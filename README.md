@@ -32,7 +32,20 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
   the interrupt (persistent SqliteSaver) and sends a Feishu card; the Boss taps
   Approve/Reject; an `ats serve` webhook resumes the cycle by thread_id. Graph
   stays decoupled from the transport.
-- ⬜ **Next** — scheduling (daily pre/post-market), Discord channel
+- ✅ **Phase 10 (scheduling)** — `ats schedule` runs a daily cron, gated to NYSE
+  sessions (skips weekends/holidays via `pandas_market_calendars`). Pairs with
+  Feishu: scheduled analysis → card → phone approval → webhook executes.
+- ⬜ **Optional next** — Discord channel (drop-in adapter), earnings-call
+  transcripts + news/social sources, latency optimization
+
+### Daily automation
+
+```bash
+# Configure config/settings.yaml: schedule.run_at / timezone, channel.kind: feishu
+ats schedule            # cron daemon (mon-fri, NYSE sessions only)
+ats schedule --now      # run one cycle immediately (skips if not a session)
+ats serve               # in a second process: handle Feishu approval callbacks
+```
 
 ### Feishu approval setup
 

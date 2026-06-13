@@ -155,7 +155,15 @@ def ibkr_probe() -> int:
     return 0
 
 
+def _setup_logging() -> None:
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
+
+
 def main(argv: list[str] | None = None) -> int:
+    _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="run one trading cycle")
@@ -168,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
     srv.add_argument("--host", default="0.0.0.0")
     srv.add_argument("--port", type=int, default=8000)
+    sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
+    sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
+    sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -181,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         from .server import serve
 
         serve(host=args.host, port=args.port)
+        return 0
+    if args.command == "schedule":
+        from .scheduler import start
+
+        start(dry_run=not args.live, run_once=args.now)
         return 0
     return 1
 

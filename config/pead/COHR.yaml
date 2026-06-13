@@ -1,0 +1,39 @@
+# Coherent (COHR) — PEAD config. Weights/threshold seeded from the
+# 已完成-基本面分析-COHR-Q3FY2026.md scorecard. COHR needs a HIGHER long bar
+# (+1.5 vs the normal +1.0) due to extreme valuation + high beta + a repeated
+# "beat-but-drops" pattern.
+
+symbol: COHR
+fiscal_label: "Q FY2026"
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 5.0          # >+5% excess vs SMH raises the long bar further
+long_threshold: 1.5           # COHR special threshold (not 1.0)
+
+scorecard_dims:
+  - {key: gross_margin,  weight: 0.25, label: 非GAAP毛利率(是否破40%)}
+  - {key: forward_guide, weight: 0.20, label: Q4营收+EPS指引}
+  - {key: revenue,       weight: 0.10, label: 总营收超预期}
+  - {key: datacom,       weight: 0.10, label: 数据中心+通信增速}
+  - {key: eps,           weight: 0.05, label: EPS超预期}
+  - {key: inp_capacity,  weight: 0.10, label: InP 6英寸产能进展}
+  - {key: t16,           weight: 0.05, label: 1.6T出货节奏}
+  - {key: ocs,           weight: 0.05, label: OCS商业化}
+  - {key: bookings,      weight: 0.05, label: 订单+预订比}
+  - {key: call_tone,     weight: 0.05, label: 电话会语气}
+
+signal_chain:
+  - {symbol: TSM,   role: upstream}
+  - {symbol: ASML,  role: upstream}
+  - {symbol: GOOGL, role: upstream}
+  - {symbol: META,  role: upstream}
+  - {symbol: MSFT,  role: upstream}
+  - {symbol: AMZN,  role: upstream}
+  - {symbol: NVDA,  role: downstream}
+  - {symbol: LITE,  role: peer}
+  - {symbol: AAOI,  role: peer}
+
+narrative_seed: >
+  AI 数据中心光互联头部供应商；800G→1.6T 切换主线；InP 6英寸产能为最大业务约束；
+  II-VI 整合尾声→毛利率扩张故事；极端估值(TTM PE ~310x)+高beta(2.01)是 PEAD 放大器，
+  历史上多次"beat 后仍跌"。

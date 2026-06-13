@@ -88,6 +88,93 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
     return result
 
 
+def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = False,
+             offline: bool = False, use_llm: bool = True, transcript: str | None = None) -> dict:
+    """Run one PEAD phase (prep | score) for a ticker. Score pauses at HITL approval.
+
+    MVP uses the synchronous CLI channel for approval; Feishu-async PEAD resume is
+    a follow-up (the webhook currently routes only the daily-cycle graph).
+    """
+    from ..graph.pead import build_pead_graph
+    from ..graph.pead_state import PeadState
+
+    channel = CLIChannel(auto=auto)
+    app = build_pead_graph(checkpointer=get_checkpointer(persist=False))
+    now = datetime.now(timezone.utc)
+    state = PeadState(symbol=symbol.upper(), phase=phase, as_of=now, dry_run=dry_run,
+                      use_llm=use_llm, use_broker=not offline, live_data=not offline,
+                      transcript_source=transcript)
+    cfg_run = {"configurable": {"thread_id": f"pead-{symbol}-{phase}-{now:%Y%m%d%H%M%S}"}}
+    print(f"▶ PEAD {phase} {symbol.upper()}")
+
+    result = app.invoke(state, config=cfg_run)
+    while "__interrupt__" in result:
+        req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
+        channel.push(Notification(kind="approval_request",
+                                  title=f"PEAD {symbol.upper()} decision", body=req.context_summary))
+        approval = channel.request_approval(req)
+        result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
+
+    _pead_report(symbol.upper(), phase, result)
+    return result
+
+
+def _pead_report(symbol: str, phase: str, result: dict) -> None:
+    print("\n" + "=" * 70)
+    if phase == "prep":
+        es = result.get("expectation_set")
+        ms = result.get("market_setup")
+        print(f"PEAD PREP COMPLETE — {symbol}")
+        if es:
+            print(f"Narrative: {es.narrative[:240]}")
+            if es.focus_ranking:
+                print("Focus: " + " > ".join(es.focus_ranking[:5]))
+            print(f"Expectations rows: {len(es.expectations)}  | consensus EPS={es.consensus_eps} "
+                  f"Rev={es.consensus_revenue}")
+        if ms:
+            print(f"Setup: run-up vs sector {ms.run_up_vs_sector_pct}% · EM {ms.expected_move_pct}% "
+                  f"· ATM IV {ms.atm_iv}% · dist-to-high {ms.dist_to_ath_pct}%")
+        print(f"Signal chain: {len(result.get('signal_chain', []))} names")
+    else:
+        sc = result.get("scorecard")
+        orders = result.get("order_results", [])
+        if sc:
+            print(f"PEAD SCORE COMPLETE — {symbol}  Scorecard {sc.total:+.2f} "
+                  f"(门槛 {sc.threshold:+.1f}) — {sc.band}")
+        print(f"决策情景: {result.get('decision_band', '—')} · orders={len(orders)}")
+        for o in orders:
+            print(f"  • {o.action} {o.symbol} {o.qty:.0f} [{o.status}]")
+    print("=" * 70)
+
+
+def pead_show(symbol: str) -> int:
+    from ..memory import get_store
+
+    store = get_store()
+    recent = store.recent_dossiers(symbol.upper(), limit=1)
+    if not recent:
+        print(f"(no PEAD dossier for {symbol.upper()} yet — run `ats pead prep {symbol.upper()}`)")
+        return 0
+    d = store.get_dossier(symbol.upper(), recent[0]["fiscal_label"])
+    print(f"=== PEAD dossier {d.symbol} {d.fiscal_label} (phase={d.phase}) ===")
+    if d.expectation_set:
+        print(f"\n[Narrative]\n{d.expectation_set.narrative}")
+        print(f"\n[Valuation] {d.expectation_set.valuation}")
+    if d.market_setup:
+        m = d.market_setup
+        print(f"\n[Setup] run-up vs sector {m.run_up_vs_sector_pct}% · EM {m.expected_move_pct}% "
+              f"· ATM IV {m.atm_iv}% · skew {m.iv_skew}")
+    if d.scorecard:
+        print(f"\n[Scorecard] 总分 {d.scorecard.total:+.2f} (门槛 {d.scorecard.threshold:+.1f}) — "
+              f"{d.scorecard.band}")
+        for ln in d.scorecard.lines:
+            print(f"  {ln.dim_key:14} score {ln.score:+.2f} × {ln.weight:.0%} = {ln.weighted:+.3f}  "
+                  f"{ln.note[:60]}")
+    if d.decision_summary:
+        print(f"\n[Decision] {d.decision_summary}")
+    return 0
+
+
 def resume_cycle(thread_id: str, approval, channel=None) -> dict:
     """Resume a checkpointed cycle with the Boss verdict (called by the webhook)."""
     from datetime import datetime, timezone
@@ -179,6 +266,14 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    pe = sub.add_parser("pead", help="PEAD earnings workflow (prep / score / show)")
+    pe.add_argument("action", choices=["prep", "score", "show"])
+    pe.add_argument("symbol")
+    pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
+    pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
+    pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
+    pe.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
+    pe.add_argument("--no-llm", action="store_true", help="skip LLM (stub agents)")
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -197,6 +292,12 @@ def main(argv: list[str] | None = None) -> int:
         from .scheduler import start
 
         start(dry_run=not args.live, run_once=args.now)
+        return 0
+    if args.command == "pead":
+        if args.action == "show":
+            return pead_show(args.symbol)
+        run_pead(args.symbol, args.action, dry_run=not args.live, auto=args.yes,
+                 offline=args.offline, use_llm=not args.no_llm, transcript=args.transcript)
         return 0
     return 1
 

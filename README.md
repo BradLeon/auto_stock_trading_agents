@@ -37,8 +37,42 @@ checklist (env, IBKR/TWS, Feishu app, tunnel, webhook, scheduling).
 - ✅ **Phase 10 (scheduling)** — `ats schedule` runs a daily cron, gated to NYSE
   sessions (skips weekends/holidays via `pandas_market_calendars`). Pairs with
   Feishu: scheduled analysis → card → phone approval → webhook executes.
-- ⬜ **Optional next** — Discord channel (drop-in adapter), earnings-call
-  transcripts + news/social sources, latency optimization
+- ✅ **PEAD MVP** — earnings-event workflow (separate from the daily cycle): a
+  per-ticker, earnings-anchored state machine. See below.
+- ⬜ **Optional next** — Feishu-async PEAD resume, Day1/2 drift tracking, Discord
+  channel, latency optimization
+
+## PEAD earnings workflow (MVP)
+
+A Post-Earnings-Announcement-Drift workflow that automates a structured,
+earnings-anchored process per ticker, reusing the same agents/HITL/risk/memory/
+IBKR building blocks as the daily cycle (`graph/pead.py`).
+
+```
+pead prep   T-N..T-1  核心叙事 + 保守/中性/乐观预期表 + consensus(yfinance)
+                      + 期权(ThetaData主, yfinance兜底: Expected Move/IV/skew)
+                      + 抢跑(vs SMH/QQQ) + 信号链(上游 hyperscaler / 同业)  → dossier
+pead score  T(盘后)    实际(财报数字 + earnings-call transcript) → 预期偏差
+                      → 加权 Surprise Scorecard → 确定性情景决策树(总分×抢跑+个股门槛)
+                      + portfolio → 风控硬裁剪 → HITL 审批 → 执行 → dossier
+```
+
+LLM judges semantics (narrative, expectations, per-dimension surprise); **the
+weighting, threshold bands, and decision tree are deterministic code** (auditable).
+
+```bash
+ats pead prep COHR                                  # build the pre-earnings dossier
+ats pead score COHR --transcript path/to/call.txt   # score + decide (HITL); --live to trade
+ats pead show COHR                                   # print the dossier
+```
+
+- Per-ticker config in `config/pead/<SYM>.yaml` (scorecard dims/weights, special
+  long threshold, signal chain). COHR is seeded from a real worked example
+  (special +1.5 long bar). `_defaults.yaml` covers the rest.
+- Transcript source: drop the call text at `var/transcripts/<SYM>_<fiscal>.txt`
+  (or pass `--transcript <path|url>`) — matches grabbing transcripts from
+  fool.com/investing.com manually. Consensus is free via yfinance.
+- MVP approval is the CLI channel; Feishu-async PEAD resume is a follow-up.
 
 ### Daily automation
 

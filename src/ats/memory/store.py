@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS performance (
     cycle_id TEXT, as_of TEXT, net_liquidation REAL, daily_pnl REAL, cumulative_pnl REAL,
     realized_pnl REAL, unrealized_pnl REAL, num_positions INTEGER, payload TEXT
 );
+CREATE TABLE IF NOT EXISTS pead_dossier (
+    symbol TEXT, fiscal_label TEXT, phase TEXT, payload TEXT, updated_at TEXT,
+    PRIMARY KEY (symbol, fiscal_label)
+);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 """
@@ -114,6 +118,33 @@ class TradingMemory:
         else:
             rows = self.conn.execute(
                 "SELECT * FROM trades ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- PEAD dossier ---------------------------------------------------- #
+    def save_dossier(self, dossier) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pead_dossier VALUES (?,?,?,?,?)",
+            (dossier.symbol, dossier.fiscal_label, dossier.phase,
+             dossier.model_dump_json(), dossier.updated_at.isoformat()))
+        self.conn.commit()
+
+    def get_dossier(self, symbol: str, fiscal_label: str):
+        from ..schemas.pead import PeadDossier
+
+        row = self.conn.execute(
+            "SELECT payload FROM pead_dossier WHERE symbol = ? AND fiscal_label = ?",
+            (symbol, fiscal_label)).fetchone()
+        return PeadDossier.model_validate_json(row["payload"]) if row else None
+
+    def recent_dossiers(self, symbol: str | None = None, limit: int = 10) -> list[dict]:
+        if symbol:
+            rows = self.conn.execute(
+                "SELECT symbol, fiscal_label, phase, updated_at FROM pead_dossier "
+                "WHERE symbol = ? ORDER BY updated_at DESC LIMIT ?", (symbol, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT symbol, fiscal_label, phase, updated_at FROM pead_dossier "
+                "ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     def close(self) -> None:

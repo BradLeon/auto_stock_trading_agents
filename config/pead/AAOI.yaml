@@ -1,0 +1,16 @@
+# Applied Optoelectronics (AAOI) — optical-module PEAD peer. Generic dims +
+# normal bar until calibrated. Small-cap, high-beta — calibrate threshold later.
+
+symbol: AAOI
+fiscal_label: "Q4 FY2025"
+sector_etf: SMH
+benchmark: QQQ
+long_threshold: 1.0
+
+signal_chain:
+  - {symbol: GOOGL, role: upstream}
+  - {symbol: META,  role: upstream}
+  - {symbol: AMZN,  role: upstream}
+  - {symbol: NVDA,  role: downstream}
+  - {symbol: COHR,  role: peer}
+  - {symbol: LITE,  role: peer}

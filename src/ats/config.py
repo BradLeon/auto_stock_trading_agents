@@ -163,3 +163,14 @@ def get_config() -> Config:
 def reset_config_cache() -> None:
     """Clear the cache (tests that point ATS_CONFIG_DIR elsewhere)."""
     get_config.cache_clear()
+
+
+def load_pead_config(symbol: str):
+    """Merge config/pead/_defaults.yaml with config/pead/<SYM>.yaml -> PeadConfig."""
+    from .schemas.pead import PeadConfig
+
+    pead_dir = _config_dir() / "pead"
+    base = _load_yaml(pead_dir / "_defaults.yaml")
+    override = _load_yaml(pead_dir / f"{symbol.upper()}.yaml")
+    merged = {**base, **override, "symbol": symbol.upper()}
+    return PeadConfig.model_validate(merged)

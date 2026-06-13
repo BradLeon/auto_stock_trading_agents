@@ -1,0 +1,19 @@
+# Default PEAD config — applied to any symbol without its own config/pead/<SYM>.yaml.
+# Per-ticker files override these fields.
+
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 5.0
+long_threshold: 1.0          # normal PEAD long bar; bespoke names raise it (see COHR)
+
+# Generic scorecard dimensions (weights sum to 1.0). Override per ticker.
+scorecard_dims:
+  - {key: gross_margin,   weight: 0.20, label: 毛利率超预期}
+  - {key: forward_guide,  weight: 0.20, label: 前瞻指引(营收+EPS)}
+  - {key: revenue,        weight: 0.15, label: 营收超预期}
+  - {key: eps,            weight: 0.15, label: EPS超预期}
+  - {key: core_growth,    weight: 0.15, label: 核心业务增速}
+  - {key: bookings,       weight: 0.10, label: 订单/预订比}
+  - {key: call_tone,      weight: 0.05, label: 电话会语气}
+
+signal_chain: []

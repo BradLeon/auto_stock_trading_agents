@@ -46,10 +46,15 @@ def get_model(role: str) -> Any:
     if rc.provider == "openai":
         from langchain_openai import ChatOpenAI
 
+        base_url = cfg.secrets.openai_base_url or None
+        # OpenRouter (optional) attribution headers — harmless against vanilla OpenAI.
+        headers = {"HTTP-Referer": "https://github.com/ats", "X-Title": "ats"} \
+            if base_url and "openrouter" in base_url else None
         return ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.openai_api_key or None,
-            base_url=cfg.secrets.openai_base_url or None,
+            base_url=base_url,
+            default_headers=headers,
             **common,
         )
 

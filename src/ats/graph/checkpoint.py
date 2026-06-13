@@ -8,27 +8,37 @@ wired in a later phase; the seam is here.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
-# Our Pydantic state is serialized into checkpoints between supersteps; LangGraph
-# requires the modules holding those types to be allowlisted for safe msgpack
-# deserialization. We trust our own schema package.
-ALLOWED_MODULES = (
-    "ats.schemas.market",
-    "ats.schemas.reports",
-    "ats.schemas.risk",
-    "ats.schemas.decision",
-    "ats.schemas.portfolio",
-    "ats.schemas.memory",
-    "ats.schemas.channel",
-    "ats.graph.state",
-)
+
+def _allowed_types() -> list[type]:
+    """Every Pydantic type that can ride inside a checkpointed TradingState.
+
+    LangGraph allowlists by (module, name); passing the classes themselves lets
+    the serializer derive those keys. We trust our own schema package.
+    """
+    from pydantic import BaseModel
+
+    from .. import schemas as schemas_pkg
+    from ..schemas import (  # noqa: F401 - ensure submodules are imported
+        channel, decision, market, memory, portfolio, reports, risk,
+    )
+    from . import state as state_mod
+
+    modules = [channel, decision, market, memory, portfolio, reports, risk, state_mod, schemas_pkg]
+    types: set[type] = set()
+    for mod in modules:
+        for _, obj in inspect.getmembers(mod, inspect.isclass):
+            if issubclass(obj, BaseModel) and obj is not BaseModel:
+                types.add(obj)
+    return list(types)
 
 
 def _serializer() -> Any:
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-    return JsonPlusSerializer(allowed_msgpack_modules=tuple((m,) for m in ALLOWED_MODULES))
+    return JsonPlusSerializer(allowed_msgpack_modules=_allowed_types())
 
 
 def get_checkpointer(persist: bool = False) -> Any:

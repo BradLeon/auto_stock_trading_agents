@@ -19,17 +19,12 @@ from datetime import datetime, timezone
 
 from langgraph.types import Send, interrupt
 
+from ..agents import analysts
 from ..config import get_config
 from ..schemas.channel import ApprovalRequest
 from ..schemas.decision import BossApproval, TradeDecision
 from ..schemas.market import MarketSnapshot
 from ..schemas.memory import TradeLogEntry
-from ..schemas.reports import (
-    FundamentalReport,
-    IndustryReport,
-    MacroReport,
-    TechnicalReport,
-)
 from ..schemas.risk import RiskGuardrails
 from .state import TradingState
 
@@ -64,47 +59,38 @@ def ingest(state: TradingState) -> dict:
 # Fan-out dispatcher (conditional edge from ingest)
 # --------------------------------------------------------------------------- #
 def fan_out(state: TradingState) -> list[Send]:
-    sends: list[Send] = [Send("macro_analyst", {"as_of": state.as_of})]
+    common = {"as_of": state.as_of, "use_llm": state.use_llm}
+    sends: list[Send] = [Send("macro_analyst", {**common})]
     for sector, brief in state.sectors.items():
-        sends.append(Send("industry_analyst", {"sector": sector, "brief": brief, "as_of": state.as_of}))
+        sends.append(Send("industry_analyst", {**common, "sector": sector, "brief": brief}))
     for t in state.watchlist:
         snap = state.market_data.get(t.symbol)
-        sends.append(Send("fundamental_analyst", {"symbol": t.symbol, "snapshot": snap, "as_of": state.as_of}))
-        sends.append(Send("technical_analyst", {"symbol": t.symbol, "snapshot": snap, "as_of": state.as_of}))
+        sends.append(Send("fundamental_analyst", {**common, "symbol": t.symbol, "snapshot": snap}))
+        sends.append(Send("technical_analyst", {**common, "symbol": t.symbol, "snapshot": snap}))
     return sends
 
 
 # --------------------------------------------------------------------------- #
-# Analysts (Send payload -> report). STUBs.
+# Analysts (Send payload -> report). Delegate to LLM-backed agents; the agents
+# fall back to neutral stubs when use_llm is False.
 # --------------------------------------------------------------------------- #
 def macro_analyst(payload: dict) -> dict:
-    return {"macro_report": MacroReport(
-        as_of=payload["as_of"], signal="neutral", conviction=0.4,
-        thesis="[stub] balanced regime; rates steady, VIX moderate.",
-        market_breadth="[stub]", vix=15.0, fear_greed=55,
-    )}
+    return {"macro_report": analysts.macro(payload["as_of"], payload["use_llm"])}
 
 
 def industry_analyst(payload: dict) -> dict:
-    return {"industry_reports": [IndustryReport(
-        as_of=payload["as_of"], sector=payload["sector"], signal="bullish", conviction=0.5,
-        thesis=f"[stub] {payload['sector']} demand healthy.",
-        supply_chain_notes=payload.get("brief", ""),
-    )]}
+    return {"industry_reports": [analysts.industry(
+        payload["sector"], payload.get("brief", ""), payload["as_of"], payload["use_llm"])]}
 
 
 def fundamental_analyst(payload: dict) -> dict:
-    return {"fundamental_reports": [FundamentalReport(
-        as_of=payload["as_of"], symbol=payload["symbol"], signal="bullish", conviction=0.6,
-        thesis=f"[stub] {payload['symbol']} fundamentals solid.",
-    )]}
+    return {"fundamental_reports": [analysts.fundamental(
+        payload["symbol"], payload.get("snapshot"), payload["as_of"], payload["use_llm"])]}
 
 
 def technical_analyst(payload: dict) -> dict:
-    return {"technical_reports": [TechnicalReport(
-        as_of=payload["as_of"], symbol=payload["symbol"], signal="neutral", conviction=0.45,
-        thesis=f"[stub] {payload['symbol']} consolidating.", trend="sideways",
-    )]}
+    return {"technical_reports": [analysts.technical(
+        payload["symbol"], payload.get("snapshot"), payload["as_of"], payload["use_llm"])]}
 
 
 # --------------------------------------------------------------------------- #

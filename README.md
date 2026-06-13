@@ -9,10 +9,18 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 ## Status
 
 - ✅ **Phase 1** — project skeleton, Pydantic contracts, config, LLM gateway
-- ✅ **Phase 2** — LangGraph topology with stub nodes; dry-run runs end-to-end
-  through the HITL interrupt
-- ⬜ **Phase 3+** — real data sources, LLM-backed analysts + SKILLs, IBKR paper,
-  Context Memory, scheduling, Feishu/Discord Boss channel (Phase 2 of roadmap)
+- ✅ **Phase 2** — LangGraph topology; dry-run runs end-to-end through the HITL interrupt
+- ✅ **Phase 3 (data)** — live market data (yfinance) + indicators wired into ingest
+- ✅ **Phase 4 (analysts)** — macro/industry/fundamental/technical agents on Claude
+  Opus 4.8 via **OpenRouter**, each with a SKILL.md and structured (tool-calling) output
+- ⬜ **Next** — SEC/financials + FRED macro + news/social sources, LLM Manager,
+  IBKR paper portfolio/execution, Context Memory + performance, scheduling,
+  Feishu/Discord Boss channel
+
+The LLM goes through OpenRouter (OpenAI-compatible) so the provider/model is a
+one-line config swap (`config/settings.yaml` → `llm.default_model`). Set
+`OPENAI_API_KEY` (OpenRouter key) + `OPENAI_BASE_URL=https://openrouter.ai/api/v1`
+in `.env`. Behind a SOCKS proxy? `pip install socksio`.
 
 ## Quickstart
 

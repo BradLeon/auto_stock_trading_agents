@@ -29,6 +29,7 @@ class TradingState(BaseModel):
     as_of: datetime
     dry_run: bool = True
     live_data: bool = True  # False -> ingest uses empty stub snapshots (offline/tests)
+    use_llm: bool = True    # False -> analysts return neutral stubs (no LLM calls)
 
     # Inputs for the cycle.
     watchlist: list[Ticker] = Field(default_factory=list)

@@ -6,8 +6,9 @@ environment: paper          # paper | live  (Phase 1: paper only)
 # --- LLM routing -------------------------------------------------------------
 # provider: anthropic (native ChatAnthropic) | openai (OpenAI-compatible via base_url)
 llm:
-  default_provider: anthropic
-  default_model: claude-opus-4-8
+  # OpenRouter relay (OpenAI-compatible) — swap provider/model by editing here.
+  default_provider: openai
+  default_model: anthropic/claude-opus-4.8
   temperature: 0.2
   max_tokens: 4096
   timeout_seconds: 120

@@ -161,9 +161,10 @@ class TradingState(BaseModel):
 
 ## 9. LLM 抽象层（Claude Opus，可切换）
 
-`src/ats/llm/gateway.py` —— `get_model(role: str) -> ChatModel`，按 `config/settings.yaml` 的 `model_routing` 选模型，默认 `claude-opus-4-8`。
-- 主路径：`langchain_anthropic.ChatAnthropic`（原生 tool-calling + prompt caching，与 LangGraph 无缝）。
-- 切换路径：经 **LiteLLM**（OpenAI 兼容网关）统一为 OpenAI 格式，改 config 即可换 provider，Agent 代码零改动。
+`src/ats/llm/gateway.py` —— `get_model(role: str) -> ChatModel`，按 `config/settings.yaml` 的 `routing` 选模型。
+- **当前主路径：OpenRouter**（OpenAI 兼容中转）→ `provider: openai` + `base_url=https://openrouter.ai/api/v1`，默认模型 `anthropic/claude-opus-4.8`。改 `default_model` 一行即可切换 provider/model，Agent 代码零改动。
+- 备路径：`langchain_anthropic.ChatAnthropic`（直连 Anthropic，`provider: anthropic`）。
+- 结构化输出统一用 **tool-calling**（`with_structured_output(method="function_calling")`），兼容 OpenRouter 背后的 Anthropic/OpenAI/Bedrock；LLM-facing schema 不放 min/max 约束（部分 provider 拒绝），数值在代码里 clamp。
 - 温度/max_tokens/重试/超时集中在 gateway 配置。
 
 ---

@@ -23,7 +23,7 @@ from ..graph.checkpoint import get_checkpointer
 from ..graph.state import TradingState
 
 
-def _initial_state(cfg, *, dry_run: bool, live_data: bool) -> TradingState:
+def _initial_state(cfg, *, dry_run: bool, live_data: bool, use_llm: bool) -> TradingState:
     now = datetime.now(timezone.utc)
     sectors = {
         sector: cfg.app.sectors.get(sector).supply_chain if cfg.app.sectors.get(sector) else ""
@@ -34,6 +34,7 @@ def _initial_state(cfg, *, dry_run: bool, live_data: bool) -> TradingState:
         as_of=now,
         dry_run=dry_run,
         live_data=live_data,
+        use_llm=use_llm,
         watchlist=cfg.app.tickers,
         sectors=sectors,
     )
@@ -45,12 +46,13 @@ def _make_channel(cfg, auto: bool):
     return get_channel()
 
 
-def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False, channel=None) -> dict:
+def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False,
+              use_llm: bool = True, channel=None) -> dict:
     cfg = get_config()
     channel = channel or _make_channel(cfg, auto)
     app = build_graph(checkpointer=get_checkpointer(persist=False))
 
-    state = _initial_state(cfg, dry_run=dry_run, live_data=not offline)
+    state = _initial_state(cfg, dry_run=dry_run, live_data=not offline, use_llm=use_llm)
     cfg_run = {"configurable": {"thread_id": state.cycle_id}}
     print(f"▶ running {state.cycle_id} (dry_run={dry_run}) over {[t.symbol for t in state.watchlist]}")
 
@@ -93,10 +95,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--live", action="store_true", help="execute (still IBKR paper); default dry-run")
     run.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     run.add_argument("--offline", action="store_true", help="skip live data fetch (stub snapshots)")
+    run.add_argument("--no-llm", action="store_true", help="skip LLM calls (neutral stub reports)")
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        run_cycle(dry_run=not args.live, auto=args.yes, offline=args.offline)
+        run_cycle(dry_run=not args.live, auto=args.yes, offline=args.offline, use_llm=not args.no_llm)
         return 0
     return 1
 

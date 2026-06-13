@@ -1,0 +1,28 @@
+# Tradable universe (3-10 names for Phase 1). Each ticker is instantiated with
+# its own fundamental + technical analyst. Sectors drive industry analysts.
+
+tickers:
+  - symbol: NVDA
+    name: NVIDIA Corporation
+    sector: ai_hardware
+    exchange: NASDAQ
+  - symbol: GOOGL
+    name: Alphabet Inc.
+    sector: internet_software
+    exchange: NASDAQ
+  - symbol: AAPL
+    name: Apple Inc.
+    sector: consumer_tech
+    exchange: NASDAQ
+
+# Sector -> short brief for the industry analyst (supply-chain framing).
+sectors:
+  ai_hardware:
+    label: AI Hardware & Semiconductors
+    supply_chain: "TSMC/foundry -> GPU/ASIC (NVDA/AMD) -> hyperscaler capex -> AI apps"
+  internet_software:
+    label: Internet & Software
+    supply_chain: "compute/cloud -> platform/ads -> enterprise & consumer software"
+  consumer_tech:
+    label: Consumer Technology
+    supply_chain: "component suppliers -> devices/OEM -> services/ecosystem"

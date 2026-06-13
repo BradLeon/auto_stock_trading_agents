@@ -51,7 +51,9 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
               use_llm: bool = True, channel=None) -> dict:
     cfg = get_config()
     channel = channel or _make_channel(cfg, auto)
-    app = build_graph(checkpointer=get_checkpointer(persist=False))
+    is_async = getattr(channel, "is_async", False)
+    # Async channels (Feishu) must survive across processes -> persistent checkpointer.
+    app = build_graph(checkpointer=get_checkpointer(persist=is_async))
 
     state = _initial_state(cfg, dry_run=dry_run, live_data=not offline, use_llm=use_llm,
                            use_broker=not offline)
@@ -60,7 +62,21 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
 
     result = app.invoke(state, config=cfg_run)
 
-    # Drive HITL interrupts until the graph completes.
+    if "__interrupt__" not in result:
+        _report(channel, result)
+        return result
+
+    req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
+
+    # Async: send the card and exit; the webhook resumes this thread later.
+    if is_async:
+        channel.send_approval_request(req, thread_id=state.cycle_id)
+        label = getattr(channel, "kind", "async channel")
+        print(f"⏸ {state.cycle_id} awaiting Boss approval via {label}. "
+              f"Run `ats serve` to handle the callback.")
+        return result
+
+    # Sync (CLI): drive interrupts to completion in-process.
     while "__interrupt__" in result:
         req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
         channel.push(Notification(kind="approval_request", title="Decisions pending review",
@@ -69,6 +85,24 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
         result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
 
     _report(channel, result)
+    return result
+
+
+def resume_cycle(thread_id: str, approval, channel=None) -> dict:
+    """Resume a checkpointed cycle with the Boss verdict (called by the webhook)."""
+    from datetime import datetime, timezone
+
+    if approval.reviewed_at is None:
+        approval.reviewed_at = datetime.now(timezone.utc)
+    app = build_graph(checkpointer=get_checkpointer(persist=True))
+    cfg_run = {"configurable": {"thread_id": thread_id}}
+    result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
+
+    if channel is not None:
+        orders = result.get("order_results", [])
+        channel.push(Notification(
+            kind="fill_report", title=f"{thread_id}: {approval.status}",
+            body=f"{len(orders)} order(s) processed"))
     return result
 
 
@@ -129,14 +163,25 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     run.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
     run.add_argument("--no-llm", action="store_true", help="skip LLM calls (neutral stub reports)")
+    run.add_argument("--channel", choices=["cli", "feishu"], help="override approval channel")
     sub.add_parser("ibkr", help="probe IBKR paper connectivity (account + positions)")
+    srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
+    srv.add_argument("--host", default="0.0.0.0")
+    srv.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        run_cycle(dry_run=not args.live, auto=args.yes, offline=args.offline, use_llm=not args.no_llm)
+        channel = get_channel(args.channel) if args.channel else None
+        run_cycle(dry_run=not args.live, auto=args.yes, offline=args.offline,
+                  use_llm=not args.no_llm, channel=channel)
         return 0
     if args.command == "ibkr":
         return ibkr_probe()
+    if args.command == "serve":
+        from .server import serve
+
+        serve(host=args.host, port=args.port)
+        return 0
     return 1
 
 

@@ -28,7 +28,26 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
   decisions, trades, and per-cycle performance. Prior PnL + recent fills are fed
   back to the Manager; the Boss `report <SYM>` pulls a name's history. DB at
   `var/ats.sqlite` (gitignored), overridable via `ATS_DB_PATH`.
-- ⬜ **Next** — scheduling (daily pre/post-market), Feishu/Discord Boss channel
+- ✅ **Phase 9 (Feishu approval)** — async Boss approval: the run checkpoints at
+  the interrupt (persistent SqliteSaver) and sends a Feishu card; the Boss taps
+  Approve/Reject; an `ats serve` webhook resumes the cycle by thread_id. Graph
+  stays decoupled from the transport.
+- ⬜ **Next** — scheduling (daily pre/post-market), Discord channel
+
+### Feishu approval setup
+
+1. Create a Feishu/Lark custom app → get **App ID / App Secret**; grant
+   `im:message` (send) and enable bot. Put a target **chat_id** in `.env`
+   (`FEISHU_CHAT_ID`).
+2. Enable **Event/Card callback** → set the request URL to your public
+   `https://<host>/feishu/callback` (in dev, tunnel with ngrok/cloudflared to the
+   `ats serve` port). Copy the **Verification Token** to `FEISHU_VERIFICATION_TOKEN`.
+3. Set `channel.kind: feishu` in `config/settings.yaml` (or `ats run --channel feishu`).
+4. Run the webhook: `ats serve --port 8000`. Then `ats run --live --channel feishu`
+   sends a card and exits; tapping Approve resumes execution via the webhook.
+
+The graph is transport-agnostic — the same interrupt/checkpoint mechanism backs
+CLI and Feishu; Discord is a drop-in adapter behind the same `BossChannel` port.
 
 ### IBKR setup (paper)
 

@@ -14,13 +14,42 @@ from ats.schemas.decision import BossApproval  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _isolate_db(tmp_path, monkeypatch):
-    """Point Context Memory at a throwaway DB per test."""
-    monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "test.sqlite"))
+    """Point Context Memory + checkpoints at throwaway DBs per test."""
+    monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "mem.sqlite"))
+    monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
     from ats.memory import reset_store_cache
 
     reset_store_cache()
     yield
     reset_store_cache()
+
+
+class FakeAsyncChannel:
+    """Async BossChannel stub: captures the approval request instead of sending."""
+
+    is_async = True
+
+    def __init__(self):
+        self.thread_id = None
+        self.request = None
+        self.notifications = []
+
+    def push(self, msg):
+        self.notifications.append(msg)
+
+    def send_approval_request(self, req, thread_id):
+        self.request = req
+        self.thread_id = thread_id
+
+    def fetch_report_context(self, query):
+        from ats.channel.context import build_report_bundle
+
+        return build_report_bundle(query)
+
+
+@pytest.fixture
+def async_channel():
+    return FakeAsyncChannel()
 
 
 class FakeChannel:

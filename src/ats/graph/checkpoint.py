@@ -42,11 +42,32 @@ def _serializer() -> Any:
     return JsonPlusSerializer(allowed_msgpack_modules=_allowed_types())
 
 
+def _checkpoint_db_path() -> str:
+    import os
+
+    from ..config import REPO_ROOT
+
+    return os.environ.get("ATS_CHECKPOINT_DB", str(REPO_ROOT / "var" / "checkpoints.sqlite"))
+
+
 def get_checkpointer(persist: bool = False) -> Any:
+    """In-process MemorySaver (default) or a file-backed SqliteSaver.
+
+    The persistent saver is required for the async Feishu/Discord approval flow:
+    the run process checkpoints at the interrupt and exits; the webhook process
+    resumes the same thread_id from the shared sqlite file.
+    """
     if persist:
-        # Phase 8+: from langgraph.checkpoint.sqlite import SqliteSaver
-        # return SqliteSaver.from_conn_string("./var/checkpoints.sqlite")
-        raise NotImplementedError("persistent checkpointer lands in a later phase")
+        import sqlite3
+        from pathlib import Path
+
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        path = _checkpoint_db_path()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path, check_same_thread=False)
+        return SqliteSaver(conn, serde=_serializer())
+
     from langgraph.checkpoint.memory import MemorySaver
 
     return MemorySaver(serde=_serializer())

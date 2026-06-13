@@ -17,8 +17,12 @@ def get_channel(kind: str | None = None) -> BossChannel:
     kind = kind or get_config().app.channel.kind
     if kind == "cli":
         return CLIChannel()
-    if kind in {"feishu", "discord"}:
-        raise NotImplementedError(f"{kind} channel is a Phase 2 deliverable")
+    if kind == "feishu":
+        from .feishu_channel import FeishuChannel
+
+        return FeishuChannel()
+    if kind == "discord":
+        raise NotImplementedError("discord channel is a later deliverable")
     raise ValueError(f"Unknown channel kind: {kind!r}")
 
 

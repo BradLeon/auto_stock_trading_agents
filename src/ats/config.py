@@ -56,6 +56,9 @@ class Secrets(BaseSettings):
 
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
+    feishu_chat_id: str = ""              # group/user chat that receives approval cards
+    feishu_verification_token: str = ""   # event callback verification (optional but recommended)
+    feishu_base_url: str = "https://open.feishu.cn"  # use open.larksuite.com for Lark
     discord_bot_token: str = ""
 
 

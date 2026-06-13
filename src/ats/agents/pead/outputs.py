@@ -77,3 +77,15 @@ class ScoreItemView(BaseModel):
 
 class ScoresView(BaseModel):
     items: list[ScoreItemView] = Field(default_factory=list)
+
+
+class ExpectationChangeView(BaseModel):
+    dim_key: str = ""
+    change: str = ""
+
+
+class ContextUpdateView(BaseModel):
+    materiality: float = Field(description="0=noise .. 1=thesis-changing")
+    event_summary: str = Field(default="", description="what's genuinely new since last update")
+    narrative_delta: str = Field(default="", description="how the thesis changes; empty if nothing")
+    expectation_changes: list[ExpectationChangeView] = Field(default_factory=list)

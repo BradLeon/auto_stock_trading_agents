@@ -1,0 +1,13 @@
+# Global PEAD settings (per-ticker config lives in config/pead/<SYM>.yaml).
+
+targets: [COHR, LITE, AAOI]      # symbols the monitor + scheduler operate on
+
+monitor:
+  enabled: true
+  lookback_days: 7
+  push_context_updates: false    # switch: push material context changes to Feishu (info only)
+  materiality_threshold: 0.7     # >= this AND push on -> Feishu info card
+
+schedule:
+  prep_days_before: 3            # run/refresh prep when earnings is within N days
+  score_after: true             # run score the session after earnings (if transcript available)

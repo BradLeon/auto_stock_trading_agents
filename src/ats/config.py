@@ -165,6 +165,26 @@ def reset_config_cache() -> None:
     get_config.cache_clear()
 
 
+def load_news_sources() -> dict:
+    """Load config/news_sources.yaml (RSS feeds, X accounts, keyword filters)."""
+    return _load_yaml(_config_dir() / "news_sources.yaml")
+
+
+def load_pead_global() -> dict:
+    """Load config/pead.yaml (targets, monitor switches, schedule windows)."""
+    cfg = _load_yaml(_config_dir() / "pead.yaml")
+    cfg.setdefault("targets", [])
+    cfg.setdefault("monitor", {})
+    cfg["monitor"].setdefault("enabled", True)
+    cfg["monitor"].setdefault("lookback_days", 7)
+    cfg["monitor"].setdefault("push_context_updates", False)
+    cfg["monitor"].setdefault("materiality_threshold", 0.7)
+    cfg.setdefault("schedule", {})
+    cfg["schedule"].setdefault("prep_days_before", 3)
+    cfg["schedule"].setdefault("score_after", True)
+    return cfg
+
+
 def load_pead_config(symbol: str):
     """Merge config/pead/_defaults.yaml with config/pead/<SYM>.yaml -> PeadConfig."""
     from .schemas.pead import PeadConfig

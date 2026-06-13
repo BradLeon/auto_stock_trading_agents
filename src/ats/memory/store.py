@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS pead_dossier (
     symbol TEXT, fiscal_label TEXT, phase TEXT, payload TEXT, updated_at TEXT,
     PRIMARY KEY (symbol, fiscal_label)
 );
+CREATE TABLE IF NOT EXISTS pead_events (
+    id TEXT PRIMARY KEY, symbol TEXT, published_at TEXT, source TEXT,
+    headline TEXT, url TEXT, processed INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 """
@@ -146,6 +151,32 @@ class TradingMemory:
                 "SELECT symbol, fiscal_label, phase, updated_at FROM pead_dossier "
                 "ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # --- PEAD event log -------------------------------------------------- #
+    def append_events(self, symbol: str, items) -> list:
+        """Insert news items not already stored; return the genuinely-new ones."""
+        if not items:
+            return []
+        existing = {r["id"] for r in self.conn.execute(
+            "SELECT id FROM pead_events WHERE id IN (%s)" % ",".join("?" * len(items)),
+            [i.id for i in items]).fetchall()}
+        fresh = [i for i in items if i.id not in existing]
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO pead_events (id,symbol,published_at,source,headline,url) "
+            "VALUES (?,?,?,?,?,?)",
+            [(i.id, symbol, i.published_at.isoformat(), i.source, i.headline, i.url) for i in fresh])
+        self.conn.commit()
+        return fresh
+
+    def recent_events(self, symbol: str, limit: int = 20) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM pead_events WHERE symbol = ? ORDER BY published_at DESC LIMIT ?",
+            (symbol, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_events(self, symbol: str) -> int:
+        return self.conn.execute("SELECT COUNT(*) c FROM pead_events WHERE symbol = ?",
+                                 (symbol,)).fetchone()["c"]
 
     def close(self) -> None:
         self.conn.close()

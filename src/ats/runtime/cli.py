@@ -147,6 +147,42 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
     print("=" * 70)
 
 
+def run_pead_monitor(symbol: str, *, use_llm: bool = True) -> dict:
+    """Run one continuous-monitor pass: ingest events, update the living dossier."""
+    from ..agents.pead import monitor
+    from ..config import load_pead_global
+
+    g = load_pead_global()
+    update = monitor.run(symbol.upper(), use_llm=use_llm,
+                         lookback_days=g["monitor"]["lookback_days"])
+    print(f"📡 monitor {symbol.upper()} — materiality {update.materiality:.2f} · "
+          f"{update.event_summary}")
+    if update.narrative_delta:
+        print(f"   Δ thesis: {update.narrative_delta}")
+    for ec in update.expectation_changes:
+        print(f"   Δ {ec.dim_key}: {ec.change}")
+
+    mon = g["monitor"]
+    if (mon.get("push_context_updates") and update.materiality >= mon["materiality_threshold"]):
+        try:
+            get_channel("feishu").push(Notification(
+                kind="info", title=f"PEAD context update — {symbol.upper()} "
+                f"(materiality {update.materiality:.2f})",
+                body=update.event_summary + ("\nΔ " + update.narrative_delta
+                                             if update.narrative_delta else "")))
+            print("   → pushed Feishu info card")
+        except Exception as exc:  # noqa: BLE001 - push is best-effort
+            print(f"   (Feishu push skipped: {exc})")
+    return {"update": update}
+
+
+def run_pead_watch(*, use_llm: bool = True) -> None:
+    from ..config import load_pead_global
+
+    for sym in load_pead_global().get("targets", []):
+        run_pead_monitor(sym, use_llm=use_llm)
+
+
 def pead_show(symbol: str) -> int:
     from ..memory import get_store
 
@@ -266,9 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
-    pe = sub.add_parser("pead", help="PEAD earnings workflow (prep / score / show)")
-    pe.add_argument("action", choices=["prep", "score", "show"])
-    pe.add_argument("symbol")
+    pe = sub.add_parser("pead", help="PEAD earnings workflow (prep / score / show / monitor / watch)")
+    pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch"])
+    pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch`)")
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
@@ -294,8 +330,16 @@ def main(argv: list[str] | None = None) -> int:
         start(dry_run=not args.live, run_once=args.now)
         return 0
     if args.command == "pead":
+        if args.action == "watch":
+            run_pead_watch(use_llm=not args.no_llm)
+            return 0
+        if not args.symbol:
+            parser.error("pead %s requires a symbol" % args.action)
         if args.action == "show":
             return pead_show(args.symbol)
+        if args.action == "monitor":
+            run_pead_monitor(args.symbol, use_llm=not args.no_llm)
+            return 0
         run_pead(args.symbol, args.action, dry_run=not args.live, auto=args.yes,
                  offline=args.offline, use_llm=not args.no_llm, transcript=args.transcript)
         return 0

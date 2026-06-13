@@ -4,7 +4,9 @@ A LangGraph-orchestrated, human-in-the-loop stock trading system. Analyst team
 (macro / industry / fundamental / technical) → risk guardrails → Manager
 decisions → **Boss approval (HITL)** → Trader (IBKR paper) → memory/performance.
 
-See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
+See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design, and
+[`docs/GO_LIVE.md`](docs/GO_LIVE.md) for the step-by-step paper-trading go-live
+checklist (env, IBKR/TWS, Feishu app, tunnel, webhook, scheduling).
 
 ## Status
 

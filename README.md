@@ -24,8 +24,11 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
   yfinance VIX/SPX/NDX + CNN fear&greed) and `data/fundamentals.py` (yfinance
   metrics + SEC EDGAR filings) feed the macro & fundamental analysts real numbers.
   Each feed degrades to a note. FRED needs `FRED_API_KEY`; the rest need no key.
-- ⬜ **Next** — Context Memory + performance tracking, scheduling, Feishu/Discord
-  Boss channel
+- ✅ **Phase 8 (Context Memory)** — SQLite store (`memory/`) persists reports,
+  decisions, trades, and per-cycle performance. Prior PnL + recent fills are fed
+  back to the Manager; the Boss `report <SYM>` pulls a name's history. DB at
+  `var/ats.sqlite` (gitignored), overridable via `ATS_DB_PATH`.
+- ⬜ **Next** — scheduling (daily pre/post-market), Feishu/Discord Boss channel
 
 ### IBKR setup (paper)
 

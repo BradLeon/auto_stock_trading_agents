@@ -114,6 +114,7 @@ def decide(
     market_data: dict[str, MarketSnapshot],
     net_liquidation: float,
     use_llm: bool,
+    feedback: str = "",
 ) -> tuple[list[TradeDecision], str]:
     """Return (proposed decisions, manager summary). Pre-validation."""
     if not use_llm:
@@ -124,6 +125,8 @@ def decide(
         fundamental_reports=fundamental_reports, technical_reports=technical_reports,
         guardrails=guardrails, market_data=market_data, net_liquidation=net_liquidation,
     )
+    if feedback:
+        ctx = f"## Track record (most recent)\n{feedback}\n\n{ctx}"
     try:
         out: ManagerOutput = run_structured("manager", ManagerOutput, ctx, skill_slug="manager")
     except Exception as exc:  # noqa: BLE001 - degrade to no-trade rather than abort

@@ -12,6 +12,17 @@ from ats.schemas.channel import ApprovalRequest, Notification, ReportBundle  # n
 from ats.schemas.decision import BossApproval  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_db(tmp_path, monkeypatch):
+    """Point Context Memory at a throwaway DB per test."""
+    monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "test.sqlite"))
+    from ats.memory import reset_store_cache
+
+    reset_store_cache()
+    yield
+    reset_store_cache()
+
+
 class FakeChannel:
     """Programmable BossChannel for tests: replays a scripted verdict."""
 

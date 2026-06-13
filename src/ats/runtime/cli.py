@@ -78,6 +78,15 @@ def _report(channel, result: dict) -> None:
     status = getattr(approval, "status", None) or (approval or {}).get("status") if approval else "—"
     print("\n" + "=" * 70)
     print(f"CYCLE COMPLETE — approval={status} · orders={len(orders)}")
+    try:
+        from ..memory import get_store
+
+        perf = get_store().last_performance()
+        if perf:
+            print(f"Performance: NetLiq ${perf.net_liquidation:,.0f} · "
+                  f"daily ${perf.daily_pnl:,.0f} · cumulative ${perf.cumulative_pnl:,.0f}")
+    except Exception:  # noqa: BLE001 - reporting only
+        pass
     for o in orders:
         sym = getattr(o, "symbol", None) or o.get("symbol")
         act = getattr(o, "action", None) or o.get("action")

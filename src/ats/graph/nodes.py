@@ -148,6 +148,7 @@ def manager(state: TradingState) -> dict:
         market_data=state.market_data,
         net_liquidation=net_liq,
         use_llm=state.use_llm,
+        feedback=_manager_feedback() if state.use_llm else "",
     )
 
     sector_by_symbol = {t.symbol: t.sector for t in state.watchlist}
@@ -251,5 +252,30 @@ def _size_qty(d: TradeDecision, price: float | None) -> float:
 # Persist (Context Memory write). STUB: no-op.
 # --------------------------------------------------------------------------- #
 def persist(state: TradingState) -> dict:
-    # Phase 8 writes reports/decisions/trade_log/performance to memory here.
+    from ..memory import compute_performance, get_store
+
+    store = get_store()
+    perf = compute_performance(
+        cycle_id=state.cycle_id, as_of=state.as_of, portfolio=state.portfolio,
+        previous=store.last_performance(), order_results=state.order_results,
+        fallback_net_liq=get_config().app.account.net_liquidation_usd,
+    )
+    store.save_cycle(state, perf)
     return {}
+
+
+def _manager_feedback() -> str:
+    """Prior performance + recent fills, fed to the Manager for continuity."""
+    from ..memory import get_store
+
+    store = get_store()
+    perf = store.last_performance()
+    if perf is None:
+        return ""
+    lines = [f"Prior cycle: NetLiq ${perf.net_liquidation:,.0f}, daily PnL "
+             f"${perf.daily_pnl:,.0f}, cumulative ${perf.cumulative_pnl:,.0f}."]
+    fills = store.recent_trades(limit=5)
+    if fills:
+        lines.append("Recent fills: " + "; ".join(
+            f"{t['action']} {t['symbol']} {t['qty']:.0f} [{t['status']}]" for t in fills))
+    return "\n".join(lines)

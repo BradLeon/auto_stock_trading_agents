@@ -30,6 +30,10 @@ risk:
   max_single_order_usd: 25000
   cash_floor_pct: 0.05          # keep >= 5% cash
 
+# --- Account (sizing) --------------------------------------------------------
+account:
+  net_liquidation_usd: 100000   # paper book size until IBKR provides the live value
+
 # --- Boss approval channel ---------------------------------------------------
 channel:
   kind: cli                     # cli (Phase 1) | feishu | discord (Phase 2)

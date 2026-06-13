@@ -65,3 +65,27 @@ class TechnicalView(AnalystView):
     support: float | None = None
     resistance: float | None = None
     indicators_summary: str = ""
+
+
+# --------------------------------------------------------------------------- #
+# Manager decision output
+# --------------------------------------------------------------------------- #
+from typing import Literal  # noqa: E402
+
+
+class DecisionView(BaseModel):
+    """One actionable trade the Manager proposes (no min/max constraints)."""
+
+    symbol: str
+    action: Literal["buy", "add", "hold", "trim", "sell"]
+    target_weight: float | None = Field(None, description="desired portfolio weight 0..1; optional")
+    notional_usd: float | None = Field(None, description="order size in USD; optional")
+    order_type: Literal["market", "limit"] = "limit"
+    limit_price: float | None = None
+    conviction: float = Field(description="0..1")
+    rationale: str = Field(description="why this trade, citing the analyst signals")
+
+
+class ManagerOutput(BaseModel):
+    summary: str = Field(description="1-3 sentences: overall stance and how reports were weighed")
+    decisions: list[DecisionView] = Field(default_factory=list)

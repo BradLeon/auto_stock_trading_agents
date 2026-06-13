@@ -47,5 +47,7 @@ class TradingState(BaseModel):
     # Risk -> decision -> approval -> execution.
     risk_guardrails: RiskGuardrails | None = None
     decisions: list[TradeDecision] = Field(default_factory=list)
+    manager_summary: str = ""
+    risk_adjustments: list[str] = Field(default_factory=list)  # what the validator clipped
     approval: BossApproval | None = None
     order_results: list[TradeLogEntry] = Field(default_factory=list)

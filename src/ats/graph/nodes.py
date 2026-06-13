@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 from langgraph.types import Send, interrupt
 
-from ..agents import analysts
+from ..agents import analysts, manager as manager_agent, risk_validator
 from ..config import get_config
 from ..schemas.channel import ApprovalRequest
 from ..schemas.decision import BossApproval, TradeDecision
@@ -110,21 +110,30 @@ def risk_manager(state: TradingState) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Manager (synthesis). STUB: small buy for bullish-fundamental names.
+# Manager (synthesis) + deterministic guardrail validator.
 # --------------------------------------------------------------------------- #
 def manager(state: TradingState) -> dict:
+    cfg = get_config()
     gr = state.risk_guardrails
-    cap = gr.max_single_order_usd if gr else 25000
-    bullish = {r.symbol for r in state.fundamental_reports if r.signal == "bullish"}
-    decisions: list[TradeDecision] = []
-    for t in state.watchlist:
-        if t.symbol in bullish:
-            decisions.append(TradeDecision(
-                symbol=t.symbol, action="buy", notional_usd=min(10000.0, cap),
-                order_type="limit", conviction=0.6,
-                rationale="[stub] bullish fundamentals within guardrails.",
-            ))
-    return {"decisions": decisions}
+    net_liq = cfg.app.account.net_liquidation_usd
+
+    proposed, summary = manager_agent.decide(
+        as_of=state.as_of,
+        macro=state.macro_report,
+        industry_reports=state.industry_reports,
+        fundamental_reports=state.fundamental_reports,
+        technical_reports=state.technical_reports,
+        guardrails=gr,
+        market_data=state.market_data,
+        net_liquidation=net_liq,
+        use_llm=state.use_llm,
+    )
+
+    sector_by_symbol = {t.symbol: t.sector for t in state.watchlist}
+    decisions, adjustments = risk_validator.apply_guardrails(
+        proposed, gr, sector_by_symbol=sector_by_symbol, net_liquidation=net_liq,
+    )
+    return {"decisions": decisions, "manager_summary": summary, "risk_adjustments": adjustments}
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +162,11 @@ def _summarize(state: TradingState) -> str:
         gr = state.risk_guardrails
         lines.append(f"Risk: pos<={gr.max_position_pct:.0%} sector<={gr.max_sector_pct:.0%} "
                      f"order<=${gr.max_single_order_usd:,.0f}")
+    if state.manager_summary:
+        lines.append(f"\nManager: {state.manager_summary}")
+    if state.risk_adjustments:
+        lines.append("Guardrail adjustments:")
+        lines.extend(f"  - {a}" for a in state.risk_adjustments)
     return "\n".join(lines)
 
 
@@ -166,12 +180,17 @@ def trader(state: TradingState) -> dict:
     to_execute = approval.effective_decisions(state.decisions)
     results: list[TradeLogEntry] = []
     for d in to_execute:
+        if d.action == "hold":
+            continue
+        snap = state.market_data.get(d.symbol)
+        price = snap.last_price if snap else None
+        qty = _size_qty(d, price)
         results.append(TradeLogEntry(
             order_id=str(uuid.uuid4())[:8],
             cycle_id=state.cycle_id,
             symbol=d.symbol,
             action=d.action,
-            qty=d.qty or 0.0,
+            qty=qty,
             order_type=d.order_type,
             limit_price=d.limit_price,
             status="filled" if state.dry_run else "submitted",
@@ -180,6 +199,19 @@ def trader(state: TradingState) -> dict:
             rationale=d.rationale,
         ))
     return {"order_results": results}
+
+
+def _size_qty(d: TradeDecision, price: float | None) -> float:
+    """Translate a decision into a share quantity (paper sizing).
+
+    Real IBKR order placement lands in a later phase; this converts notional ->
+    shares using the last price so the log carries a concrete size.
+    """
+    if d.qty:
+        return d.qty
+    if d.notional_usd and price:
+        return float(round(d.notional_usd / price))
+    return 0.0
 
 
 # --------------------------------------------------------------------------- #

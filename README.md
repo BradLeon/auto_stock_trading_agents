@@ -13,9 +13,11 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 - ✅ **Phase 3 (data)** — live market data (yfinance) + indicators wired into ingest
 - ✅ **Phase 4 (analysts)** — macro/industry/fundamental/technical agents on Claude
   Opus 4.8 via **OpenRouter**, each with a SKILL.md and structured (tool-calling) output
-- ⬜ **Next** — SEC/financials + FRED macro + news/social sources, LLM Manager,
-  IBKR paper portfolio/execution, Context Memory + performance, scheduling,
-  Feishu/Discord Boss channel
+- ✅ **Phase 5 (manager)** — LLM Manager synthesizes all reports + guardrails into
+  trades; a deterministic validator hard-clips them (only tightens). Trader skips
+  holds and sizes notional→shares.
+- ⬜ **Next** — IBKR paper portfolio/execution, FRED macro + SEC financials sources,
+  Context Memory + performance, scheduling, Feishu/Discord Boss channel
 
 The LLM goes through OpenRouter (OpenAI-compatible) so the provider/model is a
 one-line config swap (`config/settings.yaml` → `llm.default_model`). Set

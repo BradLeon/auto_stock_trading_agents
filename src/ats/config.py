@@ -97,6 +97,11 @@ class RiskConfig(BaseModel):
     cash_floor_pct: float = 0.05
 
 
+class AccountConfig(BaseModel):
+    # Paper book size used for sizing until IBKR provides the live net liquidation.
+    net_liquidation_usd: float = 100000.0
+
+
 class ChannelConfig(BaseModel):
     kind: str = "cli"
 
@@ -116,6 +121,7 @@ class AppConfig(BaseModel):
     environment: str = "paper"
     llm: LLMConfig = Field(default_factory=LLMConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    account: AccountConfig = Field(default_factory=AccountConfig)
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     tickers: list[Ticker] = Field(default_factory=list)

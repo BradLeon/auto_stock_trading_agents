@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ..schemas.decision import BossApproval, TradeDecision
 from ..schemas.market import MarketSnapshot, Ticker
 from ..schemas.memory import TradeLogEntry
+from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.reports import (
     FundamentalReport,
     IndustryReport,
@@ -28,8 +29,9 @@ class TradingState(BaseModel):
     cycle_id: str
     as_of: datetime
     dry_run: bool = True
-    live_data: bool = True  # False -> ingest uses empty stub snapshots (offline/tests)
-    use_llm: bool = True    # False -> analysts return neutral stubs (no LLM calls)
+    live_data: bool = True   # False -> ingest uses empty stub snapshots (offline/tests)
+    use_llm: bool = True     # False -> analysts return neutral stubs (no LLM calls)
+    use_broker: bool = True  # False -> skip IBKR (no portfolio read, simulated fills)
 
     # Inputs for the cycle.
     watchlist: list[Ticker] = Field(default_factory=list)
@@ -45,6 +47,7 @@ class TradingState(BaseModel):
     technical_reports: Annotated[list[TechnicalReport], operator.add] = Field(default_factory=list)
 
     # Risk -> decision -> approval -> execution.
+    portfolio: PortfolioSnapshot | None = None
     risk_guardrails: RiskGuardrails | None = None
     decisions: list[TradeDecision] = Field(default_factory=list)
     manager_summary: str = ""

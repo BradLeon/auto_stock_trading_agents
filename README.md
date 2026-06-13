@@ -16,8 +16,19 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 - ✅ **Phase 5 (manager)** — LLM Manager synthesizes all reports + guardrails into
   trades; a deterministic validator hard-clips them (only tightens). Trader skips
   holds and sizes notional→shares.
-- ⬜ **Next** — IBKR paper portfolio/execution, FRED macro + SEC financials sources,
-  Context Memory + performance, scheduling, Feishu/Discord Boss channel
+- ✅ **Phase 6 (IBKR paper)** — `broker/ibkr.py` (ib_async): risk manager reads the
+  live portfolio (tightens guardrails on over-cap names / hot sectors); Trader
+  places real paper orders on `--live`. All paths degrade gracefully if TWS is
+  down. Probe with `ats ibkr`.
+- ⬜ **Next** — FRED macro + SEC financials sources, Context Memory + performance,
+  scheduling, Feishu/Discord Boss channel
+
+### IBKR setup (paper)
+
+Start TWS or IB Gateway, log into the **paper** account, then enable
+File ▸ Global Config ▸ API ▸ Settings → "ActiveX and Socket Clients", port 7497,
+trust 127.0.0.1. Verify: `PYTHONPATH=src .venv/bin/python -m ats.runtime.cli ibkr`.
+TWS auto-logs-out daily, so re-check before a `--live` run.
 
 The LLM goes through OpenRouter (OpenAI-compatible) so the provider/model is a
 one-line config swap (`config/settings.yaml` → `llm.default_model`). Set

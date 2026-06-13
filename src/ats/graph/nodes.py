@@ -17,15 +17,23 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import logging
+
 from langgraph.types import Send, interrupt
 
-from ..agents import analysts, manager as manager_agent, risk_validator
+from ..agents import analysts, manager as manager_agent, risk_manager as risk_agent, risk_validator
+from ..broker import IBKRBroker, IBKRUnavailable
 from ..config import get_config
+
+log = logging.getLogger("ats.graph")
+
+
+def _broker(state: TradingState) -> IBKRBroker:
+    return IBKRBroker(sector_by_symbol={t.symbol: t.sector for t in state.watchlist})
 from ..schemas.channel import ApprovalRequest
 from ..schemas.decision import BossApproval, TradeDecision
 from ..schemas.market import MarketSnapshot
 from ..schemas.memory import TradeLogEntry
-from ..schemas.risk import RiskGuardrails
 from .state import TradingState
 
 
@@ -97,16 +105,20 @@ def technical_analyst(payload: dict) -> dict:
 # Risk manager (join point). STUB: echo config defaults as guardrails.
 # --------------------------------------------------------------------------- #
 def risk_manager(state: TradingState) -> dict:
-    rc = get_config().app.risk
-    return {"risk_guardrails": RiskGuardrails(
+    cfg = get_config()
+    portfolio = None
+    if state.use_broker:
+        try:
+            portfolio = _broker(state).get_portfolio()
+        except IBKRUnavailable as exc:
+            log.warning("portfolio read skipped: %s", exc)
+    guardrails = risk_agent.assess(
         as_of=state.as_of,
-        max_position_pct=rc.max_position_pct,
-        max_sector_pct=rc.max_sector_pct,
-        max_gross_leverage=rc.max_gross_leverage,
-        max_single_order_usd=rc.max_single_order_usd,
-        cash_floor_pct=rc.cash_floor_pct,
-        notes="[stub] no live portfolio yet; using config defaults.",
-    )}
+        risk_cfg=cfg.app.risk,
+        portfolio=portfolio,
+        sector_by_symbol={t.symbol: t.sector for t in state.watchlist},
+    )
+    return {"risk_guardrails": guardrails, "portfolio": portfolio}
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +128,8 @@ def manager(state: TradingState) -> dict:
     cfg = get_config()
     gr = state.risk_guardrails
     net_liq = cfg.app.account.net_liquidation_usd
+    if state.portfolio and state.portfolio.net_liquidation > 0:
+        net_liq = state.portfolio.net_liquidation
 
     proposed, summary = manager_agent.decide(
         as_of=state.as_of,
@@ -132,6 +146,7 @@ def manager(state: TradingState) -> dict:
     sector_by_symbol = {t.symbol: t.sector for t in state.watchlist}
     decisions, adjustments = risk_validator.apply_guardrails(
         proposed, gr, sector_by_symbol=sector_by_symbol, net_liquidation=net_liq,
+        portfolio=state.portfolio,
     )
     return {"decisions": decisions, "manager_summary": summary, "risk_adjustments": adjustments}
 
@@ -177,28 +192,39 @@ def trader(state: TradingState) -> dict:
     approval = state.approval
     if approval is None:
         return {"order_results": []}
-    to_execute = approval.effective_decisions(state.decisions)
-    results: list[TradeLogEntry] = []
-    for d in to_execute:
-        if d.action == "hold":
-            continue
-        snap = state.market_data.get(d.symbol)
-        price = snap.last_price if snap else None
-        qty = _size_qty(d, price)
-        results.append(TradeLogEntry(
-            order_id=str(uuid.uuid4())[:8],
-            cycle_id=state.cycle_id,
-            symbol=d.symbol,
-            action=d.action,
-            qty=qty,
-            order_type=d.order_type,
-            limit_price=d.limit_price,
-            status="filled" if state.dry_run else "submitted",
-            submitted_at=_now(),
-            filled_at=_now() if state.dry_run else None,
-            rationale=d.rationale,
-        ))
-    return {"order_results": results}
+    to_execute = [d for d in approval.effective_decisions(state.decisions) if d.action != "hold"]
+    sized = [(d, _size_qty(d, _price(state, d.symbol))) for d in to_execute]
+
+    # Live path: submit to IBKR paper. Otherwise simulate fills (dry-run).
+    if not state.dry_run and state.use_broker:
+        try:
+            return {"order_results": _broker(state).place_orders(sized, state.cycle_id)}
+        except IBKRUnavailable as exc:
+            log.warning("execution aborted, IBKR unavailable: %s", exc)
+            return {"order_results": [_errored(state, d, qty, str(exc)) for d, qty in sized]}
+
+    return {"order_results": [_simulated(state, d, qty) for d, qty in sized]}
+
+
+def _price(state: TradingState, symbol: str) -> float | None:
+    snap = state.market_data.get(symbol)
+    return snap.last_price if snap else None
+
+
+def _simulated(state: TradingState, d: TradeDecision, qty: float) -> TradeLogEntry:
+    return TradeLogEntry(
+        order_id=str(uuid.uuid4())[:8], cycle_id=state.cycle_id, symbol=d.symbol,
+        action=d.action, qty=qty, order_type=d.order_type, limit_price=d.limit_price,
+        status="filled", submitted_at=_now(), filled_at=_now(), rationale=d.rationale,
+    )
+
+
+def _errored(state: TradingState, d: TradeDecision, qty: float, error: str) -> TradeLogEntry:
+    return TradeLogEntry(
+        order_id="", cycle_id=state.cycle_id, symbol=d.symbol, action=d.action, qty=qty,
+        order_type=d.order_type, limit_price=d.limit_price, status="error",
+        submitted_at=_now(), error=error, rationale=d.rationale,
+    )
 
 
 def _size_qty(d: TradeDecision, price: float | None) -> float:

@@ -23,7 +23,7 @@ from ..graph.checkpoint import get_checkpointer
 from ..graph.state import TradingState
 
 
-def _initial_state(cfg, *, dry_run: bool, live_data: bool, use_llm: bool) -> TradingState:
+def _initial_state(cfg, *, dry_run: bool, live_data: bool, use_llm: bool, use_broker: bool) -> TradingState:
     now = datetime.now(timezone.utc)
     sectors = {
         sector: cfg.app.sectors.get(sector).supply_chain if cfg.app.sectors.get(sector) else ""
@@ -35,6 +35,7 @@ def _initial_state(cfg, *, dry_run: bool, live_data: bool, use_llm: bool) -> Tra
         dry_run=dry_run,
         live_data=live_data,
         use_llm=use_llm,
+        use_broker=use_broker,
         watchlist=cfg.app.tickers,
         sectors=sectors,
     )
@@ -52,7 +53,8 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
     channel = channel or _make_channel(cfg, auto)
     app = build_graph(checkpointer=get_checkpointer(persist=False))
 
-    state = _initial_state(cfg, dry_run=dry_run, live_data=not offline, use_llm=use_llm)
+    state = _initial_state(cfg, dry_run=dry_run, live_data=not offline, use_llm=use_llm,
+                           use_broker=not offline)
     cfg_run = {"configurable": {"thread_id": state.cycle_id}}
     print(f"▶ running {state.cycle_id} (dry_run={dry_run}) over {[t.symbol for t in state.watchlist]}")
 
@@ -88,19 +90,44 @@ def _report(channel, result: dict) -> None:
                                   body=f"{len(orders)} order(s) processed"))
 
 
+def ibkr_probe() -> int:
+    """Connectivity check: print account summary + positions, or a clear error."""
+    from ..broker import IBKRBroker, IBKRUnavailable
+
+    cfg = get_config()
+    broker = IBKRBroker(sector_by_symbol={t.symbol: t.sector for t in cfg.app.tickers})
+    try:
+        pf = broker.get_portfolio()
+    except IBKRUnavailable as exc:
+        print(f"❌ IBKR unavailable: {exc}")
+        print("   Start TWS/IB Gateway, enable API (port 7497 paper), trust 127.0.0.1.")
+        return 1
+    print(f"✅ Connected. account={pf.account_id or '?'}  "
+          f"NetLiq=${pf.net_liquidation:,.0f}  cash=${pf.cash:,.0f}  leverage={pf.leverage:.2f}x")
+    if not pf.positions:
+        print("   (no open positions)")
+    for p in pf.positions:
+        print(f"   {p.symbol:6} {p.qty:>8.0f} @ {p.avg_cost:>8.2f}  mv=${p.market_value:>12,.0f}  "
+              f"w={p.weight:.1%}  uPnL=${p.unrealized_pnl:,.0f}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="run one trading cycle")
     run.add_argument("--live", action="store_true", help="execute (still IBKR paper); default dry-run")
     run.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
-    run.add_argument("--offline", action="store_true", help="skip live data fetch (stub snapshots)")
+    run.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
     run.add_argument("--no-llm", action="store_true", help="skip LLM calls (neutral stub reports)")
+    sub.add_parser("ibkr", help="probe IBKR paper connectivity (account + positions)")
     args = parser.parse_args(argv)
 
     if args.command == "run":
         run_cycle(dry_run=not args.live, auto=args.yes, offline=args.offline, use_llm=not args.no_llm)
         return 0
+    if args.command == "ibkr":
+        return ibkr_probe()
     return 1
 
 

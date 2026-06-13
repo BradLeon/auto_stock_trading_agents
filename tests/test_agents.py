@@ -32,5 +32,5 @@ def test_analysts_stub_without_llm():
     now = datetime.now(timezone.utc)
     snap = MarketSnapshot(ticker=Ticker(symbol="NVDA"), as_of=now)
     assert "stub" in analysts.technical("NVDA", snap, now, use_llm=False).thesis
-    assert analysts.fundamental("NVDA", snap, now, use_llm=False).signal == "bullish"
-    assert "stub" in analysts.macro(now, use_llm=False).thesis
+    assert analysts.fundamental("NVDA", snap, None, now, use_llm=False).signal == "bullish"
+    assert "stub" in analysts.macro(None, now, use_llm=False).thesis

@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from ..schemas.fundamentals import FundamentalData
+from ..schemas.macro import MacroData
 from ..schemas.market import MarketSnapshot
-
-log = logging.getLogger("ats.agents")
 from ..schemas.reports import (
     FundamentalReport,
     IndustryReport,
@@ -20,6 +20,8 @@ from ..schemas.reports import (
 )
 from .base import run_structured
 from .outputs import AnalystView, FundamentalView, IndustryView, MacroView, TechnicalView
+
+log = logging.getLogger("ats.agents")
 
 
 def _clean(view: AnalystView) -> dict:
@@ -77,7 +79,8 @@ def technical(symbol: str, snapshot: MarketSnapshot | None, as_of: datetime, use
 # --------------------------------------------------------------------------- #
 # Fundamental (limited data until SEC/financials source lands)
 # --------------------------------------------------------------------------- #
-def fundamental(symbol: str, snapshot: MarketSnapshot | None, as_of: datetime, use_llm: bool) -> FundamentalReport:
+def fundamental(symbol: str, snapshot: MarketSnapshot | None, fundamentals: FundamentalData | None,
+                as_of: datetime, use_llm: bool) -> FundamentalReport:
     if not use_llm:
         # Deterministic bullish stub for offline/test runs (drives the manager stub).
         return FundamentalReport(as_of=as_of, symbol=symbol, signal="bullish", conviction=0.6,
@@ -85,10 +88,12 @@ def fundamental(symbol: str, snapshot: MarketSnapshot | None, as_of: datetime, u
     stub = FundamentalReport(as_of=as_of, symbol=symbol, signal="neutral", conviction=0.4,
                              thesis="[fallback] fundamental analyst unavailable")
     price = _price_context(snapshot) if snapshot else "No market data."
-    ctx = (f"Fundamental analysis for {symbol}.\n{price}\n\n"
-           "NOTE: dedicated financial statements / filings are not yet wired in. "
-           "Reason from your knowledge of the company plus the price context; be "
-           "explicit about uncertainty and keep conviction modest.")
+    fund_block = (f"\nFundamentals:\n{fundamentals.to_context()}"
+                  if fundamentals else "\nFundamentals: not available.")
+    ctx = (f"Fundamental analysis for {symbol}.\n{price}{fund_block}\n\n"
+           "Use the valuation multiples, margins, growth, and recent SEC filings "
+           "above together with your knowledge of the company. Be explicit about "
+           "what the metrics imply for forward risk/reward.")
     try:
         view = run_structured("fundamental_analyst", FundamentalView, ctx, skill_slug="fundamental-analyst")
         return FundamentalReport(as_of=as_of, symbol=symbol, **_clean(view))
@@ -123,17 +128,24 @@ def industry(sector: str, brief: str, as_of: datetime, use_llm: bool) -> Industr
 # --------------------------------------------------------------------------- #
 # Macro (single, global)
 # --------------------------------------------------------------------------- #
-def macro(as_of: datetime, use_llm: bool) -> MacroReport:
+def macro(macro_data: MacroData | None, as_of: datetime, use_llm: bool) -> MacroReport:
     stub = MacroReport(as_of=as_of, signal="neutral", conviction=0.4, thesis="[stub] no LLM")
     if not use_llm:
         return stub
+    data_block = (f"\nLive macro data:\n{macro_data.to_context()}"
+                  if macro_data else "\nLive macro feeds unavailable.")
     ctx = ("Assess the current US equity market regime for a swing/position horizon. "
            "Cover rates, inflation, employment, geopolitics, and breadth (SPX/NDX, VIX, "
-           "fear & greed). NOTE: live macro feeds (FRED/VIX) are not yet wired in — "
-           "reason from general knowledge, flag staleness, keep conviction modest.")
+           f"fear & greed).{data_block}\n\n"
+           "Ground your read in the figures above where present; for any feed marked "
+           "unavailable, reason from general knowledge and flag the staleness.")
     try:
         view = run_structured("macro_analyst", MacroView, ctx, skill_slug="macro-analyst")
-        return MacroReport(as_of=as_of, **_clean(view))
+        report = MacroReport(as_of=as_of, **_clean(view))
+        if macro_data:  # attach measured values, not LLM-invented ones
+            report.vix = macro_data.vix
+            report.fear_greed = macro_data.fear_greed
+        return report
     except Exception as exc:  # noqa: BLE001
         log.warning("macro analyst failed: %s", exc)
         return stub

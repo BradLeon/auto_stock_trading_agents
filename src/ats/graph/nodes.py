@@ -51,16 +51,19 @@ def ingest(state: TradingState) -> dict:
     hermetic. Other data sources (fundamentals, macro, news, social) land in
     later milestones; each degrades to None on failure.
     """
-    if state.live_data:
-        from ..data import market_data
-
-        snapshots = market_data.fetch_many(state.watchlist)
-    else:
+    if not state.live_data:
         snapshots = {
             t.symbol: MarketSnapshot(ticker=t, as_of=state.as_of, last_price=None)
             for t in state.watchlist
         }
-    return {"market_data": snapshots}
+        return {"market_data": snapshots}
+
+    from ..data import fundamentals as fund_src, macro as macro_src, market_data
+
+    snapshots = market_data.fetch_many(state.watchlist)
+    macro_data = macro_src.fetch()
+    fundamentals = {t.symbol: fund_src.fetch(t.symbol) for t in state.watchlist}
+    return {"market_data": snapshots, "macro_data": macro_data, "fundamentals": fundamentals}
 
 
 # --------------------------------------------------------------------------- #
@@ -68,12 +71,14 @@ def ingest(state: TradingState) -> dict:
 # --------------------------------------------------------------------------- #
 def fan_out(state: TradingState) -> list[Send]:
     common = {"as_of": state.as_of, "use_llm": state.use_llm}
-    sends: list[Send] = [Send("macro_analyst", {**common})]
+    sends: list[Send] = [Send("macro_analyst", {**common, "macro_data": state.macro_data})]
     for sector, brief in state.sectors.items():
         sends.append(Send("industry_analyst", {**common, "sector": sector, "brief": brief}))
     for t in state.watchlist:
         snap = state.market_data.get(t.symbol)
-        sends.append(Send("fundamental_analyst", {**common, "symbol": t.symbol, "snapshot": snap}))
+        fund = state.fundamentals.get(t.symbol)
+        sends.append(Send("fundamental_analyst",
+                          {**common, "symbol": t.symbol, "snapshot": snap, "fundamentals": fund}))
         sends.append(Send("technical_analyst", {**common, "symbol": t.symbol, "snapshot": snap}))
     return sends
 
@@ -83,7 +88,8 @@ def fan_out(state: TradingState) -> list[Send]:
 # fall back to neutral stubs when use_llm is False.
 # --------------------------------------------------------------------------- #
 def macro_analyst(payload: dict) -> dict:
-    return {"macro_report": analysts.macro(payload["as_of"], payload["use_llm"])}
+    return {"macro_report": analysts.macro(
+        payload.get("macro_data"), payload["as_of"], payload["use_llm"])}
 
 
 def industry_analyst(payload: dict) -> dict:
@@ -93,7 +99,8 @@ def industry_analyst(payload: dict) -> dict:
 
 def fundamental_analyst(payload: dict) -> dict:
     return {"fundamental_reports": [analysts.fundamental(
-        payload["symbol"], payload.get("snapshot"), payload["as_of"], payload["use_llm"])]}
+        payload["symbol"], payload.get("snapshot"), payload.get("fundamentals"),
+        payload["as_of"], payload["use_llm"])]}
 
 
 def technical_analyst(payload: dict) -> dict:

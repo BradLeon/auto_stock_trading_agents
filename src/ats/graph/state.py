@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from ..schemas.decision import BossApproval, TradeDecision
 from ..schemas.market import MarketSnapshot, Ticker
+from ..schemas.fundamentals import FundamentalData
+from ..schemas.macro import MacroData
 from ..schemas.memory import TradeLogEntry
 from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.reports import (
@@ -39,6 +41,8 @@ class TradingState(BaseModel):
 
     # Ingest output.
     market_data: dict[str, MarketSnapshot] = Field(default_factory=dict)
+    macro_data: MacroData | None = None
+    fundamentals: dict[str, FundamentalData] = Field(default_factory=dict)
 
     # Analyst outputs (parallel fan-out; lists use a concat reducer).
     macro_report: MacroReport | None = None

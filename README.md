@@ -20,8 +20,12 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
   live portfolio (tightens guardrails on over-cap names / hot sectors); Trader
   places real paper orders on `--live`. All paths degrade gracefully if TWS is
   down. Probe with `ats ibkr`.
-- ⬜ **Next** — FRED macro + SEC financials sources, Context Memory + performance,
-  scheduling, Feishu/Discord Boss channel
+- ✅ **Phase 7 (macro + fundamentals data)** — `data/macro.py` (FRED rates/CPI/jobs +
+  yfinance VIX/SPX/NDX + CNN fear&greed) and `data/fundamentals.py` (yfinance
+  metrics + SEC EDGAR filings) feed the macro & fundamental analysts real numbers.
+  Each feed degrades to a note. FRED needs `FRED_API_KEY`; the rest need no key.
+- ⬜ **Next** — Context Memory + performance tracking, scheduling, Feishu/Discord
+  Boss channel
 
 ### IBKR setup (paper)
 

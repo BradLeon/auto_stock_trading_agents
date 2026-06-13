@@ -22,11 +22,12 @@ def _allowed_types() -> list[type]:
 
     from .. import schemas as schemas_pkg
     from ..schemas import (  # noqa: F401 - ensure submodules are imported
-        channel, decision, market, memory, portfolio, reports, risk,
+        channel, decision, fundamentals, macro, market, memory, portfolio, reports, risk,
     )
     from . import state as state_mod
 
-    modules = [channel, decision, market, memory, portfolio, reports, risk, state_mod, schemas_pkg]
+    modules = [channel, decision, fundamentals, macro, market, memory, portfolio, reports,
+               risk, state_mod, schemas_pkg]
     types: set[type] = set()
     for mod in modules:
         for _, obj in inspect.getmembers(mod, inspect.isclass):

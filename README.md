@@ -73,6 +73,10 @@ ats pead show COHR                                   # print the dossier
   (or pass `--transcript <path|url>`) — matches grabbing transcripts from
   fool.com/investing.com manually. Consensus is free via yfinance.
 - MVP approval is the CLI channel; Feishu-async PEAD resume is a follow-up.
+- **Options data (ThetaData)**: for precise Expected Move / IV / skew, run the
+  local ThetaData Terminal: put creds in `var/thetadata/creds.txt`, then
+  `./scripts/start_thetadata.sh` (REST on 127.0.0.1:25503). Without it, options
+  fall back to the yfinance chain automatically.
 
 ### Daily automation
 

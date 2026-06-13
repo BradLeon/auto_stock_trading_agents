@@ -28,6 +28,7 @@ class TradingState(BaseModel):
     cycle_id: str
     as_of: datetime
     dry_run: bool = True
+    live_data: bool = True  # False -> ingest uses empty stub snapshots (offline/tests)
 
     # Inputs for the cycle.
     watchlist: list[Ticker] = Field(default_factory=list)

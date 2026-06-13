@@ -42,11 +42,21 @@ def _now() -> datetime:
 # Ingest
 # --------------------------------------------------------------------------- #
 def ingest(state: TradingState) -> dict:
-    """Assemble per-ticker market snapshots. STUB: empty snapshots."""
-    snapshots = {
-        t.symbol: MarketSnapshot(ticker=t, as_of=state.as_of, last_price=None)
-        for t in state.watchlist
-    }
+    """Assemble per-ticker market snapshots (yfinance OHLCV + indicators).
+
+    Offline mode (live_data=False) returns empty snapshots so tests stay
+    hermetic. Other data sources (fundamentals, macro, news, social) land in
+    later milestones; each degrades to None on failure.
+    """
+    if state.live_data:
+        from ..data import market_data
+
+        snapshots = market_data.fetch_many(state.watchlist)
+    else:
+        snapshots = {
+            t.symbol: MarketSnapshot(ticker=t, as_of=state.as_of, last_price=None)
+            for t in state.watchlist
+        }
     return {"market_data": snapshots}
 
 

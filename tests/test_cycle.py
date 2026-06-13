@@ -4,7 +4,7 @@ from ats.runtime.cli import run_cycle
 
 
 def test_dry_run_approve_executes_orders(approve_all):
-    result = run_cycle(dry_run=True, channel=approve_all)
+    result = run_cycle(dry_run=True, offline=True, channel=approve_all)
 
     # HITL actually fired exactly once.
     assert len(approve_all.requests) == 1
@@ -23,6 +23,6 @@ def test_dry_run_approve_executes_orders(approve_all):
 
 
 def test_reject_blocks_execution(reject_all):
-    result = run_cycle(dry_run=True, channel=reject_all)
+    result = run_cycle(dry_run=True, offline=True, channel=reject_all)
     assert result["approval"].status == "rejected"
     assert result["order_results"] == []

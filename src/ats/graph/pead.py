@@ -175,7 +175,12 @@ def score_fetch(state: PeadState) -> dict:
 
     out["fundamentals_text"] = (fund_src.fetch(state.symbol).to_context()
                                 if state.live_data else "(offline)")
-    text, src = transcript_src.fetch(state.symbol, state.fiscal_label, state.transcript_source)
+    # Fetch the transcript when explicitly provided, or in live mode; skip offline
+    # (avoids network in tests / offline runs).
+    if state.transcript_source or state.live_data:
+        text, src = transcript_src.fetch(state.symbol, state.fiscal_label, state.transcript_source)
+    else:
+        text, src = "", "offline"
     out["transcript_text"] = text
     out["transcript_resolved_source"] = src
 

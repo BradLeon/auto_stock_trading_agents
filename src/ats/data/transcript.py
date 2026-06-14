@@ -57,17 +57,106 @@ def fetch(symbol: str, fiscal_label: str = "", source: str | None = None) -> tup
             if p.exists():
                 return p.read_text(encoding="utf-8"), f"file:{p}"
 
-    # 3) FMP auto-fetch (latest transcript) if a key is configured
+    # 3) FMP auto-fetch (latest transcript) if a paid key is configured
     text, src = _fmp(symbol)
     if text:
         return text, src
 
-    # 4) dropped manual file
+    # 4) web search (Tavily) -> the fool.com / investing transcript page (free tier)
+    text, src = _from_search(symbol)
+    if text:
+        return text, src
+
+    # 5) secondary: a transcript article already in our news feed (if any)
+    text, src = _from_news(symbol)
+    if text:
+        return text, src
+
+    # 6) dropped manual file
     mp = manual_path(symbol, fiscal_label)
     if mp.exists():
         return mp.read_text(encoding="utf-8"), f"file:{mp}"
 
     return "", "none"
+
+
+# --------------------------------------------------------------------------- #
+# Web-search transcript fetch (Tavily)
+# --------------------------------------------------------------------------- #
+def _from_search(symbol: str) -> tuple[str, str]:
+    """Find + read the latest earnings-call transcript via Tavily web search.
+
+    Restricts to free transcript sources and uses Tavily's extracted page text.
+    Needs TAVILY_API_KEY (free tier); degrades to ('','') without it.
+    """
+    from ..config import get_config
+
+    key = get_config().secrets.tavily_api_key
+    if not key:
+        return "", ""
+    try:
+        import httpx
+
+        r = httpx.post("https://api.tavily.com/search", timeout=40, json={
+            "api_key": key,
+            "query": f"{symbol} latest earnings call transcript",
+            "include_domains": ["fool.com", "investing.com"],
+            "include_raw_content": True, "max_results": 5})
+        r.raise_for_status()
+        results = r.json().get("results", []) or []
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+    def looks_transcript(res: dict) -> bool:
+        return "transcript" in (res.get("url", "") + res.get("title", "")).lower()
+
+    ranked = sorted(results, key=lambda x: (looks_transcript(x),
+                                            len(x.get("raw_content") or "")), reverse=True)
+    for res in ranked:
+        content = res.get("raw_content") or res.get("content") or ""
+        if looks_transcript(res) and len(content) >= _MIN_TRANSCRIPT_CHARS:
+            return content, f"tavily:{res.get('url')}"
+    return "", ""
+
+
+# --------------------------------------------------------------------------- #
+# News-driven transcript fetch
+# --------------------------------------------------------------------------- #
+_TRANSCRIPT_HINTS = ("earnings call transcript", "call transcript", "earnings transcript")
+_MIN_TRANSCRIPT_CHARS = 2000          # a real transcript is long; skip stubs/paywalls
+_PREFERRED = ("fool.com", "investing.com")
+
+
+def _from_news(symbol: str, lookback_days: int = 10) -> tuple[str, str]:
+    """Locate the earnings-call transcript article in recent news and scrape it.
+
+    Tight lookback so we get THIS quarter's transcript (published within days of
+    the call), not last quarter's stale one. Degrades to ('','').
+    """
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from .news import fetch_news
+
+        since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        items = fetch_news(symbol, since)
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+    candidates = [it for it in items if it.url and (
+        any(h in it.headline.lower() for h in _TRANSCRIPT_HINTS)
+        or "call-transcripts" in it.url.lower())]
+    # Prefer free, transcript-friendly sources; newest first.
+    candidates.sort(key=lambda it: (any(p in it.url.lower() for p in _PREFERRED),
+                                    it.published_at), reverse=True)
+    for it in candidates:
+        try:
+            text = _fetch_url(it.url)
+        except Exception:  # noqa: BLE001
+            continue
+        if len(text) >= _MIN_TRANSCRIPT_CHARS:
+            return text, f"news:{it.source}:{it.url}"
+    return "", ""
 
 
 def _fmp(symbol: str) -> tuple[str, str]:

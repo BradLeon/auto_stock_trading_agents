@@ -287,15 +287,12 @@ def thetadata_probe(symbol: str) -> int:
         print(f"❌ ThetaData unreachable: {exc}")
         print("   Start it: put creds in var/thetadata/creds.txt, run ./scripts/start_thetadata.sh")
         return 1
-    rows = raw.get("response") if isinstance(raw, dict) else raw
-    print(f"✅ ThetaData responded. top-level type: {type(raw).__name__}")
-    if isinstance(raw, dict):
-        print(f"   keys: {list(raw.keys())}")
-    if isinstance(rows, list) and rows:
-        print(f"   rows: {len(rows)} · first row: {rows[0]}")
-    else:
-        print(f"   response: {str(raw)[:500]}")
-    print("   → share this so the v3 parser in data/options.py can be finalized.")
+    rows = raw if isinstance(raw, list) else (raw.get("response") if isinstance(raw, dict) else [])
+    print(f"✅ ThetaData responded ({len(rows)} option-EOD rows).")
+    # Confirm the parser end-to-end (Expected Move / IV / skew).
+    setup = options.fetch(symbol.upper())
+    print(f"   setup: EM {setup.get('expected_move_pct')}% · ATM IV {setup.get('atm_iv')}% · "
+          f"skew {setup.get('iv_skew')} · exp {setup.get('expiration')} · src {setup.get('source')}")
     return 0
 
 

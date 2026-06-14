@@ -95,7 +95,10 @@ def prep_fetch(state: PeadState) -> dict:
     out["consensus"] = consensus_src.fetch(state.symbol)
 
     ru = runup_src.compute(state.symbol, cfg.sector_etf, cfg.benchmark)
-    opt = opt_src.fetch(state.symbol)
+    # Pass the earnings date so options picks the post-earnings expiration (the one
+    # whose Expected Move / IV actually prices the event).
+    target_earnings = earnings_calendar.next_earnings_date(state.symbol)
+    opt = opt_src.fetch(state.symbol, target_earnings)
     out["market_setup"] = MarketSetup(
         symbol=state.symbol, as_of=state.as_of,
         pre_earnings_close=ru.get("pre_earnings_close"),

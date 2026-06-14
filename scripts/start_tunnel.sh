@@ -13,5 +13,7 @@ set -euo pipefail
 PORT="${1:-8000}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 [ -x "$DIR/var/cloudflared" ] || { echo "var/cloudflared missing — re-download it." >&2; exit 1; }
-echo "Starting tunnel to http://localhost:$PORT — copy the https://*.trycloudflare.com URL below."
-exec "$DIR/var/cloudflared" tunnel --url "http://localhost:$PORT"
+# Use 127.0.0.1 (not localhost): uvicorn binds IPv4, while `localhost` can resolve
+# to IPv6 ::1 on macOS, which cloudflared then fails to reach (Cloudflare 530).
+echo "Starting tunnel to http://127.0.0.1:$PORT — copy the https://*.trycloudflare.com URL below."
+exec "$DIR/var/cloudflared" tunnel --url "http://127.0.0.1:$PORT"

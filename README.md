@@ -118,6 +118,14 @@ ats serve               # in a second process: handle Feishu approval callbacks
 The graph is transport-agnostic — the same interrupt/checkpoint mechanism backs
 CLI and Feishu; Discord is a drop-in adapter behind the same `BossChannel` port.
 
+**Group custom-bot mode** (simpler — no app needed). A Feishu group bot is
+push-only, so approval uses URL buttons that hit a signed GET endpoint:
+1. `FEISHU_BOT_WEBHOOK` = the group bot's incoming webhook.
+2. `FEISHU_APPROVE_BASE` = public URL of `ats serve` (tunnel); `FEISHU_APPROVE_SECRET`
+   = any random string (HMAC-protects the approve links).
+3. `ats serve` exposes `GET /feishu/approve`; tapping Approve/Reject in the card
+   resumes the run. Use `--channel feishu_bot` (e.g. `ats pead score COHR --channel feishu_bot`).
+
 ### IBKR setup (paper)
 
 Start TWS or IB Gateway, log into the **paper** account, then enable

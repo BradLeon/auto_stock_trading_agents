@@ -21,6 +21,10 @@ def get_channel(kind: str | None = None) -> BossChannel:
         from .feishu_channel import FeishuChannel
 
         return FeishuChannel()
+    if kind == "feishu_bot":
+        from .feishu_bot import FeishuBotChannel
+
+        return FeishuBotChannel()
     if kind == "discord":
         raise NotImplementedError("discord channel is a later deliverable")
     raise ValueError(f"Unknown channel kind: {kind!r}")

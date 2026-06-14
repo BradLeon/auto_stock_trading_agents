@@ -57,9 +57,14 @@ class Secrets(BaseSettings):
 
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
-    feishu_chat_id: str = ""              # group/user chat that receives approval cards
-    feishu_verification_token: str = ""   # event callback verification (optional but recommended)
+    feishu_chat_id: str = ""              # group/user chat that receives approval cards (app mode)
+    feishu_verification_token: str = ""   # event callback verification (app mode)
     feishu_base_url: str = "https://open.feishu.cn"  # use open.larksuite.com for Lark
+    # Group custom-bot mode (one-way push webhook + URL-button approval):
+    feishu_bot_webhook: str = ""          # https://open.feishu.cn/open-apis/bot/v2/hook/<id>
+    feishu_bot_secret: str = ""           # optional signing secret if the bot enables 签名校验
+    feishu_approve_base: str = ""         # public base URL of `ats serve` (tunnel) for buttons
+    feishu_approve_secret: str = ""       # HMAC secret protecting the GET approve links
     discord_bot_token: str = ""
 
 

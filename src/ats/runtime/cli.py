@@ -103,8 +103,8 @@ def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = Fals
     from ..graph.pead_state import PeadState
 
     sym = symbol.upper()
-    is_async = phase == "score" and channel == "feishu"
-    ch = get_channel("feishu") if channel == "feishu" else CLIChannel(auto=auto)
+    is_async = phase == "score" and channel in ("feishu", "feishu_bot")
+    ch = get_channel(channel) if channel in ("feishu", "feishu_bot") else CLIChannel(auto=auto)
     app = build_pead_graph(checkpointer=get_checkpointer(persist=is_async))
     now = datetime.now(timezone.utc)
     fiscal = load_pead_config(sym).fiscal_label
@@ -352,8 +352,8 @@ def main(argv: list[str] | None = None) -> int:
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     pe.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
     pe.add_argument("--no-llm", action="store_true", help="skip LLM (stub agents)")
-    pe.add_argument("--channel", choices=["cli", "feishu"], default="cli",
-                    help="score approval channel (feishu = async via webhook)")
+    pe.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli",
+                    help="score approval channel (feishu/feishu_bot = async via webhook)")
     args = parser.parse_args(argv)
 
     if args.command == "run":

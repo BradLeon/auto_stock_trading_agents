@@ -71,7 +71,11 @@ def fetch(symbol: str, fiscal_label: str = "", source: str | None = None) -> tup
 
 
 def _fmp(symbol: str) -> tuple[str, str]:
-    """FinancialModelingPrep latest earnings-call transcript. Degrades to ('','')."""
+    """FinancialModelingPrep latest earnings-call transcript (current /stable API).
+
+    Transcripts are a PAID FMP feature: free/basic plans return 402 here, so this
+    degrades quietly to ('','') and the manual drop / 'none' path takes over.
+    """
     from ..config import get_config
 
     key = get_config().secrets.fmp_api_key
@@ -80,17 +84,19 @@ def _fmp(symbol: str) -> tuple[str, str]:
     try:
         import httpx
 
-        # v4 returns the most recent transcript for the symbol.
-        r = httpx.get("https://financialmodelingprep.com/api/v4/earning_call_transcript",
-                      params={"symbol": symbol.upper(), "apikey": key}, timeout=25)
-        r.raise_for_status()
+        r = httpx.get("https://financialmodelingprep.com/stable/earning-call-transcript",
+                      params={"symbol": symbol.upper(), "limit": 1, "apikey": key}, timeout=25)
+        if r.status_code != 200:   # 402 restricted / 403 legacy / etc -> degrade
+            return "", ""
         data = r.json()
-        if isinstance(data, list) and data:
-            row = data[0]
-            content = row.get("content") if isinstance(row, dict) else None
+        rows = data if isinstance(data, list) else [data]
+        if rows and isinstance(rows[0], dict):
+            row = rows[0]
+            content = row.get("content") or row.get("transcript") or row.get("text")
             if content:
-                q, y = row.get("quarter"), row.get("year")
-                return content, f"fmp:Q{q}-{y}"
-    except Exception:  # noqa: BLE001 - transcripts are premium on FMP; degrade quietly
+                period = row.get("period") or row.get("quarter")
+                fy = row.get("fiscalYear") or row.get("year")
+                return content, f"fmp:{period}-{fy}"
+    except Exception:  # noqa: BLE001 - degrade quietly
         return "", ""
     return "", ""

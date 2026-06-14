@@ -13,10 +13,26 @@ def test_transcript_reads_manual_file(tmp_path):
 
 
 def test_transcript_none_when_missing(monkeypatch, tmp_path):
-    # No manual file, no source -> empty + "none".
+    # No manual file, no FMP key, no source -> empty + "none".
     monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
+    monkeypatch.setattr(transcript, "_fmp", lambda s: ("", ""))
     text, src = transcript.fetch("COHR", "Q3 FY2026")
     assert text == "" and src == "none"
+
+
+def test_transcript_fmp_used_when_no_override(monkeypatch, tmp_path):
+    monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
+    monkeypatch.setattr(transcript, "_fmp", lambda s: ("fmp body", "fmp:Q1-2026"))
+    text, src = transcript.fetch("COHR", "Q3 FY2026")
+    assert text == "fmp body" and src == "fmp:Q1-2026"
+
+
+def test_transcript_explicit_source_beats_fmp(monkeypatch, tmp_path):
+    p = tmp_path / "t.txt"
+    p.write_text("explicit", encoding="utf-8")
+    monkeypatch.setattr(transcript, "_fmp", lambda s: ("fmp body", "fmp:Q1-2026"))
+    text, src = transcript.fetch("COHR", "Q3 FY2026", source=str(p))
+    assert text == "explicit"          # explicit override wins
 
 
 def test_pick_expiration_after_earnings():

@@ -63,8 +63,24 @@ weighting, threshold bands, and decision tree are deterministic code** (auditabl
 ```bash
 ats pead prep COHR                                  # build the pre-earnings dossier
 ats pead score COHR --transcript path/to/call.txt   # score + decide (HITL); --live to trade
+ats pead score COHR --channel feishu                # async: card → phone approval → webhook
 ats pead show COHR                                   # print the dossier
+ats pead monitor COHR                               # one continuous-context pass (news → dossier)
+ats pead watch                                       # monitor all targets (config/pead.yaml)
+ats thetadata COHR                                   # probe the local ThetaData terminal
 ```
+
+**v2 — continuous & autonomous.** The dossier is a *living* document: a daily
+`monitor` ingests target + supply-chain news (Finnhub + curated RSS; X stub) and
+folds material developments into the narrative/expectations in memory
+(`store.pead_events`, deduped). The scheduler (`ats schedule`) routes each PEAD
+target daily — always `monitor`, `prep` when earnings is near, `score` the
+session after earnings (transcript auto-fetched via FMP, `FMP_API_KEY`). Trades
+go through deterministic risk then **Feishu async approval** (`--channel feishu`;
+the `ats serve` webhook routes `pead:` threads back to the PEAD graph). Boundary:
+context/analysis is autonomous; only trades require approval. Config: global
+`config/pead.yaml` (targets, monitor switches, schedule windows) + per-ticker
+`config/pead/<SYM>.yaml`.
 
 - Per-ticker config in `config/pead/<SYM>.yaml` (scorecard dims/weights, special
   long threshold, signal chain). COHR is seeded from a real worked example

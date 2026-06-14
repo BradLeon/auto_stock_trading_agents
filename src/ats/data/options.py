@@ -40,27 +40,90 @@ def fetch(symbol: str, earnings_date: date | None = None) -> dict:
 # --------------------------------------------------------------------------- #
 # ThetaData (best-effort; validate parser against live instance)
 # --------------------------------------------------------------------------- #
-def _thetadata(symbol: str, earnings_date: date | None) -> dict | None:
+def thetadata_raw(symbol: str, on_date: date | None = None) -> dict | list:
+    """Raw /v3/option/history/eod response — used by `ats thetadata` to inspect the
+    schema against a live terminal so the parser below can be finalized."""
     import os
 
     import httpx
 
     host = os.environ.get("THETADATA_URL", "http://127.0.0.1:25503")
-    today = datetime.now(timezone.utc).date()
-    d = (earnings_date or today).strftime("%Y%m%d")
-    url = f"{host}/v3/option/history/eod"
-    r = httpx.get(url, params={"symbol": symbol, "expiration": "*",
-                               "start_date": d, "end_date": d}, timeout=10)
+    d = (on_date or datetime.now(timezone.utc).date()).strftime("%Y%m%d")
+    # trust_env=False so a configured SOCKS/HTTP proxy doesn't intercept localhost.
+    with httpx.Client(trust_env=False, timeout=10) as c:
+        r = c.get(f"{host}/v3/option/history/eod",
+                  params={"symbol": symbol, "expiration": "*", "start_date": d, "end_date": d})
     r.raise_for_status()
-    payload = r.json()
-    # Defensive parse: expect rows of option EOD records. Shape varies by version,
-    # so bail (->fallback) if we can't find strike/IV/price-like fields.
+    return r.json()
+
+
+def _get(row: dict, *keys):
+    for k in keys:
+        v = row.get(k)
+        if v is not None:
+            return v
+    return None
+
+
+def _thetadata(symbol: str, earnings_date: date | None) -> dict | None:
+    """Best-effort ThetaData v3 parse. Defensive: any shape mismatch raises and we
+    fall back to yfinance. Validate against a live terminal via `ats thetadata`."""
+    payload = thetadata_raw(symbol, earnings_date)
     rows = payload.get("response") if isinstance(payload, dict) else payload
-    if not rows:
-        raise ValueError("thetadata: empty/unexpected response")
-    # Parsing of straddle/skew from ThetaData rows is left as an integration point;
-    # raise so we fall back to yfinance until validated against a live feed.
-    raise NotImplementedError("thetadata parser pending validation against live feed")
+    if not rows or not isinstance(rows, list) or not isinstance(rows[0], dict):
+        raise ValueError("thetadata: unexpected response shape (use `ats thetadata` to inspect)")
+
+    # Normalize rows to {expiration, strike, right, bid, ask, iv}.
+    opts = []
+    for r in rows:
+        opts.append({
+            "expiration": _get(r, "expiration", "exp", "expiry"),
+            "strike": _get(r, "strike", "strike_price"),
+            "right": (str(_get(r, "right", "option_type", "type") or "")).upper()[:1],
+            "bid": _get(r, "bid", "bid_price"),
+            "ask": _get(r, "ask", "ask_price"),
+            "iv": _get(r, "implied_volatility", "implied_vol", "iv"),
+        })
+    if not all(o["strike"] and o["right"] for o in opts[:1]):
+        raise ValueError("thetadata: could not map strike/right fields")
+
+    spot = _spot(__import__("yfinance").Ticker(symbol))
+    exps = sorted({str(o["expiration"]) for o in opts if o["expiration"]})
+    chosen = _pick_thetadata_exp(exps, earnings_date)
+    chain = [o for o in opts if str(o["expiration"]) == chosen]
+    calls = [o for o in chain if o["right"] == "C"]
+    puts = [o for o in chain if o["right"] == "P"]
+    if not calls or not puts:
+        raise ValueError("thetadata: missing call/put side")
+
+    def near(side, target):
+        return min(side, key=lambda o: abs(float(o["strike"]) - target))
+
+    def mid(o):
+        b, a = o.get("bid"), o.get("ask")
+        return (float(b) + float(a)) / 2 if b and a else None
+
+    atm_c, atm_p = near(calls, spot), near(puts, spot)
+    cm, pm = mid(atm_c), mid(atm_p)
+    em = ((cm + pm) / spot * 100) if (cm and pm and spot) else None
+    iv = ((float(atm_c["iv"]) + float(atm_p["iv"])) / 2 * 100
+          if atm_c.get("iv") and atm_p.get("iv") else None)
+    op, oc = near(puts, spot * 0.95), near(calls, spot * 1.05)
+    skew = ((float(op["iv"]) - float(oc["iv"])) * 100
+            if op.get("iv") and oc.get("iv") else None)
+    return {"expected_move_pct": round(em, 2) if em else None,
+            "atm_iv": round(iv, 1) if iv else None,
+            "iv_skew": round(skew, 2) if skew is not None else None, "expiration": chosen}
+
+
+def _pick_thetadata_exp(exps: list[str], earnings_date: date | None) -> str | None:
+    if not exps:
+        return None
+    if not earnings_date:
+        return exps[0]
+    ed = earnings_date.strftime("%Y%m%d")
+    after = [e for e in exps if e.replace("-", "") >= ed]
+    return after[0] if after else exps[-1]
 
 
 # --------------------------------------------------------------------------- #

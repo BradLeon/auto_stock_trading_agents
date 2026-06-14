@@ -52,10 +52,64 @@ def run_if_session(*, dry_run: bool = True) -> bool:
     return True
 
 
+def _pead_actions(today: date, earnings_date: date | None, sched_cfg: dict) -> list[str]:
+    """Decide what to run for a PEAD target today (pure routing).
+
+    Always monitor; prep when earnings is within prep_days_before; score the
+    session after earnings.
+    """
+    actions = ["monitor"]
+    if earnings_date:
+        days_to = (earnings_date - today).days
+        if 0 < days_to <= sched_cfg.get("prep_days_before", 3):
+            actions.append("prep")
+        if sched_cfg.get("score_after", True) and (today - earnings_date).days == 1:
+            actions.append("score")
+    return actions
+
+
+def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
+    """Per-target: monitor (context update), plus prep/score by earnings proximity."""
+    from ..config import load_pead_global
+    from ..data import earnings_calendar
+    from .cli import run_pead, run_pead_monitor
+
+    g = load_pead_global()
+    if not g.get("monitor", {}).get("enabled", True):
+        return {}
+    if not is_trading_session():
+        log.info("not a trading session; skipping PEAD daily")
+        return {}
+
+    today = _today()
+    ran: dict[str, list[str]] = {}
+    for sym in g.get("targets", []):
+        ed = earnings_calendar.next_earnings_date(sym)
+        actions = _pead_actions(today, ed, g.get("schedule", {}))
+        log.info("PEAD %s: earnings=%s -> %s", sym, ed, actions)
+        for action in actions:
+            try:
+                if action == "monitor":
+                    run_pead_monitor(sym, use_llm=use_llm)
+                elif action == "prep":
+                    run_pead(sym, "prep", dry_run=dry_run, use_llm=use_llm)
+                elif action == "score":
+                    run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, channel="feishu")
+            except Exception as exc:  # noqa: BLE001 - one target must not break the rest
+                log.warning("PEAD %s %s failed: %s", sym, action, exc)
+        ran[sym] = actions
+    return ran
+
+
+def _daily(*, dry_run: bool) -> None:
+    run_if_session(dry_run=dry_run)
+    pead_daily(dry_run=dry_run)
+
+
 def start(*, dry_run: bool = True, run_once: bool = False) -> None:
     cfg = get_config().app.schedule
     if run_once:
-        run_if_session(dry_run=dry_run)
+        _daily(dry_run=dry_run)
         return
 
     from apscheduler.schedulers.blocking import BlockingScheduler
@@ -64,12 +118,14 @@ def start(*, dry_run: bool = True, run_once: bool = False) -> None:
     hour, minute = (int(x) for x in cfg.run_at.split(":"))
     scheduler = BlockingScheduler(timezone=cfg.timezone)
     scheduler.add_job(
-        lambda: run_if_session(dry_run=dry_run),
+        lambda: _daily(dry_run=dry_run),
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
         id="daily_cycle", misfire_grace_time=3600,
     )
-    log.info("scheduler started: %s %s (mon-fri, NYSE sessions only)", cfg.run_at, cfg.timezone)
-    print(f"⏰ scheduling daily cycle at {cfg.run_at} {cfg.timezone} (NYSE sessions). Ctrl-C to stop.")
+    log.info("scheduler started: %s %s (mon-fri, NYSE sessions only; daily cycle + PEAD)",
+             cfg.run_at, cfg.timezone)
+    print(f"⏰ scheduling daily cycle + PEAD at {cfg.run_at} {cfg.timezone} (NYSE sessions). "
+          f"Ctrl-C to stop.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

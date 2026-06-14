@@ -43,6 +43,7 @@ class Secrets(BaseSettings):
 
     fred_api_key: str = ""
     finnhub_api_key: str = ""
+    fmp_api_key: str = ""          # FinancialModelingPrep — earnings-call transcripts
     tavily_api_key: str = ""
     sec_edgar_user_agent: str = "ats-bot example@example.com"
     reddit_client_id: str = ""

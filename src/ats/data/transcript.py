@@ -50,16 +50,47 @@ def fetch(symbol: str, fiscal_label: str = "", source: str | None = None) -> tup
         if source.startswith("http://") or source.startswith("https://"):
             try:
                 return _fetch_url(source), f"url:{source}"
-            except Exception:  # noqa: BLE001 - fall through to manual
+            except Exception:  # noqa: BLE001 - fall through
                 pass
         else:
             p = Path(source)
             if p.exists():
                 return p.read_text(encoding="utf-8"), f"file:{p}"
 
-    # 3) dropped manual file
+    # 3) FMP auto-fetch (latest transcript) if a key is configured
+    text, src = _fmp(symbol)
+    if text:
+        return text, src
+
+    # 4) dropped manual file
     mp = manual_path(symbol, fiscal_label)
     if mp.exists():
         return mp.read_text(encoding="utf-8"), f"file:{mp}"
 
     return "", "none"
+
+
+def _fmp(symbol: str) -> tuple[str, str]:
+    """FinancialModelingPrep latest earnings-call transcript. Degrades to ('','')."""
+    from ..config import get_config
+
+    key = get_config().secrets.fmp_api_key
+    if not key:
+        return "", ""
+    try:
+        import httpx
+
+        # v4 returns the most recent transcript for the symbol.
+        r = httpx.get("https://financialmodelingprep.com/api/v4/earning_call_transcript",
+                      params={"symbol": symbol.upper(), "apikey": key}, timeout=25)
+        r.raise_for_status()
+        data = r.json()
+        if isinstance(data, list) and data:
+            row = data[0]
+            content = row.get("content") if isinstance(row, dict) else None
+            if content:
+                q, y = row.get("quarter"), row.get("year")
+                return content, f"fmp:Q{q}-{y}"
+    except Exception:  # noqa: BLE001 - transcripts are premium on FMP; degrade quietly
+        return "", ""
+    return "", ""

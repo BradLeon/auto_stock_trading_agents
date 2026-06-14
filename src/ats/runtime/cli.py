@@ -89,33 +89,48 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
 
 
 def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = False,
-             offline: bool = False, use_llm: bool = True, transcript: str | None = None) -> dict:
-    """Run one PEAD phase (prep | score) for a ticker. Score pauses at HITL approval.
+             offline: bool = False, use_llm: bool = True, transcript: str | None = None,
+             channel: str = "cli") -> dict:
+    """Run one PEAD phase (prep | score). Score pauses at HITL approval.
 
-    MVP uses the synchronous CLI channel for approval; Feishu-async PEAD resume is
-    a follow-up (the webhook currently routes only the daily-cycle graph).
+    channel="cli": synchronous terminal approval. channel="feishu": async — the
+    score run checkpoints, sends a card, and exits; `ats serve` resumes the
+    `pead:<sym>:<fiscal>` thread on the Boss's tap. The deterministic risk clip
+    runs BEFORE the interrupt, so trades pass risk before approval is requested.
     """
+    from ..config import load_pead_config
     from ..graph.pead import build_pead_graph
     from ..graph.pead_state import PeadState
 
-    channel = CLIChannel(auto=auto)
-    app = build_pead_graph(checkpointer=get_checkpointer(persist=False))
+    sym = symbol.upper()
+    is_async = phase == "score" and channel == "feishu"
+    ch = get_channel("feishu") if channel == "feishu" else CLIChannel(auto=auto)
+    app = build_pead_graph(checkpointer=get_checkpointer(persist=is_async))
     now = datetime.now(timezone.utc)
-    state = PeadState(symbol=symbol.upper(), phase=phase, as_of=now, dry_run=dry_run,
-                      use_llm=use_llm, use_broker=not offline, live_data=not offline,
-                      transcript_source=transcript)
-    cfg_run = {"configurable": {"thread_id": f"pead-{symbol}-{phase}-{now:%Y%m%d%H%M%S}"}}
-    print(f"▶ PEAD {phase} {symbol.upper()}")
+    fiscal = load_pead_config(sym).fiscal_label
+    state = PeadState(symbol=sym, phase=phase, as_of=now, dry_run=dry_run, use_llm=use_llm,
+                      use_broker=not offline, live_data=not offline, transcript_source=transcript)
+    thread_id = (f"pead:{sym}:{fiscal}".replace(" ", "") if is_async
+                 else f"pead-{sym}-{phase}-{now:%Y%m%d%H%M%S}")
+    cfg_run = {"configurable": {"thread_id": thread_id}}
+    print(f"▶ PEAD {phase} {sym}")
 
     result = app.invoke(state, config=cfg_run)
+
+    if "__interrupt__" in result and is_async:
+        req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
+        ch.send_approval_request(req, thread_id=thread_id)
+        print(f"⏸ {thread_id} awaiting Feishu approval. Run `ats serve` to handle the callback.")
+        return result
+
     while "__interrupt__" in result:
         req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
-        channel.push(Notification(kind="approval_request",
-                                  title=f"PEAD {symbol.upper()} decision", body=req.context_summary))
-        approval = channel.request_approval(req)
+        ch.push(Notification(kind="approval_request", title=f"PEAD {sym} decision",
+                             body=req.context_summary))
+        approval = ch.request_approval(req)
         result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
 
-    _pead_report(symbol.upper(), phase, result)
+    _pead_report(sym, phase, result)
     return result
 
 
@@ -212,12 +227,18 @@ def pead_show(symbol: str) -> int:
 
 
 def resume_cycle(thread_id: str, approval, channel=None) -> dict:
-    """Resume a checkpointed cycle with the Boss verdict (called by the webhook)."""
-    from datetime import datetime, timezone
+    """Resume a checkpointed run with the Boss verdict (called by the webhook).
 
+    Routes by thread_id prefix: `pead:` -> PEAD graph, else the daily cycle graph.
+    """
     if approval.reviewed_at is None:
         approval.reviewed_at = datetime.now(timezone.utc)
-    app = build_graph(checkpointer=get_checkpointer(persist=True))
+    if thread_id.startswith("pead:"):
+        from ..graph.pead import build_pead_graph
+
+        app = build_pead_graph(checkpointer=get_checkpointer(persist=True))
+    else:
+        app = build_graph(checkpointer=get_checkpointer(persist=True))
     cfg_run = {"configurable": {"thread_id": thread_id}}
     result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
 
@@ -254,6 +275,28 @@ def _report(channel, result: dict) -> None:
     if orders:
         channel.push(Notification(kind="fill_report", title="Execution done",
                                   body=f"{len(orders)} order(s) processed"))
+
+
+def thetadata_probe(symbol: str) -> int:
+    """Hit the local ThetaData terminal and dump the response shape (schema check)."""
+    from ..data import options
+
+    try:
+        raw = options.thetadata_raw(symbol.upper())
+    except Exception as exc:  # noqa: BLE001
+        print(f"❌ ThetaData unreachable: {exc}")
+        print("   Start it: put creds in var/thetadata/creds.txt, run ./scripts/start_thetadata.sh")
+        return 1
+    rows = raw.get("response") if isinstance(raw, dict) else raw
+    print(f"✅ ThetaData responded. top-level type: {type(raw).__name__}")
+    if isinstance(raw, dict):
+        print(f"   keys: {list(raw.keys())}")
+    if isinstance(rows, list) and rows:
+        print(f"   rows: {len(rows)} · first row: {rows[0]}")
+    else:
+        print(f"   response: {str(raw)[:500]}")
+    print("   → share this so the v3 parser in data/options.py can be finalized.")
+    return 0
 
 
 def ibkr_probe() -> int:
@@ -302,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
+    td.add_argument("symbol")
     pe = sub.add_parser("pead", help="PEAD earnings workflow (prep / score / show / monitor / watch)")
     pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch"])
     pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch`)")
@@ -310,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     pe.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
     pe.add_argument("--no-llm", action="store_true", help="skip LLM (stub agents)")
+    pe.add_argument("--channel", choices=["cli", "feishu"], default="cli",
+                    help="score approval channel (feishu = async via webhook)")
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -329,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
 
         start(dry_run=not args.live, run_once=args.now)
         return 0
+    if args.command == "thetadata":
+        return thetadata_probe(args.symbol)
     if args.command == "pead":
         if args.action == "watch":
             run_pead_watch(use_llm=not args.no_llm)
@@ -341,7 +390,8 @@ def main(argv: list[str] | None = None) -> int:
             run_pead_monitor(args.symbol, use_llm=not args.no_llm)
             return 0
         run_pead(args.symbol, args.action, dry_run=not args.live, auto=args.yes,
-                 offline=args.offline, use_llm=not args.no_llm, transcript=args.transcript)
+                 offline=args.offline, use_llm=not args.no_llm, transcript=args.transcript,
+                 channel=args.channel)
         return 0
     return 1
 

@@ -26,8 +26,11 @@ def _fred_client():
     key = get_config().secrets.fred_api_key
     if not key:
         return None
-    from fredapi import Fred
-
+    try:
+        from fredapi import Fred
+    except ImportError:
+        log.warning("fredapi not installed (pip install fredapi); skipping FRED feeds")
+        return None
     return Fred(api_key=key)
 
 

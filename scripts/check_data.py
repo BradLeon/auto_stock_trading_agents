@@ -1,17 +1,21 @@
-"""Probe each PEAD data source and print a status line.
+"""Probe each PEAD data source, print a status line, and DUMP the full result.
 
     PYTHONPATH=src .venv/bin/python scripts/check_data.py            # all sources
     PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # one source
 
-Each line: ✓/✗ · source · what it needs · a sample of what came back. Sources are
-fetched live (network); analysis outputs land in Context Memory (var/ats.sqlite),
-raw fetches are not separately cached.
+Each source's full response is written to var/data_dumps/<source>_<SYM>.json (or
+.txt for the transcript) so you can inspect everything — `open var/data_dumps/`.
+Sources are fetched live (network); raw fetches are not otherwise cached.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from pydantic import BaseModel
 
 from ats.data import (
     consensus,
@@ -28,23 +32,24 @@ from ats.schemas.market import Ticker
 
 SYM = sys.argv[2] if len(sys.argv) > 2 else "COHR"
 NOW = datetime.now(timezone.utc)
+DUMP_DIR = Path(__file__).resolve().parents[1] / "var" / "data_dumps"
 
 
 def market():
     s = market_data.fetch_snapshot(Ticker(symbol=SYM))
-    return bool(s.last_price), f"last={s.last_price} bars={len(s.history)} ind={len(s.indicators)}"
+    return bool(s.last_price), f"last={s.last_price} bars={len(s.history)} ind={len(s.indicators)}", s
 
 
 def fund():
     f = fundamentals.fetch(SYM)
     return bool(f.market_cap or f.trailing_pe), \
-        f"P/E={f.trailing_pe} margin={f.profit_margin} filings={len(f.recent_filings)}"
+        f"P/E={f.trailing_pe} margin={f.profit_margin} filings={len(f.recent_filings)}", f
 
 
 def macro_():
     m = macro.fetch()
     return any([m.ust_10y, m.vix, m.spx]), \
-        f"UST10Y={m.ust_10y} CPI={m.cpi_yoy} VIX={m.vix} SPX={m.spx} F&G={m.fear_greed}"
+        f"UST10Y={m.ust_10y} CPI={m.cpi_yoy} VIX={m.vix} SPX={m.spx} F&G={m.fear_greed}", m
 
 
 def opts():
@@ -52,60 +57,82 @@ def opts():
     o = options.fetch(SYM, ed)
     return bool(o.get("expected_move_pct")), \
         f"src={o.get('source')} EM={o.get('expected_move_pct')}% IV={o.get('atm_iv')}% " \
-        f"skew={o.get('iv_skew')} exp={o.get('expiration')}"
+        f"skew={o.get('iv_skew')} exp={o.get('expiration')}", o
 
 
 def earn():
-    d = earnings_calendar.next_earnings_date(SYM)
-    return bool(d), f"next_earnings={d}"
+    ev = earnings_calendar.next_earnings(SYM)
+    return bool(ev and ev.get("date")), \
+        (f"date={ev['date']} hour={ev['hour']} epsEst={ev['eps_estimate']}" if ev else "none"), ev
 
 
 def cons():
     c = consensus.fetch(SYM)
-    return bool(c.get("eps") or c.get("revenue")), f"EPS={c.get('eps')} Rev={c.get('revenue')}"
+    return bool(c.get("eps") or c.get("revenue")), f"EPS={c.get('eps')} Rev={c.get('revenue')}", c
 
 
 def run():
     r = runup.compute(SYM)
     return r.get("pre_earnings_close") is not None, \
         f"close={r.get('pre_earnings_close')} vsSMH={r.get('run_up_vs_sector_pct')}% " \
-        f"vsQQQ={r.get('run_up_vs_bench_pct')}% distATH={r.get('dist_to_ath_pct')}%"
+        f"distATH={r.get('dist_to_ath_pct')}%", r
 
 
 def news_():
     items = news.fetch_news(SYM, NOW - timedelta(days=14))
-    return len(items) > 0, f"{len(items)} items; latest: " + (items[0].headline[:60] if items else "-")
+    return len(items) > 0, f"{len(items)} items; latest: " + (items[0].headline[:60] if items else "-"), items
 
 
 def trans():
     text, src = transcript.fetch(SYM, "Q FY2026")
-    return bool(text), f"src={src} chars={len(text)}"
+    return bool(text), f"src={src} chars={len(text)}", (text, src)
 
 
 CHECKS = {
     "market": ("yfinance (no key)", market),
-    "fundamentals": ("yfinance + SEC (SEC_EDGAR_USER_AGENT)", fund),
-    "macro": ("FRED_API_KEY + yfinance", macro_),
-    "options": ("ThetaData terminal / yfinance", opts),
-    "earnings": ("yfinance/Finnhub", earn),
-    "consensus": ("yfinance (no key)", cons),
-    "runup": ("yfinance (no key)", run),
-    "news": ("FINNHUB_API_KEY + RSS", news_),
+    "fundamentals": ("yfinance + SEC", fund),
+    "macro": ("FRED + yfinance", macro_),
+    "options": ("ThetaData / yfinance", opts),
+    "earnings": ("Finnhub / yfinance", earn),
+    "consensus": ("yfinance", cons),
+    "runup": ("yfinance", run),
+    "news": ("Finnhub + RSS", news_),
     "transcript": ("Tavily/FMP/manual", trans),
 }
+
+
+def _dump(name: str, obj) -> Path:
+    DUMP_DIR.mkdir(parents=True, exist_ok=True)
+    # Transcript: (text, source) -> .txt
+    if isinstance(obj, tuple) and len(obj) == 2 and isinstance(obj[0], str):
+        text, src = obj
+        p = DUMP_DIR / f"{name}_{SYM}.txt"
+        p.write_text(f"# source: {src}\n# chars: {len(text)}\n\n{text}", encoding="utf-8")
+        return p
+    if isinstance(obj, BaseModel):
+        data = obj.model_dump(mode="json")
+    elif isinstance(obj, list):
+        data = [o.model_dump(mode="json") if isinstance(o, BaseModel) else o for o in obj]
+    else:
+        data = obj
+    p = DUMP_DIR / f"{name}_{SYM}.json"
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    return p
 
 
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else None
     items = {only: CHECKS[only]} if only in CHECKS else CHECKS
-    print(f"Testing data sources for {SYM}:\n")
+    print(f"Testing data sources for {SYM} (full results -> var/data_dumps/):\n")
     for name, (needs, fn) in items.items():
         try:
-            ok, detail = fn()
+            ok, summary, obj = fn()
             mark = "✓" if ok else "✗"
+            path = _dump(name, obj)
+            loc = path.relative_to(Path(__file__).resolve().parents[1])
         except Exception as exc:  # noqa: BLE001
-            mark, detail = "✗", f"ERROR: {exc}"
-        print(f"  {mark} {name:13} [{needs}]\n      {detail}")
+            mark, summary, loc = "✗", f"ERROR: {exc}", "(no dump)"
+        print(f"  {mark} {name:13} [{needs}]\n      {summary}\n      → {loc}")
 
 
 if __name__ == "__main__":

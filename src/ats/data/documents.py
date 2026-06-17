@@ -23,13 +23,45 @@ name = "documents"
 _MIN_DOC_CHARS = 1000
 
 
+_RELEASE_KW = ("earning", "release", "press", "8-k", "8k")
+_DECK_KW = ("presentation", "investor", "deck", "slide")
+
+
 def gather(symbol: str, docs_root: str | None = None) -> list[tuple[str, str]]:
+    """Earnings release + investor presentation + any extra curated docs.
+
+    Priority per doc type: a curated file in <docs_root>/<SYM>/ (most precise) wins;
+    otherwise auto-fetch — release from SEC 8-K, deck via Tavily. No duplicates.
+    """
+    folder = _from_folder(symbol, docs_root)
+    used: set[str] = set()
     docs: list[tuple[str, str]] = []
-    release = safe_fetch(lambda: _sec_8k_release(symbol), source=f"sec-8k:{symbol}", attempts=2)
-    if release:
-        docs.append(release)
-    docs += _from_folder(symbol, docs_root)
+
+    f_release = _classify(folder, _RELEASE_KW)
+    if f_release:
+        docs.append(f_release); used.add(f_release[0])
+    else:
+        rel = safe_fetch(lambda: _sec_8k_release(symbol), source=f"sec-8k:{symbol}", attempts=2)
+        if rel:
+            docs.append(rel)
+
+    f_deck = _classify(folder, _DECK_KW)
+    if f_deck:
+        docs.append(f_deck); used.add(f_deck[0])
+    else:
+        deck = safe_fetch(lambda: _tavily_deck(symbol), source=f"tavily-deck:{symbol}", attempts=1)
+        if deck:
+            docs.append(deck)
+
+    docs += [d for d in folder if d[0] not in used]   # extra curated docs (e.g. a saved 10-K)
     return docs
+
+
+def _classify(folder: list[tuple[str, str]], keywords: tuple[str, ...]) -> tuple[str, str] | None:
+    for label, text in folder:
+        if any(k in label.lower() for k in keywords):
+            return (label, text)
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -85,6 +117,61 @@ def _text(html: str) -> str:
     t = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
     t = re.sub(r"(?s)<[^>]+>", " ", t)
     return re.sub(r"\s+", " ", t).strip()
+
+
+# --------------------------------------------------------------------------- #
+# Investor presentation via Tavily web search (generalizes across companies)
+# --------------------------------------------------------------------------- #
+def _tavily_deck(symbol: str) -> tuple[str, str] | None:
+    import httpx
+
+    from ..config import get_config
+
+    key = get_config().secrets.tavily_api_key
+    if not key:
+        return None
+    r = httpx.post("https://api.tavily.com/search", timeout=40, json={
+        "api_key": key, "query": f"{symbol} latest quarterly investor presentation slides pdf",
+        "include_raw_content": True, "max_results": 6})
+    r.raise_for_status()
+    results = r.json().get("results", []) or []
+
+    def is_deck(x: dict) -> bool:
+        return "presentation" in (x.get("url", "") + x.get("title", "")).lower()
+
+    # Prefer an actual .pdf deck over an IR landing page; then longer content.
+    ranked = sorted(results, key=lambda x: (is_deck(x), x.get("url", "").lower().endswith(".pdf"),
+                                            len(x.get("raw_content") or "")), reverse=True)
+    for res in ranked:
+        if not is_deck(res):
+            continue
+        url = res.get("url", "")
+        content = res.get("raw_content") or ""
+        if len(content) < _MIN_DOC_CHARS and url.lower().endswith(".pdf"):
+            content = _download_pdf_text(url)        # Tavily didn't extract -> fetch the PDF
+        if len(content) >= _MIN_DOC_CHARS:
+            return (f"investor presentation (tavily:{url})", content)
+    return None
+
+
+def _download_pdf_text(url: str) -> str:
+    import io
+
+    import httpx
+
+    try:
+        from pypdf import PdfReader
+
+        r = httpx.get(url, headers={"User-Agent": _BROWSER_UA}, timeout=40, follow_redirects=True)
+        r.raise_for_status()
+        reader = PdfReader(io.BytesIO(r.content))
+        return "\n".join((p.extract_text() or "") for p in reader.pages)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 
 # --------------------------------------------------------------------------- #

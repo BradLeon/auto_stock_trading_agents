@@ -86,16 +86,24 @@ def _add_market_regime(data: MacroData) -> None:
                 setattr(data, f"{field}_chg_pct", round(chg, 2))
 
 
+# CNN's fear&greed API (the data behind edition.cnn.com/markets/fear-and-greed).
+# It rejects bare/short User-Agents (HTTP 418); a full browser UA + Referer passes.
+_CNN_FG_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+
 def _add_fear_greed(data: MacroData) -> None:
     def pull():
         import httpx
 
-        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        r = httpx.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        r = httpx.get(_CNN_FG_URL, timeout=15, follow_redirects=True, headers={
+            "User-Agent": _BROWSER_UA, "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9", "Referer": "https://edition.cnn.com/markets/fear-and-greed"})
         r.raise_for_status()
-        return int(round(r.json()["fear_and_greed"]["score"]))
+        return int(round(float(r.json()["fear_and_greed"]["score"])))
 
-    fg = safe_fetch(pull, source="cnn:fear_greed", attempts=2)
+    fg = safe_fetch(pull, source="cnn:fear_greed", attempts=3)
     if fg is not None:
         data.fear_greed = fg
     else:

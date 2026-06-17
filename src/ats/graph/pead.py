@@ -184,6 +184,13 @@ def score_fetch(state: PeadState) -> dict:
     out["transcript_text"] = text
     out["transcript_resolved_source"] = src
 
+    # Official documents: SEC 8-K earnings release + investor decks from the folder.
+    if state.live_data:
+        from ..data import documents
+
+        docs = documents.gather(state.symbol)
+        out["documents_text"] = "\n\n".join(f"### {label}\n{txt[:25000]}" for label, txt in docs)
+
     # Need run-up for the decision; recompute if the prep dossier lacked it.
     if state.market_setup is None and state.live_data:
         from ..data import runup as runup_src
@@ -200,7 +207,8 @@ def score_actuals(state: PeadState) -> dict:
                                    as_of=state.as_of, guidance="(no-llm)")}
     actuals = score_agents.extract_actuals(
         state.config, state.expectation_set, state.transcript_text,
-        state.fundamentals_text, state.as_of, state.transcript_resolved_source)
+        state.fundamentals_text, state.as_of, state.transcript_resolved_source,
+        documents_text=state.documents_text)
     return {"actuals": actuals}
 
 

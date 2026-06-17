@@ -40,6 +40,7 @@ class PeadState(BaseModel):
     peer_rows: list[dict] = Field(default_factory=list)
     transcript_text: str = ""
     transcript_resolved_source: str = ""
+    documents_text: str = ""        # official docs (SEC 8-K release + investor decks)
 
     # dossier sections
     expectation_set: ExpectationSet | None = None

@@ -31,23 +31,24 @@ log = logging.getLogger("ats.agents.pead")
 # --------------------------------------------------------------------------- #
 def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
                     transcript_text: str, fundamentals_text: str, as_of: datetime,
-                    transcript_source: str = "") -> Actuals:
+                    transcript_source: str = "", documents_text: str = "") -> Actuals:
     exp_lines = ""
     if expectations:
         exp_lines = "\n".join(
             f"  - {e.dim_key}: neutral={e.neutral}" for e in expectations.expectations)
-    # Keep enough text to reach forward guidance + later call sections (these tend
-    # to sit deep in the transcript); Opus has ample context.
-    transcript_block = (transcript_text[:40000] if transcript_text
-                        else "(no transcript provided; use reported financials only)")
+    # Opus has ample context; keep enough of each source to reach guidance + segments.
+    transcript_block = transcript_text[:40000] if transcript_text else "(no transcript)"
+    docs_block = documents_text[:40000] if documents_text else "(no official docs)"
     ctx = (
         f"Extract Q actuals for {config.symbol} ({config.fiscal_label}).\n"
         f"Expectations (neutral case) per dimension:\n{exp_lines}\n\n"
-        f"Reported financials:\n{fundamentals_text}\n\n"
-        f"Earnings call transcript / press release:\n{transcript_block}\n\n"
-        "For each scorecard dimension, give the actual value, a 'vs_expected' tag "
-        "(远超/超/中性/低于/远低于 + 🔴/✅/⚪/⚠️) and a note. Extract forward GUIDANCE and the "
-        "key qualitative call signals separately. Set reported_eps / reported_revenue if present."
+        f"Reported financials (statements + QoQ/YoY):\n{fundamentals_text}\n\n"
+        f"Official documents (SEC 8-K earnings release + investor presentation):\n{docs_block}\n\n"
+        f"Earnings call transcript:\n{transcript_block}\n\n"
+        "Using ALL of the above (press release + presentation carry segment QoQ/YoY, guidance, "
+        "and market commentary), give per scorecard dimension the actual value, a 'vs_expected' "
+        "tag (远超/超/中性/低于/远低于 + 🔴/✅/⚪/⚠️) and a note. Extract forward GUIDANCE and key "
+        "qualitative call signals separately. Set reported_eps / reported_revenue if present."
     )
     try:
         view: ActualsView = run_structured("manager", ActualsView, ctx, skill_slug="pead-actuals")

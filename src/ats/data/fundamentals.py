@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 from functools import lru_cache
 
 from ..config import get_config
-from ..schemas.fundamentals import Filing, FundamentalData
+from ..schemas.fundamentals import Filing, FinancialStatements, FundamentalData, StatementMetric
 from .base import safe_fetch
 
 name = "fundamentals"
@@ -41,6 +41,10 @@ def fetch(symbol: str) -> FundamentalData:
             if isinstance(val, (int, float)):
                 setattr(data, field, float(val))
 
+    data.statements = safe_fetch(lambda: _statements(symbol), source=f"yf-stmt:{symbol}")
+    if data.statements is None:
+        data.notes.append("quarterly statements unavailable")
+
     filings = safe_fetch(lambda: _sec_filings(symbol), source=f"sec:{symbol}", attempts=2)
     if filings:
         data.recent_filings = filings
@@ -56,6 +60,88 @@ def _yf_info(symbol: str) -> dict:
     if not info:
         raise ValueError(f"no info for {symbol}")
     return info
+
+
+# --------------------------------------------------------------------------- #
+# Quarterly statements (income / balance / cash flow) with QoQ + YoY
+# --------------------------------------------------------------------------- #
+def _row(df, *candidates):
+    """Latest, prior-quarter, and year-ago values for the first matching row."""
+    if df is None or df.empty:
+        return None, None, None
+    for name in candidates:
+        if name in df.index:
+            cols = list(df.columns)  # descending: col0=latest
+            vals = [df.loc[name, c] for c in cols]
+            cur = _num(vals[0]) if len(vals) > 0 else None
+            qoq = _num(vals[1]) if len(vals) > 1 else None
+            yoy = _num(vals[4]) if len(vals) > 4 else None
+            return cur, qoq, yoy
+    return None, None, None
+
+
+def _num(v):
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct(cur, base):
+    if cur is None or not base:
+        return None
+    if (cur < 0) != (base < 0):   # sign flip -> percentage change is not meaningful
+        return None
+    return round((cur / base - 1) * 100, 1)
+
+
+def _dollar_metric(label, cur, prev, yago):
+    return StatementMetric(label=label, value=round(cur / 1e6, 0) if cur is not None else None,
+                           qoq=_pct(cur, prev), yoy=_pct(cur, yago), unit="$M", delta_unit="%")
+
+
+def _statements(symbol: str) -> FinancialStatements:
+    import yfinance as yf
+
+    t = yf.Ticker(symbol)
+    inc, bs, cf = t.quarterly_income_stmt, t.quarterly_balance_sheet, t.quarterly_cashflow
+    if inc is None or inc.empty:
+        raise ValueError(f"no quarterly statements for {symbol}")
+
+    period = str(inc.columns[0])[:10]
+    rev = _row(inc, "Total Revenue", "Operating Revenue")
+    gp = _row(inc, "Gross Profit")
+    op = _row(inc, "Operating Income", "Operating Income Or Loss")
+    ni = _row(inc, "Net Income", "Net Income Common Stockholders")
+    eps = _row(inc, "Diluted EPS", "Basic EPS")
+    capex = _row(cf, "Capital Expenditure", "Capital Expenditures")
+    fcf = _row(cf, "Free Cash Flow")
+    debt = _row(bs, "Total Debt")
+
+    lines = [_dollar_metric("Revenue", *rev)]
+    lines.append(_margin("Gross Margin", gp, rev))
+    lines.append(_margin("Operating Margin", op, rev))
+    lines.append(_dollar_metric("Net Income", *ni))
+    if eps[0] is not None:
+        lines.append(StatementMetric(label="Diluted EPS", value=round(eps[0], 2),
+                                     qoq=_pct(eps[0], eps[1]), yoy=_pct(eps[0], eps[2]), unit="$"))
+    lines.append(_dollar_metric("CapEx", *capex))
+    lines.append(_dollar_metric("Free Cash Flow", *fcf))
+    lines.append(_dollar_metric("Total Debt", *debt))
+    return FinancialStatements(period=period, lines=[ln for ln in lines if ln.value is not None])
+
+
+def _margin(label, profit, rev):
+    """Margin (%) with QoQ/YoY as percentage-point deltas."""
+    def m(p, r):
+        return round(p / r * 100, 1) if (p is not None and r) else None
+
+    cur, qoq_v, yoy_v = m(profit[0], rev[0]), m(profit[1], rev[1]), m(profit[2], rev[2])
+    return StatementMetric(label=label, value=cur,
+                           qoq=round(cur - qoq_v, 1) if (cur is not None and qoq_v is not None) else None,
+                           yoy=round(cur - yoy_v, 1) if (cur is not None and yoy_v is not None) else None,
+                           unit="%", delta_unit="pp")
 
 
 # --- SEC EDGAR -------------------------------------------------------------- #

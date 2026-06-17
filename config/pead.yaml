@@ -11,3 +11,8 @@ monitor:
 schedule:
   prep_days_before: 3            # run/refresh prep when earnings is within N days
   score_after: true             # run score the session after earnings (if transcript available)
+
+# Folder holding manually-downloaded official docs: <docs_root>/<SYM>/*.pdf
+# (e.g. investor presentations). The earnings release auto-fetches from SEC 8-K.
+# Override with env ATS_DOCS_ROOT.
+docs_root: /Users/liuchao/Documents/Obsidian Vault/信息源

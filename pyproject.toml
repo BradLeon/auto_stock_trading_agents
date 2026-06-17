@@ -30,6 +30,7 @@ data = [
     "pandas>=2.2",
     "pandas-ta>=0.3.14b",
     "feedparser>=6.0",
+    "pypdf>=4.0",
 ]
 broker = ["ib_async>=1.0"]
 memory = ["chromadb>=0.5"]

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from ats.data import (
     consensus,
+    documents,
     earnings_calendar,
     fundamentals,
     macro,
@@ -88,6 +89,12 @@ def trans():
     return bool(text), f"src={src} chars={len(text)}", (text, src)
 
 
+def docs():
+    d = documents.gather(SYM)
+    summary = f"{len(d)} docs: " + ", ".join(f"{lbl}({len(t)//1000}k)" for lbl, t in d)
+    return len(d) > 0, summary, [{"label": lbl, "chars": len(t), "text": t} for lbl, t in d]
+
+
 CHECKS = {
     "market": ("yfinance (no key)", market),
     "fundamentals": ("yfinance + SEC", fund),
@@ -98,6 +105,7 @@ CHECKS = {
     "runup": ("yfinance", run),
     "news": ("Finnhub + RSS", news_),
     "transcript": ("Tavily/FMP/manual", trans),
+    "documents": ("SEC 8-K + folder PDFs", docs),
 }
 
 

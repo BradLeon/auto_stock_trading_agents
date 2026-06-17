@@ -188,6 +188,7 @@ def load_pead_global() -> dict:
     cfg.setdefault("schedule", {})
     cfg["schedule"].setdefault("prep_days_before", 3)
     cfg["schedule"].setdefault("score_after", True)
+    cfg.setdefault("docs_root", "")
     return cfg
 
 

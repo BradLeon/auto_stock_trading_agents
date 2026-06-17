@@ -14,6 +14,32 @@ class Filing(BaseModel):
     url: str = ""
 
 
+class StatementMetric(BaseModel):
+    """One financial-statement line with QoQ / YoY change."""
+
+    label: str
+    value: float | None = None
+    qoq: float | None = None        # % for $ metrics, percentage-points for margins
+    yoy: float | None = None
+    unit: str = ""                  # "$M" | "%" | "$"
+    delta_unit: str = "%"           # "%" | "pp"
+
+    def render(self) -> str:
+        def fmt(v, u):
+            return "n/a" if v is None else (f"{v:,.0f}{u}" if u == "$M"
+                                            else f"{v:.2f}{u}" if u in ("%", "$") else f"{v}{u}")
+
+        def dlt(v):
+            return "n/a" if v is None else f"{v:+.1f}{self.delta_unit}"
+
+        return f"{self.label}: {fmt(self.value, self.unit)} (QoQ {dlt(self.qoq)}, YoY {dlt(self.yoy)})"
+
+
+class FinancialStatements(BaseModel):
+    period: str = ""                # latest quarter end, e.g. 2026-03-31
+    lines: list[StatementMetric] = Field(default_factory=list)
+
+
 class FundamentalData(BaseModel):
     symbol: str
     as_of: datetime
@@ -26,6 +52,7 @@ class FundamentalData(BaseModel):
     earnings_growth: float | None = Field(None, description="yoy, fraction")
     free_cashflow: float | None = None
     dividend_yield: float | None = None
+    statements: FinancialStatements | None = None
     recent_filings: list[Filing] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
@@ -47,6 +74,9 @@ class FundamentalData(BaseModel):
             f"Net margin {pct(self.profit_margin)}, Rev growth {pct(self.revenue_growth)}, "
             f"EPS growth {pct(self.earnings_growth)}, FCF {num(self.free_cashflow)}",
         ]
+        if self.statements and self.statements.lines:
+            lines.append(f"Quarterly statements (latest {self.statements.period}):")
+            lines += [f"  {m.render()}" for m in self.statements.lines]
         if self.recent_filings:
             lines.append("Recent SEC filings: " +
                          ", ".join(f"{x.form} {x.filed}" for x in self.recent_filings[:5]))

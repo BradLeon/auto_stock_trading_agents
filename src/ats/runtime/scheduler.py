@@ -52,18 +52,21 @@ def run_if_session(*, dry_run: bool = True) -> bool:
     return True
 
 
-def _pead_actions(today: date, earnings_date: date | None, sched_cfg: dict) -> list[str]:
+def _pead_actions(today: date, earnings_date: date | None, hour: str,
+                  sched_cfg: dict) -> list[str]:
     """Decide what to run for a PEAD target today (pure routing).
 
-    Always monitor; prep when earnings is within prep_days_before; score the
-    session after earnings.
+    Always monitor; prep when earnings is within prep_days_before; score after the
+    print — same day for before-open (bmo/dmh) prints, next session for after-close
+    (amc, or unknown).
     """
     actions = ["monitor"]
     if earnings_date:
         days_to = (earnings_date - today).days
         if 0 < days_to <= sched_cfg.get("prep_days_before", 3):
             actions.append("prep")
-        if sched_cfg.get("score_after", True) and (today - earnings_date).days == 1:
+        score_offset = 0 if hour in ("bmo", "dmh") else 1   # bmo: same day; amc/unknown: T+1
+        if sched_cfg.get("score_after", True) and (today - earnings_date).days == score_offset:
             actions.append("score")
     return actions
 
@@ -84,9 +87,11 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
     today = _today()
     ran: dict[str, list[str]] = {}
     for sym in g.get("targets", []):
-        ed = earnings_calendar.next_earnings_date(sym)
-        actions = _pead_actions(today, ed, g.get("schedule", {}))
-        log.info("PEAD %s: earnings=%s -> %s", sym, ed, actions)
+        ev = earnings_calendar.next_earnings(sym)
+        ed = ev["date"] if ev else None
+        hour = ev["hour"] if ev else ""
+        actions = _pead_actions(today, ed, hour, g.get("schedule", {}))
+        log.info("PEAD %s: earnings=%s (%s) -> %s", sym, ed, hour or "?", actions)
         for action in actions:
             try:
                 if action == "monitor":

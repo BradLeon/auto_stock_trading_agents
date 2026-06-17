@@ -10,19 +10,29 @@ SCHED = {"prep_days_before": 3, "score_after": True}
 
 # --- E: earnings-proximity routing ----------------------------------------- #
 def test_actions_far_from_earnings_is_monitor_only():
-    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 8, 1), SCHED) == ["monitor"]
+    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 8, 1), "amc", SCHED) == ["monitor"]
 
 
 def test_actions_within_prep_window_adds_prep():
-    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 6, 3), SCHED) == ["monitor", "prep"]
+    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 6, 3), "amc", SCHED) \
+        == ["monitor", "prep"]
 
 
-def test_actions_day_after_earnings_adds_score():
-    assert scheduler._pead_actions(date(2026, 6, 2), date(2026, 6, 1), SCHED) == ["monitor", "score"]
+def test_actions_amc_scores_next_day():
+    # After-close print on 6/1 -> score 6/2 (T+1).
+    assert scheduler._pead_actions(date(2026, 6, 2), date(2026, 6, 1), "amc", SCHED) \
+        == ["monitor", "score"]
+    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 6, 1), "amc", SCHED) == ["monitor"]
+
+
+def test_actions_bmo_scores_same_day():
+    # Before-open print on 6/1 -> score same day 6/1.
+    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 6, 1), "bmo", SCHED) \
+        == ["monitor", "score"]
 
 
 def test_actions_no_earnings_date_is_monitor_only():
-    assert scheduler._pead_actions(date(2026, 6, 1), None, SCHED) == ["monitor"]
+    assert scheduler._pead_actions(date(2026, 6, 1), None, "", SCHED) == ["monitor"]
 
 
 # --- D: webhook resume routes to the PEAD graph ---------------------------- #

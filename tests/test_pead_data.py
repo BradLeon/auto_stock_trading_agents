@@ -98,9 +98,22 @@ def test_consensus_num_filters_nan():
 
 
 def test_earnings_calendar_degrades(monkeypatch):
+    # Both Finnhub and yfinance down -> None.
+    monkeypatch.setattr(earnings_calendar, "_finnhub_next",
+                        lambda s: (_ for _ in ()).throw(RuntimeError()))
     monkeypatch.setattr(earnings_calendar, "_yf_next",
                         lambda s: (_ for _ in ()).throw(RuntimeError()))
     assert earnings_calendar.next_earnings_date("COHR") is None
+
+
+def test_earnings_calendar_prefers_finnhub(monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(earnings_calendar, "_finnhub_next",
+                        lambda s: {"date": date(2026, 8, 11), "hour": "amc", "quarter": 4,
+                                   "year": 2026, "eps_estimate": 1.65, "rev_estimate": 2e9,
+                                   "confirmed": True})
+    ev = earnings_calendar.next_earnings("COHR")
+    assert ev["date"] == date(2026, 8, 11) and ev["hour"] == "amc" and ev["confirmed"]
 
 
 def test_runup_ret_20d():

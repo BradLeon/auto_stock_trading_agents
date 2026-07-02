@@ -21,6 +21,10 @@ llm:
     technical_analyst: {}
     risk_manager: {}
     manager: {}
+    # High-volume news triage: cheap+fast tier. research_extract inherits Opus
+    # (few long articles/day; supply-chain reasoning is the value) — downgrade here.
+    news_triage: {model: google/gemini-2.5-flash, temperature: 0.0, max_tokens: 8192}
+    research_extract: {}
 
 # --- Risk guardrail defaults (risk_manager may tighten, never loosen) --------
 risk:

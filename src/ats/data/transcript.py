@@ -30,18 +30,13 @@ def manual_path(symbol: str, fiscal_label: str) -> Path:
     return REPO_ROOT / "var" / "transcripts" / f"{symbol.upper()}_{_slug(fiscal_label)}.txt"
 
 
-def _strip_html(html: str) -> str:
-    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
-    text = re.sub(r"(?s)<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def _fetch_url(url: str) -> str:
-    import httpx
+    from .web import fetch_article_text
 
-    r = httpx.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20, follow_redirects=True)
-    r.raise_for_status()
-    return _strip_html(r.text)
+    text = fetch_article_text(url, min_chars=1, timeout=20)
+    if not text:
+        raise ValueError(f"no text from {url}")
+    return text
 
 
 def fetch(symbol: str, fiscal_label: str = "", source: str | None = None) -> tuple[str, str]:

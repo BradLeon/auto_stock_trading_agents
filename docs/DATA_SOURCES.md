@@ -25,7 +25,8 @@ PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # 单个：<源
 | **consensus** 一致预期 | yfinance（无需 key） | 当季 EPS / 营收 一致预期（含 low/high）+ **分析师目标价**(mean/median/low/high/current) + **评级分布**(SB/B/H/S/SS 含近 4 月趋势) + **近 120 天升降级**(机构/评级/动作，最多 8 条) | → `pead_dossier.expectation_set` + prep 叙事/预期上下文 | Finnhub earnings 带预估、`/stock/recommendation`（免费）带评级，可交叉验证；Finnhub 目标价为付费端点 |
 | **runup** 抢跑/距高 | yfinance（无需 key） | 财报前 20 日相对 SMH/QQQ 超额收益、距 52w 高 | → `pead_dossier.market_setup` | 透支判断 |
 | **options** 期权 | **ThetaData 本地终端** → yfinance 兜底 | Expected Move、ATM IV、25Δ skew（BS 反解） | → `pead_dossier.market_setup` | ⚠️ 终端开着才准（IV≈真值）；终端没开走 yfinance 时 IV 退化，建议跑财报时开 `./scripts/start_thetadata.sh` |
-| **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 | → `pead_events`（去重日志） | 连续监控用；X/社媒见待接入 |
+| **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 + **LLM 分诊降噪**（Gemini Flash 打 materiality 分，噪音不进 LLM 上下文）+ **关键新闻正文增强**（≥0.65 分抓全文喂 monitor） | → `pead_events`（含 triage_score/category） | 连续监控用；X/社媒见待接入 |
+| **research** 订阅研报 | Gmail IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | 高质量 newsletter 全文（SemiAnalysis 等，付费文只有邮件里全）→ LLM 提取 per-ticker insight（**含二阶传导**：如 Meta 出租算力→利空 MU/TSM），universe = targets+signal_chain | → `research_articles`/`research_insights`；material insight 注入 `pead_events` 流入 dossier | `ats pead research`；高置信推飞书 |
 | **transcript** 电话会纪要 | Tavily（`TAVILY_API_KEY`）→ 手动落档兜底 | 财报电话会全文（搜 fool/investing 抓正文） | → `var/transcripts/` / dossier.actuals | FMP 也支持但需付费层（免费 402）；也可 `--transcript <链接/路径>` |
 | **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**（SEC，权威自动）+ **投资者 PPT**（Tavily，通用自动）+ 文件夹精选 | → score 的 actuals 抽取 | 文件夹 `信息源/<SYM>/` 有则优先用、自动补缺、不重复 |
 
@@ -52,7 +53,7 @@ PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # 单个：<源
 
 ## 存储机制
 
-- **Context Memory `var/ats.sqlite`**：`pead_dossier`（PEAD 活体档案：叙事/预期/期权/抢跑/信号链/实际/Scorecard/决策）、`pead_events`（新闻去重日志）、`reports`/`decisions`/`trades`/`performance`（日常组合循环）。
+- **Context Memory `var/ats.sqlite`**：`pead_dossier`（PEAD 活体档案：叙事/预期/期权/抢跑/信号链/实际/Scorecard/决策）、`pead_events`（新闻去重日志 + triage_score/triage_category 分诊结果）、`research_articles`/`research_insights`（newsletter 元数据 + 提取的 insight）、`reports`/`decisions`/`trades`/`performance`（日常组合循环）。
 - **`var/checkpoints.sqlite`**：LangGraph 暂停态（异步飞书审批跨进程 resume）。
 - **`var/transcripts/<SYM>_<fiscal>.txt`**：手动落档纪要；**`信息源/<SYM>/`**（`docs_root`）：官方 PDF。
 - **原始行情/基本面/宏观/期权/consensus 不单独落库**——每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。
@@ -60,4 +61,4 @@ PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # 单个：<源
 
 ## key 一览（`.env`）
 
-必填：`OPENAI_API_KEY`(OpenRouter)。已配：`FRED_API_KEY`、`FINNHUB_API_KEY`、`TAVILY_API_KEY`、`SEC_EDGAR_USER_AGENT`、`FMP_API_KEY`(付费纪要才用)、`FEISHU_BOT_WEBHOOK`+`FEISHU_APPROVE_*`。本地服务：ThetaData 终端（期权）。
+必填：`OPENAI_API_KEY`(OpenRouter)。已配：`FRED_API_KEY`、`FINNHUB_API_KEY`、`TAVILY_API_KEY`、`SEC_EDGAR_USER_AGENT`、`FMP_API_KEY`(付费纪要才用)、`FEISHU_BOT_WEBHOOK`+`FEISHU_APPROVE_*`。新增：`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`（newsletter IMAP，需 2FA+应用专用密码）。本地服务：ThetaData 终端（期权）。

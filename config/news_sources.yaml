@@ -1,12 +1,21 @@
 # News sources for the continuous PEAD monitor.
 
-# Curated RSS feeds (industry newsletters / research). Items are matched to a
-# ticker by keyword (see keywords_by_ticker) since RSS has no ticker field.
+# Curated RSS feeds (ticker-keyword matched). Items are matched to a ticker by
+# keyword (see keywords_by_ticker) since RSS has no ticker field.
+# NOTE: "read everything" research sources belong in `newsletters:` below, NOT here.
 rss:
-  - name: SemiAnalysis
-    url: https://www.semianalysis.com/feed
   - name: SECEdgar8K-Coherent      # example company-specific feed (optional)
     url: https://www.coherent.com/rss   # placeholder; replace with a real feed
+
+# High-signal subscribed sources — every article is read in full and mined for
+# per-ticker insights (incl. second-order read-throughs), no keyword filter.
+newsletters:
+  imap:                            # Gmail IMAP (GMAIL_ADDRESS/GMAIL_APP_PASSWORD in .env)
+    folder: INBOX
+    senders:                       # matched against the From header
+      - {name: SemiAnalysis, email: semianalysis@substack.com}
+  research_feeds:                  # RSS: free posts carry full text
+    - {name: SemiAnalysis, url: https://semianalysis.com/feed/}
 
 # X / social accounts to track (X API is restricted — adapter is a stub for now).
 x_accounts:

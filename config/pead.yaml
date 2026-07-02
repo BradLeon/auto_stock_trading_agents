@@ -7,6 +7,21 @@ monitor:
   lookback_days: 7
   push_context_updates: false    # switch: push material context changes to Feishu (info only)
   materiality_threshold: 0.7     # >= this AND push on -> Feishu info card
+  triage:                        # cheap-LLM news triage (news_triage role)
+    enabled: true
+    min_score: 0.35              # below: stored but excluded from the manager-LLM context
+    fulltext_score: 0.65         # at/above: fetch the article body for depth
+    max_fulltext: 4              # bodies per run (latency/cost bound)
+    fulltext_chars: 12000
+
+# Newsletter research channel (Gmail IMAP + Substack RSS -> per-ticker insights).
+research:
+  enabled: true
+  lookback_days: 2
+  max_articles_per_run: 8
+  article_chars: 40000           # per-article cap fed to the extraction LLM
+  min_confidence_event: 0.6      # >= this -> insight becomes a pead_events entry
+  push_threshold: 0.8            # >= this -> immediate Feishu info push
 
 schedule:
   prep_days_before: 3            # run/refresh prep when earnings is within N days

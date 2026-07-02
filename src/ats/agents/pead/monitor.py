@@ -27,8 +27,8 @@ def _now() -> datetime:
 
 
 def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> ContextUpdate:
-    """Fetch new events, fold them into the dossier, return the ContextUpdate."""
-    from ...config import load_pead_config
+    """Fetch new events, triage, fold the material ones into the dossier."""
+    from ...config import load_pead_config, load_pead_global
     from ...data import news as news_src
     from ...memory import get_store
 
@@ -52,19 +52,53 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
         _apply(store, cfg, dossier, update)
         return update
 
-    update = _llm_update(symbol, cfg, dossier, fresh)
+    # Cheap-LLM triage: score, persist, filter noise, fetch bodies of hot items.
+    thesis = (dossier.expectation_set.narrative
+              if dossier and dossier.expectation_set else cfg.narrative_seed)
+    material, articles = fresh, []
+    tcfg = load_pead_global()["monitor"]["triage"]
+    if tcfg["enabled"]:
+        from . import triage
+
+        scores = triage.score_items(symbol, thesis, fresh)
+        store.set_triage(scores)
+        if scores:
+            # Unscored items (triage miss) pass through; scored noise is dropped.
+            material = [i for i in fresh
+                        if scores.get(i.id, (1.0, ""))[0] >= tcfg["min_score"]]
+            material.sort(key=lambda i: scores.get(i.id, (1.0, ""))[0], reverse=True)
+            hot = [i for i in material
+                   if scores.get(i.id, (0.0, ""))[0] >= tcfg["fulltext_score"]]
+            articles = [(it, body, scores[it.id][0]) for it, body in
+                        triage.enrich(hot, max_items=tcfg["max_fulltext"],
+                                      max_chars=tcfg["fulltext_chars"])]
+            log.info("monitor %s: triage kept %d/%d, %d bodies fetched",
+                     symbol, len(material), len(fresh), len(articles))
+
+    if not material:
+        update = ContextUpdate(symbol=symbol, as_of=_now(), materiality=0.0,
+                               event_summary=f"{len(fresh)} new events, all triaged as noise")
+        _apply(store, cfg, dossier, update)
+        return update
+
+    update = _llm_update(symbol, cfg, dossier, material, articles)
     _apply(store, cfg, dossier, update)
     return update
 
 
-def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem]) -> ContextUpdate:
+def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem],
+                articles: list[tuple[NewsItem, str, float]] = ()) -> ContextUpdate:
     thesis = (dossier.expectation_set.narrative
               if dossier and dossier.expectation_set else cfg.narrative_seed)
     events_txt = "\n".join(f"  - {e.one_line()}" for e in fresh[:MAX_EVENTS_IN_CONTEXT])
+    articles_txt = "\n\n".join(
+        f"=== [{it.published_at:%Y-%m-%d} {it.source}] {it.headline} (materiality {score:.2f}) ===\n{body}"
+        for it, body, score in articles)
     ctx = (
         f"Living dossier for {symbol}. Current thesis:\n{thesis}\n\n"
         f"New events since last update (target + supply-chain peers):\n{events_txt}\n\n"
-        "Decide materiality (0=noise, 1=thesis-changing), summarize what's genuinely new, "
+        + (f"Full text of the most material articles:\n{articles_txt}\n\n" if articles_txt else "")
+        + "Decide materiality (0=noise, 1=thesis-changing), summarize what's genuinely new, "
         "and state any change to the thesis or to specific scorecard expectations. Most days "
         "are low-materiality noise — say so."
     )

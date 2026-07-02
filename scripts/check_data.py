@@ -26,6 +26,7 @@ from ats.data import (
     market_data,
     news,
     options,
+    research,
     runup,
     transcript,
 )
@@ -90,6 +91,18 @@ def news_():
     return len(items) > 0, f"{len(items)} items; latest: " + (items[0].headline[:60] if items else "-"), items
 
 
+def research_():
+    from ats.config import get_config
+
+    arts = research.fetch_articles(NOW - timedelta(days=3))
+    creds = "yes" if get_config().secrets.gmail_address else "NO — set GMAIL_ADDRESS/GMAIL_APP_PASSWORD"
+    latest = f"{arts[0].source}: {arts[0].title[:50]}" if arts else "-"
+    return len(arts) > 0, f"{len(arts)} articles (imap creds={creds}); latest: {latest}", \
+        [{"id": a.id, "source": a.source, "title": a.title, "url": a.url,
+          "published_at": a.published_at, "chars": len(a.body), "body": a.body[:2000]}
+         for a in arts]
+
+
 def trans():
     text, src = transcript.fetch(SYM, "Q FY2026")
     return bool(text), f"src={src} chars={len(text)}", (text, src)
@@ -110,6 +123,7 @@ CHECKS = {
     "consensus": ("yfinance", cons),
     "runup": ("yfinance", run),
     "news": ("Finnhub + RSS", news_),
+    "research": ("Gmail IMAP + Substack RSS", research_),
     "transcript": ("Tavily/FMP/manual", trans),
     "documents": ("SEC 8-K + folder PDFs", docs),
 }

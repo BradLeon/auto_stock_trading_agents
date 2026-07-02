@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS pead_events (
     id TEXT PRIMARY KEY, symbol TEXT, published_at TEXT, source TEXT,
     headline TEXT, url TEXT, processed INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS research_articles (
+    id TEXT PRIMARY KEY, source TEXT, title TEXT, url TEXT,
+    published_at TEXT, fetched_at TEXT, chars INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS research_insights (
+    article_id TEXT, ticker TEXT, direction TEXT, impact_path TEXT,
+    summary TEXT, evidence_quote TEXT, confidence REAL, created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
@@ -58,6 +67,15 @@ class TradingMemory:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive column migrations (kept out of _SCHEMA so old DBs get them too)."""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(pead_events)")}
+        for ddl in ("triage_score REAL", "triage_category TEXT"):
+            if ddl.split()[0] not in cols:
+                self.conn.execute(f"ALTER TABLE pead_events ADD COLUMN {ddl}")
+        self.conn.commit()
 
     # --- writes ---------------------------------------------------------- #
     def save_cycle(self, state: "TradingState", performance: PerformanceRecord) -> None:
@@ -160,7 +178,11 @@ class TradingMemory:
         existing = {r["id"] for r in self.conn.execute(
             "SELECT id FROM pead_events WHERE id IN (%s)" % ",".join("?" * len(items)),
             [i.id for i in items]).fetchall()}
-        fresh = [i for i in items if i.id not in existing]
+        fresh = []
+        for i in items:                     # also dedup within the batch itself
+            if i.id not in existing:
+                existing.add(i.id)
+                fresh.append(i)
         self.conn.executemany(
             "INSERT OR IGNORE INTO pead_events (id,symbol,published_at,source,headline,url) "
             "VALUES (?,?,?,?,?,?)",
@@ -177,6 +199,51 @@ class TradingMemory:
     def count_events(self, symbol: str) -> int:
         return self.conn.execute("SELECT COUNT(*) c FROM pead_events WHERE symbol = ?",
                                  (symbol,)).fetchone()["c"]
+
+    def set_triage(self, scores: dict[str, tuple[float, str]]) -> None:
+        """Persist triage results: {event_id: (materiality, category)}."""
+        if not scores:
+            return
+        self.conn.executemany(
+            "UPDATE pead_events SET triage_score = ?, triage_category = ? WHERE id = ?",
+            [(score, cat, eid) for eid, (score, cat) in scores.items()])
+        self.conn.commit()
+
+    # --- research (newsletters) ------------------------------------------ #
+    def article_seen(self, article_id: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM research_articles WHERE id = ?",
+                                 (article_id,)).fetchone() is not None
+
+    def save_article(self, art) -> None:
+        """Store article metadata only (bodies are not persisted)."""
+        from datetime import datetime, timezone
+
+        self.conn.execute(
+            "INSERT OR IGNORE INTO research_articles VALUES (?,?,?,?,?,?,?)",
+            (art.id, art.source, art.title, art.url, art.published_at.isoformat(),
+             datetime.now(timezone.utc).isoformat(), len(art.body)))
+        self.conn.commit()
+
+    def save_insights(self, article_id: str, insights) -> None:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.executemany(
+            "INSERT INTO research_insights VALUES (?,?,?,?,?,?,?,?)",
+            [(article_id, i.ticker, i.direction, i.impact_path, i.summary,
+              i.evidence_quote, i.confidence, now) for i in insights])
+        self.conn.commit()
+
+    def recent_insights(self, ticker: str | None = None, limit: int = 20) -> list[dict]:
+        if ticker:
+            rows = self.conn.execute(
+                "SELECT * FROM research_insights WHERE ticker = ? ORDER BY rowid DESC LIMIT ?",
+                (ticker, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM research_insights ORDER BY rowid DESC LIMIT ?",
+                (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         self.conn.close()

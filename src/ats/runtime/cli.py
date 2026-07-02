@@ -198,6 +198,20 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
         run_pead_monitor(sym, use_llm=use_llm)
 
 
+def run_pead_research(*, use_llm: bool = True) -> list:
+    """One research pass: ingest newsletters, extract per-ticker insights."""
+    from ..agents.pead import research
+
+    insights = research.run(use_llm=use_llm)
+    if not insights:
+        print("📰 research — no new articles / no insights")
+        return []
+    print(f"📰 research — {len(insights)} insights:")
+    for i in insights:
+        print(f"   [{i.direction}/{i.impact_path}] {i.ticker} ({i.confidence:.2f}): {i.summary}")
+    return insights
+
+
 def pead_show(symbol: str) -> int:
     from ..memory import get_store
 
@@ -344,9 +358,10 @@ def main(argv: list[str] | None = None) -> int:
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
-    pe = sub.add_parser("pead", help="PEAD earnings workflow (prep / score / show / monitor / watch)")
-    pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch"])
-    pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch`)")
+    pe = sub.add_parser("pead",
+                        help="PEAD earnings workflow (prep / score / show / monitor / watch / research)")
+    pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research"])
+    pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch` / `research`)")
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
@@ -378,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pead":
         if args.action == "watch":
             run_pead_watch(use_llm=not args.no_llm)
+            return 0
+        if args.action == "research":
+            run_pead_research(use_llm=not args.no_llm)
             return 0
         if not args.symbol:
             parser.error("pead %s requires a symbol" % args.action)

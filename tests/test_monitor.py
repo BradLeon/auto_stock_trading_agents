@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from ats.agents.pead import monitor
+from ats.agents.pead import monitor, triage
 from ats.agents.pead.outputs import ContextUpdateView
 from ats.data import news as news_src
 from ats.memory import get_store
@@ -36,6 +36,7 @@ def test_monitor_dedups_on_second_run(monkeypatch):
 
 def test_monitor_llm_material_update_appends_to_narrative(monkeypatch):
     monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(triage, "score_items", lambda *a, **k: {})  # triage miss -> pass-through
     view = ContextUpdateView(materiality=0.8, event_summary="hyperscaler capex up",
                              narrative_delta="upstream CapEx raised → optical demand up",
                              expectation_changes=[])

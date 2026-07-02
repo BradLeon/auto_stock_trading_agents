@@ -89,3 +89,29 @@ class ContextUpdateView(BaseModel):
     event_summary: str = Field(default="", description="what's genuinely new since last update")
     narrative_delta: str = Field(default="", description="how the thesis changes; empty if nothing")
     expectation_changes: list[ExpectationChangeView] = Field(default_factory=list)
+
+
+class TriageItemView(BaseModel):
+    idx: int = Field(description="echo the input item's idx exactly")
+    materiality: float = Field(default=0.0, description="0=noise .. 1=thesis-critical")
+    category: str = ""
+    reason: str = ""
+
+
+class TriageBatchView(BaseModel):
+    items: list[TriageItemView] = Field(default_factory=list)
+
+
+class InsightItemView(BaseModel):
+    ticker: str
+    direction: str = Field(default="neutral", description="bullish | bearish | neutral")
+    impact_path: str = Field(default="direct",
+                             description="direct | supply_chain | competitive | demand | macro")
+    summary: str = Field(default="", description="implication for THIS ticker, 1-2 sentences")
+    evidence_quote: str = Field(default="", description="short verbatim quote from the article")
+    confidence: float = Field(default=0.0, description="0-1")
+
+
+class InsightBatchView(BaseModel):
+    insights: list[InsightItemView] = Field(default_factory=list)
+    article_gist: str = Field(default="", description="one sentence: what the article is about")

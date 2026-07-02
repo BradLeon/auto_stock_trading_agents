@@ -75,7 +75,7 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
     """Per-target: monitor (context update), plus prep/score by earnings proximity."""
     from ..config import load_pead_global
     from ..data import earnings_calendar
-    from .cli import run_pead, run_pead_monitor
+    from .cli import run_pead, run_pead_monitor, run_pead_research
 
     g = load_pead_global()
     if not g.get("monitor", {}).get("enabled", True):
@@ -83,6 +83,13 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
     if not is_trading_session():
         log.info("not a trading session; skipping PEAD daily")
         return {}
+
+    # Newsletter research first, so injected insight-events reach today's monitors.
+    if g.get("research", {}).get("enabled", True):
+        try:
+            run_pead_research(use_llm=use_llm)
+        except Exception as exc:  # noqa: BLE001 - research must not break the monitors
+            log.warning("PEAD research failed: %s", exc)
 
     today = _today()
     ran: dict[str, list[str]] = {}

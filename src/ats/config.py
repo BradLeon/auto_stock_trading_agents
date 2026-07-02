@@ -45,6 +45,10 @@ class Secrets(BaseSettings):
     finnhub_api_key: str = ""
     fmp_api_key: str = ""          # FinancialModelingPrep — earnings-call transcripts
     tavily_api_key: str = ""
+    gmail_address: str = ""            # newsletter inbox (IMAP enabled, 2FA + app password)
+    gmail_app_password: str = ""       # https://myaccount.google.com/apppasswords
+    gmail_imap_host: str = "imap.gmail.com"
+    gmail_proxy: str = ""              # e.g. socks5://127.0.0.1:7897; default: proxy env vars
     sec_edgar_user_agent: str = "ats-bot example@example.com"
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
@@ -185,6 +189,21 @@ def load_pead_global() -> dict:
     cfg["monitor"].setdefault("lookback_days", 7)
     cfg["monitor"].setdefault("push_context_updates", False)
     cfg["monitor"].setdefault("materiality_threshold", 0.7)
+    cfg["monitor"].setdefault("triage", {})
+    t = cfg["monitor"]["triage"]
+    t.setdefault("enabled", True)
+    t.setdefault("min_score", 0.35)        # below: stored but kept out of the LLM context
+    t.setdefault("fulltext_score", 0.65)   # at/above: fetch the article body
+    t.setdefault("max_fulltext", 4)
+    t.setdefault("fulltext_chars", 12000)
+    cfg.setdefault("research", {})
+    r = cfg["research"]
+    r.setdefault("enabled", True)
+    r.setdefault("lookback_days", 2)
+    r.setdefault("max_articles_per_run", 8)
+    r.setdefault("article_chars", 40000)
+    r.setdefault("min_confidence_event", 0.6)   # >= this -> synthetic event into pead_events
+    r.setdefault("push_threshold", 0.8)         # >= this -> immediate Feishu push
     cfg.setdefault("schedule", {})
     cfg["schedule"].setdefault("prep_days_before", 3)
     cfg["schedule"].setdefault("score_after", True)

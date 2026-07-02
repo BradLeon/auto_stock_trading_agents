@@ -1,7 +1,7 @@
 # 数据源状态（Data Sources）
 
 PEAD 基本面分析 + 交易 Agent 的数据源清单：已接入并测试通过 vs 待接入。
-最后更新：2026-06-17。
+最后更新：2026-07-02。
 
 ## 如何测试
 
@@ -22,14 +22,14 @@ PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # 单个：<源
 | **fundamentals** 基本面 | yfinance + SEC EDGAR（`SEC_EDGAR_USER_AGENT`） | 估值比率 + **三大报表科目**（营收/毛利率/营业利润率/净利/EPS/CapEx/FCF/折旧/负债）含 **QoQ+YoY** + 近期 SEC filing 链接 | → `pead_dossier` | 报表来自 yfinance 季度表 |
 | **macro** 宏观 | FRED（`FRED_API_KEY`）+ yfinance + CNN | UST10Y/2Y、Fed Funds、CPI YoY、失业率、非农、VIX、SPX/NDX、**Fear&Greed** | → 宏观分析师 | F&G 用完整浏览器 UA 绕过 418 |
 | **earnings** 财报日历 | Finnhub（`FINNHUB_API_KEY`）→ yfinance 兜底 | 下次财报日 + **盘前/盘后(amc/bmo)** + EPS/营收预估 | → 调度 + 期权到期选择 | 券商级（聚合 IR 公告），动态无人工 |
-| **consensus** 一致预期 | yfinance（无需 key） | 当季 EPS / 营收 一致预期（含 low/high） | → `pead_dossier.expectation_set` | Finnhub earnings 也带预估，可作交叉验证 |
+| **consensus** 一致预期 | yfinance（无需 key） | 当季 EPS / 营收 一致预期（含 low/high）+ **分析师目标价**(mean/median/low/high/current) + **评级分布**(SB/B/H/S/SS 含近 4 月趋势) + **近 120 天升降级**(机构/评级/动作，最多 8 条) | → `pead_dossier.expectation_set` + prep 叙事/预期上下文 | Finnhub earnings 带预估、`/stock/recommendation`（免费）带评级，可交叉验证；Finnhub 目标价为付费端点 |
 | **runup** 抢跑/距高 | yfinance（无需 key） | 财报前 20 日相对 SMH/QQQ 超额收益、距 52w 高 | → `pead_dossier.market_setup` | 透支判断 |
 | **options** 期权 | **ThetaData 本地终端** → yfinance 兜底 | Expected Move、ATM IV、25Δ skew（BS 反解） | → `pead_dossier.market_setup` | ⚠️ 终端开着才准（IV≈真值）；终端没开走 yfinance 时 IV 退化，建议跑财报时开 `./scripts/start_thetadata.sh` |
 | **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 | → `pead_events`（去重日志） | 连续监控用；X/社媒见待接入 |
 | **transcript** 电话会纪要 | Tavily（`TAVILY_API_KEY`）→ 手动落档兜底 | 财报电话会全文（搜 fool/investing 抓正文） | → `var/transcripts/` / dossier.actuals | FMP 也支持但需付费层（免费 402）；也可 `--transcript <链接/路径>` |
 | **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**（SEC，权威自动）+ **投资者 PPT**（Tavily，通用自动）+ 文件夹精选 | → score 的 actuals 抽取 | 文件夹 `信息源/<SYM>/` 有则优先用、自动补缺、不重复 |
 
-**已验证（COHR 实测）**：market(251 bar)、fundamentals(Rev 1,806M +20.5%YoY/CapEx/FCF/margins)、macro(F&G=40)、earnings(2026-08-11 amc)、consensus(EPS 1.62)、runup(vsSMH -7%)、options(ThetaData EM 35%/IV 101%)、news(84条)、transcript(Tavily 61K字)、documents(SEC 58K + deck 16K)。
+**已验证（COHR 实测）**：market(251 bar)、fundamentals(Rev 1,806M +20.5%YoY/CapEx/FCF/margins)、macro(F&G=40)、earnings(2026-08-11 amc)、consensus(EPS 1.62 / PT 230~384~465 / 评级 4/13/4/0/0 / 升降级 8 条)、runup(vsSMH -7%)、options(ThetaData EM 35%/IV 101%)、news(84条)、transcript(Tavily 61K字)、documents(SEC 58K + deck 16K)。
 
 ---
 
@@ -41,7 +41,6 @@ PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # 单个：<源
 | **行业景气 / 产业链定量** | 无（行业分析师靠通用知识） | 渠道检查、价格、产能利用率等分部链路定量 | 🟡 中 |
 | **X / 社媒**（Trump/Musk/Huang…） | 仅 stub（X API 受限/付费） | 重点账号实时信号 | 🟡 中（需选方案/付费） |
 | **options IV（yfinance 兜底）改 BS 反解** | 兜底 IV 退化（≈0.2%） | 终端没开时也能拿到像样 IV/skew | 🟡 中（小改动） |
-| **分析师评级 / 目标价** | 弱（yfinance 部分，无专源） | 评级变动、目标价分布（PEAD 透支判断） | 🟢 低 |
 | **Reddit 情绪** | 未实现（`.env` 有 key 槽） | 散户情绪 | 🟢 低 |
 | **内部人 / 机构 13F / 做空比例** | 未实现 | 持仓/做空结构 | 🟢 低 |
 | **Day1-2 财报后漂移跟踪** | 未实现 | 记录财报后实际股价反应，校准 Scorecard 阈值 | 🟢 低（决策不依赖） |

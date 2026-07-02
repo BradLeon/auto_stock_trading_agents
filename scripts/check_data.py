@@ -69,7 +69,13 @@ def earn():
 
 def cons():
     c = consensus.fetch(SYM)
-    return bool(c.get("eps") or c.get("revenue")), f"EPS={c.get('eps')} Rev={c.get('revenue')}", c
+    ratings = (f"{c.get('rating_strong_buy')}/{c.get('rating_buy')}/{c.get('rating_hold')}/"
+               f"{c.get('rating_sell')}/{c.get('rating_strong_sell')}")
+    ok = bool((c.get("eps") or c.get("revenue")) and c.get("target_mean") is not None)
+    return ok, \
+        (f"EPS={c.get('eps')} Rev={c.get('revenue')} "
+         f"PT={c.get('target_low')}~{c.get('target_mean')}~{c.get('target_high')} "
+         f"SB/B/H/S/SS={ratings} U/D(120d)={len(c.get('upgrades_downgrades') or [])}"), c
 
 
 def run():

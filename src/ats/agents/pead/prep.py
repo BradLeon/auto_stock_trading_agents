@@ -12,12 +12,32 @@ from .outputs import ExpectationsView, NarrativeView, SignalChainView
 log = logging.getLogger("ats.agents.pead")
 
 
+def _consensus_text(consensus: dict) -> str:
+    """Compact consensus block: estimates + price targets + ratings + recent grade actions."""
+    lines = [f"Consensus: EPS {consensus.get('eps')}, Revenue {consensus.get('revenue')}"]
+    if consensus.get("target_mean") is not None:
+        pt = (f"Price target: mean {consensus.get('target_mean')} "
+              f"({consensus.get('target_low')}–{consensus.get('target_high')})")
+        if consensus.get("target_current") is not None:
+            pt += f", current price {consensus.get('target_current')}"
+        lines.append(pt)
+    if consensus.get("rating_buy") is not None or consensus.get("rating_strong_buy") is not None:
+        lines.append(
+            f"Ratings (0m): SB {consensus.get('rating_strong_buy')} / "
+            f"B {consensus.get('rating_buy')} / H {consensus.get('rating_hold')} / "
+            f"S {consensus.get('rating_sell')} / SS {consensus.get('rating_strong_sell')}")
+    for g in (consensus.get("upgrades_downgrades") or [])[:3]:
+        lines.append(f"  {g.get('date')} {g.get('firm')}: "
+                     f"{g.get('from_grade') or '-'} -> {g.get('to_grade')} ({g.get('action')})")
+    return "\n".join(lines)
+
+
 def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict) -> NarrativeView:
     ctx = (
         f"Build the pre-earnings core narrative for {config.symbol} ({config.fiscal_label}).\n"
         f"Seed narrative: {config.narrative_seed or '(none)'}\n"
         f"Fundamentals:\n{fundamentals_text}\n"
-        f"Consensus: EPS {consensus.get('eps')}, Revenue {consensus.get('revenue')}\n\n"
+        f"{_consensus_text(consensus)}\n\n"
         "Produce the core thesis, an ordered list of what matters most THIS quarter "
         "(focus_ranking), and a valuation read (PE / forward PE / ceiling-floor)."
     )
@@ -35,7 +55,7 @@ def expectations(config: PeadConfig, narrative_view: NarrativeView,
         f"Set the conservative/neutral/optimistic expectations for {config.symbol} "
         f"({config.fiscal_label}) for EACH scorecard dimension below.\n"
         f"Narrative: {narrative_view.narrative}\n"
-        f"Consensus: EPS {consensus.get('eps')}, Revenue {consensus.get('revenue')}\n"
+        f"{_consensus_text(consensus)}\n"
         f"Fundamentals:\n{fundamentals_text}\n\n"
         f"Scorecard dimensions:\n{dims}\n\n"
         "For each dimension output one row: dim_key (exactly as above), metric, and the "

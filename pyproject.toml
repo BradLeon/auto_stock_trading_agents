@@ -24,6 +24,7 @@ dependencies = [
 # Installed as phases land; kept optional so Phase 1/2 stay lightweight.
 data = [
     "yfinance>=0.2.40",
+    "curl_cffi>=0.15",   # browser TLS impersonation for yfinance (avoids Yahoo rate-limits)
     "edgartools>=3.0",
     "fredapi>=0.5",
     "praw>=7.7",

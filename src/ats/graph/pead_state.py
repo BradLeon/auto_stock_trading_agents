@@ -38,6 +38,7 @@ class PeadState(BaseModel):
     fundamentals_text: str = ""
     consensus: dict = Field(default_factory=dict)
     peer_rows: list[dict] = Field(default_factory=list)
+    industry_context: str = ""      # curated sector background (Obsidian) for prep thesis
     transcript_text: str = ""
     transcript_resolved_source: str = ""
     documents_text: str = ""        # official docs (SEC 8-K release + investor decks)

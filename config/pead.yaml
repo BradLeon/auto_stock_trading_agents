@@ -31,3 +31,16 @@ schedule:
 # (e.g. investor presentations). The earnings release auto-fetches from SEC 8-K.
 # Override with env ATS_DOCS_ROOT.
 docs_root: /Users/liuchao/Documents/Obsidian Vault/信息源
+
+# Curated industry / supply-chain knowledge (Obsidian notes) injected as stable
+# background into prep's thesis building. All PEAD targets share one AI-hardware
+# sector brief for now. Missing root -> feature silently skipped.
+industry_notes:
+  root: /Users/liuchao/Documents/Obsidian Vault/Notion_Sync 1/半导体产业研究合集
+  files:              # whitelist; skip pure-101 background. Empty list = all *.md.
+    - AI半导体产业链分析上篇-供应链全貌概览.md
+    - AI半导体产业链分析中篇-利润去哪了？.md
+    - AI半导体产业链分析-下篇-周期股与护城河.md
+    - AI Capex 的另一半——数据中心基建产业链解读.md
+    - L4-L6层公司，当前估值分析(4.14).md
+  max_chars_per_file: 12000

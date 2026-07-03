@@ -91,11 +91,12 @@ def prep_fetch(state: PeadState) -> dict:
         return {"fundamentals_text": "(offline)", "consensus": {}, "peer_rows": []}
 
     from ..data import consensus as consensus_src, earnings_calendar, fundamentals as fund_src
-    from ..data import market_data, options as opt_src, runup as runup_src
+    from ..data import industry, market_data, options as opt_src, runup as runup_src
 
     fd = fund_src.fetch(state.symbol)
     out["fundamentals_text"] = fd.to_context()
     out["consensus"] = consensus_src.fetch(state.symbol)
+    out["industry_context"] = industry.as_context(industry.fetch_notes())
 
     ru = runup_src.compute(state.symbol, cfg.sector_etf, cfg.benchmark)
     # Pass the earnings date so options picks the post-earnings expiration (the one
@@ -134,7 +135,8 @@ def prep_narrative(state: PeadState) -> dict:
             consensus_eps=state.consensus.get("eps"),
             consensus_revenue=state.consensus.get("revenue"))}
     nv = prep_agents.narrative(cfg, state.fundamentals_text, state.consensus,
-                               prior_narrative=state.prior_narrative)
+                               prior_narrative=state.prior_narrative,
+                               industry_context=state.industry_context)
     es = ExpectationSet(
         symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
         narrative=nv.narrative, focus_ranking=nv.focus_ranking, valuation=nv.valuation,

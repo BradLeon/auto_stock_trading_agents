@@ -33,7 +33,7 @@ def _consensus_text(consensus: dict) -> str:
 
 
 def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
-              prior_narrative: str = "") -> NarrativeView:
+              prior_narrative: str = "", industry_context: str = "") -> NarrativeView:
     # Prefer the living thesis accumulated by the monitor between earnings; fall
     # back to the static seed only on the first-ever prep (nothing accumulated yet).
     if prior_narrative.strip():
@@ -41,14 +41,24 @@ def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
                 f"this, do NOT discard the developments already captured here:\n{prior_narrative}\n")
     else:
         base = f"Seed narrative: {config.narrative_seed or '(none)'}\n"
+    # Stable sector/supply-chain background (Obsidian). Reference only — use it to
+    # judge positioning, NOT to recap the industry.
+    industry_block = ""
+    if industry_context.strip():
+        industry_block = (
+            "\nIndustry / supply-chain background (STABLE reference, may be dated — use it to judge "
+            f"{config.symbol}'s position/moat/cycle-stage/pricing-power in the chain; do NOT recap "
+            f"the industry, only extract what bears on THIS quarter's thesis):\n{industry_context}\n")
     ctx = (
         f"Build the pre-earnings core narrative for {config.symbol} ({config.fiscal_label}).\n"
         f"{base}"
         f"Fundamentals:\n{fundamentals_text}\n"
-        f"{_consensus_text(consensus)}\n\n"
+        f"{_consensus_text(consensus)}\n"
+        f"{industry_block}\n"
         "Produce the core thesis (fold in the monitored developments above and any per-dimension "
-        "expectation shifts they noted), an ordered list of what matters most THIS quarter "
-        "(focus_ranking), and a valuation read (PE / forward PE / ceiling-floor)."
+        "expectation shifts they noted; ground the company's positioning in the industry background "
+        "if provided), an ordered list of what matters most THIS quarter (focus_ranking), and a "
+        "valuation read (PE / forward PE / ceiling-floor)."
     )
     try:
         return run_structured("manager", NarrativeView, ctx, skill_slug="pead-narrative")

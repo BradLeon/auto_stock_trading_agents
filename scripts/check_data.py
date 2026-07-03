@@ -27,6 +27,7 @@ from ats.data import (
     documents,
     earnings_calendar,
     fundamentals,
+    industry,
     macro,
     market_data,
     news,
@@ -152,6 +153,14 @@ def insights_():
     return n > 0, f"{len(out)} articles → {n} insights extracted", out
 
 
+def industry_():
+    notes = industry.fetch_notes()
+    total = sum(len(t) for _, t in notes)
+    listing = "; ".join(f"{n}({len(t)//1000}k)" for n, t in notes) or "-"
+    return len(notes) > 0, f"{len(notes)} notes, {total//1000}k chars: {listing}", \
+        [{"name": n, "chars": len(t), "text": t} for n, t in notes]
+
+
 def trans():
     text, src = transcript.fetch(SYM, "Q FY2026")
     return bool(text), f"src={src} chars={len(text)}", (text, src)
@@ -175,6 +184,7 @@ CHECKS = {
     "research": ("Gmail IMAP + Substack RSS", research_),
     "transcript": ("Tavily/FMP/manual", trans),
     "documents": ("SEC 8-K + folder PDFs", docs),
+    "industry": ("Obsidian 行业合集", industry_),
 }
 
 # LLM-inclusive verifications (cost $): run by name only, excluded from the all-pass.

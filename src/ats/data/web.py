@@ -16,8 +16,11 @@ _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 
 
 def strip_html(html: str) -> str:
+    import html as html_mod
+
     text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
     text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = html_mod.unescape(text)
     return re.sub(r"\s+", " ", text).strip()
 
 

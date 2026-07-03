@@ -164,7 +164,7 @@ def _decode_header(raw: str) -> str:
             parts.append(chunk.decode(charset or "utf-8", errors="replace"))
         else:
             parts.append(chunk)
-    return "".join(parts).strip()
+    return " ".join("".join(parts).split())   # collapse header folding whitespace
 
 
 def _extract_body(msg) -> tuple[str, str]:

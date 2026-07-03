@@ -1,7 +1,12 @@
 """Probe each PEAD data source, print a status line, and DUMP the full result.
 
-    PYTHONPATH=src .venv/bin/python scripts/check_data.py            # all sources
+    PYTHONPATH=src .venv/bin/python scripts/check_data.py            # all sources (no LLM)
     PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # one source
+    PYTHONPATH=src .venv/bin/python scripts/check_data.py triage COHR    # channel-1 news scoring (LLM)
+    PYTHONPATH=src .venv/bin/python scripts/check_data.py insights COHR  # channel-2 insights (LLM)
+
+LLM-inclusive checks (triage/insights) are run by name only — excluded from the
+no-arg all-pass so a bare run never spends on the LLM.
 
 Each source's full response is written to var/data_dumps/<source>_<SYM>.json (or
 .txt for the transcript) so you can inspect everything — `open var/data_dumps/`.
@@ -103,6 +108,50 @@ def research_():
          for a in arts]
 
 
+def triage_():
+    """Channel 1: fetch news, flash-score materiality, show kept vs dropped."""
+    from ats.agents.pead import triage
+    from ats.config import load_pead_config, load_pead_global
+    from ats.memory import get_store
+
+    cfg = load_pead_config(SYM)
+    dossier = get_store().get_dossier(SYM, cfg.fiscal_label)
+    thesis = (dossier.expectation_set.narrative if dossier and dossier.expectation_set
+              else cfg.narrative_seed)
+    items = news.fetch_news(SYM, NOW - timedelta(days=14))
+    scores = triage.score_items(SYM, thesis, items)
+    tcfg = load_pead_global()["monitor"]["triage"]
+    rows = []
+    for it in items:
+        sc, cat = scores.get(it.id, (None, ""))
+        rows.append({"score": sc, "category": cat,
+                     "kept": sc is None or sc >= tcfg["min_score"],
+                     "source": it.source, "headline": it.headline, "url": it.url})
+    rows.sort(key=lambda r: r["score"] if r["score"] is not None else -1, reverse=True)
+    kept = sum(1 for r in rows if r["kept"])
+    return bool(scores), \
+        f"{len(items)} items scored → {kept} kept (≥{tcfg['min_score']}), {len(items)-kept} dropped", rows
+
+
+def insights_():
+    """Channel 2: fetch newsletters + extract per-ticker insights (read-only, no persist)."""
+    from ats.agents.pead import research as ra
+    from ats.config import load_pead_global
+
+    arts = research.fetch_articles(NOW - timedelta(days=7))
+    if not arts:
+        return False, "0 newsletter articles in inbox (need a matching sender; see senders config)", []
+    card, mapping = ra._build_universe(load_pead_global().get("targets", []))
+    out = []
+    for art in arts[:5]:
+        ins = ra._extract(art, card, set(mapping), 40000)
+        out.append({"article": {"source": art.source, "title": art.title, "url": art.url,
+                                "chars": len(art.body)},
+                    "insights": [i.model_dump(mode="json") for i in ins]})
+    n = sum(len(o["insights"]) for o in out)
+    return n > 0, f"{len(out)} articles → {n} insights extracted", out
+
+
 def trans():
     text, src = transcript.fetch(SYM, "Q FY2026")
     return bool(text), f"src={src} chars={len(text)}", (text, src)
@@ -128,6 +177,14 @@ CHECKS = {
     "documents": ("SEC 8-K + folder PDFs", docs),
 }
 
+# LLM-inclusive verifications (cost $): run by name only, excluded from the all-pass.
+#   triage   = channel-1 output (news materiality scores, kept vs dropped)
+#   insights = channel-2 output (per-ticker insights extracted from newsletters)
+LLM_CHECKS = {
+    "triage": ("news_triage (Gemini Flash)", triage_),
+    "insights": ("research_extract (Opus)", insights_),
+}
+
 
 def _dump(name: str, obj) -> Path:
     DUMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -150,7 +207,11 @@ def _dump(name: str, obj) -> Path:
 
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else None
-    items = {only: CHECKS[only]} if only in CHECKS else CHECKS
+    registry = {**CHECKS, **LLM_CHECKS}
+    if only in registry:
+        items = {only: registry[only]}       # named check (incl. LLM-only ones)
+    else:
+        items = CHECKS                        # all-pass excludes LLM checks (cost $)
     print(f"Testing data sources for {SYM} (full results -> var/data_dumps/):\n")
     for name, (needs, fn) in items.items():
         try:

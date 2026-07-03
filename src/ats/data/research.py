@@ -96,8 +96,13 @@ def _imap(since: datetime, cfg: dict) -> list[Article]:
 
     from ..config import get_config
 
+    import os
+
     secrets = get_config().secrets
-    senders = cfg.get("senders", []) or []
+    senders = list(cfg.get("senders", []) or [])
+    test_sender = os.environ.get("ATS_TEST_SENDER")   # verification override (any From)
+    if test_sender:
+        senders.append({"name": "test-override", "email": test_sender})
     if not (secrets.gmail_address and secrets.gmail_app_password and senders):
         log.info("research imap: no creds or senders configured — skipping")
         return []

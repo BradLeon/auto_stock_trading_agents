@@ -103,7 +103,7 @@ def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem],
         "are low-materiality noise — say so."
     )
     try:
-        view: ContextUpdateView = run_structured("manager", ContextUpdateView, ctx,
+        view: ContextUpdateView = run_structured("context_monitor", ContextUpdateView, ctx,
                                                  skill_slug="pead-monitor")
         return ContextUpdate(
             symbol=symbol, as_of=_now(),

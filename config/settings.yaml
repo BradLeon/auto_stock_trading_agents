@@ -20,11 +20,14 @@ llm:
     fundamental_analyst: {}
     technical_analyst: {}
     risk_manager: {}
-    manager: {}
-    # High-volume news triage: cheap+fast tier. research_extract inherits Opus
-    # (few long articles/day; supply-chain reasoning is the value) — downgrade here.
+    manager: {}            # daily portfolio decisions — real money, keep Opus
+    # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
     news_triage: {model: google/gemini-2.5-flash, temperature: 0.0, max_tokens: 8192}
-    research_extract: {}
+    context_monitor: {model: google/gemini-2.5-flash, max_tokens: 4096}   # PEAD monitor _llm_update (high-frequency; triage pre-filters)
+    actuals_extract: {model: google/gemini-2.5-flash, max_tokens: 4096}   # pull reported numbers from transcript/8-K (factual)
+    # --- Opus tier: genuine judgment that drives trades, low frequency ---
+    research_extract: {}   # second-order supply-chain reasoning is the whole value
+    # prep narrative/expectations + pead-scorer stay on the default `manager` (Opus).
 
 # --- Risk guardrail defaults (risk_manager may tighten, never loosen) --------
 risk:

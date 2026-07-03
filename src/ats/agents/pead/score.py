@@ -51,7 +51,7 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         "qualitative call signals separately. Set reported_eps / reported_revenue if present."
     )
     try:
-        view: ActualsView = run_structured("manager", ActualsView, ctx, skill_slug="pead-actuals")
+        view: ActualsView = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
         return Actuals(
             symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
             reported_eps=view.reported_eps, reported_revenue=view.reported_revenue,

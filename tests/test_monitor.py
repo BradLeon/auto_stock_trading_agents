@@ -52,3 +52,21 @@ def test_monitor_no_fresh_events_is_zero_materiality(monkeypatch):
     monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: [])
     upd = monitor.run("COHR", use_llm=True)       # no events -> short-circuits before LLM
     assert upd.materiality == 0.0
+
+
+def test_monitor_persists_expectation_changes_into_narrative(monkeypatch):
+    from ats.agents.pead.outputs import ContextUpdateView, ExpectationChangeView
+
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(triage, "score_items", lambda *a, **k: {})
+    view = ContextUpdateView(
+        materiality=0.8, event_summary="capex divergence",
+        narrative_delta="demand no longer uniformly up",
+        expectation_changes=[ExpectationChangeView(
+            dim_key="hyperscaler_capex_demand", change="downgrade conviction")])
+    monkeypatch.setattr(monitor, "run_structured", lambda *a, **k: view)
+
+    monitor.run("COHR", use_llm=True)
+    narr = get_store().get_dossier("COHR", "Q FY2026").expectation_set.narrative
+    assert "demand no longer uniformly up" in narr
+    assert "[hyperscaler_capex_demand] downgrade conviction" in narr   # structured delta survives

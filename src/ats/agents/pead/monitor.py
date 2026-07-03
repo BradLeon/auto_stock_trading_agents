@@ -126,11 +126,16 @@ def _apply(store, cfg, dossier: PeadDossier | None, update: ContextUpdate) -> No
         dossier = PeadDossier(symbol=cfg.symbol, fiscal_label=cfg.fiscal_label, phase="prep",
                               updated_at=_now(), expectation_set=es)
 
-    if update.narrative_delta and update.materiality > 0:
+    if update.materiality > 0 and (update.narrative_delta or update.expectation_changes):
         es = dossier.expectation_set or ExpectationSet(
             symbol=cfg.symbol, fiscal_label=cfg.fiscal_label, as_of=_now())
         stamp = update.as_of.strftime("%Y-%m-%d")
-        es.narrative = (es.narrative + f"\n\n[update {stamp}] {update.narrative_delta}").strip()
+        block = f"\n\n[update {stamp}] {update.narrative_delta}".rstrip()
+        # Persist the structured per-dimension deltas too, so prep/score inherit them.
+        for ec in update.expectation_changes:
+            if ec.dim_key or ec.change:
+                block += f"\n  · [{ec.dim_key}] {ec.change}"
+        es.narrative = (es.narrative + block).strip()
         dossier.expectation_set = es
 
     dossier.updated_at = _now()

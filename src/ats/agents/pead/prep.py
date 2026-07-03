@@ -32,20 +32,30 @@ def _consensus_text(consensus: dict) -> str:
     return "\n".join(lines)
 
 
-def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict) -> NarrativeView:
+def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
+              prior_narrative: str = "") -> NarrativeView:
+    # Prefer the living thesis accumulated by the monitor between earnings; fall
+    # back to the static seed only on the first-ever prep (nothing accumulated yet).
+    if prior_narrative.strip():
+        base = (f"Living thesis accumulated from continuous monitoring — CONTINUE and refine "
+                f"this, do NOT discard the developments already captured here:\n{prior_narrative}\n")
+    else:
+        base = f"Seed narrative: {config.narrative_seed or '(none)'}\n"
     ctx = (
         f"Build the pre-earnings core narrative for {config.symbol} ({config.fiscal_label}).\n"
-        f"Seed narrative: {config.narrative_seed or '(none)'}\n"
+        f"{base}"
         f"Fundamentals:\n{fundamentals_text}\n"
         f"{_consensus_text(consensus)}\n\n"
-        "Produce the core thesis, an ordered list of what matters most THIS quarter "
+        "Produce the core thesis (fold in the monitored developments above and any per-dimension "
+        "expectation shifts they noted), an ordered list of what matters most THIS quarter "
         "(focus_ranking), and a valuation read (PE / forward PE / ceiling-floor)."
     )
     try:
         return run_structured("manager", NarrativeView, ctx, skill_slug="pead-narrative")
     except Exception as exc:  # noqa: BLE001
         log.warning("pead narrative failed for %s: %s", config.symbol, exc)
-        return NarrativeView(narrative=config.narrative_seed, focus_ranking=[], valuation="")
+        return NarrativeView(narrative=prior_narrative or config.narrative_seed,
+                             focus_ranking=[], valuation="")
 
 
 def expectations(config: PeadConfig, narrative_view: NarrativeView,

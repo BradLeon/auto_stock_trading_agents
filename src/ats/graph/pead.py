@@ -64,13 +64,16 @@ def load(state: PeadState) -> dict:
             log.warning("portfolio read skipped: %s", exc)
     out["portfolio"] = portfolio
 
-    if state.phase == "score":
+    if state.phase in ("score", "prep"):
         from ..memory import get_store
 
         prior = get_store().get_dossier(state.symbol, fiscal)
-        if prior:
-            out["expectation_set"] = prior.expectation_set
-            out["market_setup"] = prior.market_setup
+        if prior and prior.expectation_set:
+            if state.phase == "score":
+                out["expectation_set"] = prior.expectation_set
+                out["market_setup"] = prior.market_setup
+            else:  # prep: carry the accumulated monitor narrative forward (don't reset to seed)
+                out["prior_narrative"] = prior.expectation_set.narrative
     return out
 
 
@@ -127,9 +130,11 @@ def prep_narrative(state: PeadState) -> dict:
     if not state.use_llm:
         return {"expectation_set": ExpectationSet(
             symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
-            narrative=cfg.narrative_seed, consensus_eps=state.consensus.get("eps"),
+            narrative=state.prior_narrative or cfg.narrative_seed,
+            consensus_eps=state.consensus.get("eps"),
             consensus_revenue=state.consensus.get("revenue"))}
-    nv = prep_agents.narrative(cfg, state.fundamentals_text, state.consensus)
+    nv = prep_agents.narrative(cfg, state.fundamentals_text, state.consensus,
+                               prior_narrative=state.prior_narrative)
     es = ExpectationSet(
         symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
         narrative=nv.narrative, focus_ranking=nv.focus_ranking, valuation=nv.valuation,

@@ -43,6 +43,7 @@ class PeadState(BaseModel):
     documents_text: str = ""        # official docs (SEC 8-K release + investor decks)
 
     # dossier sections
+    prior_narrative: str = ""           # accumulated monitor thesis to continue in prep
     expectation_set: ExpectationSet | None = None
     market_setup: MarketSetup | None = None
     signal_chain: list[SignalChainItem] = Field(default_factory=list)

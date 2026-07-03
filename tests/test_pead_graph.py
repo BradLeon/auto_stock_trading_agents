@@ -31,6 +31,27 @@ def test_prep_phase_persists_dossier():
     assert d is not None and d.phase == "prep"
 
 
+def test_prep_continues_accumulated_monitor_narrative():
+    """prep must NOT reset to the seed — it inherits the monitor's living narrative."""
+    from ats.config import load_pead_config
+    from ats.memory import get_store
+    from ats.schemas.pead import ExpectationSet, PeadDossier
+
+    cfg = load_pead_config("COHR")
+    accumulated = ("core thesis\n\n[update 2026-07-02] Meta excess-compute admission — demand risk"
+                   "\n  · [hyperscaler_capex_demand] downgrade conviction")
+    get_store().save_dossier(PeadDossier(
+        symbol="COHR", fiscal_label=cfg.fiscal_label, phase="prep", updated_at=NOW,
+        expectation_set=ExpectationSet(symbol="COHR", fiscal_label=cfg.fiscal_label,
+                                       as_of=NOW, narrative=accumulated)))
+
+    app, state, cfgg = _run("prep")
+    result = app.invoke(state, config=cfgg)
+    # Offline prep carries the accumulated narrative forward instead of the seed.
+    assert "Meta excess-compute admission" in result["expectation_set"].narrative
+    assert result["expectation_set"].narrative != cfg.narrative_seed
+
+
 def test_score_decision_does_not_trim_unrelated_holdings():
     # A single-name PEAD decision must not force-trim other portfolio names that
     # happen to be over the position cap (e.g. a cash-parked SHV).

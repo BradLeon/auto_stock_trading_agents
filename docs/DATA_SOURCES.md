@@ -1,7 +1,7 @@
 # 数据源状态（Data Sources）
 
 PEAD 基本面分析 + 交易 Agent 的数据源清单：已接入并测试通过 vs 待接入。
-最后更新：2026-07-02。
+最后更新：2026-07-03。
 
 ## 如何测试
 
@@ -12,8 +12,9 @@ PYTHONPATH=src .venv/bin/python scripts/check_data.py news COHR  # 单个：<源
 # 两个通道的 LLM 加工产物（按名单独跑，不进全量、避免误计费）：
 PYTHONPATH=src .venv/bin/python scripts/check_data.py triage COHR    # ① 新闻分诊：每条打分 + 保留/丢弃
 PYTHONPATH=src .venv/bin/python scripts/check_data.py insights COHR  # ② newsletter 提取的 per-ticker insight
-# 手动转发的测试邮件 From 是你自己（非原始发件人），用 ATS_TEST_SENDER 覆盖来验证：
-ATS_TEST_SENDER=你的邮箱@gmail.com PYTHONPATH=src .venv/bin/python scripts/check_data.py insights COHR
+# research 走 QQ 邮箱（Gmail 过滤器自动转发）；手动转发的测试邮件 From 是你自己（非原始
+# 发件人），需用 ATS_TEST_SENDER 覆盖发件人过滤来验证整条链路：
+ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/check_data.py insights COHR
 ```
 每个源的**完整结果**落到 `var/data_dumps/<源>_<SYM>.json`（纪要为 `.txt`），可直接打开查看。
 ⚠️ 逐个测（yfinance 连续猛打会被限流，出现 "possibly delisted" 假错）。
@@ -32,11 +33,15 @@ ATS_TEST_SENDER=你的邮箱@gmail.com PYTHONPATH=src .venv/bin/python scripts/c
 | **runup** 抢跑/距高 | yfinance（无需 key） | 财报前 20 日相对 SMH/QQQ 超额收益、距 52w 高 | → `pead_dossier.market_setup` | 透支判断 |
 | **options** 期权 | **ThetaData 本地终端** → yfinance 兜底 | Expected Move、ATM IV、25Δ skew（BS 反解） | → `pead_dossier.market_setup` | ⚠️ 终端开着才准（IV≈真值）；终端没开走 yfinance 时 IV 退化，建议跑财报时开 `./scripts/start_thetadata.sh` |
 | **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 + **LLM 分诊降噪**（Gemini Flash 打 materiality 分，噪音不进 LLM 上下文）+ **关键新闻正文增强**（≥0.65 分抓全文喂 monitor） | → `pead_events`（含 triage_score/category） | 连续监控用；X/社媒见待接入 |
-| **research** 订阅研报 | Gmail IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | 高质量 newsletter 全文（SemiAnalysis 等，付费文只有邮件里全）→ LLM 提取 per-ticker insight（**含二阶传导**：如 Meta 出租算力→利空 MU/TSM），universe = targets+signal_chain | → `research_articles`/`research_insights`；material insight 注入 `pead_events` 流入 dossier | `ats pead research`；高置信推飞书 |
+| **research** 订阅研报 | Gmail IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | 高质量 newsletter 全文（SemiAnalysis 等，付费文只有邮件里全）→ LLM 提取 per-ticker insight（**含二阶传导**：如 Meta 出租算力→利空 MU/TSM），universe = targets+signal_chain | → `research_articles`/`research_insights`；material insight 注入 `pead_events` 流入 dossier | `ats pead research`；高置信推飞书。⚠️ Gmail 直连 993 被机场墙 → 走 **Gmail 过滤器自动转发到 QQ 邮箱**（`imap.qq.com` 直连），代码链路已实测通过、待真实自动转发邮件累积 |
 | **transcript** 电话会纪要 | Tavily（`TAVILY_API_KEY`）→ 手动落档兜底 | 财报电话会全文（搜 fool/investing 抓正文） | → `var/transcripts/` / dossier.actuals | FMP 也支持但需付费层（免费 402）；也可 `--transcript <链接/路径>` |
 | **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**（SEC，权威自动）+ **投资者 PPT**（Tavily，通用自动）+ 文件夹精选 | → score 的 actuals 抽取 | 文件夹 `信息源/<SYM>/` 有则优先用、自动补缺、不重复 |
 
-**已验证（COHR 实测）**：market(251 bar)、fundamentals(Rev 1,806M +20.5%YoY/CapEx/FCF/margins)、macro(F&G=40)、earnings(2026-08-11 amc)、consensus(EPS 1.62 / PT 230~384~465 / 评级 4/13/4/0/0 / 升降级 8 条)、runup(vsSMH -7%)、options(ThetaData EM 35%/IV 101%)、news(84条)、transcript(Tavily 61K字)、documents(SEC 58K + deck 16K)。
+**已验证（COHR 实测 2026-07-03）**：market(251 bar)、fundamentals(P/E 159 + 三表/CapEx/FCF/margins + 5 filings)、macro(F&G=32 / VIX 16 / UST10Y 4.48)、earnings(2026-08-11 amc, epsEst 1.65)、consensus(EPS 1.62 / PT 230~384~465 / 评级 4/13/4/0/0 / 升降级 8 条)、runup(vsSMH -13%)、options(yfinance 兜底 EM 31%/IV 107%；ThetaData 终端未开)、news(51 条)、**triage(51→保留15/丢弃36)**、**insights(SemiAnalysis EMIB-T 一文→5 条 per-ticker insight，经 `ATS_TEST_SENDER` 实测)**、transcript(Tavily 69K字)、documents(SEC 34K + deck 15K)。research 数据层链路已通、待真实自动转发邮件。
+
+**处理层模型路由**（成本优化，`config/settings.yaml` llm.routing）：
+- **Gemini 2.5 Flash**（便宜高频/纯抽取）：`news_triage`（新闻分诊）、`context_monitor`（monitor 折新闻进 thesis）、`actuals_extract`（财报实际值抽取）
+- **Opus 4.8**（真金白银的判断，低频）：`manager`（日常调仓）、prep 定调（叙事/预期）、`pead-scorer`（打分驱动下单）、`research_extract`（二阶传导推理是核心价值）
 
 ---
 
@@ -60,6 +65,7 @@ ATS_TEST_SENDER=你的邮箱@gmail.com PYTHONPATH=src .venv/bin/python scripts/c
 ## 存储机制
 
 - **Context Memory `var/ats.sqlite`**：`pead_dossier`（PEAD 活体档案：叙事/预期/期权/抢跑/信号链/实际/Scorecard/决策）、`pead_events`（新闻去重日志 + triage_score/triage_category 分诊结果）、`research_articles`/`research_insights`（newsletter 元数据 + 提取的 insight）、`reports`/`decisions`/`trades`/`performance`（日常组合循环）。
+- **新闻→决策闭环**：dossier 的 `narrative` 是唯一累积记忆——monitor 持续把分诊后的新闻 + 结构化维度变更折进它，prep 在财报前**读取并延续**（而非重置为种子），score 据此对基准打分。所以两条通道的产出能一路走到 Scorecard/下单，不会被 prep 冲掉。
 - **`var/checkpoints.sqlite`**：LangGraph 暂停态（异步飞书审批跨进程 resume）。
 - **`var/transcripts/<SYM>_<fiscal>.txt`**：手动落档纪要；**`信息源/<SYM>/`**（`docs_root`）：官方 PDF。
 - **原始行情/基本面/宏观/期权/consensus 不单独落库**——每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。
@@ -67,4 +73,4 @@ ATS_TEST_SENDER=你的邮箱@gmail.com PYTHONPATH=src .venv/bin/python scripts/c
 
 ## key 一览（`.env`）
 
-必填：`OPENAI_API_KEY`(OpenRouter)。已配：`FRED_API_KEY`、`FINNHUB_API_KEY`、`TAVILY_API_KEY`、`SEC_EDGAR_USER_AGENT`、`FMP_API_KEY`(付费纪要才用)、`FEISHU_BOT_WEBHOOK`+`FEISHU_APPROVE_*`。新增：`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`（newsletter IMAP，需 2FA+应用专用密码）。本地服务：ThetaData 终端（期权）。
+必填：`OPENAI_API_KEY`(OpenRouter)。已配：`FRED_API_KEY`、`FINNHUB_API_KEY`、`TAVILY_API_KEY`、`SEC_EDGAR_USER_AGENT`、`FMP_API_KEY`(付费纪要才用)、`FEISHU_BOT_WEBHOOK`+`FEISHU_APPROVE_*`。newsletter IMAP：`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`+`GMAIL_IMAP_HOST`——**实际指向 QQ 邮箱**（`imap.qq.com`，Gmail 直连 993 被墙，用 Gmail 过滤器把 SemiAnalysis 等发件人自动转发到 QQ，QQ 授权码作密码）；`GMAIL_PROXY` 可选（走本地代理连 Gmail 时用，QQ 直连不需要）。本地服务：ThetaData 终端（期权）。

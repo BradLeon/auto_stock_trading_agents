@@ -42,6 +42,7 @@ layers:
       - {symbol: NVDA}
       - {symbol: AMD}
       - {symbol: AVGO, note: ASIC/网络}
+      - {symbol: MRVL, note: Marvell 定制ASIC+光DSP（横跨L3光互联，按合集归L4设计服务）}
 
   - key: L5_fab
     label: L5 芯片制造（Foundry+封装+存储）

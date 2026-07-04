@@ -81,21 +81,28 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
         _apply(store, cfg, dossier, update)
         return update
 
-    sr = load_pead_global()["sector_review"]
+    g = load_pead_global()
+    sr = g["sector_review"]
     sector_hint = ""
     if sr["inject_monitor"]:
         from ..sector import context as sector_context
 
         sector_hint = sector_context.monitor_hint(symbol, sr["sectors"][0])
+    macro_hint = ""
+    if g["macro_review"]["inject_monitor"]:
+        from ..macro import context as macro_context
 
-    update = _llm_update(symbol, cfg, dossier, material, articles, sector_hint=sector_hint)
+        macro_hint = macro_context.monitor_hint(g["macro_review"]["name"])
+
+    update = _llm_update(symbol, cfg, dossier, material, articles,
+                         sector_hint=sector_hint, macro_hint=macro_hint)
     _apply(store, cfg, dossier, update)
     return update
 
 
 def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem],
                 articles: list[tuple[NewsItem, str, float]] = (),
-                sector_hint: str = "") -> ContextUpdate:
+                sector_hint: str = "", macro_hint: str = "") -> ContextUpdate:
     thesis = (dossier.expectation_set.narrative
               if dossier and dossier.expectation_set else cfg.narrative_seed)
     events_txt = "\n".join(f"  - {e.one_line()}" for e in fresh[:MAX_EVENTS_IN_CONTEXT])
@@ -104,6 +111,7 @@ def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem],
         for it, body, score in articles)
     ctx = (
         f"Living dossier for {symbol}. Current thesis:\n{thesis}\n\n"
+        + (f"Macro regime: {macro_hint}\n\n" if macro_hint else "")
         + (f"Sector regime: {sector_hint}\n\n" if sector_hint else "")
         + f"New events since last update (target + supply-chain peers):\n{events_txt}\n\n"
         + (f"Full text of the most material articles:\n{articles_txt}\n\n" if articles_txt else "")

@@ -219,6 +219,14 @@ def load_pead_global() -> dict:
     sr.setdefault("weekday", 0)          # 0 = Monday (weekly scheduled run)
     sr.setdefault("inject_prep", True)
     sr.setdefault("inject_monitor", True)
+    cfg.setdefault("macro_review", {})
+    mr = cfg["macro_review"]
+    mr.setdefault("enabled", True)
+    mr.setdefault("name", "macro")
+    mr.setdefault("weekday", 0)          # runs BEFORE sector on Mondays (cascade)
+    mr.setdefault("inject_prep", True)
+    mr.setdefault("inject_monitor", True)
+    mr.setdefault("feed_sector", True)   # prepend macro regime into sector review context
     return cfg
 
 
@@ -257,3 +265,19 @@ def load_sector_config(name: str = "ai_hardware"):
     r.setdefault("events_min_triage", 0.6)
     r.setdefault("dossier_excerpt_chars", 350)
     return SectorConfig.model_validate(raw)
+
+
+def load_macro_config(name: str = "macro"):
+    """Load config/macro.yaml -> MacroConfig (with sub-dict defaults)."""
+    from .schemas.macro_strategy import MacroConfig
+
+    raw = _load_yaml(_config_dir() / f"{name}.yaml")
+    if not raw:
+        raise FileNotFoundError(f"config/{name}.yaml not found")
+    raw.setdefault("search", {})
+    raw["search"].setdefault("max_results_per_query", 4)
+    raw["search"].setdefault("recency_days", 21)
+    raw["search"].setdefault("max_chars_per_result", 1800)
+    raw.setdefault("review", {})
+    raw["review"].setdefault("max_context_chars", 48000)
+    return MacroConfig.model_validate(raw)

@@ -198,6 +198,54 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
         run_pead_monitor(sym, use_llm=use_llm)
 
 
+def run_macro_review(name: str = "macro", *, use_llm: bool = True,
+                     live_data: bool = True, write_report: bool = True):
+    """One weekly macro strategist review: regime + rate path + sector tilts."""
+    from ..agents.macro import report, review as macro_review
+    from ..config import load_macro_config
+
+    review = macro_review.run(name, use_llm=use_llm, live_data=live_data)
+    print(f"🌐 macro {name} — {review.regime}")
+    if review.rate_path:
+        print(f"   利率路径: {review.rate_path}")
+    for t in review.sector_tilts:
+        print(f"   {t.stance} {t.sector}: {t.rationale[:80]}")
+    if review.asset_implications:
+        print(f"   资产含义: {review.asset_implications}")
+    if write_report and use_llm and review.sector_tilts:
+        path = report.write(review, load_macro_config(name))
+        print(f"   📝 {path}" if path else "   (report dir unset — skipped)")
+    return review
+
+
+def macro_show(name: str = "macro") -> int:
+    from ..memory import get_store
+
+    store = get_store()
+    latest = store.latest_macro_review(name)
+    if latest is None:
+        print(f"(no macro review for {name} yet — run `ats macro review`)")
+        return 0
+    print(f"=== macro review {name} @ {latest.as_of:%Y-%m-%d} ===")
+    print(f"Regime: {latest.regime}\n利率路径: {latest.rate_path}\n\n{latest.summary}\n")
+    for t in latest.sector_tilts:
+        print(f"  {t.stance} {t.sector}")
+    print("\nHistory:")
+    for r in store.recent_macro_reviews(name):
+        print(f"  {r['as_of'][:10]}  {r['regime'][:70]}")
+    return 0
+
+
+def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
+    from ..agents.macro import assemble
+    from ..config import load_macro_config
+
+    mc = assemble.build(load_macro_config(name), live_data=live_data)
+    print(f"=== macro context stats: {mc.stats()} ===\n")
+    print(mc.as_context())
+    return 0
+
+
 def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
                       live_data: bool = True, write_report: bool = True):
     """One weekly sector review: L1-L6 assessment + company calls."""
@@ -413,6 +461,12 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    ma = sub.add_parser("macro", help="macro strategist 宏观分析 (review / show / probe)")
+    ma.add_argument("action", choices=["review", "show", "probe"])
+    ma.add_argument("name", nargs="?", default="macro")
+    ma.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
+    ma.add_argument("--offline", action="store_true", help="skip FRED/yfinance/Tavily")
+    ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     pe = sub.add_parser("pead",
                         help="PEAD earnings workflow (prep / score / show / monitor / watch / research)")
     pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research"])
@@ -452,6 +506,14 @@ def main(argv: list[str] | None = None) -> int:
             return sector_probe(args.name, live_data=not args.offline)
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
+        return 0
+    if args.command == "macro":
+        if args.action == "show":
+            return macro_show(args.name)
+        if args.action == "probe":
+            return macro_probe(args.name, live_data=not args.offline)
+        run_macro_review(args.name, use_llm=not args.no_llm,
+                         live_data=not args.offline, write_report=not args.no_report)
         return 0
     if args.command == "pead":
         if args.action == "watch":

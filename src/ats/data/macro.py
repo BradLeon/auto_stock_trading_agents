@@ -6,11 +6,14 @@ leaves the field None rather than failing the cycle.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from ..config import get_config
 from ..schemas.macro import MacroData
 from .base import safe_fetch
+
+log = logging.getLogger("ats.data.macro")
 
 name = "macro"
 
@@ -18,7 +21,12 @@ _FRED_SERIES = {
     "ust_10y": "DGS10",
     "ust_2y": "DGS2",
     "fed_funds": "FEDFUNDS",
+    "real_10y": "DFII10",          # 10y TIPS real yield
     "unemployment": "UNRATE",
+    "cfnai": "CFNAI",              # Chicago Fed National Activity Index (broad growth)
+    "hy_oas": "BAMLH0A0HYM2",      # ICE BofA US High Yield OAS
+    "ig_oas": "BAMLC0A0CM",        # ICE BofA US IG Corporate OAS
+    "breakeven_10y": "T10YIE",     # 10y breakeven inflation
 }
 
 
@@ -53,12 +61,21 @@ def fetch() -> MacroData:
         cpi = safe_fetch(lambda: fred.get_series("CPIAUCSL").dropna(), source="fred:CPIAUCSL")
         if cpi is not None and len(cpi) > 12:
             data.cpi_yoy = round(float((cpi.iloc[-1] / cpi.iloc[-13] - 1) * 100), 2)
+        # Core PCE YoY (Fed's preferred inflation gauge).
+        pce = safe_fetch(lambda: fred.get_series("PCEPILFE").dropna(), source="fred:PCEPILFE")
+        if pce is not None and len(pce) > 12:
+            data.pce_yoy = round(float((pce.iloc[-1] / pce.iloc[-13] - 1) * 100), 2)
         # NFP latest month-over-month change (thousands).
         nfp = safe_fetch(lambda: fred.get_series("PAYEMS").dropna(), source="fred:PAYEMS")
         if nfp is not None and len(nfp) > 1:
             data.nfp_change_k = round(float(nfp.iloc[-1] - nfp.iloc[-2]), 1)
+        # Initial jobless claims (level -> thousands).
+        icsa = safe_fetch(lambda: _latest(fred.get_series("ICSA")), source="fred:ICSA")
+        if icsa is not None:
+            data.jobless_claims_k = round(icsa / 1000, 1)
 
     _add_market_regime(data)
+    _add_commodities(data)
     _add_fear_greed(data)
     return data
 
@@ -84,6 +101,21 @@ def _add_market_regime(data: MacroData) -> None:
             setattr(data, field, round(last, 2))
             if chg is not None:
                 setattr(data, f"{field}_chg_pct", round(chg, 2))
+
+
+def _add_commodities(data: MacroData) -> None:
+    def last_close(symbol):
+        import yfinance as yf
+
+        df = yf.Ticker(symbol).history(period="5d", interval="1d", auto_adjust=True)
+        if df is None or df.empty:
+            raise ValueError(f"no data for {symbol}")
+        return float(df["Close"].iloc[-1])
+
+    for field, symbol in (("oil_wti", "CL=F"), ("gold", "GC=F"), ("dxy", "DX-Y.NYB")):
+        val = safe_fetch(lambda s=symbol: last_close(s), source=f"yf:{symbol}")
+        if val is not None:
+            setattr(data, field, round(val, 2))
 
 
 # CNN's fear&greed API (the data behind edition.cnn.com/markets/fear-and-greed).

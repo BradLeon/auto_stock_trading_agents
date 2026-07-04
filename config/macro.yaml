@@ -1,0 +1,62 @@
+# 宏观策略师（macro_strategist，权益策略师范式）配置。
+# 9 个 theme = 策略师的输入盘（专业仪表盘分类）；定量 theme 关联 MacroData 字段，
+# 定性 theme 靠 Tavily 定向搜索。产出以 regime + rate_path + sector_tilts 为核心。
+
+name: macro
+label: 宏观
+output_dir: /Users/liuchao/Documents/Obsidian Vault/量化投资/个股分析系统
+
+themes:
+  - key: fed_policy
+    label: 货币政策（美联储）
+    kind: quant
+    quant: [fed_funds, ust_10y, ust_2y, real_10y]
+    queries: ["FOMC Federal Reserve interest rate decision dot plot", "Fed rate cut expectations 2026"]
+  - key: inflation
+    label: 通胀（CPI/PCE）
+    kind: quant
+    quant: [cpi_yoy, pce_yoy, breakeven_10y]
+    queries: ["US CPI PCE inflation latest data"]
+  - key: growth
+    label: 增长（PMI/活动指数）
+    kind: quant
+    quant: [cfnai]
+    queries: ["US ISM manufacturing services PMI latest"]
+  - key: employment
+    label: 就业
+    kind: quant
+    quant: [unemployment, nfp_change_k, jobless_claims_k]
+    queries: []
+  - key: financial_conditions
+    label: 金融条件（信用利差/美元/波动）
+    kind: quant
+    quant: [hy_oas, ig_oas, real_10y, dxy, vix]
+    queries: []
+  - key: commodities
+    label: 大宗商品（原油/黄金/美元）
+    kind: quant
+    quant: [oil_wti, gold, dxy]
+    queries: ["oil price OPEC supply", "gold price drivers"]
+  - key: geopolitics
+    label: 地缘政治
+    kind: qual
+    quant: []
+    queries: ["US Iran Middle East conflict latest", "Russia Ukraine war latest", "Taiwan China tension semiconductor"]
+  - key: trade_tariff
+    label: 关税与贸易政策
+    kind: qual
+    quant: []
+    queries: ["US tariff trade policy latest", "US China trade semiconductor export controls"]
+  - key: industrial_policy
+    label: 产业扶持政策
+    kind: qual
+    quant: []
+    queries: ["Korea Japan semiconductor subsidy chip act", "US CHIPS Act funding AI chip policy latest"]
+
+search:
+  max_results_per_query: 4
+  recency_days: 21
+  max_chars_per_result: 1800
+
+review:
+  max_context_chars: 48000

@@ -25,13 +25,17 @@ class SectorContext:
     pead_blocks: list[str] = field(default_factory=list)
     insight_lines: list[str] = field(default_factory=list)
     event_lines: list[str] = field(default_factory=list)
+    macro_block: str = ""
 
     def as_context(self) -> str:
         parts = [
             f"Weekly sector review universe — {self.cfg.label} "
             f"(需求沿 L1→L6 传导; [PEAD] = 有活体档案的重点标的):",
-            "\n\n".join(self.layer_blocks),
         ]
+        if self.macro_block:
+            parts.append("## 宏观背景（自上而下：利率/风险偏好/板块倾斜 — 据此调整层与个股观点）\n"
+                         + self.macro_block)
+        parts.append("\n\n".join(self.layer_blocks))
         if self.pead_blocks:
             parts.append("## PEAD 活体档案结论（最新叙事尾部 + 已出分的 Scorecard）\n"
                          + "\n\n".join(self.pead_blocks))
@@ -80,6 +84,15 @@ def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
 
     _pead_conclusions(sc, pead_syms)
     _insights_and_events(sc, symbols, pead_syms)
+
+    # Top-down cascade: prepend the latest macro regime/tilts if enabled.
+    from ...config import load_pead_global
+
+    mr = load_pead_global()["macro_review"]
+    if mr.get("feed_sector", True):
+        from ..macro import context as macro_context
+
+        sc.macro_block = macro_context.sector_block(mr["name"])
 
     notes = industry.fetch_notes()
     sc.static_notes = industry.as_context(notes)[:int(cfg.review["static_notes_chars"])]

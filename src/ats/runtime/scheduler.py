@@ -115,8 +115,24 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
 
 def _daily(*, dry_run: bool) -> None:
     run_if_session(dry_run=dry_run)
-    pead_daily(dry_run=dry_run)
+    _macro_weekly()      # top-down cascade: macro -> sector -> (daily) pead
     _sector_weekly()
+    pead_daily(dry_run=dry_run)
+
+
+def _macro_weekly() -> None:
+    """Weekly macro strategist review (Mondays by default). Runs BEFORE the sector
+    review so this week's macro regime feeds it (cascade 宏观→行业→个股)."""
+    from ..config import load_pead_global
+    from .cli import run_macro_review
+
+    mr = load_pead_global()["macro_review"]
+    if not mr["enabled"] or _today().weekday() != mr["weekday"]:
+        return
+    try:
+        run_macro_review(mr["name"])
+    except Exception as exc:  # noqa: BLE001 - review must not break the daily job
+        log.warning("macro review failed: %s", exc)
 
 
 def _sector_weekly() -> None:

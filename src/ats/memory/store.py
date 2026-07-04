@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS sector_reviews (
     sector TEXT, as_of TEXT, regime TEXT, summary TEXT, payload TEXT,
     PRIMARY KEY (sector, as_of)
 );
+CREATE TABLE IF NOT EXISTS macro_reviews (
+    name TEXT, as_of TEXT, regime TEXT, summary TEXT, payload TEXT,
+    PRIMARY KEY (name, as_of)
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -269,6 +273,28 @@ class TradingMemory:
         rows = self.conn.execute(
             "SELECT sector, as_of, regime, summary FROM sector_reviews "
             "WHERE sector = ? ORDER BY as_of DESC LIMIT ?", (sector, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- macro reviews ---------------------------------------------------- #
+    def save_macro_review(self, review) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO macro_reviews VALUES (?,?,?,?,?)",
+            (review.name, review.as_of.isoformat(), review.regime, review.summary,
+             review.model_dump_json()))
+        self.conn.commit()
+
+    def latest_macro_review(self, name: str = "macro"):
+        from ..schemas.macro_strategy import MacroReview
+
+        row = self.conn.execute(
+            "SELECT payload FROM macro_reviews WHERE name = ? ORDER BY as_of DESC LIMIT 1",
+            (name,)).fetchone()
+        return MacroReview.model_validate_json(row["payload"]) if row else None
+
+    def recent_macro_reviews(self, name: str = "macro", limit: int = 8) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT name, as_of, regime, summary FROM macro_reviews "
+            "WHERE name = ? ORDER BY as_of DESC LIMIT ?", (name, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def close(self) -> None:

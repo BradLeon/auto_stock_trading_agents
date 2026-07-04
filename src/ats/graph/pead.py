@@ -100,7 +100,8 @@ def prep_fetch(state: PeadState) -> dict:
     # Freshest weekly sector review rides along with the static notes.
     from ..config import load_pead_global
 
-    sr = load_pead_global()["sector_review"]
+    g = load_pead_global()
+    sr = g["sector_review"]
     if sr["inject_prep"]:
         from ..agents.sector import context as sector_context
 
@@ -109,6 +110,14 @@ def prep_fetch(state: PeadState) -> dict:
             out["industry_context"] += (
                 "\n\n### 最新行业评审（每周更新，比上面的静态笔记更新鲜；分歧时以此为准）\n"
                 + block)
+    mr = g["macro_review"]
+    if mr["inject_prep"]:
+        from ..agents.macro import context as macro_context
+
+        mblock = macro_context.prep_block(state.symbol, mr["name"])
+        if mblock:
+            out["industry_context"] += (
+                "\n\n### 最新宏观评审（自上而下：利率/风险偏好/板块倾斜的大背景）\n" + mblock)
 
     ru = runup_src.compute(state.symbol, cfg.sector_etf, cfg.benchmark)
     # Pass the earnings date so options picks the post-earnings expiration (the one

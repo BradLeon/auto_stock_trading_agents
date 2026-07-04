@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS macro_reviews (
     name TEXT, as_of TEXT, regime TEXT, summary TEXT, payload TEXT,
     PRIMARY KEY (name, as_of)
 );
+CREATE TABLE IF NOT EXISTS fills (
+    exec_id TEXT PRIMARY KEY, symbol TEXT, side TEXT, shares REAL, price REAL,
+    time TEXT, realized_pnl REAL, commission REAL, order_id TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -83,6 +87,11 @@ class TradingMemory:
         for ddl in ("triage_score REAL", "triage_category TEXT"):
             if ddl.split()[0] not in cols:
                 self.conn.execute(f"ALTER TABLE pead_events ADD COLUMN {ddl}")
+        tcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(trades)")}
+        for ddl in ("limit_price REAL", "filled_at TEXT", "error TEXT",
+                    "realized_pnl REAL", "source TEXT", "context TEXT"):
+            if ddl.split()[0] not in tcols:
+                self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
         self.conn.commit()
 
     # --- writes ---------------------------------------------------------- #
@@ -111,11 +120,7 @@ class TradingMemory:
             [(state.cycle_id, d.symbol, d.action, d.notional_usd, d.limit_price, d.conviction,
               d.rationale) for d in state.decisions])
 
-        c.executemany(
-            "INSERT INTO trades VALUES (?,?,?,?,?,?,?,?,?,?)",
-            [(t.order_id, state.cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
-              t.avg_fill_price, t.submitted_at.isoformat() if t.submitted_at else None,
-              t.rationale) for t in state.order_results])
+        self._insert_trades(state.order_results, cycle_id=state.cycle_id, source="cycle")
 
         p = performance
         c.execute("INSERT INTO performance VALUES (?,?,?,?,?,?,?,?,?)",
@@ -123,6 +128,58 @@ class TradingMemory:
                    p.cumulative_pnl, p.realized_pnl, p.unrealized_pnl, p.num_positions,
                    p.model_dump_json()))
         c.commit()
+
+    _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
+                   "avg_fill_price", "submitted_at", "rationale", "limit_price", "filled_at",
+                   "error", "realized_pnl", "source", "context")
+
+    def _insert_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
+        rows = [(t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
+                 t.avg_fill_price, t.submitted_at.isoformat() if t.submitted_at else None,
+                 t.rationale, t.limit_price, t.filled_at.isoformat() if t.filled_at else None,
+                 t.error, None, source, context) for t in entries]
+        placeholders = ",".join("?" * len(self._TRADE_COLS))
+        self.conn.executemany(
+            f"INSERT INTO trades ({','.join(self._TRADE_COLS)}) VALUES ({placeholders})", rows)
+
+    def save_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
+        """Persist trade-log entries with their full context (trader path, standalone)."""
+        if not entries:
+            return
+        self._insert_trades(entries, cycle_id=cycle_id, source=source, context=context)
+        self.conn.commit()
+
+    def upsert_fills(self, fills: list[dict]) -> int:
+        """Insert IBKR fills, deduped by exec_id (accumulates per-trade realized P&L)."""
+        if not fills:
+            return 0
+        before = self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"]
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO fills VALUES (?,?,?,?,?,?,?,?,?)",
+            [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
+              f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0), f.get("order_id", ""))
+             for f in fills])
+        self.conn.commit()
+        return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
+
+    def recent_fills(self, symbol: str | None = None, limit: int = 20) -> list[dict]:
+        if symbol:
+            rows = self.conn.execute(
+                "SELECT * FROM fills WHERE symbol = ? ORDER BY time DESC LIMIT ?",
+                (symbol, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM fills ORDER BY time DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_performance(self, record: PerformanceRecord) -> None:
+        """Standalone performance snapshot (trader daily snapshot, no full cycle)."""
+        p = record
+        self.conn.execute("INSERT INTO performance VALUES (?,?,?,?,?,?,?,?,?)",
+                          (p.cycle_id, p.as_of.isoformat(), p.net_liquidation, p.daily_pnl,
+                           p.cumulative_pnl, p.realized_pnl, p.unrealized_pnl, p.num_positions,
+                           p.model_dump_json()))
+        self.conn.commit()
 
     # --- reads ----------------------------------------------------------- #
     def last_performance(self) -> PerformanceRecord | None:
@@ -133,7 +190,18 @@ class TradingMemory:
     def performance_history(self, limit: int = 30) -> list[PerformanceRecord]:
         rows = self.conn.execute(
             "SELECT payload FROM performance ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
-        return [PerformanceRecord.model_validate_json(r["payload"]) for r in rows]
+        return list(reversed(
+            [PerformanceRecord.model_validate_json(r["payload"]) for r in rows]))
+
+    def recent_decisions(self, symbol: str | None = None, limit: int = 20) -> list[dict]:
+        if symbol:
+            rows = self.conn.execute(
+                "SELECT * FROM decisions WHERE symbol = ? ORDER BY rowid DESC LIMIT ?",
+                (symbol, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM decisions ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     def recent_reports(self, symbol: str, limit: int = 5) -> list[dict]:
         rows = self.conn.execute(

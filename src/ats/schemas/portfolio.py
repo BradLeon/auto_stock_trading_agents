@@ -31,5 +31,7 @@ class PortfolioSnapshot(BaseModel):
     gross_exposure: float = 0.0
     net_exposure: float = 0.0
     leverage: float = 0.0
+    daily_pnl: float = 0.0            # account-level, from IBKR reqPnL
+    realized_pnl: float = 0.0
     positions: list[Position] = Field(default_factory=list)
     exposure: ExposureBreakdown = Field(default_factory=ExposureBreakdown)

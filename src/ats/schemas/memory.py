@@ -28,6 +28,20 @@ class TradeLogEntry(BaseModel):
     error: str = ""
 
 
+class Fill(BaseModel):
+    """One executed fill from IBKR, carrying per-trade realized P&L."""
+
+    exec_id: str
+    symbol: str
+    side: str = ""                    # BOT | SLD
+    shares: float = 0.0
+    price: float = 0.0
+    time: str = ""
+    realized_pnl: float | None = None  # populated on closing fills
+    commission: float = 0.0
+    order_id: str = ""
+
+
 class PerformanceRecord(BaseModel):
     """Per-cycle performance snapshot, fed back to the Manager next cycle."""
 

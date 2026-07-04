@@ -94,13 +94,72 @@ class IBKRBroker:
                 exposure.by_ticker[p.symbol] = p.weight
                 exposure.by_sector[p.sector] = exposure.by_sector.get(p.sector, 0.0) + p.weight
 
+            # Account-level P&L in the same session (daily/realized).
+            daily_pnl = realized_pnl = 0.0
+            acct = get_config().secrets.ibkr_account or (
+                ib.managedAccounts()[0] if ib.managedAccounts() else "")
+            if acct:
+                pnl = ib.reqPnL(acct)
+                ib.sleep(2.0)
+                dv, rv = getattr(pnl, "dailyPnL", None), getattr(pnl, "realizedPnL", None)
+                daily_pnl = float(dv) if isinstance(dv, (int, float)) and dv == dv else 0.0
+                realized_pnl = float(rv) if isinstance(rv, (int, float)) and rv == rv else 0.0
+
             return PortfolioSnapshot(
                 as_of=_now(),
-                account_id=get_config().secrets.ibkr_account or (items[0].account if items else ""),
+                account_id=acct or (items[0].account if items else ""),
                 net_liquidation=net_liq, cash=cash, gross_exposure=gross,
                 net_exposure=gross, leverage=(gross / net_liq) if net_liq else 0.0,
+                daily_pnl=daily_pnl, realized_pnl=realized_pnl,
                 positions=positions, exposure=exposure,
             )
+
+    def get_pnl(self, account: str = "") -> dict:
+        """Account-level P&L: {daily_pnl, unrealized_pnl, realized_pnl}. 0-filled on miss."""
+        out = {"daily_pnl": 0.0, "unrealized_pnl": 0.0, "realized_pnl": 0.0}
+        with self.session() as ib:
+            acct = account or get_config().secrets.ibkr_account
+            if not acct:
+                accts = ib.managedAccounts()
+                acct = accts[0] if accts else ""
+            if not acct:
+                return out
+            pnl = ib.reqPnL(acct)
+            ib.sleep(2.0)   # let the subscription deliver a snapshot
+            for field, key in (("dailyPnL", "daily_pnl"), ("unrealizedPnL", "unrealized_pnl"),
+                               ("realizedPnL", "realized_pnl")):
+                v = getattr(pnl, field, None)
+                if isinstance(v, (int, float)) and v == v:   # filter NaN
+                    out[key] = float(v)
+            return out
+
+    def get_fills(self) -> list[dict]:
+        """Executed fills with per-trade realized P&L (IBKR's authoritative source)."""
+        out: list[dict] = []
+        with self.session() as ib:
+            ib.reqExecutions()
+            ib.sleep(1.5)
+            for f in ib.fills():
+                ex, cr = f.execution, f.commissionReport
+                rp = getattr(cr, "realizedPNL", None)
+                out.append({
+                    "exec_id": ex.execId, "symbol": f.contract.symbol,
+                    "side": ex.side, "shares": float(ex.shares), "price": float(ex.price),
+                    "time": ex.time.isoformat() if ex.time else "",
+                    "realized_pnl": float(rp) if isinstance(rp, (int, float)) and rp == rp else None,
+                    "commission": float(getattr(cr, "commission", 0) or 0),
+                    "order_id": str(ex.orderId),
+                })
+        return out
+
+    def open_orders(self) -> list[dict]:
+        with self.session() as ib:
+            ib.reqAllOpenOrders()
+            ib.sleep(1.0)
+            return [{"order_id": str(t.order.orderId), "symbol": t.contract.symbol,
+                     "action": t.order.action, "qty": float(t.order.totalQuantity),
+                     "type": t.order.orderType, "status": t.orderStatus.status}
+                    for t in ib.openTrades()]
 
     # --- writes ---------------------------------------------------------- #
     def place_orders(self, items: list[tuple[TradeDecision, float]], cycle_id: str,
@@ -140,14 +199,20 @@ class IBKRBroker:
             self._last_trades.append(None)
             return entry
 
-        side = "BUY" if decision.action in ("buy", "add") else "SELL"
-        contract = Stock(decision.symbol, "SMART", "USD")
-        ib.qualifyContracts(contract)
-        order = (LimitOrder(side, qty, decision.limit_price)
-                 if decision.order_type == "limit" and decision.limit_price
-                 else MarketOrder(side, qty))
-        trade = ib.placeOrder(contract, order)
-        self._last_trades.append(trade)
+        try:
+            side = "BUY" if decision.action in ("buy", "add") else "SELL"
+            contract = Stock(decision.symbol, "SMART", "USD")
+            ib.qualifyContracts(contract)
+            order = (LimitOrder(side, qty, decision.limit_price)
+                     if decision.order_type == "limit" and decision.limit_price
+                     else MarketOrder(side, qty))
+            trade = ib.placeOrder(contract, order)
+            self._last_trades.append(trade)
+        except Exception as exc:  # noqa: BLE001 - bad symbol / rejected contract must not escape
+            log.warning("order submit failed for %s: %s", decision.symbol, exc)
+            entry.status = "error"
+            entry.error = str(exc)
+            self._last_trades.append(None)
         return entry
 
 

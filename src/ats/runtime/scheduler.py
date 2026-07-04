@@ -118,6 +118,22 @@ def _daily(*, dry_run: bool) -> None:
     _macro_weekly()      # top-down cascade: macro -> sector -> (daily) pead
     _sector_weekly()
     pead_daily(dry_run=dry_run)
+    _perf_snapshot()
+
+
+def _perf_snapshot() -> None:
+    """Record a portfolio/performance snapshot each trading day (independent of the
+    daily cycle), so a continuous NetLiq/P&L curve exists even if only PEAD runs."""
+    if not is_trading_session():
+        return
+    try:
+        from ..trader import performance as tperf
+
+        r = tperf.record_snapshot()
+        if r is not None:
+            log.info("perf snapshot: NetLiq $%.0f dayP&L $%.0f", r.net_liquidation, r.daily_pnl)
+    except Exception as exc:  # noqa: BLE001 - snapshot must not break the daily job
+        log.warning("perf snapshot failed: %s", exc)
 
 
 def _macro_weekly() -> None:

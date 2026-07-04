@@ -198,6 +198,124 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
         run_pead_monitor(sym, use_llm=use_llm)
 
 
+def trader_portfolio() -> int:
+    from ..trader import portfolio as tp
+
+    pf = tp.snapshot()
+    if pf is None:
+        print("❌ IBKR unavailable — start TWS/Gateway with API enabled (port 7497).")
+        return 1
+    print(f"=== Portfolio {pf.account_id} @ {pf.as_of:%Y-%m-%d %H:%M} ===")
+    print(f"NetLiq ${pf.net_liquidation:,.0f} · cash ${pf.cash:,.0f} · leverage {pf.leverage:.2f}x "
+          f"· dailyP&L ${pf.daily_pnl:,.0f} · realized ${pf.realized_pnl:,.0f}")
+    if not pf.positions:
+        print("(no open positions)")
+    for p in pf.positions:
+        print(f"  {p.symbol:6} {p.qty:+.0f} @ {p.avg_cost:.2f}  mv=${p.market_value:,.0f} "
+              f"w={p.weight*100:.1f}% uPnL=${p.unrealized_pnl:,.0f}")
+    return 0
+
+
+def trader_snapshot() -> int:
+    from ..trader import performance as tperf
+
+    r = tperf.record_snapshot()
+    if r is None:
+        print("❌ IBKR unavailable — snapshot skipped.")
+        return 1
+    print(f"📸 snapshot {r.as_of:%Y-%m-%d} · NetLiq ${r.net_liquidation:,.0f} · "
+          f"dayP&L ${r.daily_pnl:,.0f} · cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}")
+    return 0
+
+
+def trader_perf(days: int = 30, *, write_report: bool = False) -> int:
+    from ..trader import performance as tperf
+
+    rep = tperf.report(days)
+    a = rep["analytics"]
+    print(f"=== Performance (last {a['window_days']} snapshots) ===")
+    print(f"NetLiq ${a['start_nav'] or 0:,.0f} → ${a['end_nav'] or 0:,.0f} · "
+          f"return {a['total_return_pct']}% · cumP&L ${a['cumulative_pnl'] or 0:,.0f}")
+    print(f"maxDD {a['max_drawdown_pct']}% · winRate {a['win_rate']} · "
+          f"profitFactor {a['profit_factor']} · closedTrades {a['closed_trades']}")
+    for name, b in a["benchmarks"].items():
+        print(f"  vs {name}: {b['return_pct']}% (alpha {b['alpha_pct']}%)")
+    if write_report:
+        _write_perf_report(rep)
+    return 0
+
+
+def _write_perf_report(rep: dict) -> None:
+    from ..config import load_macro_config
+
+    try:
+        out_dir = load_macro_config().output_dir
+    except Exception:  # noqa: BLE001
+        out_dir = ""
+    if not out_dir:
+        print("(report dir unset — skipped)")
+        return
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    a = rep["analytics"]
+    lines = [f"# 🤖 组合绩效 — {datetime.now(timezone.utc):%Y-%m-%d}", "",
+             f"- NetLiq: ${a['start_nav'] or 0:,.0f} → ${a['end_nav'] or 0:,.0f}",
+             f"- 收益率: {a['total_return_pct']}% · 累计P&L: ${a['cumulative_pnl'] or 0:,.0f}",
+             f"- 最大回撤: {a['max_drawdown_pct']}%",
+             f"- 胜率: {a['win_rate']} · 盈亏比: {a['profit_factor']} · 平仓交易: {a['closed_trades']}"]
+    for name, b in a["benchmarks"].items():
+        lines.append(f"- vs {name}: {b['return_pct']}% (alpha {b['alpha_pct']}%)")
+    p = Path(out_dir) / f"组合绩效-{datetime.now(timezone.utc):%Y-%m-%d}.md"
+    p.write_text("\n".join(lines), encoding="utf-8")
+    print(f"📝 {p}")
+
+
+def trader_fills(symbol: str | None = None) -> int:
+    from ..memory import get_store
+
+    rows = get_store().recent_fills(symbol, limit=30)
+    if not rows:
+        print("(no fills recorded yet)")
+        return 0
+    print(f"=== Fills{' ' + symbol if symbol else ''} ===")
+    for f in rows:
+        rp = f"realized ${f['realized_pnl']:,.0f}" if f.get("realized_pnl") is not None else ""
+        print(f"  {f['time'][:16]} {f['side']} {f['symbol']} {f['shares']:.0f}@{f['price']:.2f} {rp}")
+    return 0
+
+
+def trader_execute(symbol: str | None = None, *, channel: str = "cli", dry_run: bool = False) -> int:
+    from ..memory import get_store
+    from ..schemas.decision import TradeDecision
+    from ..trader import execute as texec
+
+    rows = get_store().recent_decisions(symbol, limit=20)
+    if not rows:
+        print("(no stored decisions to execute — use `ats trader buy/sell` for manual orders)")
+        return 0
+    seen, decisions = set(), []
+    for r in rows:                     # newest first; one per symbol
+        if r["symbol"] in seen:
+            continue
+        seen.add(r["symbol"])
+        decisions.append(TradeDecision(
+            symbol=r["symbol"], action=r["action"], notional_usd=r.get("notional_usd"),
+            limit_price=r.get("limit_price"), conviction=r.get("conviction") or 0.0,
+            rationale=r.get("rationale") or ""))
+    texec.execute(decisions, source="stored-decisions", channel=channel, dry_run=dry_run)
+    return 0
+
+
+def trader_manual(action: str, symbol: str, qty: float, *, limit: float | None = None,
+                  channel: str = "cli", dry_run: bool = False) -> int:
+    from ..trader import execute as texec
+
+    texec.manual(symbol, action, qty, order_type="limit" if limit else "market",
+                 limit_price=limit, channel=channel, dry_run=dry_run)
+    return 0
+
+
 def run_macro_review(name: str = "macro", *, use_llm: bool = True,
                      live_data: bool = True, write_report: bool = True):
     """One weekly macro strategist review: regime + rate path + sector tilts."""
@@ -461,6 +579,16 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
+    tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "execute", "buy", "sell"])
+    tr.add_argument("symbol", nargs="?", help="ticker (execute/fills optional; buy/sell required)")
+    tr.add_argument("qty", nargs="?", type=float, help="shares (buy/sell)")
+    tr.add_argument("--limit", type=float, help="limit price (buy/sell); omit for market")
+    tr.add_argument("--days", type=int, default=30, help="perf window (snapshots)")
+    tr.add_argument("--report", action="store_true", help="perf: also write an Obsidian report")
+    tr.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli",
+                    help="approval channel for orders")
+    tr.add_argument("--dry-run", action="store_true", help="go through approval but place no orders")
     ma = sub.add_parser("macro", help="macro strategist 宏观分析 (review / show / probe)")
     ma.add_argument("action", choices=["review", "show", "probe"])
     ma.add_argument("name", nargs="?", default="macro")
@@ -507,6 +635,22 @@ def main(argv: list[str] | None = None) -> int:
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0
+    if args.command == "trader":
+        if args.action == "portfolio":
+            return trader_portfolio()
+        if args.action == "snapshot":
+            return trader_snapshot()
+        if args.action == "perf":
+            return trader_perf(args.days, write_report=args.report)
+        if args.action == "fills":
+            return trader_fills(args.symbol)
+        if args.action == "execute":
+            return trader_execute(args.symbol, channel=args.channel, dry_run=args.dry_run)
+        # buy / sell — manual order (symbol + qty required)
+        if not args.symbol or args.qty is None:
+            parser.error(f"trader {args.action} requires SYMBOL and QTY")
+        return trader_manual(args.action, args.symbol, args.qty, limit=args.limit,
+                             channel=args.channel, dry_run=args.dry_run)
     if args.command == "macro":
         if args.action == "show":
             return macro_show(args.name)

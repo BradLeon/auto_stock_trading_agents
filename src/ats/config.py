@@ -212,6 +212,13 @@ def load_pead_global() -> dict:
     cfg["industry_notes"].setdefault("root", "")
     cfg["industry_notes"].setdefault("files", [])
     cfg["industry_notes"].setdefault("max_chars_per_file", 12000)
+    cfg.setdefault("sector_review", {})
+    sr = cfg["sector_review"]
+    sr.setdefault("enabled", True)
+    sr.setdefault("sectors", ["ai_hardware"])
+    sr.setdefault("weekday", 0)          # 0 = Monday (weekly scheduled run)
+    sr.setdefault("inject_prep", True)
+    sr.setdefault("inject_monitor", True)
     return cfg
 
 
@@ -224,3 +231,29 @@ def load_pead_config(symbol: str):
     override = _load_yaml(pead_dir / f"{symbol.upper()}.yaml")
     merged = {**base, **override, "symbol": symbol.upper()}
     return PeadConfig.model_validate(merged)
+
+
+def is_pead_target(symbol: str) -> bool:
+    """A symbol is PEAD-configured iff config/pead/<SYM>.yaml exists."""
+    return (_config_dir() / "pead" / f"{symbol.upper()}.yaml").exists()
+
+
+def load_sector_config(name: str = "ai_hardware"):
+    """Load config/sectors/<name>.yaml -> SectorConfig (with sub-dict defaults)."""
+    from .schemas.sector import SectorConfig
+
+    raw = _load_yaml(_config_dir() / "sectors" / f"{name}.yaml")
+    if not raw:
+        raise FileNotFoundError(f"config/sectors/{name}.yaml not found")
+    raw.setdefault("snapshot", {})
+    raw["snapshot"].setdefault("momentum_days", [20, 60])
+    raw["snapshot"].setdefault("consensus_for", "pead_targets")
+    raw["snapshot"].setdefault("sleep_between_tickers", 0.8)
+    raw.setdefault("review", {})
+    r = raw["review"]
+    r.setdefault("static_notes_chars", 36000)
+    r.setdefault("insights_per_ticker", 3)
+    r.setdefault("events_lookback_days", 14)
+    r.setdefault("events_min_triage", 0.6)
+    r.setdefault("dossier_excerpt_chars", 350)
+    return SectorConfig.model_validate(raw)

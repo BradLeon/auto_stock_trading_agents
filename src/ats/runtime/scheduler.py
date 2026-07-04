@@ -116,6 +116,24 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
 def _daily(*, dry_run: bool) -> None:
     run_if_session(dry_run=dry_run)
     pead_daily(dry_run=dry_run)
+    _sector_weekly()
+
+
+def _sector_weekly() -> None:
+    """Weekly sector review (Mondays by default). Lands after today's monitors, so
+    the freshest injection reaches Tuesday-onward runs; run `ats sector review`
+    manually if it matters intraday."""
+    from ..config import load_pead_global
+    from .cli import run_sector_review
+
+    sr = load_pead_global()["sector_review"]
+    if not sr["enabled"] or _today().weekday() != sr["weekday"]:
+        return
+    for name in sr["sectors"]:
+        try:
+            run_sector_review(name)
+        except Exception as exc:  # noqa: BLE001 - review must not break the daily job
+            log.warning("sector review %s failed: %s", name, exc)
 
 
 def start(*, dry_run: bool = True, run_once: bool = False) -> None:

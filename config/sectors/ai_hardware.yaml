@@ -1,0 +1,77 @@
+# AI 硬件行业 — L1-L6 分层定义（sector_analyst 每周评审的宇宙）。
+# Seed 自「半导体产业研究合集/AI半导体产业链分析上篇-供应链全貌概览」，需求沿 L1→L6 传导。
+# ⚠️ 分层归属请用户校正（标 TODO 的尤其）；本文件是唯一真源，层 key 会被 LLM 逐字回显。
+
+name: ai_hardware
+label: AI硬件
+sector_etf: SMH
+benchmark: QQQ
+output_dir: /Users/liuchao/Documents/Obsidian Vault/量化投资/个股分析系统
+
+layers:
+  - key: L1_app
+    label: L1 AI应用层（Token经济）
+    question: 谁在消耗算力？Token 需求是否仍在加速？
+    tickers:
+      - {symbol: GOOGL, note: Gemini（兼属L2）}
+    private: [OpenAI, Anthropic, xAI]        # 无票据，供 LLM 参考需求侧
+
+  - key: L2_cloud
+    label: L2 云服务层（算力租用）
+    question: 算力租金/利用率如何？Capex 指引是否继续上修？
+    tickers:
+      - {symbol: MSFT}
+      - {symbol: AMZN}
+      - {symbol: META, note: 自用为主，近期传出售闲置算力}
+      - {symbol: GOOGL}
+      - {symbol: CRWV, note: neocloud，TODO 用户确认}
+
+  - key: L3_dc_infra
+    label: L3 数据中心基建（电力/冷却/网络/光互联）
+    question: 机房/电力/光互联哪个环节仍是瓶颈？订单能见度多长？
+    tickers:
+      - {symbol: COHR, note: 光互联}
+      - {symbol: LITE, note: 光互联}
+      - {symbol: AAOI, note: 光互联}
+      - {symbol: VRT, note: 电力/冷却，TODO 用户确认}
+
+  - key: L4_chip_design
+    label: L4 芯片设计
+    question: 加速卡供需与 ASIC 替代节奏？
+    tickers:
+      - {symbol: NVDA}
+      - {symbol: AMD}
+      - {symbol: AVGO, note: ASIC/网络}
+
+  - key: L5_fab
+    label: L5 芯片制造（Foundry+封装+存储）
+    question: CoWoS/HBM 产能缺口与涨价周期位置？
+    tickers:
+      - {symbol: TSM, note: 先进制程+CoWoS}
+      - {symbol: MU, note: HBM}
+      - {symbol: "000660.KS", note: SK海力士/HBM龙头}
+      - {symbol: "005930.KS", note: 三星/HBM追赶}
+
+  - key: L6_equipment
+    label: L6 半导体设备
+    question: 设备订单（WFE）领先指标指向扩产还是收缩？
+    tickers:
+      - {symbol: ASML, note: EUV 最不可替代}
+      - {symbol: AMAT}
+      - {symbol: LRCX}
+      - {symbol: KLA}
+      - {symbol: "8035.T", note: TEL，TODO 用户确认}
+
+# 每票轻量快照的抓取策略（限速关键）
+snapshot:
+  momentum_days: [20, 60]
+  consensus_for: pead_targets       # pead_targets | all | none
+  sleep_between_tickers: 0.8        # get_info 间隔秒数
+
+# 评审上下文的规模控制
+review:
+  static_notes_chars: 36000         # 静态合集喂给合成的总上限
+  insights_per_ticker: 3
+  events_lookback_days: 14
+  events_min_triage: 0.6
+  dossier_excerpt_chars: 350

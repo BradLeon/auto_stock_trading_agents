@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS research_insights (
     article_id TEXT, ticker TEXT, direction TEXT, impact_path TEXT,
     summary TEXT, evidence_quote TEXT, confidence REAL, created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS sector_reviews (
+    sector TEXT, as_of TEXT, regime TEXT, summary TEXT, payload TEXT,
+    PRIMARY KEY (sector, as_of)
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -243,6 +247,28 @@ class TradingMemory:
             rows = self.conn.execute(
                 "SELECT * FROM research_insights ORDER BY rowid DESC LIMIT ?",
                 (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- sector reviews --------------------------------------------------- #
+    def save_sector_review(self, review) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO sector_reviews VALUES (?,?,?,?,?)",
+            (review.sector, review.as_of.isoformat(), review.regime, review.summary,
+             review.model_dump_json()))
+        self.conn.commit()
+
+    def latest_sector_review(self, sector: str):
+        from ..schemas.sector import SectorReview
+
+        row = self.conn.execute(
+            "SELECT payload FROM sector_reviews WHERE sector = ? ORDER BY as_of DESC LIMIT 1",
+            (sector,)).fetchone()
+        return SectorReview.model_validate_json(row["payload"]) if row else None
+
+    def recent_sector_reviews(self, sector: str, limit: int = 8) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT sector, as_of, regime, summary FROM sector_reviews "
+            "WHERE sector = ? ORDER BY as_of DESC LIMIT ?", (sector, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def close(self) -> None:

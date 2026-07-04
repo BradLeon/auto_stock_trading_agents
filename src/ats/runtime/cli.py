@@ -198,6 +198,55 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
         run_pead_monitor(sym, use_llm=use_llm)
 
 
+def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
+                      live_data: bool = True, write_report: bool = True):
+    """One weekly sector review: L1-L6 assessment + company calls."""
+    from ..agents.sector import report, review as sector_review
+    from ..config import load_sector_config
+
+    review = sector_review.run(name, use_llm=use_llm, live_data=live_data)
+    print(f"🏭 sector {name} — {review.regime}")
+    for a in review.layers:
+        print(f"   {a.label}: 景气 {a.boom_score:.0f} [{a.signal}] {a.supply_demand}")
+    if review.rotation_advice:
+        print(f"   轮动: {review.rotation_advice}")
+    for c in review.company_calls:
+        print(f"   {c.stance} {c.symbol} ({c.conviction:.2f}): {c.rationale[:80]}")
+    if write_report and use_llm and review.company_calls:
+        path = report.write(review, load_sector_config(name))
+        print(f"   📝 {path}" if path else "   (report dir unset — skipped)")
+    return review
+
+
+def sector_show(name: str = "ai_hardware") -> int:
+    from ..memory import get_store
+
+    store = get_store()
+    latest = store.latest_sector_review(name)
+    if latest is None:
+        print(f"(no sector review for {name} yet — run `ats sector review {name}`)")
+        return 0
+    print(f"=== sector review {name} @ {latest.as_of:%Y-%m-%d} ===")
+    print(f"Regime: {latest.regime}\n\n{latest.summary}\n")
+    for a in latest.layers:
+        print(f"  {a.label}: 景气 {a.boom_score:.0f} [{a.signal}]")
+    print("\nHistory:")
+    for r in store.recent_sector_reviews(name):
+        print(f"  {r['as_of'][:10]}  {r['regime'][:70]}")
+    return 0
+
+
+def sector_probe(name: str = "ai_hardware", *, live_data: bool = True) -> int:
+    """Assemble the review context without spending an LLM call; print stats + prompt."""
+    from ..agents.sector import assemble
+    from ..config import load_sector_config
+
+    sc = assemble.build(load_sector_config(name), live_data=live_data)
+    print(f"=== sector context stats: {sc.stats()} ===\n")
+    print(sc.as_context())
+    return 0
+
+
 def run_pead_research(*, use_llm: bool = True) -> list:
     """One research pass: ingest newsletters, extract per-ticker insights."""
     from ..agents.pead import research
@@ -358,6 +407,12 @@ def main(argv: list[str] | None = None) -> int:
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
+    se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
+    se.add_argument("action", choices=["review", "show", "probe"])
+    se.add_argument("name", nargs="?", default="ai_hardware")
+    se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
+    se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
+    se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     pe = sub.add_parser("pead",
                         help="PEAD earnings workflow (prep / score / show / monitor / watch / research)")
     pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research"])
@@ -390,6 +445,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)
+    if args.command == "sector":
+        if args.action == "show":
+            return sector_show(args.name)
+        if args.action == "probe":
+            return sector_probe(args.name, live_data=not args.offline)
+        run_sector_review(args.name, use_llm=not args.no_llm,
+                          live_data=not args.offline, write_report=not args.no_report)
+        return 0
     if args.command == "pead":
         if args.action == "watch":
             run_pead_watch(use_llm=not args.no_llm)

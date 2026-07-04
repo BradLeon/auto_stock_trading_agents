@@ -62,6 +62,25 @@ def _yf_info(symbol: str) -> dict:
     return info
 
 
+_LIGHT_KEYS = {"market_cap": "marketCap", "pe": "trailingPE", "fwd_pe": "forwardPE",
+               "gross_margin": "grossMargins", "op_margin": "operatingMargins",
+               "rev_growth": "revenueGrowth"}
+
+
+def fetch_light(symbol: str) -> dict:
+    """One-call valuation/margin snapshot for wide-universe sector scans.
+    Returns {market_cap, pe, fwd_pe, gross_margin, op_margin, rev_growth} (None-filled).
+    Never raises."""
+    out: dict = {k: None for k in _LIGHT_KEYS}
+    info = safe_fetch(lambda: _yf_info(symbol), source=f"yf-light:{symbol}", attempts=2)
+    if info:
+        for field, key in _LIGHT_KEYS.items():
+            val = info.get(key)
+            if isinstance(val, (int, float)):
+                out[field] = float(val)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Quarterly statements (income / balance / cash flow) with QoQ + YoY
 # --------------------------------------------------------------------------- #

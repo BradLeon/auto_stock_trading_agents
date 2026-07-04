@@ -81,13 +81,21 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
         _apply(store, cfg, dossier, update)
         return update
 
-    update = _llm_update(symbol, cfg, dossier, material, articles)
+    sr = load_pead_global()["sector_review"]
+    sector_hint = ""
+    if sr["inject_monitor"]:
+        from ..sector import context as sector_context
+
+        sector_hint = sector_context.monitor_hint(symbol, sr["sectors"][0])
+
+    update = _llm_update(symbol, cfg, dossier, material, articles, sector_hint=sector_hint)
     _apply(store, cfg, dossier, update)
     return update
 
 
 def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem],
-                articles: list[tuple[NewsItem, str, float]] = ()) -> ContextUpdate:
+                articles: list[tuple[NewsItem, str, float]] = (),
+                sector_hint: str = "") -> ContextUpdate:
     thesis = (dossier.expectation_set.narrative
               if dossier and dossier.expectation_set else cfg.narrative_seed)
     events_txt = "\n".join(f"  - {e.one_line()}" for e in fresh[:MAX_EVENTS_IN_CONTEXT])
@@ -96,7 +104,8 @@ def _llm_update(symbol, cfg, dossier, fresh: list[NewsItem],
         for it, body, score in articles)
     ctx = (
         f"Living dossier for {symbol}. Current thesis:\n{thesis}\n\n"
-        f"New events since last update (target + supply-chain peers):\n{events_txt}\n\n"
+        + (f"Sector regime: {sector_hint}\n\n" if sector_hint else "")
+        + f"New events since last update (target + supply-chain peers):\n{events_txt}\n\n"
         + (f"Full text of the most material articles:\n{articles_txt}\n\n" if articles_txt else "")
         + "Decide materiality (0=noise, 1=thesis-changing), summarize what's genuinely new, "
         "and state any change to the thesis or to specific scorecard expectations. Most days "

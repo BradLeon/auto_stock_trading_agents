@@ -42,5 +42,14 @@ industry_notes:
     - AI半导体产业链分析中篇-利润去哪了？.md
     - AI半导体产业链分析-下篇-周期股与护城河.md
     - AI Capex 的另一半——数据中心基建产业链解读.md
+    - L2云服务层研究：AI 时代的”数字房东”，还能不能收租？.md
     - L4-L6层公司，当前估值分析(4.14).md
   max_chars_per_file: 12000
+
+# Weekly sector review (sector_analyst): L1-L6 层评审 + 个股 call，结论注回 prep/monitor。
+sector_review:
+  enabled: true
+  sectors: [ai_hardware]
+  weekday: 0            # 周一跑（跟随每日调度检查）
+  inject_prep: true     # prep 的 industry_context 追加最新评审块
+  inject_monitor: true  # monitor 上下文加 1-3 行 regime 提示

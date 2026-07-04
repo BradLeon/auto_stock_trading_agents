@@ -58,5 +58,15 @@ search:
   recency_days: 21
   max_chars_per_result: 1800
 
+# FactSet Earnings Insight — 周度 S&P 500 盈利/估值 backdrop（权威一手）。
+# 稳定 URL 302 跳转到当周日期编码 PDF；下载失败回退到文件夹里最新的本地 PDF。
+factset:
+  enabled: true
+  url: https://www.factset.com/earningsinsight
+  folder: /Users/liuchao/Documents/Obsidian Vault/信息源/macro
+  download: true
+  max_pages: 16       # 正文页（图表页 pypdf 提取乱码）
+  max_chars: 14000
+
 review:
-  max_context_chars: 48000
+  max_context_chars: 60000

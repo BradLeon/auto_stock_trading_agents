@@ -20,14 +20,20 @@ class MacroContext:
     cfg: MacroConfig
     quant_block: str = ""
     theme_blocks: list[str] = field(default_factory=list)
+    earnings_block: str = ""          # FactSet Earnings Insight (S&P500 盈利/估值 backdrop)
+    earnings_source: str = ""
 
     def as_context(self) -> str:
         parts = [
             "Weekly macro strategist review (equity-strategist lens: synthesize into "
             "regime + rate path + SECTOR TILTS, not per-topic summaries).",
             "## 定量仪表盘（FRED + 市场）\n" + self.quant_block,
-            "## 分主题（定量关联 + 近期新闻）\n" + "\n\n".join(self.theme_blocks),
         ]
+        if self.earnings_block:
+            parts.append(
+                f"## S&P500 盈利/估值 backdrop（FactSet Earnings Insight，{self.earnings_source}）\n"
+                + self.earnings_block)
+        parts.append("## 分主题（定量关联 + 近期新闻）\n" + "\n\n".join(self.theme_blocks))
         return "\n\n".join(parts)
 
     def stats(self) -> dict:
@@ -35,6 +41,8 @@ class MacroContext:
             "themes": len(self.theme_blocks),
             "quant_chars": len(self.quant_block),
             "theme_chars": sum(len(b) for b in self.theme_blocks),
+            "earnings_chars": len(self.earnings_block),
+            "earnings_source": self.earnings_source or "-",
             "total_chars": len(self.as_context()),
         }
 
@@ -45,6 +53,12 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
     mc = MacroContext(cfg=cfg)
     data = macro_src.fetch() if live_data else None
     mc.quant_block = data.to_context() if data else "(offline — 定量数据跳过)"
+
+    # FactSet Earnings Insight — S&P500 盈利/估值 backdrop.
+    if live_data and cfg.factset.get("enabled", True):
+        from ...data import factset
+
+        mc.earnings_block, mc.earnings_source = factset.fetch_earnings_insight(cfg.factset)
 
     field_vals = _field_map(data)
     search_cfg = cfg.search

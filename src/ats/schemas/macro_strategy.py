@@ -32,6 +32,7 @@ class MacroConfig(BaseModel):
     themes: list[MacroTheme] = Field(default_factory=list)
     search: dict = Field(default_factory=dict)
     review: dict = Field(default_factory=dict)
+    factset: dict = Field(default_factory=dict)
 
     def theme_keys(self) -> set[str]:
         return {t.key for t in self.themes}

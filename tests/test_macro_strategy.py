@@ -79,6 +79,45 @@ def test_assemble_offline_and_live(monkeypatch):
     assert "offline" in mc2.as_context()                            # no network
 
 
+def test_factset_download_and_local_fallback(monkeypatch, tmp_path):
+    from ats.data import factset
+
+    # A tiny valid PDF written by pypdf so _extract works.
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    w.add_blank_page(width=200, height=200)
+    local = tmp_path / "EarningsInsight_010126.pdf"
+    with open(local, "wb") as fh:
+        w.write(fh)
+
+    cfg = {"enabled": True, "url": "http://x", "folder": str(tmp_path),
+           "download": True, "max_pages": 16, "max_chars": 500}
+
+    # Download fails -> newest local PDF used.
+    monkeypatch.setattr(factset, "_download", lambda url, folder: (_ for _ in ()).throw(RuntimeError("net")))
+    _, src = factset.fetch_earnings_insight(cfg)
+    assert src == "factset:EarningsInsight_010126.pdf"
+
+    # Disabled -> skipped.
+    assert factset.fetch_earnings_insight({"enabled": False})[1] == "disabled"
+    # No folder, download off -> none.
+    assert factset.fetch_earnings_insight(
+        {"enabled": True, "download": False, "folder": "/no/such"})[1] == "none"
+
+
+def test_assemble_includes_factset(monkeypatch):
+    data = MacroData(as_of=NOW, fed_funds=3.63)
+    monkeypatch.setattr("ats.data.macro.fetch", lambda: data)
+    monkeypatch.setattr("ats.data.websearch.search_news", lambda q, **k: [])
+    monkeypatch.setattr("ats.data.factset.fetch_earnings_insight",
+                        lambda cfg: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4", "factset:x.pdf"))
+    cfg = CFG.model_copy(update={"factset": {"enabled": True}})
+    mc = assemble.build(cfg, live_data=True)
+    ctx = mc.as_context()
+    assert "盈利/估值 backdrop" in ctx and "前瞻 P/E 20.4" in ctx
+    assert mc.stats()["earnings_source"] == "factset:x.pdf"
+
+
 def test_review_clamps_and_persists(monkeypatch):
     monkeypatch.setattr("ats.config.load_macro_config", lambda name="macro": CFG)
     monkeypatch.setattr(macro_review, "run_structured", lambda *a, **k: _view())

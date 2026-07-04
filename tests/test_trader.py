@@ -125,6 +125,16 @@ def test_fills_dedup_and_performance_snapshot():
     assert [h.net_liquidation for h in hist] == [100000, 102000]   # chronological
 
 
+def test_order_status_mapping():
+    from ats.broker.ibkr import _map_status
+
+    assert _map_status("Filled") == "filled"
+    assert _map_status("PreSubmitted") == "submitted"
+    assert _map_status("Cancelled") == "cancelled"
+    assert _map_status("ValidationError") == "rejected"   # IBKR reject (bad TIF / closed mkt)
+    assert _map_status("Inactive") == "rejected"
+
+
 def test_trades_migration_columns():
     cols = {r["name"] for r in get_store().conn.execute("PRAGMA table_info(trades)")}
     assert {"limit_price", "filled_at", "error", "realized_pnl", "source", "context"} <= cols

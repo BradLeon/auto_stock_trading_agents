@@ -186,6 +186,19 @@ class IBKRBroker:
                     wait: float = 3.0) -> TradeLogEntry:
         return self.place_orders([(decision, qty)], cycle_id, wait)[0]
 
+    def cancel_all(self, symbol: str | None = None) -> list[str]:
+        """Cancel open orders (optionally filtered by symbol). Returns cancelled ids."""
+        with self.session() as ib:
+            cancelled = []
+            for t in ib.openTrades():
+                if symbol and t.contract.symbol != symbol.upper():
+                    continue
+                ib.cancelOrder(t.order)
+                cancelled.append(str(t.order.orderId))
+            if cancelled:
+                ib.sleep(1.5)
+            return cancelled
+
     def _submit(self, ib, decision: TradeDecision, qty: float, cycle_id: str) -> TradeLogEntry:
         from ib_async import LimitOrder, MarketOrder, Stock
 
@@ -206,6 +219,7 @@ class IBKRBroker:
             order = (LimitOrder(side, qty, decision.limit_price)
                      if decision.order_type == "limit" and decision.limit_price
                      else MarketOrder(side, qty))
+            order.tif = decision.time_in_force          # DAY/GTC (avoid preset TIF warning)
             trade = ib.placeOrder(contract, order)
             self._last_trades.append(trade)
         except Exception as exc:  # noqa: BLE001 - bad symbol / rejected contract must not escape
@@ -224,6 +238,8 @@ def _map_status(status: str) -> str:
         return "submitted"
     if "partial" in s:
         return "partial"
-    if s in ("cancelled", "apicancelled", "inactive"):
+    if s in ("cancelled", "apicancelled"):
         return "cancelled"
+    if s in ("inactive", "validationerror"):   # IBKR rejected (bad TIF, closed mkt, etc.)
+        return "rejected"
     return "submitted"

@@ -271,6 +271,35 @@ def _write_perf_report(rep: dict) -> None:
     print(f"📝 {p}")
 
 
+def trader_orders() -> int:
+    from ..broker import IBKRBroker, IBKRUnavailable
+
+    try:
+        oo = IBKRBroker().open_orders()
+    except IBKRUnavailable as exc:
+        print(f"❌ IBKR unavailable: {exc}")
+        return 1
+    if not oo:
+        print("(no open orders)")
+        return 0
+    print("=== Open orders ===")
+    for o in oo:
+        print(f"  #{o['order_id']} {o['action']} {o['symbol']} x{o['qty']:.0f} {o['type']} [{o['status']}]")
+    return 0
+
+
+def trader_cancel(symbol: str | None = None) -> int:
+    from ..broker import IBKRBroker, IBKRUnavailable
+
+    try:
+        cancelled = IBKRBroker().cancel_all(symbol)
+    except IBKRUnavailable as exc:
+        print(f"❌ IBKR unavailable: {exc}")
+        return 1
+    print(f"cancelled {len(cancelled)} order(s): {cancelled}" if cancelled else "(no open orders to cancel)")
+    return 0
+
+
 def trader_fills(symbol: str | None = None) -> int:
     from ..memory import get_store
 
@@ -580,7 +609,8 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
-    tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "execute", "buy", "sell"])
+    tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
+                                       "cancel", "execute", "buy", "sell"])
     tr.add_argument("symbol", nargs="?", help="ticker (execute/fills optional; buy/sell required)")
     tr.add_argument("qty", nargs="?", type=float, help="shares (buy/sell)")
     tr.add_argument("--limit", type=float, help="limit price (buy/sell); omit for market")
@@ -644,6 +674,10 @@ def main(argv: list[str] | None = None) -> int:
             return trader_perf(args.days, write_report=args.report)
         if args.action == "fills":
             return trader_fills(args.symbol)
+        if args.action == "orders":
+            return trader_orders()
+        if args.action == "cancel":
+            return trader_cancel(args.symbol)
         if args.action == "execute":
             return trader_execute(args.symbol, channel=args.channel, dry_run=args.dry_run)
         # buy / sell — manual order (symbol + qty required)

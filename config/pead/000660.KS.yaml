@@ -1,0 +1,39 @@
+# SK Hynix (000660.KS) — PEAD config. Korean memory maker; global #1 HBM supplier
+# (HBM3E qualified with Nvidia ahead of Samsung). AI-memory super-cycle beneficiary
+# riding a big run-up (>+20% vs SMH, near ATH) → higher long bar like COHR: crowded
+# AI-memory trade + cyclical-peak risk amplify the "beat-but-drops" pattern.
+# NOTE: 韩股 — earnings/options/news 源无覆盖会退化；基本面/一致预期/抢跑/行业知识可用。
+
+symbol: 000660.KS
+fiscal_label: "Q2 2026"           # SK Hynix reports calendar quarters (~late Jul)
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 5.0
+long_threshold: 1.5               # elevated: crowded AI-memory trade + cyclical peak + run-up
+
+scorecard_dims:
+  - {key: hbm_revenue,   weight: 0.25, label: HBM营收/占比(HBM3E放量+HBM4进展/Nvidia认证)}
+  - {key: dram_asp,      weight: 0.20, label: DRAM ASP涨价幅度(常规DDR5供需)}
+  - {key: gross_margin,  weight: 0.15, label: 毛利率(内存周期弹性)}
+  - {key: forward_guide, weight: 0.15, label: 下季营收+资本开支/产能指引}
+  - {key: nand_asp,      weight: 0.10, label: NAND ASP/减产纪律}
+  - {key: revenue,       weight: 0.05, label: 总营收超预期}
+  - {key: inventory,     weight: 0.05, label: 库存去化/供需紧平衡}
+  - {key: call_tone,     weight: 0.05, label: 电话会语气}
+
+signal_chain:
+  - {symbol: NVDA,     role: downstream}   # HBM 主力客户，AI GPU 需求直接拉动
+  - {symbol: AMD,      role: downstream}   # MI 系列 HBM 客户
+  - {symbol: ASML,     role: upstream}     # EUV/光刻（DRAM 先进制程）
+  - {symbol: AMAT,     role: upstream}     # 存储制程设备
+  - {symbol: LRCX,     role: upstream}     # 刻蚀/沉积（3D NAND、HBM TSV）
+  - {symbol: MU,       role: peer}         # 美光：HBM/DRAM 直接竞争
+  - {symbol: "005930.KS", role: peer}      # 三星：HBM 追赶者、DRAM/NAND 竞争
+  - {symbol: GOOGL,    role: upstream}     # 超大厂 AI Capex（间接需求锚）
+  - {symbol: META,     role: upstream}
+
+narrative_seed: >
+  全球 HBM 龙头，HBM3E 领先三星率先通过 Nvidia 认证、拿下最大份额；AI 内存超级周期核心受益，
+  DRAM/NAND 周期同步上行 + ASP 涨价；HBM4 迭代为下一主线；毛利率随内存周期高弹性(近期 ~57%)。
+  最大风险：内存周期见顶/供给纪律松动、三星 HBM 追赶、拥挤的 AI 内存交易 + 大幅抢跑(距高<17%,
+  vs SMH +24%)构成 PEAD 透支放大器。

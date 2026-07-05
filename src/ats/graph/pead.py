@@ -1,30 +1,25 @@
 """PEAD earnings-event workflow (LangGraph).
 
     START → load → ┬ prep:  fetch → narrative → expectations → signal_chain → persist_prep → END
-                   └ score: fetch → actuals → scorecard → decision → boss_review(interrupt)
-                            → trader → persist_score → END
+                   └ score: fetch → actuals → scorecard → decision(建议) → persist_score → END
 
-Reuses existing building blocks: data sources, PEAD agents (prep/score),
-risk_validator (hard-clip), IBKR broker, channel/HITL, Context Memory.
+v0.2: the score branch produces a risk-aware trade RECOMMENDATION persisted in the
+dossier — the Chief (agents/chief) is the only decision maker and executes via the
+trader's single approval gate. No interrupt/trader nodes here anymore.
 """
 
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import interrupt
 
 from ..agents import risk_manager as risk_agent, risk_validator
 from ..agents.pead import prep as prep_agents, score as score_agents
 from ..broker import IBKRBroker, IBKRUnavailable
 from ..config import get_config, load_pead_config
-from ..schemas.channel import ApprovalRequest
-from ..schemas.decision import BossApproval, TradeDecision
 from ..schemas.market import Ticker
-from ..schemas.memory import TradeLogEntry
 from ..schemas.pead import (
     Actuals,
     ExpectationSet,
@@ -282,42 +277,17 @@ def score_decision(state: PeadState) -> dict:
     return {"decisions": clipped, "decision_band": band, "risk_adjustments": adjustments}
 
 
-def boss_review(state: PeadState) -> dict:
-    sc = state.scorecard
-    summary = (f"PEAD {state.symbol} {state.fiscal_label}\n"
-               f"Scorecard 总分 {sc.total:+.2f} (门槛 {sc.threshold:+.1f}) — {sc.band}\n"
-               f"决策情景: {state.decision_band}")
-    if state.risk_adjustments:
-        summary += "\nGuardrail: " + "; ".join(state.risk_adjustments)
-    req = ApprovalRequest(cycle_id=f"pead-{state.symbol}-{state.fiscal_label}".replace(" ", ""),
-                          as_of=state.as_of, decisions=state.decisions, context_summary=summary)
-    verdict = interrupt(req.model_dump(mode="json"))
-    return {"approval": BossApproval.model_validate(verdict)}
-
-
-def score_trader(state: PeadState) -> dict:
-    approval = state.approval
-    if approval is None:
-        return {"order_results": []}
-    to_exec = [d for d in approval.effective_decisions(state.decisions) if d.action != "hold"]
-    sized = [(d, _size_qty(d, state)) for d in to_exec]
-
-    if not state.dry_run and state.use_broker:
-        try:
-            broker = IBKRBroker(sector_by_symbol={state.symbol: "optical"})
-            return {"order_results": broker.place_orders(sized, f"pead-{state.symbol}")}
-        except IBKRUnavailable as exc:
-            log.warning("PEAD execution aborted, IBKR unavailable: %s", exc)
-            return {"order_results": [_errored(state, d, q, str(exc)) for d, q in sized]}
-    return {"order_results": [_simulated(state, d, q) for d, q in sized]}
-
-
 def score_persist(state: PeadState) -> dict:
+    """Persist the dossier with the decision RECOMMENDATION (the Chief makes the trade call)."""
     from ..memory import get_store
 
-    orders = "; ".join(f"{o.action} {o.symbol} {o.qty:.0f} [{o.status}]" for o in state.order_results)
-    summary = (f"{state.decision_band} | approval={getattr(state.approval, 'status', '—')} "
-               f"| orders: {orders or 'none'}")
+    recs = "; ".join(
+        f"{d.action} {d.symbol} " + (f"${d.notional_usd:,.0f}" if d.notional_usd
+                                     else (f"{d.qty:.0f}股" if d.qty else ""))
+        for d in state.decisions) or "观望"
+    summary = f"{state.decision_band} | 建议: {recs}"
+    if state.risk_adjustments:
+        summary += " | guardrail: " + "; ".join(state.risk_adjustments)
     dossier = PeadDossier(
         symbol=state.symbol, fiscal_label=state.fiscal_label, phase="score", updated_at=_now(),
         expectation_set=state.expectation_set, market_setup=state.market_setup,
@@ -325,27 +295,6 @@ def score_persist(state: PeadState) -> dict:
         decision_summary=summary)
     get_store().save_dossier(dossier)
     return {}
-
-
-# --- trader helpers (mirror the daily cycle) -------------------------------- #
-def _size_qty(d: TradeDecision, state: PeadState) -> float:
-    if d.qty:
-        return d.qty
-    if d.notional_usd and state.market_setup and state.market_setup.pre_earnings_close:
-        return float(round(d.notional_usd / state.market_setup.pre_earnings_close))
-    return 0.0
-
-
-def _simulated(state: PeadState, d: TradeDecision, qty: float) -> TradeLogEntry:
-    return TradeLogEntry(order_id=str(uuid.uuid4())[:8], cycle_id=f"pead-{state.symbol}",
-                         symbol=d.symbol, action=d.action, qty=qty, order_type=d.order_type,
-                         limit_price=d.limit_price, status="filled", submitted_at=_now(),
-                         filled_at=_now(), rationale=d.rationale)
-
-
-def _errored(state: PeadState, d: TradeDecision, qty: float, error: str) -> TradeLogEntry:
-    return TradeLogEntry(order_id="", cycle_id=f"pead-{state.symbol}", symbol=d.symbol,
-                         action=d.action, qty=qty, status="error", submitted_at=_now(), error=error)
 
 
 # --------------------------------------------------------------------------- #
@@ -360,7 +309,6 @@ def build_pead_graph(checkpointer=None):
         ("prep_persist", prep_persist),
         ("score_fetch", score_fetch), ("score_actuals", score_actuals),
         ("score_scorecard", score_scorecard), ("score_decision", score_decision),
-        ("boss_review", boss_review), ("score_trader", score_trader),
         ("score_persist", score_persist),
     ]:
         g.add_node(name, fn)
@@ -377,9 +325,7 @@ def build_pead_graph(checkpointer=None):
     g.add_edge("score_fetch", "score_actuals")
     g.add_edge("score_actuals", "score_scorecard")
     g.add_edge("score_scorecard", "score_decision")
-    g.add_edge("score_decision", "boss_review")
-    g.add_edge("boss_review", "score_trader")
-    g.add_edge("score_trader", "score_persist")
+    g.add_edge("score_decision", "score_persist")
     g.add_edge("score_persist", END)
 
     return g.compile(checkpointer=checkpointer)

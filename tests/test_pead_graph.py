@@ -72,16 +72,16 @@ def test_score_decision_does_not_trim_unrelated_holdings():
     assert all(d.symbol != "SHV" for d in out["decisions"])   # no leaked SHV trim
 
 
-def test_score_phase_interrupts_then_executes():
+def test_score_phase_completes_without_interrupt():
+    """v0.2: score produces a recommendation dossier; the Chief makes the trade call."""
     app, state, cfg = _run("score")
     result = app.invoke(state, config=cfg)
-    # Pauses for Boss approval.
-    assert "__interrupt__" in result
-
-    from langgraph.types import Command
-
-    result = app.invoke(Command(resume=BossApproval(status="approved").model_dump(mode="json")),
-                        config=cfg)
-    # no-llm => zero scorecard => no trade proposed => no orders, but completes cleanly.
+    assert "__interrupt__" not in result           # no HITL pause in the score branch anymore
+    # no-llm => zero scorecard => no trade recommended, but completes cleanly.
     assert result["scorecard"].total == 0.0
-    assert result["order_results"] == []
+
+    from ats.memory import get_store
+
+    d = get_store().get_dossier("COHR", result["fiscal_label"])
+    assert d is not None and d.phase == "score"
+    assert result.get("decision_band", "") in d.decision_summary   # 建议入档

@@ -175,6 +175,27 @@ class TradingMemory:
                 "SELECT * FROM fills ORDER BY time DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    # --- chief runs (reuse cycles + decisions tables) ---------------------- #
+    def save_chief_run(self, *, cycle_id: str, as_of, summary: str, decisions) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO cycles VALUES (?,?,?,?)",
+                          (cycle_id, as_of.isoformat(), None, summary))
+        self.conn.executemany(
+            "INSERT INTO decisions VALUES (?,?,?,?,?,?,?)",
+            [(cycle_id, d.symbol, d.action, d.notional_usd, d.limit_price, d.conviction,
+              d.rationale) for d in decisions])
+        self.conn.commit()
+
+    def last_chief_run(self) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM cycles WHERE cycle_id LIKE 'chief-%' ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        out["decisions"] = [dict(r) for r in self.conn.execute(
+            "SELECT * FROM decisions WHERE cycle_id = ?", (row["cycle_id"],)).fetchall()]
+        return out
+
     def save_risk_review(self, review) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO risk_reviews VALUES (?,?,?,?)",

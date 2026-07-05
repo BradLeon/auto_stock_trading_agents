@@ -1,4 +1,5 @@
-"""PEAD v2 D+E: async webhook resume routing + earnings-proximity scheduling."""
+"""PEAD earnings-proximity scheduling (v0.2: the score branch no longer interrupts —
+the Chief owns trade decisions — so the old async score-resume test was removed)."""
 
 from datetime import date, datetime, timezone
 
@@ -35,24 +36,15 @@ def test_actions_no_earnings_date_is_monitor_only():
     assert scheduler._pead_actions(date(2026, 6, 1), None, "", SCHED) == ["monitor"]
 
 
-# --- D: webhook resume routes to the PEAD graph ---------------------------- #
-def test_resume_routes_pead_thread_to_pead_graph():
-    from langgraph.types import Command  # noqa: F401  (ensures langgraph import path)
-
+# --- score branch runs straight through (no interrupt / no checkpoint pause) --
+def test_score_runs_to_completion_without_interrupt():
     from ats.graph.checkpoint import get_checkpointer
     from ats.graph.pead import build_pead_graph
     from ats.graph.pead_state import PeadState
-    from ats.runtime.cli import resume_cycle
-    from ats.schemas.decision import BossApproval
 
-    thread = "pead:COHR:QFY2026"
-    app = build_pead_graph(checkpointer=get_checkpointer(persist=True))
+    app = build_pead_graph(checkpointer=get_checkpointer(persist=False))
     state = PeadState(symbol="COHR", phase="score", as_of=NOW, use_llm=False,
                       use_broker=False, live_data=False)
-    res = app.invoke(state, config={"configurable": {"thread_id": thread}})
-    assert "__interrupt__" in res
-
-    # The webhook calls resume_cycle; the pead: prefix must route to the PEAD graph.
-    out = resume_cycle(thread, BossApproval(status="approved"))
-    assert out.get("scorecard") is not None        # completed via the PEAD graph
-    assert out.get("order_results") == []          # no-llm => zero score => no trade
+    res = app.invoke(state, config={"configurable": {"thread_id": "t-score-async"}})
+    assert "__interrupt__" not in res
+    assert res.get("scorecard") is not None

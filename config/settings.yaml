@@ -29,6 +29,7 @@ llm:
     research_extract: {}   # second-order supply-chain reasoning is the whole value
     sector_analyst: {max_tokens: 8192}   # weekly L1-L6 sector review — large structured output
     macro_strategist: {max_tokens: 8192} # weekly macro regime + sector tilts — large structured output
+    chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
     # prep narrative/expectations + pead-scorer stay on the default `manager` (Opus).
 
 # --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --

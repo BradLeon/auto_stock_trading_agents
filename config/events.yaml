@@ -1,0 +1,20 @@
+# 事件日历 — 调度器每个交易日检查，命中日期则触发对应分析师额外跑一次。
+# triggers: macro | sector | sector:<name> | pead:<SYM>（pead 触发 monitor 刷新）
+# ⚠️ 维护：每季度把下一季 FOMC/BLS 日期补进来；以下日期为 seed，
+#    TODO(user): 请对照 federalreserve.gov/monetarypolicy 与 bls.gov/schedule 核对。
+
+events:
+  # --- FOMC 决议日（2026 H2，TODO 核对）---
+  - {date: 2026-07-29, kind: fomc, label: "FOMC 决议", triggers: [macro]}
+  - {date: 2026-09-17, kind: fomc, label: "FOMC 决议", triggers: [macro]}
+  - {date: 2026-10-28, kind: fomc, label: "FOMC 决议", triggers: [macro]}
+  - {date: 2026-12-09, kind: fomc, label: "FOMC 决议", triggers: [macro]}
+
+  # --- 核心经济数据（示例，TODO 核对 bls.gov）---
+  - {date: 2026-07-14, kind: cpi, label: "6月 CPI 发布", triggers: [macro]}
+  - {date: 2026-08-07, kind: nfp, label: "7月非农", triggers: [macro]}
+
+  # --- 行业会议/发布会（示例，按需维护）---
+  # - {date: 2026-09-09, kind: industry_conf, label: "ECOC 2026 光通信展",
+  #    triggers: [sector:ai_hardware, pead:COHR, pead:LITE]}
+  # - {date: 2027-01-05, kind: industry_conf, label: "CES 2027", triggers: [sector:ai_hardware]}

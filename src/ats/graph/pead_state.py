@@ -56,5 +56,6 @@ class PeadState(BaseModel):
     decisions: list[TradeDecision] = Field(default_factory=list)
     decision_band: str = ""
     risk_adjustments: list[str] = Field(default_factory=list)
+    # legacy (pre-chief score execution path) — kept for checkpoint compatibility
     approval: BossApproval | None = None
     order_results: list[TradeLogEntry] = Field(default_factory=list)

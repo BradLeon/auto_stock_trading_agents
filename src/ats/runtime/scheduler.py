@@ -106,7 +106,8 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
                 elif action == "prep":
                     run_pead(sym, "prep", dry_run=dry_run, use_llm=use_llm)
                 elif action == "score":
-                    run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, channel="feishu")
+                    # v0.2: score persists a recommendation; _chief_daily 收口 at job end.
+                    run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm)
             except Exception as exc:  # noqa: BLE001 - one target must not break the rest
                 log.warning("PEAD %s %s failed: %s", sym, action, exc)
         ran[sym] = actions
@@ -114,11 +115,14 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
 
 
 def _daily(*, dry_run: bool) -> None:
-    run_if_session(dry_run=dry_run)
+    if get_config().app.schedule.daily_cycle_enabled:   # legacy full cycle, default off
+        run_if_session(dry_run=dry_run)
     _macro_weekly()      # top-down cascade: macro -> sector -> (daily) pead
     _sector_weekly()
+    _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
     pead_daily(dry_run=dry_run)
     _perf_snapshot()
+    _chief_daily(dry_run=dry_run)   # LAST: the Chief reads everything fresh and decides
 
 
 def _perf_snapshot() -> None:
@@ -166,6 +170,51 @@ def _push_risk_alert(review) -> None:
             body=review.regime_block()))
     except Exception as exc:  # noqa: BLE001 - push is best-effort
         log.info("risk alert push skipped: %s", exc)
+
+
+def _event_triggers() -> list[str]:
+    """Fire analyst refreshes for today's calendar events (config/events.yaml).
+    Returns the fired event labels (testable)."""
+    from ..config import load_events, load_pead_global
+    from .cli import run_macro_review, run_pead_monitor, run_sector_review
+
+    fired: list[str] = []
+    today = _today()
+    for ev in load_events():
+        if ev.date != today:
+            continue
+        log.info("event trigger: %s (%s) -> %s", ev.label, ev.kind, ev.triggers)
+        for trig in ev.triggers:
+            try:
+                if trig == "macro":
+                    run_macro_review(load_pead_global()["macro_review"]["name"])
+                elif trig == "sector":
+                    for name in load_pead_global()["sector_review"]["sectors"]:
+                        run_sector_review(name)
+                elif trig.startswith("sector:"):
+                    run_sector_review(trig.split(":", 1)[1])
+                elif trig.startswith("pead:"):
+                    run_pead_monitor(trig.split(":", 1)[1])
+                else:
+                    log.warning("unknown event trigger %r on %s", trig, ev.label)
+                    continue
+                fired.append(f"{ev.label}->{trig}")
+            except Exception as exc:  # noqa: BLE001 - one trigger must not break the job
+                log.warning("event trigger %s (%s) failed: %s", ev.label, trig, exc)
+    return fired
+
+
+def _chief_daily(*, dry_run: bool) -> None:
+    """Daily decision收口: the Chief reads all fresh artifacts and (via the trader's
+    single approval gate) proposes/executes trades. Quiet days -> zero decisions."""
+    if not is_trading_session():
+        return
+    try:
+        from .cli import run_chief
+
+        run_chief(dry_run=dry_run, channel=get_config().app.channel.kind)
+    except Exception as exc:  # noqa: BLE001 - chief must not break the daily job
+        log.warning("chief daily run failed: %s", exc)
 
 
 def _macro_weekly() -> None:

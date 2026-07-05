@@ -141,6 +141,7 @@ class ScheduleConfig(BaseModel):
     enabled: bool = False
     run_at: str = "16:15"
     timezone: str = "America/New_York"
+    daily_cycle_enabled: bool = False   # legacy full daily StateGraph cycle (PEAD-first MVP: off)
 
 
 class SectorBrief(BaseModel):
@@ -283,6 +284,14 @@ def load_sector_config(name: str = "ai_hardware"):
     r.setdefault("events_min_triage", 0.6)
     r.setdefault("dossier_excerpt_chars", 350)
     return SectorConfig.model_validate(raw)
+
+
+def load_events() -> list:
+    """Load config/events.yaml -> [CalendarEvent]. Missing/empty file -> []."""
+    from .schemas.events import CalendarEvent
+
+    raw = _load_yaml(_config_dir() / "events.yaml")
+    return [CalendarEvent.model_validate(e) for e in (raw.get("events") or [])] if raw else []
 
 
 def load_macro_config(name: str = "macro"):

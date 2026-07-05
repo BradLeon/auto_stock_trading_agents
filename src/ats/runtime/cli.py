@@ -90,47 +90,28 @@ def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False
 
 def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = False,
              offline: bool = False, use_llm: bool = True, transcript: str | None = None,
-             channel: str = "cli") -> dict:
-    """Run one PEAD phase (prep | score). Score pauses at HITL approval.
-
-    channel="cli": synchronous terminal approval. channel="feishu": async — the
-    score run checkpoints, sends a card, and exits; `ats serve` resumes the
-    `pead:<sym>:<fiscal>` thread on the Boss's tap. The deterministic risk clip
-    runs BEFORE the interrupt, so trades pass risk before approval is requested.
-    """
-    from ..config import load_pead_config
+             channel: str = "cli", chief: bool = False) -> dict:
+    """Run one PEAD phase (prep | score). v0.2: score produces a RECOMMENDATION
+    persisted in the dossier (no interrupt) — the Chief makes the trade call.
+    Pass chief=True to run the Chief immediately after a score completes."""
     from ..graph.pead import build_pead_graph
     from ..graph.pead_state import PeadState
 
     sym = symbol.upper()
-    is_async = phase == "score" and channel in ("feishu", "feishu_bot")
-    ch = get_channel(channel) if channel in ("feishu", "feishu_bot") else CLIChannel(auto=auto)
-    app = build_pead_graph(checkpointer=get_checkpointer(persist=is_async))
+    app = build_pead_graph(checkpointer=get_checkpointer(persist=False))
     now = datetime.now(timezone.utc)
-    fiscal = load_pead_config(sym).fiscal_label
     state = PeadState(symbol=sym, phase=phase, as_of=now, dry_run=dry_run, use_llm=use_llm,
                       use_broker=not offline, live_data=not offline, transcript_source=transcript)
-    thread_id = (f"pead:{sym}:{fiscal}".replace(" ", "") if is_async
-                 else f"pead-{sym}-{phase}-{now:%Y%m%d%H%M%S}")
-    cfg_run = {"configurable": {"thread_id": thread_id}}
+    cfg_run = {"configurable": {"thread_id": f"pead-{sym}-{phase}-{now:%Y%m%d%H%M%S}"}}
     print(f"▶ PEAD {phase} {sym}")
 
     result = app.invoke(state, config=cfg_run)
-
-    if "__interrupt__" in result and is_async:
-        req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
-        ch.send_approval_request(req, thread_id=thread_id)
-        print(f"⏸ {thread_id} awaiting Feishu approval. Run `ats serve` to handle the callback.")
-        return result
-
-    while "__interrupt__" in result:
-        req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
-        ch.push(Notification(kind="approval_request", title=f"PEAD {sym} decision",
-                             body=req.context_summary))
-        approval = ch.request_approval(req)
-        result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
-
     _pead_report(sym, phase, result)
+    if phase == "score":
+        if chief:
+            run_chief(dry_run=dry_run, channel=channel, auto=auto, offline=offline)
+        else:
+            print("→ 建议已入档；运行 `ats chief run` 收口交易决策")
     return result
 
 
@@ -152,13 +133,14 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
         print(f"Signal chain: {len(result.get('signal_chain', []))} names")
     else:
         sc = result.get("scorecard")
-        orders = result.get("order_results", [])
+        recs = result.get("decisions", [])
         if sc:
             print(f"PEAD SCORE COMPLETE — {symbol}  Scorecard {sc.total:+.2f} "
                   f"(门槛 {sc.threshold:+.1f}) — {sc.band}")
-        print(f"决策情景: {result.get('decision_band', '—')} · orders={len(orders)}")
-        for o in orders:
-            print(f"  • {o.action} {o.symbol} {o.qty:.0f} [{o.status}]")
+        print(f"决策情景: {result.get('decision_band', '—')} · 建议 {len(recs)} 条")
+        for d in recs:
+            size = f"${d.notional_usd:,.0f}" if d.notional_usd else (f"{d.qty:.0f}股" if d.qty else "")
+            print(f"  • 建议 {d.action} {d.symbol} {size}")
     print("=" * 70)
 
 
@@ -196,6 +178,92 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
 
     for sym in load_pead_global().get("targets", []):
         run_pead_monitor(sym, use_llm=use_llm)
+
+
+def events_list(*, days: int | None = None) -> int:
+    from datetime import date, timedelta
+
+    from ..config import load_events
+
+    events = load_events()
+    if days is not None:
+        today = date.today()
+        events = [e for e in events if today <= e.date <= today + timedelta(days=days)]
+        if not events:
+            print(f"(未来 {days} 天无日历事件 — 检查 config/events.yaml 是否需要补充下季度日期)")
+            return 0
+    if not events:
+        print("(config/events.yaml 为空)")
+        return 0
+    for e in sorted(events, key=lambda e: e.date):
+        print(f"  {e.date} [{e.kind:13}] {e.label} -> {', '.join(e.triggers)}")
+    if days is None and all(e.date < date.today() for e in events):
+        print("⚠️ 日历中全部事件已过期 — 请补充下季度 FOMC/BLS 日期")
+    return 0
+
+
+def run_chief(*, execute: bool = True, dry_run: bool = True, channel: str = "cli",
+              use_llm: bool = True, auto: bool = False, offline: bool = False) -> int:
+    """One Chief decision run: read all artifacts -> decide -> (optionally) execute."""
+    from ..agents.chief import decide as chief_decide
+    from ..memory import get_store
+
+    result = chief_decide.run(use_llm=use_llm, live_broker=not offline)
+    get_store().save_chief_run(cycle_id=result.cycle_id, as_of=result.as_of,
+                               summary=result.summary, decisions=result.decisions)
+    print(f"👔 chief {result.cycle_id}\n{result.summary}")
+    for d in result.decisions:
+        size = f"${d.notional_usd:,.0f}" if d.notional_usd else (
+            f"w={d.target_weight:.0%}" if d.target_weight else "?")
+        print(f"   {d.action.upper()} {d.symbol} {size} conv={d.conviction:.2f} — {d.rationale[:70]}")
+    if not result.decisions:
+        print("   (无行动 — 零决策)")
+        return 0
+    if execute:
+        from ..trader import execute as texec
+
+        texec.execute(result.decisions, source="chief", channel=channel,
+                      dry_run=dry_run, auto=auto, event_data=_pead_event_data())
+    return 0
+
+
+def _pead_event_data() -> dict[str, dict]:
+    """Expected Move per PEAD target from the freshest dossiers (for the L6 risk gate)."""
+    from ..config import load_pead_config, load_pead_global
+    from ..memory import get_store
+
+    out: dict[str, dict] = {}
+    for sym in load_pead_global().get("targets", []):
+        try:
+            d = get_store().get_dossier(sym.upper(), load_pead_config(sym).fiscal_label)
+            if d and d.market_setup and d.market_setup.expected_move_pct:
+                out[sym.upper()] = {"expected_move_pct": d.market_setup.expected_move_pct}
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def chief_show() -> int:
+    from ..memory import get_store
+
+    run = get_store().last_chief_run()
+    if run is None:
+        print("(no chief run yet — `ats chief run`)")
+        return 0
+    print(f"=== chief {run['cycle_id']} @ {run['as_of'][:16]} ===\n{run['manager_summary']}")
+    for d in run["decisions"]:
+        print(f"  {d['action']} {d['symbol']} ${d.get('notional_usd') or 0:,.0f} — "
+              f"{(d.get('rationale') or '')[:70]}")
+    return 0
+
+
+def chief_probe(*, offline: bool = False) -> int:
+    from ..agents.chief import assemble
+
+    ctx = assemble.build(live_broker=not offline)
+    print(f"=== chief context stats: {ctx.stats()} ===\n")
+    print(ctx.as_context())
+    return 0
 
 
 def risk_report(*, write_report: bool = False) -> int:
@@ -660,6 +728,17 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
+    ev.add_argument("action", choices=["list", "upcoming"])
+    ev.add_argument("--days", type=int, default=30, help="upcoming window")
+    ch = sub.add_parser("chief", help="chief 首席统一决策 (run / show / probe)")
+    ch.add_argument("action", choices=["run", "show", "probe"])
+    ch.add_argument("--live", action="store_true", help="execute for real (default dry-run)")
+    ch.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
+    ch.add_argument("--no-llm", action="store_true")
+    ch.add_argument("--offline", action="store_true", help="skip live broker read")
+    ch.add_argument("--no-execute", action="store_true", help="decide only, don't call trader")
+    ch.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli")
     rk = sub.add_parser("risk", help="risk officer 风控 (report / check)")
     rk.add_argument("action", choices=["report", "check"])
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
@@ -691,7 +770,9 @@ def main(argv: list[str] | None = None) -> int:
     pe.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
     pe.add_argument("--no-llm", action="store_true", help="skip LLM (stub agents)")
     pe.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli",
-                    help="score approval channel (feishu/feishu_bot = async via webhook)")
+                    help="approval channel when --chief executes")
+    pe.add_argument("--chief", action="store_true",
+                    help="score: run the Chief immediately after the recommendation persists")
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -721,6 +802,16 @@ def main(argv: list[str] | None = None) -> int:
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0
+    if args.command == "events":
+        return events_list(days=args.days if args.action == "upcoming" else None)
+    if args.command == "chief":
+        if args.action == "show":
+            return chief_show()
+        if args.action == "probe":
+            return chief_probe(offline=args.offline)
+        return run_chief(execute=not args.no_execute, dry_run=not args.live,
+                         channel=args.channel, use_llm=not args.no_llm,
+                         auto=args.yes, offline=args.offline)
     if args.command == "risk":
         if args.action == "report":
             return risk_report(write_report=args.report)
@@ -769,7 +860,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         run_pead(args.symbol, args.action, dry_run=not args.live, auto=args.yes,
                  offline=args.offline, use_llm=not args.no_llm, transcript=args.transcript,
-                 channel=args.channel)
+                 channel=args.channel, chief=getattr(args, "chief", False))
         return 0
     return 1
 

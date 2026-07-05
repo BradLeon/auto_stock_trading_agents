@@ -1,274 +1,237 @@
-# 设计文档：基于 AI Agents 的自动股票交易系统（auto_stock_trading_agents）
+# 多 Agent 交易系统 — 设计文档
 
-> 状态：v0.1（设计基线） · 最后更新：2026-06-13
-
-## 1. 背景与目标（Context）
-
-构建一个由多 Agent 协作、**人类在环（HITL）审批**的自动股票交易系统。
-
-**经确认的关键约束（决定架构）：**
-
-| 维度 | 决策 | 架构含义 |
-|---|---|---|
-| Boss 审批 | **真人审批（HITL）** | LangGraph `interrupt()` + checkpoint，可中断/可恢复 |
-| 交易周期 | **波段/持仓（日级–周级）** | 批处理 + 调度，不上 streaming/低延迟撮合 |
-| 落地阶段 | **先 IBKR Paper Trading** | 模拟盘跑通全链路并验证策略 |
-| 标的范围 | **少量精选（3–10 只）**，如 NVDA/GOOGL/AAPL | 基本面/技术面按标的实例化 |
-| 券商 | **仅 IBKR** | `ib_async` + 独立 paper/live profile |
-| LLM | **仅 Claude Opus（`claude-opus-4-8`）** | Agent 层与模型解耦，OpenAI 兼容格式便于切换 |
-
-**开发规范：** Agent 编排用 LangGraph；Agent 执行流程用 Skills（SKILL.md）规范；数据结构用 Pydantic 实例化。
-
-**本阶段目标产出：** 可运行的端到端骨架——在 IBKR 模拟盘上完成「数据采集 → 多分析师并行 → 风控约束 → Manager 决策 → 人类审批 → Trader 执行 → 记忆/绩效回写」一个完整周期。
-
-> 备注：本运行环境已挂载 **IBKR MCP**、**Aiera（财报电话会纪要）MCP**、Morningstar/FactSet/S&P 等金融数据 MCP，可作为数据源/券商层的加速选项。
->
-> 参考开源项目：[TradingAgents](https://github.com/TauricResearch/TradingAgents)、[anthropics/financial-services](https://github.com/anthropics/financial-services)。
+> 状态：**v0.2** · 最后更新：2026-07-05（v0.1 基线 2026-06-13）
+> v0.2 核心变化：PEAD-first 架构定型；行业分析师/宏观策略师/风控官/Trader/Chief 全部落地；
+> **决策收口 Chief**（分析师只产研究、不出单）；周期+事件双触发；级联注入原则明确化。
 
 ---
 
-## 2. 总体架构
+## 1. 背景与目标
+
+个人投资者的多 agent 美股交易系统：分析师团队产出研究 → **Chief 统一决策** → 真人（Boss）
+审批 → Trader 执行，风控官全程硬约束。
+
+| 约束 | 决定 |
+|---|---|
+| 决策权 | 分析师不出单；**只有 Chief 产生 TradeDecision**；只有 Boss（真人）放行 |
+| 审批 | 单一审批点：`trader.execute()`（CLI/飞书），任何下单必过 |
+| 周期 | swing/position（日/周级），非高频；**PEAD 财报事件驱动为 MVP 主线** |
+| 券商 | IBKR（paper 7497 → live 7496 仅配置切换，下单前 LIVE 二次确认） |
+| 组合 | 3-15 个美股标的，AI 硬件产业链为主（有意集中，风控设高天花板） |
+| LLM | OpenRouter 多模型路由：Opus 4.8 做判断、Gemini Flash 做高频分诊/抽取 |
+
+## 2. 总体架构（v0.2）
 
 ```
-                   ┌─────────────────────── 调度 (scheduler / CLI) ───────────────────────┐
-                   │                每日盘前/盘后触发一个 trading cycle                      │
-                   ▼
-        ┌───────────────────┐
-        │  数据采集 ingest    │  yfinance / SEC / 财报纪要 / 新闻 / 社媒 / 研报 / 宏观
-        └─────────┬─────────┘
-                  │  (写入 Context Memory，产出标准化 Pydantic 数据)
-                  ▼
-   ┌──────────────────────── 分析师团队（LangGraph 并行 fan-out, Send API）────────────────────┐
-   │  宏观分析师×1(全局)   行业分析师×N(按板块)   基本面×M(按标的)   技术面×M(按标的)              │
-   └──────────────────────────────────┬────────────────────────────────────────────────────┘
-                                       ▼  (各自产出 AnalystReport)
-                          ┌────────────────────────┐
-                          │   风控负责人 RiskManager │  读 IBKR Portfolio → Guardrails
-                          └───────────┬────────────┘
-                                      ▼
-                          ┌────────────────────────┐
-                          │      Manager（决策）     │  报告 + 约束 → TradeDecision[]
-                          └───────────┬────────────┘
-                                      ▼   interrupt()  ← LangGraph 暂停
-                          ╔════════════════════════╗
-                          ║  Boss 审批（真人 HITL）  ║◀──▶ BossChannel (CLI / 飞书 / Discord)
-                          ╚═══════════┬════════════╝
-                                      ▼  (resume)
-                          ┌────────────────────────┐
-                          │   Trader（纯执行）       │  IBKR 下单 + 交易日志
-                          └───────────┬────────────┘
-                                      ▼
-                          ┌────────────────────────┐
-                          │  记忆/绩效回写 memory     │  trade log / reports / performance
-                          └────────────────────────┘
+                    周期触发(cron: 每交易日) + 事件触发(events.yaml + 财报临近)
+                                          │
+   ┌──────────────────────────────────────┼──────────────────────────────────────┐
+   │  分析师层（平级，各自取数→分析→存档；可读上游已发布报告，不可修改，不出单）      │
+   │                                                                              │
+   │  宏观策略师(周一+FOMC/CPI/NFP) ──feed──▶ 行业分析师(周一+行业会议) ──inject──▶ │
+   │      └─▶ macro_reviews                     └─▶ sector_reviews                │
+   │                                                        │                     │
+   │  PEAD 基本面分析师(每日 monitor/research；财报前 prep；财报后 score)           │
+   │      └─▶ pead_dossier（Scorecard + 交易【建议】，不直接出单）                  │
+   │                                                                              │
+   │  风控官(每日快照，确定性无LLM) ─▶ risk_reviews（6层画像/破限/risk_state）      │
+   │  Trader(确定性无LLM) ─▶ 实时 portfolio / fills / performance                  │
+   └──────────────────────────────────────┬──────────────────────────────────────┘
+                                          ▼
+              Chief 首席（唯一决策者，每交易日收口 + score 后手动 --chief）
+              读全部存档: dossier + sector_reviews + macro_reviews + risk_reviews
+                        + 实时 portfolio + 战绩反馈
+                                          ▼  TradeDecision[]
+              trader.execute()  ═══ 单一执行管道 ═══
+                ① 6层风控硬闸(pre_trade: block/clip) → ② Boss 审批(CLI/飞书)
+                → ③ IBKR 下单 → ④ trades(含上下文JSON)+fills 落库
 ```
 
-**编排模型：** 单个 LangGraph `StateGraph`，节点 = Agent，边 = 数据/控制流。分析师层用 **Send API** 做 map 式并行扇出（按标的/板块动态生成节点调用）。Boss 审批用 **`interrupt()`** 暂停、checkpoint 持久化、人类响应后 `Command(resume=...)` 继续。整个 cycle 可断点恢复（进程重启不丢状态）。
+遗留路径：v0.1 的单日循环 StateGraph（ingest→四分析师→manager→trader）保留在
+`graph/build.py`，由 `schedule.daily_cycle_enabled`（默认 **false**）门控——PEAD-first
+MVP 不用它。
 
----
+## 3. 角色与决策权矩阵
 
-## 3. Agent 角色与职责
-
-| 角色 | 实例化 | 输入 | 输出（Pydantic） | 节点类型 |
+| 角色 | 实现 | 产出（写） | 可读 | 决策权 |
 |---|---|---|---|---|
-| 宏观分析师 | 全局 ×1 | 利率/CPI/非农(FRED)、关税/政治/地缘、SPX/NDX 盈利、VIX、贪婪指数 | `MacroReport` | LLM 节点 |
-| 行业分析师 | 按板块 ×N | 行业景气度、产业链上下游瓶颈/利润传导（如 AI 硬件链） | `IndustryReport` | LLM 节点 |
-| 基本面分析师 | 按标的 ×M | 财报、Earnings Call、SEC Filings、yahooFinance | `FundamentalReport` | LLM 节点 |
-| 技术面分析师 | 按标的 ×M | 价量、均线/MACD/RSI、形态、支撑阻力 | `TechnicalReport` | LLM 节点（含 TA 工具） |
-| 风控负责人 | 全局 ×1 | IBKR Portfolio：敞口、杠杆、盈亏比、行业集中度、持仓占比 | `RiskGuardrails` | LLM + 工具节点 |
-| Manager | 全局 ×1 | 全部分析报告 + Guardrails | `TradeDecision[]` | LLM 节点 |
-| **Boss** | 真人 | Manager 决策 | Approve/Reject/指令 | **HITL interrupt（非 LLM）** |
-| Trader | 全局 ×1 | 已审批的决策 | `OrderResult[]` + `TradeLog` | 纯工具节点（无 LLM 或仅做参数校验） |
+| **宏观策略师** | `agents/macro/`（权益策略师范式，Opus） | macro_reviews（regime/利率路径/**sector_tilts**） | 定量盘+Tavily+FactSet | ❌ 不出单 |
+| **行业分析师** | `agents/sector/`（L1-L6 分层，Opus） | sector_reviews（层评审/**company_calls**） | 快照+PEAD档案+宏观评审(上游) | ❌ 不出单 |
+| **PEAD 分析师** | `agents/pead/`（prep/monitor/score） | pead_dossier（叙事/预期/Scorecard/**建议**） | 数据源+行业/宏观评审(上游注入) | ❌ 只出建议 |
+| **风控官** | `risk/`（**确定性无LLM**） | risk_reviews（6层画像/breaches/risk_state） | portfolio+价格+存档 | ❌ 硬闸门（否决/裁剪，不产生交易） |
+| **Trader** | `trader/`（**确定性无LLM**） | trades/fills/performance | IBKR | ❌ 纯执行+记录 |
+| **Chief 首席** | `agents/chief/`（Opus） | cycles/decisions（chief-*） | **全部存档+实时portfolio** | ✅ **唯一产生 TradeDecision** |
+| **Boss** | 真人（CLI/飞书审批） | approval | 审批卡片（含风控破限） | ✅ **唯一放行** |
 
-**设计要点：**
-- **分析师互相独立**（无串话），降低偏见传染；并行执行。
-- **Trader 不做判断**：只把 `TradeDecision` 翻译成 IBKR 订单并执行，强约束防止越权。
-- **风控产出的是 guardrail 约束**（单一持仓上限、板块集中度上限、禁止加仓清单等），Manager 必须在约束内决策；并在 Manager 输出后加一个**确定性校验器**做硬性裁剪，不完全依赖 LLM 自觉遵守。
+**隔离原则**（v0.2 明确化）：分析师平级——各自独立分析、只写自己的存档；**可以读取**
+其他分析师**已发布**的报告作为上游背景（自上而下级联：宏观→行业→PEAD，如投行策略师
+报告全公司可读），**不能修改**对方产出、**不能出单**。级联注入点：
+`sector/assemble.py`(宏观背景块)、`graph/pead.py prep_fetch`(行业+宏观块)、
+`pead/monitor.py`(regime hints)，全部由 `pead.yaml` 开关控制。
 
----
+## 4. 触发矩阵
 
-## 4. LangGraph State 设计
+| 角色/动作 | 周期型 | 事件型 |
+|---|---|---|
+| PEAD monitor+research | 每交易日 | `pead:<SYM>` 日历事件（行业会议等） |
+| PEAD prep | — | 财报前 ≤`prep_days_before`(3) 日 |
+| PEAD score | — | 财报后（bmo 当日 / amc 次日） |
+| 行业分析师 review | 每周一 | `sector[:name]` 日历事件（行业会议/发布会） |
+| 宏观策略师 review | 每周一 | `macro` 日历事件（**FOMC/CPI/NFP**/政府报告） |
+| 风控官快照 | 每交易日收盘 | derisk/破限 → 飞书告警 |
+| Trader 绩效快照 | 每交易日收盘 | — |
+| **Chief 收口** | **每交易日（调度末位，读全部新鲜产出）** | score 完成（手动 `--chief`）/ 手动 `ats chief run` |
 
-`src/ats/graph/state.py` —— 用 Pydantic 模型作为 graph state：
+事件日历：`config/events.yaml`（date/kind/label/triggers），`scheduler._event_triggers()`
+每日检查，命中触发对应分析师**额外**跑一次；置于 pead_daily 之前使刷新级联进当日
+monitor 与当晚 Chief。维护：每季度补下季 FOMC/BLS 日期（`ats events upcoming` 会提示过期）。
 
-```python
-class TradingState(BaseModel):
-    cycle_id: str
-    as_of: datetime
-    watchlist: list[Ticker]                      # 本轮标的
-    market_data: dict[str, MarketSnapshot] = {}  # ingest 产出
-    macro_report: MacroReport | None = None
-    industry_reports: Annotated[list[IndustryReport], add]   # reducer 合并并行结果
-    fundamental_reports: Annotated[list[FundamentalReport], add]
-    technical_reports: Annotated[list[TechnicalReport], add]
-    risk_guardrails: RiskGuardrails | None = None
-    decisions: list[TradeDecision] = []
-    approval: BossApproval | None = None         # interrupt 回填
-    order_results: list[OrderResult] = []
-```
+调度顺序（`scheduler._daily`，mon-fri cron + NYSE session 过滤）：
+`[遗留日循环(默认关)] → 宏观周 → 行业周 → 事件触发 → PEAD(research→monitor/prep/score)
+→ 绩效+风控快照 → Chief 收口`。
 
-- 并行分析师用 `Annotated[list[...], operator.add]` reducer 聚合。
-- Checkpointer：开发期 `SqliteSaver`（`./var/checkpoints.sqlite`），生产 `PostgresSaver`。
-
----
-
-## 5. 数据源模块
-
-`src/ats/data/` —— 统一 `DataSource` 协议（`fetch() -> Pydantic 模型`），可缓存、可降级、带速率限制。
-
-| 子模块 | 内容 | 首选实现 | 备选/MCP |
-|---|---|---|---|
-| `market_data.py` | 价量、基础行情 | `yfinance` | IBKR MCP / Finnhub |
-| `fundamentals.py` | 财报、SEC Filings | `edgartools`(SEC EDGAR) + `yfinance` | Daloopa/FactSet MCP |
-| `transcripts.py` | Earnings Call 纪要 | **Aiera MCP** | FMP / API Ninjas |
-| `news.py` | 财经新闻(Bloomberg/Reuters 类) | Finnhub / Tavily / NewsAPI | — |
-| `social.py` | Reddit / X，重点账号(Trump/Karpathy/Musk/Huang) | Reddit `PRAW`；X 用官方 API 或备用抓取 | — |
-| `research.py` | 研报/newsletter（SemiAnalysis、MarketSenseAI、Substack） | RSS + 正文抓取 | — |
-| `macro.py` | 利率/CPI/非农、VIX、贪婪指数、SPX/NDX | FRED API + yfinance(^VIX,^GSPC,^IXIC) + CNN F&G | — |
-
-约定：所有适配器输出标准化 Pydantic 模型；原始抓取内容落 Context Memory；外部失败要降级（返回 `None`/缓存）而非中断整个 cycle。新闻类付费源短期用 Finnhub/Tavily 替代并标注覆盖差距，避免「沉默截断」。
-
----
-
-## 6. Context Memory
-
-`src/ats/memory/` —— 双层：
-- **结构化层（SQLite→Postgres）**：`trade_log`、`decisions`（含审批结果）、`reports`、`performance`（每日 PnL、命中率、盈亏比、回撤）。
-- **语义层（向量库 Chroma）**：报告/新闻/研报正文 embedding，供分析师 RAG 召回历史相似情景，也供 Boss 通过 `BossChannel.fetch_report_context()` 调取。
-
-绩效追踪：每个 cycle 结束后计算并入库，作为下一轮 Manager 的反馈输入。注意区分 LangGraph **checkpoint（单 cycle 短期状态）** 与 **Context Memory（跨 cycle 长期记忆）**。
-
----
-
-## 7. Pydantic 数据契约
-
-`src/ats/schemas/` —— 所有 Agent I/O 强类型化，LLM 节点用 **structured output / tool-calling** 强制产出对应 schema：
-- `market.py`：`Ticker`, `MarketSnapshot`, `OHLCV`
-- `reports.py`：`MacroReport`, `IndustryReport`, `FundamentalReport`, `TechnicalReport`（共同基类含 `signal: Literal["bullish","neutral","bearish"]`, `conviction: 0-1`, `thesis`, `key_risks`, `sources`）
-- `risk.py`：`RiskGuardrails`（`max_position_pct`, `max_sector_pct`, `max_gross_leverage`, `no_add_list`, `forced_trim`...）
-- `decision.py`：`TradeDecision`、`BossApproval`（`status: approved/rejected`, `overrides`, `direct_instructions`）
-- `portfolio.py`：`Position`, `PortfolioSnapshot`, `ExposureBreakdown`
-- `memory.py`：`TradeLogEntry`, `PerformanceRecord`
-- `channel.py`：`Notification`, `ApprovalRequest`, `ReportBundle`（Boss 交互用，见 §11）
-
----
-
-## 8. Skills（Agent 执行流程规范）
-
-`src/ats/skills/<role>/SKILL.md` —— 每个角色一个 Skill，固化其分析流程：目标、需调用的数据工具、分析步骤/检查清单、输出 schema 约束、few-shot 示例。Agent 节点运行时把对应 SKILL.md 注入 system prompt（配合 Claude **prompt caching** 缓存稳定部分降本）。「流程」与「代码」解耦，便于迭代调参而不改 Python。
-
----
-
-## 9. LLM 抽象层（Claude Opus，可切换）
-
-`src/ats/llm/gateway.py` —— `get_model(role: str) -> ChatModel`，按 `config/settings.yaml` 的 `routing` 选模型。
-- **当前主路径：OpenRouter**（OpenAI 兼容中转）→ `provider: openai` + `base_url=https://openrouter.ai/api/v1`，默认模型 `anthropic/claude-opus-4.8`。改 `default_model` 一行即可切换 provider/model，Agent 代码零改动。
-- 备路径：`langchain_anthropic.ChatAnthropic`（直连 Anthropic，`provider: anthropic`）。
-- 结构化输出统一用 **tool-calling**（`with_structured_output(method="function_calling")`），兼容 OpenRouter 背后的 Anthropic/OpenAI/Bedrock；LLM-facing schema 不放 min/max 约束（部分 provider 拒绝），数值在代码里 clamp。
-- 温度/max_tokens/重试/超时集中在 gateway 配置。
-
----
-
-## 10. IBKR 集成（Paper）
-
-`src/ats/broker/ibkr.py` —— 封装连接 IB Gateway / TWS **paper 账户**：
-- 库：`ib_async`（`ib_insync` 的活跃维护继任者）；或用 **IBKR MCP** 作为替代/补充接口。
-- 能力：`get_portfolio()`（供风控）、`place_order()` / `cancel_order()`（供 Trader）、`get_positions()`、`get_account_summary()`。
-- 安全：paper 与 live 用独立 config profile；Trader 下单前做最终校验（在 guardrails 内、不超审批范围）；所有下单写 `trade_log`。
-
----
-
-## 11. HITL 审批流 与 Boss 交互客户端
-
-### 11.1 审批流（图侧）
-
-Manager 节点后接 `interrupt()`：把 `TradeDecision[]` 摘要交给 `BossChannel` → 人类回 `BossApproval`（approve / reject / 改写 / 直接指令）→ `Command(resume=approval)` 继续到 Trader。被 reject 的决策不下单并记录原因；Boss `direct_instructions` 可绕过 Manager 直接构造订单交给 Trader。状态全程 checkpoint，审批可跨进程/隔天进行。
-
-### 11.2 Boss 交互客户端抽象（关键设计决策）
-
-> **决策：设计层面一次性纳入抽象，实现层面分两期。** 一期实现 CLI 通道跑通 backend；二期加飞书（优先）/Discord 适配器。LangGraph 的 interrupt/resume 已把审批机制与图逻辑解耦，审批入口只是 I/O 边缘适配器，留好抽象点即可零改图、零改 Agent 地接入新渠道。
-
-`src/ats/channel/` —— 定义端口接口 `BossChannel`（Protocol）：
-
-```python
-class BossChannel(Protocol):
-    def push(self, msg: Notification) -> None: ...                                  # 主动推送（决策待审、成交回报）
-    def request_approval(self, req: ApprovalRequest) -> BossApproval: ...            # 阻塞等审批
-    def fetch_report_context(self, query: str) -> ReportBundle: ...                  # Boss 调取相关 report（查 Context Memory）
-```
-
-适配器：
-- `cli_channel.py` —— **一期**：终端交互，展示决策摘要、读取 approve/reject/指令、支持 `report <ticker>` 调取上下文。
-- `feishu_channel.py` —— **二期（优先）**：飞书自定义机器人 + 事件订阅回调；用消息卡片承载决策摘要与「批准/驳回」按钮；Boss 可在群里发指令查 report。可由 Hermes / OpenClaw 这类对话式 agent 托管前端。
-- `discord_channel.py` —— **二期**：Discord bot，同上交互模型。
-
-实现注意：审批是阻塞式（图在 `interrupt` 处等待），飞书/Discord 适配器需用「图暂停 + checkpoint 落库 → 异步收到机器人回调 → 用同一 thread_id resume 图」的模式，而非长连接死等。
-
----
-
-## 12. 仓库结构
+## 5. PEAD 事件工作流（MVP 主线）
 
 ```
-auto_stock_trading_agents/
-├── pyproject.toml                # uv，依赖与脚本入口
-├── .env.example                  # API keys (Anthropic/FRED/Finnhub/Reddit/IBKR...)
-├── docs/DESIGN.md                # 本文档
-├── config/
-│   ├── settings.yaml             # 标的、板块映射、调度、风险阈值、model_routing、channel
-│   └── watchlist.yaml
-├── src/ats/
-│   ├── config.py                 # pydantic-settings 加载
-│   ├── schemas/                  # §7 数据契约
-│   ├── llm/gateway.py            # §9
-│   ├── data/                     # §5 数据源适配器
-│   ├── memory/                   # §6 结构化+向量
-│   ├── agents/                   # 各角色节点 (analysts/, risk_manager, manager, trader)
-│   ├── skills/                   # §8 各角色 SKILL.md
-│   ├── channel/                  # §11 BossChannel 抽象 + cli/feishu/discord 适配器
-│   ├── graph/                    # state.py / build.py / nodes.py / checkpoint.py
-│   ├── broker/ibkr.py            # §10
-│   └── runtime/                  # cli.py（跑/恢复一个 cycle）, scheduler.py
-└── tests/                        # 单测 + 用 mock 数据/paper 账户的集成测试
+START → load → ┬ prep:  fetch → narrative → expectations → signal_chain → persist → END
+               └ score: fetch → actuals → scorecard → decision(建议) → persist → END
+```
+- **prep**（财报前）：建期望基准——叙事（注入：静态行业笔记+最新行业/宏观评审+monitor
+  累积的活叙事 `prior_narrative`，**prep 是唯一叙事 consolidation 点**）、分维度预期
+  （保守/中性/乐观）、信号链、市场 setup（抢跑/期权 Expected Move）。
+- **monitor**（财报间每日）：新闻(Finnhub+RSS→**Gemini Flash 分诊降噪**→高分抓正文)+研报
+  insight 折进 dossier 叙事；结构化维度变更持久化。
+- **score**（财报后）：纪要/8-K/财报→抽实际值→对基准打 Surprise Scorecard（-2..+2 加权）
+  →产出**建议**（scoped 风控预夹，risk-aware）→ 存 dossier。**不出单、不审批**——Chief 收口。
+- 数据源清单与状态见 `docs/DATA_SOURCES.md`（11 个源 + 2 条 LLM 通道 + 行业知识注入）。
+
+## 6. Chief 统一决策（v0.2 新增）
+
+`agents/chief/`：`assemble.build()` 只读收集六块（实时持仓 / PEAD 档案**含新鲜度标注**
+（score 期 ≤3 交易日=可行动，否则仅背景）/ 行业 company_calls / 宏观 sector_tilts /
+风控 risk_state+breaches（derisk 时前置硬指令）/ 战绩反馈）→ 单次 Opus
+（`chief` 角色，`skills/chief`）→ `TradeDecision[]`。
+
+Skill 纪律：PEAD scorecard 是主 alpha；行业/宏观是倾斜修正器非独立信号；risk_state 是
+约束；持仓复查（止损/落空/降级）；**零交易是正确默认**。
+
+执行：`trader.execute(decisions, source="chief")` —— 风控硬闸+Boss 审批+落库全在这一个
+管道里，**全系统无第二个审批点**。CLI：`ats chief {run|show|probe}`（probe 免 LLM 查上下文）。
+
+## 7. 六层风控（确定性硬约束）
+
+`risk/`（无 LLM）；阈值在 `settings.yaml risk:`；产业链层限额在 `sectors/ai_hardware.yaml`
+各层 `weight_cap`。
+
+| 层 | 硬限额 | 动作 |
+|---|---|---|
+| 1 标的 | 单票 20% · **每产业链层 weight_cap**(L6设备10%…) · 止损-25% | 削/block/强制trim |
+| 2 组合 | 杠杆 1.0 · 现金 ≥5% | 缩买单 |
+| 3 因子 | 组合 beta ≤1.5 · 相关簇 ≤75%(实算相关矩阵+聚簇；有意集中故高) | block 加仓 |
+| 4 回撤 | 回撤-15%→**derisk**(只许减仓) · 日亏-5%→停新仓 | block 所有新买 |
+| 5 压测 | 情景损失≤25%NAV(beta×冲击+AI泡沫打簇) | block 加重敞口 |
+| 6 事件 | 财报 gap≤3%NAV(仓位×Expected Move) | 削 notional |
+
+强制点：`risk.checks.pre_trade()` 在 **trader.execute 下单前**（含 Chief/手动单）与
+PEAD score 建议生成时（scoped）。每日快照存 `risk_reviews`，derisk/破限推飞书。
+`ats risk {report|check}`。
+
+## 8. Context Memory（SQLite `var/ats.sqlite`，13 表）
+
+| 表 | 写入者 | 读取者 |
+|---|---|---|
+| pead_dossier | PEAD prep/monitor/score | Chief、行业分析师、monitor 自身 |
+| pead_events | monitor(+研报注入)，含 triage_score | monitor 上下文、行业分析师 |
+| research_articles/insights | 研报通道(Gmail→QQ IMAP+RSS) | 行业分析师、monitor |
+| sector_reviews | 行业分析师 | Chief、PEAD 注入、行业历史对比 |
+| macro_reviews | 宏观策略师 | Chief、行业/PEAD 注入 |
+| risk_reviews | 风控官(每日) | Chief、告警 |
+| trades(含context JSON)/fills | Trader | Chief 战绩反馈、绩效分析 |
+| performance(含account_id) | Trader 每日快照 | Chief、`ats trader perf`、风控回撤 |
+| cycles/decisions | Chief(chief-*) + 遗留日循环 | Chief 自反馈、审计 |
+| reports | 遗留日循环 | 遗留 |
+
+原始行情/基本面等不落库（run 时现取）；`var/data_dumps/` 仅人工查验。
+向量记忆层（Chroma）仍未建——见路线图。
+
+## 9. Schemas（`src/ats/schemas/`）
+
+`market` `portfolio`(Position 含 beta) `decision`(TradeDecision/BossApproval)
+`memory`(TradeLogEntry/Fill/PerformanceRecord) `risk`(RiskGuardrails/**RiskReview** 6层)
+`pead`(PeadConfig/ExpectationSet/Scorecard/PeadDossier) `news`(NewsItem/ContextUpdate)
+`research`(Article/Insight) `sector`(SectorConfig 含 weight_cap/SectorReview)
+`macro`(MacroData 含信用利差·大宗) `macro_strategy`(MacroReview/SectorTilt)
+`events`(CalendarEvent) `channel` `reports`(遗留日循环)
+
+## 10. Skills 与 LLM 路由
+
+15 个 skill（`src/ats/skills/<slug>/SKILL.md`）。路由（`settings.yaml llm.routing`，
+经 OpenRouter）：
+
+- **Opus 4.8**（判断，低频）：`chief` `manager`(遗留) `sector_analyst` `macro_strategist`
+  `research_extract` + PEAD prep 叙事/预期、scorer
+- **Gemini 2.5 Flash**（高频/抽取）：`news_triage`(新闻分诊) `context_monitor`(monitor 合成)
+  `actuals_extract`(财报实际值抽取)
+
+外部正文均含提示注入防护（skill 声明不可信数据 + 结构化输出 + 代码侧白名单/clamp）。
+
+## 11. HITL 审批与通道
+
+唯一审批点 `trader.execute()`：构 `ApprovalRequest`（含账户/端口/paper|live 警示 + 风控
+破限清单）→ `channel.request_approval()`。通道：CLI（同步交互）、飞书（卡片+`ats serve`
+webhook 回调）。审批结果与完整上下文（决策+审批人+来源）JSON 落 `trades.context`。
+遗留日循环仍有自己的 interrupt 流（不用时无影响）。
+
+## 12. 仓库结构（v0.2 实况）
+
+```
+src/ats/
+  agents/            # base(run_structured) analysts manager risk_manager risk_validator
+    pead/            #   prep score monitor triage research outputs
+    sector/          #   assemble review report context outputs
+    macro/           #   assemble review report context outputs
+    chief/           #   assemble decide outputs        ← v0.2 决策收口
+  broker/ibkr.py     # IBKR: portfolio/pnl/fills/orders/cancel
+  channel/           # cli / feishu / feishu_bot + server 回调
+  data/              # market fundamentals macro consensus options runup earnings_calendar
+                     # news(分诊) research(newsletter) transcript documents industry(行业知识)
+                     # factset websearch(Tavily) sector_snapshot web indicators base
+  graph/             # build+nodes(遗留日循环) pead+pead_state(事件图) checkpoint
+  memory/            # store(13表) performance
+  risk/              # correlation stress assess checks report   ← 6层风控
+  trader/            # portfolio performance analytics execute   ← 执行+绩效
+  runtime/           # cli scheduler server
+  schemas/ skills/
+config/              # settings watchlist pead(+pead/<SYM>) sectors/ macro.yaml events.yaml news_sources
+docs/                # DESIGN DATA_SOURCES SECTOR_ANALYST GO_LIVE
 ```
 
----
+## 13. 路线图
 
-## 13. 技术栈
+**已完成（v0.1→v0.2）**：✅日循环基线 ✅PEAD prep/monitor/score ✅新闻双通道(分诊+研报)
+✅行业知识注入 ✅行业分析师 ✅宏观策略师(FactSet) ✅Trader(审批执行+绩效) ✅风控官(6层)
+✅Chief 收口 ✅事件日历 ✅飞书异步审批 ✅每日快照/告警
 
-`langgraph` · `langchain-anthropic` · `litellm` · `pydantic` / `pydantic-settings` · `ib_async` · `yfinance` · `edgartools` · `praw` · `chromadb` · `pandas` / `pandas-ta`(技术指标) · `fredapi` · `tenacity`(重试) · `apscheduler` + `pandas_market_calendars`(调度/交易日历) · `uv` 包管理 · `pytest`。二期：`lark-oapi`(飞书) / `discord.py`。
+**下一步**：① events.yaml 日期校准与季度维护流程 ② Chief 决策复盘（决策 vs 实际收益
+归因，喂回 skill）③ PEAD 财报后 Day1-2 漂移跟踪校准 Scorecard 阈值 ④ 向量记忆层
+⑤ live 切换 checklist（GO_LIVE.md）⑥ 遗留日循环退役或改造决定
 
----
+## 14. 验证
 
-## 14. 分阶段交付路线
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest tests/ -q          # 全量
+# 单角色
+ats macro review / ats sector review ai_hardware / ats pead prep|score COHR
+ats risk report / ats trader portfolio / ats chief probe
+# 端到端（真实链路）
+ats schedule --now        # 宏观→行业→事件→PEAD→快照→Chief，全流程 dry-run
+ats chief run             # 收口：读存档→决策→风控→审批→(dry-run)执行
+```
 
-1. **骨架与契约**：仓库结构、`pyproject`、`config`、全部 Pydantic schema、LLM gateway（先单一 Claude Opus）。
-2. **图骨架**：用 stub 节点搭起完整 LangGraph 拓扑，含并行 fan-out、interrupt 审批（CLI 通道）、checkpoint —— 先让「空跑」端到端通。
-3. **数据源**：market_data + macro + fundamentals 三个核心源接通（其余后补/降级）。
-4. **分析师 + Skills**：实现 4 类分析师节点 + 对应 SKILL.md，接真实数据。
-5. **风控 + IBKR 读**：连 paper 账户读 Portfolio，产出 guardrails。
-6. **Manager + HITL CLI**：决策 + 真人审批交互。
-7. **Trader + 下单**：paper 下单、交易日志。
-8. **Memory + 绩效**：回写、绩效计算、反馈进 Manager。
-9. **调度**：盘前/盘后自动触发。
-10. **（二期）Boss 飞书/Discord 通道**：实现 `feishu_channel.py` / `discord_channel.py`。
+## 15. 已知风险与待定
 
----
-
-## 15. 验证（端到端）
-
-- **空跑**：阶段 2 后，`python -m ats.runtime.cli run --dry-run` 跑完整图（stub 数据），在 Manager 后正确 interrupt，`--resume` 后到达 Trader（mock）。验证并行 reducer 聚合、checkpoint 恢复。
-- **数据源单测**：每个适配器对 mock 响应解析为正确 Pydantic 模型；失败时降级不崩。
-- **IBKR 集成**：连本地 IB Gateway paper 账户，`get_portfolio()` 返回真实持仓；提交一笔限价单并在 TWS 中确认 + `trade_log` 落库。
-- **HITL**：CLI 展示决策 → 输入 approve/reject → 验证 reject 不下单、approve 正确下单、direct_instruction 绕过 Manager。
-- **全链路冒烟**：3 只标的（NVDA/GOOGL/AAPL）跑一个真实 cycle 到 paper 成交，检查 reports/decisions/trade_log/performance 四表入库。
-- `pytest` 全绿。
-
----
-
-## 16. 风险与待定项
-
-- **新闻/社媒数据获取**：Bloomberg/Reuters 官方 API 昂贵；X API 受限。短期用 Finnhub/Tavily/Reddit 替代并标注覆盖差距，避免「看起来全覆盖实则缺失」。
-- **LLM 成本**：3–10 标的 ×4 分析师 + 长上下文，单 cycle token 量可观 → 用 prompt caching、按角色路由（部分角色可降级到便宜模型）、控制召回上下文长度。
-- **风控硬约束**：Manager 输出后用确定性校验器做硬裁剪，不完全依赖 LLM 自觉遵守。
-- **时区/交易日历**：调度需处理美股交易日/盘前盘后，用 `pandas_market_calendars`。
-- **审批渠道异步性**：飞书/Discord 审批必须走「checkpoint + 回调 resume」模式，不可长连接死等（见 §11.2）。
+- events.yaml 日期需人工季度维护（过期有 CLI 提示，但无自动抓取）
+- Chief 每日一次 Opus（~$0.3-0.6/次）；安静日零决策不发审批卡
+- 相关簇/压测基于历史相关性与 beta 代理，非完备风险模型（个人投资者权衡）
+- 韩/日标的数据退化（earnings/options/news 无覆盖）
+- 遗留日循环与新架构并存，长期需退役决定

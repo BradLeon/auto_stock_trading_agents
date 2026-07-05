@@ -31,13 +31,30 @@ llm:
     macro_strategist: {max_tokens: 8192} # weekly macro regime + sector tilts — large structured output
     # prep narrative/expectations + pead-scorer stay on the default `manager` (Opus).
 
-# --- Risk guardrail defaults (risk_manager may tighten, never loosen) --------
+# --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --
 risk:
+  # L1 标的
   max_position_pct: 0.20        # single name <= 20% of net liquidation
-  max_sector_pct: 0.40          # single sector <= 40%
+  max_sector_pct: 0.50          # GICS-sector backstop for non-universe holdings
+  stop_loss_pct: 0.25           # per-position unrealized loss vs cost -> forced trim
+  # L2 组合
   max_gross_leverage: 1.0       # no margin in paper phase
   max_single_order_usd: 25000
   cash_floor_pct: 0.05          # keep >= 5% cash
+  # L3 市场/因子
+  beta_cap: 1.5                 # portfolio weighted beta ceiling
+  cluster_corr_threshold: 0.7   # pairwise corr to join a correlated cluster
+  cluster_weight_cap: 0.75      # single cluster ceiling (intentional AI concentration)
+  # L4 亏损/回撤
+  max_drawdown_pct: 0.15        # peak-to-trough NetLiq -> de-risk mode (block new buys)
+  daily_loss_limit_pct: 0.05    # single-day loss -> stop new buys
+  # L5 尾部/压测
+  max_stress_loss_pct: 0.25     # worst scenario loss vs NAV
+  stress_market_shocks: [-0.10, -0.20]
+  ai_bubble_cluster_shock: -0.35  # extra shock on the top correlated cluster
+  # L6 事件
+  max_event_loss_pct: 0.03      # single earnings gap: weight * expected_move <= this
+  max_pct_adv: 0.10             # liquidity (report only)
 
 # --- Account (sizing) --------------------------------------------------------
 account:

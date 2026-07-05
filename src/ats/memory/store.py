@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS fills (
     exec_id TEXT PRIMARY KEY, symbol TEXT, side TEXT, shares REAL, price REAL,
     time TEXT, realized_pnl REAL, commission REAL, order_id TEXT
 );
+CREATE TABLE IF NOT EXISTS risk_reviews (
+    as_of TEXT PRIMARY KEY, risk_state TEXT, summary TEXT, payload TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -170,6 +173,26 @@ class TradingMemory:
         else:
             rows = self.conn.execute(
                 "SELECT * FROM fills ORDER BY time DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_risk_review(self, review) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO risk_reviews VALUES (?,?,?,?)",
+            (review.as_of.isoformat(), review.risk_state, review.notes,
+             review.model_dump_json()))
+        self.conn.commit()
+
+    def latest_risk_review(self):
+        from ..schemas.risk import RiskReview
+
+        row = self.conn.execute(
+            "SELECT payload FROM risk_reviews ORDER BY as_of DESC LIMIT 1").fetchone()
+        return RiskReview.model_validate_json(row["payload"]) if row else None
+
+    def recent_risk_reviews(self, limit: int = 10) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT as_of, risk_state, summary FROM risk_reviews ORDER BY as_of DESC LIMIT ?",
+            (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     def save_performance(self, record: PerformanceRecord) -> None:

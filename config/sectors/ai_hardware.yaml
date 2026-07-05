@@ -11,6 +11,7 @@ output_dir: /Users/liuchao/Documents/Obsidian Vault/量化投资/个股分析系
 layers:
   - key: L1_app
     label: L1 AI应用层（Token经济）
+    weight_cap: 0.20        # 风控：本产业链层持仓总权重上限
     question: 谁在消耗算力？Token 需求是否仍在加速？
     tickers:
       - {symbol: GOOGL, note: Gemini（兼属L2）}
@@ -18,6 +19,7 @@ layers:
 
   - key: L2_cloud
     label: L2 云服务层（算力租用）
+    weight_cap: 0.20        # 低 beta 超大厂
     question: 算力租金/利用率如何？Capex 指引是否继续上修？
     tickers:
       - {symbol: MSFT}
@@ -28,6 +30,7 @@ layers:
 
   - key: L3_dc_infra
     label: L3 数据中心基建（电力/冷却/网络/光互联）
+    weight_cap: 0.1        # 光互联 PEAD 核心，高 beta
     question: 机房/电力/光互联哪个环节仍是瓶颈？订单能见度多长？
     tickers:
       - {symbol: COHR, note: 光互联}
@@ -37,6 +40,7 @@ layers:
 
   - key: L4_chip_design
     label: L4 芯片设计
+    weight_cap: 0.15
     question: 加速卡供需与 ASIC 替代节奏？
     tickers:
       - {symbol: NVDA}
@@ -46,6 +50,7 @@ layers:
 
   - key: L5_fab
     label: L5 芯片制造（Foundry+封装+存储）
+    weight_cap: 0.25
     question: CoWoS/HBM 产能缺口与涨价周期位置？
     tickers:
       - {symbol: TSM, note: 先进制程+CoWoS}
@@ -55,6 +60,7 @@ layers:
 
   - key: L6_equipment
     label: L6 半导体设备
+    weight_cap: 0.10        # 高 beta / 强周期
     question: 设备订单（WFE）领先指标指向扩产还是收缩？
     tickers:
       - {symbol: ASML, note: EUV 最不可替代}

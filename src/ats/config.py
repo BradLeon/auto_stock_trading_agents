@@ -103,11 +103,29 @@ class LLMConfig(BaseModel):
 
 
 class RiskConfig(BaseModel):
+    # L1 标的
     max_position_pct: float = 0.20
-    max_sector_pct: float = 0.40
+    max_sector_pct: float = 0.40          # GICS-sector backstop for non-universe holdings
+    stop_loss_pct: float = 0.25           # per-position unrealized loss vs cost -> forced trim
+    # L2 组合
     max_gross_leverage: float = 1.0
     max_single_order_usd: float = 25000
     cash_floor_pct: float = 0.05
+    # L3 市场/因子
+    beta_cap: float = 1.5                 # portfolio weighted beta ceiling
+    cluster_corr_threshold: float = 0.7   # pairwise corr to join a cluster
+    cluster_weight_cap: float = 0.75      # single correlated cluster ceiling (intentional concentration)
+    # L4 亏损/回撤
+    max_drawdown_pct: float = 0.15        # peak-to-trough -> de-risk mode
+    daily_loss_limit_pct: float = 0.05    # single-day loss -> stop new buys
+    # L5 尾部/压测
+    max_stress_loss_pct: float = 0.25     # worst scenario loss vs NAV
+    stress_market_shocks: list[float] = Field(default_factory=lambda: [-0.10, -0.20])
+    ai_bubble_cluster_shock: float = -0.35  # extra shock applied to the top correlated cluster
+    # L6 事件
+    max_event_loss_pct: float = 0.03      # single earnings gap: weight * expected_move <= this
+    # L1 流动性（报告用）
+    max_pct_adv: float = 0.10
 
 
 class AccountConfig(BaseModel):

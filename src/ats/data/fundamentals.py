@@ -64,12 +64,12 @@ def _yf_info(symbol: str) -> dict:
 
 _LIGHT_KEYS = {"market_cap": "marketCap", "pe": "trailingPE", "fwd_pe": "forwardPE",
                "gross_margin": "grossMargins", "op_margin": "operatingMargins",
-               "rev_growth": "revenueGrowth"}
+               "rev_growth": "revenueGrowth", "beta": "beta"}
 
 
 def fetch_light(symbol: str) -> dict:
-    """One-call valuation/margin snapshot for wide-universe sector scans.
-    Returns {market_cap, pe, fwd_pe, gross_margin, op_margin, rev_growth} (None-filled).
+    """One-call valuation/margin/beta snapshot for wide-universe scans.
+    Returns {market_cap, pe, fwd_pe, gross_margin, op_margin, rev_growth, beta} (None-filled).
     Never raises."""
     out: dict = {k: None for k in _LIGHT_KEYS}
     info = safe_fetch(lambda: _yf_info(symbol), source=f"yf-light:{symbol}", attempts=2)

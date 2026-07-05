@@ -24,14 +24,27 @@ def _now() -> datetime:
 
 
 def execute(decisions: list[TradeDecision], *, source: str, channel: str = "cli",
-            dry_run: bool = False, auto: bool = False) -> list[TradeLogEntry]:
-    """Size, request human approval, place approved orders, persist with context."""
+            dry_run: bool = False, auto: bool = False,
+            event_data: dict[str, dict] | None = None) -> list[TradeLogEntry]:
+    """Size, apply the 6-layer risk gate, request human approval, place, persist."""
     from ..channel import get_channel
     from ..config import get_config
 
     decisions = [d for d in decisions if d.action != "hold"]
     if not decisions:
         print("(no actionable decisions)")
+        return []
+
+    # --- 6-layer risk gate (hard) — the enforcement point the trader lacked ---
+    from ..risk import checks as risk_checks
+    from ..trader import portfolio as tport
+
+    live_pf = tport.snapshot()
+    decisions, risk_notes, _ = risk_checks.pre_trade(decisions, live_pf, event_data=event_data)
+    for n in risk_notes:
+        print(f"   [risk] {n}")
+    if not decisions:
+        print("(所有决策被风控硬约束拦下 — 无单可下)")
         return []
 
     secrets = get_config().secrets
@@ -43,7 +56,8 @@ def execute(decisions: list[TradeDecision], *, source: str, channel: str = "cli"
     lines = "\n".join(f"  {d.action.upper()} {d.symbol} x{q:.0f} "
                       f"{'@ ' + str(d.limit_price) if d.limit_price else '(mkt)'} — {d.rationale[:60]}"
                       for d, q in sized)
-    summary = f"{banner}\nsource={source}\nOrders:\n{lines}"
+    risk_block = ("\n风控: " + "; ".join(risk_notes)) if risk_notes else "\n风控: 无破限 ✅"
+    summary = f"{banner}\nsource={source}{risk_block}\nOrders:\n{lines}"
     if is_live:
         summary = "⚠️⚠️ 实盘账户，请务必确认 ⚠️⚠️\n" + summary
 

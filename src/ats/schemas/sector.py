@@ -21,6 +21,7 @@ class SectorLayer(BaseModel):
     key: str                          # e.g. L3_dc_infra — echoed verbatim by the LLM
     label: str
     question: str = ""
+    weight_cap: float | None = None   # risk: per-chain-layer portfolio weight ceiling
     tickers: list[LayerTicker] = Field(default_factory=list)
     private: list[str] = Field(default_factory=list)   # non-listed players, LLM reference
 

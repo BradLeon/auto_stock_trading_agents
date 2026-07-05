@@ -198,6 +198,58 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
         run_pead_monitor(sym, use_llm=use_llm)
 
 
+def risk_report(*, write_report: bool = False) -> int:
+    from ..memory import get_store
+    from ..risk import assess as risk_assess, report as risk_report_mod
+    from ..trader import portfolio as tport
+
+    pf = tport.snapshot()
+    if pf is None:
+        print("❌ IBKR unavailable — start TWS (port 7497).")
+        return 1
+    risk_assess.enrich_beta(pf)
+    review = risk_assess.assess(pf)
+    get_store().save_risk_review(review)
+    print(risk_report_mod.render(review))
+    if write_report:
+        from ..config import load_macro_config
+        try:
+            out_dir = load_macro_config().output_dir
+        except Exception:  # noqa: BLE001
+            out_dir = ""
+        path = risk_report_mod.write(review, out_dir)
+        print(f"📝 {path}" if path else "(report dir unset — skipped)")
+    return 0
+
+
+def risk_check(symbol: str | None = None) -> int:
+    """Dry-run the risk gate over stored decisions (shows block/clip without ordering)."""
+    from ..memory import get_store
+    from ..risk import checks as risk_checks
+    from ..schemas.decision import TradeDecision
+    from ..trader import portfolio as tport
+
+    rows = get_store().recent_decisions(symbol, limit=20)
+    if not rows:
+        print("(no stored decisions to check)")
+        return 0
+    seen, decisions = set(), []
+    for r in rows:
+        if r["symbol"] in seen:
+            continue
+        seen.add(r["symbol"])
+        decisions.append(TradeDecision(symbol=r["symbol"], action=r["action"],
+                                       notional_usd=r.get("notional_usd"),
+                                       limit_price=r.get("limit_price"),
+                                       rationale=r.get("rationale") or ""))
+    pf = tport.snapshot()
+    approved, notes, _ = risk_checks.pre_trade(decisions, pf)
+    print(f"=== Risk check: {len(decisions)} decisions → {len(approved)} pass ===")
+    for n in notes:
+        print(f"  {n}")
+    return 0
+
+
 def trader_portfolio() -> int:
     from ..trader import portfolio as tp
 
@@ -608,6 +660,10 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    rk = sub.add_parser("risk", help="risk officer 风控 (report / check)")
+    rk.add_argument("action", choices=["report", "check"])
+    rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
+    rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
     tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
                                        "cancel", "execute", "buy", "sell"])
@@ -665,6 +721,10 @@ def main(argv: list[str] | None = None) -> int:
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0
+    if args.command == "risk":
+        if args.action == "report":
+            return risk_report(write_report=args.report)
+        return risk_check(args.symbol)
     if args.command == "trader":
         if args.action == "portfolio":
             return trader_portfolio()

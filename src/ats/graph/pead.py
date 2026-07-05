@@ -268,6 +268,17 @@ def score_decision(state: PeadState) -> dict:
     clipped, adjustments = risk_validator.apply_guardrails(
         decisions, guardrails, sector_by_symbol={state.symbol: "optical"},
         net_liquidation=_net_liq(state), portfolio=state.portfolio)
+
+    # 6-layer risk gate (event-risk clip / de-risk / beta / cluster) on top of the
+    # scoped L1-2 above. Event data from the options-derived Expected Move.
+    if state.portfolio is not None:
+        from ..risk import checks as risk_checks
+
+        em = state.market_setup.expected_move_pct if state.market_setup else None
+        event_data = {state.symbol: {"expected_move_pct": em}} if em else None
+        clipped, notes, _ = risk_checks.pre_trade(
+            clipped, state.portfolio, event_data=event_data, apply_base=False)
+        adjustments = list(adjustments) + notes
     return {"decisions": clipped, "decision_band": band, "risk_adjustments": adjustments}
 
 

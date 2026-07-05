@@ -16,6 +16,7 @@ class Position(BaseModel):
     market_value: float
     unrealized_pnl: float = 0.0
     weight: float = Field(0.0, description="market_value / net_liquidation")
+    beta: float | None = None
 
 
 class ExposureBreakdown(BaseModel):

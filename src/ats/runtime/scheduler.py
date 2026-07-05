@@ -123,7 +123,8 @@ def _daily(*, dry_run: bool) -> None:
 
 def _perf_snapshot() -> None:
     """Record a portfolio/performance snapshot each trading day (independent of the
-    daily cycle), so a continuous NetLiq/P&L curve exists even if only PEAD runs."""
+    daily cycle), so a continuous NetLiq/P&L curve exists even if only PEAD runs.
+    Also records a risk snapshot and pushes an alert on de-risk state."""
     if not is_trading_session():
         return
     try:
@@ -134,6 +135,37 @@ def _perf_snapshot() -> None:
             log.info("perf snapshot: NetLiq $%.0f dayP&L $%.0f", r.net_liquidation, r.daily_pnl)
     except Exception as exc:  # noqa: BLE001 - snapshot must not break the daily job
         log.warning("perf snapshot failed: %s", exc)
+    try:
+        from ..memory import get_store
+        from ..risk import assess as risk_assess
+        from ..trader import portfolio as tport
+
+        pf = tport.snapshot()
+        if pf is not None:
+            risk_assess.enrich_beta(pf)
+            review = risk_assess.assess(pf)
+            get_store().save_risk_review(review)
+            log.info("risk snapshot: state=%s breaches=%d", review.risk_state, len(review.breaches))
+            if review.risk_state != "normal":
+                _push_risk_alert(review)
+    except Exception as exc:  # noqa: BLE001 - risk snapshot must not break the daily job
+        log.warning("risk snapshot failed: %s", exc)
+
+
+def _push_risk_alert(review) -> None:
+    try:
+        from ..channel import get_channel
+        from ..config import load_pead_global
+        from ..schemas.channel import Notification
+
+        if not load_pead_global()["monitor"].get("push_context_updates", False):
+            return
+        get_channel("feishu").push(Notification(
+            kind="error" if review.risk_state == "derisk" else "info",
+            title=f"风控告警 — {review.risk_state} ({len(review.breaches)} 破限)",
+            body=review.regime_block()))
+    except Exception as exc:  # noqa: BLE001 - push is best-effort
+        log.info("risk alert push skipped: %s", exc)
 
 
 def _macro_weekly() -> None:

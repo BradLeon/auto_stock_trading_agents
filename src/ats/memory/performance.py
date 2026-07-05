@@ -40,6 +40,7 @@ def compute(
     return PerformanceRecord(
         cycle_id=cycle_id,
         as_of=as_of,
+        account_id=portfolio.account_id if portfolio else "",
         net_liquidation=net_liq,
         daily_pnl=daily_pnl,
         cumulative_pnl=prev_cum + daily_pnl,

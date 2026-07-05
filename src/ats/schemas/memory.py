@@ -47,6 +47,7 @@ class PerformanceRecord(BaseModel):
 
     cycle_id: str
     as_of: datetime
+    account_id: str = ""             # scope P&L series per account (paper vs live)
     net_liquidation: float = 0.0
     daily_pnl: float = 0.0
     cumulative_pnl: float = 0.0

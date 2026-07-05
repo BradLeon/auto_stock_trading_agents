@@ -48,6 +48,19 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         net_exposure=portfolio.net_exposure,
         cash_pct=(portfolio.cash / net_liq) if net_liq else 0.0)
 
+    # L1 — single-name cap
+    for p in portfolio.positions:
+        if p.weight > rc.max_position_pct:
+            r.breaches.append(Breach(layer="L1-单票", limit=f"≤{rc.max_position_pct:.0%}",
+                                     actual=f"{p.symbol} {p.weight:.0%}", action="削到上限"))
+    # L2 — leverage + cash floor
+    if portfolio.leverage > rc.max_gross_leverage:
+        r.breaches.append(Breach(layer="L2-杠杆", limit=f"≤{rc.max_gross_leverage}",
+                                 actual=f"{portfolio.leverage:.2f}x", action="缩买单/禁新买"))
+    if r.cash_pct < rc.cash_floor_pct:
+        r.breaches.append(Breach(layer="L2-现金", limit=f"≥{rc.cash_floor_pct:.0%}",
+                                 actual=f"{r.cash_pct:.0%}", action="禁新买（现金低于安全线）"))
+
     # L3 — portfolio beta
     if any(p.beta is not None for p in portfolio.positions):
         r.portfolio_beta = round(sum(p.weight * (p.beta or 1.0) for p in portfolio.positions), 2)
@@ -99,11 +112,12 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
                                      actual=f"{p.symbol} {p.unrealized_pnl/cost:.0%}",
                                      action="强制 trim"))
 
-    # L4 — drawdown / daily loss
-    hist = get_store().performance_history(limit=250)
+    # L4 — drawdown / daily loss (scoped to THIS account — never mix paper vs live)
+    hist = [h for h in get_store().performance_history(limit=250)
+            if h.account_id == portfolio.account_id]
     if hist:
         from ..trader import analytics
-        dd = analytics.max_drawdown_pct(hist + [_perf_stub(net_liq)])
+        dd = analytics.max_drawdown_pct(hist + [_perf_stub(net_liq, portfolio.account_id)])
         r.drawdown_pct = dd
         if dd is not None and dd <= -rc.max_drawdown_pct * 100:
             r.breaches.append(Breach(layer="L4-回撤", limit=f"≥-{rc.max_drawdown_pct:.0%}",
@@ -148,7 +162,8 @@ def _prices(symbols: list[str]) -> dict[str, list[float]]:
     return sector_snapshot.fetch_prices(symbols)
 
 
-def _perf_stub(net_liq: float):
+def _perf_stub(net_liq: float, account_id: str = ""):
     from ..schemas.memory import PerformanceRecord
 
-    return PerformanceRecord(cycle_id="now", as_of=_now(), net_liquidation=net_liq)
+    return PerformanceRecord(cycle_id="now", as_of=_now(), account_id=account_id,
+                             net_liquidation=net_liq)

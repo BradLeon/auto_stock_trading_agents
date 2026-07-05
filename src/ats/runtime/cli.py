@@ -211,6 +211,17 @@ def run_chief(*, execute: bool = True, dry_run: bool = True, channel: str = "cli
     result = chief_decide.run(use_llm=use_llm, live_broker=not offline)
     get_store().save_chief_run(cycle_id=result.cycle_id, as_of=result.as_of,
                                summary=result.summary, decisions=result.decisions)
+    if use_llm:   # audit report (decision + exact context seen); skip for stubs
+        from ..agents.chief import report as chief_report
+        from ..config import load_macro_config
+
+        try:
+            out_dir = load_macro_config().output_dir
+        except Exception:  # noqa: BLE001
+            out_dir = ""
+        path = chief_report.write(result, out_dir)
+        if path:
+            print(f"📝 {path}")
     print(f"👔 chief {result.cycle_id}\n{result.summary}")
     for d in result.decisions:
         size = f"${d.notional_usd:,.0f}" if d.notional_usd else (

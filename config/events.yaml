@@ -1,20 +1,40 @@
 # 事件日历 — 调度器每个交易日检查，命中日期则触发对应分析师额外跑一次。
 # triggers: macro | sector | sector:<name> | pead:<SYM>（pead 触发 monitor 刷新）
-# ⚠️ 维护：每季度把下一季 FOMC/BLS 日期补进来；以下日期为 seed，
-#    TODO(user): 请对照 federalreserve.gov/monetarypolicy 与 bls.gov/schedule 核对。
+#
+# 维护说明：每季度把下季日期补进来。
+#   FOMC  → https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+#   CPI   → https://www.bls.gov/schedule/news_release/cpi.htm
+#   NFP   → https://www.bls.gov/schedule/news_release/empsit.htm
+#
+# 2026 H2 日期已核实（2026-07-06）：
+#   FOMC: federalreserve.gov 官网直接抓取
+#   CPI:  usinflationcalculator.com（镜像 BLS 官方 schedule）
+#   NFP:  tradingcalendar.com（镜像 BLS 官方 schedule）
 
 events:
-  # --- FOMC 决议日（2026 H2，TODO 核对）---
-  - {date: 2026-07-29, kind: fomc, label: "FOMC 决议", triggers: [macro]}
-  - {date: 2026-09-17, kind: fomc, label: "FOMC 决议", triggers: [macro]}
-  - {date: 2026-10-28, kind: fomc, label: "FOMC 决议", triggers: [macro]}
-  - {date: 2026-12-09, kind: fomc, label: "FOMC 决议", triggers: [macro]}
+  # ── FOMC 决议日（2026 H2）──────────────────────────────────────────────────
+  # 带 * 的会议附带 SEP（经济预测摘要），9月/12月尤为重要
+  - {date: 2026-07-29, kind: fomc, label: "FOMC 决议 7月",   triggers: [macro]}
+  - {date: 2026-09-16, kind: fomc, label: "FOMC 决议 9月 *", triggers: [macro]}
+  - {date: 2026-10-28, kind: fomc, label: "FOMC 决议 10月",  triggers: [macro]}
+  - {date: 2026-12-09, kind: fomc, label: "FOMC 决议 12月 *",triggers: [macro]}
 
-  # --- 核心经济数据（示例，TODO 核对 bls.gov）---
-  - {date: 2026-07-14, kind: cpi, label: "6月 CPI 发布", triggers: [macro]}
-  - {date: 2026-08-07, kind: nfp, label: "7月非农", triggers: [macro]}
+  # ── CPI 发布日（2026 H2，BLS 8:30 AM ET）────────────────────────────────────
+  - {date: 2026-07-14, kind: cpi, label: "6月 CPI",  triggers: [macro]}
+  - {date: 2026-08-12, kind: cpi, label: "7月 CPI",  triggers: [macro]}
+  - {date: 2026-09-11, kind: cpi, label: "8月 CPI",  triggers: [macro]}
+  - {date: 2026-10-14, kind: cpi, label: "9月 CPI",  triggers: [macro]}
+  - {date: 2026-11-10, kind: cpi, label: "10月 CPI", triggers: [macro]}
+  - {date: 2026-12-10, kind: cpi, label: "11月 CPI", triggers: [macro]}
 
-  # --- 行业会议/发布会（示例，按需维护）---
+  # ── 非农就业（NFP / Employment Situation，BLS 8:30 AM ET）────────────────────
+  - {date: 2026-08-07, kind: nfp, label: "7月非农",  triggers: [macro]}
+  - {date: 2026-09-04, kind: nfp, label: "8月非农",  triggers: [macro]}
+  - {date: 2026-10-02, kind: nfp, label: "9月非农",  triggers: [macro]}
+  - {date: 2026-11-06, kind: nfp, label: "10月非农", triggers: [macro]}
+  - {date: 2026-12-04, kind: nfp, label: "11月非农", triggers: [macro]}
+
+  # ── 行业会议 / 发布会（按需维护）────────────────────────────────────────────
   # - {date: 2026-09-09, kind: industry_conf, label: "ECOC 2026 光通信展",
   #    triggers: [sector:ai_hardware, pead:COHR, pead:LITE]}
   # - {date: 2027-01-05, kind: industry_conf, label: "CES 2027", triggers: [sector:ai_hardware]}

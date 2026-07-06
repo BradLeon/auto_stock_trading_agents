@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-EventKind = Literal["fomc", "cpi", "nfp", "gdp", "industry_conf", "other"]
+EventKind = Literal["fomc", "cpi", "nfp", "pce", "gdp", "industry_conf", "other"]
 
 
 class CalendarEvent(BaseModel):

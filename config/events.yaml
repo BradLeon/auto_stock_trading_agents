@@ -2,24 +2,45 @@
 # triggers: macro | sector | sector:<name> | pead:<SYM>（pead 触发 monitor 刷新）
 #
 # 维护说明：每季度把下季日期补进来。
-#   FOMC  → https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
-#   CPI   → https://www.bls.gov/schedule/news_release/cpi.htm
-#   NFP   → https://www.bls.gov/schedule/news_release/empsit.htm
+#   FOMC / PCE / GDP → https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+#                      https://www.bea.gov/news/schedule
+#   CPI / NFP        → https://www.bls.gov/schedule/news_release/cpi.htm
+#                      https://www.bls.gov/schedule/news_release/empsit.htm
 #
 # 2026 H2 日期已核实（2026-07-06）：
 #   FOMC: federalreserve.gov 官网直接抓取
-#   CPI:  usinflationcalculator.com（镜像 BLS 官方 schedule）
-#   NFP:  tradingcalendar.com（镜像 BLS 官方 schedule）
+#   PCE/GDP: bea.gov/news/schedule 官网直接抓取（PCE 与 GDP 同日发布）
+#   CPI: usinflationcalculator.com（镜像 BLS 官方 schedule）
+#   NFP: tradingcalendar.com（镜像 BLS 官方 schedule）
+#
+# 注：PCE/GDP 先行估算（Advance）往往滞后 FOMC 决议一天发布（如 7/29 FOMC → 7/30 GDP/PCE）。
+#     联储当次决策是在尚未看到最新 PCE 的情况下做出的，宏观分析师需注意这一时序关系。
 
 events:
   # ── FOMC 决议日（2026 H2）──────────────────────────────────────────────────
   # 带 * 的会议附带 SEP（经济预测摘要），9月/12月尤为重要
-  - {date: 2026-07-29, kind: fomc, label: "FOMC 决议 7月",   triggers: [macro]}
-  - {date: 2026-09-16, kind: fomc, label: "FOMC 决议 9月 *", triggers: [macro]}
-  - {date: 2026-10-28, kind: fomc, label: "FOMC 决议 10月",  triggers: [macro]}
-  - {date: 2026-12-09, kind: fomc, label: "FOMC 决议 12月 *",triggers: [macro]}
+  - {date: 2026-07-29, kind: fomc, label: "FOMC 决议 7月",    triggers: [macro]}
+  - {date: 2026-09-16, kind: fomc, label: "FOMC 决议 9月 *",  triggers: [macro]}
+  - {date: 2026-10-28, kind: fomc, label: "FOMC 决议 10月",   triggers: [macro]}
+  - {date: 2026-12-09, kind: fomc, label: "FOMC 决议 12月 *", triggers: [macro]}
 
-  # ── CPI 发布日（2026 H2，BLS 8:30 AM ET）────────────────────────────────────
+  # ── PCE（联储首选通胀指标）+ GDP，BEA 8:30 AM ET ──────────────────────────
+  # 同日发布；Advance 估算为首发，后续 Second/Third 为修订。
+  # ⚠ 7/30 GDP/PCE 在 FOMC 7/29 决议之后一天，10/29 同样滞后 FOMC 10/28 一天。
+  - {date: 2026-07-30, kind: gdp, label: "Q2 GDP 先行估算",          triggers: [macro]}
+  - {date: 2026-07-30, kind: pce, label: "6月 PCE",                  triggers: [macro]}
+  - {date: 2026-08-26, kind: gdp, label: "Q2 GDP 第二次估算",         triggers: [macro]}
+  - {date: 2026-08-26, kind: pce, label: "7月 PCE",                   triggers: [macro]}
+  - {date: 2026-09-30, kind: gdp, label: "Q2 GDP 第三次估算（终值）", triggers: [macro]}
+  - {date: 2026-09-30, kind: pce, label: "8月 PCE",                   triggers: [macro]}
+  - {date: 2026-10-29, kind: gdp, label: "Q3 GDP 先行估算",           triggers: [macro]}
+  - {date: 2026-10-29, kind: pce, label: "9月 PCE",                   triggers: [macro]}
+  - {date: 2026-11-25, kind: gdp, label: "Q3 GDP 第二次估算",         triggers: [macro]}
+  - {date: 2026-11-25, kind: pce, label: "10月 PCE",                  triggers: [macro]}
+  - {date: 2026-12-23, kind: gdp, label: "Q3 GDP 第三次估算（终值）", triggers: [macro]}
+  - {date: 2026-12-23, kind: pce, label: "11月 PCE",                  triggers: [macro]}
+
+  # ── CPI（BLS 8:30 AM ET）────────────────────────────────────────────────────
   - {date: 2026-07-14, kind: cpi, label: "6月 CPI",  triggers: [macro]}
   - {date: 2026-08-12, kind: cpi, label: "7月 CPI",  triggers: [macro]}
   - {date: 2026-09-11, kind: cpi, label: "8月 CPI",  triggers: [macro]}
@@ -28,11 +49,12 @@ events:
   - {date: 2026-12-10, kind: cpi, label: "11月 CPI", triggers: [macro]}
 
   # ── 非农就业（NFP / Employment Situation，BLS 8:30 AM ET）────────────────────
-  - {date: 2026-08-07, kind: nfp, label: "7月非农",  triggers: [macro]}
-  - {date: 2026-09-04, kind: nfp, label: "8月非农",  triggers: [macro]}
-  - {date: 2026-10-02, kind: nfp, label: "9月非农",  triggers: [macro]}
-  - {date: 2026-11-06, kind: nfp, label: "10月非农", triggers: [macro]}
-  - {date: 2026-12-04, kind: nfp, label: "11月非农", triggers: [macro]}
+  # 同时含失业率——联储双重使命（就业+通胀）的核心月度数据
+  - {date: 2026-08-07, kind: nfp, label: "7月 非农+失业率",  triggers: [macro]}
+  - {date: 2026-09-04, kind: nfp, label: "8月 非农+失业率",  triggers: [macro]}
+  - {date: 2026-10-02, kind: nfp, label: "9月 非农+失业率",  triggers: [macro]}
+  - {date: 2026-11-06, kind: nfp, label: "10月 非农+失业率", triggers: [macro]}
+  - {date: 2026-12-04, kind: nfp, label: "11月 非农+失业率", triggers: [macro]}
 
   # ── 行业会议 / 发布会（按需维护）────────────────────────────────────────────
   # - {date: 2026-09-09, kind: industry_conf, label: "ECOC 2026 光通信展",

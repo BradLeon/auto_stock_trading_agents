@@ -35,10 +35,12 @@ def _now() -> datetime:
 class IBKRBroker:
     def __init__(self, host: str | None = None, port: int | None = None,
                  client_id: int | None = None, sector_by_symbol: dict[str, str] | None = None):
-        s = get_config().secrets
+        cfg = get_config()
+        s = cfg.secrets
+        br = cfg.app.broker          # settings.yaml [broker] overrides .env defaults
         self.host = host or s.ibkr_host
-        self.port = port or s.ibkr_port
-        self.client_id = client_id or s.ibkr_client_id
+        self.port = port or br.port or s.ibkr_port
+        self.client_id = client_id or br.client_id or s.ibkr_client_id
         self.sector_by_symbol = sector_by_symbol or {}
         self._ib = None
 

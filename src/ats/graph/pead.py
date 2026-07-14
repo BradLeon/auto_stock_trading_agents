@@ -179,6 +179,7 @@ def prep_signal_chain(state: PeadState) -> dict:
 
 
 def prep_persist(state: PeadState) -> dict:
+    from ..agents.pead import report as pead_report
     from ..memory import get_store
 
     dossier = PeadDossier(
@@ -186,6 +187,9 @@ def prep_persist(state: PeadState) -> dict:
         expectation_set=state.expectation_set, market_setup=state.market_setup,
         signal_chain=state.signal_chain)
     get_store().save_dossier(dossier)
+    path = pead_report.write_prep(dossier)
+    if path:
+        print(f"   📝 {path}")
     return {}
 
 
@@ -279,6 +283,7 @@ def score_decision(state: PeadState) -> dict:
 
 def score_persist(state: PeadState) -> dict:
     """Persist the dossier with the decision RECOMMENDATION (the Chief makes the trade call)."""
+    from ..agents.pead import report as pead_report
     from ..memory import get_store
 
     recs = "; ".join(
@@ -294,6 +299,7 @@ def score_persist(state: PeadState) -> dict:
         signal_chain=state.signal_chain, actuals=state.actuals, scorecard=state.scorecard,
         decision_summary=summary)
     get_store().save_dossier(dossier)
+    pead_report.write_score(dossier)
     return {}
 
 

@@ -133,6 +133,12 @@ class AccountConfig(BaseModel):
     net_liquidation_usd: float = 100000.0
 
 
+class BrokerConfig(BaseModel):
+    # TWS live=7496, paper=7497; IB Gateway live=4001, paper=4002
+    port: int | None = None       # None → fall back to IBKR_PORT in .env (default 7497)
+    client_id: int | None = None  # None → fall back to IBKR_CLIENT_ID in .env (default 11)
+
+
 class ChannelConfig(BaseModel):
     kind: str = "cli"
 
@@ -154,6 +160,7 @@ class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     account: AccountConfig = Field(default_factory=AccountConfig)
+    broker: BrokerConfig = Field(default_factory=BrokerConfig)
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     tickers: list[Ticker] = Field(default_factory=list)

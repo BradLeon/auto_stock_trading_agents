@@ -1,7 +1,7 @@
 # Application configuration (non-secret). Secrets live in .env.
 # Loaded by src/ats/config.py.
 
-environment: paper          # paper | live  (Phase 1: paper only)
+environment: live           # paper | live  (switch here when going live)
 
 # --- LLM routing -------------------------------------------------------------
 # provider: anthropic (native ChatAnthropic) | openai (OpenAI-compatible via base_url)
@@ -56,6 +56,13 @@ risk:
   # L6 事件
   max_event_loss_pct: 0.03      # single earnings gap: weight * expected_move <= this
   max_pct_adv: 0.10             # liquidity (report only)
+
+# --- IBKR broker connection --------------------------------------------------
+# Port: TWS live=7496, TWS paper=7497, IB Gateway live=4001, IB Gateway paper=4002
+# client_id: use different IDs for paper vs live to avoid conflicts
+broker:
+  port: 7496        # live TWS
+  client_id: 12     # live client id
 
 # --- Account (sizing) --------------------------------------------------------
 account:

@@ -20,6 +20,7 @@ FRESH_SCORE_DAYS = 3   # a score-phase dossier older than this is background, no
 class ChiefContext:
     as_of: datetime
     net_liquidation: float = 0.0
+    held_symbols: set = field(default_factory=set)          # symbols currently held
     blocks: dict[str, str] = field(default_factory=dict)   # ordered by insertion
 
     def as_context(self) -> str:
@@ -43,8 +44,8 @@ def build(*, live_broker: bool = True) -> ChiefContext:
     ctx.blocks["组合现状 (trader)"] = _portfolio_block(ctx, live_broker)
     if not ctx.net_liquidation:
         ctx.net_liquidation = get_config().app.account.net_liquidation_usd
-    ctx.blocks["PEAD 档案（主 alpha 信号）"] = _pead_block()
-    ctx.blocks["行业评审（倾斜修正）"] = _sector_block()
+    ctx.blocks["PEAD 档案（主 alpha 信号）"] = _pead_block(ctx.held_symbols)
+    ctx.blocks["行业评审（倾斜修正）"] = _sector_block(ctx.held_symbols)
     ctx.blocks["宏观评审（倾斜修正）"] = _macro_block()
     ctx.blocks["风控状态（硬约束）"] = _risk_block()
     ctx.blocks["战绩反馈"] = _track_record_block()
@@ -61,6 +62,7 @@ def _portfolio_block(ctx: ChiefContext, live_broker: bool) -> str:
         if pf is None:
             return "(IBKR 不可达 — 无实时持仓)"
         ctx.net_liquidation = pf.net_liquidation
+        ctx.held_symbols = {p.symbol.upper() for p in pf.positions}
         lines = [f"NetLiq ${pf.net_liquidation:,.0f} · cash {pf.cash/pf.net_liquidation:.0%} · "
                  f"杠杆 {pf.leverage:.2f}x · 日盈亏 ${pf.daily_pnl:,.0f}"]
         for p in pf.positions:
@@ -71,13 +73,14 @@ def _portfolio_block(ctx: ChiefContext, live_broker: bool) -> str:
         return ""
 
 
-def _pead_block() -> str:
+def _pead_block(held_symbols: set | None = None) -> str:
     from ...config import load_pead_config, load_pead_global
     from ...memory import get_store
 
     store = get_store()
     now = datetime.now(timezone.utc)
     parts = []
+    held = held_symbols or set()
     for sym in load_pead_global().get("targets", []):
         try:
             cfg = load_pead_config(sym)
@@ -105,10 +108,16 @@ def _pead_block() -> str:
     return "\n\n".join(parts)
 
 
-def _sector_block() -> str:
+def _sector_block(held_symbols: set | None = None) -> str:
+    """Sector tilts for Chief. Company-level calls are filtered to:
+    (a) symbols in the live portfolio, OR
+    (b) explicit non-hold calls (增持/减持/卖出) — highest-signal deviations only.
+    This keeps the context focused; the full sector report is in Obsidian.
+    """
     from ...config import load_pead_global
     from ...memory import get_store
 
+    held = {s.upper() for s in (held_symbols or set())}
     parts = []
     for name in load_pead_global()["sector_review"]["sectors"]:
         r = get_store().latest_sector_review(name)
@@ -116,9 +125,19 @@ def _sector_block() -> str:
             continue
         lines = [f"[{name} @ {r.as_of:%Y-%m-%d}] {r.regime}"]
         if r.rotation_advice:
-            lines.append(f"轮动: {r.rotation_advice}")
+            lines.append(f"轮动建议: {r.rotation_advice}")
+        # Layer-level scores (if available)
+        for lv in getattr(r, "layer_views", None) or []:
+            score_str = f"{lv.score}" if getattr(lv, "score", None) is not None else ""
+            lines.append(f"  层 {lv.key}: 景气{score_str} [{lv.regime}] {lv.summary[:80]}")
+        # Company calls: only held positions + actionable (非持有) calls
         for c in r.company_calls:
-            lines.append(f"  {c.stance} {c.symbol} ({c.conviction:.2f}): {c.rationale[:70]}")
+            sym = c.symbol.upper()
+            is_held = sym in held
+            is_actionable = c.stance not in ("持有",)
+            if is_held or is_actionable:
+                tag = "★持仓" if is_held else ""
+                lines.append(f"  {c.stance} {c.symbol}{tag} ({c.conviction:.2f}): {c.rationale[:100]}")
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
 

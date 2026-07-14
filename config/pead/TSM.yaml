@@ -1,0 +1,34 @@
+# Taiwan Semiconductor Manufacturing (TSM) — PEAD config
+# L5 先进制程龙头：N3/N2 节点 + CoWoS 先进封装 + AI 芯片代工核心
+
+symbol: TSM
+fiscal_label: "Q FY2026"
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 5.0
+long_threshold: 1.2          # 龙头溢价，稍高于默认 1.0
+
+scorecard_dims:
+  - {key: revenue,        weight: 0.20, label: 营收超预期（美元/台币双口径）}
+  - {key: gross_margin,   weight: 0.20, label: 毛利率（目标 53-55%）}
+  - {key: forward_guide,  weight: 0.20, label: 次季营收指引（美元中枢）}
+  - {key: cowos,          weight: 0.15, label: CoWoS 先进封装产能与价格}
+  - {key: advanced_node,  weight: 0.10, label: N3/N2 产能爬坡节奏}
+  - {key: ai_demand,      weight: 0.10, label: AI 加速芯片需求能见度}
+  - {key: call_tone,      weight: 0.05, label: 电话会语气与资本支出指引}
+
+signal_chain:
+  - {symbol: NVDA,  role: downstream}   # 最大 CoWoS 客户
+  - {symbol: AMD,   role: downstream}
+  - {symbol: AAPL,  role: downstream}
+  - {symbol: AVGO,  role: downstream}
+  - {symbol: ASML,  role: upstream}     # EUV 设备供应
+  - {symbol: AMAT,  role: upstream}
+  - {symbol: SKHY,  role: peer}         # HBM 封装合作方
+  - {symbol: MU,    role: peer}
+
+narrative_seed: >
+  全球最先进晶圆代工厂；N3/N2 良率与爬坡节奏是 AI 芯片供应链核心约束；
+  CoWoS 先进封装产能决定 NVDA H100/H200/B200 供货能力；
+  台币/美元汇率与电力成本是毛利率波动主因；
+  地缘政治（台海风险溢价）压制 P/E 倍数，但 AI 需求能见度超强。

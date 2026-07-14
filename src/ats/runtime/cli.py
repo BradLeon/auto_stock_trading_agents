@@ -277,14 +277,27 @@ def chief_probe(*, offline: bool = False) -> int:
     return 0
 
 
-def risk_report(*, write_report: bool = False) -> int:
+def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
     from ..memory import get_store
     from ..risk import assess as risk_assess, report as risk_report_mod
     from ..trader import portfolio as tport
 
+    if offline:
+        stored = get_store().latest_risk_review()
+        if stored is None:
+            print("❌ No stored risk review found — run once with TWS connected.")
+            return 1
+        age = (stored.as_of.replace(tzinfo=None) if stored.as_of.tzinfo
+               else stored.as_of)
+        from datetime import datetime, timezone
+        age_days = (datetime.now(timezone.utc) - stored.as_of).days
+        print(f"⚠️  offline mode — showing stored review ({age_days}d old, as of {stored.as_of:%Y-%m-%d})")
+        print(risk_report_mod.render(stored))
+        return 0
+
     pf = tport.snapshot()
     if pf is None:
-        print("❌ IBKR unavailable — start TWS (port 7497).")
+        print("❌ IBKR unavailable — start TWS (port 7497). Use --offline to show stored review.")
         return 1
     risk_assess.enrich_beta(pf)
     review = risk_assess.assess(pf)
@@ -329,12 +342,27 @@ def risk_check(symbol: str | None = None) -> int:
     return 0
 
 
-def trader_portfolio() -> int:
+def trader_portfolio(*, offline: bool = False) -> int:
     from ..trader import portfolio as tp
 
     pf = tp.snapshot()
     if pf is None:
-        print("❌ IBKR unavailable — start TWS/Gateway with API enabled (port 7497).")
+        if offline:
+            # Fall back to most recent stored performance snapshot for display
+            from ..memory import get_store
+            from datetime import datetime, timezone
+            ph = get_store().performance_history(limit=1)
+            if ph:
+                r = ph[0]
+                age_days = (datetime.now(timezone.utc) - r.as_of).days
+                print(f"⚠️  offline mode — showing stored snapshot ({age_days}d old, as of {r.as_of:%Y-%m-%d})")
+                print(f"=== Portfolio {r.account_id} @ {r.as_of:%Y-%m-%d} (stored) ===")
+                print(f"NetLiq ${r.net_liquidation:,.0f} · dailyP&L ${r.daily_pnl:,.0f} "
+                      f"· cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}")
+                return 0
+            print("❌ No stored snapshot found — connect TWS and run `ats trader snapshot`.")
+            return 1
+        print("❌ IBKR unavailable — start TWS/Gateway with API enabled (port 7497). Use --offline for stored data.")
         return 1
     print(f"=== Portfolio {pf.account_id} @ {pf.as_of:%Y-%m-%d %H:%M} ===")
     print(f"NetLiq ${pf.net_liquidation:,.0f} · cash ${pf.cash:,.0f} · leverage {pf.leverage:.2f}x "
@@ -754,6 +782,7 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("action", choices=["report", "check"])
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
+    rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
     tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
                                        "cancel", "execute", "buy", "sell"])
@@ -764,6 +793,7 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("--report", action="store_true", help="perf: also write an Obsidian report")
     tr.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli",
                     help="approval channel for orders")
+    tr.add_argument("--offline", action="store_true", help="portfolio: show stored snapshot without IBKR")
     tr.add_argument("--dry-run", action="store_true", help="go through approval but place no orders")
     ma = sub.add_parser("macro", help="macro strategist 宏观分析 (review / show / probe)")
     ma.add_argument("action", choices=["review", "show", "probe"])
@@ -825,11 +855,11 @@ def main(argv: list[str] | None = None) -> int:
                          auto=args.yes, offline=args.offline)
     if args.command == "risk":
         if args.action == "report":
-            return risk_report(write_report=args.report)
+            return risk_report(write_report=args.report, offline=getattr(args, "offline", False))
         return risk_check(args.symbol)
     if args.command == "trader":
         if args.action == "portfolio":
-            return trader_portfolio()
+            return trader_portfolio(offline=getattr(args, "offline", False))
         if args.action == "snapshot":
             return trader_snapshot()
         if args.action == "perf":

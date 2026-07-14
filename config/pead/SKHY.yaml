@@ -1,0 +1,31 @@
+# SK Hynix ADR (SKHY) — PEAD config
+# L5 HBM 龙头：HBM3E/HBM4 主导 AI 内存市场；NVIDIA 独家/优先供应商
+
+symbol: SKHY
+fiscal_label: "Q FY2026"
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 6.0          # 高波动 ADR，阈值稍高
+long_threshold: 1.3
+
+scorecard_dims:
+  - {key: hbm_revenue,    weight: 0.25, label: HBM 营收占比与 ASP 趋势}
+  - {key: forward_guide,  weight: 0.20, label: 次季指引（HBM 出货 + DRAM 价格）}
+  - {key: gross_margin,   weight: 0.15, label: 合并毛利率（HBM 溢价拉动）}
+  - {key: hbm_share,      weight: 0.15, label: HBM3E/HBM4 市场份额维持}
+  - {key: dram_pricing,   weight: 0.10, label: 传统 DRAM 价格走势}
+  - {key: nvda_relation,  weight: 0.10, label: NVIDIA 独家/优先供应关系变化}
+  - {key: call_tone,      weight: 0.05, label: 管理层对 HBM4 量产时程表态}
+
+signal_chain:
+  - {symbol: NVDA,  role: downstream}   # 最大 HBM 客户
+  - {symbol: AMD,   role: downstream}
+  - {symbol: TSM,   role: peer}         # 先进封装合作（HBM on CoWoS）
+  - {symbol: MU,    role: peer}         # DRAM/HBM 竞争对手
+  - {symbol: ASML,  role: upstream}
+
+narrative_seed: >
+  全球 HBM（高带宽内存）市占率第一（约 50%+）；HBM3E 已批量向 NVIDIA 供货；
+  HBM4 量产节奏与三星追赶是核心变量；DRAM 价格周期+HBM 溢价双轨驱动毛利率；
+  作为韩国股票的 ADR，汇率（韩元/美元）与政治风险是额外折价因子；
+  NVIDIA CoWoS 封装中 HBM 是最稀缺组件之一。

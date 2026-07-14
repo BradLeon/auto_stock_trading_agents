@@ -51,8 +51,9 @@ _ANALYST_DEFAULTS = {
 
 def _yf_consensus(symbol: str) -> dict:
     import yfinance as yf
+    from .base import yf_symbol
 
-    t = yf.Ticker(symbol)
+    t = yf.Ticker(yf_symbol(symbol))
     out: dict = {"eps": None, "revenue": None, "eps_low": None, "eps_high": None,
                  "revenue_low": None, "revenue_high": None}
 
@@ -88,8 +89,9 @@ def _yf_consensus(symbol: str) -> dict:
 
 def _yf_analyst(symbol: str) -> dict:
     import yfinance as yf
+    from .base import yf_symbol
 
-    t = yf.Ticker(symbol)
+    t = yf.Ticker(yf_symbol(symbol))
     out: dict = {**_ANALYST_DEFAULTS, "rating_trend": [], "upgrades_downgrades": []}
 
     # analyst_price_targets: {'current': ..., 'low': ..., 'high': ..., 'mean': ..., 'median': ...}

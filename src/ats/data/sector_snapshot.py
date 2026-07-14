@@ -16,11 +16,23 @@ name = "sector_snapshot"
 
 
 def fetch_prices(symbols: list[str], period: str = "1y") -> dict[str, list[float]]:
-    """Daily closes per symbol via one batched download. Missing names -> absent key."""
+    """Daily closes per symbol via one batched download. Missing names -> absent key.
+    Input symbols may be raw IBKR broker tickers; they are normalized to yfinance
+    conventions before the download, and results are keyed back to IBKR symbols."""
     if not symbols:
         return {}
-    out = safe_fetch(lambda: _download(symbols, period), source="sector-prices")
-    return out or {}
+    from .base import yf_symbol
+
+    # Build IBKR→yf and yf→IBKR maps (one-to-one; collisions keep last)
+    ibkr_to_yf = {s: yf_symbol(s) for s in symbols}
+    yf_to_ibkr = {v: k for k, v in ibkr_to_yf.items()}
+    yf_syms = list(ibkr_to_yf.values())
+
+    raw = safe_fetch(lambda: _download(yf_syms, period), source="sector-prices")
+    if not raw:
+        return {}
+    # Remap yfinance keys → original IBKR keys
+    return {yf_to_ibkr.get(k, k): v for k, v in raw.items()}
 
 
 def _download(symbols: list[str], period: str) -> dict[str, list[float]]:

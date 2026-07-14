@@ -55,8 +55,9 @@ def fetch(symbol: str) -> FundamentalData:
 
 def _yf_info(symbol: str) -> dict:
     import yfinance as yf
+    from .base import yf_symbol
 
-    info = yf.Ticker(symbol).get_info()
+    info = yf.Ticker(yf_symbol(symbol)).get_info()
     if not info:
         raise ValueError(f"no info for {symbol}")
     return info
@@ -122,8 +123,9 @@ def _dollar_metric(label, cur, prev, yago):
 
 def _statements(symbol: str) -> FinancialStatements:
     import yfinance as yf
+    from .base import yf_symbol
 
-    t = yf.Ticker(symbol)
+    t = yf.Ticker(yf_symbol(symbol))
     inc, bs, cf = t.quarterly_income_stmt, t.quarterly_balance_sheet, t.quarterly_cashflow
     if inc is None or inc.empty:
         raise ValueError(f"no quarterly statements for {symbol}")

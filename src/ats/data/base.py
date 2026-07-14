@@ -14,6 +14,19 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 log = logging.getLogger("ats.data")
 
+# IBKR sends broker-native tickers; yfinance uses different conventions.
+# Map IBKR symbol → yfinance ticker here; applied in all data/*.py calls.
+_YF_SYMBOL_MAP: dict[str, str] = {
+    "BRK B": "BRK-B",    # Berkshire B: IBKR uses space, yfinance uses dash
+    "BRK A": "BRK-A",
+    "HY9H": "SKHY",       # SK Hynix Frankfurt ADR → US ADR (same company, USD-priced)
+}
+
+
+def yf_symbol(symbol: str) -> str:
+    """Normalize an IBKR broker symbol to its yfinance-compatible ticker."""
+    return _YF_SYMBOL_MAP.get(symbol, symbol)
+
 T = TypeVar("T")
 
 

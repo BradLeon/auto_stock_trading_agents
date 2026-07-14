@@ -297,7 +297,9 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
 
     pf = tport.snapshot()
     if pf is None:
-        print("❌ IBKR unavailable — start TWS (port 7497). Use --offline to show stored review.")
+        from ..config import get_config
+        _port = get_config().app.broker.port or get_config().secrets.ibkr_port
+        print(f"❌ IBKR unavailable — start TWS with API enabled (port {_port}). Use --offline to show stored review.")
         return 1
     risk_assess.enrich_beta(pf)
     review = risk_assess.assess(pf)
@@ -362,7 +364,9 @@ def trader_portfolio(*, offline: bool = False) -> int:
                 return 0
             print("❌ No stored snapshot found — connect TWS and run `ats trader snapshot`.")
             return 1
-        print("❌ IBKR unavailable — start TWS/Gateway with API enabled (port 7497). Use --offline for stored data.")
+        from ..config import get_config
+        _port = get_config().app.broker.port or get_config().secrets.ibkr_port
+        print(f"❌ IBKR unavailable — start TWS/Gateway with API enabled (port {_port}). Use --offline for stored data.")
         return 1
     print(f"=== Portfolio {pf.account_id} @ {pf.as_of:%Y-%m-%d %H:%M} ===")
     print(f"NetLiq ${pf.net_liquidation:,.0f} · cash ${pf.cash:,.0f} · leverage {pf.leverage:.2f}x "

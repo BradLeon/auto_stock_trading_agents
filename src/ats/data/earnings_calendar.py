@@ -66,8 +66,9 @@ def _finnhub_next(symbol: str) -> dict | None:
 # --------------------------------------------------------------------------- #
 def _yf_next(symbol: str) -> date | None:
     import yfinance as yf
+    from .base import yf_symbol
 
-    t = yf.Ticker(symbol)
+    t = yf.Ticker(yf_symbol(symbol))
     today = datetime.now(timezone.utc).date()
     df = t.get_earnings_dates(limit=12)
     if df is not None and not df.empty:

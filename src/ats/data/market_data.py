@@ -17,8 +17,9 @@ name = "yfinance"
 
 def _download(symbol: str, period: str, interval: str):
     import yfinance as yf
+    from .base import yf_symbol
 
-    df = yf.Ticker(symbol).history(period=period, interval=interval, auto_adjust=True)
+    df = yf.Ticker(yf_symbol(symbol)).history(period=period, interval=interval, auto_adjust=True)
     if df is None or df.empty:
         raise ValueError(f"no data returned for {symbol}")
     return df

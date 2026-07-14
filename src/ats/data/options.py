@@ -213,8 +213,9 @@ def _pick_expiration(expirations: tuple[str, ...], earnings_date: date | None) -
 
 def _yfinance(symbol: str, earnings_date: date | None) -> dict:
     import yfinance as yf
+    from .base import yf_symbol
 
-    t = yf.Ticker(symbol)
+    t = yf.Ticker(yf_symbol(symbol))
     exp = _pick_expiration(t.options, earnings_date)
     if not exp:
         raise ValueError(f"no option expirations for {symbol}")

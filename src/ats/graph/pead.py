@@ -1,6 +1,6 @@
 """PEAD earnings-event workflow (LangGraph).
 
-    START → load → ┬ prep:  fetch → narrative → expectations → signal_chain → persist_prep → END
+    START → load → ┬ prep:  fetch → framework → narrative → expectations → signal_chain → persist_prep → END
                    └ score: fetch → actuals → scorecard → decision(建议) → persist_score → END
 
 v0.2: the score branch produces a risk-aware trade RECOMMENDATION persisted in the
@@ -23,6 +23,7 @@ from ..schemas.market import Ticker
 from ..schemas.pead import (
     Actuals,
     ExpectationSet,
+    FundamentalBackground,
     MarketSetup,
     PeadDossier,
     Scorecard,
@@ -67,6 +68,12 @@ def load(state: PeadState) -> dict:
             if state.phase == "score":
                 out["expectation_set"] = prior.expectation_set
                 out["market_setup"] = prior.market_setup
+                # carry the prep-phase framework/chain into the score dossier so the
+                # re-save doesn't drop them
+                out["fundamental_background"] = prior.fundamental_background
+                out["signal_chain"] = prior.signal_chain
+                out["signal_chain_summary"] = prior.signal_chain_summary
+                out["earnings_date"] = prior.earnings_date
             else:  # prep: carry the accumulated monitor narrative forward (don't reset to seed)
                 out["prior_narrative"] = prior.expectation_set.narrative
     return out
@@ -118,6 +125,7 @@ def prep_fetch(state: PeadState) -> dict:
     # Pass the earnings date so options picks the post-earnings expiration (the one
     # whose Expected Move / IV actually prices the event).
     target_earnings = earnings_calendar.next_earnings_date(state.symbol)
+    out["earnings_date"] = target_earnings.isoformat() if target_earnings else ""
     opt = opt_src.fetch(state.symbol, target_earnings)
     out["market_setup"] = MarketSetup(
         symbol=state.symbol, as_of=state.as_of,
@@ -142,22 +150,61 @@ def prep_fetch(state: PeadState) -> dict:
     return out
 
 
+def prep_framework(state: PeadState) -> dict:
+    """Stable company framework (background / peers / catalysts / risks / valuation band)."""
+    if not state.use_llm:
+        return {}
+    view = prep_agents.framework(state.config, state.fundamentals_text, state.consensus)
+    fb = FundamentalBackground(
+        background=view.background, peer_comparison=view.peer_comparison,
+        watch_metrics=view.watch_metrics,
+        catalysts=view.catalysts, key_risks=view.key_risks, valuation=view.valuation)
+    return {"fundamental_background": fb}
+
+
 def prep_narrative(state: PeadState) -> dict:
     cfg = state.config
+    c = state.consensus or {}
+    consensus_kwargs = _consensus_kwargs(c)
     if not state.use_llm:
         return {"expectation_set": ExpectationSet(
             symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
             narrative=state.prior_narrative or cfg.narrative_seed,
-            consensus_eps=state.consensus.get("eps"),
-            consensus_revenue=state.consensus.get("revenue"))}
+            **consensus_kwargs)}
     nv = prep_agents.narrative(cfg, state.fundamentals_text, state.consensus,
                                prior_narrative=state.prior_narrative,
-                               industry_context=state.industry_context)
+                               industry_context=state.industry_context,
+                               market_setup=state.market_setup)
     es = ExpectationSet(
         symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
         narrative=nv.narrative, focus_ranking=nv.focus_ranking, valuation=nv.valuation,
-        consensus_eps=state.consensus.get("eps"), consensus_revenue=state.consensus.get("revenue"))
+        **consensus_kwargs)
     return {"expectation_set": es}
+
+
+def _consensus_kwargs(c: dict) -> dict:
+    """Extract all consensus fields from the raw consensus dict for ExpectationSet."""
+    rating_parts = []
+    sb = c.get("rating_strong_buy", 0) or 0
+    b = c.get("rating_buy", 0) or 0
+    h = c.get("rating_hold", 0) or 0
+    s = c.get("rating_sell", 0) or 0
+    if sb or b or h or s:
+        rating_parts = [f"强买{sb}", f"买{b}", f"持有{h}", f"卖{s}"]
+    actions = []
+    for up in (c.get("upgrades_downgrades") or [])[:3]:
+        actions.append(f"{up.get('date','')} {up.get('firm','')} → {up.get('to_grade','')}")
+    return {
+        "consensus_eps": c.get("eps"),
+        "consensus_eps_low": c.get("eps_low"),
+        "consensus_eps_high": c.get("eps_high"),
+        "consensus_revenue": c.get("revenue"),
+        "consensus_revenue_low": c.get("revenue_low"),
+        "consensus_revenue_high": c.get("revenue_high"),
+        "consensus_target_price": c.get("target_mean"),
+        "consensus_rating_summary": "/".join(rating_parts),
+        "consensus_recent_actions": actions,
+    }
 
 
 def prep_expectations(state: PeadState) -> dict:
@@ -174,8 +221,10 @@ def prep_expectations(state: PeadState) -> dict:
 
 def prep_signal_chain(state: PeadState) -> dict:
     if not state.use_llm:
-        return {"signal_chain": prep_agents._fallback_chain(state.peer_rows)}
-    return {"signal_chain": prep_agents.signal_chain(state.config, state.peer_rows)}
+        return {"signal_chain": prep_agents._fallback_chain(state.peer_rows),
+                "signal_chain_summary": ""}
+    items, summary = prep_agents.signal_chain(state.config, state.peer_rows)
+    return {"signal_chain": items, "signal_chain_summary": summary}
 
 
 def prep_persist(state: PeadState) -> dict:
@@ -184,10 +233,17 @@ def prep_persist(state: PeadState) -> dict:
 
     dossier = PeadDossier(
         symbol=state.symbol, fiscal_label=state.fiscal_label, phase="prep", updated_at=_now(),
+        earnings_date=state.earnings_date,
+        fundamental_background=state.fundamental_background,
         expectation_set=state.expectation_set, market_setup=state.market_setup,
-        signal_chain=state.signal_chain)
+        signal_chain=state.signal_chain, signal_chain_summary=state.signal_chain_summary,
+        fundamentals_context=state.fundamentals_text or "",
+        scorecard_dims=state.config.scorecard_dims,
+        scorecard_weights={d.key: d.weight for d in state.config.scorecard_dims},
+        long_threshold=state.config.long_threshold,
+        run_up_warn_pct=state.config.run_up_warn_pct)
     get_store().save_dossier(dossier)
-    path = pead_report.write_prep(dossier)
+    path = pead_report.write_report(dossier)
     if path:
         print(f"   📝 {path}")
     return {}
@@ -295,11 +351,19 @@ def score_persist(state: PeadState) -> dict:
         summary += " | guardrail: " + "; ".join(state.risk_adjustments)
     dossier = PeadDossier(
         symbol=state.symbol, fiscal_label=state.fiscal_label, phase="score", updated_at=_now(),
+        earnings_date=state.earnings_date,
+        fundamental_background=state.fundamental_background,
         expectation_set=state.expectation_set, market_setup=state.market_setup,
-        signal_chain=state.signal_chain, actuals=state.actuals, scorecard=state.scorecard,
+        signal_chain=state.signal_chain, signal_chain_summary=state.signal_chain_summary,
+        fundamentals_context=state.fundamentals_text or "",
+        scorecard_dims=state.config.scorecard_dims,
+        scorecard_weights={d.key: d.weight for d in state.config.scorecard_dims},
+        long_threshold=state.config.long_threshold,
+        run_up_warn_pct=state.config.run_up_warn_pct,
+        actuals=state.actuals, scorecard=state.scorecard,
         decision_summary=summary)
     get_store().save_dossier(dossier)
-    pead_report.write_score(dossier)
+    pead_report.write_report(dossier)
     return {}
 
 
@@ -310,7 +374,8 @@ def build_pead_graph(checkpointer=None):
     g = StateGraph(PeadState)
     for name, fn in [
         ("load", load),
-        ("prep_fetch", prep_fetch), ("prep_narrative", prep_narrative),
+        ("prep_fetch", prep_fetch), ("prep_framework", prep_framework),
+        ("prep_narrative", prep_narrative),
         ("prep_expectations", prep_expectations), ("prep_signal_chain", prep_signal_chain),
         ("prep_persist", prep_persist),
         ("score_fetch", score_fetch), ("score_actuals", score_actuals),
@@ -322,7 +387,8 @@ def build_pead_graph(checkpointer=None):
     g.add_edge(START, "load")
     g.add_conditional_edges("load", route, {"prep": "prep_fetch", "score": "score_fetch"})
 
-    g.add_edge("prep_fetch", "prep_narrative")
+    g.add_edge("prep_fetch", "prep_framework")
+    g.add_edge("prep_framework", "prep_narrative")
     g.add_edge("prep_narrative", "prep_expectations")
     g.add_edge("prep_expectations", "prep_signal_chain")
     g.add_edge("prep_signal_chain", "prep_persist")

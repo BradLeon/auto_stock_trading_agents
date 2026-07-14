@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from ...schemas.pead import Expectation, PeadConfig, SignalChainItem
+from ...schemas.pead import Expectation, MarketSetup, PeadConfig, SignalChainItem
 from ..base import run_structured
-from .outputs import ExpectationsView, NarrativeView, SignalChainView
+from .outputs import ExpectationsView, FundamentalAnalysisView, NarrativeView, SignalChainView
 
 log = logging.getLogger("ats.agents.pead")
 
@@ -32,8 +32,58 @@ def _consensus_text(consensus: dict) -> str:
     return "\n".join(lines)
 
 
+def framework(config: PeadConfig, fundamentals_text: str,
+              consensus: dict) -> FundamentalAnalysisView:
+    """Stable company framework: background bullets, peer table, catalysts, risks, valuation."""
+    peers = ", ".join(sc.symbol for sc in config.signal_chain) or "(none listed)"
+    ctx = (
+        f"Build the company framework section for {config.symbol} ({config.fiscal_label}).\n"
+        f"Fundamentals:\n{fundamentals_text}\n"
+        f"{_consensus_text(consensus)}\n"
+        f"Its signal-chain names (candidate peers for the comparison table): {peers}. "
+        f"Sector ETF: {config.sector_etf}.\n"
+        "Produce: background bullets, a peer-comparison table vs the 1-2 most relevant names, "
+        "a grouped quantitative watch-metrics list for this quarter, dated catalysts, "
+        "thesis-invalidating key risks, and a valuation read with explicit ceiling/floor "
+        "multiples and implied prices. 全部用中文输出。"
+    )
+    try:
+        return run_structured("manager", FundamentalAnalysisView, ctx,
+                              skill_slug="pead-framework")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pead framework failed for %s: %s", config.symbol, exc)
+        return FundamentalAnalysisView()
+
+
+def _market_setup_text(ms: MarketSetup | None) -> str:
+    """Options/price-action evidence block for the narrative's综合预判 read."""
+    if ms is None:
+        return ""
+    parts = []
+    if ms.pre_earnings_close is not None:
+        parts.append(f"pre-earnings close ${ms.pre_earnings_close:.2f}")
+    if ms.run_up_vs_sector_pct is not None:
+        parts.append(f"20d run-up vs sector ETF {ms.run_up_vs_sector_pct:+.1f}%")
+    if ms.run_up_vs_bench_pct is not None:
+        parts.append(f"vs benchmark {ms.run_up_vs_bench_pct:+.1f}%")
+    if ms.dist_to_ath_pct is not None:
+        parts.append(f"dist to ATH {ms.dist_to_ath_pct:+.1f}%")
+    if ms.expected_move_pct is not None:
+        parts.append(f"option Expected Move ±{ms.expected_move_pct:.1f}%")
+    if ms.atm_iv is not None:
+        # sources are inconsistent: fraction (0.55) vs percent (55.0)
+        iv = ms.atm_iv * 100 if ms.atm_iv <= 3 else ms.atm_iv
+        parts.append(f"ATM IV {iv:.0f}%")
+    if ms.iv_skew is not None:
+        parts.append(f"IV Skew (25Δ put-call) {ms.iv_skew:+.1f}pts")
+    if not parts:
+        return ""
+    return "Market setup (options / price action): " + "; ".join(parts) + "\n"
+
+
 def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
-              prior_narrative: str = "", industry_context: str = "") -> NarrativeView:
+              prior_narrative: str = "", industry_context: str = "",
+              market_setup: MarketSetup | None = None) -> NarrativeView:
     # Prefer the living thesis accumulated by the monitor between earnings; fall
     # back to the static seed only on the first-ever prep (nothing accumulated yet).
     if prior_narrative.strip():
@@ -54,11 +104,13 @@ def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
         f"{base}"
         f"Fundamentals:\n{fundamentals_text}\n"
         f"{_consensus_text(consensus)}\n"
+        f"{_market_setup_text(market_setup)}"
         f"{industry_block}\n"
         "Produce the core thesis (fold in the monitored developments above and any per-dimension "
         "expectation shifts they noted; ground the company's positioning in the industry background "
-        "if provided), an ordered list of what matters most THIS quarter (focus_ranking), and a "
-        "valuation read (PE / forward PE / ceiling-floor)."
+        "if provided; if market-setup data is given, weave its read — EM, IV Skew, excess run-up — "
+        "into the综合预判), an ordered list of what matters most THIS quarter (focus_ranking), and a "
+        "valuation read (PE / forward PE / ceiling-floor). 全部用中文输出。"
     )
     try:
         return run_structured("manager", NarrativeView, ctx, skill_slug="pead-narrative")
@@ -93,10 +145,12 @@ def expectations(config: PeadConfig, narrative_view: NarrativeView,
         return []
 
 
-def signal_chain(config: PeadConfig, peer_rows: list[dict]) -> list[SignalChainItem]:
-    """peer_rows: [{symbol, role, price_chg_pct, earnings_date, reported}]."""
+def signal_chain(config: PeadConfig,
+                 peer_rows: list[dict]) -> tuple[list[SignalChainItem], str]:
+    """peer_rows: [{symbol, role, price_chg_pct, earnings_date, reported}].
+    Returns (items, summary) — summary is the net supportive/cautionary paragraph."""
     if not config.signal_chain:
-        return []
+        return [], ""
     lines = "\n".join(
         f"  - {r['symbol']} ({r['role']}): 20d move {r.get('price_chg_pct')}%, "
         f"earnings {r.get('earnings_date')}, reported={r.get('reported')}" for r in peer_rows)
@@ -119,10 +173,10 @@ def signal_chain(config: PeadConfig, peer_rows: list[dict]) -> list[SignalChainI
                 earnings_date=ed if isinstance(ed, date) else None,
                 reported=bool(r.get("reported")), price_chg_pct=r.get("price_chg_pct"),
                 signal=it.signal))
-        return out or _fallback_chain(peer_rows)
+        return (out, view.summary) if out else (_fallback_chain(peer_rows), view.summary)
     except Exception as exc:  # noqa: BLE001
         log.warning("pead signal_chain failed for %s: %s", config.symbol, exc)
-        return _fallback_chain(peer_rows)
+        return _fallback_chain(peer_rows), ""
 
 
 def _fallback_chain(peer_rows: list[dict]) -> list[SignalChainItem]:

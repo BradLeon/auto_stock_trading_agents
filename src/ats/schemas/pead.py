@@ -49,6 +49,18 @@ class PeadConfig(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Pre-earnings: stable company framework (background / peers / valuation band)
+# --------------------------------------------------------------------------- #
+class FundamentalBackground(BaseModel):
+    background: str = ""              # 3-5 numbered bullets: moat / drivers / margin / risk
+    peer_comparison: str = ""         # markdown table vs 1-2 key peers
+    watch_metrics: str = ""           # grouped quantitative watch-list for the quarter
+    catalysts: list[str] = Field(default_factory=list)   # dated upcoming catalysts
+    key_risks: list[str] = Field(default_factory=list)   # thesis-invalidating, by severity
+    valuation: str = ""               # PE / fwd PE + ceiling-floor with implied prices
+
+
+# --------------------------------------------------------------------------- #
 # Pre-earnings: expectations baseline
 # --------------------------------------------------------------------------- #
 class Expectation(BaseModel):
@@ -68,7 +80,14 @@ class ExpectationSet(BaseModel):
     focus_ranking: list[str] = Field(default_factory=list)  # what matters most this quarter
     expectations: list[Expectation] = Field(default_factory=list)
     consensus_eps: float | None = None
+    consensus_eps_low: float | None = None
+    consensus_eps_high: float | None = None
     consensus_revenue: float | None = None
+    consensus_revenue_low: float | None = None
+    consensus_revenue_high: float | None = None
+    consensus_target_price: float | None = None   # analyst PT mean
+    consensus_rating_summary: str = ""            # e.g. "强买5/买12/持有2/卖0"
+    consensus_recent_actions: list[str] = Field(default_factory=list)  # last 3 upgrades/downgrades
     valuation: str = ""                       # PE / fwd PE / ceiling-floor note
 
 
@@ -156,9 +175,17 @@ class PeadDossier(BaseModel):
     fiscal_label: str = ""
     phase: PeadPhase = "prep"
     updated_at: datetime
+    earnings_date: str = ""           # ISO date of the print, when known
+    fundamental_background: FundamentalBackground | None = None  # stable company framework
     expectation_set: ExpectationSet | None = None
     market_setup: MarketSetup | None = None
     signal_chain: list[SignalChainItem] = Field(default_factory=list)
+    signal_chain_summary: str = ""    # net supportive/cautionary chain read
+    fundamentals_context: str = ""    # fd.to_context() snapshot at prep time
+    scorecard_dims: list[ScorecardDim] = Field(default_factory=list)  # labels+weights for skeletons
+    scorecard_weights: dict[str, float] = Field(default_factory=dict)  # dim_key -> weight
+    long_threshold: float = 1.0       # decision-tree params snapshot from config
+    run_up_warn_pct: float = 5.0
     actuals: Actuals | None = None
     scorecard: Scorecard | None = None
     decision_summary: str = ""

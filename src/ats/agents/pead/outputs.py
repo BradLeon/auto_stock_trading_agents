@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+import json
+import re
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _as_list(v):
@@ -13,12 +16,71 @@ def _as_list(v):
     return v
 
 
+def _strip_xml_params(text: str) -> tuple[str, dict]:
+    """Extract <parameter name="...">...</parameter> blocks from text.
+    Returns (clean_text, {name: content})."""
+    pattern = re.compile(r'</parameter>\s*<parameter name="([^"]+)">(.*?)(?=</parameter>|$)',
+                         re.DOTALL)
+    extracted = {}
+    # Find the first </parameter> — everything before it is clean narrative
+    first_close = text.find("</parameter>")
+    if first_close == -1:
+        return text, {}
+    clean = text[:first_close].strip()
+    tail = text[first_close:]
+    for m in pattern.finditer(tail):
+        extracted[m.group(1)] = m.group(2).strip()
+    return clean, extracted
+
+
 class NarrativeView(BaseModel):
     narrative: str = Field(description="core thesis: business drivers, key bottleneck, margin story")
     focus_ranking: list[str] = Field(default_factory=list, description="what matters most this quarter, ordered")
     valuation: str = Field(default="", description="PE / forward PE / ceiling-floor read")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_embedded_params(cls, data):
+        """If the LLM embeds focus_ranking/valuation as XML inside narrative, recover them."""
+        if not isinstance(data, dict):
+            return data
+        narrative = data.get("narrative", "") or ""
+        if "</parameter>" not in narrative:
+            return data
+        clean, extras = _strip_xml_params(narrative)
+        data = dict(data)
+        data["narrative"] = clean
+        if not data.get("focus_ranking") and "focus_ranking" in extras:
+            try:
+                data["focus_ranking"] = json.loads(extras["focus_ranking"])
+            except Exception:
+                raw = extras["focus_ranking"].strip()
+                if raw:
+                    data["focus_ranking"] = [raw]
+        if not data.get("valuation") and "valuation" in extras:
+            data["valuation"] = extras["valuation"]
+        return data
+
     @field_validator("focus_ranking", mode="before")
+    @classmethod
+    def _c(cls, v):
+        return _as_list(v)
+
+
+class FundamentalAnalysisView(BaseModel):
+    background: str = Field(default="",
+                            description="3-5 numbered bullets: moat, revenue driver, margin swing, structural risk, secular tailwind")
+    peer_comparison: str = Field(default="",
+                                 description="markdown table vs 1-2 key peers on this quarter's decisive dimensions")
+    watch_metrics: str = Field(default="",
+                               description="grouped markdown watch-list of this quarter's quantitative metrics")
+    catalysts: list[str] = Field(default_factory=list, description="dated upcoming catalysts")
+    key_risks: list[str] = Field(default_factory=list,
+                                 description="thesis-invalidating, company-specific risks, ordered by severity")
+    valuation: str = Field(default="",
+                           description="trailing/forward PE + ceiling/floor multiples with implied prices")
+
+    @field_validator("catalysts", "key_risks", mode="before")
     @classmethod
     def _c(cls, v):
         return _as_list(v)

@@ -11,6 +11,7 @@ from ..schemas.memory import TradeLogEntry
 from ..schemas.pead import (
     Actuals,
     ExpectationSet,
+    FundamentalBackground,
     MarketSetup,
     PeadConfig,
     Scorecard,
@@ -39,15 +40,18 @@ class PeadState(BaseModel):
     consensus: dict = Field(default_factory=dict)
     peer_rows: list[dict] = Field(default_factory=list)
     industry_context: str = ""      # curated sector background (Obsidian) for prep thesis
+    earnings_date: str = ""         # ISO date of the upcoming/scored print, when known
     transcript_text: str = ""
     transcript_resolved_source: str = ""
     documents_text: str = ""        # official docs (SEC 8-K release + investor decks)
 
     # dossier sections
     prior_narrative: str = ""           # accumulated monitor thesis to continue in prep
+    fundamental_background: FundamentalBackground | None = None
     expectation_set: ExpectationSet | None = None
     market_setup: MarketSetup | None = None
     signal_chain: list[SignalChainItem] = Field(default_factory=list)
+    signal_chain_summary: str = ""
     actuals: Actuals | None = None
     scorecard: Scorecard | None = None
     portfolio: PortfolioSnapshot | None = None

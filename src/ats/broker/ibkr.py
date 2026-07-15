@@ -217,7 +217,15 @@ class IBKRBroker:
         try:
             side = "BUY" if decision.action in ("buy", "add") else "SELL"
             contract = Stock(decision.symbol, "SMART", "USD")
-            ib.qualifyContracts(contract)
+            if not ib.qualifyContracts(contract):
+                # Never send an order on an unverified contract. Error 200 on a
+                # normal ticker usually means TWS lost its IB-server link
+                # (nightly restart / maintenance window) — not a bad symbol.
+                entry.status = "rejected"
+                entry.error = ("contract not qualified — check symbol, or TWS "
+                               "disconnected from IB servers (Error 1100/200)")
+                self._last_trades.append(None)
+                return entry
             order = (LimitOrder(side, qty, decision.limit_price)
                      if decision.order_type == "limit" and decision.limit_price
                      else MarketOrder(side, qty))

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime, timezone
 
 from ..broker import IBKRBroker, IBKRUnavailable
@@ -118,7 +119,7 @@ def _size(d: TradeDecision) -> float:
         return float(abs(d.qty))
     if d.notional_usd:
         px = _last_price(d.symbol)
-        if px:
+        if px and math.isfinite(px) and px > 0:
             return float(round(d.notional_usd / px))
     return 0.0
 
@@ -129,7 +130,13 @@ def _last_price(symbol: str) -> float | None:
         from ..schemas.market import Ticker
 
         snap = market_data.fetch_snapshot(Ticker(symbol=symbol))
-        return snap.history[-1].close if snap.history else None
+        # Walk back past empty bars: pre-open, yfinance appends today's bar
+        # with close=NaN before the session has traded.
+        for bar in reversed(snap.history):
+            px = bar.close
+            if px is not None and math.isfinite(px) and px > 0:
+                return float(px)
+        return None
     except Exception:  # noqa: BLE001
         return None
 

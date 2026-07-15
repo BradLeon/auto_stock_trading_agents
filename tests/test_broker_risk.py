@@ -47,3 +47,52 @@ def test_status_mapping():
     assert _map_status("Filled") == "filled"
     assert _map_status("PreSubmitted") == "submitted"
     assert _map_status("Cancelled") == "cancelled"
+
+
+def test_submit_rejects_unqualified_contract():
+    """qualifyContracts returning [] (Error 200 / TWS offline) must NOT place an
+    order — observed live 2026-07-15 during the IBKR maintenance window."""
+    from ats.schemas.decision import TradeDecision
+
+    class FakeIB:
+        placed = False
+
+        def qualifyContracts(self, *contracts):
+            return []
+
+        def placeOrder(self, contract, order):  # pragma: no cover - must not run
+            self.placed = True
+            raise AssertionError("order placed on unqualified contract")
+
+    broker = IBKRBroker(host="240.0.0.1", port=1, client_id=99)
+    broker._last_trades = []
+    ib = FakeIB()
+    entry = broker._submit(ib, TradeDecision(symbol="MRVL", action="trim"), 27, "cycle-x")
+    assert entry.status == "rejected"
+    assert "not qualified" in entry.error
+    assert ib.placed is False
+    assert broker._last_trades == [None]
+
+
+def test_size_survives_nan_close(monkeypatch):
+    """Pre-open, yfinance appends today's bar with close=NaN — sizing must skip
+    it (use the last real close), never crash on round(NaN). Seen live 2026-07-15."""
+    from ats.trader import execute as texec
+    from ats.schemas.decision import TradeDecision
+
+    class Bar:
+        def __init__(self, close):
+            self.close = close
+
+    class Snap:
+        history = [Bar(217.53), Bar(float("nan"))]
+
+    monkeypatch.setattr("ats.data.market_data.fetch_snapshot", lambda t: Snap())
+    d = TradeDecision(symbol="MRVL", action="trim", notional_usd=6000)
+    assert texec._size(d) == 28.0
+
+    class AllNan:
+        history = [Bar(float("nan"))]
+
+    monkeypatch.setattr("ats.data.market_data.fetch_snapshot", lambda t: AllNan())
+    assert texec._size(d) == 0.0

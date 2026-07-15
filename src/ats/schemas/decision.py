@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Action = Literal["buy", "add", "hold", "trim", "sell"]
 OrderType = Literal["market", "limit"]
 TimeInForce = Literal["DAY", "GTC"]
+
+# Class shares: LLMs/yfinance write BRK.B / BRK-B; IBKR (our canonical form) uses "BRK B".
+_CLASS_SHARE_RE = re.compile(r"^([A-Z]+)[.\-]([A-Z])$")
 
 
 class TradeDecision(BaseModel):
     """A single proposed action on one symbol, produced by the Manager."""
 
     symbol: str
+
+    @field_validator("symbol")
+    @classmethod
+    def _broker_native_symbol(cls, v: str) -> str:
+        return _CLASS_SHARE_RE.sub(r"\1 \2", v.strip().upper())
     action: Action
     target_weight: float | None = Field(None, ge=0, le=1, description="desired portfolio weight")
     qty: float | None = Field(None, description="absolute share delta; sign implied by action")

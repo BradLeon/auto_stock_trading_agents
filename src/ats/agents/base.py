@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import TypeVar
@@ -13,6 +16,34 @@ from ..llm import get_model
 SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 
 T = TypeVar("T", bound=BaseModel)
+
+log = logging.getLogger("ats.agents.base")
+
+# OpenRouter's OpenAI-compat relay occasionally mangles Anthropic tool calls:
+# the first parameter's value swallows the rest of the call as literal
+# `</parameter>\n<parameter name="...">...` text, and those later parameters
+# come back as their schema defaults. Detect and re-parse.
+_PARAM_LEAK_RE = re.compile(r'<parameter name="(\w+)">\s*(.*?)\s*(?:</parameter>|\Z)', re.S)
+
+
+def _repair_param_leak(obj: T, schema: type[T]) -> T:
+    data = obj.model_dump()
+    leaked = next((k for k, v in data.items()
+                   if isinstance(v, str) and "</parameter>" in v), None)
+    if leaked is None:
+        return obj
+    head, _, tail = data[leaked].partition("</parameter>")
+    data[leaked] = head.strip()
+    for m in _PARAM_LEAK_RE.finditer(tail):
+        name, raw = m.group(1), m.group(2)
+        if name not in schema.model_fields:
+            continue
+        try:
+            data[name] = json.loads(raw)
+        except ValueError:
+            data[name] = raw
+    log.warning("repaired leaked tool-call parameters in %s output", schema.__name__)
+    return schema.model_validate(data)
 
 
 @lru_cache(maxsize=None)
@@ -35,4 +66,5 @@ def run_structured(role: str, schema: type[T], context: str, *, skill_slug: str 
     # Tool-calling is the most portable structured-output method across the
     # providers OpenRouter fronts (Anthropic/OpenAI/Bedrock differ on json_schema).
     model = get_model(role).with_structured_output(schema, method="function_calling")
-    return model.invoke([SystemMessage(content=system), HumanMessage(content=context)])
+    out = model.invoke([SystemMessage(content=system), HumanMessage(content=context)])
+    return _repair_param_leak(out, schema)

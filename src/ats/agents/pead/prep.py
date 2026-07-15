@@ -48,7 +48,7 @@ def framework(config: PeadConfig, fundamentals_text: str,
         "multiples and implied prices. 全部用中文输出。"
     )
     try:
-        return run_structured("manager", FundamentalAnalysisView, ctx,
+        return run_structured("pead_analyst", FundamentalAnalysisView, ctx,
                               skill_slug="pead-framework")
     except Exception as exc:  # noqa: BLE001
         log.warning("pead framework failed for %s: %s", config.symbol, exc)
@@ -113,7 +113,7 @@ def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
         "valuation read (PE / forward PE / ceiling-floor). 全部用中文输出。"
     )
     try:
-        return run_structured("manager", NarrativeView, ctx, skill_slug="pead-narrative")
+        return run_structured("pead_analyst", NarrativeView, ctx, skill_slug="pead-narrative")
     except Exception as exc:  # noqa: BLE001
         log.warning("pead narrative failed for %s: %s", config.symbol, exc)
         return NarrativeView(narrative=prior_narrative or config.narrative_seed,
@@ -135,7 +135,7 @@ def expectations(config: PeadConfig, narrative_view: NarrativeView,
         "neutral case in consensus and prior guidance."
     )
     try:
-        view: ExpectationsView = run_structured("manager", ExpectationsView, ctx,
+        view: ExpectationsView = run_structured("pead_analyst", ExpectationsView, ctx,
                                                 skill_slug="pead-expectations")
         return [Expectation(dim_key=r.dim_key, metric=r.metric, conservative=r.conservative,
                             neutral=r.neutral, optimistic=r.optimistic, source=r.source)

@@ -16,21 +16,22 @@ llm:
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
     macro_analyst: {}
-    industry_analyst: {}
+    industry_analyst: {model: deepseek/deepseek-v3.2}   # cycle industry node + PEAD signal-chain read-throughs
     fundamental_analyst: {}
     technical_analyst: {}
     risk_manager: {}
-    manager: {}            # daily portfolio decisions — real money, keep Opus
+    manager: {}            # daily portfolio decisions + pead-scorer — real money, keep Opus
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
     news_triage: {model: google/gemini-2.5-flash, temperature: 0.0, max_tokens: 8192}
     context_monitor: {model: google/gemini-2.5-flash, max_tokens: 4096}   # PEAD monitor _llm_update (high-frequency; triage pre-filters)
     actuals_extract: {model: google/gemini-2.5-flash, max_tokens: 4096}   # pull reported numbers from transcript/8-K (factual)
+    # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
+    research_extract: {model: deepseek/deepseek-v3.2}   # supply-chain insight extraction
+    sector_analyst: {model: google/gemini-2.5-pro, max_tokens: 8192}   # weekly L1-L6 sector review — large structured output
+    macro_strategist: {model: google/gemini-2.5-pro, max_tokens: 8192} # weekly macro regime + sector tilts — large structured output
+    pead_analyst: {model: anthropic/claude-sonnet-4.6}  # PEAD prep framework/narrative/expectations (token-heavy)
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
-    research_extract: {}   # second-order supply-chain reasoning is the whole value
-    sector_analyst: {max_tokens: 8192}   # weekly L1-L6 sector review — large structured output
-    macro_strategist: {max_tokens: 8192} # weekly macro regime + sector tilts — large structured output
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
-    # prep narrative/expectations + pead-scorer stay on the default `manager` (Opus).
 
 # --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --
 risk:

@@ -24,6 +24,25 @@ def _isolate_db(tmp_path, monkeypatch):
     reset_store_cache()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_report_dir(tmp_path, monkeypatch):
+    """Reports must never land in the real Obsidian vault during tests.
+
+    Every writer resolves the vault via ats.config.load_macro_config().output_dir
+    at call time (imports are inside functions), so patching the module attribute
+    covers them all. 2026-07-15: a chief test overwrote real vault documents.
+    """
+    import ats.config as config
+
+    real = config.load_macro_config
+
+    def _redirected(name: str = "macro"):
+        cfg = real(name)
+        return cfg.model_copy(update={"output_dir": str(tmp_path)})
+
+    monkeypatch.setattr(config, "load_macro_config", _redirected)
+
+
 class FakeAsyncChannel:
     """Async BossChannel stub: captures the approval request instead of sending."""
 

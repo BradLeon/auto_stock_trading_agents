@@ -1,0 +1,37 @@
+# NVIDIA (NVDA) — PEAD config
+# AI 硬件链需求端龙头：GPU/GB200 决定全链景气。供给端受 TSM CoWoS 产能 + HBM(SKHY/MU) 约束，
+# 故信号链上游读数极关键——TSM 的 CoWoS 产能/指引直接决定 NVDA 出货上限。
+
+symbol: NVDA
+fiscal_label: "Q2 FY2027"    # NVDA 财年偏移（1 月底结）：下次申报(2026-08-25)为 FY2027 Q2；
+                             #   上次已报 $81.6B（截至 2026-04-30）为 FY2027 Q1
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 5.0
+long_threshold: 1.2          # 龙头+高关注度+高预期，门槛抬高（对标 TSM）
+
+# 权重之和 = 1.00。数据中心营收 + 次季指引主导；供给约束(CoWoS/HBM)是能否兑现的关键。
+scorecard_dims:
+  - {key: datacenter_rev,  weight: 0.25, label: 数据中心营收超预期（含环比加速度）}
+  - {key: forward_guide,   weight: 0.25, label: 次季营收指引（中枢 vs 卖方）}
+  - {key: blackwell_ramp,  weight: 0.15, label: Blackwell/GB200/GB300 爬坡节奏与 mix}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率（Blackwell 初期稀释 vs 恢复路径）}
+  - {key: supply_capacity, weight: 0.10, label: 供给约束（CoWoS/HBM 是否松动，决定上限）}
+  - {key: call_tone,       weight: 0.10, label: 电话会语气 + 主权AI/中国需求措辞}
+
+signal_chain:
+  - {symbol: TSM,   role: upstream}     # CoWoS 先进封装产能——NVDA 供给最硬约束
+  - {symbol: ASML,  role: upstream}     # 设备→晶圆产能（二级上游，最领先）
+  - {symbol: SKHY,  role: upstream}     # HBM 主供（HBM3E/HBM4）
+  - {symbol: MU,    role: upstream}     # HBM 第二供
+  - {symbol: MSFT,  role: downstream}   # 云 CapEx 需求端
+  - {symbol: META,  role: downstream}
+  - {symbol: GOOGL, role: downstream}
+  - {symbol: AMZN,  role: downstream}
+
+narrative_seed: >
+  AI 加速计算绝对龙头；数据中心营收 + 次季指引是全市场风险偏好锚；
+  供给（TSM CoWoS + HBM）而非需求是当前瓶颈——上游产能松动=出货上修，故 TSM/ASML/SKHY 读数领先；
+  Blackwell(GB200/GB300) 爬坡节奏 + 初期毛利率稀释路径是本季主线；
+  主权AI + 推理需求打开第二增长曲线；中国区(H20/合规版)是政策变量；
+  极高预期使 “beat 但指引不够炸” 成为回调触发器（PEAD 放大器）。

@@ -2,7 +2,7 @@
 # L5 先进制程龙头：N3/N2 节点 + CoWoS 先进封装 + AI 芯片代工核心
 
 symbol: TSM
-fiscal_label: "Q FY2026"
+fiscal_label: "Q2 FY2026"    # TSM 按日历季申报：2026 Q2（7 月中发布）
 sector_etf: SMH
 benchmark: QQQ
 run_up_warn_pct: 5.0

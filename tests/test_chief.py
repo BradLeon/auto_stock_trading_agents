@@ -37,7 +37,14 @@ def _seed_store():
     return store
 
 
-def test_assemble_gathers_all_blocks():
+def test_assemble_gathers_all_blocks(monkeypatch):
+    # Pin the PEAD target universe so operational config/pead.yaml changes don't
+    # break this test (it seeds + asserts on a COHR dossier).
+    import ats.config as _config
+
+    real = _config.load_pead_global
+    monkeypatch.setattr(_config, "load_pead_global",
+                        lambda: {**real(), "targets": ["COHR"]})
     _seed_store()
     ctx = assemble.build(live_broker=False)
     text = ctx.as_context()

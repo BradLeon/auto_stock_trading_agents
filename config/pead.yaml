@@ -1,6 +1,8 @@
 # Global PEAD settings (per-ticker config lives in config/pead/<SYM>.yaml).
 
-targets: [COHR, LITE, AAOI]      # symbols the monitor + scheduler operate on
+targets: [ASML, TSM, NVDA]       # symbols the monitor + scheduler operate on
+# 上一轮：[COHR, LITE, AAOI]（光模块组）。本轮聚焦 AI 硬件上游三家（EUV→晶圆→GPU），
+# TSM 产能对 NVDA 意义重大，故信号链需跨标的读上游基本面。
 
 monitor:
   enabled: true

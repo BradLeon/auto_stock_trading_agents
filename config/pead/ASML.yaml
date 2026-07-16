@@ -1,0 +1,34 @@
+# ASML Holding (ASML) — PEAD config
+# AI 硬件链最上游：EUV/High-NA 光刻独家垄断。订单(bookings)是全链最领先信号——
+# 决定 TSM/Intel/Samsung 未来 12-18 个月的先进制程产能，间接决定 NVDA 供给上限。
+
+symbol: ASML
+fiscal_label: "Q2 FY2026"    # ASML 按日历季申报：2026 Q2（7 月中发布）
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 5.0
+long_threshold: 1.1          # 垄断+能见度高，略高于默认 1.0
+
+# 权重之和 = 1.00。bookings 权重最高：ASML 财报最关键的领先指标是净新增订单/book-to-bill。
+scorecard_dims:
+  - {key: bookings,        weight: 0.25, label: 净新增订单/book-to-bill（含 EUV 订单占比，全链最领先）}
+  - {key: forward_guide,   weight: 0.20, label: 次季+全年营收/毛利指引}
+  - {key: euv_highna,      weight: 0.15, label: EUV + High-NA(EXE) 系统出货与在手订单}
+  - {key: systems_revenue, weight: 0.15, label: 系统销售营收（超预期幅度）}
+  - {key: gross_margin,    weight: 0.10, label: 毛利率（High-NA 稀释 vs 规模效应）}
+  - {key: china_mix,       weight: 0.10, label: 中国区营收占比与出口管制敞口}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气与 2026/2027 需求措辞}
+
+signal_chain:
+  - {symbol: TSM,   role: downstream}   # 最大 EUV 客户；其 CapEx 决定 ASML 订单
+  - {symbol: INTC,  role: downstream}   # High-NA 首发客户（IDM 2.0）
+  - {symbol: NVDA,  role: downstream}   # 终端需求（间接，二级下游）
+  - {symbol: AMAT,  role: peer}         # WFE 同业读数
+  - {symbol: LRCX,  role: peer}
+
+narrative_seed: >
+  EUV 光刻全球独家、High-NA(EXE:5000) 独占供应；净新增订单(bookings)是 AI 硬件链最领先信号，
+  领先 TSM 产能 ~12-18 个月、领先 NVDA 供给 ~18-24 个月；
+  收入确认滞后于订单，故市场看订单不看当季收入；
+  中国区营收占比 + 出口管制是最大政策变量；High-NA 爬坡短期稀释毛利、长期抬升 ASP；
+  “2025 过渡年、2026 重回增长” 指引措辞的兑现度是估值锚。

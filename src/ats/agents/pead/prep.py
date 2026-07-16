@@ -134,31 +134,56 @@ def expectations(config: PeadConfig, narrative_view: NarrativeView,
         "conservative / neutral(base-case) / optimistic levels, with a source. Ground the "
         "neutral case in consensus and prior guidance."
     )
-    try:
-        view: ExpectationsView = run_structured("pead_analyst", ExpectationsView, ctx,
-                                                skill_slug="pead-expectations")
-        return [Expectation(dim_key=r.dim_key, metric=r.metric, conservative=r.conservative,
-                            neutral=r.neutral, optimistic=r.optimistic, source=r.source)
-                for r in view.rows]
-    except Exception as exc:  # noqa: BLE001
-        log.warning("pead expectations failed for %s: %s", config.symbol, exc)
-        return []
+    # On the full prep context (large fundamentals_text) sonnet intermittently emits
+    # a valid ExpectationsView with rows=[] — a non-None but empty tool call that the
+    # run_structured None-retry can't catch. An empty expectations table is a degraded
+    # result worth retrying (same rationale as the None guard), so retry until non-empty.
+    for attempt in range(3):
+        try:
+            view: ExpectationsView = run_structured("pead_analyst", ExpectationsView, ctx,
+                                                    skill_slug="pead-expectations")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("pead expectations failed for %s (attempt %d): %s",
+                        config.symbol, attempt + 1, exc)
+            continue
+        if view.rows:
+            return [Expectation(dim_key=r.dim_key, metric=r.metric, conservative=r.conservative,
+                                neutral=r.neutral, optimistic=r.optimistic, source=r.source)
+                    for r in view.rows]
+        log.warning("pead expectations empty for %s (attempt %d) — retrying",
+                    config.symbol, attempt + 1)
+    log.warning("pead expectations still empty for %s after retries", config.symbol)
+    return []
+
+
+def _peer_line(r: dict) -> str:
+    """One signal-chain peer row for the LLM. When the peer has a scored dossier
+    (reported=True), append its fundamental read-through — guidance/capacity +
+    band + decision — so upstream fundamentals drive the analysis, not just price."""
+    base = (f"  - {r['symbol']} ({r['role']}): 20d move {r.get('price_chg_pct')}%, "
+            f"earnings {r.get('earnings_date')}, reported={r.get('reported')}")
+    if r.get("reported") and (r.get("peer_guidance") or r.get("peer_decision")):
+        base += (f"\n      【已发布财报 {r.get('peer_fiscal', '')} · band={r.get('peer_band') or '—'}】"
+                 f"\n      指引/产能: {r.get('peer_guidance') or '—'}"
+                 f"\n      结论: {r.get('peer_decision') or '—'}")
+    return base
 
 
 def signal_chain(config: PeadConfig,
                  peer_rows: list[dict]) -> tuple[list[SignalChainItem], str]:
-    """peer_rows: [{symbol, role, price_chg_pct, earnings_date, reported}].
+    """peer_rows: [{symbol, role, price_chg_pct, earnings_date, reported,
+    peer_fiscal?, peer_band?, peer_guidance?, peer_decision?}].
     Returns (items, summary) — summary is the net supportive/cautionary paragraph."""
     if not config.signal_chain:
         return [], ""
-    lines = "\n".join(
-        f"  - {r['symbol']} ({r['role']}): 20d move {r.get('price_chg_pct')}%, "
-        f"earnings {r.get('earnings_date')}, reported={r.get('reported')}" for r in peer_rows)
+    lines = "\n".join(_peer_line(r) for r in peer_rows)
     ctx = (
-        f"{config.symbol} sits in this AI-optical signal chain. Upstream hyperscaler CapEx / "
-        f"foundry strength is a LEADING signal; peers are read-throughs.\n{lines}\n\n"
-        "For each name give a one-line implication for the target. Then a one-paragraph summary "
-        "of whether the chain is net supportive or cautionary heading into the print."
+        f"{config.symbol} sits in this AI-hardware signal chain. Upstream foundry/lithography "
+        f"capacity + hyperscaler CapEx are LEADING signals; peers are read-throughs.\n{lines}\n\n"
+        "For each name give a one-line implication for the target. 对于标注【已发布财报】的上游/同业，"
+        "优先解读其指引/产能读数对本标的的直接含义——例如上游产能松动=本标的供给上限抬升/出货上修，"
+        "上游指引下修=需求或供给预警。Then a one-paragraph summary of whether the chain is net "
+        "supportive or cautionary heading into the print."
     )
     items_by_symbol = {r["symbol"]: r for r in peer_rows}
     try:

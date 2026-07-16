@@ -11,6 +11,16 @@ from ats.schemas.research import Article
 
 NOW = datetime.now(timezone.utc)
 
+
+def _pin_universe(monkeypatch):
+    """Pin the research universe so operational config/pead.yaml target changes
+    don't break these tests (they assert on the COHR/LITE optical group)."""
+    import ats.config as _config
+
+    real = _config.load_pead_global
+    monkeypatch.setattr(_config, "load_pead_global",
+                        lambda: {**real(), "targets": ["COHR", "LITE", "AAOI"]})
+
 ARTICLE = Article(id="imap:msg1", source="newsletter:SemiAnalysis",
                   title="Meta to rent out idle compute", url="https://s.test/p/meta",
                   body="Meta plans to rent out idle GPU capacity as a cloud service...",
@@ -30,6 +40,7 @@ def _view():
 
 
 def test_research_extracts_filters_and_injects(monkeypatch):
+    _pin_universe(monkeypatch)
     monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
     monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
 
@@ -52,6 +63,7 @@ def test_research_extracts_filters_and_injects(monkeypatch):
 
 
 def test_research_dedups_articles_on_second_run(monkeypatch):
+    _pin_universe(monkeypatch)
     monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
     monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
     research.run(use_llm=True)

@@ -72,7 +72,11 @@ def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
 
     # Per-layer blocks: question + one line per ticker.
     for layer in cfg.layers:
-        lines = [f"### {layer.label}", f"关键问题: {layer.question}" if layer.question else ""]
+        # Surface the exact layer key so the LLM echoes it verbatim (key=...).
+        # Without it the model invents keys from the label (L1_ai_applications vs
+        # L1_app) and the assessment gets dropped as unknown.
+        lines = [f"### {layer.label}  [layer key（务必原样回填此 key）= {layer.key}]",
+                 f"关键问题: {layer.question}" if layer.question else ""]
         for t in layer.tickers:
             tag = " [PEAD]" if t.symbol in pead_syms else ""
             note = f" ({t.note})" if t.note else ""

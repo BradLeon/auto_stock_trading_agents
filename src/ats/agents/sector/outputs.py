@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class LayerAssessView(BaseModel):
-    key: str = Field(description="echo the layer key exactly, e.g. L3_dc_infra")
+    key: str = Field(description="必须原样回填上下文里给出的 [layer key = ...]，"
+                                 "例如 L1_app / L5_fab；禁止自造描述性 key，否则该层被丢弃")
     boom_score: float = Field(default=50.0, description="景气度 0-100")
     supply_demand: str = Field(default="", description="供需: 紧张/平衡/过剩 + 一句依据")
     pricing_power: str = ""

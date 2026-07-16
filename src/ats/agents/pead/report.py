@@ -351,8 +351,11 @@ def write_report(dossier) -> Path | None:
     if not folder.is_dir():
         log.warning("pead report: output_dir missing — skipped: %s", folder)
         return None
-    fl_safe = dossier.fiscal_label.replace(" ", "-").replace("/", "-")
-    path = folder / f"基本面分析-{dossier.symbol}-{fl_safe}.md"
+    from ...data.fiscal import canonical_tag
+
+    # Canonical tag surfaces the exact fiscal quarter ('2026Q2') so each company's
+    # documents sort/browse by quarter; falls back to the sanitized label.
+    path = folder / f"基本面分析-{dossier.symbol}-{canonical_tag(dossier.fiscal_label)}.md"
     path.write_text(render_dossier(dossier), encoding="utf-8")
     log.info("pead report (%s): %s", dossier.phase, path)
     return path

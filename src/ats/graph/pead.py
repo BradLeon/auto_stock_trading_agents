@@ -143,11 +143,46 @@ def prep_fetch(state: PeadState) -> dict:
         chg = None
         if len(snap.history) >= 21:
             chg = round((snap.history[-1].close / snap.history[-21].close - 1) * 100, 2)
-        rows.append({"symbol": sc.symbol, "role": sc.role, "price_chg_pct": chg,
-                     "earnings_date": earnings_calendar.next_earnings_date(sc.symbol),
-                     "reported": False})
+        row = {"symbol": sc.symbol, "role": sc.role, "price_chg_pct": chg,
+               "earnings_date": earnings_calendar.next_earnings_date(sc.symbol),
+               "reported": False}
+        # Cross-ticker read-through: if this peer already reported and we scored it,
+        # carry its fundamental read (guidance/capacity + verdict) into the target's
+        # signal-chain analysis — e.g. TSM's CoWoS capacity feeding NVDA's supply thesis.
+        row.update(_peer_report(sc.symbol))
+        rows.append(row)
     out["peer_rows"] = rows
     return out
+
+
+def _peer_report(symbol: str) -> dict:
+    """Freshest SCORED dossier read-through for a signal-chain peer.
+
+    Returns {} when the peer has no scored dossier yet (leaves reported=False).
+    Otherwise flags reported=True and attaches the peer's forward guidance /
+    capacity commentary + scorecard band + decision so the target's signal-chain
+    LLM can reason on real upstream fundamentals, not just the 20d price move.
+    """
+    from ..memory import get_store
+
+    store = get_store()
+    for meta in store.recent_dossiers(symbol, limit=6):
+        if meta.get("phase") != "score":
+            continue
+        dossier = store.get_dossier(symbol, meta["fiscal_label"])
+        if not dossier:
+            continue
+        guidance = ((dossier.actuals.guidance if dossier.actuals else "") or "").strip()
+        band = ((dossier.scorecard.band if dossier.scorecard else "") or "").strip()
+        decision = (dossier.decision_summary or "").strip()
+        return {
+            "reported": True,
+            "peer_fiscal": meta["fiscal_label"],
+            "peer_band": band,
+            "peer_guidance": guidance[:600],
+            "peer_decision": decision[:400],
+        }
+    return {}
 
 
 def prep_framework(state: PeadState) -> dict:
@@ -264,6 +299,21 @@ def score_fetch(state: PeadState) -> dict:
         text, src = transcript_src.fetch(state.symbol, state.fiscal_label, state.transcript_source)
     else:
         text, src = "", "offline"
+
+    # Period guard: refuse to score a transcript that reports a DIFFERENT quarter
+    # than the target (a stale/wrong-quarter transcript scored against this
+    # quarter's expectations yields a spurious miss). Confirmed mismatch aborts;
+    # undetectable period proceeds with a flagged note.
+    if text:
+        from ..data import fiscal
+
+        ok, why = fiscal.verify_transcript(state.fiscal_label, text, src)
+        if not ok:
+            raise ValueError(
+                f"[period-guard] {state.symbol} score 已中止：{why}。transcript source={src}。"
+                f" 请用正确季度的 --transcript 重跑，或等待目标季 transcript 就绪（宁可不打分也不错季）。")
+        out["transcript_period_note"] = why
+
     out["transcript_text"] = text
     out["transcript_resolved_source"] = src
 

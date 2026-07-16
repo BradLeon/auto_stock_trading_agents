@@ -23,8 +23,11 @@ llm:
     actuals_extract: {model: google/gemini-2.5-flash, max_tokens: 4096}   # pull reported numbers from transcript/8-K (factual)
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
     research_extract: {model: deepseek/deepseek-v3.2}   # supply-chain insight extraction
-    sector_analyst: {model: google/gemini-2.5-pro, max_tokens: 8192}   # weekly L1-L6 sector review — large structured output
-    macro_strategist: {model: google/gemini-2.5-pro, max_tokens: 8192} # weekly macro regime + sector tilts — large structured output
+    # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
+    # returns an empty tool call → None; run_structured retries a few times. 24000
+    # keeps output headroom for reasoning + the large structured payload.
+    sector_analyst: {model: google/gemini-2.5-pro, max_tokens: 24000}   # weekly L1-L6 sector review — large structured output
+    macro_strategist: {model: google/gemini-2.5-pro, max_tokens: 24000} # weekly macro regime + sector tilts — large structured output
     pead_analyst: {model: anthropic/claude-sonnet-4.6}  # PEAD prep framework/narrative/expectations (token-heavy)
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus

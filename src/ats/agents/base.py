@@ -66,5 +66,18 @@ def run_structured(role: str, schema: type[T], context: str, *, skill_slug: str 
     # Tool-calling is the most portable structured-output method across the
     # providers OpenRouter fronts (Anthropic/OpenAI/Bedrock differ on json_schema).
     model = get_model(role).with_structured_output(schema, method="function_calling")
-    out = model.invoke([SystemMessage(content=system), HumanMessage(content=context)])
+    messages = [SystemMessage(content=system), HumanMessage(content=context)]
+    # Some providers (observed: gemini-2.5-pro via OpenRouter on large contexts)
+    # intermittently return an empty tool call → None. It's flaky, not deterministic,
+    # so retry a few times before failing loudly — otherwise callers silently degrade
+    # on a cryptic 'NoneType has no model_dump' (and, e.g., serve a stale review).
+    out = None
+    for _ in range(4):
+        out = model.invoke(messages)
+        if out is not None:
+            break
+    if out is None:
+        raise RuntimeError(
+            f"structured output empty for role={role!r} schema={schema.__name__} "
+            f"(context {len(context)} chars) after retries — provider returned no tool call")
     return _repair_param_leak(out, schema)

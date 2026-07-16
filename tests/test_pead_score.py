@@ -74,3 +74,74 @@ def test_band_thresholds():
     assert "未达门槛" in score_mod._band(0.9, 1.5)
     assert "中性观望" in score_mod._band(0.0, 1.5)
     assert score_mod._band(-1.0, 1.5) == "负面"
+
+
+def test_actuals_view_coerces_currency_formatted_numbers():
+    # Regression: gemini returned reported_eps='€7.35', reported_revenue='€9.7 billion'
+    # (currency + scale words). Hard float-parsing failed the whole extraction and
+    # zeroed the scorecard. ActualsView must coerce instead of raising.
+    from ats.agents.pead.outputs import ActualsView
+
+    a = ActualsView(reported_eps="€7.35", reported_revenue="€9.7 billion")
+    assert a.reported_eps == 7.35
+    assert a.reported_revenue == 9.7e9
+
+    b = ActualsView(reported_eps="$1,234M", reported_revenue="n/a")
+    assert b.reported_eps == 1.234e9
+    assert b.reported_revenue is None      # unparseable -> None, not a crash
+
+
+def test_llm_list_views_coerce_stringified_json_arrays():
+    # Regression: gemini-flash serialized `rows`/`items`/`metrics` as a JSON *string*
+    # ('[{...}, {...}]') instead of a real array. list-type validation dropped every
+    # element (NVDA prep landed 0 expectation rows). Coerce the string back to a list.
+    import json
+
+    from ats.agents.pead.outputs import (
+        ActualsView,
+        ExpectationsView,
+        ScoresView,
+        SignalChainView,
+    )
+
+    rows = json.dumps([{"dim_key": "datacenter_rev", "metric": "DC营收", "neutral": "$85B"},
+                       {"dim_key": "forward_guide", "metric": "次季指引"}])
+    ev = ExpectationsView(rows=rows)
+    assert len(ev.rows) == 2 and ev.rows[0].dim_key == "datacenter_rev"
+
+    sc = SignalChainView(items=json.dumps([{"symbol": "TSM", "signal": "CoWoS 产能"}]), summary="x")
+    assert len(sc.items) == 1 and sc.items[0].symbol == "TSM"
+
+    assert len(ScoresView(items=json.dumps([{"dim_key": "a", "score": 1.0}])).items) == 1
+    assert len(ActualsView(metrics=json.dumps([{"dim_key": "a", "actual": "x"}])).metrics) == 1
+
+    # Real lists and empties still pass through untouched.
+    assert len(ExpectationsView(rows=[{"dim_key": "z"}]).rows) == 1
+    assert ExpectationsView(rows="").rows == []
+
+
+def test_narrative_focus_ranking_coerces_stringified_array():
+    # Regression: sonnet serialized focus_ranking as a JSON-array *string*, so the
+    # report rendered all 7 focuses as one giant list item. Coerce back to a list.
+    import json
+
+    from ats.agents.pead.outputs import NarrativeView
+
+    # clean JSON array as a string
+    nv = NarrativeView(narrative="t", focus_ranking=json.dumps(["数据中心营收", "毛利率路径", "供给约束"]))
+    assert nv.focus_ranking == ["数据中心营收", "毛利率路径", "供给约束"]
+
+    # pseudo-JSON with UNESCAPED inner ASCII quotes (the real NVDA failure) — json.loads
+    # fails, so the tolerant '","' splitter must recover the items.
+    blob = '["次季指引措辞强度 —— 看 "demand visibility" 出现频率", "中国区 —— "合规路径拓宽" 信号", "OpEx 杠杆"]'
+    nv2 = NarrativeView(narrative="t", focus_ranking=blob)
+    assert len(nv2.focus_ranking) == 3
+    assert nv2.focus_ranking[2] == "OpEx 杠杆"
+
+    # a one-element list whose sole member is the pseudo-JSON blob (how it reached the store)
+    nv3 = NarrativeView(narrative="t", focus_ranking=[blob])
+    assert len(nv3.focus_ranking) == 3
+
+    # genuine lists and empties untouched
+    assert NarrativeView(narrative="t", focus_ranking=["a", "b"]).focus_ranking == ["a", "b"]
+    assert NarrativeView(narrative="t", focus_ranking=[]).focus_ranking == []

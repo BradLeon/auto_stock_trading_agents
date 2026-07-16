@@ -16,6 +16,92 @@ def _as_list(v):
     return v
 
 
+def _as_objlist(v):
+    """Coerce a list-of-objects field. Gemini-flash occasionally serializes the
+    whole list as a JSON string ('[{...}, {...}]') instead of an actual array,
+    which fails list validation and silently drops every row. Parse it back."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            return []
+        return parsed if isinstance(parsed, list) else [parsed]
+    return v
+
+
+def _split_jsonish_array(s: str) -> list[str] | None:
+    """Best-effort parse of a '[...]'-looking string into a list of strings. Tries
+    strict JSON first; on failure (models emit pseudo-JSON with UNESCAPED inner ASCII
+    quotes, e.g. an item containing \"demand visibility\"), falls back to stripping the
+    outer brackets and splitting on the '","' item boundary. Returns None if it doesn't
+    look like an array at all."""
+    s = s.strip()
+    if not (s.startswith("[") and s.endswith("]")):
+        return None
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+    except Exception:
+        pass
+    inner = s[1:-1].strip()
+    if not inner:
+        return []
+    parts = re.split(r'"\s*,\s*"', inner)          # item boundary: closing-quote , opening-quote
+    cleaned = [p.strip().strip('"').strip() for p in parts]
+    return [p for p in cleaned if p] or None
+
+
+def _as_strlist(v):
+    """Coerce a list-of-strings field. Models sometimes serialize the whole list as
+    a JSON-array string ('[\"a\", \"b\"]') instead of an actual array — pydantic then
+    keeps it as a single-element list holding the raw blob, so the report renders one
+    giant item instead of an ordered list. Parse the array back into real strings."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return []
+        arr = _split_jsonish_array(s)
+        return arr if arr is not None else [s]
+    # a one-element list whose sole item is itself a JSON-array string
+    if isinstance(v, list) and len(v) == 1 and isinstance(v[0], str):
+        arr = _split_jsonish_array(v[0])
+        if arr is not None:
+            return arr
+    return v
+
+
+_UNIT_MULT = {"trillion": 1e12, "tn": 1e12, "t": 1e12,
+              "billion": 1e9, "bn": 1e9, "b": 1e9,
+              "million": 1e6, "mn": 1e6, "m": 1e6,
+              "thousand": 1e3, "k": 1e3}
+
+
+def _coerce_num(v):
+    """Coerce an LLM-formatted number to float. Handles currency symbols, commas,
+    and scale words: '€7.35' -> 7.35, '€9.7 billion' -> 9.7e9, '$1,234M' -> 1.234e9.
+    Returns None when there's no parseable number (keeps the field optional)."""
+    if v is None or isinstance(v, (int, float)):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    s = re.sub(r"[€$£¥,]", "", s).strip()
+    m = re.match(r"^-?\d+(?:\.\d+)?", s)
+    if not m:
+        return None
+    num = float(m.group())
+    unit = s[m.end():].strip().lower()
+    return num * _UNIT_MULT.get(unit, 1.0)
+
+
 def _strip_xml_params(text: str) -> tuple[str, dict]:
     """Extract <parameter name="...">...</parameter> blocks from text.
     Returns (clean_text, {name: content})."""
@@ -37,6 +123,11 @@ class NarrativeView(BaseModel):
     narrative: str = Field(description="core thesis: business drivers, key bottleneck, margin story")
     focus_ranking: list[str] = Field(default_factory=list, description="what matters most this quarter, ordered")
     valuation: str = Field(default="", description="PE / forward PE / ceiling-floor read")
+
+    @field_validator("focus_ranking", mode="before")
+    @classmethod
+    def _cfr(cls, v):
+        return _as_strlist(v)
 
     @model_validator(mode="before")
     @classmethod
@@ -98,6 +189,11 @@ class ExpectationRowView(BaseModel):
 class ExpectationsView(BaseModel):
     rows: list[ExpectationRowView] = Field(default_factory=list)
 
+    @field_validator("rows", mode="before")
+    @classmethod
+    def _c(cls, v):
+        return _as_objlist(v)
+
 
 class SignalItemView(BaseModel):
     symbol: str
@@ -107,6 +203,11 @@ class SignalItemView(BaseModel):
 class SignalChainView(BaseModel):
     items: list[SignalItemView] = Field(default_factory=list)
     summary: str = ""
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _c(cls, v):
+        return _as_objlist(v)
 
 
 class ActualMetricView(BaseModel):
@@ -125,10 +226,22 @@ class ActualsView(BaseModel):
     transcript_signals: list[str] = Field(default_factory=list,
                                            description="key qualitative call signals")
 
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def _cm(cls, v):
+        return _as_objlist(v)
+
     @field_validator("transcript_signals", mode="before")
     @classmethod
     def _c(cls, v):
         return _as_list(v)
+
+    # LLMs often return currency-formatted strings ('€7.35', '€9.7 billion');
+    # coerce rather than hard-fail the whole extraction (which zeroed the scorecard).
+    @field_validator("reported_eps", "reported_revenue", mode="before")
+    @classmethod
+    def _num(cls, v):
+        return _coerce_num(v)
 
 
 class ScoreItemView(BaseModel):
@@ -139,6 +252,11 @@ class ScoreItemView(BaseModel):
 
 class ScoresView(BaseModel):
     items: list[ScoreItemView] = Field(default_factory=list)
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _c(cls, v):
+        return _as_objlist(v)
 
 
 class ExpectationChangeView(BaseModel):

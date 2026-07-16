@@ -86,15 +86,18 @@ def test_chief_run_store_roundtrip():
 
 
 def test_run_chief_cli_executes_when_decisions(monkeypatch):
-    """run_chief -> decisions -> trader.execute called with source=chief."""
+    """run_chief -> decision graph: chief run persisted + dry-run trade log with source=chief."""
     from ats.agents.chief.decide import ChiefResult
     from ats.runtime import cli
 
-    calls = {}
-    monkeypatch.setattr("ats.agents.chief.decide.run", lambda **k: ChiefResult(
-        cycle_id="chief-x", as_of=NOW, summary="s",
-        decisions=[TradeDecision(symbol="COHR", action="buy", notional_usd=1000)]))
-    monkeypatch.setattr("ats.trader.execute.execute",
-                        lambda decisions, **kw: calls.update(kw, n=len(decisions)) or [])
+    monkeypatch.setattr(
+        "ats.agents.chief.decide.from_context",
+        lambda text, *, cycle_id, as_of, use_llm=True: ChiefResult(
+            cycle_id=cycle_id, as_of=as_of, summary="s",
+            decisions=[TradeDecision(symbol="COHR", action="buy", notional_usd=1000)]))
+    monkeypatch.setattr("ats.trader.execute._last_price", lambda s: 100.0)
     cli.run_chief(execute=True, dry_run=True, auto=True, offline=True)
-    assert calls["source"] == "chief" and calls["n"] == 1
+    run = get_store().last_chief_run()
+    assert run["decisions"][0]["symbol"] == "COHR"
+    row = get_store().recent_trades("COHR")[0]
+    assert row["source"] == "chief" and row["status"] == "cancelled"

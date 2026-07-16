@@ -67,6 +67,8 @@ def _patch(monkeypatch, approval_status="approved"):
     FakeBroker.placed = []
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
+    # execute() now runs the decision graph; keep its risk gate off live TWS.
+    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: None)
 
     class Ch:
         def request_approval(self, req):

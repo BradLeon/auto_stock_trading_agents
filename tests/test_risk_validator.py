@@ -1,11 +1,9 @@
-"""Phase 5: Manager stub + deterministic guardrail validator (no network)."""
+"""Deterministic guardrail validator (no network)."""
 
 from datetime import datetime, timezone
 
-from ats.agents import manager as mgr
 from ats.agents.risk_validator import apply_guardrails
 from ats.schemas.decision import TradeDecision
-from ats.schemas.reports import FundamentalReport
 from ats.schemas.risk import RiskGuardrails
 
 NOW = datetime.now(timezone.utc)
@@ -17,18 +15,6 @@ def _gr(**kw):
                max_single_order_usd=25000, cash_floor_pct=0.05)
     base.update(kw)
     return RiskGuardrails(**base)
-
-
-def test_manager_stub_buys_bullish_only():
-    reports = [
-        FundamentalReport(as_of=NOW, symbol="NVDA", signal="bullish"),
-        FundamentalReport(as_of=NOW, symbol="GOOGL", signal="neutral"),
-    ]
-    decisions, _ = mgr.decide(as_of=NOW, macro=None, industry_reports=[],
-                              fundamental_reports=reports, technical_reports=[],
-                              guardrails=_gr(), market_data={}, net_liquidation=100000,
-                              use_llm=False)
-    assert [d.symbol for d in decisions] == ["NVDA"]
 
 
 def test_validator_drops_no_add():

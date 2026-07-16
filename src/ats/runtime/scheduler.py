@@ -33,25 +33,6 @@ def _today() -> date:
     return datetime.now().date()
 
 
-def run_if_session(*, dry_run: bool = True) -> bool:
-    """Run one cycle if today is a session. Returns True if it ran."""
-    from ..channel import get_channel
-    from .cli import run_cycle
-
-    if not is_trading_session():
-        log.info("not a trading session today (%s); skipping", _today())
-        return False
-
-    channel = get_channel()
-    if getattr(channel, "is_async", False) is False:
-        log.warning("scheduled run with a blocking channel (%s) will wait on input; "
-                    "use channel.kind=feishu for unattended approval",
-                    getattr(channel, "kind", "cli"))
-    log.info("starting scheduled cycle (dry_run=%s)", dry_run)
-    run_cycle(dry_run=dry_run, channel=channel)
-    return True
-
-
 def _pead_actions(today: date, earnings_date: date | None, hour: str,
                   sched_cfg: dict) -> list[str]:
     """Decide what to run for a PEAD target today (pure routing).
@@ -115,8 +96,6 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
 
 
 def _daily(*, dry_run: bool) -> None:
-    if get_config().app.schedule.daily_cycle_enabled:   # legacy full cycle, default off
-        run_if_session(dry_run=dry_run)
     _macro_weekly()      # top-down cascade: macro -> sector -> (daily) pead
     _sector_weekly()
     _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
@@ -212,7 +191,8 @@ def _chief_daily(*, dry_run: bool) -> None:
     try:
         from .cli import run_chief
 
-        run_chief(dry_run=dry_run, channel=get_config().app.channel.kind)
+        run_chief(dry_run=dry_run, channel=get_config().app.channel.kind,
+                  source="scheduled")
     except Exception as exc:  # noqa: BLE001 - chief must not break the daily job
         log.warning("chief daily run failed: %s", exc)
 

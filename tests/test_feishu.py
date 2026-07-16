@@ -3,7 +3,8 @@
 from datetime import datetime, timezone
 
 from ats.channel.feishu_channel import build_approval_card, parse_callback
-from ats.runtime.cli import resume_cycle, run_cycle
+from ats.graph.chief_state import ChiefDecisionState
+from ats.runtime.cli import resume_cycle, run_decision_graph
 from ats.schemas.channel import ApprovalRequest
 from ats.schemas.decision import TradeDecision
 
@@ -39,12 +40,17 @@ def test_parse_ignores_unknown():
     assert parse_callback({"event": {"action": {"value": {}}}})["kind"] == "ignore"
 
 
-def test_async_flow_checkpoint_then_resume(async_channel):
-    # Run pauses at the interrupt (async channel captures the request), then a
-    # separate resume_cycle() (the webhook's job) drives execution to completion.
-    paused = run_cycle(dry_run=True, offline=True, use_llm=False, channel=async_channel)
+def test_async_flow_checkpoint_then_resume(async_channel, broker):
+    # The decision graph pauses at the interrupt (async channel captures the
+    # request), then a separate resume_cycle() (the webhook's job) drives
+    # execution to completion via the checkpointed thread.
+    state = ChiefDecisionState(
+        cycle_id="chief-feishu-test", as_of=NOW, source="chief", decide=False, dry_run=False,
+        seed_decisions=[TradeDecision(symbol=s, action="buy", qty=1, rationale="r")
+                        for s in ("NVDA", "MSFT", "AAPL")])
+    paused = run_decision_graph(state, channel=async_channel)
     assert "__interrupt__" in paused
-    assert async_channel.thread_id is not None
+    assert async_channel.thread_id == "chief-feishu-test"
     assert async_channel.request and len(async_channel.request.decisions) == 3
 
     from ats.schemas.decision import BossApproval

@@ -147,7 +147,6 @@ class ScheduleConfig(BaseModel):
     enabled: bool = False
     run_at: str = "16:15"
     timezone: str = "America/New_York"
-    daily_cycle_enabled: bool = False   # legacy full daily StateGraph cycle (PEAD-first MVP: off)
 
 
 class SectorBrief(BaseModel):

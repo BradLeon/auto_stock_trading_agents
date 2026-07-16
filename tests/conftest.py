@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ats.schemas.channel import ApprovalRequest, Notification, ReportBundle  # noqa: E402
 from ats.schemas.decision import BossApproval  # noqa: E402
+from ats.schemas.memory import TradeLogEntry  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +42,40 @@ def _isolate_report_dir(tmp_path, monkeypatch):
         return cfg.model_copy(update={"output_dir": str(tmp_path)})
 
     monkeypatch.setattr(config, "load_macro_config", _redirected)
+
+
+class FakeBroker:
+    """Records placed orders; fills everything at $100."""
+
+    placed: list = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    def place_orders(self, items, cycle_id, wait=3.0):
+        now = datetime.now(timezone.utc)
+        FakeBroker.placed = list(items)
+        return [TradeLogEntry(order_id="1", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
+                              qty=q, status="filled", submitted_at=now, filled_at=now,
+                              avg_fill_price=100.0, rationale=d.rationale) for d, q in items]
+
+    def get_fills(self):
+        return [{"exec_id": "e1", "symbol": "NVDA", "side": "BOT", "shares": 5, "price": 100,
+                 "time": datetime.now(timezone.utc).isoformat(), "realized_pnl": None,
+                 "commission": 1.0, "order_id": "1"}]
+
+
+@pytest.fixture
+def broker(monkeypatch):
+    """Hermetic broker stack: FakeBroker, $100 last price, no live portfolio
+    (the risk gate degrades to 'risk checks skipped')."""
+    from ats.trader import execute as texec
+
+    FakeBroker.placed = []
+    monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
+    monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
+    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: None)
+    return FakeBroker
 
 
 class FakeAsyncChannel:

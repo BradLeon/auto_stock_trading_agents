@@ -13,7 +13,7 @@ from typing import Any
 
 
 def _allowed_types() -> list[type]:
-    """Every Pydantic type that can ride inside a checkpointed TradingState.
+    """Every Pydantic type that can ride inside a checkpointed graph state.
 
     LangGraph allowlists by (module, name); passing the classes themselves lets
     the serializer derive those keys. We trust our own schema package.
@@ -24,11 +24,11 @@ def _allowed_types() -> list[type]:
     from ..schemas import (  # noqa: F401 - ensure submodules are imported
         channel, decision, fundamentals, macro, market, memory, pead, portfolio, reports, risk,
     )
+    from . import chief_state as chief_state_mod
     from . import pead_state as pead_state_mod
-    from . import state as state_mod
 
     modules = [channel, decision, fundamentals, macro, market, memory, pead, portfolio, reports,
-               risk, state_mod, pead_state_mod, schemas_pkg]
+               risk, chief_state_mod, pead_state_mod, schemas_pkg]
     types: set[type] = set()
     for mod in modules:
         for _, obj in inspect.getmembers(mod, inspect.isclass):

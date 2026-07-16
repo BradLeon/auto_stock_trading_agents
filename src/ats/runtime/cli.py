@@ -1,11 +1,12 @@
-"""CLI runner: execute one trading cycle, pausing at the Boss-approval interrupt.
+"""CLI runner: drive the chief decision graph, pausing at the Boss-approval interrupt.
 
-    ats run                 # dry-run, interactive Boss prompt
-    ats run --yes           # dry-run, auto-approve (unattended smoke test)
-    ats run --live          # paper execution path (Phase 7+); still IBKR paper
+    ats chief run           # dry-run, interactive Boss prompt
+    ats trader buy NVDA 5   # manual order — same graph, same risk gate + approval
+    ats pead score COHR --chief   # earnings-event trade, chief收口 immediately
 
 The graph is transport-agnostic: it interrupts, this runner asks the configured
-BossChannel for a verdict, then resumes with Command(resume=...).
+BossChannel for a verdict, then resumes with Command(resume=...). Async channels
+(Feishu) checkpoint at the interrupt and `ats serve` resumes on callback.
 """
 
 from __future__ import annotations
@@ -15,76 +16,49 @@ from datetime import datetime, timezone
 
 from langgraph.types import Command
 
-from ..channel import CLIChannel, get_channel
+from ..channel import get_channel
 from ..config import get_config
-from ..schemas.channel import ApprovalRequest, Notification
-from ..graph.build import build_graph
 from ..graph.checkpoint import get_checkpointer
-from ..graph.state import TradingState
+from ..schemas.channel import ApprovalRequest, Notification
 
 
-def _initial_state(cfg, *, dry_run: bool, live_data: bool, use_llm: bool, use_broker: bool) -> TradingState:
-    now = datetime.now(timezone.utc)
-    sectors = {
-        sector: cfg.app.sectors.get(sector).supply_chain if cfg.app.sectors.get(sector) else ""
-        for sector in cfg.app.sectors_in_use
-    }
-    return TradingState(
-        cycle_id=f"cycle-{now:%Y%m%d-%H%M%S}",
-        as_of=now,
-        dry_run=dry_run,
-        live_data=live_data,
-        use_llm=use_llm,
-        use_broker=use_broker,
-        watchlist=cfg.app.tickers,
-        sectors=sectors,
-    )
+def run_decision_graph(state, *, channel="cli") -> dict:
+    """Run the chief decision graph through its approval interrupt.
 
+    Sync channels (CLI) loop interrupt->verdict->resume in-process. Async
+    channels (Feishu) send the card and return — the checkpointed thread is
+    resumed later by `ats serve` via resume_cycle(). `channel` is a kind
+    string or an already-built BossChannel.
+    """
+    from ..channel import get_channel as _get_channel   # late bind (tests patch it)
+    from ..graph.chief import build_chief_graph
 
-def _make_channel(cfg, auto: bool):
-    if cfg.app.channel.kind == "cli":
-        return CLIChannel(auto=auto)
-    return get_channel()
-
-
-def run_cycle(*, dry_run: bool = True, auto: bool = False, offline: bool = False,
-              use_llm: bool = True, channel=None) -> dict:
-    cfg = get_config()
-    channel = channel or _make_channel(cfg, auto)
-    is_async = getattr(channel, "is_async", False)
-    # Async channels (Feishu) must survive across processes -> persistent checkpointer.
-    app = build_graph(checkpointer=get_checkpointer(persist=is_async))
-
-    state = _initial_state(cfg, dry_run=dry_run, live_data=not offline, use_llm=use_llm,
-                           use_broker=not offline)
+    ch = _get_channel(channel) if isinstance(channel, str) else channel
+    is_async = getattr(ch, "is_async", False)
+    # Async channels must survive across processes -> persistent checkpointer.
+    app = build_chief_graph(checkpointer=get_checkpointer(persist=is_async))
     cfg_run = {"configurable": {"thread_id": state.cycle_id}}
-    print(f"▶ running {state.cycle_id} (dry_run={dry_run}) over {[t.symbol for t in state.watchlist]}")
+    print(f"▶ {state.cycle_id} (source={state.source}, dry_run={state.dry_run})")
 
     result = app.invoke(state, config=cfg_run)
-
     if "__interrupt__" not in result:
-        _report(channel, result)
         return result
 
-    req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
-
-    # Async: send the card and exit; the webhook resumes this thread later.
     if is_async:
-        channel.send_approval_request(req, thread_id=state.cycle_id)
-        label = getattr(channel, "kind", "async channel")
-        print(f"⏸ {state.cycle_id} awaiting Boss approval via {label}. "
-              f"Run `ats serve` to handle the callback.")
+        req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
+        ch.send_approval_request(req, thread_id=state.cycle_id)
+        print(f"⏸ {state.cycle_id} awaiting Boss approval via "
+              f"{getattr(ch, 'kind', 'async channel')}. Run `ats serve` to handle the callback.")
         return result
 
     # Sync (CLI): drive interrupts to completion in-process.
     while "__interrupt__" in result:
         req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
-        channel.push(Notification(kind="approval_request", title="Decisions pending review",
-                                  body=f"{len(req.decisions)} proposed trade(s)"))
-        approval = channel.request_approval(req)
+        if hasattr(ch, "push"):
+            ch.push(Notification(kind="approval_request", title="Decisions pending review",
+                                 body=f"{len(req.decisions)} proposed trade(s)"))
+        approval = ch.request_approval(req)
         result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
-
-    _report(channel, result)
     return result
 
 
@@ -109,7 +83,8 @@ def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = Fals
     _pead_report(sym, phase, result)
     if phase == "score":
         if chief:
-            run_chief(dry_run=dry_run, channel=channel, auto=auto, offline=offline)
+            run_chief(dry_run=dry_run, channel=channel, auto=auto, offline=offline,
+                      source="pead-chief")
         else:
             print("→ 建议已入档；运行 `ats chief run` 收口交易决策")
     return result
@@ -203,55 +178,18 @@ def events_list(*, days: int | None = None) -> int:
 
 
 def run_chief(*, execute: bool = True, dry_run: bool = True, channel: str = "cli",
-              use_llm: bool = True, auto: bool = False, offline: bool = False) -> int:
-    """One Chief decision run: read all artifacts -> decide -> (optionally) execute."""
-    from ..agents.chief import decide as chief_decide
-    from ..memory import get_store
+              use_llm: bool = True, auto: bool = False, offline: bool = False,
+              source: str = "chief") -> int:
+    """One Chief decision run through the decision graph: assemble all artifacts
+    -> decide -> risk gate -> persist -> Boss approval -> trade -> persist."""
+    from ..graph.chief_state import ChiefDecisionState
 
-    result = chief_decide.run(use_llm=use_llm, live_broker=not offline)
-    get_store().save_chief_run(cycle_id=result.cycle_id, as_of=result.as_of,
-                               summary=result.summary, decisions=result.decisions)
-    if use_llm:   # audit report (decision + exact context seen); skip for stubs
-        from ..agents.chief import report as chief_report
-        from ..config import load_macro_config
-
-        try:
-            out_dir = load_macro_config().output_dir
-        except Exception:  # noqa: BLE001
-            out_dir = ""
-        path = chief_report.write(result, out_dir)
-        if path:
-            print(f"📝 {path}")
-    print(f"👔 chief {result.cycle_id}\n{result.summary}")
-    for d in result.decisions:
-        size = f"${d.notional_usd:,.0f}" if d.notional_usd else (
-            f"w={d.target_weight:.0%}" if d.target_weight else "?")
-        print(f"   {d.action.upper()} {d.symbol} {size} conv={d.conviction:.2f} — {d.rationale[:70]}")
-    if not result.decisions:
-        print("   (无行动 — 零决策)")
-        return 0
-    if execute:
-        from ..trader import execute as texec
-
-        texec.execute(result.decisions, source="chief", channel=channel,
-                      dry_run=dry_run, auto=auto, event_data=_pead_event_data())
+    now = datetime.now(timezone.utc)
+    state = ChiefDecisionState(cycle_id=f"chief-{now:%Y%m%d-%H%M%S}", as_of=now,
+                               source=source, dry_run=dry_run, use_llm=use_llm,
+                               use_broker=not offline, auto_approve=auto, execute=execute)
+    run_decision_graph(state, channel=channel)
     return 0
-
-
-def _pead_event_data() -> dict[str, dict]:
-    """Expected Move per PEAD target from the freshest dossiers (for the L6 risk gate)."""
-    from ..config import load_pead_config, load_pead_global
-    from ..memory import get_store
-
-    out: dict[str, dict] = {}
-    for sym in load_pead_global().get("targets", []):
-        try:
-            d = get_store().get_dossier(sym.upper(), load_pead_config(sym).fiscal_label)
-            if d and d.market_setup and d.market_setup.expected_move_pct:
-                out[sym.upper()] = {"expected_move_pct": d.market_setup.expected_move_pct}
-        except Exception:  # noqa: BLE001
-            continue
-    return out
 
 
 def chief_show() -> int:
@@ -648,18 +586,16 @@ def pead_show(symbol: str) -> int:
 
 
 def resume_cycle(thread_id: str, approval, channel=None) -> dict:
-    """Resume a checkpointed run with the Boss verdict (called by the webhook).
+    """Resume a checkpointed decision run with the Boss verdict (webhook path).
 
-    Routes by thread_id prefix: `pead:` -> PEAD graph, else the daily cycle graph.
+    All approval interrupts live on the chief decision graph (`chief-*` /
+    `trader-*` thread ids), so it is always the graph to rebuild here.
     """
+    from ..graph.chief import build_chief_graph
+
     if approval.reviewed_at is None:
         approval.reviewed_at = datetime.now(timezone.utc)
-    if thread_id.startswith("pead:"):
-        from ..graph.pead import build_pead_graph
-
-        app = build_pead_graph(checkpointer=get_checkpointer(persist=True))
-    else:
-        app = build_graph(checkpointer=get_checkpointer(persist=True))
+    app = build_chief_graph(checkpointer=get_checkpointer(persist=True))
     cfg_run = {"configurable": {"thread_id": thread_id}}
     result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
 
@@ -669,33 +605,6 @@ def resume_cycle(thread_id: str, approval, channel=None) -> dict:
             kind="fill_report", title=f"{thread_id}: {approval.status}",
             body=f"{len(orders)} order(s) processed"))
     return result
-
-
-def _report(channel, result: dict) -> None:
-    orders = result.get("order_results", [])
-    approval = result.get("approval")
-    status = getattr(approval, "status", None) or (approval or {}).get("status") if approval else "—"
-    print("\n" + "=" * 70)
-    print(f"CYCLE COMPLETE — approval={status} · orders={len(orders)}")
-    try:
-        from ..memory import get_store
-
-        perf = get_store().last_performance()
-        if perf:
-            print(f"Performance: NetLiq ${perf.net_liquidation:,.0f} · "
-                  f"daily ${perf.daily_pnl:,.0f} · cumulative ${perf.cumulative_pnl:,.0f}")
-    except Exception:  # noqa: BLE001 - reporting only
-        pass
-    for o in orders:
-        sym = getattr(o, "symbol", None) or o.get("symbol")
-        act = getattr(o, "action", None) or o.get("action")
-        st = getattr(o, "status", None) or o.get("status")
-        oid = getattr(o, "order_id", None) or o.get("order_id")
-        print(f"  • {act:4} {sym:6} [{st}] order={oid}")
-    print("=" * 70)
-    if orders:
-        channel.push(Notification(kind="fill_report", title="Execution done",
-                                  body=f"{len(orders)} order(s) processed"))
 
 
 def thetadata_probe(symbol: str) -> int:
@@ -750,12 +659,6 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="run one trading cycle")
-    run.add_argument("--live", action="store_true", help="execute (still IBKR paper); default dry-run")
-    run.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
-    run.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
-    run.add_argument("--no-llm", action="store_true", help="skip LLM calls (neutral stub reports)")
-    run.add_argument("--channel", choices=["cli", "feishu"], help="override approval channel")
     sub.add_parser("ibkr", help="probe IBKR paper connectivity (account + positions)")
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
     srv.add_argument("--host", default="0.0.0.0")
@@ -820,11 +723,6 @@ def main(argv: list[str] | None = None) -> int:
                     help="score: run the Chief immediately after the recommendation persists")
     args = parser.parse_args(argv)
 
-    if args.command == "run":
-        channel = get_channel(args.channel) if args.channel else None
-        run_cycle(dry_run=not args.live, auto=args.yes, offline=args.offline,
-                  use_llm=not args.no_llm, channel=channel)
-        return 0
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":

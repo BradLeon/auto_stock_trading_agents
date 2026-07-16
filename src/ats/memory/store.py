@@ -7,15 +7,10 @@ semantic/vector layer (Chroma) is a later add; this is the structured backbone.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ..schemas.memory import PerformanceRecord
-
-if TYPE_CHECKING:
-    from ..graph.state import TradingState
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cycles (
@@ -98,40 +93,6 @@ class TradingMemory:
         self.conn.commit()
 
     # --- writes ---------------------------------------------------------- #
-    def save_cycle(self, state: "TradingState", performance: PerformanceRecord) -> None:
-        c = self.conn
-        c.execute("INSERT OR REPLACE INTO cycles VALUES (?,?,?,?)",
-                  (state.cycle_id, state.as_of.isoformat(),
-                   getattr(state.approval, "status", None), state.manager_summary))
-
-        reports = []
-        if state.macro_report:
-            reports.append(("macro_analyst", None, state.macro_report))
-        for r in state.industry_reports:
-            reports.append(("industry_analyst", r.sector, r))
-        for r in state.fundamental_reports:
-            reports.append(("fundamental_analyst", r.symbol, r))
-        for r in state.technical_reports:
-            reports.append(("technical_analyst", r.symbol, r))
-        c.executemany(
-            "INSERT INTO reports VALUES (?,?,?,?,?,?,?)",
-            [(state.cycle_id, role, sym, r.signal, r.conviction, r.thesis, r.as_of.isoformat())
-             for role, sym, r in reports])
-
-        c.executemany(
-            "INSERT INTO decisions VALUES (?,?,?,?,?,?,?)",
-            [(state.cycle_id, d.symbol, d.action, d.notional_usd, d.limit_price, d.conviction,
-              d.rationale) for d in state.decisions])
-
-        self._insert_trades(state.order_results, cycle_id=state.cycle_id, source="cycle")
-
-        p = performance
-        c.execute("INSERT INTO performance VALUES (?,?,?,?,?,?,?,?,?)",
-                  (p.cycle_id, p.as_of.isoformat(), p.net_liquidation, p.daily_pnl,
-                   p.cumulative_pnl, p.realized_pnl, p.unrealized_pnl, p.num_positions,
-                   p.model_dump_json()))
-        c.commit()
-
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
                    "avg_fill_price", "submitted_at", "rationale", "limit_price", "filled_at",
                    "error", "realized_pnl", "source", "context")

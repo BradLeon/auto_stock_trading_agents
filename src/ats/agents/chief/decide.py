@@ -30,24 +30,28 @@ def run(*, use_llm: bool = True, live_broker: bool = True) -> ChiefResult:
     now = datetime.now(timezone.utc)
     cycle_id = f"chief-{now:%Y%m%d-%H%M%S}"
     ctx = assemble.build(live_broker=live_broker)
-    ctx_text = ctx.as_context()
     log.info("chief context: %s", ctx.stats())
+    return from_context(ctx.as_context(), cycle_id=cycle_id, as_of=now, use_llm=use_llm)
 
+
+def from_context(context_text: str, *, cycle_id: str, as_of: datetime,
+                 use_llm: bool = True) -> ChiefResult:
+    """The pure LLM segment: pre-assembled context -> one synthesis -> decisions."""
     if not use_llm:
-        return ChiefResult(cycle_id=cycle_id, as_of=now, summary="[stub] chief (no-llm)",
-                           context_text=ctx_text)
+        return ChiefResult(cycle_id=cycle_id, as_of=as_of, summary="[stub] chief (no-llm)",
+                           context_text=context_text)
 
     try:
-        out: ChiefOutput = run_structured("chief", ChiefOutput, ctx_text, skill_slug="chief")
+        out: ChiefOutput = run_structured("chief", ChiefOutput, context_text, skill_slug="chief")
     except Exception as exc:  # noqa: BLE001
         log.warning("chief LLM failed: %s", exc)
-        return ChiefResult(cycle_id=cycle_id, as_of=now,
+        return ChiefResult(cycle_id=cycle_id, as_of=as_of,
                            summary=f"[fallback] chief LLM unavailable: {exc}",
-                           context_text=ctx_text)
+                           context_text=context_text)
 
     decisions = [_to_decision(d) for d in out.decisions if d.action != "hold"]
-    return ChiefResult(cycle_id=cycle_id, as_of=now, summary=out.summary,
-                       decisions=decisions, context_text=ctx_text)
+    return ChiefResult(cycle_id=cycle_id, as_of=as_of, summary=out.summary,
+                       decisions=decisions, context_text=context_text)
 
 
 def _to_decision(v) -> TradeDecision:

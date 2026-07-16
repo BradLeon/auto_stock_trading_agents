@@ -1,13 +1,16 @@
 # ats — Multi-agent automated stock trading
 
 A LangGraph-orchestrated, human-in-the-loop stock trading system. Analyst team
-(macro / industry / fundamental / technical) → risk guardrails → Manager
-decisions → **Boss approval (HITL)** → Trader (IBKR paper) → memory/performance.
+(macro / sector / PEAD) updates the knowledge base → **Chief single decision
+maker** → 6-layer risk gate → **Boss approval (HITL)** → Trader (IBKR) →
+memory/performance. Every order path funnels through one decision graph with a
+single approval interrupt.
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design,
-[`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) for the data-source status
-(tested vs pending) + how to test each, and [`docs/GO_LIVE.md`](docs/GO_LIVE.md)
-for the step-by-step paper-trading go-live checklist.
+[`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) for the workflow/trigger matrix and
+the chief decision graph, [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) for
+the data-source status (tested vs pending) + how to test each, and
+[`docs/GO_LIVE.md`](docs/GO_LIVE.md) for the step-by-step go-live checklist.
 
 ## Status
 
@@ -112,8 +115,8 @@ ats serve               # in a second process: handle Feishu approval callbacks
 2. Enable **Event/Card callback** → set the request URL to your public
    `https://<host>/feishu/callback` (in dev, tunnel with ngrok/cloudflared to the
    `ats serve` port). Copy the **Verification Token** to `FEISHU_VERIFICATION_TOKEN`.
-3. Set `channel.kind: feishu` in `config/settings.yaml` (or `ats run --channel feishu`).
-4. Run the webhook: `ats serve --port 8000`. Then `ats run --live --channel feishu`
+3. Set `channel.kind: feishu` in `config/settings.yaml` (or `ats chief run --channel feishu`).
+4. Run the webhook: `ats serve --port 8000`. Then `ats chief run --channel feishu`
    sends a card and exits; tapping Approve resumes execution via the webhook.
 
 The graph is transport-agnostic — the same interrupt/checkpoint mechanism backs
@@ -146,11 +149,14 @@ uv venv --python 3.11 .venv
 uv pip install --python .venv -e .            # or: .[dev]
 cp .env.example .env                          # fill in keys as phases land
 
-# Run one trading cycle (stub data), interactive Boss approval:
-PYTHONPATH=src .venv/bin/python -m ats.runtime.cli run
+# Chief decision run (dry-run by default), interactive Boss approval:
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli chief run
 
-# Unattended smoke test (auto-approve):
-PYTHONPATH=src .venv/bin/python -m ats.runtime.cli run --yes
+# Wiring smoke test without LLM/broker (stub decision, ends with zero trades):
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli chief run --no-llm --offline
+
+# Manual order through the same risk gate + approval funnel (dry-run):
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli trader buy NVDA 1 --limit 100 --dry-run
 
 # Tests:
 PYTHONPATH=src .venv/bin/python -m pytest -q
@@ -163,9 +169,9 @@ config/            settings.yaml (non-secret) + watchlist.yaml
 src/ats/
   schemas/         Pydantic data contracts (agent I/O)
   llm/gateway.py   role -> chat model (Claude Opus; OpenAI-compatible swap)
-  channel/         BossChannel port + CLI adapter (Feishu/Discord = Phase 2)
-  graph/           StateGraph: state, nodes (stub), build, checkpoint
-  agents/          real agent logic (Phase 3+)
-  skills/          SKILL.md per role (Phase 4+)
+  channel/         BossChannel port: CLI / Feishu adapters
+  graph/           chief (decision funnel) + pead (earnings graph) + checkpoint
+  agents/          agent logic per role (macro/ sector/ pead/ chief/)
+  skills/          SKILL.md per role
   data/ memory/ broker/ runtime/
 ```

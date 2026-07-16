@@ -15,12 +15,8 @@ llm:
   max_retries: 3
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
-    macro_analyst: {}
-    industry_analyst: {model: deepseek/deepseek-v3.2}   # cycle industry node + PEAD signal-chain read-throughs
-    fundamental_analyst: {}
-    technical_analyst: {}
-    risk_manager: {}
-    manager: {}            # daily portfolio decisions + pead-scorer — real money, keep Opus
+    industry_analyst: {model: deepseek/deepseek-v3.2}   # PEAD signal-chain read-throughs
+    manager: {}            # routing key reused by pead-scorer — real money, keep Opus
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
     news_triage: {model: google/gemini-2.5-flash, temperature: 0.0, max_tokens: 8192}
     context_monitor: {model: google/gemini-2.5-flash, max_tokens: 4096}   # PEAD monitor _llm_update (high-frequency; triage pre-filters)

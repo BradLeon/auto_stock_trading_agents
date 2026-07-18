@@ -254,6 +254,28 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
     return 0
 
 
+def risk_memo() -> int:
+    """Risk-officer narrative memo: deterministic 6-layer assess -> LLM memo -> Obsidian doc.
+    Read-only: snapshots the portfolio, never submits orders."""
+    from ..agents.risk_officer import report as memo_report, review as memo_review
+
+    memo = memo_review.run()
+    if memo is None:
+        from ..config import get_config
+        _port = get_config().app.broker.port or get_config().secrets.ibkr_port
+        print(f"❌ IBKR unavailable — start TWS with API enabled (port {_port}).")
+        return 1
+    print(memo_report.render(memo))
+    from ..config import load_macro_config
+    try:
+        out_dir = load_macro_config().output_dir
+    except Exception:  # noqa: BLE001
+        out_dir = ""
+    path = memo_report.write(memo, out_dir)
+    print(f"\n📝 {path}" if path else "\n(report dir unset — skipped)")
+    return 0
+
+
 def risk_check(symbol: str | None = None) -> int:
     """Dry-run the risk gate over stored decisions (shows block/clip without ordering)."""
     from ..memory import get_store
@@ -685,8 +707,8 @@ def main(argv: list[str] | None = None) -> int:
     ch.add_argument("--offline", action="store_true", help="skip live broker read")
     ch.add_argument("--no-execute", action="store_true", help="decide only, don't call trader")
     ch.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli")
-    rk = sub.add_parser("risk", help="risk officer 风控 (report / check)")
-    rk.add_argument("action", choices=["report", "check"])
+    rk = sub.add_parser("risk", help="risk officer 风控 (report / memo / check)")
+    rk.add_argument("action", choices=["report", "memo", "check"])
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
@@ -758,6 +780,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "risk":
         if args.action == "report":
             return risk_report(write_report=args.report, offline=getattr(args, "offline", False))
+        if args.action == "memo":
+            return risk_memo()
         return risk_check(args.symbol)
     if args.command == "trader":
         if args.action == "portfolio":

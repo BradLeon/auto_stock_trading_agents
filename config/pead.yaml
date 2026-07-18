@@ -1,8 +1,11 @@
 # Global PEAD settings (per-ticker config lives in config/pead/<SYM>.yaml).
 
-targets: [ASML, TSM, NVDA]       # symbols the monitor + scheduler operate on
-# 上一轮：[COHR, LITE, AAOI]（光模块组）。本轮聚焦 AI 硬件上游三家（EUV→晶圆→GPU），
-# TSM 产能对 NVDA 意义重大，故信号链需跨标的读上游基本面。
+targets: [GOOG, MSFT, AMZN, NVDA, SKHY, TSM, ASML, KLAC, COHR, LRCX]  # monitor + scheduler operate on
+# 上一轮：[ASML, TSM, NVDA]（AI 硬件上游三家）。本轮扩到全链 10 家：
+#   需求端云厂 GOOG/MSFT/AMZN → GPU 龙头 NVDA → 晶圆/HBM TSM/SKHY → 设备 ASML/KLAC/LRCX
+#   → 光互联 COHR。COHR/LRCX 当前以期权持有，但 PEAD 仍监控其正股财报事件。
+# 注：GOOG/MSFT/AMZN/KLAC/LRCX 暂用 _defaults 通用打分卡（仅设了 fiscal_label）；
+#   如需像 NVDA.yaml 那样定制 scorecard/signal_chain/narrative，再逐个补。
 
 monitor:
   enabled: true

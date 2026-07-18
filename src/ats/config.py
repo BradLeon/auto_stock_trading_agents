@@ -126,6 +126,9 @@ class RiskConfig(BaseModel):
     max_event_loss_pct: float = 0.03      # single earnings gap: weight * expected_move <= this
     # L1 流动性（报告用）
     max_pct_adv: float = 0.10
+    # 现金等价物：symbol -> haircut（0=纯现金信用；1=完全当风险敞口）。美债 ETF/BRK-B 等
+    # 按现金信用计入有效现金，不占单票/杠杆/beta/集中度限额。见 risk/assess.py。
+    cash_equivalents: dict[str, float] = Field(default_factory=dict)
 
 
 class AccountConfig(BaseModel):

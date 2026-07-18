@@ -1,0 +1,6 @@
+# KLA Corp (KLAC) — PEAD stub. 半导体过程控制/检测设备（L6）。当前以期权持有。
+# 财年 6 月底结：2026-07-28 申报的是 FY2026 Q4。WFE 资本开支领先指标。
+# TODO: 定制打分卡（订单/出货、WFE 指引、中国占比、检测占 WFE 份额）参照 NVDA.yaml 补全。
+
+symbol: KLAC
+fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-28 (amc)，KLA 财年 Q4

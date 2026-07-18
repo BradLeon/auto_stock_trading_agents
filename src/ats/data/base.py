@@ -14,6 +14,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 log = logging.getLogger("ats.data")
 
+# yfinance logs its own ERROR lines for delisted / invalid tickers (e.g. HK 7709 that the
+# user does not hold long-term). Those are handled gracefully by safe_fetch → None, so
+# silence yfinance's own noise; our own warnings still fire.
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+
 # IBKR sends broker-native tickers; yfinance uses different conventions.
 # Map IBKR symbol → yfinance ticker here; applied in all data/*.py calls.
 _YF_SYMBOL_MAP: dict[str, str] = {

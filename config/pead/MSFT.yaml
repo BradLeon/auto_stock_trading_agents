@@ -1,0 +1,7 @@
+# Microsoft (MSFT) — PEAD stub. 需求端云厂（Azure + Copilot），AI CapEx 指引风向标。
+# 财年 6 月底结：2026-07-29 申报的是 FY2026 Q4（Apr–Jun 2026）。
+# TODO: 定制打分卡（Azure 增速、CapEx 指引、Copilot 变现）参照 NVDA.yaml 补全。
+
+symbol: MSFT
+fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，MSFT 财年 Q4
+long_threshold: 1.2            # megacap 高关注度，门槛抬高

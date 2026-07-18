@@ -83,6 +83,7 @@ class IBKRBroker:
                 positions.append(Position(
                     symbol=sym,
                     sector=self.sector_by_symbol.get(sym, "unknown"),
+                    sec_type=getattr(it.contract, "secType", "STK") or "STK",
                     qty=float(it.position),
                     avg_cost=float(it.averageCost),
                     market_price=float(it.marketPrice),

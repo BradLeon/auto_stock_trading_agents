@@ -18,19 +18,20 @@ llm:
     industry_analyst: {model: deepseek/deepseek-v3.2}   # PEAD signal-chain read-throughs
     manager: {}            # routing key reused by pead-scorer — real money, keep Opus
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
-    news_triage: {model: google/gemini-2.5-flash, temperature: 0.0, max_tokens: 8192}
-    context_monitor: {model: google/gemini-2.5-flash, max_tokens: 4096}   # PEAD monitor _llm_update (high-frequency; triage pre-filters)
-    actuals_extract: {model: google/gemini-2.5-flash, max_tokens: 4096}   # pull reported numbers from transcript/8-K (factual)
+    news_triage: {model: google/gemini-3.5-flash, temperature: 0.0, max_tokens: 8192}
+    context_monitor: {model: google/gemini-3.5-flash, max_tokens: 4096}   # PEAD monitor _llm_update (high-frequency; triage pre-filters)
+    actuals_extract: {model: google/gemini-3.5-flash, max_tokens: 4096}   # pull reported numbers from transcript/8-K (factual)
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
     research_extract: {model: deepseek/deepseek-v3.2}   # supply-chain insight extraction
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.
-    sector_analyst: {model: google/gemini-2.5-pro, max_tokens: 24000}   # weekly L1-L6 sector review — large structured output
-    macro_strategist: {model: google/gemini-2.5-pro, max_tokens: 24000} # weekly macro regime + sector tilts — large structured output
-    pead_analyst: {model: anthropic/claude-sonnet-4.6}  # PEAD prep framework/narrative/expectations (token-heavy)
+    sector_analyst: {model: google/gemini-3.1-pro-preview, max_tokens: 24000}   # weekly L1-L6 sector review — large structured output
+    macro_strategist: {model: google/gemini-3.1-pro-preview, max_tokens: 24000} # weekly macro regime + sector tilts — large structured output
+    pead_analyst: {model: anthropic/claude-sonnet-5}  # PEAD prep framework/narrative/expectations (token-heavy)
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
+    risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus
 
 # --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --
 risk:
@@ -56,6 +57,12 @@ risk:
   # L6 事件
   max_event_loss_pct: 0.03      # single earnings gap: weight * expected_move <= this
   max_pct_adv: 0.10             # liquidity (report only)
+  # 现金等价物：symbol -> haircut（0=完全当现金 full cash credit；1=完全当风险敞口）。
+  # cash_credit = 市值 × (1−haircut) 计入有效现金；risk_weight = 市值 × haircut 才占风险限额。
+  cash_equivalents:
+    SGOV: 0.0                   # 美债 ETF，准现金
+    SHV: 0.0                    # 美债 ETF，准现金
+    BRK-B: 0.0                  # 权益压舱石，本轮按满额现金信用（可改 0.20 变部分信用）
 
 # --- IBKR broker connection --------------------------------------------------
 # Port: TWS live=7496, TWS paper=7497, IB Gateway live=4001, IB Gateway paper=4002

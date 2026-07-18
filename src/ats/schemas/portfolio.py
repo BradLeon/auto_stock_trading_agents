@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class Position(BaseModel):
     symbol: str
     sector: str = "unknown"
+    sec_type: str = "STK"            # IBKR secType: STK | OPT | FUT | … (options exempt from equity risk rules)
     qty: float
     avg_cost: float
     market_price: float

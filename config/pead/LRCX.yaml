@@ -1,0 +1,6 @@
+# Lam Research (LRCX) — PEAD stub. 半导体刻蚀/沉积设备（L6），HBM/存储扩产核心受益。
+# 财年 6 月底结：2026-07-29 申报的是 FY2026 Q4。当前以期权持有。
+# TODO: 定制打分卡（存储/HBM 敞口、WFE 指引、中国占比、系统 vs 服务收入）参照 NVDA.yaml 补全。
+
+symbol: LRCX
+fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，Lam 财年 Q4

@@ -63,10 +63,23 @@ def _portfolio_block(ctx: ChiefContext, live_broker: bool) -> str:
             return "(IBKR 不可达 — 无实时持仓)"
         ctx.net_liquidation = pf.net_liquidation
         ctx.held_symbols = {p.symbol.upper() for p in pf.positions}
-        lines = [f"NetLiq ${pf.net_liquidation:,.0f} · cash {pf.cash/pf.net_liquidation:.0%} · "
+        # effective cash = raw cash + cash-equivalent credit (SGOV/SHV/BRK-B etc.)
+        from ...config import get_config
+        from ...risk.assess import _norm_sym
+        ce_norm = {_norm_sym(k): v for k, v in (get_config().app.risk.cash_equivalents or {}).items()}
+        held_hc = {p.symbol: ce_norm[_norm_sym(p.symbol)]
+                   for p in pf.positions if _norm_sym(p.symbol) in ce_norm}
+        cash_credit = sum(p.market_value * (1.0 - held_hc[p.symbol])
+                          for p in pf.positions if p.symbol in held_hc)
+        eff_cash_pct = (pf.cash + cash_credit) / pf.net_liquidation if pf.net_liquidation else 0.0
+        lines = [f"NetLiq ${pf.net_liquidation:,.0f} · cash {pf.cash/pf.net_liquidation:.0%}"
+                 f"（含现金等价物有效 {eff_cash_pct:.0%}）· "
                  f"杠杆 {pf.leverage:.2f}x · 日盈亏 ${pf.daily_pnl:,.0f}"]
         for p in pf.positions:
-            lines.append(f"  {p.symbol} w={p.weight:.1%} uPnL=${p.unrealized_pnl:,.0f}")
+            tag = " [现金等价物]" if p.symbol in held_hc else ""
+            if (getattr(p, "sec_type", "STK") or "STK") == "OPT":
+                tag += " [期权·豁免正股风控]"
+            lines.append(f"  {p.symbol} w={p.weight:.1%} uPnL=${p.unrealized_pnl:,.0f}{tag}")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001
         log.warning("chief portfolio block failed: %s", exc)

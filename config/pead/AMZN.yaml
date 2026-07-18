@@ -1,0 +1,6 @@
+# Amazon (AMZN) — PEAD stub. 需求端云厂（AWS），AI CapEx 指引风向标。
+# TODO: 定制打分卡（AWS 增速与加速度、CapEx 指引、零售利润率）参照 NVDA.yaml 补全。
+
+symbol: AMZN
+fiscal_label: "Q2 2026"        # 下次申报 2026-07-30 (amc)，日历季 Q2 2026
+long_threshold: 1.2            # megacap 高关注度，门槛抬高

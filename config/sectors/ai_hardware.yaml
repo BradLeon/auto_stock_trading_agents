@@ -26,6 +26,7 @@ layers:
       - {symbol: AMZN}
       - {symbol: META, note: 自用为主，近期传出售闲置算力}
       - {symbol: GOOGL}
+      - {symbol: GOOG, note: Alphabet C类（IBKR/用户实际持有此代码）}
       - {symbol: CRWV, note: neocloud，TODO 用户确认}
 
   - key: L3_dc_infra
@@ -55,7 +56,9 @@ layers:
     tickers:
       - {symbol: TSM, note: 先进制程+CoWoS}
       - {symbol: MU, note: HBM}
-      - {symbol: "000660.KS", note: SK海力士/HBM龙头}
+      - {symbol: HY9H, note: SK海力士/HBM龙头（IBKR法兰克福ADR代码，用户实际持有）}
+      - {symbol: SKHY, note: SK海力士 美国ADR（用户同时持有此代码）}
+      - {symbol: "000660.KS", note: SK海力士 韩股（参考）}
       - {symbol: "005930.KS", note: 三星/HBM追赶}
 
   - key: L6_equipment
@@ -66,7 +69,8 @@ layers:
       - {symbol: ASML, note: EUV 最不可替代}
       - {symbol: AMAT}
       - {symbol: LRCX}
-      - {symbol: KLA}
+      - {symbol: KLAC, note: KLA Corp（正确代码 KLAC，原 KLA 错误）}
+      - {symbol: LSRCY, note: Lasertec ADR（EUV 掩模检测设备）}
       - {symbol: "8035.T", note: TEL，TODO 用户确认}
 
 # 每票轻量快照的抓取策略（限速关键）

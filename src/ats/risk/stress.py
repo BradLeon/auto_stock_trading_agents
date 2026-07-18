@@ -13,27 +13,38 @@ def _beta(p) -> float:
     return p.beta if p.beta is not None else 1.0
 
 
-def market_shock(portfolio: PortfolioSnapshot, shock: float) -> float:
-    """Beta-weighted equity-market shock: Σ weight_i · beta_i · shock. (% NAV)"""
-    invested = sum(p.weight for p in portfolio.positions)
-    beta_wsum = sum(p.weight * _beta(p) for p in portfolio.positions)
-    # cash is unaffected; loss scales with invested beta-exposure
+def _risk_weight(p, cash_equivalents: dict[str, float] | None) -> float:
+    """Effective shockable weight: cash equivalents only expose their haircut portion
+    (haircut=0 near-cash contributes nothing to a market/cluster shock)."""
+    hc = (cash_equivalents or {}).get(p.symbol)
+    return p.weight * hc if hc is not None else p.weight
+
+
+def market_shock(portfolio: PortfolioSnapshot, shock: float,
+                 cash_equivalents: dict[str, float] | None = None) -> float:
+    """Beta-weighted equity-market shock: Σ risk_weight_i · beta_i · shock. (% NAV)"""
+    beta_wsum = sum(_risk_weight(p, cash_equivalents) * _beta(p) for p in portfolio.positions)
+    # cash and near-cash equivalents are unaffected; loss scales with invested beta-exposure
     return round(beta_wsum * shock * 100, 2)
 
 
 def cluster_shock(portfolio: PortfolioSnapshot, cluster_members: list[str],
-                  shock: float) -> float:
+                  shock: float, cash_equivalents: dict[str, float] | None = None) -> float:
     """Extra shock concentrated on a correlated cluster (e.g. AI-semi -35%). (% NAV)"""
     members = set(cluster_members)
-    w = sum(p.weight for p in portfolio.positions if p.symbol in members)
+    w = sum(_risk_weight(p, cash_equivalents)
+            for p in portfolio.positions if p.symbol in members)
     return round(w * shock * 100, 2)
 
 
 def run(portfolio: PortfolioSnapshot, *, market_shocks: list[float],
-        top_cluster: list[str] | None, ai_bubble_shock: float) -> list[dict]:
-    out = [{"scenario": f"市场 {int(s*100)}% (beta加权)", "loss_pct": market_shock(portfolio, s)}
+        top_cluster: list[str] | None, ai_bubble_shock: float,
+        cash_equivalents: dict[str, float] | None = None) -> list[dict]:
+    out = [{"scenario": f"市场 {int(s*100)}% (beta加权)",
+            "loss_pct": market_shock(portfolio, s, cash_equivalents)}
            for s in market_shocks]
     if top_cluster:
         out.append({"scenario": f"AI泡沫破裂 {int(ai_bubble_shock*100)}% (打相关簇)",
-                    "loss_pct": cluster_shock(portfolio, top_cluster, ai_bubble_shock)})
+                    "loss_pct": cluster_shock(portfolio, top_cluster, ai_bubble_shock,
+                                              cash_equivalents)})
     return out

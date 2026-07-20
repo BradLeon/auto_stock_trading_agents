@@ -240,6 +240,7 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
         print(f"❌ IBKR unavailable — start TWS with API enabled (port {_port}). Use --offline to show stored review.")
         return 1
     risk_assess.enrich_beta(pf)
+    risk_assess.enrich_options(pf)
     review = risk_assess.assess(pf)
     get_store().save_risk_review(review)
     print(risk_report_mod.render(review))

@@ -50,6 +50,7 @@ def run(*, use_llm: bool = True) -> RiskMemo | None:
     if pf is None:
         return None
     risk_assess.enrich_beta(pf)
+    risk_assess.enrich_options(pf)
     review = risk_assess.assess(pf)
     get_store().save_risk_review(review)
 

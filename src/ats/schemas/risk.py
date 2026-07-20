@@ -63,15 +63,64 @@ class CashEquivalent(BaseModel):
     cash_credit: float = 0.0          # market_value × (1 − haircut)
 
 
-class OptionHolding(BaseModel):
-    """An option position (secType=OPT). Currently EXEMPT from the equity 6-layer rules
-    (stop-loss / drawdown / margin / single-name / beta / chain-layer) — option premium is
-    non-linear and needs its own greeks-based rules (TODO). Surfaced for visibility only."""
-    symbol: str                       # underlying symbol (IBKR reports the underlying)
+class OptionRisk(BaseModel):
+    """An option position (secType=OPT) decomposed by greeks and folded into the 6-layer
+    framework via delta-notional (single-name/factor) + BSM full-revaluation (stress).
+    Only the 4 single-leg strategies are classified: sell_put / covered_call / naked_call /
+    buy_call / buy_put."""
+    symbol: str                       # contract label (underlying + expiry/strike/right)
+    underlying: str                   # underlying symbol (drives layer/beta/cluster)
     sec_type: str = "OPT"
-    market_value: float = 0.0
-    weight: float = 0.0
+    right: str = ""                   # 'C' | 'P'
+    strike: float = 0.0
+    expiry: str = ""                  # YYYYMMDD
+    qty: float = 0.0                  # signed: long > 0, short < 0 (contracts)
+    multiplier: float = 100.0
+    strategy: str = ""                # sell_put | covered_call | naked_call | buy_call | buy_put | ""
+    spot: float | None = None         # underlying spot used for pricing
+    iv: float | None = None           # implied vol (decimal)
+    delta: float | None = None        # per-contract greeks (option-share terms)
+    gamma: float | None = None
+    vega: float | None = None         # per 1 vol point (×0.01)
+    theta: float | None = None        # per day
+    delta_notional: float = 0.0       # signed: delta × qty × mult × spot
+    margin: float | None = None       # position margin (IBKR or Reg-T estimate)
+    premium_mv: float = 0.0           # market value of the premium (IBKR marketValue)
     unrealized_pnl: float = 0.0
+    priced: bool = False              # greeks available (IBKR or BSM); False → list-only fallback
+    greeks_source: str | None = None  # 'ibkr' | 'bsm' | None
+
+
+class PortfolioGreeks(BaseModel):
+    """Portfolio-level aggregate greeks (options only; equities contribute delta_notional
+    via underlying exposure, not to gamma/vega/theta)."""
+    net_delta_notional: float = 0.0   # Σ option delta_notional (signed, $)
+    net_gamma: float = 0.0            # Σ gamma × qty × mult
+    net_vega: float = 0.0             # Σ vega × qty × mult (per 1 vol point, $)
+    net_theta: float = 0.0            # Σ theta × qty × mult (per day, $)
+    delta_adj_leverage: float = 0.0   # Σ|net delta_notional (equity+option)| / net_liq
+
+
+class UnderlyingExposure(BaseModel):
+    """Per-underlying net exposure combining equity weight and option delta-notional weight
+    (long put / short call net against long stock)."""
+    symbol: str
+    equity_weight: float = 0.0        # risk-weighted equity weight (fraction of net_liq)
+    option_delta_weight: float = 0.0  # Σ option delta_notional / net_liq (signed)
+    net_delta_weight: float = 0.0     # equity_weight + option_delta_weight (signed)
+    layer: str = ""
+
+
+class MarginSummary(BaseModel):
+    """Account-level margin picture. source='ibkr' is authoritative; 'regt_est' is a
+    self-computed Reg-T estimate (limits degrade to caution, never hard-block)."""
+    init_margin: float | None = None
+    maint_margin: float | None = None
+    excess_liquidity: float | None = None
+    buying_power: float | None = None
+    margin_util: float | None = None      # init_margin / net_liq
+    excess_liq_pct: float | None = None   # excess_liquidity / net_liq
+    source: str | None = None             # 'ibkr' | 'regt_est' | None
 
 
 class SymbolLayer(BaseModel):
@@ -99,7 +148,10 @@ class RiskReview(BaseModel):
     effective_cash_pct: float = 0.0              # (cash + Σ cash_credit) / net_liq
     effective_leverage: float | None = None      # (gross − Σ cash_credit) / net_liq
     cash_equivalents: list[CashEquivalent] = Field(default_factory=list)
-    options: list[OptionHolding] = Field(default_factory=list)     # exempt from equity rules
+    option_risks: list[OptionRisk] = Field(default_factory=list)   # options folded into 6 layers
+    portfolio_greeks: PortfolioGreeks | None = None
+    underlying_exposures: list[UnderlyingExposure] = Field(default_factory=list)
+    margin: MarginSummary | None = None
     symbol_layers: list[SymbolLayer] = Field(default_factory=list)  # explicit symbol→layer map
     portfolio_beta: float | None = None
     chain_layers: list[LayerExposure] = Field(default_factory=list)
@@ -109,6 +161,7 @@ class RiskReview(BaseModel):
     stress: list[StressResult] = Field(default_factory=list)
     event_risks: list[EventRisk] = Field(default_factory=list)
     breaches: list[Breach] = Field(default_factory=list)
+    cautions: list[Breach] = Field(default_factory=list)   # advisory (期权限额/估算保证金): 披露不硬阻单
     risk_state: str = "normal"        # normal | caution | derisk
     notes: str = ""
 
@@ -122,13 +175,29 @@ class RiskReview(BaseModel):
             f"杠杆(原始/有效)={self.gross_exposure/self.net_liquidation if self.net_liquidation else 0:.2f}x/{el}",
             f"组合beta={self.portfolio_beta} · 回撤={self.drawdown_pct}% · 日盈亏={self.daily_pnl_pct}%",
         ]
+        if self.margin:
+            m = self.margin
+            src = "IBKR" if m.source == "ibkr" else ("Reg-T估算" if m.source == "regt_est" else "—")
+            util = f"{m.margin_util:.0%}" if m.margin_util is not None else "—"
+            elp = f"{m.excess_liq_pct:.0%}" if m.excess_liq_pct is not None else "—"
+            parts.append(f"保证金({src}): 利用率={util} · 剩余流动性={elp} · "
+                         f"初始保证金=${m.init_margin:,.0f}" if m.init_margin is not None
+                         else f"保证金({src}): 利用率={util} · 剩余流动性={elp}")
+        if self.portfolio_greeks:
+            g = self.portfolio_greeks
+            parts.append(f"组合Greeks: 净Δ名义=${g.net_delta_notional:,.0f} · 净Vega=${g.net_vega:,.0f}/1vol · "
+                         f"净Theta=${g.net_theta:,.0f}/日 · Δ调整杠杆={g.delta_adj_leverage:.2f}x")
         if self.cash_equivalents:
             parts.append("现金等价物: " + "; ".join(
                 f"{c.symbol} 市值${c.market_value:,.0f} haircut={c.haircut:.0%} 现金信用${c.cash_credit:,.0f}"
                 for c in self.cash_equivalents))
-        if self.options:
-            parts.append("期权持仓(暂豁免风控): " + "; ".join(
-                f"{o.symbol} w={o.weight:.0%} uPnL=${o.unrealized_pnl:,.0f}" for o in self.options))
+        if self.option_risks:
+            parts.append("期权持仓(已并入风控): " + "; ".join(
+                f"{o.underlying} {o.strategy or o.right} Δ名义=${o.delta_notional:,.0f}"
+                + (f" IV={o.iv:.0%}" if o.iv is not None else "")
+                + (f" 保证金=${o.margin:,.0f}" if o.margin is not None else "")
+                + (f" uPnL=${o.unrealized_pnl:,.0f}") + ("" if o.priced else " [未定价]")
+                for o in self.option_risks))
         if self.symbol_layers:
             parts.append("标的→产业链层: " + "; ".join(
                 f"{sl.symbol}[{sl.sec_type}]→{sl.label}({sl.weight:.0%})" for sl in self.symbol_layers))
@@ -150,11 +219,21 @@ class RiskReview(BaseModel):
                 f"  ⚠️ {b.layer}: {b.actual} vs {b.limit} → {b.action}" for b in self.breaches))
         else:
             parts.append("破限: 无")
+        if self.cautions:
+            parts.append("提示(不硬阻单):\n" + "\n".join(
+                f"  · {c.layer}: {c.actual} vs {c.limit} → {c.action}" for c in self.cautions))
         return "\n".join(parts)[:max_chars]
 
     def regime_block(self, max_chars: int = 800) -> str:
         parts = [f"[风控 {self.as_of:%Y-%m-%d}] 状态={self.risk_state} beta={self.portfolio_beta} "
                  f"回撤={self.drawdown_pct}% 现金={self.cash_pct:.0%}(有效{self.effective_cash_pct:.0%})"]
+        if self.portfolio_greeks or self.margin:
+            g, m = self.portfolio_greeks, self.margin
+            netv = f"净Vega=${g.net_vega:,.0f}" if g else ""
+            util = f"保证金利用率={m.margin_util:.0%}" if (m and m.margin_util is not None) else ""
+            extra = " ".join(x for x in (netv, util) if x)
+            if extra:
+                parts.append(f"  {extra}")
         for b in self.breaches:
             parts.append(f"  ⚠️ {b.layer}: {b.actual} vs {b.limit} → {b.action}")
         return "\n".join(parts)[:max_chars]

@@ -48,6 +48,7 @@ def pre_trade(decisions: list[TradeDecision], portfolio: PortfolioSnapshot | Non
     # New layers: assess current risk (beta enriched) unless a review was passed in.
     if review is None:
         risk_assess.enrich_beta(portfolio)
+        risk_assess.enrich_options(portfolio)
         review = risk_assess.assess(portfolio, sector=sector, event_data=event_data)
 
     breach_layers = {b.layer for b in review.breaches}

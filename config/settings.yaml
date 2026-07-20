@@ -54,9 +54,17 @@ risk:
   max_stress_loss_pct: 0.25     # worst scenario loss vs NAV
   stress_market_shocks: [-0.10, -0.20]
   ai_bubble_cluster_shock: -0.35  # extra shock on the top correlated cluster
+  stress_vol_shocks: [0.20, 0.50]  # 期权压测 vol 联动，与 stress_market_shocks 一一配对
+  ai_bubble_vol_shock: 0.80     # AI 泡沫崩盘情景额外抬 vol（期权全重估用）
   # L6 事件
   max_event_loss_pct: 0.03      # single earnings gap: weight * expected_move <= this
   max_pct_adv: 0.10             # liquidity (report only)
+  # 期权风控（BSM/Greeks；IBKR 权威优先，取不到回退 Reg-T/BSM 估算）
+  option_risk_free_rate: 0.045  # BSM greeks / 重定价的无风险利率
+  max_margin_util_pct: 0.5      # 初始保证金/净值 上限（IBKR 源时硬阻单，估算源降 caution）
+  min_excess_liquidity_pct: 0.10  # 剩余流动性/净值 下限（保证金垫太薄）
+  max_net_vega_pct: 0.05        # |净 vega|/净值 提示阈（caution，不硬阻单）
+  short_option_loss_mult: 2.0   # short 期权：浮亏/收权利金 ≥ 此倍数 → caution
   # 现金等价物：symbol -> haircut（0=完全当现金 full cash credit；1=完全当风险敞口）。
   # cash_credit = 市值 × (1−haircut) 计入有效现金；risk_weight = 市值 × haircut 才占风险限额。
   cash_equivalents:
@@ -77,7 +85,9 @@ account:
 
 # --- Boss approval channel ---------------------------------------------------
 channel:
-  kind: cli                     # cli (Phase 1) | feishu | discord (Phase 2)
+  kind: feishu_bot              # cli | feishu (app) | feishu_bot (group-bot signed-link approval) | discord
+                                # feishu_bot: scheduler pushes an approval card with signed Approve/Reject
+                                # links to FEISHU_BOT_WEBHOOK; taps hit `ats serve` (FEISHU_APPROVE_BASE).
 
 # --- Scheduling (Phase 9) ----------------------------------------------------
 schedule:

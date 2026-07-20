@@ -77,20 +77,48 @@ class IBKRBroker:
             gross = float(summary.get("GrossPositionValue", 0) or 0)
 
             positions: list[Position] = []
+            opt_contracts: list[tuple[Position, object]] = []   # (position, ib contract) for greeks
             for it in items:
                 sym = it.contract.symbol
                 mv = float(it.marketValue)
-                positions.append(Position(
+                sec_type = getattr(it.contract, "secType", "STK") or "STK"
+                pos = Position(
                     symbol=sym,
                     sector=self.sector_by_symbol.get(sym, "unknown"),
-                    sec_type=getattr(it.contract, "secType", "STK") or "STK",
+                    sec_type=sec_type,
                     qty=float(it.position),
                     avg_cost=float(it.averageCost),
                     market_price=float(it.marketPrice),
                     market_value=mv,
                     unrealized_pnl=float(it.unrealizedPNL),
                     weight=(mv / net_liq) if net_liq else 0.0,
-                ))
+                )
+                if sec_type == "OPT":
+                    c = it.contract
+                    pos.underlying = sym
+                    pos.right = (getattr(c, "right", "") or "")[:1].upper() or None
+                    try:
+                        pos.strike = float(getattr(c, "strike", 0) or 0) or None
+                    except (TypeError, ValueError):
+                        pos.strike = None
+                    pos.expiry = (getattr(c, "lastTradeDateOrContractMonth", "") or "") or None
+                    try:
+                        pos.multiplier = float(getattr(c, "multiplier", 0) or 0) or 100.0
+                    except (TypeError, ValueError):
+                        pos.multiplier = 100.0
+                    opt_contracts.append((pos, c))
+                positions.append(pos)
+
+            # --- IBKR model greeks (authoritative; BSM fallback if unavailable) ------
+            self._fetch_option_greeks(ib, opt_contracts)
+
+            # --- IBKR authoritative margin (default accountSummary carries these tags) --
+            init_m = _fnum(summary.get("InitMarginReq"))
+            maint_m = _fnum(summary.get("MaintMarginReq"))
+            excess_l = _fnum(summary.get("ExcessLiquidity"))
+            bpower = _fnum(summary.get("BuyingPower"))
+            avail = _fnum(summary.get("AvailableFunds"))
+            margin_source = "ibkr" if init_m else None
 
             exposure = ExposureBreakdown()
             for p in positions:
@@ -115,7 +143,48 @@ class IBKRBroker:
                 net_exposure=gross, leverage=(gross / net_liq) if net_liq else 0.0,
                 daily_pnl=daily_pnl, realized_pnl=realized_pnl,
                 positions=positions, exposure=exposure,
+                init_margin=init_m, maint_margin=maint_m, excess_liquidity=excess_l,
+                buying_power=bpower, available_funds=avail, margin_source=margin_source,
             )
+
+    def _fetch_option_greeks(self, ib, opt_contracts: list) -> None:
+        """Stream IBKR model greeks (genericTick 106) for each OPT contract; write onto the
+        Position (greeks_source='ibkr'). Best-effort: any failure leaves fields None so the
+        risk layer's BSM fallback takes over. Never raises — must not break get_portfolio."""
+        if not opt_contracts:
+            return
+        try:
+            tickers = []
+            for pos, c in opt_contracts:
+                try:
+                    t = ib.reqMktData(c, "106", False, False)
+                    tickers.append((pos, t))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("reqMktData greeks failed for %s: %s", pos.symbol, exc)
+            if not tickers:
+                return
+            ib.sleep(4.0)   # let streaming modelGreeks ticks land
+            for pos, t in tickers:
+                mg = getattr(t, "modelGreeks", None)
+                if mg is None:
+                    continue
+                d = _fnum(getattr(mg, "delta", None))
+                if d is None:
+                    continue   # no usable computation → leave for BSM fallback
+                pos.delta = d
+                pos.gamma = _fnum(getattr(mg, "gamma", None))
+                pos.vega = _fnum(getattr(mg, "vega", None))
+                pos.theta = _fnum(getattr(mg, "theta", None))
+                pos.iv = _fnum(getattr(mg, "impliedVol", None))
+                pos.underlying_price = _fnum(getattr(mg, "undPrice", None))
+                pos.greeks_source = "ibkr"
+            for _, c in opt_contracts:
+                try:
+                    ib.cancelMktData(c)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            log.warning("option greeks fetch skipped: %s", exc)
 
     def get_pnl(self, account: str = "") -> dict:
         """Account-level P&L: {daily_pnl, unrealized_pnl, realized_pnl}. 0-filled on miss."""
@@ -239,6 +308,17 @@ class IBKRBroker:
             entry.error = str(exc)
             self._last_trades.append(None)
         return entry
+
+
+def _fnum(v) -> float | None:
+    """Parse an IBKR string/number tag to float; None on missing/blank/NaN."""
+    if v is None or v == "":
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None   # filter NaN
 
 
 def _map_status(status: str) -> str:

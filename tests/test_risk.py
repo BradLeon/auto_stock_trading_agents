@@ -19,6 +19,20 @@ def _pos(sym, weight, beta=1.0, sector="optical", upnl=0.0, avg=100.0, qty=10, s
                     weight=weight, beta=beta)
 
 
+def _opt(under, qty, delta, *, right="C", strike=100.0, spot=100.0, mult=100.0, iv=0.4,
+         vega=0.40, gamma=0.02, theta=-0.01, expiry="20270101", avg=5.0, upnl=0.0, beta=1.5):
+    """Option Position with IBKR-style greeks pre-filled (so assess uses them directly,
+    no network). market_price is the option premium per share."""
+    prem = avg
+    mv = prem * qty * mult
+    return Position(symbol=f"{under} {expiry} {strike:g} {right}", sector="optical",
+                    sec_type="OPT", qty=qty, avg_cost=avg, market_price=prem, market_value=mv,
+                    unrealized_pnl=upnl, weight=(mv / 1_000_000), beta=beta,
+                    strike=strike, right=right, expiry=expiry, multiplier=mult, underlying=under,
+                    delta=delta, gamma=gamma, vega=vega, theta=theta, iv=iv,
+                    underlying_price=spot, greeks_source="ibkr")
+
+
 def _pf(positions, cash=0.0, daily_pnl=0.0):
     return PortfolioSnapshot(as_of=NOW, net_liquidation=1_000_000, cash=cash,
                              gross_exposure=sum(p.market_value for p in positions),
@@ -134,19 +148,91 @@ def test_cash_equivalent_partial_haircut(monkeypatch):
 # --------------------------------------------------------------------------- #
 # options exemption + explicit symbol→layer mapping
 # --------------------------------------------------------------------------- #
-def test_options_exempt_from_equity_rules(monkeypatch):
-    # An option down 50% at 30% weight would trip stop-loss + single-name if treated as
-    # stock; being secType=OPT it is exempt, surfaced in review.options, and excluded from
-    # portfolio beta and effective leverage (margin exemption).
+def test_bsm_greeks_numeric():
+    # ATM call, S=K=100, T=1, r=0, σ=0.2 → known reference values.
+    from ats.risk import options_math as om
+    g = om.greeks(100.0, 100.0, 1.0, 0.0, 0.2, is_call=True)
+    assert abs(g["delta"] - 0.539828) < 1e-4
+    assert abs(g["gamma"] - 0.0198476) < 1e-5
+    assert abs(g["vega"] - 0.39695) < 1e-3          # per 1% vol point
+    assert abs(g["theta"] - (-0.010875)) < 1e-4     # per day
+    # put delta = call delta − 1
+    p = om.greeks(100.0, 100.0, 1.0, 0.0, 0.2, is_call=False)
+    assert abs(p["delta"] - (g["delta"] - 1.0)) < 1e-9
+    assert abs(p["gamma"] - g["gamma"]) < 1e-12     # gamma right-agnostic
+
+
+def test_regt_margin_by_strategy():
+    from ats.risk import options_math as om
+    # cash-secured-ish short put: max(0.2*100-0, 0.1*100)*100*1 + premium(5*100)
+    assert om.regt_margin("sell_put", 100, 100, 5.0, 1) == 20 * 100 + 500
+    assert om.regt_margin("covered_call", 100, 100, 5.0, 1) == 0.0
+    assert om.regt_margin("buy_call", 100, 110, 5.0, 2) == 5.0 * 100 * 2   # long = premium
+
+
+def test_option_buy_call_lifts_single_name(monkeypatch):
+    # A big long call pushes the underlying's NET delta over the single-name cap.
     monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
-    opt = _pos("COHR", 0.30, beta=3.0, upnl=-5000, avg=100, qty=100, sec_type="OPT")
     stk = _pos("NVDA", 0.10, beta=1.5)
-    pf = _pf([opt, stk], cash=600_000)
+    call = _opt("NVDA", qty=10, delta=0.8, strike=200, spot=200)   # dn=0.8*10*100*200=160k → 0.16
+    pf = _pf([stk, call], cash=740_000)
     review = risk_assess.assess(pf)
-    assert not any("COHR" in b.actual for b in review.breaches)   # no stop-loss / single-name
-    assert any(o.symbol == "COHR" for o in review.options)
-    assert review.portfolio_beta == 0.15                          # only NVDA 0.10*1.5
-    assert review.effective_leverage == 0.10                      # gross 400k − 300k option MV
+    # net delta weight ≈ 0.10 (stock) + 0.16 (call) = 0.26 > 0.20
+    assert any(b.layer == "L1-单票" and "NVDA" in b.actual for b in review.breaches)
+    o = review.option_risks[0]
+    assert o.strategy == "buy_call" and abs(o.delta_notional - 160_000) < 1
+
+
+def test_option_long_put_hedges_single_name(monkeypatch):
+    # A long put nets down a concentrated stock below the single-name cap.
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    stk = _pos("NVDA", 0.22, beta=1.5)                              # alone: 0.22 > 0.20
+    put = _opt("NVDA", qty=3, delta=-0.9, right="P", strike=100, spot=100)  # dn=-27k → -0.027
+    pf = _pf([stk, put], cash=700_000)
+    review = risk_assess.assess(pf)
+    # net 0.22 − 0.027 = 0.193 < 0.20 → no single-name breach
+    assert not any(b.layer == "L1-单票" and "NVDA" in b.actual for b in review.breaches)
+    assert review.option_risks[0].strategy == "buy_put"
+
+
+def test_option_stress_full_reval_short_vs_long_put(monkeypatch):
+    # Short put loses hard under −20% spot + vol bump; the same long put gains (hedge).
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    short_put = _opt("SPY", qty=-20, delta=-0.5, right="P", strike=100, spot=100, iv=0.4)
+    r_short = risk_assess.assess(_pf([short_put], cash=900_000))
+    worst_short = min(s.loss_pct for s in r_short.stress)
+    assert worst_short < -2.0                                       # meaningful tail loss
+
+    long_put = _opt("SPY", qty=20, delta=-0.5, right="P", strike=100, spot=100, iv=0.4)
+    r_long = risk_assess.assess(_pf([long_put], cash=900_000))
+    # −20% scenario is a GAIN for the long put holder
+    down20 = [s for s in r_long.stress if "-20%" in s.scenario][0]
+    assert down20.loss_pct > 0
+
+
+def test_margin_breach_ibkr(monkeypatch):
+    # IBKR-authoritative margin over the util cap + thin excess liquidity → hard breaches.
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    pf = PortfolioSnapshot(as_of=NOW, net_liquidation=1_000_000, cash=0.0,
+                           gross_exposure=500_000, daily_pnl=0.0,
+                           positions=[_pos("NVDA", 0.10, beta=1.0)], exposure=ExposureBreakdown(),
+                           init_margin=600_000, maint_margin=500_000, excess_liquidity=50_000,
+                           buying_power=100_000, margin_source="ibkr")
+    review = risk_assess.assess(pf)
+    layers = {b.layer for b in review.breaches}
+    assert "L2-保证金利用率" in layers                              # 0.6 > 0.5
+    assert "L2-剩余流动性" in layers                                # 0.05 < 0.10
+    assert review.margin.source == "ibkr" and review.margin.margin_util == 0.6
+
+
+def test_no_options_regression(monkeypatch):
+    # Equity-only book: options machinery stays inert (no option risks, zero net vega).
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    pf = _pf([_pos("NVDA", 0.10, beta=1.5)], cash=900_000)
+    review = risk_assess.assess(pf)
+    assert review.option_risks == []
+    assert review.portfolio_greeks.net_vega == 0.0
+    assert review.portfolio_beta == 0.15                           # unchanged: only NVDA 0.10*1.5
 
 
 def test_symbol_layer_mapping_explicit(monkeypatch):

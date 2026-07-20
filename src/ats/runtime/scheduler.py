@@ -126,6 +126,7 @@ def _perf_snapshot() -> None:
         pf = tport.snapshot()
         if pf is not None:
             risk_assess.enrich_beta(pf)
+            risk_assess.enrich_options(pf)
             review = risk_assess.assess(pf)
             get_store().save_risk_review(review)
             log.info("risk snapshot: state=%s breaches=%d", review.risk_state, len(review.breaches))

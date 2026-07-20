@@ -122,10 +122,19 @@ class RiskConfig(BaseModel):
     max_stress_loss_pct: float = 0.25     # worst scenario loss vs NAV
     stress_market_shocks: list[float] = Field(default_factory=lambda: [-0.10, -0.20])
     ai_bubble_cluster_shock: float = -0.35  # extra shock applied to the top correlated cluster
+    # 期权压测 vol 联动：与 stress_market_shocks 一一配对（跌市抬 vol，崩盘更真实）
+    stress_vol_shocks: list[float] = Field(default_factory=lambda: [0.20, 0.50])
+    ai_bubble_vol_shock: float = 0.80     # extra vol bump on the AI-cluster crash scenario
     # L6 事件
     max_event_loss_pct: float = 0.03      # single earnings gap: weight * expected_move <= this
     # L1 流动性（报告用）
     max_pct_adv: float = 0.10
+    # --- 期权风控（BSM/Greeks 量化升级）------------------------------------------
+    option_risk_free_rate: float = 0.045  # r for BSM greeks / repricing fallback
+    max_margin_util_pct: float = 0.5      # init_margin/net_liq 硬上限（IBKR 权威源时硬阻单）
+    min_excess_liquidity_pct: float = 0.10  # excess_liquidity/net_liq 硬下限（保证金垫太薄）
+    max_net_vega_pct: float = 0.05        # |净 vega|/net_liq 提示阈（caution，不硬阻单）
+    short_option_loss_mult: float = 2.0   # short 期权：亏损/收权利金 ≥ 此值 → caution
     # 现金等价物：symbol -> haircut（0=纯现金信用；1=完全当风险敞口）。美债 ETF/BRK-B 等
     # 按现金信用计入有效现金，不占单票/杠杆/beta/集中度限额。见 risk/assess.py。
     cash_equivalents: dict[str, float] = Field(default_factory=dict)

@@ -1,0 +1,15 @@
+# AXT Inc (AXT) — PEAD stub · L3 光互联上游材料（InP/GaAs 化合物半导体衬底）。
+# 光模块/激光器的上游衬底供应商，需求随光互联出货放量；小盘、中国产能敞口/出口管制为风险因子。
+# TODO: 定制打分卡（InP 衬底出货/中国出口管制敞口/毛利率）；财报前补 fiscal_label。
+symbol: AXT
+sector_etf: SMH
+benchmark: QQQ
+fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对
+long_threshold: 1.3           # 小盘高波但估值低，门槛暂定（待截面框架校准）
+
+signal_chain:
+  - {symbol: COHR, role: downstream}    # 衬底买家（光器件厂）
+  - {symbol: LITE, role: downstream}
+  - {symbol: AAOI, role: downstream}
+  - {symbol: GOOGL, role: upstream}     # 终端需求：hyperscaler capex
+  - {symbol: MSFT,  role: upstream}

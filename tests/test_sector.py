@@ -211,3 +211,38 @@ def test_scheduler_sector_weekly(monkeypatch):
     monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 7))   # Tuesday
     scheduler._sector_weekly()
     assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Cross-sectional layer basket (hermetic — no network; drives rank_cohort)
+# --------------------------------------------------------------------------- #
+def test_cross_section_rank_and_sizing():
+    from ats.agents.sector.cross_section import FactorRow, rank_cohort
+
+    rows = [
+        # strong: high growth/margins, cheap PEG, positive momentum + revisions
+        FactorRow(symbol="AAA", market_cap=40e9, beta=1.5, rev_growth=1.2,
+                  gross_margin=0.65, op_margin=0.35, fwd_pe=25, mom_60d=15, rating_delta=0.4),
+        FactorRow(symbol="BBB", market_cap=60e9, beta=1.2, rev_growth=0.4,
+                  gross_margin=0.45, op_margin=0.20, fwd_pe=40, mom_60d=-5, rating_delta=0.1),
+        FactorRow(symbol="CCC", market_cap=8e9, beta=3.5, rev_growth=0.2,
+                  gross_margin=0.30, op_margin=-0.05, fwd_pe=38, mom_60d=-30, rating_delta=-0.2),
+        FactorRow(symbol="DDD"),   # data desert -> excluded
+    ]
+    rank_cohort(rows, layer_cap=0.10, single_name_cap_frac=0.40)
+    by = {r.symbol: r for r in rows}
+
+    # data desert flagged, ranked last, zero weight
+    assert by["DDD"].data_ok is False
+    assert by["DDD"].weight == 0.0
+    assert by["DDD"].rank == 4
+
+    # ranking monotonic with composite (best name first)
+    assert by["AAA"].rank == 1
+    ranked = sorted((r for r in rows if r.data_ok), key=lambda r: r.rank)
+    comps = [r.composite for r in ranked]
+    assert comps == sorted(comps, reverse=True)
+
+    # weights sum to the layer cap and respect the single-name cap
+    assert abs(sum(r.weight for r in rows) - 0.10) < 1e-9
+    assert all(r.weight <= 0.10 * 0.40 + 1e-9 for r in rows)

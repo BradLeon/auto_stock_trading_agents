@@ -15,6 +15,7 @@ STANCES = ("增持", "持有", "减持")
 class LayerTicker(BaseModel):
     symbol: str
     note: str = ""
+    subgroup: str = ""                # e.g. 光互联/铜连接/衬底/电力冷却 — cross-section label
 
 
 class SectorLayer(BaseModel):
@@ -22,7 +23,11 @@ class SectorLayer(BaseModel):
     label: str
     question: str = ""
     weight_cap: float | None = None   # risk: per-chain-layer portfolio weight ceiling
+    weight_cap_hard: float | None = None  # dynamic-cap hard backstop (never exceeded)
     tickers: list[LayerTicker] = Field(default_factory=list)
+    # symbols ranked ALONGSIDE this layer in the cross-section but whose risk-layer
+    # membership lives elsewhere (e.g. MRVL: risk=L4, but an L3-optical peer).
+    cohort_extra: list[str] = Field(default_factory=list)
     private: list[str] = Field(default_factory=list)   # non-listed players, LLM reference
 
 
@@ -77,6 +82,26 @@ class CompanyCall(BaseModel):
     rationale: str = ""
 
 
+class BasketRow(BaseModel):
+    """One name's cross-sectional standing within a layer cohort."""
+    symbol: str
+    subgroup: str = ""
+    composite: float = 0.0                            # weighted sum of factor z-scores
+    rank: int = 0
+    weight: float = 0.0                               # suggested weight as fraction of NAV
+    data_ok: bool = True                              # False -> insufficient data, excluded
+    factors: dict = Field(default_factory=dict)       # z-score per factor
+    metrics: dict = Field(default_factory=dict)       # raw factor values (display)
+
+
+class LayerBasket(BaseModel):
+    """Cross-sectional selection + sizing for one chain layer (WHO / HOW MUCH)."""
+    layer_key: str
+    as_of: datetime
+    layer_cap: float = 0.0                            # fraction of NAV the basket sums to
+    rows: list[BasketRow] = Field(default_factory=list)
+
+
 class SectorReview(BaseModel):
     sector: str
     as_of: datetime
@@ -86,6 +111,7 @@ class SectorReview(BaseModel):
     company_calls: list[CompanyCall] = Field(default_factory=list)
     rotation_advice: str = ""
     top_risks: list[str] = Field(default_factory=list)
+    baskets: list[LayerBasket] = Field(default_factory=list)   # cross-sectional sizing per layer
 
     def call_for(self, symbol: str) -> CompanyCall | None:
         for c in self.company_calls:

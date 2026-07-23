@@ -68,10 +68,21 @@ _LIGHT_KEYS = {"market_cap": "marketCap", "pe": "trailingPE", "fwd_pe": "forward
                "rev_growth": "revenueGrowth", "beta": "beta"}
 
 
+_LIGHT_CACHE: dict[str, tuple[float, dict]] = {}
+_LIGHT_TTL = 1800.0        # in-process cache: dedupe repeat pulls within a run/hour
+
+
 def fetch_light(symbol: str) -> dict:
     """One-call valuation/margin/beta snapshot for wide-universe scans.
     Returns {market_cap, pe, fwd_pe, gross_margin, op_margin, rev_growth, beta} (None-filled).
-    Never raises."""
+    yfinance primary; finnhub fills gaps when yf rate-limits or lacks micro-cap
+    coverage (the '数据缺失' source in the sector review). Cached, never raises."""
+    import time as _t
+
+    hit = _LIGHT_CACHE.get(symbol)
+    if hit and _t.time() - hit[0] < _LIGHT_TTL:
+        return dict(hit[1])
+
     out: dict = {k: None for k in _LIGHT_KEYS}
     info = safe_fetch(lambda: _yf_info(symbol), source=f"yf-light:{symbol}", attempts=2)
     if info:
@@ -79,7 +90,54 @@ def fetch_light(symbol: str) -> dict:
             val = info.get(key)
             if isinstance(val, (int, float)):
                 out[field] = float(val)
+
+    # finnhub fallback for any core gap (rate-limit / thin coverage)
+    if any(out[k] is None for k in ("market_cap", "gross_margin", "rev_growth", "beta")):
+        fh = safe_fetch(lambda: _finnhub_light(symbol), source=f"fh-light:{symbol}", attempts=1)
+        if fh:
+            for k, v in fh.items():
+                if out.get(k) is None and v is not None:
+                    out[k] = v
+
+    if any(v is not None for v in out.values()):
+        _LIGHT_CACHE[symbol] = (_t.time(), dict(out))
     return out
+
+
+def _finnhub_light(symbol: str) -> dict:
+    """Finnhub /stock/metric fallback for fetch_light. Finnhub returns market cap
+    in $M and margins/growth in percent; normalize to fetch_light's units
+    (market_cap in $, margins/growth as fractions) so the two sources are mixable."""
+    import httpx
+
+    key = get_config().secrets.finnhub_api_key
+    if not key:
+        raise ValueError("no FINNHUB_API_KEY")
+    r = httpx.get("https://finnhub.io/api/v1/stock/metric", timeout=15,
+                  params={"symbol": symbol, "metric": "all", "token": key})
+    r.raise_for_status()
+    m = (r.json() or {}).get("metric", {}) or {}
+
+    def g(*keys):
+        for k in keys:
+            v = m.get(k)
+            if isinstance(v, (int, float)) and v == v:
+                return float(v)
+        return None
+
+    mc = g("marketCapitalization")
+    gm = g("grossMarginTTM", "grossMarginAnnual")
+    om = g("operatingMarginTTM", "operatingMarginAnnual")
+    rg = g("revenueGrowthTTMYoy", "revenueGrowthQuarterlyYoy", "revenueGrowth5Y")
+    return {
+        "market_cap": mc * 1e6 if mc is not None else None,
+        "pe": g("peTTM", "peBasicExclExtraTTM"),
+        "fwd_pe": g("forwardPE"),                    # finnhub rarely has it -> None ok
+        "gross_margin": gm / 100 if gm is not None else None,
+        "op_margin": om / 100 if om is not None else None,
+        "rev_growth": rg / 100 if rg is not None else None,
+        "beta": g("beta"),
+    }
 
 
 # --------------------------------------------------------------------------- #

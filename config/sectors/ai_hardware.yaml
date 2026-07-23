@@ -11,7 +11,7 @@ output_dir: /Users/liuchao/Documents/Obsidian Vault/量化投资/个股分析系
 layers:
   - key: L1_app
     label: L1 AI应用层（Token经济）
-    weight_cap: 0.20        # 风控：本产业链层持仓总权重上限
+    weight_cap: 0.15        # 风控：本产业链层持仓总权重上限
     question: 谁在消耗算力？Token 需求是否仍在加速？
     tickers:
       - {symbol: GOOGL, note: Gemini（兼属L2）}
@@ -19,7 +19,7 @@ layers:
 
   - key: L2_cloud
     label: L2 云服务层（算力租用）
-    weight_cap: 0.20        # 低 beta 超大厂
+    weight_cap: 0.25        # 低 beta 超大厂
     question: 算力租金/利用率如何？Capex 指引是否继续上修？
     tickers:
       - {symbol: MSFT}
@@ -31,13 +31,19 @@ layers:
 
   - key: L3_dc_infra
     label: L3 数据中心基建（电力/冷却/网络/光互联）
-    weight_cap: 0.1        # 光互联 PEAD 核心，高 beta
+    weight_cap: 0.14        # 工作上限（光互联 PEAD 核心，高 beta）
+    weight_cap_hard: 0.2   # 动态 cap 硬顶：signal 再强也不越过
     question: 机房/电力/光互联哪个环节仍是瓶颈？订单能见度多长？
+    # 子层：光互联(收发/光引擎) · 铜连接(AEC/DSP) · 上游衬底 · 电力冷却
     tickers:
-      - {symbol: COHR, note: 光互联}
-      - {symbol: LITE, note: 光互联}
-      - {symbol: AAOI, note: 光互联}
-      - {symbol: VRT, note: 电力/冷却，TODO 用户确认}
+      - {symbol: COHR, subgroup: 光互联, note: 1.6T/InP 衬底自供}
+      - {symbol: LITE, subgroup: 光互联, note: 收发+激光器}
+      - {symbol: AAOI, subgroup: 光互联, note: 收发，含CATV，小盘高波}
+      - {symbol: CRDO, subgroup: 铜连接, note: Credo AEC有源电缆+DSP/retimer，超高增速/贵}
+      - {symbol: AXT,  subgroup: 衬底,   note: 化合物半导体衬底 InP/GaAs，小盘/中国敞口}
+      - {symbol: VRT,  subgroup: 电力冷却, note: Vertiv 电力/热管理/液冷，大盘动量}
+    # 截面同业（风控主层在别处：MRVL 风控=L4，此处仅作 L3 光/电 DSP 同业参与排序）
+    cohort_extra: [MRVL]
 
   - key: L4_chip_design
     label: L4 芯片设计
@@ -63,7 +69,7 @@ layers:
 
   - key: L6_equipment
     label: L6 半导体设备
-    weight_cap: 0.10        # 高 beta / 强周期
+    weight_cap: 0.09        # 高 beta / 强周期
     question: 设备订单（WFE）领先指标指向扩产还是收缩？
     tickers:
       - {symbol: ASML, note: EUV 最不可替代}

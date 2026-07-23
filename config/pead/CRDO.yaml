@@ -1,0 +1,18 @@
+# Credo (CRDO) — PEAD stub · L3 连接层（AEC 有源电缆 + DSP/retimer）。
+# 铜链路连接龙头，超高营收增速 + 极端估值；对 hyperscaler 机架内互联 capex 高度敏感。
+# TODO: 定制打分卡（营收增速/大客户集中度/毛利率）；财报前补 fiscal_label。
+symbol: CRDO
+sector_etf: SMH
+benchmark: QQQ
+fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对
+long_threshold: 1.4           # 极端估值+高波，门槛最高（暂定，待截面框架校准）
+
+signal_chain:
+  - {symbol: GOOGL, role: upstream}
+  - {symbol: MSFT,  role: upstream}
+  - {symbol: AMZN,  role: upstream}
+  - {symbol: META,  role: upstream}
+  - {symbol: NVDA,  role: downstream}   # 机架内 GPU 互联需求
+  - {symbol: MRVL,  role: peer}         # 光/电 DSP 重叠
+  - {symbol: COHR,  role: peer}
+  - {symbol: LITE,  role: peer}

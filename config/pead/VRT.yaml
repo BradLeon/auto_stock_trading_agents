@@ -1,0 +1,14 @@
+# Vertiv (VRT) — PEAD stub · L3 数据中心基建（电力/热管理/液冷）。
+# 非光互联子层：直接吃 hyperscaler 物理数据中心建设 capex；大盘、动量强、订单 backlog 能见度是核心。
+# TODO: 定制打分卡（订单/backlog、book-to-bill、液冷渗透、毛利率）；财报前补 fiscal_label。
+symbol: VRT
+sector_etf: SMH
+benchmark: QQQ
+fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对
+long_threshold: 1.2           # 大盘动量、beat-but-drop 较轻，门槛适中（待截面框架校准）
+
+signal_chain:
+  - {symbol: GOOGL, role: upstream}     # 终端需求：hyperscaler 建厂 capex
+  - {symbol: MSFT,  role: upstream}
+  - {symbol: AMZN,  role: upstream}
+  - {symbol: META,  role: upstream}

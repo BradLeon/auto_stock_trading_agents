@@ -517,6 +517,30 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
     return 0
 
 
+def run_cross_section(name: str = "ai_hardware", layer: str = "all",
+                      *, write_report: bool = True) -> int:
+    """Cross-sectional selection + sizing within a chain layer (WHO / HOW MUCH)."""
+    from ..agents.sector import cross_section
+    from ..config import load_sector_config
+
+    cfg = load_sector_config(name)
+    keys = [layer] if layer != "all" else [ly.key for ly in cfg.layers if ly.tickers]
+    for key in keys:
+        try:
+            rows, basket = cross_section.run_layer(name, key, persist=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"❌ {key}: {exc}")
+            continue
+        label = next((ly.label for ly in cfg.layers if ly.key == key), key)
+        print(f"\n=== {label}  [{key}] ===")
+        print(cross_section.format_table(rows, basket.layer_cap))
+        if write_report:
+            path = cross_section.write_report(rows, key, cfg)
+            if path:
+                print(f"📝 {path}")
+    return 0
+
+
 def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
                       live_data: bool = True, write_report: bool = True):
     """One weekly sector review: L1-L6 assessment + company calls."""
@@ -692,8 +716,9 @@ def main(argv: list[str] | None = None) -> int:
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
-    se.add_argument("action", choices=["review", "show", "probe"])
+    se.add_argument("action", choices=["review", "show", "probe", "crosssection"])
     se.add_argument("name", nargs="?", default="ai_hardware")
+    se.add_argument("--layer", default="all", help="crosssection: layer key (e.g. L3_dc_infra) or 'all'")
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
@@ -765,6 +790,8 @@ def main(argv: list[str] | None = None) -> int:
             return sector_show(args.name)
         if args.action == "probe":
             return sector_probe(args.name, live_data=not args.offline)
+        if args.action == "crosssection":
+            return run_cross_section(args.name, args.layer, write_report=not args.no_report)
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0

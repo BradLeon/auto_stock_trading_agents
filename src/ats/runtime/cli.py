@@ -699,7 +699,9 @@ def ibkr_probe() -> int:
 def _setup_logging() -> None:
     import logging
 
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.WARNING,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S")
     logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
 
 

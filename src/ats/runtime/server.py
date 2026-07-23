@@ -110,5 +110,13 @@ def build_app():
 
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     import uvicorn
+    from uvicorn.config import LOGGING_CONFIG
 
-    uvicorn.run(build_app(), host=host, port=port)
+    # Timestamp uvicorn's default + access logs (serve.out.log) to match ats logs.
+    ts = "%Y-%m-%d %H:%M:%S"
+    LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s %(levelprefix)s %(message)s"
+    LOGGING_CONFIG["formatters"]["default"]["datefmt"] = ts
+    LOGGING_CONFIG["formatters"]["access"]["fmt"] = (
+        '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s')
+    LOGGING_CONFIG["formatters"]["access"]["datefmt"] = ts
+    uvicorn.run(build_app(), host=host, port=port, log_config=LOGGING_CONFIG)

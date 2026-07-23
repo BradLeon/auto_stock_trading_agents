@@ -8,8 +8,37 @@ BossApproval, and resumes the checkpointed cycle by thread_id. Run with
 from __future__ import annotations
 
 import logging
+import threading
 
 log = logging.getLogger("ats.server")
+
+# Serialize + dedupe cycle resumes. Feishu PREFETCHES approval links (link preview)
+# and users may double-tap, so one approval can hit /feishu/approve several times
+# concurrently. Without this, N concurrent resume_cycle calls (a) collide on the
+# serve process's IBKR client_id (→ 326/1100, dropped orders) and (b) — worse — if
+# the id ever became unique, would place the orders N times. The lock makes each
+# cycle execute at most once and serializes executions within the serve process.
+# Fail-closed: a failed resume is marked done (not auto-retried via the link) to
+# avoid double orders after a partial fill — re-run chief for a fresh cycle instead.
+_RESUME_LOCK = threading.Lock()
+_RESUMED: dict[str, str] = {}
+
+
+def _resume_once(thread_id: str, approval, channel, verdict: str) -> tuple[bool, str]:
+    from .cli import resume_cycle
+
+    with _RESUME_LOCK:
+        if thread_id in _RESUMED:
+            return True, f"{thread_id}: 已处理（{_RESUMED[thread_id]}）— 忽略重复请求"
+        try:
+            resume_cycle(thread_id, approval, channel=channel)
+        except Exception as exc:  # noqa: BLE001 - never 500 back to Feishu
+            _RESUMED[thread_id] = "failed"
+            log.exception("resume failed for %s: %s", thread_id, exc)
+            return False, f"resume failed: {exc}"
+        _RESUMED[thread_id] = approval.status
+    return (True, f"{thread_id}: {approval.status} — executing") if verdict == "approve" \
+        else (True, f"{thread_id}: rejected")
 
 
 def handle_callback(payload: dict) -> dict:
@@ -19,7 +48,6 @@ def handle_callback(payload: dict) -> dict:
     becomes an error toast so Feishu does not retry-storm.
     """
     from ..channel.feishu_channel import FeishuChannel, parse_callback, verify_token
-    from .cli import resume_cycle
 
     if not verify_token(payload):
         log.warning("rejected callback: bad verification token")
@@ -32,13 +60,9 @@ def handle_callback(payload: dict) -> dict:
     if parsed["kind"] == "approval":
         thread_id, approval = parsed["thread_id"], parsed["approval"]
         log.info("resuming %s -> %s by %s", thread_id, approval.status, approval.reviewer)
-        try:
-            resume_cycle(thread_id, approval, channel=FeishuChannel())
-        except Exception as exc:  # noqa: BLE001 - never 500 back to Feishu
-            log.exception("resume failed for %s: %s", thread_id, exc)
-            return {"toast": {"type": "error", "content": f"resume failed: {exc}"}}
-        verb = "approved — executing" if approval.status == "approved" else "rejected"
-        return {"toast": {"type": "success", "content": verb}}
+        verdict = "approve" if approval.status == "approved" else "reject"
+        ok, msg = _resume_once(thread_id, approval, FeishuChannel(), verdict)
+        return {"toast": {"type": "success" if ok else "error", "content": msg}}
 
     return {"code": 0}
 
@@ -49,7 +73,6 @@ def handle_approve(thread_id: str, verdict: str, sig: str) -> tuple[bool, str]:
 
     from ..channel.feishu_bot import FeishuBotChannel, verify_approval
     from ..schemas.decision import BossApproval
-    from .cli import resume_cycle
 
     if verdict not in ("approve", "reject") or not thread_id:
         return False, "bad request"
@@ -57,13 +80,7 @@ def handle_approve(thread_id: str, verdict: str, sig: str) -> tuple[bool, str]:
         return False, "invalid signature"
     approval = BossApproval(status="approved" if verdict == "approve" else "rejected",
                             reviewer="feishu-bot", reviewed_at=datetime.now(timezone.utc))
-    try:
-        resume_cycle(thread_id, approval, channel=FeishuBotChannel())
-    except Exception as exc:  # noqa: BLE001
-        log.exception("approve resume failed for %s: %s", thread_id, exc)
-        return False, f"resume failed: {exc}"
-    return True, f"{thread_id}: {approval.status} — executing" if verdict == "approve" \
-        else f"{thread_id}: rejected"
+    return _resume_once(thread_id, approval, FeishuBotChannel(), verdict)
 
 
 def build_app():

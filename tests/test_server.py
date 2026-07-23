@@ -35,3 +35,29 @@ def test_card_action_resumes_and_executes(async_channel, broker):
 
     trades = get_store().recent_trades(limit=10)
     assert len(trades) == 3 and all(t["status"] == "filled" for t in trades)
+
+
+def test_duplicate_callback_executes_once(async_channel, broker):
+    """Feishu prefetches approval links / users double-tap → the same cycle can hit
+    the handler concurrently. It must execute AT MOST ONCE (else double orders)."""
+    from ats.runtime import server
+
+    server._RESUMED.clear()
+    state = ChiefDecisionState(
+        cycle_id="chief-idem-test", as_of=NOW, source="chief", decide=False, dry_run=False,
+        seed_decisions=[TradeDecision(symbol=s, action="buy", qty=1, rationale="r")
+                        for s in ("NVDA", "MSFT")])
+    run_decision_graph(state, channel=async_channel)
+    thread_id = async_channel.thread_id
+    cb = {"event": {"operator": {"open_id": "ou_boss"},
+                    "action": {"value": {"action": "approve", "thread_id": thread_id}}}}
+
+    out1 = handle_callback(cb)
+    out2 = handle_callback(cb)          # duplicate
+
+    assert out1["toast"]["type"] == "success"
+    assert "已处理" in out2["toast"]["content"]      # second is deduped, not re-executed
+
+    from ats.memory import get_store
+    trades = get_store().recent_trades(limit=20)
+    assert len(trades) == 2              # 2 orders from ONE execution, not 4

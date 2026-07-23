@@ -78,7 +78,7 @@ def _portfolio_block(ctx: ChiefContext, live_broker: bool) -> str:
         for p in pf.positions:
             tag = " [现金等价物]" if p.symbol in held_hc else ""
             if (getattr(p, "sec_type", "STK") or "STK") == "OPT":
-                tag += " [期权·豁免正股风控]"
+                tag += " [期权·已并入6层风控(Δ名义/BSM，见风控块)]"
             lines.append(f"  {p.symbol} w={p.weight:.1%} uPnL=${p.unrealized_pnl:,.0f}{tag}")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001

@@ -50,6 +50,25 @@ def fetch_notes() -> list[tuple[str, str]]:
     return out
 
 
+def fetch_named(paths: list[str], cap: int = 16000) -> list[tuple[str, str]]:
+    """Read specific note files (repo-relative or absolute) -> [(name, text), ...].
+    Used by the structure analyst for per-subgroup KB notes. Missing -> skipped."""
+    from ..config import REPO_ROOT
+
+    out: list[tuple[str, str]] = []
+    for raw in paths:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = REPO_ROOT / raw
+        if not p.is_file():
+            log.info("structure KB note missing: %s", p)
+            continue
+        text = safe_fetch(lambda p=p: _read_doc(p), source=f"kb:{p.name}", attempts=1)
+        if text:
+            out.append((p.stem, text[:cap]))
+    return out
+
+
 def as_context(notes: list[tuple[str, str]]) -> str:
     """Join notes into one background block with filename headers."""
     if not notes:

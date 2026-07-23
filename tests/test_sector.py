@@ -246,3 +246,35 @@ def test_cross_section_rank_and_sizing():
     # weights sum to the layer cap and respect the single-name cap
     assert abs(sum(r.weight for r in rows) - 0.10) < 1e-9
     assert all(r.weight <= 0.10 * 0.40 + 1e-9 for r in rows)
+
+
+def test_cross_section_structural_blend_reranks():
+    """Structure overlay (tech_tenor/moat_pricing) must be able to override a
+    pure-quant winner: a strong-quant / weak-structure name drops below a
+    mid-quant / strong-structure peer under the 60/40 blend."""
+    from ats.agents.sector.cross_section import (
+        BLENDED_WEIGHTS, FactorRow, QUANT_WEIGHTS, rank_cohort)
+
+    strongq = FactorRow(symbol="STRONGQ", market_cap=40e9, beta=3.0, rev_growth=1.5,
+                        gross_margin=0.65, op_margin=0.35, fwd_pe=25, mom_60d=15, rating_delta=0.3,
+                        tech_tenor=-2.0, moat_pricing=-2.0)
+    midq = FactorRow(symbol="MIDQ", market_cap=60e9, beta=1.5, rev_growth=0.3,
+                     gross_margin=0.40, op_margin=0.18, fwd_pe=40, mom_60d=-5, rating_delta=0.0,
+                     tech_tenor=2.0, moat_pricing=2.0)
+    weakq = FactorRow(symbol="WEAKQ", market_cap=8e9, beta=3.5, rev_growth=0.2,
+                      gross_margin=0.30, op_margin=-0.05, fwd_pe=38, mom_60d=-30, rating_delta=-0.2,
+                      tech_tenor=0.0, moat_pricing=0.0)
+    rows = [strongq, midq, weakq]
+
+    rank_cohort(rows, layer_cap=0.14, weights=QUANT_WEIGHTS)   # quant pass
+    assert strongq.rank == 1                                    # quant loves STRONGQ
+    for r in rows:
+        r.quant_rank = r.rank
+
+    rank_cohort(rows, layer_cap=0.14, weights=BLENDED_WEIGHTS)  # blended pass
+    # structure flips it: MIDQ (strong structure) overtakes STRONGQ (weak structure)
+    assert midq.rank < strongq.rank
+    assert midq.quant_rank > strongq.quant_rank                 # and it was behind on quant
+    # sizing invariants still hold
+    assert abs(sum(r.weight for r in rows) - 0.14) < 1e-9
+    assert all(r.weight <= 0.14 * 0.40 + 1e-9 for r in rows)

@@ -28,6 +28,9 @@ class SectorLayer(BaseModel):
     # symbols ranked ALONGSIDE this layer in the cross-section but whose risk-layer
     # membership lives elsewhere (e.g. MRVL: risk=L4, but an L3-optical peer).
     cohort_extra: list[str] = Field(default_factory=list)
+    # subgroup -> curated KB note path (repo-relative or absolute) for the structure
+    # analyst (v2 qualitative overlay). e.g. {光互联: config/knowledge/光互联.md}
+    structure_notes: dict[str, str] = Field(default_factory=dict)
     private: list[str] = Field(default_factory=list)   # non-listed players, LLM reference
 
 
@@ -87,9 +90,13 @@ class BasketRow(BaseModel):
     symbol: str
     subgroup: str = ""
     composite: float = 0.0                            # weighted sum of factor z-scores
-    rank: int = 0
+    rank: int = 0                                     # blended rank (structural, if run)
+    quant_rank: int = 0                               # pure-quant rank (pre-blend, for contrast)
     weight: float = 0.0                               # suggested weight as fraction of NAV
     data_ok: bool = True                              # False -> insufficient data, excluded
+    tech_tenor: float | None = None                   # -2..+2 技术时间朝向（光进铜退等 secular 位置）
+    moat_pricing: float | None = None                 # -2..+2 护城河/份额/定价权/客户集中
+    rationale: str = ""                               # structure analyst's per-name note
     factors: dict = Field(default_factory=dict)       # z-score per factor
     metrics: dict = Field(default_factory=dict)       # raw factor values (display)
 
@@ -99,6 +106,8 @@ class LayerBasket(BaseModel):
     layer_key: str
     as_of: datetime
     layer_cap: float = 0.0                            # fraction of NAV the basket sums to
+    structural: bool = False                          # True if the KB structure overlay ran
+    subgroup_notes: dict = Field(default_factory=dict)  # subgroup -> tech-curve note (光进铜退…)
     rows: list[BasketRow] = Field(default_factory=list)
 
 

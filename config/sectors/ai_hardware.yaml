@@ -44,6 +44,10 @@ layers:
       - {symbol: VRT,  subgroup: 电力冷却, note: Vertiv 电力/热管理/液冷，大盘动量}
     # 截面同业（风控主层在别处：MRVL 风控=L4，此处仅作 L3 光/电 DSP 同业参与排序）
     cohort_extra: [MRVL]
+    # 子层 → 策展知识库笔记（structure_analyst v2 定性结构层，--structure 时启用）
+    structure_notes:
+      光互联: config/knowledge/光互联.md
+      铜连接: config/knowledge/铜连接.md
 
   - key: L4_chip_design
     label: L4 芯片设计

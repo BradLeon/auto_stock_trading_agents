@@ -13,6 +13,7 @@ probe (`ats ibkr`) before a live run is wise.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -40,7 +41,15 @@ class IBKRBroker:
         br = cfg.app.broker          # settings.yaml [broker] overrides .env defaults
         self.host = host or s.ibkr_host
         self.port = port or br.port or s.ibkr_port
-        self.client_id = client_id or br.client_id or s.ibkr_client_id
+        # Distinct client_id per PROCESS: serve (approval execution), the scheduler,
+        # and ad-hoc CLI all connect independently — sharing one id (12) makes a
+        # second connection kick the first (IBKR error 326 "in use" + 1100
+        # "connectivity lost") and drop orders mid-execution. An explicit client_id
+        # (tests / pinned callers) still wins; otherwise offset the config base by
+        # the pid so concurrent connections never collide. Same id within a process
+        # (get_fills must see place_orders' fills).
+        base = br.client_id or s.ibkr_client_id or 1
+        self.client_id = client_id if client_id is not None else base + (os.getpid() % 80) + 1
         self.sector_by_symbol = sector_by_symbol or {}
         self._ib = None
 

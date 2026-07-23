@@ -74,7 +74,12 @@ class TradingMemory:
         self.path = str(db_path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        # check_same_thread=False: the store singleton is created on one thread but
+        # read/written from uvicorn worker threads in `ats serve` (approval callback
+        # → resume → persist). Without this, serve crashes mid-execution with
+        # "SQLite objects created in a thread can only be used in that same thread"
+        # and records bogus errors. timeout lets concurrent writers wait out a lock.
+        self.conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self._migrate()

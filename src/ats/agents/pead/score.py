@@ -52,18 +52,27 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
     )
     try:
         view: ActualsView = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
-        return Actuals(
-            symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
-            reported_eps=view.reported_eps, reported_revenue=view.reported_revenue,
-            metrics=[ActualMetric(dim_key=m.dim_key, metric=m.metric, actual=m.actual,
-                                  vs_expected=m.vs_expected, note=m.note) for m in view.metrics],
-            guidance=view.guidance, transcript_signals=view.transcript_signals,
-            transcript_source=transcript_source)
     except Exception as exc:  # noqa: BLE001
+        # Abort loudly rather than fall back to an all-neutral (all-zero) scorecard
+        # that reads as a tradeable "符合预期" — same policy as the period guard.
         log.warning("pead actuals failed for %s: %s", config.symbol, exc)
-        return Actuals(symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
-                       transcript_source=transcript_source,
-                       guidance="[fallback] actuals extraction unavailable")
+        raise ValueError(
+            f"[actuals-guard] {config.symbol} score 已中止：actuals 抽取失败（{exc}）。"
+            f"宁可不打分也不产出全 0 的伪中性打分卡。") from exc
+    # Extraction "succeeded" but returned nothing usable despite having input →
+    # a silent degradation; treat it the same as a failure.
+    had_input = bool((transcript_text or "").strip()) or bool((documents_text or "").strip())
+    if had_input and not view.metrics and view.reported_revenue is None and view.reported_eps is None:
+        raise ValueError(
+            f"[actuals-guard] {config.symbol} score 已中止：有输入却抽取到空 actuals"
+            f"（无 metrics、无 reported EPS/营收），疑似抽取降级，拒绝据此打分。")
+    return Actuals(
+        symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
+        reported_eps=view.reported_eps, reported_revenue=view.reported_revenue,
+        metrics=[ActualMetric(dim_key=m.dim_key, metric=m.metric, actual=m.actual,
+                              vs_expected=m.vs_expected, note=m.note) for m in view.metrics],
+        guidance=view.guidance, transcript_signals=view.transcript_signals,
+        transcript_source=transcript_source)
 
 
 # --------------------------------------------------------------------------- #

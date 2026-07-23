@@ -30,6 +30,28 @@ def manual_path(symbol: str, fiscal_label: str) -> Path:
     return REPO_ROOT / "var" / "transcripts" / f"{symbol.upper()}_{_slug(fiscal_label)}.txt"
 
 
+# Structural markers a real earnings-call transcript carries but a scraped page
+# shell (nav chrome / paywall stub / truncated boilerplate) does not. Calibrated
+# against a good fetch (investing.com: 6 hits) vs a bad one (benzinga shell: 0).
+_TRANSCRIPT_MARKERS = (
+    "operator", "question-and-answer", "q&a", "prepared remarks",
+    "next question", "chief financial", "chief executive",
+)
+
+
+def looks_like_transcript(text: str) -> tuple[bool, str]:
+    """Sanity gate before scoring: is `text` a real transcript body, or did the
+    fetcher hand back page chrome / a truncated stub? Returns (ok, reason)."""
+    body = (text or "").strip()
+    if len(body) < 2000:
+        return (False, f"transcript 正文过短（{len(body)} 字），疑似抓取失败/被截断")
+    low = body.lower()
+    hits = [m for m in _TRANSCRIPT_MARKERS if m in low]
+    if len(hits) < 2:
+        return (False, f"正文缺少电话会结构标记（命中 {len(hits)}：{hits}），疑似抓到页面外壳而非 transcript")
+    return (True, f"transcript 正文校验通过（结构标记命中 {len(hits)}：{hits}）")
+
+
 def _fetch_url(url: str) -> str:
     from .web import fetch_article_text
 
@@ -52,25 +74,26 @@ def fetch(symbol: str, fiscal_label: str = "", source: str | None = None) -> tup
             if p.exists():
                 return p.read_text(encoding="utf-8"), f"file:{p}"
 
-    # 3) FMP auto-fetch (latest transcript) if a paid key is configured
+    # 3) dropped manual file — the user's habit; authoritative when present, and
+    # a clean full transcript beats brittle scraping (which can return page chrome).
+    mp = manual_path(symbol, fiscal_label)
+    if mp.exists():
+        return mp.read_text(encoding="utf-8"), f"file:{mp}"
+
+    # 4) FMP auto-fetch (latest transcript) if a paid key is configured
     text, src = _fmp(symbol)
     if text:
         return text, src
 
-    # 4) web search (Tavily) -> the fool.com / investing transcript page (free tier)
+    # 5) web search (Tavily) -> the fool.com / investing transcript page (free tier)
     text, src = _from_search(symbol)
     if text:
         return text, src
 
-    # 5) secondary: a transcript article already in our news feed (if any)
+    # 6) secondary: a transcript article already in our news feed (if any)
     text, src = _from_news(symbol)
     if text:
         return text, src
-
-    # 6) dropped manual file
-    mp = manual_path(symbol, fiscal_label)
-    if mp.exists():
-        return mp.read_text(encoding="utf-8"), f"file:{mp}"
 
     return "", "none"
 

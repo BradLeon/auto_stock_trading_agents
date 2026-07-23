@@ -314,6 +314,16 @@ def score_fetch(state: PeadState) -> dict:
                 f" 请用正确季度的 --transcript 重跑，或等待目标季 transcript 就绪（宁可不打分也不错季）。")
         out["transcript_period_note"] = why
 
+        # Body-quality guard: a scraper may hand back nav chrome / a truncated
+        # stub (right URL, wrong content) — that silently zeroes the guidance /
+        # backlog / tone dims. Refuse rather than emit a misleading partial score.
+        ok_body, why_body = transcript_src.looks_like_transcript(text)
+        if not ok_body:
+            raise ValueError(
+                f"[transcript-guard] {state.symbol} score 已中止：{why_body}。transcript source={src}。"
+                f" 请换完整 transcript 源（investing.com/fool.com）用 --transcript 重跑，"
+                f"或把全文放到 var/transcripts/（宁可不打分也不喂残缺正文）。")
+
     out["transcript_text"] = text
     out["transcript_resolved_source"] = src
 

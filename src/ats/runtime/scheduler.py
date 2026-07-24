@@ -100,8 +100,32 @@ def _daily(*, dry_run: bool) -> None:
     _sector_weekly()
     _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
     pead_daily(dry_run=dry_run)
+    _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
     _perf_snapshot()
+    _perf_risk_digest()  # surface perf + 6-layer risk: Obsidian .md + Feishu card
     _chief_daily(dry_run=dry_run)   # LAST: the Chief reads everything fresh and decides
+
+
+def _intel_digest() -> None:
+    try:
+        from .digest import intel_digest
+
+        p = intel_digest()
+        if p:
+            log.info("intel digest -> %s", p)
+    except Exception as exc:  # noqa: BLE001 - digest must not break the daily job
+        log.warning("intel digest failed: %s", exc)
+
+
+def _perf_risk_digest() -> None:
+    try:
+        from .digest import perf_risk_digest
+
+        p = perf_risk_digest()
+        if p:
+            log.info("perf/risk digest -> %s", p)
+    except Exception as exc:  # noqa: BLE001 - digest must not break the daily job
+        log.warning("perf/risk digest failed: %s", exc)
 
 
 def _perf_snapshot() -> None:

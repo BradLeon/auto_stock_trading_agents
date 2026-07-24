@@ -93,5 +93,7 @@ channel:
 # --- Scheduling (Phase 9) ----------------------------------------------------
 schedule:
   enabled: false
-  run_at: "16:15"               # after US close, local exchange tz
+  run_at: "10:30"               # 1h after US open (was 16:15 close) — lands ~22:30 China
+                                # so the Boss can approve in the evening; chief decides on
+                                # intraday prices and approved orders fill during RTH.
   timezone: America/New_York

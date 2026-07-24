@@ -27,8 +27,8 @@ llm:
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.
-    sector_analyst: {model: google/gemini-3.1-pro-preview, max_tokens: 24000}   # weekly L1-L6 sector review — large structured output
-    macro_strategist: {model: google/gemini-3.1-pro-preview, max_tokens: 24000} # weekly macro regime + sector tilts — large structured output
+    sector_analyst: {model: anthropic/claude-sonnet-5, max_tokens: 24000}   # weekly L1-L6 sector review — gemini-3.1-pro 智能(46)<sonnet(53) 且更贵；sonnet 大结构化更可靠
+    macro_strategist: {model: anthropic/claude-sonnet-5, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 sonnet-5
     pead_analyst: {model: anthropic/claude-sonnet-5}  # PEAD prep framework/narrative/expectations (token-heavy)
     structure_analyst: {model: anthropic/claude-sonnet-5, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权
     # --- Opus tier: genuine judgment that drives trades, low frequency ---

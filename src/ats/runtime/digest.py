@@ -92,17 +92,19 @@ def perf_risk_digest() -> Path | None:
         parts += ["## 风控（6 层 · 期权已并入）", "", risk_report.render(review)]
     path = _write_md(f"每日绩效风控-{now:%Y-%m-%d}.md", "\n".join(parts))
 
-    # thumbnail card
+    # thumbnail card — daily P&L from the risk review (consistent with the report;
+    # perf.daily_pnl can be a not-yet-settled IBKR reqPnL garbage read).
     if review is not None:
-        body = []
-        if perf is not None:
-            body.append(f"NetLiq ${perf.net_liquidation:,.0f} · 日盈亏 ${perf.daily_pnl:,.0f}")
+        nl = review.net_liquidation or (perf.net_liquidation if perf else 0.0)
+        dp = review.daily_pnl_pct
+        dp_txt = f" · 日盈亏 {dp}%（${dp / 100 * nl:,.0f}，盘中）" if dp is not None else ""
+        body = [f"NetLiq ${nl:,.0f}{dp_txt}"]
         line = f"状态 {review.risk_state} · 现金(有效) {review.effective_cash_pct:.0%}"
         if review.portfolio_beta is not None:
             line += f" · beta {review.portfolio_beta:.2f}"
         body.append(line)
-        if review.breaches:
-            body.append("破限：" + "；".join(b.layer for b in review.breaches))
+        for b in review.breaches:            # each breach: actual vs limit (cheap, high-signal)
+            body.append(f"⚠ {b.layer}：{b.actual} vs {b.limit}")
         _push("error" if review.risk_state == "derisk" else "info",
               f"绩效·风控 {now:%m-%d} — {review.risk_state}（{len(review.breaches)} 破限）", "\n".join(body))
     elif perf is not None:

@@ -12,12 +12,15 @@ log = logging.getLogger("ats.risk.report")
 
 def render(review: RiskReview) -> str:
     r = review
+    dp_usd = (r.daily_pnl_pct / 100 * r.net_liquidation) if r.daily_pnl_pct is not None else None
+    dp_txt = (f"{r.daily_pnl_pct}%（${dp_usd:,.0f}，仅盘中/不含盘前后）" if dp_usd is not None
+              else f"{r.daily_pnl_pct}%")
     lines = [
         f"# 🤖 组合风险报告 — {r.as_of:%Y-%m-%d}",
         "",
         f"**风险状态**: {r.risk_state}  ·  NetLiq ${r.net_liquidation:,.0f}  ·  现金 {r.cash_pct:.0%}"
         f"（有效 {r.effective_cash_pct:.0%}）  ·  组合 beta {r.portfolio_beta}  ·  回撤 {r.drawdown_pct}%  "
-        f"·  日盈亏 {r.daily_pnl_pct}%",
+        f"·  日盈亏 {dp_txt}",
         "",
         "## 破限（硬约束）" if r.breaches else "## 破限：无 ✅",
     ]

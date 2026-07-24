@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 log = logging.getLogger("ats.digest")
 
 
@@ -114,9 +116,48 @@ def perf_risk_digest() -> Path | None:
 
 
 # --------------------------------------------------------------------------- #
-# intel digest (I1)
+# intel digest (I1) — LLM synthesizes a per-ticker 中文 investment takeaway
+# (direction + importance for sorting) + translates headlines; degrades to a
+# headline-only digest if the LLM is unavailable.
 # --------------------------------------------------------------------------- #
-def intel_digest(lookback_hours: int = 24) -> Path | None:
+class _TickerBrief(BaseModel):
+    symbol: str = Field(description="标的代码，原样回填")
+    direction: str = Field("⚪", description="方向，只能是单个 emoji：🔴(利空/看空) / 🟢(利好/看多) / ⚪(中性或混合)；不要文字")
+    importance: float = Field(0.5, description="0-1，对持仓/交易决策的重要度（催化剂×确定性×相关性），越高越靠前")
+    takeaway: str = Field("", description="一句中文投资含义，≤40字；不要在此写 importance/direction 字样")
+    headlines_zh: list[str] = Field(default_factory=list, description="英文头条的中文翻译，与输入头条一一对应、同序")
+
+
+class _IntelBriefView(BaseModel):
+    briefs: list[_TickerBrief] = Field(default_factory=list)
+
+
+def _brief(per: dict) -> dict:
+    """One cheap-LLM call → {SYM: _TickerBrief} (投资要点 + direction + importance +
+    头条翻译). Empty dict on failure — the caller falls back to a headline digest."""
+    try:
+        from ..agents.base import run_structured
+
+        blocks = []
+        for sym, d in per.items():
+            lines = [f"### {sym}"]
+            if d["delta"]:
+                lines.append("Δthesis: " + d["delta"].replace("\n", " ")[:400])
+            for e in d["events"]:
+                lines.append(f"[triage {e.get('triage_score') or 0:.2f}] {(e.get('headline') or '')[:180]}")
+            for i in d["insights"]:
+                lines.append(f"insight[{i.get('direction', '')}]: {(i.get('summary') or '')[:180]}")
+            blocks.append("\n".join(lines))
+        ctx = ("逐标的输出投资要点。headlines_zh 按各标的 [triage …] 头条的出现顺序逐条翻译。\n\n"
+               + "\n\n".join(blocks))
+        view = run_structured("intel_brief", _IntelBriefView, ctx, skill_slug="intel-brief")
+        return {b.symbol.upper(): b for b in view.briefs}
+    except Exception as exc:  # noqa: BLE001 - overlay is best-effort
+        log.warning("intel brief LLM failed, headline fallback: %s", exc)
+        return {}
+
+
+def intel_digest(lookback_hours: int = 24, *, use_llm: bool = True) -> Path | None:
     if not _enabled("intel"):
         return None
     from ..config import load_pead_config, load_pead_global
@@ -130,7 +171,7 @@ def intel_digest(lookback_hours: int = 24) -> Path | None:
     now = datetime.now(timezone.utc)
 
     per: dict[str, dict] = {}
-    n_ev = n_in = 0
+    n_ev = n_in = n_delta = 0
     for sym in targets:
         events = [e for e in store.recent_events(sym, limit=40)
                   if (e.get("triage_score") or 0) >= min_triage and (e.get("published_at") or "") >= cutoff]
@@ -148,30 +189,55 @@ def intel_digest(lookback_hours: int = 24) -> Path | None:
             per[sym] = {"events": events, "insights": insights, "delta": delta}
             n_ev += len(events)
             n_in += len(insights)
+            n_delta += 1 if delta else 0
 
     if not per:
         log.info("intel digest: nothing material in the last %dh", lookback_hours)
         return None
 
+    briefs = _brief(per) if use_llm else {}
+
+    def _rank(sym: str) -> float:
+        b = briefs.get(sym)
+        if b is not None:
+            return b.importance
+        return max([e.get("triage_score") or 0 for e in per[sym]["events"]] or [0.0])
+
+    order = sorted(per, key=_rank, reverse=True)   # 投资重要度：重点在前
+
+    # --- detailed .md ---
     parts = [f"# 🤖 每日情报 — {now:%Y-%m-%d}", "",
-             f"> {len(per)} 只标的有新情报 · {n_ev} 条高分事件 · {n_in} 条研报 insight（近 {lookback_hours}h）", ""]
-    for sym, d in per.items():
-        parts.append(f"## {sym}")
-        if d["delta"]:
+             f"> {len(per)} 只标的有新情报 · {n_ev} 事件 · {n_in} insight · {n_delta} Δthesis"
+             f"（近 {lookback_hours}h，按投资重要度排序）", ""]
+    for sym in order:
+        d = per[sym]
+        b = briefs.get(sym)
+        parts.append(f"## {(b.direction + ' ') if b else ''}{sym}")
+        if b is not None and b.takeaway:
+            parts += ["", f"**投资要点**：{b.takeaway}（重要度 {b.importance:.2f}）", ""]
+        elif d["delta"]:
             parts += ["", "**Δthesis**：" + d["delta"].replace("\n", " "), ""]
-        for e in d["events"]:
-            parts.append(f"- [{(e.get('published_at') or '')[:10]} · triage {e.get('triage_score') or 0:.2f}] "
-                         f"{(e.get('headline') or '')[:180]}")
+        zh = b.headlines_zh if b is not None else []
+        for idx, e in enumerate(d["events"]):
+            t = f" — {zh[idx]}" if idx < len(zh) else ""
+            parts.append(f"- [{(e.get('published_at') or '')[:10]} · {e.get('triage_score') or 0:.2f}] "
+                         f"{(e.get('headline') or '')[:160]}{t}")
         for i in d["insights"]:
             parts.append(f"- 📰 [{i.get('direction', '')}/{i.get('impact_path', '')} · "
                          f"{i.get('confidence') or 0:.2f}] {(i.get('summary') or '')[:180]}")
         parts.append("")
     path = _write_md(f"每日情报-{now:%Y-%m-%d}.md", "\n".join(parts))
 
-    # thumbnail card: top events by triage across tickers
-    flat = sorted(((e.get("triage_score") or 0, sym, e.get("headline") or "")
-                   for sym, d in per.items() for e in d["events"]), reverse=True)
-    body = [f"{len(per)} 票有情报 · {n_ev} 事件 · {n_in} insight"]
-    body += [f"· {sym} [{sc:.2f}] {hl[:56]}" for sc, sym, hl in flat[:4]]
+    # --- thumbnail card: insight-first, sorted by investment importance ---
+    body = [f"{len(per)} 票有情报 · {n_ev} 事件 · {n_in} insight · {n_delta} Δthesis"]
+    if briefs:
+        for sym in order[:6]:
+            b = briefs.get(sym)
+            if b is not None and b.takeaway:
+                body.append(f"{b.direction} {sym}：{b.takeaway}")
+    else:   # LLM unavailable → top headlines by triage
+        flat = sorted(((e.get("triage_score") or 0, sym, e.get("headline") or "")
+                       for sym, d in per.items() for e in d["events"]), reverse=True)
+        body += [f"· {sym} [{sc:.2f}] {hl[:56]}" for sc, sym, hl in flat[:4]]
     _push("info", f"每日情报 {now:%m-%d}", "\n".join(body))
     return path

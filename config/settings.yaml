@@ -20,7 +20,7 @@ llm:
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
     news_triage: {model: deepseek/deepseek-v4-pro, temperature: 0.0, max_tokens: 8192}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
     context_monitor: {model: deepseek/deepseek-v4-pro, max_tokens: 8192}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
-    intel_brief: {model: deepseek/deepseek-v4-pro, temperature: 0.2, max_tokens: 4096}   # 每日情报 digest：逐票投资要点 + 中文翻译（gemini-flash 嵌套结构化翻空，用 deepseek）
+    intel_brief: {model: anthropic/claude-sonnet-5, temperature: 0.2, max_tokens: 8192}   # 每日情报 digest：逐票投资要点+方向+中文翻译（嵌套结构化，flash/deepseek 偶发翻空 → 用 sonnet 保证每天出）
     actuals_extract: {model: anthropic/claude-sonnet-5, max_tokens: 8192}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
     research_extract: {model: deepseek/deepseek-v4-pro}   # supply-chain insight extraction

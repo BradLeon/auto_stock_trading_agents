@@ -204,10 +204,13 @@ def intel_digest(lookback_hours: int = 24, *, use_llm: bool = True) -> Path | No
     per: dict[str, dict] = {}
     n_ev = n_in = n_delta = 0
     for sym in targets:
-        events = [e for e in store.recent_events(sym, limit=40)
-                  if (e.get("triage_score") or 0) >= min_triage and (e.get("published_at") or "") >= cutoff]
+        events = sorted(
+            [e for e in store.recent_events(sym, limit=40)
+             if (e.get("triage_score") or 0) >= min_triage and (e.get("published_at") or "") >= cutoff],
+            key=lambda e: e.get("triage_score") or 0, reverse=True)   # 重点新闻在前
         insights = [i for i in store.recent_insights(sym, limit=10)
-                    if (i.get("created_at") or "") >= cutoff]
+                    if (i.get("created_at") or "") >= cutoff
+                    and (i.get("summary") or "").strip() and (i.get("confidence") or 0) > 0]  # 滤掉空/失败 insight
         delta = ""
         try:
             d = store.get_dossier(sym, load_pead_config(sym).fiscal_label)
@@ -239,7 +242,10 @@ def intel_digest(lookback_hours: int = 24, *, use_llm: bool = True) -> Path | No
     # --- detailed .md ---
     parts = [f"# 🤖 每日情报 — {now:%Y-%m-%d}", "",
              f"> {len(per)} 只标的有新情报 · {n_ev} 事件 · {n_in} insight · {n_delta} Δthesis"
-             f"（近 {lookback_hours}h，按投资重要度排序）", ""]
+             f"（近 {lookback_hours}h，按投资重要度排序）", "",
+             "> 图例：**投资要点**=当日综合投资含义 · **Δthesis**=论点变化 · "
+             "新闻行 `[日期 · 材料度 X]` 材料度=该新闻与投资相关性的自动评分(0-1，越高越重要) · "
+             "**📰 insight**=研报观点(方向/影响/置信)。", ""]
     for sym in order:
         d = per[sym]
         b = briefs.get(sym)
@@ -250,9 +256,9 @@ def intel_digest(lookback_hours: int = 24, *, use_llm: bool = True) -> Path | No
             parts += ["", "**Δthesis（论点变化）**：" + d["delta"].replace("\n", " ")]
         parts.append("")
         zh = b.headlines_zh if b is not None else []
-        for idx, e in enumerate(d["events"]):       # triage = 新闻材料度评分 0-1
+        for idx, e in enumerate(d["events"]):       # 材料度 = 新闻与投资相关性评分 0-1
             t = f" — {zh[idx]}" if idx < len(zh) else ""
-            parts.append(f"- [{(e.get('published_at') or '')[:10]} · triage {e.get('triage_score') or 0:.2f}] "
+            parts.append(f"- [{(e.get('published_at') or '')[:10]} · 材料度 {e.get('triage_score') or 0:.2f}] "
                          f"{(e.get('headline') or '')[:160]}{t}")
         for i in d["insights"]:                     # 研报 insight（方向/影响路径/置信）
             parts.append(f"- 📰 [{i.get('direction', '')}/{i.get('impact_path', '')} · "

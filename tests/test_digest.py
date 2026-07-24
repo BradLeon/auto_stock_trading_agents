@@ -24,11 +24,12 @@ def test_perf_risk_digest_renders_md_and_card(monkeypatch):
     path = digest.perf_risk_digest()
     assert path is not None and path.exists()
     md = path.read_text(encoding="utf-8")
-    assert "每日绩效·风控" in md and "200,000" in md and "L3-组合beta" in md
+    assert "绩效风控" in md and "200,000" in md and "L3-组合beta" in md
 
     assert pushed, "a Feishu card should be pushed"
     kind, title, body = pushed[0]
-    assert kind == "info" and "caution" in title and "L3-组合beta" in body
+    # card humanizes the breach: "L3-组合beta" -> "组合 beta（加权） 1.7，限额 ≤1.5"
+    assert kind == "info" and "caution" in title and "组合 beta" in body and "≤1.5" in body
 
 
 def test_digests_skip_gracefully_on_empty_store(monkeypatch):

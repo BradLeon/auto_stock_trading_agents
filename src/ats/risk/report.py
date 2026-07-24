@@ -19,8 +19,8 @@ def render(review: RiskReview) -> str:
         f"# 🤖 组合风险报告 — {r.as_of:%Y-%m-%d}",
         "",
         f"**风险状态**: {r.risk_state}  ·  NetLiq ${r.net_liquidation:,.0f}  ·  现金 {r.cash_pct:.0%}"
-        f"（有效 {r.effective_cash_pct:.0%}）  ·  组合 beta {r.portfolio_beta}  ·  回撤 {r.drawdown_pct}%  "
-        f"·  日盈亏 {dp_txt}",
+        f"（计入现金等价物后有效 {r.effective_cash_pct:.0%}）  ·  组合 beta {r.portfolio_beta}  "
+        f"·  回撤 {r.drawdown_pct}%  ·  日盈亏 {dp_txt}",
         "",
         "## 破限（硬约束）" if r.breaches else "## 破限：无 ✅",
     ]

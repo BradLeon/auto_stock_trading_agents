@@ -15,15 +15,15 @@ llm:
   max_retries: 3
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
-    industry_analyst: {model: deepseek/deepseek-v3.2}   # PEAD signal-chain read-throughs
+    industry_analyst: {model: deepseek/deepseek-v4-pro}   # PEAD signal-chain read-throughs
     manager: {}            # routing key reused by pead-scorer — real money, keep Opus
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
-    news_triage: {model: google/gemini-3.6-flash, temperature: 0.0, max_tokens: 8192}
-    context_monitor: {model: google/gemini-3.6-flash, max_tokens: 8192}   # PEAD monitor _llm_update (high-frequency; triage pre-filters)
-    intel_brief: {model: deepseek/deepseek-v3.2, temperature: 0.2, max_tokens: 4096}   # 每日情报 digest：逐票投资要点归纳 + 中文翻译（gemini-flash 嵌套结构化翻空，用 deepseek）
+    news_triage: {model: deepseek/deepseek-v4-pro, temperature: 0.0, max_tokens: 8192}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
+    context_monitor: {model: deepseek/deepseek-v4-pro, max_tokens: 8192}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
+    intel_brief: {model: deepseek/deepseek-v4-pro, temperature: 0.2, max_tokens: 4096}   # 每日情报 digest：逐票投资要点 + 中文翻译（gemini-flash 嵌套结构化翻空，用 deepseek）
     actuals_extract: {model: anthropic/claude-sonnet-5, max_tokens: 8192}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
-    research_extract: {model: deepseek/deepseek-v3.2}   # supply-chain insight extraction
+    research_extract: {model: deepseek/deepseek-v4-pro}   # supply-chain insight extraction
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.

@@ -79,5 +79,22 @@ def test_recent_actions_shows_execution_status():
         cycle_id=cid, source="chief", context="")
 
     block = assemble._recent_actions_block()
-    assert "GOOG" in block and "已成交" in block          # decision + filled trade
-    assert "ASML" in block and "待处理" in block          # decision, no trade → pending
+    # GOOG reached the broker (filled) → in-flight/done hard-suppress section
+    assert "GOOG" in block and "已成交" in block and "在途/已成交" in block
+    # ASML was proposed but never executed → context-only, NOT a hard block (ghost fix)
+    inflight = block.split("曾提议但未执行")[0]
+    assert "ASML" not in inflight                 # ASML not in the hard-suppress section
+    assert "ASML" in block and "曾提议但未执行" in block
+
+
+def test_unexecuted_proposal_does_not_hard_suppress():
+    """A decision that never reached the broker (no trades row) — regardless of age —
+    must NOT sit in the hard 'don't re-stack' section (the ghost-pending bug): an
+    un-approved proposal is not a commitment."""
+    store = get_store()
+    store.save_chief_run(cycle_id="chief-20260101-100000", as_of=NOW, summary="", decisions=[
+        TradeDecision(symbol="KLAC", action="trim", notional_usd=1200, rationale="r")])
+
+    block = assemble._recent_actions_block()
+    assert "KLAC" in block and "曾提议但未执行" in block
+    assert "KLAC" not in block.split("曾提议但未执行")[0]   # not in the in-flight section

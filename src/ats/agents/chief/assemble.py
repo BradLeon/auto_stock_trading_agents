@@ -134,32 +134,51 @@ def _pead_block(held_symbols: set | None = None, ctx: "ChiefContext | None" = No
     return "\n\n".join(parts)
 
 
+def _cycle_day(cid: str) -> str:
+    m = re.search(r"-(\d{8})-", cid or "")
+    return f"{m.group(1)[4:6]}-{m.group(1)[6:8]}" if m else "?"
+
+
 def _recent_actions_block() -> str:
-    """Per-symbol most-recent decision + execution status, so the chief doesn't re-propose
-    an order it already made or that is still pending. Joins decisions.cycle_id → trades."""
+    """Per-symbol most-recent decision + REAL execution status. Suppression is keyed on
+    whether the order actually REACHED THE BROKER (a trades row), not on the mere
+    existence of a past proposal:
+      - filled / submitted → in-flight or done → hard 'don't re-stack';
+      - a proposal with NO trades row → never executed (unapproved) → shown as context
+        only, NOT a hard block. In an approval-gated system an un-approved proposal is
+        not a commitment, so if the situation still warrants it, re-proposing for
+        approval is legitimate — this is what stops a never-approved 'ghost' from
+        suppressing new decisions forever."""
     from ...memory import get_store
 
     store = get_store()
-    decisions = store.recent_decisions(limit=15)   # DESC by rowid → first per symbol = latest
+    decisions = store.recent_decisions(limit=20)   # DESC by rowid → first per symbol = latest
     if not decisions:
         return ""
     latest: dict[str, dict] = {}
     for d in decisions:
         latest.setdefault(d["symbol"], d)
-    lines = ["**勿重复**：以下是你近期已提的决策及执行状态。已成交/仍待审批的同标同向单不要再叠一笔；"
-             "分步减仓已在进行的，按剩余仓位而非机械重复。"]
+
+    inflight, proposed = [], []
     for sym, d in latest.items():
         cid = d.get("cycle_id") or ""
-        m = re.search(r"-(\d{8})-", cid)
-        day = f"{m.group(1)[4:6]}-{m.group(1)[6:8]}" if m else "?"
         trades = [t for t in store.recent_trades(sym, limit=8) if (t.get("cycle_id") or "") == cid]
+        line = f"- {sym}: [{_cycle_day(cid)}] {d['action']} ${d.get('notional_usd') or 0:,.0f}"
         if any((t.get("status") or "") == "filled" for t in trades):
-            status = "已成交"
+            inflight.append(line + " → 已成交（仓位已变，勿重复）")
         elif trades:
-            status = "已提交未成交"
+            inflight.append(line + " → 已提交未成交（在途，勿叠单）")
         else:
-            status = "待处理（未审批/未执行）"
-        lines.append(f"- {sym}: [{day}] {d['action']} ${d.get('notional_usd') or 0:,.0f} → {status}")
+            proposed.append(line)
+
+    lines: list[str] = []
+    if inflight:
+        lines.append("**在途/已成交（勿重复）**：已成交或已下单在途的同标同向单不要再叠一笔；分步已在进行的按剩余仓位而非机械重复。")
+        lines += inflight
+    if proposed:
+        lines.append("**曾提议但未执行（仅参考，不构成重复）**：以下是过往提过、但从未下单（未获审批）的同标决策。"
+                     "它们不是承诺——若当前情况仍成立，可再次提交审批；若已不成立，忽略即可。")
+        lines += proposed
     return "\n".join(lines)
 
 

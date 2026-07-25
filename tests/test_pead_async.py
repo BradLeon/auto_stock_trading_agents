@@ -19,17 +19,19 @@ def test_actions_within_prep_window_adds_prep():
         == ["monitor", "prep"]
 
 
-def test_actions_amc_scores_next_day():
-    # After-close print on 6/1 -> score 6/2 (T+1).
-    assert scheduler._pead_actions(date(2026, 6, 2), date(2026, 6, 1), "amc", SCHED) \
-        == ["monitor", "score"]
-    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 6, 1), "amc", SCHED) == ["monitor"]
+def test_actions_never_score_regardless_of_session():
+    """The daily cycle only monitors/preps — scoring moved to the score windows.
 
-
-def test_actions_bmo_scores_same_day():
-    # Before-open print on 6/1 -> score same day 6/1.
-    assert scheduler._pead_actions(date(2026, 6, 1), date(2026, 6, 1), "bmo", SCHED) \
-        == ["monitor", "score"]
+    These cases used to assert `["monitor", "score"]`, but they fed `_pead_actions` a
+    PAST earnings_date, which its real source (next_earnings, filtered to >= today)
+    can never produce. The assertions passed while the branch was dead in production.
+    Routing by observed print is covered in tests/test_score_state.py.
+    """
+    for today, ed, hour in [(date(2026, 6, 2), date(2026, 6, 1), "amc"),
+                            (date(2026, 6, 1), date(2026, 6, 1), "amc"),
+                            (date(2026, 6, 1), date(2026, 6, 1), "bmo"),
+                            (date(2026, 6, 1), date(2026, 6, 1), "")]:
+        assert scheduler._pead_actions(today, ed, hour, SCHED) == ["monitor"]
 
 
 def test_actions_no_earnings_date_is_monitor_only():

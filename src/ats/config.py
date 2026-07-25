@@ -244,6 +244,13 @@ def load_pead_global() -> dict:
     cfg.setdefault("schedule", {})
     cfg["schedule"].setdefault("prep_days_before", 3)
     cfg["schedule"].setdefault("score_after", True)
+    # Two score windows a day, in America/New_York: after the close for amc prints
+    # (so the Boss can approve overnight and fill at the next open), late morning for
+    # bmo prints. A print whose session is unknown is attempted in both.
+    cfg["schedule"].setdefault("score_windows", {"bmo": "11:00", "amc": "20:00"})
+    cfg["schedule"].setdefault("score_lookback_days", 4)      # how far back to catch up
+    cfg["schedule"].setdefault("transcript_upgrade_days", 4)  # v1 -> v2 retry window
+    cfg["schedule"].setdefault("chief_after_score", True)     # one chief cycle per window
     cfg.setdefault("score", {})
     # A chrome-stripped transcript is ~55K chars (~14K tokens) — fits whole in a
     # 200K context, so these caps are guardrails rather than routine clips.

@@ -76,6 +76,17 @@ CREATE TABLE IF NOT EXISTS pead_periods (
     label_source TEXT, detected_at TEXT,
     PRIMARY KEY (symbol, earnings_date)
 );
+-- Versioned score ledger. Two jobs: (1) the idempotency guard, so a symbol whose
+-- session is unknown can be attempted in BOTH daily windows without double-scoring;
+-- (2) the v1(no transcript) -> v2(with transcript) upgrade record. Note this is the
+-- only reliable "when was it scored" signal — pead_dossier.updated_at is bumped by
+-- the daily monitor and so never goes stale.
+CREATE TABLE IF NOT EXISTS pead_score_runs (
+    symbol TEXT, fiscal_label TEXT, version INTEGER, scored_at TEXT, earnings_date TEXT,
+    has_transcript INTEGER DEFAULT 0, transcript_source TEXT, window TEXT,
+    latency_hours REAL, total REAL, band TEXT, decision_summary TEXT,
+    PRIMARY KEY (symbol, fiscal_label, version)
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -238,6 +249,39 @@ class TradingMemory:
             (symbol.upper(), earnings_date.isoformat() if hasattr(earnings_date, "isoformat")
              else earnings_date)).fetchone()
         return dict(row) if row else None
+
+    # --- Versioned score runs (idempotency + v1→v2 upgrade record) ------------ #
+    def record_score_run(self, *, symbol: str, fiscal_label: str, version: int,
+                         earnings_date, has_transcript: bool, transcript_source: str = "",
+                         window: str = "", latency_hours: float | None = None,
+                         total: float | None = None, band: str = "",
+                         decision_summary: str = "") -> None:
+        from datetime import datetime, timezone
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pead_score_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (symbol.upper(), fiscal_label, version, datetime.now(timezone.utc).isoformat(),
+             earnings_date.isoformat() if hasattr(earnings_date, "isoformat") else earnings_date,
+             1 if has_transcript else 0, transcript_source, window, latency_hours,
+             total, band, decision_summary))
+        self.conn.commit()
+
+    def latest_score_run(self, symbol: str, fiscal_label: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM pead_score_runs WHERE symbol = ? AND fiscal_label = ? "
+            "ORDER BY version DESC LIMIT 1", (symbol.upper(), fiscal_label)).fetchone()
+        return dict(row) if row else None
+
+    def next_score_version(self, symbol: str, fiscal_label: str) -> int:
+        last = self.latest_score_run(symbol, fiscal_label)
+        return (last["version"] + 1) if last else 1
+
+    def score_state(self, symbol: str, fiscal_label: str) -> str:
+        """'unscored' | 'v1_no_transcript' | 'final' — drives the window state machine."""
+        last = self.latest_score_run(symbol, fiscal_label)
+        if not last:
+            return "unscored"
+        return "final" if last["has_transcript"] else "v1_no_transcript"
 
     def save_performance(self, record: PerformanceRecord) -> None:
         """Standalone performance snapshot (trader daily snapshot, no full cycle)."""

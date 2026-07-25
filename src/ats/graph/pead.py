@@ -436,7 +436,24 @@ def score_persist(state: PeadState) -> dict:
         run_up_warn_pct=state.config.run_up_warn_pct,
         actuals=state.actuals, scorecard=state.scorecard,
         decision_summary=summary)
-    get_store().save_dossier(dossier)
+    store = get_store()
+    store.save_dossier(dossier)
+
+    # Ledger the run. This — not dossier.updated_at, which the daily monitor bumps —
+    # is what tells the score windows "already done", so a print whose session is
+    # unknown can be attempted in both daily windows without being scored twice.
+    try:
+        has_tx = bool((state.transcript_text or "").strip())
+        store.record_score_run(
+            symbol=state.symbol, fiscal_label=state.fiscal_label,
+            version=store.next_score_version(state.symbol, state.fiscal_label),
+            earnings_date=state.earnings_date, has_transcript=has_tx,
+            transcript_source=state.transcript_resolved_source or "",
+            total=state.scorecard.total if state.scorecard else None,
+            band=state.decision_band or "", decision_summary=summary)
+    except Exception as exc:  # noqa: BLE001 - the score itself is already persisted
+        log.warning("score-run ledger write failed for %s: %s", state.symbol, exc)
+
     pead_report.write_report(dossier)
     return {}
 

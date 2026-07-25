@@ -58,21 +58,95 @@ _today = _today_et
 
 def _pead_actions(today: date, earnings_date: date | None, hour: str,
                   sched_cfg: dict) -> list[str]:
-    """Decide what to run for a PEAD target today (pure routing).
+    """Decide what to run for a PEAD target in the daily cycle (pure routing).
 
-    Always monitor; prep when earnings is within prep_days_before; score after the
-    print — same day for before-open (bmo/dmh) prints, next session for after-close
-    (amc, or unknown).
+    Monitor always; prep when the next print is within prep_days_before.
+
+    Scoring is NOT here. It used to be, as
+        score_offset = 0 if hour in ("bmo","dmh") else 1
+        if (today - earnings_date).days == score_offset: actions.append("score")
+    which could never fire: `earnings_date` came from next_earnings(), which filters
+    to dates >= today, so (today - earnings_date).days was always <= 0 and never 1.
+    The branch was dead in production for every after-close print — and the unit test
+    hid it by passing a past date that the real source cannot produce. Scoring now
+    lives in `_score_plan` / `pead_score_window`, triggered by an OBSERVED print.
     """
     actions = ["monitor"]
     if earnings_date:
         days_to = (earnings_date - today).days
         if 0 < days_to <= sched_cfg.get("prep_days_before", 3):
             actions.append("prep")
-        score_offset = 0 if hour in ("bmo", "dmh") else 1   # bmo: same day; amc/unknown: T+1
-        if sched_cfg.get("score_after", True) and (today - earnings_date).days == score_offset:
-            actions.append("score")
     return actions
+
+
+# --------------------------------------------------------------------------- #
+# Score windows: one before the open (bmo prints), one after the close (amc)
+# --------------------------------------------------------------------------- #
+def _score_plan(window: str, today: date, print_, state: str, sched_cfg: dict) -> tuple[bool, str]:
+    """Should `window` attempt to score this print today? Pure — no I/O.
+
+    `print_` is an EarningsPrint (or None). `state` is store.score_state(...).
+    Sessions map to windows as follows, and a print whose session is UNKNOWN is
+    attempted in BOTH windows — measured, Finnhub's `hour` is blank for 5 of 13
+    targets, so guessing would mis-time those. Double attempts are safe because
+    `state` short-circuits once a score exists.
+    """
+    if print_ is None:
+        return (False, "无近期财报")
+    age = (today - print_.date).days
+    if age < 0:
+        return (False, f"财报在未来（{print_.date}）")
+    if age > sched_cfg.get("score_lookback_days", 4):
+        return (False, f"财报已过 {age} 天，超出补打窗口")
+    if state == "final":
+        return (False, "已有含纪要的终版打分")
+    if state == "v1_no_transcript" and age > sched_cfg.get("transcript_upgrade_days", 4):
+        return (False, f"纪要窗口已过（{age} 天），v1 定稿")
+
+    session = print_.session or "unknown"
+    if session == "bmo":
+        ok = window == "bmo"
+    elif session in ("amc", "dmh"):
+        # Same day only the after-close window makes sense; from T+1 either window
+        # may catch up (e.g. the machine was asleep at 20:00).
+        ok = window == "amc" if age == 0 else True
+    else:
+        ok = True                      # unknown session -> try both windows
+    if not ok:
+        return (False, f"session={session} 不匹配 {window} 窗口")
+
+    verb = "补打" if age else "首打"
+    return (True, f"{verb}（{print_.date} {session}/{print_.session_source}, state={state}）")
+
+
+def _confirm_reported(symbol: str, print_) -> tuple[bool, str]:
+    """Has this print ACTUALLY been released? Guards against scoring too early.
+
+    Two independent pieces of evidence:
+      1. an actual EPS/revenue in the calendar feeds — authoritative, but the vendors
+         can lag hours behind the release;
+      2. a SEC 8-K filed on/after the print date — lands within minutes of the
+         release, so this is what makes same-evening scoring possible.
+
+    Neither -> skip and let the next window retry. Never accept an 8-K filed BEFORE
+    the print date: that is last quarter's release, and scoring on it would invent a
+    surprise out of stale numbers.
+    """
+    if print_.reported:
+        return (True, f"已公布（eps_actual={print_.eps_actual}）")
+    from ..data import documents
+    from ..data.base import safe_fetch
+
+    rel = safe_fetch(lambda: documents.sec_8k_release(symbol),
+                     source=f"sec-8k:{symbol}", attempts=2)
+    if not rel:
+        return (False, "无实际 EPS，且未取到 8-K")
+    filed = rel.get("filed")
+    if filed is None:
+        return (False, "8-K 无申报日期，无法确认是本季")
+    if filed < print_.date:
+        return (False, f"最新 8-K 申报于 {filed}，早于财报日 {print_.date}（上一季）")
+    return (True, f"8-K 申报于 {filed}（≥ 财报日 {print_.date}）")
 
 
 def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
@@ -109,13 +183,88 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
                     run_pead_monitor(sym, use_llm=use_llm)
                 elif action == "prep":
                     run_pead(sym, "prep", dry_run=dry_run, use_llm=use_llm)
-                elif action == "score":
-                    # v0.2: score persists a recommendation; _chief_daily 收口 at job end.
-                    run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm)
             except Exception as exc:  # noqa: BLE001 - one target must not break the rest
                 log.warning("PEAD %s %s failed: %s", sym, action, exc)
         ran[sym] = actions
     return ran
+
+
+def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True,
+                      as_of: datetime | None = None, chief: bool = True,
+                      plan_only: bool = False) -> dict:
+    """Score every target whose print has landed but hasn't been scored yet.
+
+    Runs twice a day (see config/pead.yaml schedule.score_windows): the `amc` window
+    after the close for that evening's prints, the `bmo` window late morning for
+    before-open prints. Cheap by default — the expensive LLM path is only entered for
+    a target that actually has an unscored, confirmed print.
+
+    Returns {symbol: reason} for every target, so the log is a full audit of what was
+    considered, not just what ran.
+    """
+    from ..config import load_pead_config, load_pead_global
+    from ..data import earnings_calendar, period
+    from ..memory import get_store
+    from .cli import run_chief, run_pead
+
+    g = load_pead_global()
+    sched = g.get("schedule", {})
+    if not sched.get("score_after", True):
+        log.info("score windows disabled (schedule.score_after=false)")
+        return {}
+
+    now = as_of or _now_et()
+    today = now.date()
+    if not is_trading_session(today):
+        log.info("not a trading session (%s); skipping PEAD %s score window", today, window)
+        return {}
+
+    store = get_store()
+    outcomes: dict[str, str] = {}
+    scored: list[str] = []
+
+    for sym in g.get("targets", []):
+        try:
+            cfg = load_pead_config(sym)
+            pr = earnings_calendar.last_print(
+                sym, as_of=today, back_days=sched.get("score_lookback_days", 4) + 3)
+            label = period.resolve_fiscal_label(
+                sym, pr, config_label=cfg.fiscal_label, store=store)[0] if pr else cfg.fiscal_label
+            state = store.score_state(sym, label) if label else "unscored"
+            go, why = _score_plan(window, today, pr, state, sched)
+            if go:
+                # Confirm even under --plan-only: it is read-only and cheap, and a
+                # preview that skipped it would not reflect what the real run does.
+                ok, ev = _confirm_reported(sym, pr)
+                if not ok:
+                    go, why = False, f"待确认发布：{ev}"
+                else:
+                    why = f"{why} · {ev}"
+            log.info("PEAD-score[%s] %s: %s -> %s", window, sym,
+                     "GO" if go else "skip", why)
+            outcomes[sym] = ("GO · " if go else "") + why
+            if not go or plan_only:
+                continue
+            # Pin the resolved label so the Chief reads the same key tomorrow.
+            period.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
+            run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, chief=False)
+            scored.append(sym)
+        except Exception as exc:  # noqa: BLE001 - one target must not break the window
+            log.warning("PEAD-score[%s] %s failed: %s", window, sym, exc)
+            outcomes[sym] = f"失败：{exc}"
+
+    # One Chief cycle for the whole window, not one per symbol — a single approval
+    # card. The Chief consumes the score, so the regular daily cascade then correctly
+    # treats it as background instead of re-proposing the same trade.
+    if scored and chief and not plan_only and sched.get("chief_after_score", True):
+        try:
+            run_chief(dry_run=dry_run, channel=get_config().app.channel.kind,
+                      source="pead-chief")
+        except Exception as exc:  # noqa: BLE001 - chief must not break the window
+            log.warning("PEAD-score[%s] chief run failed: %s", window, exc)
+    elif scored:
+        log.info("PEAD-score[%s] scored %s; chief skipped", window, ",".join(scored))
+    return outcomes
 
 
 def _daily(*, dry_run: bool) -> None:

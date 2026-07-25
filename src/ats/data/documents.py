@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import date
 from pathlib import Path
 
 from .base import safe_fetch
@@ -74,6 +75,19 @@ def _headers() -> dict:
 
 
 def _sec_8k_release(symbol: str) -> tuple[str, str] | None:
+    """(label, text) for `gather()`. See sec_8k_release for the dated form."""
+    rel = sec_8k_release(symbol)
+    return (rel["label"], rel["text"]) if rel else None
+
+
+def sec_8k_release(symbol: str) -> dict | None:
+    """Latest 8-K Exhibit 99.1 as {label, text, filed: date|None}.
+
+    The filing DATE is what makes this usable as a "has the print happened" probe:
+    an 8-K lands within minutes of the release, well before the data vendors
+    populate an actual EPS. Callers must still check the date against the expected
+    print — the newest 8-K may be an unrelated filing, or last quarter's release.
+    """
     import httpx
 
     from .fundamentals import _ticker_to_cik
@@ -110,7 +124,13 @@ def _sec_8k_release(symbol: str) -> tuple[str, str] | None:
     text = _text(doc.text)
     if len(text) < _MIN_DOC_CHARS:
         return None
-    return (f"SEC 8-K earnings release ({filed})", text)
+    filed_date = None
+    if filed:
+        try:
+            filed_date = date.fromisoformat(filed)
+        except ValueError:
+            pass
+    return {"label": f"SEC 8-K earnings release ({filed})", "text": text, "filed": filed_date}
 
 
 def _text(html: str) -> str:

@@ -605,6 +605,40 @@ def run_pead_research(*, use_llm: bool = True) -> list:
     return insights
 
 
+def run_pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True,
+                          as_of: str | None = None, chief: bool = True,
+                          plan_only: bool = False) -> int:
+    """Run one PEAD score window by hand (the scheduler runs the same function).
+
+    `--as-of` rewinds only the calendar/state layer, so a past print can be replayed;
+    it does NOT rewind Tavily or SEC results.
+    """
+    from datetime import datetime
+
+    from .scheduler import ET, pead_score_window
+
+    moment = None
+    if as_of:
+        moment = datetime.fromisoformat(as_of)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=ET)
+
+    label = "计划" if plan_only else ("试运行" if dry_run else "实盘")
+    print(f"=== PEAD {window} 打分窗口（{label}"
+          f"{f'，as_of={moment:%Y-%m-%d %H:%M %Z}' if moment else ''}）===")
+    outcomes = pead_score_window(window, dry_run=dry_run, use_llm=use_llm, as_of=moment,
+                                 chief=chief, plan_only=plan_only)
+    if not outcomes:
+        print("  （非交易日，或打分窗口被关闭）")
+        return 0
+    for sym, why in outcomes.items():
+        mark = "▶" if why.startswith("GO") else "·"
+        print(f"  {mark} {sym:6} {why}")
+    n = sum(1 for w in outcomes.values() if w.startswith("GO"))
+    print(f"\n  {n}/{len(outcomes)} 个标的{'待打分' if plan_only else '已打分'}")
+    return 0
+
+
 def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) -> int:
     """Audit transcript retrieval across recent quarters — no LLM, read-only.
 
@@ -812,10 +846,18 @@ def main(argv: list[str] | None = None) -> int:
     pe = sub.add_parser("pead",
                         help="PEAD earnings workflow (prep / score / show / monitor / watch / research)")
     pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research",
-                                       "transcriptprobe"])
+                                       "transcriptprobe", "scorewindow"])
     pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch` / `research`)")
     pe.add_argument("--quarters", type=int, default=4,
                     help="transcriptprobe: how many recent quarters per target")
+    pe.add_argument("--window", choices=["amc", "bmo"],
+                    help="scorewindow: which window to run")
+    pe.add_argument("--as-of", dest="as_of",
+                    help="scorewindow: ISO datetime; rewinds the calendar/state layer only")
+    pe.add_argument("--plan-only", action="store_true",
+                    help="scorewindow: print the routing decision without scoring")
+    pe.add_argument("--no-chief", action="store_true",
+                    help="scorewindow: score but don't run the Chief / push approval")
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
@@ -906,6 +948,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "transcriptprobe":
             return run_transcript_probe([args.symbol] if args.symbol else None,
                                         quarters=args.quarters)
+        if args.action == "scorewindow":
+            if not args.window:
+                parser.error("pead scorewindow requires --window amc|bmo")
+            return run_pead_score_window(args.window, dry_run=not args.live,
+                                         use_llm=not args.no_llm, as_of=args.as_of,
+                                         chief=not args.no_chief, plan_only=args.plan_only)
         if not args.symbol:
             parser.error("pead %s requires a symbol" % args.action)
         if args.action == "show":

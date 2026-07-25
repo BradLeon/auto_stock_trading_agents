@@ -278,6 +278,23 @@ class TradingMemory:
              1 if (has_transcript if final is None else final) else 0))
         self.conn.commit()
 
+    def stamp_score_run(self, symbol: str, fiscal_label: str, *, window: str,
+                        latency_hours: float | None) -> None:
+        """Attach which window produced the latest run and how long after the print.
+
+        Fixed windows necessarily leave a gap (a 06:00 ET print is only scored at
+        11:00), so record the real print→score latency: that turns "is twice a day
+        often enough" from an argument into a measurement.
+        """
+        last = self.latest_score_run(symbol, fiscal_label)
+        if not last:
+            return
+        self.conn.execute(
+            "UPDATE pead_score_runs SET window = ?, latency_hours = ? "
+            "WHERE symbol = ? AND fiscal_label = ? AND version = ?",
+            (window, latency_hours, symbol.upper(), fiscal_label, last["version"]))
+        self.conn.commit()
+
     def promote_score_run(self, symbol: str, fiscal_label: str) -> bool:
         """Mark the latest run final without re-scoring — used when the transcript
         never arrived and the v1 becomes the best available answer."""

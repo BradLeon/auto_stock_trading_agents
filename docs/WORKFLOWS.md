@@ -59,15 +59,49 @@ boss_review(interrupt) → trader → persist → END
 
 ## 5. 触发路由（`runtime/scheduler.py`）
 
-每交易日 cron（mon-fri + NYSE session 过滤），`_daily` 级联顺序：
+共三个 cron job（mon-fri + NYSE session 过滤），全部串行（单 worker executor —
+它们共用同一个 sqlite 连接）：
+
+| job | 时点（ET） | 内容 |
+|---|---|---|
+| `daily_cycle` | `settings.yaml` `schedule.run_at`（10:30） | 下方级联 |
+| `pead_score_amc` | `pead.yaml` `score_windows.amc`（20:00） | 当晚盘后财报的打分 |
+| `pead_score_bmo` | `pead.yaml` `score_windows.bmo`（11:00） | 当日盘前财报的打分 |
+
+`daily_cycle` 级联顺序：
 
 ```
 宏观周报(周一) → 行业周报(周一) → 事件触发(events.yaml) →
-PEAD(research → 逐 target monitor/prep/score) → 绩效+风控快照 → Chief 收口(末位)
+PEAD(research → 逐 target monitor/prep) → 绩效+风控快照 → Chief 收口(末位)
 ```
 
 Chief 排末位：读当日全部新鲜产出后决策。安静日零决策 → 图在 boss_review 前结束，
 不发审批卡（零打扰）。
+
+### PEAD 打分窗口（`pead_score_window`）
+
+打分**不在**日级联里，也不靠预测日期 —— 它由**观测到的财报**触发。原因见
+`data/earnings_calendar.py` 模块 docstring：数据商的财报日期会被修订，且
+Finnhub 的 `hour`（盘前/盘后）在 13 个标的里有 5 个是空的。
+
+判定链：
+1. `last_print()` 找出 lookback 窗口内已发生的财报（Finnhub 向后窗口 ∪ yfinance）
+2. `_confirm_reported()` 确认真的发布了：实际 EPS，**或** 申报日 ≥ 财报日的 8-K
+   （8-K 在发布后几分钟就有，这才让"当晚打分"可行；早于财报日的一律拒绝）
+3. `_score_plan()` 决定动作 —— `score` / `promote` / 不动。session 判不出来的标的
+   **两个窗口都试**，靠 `pead_score_runs` 台账保证只打一次
+4. 打分后：**只有终版**才交给 Chief（一个窗口一张审批卡）
+
+v1/v2：拿不到本季纪要时先按财报稿/8-K 打 v1 —— 入库但**不惊动 Chief**，权重剔除
+只有电话会才能提供的维度并重新归一（记 0 分会把 v1 往"中性"拖），仓位减半。纪要
+到位打 v2 → 交给 Chief；`transcript_upgrade_days` 到期仍无纪要则把 v1 提升为终版。
+这样一个季度只被 Chief 消费一次，`score_consumption` 语义不变。
+
+盘后窗口的单是隔夜审批的，提交前会按最新价 ±`overnight_limit_slippage_pct`
+改成**限价单**（在生成审批卡之前改，所以卡上的价格就是会提交的价格）。
+
+`score_windows_live: false` 时窗口强制 dry-run（即使 daemon 带 `--live`）：打分、
+Chief、审批卡照常，但没有单会到券商。
 
 事件日历 `config/events.yaml`（date/kind/label/triggers）：
 - `macro` → 宏观策略师额外跑一次（FOMC/CPI/NFP/政府报告）
@@ -82,6 +116,10 @@ Chief 排末位：读当日全部新鲜产出后决策。安静日零决策 → 
 |---|---|
 | `ats chief run` | T3 手动收口；`--no-llm --offline` 走 stub 全链（测试接线） |
 | `ats pead score SYM --chief` | T1：score 建议落库后立即 chief 收口 |
+| `ats pead scorewindow --window amc\|bmo` | 手工跑一个打分窗口；`--plan-only` 只看路由决策、`--as-of ISO` 回拨日历重放历史财报、`--no-chief` 不推审批 |
+| `ats pead transcriptprobe [--quarters N]` | 审计 transcript 检索：对各标的最近 N 季核对取到的是否本季（验收标准：错季 = 0） |
+| `ats pead show SYM` | 含打分台账（v1/v2、是否有纪要、是否终版、距财报几小时） |
+| `ats schedule --window amc\|bmo` | 跑单个窗口后退出（daemon 之外的手工触发） |
 | `ats trader buy/sell SYM QTY [--limit PX]` | T4 手动单（经同一风控+审批） |
 | `ats trader execute [SYM]` | T4 存量建议（decisions 表）重放 |
 | `ats schedule` / `ats schedule --now` | T2 每日 cron / 立即跑一轮级联 |

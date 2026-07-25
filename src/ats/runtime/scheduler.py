@@ -272,6 +272,10 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
             # Pin the resolved label so the Chief reads the same key tomorrow.
             period.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
             run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, chief=False)
+            # Stamp which window scored it and how far behind the print we were, so the
+            # cost of fixed windows is measurable rather than assumed.
+            latency = round((now - pr.at).total_seconds() / 3600, 2) if pr.at else None
+            store.stamp_score_run(sym, label, window=window, latency_hours=latency)
             # Only a FINAL score reaches the Chief. A transcript-less v1 is withheld
             # while we retry, so the Chief responds once, to the best evidence —
             # this is what keeps score_consumption's "act once per earnings" intact

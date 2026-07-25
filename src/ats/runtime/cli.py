@@ -713,6 +713,24 @@ def pead_show(symbol: str) -> int:
                   f"{ln.note[:60]}")
     if d.decision_summary:
         print(f"\n[Decision] {d.decision_summary}")
+
+    # Score-run ledger: which window produced it, whether it had a transcript, and how
+    # far behind the print it was — the audit trail for the score windows.
+    rows = store.conn.execute(
+        "SELECT * FROM pead_score_runs WHERE symbol = ? AND fiscal_label = ? "
+        "ORDER BY version", (symbol.upper(), d.fiscal_label)).fetchall()
+    if rows:
+        print("\n[打分台账]")
+        for r in rows:
+            lat = f"{r['latency_hours']:.1f}h" if r["latency_hours"] is not None else "?"
+            print(f"  v{r['version']}  {r['scored_at'][:19]}  window={r['window'] or '-':4} "
+                  f"纪要={'✅' if r['has_transcript'] else '❌'} "
+                  f"终版={'✅' if r['final'] else '❌'} 距财报={lat} "
+                  f"总分={r['total'] if r['total'] is not None else '-'}")
+        period = store.get_period(symbol.upper(), rows[-1]["earnings_date"])
+        if period:
+            print(f"  财报: {period['earnings_date']} {period['session']}"
+                  f"（来源 {period['session_source']}）· label 来自 {period['label_source']}")
     return 0
 
 

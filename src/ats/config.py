@@ -156,8 +156,10 @@ class ChannelConfig(BaseModel):
 
 
 class ScheduleConfig(BaseModel):
-    enabled: bool = False
-    run_at: str = "16:15"
+    # No `enabled` flag: it existed but was never read by start(), so settings.yaml
+    # advertised `enabled: false` while the launchd job scheduled normally. Whether
+    # the scheduler runs is decided by whether `ats schedule` is running.
+    run_at: str = "16:15"          # daily cycle; PEAD score windows: config/pead.yaml
     timezone: str = "America/New_York"
 
 
@@ -251,6 +253,9 @@ def load_pead_global() -> dict:
     cfg["schedule"].setdefault("score_lookback_days", 4)      # how far back to catch up
     cfg["schedule"].setdefault("transcript_upgrade_days", 4)  # v1 -> v2 retry window
     cfg["schedule"].setdefault("chief_after_score", True)     # one chief cycle per window
+    # Kill-switch for the staged rollout: while false, the score windows are forced to
+    # dry-run even when the daemon runs --live (see pead_score_window).
+    cfg["schedule"].setdefault("score_windows_live", False)
     cfg.setdefault("score", {})
     # A chrome-stripped transcript is ~55K chars (~14K tokens) — fits whole in a
     # 200K context, so these caps are guardrails rather than routine clips.

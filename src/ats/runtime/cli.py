@@ -799,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    sch.add_argument("--window", choices=["amc", "bmo"],
+                     help="run one PEAD score window immediately, then exit")
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
@@ -879,7 +881,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule":
         from .scheduler import start
 
-        start(dry_run=not args.live, run_once=args.now)
+        start(dry_run=not args.live, run_once=args.now, window=args.window)
         return 0
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)

@@ -93,8 +93,12 @@ channel:
 
 # --- Scheduling (Phase 9) ----------------------------------------------------
 schedule:
-  enabled: false
-  run_at: "10:30"               # 1h after US open (was 16:15 close) — lands ~22:30 China
-                                # so the Boss can approve in the evening; chief decides on
-                                # intraday prices and approved orders fill during RTH.
+  # Removed `enabled: false` — nothing ever read it, so it claimed scheduling was off
+  # while the launchd job scheduled normally. Start/stop the daemon instead.
+  run_at: "10:30"               # daily cycle: 1h after US open (was 16:15 close) — lands
+                                # ~22:30 China so the Boss can approve in the evening;
+                                # chief decides on intraday prices, orders fill in RTH.
+                                # PEAD score windows are separate — they fire off an
+                                # observed earnings print: config/pead.yaml
+                                # schedule.score_windows (bmo 11:00 / amc 20:00 ET).
   timezone: America/New_York

@@ -213,6 +213,16 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
         log.info("score windows disabled (schedule.score_after=false)")
         return {}
 
+    # Staged rollout: the resident daemon runs `ats schedule --live`, so without this
+    # the windows would place real orders the moment they are registered. They stay
+    # dry until schedule.score_windows_live is turned on explicitly — the PEAD decide
+    # step still emits order_type="market", and a market order raised at 20:00 ET
+    # queues into the next open, which on a post-earnings gap is the worst possible
+    # fill. Flip this on only once overnight orders are priced as limits.
+    if not dry_run and not sched.get("score_windows_live", False):
+        log.info("score window %s: forcing dry-run (schedule.score_windows_live=false)", window)
+        dry_run = True
+
     now = as_of or _now_et()
     today = now.date()
     if not is_trading_session(today):
@@ -426,26 +436,57 @@ def _sector_weekly() -> None:
             log.warning("sector review %s failed: %s", name, exc)
 
 
-def start(*, dry_run: bool = True, run_once: bool = False) -> None:
+def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None) -> None:
+    from ..config import load_pead_global
+
     cfg = get_config().app.schedule
+    if window:
+        pead_score_window(window, dry_run=dry_run)
+        return
     if run_once:
         _daily(dry_run=dry_run)
         return
 
+    from apscheduler.executors.pool import ThreadPoolExecutor
     from apscheduler.schedulers.blocking import BlockingScheduler
     from apscheduler.triggers.cron import CronTrigger
 
     hour, minute = (int(x) for x in cfg.run_at.split(":"))
-    scheduler = BlockingScheduler(timezone=cfg.timezone)
+    # One worker on purpose: these jobs are long sequential LLM pipelines that all
+    # write the same sqlite connection, so letting two run concurrently would risk
+    # interleaved writes for no gain. A job that comes due while another is running
+    # waits, and misfire_grace_time decides whether it still fires.
+    scheduler = BlockingScheduler(timezone=cfg.timezone,
+                                  executors={"default": ThreadPoolExecutor(1)})
     scheduler.add_job(
         lambda: _daily(dry_run=dry_run),
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
         id="daily_cycle", misfire_grace_time=3600,
     )
-    log.info("scheduler started: %s %s (mon-fri, NYSE sessions only; daily cycle + PEAD)",
-             cfg.run_at, cfg.timezone)
-    print(f"⏰ scheduling daily cycle + PEAD at {cfg.run_at} {cfg.timezone} (NYSE sessions). "
-          f"Ctrl-C to stop.")
+
+    # PEAD score windows — triggered by an observed print, so their job is to check
+    # cheaply and usually do nothing. See config/pead.yaml schedule.score_windows.
+    windows = load_pead_global().get("schedule", {}).get("score_windows", {}) or {}
+    for name, hhmm in sorted(windows.items()):
+        try:
+            w_hour, w_minute = (int(x) for x in str(hhmm).split(":"))
+        except ValueError:
+            log.warning("bad score_windows[%s]=%r; skipping", name, hhmm)
+            continue
+        scheduler.add_job(
+            # `name=name` binds the loop variable per job — a bare closure would give
+            # every job the last window's name.
+            lambda name=name: pead_score_window(name, dry_run=dry_run),
+            CronTrigger(day_of_week="mon-fri", hour=w_hour, minute=w_minute,
+                        timezone=cfg.timezone),
+            id=f"pead_score_{name}", misfire_grace_time=3600,
+        )
+
+    win_desc = ", ".join(f"{n}@{h}" for n, h in sorted(windows.items())) or "none"
+    log.info("scheduler started: daily %s %s; PEAD score windows %s "
+             "(mon-fri, NYSE sessions only)", cfg.run_at, cfg.timezone, win_desc)
+    print(f"⏰ daily cycle at {cfg.run_at} {cfg.timezone}; PEAD score windows: {win_desc} "
+          f"(NYSE sessions{'' if not dry_run else ', dry-run'}). Ctrl-C to stop.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

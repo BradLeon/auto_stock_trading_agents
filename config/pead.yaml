@@ -50,6 +50,15 @@ schedule:
   transcript_upgrade_days: 4    # window to replace a no-transcript v1 with a v2
   chief_after_score: true       # one Chief cycle (one approval card) per window
 
+  # Staged rollout kill-switch. The resident daemon runs `ats schedule --live`, so
+  # without this the windows would place real orders as soon as they were registered.
+  # While false they are forced to dry-run: scoring, the Chief cycle and the approval
+  # card all happen, but no order reaches the broker.
+  # DO NOT enable until overnight orders are priced as LIMITs — the PEAD decide step
+  # still emits order_type="market", and a market order raised at 20:00 ET queues into
+  # the next open, which on a post-earnings gap is the worst available fill.
+  score_windows_live: false
+
 # Context budget fed to the actuals extractor. A scraped transcript arrives wrapped
 # in page furniture (investing.com: ~34K chars of nav before the body, ~24K of ad
 # pixels after); data/transcript.extract_body strips that first, so ~55K of real

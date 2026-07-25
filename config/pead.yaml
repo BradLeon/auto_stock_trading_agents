@@ -50,14 +50,19 @@ schedule:
   transcript_upgrade_days: 4    # window to replace a no-transcript v1 with a v2
   chief_after_score: true       # one Chief cycle (one approval card) per window
 
-  # Staged rollout kill-switch. The resident daemon runs `ats schedule --live`, so
-  # without this the windows would place real orders as soon as they were registered.
-  # While false they are forced to dry-run: scoring, the Chief cycle and the approval
-  # card all happen, but no order reaches the broker.
-  # DO NOT enable until overnight orders are priced as LIMITs — the PEAD decide step
-  # still emits order_type="market", and a market order raised at 20:00 ET queues into
-  # the next open, which on a post-earnings gap is the worst available fill.
-  score_windows_live: false
+  # Kill-switch for the score windows. While false they are forced to dry-run even when
+  # the daemon runs --live: scoring, the Chief cycle and the approval card all happen,
+  # but no order reaches the broker. Takes effect on the next window — config/pead.yaml
+  # is re-read every run, so no daemon restart is needed either way.
+  #
+  # ENABLED 2026-07-25, knowingly, on the LIVE account (IBKR_PORT=7496,
+  # environment=live — NOT paper). The precondition was that overnight orders are
+  # priced as LIMITs rather than market: see overnight_limit_slippage_pct below and
+  # trader/execute.as_overnight_limits.
+  # The Boss's Feishu approval remains the last gate — nothing is submitted without it,
+  # and the card is prefixed "⚠️⚠️ 实盘账户" for a live account.
+  # Set back to false to stop automated order placement without touching the daemon.
+  score_windows_live: true
 
   # Orders from the after-close window are approved overnight (~08:00 Asia) and reach
   # the broker before the open, so they are submitted as LIMITs off the last close:

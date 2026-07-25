@@ -1,0 +1,9 @@
+# Broadcom (AVGO) — PEAD stub, uses the _defaults scorecard.
+# L4 定制 ASIC/网络：Google TPU 与多家云厂自研加速器的主要合作方，AI 网络
+# （Tomahawk/Jericho）与定制硅双轮；AI 营收指引是全链最直接的需求读数之一。
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+
+symbol: AVGO
+company_name: "Broadcom"
+sector_etf: SMH
+benchmark: QQQ

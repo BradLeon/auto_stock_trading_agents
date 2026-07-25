@@ -2,7 +2,7 @@
 # 光模块/激光器的上游衬底供应商，需求随光互联出货放量；小盘、中国产能敞口/出口管制为风险因子。
 # TODO: 定制打分卡（InP 衬底出货/中国出口管制敞口/毛利率）；财报前补 fiscal_label。
 symbol: AXT
-company_name: \"AXT\"
+company_name: "AXT"
 sector_etf: SMH
 benchmark: QQQ
 fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对

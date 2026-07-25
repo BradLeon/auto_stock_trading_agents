@@ -3,5 +3,5 @@
 # TODO: 定制打分卡（存储/HBM 敞口、WFE 指引、中国占比、系统 vs 服务收入）参照 NVDA.yaml 补全。
 
 symbol: LRCX
-company_name: \"Lam Research\"
+company_name: "Lam Research"
 fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，Lam 财年 Q4

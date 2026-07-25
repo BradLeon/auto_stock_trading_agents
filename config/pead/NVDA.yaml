@@ -3,7 +3,7 @@
 # 故信号链上游读数极关键——TSM 的 CoWoS 产能/指引直接决定 NVDA 出货上限。
 
 symbol: NVDA
-company_name: \"Nvidia\"
+company_name: "Nvidia"
 fiscal_label: "Q2 FY2027"    # NVDA 财年偏移（1 月底结）：下次申报(2026-08-25)为 FY2027 Q2；
                              #   上次已报 $81.6B（截至 2026-04-30）为 FY2027 Q1
 sector_etf: SMH

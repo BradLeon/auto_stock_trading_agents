@@ -2,7 +2,7 @@
 # 非光互联子层：直接吃 hyperscaler 物理数据中心建设 capex；大盘、动量强、订单 backlog 能见度是核心。
 # TODO: 定制打分卡（订单/backlog、book-to-bill、液冷渗透、毛利率）；财报前补 fiscal_label。
 symbol: VRT
-company_name: \"Vertiv\"
+company_name: "Vertiv"
 sector_etf: SMH
 benchmark: QQQ
 fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对

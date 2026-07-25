@@ -3,5 +3,5 @@
 # TODO: 定制打分卡（订单/出货、WFE 指引、中国占比、检测占 WFE 份额）参照 NVDA.yaml 补全。
 
 symbol: KLAC
-company_name: \"KLA\"
+company_name: "KLA"
 fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-28 (amc)，KLA 财年 Q4

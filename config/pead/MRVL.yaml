@@ -1,0 +1,9 @@
+# Marvell (MRVL) — PEAD stub, uses the _defaults scorecard.
+# L4 定制 ASIC/光互联 DSP：AWS Trainium/Inferentia 等定制硅，以及 800G/1.6T
+# 光模块 DSP;数据中心营收占比与定制硅进度是关键。
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+
+symbol: MRVL
+company_name: "Marvell Technology"
+sector_etf: SMH
+benchmark: QQQ

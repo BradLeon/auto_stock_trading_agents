@@ -2,7 +2,7 @@
 # normal bar until calibrated. Small-cap, high-beta — calibrate threshold later.
 
 symbol: AAOI
-company_name: \"Applied Optoelectronics\"
+company_name: "Applied Optoelectronics"
 fiscal_label: "Q4 FY2025"
 sector_etf: SMH
 benchmark: QQQ

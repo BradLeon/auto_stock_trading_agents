@@ -35,6 +35,7 @@ class ChiefDecisionState(BaseModel):
     context_stats: dict = Field(default_factory=dict)
     net_liquidation: float = 0.0
     event_data: dict[str, dict] = Field(default_factory=dict)   # symbol -> {expected_move_pct}
+    actionable_scores: list = Field(default_factory=list)       # [[symbol, fiscal_label], …] fresh scores this cycle → marked consumed after run
 
     # chief_decide
     summary: str = ""

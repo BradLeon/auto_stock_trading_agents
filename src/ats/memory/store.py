@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS fills (
 CREATE TABLE IF NOT EXISTS risk_reviews (
     as_of TEXT PRIMARY KEY, risk_state TEXT, summary TEXT, payload TEXT
 );
+CREATE TABLE IF NOT EXISTS score_consumption (
+    symbol TEXT, fiscal_label TEXT, consumed_at TEXT, cycle_id TEXT,
+    PRIMARY KEY (symbol, fiscal_label)
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -181,6 +185,23 @@ class TradingMemory:
             "SELECT as_of, risk_state, summary FROM risk_reviews ORDER BY as_of DESC LIMIT ?",
             (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # --- PEAD score consumption (a score is actionable to the Chief ONCE) ---- #
+    def mark_score_consumed(self, symbol: str, fiscal_label: str, cycle_id: str = "") -> None:
+        """Record that the Chief has acted on (responded to) this earnings' score, so
+        it becomes background thereafter — keyed per earnings (symbol, fiscal_label)."""
+        from datetime import datetime, timezone
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO score_consumption VALUES (?,?,?,?)",
+            (symbol.upper(), fiscal_label, datetime.now(timezone.utc).isoformat(), cycle_id))
+        self.conn.commit()
+
+    def is_score_consumed(self, symbol: str, fiscal_label: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM score_consumption WHERE symbol = ? AND fiscal_label = ?",
+            (symbol.upper(), fiscal_label)).fetchone()
+        return row is not None
 
     def save_performance(self, record: PerformanceRecord) -> None:
         """Standalone performance snapshot (trader daily snapshot, no full cycle)."""

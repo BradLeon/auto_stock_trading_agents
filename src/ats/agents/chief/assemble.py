@@ -8,6 +8,7 @@ state/breaches, and the track record. Pure code, no LLM.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -21,6 +22,9 @@ class ChiefContext:
     as_of: datetime
     net_liquidation: float = 0.0
     held_symbols: set = field(default_factory=set)          # symbols currently held
+    # (symbol, fiscal_label) of scores that are actionable THIS cycle (fresh + unconsumed).
+    # The chief flow marks these consumed after a successful run → a PEAD score fires ONCE.
+    actionable_scores: set = field(default_factory=set)
     blocks: dict[str, str] = field(default_factory=dict)   # ordered by insertion
 
     def as_context(self) -> str:
@@ -44,10 +48,11 @@ def build(*, live_broker: bool = True) -> ChiefContext:
     ctx.blocks["组合现状 (trader)"] = _portfolio_block(ctx, live_broker)
     if not ctx.net_liquidation:
         ctx.net_liquidation = get_config().app.account.net_liquidation_usd
-    ctx.blocks["PEAD 档案（主 alpha 信号）"] = _pead_block(ctx.held_symbols)
+    ctx.blocks["PEAD 档案（新鲜=事件信号一次；否则背景）"] = _pead_block(ctx.held_symbols, ctx)
     ctx.blocks["行业评审（倾斜修正）"] = _sector_block(ctx.held_symbols)
     ctx.blocks["宏观评审（倾斜修正）"] = _macro_block()
     ctx.blocks["风控状态（硬约束）"] = _risk_block()
+    ctx.blocks["近期决策与执行（时序·勿重复）"] = _recent_actions_block()
     ctx.blocks["战绩反馈"] = _track_record_block()
     return ctx
 
@@ -86,14 +91,17 @@ def _portfolio_block(ctx: ChiefContext, live_broker: bool) -> str:
         return ""
 
 
-def _pead_block(held_symbols: set | None = None) -> str:
+def _pead_block(held_symbols: set | None = None, ctx: "ChiefContext | None" = None) -> str:
+    """PEAD dossiers. A score is ACTIONABLE (event trade, once) only if it's a fresh
+    score AND not yet consumed by a prior chief cycle; otherwise it's background
+    (thesis / positioning) — the actionable "分析师建议 分步减仓" line is dropped so
+    the chief doesn't re-trigger the same trim day after day."""
     from ...config import load_pead_config, load_pead_global
     from ...memory import get_store
 
     store = get_store()
     now = datetime.now(timezone.utc)
     parts = []
-    held = held_symbols or set()
     for sym in load_pead_global().get("targets", []):
         try:
             cfg = load_pead_config(sym)
@@ -103,14 +111,19 @@ def _pead_block(held_symbols: set | None = None) -> str:
         if d is None:
             continue
         age = (now - d.updated_at.replace(tzinfo=d.updated_at.tzinfo or timezone.utc)).days
-        fresh = d.phase == "score" and age <= FRESH_SCORE_DAYS
-        head = (f"### {sym} ({d.fiscal_label}, phase={d.phase}, 更新于 {age} 天前"
-                + ("，**新鲜可行动**" if fresh else "，仅背景") + ")")
-        lines = [head]
+        is_score = d.phase == "score"
+        consumed = store.is_score_consumed(sym.upper(), d.fiscal_label)
+        fresh = is_score and age <= FRESH_SCORE_DAYS and not consumed
+        if fresh and ctx is not None:
+            ctx.actionable_scores.add((sym.upper(), d.fiscal_label))
+        tag = ("，**新鲜可行动（事件响应·仅此一次，动作后即失效）**" if fresh
+               else ("，仅背景（score 已消费→只作论点/持仓定位）" if (is_score and consumed)
+                     else "，仅背景"))
+        lines = [f"### {sym} ({d.fiscal_label}, phase={d.phase}, 更新于 {age} 天前{tag})"]
         if d.scorecard:
             lines.append(f"Scorecard: {d.scorecard.total:+.2f} (门槛 {d.scorecard.threshold:+.1f}) "
                          f"— {d.scorecard.band}")
-        if d.decision_summary:
+        if d.decision_summary and fresh:            # 可行动建议仅在新鲜未消费时出现
             lines.append(f"PEAD 分析师建议: {d.decision_summary}")
         if d.market_setup:
             ms = d.market_setup
@@ -119,6 +132,35 @@ def _pead_block(held_symbols: set | None = None) -> str:
             lines.append("叙事尾部: …" + d.expectation_set.narrative[-400:])
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
+
+
+def _recent_actions_block() -> str:
+    """Per-symbol most-recent decision + execution status, so the chief doesn't re-propose
+    an order it already made or that is still pending. Joins decisions.cycle_id → trades."""
+    from ...memory import get_store
+
+    store = get_store()
+    decisions = store.recent_decisions(limit=15)   # DESC by rowid → first per symbol = latest
+    if not decisions:
+        return ""
+    latest: dict[str, dict] = {}
+    for d in decisions:
+        latest.setdefault(d["symbol"], d)
+    lines = ["**勿重复**：以下是你近期已提的决策及执行状态。已成交/仍待审批的同标同向单不要再叠一笔；"
+             "分步减仓已在进行的，按剩余仓位而非机械重复。"]
+    for sym, d in latest.items():
+        cid = d.get("cycle_id") or ""
+        m = re.search(r"-(\d{8})-", cid)
+        day = f"{m.group(1)[4:6]}-{m.group(1)[6:8]}" if m else "?"
+        trades = [t for t in store.recent_trades(sym, limit=8) if (t.get("cycle_id") or "") == cid]
+        if any((t.get("status") or "") == "filled" for t in trades):
+            status = "已成交"
+        elif trades:
+            status = "已提交未成交"
+        else:
+            status = "待处理（未审批/未执行）"
+        lines.append(f"- {sym}: [{day}] {d['action']} ${d.get('notional_usd') or 0:,.0f} → {status}")
+    return "\n".join(lines)
 
 
 def _sector_block(held_symbols: set | None = None) -> str:

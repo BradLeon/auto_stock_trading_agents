@@ -50,7 +50,8 @@ def assemble_context(state: ChiefDecisionState) -> dict:
     ctx = assemble.build(live_broker=state.use_broker)
     log.info("chief context: %s", ctx.stats())
     out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
-               net_liquidation=ctx.net_liquidation)
+               net_liquidation=ctx.net_liquidation,
+               actionable_scores=[list(x) for x in ctx.actionable_scores])
     return out
 
 
@@ -106,8 +107,17 @@ def persist_decision(state: ChiefDecisionState) -> dict:
         return {}
     from ..memory import get_store
 
-    get_store().save_chief_run(cycle_id=state.cycle_id, as_of=state.as_of,
-                               summary=state.summary, decisions=state.decisions)
+    store = get_store()
+    store.save_chief_run(cycle_id=state.cycle_id, as_of=state.as_of,
+                         summary=state.summary, decisions=state.decisions)
+    # Consume the fresh scores this cycle acted on — a PEAD score is a one-time event
+    # signal; after the chief has responded (traded or not) it becomes background so it
+    # is never re-adopted on subsequent daily runs.
+    for pair in state.actionable_scores:
+        try:
+            store.mark_score_consumed(pair[0], pair[1], state.cycle_id)
+        except Exception as exc:  # noqa: BLE001 - consumption must not break persist
+            log.warning("score consume failed for %s: %s", pair, exc)
     if state.use_llm and state.decide:   # audit report; skip for stubs
         from ..agents.chief import report as chief_report
         from ..agents.chief.decide import ChiefResult

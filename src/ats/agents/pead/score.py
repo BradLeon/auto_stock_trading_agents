@@ -96,9 +96,20 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
 # Surprise Scorecard (LLM scores per dim; code weights + bands)
 # --------------------------------------------------------------------------- #
 def score(config: PeadConfig, expectations: ExpectationSet | None, actuals: Actuals,
-          as_of: datetime) -> Scorecard:
+          as_of: datetime, *, has_transcript: bool = True) -> Scorecard:
+    """Weighted scorecard. `has_transcript=False` renormalizes the weights.
+
+    Without a transcript, the guidance / call-tone dimensions have no evidence. Scoring
+    them 0 is not neutral — 0 is a real signal ("in line"), and with the default
+    scorecard forward_guide(0.20) + call_tone(0.05) that silently drags every
+    transcript-less score a quarter of the way toward "中性观望". So the weights are
+    renormalized across the dimensions the release can actually evidence, and the
+    unevidenced ones are recorded at weight 0 with a note.
+    """
     exp_by = {e.dim_key: e for e in (expectations.expectations if expectations else [])}
     act_by = {m.dim_key: m for m in actuals.metrics}
+    unevidenced = _unevidenced_dims(config, actuals) if not has_transcript else set()
+    weights = _renormalized_weights(config, unevidenced)
     dim_lines = []
     for d in config.scorecard_dims:
         e = exp_by.get(d.key)
@@ -123,14 +134,43 @@ def score(config: PeadConfig, expectations: ExpectationSet | None, actuals: Actu
     lines, total = [], 0.0
     for d in config.scorecard_dims:
         s, note = scores.get(d.key, (0.0, "no score"))
-        weighted = s * d.weight
+        w = weights[d.key]
+        if d.key in unevidenced:
+            s, note, w = 0.0, "无纪要，该维度无证据（权重已剔除并重新归一）", 0.0
+        weighted = s * w
         total += weighted
-        lines.append(ScorecardLine(dim_key=d.key, label=d.label, weight=d.weight,
+        lines.append(ScorecardLine(dim_key=d.key, label=d.label, weight=round(w, 4),
                                    score=s, weighted=round(weighted, 4), note=note))
     total = round(total, 4)
     return Scorecard(symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
                      lines=lines, total=total, threshold=config.long_threshold,
                      band=_band(total, config.long_threshold))
+
+
+# Dimensions that only an earnings CALL can evidence. The release carries numbers and
+# usually explicit guidance, but never management's tone or the analyst pushback.
+_CALL_ONLY_DIMS = ("call_tone", "tone", "qa_tone", "management_tone")
+
+
+def _unevidenced_dims(config: PeadConfig, actuals: Actuals) -> set[str]:
+    """Dims with no evidence in a transcript-less run: call-only dims, plus any dim the
+    extractor produced nothing for."""
+    got = {m.dim_key for m in actuals.metrics if (m.actual or "").strip()}
+    out = {d.key for d in config.scorecard_dims
+           if d.key in _CALL_ONLY_DIMS or d.key not in got}
+    # Never drop everything — if the release evidenced nothing at all, keep the weights
+    # as configured and let the actuals guard upstream decide whether to score.
+    return out if len(out) < len(config.scorecard_dims) else set()
+
+
+def _renormalized_weights(config: PeadConfig, unevidenced: set[str]) -> dict[str, float]:
+    kept = [d for d in config.scorecard_dims if d.key not in unevidenced]
+    total_kept = sum(d.weight for d in kept)
+    if not kept or total_kept <= 0:
+        return {d.key: d.weight for d in config.scorecard_dims}
+    scale = sum(d.weight for d in config.scorecard_dims) / total_kept
+    return {d.key: (0.0 if d.key in unevidenced else d.weight * scale)
+            for d in config.scorecard_dims}
 
 
 def _band(total: float, threshold: float) -> str:
@@ -149,13 +189,21 @@ def _band(total: float, threshold: float) -> str:
 def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | None,
            portfolio: PortfolioSnapshot | None, net_liquidation: float,
            small_long_pct: float = 0.03, trim_fraction: float = 0.30,
+           size_factor: float = 1.0,
           ) -> tuple[list[TradeDecision], str, str]:
-    """Return (decisions, scenario_band, rationale). Action is fully deterministic."""
+    """Return (decisions, scenario_band, rationale). Action is fully deterministic.
+
+    `size_factor` scales the OPENING size only (a transcript-less score passes 0.5).
+    De-risking is never scaled down: if the evidence says trim, thin evidence is not a
+    reason to trim less.
+    """
     total = scorecard.total
     thr = config.long_threshold
     held_qty = _held_qty(portfolio, config.symbol)
     holding = held_qty > 0
     run_up = run_up_vs_sector
+    thin = size_factor != 1.0
+    thin_note = "（v1 缺纪要，仓位按 %.0f%% 计，纪要到位后重评）" % (size_factor * 100) if thin else ""
 
     # Cleared the (ticker-specific) long bar.
     if total >= thr:
@@ -163,10 +211,11 @@ def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | N
             return ([], "做多门槛达成但抢跑透支→观望",
                     f"总分 {total:+.2f} ≥ 门槛 {thr:+.1f}，但财报前 20 日相对 {config.sector_etf} "
                     f"抢跑 +{run_up:.1f}%（>{config.run_up_warn_pct:.0f}% 警戒），透支风险高，观望。")
-        notional = round(small_long_pct * net_liquidation, 0)
+        notional = round(small_long_pct * net_liquidation * size_factor, 0)
         d = TradeDecision(symbol=config.symbol, action="buy", notional_usd=notional,
                           order_type="market", conviction=min(1.0, total / max(thr, 0.5)),
-                          rationale=f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，抢跑可控；小仓位试探做多。")
+                          rationale=f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，抢跑可控；"
+                                    f"小仓位试探做多。{thin_note}")
         return ([d], "达成门槛→小仓位做多", d.rationale)
 
     # Below the long bar.

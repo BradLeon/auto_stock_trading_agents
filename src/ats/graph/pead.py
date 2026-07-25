@@ -335,6 +335,9 @@ def score_fetch(state: PeadState) -> dict:
 
     out["transcript_text"] = text
     out["transcript_resolved_source"] = src
+    if not text:
+        log.info("%s: 无纪要，按 v1（仅财报稿/8-K）打分，权重将重新归一且仓位减半",
+                 state.symbol)
 
     # Official documents: SEC 8-K earnings release + investor decks from the folder.
     if state.live_data:
@@ -342,6 +345,16 @@ def score_fetch(state: PeadState) -> dict:
 
         docs = documents.gather(state.symbol)
         out["documents_text"] = "\n\n".join(f"### {label}\n{txt[:25000]}" for label, txt in docs)
+
+    # Minimum-evidence guard: with neither a transcript nor an earnings release there
+    # is nothing this quarter to score. yfinance's quarterly statements lag the print
+    # by days, so scoring off them alone would grade the quarter against last
+    # quarter's numbers — a fabricated surprise. Refuse instead.
+    if state.live_data and not text and not out.get("documents_text", "").strip():
+        raise ValueError(
+            f"[evidence-guard] {state.symbol} score 已中止：既无电话会纪要，也没取到"
+            f"财报稿/8-K。仅凭滞后的季度报表打分会把上一季的数字当本季，宁可不打分。"
+            f" 待纪要或 8-K 就位后重试（下一个打分窗口会自动重试）。")
 
     # Need run-up for the decision; recompute if the prep dossier lacked it.
     if state.market_setup is None and state.live_data:
@@ -378,14 +391,22 @@ def score_scorecard(state: PeadState) -> dict:
                                        as_of=state.as_of, lines=lines, total=0.0,
                                        threshold=cfg.long_threshold,
                                        band=score_agents._band(0.0, cfg.long_threshold))}
-    return {"scorecard": score_agents.score(state.config, state.expectation_set,
-                                            state.actuals, state.as_of)}
+    return {"scorecard": score_agents.score(
+        state.config, state.expectation_set, state.actuals, state.as_of,
+        has_transcript=bool((state.transcript_text or "").strip()))}
 
 
 def score_decision(state: PeadState) -> dict:
+    from ..config import load_pead_global
+
     run_up = state.market_setup.run_up_vs_sector_pct if state.market_setup else None
+    # A transcript-less score opens at reduced size: guidance and management tone are
+    # missing, so the read is genuinely thinner. Re-evaluated when the transcript lands.
+    thin = not (state.transcript_text or "").strip()
+    size_factor = load_pead_global().get("score", {}).get("v1_size_factor", 0.5) if thin else 1.0
     decisions, band, rationale = score_agents.decide(
-        state.config, state.scorecard, run_up, state.portfolio, _net_liq(state))
+        state.config, state.scorecard, run_up, state.portfolio, _net_liq(state),
+        size_factor=size_factor)
 
     guardrails = risk_agent.assess(as_of=state.as_of, risk_cfg=get_config().app.risk,
                                    portfolio=state.portfolio,

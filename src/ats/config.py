@@ -256,11 +256,17 @@ def load_pead_global() -> dict:
     # Kill-switch for the staged rollout: while false, the score windows are forced to
     # dry-run even when the daemon runs --live (see pead_score_window).
     cfg["schedule"].setdefault("score_windows_live", False)
+    # Orders raised by the after-close window are approved overnight and submitted
+    # before the open, so they are repriced as limits off the last close ± this much.
+    cfg["schedule"].setdefault("overnight_limit_slippage_pct", 0.5)
     cfg.setdefault("score", {})
     # A chrome-stripped transcript is ~55K chars (~14K tokens) — fits whole in a
     # 200K context, so these caps are guardrails rather than routine clips.
     cfg["score"].setdefault("transcript_chars", 120000)
     cfg["score"].setdefault("documents_chars", 40000)
+    # Opening size for a transcript-less v1: guidance and management tone are missing,
+    # so the read is genuinely thinner. De-risking is never scaled (see agents decide).
+    cfg["score"].setdefault("v1_size_factor", 0.5)
     cfg.setdefault("docs_root", "")
     cfg.setdefault("industry_notes", {})
     cfg["industry_notes"].setdefault("root", "")

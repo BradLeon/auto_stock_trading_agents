@@ -61,6 +61,39 @@ def size_decisions(decisions: list[TradeDecision]) -> list[tuple[TradeDecision, 
     return [(d, _size(d)) for d in decisions]
 
 
+def as_overnight_limits(decisions: list[TradeDecision],
+                        slippage_pct: float = 0.5) -> tuple[list[TradeDecision], list[str]]:
+    """Reprice market orders as limits, for decisions raised outside market hours.
+
+    The PEAD after-close window scores at 20:00 ET and the Boss approves it around
+    08:00 Asia — hours before the open. A market order submitted then simply queues
+    to the open, and on a post-earnings gap that is the worst available fill. A limit
+    off the last close caps the damage: if the gap blows through it the order just
+    doesn't fill, which for a stock that already moved 12% is usually the right answer.
+
+    Returns (decisions, notes). Decisions already carrying a limit are left alone.
+    A decision whose reference price can't be fetched stays a market order and says
+    so in the notes — better a visible market order on the approval card than a
+    silently invented limit.
+    """
+    out: list[TradeDecision] = []
+    notes: list[str] = []
+    for d in decisions:
+        if d.order_type == "limit" and d.limit_price:
+            out.append(d)
+            continue
+        ref = _last_price(d.symbol)
+        if not ref:
+            out.append(d)
+            notes.append(f"{d.symbol}: 取不到参考价，保持市价单（隔夜单请人工确认）")
+            continue
+        mult = 1 + slippage_pct / 100 if d.action.lower() == "buy" else 1 - slippage_pct / 100
+        limit = round(ref * mult, 2)
+        out.append(d.model_copy(update={"order_type": "limit", "limit_price": limit}))
+        notes.append(f"{d.symbol}: 隔夜单改限价 {limit}（参考 {ref:.2f} {mult:+.2%}）")
+    return out, notes
+
+
 def build_approval_summary(sized: list[tuple[TradeDecision, float]],
                            risk_notes: list[str], source: str) -> str:
     """Banner + risk block + order lines — the body the Boss sees on the card."""

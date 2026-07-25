@@ -91,6 +91,23 @@ def _portfolio_block(ctx: ChiefContext, live_broker: bool) -> str:
         return ""
 
 
+def _score_age_days(run: dict | None, dossier, now: datetime) -> int:
+    """Days since the score was produced.
+
+    Prefers pead_score_runs.scored_at — dossier.updated_at is bumped daily by the
+    monitor, so it measures "last touched", not "when scored".
+    """
+    stamp = (run or {}).get("scored_at")
+    if stamp:
+        try:
+            ts = datetime.fromisoformat(stamp)
+            return (now - (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc))).days
+        except ValueError:
+            pass
+    up = dossier.updated_at
+    return (now - up.replace(tzinfo=up.tzinfo or timezone.utc)).days
+
+
 def _pead_block(held_symbols: set | None = None, ctx: "ChiefContext | None" = None) -> str:
     """PEAD dossiers. A score is ACTIONABLE (event trade, once) only if it's a fresh
     score AND not yet consumed by a prior chief cycle; otherwise it's background
@@ -119,19 +136,35 @@ def _pead_block(held_symbols: set | None = None, ctx: "ChiefContext | None" = No
             continue
         if d is None:
             continue
-        age = (now - d.updated_at.replace(tzinfo=d.updated_at.tzinfo or timezone.utc)).days
         is_score = d.phase == "score"
+        run = store.latest_score_run(sym.upper(), d.fiscal_label) if is_score else None
+        # Age from the SCORE, not from the dossier: the daily monitor rewrites the row
+        # and bumps updated_at, so a scored dossier is perpetually "0 days old" and
+        # FRESH_SCORE_DAYS would never expire it.
+        age = _score_age_days(run, d, now)
         consumed = store.is_score_consumed(sym.upper(), d.fiscal_label)
-        fresh = is_score and age <= FRESH_SCORE_DAYS and not consumed
+        # A transcript-less v1 is deliberately withheld: the window keeps retrying for
+        # the transcript, and only the final score is offered to the Chief — so the
+        # Chief responds once, to the best available evidence.
+        final = bool(run and (run["has_transcript"] or run["final"])) if run else is_score
+        fresh = is_score and final and age <= FRESH_SCORE_DAYS and not consumed
         if fresh and ctx is not None:
             ctx.actionable_scores.add((sym.upper(), d.fiscal_label))
-        tag = ("，**新鲜可行动（事件响应·仅此一次，动作后即失效）**" if fresh
-               else ("，仅背景（score 已消费→只作论点/持仓定位）" if (is_score and consumed)
-                     else "，仅背景"))
-        lines = [f"### {sym} ({d.fiscal_label}, phase={d.phase}, 更新于 {age} 天前{tag})"]
+        if fresh:
+            tag = "，**新鲜可行动（事件响应·仅此一次，动作后即失效）**"
+        elif is_score and consumed:
+            tag = "，仅背景（score 已消费→只作论点/持仓定位）"
+        elif is_score and not final:
+            tag = "，仅背景（v1 缺电话会纪要，等纪要到位后重打为终版）"
+        else:
+            tag = "，仅背景"
+        lines = [f"### {sym} ({d.fiscal_label}, phase={d.phase}, 打分于 {age} 天前{tag})"]
         if d.scorecard:
             lines.append(f"Scorecard: {d.scorecard.total:+.2f} (门槛 {d.scorecard.threshold:+.1f}) "
                          f"— {d.scorecard.band}")
+        if run and not run["has_transcript"]:
+            lines.append("⚠️ 证据: 仅财报稿/8-K 数字，**无电话会纪要** —— guidance 与"
+                         "管理层口风缺失，打分偏保守，仓位建议已减半")
         if d.decision_summary and fresh:            # 可行动建议仅在新鲜未消费时出现
             lines.append(f"PEAD 分析师建议: {d.decision_summary}")
         if d.market_setup:

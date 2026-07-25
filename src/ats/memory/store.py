@@ -81,10 +81,14 @@ CREATE TABLE IF NOT EXISTS pead_periods (
 -- (2) the v1(no transcript) -> v2(with transcript) upgrade record. Note this is the
 -- only reliable "when was it scored" signal — pead_dossier.updated_at is bumped by
 -- the daily monitor and so never goes stale.
+-- `final` = this score is the one the Chief may act on. A transcript-backed score is
+-- final immediately; a transcript-less v1 is NOT (it is deliberately withheld from the
+-- Chief while we retry for the transcript), and gets promoted at the upgrade deadline.
 CREATE TABLE IF NOT EXISTS pead_score_runs (
     symbol TEXT, fiscal_label TEXT, version INTEGER, scored_at TEXT, earnings_date TEXT,
     has_transcript INTEGER DEFAULT 0, transcript_source TEXT, window TEXT,
     latency_hours REAL, total REAL, band TEXT, decision_summary TEXT,
+    final INTEGER DEFAULT 0,
     PRIMARY KEY (symbol, fiscal_label, version)
 );
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
@@ -120,6 +124,11 @@ class TradingMemory:
                     "realized_pnl REAL", "source TEXT", "context TEXT"):
             if ddl.split()[0] not in tcols:
                 self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
+        scols = {r["name"] for r in self.conn.execute("PRAGMA table_info(pead_score_runs)")}
+        if scols and "final" not in scols:
+            # Pre-existing rows were all transcript-backed scores, so they are final.
+            self.conn.execute("ALTER TABLE pead_score_runs ADD COLUMN final INTEGER DEFAULT 0")
+            self.conn.execute("UPDATE pead_score_runs SET final = has_transcript")
         self.conn.commit()
 
     # --- writes ---------------------------------------------------------- #
@@ -255,16 +264,31 @@ class TradingMemory:
                          earnings_date, has_transcript: bool, transcript_source: str = "",
                          window: str = "", latency_hours: float | None = None,
                          total: float | None = None, band: str = "",
-                         decision_summary: str = "") -> None:
+                         decision_summary: str = "", final: bool | None = None) -> None:
+        """`final` defaults to has_transcript: a transcript-backed score is actionable
+        at once, a transcript-less v1 is withheld until promoted."""
         from datetime import datetime, timezone
 
         self.conn.execute(
-            "INSERT OR REPLACE INTO pead_score_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO pead_score_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (symbol.upper(), fiscal_label, version, datetime.now(timezone.utc).isoformat(),
              earnings_date.isoformat() if hasattr(earnings_date, "isoformat") else earnings_date,
              1 if has_transcript else 0, transcript_source, window, latency_hours,
-             total, band, decision_summary))
+             total, band, decision_summary,
+             1 if (has_transcript if final is None else final) else 0))
         self.conn.commit()
+
+    def promote_score_run(self, symbol: str, fiscal_label: str) -> bool:
+        """Mark the latest run final without re-scoring — used when the transcript
+        never arrived and the v1 becomes the best available answer."""
+        last = self.latest_score_run(symbol, fiscal_label)
+        if not last or last["final"]:
+            return False
+        self.conn.execute(
+            "UPDATE pead_score_runs SET final = 1 WHERE symbol = ? AND fiscal_label = ? "
+            "AND version = ?", (symbol.upper(), fiscal_label, last["version"]))
+        self.conn.commit()
+        return True
 
     def latest_score_run(self, symbol: str, fiscal_label: str) -> dict | None:
         row = self.conn.execute(
@@ -281,7 +305,11 @@ class TradingMemory:
         last = self.latest_score_run(symbol, fiscal_label)
         if not last:
             return "unscored"
-        return "final" if last["has_transcript"] else "v1_no_transcript"
+        return "final" if (last["has_transcript"] or last["final"]) else "v1_no_transcript"
+
+    def is_score_final(self, symbol: str, fiscal_label: str) -> bool:
+        """Whether the Chief may act on this quarter's score yet."""
+        return self.score_state(symbol, fiscal_label) == "final"
 
     def save_performance(self, record: PerformanceRecord) -> None:
         """Standalone performance snapshot (trader daily snapshot, no full cycle)."""

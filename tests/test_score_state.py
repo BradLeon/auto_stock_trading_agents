@@ -28,6 +28,7 @@ def _print(d=date(2026, 7, 22), session="amc", *, eps_actual=9.11, src="yf-clock
 
 
 def plan(window, today, print_, state="unscored", sched=None):
+    """-> (action, why); action is "score" | "promote" | ""."""
     return scheduler._score_plan(window, today, print_, state, sched or SCHED)
 
 
@@ -40,84 +41,87 @@ def test_amc_print_scores_the_same_evening():
     Under the old routing this waited for T+1 at 10:30 ET, i.e. an hour AFTER the
     next open — the drift it was trying to trade had already happened.
     """
-    go, why = plan("amc", date(2026, 7, 22), _print(session="amc"))
-    assert go, why
+    action, why = plan("amc", date(2026, 7, 22), _print(session="amc"))
+    assert action == "score", why
     assert "首打" in why
 
 
 def test_amc_print_not_scored_by_the_morning_window_same_day():
-    go, why = plan("bmo", date(2026, 7, 22), _print(session="amc"))
-    assert not go
+    action, why = plan("bmo", date(2026, 7, 22), _print(session="amc"))
+    assert action == ""
     assert "不匹配" in why
 
 
 def test_bmo_print_scores_that_morning():
-    go, why = plan("bmo", date(2026, 7, 29), _print(d=date(2026, 7, 29), session="bmo"))
-    assert go, why
+    action, why = plan("bmo", date(2026, 7, 29), _print(d=date(2026, 7, 29), session="bmo"))
+    assert action == "score", why
 
 
 def test_bmo_print_not_scored_by_the_evening_window():
-    go, _ = plan("amc", date(2026, 7, 29), _print(d=date(2026, 7, 29), session="bmo"))
-    assert not go
+    action, _ = plan("amc", date(2026, 7, 29), _print(d=date(2026, 7, 29), session="bmo"))
+    assert action == ""
 
 
 def test_dmh_print_treated_like_after_close():
-    go, _ = plan("amc", date(2026, 7, 22), _print(session="dmh"))
-    assert go
+    action, _ = plan("amc", date(2026, 7, 22), _print(session="dmh"))
+    assert action == "score"
 
 
 @pytest.mark.parametrize("window", ["amc", "bmo"])
 def test_unknown_session_is_attempted_in_both_windows(window):
     """Finnhub's `hour` is blank for SKHY/CRDO/MRVL — guessing would mis-time them."""
-    go, why = plan(window, date(2026, 7, 22), _print(session="unknown", src="none"))
-    assert go, why
+    action, why = plan(window, date(2026, 7, 22), _print(session="unknown", src="none"))
+    assert action == "score", why
 
 
 # --------------------------------------------------------------------------- #
 # Idempotency / state
 # --------------------------------------------------------------------------- #
 def test_final_state_short_circuits():
-    go, why = plan("amc", date(2026, 7, 22), _print(), state="final")
-    assert not go
+    action, why = plan("amc", date(2026, 7, 22), _print(), state="final")
+    assert action == ""
     assert "终版" in why
 
 
 def test_v1_is_retried_for_an_upgrade_inside_the_window():
-    go, why = plan("amc", date(2026, 7, 24), _print(), state="v1_no_transcript")
-    assert go, why
+    action, why = plan("amc", date(2026, 7, 24), _print(), state="v1_no_transcript")
+    assert action == "score", why
+    assert "升级 v2" in why
 
 
-def test_v1_becomes_final_after_the_upgrade_window():
-    go, why = plan("amc", date(2026, 7, 28), _print(), state="v1_no_transcript",
-                   sched={"score_lookback_days": 30, "transcript_upgrade_days": 4})
-    assert not go
-    assert "纪要窗口已过" in why
+def test_v1_is_promoted_after_the_upgrade_window():
+    """The transcript never came: promote the v1 (no LLM) so the Chief can finally
+    act on it, rather than leaving the quarter silently unscored forever."""
+    action, why = plan("amc", date(2026, 7, 28), _print(), state="v1_no_transcript",
+                       sched={"score_lookback_days": 30, "transcript_upgrade_days": 4})
+    assert action == "promote"
+    assert "提升为终版" in why
 
 
 # --------------------------------------------------------------------------- #
 # Windowing
 # --------------------------------------------------------------------------- #
 def test_no_print_does_nothing():
-    go, why = plan("amc", date(2026, 7, 22), None)
-    assert not go and "无近期财报" in why
+    action, why = plan("amc", date(2026, 7, 22), None)
+    assert action == "" and "无近期财报" in why
 
 
 def test_future_print_does_nothing():
-    go, why = plan("amc", date(2026, 7, 20), _print(d=date(2026, 7, 22)))
-    assert not go and "未来" in why
+    action, why = plan("amc", date(2026, 7, 20), _print(d=date(2026, 7, 22)))
+    assert action == "" and "未来" in why
 
 
 def test_missed_window_can_catch_up_next_day_in_either_window():
     """If the box was asleep at 20:00, T+1 should still score rather than skip."""
     for window in ("amc", "bmo"):
-        go, why = plan(window, date(2026, 7, 23), _print(session="amc"))
-        assert go, f"{window}: {why}"
+        action, why = plan(window, date(2026, 7, 23), _print(session="amc"))
+        assert action == "score", f"{window}: {why}"
         assert "补打" in why
 
 
 def test_stale_print_is_abandoned():
-    go, why = plan("amc", date(2026, 8, 5), _print(session="amc"))
-    assert not go and "超出补打窗口" in why
+    action, why = plan("amc", date(2026, 8, 5), _print(session="amc"))
+    assert action == "" and "超出补打窗口" in why
 
 
 # --------------------------------------------------------------------------- #

@@ -59,6 +59,13 @@ schedule:
   # the next open, which on a post-earnings gap is the worst available fill.
   score_windows_live: false
 
+  # Orders from the after-close window are approved overnight (~08:00 Asia) and reach
+  # the broker before the open, so they are submitted as LIMITs off the last close:
+  # buy at ref × (1 + pct/100), sell at ref × (1 − pct/100). If a post-earnings gap
+  # blows through the limit the order simply doesn't fill — for a name that already
+  # moved 12% overnight that is usually the right outcome.
+  overnight_limit_slippage_pct: 0.5
+
 # Context budget fed to the actuals extractor. A scraped transcript arrives wrapped
 # in page furniture (investing.com: ~34K chars of nav before the body, ~24K of ad
 # pixels after); data/transcript.extract_body strips that first, so ~55K of real
@@ -67,6 +74,10 @@ schedule:
 score:
   transcript_chars: 120000
   documents_chars: 40000
+  # A v1 (scored from the release only, no call transcript) opens at half size and has
+  # its call-only scorecard weights renormalized away rather than scored 0 — 0 means
+  # "in line", which would quietly drag every v1 toward 中性观望.
+  v1_size_factor: 0.5
 
 # Daily digests surfaced to the Boss each cascade — a detailed Obsidian .md +
 # a thumbnail Feishu card (runtime/digest.py). Always push (not gated by

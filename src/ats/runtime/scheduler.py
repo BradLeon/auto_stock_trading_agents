@@ -82,26 +82,35 @@ def _pead_actions(today: date, earnings_date: date | None, hour: str,
 # --------------------------------------------------------------------------- #
 # Score windows: one before the open (bmo prints), one after the close (amc)
 # --------------------------------------------------------------------------- #
-def _score_plan(window: str, today: date, print_, state: str, sched_cfg: dict) -> tuple[bool, str]:
-    """Should `window` attempt to score this print today? Pure — no I/O.
+def _score_plan(window: str, today: date, print_, state: str,
+                sched_cfg: dict) -> tuple[str, str]:
+    """What should `window` do about this print today? Pure — no I/O.
 
-    `print_` is an EarningsPrint (or None). `state` is store.score_state(...).
-    Sessions map to windows as follows, and a print whose session is UNKNOWN is
-    attempted in BOTH windows — measured, Finnhub's `hour` is blank for 5 of 13
-    targets, so guessing would mis-time those. Double attempts are safe because
-    `state` short-circuits once a score exists.
+    Returns (action, why) where action is:
+      "score"   — run the scoring pipeline
+      "promote" — the transcript never came; make the existing v1 the final answer
+                  (bookkeeping only, no LLM) so the Chief can finally act on it
+      ""        — nothing
+
+    `print_` is an EarningsPrint (or None); `state` is store.score_state(...).
+    A print whose session is UNKNOWN is attempted in BOTH windows — measured,
+    Finnhub's `hour` is blank for 5 of 13 targets, so guessing would mis-time them.
+    Double attempts are safe: `state` short-circuits once a score exists.
     """
     if print_ is None:
-        return (False, "无近期财报")
+        return ("", "无近期财报")
     age = (today - print_.date).days
     if age < 0:
-        return (False, f"财报在未来（{print_.date}）")
-    if age > sched_cfg.get("score_lookback_days", 4):
-        return (False, f"财报已过 {age} 天，超出补打窗口")
+        return ("", f"财报在未来（{print_.date}）")
     if state == "final":
-        return (False, "已有含纪要的终版打分")
-    if state == "v1_no_transcript" and age > sched_cfg.get("transcript_upgrade_days", 4):
-        return (False, f"纪要窗口已过（{age} 天），v1 定稿")
+        return ("", "已有终版打分")
+
+    if state == "v1_no_transcript":
+        # Retry for the transcript, then give up and let the v1 stand.
+        if age > sched_cfg.get("transcript_upgrade_days", 4):
+            return ("promote", f"纪要 {age} 天未到，v1 提升为终版（可行动）")
+    elif age > sched_cfg.get("score_lookback_days", 4):
+        return ("", f"财报已过 {age} 天，超出补打窗口")
 
     session = print_.session or "unknown"
     if session == "bmo":
@@ -113,10 +122,10 @@ def _score_plan(window: str, today: date, print_, state: str, sched_cfg: dict) -
     else:
         ok = True                      # unknown session -> try both windows
     if not ok:
-        return (False, f"session={session} 不匹配 {window} 窗口")
+        return ("", f"session={session} 不匹配 {window} 窗口")
 
-    verb = "补打" if age else "首打"
-    return (True, f"{verb}（{print_.date} {session}/{print_.session_source}, state={state}）")
+    verb = "升级 v2" if state == "v1_no_transcript" else ("补打" if age else "首打")
+    return ("score", f"{verb}（{print_.date} {session}/{print_.session_source}, state={state}）")
 
 
 def _confirm_reported(symbol: str, print_) -> tuple[bool, str]:
@@ -241,24 +250,38 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
             label = period.resolve_fiscal_label(
                 sym, pr, config_label=cfg.fiscal_label, store=store)[0] if pr else cfg.fiscal_label
             state = store.score_state(sym, label) if label else "unscored"
-            go, why = _score_plan(window, today, pr, state, sched)
-            if go:
+            action, why = _score_plan(window, today, pr, state, sched)
+            if action == "score":
                 # Confirm even under --plan-only: it is read-only and cheap, and a
                 # preview that skipped it would not reflect what the real run does.
                 ok, ev = _confirm_reported(sym, pr)
                 if not ok:
-                    go, why = False, f"待确认发布：{ev}"
+                    action, why = "", f"待确认发布：{ev}"
                 else:
                     why = f"{why} · {ev}"
-            log.info("PEAD-score[%s] %s: %s -> %s", window, sym,
-                     "GO" if go else "skip", why)
-            outcomes[sym] = ("GO · " if go else "") + why
-            if not go or plan_only:
+            log.info("PEAD-score[%s] %s: %s -> %s", window, sym, action or "skip", why)
+            outcomes[sym] = (f"{action.upper()} · " if action else "") + why
+            if not action or plan_only:
                 continue
+
+            if action == "promote":
+                if store.promote_score_run(sym, label):
+                    scored.append(sym)      # now actionable -> let the Chief see it
+                continue
+
             # Pin the resolved label so the Chief reads the same key tomorrow.
             period.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
             run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, chief=False)
-            scored.append(sym)
+            # Only a FINAL score reaches the Chief. A transcript-less v1 is withheld
+            # while we retry, so the Chief responds once, to the best evidence —
+            # this is what keeps score_consumption's "act once per earnings" intact
+            # without needing to un-consume anything.
+            if store.is_score_final(sym, label):
+                scored.append(sym)
+            else:
+                log.info("PEAD-score[%s] %s: v1 缺纪要，暂不惊动 Chief（等升级或到期提升）",
+                         window, sym)
+                outcomes[sym] += " · v1 缺纪要，暂不交给 Chief"
         except Exception as exc:  # noqa: BLE001 - one target must not break the window
             log.warning("PEAD-score[%s] %s failed: %s", window, sym, exc)
             outcomes[sym] = f"失败：{exc}"

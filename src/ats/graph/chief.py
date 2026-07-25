@@ -93,6 +93,18 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         print("(所有决策被风控硬约束拦下 — 无单可下)")
         return {"decisions": [], "portfolio": pf, "risk_notes": risk_notes}
 
+    # The PEAD after-close window raises orders at 20:00 ET for approval overnight;
+    # reprice them as limits BEFORE the approval card is built, so the Boss approves
+    # the same prices that get submitted.
+    if state.source == "pead-chief":
+        from ..config import load_pead_global
+
+        slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", 0.5)
+        decisions, limit_notes = texec.as_overnight_limits(decisions, slip)
+        for n in limit_notes:
+            print(f"   [overnight] {n}")
+        risk_notes = list(risk_notes) + limit_notes
+
     sized = texec.size_decisions(decisions)
     summary = texec.build_approval_summary(sized, risk_notes, state.source)
     return {"decisions": decisions, "portfolio": pf,

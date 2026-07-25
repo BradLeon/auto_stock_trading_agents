@@ -13,24 +13,47 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from ..config import get_config
 
 log = logging.getLogger("ats.scheduler")
 
+# All scheduler date arithmetic is in market time — see _today_et().
+ET = ZoneInfo("America/New_York")
+
 
 def is_trading_session(day: date | datetime | None = None) -> bool:
-    """True if `day` (default today) is a NYSE trading session."""
+    """True if `day` (default today, ET) is a NYSE trading session."""
     import pandas_market_calendars as mcal
 
-    d = (day or datetime.now()).date() if isinstance(day, datetime) else (day or _today())
+    d = day.date() if isinstance(day, datetime) else (day or _today())
     iso = d.isoformat()
     sched = mcal.get_calendar("XNYS").schedule(start_date=iso, end_date=iso)
     return not sched.empty
 
 
-def _today() -> date:
-    return datetime.now().date()
+def _now_et() -> datetime:
+    return datetime.now(ET)
+
+
+def _today_et() -> date:
+    """The market's calendar date, not the machine's.
+
+    This used to be `datetime.now().date()` — the naive LOCAL date. On an Asia-based
+    machine that is a day AHEAD of ET whenever the job fires after ~12:00 ET, which
+    silently mis-dated everything downstream: the NYSE session check, the events
+    calendar, and the Monday gates for the macro/sector reviews. At the old
+    run_at 16:15 (= 04:15 next day in Asia) it was always wrong; the current 10:30
+    (= 22:30 same day) happens to line up; the 20:00 ET amc score window would be
+    wrong again. So date arithmetic is pinned to ET.
+    """
+    return _now_et().date()
+
+
+# Kept as an alias: `_today` reads naturally at the call sites and several tests
+# monkeypatch it to pin "today".
+_today = _today_et
 
 
 def _pead_actions(today: date, earnings_date: date | None, hour: str,

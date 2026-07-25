@@ -3,5 +3,6 @@
 # TODO: 如需定制打分卡/信号链（Cloud 增速、CapEx 指引、TPU 自研），参照 NVDA.yaml 补全。
 
 symbol: GOOG
+company_name: \"Alphabet\"
 fiscal_label: "Q2 2026"        # 下次申报 2026-07-22 (amc)，日历季 Q2 2026
 long_threshold: 1.2            # megacap 高关注度，门槛抬高

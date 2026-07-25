@@ -4,6 +4,7 @@
 # "beat-but-drops" pattern.
 
 symbol: COHR
+company_name: \"Coherent\"
 fiscal_label: "Q FY2026"
 sector_etf: SMH
 benchmark: QQQ

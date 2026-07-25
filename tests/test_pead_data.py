@@ -15,16 +15,17 @@ def test_transcript_reads_manual_file(tmp_path):
 def test_transcript_none_when_missing(monkeypatch, tmp_path):
     # No manual file, no FMP, no search, no news -> empty + "none".
     monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
-    monkeypatch.setattr(transcript, "_fmp", lambda s: ("", ""))
-    monkeypatch.setattr(transcript, "_from_search", lambda s: ("", ""))
+    monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("", ""))
+    monkeypatch.setattr(transcript, "_from_search", lambda s, *a: ("", ""))
     monkeypatch.setattr(transcript, "_from_news", lambda s, **k: ("", ""))
     text, src = transcript.fetch("COHR", "Q3 FY2026")
     assert text == "" and src == "none"
 
 
 def test_transcript_search_used_before_news(monkeypatch, tmp_path):
-    monkeypatch.setattr(transcript, "_fmp", lambda s: ("", ""))
-    monkeypatch.setattr(transcript, "_from_search", lambda s: ("SEARCH TEXT", "tavily:fool.com/x"))
+    monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("", ""))
+    monkeypatch.setattr(transcript, "_from_search",
+                        lambda s, *a: ("SEARCH TEXT", "tavily:fool.com/x"))
     monkeypatch.setattr(transcript, "_from_news", lambda s, **k: ("NEWS TEXT", "news:..."))
     text, src = transcript.fetch("COHR", "Q3 FY2026")
     assert text == "SEARCH TEXT" and src.startswith("tavily:")
@@ -65,7 +66,7 @@ def test_transcript_from_news_skips_short_pages(monkeypatch):
 
 def test_transcript_fmp_used_when_no_override(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
-    monkeypatch.setattr(transcript, "_fmp", lambda s: ("fmp body", "fmp:Q1-2026"))
+    monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("fmp body", "fmp:Q1-2026"))
     text, src = transcript.fetch("COHR", "Q3 FY2026")
     assert text == "fmp body" and src == "fmp:Q1-2026"
 
@@ -73,7 +74,7 @@ def test_transcript_fmp_used_when_no_override(monkeypatch, tmp_path):
 def test_transcript_explicit_source_beats_fmp(monkeypatch, tmp_path):
     p = tmp_path / "t.txt"
     p.write_text("explicit", encoding="utf-8")
-    monkeypatch.setattr(transcript, "_fmp", lambda s: ("fmp body", "fmp:Q1-2026"))
+    monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("fmp body", "fmp:Q1-2026"))
     text, src = transcript.fetch("COHR", "Q3 FY2026", source=str(p))
     assert text == "explicit"          # explicit override wins
 

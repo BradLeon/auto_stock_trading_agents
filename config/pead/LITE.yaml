@@ -2,6 +2,7 @@
 # until calibrated. Signal chain mirrors COHR (same AI-optical complex).
 
 symbol: LITE
+company_name: \"Lumentum\"
 fiscal_label: "Q FY2026"
 sector_etf: SMH
 benchmark: QQQ

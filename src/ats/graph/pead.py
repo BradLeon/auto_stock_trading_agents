@@ -296,7 +296,9 @@ def score_fetch(state: PeadState) -> dict:
     # Fetch the transcript when explicitly provided, or in live mode; skip offline
     # (avoids network in tests / offline runs).
     if state.transcript_source or state.live_data:
-        text, src = transcript_src.fetch(state.symbol, state.fiscal_label, state.transcript_source)
+        text, src = transcript_src.fetch(state.symbol, state.fiscal_label,
+                                         state.transcript_source,
+                                         company_name=state.config.company_name)
     else:
         text, src = "", "offline"
 
@@ -313,6 +315,13 @@ def score_fetch(state: PeadState) -> dict:
                 f"[period-guard] {state.symbol} score 已中止：{why}。transcript source={src}。"
                 f" 请用正确季度的 --transcript 重跑，或等待目标季 transcript 就绪（宁可不打分也不错季）。")
         out["transcript_period_note"] = why
+
+        # Strip page furniture AFTER the period guard: verify_transcript's body
+        # fallback reads text[:2500], so trimming first would move that window off
+        # the header where the quarter is usually stated.
+        text, strip_note = transcript_src.extract_body(text, src)
+        if strip_note:
+            out["transcript_period_note"] = f"{why}；{strip_note}"
 
         # Body-quality guard: a scraper may hand back nav chrome / a truncated
         # stub (right URL, wrong content) — that silently zeroes the guidance /
@@ -348,10 +357,15 @@ def score_actuals(state: PeadState) -> dict:
     if not state.use_llm:
         return {"actuals": Actuals(symbol=state.symbol, fiscal_label=state.fiscal_label,
                                    as_of=state.as_of, guidance="(no-llm)")}
+    from ..config import load_pead_global
+
+    score_cfg = load_pead_global().get("score", {})
     actuals = score_agents.extract_actuals(
         state.config, state.expectation_set, state.transcript_text,
         state.fundamentals_text, state.as_of, state.transcript_resolved_source,
-        documents_text=state.documents_text)
+        documents_text=state.documents_text,
+        transcript_chars=score_cfg.get("transcript_chars", 120_000),
+        documents_chars=score_cfg.get("documents_chars", 40_000))
     return {"actuals": actuals}
 
 

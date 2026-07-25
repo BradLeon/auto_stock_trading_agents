@@ -244,6 +244,11 @@ def load_pead_global() -> dict:
     cfg.setdefault("schedule", {})
     cfg["schedule"].setdefault("prep_days_before", 3)
     cfg["schedule"].setdefault("score_after", True)
+    cfg.setdefault("score", {})
+    # A chrome-stripped transcript is ~55K chars (~14K tokens) — fits whole in a
+    # 200K context, so these caps are guardrails rather than routine clips.
+    cfg["score"].setdefault("transcript_chars", 120000)
+    cfg["score"].setdefault("documents_chars", 40000)
     cfg.setdefault("docs_root", "")
     cfg.setdefault("industry_notes", {})
     cfg["industry_notes"].setdefault("root", "")

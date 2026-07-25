@@ -605,6 +605,55 @@ def run_pead_research(*, use_llm: bool = True) -> list:
     return insights
 
 
+def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) -> int:
+    """Audit transcript retrieval across recent quarters — no LLM, read-only.
+
+    For each target we walk the fiscal label BACKWARDS (label arithmetic, so it works
+    for offset fiscal years like NVDA's FY2027 as well as calendar-quarter filers)
+    and check that the fetched transcript REPORTS the quarter we asked for.
+
+    Acceptance: zero wrong-quarter picks. A miss is tolerable — scoring then falls
+    back to the earnings release — but a wrong quarter silently produces a fictional
+    surprise, so it must never happen.
+    """
+    from ..config import load_pead_config, load_pead_global
+    from ..data import fiscal, transcript
+
+    targets = [s.upper() for s in (symbols or load_pead_global().get("targets", []))]
+    rows, wrong, missing, skipped = [], 0, 0, []
+
+    for sym in targets:
+        cfg = load_pead_config(sym)
+        year, quarter = fiscal.parse_label(cfg.fiscal_label)
+        if not (year and quarter):
+            skipped.append(f"{sym}（fiscal_label={cfg.fiscal_label!r} 无季度）")
+            continue
+        for back in range(quarters):
+            q, y = quarter - back, year
+            while q <= 0:
+                q += 4
+                y -= 1
+            label = f"Q{q} {y}"
+            text, src = transcript._from_search(sym, label, cfg.company_name)
+            got = fiscal.detect_period(text, src) if text else None
+            body = transcript.extract_body(text, src)[0] if text else ""
+            if not text:
+                status, missing = "—— 未找到", missing + 1
+            elif got == (y, q):
+                status = "✅ 正确"
+            else:
+                status, wrong = f"❌ 错季 {got}", wrong + 1
+            rows.append((sym, label, status, len(text), len(body), src[:64]))
+            print(f"  {sym:6} {label:10} {status:16} raw={len(text):7} body={len(body):7} {src[:64]}")
+
+    print(f"\n=== transcript 检索审计：{len(rows)} 次查询 ===")
+    print(f"  ✅ 正确 {len(rows) - wrong - missing}   ❌ 错季 {wrong}   —— 未找到 {missing}")
+    if skipped:
+        print(f"  ⏭  跳过（label 无季度，待 Stage B 派生）：{', '.join(skipped)}")
+    print("  验收标准：错季 = 0" + ("  → 通过 ✅" if wrong == 0 else "  → 未通过 ❌"))
+    return 1 if wrong else 0
+
+
 def pead_show(symbol: str) -> int:
     from ..memory import get_store
 
@@ -762,8 +811,11 @@ def main(argv: list[str] | None = None) -> int:
     ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     pe = sub.add_parser("pead",
                         help="PEAD earnings workflow (prep / score / show / monitor / watch / research)")
-    pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research"])
+    pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research",
+                                       "transcriptprobe"])
     pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch` / `research`)")
+    pe.add_argument("--quarters", type=int, default=4,
+                    help="transcriptprobe: how many recent quarters per target")
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
@@ -851,6 +903,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "research":
             run_pead_research(use_llm=not args.no_llm)
             return 0
+        if args.action == "transcriptprobe":
+            return run_transcript_probe([args.symbol] if args.symbol else None,
+                                        quarters=args.quarters)
         if not args.symbol:
             parser.error("pead %s requires a symbol" % args.action)
         if args.action == "show":

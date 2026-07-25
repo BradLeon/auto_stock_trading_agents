@@ -35,6 +35,15 @@ schedule:
   prep_days_before: 3            # run/refresh prep when earnings is within N days
   score_after: true             # run score the session after earnings (if transcript available)
 
+# Context budget fed to the actuals extractor. A scraped transcript arrives wrapped
+# in page furniture (investing.com: ~34K chars of nav before the body, ~24K of ad
+# pixels after); data/transcript.extract_body strips that first, so ~55K of real
+# body reaches the LLM whole. Clipping keeps head AND tail — guidance and the
+# analyst Q&A sit at the END of a call.
+score:
+  transcript_chars: 120000
+  documents_chars: 40000
+
 # Daily digests surfaced to the Boss each cascade — a detailed Obsidian .md +
 # a thumbnail Feishu card (runtime/digest.py). Always push (not gated by
 # monitor.push_context_updates). Set false to silence a digest.

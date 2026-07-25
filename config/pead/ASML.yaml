@@ -3,6 +3,7 @@
 # 决定 TSM/Intel/Samsung 未来 12-18 个月的先进制程产能，间接决定 NVDA 供给上限。
 
 symbol: ASML
+company_name: \"ASML\"
 fiscal_label: "Q2 FY2026"    # ASML 按日历季申报：2026 Q2（7 月中发布）
 sector_etf: SMH
 benchmark: QQQ

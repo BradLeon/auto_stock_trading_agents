@@ -2,6 +2,7 @@
 # 铜链路连接龙头，超高营收增速 + 极端估值；对 hyperscaler 机架内互联 capex 高度敏感。
 # TODO: 定制打分卡（营收增速/大客户集中度/毛利率）；财报前补 fiscal_label。
 symbol: CRDO
+company_name: \"Credo Technology\"
 sector_etf: SMH
 benchmark: QQQ
 fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对

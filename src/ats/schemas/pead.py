@@ -33,6 +33,7 @@ class SignalChainConfig(BaseModel):
 class PeadConfig(BaseModel):
     symbol: str
     fiscal_label: str = ""                  # e.g. "Q3 FY2026"
+    company_name: str = ""                  # "Alphabet" — sharpens transcript search
     sector_etf: str = "SMH"                 # run-up benchmark
     benchmark: str = "QQQ"
     run_up_warn_pct: float = 5.0            # excess run-up vs sector that raises the bar

@@ -29,16 +29,33 @@ log = logging.getLogger("ats.agents.pead")
 # --------------------------------------------------------------------------- #
 # Actuals extraction (LLM from transcript + reported financials)
 # --------------------------------------------------------------------------- #
+def _clip(text: str, cap: int) -> str:
+    """Clip to `cap` chars keeping BOTH ends.
+
+    Head-only truncation is wrong for a transcript: prepared remarks open the call
+    but forward GUIDANCE and the analyst Q&A — the two things that actually move a
+    PEAD score — are at the END. So keep 60% head + 40% tail and mark the gap.
+    """
+    if len(text) <= cap:
+        return text
+    head, tail = int(cap * 0.6), cap - int(cap * 0.6)
+    dropped = len(text) - cap
+    return f"{text[:head]}\n\n…[中间省略 {dropped} 字]…\n\n{text[-tail:]}"
+
+
 def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
                     transcript_text: str, fundamentals_text: str, as_of: datetime,
-                    transcript_source: str = "", documents_text: str = "") -> Actuals:
+                    transcript_source: str = "", documents_text: str = "",
+                    transcript_chars: int = 120_000,
+                    documents_chars: int = 40_000) -> Actuals:
     exp_lines = ""
     if expectations:
         exp_lines = "\n".join(
             f"  - {e.dim_key}: neutral={e.neutral}" for e in expectations.expectations)
-    # Opus has ample context; keep enough of each source to reach guidance + segments.
-    transcript_block = transcript_text[:40000] if transcript_text else "(no transcript)"
-    docs_block = documents_text[:40000] if documents_text else "(no official docs)"
+    # Opus/Sonnet have 200K context: a chrome-stripped transcript (~55K chars ≈ 14K
+    # tokens) fits whole, so the default cap is a guardrail, not a routine clip.
+    transcript_block = _clip(transcript_text, transcript_chars) if transcript_text else "(no transcript)"
+    docs_block = _clip(documents_text, documents_chars) if documents_text else "(no official docs)"
     ctx = (
         f"Extract Q actuals for {config.symbol} ({config.fiscal_label}).\n"
         f"Expectations (neutral case) per dimension:\n{exp_lines}\n\n"

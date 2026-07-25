@@ -1,6 +1,6 @@
 # Global PEAD settings (per-ticker config lives in config/pead/<SYM>.yaml).
 
-targets: [GOOG, MSFT, AMZN, NVDA, SKHY, TSM, ASML, KLAC, COHR, LRCX, LITE, CRDO, AXT, AAOI, VRT]  # monitor + scheduler operate on
+targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, CRDO, AVGO, MRVL, VRT, KLAC]  # monitor + scheduler operate on
 # 上一轮：[ASML, TSM, NVDA]（AI 硬件上游三家）。本轮扩到全链 10 家：
 #   需求端云厂 GOOG/MSFT/AMZN → GPU 龙头 NVDA → 晶圆/HBM TSM/SKHY → 设备 ASML/KLAC/LRCX
 #   → 光互联 COHR。COHR/LRCX 当前以期权持有，但 PEAD 仍监控其正股财报事件。

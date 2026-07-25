@@ -106,6 +106,15 @@ def _pead_block(held_symbols: set | None = None, ctx: "ChiefContext | None" = No
         try:
             cfg = load_pead_config(sym)
             d = store.get_dossier(sym.upper(), cfg.fiscal_label)
+            if d is None:
+                # The label may have been DERIVED from the earnings calendar rather
+                # than hand-written in config (data/period.resolve_fiscal_label), so
+                # an exact config-label lookup can miss a dossier that exists. Fall
+                # back to the freshest stored one — better the real quarter than a
+                # silently empty PEAD block.
+                recent = store.recent_dossiers(sym.upper(), limit=1)
+                if recent:
+                    d = store.get_dossier(sym.upper(), recent[0]["fiscal_label"])
         except Exception:  # noqa: BLE001
             continue
         if d is None:

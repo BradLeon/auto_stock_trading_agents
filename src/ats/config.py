@@ -284,8 +284,16 @@ def load_pead_config(symbol: str):
 
 
 def is_pead_target(symbol: str) -> bool:
-    """A symbol is PEAD-configured iff config/pead/<SYM>.yaml exists."""
-    return (_config_dir() / "pead" / f"{symbol.upper()}.yaml").exists()
+    """True if the symbol is under PEAD coverage.
+
+    Membership in config/pead.yaml `targets` is what counts — a per-ticker file is
+    optional (missing means "use the _defaults scorecard"). Requiring the file is
+    what silently excluded AVGO/MRVL after they were added to `targets` without one.
+    """
+    sym = symbol.upper()
+    if sym in {s.upper() for s in load_pead_global().get("targets", [])}:
+        return True
+    return (_config_dir() / "pead" / f"{sym}.yaml").exists()
 
 
 def load_sector_config(name: str = "ai_hardware"):

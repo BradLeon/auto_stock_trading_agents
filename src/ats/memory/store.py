@@ -66,6 +66,16 @@ CREATE TABLE IF NOT EXISTS score_consumption (
     symbol TEXT, fiscal_label TEXT, consumed_at TEXT, cycle_id TEXT,
     PRIMARY KEY (symbol, fiscal_label)
 );
+-- One row per detected earnings print. Caches the resolved fiscal_label so the
+-- quarter key cannot drift between the score write and a later Chief read (the
+-- upstream calendars do revise quarter/year), and records which source decided
+-- the session, for audit.
+CREATE TABLE IF NOT EXISTS pead_periods (
+    symbol TEXT, earnings_date TEXT, fiscal_label TEXT, quarter INTEGER, year INTEGER,
+    session TEXT, session_source TEXT, at TEXT, eps_actual REAL, rev_actual REAL,
+    label_source TEXT, detected_at TEXT,
+    PRIMARY KEY (symbol, earnings_date)
+);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -202,6 +212,32 @@ class TradingMemory:
             "SELECT 1 FROM score_consumption WHERE symbol = ? AND fiscal_label = ?",
             (symbol.upper(), fiscal_label)).fetchone()
         return row is not None
+
+    # --- Detected earnings prints (quarter key + session, cached per print) ---- #
+    def upsert_period(self, print_, fiscal_label: str, label_source: str) -> None:
+        """Record/refresh a detected print keyed (symbol, earnings_date).
+
+        Caching the label matters: the upstream calendars revise quarter/year, and a
+        label that shifts between the score write and a later read would orphan the
+        dossier (its PK is (symbol, fiscal_label)).
+        """
+        from datetime import datetime, timezone
+
+        p = print_
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pead_periods VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (p.symbol.upper(), p.date.isoformat(), fiscal_label, p.quarter, p.year,
+             p.session, p.session_source, p.at.isoformat() if p.at else None,
+             p.eps_actual, p.rev_actual, label_source,
+             datetime.now(timezone.utc).isoformat()))
+        self.conn.commit()
+
+    def get_period(self, symbol: str, earnings_date) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM pead_periods WHERE symbol = ? AND earnings_date = ?",
+            (symbol.upper(), earnings_date.isoformat() if hasattr(earnings_date, "isoformat")
+             else earnings_date)).fetchone()
+        return dict(row) if row else None
 
     def save_performance(self, record: PerformanceRecord) -> None:
         """Standalone performance snapshot (trader daily snapshot, no full cycle)."""

@@ -44,20 +44,26 @@ def _capture(conn) -> Section:
         s.findings.append(Finding("trades", "0 行", None, "还没有任何订单记录"))
         return s
 
+    # Fill facts are only OWED by orders that actually filled — measuring them against
+    # all 52 rows (most of which errored or were cancelled) understates the real state.
+    filled = conn.execute("SELECT COUNT(*) FROM trades WHERE status = 'filled'").fetchone()[0]
     row = conn.execute(
         "SELECT SUM(avg_fill_price IS NOT NULL), SUM(realized_pnl IS NOT NULL), "
-        "SUM(filled_at IS NOT NULL), SUM(order_id IS NOT NULL AND order_id != '') "
-        "FROM trades").fetchone()
-    px, pnl, fat, oid = (r or 0 for r in row)
+        "SUM(filled_at IS NOT NULL) FROM trades WHERE status = 'filled'").fetchone()
+    px, pnl, fat = (r or 0 for r in row)
+    oid = conn.execute(
+        "SELECT COUNT(*) FROM trades WHERE order_id IS NOT NULL AND order_id != ''"
+    ).fetchone()[0]
 
     s.findings.append(Finding("trades 总行数", str(total)))
-    s.findings.append(Finding("有成交价 avg_fill_price", _pct(px, total), px == total,
-                              "3 秒轮询之后才成交的单永远不会回填" if px < total else ""))
-    s.findings.append(Finding("有盈亏 realized_pnl", _pct(pnl, total), pnl == total,
-                              "_insert_trades 硬编码 None，全库无 UPDATE" if not pnl else ""))
-    s.findings.append(Finding("有成交时间 filled_at", _pct(fat, total), fat == total))
-    s.findings.append(Finding("有 order_id", _pct(oid, total), oid == total,
-                              "cancelled/error 单没有 order_id" if oid < total else ""))
+    s.findings.append(Finding("其中已成交", str(filled), None, "以下三项只对已成交单计算"))
+    s.findings.append(Finding("  有成交价 avg_fill_price", _pct(px, filled), px == filled,
+                              "3 秒轮询之后才成交的单不会回填" if px < filled else ""))
+    s.findings.append(Finding("  有盈亏 realized_pnl", _pct(pnl, filled), pnl == filled,
+                              "_insert_trades 写 None；需 reconcile 回填" if pnl < filled else ""))
+    s.findings.append(Finding("  有成交时间 filled_at", _pct(fat, filled), fat == filled))
+    s.findings.append(Finding("有 order_id", _pct(oid, total), None,
+                              "cancelled/error 单本就没有 order_id"))
 
     states = conn.execute(
         "SELECT status, COUNT(*) FROM trades GROUP BY status ORDER BY 2 DESC").fetchall()

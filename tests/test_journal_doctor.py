@@ -69,6 +69,20 @@ def test_clean_capture_passes(conn):
     assert _find(sections, "1.", "有成交价").ok is True
 
 
+def test_unfilled_orders_are_not_counted_as_missing_pnl(conn):
+    """A cancelled/errored order owes no fill price and no P&L — measuring those
+    against all rows (most of which never filled) misstates the real gap."""
+    _trade(conn, order_id="1", status="filled", avg_fill_price=317.07,
+           realized_pnl=495.19, filled_at=NOW.isoformat())
+    for i, st in enumerate(("error", "cancelled", "expired"), start=2):
+        _trade(conn, order_id=str(i), symbol=f"S{i}", status=st)
+    sections = doctor.collect(conn)
+    assert _find(sections, "1.", "trades 总行数").value == "4"
+    assert _find(sections, "1.", "其中已成交").value == "1"
+    f = _find(sections, "1.", "有盈亏")
+    assert f.ok is True and f.value.startswith("1/1")
+
+
 def test_flags_zombie_submitted_rows(conn):
     """Submitted with no fill price = we never learned the outcome."""
     _trade(conn, status="submitted", order_id="1")

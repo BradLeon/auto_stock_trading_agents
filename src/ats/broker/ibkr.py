@@ -230,6 +230,34 @@ class IBKRBroker:
                     "realized_pnl": float(rp) if isinstance(rp, (int, float)) and rp == rp else None,
                     "commission": float(getattr(cr, "commission", 0) or 0),
                     "order_id": str(ex.orderId),
+                    # Durable identities: orderId is a per-client sequence that TWS
+                    # resets, so it cannot be joined on across days. permId is global
+                    # and permanent; orderRef is our own tag, echoed back on every
+                    # execution, and is what separates our orders from manual ones.
+                    "perm_id": str(getattr(ex, "permId", "") or ""),
+                    "order_ref": str(getattr(ex, "orderRef", "") or ""),
+                })
+        return out
+
+    def completed_orders(self) -> list[dict]:
+        """Terminal state of today's orders, including ones that never filled.
+
+        `place_orders` only polls for 3 seconds, so anything settling later is left
+        as 'submitted' forever — including DAY orders the exchange cancels at the
+        close. This is the read that resolves them.
+        """
+        out: list[dict] = []
+        with self.session() as ib:
+            ib.reqCompletedOrders(apiOnly=False)
+            ib.sleep(1.5)
+            for t in list(ib.trades()) + list(getattr(ib, "completedTrades", lambda: [])()):
+                st, o = t.orderStatus, t.order
+                out.append({
+                    "order_id": str(o.orderId), "perm_id": str(getattr(o, "permId", "") or ""),
+                    "order_ref": str(getattr(o, "orderRef", "") or ""),
+                    "symbol": t.contract.symbol, "status": _map_status(st.status),
+                    "filled": float(st.filled or 0),
+                    "avg_fill_price": float(st.avgFillPrice) if st.avgFillPrice else None,
                 })
         return out
 

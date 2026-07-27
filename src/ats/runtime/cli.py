@@ -845,8 +845,10 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
-    jr = sub.add_parser("journal", help="交易日志 (doctor)")
-    jr.add_argument("action", choices=["doctor"])
+    jr = sub.add_parser("journal", help="交易日志 (doctor / reconcile)")
+    jr.add_argument("action", choices=["doctor", "reconcile"])
+    jr.add_argument("--dry-run", action="store_true",
+                    help="reconcile: 只读，打印将要写入什么")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
     tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
                                        "cancel", "execute", "buy", "sell"])
@@ -933,6 +935,10 @@ def main(argv: list[str] | None = None) -> int:
             return risk_memo()
         return risk_check(args.symbol)
     if args.command == "journal":
+        if args.action == "reconcile":
+            from ..trader import reconcile
+
+            return reconcile.run(dry_run=args.dry_run)
         from ..journal import doctor
 
         return doctor.run()

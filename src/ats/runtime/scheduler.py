@@ -431,6 +431,21 @@ def _chief_daily(*, dry_run: bool) -> None:
         log.warning("chief daily run failed: %s", exc)
 
 
+def _journal_reconcile() -> None:
+    """Backfill today's execution outcomes onto the trade record."""
+    if not is_trading_session():
+        return
+    try:
+        from ..trader import reconcile
+
+        s = reconcile.reconcile()
+        log.info("journal reconcile: %s", {k: v for k, v in s.items() if k != "errors"})
+        for e in s.get("errors", []):
+            log.warning("journal reconcile: %s", e)
+    except Exception as exc:  # noqa: BLE001 - must never break the daemon
+        log.warning("journal reconcile failed: %s", exc)
+
+
 def _macro_weekly() -> None:
     """Weekly macro strategist review (Mondays by default). Runs BEFORE the sector
     review so this week's macro regime feeds it (cascade 宏观→行业→个股)."""
@@ -507,6 +522,19 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             CronTrigger(day_of_week="mon-fri", hour=w_hour, minute=w_minute,
                         timezone=cfg.timezone),
             id=f"pead_score_{name}", misfire_grace_time=3600,
+        )
+
+    # Post-close reconciliation. Its own job on purpose: reqExecutions only returns
+    # the CURRENT day's executions, so a session it misses is lost for good — it must
+    # not be able to fail just because an LLM step earlier in the cascade did.
+    jcfg = get_config().app.journal
+    if jcfg.enabled:
+        r_hour, r_minute = (int(x) for x in jcfg.reconcile_at.split(":"))
+        scheduler.add_job(
+            lambda: _journal_reconcile(),
+            CronTrigger(day_of_week="mon-fri", hour=r_hour, minute=r_minute,
+                        timezone=cfg.timezone),
+            id="journal_reconcile", misfire_grace_time=7200,
         )
 
     win_desc = ", ".join(f"{n}@{h}" for n, h in sorted(windows.items())) or "none"

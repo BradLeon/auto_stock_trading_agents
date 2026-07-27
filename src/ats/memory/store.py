@@ -272,6 +272,16 @@ class TradingMemory:
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
 
+    # --- journal bookkeeping ---------------------------------------------- #
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO journal_meta VALUES (?,?)", (key, value))
+        self.conn.commit()
+
+    def get_meta(self, key: str, default: str = "") -> str:
+        row = self.conn.execute(
+            "SELECT value FROM journal_meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
     def recent_fills(self, symbol: str | None = None, limit: int = 20) -> list[dict]:
         if symbol:
             rows = self.conn.execute(

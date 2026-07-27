@@ -272,6 +272,18 @@ class TradingMemory:
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
 
+    def set_cycle_approval(self, cycle_id: str, status: str) -> None:
+        """Record the Boss's verdict once it is known.
+
+        `save_chief_run` writes the cycle row BEFORE the approval interrupt (so a card
+        the Boss never answers still leaves an audit trail), which is why
+        approval_status was NULL on every cycle ever recorded — nothing came back to
+        fill it in.
+        """
+        self.conn.execute("UPDATE cycles SET approval_status = ? WHERE cycle_id = ?",
+                          (status, cycle_id))
+        self.conn.commit()
+
     # --- journal bookkeeping ---------------------------------------------- #
     def set_meta(self, key: str, value: str) -> None:
         self.conn.execute("INSERT OR REPLACE INTO journal_meta VALUES (?,?)", (key, value))

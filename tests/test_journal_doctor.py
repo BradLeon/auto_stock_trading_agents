@@ -23,13 +23,17 @@ def conn():
 
 
 def _trade(conn, *, cycle="c1", symbol="GOOG", action="trim", status="filled",
-           order_id="1", avg_fill_price=None, realized_pnl=None, filled_at=None):
+           order_id="1", avg_fill_price=None, realized_pnl=None, filled_at=None,
+           legacy=False):
+    """`legacy=True` omits client_order_id, i.e. a row written before the journal."""
+    coid = None if legacy else f"{cycle}:{symbol}:{action}:{order_id}"
     conn.execute(
         "INSERT INTO trades (order_id, cycle_id, symbol, action, qty, order_type, status, "
         "avg_fill_price, submitted_at, rationale, limit_price, filled_at, error, "
-        "realized_pnl, source, context) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "realized_pnl, source, context, client_order_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (order_id, cycle, symbol, action, 10.0, "limit", status, avg_fill_price,
-         NOW.isoformat(), "why", None, filled_at, "", realized_pnl, "chief", "{}"))
+         NOW.isoformat(), "why", None, filled_at, "", realized_pnl, "chief", "{}", coid))
     conn.commit()
 
 
@@ -100,7 +104,7 @@ def test_counts_redundant_rows_not_just_groups(conn):
         _trade(conn, cycle="c1", symbol="GOOG", action="trim", order_id=str(i))
     for i in range(5):
         _trade(conn, cycle="c1", symbol="ASML", action="trim", order_id=f"a{i}")
-    f = _find(doctor.collect(conn), "2.", "重复的意图组")
+    f = _find(doctor.collect(conn), "2.", "重复的意图组（新制）")
     assert f.ok is False
     assert f.value == "2"
     assert "多出 8 行" in f.detail
@@ -109,7 +113,24 @@ def test_counts_redundant_rows_not_just_groups(conn):
 def test_no_duplicates_passes(conn):
     _trade(conn, symbol="GOOG", order_id="1")
     _trade(conn, symbol="ASML", order_id="2")
-    assert _find(doctor.collect(conn), "2.", "重复意图").ok is True
+    assert _find(doctor.collect(conn), "2.", "重复的意图组（新制）").ok is True
+
+
+def test_legacy_rows_are_reported_separately_not_as_failures(conn):
+    """History written before the journal cannot be repaired — the broker only serves
+    the current day's executions. Flagging it red forever just trains you to ignore
+    the whole report."""
+    for i in range(5):                       # the real 2026-07-23 retry storm
+        _trade(conn, cycle="old", symbol="GOOG", order_id=str(i), legacy=True)
+    _trade(conn, cycle="new", symbol="ASML", order_id="9", status="filled",
+           avg_fill_price=100.0, realized_pnl=5.0, filled_at=NOW.isoformat())
+
+    sections = doctor.collect(conn)
+    assert _find(sections, "1.", "历史行").value == "5"
+    assert _find(sections, "2.", "重复的意图组（新制）").ok is True      # new regime clean
+    legacy = _find(sections, "2.", "历史重复")
+    assert legacy.ok is None                                        # context, not failure
+    assert "1 组 / 多 4 行" in legacy.value
 
 
 # --------------------------------------------------------------------------- #

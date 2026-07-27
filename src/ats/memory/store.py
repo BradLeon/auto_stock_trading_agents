@@ -17,9 +17,6 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cycles (
     cycle_id TEXT PRIMARY KEY, as_of TEXT, approval_status TEXT, manager_summary TEXT
 );
-CREATE TABLE IF NOT EXISTS reports (
-    cycle_id TEXT, role TEXT, symbol TEXT, signal TEXT, conviction REAL, thesis TEXT, as_of TEXT
-);
 CREATE TABLE IF NOT EXISTS decisions (
     cycle_id TEXT, symbol TEXT, action TEXT, notional_usd REAL, limit_price REAL,
     conviction REAL, rationale TEXT
@@ -144,7 +141,6 @@ CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries(symbol);
 CREATE INDEX IF NOT EXISTS idx_pred_symbol ON predictions(symbol);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
-CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 """
 
@@ -492,12 +488,6 @@ class TradingMemory:
         else:
             rows = self.conn.execute(
                 "SELECT * FROM decisions ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
-
-    def recent_reports(self, symbol: str, limit: int = 5) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM reports WHERE symbol = ? ORDER BY rowid DESC LIMIT ?",
-            (symbol, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def recent_trades(self, symbol: str | None = None, limit: int = 10) -> list[dict]:

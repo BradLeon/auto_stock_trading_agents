@@ -201,7 +201,7 @@ class TradingMemory:
     # --- writes ---------------------------------------------------------- #
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
                    "avg_fill_price", "submitted_at", "rationale", "limit_price", "filled_at",
-                   "error", "realized_pnl", "source", "context")
+                   "error", "realized_pnl", "source", "context", "perm_id", "order_ref")
 
     @staticmethod
     def client_order_id(cycle_id: str, symbol: str, action: str) -> str:
@@ -234,17 +234,23 @@ class TradingMemory:
                     f"({','.join('?' * len(self._TRADE_COLS))},?,?,?)",
                     (t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
                      t.avg_fill_price, submitted, t.rationale, t.limit_price, filled,
-                     t.error, None, source, context, coid, 1, submitted))
+                     t.error, None, source, context,
+                     getattr(t, "perm_id", "") or None, getattr(t, "order_ref", "") or None,
+                     coid, 1, submitted))
                 continue
             had_fill = prior["avg_fill_price"] is not None
             self.conn.execute(
                 "UPDATE trades SET attempt = attempt + 1, status = ?, error = ?, "
                 "order_id = ?, avg_fill_price = COALESCE(avg_fill_price, ?), "
                 "filled_at = COALESCE(filled_at, ?), qty = ?, limit_price = ?, "
-                "context = ?, submitted_at = ? WHERE client_order_id = ?",
+                "context = ?, submitted_at = ?, "
+                "perm_id = COALESCE(?, perm_id), order_ref = COALESCE(?, order_ref) "
+                "WHERE client_order_id = ?",
                 (prior["status"] if had_fill else t.status, t.error,
                  t.order_id or prior["order_id"], t.avg_fill_price, filled,
-                 t.qty, t.limit_price, context, submitted, coid))
+                 t.qty, t.limit_price, context, submitted,
+                 getattr(t, "perm_id", "") or None, getattr(t, "order_ref", "") or None,
+                 coid))
 
     def save_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
         """Persist trade-log entries with their full context (trader path, standalone)."""

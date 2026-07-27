@@ -285,6 +285,9 @@ class IBKRBroker:
                     continue
                 st = trade.orderStatus
                 e.order_id = str(trade.order.orderId)
+                # permId is assigned by IBKR at acknowledgement and is globally
+                # permanent — the only id safe to join executions on later.
+                e.perm_id = str(getattr(trade.order, "permId", "") or "")
                 e.status = _map_status(st.status)
                 if st.filled and st.avgFillPrice:
                     e.avg_fill_price = float(st.avgFillPrice)
@@ -337,7 +340,14 @@ class IBKRBroker:
                      if decision.order_type == "limit" and decision.limit_price
                      else MarketOrder(side, qty))
             order.tif = decision.time_in_force          # DAY/GTC (avoid preset TIF warning)
+            # Tag the order so its executions can be recognised as ours. reqExecutions
+            # returns the whole ACCOUNT's fills, including ones placed by hand in TWS;
+            # without a tag the only link is orderId, which TWS resets on restart and
+            # therefore cannot be joined on across days. IBKR echoes orderRef back on
+            # every execution. Capped at 60 chars — IBKR silently truncates long refs.
+            order.orderRef = order_ref(cycle_id, decision.symbol)[:60]
             trade = ib.placeOrder(contract, order)
+            entry.order_ref = order.orderRef
             self._last_trades.append(trade)
         except Exception as exc:  # noqa: BLE001 - bad symbol / rejected contract must not escape
             log.warning("order submit failed for %s: %s", decision.symbol, exc)
@@ -345,6 +355,15 @@ class IBKRBroker:
             entry.error = str(exc)
             self._last_trades.append(None)
         return entry
+
+
+def order_ref(cycle_id: str, symbol: str) -> str:
+    """Our tag on an outgoing order: `ats:<cycle_id>:<SYMBOL>`.
+
+    The `ats:` prefix is what distinguishes a system order from a manual TWS trade in
+    the account-wide execution feed.
+    """
+    return f"ats:{cycle_id}:{symbol.upper()}"
 
 
 def _fnum(v) -> float | None:

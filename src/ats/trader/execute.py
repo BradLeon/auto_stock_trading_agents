@@ -104,9 +104,22 @@ def build_approval_summary(sized: list[tuple[TradeDecision, float]],
     is_live = secrets.ibkr_port in _LIVE_PORTS or env == "live"
     banner = (f"account={secrets.ibkr_account or '(default)'} @ {secrets.ibkr_host}:{secrets.ibkr_port} "
               f"[{'⚠️ LIVE ACCOUNT' if is_live else 'paper'}]")
-    lines = "\n".join(f"  {d.action.upper()} {d.symbol} x{q:.0f} "
-                      f"{'@ ' + str(d.limit_price) if d.limit_price else '(mkt)'} — {d.rationale[:60]}"
-                      for d, q in sized)
+    # Show the declared plan and the ledger id: the Boss should see, at the moment of
+    # approving, that every order is already on the record with its exit criterion.
+    def _line(d, q) -> str:
+        px = f"@ {d.limit_price}" if d.limit_price else "(mkt)"
+        plan = []
+        if d.stop_price:
+            plan.append(f"止 {d.stop_price:g}")
+        if d.target_price:
+            plan.append(f"标 {d.target_price:g}")
+        if d.planned_horizon_days:
+            plan.append(f"{d.planned_horizon_days}日")
+        tail = f" [{d.setup}" + (f" · {' · '.join(plan)}" if plan else "") + "]" if (
+            d.setup and d.setup != "unknown") or plan else ""
+        return f"  {d.action.upper()} {d.symbol} x{q:.0f} {px}{tail} — {d.rationale[:60]}"
+
+    lines = "\n".join(_line(d, q) for d, q in sized)
     risk_block = ("\n风控: " + "; ".join(risk_notes)) if risk_notes else "\n风控: 无破限 ✅"
     summary = f"{banner}\nsource={source}{risk_block}\nOrders:\n{lines}"
     if is_live:

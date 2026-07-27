@@ -312,6 +312,7 @@ def _daily(*, dry_run: bool) -> None:
     _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
     _perf_snapshot()
     _perf_risk_digest()  # surface perf + 6-layer risk: Obsidian .md + Feishu card
+    _journal_marks()     # score elapsed prediction horizons + rewrite the ledger
     _chief_daily(dry_run=dry_run)   # LAST: the Chief reads everything fresh and decides
 
 
@@ -429,6 +430,29 @@ def _chief_daily(*, dry_run: bool) -> None:
                   source="scheduled")
     except Exception as exc:  # noqa: BLE001 - chief must not break the daily job
         log.warning("chief daily run failed: %s", exc)
+
+
+def _journal_marks() -> None:
+    """Score elapsed prediction horizons and regenerate the ledger.
+
+    Price-only (yfinance), no broker and no LLM — safe to run every session.
+    """
+    if not get_config().app.journal.enabled:
+        return
+    try:
+        from ..journal import predictions
+
+        log.info("journal predictions: %s", predictions.score_open_predictions())
+    except Exception as exc:  # noqa: BLE001 - the journal observes, never blocks
+        log.warning("journal prediction scoring failed: %s", exc)
+    try:
+        from ..journal import report as journal_report
+
+        p = journal_report.write_ledger()
+        if p:
+            log.info("journal ledger -> %s", p)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("journal ledger failed: %s", exc)
 
 
 def _journal_reconcile() -> None:

@@ -11,6 +11,11 @@ from pydantic import BaseModel, Field, field_validator
 Action = Literal["buy", "add", "hold", "trim", "sell"]
 OrderType = Literal["market", "limit"]
 TimeInForce = Literal["DAY", "GTC"]
+# What kind of trade this is. Expectancy-per-setup is the single most useful thing a
+# journal can aggregate, and inferring it later by regexing Chinese free-text rationale
+# would be wrong often enough to poison the statistic — so the Chief states it.
+Setup = Literal["pead_event", "risk_repair", "stop_loss", "sector_rotation",
+                "macro_tilt", "manual", "boss_override", "unknown"]
 
 # Class shares: LLMs/yfinance write BRK.B / BRK-B; IBKR (our canonical form) uses "BRK B".
 _CLASS_SHARE_RE = re.compile(r"^([A-Z]+)[.\-]([A-Z])$")
@@ -35,6 +40,17 @@ class TradeDecision(BaseModel):
     conviction: float = Field(0.0, ge=0, le=1)
     rationale: str = ""
     references: list[str] = Field(default_factory=list, description="report ids / sources cited")
+
+    # --- pre-registered plan (journal) --------------------------------------
+    # Declared intent, NOT resting orders: the approval gate means an order reaches
+    # the broker hours after the decision, and a GTC stop left on a post-earnings
+    # gapper guarantees the worst fill. These exist so the exit criterion is on record
+    # BEFORE the outcome is known, which is what makes the review falsifiable.
+    setup: Setup = "unknown"
+    stop_price: float | None = Field(None, gt=0, description="declared invalidation price")
+    target_price: float | None = Field(None, gt=0)
+    planned_horizon_days: int | None = Field(None, gt=0, description="intended holding window")
+    invalidation: str = Field("", description="what observation would falsify this thesis")
 
 
 class BossApproval(BaseModel):

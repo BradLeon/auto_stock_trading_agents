@@ -120,11 +120,17 @@ CREATE TABLE IF NOT EXISTS journal_entries (
 );
 -- Falsifiable claims, recorded when made. entry_id NULL = we predicted but did not
 -- trade, which is exactly the sample that keeps calibration unbiased.
+-- ref_date is the first session we could ACT on the claim (when the score was made),
+-- NOT the print date. The earnings gap is not capturable — you cannot buy at the
+-- pre-announcement close after seeing the result — and PEAD is by definition the
+-- POST-announcement drift. print_date is kept alongside so the gap itself, a separate
+-- and non-tradeable quantity, can still be measured.
 CREATE TABLE IF NOT EXISTS predictions (
     prediction_id TEXT PRIMARY KEY, made_at TEXT, symbol TEXT,
     source TEXT, ref_key TEXT, kind TEXT,
     predicted_value REAL, predicted_band TEXT,
-    ref_price REAL, ref_date TEXT, sector_etf TEXT, benchmark TEXT, entry_id TEXT
+    ref_price REAL, ref_date TEXT, print_date TEXT,
+    sector_etf TEXT, benchmark TEXT, entry_id TEXT
 );
 -- One row per horizon. All horizons are KEPT: short/long disagreement (right at
 -- T+1, wrong at T+20 = right entry, wrong holding period) is the signal, not noise
@@ -188,6 +194,11 @@ class TradingMemory:
                     "link_confidence TEXT", "captured_at TEXT"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
+        # Any column added to a table that already exists in the wild needs an ALTER —
+        # CREATE TABLE IF NOT EXISTS in _SCHEMA is a no-op on an existing table.
+        pcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(predictions)")}
+        if pcols and "print_date" not in pcols:
+            self.conn.execute("ALTER TABLE predictions ADD COLUMN print_date TEXT")
         # NULLs are distinct in a SQLite unique index, so the 52 legacy rows (which
         # have no client_order_id) coexist with the constraint.
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_coid "
@@ -285,6 +296,71 @@ class TradingMemory:
         self.conn.execute("UPDATE cycles SET approval_status = ? WHERE cycle_id = ?",
                           (status, cycle_id))
         self.conn.commit()
+
+    # --- journal entries (one row per INTENT) ------------------------------ #
+    def save_journal_entry(self, row: dict) -> None:
+        """Insert the pre-registered plan. Idempotent on entry_id: a retried cycle
+        re-states the same plan, it does not create a second intent."""
+        cols = ",".join(row)
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO journal_entries ({cols}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def update_journal_outcome(self, entry_id: str, row: dict) -> None:
+        """Attach the execution result. The PLAN columns are never touched here —
+        a journal whose plan can be edited after the outcome proves nothing."""
+        sets = ", ".join(f"{k} = COALESCE(?, {k})" for k in row)
+        self.conn.execute(
+            f"UPDATE journal_entries SET {sets}, submit_attempts = "
+            "(SELECT attempt FROM trades WHERE client_order_id = ?) WHERE entry_id = ?",
+            (*row.values(), entry_id, entry_id))
+        self.conn.commit()
+
+    def journal_entries(self, *, since: str = "", symbol: str = "",
+                        limit: int = 500) -> list[dict]:
+        sql = "SELECT * FROM journal_entries WHERE 1=1"
+        args: list = []
+        if since:
+            sql += " AND as_of >= ?"
+            args.append(since)
+        if symbol:
+            sql += " AND symbol = ?"
+            args.append(symbol.upper())
+        sql += " ORDER BY as_of DESC, symbol LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    # --- predictions + outcomes -------------------------------------------- #
+    def save_prediction(self, row: dict) -> None:
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO predictions ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def save_prediction_outcome(self, row: dict) -> None:
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO prediction_outcomes ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def has_outcome(self, prediction_id: str, horizon_days: int) -> bool:
+        return self.conn.execute(
+            "SELECT 1 FROM prediction_outcomes WHERE prediction_id = ? AND horizon_days = ?",
+            (prediction_id, horizon_days)).fetchone() is not None
+
+    def open_predictions(self, horizons: list[int]) -> list[dict]:
+        """Predictions still missing at least one horizon."""
+        rows = self.conn.execute(
+            "SELECT p.* FROM predictions p WHERE (SELECT COUNT(*) FROM prediction_outcomes o "
+            "WHERE o.prediction_id = p.prediction_id) < ? ORDER BY p.made_at",
+            (len(horizons),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def prediction_outcomes(self, prediction_id: str) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM prediction_outcomes WHERE prediction_id = ? ORDER BY horizon_days",
+            (prediction_id,)).fetchall()]
 
     # --- journal bookkeeping ---------------------------------------------- #
     def set_meta(self, key: str, value: str) -> None:

@@ -122,6 +122,14 @@ def persist_decision(state: ChiefDecisionState) -> dict:
     store = get_store()
     store.save_chief_run(cycle_id=state.cycle_id, as_of=state.as_of,
                          summary=state.summary, decisions=state.decisions)
+    # Pre-register the plan BEFORE the approval interrupt. A plan written after the
+    # outcome is known can no longer be wrong, so it proves nothing.
+    try:
+        from ..journal import entries as journal_entries
+
+        journal_entries.record_intents(state, store=store)
+    except Exception as exc:  # noqa: BLE001 - the journal observes, it must not block
+        log.warning("journal pre-registration failed: %s", exc)
     # Consume the fresh scores this cycle acted on — a PEAD score is a one-time event
     # signal; after the chief has responded (traded or not) it becomes background so it
     # is never re-adopted on subsequent daily runs.
@@ -208,6 +216,12 @@ def persist(state: ChiefDecisionState) -> dict:
                           source=state.source, context=context)
     if state.fills:
         store.upsert_fills(state.fills)
+    try:
+        from ..journal import entries as journal_entries
+
+        journal_entries.record_outcome(state, store=store)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("journal outcome write failed: %s", exc)
     return {}
 
 

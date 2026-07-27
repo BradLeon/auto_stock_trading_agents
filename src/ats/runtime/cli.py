@@ -845,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
+    jr = sub.add_parser("journal", help="交易日志 (doctor)")
+    jr.add_argument("action", choices=["doctor"])
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
     tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
                                        "cancel", "execute", "buy", "sell"])
@@ -930,6 +932,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "memo":
             return risk_memo()
         return risk_check(args.symbol)
+    if args.command == "journal":
+        from ..journal import doctor
+
+        return doctor.run()
     if args.command == "trader":
         if args.action == "portfolio":
             return trader_portfolio(offline=getattr(args, "offline", False))

@@ -34,7 +34,8 @@ def _trade(conn, *, cycle="c1", symbol="GOOG", action="trim", status="filled",
 
 
 def _fill(conn, *, exec_id="e1", symbol="GOOG", order_id="1", pnl=0.0, time="2026-07-23T10:00"):
-    conn.execute("INSERT INTO fills VALUES (?,?,?,?,?,?,?,?,?)",
+    conn.execute("INSERT INTO fills (exec_id, symbol, side, shares, price, time, "
+                 "realized_pnl, commission, order_id) VALUES (?,?,?,?,?,?,?,?,?)",
                  (exec_id, symbol, "SLD", 10.0, 100.0, time, pnl, 0.0, order_id))
     conn.commit()
 

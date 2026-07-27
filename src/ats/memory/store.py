@@ -8,6 +8,7 @@ semantic/vector layer (Chroma) is a later add; this is the structured backbone.
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..schemas.memory import PerformanceRecord
@@ -91,6 +92,56 @@ CREATE TABLE IF NOT EXISTS pead_score_runs (
     final INTEGER DEFAULT 0,
     PRIMARY KEY (symbol, fiscal_label, version)
 );
+-- ---------------------------------------------------------------------------
+-- Trade journal
+-- ---------------------------------------------------------------------------
+-- One row per INTENT, not per fill. This matters: of the first 52 order rows,
+-- 24 errored and 16 were cancelled — orders evaporating (IBKR down, approval
+-- declined) is this system's most common real outcome, and a journal of fills
+-- only would hide it completely.
+CREATE TABLE IF NOT EXISTS journal_entries (
+    entry_id TEXT PRIMARY KEY,            -- = trades.client_order_id
+    cycle_id TEXT, as_of TEXT, symbol TEXT, action TEXT, source TEXT, setup TEXT,
+    -- plan, pre-registered at decision time and never rewritten
+    intended_notional REAL, intended_qty REAL, conviction REAL,
+    order_type TEXT, limit_price REAL,
+    stop_price REAL, target_price REAL, planned_horizon_days INTEGER,
+    invalidation TEXT, planned_risk_usd REAL, risk_unit_source TEXT, rationale TEXT,
+    -- regime SNAPSHOT (denormalised on purpose: a later review rewrite must not
+    -- rewrite what we believed at the time)
+    regime_risk_state TEXT, regime_portfolio_beta REAL,
+    -- evidence quality — the agent-native "did I follow my plan"
+    ev_score_total REAL, ev_score_band TEXT, ev_has_transcript INTEGER,
+    ev_score_latency_h REAL, ev_expected_move_pct REAL,
+    -- gates
+    risk_notes_json TEXT, clipped_from_notional REAL,
+    approval_status TEXT, approval_reviewer TEXT, approval_comment TEXT,
+    approval_divergence TEXT,
+    -- execution rollup
+    submit_attempts INTEGER DEFAULT 0, terminal_status TEXT,
+    filled_qty REAL, avg_fill_price REAL, slippage_bps REAL
+);
+-- Falsifiable claims, recorded when made. entry_id NULL = we predicted but did not
+-- trade, which is exactly the sample that keeps calibration unbiased.
+CREATE TABLE IF NOT EXISTS predictions (
+    prediction_id TEXT PRIMARY KEY, made_at TEXT, symbol TEXT,
+    source TEXT, ref_key TEXT, kind TEXT,
+    predicted_value REAL, predicted_band TEXT,
+    ref_price REAL, ref_date TEXT, sector_etf TEXT, benchmark TEXT, entry_id TEXT
+);
+-- One row per horizon. All horizons are KEPT: short/long disagreement (right at
+-- T+1, wrong at T+20 = right entry, wrong holding period) is the signal, not noise
+-- to be collapsed into a single verdict.
+CREATE TABLE IF NOT EXISTS prediction_outcomes (
+    prediction_id TEXT, horizon_days INTEGER, as_of TEXT,
+    realized_pct REAL, excess_vs_sector_pct REAL, excess_vs_bench_pct REAL,
+    PRIMARY KEY (prediction_id, horizon_days)
+);
+-- Single-row bookkeeping, e.g. tracking_start_date: before it we did not observe,
+-- which is NOT the same as "no trades happened".
+CREATE TABLE IF NOT EXISTS journal_meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries(symbol);
+CREATE INDEX IF NOT EXISTS idx_pred_symbol ON predictions(symbol);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
@@ -129,6 +180,22 @@ class TradingMemory:
             # Pre-existing rows were all transcript-backed scores, so they are final.
             self.conn.execute("ALTER TABLE pead_score_runs ADD COLUMN final INTEGER DEFAULT 0")
             self.conn.execute("UPDATE pead_score_runs SET final = has_transcript")
+        # Journal linkage. `client_order_id` is the idempotency key; `perm_id` /
+        # `order_ref` are the durable broker identities (orderId is a per-client
+        # sequence that TWS resets, so it cannot be joined on across days).
+        for ddl in ("client_order_id TEXT", "perm_id TEXT", "order_ref TEXT",
+                    "attempt INTEGER DEFAULT 1", "entry_id TEXT", "first_submitted_at TEXT"):
+            if ddl.split()[0] not in tcols:
+                self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
+        fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fills)")}
+        for ddl in ("perm_id TEXT", "order_ref TEXT", "origin TEXT",
+                    "link_confidence TEXT", "captured_at TEXT"):
+            if ddl.split()[0] not in fcols:
+                self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
+        # NULLs are distinct in a SQLite unique index, so the 52 legacy rows (which
+        # have no client_order_id) coexist with the constraint.
+        self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_coid "
+                          "ON trades(client_order_id)")
         self.conn.commit()
 
     # --- writes ---------------------------------------------------------- #
@@ -136,14 +203,48 @@ class TradingMemory:
                    "avg_fill_price", "submitted_at", "rationale", "limit_price", "filled_at",
                    "error", "realized_pnl", "source", "context")
 
+    @staticmethod
+    def client_order_id(cycle_id: str, symbol: str, action: str) -> str:
+        """Deterministic idempotency key: one INTENT, one row.
+
+        A cycle proposes at most one order per (symbol, action); repeated rows for the
+        same triple are retries of the same intent, not new intents. Without this key
+        the 2026-07-23 IBKR outage wrote the same GOOG/ASML/KLAC trim five times each.
+        """
+        return f"{cycle_id}:{symbol.upper()}:{action}"
+
     def _insert_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
-        rows = [(t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
-                 t.avg_fill_price, t.submitted_at.isoformat() if t.submitted_at else None,
-                 t.rationale, t.limit_price, t.filled_at.isoformat() if t.filled_at else None,
-                 t.error, None, source, context) for t in entries]
-        placeholders = ",".join("?" * len(self._TRADE_COLS))
-        self.conn.executemany(
-            f"INSERT INTO trades ({','.join(self._TRADE_COLS)}) VALUES ({placeholders})", rows)
+        """Upsert one row per intent, counting attempts instead of duplicating rows.
+
+        On a repeat we keep whatever execution facts we already learned — a retry that
+        errors must never erase a fill the first attempt achieved — and keep the
+        original submit time, while advancing status/error and bumping `attempt`.
+        """
+        for t in entries:
+            coid = self.client_order_id(cycle_id, t.symbol, t.action)
+            submitted = t.submitted_at.isoformat() if t.submitted_at else None
+            filled = t.filled_at.isoformat() if t.filled_at else None
+            prior = self.conn.execute(
+                "SELECT attempt, status, avg_fill_price, filled_at, order_id, first_submitted_at "
+                "FROM trades WHERE client_order_id = ?", (coid,)).fetchone()
+            if prior is None:
+                self.conn.execute(
+                    f"INSERT INTO trades ({','.join(self._TRADE_COLS)}, client_order_id, "
+                    f"attempt, first_submitted_at) VALUES "
+                    f"({','.join('?' * len(self._TRADE_COLS))},?,?,?)",
+                    (t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
+                     t.avg_fill_price, submitted, t.rationale, t.limit_price, filled,
+                     t.error, None, source, context, coid, 1, submitted))
+                continue
+            had_fill = prior["avg_fill_price"] is not None
+            self.conn.execute(
+                "UPDATE trades SET attempt = attempt + 1, status = ?, error = ?, "
+                "order_id = ?, avg_fill_price = COALESCE(avg_fill_price, ?), "
+                "filled_at = COALESCE(filled_at, ?), qty = ?, limit_price = ?, "
+                "context = ?, submitted_at = ? WHERE client_order_id = ?",
+                (prior["status"] if had_fill else t.status, t.error,
+                 t.order_id or prior["order_id"], t.avg_fill_price, filled,
+                 t.qty, t.limit_price, context, submitted, coid))
 
     def save_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
         """Persist trade-log entries with their full context (trader path, standalone)."""
@@ -157,10 +258,16 @@ class TradingMemory:
         if not fills:
             return 0
         before = self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"]
+        # Column-explicit: `fills` gains journal columns over time, and a positional
+        # INSERT silently breaks the moment one is added.
         self.conn.executemany(
-            "INSERT OR IGNORE INTO fills VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO fills (exec_id, symbol, side, shares, price, time, "
+            "realized_pnl, commission, order_id, perm_id, order_ref, captured_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
-              f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0), f.get("order_id", ""))
+              f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0),
+              f.get("order_id", ""), f.get("perm_id"), f.get("order_ref"),
+              datetime.now(timezone.utc).isoformat())
              for f in fills])
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before

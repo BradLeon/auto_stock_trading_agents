@@ -29,10 +29,18 @@ def max_drawdown_pct(history: list[PerformanceRecord]) -> float | None:
     return round(worst * 100, 2)
 
 
-def trade_stats(fills: list[dict]) -> dict:
-    """Win rate + profit factor from closing fills carrying realized P&L."""
-    closed = [f["realized_pnl"] for f in fills
-              if f.get("realized_pnl") is not None and f["realized_pnl"] != 0]
+def episode_stats(episodes: list) -> dict:
+    """Win rate + profit factor from CLOSED trade episodes — one number per round
+    trip, not per fill.
+
+    Replaces the old fill-level `trade_stats`, which counted every partial exit of a
+    scaled-out position as a separate "trade" (a position trimmed in 3 pieces read as
+    3 trades, all with the same sign — a coin that only ever lands on one side looks
+    like 3 flips). An episode's `realized_pnl` is already the fill-level sum, so this
+    reports the SAME total P&L, just grouped by round trip instead of by execution.
+    """
+    closed = [e.realized_pnl for e in episodes
+             if e.status == "closed" and e.realized_pnl is not None and e.realized_pnl != 0]
     if not closed:
         return {"win_rate": None, "profit_factor": None, "closed_trades": 0}
     wins = [p for p in closed if p > 0]
@@ -52,7 +60,7 @@ def benchmark_return_pct(closes: list[float]) -> float | None:
     return round((closes[-1] / closes[0] - 1) * 100, 2)
 
 
-def summarize(history: list[PerformanceRecord], fills: list[dict],
+def summarize(history: list[PerformanceRecord], episodes: list,
               benchmark: dict[str, list[float]] | None = None) -> dict:
     """Full analytics dict. benchmark = {name: close_series} over the same window."""
     ret = total_return_pct(history)
@@ -63,7 +71,7 @@ def summarize(history: list[PerformanceRecord], fills: list[dict],
         "total_return_pct": ret,
         "cumulative_pnl": history[-1].cumulative_pnl if history else None,
         "max_drawdown_pct": max_drawdown_pct(history),
-        **trade_stats(fills),
+        **episode_stats(episodes),
         "benchmarks": {},
     }
     for name, closes in (benchmark or {}).items():

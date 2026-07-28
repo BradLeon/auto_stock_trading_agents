@@ -845,13 +845,15 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
-    jr = sub.add_parser("journal", help="交易日志 (doctor / reconcile / ledger / score)")
-    jr.add_argument("action", choices=["doctor", "reconcile", "ledger", "score"])
+    jr = sub.add_parser("journal",
+                        help="交易日志 (doctor / reconcile / episodes / ledger / score)")
+    jr.add_argument("action", choices=["doctor", "reconcile", "episodes", "ledger", "score"])
     jr.add_argument("--dry-run", action="store_true",
                     help="reconcile: 只读，打印将要写入什么")
     jr.add_argument("--month", help="ledger: YYYY-MM（默认本月）")
     jr.add_argument("--backfill", action="store_true",
                     help="score: 先用已打分的 dossier 回填预测")
+    jr.add_argument("--symbol", help="episodes: 只看这个标的")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
     tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
                                        "cancel", "execute", "buy", "sell"])
@@ -942,6 +944,16 @@ def main(argv: list[str] | None = None) -> int:
             from ..trader import reconcile
 
             return reconcile.run(dry_run=args.dry_run)
+        if args.action == "episodes":
+            from ..journal import episodes as episodes_mod
+            from ..memory import get_store
+
+            rc = episodes_mod.run()
+            for ep in get_store().list_episodes(symbol=args.symbol or "", limit=50):
+                print(f"  {ep.symbol:6} {ep.direction:5} {ep.status:6} "
+                      f"origin={ep.origin:12} realized={ep.realized_pnl} "
+                      f"entry={ep.avg_entry} exit={ep.avg_exit}")
+            return rc
         if args.action == "ledger":
             from ..journal import report as journal_report
 

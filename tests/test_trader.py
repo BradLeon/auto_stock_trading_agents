@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from ats.memory import get_store
 from ats.schemas.decision import BossApproval, TradeDecision
+from ats.schemas.journal import TradeEpisode
 from ats.schemas.memory import PerformanceRecord, TradeLogEntry
 from ats.schemas.portfolio import PortfolioSnapshot, Position
 from ats.trader import analytics, execute as texec
@@ -17,6 +18,11 @@ def _perf(nav, cum=0.0, i=0):
                              cumulative_pnl=cum)
 
 
+def _episode(pnl, status="closed", i=0):
+    return TradeEpisode(episode_id=f"e{i}", symbol="GOOG", status=status,
+                        opened_at=NOW, realized_pnl=pnl)
+
+
 # --------------------------------------------------------------------------- #
 # analytics
 # --------------------------------------------------------------------------- #
@@ -27,17 +33,24 @@ def test_total_return_and_drawdown():
     assert analytics.max_drawdown_pct(hist) == -10.0     # 110k -> 99k
 
 
-def test_trade_stats():
-    fills = [{"realized_pnl": 300}, {"realized_pnl": -100}, {"realized_pnl": 200},
-             {"realized_pnl": None}, {"realized_pnl": 0}]
-    s = analytics.trade_stats(fills)
+def test_episode_stats():
+    episodes = [_episode(300, i=0), _episode(-100, i=1), _episode(200, i=2),
+               _episode(None, i=3), _episode(0, i=4), _episode(999, status="open", i=5)]
+    s = analytics.episode_stats(episodes)
     assert s["closed_trades"] == 3 and s["win_rate"] == round(2 / 3, 3)
     assert s["profit_factor"] == 5.0                      # (300+200)/100
 
 
+def test_episode_stats_counts_a_scaled_out_position_once():
+    """The bug this replaces: the old fill-level trade_stats counted every partial
+    exit of one position as a separate trade."""
+    one_episode_three_trims = [_episode(400, i=0)]   # already the SUM of 3 partial exits
+    assert analytics.episode_stats(one_episode_three_trims)["closed_trades"] == 1
+
+
 def test_benchmark_and_summary():
     hist = [_perf(100000, 0, 0), _perf(105000, 5000, 1)]
-    out = analytics.summarize(hist, [{"realized_pnl": 50}], {"SPY": [400.0, 408.0]})
+    out = analytics.summarize(hist, [_episode(50)], {"SPY": [400.0, 408.0]})
     assert out["total_return_pct"] == 5.0
     assert out["benchmarks"]["SPY"]["return_pct"] == 2.0
     assert out["benchmarks"]["SPY"]["alpha_pct"] == 3.0   # 5 - 2

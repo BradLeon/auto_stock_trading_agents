@@ -140,11 +140,27 @@ CREATE TABLE IF NOT EXISTS prediction_outcomes (
     realized_pct REAL, excess_vs_sector_pct REAL, excess_vs_bench_pct REAL,
     PRIMARY KEY (prediction_id, horizon_days)
 );
+-- One round trip: net position 0 -> nonzero -> back to 0. Adds/trims are LEGS of the
+-- same episode, not new episodes — this is what fixes the old analytics counting a
+-- scaled-out position as N trades. No separate episode_legs table: a leg IS a fill
+-- plus which episode/entry it belongs to, so `fills.episode_id`/`fills.entry_id`
+-- (below) carry that, and a second table would just be redundant (Occam).
+CREATE TABLE IF NOT EXISTS trade_episodes (
+    episode_id TEXT PRIMARY KEY, symbol TEXT, direction TEXT, origin TEXT,
+    status TEXT,
+    opened_at TEXT, closed_at TEXT, avg_entry REAL, avg_exit REAL,
+    realized_pnl REAL, unrealized_pnl REAL, commission REAL, basis_source TEXT,
+    holding_days INTEGER, r_multiple REAL, r_multiple_mtm REAL, risk_unit_source TEXT,
+    mae_pct REAL, mfe_pct REAL, mae_source TEXT, excess_vs_sector_pct REAL,
+    setup TEXT, primary_entry_id TEXT, exit_reason TEXT, exit_as_planned INTEGER,
+    invalidation_triggered INTEGER, horizon_overdue_days INTEGER
+);
 -- Single-row bookkeeping, e.g. tracking_start_date: before it we did not observe,
 -- which is NOT the same as "no trades happened".
 CREATE TABLE IF NOT EXISTS journal_meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries(symbol);
 CREATE INDEX IF NOT EXISTS idx_pred_symbol ON predictions(symbol);
+CREATE INDEX IF NOT EXISTS idx_episode_symbol ON trade_episodes(symbol);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
@@ -185,13 +201,19 @@ class TradingMemory:
         # Journal linkage. `client_order_id` is the idempotency key; `perm_id` /
         # `order_ref` are the durable broker identities (orderId is a per-client
         # sequence that TWS resets, so it cannot be joined on across days).
+        # NOTE: `trades.entry_id` below is dead weight — client_order_id IS the
+        # JournalEntry id by construction (see JournalEntry docstring), so nothing
+        # ever needed a second column for it. Left in place rather than dropped:
+        # SQLite column drops require a full table rebuild for zero benefit on an
+        # already-deployed table. Use client_order_id, not this column.
         for ddl in ("client_order_id TEXT", "perm_id TEXT", "order_ref TEXT",
                     "attempt INTEGER DEFAULT 1", "entry_id TEXT", "first_submitted_at TEXT"):
             if ddl.split()[0] not in tcols:
                 self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
         fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fills)")}
         for ddl in ("perm_id TEXT", "order_ref TEXT", "origin TEXT",
-                    "link_confidence TEXT", "captured_at TEXT"):
+                    "link_confidence TEXT", "captured_at TEXT",
+                    "entry_id TEXT", "episode_id TEXT"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
         # Any column added to a table that already exists in the wild needs an ALTER —
@@ -377,6 +399,68 @@ class TradingMemory:
         sql += " ORDER BY as_of DESC, symbol LIMIT ?"
         args.append(limit)
         return [self._row_to_journal(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def get_journal_entry(self, entry_id: str):
+        """-> JournalEntry | None. Used to attach the opening plan onto an episode."""
+        row = self.conn.execute(
+            "SELECT * FROM journal_entries WHERE entry_id = ?", (entry_id,)).fetchone()
+        return self._row_to_journal(row) if row else None
+
+    # --- trade episodes (one round trip: flat -> position -> flat) --------- #
+    _EPISODE_COLS = (
+        "episode_id", "symbol", "direction", "origin", "status", "opened_at",
+        "closed_at", "avg_entry", "avg_exit", "realized_pnl", "unrealized_pnl",
+        "commission", "basis_source", "holding_days", "r_multiple", "r_multiple_mtm",
+        "risk_unit_source", "mae_pct", "mfe_pct", "mae_source", "excess_vs_sector_pct",
+        "setup", "primary_entry_id", "exit_reason", "exit_as_planned",
+        "invalidation_triggered", "horizon_overdue_days")
+
+    def save_episode(self, episode) -> None:
+        """Upsert by episode_id — the reducer re-derives episodes from fills each run,
+        so re-saving the same episode_id must replace, not duplicate."""
+        row = episode.model_dump(mode="json")
+        row = {k: row.get(k) for k in self._EPISODE_COLS}
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO trade_episodes ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def get_episode(self, episode_id: str):
+        """-> TradeEpisode | None."""
+        from ..schemas.journal import TradeEpisode
+
+        row = self.conn.execute(
+            "SELECT * FROM trade_episodes WHERE episode_id = ?", (episode_id,)).fetchone()
+        return TradeEpisode.model_validate(dict(row)) if row else None
+
+    def list_episodes(self, *, symbol: str = "", status: str = "",
+                      decision_gradeable_only: bool = False, limit: int = 500) -> list:
+        """-> list[TradeEpisode]."""
+        from ..schemas.journal import TradeEpisode
+
+        sql = "SELECT * FROM trade_episodes WHERE 1=1"
+        args: list = []
+        if symbol:
+            sql += " AND symbol = ?"
+            args.append(symbol.upper())
+        if status:
+            sql += " AND status = ?"
+            args.append(status)
+        if decision_gradeable_only:
+            sql += " AND origin != 'pre_tracking'"
+        sql += " ORDER BY opened_at DESC LIMIT ?"
+        args.append(limit)
+        return [TradeEpisode.model_validate(dict(r))
+                for r in self.conn.execute(sql, args).fetchall()]
+
+    def fills_for_symbol(self, symbol: str) -> list[dict]:
+        """Raw fill rows for the reducer, oldest first."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM fills WHERE symbol = ? ORDER BY time ASC", (symbol.upper(),))]
+
+    def symbols_with_fills(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT symbol FROM fills ORDER BY symbol")]
 
     # --- predictions + outcomes -------------------------------------------- #
     def save_prediction(self, prediction) -> None:

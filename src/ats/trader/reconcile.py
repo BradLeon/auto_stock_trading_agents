@@ -110,6 +110,7 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
     for f in fills:
         row, how = _match(f, trades)
         origin = "system" if row else "manual"
+        entry_id = row.get("client_order_id") if row else None
         if row:
             summary["linked"] += 1
             rp = f.get("realized_pnl")
@@ -120,9 +121,11 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
         else:
             summary["manual"] += 1
         if not dry_run:
+            # entry_id is how the episode reducer later joins a fill back to the
+            # pre-registered plan (JournalEntry) that proposed it.
             store.conn.execute(
-                "UPDATE fills SET origin = ?, link_confidence = ? WHERE exec_id = ?",
-                (origin, how, f.get("exec_id")))
+                "UPDATE fills SET origin = ?, link_confidence = ?, entry_id = ? "
+                "WHERE exec_id = ?", (origin, how, entry_id, f.get("exec_id")))
 
     for rid, pnl in pnl_by_rid.items():
         if not dry_run:

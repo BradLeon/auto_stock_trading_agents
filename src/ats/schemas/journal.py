@@ -63,8 +63,8 @@ ExitReason = Literal[
 EpisodeOrigin = Literal[
     "system",        # 系统下的单
     "manual",        # 你在 TWS 手工下的
-    "mixed",         # 两者都有（同一回合内既有系统单又有手工单）
-    "pre_tracking",  # 日志上线前的存量持仓（无入场记录，只能用券商均价）
+    "pre_tracking",  # 全部来自日志上线前的存量持仓（无入场记录，只能用券商均价）
+    "mixed",         # 混合：系统/手工/存量里至少两种都有
 ]
 
 BasisSource = Literal[
@@ -177,9 +177,11 @@ class TradeEpisode(BaseModel):
     opened_at: datetime                 # 开仓时刻（净持仓由 0 变为非 0）
     closed_at: datetime | None = None   # 平仓时刻（净持仓回到 0）；未平仓则为 None
     avg_entry: float | None = None      # 平均建仓成本
-    avg_exit: float | None = None       # 平均平仓价格（未平仓则为 None）
-    realized_pnl: float | None = None       # 仅已平仓：已实现盈亏（美元）
-    unrealized_pnl: float | None = None     # 仅未平仓：按当前市价算的浮动盈亏
+    avg_exit: float | None = None       # 已减仓部分的平均卖出/买回价（尚无减仓则为 None）
+    realized_pnl: float | None = None       # 累计已实现盈亏（美元）——哪怕仍未平仓，
+                                             # 之前减仓部分也计入；来自 IBKR 逐笔求和
+    unrealized_pnl: float | None = None     # 仅剩余未平部分：按当前市价算的浮动盈亏
+                                             # （已完全平仓则为 None）
     commission: float | None = None         # 该回合累计佣金
     basis_source: BasisSource = "observed_fills"   # 成本价来自观测成交还是券商均价
 
@@ -207,10 +209,13 @@ class TradeEpisode(BaseModel):
     def decision_gradeable(self) -> bool:
         """能否用于决策质量统计。
 
-        存量持仓没有预登记计划、没有 invalidation、没有意图记录 —— 混进决策质量
-        统计会污染它。结果质量则不受影响（券商均价能算浮盈亏）。
+        真正的判据是"有没有预登记计划可对照"，即 primary_entry_id 是否指向一条
+        真实的 JournalEntry —— 而不是 origin 是否为 pre_tracking。存量持仓固然没有
+        计划，但**手工单同样没有**（manual 走的下单路径绕过 persist_decision，
+        参见 Stage 1c），origin='manual' 或 'mixed' 不代表就有计划可评。
+        混进决策质量统计会污染它；结果质量则不受影响（券商均价能算浮盈亏）。
         """
-        return self.origin != "pre_tracking"
+        return bool(self.primary_entry_id)
 
 
 class Prediction(BaseModel):

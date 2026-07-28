@@ -463,6 +463,40 @@ def _sector_weekly() -> None:
             log.warning("sector review %s failed: %s", name, exc)
 
 
+def _attach_job_logging(scheduler) -> None:
+    """Log every fire, miss and error.
+
+    Without this we are blind in the exact way that matters: for 2.5 days the daemon
+    logged "scheduler started" and then nothing, and a missed job looks identical to a
+    quiet day. APScheduler reports misses on its own logger, which our config leaves at
+    WARNING on the root handler — reachable in principle, but nothing ever surfaced it
+    next to our own lines. Now a miss is loud and a late run says how late it was.
+    """
+    from apscheduler.events import (
+        EVENT_JOB_ERROR,
+        EVENT_JOB_EXECUTED,
+        EVENT_JOB_MISSED,
+    )
+
+    def _on_event(event) -> None:
+        if event.code == EVENT_JOB_MISSED:
+            log.error("job %s MISSED its %s run — machine asleep past the grace window? "
+                      "(nothing ran)", event.job_id, event.scheduled_run_time)
+            return
+        late = ""
+        if event.scheduled_run_time:
+            secs = (_now_et() - event.scheduled_run_time).total_seconds()
+            if secs > 300:
+                late = f"（迟 {secs / 3600:.1f} 小时）"
+        if event.code == EVENT_JOB_ERROR:
+            log.error("job %s raised%s: %s", event.job_id, late, event.exception)
+        else:
+            log.info("job %s finished%s", event.job_id, late)
+
+    scheduler.add_listener(_on_event,
+                           EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+
+
 def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None) -> None:
     from ..config import load_pead_global
 
@@ -479,16 +513,25 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
     from apscheduler.triggers.cron import CronTrigger
 
     hour, minute = (int(x) for x in cfg.run_at.split(":"))
+    # This host SLEEPS. Measured 2026-07-27: the daemon had been alive 2.5 days with
+    # 0.45s of CPU — every job had been skipped, because the Mac was asleep at the
+    # trigger and the old 1-hour grace expired before it woke. The 20:00 ET after-close
+    # window is the worst case: it lands at 09:00 local, i.e. squarely in the night.
+    # A late score is still useful — 20:00 ET + 6h is 02:00 ET, still ~7h before the
+    # next open — so the grace is wide enough to survive an overnight sleep. Beyond
+    # that the T+1 catch-up path in _score_plan takes over.
+    grace = int(cfg.misfire_grace_hours * 3600)
     # One worker on purpose: these jobs are long sequential LLM pipelines that all
     # write the same sqlite connection, so letting two run concurrently would risk
     # interleaved writes for no gain. A job that comes due while another is running
     # waits, and misfire_grace_time decides whether it still fires.
     scheduler = BlockingScheduler(timezone=cfg.timezone,
                                   executors={"default": ThreadPoolExecutor(1)})
+    _attach_job_logging(scheduler)
     scheduler.add_job(
         lambda: _daily(dry_run=dry_run),
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
-        id="daily_cycle", misfire_grace_time=3600,
+        id="daily_cycle", misfire_grace_time=grace,
     )
 
     # PEAD score windows — triggered by an observed print, so their job is to check
@@ -506,7 +549,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             lambda name=name: pead_score_window(name, dry_run=dry_run),
             CronTrigger(day_of_week="mon-fri", hour=w_hour, minute=w_minute,
                         timezone=cfg.timezone),
-            id=f"pead_score_{name}", misfire_grace_time=3600,
+            id=f"pead_score_{name}", misfire_grace_time=grace,
         )
 
     win_desc = ", ".join(f"{n}@{h}" for n, h in sorted(windows.items())) or "none"

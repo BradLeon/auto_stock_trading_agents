@@ -161,6 +161,10 @@ class ScheduleConfig(BaseModel):
     # the scheduler runs is decided by whether `ats schedule` is running.
     run_at: str = "16:15"          # daily cycle; PEAD score windows: config/pead.yaml
     timezone: str = "America/New_York"
+    # This host sleeps. A job whose trigger fires while the Mac is asleep only runs on
+    # wake, and only if it is still inside this window — with the old 1 hour, every
+    # overnight trigger was silently dropped. See scheduler.start().
+    misfire_grace_hours: float = 6.0
 
 
 class SectorBrief(BaseModel):

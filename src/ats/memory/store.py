@@ -501,6 +501,21 @@ class TradingMemory:
             (len(horizons),)).fetchall()
         return [Prediction.model_validate(dict(r)) for r in rows]
 
+    def all_predictions(self, source: str = "") -> list:
+        """-> list[Prediction], every one ever made (optionally filtered by source).
+        Calibration accrues per SCORE regardless of whether a trade followed, so this
+        is the base population for Stage D's calibration report."""
+        from ..schemas.journal import Prediction
+
+        sql = "SELECT * FROM predictions"
+        args: list = []
+        if source:
+            sql += " WHERE source = ?"
+            args.append(source)
+        sql += " ORDER BY made_at"
+        return [Prediction.model_validate(dict(r))
+                for r in self.conn.execute(sql, args).fetchall()]
+
     def predictions_for_entries(self, entry_ids: list[str]) -> list:
         """-> list[Prediction] whose entry_id is one of the given ids — the predictions
         that actually led to a trade in a given episode (an episode has no fiscal_label

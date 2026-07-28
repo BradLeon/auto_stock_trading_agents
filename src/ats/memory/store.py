@@ -106,12 +106,12 @@ CREATE TABLE IF NOT EXISTS journal_entries (
     invalidation TEXT, planned_risk_usd REAL, risk_unit_source TEXT, rationale TEXT,
     -- regime SNAPSHOT (denormalised on purpose: a later review rewrite must not
     -- rewrite what we believed at the time)
-    regime_risk_state TEXT, regime_portfolio_beta REAL,
+    regime_risk_state TEXT,
     -- evidence quality — the agent-native "did I follow my plan"
     ev_score_total REAL, ev_score_band TEXT, ev_has_transcript INTEGER,
     ev_score_latency_h REAL, ev_expected_move_pct REAL,
     -- gates
-    risk_notes_json TEXT, clipped_from_notional REAL,
+    risk_notes_json TEXT,
     approval_status TEXT, approval_reviewer TEXT, approval_comment TEXT,
     approval_divergence TEXT,
     -- execution rollup
@@ -298,12 +298,58 @@ class TradingMemory:
         self.conn.commit()
 
     # --- journal entries (one row per INTENT) ------------------------------ #
-    def save_journal_entry(self, row: dict) -> None:
+    # The typed columns; `risk_notes` and `approval` are objects in Python and JSON
+    # on disk, so they are mapped explicitly rather than dumped.
+    _JOURNAL_COLS = (
+        "entry_id", "cycle_id", "as_of", "symbol", "action", "source", "setup",
+        "intended_notional", "intended_qty", "conviction", "order_type", "limit_price",
+        "stop_price", "target_price", "planned_horizon_days", "invalidation",
+        "planned_risk_usd", "risk_unit_source", "rationale", "regime_risk_state",
+        "ev_score_total", "ev_score_band", "ev_has_transcript", "ev_score_latency_h",
+        "ev_expected_move_pct", "risk_notes_json", "approval_status", "approval_reviewer",
+        "approval_comment", "approval_divergence", "submit_attempts", "terminal_status",
+        "filled_qty", "avg_fill_price", "slippage_bps")
+
+    @staticmethod
+    def _journal_to_row(e) -> dict:
+        import json as _json
+
+        d = e.model_dump(mode="json")
+        ap = e.approval
+        d["risk_notes_json"] = _json.dumps(e.risk_notes, ensure_ascii=False)
+        d["approval_status"] = ap.status if ap else None
+        d["approval_reviewer"] = ap.reviewer if ap else None
+        d["approval_comment"] = ap.comment if ap else None
+        d["approval_divergence"] = (_json.dumps(ap.model_dump(mode="json"),
+                                                ensure_ascii=False) if ap else None)
+        return {k: d.get(k) for k in TradingMemory._JOURNAL_COLS}
+
+    @staticmethod
+    def _row_to_journal(row):
+        import json as _json
+
+        from ..schemas.journal import ApprovalDivergence, JournalEntry
+
+        d = dict(row)
+        d["risk_notes"] = _json.loads(d.pop("risk_notes_json", None) or "[]")
+        raw = d.pop("approval_divergence", None)
+        d["approval"] = ApprovalDivergence.model_validate(_json.loads(raw)) if raw else None
+        for k in ("approval_status", "approval_reviewer", "approval_comment"):
+            d.pop(k, None)
+        # A NULL column on a field that has a non-null default means "never set" —
+        # let the default speak rather than failing validation (e.g. submit_attempts
+        # is NULL until an order row exists).
+        fields = JournalEntry.model_fields
+        return JournalEntry.model_validate({
+            k: v for k, v in d.items()
+            if k in fields and not (v is None and fields[k].default is not None)})
+
+    def save_journal_entry(self, entry) -> None:
         """Insert the pre-registered plan. Idempotent on entry_id: a retried cycle
         re-states the same plan, it does not create a second intent."""
-        cols = ",".join(row)
+        row = self._journal_to_row(entry)
         self.conn.execute(
-            f"INSERT OR REPLACE INTO journal_entries ({cols}) "
+            f"INSERT OR REPLACE INTO journal_entries ({','.join(row)}) "
             f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
         self.conn.commit()
 
@@ -318,7 +364,8 @@ class TradingMemory:
         self.conn.commit()
 
     def journal_entries(self, *, since: str = "", symbol: str = "",
-                        limit: int = 500) -> list[dict]:
+                        limit: int = 500) -> list:
+        """-> list[JournalEntry]."""
         sql = "SELECT * FROM journal_entries WHERE 1=1"
         args: list = []
         if since:
@@ -329,16 +376,18 @@ class TradingMemory:
             args.append(symbol.upper())
         sql += " ORDER BY as_of DESC, symbol LIMIT ?"
         args.append(limit)
-        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+        return [self._row_to_journal(r) for r in self.conn.execute(sql, args).fetchall()]
 
     # --- predictions + outcomes -------------------------------------------- #
-    def save_prediction(self, row: dict) -> None:
+    def save_prediction(self, prediction) -> None:
+        row = prediction.model_dump(mode="json")
         self.conn.execute(
             f"INSERT OR REPLACE INTO predictions ({','.join(row)}) "
             f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
         self.conn.commit()
 
-    def save_prediction_outcome(self, row: dict) -> None:
+    def save_prediction_outcome(self, outcome) -> None:
+        row = outcome.model_dump(mode="json")
         self.conn.execute(
             f"INSERT OR REPLACE INTO prediction_outcomes ({','.join(row)}) "
             f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
@@ -349,16 +398,21 @@ class TradingMemory:
             "SELECT 1 FROM prediction_outcomes WHERE prediction_id = ? AND horizon_days = ?",
             (prediction_id, horizon_days)).fetchone() is not None
 
-    def open_predictions(self, horizons: list[int]) -> list[dict]:
-        """Predictions still missing at least one horizon."""
+    def open_predictions(self, horizons: list[int]) -> list:
+        """Predictions still missing at least one horizon. -> list[Prediction]."""
+        from ..schemas.journal import Prediction
+
         rows = self.conn.execute(
             "SELECT p.* FROM predictions p WHERE (SELECT COUNT(*) FROM prediction_outcomes o "
             "WHERE o.prediction_id = p.prediction_id) < ? ORDER BY p.made_at",
             (len(horizons),)).fetchall()
-        return [dict(r) for r in rows]
+        return [Prediction.model_validate(dict(r)) for r in rows]
 
-    def prediction_outcomes(self, prediction_id: str) -> list[dict]:
-        return [dict(r) for r in self.conn.execute(
+    def prediction_outcomes(self, prediction_id: str) -> list:
+        """-> list[PredictionOutcome]."""
+        from ..schemas.journal import PredictionOutcome
+
+        return [PredictionOutcome.model_validate(dict(r)) for r in self.conn.execute(
             "SELECT * FROM prediction_outcomes WHERE prediction_id = ? ORDER BY horizon_days",
             (prediction_id,)).fetchall()]
 

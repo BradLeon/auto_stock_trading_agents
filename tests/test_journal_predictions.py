@@ -66,9 +66,9 @@ def test_reference_is_the_actionable_date_not_the_print(store, _prices):
                               earnings_date="2026-07-22",     # print (gap day)
                               scored_at=NOW)                  # when we could act
     p = store.open_predictions([1])[0]
-    assert p["ref_date"] == "2026-07-23"       # not 07-22
-    assert p["ref_price"] == 92.0              # post-gap
-    assert p["print_date"] == "2026-07-22"     # kept for context
+    assert str(p.ref_date) == "2026-07-23"       # not 07-22
+    assert p.ref_price == 92.0              # post-gap
+    assert str(p.print_date) == "2026-07-22"     # kept for context
 
 
 def test_accepts_an_iso_string_earnings_date(store, _prices):
@@ -76,7 +76,7 @@ def test_accepts_an_iso_string_earnings_date(store, _prices):
     _prices["TSM"] = _series()
     jp.record_pead_prediction(store=store, symbol="TSM", fiscal_label="Q1",
                               scorecard=_card(), earnings_date="2026-07-20")
-    assert store.open_predictions([1])[0]["print_date"] == "2026-07-20"
+    assert str(store.open_predictions([1])[0].print_date) == "2026-07-20"
 
 
 # --------------------------------------------------------------------------- #
@@ -94,11 +94,11 @@ def test_all_horizons_are_scored_and_retained(store, _prices):
                               sector_etf="SMH", benchmark="QQQ")
     jp.score_open_predictions(store=store, horizons=[1, 5])
 
-    outs = {o["horizon_days"]: o for o in store.prediction_outcomes("TSM:Q2:pead_score")}
-    assert outs[1]["realized_pct"] == pytest.approx(2.0)
-    assert outs[5]["realized_pct"] == pytest.approx(-10.0)
-    assert outs[1]["excess_vs_sector_pct"] == pytest.approx(2.0)   # sector flat
-    assert outs[5]["excess_vs_sector_pct"] == pytest.approx(-10.0)
+    outs = {o.horizon_days: o for o in store.prediction_outcomes("TSM:Q2:pead_score")}
+    assert outs[1].realized_pct == pytest.approx(2.0)
+    assert outs[5].realized_pct == pytest.approx(-10.0)
+    assert outs[1].excess_vs_sector_pct == pytest.approx(2.0)   # sector flat
+    assert outs[5].excess_vs_sector_pct == pytest.approx(-10.0)
 
 
 def test_unelapsed_horizons_are_pending_not_zero(store, _prices):
@@ -107,7 +107,7 @@ def test_unelapsed_horizons_are_pending_not_zero(store, _prices):
                               scorecard=_card(), scored_at=NOW)
     s = jp.score_open_predictions(store=store, horizons=[1, 20])
     assert s["scored"] == 1 and s["pending"] == 1
-    assert [o["horizon_days"] for o in store.prediction_outcomes("TSM:Q2:pead_score")] == [1]
+    assert [o.horizon_days for o in store.prediction_outcomes("TSM:Q2:pead_score")] == [1]
 
 
 def test_scoring_is_idempotent(store, _prices):
@@ -130,9 +130,9 @@ def test_a_prediction_with_no_trade_is_still_scored(store, _prices):
     jp.record_pead_prediction(store=store, symbol="TSM", fiscal_label="Q2",
                               scorecard=_card(), scored_at=NOW, entry_id=None)
     jp.score_open_predictions(store=store, horizons=[1])
-    p = store.conn.execute("SELECT entry_id FROM predictions").fetchone()
-    assert p["entry_id"] is None
-    assert store.prediction_outcomes("TSM:Q2:pead_score")[0]["realized_pct"] == pytest.approx(3.0)
+    row = store.conn.execute("SELECT entry_id FROM predictions").fetchone()
+    assert row["entry_id"] is None
+    assert store.prediction_outcomes("TSM:Q2:pead_score")[0].realized_pct == pytest.approx(3.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -158,4 +158,4 @@ def test_no_price_history_degrades_quietly(store, monkeypatch):
     ids = jp.record_pead_prediction(store=store, symbol="ZZZZ", fiscal_label="Q2",
                                     scorecard=_card(), scored_at=NOW)
     assert ids                                        # claim still recorded
-    assert store.open_predictions([1])[0]["ref_price"] is None
+    assert store.open_predictions([1])[0].ref_price is None

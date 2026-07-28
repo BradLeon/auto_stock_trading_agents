@@ -91,19 +91,19 @@ def test_intents_recorded_with_the_plan(store):
                ), store=store)
     assert ids == ["c1:GOOG:trim"]
     row = store.journal_entries()[0]
-    assert row["setup"] == "pead_event"
-    assert row["stop_price"] == 300.0
-    assert row["planned_horizon_days"] == 10
-    assert row["invalidation"] == "Cloud 增速再降到 25% 以下"
-    assert row["risk_unit_source"] == "declared_stop"
-    assert row["ev_expected_move_pct"] == 5.71
-    assert row["terminal_status"] is None            # not executed yet
+    assert row.setup == "pead_event"
+    assert row.stop_price == 300.0
+    assert row.planned_horizon_days == 10
+    assert row.invalidation == "Cloud 增速再降到 25% 以下"
+    assert row.risk_unit_source == "declared_stop"
+    assert row.ev_expected_move_pct == 5.71
+    assert row.terminal_status is None            # not executed yet
 
 
 def test_intent_id_matches_the_trade_key(store):
     """The ledger id IS the order idempotency key, so the two always join."""
     je.record_intents(_state([_d()]), store=store)
-    assert store.journal_entries()[0]["entry_id"] == store.client_order_id("c1", "GOOG", "trim")
+    assert store.journal_entries()[0].entry_id == store.client_order_id("c1", "GOOG", "trim")
 
 
 def test_rerunning_a_cycle_restates_one_intent(store):
@@ -115,13 +115,13 @@ def test_rerunning_a_cycle_restates_one_intent(store):
 
 def test_setup_falls_back_to_the_cycle_source(store):
     je.record_intents(_state([_d()], cycle_id="c2", source="pead-chief"), store=store)
-    assert store.journal_entries()[0]["setup"] == "pead_event"
+    assert store.journal_entries()[0].setup == "pead_event"
 
 
 def test_risk_notes_are_snapshotted(store):
     notes = ["GOOG: 仓位由 $5,000 削减至 $4,000（L4 19%>15%）"]
     je.record_intents(_state([_d()], risk_notes=notes), store=store)
-    assert json.loads(store.journal_entries()[0]["risk_notes_json"]) == notes
+    assert store.journal_entries()[0].risk_notes == notes
 
 
 # --------------------------------------------------------------------------- #
@@ -137,13 +137,13 @@ def test_outcome_attaches_without_touching_the_plan(store):
                              approval=BossApproval(status="approved", reviewer="boss")),
                       store=store)
     row = store.journal_entries()[0]
-    assert row["terminal_status"] == "filled"
-    assert row["avg_fill_price"] == 317.07
-    assert row["approval_status"] == "approved"
+    assert row.terminal_status == "filled"
+    assert row.avg_fill_price == 317.07
+    assert row.approval is not None and row.approval.status == "approved"
     # plan untouched
-    assert row["stop_price"] == 300.0
-    assert row["invalidation"] == "原始论点"
-    assert row["setup"] == "pead_event"
+    assert row.stop_price == 300.0
+    assert row.invalidation == "原始论点"
+    assert row.setup == "pead_event"
 
 
 def test_slippage_sign_is_cost_for_both_sides(store):
@@ -166,8 +166,8 @@ def test_failed_orders_still_have_a_ledger_row(store):
                           submitted_at=NOW)
     je.record_outcome(_state([d], order_results=[entry]), store=store)
     row = store.journal_entries()[0]
-    assert row["terminal_status"] == "error"
-    assert row["stop_price"] is None or True          # plan preserved regardless
+    assert row.terminal_status == "error"
+    assert row.stop_price is None or True          # plan preserved regardless
 
 
 def test_journal_failure_never_breaks_the_cycle(store, monkeypatch):
@@ -183,8 +183,8 @@ def test_declared_stop_without_a_reference_price_falls_back(store):
     je.record_intents(_state([d], event_data={"GOOG": {"expected_move_pct": 5.71}}),
                       store=store)
     row = store.journal_entries()[0]
-    assert row["risk_unit_source"] == "expected_move"
-    assert row["planned_risk_usd"] is not None
+    assert row.risk_unit_source == "expected_move"
+    assert row.planned_risk_usd is not None
 
 
 def test_held_position_mark_makes_a_declared_stop_usable(store):
@@ -197,5 +197,5 @@ def test_held_position_mark_makes_a_declared_stop_usable(store):
     d = _d(stop_price=306.0, notional_usd=10_000.0)
     je.record_intents(_state([d], portfolio=pf), store=store)
     row = store.journal_entries()[0]
-    assert row["risk_unit_source"] == "declared_stop"
-    assert row["planned_risk_usd"] == pytest.approx(1000.0, abs=1)
+    assert row.risk_unit_source == "declared_stop"
+    assert row.planned_risk_usd == pytest.approx(1000.0, abs=1)

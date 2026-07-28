@@ -101,15 +101,16 @@ def record_pead_prediction(*, store, symbol: str, fiscal_label: str, scorecard,
     if pt and ref_price:
         claims.append(("consensus_pt", "target_pct", _pct(ref_price, pt), ""))
 
+    from ..schemas.journal import Prediction
+
     for source, kind, value, band in claims:
         pid = f"{ref_key}:{source}"
-        store.save_prediction({
-            "prediction_id": pid, "made_at": made.isoformat(), "symbol": symbol,
-            "source": source, "ref_key": ref_key, "kind": kind,
-            "predicted_value": value, "predicted_band": band,
-            "ref_price": ref_price, "ref_date": (got[0] if got else ref_date).isoformat(),
-            "print_date": print_date.isoformat() if print_date else None,
-            "sector_etf": sector_etf, "benchmark": benchmark, "entry_id": entry_id})
+        store.save_prediction(Prediction(
+            prediction_id=pid, made_at=made, symbol=symbol, source=source,
+            ref_key=ref_key, kind=kind, predicted_value=value, predicted_band=band,
+            ref_price=ref_price, ref_date=(got[0] if got else ref_date),
+            print_date=print_date, sector_etf=sector_etf, benchmark=benchmark,
+            entry_id=entry_id))
         ids.append(pid)
     return ids
 
@@ -118,15 +119,18 @@ def score_open_predictions(*, store=None, horizons=None) -> dict:
     """Fill in outcomes for every horizon that has now elapsed. Idempotent."""
     from ..config import get_config
     from ..memory import get_store
+    from ..schemas.journal import PredictionOutcome
 
     store = store or get_store()
     horizons = horizons or get_config().app.journal.horizons
     summary = {"scored": 0, "pending": 0, "no_price": 0}
 
     for p in store.open_predictions(horizons):
-        pid, sym = p["prediction_id"], p["symbol"]
-        ref_date = date.fromisoformat(p["ref_date"])
-        ref_px = p["ref_price"]
+        pid, sym = p.prediction_id, p.symbol
+        ref_date, ref_px = p.ref_date, p.ref_price
+        if ref_date is None:
+            summary["no_price"] += 1
+            continue
         for h in horizons:
             if store.has_outcome(pid, h):
                 continue
@@ -139,7 +143,7 @@ def score_open_predictions(*, store=None, horizons=None) -> dict:
                 continue
             realized = _pct(ref_px, fwd[1])
             excess_sector = excess_bench = None
-            for etf, key in ((p["sector_etf"], "sector"), (p["benchmark"], "bench")):
+            for etf, key in ((p.sector_etf, "sector"), (p.benchmark, "bench")):
                 if not etf:
                     continue
                 base = _close_on_or_after(etf, ref_date)
@@ -152,10 +156,10 @@ def score_open_predictions(*, store=None, horizons=None) -> dict:
                             excess_sector = val
                         else:
                             excess_bench = val
-            store.save_prediction_outcome({
-                "prediction_id": pid, "horizon_days": h, "as_of": fwd[0].isoformat(),
-                "realized_pct": realized, "excess_vs_sector_pct": excess_sector,
-                "excess_vs_bench_pct": excess_bench})
+            store.save_prediction_outcome(PredictionOutcome(
+                prediction_id=pid, horizon_days=h, as_of=fwd[0],
+                realized_pct=realized, excess_vs_sector_pct=excess_sector,
+                excess_vs_bench_pct=excess_bench))
             summary["scored"] += 1
     return summary
 

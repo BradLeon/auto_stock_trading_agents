@@ -7,21 +7,19 @@ most worth noticing.
 
 from __future__ import annotations
 
-import json
+from datetime import datetime, timezone
 
 from ats.journal.report import render_ledger
+from ats.schemas.journal import JournalEntry
+
+NOW = datetime(2026, 7, 23, 14, 6, tzinfo=timezone.utc)
 
 
 def _e(**kw):
-    base = {"entry_id": "c1:GOOG:trim", "as_of": "2026-07-23T14:06:00+00:00",
-            "symbol": "GOOG", "action": "trim", "setup": "pead_event",
-            "intended_notional": 4000.0, "intended_qty": 13.0, "conviction": 0.5,
-            "stop_price": None, "target_price": None, "planned_horizon_days": None,
-            "invalidation": "", "ev_score_total": None, "ev_has_transcript": None,
-            "ev_score_latency_h": None, "risk_notes_json": None,
-            "approval_status": None, "approval_divergence": None,
-            "terminal_status": None, "submit_attempts": None}
-    return {**base, **kw}
+    base = dict(entry_id="c1:GOOG:trim", cycle_id="c1", as_of=NOW, symbol="GOOG",
+                action="trim", setup="pead_event", intended_notional=4000.0,
+                intended_qty=13.0, conviction=0.5)
+    return JournalEntry(**{**base, **kw})
 
 
 def test_empty_month_is_stated_not_blank():
@@ -52,8 +50,10 @@ def test_missing_transcript_is_called_out():
 
 
 def test_boss_rejection_is_marked():
-    div = json.dumps({"diverged": True, "dropped_symbols": ["GOOG"]})
-    out = render_ledger([_e(approval_status="approved", approval_divergence=div)], "2026-07")
+    from ats.schemas.journal import ApprovalDivergence
+
+    ap = ApprovalDivergence(status="approved", diverged=True, dropped_symbols=["GOOG"])
+    out = render_ledger([_e(approval=ap)], "2026-07")
     assert "**被否**" in out
     assert "人审有分歧 1" in out
 

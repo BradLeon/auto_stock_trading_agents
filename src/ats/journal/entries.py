@@ -100,6 +100,7 @@ def record_intents(state, *, store=None) -> list[str]:
     """
     from ..config import get_config, load_pead_config
     from ..memory import get_store
+    from ..schemas.journal import JournalEntry
 
     store = store or get_store()
     ids: list[str] = []
@@ -127,22 +128,21 @@ def record_intents(state, *, store=None) -> list[str]:
             risk_usd, unit = resolve_risk_unit(
                 d, expected_move_pct=em, stop_loss_pct=stop_loss_pct,
                 last_price=marks.get(d.symbol))
-            store.save_journal_entry({
-                "entry_id": entry_id, "cycle_id": state.cycle_id,
-                "as_of": state.as_of.isoformat(), "symbol": d.symbol, "action": d.action,
-                "source": state.source, "setup": _setup_of(d, state.source),
-                "intended_notional": d.notional_usd, "intended_qty": d.qty,
-                "conviction": d.conviction, "order_type": d.order_type,
-                "limit_price": d.limit_price, "stop_price": d.stop_price,
-                "target_price": d.target_price,
-                "planned_horizon_days": d.planned_horizon_days,
-                "invalidation": d.invalidation,
-                "planned_risk_usd": risk_usd, "risk_unit_source": unit,
-                "rationale": d.rationale,
-                "ev_expected_move_pct": em,
-                "risk_notes_json": notes_json,
+            store.save_journal_entry(JournalEntry(
+                entry_id=entry_id, cycle_id=state.cycle_id, as_of=state.as_of,
+                symbol=d.symbol, action=d.action, source=state.source,
+                setup=_setup_of(d, state.source),
+                intended_notional=d.notional_usd, intended_qty=d.qty,
+                conviction=d.conviction, order_type=d.order_type,
+                limit_price=d.limit_price, stop_price=d.stop_price,
+                target_price=d.target_price,
+                planned_horizon_days=d.planned_horizon_days,
+                invalidation=d.invalidation,
+                planned_risk_usd=risk_usd, risk_unit_source=unit,
+                rationale=d.rationale, ev_expected_move_pct=em,
+                risk_notes=list(state.risk_notes or []),
                 **regime, **_evidence(store, d.symbol, label),
-            })
+            ))
             ids.append(entry_id)
         except Exception as exc:  # noqa: BLE001 - one row must not break the cycle
             log.warning("journal entry failed for %s: %s", d.symbol, exc)

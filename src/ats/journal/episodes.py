@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable
 
 from ..schemas.journal import EpisodeOrigin, TradeEpisode
 
@@ -139,9 +138,7 @@ class _Accumulator:
         )
 
 
-def build_episodes(symbol: str, fills: list[dict], *,
-                   lookup_entry: Callable[[str], object | None] | None = None,
-                   ) -> list[TradeEpisode]:
+def build_episodes(symbol: str, fills: list[dict]) -> list[TradeEpisode]:
     """Reduce a symbol's fills (any order) into episodes.
 
     Handles the edge case of a single fill flipping net position through zero
@@ -287,7 +284,7 @@ def rebuild_all(*, store=None, portfolio=None) -> dict:
                 all_fills = [_seed_fill(symbol, implied_prior, cost, earliest)] + fills
                 summary["seeded"] += 1
 
-        episodes = build_episodes(symbol, all_fills, lookup_entry=store.get_journal_entry)
+        episodes = build_episodes(symbol, all_fills)
         for i, ep in enumerate(episodes):
             if ep.primary_entry_id:
                 entry = store.get_journal_entry(ep.primary_entry_id)

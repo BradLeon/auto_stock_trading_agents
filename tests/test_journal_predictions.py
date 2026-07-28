@@ -12,6 +12,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from ats.journal import predictions as jp
+from ats.journal import prices
 from ats.memory import get_store
 from ats.schemas.market import OHLCV
 from ats.schemas.pead import Scorecard, ScorecardLine
@@ -36,8 +37,10 @@ def _series(start_close=100.0, **overrides):
 
 @pytest.fixture(autouse=True)
 def _prices(monkeypatch):
-    cache = {}
-    monkeypatch.setattr(jp, "_PRICE_CACHE", cache)
+    """Stub `prices.bars` itself — a cache MISS must return empty, never fall through
+    to a real network fetch."""
+    cache: dict[str, list] = {}
+    monkeypatch.setattr(prices, "bars", lambda symbol: cache.get(symbol, []))
     return cache
 
 
@@ -154,7 +157,7 @@ def test_expected_move_and_target_price_are_registered(store, _prices):
 
 
 def test_no_price_history_degrades_quietly(store, monkeypatch):
-    monkeypatch.setattr(jp, "_bars", lambda s: [])
+    monkeypatch.setattr(prices, "bars", lambda s: [])
     ids = jp.record_pead_prediction(store=store, symbol="ZZZZ", fiscal_label="Q2",
                                     scorecard=_card(), scored_at=NOW)
     assert ids                                        # claim still recorded

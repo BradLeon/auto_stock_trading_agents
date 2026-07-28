@@ -462,6 +462,12 @@ class TradingMemory:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT symbol FROM fills ORDER BY symbol")]
 
+    def legs_for_episode(self, episode_id: str) -> list[dict]:
+        """Raw fill rows belonging to one episode, oldest first. The last row is the
+        closing leg for a closed episode, or the most recent trim for an open one."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM fills WHERE episode_id = ? ORDER BY time ASC", (episode_id,))]
+
     # --- predictions + outcomes -------------------------------------------- #
     def save_prediction(self, prediction) -> None:
         row = prediction.model_dump(mode="json")

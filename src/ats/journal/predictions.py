@@ -20,32 +20,14 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 
+from . import prices
+
 log = logging.getLogger("ats.journal")
-
-_PRICE_CACHE: dict[str, list] = {}
-
-
-def _bars(symbol: str):
-    """Daily bars, UNADJUSTED — see market_data.fetch_snapshot(adjust=...)."""
-    if symbol not in _PRICE_CACHE:
-        from ..data.market_data import fetch_snapshot
-        from ..schemas.market import Ticker
-
-        snap = fetch_snapshot(Ticker(symbol=symbol), period="2y", adjust=False)
-        _PRICE_CACHE[symbol] = snap.history or []
-    return _PRICE_CACHE[symbol]
-
-
-def _close_on_or_after(symbol: str, d: date) -> tuple[date, float] | None:
-    for b in _bars(symbol):
-        if b.date >= d:
-            return (b.date, b.close)
-    return None
 
 
 def _forward_close(symbol: str, start: date, horizon: int) -> tuple[date, float] | None:
     """Close `horizon` TRADING days after the first bar on/after `start`."""
-    bars = _bars(symbol)
+    bars = prices.bars(symbol)
     idx = next((i for i, b in enumerate(bars) if b.date >= start), None)
     if idx is None or idx + horizon >= len(bars):
         return None
@@ -86,7 +68,7 @@ def record_pead_prediction(*, store, symbol: str, fiscal_label: str, scorecard,
     made = datetime.now(timezone.utc)
     print_date = _as_date(earnings_date)
     ref_date = _as_date(scored_at) or print_date or made.date()
-    got = _close_on_or_after(symbol, ref_date)
+    got = prices.close_on_or_after(symbol, ref_date)
     ref_price = got[1] if got else None
     ref_key = f"{symbol}:{fiscal_label}"
     ids: list[str] = []
@@ -146,7 +128,7 @@ def score_open_predictions(*, store=None, horizons=None) -> dict:
             for etf, key in ((p.sector_etf, "sector"), (p.benchmark, "bench")):
                 if not etf:
                     continue
-                base = _close_on_or_after(etf, ref_date)
+                base = prices.close_on_or_after(etf, ref_date)
                 fwd_b = _forward_close(etf, ref_date, h)
                 if base and fwd_b:
                     bench_ret = _pct(base[1], fwd_b[1])

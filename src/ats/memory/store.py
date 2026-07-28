@@ -501,6 +501,20 @@ class TradingMemory:
             (len(horizons),)).fetchall()
         return [Prediction.model_validate(dict(r)) for r in rows]
 
+    def predictions_for_entries(self, entry_ids: list[str]) -> list:
+        """-> list[Prediction] whose entry_id is one of the given ids — the predictions
+        that actually led to a trade in a given episode (an episode has no fiscal_label
+        of its own; this is how its review card finds the right quarter's predictions)."""
+        from ..schemas.journal import Prediction
+
+        ids = [e for e in entry_ids if e]
+        if not ids:
+            return []
+        rows = self.conn.execute(
+            f"SELECT * FROM predictions WHERE entry_id IN ({','.join('?' * len(ids))}) "
+            "ORDER BY made_at", ids).fetchall()
+        return [Prediction.model_validate(dict(r)) for r in rows]
+
     def prediction_outcomes(self, prediction_id: str) -> list:
         """-> list[PredictionOutcome]."""
         from ..schemas.journal import PredictionOutcome

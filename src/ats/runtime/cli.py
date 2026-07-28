@@ -846,9 +846,9 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
     jr = sub.add_parser("journal",
-                        help="交易日志 (doctor / reconcile / episodes / mark / invalidate / ledger / score)")
+                        help="交易日志 (doctor / reconcile / episodes / mark / invalidate / review / ledger / score)")
     jr.add_argument("action", choices=["doctor", "reconcile", "episodes", "mark",
-                                       "invalidate", "ledger", "score"])
+                                       "invalidate", "review", "ledger", "score"])
     jr.add_argument("--dry-run", action="store_true",
                     help="reconcile: 只读，打印将要写入什么")
     jr.add_argument("--month", help="ledger: YYYY-MM（默认本月）")
@@ -965,6 +965,10 @@ def main(argv: list[str] | None = None) -> int:
             from ..journal import invalidation
 
             return invalidation.run(use_llm=not args.no_llm)
+        if args.action == "review":
+            from ..journal import episode_report
+
+            return episode_report.run()
         if args.action == "ledger":
             from ..journal import report as journal_report
 

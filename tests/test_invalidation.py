@@ -197,33 +197,6 @@ def test_llm_failure_degrades_without_guessing(store, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _build_card: legs collection
-# --------------------------------------------------------------------------- #
-def test_build_card_collects_distinct_legs_in_order(store):
-    store.conn.execute(
-        "INSERT INTO fills (exec_id, symbol, side, shares, price, time, episode_id, "
-        "entry_id) VALUES (?,?,?,?,?,?,?,?)",
-        ("f1", "GOOG", "BOT", 10, 100.0, "2026-07-01T10:00:00+00:00", "e1", "c1:GOOG:open"))
-    store.conn.execute(
-        "INSERT INTO fills (exec_id, symbol, side, shares, price, time, episode_id, "
-        "entry_id) VALUES (?,?,?,?,?,?,?,?)",
-        ("f2", "GOOG", "BOT", 5, 110.0, "2026-07-05T10:00:00+00:00", "e1", "c2:GOOG:add"))
-    store.save_journal_entry(_entry(entry_id="c1:GOOG:open", action="buy"))
-    store.save_journal_entry(_entry(entry_id="c2:GOOG:add", action="add"))
-    card = inv._build_card(store, _episode())
-    assert [leg.entry_id for leg in card.legs] == ["c1:GOOG:open", "c2:GOOG:add"]
-
-
-def test_build_card_skips_legs_with_no_linked_entry(store):
-    store.conn.execute(
-        "INSERT INTO fills (exec_id, symbol, side, shares, price, time, episode_id, "
-        "entry_id) VALUES (?,?,?,?,?,?,?,?)",
-        ("f1", "GOOG", "BOT", 10, 100.0, "2026-07-01T10:00:00+00:00", "e1", None))
-    card = inv._build_card(store, _episode())
-    assert card.legs == []
-
-
-# --------------------------------------------------------------------------- #
 # period events/insights: date filtering
 # --------------------------------------------------------------------------- #
 def test_period_events_excludes_before_open_and_sorts_ascending(store):

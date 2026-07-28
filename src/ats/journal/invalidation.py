@@ -43,7 +43,8 @@ import logging
 from datetime import date, datetime, timezone
 
 from ..agents.base import run_structured
-from ..schemas.journal import EpisodeCard, JournalEntry, TradeEpisode
+from ..schemas.journal import EpisodeCard
+from .card import build_card
 from .outputs import InvalidationView
 
 log = logging.getLogger("ats.journal")
@@ -59,21 +60,6 @@ def _assert_blind(card: EpisodeCard) -> None:
     leaked = [f for f in _OUTCOME_FIELDS if getattr(card.episode, f) is not None]
     if leaked:
         raise AssertionError(f"invalidation check received an unblinded card: {leaked}")
-
-
-def _build_card(store, episode: TradeEpisode) -> EpisodeCard:
-    plan = store.get_journal_entry(episode.primary_entry_id) if episode.primary_entry_id else None
-    seen: set[str] = set()
-    legs: list[JournalEntry] = []
-    for leg in store.legs_for_episode(episode.episode_id):
-        entry_id = leg.get("entry_id")
-        if not entry_id or entry_id in seen:
-            continue
-        seen.add(entry_id)
-        entry = store.get_journal_entry(entry_id)
-        if entry is not None:
-            legs.append(entry)
-    return EpisodeCard(episode=episode, plan=plan, legs=legs)
 
 
 def _to_date(s: str | None) -> date | None:
@@ -165,7 +151,7 @@ def check_all(*, store=None, use_llm: bool = True, as_of: date | None = None) ->
                 store.save_episode(ep.model_copy(update=updates))
             continue
 
-        card = _build_card(store, ep).blind()
+        card = build_card(store, ep, with_predictions=False).blind()
         _assert_blind(card)
         events = _period_events(store, ep.symbol, ep.opened_at.date())
         insights = _period_insights(store, ep.symbol, ep.opened_at.date())

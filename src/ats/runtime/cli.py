@@ -846,14 +846,17 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
     jr = sub.add_parser("journal",
-                        help="交易日志 (doctor / reconcile / episodes / ledger / score)")
-    jr.add_argument("action", choices=["doctor", "reconcile", "episodes", "ledger", "score"])
+                        help="交易日志 (doctor / reconcile / episodes / mark / invalidate / ledger / score)")
+    jr.add_argument("action", choices=["doctor", "reconcile", "episodes", "mark",
+                                       "invalidate", "ledger", "score"])
     jr.add_argument("--dry-run", action="store_true",
                     help="reconcile: 只读，打印将要写入什么")
     jr.add_argument("--month", help="ledger: YYYY-MM（默认本月）")
     jr.add_argument("--backfill", action="store_true",
                     help="score: 先用已打分的 dossier 回填预测")
     jr.add_argument("--symbol", help="episodes: 只看这个标的")
+    jr.add_argument("--no-llm", action="store_true",
+                    help="invalidate: 只算 horizon_overdue_days，不调 LLM 判定失效")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
     tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
                                        "cancel", "execute", "buy", "sell"])
@@ -954,6 +957,14 @@ def main(argv: list[str] | None = None) -> int:
                       f"origin={ep.origin:12} realized={ep.realized_pnl} "
                       f"entry={ep.avg_entry} exit={ep.avg_exit}")
             return rc
+        if args.action == "mark":
+            from ..journal import marks
+
+            return marks.run()
+        if args.action == "invalidate":
+            from ..journal import invalidation
+
+            return invalidation.run(use_llm=not args.no_llm)
         if args.action == "ledger":
             from ..journal import report as journal_report
 

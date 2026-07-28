@@ -447,7 +447,10 @@ class TradingMemory:
             sql += " AND status = ?"
             args.append(status)
         if decision_gradeable_only:
-            sql += " AND origin != 'pre_tracking'"
+            # Mirrors TradeEpisode.decision_gradeable: a real linked plan, not origin —
+            # manual-origin episodes also have no plan (manual orders bypass
+            # persist_decision) and must not slip into decision-quality stats either.
+            sql += " AND primary_entry_id != ''"
         sql += " ORDER BY opened_at DESC LIMIT ?"
         args.append(limit)
         return [TradeEpisode.model_validate(dict(r))

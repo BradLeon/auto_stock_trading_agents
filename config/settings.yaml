@@ -31,6 +31,7 @@ llm:
     macro_strategist: {model: anthropic/claude-sonnet-5, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 sonnet-5
     pead_analyst: {model: anthropic/claude-sonnet-5}  # PEAD prep framework/narrative/expectations (token-heavy)
     structure_analyst: {model: anthropic/claude-sonnet-5, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权
+    invalidation_check: {model: anthropic/claude-sonnet-5, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，用 sonnet 保证判读稳定
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
     risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus

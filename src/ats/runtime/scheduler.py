@@ -70,11 +70,21 @@ def _pead_actions(today: date, earnings_date: date | None, hour: str,
     The branch was dead in production for every after-close print — and the unit test
     hid it by passing a past date that the real source cannot produce. Scoring now
     lives in `_score_plan` / `pead_score_window`, triggered by an OBSERVED print.
+
+    Same-day (days_to == 0) is prep-eligible UNLESS the print is bmo. A bmo print
+    has already opened for trading by the time the 10:30 ET cycle runs — prep after
+    the fact is moot. An amc/dmh/unknown-session print same-day is still hours away
+    (10:30 ET is well before a 20:00 ET close), so prep is still useful. Found
+    2026-07-29: KLAC is amc and printed same-day, but the old unconditional
+    `0 < days_to` excluded days_to == 0 regardless of session, so a same-day amc
+    name lost its very last legitimate prep window even with a perfectly healthy
+    scheduler — this was never actually about the daemon-downtime misfire issue.
     """
     actions = ["monitor"]
     if earnings_date:
         days_to = (earnings_date - today).days
-        if 0 < days_to <= sched_cfg.get("prep_days_before", 3):
+        min_days = 1 if hour == "bmo" else 0
+        if min_days <= days_to <= sched_cfg.get("prep_days_before", 3):
             actions.append("prep")
     return actions
 

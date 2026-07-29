@@ -143,6 +143,18 @@ def test_setup_expectancy_excludes_non_gradeable_episodes(store):
     assert block.n_closed == 0 and block.table == []
 
 
+def test_setup_expectancy_counterexample_is_the_group_outlier(store):
+    """Two episodes near the group mean, one far outlier — the outlier's bare
+    episode_id must come back, not a formatted string (Stage E resolves it itself)."""
+    store.save_episode(_episode(episode_id="e1", realized_pnl=100.0))
+    store.save_episode(_episode(episode_id="e2", symbol="TSM", primary_entry_id="c1:TSM:open",
+                               realized_pnl=110.0))
+    store.save_episode(_episode(episode_id="e3", symbol="ASML", primary_entry_id="c1:ASML:open",
+                               realized_pnl=5000.0))
+    block = cal._setup_expectancy(store)
+    assert block.counterexamples[0] == "e3"
+
+
 # --------------------------------------------------------------------------- #
 # 6. risk gate audit
 # --------------------------------------------------------------------------- #
@@ -162,6 +174,19 @@ def test_risk_gate_audit_splits_by_risk_notes_presence(store):
     assert by_group["风控介入过（削减/预警）"]["n"] == 1
     assert by_group["风控介入过（削减/预警）"]["均值盈亏$"] == pytest.approx(300.0)
     assert by_group["风控未介入"]["均值盈亏$"] == pytest.approx(-100.0)
+
+
+def test_risk_gate_audit_counterexample_is_the_group_outlier(store):
+    store.save_journal_entry(_entry(entry_id="c1:GOOG:open", risk_notes=["clipped"]))
+    store.save_episode(_episode(episode_id="e1", primary_entry_id="c1:GOOG:open", realized_pnl=100.0))
+    store.save_journal_entry(_entry(entry_id="c2:TSM:open", symbol="TSM", risk_notes=["clipped"]))
+    store.save_episode(_episode(episode_id="e2", symbol="TSM", primary_entry_id="c2:TSM:open",
+                               realized_pnl=110.0))
+    store.save_journal_entry(_entry(entry_id="c3:ASML:open", symbol="ASML", risk_notes=["clipped"]))
+    store.save_episode(_episode(episode_id="e3", symbol="ASML", primary_entry_id="c3:ASML:open",
+                               realized_pnl=-9000.0))
+    block = cal._risk_gate_audit(store)
+    assert block.counterexamples[0] == "e3"
 
 
 # --------------------------------------------------------------------------- #
@@ -204,6 +229,45 @@ def test_human_gate_audit_ignores_entries_the_boss_approved(store, monkeypatch):
     store.save_journal_entry(_entry(approval=div))
     block = cal._human_gate_audit(store)
     assert block.n_closed == 0
+
+
+# --------------------------------------------------------------------------- #
+# bare-ID counterexamples + render-time resolution
+# --------------------------------------------------------------------------- #
+def test_group_outlier_counterexamples_needs_at_least_two_per_group():
+    groups = {"a": [("x1", 100.0)], "b": [("y1", 10.0), ("y2", 12.0), ("y3", 999.0)]}
+    out = cal._group_outlier_counterexamples(groups, k=1)
+    assert out == ["y3"]   # group "a" has only 1 item -> no mean to deviate from -> skipped
+
+
+def test_store_get_prediction_round_trips(store):
+    store.save_prediction(_pred(prediction_id="p1", predicted_value=1.1))
+    assert store.get_prediction("p1").predicted_value == pytest.approx(1.1)
+    assert store.get_prediction("does-not-exist") is None
+
+
+def test_fmt_counterexample_resolves_episode_prediction_and_entry(store):
+    store.save_episode(_episode(episode_id="e1", realized_pnl=500.0, r_multiple=1.5))
+    store.save_prediction(_pred(prediction_id="p1", predicted_value=1.1, predicted_band="达到做多门槛"))
+    store.save_journal_entry(_entry(entry_id="c9:GOOG:open"))
+    assert "GOOG" in cal._fmt_counterexample(store, "e1") and "1.50R" in cal._fmt_counterexample(store, "e1")
+    assert "达到做多门槛" in cal._fmt_counterexample(store, "p1")
+    assert "c9:GOOG:open" in cal._fmt_counterexample(store, "c9:GOOG:open")
+
+
+def test_fmt_counterexample_falls_back_to_bare_id_when_unresolvable(store):
+    assert cal._fmt_counterexample(store, "ghost-id") == "`ghost-id`"
+
+
+def test_render_resolves_counterexamples_into_readable_lines(store):
+    from ats.schemas.journal import EvidenceBlock
+
+    store.save_episode(_episode(episode_id="e1", realized_pnl=500.0, r_multiple=1.5))
+    block = EvidenceBlock(question="q", table=[{"a": 1}], n_closed=12, n_open=0, n_min=10,
+                          counterexamples=["e1"])
+    out = cal.render_calibration([block], "2026-07", store=store)
+    cx_line = next(line for line in out.splitlines() if "最强反例" in line)
+    assert "1.50R" in cx_line and "GOOG" in cx_line
 
 
 # --------------------------------------------------------------------------- #

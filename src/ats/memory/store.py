@@ -516,6 +516,16 @@ class TradingMemory:
         return [Prediction.model_validate(dict(r))
                 for r in self.conn.execute(sql, args).fetchall()]
 
+    def get_prediction(self, prediction_id: str):
+        """-> Prediction | None. Single-row lookup, mirrors get_episode/
+        get_journal_entry — used to resolve a bare counterexample ID back to its
+        full record (e.g. when rendering, or when Stage E's critic picks cases)."""
+        from ..schemas.journal import Prediction
+
+        row = self.conn.execute(
+            "SELECT * FROM predictions WHERE prediction_id = ?", (prediction_id,)).fetchone()
+        return Prediction.model_validate(dict(row)) if row else None
+
     def predictions_for_entries(self, entry_ids: list[str]) -> list:
         """-> list[Prediction] whose entry_id is one of the given ids — the predictions
         that actually led to a trade in a given episode (an episode has no fiscal_label

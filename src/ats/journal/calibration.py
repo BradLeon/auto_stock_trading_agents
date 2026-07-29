@@ -24,13 +24,33 @@ from ..schemas.journal import EvidenceBlock
 
 
 def _counterexamples(pairs: list[tuple[str, float, float]], k: int = 3) -> list[str]:
-    """pairs = (id, expected_signed_value, actual_signed_value). The strongest
-    disagreements — expected and actual point opposite ways — largest |actual| first.
-    Only given the mean, an LLM (or a human skimming) will read n=14 as a rule; a
-    forced counterexample is what surfaces "but twice it went the other way"."""
+    """pairs = (id, expected_signed_value, actual_signed_value). Returns bare IDs
+    (episode_id / prediction_id — see EvidenceBlock.counterexamples' own field
+    comment) for the strongest disagreements — expected and actual point opposite
+    ways — largest |actual| first. Only given the mean, an LLM (or a human skimming)
+    will read n=14 as a rule; a forced counterexample is what surfaces "but twice it
+    went the other way". Formatting into a human-readable line happens at render
+    time (`_fmt_counterexample`), not here — a bare ID is what lets a downstream
+    consumer (Stage E's critic) resolve it back to the full record, not just read it."""
     bad = [(abs(a), i, e, a) for i, e, a in pairs if e * a < 0]
     bad.sort(key=lambda t: -t[0])
-    return [f"{i}（预测 {e:+.2f} vs 实现 {a:+.2f}%）" for _, i, e, a in bad[:k]]
+    return [i for _, i, _, _ in bad[:k]]
+
+
+def _group_outlier_counterexamples(groups: dict[str, list[tuple[str, float]]],
+                                   k: int = 3) -> list[str]:
+    """groups = {label: [(id, value), ...]}. Bare IDs of whichever items deviate
+    most from THEIR OWN group's mean — the case(s) that most contradict that
+    group's story, largest deviation first. Needs >=2 items in a group to have a
+    mean worth deviating from."""
+    scored = []
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        mean = sum(v for _, v in items) / len(items)
+        scored += [(abs(v - mean), id_) for id_, v in items]
+    scored.sort(key=lambda t: -t[0])
+    return [id_ for _, id_ in scored[:k]]
 
 
 # --------------------------------------------------------------------------- #
@@ -130,8 +150,7 @@ def _expected_move_calibration(store) -> EvidenceBlock:
     # counterexamples here are UNDER-priced surprises (realized far > predicted) —
     # events the L6 gate should have sized larger, not the ratio's sign.
     diffs.sort(key=lambda d: d[1] - d[2])
-    counterexamples = [f"{pid}（预测±{pv:.1f}% 实际|{rv:.1f}%|）"
-                       for pid, pv, rv in diffs[:3] if rv > pv]
+    counterexamples = [pid for pid, pv, rv in diffs[:3] if rv > pv]
     return EvidenceBlock(
         question="期权隐含预期波幅 vs 实现 |T+1| 涨跌幅的比值 —— 决定 L6 事件闸松紧",
         table=table, n_closed=n_closed, n_open=n_open, n_min=20,
@@ -180,6 +199,7 @@ def _setup_expectancy(store) -> EvidenceBlock:
     for e in closed:
         by_setup.setdefault(e.setup, []).append(e)
     rows = []
+    pnl_groups: dict[str, list[tuple[str, float]]] = {}
     for setup, eps in by_setup.items():
         pnls = [e.realized_pnl for e in eps if e.realized_pnl is not None]
         wins = [x for x in pnls if x > 0]
@@ -192,10 +212,12 @@ def _setup_expectancy(store) -> EvidenceBlock:
             "均值盈亏$": round(sum(pnls) / len(pnls), 0) if pnls else None,
             "MFE:|MAE|": round(sum(m for m, _ in mfe_mae) / mae_sum, 2) if mae_sum else None,
         })
+        pnl_groups[setup] = [(e.episode_id, e.realized_pnl) for e in eps if e.realized_pnl is not None]
     rows.sort(key=lambda r: -(r["n"] or 0))
     return EvidenceBlock(
         question="按 setup 分类的胜率 / 均值盈亏 / MFE:|MAE| —— 哪类值得加码，哪类该收紧？",
-        table=rows, n_closed=len(closed), n_open=len(open_), n_min=20)
+        table=rows, n_closed=len(closed), n_open=len(open_), n_min=20,
+        counterexamples=_group_outlier_counterexamples(pnl_groups))
 
 
 # --------------------------------------------------------------------------- #
@@ -205,24 +227,28 @@ def _risk_gate_audit(store) -> EvidenceBlock:
     episodes_by_entry = {e.primary_entry_id: e for e in store.list_episodes(limit=100_000)
                          if e.decision_gradeable and e.status == "closed"}
     entries = store.journal_entries(limit=5000)
-    gated, ungated = [], []
+    gated: list[tuple[str, float]] = []
+    ungated: list[tuple[str, float]] = []
     for entry in entries:
         ep = episodes_by_entry.get(entry.entry_id)
         if ep is None or ep.realized_pnl is None:
             continue
-        (gated if entry.risk_notes else ungated).append(ep.realized_pnl)
+        (gated if entry.risk_notes else ungated).append((ep.episode_id, ep.realized_pnl))
 
-    def _stats(label: str, pnls: list[float]) -> dict:
-        if not pnls:
+    def _stats(label: str, pairs: list[tuple[str, float]]) -> dict:
+        if not pairs:
             return {"分组": label, "n": 0, "win_rate": None, "均值盈亏$": None}
+        pnls = [p for _, p in pairs]
         wins = [p for p in pnls if p > 0]
         return {"分组": label, "n": len(pnls), "win_rate": round(len(wins) / len(pnls), 2),
                 "均值盈亏$": round(sum(pnls) / len(pnls), 0)}
 
     table = [_stats("风控介入过（削减/预警）", gated), _stats("风控未介入", ungated)]
+    counterexamples = _group_outlier_counterexamples({"gated": gated, "ungated": ungated})
     return EvidenceBlock(
         question="风控闸介入过的意图，事后走成什么样——保护了下行，还是错杀了盈利单？",
-        table=table, n_closed=len(gated) + len(ungated), n_open=0, n_min=10)
+        table=table, n_closed=len(gated) + len(ungated), n_open=0, n_min=10,
+        counterexamples=counterexamples)
 
 
 # --------------------------------------------------------------------------- #
@@ -260,8 +286,7 @@ def _human_gate_audit(store) -> EvidenceBlock:
         f"若按提议方向持有T+{h}均值涨跌%": round(sum(r[2] for r in rows_data) / n, 2) if n else None,
     }]
     strongest = sorted(rows_data, key=lambda r: -r[2])[:3]
-    counterexamples = [f"{sym}（{eid}）：否决后按提议方向本会 {pct:+.1f}%"
-                       for eid, sym, pct in strongest if pct > 0]
+    counterexamples = [eid for eid, _sym, pct in strongest if pct > 0]
     return EvidenceBlock(
         question="人审否决的提议，若仍按提议方向持有，事后是赢是亏？"
                 "（中性呈现——否决可能对，也可能是防住了这里没测到的别的风险）",
@@ -304,7 +329,32 @@ def _render_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def render_calibration(blocks: list[EvidenceBlock], period_label: str) -> str:
+def _fmt_counterexample(store, id_: str) -> str:
+    """Resolve a bare counterexample ID (episode_id / prediction_id / entry_id) back
+    to a human-readable line for the report. Tries each store in turn — the ID's own
+    shape doesn't say which kind it is, so this just asks each lookup and keeps
+    whichever answers. Falls back to the bare ID if nothing resolves (store rebuilt
+    since the block was computed, etc.) rather than failing the whole render."""
+    ep = store.get_episode(id_)
+    if ep is not None:
+        perf = (f"{ep.r_multiple:+.2f}R" if ep.r_multiple is not None
+               else (f"${ep.realized_pnl:,.0f}" if ep.realized_pnl is not None else "—"))
+        return f"{ep.symbol} 回合 `{id_}`（{perf}）"
+    pred = store.get_prediction(id_)
+    if pred is not None:
+        val = f"{pred.predicted_value:+.2f}" if pred.predicted_value is not None else "—"
+        band = f"（{pred.predicted_band}）" if pred.predicted_band else ""
+        return f"{pred.symbol} {pred.source} 预测 `{id_}`：预测值 {val}{band}"
+    entry = store.get_journal_entry(id_)
+    if entry is not None:
+        return f"{entry.symbol} {entry.action} 意图 `{id_}`"
+    return f"`{id_}`"
+
+
+def render_calibration(blocks: list[EvidenceBlock], period_label: str, *, store=None) -> str:
+    from ..memory import get_store
+
+    store = store or get_store()
     lines = [f"# 系统校准 — {period_label}", "",
             f"> 生成于 {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC ｜ "
             "纯确定性统计，无 LLM ｜ 主指标是校准而非盈亏", ""]
@@ -314,7 +364,8 @@ def render_calibration(blocks: list[EvidenceBlock], period_label: str) -> str:
         lines.append(f"> {n_note}" + ("" if b.sufficient else f" — **样本不足（<{b.n_min}），不作结论**"))
         lines += ["", _render_table(b.table)]
         if b.counterexamples:
-            lines += ["", "**最强反例**：" + "；".join(b.counterexamples)]
+            fmted = [_fmt_counterexample(store, cx) for cx in b.counterexamples]
+            lines += ["", "**最强反例**：" + "；".join(fmted)]
         lines.append("")
     return "\n".join(lines)
 
@@ -335,7 +386,7 @@ def write_calibration(*, store=None, as_of: date | None = None,
     today = as_of or datetime.now(timezone.utc).date()
     label = _period_label(today, quarterly)
     blocks = build_evidence_blocks(store)
-    return _write_md(f"系统校准-{label}.md", render_calibration(blocks, label))
+    return _write_md(f"系统校准-{label}.md", render_calibration(blocks, label, store=store))
 
 
 def run(*, quarterly: bool = False) -> int:

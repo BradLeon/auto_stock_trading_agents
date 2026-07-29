@@ -611,7 +611,11 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             lambda: _journal_reconcile(),
             CronTrigger(day_of_week="mon-fri", hour=r_hour, minute=r_minute,
                         timezone=cfg.timezone),
-            id="journal_reconcile", misfire_grace_time=7200,
+            # Same grace as the PEAD jobs, not a separate hardcoded value: a missed
+            # reconcile is unrecoverable (see comment above), so it needs the wide
+            # window at least as much as the score windows do — this predates the
+            # misfire_grace_hours config and was never updated when that landed.
+            id="journal_reconcile", misfire_grace_time=grace,
         )
 
     win_desc = ", ".join(f"{n}@{h}" for n, h in sorted(windows.items())) or "none"

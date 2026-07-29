@@ -26,12 +26,28 @@ def test_actions_never_score_regardless_of_session():
     PAST earnings_date, which its real source (next_earnings, filtered to >= today)
     can never produce. The assertions passed while the branch was dead in production.
     Routing by observed print is covered in tests/test_score_state.py.
+
+    `today == ed` (days_to == 0) also exercises the bmo/amc same-day prep boundary —
+    see test_actions_same_day_prep_is_session_aware for that in detail; this test only
+    asserts "score" never appears, regardless of what happens with "prep".
     """
     for today, ed, hour in [(date(2026, 6, 2), date(2026, 6, 1), "amc"),
                             (date(2026, 6, 1), date(2026, 6, 1), "amc"),
                             (date(2026, 6, 1), date(2026, 6, 1), "bmo"),
                             (date(2026, 6, 1), date(2026, 6, 1), "")]:
-        assert scheduler._pead_actions(today, ed, hour, SCHED) == ["monitor"]
+        assert "score" not in scheduler._pead_actions(today, ed, hour, SCHED)
+
+
+def test_actions_same_day_prep_is_session_aware():
+    """Found via KLAC 2026-07-29: an amc print due LATER TODAY is still hours away at
+    the 10:30 ET daily-cycle run, so prep is still useful — but the print already
+    happened once EARNINGS_DATE < today (checked elsewhere), and a bmo print has
+    already opened for trading by 10:30 ET, so prep after the fact is moot."""
+    same_day = date(2026, 6, 1)
+    assert scheduler._pead_actions(same_day, same_day, "amc", SCHED) == ["monitor", "prep"]
+    assert scheduler._pead_actions(same_day, same_day, "dmh", SCHED) == ["monitor", "prep"]
+    assert scheduler._pead_actions(same_day, same_day, "", SCHED) == ["monitor", "prep"]
+    assert scheduler._pead_actions(same_day, same_day, "bmo", SCHED) == ["monitor"]
 
 
 def test_actions_no_earnings_date_is_monitor_only():

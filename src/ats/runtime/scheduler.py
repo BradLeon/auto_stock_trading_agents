@@ -70,11 +70,21 @@ def _pead_actions(today: date, earnings_date: date | None, hour: str,
     The branch was dead in production for every after-close print — and the unit test
     hid it by passing a past date that the real source cannot produce. Scoring now
     lives in `_score_plan` / `pead_score_window`, triggered by an OBSERVED print.
+
+    Same-day (days_to == 0) is prep-eligible UNLESS the print is bmo. A bmo print
+    has already opened for trading by the time the 10:30 ET cycle runs — prep after
+    the fact is moot. An amc/dmh/unknown-session print same-day is still hours away
+    (10:30 ET is well before a 20:00 ET close), so prep is still useful. Found
+    2026-07-29: KLAC is amc and printed same-day, but the old unconditional
+    `0 < days_to` excluded days_to == 0 regardless of session, so a same-day amc
+    name lost its very last legitimate prep window even with a perfectly healthy
+    scheduler — this was never actually about the daemon-downtime misfire issue.
     """
     actions = ["monitor"]
     if earnings_date:
         days_to = (earnings_date - today).days
-        if 0 < days_to <= sched_cfg.get("prep_days_before", 3):
+        min_days = 1 if hour == "bmo" else 0
+        if min_days <= days_to <= sched_cfg.get("prep_days_before", 3):
             actions.append("prep")
     return actions
 
@@ -502,6 +512,40 @@ def _sector_weekly() -> None:
             log.warning("sector review %s failed: %s", name, exc)
 
 
+def _attach_job_logging(scheduler) -> None:
+    """Log every fire, miss and error.
+
+    Without this we are blind in the exact way that matters: for 2.5 days the daemon
+    logged "scheduler started" and then nothing, and a missed job looks identical to a
+    quiet day. APScheduler reports misses on its own logger, which our config leaves at
+    WARNING on the root handler — reachable in principle, but nothing ever surfaced it
+    next to our own lines. Now a miss is loud and a late run says how late it was.
+    """
+    from apscheduler.events import (
+        EVENT_JOB_ERROR,
+        EVENT_JOB_EXECUTED,
+        EVENT_JOB_MISSED,
+    )
+
+    def _on_event(event) -> None:
+        if event.code == EVENT_JOB_MISSED:
+            log.error("job %s MISSED its %s run — machine asleep past the grace window? "
+                      "(nothing ran)", event.job_id, event.scheduled_run_time)
+            return
+        late = ""
+        if event.scheduled_run_time:
+            secs = (_now_et() - event.scheduled_run_time).total_seconds()
+            if secs > 300:
+                late = f"（迟 {secs / 3600:.1f} 小时）"
+        if event.code == EVENT_JOB_ERROR:
+            log.error("job %s raised%s: %s", event.job_id, late, event.exception)
+        else:
+            log.info("job %s finished%s", event.job_id, late)
+
+    scheduler.add_listener(_on_event,
+                           EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+
+
 def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None) -> None:
     from ..config import load_pead_global
 
@@ -518,16 +562,25 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
     from apscheduler.triggers.cron import CronTrigger
 
     hour, minute = (int(x) for x in cfg.run_at.split(":"))
+    # This host SLEEPS. Measured 2026-07-27: the daemon had been alive 2.5 days with
+    # 0.45s of CPU — every job had been skipped, because the Mac was asleep at the
+    # trigger and the old 1-hour grace expired before it woke. The 20:00 ET after-close
+    # window is the worst case: it lands at 09:00 local, i.e. squarely in the night.
+    # A late score is still useful — 20:00 ET + 6h is 02:00 ET, still ~7h before the
+    # next open — so the grace is wide enough to survive an overnight sleep. Beyond
+    # that the T+1 catch-up path in _score_plan takes over.
+    grace = int(cfg.misfire_grace_hours * 3600)
     # One worker on purpose: these jobs are long sequential LLM pipelines that all
     # write the same sqlite connection, so letting two run concurrently would risk
     # interleaved writes for no gain. A job that comes due while another is running
     # waits, and misfire_grace_time decides whether it still fires.
     scheduler = BlockingScheduler(timezone=cfg.timezone,
                                   executors={"default": ThreadPoolExecutor(1)})
+    _attach_job_logging(scheduler)
     scheduler.add_job(
         lambda: _daily(dry_run=dry_run),
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
-        id="daily_cycle", misfire_grace_time=3600,
+        id="daily_cycle", misfire_grace_time=grace,
     )
 
     # PEAD score windows — triggered by an observed print, so their job is to check
@@ -545,7 +598,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             lambda name=name: pead_score_window(name, dry_run=dry_run),
             CronTrigger(day_of_week="mon-fri", hour=w_hour, minute=w_minute,
                         timezone=cfg.timezone),
-            id=f"pead_score_{name}", misfire_grace_time=3600,
+            id=f"pead_score_{name}", misfire_grace_time=grace,
         )
 
     # Post-close reconciliation. Its own job on purpose: reqExecutions only returns

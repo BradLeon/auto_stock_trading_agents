@@ -104,6 +104,12 @@ schedule:
                                 # observed earnings print: config/pead.yaml
                                 # schedule.score_windows (bmo 11:00 / amc 20:00 ET).
   timezone: America/New_York
+  # 这台机器会睡眠。触发时刻若在睡眠中，任务只有在唤醒后、且仍在本宽限窗口内才补跑。
+  # 实测 2026-07-27：旧值 1 小时导致 daemon 存活 2.5 天、CPU 仅 0.45 秒 —— 每一次触发
+  # 都被静默丢弃。最糟的是盘后 20:00 ET 窗口，它落在本地 09:00（清晨）。
+  # 6 小时的依据：20:00 ET + 6h = 02:00 ET，距次日开盘仍有约 7 小时，迟到的打分依然
+  # 有效；再晚就交给 _score_plan 的 T+1 补打路径。
+  misfire_grace_hours: 6
 
 # --- Trade journal -----------------------------------------------------------
 # 对账必须每个交易日跑：IBKR 的 reqExecutions 只返回**当日**执行，漏掉的那天成交

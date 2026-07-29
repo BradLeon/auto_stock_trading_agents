@@ -266,8 +266,18 @@ def prep_persist(state: PeadState) -> dict:
     from ..agents.pead import report as pead_report
     from ..memory import get_store
 
+    store = get_store()
+    # A prep run AFTER a score already exists — a post-hoc backfill, which until the
+    # 2026-07-29 same-day-amc routing fix could never happen in normal operation —
+    # must not silently discard that score. `load()`'s score branch already carries
+    # prep fields forward for the opposite (score-after-prep) direction; this mirrors
+    # it for prep-after-score, which was previously unhandled (found via KLAC:
+    # backfilling prep wiped the already-persisted actuals/scorecard/decision_summary).
+    prior = store.get_dossier(state.symbol, state.fiscal_label)
+    already_scored = bool(prior and prior.actuals)
     dossier = PeadDossier(
-        symbol=state.symbol, fiscal_label=state.fiscal_label, phase="prep", updated_at=_now(),
+        symbol=state.symbol, fiscal_label=state.fiscal_label,
+        phase="score" if already_scored else "prep", updated_at=_now(),
         earnings_date=state.earnings_date,
         fundamental_background=state.fundamental_background,
         expectation_set=state.expectation_set, market_setup=state.market_setup,
@@ -276,8 +286,11 @@ def prep_persist(state: PeadState) -> dict:
         scorecard_dims=state.config.scorecard_dims,
         scorecard_weights={d.key: d.weight for d in state.config.scorecard_dims},
         long_threshold=state.config.long_threshold,
-        run_up_warn_pct=state.config.run_up_warn_pct)
-    get_store().save_dossier(dossier)
+        run_up_warn_pct=state.config.run_up_warn_pct,
+        actuals=prior.actuals if already_scored else None,
+        scorecard=prior.scorecard if already_scored else None,
+        decision_summary=(prior.decision_summary if already_scored else "") or "")
+    store.save_dossier(dossier)
     path = pead_report.write_report(dossier)
     if path:
         print(f"   📝 {path}")

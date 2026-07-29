@@ -72,6 +72,30 @@ def test_score_decision_does_not_trim_unrelated_holdings():
     assert all(d.symbol != "SHV" for d in out["decisions"])   # no leaked SHV trim
 
 
+def test_prep_after_score_does_not_discard_the_score():
+    """Found via KLAC 2026-07-29: a same-day-amc routing bug meant prep never ran
+    before the print, so a post-hoc `pead prep KLAC` backfill was needed AFTER score
+    had already persisted actuals/scorecard/decision_summary. prep_persist rebuilt
+    the dossier from scratch and silently wiped all three. This is the regression
+    test for the fix — prep run after score must preserve the score, not erase it."""
+    from ats.memory import get_store
+
+    score_app, score_state, score_cfg = _run("score")
+    score_result = score_app.invoke(score_state, config=score_cfg)
+    fiscal_label = score_result["fiscal_label"]
+    scored = get_store().get_dossier("COHR", fiscal_label)
+    assert scored.phase == "score" and scored.actuals is not None
+
+    prep_app, prep_state, prep_cfg = _run("prep")
+    prep_app.invoke(prep_state, config=prep_cfg)
+
+    after_prep = get_store().get_dossier("COHR", fiscal_label)
+    assert after_prep.phase == "score"                        # not regressed to "prep"
+    assert after_prep.actuals is not None                     # not wiped
+    assert after_prep.decision_summary == scored.decision_summary
+    assert after_prep.expectation_set is not None              # prep content DID land
+
+
 def test_score_phase_completes_without_interrupt():
     """v0.2: score produces a recommendation dossier; the Chief makes the trade call."""
     app, state, cfg = _run("score")

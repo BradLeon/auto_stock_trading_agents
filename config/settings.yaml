@@ -35,6 +35,7 @@ llm:
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
     risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus
+    critic: {max_tokens: 4096}           # 交易日志季度 critic —— 低频、人工签字前最后一道叙事关卡，成本不是约束
 
 # --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --
 risk:

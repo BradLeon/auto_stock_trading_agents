@@ -847,9 +847,10 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
     jr = sub.add_parser("journal",
                         help="交易日志 (doctor / reconcile / episodes / mark / invalidate / review / "
-                             "calibrate / ledger / score)")
+                             "calibrate / reflect / ledger / score)")
     jr.add_argument("action", choices=["doctor", "reconcile", "episodes", "mark",
-                                       "invalidate", "review", "calibrate", "ledger", "score"])
+                                       "invalidate", "review", "calibrate", "reflect",
+                                       "ledger", "score"])
     jr.add_argument("--dry-run", action="store_true",
                     help="reconcile: 只读，打印将要写入什么")
     jr.add_argument("--month", help="ledger: YYYY-MM（默认本月）")
@@ -857,7 +858,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="score: 先用已打分的 dossier 回填预测")
     jr.add_argument("--symbol", help="episodes: 只看这个标的")
     jr.add_argument("--no-llm", action="store_true",
-                    help="invalidate: 只算 horizon_overdue_days，不调 LLM 判定失效")
+                    help="invalidate: 只算 horizon_overdue_days，不调 LLM 判定失效；"
+                        "reflect: 只出确定性证据+当前需要处理清单，不调 LLM 生成假设")
     jr.add_argument("--quarterly", action="store_true",
                     help="calibrate: 按季度出报告（默认按月）")
     tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
@@ -976,6 +978,10 @@ def main(argv: list[str] | None = None) -> int:
             from ..journal import calibration
 
             return calibration.run(quarterly=args.quarterly)
+        if args.action == "reflect":
+            from ..journal import critic
+
+            return critic.run(use_llm=not args.no_llm)
         if args.action == "ledger":
             from ..journal import report as journal_report
 

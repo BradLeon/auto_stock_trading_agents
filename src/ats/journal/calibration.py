@@ -223,6 +223,18 @@ def _setup_expectancy(store) -> EvidenceBlock:
 # --------------------------------------------------------------------------- #
 # 6. 风控闸审计：被削减/拦下的意图，事后走成什么
 # --------------------------------------------------------------------------- #
+def win_rate_stats(label: str, pairs: list[tuple[str, float]]) -> dict:
+    """(label, [(id, realized_pnl), ...]) -> {分组, n, win_rate, 均值盈亏$}. Shared
+    by every block that splits a population into two groups and compares outcomes —
+    also reused by critic.py's execution/evidence blocks."""
+    if not pairs:
+        return {"分组": label, "n": 0, "win_rate": None, "均值盈亏$": None}
+    pnls = [p for _, p in pairs]
+    wins = [p for p in pnls if p > 0]
+    return {"分组": label, "n": len(pnls), "win_rate": round(len(wins) / len(pnls), 2),
+            "均值盈亏$": round(sum(pnls) / len(pnls), 0)}
+
+
 def _risk_gate_audit(store) -> EvidenceBlock:
     episodes_by_entry = {e.primary_entry_id: e for e in store.list_episodes(limit=100_000)
                          if e.decision_gradeable and e.status == "closed"}
@@ -235,15 +247,7 @@ def _risk_gate_audit(store) -> EvidenceBlock:
             continue
         (gated if entry.risk_notes else ungated).append((ep.episode_id, ep.realized_pnl))
 
-    def _stats(label: str, pairs: list[tuple[str, float]]) -> dict:
-        if not pairs:
-            return {"分组": label, "n": 0, "win_rate": None, "均值盈亏$": None}
-        pnls = [p for _, p in pairs]
-        wins = [p for p in pnls if p > 0]
-        return {"分组": label, "n": len(pnls), "win_rate": round(len(wins) / len(pnls), 2),
-                "均值盈亏$": round(sum(pnls) / len(pnls), 0)}
-
-    table = [_stats("风控介入过（削减/预警）", gated), _stats("风控未介入", ungated)]
+    table = [win_rate_stats("风控介入过（削减/预警）", gated), win_rate_stats("风控未介入", ungated)]
     counterexamples = _group_outlier_counterexamples({"gated": gated, "ungated": ungated})
     return EvidenceBlock(
         question="风控闸介入过的意图，事后走成什么样——保护了下行，还是错杀了盈利单？",

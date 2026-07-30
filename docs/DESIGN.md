@@ -192,8 +192,11 @@ risk_state 是约束而不是参考意见；持仓复查（止损/落空/降级�
 | 6 事件 | 财报 gap ≤3% NAV（仓位×Expected Move） | 削 notional |
 
 强制点只有两处，且都是结构性强制而非调用方自觉：决策图的 `risk_gate` 节点
-（审批之前，任何下单路径必过），以及 PEAD score 生成建议时（scoped，避免建议
-本身就带着一个风控会立刻否决的仓位）。
+（审批之前，任何下单路径必过——这里操作的是真正的 `TradeDecision`），以及
+PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecision` 临时借用同一套
+风控裁剪函数做 sanity-check，避免建议本身就带着一个风控会立刻否决的仓位，转换
+结果再转回不可执行的 `PeadRecommendation`；`agents/pead/` 目录本身不导入也不
+构造 `TradeDecision`，只有 Chief 才产生真正可执行的决策）。
 
 ## 9. 交易日志与 Critic：把"复盘"也做成可审计的东西
 

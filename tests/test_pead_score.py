@@ -66,7 +66,20 @@ def test_decision_trims_when_holding_and_below_bar():
     decisions, band, _ = score_mod.decide(cfg, sc, run_up_vs_sector=-12.0,
                                            portfolio=pf, net_liquidation=100000)
     assert len(decisions) == 1 and decisions[0].action == "trim"
-    assert decisions[0].qty == 30      # 30% of 100
+    assert decisions[0].qty_hint == 30      # 30% of 100
+
+
+def test_score_module_never_imports_or_constructs_trade_decision():
+    # Structural guarantee, not just a naming convention: PEAD is an analyst, not the
+    # Manager — only Chief may produce an executable TradeDecision (docs/DESIGN.md
+    # §4/§7). decide() returns PeadRecommendation instead. A docstring may still
+    # *mention* TradeDecision (to explain the distinction), so check the two patterns
+    # that would actually reintroduce it: an import line and a constructor call.
+    import inspect
+
+    src = inspect.getsource(score_mod)
+    assert "import TradeDecision" not in src
+    assert "TradeDecision(" not in src
 
 
 def test_band_thresholds():

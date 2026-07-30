@@ -19,6 +19,7 @@ from ..agents import risk_manager as risk_agent, risk_validator
 from ..agents.pead import prep as prep_agents, score as score_agents
 from ..broker import IBKRBroker, IBKRUnavailable
 from ..config import get_config, load_pead_config
+from ..schemas.decision import TradeDecision
 from ..schemas.market import Ticker
 from ..schemas.pead import (
     Actuals,
@@ -26,6 +27,7 @@ from ..schemas.pead import (
     FundamentalBackground,
     MarketSetup,
     PeadDossier,
+    PeadRecommendation,
     Scorecard,
     ScorecardLine,
 )
@@ -409,6 +411,18 @@ def score_scorecard(state: PeadState) -> dict:
         has_transcript=bool((state.transcript_text or "").strip()))}
 
 
+def _rec_to_decision(r: PeadRecommendation) -> TradeDecision:
+    return TradeDecision(symbol=r.symbol, action=r.action, qty=r.qty_hint,
+                         notional_usd=r.notional_hint, conviction=r.conviction,
+                         rationale=r.rationale)
+
+
+def _decision_to_rec(d: TradeDecision, as_of: datetime) -> PeadRecommendation:
+    return PeadRecommendation(symbol=d.symbol, action=d.action, qty_hint=d.qty,
+                              notional_hint=d.notional_usd, conviction=d.conviction,
+                              rationale=d.rationale, portfolio_as_of=as_of)
+
+
 def score_decision(state: PeadState) -> dict:
     from ..config import load_pead_global
 
@@ -417,10 +431,16 @@ def score_decision(state: PeadState) -> dict:
     # missing, so the read is genuinely thinner. Re-evaluated when the transcript lands.
     thin = not (state.transcript_text or "").strip()
     size_factor = load_pead_global().get("score", {}).get("v1_size_factor", 0.5) if thin else 1.0
-    decisions, band, rationale = score_agents.decide(
+    recs, band, rationale = score_agents.decide(
         state.config, state.scorecard, run_up, state.portfolio, _net_liq(state),
-        size_factor=size_factor)
+        size_factor=size_factor, as_of=state.as_of)
 
+    # apply_guardrails/pre_trade are the same risk-clipping machinery the Chief's own
+    # decision graph uses, and they're strongly typed to TradeDecision. PEAD borrows
+    # them here as a sanity-check on its RECOMMENDATION (does it already blow a risk
+    # cap?) — the conversion is transient, scoped to this function; agents/pead/score.py
+    # itself never touches TradeDecision.
+    decisions = [_rec_to_decision(r) for r in recs]
     guardrails = risk_agent.assess(as_of=state.as_of, risk_cfg=get_config().app.risk,
                                    portfolio=state.portfolio,
                                    sector_by_symbol={state.symbol: "optical"})
@@ -442,7 +462,8 @@ def score_decision(state: PeadState) -> dict:
         clipped, notes, _ = risk_checks.pre_trade(
             clipped, state.portfolio, event_data=event_data, apply_base=False)
         adjustments = list(adjustments) + notes
-    return {"decisions": clipped, "decision_band": band, "risk_adjustments": adjustments}
+    clipped_recs = [_decision_to_rec(d, state.as_of) for d in clipped]
+    return {"decisions": clipped_recs, "decision_band": band, "risk_adjustments": adjustments}
 
 
 def score_persist(state: PeadState) -> dict:
@@ -451,10 +472,13 @@ def score_persist(state: PeadState) -> dict:
     from ..memory import get_store
 
     recs = "; ".join(
-        f"{d.action} {d.symbol} " + (f"${d.notional_usd:,.0f}" if d.notional_usd
-                                     else (f"{d.qty:.0f}股" if d.qty else ""))
+        f"{d.action} {d.symbol}" +
+        (f" 约${d.notional_hint:,.0f}" if d.notional_hint else
+         (f" 约{d.qty_hint:.0f}股（参考）" if d.qty_hint else ""))
         for d in state.decisions) or "观望"
-    summary = f"{state.decision_band} | 建议: {recs}"
+    summary = f"{state.decision_band} | PEAD 建议（非可执行，Chief 会用当时真实持仓重新计算）: {recs}"
+    if state.decisions and state.decisions[0].portfolio_as_of:
+        summary += f"（参考持仓快照: {state.decisions[0].portfolio_as_of:%Y-%m-%d %H:%M}）"
     if state.risk_adjustments:
         summary += " | guardrail: " + "; ".join(state.risk_adjustments)
     dossier = PeadDossier(

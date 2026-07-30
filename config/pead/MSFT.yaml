@@ -6,3 +6,10 @@ symbol: MSFT
 company_name: "Microsoft"
 fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，MSFT 财年 Q4
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
+
+signal_chain:
+  - {symbol: AMZN,  role: peer}        # 同层云厂商，CapEx 指引互相印证
+  - {symbol: META,  role: peer}
+  - {symbol: GOOGL, role: peer}
+  - {symbol: NVDA,  role: upstream}    # 算力采购的核心上游约束
+  - {symbol: AVGO,  role: upstream}    # 定制 ASIC 供给

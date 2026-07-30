@@ -10,12 +10,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from ...schemas.decision import TradeDecision
 from ...schemas.pead import (
     ActualMetric,
     Actuals,
     ExpectationSet,
     PeadConfig,
+    PeadRecommendation,
     Scorecard,
     ScorecardLine,
 )
@@ -189,13 +189,17 @@ def _band(total: float, threshold: float) -> str:
 def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | None,
            portfolio: PortfolioSnapshot | None, net_liquidation: float,
            small_long_pct: float = 0.03, trim_fraction: float = 0.30,
-           size_factor: float = 1.0,
-          ) -> tuple[list[TradeDecision], str, str]:
-    """Return (decisions, scenario_band, rationale). Action is fully deterministic.
+           size_factor: float = 1.0, as_of: datetime | None = None,
+          ) -> tuple[list[PeadRecommendation], str, str]:
+    """Return (recommendations, scenario_band, rationale). Action is fully deterministic.
 
     `size_factor` scales the OPENING size only (a transcript-less score passes 0.5).
     De-risking is never scaled down: if the evidence says trim, thin evidence is not a
     reason to trim less.
+
+    Returns `PeadRecommendation`, NOT `TradeDecision` — PEAD is an analyst, not the
+    Manager. `qty_hint`/`notional_hint` are computed from the live `portfolio` snapshot
+    passed in, but only Chief may turn a recommendation into an executable decision.
     """
     total = scorecard.total
     thr = config.long_threshold
@@ -212,10 +216,11 @@ def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | N
                     f"总分 {total:+.2f} ≥ 门槛 {thr:+.1f}，但财报前 20 日相对 {config.sector_etf} "
                     f"抢跑 +{run_up:.1f}%（>{config.run_up_warn_pct:.0f}% 警戒），透支风险高，观望。")
         notional = round(small_long_pct * net_liquidation * size_factor, 0)
-        d = TradeDecision(symbol=config.symbol, action="buy", notional_usd=notional,
-                          order_type="market", conviction=min(1.0, total / max(thr, 0.5)),
-                          rationale=f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，抢跑可控；"
-                                    f"小仓位试探做多。{thin_note}")
+        d = PeadRecommendation(symbol=config.symbol, action="buy", notional_hint=notional,
+                               conviction=min(1.0, total / max(thr, 0.5)),
+                               rationale=f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，抢跑可控；"
+                                         f"小仓位试探做多。{thin_note}",
+                               portfolio_as_of=as_of)
         return ([d], "达成门槛→小仓位做多", d.rationale)
 
     # Below the long bar.
@@ -223,10 +228,11 @@ def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | N
         # Beat-but-not-enough / weak: de-risk per the doc's "分步减仓".
         qty = round(held_qty * trim_fraction)
         if qty >= 1:
-            d = TradeDecision(symbol=config.symbol, action="trim", qty=float(qty),
-                              order_type="market", conviction=0.5,
-                              rationale=f"Scorecard {total:+.2f} 未达门槛 {thr:+.1f}，已持仓 → "
-                                        f"减仓 {trim_fraction:.0%} 锁定，保留核心仓位。")
+            d = PeadRecommendation(symbol=config.symbol, action="trim", qty_hint=float(qty),
+                                   conviction=0.5,
+                                   rationale=f"Scorecard {total:+.2f} 未达门槛 {thr:+.1f}，已持仓 → "
+                                             f"减仓 {trim_fraction:.0%} 锁定，保留核心仓位。",
+                                   portfolio_as_of=as_of)
             return ([d], "未达门槛+持仓→分步减仓", d.rationale)
 
     if total <= -0.5:

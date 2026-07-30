@@ -313,7 +313,29 @@ def load_pead_config(symbol: str):
     base = _load_yaml(pead_dir / "_defaults.yaml")
     override = _load_yaml(pead_dir / f"{symbol.upper()}.yaml")
     merged = {**base, **override, "symbol": symbol.upper()}
+    if not merged.get("signal_chain"):
+        merged["signal_chain"] = _derive_signal_chain(symbol.upper())
     return PeadConfig.model_validate(merged)
+
+
+def _derive_signal_chain(symbol: str) -> list[dict]:
+    """Fallback peer list when a ticker's YAML doesn't curate a `signal_chain`.
+
+    Otherwise a newly-added PEAD target silently ships with an empty cross-symbol
+    section (see MSFT's original stub, which had no signal_chain and always
+    rendered "跨标的信号链（暂无数据）"). Peers come from whichever sector layer the
+    symbol belongs to, all tagged role=peer — we don't guess upstream/downstream
+    direction here; a curated YAML entry (like MSFT/NVDA/TSM) always overrides this.
+    """
+    try:
+        sector_cfg = load_sector_config()
+    except Exception:
+        return []
+    for layer in sector_cfg.layers:
+        if any(t.symbol == symbol for t in layer.tickers):
+            return [{"symbol": t.symbol, "role": "peer"}
+                    for t in layer.tickers if t.symbol != symbol]
+    return []
 
 
 def is_pead_target(symbol: str) -> bool:

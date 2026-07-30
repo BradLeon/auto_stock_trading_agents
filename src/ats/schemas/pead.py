@@ -190,3 +190,19 @@ class PeadDossier(BaseModel):
     actuals: Actuals | None = None
     scorecard: Scorecard | None = None
     decision_summary: str = ""
+
+
+class PeadRecommendation(BaseModel):
+    """PEAD 分析师的建议——不是 TradeDecision，不可执行。
+
+    qty_hint/notional_hint 是基于 portfolio_as_of 那一刻的组合快照算出的参考量级，
+    仅供人读；Chief 决策时必须用自己当时的真实持仓重新计算，不能直接拿这个数字下单。
+    """
+
+    symbol: str
+    action: Literal["buy", "trim", "sell", "hold"]
+    qty_hint: float | None = None
+    notional_hint: float | None = None
+    conviction: float = 0.0
+    rationale: str = ""
+    portfolio_as_of: datetime | None = None

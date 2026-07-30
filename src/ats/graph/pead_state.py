@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from ..schemas.decision import BossApproval, TradeDecision
+from ..schemas.decision import BossApproval
 from ..schemas.memory import TradeLogEntry
 from ..schemas.pead import (
     Actuals,
@@ -14,6 +14,7 @@ from ..schemas.pead import (
     FundamentalBackground,
     MarketSetup,
     PeadConfig,
+    PeadRecommendation,
     Scorecard,
     SignalChainItem,
 )
@@ -57,7 +58,7 @@ class PeadState(BaseModel):
     portfolio: PortfolioSnapshot | None = None
 
     # decision / execution
-    decisions: list[TradeDecision] = Field(default_factory=list)
+    decisions: list[PeadRecommendation] = Field(default_factory=list)
     decision_band: str = ""
     risk_adjustments: list[str] = Field(default_factory=list)
     # legacy (pre-chief score execution path) — kept for checkpoint compatibility

@@ -112,8 +112,8 @@ def test_v1_opens_at_half_size():
     full, _, _ = score_agents.decide(_cfg(), _card(1.5), None, None, 100_000.0)
     half, _, note = score_agents.decide(_cfg(), _card(1.5), None, None, 100_000.0,
                                         size_factor=0.5)
-    assert full[0].notional_usd == 3000
-    assert half[0].notional_usd == 1500
+    assert full[0].notional_hint == 3000
+    assert half[0].notional_hint == 1500
     assert "缺纪要" in half[0].rationale
 
 
@@ -127,7 +127,7 @@ def test_thin_evidence_does_not_shrink_a_trim():
     full, _, _ = score_agents.decide(_cfg(), _card(0.0), None, pf, 100_000.0)
     half, _, _ = score_agents.decide(_cfg(), _card(0.0), None, pf, 100_000.0, size_factor=0.5)
     assert full[0].action == "trim" and half[0].action == "trim"
-    assert full[0].qty == half[0].qty == 30.0
+    assert full[0].qty_hint == half[0].qty_hint == 30.0
 
 
 # --------------------------------------------------------------------------- #

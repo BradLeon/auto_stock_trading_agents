@@ -5,7 +5,7 @@ That is the point of keeping indicators.py/regime.py free of I/O — the numbers
 have to be verifiable before any LLM ever sees them.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -407,6 +407,127 @@ def test_det_block_tells_the_model_the_numbers_are_not_its_to_rewrite():
     assert "不得改写或重算" in block
     assert "stagflation" in block
     assert "名义利率分解" in block and "象限判定的逐项依据" in block
+
+
+def _saved_review(**kw):
+    """Persist a review carrying a real deterministic layer, and return it."""
+    from ats.memory import get_store
+
+    series = _stagflation_series()
+    spec = {k: (k.upper(), k, "pct" if k.endswith(("_10y", "oas")) else "index", "daily")
+            for k in series}
+    det = regime.assess(series, ind.build_readings(series, spec))
+    r = MacroReview(name="macro", as_of=datetime(2026, 7, 30, tzinfo=timezone.utc),
+                    regime="risk-off，滞胀初期", rate_path="维持不动",
+                    asset_implications="股承压", **{**det, **kw})
+    get_store().save_macro_review(r)
+    return r
+
+
+def test_quadrant_reaches_all_five_downstream_injection_points():
+    """The deterministic call must survive into every consumer of the review.
+
+    These five are the only paths by which macro work reaches a trade decision;
+    a field that stops at the report helps nobody.
+    """
+    from ats.agents.chief import assemble as chief_assemble
+    from ats.agents.macro import context as macro_context
+
+    _saved_review()
+
+    # 1-2. PEAD prep and monitor.
+    assert "stagflation" in macro_context.prep_block("NVDA", "macro")
+    assert "stagflation" in macro_context.monitor_hint("macro")
+    # 3. Sector review (the industry analyst rotates layers on this).
+    assert "stagflation" in macro_context.sector_block("macro")
+    # 4. Chief.
+    assert "stagflation" in chief_assemble._macro_block()
+    # 5. Risk officer memo — a widening spread or "worst combination" read is a
+    #    risk input, not colour, so the quadrant has to reach this prompt too.
+    from datetime import datetime as _dt
+
+    from ats.agents.risk_officer import review as ro
+    from ats.schemas.risk import RiskReview
+
+    prompt = ro._context(RiskReview(as_of=_dt(2026, 7, 30, tzinfo=timezone.utc)))
+    assert "stagflation" in prompt
+
+
+def test_monitor_hint_stays_within_its_character_budget():
+    # 280 chars is the materiality-calibration budget; the brief form drops the
+    # alerts precisely so a long one cannot crowd out the regime itself.
+    from ats.agents.macro import context as macro_context
+
+    _saved_review()
+    hint = macro_context.monitor_hint("macro", max_chars=280)
+    assert len(hint) <= 280 and "象限" in hint
+
+
+def test_stub_reviews_are_still_never_injected_downstream():
+    """The pre-existing guard must survive the new fields.
+
+    A `(no-llm)` run now carries a real quadrant, which makes it *more* tempting
+    to inject — but its narrative is empty, so downstream would read a regime
+    line that says nothing.
+    """
+    from ats.agents.macro import context as macro_context
+    from ats.memory import get_store
+
+    get_store().save_macro_review(MacroReview(
+        name="macro", as_of=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        regime="(no-llm)", quadrant="stagflation", quadrant_state="confirmed"))
+    assert macro_context.prep_block("NVDA", "macro") == ""
+    assert macro_context.monitor_hint("macro") == ""
+    assert macro_context.sector_block("macro") == ""
+
+
+def test_a_review_without_the_deterministic_layer_injects_no_quadrant_noise():
+    """Offline/legacy reviews must not emit an empty "象限 transition" line."""
+    from ats.agents.macro import context as macro_context
+    from ats.memory import get_store
+
+    get_store().save_macro_review(MacroReview(
+        name="macro", as_of=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        regime="risk-on", rate_path="持"))
+    assert "象限" not in macro_context.monitor_hint("macro")
+    assert "象限" not in macro_context.sector_block("macro")
+
+
+def test_report_separates_computed_facts_from_model_narrative():
+    from ats.agents.macro import report
+    from ats.schemas.macro_strategy import MacroConfig
+
+    r = _saved_review(summary="总评", falsifier="初请连续两周高于 26 万",
+                      top_risks=["能源二次上涨"])
+    out = report.render(r, MacroConfig(name="macro", label="宏观"))
+
+    assert "📐 确定性读数（代码算出，非模型判断）" in out
+    assert "象限判定的逐项依据" in out and "名义利率分解" in out
+    assert "附录：指标读数" in out
+    assert "证伪条件" in out and "初请连续两周高于 26 万" in out
+
+
+def test_report_omits_deterministic_sections_when_there_is_no_data():
+    from ats.agents.macro import report
+    from ats.schemas.macro_strategy import MacroConfig
+
+    r = MacroReview(name="macro", as_of=datetime(2026, 7, 30, tzinfo=timezone.utc),
+                    regime="risk-on", summary="s")
+    out = report.render(r, MacroConfig(name="macro", label="宏观"))
+    assert "📐 确定性读数" not in out and "附录：指标读数" not in out
+    assert "## 行业状态（regime）" in out          # narrative still renders
+
+
+def test_skill_states_the_numbers_are_not_the_models_to_rewrite():
+    """The SKILL is the model's contract; these clauses are load-bearing."""
+    from pathlib import Path
+
+    text = Path("src/ats/skills/macro-strategist/SKILL.md").read_text(encoding="utf-8")
+    assert "不得改写、重算" in text                  # deterministic layer is read-only
+    assert "象限判定不可推翻" in text
+    assert "禁止对单个公司的盈利" in text            # role boundary vs 基本面分析师
+    assert "falsifier" in text and "可观测" in text
+    assert "## Security" in text
 
 
 def test_deterministic_fields_survive_the_llm_path(monkeypatch):

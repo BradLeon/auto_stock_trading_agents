@@ -25,6 +25,9 @@ def monitor_hint(name: str = "macro", max_chars: int = 280) -> str:
         if review is None:
             return ""
         hint = f"宏观评审 {review.as_of:%Y-%m-%d}: {review.regime}"
+        brief = review.quadrant_brief()
+        if brief:
+            hint += f" | {brief}"
         if review.rate_path:
             hint += f" | 利率: {review.rate_path}"
         return hint[:max_chars]
@@ -40,6 +43,11 @@ def sector_block(name: str = "macro", max_chars: int = 1500) -> str:
         if review is None:
             return ""
         parts = [f"[宏观评审 {review.as_of:%Y-%m-%d}] {review.regime}"]
+        # The industry analyst rotates between supply-chain layers, and which
+        # layer leads is exactly what the quadrant speaks to — so it goes in
+        # ahead of the narrative, and carries its alerts.
+        if review.quadrant_brief():
+            parts.append(review.quadrant_line())
         if review.rate_path:
             parts.append(f"利率路径: {review.rate_path}")
         if review.asset_implications:

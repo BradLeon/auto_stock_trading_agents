@@ -324,11 +324,24 @@ MacroReview
 | Chief | `agents/chief/assemble.py:261-266` |
 | 风控官 memo | `agents/risk_officer/review.py:29-38` |
 
-改造 `regime_block()` 时**必须保留一条既有保护**：`agents/macro/context.py:55-61`
-会拦截 `regime` 以 `(` 开头的 stub 评审，使其不被注入下游。新设计不能破坏它。
+**注意"唯一收口"只对其中三处成立**：PEAD prep 与 Chief 走 `regime_block()`，
+但 `monitor_hint()` 与 `sector_block()` 各自拼字符串、风控官只取 `mr.regime`——
+这三处必须单独接入，否则新字段只到报告为止，不会影响任何决策。现已全部接入：
 
-建议 `regime_block()` 新增一行紧凑的象限摘要，例如：
-`[象限] stagflation（暂定，第 1 周）| 增长 -0.4 / 通胀 +0.6 | 告警: 最差组合成形`
+- `regime_block()` 第二行输出 `quadrant_line()`（含告警），PEAD prep / Chief 自动获得。
+- `sector_block()` 追加 `quadrant_line()`——行业分析师做的是层间轮动，象限正是
+  "哪一层领先"的直接输入。
+- `monitor_hint()` 追加 `quadrant_brief()`（**不含告警**：280 字预算下，一条长告警
+  会把 regime 本身挤掉）。
+- 风控官 memo 追加 `quadrant_line()`——信用利差走阔、"最差组合成形"属于风控输入，
+  不是背景色。
+
+**必须保留的既有保护**：`agents/macro/context.py` 会拦截 `regime` 以 `(` 开头的 stub
+评审，使其不被注入下游。`--no-llm` 现在也会产出真实象限，反而更容易让人想注入它——
+但它没有叙事层，注入下去只会得到一句空话。这条保护有专门的回归测试。
+
+另有一条相关约束：没有确定性层的评审（离线跑、或本框架之前的历史行）**不得输出
+空的"象限 transition"**，否则下游会读到一个看似有结论、实则没算过的判定。
 
 ## 8. SKILL.md 如何约束产出正确性
 
@@ -398,7 +411,7 @@ MOVE 就能参与 z-score 判定）。
 | 阶段 | 内容 | 验证方式 | 状态 |
 |---|---|---|---|
 | **Stage 1** 确定性指标层 | 不丢弃 FRED 历史；算 Δ/z-score/百分位；§5 分解；§5.3 趋势/冲击；§6 象限判定与迟滞；§6.5 告警；schema 扩展 | 合成序列单测覆盖象限边界与迟滞；再对真实 FRED 数据逐个核对数字 | ✅ 已完成 |
-| **Stage 2** 叙事层 | 重写 SKILL.md（§8）；报告渲染新增象限/指标表/告警段；`regime_block()` 已扩展，需回归 5 个下游注入点 | `ats macro probe` 看拼好的上下文；`ats macro review` 实跑；全量测试确认下游注入未破 | 待做 |
+| **Stage 2** 叙事层 | 重写 SKILL.md（§8）；报告新增确定性章节（象限/依据表/分解/告警/指标附录/证伪条件）；5 个下游注入点全部带上象限 | 单测覆盖 5 个注入点、stub 保护、报告降级、SKILL 关键条款 | ✅ 已完成 |
 | **Stage 3** 盈利数据 | FactSet 表格抽取 + 三级降级 + 合理性校验 | 用已下载的历史 PDF 做回归；故意喂坏版式验证降级 | 待做 |
 
 ### Stage 1 实跑发现（保留作为教训）

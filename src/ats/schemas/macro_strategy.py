@@ -31,6 +31,8 @@ Quadrant = Literal[
 # until a second consecutive review agrees. Downstream only tilts on `confirmed`.
 QuadrantState = Literal["confirmed", "provisional", "insufficient"]
 
+_STATE_CN = {"confirmed": "确认", "provisional": "暂定", "insufficient": "证据不足"}
+
 # How to read a change: yields/spreads in basis points, prices/indices in percent,
 # and `level` in raw absolute difference.
 #
@@ -183,10 +185,20 @@ class MacroReview(BaseModel):
     top_risks: list[str] = Field(default_factory=list)
     falsifier: str = ""                # 什么观察会推翻这次判断（必须具体可观测）
 
+    def quadrant_brief(self) -> str:
+        """Shortest useful form, for callers on a tight character budget.
+
+        Omits the alerts that `quadrant_line` carries — in a 280-char monitor
+        hint a long alert would crowd out the regime itself.
+        """
+        if self.quadrant == "transition" and not self.axis_inputs:
+            return ""                   # nothing was computed; say nothing
+        state = _STATE_CN.get(self.quadrant_state, self.quadrant_state)
+        return f"象限 {self.quadrant}（{state}）"
+
     def quadrant_line(self) -> str:
         """One compact line summarising the deterministic call, for injection."""
-        state = {"confirmed": "确认", "provisional": "暂定",
-                 "insufficient": "证据不足"}.get(self.quadrant_state, self.quadrant_state)
+        state = _STATE_CN.get(self.quadrant_state, self.quadrant_state)
         line = (f"[象限] {self.quadrant}（{state}"
                 f"{f'，第 {self.quadrant_weeks} 期' if self.quadrant_weeks else ''}）"
                 f" | 增长 {self.growth_axis:+.2f} / 通胀 {self.inflation_axis:+.2f}")

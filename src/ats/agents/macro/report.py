@@ -10,12 +10,95 @@ from ...schemas.macro_strategy import MacroConfig, MacroReview
 log = logging.getLogger("ats.agents.macro.report")
 
 
+_QUADRANT_LABEL = {
+    "goldilocks": "Goldilocks 温和降温（增长稳 + 通胀下行）",
+    "reflation": "Reflation 经济过热（增长改善 + 通胀上行）",
+    "stagflation": "Stagflation 滞胀（增长恶化 + 通胀上行）",
+    "deflation": "Deflation 普通衰退（增长恶化 + 通胀下行）",
+    "transition": "Transition 过渡（不强行四选一）",
+}
+_STATE_LABEL = {"confirmed": "已确认", "provisional": "暂定",
+                "insufficient": "证据不足"}
+
+
+def _deterministic_section(review: MacroReview) -> list[str]:
+    """Code-computed facts, rendered ABOVE the narrative and labelled as such.
+
+    Kept visually separate from the LLM's prose on purpose: a reader has to be
+    able to tell at a glance which lines are arithmetic and which are a model's
+    interpretation (docs/MACRO_ANALYST.md §4.4).
+    """
+    if not review.axis_inputs and not review.indicators:
+        return []                       # offline run or a pre-framework review
+
+    lines = ["## 📐 确定性读数（代码算出，非模型判断）", ""]
+    quad = _QUADRANT_LABEL.get(review.quadrant, review.quadrant)
+    state = _STATE_LABEL.get(review.quadrant_state, review.quadrant_state)
+    weeks = f"，连续 {review.quadrant_weeks} 期" if review.quadrant_weeks else ""
+    lines += [f"**象限：{quad}** — {state}{weeks}", "",
+              f"- 增长轴 `{review.growth_axis:+.2f}` / 通胀轴 `{review.inflation_axis:+.2f}`"]
+    if review.quadrant_reason:
+        lines.append(f"- 判定理由：{review.quadrant_reason}")
+    if review.focus_keys:
+        lines.append(f"- 本期重点指标：{', '.join(review.focus_keys)}")
+
+    if review.alerts:
+        lines += ["", "### ⚠️ 告警"] + [f"- {a}" for a in review.alerts]
+
+    dec = review.decomposition
+    if dec is not None and dec.d_real_bp is not None:
+        lines += ["", f"### 名义利率分解（{dec.window_days} 天）", "",
+                  f"`Δ名义 {dec.d_nominal_bp:+.0f}bp = Δ实际 {dec.d_real_bp:+.0f}bp"
+                  f" + Δ通胀补偿 {dec.d_breakeven_bp:+.0f}bp`", "",
+                  f"- **{dec.classification}**", f"- {dec.equity_read}"]
+        if dec.real_yield_cause:
+            lines.append(f"- 实际收益率下降成因：{dec.real_yield_cause}")
+
+    if review.shock_vs_trend:
+        lines += ["", "### 趋势 vs 冲击（美联储会反应 or 看穿）", ""]
+        lines += [f"- {s}" for s in review.shock_vs_trend]
+
+    if review.axis_inputs:
+        lines += ["", "### 象限判定的逐项依据", "",
+                  "| 输入 | 取值 | 判据 | 得分 |", "|---|---|---|---|"]
+        for a in review.axis_inputs:
+            val = "n/a" if a.value is None else a.value
+            lines.append(f"| {a.label or a.key} | {val} | {a.threshold} | `{a.score:+.2f}` |")
+    return lines + [""]
+
+
+def _indicator_appendix(review: MacroReview) -> list[str]:
+    live = [r for r in review.indicators if r.level is not None]
+    if not live:
+        return []
+    lines = ["## 附录：指标读数", "",
+             "变化单位：收益率/利差为 bp，价格与指数为 %，零中心序列为绝对差。", "",
+             "| 指标 | 水平 | Δ1w | Δ1m | Δ3m | z(3y) | 10y百分位 | 截至 |",
+             "|---|---|---|---|---|---|---|---|"]
+    for r in live:
+        u = "bp" if r.unit == "pct" else ("" if r.unit == "level" else "%")
+        f = lambda v: "—" if v is None else f"{v:+.1f}{u}"  # noqa: E731
+        flag = " ⚠️" if r.stale else ""
+        lines.append(
+            f"| {r.label or r.key}{flag} | {r.level} | {f(r.d_1w)} | {f(r.d_1m)} |"
+            f" {f(r.d_3m)} | {r.z_3y if r.z_3y is not None else '—'} |"
+            f" {r.pct_10y if r.pct_10y is not None else '—'} | {r.as_of or '—'} |")
+    missing = [r.label or r.key for r in review.indicators if r.level is None]
+    if missing:
+        lines += ["", f"缺失数据源：{', '.join(missing)}"]
+    return lines + [""]
+
+
 def render(review: MacroReview, cfg: MacroConfig) -> str:
     lines = [
         f"# 🤖 宏观分析 — {cfg.label}（{review.as_of:%Y-%m-%d}）",
         "",
-        f"> 由 `ats macro review` 自动生成（macro_strategist，权益策略师范式，每周评审）。",
+        "> 由 `ats macro review` 自动生成（macro_strategist，权益策略师范式，每周评审）。",
+        "> 📐 标记的章节由确定性代码算出；其余为模型解读。",
         "",
+    ]
+    lines += _deterministic_section(review)
+    lines += [
         "## 行业状态（regime）",
         f"**{review.regime}**",
         "",
@@ -39,7 +122,14 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
 
     lines += ["", "## 主要风险", ""]
     lines += [f"- {r}" for r in review.top_risks]
-    lines += ["", "---", f"*数据截至 {review.as_of:%Y-%m-%d %H:%M} UTC*", ""]
+
+    # A macro call you cannot falsify is worth nothing, and this is next week's
+    # checklist item — so it gets its own section rather than a footnote.
+    if review.falsifier:
+        lines += ["", "## 证伪条件（什么观察会推翻这次判断）", "", review.falsifier]
+
+    lines += [""] + _indicator_appendix(review)
+    lines += ["---", f"*数据截至 {review.as_of:%Y-%m-%d %H:%M} UTC*", ""]
     return "\n".join(lines)
 
 

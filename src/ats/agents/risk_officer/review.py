@@ -31,6 +31,10 @@ def _context(review: RiskReview) -> str:
         mr = get_store().latest_macro_review()
         if mr is not None:
             macro = f"\n宏观 regime（参考）: {mr.regime}"
+            # Deterministic quadrant + alerts belong here too: a widening credit
+            # spread or a "worst combination" read is a risk input, not colour.
+            if mr.quadrant_brief():
+                macro += f"\n宏观象限（代码判定，参考）: {mr.quadrant_line()}"
     except Exception:  # noqa: BLE001
         pass
     return (

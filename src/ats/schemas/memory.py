@@ -26,6 +26,10 @@ class TradeLogEntry(BaseModel):
     filled_at: datetime | None = None
     rationale: str = ""
     error: str = ""
+    # Durable broker identities, set at submit. orderId is a per-client sequence TWS
+    # resets, so it cannot be joined on across sessions; these can.
+    perm_id: str = ""
+    order_ref: str = ""
 
 
 class Fill(BaseModel):

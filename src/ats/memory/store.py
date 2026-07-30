@@ -8,6 +8,7 @@ semantic/vector layer (Chroma) is a later add; this is the structured backbone.
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..schemas.memory import PerformanceRecord
@@ -15,9 +16,6 @@ from ..schemas.memory import PerformanceRecord
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cycles (
     cycle_id TEXT PRIMARY KEY, as_of TEXT, approval_status TEXT, manager_summary TEXT
-);
-CREATE TABLE IF NOT EXISTS reports (
-    cycle_id TEXT, role TEXT, symbol TEXT, signal TEXT, conviction REAL, thesis TEXT, as_of TEXT
 );
 CREATE TABLE IF NOT EXISTS decisions (
     cycle_id TEXT, symbol TEXT, action TEXT, notional_usd REAL, limit_price REAL,
@@ -91,9 +89,80 @@ CREATE TABLE IF NOT EXISTS pead_score_runs (
     final INTEGER DEFAULT 0,
     PRIMARY KEY (symbol, fiscal_label, version)
 );
+-- ---------------------------------------------------------------------------
+-- Trade journal
+-- ---------------------------------------------------------------------------
+-- One row per INTENT, not per fill. This matters: of the first 52 order rows,
+-- 24 errored and 16 were cancelled — orders evaporating (IBKR down, approval
+-- declined) is this system's most common real outcome, and a journal of fills
+-- only would hide it completely.
+CREATE TABLE IF NOT EXISTS journal_entries (
+    entry_id TEXT PRIMARY KEY,            -- = trades.client_order_id
+    cycle_id TEXT, as_of TEXT, symbol TEXT, action TEXT, source TEXT, setup TEXT,
+    -- plan, pre-registered at decision time and never rewritten
+    intended_notional REAL, intended_qty REAL, conviction REAL,
+    order_type TEXT, limit_price REAL,
+    stop_price REAL, target_price REAL, planned_horizon_days INTEGER,
+    invalidation TEXT, planned_risk_usd REAL, risk_unit_source TEXT, rationale TEXT,
+    -- regime SNAPSHOT (denormalised on purpose: a later review rewrite must not
+    -- rewrite what we believed at the time)
+    regime_risk_state TEXT,
+    -- evidence quality — the agent-native "did I follow my plan"
+    ev_score_total REAL, ev_score_band TEXT, ev_has_transcript INTEGER,
+    ev_score_latency_h REAL, ev_expected_move_pct REAL,
+    -- gates
+    risk_notes_json TEXT,
+    approval_status TEXT, approval_reviewer TEXT, approval_comment TEXT,
+    approval_divergence TEXT,
+    -- execution rollup
+    submit_attempts INTEGER DEFAULT 0, terminal_status TEXT,
+    filled_qty REAL, avg_fill_price REAL, slippage_bps REAL
+);
+-- Falsifiable claims, recorded when made. entry_id NULL = we predicted but did not
+-- trade, which is exactly the sample that keeps calibration unbiased.
+-- ref_date is the first session we could ACT on the claim (when the score was made),
+-- NOT the print date. The earnings gap is not capturable — you cannot buy at the
+-- pre-announcement close after seeing the result — and PEAD is by definition the
+-- POST-announcement drift. print_date is kept alongside so the gap itself, a separate
+-- and non-tradeable quantity, can still be measured.
+CREATE TABLE IF NOT EXISTS predictions (
+    prediction_id TEXT PRIMARY KEY, made_at TEXT, symbol TEXT,
+    source TEXT, ref_key TEXT, kind TEXT,
+    predicted_value REAL, predicted_band TEXT,
+    ref_price REAL, ref_date TEXT, print_date TEXT,
+    sector_etf TEXT, benchmark TEXT, entry_id TEXT
+);
+-- One row per horizon. All horizons are KEPT: short/long disagreement (right at
+-- T+1, wrong at T+20 = right entry, wrong holding period) is the signal, not noise
+-- to be collapsed into a single verdict.
+CREATE TABLE IF NOT EXISTS prediction_outcomes (
+    prediction_id TEXT, horizon_days INTEGER, as_of TEXT,
+    realized_pct REAL, excess_vs_sector_pct REAL, excess_vs_bench_pct REAL,
+    PRIMARY KEY (prediction_id, horizon_days)
+);
+-- One round trip: net position 0 -> nonzero -> back to 0. Adds/trims are LEGS of the
+-- same episode, not new episodes — this is what fixes the old analytics counting a
+-- scaled-out position as N trades. No separate episode_legs table: a leg IS a fill
+-- plus which episode/entry it belongs to, so `fills.episode_id`/`fills.entry_id`
+-- (below) carry that, and a second table would just be redundant (Occam).
+CREATE TABLE IF NOT EXISTS trade_episodes (
+    episode_id TEXT PRIMARY KEY, symbol TEXT, direction TEXT, origin TEXT,
+    status TEXT,
+    opened_at TEXT, closed_at TEXT, avg_entry REAL, avg_exit REAL,
+    realized_pnl REAL, unrealized_pnl REAL, commission REAL, basis_source TEXT,
+    holding_days INTEGER, r_multiple REAL, r_multiple_mtm REAL, risk_unit_source TEXT,
+    mae_pct REAL, mfe_pct REAL, mae_source TEXT, excess_vs_sector_pct REAL,
+    setup TEXT, primary_entry_id TEXT, exit_reason TEXT, exit_as_planned INTEGER,
+    invalidation_triggered INTEGER, horizon_overdue_days INTEGER
+);
+-- Single-row bookkeeping, e.g. tracking_start_date: before it we did not observe,
+-- which is NOT the same as "no trades happened".
+CREATE TABLE IF NOT EXISTS journal_meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries(symbol);
+CREATE INDEX IF NOT EXISTS idx_pred_symbol ON predictions(symbol);
+CREATE INDEX IF NOT EXISTS idx_episode_symbol ON trade_episodes(symbol);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
-CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 """
 
@@ -129,21 +198,88 @@ class TradingMemory:
             # Pre-existing rows were all transcript-backed scores, so they are final.
             self.conn.execute("ALTER TABLE pead_score_runs ADD COLUMN final INTEGER DEFAULT 0")
             self.conn.execute("UPDATE pead_score_runs SET final = has_transcript")
+        # Journal linkage. `client_order_id` is the idempotency key; `perm_id` /
+        # `order_ref` are the durable broker identities (orderId is a per-client
+        # sequence that TWS resets, so it cannot be joined on across days).
+        # NOTE: `trades.entry_id` below is dead weight — client_order_id IS the
+        # JournalEntry id by construction (see JournalEntry docstring), so nothing
+        # ever needed a second column for it. Left in place rather than dropped:
+        # SQLite column drops require a full table rebuild for zero benefit on an
+        # already-deployed table. Use client_order_id, not this column.
+        for ddl in ("client_order_id TEXT", "perm_id TEXT", "order_ref TEXT",
+                    "attempt INTEGER DEFAULT 1", "entry_id TEXT", "first_submitted_at TEXT"):
+            if ddl.split()[0] not in tcols:
+                self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
+        fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fills)")}
+        for ddl in ("perm_id TEXT", "order_ref TEXT", "origin TEXT",
+                    "link_confidence TEXT", "captured_at TEXT",
+                    "entry_id TEXT", "episode_id TEXT"):
+            if ddl.split()[0] not in fcols:
+                self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
+        # Any column added to a table that already exists in the wild needs an ALTER —
+        # CREATE TABLE IF NOT EXISTS in _SCHEMA is a no-op on an existing table.
+        pcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(predictions)")}
+        if pcols and "print_date" not in pcols:
+            self.conn.execute("ALTER TABLE predictions ADD COLUMN print_date TEXT")
+        # NULLs are distinct in a SQLite unique index, so the 52 legacy rows (which
+        # have no client_order_id) coexist with the constraint.
+        self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_coid "
+                          "ON trades(client_order_id)")
         self.conn.commit()
 
     # --- writes ---------------------------------------------------------- #
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
                    "avg_fill_price", "submitted_at", "rationale", "limit_price", "filled_at",
-                   "error", "realized_pnl", "source", "context")
+                   "error", "realized_pnl", "source", "context", "perm_id", "order_ref")
+
+    @staticmethod
+    def client_order_id(cycle_id: str, symbol: str, action: str) -> str:
+        """Deterministic idempotency key: one INTENT, one row.
+
+        A cycle proposes at most one order per (symbol, action); repeated rows for the
+        same triple are retries of the same intent, not new intents. Without this key
+        the 2026-07-23 IBKR outage wrote the same GOOG/ASML/KLAC trim five times each.
+        """
+        return f"{cycle_id}:{symbol.upper()}:{action}"
 
     def _insert_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
-        rows = [(t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
-                 t.avg_fill_price, t.submitted_at.isoformat() if t.submitted_at else None,
-                 t.rationale, t.limit_price, t.filled_at.isoformat() if t.filled_at else None,
-                 t.error, None, source, context) for t in entries]
-        placeholders = ",".join("?" * len(self._TRADE_COLS))
-        self.conn.executemany(
-            f"INSERT INTO trades ({','.join(self._TRADE_COLS)}) VALUES ({placeholders})", rows)
+        """Upsert one row per intent, counting attempts instead of duplicating rows.
+
+        On a repeat we keep whatever execution facts we already learned — a retry that
+        errors must never erase a fill the first attempt achieved — and keep the
+        original submit time, while advancing status/error and bumping `attempt`.
+        """
+        for t in entries:
+            coid = self.client_order_id(cycle_id, t.symbol, t.action)
+            submitted = t.submitted_at.isoformat() if t.submitted_at else None
+            filled = t.filled_at.isoformat() if t.filled_at else None
+            prior = self.conn.execute(
+                "SELECT attempt, status, avg_fill_price, filled_at, order_id, first_submitted_at "
+                "FROM trades WHERE client_order_id = ?", (coid,)).fetchone()
+            if prior is None:
+                self.conn.execute(
+                    f"INSERT INTO trades ({','.join(self._TRADE_COLS)}, client_order_id, "
+                    f"attempt, first_submitted_at) VALUES "
+                    f"({','.join('?' * len(self._TRADE_COLS))},?,?,?)",
+                    (t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
+                     t.avg_fill_price, submitted, t.rationale, t.limit_price, filled,
+                     t.error, None, source, context,
+                     getattr(t, "perm_id", "") or None, getattr(t, "order_ref", "") or None,
+                     coid, 1, submitted))
+                continue
+            had_fill = prior["avg_fill_price"] is not None
+            self.conn.execute(
+                "UPDATE trades SET attempt = attempt + 1, status = ?, error = ?, "
+                "order_id = ?, avg_fill_price = COALESCE(avg_fill_price, ?), "
+                "filled_at = COALESCE(filled_at, ?), qty = ?, limit_price = ?, "
+                "context = ?, submitted_at = ?, "
+                "perm_id = COALESCE(?, perm_id), order_ref = COALESCE(?, order_ref) "
+                "WHERE client_order_id = ?",
+                (prior["status"] if had_fill else t.status, t.error,
+                 t.order_id or prior["order_id"], t.avg_fill_price, filled,
+                 t.qty, t.limit_price, context, submitted,
+                 getattr(t, "perm_id", "") or None, getattr(t, "order_ref", "") or None,
+                 coid))
 
     def save_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
         """Persist trade-log entries with their full context (trader path, standalone)."""
@@ -157,13 +293,270 @@ class TradingMemory:
         if not fills:
             return 0
         before = self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"]
+        # Column-explicit: `fills` gains journal columns over time, and a positional
+        # INSERT silently breaks the moment one is added.
         self.conn.executemany(
-            "INSERT OR IGNORE INTO fills VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO fills (exec_id, symbol, side, shares, price, time, "
+            "realized_pnl, commission, order_id, perm_id, order_ref, captured_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
-              f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0), f.get("order_id", ""))
+              f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0),
+              f.get("order_id", ""), f.get("perm_id"), f.get("order_ref"),
+              datetime.now(timezone.utc).isoformat())
              for f in fills])
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
+
+    def set_cycle_approval(self, cycle_id: str, status: str) -> None:
+        """Record the Boss's verdict once it is known.
+
+        `save_chief_run` writes the cycle row BEFORE the approval interrupt (so a card
+        the Boss never answers still leaves an audit trail), which is why
+        approval_status was NULL on every cycle ever recorded — nothing came back to
+        fill it in.
+        """
+        self.conn.execute("UPDATE cycles SET approval_status = ? WHERE cycle_id = ?",
+                          (status, cycle_id))
+        self.conn.commit()
+
+    # --- journal entries (one row per INTENT) ------------------------------ #
+    # The typed columns; `risk_notes` and `approval` are objects in Python and JSON
+    # on disk, so they are mapped explicitly rather than dumped.
+    _JOURNAL_COLS = (
+        "entry_id", "cycle_id", "as_of", "symbol", "action", "source", "setup",
+        "intended_notional", "intended_qty", "conviction", "order_type", "limit_price",
+        "stop_price", "target_price", "planned_horizon_days", "invalidation",
+        "planned_risk_usd", "risk_unit_source", "rationale", "regime_risk_state",
+        "ev_score_total", "ev_score_band", "ev_has_transcript", "ev_score_latency_h",
+        "ev_expected_move_pct", "risk_notes_json", "approval_status", "approval_reviewer",
+        "approval_comment", "approval_divergence", "submit_attempts", "terminal_status",
+        "filled_qty", "avg_fill_price", "slippage_bps")
+
+    @staticmethod
+    def _journal_to_row(e) -> dict:
+        import json as _json
+
+        d = e.model_dump(mode="json")
+        ap = e.approval
+        d["risk_notes_json"] = _json.dumps(e.risk_notes, ensure_ascii=False)
+        d["approval_status"] = ap.status if ap else None
+        d["approval_reviewer"] = ap.reviewer if ap else None
+        d["approval_comment"] = ap.comment if ap else None
+        d["approval_divergence"] = (_json.dumps(ap.model_dump(mode="json"),
+                                                ensure_ascii=False) if ap else None)
+        return {k: d.get(k) for k in TradingMemory._JOURNAL_COLS}
+
+    @staticmethod
+    def _row_to_journal(row):
+        import json as _json
+
+        from ..schemas.journal import ApprovalDivergence, JournalEntry
+
+        d = dict(row)
+        d["risk_notes"] = _json.loads(d.pop("risk_notes_json", None) or "[]")
+        raw = d.pop("approval_divergence", None)
+        d["approval"] = ApprovalDivergence.model_validate(_json.loads(raw)) if raw else None
+        for k in ("approval_status", "approval_reviewer", "approval_comment"):
+            d.pop(k, None)
+        # A NULL column on a field that has a non-null default means "never set" —
+        # let the default speak rather than failing validation (e.g. submit_attempts
+        # is NULL until an order row exists).
+        fields = JournalEntry.model_fields
+        return JournalEntry.model_validate({
+            k: v for k, v in d.items()
+            if k in fields and not (v is None and fields[k].default is not None)})
+
+    def save_journal_entry(self, entry) -> None:
+        """Insert the pre-registered plan. Idempotent on entry_id: a retried cycle
+        re-states the same plan, it does not create a second intent."""
+        row = self._journal_to_row(entry)
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO journal_entries ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def update_journal_outcome(self, entry_id: str, row: dict) -> None:
+        """Attach the execution result. The PLAN columns are never touched here —
+        a journal whose plan can be edited after the outcome proves nothing."""
+        sets = ", ".join(f"{k} = COALESCE(?, {k})" for k in row)
+        self.conn.execute(
+            f"UPDATE journal_entries SET {sets}, submit_attempts = "
+            "(SELECT attempt FROM trades WHERE client_order_id = ?) WHERE entry_id = ?",
+            (*row.values(), entry_id, entry_id))
+        self.conn.commit()
+
+    def journal_entries(self, *, since: str = "", symbol: str = "",
+                        limit: int = 500) -> list:
+        """-> list[JournalEntry]."""
+        sql = "SELECT * FROM journal_entries WHERE 1=1"
+        args: list = []
+        if since:
+            sql += " AND as_of >= ?"
+            args.append(since)
+        if symbol:
+            sql += " AND symbol = ?"
+            args.append(symbol.upper())
+        sql += " ORDER BY as_of DESC, symbol LIMIT ?"
+        args.append(limit)
+        return [self._row_to_journal(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def get_journal_entry(self, entry_id: str):
+        """-> JournalEntry | None. Used to attach the opening plan onto an episode."""
+        row = self.conn.execute(
+            "SELECT * FROM journal_entries WHERE entry_id = ?", (entry_id,)).fetchone()
+        return self._row_to_journal(row) if row else None
+
+    # --- trade episodes (one round trip: flat -> position -> flat) --------- #
+    _EPISODE_COLS = (
+        "episode_id", "symbol", "direction", "origin", "status", "opened_at",
+        "closed_at", "avg_entry", "avg_exit", "realized_pnl", "unrealized_pnl",
+        "commission", "basis_source", "holding_days", "r_multiple", "r_multiple_mtm",
+        "risk_unit_source", "mae_pct", "mfe_pct", "mae_source", "excess_vs_sector_pct",
+        "setup", "primary_entry_id", "exit_reason", "exit_as_planned",
+        "invalidation_triggered", "horizon_overdue_days")
+
+    def save_episode(self, episode) -> None:
+        """Upsert by episode_id — the reducer re-derives episodes from fills each run,
+        so re-saving the same episode_id must replace, not duplicate."""
+        row = episode.model_dump(mode="json")
+        row = {k: row.get(k) for k in self._EPISODE_COLS}
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO trade_episodes ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def get_episode(self, episode_id: str):
+        """-> TradeEpisode | None."""
+        from ..schemas.journal import TradeEpisode
+
+        row = self.conn.execute(
+            "SELECT * FROM trade_episodes WHERE episode_id = ?", (episode_id,)).fetchone()
+        return TradeEpisode.model_validate(dict(row)) if row else None
+
+    def list_episodes(self, *, symbol: str = "", status: str = "",
+                      decision_gradeable_only: bool = False, limit: int = 500) -> list:
+        """-> list[TradeEpisode]."""
+        from ..schemas.journal import TradeEpisode
+
+        sql = "SELECT * FROM trade_episodes WHERE 1=1"
+        args: list = []
+        if symbol:
+            sql += " AND symbol = ?"
+            args.append(symbol.upper())
+        if status:
+            sql += " AND status = ?"
+            args.append(status)
+        if decision_gradeable_only:
+            # Mirrors TradeEpisode.decision_gradeable: a real linked plan, not origin —
+            # manual-origin episodes also have no plan (manual orders bypass
+            # persist_decision) and must not slip into decision-quality stats either.
+            sql += " AND primary_entry_id != ''"
+        sql += " ORDER BY opened_at DESC LIMIT ?"
+        args.append(limit)
+        return [TradeEpisode.model_validate(dict(r))
+                for r in self.conn.execute(sql, args).fetchall()]
+
+    def fills_for_symbol(self, symbol: str) -> list[dict]:
+        """Raw fill rows for the reducer, oldest first."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM fills WHERE symbol = ? ORDER BY time ASC", (symbol.upper(),))]
+
+    def symbols_with_fills(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT symbol FROM fills ORDER BY symbol")]
+
+    def legs_for_episode(self, episode_id: str) -> list[dict]:
+        """Raw fill rows belonging to one episode, oldest first. The last row is the
+        closing leg for a closed episode, or the most recent trim for an open one."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM fills WHERE episode_id = ? ORDER BY time ASC", (episode_id,))]
+
+    # --- predictions + outcomes -------------------------------------------- #
+    def save_prediction(self, prediction) -> None:
+        row = prediction.model_dump(mode="json")
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO predictions ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def save_prediction_outcome(self, outcome) -> None:
+        row = outcome.model_dump(mode="json")
+        self.conn.execute(
+            f"INSERT OR REPLACE INTO prediction_outcomes ({','.join(row)}) "
+            f"VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+        self.conn.commit()
+
+    def has_outcome(self, prediction_id: str, horizon_days: int) -> bool:
+        return self.conn.execute(
+            "SELECT 1 FROM prediction_outcomes WHERE prediction_id = ? AND horizon_days = ?",
+            (prediction_id, horizon_days)).fetchone() is not None
+
+    def open_predictions(self, horizons: list[int]) -> list:
+        """Predictions still missing at least one horizon. -> list[Prediction]."""
+        from ..schemas.journal import Prediction
+
+        rows = self.conn.execute(
+            "SELECT p.* FROM predictions p WHERE (SELECT COUNT(*) FROM prediction_outcomes o "
+            "WHERE o.prediction_id = p.prediction_id) < ? ORDER BY p.made_at",
+            (len(horizons),)).fetchall()
+        return [Prediction.model_validate(dict(r)) for r in rows]
+
+    def all_predictions(self, source: str = "") -> list:
+        """-> list[Prediction], every one ever made (optionally filtered by source).
+        Calibration accrues per SCORE regardless of whether a trade followed, so this
+        is the base population for Stage D's calibration report."""
+        from ..schemas.journal import Prediction
+
+        sql = "SELECT * FROM predictions"
+        args: list = []
+        if source:
+            sql += " WHERE source = ?"
+            args.append(source)
+        sql += " ORDER BY made_at"
+        return [Prediction.model_validate(dict(r))
+                for r in self.conn.execute(sql, args).fetchall()]
+
+    def get_prediction(self, prediction_id: str):
+        """-> Prediction | None. Single-row lookup, mirrors get_episode/
+        get_journal_entry — used to resolve a bare counterexample ID back to its
+        full record (e.g. when rendering, or when Stage E's critic picks cases)."""
+        from ..schemas.journal import Prediction
+
+        row = self.conn.execute(
+            "SELECT * FROM predictions WHERE prediction_id = ?", (prediction_id,)).fetchone()
+        return Prediction.model_validate(dict(row)) if row else None
+
+    def predictions_for_entries(self, entry_ids: list[str]) -> list:
+        """-> list[Prediction] whose entry_id is one of the given ids — the predictions
+        that actually led to a trade in a given episode (an episode has no fiscal_label
+        of its own; this is how its review card finds the right quarter's predictions)."""
+        from ..schemas.journal import Prediction
+
+        ids = [e for e in entry_ids if e]
+        if not ids:
+            return []
+        rows = self.conn.execute(
+            f"SELECT * FROM predictions WHERE entry_id IN ({','.join('?' * len(ids))}) "
+            "ORDER BY made_at", ids).fetchall()
+        return [Prediction.model_validate(dict(r)) for r in rows]
+
+    def prediction_outcomes(self, prediction_id: str) -> list:
+        """-> list[PredictionOutcome]."""
+        from ..schemas.journal import PredictionOutcome
+
+        return [PredictionOutcome.model_validate(dict(r)) for r in self.conn.execute(
+            "SELECT * FROM prediction_outcomes WHERE prediction_id = ? ORDER BY horizon_days",
+            (prediction_id,)).fetchall()]
+
+    # --- journal bookkeeping ---------------------------------------------- #
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO journal_meta VALUES (?,?)", (key, value))
+        self.conn.commit()
+
+    def get_meta(self, key: str, default: str = "") -> str:
+        row = self.conn.execute(
+            "SELECT value FROM journal_meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
 
     def recent_fills(self, symbol: str | None = None, limit: int = 20) -> list[dict]:
         if symbol:
@@ -357,12 +750,6 @@ class TradingMemory:
         else:
             rows = self.conn.execute(
                 "SELECT * FROM decisions ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
-
-    def recent_reports(self, symbol: str, limit: int = 5) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM reports WHERE symbol = ? ORDER BY rowid DESC LIMIT ?",
-            (symbol, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def recent_trades(self, symbol: str | None = None, limit: int = 10) -> list[dict]:

@@ -122,6 +122,14 @@ def persist_decision(state: ChiefDecisionState) -> dict:
     store = get_store()
     store.save_chief_run(cycle_id=state.cycle_id, as_of=state.as_of,
                          summary=state.summary, decisions=state.decisions)
+    # Pre-register the plan BEFORE the approval interrupt. A plan written after the
+    # outcome is known can no longer be wrong, so it proves nothing.
+    try:
+        from ..journal import entries as journal_entries
+
+        journal_entries.record_intents(state, store=store)
+    except Exception as exc:  # noqa: BLE001 - the journal observes, it must not block
+        log.warning("journal pre-registration failed: %s", exc)
     # Consume the fresh scores this cycle acted on — a PEAD score is a one-time event
     # signal; after the chief has responded (traded or not) it becomes background so it
     # is never re-adopted on subsequent daily runs.
@@ -193,11 +201,27 @@ def persist(state: ChiefDecisionState) -> dict:
     from ..memory import get_store
     from ..trader import execute as texec
 
-    context = texec.trade_context_json(state.source, state.approval, state.decisions)
-    get_store().save_trades(state.order_results, cycle_id=state.cycle_id,
-                            source=state.source, context=context)
+    store = get_store()
+    # The verdict is only known here — persist_decision runs BEFORE the interrupt, so
+    # it wrote approval_status = None and nothing ever came back to fill it in.
+    if state.approval is not None:
+        store.set_cycle_approval(state.cycle_id, state.approval.status)
+
+    by_symbol = {d.symbol: d for d in state.decisions}
+    for entry in state.order_results:
+        context = texec.trade_context_json(
+            state.source, state.approval, state.decisions,
+            decision=by_symbol.get(entry.symbol), risk_notes=state.risk_notes)
+        store.save_trades([entry], cycle_id=state.cycle_id,
+                          source=state.source, context=context)
     if state.fills:
-        get_store().upsert_fills(state.fills)
+        store.upsert_fills(state.fills)
+    try:
+        from ..journal import entries as journal_entries
+
+        journal_entries.record_outcome(state, store=store)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("journal outcome write failed: %s", exc)
     return {}
 
 

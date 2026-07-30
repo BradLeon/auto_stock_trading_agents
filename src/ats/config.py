@@ -155,6 +155,15 @@ class ChannelConfig(BaseModel):
     kind: str = "cli"
 
 
+class JournalConfig(BaseModel):
+    """Trade journal. `reconcile_at` is post-close ET: reqExecutions only returns the
+    current day's executions, so a missed session cannot be recovered later."""
+
+    enabled: bool = True
+    reconcile_at: str = "16:10"                     # America/New_York
+    horizons: list[int] = Field(default_factory=lambda: [1, 5, 20, 60])
+
+
 class ScheduleConfig(BaseModel):
     # No `enabled` flag: it existed but was never read by start(), so settings.yaml
     # advertised `enabled: false` while the launchd job scheduled normally. Whether
@@ -180,6 +189,7 @@ class AppConfig(BaseModel):
     broker: BrokerConfig = Field(default_factory=BrokerConfig)
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
+    journal: JournalConfig = Field(default_factory=JournalConfig)
     tickers: list[Ticker] = Field(default_factory=list)
     sectors: dict[str, SectorBrief] = Field(default_factory=dict)
 

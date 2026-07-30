@@ -59,4 +59,9 @@ def _to_decision(v) -> TradeDecision:
         symbol=v.symbol.upper(), action=v.action,
         target_weight=v.target_weight, notional_usd=v.notional_usd,
         order_type=v.order_type, limit_price=v.limit_price,
-        conviction=max(0.0, min(1.0, float(v.conviction))), rationale=v.rationale)
+        conviction=max(0.0, min(1.0, float(v.conviction))), rationale=v.rationale,
+        setup=getattr(v, "setup", "unknown") or "unknown",
+        stop_price=getattr(v, "stop_price", None),
+        target_price=getattr(v, "target_price", None),
+        planned_horizon_days=getattr(v, "planned_horizon_days", None),
+        invalidation=getattr(v, "invalidation", "") or "")

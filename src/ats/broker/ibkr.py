@@ -230,6 +230,34 @@ class IBKRBroker:
                     "realized_pnl": float(rp) if isinstance(rp, (int, float)) and rp == rp else None,
                     "commission": float(getattr(cr, "commission", 0) or 0),
                     "order_id": str(ex.orderId),
+                    # Durable identities: orderId is a per-client sequence that TWS
+                    # resets, so it cannot be joined on across days. permId is global
+                    # and permanent; orderRef is our own tag, echoed back on every
+                    # execution, and is what separates our orders from manual ones.
+                    "perm_id": str(getattr(ex, "permId", "") or ""),
+                    "order_ref": str(getattr(ex, "orderRef", "") or ""),
+                })
+        return out
+
+    def completed_orders(self) -> list[dict]:
+        """Terminal state of today's orders, including ones that never filled.
+
+        `place_orders` only polls for 3 seconds, so anything settling later is left
+        as 'submitted' forever — including DAY orders the exchange cancels at the
+        close. This is the read that resolves them.
+        """
+        out: list[dict] = []
+        with self.session() as ib:
+            ib.reqCompletedOrders(apiOnly=False)
+            ib.sleep(1.5)
+            for t in list(ib.trades()) + list(getattr(ib, "completedTrades", lambda: [])()):
+                st, o = t.orderStatus, t.order
+                out.append({
+                    "order_id": str(o.orderId), "perm_id": str(getattr(o, "permId", "") or ""),
+                    "order_ref": str(getattr(o, "orderRef", "") or ""),
+                    "symbol": t.contract.symbol, "status": _map_status(st.status),
+                    "filled": float(st.filled or 0),
+                    "avg_fill_price": float(st.avgFillPrice) if st.avgFillPrice else None,
                 })
         return out
 
@@ -257,6 +285,9 @@ class IBKRBroker:
                     continue
                 st = trade.orderStatus
                 e.order_id = str(trade.order.orderId)
+                # permId is assigned by IBKR at acknowledgement and is globally
+                # permanent — the only id safe to join executions on later.
+                e.perm_id = str(getattr(trade.order, "permId", "") or "")
                 e.status = _map_status(st.status)
                 if st.filled and st.avgFillPrice:
                     e.avg_fill_price = float(st.avgFillPrice)
@@ -309,7 +340,14 @@ class IBKRBroker:
                      if decision.order_type == "limit" and decision.limit_price
                      else MarketOrder(side, qty))
             order.tif = decision.time_in_force          # DAY/GTC (avoid preset TIF warning)
+            # Tag the order so its executions can be recognised as ours. reqExecutions
+            # returns the whole ACCOUNT's fills, including ones placed by hand in TWS;
+            # without a tag the only link is orderId, which TWS resets on restart and
+            # therefore cannot be joined on across days. IBKR echoes orderRef back on
+            # every execution. Capped at 60 chars — IBKR silently truncates long refs.
+            order.orderRef = order_ref(cycle_id, decision.symbol)[:60]
             trade = ib.placeOrder(contract, order)
+            entry.order_ref = order.orderRef
             self._last_trades.append(trade)
         except Exception as exc:  # noqa: BLE001 - bad symbol / rejected contract must not escape
             log.warning("order submit failed for %s: %s", decision.symbol, exc)
@@ -317,6 +355,15 @@ class IBKRBroker:
             entry.error = str(exc)
             self._last_trades.append(None)
         return entry
+
+
+def order_ref(cycle_id: str, symbol: str) -> str:
+    """Our tag on an outgoing order: `ats:<cycle_id>:<SYMBOL>`.
+
+    The `ats:` prefix is what distinguishes a system order from a manual TWS trade in
+    the account-wide execution feed.
+    """
+    return f"ats:{cycle_id}:{symbol.upper()}"
 
 
 def _fnum(v) -> float | None:

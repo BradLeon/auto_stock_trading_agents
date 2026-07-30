@@ -324,6 +324,7 @@ def _daily(*, dry_run: bool) -> None:
     _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
     _perf_snapshot()
     _perf_risk_digest()  # surface perf + 6-layer risk: Obsidian .md + Feishu card
+    _journal_marks()     # score elapsed prediction horizons + rewrite the ledger
     _chief_daily(dry_run=dry_run)   # LAST: the Chief reads everything fresh and decides
 
 
@@ -441,6 +442,44 @@ def _chief_daily(*, dry_run: bool) -> None:
                   source="scheduled")
     except Exception as exc:  # noqa: BLE001 - chief must not break the daily job
         log.warning("chief daily run failed: %s", exc)
+
+
+def _journal_marks() -> None:
+    """Score elapsed prediction horizons and regenerate the ledger.
+
+    Price-only (yfinance), no broker and no LLM — safe to run every session.
+    """
+    if not get_config().app.journal.enabled:
+        return
+    try:
+        from ..journal import predictions
+
+        log.info("journal predictions: %s", predictions.score_open_predictions())
+    except Exception as exc:  # noqa: BLE001 - the journal observes, never blocks
+        log.warning("journal prediction scoring failed: %s", exc)
+    try:
+        from ..journal import report as journal_report
+
+        p = journal_report.write_ledger()
+        if p:
+            log.info("journal ledger -> %s", p)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("journal ledger failed: %s", exc)
+
+
+def _journal_reconcile() -> None:
+    """Backfill today's execution outcomes onto the trade record."""
+    if not is_trading_session():
+        return
+    try:
+        from ..trader import reconcile
+
+        s = reconcile.reconcile()
+        log.info("journal reconcile: %s", {k: v for k, v in s.items() if k != "errors"})
+        for e in s.get("errors", []):
+            log.warning("journal reconcile: %s", e)
+    except Exception as exc:  # noqa: BLE001 - must never break the daemon
+        log.warning("journal reconcile failed: %s", exc)
 
 
 def _macro_weekly() -> None:
@@ -577,6 +616,23 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             CronTrigger(day_of_week="mon-fri", hour=w_hour, minute=w_minute,
                         timezone=cfg.timezone),
             id=f"pead_score_{name}", misfire_grace_time=grace,
+        )
+
+    # Post-close reconciliation. Its own job on purpose: reqExecutions only returns
+    # the CURRENT day's executions, so a session it misses is lost for good — it must
+    # not be able to fail just because an LLM step earlier in the cascade did.
+    jcfg = get_config().app.journal
+    if jcfg.enabled:
+        r_hour, r_minute = (int(x) for x in jcfg.reconcile_at.split(":"))
+        scheduler.add_job(
+            lambda: _journal_reconcile(),
+            CronTrigger(day_of_week="mon-fri", hour=r_hour, minute=r_minute,
+                        timezone=cfg.timezone),
+            # Same grace as the PEAD jobs, not a separate hardcoded value: a missed
+            # reconcile is unrecoverable (see comment above), so it needs the wide
+            # window at least as much as the score windows do — this predates the
+            # misfire_grace_hours config and was never updated when that landed.
+            id="journal_reconcile", misfire_grace_time=grace,
         )
 
     win_desc = ", ".join(f"{n}@{h}" for n, h in sorted(windows.items())) or "none"

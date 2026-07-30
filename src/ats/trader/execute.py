@@ -104,9 +104,22 @@ def build_approval_summary(sized: list[tuple[TradeDecision, float]],
     is_live = secrets.ibkr_port in _LIVE_PORTS or env == "live"
     banner = (f"account={secrets.ibkr_account or '(default)'} @ {secrets.ibkr_host}:{secrets.ibkr_port} "
               f"[{'⚠️ LIVE ACCOUNT' if is_live else 'paper'}]")
-    lines = "\n".join(f"  {d.action.upper()} {d.symbol} x{q:.0f} "
-                      f"{'@ ' + str(d.limit_price) if d.limit_price else '(mkt)'} — {d.rationale[:60]}"
-                      for d, q in sized)
+    # Show the declared plan and the ledger id: the Boss should see, at the moment of
+    # approving, that every order is already on the record with its exit criterion.
+    def _line(d, q) -> str:
+        px = f"@ {d.limit_price}" if d.limit_price else "(mkt)"
+        plan = []
+        if d.stop_price:
+            plan.append(f"止 {d.stop_price:g}")
+        if d.target_price:
+            plan.append(f"标 {d.target_price:g}")
+        if d.planned_horizon_days:
+            plan.append(f"{d.planned_horizon_days}日")
+        tail = f" [{d.setup}" + (f" · {' · '.join(plan)}" if plan else "") + "]" if (
+            d.setup and d.setup != "unknown") or plan else ""
+        return f"  {d.action.upper()} {d.symbol} x{q:.0f} {px}{tail} — {d.rationale[:60]}"
+
+    lines = "\n".join(_line(d, q) for d, q in sized)
     risk_block = ("\n风控: " + "; ".join(risk_notes)) if risk_notes else "\n风控: 无破限 ✅"
     summary = f"{banner}\nsource={source}{risk_block}\nOrders:\n{lines}"
     if is_live:
@@ -140,12 +153,57 @@ def place_orders(to_place: list[tuple[TradeDecision, float]],
         return entries, []
 
 
+def approval_divergence(approval: BossApproval | None,
+                        proposed: list[TradeDecision]) -> dict:
+    """Where the human disagreed with the agent.
+
+    This is the most valuable field in the journal, and it used to be discarded:
+    `trade_context_json` kept only status + reviewer. In an automated system the
+    human-journal staple "did I follow my plan?" is trivially yes — the machine
+    cannot deviate. The meaningful analogue is the reverse: where did the Boss drop,
+    override or add to what the agent proposed. Recording it is the only way to later
+    ask whether those interventions helped or hurt.
+    """
+    if approval is None:
+        return {}
+    proposed_syms = [d.symbol for d in proposed]
+    eff_syms = [d.symbol for d in approval.effective_decisions(proposed)]
+    out = {
+        "status": approval.status,
+        "reviewer": approval.reviewer,
+        "reviewed_at": approval.reviewed_at.isoformat() if approval.reviewed_at else None,
+        "comment": approval.comment,
+        "proposed_symbols": proposed_syms,
+        "effective_symbols": eff_syms,
+        "dropped_symbols": [s for s in proposed_syms if s not in eff_syms],
+        "added_symbols": [s for s in eff_syms if s not in proposed_syms],
+        "rejected_symbols": list(approval.rejected_symbols),
+        "overrides": [d.model_dump(mode="json") for d in approval.overrides],
+        "direct_instructions": [d.model_dump(mode="json") for d in approval.direct_instructions],
+    }
+    out["diverged"] = bool(out["dropped_symbols"] or out["added_symbols"]
+                           or out["overrides"] or approval.status != "approved")
+    return out
+
+
 def trade_context_json(source: str, approval: BossApproval | None,
-                       decisions: list[TradeDecision]) -> str:
+                       decisions: list[TradeDecision], *,
+                       decision: TradeDecision | None = None,
+                       risk_notes: list[str] | None = None) -> str:
+    """Per-order audit snapshot.
+
+    `decision` narrows the payload to the single order this row is about — every row
+    previously carried the whole cycle's decisions (900-1200 bytes duplicated N times).
+    `risk_notes` records why sizing was clipped or an order blocked; those were printed
+    to the console and shown on the approval card, then thrown away.
+    """
+    own = [decision] if decision is not None else decisions
     return json.dumps({
-        "source": source, "approval_status": getattr(approval, "status", ""),
-        "reviewer": getattr(approval, "reviewer", ""),
-        "decisions": [d.model_dump(mode="json") for d in decisions]}, ensure_ascii=False)
+        "source": source,
+        "approval": approval_divergence(approval, decisions),
+        "risk_notes": list(risk_notes or []),
+        "decisions": [d.model_dump(mode="json") for d in own],
+    }, ensure_ascii=False)
 
 
 def pead_event_data() -> dict[str, dict]:

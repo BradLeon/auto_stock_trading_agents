@@ -15,19 +15,29 @@ from .indicators import compute_indicators
 name = "yfinance"
 
 
-def _download(symbol: str, period: str, interval: str):
+def _download(symbol: str, period: str, interval: str, adjust: bool = True):
     import yfinance as yf
     from .base import yf_symbol
 
-    df = yf.Ticker(yf_symbol(symbol)).history(period=period, interval=interval, auto_adjust=True)
+    df = yf.Ticker(yf_symbol(symbol)).history(period=period, interval=interval,
+                                              auto_adjust=adjust)
     if df is None or df.empty:
         raise ValueError(f"no data returned for {symbol}")
     return df
 
 
-def fetch_snapshot(ticker: Ticker, *, period: str = "1y", interval: str = "1d") -> MarketSnapshot:
+def fetch_snapshot(ticker: Ticker, *, period: str = "1y", interval: str = "1d",
+                   adjust: bool = True) -> MarketSnapshot:
+    """Daily OHLCV history.
+
+    `adjust=True` (the default, and what indicators want) back-adjusts for splits and
+    dividends. Pass `adjust=False` when comparing against a RAW price captured at a
+    point in time — an unadjusted fill price or reference price measured against an
+    adjusted series silently drifts across any corporate action.
+    """
     as_of = datetime.now(timezone.utc)
-    df = safe_fetch(lambda: _download(ticker.symbol, period, interval), source=f"{name}:{ticker.symbol}")
+    df = safe_fetch(lambda: _download(ticker.symbol, period, interval, adjust),
+                    source=f"{name}:{ticker.symbol}")
     if df is None:
         return MarketSnapshot(ticker=ticker, as_of=as_of)
 

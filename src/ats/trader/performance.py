@@ -37,14 +37,20 @@ def record_snapshot(cycle_id: str = "") -> PerformanceRecord | None:
         return None
 
     store.upsert_fills(fills)
+    # Episodes are rebuilt here, on the same portfolio+fills read, so this is also
+    # the natural once-per-session trigger for the trade journal's round-trip ledger.
+    from ..journal import episodes as episodes_mod
+
+    episodes_mod.rebuild_all(store=store, portfolio=portfolio)
+
     record = perf_compute.compute(
         cycle_id=cycle_id or f"snap-{_now():%Y%m%d}", as_of=_now(), portfolio=portfolio,
         previous=store.last_performance(), order_results=[],
         fallback_net_liq=get_config().app.account.net_liquidation_usd)
 
-    # Backfill the analytic fields from the full history + accumulated fills.
+    # Backfill the analytic fields from the full history + accumulated episodes.
     hist = store.performance_history(limit=250) + [record]
-    stats = analytics.trade_stats(store.recent_fills(limit=2000))
+    stats = analytics.episode_stats(store.list_episodes(limit=5000))
     record.win_rate = stats["win_rate"]
     record.profit_factor = stats["profit_factor"]
     record.max_drawdown = analytics.max_drawdown_pct(hist)
@@ -56,9 +62,9 @@ def report(days: int = 30) -> dict:
     """History + full analytics (returns/drawdown/win-rate/profit-factor/benchmark)."""
     store = get_store()
     hist = store.performance_history(limit=max(days, 2))
-    fills = store.recent_fills(limit=2000)
+    episodes = store.list_episodes(limit=5000)
     benchmark = _benchmark_closes(len(hist))
-    return {"history": hist, "analytics": analytics.summarize(hist, fills, benchmark)}
+    return {"history": hist, "analytics": analytics.summarize(hist, episodes, benchmark)}
 
 
 def _benchmark_closes(n: int) -> dict[str, list[float]]:

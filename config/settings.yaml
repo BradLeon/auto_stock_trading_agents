@@ -31,9 +31,11 @@ llm:
     macro_strategist: {model: anthropic/claude-sonnet-5, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 sonnet-5
     pead_analyst: {model: anthropic/claude-sonnet-5}  # PEAD prep framework/narrative/expectations (token-heavy)
     structure_analyst: {model: anthropic/claude-sonnet-5, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权
+    invalidation_check: {model: anthropic/claude-sonnet-5, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，用 sonnet 保证判读稳定
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
     risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus
+    critic: {max_tokens: 4096}           # 交易日志季度 critic —— 低频、人工签字前最后一道叙事关卡，成本不是约束
 
 # --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --
 risk:
@@ -108,3 +110,12 @@ schedule:
   # 6 小时的依据：20:00 ET + 6h = 02:00 ET，距次日开盘仍有约 7 小时，迟到的打分依然
   # 有效；再晚就交给 _score_plan 的 T+1 补打路径。
   misfire_grace_hours: 6
+
+# --- Trade journal -----------------------------------------------------------
+# 对账必须每个交易日跑：IBKR 的 reqExecutions 只返回**当日**执行，漏掉的那天成交
+# 无法事后补回（除非人工导 Flex Query）。所以它是独立 cron，不挂在日级联后面 ——
+# 级联里任何一个 LLM 步骤失败都不该连累它。
+journal:
+  enabled: true
+  reconcile_at: "16:10"         # America/New_York，收盘后
+  horizons: [1, 5, 20, 60]      # 预测打分窗口；四个全部保留，长短期分歧本身是信号

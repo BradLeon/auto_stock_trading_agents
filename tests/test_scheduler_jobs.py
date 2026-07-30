@@ -43,9 +43,10 @@ def registered(monkeypatch):
     return holder["sched"]
 
 
-def test_registers_daily_cycle_and_both_score_windows(registered):
+def test_registers_daily_cycle_score_windows_and_reconcile(registered):
     ids = [j["id"] for j in registered.jobs]
-    assert ids == ["daily_cycle", "weekly_review", "pead_score_amc", "pead_score_bmo"]
+    assert ids == ["daily_cycle", "weekly_review", "pead_score_amc", "pead_score_bmo",
+                   "journal_reconcile"]
 
 
 def test_weekly_review_is_saturday_at_the_same_time_as_the_daily_cycle(registered):
@@ -57,6 +58,15 @@ def test_weekly_review_is_saturday_at_the_same_time_as_the_daily_cycle(registere
     assert weekly_fields["day_of_week"] == "sat"
     assert (weekly_fields["hour"], weekly_fields["minute"]) == \
         (daily_fields["hour"], daily_fields["minute"])
+
+
+def test_reconcile_is_its_own_job_with_a_long_grace(registered):
+    """reqExecutions only returns the CURRENT day, so a missed session is lost for
+    good — reconciliation must not ride on the LLM cascade succeeding."""
+    job = next(j for j in registered.jobs if j["id"] == "journal_reconcile")
+    fields = {f.name: str(f) for f in job["trigger"].fields}
+    assert (fields["hour"], fields["minute"]) == ("16", "10")
+    assert job["misfire_grace_time"] >= 3600
 
 
 def test_windows_fire_at_the_configured_times(registered):
@@ -121,7 +131,7 @@ def test_bad_window_time_is_skipped_not_fatal(monkeypatch):
                         lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
     scheduler.start(dry_run=True)
     assert [j["id"] for j in holder["s"].jobs] == [
-        "daily_cycle", "weekly_review", "pead_score_bmo"]
+        "daily_cycle", "weekly_review", "pead_score_bmo", "journal_reconcile"]
 
 
 # --------------------------------------------------------------------------- #

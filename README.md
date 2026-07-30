@@ -246,8 +246,10 @@ ats serve                      # 常驻进程：处理飞书审批回调（和�
 这份 README 只讲"这是什么、怎么用、要注意什么"。更技术性的内容在
 `docs/` 目录：
 
-- [`docs/DESIGN.md`](docs/DESIGN.md) —— 完整架构设计、各角色的读写权限矩阵、
-  六层风控的具体阈值、数据表结构
+- [`docs/DESIGN.md`](docs/DESIGN.md) —— 设计思想、角色边界、不可违反的不变式
+  （面向决策者/设计者，偏抽象）
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —— 环境搭建、代码规范、测试约定、
+  daemon 运维操作（面向开发/运维工程师，偏具体）
 - [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) —— 每种 workflow 的精确触发条件、
   Chief 决策图的节点顺序、财报打分窗口的判定逻辑
 - [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) —— 每个数据源的接入状态、

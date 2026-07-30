@@ -290,14 +290,15 @@ def load_pead_global() -> dict:
     sr = cfg["sector_review"]
     sr.setdefault("enabled", True)
     sr.setdefault("sectors", ["ai_hardware"])
-    sr.setdefault("weekday", 0)          # 0 = Monday (weekly scheduled run)
+    sr.setdefault("weekday", 5)          # 5 = Saturday (weekly scheduled run; own cron job,
+                                          # decoupled from the mon-fri trading-day cascade)
     sr.setdefault("inject_prep", True)
     sr.setdefault("inject_monitor", True)
     cfg.setdefault("macro_review", {})
     mr = cfg["macro_review"]
     mr.setdefault("enabled", True)
     mr.setdefault("name", "macro")
-    mr.setdefault("weekday", 0)          # runs BEFORE sector on Mondays (cascade)
+    mr.setdefault("weekday", 5)          # runs BEFORE sector on Saturdays (cascade)
     mr.setdefault("inject_prep", True)
     mr.setdefault("inject_monitor", True)
     mr.setdefault("feed_sector", True)   # prepend macro regime into sector review context

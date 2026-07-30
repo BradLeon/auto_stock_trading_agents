@@ -315,8 +315,10 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
 
 
 def _daily(*, dry_run: bool) -> None:
-    _macro_weekly()      # top-down cascade: macro -> sector -> (daily) pead
-    _sector_weekly()
+    # Macro/sector weekly review moved to its own Saturday job (see _weekly_review /
+    # the "weekly_review" cron job) — they don't touch the broker or need a trading
+    # session, so tying them to the mon-fri trading-day cascade was never necessary,
+    # and running them over the weekend keeps Monday's cascade free of the extra load.
     _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
     pead_daily(dry_run=dry_run)
     _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
@@ -481,7 +483,7 @@ def _journal_reconcile() -> None:
 
 
 def _macro_weekly() -> None:
-    """Weekly macro strategist review (Mondays by default). Runs BEFORE the sector
+    """Weekly macro strategist review (Saturdays by default). Runs BEFORE the sector
     review so this week's macro regime feeds it (cascade 宏观→行业→个股)."""
     from ..config import load_pead_global
     from .cli import run_macro_review
@@ -491,14 +493,14 @@ def _macro_weekly() -> None:
         return
     try:
         run_macro_review(mr["name"])
-    except Exception as exc:  # noqa: BLE001 - review must not break the daily job
+    except Exception as exc:  # noqa: BLE001 - review must not break the weekly job
         log.warning("macro review failed: %s", exc)
 
 
 def _sector_weekly() -> None:
-    """Weekly sector review (Mondays by default). Lands after today's monitors, so
-    the freshest injection reaches Tuesday-onward runs; run `ats sector review`
-    manually if it matters intraday."""
+    """Weekly sector review (Saturdays by default). Runs the weekend after the week's
+    monitors land, so Monday's cascade opens with the freshest injection already in
+    place; run `ats sector review` manually if it matters sooner."""
     from ..config import load_pead_global
     from .cli import run_sector_review
 
@@ -508,8 +510,16 @@ def _sector_weekly() -> None:
     for name in sr["sectors"]:
         try:
             run_sector_review(name)
-        except Exception as exc:  # noqa: BLE001 - review must not break the daily job
+        except Exception as exc:  # noqa: BLE001 - review must not break the weekly job
             log.warning("sector review %s failed: %s", name, exc)
+
+
+def _weekly_review() -> None:
+    """Saturday-only job: macro then sector review, decoupled from the mon-fri
+    trading-day cascade (see `_daily`'s comment for why). Neither node places trades,
+    so there's no dry_run to thread through here."""
+    _macro_weekly()
+    _sector_weekly()
 
 
 def _attach_job_logging(scheduler) -> None:
@@ -581,6 +591,13 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         lambda: _daily(dry_run=dry_run),
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
         id="daily_cycle", misfire_grace_time=grace,
+    )
+    # Macro/sector weekly review: own job, Saturdays, same time-of-day and grace as
+    # the trading-day cascade — no NYSE session gating needed since it never trades.
+    scheduler.add_job(
+        lambda: _weekly_review(),
+        CronTrigger(day_of_week="sat", hour=hour, minute=minute, timezone=cfg.timezone),
+        id="weekly_review", misfire_grace_time=grace,
     )
 
     # PEAD score windows — triggered by an observed print, so their job is to check

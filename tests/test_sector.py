@@ -203,12 +203,12 @@ def test_scheduler_sector_weekly(monkeypatch):
     calls = []
     monkeypatch.setattr("ats.runtime.cli.run_sector_review",
                         lambda name, **k: calls.append(name))
-    monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 6))   # a Monday
+    monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 4))   # a Saturday (new default)
     scheduler._sector_weekly()
     assert calls == ["ai_hardware"]
 
     calls.clear()
-    monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 7))   # Tuesday
+    monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 6))   # Monday — no longer fires
     scheduler._sector_weekly()
     assert calls == []
 

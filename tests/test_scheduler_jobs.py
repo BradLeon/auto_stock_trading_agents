@@ -45,7 +45,18 @@ def registered(monkeypatch):
 
 def test_registers_daily_cycle_and_both_score_windows(registered):
     ids = [j["id"] for j in registered.jobs]
-    assert ids == ["daily_cycle", "pead_score_amc", "pead_score_bmo"]
+    assert ids == ["daily_cycle", "weekly_review", "pead_score_amc", "pead_score_bmo"]
+
+
+def test_weekly_review_is_saturday_at_the_same_time_as_the_daily_cycle(registered):
+    """Macro/sector review doesn't trade and doesn't need a NYSE session, so it got
+    its own Saturday slot instead of riding the mon-fri trading-day cascade."""
+    by_id = {j["id"]: j["trigger"] for j in registered.jobs}
+    daily_fields = {f.name: str(f) for f in by_id["daily_cycle"].fields}
+    weekly_fields = {f.name: str(f) for f in by_id["weekly_review"].fields}
+    assert weekly_fields["day_of_week"] == "sat"
+    assert (weekly_fields["hour"], weekly_fields["minute"]) == \
+        (daily_fields["hour"], daily_fields["minute"])
 
 
 def test_windows_fire_at_the_configured_times(registered):
@@ -55,6 +66,8 @@ def test_windows_fire_at_the_configured_times(registered):
     assert (fields["pead_score_amc"]["hour"], fields["pead_score_amc"]["minute"]) == ("20", "0")
     assert (fields["pead_score_bmo"]["hour"], fields["pead_score_bmo"]["minute"]) == ("11", "0")
     for i in by_id:
+        if i == "weekly_review":       # the one Saturday-only job — see its own test
+            continue
         assert fields[i]["day_of_week"] == "mon-fri"
 
 
@@ -107,7 +120,8 @@ def test_bad_window_time_is_skipped_not_fatal(monkeypatch):
     monkeypatch.setattr(blocking, "BlockingScheduler",
                         lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
     scheduler.start(dry_run=True)
-    assert [j["id"] for j in holder["s"].jobs] == ["daily_cycle", "pead_score_bmo"]
+    assert [j["id"] for j in holder["s"].jobs] == [
+        "daily_cycle", "weekly_review", "pead_score_bmo"]
 
 
 # --------------------------------------------------------------------------- #

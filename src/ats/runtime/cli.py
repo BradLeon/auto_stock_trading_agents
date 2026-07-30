@@ -469,6 +469,30 @@ def trader_manual(action: str, symbol: str, qty: float, *, limit: float | None =
     return 0
 
 
+def _print_quadrant(review) -> None:
+    """Show the deterministic layer — this is what `--no-llm` exists to verify."""
+    if not review.axis_inputs and review.quadrant == "transition":
+        return
+    print(f"   {review.quadrant_line()}")
+    if review.quadrant_reason:
+        print(f"      理由: {review.quadrant_reason}")
+    for a in review.axis_inputs:
+        val = "n/a" if a.value is None else a.value
+        print(f"      · {a.label or a.key}: {val} (判据 {a.threshold}) → {a.score:+.2f}")
+    dec = review.decomposition
+    if dec is not None and dec.d_real_bp is not None:
+        print(f"      · 利率分解 {dec.window_days}d: Δ名义 {dec.d_nominal_bp:+.0f}bp"
+              f" = Δ实际 {dec.d_real_bp:+.0f} + Δ通胀补偿 {dec.d_breakeven_bp:+.0f}"
+              f" → {dec.classification}")
+        if dec.real_yield_cause:
+            print(f"      · 成因: {dec.real_yield_cause}")
+    for s in review.shock_vs_trend:
+        print(f"      · {s}")
+    stale = [r.key for r in review.indicators if r.stale]
+    if stale:
+        print(f"      · ⚠️ 数据过旧/缺失: {', '.join(stale)}")
+
+
 def run_macro_review(name: str = "macro", *, use_llm: bool = True,
                      live_data: bool = True, write_report: bool = True):
     """One weekly macro strategist review: regime + rate path + sector tilts."""
@@ -477,6 +501,7 @@ def run_macro_review(name: str = "macro", *, use_llm: bool = True,
 
     review = macro_review.run(name, use_llm=use_llm, live_data=live_data)
     print(f"🌐 macro {name} — {review.regime}")
+    _print_quadrant(review)
     if review.rate_path:
         print(f"   利率路径: {review.rate_path}")
     for t in review.sector_tilts:
@@ -498,7 +523,11 @@ def macro_show(name: str = "macro") -> int:
         print(f"(no macro review for {name} yet — run `ats macro review`)")
         return 0
     print(f"=== macro review {name} @ {latest.as_of:%Y-%m-%d} ===")
-    print(f"Regime: {latest.regime}\n利率路径: {latest.rate_path}\n\n{latest.summary}\n")
+    print(f"Regime: {latest.regime}")
+    _print_quadrant(latest)
+    if latest.falsifier:
+        print(f"证伪条件: {latest.falsifier}")
+    print(f"利率路径: {latest.rate_path}\n\n{latest.summary}\n")
     for t in latest.sector_tilts:
         print(f"  {t.stance} {t.sector}")
     print("\nHistory:")

@@ -393,6 +393,11 @@ def load_macro_config(name: str = "macro"):
     raw["search"].setdefault("max_chars_per_result", 1800)
     raw.setdefault("review", {})
     raw["review"].setdefault("max_context_chars", 60000)
+    # Regime thresholds intentionally get no per-key setdefault here: the values
+    # live in config/macro.yaml (tunable without a code change) and fall back to
+    # agents/macro/regime.DEFAULTS key-by-key at merge time. Duplicating them in
+    # a third place is exactly how a code default silently stops taking effect.
+    raw.setdefault("regime", {})
     raw.setdefault("factset", {})
     fs = raw["factset"]
     fs.setdefault("enabled", True)

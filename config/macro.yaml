@@ -70,3 +70,40 @@ factset:
 
 review:
   max_context_chars: 60000
+
+# 四象限判定的标定阈值（docs/MACRO_ANALYST.md §6.2）。
+# ⚠️ 这些是初始标定值，不是定论：上线后按实际触发频率复盘调整——每周翻转说明太灵敏，
+#    长期不动说明太钝。改值改这里，代码里的 regime.DEFAULTS 只是缺省兜底。
+regime:
+  neutral_band: 0.25          # |轴分| 低于此值 ⇒ transition（进入门槛）
+  stay_band: 0.15             # 留在已确认象限的宽松门槛（迟滞，见 §4.3）
+  min_inputs_per_axis: 2      # 存活输入少于此数 ⇒ insufficient，不猜
+  confirm_weeks: 2            # 连续几期同向后 provisional → confirmed
+
+  growth:
+    sahm_bad: 0.50            # 失业率 3m均值 − 12m最低 ≥ 0.50pp（Sahm 规则）
+    sahm_good: 0.0
+    initial_claims_bad_pct: 10.0     # 初请 4 周均值 vs 3 个月前
+    continuing_claims_bad_pct: 8.0   # 续请（再就业难度，早期信号）
+    cfnai_bad: -0.35          # CFNAI-MA3
+    cfnai_good: 0.20
+
+  inflation:
+    pce_momentum_pp: 0.3      # 核心 PCE 3m年化 − 12m YoY
+    breakeven_z: 1.5          # 10y 通胀补偿 z(3y) —— 饱和点而非触发点：设 0.5 时
+                              #   z=-0.51 与 z=-3.0 同样打 -1.0，输入退化成二值
+    energy_3m_pct: 15.0       # 汽油/原油 3 个月变化
+
+  alerts:
+    credit_widen_bp: 50.0         # HY OAS 1 个月走阔
+    equity_near_high_pct: 3.0     # SPX 距 3 个月高点（背离判定）
+    worst_combo_real_bp: 20.0     # 实际↑ 且 通胀补偿↑ = 最差组合
+    worst_combo_breakeven_bp: 15.0
+    bond_vol_z: 1.5               # MOVE（或代理）z-score
+
+  decomposition:
+    flat_bp: 5.0              # |Δ| 小于此值视为持平，避免 +4bp 被读成"通胀补偿↑"
+
+  shock_vs_trend:
+    shock_z: 2.0              # 1m 变化 z 超此值且 3m 未成形 ⇒ 冲击
+    trend_z: 1.0              # 3m 变化 z 超此值且与 1m 同向 ⇒ 趋势

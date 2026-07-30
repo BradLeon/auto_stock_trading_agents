@@ -28,3 +28,7 @@ class MacroReviewLLMView(BaseModel):
     asset_implications: str = Field(default="", description="股/债/美元/黄金/原油含义")
     themes: list[ThemeAssessView] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
+    falsifier: str = Field(
+        default="",
+        description=("什么**具体可观测**的事件会推翻这次判断。"
+                     "'如果经济恶化' 不合格；'初请 4 周均值连续两周高于 26 万' 合格。"))

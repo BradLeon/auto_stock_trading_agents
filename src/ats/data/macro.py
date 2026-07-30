@@ -30,6 +30,61 @@ _FRED_SERIES = {
 }
 
 
+# Series the indicator framework needs the FULL HISTORY of, not just the last
+# print: every axis, z-score and Δ in docs/MACRO_ANALYST.md §4 is defined on the
+# series, and `fred.get_series()` already returns all of it — the old code just
+# threw it away in `_latest()`. Keeping it in memory costs nothing and avoids
+# introducing a macro persistence layer (docs/DATA_SOURCES.md keeps raw macro
+# out of the DB on purpose).
+#
+#   key -> (fred_code, 中文标签, unit, 观测频率)
+# `unit` decides how a change reads: pct → basis points, price/index → percent.
+_SERIES_SPEC: dict[str, tuple[str, str, str, str]] = {
+    # ── 利率 / 信用（日频）─────────────────────────────
+    "ust_10y":        ("DGS10",         "10y 名义",       "pct",   "daily"),
+    "ust_2y":         ("DGS2",          "2y 国债",        "pct",   "daily"),
+    "real_10y":       ("DFII10",        "10y 实际收益率", "pct",   "daily"),
+    "breakeven_10y":  ("T10YIE",        "10y 通胀补偿",   "pct",   "daily"),
+    "policy_rate":    ("DFF",           "有效联邦基金",   "pct",   "daily"),
+    "hy_oas":         ("BAMLH0A0HYM2",  "高收益利差",     "pct",   "daily"),
+    "ig_oas":         ("BAMLC0A0CM",    "投资级利差",     "pct",   "daily"),
+    "vix":            ("VIXCLS",        "VIX",            "index", "daily"),
+    # ── 就业（周频/月频）──────────────────────────────
+    "initial_claims": ("ICSA",          "初请失业金",     "index", "weekly"),
+    "continuing_claims": ("CCSA",       "续请失业金",     "index", "weekly"),
+    "unemployment":   ("UNRATE",        "失业率",         "pct",   "monthly"),
+    # ── 通胀 / 增长（月频）────────────────────────────
+    "core_pce":       ("PCEPILFE",      "核心 PCE 指数",  "index", "monthly"),
+    # CFNAI oscillates around zero and changes sign — a percent change on it is
+    # division noise, so it reports absolute differences (`level`).
+    "cfnai":          ("CFNAI",         "CFNAI 活动指数", "level", "monthly"),
+    # ── 大宗（周频）───────────────────────────────────
+    "gasoline":       ("GASREGW",       "汽油零售价",     "price", "weekly"),
+    # ── 生产率（季频，仅展示，不参与象限判定，§3.3）────
+    "productivity":   ("OPHNFB",        "非农生产率",     "index", "quarterly"),
+    "unit_labor_cost": ("ULCNFB",       "单位劳动成本",   "index", "quarterly"),
+}
+
+# yfinance-sourced series that also need history (FRED has no clean daily feed
+# for these two). Batched into one download — the rate-limit mitigation used
+# throughout data/ (see sector_snapshot.py).
+_YF_SERIES_SPEC: dict[str, tuple[str, str, str]] = {
+    "oil_wti": ("CL=F",       "WTI 原油", "price"),
+    "dxy":     ("DX-Y.NYB",   "美元指数", "index"),
+    # Needed by the credit-equity divergence alert (§6.5): the warning is
+    # "credit is widening while equities have not noticed yet", so it takes both.
+    "spx":     ("^GSPC",      "标普500",  "index"),
+}
+
+
+def series_spec() -> dict[str, tuple[str, str, str, str]]:
+    """key -> (source_code, label, unit, freq) for every history-backed series."""
+    out = dict(_SERIES_SPEC)
+    for key, (sym, label, unit) in _YF_SERIES_SPEC.items():
+        out[key] = (sym, label, unit, "daily")
+    return out
+
+
 def _fred_client():
     key = get_config().secrets.fred_api_key
     if not key:
@@ -45,6 +100,54 @@ def _fred_client():
 def _latest(series) -> float | None:
     s = series.dropna()
     return float(s.iloc[-1]) if len(s) else None
+
+
+def fetch_series(years: int = 11) -> dict:
+    """Full histories for the indicator framework: `{key: pandas.Series}`.
+
+    Deliberately separate from `fetch()` rather than folded into it: `fetch()` is
+    consumed by five downstream call sites and mocked in tests, and the weekly
+    cadence makes the duplicated FRED round-trips irrelevant next to the
+    regression risk of changing its contract.
+
+    `years` covers the longest window any indicator needs (10y percentile + a
+    year of slack). A dead feed yields a missing key, never an exception —
+    `data/base.py` policy: a source degrades the cycle, it never aborts it.
+    """
+    out: dict = {}
+    fred = _fred_client()
+    if fred is None:
+        log.warning("FRED (no api key): indicator histories unavailable")
+    else:
+        for key, (code, _label, _unit, _freq) in _SERIES_SPEC.items():
+            s = safe_fetch(lambda c=code: fred.get_series(c).dropna(),
+                           source=f"fred:{code}")
+            if s is not None and len(s):
+                out[key] = s
+    _add_yf_series(out, years=years)
+    return out
+
+
+def _add_yf_series(out: dict, *, years: int) -> None:
+    symbols = [sym for sym, _l, _u in _YF_SERIES_SPEC.values()]
+
+    def _download():
+        import yfinance as yf
+
+        return yf.download(symbols, period=f"{years}y", interval="1d",
+                           auto_adjust=True, progress=False, group_by="column")
+
+    df = safe_fetch(_download, source=f"yf:{','.join(symbols)}")
+    if df is None or getattr(df, "empty", True):
+        return
+    close = df["Close"] if "Close" in df else df
+    for key, (sym, _label, _unit) in _YF_SERIES_SPEC.items():
+        try:
+            s = close[sym].dropna() if sym in close else None
+        except Exception:  # noqa: BLE001 - shape varies with yfinance versions
+            s = None
+        if s is not None and len(s):
+            out[key] = s
 
 
 def fetch() -> MacroData:

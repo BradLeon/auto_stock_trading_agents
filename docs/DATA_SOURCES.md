@@ -25,7 +25,7 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 
 | 源 | provider / key | 提供的数据 | 存储 | 备注 |
 |---|---|---|---|---|
-| **market** 行情 | yfinance（无需 key） | 日线 OHLCV(1y) + SMA/RSI/MACD/ATR 等 9 指标 | run 时现取 → 技术面分析师 | — |
+| **market** 行情 | yfinance（无需 key） | 日线 OHLCV(1y) + SMA/RSI/MACD/ATR 等 9 指标 | run 时现取 → 技术面分析师（`agents/technical`，用日线收盘算 7 点评分） | — |
 | **fundamentals** 基本面 | yfinance + SEC EDGAR（`SEC_EDGAR_USER_AGENT`） | 估值比率 + **三大报表科目**（营收/毛利率/营业利润率/净利/EPS/CapEx/FCF/折旧/负债）含 **QoQ+YoY** + 近期 SEC filing 链接 | → `pead_dossier` | 报表来自 yfinance 季度表 |
 | **macro** 宏观 | FRED（`FRED_API_KEY`）+ yfinance + CNN | UST10Y/2Y、Fed Funds、CPI YoY、失业率、非农、VIX、SPX/NDX、**Fear&Greed** | → 宏观分析师 | F&G 用完整浏览器 UA 绕过 418 |
 | **earnings** 财报日历 | Finnhub（`FINNHUB_API_KEY`）→ yfinance 兜底 | 下次财报日 + **盘前/盘后(amc/bmo)** + EPS/营收预估 | → 调度 + 期权到期选择 | 券商级（聚合 IR 公告），动态无人工 |

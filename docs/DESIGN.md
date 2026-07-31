@@ -59,6 +59,7 @@ flowchart TD
         direction TB
         Macro["宏观策略师<br/>(周六 + FOMC/CPI/NFP)"] -->|inject| Sector["行业分析师<br/>(周六 + 行业会议)"]
         Sector -->|inject| PEAD["PEAD 分析师<br/>(每日 monitor；财报前 prep；财报后 score)"]
+        Tech["技术面分析师<br/>(每日，确定性无 LLM)"]
         Risk["风控官<br/>(每日快照，确定性无 LLM)"]
         Trader0["Trader<br/>(确定性无 LLM)"]
     end
@@ -92,6 +93,7 @@ flowchart TD
 | 宏观策略师 | macro_reviews（regime / 利率路径 / sector_tilts） | 定量盘 + Tavily + FactSet | ❌ 不出单 |
 | 行业分析师 | sector_reviews（层评审 / company_calls） | 快照 + PEAD 档案 + 宏观评审（上游） | ❌ 不出单 |
 | PEAD 分析师 | pead_dossier（叙事 / 预期 / Scorecard / 建议） | 数据源 + 行业/宏观评审（上游注入） | ❌ 只出建议 |
+| 技术面分析师 | technical_reviews（7 点评分 / 建议敞口 / Tier 触发） | 日线收盘价 + VIX/VIX3M | ❌ 只出建议敞口，**不判方向** |
 | 风控官 | risk_reviews（六层画像 / breaches / risk_state） | 持仓 + 价格 + 存档 | ❌ 硬闸门（否决/裁剪，不产生交易） |
 | Trader | trades / fills / performance | IBKR | ❌ 纯执行 + 记录 |
 | **Chief 首席** | cycles / decisions | **全部存档 + 实时持仓** | ✅ **唯一产生 TradeDecision** |
@@ -101,6 +103,11 @@ flowchart TD
 **隔离原则**：分析师平级——各自独立分析、只写自己的存档；可以读取其他分析师
 **已发布**的报告作为上游背景（自上而下级联：宏观 → 行业 → PEAD，如投行策略师
 报告全公司可读），但不能修改对方产出、不能出单。
+
+**技术面分析师不在这条级联里**：它不读任何其他分析师的产出，只吃价格与 VIX，
+因此不受上游叙事影响——这是有意的，它的价值恰恰在于提供一个与基本面判断
+**相互独立**的证据源。它在时序上排在 PEAD 之后仅仅是为了让 Chief 一次读齐，
+不代表它消费 PEAD 的结论。
 
 ## 5. 触发矩阵：为什么是"周期 + 事件"双轨
 
@@ -114,6 +121,7 @@ flowchart TD
 | PEAD score | — | 财报后（bmo 当日 / amc 次日），且必须先确认财报已真实发布 |
 | 行业分析师 review | 每周六 | `sector[:name]` 日历事件（行业会议/发布会） |
 | 宏观策略师 review | 每周六 | `macro` 日历事件（FOMC/CPI/NFP/政府报告） |
+| 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — |
 | 风控官快照 | 每交易日收盘 | derisk/破限 → 飞书告警 |
 | 交易日志对账（journal_reconcile） | 每交易日收盘后 | — （只读，一天没跑就永久丢失当天成交，不可补跑） |
 | **Chief 收口** | 每交易日（调度末位，读全部新鲜产出） | score 完成后手动 `--chief` / `ats chief run` |
@@ -271,6 +279,7 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 | research_articles/insights | 研报通道 | 行业分析师、monitor |
 | sector_reviews | 行业分析师 | Chief、PEAD 注入 |
 | macro_reviews | 宏观策略师 | Chief、行业/PEAD 注入 |
+| technical_reviews | 技术面分析师（每日） | Chief |
 | risk_reviews | 风控官（每日） | Chief、告警 |
 | trades（含 context JSON）/fills | Trader | Chief 战绩反馈、绩效分析 |
 | performance | Trader 每日快照 | Chief、风控回撤 |
@@ -313,4 +322,5 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 - workflow 细节表、触发路由表 → `docs/WORKFLOWS.md`
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`
 - 行业分析师 L1-L6 分层方法论 → `docs/SECTOR_ANALYST.md`
+- 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
 - 从 paper 到 live 的历史 checklist → `docs/GO_LIVE.md`

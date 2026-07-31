@@ -1,6 +1,6 @@
 # Workflows 与触发条件
 
-> 状态：v0.3 · 2026-07-16 · 配套实现：`graph/chief.py`（决策图）+ `runtime/scheduler.py`（触发路由）
+> 状态：v0.3 · 2026-07-31（新增技术面分析师） · 配套实现：`graph/chief.py`（决策图）+ `runtime/scheduler.py`（触发路由）
 
 系统只有两类 workflow：**信息型**（更新知识库，永不触碰 broker）与**交易型**（产生订单，
 全部汇入同一张 chief 决策图）。触发条件分**周期型**（每日/每周 cron）与**事件型**
@@ -14,10 +14,13 @@
 | I2 | 宏观周报 | 每周一 | FOMC / CPI / NFP 当日（events.yaml → `macro`） | macro_strategist | 单 agent 函数 |
 | I3 | 行业周报 | 每周一（I2 之后，读新鲜 regime） | 产业链重磅事件 / 龙头财报 read-through（events.yaml → `sector:NAME`） | sector_analyst | 单 agent 函数 |
 | I4 | PEAD prep | — | 财报 T-3（earnings calendar 自动） | pead_analyst ×3 + industry_analyst | LangGraph（`graph/pead.py` prep 分支） |
-| I5 | 绩效/风控快照 | 每交易日盘后 | risk_state≠normal → 飞书告警 | 确定性代码（无 LLM） | 普通函数 |
+| I5 | 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — | 确定性代码（**无 LLM**）：7 点动量评分 + VIX 调节 + 期限结构/破位两层 | 普通函数 |
+| I6 | 绩效/风控快照 | 每交易日盘后 | risk_state≠normal → 飞书告警 | 确定性代码（无 LLM） | 普通函数 |
+
+（原 I5 绩效/风控快照顺延为 I6。）
 
 图化取舍：LangGraph 的价值 = interrupt/checkpoint 跨进程恢复 + 多节点编排。只有决策图
-（有审批 interrupt）和 PEAD 图（多节点 LLM 链）图化；I1/I2/I3/I5 保持函数，不过度工程。
+（有审批 interrupt）和 PEAD 图（多节点 LLM 链）图化；I1/I2/I3/I5/I6 保持函数，不过度工程。
 
 ## 2. 交易型 workflow（产生订单）
 
@@ -71,8 +74,11 @@ boss_review(interrupt) → trader → persist → END
 `daily_cycle` 级联顺序：
 
 ```
-宏观周报(周一) → 行业周报(周一) → 事件触发(events.yaml) →
-PEAD(research → 逐 target monitor/prep) → 绩效+风控快照 → Chief 收口(末位)
+事件触发(events.yaml) → PEAD(research → 逐 target monitor/prep) →
+技术面读数(逐标的评分/建议敞口) → 每日情报 digest →
+绩效+风控快照 → 交易日志 marks → Chief 收口(末位)
+
+注：宏观周报/行业周报已移出交易日级联，改为独立的周六 job（`weekly_review`）。
 ```
 
 Chief 排末位：读当日全部新鲜产出后决策。安静日零决策 → 图在 boss_review 前结束，
@@ -120,6 +126,7 @@ Chief、审批卡照常，但没有单会到券商。
 | `ats pead transcriptprobe [--quarters N]` | 审计 transcript 检索：对各标的最近 N 季核对取到的是否本季（验收标准：错季 = 0） |
 | `ats pead show SYM` | 含打分台账（v1/v2、是否有纪要、是否终版、距财报几小时） |
 | `ats schedule --window amc\|bmo` | 跑单个窗口后退出（daemon 之外的手工触发） |
+| `ats technical review\|show\|probe` | 技术面读数（确定性无 LLM）；`probe` 不落库不写报告 |
 | `ats trader buy/sell SYM QTY [--limit PX]` | T4 手动单（经同一风控+审批） |
 | `ats trader execute [SYM]` | T4 存量建议（decisions 表）重放 |
 | `ats schedule` / `ats schedule --now` | T2 每日 cron / 立即跑一轮级联 |

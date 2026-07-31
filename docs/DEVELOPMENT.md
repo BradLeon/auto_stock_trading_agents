@@ -50,6 +50,7 @@ src/ats/
     base.py           # run_structured() —— 所有 LLM 调用的统一入口
     macro/             # assemble review report context outputs
     sector/            # assemble review report context outputs
+    technical/         # strategy(纯数学·唯一真源) review report context —— 无 LLM
     pead/              # prep score monitor triage research outputs
     chief/             # assemble decide outputs —— 决策收口
   broker/ibkr.py       # IBKR: portfolio/pnl/fills/orders/cancel
@@ -72,7 +73,7 @@ config/
   settings.yaml        # 全局：llm.routing / risk / 通道等
   pead.yaml            # PEAD 全局：targets/schedule windows/monitor 开关
   pead/<SYM>.yaml       # 单票覆盖，合并在 pead/_defaults.yaml 之上
-  sectors/*.yaml macro.yaml events.yaml news_sources.yaml watchlist.yaml
+  sectors/*.yaml macro.yaml technical.yaml events.yaml news_sources.yaml watchlist.yaml
   knowledge/*.md        # 注入分析师上下文的静态行业笔记
 tests/                  # 见第 6 节
 docs/                   # DESIGN DEVELOPMENT WORKFLOWS DATA_SOURCES SECTOR_ANALYST GO_LIVE
@@ -277,10 +278,11 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/ -q          # 全量
 # 单角色 probe（多数支持 --offline / --no-llm 跳过外部依赖）
 ats macro review / ats sector review ai_hardware / ats pead prep|score COHR
 ats risk report / ats trader portfolio / ats chief probe
+ats technical probe         # 技术面读数（确定性，不落库不写报告）
 ats journal doctor          # 改 journal/ 任何代码前先跑这个，read-only 数据质量体检
 
 # 端到端（真实链路，可 dry-run）
-ats schedule --now          # 宏观→行业→事件→PEAD→快照→Chief，全流程
+ats schedule --now          # 事件→PEAD→技术面→快照→Chief，全流程
 ats chief run                # 收口：读存档→决策→风控→审批→(dry-run)执行
 ```
 
@@ -289,4 +291,5 @@ ats chief run                # 收口：读存档→决策→风控→审批→(
 - 设计动机、角色边界、总体架构 → `docs/DESIGN.md`
 - 使用者视角、日常操作 → `README.md`
 - workflow 细节表、触发路由表 → `docs/WORKFLOWS.md`
+- 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`

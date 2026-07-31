@@ -1,0 +1,33 @@
+# 技术面分析师配置。
+# 策略甲 = 用户 LEAPS V1→V4 核心的忠实无杠杆移植，经 7.5 年回测选定
+# （2019-01→2026-07，9 个预注册回撤窗口 + 静态敞口对照 + 成本敏感性）。
+# 详见 docs/TECHNICAL_ANALYST.md。
+#
+# ⚠️ 本 agent **不接 LLM**：产出就是策略的确定性运行结果。
+
+name: technical
+label: 技术面
+output_dir: /Users/liuchao/Documents/Obsidian Vault/量化投资/个股分析系统
+
+# 换策略只改这一行；可选 jia / yi / bing（见 agents/technical/strategy.MODES）。
+# 乙、丙已被 7.5 年回测排除（择时对夏普的净贡献为负），保留仅为可复现与后续迭代。
+strategy: jia
+
+universe:
+  # 实际持仓 ∪ pead targets。IBKR 不可用时退化为 targets-only。
+  include_holdings: true
+  include_pead_targets: true
+  # 现金等价物不做技术面判定（它们本来就是减仓的去处）
+  exclude: [SGOV, SHV, BIL]
+  min_bars: 200          # 少于 SMA200 所需根数则标记 stale，不出读数
+
+params:
+  # 缺省值在 agents/technical/strategy.py，此处留空即沿用。
+  # 显式写出的键会覆盖代码缺省 —— 改这里，不要改代码（DEVELOPMENT.md §5）。
+  vix_anchor: 15.0       # sigma = min(2, vix_anchor / VIX)
+  panic_ratio: 1.15      # VIX/VIX3M ≥ 此值 → 清仓建议（Tier1）
+  bear_cap: 0.5          # 收盘价 < SMA200 → 建议敞口上限（Tier2）
+
+review:
+  history_days: 420      # 取价回看天数，需 > SMA200 + 60 日动量项
+  chief_block_chars: 1200

@@ -493,6 +493,55 @@ def _print_quadrant(review) -> None:
         print(f"      · ⚠️ 数据过旧/缺失: {', '.join(stale)}")
 
 
+def run_technical_review(name: str = "technical", *, live_data: bool = True,
+                        write_report: bool = True) -> int:
+    """Deterministic technical readings (no LLM). Advisory input to the Chief."""
+    from ..agents.technical import review as tech_review
+
+    r = tech_review.run(name, live_data=live_data, write_report=write_report)
+    print(f"📐 technical {name} — 策略 {r.strategy} · {r.summary_line()}")
+    for note in r.notes:
+        print(f"   ⚠️  {note}")
+    live = [x for x in r.readings if not x.stale]
+    for x in sorted(live, key=lambda v: (v.target_exposure, v.symbol)):
+        mark = " ←变化" if x.changed else ""
+        print(f"   {x.one_line()}{mark}")
+    stale = [x.symbol for x in r.readings if x.stale]
+    if stale:
+        print(f"   （未评估: {', '.join(stale)}）")
+    return 0
+
+
+def technical_show(name: str = "technical") -> int:
+    from ..memory import get_store
+
+    store = get_store()
+    latest = store.latest_technical_review(name)
+    if latest is None:
+        print(f"(no technical review for {name} yet — run `ats technical review`)")
+        return 0
+    print(f"=== technical {name} @ {latest.as_of:%Y-%m-%d} · 策略 {latest.strategy} ===")
+    print(latest.chief_block(4000))
+    print("\nHistory:")
+    for row in store.recent_technical_reviews(name):
+        print(f"  {row['as_of'][:10]}  {row['summary'][:80]}")
+    return 0
+
+
+def technical_probe(name: str = "technical", *, live_data: bool = True) -> int:
+    """Resolve the universe and compute readings WITHOUT persisting or reporting."""
+    from ..agents.technical import review as tech_review
+
+    r = tech_review.run(name, live_data=live_data, persist=False, write_report=False)
+    print(f"=== technical probe: {len(r.readings)} readings, "
+          f"strategy={r.strategy}, fingerprint={r.fingerprint} ===")
+    for note in r.notes:
+        print(f"  note: {note}")
+    print()
+    print(r.chief_block(4000))
+    return 0
+
+
 def run_macro_review(name: str = "macro", *, use_llm: bool = True,
                      live_data: bool = True, write_report: bool = True):
     """One weekly macro strategist review: regime + rate path + sector tilts."""
@@ -913,6 +962,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="approval channel for orders")
     tr.add_argument("--offline", action="store_true", help="portfolio: show stored snapshot without IBKR")
     tr.add_argument("--dry-run", action="store_true", help="go through approval but place no orders")
+    te = sub.add_parser("technical",
+                        help="technical analyst 技术面 (review / show / probe) — 确定性无 LLM")
+    te.add_argument("action", choices=["review", "show", "probe"])
+    te.add_argument("name", nargs="?", default="technical")
+    te.add_argument("--offline", action="store_true", help="skip broker + price fetch")
+    te.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     ma = sub.add_parser("macro", help="macro strategist 宏观分析 (review / show / probe)")
     ma.add_argument("action", choices=["review", "show", "probe"])
     ma.add_argument("name", nargs="?", default="macro")
@@ -1052,6 +1107,13 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"trader {args.action} requires SYMBOL and QTY")
         return trader_manual(args.action, args.symbol, args.qty, limit=args.limit,
                              channel=args.channel, dry_run=args.dry_run)
+    if args.command == "technical":
+        if args.action == "show":
+            return technical_show(args.name)
+        if args.action == "probe":
+            return technical_probe(args.name, live_data=not args.offline)
+        return run_technical_review(args.name, live_data=not args.offline,
+                                    write_report=not args.no_report)
     if args.command == "macro":
         if args.action == "show":
             return macro_show(args.name)

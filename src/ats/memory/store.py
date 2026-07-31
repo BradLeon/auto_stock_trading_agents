@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS macro_reviews (
     name TEXT, as_of TEXT, regime TEXT, summary TEXT, payload TEXT,
     PRIMARY KEY (name, as_of)
 );
+
+CREATE TABLE IF NOT EXISTS technical_reviews (
+    name TEXT, as_of TEXT, summary TEXT, payload TEXT,
+    PRIMARY KEY (name, as_of)
+);
 CREATE TABLE IF NOT EXISTS fills (
     exec_id TEXT PRIMARY KEY, symbol TEXT, side TEXT, shares REAL, price REAL,
     time TEXT, realized_pnl REAL, commission REAL, order_id TEXT
@@ -905,6 +910,44 @@ class TradingMemory:
     def recent_macro_reviews(self, name: str = "macro", limit: int = 8) -> list[dict]:
         rows = self.conn.execute(
             "SELECT name, as_of, regime, summary FROM macro_reviews "
+            "WHERE name = ? ORDER BY as_of DESC LIMIT ?", (name, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- technical reviews ------------------------------------------------ #
+    # `as_of` is stored as a DATE, not a timestamp: the analyst runs once per
+    # session, so a same-day rerun must overwrite rather than accumulate rows.
+    def save_technical_review(self, review) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO technical_reviews VALUES (?,?,?,?)",
+            (review.name, review.as_of.date().isoformat(), review.summary_line(),
+             review.model_dump_json()))
+        self.conn.commit()
+
+    def latest_technical_review(self, name: str = "technical"):
+        from ..schemas.technical import TechnicalReview
+
+        row = self.conn.execute(
+            "SELECT payload FROM technical_reviews WHERE name = ? "
+            "ORDER BY as_of DESC LIMIT 1", (name,)).fetchone()
+        return TechnicalReview.model_validate_json(row["payload"]) if row else None
+
+    def previous_technical_review(self, name: str = "technical", *, before: str = ""):
+        """The most recent review STRICTLY before `before` (an ISO date).
+
+        Change detection ("NVDA dropped from 100% to 50%") needs yesterday's
+        reading; without the strict bound a same-day rerun would compare against
+        the row it is about to overwrite and always report "no change".
+        """
+        from ..schemas.technical import TechnicalReview
+
+        row = self.conn.execute(
+            "SELECT payload FROM technical_reviews WHERE name = ? AND as_of < ? "
+            "ORDER BY as_of DESC LIMIT 1", (name, before)).fetchone()
+        return TechnicalReview.model_validate_json(row["payload"]) if row else None
+
+    def recent_technical_reviews(self, name: str = "technical", limit: int = 8) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT name, as_of, summary FROM technical_reviews "
             "WHERE name = ? ORDER BY as_of DESC LIMIT ?", (name, limit)).fetchall()
         return [dict(r) for r in rows]
 

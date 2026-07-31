@@ -351,6 +351,33 @@ def is_pead_target(symbol: str) -> bool:
     return (_config_dir() / "pead" / f"{sym}.yaml").exists()
 
 
+def load_technical_config(name: str = "technical"):
+    """Load config/technical.yaml -> TechnicalConfig.
+
+    Only `universe`/`review` get per-key setdefaults here. The strategy
+    thresholds deliberately do NOT: their one authoritative home is
+    agents/technical/strategy.py, merged key-by-key at use time. Defaulting them
+    in two places is exactly how a code default silently stops taking effect
+    (same reasoning as the macro `regime` block further down).
+    """
+    from .schemas.technical import TechnicalConfig
+
+    raw = _load_yaml(_config_dir() / f"{name}.yaml")
+    if not raw:
+        raise FileNotFoundError(f"config/{name}.yaml not found")
+    raw.setdefault("universe", {})
+    u = raw["universe"]
+    u.setdefault("include_holdings", True)
+    u.setdefault("include_pead_targets", True)
+    u.setdefault("exclude", ["SGOV", "SHV", "BIL"])
+    u.setdefault("min_bars", 200)
+    raw.setdefault("params", {})          # empty -> strategy.py defaults apply
+    raw.setdefault("review", {})
+    raw["review"].setdefault("history_days", 420)
+    raw["review"].setdefault("chief_block_chars", 1200)
+    return TechnicalConfig.model_validate(raw)
+
+
 def load_sector_config(name: str = "ai_hardware"):
     """Load config/sectors/<name>.yaml -> SectorConfig (with sub-dict defaults)."""
     from .schemas.sector import SectorConfig

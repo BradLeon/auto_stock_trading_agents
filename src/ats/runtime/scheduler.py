@@ -314,6 +314,20 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     return outcomes
 
 
+def _technical_daily() -> None:
+    """Deterministic technical readings, before the Chief reads them.
+
+    Cheap (one batched price download, no LLM), so it runs every session even
+    though the strategy's own deadband means most days imply no action.
+    """
+    from .cli import run_technical_review
+
+    try:
+        run_technical_review()
+    except Exception as exc:  # noqa: BLE001 - an analyst must not break the cycle
+        log.warning("technical review failed: %s", exc)
+
+
 def _daily(*, dry_run: bool) -> None:
     # Macro/sector weekly review moved to its own Saturday job (see _weekly_review /
     # the "weekly_review" cron job) — they don't touch the broker or need a trading
@@ -321,6 +335,7 @@ def _daily(*, dry_run: bool) -> None:
     # and running them over the weekend keeps Monday's cascade free of the extra load.
     _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
     pead_daily(dry_run=dry_run)
+    _technical_daily()
     _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
     _perf_snapshot()
     _perf_risk_digest()  # surface perf + 6-layer risk: Obsidian .md + Feishu card

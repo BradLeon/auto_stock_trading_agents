@@ -49,6 +49,7 @@ def build(*, live_broker: bool = True) -> ChiefContext:
     if not ctx.net_liquidation:
         ctx.net_liquidation = get_config().app.account.net_liquidation_usd
     ctx.blocks["PEAD 档案（新鲜=事件信号一次；否则背景）"] = _pead_block(ctx.held_symbols, ctx)
+    ctx.blocks["技术面（择时/敞口建议，非方向判断）"] = _technical_block()
     ctx.blocks["行业评审（倾斜修正）"] = _sector_block(ctx.held_symbols)
     ctx.blocks["宏观评审（倾斜修正）"] = _macro_block()
     ctx.blocks["风控状态（硬约束）"] = _risk_block()
@@ -222,6 +223,18 @@ def _recent_actions_block() -> str:
                      "它们不是承诺——若当前情况仍成立，可再次提交审批；若已不成立，忽略即可。")
         lines += proposed
     return "\n".join(lines)
+
+
+def _technical_block() -> str:
+    """Deterministic timing/exposure readings. Advisory only — never an order.
+
+    Deliberately placed AFTER the PEAD block: PEAD says what a name is worth,
+    technical says whether now is a good moment to hold that much of it. The
+    Chief needs the thesis before the timing overlay on it.
+    """
+    from ..technical import context as tech_context
+
+    return tech_context.chief_block(max_chars=1200)
 
 
 def _sector_block(held_symbols: set | None = None) -> str:

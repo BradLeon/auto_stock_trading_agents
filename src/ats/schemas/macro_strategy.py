@@ -126,6 +126,74 @@ class AxisInput(BaseModel):
     note: str = ""
 
 
+class EarningsBackdrop(BaseModel):
+    """S&P 500 **aggregate** earnings/valuation, parsed from FactSet Earnings Insight.
+
+    Index level only, never single companies: the aggregate profit cycle is a macro
+    variable, one company's EPS is the fundamental analyst's job (MACRO_ANALYST.md §2).
+
+    Every field is optional and independently validated. FactSet's wording shifts
+    with the earnings season ("estimated" before the quarter reports, "blended"
+    after; guidance counts reset at the quarter roll), so a missing field is
+    normal and must not invalidate the ones that did parse.
+    """
+
+    source: str = ""                       # EarningsInsight_072426.pdf
+    report_date: date | None = None
+    quarter: str = ""                      # "Q2 2026"
+
+    growth_pct: float | None = None        # 本季 YoY 盈利增速
+    growth_basis: str = ""                 # estimated（未开始披露）| blended（已部分披露）
+    prior_growth_pct: float | None = None  # 季初时的预估增速
+    prior_as_of: str = ""                  # "June 30"
+    sectors_higher: int | None = None      # 几个板块较季初上修
+    revision_direction: str = ""           # upward | downward
+
+    guidance_quarter: str = ""             # 指引对应的季度（与 quarter 可能不同）
+    guidance_negative: int | None = None
+    guidance_positive: int | None = None
+
+    pct_reported: float | None = None      # 已披露公司占比
+    pct_eps_beat: float | None = None
+    pct_revenue_beat: float | None = None
+
+    fwd_pe: float | None = None            # 前瞻 12 个月 P/E
+    fwd_pe_5y_avg: float | None = None
+    fwd_pe_10y_avg: float | None = None
+
+    degraded: bool = False                 # 结构化抽取失败，只剩散文
+    notes: list[str] = Field(default_factory=list)
+
+    @property
+    def revision_pp(self) -> float | None:
+        """本季增速相对季初预估的变化（百分点）—— 盈利修正的方向与幅度。"""
+        if self.growth_pct is None or self.prior_growth_pct is None:
+            return None
+        return round(self.growth_pct - self.prior_growth_pct, 1)
+
+    @property
+    def fwd_pe_vs_5y_pct(self) -> float | None:
+        """前瞻 P/E 相对自身 5 年均值的偏离（%）—— FactSet 自带的分布参照。"""
+        if not self.fwd_pe or not self.fwd_pe_5y_avg:
+            return None
+        return round((self.fwd_pe / self.fwd_pe_5y_avg - 1) * 100, 1)
+
+    def to_context(self) -> str:
+        if self.degraded or self.fwd_pe is None:
+            return ""
+        bits = [f"S&P500 前瞻P/E {self.fwd_pe}"]
+        if self.fwd_pe_5y_avg:
+            bits.append(f"（5年均值 {self.fwd_pe_5y_avg}，偏离 {self.fwd_pe_vs_5y_pct:+.1f}%）")
+        if self.growth_pct is not None:
+            bits.append(f"| {self.quarter} 盈利增速 {self.growth_pct:+.1f}%（{self.growth_basis}）")
+        if self.revision_pp is not None:
+            bits.append(f"，较季初 {self.prior_as_of} 修正 {self.revision_pp:+.1f}pp")
+        if self.sectors_higher is not None:
+            way = {"upward": "上修", "downward": "下修"}.get(self.revision_direction, "变动")
+            bits.append(f"，{self.sectors_higher} 个板块{way}")
+        return "".join(bits)
+
+
 class RateDecomposition(BaseModel):
     """名义 10y = 实际 10y + 通胀补偿，逐项拆开。
 
@@ -171,6 +239,7 @@ class MacroReview(BaseModel):
     axis_inputs: list[AxisInput] = Field(default_factory=list)
     indicators: list[IndicatorReading] = Field(default_factory=list)
     decomposition: RateDecomposition | None = None
+    earnings_backdrop: EarningsBackdrop | None = None   # 总量盈利周期（优先级 8）
     shock_vs_trend: list[str] = Field(default_factory=list)
     alerts: list[str] = Field(default_factory=list)
     focus_keys: list[str] = Field(default_factory=list)   # 当期该重点看的指标（象限决定）

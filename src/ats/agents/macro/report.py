@@ -28,19 +28,24 @@ def _deterministic_section(review: MacroReview) -> list[str]:
     able to tell at a glance which lines are arithmetic and which are a model's
     interpretation (docs/MACRO_ANALYST.md §4.4).
     """
-    if not review.axis_inputs and not review.indicators:
+    # The earnings backdrop comes from a different source than the indicator
+    # layer, so it can be present when FRED is down — gating the whole section on
+    # indicators alone would silently drop it.
+    if not (review.axis_inputs or review.indicators or review.earnings_backdrop):
         return []                       # offline run or a pre-framework review
 
     lines = ["## 📐 确定性读数（代码算出，非模型判断）", ""]
-    quad = _QUADRANT_LABEL.get(review.quadrant, review.quadrant)
-    state = _STATE_LABEL.get(review.quadrant_state, review.quadrant_state)
-    weeks = f"，连续 {review.quadrant_weeks} 期" if review.quadrant_weeks else ""
-    lines += [f"**象限：{quad}** — {state}{weeks}", "",
-              f"- 增长轴 `{review.growth_axis:+.2f}` / 通胀轴 `{review.inflation_axis:+.2f}`"]
-    if review.quadrant_reason:
-        lines.append(f"- 判定理由：{review.quadrant_reason}")
-    if review.focus_keys:
-        lines.append(f"- 本期重点指标：{', '.join(review.focus_keys)}")
+    if review.axis_inputs or review.indicators:
+        quad = _QUADRANT_LABEL.get(review.quadrant, review.quadrant)
+        state = _STATE_LABEL.get(review.quadrant_state, review.quadrant_state)
+        weeks = f"，连续 {review.quadrant_weeks} 期" if review.quadrant_weeks else ""
+        lines += [f"**象限：{quad}** — {state}{weeks}", "",
+                  f"- 增长轴 `{review.growth_axis:+.2f}` /"
+                  f" 通胀轴 `{review.inflation_axis:+.2f}`"]
+        if review.quadrant_reason:
+            lines.append(f"- 判定理由：{review.quadrant_reason}")
+        if review.focus_keys:
+            lines.append(f"- 本期重点指标：{', '.join(review.focus_keys)}")
 
     if review.alerts:
         lines += ["", "### ⚠️ 告警"] + [f"- {a}" for a in review.alerts]
@@ -53,6 +58,41 @@ def _deterministic_section(review: MacroReview) -> list[str]:
                   f"- **{dec.classification}**", f"- {dec.equity_read}"]
         if dec.real_yield_cause:
             lines.append(f"- 实际收益率下降成因：{dec.real_yield_cause}")
+
+    bd = review.earnings_backdrop
+    if bd is not None:
+        lines += ["", "### 总量盈利周期（S&P500，FactSet Earnings Insight）", ""]
+        if bd.degraded:
+            lines.append(f"⚠️ 结构化抽取失败（{'; '.join(bd.notes) or '未知原因'}）—— "
+                         "本期仅有散文可用。")
+        else:
+            rows = []
+            if bd.fwd_pe is not None:
+                rows.append(("前瞻 12 个月 P/E", f"{bd.fwd_pe}"
+                             f"（5年均值 {bd.fwd_pe_5y_avg} / 10年均值 {bd.fwd_pe_10y_avg}）"))
+            if bd.fwd_pe_vs_5y_pct is not None:
+                rows.append(("估值偏离", f"较 5 年均值 {bd.fwd_pe_vs_5y_pct:+.1f}%"))
+            if bd.growth_pct is not None:
+                rows.append((f"{bd.quarter} 盈利增速",
+                             f"{bd.growth_pct:+.1f}%（{bd.growth_basis}）"))
+            if bd.revision_pp is not None:
+                rows.append(("盈利修正", f"较季初 {bd.prior_as_of} "
+                             f"{bd.prior_growth_pct:+.1f}% → {bd.growth_pct:+.1f}%"
+                             f"（{bd.revision_pp:+.1f}pp）"))
+            if bd.sectors_higher is not None:
+                way = {"upward": "上修", "downward": "下修"}.get(bd.revision_direction, "变动")
+                rows.append(("修正广度", f"{bd.sectors_higher} 个板块{way}"))
+            if bd.pct_reported is not None:
+                rows.append(("披露进度", f"{bd.pct_reported:.0f}% 已报 · EPS 超预期 "
+                             f"{bd.pct_eps_beat:.0f}% · 营收超预期 {bd.pct_revenue_beat:.0f}%"))
+            if bd.guidance_negative is not None:
+                rows.append((f"{bd.guidance_quarter} 指引",
+                             f"负面 {bd.guidance_negative} / 正面 {bd.guidance_positive}"))
+            lines += ["| 项 | 值 |", "|---|---|"]
+            lines += [f"| {k} | {v} |" for k, v in rows]
+            lines += ["", f"*来源：{bd.source}"
+                      f"{f'（{bd.report_date}）' if bd.report_date else ''}；指数层面总量，"
+                      "不含个股。*"]
 
     if review.shock_vs_trend:
         lines += ["", "### 趋势 vs 冲击（美联储会反应 or 看穿）", ""]

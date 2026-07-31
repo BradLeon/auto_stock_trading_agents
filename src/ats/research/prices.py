@@ -116,3 +116,19 @@ def ensure(symbols: list[str], start: str, end: str, *, path: Path | None = None
         log.info("research prices: fetching %s", missing)
         fetch_and_store(missing, start, end, path=path)
     return load(symbols, start, end, path=path)
+
+
+def align_optional(symbol: str, dates: list[date], *, path: Path | None = None
+                   ) -> list[float | None]:
+    """A series aligned to `dates`, with None where the vendor has no print.
+
+    Kept out of `load`'s intersection on purpose: ^VIX3M ends 2026-07-17 while
+    ^VIX runs on, so intersecting would silently truncate the whole panel and
+    delete the July-2026 drawdown from every backtest. A consumer that cannot
+    evaluate a rule without it must skip that rule for those days — never
+    forward-fill, which would fabricate a term structure exactly when it matters.
+    """
+    db = _conn(path)
+    rows = dict(db.execute("SELECT d, close FROM prices WHERE symbol=?", (symbol,)).fetchall())
+    db.close()
+    return [rows.get(d.isoformat()) for d in dates]

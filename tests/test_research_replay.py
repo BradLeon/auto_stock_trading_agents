@@ -222,3 +222,69 @@ def test_sharpe_rises_when_the_same_return_comes_with_less_noise():
     calm = [random.gauss(0.0006, 0.004) for _ in range(504)]
     wild = [random.gauss(0.0006, 0.020) for _ in range(504)]
     assert replay.sharpe(calm, rf) > replay.sharpe(wild, rf)
+
+
+# ── strategy E: user's V4 SmartRisk ported to unlevered equity (variant #3) ──
+def test_momentum_score_matches_the_published_7_point_table():
+    up = [100.0 + i for i in range(300)]
+    assert replay.momentum_score_7(up, 299) == 7        # every condition holds
+    down = [400.0 - i for i in range(300)]
+    assert replay.momentum_score_7(down, 299) == 0      # none hold
+
+
+def test_ladder_is_the_published_one():
+    assert replay.LADDER == {0: 0.0, 1: 0.0, 2: 0.5, 3: 1.0,
+                             4: 1.5, 5: 2.0, 6: 2.5, 7: 3.0}
+
+
+def test_e_caps_at_one_because_the_book_is_unlevered():
+    up = [100.0 + i for i in range(300)]
+    e = replay.series_smartrisk_equity(up, [15.0] * 300, [15.0] * 300)
+    assert e[-1] == pytest.approx(1.0)      # ladder says 3.0x, unlevered caps to 1.0
+
+
+def test_e_tier1_panic_exits_fully_on_inverted_term_structure():
+    up = [100.0 + i for i in range(300)]
+    calm = replay.series_smartrisk_equity(up, [15.0] * 300, [18.0] * 300)
+    panic = replay.series_smartrisk_equity(up, [23.0] * 300, [19.0] * 300)  # ratio 1.21
+    assert calm[-1] > 0 and panic[-1] == 0.0
+
+
+def test_e_tier1_is_skipped_when_vix3m_is_missing_not_forward_filled():
+    """Yahoo's ^VIX3M stops 2026-07-17 while ^VIX runs on. Carrying a stale
+    VIX3M against a spiking VIX would manufacture a fake panic — so absent data
+    must disable Tier 1, not fabricate it."""
+    up = [100.0 + i for i in range(300)]
+    no3m = replay.series_smartrisk_equity(up, [30.0] * 300, [])    # VIX high, no VIX3M
+    assert no3m[-1] > 0.0        # Tier 3 still throttles, Tier 1 cannot fire
+
+
+def test_e_tier2_halves_exposure_below_sma200():
+    # Long decline then a bounce that reclaims short MAs but not the 200-day.
+    closes = [300.0 - i * 0.5 for i in range(260)] + [170.0 + i * 0.3 for i in range(40)]
+    e = replay.series_smartrisk_equity(closes, [15.0] * 300, [15.0] * 300)
+    assert e[-1] <= replay.BEAR_PRICE_CAP
+
+
+def test_rebalance_band_suppresses_small_drifts_and_respects_cooldown():
+    target = [1.0, 0.9, 0.8, 0.85, 0.9, 1.0, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
+    got = replay.apply_rebalance(target, band=0.25, cooldown=5)
+    assert got[:6] == [1.0] * 6            # drifts under the band change nothing
+    assert got[6] == 0.4                   # a big move does trade
+    # causal: element i never depends on anything after i
+    assert replay.apply_rebalance(target[:7], 0.25, 5) == got[:7]
+
+
+def test_rebalance_discipline_cuts_the_churn_that_sank_strategy_d():
+    """The user's own V1-V4 rule (25% band, 5d cooldown) is what D was missing."""
+    import random
+
+    random.seed(13)
+    noisy = [0.5 + 0.4 * random.random() for _ in range(500)]   # jittery target
+    raw_switches = sum(1 for i in range(1, len(noisy)) if noisy[i] != noisy[i - 1])
+    damped = replay.apply_rebalance(noisy, 0.25, 5)
+    at = [i for i in range(1, len(damped)) if damped[i] != damped[i - 1]]
+
+    assert len(at) < raw_switches / 5           # a large reduction in churn...
+    # ...and the cooldown is a hard structural guarantee, not a tendency:
+    assert all(b - a >= 5 for a, b in zip(at, at[1:]))

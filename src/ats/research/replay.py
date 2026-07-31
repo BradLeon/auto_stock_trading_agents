@@ -43,6 +43,13 @@ TRADING_DAYS = 252
 D_SMAS = (20, 50, 200)
 VIX_ANCHOR = 15.0
 
+# ── strategy E constants (see the ported-SmartRisk note further down) ────────
+LADDER = {0: 0.0, 1: 0.0, 2: 0.5, 3: 1.0, 4: 1.5, 5: 2.0, 6: 2.5, 7: 3.0}
+PANIC_TERM_RATIO = 1.15      # VIX/VIX3M at or above this -> full exit
+BEAR_PRICE_CAP = 0.5         # close < SMA200 -> at most half
+REBAL_BAND = 0.25            # |target - actual| must exceed this to trade
+REBAL_COOLDOWN = 5           # ...and this many days since the last trade
+
 
 # ── primitives ───────────────────────────────────────────────────────────────
 def sma(closes: list[float], n: int) -> float | None:
@@ -135,7 +142,7 @@ def rule_triple_ma_vix(closes: list[float], *, vix: list[float] = (), **_kw) -> 
 
 RULES = {"BH": rule_hold, "A_vol_throttle": rule_vol_throttle,
          "B_peer_relative": rule_peer_relative, "C_trend_sma200": rule_trend,
-         "D_3ma_vix": rule_triple_ma_vix}
+         "D_3ma_vix": rule_triple_ma_vix, "E_smartrisk": None}
 
 
 # ── causal signal series ─────────────────────────────────────────────────────
@@ -216,6 +223,10 @@ def build_series(prices: dict[str, list[float]], syms: list[str], rule_name: str
     if rule_name == "D_3ma_vix":
         vix = (market or {}).get("VIX", [])
         return {s: series_triple_ma_vix(prices[s], vix) for s in syms}
+    if rule_name == "E_smartrisk":
+        m = market or {}
+        return {s: series_smartrisk_equity(prices[s], m.get("VIX", []),
+                                           m.get("VIX3M", [])) for s in syms}
     if rule_name == "B_peer_relative":
         dds = {s: _dd_series(prices[s]) for s in syms}
         out = {}
@@ -250,7 +261,8 @@ class Result:
 def run(dates, prices: dict[str, list[float]], *, equity: dict[str, float],
         reserve: tuple[str, float], rule_name: str, start_idx: int,
         cost_bps: float = COST_BPS,
-        market: dict[str, list[float]] | None = None) -> Result:
+        market: dict[str, list[float]] | None = None,
+        rebalance_band: float = 0.0, cooldown: int = REBAL_COOLDOWN) -> Result:
     """Replay one rule.
 
     `equity` maps symbol -> target weight; `reserve` is (symbol, weight) for the
@@ -260,6 +272,8 @@ def run(dates, prices: dict[str, list[float]], *, equity: dict[str, float],
     res_sym, res_w = reserve
     syms = list(equity)
     sig = build_series(prices, syms, rule_name, market=market)
+    if rebalance_band:
+        sig = {s: apply_rebalance(v, rebalance_band, cooldown) for s, v in sig.items()}
     nav, prev_exp = 1.0, {s: 1.0 for s in syms}
     res = Result(name=rule_name)
 
@@ -305,3 +319,84 @@ def sharpe(rets: list[float], rf: list[float]) -> float | None:
     if sd == 0:
         return None
     return statistics.fmean(ex) / sd * (TRADING_DAYS ** 0.5)
+
+
+# ── strategy E: SmartRisk ported to an unlevered equity book ─────────────────
+# Pre-registered 2026-07-31 (variant #3), BEFORE its first run.
+#
+# Source: the user's own backtested LEAPS series V1->V4 (QQQ/SPY). What survived
+# all four versions unchanged is the core, so that is what gets ported:
+#   · the 7-point momentum score (V1, never modified through V4)
+#   · the score->exposure ladder
+#   · Vol Target  min(2, 15/VIX)
+#   · rebalance only when |target-actual| > 25% AND >= 5 days since last trade
+# V4 then adds Tier 1 Panic (VIX term structure) and Tier 2 Bear (SMA200).
+#
+# TWO DELIBERATE DEPARTURES, both because this book is unlevered stock, not LEAPS:
+#   1. Vega Guard is NOT ported. Its rationale is long-call positive vega and the
+#      vol crush that follows a spike; a share of stock has no vega, so the
+#      mechanism that made it V3's biggest profit source simply does not exist.
+#   2. Every "cap 1.0x" rule becomes a NO-OP, because 1.0x IS the ceiling without
+#      leverage. Only two of V4's five tier rules still bite: panic->0 and
+#      price<SMA200 -> cap 0.5. This is reported, not hidden — it is the honest
+#      answer to "does it still apply to single stocks".
+
+
+def momentum_score_7(closes: list[float], i: int) -> int:
+    """V1's 7-point score, unchanged through V4.
+
+    The last two terms (vs 20d/60d ago) were added by the user specifically to
+    offset SMA lag — which is exactly the weakness that made a plain SMA200 rule
+    useless in the fast July-2026 selloff.
+    """
+    c = closes[i]
+    s20 = statistics.fmean(closes[i - 19: i + 1]) if i >= 19 else None
+    s50 = statistics.fmean(closes[i - 49: i + 1]) if i >= 49 else None
+    s200 = statistics.fmean(closes[i - 199: i + 1]) if i >= 199 else None
+    score = 0
+    for m in (s20, s50, s200):
+        if m is not None and c > m:
+            score += 1
+    if s20 is not None and s50 is not None and s20 > s50:
+        score += 1
+    if s50 is not None and s200 is not None and s50 > s200:
+        score += 1
+    if i >= 20 and c > closes[i - 20]:
+        score += 1
+    if i >= 60 and c > closes[i - 60]:
+        score += 1
+    return score
+
+
+def series_smartrisk_equity(closes: list[float], vix: list[float],
+                            vix3m: list[float]) -> list[float]:
+    out = []
+    for i in range(len(closes)):
+        tgt = min(1.0, LADDER[momentum_score_7(closes, i)])       # unlevered cap
+        v = vix[i] if i < len(vix) else None
+        if v and v > 0:                                            # Tier 3
+            tgt *= min(1.0, VIX_ANCHOR / v)
+        v3 = vix3m[i] if i < len(vix3m) else None
+        if v and v3 and v3 > 0 and (v / v3) >= PANIC_TERM_RATIO:   # Tier 1
+            tgt = 0.0
+        s200 = statistics.fmean(closes[i - 199: i + 1]) if i >= 199 else None
+        if s200 is not None and closes[i] < s200:                  # Tier 2
+            tgt = min(tgt, BEAR_PRICE_CAP)
+        out.append(max(0.0, min(1.0, tgt)))
+    return out
+
+
+def apply_rebalance(target: list[float], band: float = REBAL_BAND,
+                    cooldown: int = REBAL_COOLDOWN) -> list[float]:
+    """Turn a continuously-varying target into what you would actually hold.
+
+    This is the piece strategy D lacked, and why it churned 2320 times: without a
+    deadband every daily VIX wiggle became a trade. Causal by construction —
+    actual[i] depends only on actual[i-1] and target[i].
+    """
+    actual, held, last = [], target[0] if target else 0.0, -10**9
+    for i, t in enumerate(target):
+        if abs(t - held) > band and (i - last) >= cooldown:
+            held, last = t, i
+        actual.append(held)
+    return actual

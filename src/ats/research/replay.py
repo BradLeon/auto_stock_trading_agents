@@ -32,6 +32,17 @@ SMA_WINDOW = 200
 COST_BPS = 10.0            # one-way, in basis points of traded notional
 TRADING_DAYS = 252
 
+# ── strategy D, pre-registered 2026-07-31 (variant #2) ───────────────────────
+# Registered BEFORE its first run, per the no-search discipline above. Spec:
+#   trend    = share of {close>SMA20, close>SMA50, close>SMA200} that hold  -> {0,⅓,⅔,1}
+#   vix_mult = min(1, VIX_ANCHOR / VIX)   (VIX<=15 -> 1.0; VIX 30 -> 0.5)
+#   exposure = trend * vix_mult
+# The MA leg grades trend quality per name; the VIX leg is a market-wide throttle,
+# so it scales every name together. Only the anchor (15) was chosen by the user;
+# nothing here was fitted to the test period.
+D_SMAS = (20, 50, 200)
+VIX_ANCHOR = 15.0
+
 
 # ── primitives ───────────────────────────────────────────────────────────────
 def sma(closes: list[float], n: int) -> float | None:
@@ -111,8 +122,20 @@ def rule_trend(closes: list[float], **_kw) -> float:
     return 1.0 if m is None or closes[-1] > m else 0.0
 
 
+def rule_triple_ma_vix(closes: list[float], *, vix: list[float] = (), **_kw) -> float:
+    """Strategy D — three-MA trend quality, throttled by market-wide VIX."""
+    held = [1.0 for n in D_SMAS if (m := sma(closes, n)) is not None and closes[-1] > m]
+    known = [n for n in D_SMAS if sma(closes, n) is not None]
+    trend = (len(held) / len(known)) if known else 1.0
+    mult = 1.0
+    if len(vix) and vix[-1] and vix[-1] > 0:
+        mult = min(1.0, VIX_ANCHOR / vix[-1])
+    return max(0.0, min(1.0, trend * mult))
+
+
 RULES = {"BH": rule_hold, "A_vol_throttle": rule_vol_throttle,
-         "B_peer_relative": rule_peer_relative, "C_trend_sma200": rule_trend}
+         "B_peer_relative": rule_peer_relative, "C_trend_sma200": rule_trend,
+         "D_3ma_vix": rule_triple_ma_vix}
 
 
 # ── causal signal series ─────────────────────────────────────────────────────
@@ -146,6 +169,20 @@ def series_vol_throttle(closes: list[float]) -> list[float]:
     return out
 
 
+def series_triple_ma_vix(closes: list[float], vix: list[float]) -> list[float]:
+    mas = {n: [statistics.fmean(closes[i - n + 1: i + 1]) if i >= n - 1 else None
+               for i in range(len(closes))] for n in D_SMAS}
+    out = []
+    for i, c in enumerate(closes):
+        known = [n for n in D_SMAS if mas[n][i] is not None]
+        held = [n for n in known if c > mas[n][i]]
+        trend = (len(held) / len(known)) if known else 1.0
+        v = vix[i] if i < len(vix) else None
+        mult = min(1.0, VIX_ANCHOR / v) if v and v > 0 else 1.0
+        out.append(max(0.0, min(1.0, trend * mult)))
+    return out
+
+
 def series_trend(closes: list[float]) -> list[float]:
     out, run = [], 0.0
     for i, c in enumerate(closes):
@@ -166,8 +203,9 @@ def _dd_series(closes: list[float], lookback: int = DD_LOOKBACK) -> list[float]:
     return out
 
 
-def build_series(prices: dict[str, list[float]], syms: list[str],
-                 rule_name: str) -> dict[str, list[float]]:
+def build_series(prices: dict[str, list[float]], syms: list[str], rule_name: str,
+                 *, market: dict[str, list[float]] | None = None
+                 ) -> dict[str, list[float]]:
     """Per-symbol exposure series, causal by construction."""
     if rule_name == "BH":
         return {s: [1.0] * len(prices[s]) for s in syms}
@@ -175,6 +213,9 @@ def build_series(prices: dict[str, list[float]], syms: list[str],
         return {s: series_vol_throttle(prices[s]) for s in syms}
     if rule_name == "C_trend_sma200":
         return {s: series_trend(prices[s]) for s in syms}
+    if rule_name == "D_3ma_vix":
+        vix = (market or {}).get("VIX", [])
+        return {s: series_triple_ma_vix(prices[s], vix) for s in syms}
     if rule_name == "B_peer_relative":
         dds = {s: _dd_series(prices[s]) for s in syms}
         out = {}
@@ -200,13 +241,16 @@ class Result:
     dates: list = field(default_factory=list)
     curve: list[float] = field(default_factory=list)
     exposure: list[float] = field(default_factory=list)   # avg equity exposure
+    rets: list[float] = field(default_factory=list)       # daily portfolio returns
+    rf: list[float] = field(default_factory=list)         # daily reserve (risk-free) returns
     trades: int = 0
     cost_paid: float = 0.0
 
 
 def run(dates, prices: dict[str, list[float]], *, equity: dict[str, float],
         reserve: tuple[str, float], rule_name: str, start_idx: int,
-        cost_bps: float = COST_BPS) -> Result:
+        cost_bps: float = COST_BPS,
+        market: dict[str, list[float]] | None = None) -> Result:
     """Replay one rule.
 
     `equity` maps symbol -> target weight; `reserve` is (symbol, weight) for the
@@ -215,7 +259,7 @@ def run(dates, prices: dict[str, list[float]], *, equity: dict[str, float],
     """
     res_sym, res_w = reserve
     syms = list(equity)
-    sig = build_series(prices, syms, rule_name)
+    sig = build_series(prices, syms, rule_name, market=market)
     nav, prev_exp = 1.0, {s: 1.0 for s in syms}
     res = Result(name=rule_name)
 
@@ -240,6 +284,24 @@ def run(dates, prices: dict[str, list[float]], *, equity: dict[str, float],
         nav *= (1 + ret - cost)
         res.dates.append(dates[i + 1])
         res.curve.append(nav)
+        res.rets.append(ret - cost)
+        res.rf.append(res_r)
         res.exposure.append(sum(equity[s] * exp[s] for s in syms) / sum(equity.values()))
         prev_exp = exp
     return res
+
+
+def sharpe(rets: list[float], rf: list[float]) -> float | None:
+    """Annualised Sharpe over the reserve asset's own return.
+
+    Using SGOV (the sleeve the strategy actually parks in) as the risk-free leg
+    keeps the ratio internally consistent — the alternative the portfolio really
+    had, not an external T-bill series that never touched this book.
+    """
+    if len(rets) < 3:
+        return None
+    ex = [r - f for r, f in zip(rets, rf)]
+    sd = statistics.stdev(ex)
+    if sd == 0:
+        return None
+    return statistics.fmean(ex) / sd * (TRADING_DAYS ** 0.5)

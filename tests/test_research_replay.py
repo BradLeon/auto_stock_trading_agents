@@ -151,3 +151,74 @@ def test_peer_series_matches_scalar_rule():
     for i in range(260, 400, 23):
         peers = [px[o][: i + 1] for o in syms if o != "A"]
         assert ser["A"][i] == replay.rule_peer_relative(px["A"][: i + 1], peers=peers)
+
+
+# ── strategy D (pre-registered variant #2) ───────────────────────────────────
+def test_d_full_exposure_when_uptrend_and_calm_vix():
+    rising = [100.0 + i for i in range(300)]          # above all three MAs
+    assert replay.rule_triple_ma_vix(rising, vix=[12.0]) == pytest.approx(1.0)
+    assert replay.rule_triple_ma_vix(rising, vix=[15.0]) == pytest.approx(1.0)
+
+
+def test_d_vix_throttles_proportionally_above_the_anchor():
+    rising = [100.0 + i for i in range(300)]
+    # anchor 15 / VIX 30 = 0.5; trend leg is full, so exposure halves.
+    assert replay.rule_triple_ma_vix(rising, vix=[30.0]) == pytest.approx(0.5)
+    assert replay.rule_triple_ma_vix(rising, vix=[20.0]) == pytest.approx(0.75)
+
+
+def test_d_grades_trend_by_how_many_mas_price_holds():
+    """Partial credit is the point of the three-line system.
+
+    A long decline followed by a small bounce: price reclaims the short MAs but
+    is still far under the 200-day, so D should give 2/3 — not a binary in/out.
+    """
+    closes = [300.0 - i * 0.5 for i in range(260)] + [170.0 + i * 0.3 for i in range(40)]
+    mas = {n: replay.sma(closes, n) for n in (20, 50, 200)}
+    assert closes[-1] > mas[20] and closes[-1] > mas[50] and closes[-1] < mas[200]
+    assert replay.rule_triple_ma_vix(closes, vix=[15.0]) == pytest.approx(2 / 3, abs=1e-9)
+
+
+def test_d_falls_to_zero_in_a_downtrend():
+    falling = [400.0 - i for i in range(300)]
+    assert replay.rule_triple_ma_vix(falling, vix=[15.0]) == 0.0
+
+
+def test_d_series_matches_scalar_rule():
+    import random
+
+    random.seed(3)
+    closes, vix = [100.0], []
+    for _ in range(400):
+        closes.append(closes[-1] * (1 + random.gauss(0.0006, 0.018)))
+    for _ in range(len(closes)):
+        vix.append(max(9.0, random.gauss(18.0, 5.0)))
+    ser = replay.series_triple_ma_vix(closes, vix)
+    for i in range(210, len(closes), 19):
+        assert ser[i] == pytest.approx(
+            replay.rule_triple_ma_vix(closes[: i + 1], vix=vix[: i + 1]))
+
+
+# ── Sharpe ───────────────────────────────────────────────────────────────────
+def test_sharpe_is_excess_over_the_reserve_asset():
+    rets = [0.001] * 252
+    rf = [0.0] * 252
+    # constant excess -> zero stdev -> undefined, must be None not a huge number
+    assert replay.sharpe(rets, rf) is None
+
+    import random
+    random.seed(5)
+    noisy = [random.gauss(0.0008, 0.01) for _ in range(504)]
+    flat_rf = [0.0002] * 504
+    s = replay.sharpe(noisy, flat_rf)
+    assert s is not None and 0.0 < s < 4.0        # sane magnitude
+
+
+def test_sharpe_rises_when_the_same_return_comes_with_less_noise():
+    import random
+
+    random.seed(9)
+    rf = [0.0] * 504
+    calm = [random.gauss(0.0006, 0.004) for _ in range(504)]
+    wild = [random.gauss(0.0006, 0.020) for _ in range(504)]
+    assert replay.sharpe(calm, rf) > replay.sharpe(wild, rf)

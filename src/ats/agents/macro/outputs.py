@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from ..coerce import _as_objlist, _as_strlist
 
 
 class ThemeAssessView(BaseModel):
@@ -28,6 +30,21 @@ class MacroReviewLLMView(BaseModel):
     asset_implications: str = Field(default="", description="股/债/美元/黄金/原油含义")
     themes: list[ThemeAssessView] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
+
+    # Observed live 2026-07-31: sonnet returned `themes` as a JSON *string*, the
+    # whole review failed validation, and run() fell back to the PRIOR week's
+    # review — stale macro background feeding five downstream agents with nothing
+    # on screen to say so. Coerce instead of discarding the call.
+    @field_validator("sector_tilts", "themes", mode="before")
+    @classmethod
+    def _objlists(cls, v):
+        return _as_objlist(v)
+
+    @field_validator("top_risks", mode="before")
+    @classmethod
+    def _strlists(cls, v):
+        return _as_strlist(v)
+
     falsifier: str = Field(
         default="",
         description=("什么**具体可观测**的事件会推翻这次判断。"

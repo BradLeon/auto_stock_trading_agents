@@ -499,7 +499,17 @@ def run_macro_review(name: str = "macro", *, use_llm: bool = True,
     from ..agents.macro import report, review as macro_review
     from ..config import load_macro_config
 
+    from datetime import datetime, timezone
+
+    started = datetime.now(timezone.utc)
     review = macro_review.run(name, use_llm=use_llm, live_data=live_data)
+    # run() returns the PRIOR stored review when the LLM call fails, so a failed
+    # run is otherwise indistinguishable from a good one — and writing a report
+    # for it would overwrite that older day's file under its own date.
+    stale = use_llm and review.as_of < started
+    if stale:
+        print(f"⚠️  macro {name}: LLM 失败，以下为 {review.as_of:%Y-%m-%d %H:%M} 的旧评审"
+              f"（未写报告、未更新存档）")
     print(f"🌐 macro {name} — {review.regime}")
     _print_quadrant(review)
     if review.rate_path:
@@ -508,7 +518,7 @@ def run_macro_review(name: str = "macro", *, use_llm: bool = True,
         print(f"   {t.stance} {t.sector}: {t.rationale[:80]}")
     if review.asset_implications:
         print(f"   资产含义: {review.asset_implications}")
-    if write_report and use_llm and review.sector_tilts:
+    if write_report and use_llm and review.sector_tilts and not stale:
         path = report.write(review, load_macro_config(name))
         print(f"   📝 {path}" if path else "   (report dir unset — skipped)")
     return review

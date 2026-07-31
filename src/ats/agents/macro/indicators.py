@@ -68,7 +68,11 @@ def _to_date(idx) -> date:
 
 
 def value_asof(points: list[tuple[date, float]], target: date) -> float | None:
-    """Last observation at or before `target` (None if the series starts later)."""
+    """Last observation at or before `target` (None if the series starts later).
+
+    Correct for as-of queries, where looking ahead of `target` would be cheating.
+    For measuring a change over a window, prefer `value_near`.
+    """
     val = None
     for d, v in points:
         if d <= target:
@@ -76,6 +80,27 @@ def value_asof(points: list[tuple[date, float]], target: date) -> float | None:
         else:
             break
     return val
+
+
+def value_near(points: list[tuple[date, float]], target: date) -> float | None:
+    """Observation closest to `target` in either direction.
+
+    Used for Δ windows because "last at or before" silently overshoots on
+    coarse series: FRED dates monthly data to the 1st of the reference month, so
+    a 90-day lookback from 1 May resolves to 31 Jan and picks up the 1 Jan
+    print — a FOUR-month change reported as three. Nearest picks 1 Feb.
+    There is no lookahead concern here: both candidates are already history.
+    """
+    if not points:
+        return None
+    best, best_gap = None, None
+    for d, v in points:
+        gap = abs((d - target).days)
+        if best_gap is None or gap < best_gap:
+            best, best_gap = v, gap
+        elif d > target and gap > best_gap:
+            break                       # sorted: gaps only grow from here
+    return best
 
 
 def _window(points: list[tuple[date, float]], days: int, end: date) -> list[float]:
@@ -160,9 +185,9 @@ def reading(key: str, series, *, label: str = "", unit: str = "pct",
     ref = as_of or last_date
     return IndicatorReading(
         key=key, label=label, unit=unit, source=source, level=round(level, 4),
-        d_1w=_change(level, value_asof(points, ref - timedelta(days=7)), unit),
-        d_1m=_change(level, value_asof(points, ref - timedelta(days=30)), unit),
-        d_3m=_change(level, value_asof(points, ref - timedelta(days=90)), unit),
+        d_1w=_change(level, value_near(points, ref - timedelta(days=7)), unit),
+        d_1m=_change(level, value_near(points, ref - timedelta(days=30)), unit),
+        d_3m=_change(level, value_near(points, ref - timedelta(days=90)), unit),
         z_3y=zscore(_window(points, _Z_WINDOW_DAYS, last_date), level),
         pct_10y=percentile(_window(points, _PCT_WINDOW_DAYS, last_date), level),
         as_of=last_date,

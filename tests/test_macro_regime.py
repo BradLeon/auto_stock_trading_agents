@@ -74,6 +74,29 @@ def test_lookback_is_date_based_so_it_works_across_frequencies():
     assert r.d_1m == pytest.approx(0.82, abs=0.02)
 
 
+def test_monthly_three_month_change_spans_three_months_not_four():
+    """FRED dates monthly data to the 1st of the reference month.
+
+    A 90-day lookback from 1 May resolves to 31 Jan; "last at or before" then
+    picks the 1 Jan print, reporting a FOUR-month change as three. Live run
+    2026-07-31: core PCE showed d_3m +1.3% (≈5.3% annualised) while the axis's
+    own 3m-annualised figure was 2.89% — the same series disagreeing with itself
+    in one report.
+    """
+    pts = [(date(2026, m, 1), 100.0 + m) for m in range(1, 6)]     # +1 per month
+    r = ind.reading("core_pce", pts, unit="index", freq="monthly")
+    # May(105) vs Feb(102) = 3 months = +2.94%; the bug gave May vs Jan = +3.96%.
+    assert r.d_3m == pytest.approx(2.94, abs=0.05)
+
+
+def test_value_near_and_value_asof_have_different_jobs():
+    pts = [(date(2026, 1, 1), 1.0), (date(2026, 2, 1), 2.0)]
+    # as-of never looks ahead of the target...
+    assert ind.value_asof(pts, date(2026, 1, 31)) == 1.0
+    # ...but a Δ window wants whichever observation is actually closest.
+    assert ind.value_near(pts, date(2026, 1, 31)) == 2.0
+
+
 def test_change_z_separates_a_shock_from_a_trend():
     # Flat series with one abrupt jump at the end -> large 1m change z.
     pts = daily(400, lambda i: 100.0 + (30.0 if i >= 395 else 0.0))
@@ -528,6 +551,62 @@ def test_skill_states_the_numbers_are_not_the_models_to_rewrite():
     assert "禁止对单个公司的盈利" in text            # role boundary vs 基本面分析师
     assert "falsifier" in text and "可观测" in text
     assert "## Security" in text
+
+
+def test_macro_view_coerces_a_stringified_themes_array():
+    """Reproduces the live 2026-07-31 failure.
+
+    sonnet returned `themes` as a JSON *string*; list validation rejected the
+    whole review, run() fell back to the prior week, and five downstream agents
+    silently consumed stale macro background. Coerce rather than discard.
+    """
+    import json
+
+    from ats.agents.macro.outputs import MacroReviewLLMView
+
+    themes = json.dumps([{"key": "fed_policy", "direction": "偏紧",
+                          "transmission": "实际利率↑→估值压缩", "signal": "risk-off"}])
+    tilts = json.dumps([{"sector": "半导体", "stance": "低配", "rationale": "久期风险"}])
+    v = MacroReviewLLMView(regime="risk-off", themes=themes, sector_tilts=tilts,
+                           top_risks='["能源二次上涨", "信用利差走阔"]')
+    assert len(v.themes) == 1 and v.themes[0].key == "fed_policy"
+    assert len(v.sector_tilts) == 1 and v.sector_tilts[0].stance == "低配"
+    assert v.top_risks == ["能源二次上涨", "信用利差走阔"]
+
+    # Real arrays must still pass through untouched.
+    plain = MacroReviewLLMView(regime="r", themes=[{"key": "growth"}], top_risks=["a"])
+    assert plain.themes[0].key == "growth" and plain.top_risks == ["a"]
+
+
+def test_a_failed_llm_run_is_reported_and_writes_no_report(monkeypatch, tmp_path):
+    """A fallback to the prior review must not masquerade as a fresh run.
+
+    run() returns the stored prior review on LLM failure; writing a report for it
+    would rewrite that older day's file under its own date and read as success.
+    """
+    from ats.agents.macro import assemble
+    from ats.agents.macro import report as macro_report
+    from ats.agents.macro import review as macro_review
+    from ats.memory import get_store
+    from ats.runtime import cli
+    from ats.schemas.macro_strategy import SectorTilt
+
+    get_store().save_macro_review(MacroReview(
+        name="macro", as_of=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        regime="PRIOR", sector_tilts=[SectorTilt(sector="半导体", stance="低配")]))
+    monkeypatch.setattr(assemble, "build",
+                        lambda cfg, live_data=True: assemble.MacroContext(cfg=cfg))
+
+    def boom(*a, **k):
+        raise RuntimeError("validation error")
+
+    monkeypatch.setattr(macro_review, "run_structured", boom)
+    wrote: list = []
+    monkeypatch.setattr(macro_report, "write", lambda r, c: wrote.append(r) or tmp_path)
+
+    out = cli.run_macro_review("macro", use_llm=True, live_data=False)
+    assert out.regime == "PRIOR"
+    assert wrote == []          # the stale review must not overwrite 07-30's report
 
 
 def test_deterministic_fields_survive_the_llm_path(monkeypatch):

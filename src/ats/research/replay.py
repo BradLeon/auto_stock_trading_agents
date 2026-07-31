@@ -142,7 +142,8 @@ def rule_triple_ma_vix(closes: list[float], *, vix: list[float] = (), **_kw) -> 
 
 RULES = {"BH": rule_hold, "A_vol_throttle": rule_vol_throttle,
          "B_peer_relative": rule_peer_relative, "C_trend_sma200": rule_trend,
-         "D_3ma_vix": rule_triple_ma_vix, "E_smartrisk": None}
+         "D_3ma_vix": rule_triple_ma_vix,
+         "F_jia": None, "F_yi": None, "F_bing": None}
 
 
 # ── causal signal series ─────────────────────────────────────────────────────
@@ -223,10 +224,11 @@ def build_series(prices: dict[str, list[float]], syms: list[str], rule_name: str
     if rule_name == "D_3ma_vix":
         vix = (market or {}).get("VIX", [])
         return {s: series_triple_ma_vix(prices[s], vix) for s in syms}
-    if rule_name == "E_smartrisk":
+    if rule_name.startswith("F_"):
         m = market or {}
-        return {s: series_smartrisk_equity(prices[s], m.get("VIX", []),
-                                           m.get("VIX3M", [])) for s in syms}
+        mode = rule_name[2:]
+        return {s: series_momentum_vol(prices[s], m.get("VIX", []),
+                                       m.get("VIX3M", []), mode) for s in syms}
     if rule_name == "B_peer_relative":
         dds = {s: _dd_series(prices[s]) for s in syms}
         out = {}
@@ -368,21 +370,60 @@ def momentum_score_7(closes: list[float], i: int) -> int:
     return score
 
 
-def series_smartrisk_equity(closes: list[float], vix: list[float],
-                            vix3m: list[float]) -> list[float]:
+# ── momentum + vol target, ported to an UNLEVERED book (3 readings) ──────────
+# Source of truth: signals/momentum.py in the user's option repo. Core copied
+# verbatim: the 7-point score, the ladder L, and sigma = min(2, 15/VIX).
+#
+# The whole difficulty is the ceiling. The original computes
+#     E = min(3.0, L(S) * sigma)
+# and most of its protection comes from cutting 3.0x down to 1.5x when VIX
+# doubles. An unlevered book is capped at 1.0, so that cut lands entirely above
+# the ceiling and changes nothing. Three structurally different readings of how
+# to carry that intent over — all registered here BEFORE the first run, all
+# reported afterwards regardless of which looks best:
+#
+#   jia  faithful   E = min(1.0, L*sigma)        ceiling only; VIX barely bites
+#   yi   rescaled   E = min(1.0, (L/3)*sigma)    3.0x means "fully invested"
+#   bing separated  E = min(1,L) * min(1,sigma)  score sets base, VIX discounts it
+MODES = ("jia", "yi", "bing")
+
+
+def exposure_from(score: int, vix: float | None, mode: str) -> float:
+    """One day's base exposure, before the Tier overlays."""
+    raw = LADDER[score]
+    if raw == 0.0:                       # short-circuit, as in momentum.py:143
+        return 0.0
+    sigma = min(2.0, VIX_ANCHOR / vix) if vix and vix > 0 else 1.0
+    if mode == "jia":
+        e = min(1.0, raw * sigma)
+    elif mode == "yi":
+        e = min(1.0, (raw / 3.0) * sigma)
+    elif mode == "bing":
+        e = min(1.0, raw) * min(1.0, sigma)
+    else:
+        raise KeyError(mode)
+    return max(0.0, min(1.0, e))
+
+
+def series_momentum_vol(closes: list[float], vix: list[float],
+                        vix3m: list[float], mode: str) -> list[float]:
+    """Full per-name exposure series: base formula -> Tier1 -> Tier2."""
     out = []
     for i in range(len(closes)):
-        tgt = min(1.0, LADDER[momentum_score_7(closes, i)])       # unlevered cap
         v = vix[i] if i < len(vix) else None
-        if v and v > 0:                                            # Tier 3
-            tgt *= min(1.0, VIX_ANCHOR / v)
+        e = exposure_from(momentum_score_7(closes, i), v, mode)
+
         v3 = vix3m[i] if i < len(vix3m) else None
-        if v and v3 and v3 > 0 and (v / v3) >= PANIC_TERM_RATIO:   # Tier 1
-            tgt = 0.0
+        # Tier 1 panic. Skipped entirely when VIX3M is absent — carrying a stale
+        # VIX3M against a spiking VIX would fabricate an inverted term structure
+        # exactly on the days it matters most.
+        if v and v3 and v3 > 0 and (v / v3) >= PANIC_TERM_RATIO:
+            e = 0.0
+
         s200 = statistics.fmean(closes[i - 199: i + 1]) if i >= 199 else None
-        if s200 is not None and closes[i] < s200:                  # Tier 2
-            tgt = min(tgt, BEAR_PRICE_CAP)
-        out.append(max(0.0, min(1.0, tgt)))
+        if s200 is not None and closes[i] < s200:          # Tier 2 bear
+            e = min(e, BEAR_PRICE_CAP)
+        out.append(e)
     return out
 
 

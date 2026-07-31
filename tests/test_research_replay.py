@@ -237,35 +237,6 @@ def test_ladder_is_the_published_one():
                              4: 1.5, 5: 2.0, 6: 2.5, 7: 3.0}
 
 
-def test_e_caps_at_one_because_the_book_is_unlevered():
-    up = [100.0 + i for i in range(300)]
-    e = replay.series_smartrisk_equity(up, [15.0] * 300, [15.0] * 300)
-    assert e[-1] == pytest.approx(1.0)      # ladder says 3.0x, unlevered caps to 1.0
-
-
-def test_e_tier1_panic_exits_fully_on_inverted_term_structure():
-    up = [100.0 + i for i in range(300)]
-    calm = replay.series_smartrisk_equity(up, [15.0] * 300, [18.0] * 300)
-    panic = replay.series_smartrisk_equity(up, [23.0] * 300, [19.0] * 300)  # ratio 1.21
-    assert calm[-1] > 0 and panic[-1] == 0.0
-
-
-def test_e_tier1_is_skipped_when_vix3m_is_missing_not_forward_filled():
-    """Yahoo's ^VIX3M stops 2026-07-17 while ^VIX runs on. Carrying a stale
-    VIX3M against a spiking VIX would manufacture a fake panic — so absent data
-    must disable Tier 1, not fabricate it."""
-    up = [100.0 + i for i in range(300)]
-    no3m = replay.series_smartrisk_equity(up, [30.0] * 300, [])    # VIX high, no VIX3M
-    assert no3m[-1] > 0.0        # Tier 3 still throttles, Tier 1 cannot fire
-
-
-def test_e_tier2_halves_exposure_below_sma200():
-    # Long decline then a bounce that reclaims short MAs but not the 200-day.
-    closes = [300.0 - i * 0.5 for i in range(260)] + [170.0 + i * 0.3 for i in range(40)]
-    e = replay.series_smartrisk_equity(closes, [15.0] * 300, [15.0] * 300)
-    assert e[-1] <= replay.BEAR_PRICE_CAP
-
-
 def test_rebalance_band_suppresses_small_drifts_and_respects_cooldown():
     target = [1.0, 0.9, 0.8, 0.85, 0.9, 1.0, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
     got = replay.apply_rebalance(target, band=0.25, cooldown=5)
@@ -288,3 +259,68 @@ def test_rebalance_discipline_cuts_the_churn_that_sank_strategy_d():
     assert len(at) < raw_switches / 5           # a large reduction in churn...
     # ...and the cooldown is a hard structural guarantee, not a tendency:
     assert all(b - a >= 5 for a, b in zip(at, at[1:]))
+
+
+# ── unlevered port: three pre-registered readings (甲/乙/丙) ─────────────────
+@pytest.mark.parametrize("score,vix,jia,yi,bing", [
+    (7, 15, 1.00, 1.00, 1.00),
+    (7, 30, 1.00, 0.50, 0.50),     # the whole disagreement in one row
+    (3, 15, 1.00, 1 / 3, 1.00),
+    (3, 30, 0.50, 1 / 6, 0.50),
+    (5, 30, 1.00, 1 / 3, 0.50),
+    (2, 15, 0.50, 1 / 6, 0.50),
+    (1, 15, 0.00, 0.00, 0.00),     # short-circuit: L=0 -> 0 regardless of VIX
+])
+def test_exposure_table_matches_the_agreed_spec(score, vix, jia, yi, bing):
+    assert replay.exposure_from(score, vix, "jia") == pytest.approx(jia, abs=1e-9)
+    assert replay.exposure_from(score, vix, "yi") == pytest.approx(yi, abs=1e-9)
+    assert replay.exposure_from(score, vix, "bing") == pytest.approx(bing, abs=1e-9)
+
+
+def test_zero_score_short_circuits_before_vol_scaling():
+    """momentum.py:143 returns 0 without computing sigma. A calm VIX must not
+    resurrect a dead trend."""
+    for mode in replay.MODES:
+        assert replay.exposure_from(0, 5.0, mode) == 0.0   # sigma would be 2.0
+        assert replay.exposure_from(1, 5.0, mode) == 0.0
+
+
+def test_faithful_mode_shows_vix_cannot_protect_a_strong_trend():
+    """The central finding, pinned: unlevered, 甲 leaves a 7-score untouched even
+    in a panic — because the original's cut lands entirely above the 1.0 ceiling."""
+    for vix in (15, 20, 30, 40):
+        assert replay.exposure_from(7, vix, "jia") == 1.0
+
+
+def test_tier1_panic_zeroes_exposure_on_inverted_term_structure():
+    up = [100.0 + i for i in range(300)]
+    calm = replay.series_momentum_vol(up, [15.0] * 300, [18.0] * 300, "jia")
+    panic = replay.series_momentum_vol(up, [23.0] * 300, [19.0] * 300, "jia")  # 1.21
+    assert calm[-1] > 0 and panic[-1] == 0.0
+
+
+def test_tier1_is_skipped_when_vix3m_missing_never_forward_filled():
+    up = [100.0 + i for i in range(300)]
+    got = replay.series_momentum_vol(up, [40.0] * 300, [], "jia")   # no VIX3M at all
+    assert got[-1] > 0.0        # Tier 1 unevaluable -> must not fire
+
+
+def test_tier2_caps_at_half_below_sma200():
+    closes = [300.0 - i * 0.5 for i in range(260)] + [170.0 + i * 0.3 for i in range(40)]
+    for mode in replay.MODES:
+        got = replay.series_momentum_vol(closes, [15.0] * 300, [15.0] * 300, mode)
+        assert got[-1] <= replay.BEAR_PRICE_CAP
+
+
+def test_variants_are_causal():
+    import random
+
+    random.seed(21)
+    closes, vix = [100.0], []
+    for _ in range(400):
+        closes.append(closes[-1] * (1 + random.gauss(0.0006, 0.018)))
+    vix = [max(9.0, random.gauss(18.0, 4.0)) for _ in closes]
+    for mode in replay.MODES:
+        full = replay.series_momentum_vol(closes, vix, [], mode)
+        trunc = replay.series_momentum_vol(closes[:301], vix[:301], [], mode)
+        assert full[:301] == trunc      # the future cannot change the past

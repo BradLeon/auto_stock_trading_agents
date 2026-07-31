@@ -25,6 +25,7 @@ _YF_SYMBOL_MAP: dict[str, str] = {
     "BRK B": "BRK-B",    # Berkshire B: IBKR uses space, yfinance uses dash
     "BRK A": "BRK-A",
     "HY9H": "SKHY",       # SK Hynix Frankfurt ADR → US ADR (same company, USD-priced)
+    "7709": "7709.HK",    # CSOP SK Hynix Daily (2x) Leveraged, HKEX
 }
 
 

@@ -17,8 +17,10 @@ universe:
   # 实际持仓 ∪ pead targets。IBKR 不可用时退化为 targets-only。
   include_holdings: true
   include_pead_targets: true
-  # 现金等价物不做技术面判定（它们本来就是减仓的去处）
-  exclude: [SGOV, SHV, BIL]
+  # 现金等价物不做技术面判定（它们本来就是减仓的去处）；
+  # 7709 = CSOP SK Hynix Daily 2x Leveraged（HKEX）——每日重置的杠杆产品价格路径
+  # 依赖衰减，均线读数会失真；其底层 SK Hynix 已由 SKHY 覆盖，排除不丢信息。
+  exclude: [SGOV, SHV, BIL, "7709"]
   min_bars: 200          # 少于 SMA200 所需根数则标记 stale，不出读数
 
 params:

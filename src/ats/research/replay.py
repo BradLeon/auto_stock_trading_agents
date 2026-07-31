@@ -23,6 +23,19 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 
+from ..agents.technical.strategy import (  # noqa: F401 — re-exported for callers/tests
+    BEAR_PRICE_CAP,
+    LADDER,
+    MODES,
+    PANIC_TERM_RATIO,
+    REBAL_BAND,
+    REBAL_COOLDOWN,
+    apply_rebalance,
+    exposure_from,
+    momentum_score_7,
+    series_momentum_vol,
+)
+
 # ── fixed parameters (pre-registered; do not tune) ────────────────────────────
 VOL_WINDOW = 20            # trading days for realised vol
 VOL_PCTL_TRIGGER = 80.0    # only throttle above this percentile of own vol history
@@ -42,14 +55,6 @@ TRADING_DAYS = 252
 # nothing here was fitted to the test period.
 D_SMAS = (20, 50, 200)
 VIX_ANCHOR = 15.0
-
-# ── strategy E constants (see the ported-SmartRisk note further down) ────────
-LADDER = {0: 0.0, 1: 0.0, 2: 0.5, 3: 1.0, 4: 1.5, 5: 2.0, 6: 2.5, 7: 3.0}
-PANIC_TERM_RATIO = 1.15      # VIX/VIX3M at or above this -> full exit
-BEAR_PRICE_CAP = 0.5         # close < SMA200 -> at most half
-REBAL_BAND = 0.25            # |target - actual| must exceed this to trade
-REBAL_COOLDOWN = 5           # ...and this many days since the last trade
-
 
 # ── primitives ───────────────────────────────────────────────────────────────
 def sma(closes: list[float], n: int) -> float | None:
@@ -143,7 +148,7 @@ def rule_triple_ma_vix(closes: list[float], *, vix: list[float] = (), **_kw) -> 
 RULES = {"BH": rule_hold, "A_vol_throttle": rule_vol_throttle,
          "B_peer_relative": rule_peer_relative, "C_trend_sma200": rule_trend,
          "D_3ma_vix": rule_triple_ma_vix,
-         "F_jia": None, "F_yi": None, "F_bing": None}
+         "F_jia": None, "F_yi": None, "F_bing": None, "F_jia_bearslope": None}
 
 
 # ── causal signal series ─────────────────────────────────────────────────────
@@ -224,6 +229,12 @@ def build_series(prices: dict[str, list[float]], syms: list[str], rule_name: str
     if rule_name == "D_3ma_vix":
         vix = (market or {}).get("VIX", [])
         return {s: series_triple_ma_vix(prices[s], vix) for s in syms}
+    if rule_name == "F_jia_bearslope":
+        # 甲 + leaps_smartrisk's Tier 2 (bear cap gated on SMA200 itself declining,
+        # not just price < SMA200). See docs/TECHNICAL_ANALYST.md §comparison.
+        m = market or {}
+        return {s: series_momentum_vol(prices[s], m.get("VIX", []), m.get("VIX3M", []),
+                                       "jia", bear_requires_declining=True) for s in syms}
     if rule_name.startswith("F_"):
         m = market or {}
         mode = rule_name[2:]
@@ -323,7 +334,7 @@ def sharpe(rets: list[float], rf: list[float]) -> float | None:
     return statistics.fmean(ex) / sd * (TRADING_DAYS ** 0.5)
 
 
-# ── strategy E: SmartRisk ported to an unlevered equity book ─────────────────
+# ── strategy E / F_*: SmartRisk ported to an unlevered equity book ───────────
 # Pre-registered 2026-07-31 (variant #3), BEFORE its first run.
 #
 # Source: the user's own backtested LEAPS series V1->V4 (QQQ/SPY). What survived
@@ -342,102 +353,9 @@ def sharpe(rets: list[float], rf: list[float]) -> float | None:
 #      leverage. Only two of V4's five tier rules still bite: panic->0 and
 #      price<SMA200 -> cap 0.5. This is reported, not hidden — it is the honest
 #      answer to "does it still apply to single stocks".
-
-
-def momentum_score_7(closes: list[float], i: int) -> int:
-    """V1's 7-point score, unchanged through V4.
-
-    The last two terms (vs 20d/60d ago) were added by the user specifically to
-    offset SMA lag — which is exactly the weakness that made a plain SMA200 rule
-    useless in the fast July-2026 selloff.
-    """
-    c = closes[i]
-    s20 = statistics.fmean(closes[i - 19: i + 1]) if i >= 19 else None
-    s50 = statistics.fmean(closes[i - 49: i + 1]) if i >= 49 else None
-    s200 = statistics.fmean(closes[i - 199: i + 1]) if i >= 199 else None
-    score = 0
-    for m in (s20, s50, s200):
-        if m is not None and c > m:
-            score += 1
-    if s20 is not None and s50 is not None and s20 > s50:
-        score += 1
-    if s50 is not None and s200 is not None and s50 > s200:
-        score += 1
-    if i >= 20 and c > closes[i - 20]:
-        score += 1
-    if i >= 60 and c > closes[i - 60]:
-        score += 1
-    return score
-
-
-# ── momentum + vol target, ported to an UNLEVERED book (3 readings) ──────────
-# Source of truth: signals/momentum.py in the user's option repo. Core copied
-# verbatim: the 7-point score, the ladder L, and sigma = min(2, 15/VIX).
 #
-# The whole difficulty is the ceiling. The original computes
-#     E = min(3.0, L(S) * sigma)
-# and most of its protection comes from cutting 3.0x down to 1.5x when VIX
-# doubles. An unlevered book is capped at 1.0, so that cut lands entirely above
-# the ceiling and changes nothing. Three structurally different readings of how
-# to carry that intent over — all registered here BEFORE the first run, all
-# reported afterwards regardless of which looks best:
-#
-#   jia  faithful   E = min(1.0, L*sigma)        ceiling only; VIX barely bites
-#   yi   rescaled   E = min(1.0, (L/3)*sigma)    3.0x means "fully invested"
-#   bing separated  E = min(1,L) * min(1,sigma)  score sets base, VIX discounts it
-MODES = ("jia", "yi", "bing")
-
-
-def exposure_from(score: int, vix: float | None, mode: str) -> float:
-    """One day's base exposure, before the Tier overlays."""
-    raw = LADDER[score]
-    if raw == 0.0:                       # short-circuit, as in momentum.py:143
-        return 0.0
-    sigma = min(2.0, VIX_ANCHOR / vix) if vix and vix > 0 else 1.0
-    if mode == "jia":
-        e = min(1.0, raw * sigma)
-    elif mode == "yi":
-        e = min(1.0, (raw / 3.0) * sigma)
-    elif mode == "bing":
-        e = min(1.0, raw) * min(1.0, sigma)
-    else:
-        raise KeyError(mode)
-    return max(0.0, min(1.0, e))
-
-
-def series_momentum_vol(closes: list[float], vix: list[float],
-                        vix3m: list[float], mode: str) -> list[float]:
-    """Full per-name exposure series: base formula -> Tier1 -> Tier2."""
-    out = []
-    for i in range(len(closes)):
-        v = vix[i] if i < len(vix) else None
-        e = exposure_from(momentum_score_7(closes, i), v, mode)
-
-        v3 = vix3m[i] if i < len(vix3m) else None
-        # Tier 1 panic. Skipped entirely when VIX3M is absent — carrying a stale
-        # VIX3M against a spiking VIX would fabricate an inverted term structure
-        # exactly on the days it matters most.
-        if v and v3 and v3 > 0 and (v / v3) >= PANIC_TERM_RATIO:
-            e = 0.0
-
-        s200 = statistics.fmean(closes[i - 199: i + 1]) if i >= 199 else None
-        if s200 is not None and closes[i] < s200:          # Tier 2 bear
-            e = min(e, BEAR_PRICE_CAP)
-        out.append(e)
-    return out
-
-
-def apply_rebalance(target: list[float], band: float = REBAL_BAND,
-                    cooldown: int = REBAL_COOLDOWN) -> list[float]:
-    """Turn a continuously-varying target into what you would actually hold.
-
-    This is the piece strategy D lacked, and why it churned 2320 times: without a
-    deadband every daily VIX wiggle became a trade. Causal by construction —
-    actual[i] depends only on actual[i-1] and target[i].
-    """
-    actual, held, last = [], target[0] if target else 0.0, -10**9
-    for i, t in enumerate(target):
-        if abs(t - held) > band and (i - last) >= cooldown:
-            held, last = t, i
-        actual.append(held)
-    return actual
+# momentum_score_7 / exposure_from / series_momentum_vol / apply_rebalance /
+# LADDER / MODES / PANIC_TERM_RATIO / BEAR_PRICE_CAP / REBAL_BAND / REBAL_COOLDOWN
+# now live in agents/technical/strategy.py (the deployed analyst) and are
+# imported at the top of this file — the backtest must exercise the exact code
+# that runs live, not a hand-kept copy of it.

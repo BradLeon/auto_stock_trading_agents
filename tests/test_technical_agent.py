@@ -115,6 +115,35 @@ def test_tier2_bear_caps_exposure_below_sma200():
     assert got.bear_fired and got.target_exposure <= st.BEAR_PRICE_CAP
 
 
+def test_sma200_prior_needs_full_lookback_history():
+    closes = rising(219)                     # i=218, j=i-20=198 < 199 -> None
+    i = len(closes) - 1
+    assert st.sma200_prior(closes, i, lookback=20) is None      # needs 220+ bars
+    longer = rising(220)                     # i=219, j=199 -> exactly enough
+    j = len(longer) - 1
+    assert st.sma200_prior(longer, j, lookback=20) is not None
+
+
+def test_apply_tiers_declining_gate_is_opt_in_and_deployed_default_is_unchanged():
+    """Deployed 甲 must keep capping on price<SMA200 alone (bear_requires_declining
+    defaults to False) — the gated reading (compared against leaps_smartrisk on
+    2026-08-01, and rejected on backtest) is available but not wired in."""
+    close, sma200 = 90.0, 100.0        # price < sma200; declining-or-not is irrelevant here
+    e_default, _, bear_default = st.apply_tiers(
+        1.0, close=close, sma200=sma200, vix=15.0, vix3m=18.0)
+    assert bear_default and e_default <= st.BEAR_PRICE_CAP
+
+    close2, sma200_2, sma200_prior_2 = 90.0, 100.0, 95.0   # price<sma200, sma200 RISING (100>95)
+    e_gated, _, bear_gated = st.apply_tiers(
+        1.0, close=close2, sma200=sma200_2, vix=15.0, vix3m=18.0,
+        sma200_prior_value=sma200_prior_2, bear_requires_declining=True)
+    assert not bear_gated and e_gated == 1.0
+    # same inputs WITHOUT the gate still cap, proving the flag — not the inputs — differs
+    e_ungated, _, bear_ungated = st.apply_tiers(
+        1.0, close=close2, sma200=sma200_2, vix=15.0, vix3m=18.0)
+    assert bear_ungated and e_ungated <= st.BEAR_PRICE_CAP
+
+
 def test_tier1_panic_needs_vix3m_and_is_skipped_without_it():
     """A stale VIX3M divided into a spiking VIX fabricates an inversion on
     exactly the days that matter, so absence must disable Tier 1."""

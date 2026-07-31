@@ -31,6 +31,7 @@ VIX_ANCHOR = 15.0            # sigma = min(SIGMA_CAP, VIX_ANCHOR / VIX)
 SIGMA_CAP = 2.0
 PANIC_TERM_RATIO = 1.15      # VIX/VIX3M at or above this -> full exit (Tier 1)
 BEAR_PRICE_CAP = 0.5         # close < SMA200 -> at most half (Tier 2)
+BEAR_SLOPE_LOOKBACK = 20     # sessions back for the SMA200-declining check (Tier 2, gated variant)
 REBAL_BAND = 0.25            # |target - held| must exceed this to act
 REBAL_COOLDOWN = 5           # ...and this many sessions since the last change
 
@@ -115,35 +116,71 @@ def exposure_from(score: int, vix: float | None, mode: str = DEFAULT_MODE, *,
     return max(0.0, min(1.0, e))
 
 
+def sma200_prior(closes: list[float], i: int, lookback: int = BEAR_SLOPE_LOOKBACK
+                 ) -> float | None:
+    """SMA200 as evaluated `lookback` sessions before i. None if not enough history.
+
+    Only used by the `bear_requires_declining` variant of Tier 2 below.
+    """
+    j = i - lookback
+    return statistics.fmean(closes[j - 199: j + 1]) if j >= 199 else None
+
+
 def apply_tiers(exposure: float, *, close: float, sma200: float | None,
                 vix: float | None, vix3m: float | None,
                 panic_ratio: float = PANIC_TERM_RATIO,
-                bear_cap: float = BEAR_PRICE_CAP) -> tuple[float, bool, bool]:
+                bear_cap: float = BEAR_PRICE_CAP,
+                sma200_prior_value: float | None = None,
+                bear_requires_declining: bool = False) -> tuple[float, bool, bool]:
     """Tier 1 panic + Tier 2 bear. Returns (exposure, panic_fired, bear_fired).
 
     Tier 1 is SKIPPED when VIX3M is missing rather than approximated: a stale
     VIX3M divided into a spiking VIX manufactures an inverted term structure on
     exactly the days the signal matters. Yahoo's ^VIX3M has real gaps.
+
+    Tier 2 has two readings, both traceable to the user's own LEAPS series:
+      · default (bear_requires_declining=False): price < SMA200 alone caps
+        exposure. This is what 甲 has run since inception.
+      · bear_requires_declining=True: matches `leaps_smartrisk`'s Tier 2 — the
+        cap only fires when SMA200 ITSELF is declining vs BEAR_SLOPE_LOOKBACK
+        sessions ago AND price < SMA200. A brief dip below a still-rising
+        SMA200 (a pullback inside an uptrend) does not trigger it; only a
+        genuinely rolling-over 200-day trend does. Needs `sma200_prior_value`
+        (see `sma200_prior`); if that history isn't available yet this
+        reading does not fire — conservative, matching the source strategy
+        returning cap=None on missing history.
     """
     panic = bool(vix and vix3m and vix3m > 0 and (vix / vix3m) >= panic_ratio)
     if panic:
         exposure = 0.0
-    bear = bool(sma200 is not None and close < sma200)
+    if bear_requires_declining:
+        bear = bool(sma200 is not None and close < sma200
+                    and sma200_prior_value is not None and sma200 < sma200_prior_value)
+    else:
+        bear = bool(sma200 is not None and close < sma200)
     if bear:
         exposure = min(exposure, bear_cap)
     return max(0.0, min(1.0, exposure)), panic, bear
 
 
 def series_momentum_vol(closes: list[float], vix: list[float],
-                        vix3m: list[float], mode: str = DEFAULT_MODE) -> list[float]:
-    """Full per-name exposure series — used by the backtester."""
+                        vix3m: list[float], mode: str = DEFAULT_MODE, *,
+                        bear_requires_declining: bool = False) -> list[float]:
+    """Full per-name exposure series — used by the backtester.
+
+    `bear_requires_declining` selects the `leaps_smartrisk`-style Tier 2 (see
+    `apply_tiers`); default False reproduces 甲's deployed behaviour unchanged.
+    """
     out = []
     for i in range(len(closes)):
         v = vix[i] if i < len(vix) else None
         e = exposure_from(momentum_score_7(closes, i), v, mode)
         s200 = statistics.fmean(closes[i - 199: i + 1]) if i >= 199 else None
+        s200_prior = (sma200_prior(closes, i) if bear_requires_declining else None)
         v3 = vix3m[i] if i < len(vix3m) else None
-        e, _, _ = apply_tiers(e, close=closes[i], sma200=s200, vix=v, vix3m=v3)
+        e, _, _ = apply_tiers(e, close=closes[i], sma200=s200, vix=v, vix3m=v3,
+                              sma200_prior_value=s200_prior,
+                              bear_requires_declining=bear_requires_declining)
         out.append(e)
     return out
 

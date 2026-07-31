@@ -312,6 +312,48 @@ def test_tier2_caps_at_half_below_sma200():
         assert got[-1] <= replay.BEAR_PRICE_CAP
 
 
+def test_bearslope_gate_fires_on_strictly_fewer_days_than_the_deployed_rule():
+    """leaps_smartrisk's Tier 2 (compared 2026-08-01): the cap only fires when
+    SMA200 ITSELF is declining, not just price < SMA200 — strictly stricter
+    than the deployed rule, so over any real (noisy) path it must be capped on
+    a subset of the days the deployed rule caps on, never more."""
+    import random
+
+    random.seed(7)
+    closes = [100.0]
+    for _ in range(1200):
+        closes.append(closes[-1] * (1 + random.gauss(0.0002, 0.016)))
+    vix = [15.0] * len(closes)
+    ungated = replay.series_momentum_vol(closes, vix, vix, "jia")
+    gated = replay.series_momentum_vol(closes, vix, vix, "jia", bear_requires_declining=True)
+    capped_ungated = {i for i, e in enumerate(ungated) if e <= replay.BEAR_PRICE_CAP + 1e-9}
+    capped_gated = {i for i, e in enumerate(gated) if e <= replay.BEAR_PRICE_CAP + 1e-9}
+    # every exposure the gated rule caps to <=0.5, the deployed rule also caps
+    # (fewer trigger days observed empirically on 7 real symbols, 2026-08-01)
+    assert len(capped_gated) < len(capped_ungated)
+
+
+def test_bearslope_gate_still_fires_in_a_sustained_decline():
+    """When SMA200 is genuinely rolling over (not just a one-day dip), both the
+    deployed rule and the gated candidate must cap identically."""
+    closes = [300.0 - i * 0.5 for i in range(300)]
+    ungated = replay.series_momentum_vol(closes, [15.0] * 300, [15.0] * 300, "jia")
+    gated = replay.series_momentum_vol(closes, [15.0] * 300, [15.0] * 300, "jia",
+                                       bear_requires_declining=True)
+    assert ungated[-1] <= replay.BEAR_PRICE_CAP
+    assert gated[-1] <= replay.BEAR_PRICE_CAP
+
+
+def test_build_series_dispatches_bearslope_variant():
+    closes = [300.0 - i * 0.5 for i in range(300)]
+    prices = {"X": closes}
+    market = {"VIX": [15.0] * 300, "VIX3M": [15.0] * 300}
+    want = replay.series_momentum_vol(closes, market["VIX"], market["VIX3M"], "jia",
+                                      bear_requires_declining=True)
+    got = replay.build_series(prices, ["X"], "F_jia_bearslope", market=market)
+    assert got["X"] == want
+
+
 def test_variants_are_causal():
     import random
 

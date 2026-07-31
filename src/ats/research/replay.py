@@ -1,0 +1,245 @@
+"""Replay candidate drawdown-control rules over real price history.
+
+Why this exists: the question "would a trend/vol rule have helped in the drawdowns
+I actually lived through" is answerable with data, and answering it BEFORE wiring
+anything into the live path is the whole point. See docs/MACRO_ANALYST.md's staging
+philosophy — deterministic first, verified, then connected.
+
+Three hard rules this module must obey, because a backtest is the easiest kind of
+code to fool yourself with:
+
+  1. NO LOOKAHEAD. An exposure for day i is computed from closes[0..i] only and is
+     applied to the return realised from i to i+1. `assert_no_lookahead` proves it
+     by mutating the future and checking the past signal is unchanged.
+  2. NO PARAMETER SEARCH. Every constant below is a textbook default, fixed before
+     the first run. Three drawdown episodes cannot support a grid search — it would
+     produce a beautiful, overfit, useless answer.
+  3. COSTS ARE MANDATORY. Whipsaw is the specific risk being tested; without a
+     round-trip cost the rule that trades most looks best for free.
+"""
+
+from __future__ import annotations
+
+import statistics
+from dataclasses import dataclass, field
+
+# ── fixed parameters (pre-registered; do not tune) ────────────────────────────
+VOL_WINDOW = 20            # trading days for realised vol
+VOL_PCTL_TRIGGER = 80.0    # only throttle above this percentile of own vol history
+DD_LOOKBACK = 252          # trailing window for "peak" in drawdown
+PEER_EXCESS_TRIGGER = -0.15   # own DD minus peer-median DD, in fraction (-15pp)
+SMA_WINDOW = 200
+COST_BPS = 10.0            # one-way, in basis points of traded notional
+TRADING_DAYS = 252
+
+
+# ── primitives ───────────────────────────────────────────────────────────────
+def sma(closes: list[float], n: int) -> float | None:
+    return statistics.fmean(closes[-n:]) if len(closes) >= n else None
+
+
+def realized_vol(closes: list[float], n: int = VOL_WINDOW) -> float | None:
+    """Annualised stdev of daily log-ish returns over the last n days."""
+    if len(closes) < n + 1:
+        return None
+    rets = [closes[i] / closes[i - 1] - 1 for i in range(len(closes) - n, len(closes))]
+    if len(rets) < 2:
+        return None
+    sd = statistics.stdev(rets)
+    return sd * (TRADING_DAYS ** 0.5)
+
+
+def drawdown(closes: list[float], lookback: int = DD_LOOKBACK) -> float:
+    """Current price vs the trailing peak, as a negative fraction."""
+    window = closes[-lookback:] if len(closes) > lookback else closes
+    peak = max(window)
+    return closes[-1] / peak - 1 if peak > 0 else 0.0
+
+
+def max_drawdown(curve: list[float]) -> float:
+    peak, worst = curve[0], 0.0
+    for v in curve:
+        peak = max(peak, v)
+        worst = min(worst, v / peak - 1)
+    return worst
+
+
+# ── rules: closes-so-far -> target exposure in [0, 1] ────────────────────────
+def rule_hold(_closes, **_kw) -> float:
+    return 1.0
+
+
+def rule_vol_throttle(closes: list[float], **_kw) -> float:
+    """Conditional volatility targeting.
+
+    Conventional (always-on) vol targeting does not reliably help in equities;
+    the version that does is conditional — it only cuts in genuinely extreme
+    volatility states. So below the trigger percentile this returns full exposure.
+    """
+    rv = realized_vol(closes)
+    if rv is None or rv <= 0:
+        return 1.0
+    hist = [realized_vol(closes[: i + 1]) for i in range(VOL_WINDOW, len(closes))]
+    hist = [h for h in hist if h]
+    if len(hist) < 60:
+        return 1.0
+    trigger = _percentile(hist, VOL_PCTL_TRIGGER)
+    if rv <= trigger:
+        return 1.0
+    target = statistics.median(hist)
+    return max(0.0, min(1.0, target / rv))
+
+
+def rule_peer_relative(closes: list[float], *, peers: list[list[float]] = (), **_kw) -> float:
+    """Cut only when THIS name is falling harder than its cohort.
+
+    An indiscriminate sector-wide selloff leaves the excess near zero, so this
+    stays fully invested through it — which is the intended behaviour if such
+    selloffs mean-revert. It fires when the damage is idiosyncratic.
+    """
+    if not peers:
+        return 1.0
+    own = drawdown(closes)
+    peer_dds = [drawdown(p) for p in peers if len(p) > 1]
+    if not peer_dds:
+        return 1.0
+    return 0.0 if (own - statistics.median(peer_dds)) < PEER_EXCESS_TRIGGER else 1.0
+
+
+def rule_trend(closes: list[float], **_kw) -> float:
+    m = sma(closes, SMA_WINDOW)
+    return 1.0 if m is None or closes[-1] > m else 0.0
+
+
+RULES = {"BH": rule_hold, "A_vol_throttle": rule_vol_throttle,
+         "B_peer_relative": rule_peer_relative, "C_trend_sma200": rule_trend}
+
+
+# ── causal signal series ─────────────────────────────────────────────────────
+# The scalar rules above are the readable reference implementation, but calling
+# them once per day re-derives the whole history every time (O(n^2)). These build
+# the same series in one causal pass; `test_series_match_scalar_rules` pins them
+# to the reference so the fast path can never silently drift from it.
+def _rolling_vol_series(closes: list[float], n: int = VOL_WINDOW) -> list[float | None]:
+    rets = [0.0] + [closes[i] / closes[i - 1] - 1 for i in range(1, len(closes))]
+    out: list[float | None] = [None] * len(closes)
+    for i in range(n, len(closes)):
+        out[i] = statistics.stdev(rets[i - n + 1: i + 1]) * (TRADING_DAYS ** 0.5)
+    return out
+
+
+def series_vol_throttle(closes: list[float]) -> list[float]:
+    rv = _rolling_vol_series(closes)
+    seen: list[float] = []
+    out = []
+    for i in range(len(closes)):
+        if rv[i] is not None:
+            seen.append(rv[i])
+        cur = rv[i]
+        if cur is None or cur <= 0 or len(seen) < 60:
+            out.append(1.0)
+            continue
+        hist = seen          # inclusive of today, matching the scalar reference
+        trigger = _percentile(hist, VOL_PCTL_TRIGGER)
+        out.append(1.0 if cur <= trigger
+                   else max(0.0, min(1.0, statistics.median(hist) / cur)))
+    return out
+
+
+def series_trend(closes: list[float]) -> list[float]:
+    out, run = [], 0.0
+    for i, c in enumerate(closes):
+        if i >= SMA_WINDOW - 1:
+            run = statistics.fmean(closes[i - SMA_WINDOW + 1: i + 1])
+            out.append(1.0 if c > run else 0.0)
+        else:
+            out.append(1.0)
+    return out
+
+
+def _dd_series(closes: list[float], lookback: int = DD_LOOKBACK) -> list[float]:
+    out = []
+    for i in range(len(closes)):
+        w = closes[max(0, i - lookback + 1): i + 1]
+        pk = max(w)
+        out.append(closes[i] / pk - 1 if pk > 0 else 0.0)
+    return out
+
+
+def build_series(prices: dict[str, list[float]], syms: list[str],
+                 rule_name: str) -> dict[str, list[float]]:
+    """Per-symbol exposure series, causal by construction."""
+    if rule_name == "BH":
+        return {s: [1.0] * len(prices[s]) for s in syms}
+    if rule_name == "A_vol_throttle":
+        return {s: series_vol_throttle(prices[s]) for s in syms}
+    if rule_name == "C_trend_sma200":
+        return {s: series_trend(prices[s]) for s in syms}
+    if rule_name == "B_peer_relative":
+        dds = {s: _dd_series(prices[s]) for s in syms}
+        out = {}
+        for s in syms:
+            others = [o for o in syms if o != s]
+            out[s] = [0.0 if (dds[s][i] - statistics.median([dds[o][i] for o in others]))
+                      < PEER_EXCESS_TRIGGER else 1.0 for i in range(len(prices[s]))]
+        return out
+    raise KeyError(rule_name)
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    s = sorted(values)
+    k = (len(s) - 1) * pct / 100.0
+    lo = int(k)
+    return s[lo] if lo + 1 >= len(s) else s[lo] + (s[lo + 1] - s[lo]) * (k - lo)
+
+
+# ── engine ───────────────────────────────────────────────────────────────────
+@dataclass
+class Result:
+    name: str
+    dates: list = field(default_factory=list)
+    curve: list[float] = field(default_factory=list)
+    exposure: list[float] = field(default_factory=list)   # avg equity exposure
+    trades: int = 0
+    cost_paid: float = 0.0
+
+
+def run(dates, prices: dict[str, list[float]], *, equity: dict[str, float],
+        reserve: tuple[str, float], rule_name: str, start_idx: int,
+        cost_bps: float = COST_BPS) -> Result:
+    """Replay one rule.
+
+    `equity` maps symbol -> target weight; `reserve` is (symbol, weight) for the
+    cash-like sleeve that freed capital flows into. Exposure for day i is decided
+    on closes[..i] and earns the day i->i+1 return.
+    """
+    res_sym, res_w = reserve
+    syms = list(equity)
+    sig = build_series(prices, syms, rule_name)
+    nav, prev_exp = 1.0, {s: 1.0 for s in syms}
+    res = Result(name=rule_name)
+
+    for i in range(start_idx, len(dates) - 1):
+        exp = {s: sig[s][i] for s in syms}      # decided on closes[..i]
+
+        turnover = sum(abs(exp[s] - prev_exp[s]) * equity[s] for s in syms)
+        cost = turnover * cost_bps / 10_000.0
+        res.cost_paid += cost * nav
+        if turnover > 1e-9:
+            res.trades += sum(1 for s in syms if abs(exp[s] - prev_exp[s]) > 1e-9)
+
+        ret = 0.0
+        idle = 0.0
+        for s in syms:
+            r = prices[s][i + 1] / prices[s][i] - 1
+            ret += equity[s] * exp[s] * r
+            idle += equity[s] * (1 - exp[s])
+        res_r = prices[res_sym][i + 1] / prices[res_sym][i] - 1
+        ret += (res_w + idle) * res_r          # freed capital parks in the reserve
+
+        nav *= (1 + ret - cost)
+        res.dates.append(dates[i + 1])
+        res.curve.append(nav)
+        res.exposure.append(sum(equity[s] * exp[s] for s in syms) / sum(equity.values()))
+        prev_exp = exp
+    return res

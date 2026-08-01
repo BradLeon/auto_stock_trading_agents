@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from ..coerce import _as_objlist, _as_strlist
 
 
 class LayerAssessView(BaseModel):
@@ -32,6 +34,20 @@ class SectorReviewLLMView(BaseModel):
     company_calls: list[CompanyCallView] = Field(default_factory=list)
     rotation_advice: str = Field(default="", description="层间轮动建议：加/减哪层，为什么")
     top_risks: list[str] = Field(default_factory=list)
+
+    # Same class of failure macro/pead already hit (see agents/coerce.py): a model
+    # occasionally serializes a list field as a string instead of a real array,
+    # which fails validation and (per review.py's docstring) makes the whole run
+    # silently fall back to last week's stored review. Coerce rather than discard.
+    @field_validator("layers", "company_calls", mode="before")
+    @classmethod
+    def _coerce_objlists(cls, v):
+        return _as_objlist(v)
+
+    @field_validator("top_risks", mode="before")
+    @classmethod
+    def _coerce_top_risks(cls, v):
+        return _as_strlist(v)
 
 
 # --------------------------------------------------------------------------- #

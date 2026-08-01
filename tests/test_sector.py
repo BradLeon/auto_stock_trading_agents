@@ -128,6 +128,36 @@ def test_review_clamps_and_persists(monkeypatch):
     assert get_store().latest_sector_review("test_sector").regime == r.regime
 
 
+def test_sector_view_coerces_item_tagged_top_risks():
+    """Reproduces the live 2026-08-01 failure: the model emitted `top_risks` as
+    `<item>...</item>` pseudo-XML instead of a JSON array. Validation rejected the
+    whole review and run() fell back to the PRIOR week's report (see this file's
+    docstring) — same failure class already fixed for macro's `themes`/`top_risks`,
+    just never wired up for sector. Coerce rather than discard."""
+    tagged = ("\n<item>实际利率趋势性抬升压制高估值成长股</item>\n"
+             "<item>高收益利差走阔，信用质量边际转差</item>\n")
+    v = SectorReviewLLMView(regime="r", top_risks=tagged)
+    assert v.top_risks == ["实际利率趋势性抬升压制高估值成长股", "高收益利差走阔，信用质量边际转差"]
+
+    # A JSON-array string (the other known shape) must still coerce correctly.
+    v2 = SectorReviewLLMView(regime="r", top_risks='["能源二次上涨", "信用利差走阔"]')
+    assert v2.top_risks == ["能源二次上涨", "信用利差走阔"]
+
+    # Real arrays must still pass through untouched.
+    plain = SectorReviewLLMView(regime="r", top_risks=["a"])
+    assert plain.top_risks == ["a"]
+
+
+def test_sector_view_coerces_stringified_layers_and_calls():
+    import json
+
+    layers = json.dumps([{"key": "L3", "boom_score": 80.0}])
+    calls = json.dumps([{"symbol": "MSFT", "stance": "增持"}])
+    v = SectorReviewLLMView(regime="r", layers=layers, company_calls=calls)
+    assert len(v.layers) == 1 and v.layers[0].key == "L3"
+    assert len(v.company_calls) == 1 and v.company_calls[0].symbol == "MSFT"
+
+
 def test_review_llm_failure_keeps_prior(monkeypatch):
     monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
     monkeypatch.setattr(assemble, "build",

@@ -71,6 +71,21 @@ def _split_jsonish_array(s: str) -> list[str] | None:
     return [p for p in cleaned if p] or None
 
 
+_ITEM_TAG_RE = re.compile(r"<item>(.*?)</item>", re.DOTALL)
+
+
+def _split_item_tagged(s: str) -> list[str] | None:
+    """Best-effort parse of `<item>a</item><item>b</item>`-style pseudo-XML.
+
+    Reproduced live 2026-08-01 (sector review, `top_risks`): the model emitted
+    the list as `<item>...</item>` markup instead of JSON, which doesn't match
+    `_split_jsonish_array`'s `[...]` shape at all and would otherwise wrap the
+    whole tagged blob as one list element. Returns None if no tag is found.
+    """
+    items = [m.strip() for m in _ITEM_TAG_RE.findall(s)]
+    return [i for i in items if i] or None
+
+
 def _as_strlist(v):
     """Coerce a list-of-strings field.
 
@@ -85,11 +100,11 @@ def _as_strlist(v):
         s = v.strip()
         if not s:
             return []
-        arr = _split_jsonish_array(s)
+        arr = _split_jsonish_array(s) or _split_item_tagged(s)
         return arr if arr is not None else [s]
     # a one-element list whose sole item is itself a JSON-array string
     if isinstance(v, list) and len(v) == 1 and isinstance(v[0], str):
-        arr = _split_jsonish_array(v[0])
+        arr = _split_jsonish_array(v[0]) or _split_item_tagged(v[0])
         if arr is not None:
             return arr
     return v

@@ -42,11 +42,12 @@ def _today_et() -> date:
 
     This used to be `datetime.now().date()` — the naive LOCAL date. On an Asia-based
     machine that is a day AHEAD of ET whenever the job fires after ~12:00 ET, which
-    silently mis-dated everything downstream: the NYSE session check, the events
-    calendar, and the Monday gates for the macro/sector reviews. At the old
-    run_at 16:15 (= 04:15 next day in Asia) it was always wrong; the current 10:30
-    (= 22:30 same day) happens to line up; the 20:00 ET amc score window would be
-    wrong again. So date arithmetic is pinned to ET.
+    silently mis-dated everything downstream: the NYSE session check and the events
+    calendar. At the old run_at 16:15 (= 04:15 next day in Asia) it was always wrong;
+    the current 10:30 (= 22:30 same day) happens to line up; the 20:00 ET amc score
+    window would be wrong again. So date arithmetic for anything NYSE-related is
+    pinned to ET. (The weekly macro/sector review's own day gate is NOT here — see
+    `_today_weekly()` — because that job was deliberately un-pinned from ET.)
     """
     return _now_et().date()
 
@@ -54,6 +55,24 @@ def _today_et() -> date:
 # Kept as an alias: `_today` reads naturally at the call sites and several tests
 # monkeypatch it to pin "today".
 _today = _today_et
+
+
+def _today_weekly() -> date:
+    """Calendar date for the weekly macro/sector review's own day gate.
+
+    Deliberately NOT `_today_et()`: that job neither trades nor needs a NYSE session,
+    so tying its "which day is it" concept to the ET calendar was only ever inherited
+    from the shared helper. It actively breaks once the trigger's own timezone
+    (schedule.weekly_review_tz) disagrees with ET on the calendar day — e.g. Beijing
+    Saturday 08:40 is still Friday evening in New York, so `_today_et().weekday()`
+    would read 4 (Friday), the weekday gate would silently return without running,
+    and the job would look like it fired but produce nothing. Exactly the failure
+    mode `_today_et()` itself exists to prevent, just with the roles reversed.
+    """
+    from ..config import get_config
+
+    tz = ZoneInfo(get_config().app.schedule.weekly_review_tz)
+    return datetime.now(tz).date()
 
 
 def _pead_actions(today: date, earnings_date: date | None, hour: str,
@@ -504,7 +523,7 @@ def _macro_weekly() -> None:
     from .cli import run_macro_review
 
     mr = load_pead_global()["macro_review"]
-    if not mr["enabled"] or _today().weekday() != mr["weekday"]:
+    if not mr["enabled"] or _today_weekly().weekday() != mr["weekday"]:
         return
     try:
         run_macro_review(mr["name"])
@@ -520,7 +539,7 @@ def _sector_weekly() -> None:
     from .cli import run_sector_review
 
     sr = load_pead_global()["sector_review"]
-    if not sr["enabled"] or _today().weekday() != sr["weekday"]:
+    if not sr["enabled"] or _today_weekly().weekday() != sr["weekday"]:
         return
     for name in sr["sectors"]:
         try:
@@ -607,11 +626,15 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
         id="daily_cycle", misfire_grace_time=grace,
     )
-    # Macro/sector weekly review: own job, Saturdays, same time-of-day and grace as
-    # the trading-day cascade — no NYSE session gating needed since it never trades.
+    # Macro/sector weekly review: own job, own time/timezone (schedule.weekly_review_at/
+    # _tz) — it never trades and doesn't need a NYSE session, so there's no reason to
+    # tie it to the daily cascade's ET clock. See _today_weekly() for why the day-gate
+    # inside _macro_weekly/_sector_weekly must track this same timezone, not ET.
+    w_hour, w_minute = (int(x) for x in cfg.weekly_review_at.split(":"))
     scheduler.add_job(
         lambda: _weekly_review(),
-        CronTrigger(day_of_week="sat", hour=hour, minute=minute, timezone=cfg.timezone),
+        CronTrigger(day_of_week="sat", hour=w_hour, minute=w_minute,
+                    timezone=cfg.weekly_review_tz),
         id="weekly_review", misfire_grace_time=grace,
     )
 

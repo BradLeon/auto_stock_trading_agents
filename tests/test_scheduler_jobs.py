@@ -49,15 +49,18 @@ def test_registers_daily_cycle_score_windows_and_reconcile(registered):
                    "journal_reconcile"]
 
 
-def test_weekly_review_is_saturday_at_the_same_time_as_the_daily_cycle(registered):
+def test_weekly_review_has_its_own_saturday_time_and_timezone(registered):
     """Macro/sector review doesn't trade and doesn't need a NYSE session, so it got
-    its own Saturday slot instead of riding the mon-fri trading-day cascade."""
+    its own Saturday slot AND its own timezone (schedule.weekly_review_at/_tz) —
+    deliberately decoupled from the mon-fri daily cycle's ET clock. 2026-08-01:
+    moved to Beijing 08:50 on request, which only works correctly because the
+    weekday gate inside _macro_weekly/_sector_weekly also tracks this timezone
+    (_today_weekly()) rather than ET — see that function's docstring for why."""
     by_id = {j["id"]: j["trigger"] for j in registered.jobs}
-    daily_fields = {f.name: str(f) for f in by_id["daily_cycle"].fields}
     weekly_fields = {f.name: str(f) for f in by_id["weekly_review"].fields}
     assert weekly_fields["day_of_week"] == "sat"
-    assert (weekly_fields["hour"], weekly_fields["minute"]) == \
-        (daily_fields["hour"], daily_fields["minute"])
+    assert (weekly_fields["hour"], weekly_fields["minute"]) == ("8", "50")
+    assert str(by_id["weekly_review"].timezone) == "Asia/Shanghai"
 
 
 def test_reconcile_is_its_own_job_with_a_long_grace(registered):

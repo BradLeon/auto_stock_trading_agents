@@ -170,6 +170,13 @@ class ScheduleConfig(BaseModel):
     # the scheduler runs is decided by whether `ats schedule` is running.
     run_at: str = "16:15"          # daily cycle; PEAD score windows: config/pead.yaml
     timezone: str = "America/New_York"
+    # Macro/sector weekly review: its OWN time/timezone, deliberately decoupled from
+    # run_at/timezone above. It never touches the broker or NYSE sessions, so there is
+    # no reason to tie it to ET — and doing so is actively wrong once the trigger's
+    # local day and the ET calendar day disagree (e.g. Beijing Saturday 08:40 is still
+    # Friday evening in New York). See scheduler._today_weekly().
+    weekly_review_at: str = "10:30"
+    weekly_review_tz: str = "America/New_York"
     # This host sleeps. A job whose trigger fires while the Mac is asleep only runs on
     # wake, and only if it is still inside this window — with the old 1 hour, every
     # overnight trigger was silently dropped. See scheduler.start().

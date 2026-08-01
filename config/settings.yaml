@@ -104,6 +104,11 @@ schedule:
                                 # observed earnings print: config/pead.yaml
                                 # schedule.score_windows (bmo 11:00 / amc 20:00 ET).
   timezone: America/New_York
+  # 宏观/行业周报：独立的时间与时区，不跟 run_at/timezone 绑定。这个 job 不碰 broker、
+  # 不需要 NYSE 交易日，绑定 ET 没有意义——且一旦触发时刻的本地日期和 ET 日历日不一致
+  # 就会出问题（例如北京周六 08:50，纽约那一刻还是周五晚上），所以直接用操作者的时区。
+  weekly_review_at: "08:50"
+  weekly_review_tz: Asia/Shanghai
   # 这台机器会睡眠。触发时刻若在睡眠中，任务只有在唤醒后、且仍在本宽限窗口内才补跑。
   # 实测 2026-07-27：旧值 1 小时导致 daemon 存活 2.5 天、CPU 仅 0.45 秒 —— 每一次触发
   # 都被静默丢弃。最糟的是盘后 20:00 ET 窗口，它落在本地 09:00（清晨）。

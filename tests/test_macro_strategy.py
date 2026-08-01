@@ -210,12 +210,13 @@ def test_scheduler_macro_before_sector(monkeypatch):
     order = []
     monkeypatch.setattr("ats.runtime.cli.run_macro_review", lambda name, **k: order.append("macro"))
     monkeypatch.setattr("ats.runtime.cli.run_sector_review", lambda name, **k: order.append("sector"))
-    monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 4))   # Saturday (new default)
+    # weekday gate now tracks weekly_review_tz, not ET — see _today_weekly().
+    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))   # Saturday
     scheduler._macro_weekly()
     scheduler._sector_weekly()
     assert order == ["macro", "sector"]
 
     order.clear()
-    monkeypatch.setattr(scheduler, "_today", lambda: date(2026, 7, 6))   # Monday — no longer fires
+    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 6))   # Monday — no longer fires
     scheduler._macro_weekly()
     assert order == []

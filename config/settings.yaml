@@ -8,7 +8,7 @@ environment: live           # paper | live  (switch here when going live)
 llm:
   # OpenRouter relay (OpenAI-compatible) — swap provider/model by editing here.
   default_provider: openai
-  default_model: anthropic/claude-opus-4.8
+  default_model: anthropic/claude-opus-5
   temperature: 0.2
   max_tokens: 4096
   timeout_seconds: 120
@@ -18,20 +18,20 @@ llm:
     industry_analyst: {model: deepseek/deepseek-v4-pro}   # PEAD signal-chain read-throughs
     manager: {}            # routing key reused by pead-scorer — real money, keep Opus
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
-    news_triage: {model: deepseek/deepseek-v4-pro, temperature: 0.0, max_tokens: 8192}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
-    context_monitor: {model: deepseek/deepseek-v4-pro, max_tokens: 8192}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
-    intel_brief: {model: anthropic/claude-sonnet-5, temperature: 0.2, max_tokens: 8192}   # 每日情报 digest：逐票投资要点+方向+中文翻译（嵌套结构化，flash/deepseek 偶发翻空 → 用 sonnet 保证每天出）
-    actuals_extract: {model: anthropic/claude-sonnet-5, max_tokens: 8192}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor
+    news_triage: {model: deepseek/deepseek-v4-flash-0731, temperature: 0.0, max_tokens: 8192}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
+    context_monitor: {model: deepseek/deepseek-v4-flash-0731, max_tokens: 8192}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
+    intel_brief: {model: openai/gpt-5.6-terra, temperature: 0.2, max_tokens: 8192}   # 每日情报 digest：逐票投资要点+方向+中文翻译（嵌套结构化，flash/deepseek 偶发翻空 → 用 sonnet 保证每天出；2026-08-03 验证后换 terra，更便宜且智能指数更高）
+    actuals_extract: {model: openai/gpt-5.6-terra, max_tokens: 8192}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor（2026-08-03 换 terra）
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
-    research_extract: {model: deepseek/deepseek-v4-pro}   # supply-chain insight extraction
+    research_extract: {model: deepseek/deepseek-v4-flash-0731}   # supply-chain insight extraction
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.
-    sector_analyst: {model: anthropic/claude-sonnet-5, max_tokens: 24000}   # weekly L1-L6 sector review — gemini-3.1-pro 智能(46)<sonnet(53) 且更贵；sonnet 大结构化更可靠
-    macro_strategist: {model: anthropic/claude-sonnet-5, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 sonnet-5
-    pead_analyst: {model: anthropic/claude-sonnet-5}  # PEAD prep framework/narrative/expectations (token-heavy)
-    structure_analyst: {model: anthropic/claude-sonnet-5, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权
-    invalidation_check: {model: anthropic/claude-sonnet-5, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，用 sonnet 保证判读稳定
+    sector_analyst: {model: openai/gpt-5.6-terra, max_tokens: 24000}   # weekly L1-L6 sector review — 试点(2026-08-03)验证通过：Terra AA智能指数55(max effort)>sonnet-5(53)，且 OpenRouter 限时5折后价格($1/$6)是 sonnet-5($2/$10)的一半；结构化输出稳定，不稳就退回 anthropic/claude-sonnet-5
+    macro_strategist: {model: openai/gpt-5.6-terra, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 terra（2026-08-03）
+    pead_analyst: {model: openai/gpt-5.6-terra}  # PEAD prep framework/narrative/expectations (token-heavy)（2026-08-03 换 terra）
+    structure_analyst: {model: openai/gpt-5.6-terra, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权（2026-08-03 换 terra）
+    invalidation_check: {model: openai/gpt-5.6-terra, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，判读需稳定（2026-08-03 换 terra）
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
     risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus

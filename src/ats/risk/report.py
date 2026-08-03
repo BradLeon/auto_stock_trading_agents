@@ -10,8 +10,11 @@ from ..schemas.risk import RiskReview
 log = logging.getLogger("ats.risk.report")
 
 
-def render(review: RiskReview) -> str:
+def render(review: RiskReview, rc=None) -> str:
     r = review
+    if rc is None:
+        from ..config import get_config
+        rc = get_config().app.risk
     dp_usd = (r.daily_pnl_pct / 100 * r.net_liquidation) if r.daily_pnl_pct is not None else None
     dp_txt = (f"{r.daily_pnl_pct}%（${dp_usd:,.0f}，仅盘中/不含盘前后）" if dp_usd is not None
               else f"{r.daily_pnl_pct}%")
@@ -32,6 +35,8 @@ def render(review: RiskReview) -> str:
         for c in r.cautions:
             lines.append(f"- · **{c.layer}** — {c.actual} vs {c.limit} → {c.action}")
 
+    lines += _layer_overview_lines(r, rc)
+
     if r.margin:
         m = r.margin
         src = "IBKR 权威" if m.source == "ibkr" else ("Reg-T 估算" if m.source == "regt_est" else "—")
@@ -50,7 +55,16 @@ def render(review: RiskReview) -> str:
         lines += ["", "## 组合 Greeks（期权敞口）", "",
                   f"- 净 Δ 名义 **${g.net_delta_notional:,.0f}** · 净 Vega **${g.net_vega:,.0f}**/1%vol"
                   f" · 净 Theta **${g.net_theta:,.0f}**/日 · 净 Gamma {g.net_gamma:,.2f}",
-                  f"- Δ 调整杠杆（含期权）**{g.delta_adj_leverage:.2f}x**"]
+                  f"- Δ 调整杠杆（含期权）**{g.delta_adj_leverage:.2f}x**",
+                  "",
+                  "> 净Δ名义：期权折算成等价正股方向性敞口（多空互抵后的净值），本身不直接参与硬限额判断——"
+                  "真正驱动 L1 单票/产业链层限额的是下方「每标的净敞口」里逐标的的 Δ 权重。",
+                  "> 净Vega：隐含波动率每变动 1 个百分点，期权组合的浮盈亏变化（净值，多空可能相互对冲，"
+                  "会掩盖单腿上的集中 vega 风险）。",
+                  "> 净Theta：每日时间损耗带来的浮盈亏。",
+                  "> 净Gamma：标的每变动 $1，Δ名义变化的速度——净空 gamma 意味着不利方向上敞口会非线性加速恶化；"
+                  "**当前没有硬限额覆盖这一项，需人工盯梢**，尤其是临近到期、IV 偏高的空头期权。",
+                  "> Δ调整杠杆：期权按 Δ 折算成正股等价敞口后的组合经济杠杆，区别于账面持仓市值杠杆。"]
 
     if r.cash_equivalents:
         lines += ["", "## 现金等价物（haircut 计入有效现金）", "",
@@ -108,7 +122,11 @@ def render(review: RiskReview) -> str:
             lines.append(f"- {c.weight:.0%} avgρ={c.avg_corr}: {', '.join(c.members)}")
 
     if r.stress:
-        lines += ["", "## 情景压测", "", "| 情景 | 损失(%NAV) |", "|---|---|"]
+        lines += ["", "## 情景压测", "",
+                  "> 正股用 beta 线性近似（Σ风险权重×beta×市场冲击），期权用 Black-Scholes 全额重定价"
+                  "（现货冲击与隐含波动率冲击联动，模拟崩盘时 IV 飙升），比线性 Δ 近似更能捕捉 "
+                  "gamma/vega 的非线性尾部损失。",
+                  "", "| 情景 | 损失(%NAV) |", "|---|---|"]
         for s in r.stress:
             lines.append(f"| {s.scenario} | {s.loss_pct}% |")
 
@@ -119,6 +137,113 @@ def render(review: RiskReview) -> str:
 
     lines += ["", "---", f"*{r.notes}*", ""]
     return "\n".join(lines)
+
+
+def _layer_overview_lines(r: RiskReview, rc) -> list[str]:
+    """One-glance L1~L6 status table. Breached/caution layers point back to the lists
+    already rendered above (never re-states their text, to avoid the two copies drifting);
+    clean layers show their actual reading vs the configured limit so headroom is visible
+    even when nothing fired — this is what the rest of the report doesn't otherwise expose
+    per-layer."""
+
+    def status_for(prefix: str) -> tuple[str, str] | None:
+        n_b = sum(1 for b in r.breaches if b.layer.startswith(prefix))
+        n_c = sum(1 for c in r.cautions if c.layer.startswith(prefix))
+        if n_b:
+            return f"⚠️ {n_b} 项破限", "详见上方「破限」列表"
+        if n_c:
+            return f"· {n_c} 项提示", "详见上方「提示」列表"
+        return None
+
+    rows: list[tuple[str, str, str, str]] = []
+
+    st = status_for("L1-")
+    if st:
+        status, reading = st
+    else:
+        status = "✅ 正常"
+        parts = []
+        if r.underlying_exposures:
+            top = max(r.underlying_exposures, key=lambda ue: abs(ue.net_delta_weight))
+            parts.append(f"单票最大 {top.symbol} {abs(top.net_delta_weight):.0%}"
+                         f"（限{rc.max_position_pct:.0%}）")
+        if r.chain_layers:
+            top_l = max(r.chain_layers, key=lambda le: (le.weight / le.cap) if le.cap else 0.0)
+            cap_txt = f"（限{top_l.cap:.0%}）" if top_l.cap is not None else ""
+            parts.append(f"产业链层最高 {top_l.label} {top_l.weight:.0%}{cap_txt}")
+        reading = " · ".join(parts) or "—"
+    rows.append(("L1 标的", "单票/产业链层/止损", status, reading))
+
+    st = status_for("L2-")
+    if st:
+        status, reading = st
+    else:
+        status = "✅ 正常"
+        parts = []
+        if r.effective_leverage is not None:
+            parts.append(f"有效杠杆 {r.effective_leverage:.2f}x（限{rc.max_gross_leverage}x）")
+        parts.append(f"有效现金 {r.effective_cash_pct:.0%}（限≥{rc.cash_floor_pct:.0%}）")
+        if r.margin and r.margin.margin_util is not None:
+            parts.append(f"保证金利用率 {r.margin.margin_util:.0%}（限{rc.max_margin_util_pct:.0%}）")
+        reading = " · ".join(parts) or "—"
+    rows.append(("L2 组合", "杠杆/现金/保证金", status, reading))
+
+    st = status_for("L3-")
+    if st:
+        status, reading = st
+    else:
+        status = "✅ 正常"
+        parts = []
+        if r.portfolio_beta is not None:
+            parts.append(f"组合beta {r.portfolio_beta}（限≤{rc.beta_cap}）")
+        if r.clusters:
+            parts.append(f"最大相关簇 {r.clusters[0].weight:.0%}（限≤{rc.cluster_weight_cap:.0%}）")
+        else:
+            parts.append("暂无≥2只标的的相关簇")
+        reading = " · ".join(parts) or "—"
+    rows.append(("L3 市场/因子", "beta/相关簇", status, reading))
+
+    st = status_for("L4-")
+    if st:
+        status, reading = st
+    else:
+        status = "✅ 正常"
+        parts = []
+        if r.drawdown_pct is not None:
+            parts.append(f"回撤 {r.drawdown_pct}%（限≥-{rc.max_drawdown_pct:.0%}）")
+        if r.daily_pnl_pct is not None:
+            parts.append(f"日盈亏 {r.daily_pnl_pct}%（限≥-{rc.daily_loss_limit_pct:.0%}）")
+        reading = " · ".join(parts) or "—"
+    rows.append(("L4 亏损/回撤", "回撤/日亏", status, reading))
+
+    st = status_for("L5-")
+    if st:
+        status, reading = st
+    else:
+        status = "✅ 正常"
+        if r.stress:
+            worst = min(r.stress, key=lambda s: s.loss_pct)
+            reading = f"最差情景「{worst.scenario}」{worst.loss_pct}%（限≥-{rc.max_stress_loss_pct:.0%}）"
+        else:
+            reading = "未跑压测"
+    rows.append(("L5 尾部/压测", "情景压测", status, reading))
+
+    st = status_for("L6-")
+    if st:
+        status, reading = st
+    else:
+        status = "✅ 正常"
+        if r.event_risks:
+            worst_e = max(r.event_risks, key=lambda e: e.event_loss_pct)
+            reading = f"{worst_e.symbol} 事件损失 {worst_e.event_loss_pct:.1f}%（限≤{rc.max_event_loss_pct:.0%}）"
+        else:
+            reading = "近期无财报事件敞口"
+    rows.append(("L6 事件", "财报事件", status, reading))
+
+    lines = ["", "## 六层风控一览", "", "| 层 | 覆盖 | 状态 | 读数 |", "|---|---|---|---|"]
+    for label, scope, status, reading in rows:
+        lines.append(f"| {label} | {scope} | {status} | {reading} |")
+    return lines
 
 
 def write(review: RiskReview, out_dir: str) -> Path | None:

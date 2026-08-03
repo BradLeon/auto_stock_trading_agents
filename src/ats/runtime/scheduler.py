@@ -409,8 +409,9 @@ def _perf_snapshot() -> None:
             risk_assess.enrich_options(pf)
             review = risk_assess.assess(pf)
             get_store().save_risk_review(review)
-            log.info("risk snapshot: state=%s breaches=%d", review.risk_state, len(review.breaches))
-            if review.risk_state != "normal":
+            state = review.directive.state if review.directive else review.risk_state
+            log.info("risk snapshot: state=%s breaches=%d", state, len(review.breaches))
+            if state not in ("NORMAL", "normal"):
                 _push_risk_alert(review)
     except Exception as exc:  # noqa: BLE001 - risk snapshot must not break the daily job
         log.warning("risk snapshot failed: %s", exc)
@@ -424,9 +425,10 @@ def _push_risk_alert(review) -> None:
 
         if not load_pead_global()["monitor"].get("push_context_updates", False):
             return
+        state = review.directive.state if review.directive else review.risk_state
         get_channel("feishu").push(Notification(
-            kind="error" if review.risk_state == "derisk" else "info",
-            title=f"风控告警 — {review.risk_state} ({len(review.breaches)} 破限)",
+            kind="error" if state in ("DATA_INVALID", "EMERGENCY", "derisk") else "info",
+            title=f"风控告警 — {state} ({len(review.breaches)} 破限)",
             body=review.regime_block()))
     except Exception as exc:  # noqa: BLE001 - push is best-effort
         log.info("risk alert push skipped: %s", exc)

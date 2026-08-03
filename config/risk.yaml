@@ -1,0 +1,91 @@
+# 风控配置唯一入口。
+# 行业结构/标的归属仍在 config/sectors/*.yaml；所有可调风险阈值都只在本文件维护。
+
+# L1-L6 全局限额
+limits:
+  # L1 标的
+  max_position_pct: 0.25
+  max_sector_pct: 0.50
+  stop_loss_pct: 0.25
+  # L2 组合
+  max_gross_leverage: 1.0
+  max_single_order_usd: 25000
+  cash_floor_pct: 0.10
+  max_margin_util_pct: 0.50
+  min_excess_liquidity_pct: 0.10
+  # L3 市场/因子
+  beta_cap: 2.0
+  cluster_corr_threshold: 0.70
+  cluster_weight_cap: 0.75
+  # L4 亏损/回撤
+  max_drawdown_pct: 0.15
+  daily_loss_limit_pct: 0.05
+  # L5 尾部/压测
+  max_stress_loss_pct: 0.25
+  stress_market_shocks: [-0.10, -0.20]
+  stress_vol_shocks: [0.20, 0.50]
+  ai_bubble_cluster_shock: -0.35
+  ai_bubble_vol_shock: 0.80
+  # L6 事件/流动性
+  max_event_loss_pct: 0.03
+  max_pct_adv: 0.10
+  # 期权 Greeks/止损
+  option_risk_free_rate: 0.045
+  max_net_vega_pct: 0.05
+  short_option_loss_mult: 2.0
+  # symbol -> haircut；0=全额现金信用，1=完全作为风险资产
+  cash_equivalents:
+    SGOV: 0.0
+    SHV: 0.0
+    BRK-B: 0.0
+
+# 各行业产业链层限额；key 必须匹配 config/sectors/<sector>.yaml 的 layer key
+sector_layer_caps:
+  ai_hardware:
+    L1_app: {weight_cap: 0.15}
+    L2_cloud: {weight_cap: 0.25}
+    L3_dc_infra: {weight_cap: 0.15, weight_cap_hard: 0.20}
+    L4_chip_design: {weight_cap: 0.15}
+    L5_fab: {weight_cap: 0.30}
+    L6_equipment: {weight_cap: 0.15}
+
+# sell-put 资金生存性
+option_survival:
+  max_full_assignment_nav_pct: 1.00
+  max_probability_weighted_nav_pct: 0.35
+  max_p99_assignment_nav_pct: 0.75
+  max_peak_expiry_nav_pct: 0.50
+  expiry_horizons_days: [7, 30, 90, 365]
+  p99_z_score: 2.326
+
+# Chief 状态机
+directive:
+  limited_headroom_pct: 0.10
+
+# 执行证券 -> 经济风险实体；未配置证券默认自身为实体、1x 敞口
+instruments:
+  "7709":
+    economic_entity: SK_HYNIX
+    label: SK Hynix
+    risk_symbol: HY9H
+    layer_symbol: HY9H
+    exposure_multiplier: 2.0
+    product_type: leveraged_etf
+  HY9H:
+    economic_entity: SK_HYNIX
+    label: SK Hynix
+    risk_symbol: HY9H
+    layer_symbol: HY9H
+    product_type: cross_listing
+  SKHY:
+    economic_entity: SK_HYNIX
+    label: SK Hynix
+    risk_symbol: HY9H
+    layer_symbol: HY9H
+    product_type: adr
+  "000660.KS":
+    economic_entity: SK_HYNIX
+    label: SK Hynix
+    risk_symbol: HY9H
+    layer_symbol: HY9H
+    product_type: primary_listing

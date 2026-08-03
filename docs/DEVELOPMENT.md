@@ -70,7 +70,8 @@ src/ats/
   schemas/             # 每个业务域一个文件，见第 3 节
   skills/<slug>/SKILL.md  # 每个 LLM 角色一份，见第 4 节
 config/
-  settings.yaml        # 全局：llm.routing / risk / 通道等
+  settings.yaml        # 全局：llm.routing / broker / 通道 / 调度等
+  risk.yaml            # 风控唯一入口：限额 / 层 cap / 期权生存 / 实体映射
   pead.yaml            # PEAD 全局：targets/schedule windows/monitor 开关
   pead/<SYM>.yaml       # 单票覆盖，合并在 pead/_defaults.yaml 之上
   sectors/*.yaml macro.yaml technical.yaml events.yaml news_sources.yaml watchlist.yaml

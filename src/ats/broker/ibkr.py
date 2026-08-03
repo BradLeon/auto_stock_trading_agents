@@ -79,7 +79,8 @@ class IBKRBroker:
     # --- reads ----------------------------------------------------------- #
     def get_portfolio(self) -> PortfolioSnapshot:
         with self.session() as ib:
-            summary = {av.tag: av.value for av in ib.accountSummary()}
+            account_values = list(ib.accountSummary())
+            base_currency, exchange_rates, summary = _account_value_context(account_values)
             items = ib.portfolio()
             net_liq = float(summary.get("NetLiquidation", 0) or 0)
             cash = float(summary.get("TotalCashValue", 0) or 0)
@@ -89,7 +90,11 @@ class IBKRBroker:
             opt_contracts: list[tuple[Position, object]] = []   # (position, ib contract) for greeks
             for it in items:
                 sym = it.contract.symbol
-                mv = float(it.marketValue)
+                currency = (getattr(it.contract, "currency", "") or base_currency).upper()
+                fx = _fx_rate(currency, base_currency, exchange_rates, sym)
+                mv_local = float(it.marketValue)
+                upnl_local = float(it.unrealizedPNL)
+                mv = mv_local * fx
                 sec_type = getattr(it.contract, "secType", "STK") or "STK"
                 pos = Position(
                     symbol=sym,
@@ -99,8 +104,10 @@ class IBKRBroker:
                     avg_cost=float(it.averageCost),
                     market_price=float(it.marketPrice),
                     market_value=mv,
-                    unrealized_pnl=float(it.unrealizedPNL),
+                    unrealized_pnl=upnl_local * fx,
                     weight=(mv / net_liq) if net_liq else 0.0,
+                    currency=currency, fx_rate_to_base=fx,
+                    market_value_local=mv_local, unrealized_pnl_local=upnl_local,
                 )
                 if sec_type == "OPT":
                     c = it.contract
@@ -148,6 +155,7 @@ class IBKRBroker:
             return PortfolioSnapshot(
                 as_of=_now(),
                 account_id=acct or (items[0].account if items else ""),
+                base_currency=base_currency, exchange_rates=exchange_rates,
                 net_liquidation=net_liq, cash=cash, gross_exposure=gross,
                 net_exposure=gross, leverage=(gross / net_liq) if net_liq else 0.0,
                 daily_pnl=daily_pnl, realized_pnl=realized_pnl,
@@ -375,6 +383,45 @@ def _fnum(v) -> float | None:
     except (TypeError, ValueError):
         return None
     return f if f == f else None   # filter NaN
+
+
+def _account_value_context(values) -> tuple[str, dict[str, float], dict[str, str]]:
+    """Select base-currency account totals and retain FX rates for portfolio conversion.
+
+    IBKR portfolio-item prices/values are denominated in the contract currency, while
+    account-summary totals such as NetLiquidation are in the account base currency.
+    Never collapse account values by tag before inspecting their currency.
+    """
+    base_currency = next(
+        ((getattr(v, "currency", "") or "").upper() for v in values
+         if getattr(v, "tag", "") == "NetLiquidation"
+         and (getattr(v, "currency", "") or "").upper() not in ("", "BASE")),
+        "USD",
+    )
+    rates: dict[str, float] = {base_currency: 1.0, "BASE": 1.0}
+    for v in values:
+        if getattr(v, "tag", "") != "ExchangeRate":
+            continue
+        currency = (getattr(v, "currency", "") or "").upper()
+        rate = _fnum(getattr(v, "value", None))
+        if currency and rate is not None:
+            rates[currency] = rate
+
+    summary: dict[str, str] = {}
+    for v in values:
+        currency = (getattr(v, "currency", "") or "").upper()
+        if currency in (base_currency, "BASE", ""):
+            summary[getattr(v, "tag", "")] = getattr(v, "value", "")
+    return base_currency, rates, summary
+
+
+def _fx_rate(currency: str, base_currency: str, rates: dict[str, float], symbol: str) -> float:
+    rate = rates.get(currency)
+    if rate is None:
+        raise IBKRUnavailable(
+            f"missing {currency}->{base_currency} exchange rate for {symbol}; "
+            "refusing to mix local-currency market value with base-currency NAV")
+    return rate
 
 
 def _map_status(status: str) -> str:

@@ -132,14 +132,16 @@ def perf_risk_digest() -> Path | None:
         dp = review.daily_pnl_pct
         dp_txt = f" · 日盈亏 {dp}%（${dp / 100 * nl:,.0f}，盘中）" if dp is not None else ""
         body = [f"NetLiq ${nl:,.0f}{dp_txt}"]
-        line = f"状态 {review.risk_state} · 现金(有效) {review.effective_cash_pct:.0%}"
+        state = review.directive.state if review.directive else review.risk_state
+        line = f"状态 {state} · 现金(有效) {review.effective_cash_pct:.0%}"
         if review.portfolio_beta is not None:
             line += f" · beta {review.portfolio_beta:.2f}"
         body.append(line)
         for b in review.breaches:            # human-readable: what the metric is + 实值/限额
             body.append(f"⚠ {_humanize_breach(b)}")
-        _push("error" if review.risk_state == "derisk" else "info",
-              f"绩效·风控 {now:%m-%d} — {review.risk_state}（{len(review.breaches)} 破限）", "\n".join(body))
+        urgent = state in ("DATA_INVALID", "EMERGENCY", "derisk")
+        _push("error" if urgent else "info",
+              f"绩效·风控 {now:%m-%d} — {state}（{len(review.breaches)} 破限）", "\n".join(body))
     elif perf is not None:
         _push("info", f"绩效 {now:%m-%d}",
               f"NetLiq ${perf.net_liquidation:,.0f} · 日盈亏 ${perf.daily_pnl:,.0f}")

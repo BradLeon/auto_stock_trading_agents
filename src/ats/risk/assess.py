@@ -10,20 +10,26 @@ computed in `enrich_options`. See risk/options_math.py for the quant core.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import datetime, timezone
 
 from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.risk import (
     Breach,
+    AssignmentRisk,
     CashEquivalent,
     Cluster,
+    EconomicExposure,
+    ExpiryFundingBucket,
     EventRisk,
     LayerExposure,
     MarginSummary,
     OptionRisk,
+    OptionSurvivalSummary,
     PortfolioGreeks,
     RiskReview,
+    RiskDirective,
     StressResult,
     SymbolLayer,
     UnderlyingExposure,
@@ -50,13 +56,16 @@ def _is_opt(p) -> bool:
 def enrich_beta(portfolio: PortfolioSnapshot) -> None:
     """Fill Position.beta for held equities (once, paced) — not done in get_portfolio.
     Option underlyings get their beta in enrich_options (keyed on the underlying symbol)."""
+    from ..config import load_instrument_risk_registry
     from ..data import fundamentals
 
+    registry = load_instrument_risk_registry()
     for p in portfolio.positions:
         if _is_opt(p):
             continue
         if p.beta is None:
-            p.beta = fundamentals.fetch_light(p.symbol).get("beta")
+            risk_symbol = registry.resolve(p.symbol).risk_symbol
+            p.beta = fundamentals.fetch_light(risk_symbol).get("beta")
             time.sleep(0.5)
 
 
@@ -64,13 +73,14 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
     """Fill option greeks (BSM fallback when IBKR didn't supply them) + underlying beta on each
     OPT Position. Mirrors enrich_beta: fetches/derives data, mutates positions in place, never
     raises. Positions already carrying IBKR greeks (greeks_source=='ibkr') are left as-is."""
-    from ..config import get_config
+    from ..config import get_config, load_instrument_risk_registry
     from ..data import fundamentals
 
     opts = [p for p in portfolio.positions if _is_opt(p)]
     if not opts:
         return
     rc = get_config().app.risk
+    registry = load_instrument_risk_registry()
     r = rc.option_risk_free_rate
 
     # Batch spot for underlyings IBKR didn't already price (undPrice).
@@ -90,7 +100,7 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
         # underlying beta (for L3) — key on the underlying, cache on the option position
         if p.beta is None:
             try:
-                p.beta = fundamentals.fetch_light(under).get("beta")
+                p.beta = fundamentals.fetch_light(registry.resolve(under).risk_symbol).get("beta")
                 time.sleep(0.5)
             except Exception as exc:  # noqa: BLE001
                 log.warning("option beta skipped for %s: %s", under, exc)
@@ -133,7 +143,7 @@ def _classify_strategy(right: str, qty: float, shares_held: float, mult: float) 
     return "buy_call" if is_call else "buy_put"    # long
 
 
-def _build_option_risks(option_positions, equities, rc) -> list[OptionRisk]:
+def _build_option_risks(option_positions, equities, rc, registry) -> list[OptionRisk]:
     """Construct OptionRisk (strategy, greeks, delta-notional, Reg-T margin estimate) per OPT."""
     shares_by_under: dict[str, float] = {}
     for p in equities:
@@ -142,33 +152,197 @@ def _build_option_risks(option_positions, equities, rc) -> list[OptionRisk]:
     out: list[OptionRisk] = []
     for p in option_positions:
         under = p.underlying or p.symbol
+        meta = registry.resolve(under)
         mult = p.multiplier or 100.0
         shares_held = shares_by_under.get(_norm_sym(under), 0.0)
         strat = _classify_strategy(p.right or "C", p.qty, shares_held, mult)
         S = p.underlying_price
         priced = p.delta is not None and S is not None and bool(p.strike)
-        dn = (p.delta * p.qty * mult * S) if priced else 0.0
+        dn = (p.delta * p.qty * mult * S * p.fx_rate_to_base) if priced else 0.0
         margin = None
         if p.strike and S is not None:
-            margin = options_math.regt_margin(strat, S, p.strike, p.market_price or 0.0,
-                                              abs(p.qty), mult)
+            margin = (options_math.regt_margin(strat, S, p.strike, p.market_price or 0.0,
+                                               abs(p.qty), mult) * p.fx_rate_to_base)
         out.append(OptionRisk(
             symbol=p.symbol, underlying=under, sec_type=p.sec_type or "OPT",
             right=(p.right or ""), strike=p.strike or 0.0, expiry=p.expiry or "",
             qty=p.qty, multiplier=mult, strategy=strat, spot=S, iv=p.iv,
             delta=p.delta, gamma=p.gamma, vega=p.vega, theta=p.theta,
             delta_notional=dn, margin=margin, premium_mv=p.market_value,
-            unrealized_pnl=p.unrealized_pnl, priced=priced, greeks_source=p.greeks_source))
+            unrealized_pnl=p.unrealized_pnl, priced=priced, greeks_source=p.greeks_source,
+            economic_entity=meta.economic_entity, risk_symbol=meta.risk_symbol,
+            exposure_multiplier=meta.exposure_multiplier, fx_rate_to_base=p.fx_rate_to_base))
     return out
+
+
+def _days_to_expiry(expiry: str) -> int:
+    try:
+        ed = datetime.strptime(expiry.replace("-", "")[:8], "%Y%m%d").date()
+    except (ValueError, TypeError):
+        return 0
+    return max((ed - datetime.now(timezone.utc).date()).days, 0)
+
+
+def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float) -> None:
+    """Funding survival for short puts, separated from delta/BSM mark-to-market risk."""
+    assignments: list[AssignmentRisk] = []
+    by_expiry: dict[str, float] = {}
+    for o in r.option_risks:
+        if o.strategy != "sell_put" or o.qty >= 0:
+            continue
+        full = o.strike * abs(o.qty) * o.multiplier * o.fx_rate_to_base
+        probability = None
+        source = "unknown"
+        T = options_math.years_to_expiry(o.expiry) if o.expiry else 0.0
+        if o.spot and o.strike and o.iv is not None:
+            probability = options_math.itm_probability(
+                o.spot, o.strike, T, rc.option_risk_free_rate, o.iv, is_call=False)
+            source = "bsm_N(-d2)"
+        elif o.delta is not None:
+            probability = min(max(abs(o.delta), 0.0), 1.0)
+            source = "abs_delta_fallback"
+        expected = full * probability if probability is not None else full
+        assignments.append(AssignmentRisk(
+            symbol=o.symbol, underlying=o.underlying, expiry=o.expiry,
+            days_to_expiry=_days_to_expiry(o.expiry), full_assignment_notional=round(full, 2),
+            assignment_probability=probability, probability_source=source,
+            probability_weighted_notional=round(expected, 2)))
+        by_expiry[o.expiry] = by_expiry.get(o.expiry, 0.0) + full
+
+    effective_cash = r.effective_cash_pct * net_liq
+    liquidity_candidates = [effective_cash]
+    if portfolio.excess_liquidity is not None:
+        liquidity_candidates.append(portfolio.excess_liquidity)
+    available = max(liquidity_candidates, default=0.0)
+    total_full = sum(a.full_assignment_notional for a in assignments)
+    total_expected = sum(a.probability_weighted_notional for a in assignments)
+    peak_expiry = max(by_expiry.values(), default=0.0)
+    unknown = any(a.assignment_probability is None for a in assignments)
+
+    horizons = sorted(set(policy.expiry_horizons_days))
+    max_days = max((a.days_to_expiry for a in assignments), default=0)
+    if max_days and (not horizons or max_days > horizons[-1]):
+        horizons.append(max_days)
+    buckets: list[ExpiryFundingBucket] = []
+    for horizon in horizons:
+        active = [a for a in assignments if a.days_to_expiry <= horizon]
+        full = sum(a.full_assignment_notional for a in active)
+        expected = sum(a.probability_weighted_notional for a in active)
+        variance = sum(
+            a.full_assignment_notional ** 2 * (a.assignment_probability or 0.0)
+            * (1.0 - (a.assignment_probability or 0.0))
+            for a in active if a.assignment_probability is not None)
+        p99 = full if any(a.assignment_probability is None for a in active) else min(
+            full, expected + policy.p99_z_score * math.sqrt(variance))
+        buckets.append(ExpiryFundingBucket(
+            label=f"≤{horizon}天", through_days=horizon,
+            expiries=sorted({a.expiry for a in active}), full_notional=round(full, 2),
+            expected_notional=round(expected, 2), p99_notional=round(p99, 2)))
+    p99_total = max((b.p99_notional for b in buckets), default=0.0)
+    summary = OptionSurvivalSummary(
+        assignments=assignments, expiry_buckets=buckets,
+        total_full_assignment_notional=round(total_full, 2),
+        probability_weighted_notional=round(total_expected, 2),
+        p99_assignment_notional=round(p99_total, 2),
+        peak_expiry_full_notional=round(peak_expiry, 2), available_liquidity=round(available, 2),
+        p99_funding_gap=round(max(p99_total - available, 0.0), 2),
+        has_unknown_probability=unknown,
+        notes="到期ITM概率采用BSM N(-d2)；美式期权可能提前指派。P99按仓位级Bernoulli近似。")
+    r.option_survival = summary
+    if not net_liq or not assignments:
+        return
+
+    checks = [
+        ("L2-期权全额指派", total_full / net_liq,
+         policy.max_full_assignment_nav_pct, "降低灾难性全指派名义"),
+        ("L2-期权概率占用", total_expected / net_liq,
+         policy.max_probability_weighted_nav_pct, "降低概率加权资金占用"),
+        ("L2-期权P99指派", p99_total / net_liq,
+         policy.max_p99_assignment_nav_pct, "降低P99联合指派资金"),
+        ("L2-期权单日到期峰值", peak_expiry / net_liq,
+         policy.max_peak_expiry_nav_pct, "分散同到期日或降低手数"),
+    ]
+    for layer, actual, limit, action in checks:
+        if actual > limit:
+            r.breaches.append(Breach(layer=layer, limit=f"≤{limit:.0%} NAV",
+                                     actual=f"{actual:.0%} NAV", action=action))
+    if summary.p99_funding_gap > 0:
+        r.breaches.append(Breach(
+            layer="L2-期权生存流动性", limit="P99指派≤可用流动性",
+            actual=f"缺口 ${summary.p99_funding_gap:,.0f}", action="补流动性/平仓/错开到期"))
+    if unknown:
+        r.breaches.append(Breach(
+            layer="L2-期权指派数据", limit="短put概率必须可估",
+            actual="存在未知指派概率", action="DATA_INVALID：补齐spot/IV/delta"))
+
+
+def _build_directive(r: RiskReview, rc, policy, net_liq: float) -> RiskDirective:
+    worst_stress = min((s.loss_pct for s in r.stress), default=0.0)
+    max_entity = max((abs(e.net_delta_weight) for e in r.economic_exposures), default=0.0)
+    budgets = {
+        "single_entity_delta": round(max(rc.max_position_pct - max_entity, 0.0), 4),
+        "portfolio_beta": round(max(rc.beta_cap - (r.portfolio_beta or 0.0), 0.0), 4),
+        "stress_loss": round(max(rc.max_stress_loss_pct - abs(min(worst_stress, 0.0)) / 100, 0.0), 4),
+        "cash_above_floor": round(max(r.effective_cash_pct - rc.cash_floor_pct, 0.0), 4),
+    }
+    if r.option_survival and net_liq:
+        budgets["p99_assignment"] = round(max(
+            policy.option_survival.max_p99_assignment_nav_pct
+            - r.option_survival.p99_assignment_notional / net_liq, 0.0), 4)
+
+    blocked_entities = sorted(
+        e.economic_entity for e in r.economic_exposures
+        if abs(e.net_delta_weight) > rc.max_position_pct)
+    blocked_layers = sorted(le.key for le in r.chain_layers if le.breached)
+    data_invalid = net_liq <= 0 or bool(
+        r.option_survival and r.option_survival.has_unknown_probability)
+    emergency = any(b.layer.startswith(("L4-回撤", "L4-日亏", "L2-期权全额指派"))
+                    for b in r.breaches)
+    if r.margin and r.margin.excess_liquidity is not None and r.margin.excess_liquidity <= 0:
+        emergency = True
+
+    if data_invalid:
+        state = "DATA_INVALID"
+        actions = ["reduce", "cancel_pending"]
+    elif emergency:
+        state = "EMERGENCY"
+        actions = ["reduce", "close_short_options", "raise_liquidity"]
+    elif r.breaches:
+        state = "REPAIR_ONLY"
+        actions = ["reduce", "hedge_if_verified_improving"]
+    else:
+        upper_utils = [
+            max_entity / rc.max_position_pct if rc.max_position_pct else 0.0,
+            (r.portfolio_beta or 0.0) / rc.beta_cap if rc.beta_cap else 0.0,
+            abs(min(worst_stress, 0.0)) / 100 / rc.max_stress_loss_pct
+            if rc.max_stress_loss_pct else 0.0,
+        ]
+        near_limit = max(upper_utils, default=0.0) >= 1.0 - policy.directive.limited_headroom_pct
+        state = "LIMITED" if (r.cautions or near_limit) else "NORMAL"
+        actions = ["increase_within_budget", "hedge", "reduce"] if state == "LIMITED" else [
+            "increase_within_budget", "hedge", "reduce"]
+    return RiskDirective(
+        state=state, can_increase_risk=state in ("NORMAL", "LIMITED"),
+        allowed_actions=actions, blocked_entities=blocked_entities,
+        blocked_layers=blocked_layers, risk_budget_remaining=budgets,
+        required_repairs=[f"{b.layer}: {b.actual}→{b.limit}" for b in r.breaches],
+        reasons=[b.action for b in r.breaches] + [c.action for c in r.cautions])
 
 
 def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
            event_data: dict[str, dict] | None = None) -> RiskReview:
     """event_data: {symbol: {expected_move_pct, ...}} for held names near earnings."""
-    from ..config import get_config, load_sector_config
+    from ..config import (
+        get_config,
+        load_instrument_risk_registry,
+        load_risk_policy,
+        load_sector_config,
+    )
     from ..memory import get_store
 
     rc = get_config().app.risk
+    registry = load_instrument_risk_registry()
+    risk_policy = load_risk_policy()
     net_liq = portfolio.net_liquidation
 
     # Options are now FOLDED INTO the 6 layers via delta-notional + BSM reval (no longer exempt).
@@ -188,7 +362,7 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         cash_pct=(portfolio.cash / net_liq) if net_liq else 0.0)
 
     # --- option risk decomposition (greeks / strategy / delta-notional / margin) ---
-    r.option_risks = _build_option_risks(option_positions, equities, rc)
+    r.option_risks = _build_option_risks(option_positions, equities, rc, registry)
 
     for p in equities:
         hc = ce_map.get(p.symbol)
@@ -208,33 +382,67 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         r.effective_leverage = round(
             (portfolio.gross_exposure - cash_credit_total - option_mv_total) / net_liq, 2)
 
+    _assess_option_survival(
+        r, portfolio, rc, risk_policy.option_survival, net_liq)
+
     # --- per-underlying NET delta exposure (equity risk weight + option delta-notional) ---
     beta_map: dict[str, float | None] = {}
     equity_w: dict[str, float] = {}
+    capital_w: dict[str, float] = {}
     option_w: dict[str, float] = {}
+    risk_symbols: dict[str, str] = {}
+    layer_symbols: dict[str, str] = {}
+    members: dict[str, set[str]] = {}
+    disp: dict[str, str] = {}
     for p in equities:
-        s = _norm_sym(p.symbol)
-        equity_w[s] = equity_w.get(s, 0.0) + risk_wt[p.symbol]
+        meta = registry.resolve(p.symbol)
+        s = meta.economic_entity
+        capital_w[s] = capital_w.get(s, 0.0) + risk_wt[p.symbol]
+        equity_w[s] = equity_w.get(s, 0.0) + risk_wt[p.symbol] * meta.exposure_multiplier
+        risk_symbols[s] = meta.risk_symbol
+        layer_symbols[s] = meta.layer_symbol
+        members.setdefault(s, set()).add(p.symbol)
+        disp[s] = meta.label
         if p.beta is not None:
             beta_map[s] = p.beta
     for o in r.option_risks:
-        s = _norm_sym(o.underlying)
+        s = o.economic_entity or _norm_sym(o.underlying)
         if net_liq:
-            option_w[s] = option_w.get(s, 0.0) + o.delta_notional / net_liq
+            option_w[s] = (option_w.get(s, 0.0)
+                           + o.delta_notional / net_liq * o.exposure_multiplier)
+        meta = registry.resolve(o.underlying)
+        risk_symbols[s] = meta.risk_symbol
+        layer_symbols[s] = meta.layer_symbol
+        members.setdefault(s, set()).add(o.symbol)
+        disp[s] = meta.label
     for p in option_positions:            # underlying betas for option-only names
-        s = _norm_sym(p.underlying or p.symbol)
+        meta = registry.resolve(p.underlying or p.symbol)
+        s = meta.economic_entity
         if s not in beta_map and p.beta is not None:
             beta_map[s] = p.beta
-    # display symbol per normalized key (prefer the equity/underlying spelling)
-    disp: dict[str, str] = {}
-    for p in equities:
-        disp.setdefault(_norm_sym(p.symbol), p.symbol)
-    for o in r.option_risks:
-        disp.setdefault(_norm_sym(o.underlying), o.underlying)
 
     net_w: dict[str, float] = {}
     for s in set(equity_w) | set(option_w):
         net_w[s] = equity_w.get(s, 0.0) + option_w.get(s, 0.0)
+
+    economic_by_entity: dict[str, EconomicExposure] = {}
+    underlying_by_entity: dict[str, UnderlyingExposure] = {}
+    for s, w in net_w.items():
+        beta = beta_map.get(s)
+        ue = UnderlyingExposure(
+            symbol=disp[s], equity_weight=round(equity_w.get(s, 0.0), 4),
+            option_delta_weight=round(option_w.get(s, 0.0), 4),
+            net_delta_weight=round(w, 4))
+        ee = EconomicExposure(
+            economic_entity=s, label=disp[s], risk_symbol=risk_symbols[s],
+            members=sorted(members.get(s, set())), capital_weight=round(capital_w.get(s, 0.0), 4),
+            equity_delta_weight=round(equity_w.get(s, 0.0), 4),
+            option_delta_weight=round(option_w.get(s, 0.0), 4), net_delta_weight=round(w, 4),
+            beta_contribution=round(w * (beta if beta is not None else 1.0), 4))
+        underlying_by_entity[s] = ue
+        economic_by_entity[s] = ee
+        r.underlying_exposures.append(ue)
+        r.economic_exposures.append(ee)
 
     # L1 — single-name cap on NET delta weight (option delta-notional now counts; hedges net off)
     for s, w in net_w.items():
@@ -270,26 +478,27 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         caps = {ly.key: ly.weight_cap for ly in scfg.layers}
         layer_w: dict[str, float] = {}
         for p in equities:
-            lk = scfg.layer_of(p.symbol)
+            meta = registry.resolve(p.symbol)
+            lk = scfg.layer_of(meta.layer_symbol)
             r.symbol_layers.append(SymbolLayer(
                 symbol=p.symbol, layer=lk or "", label=labels.get(lk, "未分层") if lk else "未分层",
-                weight=round(risk_wt[p.symbol], 4), sec_type=p.sec_type or "STK"))
+                weight=round(risk_wt[p.symbol] * meta.exposure_multiplier, 4),
+                sec_type=p.sec_type or "STK"))
         for o in r.option_risks:
-            lk = scfg.layer_of(o.underlying)
-            dw = (o.delta_notional / net_liq) if net_liq else 0.0
+            meta = registry.resolve(o.underlying)
+            lk = scfg.layer_of(meta.layer_symbol)
+            dw = ((o.delta_notional / net_liq) * meta.exposure_multiplier) if net_liq else 0.0
             r.symbol_layers.append(SymbolLayer(
                 symbol=f"{o.underlying}[{o.strategy or o.right}]", layer=lk or "",
                 label=labels.get(lk, "未分层") if lk else "未分层",
                 weight=round(dw, 4), sec_type="OPT"))
         # per-underlying NET delta weight drives the layer cap (hedges net off within a layer)
         for s, w in net_w.items():
-            lk = scfg.layer_of(disp[s])
+            lk = scfg.layer_of(layer_symbols[s])
             if lk:
                 layer_w[lk] = layer_w.get(lk, 0.0) + w
-            r.underlying_exposures.append(UnderlyingExposure(
-                symbol=disp[s], equity_weight=round(equity_w.get(s, 0.0), 4),
-                option_delta_weight=round(option_w.get(s, 0.0), 4),
-                net_delta_weight=round(w, 4), layer=lk or ""))
+            underlying_by_entity[s].layer = lk or ""
+            economic_by_entity[s].layer = lk or ""
         for lk, w in layer_w.items():
             cap = caps.get(lk)
             breached = cap is not None and w > cap
@@ -302,7 +511,11 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         log.warning("chain-layer concentration skipped: %s", exc)
 
     # L3 — correlation clusters (weight = |net delta weight|; option underlyings included)
-    cluster_weights = {disp[s]: abs(w) for s, w in net_w.items() if abs(w) > 0}
+    cluster_weights: dict[str, float] = {}
+    for s, w in net_w.items():
+        if abs(w) > 0:
+            rs = risk_symbols[s]
+            cluster_weights[rs] = cluster_weights.get(rs, 0.0) + abs(w)
     if len(cluster_weights) >= 2:
         prices = _prices(list(cluster_weights))
         for c in correlation.clusters(cluster_weights, prices, rc.cluster_corr_threshold):
@@ -320,7 +533,7 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     for p in equities:
         if p.symbol in ce_map:
             continue
-        cost = p.avg_cost * abs(p.qty)
+        cost = p.avg_cost * abs(p.qty) * p.fx_rate_to_base
         if cost > 0 and p.unrealized_pnl / cost <= -rc.stop_loss_pct:
             r.breaches.append(Breach(layer="L1-止损", limit=f"≥-{rc.stop_loss_pct:.0%}",
                                      actual=f"{p.symbol} {p.unrealized_pnl/cost:.0%}",
@@ -344,10 +557,17 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
                                      actual=f"{r.daily_pnl_pct}%", action="停新仓"))
 
     # L5 — stress: equity beta shock + option BSM full-revaluation with paired vol shocks
-    eq_portfolio = portfolio.model_copy(update={"positions": equities})
+    stress_equities = []
+    for p in equities:
+        meta = registry.resolve(p.symbol)
+        stress_equities.append(p.model_copy(update={
+            "symbol": meta.risk_symbol,
+            "weight": risk_wt[p.symbol] * meta.exposure_multiplier,
+        }))
+    eq_portfolio = portfolio.model_copy(update={"positions": stress_equities})
     r.stress = [StressResult(**s) for s in stress.run(
         eq_portfolio, market_shocks=rc.stress_market_shocks, top_cluster=top_cluster_members,
-        ai_bubble_shock=rc.ai_bubble_cluster_shock, cash_equivalents=ce_map,
+        ai_bubble_shock=rc.ai_bubble_cluster_shock, cash_equivalents=None,
         options=r.option_risks, vol_shocks=rc.stress_vol_shocks,
         ai_bubble_vol_shock=rc.ai_bubble_vol_shock, r=rc.option_risk_free_rate)]
     worst = min((s.loss_pct for s in r.stress), default=0.0)
@@ -357,9 +577,11 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
 
     # L6 — earnings-event risk: equities (linear) + options (BSM ±EM reval, worse side)
     for p in equities:
-        em = (event_data or {}).get(p.symbol, {}).get("expected_move_pct")
+        meta = registry.resolve(p.symbol)
+        em = ((event_data or {}).get(p.symbol, {}).get("expected_move_pct")
+              or (event_data or {}).get(meta.risk_symbol, {}).get("expected_move_pct"))
         if em:
-            loss = round(p.weight * em, 2)   # em already in %
+            loss = round(risk_wt[p.symbol] * meta.exposure_multiplier * em, 2)
             breached = loss > rc.max_event_loss_pct * 100
             r.event_risks.append(EventRisk(symbol=p.symbol, weight=p.weight,
                                            expected_move_pct=em, event_loss_pct=loss))
@@ -371,9 +593,12 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     # --- portfolio greeks aggregate + caution-level option limits (disclose, don't hard-block) ---
     _assess_portfolio_greeks(r, net_w, net_liq, rc)
 
-    # risk_state
-    derisk = any(b.layer.startswith(("L4-回撤",)) for b in r.breaches)
-    r.risk_state = "derisk" if derisk else ("caution" if (r.breaches or r.cautions) else "normal")
+    # Chief-facing state machine; risk_state remains as a legacy compatibility projection.
+    r.directive = _build_directive(r, rc, risk_policy, net_liq)
+    r.risk_state = (
+        "normal" if r.directive.state == "NORMAL"
+        else "derisk" if r.directive.state in ("DATA_INVALID", "EMERGENCY")
+        else "caution")
     r.notes = (f"{len(r.breaches)} breach(es), {len(r.cautions)} caution(s); "
                f"beta {r.portfolio_beta}; 相关簇 {len(r.clusters)}; 期权 {len(r.option_risks)}")
     return r
@@ -384,14 +609,14 @@ def _assess_margin(r: RiskReview, portfolio, equities, rc, net_liq: float) -> No
     hard-block; estimated breaches degrade to caution (annotated 估算) to avoid false blocks."""
     if not net_liq:
         return
-    if portfolio.margin_source == "ibkr" and portfolio.init_margin:
+    if portfolio.margin_source in ("ibkr", "ibkr_projected_est") and portfolio.init_margin:
         m = MarginSummary(
             init_margin=portfolio.init_margin, maint_margin=portfolio.maint_margin,
             excess_liquidity=portfolio.excess_liquidity, buying_power=portfolio.buying_power,
             margin_util=round(portfolio.init_margin / net_liq, 4),
             excess_liq_pct=(round(portfolio.excess_liquidity / net_liq, 4)
                             if portfolio.excess_liquidity is not None else None),
-            source="ibkr")
+            source=portfolio.margin_source)
     else:
         # Reg-T estimate: long equity 50% of MV + per-option Reg-T; excess ≈ net_liq − init.
         eq_init = sum(0.5 * abs(p.market_value) for p in equities)
@@ -425,7 +650,8 @@ def _assess_option_stops(r: RiskReview, option_positions, rc) -> None:
         p = by_sym.get(o.symbol)
         if p is None:
             continue
-        basis = abs(p.avg_cost) * abs(p.qty)     # cost (long) / credit (short), $
+        basis = abs(p.avg_cost) * abs(p.qty) * p.fx_rate_to_base
+        # cost (long) / credit (short), account base currency
         if basis <= 0:
             continue
         if p.qty > 0:                            # long option
@@ -450,22 +676,25 @@ def _assess_option_events(r: RiskReview, event_data, rc, net_liq: float) -> None
     for o in r.option_risks:
         if not o.priced or o.spot is None or o.iv is None or not o.strike:
             continue
-        em = (event_data or {}).get(o.underlying, {}).get("expected_move_pct")
+        em = ((event_data or {}).get(o.underlying, {}).get("expected_move_pct")
+              or (event_data or {}).get(o.risk_symbol, {}).get("expected_move_pct"))
         if not em:
             continue
+        product_em = em * o.exposure_multiplier
         T = options_math.years_to_expiry(o.expiry) if o.expiry else 0.0
         is_call = (o.right or "C").upper().startswith("C")
         v0 = options_math.reprice(o.spot, o.strike, T, rc.option_risk_free_rate, o.iv, is_call)
         worst = 0.0
         for sign in (1.0, -1.0):
-            v1 = options_math.reprice(o.spot * (1 + sign * em / 100.0), o.strike, T,
+            shocked_spot = o.spot * max(1 + sign * product_em / 100.0, 0.01)
+            v1 = options_math.reprice(shocked_spot, o.strike, T,
                                      rc.option_risk_free_rate, o.iv, is_call)
-            pnl = (v1 - v0) * o.qty * o.multiplier
+            pnl = (v1 - v0) * o.qty * o.multiplier * o.fx_rate_to_base
             worst = min(worst, pnl)
         loss_pct = round(-worst / net_liq * 100, 2)      # positive % NAV
         r.event_risks.append(EventRisk(symbol=f"{o.underlying}[{o.strategy or o.right}]",
                                        weight=round(abs(o.delta_notional) / net_liq, 4),
-                                       expected_move_pct=em, event_loss_pct=loss_pct))
+                                       expected_move_pct=product_em, event_loss_pct=loss_pct))
         if loss_pct > rc.max_event_loss_pct * 100:
             r.breaches.append(Breach(layer="L6-事件", limit=f"≤{rc.max_event_loss_pct:.0%}",
                                      actual=f"{o.underlying}({o.strategy}) {loss_pct:.1f}%",
@@ -476,8 +705,10 @@ def _assess_portfolio_greeks(r: RiskReview, net_w: dict, net_liq: float, rc) -> 
     """Aggregate option greeks + delta-adjusted leverage; caution if |净vega|/NAV over limit."""
     net_dn = sum(o.delta_notional for o in r.option_risks)
     net_gamma = sum((o.gamma or 0.0) * o.qty * o.multiplier for o in r.option_risks)
-    net_vega = sum((o.vega or 0.0) * o.qty * o.multiplier for o in r.option_risks)
-    net_theta = sum((o.theta or 0.0) * o.qty * o.multiplier for o in r.option_risks)
+    net_vega = sum((o.vega or 0.0) * o.qty * o.multiplier * o.fx_rate_to_base
+                   for o in r.option_risks)
+    net_theta = sum((o.theta or 0.0) * o.qty * o.multiplier * o.fx_rate_to_base
+                    for o in r.option_risks)
     dal = (sum(abs(w) for w in net_w.values())) if net_w else 0.0
     r.portfolio_greeks = PortfolioGreeks(
         net_delta_notional=round(net_dn, 0), net_gamma=round(net_gamma, 2),

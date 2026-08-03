@@ -66,6 +66,8 @@ def test_stress_beta_shock():
 # --------------------------------------------------------------------------- #
 def test_assess_beta_and_stop_and_event(monkeypatch):
     monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})   # skip network clustering
+    from ats.config import get_config
+    monkeypatch.setattr(get_config().app.risk, "beta_cap", 1.5)
     pf = _pf([
         _pos("HOT", 0.5, beta=3.0),                               # pushes beta over 1.5
         _pos("LOSER", 0.2, beta=1.0, upnl=-400, avg=100, qty=20),  # -20%? cost 2000, upnl -400 = -20%
@@ -92,7 +94,7 @@ def test_pre_trade_blocks_buy_in_derisk(monkeypatch):
 
 
 def test_pre_trade_event_clip(monkeypatch):
-    pf = _pf([_pos("X", 0.3)])
+    pf = _pf([_pos("X", 0.1)], cash=900_000)
     review = RiskReview(as_of=NOW, risk_state="normal")
     # EM 20%, cap 3% NAV -> max weight 15% -> max notional 150k on 1M NAV
     buy = TradeDecision(symbol="COHR", action="buy", notional_usd=300_000)
@@ -105,6 +107,23 @@ def test_pre_trade_no_portfolio_skips():
     buy = TradeDecision(symbol="X", action="buy", notional_usd=1000)
     out, notes, review = risk_checks.pre_trade([buy], None)
     assert out == [buy] and review is None
+
+
+def test_post_trade_projection_updates_margin_from_ibkr_baseline():
+    from ats.risk import marginal
+
+    pf = _pf([_pos("X", 0.10)], cash=900_000)
+    pf.margin_source = "ibkr"
+    pf.init_margin = 200_000
+    pf.maint_margin = 100_000
+    pf.excess_liquidity = 800_000
+    post = marginal.project_trade(
+        pf, TradeDecision(symbol="X", action="add", notional_usd=100_000))
+
+    assert post.margin_source == "ibkr_projected_est"
+    assert post.init_margin == 250_000
+    assert post.maint_margin == 125_000
+    assert post.excess_liquidity == 775_000
 
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +164,39 @@ def test_cash_equivalent_partial_haircut(monkeypatch):
     assert review.portfolio_beta == 0.1                      # only risk-weight share: 0.10*1.0
 
 
+def test_economic_entity_aggregates_cross_listing_and_leveraged_etf(monkeypatch):
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    pf = _pf([
+        _pos("7709", 0.02, beta=2.0),
+        _pos("HY9H", 0.14, beta=2.0),
+    ], cash=840_000)
+
+    review = risk_assess.assess(pf)
+    sk = next(e for e in review.economic_exposures if e.economic_entity == "SK_HYNIX")
+
+    assert sk.members == ["7709", "HY9H"]
+    assert sk.capital_weight == 0.16
+    assert sk.equity_delta_weight == 0.18       # 7709 2% × 2 + HY9H 14%
+    assert sk.net_delta_weight == 0.18
+    assert sk.beta_contribution == 0.36         # economic delta × underlying beta
+    assert review.portfolio_beta == 0.36
+
+
+def test_enrich_beta_uses_underlying_risk_symbol_for_leveraged_etf(monkeypatch):
+    calls = []
+    from ats.data import fundamentals
+    monkeypatch.setattr(fundamentals, "fetch_light",
+                        lambda symbol: calls.append(symbol) or {"beta": 2.25})
+    monkeypatch.setattr(risk_assess.time, "sleep", lambda _: None)
+    position = _pos("7709", 0.02, beta=None)
+    pf = _pf([position])
+
+    risk_assess.enrich_beta(pf)
+
+    assert calls == ["HY9H"]
+    assert position.beta == 2.25
+
+
 # --------------------------------------------------------------------------- #
 # options exemption + explicit symbol→layer mapping
 # --------------------------------------------------------------------------- #
@@ -160,6 +212,16 @@ def test_bsm_greeks_numeric():
     p = om.greeks(100.0, 100.0, 1.0, 0.0, 0.2, is_call=False)
     assert abs(p["delta"] - (g["delta"] - 1.0)) < 1e-9
     assert abs(p["gamma"] - g["gamma"]) < 1e-12     # gamma right-agnostic
+
+
+def test_bsm_itm_probability_is_not_delta():
+    from ats.risk import options_math as om
+
+    g = om.greeks(100.0, 90.0, 1.0, 0.0, 0.2, is_call=False)
+    p_itm = om.itm_probability(100.0, 90.0, 1.0, 0.0, 0.2, is_call=False)
+
+    assert p_itm is not None
+    assert 0.0 < abs(g["delta"]) < p_itm < 1.0       # N(-d2) vs |N(d1)-1|
 
 
 def test_regt_margin_by_strategy():
@@ -181,6 +243,52 @@ def test_option_buy_call_lifts_single_name(monkeypatch):
     assert any(b.layer == "L1-单票" and "NVDA" in b.actual for b in review.breaches)
     o = review.option_risks[0]
     assert o.strategy == "buy_call" and abs(o.delta_notional - 160_000) < 1
+
+
+def test_foreign_currency_option_risk_is_converted_to_base(monkeypatch):
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    call = _opt("NVDA", qty=1, delta=0.5, strike=100, spot=100)
+    call.currency = "EUR"
+    call.fx_rate_to_base = 1.2
+
+    review = risk_assess.assess(_pf([call], cash=995_000))
+    option = review.option_risks[0]
+
+    assert option.delta_notional == 6_000       # 0.5 × 1 × 100 × €100 × 1.2 USD/EUR
+    assert option.fx_rate_to_base == 1.2
+    assert option.margin == 600                 # long premium €5 × 100 × 1.2
+
+
+def test_sell_put_survival_separates_expiry_dates(monkeypatch):
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    aug = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
+               expiry="20260831", iv=0.3)
+    sep = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
+               expiry="20260930", iv=0.3)
+
+    review = risk_assess.assess(_pf([aug, sep], cash=1_000_000))
+    survival = review.option_survival
+
+    assert survival is not None
+    assert survival.total_full_assignment_notional == 20_000
+    assert survival.peak_expiry_full_notional == 10_000
+    assert [a.probability_source for a in survival.assignments] == [
+        "bsm_N(-d2)", "bsm_N(-d2)"]
+    within_30 = next(b for b in survival.expiry_buckets if b.through_days == 30)
+    within_90 = next(b for b in survival.expiry_buckets if b.through_days == 90)
+    assert within_30.full_notional == 10_000
+    assert within_90.full_notional == 20_000
+
+
+def test_unknown_sell_put_probability_is_data_invalid(monkeypatch):
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    put = _opt("SPY", qty=-1, delta=None, right="P", strike=100, spot=100, iv=None)
+
+    review = risk_assess.assess(_pf([put], cash=1_000_000))
+
+    assert review.option_survival.has_unknown_probability is True
+    assert review.directive.state == "DATA_INVALID"
+    assert review.risk_state == "derisk"
 
 
 def test_option_long_put_hedges_single_name(monkeypatch):
@@ -233,6 +341,19 @@ def test_no_options_regression(monkeypatch):
     assert review.option_risks == []
     assert review.portfolio_greeks.net_vega == 0.0
     assert review.portfolio_beta == 0.15                           # unchanged: only NVDA 0.10*1.5
+    assert review.directive.state == "NORMAL"
+
+
+def test_known_breach_becomes_repair_only_directive(monkeypatch):
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    from ats.config import get_config
+    monkeypatch.setattr(get_config().app.risk, "max_position_pct", 0.20)
+    review = risk_assess.assess(_pf([_pos("NVDA", 0.25, beta=1.5)], cash=750_000))
+
+    assert review.directive.state == "REPAIR_ONLY"
+    assert review.directive.can_increase_risk is False
+    assert "NVDA" in review.directive.blocked_entities
+    assert "reduce" in review.directive.allowed_actions
 
 
 def test_symbol_layer_mapping_explicit(monkeypatch):
@@ -254,6 +375,29 @@ def test_riskconfig_parses_cash_equivalents():
 
 def test_store_risk_review_roundtrip():
     store = get_store()
-    store.save_risk_review(RiskReview(as_of=NOW, risk_state="caution", notes="2 breaches"))
-    assert store.latest_risk_review().risk_state == "caution"
+    from ats.schemas.risk import RiskDirective
+    store.save_risk_review(RiskReview(
+        as_of=NOW, risk_state="caution", notes="2 breaches",
+        directive=RiskDirective(
+            state="REPAIR_ONLY", can_increase_risk=False,
+            required_repairs=["L3 beta"])))
+    restored = store.latest_risk_review()
+    assert restored.risk_state == "caution"
+    assert restored.directive.state == "REPAIR_ONLY"
+    assert restored.directive.required_repairs == ["L3 beta"]
     assert len(store.recent_risk_reviews()) >= 1
+
+
+def test_report_renders_directive_and_option_survival(monkeypatch):
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    from ats.risk import report
+
+    put = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
+               expiry="20260831", iv=0.3)
+    review = risk_assess.assess(_pf([put], cash=1_000_000))
+    text = report.render(review)
+
+    assert "RiskDirective" in text
+    assert "期权指派与资金生存性" in text
+    assert "bsm_N(-d2)" in text
+    assert "累计期限桶" in text

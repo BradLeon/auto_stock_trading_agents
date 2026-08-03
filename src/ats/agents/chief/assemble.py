@@ -286,6 +286,8 @@ def _risk_block() -> str:
     if r is None:
         return ""
     block = r.regime_block(1200)
+    if r.directive:
+        return block
     if r.risk_state == "derisk":
         block = "**⛔ de-risk 态：只允许减仓决策，禁止任何新买。**\n" + block
     return block

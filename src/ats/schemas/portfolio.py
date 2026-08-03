@@ -14,10 +14,14 @@ class Position(BaseModel):
     qty: float
     avg_cost: float
     market_price: float
-    market_value: float
-    unrealized_pnl: float = 0.0
-    weight: float = Field(0.0, description="market_value / net_liquidation")
+    market_value: float                   # account base currency
+    unrealized_pnl: float = 0.0           # account base currency
+    weight: float = Field(0.0, description="base-currency market_value / net_liquidation")
     beta: float | None = None
+    currency: str = "USD"                 # contract/local currency
+    fx_rate_to_base: float = 1.0           # account-base units per 1 local-currency unit
+    market_value_local: float | None = None
+    unrealized_pnl_local: float | None = None
 
     # --- option contract fields (secType=OPT only; None for equities) --------
     strike: float | None = None
@@ -43,6 +47,8 @@ class ExposureBreakdown(BaseModel):
 class PortfolioSnapshot(BaseModel):
     as_of: datetime
     account_id: str = ""
+    base_currency: str = "USD"
+    exchange_rates: dict[str, float] = Field(default_factory=dict)
     net_liquidation: float = 0.0
     cash: float = 0.0
     gross_exposure: float = 0.0

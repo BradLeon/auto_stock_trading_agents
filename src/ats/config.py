@@ -221,12 +221,17 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 
+def _load_risk_yaml() -> dict:
+    """Return the single source of truth for all adjustable risk configuration."""
+    return _load_yaml(_config_dir() / "risk.yaml")
+
+
 @functools.lru_cache(maxsize=1)
 def get_config() -> Config:
     cfg_dir = _config_dir()
     settings_raw = _load_yaml(cfg_dir / "settings.yaml")
     watchlist_raw = _load_yaml(cfg_dir / "watchlist.yaml")
-    merged = {**settings_raw, **watchlist_raw}
+    merged = {**settings_raw, **watchlist_raw, "risk": _load_risk_yaml().get("limits", {})}
     return Config(app=AppConfig.model_validate(merged), secrets=Secrets())
 
 
@@ -386,12 +391,19 @@ def load_technical_config(name: str = "technical"):
 
 
 def load_sector_config(name: str = "ai_hardware"):
-    """Load config/sectors/<name>.yaml -> SectorConfig (with sub-dict defaults)."""
+    """Load sector structure and inject its caps from the central risk.yaml."""
     from .schemas.sector import SectorConfig
 
     raw = _load_yaml(_config_dir() / "sectors" / f"{name}.yaml")
     if not raw:
         raise FileNotFoundError(f"config/sectors/{name}.yaml not found")
+    cap_config = (_load_risk_yaml().get("sector_layer_caps", {}).get(name, {}) or {})
+    for layer in raw.get("layers", []):
+        caps = cap_config.get(layer.get("key"), {}) or {}
+        if "weight_cap" in caps:
+            layer["weight_cap"] = caps["weight_cap"]
+        if "weight_cap_hard" in caps:
+            layer["weight_cap_hard"] = caps["weight_cap_hard"]
     raw.setdefault("snapshot", {})
     raw["snapshot"].setdefault("momentum_days", [20, 60])
     raw["snapshot"].setdefault("consensus_for", "pead_targets")
@@ -404,6 +416,29 @@ def load_sector_config(name: str = "ai_hardware"):
     r.setdefault("events_min_triage", 0.6)
     r.setdefault("dossier_excerpt_chars", 350)
     return SectorConfig.model_validate(raw)
+
+
+def load_instrument_risk_registry():
+    """Load execution-instrument -> economic-risk metadata.
+
+    Missing metadata is intentionally valid: the registry resolves an unknown security
+    to its own normalized symbol with a 1x multiplier.
+    """
+    from .schemas.instruments import InstrumentRiskRegistry
+
+    raw = _load_risk_yaml()
+    return InstrumentRiskRegistry.model_validate({"instruments": raw.get("instruments", {})})
+
+
+def load_risk_policy():
+    """Load hard survival/state policy kept separate from strategy settings."""
+    from .schemas.risk import RiskPolicy
+
+    raw = _load_risk_yaml()
+    return RiskPolicy.model_validate({
+        "option_survival": raw.get("option_survival", {}),
+        "directive": raw.get("directive", {}),
+    })
 
 
 def load_events() -> list:

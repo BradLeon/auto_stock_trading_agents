@@ -8,7 +8,7 @@ from ats.memory import get_store
 from ats.schemas.decision import TradeDecision
 from ats.schemas.macro_strategy import MacroReview, SectorTilt
 from ats.schemas.pead import ExpectationSet, PeadDossier, Scorecard
-from ats.schemas.risk import RiskReview
+from ats.schemas.risk import RiskDirective, RiskReview
 from ats.schemas.sector import CompanyCall, SectorReview
 
 NOW = datetime.now(timezone.utc)
@@ -60,6 +60,23 @@ def test_assemble_derisk_prepends_hard_instruction():
     store.save_risk_review(RiskReview(as_of=NOW, risk_state="derisk"))
     ctx = assemble.build(live_broker=False)
     assert "只允许减仓" in ctx.as_context()
+
+
+def test_assemble_exposes_compact_risk_directive():
+    store = get_store()
+    store.save_risk_review(RiskReview(
+        as_of=NOW, risk_state="caution",
+        directive=RiskDirective(
+            state="REPAIR_ONLY", can_increase_risk=False,
+            allowed_actions=["reduce", "hedge_if_verified_improving"],
+            blocked_entities=["SK_HYNIX"], blocked_layers=["L5_fab"],
+            required_repairs=["L5制造层 32%→30%"])))
+
+    text = assemble.build(live_broker=False).as_context()
+
+    assert "RiskDirective=REPAIR_ONLY" in text
+    assert "可增加风险=False" in text
+    assert "SK_HYNIX" in text and "L5_fab" in text
 
 
 def test_decide_no_llm_zero_decisions():

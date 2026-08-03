@@ -37,45 +37,6 @@ llm:
     risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus
     critic: {max_tokens: 4096}           # 交易日志季度 critic —— 低频、人工签字前最后一道叙事关卡，成本不是约束
 
-# --- Risk guardrail defaults (6-layer hard limits; validator only tightens) --
-risk:
-  # L1 标的
-  max_position_pct: 0.20        # single name <= 20% of net liquidation
-  max_sector_pct: 0.50          # GICS-sector backstop for non-universe holdings
-  stop_loss_pct: 0.25           # per-position unrealized loss vs cost -> forced trim
-  # L2 组合
-  max_gross_leverage: 1.0       # no margin in paper phase
-  max_single_order_usd: 25000
-  cash_floor_pct: 0.05          # keep >= 5% cash
-  # L3 市场/因子
-  beta_cap: 1.5                 # portfolio weighted beta ceiling
-  cluster_corr_threshold: 0.7   # pairwise corr to join a correlated cluster
-  cluster_weight_cap: 0.75      # single cluster ceiling (intentional AI concentration)
-  # L4 亏损/回撤
-  max_drawdown_pct: 0.15        # peak-to-trough NetLiq -> de-risk mode (block new buys)
-  daily_loss_limit_pct: 0.05    # single-day loss -> stop new buys
-  # L5 尾部/压测
-  max_stress_loss_pct: 0.25     # worst scenario loss vs NAV
-  stress_market_shocks: [-0.10, -0.20]
-  ai_bubble_cluster_shock: -0.35  # extra shock on the top correlated cluster
-  stress_vol_shocks: [0.20, 0.50]  # 期权压测 vol 联动，与 stress_market_shocks 一一配对
-  ai_bubble_vol_shock: 0.80     # AI 泡沫崩盘情景额外抬 vol（期权全重估用）
-  # L6 事件
-  max_event_loss_pct: 0.03      # single earnings gap: weight * expected_move <= this
-  max_pct_adv: 0.10             # liquidity (report only)
-  # 期权风控（BSM/Greeks；IBKR 权威优先，取不到回退 Reg-T/BSM 估算）
-  option_risk_free_rate: 0.045  # BSM greeks / 重定价的无风险利率
-  max_margin_util_pct: 0.5      # 初始保证金/净值 上限（IBKR 源时硬阻单，估算源降 caution）
-  min_excess_liquidity_pct: 0.10  # 剩余流动性/净值 下限（保证金垫太薄）
-  max_net_vega_pct: 0.05        # |净 vega|/净值 提示阈（caution，不硬阻单）
-  short_option_loss_mult: 2.0   # short 期权：浮亏/收权利金 ≥ 此倍数 → caution
-  # 现金等价物：symbol -> haircut（0=完全当现金 full cash credit；1=完全当风险敞口）。
-  # cash_credit = 市值 × (1−haircut) 计入有效现金；risk_weight = 市值 × haircut 才占风险限额。
-  cash_equivalents:
-    SGOV: 0.0                   # 美债 ETF，准现金
-    SHV: 0.0                    # 美债 ETF，准现金
-    BRK-B: 0.0                  # 权益压舱石，本轮按满额现金信用（可改 0.20 变部分信用）
-
 # --- IBKR broker connection --------------------------------------------------
 # Port: TWS live=7496, TWS paper=7497, IB Gateway live=4001, IB Gateway paper=4002
 # client_id: use different IDs for paper vs live to avoid conflicts

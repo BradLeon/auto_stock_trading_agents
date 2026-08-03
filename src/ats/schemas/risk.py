@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -89,6 +90,10 @@ class OptionRisk(BaseModel):
     unrealized_pnl: float = 0.0
     priced: bool = False              # greeks available (IBKR or BSM); False → list-only fallback
     greeks_source: str | None = None  # 'ibkr' | 'bsm' | None
+    economic_entity: str = ""
+    risk_symbol: str = ""
+    exposure_multiplier: float = 1.0
+    fx_rate_to_base: float = 1.0
 
 
 class PortfolioGreeks(BaseModel):
@@ -111,9 +116,22 @@ class UnderlyingExposure(BaseModel):
     layer: str = ""
 
 
+class EconomicExposure(BaseModel):
+    """One economic risk after aggregating listings, ETFs and options."""
+    economic_entity: str
+    label: str
+    risk_symbol: str
+    members: list[str] = Field(default_factory=list)
+    capital_weight: float = 0.0
+    equity_delta_weight: float = 0.0
+    option_delta_weight: float = 0.0
+    net_delta_weight: float = 0.0
+    beta_contribution: float | None = None
+    layer: str = ""
+
+
 class MarginSummary(BaseModel):
-    """Account-level margin picture. source='ibkr' is authoritative; 'regt_est' is a
-    self-computed Reg-T estimate (limits degrade to caution, never hard-block)."""
+    """Account-level margin picture; projected/Reg-T estimates are disclosed as estimates."""
     init_margin: float | None = None
     maint_margin: float | None = None
     excess_liquidity: float | None = None
@@ -139,6 +157,103 @@ class Breach(BaseModel):
     action: str                       # what enforcement did / would do
 
 
+class AssignmentRisk(BaseModel):
+    symbol: str
+    underlying: str
+    expiry: str
+    days_to_expiry: int = 0
+    full_assignment_notional: float = 0.0
+    assignment_probability: float | None = None
+    probability_source: str = "unknown"
+    probability_weighted_notional: float = 0.0
+
+
+class ExpiryFundingBucket(BaseModel):
+    label: str
+    through_days: int
+    expiries: list[str] = Field(default_factory=list)
+    full_notional: float = 0.0
+    expected_notional: float = 0.0
+    p99_notional: float = 0.0
+
+
+class OptionSurvivalSummary(BaseModel):
+    assignments: list[AssignmentRisk] = Field(default_factory=list)
+    expiry_buckets: list[ExpiryFundingBucket] = Field(default_factory=list)
+    total_full_assignment_notional: float = 0.0
+    probability_weighted_notional: float = 0.0
+    p99_assignment_notional: float = 0.0
+    peak_expiry_full_notional: float = 0.0
+    available_liquidity: float = 0.0
+    p99_funding_gap: float = 0.0
+    has_unknown_probability: bool = False
+    notes: str = ""
+
+
+DirectiveState = Literal["NORMAL", "LIMITED", "REPAIR_ONLY", "DATA_INVALID", "EMERGENCY"]
+
+
+class RiskDirective(BaseModel):
+    """Compact, deterministic instructions consumed by Chief and the order gate."""
+    state: DirectiveState = "NORMAL"
+    can_increase_risk: bool = True
+    allowed_actions: list[str] = Field(default_factory=list)
+    blocked_entities: list[str] = Field(default_factory=list)
+    blocked_layers: list[str] = Field(default_factory=list)
+    risk_budget_remaining: dict[str, float] = Field(default_factory=dict)
+    required_repairs: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+    def as_chief_instruction(self) -> str:
+        actions = ", ".join(self.allowed_actions) or "none"
+        lines = [f"RiskDirective={self.state} · 可增加风险={self.can_increase_risk} · 允许={actions}"]
+        if self.blocked_entities:
+            lines.append("禁止增加实体: " + ", ".join(self.blocked_entities))
+        if self.blocked_layers:
+            lines.append("禁止增加产业链层: " + ", ".join(self.blocked_layers))
+        if self.required_repairs:
+            lines.append("必须修复: " + "; ".join(self.required_repairs[:5]))
+        if self.reasons:
+            lines.append("原因: " + "; ".join(self.reasons[:5]))
+        return "\n".join(lines)
+
+
+class OptionSurvivalPolicy(BaseModel):
+    max_full_assignment_nav_pct: float = Field(1.0, gt=0)
+    max_probability_weighted_nav_pct: float = Field(0.35, gt=0)
+    max_p99_assignment_nav_pct: float = Field(0.75, gt=0)
+    max_peak_expiry_nav_pct: float = Field(0.50, gt=0)
+    expiry_horizons_days: list[int] = Field(default_factory=lambda: [7, 30, 90, 365])
+    p99_z_score: float = Field(2.326, gt=0)
+
+
+class DirectivePolicy(BaseModel):
+    limited_headroom_pct: float = Field(0.10, ge=0, lt=1)
+
+
+class RiskPolicy(BaseModel):
+    option_survival: OptionSurvivalPolicy = Field(default_factory=OptionSurvivalPolicy)
+    directive: DirectivePolicy = Field(default_factory=DirectivePolicy)
+
+
+class RiskMetricDelta(BaseModel):
+    metric: str
+    before_utilization: float
+    after_utilization: float
+    limit: float = 1.0
+    worsened: bool = False
+    improved: bool = False
+    new_breach: bool = False
+
+
+class MarginalRiskAssessment(BaseModel):
+    symbol: str
+    allowed: bool
+    classification: str = "neutral"
+    deltas: list[RiskMetricDelta] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class RiskReview(BaseModel):
     as_of: datetime
     net_liquidation: float = 0.0
@@ -151,6 +266,7 @@ class RiskReview(BaseModel):
     option_risks: list[OptionRisk] = Field(default_factory=list)   # options folded into 6 layers
     portfolio_greeks: PortfolioGreeks | None = None
     underlying_exposures: list[UnderlyingExposure] = Field(default_factory=list)
+    economic_exposures: list[EconomicExposure] = Field(default_factory=list)
     margin: MarginSummary | None = None
     symbol_layers: list[SymbolLayer] = Field(default_factory=list)  # explicit symbol→layer map
     portfolio_beta: float | None = None
@@ -160,9 +276,11 @@ class RiskReview(BaseModel):
     daily_pnl_pct: float | None = None
     stress: list[StressResult] = Field(default_factory=list)
     event_risks: list[EventRisk] = Field(default_factory=list)
+    option_survival: OptionSurvivalSummary | None = None
     breaches: list[Breach] = Field(default_factory=list)
     cautions: list[Breach] = Field(default_factory=list)   # advisory (期权限额/估算保证金): 披露不硬阻单
     risk_state: str = "normal"        # normal | caution | derisk
+    directive: RiskDirective | None = None
     notes: str = ""
 
     def as_memo_context(self, max_chars: int = 4000) -> str:
@@ -175,9 +293,14 @@ class RiskReview(BaseModel):
             f"杠杆(原始/有效)={self.gross_exposure/self.net_liquidation if self.net_liquidation else 0:.2f}x/{el}",
             f"组合beta={self.portfolio_beta} · 回撤={self.drawdown_pct}% · 日盈亏={self.daily_pnl_pct}%",
         ]
+        if self.directive:
+            parts.append(self.directive.as_chief_instruction())
         if self.margin:
             m = self.margin
-            src = "IBKR" if m.source == "ibkr" else ("Reg-T估算" if m.source == "regt_est" else "—")
+            src = (
+                "IBKR" if m.source == "ibkr"
+                else "IBKR基线+交易后估算" if m.source == "ibkr_projected_est"
+                else "Reg-T估算" if m.source == "regt_est" else "—")
             util = f"{m.margin_util:.0%}" if m.margin_util is not None else "—"
             elp = f"{m.excess_liq_pct:.0%}" if m.excess_liq_pct is not None else "—"
             parts.append(f"保证金({src}): 利用率={util} · 剩余流动性={elp} · "
@@ -191,6 +314,12 @@ class RiskReview(BaseModel):
             parts.append("现金等价物: " + "; ".join(
                 f"{c.symbol} 市值${c.market_value:,.0f} haircut={c.haircut:.0%} 现金信用${c.cash_credit:,.0f}"
                 for c in self.cash_equivalents))
+        if self.economic_exposures:
+            parts.append("经济风险实体: " + "; ".join(
+                f"{e.label}[{','.join(e.members)}] 资本={e.capital_weight:.1%} "
+                f"净经济Δ={e.net_delta_weight:+.1%} beta贡献={e.beta_contribution:+.1%}"
+                for e in sorted(self.economic_exposures,
+                                key=lambda x: abs(x.net_delta_weight), reverse=True)))
         if self.option_risks:
             parts.append("期权持仓(已并入风控): " + "; ".join(
                 f"{o.underlying} {o.strategy or o.right} Δ名义=${o.delta_notional:,.0f}"
@@ -227,6 +356,8 @@ class RiskReview(BaseModel):
     def regime_block(self, max_chars: int = 800) -> str:
         parts = [f"[风控 {self.as_of:%Y-%m-%d}] 状态={self.risk_state} beta={self.portfolio_beta} "
                  f"回撤={self.drawdown_pct}% 现金={self.cash_pct:.0%}(有效{self.effective_cash_pct:.0%})"]
+        if self.directive:
+            parts.insert(0, self.directive.as_chief_instruction())
         if self.portfolio_greeks or self.margin:
             g, m = self.portfolio_greeks, self.margin
             netv = f"净Vega=${g.net_vega:,.0f}" if g else ""

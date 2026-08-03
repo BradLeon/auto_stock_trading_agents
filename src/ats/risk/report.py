@@ -21,7 +21,8 @@ def render(review: RiskReview, rc=None) -> str:
     lines = [
         f"# 🤖 组合风险报告 — {r.as_of:%Y-%m-%d}",
         "",
-        f"**风险状态**: {r.risk_state}  ·  NetLiq ${r.net_liquidation:,.0f}  ·  现金 {r.cash_pct:.0%}"
+        f"**风险状态**: {r.directive.state if r.directive else r.risk_state}  "
+        f"·  NetLiq ${r.net_liquidation:,.0f}  ·  现金 {r.cash_pct:.0%}"
         f"（计入现金等价物后有效 {r.effective_cash_pct:.0%}）  ·  组合 beta {r.portfolio_beta}  "
         f"·  回撤 {r.drawdown_pct}%  ·  日盈亏 {dp_txt}",
         "",
@@ -29,6 +30,19 @@ def render(review: RiskReview, rc=None) -> str:
     ]
     for b in r.breaches:
         lines.append(f"- ⚠️ **{b.layer}** — 实际 {b.actual} vs 限额 {b.limit} → {b.action}")
+
+    if r.directive:
+        d = r.directive
+        lines += ["", "## 给 Chief 的 RiskDirective", "",
+                  f"- 状态 **{d.state}** · 可增加风险 **{d.can_increase_risk}**",
+                  f"- 允许动作：{', '.join(d.allowed_actions) or '无'}"]
+        if d.blocked_entities:
+            lines.append(f"- 禁止增加实体：{', '.join(d.blocked_entities)}")
+        if d.blocked_layers:
+            lines.append(f"- 禁止增加产业链层：{', '.join(d.blocked_layers)}")
+        if d.risk_budget_remaining:
+            lines.append("- 剩余风险预算：" + "; ".join(
+                f"{key}={value:.1%}" for key, value in d.risk_budget_remaining.items()))
 
     if r.cautions:
         lines += ["", "## 提示（不硬阻单）"]
@@ -39,7 +53,10 @@ def render(review: RiskReview, rc=None) -> str:
 
     if r.margin:
         m = r.margin
-        src = "IBKR 权威" if m.source == "ibkr" else ("Reg-T 估算" if m.source == "regt_est" else "—")
+        src = (
+            "IBKR 权威" if m.source == "ibkr"
+            else "IBKR基线+交易后估算" if m.source == "ibkr_projected_est"
+            else "Reg-T 估算" if m.source == "regt_est" else "—")
         util = f"{m.margin_util:.0%}" if m.margin_util is not None else "—"
         elp = f"{m.excess_liq_pct:.0%}" if m.excess_liq_pct is not None else "—"
         im = f"${m.init_margin:,.0f}" if m.init_margin is not None else "—"
@@ -49,6 +66,33 @@ def render(review: RiskReview, rc=None) -> str:
                   f"{('$%s' % format(m.maint_margin, ',.0f')) if m.maint_margin is not None else '—'}"
                   f" · 剩余流动性 {el}",
                   f"- 保证金利用率 **{util}** · 剩余流动性占比 **{elp}**"]
+
+    if r.option_survival and r.option_survival.assignments:
+        s = r.option_survival
+        lines += ["", "## 期权指派与资金生存性", "",
+                  "> 全额指派是灾难上限；容量判断同时使用 BSM 到期ITM概率 N(-d2)、"
+                  "到期结构和 P99 资金占用。美式期权仍可能提前指派。", "",
+                  f"- 全额名义 **${s.total_full_assignment_notional:,.0f}** · "
+                  f"概率加权 **${s.probability_weighted_notional:,.0f}** · "
+                  f"P99 **${s.p99_assignment_notional:,.0f}**",
+                  f"- 单到期日峰值 **${s.peak_expiry_full_notional:,.0f}** · "
+                  f"可用流动性 **${s.available_liquidity:,.0f}** · "
+                  f"P99资金缺口 **${s.p99_funding_gap:,.0f}**", "",
+                  "| 标的 | 到期 | 天数 | 全额指派 | ITM概率 | 概率占用 | 概率来源 |",
+                  "|---|---|---|---|---|---|---|"]
+        for a in s.assignments:
+            probability = (f"{a.assignment_probability:.1%}"
+                           if a.assignment_probability is not None else "未知")
+            lines.append(
+                f"| {a.underlying} | {a.expiry} | {a.days_to_expiry} | "
+                f"${a.full_assignment_notional:,.0f} | {probability} | "
+                f"${a.probability_weighted_notional:,.0f} | {a.probability_source} |")
+        lines += ["", "| 累计期限桶 | 涉及到期日 | 全额名义 | 期望占用 | P99占用 |",
+                  "|---|---|---|---|---|"]
+        for b in s.expiry_buckets:
+            lines.append(
+                f"| {b.label} | {', '.join(b.expiries) or '—'} | ${b.full_notional:,.0f} | "
+                f"${b.expected_notional:,.0f} | ${b.p99_notional:,.0f} |")
 
     if r.portfolio_greeks:
         g = r.portfolio_greeks
@@ -76,6 +120,17 @@ def render(review: RiskReview, rc=None) -> str:
         lines.append(f"\n> 有效现金 {r.effective_cash_pct:.0%}（原始 {r.cash_pct:.0%}）· "
                      f"有效杠杆 {eff_lev}")
 
+    if r.economic_exposures:
+        lines += ["", "## 经济风险实体（跨证券代码汇总）", "",
+                  "> 资本权重是基础货币市值/NAV；经济Δ再计入杠杆 ETF 倍数与期权 delta。",
+                  "", "| 风险实体 | 成员证券 | 资本权重 | 正股经济Δ | 期权Δ | 净经济Δ | beta贡献 |",
+                  "|---|---|---|---|---|---|---|"]
+        for ee in sorted(r.economic_exposures, key=lambda x: abs(x.net_delta_weight), reverse=True):
+            bc = f"{ee.beta_contribution:+.1%}" if ee.beta_contribution is not None else "—"
+            lines.append(f"| {ee.label} | {', '.join(ee.members)} | {ee.capital_weight:.1%} | "
+                         f"{ee.equity_delta_weight:+.1%} | {ee.option_delta_weight:+.1%} | "
+                         f"{ee.net_delta_weight:+.1%} | {bc} |")
+
     if r.option_risks:
         lines += ["", "## 期权风险明细（已并入 6 层风控）", "",
                   "> Δ名义 = delta×合约数×乘数×现货（已计入单票/产业链层/beta/相关簇/压测）。"
@@ -85,7 +140,8 @@ def render(review: RiskReview, rc=None) -> str:
         for o in r.option_risks:
             iv = f"{o.iv:.0%}" if o.iv is not None else "—"
             dlt = f"{o.delta:.2f}" if o.delta is not None else "—"
-            vg = f"${o.vega * o.qty * o.multiplier:,.0f}" if o.vega is not None else "—"
+            vg = (f"${o.vega * o.qty * o.multiplier * o.fx_rate_to_base:,.0f}"
+                  if o.vega is not None else "—")
             mg = f"${o.margin:,.0f}" if o.margin is not None else "—"
             src = o.greeks_source or ("未定价" if not o.priced else "—")
             lines.append(

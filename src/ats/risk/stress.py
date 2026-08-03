@@ -53,15 +53,17 @@ def _option_reval_loss(options: list[OptionRisk], spot_shock: float, vol_shock: 
     for o in options:
         if not o.priced or o.spot is None or o.iv is None or not o.strike:
             continue
-        if only_underlyings is not None and o.underlying not in only_underlyings:
+        cluster_symbol = o.risk_symbol or o.underlying
+        if only_underlyings is not None and cluster_symbol not in only_underlyings:
             continue
         T = years_to_expiry(o.expiry) if o.expiry else 0.0
         is_call = (o.right or "C").upper().startswith("C")
         S0, sigma0 = o.spot, o.iv
         v0 = reprice(S0, o.strike, T, r, sigma0, is_call)                       # per share now
-        v1 = reprice(S0 * (1 + spot_shock), o.strike, T, r,
+        product_shock = max(spot_shock * o.exposure_multiplier, -0.99)
+        v1 = reprice(S0 * (1 + product_shock), o.strike, T, r,
                      max(sigma0 * (1 + vol_shock), 1e-4), is_call)              # shocked
-        pnl += (v1 - v0) * o.qty * o.multiplier          # qty signed (short < 0)
+        pnl += (v1 - v0) * o.qty * o.multiplier * o.fx_rate_to_base
     return round(pnl / net_liq * 100, 2)
 
 

@@ -75,6 +75,25 @@ def years_to_expiry(expiry: str, today: date | None = None) -> float:
     return max((ed - today).days, 0) / 365.0
 
 
+def itm_probability(S: float, K: float, T: float, r: float, sigma: float,
+                    is_call: bool) -> float | None:
+    """Risk-neutral European probability of expiring ITM: N(d2) call / N(-d2) put.
+
+    This is more precise than treating delta (N(d1)) as assignment probability. It is
+    still an approximation for American options because early exercise is possible.
+    """
+    if S <= 0 or K <= 0:
+        return None
+    if T <= 0:
+        return float(S > K) if is_call else float(S < K)
+    if sigma <= 0:
+        terminal_forward = S * math.exp(r * T)
+        return float(terminal_forward > K) if is_call else float(terminal_forward < K)
+    d2 = ((math.log(S / K) + (r - 0.5 * sigma * sigma) * T)
+          / (sigma * math.sqrt(T)))
+    return _norm_cdf(d2) if is_call else _norm_cdf(-d2)
+
+
 def regt_margin(strategy: str, S: float, K: float, premium: float, contracts: float,
                 mult: float = 100.0) -> float:
     """Reg-T initial margin estimate for a single-leg option position ($). Fallback for when

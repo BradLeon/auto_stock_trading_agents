@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from .chain import ClaimDef
+
 STANCES = ("增持", "持有", "减持")
 
 
@@ -32,6 +34,9 @@ class SectorLayer(BaseModel):
     # analyst (v2 qualitative overlay). e.g. {光互联: config/knowledge/光互联.md}
     structure_notes: dict[str, str] = Field(default_factory=dict)
     private: list[str] = Field(default_factory=list)   # non-listed players, LLM reference
+    # Falsifiable propositions this layer is being tested on (docs/CHAIN_EVIDENCE.md).
+    # Human-maintained: agents may PROPOSE one, only a person adds it here.
+    claims: list[ClaimDef] = Field(default_factory=list)
 
 
 class SectorConfig(BaseModel):

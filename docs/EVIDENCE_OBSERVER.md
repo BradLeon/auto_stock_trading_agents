@@ -42,7 +42,8 @@
 - ❌ 不判断买卖、不给目标价、不给仓位建议——连"建议"这一层都没有
 - ❌ 不打分、不建 dossier、不触发 Chief
 - ❌ **绝不进入下单路径**（`tests/test_scheduler_jobs.py` 直接断言这条）
-- ❌ 不给最终置信度——来源去重、立场计数、结论阈值都由确定性代码算（阶段二）
+- ❌ 不给最终置信度——来源去重、立场计数、结论阈值全部由确定性代码算
+  （`src/ats/chain/corroborate.py`，无 LLM）
 
 ### 由代码强制、不交给模型的四条
 
@@ -120,6 +121,9 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence observe MU
 # 用本地文档跑（抓不到、或想拿一段文本试抽取效果时）
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence observe MU --file /path/to/call.txt
 
+# 看命题的印证结论（三道闸的输出）
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence claims
+
 # 看已入库的观测（含最近的抽取失败）
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show --entity MU --limit 50
@@ -159,9 +163,9 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
 ### 产出去向
 
 1. **SQLite** `evidence_observations` / `evidence_failures` 表。
-2. **阶段二起**：喂给三道闸聚合器算 claim 结论；
-   **阶段三起**：`relative` 结论转成 `moat_pricing` 证据包进入截面因子。
-3. **当前（阶段一）：只写库，不影响任何现有输出**——Chief、行业评审、风控都看不到它。
+2. 喂给三道闸聚合器算出各 claim 的印证结论（`ats evidence claims` 可查）。
+3. **阶段三起**：`relative` 结论会转成 `moat_pricing` 证据包进入截面因子。
+4. **当前仍只写库，不影响任何现有输出**——Chief、行业评审、风控都还看不到它。
 
 ### 排查
 
@@ -170,4 +174,8 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
 - 某次抽取失败 → `evidence show` 底部会列出最近失败及原因（这是刻意保留的，
   不是错误日志）。
 - 抽出来的 `metric` 命名不一致（如 `hbm_capacity` vs `hbm_capacity_sold_out`）
-  → 阶段二会引入 claim 的 `metrics` 白名单做匹配，目前不做归一。
+  → claim 的 `metrics` 白名单负责匹配：**不在白名单里的观测会被静默忽略**。
+  用 `ats evidence claims` 看某条 claim 的证据簇数，若明显偏少，多半是抽出来的
+  指标名没进白名单——补进 `config/sectors/<name>.yaml` 对应 claim 的 `metrics` 即可。
+  注意同时确认极性：若该指标方向与命题相反（如"产能上升"对"供给紧张"是反证），
+  要一并加进 `metric_polarity`。

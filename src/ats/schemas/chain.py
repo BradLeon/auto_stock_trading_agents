@@ -147,6 +147,18 @@ class ClaimDef(BaseModel):
     witnesses: list[Witness] = Field(default_factory=list)
     falsifiers: list[str] = Field(default_factory=list)
     horizon: Horizon | None = None
+    # Which reading direction SUPPORTS the statement. Declared, not inferred: for
+    # "supply stays tight" a capacity increase is counter-evidence, while for
+    # "demand keeps growing" it is supporting — no generic rule can tell them apart.
+    supporting_direction: Direction = "up"
+    # Per-metric override, because one claim legitimately mixes polarities: under
+    # "HBM supply stays tight", lead_time UP supports it but capacity UP refutes it.
+    # Without this, adding capacity to `metrics` would score supply loosening as
+    # evidence FOR tightness — the engine would confidently invert the reading.
+    metric_polarity: dict[str, Direction] = Field(default_factory=dict)
+
+    def polarity_of(self, metric: str) -> Direction:
+        return self.metric_polarity.get((metric or "").lower(), self.supporting_direction)
 
     @field_validator("subject")
     @classmethod

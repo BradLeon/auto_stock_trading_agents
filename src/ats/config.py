@@ -430,6 +430,16 @@ def load_sector_config(name: str = "ai_hardware"):
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)
     r.setdefault("dossier_excerpt_chars", 350)
+    # Chain-evidence corroboration thresholds (docs/CHAIN_EVIDENCE.md §4). Config, not
+    # constants: they are judgement calls about how much evidence is "enough".
+    r.setdefault("corroboration", {})
+    c = r["corroboration"]
+    c.setdefault("min_clusters", 2)         # independent evidence clusters for a verdict
+    c.setdefault("min_stance_classes", 2)   # 3 sell-side notes are ONE witness class
+    c.setdefault("min_confidence", 0.5)     # drop low-confidence extractions
+    for layer in raw.get("layers", []):     # claims carry their layer for reporting
+        for claim in layer.get("claims", []) or []:
+            claim.setdefault("layer", layer.get("key", ""))
     return SectorConfig.model_validate(raw)
 
 

@@ -64,6 +64,39 @@ layers:
       - {symbol: SKHY, note: SK海力士 美国ADR（用户同时持有此代码）}
       - {symbol: "000660.KS", note: SK海力士 韩股（参考）}
       - {symbol: "005930.KS", note: 三星/HBM追赶}
+    # 可证伪命题（见 docs/CHAIN_EVIDENCE.md）。人工维护：agent 只能提议，只有人能加。
+    # kind=common 任何证人的读数都计入；kind=relative 只有关于 subject 本人的
+    # direct_metrics 读数才能改变结论——竞争者扩产只证明行业供给增加，不证明我方失份额。
+    claims:
+      - id: hbm_supply_tight
+        kind: common
+        statement: HBM 供给持续紧张、需求高于规划产能
+        supporting_direction: up
+        metrics: [hbm_capex, sold_out_ratio, hbm_bookings, hbm_lead_time, hbm_capacity]
+        # 产能/供给上升 = 供给转松 = 对"持续紧张"是反证，与其余指标方向相反
+        metric_polarity: {hbm_capacity: down}
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        witnesses:
+          - {entity: NVDA, stance: customer}
+          - {entity: MSFT, stance: customer}
+          - {entity: SKHY, stance: supplier}
+          - {entity: MU, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+      - id: sk_hbm_share
+        kind: relative
+        subject: SKHY
+        statement: SK Hynix 维持核心客户 HBM 领先份额与定价权
+        supporting_direction: up
+        direct_metrics: [hbm_share, customer_qualification, hbm_asp, hbm_gross_margin]
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        witnesses:
+          - {entity: SKHY, stance: incumbent}
+          - {entity: MU, stance: competitor}
+          - {entity: "005930.KS", stance: competitor}
+          - {entity: NVDA, stance: customer}
+        falsifiers:
+          - 竞争对手通过核心客户认证，且 SK 份额指引下修
+          - HBM ASP 连续两个观察期下修
 
   - key: L6_equipment
     label: L6 半导体设备

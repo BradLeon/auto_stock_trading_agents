@@ -679,6 +679,40 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                 print(f"  {f['entity']} · {f['document_id']}: {f['reason']}")
         return 0
 
+    if action == "claims":
+        from ..chain import corroborate as corr
+        from ..config import load_sector_config
+
+        cfg = load_sector_config(entity or "ai_hardware")
+        ccfg = cfg.review.get("corroboration", {})
+        any_claim = False
+        for layer in cfg.layers:
+            if not layer.claims:
+                continue
+            any_claim = True
+            print(f"\n=== {layer.label} ({layer.key}) ===")
+            rows_by_entity = {}
+            for claim in layer.claims:
+                ents = {w.entity.upper() for w in claim.witnesses}
+                if claim.subject:
+                    ents.add(claim.subject)
+                for e in ents:
+                    rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
+            for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):
+                claim = next(c for c in layer.claims if c.id == a.claim_id)
+                mark = {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
+                        "unknown": "· "}.get(a.verdict, "· ")
+                print(f"{mark} {a.claim_id:20} {a.verdict:13} 覆盖 {a.coverage:6} "
+                      f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类")
+                print(f"     {claim.statement}")
+                print(f"     支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
+                      + (f" · 异议 {','.join(a.dissenters)}" if a.dissenters else ""))
+                if a.note:
+                    print(f"     {a.note}")
+        if not any_claim:
+            print("(该行业配置里还没有 claims —— 见 docs/CHAIN_EVIDENCE.md)")
+        return 0
+
     if not symbol:
         print("❌ observe 需要标的：ats evidence observe MU")
         return 1
@@ -977,10 +1011,10 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     evi = sub.add_parser("evidence", help="产业链证据 (observe / show) —— 只读，绝不下单")
-    evi.add_argument("action", choices=["observe", "show"])
+    evi.add_argument("action", choices=["observe", "show", "claims"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
-    evi.add_argument("--entity", default="", help="show: 只看某个实体")
+    evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")
     evi.add_argument("--limit", type=int, default=30, help="show: 条数")
     ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
     ev.add_argument("action", choices=["list", "upcoming"])

@@ -1,7 +1,8 @@
 # 产业链证据 → 截面因子
 
 > 面向：决策者 / 设计者。讲思想、逻辑、边界与验收，不讲怎么写代码。
-> 状态：**阶段一已实施**（证据表 + 观测抽取，只写库不影响现有输出）；阶段二~四待做。
+> 状态：**阶段一、二已实施**（证据表 + 观测抽取 + 三道闸聚合，仍只写库不影响现有输出）；
+> 阶段三、四待做。
 > 每阶段的验收标准见第七节，未通过不进入下一阶段。
 > 与 `docs/SECTOR_ANALYST.md`（周度行业评审）、`docs/RISK_SYSTEM.md`（六层限额）配套阅读。
 
@@ -77,6 +78,13 @@ B 类才产生动作。** 一个只做 A 类的证据系统，做得再严谨也
 
 **要求至少 2 类不同立场**才能给出 `confirmed`；只有单一立场（哪怕十家）最高只能到
 `mixed`。公司自身指引即使正式，也不能单独确认整个命题。
+
+### 极性：一条 claim 内不同指标方向可以相反
+
+支持方向是**声明**出来的，不是推断的。而且必须**逐指标**声明：在"HBM 供给持续紧张"
+这条命题下，**交期变长**支持它，**产能上升**却是反证（供给转松）。只在 claim 层面
+写一个 `supporting_direction`，引擎会把"供给转松"算成"紧张的证据"——把结论算反，
+且算得很自信。所以 `metric_polarity` 可逐指标覆盖。
 
 ### 闸 3 — common / relative 隔离（最重要）
 
@@ -199,7 +207,8 @@ instrument registry（SKHY / HY9H / 000660.KS 归一到同一经济实体的能�
     claims:
       - {id: hbm_demand, kind: common, horizon: {from: 2026-08-01, to: 2027-12-31},
          statement: HBM 需求持续高于规划供给,
-         metrics: [hbm_capex, sold_out_ratio],
+         metrics: [hbm_capex, sold_out_ratio, hbm_capacity],
+         metric_polarity: {hbm_capacity: down},   # 产能上升=供给转松=反证
          witnesses: [{entity: NVDA, stance: customer}, {entity: MSFT, stance: customer},
                      {entity: SKHY, stance: supplier}, {entity: MU, stance: supplier}]}
       - {id: sk_share, kind: relative, subject: SKHY,
@@ -317,7 +326,7 @@ eligible_for_confirmation: false
 
 **验收**：观察名单某次真实财报跑完，每条观测都能点回原文；现有全量测试不回归。
 
-### 阶段二：聚合三道闸
+### 阶段二：聚合三道闸　✅ 已完成
 
 实现 `corroborate()`，参数（阈值、衰减、立场要求）全部走配置。
 
@@ -335,6 +344,8 @@ eligible_for_confirmation: false
 | 覆盖率 | 5 个证人只到 1 个 | 结论带 `1/5 已报`，与 `4/5 已报` 在输出上可区分 |
 | 可达性 | 关键指标取不到 | claim 保持 `unknown`；**断言不被解释成负面** |
 | 反证不被净额掩盖 | 支持 3 条、反驳 2 条 | 两侧分数分别保留，不只显示净值 |
+| 极性 | 同一 claim 下 lead_time↑ 与 capacity↑ | 前者计支持、后者计反驳，不被同向合并 |
+| 发现材料隔离 | 观测被标记 discovery_evidence | 不得计入该 claim 的 verdict |
 
 **验收**：上表全绿。特别是隔离那两条——它们是这套设计存在的理由。
 

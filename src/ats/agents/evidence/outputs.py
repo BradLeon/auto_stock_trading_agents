@@ -9,7 +9,15 @@ from ..coerce import _as_objlist
 
 class ObservationView(BaseModel):
     entity: str = Field(description="这条事实说的是哪个公司/实体（代码或名称）")
-    metric: str = Field(description="指标 key，如 hbm_capacity / capex_guide / lead_time / asp")
+    metric: str = Field(description="你对该指标的命名，如 hbm_capacity / lead_time（仅供展示）")
+    # Semantic link, not a string match: the caller supplies a closed menu of claim
+    # dimensions with descriptions. Naming variants (hbm_market_share / hbm_share /
+    # 份额指引下修) must land on the same dimension instead of being lost.
+    concept: str = Field(
+        default="",
+        description="这条事实归属于上下文所给「可归属维度」清单里的哪一个 key。"
+                    "按语义判断，不要按字面匹配。都不属于就留空——留空是允许的，"
+                    "**不要硬套**一个不相干的维度")
     period: str = Field(default="", description="该事实覆盖的期间，如 FY26Q3 / 2027")
     observation_type: str = Field(
         default="reported_actual",

@@ -707,6 +707,9 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                 print(f"     {claim.statement}")
                 print(f"     支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
                       + (f" · 异议 {','.join(a.dissenters)}" if a.dissenters else ""))
+                if a.silent_witnesses:
+                    # Silence is a gap, not neutrality — name who did not speak.
+                    print(f"     未发声：{','.join(a.silent_witnesses)}")
                 if a.note:
                     print(f"     {a.note}")
         if not any_claim:

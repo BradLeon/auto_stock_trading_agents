@@ -38,9 +38,26 @@
 4. **零结论是正确默认。** 证据不足输出 unknown，不补猜、不强行投票。
    **数据取不到 ≠ 负面信号。**
 5. **证据必须可回到原文。** 每条观测保存最短必要原文片段；只保存模型摘要的观测无效。
-6. **LLM 抽取和解释，代码算结论。** 来源去重、立场计数、新鲜度衰减、结论阈值全部由
-   确定性代码计算。沿用风控六层与 risk_officer 的既有分工。
-7. **这条链路不碰 broker。** 只有 Chief 产生 `TradeDecision`，只有 Boss 放行订单。
+6. **语义判断交给 LLM，计数与规则交给代码。** 这条线要划在正确的位置：
+
+   | 必须确定性 | 本质是语义，交给模型 |
+   |---|---|
+   | 证据簇去重（独立性计数） | 这条事实**属于命题的哪个维度** |
+   | 立场类别计数（用声明表，见不变式 8） | |
+   | common/relative 隔离规则 | |
+   | 支持/反驳累计、阈值、覆盖率、时效衰减 | |
+
+   **"这条观测是否支持这个命题"本质是语义判断。** 把它做成指标名的字符串查表，
+   不会让它变得确定，只会让它变错——`hbm_market_share` 与 `hbm_share` 之间没有
+   语义差别、只有命名意外，而丢掉一条份额证据是实打实的损失。真正需要防漂移的是
+   计数与隔离规则，那些错了才会造成实际损失，而它们可以保持纯算术。
+7. **一家公司的自述不足以支撑跨标的命题。** 我们追踪的信号几乎都是产品级/行业级的，
+   单份财报既只代表自家情况，又可能选择性披露。所以命题必须**在定义时**就声明要
+   交叉验证谁——下游客户、同业、竞争者各自该说什么。
+8. **证人立场由命题声明，不由文档推断。** 每份财报都是公司自己的电话会，从文档里
+   问"说话人是谁"永远得到"这家公司自己"，跨立场印证会结构性地永不成立。
+   立场是命题的属性：定义命题时就写明"NVDA 在这条命题上是客户侧证人"。
+9. **这条链路不碰 broker。** 只有 Chief 产生 `TradeDecision`，只有 Boss 放行订单。
    本系统只改变**证据**，不新增下单路径。
 
 ---
@@ -61,7 +78,43 @@ B 类才产生动作。** 一个只做 A 类的证据系统，做得再严谨也
 
 ---
 
-## 四、三道闸
+## 四、命题的形态：维度，不是指标名
+
+命题不是一句口号，它声明**四件事**：要看哪些维度、每个维度什么方向算支持、
+**这个维度该由谁来说**、以及哪些维度能改变相对份额。
+
+```yaml
+- id: hbm_supply_tight
+  kind: common
+  statement: HBM 供给持续紧张、需求高于规划产能
+  concepts:
+    - key: supply_tightness
+      desc: 供给紧张程度——售罄比例、订单能见度、交期长短
+      supports_when: up
+      expect_from: [SKHY, MU, "005930.KS", NVDA]
+    - key: capacity_addition
+      desc: 新增产能与资本开支投放节奏
+      supports_when: down          # 产能大增 = 供给转松 = 反证
+      expect_from: [SKHY, MU, "005930.KS"]
+```
+
+三个要点：
+
+- **`desc` 是给模型的语义锚，不是给人看的注释。** 观测按语义归到维度上，
+  `hbm_market_share` / `hbm_share` / "份额指引下修" 会落进同一个维度。
+  **绝不用指标名做字符串匹配**——那样丢证据只是因为命名意外。
+- **`supports_when` 逐维度声明。** 同一条命题里方向可以相反：在"供给持续紧张"下，
+  交期变长支持它，产能上升却是反证。只在命题层面写一个方向，引擎会把"供给转松"
+  算成"紧张的证据"——把结论算反，而且算得很自信。
+- **`expect_from` 声明该由谁来说。** 这是不变式 7 的落地：单份财报只代表自家情况、
+  且可能选择性披露，所以定义命题时就要写清交叉验证谁。声明之后，**沉默会显示成
+  缺口而不是中性**（"三星在 capacity_addition 上本季未发声"）。
+
+归不上任何维度的观测**照常入库**——它们正是第六·五节"未映射池"的输入。
+
+---
+
+## 四·五、三道闸
 
 聚合器（确定性，无 LLM）按顺序过三道闸，任何一道不过就降级，不是"尽力给个结论"。
 
@@ -73,27 +126,28 @@ B 类才产生动作。** 一个只做 A 类的证据系统，做得再严谨也
 
 ### 闸 2 — 立场：三家卖方不等于三类证人
 
-每个证人标注立场：`customer`（需求方）/ `supplier`（供给方）/ `competitor`（竞争者）
-/ `incumbent`（主体自身）/ `regulator`（监管统计）。
+立场取自**命题声明的证人表**，不取自文档抽取（不变式 8）：
 
-**要求至少 2 类不同立场**才能给出 `confirmed`；只有单一立场（哪怕十家）最高只能到
-`mixed`。公司自身指引即使正式，也不能单独确认整个命题。
+```yaml
+witnesses:
+  - {entity: NVDA,        stance: customer}     # 下游客户
+  - {entity: SKHY,        stance: incumbent}    # 我们持有的这家
+  - {entity: MU,          stance: competitor}
+  - {entity: "005930.KS", stance: competitor}
+```
 
-### 极性：一条 claim 内不同指标方向可以相反
-
-支持方向是**声明**出来的，不是推断的。而且必须**逐指标**声明：在"HBM 供给持续紧张"
-这条命题下，**交期变长**支持它，**产能上升**却是反证（供给转松）。只在 claim 层面
-写一个 `supporting_direction`，引擎会把"供给转松"算成"紧张的证据"——把结论算反，
-且算得很自信。所以 `metric_polarity` 可逐指标覆盖。
+**要求至少 2 类不同立场**才能给出确定结论；只有单一立场（哪怕十家）最高只能到
+`mixed`。公司自身指引即使正式，也不能单独确认整个命题。研报/媒体/市场行为是二手
+材料，可以加权重但**永远不贡献立场类别**。
 
 ### 闸 3 — common / relative 隔离（最重要）
 
 这道闸是本设计和"朴素多家投票"的根本区别：
 
-- **A 类（common）claim**：任何证人的产能/需求/价格读数都可以计入。
-- **B 类（relative）claim**：必须声明 `subject`（主体，如 SKHY）。
-  **只有直接证据能改变它的结论**——主体自己的份额/ASP/认证读数，或竞争者明确
-  "从主体手里拿到份额" 的读数。
+- **A 类（common）claim**：任何证人在任一维度上的读数都可以计入。
+- **B 类（relative）claim**：必须声明 `subject`（主体，如 SKHY），并把能改变份额
+  判断的维度标为 `direct: true`（份额、客户认证、ASP、毛利率）。
+  **只有关于 subject 本人、且落在 direct 维度上的读数才能改变它。**
   竞争者单纯的**扩产/需求/指引上修，只计入关联的 A 类 claim，不动 B 类**。
 
 举例，美光上调 HBM 指引，正确的记账是四条同时发生：
@@ -192,7 +246,7 @@ Chief 仍须自己决定仓位——不变式是"Chief 是唯一决策者"，把
 
 | 表 | 存什么 |
 |---|---|
-| `evidence_observations` | 一次观测：来源文档 / 实体 / 指标 / 期间 / 方向 / **原文片段** / 观测类型（已实现·指引·对手方陈述·研究·媒体）/ **证人立场** |
+| `evidence_observations` | 一次观测：来源文档 / 实体 / 指标原名 / **归属维度**（语义链接，空=未映射）/ 期间 / 方向 / **原文片段** / 观测类型（已实现·指引·对手方陈述·研究·媒体） |
 | `claim_assessments` | 聚合快照：claim / as_of / verdict / 支持与反驳分数分列 / 证据簇数 / 立场类别数 / 引用的观测 |
 
 **主题不建注册表。** 命题就写在 `config/sectors/ai_hardware.yaml` 每层下的 `claims:`
@@ -200,31 +254,35 @@ Chief 仍须自己决定仓位——不变式是"Chief 是唯一决策者"，把
 instrument registry（SKHY / HY9H / 000660.KS 归一到同一经济实体的能力**已经存在**），
 不新造第四个配置真源。
 
-配置形态：
+配置形态见第四节。相对份额命题多两样东西——`subject` 和 `direct: true` 维度：
 
 ```yaml
-  - key: L5_fab
-    claims:
-      - {id: hbm_demand, kind: common, horizon: {from: 2026-08-01, to: 2027-12-31},
-         statement: HBM 需求持续高于规划供给,
-         metrics: [hbm_capex, sold_out_ratio, hbm_capacity],
-         metric_polarity: {hbm_capacity: down},   # 产能上升=供给转松=反证
-         witnesses: [{entity: NVDA, stance: customer}, {entity: MSFT, stance: customer},
-                     {entity: SKHY, stance: supplier}, {entity: MU, stance: supplier}]}
-      - {id: sk_share, kind: relative, subject: SKHY,
-         horizon: {from: 2026-08-01, to: 2027-12-31},
-         statement: SK Hynix 维持核心客户领先份额,
-         direct_metrics: [hbm_share, customer_qualification, hbm_asp],
-         witnesses: [{entity: SKHY, stance: incumbent}, {entity: MU, stance: competitor},
-                     {entity: "005930.KS", stance: competitor}],
-         falsifiers: [竞争对手通过核心客户认证且 SK 份额指引下修]}
+      - id: sk_hbm_share
+        kind: relative
+        subject: SKHY
+        statement: SK Hynix 维持核心客户 HBM 领先份额与定价权
+        concepts:
+          - {key: hbm_share, desc: HBM 份额/供货占比及其指引, supports_when: up,
+             direct: true, expect_from: [SKHY, MU, "005930.KS", NVDA]}
+          - {key: customer_qualification, desc: 核心客户认证进展（谁通过、谁被替代）,
+             supports_when: down, direct: true, expect_from: [NVDA, "005930.KS", MU]}
+          - {key: hbm_pricing, desc: HBM 价格/ASP 与毛利率走向, supports_when: up,
+             direct: true, expect_from: [SKHY, MU]}
+        witnesses:
+          - {entity: SKHY, stance: incumbent}
+          - {entity: MU, stance: competitor}
+          - {entity: "005930.KS", stance: competitor}
+          - {entity: NVDA, stance: customer}
+        falsifiers: [竞争对手通过核心客户认证且 SK 份额指引下修]
 ```
 
-- `direct_metrics` 是闸 3 的执行依据：只有这些指标上的读数能改变 relative claim。
+- `direct: true` 是闸 3 的执行依据：只有落在这些维度、且关于 `subject` 本人的读数
+  才能改变相对份额判断。
 - `horizon` 让"2027 年前供不应求"和"本季供不应求"成为不同命题。**超出时效的观测
   衰减回 unknown，不永久有效**；命题过期后进入待复核，不静默沿用。
-- **覆盖率随结论一起呈现**：每个结论都带"应到证人 / 已到证人"，`supportive 4/5 已报`
-  和 `supportive 1/5 已报` 在报告里必须能一眼区分——否则你不知道一个结论建立在几分
+- **覆盖率随结论一起呈现，且沉默要点名**：结论带"应到证人 / 已到证人"，并列出
+  **本期未发声的证人**。`supportive 4/5` 与 `supportive 1/5` 必须一眼可分——否则
+  你不知道一个结论建立在几分
   之几的证据上。
 
 ---
@@ -344,7 +402,10 @@ eligible_for_confirmation: false
 | 覆盖率 | 5 个证人只到 1 个 | 结论带 `1/5 已报`，与 `4/5 已报` 在输出上可区分 |
 | 可达性 | 关键指标取不到 | claim 保持 `unknown`；**断言不被解释成负面** |
 | 反证不被净额掩盖 | 支持 3 条、反驳 2 条 | 两侧分数分别保留，不只显示净值 |
-| 极性 | 同一 claim 下 lead_time↑ 与 capacity↑ | 前者计支持、后者计反驳，不被同向合并 |
+| 极性 | 同一 claim 下"交期↑"与"产能↑" | 前者计支持、后者计反驳，不被同向合并 |
+| **语义链接** | 抽出 `hbm_market_share`，命题维度叫 `hbm_share` | **必须归到同一维度**，不得因命名差异丢失 |
+| 立场来源 | 每份文档都是公司自述（抽取值恒为 incumbent） | 立场取自命题声明的证人表，跨立场印证仍能成立 |
+| 沉默即缺口 | 声明的证人本期未发声 | 结论里点名该证人，不当作中性 |
 | 发现材料隔离 | 观测被标记 discovery_evidence | 不得计入该 claim 的 verdict |
 
 **验收**：上表全绿。特别是隔离那两条——它们是这套设计存在的理由。

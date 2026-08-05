@@ -31,7 +31,9 @@
 
 | 字段 | 说明 |
 |---|---|
-| `entity` / `metric` / `period` | 这条事实说的是谁、哪个指标、哪个期间 |
+| `entity` / `source_entity` | 这条事实**说的是谁** / **由谁披露**（立场归于说话人） |
+| `concept` | 归属的命题维度——**按语义判断，不做字符匹配**；归不上就留空 |
+| `metric` / `period` | 模型自己的指标命名（仅供展示）/ 覆盖期间 |
 | `observation_type` | `reported_actual` 已实现 · `guidance` 前瞻主张 · `counterparty` 对手方谈别的环节 · `regulatory` · `research` · `media` · `market` |
 | `stance` | 说话人的经济位置：`incumbent` / `competitor` / `customer` / `supplier` / `regulator` |
 | `direction` | 该指标本身的方向 up/flat/down（**不是**对股价的判断） |
@@ -56,6 +58,9 @@
    只有后者可以当作证据缺失。取不到数据 ≠ 负面信号。
 4. **观测 id 对 (文档, 实体, 指标, 期间) 确定性。** 同一份纪要重跑十遍不会变成
    十条证据——证据条数下游要用来判断"几方印证"，重复计数等于凭空制造共识。
+5. **归属维度只能取自上下文给的闭集。** 模型编出来的维度名一律降级为"未映射"——
+   把事实错误归档到不相干的命题下，比不归档更糟。未映射是**合法结果**，
+   它们是阶段四归纳池的输入。
 
 另有一条**粘性**规则：`discovery_evidence` 一旦被归纳步骤置位，观察员重跑同一文档
 时不会清除它（否则"发现某命题的材料"会重新变得有资格印证那个命题，见
@@ -173,9 +178,8 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
   想立刻看效果就用 `--file` 手动跑一段文本。
 - 某次抽取失败 → `evidence show` 底部会列出最近失败及原因（这是刻意保留的，
   不是错误日志）。
-- 抽出来的 `metric` 命名不一致（如 `hbm_capacity` vs `hbm_capacity_sold_out`）
-  → claim 的 `metrics` 白名单负责匹配：**不在白名单里的观测会被静默忽略**。
-  用 `ats evidence claims` 看某条 claim 的证据簇数，若明显偏少，多半是抽出来的
-  指标名没进白名单——补进 `config/sectors/<name>.yaml` 对应 claim 的 `metrics` 即可。
-  注意同时确认极性：若该指标方向与命题相反（如"产能上升"对"供给紧张"是反证），
-  要一并加进 `metric_polarity`。
+- 观测大量显示"未映射" → 说明命题的 `concepts` 描述（`desc`）不够贴合该公司实际
+  披露的内容。**不要去改指标名**——归属是语义判断，改 `desc` 让维度描述覆盖到那类
+  表述即可。用 `ats evidence show` 看"模型原名 → 归属维度"的对照。
+- 某条 claim 证据簇数偏少 → 先看 `ats evidence claims` 的"未发声"名单：多半是声明的
+  证人本期确实没披露该维度，这是**真实的证据缺口**，不是 bug。

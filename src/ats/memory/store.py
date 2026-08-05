@@ -181,7 +181,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 -- several claims across layers.
 CREATE TABLE IF NOT EXISTS evidence_observations (
     id TEXT PRIMARY KEY, document_id TEXT, source_url TEXT,
-    entity TEXT, metric TEXT, period TEXT,
+    entity TEXT, source_entity TEXT, metric TEXT, concept TEXT, period TEXT,
     observation_type TEXT, stance TEXT, direction TEXT,
     value REAL, unit TEXT, evidence_span TEXT, observed_at TEXT,
     discovery_evidence INTEGER DEFAULT 0, extraction_confidence REAL DEFAULT 1.0
@@ -262,6 +262,12 @@ class TradingMemory:
         # have no client_order_id) coexist with the constraint.
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_coid "
                           "ON trades(client_order_id)")
+        ocols = {r["name"] for r in self.conn.execute(
+            "PRAGMA table_info(evidence_observations)")}
+        for ddl in ("concept TEXT", "source_entity TEXT"):
+            if ocols and ddl.split()[0] not in ocols:
+                self.conn.execute(
+                    f"ALTER TABLE evidence_observations ADD COLUMN {ddl}")
         self._migrate_pead_events_pk()
         self.conn.commit()
 
@@ -908,11 +914,13 @@ class TradingMemory:
         frozen = 1 if (obs.discovery_evidence or (existing and existing[0])) else 0
         self.conn.execute(
             "INSERT OR REPLACE INTO evidence_observations "
-            "(id,document_id,source_url,entity,metric,period,observation_type,stance,"
-            " direction,value,unit,evidence_span,observed_at,discovery_evidence,"
-            " extraction_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (obs.id, obs.document_id, obs.source_url, obs.entity.upper(), obs.metric,
-             obs.period, obs.observation_type, obs.stance, obs.direction, obs.value,
+            "(id,document_id,source_url,entity,source_entity,metric,concept,period,"
+            " observation_type,stance,direction,value,unit,evidence_span,observed_at,"
+            " discovery_evidence,extraction_confidence)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (obs.id, obs.document_id, obs.source_url, obs.entity.upper(),
+             (obs.source_entity or obs.entity).upper(), obs.metric,
+             obs.concept, obs.period, obs.observation_type, obs.stance, obs.direction, obs.value,
              obs.unit, obs.evidence_span, obs.observed_at.isoformat(),
              frozen, obs.extraction_confidence))
         self.conn.commit()

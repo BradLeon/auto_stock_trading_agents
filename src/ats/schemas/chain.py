@@ -59,7 +59,16 @@ class Observation(BaseModel):
     document_id: str                      # source doc (filing/transcript/article)
     source_url: str = ""
     entity: str                           # economic entity the fact is ABOUT
-    metric: str                           # e.g. hbm_asp, capex_guide, lead_time
+    # Who DISCLOSED it — the filing this came from. Distinct from `entity` on purpose:
+    # NVDA's call discussing HBM supply is a CUSTOMER-side testimony about a supplier's
+    # product. Witness stance belongs to the speaker, and two speakers saying the same
+    # thing are two independent witnesses; without this they would collapse into one.
+    source_entity: str = ""
+    metric: str                           # the model's own label, kept for display
+    # Which declared claim dimension this fact belongs to, assigned semantically.
+    # Empty = unmapped: still stored, and it is exactly what feeds the induction
+    # pool in docs/CHAIN_EVIDENCE.md §6.5.
+    concept: str = ""
     period: str = ""                      # fiscal label / quarter the fact covers
     observation_type: ObservationType
     stance: WitnessStance
@@ -131,6 +140,36 @@ class Horizon(BaseModel):
         return not (self.to and when > self.to)
 
 
+class Concept(BaseModel):
+    """One dimension a claim is tested on.
+
+    Deliberately a CONCEPT with a description, not a metric name. Observations are
+    linked to it semantically — `hbm_market_share`, `hbm_share` and "份额指引下修"
+    all belong here. Matching on metric strings would drop evidence over a naming
+    accident, which is a real loss dressed up as determinism.
+    """
+
+    key: str
+    desc: str = ""                        # semantic anchor shown to the linker model
+    # Which reading direction supports the claim ON THIS DIMENSION. Per-concept because
+    # one claim mixes polarities: under "supply stays tight", lead-time UP supports it
+    # while capacity UP refutes it. A claim-level direction would score supply
+    # loosening as evidence FOR tightness — confidently inverted.
+    supports_when: Direction = "up"
+    # Who is expected to speak to this dimension. Makes silence visible as a GAP rather
+    # than as neutrality — a single filing is self-interested and may disclose
+    # selectively, so cross-validation has to be declared up front.
+    expect_from: list[str] = Field(default_factory=list)
+    # Gate 3: may a reading here move a `relative` claim? (share / qualification /
+    # ASP / margin yes; capacity or demand no.)
+    direct: bool = False
+
+    @field_validator("expect_from")
+    @classmethod
+    def _upper(cls, v: list[str]) -> list[str]:
+        return [s.upper() for s in v]
+
+
 class ClaimDef(BaseModel):
     """A declared, falsifiable proposition. Lives in config/sectors/<name>.yaml under
     its layer; only a human adds one (agents may propose, see docs/CHAIN_EVIDENCE.md)."""
@@ -140,30 +179,32 @@ class ClaimDef(BaseModel):
     statement: str = ""
     layer: str = ""
     subject: str = ""                     # required when kind == "relative"
-    metrics: list[str] = Field(default_factory=list)
-    # Gate 3: only readings on these metrics may move a `relative` claim. A competitor's
-    # capacity/demand reading is credited to the linked common claim instead.
-    direct_metrics: list[str] = Field(default_factory=list)
+    concepts: list[Concept] = Field(default_factory=list)
+    # Witness stances are declared here, NOT read off the document: every filing is the
+    # company's own call, so asking a model "who is speaking" always answers "this
+    # company", and cross-stance corroboration could never be satisfied.
     witnesses: list[Witness] = Field(default_factory=list)
     falsifiers: list[str] = Field(default_factory=list)
     horizon: Horizon | None = None
-    # Which reading direction SUPPORTS the statement. Declared, not inferred: for
-    # "supply stays tight" a capacity increase is counter-evidence, while for
-    # "demand keeps growing" it is supporting — no generic rule can tell them apart.
-    supporting_direction: Direction = "up"
-    # Per-metric override, because one claim legitimately mixes polarities: under
-    # "HBM supply stays tight", lead_time UP supports it but capacity UP refutes it.
-    # Without this, adding capacity to `metrics` would score supply loosening as
-    # evidence FOR tightness — the engine would confidently invert the reading.
-    metric_polarity: dict[str, Direction] = Field(default_factory=dict)
-
-    def polarity_of(self, metric: str) -> Direction:
-        return self.metric_polarity.get((metric or "").lower(), self.supporting_direction)
 
     @field_validator("subject")
     @classmethod
     def _subject_upper(cls, v: str) -> str:
         return (v or "").upper()
+
+    def concept(self, key: str) -> Concept | None:
+        return next((c for c in self.concepts if c.key == key), None)
+
+    def stance_of(self, entity: str) -> str:
+        """Declared stance of the SPEAKER (see Observation.source_entity)."""
+        w = next((w for w in self.witnesses if w.entity.upper() == (entity or "").upper()),
+                 None)
+        return w.stance if w else ""
+
+    def expected_witnesses(self) -> set[str]:
+        """Union of who should speak, across dimensions; falls back to the witness list."""
+        out = {e for c in self.concepts for e in c.expect_from}
+        return out or {w.entity.upper() for w in self.witnesses}
 
     def model_post_init(self, _ctx) -> None:
         if self.kind == "relative" and not self.subject:
@@ -189,6 +230,9 @@ class ClaimAssessment(BaseModel):
     witnesses_expected: int = 0
     witnesses_reported: int = 0
     dissenters: list[str] = Field(default_factory=list)
+    # Declared witnesses that said nothing this period. Named, not folded into a
+    # count: a company's silence on a dimension is a gap, not neutrality.
+    silent_witnesses: list[str] = Field(default_factory=list)
     observation_ids: list[str] = Field(default_factory=list)
     note: str = ""
 

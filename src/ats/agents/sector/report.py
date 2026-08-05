@@ -69,6 +69,6 @@ def write(review: SectorReview, cfg: SectorConfig) -> Path | None:
 
 
 def _pead_symbols(cfg: SectorConfig) -> set[str]:
-    from ...config import is_pead_target
+    from ...config import is_pead_covered
 
-    return {s for s in cfg.all_symbols() if is_pead_target(s)}
+    return {s for s in cfg.all_symbols() if is_pead_covered(s)}

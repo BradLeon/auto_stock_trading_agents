@@ -249,6 +249,7 @@ def load_pead_global() -> dict:
     """Load config/pead.yaml (targets, monitor switches, schedule windows)."""
     cfg = _load_yaml(_config_dir() / "pead.yaml")
     cfg.setdefault("targets", [])
+    cfg.setdefault("observe", [])       # evidence-only coverage; never reaches the order path
     cfg.setdefault("monitor", {})
     cfg["monitor"].setdefault("enabled", True)
     cfg["monitor"].setdefault("lookback_days", 7)
@@ -351,16 +352,30 @@ def _derive_signal_chain(symbol: str) -> list[dict]:
 
 
 def is_pead_target(symbol: str) -> bool:
-    """True if the symbol is under PEAD coverage.
+    """True if the symbol is a TRADABLE PEAD target: full scoring, may reach the order path.
 
-    Membership in config/pead.yaml `targets` is what counts — a per-ticker file is
-    optional (missing means "use the _defaults scorecard"). Requiring the file is
-    what silently excluded AVGO/MRVL after they were added to `targets` without one.
+    Strictly `config/pead.yaml: targets`. A per-ticker file is optional (missing means
+    "use the _defaults scorecard") and — importantly — is NOT evidence of coverage:
+    treating a leftover file as coverage is what made MSFT/AMZN look tracked (tagged
+    [PEAD] in the sector review, consensus fetched) while no scheduler loop ever
+    touched them. Coverage is now declared, not inferred from the filesystem.
+    """
+    return symbol.upper() in {s.upper() for s in load_pead_global().get("targets", [])}
+
+
+def pead_observe_list() -> list[str]:
+    """Evidence-only coverage: earnings are read for chain evidence, never scored/traded."""
+    return [str(s).upper() for s in load_pead_global().get("observe", [])]
+
+
+def is_pead_covered(symbol: str) -> bool:
+    """True if the symbol is covered at all — tradable target OR evidence-only observe.
+
+    Use this for *display/enrichment* decisions (sector [PEAD] tag, consensus fetch).
+    Use `is_pead_target` for anything that can lead to an order.
     """
     sym = symbol.upper()
-    if sym in {s.upper() for s in load_pead_global().get("targets", [])}:
-        return True
-    return (_config_dir() / "pead" / f"{sym}.yaml").exists()
+    return is_pead_target(sym) or sym in set(pead_observe_list())
 
 
 def load_technical_config(name: str = "technical"):

@@ -69,14 +69,31 @@ def test_load_sector_config_missing_raises(monkeypatch, tmp_path):
         load_sector_config("nope")
 
 
-def test_is_pead_target(monkeypatch, tmp_path):
+def test_coverage_is_declared_not_inferred_from_files(monkeypatch, tmp_path):
+    """Coverage must come from an explicit list, never from a leftover config file.
+
+    Inferring it from the filesystem is what made MSFT/AMZN *look* tracked — tagged
+    [PEAD] in the sector review, consensus fetched — while no scheduler loop ever
+    read their earnings. A stale file is not a decision to cover something.
+    """
     monkeypatch.setenv("ATS_CONFIG_DIR", str(tmp_path))
     (tmp_path / "pead").mkdir()
-    (tmp_path / "pead" / "COHR.yaml").write_text("symbol: COHR\n", encoding="utf-8")
-    from ats.config import is_pead_target
+    # A per-ticker file with NO membership anywhere: pure leftover.
+    (tmp_path / "pead" / "AXT.yaml").write_text("symbol: AXT\n", encoding="utf-8")
+    (tmp_path / "pead.yaml").write_text(
+        "targets: [COHR]\nobserve: [MU]\n", encoding="utf-8")
+    from ats.config import is_pead_covered, is_pead_target, pead_observe_list
 
+    # tradable target
     assert is_pead_target("COHR") and is_pead_target("cohr")
-    assert not is_pead_target("NVDA")
+    assert is_pead_covered("COHR")
+    # evidence-only: covered, but NOT tradable
+    assert not is_pead_target("MU")
+    assert is_pead_covered("MU") and is_pead_covered("mu")
+    assert pead_observe_list() == ["MU"]
+    # leftover file: neither
+    assert not is_pead_target("AXT") and not is_pead_covered("AXT")
+    assert not is_pead_target("NVDA") and not is_pead_covered("NVDA")
 
 
 def test_assemble_offline_reads_store(monkeypatch):

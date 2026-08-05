@@ -24,6 +24,9 @@ llm:
     actuals_extract: {model: openai/gpt-5.6-terra, max_tokens: 8192}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor（2026-08-03 换 terra）
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
     research_extract: {model: deepseek/deepseek-v4-flash-0731}   # supply-chain insight extraction
+    # 产业链证据抽取（观察名单财报）：只抽事实+原文片段，不做判断 → 便宜档足够。
+    # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/CHAIN_EVIDENCE.md
+    evidence_observer: {model: deepseek/deepseek-v4-flash-0731, temperature: 0.0, max_tokens: 8192}
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.

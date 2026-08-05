@@ -10,6 +10,13 @@ targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, CRDO, AVGO, MRVL, VRT, 
 # 注：GOOG/MSFT/AMZN/KLAC/LRCX 暂用 _defaults 通用打分卡（仅设了 fiscal_label）；
 #   如需像 NVDA.yaml 那样定制 scorecard/signal_chain/narrative，再逐个补。
 
+# 观察名单：只读财报、不打分、不产出仓位建议、**绝不进入下单路径**。
+# 它们的财报被抽成产业链证据（见 docs/CHAIN_EVIDENCE.md）——利润是流动的，HBM 的
+# 供需由海力士/美光/三星三家共同决定，云 capex 由五家共同决定，只读自己持有的那家
+# 等于用几分之一的证据下注。
+# 与 targets 的区别：targets 可交易、走完整 PEAD 打分；observe 只贡献证据。
+observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS"]
+
 monitor:
   enabled: true
   lookback_days: 7

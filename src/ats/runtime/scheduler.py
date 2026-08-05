@@ -319,6 +319,13 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
             log.warning("PEAD-score[%s] %s failed: %s", window, sym, exc)
             outcomes[sym] = f"失败：{exc}"
 
+    # Evidence-only tier. Deliberately a SEPARATE loop over `observe`, never merged
+    # into the targets loop above: these names must not enter `scored`, must not
+    # trigger a Chief cycle, and must never reach the order path. They only leave
+    # chain observations behind (docs/CHAIN_EVIDENCE.md).
+    if not plan_only:
+        _observe_window(window, today, sched, outcomes, g.get("observe", []))
+
     # One Chief cycle for the whole window, not one per symbol — a single approval
     # card. The Chief consumes the score, so the regular daily cascade then correctly
     # treats it as background instead of re-proposing the same trade.
@@ -331,6 +338,52 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     elif scored:
         log.info("PEAD-score[%s] scored %s; chief skipped", window, ",".join(scored))
     return outcomes
+
+
+def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> None:
+    """Read the earnings of evidence-only names into chain observations.
+
+    Same double confirmation as scoring (`last_print` has an actual EPS AND an 8-K
+    filed on/after the print date) — without it we would read last quarter's numbers
+    as if they were new, which is exactly how a stale figure becomes false
+    corroboration for a live claim.
+
+    Hard boundary: no scoring, no dossier, no Chief, no orders. This function may
+    only write to the evidence tables.
+    """
+    from ..agents.evidence import observer
+    from ..data import documents, earnings_calendar, transcript
+
+    if not names:
+        return
+    for sym in (str(s).upper() for s in names):
+        try:
+            pr = earnings_calendar.last_print(
+                sym, as_of=today, back_days=sched.get("score_lookback_days", 4) + 3)
+            if pr is None or not pr.date:
+                continue
+            ok, ev = _confirm_reported(sym, pr)
+            if not ok:
+                log.info("observe[%s] %s: 待确认发布：%s", window, sym, ev)
+                continue
+            doc_id = f"{sym}:{pr.date:%Y%m%d}"
+            text, src = "", ""
+            try:
+                text, src = transcript.fetch(sym)
+            except Exception as exc:  # noqa: BLE001
+                log.info("observe[%s] %s: 纪要不可得（%s），退回公开文档", window, sym, exc)
+            if not text:
+                docs = documents.gather(sym)
+                text = "\n\n".join(body for _, body in docs)
+                src = "documents"
+            res = observer.observe_document(sym, doc_id, text, source_url=src,
+                                            period=str(pr.date))
+            outcomes[f"{sym} (observe)"] = (
+                f"证据 {res['new']} 新 / {res['saved']} 条" if not res["failure"]
+                else f"证据抽取失败：{res['failure']}")
+            log.info("observe[%s] %s: %s", window, sym, outcomes[f"{sym} (observe)"])
+        except Exception as exc:  # noqa: BLE001 - one name must not break the window
+            log.warning("observe[%s] %s failed: %s", window, sym, exc)
 
 
 def _technical_daily() -> None:

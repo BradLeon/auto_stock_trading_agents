@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from ats.runtime import scheduler
@@ -156,6 +158,7 @@ def test_live_daemon_still_gets_dry_run_windows(monkeypatch):
         c = dict(real())
         c["schedule"] = {**c["schedule"], "score_windows_live": live}
         c["targets"] = []
+        c["observe"] = []          # evidence tier is exercised in its own tests
         return c
 
     monkeypatch.setattr(config, "load_pead_global", lambda: cfg_with(False))
@@ -175,6 +178,7 @@ def test_windows_go_live_only_when_explicitly_enabled(monkeypatch):
         c = dict(real())
         c["schedule"] = {**c["schedule"], "score_windows_live": True}
         c["targets"] = []
+        c["observe"] = []          # evidence tier is exercised in its own tests
         return c
 
     monkeypatch.setattr(config, "load_pead_global", cfg)
@@ -239,3 +243,78 @@ def test_missed_job_logs_an_error(caplog):
     with caplog.at_level("ERROR"):
         captured["fn"](Ev())
     assert "MISSED" in caplog.text and "pead_score_amc" in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# Evidence-only tier: coverage must never widen the order path
+# --------------------------------------------------------------------------- #
+def test_observe_names_never_reach_chief_or_orders(monkeypatch):
+    """The observe tier exists to read the earnings of companies we do NOT hold.
+
+    It is a read-only widening of COVERAGE, never of the order path. This asserts the
+    boundary end-to-end: an observe name with a confirmed, unscored print produces
+    evidence and nothing else — no scoring, no dossier, no Chief cycle.
+    """
+    from ats import config
+    from ats.agents.evidence import observer as obs_mod
+
+    real = config.load_pead_global
+
+    def cfg():
+        c = dict(real())
+        c["targets"] = []                       # nothing tradable this window
+        c["observe"] = ["MU"]
+        return c
+
+    monkeypatch.setattr(config, "load_pead_global", cfg)
+    monkeypatch.setattr(scheduler, "is_trading_session", lambda *a, **k: True)
+    monkeypatch.setattr(scheduler, "_confirm_reported", lambda s, p: (True, "已公布"))
+
+    class _Print:
+        date = datetime(2026, 8, 4).date()
+        at = None
+
+    monkeypatch.setattr("ats.data.earnings_calendar.last_print", lambda *a, **k: _Print())
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("纪要正文", "fmp"))
+
+    monkeypatch.setattr(scheduler, "run_chief",
+                        lambda **kw: pytest.fail("observe must not trigger a Chief cycle"),
+                        raising=False)
+    monkeypatch.setattr(scheduler, "run_pead",
+                        lambda *a, **k: pytest.fail("observe must not be scored"),
+                        raising=False)
+
+    called = {}
+
+    def fake_observe(sym, doc, text, **k):
+        called["sym"] = sym
+        return {"symbol": sym, "saved": 2, "new": 2, "failure": ""}
+
+    monkeypatch.setattr(obs_mod, "observe_document", fake_observe)
+
+    outcomes = scheduler.pead_score_window("amc", dry_run=True)
+    assert called["sym"] == "MU"                       # evidence WAS extracted
+    assert any("observe" in k for k in outcomes)       # and reported in the audit log
+
+
+def test_observe_requires_the_same_double_confirmation(monkeypatch):
+    """Without the 8-K confirmation we would read last quarter's numbers as new —
+    that is precisely how a stale figure becomes false corroboration."""
+    from ats import config
+    from ats.agents.evidence import observer as obs_mod
+
+    real = config.load_pead_global
+    monkeypatch.setattr(config, "load_pead_global",
+                        lambda: {**real(), "targets": [], "observe": ["MU"]})
+    monkeypatch.setattr(scheduler, "is_trading_session", lambda *a, **k: True)
+    monkeypatch.setattr(scheduler, "_confirm_reported", lambda s, p: (False, "未取到 8-K"))
+
+    class _Print:
+        date = datetime(2026, 8, 4).date()
+        at = None
+
+    monkeypatch.setattr("ats.data.earnings_calendar.last_print", lambda *a, **k: _Print())
+    monkeypatch.setattr(obs_mod, "observe_document",
+                        lambda *a, **k: pytest.fail("must not extract before confirmation"))
+
+    scheduler.pead_score_window("amc", dry_run=True)

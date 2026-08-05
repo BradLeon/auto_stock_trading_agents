@@ -61,12 +61,14 @@ class SectorContext:
 
 
 def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
-    from ...config import is_pead_target
+    from ...config import is_pead_covered
     from ...data import industry
 
     sc = SectorContext(cfg=cfg)
     symbols = cfg.all_symbols()
-    pead_syms = [s for s in symbols if is_pead_target(s)]
+    # Covered = tradable target OR evidence-only observe. This drives display/enrichment
+    # (the [PEAD] tag, consensus fetch), not trading — so the observe names belong here.
+    pead_syms = [s for s in symbols if is_pead_covered(s)]
 
     snapshots = _snapshots(cfg, symbols, pead_syms) if live_data else {}
 

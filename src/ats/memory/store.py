@@ -176,6 +176,31 @@ CREATE INDEX IF NOT EXISTS idx_episode_symbol ON trade_episodes(symbol);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+-- Chain evidence (docs/CHAIN_EVIDENCE.md). Not keyed by tradable symbol: an
+-- observation is about an economic entity and a metric, and one fact can bear on
+-- several claims across layers.
+CREATE TABLE IF NOT EXISTS evidence_observations (
+    id TEXT PRIMARY KEY, document_id TEXT, source_url TEXT,
+    entity TEXT, metric TEXT, period TEXT,
+    observation_type TEXT, stance TEXT, direction TEXT,
+    value REAL, unit TEXT, evidence_span TEXT, observed_at TEXT,
+    discovery_evidence INTEGER DEFAULT 0, extraction_confidence REAL DEFAULT 1.0
+);
+CREATE INDEX IF NOT EXISTS idx_obs_entity ON evidence_observations(entity, metric);
+CREATE INDEX IF NOT EXISTS idx_obs_at ON evidence_observations(observed_at);
+-- Failed extractions are kept: "could not read" and "says nothing" are different
+-- states, and only the second may influence a verdict.
+CREATE TABLE IF NOT EXISTS evidence_failures (
+    document_id TEXT, entity TEXT, reason TEXT, at TEXT,
+    PRIMARY KEY (document_id, entity)
+);
+CREATE TABLE IF NOT EXISTS claim_assessments (
+    claim_id TEXT, as_of TEXT, layer TEXT, verdict TEXT,
+    support_score REAL, refute_score REAL, evidence_clusters INTEGER,
+    stance_classes INTEGER, witnesses_expected INTEGER, witnesses_reported INTEGER,
+    payload TEXT,
+    PRIMARY KEY (claim_id, as_of)
+);
 """
 
 
@@ -862,6 +887,70 @@ class TradingMemory:
             [(i.id, symbol, i.published_at.isoformat(), i.source, i.headline, i.url) for i in fresh])
         self.conn.commit()
         return fresh
+
+    # --- chain evidence --------------------------------------------------- #
+    def save_observation(self, obs) -> bool:
+        """Idempotent upsert. Returns True if this observation is new.
+
+        The id is deterministic over (document, entity, metric, period), so
+        re-running the observer over the same transcript cannot inflate the
+        evidence count — which would otherwise manufacture false corroboration.
+        """
+        existing = self.conn.execute(
+            "SELECT 1 FROM evidence_observations WHERE id = ?", (obs.id,)).fetchone()
+        self.conn.execute(
+            "INSERT OR REPLACE INTO evidence_observations "
+            "(id,document_id,source_url,entity,metric,period,observation_type,stance,"
+            " direction,value,unit,evidence_span,observed_at,discovery_evidence,"
+            " extraction_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (obs.id, obs.document_id, obs.source_url, obs.entity.upper(), obs.metric,
+             obs.period, obs.observation_type, obs.stance, obs.direction, obs.value,
+             obs.unit, obs.evidence_span, obs.observed_at.isoformat(),
+             1 if obs.discovery_evidence else 0, obs.extraction_confidence))
+        self.conn.commit()
+        return existing is None
+
+    def observations(self, *, entity: str | None = None, metric: str | None = None,
+                     since: datetime | None = None, limit: int = 500) -> list[dict]:
+        sql = "SELECT * FROM evidence_observations WHERE 1=1"
+        args: list = []
+        if entity:
+            sql += " AND entity = ?"
+            args.append(entity.upper())
+        if metric:
+            sql += " AND metric = ?"
+            args.append(metric)
+        if since:
+            sql += " AND observed_at >= ?"
+            args.append(since.isoformat())
+        sql += " ORDER BY observed_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def save_observation_failure(self, fail) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO evidence_failures (document_id,entity,reason,at) "
+            "VALUES (?,?,?,?)",
+            (fail.document_id, (fail.entity or "").upper(), fail.reason, fail.at.isoformat()))
+        self.conn.commit()
+
+    def observation_failures(self, limit: int = 50) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM evidence_failures ORDER BY at DESC LIMIT ?", (limit,)).fetchall()]
+
+    def freeze_as_discovery(self, observation_ids: list[str]) -> int:
+        """Mark observations as the material that MADE us notice a proposition.
+
+        Frozen material explains "why look"; it may never also count as "it is true"
+        (see docs/CHAIN_EVIDENCE.md §6.5). Returns rows affected.
+        """
+        if not observation_ids:
+            return 0
+        cur = self.conn.execute(
+            "UPDATE evidence_observations SET discovery_evidence = 1 WHERE id IN (%s)"
+            % ",".join("?" * len(observation_ids)), observation_ids)
+        self.conn.commit()
+        return cur.rowcount
 
     def recent_events(self, symbol: str, limit: int = 20) -> list[dict]:
         rows = self.conn.execute(

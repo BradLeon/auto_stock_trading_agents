@@ -7,11 +7,14 @@ semantic/vector layer (Chroma) is a later add; this is the structured backbone.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..schemas.memory import PerformanceRecord
+
+log = logging.getLogger("ats.memory.store")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cycles (
@@ -33,9 +36,13 @@ CREATE TABLE IF NOT EXISTS pead_dossier (
     symbol TEXT, fiscal_label TEXT, phase TEXT, payload TEXT, updated_at TEXT,
     PRIMARY KEY (symbol, fiscal_label)
 );
+-- PK is (symbol, id), not id alone: one news item is legitimately relevant to
+-- several targets (a peer headline is fetched once per target listing it in
+-- signal_chain), so it must be storable under each. See _migrate_pead_events_pk.
 CREATE TABLE IF NOT EXISTS pead_events (
-    id TEXT PRIMARY KEY, symbol TEXT, published_at TEXT, source TEXT,
-    headline TEXT, url TEXT, processed INTEGER DEFAULT 0
+    id TEXT, symbol TEXT, published_at TEXT, source TEXT,
+    headline TEXT, url TEXT, processed INTEGER DEFAULT 0,
+    PRIMARY KEY (symbol, id)
 );
 CREATE TABLE IF NOT EXISTS research_articles (
     id TEXT PRIMARY KEY, source TEXT, title TEXT, url TEXT,
@@ -230,7 +237,42 @@ class TradingMemory:
         # have no client_order_id) coexist with the constraint.
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_coid "
                           "ON trades(client_order_id)")
+        self._migrate_pead_events_pk()
         self.conn.commit()
+
+    def _migrate_pead_events_pk(self) -> None:
+        """pead_events: global `id` PK -> composite (symbol, id).
+
+        The same news item is legitimately relevant to several targets — a peer's
+        headline is fetched once per target that lists it in `signal_chain`. Under a
+        global PK only the FIRST target to fetch it could store it; every other target
+        silently saw nothing that round (AMZN sits in 6 targets' signal chains, so 5 of
+        them lost it). Rebuild is required: SQLite cannot ALTER a PRIMARY KEY.
+
+        Idempotent — detects the old shape and does nothing once migrated.
+        """
+        info = list(self.conn.execute("PRAGMA table_info(pead_events)"))
+        if not info:
+            return                                   # fresh DB: _SCHEMA already correct
+        pk_cols = {r["name"] for r in info if r["pk"]}
+        if pk_cols == {"symbol", "id"}:
+            return                                   # already migrated
+        cols = [r["name"] for r in info]             # preserve ALTER-added columns
+        collist = ",".join(cols)
+        log.info("migrating pead_events to composite PK (symbol, id)")
+        self.conn.executescript(f"""
+            CREATE TABLE pead_events__new (
+                id TEXT, symbol TEXT, published_at TEXT, source TEXT,
+                headline TEXT, url TEXT, processed INTEGER DEFAULT 0,
+                triage_score REAL, triage_category TEXT,
+                PRIMARY KEY (symbol, id)
+            );
+            INSERT OR IGNORE INTO pead_events__new ({collist})
+                SELECT {collist} FROM pead_events;
+            DROP TABLE pead_events;
+            ALTER TABLE pead_events__new RENAME TO pead_events;
+            CREATE INDEX IF NOT EXISTS idx_pead_events ON pead_events(symbol, published_at);
+        """)
 
     # --- writes ---------------------------------------------------------- #
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
@@ -796,12 +838,19 @@ class TradingMemory:
 
     # --- PEAD event log -------------------------------------------------- #
     def append_events(self, symbol: str, items) -> list:
-        """Insert news items not already stored; return the genuinely-new ones."""
+        """Insert news items not already stored FOR THIS SYMBOL; return the new ones.
+
+        Dedup is per-symbol, not global: the same peer headline is relevant to every
+        target that lists that peer in its signal_chain, and each of them needs to see
+        it. A global dedup gave the item to whichever target fetched it first and
+        silently starved the rest.
+        """
         if not items:
             return []
         existing = {r["id"] for r in self.conn.execute(
-            "SELECT id FROM pead_events WHERE id IN (%s)" % ",".join("?" * len(items)),
-            [i.id for i in items]).fetchall()}
+            "SELECT id FROM pead_events WHERE symbol = ? AND id IN (%s)"
+            % ",".join("?" * len(items)),
+            [symbol, *(i.id for i in items)]).fetchall()}
         fresh = []
         for i in items:                     # also dedup within the batch itself
             if i.id not in existing:

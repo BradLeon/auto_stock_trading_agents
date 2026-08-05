@@ -31,3 +31,23 @@ def test_performance_carries_cumulative_forward():
     assert p.net_liquidation == 100000
     assert p.daily_pnl == 0.0
     assert p.cumulative_pnl == 0.0
+
+
+def test_pead_events_dedup_is_per_symbol():
+    """One peer headline must reach EVERY target whose signal_chain lists that peer.
+
+    Regression: pead_events had a global `id` PRIMARY KEY and append_events deduped on
+    id alone, so whichever target fetched an item first owned it and the rest silently
+    saw nothing. AMZN sits in 6 targets' signal chains — 5 of them lost every AMZN item.
+    """
+    from ats.schemas.news import NewsItem
+
+    mem = TradingMemory(":memory:")
+    item = NewsItem(id="finnhub:12345", published_at=NOW, source="finnhub",
+                    headline="AMZN raises 2026 capex guide", url="http://x")
+    targets = ["COHR", "VRT", "LITE", "CRDO", "NVDA", "MSFT"]
+    for t in targets:
+        assert len(mem.append_events(t, [item])) == 1, f"{t} should receive the item"
+        assert mem.count_events(t) == 1
+    # Same symbol twice is still idempotent.
+    assert mem.append_events("COHR", [item]) == []

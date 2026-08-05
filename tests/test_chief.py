@@ -55,6 +55,40 @@ def test_assemble_gathers_all_blocks(monkeypatch):
     assert "normal" in text                                    # risk state
 
 
+def test_sector_block_renders_layer_boom_scores():
+    """Per-layer 景气 must reach the chief.
+
+    Regression: the block read a `layer_views` attribute SectorReview never had, so
+    the loop silently never ran — the weekly engine scored all six chain layers and
+    the chief saw none of it.
+    """
+    from ats.schemas.sector import LayerAssessment
+
+    get_store().save_sector_review(SectorReview(
+        sector="ai_hardware", as_of=NOW, regime="L5 是瓶颈",
+        layers=[LayerAssessment(key="L5_fab", label="L5 芯片制造", boom_score=82.0,
+                                signal="bullish", supply_demand="紧张：HBM 仍是最大瓶颈")]))
+    text = assemble._sector_block(set())
+    assert "L5 芯片制造" in text and "景气82" in text
+    assert "bullish" in text and "HBM 仍是最大瓶颈" in text
+
+
+def test_pead_block_renders_signal_chain_summary():
+    """Cross-ticker read-through belongs on the decision desk, not only in Obsidian."""
+    import ats.config as _config
+
+    real = _config.load_pead_global
+    _config.load_pead_global = lambda: {**real(), "targets": ["COHR"]}
+    try:
+        cfg = _config.load_pead_config("COHR")
+        get_store().save_dossier(PeadDossier(
+            symbol="COHR", fiscal_label=cfg.fiscal_label, phase="prep", updated_at=NOW,
+            signal_chain_summary="上游 TSM CoWoS 产能扩张，对本标的供给上限构成支持"))
+        assert "信号链: 上游 TSM CoWoS 产能扩张" in assemble._pead_block(set(), None)
+    finally:
+        _config.load_pead_global = real
+
+
 def test_assemble_derisk_prepends_hard_instruction():
     store = get_store()
     store.save_risk_review(RiskReview(as_of=NOW, risk_state="derisk"))

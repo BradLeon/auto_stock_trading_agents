@@ -168,6 +168,11 @@ def _pead_block(held_symbols: set | None = None, ctx: "ChiefContext | None" = No
                          "管理层口风缺失，打分偏保守，仓位建议已减半")
         if d.decision_summary and fresh:            # 可行动建议仅在新鲜未消费时出现
             lines.append(f"PEAD 分析师建议: {d.decision_summary}")
+        if d.signal_chain_summary:
+            # Cross-ticker read-through (upstream capacity / downstream CapEx → this name).
+            # The industry_analyst produces it at prep; it used to reach only the Obsidian
+            # report, never the decision desk.
+            lines.append(f"信号链: {d.signal_chain_summary[:300]}")
         if d.market_setup:
             ms = d.market_setup
             lines.append(f"Setup: 抢跑 vs 板块 {ms.run_up_vs_sector_pct}% · EM {ms.expected_move_pct}%")
@@ -255,10 +260,13 @@ def _sector_block(held_symbols: set | None = None) -> str:
         lines = [f"[{name} @ {r.as_of:%Y-%m-%d}] {r.regime}"]
         if r.rotation_advice:
             lines.append(f"轮动建议: {r.rotation_advice}")
-        # Layer-level scores (if available)
-        for lv in getattr(r, "layer_views", None) or []:
-            score_str = f"{lv.score}" if getattr(lv, "score", None) is not None else ""
-            lines.append(f"  层 {lv.key}: 景气{score_str} [{lv.regime}] {lv.summary[:80]}")
+        # Layer-level 景气 (L1-L6). The weekly engine computes these for every layer —
+        # they belong on the decision desk, not only in the Obsidian report. (This read
+        # used to look for a `layer_views` attribute that SectorReview never had, so the
+        # loop silently never ran and the chief never saw per-layer 景气 at all.)
+        for lv in r.layers:
+            lines.append(f"  层 {lv.label or lv.key}: 景气{lv.boom_score:.0f} "
+                         f"[{lv.signal}] {lv.supply_demand[:80]}")
         # Company calls: only held positions + actionable (非持有) calls
         for c in r.company_calls:
             sym = c.symbol.upper()

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from pathlib import Path
 
 from langgraph.types import Command
 
@@ -650,6 +651,64 @@ def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
     return review
 
 
+def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
+                 entity: str = "", limit: int = 30) -> int:
+    """Chain evidence: observe one company's latest print, or inspect what's stored.
+
+    Read-only with respect to trading — this path can never place an order.
+    """
+    from ..agents.evidence import observer
+    from ..memory import get_store
+
+    store = get_store()
+    if action == "show":
+        rows = store.observations(entity=entity or None, limit=limit)
+        if not rows:
+            print("(暂无证据观测 — 等观察名单的下一次财报，或用 `ats evidence observe` 手动跑)")
+            return 0
+        print(f"{'实体':<10}{'指标':<22}{'类型':<18}{'立场':<12}{'方向':<7}{'期间'}")
+        print("-" * 84)
+        for r in rows:
+            print(f"{r['entity']:<10}{r['metric']:<22}{r['observation_type']:<18}"
+                  f"{r['stance']:<12}{r['direction']:<7}{r['period'] or '—'}")
+            print(f"    {r['evidence_span'][:76]}")
+        fails = store.observation_failures(limit=5)
+        if fails:
+            print("\n最近抽取失败（保留而非记成'零观测'）：")
+            for f in fails:
+                print(f"  {f['entity']} · {f['document_id']}: {f['reason']}")
+        return 0
+
+    if not symbol:
+        print("❌ observe 需要标的：ats evidence observe MU")
+        return 1
+    sym = symbol.upper()
+    if file:
+        text, src, doc_id = Path(file).read_text(encoding="utf-8"), file, f"{sym}:{Path(file).name}"
+    else:
+        from ..data import documents, earnings_calendar, transcript
+
+        pr = earnings_calendar.last_print(sym, back_days=30)
+        doc_id = f"{sym}:{pr.date:%Y%m%d}" if pr and pr.date else f"{sym}:manual"
+        text, src = "", ""
+        try:
+            text, src = transcript.fetch(sym)
+        except Exception as exc:  # noqa: BLE001
+            print(f"（纪要不可得：{exc}）")
+        if not text:
+            text = "\n\n".join(body for _, body in documents.gather(sym))
+            src = "documents"
+    if not text.strip():
+        print(f"❌ 取不到 {sym} 的财报稿/纪要 — 可用 --file 指定本地文档")
+        return 1
+    res = observer.observe_document(sym, doc_id, text, source_url=src)
+    if res["failure"]:
+        print(f"⚠️  {sym}: 抽取失败 — {res['failure']}（已记录，不记为零观测）")
+        return 0
+    print(f"✅ {sym}: {res['new']} 条新观测 / 共 {res['saved']} 条（doc={doc_id}）")
+    return 0
+
+
 def sector_show(name: str = "ai_hardware") -> int:
     from ..memory import get_store
 
@@ -917,6 +976,12 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    evi = sub.add_parser("evidence", help="产业链证据 (observe / show) —— 只读，绝不下单")
+    evi.add_argument("action", choices=["observe", "show"])
+    evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
+    evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
+    evi.add_argument("--entity", default="", help="show: 只看某个实体")
+    evi.add_argument("--limit", type=int, default=30, help="show: 条数")
     ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
     ev.add_argument("action", choices=["list", "upcoming"])
     ev.add_argument("--days", type=int, default=30, help="upcoming window")
@@ -1025,6 +1090,9 @@ def main(argv: list[str] | None = None) -> int:
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0
+    if args.command == "evidence":
+        return run_evidence(args.action, args.symbol, file=args.file,
+                            entity=args.entity, limit=args.limit)
     if args.command == "events":
         return events_list(days=args.days if args.action == "upcoming" else None)
     if args.command == "chief":

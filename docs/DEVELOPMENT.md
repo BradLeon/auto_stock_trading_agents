@@ -52,6 +52,7 @@ src/ats/
     sector/            # assemble review report context outputs
     technical/         # strategy(纯数学·唯一真源) review report context —— 无 LLM
     pead/              # prep score monitor triage research outputs
+    evidence/          # observer outputs —— 产业链证据抽取（只写证据表，不碰 broker）
     chief/             # assemble decide outputs —— 决策收口
   broker/ibkr.py       # IBKR: portfolio/pnl/fills/orders/cancel
   channel/             # cli / feishu / feishu_bot + server 回调
@@ -66,18 +67,20 @@ src/ats/
     outputs.py         # LLM 结构化视图（ProposedChangeView / FindingItemView...）
   memory/              # store(所有表的读写) performance
   risk/                # correlation stress assess checks report —— 六层风控
+  chain/               # 产业链证据聚合（阶段二起：corroborate / induction）
   runtime/             # cli scheduler server
   schemas/             # 每个业务域一个文件，见第 3 节
   skills/<slug>/SKILL.md  # 每个 LLM 角色一份，见第 4 节
 config/
   settings.yaml        # 全局：llm.routing / broker / 通道 / 调度等
   risk.yaml            # 风控唯一入口：限额 / 层 cap / 期权生存 / 实体映射
-  pead.yaml            # PEAD 全局：targets/schedule windows/monitor 开关
+  pead.yaml            # PEAD 全局：targets(可交易) / observe(只读证据) / schedule / monitor
   pead/<SYM>.yaml       # 单票覆盖，合并在 pead/_defaults.yaml 之上
   sectors/*.yaml macro.yaml technical.yaml events.yaml news_sources.yaml watchlist.yaml
   knowledge/*.md        # 注入分析师上下文的静态行业笔记
 tests/                  # 见第 6 节
-docs/                   # DESIGN DEVELOPMENT WORKFLOWS DATA_SOURCES SECTOR_ANALYST GO_LIVE
+docs/                   # DESIGN DEVELOPMENT WORKFLOWS DATA_SOURCES SECTOR_ANALYST
+                        # CHAIN_EVIDENCE TECHNICAL_ANALYST MACRO_ANALYST RISK_SYSTEM GO_LIVE
 ```
 
 ## 3. Schemas 约定（`src/ats/schemas/`）
@@ -127,7 +130,10 @@ pydantic `BaseModel`。约定：
   `sector_analyst` `macro_strategist` `pead_analyst` `structure_analyst`
   `invalidation_check` `intel_brief` `actuals_extract`
 - **便宜档**（高频、抽取为主，能接受偶尔重试）：`news_triage` `context_monitor`
-  `industry_analyst` `research_extract`
+  `industry_analyst` `research_extract` `evidence_observer`
+
+（2026-08-03 起 Sonnet 档整体换成 `openai/gpt-5.6-terra`：AA 智能指数 55 高于
+sonnet-5 的 53，价格约一半。不稳就按上面的经验退回 `anthropic/claude-sonnet-5`。）
 
 改路由时的经验：某个角色如果偶发"空 tool call → 全零输出"（`run_structured`
 会重试几次但仍可能失败），通常是因为便宜模型在大 context + 复杂嵌套结构化输出
@@ -249,6 +255,13 @@ score/prep 还能手动重跑）。如果因为改代码/重启导致某天错�
   方式是每次持久化前先 `store.get_dossier(...)` 读出旧值，把不该在这次操作里
   改变的字段显式带过去。**任何新的 `INSERT OR REPLACE` 写入点，都要先问一句
   "这次覆盖会不会丢掉另一个阶段已经写好的字段"。**
+  第二例（`evidence_observations`）：`discovery_evidence` 由**归纳步骤**置位，
+  而写入这张表的是**观察员**。观察员重跑同一份文档时若原样覆盖，就会清掉这个
+  标志——于是"发现某个命题的材料"又变得有资格去印证那个命题，反事后编造的护栏
+  静默失效。所以该字段做成**粘性**的：一旦冻结，重写不清除。
+- 除了幂等，**确定性 ID 还负责防止"伪印证"**：`evidence_observations.id` 取
+  `(文档, 实体, 指标, 期间)` 的 hash，所以把同一份纪要重跑十遍不会变成十条证据。
+  证据条数会被下游用来判断"几方印证"，重复计数等于凭空制造共识。
 - 测试环境用 `ATS_DB_PATH` 环境变量指向临时文件（见第 6 节 `_isolate_db`），
   不要在测试里直接连 `var/ats.sqlite`。
 - 原始行情/基本面数据不落库，运行时现取；`var/data_dumps/` 只用于人工查验，

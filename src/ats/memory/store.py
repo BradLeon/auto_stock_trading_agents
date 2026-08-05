@@ -897,7 +897,15 @@ class TradingMemory:
         evidence count — which would otherwise manufacture false corroboration.
         """
         existing = self.conn.execute(
-            "SELECT 1 FROM evidence_observations WHERE id = ?", (obs.id,)).fetchone()
+            "SELECT discovery_evidence FROM evidence_observations WHERE id = ?",
+            (obs.id,)).fetchone()
+        # discovery_evidence is STICKY across rewrites. It is set by a different
+        # step (freeze_as_discovery, when an induction pass used this row to notice
+        # a proposition), so a plain INSERT OR REPLACE from the observer would clear
+        # it — and the material that discovered a claim would silently become
+        # eligible to confirm that same claim. Cf. the prep/score overwrite incident
+        # in docs/DEVELOPMENT.md §10.
+        frozen = 1 if (obs.discovery_evidence or (existing and existing[0])) else 0
         self.conn.execute(
             "INSERT OR REPLACE INTO evidence_observations "
             "(id,document_id,source_url,entity,metric,period,observation_type,stance,"
@@ -906,7 +914,7 @@ class TradingMemory:
             (obs.id, obs.document_id, obs.source_url, obs.entity.upper(), obs.metric,
              obs.period, obs.observation_type, obs.stance, obs.direction, obs.value,
              obs.unit, obs.evidence_span, obs.observed_at.isoformat(),
-             1 if obs.discovery_evidence else 0, obs.extraction_confidence))
+             frozen, obs.extraction_confidence))
         self.conn.commit()
         return existing is None
 

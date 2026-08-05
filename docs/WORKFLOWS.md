@@ -16,8 +16,15 @@
 | I4 | PEAD prep | — | 财报 T-3（earnings calendar 自动） | pead_analyst ×3 + industry_analyst | LangGraph（`graph/pead.py` prep 分支） |
 | I5 | 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — | 确定性代码（**无 LLM**）：7 点动量评分 + VIX 调节 + 期限结构/破位两层 | 普通函数 |
 | I6 | 绩效/风控快照 | 每交易日盘后 | risk_state≠normal → 飞书告警 | 确定性代码（无 LLM） | 普通函数 |
+| I7 | 产业链证据观察 | — | observe 名单公司财报发布（与打分同一套双重确认） | evidence_observer | 普通函数（只写证据表） |
 
 （原 I5 绩效/风控快照顺延为 I6。）
+
+**I7 的边界**：observe 名单（`config/pead.yaml: observe`）是**覆盖**，不是**可交易**。
+这些公司我们大多不持有，读它们是因为利润是流动的——HBM 的供需由海力士/美光/三星
+三家共同决定。它们只留下带原文片段的观测，**不打分、不建档案、不触发 Chief、
+绝不进下单路径**（`tests/test_scheduler_jobs.py` 直接断言这条边界）。
+设计见 [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
 
 图化取舍：LangGraph 的价值 = interrupt/checkpoint 跨进程恢复 + 多节点编排。只有决策图
 （有审批 interrupt）和 PEAD 图（多节点 LLM 链）图化；I1/I2/I3/I5/I6 保持函数，不过度工程。
@@ -108,6 +115,11 @@ v1/v2：拿不到本季纪要时先按财报稿/8-K 打 v1 —— 入库但**不
 
 `score_windows_live: false` 时窗口强制 dry-run（即使 daemon 带 `--live`）：打分、
 Chief、审批卡照常，但没有单会到券商。
+
+同一个窗口的末尾还跑一遍 **observe 名单**（`_observe_window`）——**独立循环，刻意
+不与 targets 合并**：它复用第 2 步同一套 8-K 双重确认（否则会把上一季的数字当成新
+证据读进来，而陈旧数字正是伪印证的来源），但只把财报抽成产业链证据，不进 `scored`、
+不触发 Chief、不产生任何订单。
 
 事件日历 `config/events.yaml`（date/kind/label/triggers）：
 - `macro` → 宏观策略师额外跑一次（FOMC/CPI/NFP/政府报告）

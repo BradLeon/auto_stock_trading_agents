@@ -1,7 +1,8 @@
 # 产业链证据 → 截面因子
 
 > 面向：决策者 / 设计者。讲思想、逻辑、边界与验收，不讲怎么写代码。
-> 状态：**设计已定，分四阶段实施**。每阶段的验收标准见第七节，未通过不进入下一阶段。
+> 状态：**阶段一已实施**（证据表 + 观测抽取，只写库不影响现有输出）；阶段二~四待做。
+> 每阶段的验收标准见第七节，未通过不进入下一阶段。
 > 与 `docs/SECTOR_ANALYST.md`（周度行业评审）、`docs/RISK_SYSTEM.md`（六层限额）配套阅读。
 
 ---
@@ -298,9 +299,9 @@ eligible_for_confirmation: false
 每阶段独立提交、独立验收。**上一阶段未通过不进入下一阶段。** 任何阶段都不改变
 下单路径、审批流程或风控参数。
 
-### 阶段一：证据表 + 观测抽取
+### 阶段一：证据表 + 观测抽取　✅ 已完成
 
-建两张表、抽取角色 `evidence_observer`（便宜模型档）、只在观察名单财报后触发。
+建表、抽取角色 `evidence_observer`（便宜模型档）、只在观察名单财报后触发。
 **只写库，不影响任何现有输出。**
 
 **测试** `tests/test_chain_evidence.py`：
@@ -413,11 +414,16 @@ eligible_for_confirmation: false
 | `config/sectors/ai_hardware.yaml` | 分层 + 成分股 + **claims 定义**（人工维护的唯一真源） |
 | `config/risk.yaml` | instrument registry：代码 → 经济实体归一（**复用，不重建**） |
 | `src/ats/schemas/chain.py` | Observation / ClaimDef / ClaimAssessment schema |
-| `src/ats/chain/corroborate.py` | 三道闸聚合器（确定性，无 LLM） |
-| `src/ats/chain/induction.py` | 未映射池 + 触发条件（确定性）→ 待确认命题卡 |
+| `src/ats/agents/evidence/observer.py` | 观测抽取（只抽事实，枚举非法整行丢弃） |
+| `src/ats/memory/store.py` | `save_observation` 幂等 + `discovery_evidence` 粘性 |
+| `src/ats/runtime/scheduler.py` | `_observe_window`：独立循环，与下单路径隔离 |
+| `src/ats/chain/corroborate.py` | 三道闸聚合器（确定性，无 LLM）·**阶段二** |
+| `src/ats/chain/induction.py` | 未映射池 + 触发条件（确定性）→ 待确认命题卡 ·**阶段四** |
 | `src/ats/agents/sector/structure.py` | 结构层——证据包在此转成 `moat_pricing` |
 | `src/ats/agents/sector/cross_section.py` | 截面因子模型（`moat_pricing` 权重 20%） |
 | `src/ats/skills/evidence-observer/SKILL.md` | 抽取提示词（只抽事实，不判方向） |
+
+观察员的完整边界与用法见 [`docs/EVIDENCE_OBSERVER.md`](EVIDENCE_OBSERVER.md)。
 
 ---
 

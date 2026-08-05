@@ -94,6 +94,7 @@ flowchart TD
 | 行业分析师 | sector_reviews（层评审 / company_calls） | 快照 + PEAD 档案 + 宏观评审（上游） | ❌ 不出单 |
 | PEAD 分析师 | pead_dossier（叙事 / 预期 / Scorecard / 建议） | 数据源 + 行业/宏观评审（上游注入） | ❌ 只出建议 |
 | 技术面分析师 | technical_reviews（7 点评分 / 建议敞口 / Tier 触发） | 日线收盘价 + VIX/VIX3M | ❌ 只出建议敞口，**不判方向** |
+| 证据观察员 | evidence_observations（带原文片段的事实观测） | 观察名单公司的财报稿/纪要 | ❌ **只抽事实，连建议都不出** |
 | 风控官 | risk_reviews（六层画像 / breaches / risk_state） | 持仓 + 价格 + 存档 | ❌ 硬闸门（否决/裁剪，不产生交易） |
 | Trader | trades / fills / performance | IBKR | ❌ 纯执行 + 记录 |
 | **Chief 首席** | cycles / decisions | **全部存档 + 实时持仓** | ✅ **唯一产生 TradeDecision** |
@@ -119,6 +120,7 @@ flowchart TD
 | PEAD monitor | 每交易日 | `pead:<SYM>` 日历事件 |
 | PEAD prep | — | 财报前 ≤3 个交易日（bmo/amc/dmh 各自的同日边界不同，见下） |
 | PEAD score | — | 财报后（bmo 当日 / amc 次日），且必须先确认财报已真实发布 |
+| 证据观察（observe 名单） | — | 同上双重确认后，**只抽证据**，不打分、不惊动 Chief |
 | 行业分析师 review | 每周六 | `sector[:name]` 日历事件（行业会议/发布会） |
 | 宏观策略师 review | 每周六 | `macro` 日历事件（FOMC/CPI/NFP/政府报告） |
 | 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — |
@@ -332,5 +334,6 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`
 - 行业分析师 L1-L6 分层方法论 → `docs/SECTOR_ANALYST.md`
 - 跨公司证据如何进入截面因子（共同需求 vs 相对份额）→ `docs/CHAIN_EVIDENCE.md`
+- 证据观察员的边界与用法 → `docs/EVIDENCE_OBSERVER.md`
 - 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
 - 从 paper 到 live 的历史 checklist → `docs/GO_LIVE.md`

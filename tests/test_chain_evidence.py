@@ -176,6 +176,22 @@ def test_freeze_as_discovery_marks_rows():
     assert row["discovery_evidence"] == 1
 
 
+def test_discovery_freeze_survives_reprocessing():
+    """The freeze must be sticky.
+
+    freeze_as_discovery is set by the induction step; the observer may later re-read
+    the same filing. If a plain overwrite cleared the flag, the very material that
+    discovered a proposition would become eligible to confirm it — the anti-hindsight
+    guard would fail silently, which is the worst way for it to fail.
+    """
+    store = get_store()
+    o = _obs()
+    store.save_observation(o)
+    store.freeze_as_discovery([o.id])
+    store.save_observation(_obs())                      # observer re-runs the document
+    assert store.observations(entity="MU")[0]["discovery_evidence"] == 1
+
+
 def test_failure_record_roundtrip():
     store = get_store()
     store.save_observation_failure(ObservationFailure(

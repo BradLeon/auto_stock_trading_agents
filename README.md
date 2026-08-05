@@ -253,6 +253,8 @@ ats serve                      # 常驻进程：处理飞书审批回调（和�
   （面向决策者/设计者，偏抽象）
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —— 环境搭建、代码规范、测试约定、
   daemon 运维操作（面向开发/运维工程师，偏具体）
+- [`docs/CHAIN_EVIDENCE.md`](docs/CHAIN_EVIDENCE.md) —— 未持有公司的财报如何变成
+  证据、共同需求与相对份额为什么必须分开记账、以及它如何进入截面因子
 - [`docs/TECHNICAL_ANALYST.md`](docs/TECHNICAL_ANALYST.md) —— 技术面策略的数学定义、
   7.5 年回测证据、以及为什么选了这一版
 - [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) —— 每种 workflow 的精确触发条件、

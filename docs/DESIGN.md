@@ -331,5 +331,6 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 - workflow 细节表、触发路由表 → `docs/WORKFLOWS.md`
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`
 - 行业分析师 L1-L6 分层方法论 → `docs/SECTOR_ANALYST.md`
+- 跨公司证据如何进入截面因子（共同需求 vs 相对份额）→ `docs/CHAIN_EVIDENCE.md`
 - 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
 - 从 paper 到 live 的历史 checklist → `docs/GO_LIVE.md`

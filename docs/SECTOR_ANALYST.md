@@ -73,7 +73,26 @@ SectorReview → ① sqlite sector_reviews 表
 | `src/ats/agents/sector/review.py` | 编排 + Opus 合成 + clamp/校验 |
 | `src/ats/agents/sector/report.py` | Obsidian markdown 渲染/写入 |
 | `src/ats/agents/sector/context.py` | 注回 PEAD 的 prep_block/monitor_hint |
+| `src/ats/agents/sector/cross_section.py` | 截面选股：层内排序 + 权重分配（确定性，无 LLM） |
+| `src/ats/agents/sector/structure.py` | 结构层：KB 定性评审 → tech_tenor / moat_pricing |
 | `src/ats/skills/sector-analyst/SKILL.md` | 合成提示词（方法论+校准纪律） |
+
+### 截面选股层（谁 / 多少）
+
+周度评审回答"哪层景气"，但不回答"这层里买谁、买多少"。截面层补这一课：在**同层
+cohort 内**把几个因子标准化成 z 分（Barra-lite），复合成排名，再按风险预算转成权重。
+
+- **量化因子**：growth 0.25 / quality 0.20 / value 0.25 / momentum 0.10 / revisions 0.20
+- **结构因子**（`--structure`，KB 定性）：`tech_tenor` 技术时间朝向、`moat_pricing`
+  护城河/份额/定价权，各 0.20；开启时量化整体压到 60%、结构占 40%
+- 层预算来自 `config/risk.yaml` 的 `sector_layer_caps`；`cohort_extra` 的票参与排名
+  但不占预算
+
+> **当前局限**：结构层的触发条件是"该层配了 `structure_notes` 知识库"，而目前**只有
+> L3 光互联层配了**。因此 L4 / L5 / L6 从未跑过结构层，这些层的 `moat_pricing` 恒为
+> 空值、记 0 分、cohort-neutral——也就是说，表达"海力士被三星反超"的那个因子，在 HBM
+> 层压根没被计算过。补齐知识库、并给这个因子接上事件级证据的设计见
+> [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
 
 ---
 

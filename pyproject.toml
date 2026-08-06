@@ -33,6 +33,7 @@ data = [
     "feedparser>=6.0",
     "pypdf>=4.0",
     "pysocks>=1.7",      # IMAP via local proxy (imaplib ignores proxy env vars)
+    "duckdb>=1.0",       # remote parquet reads for the transcript dataset (data/defeatbeta.py)
 ]
 broker = ["ib_async>=1.0"]
 memory = ["chromadb>=0.5"]

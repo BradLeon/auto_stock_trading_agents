@@ -180,6 +180,26 @@ def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
     return any(_hit(t) for t in tokens if len(t) >= 3 and t not in generic)
 
 
+def _fetch_keyed(symbol: str, label: str, print_=None):
+    """Tier-1 lookup in the keyed transcript dataset. None when it has nothing.
+
+    When a target quarter is known we ask for that exact quarter rather than "latest".
+    Asking for latest and checking afterwards is how a company that has not reported
+    yet gets served its previous call — NVDA's Q1 FY2027 material nearly stood in for
+    the Q2 FY2027 print that will not exist until late August.
+    """
+    from ...data import defeatbeta, fiscal
+
+    year, quarter = fiscal.parse_label(label) if label else (None, None)
+    got = defeatbeta.fetch(symbol, fiscal_year=year, fiscal_quarter=quarter)
+    if got is None and quarter is not None:
+        # Nothing for the target quarter. Do NOT silently accept the previous one:
+        # "has not reported yet" is a gap, and a gap is honest.
+        log.info("evidence %s: dataset has no %s — treating as not-yet-reported",
+                 symbol, label)
+    return got
+
+
 def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, str]:
     """Get this company's latest filing text. Returns (text, source, note).
 
@@ -242,6 +262,24 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         hit = source_cache.load(symbol, label, kind)
         if hit:
             return hit.text, hit.source or "cache", f"缓存命中：{hit.path.name}"
+
+    # Tier 1: the keyed dataset. Ahead of every search path because it cannot return
+    # another company's document at all — that is a structural property, not an
+    # accuracy claim, and it retires the failure mode five witnesses hit in one day.
+    # Its fiscal columns also make the period check an equality test; the guards below
+    # still run, but on this path they have nothing left to catch.
+    keyed = _fetch_keyed(symbol, label, print_)
+    if keyed is not None:
+        cached = source_cache.store(symbol, keyed.label, "transcript", keyed.text,
+                                    source="defeatbeta",
+                                    source_url=f"defeatbeta:{keyed.symbol}:{keyed.report_date}")
+        if cached and store is not None:
+            try:
+                store.save_document(cached, note=f"report_date={keyed.report_date}")
+            except Exception as exc:  # noqa: BLE001
+                log.info("evidence %s: could not record document (%s)", symbol, exc)
+        return (keyed.text, "defeatbeta",
+                f"数据集直取 {keyed.label} · 披露日 {keyed.report_date}")
 
     text, src = "", ""
     try:

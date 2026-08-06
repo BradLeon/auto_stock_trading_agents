@@ -429,6 +429,58 @@ def test_fetch_hits_cache_without_network(tmp_path, monkeypatch):
     assert "Micron cached body" in text and "缓存命中" in note
 
 
+def test_keyed_dataset_wins_over_every_search_path(tmp_path, monkeypatch):
+    """Tier 1 must be consulted before anything that can return another company's
+    document, and its result must be cached so the next run costs nothing."""
+    from ats.agents.evidence import observer as obs
+    from ats.data import defeatbeta
+    from ats.memory import get_store
+
+    def _boom(*a, **k):
+        raise AssertionError("a keyed hit must not fall through to search")
+
+    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: defeatbeta.Transcript(
+        symbol="SKHY", fiscal_year=2026, fiscal_quarter=2, report_date="2026-07-29",
+        text="Park Seong-hwan: SK hynix second quarter earnings call. " * 40))
+    monkeypatch.setattr("ats.data.transcript.fetch", _boom)
+    monkeypatch.setattr("ats.data.documents.gather", _boom)
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
+                        lambda *a, **k: ("Q2 FY2026", ""))
+
+    store = get_store()
+    text, src, note = obs.fetch_document("HY9H", store=store)   # via an alias
+    assert src == "defeatbeta" and "2026-07-29" in note
+    assert store.has_document("SKHY", "Q2 FY2026", "transcript")
+
+    monkeypatch.setattr(defeatbeta, "fetch", _boom)             # second run: cache only
+    text2, src2, note2 = obs.fetch_document("000660.KS", store=store)
+    assert text2.strip() == text.strip() and "缓存命中" in note2
+
+
+def test_a_company_that_has_not_reported_yet_is_a_gap_not_last_quarter(monkeypatch):
+    """Asking the dataset for "latest" and checking afterwards is how a company that
+    has not reported gets served its previous call — the exact shape of the NVDA
+    failure. The target quarter goes INTO the query."""
+    from ats.agents.evidence import observer as obs
+    from ats.data import defeatbeta
+
+    seen = {}
+
+    def _fetch(symbol, *, fiscal_year=None, fiscal_quarter=None):
+        seen.update(year=fiscal_year, quarter=fiscal_quarter)
+        return None                       # Q2 FY2027 does not exist yet
+
+    monkeypatch.setattr(defeatbeta, "fetch", _fetch)
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [])
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
+                        lambda *a, **k: ("Q2 FY2027", ""))
+
+    text, _src, _note = obs.fetch_document("NVDA")
+    assert seen == {"year": 2027, "quarter": 2}     # asked for THAT quarter
+    assert not text.strip()
+
+
 def test_identity_guard_rejects_a_different_companys_filing():
     """Both halves of a real false PASS, found on 2026-08-06 with live documents:
     an Apple earnings call was accepted as AMD's (8 Apple facts entered the ledger as

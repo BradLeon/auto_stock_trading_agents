@@ -60,6 +60,19 @@ def _isolate_report_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_transcript_dataset(monkeypatch):
+    """Tier-1 transcript lookup is off unless a test asks for it.
+
+    It reads a 2.2GB remote parquet; left live, every test touching fetch_document
+    would spend ~40s on the network. Tests that exercise this path monkeypatch
+    `ats.data.defeatbeta.fetch` themselves.
+    """
+    from ats.data import defeatbeta
+
+    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _stub_adjudicator(monkeypatch):
     """No test may reach the live cluster adjudicator.
 

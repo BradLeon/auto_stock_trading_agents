@@ -364,7 +364,7 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
     only write to the evidence tables.
     """
     from ..agents.evidence import observer
-    from ..data import documents, earnings_calendar, transcript
+    from ..data import earnings_calendar
     from ..memory import get_store
 
     if not names:
@@ -386,15 +386,12 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
                 # the lookback spans several days, so without this the same filing
                 # would be re-fetched and re-read every attempt.
                 continue
-            text, src = "", ""
-            try:
-                text, src = transcript.fetch(sym)
-            except Exception as exc:  # noqa: BLE001
-                log.info("observe[%s] %s: 纪要不可得（%s），退回公开文档", window, sym, exc)
-            if not text:
-                docs = documents.gather(sym)
-                text = "\n\n".join(body for _, body in docs)
-                src = "documents"
+            # Period-guarded fetch (see observer.fetch_document): the fiscal label must
+            # reach the search, and the result must be verified, or we extract from
+            # another company's or another quarter's filing.
+            text, src, note = observer.fetch_document(sym, print_=pr, store=store)
+            if note:
+                log.info("observe[%s] %s: %s", window, sym, note)
             res = observer.observe_document(sym, doc_id, text, source_url=src,
                                             period=str(pr.date))
             outcomes[f"{sym} (observe)"] = (

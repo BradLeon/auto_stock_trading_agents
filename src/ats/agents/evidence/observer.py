@@ -130,6 +130,99 @@ def relation_hint(symbol: str, sector: str = "ai_hardware") -> str:
             "指代含糊、或对应多家时，entity 仍记说话人。")
 
 
+def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
+    """Does this document actually name the company it is supposed to be from?
+
+    Only the head is searched: an earnings call identifies the issuer in its opening
+    lines, whereas a passing mention deep in an unrelated transcript would be a false
+    pass. Aliases are stripped to a distinctive token ("SK Hynix" -> "hynix") so that
+    "SK hynix Inc." and "SK Hynix" both match.
+    """
+    head = (text or "")[:8000].lower()
+    needles = {symbol.lower(), symbol.split(".")[0].lower()}
+    # >=3 chars, not >3: real names are this short ("KLA", "AMD", "TSM"), and dropping
+    # them turned a legitimate KLA transcript into a false reject. Generic corporate
+    # words are excluded instead, which is what actually risks a false PASS.
+    generic = {"inc", "corp", "ltd", "plc", "the", "and", "group", "co",
+               "holdings", "technologies", "technology", "corporation", "company",
+               "international", "electronics", "semiconductor", "semiconductors"}
+    for part in (company_name or "").replace(",", " ").split():
+        token = part.strip(".").lower()
+        if len(token) >= 3 and token not in generic:
+            needles.add(token)
+    return any(n and n in head for n in needles)
+
+
+def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, str]:
+    """Get this company's latest filing text. Returns (text, source, note).
+
+    Mirrors the PEAD score path (graph/pead.py) on purpose, because the two failure
+    modes it guards are exactly the ones that poison an evidence ledger:
+
+      * `fiscal_label` must reach the search. Without it transcript.fetch falls back to
+        a bare "<SYM> latest earnings call transcript" query, which that module already
+        measured as returning the wrong quarter — and for thin-coverage tickers it can
+        return an entirely different COMPANY (observed: SKHY -> Sherwin-Williams,
+        005930.KS -> Teradyne).
+      * the fetched text must then be period-verified. PEAD refuses to score on a
+        confirmed mismatch; here we refuse to extract and fall back to filings, because
+        an observation carrying the wrong quarter's numbers is worse than none — it is
+        indistinguishable from a real one once it is in the table.
+    """
+    from ...config import load_pead_config
+    from ...data import documents, fiscal, period, transcript
+
+    config_label, company = "", ""
+    try:
+        cfg = load_pead_config(symbol)
+        config_label = getattr(cfg, "fiscal_label", "") or ""
+        company = getattr(cfg, "company_name", "") or ""
+    except Exception:  # noqa: BLE001 - a missing per-ticker file must not block
+        pass
+    # Derive the label from the ACTUAL print rather than trusting a per-ticker file.
+    # Observe-list names have no per-ticker config at all, and even a target's can be
+    # malformed (SKHY's said "Q FY2026" — no quarter number, so it neither steers the
+    # search nor lets the period guard parse a target). Both cases silently degrade to
+    # a bare "<SYM> latest earnings call transcript" query, which is how we ended up
+    # extracting Sherwin-Williams for SKHY and last quarter's call for MU.
+    label = config_label
+    try:
+        label = period.resolve_fiscal_label(
+            symbol, print_, config_label=config_label, store=store)[0] or config_label
+    except Exception as exc:  # noqa: BLE001
+        log.info("evidence %s: fiscal label unresolved (%s)", symbol, exc)
+
+    text, src = "", ""
+    try:
+        text, src = transcript.fetch(symbol, label, company_name=company)
+    except Exception as exc:  # noqa: BLE001
+        log.info("evidence %s: transcript unavailable (%s)", symbol, exc)
+
+    note = ""
+    # Identity guard, checked BEFORE the period guard because it is the failure that
+    # actually happened twice: a thinly-covered ticker's search returned a different
+    # COMPANY entirely (SKHY -> Sherwin-Williams, 005930.KS -> Teradyne). The period
+    # guard cannot catch that — a wrong company's transcript can report the right
+    # quarter — and for names whose fiscal label will not resolve it never even runs.
+    # Cheap and decisive: the company's own call names the company.
+    if text and not _mentions_company(text, symbol, company):
+        log.warning("evidence %s: fetched document does not name the company (src=%s)",
+                    symbol, src)
+        text, src, note = "", "", f"取回的文档未提及本公司（来源 {src}）→ 改用公开文档"
+    if text and label:
+        ok, why = fiscal.verify_transcript(label, text, src)
+        if not ok:
+            log.warning("evidence %s: transcript rejected by period guard — %s", symbol, why)
+            text, src, note = "", "", f"纪要报告期核对未通过（{why}）→ 改用公开文档"
+        else:
+            note = why
+    if not text:
+        docs = documents.gather(symbol)
+        text = "\n\n".join(body for _, body in docs)
+        src = "documents"
+    return text, src, note
+
+
 def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
             period: str = "", now: datetime | None = None,
             sector: str = "ai_hardware") -> tuple[list[Observation], str]:

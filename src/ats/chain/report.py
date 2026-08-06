@@ -139,7 +139,10 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
             for e in ents:
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)
-        assessments = assess_layer(layer, rows_by_entity, cfg=ccfg)
+        # Stamp the snapshot with the REPORT's as_of, not wall-clock: otherwise
+        # re-rendering the same report writes a second row instead of replacing
+        # one, and the history reads as change when nothing changed.
+        assessments = assess_layer(layer, rows_by_entity, cfg=ccfg, as_of=as_of)
         assessments_by_layer[layer.key] = assessments
         # Snapshot the verdicts. Versioned by (claim_id, as_of) so the table answers
         # "when did this turn from mixed to contradicted" — the only question a verdict

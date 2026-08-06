@@ -96,8 +96,12 @@ def test_render_persists_verdict_history():
 
     report.render(cfg, store, as_of=NOW, ind_cfg={})
     report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})
+    report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})   # rerun
 
     hist = store.claim_assessment_history("sk_hbm_share")
-    assert len(hist) == 2, "each run must leave its own snapshot"
+    # Two dates, not three rows: the snapshot is stamped with the REPORT's as_of, so a
+    # rerun replaces rather than appends — otherwise the history reads as change when
+    # nothing changed.
+    assert len(hist) == 2, "one snapshot per report date; reruns must not append"
     assert {h["verdict"] for h in hist}                      # verdict recorded
     assert store.latest_claim_assessments()                   # and a latest view exists

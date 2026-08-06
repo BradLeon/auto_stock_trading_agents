@@ -301,3 +301,57 @@ def test_already_extracted_document_is_not_fetched_again(monkeypatch):
     monkeypatch.setattr(obs_mod, "observe_document",
                         lambda *a, **k: pytest.fail("must not re-extract"))
     scheduler.pead_score_window("amc", dry_run=True)
+
+
+# --- document sourcing guards --------------------------------------------- #
+def test_identity_guard_rejects_another_companys_transcript():
+    """The failure that actually happened, twice, on real data.
+
+    A thinly-covered ticker's search returned a different COMPANY: SKHY got
+    Sherwin-Williams, 005930.KS got Teradyne. The period guard cannot catch this (a
+    wrong company can report the right quarter) and for names whose fiscal label will
+    not resolve it never runs at all. An observation carrying another company's numbers
+    is worse than none — once in the table it is indistinguishable from a real one.
+    """
+    from ats.agents.evidence.observer import _mentions_company as mentions
+
+    assert mentions("SK hynix Inc. Q2 2026 earnings call", "SKHY", "SK Hynix")
+    assert not mentions("The Sherwin-Williams Company Q2 2026 paint results",
+                        "SKHY", "SK Hynix")
+    assert not mentions("Teradyne Q4 2024 earnings call transcript",
+                        "005930.KS", "Samsung Electronics")
+    assert mentions("Samsung Electronics Q2 2026 memory division", "005930.KS",
+                    "Samsung Electronics")
+
+
+def test_identity_guard_ignores_generic_corporate_suffixes():
+    """"Inc"/"Technologies" must not make every filing look like a match."""
+    from ats.agents.evidence.observer import _mentions_company as mentions
+
+    assert not mentions("Some Other Technologies Inc. reported results",
+                        "MU", "Micron Technology")
+    # "Semiconductor"/"International" are the same trap: they would pass almost any
+    # semis filing, and "ASM International" would then read as "ASML".
+    assert not mentions("ASM International posts record Q2 2026 revenue", "ASML", "ASML")
+
+
+def test_identity_guard_accepts_short_real_names():
+    """Real names are this short. Requiring >3 chars rejected a genuine KLA
+    transcript (config company_name is "KLA", and the call never writes "KLAC")."""
+    from ats.agents.evidence.observer import _mentions_company as mentions
+
+    assert mentions("KLA Corporation reported Q4 2026 results", "KLAC", "KLA")
+    assert mentions("ASML Holding N.V. Q2 2026 earnings call", "ASML", "ASML")
+    assert mentions("Taiwan Semiconductor Manufacturing Q2 2026", "TSM",
+                    "Taiwan Semiconductor")
+
+
+def test_fetch_falls_back_to_filings_when_the_document_is_not_ours(monkeypatch):
+    from ats.agents.evidence import observer as obs
+
+    monkeypatch.setattr("ats.data.transcript.fetch",
+                        lambda *a, **k: ("Sherwin-Williams paint results", "tavily:x"))
+    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [("8k", "SK Hynix 8-K body")])
+    text, src, note = obs.fetch_document("SKHY")
+    assert src == "documents" and "未提及本公司" in note
+    assert "Sherwin" not in text

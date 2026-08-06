@@ -778,18 +778,13 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
     if file:
         text, src, doc_id = Path(file).read_text(encoding="utf-8"), file, f"{sym}:{Path(file).name}"
     else:
-        from ..data import documents, earnings_calendar, transcript
+        from ..data import earnings_calendar
 
-        pr = earnings_calendar.last_print(sym, back_days=30)
+        pr = earnings_calendar.last_print(sym, back_days=45)
         doc_id = f"{sym}:{pr.date:%Y%m%d}" if pr and pr.date else f"{sym}:manual"
-        text, src = "", ""
-        try:
-            text, src = transcript.fetch(sym)
-        except Exception as exc:  # noqa: BLE001
-            print(f"（纪要不可得：{exc}）")
-        if not text:
-            text = "\n\n".join(body for _, body in documents.gather(sym))
-            src = "documents"
+        text, src, note = observer.fetch_document(sym, print_=pr, store=store)
+        if note:
+            print(f"（{note}）")
     if not text.strip():
         print(f"❌ 取不到 {sym} 的财报稿/纪要 — 可用 --file 指定本地文档")
         return 1

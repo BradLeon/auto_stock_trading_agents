@@ -324,7 +324,14 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     # trigger a Chief cycle, and must never reach the order path. They only leave
     # chain observations behind (docs/CHAIN_EVIDENCE.md).
     if not plan_only:
-        _observe_window(window, today, sched, outcomes, g.get("observe", []))
+        # Evidence covers EVERY name a claim can call as a witness — targets included.
+        # Restricting it to `observe` left the two most important witnesses uncollected:
+        # SKHY (the subject we hold) and NVDA (the customer whose testimony is the only
+        # cross-stance evidence about SK's share). Both are targets, so the share claim
+        # could only ever see competitor readings — which gate 3 correctly refuses to
+        # act on — leaving it permanently unknown.
+        _observe_window(window, today, sched, outcomes,
+                        list(g.get("targets", [])) + list(g.get("observe", [])))
 
     # One Chief cycle for the whole window, not one per symbol — a single approval
     # card. The Chief consumes the score, so the regular daily cascade then correctly
@@ -348,15 +355,22 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
     as if they were new, which is exactly how a stale figure becomes false
     corroboration for a live claim.
 
+    Runs over targets AND observe names: being tradable does not make a company's
+    filing useless as evidence about the chain. The difference stays where it belongs —
+    targets are additionally scored and may reach the order path; this function never
+    does either.
+
     Hard boundary: no scoring, no dossier, no Chief, no orders. This function may
     only write to the evidence tables.
     """
     from ..agents.evidence import observer
     from ..data import documents, earnings_calendar, transcript
+    from ..memory import get_store
 
     if not names:
         return
-    for sym in (str(s).upper() for s in names):
+    store = get_store()
+    for sym in dict.fromkeys(str(s).upper() for s in names):     # dedupe, keep order
         try:
             pr = earnings_calendar.last_print(
                 sym, as_of=today, back_days=sched.get("score_lookback_days", 4) + 3)
@@ -367,6 +381,11 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
                 log.info("observe[%s] %s: 待确认发布：%s", window, sym, ev)
                 continue
             doc_id = f"{sym}:{pr.date:%Y%m%d}"
+            if store.has_observations_for_document(doc_id):
+                # Already extracted. Both windows attempt an unknown-session print and
+                # the lookback spans several days, so without this the same filing
+                # would be re-fetched and re-read every attempt.
+                continue
             text, src = "", ""
             try:
                 text, src = transcript.fetch(sym)

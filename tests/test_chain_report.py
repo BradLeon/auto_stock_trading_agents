@@ -83,3 +83,21 @@ def test_report_writer_is_isolated_from_the_real_vault(tmp_path):
     out = load_sector_config("ai_hardware").output_dir
     assert "Obsidian" not in out, f"sector output_dir leaked to the real vault: {out}"
     assert out.startswith(str(tmp_path.parent.parent)) or "pytest" in out
+
+
+def test_render_persists_verdict_history():
+    """The verdict table exists to answer "when did this change" — so each render
+    snapshots, versioned by (claim_id, as_of), rather than overwriting."""
+    from datetime import timedelta
+
+    store = get_store()
+    store.save_observation(_obs("SKHY", "hbm_share", direction="down", span="share to decline"))
+    cfg = load_sector_config("ai_hardware")
+
+    report.render(cfg, store, as_of=NOW, ind_cfg={})
+    report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})
+
+    hist = store.claim_assessment_history("sk_hbm_share")
+    assert len(hist) == 2, "each run must leave its own snapshot"
+    assert {h["verdict"] for h in hist}                      # verdict recorded
+    assert store.latest_claim_assessments()                   # and a latest view exists

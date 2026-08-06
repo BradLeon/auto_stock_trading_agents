@@ -139,7 +139,16 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
             for e in ents:
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)
-        assessments_by_layer[layer.key] = assess_layer(layer, rows_by_entity, cfg=ccfg)
+        assessments = assess_layer(layer, rows_by_entity, cfg=ccfg)
+        assessments_by_layer[layer.key] = assessments
+        # Snapshot the verdicts. Versioned by (claim_id, as_of) so the table answers
+        # "when did this turn from mixed to contradicted" — the only question a verdict
+        # history exists for. Best-effort: the report must still render if it fails.
+        for a in assessments:
+            try:
+                store.save_claim_assessment(a)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("claim assessment persist skipped for %s: %s", a.claim_id, exc)
         for rows in rows_by_entity.values():
             for r in rows:
                 rows_by_id[r["id"]] = r

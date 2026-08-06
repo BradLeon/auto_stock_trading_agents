@@ -237,3 +237,67 @@ def test_failure_record_roundtrip():
     store.save_observation_failure(ObservationFailure(
         document_id="d1", entity="ORCL", reason="未取到文档", at=NOW))
     assert store.observation_failures()[0]["entity"] == "ORCL"
+
+
+def test_evidence_covers_targets_not_only_the_observe_list(monkeypatch):
+    """Being tradable must not exclude a company's filing from the evidence ledger.
+
+    The L5 share claim names SKHY (the subject we hold) and NVDA (the customer whose
+    testimony is its only cross-stance evidence) as witnesses — both are PEAD targets.
+    While collection ran over `observe` alone, neither was ever read, so gate 3 saw
+    only competitor readings (which it correctly refuses to act on) and the claim was
+    permanently unknown.
+    """
+    from ats import config
+    from ats.agents.evidence import observer as obs_mod
+    from ats.runtime import scheduler
+
+    real = config.load_pead_global
+    monkeypatch.setattr(config, "load_pead_global",
+                        lambda: {**real(), "targets": ["SKHY"], "observe": ["MU"]})
+    monkeypatch.setattr(scheduler, "is_trading_session", lambda *a, **k: True)
+    monkeypatch.setattr(scheduler, "_confirm_reported", lambda s, p: (True, "已公布"))
+    monkeypatch.setattr(scheduler, "_score_plan", lambda *a, **k: ("", "no print"))
+
+    class _Print:
+        date = datetime(2026, 8, 5).date()
+        at = None
+
+    monkeypatch.setattr("ats.data.earnings_calendar.last_print", lambda *a, **k: _Print())
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("正文", "fmp"))
+
+    seen: list[str] = []
+    monkeypatch.setattr(obs_mod, "observe_document",
+                        lambda sym, doc, text, **k: (seen.append(sym) or
+                                                     {"symbol": sym, "saved": 1, "new": 1,
+                                                      "failure": ""}))
+    scheduler.pead_score_window("amc", dry_run=True)
+    assert set(seen) == {"SKHY", "MU"}, "a target's filing is evidence too"
+
+
+def test_already_extracted_document_is_not_fetched_again(monkeypatch):
+    """Document-level idempotence: both windows attempt an unknown-session print and
+    the lookback spans days, so re-reading would burn a fetch and an LLM call each time."""
+    from ats import config
+    from ats.agents.evidence import observer as obs_mod
+    from ats.runtime import scheduler
+
+    real = config.load_pead_global
+    monkeypatch.setattr(config, "load_pead_global",
+                        lambda: {**real(), "targets": [], "observe": ["MU"]})
+    monkeypatch.setattr(scheduler, "is_trading_session", lambda *a, **k: True)
+    monkeypatch.setattr(scheduler, "_confirm_reported", lambda s, p: (True, "已公布"))
+
+    class _Print:
+        date = datetime(2026, 8, 5).date()
+        at = None
+
+    monkeypatch.setattr("ats.data.earnings_calendar.last_print", lambda *a, **k: _Print())
+    # Pre-seed an observation from that exact filing.
+    get_store().save_observation(_obs(document_id="MU:20260805"))
+
+    monkeypatch.setattr("ats.data.transcript.fetch",
+                        lambda *a, **k: pytest.fail("must not re-fetch a read filing"))
+    monkeypatch.setattr(obs_mod, "observe_document",
+                        lambda *a, **k: pytest.fail("must not re-extract"))
+    scheduler.pead_score_window("amc", dry_run=True)

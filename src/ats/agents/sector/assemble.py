@@ -26,6 +26,7 @@ class SectorContext:
     insight_lines: list[str] = field(default_factory=list)
     event_lines: list[str] = field(default_factory=list)
     macro_block: str = ""
+    evidence_block: str = ""
 
     def as_context(self) -> str:
         parts = [
@@ -35,6 +36,8 @@ class SectorContext:
         if self.macro_block:
             parts.append("## 宏观背景（自上而下：利率/风险偏好/板块倾斜 — 据此调整层与个股观点）\n"
                          + self.macro_block)
+        if self.evidence_block:
+            parts.append(self.evidence_block)
         parts.append("\n\n".join(self.layer_blocks))
         if self.pead_blocks:
             parts.append("## PEAD 活体档案结论（最新叙事尾部 + 已出分的 Scorecard）\n"
@@ -90,6 +93,7 @@ def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
 
     _pead_conclusions(sc, pead_syms)
     _insights_and_events(sc, symbols, pead_syms)
+    _chain_evidence(sc, cfg)
 
     # Top-down cascade: prepend the latest macro regime/tilts if enabled.
     from ...config import load_pead_global
@@ -226,3 +230,49 @@ def _insights_and_events(sc: SectorContext, symbols: list[str], pead_syms: list[
                     and (e.get("published_at") or "") >= cutoff):
                 sc.event_lines.append(
                     f"- [{e['published_at'][:10]} {score:.1f}] ({sym}) {e['headline'][:110]}")
+
+
+def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
+    """Common-demand verdicts from the evidence ledger, for the layer 景气 call.
+
+    Only A-class (`common`) claims come here. B-class relative verdicts go to the
+    cross-section's moat_pricing instead — routing them into the layer read would put
+    "who is winning inside the layer" back into "how hot is the layer", which is the
+    conflation this whole design exists to prevent.
+
+    These verdicts are computed by the deterministic engine; the analyst is told not to
+    re-litigate them, only to use them as the evidence base for the boom score. Without
+    this the weekly review scores "HBM supply is tight" off price momentum and
+    valuation snapshots while the actual filings sit unread in the ledger.
+    """
+    from ...chain.corroborate import assess_layer
+    from ...memory import get_store
+
+    store = get_store()
+    ccfg = cfg.review.get("corroboration", {})
+    lines: list[str] = []
+    for layer in cfg.layers:
+        commons = [c for c in layer.claims if c.kind == "common"]
+        if not commons:
+            continue
+        rows_by_entity: dict[str, list[dict]] = {}
+        for claim in commons:
+            for e in claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}:
+                if e not in rows_by_entity:
+                    rows_by_entity[e] = store.observations(entity=e, limit=200)
+        for a in assess_layer(layer, rows_by_entity, cfg=ccfg):
+            claim = next((c for c in commons if c.id == a.claim_id), None)
+            if claim is None:
+                continue            # relative claim — belongs to the cross-section
+            silent = f" · 未发声 {', '.join(a.silent_witnesses)}" if a.silent_witnesses else ""
+            lines.append(
+                f"- [{layer.key}] {claim.statement}\n"
+                f"    结论 {a.verdict} · 证人覆盖 {a.coverage} · 独立证据簇 "
+                f"{a.evidence_clusters} · 立场 {a.stance_classes} 类 · "
+                f"支持 {a.support_score:.0f}/反驳 {a.refute_score:.0f}{silent}")
+    if lines:
+        sc.evidence_block = (
+            "## 产业链证据（各层共同需求命题的印证状态）\n"
+            "> 由确定性引擎从各家财报原文算出，**不要重新判断这些结论对不对**——"
+            "把它们当作该层景气打分的证据基础。覆盖率低或立场单一时，说明证据还不足以下判断。\n"
+            + "\n".join(lines))

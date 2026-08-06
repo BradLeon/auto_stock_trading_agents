@@ -951,6 +951,46 @@ class TradingMemory:
         args.append(limit)
         return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
+    def has_observations_for_document(self, document_id: str) -> bool:
+        """Already extracted from this filing? Then never fetch or re-read it.
+
+        Document-level idempotence: the earnings windows retry across days and both
+        windows may attempt an unknown-session print, so without this a filing would be
+        re-fetched and re-sent to the model every attempt.
+        """
+        return self.conn.execute(
+            "SELECT 1 FROM evidence_observations WHERE document_id = ? LIMIT 1",
+            (document_id,)).fetchone() is not None
+
+    def save_claim_assessment(self, assessment) -> None:
+        """Snapshot a verdict. Versioned by (claim_id, as_of), never overwritten in
+        place: "when did this claim turn from mixed to contradicted" is exactly the
+        question a verdict table exists to answer, and it is unanswerable if each run
+        clobbers the last."""
+        import json
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO claim_assessments (claim_id,as_of,layer,verdict,"
+            " support_score,refute_score,evidence_clusters,stance_classes,"
+            " witnesses_expected,witnesses_reported,payload) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (assessment.claim_id, assessment.as_of.isoformat(), assessment.layer,
+             assessment.verdict, assessment.support_score, assessment.refute_score,
+             assessment.evidence_clusters, assessment.stance_classes,
+             assessment.witnesses_expected, assessment.witnesses_reported,
+             json.dumps(assessment.model_dump(mode="json"), ensure_ascii=False)))
+        self.conn.commit()
+
+    def claim_assessment_history(self, claim_id: str, limit: int = 20) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM claim_assessments WHERE claim_id = ? ORDER BY as_of DESC "
+            "LIMIT ?", (claim_id, limit)).fetchall()]
+
+    def latest_claim_assessments(self, limit: int = 50) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM claim_assessments a WHERE as_of = ("
+            "  SELECT MAX(as_of) FROM claim_assessments b WHERE b.claim_id = a.claim_id)"
+            " ORDER BY layer, claim_id LIMIT ?", (limit,)).fetchall()]
+
     def save_observation_failure(self, fail) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO evidence_failures (document_id,entity,reason,at) "

@@ -191,9 +191,9 @@ flowchart LR
 
 除此之外，值得偶尔做的事：
 
-- **看一眼产业链证据**：`ats evidence claims` 会告诉你每条假设现在被证实到什么
-  程度、**还有谁没发声**（比如"HBM 供给紧张：支持6簇/反驳3簇，美光和三星在扩产；
-  微软本期未发声"）。这部分目前**只在命令行和数据库里**，还没有 Obsidian 报告。
+- **翻一眼产业链证据周报**：每周和行业评审一起，会在你的知识库里生成一份
+  `产业链证据-AI硬件-<日期>.md`——每条假设现在被证实到什么程度、**还有谁没发声**、
+  以及每个结论背后的**财报原文**。想立刻看命令行版就跑 `ats evidence claims`。
 - **翻一眼分析报告**：每份分析（行业评审、财报分析、交易复盘）都会存成一份
   Obsidian 笔记，落在你配置的知识库目录里，方便你不受打字长度限制地回顾
   某只票、某次决策的完整来龙去脉。
@@ -285,6 +285,7 @@ ats pead score SYM --transcript path/to/call.txt   # 手动打分（比如自动
 ats evidence show              # 看已抽取的产业链证据（不持有公司的财报事实）
 ats evidence observe MU        # 手动读一次某公司的最近财报，抽成证据
 ats evidence claims            # 看各命题现在被证实/证伪到什么程度、谁还没发声
+ats evidence report            # 手动生成一份产业链证据 Obsidian 周报
 ats evidence propose           # 让系统看看未归类的事实里有没有新命题（不够门槛就不跑）
 ats evidence proposals         # 列出待你审批的候选命题
 ats evidence review <id> --accept --note "理由"   # 采纳（或不加 --accept 即拒绝）

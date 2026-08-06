@@ -212,6 +212,8 @@ def test_scheduler_macro_before_sector(monkeypatch):
     monkeypatch.setattr("ats.runtime.cli.run_sector_review", lambda name, **k: order.append("sector"))
     # weekday gate now tracks weekly_review_tz, not ET — see _today_weekly().
     monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))   # Saturday
+    # The weekly job now also ranks the cross-section (network) and writes a report.
+    monkeypatch.setattr(scheduler, "_cross_section_weekly", lambda name: None)
     scheduler._macro_weekly()
     scheduler._sector_weekly()
     assert order == ["macro", "sector"]

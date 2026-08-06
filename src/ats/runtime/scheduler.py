@@ -617,6 +617,7 @@ def _cross_section_weekly(name: str) -> None:
     """
     from ..agents.sector import cross_section
     from ..config import load_sector_config
+    from ..memory import get_store
 
     try:
         cfg = load_sector_config(name)
@@ -630,6 +631,17 @@ def _cross_section_weekly(name: str) -> None:
             cross_section.run_layer(name, layer.key, persist=True, structure=True)
         except Exception as exc:  # noqa: BLE001 - one layer must not break the rest
             log.warning("cross-section %s/%s failed: %s", name, layer.key, exc)
+    # One Obsidian report per week, after every layer has been ranked, so the claim
+    # verdicts and the basket it produced describe the same run.
+    try:
+        from ..chain import report as chain_report
+        from ..config import load_pead_global
+
+        path = chain_report.write(cfg, get_store(), as_of=_now_et(),
+                                  ind_cfg=load_pead_global().get("induction", {}))
+        log.info("chain evidence report: %s", path or "(output_dir unset — skipped)")
+    except Exception as exc:  # noqa: BLE001 - the report must not break the job
+        log.warning("chain evidence report failed for %s: %s", name, exc)
 
 
 def _weekly_review() -> None:

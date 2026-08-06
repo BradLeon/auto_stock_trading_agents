@@ -192,7 +192,8 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
 1. **SQLite** `evidence_observations` / `evidence_failures` 表。
 2. 喂给三道闸聚合器算出各 claim 的印证结论（`ats evidence claims` 可查）。
 3. **阶段三起**：`relative` 结论会转成 `moat_pricing` 证据包进入截面因子。
-4. **当前仍只写库，不影响任何现有输出**——Chief、行业评审、风控都还看不到它。
+4. **Obsidian 周报** `产业链证据-<label>-<日期>.md`：命题结论、覆盖率、未发声证人、
+   每条结论的财报原文、未映射池、待确认命题、抽取失败。与行业评审同一天生成。
 
 ### 排查
 

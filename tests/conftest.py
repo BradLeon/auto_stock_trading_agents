@@ -29,19 +29,29 @@ def _isolate_db(tmp_path, monkeypatch):
 def _isolate_report_dir(tmp_path, monkeypatch):
     """Reports must never land in the real Obsidian vault during tests.
 
-    Every writer resolves the vault via ats.config.load_macro_config().output_dir
-    at call time (imports are inside functions), so patching the module attribute
-    covers them all. 2026-07-15: a chief test overwrote real vault documents.
+    Writers resolve the vault via a config loader's `output_dir` at call time (imports
+    are inside functions), so patching the module attribute covers them all.
+
+    BOTH loaders are redirected. Relying on each test to stub whatever happens to write
+    has now failed twice: 2026-07-15 a chief test overwrote real vault documents, and
+    2026-08-06 the chain-evidence weekly report landed in the vault because it reads
+    `load_sector_config().output_dir` — not covered here at the time — from a scheduler
+    test that had no reason to know a report writer sat downstream. Isolation belongs
+    in this fixture, not in each caller's memory.
     """
     import ats.config as config
 
-    real = config.load_macro_config
+    real_macro = config.load_macro_config
+    real_sector = config.load_sector_config
 
-    def _redirected(name: str = "macro"):
-        cfg = real(name)
-        return cfg.model_copy(update={"output_dir": str(tmp_path)})
+    def _macro(name: str = "macro"):
+        return real_macro(name).model_copy(update={"output_dir": str(tmp_path)})
 
-    monkeypatch.setattr(config, "load_macro_config", _redirected)
+    def _sector(name: str = "ai_hardware"):
+        return real_sector(name).model_copy(update={"output_dir": str(tmp_path)})
+
+    monkeypatch.setattr(config, "load_macro_config", _macro)
+    monkeypatch.setattr(config, "load_sector_config", _sector)
 
 
 class FakeBroker:

@@ -17,7 +17,7 @@
 | I5 | 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — | 确定性代码（**无 LLM**）：7 点动量评分 + VIX 调节 + 期限结构/破位两层 | 普通函数 |
 | I6 | 绩效/风控快照 | 每交易日盘后 | risk_state≠normal → 飞书告警 | 确定性代码（无 LLM） | 普通函数 |
 | I7 | 产业链证据观察 | — | observe 名单公司财报发布（与打分同一套双重确认） | evidence_observer | 普通函数（只写证据表） |
-| I8 | 命题印证 + 截面重排 | 每周（跟在 I3 行业周报之后） | — | 确定性三道闸 → structure_analyst → 截面 | 普通函数 |
+| I8 | 命题印证 + 截面重排 | 每周（跟在 I3 行业周报之后） | — | 确定性三道闸 → structure_analyst → 截面 | 普通函数（出 Obsidian 周报） |
 | I9 | 涌现命题归纳 | **无周期** | 未归属观测积累到门槛 | claim_proposer | 普通函数（只产待确认卡） |
 
 （原 I5 绩效/风控快照顺延为 I6。）
@@ -36,6 +36,7 @@
        → relative 结论 → moat_pricing 证据包 → structure_analyst
        → 截面重排 → basket
        → Chief 上下文（只给"量化第N→复合第M + 依据"，**不给权重数字**）
+       → Obsidian 周报：命题结论 + 覆盖率 + 未发声证人 + **每条结论的财报原文**
   ↓
 未映射池攒够（≥6 条观测 × ≥3 个来源）
   → I9 归纳一条候选命题 → 待确认卡 → **你审阅**
@@ -183,6 +184,7 @@ Chief、审批卡照常，但没有单会到券商。
 | `ats evidence observe SYM [--file F]` | I7：手动读一次某公司财报抽成证据（`--file` 用本地文档） |
 | `ats evidence show [--entity X]` | 看已入库观测（说话人/关于谁/归属维度/原文）与最近抽取失败 |
 | `ats evidence claims` | I8：看各命题的印证结论、覆盖率、异议方、**未发声证人** |
+| `ats evidence report` | 手动生成 `产业链证据-<label>-<日期>.md`（周报后自动生成一份） |
 | `ats sector crosssection NAME --layer K --structure` | I8：手动跑截面（周报后自动跑，带结构层） |
 | `ats evidence propose` | I9：跑一次归纳（门槛不过则不调用模型，只打印判定） |
 | `ats evidence proposals` | 列出待确认/已采纳/已拒绝的候选命题 |

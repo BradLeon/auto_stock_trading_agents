@@ -1,7 +1,8 @@
 # 产业链证据 → 截面因子
 
 > 面向：决策者 / 设计者。讲思想、逻辑、边界与验收，不讲怎么写代码。
-> 状态：**阶段一~三已实施**（证据表 → 三道闸 → moat_pricing → 截面 → Chief）；阶段四待做。
+> 状态：**四个阶段全部实施完成**（证据表 → 三道闸 → moat_pricing → 截面 → Chief；
+> 外加涌现命题归纳）。
 > 阶段三是第一个会改变现有输出的阶段，由 `config/pead.yaml` 的 `sector_review.cross_section`
 > 与 `feed_chief_basket` 两个开关控制，关掉即回到阶段三之前的行为。
 > 每阶段的验收标准见第七节，未通过不进入下一阶段。
@@ -438,7 +439,7 @@ eligible_for_confirmation: false
 
 **验收**：两个 fixture 全绿；flag 关闭时与当前系统零差异。
 
-### 阶段四：涌现命题归纳
+### 阶段四：涌现命题归纳　✅ 已完成
 
 未映射池 + 证据驱动触发 + 待确认命题卡 + discovery evidence 冻结。
 

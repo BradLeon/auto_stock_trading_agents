@@ -311,6 +311,14 @@ def load_pead_global() -> dict:
     # whole stage-3 path: off = the system behaves exactly as it did before.
     sr.setdefault("cross_section", True)
     sr.setdefault("feed_chief_basket", True)
+    # 涌现命题归纳（阶段四）：证据驱动，不设 cron。门槛是确定性的——由未归属观测
+    # 的积累触发，纯时间流逝不触发。产出只是给人看的待确认卡。
+    cfg.setdefault("induction", {})
+    ind = cfg["induction"]
+    ind.setdefault("enabled", True)
+    ind.setdefault("min_observations", 6)   # 够成形，不是零星噪音
+    ind.setdefault("min_entities", 3)       # 跨来源，不是一家的自说自话
+    ind.setdefault("cooldown_days", 30)     # 被拒的候选不得换个说法下周再来
     cfg.setdefault("macro_review", {})
     mr = cfg["macro_review"]
     mr.setdefault("enabled", True)

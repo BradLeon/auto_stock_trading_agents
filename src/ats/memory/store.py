@@ -194,6 +194,14 @@ CREATE TABLE IF NOT EXISTS evidence_failures (
     document_id TEXT, entity TEXT, reason TEXT, at TEXT,
     PRIMARY KEY (document_id, entity)
 );
+-- Propositions the system induced but a human has not adopted. Deliberately a
+-- separate table from claims: agents propose, only a person extends the axes.
+CREATE TABLE IF NOT EXISTS claim_proposals (
+    id TEXT PRIMARY KEY, signature TEXT, statement TEXT, layer_hint TEXT,
+    kind TEXT, subject TEXT, status TEXT, created_at TEXT,
+    reviewed_at TEXT, reviewer TEXT, rationale TEXT, payload TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_sig ON claim_proposals(signature, status);
 CREATE TABLE IF NOT EXISTS claim_assessments (
     claim_id TEXT, as_of TEXT, layer TEXT, verdict TEXT,
     support_score REAL, refute_score REAL, evidence_clusters INTEGER,
@@ -967,6 +975,59 @@ class TradingMemory:
             % ",".join("?" * len(observation_ids)), observation_ids)
         self.conn.commit()
         return cur.rowcount
+
+    def unmapped_observations(self, *, limit: int = 500) -> list[dict]:
+        """Facts we stored but could file under no declared claim dimension.
+
+        These are the raw material for induction: information the system already holds
+        that has no home yet. Discovery-frozen rows are excluded — they already
+        triggered a proposal and must not trigger another.
+        """
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM evidence_observations "
+            "WHERE (concept IS NULL OR concept = '') AND COALESCE(discovery_evidence,0) = 0 "
+            "ORDER BY observed_at DESC LIMIT ?", (limit,)).fetchall()]
+
+    def save_claim_proposal(self, proposal) -> None:
+        import json
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO claim_proposals (id,signature,statement,layer_hint,"
+            " kind,subject,status,created_at,reviewed_at,reviewer,rationale,payload)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (proposal.id, proposal.signature, proposal.statement, proposal.layer_hint,
+             proposal.kind, proposal.subject, proposal.status,
+             proposal.created_at.isoformat(),
+             proposal.reviewed_at.isoformat() if proposal.reviewed_at else None,
+             proposal.reviewer, proposal.rationale,
+             json.dumps(proposal.model_dump(mode="json"), ensure_ascii=False)))
+        self.conn.commit()
+
+    def claim_proposals(self, *, status: str | None = None, limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM claim_proposals"
+        args: list = []
+        if status:
+            sql += " WHERE status = ?"
+            args.append(status)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def proposal_by_signature(self, signature: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM claim_proposals WHERE signature = ? ORDER BY created_at DESC "
+            "LIMIT 1", (signature,)).fetchone()
+        return dict(row) if row else None
+
+    def set_proposal_status(self, proposal_id: str, status: str, *, reviewer: str = "",
+                            rationale: str = "", at=None) -> bool:
+        at = at or datetime.now(timezone.utc)
+        cur = self.conn.execute(
+            "UPDATE claim_proposals SET status = ?, reviewed_at = ?, reviewer = ?,"
+            " rationale = ? WHERE id = ?",
+            (status, at.isoformat(), reviewer, rationale, proposal_id))
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def recent_events(self, symbol: str, limit: int = 20) -> list[dict]:
         rows = self.conn.execute(

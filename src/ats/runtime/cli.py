@@ -652,7 +652,8 @@ def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
 
 
 def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
-                 entity: str = "", limit: int = 30) -> int:
+                 entity: str = "", limit: int = 30, accept: bool = False,
+                 reviewer: str = "", note: str = "") -> int:
     """Chain evidence: observe one company's latest print, or inspect what's stored.
 
     Read-only with respect to trading — this path can never place an order.
@@ -677,6 +678,50 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
             print("\n最近抽取失败（保留而非记成'零观测'）：")
             for f in fails:
                 print(f"  {f['entity']} · {f['document_id']}: {f['reason']}")
+        return 0
+
+    if action in ("propose", "proposals", "review"):
+        from ..chain import induction
+        from ..config import load_pead_global
+
+        if action == "proposals":
+            rows = store.claim_proposals(limit=limit)
+            if not rows:
+                print("(暂无待确认命题 —— 未归属观测还没积累到触发门槛)")
+                return 0
+            for r in rows:
+                mark = {"pending": "⏳", "accepted": "✅", "rejected": "🚫"}.get(r["status"], "·")
+                print(f"{mark} {r['id']}  [{r['status']}]  {r['statement']}")
+                if r.get("rationale"):
+                    print(f"     理由：{r['rationale']}")
+            return 0
+
+        if action == "review":
+            if not symbol:
+                print("❌ 需要 proposal id：ats evidence review <id> --accept|--reject")
+                return 1
+            status = "accepted" if accept else "rejected"
+            if not store.set_proposal_status(symbol, status, reviewer=reviewer or "boss",
+                                             rationale=note):
+                print(f"❌ 未找到 proposal {symbol}")
+                return 1
+            print(f"{'✅ 已采纳' if accept else '🚫 已拒绝'} {symbol}")
+            if accept:
+                print("提醒：命题仍需你手工写进 config/sectors/<name>.yaml 的 claims: —— "
+                      "坐标系只有人能扩。触发它的那批观测已冻结，不会用于印证它自己。")
+            return 0
+
+        ind_cfg = load_pead_global().get("induction", {})
+        if not ind_cfg.get("enabled", True):
+            print("(induction.enabled=false — 归纳已关闭)")
+            return 0
+        proposal, reason = induction.induce(store, cfg=ind_cfg)
+        print(f"触发判定：{reason}")
+        if proposal is None:
+            return 0
+        rows_by_id = {r["id"]: r for r in store.observations(limit=500)}
+        print()
+        print(induction.as_card(proposal, rows_by_id))
         return 0
 
     if action == "claims":
@@ -1014,11 +1059,15 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     evi = sub.add_parser("evidence", help="产业链证据 (observe / show) —— 只读，绝不下单")
-    evi.add_argument("action", choices=["observe", "show", "claims"])
+    evi.add_argument("action",
+                     choices=["observe", "show", "claims", "propose", "proposals", "review"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")
-    evi.add_argument("--limit", type=int, default=30, help="show: 条数")
+    evi.add_argument("--limit", type=int, default=30, help="show/proposals: 条数")
+    evi.add_argument("--accept", action="store_true", help="review: 采纳（默认拒绝）")
+    evi.add_argument("--reviewer", default="", help="review: 审阅人")
+    evi.add_argument("--note", default="", help="review: 理由")
     ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
     ev.add_argument("action", choices=["list", "upcoming"])
     ev.add_argument("--days", type=int, default=30, help="upcoming window")
@@ -1129,7 +1178,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "evidence":
         return run_evidence(args.action, args.symbol, file=args.file,
-                            entity=args.entity, limit=args.limit)
+                            entity=args.entity, limit=args.limit, accept=args.accept,
+                            reviewer=args.reviewer, note=args.note)
     if args.command == "events":
         return events_list(days=args.days if args.action == "upcoming" else None)
     if args.command == "chief":

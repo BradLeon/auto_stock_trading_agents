@@ -48,3 +48,46 @@ class EvidenceExtractionView(BaseModel):
     @classmethod
     def _coerce(cls, v):
         return _as_objlist(v)
+
+
+# --------------------------------------------------------------------------- #
+# Claim proposer — induce ONE candidate proposition from unmapped observations
+# --------------------------------------------------------------------------- #
+class ProposedConceptView(BaseModel):
+    key: str = Field(description="维度 key，蛇形小写，如 optical_lead_time")
+    desc: str = Field(description="这个维度覆盖什么表述（供后续语义归属用）")
+    supports_when: str = Field(default="up", description="up|down —— 该维度哪个方向算支持命题")
+    expect_from: list[str] = Field(default_factory=list,
+                                   description="该维度应该由哪些公司来说（交叉验证对象）")
+    direct: bool = Field(default=False, description="relative 命题里，此维度能否改变份额判断")
+
+
+class ProposedWitnessView(BaseModel):
+    entity: str
+    stance: str = Field(description="customer | supplier | competitor | incumbent | regulator")
+
+
+class ClaimProposalView(BaseModel):
+    statement: str = Field(
+        default="",
+        description="一条可证伪的经济命题，写清机制。若这些观测并未共同指向一件事，留空")
+    layer_hint: str = Field(default="", description="涉及的产业链层，可跨层如 L5→L3")
+    kind: str = Field(default="common", description="common(行业共同) | relative(层内相对份额)")
+    subject: str = Field(default="", description="kind=relative 时必填：谁的相对位置")
+    concepts: list[ProposedConceptView] = Field(default_factory=list)
+    witnesses: list[ProposedWitnessView] = Field(default_factory=list)
+
+    @field_validator("concepts", "witnesses", mode="before")
+    @classmethod
+    def _coerce(cls, v):
+        return _as_objlist(v)
+
+    def as_concepts(self):
+        from .proposer import to_concepts
+
+        return to_concepts(self)
+
+    def as_witnesses(self):
+        from .proposer import to_witnesses
+
+        return to_witnesses(self)

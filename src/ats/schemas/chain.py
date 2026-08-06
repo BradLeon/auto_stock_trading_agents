@@ -239,3 +239,48 @@ class ClaimAssessment(BaseModel):
     @property
     def coverage(self) -> str:
         return f"{self.witnesses_reported}/{self.witnesses_expected}"
+
+
+class ClaimProposal(BaseModel):
+    """A proposition the system induced from evidence it could not file anywhere.
+
+    Agents may PROPOSE; only a person adds a claim to the config. That line is what
+    keeps the cross-section's factor axes stable enough for history to be comparable —
+    see docs/CHAIN_EVIDENCE.md §6.5.
+
+    `observation_ids` are frozen as discovery evidence at proposal time: the material
+    that made us notice a proposition explains "why look", it may never also serve as
+    "it is true". Without that freeze an agent could induce a theme from a pattern and
+    then cite the very same pattern as its confirmation.
+    """
+
+    id: str = ""
+    signature: str = ""                   # entity+metric fingerprint, for dedup/cooldown
+    statement: str
+    layer_hint: str = ""                  # may span layers — that is often the point
+    kind: ClaimKind = "common"
+    subject: str = ""
+    concepts: list[Concept] = Field(default_factory=list)
+    witnesses: list[Witness] = Field(default_factory=list)
+    stance_note: str = ""                 # e.g. "供给方x3 / 需求方x0 — 立场单一"
+    observation_ids: list[str] = Field(default_factory=list)
+    status: str = "pending"               # pending | accepted | rejected
+    created_at: datetime
+    reviewed_at: datetime | None = None
+    reviewer: str = ""
+    rationale: str = ""
+
+    @staticmethod
+    def make_signature(entities, metrics) -> str:
+        """Fingerprint the EVIDENCE, not the wording.
+
+        Re-proposing the same idea under a new sentence must be recognised as the same
+        candidate, so the signature is built from who and what — not the statement.
+        """
+        raw = "|".join(sorted({e.upper() for e in entities})) + "::" + \
+              "|".join(sorted({m.lower() for m in metrics}))
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+    def model_post_init(self, _ctx) -> None:
+        if not self.id:
+            object.__setattr__(self, "id", f"{self.signature}-{self.created_at:%Y%m%d}")

@@ -143,6 +143,11 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence observe MU
 # 用本地文档跑（抓不到、或想拿一段文本试抽取效果时）
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence observe MU --file /path/to/call.txt
 
+# 涌现命题：证据攒够时归纳一次（不设 cron，纯时间流逝不触发）
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence propose
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence proposals
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence review <id> --accept --note "..."
+
 # 看命题的印证结论（三道闸的输出）
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence claims
 

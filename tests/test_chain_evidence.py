@@ -429,6 +429,44 @@ def test_fetch_hits_cache_without_network(tmp_path, monkeypatch):
     assert "Micron cached body" in text and "缓存命中" in note
 
 
+def test_fallback_documents_are_period_guarded_too(tmp_path, monkeypatch):
+    """The real leak: NVDA had not reported Q2 FY2027, the transcript search came up
+    empty, and the unguarded fallback served a September 2025 investor deck — 17
+    observations of year-old material entered the ledger as current testimony. An old
+    NVIDIA deck names NVIDIA, so only the period guard can catch it."""
+    from ats.agents.evidence import observer as obs
+    from ats.memory import get_store
+
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.documents.gather",
+                        lambda *a, **k: [("deck", "NVIDIA Investor Presentation Q2 FY26 "
+                                                  "September 2025. " * 60)])
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
+                        lambda *a, **k: ("Q2 FY2027", ""))
+    monkeypatch.setattr("ats.data.fiscal.verify_transcript",
+                        lambda label, text, src: (False, "文档报告期 Q2 FY26 ≠ Q2 FY2027"))
+    store = get_store()
+    text, src, note = obs.fetch_document("NVDA", store=store)
+
+    assert not text.strip(), "过期文档必须记为缺口，而不是凑一份最近的"
+    assert "记为缺口" in note
+    assert not store.has_document("NVDA", "Q2 FY2027", "release")
+
+
+def test_current_material_without_a_parseable_period_still_passes(tmp_path, monkeypatch):
+    """Samsung and Nanya publish current material with no machine-readable fiscal
+    label. Demanding proof of the period would drop two real witnesses, so the guard
+    rejects only a POSITIVE mismatch."""
+    from ats.agents.evidence import observer as obs
+
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.documents.gather",
+                        lambda *a, **k: [("rel", "Samsung Electronics results. " * 80)])
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
+    text, src, note = obs.fetch_document("005930.KS")
+    assert "Samsung Electronics" in text and src == "documents"
+
+
 def test_rejected_document_is_recorded_with_its_url(tmp_path, monkeypatch):
     """A wrong fetch must be visible afterwards. `未发声` and `我们抓到了别人家的文档`
     are different states and only the first is evidence of anything."""

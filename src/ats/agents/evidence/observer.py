@@ -222,31 +222,43 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     except Exception as exc:  # noqa: BLE001
         log.info("evidence %s: transcript unavailable (%s)", symbol, exc)
 
-    note = ""
-    # Identity guard, checked BEFORE the period guard because it is the failure that
-    # actually happened twice: a thinly-covered ticker's search returned a different
-    # COMPANY entirely (SKHY -> Sherwin-Williams, 005930.KS -> Teradyne). The period
-    # guard cannot catch that — a wrong company's transcript can report the right
-    # quarter — and for names whose fiscal label will not resolve it never even runs.
-    # Cheap and decisive: the company's own call names the company.
-    rejected, attempted_url = "", src        # keep the URL: `src` is cleared on reject
-    if text and not _mentions_company(text, symbol, company):
-        log.warning("evidence %s: fetched document does not name the company (src=%s)",
-                    symbol, src)
-        rejected = f"取回的文档未提及本公司（来源 {src}）"
-        text, src, note = "", "", rejected + " → 改用公开文档"
-    if text and label:
-        ok, why = fiscal.verify_transcript(label, text, src)
-        if not ok:
-            log.warning("evidence %s: transcript rejected by period guard — %s", symbol, why)
-            rejected = f"纪要报告期核对未通过（{why}）"
+    def _screen(body: str, source: str, kind: str) -> tuple[str, str]:
+        """Both guards. Returns (rejection reason, detail) — ("", why) when it passes.
+
+        Applied to EVERY path, not just the transcript. When the fallback ran unguarded,
+        NVDA — which had not yet reported Q2 FY2027 — was served a September 2025
+        investor deck and 17 observations from year-old material entered the ledger as
+        current testimony. That is worse than the wrong-company failure it sits next to:
+        an old NVIDIA deck does name NVIDIA, so the identity guard passes it, and the
+        only thing wrong is the date. **Absent a current document the right answer is a
+        gap, not the most recent thing findable.**
+        """
+        # Identity first: it is the failure that actually happened twice (SKHY ->
+        # Sherwin-Williams, 005930.KS -> Teradyne), the period guard cannot catch it (a
+        # wrong company's filing can carry the right quarter), and for names whose
+        # fiscal label will not resolve the period guard never even runs.
+        if not _mentions_company(body, symbol, company):
+            return f"取回的文档未提及本公司（来源 {source}）", ""
+        if not label:
+            return "", ""            # nothing to check against; unknown is not wrong
+        ok, why = fiscal.verify_transcript(label, body, source)
+        # `verify_transcript` rejects only on a POSITIVE mismatch — an unparseable
+        # period passes. Samsung and Nanya both publish current material with no
+        # machine-readable label, and demanding proof of the period would drop them.
+        return ("" if ok else f"报告期核对未通过（{why}）"), why
+
+    note, rejected, attempted_url = "", "", src
+    if text:
+        rejected, why = _screen(text, src, "transcript")
+        if rejected:
+            log.warning("evidence %s: transcript rejected — %s", symbol, rejected)
             text, src, note = "", "", rejected + " → 改用公开文档"
         else:
             note = why
-    # Record the rejection with its URL. It does not block a later retry (the right
-    # transcript may simply not be published yet) — it makes "we tried and got the
-    # wrong company" visible instead of indistinguishable from "nobody looked".
     if rejected and store is not None:
+        # Record the rejection with its URL. It does not block a later retry (the right
+        # transcript may simply not be published yet) — it makes "we tried and got the
+        # wrong document" visible instead of indistinguishable from "nobody looked".
         try:
             store.save_document_failure(symbol, label, "transcript",
                                         source=attempted_url or "search",
@@ -257,8 +269,20 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     doc_type = "transcript"
     if not text:
         docs = documents.gather(symbol)
-        text = "\n\n".join(body for _, body in docs)
+        body = "\n\n".join(b for _, b in docs)
         src, doc_type = "documents", "release"
+        why, _detail = (_screen(body, src, "release") if body.strip() else ("无公开文档", ""))
+        if why:
+            log.warning("evidence %s: fallback documents rejected — %s", symbol, why)
+            note = f"{note + ' / ' if note else ''}公开文档亦不合格（{why}）→ 记为缺口"
+            if store is not None:
+                try:
+                    store.save_document_failure(symbol, label, "release",
+                                                source="documents", note=why)
+                except Exception as exc:  # noqa: BLE001
+                    log.info("evidence %s: could not record fallback failure (%s)", symbol, exc)
+        else:
+            text = body
 
     if text.strip():
         cached = source_cache.store(symbol, label, doc_type, text, source=src, source_url=src)

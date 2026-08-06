@@ -133,10 +133,29 @@ def sec_8k_release(symbol: str) -> dict | None:
     return {"label": f"SEC 8-K earnings release ({filed})", "text": text, "filed": filed_date}
 
 
+_XBRL_MARKERS = ("IDEA: XBRL DOCUMENT", "Namespace Prefix: dei_", "X - Definition")
+
+
+def strip_xbrl_boilerplate(text: str) -> str:
+    """Drop the SEC XBRL viewer's element dictionary from a rendered filing.
+
+    An 8-K cover page rendered through EDGAR's viewer is ~7k characters of
+    "X - Definition / Namespace Prefix: dei_ / Data Type: xbrli:..." with no financial
+    content. Two costs, one of them silent: the observer pays to read it, and — worse —
+    it fills the head of the document, which is the only window `fiscal.detect_period`
+    examines. That is how a stale NVIDIA deck concatenated after one of these cover
+    pages came back as "period undetectable" instead of "eleven months old".
+    """
+    body = text or ""
+    if "X - Definition" in body:
+        body = body[:body.index("X - Definition")]
+    return body.strip()
+
+
 def _text(html: str) -> str:
     t = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
     t = re.sub(r"(?s)<[^>]+>", " ", t)
-    return re.sub(r"\s+", " ", t).strip()
+    return strip_xbrl_boilerplate(re.sub(r"\s+", " ", t).strip())
 
 
 # --------------------------------------------------------------------------- #

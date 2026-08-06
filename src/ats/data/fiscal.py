@@ -53,6 +53,11 @@ def canonical_tag(label: str) -> str:
 _SLUG_QY = re.compile(r"q([1-4])[-_\s]?(?:fy)?[-_\s]?(20\d\d)", re.I)   # q2-2026, Q2FY2026
 _SLUG_YQ = re.compile(r"(20\d\d)[-_\s]?q([1-4])", re.I)                 # 2026-q2, 2026Q2
 _WORD_QY = re.compile(r"(first|second|third|fourth)[-\s]+quarter[^.]{0,14}?(20\d\d)", re.I)
+# Two-digit fiscal year — the form US investor decks put on their cover ("Q2 FY26",
+# often with the newline PDF extraction leaves behind). `fy` is required: a bare
+# "Q2 26" is far too easy to hit by accident inside a table. Without this an
+# 11-month-old NVIDIA deck read as "period undetectable" and was waved through.
+_SLUG_QY2 = re.compile(r"q([1-4])\s*fy\s*(\d\d)\b", re.I)
 
 
 def _find_period(hay: str) -> tuple[int, int] | None:
@@ -61,6 +66,9 @@ def _find_period(hay: str) -> tuple[int, int] | None:
     m = _SLUG_QY.search(hay)
     if m:
         return (int(m.group(2)), int(m.group(1)))
+    m = _SLUG_QY2.search(hay)
+    if m:
+        return (2000 + int(m.group(2)), int(m.group(1)))
     m = _SLUG_YQ.search(hay)
     if m:
         return (int(m.group(1)), int(m.group(2)))

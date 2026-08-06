@@ -216,10 +216,36 @@ def _from_folder(symbol: str, docs_root: str | None) -> list[tuple[str, str]]:
         return []
     out: list[tuple[str, str]] = []
     for p in sorted(folder.iterdir()):
+        if _is_auto_cached(p):
+            # source_cache writes into this same folder by design (one directory, one
+            # reader, so a hand-dropped correction wins). But gather() must skip what we
+            # fetched ourselves: this function's output is what gets cached, so reading
+            # our own cache back would re-ingest it every run and grow the file without
+            # bound. Hand-dropped files have no frontmatter and are still read.
+            continue
         text = safe_fetch(lambda p=p: _read_doc(p), source=f"doc:{p.name}", attempts=1)
         if text and len(text) >= _MIN_DOC_CHARS:
             out.append((f"doc:{p.name}", text))
     return out
+
+
+def _is_auto_cached(path: Path) -> bool:
+    """True for files written by data.source_cache (frontmatter with a `source:` line)."""
+    if path.suffix.lower() not in (".md", ".txt"):
+        return False
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            if fh.readline().strip() != "---":
+                return False
+            for _ in range(12):
+                line = fh.readline()
+                if not line or line.strip() == "---":
+                    return False
+                if line.startswith("source:") and line.split(":", 1)[1].strip():
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def _read_doc(path: Path) -> str:

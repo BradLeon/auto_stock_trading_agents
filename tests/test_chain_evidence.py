@@ -355,3 +355,95 @@ def test_fetch_falls_back_to_filings_when_the_document_is_not_ours(monkeypatch):
     text, src, note = obs.fetch_document("SKHY")
     assert src == "documents" and "未提及本公司" in note
     assert "Sherwin" not in text
+
+
+# --------------------------------------------------------------------------- #
+# Entity identity + source cache
+# --------------------------------------------------------------------------- #
+def test_a_companys_several_listings_fold_to_one_witness():
+    """SK hynix trades as SKHY / HY9H / 000660.KS. If those counted as three
+    witnesses, one earnings call would satisfy the stance-diversity gate on its own —
+    the least visible way for that gate to fail."""
+    from ats.config import canonical_entity
+
+    assert canonical_entity("HY9H") == "SKHY"
+    assert canonical_entity("000660.KS") == "SKHY"
+    assert canonical_entity("SKHY") == "SKHY"
+    assert canonical_entity("MU") == "MU"
+    assert canonical_entity("UNKNOWN.XX") == "UNKNOWN.XX"   # passes through
+
+
+def test_cache_round_trip_and_alias_folding(tmp_path, monkeypatch):
+    from ats.data import source_cache
+
+    monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path))
+    body = "SK hynix second quarter results. " * 100
+    saved = source_cache.store("000660.KS", "FY26Q2", "transcript", body,
+                               source="fmp", source_url="http://x")
+    assert saved and saved.path.parent.name == "SKHY"   # written under the canonical id
+    hit = source_cache.load("HY9H", "FY26Q2", "transcript")   # read via another alias
+    assert hit and hit.text.strip() == body.strip() and hit.source == "fmp"
+    assert hit.sha256 == saved.sha256
+
+
+def test_cache_refuses_stubs(tmp_path, monkeypatch):
+    """A paywall page is short. Caching it would freeze the failure in place."""
+    from ats.data import source_cache
+
+    monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path))
+    assert source_cache.store("MU", "FY26Q3", "transcript", "Subscribe to read") is None
+    assert source_cache.load("MU", "FY26Q3", "transcript") is None
+
+
+def test_gather_skips_our_own_cache_but_reads_hand_dropped_files(tmp_path, monkeypatch):
+    """The feedback loop this guards: gather()'s output is what gets cached, so if
+    gather() also READ the cache, every run would re-ingest and the file would grow
+    without bound."""
+    from ats.data import documents, source_cache
+
+    monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path))
+    source_cache.store("MU", "FY26Q3", "transcript", "AUTO FETCHED BODY " * 100,
+                       source="tavily")
+    (tmp_path / "MU" / "手工纪要.md").write_text("HAND DROPPED BODY " * 100, encoding="utf-8")
+
+    bodies = "\n".join(b for _, b in documents.gather("MU"))
+    assert "HAND DROPPED" in bodies
+    assert "AUTO FETCHED" not in bodies
+
+
+def test_fetch_hits_cache_without_network(tmp_path, monkeypatch):
+    from ats.agents.evidence import observer as obs
+
+    monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path))
+
+    def _boom(*a, **k):
+        raise AssertionError("cache hit must not reach the network")
+
+    from ats.data import source_cache
+
+    source_cache.store("MU", "", "transcript", "Micron cached body. " * 100, source="fmp")
+    monkeypatch.setattr("ats.data.transcript.fetch", _boom)
+    monkeypatch.setattr("ats.data.documents.gather", _boom)
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
+    text, src, note = obs.fetch_document("MU")
+    assert "Micron cached body" in text and "缓存命中" in note
+
+
+def test_rejected_document_is_recorded_with_its_url(tmp_path, monkeypatch):
+    """A wrong fetch must be visible afterwards. `未发声` and `我们抓到了别人家的文档`
+    are different states and only the first is evidence of anything."""
+    from ats.agents.evidence import observer as obs
+    from ats.memory import get_store
+
+    monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path))
+    monkeypatch.setattr("ats.data.transcript.fetch",
+                        lambda *a, **k: ("Sherwin-Williams paint results", "tavily:bad-url"))
+    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [])
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("FY26Q2", ""))
+    store = get_store()
+    obs.fetch_document("SKHY", store=store)
+
+    bad = store.documents(entity="SKHY", ok_only=False)
+    assert bad and bad[0]["ok"] == 0
+    assert "tavily:bad-url" in bad[0]["source_url"]
+    assert not store.has_document("SKHY", "FY26Q2", "transcript")

@@ -156,6 +156,16 @@ def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
 def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, str]:
     """Get this company's latest filing text. Returns (text, source, note).
 
+    Cache first (data.source_cache): a hit costs no network at all. This is not only a
+    cost measure — re-fetching is not idempotent (the same SKHY query returned
+    Sherwin-Williams on one run and the correct call on the next), so without a fixed
+    corpus, results measured before and after a prompt change are not comparable.
+
+    A miss fetches, then runs both guards BEFORE writing: a document that fails is never
+    cached, and is recorded as an ok=0 row carrying the URL. Retry on a later run is
+    still allowed on purpose — a transcript that did not exist yesterday may exist
+    today — so what the failure row buys is visibility, not suppression.
+
     Mirrors the PEAD score path (graph/pead.py) on purpose, because the two failure
     modes it guards are exactly the ones that poison an evidence ledger:
 
@@ -169,14 +179,17 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         an observation carrying the wrong quarter's numbers is worse than none — it is
         indistinguishable from a real one once it is in the table.
     """
-    from ...config import load_pead_config
-    from ...data import documents, fiscal, period, transcript
+    from ...config import canonical_entity, entity_meta, load_pead_config
+    from ...data import documents, fiscal, period, source_cache, transcript
 
-    config_label, company = "", ""
+    symbol = canonical_entity(symbol)
+    config_label, company = "", entity_meta(symbol).get("name", "")
     try:
         cfg = load_pead_config(symbol)
         config_label = getattr(cfg, "fiscal_label", "") or ""
-        company = getattr(cfg, "company_name", "") or ""
+        # `or company`, not a bare assignment: observe-list names have no per-ticker
+        # config, and the registry name is the only thing the identity guard can use.
+        company = getattr(cfg, "company_name", "") or company
     except Exception:  # noqa: BLE001 - a missing per-ticker file must not block
         pass
     # Derive the label from the ACTUAL print rather than trusting a per-ticker file.
@@ -192,6 +205,17 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     except Exception as exc:  # noqa: BLE001
         log.info("evidence %s: fiscal label unresolved (%s)", symbol, exc)
 
+    # Cache first — zero network on a hit. Hand-dropped files under 信息源/<SYM>/ are
+    # loaded by the same reader, so correcting a bad fetch is just putting the right
+    # file there; the guards below never re-litigate what a person put in by hand.
+    # Both doc types, in preference order: a name that never yields a transcript falls
+    # back to `release` every run, and checking only "transcript" would mean it never
+    # hits cache at all.
+    for kind in ("transcript", "release"):
+        hit = source_cache.load(symbol, label, kind)
+        if hit:
+            return hit.text, hit.source or "cache", f"缓存命中：{hit.path.name}"
+
     text, src = "", ""
     try:
         text, src = transcript.fetch(symbol, label, company_name=company)
@@ -205,21 +229,44 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     # guard cannot catch that — a wrong company's transcript can report the right
     # quarter — and for names whose fiscal label will not resolve it never even runs.
     # Cheap and decisive: the company's own call names the company.
+    rejected, attempted_url = "", src        # keep the URL: `src` is cleared on reject
     if text and not _mentions_company(text, symbol, company):
         log.warning("evidence %s: fetched document does not name the company (src=%s)",
                     symbol, src)
-        text, src, note = "", "", f"取回的文档未提及本公司（来源 {src}）→ 改用公开文档"
+        rejected = f"取回的文档未提及本公司（来源 {src}）"
+        text, src, note = "", "", rejected + " → 改用公开文档"
     if text and label:
         ok, why = fiscal.verify_transcript(label, text, src)
         if not ok:
             log.warning("evidence %s: transcript rejected by period guard — %s", symbol, why)
-            text, src, note = "", "", f"纪要报告期核对未通过（{why}）→ 改用公开文档"
+            rejected = f"纪要报告期核对未通过（{why}）"
+            text, src, note = "", "", rejected + " → 改用公开文档"
         else:
             note = why
+    # Record the rejection with its URL. It does not block a later retry (the right
+    # transcript may simply not be published yet) — it makes "we tried and got the
+    # wrong company" visible instead of indistinguishable from "nobody looked".
+    if rejected and store is not None:
+        try:
+            store.save_document_failure(symbol, label, "transcript",
+                                        source=attempted_url or "search",
+                                        source_url=attempted_url, note=rejected)
+        except Exception as exc:  # noqa: BLE001 - bookkeeping must not break the fetch
+            log.info("evidence %s: could not record document failure (%s)", symbol, exc)
+
+    doc_type = "transcript"
     if not text:
         docs = documents.gather(symbol)
         text = "\n\n".join(body for _, body in docs)
-        src = "documents"
+        src, doc_type = "documents", "release"
+
+    if text.strip():
+        cached = source_cache.store(symbol, label, doc_type, text, source=src, source_url=src)
+        if cached and store is not None:
+            try:
+                store.save_document(cached, note=note)
+            except Exception as exc:  # noqa: BLE001
+                log.info("evidence %s: could not record document (%s)", symbol, exc)
     return text, src, note
 
 

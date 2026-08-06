@@ -52,6 +52,11 @@ def _isolate_report_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "load_macro_config", _macro)
     monkeypatch.setattr(config, "load_sector_config", _sector)
+    # Primary-source cache (data.source_cache) reads AND WRITES under docs_root, which
+    # in production is the same Obsidian vault. Without this a test that fetches a
+    # document would deposit it in the user's notes — and, worse, would read whatever
+    # is already there, so a test's outcome would depend on the vault's contents.
+    monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path / "sources"))
 
 
 class FakeBroker:

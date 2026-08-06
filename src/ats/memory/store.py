@@ -194,6 +194,18 @@ CREATE TABLE IF NOT EXISTS evidence_failures (
     document_id TEXT, entity TEXT, reason TEXT, at TEXT,
     PRIMARY KEY (document_id, entity)
 );
+-- Primary-source inventory. METADATA ONLY — the prose lives in `信息源/` where it can be
+-- opened, searched and corrected by hand; copying it here would buy nothing a path does
+-- not already give. What the table does buy: idempotence (skip a fetch), provenance
+-- (which file did this observation come from), and an honest coverage report (who in the
+-- witness roster we hold nothing for). `ok=0` rows are fetches that failed a guard —
+-- kept on purpose so a wrong document is paid for once and never retried blindly.
+CREATE TABLE IF NOT EXISTS source_documents (
+    document_id TEXT PRIMARY KEY, entity TEXT, period TEXT, doc_type TEXT,
+    source TEXT, source_url TEXT, local_path TEXT, sha256 TEXT,
+    chars INTEGER, ok INTEGER DEFAULT 1, note TEXT, fetched_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_srcdoc_entity ON source_documents(entity, period);
 -- Propositions the system induced but a human has not adopted. Deliberately a
 -- separate table from claims: agents propose, only a person extends the axes.
 CREATE TABLE IF NOT EXISTS claim_proposals (
@@ -1001,6 +1013,61 @@ class TradingMemory:
     def observation_failures(self, limit: int = 50) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM evidence_failures ORDER BY at DESC LIMIT ?", (limit,)).fetchall()]
+
+    # ----------------------------------------------------------------- #
+    # Primary-source inventory (metadata; text lives under docs_root)
+    # ----------------------------------------------------------------- #
+    def save_document(self, doc, *, ok: bool = True, note: str = "") -> None:
+        """Record a fetched/cached source document. `doc` is a data.source_cache.CachedDoc."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO source_documents (document_id,entity,period,doc_type,"
+            "source,source_url,local_path,sha256,chars,ok,note,fetched_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (doc.document_id, doc.symbol.upper(), doc.period, doc.doc_type, doc.source,
+             doc.source_url, str(doc.path) if doc.path else "", doc.sha256,
+             len(doc.text or ""), 1 if ok else 0, note, doc.fetched_at))
+        self.conn.commit()
+
+    def save_document_failure(self, entity: str, period: str, doc_type: str, *,
+                              source: str = "", source_url: str = "", note: str = "",
+                              at: str | None = None) -> None:
+        """Record a fetch that failed a guard, so it is not retried blindly.
+
+        Stored with ok=0 and no local path: there is deliberately no text, because the
+        whole point is that this document was rejected before it could contaminate
+        anything.
+        """
+        from datetime import datetime, timezone
+
+        doc_id = f"{entity.upper()}:{period or 'unknown'}:{doc_type}"
+        self.conn.execute(
+            "INSERT OR REPLACE INTO source_documents (document_id,entity,period,doc_type,"
+            "source,source_url,local_path,sha256,chars,ok,note,fetched_at) "
+            "VALUES (?,?,?,?,?,?,'','',0,0,?,?)",
+            (doc_id, entity.upper(), period, doc_type, source, source_url, note,
+             (at or datetime.now(timezone.utc).isoformat(timespec="seconds"))))
+        self.conn.commit()
+
+    def documents(self, entity: str | None = None, *, ok_only: bool = True,
+                  limit: int = 200) -> list[dict]:
+        sql = "SELECT * FROM source_documents"
+        where, args = [], []
+        if entity:
+            where.append("entity = ?")
+            args.append(entity.upper())
+        if ok_only:
+            where.append("ok = 1")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY fetched_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def has_document(self, entity: str, period: str, doc_type: str) -> bool:
+        row = self.conn.execute(
+            "SELECT ok FROM source_documents WHERE document_id = ?",
+            (f"{entity.upper()}:{period or 'unknown'}:{doc_type}",)).fetchone()
+        return bool(row and row["ok"])
 
     def freeze_as_discovery(self, observation_ids: list[str]) -> int:
         """Mark observations as the material that MADE us notice a proposition.

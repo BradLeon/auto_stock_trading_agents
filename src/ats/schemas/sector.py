@@ -34,9 +34,25 @@ class SectorLayer(BaseModel):
     # analyst (v2 qualitative overlay). e.g. {光互联: config/knowledge/光互联.md}
     structure_notes: dict[str, str] = Field(default_factory=dict)
     private: list[str] = Field(default_factory=list)   # non-listed players, LLM reference
+    # Who may bear witness on this layer's theme, by role (peer / upstream / downstream /
+    # reference / private). Human-maintained: this is a governance choice, not something
+    # the engine may widen on its own. Symbols are canonical entity ids — aliases fold in
+    # via config/entities.yaml, so a company's several listings never count as several
+    # witnesses. Roles the engine does not consume (private) are documentation.
+    witness_roster: dict[str, list[str]] = Field(default_factory=dict)
     # Falsifiable propositions this layer is being tested on (docs/CHAIN_EVIDENCE.md).
     # Human-maintained: agents may PROPOSE one, only a person adds it here.
     claims: list[ClaimDef] = Field(default_factory=list)
+
+    def roster(self, *roles: str) -> list[str]:
+        """Canonical entities in the named roles (all witness roles if none given)."""
+        wanted = roles or ("peer", "upstream", "downstream", "reference")
+        out: list[str] = []
+        for role in wanted:
+            for sym in self.witness_roster.get(role, []):
+                if sym not in out:
+                    out.append(sym)
+        return out
 
 
 class SectorConfig(BaseModel):

@@ -238,11 +238,49 @@ def get_config() -> Config:
 def reset_config_cache() -> None:
     """Clear the cache (tests that point ATS_CONFIG_DIR elsewhere)."""
     get_config.cache_clear()
+    load_entities.cache_clear()
+    _alias_index.cache_clear()
 
 
 def load_news_sources() -> dict:
     """Load config/news_sources.yaml (RSS feeds, X accounts, keyword filters)."""
     return _load_yaml(_config_dir() / "news_sources.yaml")
+
+
+@functools.lru_cache(maxsize=1)
+def load_entities() -> dict:
+    """Load config/entities.yaml — the canonical witness-identity registry.
+
+    Returns {canonical: {name, aliases, market, filings}}. Absent file is fine: every
+    symbol then resolves to itself, which is the pre-registry behaviour.
+    """
+    return _load_yaml(_config_dir() / "entities.yaml").get("entities", {}) or {}
+
+
+@functools.lru_cache(maxsize=1)
+def _alias_index() -> dict[str, str]:
+    idx: dict[str, str] = {}
+    for canonical, meta in load_entities().items():
+        idx[canonical.upper()] = canonical
+        for alias in (meta or {}).get("aliases", []) or []:
+            idx[str(alias).upper()] = canonical
+    return idx
+
+
+def canonical_entity(symbol: str) -> str:
+    """Fold a ticker onto the company that speaks through it.
+
+    Load-bearing for the corroboration gates: SK hynix trades as SKHY, HY9H and
+    000660.KS, and one earnings call filed under three ids would read as three
+    independent witnesses — defeating the stance-diversity gate from the inside, which
+    is the least visible way for it to fail. Unknown symbols pass through unchanged.
+    """
+    return _alias_index().get((symbol or "").upper(), symbol)
+
+
+def entity_meta(symbol: str) -> dict:
+    """Registry record for a symbol (via its canonical id); {} when unregistered."""
+    return load_entities().get(canonical_entity(symbol), {}) or {}
 
 
 def load_pead_global() -> dict:

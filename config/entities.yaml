@@ -1,0 +1,105 @@
+# 证人身份注册表 —— 证人是**公司**，不是代码。
+#
+# 为什么必须有这张表：SK 海力士在本仓库里有三个代码（SKHY 美股 ADR、HY9H 法兰克福、
+# 000660.KS 韩股），三个都指向同一场电话会。若按代码入账，一份纪要会被算成三个"独立
+# 证人"，把立场多样性闸（≥2 类证人才能下结论）从内部骗过去 —— 那道闸正是用来防止
+# 单一信源自我印证的，被自己的代码别名攻破是最难察觉的一种失效。
+#
+# canonical  入库时写进 entity / source_entity 的唯一身份
+# aliases    折叠到该身份的其它代码（含跨市场挂牌与 ADR）
+# name       身份闸用它核对"取回的文档确实提到这家公司"
+# market     文档在哪个市场披露 —— 决定 downloader 走哪条取数路径
+# filings    该公司**原始文件**的披露地：sec 表示能在 EDGAR 找到，ir 表示只能取投资者
+#            关系页/纪要。取不到不是错误，会如实记成缺口。
+
+entities:
+  SKHY:
+    name: SK hynix
+    aliases: [HY9H, "000660.KS", SKHYY, "000660"]
+    market: KRX
+    filings: ir
+
+  "005930.KS":
+    name: Samsung Electronics
+    aliases: [SSNLF, "005930", SMSN]
+    market: KRX
+    filings: ir
+
+  MU:
+    name: Micron Technology
+    aliases: []
+    market: US
+    filings: sec
+
+  NVDA:
+    name: NVIDIA
+    aliases: []
+    market: US
+    filings: sec
+
+  AMD:
+    name: Advanced Micro Devices
+    aliases: []
+    market: US
+    filings: sec
+
+  AVGO:
+    name: Broadcom
+    aliases: []
+    market: US
+    filings: sec
+
+  TSM:
+    name: Taiwan Semiconductor Manufacturing
+    aliases: ["2330.TW", TSMC]
+    market: TWSE
+    filings: sec          # 20-F + 英文法说会纪要
+
+  ASML:
+    name: ASML Holding
+    aliases: [ASML.AS, ASMLF]
+    market: US
+    filings: sec          # 20-F
+
+  KLAC:
+    name: KLA
+    aliases: [KLA]
+    market: US
+    filings: sec
+
+  LRCX:
+    name: Lam Research
+    aliases: []
+    market: US
+    filings: sec
+
+  AMAT:
+    name: Applied Materials
+    aliases: []
+    market: US
+    filings: sec
+
+  # --- 跨市场：可达性待 downloader 覆盖扫描验证 -------------------------------
+  "6857.T":
+    name: Advantest
+    aliases: [ATEYY, "6857"]
+    market: TSE
+    filings: ir
+
+  "6146.T":
+    name: Disco Corporation
+    aliases: [DSCSY, "6146"]
+    market: TSE
+    filings: ir
+
+  BESI.AS:
+    name: BE Semiconductor Industries
+    aliases: [BESIY, BESI]
+    market: AMS
+    filings: ir
+
+  "2408.TW":
+    name: Nanya Technology
+    aliases: ["2408"]
+    market: TWSE
+    filings: ir

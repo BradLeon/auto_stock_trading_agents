@@ -651,6 +651,48 @@ def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
     return review
 
 
+def _evidence_sources(store, *, entity: str = "") -> int:
+    """Primary-source coverage: who the roster declares vs whose documents we hold.
+
+    A declared witness we can never fetch is worse than an undeclared one — it sits in
+    `未发声` forever and quietly inflates the coverage denominator, making the evidence
+    look thinner than it is. This is the report that says which ones to demote.
+    """
+    from ..config import canonical_entity, entity_meta, load_sector_config
+    from ..data import source_cache
+
+    cfg = load_sector_config(entity or "ai_hardware")
+    root = source_cache.root()
+    print(f"信息源目录：{root or '(未配置 docs_root)'}\n")
+
+    for layer in cfg.layers:
+        if not layer.witness_roster:
+            continue
+        print(f"=== {layer.label} ({layer.key}) ===")
+        for role in ("peer", "upstream", "downstream", "reference"):
+            names = layer.witness_roster.get(role, [])
+            if not names:
+                continue
+            print(f"  [{role}]")
+            for raw in names:
+                sym = canonical_entity(raw)
+                docs = source_cache.inventory(sym)
+                bad = [d for d in store.documents(entity=sym, ok_only=False) if not d["ok"]]
+                meta = entity_meta(sym)
+                if docs:
+                    newest = max(docs, key=lambda d: d.fetched_at or "")
+                    mark, detail = "✅", (f"{len(docs)} 份 · 最新 {newest.period or '期间未知'}"
+                                         f" · {len(newest.text)//1000}k 字符")
+                elif bad:
+                    mark, detail = "⚠️ ", f"抓到过但被闸拦下：{bad[0]['note']}"
+                else:
+                    mark, detail = "❌", "无原始文件"
+                market = meta.get("market", "?")
+                print(f"    {mark} {sym:<12}{meta.get('name', ''):<34}{market:<6}{detail}")
+        print()
+    return 0
+
+
 def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                  entity: str = "", limit: int = 30, accept: bool = False,
                  reviewer: str = "", note: str = "") -> int:
@@ -662,6 +704,8 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
     from ..memory import get_store
 
     store = get_store()
+    if action == "sources":
+        return _evidence_sources(store, entity=entity)
     if action == "show":
         rows = store.observations(entity=entity or None, limit=limit)
         if not rows:
@@ -1063,9 +1107,9 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
-    evi = sub.add_parser("evidence", help="产业链证据 (observe / show) —— 只读，绝不下单")
+    evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
     evi.add_argument("action",
-                     choices=["observe", "show", "claims", "report",
+                     choices=["observe", "show", "claims", "report", "sources",
                               "propose", "proposals", "review"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")

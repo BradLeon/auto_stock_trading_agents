@@ -66,6 +66,37 @@ layers:
       - {symbol: "005930.KS", note: 三星/HBM追赶}
     structure_notes:
       存储: config/knowledge/HBM存储.md
+    # HBM 主题的证人范围（2026-08-06 人工规定）。身份按 config/entities.yaml 归一：
+    # 写 canonical，别名代码（HY9H / 000660.KS）自动折叠，不会被算成额外证人。
+    #
+    # 入选判据是**能否给出区分性读数**，不是体量。一家只会说"AI 需求很好"的公司，
+    # 说的是三家存储厂自己已经说过的话，只增加音量不增加信息 —— 而音量正是去重闸要
+    # 压掉的东西。名单宁短勿长：声明一个取不到或说不出区分度的证人，只会把覆盖率的
+    # 分母做大，看起来更差而并没有更差。
+    #
+    # peer       同层竞对，尽量完备。HBM 是三家寡头，这就是全部在产玩家。
+    # upstream   直接上游最主要供应商。ASML(EUV/DRAM 节点)、KLA(过程控制) 用户点名；
+    #            LRCX 的 TSV 刻蚀是 HBM 堆叠专属工序。AMAT 落选：沉积对 HBM 无专属
+    #            读数，它的评论与存储厂自述重复。
+    # downstream 直接下游买家。NVDA 用户点名（占 HBM 需求大头）；AMD 的 MI 系列是
+    #            真实第二大买家且会明确评论 HBM 供给。AVGO 落选：定制 ASIC 确实吃
+    #            HBM，但它对外只给"AI 收入"口径，落不到 HBM 维度上。
+    # reference  不计入证人覆盖率。南亚科是唯一没有 HBM 的上市 DRAM 厂，用来把常规
+    #            DRAM 信号与 HBM 信号分开 —— HBM 单 bit 吃约三倍晶圆，挤占产能推高
+    #            常规 DRAM 价格，是本命题机制的一环。
+    # private    未上市、无票据，仅供 LLM 参考。
+    #
+    # 落选但值得复评（等 downloader 覆盖扫描证明可达后再升）：
+    #   6857.T Advantest（HBM 测试是真实瓶颈）、6146.T Disco（堆叠减薄）、
+    #   BESI.AS（混合键合，对 HBM4 时点最有区分度）—— 三家都是日/荷股，可达性未验证。
+    # 明确不属于本主题：SNDK(NAND)、STX(HDD)。NAND 是不同产线不同工艺，HDD 与 HBM
+    #   机制无关；"AI 存储需求外溢到 NAND/HDD"是**另一条命题**，该由归纳引擎自己提。
+    witness_roster:
+      peer:       [SKHY, "005930.KS", MU]
+      upstream:   [ASML, KLAC, LRCX]
+      downstream: [NVDA, AMD]
+      reference:  ["2408.TW"]
+      private:    [CXMT 长鑫存储]
     # 可证伪命题（见 docs/CHAIN_EVIDENCE.md）。人工维护：agent 只能提议，只有人能加。
     # concepts 是「维度」不是指标名——观测按 desc 的语义归属，绝不做字符串匹配。
     # expect_from 声明该维度**该由谁来说**：单份财报只代表自家、且可能选择性披露，

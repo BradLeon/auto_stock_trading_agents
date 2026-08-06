@@ -85,7 +85,7 @@ docs/                   # DESIGN DEVELOPMENT WORKFLOWS DATA_SOURCES SECTOR_ANALY
 
 ## 3. Schemas 约定（`src/ats/schemas/`）
 
-每个业务域一个文件（`pead.py` `sector.py` `journal.py` `risk.py` ...），全部用
+每个业务域一个文件（`pead.py` `sector.py` `journal.py` `risk.py` `chain.py` ...），全部用
 pydantic `BaseModel`。约定：
 
 - **枚举用 `Literal[...]`，不用 `Enum`**——JSON 序列化直接是字符串，LLM 结构化
@@ -152,6 +152,43 @@ key（哪怕值和旧默认值一样），改代码里的默认值**不会**生�
 改成 5，但 `config/pead.yaml` 里显式写着 `weekday: 0`，改完代码后行为没变，
 直到同时改了 YAML 文件才生效。**结论：改任何 `setdefault()` 的默认值时，
 必须同时 grep 一遍所有相关 YAML 文件，确认没有被显式覆盖。**
+
+### 产业链证据：四处配置各管什么
+
+新人最容易问的是"命题/观察名单/知识库/供应链关系分别在哪"。四份配置**职责不重叠**：
+
+| 配置 | 管什么 | 例 |
+|---|---|---|
+| `config/pead.yaml` `observe:` | **要读谁的财报**（只读覆盖，绝不可交易） | `[MSFT, AMZN, META, ORCL, MU, "005930.KS"]` |
+| `config/sectors/<name>.yaml` 各层 `claims:` | **要验证什么命题**、每个维度什么方向算支持、**该由谁来说** | 见下 |
+| `config/sectors/<name>.yaml` 各层 `structure_notes:` → `config/knowledge/*.md` | **稳定的产业结构背景**（供结构分析师打底） | `存储: config/knowledge/HBM存储.md` |
+| `config/pead/<SYM>.yaml` `signal_chain:` | **谁的上下游是谁**——用于把"我们最大的内存合作伙伴"解析到具体公司 | `{symbol: SKHY, role: upstream}  # HBM 主供` |
+
+命题的形态（`concepts` 是**维度**不是指标名——观测按 `desc` 语义归属，绝不字符串匹配）：
+
+```yaml
+claims:
+  - id: sk_hbm_share
+    kind: relative          # common=行业共同 | relative=层内相对份额
+    subject: SKHY           # relative 必填
+    horizon: {from: 2026-08-01, to: 2027-12-31}
+    concepts:
+      - key: hbm_share
+        desc: HBM 份额/供货占比及其指引（含"份额将下降"这类表述）
+        supports_when: up   # 逐维度声明；同一命题内方向可相反
+        direct: true        # relative：只有 direct 维度能改变份额判断
+        expect_from: [SKHY, MU, "005930.KS", NVDA]   # 该由谁来说 → 沉默显示为缺口
+    witnesses:              # 立场取自这里，不从文档推断
+      - {entity: NVDA, stance: customer}
+    falsifiers: [竞争对手通过核心客户认证，且 SK 份额指引下修]
+```
+
+**知识库让位于证据**：`config/knowledge/*.md` 提供不变的产业结构；本季谁在赢由证据
+台账定。两者冲突时以证据为准（`HBM存储.md` 开头显式写了这条）。
+
+**开关**（`config/pead.yaml` `sector_review:` / `induction:`）：
+`cross_section` 与 `feed_chief_basket` 关掉 = 回到阶段三之前；`induction.enabled`
+关掉 = 不再归纳新命题。三个都不影响已入库的证据。
 
 ## 6. 测试约定
 
@@ -259,6 +296,11 @@ score/prep 还能手动重跑）。如果因为改代码/重启导致某天错�
   而写入这张表的是**观察员**。观察员重跑同一份文档时若原样覆盖，就会清掉这个
   标志——于是"发现某个命题的材料"又变得有资格去印证那个命题，反事后编造的护栏
   静默失效。所以该字段做成**粘性**的：一旦冻结，重写不清除。
+- **产业链证据四张表**（`evidence_observations` / `evidence_failures` /
+  `claim_assessments` / `claim_proposals`）全部 additive，不动既有表。观测表的
+  `concept` 与 `source_entity` 两列是后加的，走 `_migrate` 里的 ALTER 分支；
+  `pead_events` 的主键变更需要建表重拷（SQLite 不能 ALTER PK），见
+  `_migrate_pead_events_pk`。
 - 除了幂等，**确定性 ID 还负责防止"伪印证"**：`evidence_observations.id` 取
   `(文档, 实体, 指标, 期间)` 的 hash，所以把同一份纪要重跑十遍不会变成十条证据。
   证据条数会被下游用来判断"几方印证"，重复计数等于凭空制造共识。

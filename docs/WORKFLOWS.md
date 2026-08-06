@@ -1,6 +1,6 @@
 # Workflows 与触发条件
 
-> 状态：v0.3 · 2026-07-31（新增技术面分析师） · 配套实现：`graph/chief.py`（决策图）+ `runtime/scheduler.py`（触发路由）
+> 状态：v0.4 · 2026-08-06（新增产业链证据 I7-I9） · 配套实现：`graph/chief.py`（决策图）+ `runtime/scheduler.py`（触发路由）
 
 系统只有两类 workflow：**信息型**（更新知识库，永不触碰 broker）与**交易型**（产生订单，
 全部汇入同一张 chief 决策图）。触发条件分**周期型**（每日/每周 cron）与**事件型**
@@ -17,8 +17,32 @@
 | I5 | 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — | 确定性代码（**无 LLM**）：7 点动量评分 + VIX 调节 + 期限结构/破位两层 | 普通函数 |
 | I6 | 绩效/风控快照 | 每交易日盘后 | risk_state≠normal → 飞书告警 | 确定性代码（无 LLM） | 普通函数 |
 | I7 | 产业链证据观察 | — | observe 名单公司财报发布（与打分同一套双重确认） | evidence_observer | 普通函数（只写证据表） |
+| I8 | 命题印证 + 截面重排 | 每周（跟在 I3 行业周报之后） | — | 确定性三道闸 → structure_analyst → 截面 | 普通函数 |
+| I9 | 涌现命题归纳 | **无周期** | 未归属观测积累到门槛 | claim_proposer | 普通函数（只产待确认卡） |
 
 （原 I5 绩效/风控快照顺延为 I6。）
+
+### 求证工作全流程（I7 → I8 → I9）
+
+```
+观察名单公司发财报（8-K 双重确认）
+  → I7 抽取观测：实体/维度/方向/**原文片段**，落 evidence_observations
+       · 语义归属到命题维度（不是字符串匹配）
+       · 用 signal_chain 解析"我们最大的内存合作伙伴"这类指代
+       · 归不上任何维度 → 留空，进未映射池（I9 的原料）
+  ↓
+每周行业评审之后
+  → I8 三道闸聚合（确定性，无 LLM）：去重 → 立场 → common/relative 隔离
+       → relative 结论 → moat_pricing 证据包 → structure_analyst
+       → 截面重排 → basket
+       → Chief 上下文（只给"量化第N→复合第M + 依据"，**不给权重数字**）
+  ↓
+未映射池攒够（≥6 条观测 × ≥3 个来源）
+  → I9 归纳一条候选命题 → 待确认卡 → **你审阅**
+       → 采纳：你手工写进 config；拒绝：signature 进冷却期
+```
+
+**三个节点都不产生订单**，全程不碰 broker。
 
 **I7 的边界**：observe 名单（`config/pead.yaml: observe`）是**覆盖**，不是**可交易**。
 这些公司我们大多不持有，读它们是因为利润是流动的——HBM 的供需由海力士/美光/三星
@@ -121,6 +145,19 @@ Chief、审批卡照常，但没有单会到券商。
 证据读进来，而陈旧数字正是伪印证的来源），但只把财报抽成产业链证据，不进 `scored`、
 不触发 Chief、不产生任何订单。
 
+### 涌现命题的触发（`chain/induction.py`）
+
+**没有 cron，纯时间流逝不触发。** 门槛是确定性的，不过门连模型都不调用：
+
+| 条件 | 默认 | 为什么 |
+|---|---|---|
+| 未归属观测数 | ≥ 6 | 少于此只是零星噪音，不成模式 |
+| 不同来源数 | ≥ 3 | 一家公司说得再多也只是一家在说 |
+| 冷却期 | 30 天 | 被拒的候选不得换个说法下周再来；signature 取自**证据指纹**（实体+指标）而非措辞 |
+
+触发后立刻把那批观测**冻结为 discovery evidence**——发现某命题的材料永远不能再充当
+它成立的证据。这道闸没有的话，agent 可以从一个模式归纳出命题、再拿同一批材料自证。
+
 事件日历 `config/events.yaml`（date/kind/label/triggers）：
 - `macro` → 宏观策略师额外跑一次（FOMC/CPI/NFP/政府报告）
 - `sector` / `sector:NAME` → 行业分析师（行业会议/产品发布会/龙头财报 read-through）
@@ -143,6 +180,13 @@ Chief、审批卡照常，但没有单会到券商。
 | `ats trader execute [SYM]` | T4 存量建议（decisions 表）重放 |
 | `ats schedule` / `ats schedule --now` | T2 每日 cron / 立即跑一轮级联 |
 | `ats serve` | webhook：飞书回调恢复 checkpoint 线程 |
+| `ats evidence observe SYM [--file F]` | I7：手动读一次某公司财报抽成证据（`--file` 用本地文档） |
+| `ats evidence show [--entity X]` | 看已入库观测（说话人/关于谁/归属维度/原文）与最近抽取失败 |
+| `ats evidence claims` | I8：看各命题的印证结论、覆盖率、异议方、**未发声证人** |
+| `ats sector crosssection NAME --layer K --structure` | I8：手动跑截面（周报后自动跑，带结构层） |
+| `ats evidence propose` | I9：跑一次归纳（门槛不过则不调用模型，只打印判定） |
+| `ats evidence proposals` | 列出待确认/已采纳/已拒绝的候选命题 |
+| `ats evidence review ID --accept\|--note "..."` | 审批候选命题（默认拒绝；采纳后仍需你手工写进配置） |
 
 ## 7. dry_run / --live / --yes 语义
 

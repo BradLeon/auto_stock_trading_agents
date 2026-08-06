@@ -156,6 +156,46 @@ def test_prompt_injection_in_body_does_not_change_the_task(monkeypatch):
     assert len(obs) == 1 and obs[0].metric == "hbm_capacity"
 
 
+def test_relation_hint_carries_the_curated_supply_chain():
+    """Resolution is grounded in human-curated config, not the model's world knowledge.
+
+    config/pead/NVDA.yaml already records `SKHY, role: upstream  # HBM 主供` — that one
+    line is what lets "our largest memory partner" resolve to SK Hynix.
+    """
+    hint = observer.relation_hint("NVDA")
+    assert "SKHY" in hint and "HBM 主供" in hint
+    assert "只在能唯一确定时" in hint          # no guessing when the reference is vague
+
+
+def test_extraction_context_offers_relations_and_concepts(monkeypatch):
+    seen = {}
+
+    def fake(role, schema, context, **k):
+        seen["ctx"] = context
+        return _view([_row()])
+
+    monkeypatch.setattr(observer, "run_structured", fake)
+    observer.extract("NVDA", "doc-r", "原文…", now=NOW)
+    assert "说话人（本文档的发布方）：NVDA" in seen["ctx"]
+    assert "产业链关系" in seen["ctx"]           # who its partners are
+    assert "可归属维度" in seen["ctx"]           # and what dimensions it can speak to
+
+
+def test_fact_about_a_partner_is_filed_under_that_partner(monkeypatch):
+    """A customer's testimony about its supplier must be recorded against the SUPPLIER.
+
+    Filed under the speaker it never reaches the supplier's share claim, which leaves
+    that claim resting on the incumbent's own account — one stance, never confirmable.
+    The speaker stays in `source_entity` so a bad resolution is still traceable.
+    """
+    monkeypatch.setattr(observer, "run_structured", lambda *a, **k: _view([
+        _row(entity="SKHY", metric="hbm_share", direction="down",
+             evidence_span="allocation to our largest memory partner will step down")]))
+    obs, _ = observer.extract("NVDA", "doc-nv", "原文…", now=NOW)
+    assert obs[0].entity == "SKHY"            # the fact is ABOUT SK Hynix
+    assert obs[0].source_entity == "NVDA"     # but NVIDIA disclosed it
+
+
 def test_observe_document_persists_failure(monkeypatch):
     monkeypatch.setattr(observer, "run_structured",
                         lambda *a, **k: _view([], failure="实体歧义"))

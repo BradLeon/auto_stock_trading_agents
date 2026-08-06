@@ -82,6 +82,54 @@ def concept_menu(symbol: str, sector: str = "ai_hardware") -> tuple[str, set[str
             "**不要硬套**）：\n" + "\n".join(lines)), keys
 
 
+def relation_hint(symbol: str, sector: str = "ai_hardware") -> str:
+    """The speaker's curated supply-chain relations, so descriptive references resolve.
+
+    A customer saying "allocation to our largest memory partner will step down" is the
+    single most valuable evidence about that partner's competitive position — and it is
+    lost if the fact gets filed under the speaker. Resolving the reference needs one
+    outside fact: who that partner IS.
+
+    That fact is already curated, per ticker, in `config/pead/<SYM>.yaml: signal_chain`
+    (NVDA's lists `SKHY, role: upstream  # HBM 主供`). So resolution is grounded in
+    human-reviewed config rather than the model's world knowledge — auditable, and
+    wrong resolutions stay traceable because the speaker is kept in `source_entity`.
+    """
+    import re
+
+    from ...config import load_pead_config
+
+    role_cn = {"upstream": "上游", "peer": "同业", "downstream": "下游"}
+    lines: list[str] = []
+    try:
+        cfg = load_pead_config(symbol)
+    except Exception as exc:  # noqa: BLE001 - a missing per-ticker file must not block
+        log.info("relation hint unavailable for %s: %s", symbol, exc)
+        return ""
+    # The curated note ("HBM 主供") is what lets the model tell partners apart, and it
+    # only exists as a YAML comment — read it back off the raw file.
+    notes: dict[str, str] = {}
+    try:
+        from ...config import _config_dir
+
+        raw = (_config_dir() / "pead" / f"{symbol.upper()}.yaml").read_text(encoding="utf-8")
+        for m in re.finditer(r"symbol:\s*([A-Za-z0-9.\-]+).*?#\s*(.+)$", raw, re.MULTILINE):
+            notes[m.group(1).upper()] = m.group(2).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    for sc in getattr(cfg, "signal_chain", None) or []:
+        sym = sc.symbol.upper()
+        note = notes.get(sym, "")
+        lines.append(f"  {role_cn.get(sc.role, sc.role)} {sym}" + (f" —— {note}" if note else ""))
+    if not lines:
+        return ""
+    return ("说话人的产业链关系（人工策展，可据此解析文中的描述性指代）：\n"
+            + "\n".join(lines) + "\n"
+            "若文中以描述指代上述某一家（例如「我们最大的内存合作伙伴」对应上游 HBM 主供），\n"
+            "请把 entity 记成**被指代的那家公司**而不是说话人。**只在能唯一确定时**这样做；\n"
+            "指代含糊、或对应多家时，entity 仍记说话人。")
+
+
 def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
             period: str = "", now: datetime | None = None,
             sector: str = "ai_hardware") -> tuple[list[Observation], str]:
@@ -96,9 +144,11 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
         return [], "文档为空或未取到"
 
     menu, valid_concepts = concept_menu(symbol, sector)
+    relations = relation_hint(symbol, sector)
     ctx = (
-        f"公司：{symbol}\n"
+        f"说话人（本文档的发布方）：{symbol}\n"
         f"期间（如已知）：{period or '未知'}\n\n"
+        + (relations + "\n\n" if relations else "")
         + (menu + "\n\n" if menu else "")
         + "以下是该公司的财报/纪要原文。请抽取其中可核对的事实观测。\n"
         "只抽事实，不做投资判断；每条必须带原文逐字片段。\n"

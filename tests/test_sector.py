@@ -250,15 +250,39 @@ def test_scheduler_sector_weekly(monkeypatch):
     calls = []
     monkeypatch.setattr("ats.runtime.cli.run_sector_review",
                         lambda name, **k: calls.append(name))
+    # The weekly job now also runs the cross-section, which fetches factors for the
+    # whole universe. Stub it: without this the test makes ~25 live yfinance calls
+    # (measured: 119s) and its result depends on the network.
+    xs = []
+    monkeypatch.setattr(scheduler, "_cross_section_weekly", lambda name: xs.append(name))
     # weekday gate now tracks weekly_review_tz, not ET — see scheduler._today_weekly().
     monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))   # a Saturday
     scheduler._sector_weekly()
     assert calls == ["ai_hardware"]
+    assert xs == ["ai_hardware"]          # ranking follows the review, same fresh data
 
     calls.clear()
+    xs.clear()
     monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 6))   # Monday — no longer fires
     scheduler._sector_weekly()
-    assert calls == []
+    assert calls == [] and xs == []
+
+
+def test_cross_section_weekly_respects_the_kill_switch(monkeypatch):
+    """`sector_review.cross_section: false` must fully restore pre-stage-3 behaviour."""
+    from datetime import date
+
+    from ats import config
+    from ats.runtime import scheduler
+
+    real = config.load_pead_global
+    monkeypatch.setattr(config, "load_pead_global", lambda: {
+        **real(), "sector_review": {**real()["sector_review"], "cross_section": False}})
+    monkeypatch.setattr("ats.runtime.cli.run_sector_review", lambda name, **k: None)
+    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))
+    monkeypatch.setattr(scheduler, "_cross_section_weekly",
+                        lambda name: pytest.fail("kill switch must prevent the run"))
+    scheduler._sector_weekly()
 
 
 # --------------------------------------------------------------------------- #

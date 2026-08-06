@@ -267,6 +267,7 @@ def _sector_block(held_symbols: set | None = None) -> str:
         for lv in r.layers:
             lines.append(f"  层 {lv.label or lv.key}: 景气{lv.boom_score:.0f} "
                          f"[{lv.signal}] {lv.supply_demand[:80]}")
+        lines += _basket_lines(r)
         # Company calls: only held positions + actionable (非持有) calls
         for c in r.company_calls:
             sym = c.symbol.upper()
@@ -277,6 +278,38 @@ def _sector_block(held_symbols: set | None = None) -> str:
                 lines.append(f"  {c.stance} {c.symbol}{tag} ({c.conviction:.2f}): {c.rationale[:100]}")
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
+
+
+def _basket_lines(review) -> list[str]:
+    """Cross-section: where the structural evidence DISAGREES with the pure-quant rank.
+
+    Deliberately reports the disagreement and its reason, never the suggested weights.
+    The factor model computes "三星 13% / 海力士 9%"; handing those numbers to the Chief
+    would get them copied, which quietly moves the sizing decision to a model nobody is
+    accountable for. The Chief is the only decision-maker — it gets the evidence and the
+    relative ordering, and decides sizing itself.
+    """
+    from ...config import load_pead_global
+
+    try:
+        if not load_pead_global()["sector_review"].get("feed_chief_basket", True):
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[str] = []
+    for b in getattr(review, "baskets", None) or []:
+        if not b.structural:
+            continue          # pure-quant ranking says nothing new about position
+        moved = [r for r in b.rows if r.quant_rank and r.rank and r.rank != r.quant_rank]
+        if not moved:
+            continue
+        out.append(f"  截面（{b.layer_key}）复合排名 vs 纯量化排名的分歧：")
+        for r in sorted(moved, key=lambda x: x.rank)[:5]:
+            why = (r.rationale or "").strip().replace("\n", " ")
+            moat = f" moat={r.moat_pricing:+.1f}" if r.moat_pricing is not None else ""
+            out.append(f"    {r.symbol} 量化第{r.quant_rank} → 复合第{r.rank}{moat}"
+                       + (f" 依据：{why[:110]}" if why else ""))
+    return out
 
 
 def _macro_block() -> str:

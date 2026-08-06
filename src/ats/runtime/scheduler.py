@@ -601,6 +601,35 @@ def _sector_weekly() -> None:
             run_sector_review(name)
         except Exception as exc:  # noqa: BLE001 - review must not break the weekly job
             log.warning("sector review %s failed: %s", name, exc)
+        # Cross-section right after the review, on the same fresh data. Without this it
+        # only ever ran when someone typed `ats sector crosssection` by hand, so the
+        # deterministic who/how-much layer effectively never updated.
+        if sr.get("cross_section", True):
+            _cross_section_weekly(name)
+
+
+def _cross_section_weekly(name: str) -> None:
+    """Rank every layer that declares a cohort, with the structure overlay on.
+
+    Structure is on by default here: it is what carries the chain-evidence into
+    `moat_pricing`. Failures are per-layer — one layer's data outage must not cost
+    the others their ranking.
+    """
+    from ..agents.sector import cross_section
+    from ..config import load_sector_config
+
+    try:
+        cfg = load_sector_config(name)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cross-section skipped for %s: %s", name, exc)
+        return
+    for layer in cfg.layers:
+        if not layer.tickers:
+            continue
+        try:
+            cross_section.run_layer(name, layer.key, persist=True, structure=True)
+        except Exception as exc:  # noqa: BLE001 - one layer must not break the rest
+            log.warning("cross-section %s/%s failed: %s", name, layer.key, exc)
 
 
 def _weekly_review() -> None:

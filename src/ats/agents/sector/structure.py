@@ -27,16 +27,24 @@ def _clamp(v: float | None) -> float:
 
 
 def assess(rows, structure_notes: dict[str, str],
-           pead_narratives: dict[str, str] | None = None):
+           pead_narratives: dict[str, str] | None = None,
+           moat_context: str = ""):
     """Run the structure analyst over a layer's cohort. Returns
     (scores{symbol: (tech_tenor, moat_pricing, rationale)}, subgroup_notes{name: note}).
-    Empty on missing KB or LLM failure (caller keeps the pure-quant ranking)."""
+
+    `moat_context` carries event-level competitive-position evidence built from the
+    chain-evidence ledger (see chain/moat.py). Historically the only input was a
+    curated KB note, so a layer without one skipped the overlay entirely and its
+    `moat_pricing` was permanently null — which is why the factor expressing "SK Hynix
+    is being overtaken by Samsung" had never once been computed for the HBM layer.
+    Either source is now sufficient to run.
+    """
     from ...data import industry
 
     note_paths = list(dict.fromkeys(structure_notes.values()))   # dedupe, keep order
     kb = industry.fetch_named(note_paths) if note_paths else []
-    if not kb:
-        log.info("structure: no KB notes for this layer — skipping overlay")
+    if not kb and not moat_context:
+        log.info("structure: no KB notes and no chain evidence — skipping overlay")
         return {}, {}
 
     # Compact quant-basket summary so the analyst sees what it's correcting.
@@ -50,12 +58,12 @@ def assess(rows, structure_notes: dict[str, str],
                      f"{p(r.peg())} | {p(r.mom_60d, 1, '%')}")
     basket_block = "\n".join(lines)
 
-    ctx_parts = [
-        "对下列同层标的做结构/技术定性评审。事实以知识库笔记为准。",
-        "## 知识库（策展产业笔记 — 事实来源）",
-        industry.as_context(kb),
-        basket_block,
-    ]
+    ctx_parts = ["对下列同层标的做结构/技术定性评审。事实以知识库笔记与竞争位置证据为准。"]
+    if kb:
+        ctx_parts += ["## 知识库（策展产业笔记 — 事实来源）", industry.as_context(kb)]
+    if moat_context:
+        ctx_parts.append(moat_context)
+    ctx_parts.append(basket_block)
     if pead_narratives:
         ctx_parts.append("## 部分标的 PEAD 叙事（参考）\n" + "\n".join(
             f"- {s}: {t[:400]}" for s, t in pead_narratives.items() if t))

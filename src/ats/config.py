@@ -307,6 +307,10 @@ def load_pead_global() -> dict:
                                           # decoupled from the mon-fri trading-day cascade)
     sr.setdefault("inject_prep", True)
     sr.setdefault("inject_monitor", True)
+    # Cross-section + chain evidence -> moat_pricing -> Chief. The kill switch for the
+    # whole stage-3 path: off = the system behaves exactly as it did before.
+    sr.setdefault("cross_section", True)
+    sr.setdefault("feed_chief_basket", True)
     cfg.setdefault("macro_review", {})
     mr = cfg["macro_review"]
     mr.setdefault("enabled", True)

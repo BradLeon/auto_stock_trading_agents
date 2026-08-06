@@ -64,6 +64,8 @@ layers:
       - {symbol: SKHY, note: SK海力士 美国ADR（用户同时持有此代码）}
       - {symbol: "000660.KS", note: SK海力士 韩股（参考）}
       - {symbol: "005930.KS", note: 三星/HBM追赶}
+    structure_notes:
+      存储: config/knowledge/HBM存储.md
     # 可证伪命题（见 docs/CHAIN_EVIDENCE.md）。人工维护：agent 只能提议，只有人能加。
     # concepts 是「维度」不是指标名——观测按 desc 的语义归属，绝不做字符串匹配。
     # expect_from 声明该维度**该由谁来说**：单份财报只代表自家、且可能选择性披露，

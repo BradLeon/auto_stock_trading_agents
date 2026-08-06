@@ -249,11 +249,27 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
     for r in rows:
         r.quant_rank = r.rank
 
+    # Competitive-position evidence from the chain ledger (docs/CHAIN_EVIDENCE.md).
+    # Only `relative` verdicts reach here, and only supportive/contradicted ones —
+    # unknown/mixed deliberately yield nothing so moat_pricing stays NULL rather than 0.
+    moat_ctx = ""
+    if structure:
+        try:
+            from ...chain import moat
+            from ...memory import get_store
+
+            packs = moat.packs_for_layer(
+                layer, get_store(), cfg=cfg.review.get("corroboration", {}))
+            moat_ctx = moat.as_context(packs)
+        except Exception as exc:  # noqa: BLE001 - evidence is an overlay, never a blocker
+            log.warning("chain evidence unavailable for %s: %s", layer_key, exc)
+
     structural, subgroup_notes = False, {}
-    if structure and layer.structure_notes:
+    if structure and (layer.structure_notes or moat_ctx):
         from . import structure as struct_mod
 
-        scores, subgroup_notes = struct_mod.assess(rows, layer.structure_notes)
+        scores, subgroup_notes = struct_mod.assess(rows, layer.structure_notes,
+                                                   moat_context=moat_ctx)
         if scores:
             for r in rows:
                 s = scores.get(r.symbol)

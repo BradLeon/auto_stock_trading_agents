@@ -163,7 +163,7 @@ def as_card(proposal: ClaimProposal, rows_by_id: dict[str, dict] | None = None) 
     if proposal.concepts:
         lines += ["", "  建议的 claim 形态"]
         for c in proposal.concepts:
-            lines.append(f"    {c.key}: {c.desc}（{c.supports_when} 为支持）")
+            lines.append(f"    {c.key}: {c.desc}")
     lines += ["", "  这批观测已冻结为 discovery evidence——采纳后它们不得用于印证该命题。",
               f"  → ats evidence review {proposal.id} --accept | --reject"]
     return "\n".join(lines)

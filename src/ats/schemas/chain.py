@@ -151,11 +151,16 @@ class Concept(BaseModel):
 
     key: str
     desc: str = ""                        # semantic anchor shown to the linker model
-    # Which reading direction supports the claim ON THIS DIMENSION. Per-concept because
-    # one claim mixes polarities: under "supply stays tight", lead-time UP supports it
-    # while capacity UP refutes it. A claim-level direction would score supply
-    # loosening as evidence FOR tightness — confidently inverted.
-    supports_when: Direction = "up"
+    # NOTE: there is deliberately no `supports_when` here. It used to declare "this
+    # direction on this dimension supports the claim", and it was the wrong shape: a
+    # monotone, context-free scalar cannot express a meaning that depends on context,
+    # horizon and who is speaking. Real data settled it — SK hynix saying customers
+    # still want more supply WHILE pulling capacity forward was scored as seven
+    # refutations of "supply stays tight", because config asserted capex-up ⇒ looser.
+    # Management expands in every boom; that is a response to demand, not a denial of
+    # it. Polarity now comes from an adjudicated, reasoned call per cluster
+    # (chain/adjudicate.py). Config declares SCOPE and GOVERNANCE; it does not assert
+    # meaning.
     # Who is expected to speak to this dimension. Makes silence visible as a GAP rather
     # than as neutrality — a single filing is self-interested and may disclose
     # selectively, so cross-validation has to be declared up front.
@@ -211,6 +216,57 @@ class ClaimDef(BaseModel):
             raise ValueError(f"relative claim {self.id!r} must declare a subject")
 
 
+Polarity = Literal["support", "refute", "neutral"]
+
+
+class EvidenceCluster(BaseModel):
+    """One de-duplicated body of evidence: everything one speaker said on one dimension
+    in one direction.
+
+    Members are kept, not collapsed to a representative row. An earnings call restates
+    the same expansion plan across 2026 / FY26Q2 / FY26Q3 / 2027, and those five
+    sentences are ONE piece of evidence — a plan with a schedule — not five votes.
+    Judging the whole group at once is also what lets a reader see the schedule.
+    """
+
+    key: str                              # stable id: speaker|entity|concept|direction
+    speaker: str                          # who disclosed it
+    entity: str                           # who the facts are ABOUT
+    concept: str
+    direction: Direction
+    stance: str = ""                      # from the claim's declared witness table
+    primary: bool = True                  # PRIMARY_TYPES — may contribute a stance class
+    rows: list[dict] = Field(default_factory=list)
+
+    @property
+    def periods(self) -> list[str]:
+        seen = [r.get("period") or "" for r in self.rows]
+        return sorted({p for p in seen if p})
+
+    @property
+    def observation_ids(self) -> list[str]:
+        return [r["id"] for r in self.rows if r.get("id")]
+
+
+class ClusterJudgement(BaseModel):
+    """What one cluster means for one claim, and WHY.
+
+    The reason is not decoration — it is the whole reason this may be a model's call
+    rather than a config scalar. A polarity without a recorded reason is unauditable,
+    and an unauditable judgement is indistinguishable from the confidently-inverted
+    config it replaced.
+    """
+
+    cluster_key: str
+    polarity: Polarity = "neutral"
+    reason: str = ""
+    speaker: str = ""
+    concept: str = ""
+    stance: str = ""
+    primary: bool = True
+    observation_ids: list[str] = Field(default_factory=list)
+
+
 class ClaimAssessment(BaseModel):
     """Aggregated verdict for one claim at a point in time.
 
@@ -234,6 +290,10 @@ class ClaimAssessment(BaseModel):
     # count: a company's silence on a dimension is a gap, not neutrality.
     silent_witnesses: list[str] = Field(default_factory=list)
     observation_ids: list[str] = Field(default_factory=list)
+    # Every polarity call with its reason. Travels with the verdict into storage and
+    # into the report, so "why does SK hynix's own capex count as support here" is
+    # answerable without re-running anything.
+    judgements: list[ClusterJudgement] = Field(default_factory=list)
     note: str = ""
 
     @property

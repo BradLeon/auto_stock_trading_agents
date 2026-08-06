@@ -17,12 +17,12 @@ CFG = {"min_clusters": 2, "min_stance_classes": 2, "min_confidence": 0.5}
 
 
 def _row(entity, concept, *, direction="up", speaker=None, otype="guidance",
-         doc="d1", rid=None, span="…"):
+         doc="d1", rid=None, polarity="support", span="…"):
     return {"id": rid or f"{doc}:{entity}:{concept}", "document_id": doc,
             "entity": entity.upper(), "source_entity": (speaker or entity).upper(),
             "metric": concept, "concept": concept, "period": "FY26Q3",
             "observation_type": otype, "stance": "incumbent", "direction": direction,
-            "evidence_span": span, "extraction_confidence": 1.0,
+            "evidence_span": span + ("" if polarity == "support" else f"[[{polarity.upper()}]]"), "extraction_confidence": 1.0,
             "discovery_evidence": 0, "observed_at": NOW.isoformat()}
 
 
@@ -30,10 +30,10 @@ def _share_claim():
     return ClaimDef(
         id="sk_hbm_share", kind="relative", subject="SKHY", layer="L5_fab",
         statement="SK Hynix 维持核心客户 HBM 领先份额与定价权",
-        concepts=[Concept(key="hbm_share", desc="份额", supports_when="up", direct=True),
+        concepts=[Concept(key="hbm_share", desc="份额", direct=True),
                   Concept(key="customer_qualification", desc="认证",
-                          supports_when="down", direct=True),
-                  Concept(key="capacity_addition", desc="扩产", supports_when="down")],
+                          direct=True),
+                  Concept(key="capacity_addition", desc="扩产")],
         witnesses=[Witness(entity="SKHY", stance="incumbent"),
                    Witness(entity="MU", stance="competitor"),
                    Witness(entity="005930.KS", stance="competitor"),
@@ -44,8 +44,8 @@ def _common_claim():
     return ClaimDef(
         id="hbm_supply_tight", kind="common", layer="L5_fab",
         statement="HBM 供给持续紧张",
-        concepts=[Concept(key="supply_tightness", desc="紧张", supports_when="up"),
-                  Concept(key="capacity_addition", desc="扩产", supports_when="down")],
+        concepts=[Concept(key="supply_tightness", desc="紧张"),
+                  Concept(key="capacity_addition", desc="扩产")],
         witnesses=[Witness(entity="SKHY", stance="supplier"),
                    Witness(entity="NVDA", stance="customer")])
 
@@ -53,9 +53,10 @@ def _common_claim():
 # --- evidence packs -------------------------------------------------------- #
 def test_contradicted_share_claim_becomes_negative_evidence():
     rows = [_row("SKHY", "hbm_share", direction="down", speaker="SKHY", doc="sk",
-                 rid="a", span="we expect our HBM share to decline modestly"),
+                 rid="a", polarity="refute",
+                 span="we expect our HBM share to decline modestly"),
             _row("SKHY", "customer_qualification", direction="up", speaker="005930.KS",
-                 otype="counterparty", doc="ss", rid="b",
+                 otype="counterparty", doc="ss", rid="b", polarity="refute",
                  span="Samsung qualified HBM4 at SK's largest customer")]
     claim = _share_claim()
     a = corroborate(claim, rows, cfg=CFG)

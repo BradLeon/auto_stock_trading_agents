@@ -429,6 +429,40 @@ def test_fetch_hits_cache_without_network(tmp_path, monkeypatch):
     assert "Micron cached body" in text and "缓存命中" in note
 
 
+def test_identity_guard_rejects_a_different_companys_filing():
+    """Both halves of a real false PASS, found on 2026-08-06 with live documents:
+    an Apple earnings call was accepted as AMD's (8 Apple facts entered the ledger as
+    AMD's) and a 2020 Newmont gold deck was accepted as Samsung's (13 more)."""
+    from ats.agents.evidence.observer import _mentions_company as mentions
+
+    # "Advanced Micro Devices" contributes the token "micro", which occurs inside
+    # unrelated words; and a related-story link slug supplies a bare "amd".
+    apple = ("[video](https://www.investing.com/news/stock-futures-rise-spacex-amd-dip-4836330)\n"
+             "Apple Q2 2026 earnings call. Tim Cook discussed Micro LED displays and "
+             "microphone quality across our advanced device lineup.")
+    assert not mentions(apple, "AMD", "Advanced Micro Devices")
+    assert not mentions("NEWMONT CORPORATION AUGUST INVESTOR PRESENTATION. Gold AISC "
+                        "declining to $800/oz.", "005930.KS", "Samsung Electronics")
+
+    # …while the genuine articles must still pass, including short real names.
+    assert mentions("Micron Technology reports third quarter results", "MU",
+                    "Micron Technology")
+    assert mentions("KLA Corporation announces Q4 results", "KLAC", "KLA")
+    assert mentions("SK hynix Inc. 2026 Q2 earnings call", "SKHY", "SK hynix")
+
+
+def test_identity_guard_looks_past_a_wall_of_links():
+    """Scraped transcript pages open with a block of related-story links. Slicing the
+    head before stripping them left the company's own name outside the window and
+    rejected four legitimate filings."""
+    from ats.agents.evidence.observer import _mentions_company as mentions
+
+    page = ("".join(f"[video {i}](https://www.investing.com/news/transcripts/x-{i})\n"
+                    for i in range(400))
+            + "Lam Research Corporation fourth quarter fiscal 2026 earnings call")
+    assert mentions(page, "LRCX", "Lam Research")
+
+
 def test_fallback_documents_are_period_guarded_too(tmp_path, monkeypatch):
     """The real leak: NVDA had not reported Q2 FY2027, the transcript search came up
     empty, and the unguarded fallback served a September 2025 investor deck — 17

@@ -61,7 +61,7 @@ def propose(rows: list[dict], *, sector: str = "ai_hardware") -> ClaimProposalVi
 
 
 def to_concepts(view: ClaimProposalView) -> list[Concept]:
-    return [Concept(key=c.key, desc=c.desc, supports_when=c.supports_when,
+    return [Concept(key=c.key, desc=c.desc,
                     expect_from=c.expect_from, direct=c.direct) for c in view.concepts]
 
 

@@ -138,19 +138,46 @@ def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
     pass. Aliases are stripped to a distinctive token ("SK Hynix" -> "hynix") so that
     "SK hynix Inc." and "SK Hynix" both match.
     """
-    head = (text or "")[:8000].lower()
-    needles = {symbol.lower(), symbol.split(".")[0].lower()}
-    # >=3 chars, not >3: real names are this short ("KLA", "AMD", "TSM"), and dropping
-    # them turned a legitimate KLA transcript into a false reject. Generic corporate
-    # words are excluded instead, which is what actually risks a false PASS.
-    generic = {"inc", "corp", "ltd", "plc", "the", "and", "group", "co",
+    import re
+
+    # Strip URLs BEFORE slicing. Scraped transcript pages open with a block of
+    # related-story links, and one of those slugs ("...spacex-amd-dip-post-earnings...")
+    # was enough to certify an Apple earnings call as AMD's. A link to a story about a
+    # company is not that company speaking. Slicing first would also be wrong: on these
+    # pages the first 8k characters are almost entirely link markup, so the company's
+    # own name would fall outside the window.
+    head = re.sub(r"https?://\S+|\[[^\]]*\]\([^)]*\)", " ", (text or "")[:40000]).lower()
+    head = re.sub(r"\s+", " ", head)[:8000]
+
+    # Word boundaries, never bare substring, and `-`/`_` count as word characters so a
+    # slug cannot supply the boundary. Substring matching had contributed the other half
+    # of the same failure: "Advanced Micro Devices" yields the token "micro", which
+    # occurs inside unrelated words. A false PASS is the dangerous direction — a false
+    # reject merely falls back to the next source.
+    def _hit(needle: str) -> bool:
+        return re.search(rf"(?<![a-z0-9_-]){re.escape(needle)}(?![a-z0-9_-])",
+                         head) is not None
+
+    if _hit(symbol.lower()) or _hit(symbol.split(".")[0].lower()):
+        return True                       # the ticker itself is decisive
+
+    name = re.sub(r"[^a-z0-9 ]+", " ", (company_name or "").lower())
+    name = re.sub(r"\s+", " ", name).strip()
+    if len(name.split()) > 1 and name in re.sub(r"\s+", " ", head):
+        return True                       # full legal name as a phrase — filings use it
+
+    # A single name token only counts when it is distinctive on its own. "hynix",
+    # "nvidia", "micron", "samsung" identify a company; "advanced", "micro", "devices"
+    # do not, and neither do the corporate suffixes.
+    generic = {"inc", "corp", "ltd", "plc", "the", "and", "group", "co", "holding",
                "holdings", "technologies", "technology", "corporation", "company",
-               "international", "electronics", "semiconductor", "semiconductors"}
-    for part in (company_name or "").replace(",", " ").split():
-        token = part.strip(".").lower()
-        if len(token) >= 3 and token not in generic:
-            needles.add(token)
-    return any(n and n in head for n in needles)
+               "international", "electronics", "electronic", "semiconductor",
+               "semiconductors", "advanced", "micro", "devices", "device", "systems",
+               "system", "solutions", "digital", "global", "industries", "materials",
+               "products", "research", "manufacturing", "instruments", "labs",
+               "laboratories", "microelectronics", "limited", "sa", "nv", "ag"}
+    tokens = [p.strip(".").lower() for p in name.split()]
+    return any(_hit(t) for t in tokens if len(t) >= 3 and t not in generic)
 
 
 def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, str]:

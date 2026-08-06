@@ -59,6 +59,41 @@ def _isolate_report_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("ATS_DOCS_ROOT", str(tmp_path / "sources"))
 
 
+@pytest.fixture(autouse=True)
+def _stub_adjudicator(monkeypatch):
+    """No test may reach the live cluster adjudicator.
+
+    Patched at `run_structured` rather than at `judge`, so the adjudicator's own glue
+    still runs — echoing cluster ids back, dropping invented ones, defaulting the
+    unjudged to neutral. Polarity is expressed in the fixture data: a cluster whose
+    evidence spans carry [[REFUTE]] or [[NEUTRAL]] gets that, everything else supports.
+
+    Autouse because the failure mode is silent: `judge()` swallows exceptions and
+    degrades to all-neutral, so a test that accidentally called out to a model would
+    not error — it would just quietly assert against `unknown` and look green.
+    """
+    from ats.agents.evidence import adjudicator
+    from ats.agents.evidence.outputs import AdjudicationView, ClusterJudgementView
+
+    def _fake(role, schema, context, **kw):
+        blocks: list[tuple[str, list[str]]] = []
+        for line in context.splitlines():
+            if " id=" in line:
+                blocks.append((line.split(" id=", 1)[1].strip(), []))
+            elif blocks:
+                blocks[-1][1].append(line)
+        out = []
+        for key, body in blocks:
+            text = "\n".join(body)
+            polarity = ("refute" if "[[REFUTE]]" in text
+                        else "neutral" if "[[NEUTRAL]]" in text else "support")
+            out.append(ClusterJudgementView(cluster_key=key, polarity=polarity,
+                                            reason=f"stub:{polarity}"))
+        return AdjudicationView(judgements=out)
+
+    monkeypatch.setattr(adjudicator, "run_structured", _fake)
+
+
 class FakeBroker:
     """Records placed orders; fills everything at $100."""
 

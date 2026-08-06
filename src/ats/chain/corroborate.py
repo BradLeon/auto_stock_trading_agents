@@ -1,17 +1,24 @@
-"""Three-gate corroboration engine — deterministic, no LLM.
+"""Three-gate corroboration engine — evidence hygiene and arithmetic.
 
-Turns stored observations into a verdict per claim. Every judgement here is arithmetic
-over declared config so a reader can re-derive it. The semantic step — deciding which
-claim dimension a fact belongs to — happened upstream at extraction time and is stored
-on the observation as `concept`; this module never matches on metric strings, because
-losing a share reading to the gap between `hbm_market_share` and `hbm_share` is a real
-loss dressed up as determinism.
+Turns stored observations into a verdict per claim. The division of labour is the point:
+
+  * THIS MODULE owns hygiene and scoring — which observations are eligible, how they
+    de-duplicate, whose stances are represented, and the arithmetic on top. None of
+    that needs to understand what a sentence means, so none of it is a model's call.
+  * SEMANTICS are two injected judgements. Which dimension a fact belongs to is decided
+    at extraction time and stored as `concept` (never matched on metric strings —
+    losing a share reading to the gap between `hbm_market_share` and `hbm_share` is a
+    real loss dressed up as determinism). What a cluster MEANS for a claim is decided
+    by an adjudicator passed in as `judge`, one reasoned call per cluster.
+
+Given the judgements, everything here is re-derivable arithmetic over declared config.
 
 The three gates, in order (docs/CHAIN_EVIDENCE.md §4.5):
 
-  1. DEDUP    — cluster by (fact, stance, primary/secondary) before counting. Ten
-                reprints of one report are one cluster; a company's press release,
-                earnings deck and call quoting the same number are one cluster.
+  1. DEDUP    — cluster by (speaker, fact, direction, primary/secondary) before
+                counting. Ten reprints of one report are one cluster; a company's press
+                release, earnings deck and call quoting the same number are one cluster;
+                and one call restating a plan across five fiscal periods is one cluster.
   2. STANCE   — a verdict needs >= 2 DIFFERENT witness stances, taken from the CLAIM's
                 declared witness table. Read off the document instead, every filing is
                 the company's own call and the answer is always "incumbent", so
@@ -29,7 +36,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from ..schemas.chain import ClaimAssessment, ClaimDef
+from ..schemas.chain import ClaimAssessment, ClaimDef, EvidenceCluster
 
 log = logging.getLogger("ats.chain.corroborate")
 
@@ -84,24 +91,30 @@ def _cluster_key(row: dict) -> tuple:
     collapsing those would destroy exactly the cross-stakeholder corroboration that
     gate 2 rewards. Ten outlets relaying one company's figure still share that one
     speaker, so they stay a single cluster.
+
+    `period` is deliberately NOT in the key. It used to be, and gate 1 failed at its own
+    job: one SK hynix call restated a single expansion plan across 2026 / FY26 / FY26Q2
+    / FY26Q3 / 2027, and those five sentences became five independent refutations that
+    outvoted two genuine supporting clusters. An earnings call naturally narrates one
+    plan across several horizons — that is one piece of evidence with a schedule, and
+    keeping the members together is what lets a reader (and the adjudicator) see the
+    schedule instead of a stack of votes.
     """
     src = "primary" if row.get("observation_type") in PRIMARY_TYPES else "secondary"
     return (_speaker(row), row.get("entity"), row.get("concept"),
-            row.get("period"), row.get("direction"), src)
+            row.get("direction"), src)
 
 
-def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
-                as_of: datetime | None = None) -> ClaimAssessment:
-    """Aggregate observations into one claim verdict. Pure function over `rows`."""
+def build_clusters(claim: ClaimDef, rows: list[dict], *,
+                   cfg: dict | None = None) -> list[EvidenceCluster]:
+    """Gates 1 + 3 + eligibility. The de-duplicated evidence a claim actually rests on.
+
+    Separated from scoring so the adjudicator can be handed exactly this — nothing more.
+    It sees no prices, no positions, no P&L and no previous verdict, and it cannot add
+    or remove a cluster: the set is fixed here, before it runs.
+    """
     cfg = cfg or {}
-    min_clusters = cfg.get("min_clusters", 2)
-    min_stances = cfg.get("min_stance_classes", 2)
     min_conf = cfg.get("min_confidence", 0.5)
-    as_of = as_of or datetime.now(timezone.utc)
-
-    expected = claim.expected_witnesses()
-    assessment = ClaimAssessment(claim_id=claim.id, layer=claim.layer, as_of=as_of,
-                                 witnesses_expected=len(expected))
 
     eligible: list[tuple[dict, object]] = []
     for r in rows:
@@ -115,38 +128,75 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         if concept is not None:
             eligible.append((r, concept))
 
-    spoke = {_speaker(r) for r, _ in eligible} & expected
+    clusters: dict[tuple, EvidenceCluster] = {}
+    for r, _concept in eligible:
+        key = _cluster_key(r)
+        if key not in clusters:
+            # Stance belongs to the SPEAKER, and comes from the claim's declared witness
+            # table — never from the document (invariant 8).
+            clusters[key] = EvidenceCluster(
+                key="|".join(str(k) for k in key), speaker=_speaker(r),
+                entity=(r.get("entity") or "").upper(), concept=r.get("concept") or "",
+                direction=r.get("direction") or "flat",
+                stance=claim.stance_of(_speaker(r)),
+                primary=r.get("observation_type") in PRIMARY_TYPES)
+        clusters[key].rows.append(r)
+    return list(clusters.values())
+
+
+def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
+                as_of: datetime | None = None, judge=None) -> ClaimAssessment:
+    """Aggregate observations into one claim verdict.
+
+    `judge(claim, clusters) -> list[ClusterJudgement]` supplies polarity. Pure given
+    that: the same clusters and the same judgements always produce the same verdict.
+    Defaults to the LLM adjudicator; tests inject a stub.
+    """
+    cfg = cfg or {}
+    min_clusters = cfg.get("min_clusters", 2)
+    min_stances = cfg.get("min_stance_classes", 2)
+    min_conf = cfg.get("min_confidence", 0.5)
+    as_of = as_of or datetime.now(timezone.utc)
+
+    expected = claim.expected_witnesses()
+    assessment = ClaimAssessment(claim_id=claim.id, layer=claim.layer, as_of=as_of,
+                                 witnesses_expected=len(expected))
+
+    clusters = build_clusters(claim, rows, cfg=cfg)
+
+    spoke = {c.speaker for c in clusters} & expected
     assessment.witnesses_reported = len(spoke)
     # Name who stayed silent. A declared witness saying nothing is a GAP, not
     # neutrality — that is how selective disclosure becomes visible.
     assessment.silent_witnesses = sorted(expected - spoke)
 
-    if not eligible:
+    if not clusters:
         assessment.note = "无适用证据 —— 保持 unknown（注意：取不到数据不等于负面）"
         return assessment
 
-    # Gate 1: collapse to independent clusters BEFORE any counting. Stance comes from
-    # the claim's declared witness table (gate 2's premise), not from the document.
-    clusters: dict[tuple, tuple[dict, object, str]] = {}
-    for r, concept in eligible:
-        # Stance belongs to the SPEAKER, and comes from the claim's declared witness
-        # table — never from the document (invariant 8).
-        stance = claim.stance_of(_speaker(r))
-        clusters.setdefault(_cluster_key(r), (r, concept, stance))
+    if judge is None:
+        from ..agents.evidence.adjudicator import judge as _default_judge
+
+        judge = _default_judge
+    judgements = judge(claim, clusters)
+    assessment.judgements = judgements
+    by_key = {c.key: c for c in clusters}
 
     support, refute = [], []
-    for r, concept, stance in clusters.values():
-        direction = r.get("direction")
-        if direction == concept.supports_when:
-            support.append((r, stance))
-        elif direction in ("up", "down"):          # the opposite of supporting
-            refute.append((r, stance))
-        # `flat` is context: it neither supports nor refutes.
+    for j in judgements:
+        cluster = by_key.get(j.cluster_key)
+        if cluster is None:
+            continue
+        if j.polarity == "support":
+            support.append(cluster)
+        elif j.polarity == "refute":
+            refute.append(cluster)
+        # `neutral` is context: it neither supports nor refutes.
 
     # Gate 2: only PRIMARY clusters contribute a witness class, and only if the claim
     # actually declared a stance for that entity.
     def _stances(items):
-        return {s for r, s in items if s and r.get("observation_type") in PRIMARY_TYPES}
+        return {c.stance for c in items if c.stance and c.primary}
 
     stances = _stances(support) | _stances(refute)
 
@@ -154,7 +204,7 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     assessment.refute_score = float(len(refute))
     assessment.evidence_clusters = len(clusters)
     assessment.stance_classes = len(stances)
-    assessment.observation_ids = [r["id"] for r, _ in eligible if r.get("id")]
+    assessment.observation_ids = [i for c in clusters for i in c.observation_ids]
 
     total = len(support) + len(refute)
     if total < min_clusters:
@@ -165,7 +215,7 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     if support and refute:
         assessment.verdict = "mixed"
         losing = refute if len(support) >= len(refute) else support
-        assessment.dissenters = sorted({_speaker(r) for r, _ in losing})
+        assessment.dissenters = sorted({c.speaker for c in losing})
         assessment.note = f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，分歧未消解"
         return assessment
 
@@ -186,7 +236,7 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
 
 
 def assess_layer(layer, rows_by_entity, *, cfg: dict | None = None,
-                 as_of: datetime | None = None) -> list[ClaimAssessment]:
+                 as_of: datetime | None = None, judge=None) -> list[ClaimAssessment]:
     """Run every claim on one sector layer. `rows_by_entity` maps entity -> observations."""
     out = []
     for claim in layer.claims:
@@ -194,5 +244,5 @@ def assess_layer(layer, rows_by_entity, *, cfg: dict | None = None,
         if claim.subject:
             entities.add(claim.subject)
         rows = [r for e in entities for r in rows_by_entity.get(e, [])]
-        out.append(corroborate(claim, rows, cfg=cfg, as_of=as_of))
+        out.append(corroborate(claim, rows, cfg=cfg, as_of=as_of, judge=judge))
     return out

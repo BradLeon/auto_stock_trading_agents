@@ -56,7 +56,9 @@ class EvidenceExtractionView(BaseModel):
 class ProposedConceptView(BaseModel):
     key: str = Field(description="维度 key，蛇形小写，如 optical_lead_time")
     desc: str = Field(description="这个维度覆盖什么表述（供后续语义归属用）")
-    supports_when: str = Field(default="up", description="up|down —— 该维度哪个方向算支持命题")
+    # No `supports_when`: polarity is adjudicated per cluster with a recorded reason
+    # (chain/adjudicate), not declared. A proposed claim must not reintroduce the
+    # context-free scalar the design just removed.
     expect_from: list[str] = Field(default_factory=list,
                                    description="该维度应该由哪些公司来说（交叉验证对象）")
     direct: bool = Field(default=False, description="relative 命题里，此维度能否改变份额判断")
@@ -91,3 +93,24 @@ class ClaimProposalView(BaseModel):
         from .proposer import to_witnesses
 
         return to_witnesses(self)
+
+
+# --------------------------------------------------------------------------- #
+# Cluster adjudication — what does this evidence MEAN for this claim?
+# --------------------------------------------------------------------------- #
+class ClusterJudgementView(BaseModel):
+    cluster_key: str = Field(description="原样回填该组的 id=，不要改写")
+    polarity: str = Field(default="neutral", description="support | refute | neutral")
+    reason: str = Field(
+        default="",
+        description="一句话讲清为什么，要引到具体内容。这句会入库并展示给人看，"
+                    "不写理由等于没判断")
+
+
+class AdjudicationView(BaseModel):
+    judgements: list[ClusterJudgementView] = Field(default_factory=list)
+
+    @field_validator("judgements", mode="before")
+    @classmethod
+    def _coerce(cls, v):
+        return _as_objlist(v)

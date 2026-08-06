@@ -109,15 +109,12 @@ layers:
         concepts:
           - key: supply_tightness
             desc: 供给紧张程度——售罄比例、订单能见度、交期长短、是否成为出货瓶颈
-            supports_when: up
             expect_from: [SKHY, MU, "005930.KS", NVDA]
           - key: capacity_addition
             desc: 新增产能、扩产节奏与资本开支投放（含 bit 供给增长）
-            supports_when: down          # 产能大增=供给转松=对"持续紧张"是反证
             expect_from: [SKHY, MU, "005930.KS"]
           - key: hbm_demand
             desc: 下游对 HBM 的需求强度、采购计划与瓶颈表述
-            supports_when: up
             expect_from: [NVDA, MSFT]
         witnesses:
           - {entity: NVDA, stance: customer}
@@ -133,17 +130,14 @@ layers:
         concepts:
           - key: hbm_share
             desc: HBM 市场份额/供货占比及其指引（含"份额将下降/提升"这类表述）
-            supports_when: up
             direct: true
             expect_from: [SKHY, MU, "005930.KS", NVDA]
           - key: customer_qualification
             desc: 核心客户认证进展——谁通过认证、谁被替代、供应商多元化推进
-            supports_when: down          # 竞争者通过认证=对"维持领先"是反证
             direct: true
             expect_from: [NVDA, "005930.KS", MU, SKHY]
           - key: hbm_pricing
             desc: HBM 价格/ASP 与毛利率走向（定价权的直接读数）
-            supports_when: up
             direct: true
             expect_from: [SKHY, MU]
         witnesses:

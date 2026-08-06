@@ -56,6 +56,15 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
                 # The engine's note repeats the silent-witness list for CLI readers;
                 # the report already gives it its own line.
                 lines.append(f"- {a.note.split(' · 未发声：')[0]}")
+            if a.judgements:
+                # Every polarity call with its reason. This is the section a reader
+                # actually argues with: the verdict is arithmetic over these, so
+                # disagreeing with the conclusion means disagreeing with a line here.
+                mark = {"support": "＋支持", "refute": "－反驳", "neutral": "・中性"}
+                lines += ["", "  | 判读 | 说话人 | 维度 | 理由 |", "  |---|---|---|---|"]
+                for j in a.judgements:
+                    lines.append(f"  | {mark.get(j.polarity, j.polarity)} | {j.speaker} | "
+                                 f"{j.concept or '—'} | {j.reason or '—'} |")
             spans = [rows_by_id[i] for i in a.observation_ids if i in rows_by_id][:6]
             if spans:
                 lines += ["", "  | 说话人 | 关于 | 维度 | 方向 | 类型 | 原文 |",

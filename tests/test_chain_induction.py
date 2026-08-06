@@ -105,7 +105,7 @@ def _fake_view():
         statement="AI 数据中心的增量瓶颈正从存储转向光互联，InP 衬底与 EML 器件成为出货约束",
         layer_hint="L5→L3", kind="common",
         concepts=[{"key": "optical_bottleneck", "desc": "光互联交期/缺口/良率",
-                   "supports_when": "up", "expect_from": ["COHR", "LITE", "AXT"]}],
+                   "expect_from": ["COHR", "LITE", "AXT"]}],
         witnesses=[{"entity": "COHR", "stance": "supplier"},
                    {"entity": "NVDA", "stance": "customer"}])
 
@@ -145,7 +145,7 @@ def test_frozen_discovery_evidence_cannot_confirm_the_claim_it_produced(monkeypa
     adopted = ClaimDef(
         id="optical_bottleneck", kind="common", layer="L3_dc_infra",
         statement=proposal.statement,
-        concepts=[Concept(key="optical_bottleneck", desc="光互联交期/缺口", supports_when="up")],
+        concepts=[Concept(key="optical_bottleneck", desc="光互联交期/缺口")],
         witnesses=[Witness(entity="COHR", stance="supplier"),
                    Witness(entity="LITE", stance="supplier"),
                    Witness(entity="AXT", stance="competitor")])

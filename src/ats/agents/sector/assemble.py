@@ -270,9 +270,19 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
                 f"    结论 {a.verdict} · 证人覆盖 {a.coverage} · 独立证据簇 "
                 f"{a.evidence_clusters} · 立场 {a.stance_classes} 类 · "
                 f"支持 {a.support_score:.0f}/反驳 {a.refute_score:.0f}{silent}")
+            # The reasons travel with the verdict. Without them the analyst is asked to
+            # accept a number on authority — and the reasons are the only thing that
+            # makes the polarity call checkable rather than merely asserted.
+            mark = {"support": "＋", "refute": "－", "neutral": "・"}
+            for j in a.judgements:
+                if j.polarity == "neutral" and not j.reason:
+                    continue
+                lines.append(f"      {mark.get(j.polarity, '・')} {j.speaker} "
+                             f"[{j.concept}] {j.reason}")
     if lines:
         sc.evidence_block = (
             "## 产业链证据（各层共同需求命题的印证状态）\n"
-            "> 由确定性引擎从各家财报原文算出，**不要重新判断这些结论对不对**——"
-            "把它们当作该层景气打分的证据基础。覆盖率低或立场单一时，说明证据还不足以下判断。\n"
+            "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条 ＋/－ 后面是判读理由。\n"
+            "> **不要重新判断这些结论对不对**——把它们当作该层景气打分的证据基础。"
+            "覆盖率低或立场单一时，说明证据还不足以下判断。\n"
             + "\n".join(lines))

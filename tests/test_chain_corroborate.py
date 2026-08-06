@@ -14,7 +14,7 @@ CFG = {"min_clusters": 2, "min_stance_classes": 2, "min_confidence": 0.5}
 
 def _row(entity, concept, *, direction="up", speaker=None, otype="guidance",
          doc="d1", period="FY26Q3", at=None, conf=1.0, discovery=False, rid=None,
-         metric="", stance="incumbent"):
+         metric="", stance="incumbent", polarity="support"):
     """`entity` = who the fact is ABOUT; `speaker` = whose filing disclosed it.
 
     `stance` is the EXTRACTED value and the engine must IGNORE it — stance comes from
@@ -26,7 +26,11 @@ def _row(entity, concept, *, direction="up", speaker=None, otype="guidance",
         "source_entity": (speaker or entity).upper(),
         "metric": metric or concept, "concept": concept,
         "period": period, "observation_type": otype, "stance": stance,
-        "direction": direction, "evidence_span": "…", "extraction_confidence": conf,
+        # Polarity is adjudicated from the evidence now, not declared in config, so
+        # the fixture says what the evidence MEANS by marking the span (see the
+        # conftest adjudicator stub).
+        "direction": direction, "extraction_confidence": conf,
+        "evidence_span": "…" + ("" if polarity == "support" else f"[[{polarity.upper()}]]"),
         "discovery_evidence": 1 if discovery else 0,
         "observed_at": (at or NOW).isoformat(),
     }
@@ -35,11 +39,9 @@ def _row(entity, concept, *, direction="up", speaker=None, otype="guidance",
 def _common(**kw):
     base = dict(id="hbm_supply_tight", kind="common", layer="L5_fab",
                 statement="HBM 供给持续紧张",
-                concepts=[Concept(key="supply_tightness", desc="售罄/交期",
-                                  supports_when="up"),
-                          Concept(key="capacity_addition", desc="扩产/capex",
-                                  supports_when="down"),
-                          Concept(key="hbm_demand", desc="下游需求", supports_when="up")],
+                concepts=[Concept(key="supply_tightness", desc="售罄/交期"),
+                          Concept(key="capacity_addition", desc="扩产/capex"),
+                          Concept(key="hbm_demand", desc="下游需求")],
                 witnesses=[Witness(entity="NVDA", stance="customer"),
                            Witness(entity="MSFT", stance="customer"),
                            Witness(entity="SKHY", stance="supplier"),
@@ -50,14 +52,10 @@ def _common(**kw):
 def _relative(**kw):
     base = dict(id="sk_hbm_share", kind="relative", subject="SKHY", layer="L5_fab",
                 statement="SK Hynix 维持领先份额",
-                concepts=[Concept(key="hbm_share", desc="份额及其指引",
-                                  supports_when="up", direct=True),
-                          Concept(key="customer_qualification", desc="客户认证进展",
-                                  supports_when="down", direct=True),
-                          Concept(key="hbm_pricing", desc="ASP/毛利率",
-                                  supports_when="up", direct=True),
-                          Concept(key="capacity_addition", desc="扩产",
-                                  supports_when="down", direct=False)],
+                concepts=[Concept(key="hbm_share", desc="份额及其指引", direct=True),
+                          Concept(key="customer_qualification", desc="客户认证进展", direct=True),
+                          Concept(key="hbm_pricing", desc="ASP/毛利率", direct=True),
+                          Concept(key="capacity_addition", desc="扩产", direct=False)],
                 witnesses=[Witness(entity="SKHY", stance="incumbent"),
                            Witness(entity="MU", stance="competitor"),
                            Witness(entity="005930.KS", stance="competitor"),
@@ -97,9 +95,12 @@ def test_same_fact_from_company_and_customer_stays_two_clusters():
 def test_three_sell_side_notes_cannot_confirm():
     """Three sell-side notes are ONE witness class — secondary material never
     contributes a stance, so it cannot carry a claim to a verdict on its own."""
-    rows = [_row("MU", "supply_tightness", otype="research", speaker="MU",
-                 doc=f"note-{i}", period=f"P{i}", rid=f"n{i}") for i in range(3)]
+    # Three DIFFERENT houses, so gate 1 legitimately keeps them apart and the test
+    # exercises gate 2 rather than tripping the cluster-count floor first.
+    rows = [_row("MU", "supply_tightness", otype="research", speaker=f"HOUSE{i}",
+                 doc=f"note-{i}", rid=f"n{i}") for i in range(3)]
     a = corroborate(_common(), rows, cfg=CFG)
+    assert a.evidence_clusters == 3
     assert a.verdict == "mixed"            # capped: not confirmed
     assert a.stance_classes == 0
     assert "立场" in a.note
@@ -147,9 +148,9 @@ def test_competitor_expansion_does_not_move_our_share_claim():
 def test_direct_share_evidence_does_move_the_relative_claim():
     """The other half: with real evidence about the subject, the claim must move."""
     rows = [_row("SKHY", "hbm_share", direction="down", speaker="SKHY",
-                 otype="guidance", doc="sk-call", rid="a"),
+                 otype="guidance", doc="sk-call", rid="a", polarity="refute"),
             _row("SKHY", "customer_qualification", direction="up", speaker="005930.KS",
-                 otype="counterparty", doc="ss-call", rid="b")]
+                 otype="counterparty", doc="ss-call", rid="b", polarity="refute")]
     a = corroborate(_relative(), rows, cfg=CFG)
     assert a.verdict == "contradicted"
     assert a.refute_score == 2.0 and a.support_score == 0.0
@@ -209,22 +210,48 @@ def test_discovery_evidence_cannot_confirm_the_claim_it_discovered():
     assert corroborate(_common(), rows, cfg=CFG).verdict == "unknown"
 
 
-# --- per-concept polarity -------------------------------------------------- #
-def test_polarity_can_invert_within_one_claim():
-    """One claim legitimately mixes polarities.
+# --- polarity is adjudicated, not declared --------------------------------- #
+def test_same_dimension_and_direction_can_land_on_either_side():
+    """The reason `supports_when` had to go.
 
-    Under "HBM supply stays tight": lead-time/sold-out UP supports it, but capacity UP
-    means supply is LOOSENING and must count against it. A single claim-level direction
-    would score supply loosening as evidence FOR tightness — confidently inverted.
-    """
-    rows = [_row("SKHY", "supply_tightness", direction="up", speaker="SKHY",
+    Two capacity-UP readings on the same claim: one is a response to demand the
+    company cannot meet, the other is supply overtaking demand. Same dimension, same
+    direction, opposite meanings — a config scalar could only ever get one of them
+    right, and got the real SK hynix call wrong."""
+    rows = [_row("SKHY", "capacity_addition", direction="up", speaker="SKHY",
                  doc="sk", rid="a"),
             _row("MU", "capacity_addition", direction="up", speaker="MU",
-                 doc="mu", rid="b")]
+                 doc="mu", rid="b", polarity="refute")]
     a = corroborate(_common(), rows, cfg=CFG)
-    assert a.support_score == 1.0        # sold-out/lead-time up -> tight
-    assert a.refute_score == 1.0         # capacity up           -> loosening
+    assert a.support_score == 1.0 and a.refute_score == 1.0
     assert a.verdict == "mixed"
+
+
+def test_every_polarity_call_carries_a_recorded_reason():
+    """A polarity without a reason is unauditable, and an unauditable judgement is no
+    better than the inverted config it replaced."""
+    rows = [_row("SKHY", "supply_tightness", speaker="SKHY", doc="sk", rid="a"),
+            _row("MU", "capacity_addition", speaker="MU", doc="mu", rid="b",
+                 polarity="refute")]
+    a = corroborate(_common(), rows, cfg=CFG)
+    assert len(a.judgements) == 2
+    assert all(j.reason for j in a.judgements)
+    assert {j.polarity for j in a.judgements} == {"support", "refute"}
+    assert all(j.speaker and j.observation_ids for j in a.judgements)
+
+
+def test_one_call_restating_a_plan_across_periods_is_one_piece_of_evidence():
+    """Gate 1's actual job. SK hynix narrated one expansion plan across 2026 / FY26 /
+    FY26Q2 / FY26Q3 / 2027; with `period` in the cluster key those five sentences
+    became five independent refutations and outvoted two genuine supporting clusters.
+    One plan with a schedule is one piece of evidence."""
+    rows = [_row("SKHY", "capacity_addition", speaker="SKHY", doc="sk-call",
+                 period=p, rid=f"p{i}")
+            for i, p in enumerate(["2026", "FY26", "FY26Q2", "FY26Q3", "2027"])]
+    a = corroborate(_common(), rows, cfg=CFG)
+    assert a.evidence_clusters == 1
+    assert len(a.judgements) == 1
+    assert len(a.judgements[0].observation_ids) == 5    # members kept, not discarded
 
 
 def test_unmapped_observations_are_ignored_not_guessed():
@@ -270,9 +297,9 @@ def test_counter_evidence_is_not_hidden_by_netting():
             _row("SKHY", "hbm_demand", speaker="NVDA", otype="counterparty",
                  doc="b", rid="b"),
             _row("MU", "hbm_demand", direction="down", speaker="MSFT",
-                 otype="counterparty", doc="c", rid="c"),
+                 otype="counterparty", doc="c", rid="c", polarity="refute"),
             _row("MU", "supply_tightness", direction="down", speaker="MU",
-                 doc="d", rid="d")]
+                 doc="d", rid="d", polarity="refute")]
     a = corroborate(_common(), rows, cfg=CFG)
     assert a.verdict == "mixed"
     assert a.support_score == 2.0 and a.refute_score == 2.0   # both sides visible

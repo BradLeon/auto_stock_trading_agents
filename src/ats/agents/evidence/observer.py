@@ -563,7 +563,13 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
         # under a claim it has nothing to do with. Unmapped is a legitimate outcome —
         # those rows feed the induction pool (docs/CHAIN_EVIDENCE.md §6.5).
         concept = (v.concept or "").strip()
-        if concept and valid_concepts and concept not in valid_concepts:
+        # `not in valid_concepts` alone was not enough: when the menu is EMPTY — this
+        # company is a declared witness for nothing — the old guard short-circuited on
+        # the falsy set and let anything through. KLA duly invented `wfe_spend` and
+        # `hbm`, undeclared dimensions that no claim can ever consume but that leave the
+        # unmapped pool looking as if they had been filed. An empty menu means every
+        # concept is invalid, not that any concept is fine.
+        if concept and concept not in valid_concepts:
             log.info("evidence %s: unknown concept %r -> unmapped", symbol, concept)
             concept = ""
         try:

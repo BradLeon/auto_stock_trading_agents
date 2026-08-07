@@ -103,6 +103,20 @@ def test_bad_enum_row_is_dropped_not_coerced(monkeypatch):
     assert failure == ""
 
 
+def test_a_company_with_no_declared_dimensions_gets_none_assigned(monkeypatch):
+    """An empty menu means every concept is invalid, not that any concept is fine.
+
+    KLA is a declared witness for nothing, so its menu is empty — and the old guard
+    short-circuited on the falsy set, letting it invent `wfe_spend` and `hbm`. Those
+    are dimensions no claim can consume, but they made the rows look filed rather than
+    unmapped, which is where they belong (they feed induction)."""
+    monkeypatch.setattr(observer, "run_structured", lambda *a, **k: _view([
+        _row(metric="wfe", concept="wfe_spend"), _row(metric="hbm_rev", concept="hbm"),
+    ]))
+    obs, _ = observer.extract("KLAC", "doc-menu", "原文…", now=NOW)
+    assert [o.concept for o in obs] == ["", ""]
+
+
 def test_row_without_span_is_dropped(monkeypatch):
     monkeypatch.setattr(observer, "run_structured", lambda *a, **k: _view([
         _row(evidence_span=""), _row(metric="asp"),

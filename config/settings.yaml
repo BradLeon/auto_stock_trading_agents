@@ -26,7 +26,11 @@ llm:
     research_extract: {model: deepseek/deepseek-v4-flash-0731}   # supply-chain insight extraction
     # 产业链证据抽取（观察名单财报）：只抽事实+原文片段，不做判断 → 便宜档足够。
     # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/CHAIN_EVIDENCE.md
-    evidence_observer: {model: deepseek/deepseek-v4-flash-0731, temperature: 0.0, max_tokens: 8192}
+    # provider: deepseek —— 走官方 API 而不是 OpenRouter。同一份文档、同一段 prompt，
+    # 经 OpenRouter 三次抽取结果是 [0, 33, 36]；换 terra 档是 [3, 3, 2]（稳定但几乎读不出
+    # 东西）。两个模型两种异常，共同变量是网关，所以先把网关这个变量去掉。
+    # 纯文本进出、无需跨供应商路由的角色才这么切；需要 Anthropic/OpenAI 的仍走 OpenRouter。
+    evidence_observer: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192}
     # 涌现命题归纳：低频（证据驱动，不设 cron），但要从一堆散落事实里归纳出可证伪命题，
     # 是判断活不是抽取活 → 走中档。产出只是给人看的待确认卡，不进因子也不进 Chief。
     claim_proposer: {model: openai/gpt-5.6-terra, max_tokens: 4096}
@@ -34,7 +38,7 @@ llm:
     # supports_when 标量——真实数据证明那个形状是错的（SK 海力士一边说客户还在要货、
     # 一边扩产，被判成 7 条反驳）。上下文很短（一条命题 + ~10 组、每组几句原文），
     # 但判的是机制不是方向词，判错方向直接改写结论 → 走中档。频次同 sector_review。
-    evidence_adjudicator: {model: openai/gpt-5.6-terra, temperature: 0.0, max_tokens: 8192}
+    evidence_adjudicator: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192}
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.

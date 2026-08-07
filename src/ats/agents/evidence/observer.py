@@ -179,6 +179,28 @@ def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
     return any(_hit(t) for t in tokens if len(t) >= 3 and t not in generic)
 
 
+# Source hierarchy. A cached document may only pre-empt a fetch when it came from a
+# tier we would not improve on; otherwise the cache silently freezes whatever was
+# fetched first, which is how web-scraped material outlived the keyed dataset.
+_RANK_MANUAL = 3        # a person put this file in 信息源/<SYM>/ — authoritative
+_RANK_KEYED = 2         # defeatbeta: keyed by ticker, cannot return another company
+_RANK_PUBLIC = 1        # documents.gather: SEC/IR material, but assembled by search
+_RANK_SEARCH = 0        # tavily/web: the tier that returned Sherwin-Williams for SKHY
+
+
+def _source_rank(source: str) -> int:
+    s = (source or "").lower()
+    if not s or s in ("manual", "cache") or s.startswith("file:") or s.startswith("doc:"):
+        return _RANK_MANUAL
+    # Keyed-by-ticker sources, whatever the vendor: the property that matters is that
+    # you ask for a symbol and cannot be handed a different company.
+    if s.startswith("defeatbeta") or s.startswith("fmp"):
+        return _RANK_KEYED
+    if s.startswith("documents") or s.startswith("sec"):
+        return _RANK_PUBLIC
+    return _RANK_SEARCH
+
+
 def _fetch_keyed(symbol: str, label: str, print_=None):
     """Tier-1 lookup in the keyed transcript dataset. Returns (Transcript, note) or None.
 
@@ -262,16 +284,27 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     except Exception as exc:  # noqa: BLE001
         log.info("evidence %s: fiscal label unresolved (%s)", symbol, exc)
 
-    # Cache first — zero network on a hit. Hand-dropped files under 信息源/<SYM>/ are
-    # loaded by the same reader, so correcting a bad fetch is just putting the right
-    # file there; the guards below never re-litigate what a person put in by hand.
+    # Cache — but the tier order applies to it too. Checking the cache first and
+    # returning on any hit inverted the whole source hierarchy: documents scraped off
+    # investing.com before the keyed dataset was wired kept winning forever, because a
+    # cached copy short-circuits before the dataset is ever asked. Nine of thirteen
+    # witnesses were still on web-scraped material for exactly that reason, including
+    # SKHY and MU, which the dataset carries.
+    #
+    # So a cached copy short-circuits only when it came from a source we would not
+    # improve on — a person's hand-dropped file, or the keyed dataset. Anything weaker
+    # is kept as a fallback and used only if the better tier has nothing.
     # Both doc types, in preference order: a name that never yields a transcript falls
     # back to `release` every run, and checking only "transcript" would mean it never
     # hits cache at all.
+    stale_hit = None
     for kind in ("transcript", "release"):
         hit = source_cache.load(symbol, label, kind)
-        if hit:
+        if not hit:
+            continue
+        if _source_rank(hit.source) >= _RANK_KEYED:
             return hit.text, hit.source or "cache", f"缓存命中：{hit.path.name}"
+        stale_hit = stale_hit or hit
 
     # Tier 1: the keyed dataset. Ahead of every search path because it cannot return
     # another company's document at all — that is a structural property, not an
@@ -381,6 +414,14 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
                 except Exception as exc:  # noqa: BLE001
                     log.info("evidence %s: could not record fallback failure (%s)", symbol, exc)
 
+    if not text.strip() and stale_hit is not None:
+        # Everything better came up empty, so the weaker cached copy is what we have.
+        # Kept rather than discarded: demoting it below the dataset must not turn a
+        # witness we can still read into a gap.
+        log.info("evidence %s: falling back to the cached %s copy", symbol, stale_hit.source)
+        return (stale_hit.text, stale_hit.source or "cache",
+                f"{note + ' / ' if note else ''}回落到旧缓存（来源 {stale_hit.source}）")
+
     if text.strip():
         cached = source_cache.store(symbol, label, doc_type, text, source=src, source_url=src)
         if cached and store is not None:
@@ -398,15 +439,23 @@ WINDOW_OVERLAP = 1_500       # so a fact split across a boundary is whole in one
 def _windows(body: str) -> list[str]:
     """Split a document into overlapping extraction windows.
 
-    Measured on NVDA's Q1 FY2027 call (46k chars) on 2026-08-07: the first 12k yielded
-    27 observations, the first 25k yielded 36, and **the whole document yielded zero** —
-    the model returned an empty list with an empty failure_reason, which is the silent
-    version of the large-context instability recorded in docs/DEVELOPMENT.md §4.
+    Why windows rather than a bigger call — measured on 2026-08-07, and NOT for the
+    reason first assumed:
 
-    The gradient matters more than the zero. Going 12k → 25k added observations from the
-    new material but did not lose the old ones, which says single-pass reading of a long
-    document has been quietly under-reporting all along, not only when it collapses to
-    nothing. Windows trade a few extra cheap calls for recall.
+      * it is not the context window. One document's prompt is ~16k tokens against a
+        1M-token model.
+      * it is not the output cap either. Raising max_tokens 8192 → 32000 on the same
+        document produced 0 rows, while 8192 produced 26.
+      * it is provider flakiness at the cheap tier. Three identical full-document runs
+        returned [0, 33, 36].
+      * and the mid tier does not fix it: terra returned [3, 3, 2] — stable, but
+        reading almost nothing out of a 46k document. Stably under-reading is worse
+        than occasionally failing loudly.
+
+    So: smaller tasks fail less often, and a window that does fail costs one slice
+    instead of the whole document (paired with the empty-result retry in `extract`).
+    Recall improves too — TSM went 20 → 37 observations, and it had been "succeeding"
+    all along, which means single-pass reading was quietly under-reporting.
 
     Overlap exists because a figure and the sentence that qualifies it can straddle a
     cut, and half a fact is worse than none — `evidence_span` would then be unverifiable
@@ -466,14 +515,27 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
     windows = _windows(body)
     for i, chunk in enumerate(windows, 1):
         tag = f"{document_id}#{i}/{len(windows)}" if len(windows) > 1 else document_id
-        try:
-            view: EvidenceExtractionView = run_structured(
-                "evidence_observer", EvidenceExtractionView,
-                _context(symbol, chunk, period, menu, relations),
-                skill_slug="evidence-observer")
-        except Exception as exc:  # noqa: BLE001 - one window must not break the document
-            log.warning("evidence observer failed for %s (%s): %s", symbol, tag, exc)
-            failures.append(f"窗口 {i} 调用失败：{exc}")
+        ctx = _context(symbol, chunk, period, menu, relations)
+        view = None
+        # Retry an EMPTY result once. Measured on NVDA's Q1 FY2027 call, three identical
+        # runs of the same window returned [0, 33, 36]: the cheap tier intermittently
+        # returns a well-formed empty list with no failure_reason, so `run_structured`'s
+        # None-retry never fires. A silent zero is indistinguishable from "this document
+        # says nothing", which is the one thing that must never be guessed.
+        for attempt in (1, 2):
+            try:
+                view = run_structured("evidence_observer", EvidenceExtractionView, ctx,
+                                      skill_slug="evidence-observer")
+            except Exception as exc:  # noqa: BLE001 - one window must not break the doc
+                log.warning("evidence observer failed for %s (%s): %s", symbol, tag, exc)
+                failures.append(f"窗口 {i} 调用失败：{exc}")
+                view = None
+                break
+            if view.observations or view.failure_reason:
+                break
+            log.info("evidence %s: window %s returned nothing — retrying (%d)",
+                     symbol, tag, attempt)
+        if view is None:
             continue
         if not view.observations and view.failure_reason:
             failures.append(view.failure_reason)

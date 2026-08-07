@@ -40,6 +40,13 @@ class Secrets(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     openai_base_url: str = ""
+    # DeepSeek's own API, used directly rather than through OpenRouter. Added because
+    # identical requests through the relay returned wildly different results — the same
+    # document and prompt extracted [0, 33, 36] observations across three runs — and the
+    # gateway was the common factor across two different models. Talking to the provider
+    # removes one variable from that.
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     fred_api_key: str = ""
     finnhub_api_key: str = ""

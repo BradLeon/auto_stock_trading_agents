@@ -457,6 +457,41 @@ def test_keyed_dataset_wins_over_every_search_path(tmp_path, monkeypatch):
     assert text2.strip() == text.strip() and "缓存命中" in note2
 
 
+def test_a_web_scraped_cache_does_not_outrank_the_keyed_dataset(tmp_path, monkeypatch):
+    """The bug that left nine of thirteen witnesses on investing.com material: any cache
+    hit short-circuited before the dataset was ever asked, so whatever was fetched first
+    won permanently — including for SKHY and MU, which the dataset carries."""
+    from ats.agents.evidence import observer as obs
+    from ats.data import defeatbeta, source_cache
+
+    source_cache.store("MU", "Q3 FY2026", "transcript", "scraped from investing dot com " * 60,
+                       source="tavily:https://www.investing.com/news/x")
+    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: defeatbeta.Transcript(
+        symbol="MU", fiscal_year=2026, fiscal_quarter=3, report_date="2026-06-24",
+        text="Sanjay Mehrotra: Micron third quarter results. " * 60))
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
+                        lambda *a, **k: ("Q3 FY2026", ""))
+
+    text, src, _note = obs.fetch_document("MU")
+    assert src == "defeatbeta" and "investing" not in text
+
+
+def test_a_weaker_cached_copy_is_still_used_when_nothing_better_exists(tmp_path, monkeypatch):
+    """Demoting the search tier must not turn a witness we can still read into a gap:
+    Nanya and Samsung are not in the dataset at all."""
+    from ats.agents.evidence import observer as obs
+    from ats.data import source_cache
+
+    source_cache.store("2408.TW", "", "transcript", "Nanya Technology results. " * 60,
+                       source="tavily:https://www.investing.com/news/x")
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [])
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
+
+    text, _src, note = obs.fetch_document("2408.TW")
+    assert "Nanya Technology" in text and "回落到旧缓存" in note
+
+
 def test_unpublished_quarter_falls_back_but_is_labelled(monkeypatch):
     """The target quarter goes INTO the query, never "latest, checked afterwards" —
     that ordering is what served NVDA an eleven-month-old deck.

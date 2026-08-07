@@ -43,6 +43,18 @@ def get_model(role: str) -> Any:
             **common,
         )
 
+    if rc.provider == "deepseek":
+        # OpenAI-SDK compatible (api-docs.deepseek.com): same wire format, tool calling
+        # and JSON mode supported, only base_url and key differ.
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=rc.model,
+            api_key=cfg.secrets.deepseek_api_key or None,
+            base_url=cfg.secrets.deepseek_base_url or "https://api.deepseek.com",
+            **common,
+        )
+
     if rc.provider == "openai":
         from langchain_openai import ChatOpenAI
 

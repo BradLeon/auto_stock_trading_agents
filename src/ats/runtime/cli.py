@@ -693,6 +693,39 @@ def _evidence_sources(store, *, entity: str = "") -> int:
     return 0
 
 
+def _evidence_probe(symbol: str, runs: int = 5) -> int:
+    """Run the SAME extraction N times and print the spread.
+
+    Exists because a single run tells you nothing about this failure mode: on
+    2026-08-07 the same document and prompt returned [0, 33, 36] observations through
+    OpenRouter, so any one-shot check would have "confirmed" whichever answer it drew.
+    Variance is the measurement.
+    """
+    from ..agents.evidence import observer
+    from ..config import get_config
+    from ..data import source_cache
+
+    sym = symbol.upper()
+    docs = source_cache.inventory(sym)
+    if not docs:
+        print(f"❌ {sym} 没有缓存文档 —— 先跑 `ats evidence observe {sym}`")
+        return 1
+    doc = max(docs, key=lambda d: len(d.text))
+    rc = get_config().app.llm.for_role("evidence_observer")
+    print(f"{sym} · {doc.path.name} · {len(doc.text)} 字符")
+    print(f"provider={rc.provider} model={rc.model} max_tokens={rc.max_tokens}\n")
+
+    counts = []
+    for i in range(1, runs + 1):
+        obs, failure = observer.extract(sym, f"probe-{i}", doc.text)
+        counts.append(len(obs))
+        print(f"  第 {i} 次 → {len(obs):>3} 条" + (f"  failure={failure}" if failure else ""))
+    lo, hi = min(counts), max(counts)
+    print(f"\n结果 {counts} · 极差 {hi - lo} · 空结果 {counts.count(0)}/{runs}")
+    print("稳定" if lo > 0 and hi - lo <= max(3, hi * 0.2) else "⚠️ 不稳定")
+    return 0
+
+
 def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                  entity: str = "", limit: int = 30, accept: bool = False,
                  reviewer: str = "", note: str = "") -> int:
@@ -706,6 +739,11 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
     store = get_store()
     if action == "sources":
         return _evidence_sources(store, entity=entity)
+    if action == "probe":
+        if not symbol:
+            print("❌ probe 需要标的：ats evidence probe NVDA --limit 5")
+            return 1
+        return _evidence_probe(symbol, runs=limit if limit and limit <= 20 else 5)
     if action == "show":
         rows = store.observations(entity=entity or None, limit=limit)
         if not rows:
@@ -1121,7 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
     evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
     evi.add_argument("action",
                      choices=["observe", "show", "claims", "report", "sources",
-                              "propose", "proposals", "review"])
+                              "probe", "propose", "proposals", "review"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")

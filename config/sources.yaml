@@ -35,17 +35,19 @@
 
 sources:
   kr_semiconductor_exports:
-    label: 韩国半导体出口（月度）
-    adapter: kr_customs
-    params: {hs_prefix: "8542", metric: export_value_usd}
+    label: 韩国半导体出口指数（月度）
+    adapter: kr_ecos
+    params: {stat: "403Y001", item: "3091AA"}      # 수출금액지수 / 반도체
     entity: KR_SEMI_EXPORT
     stance: regulator
     observation_type: regulatory
     cadence: monthly
     concepts: [supply_tightness, hbm_demand]
     direction_from: [yoy, mom]
-    # 韩国半导体出口直接覆盖 SK 海力士 + 三星的实际出货，是这两家自述之外唯一的独立读数。
-    # 关税厅每月发布，且月中还有旬报（1-10 日、1-20 日），比财报早得多。
+    # 韩国半导体出口以**存储为主**，而 SK 海力士 + 三星就是它的主体——这条序列测的是这两家
+    # 实际出货了什么，而不是它们如何评价自己。韩国银行每月发布，且是指数（2020=100），
+    # 所以观测取同比/环比变化而非水平值。
+    # 与台湾那条的区别正是"机制"而不是"统计口径"：台湾出口是代工与封装，不是存储。
 
   tw_ic_exports:
     label: 台湾积体电路出口（月度）

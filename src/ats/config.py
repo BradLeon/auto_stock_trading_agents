@@ -49,7 +49,7 @@ class Secrets(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
 
     fred_api_key: str = ""
-    kr_customs_api_key: str = ""   # KOSIS 开放 API（韩国半导体出口，见 data/sources/kr_customs.py）
+    kr_ecos_api_key: str = ""      # 韩国银行 ECOS（可留空，走文档示例 key，每次 10 行）
     finnhub_api_key: str = ""
     fmp_api_key: str = ""          # FinancialModelingPrep — earnings-call transcripts
     tavily_api_key: str = ""

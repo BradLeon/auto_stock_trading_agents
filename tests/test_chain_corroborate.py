@@ -234,6 +234,53 @@ def test_discovery_evidence_cannot_confirm_the_claim_it_discovered():
     assert corroborate(_common(), rows, cfg=CFG).verdict == "unknown"
 
 
+# --- dissent: veto vs caveat ----------------------------------------------- #
+def test_a_lone_dissenting_cluster_does_not_veto_a_large_majority():
+    """`mixed` means "the disagreement is unresolved", and one cluster against many is
+    not a disagreement. The old any-refute-at-all rule made that indistinguishable, and
+    it degraded as coverage grew: with 38 real clusters the same data returned
+    `mixed 26/1` and `supportive 28/0` on consecutive runs, because the adjudicator
+    wavers on borderline clusters and a single flip decided the verdict."""
+    # Nine supporting clusters across two stance classes (suppliers + a customer),
+    # against one dissenting cluster.
+    rows = [_row("MU", concept, speaker=who, doc=f"{who}-{concept}", rid=f"{who}{concept}")
+            for who in ("SKHY", "MU", "MSFT")
+            for concept in ("supply_tightness", "capacity_addition", "hbm_demand")]
+    rows.append(_row("MU", "hbm_demand", speaker="NVDA", otype="counterparty",
+                     doc="nv", rid="x", polarity="refute"))
+    a = corroborate(_common(), rows, cfg=CFG)
+    assert a.verdict == "supportive"          # 9 vs 1 — the majority stands
+    assert a.dissenters == ["NVDA"]           # …but the dissent is NAMED
+    assert "异议" in a.note                    # …and stated, not hidden
+
+
+def test_material_dissent_still_overturns():
+    """Demoting a lone dissent to a caveat must not make dissent toothless: several
+    independent dissenting clusters still leave the question open."""
+    rows = [_row("MU", concept, speaker=who, doc=f"{who}-{concept}", rid=f"{who}{concept}")
+            for who, concepts in (("SKHY", ("supply_tightness", "capacity_addition")),
+                                  ("MU", ("supply_tightness", "capacity_addition")),
+                                  ("MSFT", ("hbm_demand",)))
+            for concept in concepts]
+    rows += [_row("MU", "hbm_demand", speaker=who, otype="counterparty",
+                  doc=f"{who}-d", rid=f"{who}x", polarity="refute")
+             for who in ("NVDA", "SKHY", "MU")]
+    a = corroborate(_common(), rows, cfg=CFG)
+    assert a.verdict == "mixed" and "分歧未消解" in a.note
+
+
+def test_dissent_share_overturns_even_when_small_in_count():
+    """The share test carries the small-evidence case: 2 against 3 is a real split
+    even though 2 is below the absolute cluster threshold."""
+    rows = [_row("MU", "supply_tightness", speaker=who, doc=f"{who}-s", rid=f"{who}s")
+            for who in ("SKHY", "MU", "MSFT")]
+    rows += [_row("MU", "hbm_demand", speaker=who, otype="counterparty",
+                  doc=f"{who}-d", rid=f"{who}x", polarity="refute")
+             for who in ("NVDA", "SKHY")]
+    a = corroborate(_common(), rows, cfg=CFG)
+    assert a.verdict == "mixed"
+
+
 # --- polarity is adjudicated, not declared --------------------------------- #
 def test_same_dimension_and_direction_can_land_on_either_side():
     """The reason `supports_when` had to go.

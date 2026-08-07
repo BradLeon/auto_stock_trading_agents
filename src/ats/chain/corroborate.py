@@ -239,6 +239,11 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     min_clusters = cfg.get("min_clusters", 2)
     min_stances = cfg.get("min_stance_classes", 2)
     min_conf = cfg.get("min_confidence", 0.5)
+    # How much dissent overturns a majority. EITHER condition suffices: a few
+    # independent dissenting clusters matter even in a large body of evidence, and a
+    # large share matters even when the body is small.
+    min_dissent_clusters = cfg.get("min_dissent_clusters", 3)
+    min_dissent_share = cfg.get("min_dissent_share", 0.20)
     as_of = as_of or datetime.now(timezone.utc)
 
     expected = claim.expected_witnesses()
@@ -295,10 +300,26 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         assessment.note = f"独立证据簇 {total} < {min_clusters}，证据不足"
         return assessment
 
-    if support and refute:
+    # `mixed` means "the disagreement is unresolved", and a lone dissenting cluster
+    # against twenty-seven is not a disagreement — it is one reading worth checking.
+    # The old rule (any refute at all -> mixed) made that distinction impossible, and
+    # it got worse as coverage improved: with 38 clusters the same data returned
+    # `mixed 26/1` and `supportive 28/0` on consecutive runs, because the adjudicator
+    # wavers on borderline clusters and one flip decided the verdict.
+    #
+    # So the minority must be MATERIAL to overturn: either several independent clusters
+    # or a real share of the evidence. Below that the majority stands — but the
+    # dissenters are still named, and the note still says the dissent exists. It is
+    # demoted from veto to caveat, never hidden.
+    minority = min(support, refute, key=len) if (support and refute) else []
+    if minority:
+        assessment.dissenters = sorted({c.speaker for c in minority})
+    material = bool(minority) and (
+        len(minority) >= min_dissent_clusters
+        or len(minority) / total >= min_dissent_share)
+
+    if material:
         assessment.verdict = "mixed"
-        losing = refute if len(support) >= len(refute) else support
-        assessment.dissenters = sorted({c.speaker for c in losing})
         assessment.note = f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，分歧未消解"
         return assessment
 
@@ -310,9 +331,12 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
                            f"未达 {min_stances} 类确认门槛")
         return assessment
 
-    assessment.verdict = "supportive" if support else "contradicted"
-    assessment.note = (f"{len(support) or len(refute)} 个独立证据簇 · "
+    assessment.verdict = "supportive" if len(support) >= len(refute) else "contradicted"
+    assessment.note = (f"{max(len(support), len(refute))} 个独立证据簇 · "
                        f"{len(stances)} 类立场（{'/'.join(sorted(stances))}）")
+    if minority:
+        assessment.note += (f" · ⚠️ 另有 {len(minority)} 簇异议"
+                            f"（{','.join(assessment.dissenters)}），未达翻案门槛")
     if assessment.silent_witnesses:
         assessment.note += f" · 未发声：{','.join(assessment.silent_witnesses)}"
     return assessment

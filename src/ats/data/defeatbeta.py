@@ -133,3 +133,62 @@ def available(symbols: list[str]) -> dict[str, str]:
         log.info("defeatbeta: availability query failed (%s)", exc)
         return {}
     return {r[0]: str(r[1]) for r in rows}
+
+
+FILINGS = (f"https://huggingface.co/datasets/{REPO}/resolve/main/data/"
+           "stock_sec_filing.parquet")
+# US domestic issuers report on 8-K; foreign private issuers (ASML, TSM, SK hynix) use
+# 6-K. Both carry the earnings release as an exhibit, so both are in scope — restricting
+# to 8-K would silently exclude exactly the non-US witnesses we work hardest to cover.
+EARNINGS_FORMS = ("8-K", "6-K")
+
+
+@dataclass
+class Filing:
+    symbol: str
+    cik: str
+    accession: str
+    form_type: str
+    filing_date: str
+    url: str
+
+
+def filings(symbol: str, *, forms: tuple[str, ...] = EARNINGS_FORMS,
+            near: str = "", window_days: int = 4) -> list[Filing]:
+    """Filing METADATA for a symbol — the table carries no document text.
+
+    That is the useful shape rather than a limitation: it hands us the CIK and the
+    accession number, which is all EDGAR needs to serve the exhibit deterministically.
+    No search, no guessing which company or which quarter.
+
+    `near` (YYYY-MM-DD) keeps only filings within `window_days` of that date, which is
+    how the earnings release gets told apart from the other 400 8-Ks a company files:
+    the release lands on the print date. Without it, "latest 8-K" picks up director
+    changes and shelf registrations.
+    """
+    from datetime import date, timedelta
+
+    from ..config import canonical_entity
+
+    sym = canonical_entity(symbol).upper()
+    where = ["symbol = ?", f"form_type IN ({','.join('?' * len(forms))})"]
+    args: list = [sym, *forms]
+    if near:
+        try:
+            pivot = date.fromisoformat(near)
+        except ValueError:
+            pivot = None
+        if pivot:
+            where.append("filing_date BETWEEN ? AND ?")
+            args += [str(pivot - timedelta(days=window_days)),
+                     str(pivot + timedelta(days=window_days))]
+    sql = (f"SELECT symbol, cik, accession_number, form_type, filing_date, filing_url "
+           f"FROM read_parquet('{FILINGS}') WHERE {' AND '.join(where)} "
+           f"ORDER BY filing_date DESC LIMIT 20")
+    try:
+        rows = _connect().execute(sql, args).fetchall()
+    except Exception as exc:  # noqa: BLE001 - a mirror outage must not break the window
+        log.info("defeatbeta: filing query failed for %s (%s)", sym, exc)
+        return []
+    return [Filing(symbol=r[0], cik=str(r[1]), accession=str(r[2]), form_type=str(r[3]),
+                   filing_date=str(r[4]), url=str(r[5] or "")) for r in rows]

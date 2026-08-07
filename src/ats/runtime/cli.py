@@ -887,8 +887,25 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
     res = observer.observe_document(sym, doc_id, text, source_url=src)
     if res["failure"]:
         print(f"⚠️  {sym}: 抽取失败 — {res['failure']}（已记录，不记为零观测）")
-        return 0
-    print(f"✅ {sym}: {res['new']} 条新观测 / 共 {res['saved']} 条（doc={doc_id}）")
+    else:
+        print(f"✅ {sym}: {res['new']} 条新观测 / 共 {res['saved']} 条（doc={doc_id}）")
+
+    # The earnings RELEASE is a second document, extracted separately — the call
+    # narrates, the release tabulates, and folding them together would lose which
+    # source a number came from.
+    if not file:
+        report_date = str(getattr(pr, "date", "") or "")
+        rtext, rsrc, rnote = observer.fetch_release(sym, report_date=report_date,
+                                                    store=store)
+        if rnote:
+            print(f"（财报稿：{rnote}）")
+        if rtext.strip():
+            rid = f"{sym}:release:{report_date or 'manual'}"
+            rres = observer.observe_document(sym, rid, rtext, source_url=rsrc)
+            if rres["failure"]:
+                print(f"⚠️  {sym} 财报稿抽取失败 — {rres['failure']}")
+            else:
+                print(f"✅ {sym} 财报稿: {rres['new']} 条新观测 / 共 {rres['saved']} 条")
     return 0
 
 

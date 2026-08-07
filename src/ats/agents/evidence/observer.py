@@ -232,6 +232,61 @@ def _fetch_keyed(symbol: str, label: str, print_=None):
     return (got, "") if got is not None else None
 
 
+def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
+                  store=None) -> tuple[str, str, str]:
+    """The earnings RELEASE, as a document separate from the call. (text, src, note).
+
+    Separate on purpose, not appended to the transcript: they answer different
+    questions and must stay individually traceable. The call is where management
+    narrates and takes questions; the release is where the quarter is tabulated. Every
+    `reported_actual` observation in the ledger on 2026-08-07 came from a transcript,
+    which meant the most checkable facts were being read off spoken, rounded figures
+    ("ASP rose by mid 40%") when the exact ones were a filing away.
+
+    Keeping them as two documents also keeps their observation ids distinct and lets
+    one fail without taking the other down.
+    """
+    from ...data import sec, source_cache
+
+    cached = source_cache.load(symbol, label, "release")
+    if cached and _source_rank(cached.source) >= _RANK_KEYED:
+        return cached.text, cached.source, f"缓存命中：{cached.path.name}"
+
+    text, url, note = sec.earnings_release(symbol, near=report_date)
+    if not text:
+        return "", "", note
+
+    company = ""
+    try:
+        from ...config import entity_meta, load_pead_config
+
+        company = entity_meta(symbol).get("name", "")
+        company = getattr(load_pead_config(symbol), "company_name", "") or company
+    except Exception:  # noqa: BLE001
+        pass
+    # The same identity guard as the transcript path. Deterministic sourcing makes a
+    # wrong company far less likely here, but "less likely" is not a reason to remove
+    # a check that costs nothing.
+    if not _mentions_company(text, symbol, company):
+        log.warning("evidence %s: release does not name the company (%s)", symbol, url)
+        if store is not None:
+            try:
+                store.save_document_failure(symbol, label, "release", source="sec",
+                                            source_url=url, note="财报稿未提及本公司")
+            except Exception:  # noqa: BLE001
+                pass
+        return "", "", "财报稿未提及本公司 → 记为缺口"
+
+    stored = source_cache.store(symbol, label, "release", text, source="sec",
+                                source_url=url)
+    if stored and store is not None:
+        try:
+            store.save_document(stored, note=note)
+        except Exception as exc:  # noqa: BLE001
+            log.info("evidence %s: could not record release (%s)", symbol, exc)
+    return text, "sec", note
+
+
 def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, str]:
     """Get this company's latest filing text. Returns (text, source, note).
 

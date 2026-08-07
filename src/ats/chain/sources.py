@@ -71,10 +71,11 @@ def _span(source: SourceDef, point: SeriesPoint, basis: str, change: float | Non
     an observation nobody can go and verify is not evidence, and that rule does not
     relax just because the number came from a spreadsheet instead of a transcript."""
     unit = f" {point.unit}" if point.unit else ""
+    what = f" {point.series}" if point.series else ""
     move = f"{change * 100:+.1f}%" if change is not None else "n/a"
     label = {"yoy": "同比", "mom": "环比", "level_vs_ma": "较均值"}.get(basis, basis)
     published = f"，发布 {point.published_at}" if point.published_at else ""
-    return (f"{point.period} {source.label or source.id} {point.value:,.1f}{unit}，"
+    return (f"{point.period} {source.label or source.id}{what} {point.value:,.2f}{unit}，"
             f"{label} {move}（{source.adapter} {point.period}{published}）")
 
 
@@ -93,10 +94,11 @@ def to_observations(source: SourceDef, points: list[SeriesPoint], *,
             change = getattr(point, basis, None)
             if change is None:
                 continue
-            metric = f"{source.id}_{basis}"
+            suffix = f"_{point.series}" if point.series else ""
+            metric = f"{source.id}{suffix}_{basis}"
             try:
                 out.append(Observation(
-                    document_id=f"{source.id}:{point.period}",
+                    document_id=f"{source.id}:{point.period}{suffix}",
                     source_url=source.adapter,
                     entity=source.entity,
                     # The source speaks for itself: it is both the subject and the

@@ -62,8 +62,29 @@ sources:
     # 覆盖台积电（CoWoS 封装）与南亚科。和韩国出口并列时能分开"存储紧张"与"封装紧张"，
     # 这正是 hbm_supply_tight 机制里最难靠单家财报分辨的一环。
 
+  dram_contract_price:
+    label: DRAM 合约价
+    adapter: trendforce
+    params:
+      items: ["DDR5 8GB SO-DIMM", "DDR4 16Gb 2Gx8", "DDR4 8Gb 1Gx8"]
+    entity: DRAM_CONTRACT_PRICE
+    stance: regulator
+    observation_type: market
+    cadence: monthly
+    concepts: [hbm_pricing, supply_tightness]
+    direction_from: [mom]        # 公开表只给"较上期"，没有历史序列可算同比 —— 只凭一期
+                                 # 快照造一个同比就是编造
+    # `hbm_pricing` 维度上唯一的独立读数。其余全部是存储厂在描述自己的定价能力，而三家
+    # 各说自己 ASP 涨了，是三个当事人，不是交叉印证。
+    #
+    # 它不是 HBM 价格，为什么仍然对症：HBM 每 bit 吃的晶圆约是常规 DRAM 的三倍，HBM 爬坡
+    # 会挤占常规 DRAM 产能、推高其价格——SK 海力士在 Q2 FY2026 电话会上原话就是"常规 DRAM
+    # 价格近月大幅上行"。常规合约价上行是挤出效应为真的证据；若 HBM 仍在爬坡而合约价转跌，
+    # 那才是反证。
+    #
+    # observation_type 是 market 不是 regulatory：TrendForce 是定价机构不是官方统计。
+    # 注意这让它落入 SECONDARY —— 能参与支持/反驳记分，但**不贡献立场类别**。这是对的：
+    # 立场类别是"独立证人"的度量，而一家研究机构的报价不是一个新的经济位置。
+
 # --- 已评估但暂不接入 ---------------------------------------------------------
-# dram_contract_price（TrendForce / DRAMeXchange）
-#   对 hbm_pricing 维度是最直接的独立读数，但明细数据付费；公开月报是新闻稿形式，得走
-#   observer 而不是序列适配器，性质与成本都不同。等有确定可用的免费渠道再接 —— 先声明
-#   一个取不到的源，只会让覆盖率的分母变大而证据不变多。
+# （暂无）

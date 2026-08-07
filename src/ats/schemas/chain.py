@@ -431,6 +431,11 @@ class SeriesPoint(BaseModel):
     """One observation of a statistical series, as the adapter returns it."""
 
     period: str                           # e.g. 2026-06
+    # Sub-series within one source. A customs series has none; a price table publishes
+    # many parts in the SAME period, and without this they collapse onto one another —
+    # the observation id is deterministic over (document, entity, metric, period), so
+    # DDR5 and DDR4 in 2026-06 would be the same row.
+    series: str = ""
     value: float
     unit: str = ""
     yoy: float | None = None              # fractional change, not percent

@@ -44,14 +44,27 @@ def get_model(role: str) -> Any:
         )
 
     if rc.provider == "deepseek":
-        # OpenAI-SDK compatible (api-docs.deepseek.com): same wire format, tool calling
-        # and JSON mode supported, only base_url and key differ.
+        # OpenAI-SDK compatible (api-docs.deepseek.com): same wire format, only base_url
+        # and key differ.
+        #
+        # Thinking mode is DISABLED, and it is not optional. v4-flash reasons by default,
+        # and the API rejects a forced tool_choice while reasoning:
+        #   400 "Thinking mode does not support this tool_choice"
+        # `with_structured_output(method="function_calling")` forces the tool, so every
+        # structured call fails outright — measured 5/5. The two alternatives were worse:
+        # `json_schema` is unavailable on this endpoint, and `json_mode` returns JSON that
+        # ignores the schema (it invented an `observation` field where the model expects
+        # `metric`), which is a silent failure rather than a loud one.
+        #
+        # It must go in `extra_body`: langchain_openai forwards `model_kwargs` as
+        # top-level SDK arguments, and the SDK rejects an unknown `thinking` kwarg.
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.deepseek_api_key or None,
             base_url=cfg.secrets.deepseek_base_url or "https://api.deepseek.com",
+            extra_body={"thinking": {"type": "disabled"}},
             **common,
         )
 

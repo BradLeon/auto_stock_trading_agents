@@ -439,23 +439,20 @@ WINDOW_OVERLAP = 1_500       # so a fact split across a boundary is whole in one
 def _windows(body: str) -> list[str]:
     """Split a document into overlapping extraction windows.
 
-    Why windows rather than a bigger call — measured on 2026-08-07, and NOT for the
-    reason first assumed:
+    Windows are a RECALL measure, not a reliability one. The reliability problem had a
+    different cause and a different fix — see the gateway note in llm/gateway.py: every
+    diagnosis of "the context is too long" or "the output cap is too low" was wrong, and
+    identical requests were simply coming back different through the relay.
 
-      * it is not the context window. One document's prompt is ~16k tokens against a
-        1M-token model.
-      * it is not the output cap either. Raising max_tokens 8192 → 32000 on the same
-        document produced 0 rows, while 8192 produced 26.
-      * it is provider flakiness at the cheap tier. Three identical full-document runs
-        returned [0, 33, 36].
-      * and the mid tier does not fix it: terra returned [3, 3, 2] — stable, but
-        reading almost nothing out of a 46k document. Stably under-reading is worse
-        than occasionally failing loudly.
+    What survives that correction, measured 2026-08-07 against DeepSeek's own API:
 
-    So: smaller tasks fail less often, and a window that does fail costs one slice
-    instead of the whole document (paired with the empty-result retry in `extract`).
-    Recall improves too — TSM went 20 → 37 observations, and it had been "succeeding"
-    all along, which means single-pass reading was quietly under-reporting.
+        NVDA Q1 FY2027, 46k chars, 3 windows vs one pass
+          windowed   [58, 57, 53, 58, 66]
+          single     [49, 37, 42]
+
+    Both are stable now; the windowed read finds consistently more. TSM showed the same
+    thing earlier (20 -> 37) while "succeeding" either way, which means single-pass
+    reading of a long document quietly under-reports rather than failing visibly.
 
     Overlap exists because a figure and the sentence that qualifies it can straddle a
     cut, and half a fact is worse than none — `evidence_span` would then be unverifiable
@@ -517,11 +514,12 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
         tag = f"{document_id}#{i}/{len(windows)}" if len(windows) > 1 else document_id
         ctx = _context(symbol, chunk, period, menu, relations)
         view = None
-        # Retry an EMPTY result once. Measured on NVDA's Q1 FY2027 call, three identical
-        # runs of the same window returned [0, 33, 36]: the cheap tier intermittently
-        # returns a well-formed empty list with no failure_reason, so `run_structured`'s
-        # None-retry never fires. A silent zero is indistinguishable from "this document
-        # says nothing", which is the one thing that must never be guessed.
+        # Retry an EMPTY result once. A well-formed empty list with an empty
+        # failure_reason slips past `run_structured`'s None-retry, and a silent zero is
+        # indistinguishable from "this document says nothing" — the one state that must
+        # never be guessed. This fired constantly through the OpenRouter relay
+        # ([0, 33, 36] on identical inputs) and has not fired since moving to DeepSeek's
+        # own API; it stays as the cheap backstop for the next provider that does it.
         for attempt in (1, 2):
             try:
                 view = run_structured("evidence_observer", EvidenceExtractionView, ctx,

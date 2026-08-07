@@ -103,6 +103,7 @@ def build_packs(assessments, claims, observations_by_id) -> list[MoatEvidence]:
 def packs_for_layer(layer, store, *, cfg: dict | None = None) -> list[MoatEvidence]:
     """Assess a layer's claims from stored observations and build its evidence packs."""
     from .corroborate import assess_layer
+    from .sources import source_entities_for as _source_entities
 
     if not getattr(layer, "claims", None):
         return []
@@ -110,6 +111,7 @@ def packs_for_layer(layer, store, *, cfg: dict | None = None) -> list[MoatEviden
     for claim in layer.claims:
         entities = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
         entities |= set(claim.entities)
+        entities |= _source_entities(claim)
         for e in entities:
             if e not in rows_by_entity:
                 rows_by_entity[e] = store.observations(entity=e, limit=200)

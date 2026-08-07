@@ -154,6 +154,7 @@ def _failure_section(store) -> list[str]:
 def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
     """Build the markdown. `cfg` is a SectorConfig; `store` the TradingMemory."""
     from .corroborate import assess_layer
+    from .sources import source_entities_for as _source_entities
 
     ccfg = cfg.review.get("corroboration", {})
     assessments_by_layer, rows_by_id = {}, {}
@@ -164,6 +165,7 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
         for claim in layer.claims:
             ents = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
             ents |= set(claim.entities)
+            ents |= _source_entities(claim)
             for e in ents:
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)

@@ -391,3 +391,48 @@ class ClaimProposal(BaseModel):
     def model_post_init(self, _ctx) -> None:
         if not self.id:
             object.__setattr__(self, "id", f"{self.signature}-{self.created_at:%Y%m%d}")
+
+
+class SourceDef(BaseModel):
+    """A third-party evidence source — a witness that is not a company.
+
+    Customs bureaus and pricing agencies are not party to anything, so the `regulator`
+    stance they carry is the scarcest kind of evidence this system can hold: the one
+    kind that a single company's narrative cannot colour. Declared in
+    config/sources.yaml; see that file for the field-by-field rationale.
+    """
+
+    id: str
+    label: str = ""
+    adapter: str                          # data/sources/<adapter>.py
+    params: dict = Field(default_factory=dict)
+    entity: str                           # non-company entity the facts are ABOUT
+    stance: WitnessStance = "regulator"
+    observation_type: ObservationType = "regulatory"
+    cadence: str = "monthly"
+    concepts: list[str] = Field(default_factory=list)
+    # Trend and turning point are different facts: yoy filters seasonality, mom turns
+    # first. Declaring both emits one observation each rather than blending them into a
+    # single number, which would erase the leading signal.
+    direction_from: list[str] = Field(default_factory=lambda: ["yoy"])
+
+    @field_validator("direction_from", mode="before")
+    @classmethod
+    def _as_list(cls, v):
+        return [v] if isinstance(v, str) else (v or ["yoy"])
+
+    @field_validator("entity")
+    @classmethod
+    def _entity_upper(cls, v: str) -> str:
+        return (v or "").upper()
+
+
+class SeriesPoint(BaseModel):
+    """One observation of a statistical series, as the adapter returns it."""
+
+    period: str                           # e.g. 2026-06
+    value: float
+    unit: str = ""
+    yoy: float | None = None              # fractional change, not percent
+    mom: float | None = None
+    published_at: date | None = None      # when the agency released it

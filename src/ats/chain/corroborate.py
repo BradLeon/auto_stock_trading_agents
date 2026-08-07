@@ -91,6 +91,13 @@ def _speaker(row: dict) -> str:
     return ((row.get("source_entity") or row.get("entity")) or "").upper()
 
 
+def _source_stance(entity: str) -> str:
+    """Declared stance of a third-party source, or "" if this is not one."""
+    from .sources import load_sources
+
+    return next((s.stance for s in load_sources() if s.entity == entity), "")
+
+
 def _cluster_key(row: dict) -> tuple:
     """Gate 1. Independence is judged by originating fact + SPEAKER, not volume.
 
@@ -146,7 +153,11 @@ def build_clusters(claim: ClaimDef, rows: list[dict], *,
                 key="|".join(str(k) for k in key), speaker=_speaker(r),
                 entity=(r.get("entity") or "").upper(), concept=r.get("concept") or "",
                 direction=r.get("direction") or "flat",
-                stance=claim.stance_of(_speaker(r)),
+                # Companies get their stance from the claim's witness table; a customs
+                # bureau is in no claim's witness table, so it declares its own in
+                # config/sources.yaml. Either way the stance is DECLARED, never read
+                # off the material — which is the invariant that matters.
+                stance=claim.stance_of(_speaker(r)) or _source_stance(_speaker(r)),
                 primary=r.get("observation_type") in PRIMARY_TYPES)
         clusters[key].rows.append(r)
     return list(clusters.values())
@@ -345,10 +356,17 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
 def assess_layer(layer, rows_by_entity, *, cfg: dict | None = None,
                  as_of: datetime | None = None, judge=None) -> list[ClaimAssessment]:
     """Run every claim on one sector layer. `rows_by_entity` maps entity -> observations."""
+    from .sources import sources_for_concepts
+
     out = []
     for claim in layer.claims:
         entities = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
         entities |= set(claim.entities)
+        # Third-party sources bind by DIMENSION, not by being named in the claim: a
+        # source declares which concepts it may speak to, a claim declares which it is
+        # tested on, and they meet on the concept key. That is what lets a source be
+        # added without touching any claim, and vice versa.
+        entities |= {s.entity for s in sources_for_concepts({c.key for c in claim.concepts})}
         rows = [r for e in entities for r in rows_by_entity.get(e, [])]
         out.append(corroborate(claim, rows, cfg=cfg, as_of=as_of, judge=judge))
     return out

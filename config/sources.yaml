@@ -1,0 +1,67 @@
+# 第三方证据源注册表 —— 不依赖任何公司自述的证据。
+#
+# 为什么需要它：截至 2026-08-07，两条 L5 命题的证据**全部**来自公司自己的财报纪要。
+# 立场多样性闸因此只能在 customer / supplier 之间取得，而这两类都是当事人。海关统计和
+# 定价机构不是任何一方当事人 —— 它们提供的 `regulator` 立场是这套系统里最稀缺、也最难
+# 被单方叙事污染的证据。
+#
+# 数据模型不用改：Observation 早就有 observation_type: regulatory|market|research，
+# WitnessStance 早就有 regulator，三道闸对它们一视同仁。这里加的只是取数与声明。
+#
+# --- 字段 -------------------------------------------------------------------
+# adapter            取数适配器，对应 src/ats/data/sources/<adapter>.py
+# params             传给适配器的参数（各家 API 不同，这一层无法也不该抽象）
+# entity             这条事实"关于"什么。非公司实体，用大写下划线以免和 ticker 混淆
+# stance             进入立场多样性闸的立场
+# observation_type   regulatory（官方统计） | market（价格/成交） | research
+# cadence            发布频率，同时也是陈旧判据
+# concepts           它有资格说话的维度 —— 绑定发生在维度 key 上，不绑定具体命题，
+#                    所以加一个源不用改任何命题，加一条命题也不用改任何源
+# direction_from     方向怎么从序列算出来：
+#                      yoy          同比 —— 看趋势，滤掉季节性
+#                      mom          环比 —— 看拐点，比同比早一步反映转折
+#                      level_vs_ma  与移动均值比 —— 看水平偏离
+#                    同比同环比可以并列声明，各产出一条观测；一段趋势和一个拐点是两件
+#                    不同的事实，合成一个数会把先行信息抹掉。
+#
+# --- 不做的事 ---------------------------------------------------------------
+# 序列不走 LLM 抽取：一串数字没有散文可读，direction 由公式算出、evidence_span 确定性
+# 渲染成一行可复核的事实。但**含义仍然交给判读器** —— "出口同比 +32%" 既可能是需求强劲
+# 也可能是供给转松，和扩产是同一类问题。引擎算观测，模型判含义，分工不变。
+#
+# 第三方源**不计入** witnesses_reported 的覆盖率分母（2026-08-07 决定）。那个分母衡量
+# 的是"该说话的公司说了没有"，把统计局塞进去会稀释公司的沉默。它们贡献证据簇、立场
+# 类别与支持/反驳记分，在报告里单列。
+
+sources:
+  kr_semiconductor_exports:
+    label: 韩国半导体出口（月度）
+    adapter: kr_customs
+    params: {hs_prefix: "8542", metric: export_value_usd}
+    entity: KR_SEMI_EXPORT
+    stance: regulator
+    observation_type: regulatory
+    cadence: monthly
+    concepts: [supply_tightness, hbm_demand]
+    direction_from: [yoy, mom]
+    # 韩国半导体出口直接覆盖 SK 海力士 + 三星的实际出货，是这两家自述之外唯一的独立读数。
+    # 关税厅每月发布，且月中还有旬报（1-10 日、1-20 日），比财报早得多。
+
+  tw_ic_exports:
+    label: 台湾积体电路出口（月度）
+    adapter: tw_mof
+    params: {hs_prefix: "8542", metric: export_value_usd}
+    entity: TW_IC_EXPORT
+    stance: regulator
+    observation_type: regulatory
+    cadence: monthly
+    concepts: [supply_tightness, hbm_demand]
+    direction_from: [yoy, mom]
+    # 覆盖台积电（CoWoS 封装）与南亚科。和韩国出口并列时能分开"存储紧张"与"封装紧张"，
+    # 这正是 hbm_supply_tight 机制里最难靠单家财报分辨的一环。
+
+# --- 已评估但暂不接入 ---------------------------------------------------------
+# dram_contract_price（TrendForce / DRAMeXchange）
+#   对 hbm_pricing 维度是最直接的独立读数，但明细数据付费；公开月报是新闻稿形式，得走
+#   observer 而不是序列适配器，性质与成本都不同。等有确定可用的免费渠道再接 —— 先声明
+#   一个取不到的源，只会让覆盖率的分母变大而证据不变多。

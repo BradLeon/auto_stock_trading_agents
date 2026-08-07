@@ -821,6 +821,8 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         from ..config import load_sector_config
 
         cfg = load_sector_config(entity or "ai_hardware")
+        from ..chain.sources import source_entities_for as _source_entities
+
         ccfg = cfg.review.get("corroboration", {})
         any_claim = False
         for layer in cfg.layers:
@@ -832,6 +834,7 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
             for claim in layer.claims:
                 ents = {w.entity.upper() for w in claim.witnesses}
                 ents |= claim.expected_witnesses() | set(claim.entities)
+                ents |= _source_entities(claim)
                 for e in ents:
                     rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
             for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):

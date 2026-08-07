@@ -19,16 +19,20 @@ from pathlib import Path
 log = logging.getLogger("ats.chain.report")
 
 VERDICT_MARK = {"supportive": "✅ 印证", "contradicted": "⛔ 反证",
-                "falsified": "⛔ 已证伪", "mixed": "⚠️ 分歧", "unknown": "· 未定"}
+                "falsified": "⛔ 已证伪", "mixed": "⚠️ 分歧", "unknown": "· 未定",
+                "resolved": "📊 已比较"}
+STANDING_MARK = {"strong": "强", "neutral": "中", "weak": "弱", "unknown": "—"}
+BASIS_CN = {"corroborated": "有交叉印证", "self_reported": "仅自述", "thin": "证据薄"}
 TYPE_CN = {"reported_actual": "已实现", "guidance": "指引", "counterparty": "对手方",
            "regulatory": "监管", "research": "研究", "media": "媒体", "market": "市场"}
 
 
 def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
     lines = ["## 命题印证", "",
-             "> 结论由确定性引擎算出（去重 → 立场 → common/relative 隔离），"
-             "LLM 只负责把事实归到维度上。**竞争者扩产不等于我方失份额**——"
-             "没有关于本方的直接读数时，相对份额命题保持 unknown。", ""]
+             "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条判读都附理由，"
+             "**结论应当对着理由争论，而不是对着数字**。\n"
+             "> **竞争者扩产不等于我方失份额**——扩产不是 direct 维度，进不了截面比较。"
+             "截面命题不断言真假，只回答「这个位置在同业之间怎么分布」。", ""]
     any_claim = False
     for layer in cfg.layers:
         assessments = assessments_by_layer.get(layer.key) or []
@@ -38,16 +42,21 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
         lines += [f"### {layer.label}", ""]
         for a in assessments:
             claim = next((c for c in layer.claims if c.id == a.claim_id), None)
-            kind = "相对份额" if (claim and claim.kind == "relative") else "共同需求"
-            subj = f" · 主体 {claim.subject}" if claim and claim.subject else ""
+            kind = "截面比较" if (claim and claim.kind == "relative") else "共同需求"
+            subj = (f" · 比较 {', '.join(claim.entities)}"
+                    if claim and claim.entities else "")
             lines += [
                 f"**{VERDICT_MARK.get(a.verdict, a.verdict)}｜{claim.statement if claim else a.claim_id}**",
                 "",
                 f"- 类型 {kind}{subj} · 证人覆盖 **{a.coverage}** · 独立证据簇 "
                 f"{a.evidence_clusters} · 立场 {a.stance_classes} 类",
-                f"- 支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
-                + (f" · 异议方 {', '.join(a.dissenters)}" if a.dissenters else ""),
             ]
+            if not a.entity_readings:
+                # A cross-section has no aggregate support/refute — printing "0 / 0"
+                # under a table that clearly says otherwise reads as a bug.
+                lines.append(
+                    f"- 支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
+                    + (f" · 异议方 {', '.join(a.dissenters)}" if a.dissenters else ""))
             if a.silent_witnesses:
                 # Silence is a gap, not neutrality: a witness who said nothing is the
                 # difference between "checked and fine" and "never checked".
@@ -56,6 +65,17 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
                 # The engine's note repeats the silent-witness list for CLI readers;
                 # the report already gives it its own line.
                 lines.append(f"- {a.note.split(' · 未发声：')[0]}")
+            if a.entity_readings:
+                # A cross-section's answer IS this table. Basis travels with each row:
+                # a self-reported "strong" must not read like a corroborated one.
+                lines += ["", "  | 公司 | 位置 | 依据强度 | 证据 | 说话人 | 理由 |",
+                          "  |---|---|---|---|---|---|"]
+                for r in a.entity_readings:
+                    lines.append(
+                        f"  | **{r.entity}** | {STANDING_MARK.get(r.standing, r.standing)} "
+                        f"| {BASIS_CN.get(r.basis, r.basis)} | {r.evidence_clusters} 簇/"
+                        f"{r.stance_classes} 类 | {', '.join(r.speakers) or '—'} "
+                        f"| {r.reason or '—'} |")
             if a.judgements:
                 # Every polarity call with its reason. This is the section a reader
                 # actually argues with: the verdict is arithmetic over these, so
@@ -143,8 +163,7 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
         rows_by_entity = {}
         for claim in layer.claims:
             ents = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
-            if claim.subject:
-                ents.add(claim.subject)
+            ents |= set(claim.entities)
             for e in ents:
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)

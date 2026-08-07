@@ -28,8 +28,8 @@ def _row(entity, concept, *, direction="up", speaker=None, otype="guidance",
 
 def _share_claim():
     return ClaimDef(
-        id="sk_hbm_share", kind="relative", subject="SKHY", layer="L5_fab",
-        statement="SK Hynix 维持核心客户 HBM 领先份额与定价权",
+        id="hbm_share_and_pricing_power", kind="relative", entities=["SKHY", "MU", "005930.KS"], layer="L5_fab",
+        statement="HBM 份额与定价权在三家之间如何分布",
         concepts=[Concept(key="hbm_share", desc="份额", direct=True),
                   Concept(key="customer_qualification", desc="认证",
                           direct=True),
@@ -51,24 +51,30 @@ def _common_claim():
 
 
 # --- evidence packs -------------------------------------------------------- #
-def test_contradicted_share_claim_becomes_negative_evidence():
-    rows = [_row("SKHY", "hbm_share", direction="down", speaker="SKHY", doc="sk",
-                 rid="a", polarity="refute",
+def test_each_company_gets_its_own_moat_pack():
+    """One pack per COMPANY, not one per claim. The old shape scored only the declared
+    subject, so a rival's own disclosure could never reach the factor for that rival —
+    and the one name that could be scored happened to be the one we hold."""
+    rows = [_row("SKHY", "hbm_share", speaker="SKHY", doc="sk", rid="a",
+                 span="ASP rose approximately 30% on continued price strength"),
+            _row("SKHY", "hbm_pricing", speaker="SKHY", doc="sk", rid="a2",
+                 span="pricing reflects our higher technology complexity"),
+            _row("MU", "hbm_share", speaker="MU", doc="mu", rid="b", polarity="weak",
                  span="we expect our HBM share to decline modestly"),
-            _row("SKHY", "customer_qualification", direction="up", speaker="005930.KS",
-                 otype="counterparty", doc="ss", rid="b", polarity="refute",
-                 span="Samsung qualified HBM4 at SK's largest customer")]
+            _row("MU", "customer_qualification", speaker="MU", doc="mu", rid="b2",
+                 polarity="weak", span="qualification at the lead customer slipped")]
     claim = _share_claim()
     a = corroborate(claim, rows, cfg=CFG)
-    assert a.verdict == "contradicted"
+    assert a.verdict == "resolved"
 
-    packs = moat.build_packs([a], [claim], {r["id"]: r for r in rows})
-    assert len(packs) == 1
-    p = packs[0]
-    assert p.subject == "SKHY" and p.direction == "negative"
-    assert any("decline modestly" in s for s in p.spans)      # carries the source text
-    ctx = moat.as_context(packs)
-    assert "SKHY" in ctx and "不要凭印象打分" in ctx
+    packs = {p.subject: p for p in moat.build_packs([a], [claim],
+                                                    {r["id"]: r for r in rows})}
+    assert set(packs) == {"SKHY", "MU"}          # 005930.KS silent -> no pack
+    assert packs["SKHY"].direction == "positive"
+    assert packs["MU"].direction == "negative"
+    assert any("decline modestly" in s for s in packs["MU"].spans)   # carries the text
+    ctx = moat.as_context(list(packs.values()))
+    assert "SKHY" in ctx and "MU" in ctx and "不要凭印象打分" in ctx
 
 
 def test_common_verdict_never_produces_moat_evidence():
@@ -88,9 +94,10 @@ def test_unknown_and_mixed_produce_nothing_so_moat_stays_null():
     """"not looked at" must stay distinguishable from "looked at, judged neutral" —
     so an unresolved claim yields NO evidence and moat_pricing keeps its null."""
     claim = _share_claim()
-    for rows in ([], [_row("SKHY", "hbm_share", direction="down", speaker="SKHY")]):
+    # No evidence at all, and evidence for only ONE company (a comparison needs two).
+    for rows in ([], [_row("SKHY", "hbm_share", speaker="SKHY", rid="only")]):
         a = corroborate(claim, rows, cfg=CFG)
-        assert a.verdict in ("unknown", "mixed")
+        assert a.verdict == "unknown"
         assert moat.build_packs([a], [claim], {}) == []
 
 

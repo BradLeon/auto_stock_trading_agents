@@ -793,19 +793,30 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
             rows_by_entity = {}
             for claim in layer.claims:
                 ents = {w.entity.upper() for w in claim.witnesses}
-                if claim.subject:
-                    ents.add(claim.subject)
+                ents |= claim.expected_witnesses() | set(claim.entities)
                 for e in ents:
                     rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
             for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):
                 claim = next(c for c in layer.claims if c.id == a.claim_id)
                 mark = {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
-                        "unknown": "· "}.get(a.verdict, "· ")
+                        "resolved": "📊", "unknown": "· "}.get(a.verdict, "· ")
                 print(f"{mark} {a.claim_id:20} {a.verdict:13} 覆盖 {a.coverage:6} "
                       f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类")
                 print(f"     {claim.statement}")
-                print(f"     支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
-                      + (f" · 异议 {','.join(a.dissenters)}" if a.dissenters else ""))
+                if a.entity_readings:
+                    # A cross-section's answer IS the per-company table; there is no
+                    # single support/refute count to print.
+                    stand = {"strong": "强", "neutral": "中", "weak": "弱",
+                             "unknown": "—"}
+                    basis = {"corroborated": "有交叉印证", "self_reported": "仅自述",
+                             "thin": "证据薄"}
+                    for r in a.entity_readings:
+                        print(f"       {r.entity:<12}{stand.get(r.standing, r.standing):<3}"
+                              f"{basis.get(r.basis, r.basis):<8}"
+                              f"{r.evidence_clusters} 簇/{r.stance_classes} 类  {r.reason}")
+                else:
+                    print(f"     支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
+                          + (f" · 异议 {','.join(a.dissenters)}" if a.dissenters else ""))
                 if a.silent_witnesses:
                     # Silence is a gap, not neutrality — name who did not speak.
                     print(f"     未发声：{','.join(a.silent_witnesses)}")

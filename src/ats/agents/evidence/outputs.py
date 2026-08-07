@@ -114,3 +114,19 @@ class AdjudicationView(BaseModel):
     @classmethod
     def _coerce(cls, v):
         return _as_objlist(v)
+
+
+class EntityReadingView(BaseModel):
+    entity: str = Field(description="原样回填上面给出的公司代码")
+    standing: str = Field(default="unknown",
+                          description="strong | neutral | weak | unknown")
+    reason: str = Field(default="", description="一句话依据，要引到具体内容")
+
+
+class CrossSectionView(BaseModel):
+    readings: list[EntityReadingView] = Field(default_factory=list)
+
+    @field_validator("readings", mode="before")
+    @classmethod
+    def _coerce(cls, v):
+        return _as_objlist(v)

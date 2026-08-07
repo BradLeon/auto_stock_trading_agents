@@ -86,7 +86,8 @@ def _stub_adjudicator(monkeypatch):
     not error — it would just quietly assert against `unknown` and look green.
     """
     from ats.agents.evidence import adjudicator
-    from ats.agents.evidence.outputs import AdjudicationView, ClusterJudgementView
+    from ats.agents.evidence.outputs import (AdjudicationView, ClusterJudgementView,
+                                          CrossSectionView, EntityReadingView)
 
     def _fake(role, schema, context, **kw):
         blocks: list[tuple[str, list[str]]] = []
@@ -104,7 +105,28 @@ def _stub_adjudicator(monkeypatch):
                                             reason=f"stub:{polarity}"))
         return AdjudicationView(judgements=out)
 
-    monkeypatch.setattr(adjudicator, "run_structured", _fake)
+    def _fake_cross(role, schema, context, **kw):
+        blocks: list[tuple[str, list[str]]] = []
+        for line in context.splitlines():
+            if line.startswith("### "):
+                blocks.append((line[4:].strip(), []))
+            elif blocks:
+                blocks[-1][1].append(line)
+        out = []
+        for entity, body in blocks:
+            text = "\n".join(body)
+            standing = ("unknown" if "（本期无可用读数）" in text
+                        else "weak" if "[[WEAK]]" in text
+                        else "neutral" if "[[NEUTRAL]]" in text else "strong")
+            out.append(EntityReadingView(entity=entity, standing=standing,
+                                         reason=f"stub:{standing}"))
+        return CrossSectionView(readings=out)
+
+    def _dispatch(role, schema, context, **kw):
+        return (_fake_cross if schema is CrossSectionView else _fake)(
+            role, schema, context, **kw)
+
+    monkeypatch.setattr(adjudicator, "run_structured", _dispatch)
 
 
 class FakeBroker:

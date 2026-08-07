@@ -9,12 +9,13 @@ verbatim spans, per subject.
 
 Two rules the caller must not bypass:
 
-  * only `relative` claims produce packs. A `common` verdict is about the industry,
-    not about who wins inside it — routing it here would re-introduce exactly the
-    "competitor expands => our holding lost share" inference gate 3 exists to block;
-  * `unknown` / `mixed` produce NOTHING, so `moat_pricing` stays null (cohort-neutral)
-    rather than 0. "Not looked at" and "looked at, judged neutral" are different states
-    and must stay distinguishable in the report.
+  * only `relative` (cross-section) claims produce packs. A `common` verdict is about
+    the industry, not about who wins inside it — routing it here would re-introduce
+    exactly the "competitor expands => our holding lost share" inference gate 3 blocks;
+  * only `strong` / `weak` readings produce packs. `neutral` and `unknown` produce
+    NOTHING, so `moat_pricing` stays null (cohort-neutral) rather than 0. "Not looked
+    at" and "looked at, judged neutral" are different states and must stay
+    distinguishable in the report.
 """
 
 from __future__ import annotations
@@ -53,34 +54,49 @@ class MoatEvidence:
 
 
 def build_packs(assessments, claims, observations_by_id) -> list[MoatEvidence]:
-    """Turn relative-claim verdicts into per-subject evidence packs.
+    """Turn cross-section readings into one evidence pack per company.
 
     `observations_by_id` maps observation id -> row, so each pack can carry the actual
     source sentences: the analyst is being asked to score a competitive position, and
     it should score the evidence, not our summary of it.
+
+    One pack per COMPANY, not per claim. That is the whole change: the previous shape
+    produced a single verdict about one subject, so a rival's own share disclosure could
+    never reach the factor for the rival — only 20% of the cohort could ever be scored
+    from evidence, and it happened to be the name we hold.
     """
     by_id = {c.id: c for c in claims}
     out: list[MoatEvidence] = []
     for a in assessments:
         claim = by_id.get(a.claim_id)
-        if claim is None or claim.kind != "relative" or not claim.subject:
+        if claim is None or claim.kind != "relative":
             continue
-        if a.verdict == "supportive":
-            direction = "positive"
-        elif a.verdict in ("contradicted", "falsified"):
-            direction = "negative"
-        else:
-            continue          # unknown / mixed -> no evidence -> moat_pricing stays null
-        spans = []
-        for oid in a.observation_ids[:MAX_SPANS]:
-            row = observations_by_id.get(oid)
-            if row and row.get("evidence_span"):
-                who = row.get("source_entity") or row.get("entity") or ""
-                spans.append(f"[{who}] {row['evidence_span'][:160]}")
-        out.append(MoatEvidence(
-            subject=claim.subject, direction=direction, claim_id=claim.id,
-            statement=claim.statement or claim.id, verdict=a.verdict,
-            coverage=a.coverage, spans=spans, silent=a.silent_witnesses))
+        if a.verdict != "resolved":
+            # A comparison of one is not a comparison. When only a single name in the
+            # cohort disclosed anything, scoring it "strong" would be exactly the
+            # single-name self-report the cross-section exists to escape — so the whole
+            # assessment yields nothing and moat_pricing stays null for everyone.
+            continue
+        for reading in a.entity_readings:
+            if reading.standing == "strong":
+                direction = "positive"
+            elif reading.standing == "weak":
+                direction = "negative"
+            else:
+                continue      # neutral / unknown -> no pack -> moat_pricing stays null
+            spans = []
+            for oid in reading.observation_ids[:MAX_SPANS]:
+                row = observations_by_id.get(oid)
+                if row and row.get("evidence_span"):
+                    who = row.get("source_entity") or row.get("entity") or ""
+                    spans.append(f"[{who}] {row['evidence_span'][:160]}")
+            out.append(MoatEvidence(
+                subject=reading.entity, direction=direction, claim_id=claim.id,
+                statement=claim.statement or claim.id,
+                verdict=f"{reading.standing}（{reading.basis}）"
+                        + (f" — {reading.reason}" if reading.reason else ""),
+                coverage=f"{reading.evidence_clusters} 簇/{reading.stance_classes} 类立场",
+                spans=spans, silent=a.silent_witnesses))
     return out
 
 
@@ -93,8 +109,7 @@ def packs_for_layer(layer, store, *, cfg: dict | None = None) -> list[MoatEviden
     rows_by_entity: dict[str, list[dict]] = {}
     for claim in layer.claims:
         entities = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
-        if claim.subject:
-            entities.add(claim.subject)
+        entities |= set(claim.entities)
         for e in entities:
             if e not in rows_by_entity:
                 rows_by_entity[e] = store.observations(entity=e, limit=200)

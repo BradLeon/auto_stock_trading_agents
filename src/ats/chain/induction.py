@@ -132,7 +132,7 @@ def induce(store, *, sector: str = "ai_hardware", cfg: dict | None = None,
     proposal = ClaimProposal(
         signature=signature, statement=view.statement.strip(),
         layer_hint=view.layer_hint or "", kind=view.kind or "common",
-        subject=(view.subject or "").upper(),
+        subject=(view.subject or "").upper(),  # proposals stay free-form until adopted
         concepts=view.as_concepts(), witnesses=view.as_witnesses(),
         stance_note=_stance_note(rows, sector),
         observation_ids=[r["id"] for r in rows if r.get("id")],

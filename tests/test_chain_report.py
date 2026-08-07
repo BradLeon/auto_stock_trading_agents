@@ -98,7 +98,7 @@ def test_render_persists_verdict_history():
     report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})
     report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})   # rerun
 
-    hist = store.claim_assessment_history("sk_hbm_share")
+    hist = store.claim_assessment_history("hbm_share_and_pricing_power")
     # Two dates, not three rows: the snapshot is stamped with the REPORT's as_of, so a
     # rerun replaces rather than appends — otherwise the history reads as change when
     # nothing changed.

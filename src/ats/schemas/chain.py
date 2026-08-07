@@ -6,9 +6,11 @@ observation. See docs/CHAIN_EVIDENCE.md for the design and the invariants.
 
 The load-bearing distinction is `kind`:
   * common   — industry-wide demand/supply/pricing. Any witness can move it.
-  * relative — one subject's competitive position. ONLY direct evidence moves it;
-               a competitor merely expanding capacity proves industry supply grew,
-               it does NOT prove our holding lost share.
+  * relative — a CROSS-SECTION over a cohort: how a competitive position (share,
+               pricing power, qualification) is distributed across named peers. It
+               yields one reading per company, never a single true/false. Only `direct`
+               dimensions move it — a competitor merely expanding capacity proves
+               industry supply grew, it does NOT prove our holding lost share.
 """
 
 from __future__ import annotations
@@ -44,7 +46,16 @@ WitnessStance = Literal[
 
 Direction = Literal["up", "flat", "down"]
 ClaimKind = Literal["common", "relative"]
-Verdict = Literal["unknown", "supportive", "mixed", "contradicted", "falsified"]
+# `resolved` belongs to cross-section (relative) claims only: they do not assert
+# anything to be supported or contradicted, they ask how a position is distributed, so
+# the only question is whether the comparison could be made at all.
+Verdict = Literal["unknown", "supportive", "mixed", "contradicted", "falsified", "resolved"]
+# How a company reads on the dimension being compared.
+Standing = Literal["strong", "neutral", "weak", "unknown"]
+# What the reading rests on. Not a gate — a label that travels with the reading, because
+# "three companies each self-reporting" is weak per company but informative as a
+# comparison: the self-report bias is common-mode and largely cancels across the cohort.
+ReadingBasis = Literal["corroborated", "self_reported", "thin"]
 
 
 class Observation(BaseModel):
@@ -183,7 +194,19 @@ class ClaimDef(BaseModel):
     kind: ClaimKind = "common"
     statement: str = ""
     layer: str = ""
-    subject: str = ""                     # required when kind == "relative"
+    # `relative` claims are CROSS-SECTIONS, not assertions about one name. They name the
+    # cohort being compared and ask how a position is distributed across it; the answer
+    # is one reading per entity, never a single true/false.
+    #
+    # This replaced a `subject` field, and the reason is worth keeping: with a subject,
+    # the isolation gate could only admit evidence ABOUT that subject, and earnings calls
+    # essentially never name a competitor. So "SK Hynix maintains its lead" rested
+    # entirely on SK Hynix's own testimony — 支持3/反驳0 from one speaker — and was
+    # unfalsifiable in practice. Asking instead how share and pricing read across
+    # SK/Micron/Samsung lets each company's own disclosure count, for itself, and turns
+    # an unanswerable question into a comparison. It is also the honest framing when we
+    # hold one of the names.
+    entities: list[str] = Field(default_factory=list)
     concepts: list[Concept] = Field(default_factory=list)
     # Witness stances are declared here, NOT read off the document: every filing is the
     # company's own call, so asking a model "who is speaking" always answers "this
@@ -192,10 +215,10 @@ class ClaimDef(BaseModel):
     falsifiers: list[str] = Field(default_factory=list)
     horizon: Horizon | None = None
 
-    @field_validator("subject")
+    @field_validator("entities")
     @classmethod
-    def _subject_upper(cls, v: str) -> str:
-        return (v or "").upper()
+    def _entities_upper(cls, v: list[str]) -> list[str]:
+        return [s.upper() for s in v]
 
     def concept(self, key: str) -> Concept | None:
         return next((c for c in self.concepts if c.key == key), None)
@@ -212,8 +235,10 @@ class ClaimDef(BaseModel):
         return out or {w.entity.upper() for w in self.witnesses}
 
     def model_post_init(self, _ctx) -> None:
-        if self.kind == "relative" and not self.subject:
-            raise ValueError(f"relative claim {self.id!r} must declare a subject")
+        if self.kind == "relative" and len(self.entities) < 2:
+            raise ValueError(
+                f"relative claim {self.id!r} is a cross-section and must name at least "
+                f"two entities to compare")
 
 
 Polarity = Literal["support", "refute", "neutral"]
@@ -267,6 +292,25 @@ class ClusterJudgement(BaseModel):
     observation_ids: list[str] = Field(default_factory=list)
 
 
+class EntityReading(BaseModel):
+    """How one company reads on a cross-section claim's dimension.
+
+    Deliberately per-entity and never netted into a ranking number here: the engine
+    reports where each name stands and on what, and the cross-section decides what that
+    is worth. `basis` travels with the reading so a self-reported "strong" cannot be
+    mistaken for a corroborated one.
+    """
+
+    entity: str
+    standing: Standing = "unknown"
+    reason: str = ""
+    basis: ReadingBasis = "thin"
+    evidence_clusters: int = 0
+    stance_classes: int = 0
+    speakers: list[str] = Field(default_factory=list)
+    observation_ids: list[str] = Field(default_factory=list)
+
+
 class ClaimAssessment(BaseModel):
     """Aggregated verdict for one claim at a point in time.
 
@@ -294,6 +338,9 @@ class ClaimAssessment(BaseModel):
     # into the report, so "why does SK hynix's own capex count as support here" is
     # answerable without re-running anything.
     judgements: list[ClusterJudgement] = Field(default_factory=list)
+    # Cross-section claims only: one row per compared entity. `verdict` then says
+    # whether the comparison could be made, not whether something is true.
+    entity_readings: list[EntityReading] = Field(default_factory=list)
     note: str = ""
 
     @property

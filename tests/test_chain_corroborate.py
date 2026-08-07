@@ -50,8 +50,8 @@ def _common(**kw):
 
 
 def _relative(**kw):
-    base = dict(id="sk_hbm_share", kind="relative", subject="SKHY", layer="L5_fab",
-                statement="SK Hynix 维持领先份额",
+    base = dict(id="hbm_share_and_pricing_power", kind="relative", entities=["SKHY", "MU", "005930.KS"], layer="L5_fab",
+                statement="HBM 份额与定价权在三家之间如何分布",
                 concepts=[Concept(key="hbm_share", desc="份额及其指引", direct=True),
                           Concept(key="customer_qualification", desc="客户认证进展", direct=True),
                           Concept(key="hbm_pricing", desc="ASP/毛利率", direct=True),
@@ -145,15 +145,39 @@ def test_competitor_expansion_does_not_move_our_share_claim():
     assert relative.refute_score == 0.0
 
 
-def test_direct_share_evidence_does_move_the_relative_claim():
-    """The other half: with real evidence about the subject, the claim must move."""
-    rows = [_row("SKHY", "hbm_share", direction="down", speaker="SKHY",
-                 otype="guidance", doc="sk-call", rid="a", polarity="refute"),
-            _row("SKHY", "customer_qualification", direction="up", speaker="005930.KS",
-                 otype="counterparty", doc="ss-call", rid="b", polarity="refute")]
+def test_a_rivals_own_share_reading_now_counts_for_the_rival():
+    """The point of the cross-section. Under the old subject-shaped claim, Micron's own
+    share disclosure was discarded — only evidence ABOUT SK Hynix could enter, and
+    earnings calls do not discuss competitors, so the claim rested on SK's self-report
+    alone. Now each company's disclosure lands in its own row and they can be compared."""
+    rows = [_row("SKHY", "hbm_share", speaker="SKHY", doc="sk-call", rid="a"),
+            _row("SKHY", "hbm_pricing", speaker="SKHY", doc="sk-call", rid="a2"),
+            _row("MU", "hbm_share", speaker="MU", doc="mu-call", rid="b",
+                 polarity="weak"),
+            _row("MU", "customer_qualification", speaker="MU", doc="mu-call", rid="b2",
+                 polarity="weak")]
     a = corroborate(_relative(), rows, cfg=CFG)
-    assert a.verdict == "contradicted"
-    assert a.refute_score == 2.0 and a.support_score == 0.0
+    assert a.verdict == "resolved"
+    by = {r.entity: r for r in a.entity_readings}
+    assert by["SKHY"].standing == "strong" and by["MU"].standing == "weak"
+    assert by["005930.KS"].standing == "unknown"        # silent, not weak
+    assert all(r.reason for r in a.entity_readings)
+
+
+def test_a_reading_that_is_only_self_reported_says_so():
+    """Basis travels with the reading. A cohort where every name self-reports is still
+    comparable — the bias is common-mode — but a self-reported `strong` must never be
+    presented as if a customer had confirmed it."""
+    rows = [_row("SKHY", "hbm_share", speaker="SKHY", doc="sk", rid="a"),
+            _row("SKHY", "hbm_pricing", speaker="SKHY", doc="sk", rid="a2"),
+            _row("MU", "hbm_share", speaker="MU", doc="mu", rid="b"),
+            _row("MU", "customer_qualification", speaker="NVDA", otype="counterparty",
+                 doc="nv", rid="b2")]
+    a = corroborate(_relative(), rows, cfg=CFG)
+    by = {r.entity: r for r in a.entity_readings}
+    assert by["SKHY"].basis == "self_reported"     # only SK spoke about SK
+    assert by["MU"].basis == "corroborated"        # MU plus its customer
+    assert "NVDA" in by["MU"].speakers
 
 
 def test_relative_claim_ignores_non_direct_metrics_about_the_subject():

@@ -129,24 +129,31 @@ layers:
           - {entity: MU, stance: supplier}
           - {entity: "005930.KS", stance: supplier}
           - {entity: TSM, stance: supplier}
-      - id: sk_hbm_share
+      # 2026-08-07 由 sk_hbm_share 改写为截面比较。原来的形状是"SK Hynix 维持领先"
+      # ——一条只有 SK 自己会回答的命题：闸 3 只收「关于主体」的读数，而财报电话会几乎
+      # 从不点名竞争对手，于是它永远是 SK 自述 支持N/反驳0，实践上不可证伪。改成问
+      # 「这个位置在三家之间怎么分布」，每家的自我披露都算数（算给它自己），不可回答的
+      # 问题就变成了可比较的问题。持有其中一家时，这也是更诚实的问法。
+      - id: hbm_share_and_pricing_power
         kind: relative
-        subject: SKHY
-        statement: SK Hynix 维持核心客户 HBM 领先份额与定价权
+        entities: [SKHY, MU, "005930.KS"]
+        statement: HBM 份额与定价权在 SK 海力士 / 美光 / 三星之间如何分布
         horizon: {from: 2026-08-01, to: 2027-12-31}
         concepts:
           - key: hbm_share
             desc: HBM 市场份额/供货占比及其指引（含"份额将下降/提升"这类表述）
             direct: true
-            expect_from: [SKHY, MU, "005930.KS", NVDA]
+            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD]
           - key: customer_qualification
             desc: 核心客户认证进展——谁通过认证、谁被替代、供应商多元化推进
             direct: true
-            expect_from: [NVDA, AMD, "005930.KS", MU, SKHY]
+            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD]
           - key: hbm_pricing
             desc: HBM 价格/ASP 与毛利率走向（定价权的直接读数）
             direct: true
-            expect_from: [SKHY, MU]
+            expect_from: [SKHY, MU, "005930.KS"]
+        # 立场表仍然声明：谁自述、谁是竞对、谁是客户。它决定 basis 是"仅自述"还是
+        # "有交叉印证"——客户点名某家通过认证，比该家自己宣布重得多。
         witnesses:
           - {entity: SKHY, stance: incumbent}
           - {entity: MU, stance: competitor}
@@ -154,7 +161,7 @@ layers:
           - {entity: NVDA, stance: customer}
           - {entity: AMD, stance: customer}
         falsifiers:
-          - 竞争对手通过核心客户认证，且 SK 份额指引下修
+          - 某家份额指引下修，同时另一家通过其核心客户认证
           - HBM ASP 连续两个观察期下修
 
   - key: L6_equipment

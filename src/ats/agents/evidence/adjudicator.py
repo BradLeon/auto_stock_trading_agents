@@ -58,10 +58,8 @@ def _cluster_block(claim: ClaimDef, clusters: list[EvidenceCluster]) -> str:
 
 
 def build_context(claim: ClaimDef, clusters: list[EvidenceCluster]) -> str:
-    subject = f"\n主体：{claim.subject}（这是一条**相对**命题，问的是该主体相对同业的位置）" \
-        if claim.kind == "relative" else ""
     return (
-        f"命题：{claim.statement or claim.id}{subject}\n"
+        f"命题：{claim.statement or claim.id}\n"
         + (f"证伪条件：{'；'.join(claim.falsifiers)}\n" if claim.falsifiers else "")
         + "\n下面每一组是**一份独立证据**——同一个说话人在同一维度同一方向上的全部表述，"
         "已经去过重。同一组里跨多个期间的表述属于同一件事（例如一个分年度铺开的扩产计划），"
@@ -119,3 +117,86 @@ def judge(claim: ClaimDef, clusters: list[EvidenceCluster]) -> list[ClusterJudge
             speaker=c.speaker, concept=c.concept, stance=c.stance,
             primary=c.primary, observation_ids=c.observation_ids))
     return [seen[c.key] for c in clusters]
+
+
+# --------------------------------------------------------------------------- #
+# Cross-section: how does each company in the cohort read?
+# --------------------------------------------------------------------------- #
+def build_cross_section_context(claim: ClaimDef, by_entity: dict) -> str:
+    """One prompt covering the whole cohort, because the question IS comparative.
+
+    Judging each company in isolation and collating afterwards would lose the only
+    thing this claim asks: how they stand relative to one another. Seen together, three
+    companies each describing their own position can be compared even though each is
+    self-reporting — the bias is common-mode.
+    """
+    blocks = []
+    for entity in claim.entities:
+        groups = by_entity.get(entity) or []
+        if not groups:
+            blocks.append(f"### {entity}\n  （本期无可用读数）")
+            continue
+        lines = [f"### {entity}"]
+        for c in groups:
+            concept = claim.concept(c.concept)
+            src = "自述" if c.speaker == entity else f"由 {c.speaker} 披露"
+            lines.append(f"  · [{c.concept}（{concept.desc if concept else ''}）· {src}"
+                         + (f" · 期间 {', '.join(c.periods)}" if c.periods else "") + "]")
+            for r in c.rows[:MAX_SPANS]:
+                lines.append(f"      {(r.get('evidence_span') or '')[:SPAN_CHARS]}")
+        blocks.append("\n".join(lines))
+
+    return (
+        f"比较的问题：{claim.statement or claim.id}\n"
+        f"参与比较的公司：{', '.join(claim.entities)}\n\n"
+        "下面按公司分组给出各自的读数（已去重）。请**逐家**判断它在这个维度上处于什么位置。\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n逐家给出 standing：\n"
+        "  strong  —— 在该维度上处于领先/增强的位置\n"
+        "  neutral —— 持平，或证据不指向任一方向\n"
+        "  weak    —— 处于落后/削弱的位置\n"
+        "  unknown —— 证据不足以判断（**没有读数时必须用这个，不要猜**）\n\n"
+        "要点：\n"
+        "- 这是**横向比较**，不是逐家独立打分。判断某家是 strong 还是 neutral，要看它相对\n"
+        "  其他几家的表述强弱，而不是它自己听起来乐观不乐观。\n"
+        "- **每家都会把自己说得不错**，这是共同偏差。要找的是**差异**：谁给了具体的量产/\n"
+        "  认证/价格证据，谁只给了愿景；谁在追赶，谁被追赶。\n"
+        "- 没有读数的公司一律 unknown。缺席不是中性，更不是弱——它只是没说。\n"
+        "- reason 一句话讲清依据，要引到具体内容。这句会入库并展示给人看。\n"
+        "- 你只判读证据；**不要**给买卖建议、目标价或仓位。"
+    )
+
+
+def judge_cross_section(claim: ClaimDef, by_entity: dict) -> list:
+    """One reading per declared entity. Never raises — degrades to all-unknown.
+
+    Degrading to unknown is the safe direction: it leaves moat_pricing null
+    (cohort-neutral) rather than manufacturing a ranking out of an outage.
+    """
+    from ...schemas.chain import EntityReading
+    from .outputs import CrossSectionView
+
+    if not claim.entities:
+        return []
+    try:
+        view = run_structured("evidence_adjudicator", CrossSectionView,
+                              build_cross_section_context(claim, by_entity),
+                              skill_slug="evidence-adjudicator")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cross-section adjudication failed for %s: %s", claim.id, exc)
+        view = None
+
+    valid = {"strong", "neutral", "weak", "unknown"}
+    seen: dict[str, EntityReading] = {}
+    for item in (getattr(view, "readings", None) or []):
+        entity = (item.entity or "").upper()
+        if entity not in set(claim.entities):
+            log.info("cross-section: unknown entity %r on %s — dropped", entity, claim.id)
+            continue                      # it may not add companies to the cohort
+        standing = item.standing if item.standing in valid else "unknown"
+        seen[entity] = EntityReading(entity=entity, standing=standing,
+                                     reason=(item.reason or "").strip())
+    for entity in claim.entities:
+        seen.setdefault(entity, EntityReading(entity=entity, standing="unknown",
+                                              reason="未获判读"))
+    return [seen[e] for e in claim.entities]

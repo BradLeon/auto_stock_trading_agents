@@ -67,8 +67,7 @@ def concept_menu(symbol: str, sector: str = "ai_hardware") -> tuple[str, set[str
             # Only offer dimensions this company is actually a declared witness for —
             # a shorter, sharper menu classifies better than the whole sector's.
             speaks = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
-            if claim.subject:
-                speaks.add(claim.subject)
+            speaks |= set(claim.entities)
             if sym not in speaks:
                 continue
             for c in claim.concepts:

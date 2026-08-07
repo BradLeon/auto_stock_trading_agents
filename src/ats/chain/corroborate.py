@@ -36,7 +36,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from ..schemas.chain import ClaimAssessment, ClaimDef, EvidenceCluster
+from ..schemas.chain import (ClaimAssessment, ClaimDef, EntityReading,
+                            EvidenceCluster)
 
 log = logging.getLogger("ats.chain.corroborate")
 
@@ -63,17 +64,24 @@ def _in_horizon(claim: ClaimDef, row: dict) -> bool:
 
 
 def _relevant_concept(claim: ClaimDef, row: dict):
-    """Gate 3. Returns the Concept this row may move on this claim, or None."""
+    """Gate 3. Returns the Concept this row may move on this claim, or None.
+
+    For a cross-section (`relative`) claim the rule is: only `direct` dimensions — share,
+    qualification, pricing — and only about a company in the declared cohort. The
+    grouping then happens by `entity`, so each company's reading lands in its own row.
+
+    This is the isolation that matters, and it is unchanged in substance: a competitor's
+    capacity expansion still cannot become a statement about our holding's share,
+    because capacity is not a `direct` dimension. What changed is that the competitor's
+    own SHARE reading now counts — for the competitor — instead of being discarded.
+    """
     concept = claim.concept(row.get("concept") or "")
     if concept is None:
         return None                      # unmapped, or belongs to a different claim
     if claim.kind == "relative":
-        # The load-bearing rule of the whole design. `entity` is who the fact is ABOUT,
-        # so a competitor's own capacity reading is excluded here, while a reading about
-        # the subject's share — whoever disclosed it — counts.
-        if (row.get("entity") or "").upper() != claim.subject:
-            return None
         if not concept.direct:
+            return None
+        if (row.get("entity") or "").upper() not in set(claim.entities):
             return None
     return concept
 
@@ -144,6 +152,79 @@ def build_clusters(claim: ClaimDef, rows: list[dict], *,
     return list(clusters.values())
 
 
+def cross_section(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
+                  as_of: datetime | None = None, judge=None) -> ClaimAssessment:
+    """Read a `relative` claim as a comparison: one standing per declared entity.
+
+    There is no single verdict here on purpose. "SK Hynix maintains its lead" was a
+    question only SK Hynix's own call ever answered, because competitors do not discuss
+    each other; "how do share and pricing read across SK / Micron / Samsung" is answered
+    by all three, each about itself, and the comparison is what the cross-section factor
+    actually needs.
+    """
+    cfg = cfg or {}
+    min_clusters = cfg.get("min_clusters", 2)
+    as_of = as_of or datetime.now(timezone.utc)
+
+    assessment = ClaimAssessment(claim_id=claim.id, layer=claim.layer, as_of=as_of,
+                                 witnesses_expected=len(claim.entities))
+    clusters = build_clusters(claim, rows, cfg=cfg)
+    by_entity: dict[str, list] = {e: [] for e in claim.entities}
+    for c in clusters:
+        by_entity.setdefault(c.entity, []).append(c)
+
+    heard = [e for e in claim.entities if by_entity.get(e)]
+    assessment.witnesses_reported = len(heard)
+    assessment.silent_witnesses = [e for e in claim.entities if not by_entity.get(e)]
+    assessment.evidence_clusters = len(clusters)
+
+    if not clusters:
+        assessment.note = "无适用证据 —— 无法比较（注意：取不到数据不等于负面）"
+        return assessment
+
+    if judge is None:
+        from ..agents.evidence.adjudicator import judge_cross_section as _default
+
+        judge = _default
+    readings = {r.entity: r for r in judge(claim, by_entity)}
+
+    out = []
+    for entity in claim.entities:
+        group = by_entity.get(entity) or []
+        reading = readings.get(entity) or EntityReading(entity=entity)
+        stances = {c.stance for c in group if c.stance and c.primary}
+        speakers = sorted({c.speaker for c in group})
+        reading.evidence_clusters = len(group)
+        reading.stance_classes = len(stances)
+        reading.speakers = speakers
+        reading.observation_ids = [i for c in group for i in c.observation_ids]
+        if not group:
+            reading.standing = "unknown"
+            reading.basis = "thin"
+            reading.reason = reading.reason or "本期未发声"
+        elif len(group) < min_clusters:
+            reading.basis = "thin"
+        elif len(stances) >= 2:
+            reading.basis = "corroborated"
+        else:
+            # Only the company itself spoke. Kept, not dropped: across a cohort where
+            # every name self-reports, the bias is common-mode and the COMPARISON still
+            # carries information — which a single self-reported claim would not.
+            reading.basis = "self_reported"
+        out.append(reading)
+
+    assessment.entity_readings = out
+    assessment.stance_classes = len({c.stance for c in clusters if c.stance and c.primary})
+    graded = [r for r in out if r.standing != "unknown"]
+    assessment.verdict = "resolved" if len(graded) >= 2 else "unknown"
+    assessment.observation_ids = [i for c in clusters for i in c.observation_ids]
+    assessment.note = (
+        f"{len(graded)}/{len(claim.entities)} 家有读数 · "
+        + " · ".join(f"{r.entity} {r.standing}({r.basis})" for r in graded)
+        if graded else "读数不足两家，无法构成比较")
+    return assessment
+
+
 def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
                 as_of: datetime | None = None, judge=None) -> ClaimAssessment:
     """Aggregate observations into one claim verdict.
@@ -152,6 +233,8 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     that: the same clusters and the same judgements always produce the same verdict.
     Defaults to the LLM adjudicator; tests inject a stub.
     """
+    if claim.kind == "relative":
+        return cross_section(claim, rows, cfg=cfg, as_of=as_of, judge=judge)
     cfg = cfg or {}
     min_clusters = cfg.get("min_clusters", 2)
     min_stances = cfg.get("min_stance_classes", 2)
@@ -241,8 +324,7 @@ def assess_layer(layer, rows_by_entity, *, cfg: dict | None = None,
     out = []
     for claim in layer.claims:
         entities = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
-        if claim.subject:
-            entities.add(claim.subject)
+        entities |= set(claim.entities)
         rows = [r for e in entities for r in rows_by_entity.get(e, [])]
         out.append(corroborate(claim, rows, cfg=cfg, as_of=as_of, judge=judge))
     return out

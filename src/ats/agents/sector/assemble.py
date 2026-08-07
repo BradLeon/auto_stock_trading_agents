@@ -246,6 +246,7 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
     valuation snapshots while the actual filings sit unread in the ledger.
     """
     from ...chain.corroborate import assess_layer
+    from ...chain.sources import source_entities_for
     from ...memory import get_store
 
     store = get_store()
@@ -257,7 +258,12 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
             continue
         rows_by_entity: dict[str, list[dict]] = {}
         for claim in commons:
-            for e in claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}:
+            # Third-party sources are never NAMED in a claim — they bind by dimension —
+            # so iterating declared witnesses alone silently drops every non-company
+            # witness, which is exactly the `regulator` stance this block most needs.
+            for e in (claim.expected_witnesses()
+                      | {w.entity.upper() for w in claim.witnesses}
+                      | source_entities_for(claim)):
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)
         for a in assess_layer(layer, rows_by_entity, cfg=ccfg):

@@ -187,11 +187,20 @@ def inventory(symbol: str) -> list[CachedDoc]:
         return []
     out: list[CachedDoc] = []
     for p in sorted(folder.iterdir()):
-        if p.suffix.lower() not in (".md", ".txt"):
+        if p.suffix.lower() not in (".md", ".txt", ".pdf", ".htm", ".html"):
             continue
         try:
-            meta, body = _split_frontmatter(p.read_text(encoding="utf-8", errors="ignore"))
-        except OSError:
+            if p.suffix.lower() in (".md", ".txt"):
+                meta, body = _split_frontmatter(p.read_text(encoding="utf-8", errors="ignore"))
+            else:
+                # Hand-dropped PDFs/HTML are the ONLY source for names the dataset does
+                # not carry (Samsung, Nanya). Skipping them here would report a witness
+                # as "no document" while `documents.gather` was happily reading it —
+                # a coverage view that disagrees with the fetch path is worse than none.
+                from . import documents
+
+                meta, body = {"doc_type": "manual"}, documents._read_doc(p)
+        except Exception:  # noqa: BLE001 - one unreadable file must not hide the rest
             continue
         if len(body.strip()) < MIN_CHARS:
             continue

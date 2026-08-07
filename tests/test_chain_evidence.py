@@ -457,28 +457,57 @@ def test_keyed_dataset_wins_over_every_search_path(tmp_path, monkeypatch):
     assert text2.strip() == text.strip() and "缓存命中" in note2
 
 
-def test_a_company_that_has_not_reported_yet_is_a_gap_not_last_quarter(monkeypatch):
-    """Asking the dataset for "latest" and checking afterwards is how a company that
-    has not reported gets served its previous call — the exact shape of the NVDA
-    failure. The target quarter goes INTO the query."""
+def test_unpublished_quarter_falls_back_but_is_labelled(monkeypatch):
+    """The target quarter goes INTO the query, never "latest, checked afterwards" —
+    that ordering is what served NVDA an eleven-month-old deck.
+
+    When the quarter genuinely has not been published we DO fall back to the last one
+    (a witness's previous call is real testimony, and dropping it leaves no customer
+    voice at all until late August), but the note says so and the cached document keeps
+    its own quarter. Stale-but-flagged and stale-and-silent are different things; only
+    the second has ever caused damage here."""
     from ats.agents.evidence import observer as obs
     from ats.data import defeatbeta
 
-    seen = {}
+    asked = []
 
     def _fetch(symbol, *, fiscal_year=None, fiscal_quarter=None):
-        seen.update(year=fiscal_year, quarter=fiscal_quarter)
-        return None                       # Q2 FY2027 does not exist yet
+        asked.append((fiscal_year, fiscal_quarter))
+        if fiscal_quarter == 2:
+            return None                    # Q2 FY2027 not published yet
+        return defeatbeta.Transcript(symbol="NVDA", fiscal_year=2027, fiscal_quarter=1,
+                                     report_date="2026-05-20",
+                                     text="Colette Kress: first quarter results. " * 60)
 
     monkeypatch.setattr(defeatbeta, "fetch", _fetch)
-    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
-    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [])
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
                         lambda *a, **k: ("Q2 FY2027", ""))
 
-    text, _src, _note = obs.fetch_document("NVDA")
-    assert seen == {"year": 2027, "quarter": 2}     # asked for THAT quarter
-    assert not text.strip()
+    text, src, note = obs.fetch_document("NVDA")
+    assert asked[0] == (2027, 2)           # exact quarter first, not "latest"
+    assert src == "defeatbeta" and text.strip()
+    assert "尚未发布" in note and "Q1 FY2027" in note
+
+
+def test_one_bad_gathered_piece_does_not_condemn_the_hand_dropped_ones(tmp_path, monkeypatch):
+    """What actually happened to Samsung on 2026-08-07: `gather` returned a 2020
+    Newmont deck (web search) concatenated ahead of two authoritative PDFs the user had
+    just placed in 信息源/005930.KS/. Screening the JOIN rejected all three, so the one
+    source that exists for a witness the dataset does not carry was thrown away with the
+    garbage that preceded it."""
+    from ats.agents.evidence import observer as obs
+
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [
+        ("investor presentation (tavily:…NEM…)", "NEWMONT CORPORATION gold AISC " * 200),
+        ("doc:samsung_2026Q2_script.pdf", "Samsung Electronics second quarter results. " * 200),
+    ])
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
+
+    text, src, note = obs.fetch_document("005930.KS")
+    assert "Samsung Electronics" in text
+    assert "NEWMONT" not in text
+    assert "已丢弃 1 份" in note
 
 
 def test_identity_guard_rejects_a_different_companys_filing():

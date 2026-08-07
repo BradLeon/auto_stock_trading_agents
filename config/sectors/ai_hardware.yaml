@@ -93,8 +93,8 @@ layers:
     #   机制无关；"AI 存储需求外溢到 NAND/HDD"是**另一条命题**，该由归纳引擎自己提。
     witness_roster:
       peer:       [SKHY, "005930.KS", MU]
-      upstream:   [ASML, KLAC, LRCX]
-      downstream: [NVDA, AMD]
+      upstream:   [ASML, KLAC, LRCX, TSM]
+      downstream: [NVDA, AMD, MSFT]
       reference:  ["2408.TW"]
       private:    [CXMT 长鑫存储]
     # 可证伪命题（见 docs/CHAIN_EVIDENCE.md）。人工维护：agent 只能提议，只有人能加。
@@ -109,19 +109,26 @@ layers:
         concepts:
           - key: supply_tightness
             desc: 供给紧张程度——售罄比例、订单能见度、交期长短、是否成为出货瓶颈
-            expect_from: [SKHY, MU, "005930.KS", NVDA]
+            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD, TSM]
           - key: capacity_addition
             desc: 新增产能、扩产节奏与资本开支投放（含 bit 供给增长）
-            expect_from: [SKHY, MU, "005930.KS"]
+            expect_from: [SKHY, MU, "005930.KS", TSM]
           - key: hbm_demand
             desc: 下游对 HBM 的需求强度、采购计划与瓶颈表述
-            expect_from: [NVDA, MSFT]
+            expect_from: [NVDA, AMD, MSFT]
+        # 2026-08-07 补入 AMD / TSM。判据仍是"能否给出区分性读数"：
+        #   AMD  MI 系列是第二大 HBM 买家，会明确评论 HBM 供给 → customer
+        #   TSM  CoWoS 是 HBM 上板的必经环节，产能与排期由它披露 → supplier
+        # ASML/KLAC/LRCX 仍不入列：它们说的是 WFE 订单，对"HBM 此刻紧不紧"只是间接
+        # read-through，进来只会稀释而不增加分辨力。
         witnesses:
           - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
           - {entity: MSFT, stance: customer}
           - {entity: SKHY, stance: supplier}
           - {entity: MU, stance: supplier}
           - {entity: "005930.KS", stance: supplier}
+          - {entity: TSM, stance: supplier}
       - id: sk_hbm_share
         kind: relative
         subject: SKHY
@@ -135,7 +142,7 @@ layers:
           - key: customer_qualification
             desc: 核心客户认证进展——谁通过认证、谁被替代、供应商多元化推进
             direct: true
-            expect_from: [NVDA, "005930.KS", MU, SKHY]
+            expect_from: [NVDA, AMD, "005930.KS", MU, SKHY]
           - key: hbm_pricing
             desc: HBM 价格/ASP 与毛利率走向（定价权的直接读数）
             direct: true
@@ -145,6 +152,7 @@ layers:
           - {entity: MU, stance: competitor}
           - {entity: "005930.KS", stance: competitor}
           - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
         falsifiers:
           - 竞争对手通过核心客户认证，且 SK 份额指引下修
           - HBM ASP 连续两个观察期下修

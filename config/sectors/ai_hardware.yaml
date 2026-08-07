@@ -116,6 +116,12 @@ layers:
           - key: hbm_demand
             desc: 下游对 HBM 的需求强度、采购计划与瓶颈表述
             expect_from: [NVDA, AMD, MSFT]
+          # 2026-08-07 新增。HBM 装到加速卡上必须过 CoWoS/先进封装这一关，所以封装吞吐
+          # 是本命题机制里与存储供给并列的另一条链路——它紧，HBM 就到不了客户手上，
+          # 无论存储厂产出多少。分开声明是因为两者会背离：存储宽松而封装紧，或反之。
+          - key: packaging_throughput
+            desc: 先进封装（CoWoS/2.5D/3D）的产能、排期与是否成为出货瓶颈
+            expect_from: [TSM, NVDA, AMD]
         # 2026-08-07 补入 AMD / TSM。判据仍是"能否给出区分性读数"：
         #   AMD  MI 系列是第二大 HBM 买家，会明确评论 HBM 供给 → customer
         #   TSM  CoWoS 是 HBM 上板的必经环节，产能与排期由它披露 → supplier

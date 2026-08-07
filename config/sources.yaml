@@ -57,10 +57,15 @@ sources:
     stance: regulator
     observation_type: regulatory
     cadence: monthly
-    concepts: [supply_tightness, hbm_demand]
+    concepts: [packaging_throughput]
     direction_from: [yoy, mom]
-    # 覆盖台积电（CoWoS 封装）与南亚科。和韩国出口并列时能分开"存储紧张"与"封装紧张"，
-    # 这正是 hbm_supply_tight 机制里最难靠单家财报分辨的一环。
+    # 2026-08-07 改绑。原来挂在 supply_tightness / hbm_demand 上，判读器每次都判中性，
+    # 理由是"台湾 IC 出口是整体口径，无法归因到 HBM"——它是对的：台湾出口是**代工与封装**，
+    # 不是存储。这条序列真正能说话的是封装吞吐，改绑到 packaging_throughput 之后它才
+    # 开始提供信息，而不是每期贡献一条"与命题无关"。
+    #
+    # 与韩国那条的对照说明了判据：同一类统计（半导体出口），换个国家机制完全不同。
+    # 入选标准始终是"能否给出区分性读数"，不是"是不是官方数据"。
 
   dram_contract_price:
     label: DRAM 合约价

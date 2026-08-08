@@ -249,23 +249,39 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
     """Fetch factors for a layer's cohort (its tickers + cohort_extra peers), rank,
     size, and (if structure=True and KB notes exist) blend in the structure analyst's
     tech_tenor/moat_pricing overlay → re-rank. Persists the basket. Returns (rows, basket)."""
-    from ...config import load_sector_config
+    from ...config import canonical_entity, load_sector_config
 
     cfg = load_sector_config(sector_name)
     layer = next((ly for ly in cfg.layers if ly.key == layer_key), None)
     if layer is None:
         raise ValueError(f"layer {layer_key!r} not in sector {sector_name!r}")
 
-    subgroups = {t.symbol: t.subgroup for t in layer.tickers}
-    cohort = [t.symbol for t in layer.tickers]
-    for x in layer.cohort_extra:
-        if x not in cohort:
-            cohort.append(x)
-            subgroups[x] = "(peer)"
+    # One row per COMPANY, not per listing. SK hynix is configured under three codes
+    # (SKHY / HY9H / 000660.KS) because the book holds more than one of them, and the
+    # cohort took all three: it ranked the same company three times and handed it 20.5%
+    # of a 30% layer budget. The structure analyst even wrote "HY9H 与 SKHY/000660.KS 为
+    # 同一经济实体" in its own rationale — and still scored all three, because it was
+    # given three rows.
+    #
+    # Listing-level differences (liquidity premium, local pricing, listing vintage) are
+    # real, but they are the portfolio's problem, not the analysts'. Selection and
+    # relative ranking are about the business. `canonical_entity` also prefers the US
+    # ticker by construction of config/entities.yaml, which fixes a data defect for
+    # free: the Korean lines report market cap in KRW, so 000660.KS came through as
+    # 1,009,413 against SKHY's 979.
+    subgroups: dict[str, str] = {}
+    cohort: list[str] = []
+    for sym in [t.symbol for t in layer.tickers] + list(layer.cohort_extra):
+        canon = canonical_entity(sym)
+        if canon in cohort:
+            continue
+        cohort.append(canon)
+        subgroups[canon] = next((t.subgroup for t in layer.tickers if t.symbol == sym),
+                                "(peer)")
     layer_cap = layer.weight_cap if layer.weight_cap is not None else 0.10
 
     rows = fetch_factors(cohort, subgroups)
-    extra = set(layer.cohort_extra)
+    extra = {canonical_entity(x) for x in layer.cohort_extra}
     for r in rows:
         r.sizable = r.symbol not in extra
     rank_cohort(rows, layer_cap=layer_cap)          # pure-quant pass

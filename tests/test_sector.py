@@ -395,3 +395,32 @@ def test_stale_baskets_are_not_carried_across_days(monkeypatch):
     monkeypatch.setattr(assemble, "build",
                         lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
     assert sector_review.run("test_sector", use_llm=True, live_data=False).baskets == []
+
+
+def test_cohort_is_one_row_per_company_not_per_listing(monkeypatch):
+    """SK hynix is configured under three codes because the book holds more than one.
+    The cohort took all three: it ranked the same company three times and handed it
+    20.5% of a 30% layer budget. Listing-level differences are the portfolio's problem;
+    selection and relative ranking are about the business."""
+    from ats.agents.sector import cross_section
+    from ats.schemas.sector import SectorConfig, SectorLayer, LayerTicker
+
+    cfg = SectorConfig(name="t", layers=[SectorLayer(
+        key="L5", label="L5", weight_cap=0.30, tickers=[
+            LayerTicker(symbol="TSM"), LayerTicker(symbol="MU"),
+            LayerTicker(symbol="HY9H"), LayerTicker(symbol="SKHY"),
+            LayerTicker(symbol="000660.KS"), LayerTicker(symbol="005930.KS")])])
+    seen = {}
+
+    def _fetch(symbols, subgroups=None):
+        seen["cohort"] = list(symbols)
+        return [cross_section.FactorRow(symbol=s, market_cap=1e11, rev_growth=0.3)
+                for s in symbols]
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name="t": cfg)
+    monkeypatch.setattr(cross_section, "fetch_factors", _fetch)
+    cross_section.run_layer("t", "L5", persist=False, structure=False)
+
+    # Three SK hynix listings fold onto the US ADR — which is the canonical id in
+    # config/entities.yaml, so "prefer the US ticker" needs no separate rule.
+    assert seen["cohort"] == ["TSM", "MU", "SKHY", "005930.KS"]

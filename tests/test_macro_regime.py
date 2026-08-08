@@ -6,6 +6,7 @@ have to be verifiable before any LLM ever sees them.
 """
 
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +64,47 @@ def test_staleness_is_per_frequency_not_absolute():
 def test_missing_series_yields_a_stale_reading_rather_than_disappearing():
     r = ind.reading("gone", None)
     assert r.stale is True and r.level is None
+
+
+def test_catchup_run_detects_missed_nfp_release_and_unemployment():
+    """The event-day trigger is an accelerator, not the only ingestion path."""
+    prior = MacroReview(
+        name="macro", as_of=datetime(2026, 8, 1, tzinfo=timezone.utc), regime="old",
+        indicators=[ind.IndicatorReading(
+            key="unemployment", label="失业率", unit="pct", level=4.2,
+            as_of=date(2026, 6, 1), source="fred:UNRATE")])
+    current = [
+        ind.IndicatorReading(key="unemployment", label="失业率", unit="pct", level=4.1,
+                             d_1m=-10.0, as_of=date(2026, 7, 1), source="fred:UNRATE"),
+        ind.IndicatorReading(key="payrolls", label="非农就业（千人）", unit="level",
+                             level=160100.0, d_1m=125.0, as_of=date(2026, 7, 1),
+                             source="fred:PAYEMS"),
+    ]
+    event = SimpleNamespace(date=date(2026, 8, 7), kind="nfp", triggers=["macro"])
+    deltas = ind.detect_deltas(current, prior, events=[event], through=date(2026, 8, 8))
+
+    by_key = {d.key: d for d in deltas}
+    assert set(by_key) == {"unemployment", "payrolls"}
+    assert by_key["unemployment"].release_date == date(2026, 8, 7)
+    assert by_key["unemployment"].observation_date == date(2026, 7, 1)
+    assert by_key["payrolls"].period_change == 125.0
+
+
+def test_vintage_snapshot_detects_revisions_to_prior_observations():
+    prior = MacroReview(
+        name="macro", as_of=datetime(2026, 8, 1, tzinfo=timezone.utc), regime="old",
+        indicators=[ind.IndicatorReading(
+            key="payrolls", label="非农就业（千人）", unit="level", level=160000,
+            as_of=date(2026, 6, 1), recent_observations={"2026-06-01": 160000})])
+    current = [ind.IndicatorReading(
+        key="payrolls", label="非农就业（千人）", unit="level", level=160120,
+        as_of=date(2026, 7, 1),
+        recent_observations={"2026-06-01": 159980, "2026-07-01": 160120})]
+    deltas = ind.detect_deltas(current, prior, through=date(2026, 8, 8))
+    assert any(d.change_kind == "revision" and d.observation_date == date(2026, 6, 1)
+               for d in deltas)
+    assert any(d.change_kind == "new_release" and d.observation_date == date(2026, 7, 1)
+               for d in deltas)
 
 
 def test_lookback_is_date_based_so_it_works_across_frequencies():
@@ -125,6 +167,13 @@ def test_sahm_rule_drives_the_growth_axis_negative():
     sahm = next(i for i in inputs if i.key == "sahm")
     assert sahm.value >= 0.5 and sahm.score == -1.0
     assert score < 0
+
+
+def test_three_month_payroll_average_feeds_growth_axis():
+    pays = monthly(6, lambda i: 100000 + i * 225)
+    score, inputs = regime.growth_axis({"payrolls": pays}, regime._cfg(None))
+    nfp = next(i for i in inputs if i.key == "nfp_3m_avg")
+    assert nfp.value == 225.0 and nfp.score > 0 and score > 0
 
 
 def test_core_pce_momentum_drives_the_inflation_axis():
@@ -398,13 +447,28 @@ def test_no_llm_run_still_computes_and_persists_the_quadrant(monkeypatch):
     assert get_store().latest_macro_review("macro").quadrant == "stagflation"
 
 
-def test_hysteresis_state_carries_across_consecutive_runs(monkeypatch):
+def test_same_day_rerun_does_not_fake_a_second_confirmation_week(monkeypatch):
     from ats.agents.macro import review as macro_review
 
     _patch_series(monkeypatch, _stagflation_series())
     first = macro_review.run("macro", use_llm=False, live_data=True)
     assert (first.quadrant_state, first.quadrant_weeks) == ("provisional", 1)
     second = macro_review.run("macro", use_llm=False, live_data=True)
+    assert (second.quadrant_state, second.quadrant_weeks) == ("provisional", 1)
+
+
+def test_hysteresis_state_carries_across_distinct_review_dates(monkeypatch):
+    from ats.agents.macro import review as macro_review
+
+    _patch_series(monkeypatch, _stagflation_series())
+    times = iter([
+        datetime(2026, 8, 1, 8, tzinfo=timezone.utc),
+        datetime(2026, 8, 8, 8, tzinfo=timezone.utc),
+    ])
+    monkeypatch.setattr(macro_review, "_now", lambda: next(times))
+    first = macro_review.run("macro", use_llm=False, live_data=True)
+    second = macro_review.run("macro", use_llm=False, live_data=True)
+    assert (first.quadrant_state, first.quadrant_weeks) == ("provisional", 1)
     assert (second.quadrant_state, second.quadrant_weeks) == ("confirmed", 2)
 
 
@@ -528,6 +592,25 @@ def test_report_separates_computed_facts_from_model_narrative():
     assert "象限判定的逐项依据" in out and "名义利率分解" in out
     assert "附录：指标读数" in out
     assert "证伪条件" in out and "初请连续两周高于 26 万" in out
+
+
+def test_report_puts_data_and_conclusion_delta_before_current_state():
+    from ats.agents.macro import report
+    from ats.schemas.macro_strategy import MacroConfig, MacroDataDelta
+
+    r = MacroReview(
+        name="macro", as_of=datetime(2026, 8, 8, tzinfo=timezone.utc), regime="new",
+        comparison_as_of=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        conclusion_delta="结论由偏谨慎转为中性。",
+        data_deltas=[MacroDataDelta(
+            key="payrolls", label="非农就业（千人）", unit="level",
+            release_date=date(2026, 8, 7), observation_date=date(2026, 7, 1),
+            current_level=160100, period_change=125)],
+    )
+    out = report.render(r, MacroConfig(name="macro", label="宏观"))
+    assert "本期最重要：宏观数据与结论 Delta" in out
+    assert "2026-08-07" in out and "2026-07-01" in out
+    assert out.index("宏观数据与结论 Delta") < out.index("行业状态")
 
 
 def test_report_omits_deterministic_sections_when_there_is_no_data():

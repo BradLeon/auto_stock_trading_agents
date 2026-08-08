@@ -53,7 +53,12 @@ _SERIES_SPEC: dict[str, tuple[str, str, str, str]] = {
     "initial_claims": ("ICSA",          "初请失业金",     "index", "weekly"),
     "continuing_claims": ("CCSA",       "续请失业金",     "index", "weekly"),
     "unemployment":   ("UNRATE",        "失业率",         "pct",   "monthly"),
+    # PAYEMS is a level in thousands; its one-month raw difference is the
+    # headline non-farm-payroll change.  Keeping the full series here makes the
+    # print auditable and comparable with the previous review.
+    "payrolls":       ("PAYEMS",         "非农就业（千人）", "level", "monthly"),
     # ── 通胀 / 增长（月频）────────────────────────────
+    "headline_cpi":   ("CPIAUCSL",       "CPI 指数",        "index", "monthly"),
     "core_pce":       ("PCEPILFE",      "核心 PCE 指数",  "index", "monthly"),
     # CFNAI oscillates around zero and changes sign — a percent change on it is
     # division noise, so it reports absolute differences (`level`).

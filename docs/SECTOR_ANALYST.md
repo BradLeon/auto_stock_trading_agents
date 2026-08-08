@@ -116,7 +116,15 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector show ai_hardware
 
 ### 自动调度
 
-`config/pead.yaml` 的 `sector_review` 段控制：`enabled`、`sectors`、`weekday`（0=周一）、`inject_prep`、`inject_monitor`。调度器每周一自动跑（在每日 `_daily` 里检查星期）。行业视角变化是周级的，日级刷新没意义且费 token，所以默认周更。
+`config/pead.yaml` 的 `sector_review` 段控制：`enabled`、`sectors`、`weekday`（5=周六）、`inject_prep`、`inject_monitor`。调度器的独立 `weekly_review` job 按 `config/settings.yaml` 的 `weekly_review_at` / `weekly_review_tz`（当前为周六 08:50，Asia/Shanghai）先跑宏观、再跑行业和截面重排；它不属于每日 `_daily` 级联，也不依赖 NYSE 交易日。若机器睡眠或 daemon 未运行而错过该时点，依次执行：
+
+```bash
+ats macro review macro
+ats sector review ai_hardware
+ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告；默认 dry-run，仍须人工审批
+```
+
+行业视角变化是周级的，日级刷新没意义且费 token，所以默认周更。
 
 ### 增删关注标的
 

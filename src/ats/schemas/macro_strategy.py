@@ -109,6 +109,31 @@ class IndicatorReading(BaseModel):
     as_of: date | None = None           # 该序列最后一个观测的日期（非运行时间）
     source: str = ""                    # fred:DGS10 / yfinance:^VIX / macromicro …
     stale: bool = False                 # 观测过旧（按频率各自的容忍度判定）
+    # Small vintage snapshot used on the next run to detect revisions to an
+    # already-published observation.  Raw histories still are not persisted.
+    recent_observations: dict[str, float] = Field(default_factory=dict)
+
+
+class MacroDataDelta(BaseModel):
+    """One macro observation discovered since the comparison review.
+
+    FRED dates monthly observations to their reference month, not their release
+    day.  Keep both dates so an 8-Aug review can correctly identify the 7-Aug
+    employment release even though its observation is dated 1-Jul.
+    """
+
+    key: str
+    label: str = ""
+    change_kind: Literal["new_release", "revision", "newly_tracked"] = "new_release"
+    release_date: date | None = None
+    observation_date: date | None = None
+    previous_observation_date: date | None = None
+    previous_level: float | None = None
+    current_level: float | None = None
+    level_change: float | None = None
+    period_change: float | None = None
+    unit: IndicatorUnit = "pct"
+    source: str = ""
 
 
 class AxisInput(BaseModel):
@@ -238,6 +263,8 @@ class MacroReview(BaseModel):
     inflation_axis: float = 0.0        # [-1, +1]，负=下行
     axis_inputs: list[AxisInput] = Field(default_factory=list)
     indicators: list[IndicatorReading] = Field(default_factory=list)
+    comparison_as_of: datetime | None = None
+    data_deltas: list[MacroDataDelta] = Field(default_factory=list)
     decomposition: RateDecomposition | None = None
     earnings_backdrop: EarningsBackdrop | None = None   # 总量盈利周期（优先级 8）
     shock_vs_trend: list[str] = Field(default_factory=list)
@@ -247,6 +274,7 @@ class MacroReview(BaseModel):
     # ── 叙事层（LLM 填）────────────────────────────────
     regime: str = ""                   # risk-on/off + 周期位置，一句话自包含（注入用）
     summary: str = ""
+    conclusion_delta: str = ""         # 相对上一份正式周报，结论为何/如何变化
     rate_path: str = ""                # 利率路径判断（降/持/加息与时点）
     sector_tilts: list[SectorTilt] = Field(default_factory=list)   # 核心交付物
     asset_implications: str = ""       # 股/债/美元/黄金/原油
@@ -280,6 +308,8 @@ class MacroReview(BaseModel):
         # this block, never the full report, and the deterministic call is the part
         # that must survive truncation.
         parts = [f"[宏观评审 {self.as_of:%Y-%m-%d}] {self.regime}", self.quadrant_line()]
+        if self.conclusion_delta:
+            parts.append(f"相对上期: {self.conclusion_delta}")
         if self.rate_path:
             parts.append(f"利率路径: {self.rate_path}")
         if self.asset_implications:

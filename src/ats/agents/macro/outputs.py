@@ -24,6 +24,10 @@ class SectorTiltView(BaseModel):
 class MacroReviewLLMView(BaseModel):
     regime: str = Field(description="risk-on/neutral/risk-off + 周期位置，一句话自包含（会被注入其他 agent）")
     summary: str = Field(default="", description="5-10 行总评，面向 prep/monitor/行业分析师读者")
+    conclusion_delta: str = Field(
+        default="",
+        description=("相对上一份正式宏观评审，结论发生了什么变化及为什么；必须优先解释"
+                     "新增/修订数据。若结论不变，明确写‘结论不变’并说明新数据为何不足以改变它。"))
     rate_path: str = Field(default="", description="美联储利率路径判断：降/持/加息与时点")
     sector_tilts: list[SectorTiltView] = Field(default_factory=list,
                                                description="核心交付物：超配/低配哪些板块行业")

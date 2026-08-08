@@ -26,7 +26,7 @@ def _now() -> datetime:
 
 
 def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
-                  live_data: bool = True) -> dict:
+                  live_data: bool = True, as_of: datetime | None = None) -> dict:
     """Run the whole code-computed layer: readings, axes, quadrant, alerts.
 
     Computed here rather than inside assemble.build() on purpose — build() is
@@ -45,11 +45,19 @@ def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
         log.warning("macro: no indicator series available; regime layer skipped")
         return {}
     readings = indicators.build_readings(series, macro_data.series_spec())
-    return regime.assess(
+    out = regime.assess(
         series, readings, overrides=cfg.regime,
         prior_quadrant=(prior.quadrant if prior else None),
         prior_state=(prior.quadrant_state if prior else "insufficient"),
         prior_weeks=(prior.quadrant_weeks if prior else 0))
+    if prior is not None:
+        from ...config import load_events
+
+        now = as_of or _now()
+        out["comparison_as_of"] = prior.as_of
+        out["data_deltas"] = indicators.detect_deltas(
+            readings, prior, events=load_events(), through=now.date())
+    return out
 
 
 def _earnings_backdrop(mc):
@@ -84,15 +92,31 @@ def _det_block(det: dict) -> str:
     if not det:
         return ""
     lines = ["## 确定性读数（代码算出，**不得改写或重算**，你的工作是解释）", ""]
-    lines.append(f"- 象限: **{det['quadrant']}**（{det['quadrant_state']}，"
-                 f"连续 {det['quadrant_weeks']} 期） | 增长轴 {det['growth_axis']:+.2f}"
-                 f" / 通胀轴 {det['inflation_axis']:+.2f}")
+    if "quadrant" in det:
+        lines.append(f"- 象限: **{det['quadrant']}**（{det['quadrant_state']}，"
+                     f"连续 {det['quadrant_weeks']} 期） | 增长轴 {det['growth_axis']:+.2f}"
+                     f" / 通胀轴 {det['inflation_axis']:+.2f}")
     if det.get("quadrant_reason"):
         lines.append(f"- 判定理由: {det['quadrant_reason']}")
     if det.get("focus_keys"):
         lines.append(f"- 本期重点指标: {', '.join(det['focus_keys'])}")
     if det.get("alerts"):
         lines.append("- ⚠️ 告警: " + "; ".join(det["alerts"]))
+
+    deltas = det.get("data_deltas") or []
+    if deltas:
+        lines += ["", "## 距上次正式评审的新增/修订数据（最高优先级）"]
+        for d in deltas:
+            published = f"发布 {d.release_date}" if d.release_date else "本次检测到"
+            observed = f"数据期 {d.observation_date}" if d.observation_date else ""
+            before = "n/a" if d.previous_level is None else str(d.previous_level)
+            after = "n/a" if d.current_level is None else str(d.current_level)
+            kind = {"new_release": "新发布", "revision": "修订",
+                    "newly_tracked": "新增跟踪"}.get(d.change_kind, d.change_kind)
+            lines.append(f"- **{d.label or d.key}** [{kind}] {published} {observed}: "
+                         f"{before} → {after}")
+        lines.append("- 必须在 conclusion_delta 中逐项说明这些变化是否改变上次结论；"
+                     "不能只复述当前水平。")
 
     dec = det.get("decomposition")
     if dec is not None:
@@ -158,15 +182,47 @@ def _det_block(det: dict) -> str:
     return "\n".join(lines)
 
 
+def _prior_block(prior: MacroReview | None) -> str:
+    if prior is None:
+        return ""
+    tilts = "; ".join(f"{t.sector}={t.stance}" for t in prior.sector_tilts) or "—"
+    return (
+        f"## 上次正式评审（比较基准：{prior.as_of:%Y-%m-%d}）\n"
+        f"- 象限: {prior.quadrant}（{prior.quadrant_state}） | "
+        f"增长 {prior.growth_axis:+.2f} / 通胀 {prior.inflation_axis:+.2f}\n"
+        f"- regime: {prior.regime}\n- 利率路径: {prior.rate_path or '—'}\n"
+        f"- 板块倾斜: {tilts}\n"
+        "请只把它用于比较变化，不得把旧数字当作本期事实。")
+
+
+def _fallback_conclusion_delta(prior: MacroReview | None, regime_text: str,
+                               det: dict) -> str:
+    if prior is None:
+        return "首次建立比较基准；下次评审起将逐项展示数据与结论变化。"
+    q = det.get("quadrant", "transition")
+    g = det.get("growth_axis", 0.0)
+    inf = det.get("inflation_axis", 0.0)
+    changed = "结论不变" if q == prior.quadrant and regime_text == prior.regime else "结论已更新"
+    return (f"{changed}：象限 {prior.quadrant} → {q}；"
+            f"增长轴 {prior.growth_axis:+.2f} → {g:+.2f}；"
+            f"通胀轴 {prior.inflation_axis:+.2f} → {inf:+.2f}。")
+
+
 def run(name: str = "macro", *, use_llm: bool = True, live_data: bool = True) -> MacroReview:
     from ...config import load_macro_config
     from ...memory import get_store
 
     cfg = load_macro_config(name)
     store = get_store()
-    prior = store.latest_macro_review(name)
+    started = _now()
+    latest = store.latest_macro_review(name)
+    # A same-day retry still compares with the previous formal period.  This is
+    # essential for catch-up: an incomplete first rerun must not consume the
+    # 1-Aug→8-Aug delta before the corrected report is produced.
+    prior = store.latest_macro_review_before(name, started.date()) or (
+        latest if latest is not None and latest.as_of.date() < started.date() else None)
     mc = assemble.build(cfg, live_data=live_data)
-    det = deterministic(cfg, prior, live_data=live_data)
+    det = deterministic(cfg, prior, live_data=live_data, as_of=started)
     # Parse the aggregate earnings backdrop out of the FactSet text assemble
     # already fetched — no second PDF read. Index level only (§2 role boundary).
     backdrop = _earnings_backdrop(mc)
@@ -178,30 +234,34 @@ def run(name: str = "macro", *, use_llm: bool = True, live_data: bool = True) ->
     if not use_llm:
         # The deterministic layer still runs and persists: verifying the numbers
         # before any model sees them is the whole point of the --no-llm path.
-        review = MacroReview(name=name, as_of=_now(), regime="(no-llm)",
-                             summary=f"context stats: {mc.stats()}", **det)
+        review = MacroReview(
+            name=name, as_of=started, regime="(no-llm)",
+            summary=f"context stats: {mc.stats()}",
+            conclusion_delta=_fallback_conclusion_delta(prior, "(no-llm)", det), **det)
         store.save_macro_review(review)
         return review
 
     context = mc.as_context()
     block = _det_block(det)
-    if block:
-        context = f"{block}\n\n{context}"
+    comparison = _prior_block(prior)
+    if block or comparison:
+        context = "\n\n".join(x for x in (comparison, block, context) if x)
 
     try:
         view: MacroReviewLLMView = run_structured("macro_strategist", MacroReviewLLMView,
                                                   context, skill_slug="macro-strategist")
     except Exception as exc:  # noqa: BLE001
         log.warning("macro review LLM failed for %s: %s", name, exc)
-        return prior or MacroReview(name=name, as_of=_now(), regime="(LLM unavailable)")
+        return latest or prior or MacroReview(name=name, as_of=started, regime="(LLM unavailable)")
 
-    review = _to_review(name, cfg, view, det)
+    review = _to_review(name, cfg, view, det, prior=prior, as_of=started)
     store.save_macro_review(review)
     return review
 
 
 def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
-               det: dict | None = None) -> MacroReview:
+               det: dict | None = None, *, prior: MacroReview | None = None,
+               as_of: datetime | None = None) -> MacroReview:
     valid = {t.key: t.label for t in cfg.themes}
     themes = []
     for tv in view.themes:
@@ -221,7 +281,9 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
     # `**det` last is deliberate: the deterministic fields are code-owned and must
     # win outright if a future view ever grows a same-named field.
     return MacroReview(
-        name=name, as_of=_now(), regime=view.regime, summary=view.summary,
+        name=name, as_of=as_of or _now(), regime=view.regime, summary=view.summary,
+        conclusion_delta=(view.conclusion_delta or
+                          _fallback_conclusion_delta(prior, view.regime, det or {})),
         rate_path=view.rate_path, sector_tilts=tilts,
         asset_implications=view.asset_implications, themes=themes,
         top_risks=view.top_risks, falsifier=view.falsifier, **(det or {}))

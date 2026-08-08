@@ -150,6 +150,15 @@ def test_store_roundtrip():
     assert len(store.recent_macro_reviews("m")) == 2
 
 
+def test_same_day_rerun_uses_previous_formal_day_as_comparison():
+    store = get_store()
+    store.save_macro_review(MacroReview(name="m", as_of=datetime(2026, 8, 1), regime="weekly"))
+    store.save_macro_review(MacroReview(name="m", as_of=datetime(2026, 8, 8, 1),
+                                        regime="bad-rerun"))
+    prior = store.latest_macro_review_before("m", datetime(2026, 8, 8).date())
+    assert prior is not None and prior.regime == "weekly"
+
+
 def test_report_render_and_write(tmp_path):
     r = MacroReview(name="macro", as_of=NOW, regime="risk-off", summary="S",
                     rate_path="维持", asset_implications="黄金受益",

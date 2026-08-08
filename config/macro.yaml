@@ -83,6 +83,8 @@ regime:
   growth:
     sahm_bad: 0.50            # 失业率 3m均值 − 12m最低 ≥ 0.50pp（Sahm 规则）
     sahm_good: 0.0
+    nfp_3m_bad_k: 50.0        # 非农新增 3 个月均值（千人）；低于此值判恶化
+    nfp_3m_good_k: 200.0      # 高于此值判改善；中间连续映射，避免单月翻转
     initial_claims_bad_pct: 10.0     # 初请 4 周均值 vs 3 个月前
     continuing_claims_bad_pct: 8.0   # 续请（再就业难度，早期信号）
     cfnai_bad: -0.35          # CFNAI-MA3

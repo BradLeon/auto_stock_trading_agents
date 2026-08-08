@@ -11,8 +11,8 @@
 | # | Workflow | 周期触发 | 事件触发 | 角色链 | 形态 |
 |---|---|---|---|---|---|
 | I1 | 每日情报流 | 每交易日盘后 | 高置信 research insight → 飞书即时 push | research_extract → news_triage → context_monitor（逐 PEAD target） | 普通函数（线性、无审批、廉价） |
-| I2 | 宏观周报 | 每周一 | FOMC / CPI / NFP 当日（events.yaml → `macro`） | macro_strategist | 单 agent 函数 |
-| I3 | 行业周报 | 每周一（I2 之后，读新鲜 regime） | 产业链重磅事件 / 龙头财报 read-through（events.yaml → `sector:NAME`） | sector_analyst | 单 agent 函数 |
+| I2 | 宏观周报 | 每周六 08:50（Asia/Shanghai）；每次均补拉上次正式评审后的数据 Delta | FOMC / CPI / NFP 当日（`events.yaml` → `macro`，即时加速路径） | macro_strategist | 单 agent 函数 |
+| I3 | 行业周报 | 每周六，紧跟 I2（读新鲜 regime） | 产业链重磅事件 / 龙头财报 read-through（`events.yaml` → `sector:NAME`） | sector_analyst | 单 agent 函数 |
 | I4 | PEAD prep | — | 财报 T-3（earnings calendar 自动） | pead_analyst ×3 + industry_analyst | LangGraph（`graph/pead.py` prep 分支） |
 | I5 | 技术面读数 | 每交易日（PEAD 之后、Chief 之前） | — | 确定性代码（**无 LLM**）：7 点动量评分 + VIX 调节 + 期限结构/破位两层 | 普通函数 |
 | I6 | 绩效/风控快照 | 每交易日盘后 | risk_state≠normal → 飞书告警 | 确定性代码（无 LLM） | 普通函数 |
@@ -96,12 +96,13 @@ boss_review(interrupt) → trader → persist → END
 
 ## 5. 触发路由（`runtime/scheduler.py`）
 
-共三个 cron job（mon-fri + NYSE session 过滤），全部串行（单 worker executor —
-它们共用同一个 sqlite 连接）：
+共四个 cron job，全部串行（单 worker executor——它们共用同一个 sqlite 连接）。日级
+与财报窗口仅在周一至周五且通过 NYSE session 过滤；周度研究不依赖交易日：
 
 | job | 时点（ET） | 内容 |
 |---|---|---|
 | `daily_cycle` | `settings.yaml` `schedule.run_at`（10:30） | 下方级联 |
+| `weekly_review` | 周六 `settings.yaml` `schedule.weekly_review_at`（08:50，`weekly_review_tz=Asia/Shanghai`） | 宏观 → 行业 → 截面重排；不碰 broker |
 | `pead_score_amc` | `pead.yaml` `score_windows.amc`（20:00） | 当晚盘后财报的打分 |
 | `pead_score_bmo` | `pead.yaml` `score_windows.bmo`（11:00） | 当日盘前财报的打分 |
 
@@ -168,11 +169,17 @@ Chief、审批卡照常，但没有单会到券商。
 每季度人工补下季日期（`ats events upcoming` 提示过期）；财报日历已自动
 （`data/earnings_calendar.py` 驱动 prep/score 时点）。
 
+宏观事件触发与增量补拉是互补关系：发布日触发追求时效；后续任意正式运行都会比较上次
+评审保存的 vintage 与当前数据源，追回遗漏发布和修订。报告顶部的 Delta 章节先于当前状态，
+同时展示数据变化及其对应的结论变化。
+
 ## 6. CLI 入口 → 决策图
 
 | 命令 | 说明 |
 |---|---|
 | `ats chief run` | T3 手动收口；`--no-llm --offline` 走 stub 全链（测试接线） |
+| `ats macro review [NAME]` | 手动运行宏观周报；`--no-llm` 只作组装/存根验证，`--offline` 不拉外部数据，`show`/`probe` 可查看结果或输入。生产补跑使用不带这些开关的 `ats macro review macro`。 |
+| `ats sector review [NAME]` | 手动运行行业周报；应在宏观周报后运行。`show`/`probe` 查看结果或输入；生产补跑使用 `ats sector review ai_hardware`。 |
 | `ats pead score SYM --chief` | T1：score 建议落库后立即 chief 收口 |
 | `ats pead scorewindow --window amc\|bmo` | 手工跑一个打分窗口；`--plan-only` 只看路由决策、`--as-of ISO` 回拨日历重放历史财报、`--no-chief` 不推审批 |
 | `ats pead transcriptprobe [--quarters N]` | 审计 transcript 检索：对各标的最近 N 季核对取到的是否本季（验收标准：错季 = 0） |

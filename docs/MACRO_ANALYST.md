@@ -470,6 +470,32 @@ stub 保护（`agents/macro/context.py` 拦截以 `(` 开头的 regime），所�
 
 ## 12. 相关文档
 
+### 命令行与补跑
+
+```bash
+# 生产补跑：拉取 FRED / 市场 / 新闻及 FactSet 材料，落库并写周报
+ats macro review macro
+
+# 查看最近结果或检查输入；--no-llm 会写 stub，不应用于生产库验证
+ats macro show macro
+ats macro probe macro
+```
+
+正常调度由 `weekly_review` 在周六 08:50（`Asia/Shanghai`）执行，顺序为宏观后行业。
+FOMC/CPI/NFP 等 `config/events.yaml` 事件也会在交易日的 `daily_cycle` 中触发额外宏观
+评审，以获得发布日时效性；这条即时路径予以保留，但不是数据入库的唯一入口。
+
+每一次正式宏观评审（事件触发、周度调度或手动命令）都会读取上次正式评审保存的指标
+vintage，再与本次 FRED 结果比较，补齐区间内的新增观测和历史修订。比如上次评审为
+8 月 1 日、8 月 7 日 NFP 发布日任务失败、8 月 8 日手动补跑，本次仍会识别 8 月 7 日发布的
+非农和失业率；FRED 的 `observation_date` 是数据所属月份，报告另用 `release_date` 标识发布日期。
+
+报告顶部固定输出高优章节“宏观数据与结论 Delta”：逐项列出新增/修订、发布日期、
+数据所属期、上次值到本次值和期变动，并说明这些变化是否以及如何改变 regime、风险预算
+或行业倾斜。若结论未变，也必须明确写出“数据已更新、结论维持”及原因。错过任务后，先
+执行 `ats macro review macro`，再执行 `ats sector review ai_hardware`，最后按需运行
+`ats chief run --channel feishu_bot` 更新决策。
+
 - 系统全局设计、角色矩阵 → `docs/DESIGN.md`
 - 代码规范、数据源约定 → `docs/DEVELOPMENT.md`
 - 数据源接入状态 → `docs/DATA_SOURCES.md`

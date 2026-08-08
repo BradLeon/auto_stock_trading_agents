@@ -277,6 +277,15 @@ source /Users/liuchao/Code/trading/auto_stock_trading_agents/.venv/bin/activate
 效果完全一样——但这条也要在能找到 `.venv` 的目录下跑（同样两种解法）。
 
 ```bash
+# 周度研究（默认真实数据 + LLM；只更新研究存档，不会下单）
+ats macro review macro         # 手动补跑宏观周报（FRED/市场/新闻 → 宏观评审）
+ats macro show macro           # 查看最近一次宏观评审与历史摘要
+ats sector review ai_hardware  # 手动补跑 AI 硬件行业周报（应在宏观评审之后运行）
+ats sector show ai_hardware    # 查看最近一次行业评审与历史摘要
+
+# 补跑周度研究后，如需让 Chief 基于新结论更新决策：
+ats chief run --channel feishu_bot  # 默认 dry-run，发飞书审批卡；绝不要加 --yes
+
 ats chief run                 # 手动触发一次 Chief 收口（读全部存档→决策→风控→审批）
 ats chief show                # 看最近一次 Chief 决策的完整上下文
 ats pead show SYM             # 看某只票的财报事件档案（预期、打分、是否已发终版）
@@ -295,6 +304,16 @@ ats trader perf                # 看历史绩效
 ats schedule --now             # 立即手动跑一轮完整级联（非交易日会自动跳过）
 ats serve                      # 常驻进程：处理飞书审批回调（和调度进程分开跑）
 ```
+
+周度任务的正常触发时点由 `config/settings.yaml` 控制：`weekly_review` 在
+`Asia/Shanghai` 时区每周六 `08:50` 依次运行“宏观 → 行业 → 截面重排”。若机器在
+该时刻睡眠或调度器未运行，按上面的前三条命令补跑；`ats schedule --now` 不会补跑
+这两个周度任务，且在非交易日会跳过日级联。
+
+宏观更新有两条并存路径：FOMC/CPI/NFP 等发布日事件触发用于尽快出结论；任何后续的
+周度调度或手动 `macro review` 也会把“上次正式评审 → 本次运行”之间所有已跟踪指标的
+新增观测和历史修订补拉回来。因此发布日任务失败不会形成永久缺口。新周报顶部的
+“宏观数据与结论 Delta”会高优列出数据发布日期、数据所属期、前值/新值以及结论变化。
 
 日常运行靠两个常驻进程：`ats schedule --live`（定时触发级联）和 `ats serve`
 （处理飞书回调），二者都建议交给 launchd/systemd 之类的守护进程管理，别手动

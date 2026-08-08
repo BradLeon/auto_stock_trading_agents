@@ -33,6 +33,8 @@ DEFAULTS: dict = {
     "growth": {
         "sahm_bad": 0.50,          # 失业率 3m均值 − 12m最低 ≥ 0.50pp（Sahm 规则）
         "sahm_good": 0.0,
+        "nfp_3m_bad_k": 50.0,
+        "nfp_3m_good_k": 200.0,
         "initial_claims_bad_pct": 10.0,    # 初请 4 周均值 vs 3 个月前
         "continuing_claims_bad_pct": 8.0,
         "cfnai_bad": -0.35,        # CFNAI-MA3
@@ -134,6 +136,22 @@ def growth_axis(series: dict, cfg: dict) -> tuple[float, list[AxisInput]]:
                 value=round(sahm, 2),
                 threshold=f"≥ +{g['sahm_bad']:.2f}pp 判恶化（单边，0=无信号）",
                 score=round(score, 3), note="公认的衰退识别规则，只报警不报喜"))
+
+    # A single payroll print is revision-prone.  Use the latest three monthly
+    # PAYEMS changes so a later catch-up run sees the new release but does not
+    # let one noisy month flip the growth call by itself.
+    payrolls = ind.as_points(series.get("payrolls"))
+    if len(payrolls) >= 4:
+        monthly_changes = [payrolls[i][1] - payrolls[i - 1][1]
+                           for i in range(len(payrolls) - 3, len(payrolls))]
+        avg3 = sum(monthly_changes) / len(monthly_changes)
+        inputs.append(AxisInput(
+            key="nfp_3m_avg", label="非农新增 3 个月均值",
+            value=round(avg3, 1),
+            threshold=(f"<{g['nfp_3m_bad_k']:.0f}k 判恶化 / "
+                       f">{g['nfp_3m_good_k']:.0f}k 判改善"),
+            score=_scaled(avg3, g["nfp_3m_bad_k"], g["nfp_3m_good_k"]),
+            note="PAYEMS 月差；3 个月均值降低单月发布与修订噪音"))
 
     # Claims: weekly and timely, but unusable raw — 4-week mean vs 3 months ago.
     ic = ind.as_points(series.get("initial_claims"))

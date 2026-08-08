@@ -21,6 +21,49 @@ _STATE_LABEL = {"confirmed": "已确认", "provisional": "暂定",
                 "insufficient": "证据不足"}
 
 
+def _delta_section(review: MacroReview) -> list[str]:
+    """Highest-priority answer: what changed since the prior formal review."""
+    if review.comparison_as_of is None:
+        return []
+    lines = [
+        "## 🚨 本期最重要：宏观数据与结论 Delta",
+        "",
+        f"> 比较区间：{review.comparison_as_of:%Y-%m-%d} 上次正式评审 → "
+        f"{review.as_of:%Y-%m-%d} 本次运行。发布日触发与事后补跑使用同一套增量检测。",
+        "",
+        "### 新增 / 修订数据",
+        "",
+    ]
+    if not review.data_deltas:
+        lines.append("- 本区间未检测到已跟踪数据源的新观测或修订。")
+    else:
+        lines += [
+            "| 指标 | 类型 | 发布日 | 数据期 | 上次 → 本次 | 本期变动 |",
+            "|---|---|---|---|---|---|",
+        ]
+        kinds = {"new_release": "**新发布**", "revision": "**修订**",
+                 "newly_tracked": "新增跟踪"}
+        for d in review.data_deltas:
+            if d.unit == "pct":
+                values = (f"{d.previous_level}%" if d.previous_level is not None else "—",
+                          f"{d.current_level}%" if d.current_level is not None else "—")
+                move = "—" if d.period_change is None else f"{d.period_change:+.1f}bp"
+            elif d.unit == "level":
+                values = (str(d.previous_level) if d.previous_level is not None else "—",
+                          str(d.current_level) if d.current_level is not None else "—")
+                move = "—" if d.period_change is None else f"{d.period_change:+.1f}"
+            else:
+                values = (str(d.previous_level) if d.previous_level is not None else "—",
+                          str(d.current_level) if d.current_level is not None else "—")
+                move = "—" if d.period_change is None else f"{d.period_change:+.1f}%"
+            lines.append(
+                f"| {d.label or d.key} | {kinds.get(d.change_kind, d.change_kind)} | "
+                f"{d.release_date or '自动检测'} | {d.observation_date or '—'} | "
+                f"{values[0]} → {values[1]} | {move} |")
+    lines += ["", "### 结论变化", "", review.conclusion_delta or "—", ""]
+    return lines
+
+
 def _deterministic_section(review: MacroReview) -> list[str]:
     """Code-computed facts, rendered ABOVE the narrative and labelled as such.
 
@@ -112,7 +155,7 @@ def _indicator_appendix(review: MacroReview) -> list[str]:
     if not live:
         return []
     lines = ["## 附录：指标读数", "",
-             "变化单位：收益率/利差为 bp，价格与指数为 %，零中心序列为绝对差。", "",
+             "变化单位：收益率/利差为 bp，价格与指数为 %；非农就业与零中心序列为绝对差。", "",
              "| 指标 | 水平 | Δ1w | Δ1m | Δ3m | z(3y) | 10y百分位 | 截至 |",
              "|---|---|---|---|---|---|---|---|"]
     for r in live:
@@ -137,6 +180,7 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
         "> 📐 标记的章节由确定性代码算出；其余为模型解读。",
         "",
     ]
+    lines += _delta_section(review)
     lines += _deterministic_section(review)
     lines += [
         "## 行业状态（regime）",

@@ -1240,6 +1240,22 @@ class TradingMemory:
             (name,)).fetchone()
         return MacroReview.model_validate_json(row["payload"]) if row else None
 
+    def latest_macro_review_before(self, name: str, before_date):
+        """Latest full review from an earlier calendar day.
+
+        Same-day reruns overwrite the report file and must keep comparing with
+        the previous formal period; otherwise the first imperfect rerun consumes
+        the delta and a corrected rerun minutes later says "nothing changed".
+        """
+        from ..schemas.macro_strategy import MacroReview
+
+        day = before_date.isoformat() if hasattr(before_date, "isoformat") else str(before_date)
+        row = self.conn.execute(
+            "SELECT payload FROM macro_reviews WHERE name = ? "
+            "AND substr(as_of, 1, 10) < ? ORDER BY as_of DESC LIMIT 1",
+            (name, day)).fetchone()
+        return MacroReview.model_validate_json(row["payload"]) if row else None
+
     def recent_macro_reviews(self, name: str = "macro", limit: int = 8) -> list[dict]:
         rows = self.conn.execute(
             "SELECT name, as_of, regime, summary FROM macro_reviews "

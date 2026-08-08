@@ -19,7 +19,7 @@ from __future__ import annotations
 import statistics
 from datetime import date, timedelta
 
-from ...schemas.macro_strategy import IndicatorReading
+from ...schemas.macro_strategy import IndicatorReading, MacroDataDelta
 
 # How long an observation may go without an update before we call it stale.
 # Monthly tolerances have to be generous: FRED dates a monthly series to the
@@ -192,6 +192,7 @@ def reading(key: str, series, *, label: str = "", unit: str = "pct",
         pct_10y=percentile(_window(points, _PCT_WINDOW_DAYS, last_date), level),
         as_of=last_date,
         stale=(ref - last_date).days > _STALE_DAYS.get(freq, 7),
+        recent_observations={d.isoformat(): round(v, 6) for d, v in points[-4:]},
     )
 
 
@@ -209,3 +210,95 @@ def build_readings(series_by_key: dict, spec: dict,
         out.append(reading(key, series_by_key.get(key), label=label, unit=unit,
                            source=f"{prefix}:{code}", freq=freq, as_of=as_of))
     return out
+
+
+_EVENT_KEYS = {
+    "nfp": {"payrolls", "unemployment"},
+    "cpi": {"headline_cpi"},
+    "pce": {"core_pce"},
+}
+
+
+def detect_deltas(readings: list[IndicatorReading], prior, *, events=(),
+                  through: date | None = None) -> list[MacroDataDelta]:
+    """Compare current source snapshots with the previous formal review.
+
+    This is deliberately run on *every* scheduled or manual review.  Calendar
+    events still trigger same-day reviews for speed, but are not required for
+    correctness: a missed 7-Aug release is discovered by an 8-Aug run because
+    the current source vintage is compared with the last persisted vintage.
+
+    The event calendar supplies publication dates where known.  FRED's monthly
+    index is the reference month (for example 1-Jul), not the day BLS published
+    it (7-Aug); conflating those dates was the reason the prior report looked
+    stale even after the source had updated.
+    """
+    if prior is None:
+        return []
+    end = through or date.today()
+    start = prior.as_of.date()
+    prior_by_key = {r.key: r for r in prior.indicators}
+
+    release_dates: dict[str, date] = {}
+    for ev in events or ():
+        keys = _EVENT_KEYS.get(getattr(ev, "kind", ""), set())
+        ev_date = getattr(ev, "date", None)
+        if ev_date is None or not (start < ev_date <= end):
+            continue
+        if "macro" not in getattr(ev, "triggers", []):
+            continue
+        for key in keys:
+            release_dates[key] = max(ev_date, release_dates.get(key, ev_date))
+
+    out: list[MacroDataDelta] = []
+    for cur in readings:
+        if cur.level is None:
+            continue
+        old = prior_by_key.get(cur.key)
+        release_date = release_dates.get(cur.key)
+
+        # Once both reviews carry short vintage snapshots, revisions to any of
+        # the overlapping recent observations become visible as their own rows.
+        if old is not None and old.recent_observations and cur.recent_observations:
+            for obs, old_value in old.recent_observations.items():
+                new_value = cur.recent_observations.get(obs)
+                if new_value is None or abs(new_value - old_value) < 1e-9:
+                    continue
+                out.append(MacroDataDelta(
+                    key=cur.key, label=cur.label, change_kind="revision",
+                    release_date=release_date, observation_date=date.fromisoformat(obs),
+                    previous_observation_date=date.fromisoformat(obs),
+                    previous_level=old_value, current_level=new_value,
+                    level_change=round(new_value - old_value, 4), unit=cur.unit,
+                    source=cur.source))
+
+        newer = (old is not None and cur.as_of is not None
+                 and (old.as_of is None or cur.as_of > old.as_of))
+        same_period_revision = (old is not None and cur.as_of == old.as_of
+                                and old.level is not None
+                                and abs(cur.level - old.level) >= 1e-9
+                                and not old.recent_observations)
+        # A newly introduced series is only called an interval delta when the
+        # calendar confirms a relevant release.  This avoids claiming that old
+        # CPI history is "new" merely because tracking was added today.
+        newly_available = old is None and release_date is not None
+        if not (newer or same_period_revision or newly_available):
+            continue
+
+        kind = "revision" if same_period_revision else "new_release"
+        prior_level = old.level if old is not None else None
+        out.append(MacroDataDelta(
+            key=cur.key, label=cur.label, change_kind=kind,
+            release_date=release_date, observation_date=cur.as_of,
+            previous_observation_date=(old.as_of if old is not None else None),
+            previous_level=prior_level, current_level=cur.level,
+            level_change=(round(cur.level - prior_level, 4)
+                          if prior_level is not None else None),
+            period_change=cur.d_1m, unit=cur.unit, source=cur.source))
+
+    # Official releases first, then revisions, then market/weekly updates.
+    return sorted(out, key=lambda d: (
+        d.release_date is None,
+        0 if d.change_kind == "new_release" else 1,
+        d.release_date or d.observation_date or date.min,
+        d.label))

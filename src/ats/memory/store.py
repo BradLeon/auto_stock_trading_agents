@@ -975,17 +975,28 @@ class TradingMemory:
             (document_id,)).fetchone() is not None
 
     def save_claim_assessment(self, assessment) -> None:
-        """Snapshot a verdict. Versioned by (claim_id, as_of), never overwritten in
-        place: "when did this claim turn from mixed to contradicted" is exactly the
-        question a verdict table exists to answer, and it is unanswerable if each run
-        clobbers the last."""
+        """Snapshot a verdict, one row per claim per DAY.
+
+        Versioned rather than overwritten because "when did this claim turn from mixed
+        to contradicted" is the question a verdict table exists to answer. But the unit
+        of version is the day, not the instant: the report file is already named by date
+        and same-day reruns overwrite it, so a table that appended on every rerun
+        disagreed with its own report — three `evidence report` runs on 2026-08-07 left
+        three rows per claim, and the history read as change when nothing had changed.
+
+        Normalising happens HERE rather than at the call sites so every writer gets it,
+        and it converts to UTC first: the CLI stamped `+00:00` while the scheduler
+        stamped an ET offset, and `latest_claim_assessments` picks MAX over TEXT — a
+        lexicographic compare on wall-clock digits, which mixed offsets can invert.
+        """
         import json
 
+        day = assessment.as_of.astimezone(timezone.utc).date().isoformat()
         self.conn.execute(
             "INSERT OR REPLACE INTO claim_assessments (claim_id,as_of,layer,verdict,"
             " support_score,refute_score,evidence_clusters,stance_classes,"
             " witnesses_expected,witnesses_reported,payload) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (assessment.claim_id, assessment.as_of.isoformat(), assessment.layer,
+            (assessment.claim_id, day, assessment.layer,
              assessment.verdict, assessment.support_score, assessment.refute_score,
              assessment.evidence_clusters, assessment.stance_classes,
              assessment.witnesses_expected, assessment.witnesses_reported,

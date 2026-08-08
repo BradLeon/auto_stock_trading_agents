@@ -91,7 +91,7 @@ class LayerAssessment(BaseModel):
     label: str = ""
     boom_score: float = Field(50.0, ge=0, le=100)   # 景气度
     supply_demand: str = ""                          # 紧张/平衡/过剩 + 依据
-    pricing_power: str = ""
+    pricing_power: str = ""       # 谁在瓶颈环节；见 SKILL.md 的证据优先纪律
     capital_flow: str = ""
     cycle_position: str = ""
     signal: str = "neutral"                          # bullish | neutral | bearish

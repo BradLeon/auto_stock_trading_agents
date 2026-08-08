@@ -222,6 +222,29 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
             for r in sorted(rows, key=lambda x: x.rank)])
 
 
+def _layer_view(sector_name: str, layer_key: str) -> str:
+    """The sector analyst's read on this layer, from the review that just ran.
+
+    The weekly job already runs review -> cross-section in order, but the two shared
+    only a storage row: the within-layer scoring never saw what had just been concluded
+    about the layer. Best-effort — a missing review must not block the ranking.
+    """
+    try:
+        from ...memory import get_store
+
+        review = get_store().latest_sector_review(sector_name)
+        assessment = review.layer_assessment(layer_key) if review else None
+        if assessment is None:
+            return ""
+        return (f"景气 {assessment.boom_score:.0f} [{assessment.signal}]\n"
+                f"供需：{assessment.supply_demand}\n"
+                f"定价权：{assessment.pricing_power}\n"
+                f"周期：{assessment.cycle_position}")
+    except Exception as exc:  # noqa: BLE001
+        log.info("layer view unavailable for %s/%s: %s", sector_name, layer_key, exc)
+        return ""
+
+
 def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structure: bool = False):
     """Fetch factors for a layer's cohort (its tickers + cohort_extra peers), rank,
     size, and (if structure=True and KB notes exist) blend in the structure analyst's
@@ -250,26 +273,28 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
         r.quant_rank = r.rank
 
     # Competitive-position evidence from the chain ledger (docs/CHAIN_EVIDENCE.md).
-    # Only `relative` verdicts reach here, and only supportive/contradicted ones —
-    # unknown/mixed deliberately yield nothing so moat_pricing stays NULL rather than 0.
-    moat_ctx = ""
+    # Only claims that DECLARE a structural factor reach here (`feeds_factor`), and only
+    # resolved comparisons — an unresolved one yields nothing, so the factor stays NULL
+    # rather than 0. "Not looked at" and "looked at, judged neutral" stay distinct.
+    evidence_ctx = ""
     if structure:
         try:
-            from ...chain import moat
+            from ...chain import factor_evidence
             from ...memory import get_store
 
-            packs = moat.packs_for_layer(
+            packs = factor_evidence.packs_for_layer(
                 layer, get_store(), cfg=cfg.review.get("corroboration", {}))
-            moat_ctx = moat.as_context(packs)
+            evidence_ctx = factor_evidence.as_context(packs)
         except Exception as exc:  # noqa: BLE001 - evidence is an overlay, never a blocker
             log.warning("chain evidence unavailable for %s: %s", layer_key, exc)
 
     structural, subgroup_notes = False, {}
-    if structure and (layer.structure_notes or moat_ctx):
+    if structure and (layer.structure_notes or evidence_ctx):
         from . import structure as struct_mod
 
-        scores, subgroup_notes = struct_mod.assess(rows, layer.structure_notes,
-                                                   moat_context=moat_ctx)
+        scores, subgroup_notes = struct_mod.assess(
+            rows, layer.structure_notes, moat_context=evidence_ctx,
+            layer_view=_layer_view(sector_name, layer_key))
         if scores:
             for r in rows:
                 s = scores.get(r.symbol)

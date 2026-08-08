@@ -94,14 +94,39 @@ def test_render_persists_verdict_history():
     store.save_observation(_obs("SKHY", "hbm_share", direction="down", span="share to decline"))
     cfg = load_sector_config("ai_hardware")
 
+    # Same-day reruns pass DIFFERENT instants — which is what production does, and
+    # what the previous version of this test failed to reproduce by pinning NOW.
     report.render(cfg, store, as_of=NOW, ind_cfg={})
     report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})
-    report.render(cfg, store, as_of=NOW + timedelta(days=7), ind_cfg={})   # rerun
+    report.render(cfg, store, as_of=NOW + timedelta(days=7, hours=3), ind_cfg={})
+    report.render(cfg, store, as_of=NOW + timedelta(days=7, hours=9), ind_cfg={})
 
     hist = store.claim_assessment_history("hbm_share_and_pricing_power")
-    # Two dates, not three rows: the snapshot is stamped with the REPORT's as_of, so a
-    # rerun replaces rather than appends — otherwise the history reads as change when
-    # nothing changed.
-    assert len(hist) == 2, "one snapshot per report date; reruns must not append"
-    assert {h["verdict"] for h in hist}                      # verdict recorded
+    # Two DAYS, not four rows. The report file is named by date and same-day reruns
+    # overwrite it; a table that appended on every rerun would disagree with its own
+    # report, and the history would read as change when nothing had changed.
+    assert len(hist) == 2, "one snapshot per DAY; same-day reruns must replace"
+    assert {h["as_of"] for h in hist} == {
+        NOW.date().isoformat(), (NOW + timedelta(days=7)).date().isoformat()}
     assert store.latest_claim_assessments()                   # and a latest view exists
+
+
+def test_snapshot_day_is_utc_regardless_of_the_callers_timezone():
+    """The CLI stamps UTC and the scheduler stamps ET. `latest_claim_assessments` picks
+    MAX over TEXT — a lexicographic compare on wall-clock digits — so mixing offsets
+    could order the history backwards."""
+    from datetime import timedelta, timezone as tz
+
+    store = get_store()
+    store.save_observation(_obs("SKHY", "hbm_share", direction="down", span="share"))
+    cfg = load_sector_config("ai_hardware")
+
+    et = tz(timedelta(hours=-4))
+    # 2026-08-06 22:00 ET is 2026-08-07 02:00 UTC — the same UTC day as the next call.
+    report.render(cfg, store, as_of=NOW.astimezone(et).replace(hour=22), ind_cfg={})
+    report.render(cfg, store, as_of=NOW.replace(hour=3), ind_cfg={})
+
+    hist = store.claim_assessment_history("hbm_share_and_pricing_power")
+    assert {h["as_of"] for h in hist} <= {NOW.date().isoformat(),
+                                          (NOW.date() - timedelta(days=1)).isoformat()}
+    assert all(len(h["as_of"]) == 10 for h in hist), "stored as a date, not an instant"

@@ -118,8 +118,15 @@ def _stub_adjudicator(monkeypatch):
             standing = ("unknown" if "（本期无可用读数）" in text
                         else "weak" if "[[WEAK]]" in text
                         else "neutral" if "[[NEUTRAL]]" in text else "strong")
+            # Cite the clusters whose direction matches the standing — the real
+            # adjudicator is asked to name what it relied on, and a stub that cited
+            # everything would hide the very defect `key_clusters` exists to catch.
+            want = "down" if standing == "weak" else "up"
+            cited = [ln.split("id=", 1)[1].strip()
+                     for ln in body if " id=" in ln or ln.strip().startswith("· id=")]
+            keys = [k for k in cited if f"|{want}|" in k] or cited
             out.append(EntityReadingView(entity=entity, standing=standing,
-                                         reason=f"stub:{standing}"))
+                                         reason=f"stub:{standing}", key_clusters=keys))
         return CrossSectionView(readings=out)
 
     def _dispatch(role, schema, context, **kw):

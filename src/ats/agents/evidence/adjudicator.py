@@ -140,7 +140,8 @@ def build_cross_section_context(claim: ClaimDef, by_entity: dict) -> str:
         for c in groups:
             concept = claim.concept(c.concept)
             src = "自述" if c.speaker == entity else f"由 {c.speaker} 披露"
-            lines.append(f"  · [{c.concept}（{concept.desc if concept else ''}）· {src}"
+            lines.append(f"  · id={c.key}\n"
+                         f"    [{c.concept}（{concept.desc if concept else ''}）· {src}"
                          + (f" · 期间 {', '.join(c.periods)}" if c.periods else "") + "]")
             for r in c.rows[:MAX_SPANS]:
                 lines.append(f"      {(r.get('evidence_span') or '')[:SPAN_CHARS]}")
@@ -163,6 +164,8 @@ def build_cross_section_context(claim: ClaimDef, by_entity: dict) -> str:
         "  认证/价格证据，谁只给了愿景；谁在追赶，谁被追赶。\n"
         "- 没有读数的公司一律 unknown。缺席不是中性，更不是弱——它只是没说。\n"
         "- reason 一句话讲清依据，要引到具体内容。这句会入库并展示给人看。\n"
+        "- **key_clusters 必填**：把你这个判断实际依据的那几组 id 回填进去。下游只展示\n"
+        "  这几组的原文作为佐证，所以漏填 = 结论没有出处，填错 = 结论配上不相干的证据。\n"
         "- 你只判读证据；**不要**给买卖建议、目标价或仓位。"
     )
 
@@ -187,6 +190,7 @@ def judge_cross_section(claim: ClaimDef, by_entity: dict) -> list:
         view = None
 
     valid = {"strong", "neutral", "weak", "unknown"}
+    valid_keys = {c.key for g in by_entity.values() for c in g}
     seen: dict[str, EntityReading] = {}
     for item in (getattr(view, "readings", None) or []):
         entity = (item.entity or "").upper()
@@ -194,8 +198,12 @@ def judge_cross_section(claim: ClaimDef, by_entity: dict) -> list:
             log.info("cross-section: unknown entity %r on %s — dropped", entity, claim.id)
             continue                      # it may not add companies to the cohort
         standing = item.standing if item.standing in valid else "unknown"
-        seen[entity] = EntityReading(entity=entity, standing=standing,
-                                     reason=(item.reason or "").strip())
+        # Only ids that exist. A cited cluster we cannot resolve would render as
+        # missing evidence under a stated conclusion, which is the failure this field
+        # was added to prevent.
+        seen[entity] = EntityReading(
+            entity=entity, standing=standing, reason=(item.reason or "").strip(),
+            key_clusters=[k for k in (item.key_clusters or []) if k in valid_keys])
     for entity in claim.entities:
         seen.setdefault(entity, EntityReading(entity=entity, standing="unknown",
                                               reason="未获判读"))

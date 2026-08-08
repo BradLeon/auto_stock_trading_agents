@@ -233,62 +233,112 @@ def _insights_and_events(sc: SectorContext, symbols: list[str], pead_syms: list[
 
 
 def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
-    """Common-demand verdicts from the evidence ledger, for the layer 景气 call.
+    """Claim verdicts from the evidence ledger, split to match the layer table's columns.
 
-    Only A-class (`common`) claims come here. B-class relative verdicts go to the
-    cross-section's moat_pricing instead — routing them into the layer read would put
-    "who is winning inside the layer" back into "how hot is the layer", which is the
-    conflation this whole design exists to prevent.
+    BOTH kinds come here, and they are kept apart because the layer table already
+    separates them:
 
-    These verdicts are computed by the deterministic engine; the analyst is told not to
-    re-litigate them, only to use them as the evidence base for the boom score. Without
-    this the weekly review scores "HBM supply is tight" off price momentum and
-    valuation snapshots while the actual filings sit unread in the ledger.
+      供需  <- `common`   claims (supply tightness, capacity, demand, throughput)
+      定价权 <- `relative` claims (share, pricing power, customer qualification)
+
+    `relative` used to be excluded on the grounds that it belonged to the cross-section
+    factor. That was a routing mistake with a visible cost: the 定价权 cell was written
+    from a static industry essay plus gross margins, while `hbm_share_and_pricing_power`
+    — whose own dimension description reads "HBM 价格/ASP 与毛利率走向（定价权的直接
+    读数）" — sat unread in the ledger. Two things named 定价权, in the same package,
+    sharing no data.
+
+    Feeding a factor and informing an analyst are not alternatives; a claim can do
+    either, both, or neither (see ClaimDef.feeds_factor). The isolation that matters is
+    unchanged: a common verdict still may not be read as "who is winning", which is why
+    the two blocks stay separate rather than being merged into one list.
     """
     from ...chain.corroborate import assess_layer
+    from ...chain.factor_evidence import BASIS_CN, STANDING_CN
     from ...chain.sources import source_entities_for
     from ...memory import get_store
 
     store = get_store()
     ccfg = cfg.review.get("corroboration", {})
-    lines: list[str] = []
+    demand_lines: list[str] = []
+    pricing_lines: list[str] = []
     for layer in cfg.layers:
-        commons = [c for c in layer.claims if c.kind == "common"]
-        if not commons:
+        if not layer.claims:
             continue
         rows_by_entity: dict[str, list[dict]] = {}
-        for claim in commons:
+        for claim in layer.claims:
             # Third-party sources are never NAMED in a claim — they bind by dimension —
             # so iterating declared witnesses alone silently drops every non-company
             # witness, which is exactly the `regulator` stance this block most needs.
             for e in (claim.expected_witnesses()
                       | {w.entity.upper() for w in claim.witnesses}
+                      | set(claim.entities)
                       | source_entities_for(claim)):
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)
+        by_id = {c.id: c for c in layer.claims}
         for a in assess_layer(layer, rows_by_entity, cfg=ccfg):
-            claim = next((c for c in commons if c.id == a.claim_id), None)
+            claim = by_id.get(a.claim_id)
             if claim is None:
-                continue            # relative claim — belongs to the cross-section
-            silent = f" · 未发声 {', '.join(a.silent_witnesses)}" if a.silent_witnesses else ""
-            lines.append(
-                f"- [{layer.key}] {claim.statement}\n"
-                f"    结论 {a.verdict} · 证人覆盖 {a.coverage} · 独立证据簇 "
-                f"{a.evidence_clusters} · 立场 {a.stance_classes} 类 · "
-                f"支持 {a.support_score:.0f}/反驳 {a.refute_score:.0f}{silent}")
-            # The reasons travel with the verdict. Without them the analyst is asked to
-            # accept a number on authority — and the reasons are the only thing that
-            # makes the polarity call checkable rather than merely asserted.
-            mark = {"support": "＋", "refute": "－", "neutral": "・"}
-            for j in a.judgements:
-                if j.polarity == "neutral" and not j.reason:
-                    continue
-                lines.append(f"      {mark.get(j.polarity, '・')} {j.speaker} "
-                             f"[{j.concept}] {j.reason}")
-    if lines:
-        sc.evidence_block = (
-            "## 产业链证据（各层共同需求命题的印证状态）\n"
+                continue
+            if claim.kind == "relative":
+                pricing_lines.extend(_pricing_lines(layer, claim, a,
+                                                    STANDING_CN, BASIS_CN))
+            else:
+                demand_lines.extend(_demand_lines(layer, claim, a))
+
+    blocks = []
+    if demand_lines:
+        blocks.append(
+            "### 供需（共同需求命题 — 用于该层「供需」与景气打分）\n"
             "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条 ＋/－ 后面是判读理由。\n"
-            "> **不要重新判断这些结论对不对**——把它们当作该层景气打分的证据基础。"
-            "覆盖率低或立场单一时，说明证据还不足以下判断。\n"
-            + "\n".join(lines))
+            "> **不要重新判断这些结论对不对**，把它们当作证据基础。覆盖率低或立场单一时，"
+            "说明证据还不足以下判断。\n" + "\n".join(demand_lines))
+    if pricing_lines:
+        blocks.append(
+            "### 定价权（截面比较命题 — 用于该层「定价权」一列）\n"
+            "> 逐家读数由判读器横向比较同期财报原文得出。**与静态行业笔记冲突时以此为准**："
+            "笔记是稳定的结构背景，这里是本期实际发生的事。\n"
+            "> 「仅自述」= 只有该公司自己说；「有交叉印证」= 客户或第三方也这么说。\n"
+            + "\n".join(pricing_lines))
+    if blocks:
+        sc.evidence_block = "## 产业链证据（来自各家财报原文的命题印证）\n" + "\n\n".join(blocks)
+
+
+def _demand_lines(layer, claim, a) -> list[str]:
+    silent = f" · 未发声 {', '.join(a.silent_witnesses)}" if a.silent_witnesses else ""
+    out = [f"- [{layer.key}] {claim.statement}\n"
+           f"    结论 {a.verdict} · 证人覆盖 {a.coverage} · 独立证据簇 "
+           f"{a.evidence_clusters} · 立场 {a.stance_classes} 类 · "
+           f"支持 {a.support_score:.0f}/反驳 {a.refute_score:.0f}{silent}"]
+    # The reasons travel with the verdict. Without them the analyst is asked to accept a
+    # number on authority — and the reasons are the only thing that makes the polarity
+    # call checkable rather than merely asserted.
+    mark = {"support": "＋", "refute": "－", "neutral": "・"}
+    for j in a.judgements:
+        if j.polarity == "neutral" and not j.reason:
+            continue
+        out.append(f"      {mark.get(j.polarity, '・')} {j.speaker} [{j.concept}] {j.reason}")
+    return out
+
+
+def _pricing_lines(layer, claim, a, standing_cn, basis_cn) -> list[str]:
+    """One comparison table per claim — never N independent per-name assertions.
+
+    The question is how a position is distributed across a cohort, and a reader can only
+    answer that by seeing the names side by side.
+    """
+    if not a.entity_readings:
+        return []
+    out = [f"- [{layer.key}] {claim.statement}",
+           "", "  | 公司 | 位置 | 依据强度 | 说话人 | 判读理由 |", "  |---|---|---|---|---|"]
+    for r in a.entity_readings:
+        out.append(f"  | **{r.entity}** | {standing_cn.get(r.standing, r.standing)} "
+                   f"| {basis_cn.get(r.basis, r.basis)} | {', '.join(r.speakers) or '—'} "
+                   f"| {r.reason or '—'} |")
+    graded = [r for r in a.entity_readings if r.standing != "unknown"]
+    if graded and all(r.basis == "self_reported" for r in graded):
+        out.append("  > ⚠️ 全部读数均为各家自述，无客户或第三方交叉印证——可比性来自横向"
+                   "对照，而非单条的可信度。")
+    out.append("")
+    return out

@@ -207,6 +207,18 @@ class ClaimDef(BaseModel):
     # an unanswerable question into a comparison. It is also the honest framing when we
     # hold one of the names.
     entities: list[str] = Field(default_factory=list)
+    # Which cross-section factor this claim's verdict may inform, if any. OMITTED IS THE
+    # DEFAULT and means "no factor": the claim still appears in the weekly report, still
+    # reaches the sector analyst, still answers `ats evidence claims`. It simply does not
+    # move a number.
+    #
+    # This exists because `kind` used to decide the destination, which fused two
+    # unrelated things: `relative` meant BOTH "aggregate as a per-entity comparison" AND
+    # "feed moat_pricing". The framework was written as if moat_pricing were its purpose
+    # — the design doc's title, this package's module names, twenty places in the docs —
+    # when moat_pricing is one of two structural factors and most propositions worth
+    # tracking inform neither. `kind` now only selects the aggregation algorithm.
+    feeds_factor: str = ""                # "moat_pricing" | "tech_tenor" | "" (none)
     concepts: list[Concept] = Field(default_factory=list)
     # Witness stances are declared here, NOT read off the document: every filing is the
     # company's own call, so asking a model "who is speaking" always answers "this
@@ -309,6 +321,15 @@ class EntityReading(BaseModel):
     stance_classes: int = 0
     speakers: list[str] = Field(default_factory=list)
     observation_ids: list[str] = Field(default_factory=list)
+    # The clusters the adjudicator says it actually relied on. Without this, a consumer
+    # showing "the evidence" can only take the first N of everything the entity said —
+    # and it did: SK hynix was labelled `strong` above four quotes of which one read
+    # `down` ("DRAM ASP growth fell below market expectations") and two `flat`. Evidence
+    # that contradicts the conclusion it is printed under is worse than no evidence.
+    key_clusters: list[str] = Field(default_factory=list)
+    # `key_clusters` resolved to observations, so a renderer can show the justification
+    # without needing the cluster objects.
+    key_observation_ids: list[str] = Field(default_factory=list)
 
 
 class ClaimAssessment(BaseModel):

@@ -7,7 +7,7 @@ no LLM, no Obsidian, no IBKR).
 from datetime import datetime, timezone
 
 from ats.agents.sector import cross_section
-from ats.chain import moat
+from ats.chain import factor_evidence
 from ats.chain.corroborate import corroborate
 from ats.schemas.chain import ClaimDef, Concept, Witness
 from ats.schemas.sector import BasketRow, LayerBasket, SectorReview
@@ -26,18 +26,19 @@ def _row(entity, concept, *, direction="up", speaker=None, otype="guidance",
             "discovery_evidence": 0, "observed_at": NOW.isoformat()}
 
 
-def _share_claim():
-    return ClaimDef(
+def _share_claim(**kw):
+    return ClaimDef(**{**dict(
         id="hbm_share_and_pricing_power", kind="relative", entities=["SKHY", "MU", "005930.KS"], layer="L5_fab",
+        feeds_factor="moat_pricing",
         statement="HBM 份额与定价权在三家之间如何分布",
         concepts=[Concept(key="hbm_share", desc="份额", direct=True),
-                  Concept(key="customer_qualification", desc="认证",
-                          direct=True),
+                  Concept(key="customer_qualification", desc="认证", direct=True),
+                  Concept(key="hbm_pricing", desc="ASP/毛利率", direct=True),
                   Concept(key="capacity_addition", desc="扩产")],
         witnesses=[Witness(entity="SKHY", stance="incumbent"),
                    Witness(entity="MU", stance="competitor"),
                    Witness(entity="005930.KS", stance="competitor"),
-                   Witness(entity="NVDA", stance="customer")])
+                   Witness(entity="NVDA", stance="customer")]), **kw})
 
 
 def _common_claim():
@@ -51,10 +52,11 @@ def _common_claim():
 
 
 # --- evidence packs -------------------------------------------------------- #
-def test_each_company_gets_its_own_moat_pack():
-    """One pack per COMPANY, not one per claim. The old shape scored only the declared
-    subject, so a rival's own disclosure could never reach the factor for that rival —
-    and the one name that could be scored happened to be the one we hold."""
+def test_one_claim_renders_as_one_comparison_table():
+    """A cross-section pack is per-CLAIM, not per-name. The structure analyst has to
+    produce differentiated -2..+2 scores across a cohort, and N independent per-name
+    assertions cannot express an ordering — "SK strong, Samsung strong" says nothing
+    about which to overweight."""
     rows = [_row("SKHY", "hbm_share", speaker="SKHY", doc="sk", rid="a",
                  span="ASP rose approximately 30% on continued price strength"),
             _row("SKHY", "hbm_pricing", speaker="SKHY", doc="sk", rid="a2",
@@ -67,14 +69,51 @@ def test_each_company_gets_its_own_moat_pack():
     a = corroborate(claim, rows, cfg=CFG)
     assert a.verdict == "resolved"
 
-    packs = {p.subject: p for p in moat.build_packs([a], [claim],
-                                                    {r["id"]: r for r in rows})}
-    assert set(packs) == {"SKHY", "MU"}          # 005930.KS silent -> no pack
-    assert packs["SKHY"].direction == "positive"
-    assert packs["MU"].direction == "negative"
-    assert any("decline modestly" in s for s in packs["MU"].spans)   # carries the text
-    ctx = moat.as_context(list(packs.values()))
-    assert "SKHY" in ctx and "MU" in ctx and "不要凭印象打分" in ctx
+    packs = factor_evidence.build_packs([a], [claim], {r["id"]: r for r in rows})
+    assert len(packs) == 1                       # one claim -> one table
+    pack = packs[0]
+    assert pack.factor == "moat_pricing"
+    assert [r.entity for r in pack.readings] == ["SKHY", "MU", "005930.KS"]
+
+    text = pack.as_text()
+    assert "| **SKHY** | 强" in text and "| **MU** | 弱" in text
+    assert "005930.KS" in text and "无读数" in text   # silence is shown, not omitted
+    ctx = factor_evidence.as_context(packs)
+    assert "moat_pricing" in ctx and "不要凭印象打分" in ctx
+
+
+def test_the_evidence_shown_is_the_evidence_the_reading_rests_on():
+    """The defect this replaced: the pack printed the first four observations the entity
+    had made, so SK hynix was labelled `strong` above one `down` reading ("DRAM ASP
+    growth fell below market expectations") and two `flat` ones. Evidence that
+    contradicts the conclusion it is printed under is worse than no evidence."""
+    rows = [_row("SKHY", "hbm_pricing", speaker="SKHY", doc="sk", rid="cited",
+                 span="ASP rose approximately 30%"),
+            _row("SKHY", "hbm_share", direction="down", speaker="SKHY", doc="sk",
+                 rid="notcited", span="ASP growth fell below market expectations"),
+            _row("MU", "hbm_share", speaker="MU", doc="mu", rid="m", polarity="weak",
+                 span="share to decline")]
+    claim = _share_claim()
+    a = corroborate(claim, rows, cfg=CFG)
+    sk = next(r for r in a.entity_readings if r.entity == "SKHY")
+    assert sk.key_observation_ids and "notcited" not in sk.key_observation_ids
+
+    text = factor_evidence.build_packs([a], [claim],
+                                       {r["id"]: r for r in rows})[0].as_text()
+    assert "ASP rose approximately 30%" in text
+    assert "fell below market expectations" not in text
+
+
+def test_a_claim_that_declares_no_factor_reaches_no_factor():
+    """`feeds_factor` omitted is the default and means the claim informs no factor. It
+    still reaches the weekly report and the sector analyst — routing and aggregation are
+    separate decisions, which is what `kind` used to conflate."""
+    rows = [_row("SKHY", "hbm_share", speaker="SKHY", doc="sk", rid="a"),
+            _row("MU", "hbm_share", speaker="MU", doc="mu", rid="b", polarity="weak")]
+    claim = _share_claim(feeds_factor="")
+    a = corroborate(claim, rows, cfg=CFG)
+    assert a.verdict == "resolved"                # the comparison still happened
+    assert factor_evidence.build_packs([a], [claim], {}) == []
 
 
 def test_common_verdict_never_produces_moat_evidence():
@@ -87,7 +126,7 @@ def test_common_verdict_never_produces_moat_evidence():
     claim = _common_claim()
     a = corroborate(claim, rows, cfg=CFG)
     assert a.verdict == "supportive"
-    assert moat.build_packs([a], [claim], {r["id"]: r for r in rows}) == []
+    assert factor_evidence.build_packs([a], [claim], {r["id"]: r for r in rows}) == []
 
 
 def test_unknown_and_mixed_produce_nothing_so_moat_stays_null():
@@ -98,7 +137,7 @@ def test_unknown_and_mixed_produce_nothing_so_moat_stays_null():
     for rows in ([], [_row("SKHY", "hbm_share", speaker="SKHY", rid="only")]):
         a = corroborate(claim, rows, cfg=CFG)
         assert a.verdict == "unknown"
-        assert moat.build_packs([a], [claim], {}) == []
+        assert factor_evidence.build_packs([a], [claim], {}) == []
 
 
 def test_competitor_expansion_alone_yields_no_moat_evidence():
@@ -109,7 +148,7 @@ def test_competitor_expansion_alone_yields_no_moat_evidence():
     claim = _share_claim()
     a = corroborate(claim, rows, cfg=CFG)
     assert a.verdict == "unknown"
-    assert moat.build_packs([a], [claim], {r["id"]: r for r in rows}) == []
+    assert factor_evidence.build_packs([a], [claim], {r["id"]: r for r in rows}) == []
 
 
 # --- cross-section rerank -------------------------------------------------- #

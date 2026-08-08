@@ -209,6 +209,12 @@ def cross_section(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         reading.stance_classes = len(stances)
         reading.speakers = speakers
         reading.observation_ids = [i for c in group for i in c.observation_ids]
+        # Resolve the clusters the adjudicator cited into the spans a consumer may print
+        # under this standing. Everything else stays in `observation_ids` — visible, but
+        # never passed off as the justification.
+        cited = set(reading.key_clusters)
+        reading.key_observation_ids = [i for c in group if c.key in cited
+                                       for i in c.observation_ids]
         if not group:
             reading.standing = "unknown"
             reading.basis = "thin"

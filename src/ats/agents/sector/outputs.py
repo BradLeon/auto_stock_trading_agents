@@ -12,7 +12,11 @@ class LayerAssessView(BaseModel):
                                  "例如 L1_app / L5_fab；禁止自造描述性 key，否则该层被丢弃")
     boom_score: float = Field(default=50.0, description="景气度 0-100")
     supply_demand: str = Field(default="", description="供需: 紧张/平衡/过剩 + 一句依据")
-    pricing_power: str = ""
+    pricing_power: str = Field(
+        default="",
+        description="本层的定价权归属：谁在瓶颈环节、谁在被替代、份额与 ASP 的方向。"
+                    "**若上下文给了「定价权（截面比较命题）」的逐家读数，以它为准**，"
+                    "静态行业笔记让位——笔记是稳定背景，读数是本期实际发生的事")
     capital_flow: str = Field(default="", description="资金流向观察（以相对动量/估值扩张为 proxy）")
     cycle_position: str = Field(default="", description="早/中/晚周期 + 依据")
     signal: str = Field(default="neutral", description="bullish | neutral | bearish")

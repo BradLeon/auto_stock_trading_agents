@@ -141,8 +141,12 @@ layers:
       # 「这个位置在三家之间怎么分布」，每家的自我披露都算数（算给它自己），不可回答的
       # 问题就变成了可比较的问题。持有其中一家时，这也是更诚实的问法。
       - id: hbm_share_and_pricing_power
-        kind: relative
+        kind: relative                   # kind 只决定怎么聚合（逐家读数 vs 支持/反驳记分）
         entities: [SKHY, MU, "005930.KS"]
+        # 这条命题的读数可以进哪个结构因子。省略 = 不进任何因子（仍上周报、仍进行业
+        # 分析师的「定价权」块）。可选 moat_pricing / tech_tenor —— 截面一共就这两个
+        # 结构因子，而"份额与定价权"正对应 moat_pricing 自身的分解口径。
+        feeds_factor: moat_pricing
         statement: HBM 份额与定价权在 SK 海力士 / 美光 / 三星之间如何分布
         horizon: {from: 2026-08-01, to: 2027-12-31}
         concepts:

@@ -121,6 +121,11 @@ class EntityReadingView(BaseModel):
     standing: str = Field(default="unknown",
                           description="strong | neutral | weak | unknown")
     reason: str = Field(default="", description="一句话依据，要引到具体内容")
+    key_clusters: list[str] = Field(
+        default_factory=list,
+        description="你这个判断实际依据的那几组的 id=（原样回填，可多条）。"
+                    "下游会**只**展示这几组的原文作为佐证，所以漏填等于让结论没有出处，"
+                    "填错等于让结论配上不相干的证据")
 
 
 class CrossSectionView(BaseModel):

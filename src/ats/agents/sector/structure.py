@@ -28,16 +28,21 @@ def _clamp(v: float | None) -> float:
 
 def assess(rows, structure_notes: dict[str, str],
            pead_narratives: dict[str, str] | None = None,
-           moat_context: str = ""):
+           moat_context: str = "", layer_view: str = ""):
     """Run the structure analyst over a layer's cohort. Returns
     (scores{symbol: (tech_tenor, moat_pricing, rationale)}, subgroup_notes{name: note}).
 
     `moat_context` carries event-level competitive-position evidence built from the
-    chain-evidence ledger (see chain/moat.py). Historically the only input was a
-    curated KB note, so a layer without one skipped the overlay entirely and its
+    chain-evidence ledger (see chain/factor_evidence.py). Historically the only input
+    was a curated KB note, so a layer without one skipped the overlay entirely and its
     `moat_pricing` was permanently null — which is why the factor expressing "SK Hynix
     is being overtaken by Samsung" had never once been computed for the HBM layer.
     Either source is now sufficient to run.
+
+    `layer_view` is the sector analyst's assessment of THIS layer, from the review that
+    ran minutes earlier in the same weekly job. Scoring within a layer without knowing
+    what was just concluded about the layer is the part of "sequential" that was
+    missing: the two stages shared a storage row and nothing else.
     """
     from ...data import industry
 
@@ -59,9 +64,14 @@ def assess(rows, structure_notes: dict[str, str],
     basket_block = "\n".join(lines)
 
     ctx_parts = ["对下列同层标的做结构/技术定性评审。事实以知识库笔记与竞争位置证据为准。"]
+    if layer_view:
+        ctx_parts.append("## 本层的行业评审结论（同一周度作业刚刚产出，作为背景）\n"
+                         + layer_view)
     if kb:
         ctx_parts += ["## 知识库（策展产业笔记 — 事实来源）", industry.as_context(kb)]
     if moat_context:
+        # After the KB on purpose: when they disagree the event-level evidence wins,
+        # and the later block is the one still in view as the model writes its scores.
         ctx_parts.append(moat_context)
     ctx_parts.append(basket_block)
     if pead_narratives:

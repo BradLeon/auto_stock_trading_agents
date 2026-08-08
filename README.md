@@ -226,15 +226,15 @@ flowchart LR
 
 ```yaml
 claims:
-  - id: sk_hbm_share
-    kind: relative            # relative=层内谁在赢 | common=整个环节的冷热
-    subject: SKHY             # 这条命题在说谁
-    statement: SK Hynix 维持核心客户 HBM 领先份额与定价权
+  - id: hbm_share_and_pricing_power
+    kind: relative            # 只决定怎么聚合：逐家读数 | common=支持/反驳记分
+    entities: [SKHY, MU, "005930.KS"]      # 比较这几家
+    feeds_factor: moat_pricing             # 可选：还要影响哪个截面因子；省略=都不影响
+    statement: HBM 份额与定价权在这三家之间如何分布
     concepts:                 # 要看哪些维度（按语义归类，不是关键词匹配）
       - key: hbm_share
         desc: HBM 份额/供货占比及其指引
-        supports_when: up     # 这个维度往哪个方向算"支持"
-        direct: true          # 只有这类维度能改变份额判断
+        direct: true          # 只有这类维度能进截面比较
         expect_from: [SKHY, MU, "005930.KS", NVDA]   # 该由谁来说
     witnesses:                # 每个证人站在什么位置（决定能不能交叉印证）
       - {entity: NVDA, stance: customer}
@@ -243,9 +243,9 @@ claims:
 
 两个容易踩的点：
 
-- **`supports_when` 要逐维度写。** 同一条命题里方向可以相反——在"供给持续紧张"下，
-  交期变长是支持，**产能上升却是反证**。只写一个总方向，系统会把"供给转松"
-  当成"紧张的证据"，而且算得很自信。
+- **配置里没有"哪个方向算支持"这种字段。** 曾经有（`supports_when`），实测被打脸：
+  SK 海力士一边说客户还在要货、一边提前量产，被断言成七条反驳。景气里管理层必然扩产，
+  那是对需求的回应。**配置声明范围与治理，含义由逐簇判读给出并留下可审计的理由。**
 - **`expect_from` 决定了"沉默"怎么被看待。** 声明了该由谁来说，某人本期没说话
   就会被点名为缺口；不声明，沉默就被当成中性——而单份财报既片面又可能挑好的说。
 

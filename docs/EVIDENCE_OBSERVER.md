@@ -3,7 +3,7 @@
 把**我们不持有的公司**的财报，变成可核对的事实观测，供产业链证据系统使用。
 它是全系统权限最小的 agent：不判方向、不给建议、不碰 broker，只抽事实。
 
-配套阅读：[`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)（这些观测最终如何进入截面因子）。
+配套阅读：[`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)（这些观测最终如何变成可证伪的命题结论）。
 
 ---
 
@@ -191,7 +191,8 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
 
 1. **SQLite** `evidence_observations` / `evidence_failures` 表。
 2. 喂给三道闸聚合器算出各 claim 的印证结论（`ats evidence claims` 可查）。
-3. **阶段三起**：`relative` 结论会转成 `moat_pricing` 证据包进入截面因子。
+3. **阶段三起**：`relative` 结论进行业分析师的「定价权」块；命题若声明了
+   `feeds_factor`，再额外转成该截面因子的证据包。
 4. **Obsidian 周报** `产业链证据-<label>-<日期>.md`：命题结论、覆盖率、未发声证人、
    每条结论的财报原文、未映射池、待确认命题、抽取失败。与行业评审同一天生成。
 

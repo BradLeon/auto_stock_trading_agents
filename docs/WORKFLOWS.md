@@ -33,7 +33,9 @@
   ↓
 每周行业评审之后
   → I8 三道闸聚合（确定性，无 LLM）：去重 → 立场 → common/relative 隔离
-       → relative 结论 → moat_pricing 证据包 → structure_analyst
+       → common 结论 → 行业分析师「供需」块
+       → relative 结论 → 行业分析师「定价权」块
+                       →（声明了 feeds_factor 时）该截面因子的证据包 → structure_analyst
        → 截面重排 → basket
        → Chief 上下文（只给"量化第N→复合第M + 依据"，**不给权重数字**）
        → Obsidian 周报：命题结论 + 覆盖率 + 未发声证人 + **每条结论的财报原文**

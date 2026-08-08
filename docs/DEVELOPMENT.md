@@ -168,14 +168,13 @@ key（哪怕值和旧默认值一样），改代码里的默认值**不会**生�
 
 ```yaml
 claims:
-  - id: sk_hbm_share
-    kind: relative          # common=行业共同 | relative=层内相对份额
-    subject: SKHY           # relative 必填
-    horizon: {from: 2026-08-01, to: 2027-12-31}
+  - id: hbm_share_and_pricing_power
+    kind: relative          # kind 只决定怎么聚合，不决定去处
+    entities: [SKHY, MU, "005930.KS"]   # relative 必填：比较谁
+    feeds_factor: moat_pricing          # 可选：还要影响哪个截面因子
     concepts:
       - key: hbm_share
-        desc: HBM 份额/供货占比及其指引（含"份额将下降"这类表述）
-        supports_when: up   # 逐维度声明；同一命题内方向可相反
+        desc: 份额/供货占比及其指引     # desc 是语义锚，观测按它归类
         direct: true        # relative：只有 direct 维度能改变份额判断
         expect_from: [SKHY, MU, "005930.KS", NVDA]   # 该由谁来说 → 沉默显示为缺口
     witnesses:              # 立场取自这里，不从文档推断

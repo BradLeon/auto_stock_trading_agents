@@ -89,8 +89,12 @@ class FactorEvidence:
                 continue
             out += ["", f"**{r.entity} 的依据**（判读器实际引用的原文）"]
             for concept, items in spans.items():
-                for who, span in items[:MAX_SPANS]:
-                    out.append(f"- [{concept}] {who}：{span}")
+                for who, direction, span in items[:MAX_SPANS]:
+                    # The direction is shown because a cluster is the unit of evidence,
+                    # not a sentence: one speaker's pricing cluster can hold both
+                    # "progressing smoothly" and "shipments pushed back". Hiding the mix
+                    # would make the pack read cleaner than the filing actually was.
+                    out.append(f"- [{concept} · {direction}] {who}：{span}")
         return "\n".join(out)
 
 
@@ -125,7 +129,8 @@ def build_packs(assessments, claims, observations_by_id) -> list[FactorEvidence]
                     continue
                 who = row.get("source_entity") or row.get("entity") or ""
                 by_concept[row.get("concept") or "—"].append(
-                    (who, row["evidence_span"][:SPAN_CHARS]))
+                    (who, row.get("direction") or "flat",
+                     row["evidence_span"][:SPAN_CHARS]))
             if by_concept:
                 spans_by_entity[reading.entity] = dict(by_concept)
             elif reading.standing != "unknown":

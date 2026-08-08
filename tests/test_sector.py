@@ -350,3 +350,48 @@ def test_cross_section_structural_blend_reranks():
     # sizing invariants still hold
     assert abs(sum(r.weight for r in rows) - 0.14) < 1e-9
     assert all(r.weight <= 0.14 * 0.40 + 1e-9 for r in rows)
+
+
+# --- cross-section orchestration resilience -------------------------------- #
+def test_a_new_review_keeps_the_same_days_baskets(monkeypatch):
+    """A review always creates a new row. Re-running it after the cross-section
+    stranded that day's baskets on the older row, so `latest_sector_review` returned a
+    basket-less review and the Chief saw no cross-section at all."""
+    from datetime import datetime, timezone
+
+    from ats.memory import get_store
+    from ats.schemas.sector import LayerBasket, SectorReview
+
+    store = get_store()
+    today = datetime.now(timezone.utc)
+    store.save_sector_review(SectorReview(
+        sector="test_sector", as_of=today, regime="prior",
+        baskets=[LayerBasket(layer_key="L5_fab", as_of=today, structural=True)]))
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
+    monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
+    monkeypatch.setattr(assemble, "build",
+                        lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
+    out = sector_review.run("test_sector", use_llm=True, live_data=False)
+    assert [b.layer_key for b in out.baskets] == ["L5_fab"]
+
+
+def test_stale_baskets_are_not_carried_across_days(monkeypatch):
+    """A basket describes one run's prices and factor values. Re-attaching last week's
+    would misstate when it was computed."""
+    from datetime import datetime, timedelta, timezone
+
+    from ats.memory import get_store
+    from ats.schemas.sector import LayerBasket, SectorReview
+
+    store = get_store()
+    old = datetime.now(timezone.utc) - timedelta(days=7)
+    store.save_sector_review(SectorReview(
+        sector="test_sector", as_of=old, regime="prior",
+        baskets=[LayerBasket(layer_key="L5_fab", as_of=old, structural=True)]))
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
+    monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
+    monkeypatch.setattr(assemble, "build",
+                        lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
+    assert sector_review.run("test_sector", use_llm=True, live_data=False).baskets == []

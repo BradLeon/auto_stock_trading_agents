@@ -85,6 +85,22 @@ def _to_review(name: str, cfg: SectorConfig, view: SectorReviewLLMView) -> Secto
             conviction=max(0.0, min(1.0, float(cv.conviction))),
             rationale=cv.rationale))
 
-    return SectorReview(sector=name, as_of=_now(), regime=view.regime, summary=view.summary,
-                        layers=layers, company_calls=calls,
+    # Carry forward baskets computed for the SAME day. A review always creates a new
+    # row, so re-running it after the cross-section stranded that day's baskets on the
+    # older row — `latest_sector_review` then returned a basket-less review and the
+    # Chief saw no cross-section at all. Older days are not carried: a basket describes
+    # one run's prices and factor values, and re-attaching last week's would be a lie
+    # about when it was computed.
+    now = _now()
+    baskets = []
+    try:
+        from ...memory import get_store
+
+        prior = get_store().latest_sector_review(name)
+        if prior is not None and prior.as_of.date() == now.date():
+            baskets = prior.baskets
+    except Exception as exc:  # noqa: BLE001 - carry-forward is best-effort
+        log.info("basket carry-forward skipped for %s: %s", name, exc)
+    return SectorReview(sector=name, as_of=now, regime=view.regime, summary=view.summary,
+                        layers=layers, company_calls=calls, baskets=baskets,
                         rotation_advice=view.rotation_advice, top_risks=view.top_risks)

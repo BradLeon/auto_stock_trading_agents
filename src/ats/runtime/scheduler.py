@@ -640,8 +640,17 @@ def _cross_section_weekly(name: str) -> None:
     except Exception as exc:  # noqa: BLE001
         log.warning("cross-section skipped for %s: %s", name, exc)
         return
+    review = get_store().latest_sector_review(name)
     for layer in cfg.layers:
         if not layer.tickers:
+            continue
+        # Skip what the review, minutes earlier in this same job, called bearish. Sizing
+        # names inside a layer we just recommended cutting is work whose output nobody
+        # should act on. Uses the existing `signal` field rather than inventing a
+        # threshold; layers with no assessment still run.
+        assessment = review.layer_assessment(layer.key) if review else None
+        if assessment is not None and assessment.signal == "bearish":
+            log.info("cross-section %s/%s skipped — review called it bearish", name, layer.key)
             continue
         try:
             cross_section.run_layer(name, layer.key, persist=True, structure=True)

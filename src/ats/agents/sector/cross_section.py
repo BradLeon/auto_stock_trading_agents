@@ -311,7 +311,14 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
 
             store = get_store()
             review = store.latest_sector_review(sector_name)
-            if review is not None:
+            if review is None:
+                # The basket has nowhere to live: `SectorReview` is its only home, and
+                # `_basket_lines` reads it from there. Silently dropping it made the
+                # whole cross-section look like it had never run.
+                log.warning("basket for %s/%s discarded — no sector review to attach to; "
+                            "run `ats sector review %s` first",
+                            sector_name, layer_key, sector_name)
+            else:
                 review.baskets = [b for b in review.baskets if b.layer_key != layer_key] + [basket]
                 store.save_sector_review(review)   # same as_of -> replace in place
         except Exception as exc:  # noqa: BLE001 - persistence is best-effort

@@ -26,6 +26,8 @@ layers:
       - {symbol: GOOGL}
       - {symbol: GOOG, note: Alphabet C类（IBKR/用户实际持有此代码）}
       - {symbol: CRWV, note: neocloud，TODO 用户确认}
+    structure_notes:
+      云服务: config/knowledge/云服务.md
 
   - key: L3_dc_infra
     label: L3 数据中心基建（电力/冷却/网络/光互联）
@@ -44,6 +46,8 @@ layers:
     structure_notes:
       光互联: config/knowledge/光互联.md
       铜连接: config/knowledge/铜连接.md
+      衬底: config/knowledge/光互联.md      # 衬底判据写在光互联笔记里（需求派生自它）
+      电力冷却: config/knowledge/电力冷却.md
 
   - key: L4_chip_design
     label: L4 芯片设计
@@ -53,6 +57,8 @@ layers:
       - {symbol: AMD}
       - {symbol: AVGO, note: ASIC/网络}
       - {symbol: MRVL, note: Marvell 定制ASIC+光DSP（横跨L3光互联，按合集归L4设计服务）}
+    structure_notes:
+      芯片设计: config/knowledge/芯片设计.md
 
   - key: L5_fab
     label: L5 芯片制造（Foundry+封装+存储）
@@ -66,6 +72,7 @@ layers:
       - {symbol: "005930.KS", note: 三星/HBM追赶}
     structure_notes:
       存储: config/knowledge/HBM存储.md
+      代工封装: config/knowledge/先进封装代工.md
     # HBM 主题的证人范围（2026-08-06 人工规定）。身份按 config/entities.yaml 归一：
     # 写 canonical，别名代码（HY9H / 000660.KS）自动折叠，不会被算成额外证人。
     #
@@ -184,6 +191,8 @@ layers:
       - {symbol: KLAC, note: KLA Corp（正确代码 KLAC，原 KLA 错误）}
       - {symbol: LSRCY, note: Lasertec ADR（EUV 掩模检测设备）}
       - {symbol: "8035.T", note: TEL，TODO 用户确认}
+    structure_notes:
+      半导体设备: config/knowledge/半导体设备.md
 
 # 每票轻量快照的抓取策略（限速关键）
 snapshot:

@@ -128,6 +128,31 @@ def test_assemble_offline_reads_store(monkeypatch):
     assert "(offline)" in ctx                                      # no yfinance
 
 
+def test_sector_analyst_gets_the_criteria_before_the_evidence(monkeypatch, tmp_path):
+    """The curated notes used to reach only the cross-section's structure analyst, while
+    the sector analyst re-derived the same criteria from 36k of raw research every week.
+
+    Order is load-bearing and mirrors structure.assess: criteria first (how to weigh a
+    reading), ledger after (what this quarter's reading was). When they disagree the
+    later block is the one still in view — so the evidence must not be pushed above it.
+    """
+    from ats.data import industry
+
+    note = tmp_path / "kb.md"
+    note.write_text("护城河判据：拥有瓶颈环节 > 客户分散度 > 组装规模", encoding="utf-8")
+    cfg = CFG.model_copy(deep=True)
+    cfg.layers[1].structure_notes = {"云": str(note)}
+    monkeypatch.setattr(industry, "fetch_notes", lambda: [("map.md", "RAW RESEARCH")])
+
+    sc = assemble.build(cfg, live_data=False)
+    ctx = sc.as_context()
+    assert "拥有瓶颈环节" in ctx
+    assert "不是**谁排第几**" in ctx                    # states what it is NOT for
+    sc.evidence_block = "## 产业链证据\nEVIDENCE MARKER"
+    ctx = sc.as_context()
+    assert ctx.index("拥有瓶颈环节") < ctx.index("EVIDENCE MARKER")
+
+
 def test_review_clamps_and_persists(monkeypatch):
     monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
     monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())

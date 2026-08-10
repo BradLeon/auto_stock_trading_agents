@@ -484,6 +484,7 @@ def load_sector_config(name: str = "ai_hardware"):
     raw.setdefault("review", {})
     r = raw["review"]
     r.setdefault("static_notes_chars", 36000)
+    r.setdefault("kb_criteria_chars", 24000)   # 各层 structure_notes 汇总给 sector_analyst
     r.setdefault("insights_per_ticker", 3)
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)

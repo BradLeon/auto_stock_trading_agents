@@ -91,11 +91,13 @@ flowchart TD
 | 角色 | 产出（写） | 可读 | 决策权 |
 |---|---|---|---|
 | 宏观策略师 | macro_reviews（regime / 利率路径 / sector_tilts） | 定量盘 + Tavily + FactSet | ❌ 不出单 |
-| 行业分析师 | sector_reviews（层评审 / company_calls） | 快照 + PEAD 档案 + 宏观评审（上游） | ❌ 不出单 |
+| 行业分析师 | sector_reviews（层评审 / company_calls） | 快照 + PEAD 档案 + 宏观评审（上游）+ **子层判据 `knowledge/*.md`** | ❌ 不出单 |
 | PEAD 分析师 | pead_dossier（叙事 / 预期 / Scorecard / 建议） | 数据源 + 行业/宏观评审（上游注入） | ❌ 只出建议 |
 | 技术面分析师 | technical_reviews（7 点评分 / 建议敞口 / Tier 触发） | 日线收盘价 + VIX/VIX3M | ❌ 只出建议敞口，**不判方向** |
-| 证据观察员 | evidence_observations（带原文片段的事实观测） | 观察名单公司的财报稿/纪要 | ❌ **只抽事实，连建议都不出** |
+| 证据观察员 | evidence_observations（带原文片段的事实观测） | 观察名单公司的财报稿/纪要 + **`signal_chain` 的角色与行尾注释** | ❌ **只抽事实，连建议都不出** |
 | 命题提议者 | claim_proposals（待人确认的涌现命题） | 归不到任何已声明命题的观测 | ❌ 只提议；**只有人能写进配置** |
+| 截面结构分析师 | `BasketRow.{tech_tenor, moat_pricing, rationale}` | **`knowledge/*.md` 全文** + 竞争位置证据 + 量化 basket | ❌ 只给定性修正，不出单 |
+| 知识库复核（无 LLM） | 周报「知识库复核」小节 | 观测/判读/评审/KB 文件时间戳 | ❌ **只产出待办清单，不改任何配置** |
 | 风控官 | risk_reviews（六层画像 / breaches / risk_state） | 持仓 + 价格 + 存档 | ❌ 硬闸门（否决/裁剪，不产生交易） |
 | Trader | trades / fills / performance | IBKR | ❌ 纯执行 + 记录 |
 | **Chief 首席** | cycles / decisions | **全部存档 + 实时持仓** | ✅ **唯一产生 TradeDecision** |
@@ -397,6 +399,7 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`
 - 行业分析师 L1-L6 分层方法论 → `docs/SECTOR_ANALYST.md`
 - 跨公司证据如何进入截面因子（共同需求 vs 相对份额）→ `docs/CHAIN_EVIDENCE.md`
+- 静态知识分层、谁读知识库、怎么发现它该更新 → `docs/KNOWLEDGE.md`
 - 证据观察员的边界与用法 → `docs/EVIDENCE_OBSERVER.md`
 - 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
 - 从 paper 到 live 的历史 checklist → `docs/GO_LIVE.md`

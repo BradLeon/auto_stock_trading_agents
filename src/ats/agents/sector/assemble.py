@@ -26,6 +26,7 @@ class SectorContext:
     insight_lines: list[str] = field(default_factory=list)
     event_lines: list[str] = field(default_factory=list)
     macro_block: str = ""
+    kb_criteria: str = ""
     evidence_block: str = ""
 
     def as_context(self) -> str:
@@ -36,6 +37,15 @@ class SectorContext:
         if self.macro_block:
             parts.append("## 宏观背景（自上而下：利率/风险偏好/板块倾斜 — 据此调整层与个股观点）\n"
                          + self.macro_block)
+        if self.kb_criteria:
+            # BEFORE the evidence on purpose, mirroring structure.assess and
+            # graph/pead.py: the criteria say how to weigh a reading, the ledger says
+            # what this quarter's reading was, and when they disagree the later block —
+            # the evidence — is the one still in view as the model writes.
+            parts.append(
+                "## 子层判据（策展知识库 — 年度级，说的是**怎么判断**，不是**谁排第几**）\n"
+                "> 排序由下面的产业链证据与本期读数决定；本节只提供判据与常见误判。\n"
+                + self.kb_criteria)
         if self.evidence_block:
             parts.append(self.evidence_block)
         parts.append("\n\n".join(self.layer_blocks))
@@ -59,6 +69,7 @@ class SectorContext:
             "insights": len(self.insight_lines),
             "events": len(self.event_lines),
             "static_chars": len(self.static_notes),
+            "kb_chars": len(self.kb_criteria),
             "total_chars": len(self.as_context()),
         }
 
@@ -104,9 +115,35 @@ def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
 
         sc.macro_block = macro_context.sector_block(mr["name"])
 
+    _kb_criteria(sc, cfg)
+
     notes = industry.fetch_notes()
     sc.static_notes = industry.as_context(notes)[:int(cfg.review["static_notes_chars"])]
     return sc
+
+
+def _kb_criteria(sc: SectorContext, cfg: SectorConfig) -> None:
+    """The curated sub-layer notes — the same files the structure analyst reads.
+
+    Until now these reached ONLY the cross-section's structure analyst, while the sector
+    analyst got 36k of undistilled research and had to re-derive the criteria from it
+    every week. The notes are the distilled form of that same research: what makes a
+    moat in this sub-layer, and which readings are commonly misread. Giving it the
+    criteria does not tell it the answer — the notes deliberately contain no ranking.
+    """
+    from ...data import industry
+
+    paths: list[str] = []
+    for layer in cfg.layers:
+        for path in layer.structure_notes.values():
+            if path not in paths:
+                paths.append(path)
+    if not paths:
+        return
+    kb = industry.fetch_named(paths)
+    if kb:
+        cap = int(cfg.review.get("kb_criteria_chars", 24000))
+        sc.kb_criteria = industry.as_context(kb)[:cap]
 
 
 # --------------------------------------------------------------------------- #

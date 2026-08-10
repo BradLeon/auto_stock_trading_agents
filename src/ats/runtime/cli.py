@@ -816,6 +816,18 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         print(f"📝 {path}" if path else "(report dir unset — skipped)")
         return 0
 
+    if action == "kbreview":
+        # The same six detectors the weekly report runs, on demand. Worth its own
+        # command because the report costs a full re-assessment to regenerate, while
+        # the question "did my KB edit clear that finding?" should cost nothing.
+        from ..chain import kb_review
+        from ..config import load_sector_config
+
+        cfg = load_sector_config(entity or "ai_hardware")
+        findings = kb_review.review(cfg, store, now=datetime.now(timezone.utc))
+        print("\n".join(kb_review.as_section(findings)))
+        return 0
+
     if action == "claims":
         from ..chain import corroborate as corr
         from ..config import load_sector_config
@@ -1179,7 +1191,7 @@ def main(argv: list[str] | None = None) -> int:
     evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
     evi.add_argument("action",
                      choices=["observe", "show", "claims", "report", "sources",
-                              "probe", "propose", "proposals", "review"])
+                              "probe", "propose", "proposals", "review", "kbreview"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")

@@ -297,6 +297,7 @@ ats evidence claims            # 看各命题现在被证实/证伪到什么程�
 ats evidence report            # 手动生成一份产业链证据 Obsidian 周报
 ats evidence propose           # 让系统看看未归类的事实里有没有新命题（不够门槛就不跑）
 ats evidence proposals         # 列出待你审批的候选命题
+ats evidence kbreview          # 知识库该更新了吗（六类信号，无 LLM；周报里也有这一节）
 ats evidence review <id> --accept --note "理由"   # 采纳（或不加 --accept 即拒绝）
 ats risk report                # 看当前六层风控画像
 ats trader portfolio           # 看实时持仓

@@ -197,6 +197,7 @@ Chief、审批卡照常，但没有单会到券商。
 | `ats sector crosssection NAME --layer K --structure` | I8：手动跑截面（周报后自动跑，带结构层） |
 | `ats evidence propose` | I9：跑一次归纳（门槛不过则不调用模型，只打印判定） |
 | `ats evidence proposals` | 列出待确认/已采纳/已拒绝的候选命题 |
+| `ats evidence kbreview [--entity NAME]` | 知识库复核的六类信号（确定性，无 LLM）；周报「知识库复核」小节的即时版，见 `docs/KNOWLEDGE.md` |
 | `ats evidence review ID --accept\|--note "..."` | 审批候选命题（默认拒绝；采纳后仍需你手工写进配置） |
 
 ## 7. dry_run / --live / --yes 语义

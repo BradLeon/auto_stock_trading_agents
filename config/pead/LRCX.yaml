@@ -5,3 +5,13 @@
 symbol: LRCX
 company_name: "Lam Research"
 fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，Lam 财年 Q4
+
+# 产业链关系：刻蚀与沉积设备，存储敞口在四大设备商里最高——
+# 这决定了它的订单与 DRAM/NAND 周期的相关性强于逻辑制程。
+signal_chain:
+  - {symbol: MU,    role: downstream}   # DRAM/NAND 产能——Lam 存储敞口的主体
+  - {symbol: SKHY,  role: downstream}   # HBM 的 TSV 刻蚀是 Lam 的专属工序
+  - {symbol: TSM,   role: downstream}   # 逻辑制程侧客户
+  - {symbol: ASML,  role: peer}         # 同为设备商，光刻不重叠但同吃 WFE 预算
+  - {symbol: KLAC,  role: peer}
+  - {symbol: AMAT,  role: peer}         # 沉积环节直接竞争

@@ -6,3 +6,13 @@ symbol: GOOG
 company_name: "Alphabet"
 fiscal_label: "Q2 2026"        # 下次申报 2026-07-22 (amc)，日历季 Q2 2026
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
+
+# 产业链关系：GCP 既买加速器也自研 TPU，是链条上少数同时是买方与设计方的角色。
+signal_chain:
+  - {symbol: NVDA,  role: upstream}     # GPU 采购（与自研 TPU 并行）
+  - {symbol: AVGO,  role: upstream}     # TPU 联合设计方
+  - {symbol: TSM,   role: upstream}     # TPU 代工（二级上游）
+  - {symbol: SKHY,  role: upstream}     # TPU 用 HBM（三级上游）
+  - {symbol: MSFT,  role: peer}         # 同为超大规模云
+  - {symbol: AMZN,  role: peer}
+  - {symbol: META,  role: peer}

@@ -7,3 +7,14 @@ symbol: AVGO
 company_name: "Broadcom"
 sector_etf: SMH
 benchmark: QQQ
+
+# 产业链关系：定制 ASIC + 网络交换，利润来自"替客户把 GPU 换成自研芯片"。
+signal_chain:
+  - {symbol: TSM,   role: upstream}     # 先进制程 + CoWoS 封装（ASIC 的产能约束）
+  - {symbol: SKHY,  role: upstream}     # 定制 ASIC 同样吃 HBM
+  - {symbol: MU,    role: upstream}     # HBM 第二供
+  - {symbol: NVDA,  role: peer}         # 通用 GPU 的替代对手——此消彼长
+  - {symbol: MRVL,  role: peer}         # 定制 ASIC 设计服务的直接竞对
+  - {symbol: GOOGL, role: downstream}   # TPU 合作方，最大定制客户
+  - {symbol: META,  role: downstream}   # MTIA 自研加速器 + 网络设备采购
+  - {symbol: MSFT,  role: downstream}

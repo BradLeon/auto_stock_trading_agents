@@ -63,13 +63,15 @@ layers:
 
 
 def test_signal_chain_falls_back_to_sector_layer_when_yaml_declares_none():
-    # KLAC has no signal_chain in config/pead/KLAC.yaml — falls back to its
-    # ai_hardware.yaml L6_equipment layer peers.
-    cfg = load_pead_config("KLAC")
+    # AMD has no config/pead/AMD.yaml at all — falls back to its ai_hardware.yaml
+    # L4_chip_design layer peers. (chain/kb_review.py reports exactly this gap: the
+    # fallback keeps the report populated but carries no role and no comment, so
+    # `relation_hint` cannot tell 「上游 HBM 主供」 from 「上游 EUV」.)
+    cfg = load_pead_config("AMD")
     peers = {s.symbol for s in cfg.signal_chain}
     assert peers, "expected a non-empty derived peer list"
-    assert "KLAC" not in peers          # never include itself
-    assert "ASML" in peers              # same L6_equipment layer
+    assert "AMD" not in peers           # never include itself
+    assert "NVDA" in peers              # same L4_chip_design layer
     assert all(s.role == "peer" for s in cfg.signal_chain)  # no guessed direction
 
 

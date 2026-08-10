@@ -7,3 +7,12 @@ symbol: MRVL
 company_name: "Marvell Technology"
 sector_etf: SMH
 benchmark: QQQ
+
+# 产业链关系：定制 ASIC 设计服务 + 光 DSP，横跨 L4 设计与 L3 光互联两侧。
+signal_chain:
+  - {symbol: TSM,   role: upstream}     # 先进制程代工
+  - {symbol: AVGO,  role: peer}         # 定制 ASIC 设计服务的直接竞对
+  - {symbol: CRDO,  role: peer}         # 光 DSP/retimer 侧的重叠竞争
+  - {symbol: NVDA,  role: peer}         # 通用 GPU 的替代关系
+  - {symbol: AMZN,  role: downstream}   # 定制芯片客户
+  - {symbol: MSFT,  role: downstream}

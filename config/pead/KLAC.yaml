@@ -5,3 +5,13 @@
 symbol: KLAC
 company_name: "KLA"
 fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-28 (amc)，KLA 财年 Q4
+
+# 产业链关系：过程控制/量测设备，卖给所有建厂的人——它的客户就是它的下游。
+# 与其他设备商的区别：KLA 的 recipe 锁定发生在客户产线上，替换成本来自这里。
+signal_chain:
+  - {symbol: TSM,   role: downstream}   # 最大客户，先进制程与封装良率检测
+  - {symbol: SKHY,  role: downstream}   # HBM 堆叠良率——检测需求随层数上升
+  - {symbol: MU,    role: downstream}   # DRAM 产线
+  - {symbol: ASML,  role: peer}         # 同为设备商但不重叠（光刻 vs 检测）
+  - {symbol: LRCX,  role: peer}         # 刻蚀/沉积——同吃 WFE 预算
+  - {symbol: AMAT,  role: peer}         # 部分量测环节直接竞争

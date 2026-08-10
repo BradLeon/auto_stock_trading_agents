@@ -140,6 +140,22 @@ def _proposal_section(store) -> list[str]:
     return lines
 
 
+def _kb_section(cfg, store, *, as_of) -> list[str]:
+    """What the static knowledge may be missing (chain/kb_review.py).
+
+    Placed after the proposals because it is the same kind of output — a list only a
+    person may act on — and before the failures, which are plumbing.
+    """
+    from . import kb_review
+
+    try:
+        findings = kb_review.review(cfg, store, now=as_of)
+    except Exception as exc:  # noqa: BLE001 — a detector must never break the report
+        log.warning("kb review section skipped: %s", exc)
+        return []
+    return kb_review.as_section(findings)
+
+
 def _failure_section(store) -> list[str]:
     fails = store.observation_failures(limit=8)
     if not fails:
@@ -198,6 +214,7 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
     lines += _claim_section(cfg, store, assessments_by_layer, rows_by_id)
     lines += _pool_section(store, ind_cfg or {})
     lines += _proposal_section(store)
+    lines += _kb_section(cfg, store, as_of=as_of)
     lines += _failure_section(store)
     total = len(store.observations(limit=1000))
     lines += ["---", f"*观测总数 {total} · 命题 "

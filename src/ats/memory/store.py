@@ -1218,6 +1218,26 @@ class TradingMemory:
             (sector,)).fetchone()
         return SectorReview.model_validate_json(row["payload"]) if row else None
 
+    def sector_review_history(self, sector: str, limit: int = 8) -> list:
+        """Recent reviews in full, newest first — payloads, not just the summary row.
+
+        A weekly run often assesses one layer, so `latest_sector_review` alone answers
+        "what do we currently think about L3?" with silence. Readers that need the most
+        recent view PER LAYER have to walk backwards through several reviews.
+        """
+        from ..schemas.sector import SectorReview
+
+        rows = self.conn.execute(
+            "SELECT payload FROM sector_reviews WHERE sector = ? ORDER BY as_of DESC "
+            "LIMIT ?", (sector, limit)).fetchall()
+        out = []
+        for r in rows:
+            try:
+                out.append(SectorReview.model_validate_json(r["payload"]))
+            except Exception as exc:  # noqa: BLE001 — one bad row must not hide the rest
+                log.warning("sector review payload skipped: %s", exc)
+        return out
+
     def recent_sector_reviews(self, sector: str, limit: int = 8) -> list[dict]:
         rows = self.conn.execute(
             "SELECT sector, as_of, regime, summary FROM sector_reviews "

@@ -5,3 +5,14 @@ symbol: AMZN
 company_name: "Amazon"
 fiscal_label: "Q2 2026"        # 下次申报 2026-07-30 (amc)，日历季 Q2 2026
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
+
+# 产业链关系：AWS 既是加速器的最大买方之一，也自研 Trainium/Inferentia。
+# 注释是给 evidence_observer 用的——它靠这些描述把电话会里的指代解析到具体公司。
+signal_chain:
+  - {symbol: NVDA,  role: upstream}     # GPU 主供——AWS 采购与自研并行
+  - {symbol: AVGO,  role: upstream}     # 定制 ASIC/网络芯片合作方
+  - {symbol: MRVL,  role: upstream}     # 定制芯片设计服务（Trainium 世代合作）
+  - {symbol: TSM,   role: upstream}     # 自研芯片的代工方（二级上游）
+  - {symbol: MSFT,  role: peer}         # 同为超大规模云，capex 与算力租金可比
+  - {symbol: GOOGL, role: peer}
+  - {symbol: META,  role: peer}         # 自用为主，但同样争夺加速器供给

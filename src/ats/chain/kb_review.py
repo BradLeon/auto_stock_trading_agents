@@ -34,8 +34,13 @@ from pathlib import Path
 
 log = logging.getLogger("ats.chain.kb_review")
 
-# The structure analyst is instructed to say this when it scores a name blind.
+# Two different ways the structure analyst can fail to score a name, and they need
+# different fixes. Once the knowledge base stopped carrying company-level facts (it
+# gives criteria now, not rankings), "no company facts in the KB" became the EXPECTED
+# state — collecting it as a KB gap would flag the design decision itself on every
+# layer, every week. What is missing in that case is evidence, not knowledge.
 BLIND_MARKERS = ("KB 未覆盖", "KB未覆盖", "知识库未覆盖", "知识库未涵盖", "无 KB", "未被知识库")
+THIN_EVIDENCE_MARKERS = ("缺本期证据", "无本期证据", "缺公司级证据", "未提供.*公司级")
 # Reasons the adjudicator gives when a source cannot be tied to the claim's subject.
 # Used as a NOTE, never as a precondition: making a detector depend on the model's
 # phrasing means it goes quiet the moment the model rewords, which is how the Taiwan
@@ -103,13 +108,18 @@ def _tokens(metric: str) -> set[str]:
 
 # --- ① blind spots ------------------------------------------------------- #
 def blind_spots(cfg, store) -> list[Finding]:
-    """The structure analyst's own "I scored this without knowledge" admissions.
+    """The structure analyst's own "I could not score this" admissions.
 
     Already written into every basket row's rationale and read by nobody — the cheapest
     signal in the set, and the only one that is the analyst telling us directly.
+
+    Split by which thing was missing. A KB gap is fixed by writing criteria; an evidence
+    gap is fixed by declaring a claim or a witness, and no amount of KB editing will
+    clear it. Reporting them together sends the reader to the wrong file.
     """
     label_of = {ly.key: ly.label for ly in cfg.layers}
-    by_layer: dict[str, list[str]] = {}
+    blind: dict[str, list[str]] = {}
+    thin: dict[str, list[str]] = {}
     seen_layers: set[str] = set()
     # Newest-first, first basket per layer wins: a weekly run usually scores ONE layer,
     # so the current view of L3 may sit three reviews back. Reading only the latest
@@ -120,19 +130,31 @@ def blind_spots(cfg, store) -> list[Finding]:
                 continue
             seen_layers.add(basket.layer_key)
             for row in basket.rows:
-                if any(m in (row.rationale or "") for m in BLIND_MARKERS):
-                    by_layer.setdefault(basket.layer_key, []).append(row.symbol)
+                why = row.rationale or ""
+                if any(m in why for m in BLIND_MARKERS):
+                    blind.setdefault(basket.layer_key, []).append(row.symbol)
+                elif any(re.search(m, why) for m in THIN_EVIDENCE_MARKERS):
+                    thin.setdefault(basket.layer_key, []).append(row.symbol)
     out = []
-    for key, names in sorted(by_layer.items()):
+    for key, names in sorted(blind.items()):
         layer = next((ly for ly in cfg.layers if ly.key == key), None)
         has_kb = bool(layer and layer.structure_notes)
         out.append(Finding(
             signal="① 盲区标记",
             subject=f"{label_of.get(key, key)}：{', '.join(sorted(set(names)))}",
-            detail=f"结构分析师自报 {len(set(names))} 个标的在无知识库依据下打分"
-                   + ("（该层已有 KB，但未覆盖这些名字）" if has_kb else "（该层没有任何 KB）"),
+            detail=f"结构分析师自报 {len(set(names))} 个标的**没有可用判据**"
+                   + ("（该层已有 KB，但未覆盖这些名字所属的环节）" if has_kb
+                      else "（该层没有任何 KB）"),
             action=("补写这些名字所属子层的知识库" if has_kb
                     else f"为 {key} 新建 config/knowledge/*.md 并在 structure_notes 里挂上")))
+    for key, names in sorted(thin.items()):
+        out.append(Finding(
+            signal="① 盲区标记",
+            subject=f"{label_of.get(key, key)}：{', '.join(sorted(set(names)))}（缺证据）",
+            detail=f"{len(set(names))} 个标的**有判据但没有本期读数**可套——"
+                   f"判据管怎么权衡，排序要靠台账里的实际表述",
+            action="**这不是知识库的问题**：给该层立命题、补 witness_roster，"
+                   "或等下一次财报把读数补上"))
     return out[: DEFAULTS["max_per_signal"]]
 
 

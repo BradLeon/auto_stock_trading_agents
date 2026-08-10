@@ -42,6 +42,26 @@ def test_blind_spots_come_from_the_analyst_own_words():
     assert "MRVL" in found[0].subject and "COHR" not in found[0].subject
 
 
+def test_a_missing_reading_is_not_a_missing_criterion():
+    """Once the KB stopped carrying company-level facts, "the KB does not say whether
+    this company owns its substrate" became the EXPECTED state — the criteria are
+    there, the quarter's reading is not. Filing that as a KB gap would flag the design
+    decision itself, on every layer, every week, and send the reader to the wrong file:
+    no amount of KB editing clears an evidence gap."""
+    store = get_store()
+    store.save_sector_review(_review("ai_hardware", "L2_cloud", [
+        BasketRow(symbol="AMZN", rationale="判据清楚，但缺本期证据，按纪律中性"),
+        BasketRow(symbol="MSFT", rationale="KB 未覆盖该环节")]))
+
+    found = kb_review.blind_spots(load_sector_config("ai_hardware"), store)
+    by_subject = {f.subject: f for f in found}
+    kb_gap = next(f for s, f in by_subject.items() if "MSFT" in s)
+    ev_gap = next(f for s, f in by_subject.items() if "AMZN" in s)
+    assert "AMZN" not in kb_gap.subject and "MSFT" not in ev_gap.subject
+    assert "知识库" in kb_gap.action
+    assert "不是知识库的问题" in ev_gap.action
+
+
 def test_blind_spots_survive_a_week_that_scored_a_different_layer():
     """A weekly run usually scores ONE layer. Reading only the newest review would
     report "no blind spots" for every layer that simply did not run this week —

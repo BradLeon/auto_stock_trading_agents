@@ -74,6 +74,131 @@ layers:
           - {entity: META, stance: customer}
           - {entity: ORCL, stance: customer}
 
+      # ── 2026-08-11 新增三条云服务命题 ────────────────────────────────────────
+      # 起草时先写了「已锁定的电力与场地」「自研芯片的部署占比」，审计台账后发现
+      # **五家全部 0 条**——没有一家披露 PPA、并网、土地收购或部署分母。那是问了公司
+      # 不会说的话，和「名单宁短勿长」是同一类错误，只是发生在维度层而不是证人层。
+      # 下面的维度全部改成**公司真会说的话**。
+      - id: cloud_demand_still_accelerating
+        kind: common
+        statement: 云 AI 需求仍在加速——订单承诺的增长快于已确认收入，且供给仍是约束
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: rpo_backlog_growth
+            desc: RPO / backlog 的增速与**同一家公司自身收入增速**的对比。
+                  只做公司内部对比，不跨公司比绝对值——MSFT 的 commercial RPO 含
+                  Office/Dynamics，GOOG 的是纯云 backlog，口径本就不可比。
+                  同时记录转化节奏（多少会在未来 N 个月确认为收入）
+            expect_from: [MSFT, GOOG, AMZN]
+          - key: cloud_capacity_constraint
+            desc: 需求是否仍超过可用产能——"supply constrained""demand exceeds capacity"、
+                  用第三方产能过桥、交付排期。注意这是**云侧**的产能约束，
+                  与 L5 的 HBM 供给紧张是两件事
+            expect_from: [MSFT, GOOG, AMZN, META]
+          - key: demand_conversion
+            desc: 供给侧对终端需求的确认——**只记与云/数据中心终端需求直接相关的
+                  订单与出货表述**，不记该公司自身产品线的供需（那属于 L5 的命题）。
+                  瓶颈现在在存储与先进封装，不在加速器设计，所以三者都要问
+            expect_from: [SKHY, MU, TSM, NVDA]
+        falsifiers:
+          - 任一云厂的 RPO/backlog 增速掉到自身收入增速以下
+          - 云厂不再提产能约束，或转为"需求受限"表述
+          - 存储/封装的订单与出货增速掉头，与云厂的 backlog 叙事背离
+        # ORCL 不入列：RPO $6,380 亿高度集中在少数几笔（"four customers contracting for
+        #   more than $8 billion this quarter"、$750 亿预付与客户自供硬件）。它是
+        #   **资金结构的好证人、需求广度的坏证人**——留在 capex_funding_quality。
+        # META 不入列：不卖云，backlog 那条腿永久沉默（唯一命中是客户案例）。
+        #   但它在 cloud_capacity_constraint 上有话说，所以只在该维度的 expect_from 里。
+        # 电力侧没有好的上市证人（VRT 只讲行业总量、无区分度），改由第三方源补，
+        #   见 datacenter_buildout_constraint。
+        witnesses:
+          - {entity: MSFT, stance: incumbent}
+          - {entity: GOOG, stance: incumbent}
+          - {entity: AMZN, stance: incumbent}
+          - {entity: SKHY, stance: supplier}
+          - {entity: MU,   stance: supplier}
+          - {entity: TSM,  stance: supplier}
+          - {entity: NVDA, stance: supplier}
+
+      - id: cloud_moat_hard_assets
+        kind: relative
+        entities: [MSFT, GOOG, AMZN, META]
+        feeds_factor: moat_pricing
+        statement: 云服务的硬资产护城河（数据中心容量、自研芯片）在超大规模厂商之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # 两条都必须 direct: true，否则隔离闸（gate 3）会把它们全部挡掉——
+          # relative 命题只在 direct 维度上移动，而默认是 false。
+          #
+          # 为什么 capacity 在这里是 direct，在 hbm_supply_tight 里却不是：
+          # 那边 capacity_addition 是**行业供给**读数，竞争者扩产推不出"我方失份额"，
+          # 所以必须挡住。这里的容量**就是被比较的资产本身**，且每家的读数各自落进
+          # 自己那一行（按 entity 分组），不存在跨公司推断。同一个词，两种语义。
+          - key: datacenter_capacity_delivered
+            desc: 已交付/在建的电力与数据中心容量——**物理量**：GW/MW、新增站点数、
+                  合建结构、机房上线。**不要记资产负债表的固定资产净额/PP&E**——
+                  那是会计口径不是容量，且不同折旧政策下不可比（首轮判读里它被当成
+                  容量用了，还把两栏读反）。
+                  **这是"已交付"不是"已锁定"**：知识库判据里最硬的一条是已锁定的电力与
+                  场地，但无人披露 PPA/并网/土地，所以这里退到能拿到的最接近读数
+            expect_from: [MSFT, GOOG, AMZN, META]
+            direct: true
+          - key: custom_silicon_program
+            desc: 自研芯片的部署形态与经济性——已上线机架/数据中心数、性能功耗比、
+                  对外收入、代际延续与设计伙伴。**不要求份额分母**（无人披露）。
+                  设计伙伴（AVGO/MRVL）谈到某家客户的项目时，entity 记的是**那家客户**，
+                  这是本条唯一的非自述读数来源
+            expect_from: [MSFT, GOOG, AMZN, META, AVGO, MRVL]
+            direct: true
+        falsifiers:
+          - 某家的自研芯片代际中断或更换设计伙伴
+          - 某家披露数据中心/电力交付时点推迟
+        # AVGO/MRVL 作 supplier：它们是 TPU/MTIA/Maia 的联合设计方，会披露项目进度与
+        # 客户——这是对"自研芯片到底部署了没有"的**非自述**读数，把 basis 从「仅自述」
+        # 升到「有交叉印证」。
+        # 预期 GOOG 在 datacenter_capacity_delivered 上沉默（台账里它这一项 0 条）。
+        # 沉默被显式记成缺口而非中性，这正是该看见的事实。
+        witnesses:
+          - {entity: MSFT, stance: incumbent}
+          - {entity: GOOG, stance: competitor}
+          - {entity: AMZN, stance: competitor}
+          - {entity: META, stance: competitor}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+
+      # 单独立一条，不并进上面两条：它问的是完全不同的事，而且**同一条读数对两件事
+      # 符号相反**——审批冻结让短缺更持久（对"需求超供给"是支持），同时让下游收入被
+      # 推迟（对交付是利空）。合在一起判读器只能二选一。
+      #
+      # 这是"钱和需求都到位了，东西建不建得出来"的问题：审批批不下来、电接不上，
+      # capex 就落不了地，L3–L6 的收入预期直接被封顶。属于基本面约束，不是情绪。
+      - id: datacenter_buildout_constraint
+        kind: common
+        statement: 数据中心的物理落地未被审批与并网卡住——已宣布的产能能按期交付
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: power_delivery_timeline
+            desc: 公司自述的电力/机房上线时点——按期、提前、还是推迟。
+                  只记**时点**的变化，不记容量规模（那属于 cloud_moat_hard_assets）
+            expect_from: [MSFT, GOOG, AMZN, META, ORCL]
+          - key: permitting_action
+            desc: 审批与政策对数据中心建设的限制——暂停/新规/成本分摊原则变化，
+                  以及公司对选址转移的表述。**财报里罕见，主要靠第三方源**
+            expect_from: [MSFT, GOOG, AMZN, META, ORCL]
+          - key: interconnection_queue
+            desc: 电网接入排队中的数据中心负荷规模及其变化。**只能来自第三方源**——
+                  电网运营商是独立第三方，公司不会披露自己在排队里的位置
+            expect_from: []
+        falsifiers:
+          - 任一云厂披露电力/机房上线时点推迟
+          - 出现新的辖区级审批暂停或大负荷接入限制
+        witnesses:
+          - {entity: MSFT, stance: incumbent}
+          - {entity: GOOG, stance: incumbent}
+          - {entity: AMZN, stance: incumbent}
+          - {entity: META, stance: incumbent}
+          - {entity: ORCL, stance: incumbent}
+
   - key: L3_dc_infra
     label: L3 数据中心基建（电力/冷却/网络/光互联）
     question: 机房/电力/光互联哪个环节仍是瓶颈？订单能见度多长？

@@ -658,6 +658,18 @@ def _cross_section_weekly(name: str) -> None:
             log.warning("cross-section %s/%s failed: %s", name, layer.key, exc)
     # One Obsidian report per week, after every layer has been ranked, so the claim
     # verdicts and the basket it produced describe the same run.
+    # Refresh third-party series BEFORE the report renders, or the report shows last
+    # month's customs print next to this week's filings. `collect()` had no production
+    # caller at all — the configured sources only ever ran when someone invoked it from
+    # a REPL, so they were silently frozen while looking configured.
+    try:
+        from ..chain import sources as chain_sources
+
+        saved = chain_sources.collect(get_store())
+        log.info("third-party sources: %s", saved or "(none configured)")
+    except Exception as exc:  # noqa: BLE001 - a source outage must not break the job
+        log.warning("third-party source collection failed: %s", exc)
+
     try:
         from ..chain import report as chain_report
         from ..config import load_pead_global

@@ -816,6 +816,20 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         print(f"📝 {path}" if path else "(report dir unset — skipped)")
         return 0
 
+    if action == "collect":
+        # Fetch every configured third-party series into the ledger. Separate from
+        # `sources`, which reports primary-document coverage and touches no network.
+        from ..chain import sources as chain_sources
+
+        saved = chain_sources.collect(store)
+        if not saved:
+            print("（config/sources.yaml 里没有配置第三方源）")
+            return 0
+        for sid, n in sorted(saved.items()):
+            print(f"  {'✅' if n else '⚠️ '} {sid:<28}{n} 条新观测"
+                  + ("" if n else "　—— 取不到数据，已记成缺口而非沉默"))
+        return 0
+
     if action == "kbreview":
         # The same six detectors the weekly report runs, on demand. Worth its own
         # command because the report costs a full re-assessment to regenerate, while
@@ -1198,7 +1212,8 @@ def main(argv: list[str] | None = None) -> int:
     evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
     evi.add_argument("action",
                      choices=["observe", "show", "claims", "report", "sources",
-                              "probe", "propose", "proposals", "review", "kbreview"])
+                              "probe", "propose", "proposals", "review", "kbreview",
+                              "collect"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")

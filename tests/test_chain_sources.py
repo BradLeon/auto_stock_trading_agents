@@ -103,3 +103,34 @@ def test_a_series_does_not_inflate_the_cluster_count():
     clusters = build_clusters(claim, rows)
     assert len(clusters) == 1
     assert len(clusters[0].rows) == 6            # members kept, one voice
+
+
+def test_collect_is_wired_into_the_weekly_job(monkeypatch):
+    """A configured source that nobody ever fetches is worse than none — it looks
+    live in the config and is frozen in the ledger. `collect()` had no production
+    caller at all: the only invocation in the repo was this test file, so the three
+    declared series only ever refreshed when someone ran it from a REPL.
+
+    The weekly job must refresh BEFORE rendering, or the report shows last month's
+    customs print beside this week's filings.
+    """
+    import inspect
+
+    from ats.runtime import scheduler
+
+    src = inspect.getsource(scheduler._cross_section_weekly)
+    assert "sources.collect" in src or "chain_sources.collect" in src
+    # ...and it must come before the report is written, not after.
+    assert src.index("collect(") < src.index("chain_report.write")
+
+
+def test_a_source_outage_does_not_break_the_weekly_job():
+    """An agency being down is a recorded gap, never an exception that costs the whole
+    sector job its report — the same rule the adapters follow one level down."""
+    import inspect
+
+    from ats.runtime import scheduler
+
+    src = inspect.getsource(scheduler._cross_section_weekly)
+    after_call = src[src.index("chain_sources.collect("):]
+    assert "except Exception" in after_call.split("chain_report")[0]

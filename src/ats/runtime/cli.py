@@ -1181,10 +1181,14 @@ def main(argv: list[str] | None = None) -> int:
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
-    se.add_argument("action", choices=["review", "show", "probe", "crosssection"])
+    se.add_argument("action",
+                    choices=["review", "show", "probe", "crosssection", "kbperturb"])
     se.add_argument("name", nargs="?", default="ai_hardware")
     se.add_argument("--layer", default="all", help="crosssection: layer key (e.g. L3_dc_infra) or 'all'")
     se.add_argument("--structure", action="store_true", help="crosssection: blend KB structure analyst")
+    se.add_argument("--mode", default="poison", choices=["poison", "ablate", "control"],
+                    help="kbperturb: 倒序判据(poison) / 删掉判据(ablate) / "
+                         "同一份笔记跑两次测噪声底(control)")
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
@@ -1301,6 +1305,20 @@ def main(argv: list[str] | None = None) -> int:
             return sector_show(args.name)
         if args.action == "probe":
             return sector_probe(args.name, live_data=not args.offline)
+        if args.action == "kbperturb":
+            # Layer 2 of KB validation: the audit shows the analyst CITES the criteria,
+            # this shows whether they PRODUCED the score. Never persists, never touches
+            # the production notes.
+            from ..agents.sector import kb_perturb
+
+            if args.layer in ("", "all"):
+                print("kbperturb 需要指定 --layer（一次只扰动一层）")
+                return 2
+            base, other = kb_perturb.run(args.name, args.layer, mode=args.mode)
+            print()
+            print(kb_perturb.render(base, other, mode=args.mode))
+            return 0
+
         if args.action == "crosssection":
             return run_cross_section(args.name, args.layer, structure=args.structure,
                                      write_report=not args.no_report)

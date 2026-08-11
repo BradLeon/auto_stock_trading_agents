@@ -156,6 +156,21 @@ def _kb_section(cfg, store, *, as_of) -> list[str]:
     return kb_review.as_section(findings)
 
 
+def _kb_audit_section(cfg, store) -> list[str]:
+    """Whether the knowledge base was USED correctly (chain/kb_audit.py).
+
+    Sits right after the review section because they are the two halves of one
+    question: is the knowledge right, and is it being applied.
+    """
+    from . import kb_audit
+
+    try:
+        return kb_audit.as_section(kb_audit.audit(cfg, store))
+    except Exception as exc:  # noqa: BLE001 — an audit must never break the report
+        log.warning("kb audit section skipped: %s", exc)
+        return []
+
+
 def _failure_section(store) -> list[str]:
     fails = store.observation_failures(limit=8)
     if not fails:
@@ -215,6 +230,7 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
     lines += _pool_section(store, ind_cfg or {})
     lines += _proposal_section(store)
     lines += _kb_section(cfg, store, as_of=as_of)
+    lines += _kb_audit_section(cfg, store)
     lines += _failure_section(store)
     total = len(store.observations(limit=1000))
     lines += ["---", f"*观测总数 {total} · 命题 "

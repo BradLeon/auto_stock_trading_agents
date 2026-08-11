@@ -198,6 +198,7 @@ Chief、审批卡照常，但没有单会到券商。
 | `ats evidence propose` | I9：跑一次归纳（门槛不过则不调用模型，只打印判定） |
 | `ats evidence proposals` | 列出待确认/已采纳/已拒绝的候选命题 |
 | `ats evidence kbreview [--entity NAME]` | 知识库复核的六类信号（确定性，无 LLM）；周报「知识库复核」小节的即时版，见 `docs/KNOWLEDGE.md` |
+| `ats sector kbperturb NAME --layer K [--mode poison\|ablate\|control]` | 知识库是否 load-bearing：消融/投毒/对照三臂对比。**先跑 control 拿本层噪声底**（各层差很多）。不落库、不动生产笔记 |
 | `ats evidence review ID --accept\|--note "..."` | 审批候选命题（默认拒绝；采纳后仍需你手工写进配置） |
 
 ## 7. dry_run / --live / --yes 语义

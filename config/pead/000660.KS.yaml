@@ -29,7 +29,7 @@ signal_chain:
   - {symbol: LRCX,     role: upstream}     # 刻蚀/沉积（3D NAND、HBM TSV）
   - {symbol: MU,       role: peer}         # 美光：HBM/DRAM 直接竞争
   - {symbol: "005930.KS", role: peer}      # 三星：HBM 追赶者、DRAM/NAND 竞争
-  - {symbol: GOOGL,    role: upstream}     # 超大厂 AI Capex（间接需求锚）
+  - {symbol: GOOG,    role: upstream}     # 超大厂 AI Capex（间接需求锚）
   - {symbol: META,     role: upstream}
 
 narrative_seed: >

@@ -6,7 +6,7 @@ tickers:
     name: NVIDIA Corporation
     sector: ai_hardware
     exchange: NASDAQ
-  - symbol: GOOGL
+  - symbol: GOOG
     name: Alphabet Inc.
     sector: internet_software
     exchange: NASDAQ

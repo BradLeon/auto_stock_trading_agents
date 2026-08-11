@@ -25,6 +25,16 @@ entities:
     market: KRX
     filings: ir
 
+  # 2026-08-11 补。与 SK 海力士同一类问题：A/C 两类股是同一家公司、同一场电话会、
+  # 同一份 10-Q，按代码入账会被算成两个独立证人，并在截面里各拿一份权重——L2 的
+  # basket 里 GOOG 排第 4、GOOGL 排第 5，各配 3.6%，等于给 Alphabet 配了 7.2%。
+  # canonical 取 GOOG：账户实际持有的是 C 类。
+  GOOG:
+    name: Alphabet
+    aliases: [GOOGL, GOOG.L, ALPHABET, GOOGLE]
+    market: US
+    filings: sec
+
   MU:
     name: Micron Technology
     aliases: []

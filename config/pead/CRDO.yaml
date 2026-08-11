@@ -9,7 +9,7 @@ fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 
 long_threshold: 1.4           # 极端估值+高波，门槛最高（暂定，待截面框架校准）
 
 signal_chain:
-  - {symbol: GOOGL, role: upstream}
+  - {symbol: GOOG, role: upstream}
   - {symbol: MSFT,  role: upstream}
   - {symbol: AMZN,  role: upstream}
   - {symbol: META,  role: upstream}

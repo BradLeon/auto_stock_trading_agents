@@ -12,5 +12,5 @@ signal_chain:
   - {symbol: COHR, role: downstream}    # 衬底买家（光器件厂）
   - {symbol: LITE, role: downstream}
   - {symbol: AAOI, role: downstream}
-  - {symbol: GOOGL, role: upstream}     # 终端需求：hyperscaler capex
+  - {symbol: GOOG, role: upstream}     # 终端需求：hyperscaler capex
   - {symbol: MSFT,  role: upstream}

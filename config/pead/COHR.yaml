@@ -26,7 +26,7 @@ scorecard_dims:
 signal_chain:
   - {symbol: TSM,   role: upstream}
   - {symbol: ASML,  role: upstream}
-  - {symbol: GOOGL, role: upstream}
+  - {symbol: GOOG, role: upstream}
   - {symbol: META,  role: upstream}
   - {symbol: MSFT,  role: upstream}
   - {symbol: AMZN,  role: upstream}

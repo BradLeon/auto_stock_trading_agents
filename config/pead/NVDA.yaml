@@ -27,7 +27,7 @@ signal_chain:
   - {symbol: MU,    role: upstream}     # HBM 第二供
   - {symbol: MSFT,  role: downstream}   # 云 CapEx 需求端
   - {symbol: META,  role: downstream}
-  - {symbol: GOOGL, role: downstream}
+  - {symbol: GOOG, role: downstream}
   - {symbol: AMZN,  role: downstream}
 
 narrative_seed: >

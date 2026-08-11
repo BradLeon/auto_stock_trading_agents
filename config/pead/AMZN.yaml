@@ -14,5 +14,5 @@ signal_chain:
   - {symbol: MRVL,  role: upstream}     # 定制芯片设计服务（Trainium 世代合作）
   - {symbol: TSM,   role: upstream}     # 自研芯片的代工方（二级上游）
   - {symbol: MSFT,  role: peer}         # 同为超大规模云，capex 与算力租金可比
-  - {symbol: GOOGL, role: peer}
+  - {symbol: GOOG, role: peer}
   - {symbol: META,  role: peer}         # 自用为主，但同样争夺加速器供给

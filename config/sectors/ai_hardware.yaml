@@ -13,7 +13,7 @@ layers:
     label: L1 AI应用层（Token经济）
     question: 谁在消耗算力？Token 需求是否仍在加速？
     tickers:
-      - {symbol: GOOGL, note: Gemini（兼属L2）}
+      - {symbol: GOOG, note: Gemini（兼属L2）—— A/C 类已在 entities.yaml 归一到 GOOG}
     private: [OpenAI, Anthropic, xAI]        # 无票据，供 LLM 参考需求侧
 
   - key: L2_cloud
@@ -23,11 +23,58 @@ layers:
       - {symbol: MSFT}
       - {symbol: AMZN}
       - {symbol: META, note: 自用为主，近期传出售闲置算力}
-      - {symbol: GOOGL}
-      - {symbol: GOOG, note: Alphabet C类（IBKR/用户实际持有此代码）}
+      - {symbol: GOOG, note: Alphabet（A/C 类归一到 C 类，账户实际持有；见 entities.yaml）}
       - {symbol: CRWV, note: neocloud，TODO 用户确认}
     structure_notes:
       云服务: config/knowledge/云服务.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子，六层都挂（见 docs/KNOWLEDGE.md）
+    # 2026-08-11 人工新增。放在 L2 是因为钱从这里花出去，证人也最强；但它是**跨 L2→L6
+    # 的共同因子**：L2 的资本开支就是 L3-L6 的收入。所以证人两侧都放——需求侧披露融资
+    # 与口径，供给侧披露它们对客户 capex 节奏的**自述预期**，后者比订单下滑早几个季度。
+    #
+    # 这条命题的形状是刻意的：statement 写成**多头假设**，让证据去证伪它。按建仓时
+    # 已知的读数（Alphabet 发债 $203 亿 + 强制可转优先股、单季 FCF 转负），它很可能
+    # 一上线就被判反证——那正是它的价值，不是要回避的结果。
+    claims:
+      - id: capex_funding_quality
+        kind: common
+        statement: 超大规模厂商的 AI capex 由内生现金流支撑，未依赖递增的外部融资与表外承诺
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: external_funding_need
+            desc: "**仅限买方（超大规模云厂）**为资本开支进行的债务发行、优先股/可转债
+                  规模，以及净债务与杠杆率方向。核心读数是自由现金流能否覆盖当期 capex——
+                  覆盖不了，capex 节奏就不再由需求单独决定，而受制于融资窗口。
+                  **供应商自身的资本结构不归这里**（concept_menu 是命题级放开的，
+                  会把这个维度也提供给供给侧证人，所以这里必须自己设限）"
+            expect_from: [GOOG, MSFT, AMZN, META]
+          - key: off_balance_sheet_shift
+            desc: "**仅限买方**的口径操作：经营租赁重分类、资产使用年限变更、SPV/JV 与
+                  第三方托管等把支出移出资本开支口径的做法。判据：口径调整不等于支出减少"
+            expect_from: [GOOG, MSFT, AMZN, META]
+          - key: purchase_commitments
+            desc: "**仅限买方**的无条件采购承诺、长期供货合同与剩余履约义务的规模和年限
+                  ——已经签字的未来支出下限。对客户是收入承诺，对自己是必须建出来的产能承诺"
+            expect_from: [GOOG, MSFT, AMZN, META]
+          - key: capex_cadence_downstream
+            desc: "**仅限供给侧**：供应商对客户 capex 节奏的自述预期（如「云 capex 增速
+                  放缓至 30%+ 区间」）、以及客户订单/产能预订的节奏变化。
+                  这是资金端压力传导到订单端最早的读数。买方自己的 capex 指引不归这里"
+            expect_from: [MRVL, AVGO, NVDA, LITE, COHR, LRCX, ASML, TSM]
+        falsifiers:
+          - 任一超大规模厂商为 capex 发行债务/优先股，且当期自由现金流无法覆盖 capex
+          - 出现 capex 口径调整（租赁重分类/折旧年限延长/SPV 托管）而实质现金承诺未降
+          - 下游供应商下修对客户 capex 增速的预期
+        witnesses:
+          - {entity: GOOG, stance: customer}
+          - {entity: MSFT, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: NVDA, stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: TSM, stance: supplier}
+          - {entity: LRCX, stance: supplier}
 
   - key: L3_dc_infra
     label: L3 数据中心基建（电力/冷却/网络/光互联）
@@ -48,6 +95,7 @@ layers:
       铜连接: config/knowledge/铜连接.md
       衬底: config/knowledge/光互联.md      # 衬底判据写在光互联笔记里（需求派生自它）
       电力冷却: config/knowledge/电力冷却.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
 
   - key: L4_chip_design
     label: L4 芯片设计
@@ -59,6 +107,7 @@ layers:
       - {symbol: MRVL, note: Marvell 定制ASIC+光DSP（横跨L3光互联，按合集归L4设计服务）}
     structure_notes:
       芯片设计: config/knowledge/芯片设计.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
 
   - key: L5_fab
     label: L5 芯片制造（Foundry+封装+存储）
@@ -73,6 +122,7 @@ layers:
     structure_notes:
       存储: config/knowledge/HBM存储.md
       代工封装: config/knowledge/先进封装代工.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
     # HBM 主题的证人范围（2026-08-06 人工规定）。身份按 config/entities.yaml 归一：
     # 写 canonical，别名代码（HY9H / 000660.KS）自动折叠，不会被算成额外证人。
     #
@@ -193,6 +243,7 @@ layers:
       - {symbol: "8035.T", note: TEL，TODO 用户确认}
     structure_notes:
       半导体设备: config/knowledge/半导体设备.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
 
 # 每票轻量快照的抓取策略（限速关键）
 snapshot:

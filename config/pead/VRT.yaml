@@ -9,7 +9,7 @@ fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 
 long_threshold: 1.2           # 大盘动量、beat-but-drop 较轻，门槛适中（待截面框架校准）
 
 signal_chain:
-  - {symbol: GOOGL, role: upstream}     # 终端需求：hyperscaler 建厂 capex
+  - {symbol: GOOG, role: upstream}     # 终端需求：hyperscaler 建厂 capex
   - {symbol: MSFT,  role: upstream}
   - {symbol: AMZN,  role: upstream}
   - {symbol: META,  role: upstream}

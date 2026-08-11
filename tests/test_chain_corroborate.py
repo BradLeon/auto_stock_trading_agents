@@ -375,3 +375,44 @@ def test_counter_evidence_is_not_hidden_by_netting():
     assert a.verdict == "mixed"
     assert a.support_score == 2.0 and a.refute_score == 2.0   # both sides visible
     assert a.dissenters                                        # and named
+
+
+def test_two_kinds_of_mixed_are_told_apart():
+    """`mixed` covers two states that mean opposite things to a reader.
+
+    One is a genuine disagreement. The other is one-sided evidence whose witnesses all
+    share a vantage point — the engine declines to confirm it, but the evidence does
+    not conflict. Observed live: `capex_funding_quality` came back refuted 9 clusters
+    to 1 by five independent filings and still landed in `mixed`, because every witness
+    was a `customer` disclosing its own financing. Rendering that as 「分歧」 says the
+    filings disagreed; they did not.
+    """
+    from ats.chain.report import verdict_mark
+    from ats.schemas.chain import ClaimAssessment
+
+    dissent = ClaimAssessment(claim_id="c", as_of=NOW, verdict="mixed",
+                              unresolved_reason="dissent")
+    single = ClaimAssessment(claim_id="c", as_of=NOW, verdict="mixed",
+                             unresolved_reason="single_stance")
+    assert verdict_mark(dissent) != verdict_mark(single)
+    assert "分歧" in verdict_mark(dissent)
+    assert "分歧" not in verdict_mark(single) and "未确认" in verdict_mark(single)
+    # Assessments stored before the field existed must still render.
+    assert verdict_mark(ClaimAssessment(claim_id="c", as_of=NOW, verdict="mixed"))
+
+
+def test_single_stance_note_says_which_way_the_evidence_leans():
+    """"Unconfirmed" without a direction reads as "we learned nothing". A claim refuted
+    by four independent filings and a claim with no directional evidence must not
+    produce the same sentence — the first is a finding, the second is a gap."""
+    claim = _common(witnesses=[Witness(entity="NVDA", stance="customer"),
+                               Witness(entity="MSFT", stance="customer")])
+    rows = [_row("NVDA", "supply_tightness", speaker=s, doc=f"d{i}", rid=f"r{i}",
+                 polarity="refute")
+            for i, s in enumerate(["NVDA", "MSFT", "NVDA", "MSFT"])]
+    a = corroborate(claim, rows, cfg=CFG)
+
+    assert a.verdict == "mixed"
+    assert a.unresolved_reason == "single_stance"   # NOT a disagreement
+    assert a.stance_classes == 1
+    assert "一边倒" in a.note and "反驳" in a.note and "立场" in a.note

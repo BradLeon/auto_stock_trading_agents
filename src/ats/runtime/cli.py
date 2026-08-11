@@ -851,8 +851,11 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                     rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
             for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):
                 claim = next(c for c in layer.claims if c.id == a.claim_id)
-                mark = {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
-                        "resolved": "📊", "unknown": "· "}.get(a.verdict, "· ")
+                # 「◐」 = one-sided evidence, single stance -> unconfirmed, NOT conflicting
+                mark = ("◐" if (a.verdict == "mixed"
+                                and a.unresolved_reason == "single_stance")
+                        else {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
+                              "resolved": "📊", "unknown": "· "}.get(a.verdict, "· "))
                 print(f"{mark} {a.claim_id:20} {a.verdict:13} 覆盖 {a.coverage:6} "
                       f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类")
                 print(f"     {claim.statement}")

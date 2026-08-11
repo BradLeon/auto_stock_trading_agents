@@ -21,6 +21,18 @@ log = logging.getLogger("ats.chain.report")
 VERDICT_MARK = {"supportive": "✅ 印证", "contradicted": "⛔ 反证",
                 "falsified": "⛔ 已证伪", "mixed": "⚠️ 分歧", "unknown": "· 未定",
                 "resolved": "📊 已比较"}
+# `mixed` covers two states that mean opposite things. Only one of them is a
+# disagreement; the other is one-sided evidence that every witness happens to share a
+# vantage point on, which the engine declines to confirm. Labelling both 「分歧」 told
+# the reader the evidence conflicted when it did not.
+UNRESOLVED_MARK = {"single_stance": "◐ 未确认（立场单一）", "dissent": "⚠️ 分歧"}
+
+
+def verdict_mark(a) -> str:
+    """The headline label for one assessment, disambiguating the two kinds of `mixed`."""
+    if a.verdict == "mixed":
+        return UNRESOLVED_MARK.get(getattr(a, "unresolved_reason", ""), "⚠️ 分歧")
+    return VERDICT_MARK.get(a.verdict, a.verdict)
 STANDING_MARK = {"strong": "强", "neutral": "中", "weak": "弱", "unknown": "—"}
 BASIS_CN = {"corroborated": "有交叉印证", "self_reported": "仅自述", "thin": "证据薄"}
 TYPE_CN = {"reported_actual": "已实现", "guidance": "指引", "counterparty": "对手方",
@@ -46,7 +58,7 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
             subj = (f" · 比较 {', '.join(claim.entities)}"
                     if claim and claim.entities else "")
             lines += [
-                f"**{VERDICT_MARK.get(a.verdict, a.verdict)}｜{claim.statement if claim else a.claim_id}**",
+                f"**{verdict_mark(a)}｜{claim.statement if claim else a.claim_id}**",
                 "",
                 f"- 类型 {kind}{subj} · 证人覆盖 **{a.coverage}** · 独立证据簇 "
                 f"{a.evidence_clusters} · 立场 {a.stance_classes} 类",

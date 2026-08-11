@@ -337,15 +337,23 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
 
     if material:
         assessment.verdict = "mixed"
+        assessment.unresolved_reason = "dissent"
         assessment.note = f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，分歧未消解"
         return assessment
 
     if len(stances) < min_stances:
         # Single-stance evidence, however voluminous, cannot confirm. Say WHY, or a
-        # reader takes "mixed" to mean "conflicting" rather than "unconfirmed".
+        # reader takes "mixed" to mean "conflicting" rather than "unconfirmed" — and
+        # say WHICH WAY it leans, or "unconfirmed" reads as "we learned nothing".
+        # A claim can be refuted 9:1 by five independent filings and still land here.
         assessment.verdict = "mixed"
-        assessment.note = (f"仅 {len(stances)} 类立场（{'/'.join(sorted(stances)) or '无'}），"
-                           f"未达 {min_stances} 类确认门槛")
+        assessment.unresolved_reason = "single_stance"
+        lean = ("反驳" if len(refute) > len(support)
+                else "支持" if len(support) > len(refute) else "两向持平")
+        tilt = (f"证据一边倒（{lean} {max(len(support), len(refute))} 簇 vs "
+                f"{min(len(support), len(refute))} 簇）" if support or refute else "无方向性证据")
+        assessment.note = (f"{tilt}，但仅 {len(stances)} 类立场"
+                           f"（{'/'.join(sorted(stances)) or '无'}），未达 {min_stances} 类确认门槛")
         return assessment
 
     assessment.verdict = "supportive" if len(support) >= len(refute) else "contradicted"

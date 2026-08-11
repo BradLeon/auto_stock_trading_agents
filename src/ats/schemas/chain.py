@@ -350,6 +350,12 @@ class ClaimAssessment(BaseModel):
     stance_classes: int = 0               # distinct witness stances seen
     witnesses_expected: int = 0
     witnesses_reported: int = 0
+    # WHY a verdict is `mixed`, because the two reasons mean opposite things to a
+    # reader. "dissent" = the evidence genuinely conflicts. "single_stance" = the
+    # evidence is one-sided but every witness shares a vantage point, so the engine
+    # declines to confirm it. Rendering both as 「分歧」 told the reader the evidence
+    # disagreed when it did not. Empty for every other verdict.
+    unresolved_reason: Literal["", "dissent", "single_stance"] = ""
     dissenters: list[str] = Field(default_factory=list)
     # Declared witnesses that said nothing this period. Named, not folded into a
     # count: a company's silence on a dimension is a gap, not neutrality.

@@ -80,13 +80,36 @@ def test_one_print_files_under_every_declared_concept(monkeypatch):
 
 def test_an_unreachable_source_is_a_gap_not_silence(monkeypatch):
     """Korea's series needs a key we do not have. "We have no Korean data" and "Korean
-    exports say nothing" are different claims about the world."""
+    exports say nothing" are different claims about the world.
+
+    A true failure is `-1`, never `0` — see the next test for why the distinction is
+    load-bearing, not cosmetic.
+    """
     monkeypatch.setattr(sources, "load_sources", lambda: [_source(id="kr", adapter="kr_customs")])
     monkeypatch.setattr(sources, "fetch", lambda *a, **k: [])
     store = get_store()
-    assert sources.collect(store, now=NOW) == {"kr": 0}
+    assert sources.collect(store, now=NOW) == {"kr": -1}
     assert store.observations(entity="TW_IC_EXPORT") == []
     assert [d for d in store.documents(entity="TW_IC_EXPORT", ok_only=False) if not d["ok"]]
+
+
+def test_current_data_is_not_the_same_zero_as_unreachable(monkeypatch):
+    """A monthly source fetched twice inside one month returns the same print both
+    times — every point is already in the ledger, so zero rows are NEW. That is a
+    healthy, live source, not a dead one, and must not collapse to the same `0` a
+    genuine outage reports.
+
+    This is not hypothetical: TrendForce's contract-price page returned "2H Jun" on two
+    consecutive `collect()` runs, and a CLI surface that treated any `0` as failure
+    printed "取不到数据" over a source that had just been fetched successfully.
+    """
+    monkeypatch.setattr(sources, "load_sources", lambda: [_source()])
+    monkeypatch.setattr(sources, "fetch", lambda *a, **k: _points())
+    store = get_store()
+    sources.collect(store, now=NOW)                        # first run: all new
+    second = sources.collect(store, now=NOW)                # second run: identical print
+    assert second["tw_ic_exports"] == 0                     # reached, nothing NEW —
+    assert second["tw_ic_exports"] != -1                    # — genuinely not a gap
 
 
 def test_a_series_does_not_inflate_the_cluster_count():

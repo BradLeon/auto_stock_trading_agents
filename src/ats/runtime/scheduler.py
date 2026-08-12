@@ -666,6 +666,7 @@ def _cross_section_weekly(name: str) -> None:
         from ..chain import sources as chain_sources
 
         saved = chain_sources.collect(get_store())
+        # -1 per id = could not reach it this round (a gap); 0 = reached, nothing new.
         log.info("third-party sources: %s", saved or "(none configured)")
     except Exception as exc:  # noqa: BLE001 - a source outage must not break the job
         log.warning("third-party source collection failed: %s", exc)

@@ -420,6 +420,48 @@ layers:
           - 某家份额指引下修，同时另一家通过其核心客户认证
           - HBM ASP 连续两个观察期下修
 
+      # 2026-08-12 新增。与上面的 hbm_share_and_pricing_power 问的是**不同的问题**：
+      # 那条是 relative，问"三家之间谁的定价权更强"（排序）；这条是 common，问
+      # "整个 HBM 层的定价权本身还在不在扩张"（真假）——供给紧张（hbm_supply_tight）
+      # 不等于还能继续涨价，"售罄但 ASP 走平"是这个子层最常见的误判。
+      #
+      # 复用 hbm_pricing key（不新建）：一个 concept key 可被多条命题各自声明，
+      # corroborate._relevant_concept 逐命题查自己的 concept 表，两条命题共用同一批
+      # 观测互不影响——capex_funding_quality/asic_substitution_delivering 已验证过
+      # 这个模式，实测 concept 的证据数只会因为多一条命题声明而被更充分地抽取，不会被拆散。
+      #
+      # 第一方数据审计（2026-08-12）：三家里只有三星给具体 ASP 数字（DRAM 环比+40%），
+      # SK 海力士只讲定价机制不给数字（HBM 走年度 LTA，非现货报价——它自己解释了
+      # 为什么没有可追踪的周期性价格），美光只给毛利率。**没有一家披露 HBM 专属价格**。
+      # 第三方数据审计：TrendForce 免费价格表**没有 HBM 行**（核实过完整品类列表，
+      # 只有传统 DDR/LPDDR/GDDR）；免费新闻中心的 HBM 文章是定性叙事（"预计涨价数倍"），
+      # 无可追踪的周期性数字；真正的 HBM 报价在付费报告里，拿不到。**不新接源**——
+      # 现有 dram_contract_price（挤占机制，SK 海力士自己确认过）已是这个维度上
+      # 唯一能拿到的独立读数。
+      - id: hbm_pricing_still_expanding
+        kind: common
+        statement: HBM 的定价权仍在扩张——ASP/合约价仍在上行而非走平
+        horizon: {from: 2026-08-01, to: 2027-06-30}
+        concepts:
+          - key: hbm_pricing
+            desc: HBM/存储 ASP、合约价与毛利率的方向——上行/走平/下行。
+                  买方对存储成本上升的表述也算——它可能是"价格确实在涨"的佐证，
+                  也可能是压价前兆，由判读器按上下文区分（不是配置能预判的方向）。
+                  与第三方源 dram_contract_price 共享绑定：传统 DRAM 合约价上行是
+                  HBM 挤占产能的佐证，机制见该 adapter 的模块文档
+            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD]
+        falsifiers:
+          - 任一供应商披露 HBM/DRAM ASP 环比走平或下行
+          - 客户明确要求降价、缩短订单能见度或下调规格
+        # 与 hbm_share_and_pricing_power 用同一套证人（少 MSFT——它在存储成本上
+        # 没有可用表述，加了只会制造一个说不出区分度的沉默证人）。
+        witnesses:
+          - {entity: SKHY, stance: supplier}
+          - {entity: MU, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+
   - key: L6_equipment
     label: L6 半导体设备
     question: 设备订单（WFE）领先指标指向扩产还是收缩？

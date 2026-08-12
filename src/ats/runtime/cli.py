@@ -825,9 +825,17 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         if not saved:
             print("（config/sources.yaml 里没有配置第三方源）")
             return 0
+        # -1 = the source could not be reached this round (true gap). 0 = it was
+        # reached but every point was already in the ledger (data is current, not
+        # stale). Printing both as "取不到数据" is the exact bug this distinguishes:
+        # a monthly source fetched twice in one month is 0-and-fine, not dead.
         for sid, n in sorted(saved.items()):
-            print(f"  {'✅' if n else '⚠️ '} {sid:<28}{n} 条新观测"
-                  + ("" if n else "　—— 取不到数据，已记成缺口而非沉默"))
+            if n < 0:
+                print(f"  ⚠️  {sid:<28}取不到数据，已记成缺口而非沉默")
+            elif n == 0:
+                print(f"  🟡 {sid:<28}0 条新观测　—— 已抓到最新数据，只是与上次相同")
+            else:
+                print(f"  ✅ {sid:<28}{n} 条新观测")
         return 0
 
     if action == "kbreview":

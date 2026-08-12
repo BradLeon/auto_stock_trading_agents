@@ -37,6 +37,8 @@ STANDING_MARK = {"strong": "强", "neutral": "中", "weak": "弱", "unknown": "�
 BASIS_CN = {"corroborated": "有交叉印证", "self_reported": "仅自述", "thin": "证据薄"}
 TYPE_CN = {"reported_actual": "已实现", "guidance": "指引", "counterparty": "对手方",
            "regulatory": "监管", "research": "研究", "media": "媒体", "market": "市场"}
+STANCE_CN = {"customer": "客户", "supplier": "供应商", "competitor": "竞对",
+            "incumbent": "当事方", "regulator": "监管/统计机构"}
 
 
 def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
@@ -152,6 +154,86 @@ def _proposal_section(store) -> list[str]:
     return lines
 
 
+def _sources_section(store) -> list[str]:
+    """Independent (non-self-reported) data feeds behind the claims above.
+
+    Placed right after the claims because it is their grounding: a company saying its
+    own ASP rose is one interested party; a customs bureau or a price-reporting agency
+    saying the same is a different witness stance, and it is the only way some claims
+    (`hbm_pricing_still_expanding`) clear the stance-diversity gate at all.
+
+    Deliberately reads the LEDGER, not a live fetch — `render()` has never made a
+    network call, and it must not start now. The claims in this same report were
+    computed against stored data; showing a live peek that might have since revised
+    would let the report disagree with itself. Freshness is answered honestly instead:
+    each source's most recent stored reading, and whether its last collection attempt
+    (`ats evidence collect`) succeeded.
+    """
+    from . import sources as chain_sources
+
+    declared = chain_sources.load_sources()
+    if not declared:
+        return []
+    lines = ["## 第三方数据源", "",
+             "> 非自述、独立于任何一家公司的读数——这是部分命题唯一能拿到跨立场佐证的"
+             "来源。取不到数据记成缺口，不会悄悄变成沉默（`ats evidence collect` / "
+             "`chain/sources.py`）。下面是**台账里已存的**读数，不是现抓的——"
+             "本报告不发网络请求，且上面的判读正是对着这批存量数据算出来的。", ""]
+    for s in declared:
+        lines += [f"### {s.label or s.id}（`{s.id}`）", ""]
+        # Pulled from the adapter's own module docstring so this rationale can never
+        # drift from the code that actually justifies the source being on-mechanism.
+        try:
+            import importlib
+
+            mod = importlib.import_module(f"..data.sources.{s.adapter}", __package__)
+            doc = (mod.__doc__ or "").strip()
+            rationale = doc.split("\n\n")[0].replace("\n", " ") if doc else ""
+        except Exception:  # noqa: BLE001 — a missing/broken adapter must not break this
+            rationale = ""
+        if rationale:
+            lines += [rationale, ""]
+        lines += [f"- 适配器 `{s.adapter}` · 立场 **{STANCE_CN.get(s.stance, s.stance)}** "
+                  f"· 类型 {TYPE_CN.get(s.observation_type, s.observation_type)} "
+                  f"· 更新频率 {s.cadence}",
+                  f"- 绑定维度：{', '.join(f'`{c}`' for c in s.concepts) or '（无）'}", ""]
+
+        # collect() saves one physical row PER declared concept — the same print filed
+        # under `supply_tightness` and again under `hbm_demand` is two DB rows so both
+        # claims can find it, but showing "what this source said" twice reads like a
+        # duplication bug. Fetch generously, then dedupe on the reading itself.
+        raw = store.observations(entity=s.entity, limit=60)
+        seen: set[tuple] = set()
+        rows = []
+        for r in raw:
+            key = (r.get("period"), r.get("metric"), r.get("direction"), r.get("evidence_span"))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(r)
+            if len(rows) >= 12:
+                break
+        # `collect()` only ever writes a `source_documents` row here on FAILURE (a
+        # successful fetch has nothing analogous to save — its output is the
+        # observations themselves), so the latest row, if any, is always an attempt
+        # that came back empty.
+        attempts = store.documents(entity=s.entity, ok_only=False, limit=1)
+        last_fail = attempts[0] if attempts else None
+        if not rows:
+            note = f"（最近一次尝试 {last_fail['fetched_at']}：{last_fail['note']}）" if last_fail else ""
+            lines += [f"⚠️ 台账里还没有这个源的观测{note}", ""]
+            continue
+        if last_fail and last_fail["fetched_at"] > raw[0]["observed_at"]:
+            lines += [f"⚠️ 最近一次抓取失败（{last_fail['fetched_at']}：{last_fail['note']}）"
+                      f"——以下是上一次成功抓到的读数", ""]
+        lines += ["| 期间 | 读数 | 方向 | 原文 |", "|---|---|---|---|"]
+        for r in rows:
+            lines.append(f"| {r.get('period') or '—'} | {r.get('metric') or '—'} "
+                         f"| {r.get('direction') or '—'} | {(r.get('evidence_span') or '')[:110]} |")
+        lines.append("")
+    return lines
+
+
 def _kb_section(cfg, store, *, as_of) -> list[str]:
     """What the static knowledge may be missing (chain/kb_review.py).
 
@@ -239,6 +321,7 @@ def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
         "",
     ]
     lines += _claim_section(cfg, store, assessments_by_layer, rows_by_id)
+    lines += _sources_section(store)
     lines += _pool_section(store, ind_cfg or {})
     lines += _proposal_section(store)
     lines += _kb_section(cfg, store, as_of=as_of)

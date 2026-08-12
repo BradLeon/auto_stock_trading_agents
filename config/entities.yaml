@@ -35,6 +35,17 @@ entities:
     market: US
     filings: sec
 
+  # 2026-08-12 补。xAI 于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市。
+  # 登记的两个作用：① 让 xAI/SpaceX 这些名字折叠到同一身份；② 让知识库复核的
+  # 「⑤ 陌生实体」不再每周举报它。
+  # ⚠️ 它只有 AI/算力分部与 L2 命题相关——星链、星舰、发射业务不属于任何已声明维度，
+  # 应当落在未映射池里。核验时要专门看这一条。
+  SPCX:
+    name: SpaceX
+    aliases: [SPACEX, XAI, "SPACE X", STARLINK]
+    market: US
+    filings: sec
+
   MU:
     name: Micron Technology
     aliases: []

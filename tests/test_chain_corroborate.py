@@ -416,3 +416,70 @@ def test_single_stance_note_says_which_way_the_evidence_leans():
     assert a.unresolved_reason == "single_stance"   # NOT a disagreement
     assert a.stance_classes == 1
     assert "一边倒" in a.note and "反驳" in a.note and "立场" in a.note
+
+
+# --- Per-claim stance override --------------------------------------------- #
+def _one_vantage(**kw):
+    """A claim whose question admits a single vantage point by construction."""
+    base = dict(id="capex_funding_quality", kind="common", layer="L2_cloud",
+                statement="capex 由内生现金流支撑",
+                concepts=[Concept(key="external_funding_need", desc="为 capex 举债")],
+                witnesses=[Witness(entity=e, stance="customer")
+                           for e in ("GOOG", "MSFT", "AMZN", "META", "ORCL")])
+    return ClaimDef(**{**base, **kw})
+
+
+def test_a_single_vantage_question_can_still_reach_a_verdict():
+    """Some questions have one vantage point by construction. "Is this company's capex
+    funded internally" can only be answered by the company whose capex it is —
+    suppliers and customers cannot see its balance sheet. Five independent filers
+    refuted it 13:1 and it still could not resolve, because the gate is unsatisfiable
+    for this claim shape, not merely unsatisfied yet."""
+    rows = [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{i}", rid=f"r{i}",
+                 polarity="refute")
+            for i, s in enumerate(["GOOG", "MSFT", "AMZN", "META"])]
+
+    strict = corroborate(_one_vantage(), rows, cfg=CFG)
+    assert strict.verdict == "mixed" and strict.unresolved_reason == "single_stance"
+
+    relaxed = corroborate(_one_vantage(min_stance_classes=1), rows, cfg=CFG)
+    # Refuted 4:0 — and the claim's statement is the bullish assumption, so resolving
+    # it means falsifying it.
+    assert relaxed.verdict == "contradicted"
+    assert relaxed.stance_classes == 1
+
+
+def test_relaxing_the_gate_is_paid_for_with_source_multiplicity():
+    """The gate's real target is independence; stance class is only a proxy for it. An
+    override may not become a way for a couple of interested parties to confirm a claim
+    about themselves, so below `RELAXED_MIN_SPEAKERS` distinct speakers the sector
+    default is restored and the claim stays unresolved.
+
+    Note where the boundary actually bites: ONE speaker never gets this far — gate 1
+    collapses that company's four sentences into a single cluster and `min_clusters`
+    rejects it as `unknown`. The case this backstop exists for is two or three filers,
+    which clears dedup but is still too thin to trade away vantage diversity.
+    """
+    from ats.chain.corroborate import RELAXED_MIN_SPEAKERS
+
+    def rows_from(*speakers):
+        return [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{s}",
+                     rid=f"r{s}", polarity="refute") for s in speakers]
+
+    thin = rows_from("GOOG", "MSFT")               # 2 clusters: clears gate 1...
+    a = corroborate(_one_vantage(min_stance_classes=1), thin, cfg=CFG)
+    assert a.evidence_clusters == 2                # ...but too few speakers to relax
+    assert a.verdict == "mixed" and a.unresolved_reason == "single_stance"
+
+    enough = rows_from(*["GOOG", "MSFT", "AMZN", "META"][:RELAXED_MIN_SPEAKERS])
+    b = corroborate(_one_vantage(min_stance_classes=1), enough, cfg=CFG)
+    assert b.verdict == "contradicted"
+
+
+def test_a_relaxed_threshold_is_never_invisible():
+    """A verdict resting on one vantage point must say so, or a reader cannot tell it
+    apart from one corroborated across stances."""
+    rows = [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{s}", rid=f"r{s}",
+                 polarity="refute") for s in ("GOOG", "MSFT", "AMZN", "META")]
+    a = corroborate(_one_vantage(min_stance_classes=1), rows, cfg=CFG)
+    assert "1 类立场可得" in a.note and "4 个独立说话人" in a.note

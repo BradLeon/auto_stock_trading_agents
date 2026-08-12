@@ -45,6 +45,11 @@ log = logging.getLogger("ats.chain.corroborate")
 # it may add weight but never counts as an independent witness class, which is what
 # stops "three sell-side notes" or a wall of reprints from confirming anything.
 PRIMARY_TYPES = {"reported_actual", "guidance", "counterparty", "regulatory"}
+# A claim may lower the stance-diversity threshold (ClaimDef.min_stance_classes) when
+# the question has one vantage point by construction. The exchange is source
+# multiplicity: below this many distinct speakers the relaxed threshold is ignored and
+# the sector default applies, so a lone company can never confirm a claim about itself.
+RELAXED_MIN_SPEAKERS = 3
 SECONDARY_TYPES = {"research", "media", "market"}
 
 
@@ -254,7 +259,9 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         return cross_section(claim, rows, cfg=cfg, as_of=as_of, judge=judge)
     cfg = cfg or {}
     min_clusters = cfg.get("min_clusters", 2)
-    min_stances = cfg.get("min_stance_classes", 2)
+    sector_min_stances = cfg.get("min_stance_classes", 2)
+    min_stances = (claim.min_stance_classes
+                   if claim.min_stance_classes is not None else sector_min_stances)
     min_conf = cfg.get("min_confidence", 0.5)
     # How much dissent overturns a majority. EITHER condition suffices: a few
     # independent dissenting clusters matter even in a large body of evidence, and a
@@ -341,6 +348,14 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         assessment.note = f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，分歧未消解"
         return assessment
 
+    # An override buys nothing unless several independent filers are talking: the
+    # failure mode the gate guards against is one interested party confirming itself.
+    speakers = {c.speaker for c in (support + refute) if c.speaker}
+    relaxed = min_stances < sector_min_stances
+    if relaxed and len(speakers) < RELAXED_MIN_SPEAKERS:
+        min_stances = sector_min_stances
+        relaxed = False
+
     if len(stances) < min_stances:
         # Single-stance evidence, however voluminous, cannot confirm. Say WHY, or a
         # reader takes "mixed" to mean "conflicting" rather than "unconfirmed" — and
@@ -359,6 +374,11 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     assessment.verdict = "supportive" if len(support) >= len(refute) else "contradicted"
     assessment.note = (f"{max(len(support), len(refute))} 个独立证据簇 · "
                        f"{len(stances)} 类立场（{'/'.join(sorted(stances))}）")
+    if relaxed:
+        # Never let a relaxed threshold be invisible: a reader must be able to see that
+        # this verdict rests on one vantage point, and on how many separate filers.
+        assessment.note += (f" · ⚠️ 本命题声明只有 {min_stances} 类立场可得"
+                            f"（单一视角问题），由 {len(speakers)} 个独立说话人支撑")
     if minority:
         assessment.note += (f" · ⚠️ 另有 {len(minority)} 簇异议"
                             f"（{','.join(assessment.dissenters)}），未达翻案门槛")

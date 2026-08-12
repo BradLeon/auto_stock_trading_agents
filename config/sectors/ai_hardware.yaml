@@ -14,7 +14,9 @@ layers:
     question: 谁在消耗算力？Token 需求是否仍在加速？
     tickers:
       - {symbol: GOOG, note: Gemini（兼属L2）—— A/C 类已在 entities.yaml 归一到 GOOG}
-    private: [OpenAI, Anthropic, xAI]        # 无票据，供 LLM 参考需求侧
+    # xAI 已于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市并出财报，
+    # 所以它不再是「无票据」——已登记为 entities.yaml 的 SPCX 并进入 L2 各命题的证人表。
+    private: [OpenAI, Anthropic]             # 无票据，供 LLM 参考需求侧
 
   - key: L2_cloud
     label: L2 云服务层（算力租用）
@@ -50,6 +52,12 @@ layers:
         kind: common
         statement: 超大规模厂商的 AI capex 由内生现金流支撑，未依赖递增的外部融资与表外承诺
         horizon: {from: 2026-08-01, to: 2027-12-31}
+        # 「这笔 capex 是谁的钱」**只有钱的主人能回答**——供应商与客户拿不到它的资产
+        # 负债表。所以立场闸对这条命题不是"暂时凑不齐第二类"，而是**永远凑不齐**：
+        # 五家独立公司以 13:1 判为反驳，仍卡在 mixed。
+        # 声明单一视角后，引擎要求改由**说话人数量**兜底（≥3 家独立申报方），
+        # 见 chain/corroborate.py 的 RELAXED_MIN_SPEAKERS。
+        min_stance_classes: 1
         concepts:
           - key: external_funding_need
             desc: 为资本开支进行的债务发行、优先股/可转债/ATM 额度，以及净债务与杠杆率
@@ -73,6 +81,9 @@ layers:
           - {entity: AMZN, stance: customer}
           - {entity: META, stance: customer}
           - {entity: ORCL, stance: customer}
+          # SPCX 只记 AI/算力分部：它 Q2 capex $184 亿中 $158 亿投在 AI 算力基建，
+          # 且是全库唯一披露回本期的实体（"less than one-year payback"）。
+          - {entity: SPCX, stance: customer}
 
       # ── 2026-08-11 新增三条云服务命题 ────────────────────────────────────────
       # 起草时先写了「已锁定的电力与场地」「自研芯片的部署占比」，审计台账后发现
@@ -89,7 +100,7 @@ layers:
                   只做公司内部对比，不跨公司比绝对值——MSFT 的 commercial RPO 含
                   Office/Dynamics，GOOG 的是纯云 backlog，口径本就不可比。
                   同时记录转化节奏（多少会在未来 N 个月确认为收入）
-            expect_from: [MSFT, GOOG, AMZN]
+            expect_from: [MSFT, GOOG, AMZN, SPCX]
           - key: cloud_capacity_constraint
             desc: 需求是否仍超过可用产能——"supply constrained""demand exceeds capacity"、
                   用第三方产能过桥、交付排期。注意这是**云侧**的产能约束，
@@ -115,6 +126,7 @@ layers:
           - {entity: MSFT, stance: incumbent}
           - {entity: GOOG, stance: incumbent}
           - {entity: AMZN, stance: incumbent}
+          - {entity: SPCX, stance: incumbent}
           - {entity: SKHY, stance: supplier}
           - {entity: MU,   stance: supplier}
           - {entity: TSM,  stance: supplier}
@@ -122,7 +134,7 @@ layers:
 
       - id: cloud_moat_hard_assets
         kind: relative
-        entities: [MSFT, GOOG, AMZN, META]
+        entities: [MSFT, GOOG, AMZN, META, SPCX]
         feeds_factor: moat_pricing
         statement: 云服务的硬资产护城河（数据中心容量、自研芯片）在超大规模厂商之间如何分布
         horizon: {from: 2026-08-01, to: 2027-12-31}
@@ -141,7 +153,7 @@ layers:
                   容量用了，还把两栏读反）。
                   **这是"已交付"不是"已锁定"**：知识库判据里最硬的一条是已锁定的电力与
                   场地，但无人披露 PPA/并网/土地，所以这里退到能拿到的最接近读数
-            expect_from: [MSFT, GOOG, AMZN, META]
+            expect_from: [MSFT, GOOG, AMZN, META, SPCX]
             direct: true
           - key: custom_silicon_program
             desc: 自研芯片的部署形态与经济性——已上线机架/数据中心数、性能功耗比、
@@ -163,6 +175,7 @@ layers:
           - {entity: GOOG, stance: competitor}
           - {entity: AMZN, stance: competitor}
           - {entity: META, stance: competitor}
+          - {entity: SPCX, stance: competitor}
           - {entity: AVGO, stance: supplier}
           - {entity: MRVL, stance: supplier}
 
@@ -180,7 +193,7 @@ layers:
           - key: power_delivery_timeline
             desc: 公司自述的电力/机房上线时点——按期、提前、还是推迟。
                   只记**时点**的变化，不记容量规模（那属于 cloud_moat_hard_assets）
-            expect_from: [MSFT, GOOG, AMZN, META, ORCL]
+            expect_from: [MSFT, GOOG, AMZN, META, ORCL, SPCX]
           - key: permitting_action
             desc: 审批与政策对数据中心建设的限制——暂停/新规/成本分摊原则变化，
                   以及公司对选址转移的表述。**财报里罕见，主要靠第三方源**
@@ -198,6 +211,59 @@ layers:
           - {entity: AMZN, stance: incumbent}
           - {entity: META, stance: incumbent}
           - {entity: ORCL, stance: incumbent}
+          # 全库唯一给出逐季 GW 交付序列的实体：400MW → 1GW → 1.4GW → 年底 2GW+，
+          # 电厂级 15GW。新进入者、无存量机房，约束读数不被既有产能稀释。
+          # 但它在审批/并网上 0 条——那部分仍是缺口。
+          - {entity: SPCX, stance: incumbent}
+
+      # 2026-08-12 新增。与上面的 cloud_moat_hard_assets 问的是**不同的问题**：
+      # 那条是 relative，问「谁的自研更深」（排序）；这条是 common，问「自研整体上
+      # 兑现了没有」（真假）。两者**共用同一个 concept key**——一个 key 可被多条命题
+      # 各自声明，corroborate._relevant_concept 是逐命题查自己的 concept 表，
+      # 所以那 30 条证据两条命题都能完整取到，不会被拆散。
+      #
+      # 刻意**没有**新建的两个维度（避免以后重复踩）：
+      #   asic_unit_economics —— 「比通用 GPU 省了多少」全库只有 5 条，META 零条，
+      #     且比较对象根本不是通用 GPU（MSFT 比"我们机队上一代"、GOOG 比"peer
+      #     offerings"、AMZN 的 Graviton/Axion 是 CPU 不是加速器）。问了公司不会说的话。
+      #   asic_external_revenue —— custom_silicon_program 的 desc 已逐字包含"对外收入"，
+      #     GOOG 的 TPU 系统销售、AMZN 的 Trainium 外售都已在其中；单拆只会抢同一批行。
+      - id: asic_substitution_delivering
+        kind: common
+        statement: 自研 ASIC 正在兑现——部署在扩大、已产生外部收入，且开始降低对外购加速器的依赖
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # 复用，不新建。定义在 cloud_moat_hard_assets 里，两条命题共享同一批观测。
+          - key: custom_silicon_program
+            desc: 自研芯片的部署形态与经济性——已上线机架/数据中心数、性能功耗比、
+                  对外收入、代际延续与设计伙伴。**不要求份额分母**（无人披露）。
+                  设计方（AVGO/MRVL）谈到某家客户的项目时，entity 记的是**那家客户**；
+                  设计方谈自己的 design win 与自研业务收入构成时，entity 记它自己
+            expect_from: [MSFT, GOOG, AMZN, META, AVGO, MRVL]
+          # 唯一真正缺的角度。**已知当前 NVDA/AMD 零条**——声明它正是为了让下一轮抽取
+          # 有地方安放，并让沉默被显式记成缺口而不是中性。
+          - key: asic_merchant_dependency
+            desc: 自研与外购加速器的**配比及其方向**（买方自述，如"训练用外购、推理用
+                  自研"或独家采购承诺），以及通用 GPU 侧对被替代的回应——份额、定价、
+                  竞争格局表述。不记单纯的产品发布，只记涉及**替代关系**的表述
+            expect_from: [MSFT, GOOG, AMZN, META, SPCX, NVDA, AMD]
+        falsifiers:
+          - 自研芯片的部署或对外收入停滞、代际中断
+          - 买方明确提高外购加速器的比重，或承诺独家采购通用 GPU
+        # NVDA/AMD 作 competitor 是本命题最锋利的一环：它们最有动机否认 ASIC 省钱，
+        # 所以哪怕只让步一点都是强证据；而它们的沉默本身也是读数。
+        # SPCX 入列的理由与其他云厂相反——它公开表态"exclusively on Nvidia"，
+        # 是这条命题现成的反向读数。
+        witnesses:
+          - {entity: MSFT, stance: incumbent}
+          - {entity: GOOG, stance: incumbent}
+          - {entity: AMZN, stance: incumbent}
+          - {entity: META, stance: incumbent}
+          - {entity: SPCX, stance: incumbent}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: NVDA, stance: competitor}
+          - {entity: AMD,  stance: competitor}
 
   - key: L3_dc_infra
     label: L3 数据中心基建（电力/冷却/网络/光互联）

@@ -225,6 +225,22 @@ class ClaimDef(BaseModel):
     # company", and cross-stance corroboration could never be satisfied.
     witnesses: list[Witness] = Field(default_factory=list)
     falsifiers: list[str] = Field(default_factory=list)
+    # Per-claim override of the stance-diversity gate. None = use the sector default (2).
+    #
+    # Set this to 1 ONLY when the question admits a single vantage point **by
+    # construction** — then the gate is not delaying a verdict, it makes the claim
+    # undecidable forever. The live case: "is this company's capex funded internally"
+    # can only be answered by the company whose capex it is; suppliers and customers
+    # have no access to its balance sheet. Five independent filers refuted it 13 : 1
+    # and it still could not resolve.
+    #
+    # It is NOT an escape hatch for "this claim is inconvenient". The gate exists to
+    # stop a self-serving single source from confirming itself, and that failure mode
+    # is real whenever the speakers benefit from the reading. `corroborate` therefore
+    # refuses to honour a relaxed threshold unless the evidence also comes from at
+    # least `RELAXED_MIN_SPEAKERS` distinct speakers — relaxing vantage diversity
+    # requires source multiplicity in exchange.
+    min_stance_classes: int | None = None
     horizon: Horizon | None = None
 
     @field_validator("entities")

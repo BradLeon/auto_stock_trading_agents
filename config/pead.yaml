@@ -15,7 +15,7 @@ targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, CRDO, AVGO, MRVL, VRT, 
 # 供需由海力士/美光/三星三家共同决定，云 capex 由五家共同决定，只读自己持有的那家
 # 等于用几分之一的证据下注。
 # 与 targets 的区别：targets 可交易、走完整 PEAD 打分；observe 只贡献证据。
-observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX]
+observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX, INTC]
 
 monitor:
   enabled: true

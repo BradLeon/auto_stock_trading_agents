@@ -183,15 +183,21 @@ def test_a_dimension_that_discriminates_is_not_reported():
 def test_declared_third_party_sources_are_not_strangers():
     """TW_IC_EXPORT is a customs bureau declared in config/sources.yaml. It appears in
     no ticker list by design, and flagging it every week would train the reader to skip
-    the one section whose whole job is to be read."""
+    the one section whose whole job is to be read.
+
+    The foil used to be INTC, until 2026-08-13 registered it for the foundry claims —
+    which is the check working, not breaking. The foil has to be a name genuinely in no
+    config: UMC is a real foundry that turns up in silicon-photonics commentary and is
+    deliberately not registered, so a reading about it SHOULD be reported.
+    """
     store = get_store()
     store.save_observation(_obs("TW_IC_EXPORT", metric="ic_exports_yoy"))
-    store.save_observation(_obs("ASML", about="INTC", metric="highna_adoption",
-                                span="Intel Foundry is using High-NA on 18A"))
+    store.save_observation(_obs("ASML", about="UMC", metric="photonics_capacity",
+                                span="UMC is shipping silicon photonics wafers"))
 
     found = kb_review.unfamiliar_entities(load_sector_config("ai_hardware"), store)
     subjects = {f.subject for f in found}
-    assert "INTC" in subjects
+    assert "UMC" in subjects
     assert "TW_IC_EXPORT" not in subjects
 
 

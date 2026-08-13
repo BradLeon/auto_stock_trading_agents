@@ -361,7 +361,7 @@ layers:
             expect_from: [SKHY, MU, "005930.KS", TSM]
           - key: hbm_demand
             desc: 下游对 HBM 的需求强度、采购计划与瓶颈表述
-            expect_from: [NVDA, AMD, MSFT]
+            expect_from: [NVDA, AMD, MSFT, KR_US_SUMMIT]
           # 2026-08-07 新增。HBM 装到加速卡上必须过 CoWoS/先进封装这一关，所以封装吞吐
           # 是本命题机制里与存储供给并列的另一条链路——它紧，HBM 就到不了客户手上，
           # 无论存储厂产出多少。分开声明是因为两者会背离：存储宽松而封装紧，或反之。
@@ -373,6 +373,10 @@ layers:
         #   TSM  CoWoS 是 HBM 上板的必经环节，产能与排期由它披露 → supplier
         # ASML/KLAC/LRCX 仍不入列：它们说的是 WFE 订单，对"HBM 此刻紧不紧"只是间接
         # read-through，进来只会稀释而不增加分辨力。
+        #
+        # 2026-08-13 加 KR_US_SUMMIT：旧金山峰会披露 SK 集团计划五年内向 Nvidia 等供应
+        # 7500 亿美元先进存储——这是需求侧的多年承诺，且是政府简报独立确认，不是 SK
+        # 自己财报电话会里的自述，stance 用 regulator。
         witnesses:
           - {entity: NVDA, stance: customer}
           - {entity: AMD, stance: customer}
@@ -381,6 +385,7 @@ layers:
           - {entity: MU, stance: supplier}
           - {entity: "005930.KS", stance: supplier}
           - {entity: TSM, stance: supplier}
+          - {entity: KR_US_SUMMIT, stance: regulator}
       # 2026-08-07 由 sk_hbm_share 改写为截面比较。原来的形状是"SK Hynix 维持领先"
       # ——一条只有 SK 自己会回答的命题：闸 3 只收「关于主体」的读数，而财报电话会几乎
       # 从不点名竞争对手，于是它永远是 SK 自述 支持N/反驳0，实践上不可证伪。改成问
@@ -461,6 +466,253 @@ layers:
           - {entity: "005930.KS", stance: supplier}
           - {entity: NVDA, stance: customer}
           - {entity: AMD, stance: customer}
+
+      # ── 2026-08-13 新增四条代工/封装命题 ─────────────────────────────────────
+      # TSM 此前在本文件里**只是别人命题的证人**（hbm_supply_tight 的 supplier、
+      # cloud_demand_still_accelerating 的 supplier），没有一条以它自己为主体的命题。
+      # 台账里它有 123 条观测，其中 **66 条落在未映射池**——制程组合、N2 爬坡的毛利
+      # 稀释、A14 的 SRAM 良率、COUPE 量产、海外厂稀释，全都没有维度可归。下面四条
+      # 命题主要就是给这批读数一个落点。
+      #
+      # 切分轴：**按产能类型分，不按产品线分**。起草时先按用户提的三条产品线
+      # （AI 加速器 / CPU 服务器芯片组 / CPO 光引擎）各立一组，查证后否掉了：
+      #   · 台积电官方路线图把 COUPE 分三步——SoIC-X 堆出光引擎裸片（2025 验证完成）、
+      #     **2026 起光引擎上 CoWoS interposer 与交换 ASIC 合封**、更远期光引擎直接
+      #     与计算芯粒同封。也就是说从 2026 这一步开始，CPO 和 GPU+HBM **吃的是同一
+      #     池 CoWoS 中介层产能**（IFTLE 642 标题即 "Integrated CoWoS and COUPE"）。
+      #     按产品线各立"缺口方向"命题，两条会永远同向变动，互相稀释。
+      #     ⚠️ 未查到的：140k wpm 的 CoWoS 目标里 CPO 与 GPU 各占多少配额，无第一方
+      #     拆分。所以只知道"共享池"，不知道"分池比例"——不要在判读时假装知道。
+      #   · CPU/服务器芯片组**不单独立命题**：全库对它只有"用台积电 3nm"一句，
+      #     无良率、无产能、无订单转移读数（Google Axion 的代工厂连归属都没查到）。
+      #     证据密度排序与收入权重排序是反的，立不立命题看前者。它的读数并入下面
+      #     的先进制程两条命题即可。
+      #
+      # 形状：缺口方向 → common（问真假）；竞对位置与订单转移 → relative（问分布）。
+      # 良率是**领先指标**、订单转移是**滞后确认**，两者因果相连，所以合在同一条
+      # relative 命题里作两个维度，不拆成两条互相稀释的薄命题。
+      #
+      # 为什么不复用 hbm_supply_tight 的 capacity_addition / supply_tightness：
+      # 那两个 key 的语义是**存储 bit 供给**（desc 里写着"含 bit 供给增长"），
+      # 晶圆厂产能是另一回事。这正是 cloud_capacity_constraint 当初要单开 key 的
+      # 同一个理由——MSFT 的 Azure 产能话术曾因共享 key 被误归进 HBM 命题。
+      # packaging_throughput 是唯一**真正同维度**的，所以复用（见下）。
+      - id: advanced_node_supply_gap
+        kind: common
+        statement: 先进制程晶圆的需求仍高于可用产能——缺口在扩大而非收敛
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: foundry_node_utilization
+            desc: 先进制程（7nm 及以下）的稼动率、满载/售罄表述、产能分配与排期。
+                  台积电的制程收入组合（N2/N3/N5/N7 各占多少、先进制程占晶圆收入比重）
+                  也记在这里——组合快速上移是产能被高阶需求挤占的读数。
+                  **不记存储 bit 供给**，那属于 hbm_supply_tight
+            expect_from: [TSM, "005930.KS", INTC]
+          - key: foundry_node_capacity_addition
+            desc: 先进制程的新增产能与爬坡节奏——新厂投产时点、节点爬坡进度、
+                  资本开支投放方向，以及**爬坡对毛利的稀释幅度**（台积电用它量化
+                  N2 与海外厂的爬坡强度，是产能投放规模的间接但可追踪的读数）
+            expect_from: [TSM, "005930.KS", INTC, ASML]
+          - key: foundry_node_demand_visibility
+            desc: 买方对先进制程的需求强度与订单能见度——长约、预付、产能预订、
+                  多代产品的节点选择。**只记与先进制程产能相关的表述**，
+                  不记该买方自身终端产品的需求好坏
+            expect_from: [NVDA, AMD, AVGO, MRVL, "005930.KS"]
+        falsifiers:
+          - 台积电或三星披露先进制程稼动率下滑、或出现产能空档
+          - 先进制程新增产能的投放速度快于买方订单能见度的延长
+          - 买方明确表示先进制程产能不再是约束、或转为削减预订
+        # ASML 入列的理由与 hbm_supply_tight 里把它排除的理由并不矛盾：那条命题问
+        # "HBM 此刻紧不紧"，WFE 订单只是间接 read-through；这条问的是**先进制程产能
+        # 本身**，而先进制程产能在物理上约等于 EUV/High-NA 装机量，它的出货与客户
+        # 分布是这个维度上最直接的独立读数（现有 INTC 的 4 条也正是出自它）。
+        witnesses:
+          - {entity: TSM, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+          - {entity: INTC, stance: supplier}
+          - {entity: ASML, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: MRVL, stance: customer}
+
+      # ⚠️ 2026-08-13 首轮判读暴露过两层问题，改了两次：
+      #   ① 漏声明：INTC/三星只写进了 packaging_capacity_addition 的 expect_from，
+      #     没进证人表——判读器拿不到"它们是供给侧同行"这个信号，只能凭常识现推，
+      #     推成了"它们是台积电的竞争对手，与本命题无关"。common 命题问的是**行业
+      #     供给缺口本身**，不是"以谁为主角、谁在挑战它"——所有代工/封装厂都是
+      #     同一视角的供给侧证人，一律 supplier，不分 incumbent/competitor（那两个
+      #     立场只在 relative 命题里有意义，因为那里的问题就是"谁相对谁"）。
+      #     hbm_supply_tight 与 advanced_node_supply_gap 已经是这么做的，这条当初
+      #     漏声明纯属疏忽。补声明后支持簇 2→3，但 INTC 仍全部判中性。
+      #   ② 补完证人表后问题仍在，根子是 statement 点了"CoWoS"这个台积电自家商标——
+      #     判读器据此技术性地认定"EMIB 与 CoWoS 非同一产能池，不算证据"，单独看
+      #     没错，但把命题的意图收窄成了"台积电 CoWoS 专属缺口"，而这条命题的本意
+      #     是"先进逻辑芯片封装（不分技术路线）整体是否仍供不应求"——不同方案服务
+      #     同一个行业需求，EMIB 积压也是"封装这个环节整体仍紧"的佐证。改成不点名
+      #     商标的措辞，把"谁的技术路线更强"完全留给下面的 relative 命题去问。
+      - id: advanced_packaging_supply_gap
+        kind: common
+        statement: 先进逻辑芯片封装（不分技术路线）的需求仍高于可用产能——缺口在扩大而非收敛
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # 复用 hbm_supply_tight 的 key，不新建：那里问的是"封装紧不紧会不会卡住
+          # HBM 上板"，这里问的是"封装缺口本身的方向"，**同一个维度、两个问题**，
+          # 正是 hbm_pricing / custom_silicon_program 已验证过的共享模式。
+          - key: packaging_throughput
+            desc: 先进逻辑芯片封装（CoWoS/EMIB/CoPoS 等 2.5D/3D 方案，不论哪家哪种
+                  技术路线）的产能、排期与是否成为出货瓶颈。**不同技术路线服务的是
+                  同一个行业需求**——任一家的产能紧张/积压都算这个环节整体供需的
+                  佐证，不要求技术路线相同才算数，"谁的方案更强"是另一条命题的问题。
+                  **买方一侧的配额与排期表述也记在这里**（拿到多少产能、是否因封装
+                  而非晶圆受限、是否启用第二封装来源）——那是对供给侧自述的非自述印证
+            expect_from: [TSM, INTC, "005930.KS", NVDA, AMD, AVGO, MRVL, TRENDFORCE]
+          - key: packaging_capacity_addition
+            desc: 先进逻辑芯片封装的产能扩张节奏——月产能目标、新封装厂/产线投产
+                  时点、外包给 OSAT 的溢出比例（外包扩大既是产能扩张也是自有产能
+                  吃紧的读数），以及玻璃基板/面板级等下一代方案的验证与量产时点。
+                  同样**不分技术路线**，任一家的扩产/延迟都算行业产能供给的读数。
+                  台积电 COUPE/CPO 光引擎的产能表述也记在这里——它 2026 起整合进
+                  CoWoS 合封，与 GPU+HBM 消耗同一池中介层产能，不单开维度
+            expect_from: [TSM, INTC, "005930.KS", TRENDFORCE]
+        # 起草时这里还有第三个维度 packaging_allocation_pressure（买方侧的封装配额），
+        # 首轮抽取后删掉：NVDA/AMD/AVGO/MRVL 在它上面**全零**，而同一批公司关于封装的
+        # 话全被抽进了 packaging_throughput。两个 concept 在抽取模型眼里语义不可分，
+        # 后声明的那个只会抢同一批行——与当初否掉 asic_external_revenue 是同一个毛病。
+        # 买方视角没有丢：它并进了 packaging_throughput 的 desc 与 expect_from。
+        falsifiers:
+          - 任一家先进逻辑芯片封装的稼动率下滑、或下调月产能扩张目标，且无同业顶上
+          - 买方表示封装已不再是约束、或封装配额出现富余
+          - 外包给 OSAT 的比例下降且自有产能未同步吃紧
+        # 2026-08-13 加 TRENDFORCE：stance 用 regulator（同 dram_contract_price 的先例——
+        # WitnessStance 枚举没有 market，这个位置是"独立于任何一方的第三方"，不是"当事人
+        # 的某一方"，regulator 语义上就是这个坑，observation_type 才是 market）。
+        # 独立于台积电/Intel/三星任何一方，是这条命题第一个真正的非自述读数来源。
+        # 不进 entities.yaml（同 TW_IC_EXPORT 的先例，是研究机构不是上市公司，不需要
+        # 别名折叠或 downloader 路由）；通过 --file 手动喂文档，不走 chain_sources.
+        # collect()——TrendForce 这批是新闻稿，不是结构化价格表。
+        witnesses:
+          - {entity: TSM, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+          - {entity: INTC, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: MRVL, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # 下面两条是 relative。cohort 都是 [TSM, 005930.KS, INTC]，但**不合并成一条**：
+      # 两个战场的相对位置正好相反——三星在制程上贴得近（2nm 项目赢单同比翻倍、
+      # 8nm 及以下满载、先进制程收入占比 2026 过半），在封装上远（CPO turnkey 排到
+      # 2029）；Intel 大致相反（18A 良率与 High-NA 首发在前，外部大客户上量未见）。
+      # 合成一条只会把这两个方向相反的信号平均成一团糊，而它们的分歧正是要看的东西。
+      #
+      # 所有维度必须 direct: true——relative 命题只在 direct 维度上移动（闸 3），
+      # 默认 false，cloud_moat_hard_assets 曾因此 47 条证据出 0 簇。
+      # 为什么产能在这里是 direct、在上面 advanced_node_supply_gap 里却不是：
+      # 那边是**行业供给**读数，竞争者扩产推不出"我方失份额"；这里的产能是**被比较
+      # 的资产本身**，每家读数各自落进自己那一行。同一个词，两种语义。
+      - id: advanced_node_competitive_position
+        kind: relative
+        entities: [TSM, "005930.KS", INTC]
+        feeds_factor: tech_tenor
+        statement: 先进制程的技术与量产位置在台积电 / 三星 / 英特尔之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: node_yield_progress
+            desc: 各家先进节点的良率与器件性能进展——具体良率数字、SRAM 良率、
+                  性能功耗密度对比、爬坡是否顺利。良率是**领先指标**：良率不达标时
+                  名义产能不等于可用产能，这是本条命题的因果起点
+            direct: true
+            expect_from: [TSM, "005930.KS", INTC]
+          - key: node_customer_wins
+            desc: 先进节点的客户赢单、流片与量产承诺——项目数、订单管线、
+                  谁通过认证、谁被替代、是否引入第二代工来源。这是良率进展的
+                  **滞后确认**：设计赢单不等于上量承诺，两者要分开记
+            direct: true
+            expect_from: [TSM, "005930.KS", INTC, NVDA, AMD, AVGO, MRVL, KR_US_SUMMIT]
+          - key: node_capacity_buildout
+            desc: 各家自身先进制程产能的建设进度与地理布局——新厂投产时点、
+                  节点产能规模、海外扩产的成本代价。只记**该家自己的**产能位置，
+                  行业总量缺口属于 advanced_node_supply_gap
+            direct: true
+            expect_from: [TSM, "005930.KS", INTC]
+        falsifiers:
+          - 三星或英特尔披露先进节点良率达到可量产水平，且拿下具名大客户的上量订单
+          - 台积电的节点爬坡时点推迟，或先进制程收入占比停止上移
+          - 任一大客户明确将先进节点订单分流至第二代工来源
+        # ASML 作 supplier 是这条命题里唯一的非自述读数来源：它会公开说 High-NA 谁先
+        # 拿到、谁先上产线——现有 INTC 的 4 条读数全部出自它。
+        # NVDA/AMD/AVGO/MRVL 作 customer：订单转移的表述只有买方说才算数，
+        # 代工厂自述赢单是**利益相关方自我申报**，basis 低一档。
+        # ⚠️ INTC 是 2026-08-13 才注册并进 observe 的，首轮判读时它大概率**三个维度
+        # 全零**。那是"还没抓过"不是"没进展"，判读时不要把它读成落后。
+        #
+        # 2026-08-13 加 KR_US_SUMMIT：2026-07-24 旧金山韩美 AI 峰会的政府简报——三星电子
+        # 与博通签 MOU，含 2000 亿美元先进存储供应与 AI 芯片代工合作。这条 entity 记的
+        # 是 005930.KS（关于三星），source_entity 是峰会简报本身，不是三星自述——政府
+        # 简报 + 双方联合披露，独立性比任一当事方自己说都强，stance 用 regulator
+        # （同 TRENDFORCE 的理由：这个位置是"独立于任何一方"，不是"当事人的某一方"）。
+        witnesses:
+          - {entity: TSM, stance: incumbent}
+          - {entity: "005930.KS", stance: competitor}
+          - {entity: INTC, stance: competitor}
+          - {entity: ASML, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: MRVL, stance: customer}
+          - {entity: KR_US_SUMMIT, stance: regulator}
+
+      # 不设 feeds_factor：CoWoS 的定价权（晶圆 ASP 向 7nm 靠拢）确实是 moat_pricing
+      # 的题中之义，但全库目前**没有一条封装 ASP/毛利的独立读数**——台积电只给公司级
+      # 毛利，不拆封装。挂上因子等于让一个没有价格读数的维度去动截面权重。
+      # 等真出现封装定价的可追踪读数再补。
+      - id: advanced_packaging_competitive_position
+        kind: relative
+        entities: [TSM, "005930.KS", INTC]
+        statement: 先进封装的技术与量产位置在台积电 / 三星 / 英特尔之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: packaging_yield_progress
+            desc: 各家**逻辑芯片先进封装**的良率与技术就绪度——EMIB/SoIC/CoWoS/CoPoS
+                  等 2.5D/3D 方案的验证与量产时点、玻璃基板与面板级封装的中试进度、
+                  光引擎（COUPE 及同类）的量产状态。**时点推迟或提前本身就是读数**。
+                  ⛔ 不记存储自身的堆叠与样品进度（HBM3E/HBM4/HBM4E 出货、DRAM 堆叠
+                  良率）——那属于 hbm_share_and_pricing_power 的 customer_qualification。
+                  首轮判读踩过这个坑：三星凭"行业首个 HBM4E 样品出货"被判为封装领先，
+                  但存储堆叠与 CoWoS 级逻辑封装是两个不同战场，混在一起会把一家在
+                  存储上的进度读成它在逻辑封装上追上了台积电
+            direct: true
+            expect_from: [TSM, INTC, "005930.KS", TRENDFORCE]
+          - key: packaging_customer_wins
+            desc: 逻辑芯片先进封装的客户承诺与订单归属——谁在谁家封装、是否启用第二
+                  封装来源、是否有具名客户的试产或转单、封装订单积压的方向。
+                  买方一侧的表述权重高于封装方自述。⛔ 同样不记存储客户的认证进展
+            direct: true
+            expect_from: [TSM, INTC, "005930.KS", NVDA, AVGO, AMD, TRENDFORCE]
+        falsifiers:
+          - 英特尔或三星的封装方案拿下具名大客户的量产订单（非仅试产/设计合作）
+          - 台积电的封装量产时点推迟，或具名客户将封装分流至第二来源
+          - 台积电与竞对在封装上转为合作结构（如共建标准/共用基板），
+            相对位置的问法本身即失效，需重写命题
+        # ⚠️ 起草时明知这条命题**当前几乎是台积电独角戏**：台账里三星 0 条封装读数
+        # （它的代工话术全在节点上）、英特尔 0 条（刚注册）。仍然声明，理由与
+        # asic_merchant_dependency 当初相同——**声明是为了让下一轮抽取有地方安放，
+        # 并让沉默被显式记成缺口而不是中性**。若两轮抽取后三星/英特尔仍全零，
+        # 该做的是把 cohort 收窄或废掉这条命题，不是留着它假装在比较。
+        # 2026-08-13 加 TRENDFORCE：它专题报过台积电 CoWoS vs Intel EMIB 的横向比较、
+        # 以及"GOOG/META 考虑转向 EMIB"这类具名客户动向——relative 命题的两个 direct
+        # 维度都是 gate 3 只吃 cohort 内实体，TRENDFORCE 说的事只要 entity 落在
+        # TSM/005930.KS/INTC 三家上就能过闸，不需要额外放宽隔离规则。
+        witnesses:
+          - {entity: TSM, stance: incumbent}
+          - {entity: INTC, stance: competitor}
+          - {entity: "005930.KS", stance: competitor}
+          - {entity: NVDA, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
 
   - key: L6_equipment
     label: L6 半导体设备

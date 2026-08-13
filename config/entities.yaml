@@ -21,7 +21,11 @@ entities:
 
   "005930.KS":
     name: Samsung Electronics
-    aliases: [SSNLF, "005930", SMSN]
+    # "SAMSUNG ELECTRONICS" 补于 2026-08-13：喂三方新闻（TrendForce/峰会简报）时，
+    # LLM 抽取按文中原文写公司全名，不是股票代码——canonical_entity() 现在也在逐条
+    # 观测的 entity 字段上生效（见 observer.py extract()），折不到就会开一个新
+    # entity 键，任何命题的证人/概念查询都够不着它。
+    aliases: [SSNLF, "005930", SMSN, "SAMSUNG ELECTRONICS"]
     market: KRX
     filings: ir
 
@@ -75,6 +79,17 @@ entities:
     aliases: ["2330.TW", TSMC]
     market: TWSE
     filings: sec          # 20-F + 英文法说会纪要
+
+  # 2026-08-13 补。它是先进制程与先进封装两条命题里唯一未注册的 cohort 成员——
+  # 台账里关于 Intel 的读数只有 4 条，且全部出自 ASML 之口（High-NA 谁先上量）。
+  # 转述能证明"别人怎么看它"，证明不了它自己报的 18A 良率与外部客户进展；
+  # 不注册 + 不进 observe，foundry_competitive_position 那两条命题的 Intel 一栏
+  # 就会永远空着，而空着会被读成"没进展"，不是"没抓过"。
+  INTC:
+    name: Intel
+    aliases: [INTEL, "INTEL FOUNDRY"]
+    market: US
+    filings: sec
 
   ASML:
     name: ASML Holding

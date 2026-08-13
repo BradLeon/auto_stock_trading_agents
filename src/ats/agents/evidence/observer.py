@@ -628,9 +628,11 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
             log.info("evidence %s: unknown concept %r -> unmapped", symbol, concept)
             concept = ""
         try:
+            from ...config import canonical_entity
+
             out.append(Observation(
                 document_id=document_id, source_url=source_url,
-                entity=v.entity.strip().upper(), source_entity=symbol.upper(),
+                entity=canonical_entity(v.entity.strip().upper()), source_entity=symbol.upper(),
                 metric=v.metric.strip().lower(),
                 concept=concept, period=(v.period or period or "").strip(),
                 observation_type=v.observation_type, stance=v.stance,

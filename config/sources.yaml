@@ -91,5 +91,64 @@ sources:
     # 注意这让它落入 SECONDARY —— 能参与支持/反驳记分，但**不贡献立场类别**。这是对的：
     # 立场类别是"独立证人"的度量，而一家研究机构的报价不是一个新的经济位置。
 
+# ==============================================================================
+# 文章类第三方源 —— 上面 sources: 的兄弟，但走另一条通路
+# ==============================================================================
+#
+# 区别只有一个，但它决定了两者不能合并：**上面那些是数列，这些是散文**。
+# 数列靠公式变成观测（chain/sources.py::to_observations，全程不过 LLM）；文章必须被读。
+# 混进同一个声明块，就等于让 sources.py 悄悄失去它自己文档字符串所标榜的那个性质
+# ——「这些数字从未经过模型的判断」。所以另起一块，另走 chain/articles.py。
+#
+# --- 字段（与 sources: 不同的部分）---------------------------------------------
+# adapter          -> src/ats/data/articles/<adapter>.py，需实现 discover() 与 fetch_body()
+# entity           **发布者**，不是被报道的对象。它是「说话人」（source_entity），
+#                  文章里提到的公司才是 entity —— 一篇文章可以同时讲三家公司
+# pages            索引页往回翻几页。跨轮重叠是免费的：已入库的文章在花掉一次抓取
+#                  之前就被跳过，更别说模型调用
+# max_per_run      成本上限，只封顶模型调用，不封顶发现
+# min_body_chars   作用在**抽出的正文**上，不是整页。见下方 TrendForce 的注释
+# match            slug 关键词预筛（slug 里就有标题）。**只管成本不管正确性**——
+#                  concept_menu 是封闭菜单，漏网的离题文章会整篇落进未映射池，
+#                  任何命题都够不着。所以宁可宽：筛漏了丢的是真证据，
+#                  筛松了只浪费一次模型调用
+#
+# 立场与观测类型：entity 进 witnesses 表时给 regulator（它独立于任何一方当事人），
+# 但**逐行的 observation_type 由抽取模型判**——转述台积电指引的句子是 guidance（PRIMARY，
+# 贡献立场类），机构自己的观点是 research（SECONDARY，只贡献权重）。这意味着一条命题
+# 能否过立场闸，部分取决于模型的逐行判型。这不稳定但有语义依据，**不要试图用配置钉死
+# 类型** —— 那正是 supports_when 当初被删掉的同一类错误（见 schemas/chain.py::Concept）。
+
+article_sources:
+  trendforce_news:
+    label: TrendForce 新闻
+    adapter: trendforce
+    entity: TRENDFORCE
+    stance: regulator
+    doc_type: article
+    cadence: weekly
+    pages: 5              # 每页约 9 篇、每天发 7-9 篇 -> 覆盖约一周，周更作业够且有冗余
+    max_per_run: 12
+    min_body_chars: 800   # 与 data/source_cache.py 的 MIN_CHARS 对齐
+    match: [cowos, copos, emib, packaging, hbm, dram, nand, memory, foundry,
+            tsmc, wafer, samsung, sk-hynix, hynix, micron, intel, nvidia,
+            nanometer, 2nm, 3nm, advanced, osat, ase, capacity, yield]
+    # 为什么不用它的 RSS（2026-08-13 实测）：https://www.trendforce.com/news/feed/ 确实存在，
+    # 带全文与结构化 tags，本该是更好的源 —— 但它的**内容冻结在 2026-07-01**，
+    # 而站点每天都在发（索引页当天就有 08-13 的文章）。更阴的是它每次都带一个新的
+    # Last-Modified 重新分发，光看响应头看不出它是死的。所以发现走索引页翻页。
+    # 哪天它修好了，只需要改 data/articles/trendforce.py 的 discover() 一个函数。
+    #
+    # 付费墙怎么处理：**靠正文容器在不在，不靠检测付费特征**。实测否掉的三种做法——
+    #   · 按 "Subscribe"/"Member Center" 关键词判：每一页都命中（导航栏常驻），6/6 篇误报
+    #   · 按整页长度判：反向相关，付费的 research/dram 页纯文本 32,216 字符，
+    #     比任何正常文章都长，却一个字正文都没有
+    #   · 直接用整页文本：正文只占 47%，其余是导航与页脚；付费页则是 100% 噪音
+    # 采用的判据让**新出现的付费形态默认落在安全的一侧**（记成缺口），而不是默认被当成正文。
+    # 取不到正文记 save_document_failure —— 「读不到」和「没说」是两种状态，
+    # 只报成功会让付费墙扩大伪装成「TrendForce 最近没什么可说的」。
+
 # --- 已评估但暂不接入 ---------------------------------------------------------
-# （暂无）
+# SemiAnalysis：它已经在 config/news_sources.yaml 的 newsletter 管线里（IMAP + Substack
+#   RSS），产出进 research_insights 表。把它**也**接到证据链上是另一个决策，涉及两条管线
+#   的职责边界（同一篇文章被两套机制读两遍意味着什么），不在文章源首版范围内。

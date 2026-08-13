@@ -838,6 +838,29 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                 print(f"  ✅ {sid:<28}{n} 条新观测")
         return 0
 
+    if action == "articles":
+        # The prose half of `collect`. Separate command because it costs a model call
+        # per article and takes minutes, while `collect` is arithmetic over a series.
+        from ..chain import articles as chain_articles
+
+        stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
+        if not stats:
+            print("（config/sources.yaml 里没有配置 article_sources）")
+            return 0
+        for sid, st in sorted(stats.items()):
+            if st.unreachable:
+                print(f"  ⚠️  {sid:<24}取不到文章列表，已记成缺口而非沉默")
+                continue
+            print(f"  📰 {sid:<24}扫 {st.scanned} 篇 · 命中 {st.matched} 篇 · "
+                  f"新抽取 {st.ingested} 篇 / {st.observations} 条观测")
+            if st.unreadable:
+                # Never fold this into the headline: a widening paywall must not read
+                # as the publisher having gone quiet.
+                print(f"     🚫 {st.unreadable} 篇取不到正文（付费或模板变更），已记成缺口")
+            for t in st.titles:
+                print(f"     · {t[:88]}")
+        return 0
+
     if action == "kbreview":
         # The same six detectors the weekly report runs, on demand. Worth its own
         # command because the report costs a full re-assessment to regenerate, while
@@ -1221,7 +1244,7 @@ def main(argv: list[str] | None = None) -> int:
     evi.add_argument("action",
                      choices=["observe", "show", "claims", "report", "sources",
                               "probe", "propose", "proposals", "review", "kbreview",
-                              "collect"])
+                              "collect", "articles"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")

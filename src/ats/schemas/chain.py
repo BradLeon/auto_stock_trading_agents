@@ -470,6 +470,73 @@ class SourceDef(BaseModel):
         return (v or "").upper()
 
 
+class ArticleSourceDef(BaseModel):
+    """A third-party evidence source that publishes PROSE rather than a series.
+
+    The sibling of `SourceDef`, and deliberately a separate declaration rather than a
+    flag on it: a statistical series becomes an Observation by formula (see
+    chain/sources.to_observations — no model in the loop), while an article has to be
+    read. Folding the two together would quietly cost `sources.py` the property its own
+    docstring sells, that its numbers never passed through a model's judgement.
+
+    Declared in config/sources.yaml under `article_sources:`; see that file for the
+    field-by-field rationale.
+    """
+
+    id: str
+    label: str = ""
+    adapter: str                          # data/articles/<adapter>.py
+    params: dict = Field(default_factory=dict)
+    entity: str                           # the PUBLISHER — it is the speaker, never the subject
+    stance: WitnessStance = "regulator"
+    doc_type: str = "article"
+    cadence: str = "weekly"
+    # How deep to page back through the index. Overlap between runs is free: an article
+    # already in the ledger is skipped before it costs a fetch, let alone a model call.
+    pages: int = 3
+    max_per_run: int = 12                 # cost ceiling on model calls, not on discovery
+    # Applies to the EXTRACTED body, never the whole page — a paywalled product page is
+    # the longest document on the site and contains no article at all.
+    min_body_chars: int = 800
+    # Cheap deterministic pre-filter on the URL slug (which carries the headline). This
+    # governs COST, not correctness: `observer.concept_menu` is a closed menu, so an
+    # off-topic article that slips through lands entirely in the unmapped pool where no
+    # claim can reach it. So prefer it wide — a miss here loses real evidence, while a
+    # false positive only wastes one model call.
+    match: list[str] = Field(default_factory=list)
+
+    @field_validator("entity")
+    @classmethod
+    def _entity_upper(cls, v: str) -> str:
+        return (v or "").upper()
+
+    @field_validator("match")
+    @classmethod
+    def _match_lower(cls, v: list[str]) -> list[str]:
+        return [str(s).lower() for s in (v or [])]
+
+
+class ArticleRef(BaseModel):
+    """One article as the DISCOVERER found it — before anything has been fetched.
+
+    Carries enough to decide whether the article is worth fetching at all: TrendForce
+    puts both the date and the headline in the URL, so the keyword filter and the
+    already-seen check both run before a single body request is made.
+    """
+
+    url: str
+    slug: str                             # stable per-article id; used in the document_id
+    title: str = ""
+    published_at: date | None = None
+
+    @field_validator("slug")
+    @classmethod
+    def _slug_required(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("slug must not be blank")
+        return v.strip()
+
+
 class SeriesPoint(BaseModel):
     """One observation of a statistical series, as the adapter returns it."""
 

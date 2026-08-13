@@ -662,6 +662,22 @@ def _cross_section_weekly(name: str) -> None:
     # month's customs print next to this week's filings. `collect()` had no production
     # caller at all — the configured sources only ever ran when someone invoked it from
     # a REPL, so they were silently frozen while looking configured.
+    # Articles first, series second: both land in the ledger the report then reads, and
+    # article ingestion is the slower, more failure-prone half (one model call per piece
+    # against a site whose template can move), so it gets its own guard.
+    try:
+        from ..chain import articles as chain_articles
+
+        for sid, stat in chain_articles.collect_articles(get_store()).items():
+            if stat.unreachable:
+                log.warning("article source %s: unreachable this round (recorded as a gap)", sid)
+            else:
+                log.info("article source %s: scanned %d, matched %d, ingested %d "
+                         "(%d new observations, %d unreadable)", sid, stat.scanned,
+                         stat.matched, stat.ingested, stat.observations, stat.unreadable)
+    except Exception as exc:  # noqa: BLE001 - a publisher outage must not break the job
+        log.warning("article source collection failed: %s", exc)
+
     try:
         from ..chain import sources as chain_sources
 

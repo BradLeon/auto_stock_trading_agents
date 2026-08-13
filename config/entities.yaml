@@ -12,10 +12,17 @@
 # filings    该公司**原始文件**的披露地：sec 表示能在 EDGAR 找到，ir 表示只能取投资者
 #            关系页/纪要。取不到不是错误，会如实记成缺口。
 
+# ⚠️ 2026-08-13：别名表原本只登记**代码**，因为此前每份文档都是公司自己的财报——
+# 公司在自己的电话会里几乎不会用英文全名自称，所以「通俗名」这一类别名从没被用到。
+# 接入第三方文章后这个假设失效了：TrendForce 写的是 "SK hynix"、"Micron"、"Samsung"，
+# 抽取模型照抄原文，于是 SAMSUNG(12 条) 与 005930.KS(8 条) 被拆成两个实体键——
+# 正是本文件开头警告的那种「从内部骗过立场闸」的失效，只是这次走的是通俗名而不是代码。
+# 别名是**精确整串匹配**（config.py::_alias_index），所以 "SAMSUNG ELECTRO-MECHANICS"
+# 不会被 "SAMSUNG" 误折——那是另一家上市公司。
 entities:
   SKHY:
     name: SK hynix
-    aliases: [HY9H, "000660.KS", SKHYY, "000660"]
+    aliases: [HY9H, "000660.KS", SKHYY, "000660", "SK HYNIX", "SK HYNIX INC"]
     market: KRX
     filings: ir
 
@@ -25,7 +32,7 @@ entities:
     # LLM 抽取按文中原文写公司全名，不是股票代码——canonical_entity() 现在也在逐条
     # 观测的 entity 字段上生效（见 observer.py extract()），折不到就会开一个新
     # entity 键，任何命题的证人/概念查询都够不着它。
-    aliases: [SSNLF, "005930", SMSN, "SAMSUNG ELECTRONICS"]
+    aliases: [SSNLF, "005930", SMSN, "SAMSUNG ELECTRONICS", SAMSUNG]
     market: KRX
     filings: ir
 
@@ -52,25 +59,25 @@ entities:
 
   MU:
     name: Micron Technology
-    aliases: []
+    aliases: [MICRON, "MICRON TECHNOLOGY"]
     market: US
     filings: sec
 
   NVDA:
     name: NVIDIA
-    aliases: []
+    aliases: [NVIDIA, "NVIDIA CORPORATION"]
     market: US
     filings: sec
 
   AMD:
     name: Advanced Micro Devices
-    aliases: []
+    aliases: ["ADVANCED MICRO DEVICES"]
     market: US
     filings: sec
 
   AVGO:
     name: Broadcom
-    aliases: []
+    aliases: [BROADCOM, "BROADCOM INC"]
     market: US
     filings: sec
 

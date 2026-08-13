@@ -231,6 +231,60 @@ def _sources_section(store) -> list[str]:
             lines.append(f"| {r.get('period') or '—'} | {r.get('metric') or '—'} "
                          f"| {r.get('direction') or '—'} | {(r.get('evidence_span') or '')[:110]} |")
         lines.append("")
+    lines += _article_sources_section(store)
+    return lines
+
+
+def _article_sources_section(store) -> list[str]:
+    """Article sources — the prose half of the same grounding, same no-network rule.
+
+    Shows what could NOT be read as prominently as what could. A publisher's paywall
+    widening and a publisher going quiet look identical in a success-only listing, and
+    they call for opposite responses: one means find another source, the other means the
+    story really has stopped moving.
+    """
+    from . import articles as chain_articles
+
+    declared = chain_articles.load_article_sources()
+    if not declared:
+        return []
+    lines = ["### 文章类第三方源", "",
+             "> 与上面的数列源同为非自述读数，区别只在形态：数列靠公式变成观测，"
+             "文章要被读。**取不到正文的文章单列**——付费墙扩大与「这家最近没什么可说的」"
+             "在只报成功的清单里长得一模一样，但该做的应对正好相反。", ""]
+    for s in declared:
+        lines += [f"#### {s.label or s.id}（`{s.id}`）", ""]
+        try:
+            import importlib
+
+            mod = importlib.import_module(f"..data.articles.{s.adapter}", __package__)
+            doc = (mod.__doc__ or "").strip()
+            rationale = doc.split("\n\n")[0].replace("\n", " ") if doc else ""
+        except Exception:  # noqa: BLE001 — a missing/broken adapter must not break this
+            rationale = ""
+        if rationale:
+            lines += [rationale, ""]
+        lines += [f"- 适配器 `{s.adapter}` · 立场 **{STANCE_CN.get(s.stance, s.stance)}** "
+                  f"· 更新频率 {s.cadence}", ""]
+
+        docs = store.documents(entity=s.entity, ok_only=False, limit=200)
+        ok = [d for d in docs if d.get("ok") and d.get("doc_type") == s.doc_type]
+        bad = [d for d in docs if not d.get("ok") and d.get("period")]
+        if not ok and not bad:
+            lines += ["⚠️ 台账里还没有这个源的文章（`ats evidence articles` 尚未跑过）", ""]
+            continue
+        if ok:
+            lines += ["| 抓取时间 | 文章 | 原文 |", "|---|---|---|"]
+            for d in ok[:12]:
+                lines.append(f"| {(d.get('fetched_at') or '')[:10]} "
+                             f"| {(d.get('period') or '—')[:76]} "
+                             f"| [链接]({d.get('source_url') or ''}) |")
+            lines.append("")
+        if bad:
+            lines += [f"🚫 **{len(bad)} 篇取不到正文**（付费或模板变更）——记成缺口，不是沉默：", ""]
+            for d in bad[:8]:
+                lines.append(f"- `{(d.get('period') or '—')[:70]}` · {d.get('note') or ''}")
+            lines.append("")
     return lines
 
 

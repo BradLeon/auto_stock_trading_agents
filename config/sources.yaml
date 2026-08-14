@@ -130,9 +130,17 @@ article_sources:
     pages: 5              # 每页约 9 篇、每天发 7-9 篇 -> 覆盖约一周，周更作业够且有冗余
     max_per_run: 12
     min_body_chars: 800   # 与 data/source_cache.py 的 MIN_CHARS 对齐
+    # 2026-08-14 补光互联词。原来这一串全是存储/封装词，**一个光的都没有**，
+    # 于是 TrendForce 的光模块/CPO 报道从来没被抓过——直接后果是 L3 三条 common 命题
+    # 全部卡在「立场单一（只有 supplier）」，因为唯一能提供 regulator 立场的证人
+    # 被关键词挡在门外。这不是判读的问题，是取数的问题。
     match: [cowos, copos, emib, packaging, hbm, dram, nand, memory, foundry,
             tsmc, wafer, samsung, sk-hynix, hynix, micron, intel, nvidia,
-            nanometer, 2nm, 3nm, advanced, osat, ase, capacity, yield]
+            nanometer, 2nm, 3nm, advanced, osat, ase, capacity, yield,
+            # --- 光互联/互联层 ---
+            optical, optics, transceiver, laser, photonic, photonics, cpo,
+            co-packaged, npo, dsp, retimer, aec, interconnect, 800g, 1.6t, 3.2t,
+            eml, vcsel, inp, lumentum, coherent, credo, marvell, broadcom]
     # 为什么不用它的 RSS（2026-08-13 实测）：https://www.trendforce.com/news/feed/ 确实存在，
     # 带全文与结构化 tags，本该是更好的源 —— 但它的**内容冻结在 2026-07-01**，
     # 而站点每天都在发（索引页当天就有 08-13 的文章）。更阴的是它每次都带一个新的

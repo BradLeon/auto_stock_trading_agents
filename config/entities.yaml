@@ -98,6 +98,46 @@ entities:
     market: US
     filings: sec
 
+  # --- L3 光互联/互联层 -------------------------------------------------------
+  # 2026-08-14 补。这五家此前**一家都没注册**，而 L3 层马上要立命题。
+  # 别名取的是**通俗名**而不是代码，因为踩坑的是第三方散文不是公司自述：
+  # TrendForce 写的是 "Lumentum"/"Coherent"/"Credo"，抽取模型照抄原文，
+  # 折不到就各开一个新实体键，任何命题都够不着——与上一轮 SAMSUNG 被拆成两个键同型。
+  LITE:
+    name: Lumentum
+    aliases: [LUMENTUM, "LUMENTUM HOLDINGS"]
+    market: US
+    filings: sec
+
+  COHR:
+    name: Coherent
+    # II-VI 是合并前的旧名，老文章仍在用
+    aliases: [COHERENT, "COHERENT CORP", "II-VI", "II-VI INCORPORATED"]
+    market: US
+    filings: sec
+
+  CRDO:
+    name: Credo Technology
+    aliases: [CREDO, "CREDO TECHNOLOGY", "CREDO SEMICONDUCTOR", "CREDO SEMI"]
+    market: US
+    filings: sec
+
+  MRVL:
+    name: Marvell Technology
+    aliases: [MARVELL, "MARVELL TECHNOLOGY"]
+    market: US
+    filings: sec
+
+  # ⚠️ 账户实际持有的代码是 AXTI，配置各处写的是 AXT。这条别名只解决**证据侧**的
+  # 实体折叠；风控的分层归属走的是另一条路径（风控快照的 symbol_layers），
+  # 不会因为这条别名而修复——AXTI 目前仍显示「未分层」、其 3.03% 不计入 L3 上限。
+  # 已与用户确认本轮不修那一侧，此处留痕。
+  AXT:
+    name: AXT Inc
+    aliases: [AXTI, "AXT INC"]
+    market: US
+    filings: sec
+
   ASML:
     name: ASML Holding
     aliases: [ASML.AS, ASMLF]

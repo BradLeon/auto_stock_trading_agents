@@ -286,6 +286,167 @@ layers:
       电力冷却: config/knowledge/电力冷却.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
 
+    # ── 2026-08-14 新增四条互联层命题 ──────────────────────────────────────────
+    # 此前本层**一条命题都没有**，后果是 concept_menu() 对 LITE/COHR/CRDO 返回空菜单，
+    # 它们的观测被 extract() 全部置空 concept：COHR 216 条、LITE 52 条 100% 未映射，
+    # MRVL 190 条里 164 条未映射（那 26 条已映射的全是定制硅/代工维度，**没有一条是光的**）。
+    # 证据一直在库里，只是没有落点——这是配置缺口不是数据缺口。
+    #
+    # 与知识库笔记的分工（config/knowledge/光互联.md 开头的范围契约写死了这条）：
+    # 笔记只写年度级不变的**判据**，不写"谁排第几"；本期排序由这里的命题用财报原文给出。
+    # 所以下面每条命题都对应笔记里的一条判据，而不是重复笔记的结论。
+    #
+    # 形状规则（沿用 L5 已确立的）：common 命题里所有供给侧同行一律 supplier，
+    # 不分 incumbent/competitor（那两个立场只在 relative 里有意义）；relative 命题的
+    # 每个 concept 必须 direct: true，否则闸 3 全挡（cloud_moat_hard_assets 曾因此 47 条出 0 簇）。
+    #
+    # **刻意不立的两条**（免得以后重复起草）：
+    #   ~~独立的 CPO 商业化时点命题~~：CPO 的一阶效应是替代**铜**不是替代可插拔光
+    #     （Cignal AI：最早的量产应用是替代铜），所以它属于下面第 ③ 条的机制，不单开；
+    #     而且 L5 的 packaging_capacity_addition 已经在收 CPO **产能**读数（台积电 COUPE），
+    #     再开一个 L3 的 CPO 产能维度会与它抢同一批行——与被删掉的
+    #     packaging_allocation_pressure 同一个毛病。
+    #   ~~衬底（AXT）专属命题~~：台账零证据，且 光互联.md 判据写明衬底需求是**派生**的、
+    #     "方向相同但时点滞后、幅度放大"——单立会与第 ① 条永远同向变动，互相稀释。
+    claims:
+      # ① 对应 光互联.md 判据一「瓶颈环节的所有权」：先确认瓶颈还在不在。
+      - id: optical_component_supply_gap
+        kind: common
+        statement: 光器件（EML / CW 激光器 / InP 衬底）的供给缺口仍在扩大而非收敛
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: optical_component_tightness
+            desc: 光器件供需缺口的**量化表述**、售罄状态、交期长短、是否成为出货瓶颈，
+                  以及**定价弹性**（"还有提价空间"本身就是缺口未消解的读数）。
+                  只记器件层（激光器/衬底/PIC）的紧张，不记模块组装产能——
+                  组装是薄利可替代环节，它紧不紧说明不了瓶颈在哪
+            expect_from: [LITE, COHR, MRVL, NVDA, TRENDFORCE]
+          - key: optical_capacity_buildout
+            desc: 激光器与衬底产能扩张的**规模与时点**——新增产线、晶圆尺寸代际推进、
+                  投产时间表、长约与预付。扩产是对需求强度的回应而非对紧张的否定；
+                  真正的反证是**投放速度快于订单能见度的延长**
+            expect_from: [LITE, COHR, TRENDFORCE]
+        falsifiers:
+          - 任一器件供应商披露供需缺口的量化数字收窄（如 LITE 的 EML 缺口从 >30% 下修）
+          - 出现"不再售罄""交期缩短""客户要求降价"这类表述
+          - 新增器件产能的投放速度快于买方订单能见度的延长
+        # AXT 不入列：衬底是本层最上游，但它零证据且需求是派生的（见上方注释）。
+        # AAOI 不入列：既非 target 也非 observe，零观测，声明了只会制造沉默证人。
+        witnesses:
+          - {entity: LITE, stance: supplier}
+          - {entity: COHR, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ② 对应 光互联.md 常见误判「定价权的直接读数是 ASP 的方向，不是毛利的水平」。
+      # 这条命题就是把那句话变成可证伪的追踪。
+      - id: rate_transition_pricing_power
+        kind: common
+        statement: 800G→1.6T 的代际切换仍在带来 ASP 与毛利上行，而非转入价格战
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: rate_transition_asp
+            desc: 速率代际切换带来的 **ASP 方向**与毛利结构变化——新一代相对上一代是
+                  溢价还是平价。**不记毛利率的绝对水平**（高毛利可能只是产品组合，
+                  光互联.md 明确警告过这个误判）。产品**品类**之间的 ASP 差异
+                  （分立器件 vs 整机模块）也记在这里，但要与代际切换分开判读
+            expect_from: [LITE, COHR, MRVL, CRDO, NVDA]
+          - key: rate_transition_ramp
+            desc: 新一代的出货节奏与收入占比，以及**上一代是否同步走弱**。
+                  两代同时增长是缺口未收敛的佐证；新一代放量而上一代掉头，
+                  才是切换进入替代期、议价窗口收窄的信号
+            expect_from: [LITE, COHR, MRVL, TRENDFORCE]
+        falsifiers:
+          - 新一代产品的 ASP 或毛利贡献不再高于上一代
+          - 上一代速率的收入掉头向下，同时新一代未同步放量
+          - 出现客户要求降价、或供应商主动放缓提价的表述
+        witnesses:
+          - {entity: LITE, stance: supplier}
+          - {entity: COHR, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: CRDO, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ③ 对应 铜连接.md「retimer/DSP 的能力可以向光 DSP 延伸——这是判断一家铜连接
+      # 公司久期的关键分叉点」。
+      #
+      # ⚠️ 起草时这条本来写的是「铜的可达距离尚未被 CPO/光方案侵蚀」，2026-08-14 首次
+      # 抽取 CRDO 后**推翻重写**：CRDO 管理层自己就让步了那个方向——「eventually we
+      # could get to 50/50 for sure... optical could actually exceed copper in the
+      # upcoming years」，且 CPO/NPO 首笔收入预期 FY2028。追踪一个当事人已经承认的
+      # 方向没有意义。真正未定、且决定持仓成败的是**转身能不能兑现、代价是什么**：
+      # 它铜侧毛利 68%，而自述光 DSP/SiPho PIC 是"两位数 ASP"、只有 ZeroFlap 整机是
+      # "三位数 ASP"——收入转过去了，毛利结构未必跟得过去。
+      - id: copper_ip_crosses_to_optical
+        kind: common
+        statement: 铜连接侧的 DSP / SerDes IP 正在成功转化为光侧收入，且未以毛利结构为代价
+        horizon: {from: 2026-08-01, to: 2028-06-30}
+        concepts:
+          - key: interconnect_ip_crossover
+            desc: 铜侧 IP 向光侧延伸的**收入兑现与时点**——光 DSP / PIC / 光模块的
+                  收入规模、增速、占比目标与爬坡时点，以及**它带来的毛利结构变化**。
+                  这是本条命题的核心：收入转过去不等于经济性转过去
+            expect_from: [CRDO, MRVL, LITE, COHR]
+          - key: copper_optical_boundary
+            desc: 铜光边界的移动——SerDes 代际对铜可达距离的影响、AEC 与光方案的分工
+                  变化、CPO/NPO 的量产时点与它先替代谁。**时点推迟或提前本身就是读数**
+            expect_from: [CRDO, MRVL, COHR, NVDA]
+        falsifiers:
+          - 光侧收入占比上升的同时毛利率下行（转身成功但经济性劣化）
+          - 光侧的量产/爬坡时点推迟，或 design win 落后于同业
+          - 铜侧收入掉头而光侧未同步接上（青黄不接）
+        witnesses:
+          - {entity: CRDO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: COHR, stance: supplier}
+          - {entity: LITE, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ④ 截面。维度取自两份知识库笔记**共有**的判据，这样铜光两侧才可比：
+      # 光互联.md 的排序是「瓶颈所有权 > 垂直整合 > 客户分散度 > 封装规模」，
+      # 铜连接.md 是「SerDes/DSP IP 深度 > 客户分散度(权重更高) > 下一代设计导入 > 产能」。
+      # 交集正是下面三条。
+      - id: interconnect_moat_distribution
+        kind: relative
+        entities: [LITE, COHR, MRVL, CRDO]
+        feeds_factor: moat_pricing
+        statement: 互联层的结构位置在 Lumentum / Coherent / Marvell / Credo 之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: interconnect_bottleneck_asset
+            desc: 自有的**瓶颈资产**——InP/EML 自供产能与垂直整合深度（光侧），
+                  SerDes/DSP 的 IP 深度与工艺代际（铜侧）。两份笔记各自的"最硬"
+                  一条在这里合并：拥有别人绕不开的东西
+            direct: true
+            expect_from: [LITE, COHR, MRVL, CRDO]
+          - key: interconnect_customer_concentration
+            desc: 客户集中度及其分散进展——前几大客户占比、10% 客户家数、
+                  新客户导入。铜连接.md 明确写本子层这条的**扣分权重比别的子层更高**：
+                  一个客户的架构选型变更就能改写全年
+            direct: true
+            expect_from: [LITE, COHR, MRVL, CRDO]
+          - key: interconnect_next_gen_design_in
+            desc: 下一代规格（1.6T/3.2T、CPO/NPO、下一代 AEC）的**设计导入与量产承诺**
+                  ——即久期能见度。设计赢单不等于上量承诺，两者要分开记
+            direct: true
+            expect_from: [LITE, COHR, MRVL, CRDO, NVDA]
+        falsifiers:
+          - 某家的瓶颈资产被绕开（客户改用替代方案或第二供应商）
+          - 某家的客户集中度进一步上升而同业在下降
+          - 某家在下一代规格上缺席，而同业已拿到具名客户的量产承诺
+        # NVDA 作 customer 是本条唯一的非自述读数来源：它 2026-03 同时投了 LITE 与 COHR
+        # 各 20 亿美元锁产能，谁被它选中、选中做什么，比任一家自述的护城河都重。
+        witnesses:
+          - {entity: LITE, stance: incumbent}
+          - {entity: COHR, stance: competitor}
+          - {entity: MRVL, stance: competitor}
+          - {entity: CRDO, stance: competitor}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
   - key: L4_chip_design
     label: L4 芯片设计
     question: 加速卡供需与 ASIC 替代节奏？

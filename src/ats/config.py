@@ -484,7 +484,11 @@ def load_sector_config(name: str = "ai_hardware"):
     raw.setdefault("review", {})
     r = raw["review"]
     r.setdefault("static_notes_chars", 36000)
-    r.setdefault("kb_criteria_chars", 24000)   # 各层 structure_notes 汇总给 sector_analyst
+    # 各层 structure_notes 汇总给 sector_analyst。2026-08-15 从 24000 提到 32000：
+    # 半导体设备.md 改写后九份笔记合计 22.9k，只剩 4.5% 余量，而**截断是静默的**且切的是
+    # 拼接顺序最后一份（L6）的尾部——正好是「常见误判」那节。上限只封顶不设目标，
+    # 提高它本身不增加 prompt 长度。
+    r.setdefault("kb_criteria_chars", 32000)
     r.setdefault("insights_per_ticker", 3)
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)

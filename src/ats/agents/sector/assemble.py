@@ -142,8 +142,16 @@ def _kb_criteria(sc: SectorContext, cfg: SectorConfig) -> None:
         return
     kb = industry.fetch_named(paths)
     if kb:
-        cap = int(cfg.review.get("kb_criteria_chars", 24000))
-        sc.kb_criteria = industry.as_context(kb)[:cap]
+        # 默认值的真源是 config.py 的 setdefault（那里保证这个键一定存在），这里的
+        # 兜底只是防御性的——但两处必须一致，否则改了一处会以为改全了。
+        cap = int(cfg.review.get("kb_criteria_chars", 32000))
+        # 截断是静默的，且切的是拼接顺序最后一份笔记的尾部。真被切到时要留下痕迹，
+        # 否则下游看到的是一份看起来完整、实则缺了结尾的知识库。
+        joined = industry.as_context(kb)
+        if len(joined) > cap:
+            log.warning("kb criteria truncated: %d chars > cap %d — 末尾笔记的结尾已被切掉，"
+                        "考虑调高 review.kb_criteria_chars", len(joined), cap)
+        sc.kb_criteria = joined[:cap]
 
 
 # --------------------------------------------------------------------------- #

@@ -344,8 +344,12 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
 
 def _demand_lines(layer, claim, a) -> list[str]:
     silent = f" · 未发声 {', '.join(a.silent_witnesses)}" if a.silent_witnesses else ""
+    # `basis` travels with the verdict, or the analyst cannot tell a reading that two
+    # vantage points confirmed from one that only the interested parties asserted —
+    # they warrant different confidence and the verdict word alone hides the difference.
+    basis = {"self_reported": "（仅自述）", "thin": "（证据薄）"}.get(a.basis, "")
     out = [f"- [{layer.key}] {claim.statement}\n"
-           f"    结论 {a.verdict} · 证人覆盖 {a.coverage} · 独立证据簇 "
+           f"    结论 {a.verdict}{basis} · 证人覆盖 {a.coverage} · 独立证据簇 "
            f"{a.evidence_clusters} · 立场 {a.stance_classes} 类 · "
            f"支持 {a.support_score:.0f}/反驳 {a.refute_score:.0f}{silent}"]
     # The reasons travel with the verdict. Without them the analyst is asked to accept a

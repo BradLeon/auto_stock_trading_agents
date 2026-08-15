@@ -896,12 +896,13 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                     rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
             for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):
                 claim = next(c for c in layer.claims if c.id == a.claim_id)
-                # 「◐」 = one-sided evidence, single stance -> unconfirmed, NOT conflicting
-                mark = ("◐" if (a.verdict == "mixed"
-                                and a.unresolved_reason == "single_stance")
+                # 「◐」 = one-sided AND too few independent filers -> unconfirmed,
+                # NOT conflicting. 「仅自述」 = it did resolve, on one vantage point.
+                mark = ("◐" if a.unresolved_reason == "single_stance"
                         else {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
                               "resolved": "📊", "unknown": "· "}.get(a.verdict, "· "))
-                print(f"{mark} {a.claim_id:20} {a.verdict:13} 覆盖 {a.coverage:6} "
+                basis = "（仅自述）" if a.basis == "self_reported" else ""
+                print(f"{mark} {a.claim_id:20} {a.verdict:13}{basis} 覆盖 {a.coverage:6} "
                       f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类")
                 print(f"     {claim.statement}")
                 if a.entity_readings:

@@ -53,11 +53,10 @@ layers:
         statement: 超大规模厂商的 AI capex 由内生现金流支撑，未依赖递增的外部融资与表外承诺
         horizon: {from: 2026-08-01, to: 2027-12-31}
         # 「这笔 capex 是谁的钱」**只有钱的主人能回答**——供应商与客户拿不到它的资产
-        # 负债表。所以立场闸对这条命题不是"暂时凑不齐第二类"，而是**永远凑不齐**：
-        # 五家独立公司以 13:1 判为反驳，仍卡在 mixed。
-        # 声明单一视角后，引擎要求改由**说话人数量**兜底（≥3 家独立申报方），
-        # 见 chain/corroborate.py 的 RELAXED_MIN_SPEAKERS。
-        min_stance_classes: 1
+        # 负债表，所以这条命题永远只有一类立场。
+        # 曾经需要在这里声明 min_stance_classes: 1 来买一个豁免；2026-08-15 立场闸从
+        # "闸"改成"档"之后不再需要——6 个独立说话人自动够格，结论照出，
+        # 只是带上 basis=self_reported 的标注。那个旋钮已从 schema 删除。
         concepts:
           - key: external_funding_need
             desc: 为资本开支进行的债务发行、优先股/可转债/ATM 额度，以及净债务与杠杆率

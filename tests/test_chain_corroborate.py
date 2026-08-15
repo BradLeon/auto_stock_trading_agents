@@ -91,18 +91,25 @@ def test_same_fact_from_company_and_customer_stays_two_clusters():
     assert a.verdict == "supportive"
 
 
-# --- Gate 2: stance -------------------------------------------------------- #
+# --- Gate 2: stance, as a GRADE ------------------------------------------- #
 def test_three_sell_side_notes_cannot_confirm():
     """Three sell-side notes are ONE witness class — secondary material never
-    contributes a stance, so it cannot carry a claim to a verdict on its own."""
+    contributes a stance, so it cannot carry a claim to a verdict on its own.
+
+    This survived gate 2 becoming a grade, and it is the test that nearly did not:
+    the speaker floor that now substitutes for stance diversity was first written over
+    ALL clusters, which let three research houses clear it and confirm the claim
+    through the back door. The floor counts PRIMARY speakers only, for the same reason
+    the stance count always has.
+    """
     # Three DIFFERENT houses, so gate 1 legitimately keeps them apart and the test
     # exercises gate 2 rather than tripping the cluster-count floor first.
     rows = [_row("MU", "supply_tightness", otype="research", speaker=f"HOUSE{i}",
                  doc=f"note-{i}", rid=f"n{i}") for i in range(3)]
     a = corroborate(_common(), rows, cfg=CFG)
     assert a.evidence_clusters == 3
-    assert a.verdict == "mixed"            # capped: not confirmed
-    assert a.stance_classes == 0
+    assert a.verdict == "unknown"          # withheld: no primary testimony at all
+    assert a.stance_classes == 0 and a.speakers == []
     assert "立场" in a.note
 
 
@@ -113,14 +120,36 @@ def test_customer_plus_supplier_can_confirm():
     a = corroborate(_common(), rows, cfg=CFG)
     assert a.verdict == "supportive"
     assert a.stance_classes == 2
+    assert a.basis == "corroborated"       # two vantage points agreed
 
 
-def test_single_stance_however_many_names_stays_capped():
-    """Two different suppliers still agree from the same economic position."""
+def test_two_speakers_sharing_a_vantage_are_still_too_few():
+    """Two suppliers agreeing from the same economic position is not enough to stand
+    on its own — the substitute for vantage diversity is source multiplicity, and two
+    is below the floor."""
     rows = [_row("MU", "supply_tightness", speaker="MU", doc="mu", rid="a"),
             _row("SKHY", "supply_tightness", speaker="SKHY", doc="sk", rid="b")]
     a = corroborate(_common(), rows, cfg=CFG)
-    assert a.verdict == "mixed" and a.stance_classes == 1
+    assert a.verdict == "unknown" and a.unresolved_reason == "single_stance"
+    assert a.stance_classes == 1 and a.basis == "thin"
+
+
+def test_enough_independent_filers_resolve_on_one_vantage():
+    """The change this whole grade exists for.
+
+    Four competing suppliers agreeing is not self-confirmation — they are the parties
+    least able to coordinate a story, since any one of them profits by contradicting
+    the others. Returning `mixed` over 4 support / 0 refute called that a conflict.
+    It resolves now, carrying `self_reported` so the caveat is never lost.
+    """
+    rows = [_row("MU", "supply_tightness", speaker=s, doc=f"d{s}", rid=f"r{s}")
+            for s in ("MU", "SKHY", "005930.KS", "WDC")]
+    a = corroborate(_common(), rows, cfg=CFG)
+    assert a.verdict == "supportive"
+    assert a.basis == "self_reported"      # graded, not vetoed
+    assert a.stance_classes == 1 and len(a.speakers) == 4
+    assert a.unresolved_reason == ""       # nothing is unresolved — it resolved
+    assert "仅自述" in a.note                # and the caveat is visible
 
 
 # --- Gate 3: common / relative isolation (the reason this design exists) ---- #
@@ -139,9 +168,14 @@ def test_competitor_expansion_does_not_move_our_share_claim():
     common = corroborate(_common(), rows, cfg=CFG)
     relative = corroborate(_relative(), rows, cfg=CFG)
 
-    assert common.verdict != "unknown"          # industry demand/supply DID move
-    assert relative.verdict == "unknown"        # our share claim did NOT
-    assert relative.evidence_clusters == 0
+    # Assert on CLUSTERS, not on the verdict word. The industry claim legitimately
+    # reaches this evidence; the share claim must never see it at all. (This used to
+    # compare verdicts, which worked only by accident: both sides can now read
+    # `unknown` for entirely different reasons — too few independent filers on one,
+    # nothing admissible whatsoever on the other — and that difference is the point.)
+    assert common.evidence_clusters > 0         # industry demand/supply DID move
+    assert relative.evidence_clusters == 0      # our share claim saw nothing
+    assert relative.verdict == "unknown"
     assert relative.refute_score == 0.0
 
 
@@ -377,33 +411,45 @@ def test_counter_evidence_is_not_hidden_by_netting():
     assert a.dissenters                                        # and named
 
 
-def test_two_kinds_of_mixed_are_told_apart():
-    """`mixed` covers two states that mean opposite things to a reader.
+def test_conflict_and_thinness_are_told_apart():
+    """`mixed` may now mean exactly one thing: the evidence conflicts.
 
-    One is a genuine disagreement. The other is one-sided evidence whose witnesses all
-    share a vantage point — the engine declines to confirm it, but the evidence does
-    not conflict. Observed live: `capex_funding_quality` came back refuted 9 clusters
-    to 1 by five independent filings and still landed in `mixed`, because every witness
-    was a `customer` disclosing its own financing. Rendering that as 「分歧」 says the
-    filings disagreed; they did not.
+    Evidence that is one-sided but rests on one vantage point used to land in `mixed`
+    too, and rendering both as 「分歧」 told the reader the filings disagreed when they
+    did not. That state is now either a resolved verdict carrying `self_reported`, or —
+    when too few independent filers spoke — `unknown` with the reason attached.
     """
     from ats.chain.report import verdict_mark
     from ats.schemas.chain import ClaimAssessment
 
     dissent = ClaimAssessment(claim_id="c", as_of=NOW, verdict="mixed",
                               unresolved_reason="dissent")
-    single = ClaimAssessment(claim_id="c", as_of=NOW, verdict="mixed",
-                             unresolved_reason="single_stance")
-    assert verdict_mark(dissent) != verdict_mark(single)
+    thin = ClaimAssessment(claim_id="c", as_of=NOW, verdict="unknown",
+                           unresolved_reason="single_stance")
     assert "分歧" in verdict_mark(dissent)
-    assert "分歧" not in verdict_mark(single) and "未确认" in verdict_mark(single)
-    # Assessments stored before the field existed must still render.
+    assert "分歧" not in verdict_mark(thin) and "未确认" in verdict_mark(thin)
+    # Assessments stored before the fields existed must still render.
     assert verdict_mark(ClaimAssessment(claim_id="c", as_of=NOW, verdict="mixed"))
 
 
-def test_single_stance_note_says_which_way_the_evidence_leans():
+def test_a_self_reported_verdict_never_reads_like_a_corroborated_one():
+    """The caveat replaced a veto, so it has to be visible. If `✅ 印证` and a verdict
+    resting on one vantage point rendered identically, this change would have quietly
+    made the output worse rather than better."""
+    from ats.chain.report import verdict_mark
+    from ats.schemas.chain import ClaimAssessment
+
+    corro = ClaimAssessment(claim_id="c", as_of=NOW, verdict="supportive",
+                            basis="corroborated")
+    self_rep = ClaimAssessment(claim_id="c", as_of=NOW, verdict="supportive",
+                               basis="self_reported")
+    assert verdict_mark(corro) != verdict_mark(self_rep)
+    assert "仅自述" in verdict_mark(self_rep)
+
+
+def test_withheld_verdict_says_which_way_the_evidence_leans():
     """"Unconfirmed" without a direction reads as "we learned nothing". A claim refuted
-    by four independent filings and a claim with no directional evidence must not
+    by two independent filings and a claim with no directional evidence must not
     produce the same sentence — the first is a finding, the second is a gap."""
     claim = _common(witnesses=[Witness(entity="NVDA", stance="customer"),
                                Witness(entity="MSFT", stance="customer")])
@@ -412,13 +458,13 @@ def test_single_stance_note_says_which_way_the_evidence_leans():
             for i, s in enumerate(["NVDA", "MSFT", "NVDA", "MSFT"])]
     a = corroborate(claim, rows, cfg=CFG)
 
-    assert a.verdict == "mixed"
-    assert a.unresolved_reason == "single_stance"   # NOT a disagreement
+    assert a.verdict == "unknown"                  # 2 speakers: below the floor
+    assert a.unresolved_reason == "single_stance"  # NOT a disagreement
     assert a.stance_classes == 1
-    assert "一边倒" in a.note and "反驳" in a.note and "立场" in a.note
+    assert "一边倒" in a.note and "反驳" in a.note and "独立说话人" in a.note
 
 
-# --- Per-claim stance override --------------------------------------------- #
+# --- The single-vantage question, with no per-claim override --------------- #
 def _one_vantage(**kw):
     """A claim whose question admits a single vantage point by construction."""
     base = dict(id="capex_funding_quality", kind="common", layer="L2_cloud",
@@ -429,57 +475,58 @@ def _one_vantage(**kw):
     return ClaimDef(**{**base, **kw})
 
 
-def test_a_single_vantage_question_can_still_reach_a_verdict():
-    """Some questions have one vantage point by construction. "Is this company's capex
-    funded internally" can only be answered by the company whose capex it is —
-    suppliers and customers cannot see its balance sheet. Five independent filers
-    refuted it 13:1 and it still could not resolve, because the gate is unsatisfiable
-    for this claim shape, not merely unsatisfied yet."""
+def test_a_single_vantage_question_resolves_without_being_declared():
+    """"Is this company's capex funded internally" can only be answered by the company
+    whose capex it is — suppliers and customers cannot see its balance sheet. It used to
+    need a hand-written `min_stance_classes: 1` on the claim to escape the veto, which
+    cost a judgement call ("is this single-vantage BY CONSTRUCTION?") on every claim
+    anyone wrote. Four independent filers now carry it on their own.
+    """
     rows = [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{i}", rid=f"r{i}",
                  polarity="refute")
             for i, s in enumerate(["GOOG", "MSFT", "AMZN", "META"])]
 
-    strict = corroborate(_one_vantage(), rows, cfg=CFG)
-    assert strict.verdict == "mixed" and strict.unresolved_reason == "single_stance"
-
-    relaxed = corroborate(_one_vantage(min_stance_classes=1), rows, cfg=CFG)
+    a = corroborate(_one_vantage(), rows, cfg=CFG)
     # Refuted 4:0 — and the claim's statement is the bullish assumption, so resolving
     # it means falsifying it.
-    assert relaxed.verdict == "contradicted"
-    assert relaxed.stance_classes == 1
+    assert a.verdict == "contradicted"
+    assert a.basis == "self_reported" and a.stance_classes == 1
+    assert len(a.speakers) == 4
 
 
-def test_relaxing_the_gate_is_paid_for_with_source_multiplicity():
-    """The gate's real target is independence; stance class is only a proxy for it. An
-    override may not become a way for a couple of interested parties to confirm a claim
-    about themselves, so below `RELAXED_MIN_SPEAKERS` distinct speakers the sector
-    default is restored and the claim stays unresolved.
+def test_one_vantage_still_needs_several_independent_filers():
+    """Source multiplicity is what substitutes for vantage diversity, so it has to be a
+    real floor. A couple of interested parties may still not confirm a claim about
+    themselves.
 
     Note where the boundary actually bites: ONE speaker never gets this far — gate 1
-    collapses that company's four sentences into a single cluster and `min_clusters`
-    rejects it as `unknown`. The case this backstop exists for is two or three filers,
-    which clears dedup but is still too thin to trade away vantage diversity.
+    collapses that company's sentences into a single cluster and `min_clusters` rejects
+    it as `unknown`. The case this floor exists for is two filers, which clears dedup
+    but is still too thin to stand without a second vantage point.
     """
-    from ats.chain.corroborate import RELAXED_MIN_SPEAKERS
+    from ats.chain.corroborate import MIN_INDEPENDENT_SPEAKERS
 
     def rows_from(*speakers):
         return [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{s}",
                      rid=f"r{s}", polarity="refute") for s in speakers]
 
     thin = rows_from("GOOG", "MSFT")               # 2 clusters: clears gate 1...
-    a = corroborate(_one_vantage(min_stance_classes=1), thin, cfg=CFG)
-    assert a.evidence_clusters == 2                # ...but too few speakers to relax
-    assert a.verdict == "mixed" and a.unresolved_reason == "single_stance"
+    a = corroborate(_one_vantage(), thin, cfg=CFG)
+    assert a.evidence_clusters == 2                # ...but below the speaker floor
+    assert a.verdict == "unknown" and a.unresolved_reason == "single_stance"
 
-    enough = rows_from(*["GOOG", "MSFT", "AMZN", "META"][:RELAXED_MIN_SPEAKERS])
-    b = corroborate(_one_vantage(min_stance_classes=1), enough, cfg=CFG)
-    assert b.verdict == "contradicted"
+    enough = rows_from(*["GOOG", "MSFT", "AMZN", "META"][:MIN_INDEPENDENT_SPEAKERS])
+    b = corroborate(_one_vantage(), enough, cfg=CFG)
+    assert b.verdict == "contradicted" and b.basis == "self_reported"
 
 
-def test_a_relaxed_threshold_is_never_invisible():
-    """A verdict resting on one vantage point must say so, or a reader cannot tell it
-    apart from one corroborated across stances."""
+def test_a_single_vantage_verdict_names_the_filers_it_rests_on():
+    """The note has to carry both halves of the trade: which single vantage point this
+    is, and how many independent filers were accepted in place of a second one. A reader
+    who cannot see the count cannot judge whether the substitution was earned."""
     rows = [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{s}", rid=f"r{s}",
                  polarity="refute") for s in ("GOOG", "MSFT", "AMZN", "META")]
-    a = corroborate(_one_vantage(min_stance_classes=1), rows, cfg=CFG)
-    assert "1 类立场可得" in a.note and "4 个独立说话人" in a.note
+    a = corroborate(_one_vantage(), rows, cfg=CFG)
+    assert "仅自述" in a.note and "customer" in a.note
+    assert "4 个独立说话人" in a.note
+    assert all(s in a.note for s in ("GOOG", "MSFT", "AMZN", "META"))

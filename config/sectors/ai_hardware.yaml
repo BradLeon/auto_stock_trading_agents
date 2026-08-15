@@ -895,14 +895,235 @@ layers:
     question: 设备订单（WFE）领先指标指向扩产还是收缩？
     tickers:
       - {symbol: ASML, note: EUV 最不可替代}
-      - {symbol: AMAT}
-      - {symbol: LRCX}
+      - {symbol: AMAT, note: 产品组合最宽（沉积/刻蚀/量测/先进封装），中国敞口最大}
+      - {symbol: LRCX, note: 刻蚀/沉积，存储敞口在四家里最高}
       - {symbol: KLAC, note: KLA Corp（正确代码 KLAC，原 KLA 错误）}
       - {symbol: LSRCY, note: Lasertec ADR（EUV 掩模检测设备）}
       - {symbol: "8035.T", note: TEL，TODO 用户确认}
     structure_notes:
       半导体设备: config/knowledge/半导体设备.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+
+    # ── 2026-08-15 新增五条设备层命题 ────────────────────────────────────────
+    # 此前本层**一条命题都没有**，concept_menu() 对 KLAC/LRCX/AMAT 返回空菜单，
+    # 390 条读数只有 1 条被映射（ASML 那 6 个菜单维度全来自 L5、全是关于**别人**的节点）。
+    #
+    # **命题集 = 知识库的收入分解式。** config/knowledge/半导体设备.md 第一节把设备公司
+    # 的收入变化拆成六项，并指出「六项里只有第一项是整层共享的，其余都是个股差异的来源」：
+    #
+    #   收入变化 ≈ 客户产能扩张 + 制程内容量 + 份额 + 价格与组合 + 存量服务 − 出口与交付约束
+    #
+    #   客户产能扩张   → ① wfe_cycle_still_expanding        common（唯一能拉到买方的）
+    #   制程内容量     → ② process_content_still_rising     common
+    #   存量服务       → ③ equipment_service_buffer         common
+    #   出口与交付约束 → ④ equipment_market_access_intact   common
+    #   份额 + 价格组合 → ⑤ equipment_position_distribution  relative
+    #
+    # 按分解式一一对应不是修辞：它保证**没有一项被漏掉、也没有两条命题问同一件事**，
+    # 而后者是这套系统里最贵的错误（packaging_allocation_pressure 因此被删）。
+    #
+    # **没有任何一条是"针对持仓"立的。** 起草时曾打算给 ASML 单立一条光刻命题，理由是
+    # 「光刻没有可比同业、进不了截面」——逻辑成立，但核对证据后推翻了：光刻强度只有 ASML
+    # 一家说话，**1 个说话人**在闸 2 分档规则下直接判 unknown（单一视角需 ≥3 个独立说话人），
+    # 立了也永远出不了结论。改为把问题放大成"制程内容量"（命题 ②），光刻降为其中一维，
+    # 于是 ASML/KLAC/LRCX 三家都能说话，而 ASML 关心的那件事一条不落。
+    # **判据是这个维度有没有 ≥3 个独立说话人，不是"我持有它"，也不是"它有没有同业"。**
+    #
+    # **刻意不立的两条**（免得以后重复起草）：
+    #   ~~独立的先进封装设备命题~~ —— 笔记确认先进封装是增量不是搬家、值得追踪，但 L5 的
+    #     packaging_capacity_addition 已在收这批读数（AMAT 那条已映射的行就是证据），
+    #     再开会抢同一批行。改放进 ② 的 process_content_intensity——那里问的是**每片晶圆的
+    #     内容量**，与 L5 问的**产能**是两件事。
+    #   ~~研发强度/花钱守位命题~~ —— 笔记把它改成了复合条件（研发强度↑ + 份额与新品收入未
+    #     改善 + 毛利与增量 ROIC↓ 三者同时成立），单个 concept 承载不了这种合取判断，
+    #     拆开后每一维又都会与 ⑤ 抢行。留给截面分析师在 moat_pricing 里综合。
+    #
+    # **LSRCY 与 8035.T 不进任何命题**：都在上面的 tickers 里但台账零证据、不在
+    # targets/observe。Lasertec 尤其可惜——笔记单独点出掩模检测「需求跟着掩模层数与新节点
+    # 导入走，**不跟着 WFE 总量走**」，是本层唯一与 WFE 不同步的一段，本该是很好的对照组。
+    # 但零证据就是零证据，等它进 observe 有读数了再升。
+    claims:
+      - id: wfe_cycle_still_expanding
+        kind: common
+        statement: 晶圆厂设备支出周期仍在上行，且买方的实际采购与设备商的预期一致
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: wfe_spend_outlook
+            desc: 设备商对 WFE 总量的预期、修正方向与分部拆分（逻辑/存储/封装各多少）。
+                  **买方一侧的设备采购承诺也记在这里**——工具支出的增减、新厂装机时点，
+                  以及"用旧工具改造替代新购"这类**反向**表述。
+                  ⚠️ 口径：WFE 通常特指**前道**设备，先进封装/组装设备是另一个预算与统计
+                  口径。记读数时要带上口径，否则两个不同口径的数字会被当成同一件事比较
+            expect_from: [KLAC, LRCX, ASML, AMAT, TSM, INTC, "005930.KS", MU, TRENDFORCE]
+          - key: equipment_lead_time_and_coverage
+            desc: 交期、订单覆盖率、积压订单与自身产能扩张计划。
+                  笔记明确交期与积压是**周期性读数、不构成跨周期护城河**——所以它只出现在
+                  这条周期命题里，**不进截面命题**
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+        falsifiers:
+          - 任一设备商下修 WFE 总量预期，或买方下修工具支出
+          - 买方转向工具复用/改造而非新购
+          - 交期缩短且订单覆盖率同步下降
+        # 这是五条里**唯一能拿到 2 类立场的**：买方读数已在库且双向——
+        # INTC「2026 工具支出 +40%」vs 台积电「把 5nm 工具改成 3nm」（复用而非新购，是真证伪）。
+        # ⚠️ 那两条现已映射到 L5 的 foundry_node_capacity_addition / capacity_addition。
+        # **不新开买方维度**，靠上面 desc 与 expect_from 把它们引到这里——
+        # 与 packaging_throughput 已验证的做法一致。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TSM, stance: customer}
+          - {entity: INTC, stance: customer}
+          - {entity: "005930.KS", stance: customer}
+          - {entity: MU, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      - id: process_content_still_rising
+        kind: common
+        statement: 单位晶圆/单位堆叠的设备内容量仍在上升——技术迁移带来的是净增加，不是步骤替代
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: process_content_intensity
+            desc: 每片晶圆或每层堆叠需要的本公司工序内容量、新工序的导入、
+                  SAM per wafer 的变化，以及**先进封装带来的新增工序**（混合键合、临时键合、
+                  减薄、翘曲控制、面板级）。这里问的是**每片晶圆的内容量**，
+                  ⛔ 不是产能——产能属于 L5 的 packaging_capacity_addition
+            expect_from: [LRCX, KLAC, AMAT, ASML, TSM, "005930.KS"]
+          - key: litho_intensity_trend
+            desc: 光刻层数与强度的方向（每代节点用多少 EUV 层、光刻强度是升是降），
+                  以及**客户用多重曝光等手段绕过最新一代光刻的迹象**。
+                  ⛔ 不记客户的节点良率与量产进度，那属于 L5 的 node_yield_progress
+            expect_from: [ASML, TSM, INTC, "005930.KS"]
+        falsifiers:
+          - 某代节点的工序步骤被合并或替代，导致净内容量下降
+          - 客户用多重曝光持续替代最新一代光刻
+          - 先进封装的增量被前道的减量抵消
+        # 对应笔记第三节改写后的判据：「**不是每道工序每一代都单调上升**」——
+        # EUV 单次曝光可替代多次 DUV 图形化，反而减少部分沉积/刻蚀/清洗步骤。
+        # 所以这条是可证伪的，而不是"节点越小设备越好"的同义反复。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TSM, stance: customer}
+          - {entity: "005930.KS", stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      - id: equipment_service_buffer
+        kind: common
+        statement: 服务与装机量收入正在提供跨周期缓冲——它的增速不随系统销售的周期同步回落
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: equipment_service_mix
+            desc: 服务/备件/装机量管理收入的规模、增速与占比方向，
+                  以及它与系统销售增速的**对比**（缓冲成立与否看的是两者的差，不是绝对水平）
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+          - key: installed_base_upgrade_demand
+            desc: 装机基数、装机利用率、升级改造需求与其附加值。
+                  已在库：ASML「客户想尽快在现有厂拿到更多产能，创造了很强的升级需求」、
+                  LRCX「导电刻蚀装机超 4 万腔体」「Akara 装机每年翻倍」
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+        falsifiers:
+          - 服务收入增速掉到系统销售增速以下
+          - 装机利用率或升级改造需求出现下滑表述
+          - 客户推迟维护/服务合同续约
+        # 把笔记里「**本层最被低估的一条**」变成可追踪的命题——全库此前无任何命题、
+        # 任何打分卡覆盖它。四家同为 supplier → 单一立场，但 4 个独立说话人 ≥3，
+        # 按 2026-08-15 改档后的闸 2 会出 supportive(self_reported) 而不是卡住。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      - id: equipment_market_access_intact
+        kind: common
+        statement: 出口管制与市场可达性尚未成为设备收入的实质约束
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: equipment_market_access
+            desc: 受限市场（尤其中国区）的收入占比与方向、出口许可的变化、特定客户的可达性，
+                  以及**竞争对手能否进入本公司进不去的市场**——可达性差异本身就是份额变化
+                  的来源（KLAC 那句「竞争对手能出货到我们进不去的中国晶圆厂」是这个维度上
+                  最有区分度的读数）
+            expect_from: [ASML, LRCX, AMAT, KLAC, TRENDFORCE]
+        falsifiers:
+          - 任一家披露受限市场收入占比下滑且归因于许可变化
+          - 出现新的管制范围扩大或许可撤销
+          - 某家因可达性差异丢掉具名客户或具名订单
+        # 对应笔记第五节新增的风险时间尺度表，核心句：
+        # 「**护城河可以完全没变，收入仍可能因为出口许可或客户资本开支在一个季度内下降。
+        #   不能用"护城河衰退慢"推导"盈利风险也慢"**。」这是旧版笔记完全没有的轴。
+        #
+        # **单 concept 是刻意的**：交付约束本可以单开一维，但它与命题 ① 的
+        # equipment_lead_time_and_coverage 在抽取模型眼里语义不可分，后声明的那个只会抢
+        # 同一批行——与被删掉的 packaging_allocation_pressure 同一个毛病。
+        # 单 concept 有先例（hbm_pricing_still_expanding），且 4 个说话人足够过簇数门槛。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # 截面。四个维度全部 direct: true——relative 命题只在 direct 维度上移动（闸 3）。
+      # 维度的**排序**按新版笔记调整过：旧版说「存储/逻辑两个周期不同步，这往往是本层截面
+      # 区分度的主要来源」，新版加了限定——同一终端需求同时拉动两侧时两个周期会**阶段性
+      # 同步**，此时区分度更多来自份额与制程内容量。当下正是这种同步期。
+      - id: equipment_position_distribution
+        kind: relative
+        entities: [ASML, KLAC, LRCX, AMAT]
+        feeds_factor: moat_pricing
+        statement: 设备层的结构位置在 ASML / KLA / Lam / AMAT 之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: equipment_share_and_intensity
+            desc: SAM 占 WFE 的比重、份额的稳定性、新节点导入时是否仍拿到 POR/量产认证。
+                  这是笔记里 recipe 绑定深度的**可观测代理**（长期稳中有升本身就是绑定
+                  有效的证据）。已在库：LRCX「SAM 已到 WFE 的 36.5%、目标高 30%」、
+                  KLAC「是最接近对手的 6 倍」
+            direct: true
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+          # ⚠️ 这里原本还有一个 equipment_process_content（逐家的净内容量比较），
+          # 首轮抽取后删除：**全库只抽到 2 行**（只有 LRCX，其余三家 0），而命题 ② 的
+          # process_content_intensity 拿到 27 行。两个 concept 在抽取模型眼里语义不可分，
+          # "行业整体的内容量趋势"与"逐家的内容量比较"用的是同一批句子，后声明的那个
+          # 抢不过——与被删掉的 packaging_allocation_pressure 同一个毛病。
+          # 起草时明明在注释里写了"与命题 ② 同源"，还是造了这个重复维度，留痕备戒。
+          # 逐家的内容量差异没有丢：SAM per wafer 这类读数会落进下面的
+          # equipment_share_and_intensity（份额与内容量本就是同一个问题的两面）。
+          - key: equipment_segment_exposure
+            desc: 存储/逻辑/先进封装的收入敞口及其方向。
+                  ⚠️ **同一终端需求同时拉动存储与逻辑两侧时，两个周期会阶段性同步，
+                  此时本维度的区分度会明显下降**——四家敞口相似**不等于**没有差异，
+                  差异在上面两个维度里。判读时不要把"敞口接近"读成"位置相同"
+            direct: true
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+          - key: equipment_service_mix
+            desc: 服务/备件/装机量收入的占比与增速——逐家比较。
+                  笔记判据 3：服务占比越高，周期性打折应该越小
+            direct: true
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+        falsifiers:
+          - 某家的工序被第二条技术路线绕开
+          - 某家在新节点导入时未被选中（丢 POR）
+          - 某家服务占比持续低于同业，且系统销售同步回落
+        # equipment_service_mix 复用命题 ③ 的 key：一个 key 可被多条命题各自声明，
+        # 且 direct 是**逐命题**的——③ 里非 direct（那是行业级问真假），这里 direct
+        # （逐家比较）。同 capacity_addition 与 datacenter_capacity_delivered 的先例：
+        # 同一个词，两种语义。
+        witnesses:
+          - {entity: ASML, stance: incumbent}
+          - {entity: KLAC, stance: competitor}
+          - {entity: LRCX, stance: competitor}
+          - {entity: AMAT, stance: competitor}
+          - {entity: TSM, stance: customer}
+          - {entity: MU, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
 
 # 每票轻量快照的抓取策略（限速关键）
 snapshot:

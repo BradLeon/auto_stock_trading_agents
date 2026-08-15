@@ -156,9 +156,13 @@ entities:
     market: US
     filings: sec
 
+  # 2026-08-15 补别名。台账里它的 12 条读数全部存在 `APPLIED MATERIALS (AMAT)` 这个
+  # 键下——第三方文章（TrendForce）写的是"公司全名 (代码)"，抽取模型照抄原文，而这里
+  # aliases 是空的，于是折不回来。后果比 SAMSUNG 那次更彻底：`AMAT` 名下**一条读数都没有**，
+  # 把它声明成证人 = 声明一个永远沉默的证人。
   AMAT:
     name: Applied Materials
-    aliases: []
+    aliases: ["APPLIED MATERIALS", "APPLIED MATERIALS (AMAT)"]
     market: US
     filings: sec
 

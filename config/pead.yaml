@@ -15,7 +15,10 @@ targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, CRDO, AVGO, MRVL, VRT, 
 # 供需由海力士/美光/三星三家共同决定，云 capex 由五家共同决定，只读自己持有的那家
 # 等于用几分之一的证据下注。
 # 与 targets 的区别：targets 可交易、走完整 PEAD 打分；observe 只贡献证据。
-observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX, INTC]
+# 2026-08-15 加 AMAT：它在 L6 的 tickers 里、是设备层截面的第四家，但此前既不在 targets
+# 也不在 observe，从未抽取过第一方财报——台账里关于它的 12 条全是 TrendForce 转述。
+# 不持有它，所以进 observe 而非 targets（只贡献证据，不进下单路径）。
+observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX, INTC, AMAT]
 
 monitor:
   enabled: true

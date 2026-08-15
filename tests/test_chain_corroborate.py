@@ -285,12 +285,44 @@ def test_a_lone_dissenting_cluster_does_not_veto_a_large_majority():
     a = corroborate(_common(), rows, cfg=CFG)
     assert a.verdict == "supportive"          # 9 vs 1 — the majority stands
     assert a.dissenters == ["NVDA"]           # …but the dissent is NAMED
-    assert "异议" in a.note                    # …and stated, not hidden
+    assert "具名例外" in a.note                 # …as an exception, not a failed challenge
 
 
-def test_material_dissent_still_overturns():
-    """Demoting a lone dissent to a caveat must not make dissent toothless: several
-    independent dissenting clusters still leave the question open."""
+def test_a_clear_majority_names_the_exception_instead_of_going_unresolved():
+    """The live case this rule was rewritten for.
+
+    `capex_funding_quality` read 3 support : 12 refute and was called 分歧, because the
+    minority hit `>= 3 clusters` and `>= 20% share` at exactly both thresholds — while
+    a sibling claim passed at 18%. Two percentage points decided between "the evidence
+    conflicts" and "the evidence is clear", and the adjudicator's own wobble moved the
+    same claim across the line between runs.
+
+    What the minority is actually worth is being NAMED: "every hyperscaler's cash flow
+    is tight except Microsoft" is a finding about Microsoft, and averaging it into
+    「未消解」 throws away the most informative row in the claim.
+    """
+    claim = _common(
+        concepts=[Concept(key="external_funding_need", desc="为 capex 举债")],
+        witnesses=[Witness(entity=e, stance="customer")
+                   for e in ("GOOG", "AMZN", "META", "ORCL", "MSFT")])
+    rows = [_row("GOOG", "external_funding_need", speaker=s, doc=f"d{s}", rid=f"r{s}",
+                 polarity="refute")
+            for s in ("GOOG", "AMZN", "META", "ORCL")]
+    rows += [_row("GOOG", "external_funding_need", speaker="MSFT", doc="dm", rid="rm",
+                  polarity="support")]
+    a = corroborate(claim, rows, cfg=CFG)
+
+    assert a.verdict == "contradicted"        # 4:1 — the direction is callable
+    assert a.dissenters == ["MSFT"]           # and the exception is named
+    assert "具名例外" in a.note and "MSFT" in a.note
+    # The dissenting evidence itself survives for downstream agents to read.
+    assert any(j.polarity == "support" and j.speaker == "MSFT" for j in a.judgements)
+
+
+def test_a_split_too_close_to_call_is_still_mixed():
+    """Naming the exception must not make dissent toothless. When the majority is not
+    even twice the minority the direction genuinely cannot be called, and `mixed` keeps
+    exactly that meaning — nothing weaker."""
     rows = [_row("MU", concept, speaker=who, doc=f"{who}-{concept}", rid=f"{who}{concept}")
             for who, concepts in (("SKHY", ("supply_tightness", "capacity_addition")),
                                   ("MU", ("supply_tightness", "capacity_addition")),
@@ -300,7 +332,8 @@ def test_material_dissent_still_overturns():
                   doc=f"{who}-d", rid=f"{who}x", polarity="refute")
              for who in ("NVDA", "SKHY", "MU")]
     a = corroborate(_common(), rows, cfg=CFG)
-    assert a.verdict == "mixed" and "分歧未消解" in a.note
+    assert a.verdict == "mixed" and a.unresolved_reason == "dissent"
+    assert "方向无法判定" in a.note              # 5 vs 3 = 1.7:1, below the ratio
 
 
 def test_dissent_share_overturns_even_when_small_in_count():

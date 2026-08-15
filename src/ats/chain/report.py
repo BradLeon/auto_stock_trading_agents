@@ -78,9 +78,14 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
             if not a.entity_readings:
                 # A cross-section has no aggregate support/refute — printing "0 / 0"
                 # under a table that clearly says otherwise reads as a bug.
+                # The minority is named as an EXCEPTION rather than as a failed
+                # challenge: "every hyperscaler but Microsoft" is the finding, and
+                # burying Microsoft under 「异议方」 invites the reader to skip the one
+                # row that carries the most information.
+                exc = (f" · 具名例外 {', '.join(a.dissenters)}（反向读数见下方逐簇判读）"
+                       if a.dissenters else "")
                 lines.append(
-                    f"- 支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
-                    + (f" · 异议方 {', '.join(a.dissenters)}" if a.dissenters else ""))
+                    f"- 支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}{exc}")
             if a.silent_witnesses:
                 # Silence is a gap, not neutrality: a witness who said nothing is the
                 # difference between "checked and fine" and "never checked".

@@ -66,6 +66,13 @@ PRIMARY_TYPES = {"reported_actual", "guidance", "counterparty", "regulatory"}
 # party confirming itself, and that is a statement about speaker count, not about seats
 # in the value chain. Below this the verdict is withheld.
 MIN_INDEPENDENT_SPEAKERS = 3
+# How much bigger the majority must be than the minority for the direction to be
+# callable. Below this the claim is `mixed` — genuinely indecisive, not merely
+# contested. Stated as a ratio on purpose: an absolute dissent count makes 3-against-34
+# look like the same kind of doubt as 3-against-5, and a share threshold has to be
+# picked, which is how the previous rule ended up drawing the line between "分歧" and
+# "印证" two percentage points apart.
+DECISIVE_MAJORITY_RATIO = 2.0
 SECONDARY_TYPES = {"research", "media", "market"}
 
 
@@ -283,11 +290,8 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     min_clusters = cfg.get("min_clusters", 2)
     min_stances = cfg.get("min_stance_classes", 2)
     min_conf = cfg.get("min_confidence", 0.5)
-    # How much dissent overturns a majority. EITHER condition suffices: a few
-    # independent dissenting clusters matter even in a large body of evidence, and a
-    # large share matters even when the body is small.
-    min_dissent_clusters = cfg.get("min_dissent_clusters", 3)
-    min_dissent_share = cfg.get("min_dissent_share", 0.20)
+    # `min_dissent_clusters` / `min_dissent_share` used to be read here. Both are gone:
+    # dissent no longer vetoes, it is named (see DECISIVE_MAJORITY_RATIO).
     as_of = as_of or datetime.now(timezone.utc)
 
     expected = claim.expected_witnesses()
@@ -344,28 +348,38 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         assessment.note = f"独立证据簇 {total} < {min_clusters}，证据不足"
         return assessment
 
-    # `mixed` means "the disagreement is unresolved", and a lone dissenting cluster
-    # against twenty-seven is not a disagreement — it is one reading worth checking.
-    # The old rule (any refute at all -> mixed) made that distinction impossible, and
-    # it got worse as coverage improved: with 38 clusters the same data returned
-    # `mixed 26/1` and `supportive 28/0` on consecutive runs, because the adjudicator
-    # wavers on borderline clusters and one flip decided the verdict.
+    # `mixed` means "I cannot tell you which way this reads" — nothing weaker. A
+    # minority does not overturn a majority merely by existing; it overturns it by
+    # making the majority INDECISIVE. The test is therefore a ratio, not a count:
+    # unless the majority is at least twice the minority, the split is too close to
+    # call and the claim is genuinely unresolved.
     #
-    # So the minority must be MATERIAL to overturn: either several independent clusters
-    # or a real share of the evidence. Below that the majority stands — but the
-    # dissenters are still named, and the note still says the dissent exists. It is
-    # demoted from veto to caveat, never hidden.
+    # Two earlier rules failed here, in opposite directions. "Any refute at all ->
+    # mixed" made a lone dissenting cluster veto twenty-seven. Replacing it with
+    # ">= 3 clusters OR >= 20% share" was still a veto, just a higher one, and the
+    # thresholds turned out to sit exactly where the data lives: measured across the
+    # book, `capex_funding_quality` tripped at 3 clusters and 20.0% — both conditions
+    # at their exact boundary — while `asic_substitution_delivering` passed at 18%.
+    # A two-point difference decided between "分歧" and "印证", and the adjudicator's
+    # own wobble moved the same claim between 3:12 and 4:15 on consecutive runs. A
+    # threshold that unstable is not measuring anything.
+    #
+    # What the minority IS worth is naming. "Every hyperscaler's free cash flow is
+    # tight except Microsoft" is a finding — and a more useful one than the majority
+    # alone — but only if Microsoft is reported as a named exception rather than
+    # averaged away into "unresolved". So dissent is preserved in full (`dissenters`,
+    # and every `judgements` row with its reason) and travels with the verdict.
     minority = min(support, refute, key=len) if (support and refute) else []
+    majority = max(support, refute, key=len) if (support and refute) else (support or refute)
     if minority:
         assessment.dissenters = sorted({c.speaker for c in minority})
-    material = bool(minority) and (
-        len(minority) >= min_dissent_clusters
-        or len(minority) / total >= min_dissent_share)
+    indecisive = bool(minority) and len(majority) < DECISIVE_MAJORITY_RATIO * len(minority)
 
-    if material:
+    if indecisive:
         assessment.verdict = "mixed"
         assessment.unresolved_reason = "dissent"
-        assessment.note = f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，分歧未消解"
+        assessment.note = (f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，"
+                           f"多数不足少数的 {DECISIVE_MAJORITY_RATIO:g} 倍，方向无法判定")
         return assessment
 
     # Gate 2, as a grade. Vantage diversity is what we WANT; independent-speaker count
@@ -408,8 +422,12 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         assessment.note += (f" · ⚠️ 仅自述（{'/'.join(sorted(stances))} 单一视角），"
                             f"由 {len(speakers)} 个独立说话人支撑：{','.join(speakers)}")
     if minority:
-        assessment.note += (f" · ⚠️ 另有 {len(minority)} 簇异议"
-                            f"（{','.join(assessment.dissenters)}），未达翻案门槛")
+        # Framed as an EXCEPTION, not as a failed challenge. "未达翻案门槛" told the
+        # reader the minority had tried and lost, which invites skipping it — but the
+        # minority is often the most informative row in the claim: if every hyperscaler
+        # but one reports tightening cash flow, the one is what a reader should look at.
+        assessment.note += (f" · 具名例外：{','.join(assessment.dissenters)}"
+                            f"（{len(minority)} 簇，反向读数已保留）")
     if assessment.silent_witnesses:
         assessment.note += f" · 未发声：{','.join(assessment.silent_witnesses)}"
     return assessment

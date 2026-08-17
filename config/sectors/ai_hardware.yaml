@@ -898,8 +898,6 @@ layers:
       - {symbol: AMAT, note: 产品组合最宽（沉积/刻蚀/量测/先进封装），中国敞口最大}
       - {symbol: LRCX, note: 刻蚀/沉积，存储敞口在四家里最高}
       - {symbol: KLAC, note: KLA Corp（正确代码 KLAC，原 KLA 错误）}
-      - {symbol: LSRCY, note: Lasertec ADR（EUV 掩模检测设备）}
-      - {symbol: "8035.T", note: TEL，TODO 用户确认}
     structure_notes:
       半导体设备: config/knowledge/半导体设备.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
@@ -938,10 +936,13 @@ layers:
     #     改善 + 毛利与增量 ROIC↓ 三者同时成立），单个 concept 承载不了这种合取判断，
     #     拆开后每一维又都会与 ⑤ 抢行。留给截面分析师在 moat_pricing 里综合。
     #
-    # **LSRCY 与 8035.T 不进任何命题**：都在上面的 tickers 里但台账零证据、不在
-    # targets/observe。Lasertec 尤其可惜——笔记单独点出掩模检测「需求跟着掩模层数与新节点
-    # 导入走，**不跟着 WFE 总量走**」，是本层唯一与 WFE 不同步的一段，本该是很好的对照组。
-    # 但零证据就是零证据，等它进 observe 有读数了再升。
+    # **LSRCY（Lasertec）与 8035.T（TEL）已于 2026-08-17 移出本层 tickers**：台账零证据、
+    # 不在 targets/observe，留在宇宙里只会每周多两次取不到内容的价格快照，并在给行业
+    # 分析师的层级表里占两行空位。
+    # Lasertec 尤其可惜——`半导体设备.md` 单独点出掩模检测「需求跟着掩模层数与新节点导入走，
+    # **不跟着 WFE 总量走**」，是本层唯一与 WFE 不同步的一段，本该是最好的对照组：
+    # 它能证伪"整层同涨同跌"。**要加回来的条件是先进 observe 拿到读数**，而不是先放回
+    # tickers 里等——后者正是它此前一直零证据的原因。
     claims:
       - id: wfe_cycle_still_expanding
         kind: common

@@ -448,15 +448,468 @@ layers:
 
   - key: L4_chip_design
     label: L4 芯片设计
-    question: 加速卡供需与 ASIC 替代节奏？
+    # 2026-08-17 收窄到 XPU/AI 加速器口径。本层只问「算力芯片本身」——网络与交换芯片、
+    # 光 DSP、铜连接归 L3（interconnect_moat_distribution 已在跑，MRVL 就在那条的 cohort
+    # 里）；HBM 与内存互联归 L5。**cohort 不因此变**，变的是每个维度 desc 里写死的边界：
+    # AVGO 的网络收入、MRVL 的光 DSP 收入不进本层任何一条命题。
+    question: XPU（GPU/ASIC）的订单节奏、单位算力价值捕获与四家之间的位置分布？
     tickers:
-      - {symbol: NVDA}
-      - {symbol: AMD}
-      - {symbol: AVGO, note: ASIC/网络}
-      - {symbol: MRVL, note: Marvell 定制ASIC+光DSP（横跨L3光互联，按合集归L4设计服务）}
+      - {symbol: NVDA, note: 外售通用加速平台的行业标准}
+      - {symbol: AMD,  note: 唯一的第二家外售通用 GPU —— 通用平台路线在截面里的对照组。
+                            observe 名单成员，只贡献证据、不进下单路径}
+      - {symbol: AVGO, note: 定制 XPU。**网络/交换芯片收入不在本层命题内**（归 L3），
+                            但它对外只给合并的「AI 收入」口径，判读时要注意这个口径差}
+      - {symbol: MRVL, note: 定制 XPU。**光 DSP 与互联收入不在本层命题内**——那部分由 L3 的
+                            interconnect_moat_distribution 负责，它已在那条的 cohort 里}
     structure_notes:
       芯片设计: config/knowledge/芯片设计.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+
+    # ── 2026-08-17 新增四条 XPU 命题 ─────────────────────────────────────────
+    # 此前本层**一条命题都没有**（L1 只有一只票，不算），而它挂着知识库、有四家标的。
+    # 后果与 L6 上一轮同型但规模更大：这四家目前只是**别人命题的证人**（NVDA 在 HBM 供给
+    # 里、MRVL 在互联截面里、AVGO 在先进制程里），concept_menu() 给它们的菜单全是关于
+    # 别人的维度，于是 761 条读数里 **588 条落在未映射池**：
+    #   NVDA 227 条 / 184 未映射（81%）   AMD  223 / 187（84%）
+    #   AVGO  75 条 /  62 未映射（83%）   MRVL 236 / 155（66%）
+    # 同时 L4 的 moat_pricing 只能由静态长文 + 毛利率给出 —— 正是 docs/CHAIN_EVIDENCE.md
+    # 开篇批评的那个状态。
+    #
+    # ⚠️ 与 L6 的一处**重要差别**：L4 未映射池里有相当比例是纯财务读数（revenue / FCF /
+    # 毛利 / 回购 / EPS / 股数）。那些本就该留在 PEAD 打分卡，**不该被任何命题吸收**——
+    # 所以 L4 未映射率的合理下限比 L6 高，别拿 L6 的数字当验收线。
+    #
+    # **命题集 = 知识库的收入分解式**（同 L6 那一轮的纪律）。config/knowledge/芯片设计.md
+    # 第十一节把 XPU 层的收入变化拆成：
+    #
+    #   收入变化 ≈ 部署算力规模 × 每单位算力的 XPU 内容价值 × 该厂商份额
+    #              + 系统/软件附加 − 代际交付延期与可达市场约束
+    #
+    #   部署算力规模与订单节奏 → ① xpu_order_momentum_outpacing_revenue  common
+    #   每单位内容价值与毛利   → ② xpu_value_capture_per_capacity        common
+    #   代际交付（时点+有效算力）→ ③ xpu_generation_cadence_delivering    common
+    #   份额 + 客户归属 + 系统  → ④ xpu_position_distribution             relative
+    #   收入的资金来源质量     → ⑤ xpu_revenue_funded_by_customers       common
+    #
+    # 一一对应保证**没有一项被漏掉、也没有两条命题问同一件事**，后者是这套系统里最贵的
+    # 错误（packaging_allocation_pressure / equipment_process_content / asic_external_revenue
+    # 三次同款失效）。
+    #
+    # ⑤ 不在分解式的五项里，它是**乘在整个式子上的质量系数**：同样的收入，客户自有资金
+    # 支撑的与厂商垫出来的，持续性不是一回事。首版把它当成 ④ 的一个维度，2026-08-17
+    # 首轮判读后拆出来独立成命题——诊断与留痕写在 ④ 被删掉的那一维原位。
+    #
+    # **刻意不立的三条**（免得以后重复起草）：
+    #   ~~市场可达性 / 出口管制命题~~ —— 台账里只有 NVDA（7 条）与 AMD（1 条）说话，
+    #     **2 个说话人 < MIN_INDEPENDENT_SPEAKERS=3**，立了永远判 unknown。判据与 L6 那轮
+    #     否掉独立光刻命题完全一样。中国与主权敞口降为 ④ 的 xpu_account_and_customer_mix
+    #     里的客户结构一维 —— **在那里它反而有区分度**（NVDA 主权收入 +80%、中国 DC 收入
+    #     被排除在 outlook 外，对比 AVGO 只有三个客户）。
+    #   ~~L4 侧的 ASIC 替代 common 命题~~ —— L2 的 asic_substitution_delivering 已经在问
+    #     「自研 ASIC 兑现了没有」（买方视角，common）。供给侧要问的是**订单在四家之间
+    #     怎么转移**，那是截面、就是 ④，不是第二条 common。
+    #   ~~独立的 XPU 供应锁定命题~~ —— 「对上游的采购承诺/预付/长约」在抽取模型眼里与 L5
+    #     的 foundry_node_demand_visibility（**MRVL 已有 7 行落在那里**）语义不可分，新开
+    #     一维只会抢同一批行。改为并入 xpu_demand_creation_commitment —— 用资产负债表锁定
+    #     **供应**与锁定**需求**本就是同一件事的两半；晶圆/封装口径的读数继续留在 L5。
+    #
+    # **AMD 此前既不在 targets 也不在 observe**（证据扫描只覆盖这两个名单，见
+    # runtime/scheduler.py 的 _observe_window），那 223 条读数不会自动刷新、horizon 一滚
+    # 全部过期。与上一轮发现 AMAT 同型，已按同样先例加入 observe 并补 config/pead/AMD.yaml。
+    claims:
+      # ① 直接回答「什么时点判断该层的投资力度」。形状取自 L2 的
+      # cloud_demand_still_accelerating（RPO 增速 vs 自身收入增速），换成 L4 口径：
+      # **订单承诺 vs 已出货收入**。AVGO 把这个差直接说出来了——「$30B bookings against
+      # the $10.8B we shipped」——book-to-bill 是本层最有信息量的周期读数。
+      #
+      # 与 L2 那条的边界：它的 demand_conversion 明确写着「不记该公司自身产品线的供需」
+      # 并把那部分指向「L5 的命题」，但 L5 没有一条在收加速器级别的订单读数。这条命题
+      # 填的就是 L2 显式留下的那个洞。
+      # 2026-08-17 首轮判读后收窄：原 statement 还带着「且未被厂商自身的融资安排稀释」
+      # 一句，并挂了第三个维度 xpu_demand_creation_commitment。已拆出去独立成命题 ⑤——
+      # 理由见 ⑤ 的注释。这条回到只问一件事：**订单节奏**。
+      - id: xpu_order_momentum_outpacing_revenue
+        kind: common
+        statement: 加速器的订单承诺与能见度仍在扩张——承诺增长快于已确认收入
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: xpu_order_visibility
+            desc: 加速器的订单承诺与能见度——bookings/backlog、能见度年限、design win 金额、
+                  客户 PO，以及已宣布但未交付的部署承诺规模（GW/机架/集群）。
+                  **与同期已出货收入的对比是本维度最有信息量的形态**（book-to-bill）。
+                  ⛔ 不记网络/交换/光模块的订单（那属于 L3）。
+                  ⛔ 不记数据中心与电力容量本身（那属于 L2 的 datacenter_capacity_delivered），
+                  只记**加速器**的承诺
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META, ORCL, SPCX]
+          # 需求的**质量**：订单能不能持续，取决于已经买回去的卡有没有在真烧。
+          # 与 L2 的 cloud_capacity_constraint 是两件事：那条问「云侧产能够不够」，
+          # 这条问「已装机的存量在什么利用水平上」。
+          # ⚠️ 首轮实测 7 行（ORCL 与其他买方 5、NVDA 2）。密度偏低但**信息量最高**：
+          # 拿到的是"全球 GPU 利用率 97.5%""到期的卡有 49% 的客户续租了其中 92%"
+          # 这类只有买方说得出、且直接证伪整条 AI 论点的读数。
+          # 若下一轮涨到两位数，**应把它升格成独立 common 命题**（"已部署算力仍在被
+          # 充分消耗"）——它现在寄居在订单命题里，是因为单独立一条还撑不住。
+          - key: installed_fleet_utilization
+            desc: 已装机加速器的利用率、续租率、租金价格与旧世代资产的残值——
+                  GPU 利用率、到期续租比例、按小时租金的方向、旧世代是否提前退役。
+                  ⛔ 不记云厂"产能受限/需求超过供给"的表述（那属于 L2 的
+                  cloud_capacity_constraint）——这里问的是**存量在不在被消耗**，
+                  不是增量够不够
+            expect_from: [ORCL, MSFT, GOOG, AMZN, SPCX, CRWV, NBIS, NVDA]
+        falsifiers:
+          - 任一家的 bookings 或能见度年限收缩，或 book-to-bill 掉到 1 以下
+          - 租金或利用率下行、续租率下降、旧世代加速器提前退役
+          - 买方推迟或缩量已宣布的部署承诺
+        # 买方证人是这条命题拿到第二类立场的关键：ORCL 的利用率与续租率、SPCX 的采购
+        # 承诺、AMZN 对实验室多年多 GW 承诺的描述，都是供给侧自己不会说的事。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: SPCX, stance: customer}
+          - {entity: CRWV, stance: customer}
+          - {entity: NBIS, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ② 这条把「轻资产 + 高毛利 ⇒ 该是 AI 主 Beta」从信念变成可证伪的命题。
+      # 知识库第二节的核心句：「高终端芯片金额不等于高 L4 利润留存」「高毛利是定价权的
+      # 结果；要追问客户为何不能迁移或压价」。
+      #
+      # 本命题最有价值的证据是 AVGO **同一家给出的两条互相矛盾的读数**：
+      #   「content per gigawatt will increase…XPU 价格会大幅上升」
+      #   「dollars per gigawatt, dollar billions per gigawatt is relatively stable」
+      # 内部张力比单向读数有信息量（同 L6 ① 的 INTC：工具支出指引 +40% 与 PP&E 实际
+      # 下降同时出自它自己）。判读时不要挑一条用，要把两条都带上。
+      - id: xpu_value_capture_per_capacity
+        kind: common
+        statement: 每单位部署算力里 XPU 拿到的内容价值与毛利留存仍在上升——未被存储/封装/电力成本挤压
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # ⚠️ 2026-08-18 大改口径。首版 desc 写的是「单位部署算力里**芯片**拿到多少钱」，
+          # 「芯片」两个字同时可以读成"整机 BOM 里的加速器模组"和"XPU 厂商自己收到的钱"，
+          # 判读器选了前者，于是把「Helios 比竞品多近 50% HBM」判成了内容价值上升的支持。
+          # **那条证据的方向其实是相反的**：HBM 含量更高意味着同一美元机架里更大一块流向
+          # 存储厂，在 HBM 涨价周期里，XPU 厂商自己拿到的那一份反而可能被压缩。
+          # 下面把这个区分写死，让判读器只需要**分类**，不需要做那三步反向推理。
+          - key: xpu_content_per_capacity
+            desc: 每 GW / 每机架 / 每集群里，**XPU 厂商自己确认为收入的那一部分**的方向与 ASP。
+                  ⚠️ 关键区分：**整机 BOM 的内容量 ≠ XPU 厂商拿到的钱**。
+                  "本代产品用了更多 HBM / 更贵的封装 / 更多电源模块"记的是**别人**拿到的钱
+                  变多了，它对本维度是**中性甚至反向**的读数（在上游涨价周期里尤其如此），
+                  **不要**把它读成本层内容价值上升；只有明确指向本公司**单位算力收入或 ASP**
+                  的表述才算正向。
+                  买方一侧的资本开支硅含量占比也记这里（"多少比例的 capex 是 CPU/GPU
+                  这类短寿命资产"），那是本维度上少有的非自述读数。
+                  ⚠️ 但**只有占比的方向变化才算证据，单期静态占比是中性背景**——
+                  "约三分之二的 capex 是短寿命资产"是一个水平值，没说它在升还是降。
+                  同一次电话会里"已经转向短寿命资产"与"占比约三分之二"讲的是同一件事，
+                  不要当成两条独立证据。
+                  ⛔ 不记服务器 CPU 的单位与 ASP（EPYC/Vera 这类通用 CPU 不是加速器）。
+                  ⛔ 不记网络/光模块的单位内容量（L3）
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META]
+          # ⚠️ 2026-08-18 大改口径。首版只排除了"软件与非 AI 分部毛利"，没排除**合并口径**，
+          # 于是「Q3 合并毛利率降至约 74%」进来了并被判成反驳。那个数字的机制是**业务组合
+          # 稀释**——高毛利软件业务占比下降、低毛利 AI 半导体占比上升——与"XPU 在单位算力
+          # 里的价值捕获"无关。最能说明问题的是：解释这个机制的原话就在同一份纪要里、
+          # 同一个维度里、已经抽出来了（"It's the mix... between software and non-AI to the
+          # very highly, rapidly growing AI semiconductor that is just diluting gross margin"），
+          # 判读器一次看得到全部证据簇，却仍按字面把合并毛利下行判成了反驳。
+          # **根子不是它没看见，是这个数字本来就不该进这个维度。** 口径改成正列举。
+          - key: xpu_margin_retention
+            desc: 只问**加速器业务本身**的毛利率方向及其归因——上游（HBM/晶圆/封装）涨价
+                  能否向客户传导、客户是否压价、定制 vs 外售的组合对加速器毛利的影响。
+                  ⚠️ 只收能归到加速器口径的读数。以下**一律不算**，即使它们的字面是"毛利率"：
+                  公司合并毛利率 / 合并营业利润率；任何**分部级**毛利率或营业利润率
+                  （半导体分部、基础设施软件分部等——半导体分部同时含网络、无线与非 AI
+                  产品，它的毛利率变化主要由这些产品的组合驱动，与加速器无关）。
+                  判据很简单：**这个数字里混进了加速器以外的业务，就不算。**
+                  "组合稀释"与"单位价值被挤压"是两回事，混用会把前者误读成后者。
+                  厂商自己解释毛利变化来自组合而非定价时，那是**中性背景**，
+                  不是对本命题的反驳。
+                  ⛔ 不记公司层面的净利/EPS/回购——那些是 PEAD 打分卡的事，不是链式证据
+            expect_from: [NVDA, AMD, AVGO, MRVL]
+        falsifiers:
+          - 每 GW/每机架的芯片内容价值走平或下行，而部署算力仍在增长
+          - 存储/封装涨价无法传导，加速器毛利连续两个观察期下行
+          - 买方把更多单位算力预算移向电力、存储或系统集成
+          - 厂商用降价换取份额（ASP 与出货量方向背离）
+        # 2026-08-18 移除 ORCL。它是**算力建设方不是 XPU 提供方**，对"加速器自身的毛利
+        # 与单位内容价值"给不出区分性读数，但它会不停地讲**自己的合同经济学**——
+        # 「客户预付与自带硬件以相近或更好的利润率获得」「大型项目稳态 ROIC 20%+」——
+        # 这些句子反复被抽进本命题的两个维度，讲的却是 ORCL 卖云服务的利润率，
+        # 不是加速器的毛利。连续两轮用 desc 排除都没挡住，因为它字面上确实在谈"margin"。
+        # 按本文件的老规矩处理：**名单宁短勿长，声明一个说不出区分度的证人只会把覆盖率
+        # 的分母做大，看起来更差而并没有更差。** ORCL 仍留在 ①（利用率与续租是它最好的
+        # 读数）、④（具名账户）、⑤（谁为加速器出钱），只从这条命题退出。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ③ 对应知识库第三节（「流片是高成本、低容错的离散事件，一次延期把收入曲线整体
+      # 后移」）、第七节 4（迭代速度本身成为壁垒）与第十节（证据等级）。
+      # Fabless 没有晶圆厂，所以资本开支不是有信息量的指标——**代际交付时点才是**。
+      - id: xpu_generation_cadence_delivering
+        kind: common
+        statement: 新一代加速器正按公布的年度节奏兑现——量产时点未推迟，且代际的单位任务成本改进在真实负载上兑现
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # ⚠️ 2026-08-18 补两条方向判据。首轮判读把
+          # 「we'll be supply constrained throughout the entire life of Vera Rubin」
+          # 判成了**支持**，理由是"供应受限说明需求高于供给"——那是把它当成需求信号读了，
+          # 而本维度问的是**交付**。这与 xpu_content_per_capacity 上"多用 HBM = 内容价值
+          # 上升"是同一类错：表面读数与它对本命题的含义方向相反。
+          - key: xpu_generation_timeline
+            desc: 新一代加速器从流片、量产、首出货到爬坡完成的**时点**及其变化
+                  （提前 / 按时 / 推迟本身就是读数），以及供应或良率是否限制了已承诺的爬坡。
+                  ⚠️ **本维度只问交付，不问需求。** "供应受限 / supply constrained /
+                  产能跟不上"是**约束**读数，对本命题是中性偏反向——即使它同时说明需求很强，
+                  那份需求信息属于命题 ①，不在这里计分。反过来，"供应已能满足承诺的爬坡"
+                  才是正向。
+                  **厂商为保障交付而做的上游安排也记这里**——库存、对晶圆/存储/封装供应商
+                  的采购承诺与预付款、产能锁定、多年需求展望。但它们是**投入不是结果**：
+                  锁产能说明在努力保交付，不等于时点已经兑现，除非同时给出时点未推迟的
+                  表述，否则按中性处理。
+                  钱付给上游换的是自己能不能出货，与命题 ⑤ 问的「客户那笔钱是谁出的」
+                  方向相反，不要混为一谈。
+                  ⛔ 不记代工厂自身的节点良率与爬坡（那属于 L5 的 node_yield_progress
+                  与 foundry_node_capacity_addition）——这里只记**加速器产品**的时点
+            expect_from: [NVDA, AMD, AVGO, MRVL, TSM]
+          - key: xpu_effective_performance_delivery
+            desc: 代际的**有效算力与单位任务成本**改进——真实负载下的吞吐、每美元 token、
+                  每瓦性能、成本下降幅度，以及客户侧能否复现。
+                  ⚠️ **峰值 FLOPS 与规格表数字不算兑现**（知识库第六节 1：客户购买的是
+                  有效算力与单位任务成本，不是规格表）。只记落到真实负载或单位任务成本
+                  上的读数；纯参数对比留空，不要硬套
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, ORCL]
+        falsifiers:
+          - 任一家推迟量产/出货时点，或供应约束限制了已承诺的爬坡
+          - 代际的每 token 成本改进放缓，或客户在真实负载上复现不出厂商声称的改进
+          - 出现重流片、良率问题或架构级回退
+        # TSM 作 supplier：加速器的量产时点在物理上受它的节点与封装排期约束，它是这条
+        # 命题上唯一能对交付时点给出非自述读数的一方。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: TSM,  stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ④ 截面。三个维度全部 direct: true —— relative 命题只在 direct 维度上移动（闸 3），
+      # 默认 false，cloud_moat_hard_assets 曾因此 47 条证据出 0 簇。
+      #
+      # 为什么是这三维、而不是「谁的份额高」：份额分母无人披露（没有一家给出 XPU 单位
+      # 出货或美元份额的可比口径），问了只会得到各家自己定义的口径。改问**位置的三个
+      # 可观测代理**：具名账户归属、交付形态深度、资产负债表绑定。
+      #
+      # **代际交付节奏刻意不作为本条的维度**：本期四家都在年度节奏上，那是整层共享的
+      # 问题（命题 ③），在这里再开一维只会与 xpu_generation_timeline 抢同一批句子。
+      # 若将来出现某一家连续两代延期而同业按时，再把它升为截面维度。
+      - id: xpu_position_distribution
+        kind: relative
+        entities: [NVDA, AMD, AVGO, MRVL]
+        feeds_factor: moat_pricing
+        statement: XPU 层的结构位置在 NVIDIA / AMD / Broadcom / Marvell 之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # entity 归属规则见下方长注释——这一维的成败全在它身上。
+          - key: xpu_account_and_customer_mix
+            desc: 具名客户/AI 实验室的加速器部署归属与**转移方向**（谁拿到哪个账户、
+                  独家还是双供、配额比例、下一代是否续用），以及客户结构的广度与集中度
+                  （云厂/实验室/主权/企业各占多少、前几大客户占比、新客户导入、
+                  受限市场的可达性差异）。
+                  ⛔ 不记网络/光互联的客户集中度（那属于 L3 的
+                  interconnect_customer_concentration）——这里只问**加速器账户**
+            direct: true
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META, ORCL, SPCX]
+          # ⚠️ 首轮抽取实测：**全库只有 4 行**（NVDA 2、AVGO 2，AMD 与 MRVL 各 0）。
+          # 保留但列为下一轮的头号复核对象，理由与判据一并留在这里：
+          #   · 拿到的那 4 行**正是设计它时想要的对照**——"只卖芯片不做机架"与"全栈"
+          #     出现在同一维度上，这不是噪音。
+          #   · AMD 的 0 行是**语义竞争的迹象，不是它没说**：它的机架级平台在同一轮里
+          #     拿到了 8 行 xpu_generation_timeline。「机架平台已投产、本季度开始出货」
+          #     在抽取模型眼里首先是一条**时点**事实，"交付形态"这个抽象没抢过它。
+          #     这正是 packaging_allocation_pressure / equipment_process_content 的
+          #     早期形态。
+          # **下一轮若仍是个位数且 AMD/MRVL 仍为 0，就删掉它**，把交付形态并进
+          # xpu_account_and_customer_mix（客户按什么形态采纳，本就是账户归属的一部分），
+          # 不要留着它假装在比较。
+          - key: xpu_platform_scope
+            desc: 交付形态的深度——裸芯片 / 板卡 / 整机架 / 网络与软件打包，各家在系统级
+                  交付与软件栈上的投入，以及客户是否按这个形态采纳。
+                  这一维天然可比：同一个问题上「只卖芯片、不做机架」与「机架级平台」与
+                  「全栈」是三种明确的位置，而不是一条高低轴。
+                  **记的是形态本身，不是某一代产品的量产时点**——后者属于命题 ③ 的
+                  xpu_generation_timeline。
+                  ⛔ 不记网络芯片本身的竞争位置（L3）
+            direct: true
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, ORCL]
+          # ⚠️ 这里原本还有第三维 xpu_demand_creation_commitment（"谁最依赖用资产负债表
+          # 锁定需求"），**2026-08-17 首轮判读后删除**，原因值得完整留痕——它是本文件里
+          # 第一次出现的**符号歧义**型失效，与 packaging_allocation_pressure 那类
+          # "两个 key 抢同一批句子"是不同的病。
+          #
+          # 症状：同一批证据、同一份配置，连跑三次得到三个不同的截面答案
+          #   （AVGO 强/中/中，MRVL 中/无读数/无读数），而这条命题 feeds moat_pricing，
+          #   摆动会一路传到复合排名与权重。
+          # 根因：那一维的 9 行读数里塞了**三种符号相反的事实**——
+          #   · MRVL 5 行全是对**上游供应商**的预付与产能锁定（保障交付，正向）
+          #   · AVGO 3 行全是为**下游客户**设的融资载体（"a vehicle to basically have
+          #     these chips funded for these LLM players"，客户付不起、卖方垫，负向）
+          #   · ORCL 1 行是客户自付（"customer prepayments and BYOH at similar or
+          #     better margins"）——那是这条轴的**对立面**本身
+          #   判读器每次都要重新决定这堆混合物算强还是算弱，于是每次结论不同。
+          #   最能说明问题的是它写过的一句判词：MRVL"只做上游预付所以偏弱"——
+          #   **拿供应保障的证据去比客户融资的位置，那句话本身就是维度错配的证据。**
+          # 处理：按符号切成两半，各归各家，一行证据都没丢——
+          #   上游锁供应 → 命题 ③ 的 xpu_generation_timeline（desc 已明确接手）
+          #   下游垫需求 → 新命题 ⑤ xpu_revenue_funded_by_customers（符号写进 statement）
+          # **不在这里保留一个"垫得越多越弱"的维度**：那要在 desc 里人工声明符号，
+          # 已经贴近被删掉的 supports_when 反模式；且截面三维只要有一维需要声明符号，
+          # 加权就重新变成判读器的自由裁量，摆动会以另一种形式回来。
+          # 现在剩下的两维符号都无歧义：覆盖越广越强、交付形态越深越强。
+        falsifiers:
+          - 某家在具名客户的下一代部署里被替换，或从独家变成双供
+          - 某家的客户集中度上升且第一大客户份额扩大，而同业在分散
+          - 某家的系统级方案被客户拆解回裸芯片采购
+        # ⚠️ **entity 归属规则**，这一维的成败全在它身上：
+        #   · 读数说的是「这笔算力用了谁的芯片」→ entity 记**芯片方**。
+        #     例：AMD 说某实验室部署 2GW MI450 → entity=AMD（不是那个实验室）。
+        #     台账里这条现在记成了 entity=ANTHROPIC，落在 cohort 外、闸 3 直接挡掉，
+        #     重抽后会归位。
+        #   · 读数说的是客户**自研项目本身**的进展 → entity 记那家客户，那属于 L2 的
+        #     custom_silicon_program（云厂的 TPU/Trainium/MTIA 部署与对外收入在那里）。
+        # **不把 ANTHROPIC / OPENAI 声明成证人**：它们无票据、永不发声，声明只会造两个
+        # 沉默证人并把覆盖率的分母做大——「名单宁短勿长」（L5 命题注释里那条）。
+        # 它们说过的话通过芯片方或云厂的财报进来，entity 按上面的规则落到 cohort 内。
+        #
+        # 买方证人是 AVGO/MRVL 摆脱 100% 自述的唯一出路：台账里关于这两家的读数
+        # **非自述为 0 条**（NVDA 11 条、AMD 1 条）。买方点名某家时 entity 落在 cohort 内、
+        # speaker 是买方，闸 3 照过，basis 直接从 self_reported 升到 corroborated。
+        # 2026-08-18 四家一律 supplier，**刻意不分 incumbent / competitor**。
+        # 首版按 L6 ⑤ 的样子写成 NVDA=incumbent、其余=competitor，那是错的：
+        # incumbent/competitor 这对标签是**旧的 subject 式命题**留下的化石——它预设了
+        # 一个主角、把问题读成「谁在挑战 NVDA」，而截面命题被发明出来正是为了取消主角
+        # （见 schemas/chain.py 里 entities 字段那段：sk_hbm_share 之所以被改写，就是因为
+        # 「以某家为主体」让它永远只有主体自述、实践上不可证伪）。
+        # statement 已经写成中立的「如何分布」，证人表不能把主角再塞回来。
+        # 机制上两种写法的 basis 结果相同（每家读数按 entity 分组，各自 1 类立场），
+        # 差别在判读器看到的框架——而它会照着框架写理由。
+        # ⚠️ L6 的 equipment_position_distribution 仍是 incumbent/competitor 写法，
+        # 同一个问题，尚未统一。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: SPCX, stance: customer}
+          - {entity: TSM,  stance: supplier}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ⑤ 2026-08-17 由 ④ 的一个维度拆出来独立成命题。它问的是**这笔收入的钱最终由谁出**。
+      #
+      # 起草 ④ 时我拒绝过给它单立 common 命题，理由是「问『融资性需求创造是否在扩大』，
+      # 支持证据每季度自动送上门、反驳证据没人主动披露，支持N/反驳0 实践上不可证伪」。
+      # **那个理由对下面这个写法不成立，因为方向反过来了。** 写成多头假设之后：
+      #   支持证据 = 客户掏现金、客户预付、自带硬件（ORCL「customer prepayments and
+      #              BYOH at similar or better margins」就是现成的一条）
+      #   反驳证据 = 每一个新宣布的表外载体、股权、担保（AVGO 的 Apollo/Blackstone
+      #              20GW 平台、首期 350 亿就是现成的一条）
+      # **两边都有人主动说**，命题才真的可证伪。这正是 L2 capex_funding_quality 的写法，
+      # 它的注释里写着「statement 刻意写成多头假设，让证据去证伪它。首次判读即为 mixed
+      # （反驳 3 簇），那正是它的价值，不是要回避的结果」。本条大概率同样首判 mixed。
+      #
+      # **它与 L2 的 capex_funding_quality 天然成对**：那条问「买方的钱从哪来」，这条问
+      # 「卖方替买方垫了多少」。两边同时恶化才是系统性信号，只看一边会得出相反结论——
+      # 这句话已写进 config/knowledge/芯片设计.md 第八节 A 第 7 条，此前没有命题承接它。
+      #
+      # **与命题 ③ 的边界是这条命题最容易被搞混的地方，所以两边都写了**：
+      # 钱付给**上游**换的是自己能不能出货（保障交付，归 ③ 的 xpu_generation_timeline）；
+      # 钱垫给**下游**换的是客户买不买得起（创造需求，归这里）。两者方向相反，
+      # 合在一个维度里正是 ④ 那一维被删掉的原因。
+      - id: xpu_revenue_funded_by_customers
+        kind: common
+        statement: XPU 层的收入仍主要由客户自有资金支撑——厂商自身的股权、担保、承购与表外载体未成为订单的实质来源
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # ⚠️ 2026-08-18 收窄口径。首轮判读时这一维**支持侧的 3 行全部来自 ORCL**，
+          # 而且说的是「ORCL 自己的客户预付给 ORCL / 自带硬件」——那是**下一层**的资金
+          # 结构（谁出钱买 ORCL 的云服务），不是「谁出钱买 XPU」。ORCL 作为 L4 的
+          # customer 立场没错，错的是这批读数答的是另一层的问题：它们的正确落点是
+          # L2 的 capex_funding_quality（那条问的就是买方这笔 capex 由谁的钱支撑，
+          # ORCL 已在它的证人表里、且被点名为"负债驱动 capex 最典型的一家"）。
+          # 结果是本命题在**零家 XPU 厂商发声**的情况下判了 supportive，支持 2 / 反驳 1
+          # 正好压在 DECISIVE_MAJORITY_RATIO=2.0 的线上——这个结论不该被当真。
+          - key: xpu_order_funding_source
+            desc: 问的是**买加速器的这笔钱由谁出**——一端是买方自有现金、买方自筹的债务与
+                  股权、买方向 XPU 厂商支付的预付款；另一端是 XPU 厂商提供的股权投资、担保与
+                  承购安排、为客户设立的表外融资载体、对客户算力采购的信用支持。
+                  方向指的是**XPU 厂商承担比例**的升降，不是绝对金额。
+                  买方说「我们的加速器是自己出钱买的」或「由芯片供应商安排融资」时，
+                  entity 记那家 **XPU 厂商**——那是本维度上最有价值的非自述读数。
+                  ⛔ **只看链条上这一跳：买方 → XPU 厂商。** 买方自己的客户如何付钱给买方
+                  一律不记——云厂/新云口中的"客户预付合同""自带硬件（BYOH）""RPO 里多少
+                  比例是预付类交易"，讲的是**它自己的客户**在为**它的云服务**出钱，
+                  与谁为加速器出钱隔了一层。那些读数属 L2 的 capex_funding_quality。
+                  ⛔ 不记 XPU 厂商对**上游供应商**的预付与产能锁定——那是保障交付不是
+                  创造需求，方向相反，属命题 ③ 的 xpu_generation_timeline
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META, ORCL, SPCX, CRWV, NBIS]
+        falsifiers:
+          - 任一厂商为客户设立或扩大融资载体、提供担保或承购承诺
+          - 新增订单中由厂商股权/担保/表外载体支撑的比重上升
+          - 客户预付与自带硬件的比例下降
+          - 厂商对客户的股权投资出现减值，或被投客户推迟、取消采购
+        # 买方证人在这条命题上比在别处更重要：「这笔钱是谁出的」买方最清楚，而且
+        # 与 L2 capex_funding_quality 的道理一样——**钱的主人最有资格作证**。
+        # 区别是那条只留买方（供应商拿不到客户的资产负债表），这条两边都要：
+        # 表外载体与担保安排出现在**卖方**的披露里，客户自付则出现在**买方**的披露里，
+        # 两端各说各自看得见的那一半，合起来才是完整的资金来源结构。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: SPCX, stance: customer}
+          - {entity: CRWV, stance: customer}
+          - {entity: NBIS, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
 
   - key: L5_fab
     label: L5 芯片制造（Foundry+封装+存储）
@@ -1117,11 +1570,20 @@ layers:
         # 且 direct 是**逐命题**的——③ 里非 direct（那是行业级问真假），这里 direct
         # （逐家比较）。同 capacity_addition 与 datacenter_capacity_delivered 的先例：
         # 同一个词，两种语义。
+        # 2026-08-18 四家一律 supplier，与 L4 的 xpu_position_distribution 统一。
+        # incumbent/competitor 这对标签是**旧 subject 式命题留下的化石**：它预设一个主角、
+        # 把问题读成「谁在挑战 ASML」，而截面命题被发明出来正是为了取消主角
+        # （见 schemas/chain.py 的 entities 字段注释：sk_hbm_share 被改写就是因为
+        # 「以某家为主体」让它永远只有主体自述、实践上不可证伪）。
+        # statement 已经是中立的「如何分布」，证人表不该把主角再塞回来。
+        # 机制上 basis 结果相同（读数按 entity 分组，各自 1 类立场），差别在判读器看到的
+        # 框架——它会照着框架写理由。L4 改完后实测：理由从「相对 NVDA 明显偏弱」这种
+        # 挑战者叙事，变成按维度逐条陈述各家自己的位置。
         witnesses:
-          - {entity: ASML, stance: incumbent}
-          - {entity: KLAC, stance: competitor}
-          - {entity: LRCX, stance: competitor}
-          - {entity: AMAT, stance: competitor}
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
           - {entity: TSM, stance: customer}
           - {entity: MU, stance: customer}
           - {entity: TRENDFORCE, stance: regulator}

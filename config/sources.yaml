@@ -128,19 +128,35 @@ article_sources:
     doc_type: article
     cadence: weekly
     pages: 5              # 每页约 9 篇、每天发 7-9 篇 -> 覆盖约一周，周更作业够且有冗余
-    max_per_run: 12
+    # 2026-08-17 由 12 提到 16：上面的关键词集扩了约三成（L4/XPU 一组），而
+    # max_per_run 是**硬上限**——不同步抬高，新增的加速器文章会在上限处挤掉存储/封装/
+    # 光互联的文章，等于用 L4 的覆盖率换 L3/L5 的覆盖率。这是本文件里已经写过一次的
+    # 教训（"过松的过滤器会静默挤掉真正该读的文章"），只是这次挤压来自上限而不是过滤器。
+    max_per_run: 16
     min_body_chars: 800   # 与 data/source_cache.py 的 MIN_CHARS 对齐
     # 2026-08-14 补光互联词。原来这一串全是存储/封装词，**一个光的都没有**，
     # 于是 TrendForce 的光模块/CPO 报道从来没被抓过——直接后果是 L3 三条 common 命题
     # 全部卡在「立场单一（只有 supplier）」，因为唯一能提供 regulator 立场的证人
     # 被关键词挡在门外。这不是判读的问题，是取数的问题。
+    # 2026-08-17 补 L4/XPU 词。**与 2026-08-14 补光互联词那次是同一个毛病**：这串词里
+    # nvidia/marvell/broadcom/intel 早就有，但 gpu / asic / xpu / accelerator / amd
+    # **一个都没有**——于是 TrendForce 关于加速器本身（而不是它用的存储与封装）的报道
+    # 从来没被抓过。后果同样直接：L4 四家的台账里非自述读数总共只有 11 条，AVGO 与 MRVL
+    # 各 0 条，而 TrendForce 是这一层唯一现成的 regulator 立场来源。
+    # **这是取数问题，不是判读问题**——不补词，四条 L4 命题只能全部落在 self_reported。
     match: [cowos, copos, emib, packaging, hbm, dram, nand, memory, foundry,
             tsmc, wafer, samsung, sk-hynix, hynix, micron, intel, nvidia,
             nanometer, 2nm, 3nm, advanced, osat, ase, capacity, yield,
             # --- 光互联/互联层 ---
             optical, optics, transceiver, laser, photonic, photonics, cpo,
             co-packaged, npo, dsp, retimer, aec, interconnect, 800g, 1.6t, 3.2t,
-            eml, vcsel, inp, lumentum, coherent, credo, marvell, broadcom]
+            eml, vcsel, inp, lumentum, coherent, credo, marvell, broadcom,
+            # --- L4 芯片设计 / XPU ---
+            # 刻意不加 `training` 与 `ai chip`：前者在标题里几乎总是泛指"AI 训练"而不是
+            # 芯片，后者与已有的 nvidia/gpu/asic 高度重叠。按本文件自己的教训——过松的
+            # 过滤器不只是费钱，它会在 max_per_run 上限处**静默挤掉真正该读的文章**。
+            gpu, asic, xpu, accelerator, amd, instinct, blackwell, rubin,
+            tpu, trainium, inference, hyperscaler]
     # 为什么不用它的 RSS（2026-08-13 实测）：https://www.trendforce.com/news/feed/ 确实存在，
     # 带全文与结构化 tags，本该是更好的源 —— 但它的**内容冻结在 2026-07-01**，
     # 而站点每天都在发（索引页当天就有 08-13 的文章）。更阴的是它每次都带一个新的
@@ -156,7 +172,86 @@ article_sources:
     # 取不到正文记 save_document_failure —— 「读不到」和「没说」是两种状态，
     # 只报成功会让付费墙扩大伪装成「TrendForce 最近没什么可说的」。
 
+  # 2026-08-18 新增。**这条链上唯一覆盖「结构性交易」的源。**
+  # 财报讲的是已经结束的那个季度；而融资平台、对客户的股权与担保、供应长约这类事情是
+  # **公告出来的**，等它出现在 10-Q 里，命题问的那件事早就变了。
+  #
+  # 实证：`xpu_revenue_funded_by_customers`（XPU 收入由客户自有资金还是厂商垫资支撑）
+  # 只靠第一方财报时判 unknown——独立证据簇 1 < 2。答案一直在这个源里：
+  #   [2026-08-11 DJ-N]《Nvidia, Wall Street Firms Set Financing Pact -- WSJ》
+  #     Apollo/Blackstone/BlackRock/Brookfield/高盛/KKR「aim to deploy over $500 billion
+  #     of outside capital」建立「compute financing platforms」；
+  #     并且——「Apollo and Blackstone earlier this year struck a deal with **Broadcom**
+  #     to set up a similar financing platform for the chip maker's customers.」
+  # 最后那句比标题值钱：它是**对博通自述 SPV 的独立印证**，而博通在台账里非自述读数为 0。
+  # 这个源正是截面摆脱「四家自己给自己打分」的出路。
+  #
+  # **不需要订阅**：下面这些 Dow Jones 与 Briefing.com 源是有资金账户默认开通的
+  # （TWS ▸ 配置 ▸ API ▸ 新闻配置里已勾选）。Benzinga / The Fly 在同一个对话框里但要另外
+  # 订阅，未订阅时它们根本不出现在 reqNewsProviders() 里，不需要特殊处理。
+  #
+  # ⚠️ **依赖 TWS 正在运行**。取不到时按现有约定记成 unreachable 缺口（"读不到"与
+  # "没说"是两种状态），不会静默当成"最近没新闻"。
+  #
+  # stance 用 regulator：同 TRENDFORCE 的理由——WitnessStance 枚举里没有 media，
+  # 这个位置要的是"独立于任何一方的第三方"，不是"当事人的某一方"。
+  # entity 用 DOWJONES 一个口径而不按 WSJ/Barron's/MarketWatch 拆：它们同属道琼斯，
+  # 同一件事的多篇报道**本来就该算一个证据簇**（不变式 3：十篇转载是一个簇）。
+  ibkr_news:
+    label: IBKR 新闻（道琼斯/Briefing）
+    adapter: ibkr_news
+    entity: DOWJONES
+    stance: regulator
+    doc_type: article
+    cadence: daily
+    pages: 3                # 对本适配器 = 回看 3 个 3 天切片
+    max_per_run: 10
+    min_body_chars: 600     # 通讯社正文比网页文章短，阈值低于 TrendForce 的 800
+    params:
+      lookback_days: 7
+      # 只扫这些标的的新闻。**不是全市场**——按 conId 逐个请求，名单越长越慢，
+      # 且与命题无关的公司只会把未映射池做大。先覆盖 L4 四家 + 最活跃的买方。
+      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+    # 关键词比 TrendForce 那份窄且偏"交易/结构"，因为这个源的价值不在于复述基本面
+    # （那些财报里都有），而在于**财报里没有的那类事实**。
+    match: [financing, finance, guarantee, backstop, prepay, prepayment, stake,
+            equity, invest, investment, vehicle, spv, lending, loan, debt,
+            apollo, blackstone, blackrock, brookfield, kkr, "goldman sachs",
+            supply, agreement, deal, pact, partnership, commitment, order,
+            capacity, gpu, asic, xpu, accelerator, chip, hbm, foundry, capex]
+
+  # 2026-08-18 接入。**文章已经在抓了，缺的只是通往命题的那一段。**
+  # config/news_sources.yaml 的 newsletter 管线（IMAP + Substack RSS）一直在收 SemiAnalysis，
+  # 产出 47 条 research_insights。但那张表的形状是 ticker/direction/summary/quote，
+  # **没有 concept、没有 stance、没有 source_entity**，所以任何命题都够不着它。
+  # 而躺在里面的东西是这样的：
+  #   AMD |「Meta is requesting a custom cut-down version of AMD's MI450X with half the
+  #         compute and HBM, which could significantly reduce AMD's volume...」
+  # 具名客户 + 具名项目的配置变更 + 量的方向，正是 xpu_account_and_customer_mix 最缺的，
+  # 而且**不是自述**——四家自己给自己打分的截面永远产不出这种读数。
+  #
+  # 两条管线读同一篇文章，是有意的不是浪费：
+  #   research_insights   回答「这对我持有的某只票意味着什么」→ 喂 PEAD 监控
+  #   evidence_observations 回答「这条事实属于哪个命题维度」→ 喂命题印证
+  # 两个不同的问题，合并只会让一个输出把两件事都做砸。成本由 max_per_run 封顶。
+  # 重复计数不是风险：闸 1 按**说话人**聚簇，SemiAnalysis 关于同一件事说多少遍都是一簇。
+  semianalysis:
+    label: SemiAnalysis（已订阅）
+    adapter: semianalysis
+    entity: SEMIANALYSIS
+    stance: regulator     # 同 TRENDFORCE / DOWJONES：枚举里没有 media，这个位置要的是
+                          # "独立于任何一方的第三方"，不是"当事人的某一方"
+    doc_type: article
+    cadence: weekly
+    pages: 3
+    max_per_run: 4        # 单篇 2-7 万字符，会被切成多个抽取窗口，比网页文章贵得多
+    min_body_chars: 2000
+    params:
+      lookback_days: 30
+      source_match: SemiAnalysis   # newsletter 管线里若以后有别家，这里限定只取它
+    # **刻意留空 = 全读。** 与 TrendForce/IBKR 相反：那两个是宽口径信息流，需要关键词
+    # 控成本；这个是逐篇订阅的深度分析，篇篇都值得读，加过滤只会漏掉真正的增量。
+    # 见 ArticleSourceDef.match 的注释：漏一篇丢的是真证据，多读一篇只多一次模型调用。
+    match: []
+
 # --- 已评估但暂不接入 ---------------------------------------------------------
-# SemiAnalysis：它已经在 config/news_sources.yaml 的 newsletter 管线里（IMAP + Substack
-#   RSS），产出进 research_insights 表。把它**也**接到证据链上是另一个决策，涉及两条管线
-#   的职责边界（同一篇文章被两套机制读两遍意味着什么），不在文章源首版范围内。

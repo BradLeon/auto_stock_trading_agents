@@ -53,6 +53,58 @@ def test_different_period_is_a_different_observation():
     assert len(store.observations(entity="MU")) == 2
 
 
+def test_reextraction_retires_the_previous_reading_of_the_same_document():
+    """The id is deterministic over (document, entity, metric, period) — and the model
+    rarely reproduces the exact same `metric` label twice. So a re-run mostly writes NEW
+    rows beside the old ones, and both readings of the same sentence count as evidence.
+
+    That matters because `concept` is frozen at extraction time: tightening a dimension's
+    `desc` and re-extracting is the only way to fix a misclassification, and it does not
+    work if the old classification keeps voting. Measured 2026-08-18: 1829 of 5093 rows
+    in the ledger were stale re-reads, and one of them kept refuting a claim the
+    re-extraction had already corrected.
+    """
+    store = get_store()
+    old = _obs(metric="consolidated_gross_margin", concept="xpu_margin_retention")
+    store.save_observation(old)
+
+    n = store.supersede_document_observations("mu-fy26q3", "MU")
+
+    assert n == 1
+    assert store.observations(entity="MU") == []                    # gone from evidence
+    assert len(store.observations(entity="MU", include_superseded=True)) == 1  # not deleted
+
+
+def test_an_observation_the_new_run_reproduces_comes_back_to_life():
+    """Superseding runs BEFORE the insert, and `save_observation` uses INSERT OR REPLACE
+    (drop + re-insert), so `superseded_at` resets to NULL for anything the new extraction
+    still produces. What stays retired is exactly what it no longer sees."""
+    store = get_store()
+    store.save_observation(_obs(metric="kept"))
+    store.save_observation(_obs(metric="dropped"))
+
+    store.supersede_document_observations("mu-fy26q3", "MU")
+    store.save_observation(_obs(metric="kept"))                     # the re-run's output
+
+    live = {r["metric"] for r in store.observations(entity="MU")}
+    assert live == {"kept"}
+    assert len(store.observations(entity="MU", include_superseded=True)) == 2
+
+
+def test_a_failed_reextraction_must_not_retire_good_evidence(monkeypatch):
+    """Superseding is only safe on success. If a re-run errors or returns nothing and we
+    had already retired the previous rows, one bad model call would silently empty a
+    claim's evidence — and "no evidence" reads as `unknown`, not as an error."""
+    store = get_store()
+    store.save_observation(_obs())
+    monkeypatch.setattr(observer, "extract", lambda *a, **k: ([], "模型调用失败"))
+
+    out = observer.observe_document("MU", "mu-fy26q3", "任意正文", store=store)
+
+    assert out["failure"]
+    assert len(store.observations(entity="MU")) == 1                # untouched
+
+
 def test_evidence_span_is_required():
     """An observation carrying only the model's paraphrase cannot be re-checked."""
     with pytest.raises(ValueError):
@@ -649,3 +701,25 @@ def test_rejected_document_is_recorded_with_its_url(tmp_path, monkeypatch):
     assert bad and bad[0]["ok"] == 0
     assert "tavily:bad-url" in bad[0]["source_url"]
     assert not store.has_document("SKHY", "FY26Q2", "transcript")
+
+
+def test_a_bare_fragment_is_not_re_checkable_evidence(monkeypatch):
+    """Verbatim is necessary but not sufficient. Measured in the live ledger: spans of
+    `China 26%`, `going to mid-40s`, `up 175% this year` — no subject, no period. They
+    read as evidence downstream and cannot be verified against anything."""
+    monkeypatch.setattr(observer, "run_structured", lambda *a, **k: _view([
+        _row(metric="china_share", evidence_span="China 26%"),
+        _row(metric="kept", evidence_span="2027 年产能大部分已预售"),
+    ]))
+    obs, _ = observer.extract("MU", "d1", "正文", now=NOW)
+    assert [o.metric for o in obs] == ["kept"]
+
+
+def test_the_span_floor_does_not_hold_chinese_to_a_stricter_bar():
+    """A Han character carries about twice what a Latin one does, so a flat character
+    count would silently make Chinese sources harder to admit than English ones —
+    `2027 年产能大部分已预售` is 13 characters and a complete, checkable sentence."""
+    from ats.agents.evidence.observer import MIN_SPAN_WEIGHT, _span_weight
+
+    assert _span_weight("2027 年产能大部分已预售") >= MIN_SPAN_WEIGHT
+    assert _span_weight("up 175% this year") < MIN_SPAN_WEIGHT

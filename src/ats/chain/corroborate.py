@@ -430,6 +430,15 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
                             f"（{len(minority)} 簇，反向读数已保留）")
     if assessment.silent_witnesses:
         assessment.note += f" · 未发声：{','.join(assessment.silent_witnesses)}"
+    # An unjudged cluster and a genuinely neutral one are the same row downstream, so a
+    # partial adjudication does not look like a failure — it looks like a claim with
+    # less support than it has. Measured 2026-08-18: 11 of 17 clusters came back
+    # unjudged and the weekly output showed only the reduced score, with nothing to
+    # distinguish it from a claim whose evidence really was that thin.
+    unjudged = sum(1 for j in judgements if j.reason == "未获判读")
+    if unjudged:
+        assessment.note += (f" · ⚠️ {unjudged}/{len(judgements)} 簇未获判读"
+                            f"（判读器本轮未返回，已按中性处理——这是缺口不是中性结论）")
     return assessment
 
 

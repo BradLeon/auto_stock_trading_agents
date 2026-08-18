@@ -42,7 +42,40 @@ entities:
   # canonical 取 GOOG：账户实际持有的是 C 类。
   GOOG:
     name: Alphabet
-    aliases: [GOOGL, GOOG.L, ALPHABET, GOOGLE]
+    # 2026-08-18 补 GOOGLE CLOUD / GCP：第三方文章按业务线称呼，而不是按上市主体。
+    # 台账里这个写法有 17 条读数，全部够不着任何命题——corroborate.assess_layer 是
+    # **按 entity 取行**的，一个折叠不了的名字等于这批证据不存在。
+    aliases: [GOOGL, GOOG.L, ALPHABET, GOOGLE, "GOOGLE CLOUD", GCP]
+    market: US
+    filings: sec
+
+  # 2026-08-18 新登记。MSFT 此前**根本不在这个注册表里**——它是 observe 名单成员、
+  # 是 L2/L4 多条命题的证人，但第三方源写 "MICROSOFT" 时折叠不到 MSFT，18 条读数
+  # 因此够不着任何命题。自家财报走 symbol=MSFT 那条路所以一直没暴露这个洞。
+  MSFT:
+    name: Microsoft
+    aliases: [MICROSOFT, "MICROSOFT CORPORATION", AZURE]
+    market: US
+    filings: sec
+
+  # 2026-08-18 新登记。它在 L2 的 tickers 里（标着 TODO 待确认），既非 target 也非
+  # observe，所以没有第一方财报；但它在**别人的**新闻里频繁出现（NVDA 的算力承诺、
+  # 实验室的部署去向）。登记只为让这些第三方读数能折叠到一个稳定身份。
+  CRWV:
+    name: CoreWeave
+    aliases: [COREWEAVE, "CORE WEAVE"]
+    market: US
+    filings: sec
+
+  # 2026-08-18 补。与 CRWV 同类的 neocloud。
+  # ⚠️ **这两家的证据价值是有方向性的，不要当成通用买方证人**：它们的机队几乎全绑
+  # 英伟达供应链，所以它们说的话对 NVDA 是有力的侧面佐证（客户视角的利用率、租金、
+  # 采购与融资安排），但对 ASIC 路线（AVGO/MRVL）参考有限——它们本来就不买定制芯片，
+  # 沉默不代表 ASIC 不行。截面判读时要记得这个不对称，别把"neocloud 没提 ASIC"
+  # 读成对 ASIC 的反向证据。
+  NBIS:
+    name: Nebius Group
+    aliases: [NEBIUS, "NEBIUS GROUP", YANDEX.NV]
     market: US
     filings: sec
 

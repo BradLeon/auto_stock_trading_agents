@@ -80,37 +80,90 @@ def build_context(claim: ClaimDef, clusters: list[EvidenceCluster]) -> str:
     )
 
 
+# A judged fraction below this is treated as a failed call rather than as a set of
+# neutral findings, and the call is made once more. Measured 2026-08-18: one run of a
+# 17-cluster claim came back with 7 judgements (one of them mis-keyed), so 11 clusters
+# defaulted to neutral — and an immediate re-run of the identical prompt returned all 17
+# with every key correct. The shortfall is flake, not capacity: the prompt was 11k chars,
+# and a 16-cluster claim in the same batch was judged in full.
+#
+# Retrying is the right response precisely BECAUSE it is flake. Switching to a stronger
+# model would not help — the same model, same context, same prompt already succeeds.
+MIN_JUDGED_FRACTION = 0.8
+
+
+def _resolve_key(raw: str, by_key: dict, clusters: list[EvidenceCluster]) -> EvidenceCluster | None:
+    """Match a returned cluster id, tolerating a truncated tail — but never ambiguity.
+
+    Keys are `speaker|entity|concept|direction|primary`, and the observed flake was the
+    model echoing `AMD|AMD|xpu_order_visibility|up` — correct, but missing the fifth
+    segment. Dropping that judgement threw away a real reading over a formatting slip.
+
+    Prefix matching is only accepted when it identifies exactly ONE cluster. Two clusters
+    can differ solely in that last segment (the same speaker on the same dimension, once
+    in a filing and once in a press summary), and silently assigning a judgement to the
+    wrong one would be worse than not using it at all.
+    """
+    if raw in by_key:
+        return by_key[raw]
+    hits = [c for c in clusters if c.key.startswith(f"{raw}|")]
+    return hits[0] if len(hits) == 1 else None
+
+
 def judge(claim: ClaimDef, clusters: list[EvidenceCluster]) -> list[ClusterJudgement]:
     """Adjudicate every cluster. Never raises — degrades to all-neutral.
 
     Degrading to neutral rather than to a guess is the safe direction: a failed
     adjudication leaves the claim `unknown` for want of evidence, which is honest,
     whereas defaulting to a polarity would manufacture a verdict out of an outage.
+
+    What that safety costs, and why the retry above exists: an unjudged cluster and a
+    genuinely neutral one are the same row downstream. A partial response therefore does
+    not look like a failure, it looks like a claim with less support than it has. The
+    count of unjudged clusters is returned to the caller (see `corroborate`) so the
+    shortfall reaches the reader instead of dissolving into the verdict.
     """
     if not clusters:
         return []
-    try:
-        view = run_structured("evidence_adjudicator", AdjudicationView,
-                              build_context(claim, clusters),
-                              skill_slug="evidence-adjudicator")
-    except Exception as exc:  # noqa: BLE001 - one claim must not break the run
-        log.warning("adjudicator failed for claim %s: %s", claim.id, exc)
-        view = None
 
-    by_key = {c.key: c for c in clusters}
     seen: dict[str, ClusterJudgement] = {}
-    for item in (getattr(view, "judgements", None) or []):
-        cluster = by_key.get(item.cluster_key)
-        if cluster is None:
-            log.info("adjudicator: unknown cluster id %r on claim %s — dropped",
-                     item.cluster_key, claim.id)
-            continue                      # it may not invent clusters
-        seen[cluster.key] = ClusterJudgement(
-            cluster_key=cluster.key, polarity=item.polarity, reason=(item.reason or "").strip(),
-            speaker=cluster.speaker, concept=cluster.concept, stance=cluster.stance,
-            primary=cluster.primary, observation_ids=cluster.observation_ids)
+    for attempt in (1, 2):
+        try:
+            view = run_structured("evidence_adjudicator", AdjudicationView,
+                                  build_context(claim, clusters),
+                                  skill_slug="evidence-adjudicator")
+        except Exception as exc:  # noqa: BLE001 - one claim must not break the run
+            log.warning("adjudicator failed for claim %s (attempt %d): %s",
+                        claim.id, attempt, exc)
+            view = None
 
-    # Anything unjudged stays neutral, and says so. Silence must not read as agreement.
+        by_key = {c.key: c for c in clusters}
+        for item in (getattr(view, "judgements", None) or []):
+            cluster = _resolve_key(item.cluster_key, by_key, clusters)
+            if cluster is None:
+                log.info("adjudicator: unresolvable cluster id %r on claim %s — dropped",
+                         item.cluster_key, claim.id)
+                continue                  # it may not invent clusters
+            seen[cluster.key] = ClusterJudgement(
+                cluster_key=cluster.key, polarity=item.polarity,
+                reason=(item.reason or "").strip(), speaker=cluster.speaker,
+                concept=cluster.concept, stance=cluster.stance,
+                primary=cluster.primary, observation_ids=cluster.observation_ids)
+
+        if len(seen) >= MIN_JUDGED_FRACTION * len(clusters):
+            break
+        if attempt == 1:
+            log.warning("adjudicator: %s judged %d/%d clusters — retrying",
+                        claim.id, len(seen), len(clusters))
+
+    unjudged = len(clusters) - len(seen)
+    if unjudged:
+        log.warning("adjudicator: %s left %d/%d cluster(s) unjudged after retry",
+                    claim.id, unjudged, len(clusters))
+
+    # Anything still unjudged stays neutral, and says so. Silence must not read as
+    # agreement — but it must not read as a considered "neutral" either, which is why
+    # the reason is explicit and the count is surfaced on the assessment.
     for c in clusters:
         seen.setdefault(c.key, ClusterJudgement(
             cluster_key=c.key, polarity="neutral", reason="未获判读",

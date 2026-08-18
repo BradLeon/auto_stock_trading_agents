@@ -563,3 +563,31 @@ def test_a_single_vantage_verdict_names_the_filers_it_rests_on():
     assert "仅自述" in a.note and "customer" in a.note
     assert "4 个独立说话人" in a.note
     assert all(s in a.note for s in ("GOOG", "MSFT", "AMZN", "META"))
+
+
+def test_a_truncated_cluster_id_still_resolves_when_unambiguous():
+    """Keys are `speaker|entity|concept|direction|primary`. Observed 2026-08-18: the
+    adjudicator echoed `AMD|AMD|xpu_order_visibility|up` — correct but missing the fifth
+    segment — and the judgement was discarded over a formatting slip."""
+    from ats.agents.evidence.adjudicator import _resolve_key
+    from ats.schemas.chain import EvidenceCluster
+
+    c = EvidenceCluster(key="AMD|AMD|xpu_order_visibility|up|primary", speaker="AMD",
+                        entity="AMD", concept="xpu_order_visibility", direction="up")
+    by_key = {c.key: c}
+    assert _resolve_key("AMD|AMD|xpu_order_visibility|up|primary", by_key, [c]) is c
+    assert _resolve_key("AMD|AMD|xpu_order_visibility|up", by_key, [c]) is c
+
+
+def test_an_ambiguous_truncated_id_is_refused_rather_than_guessed():
+    """Two clusters can differ only in that last segment — the same speaker on the same
+    dimension, once in a filing and once in a press summary. Assigning a judgement to
+    the wrong one is worse than not using it."""
+    from ats.agents.evidence.adjudicator import _resolve_key
+    from ats.schemas.chain import EvidenceCluster
+
+    a = EvidenceCluster(key="DJ|NVDA|c|up|primary", speaker="DJ", entity="NVDA",
+                        concept="c", direction="up", primary=True)
+    b = EvidenceCluster(key="DJ|NVDA|c|up|secondary", speaker="DJ", entity="NVDA",
+                        concept="c", direction="up", primary=False)
+    assert _resolve_key("DJ|NVDA|c|up", {x.key: x for x in (a, b)}, [a, b]) is None

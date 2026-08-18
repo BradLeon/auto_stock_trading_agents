@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -282,8 +283,30 @@ def canonical_entity(symbol: str) -> str:
     000660.KS, and one earnings call filed under three ids would read as three
     independent witnesses — defeating the stance-diversity gate from the inside, which
     is the least visible way for it to fail. Unknown symbols pass through unchanged.
+
+    The `NAME (TICKER)` fallback exists because third-party prose names companies the
+    way a journalist does, not the way a filing does. Measured after wiring up the news
+    and newsletter sources (2026-08-18): `NVIDIA (NVDA)`, `MICRON (MU)`,
+    `APPLIED MATERIALS (AMAT)` all arrived as fresh unresolvable entities — and an
+    entity that resolves to nothing is not merely untidy, it is unreachable:
+    `corroborate.assess_layer` gathers rows BY entity, so those readings can never enter
+    any claim. Enumerating one alias per phrasing loses that race by construction; the
+    parenthesised ticker is the publisher already telling us the answer.
     """
-    return _alias_index().get((symbol or "").upper(), symbol)
+    key = (symbol or "").upper().strip()
+    idx = _alias_index()
+    if key in idx:
+        return idx[key]
+    # "NVIDIA (NVDA)" -> try NVDA, then the bare name. Only a trailing parenthetical of
+    # ticker-shaped text; anything else is left alone rather than guessed at.
+    m = re.fullmatch(r"(.+?)\s*\(([A-Z0-9.\-]{1,12})\)", key)
+    if m:
+        name, ticker = m.group(1).strip(), m.group(2)
+        for cand in (ticker, name):
+            if cand in idx:
+                return idx[cand]
+        return ticker            # unregistered, but at least stable across phrasings
+    return symbol
 
 
 def entity_meta(symbol: str) -> dict:

@@ -36,6 +36,28 @@ _STANCES = set(get_args(WitnessStance))
 _DIRECTIONS = set(get_args(Direction))
 
 MAX_DOC_CHARS = 60_000       # observe-tier budget: a fraction of a full PEAD score
+# Shortest span that can still be re-checked, measured in CJK-WEIGHTED characters (a
+# Han character carries roughly twice what a Latin one does, and a flat count would
+# quietly hold Chinese sources to a stricter bar than English ones — `2027 年产能大部分
+# 已预售` is 13 characters and a complete, checkable statement).
+#
+# This is a re-checkability bar, not a quality bar. What it stops is the degenerate tail
+# measured in the live ledger — `China 26%`, `going to mid-40s`, `up 175% this year` —
+# spans with no subject and no period that read as evidence downstream and cannot be
+# verified against anything.
+#
+# ⚠️ It does NOT solve the case that prompted it. `protect its 75% gross profit margin`
+# weighs 34 and survives, yet it is unusable for the same reason: no subject, no period,
+# and a framing ("needs to PROTECT") that arguably reverses its meaning. No threshold
+# both keeps the 13-character Chinese sentence above and drops that 34-character English
+# fragment — they are separated by whether the quote is a SENTENCE, not by how long it
+# is. Fixing that belongs in the extraction prompt, not here.
+MIN_SPAN_WEIGHT = 20
+
+
+def _span_weight(s: str) -> int:
+    """Length with CJK counted double — see MIN_SPAN_WEIGHT."""
+    return sum(2 if "一" <= ch <= "鿿" else 1 for ch in s)
 
 
 def _clip(text: str, limit: int = MAX_DOC_CHARS) -> str:
@@ -601,9 +623,12 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
     out: list[Observation] = []
     for v in rows:
         span = (v.evidence_span or "").strip()
-        if not span:
-            log.warning("evidence %s: dropped row without evidence_span (metric=%s)",
-                        symbol, v.metric)
+        if _span_weight(span) < MIN_SPAN_WEIGHT:
+            # Blank was always dropped; a bare fragment now is too. Verbatim is
+            # necessary but not sufficient — the invariant is that evidence can be
+            # RE-CHECKED, and `China 26%` cannot be checked against anything.
+            log.warning("evidence %s: dropped row with unusable span (%r, metric=%s)",
+                        symbol, span[:40], v.metric)
             continue
         if v.observation_type not in _TYPES or v.stance not in _STANCES:
             # Do not silently normalise: a model that invents an enum value is not
@@ -658,5 +683,19 @@ def observe_document(symbol: str, document_id: str, text: str, *, source_url: st
         store.save_observation_failure(ObservationFailure(
             document_id=document_id, entity=symbol.upper(), reason=failure, at=now))
         return {"symbol": symbol, "saved": 0, "new": 0, "failure": failure}
+    # Retire this speaker's PREVIOUS reading of this document before writing the new
+    # one. Only on success, and only once we actually have rows: a failed or empty
+    # extraction must never be able to silently retire good evidence.
+    #
+    # This is what makes a dimension re-definition take effect. `concept` is frozen at
+    # extraction time, so tightening a `desc` does nothing to rows already stored — and
+    # without superseding, the old classification keeps voting alongside the new one.
+    # Re-produced observations reset to live automatically (save_observation uses
+    # INSERT OR REPLACE), so what stays retired is exactly what this run no longer sees.
+    retired = store.supersede_document_observations(document_id, symbol, at=now)
     new = sum(1 for o in obs if store.save_observation(o))
-    return {"symbol": symbol, "saved": len(obs), "new": new, "failure": ""}
+    if retired:
+        log.info("evidence %s: superseded %d prior observation(s) of %s",
+                 symbol, retired, document_id)
+    return {"symbol": symbol, "saved": len(obs), "new": new,
+            "superseded": retired, "failure": ""}

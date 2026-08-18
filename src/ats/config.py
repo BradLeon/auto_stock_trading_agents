@@ -511,7 +511,11 @@ def load_sector_config(name: str = "ai_hardware"):
     # 半导体设备.md 改写后九份笔记合计 22.9k，只剩 4.5% 余量，而**截断是静默的**且切的是
     # 拼接顺序最后一份（L6）的尾部——正好是「常见误判」那节。上限只封顶不设目标，
     # 提高它本身不增加 prompt 长度。
-    r.setdefault("kb_criteria_chars", 32000)
+    # 2026-08-18 从 32000 提到 44000：芯片设计.md 改写后九份已实测到 30.7k（上一条注释里
+    # 的 22.9k 当天就被那次改写作废了），余量只剩 4%；再挂上新增的 L1 Token经济.md（6.0k）
+    # 会到 36.7k，**正好复现上一次要避免的那次静默截断**。同一个坑第二次踩，说明单靠注释
+    # 里的一个数字盯不住——真正的护栏是 assemble._kb_criteria 里那条超限 warning。
+    r.setdefault("kb_criteria_chars", 44000)
     r.setdefault("insights_per_ticker", 3)
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)

@@ -17,6 +17,22 @@ layers:
     # xAI 已于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市并出财报，
     # 所以它不再是「无票据」——已登记为 entities.yaml 的 SPCX 并进入 L2 各命题的证人表。
     private: [OpenAI, Anthropic]             # 无票据，供 LLM 参考需求侧
+    structure_notes:
+      Token经济: config/knowledge/Token经济.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+    # 2026-08-18 人工新增。此前 docs/KNOWLEDGE.md 写着「L1 不写」，理由是只有一只票、
+    # cross_section._zscores 需要 ≥2 个样本——**理由本身没错，但它答的是另一个问题**。
+    # 单样本确实让本层的截面 z 分恒为 0，所以这份笔记不改变任何权重；它有两个别的用途：
+    #   ① `SectorContext.kb_criteria` 是**各层 structure_notes 的汇总**，sector_analyst
+    #      读的是全部九份。L2–L6 的景气叙事最终都挂在「本层能不能把算力卖成链外收入」
+    #      上，而此前那个前提**没有任何一份笔记写过**——它只存在于六份研报的散装叙述里。
+    #   ② 本层主要玩家未上市（见 private），判读只能靠对手方披露。「怎么读二手证人」
+    #      本身就是判据，写在笔记的第四节最后一条。
+    # 同时它消掉 chain/kb_review.py 的①盲区标记（has_kb = bool(layer.structure_notes)）。
+    #
+    # 文件名取「Token经济」而不是「AI应用」是**为了 kb_audit 的越层检测**：那个检测器用
+    # `if stem in why` 判断某层的理由里有没有引用它没拿到的笔记，而「AI应用」四个字会在
+    # 别层理由里自然出现（「AI应用需求」），会造出一串假阳性。stem 必须够独特。
 
   - key: L2_cloud
     label: L2 云服务层（算力租用）

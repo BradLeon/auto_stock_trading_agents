@@ -33,6 +33,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ...data import industry
+
 log = logging.getLogger("ats.agents.sector.kb_perturb")
 
 
@@ -42,47 +44,62 @@ class ArmScores:
     scores: dict[str, tuple[float, float, str]]     # symbol -> (tenor, moat, rationale)
 
 
-def _split_sections(text: str) -> tuple[str, str, str]:
-    """(before §三, §三 body, from §四 on). Empty middle when the note has no §三."""
-    if "## 三" not in text:
-        return text, "", ""
-    head, rest = text.split("## 三", 1)
-    if "## 四" in rest:
-        body, tail = rest.split("## 四", 1)
-        return head, "## 三" + body, "## 四" + tail
-    return head, "## 三" + rest, ""
+def _rewrite_criteria(text: str, fn) -> str:
+    """Apply `fn` to each criteria section, leaving the rest of the note byte-identical.
+
+    Sections are located by heading meaning (`industry.criteria_spans`), NOT by section
+    number. The previous version split on the literal "## 三", which quietly made both
+    perturbations no-ops on the two notes that outgrew the four-section template:
+    `ablate` deleted 技术曲线 while writing a heading claiming the criteria were gone,
+    and `poison` found no numbered items and returned the note unchanged — a control arm
+    labelled 投毒, whose null result reads as "the criteria are not load-bearing".
+    That is the one wrong answer this whole test exists to avoid.
+    """
+    spans = industry.criteria_spans(text)
+    if not spans:
+        return text
+    out, prev = [], 0
+    changed = False
+    for a, b in spans:
+        new = fn(text[a:b])
+        changed = changed or new != text[a:b]
+        out += [text[prev:a], new]
+        prev = b
+    out.append(text[prev:])
+    return "".join(out) if changed else text
 
 
 def ablate(text: str) -> str:
     """Drop the moat criteria entirely, leaving value chain + tech curve + pitfalls."""
-    head, _, tail = _split_sections(text)
-    if not tail and "## 三" not in text:
-        return text
-    return (head + "## 三、护城河判据\n\n（本节已移除——消融测试）\n\n" + tail)
+    def strip(section: str) -> str:
+        heading = section.split("\n", 1)[0]      # keep the note's own heading wording
+        return heading + "\n\n（本节已移除——消融测试）\n\n"
+
+    return _rewrite_criteria(text, strip)
 
 
 def poison(text: str) -> str:
-    """Reverse the numbered criteria in §三, and flip the hard/soft labels with them.
+    """Reverse the numbered criteria, and flip the hard/soft labels with them.
 
     Reversing rather than rewriting keeps the vocabulary identical, so the arms differ
     in ORDER and nothing else. A model that is genuinely reading the ordering must
     reorder; a model reciting its prior will produce the same ranking either way — and
     that is the outcome worth knowing about.
     """
-    head, mid, tail = _split_sections(text)
-    if not mid:
-        return text
-    items = re.split(r"(?m)^(?=\s*\d+\.\s)", mid)
-    lead, numbered = items[0], [i for i in items[1:] if i.strip()]
-    if len(numbered) < 2:
-        return text
-    flipped = []
-    for n, item in enumerate(reversed(numbered), start=1):
-        item = re.sub(r"(?m)^\s*\d+\.", f"{n}.", item, count=1)
-        item = item.replace("**最硬**", "\x00").replace("**最软**", "**最硬**")
-        item = item.replace("\x00", "**最软**")
-        flipped.append(item)
-    return head + lead + "".join(flipped) + tail
+    def reverse(section: str) -> str:
+        items = re.split(r"(?m)^(?=\s*\d+\.\s)", section)
+        lead, numbered = items[0], [i for i in items[1:] if i.strip()]
+        if len(numbered) < 2:
+            return section
+        flipped = []
+        for n, item in enumerate(reversed(numbered), start=1):
+            item = re.sub(r"(?m)^\s*\d+\.", f"{n}.", item, count=1)
+            item = item.replace("**最硬**", "\x00").replace("**最软**", "**最硬**")
+            item = item.replace("\x00", "**最软**")
+            flipped.append(item)
+        return lead + "".join(flipped)
+
+    return _rewrite_criteria(text, reverse)
 
 
 def control(text: str) -> str:

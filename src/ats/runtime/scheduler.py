@@ -667,6 +667,11 @@ def _cross_section_weekly(name: str) -> None:
     # against a site whose template can move), so it gets its own guard.
     try:
         from ..chain import articles as chain_articles
+        from ..data import research as research_data
+
+        # One acquisition stage feeds both PEAD and chain consumers. The adapter for
+        # subscribed research reads the shared catalog and never reconnects to IMAP.
+        research_data.ingest_configured(store=get_store())
 
         for sid, stat in chain_articles.collect_articles(get_store()).items():
             if stat.unreachable:

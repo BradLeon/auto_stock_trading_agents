@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from ..schemas.chain import ArticleRef, ArticleSourceDef
 
 log = logging.getLogger("ats.chain.articles")
+PROCESSOR_VERSION = "chain-observer-v1"
 
 
 @dataclass
@@ -127,17 +128,21 @@ def _wanted(ref: ArticleRef, source: ArticleSourceDef) -> bool:
 
 
 def _seen_document_ids(store, entity: str) -> set[str]:
-    """Every document already on file for this publisher, successes AND failures.
+    """Documents this consumer spent work on, plus known-unreadable source failures.
 
     One query per run rather than one per article, and `ok_only=False` on purpose: a
     known-unreadable article must stay skipped, or the paywall gets re-probed weekly.
     """
     try:
+        seen = store.processed_document_ids("chain", PROCESSOR_VERSION, entity=entity)
         rows = store.documents(entity=entity, ok_only=False, limit=5000)
     except Exception as exc:  # noqa: BLE001
         log.warning("articles: could not read document inventory for %s — %s", entity, exc)
         return set()
-    return {r["document_id"] for r in rows if r.get("document_id")}
+    # A failed body fetch has no accepted content version, so it cannot have a normal
+    # processing row. Keep those ids in the negative cache exactly as before.
+    seen |= {r["document_id"] for r in rows if r.get("document_id") and not r.get("ok")}
+    return seen
 
 
 def collect_articles(store, *, source_ids: set[str] | None = None,
@@ -199,11 +204,22 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
                     at=now.isoformat())
                 continue
 
-            doc = source_cache.store(source.entity, ref.slug, source.doc_type, body,
-                                     source=source.adapter, source_url=ref.url, now=now)
-            if doc is not None:
-                store.save_document(doc)           # "we already paid for this one"
-                document_id = doc.document_id
+            # Managed sources such as subscribed research were persisted by the shared
+            # ingestion stage before this consumer ran. Do not rewrite their catalog
+            # metadata; web-only sources still enter the store here.
+            if store.latest_document_version(document_id) is None:
+                doc = source_cache.store(source.entity, ref.slug, source.doc_type, body,
+                                         source=source.adapter, source_url=ref.url, now=now,
+                                         min_chars=1)  # source-specific guard already ran above
+                if doc is not None:
+                    store.save_document(doc)       # mark before the expensive model call
+                    document_id = doc.document_id
+
+            version_id = store.begin_document_processing(
+                document_id, "chain", PROCESSOR_VERSION)
+            if not version_id:
+                # Another run/version already paid for this exact processing step.
+                continue
 
             # period="" on purpose. In observer.extract it is a per-ROW fallback
             # (`period=(v.period or period or "")`), so passing the slug would stamp it
@@ -214,6 +230,10 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
             stat.ingested += 1
             stat.observations += res.get("new", 0)
             stat.titles.append(ref.title or ref.slug)
+            store.finish_document_processing(
+                version_id, "chain", PROCESSOR_VERSION,
+                ok=not bool(res.get("failure")), outputs=res.get("new", 0),
+                note=res.get("failure", ""))
             if res.get("failure"):
                 log.info("articles: %s extraction failed for %s — %s",
                          source.id, ref.slug, res["failure"])

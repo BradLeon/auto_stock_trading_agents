@@ -166,9 +166,13 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
     for source in load_sources():
         if concepts and not (set(source.concepts) & concepts):
             continue
+        store.register_data_source(source, kind="structured", at=now)
+        run_id = store.begin_ingestion(source.id, kind="structured", at=now)
         points = fetch(source, lookback_months=lookback_months)
         if not points:
             out[source.id] = -1
+            store.finish_ingestion(run_id, status="unreachable", note="本轮取不到数据",
+                                   at=now)
             try:
                 store.save_document_failure(source.entity, "", "series",
                                             source=source.adapter,
@@ -176,6 +180,7 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
             except Exception:  # noqa: BLE001
                 pass
             continue
+        raw_saved = store.save_measurement_points(source, points, fetched_at=now)
         saved = 0
         for obs in to_observations(source, points, now=now):
             for concept in source.concepts:
@@ -184,10 +189,15 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
                 # period), and two concepts off one print must not collide.
                 row = row.model_copy(update={"id": Observation.deterministic_id(
                     row.document_id, row.entity, f"{row.metric}:{concept}", row.period)})
-                if store.save_observation(row):
+                if store.save_observation(
+                        row, projection_profile="structured_evidence",
+                        projection_version="v1"):
                     saved += 1
         out[source.id] = saved
-        log.info("sources: %s -> %d new observations", source.id, saved)
+        store.finish_ingestion(run_id, status="succeeded", discovered=len(points),
+                               accepted=raw_saved, at=now)
+        log.info("sources: %s -> %d raw point vintages, %d new observations",
+                 source.id, raw_saved, saved)
     return out
 
 

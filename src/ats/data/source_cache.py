@@ -52,6 +52,12 @@ class CachedDoc:
     fetched_at: str = ""
     sha256: str = ""
     from_cache: bool = False
+    # Exact immutable bytes for lineage. `path` remains the human-friendly latest
+    # location so all existing readers keep working.
+    version_path: Path | None = None
+    external_id: str = ""
+    title: str = ""
+    published_at: str = ""
 
     @property
     def document_id(self) -> str:
@@ -83,10 +89,15 @@ def path_for(symbol: str, period: str, doc_type: str) -> Path | None:
     return base / sym / f"{sym}-{_slug(period) or 'unknown'}-{_slug(doc_type)}.md"
 
 
+def _version_path(path: Path, digest: str) -> Path:
+    """Hidden immutable sibling; keeps the visible Obsidian folder uncluttered."""
+    return path.parent / ".versions" / f"{path.stem}.{digest[:16]}{path.suffix}"
+
+
 # --------------------------------------------------------------------------- #
 # Read
 # --------------------------------------------------------------------------- #
-def load(symbol: str, period: str, doc_type: str) -> CachedDoc | None:
+def load(symbol: str, period: str, doc_type: str, *, min_chars: int = MIN_CHARS) -> CachedDoc | None:
     """Return the cached document, or None. Never touches the network."""
     from ..config import canonical_entity
 
@@ -100,14 +111,17 @@ def load(symbol: str, period: str, doc_type: str) -> CachedDoc | None:
         log.warning("source_cache: unreadable %s (%s)", p, exc)
         return None
     meta, body = _split_frontmatter(raw)
-    if len(body.strip()) < MIN_CHARS:
+    if len(body.strip()) < min_chars:
         return None
+    digest = meta.get("sha256", "") or hashlib.sha256(body.encode("utf-8")).hexdigest()
+    version_path = _version_path(p, digest)
     return CachedDoc(symbol=sym, period=meta.get("period", period),
                      doc_type=meta.get("doc_type", doc_type), text=body,
                      path=p, source=meta.get("source", "manual"),
                      source_url=meta.get("source_url", ""),
                      fetched_at=meta.get("fetched_at", ""),
-                     sha256=meta.get("sha256", ""), from_cache=True)
+                     sha256=digest, from_cache=True,
+                     version_path=version_path if version_path.is_file() else p)
 
 
 def _split_frontmatter(raw: str) -> tuple[dict, str]:
@@ -136,13 +150,15 @@ def _split_frontmatter(raw: str) -> tuple[dict, str]:
 # Write
 # --------------------------------------------------------------------------- #
 def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "",
-          source_url: str = "", now: datetime | None = None) -> CachedDoc | None:
+          source_url: str = "", now: datetime | None = None,
+          external_id: str = "", title: str = "",
+          published_at: str = "", min_chars: int = MIN_CHARS) -> CachedDoc | None:
     """Write a document to the cache. Callers must have run the guards first."""
     from ..config import canonical_entity
 
     sym = canonical_entity(symbol).upper()
     body = (text or "").strip()
-    if len(body) < MIN_CHARS:
+    if len(body) < min_chars:
         log.info("source_cache: refusing to cache %s %s — only %d chars",
                  sym, doc_type, len(body))
         return None
@@ -164,12 +180,19 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
         "---",
         "",
     ])
+    rendered = header + body
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(header + body, encoding="utf-8")
+    version_path = _version_path(p, digest)
+    version_path.parent.mkdir(parents=True, exist_ok=True)
+    if not version_path.exists():
+        version_path.write_text(rendered, encoding="utf-8")
+    # The visible path is the latest accepted version for humans and legacy readers.
+    p.write_text(rendered, encoding="utf-8")
     log.info("source_cache: stored %s (%d chars) -> %s", sym, len(body), p)
     return CachedDoc(symbol=sym, period=period, doc_type=doc_type, text=body, path=p,
                      source=source, source_url=source_url, fetched_at=stamp,
-                     sha256=digest, from_cache=False)
+                     sha256=digest, from_cache=False, version_path=version_path,
+                     external_id=external_id, title=title, published_at=published_at)
 
 
 # --------------------------------------------------------------------------- #
@@ -204,11 +227,14 @@ def inventory(symbol: str) -> list[CachedDoc]:
             continue
         if len(body.strip()) < MIN_CHARS:
             continue
+        digest = meta.get("sha256", "") or hashlib.sha256(body.encode("utf-8")).hexdigest()
+        version_path = _version_path(p, digest)
         out.append(CachedDoc(symbol=canonical_entity(symbol).upper(),
                              period=meta.get("period", ""),
                              doc_type=meta.get("doc_type", "manual"), text=body, path=p,
                              source=meta.get("source", "manual"),
                              source_url=meta.get("source_url", ""),
                              fetched_at=meta.get("fetched_at", ""),
-                             sha256=meta.get("sha256", ""), from_cache=True))
+                             sha256=digest, from_cache=True,
+                             version_path=version_path if version_path.is_file() else p))
     return out

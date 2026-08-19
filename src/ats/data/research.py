@@ -12,6 +12,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from ..schemas.research import Article
 from .base import safe_fetch
@@ -24,6 +25,77 @@ name = "research"
 _MIN_RSS_BODY = 1500     # below this, an RSS body is a paid-post teaser -> fetch the page
 _IMAP_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def article_slug(article_id: str) -> str:
+    """Stable filesystem identity shared by every consumer of a research article."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", article_id or "").strip("-")[:120]
+
+
+def publisher_entity(source: str) -> str:
+    """Canonical publisher id for the shared document catalog."""
+    name = (source or "research").split(":", 1)[-1]
+    return re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper() or "RESEARCH"
+
+
+def ingest(since: datetime, *, store=None) -> list[Article]:
+    """Fetch once, persist accepted bodies, and return the discovered articles.
+
+    This is the only newsletter function allowed to touch IMAP/RSS. PEAD and chain
+    consumers read `stored_articles` instead, so adding a consumer never adds another
+    source-specific fetch path.
+    """
+    from ..memory import get_store
+    from . import source_cache
+
+    store = store or get_store()
+    articles = fetch_articles(since)
+    for art in articles:
+        doc = source_cache.store(
+            publisher_entity(art.source), article_slug(art.id), "article", art.body,
+            source=art.source, source_url=art.url, external_id=art.id, title=art.title,
+            published_at=art.published_at.isoformat(), min_chars=1)
+        if doc is not None:
+            store.save_document(doc)
+    return articles
+
+
+def ingest_configured(*, store=None) -> list[Article]:
+    """Run the single configured newsletter acquisition window."""
+    from ..config import load_pead_global
+
+    cfg = load_pead_global().get("research", {}) or {}
+    since = datetime.now(timezone.utc) - timedelta(days=int(cfg.get("lookback_days", 14)))
+    return ingest(since, store=store)
+
+
+def stored_articles(since: datetime, *, source_match: str = "", store=None,
+                    limit: int = 500) -> list[Article]:
+    """Read research bodies from the shared document asset store; never uses network."""
+    from ..memory import get_store
+    from .source_cache import _split_frontmatter
+
+    store = store or get_store()
+    rows = store.documents(doc_type="article", published_since=since.isoformat(),
+                           source_contains=source_match or None, limit=limit)
+    out: list[Article] = []
+    for row in rows:
+        external_id = row.get("external_id") or ""
+        path = Path(row.get("local_path") or "")
+        if not external_id or not path.is_file():
+            continue
+        try:
+            _, body = _split_frontmatter(path.read_text(encoding="utf-8", errors="ignore"))
+            published = datetime.fromisoformat(row.get("published_at") or "")
+        except (OSError, ValueError):
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        out.append(Article(id=external_id, source=row.get("source") or "research",
+                           title=row.get("title") or "", url=row.get("source_url") or "",
+                           body=body, published_at=published))
+    out.sort(key=lambda a: a.published_at, reverse=True)
+    return out
 
 
 def fetch_articles(since: datetime) -> list[Article]:

@@ -392,6 +392,11 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
             text, src, note = observer.fetch_document(sym, print_=pr, store=store)
             if note:
                 log.info("observe[%s] %s: %s", window, sym, note)
+            from ..data import document_assets
+
+            asset = document_assets.identify(text, entity=sym, store=store)
+            if asset and store.has_observations_for_document(asset["document_id"]):
+                continue
             res = observer.observe_document(sym, doc_id, text, source_url=src,
                                             period=str(pr.date))
             outcomes[f"{sym} (observe)"] = (

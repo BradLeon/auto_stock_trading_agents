@@ -38,6 +38,8 @@ class DataProducts:
         key = entity.upper()
         return {
             "entity": key,
+            "documents": self.store.documents(
+                entity=key, published_since=since.isoformat() if since else None, limit=1000),
             "measurements": self.store.measurements(entity=key, limit=2000),
             "facts": self.store.facts(entity=key, since=since, limit=1000),
             "pead_projections": self.store.task_projections(

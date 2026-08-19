@@ -46,17 +46,16 @@ def ingest(since: datetime, *, store=None) -> list[Article]:
     source-specific fetch path.
     """
     from ..memory import get_store
-    from . import source_cache
+    from . import document_assets
 
     store = store or get_store()
     articles = fetch_articles(since)
     for art in articles:
-        doc = source_cache.store(
-            publisher_entity(art.source), article_slug(art.id), "article", art.body,
+        document_assets.ingest(
+            entity=publisher_entity(art.source), key=article_slug(art.id),
+            doc_type="article", text=art.body,
             source=art.source, source_url=art.url, external_id=art.id, title=art.title,
-            published_at=art.published_at.isoformat(), min_chars=1)
-        if doc is not None:
-            store.save_document(doc)
+            published_at=art.published_at.isoformat(), min_chars=1, store=store)
     return articles
 
 

@@ -71,7 +71,7 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
                    if scores.get(i.id, (0.0, ""))[0] >= tcfg["fulltext_score"]]
             articles = [(it, body, scores[it.id][0]) for it, body in
                         triage.enrich(hot, max_items=tcfg["max_fulltext"],
-                                      max_chars=tcfg["fulltext_chars"])]
+                                      max_chars=tcfg["fulltext_chars"], store=store)]
             log.info("monitor %s: triage kept %d/%d, %d bodies fetched",
                      symbol, len(material), len(fresh), len(articles))
 

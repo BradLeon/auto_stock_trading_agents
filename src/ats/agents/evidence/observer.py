@@ -268,7 +268,7 @@ def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
     Keeping them as two documents also keeps their observation ids distinct and lets
     one fail without taking the other down.
     """
-    from ...data import sec, source_cache
+    from ...data import document_assets, sec, source_cache
 
     cached = source_cache.load(symbol, label, "release")
     if cached and _source_rank(cached.source) >= _RANK_KEYED:
@@ -299,13 +299,14 @@ def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
                 pass
         return "", "", "财报稿未提及本公司 → 记为缺口"
 
-    stored = source_cache.store(symbol, label, "release", text, source="sec",
-                                source_url=url)
-    if stored and store is not None:
-        try:
-            store.save_document(stored, note=note)
-        except Exception as exc:  # noqa: BLE001
-            log.info("evidence %s: could not record release (%s)", symbol, exc)
+    try:
+        document_assets.ingest(
+            entity=symbol, key=label, doc_type="release", text=text, source="sec",
+            source_url=url, external_id=url, title=f"{symbol} {label} earnings release",
+            related_entities=(symbol,), note=note, store=store,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.info("evidence %s: could not record release (%s)", symbol, exc)
     return text, "sec", note
 
 
@@ -336,7 +337,7 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         indistinguishable from a real one once it is in the table.
     """
     from ...config import canonical_entity, entity_meta, load_pead_config
-    from ...data import documents, fiscal, period, source_cache, transcript
+    from ...data import document_assets, documents, fiscal, period, source_cache, transcript
 
     symbol = canonical_entity(symbol)
     config_label, company = "", entity_meta(symbol).get("name", "")
@@ -391,17 +392,20 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     keyed = _fetch_keyed(symbol, label, print_)
     if keyed is not None:
         doc, stale = keyed
-        cached = source_cache.store(symbol, doc.label, "transcript", doc.text,
-                                    source="defeatbeta",
-                                    source_url=f"defeatbeta:{doc.symbol}:{doc.report_date}")
         note = f"数据集直取 {doc.label} · 披露日 {doc.report_date}"
         if stale:
             note = f"{stale} · 披露日 {doc.report_date}"
-        if cached and store is not None:
-            try:
-                store.save_document(cached, note=note)
-            except Exception as exc:  # noqa: BLE001
-                log.info("evidence %s: could not record document (%s)", symbol, exc)
+        try:
+            document_assets.ingest(
+                entity=symbol, key=doc.label, doc_type="transcript", text=doc.text,
+                source="defeatbeta", source_url=f"defeatbeta:{doc.symbol}:{doc.report_date}",
+                external_id=f"defeatbeta:{doc.symbol}:{doc.report_date}",
+                title=f"{symbol} {doc.label} earnings call transcript",
+                published_at=str(doc.report_date), related_entities=(symbol,),
+                note=note, store=store,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.info("evidence %s: could not record document (%s)", symbol, exc)
         # The transcript's OWN quarter is passed on, not the one we asked for: the
         # observation's period must describe the fact, never the query.
         return doc.text, "defeatbeta", note
@@ -465,7 +469,7 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         # were thrown away with it. Hand-dropped files are the ONLY source for names the
         # dataset does not carry — they must not be hostage to a search result.
         kept, dropped = [], []
-        for lab, piece in documents.gather(symbol):
+        for lab, piece in documents.gather(symbol, period=label, store=store):
             if not (piece or "").strip():
                 continue
             why, _d = _screen(piece, f"documents:{lab}", "release")
@@ -500,12 +504,14 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
                 f"{note + ' / ' if note else ''}回落到旧缓存（来源 {stale_hit.source}）")
 
     if text.strip():
-        cached = source_cache.store(symbol, label, doc_type, text, source=src, source_url=src)
-        if cached and store is not None:
-            try:
-                store.save_document(cached, note=note)
-            except Exception as exc:  # noqa: BLE001
-                log.info("evidence %s: could not record document (%s)", symbol, exc)
+        try:
+            document_assets.ingest(
+                entity=symbol, key=label, doc_type=doc_type, text=text, source=src,
+                source_url=src, external_id=src, title=f"{symbol} {label} {doc_type}",
+                related_entities=(symbol,), note=note, store=store,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.info("evidence %s: could not record document (%s)", symbol, exc)
     return text, src, note
 
 
@@ -677,6 +683,14 @@ def observe_document(symbol: str, document_id: str, text: str, *, source_url: st
 
     store = store or get_store()
     now = now or datetime.now(timezone.utc)
+    # Compatibility callers historically invented ids such as ``MU:20260805``.
+    # Once the exact body is in the shared catalog, facts must point to that immutable
+    # asset instead so lineage opens the source version rather than a synthetic key.
+    from ...data import document_assets
+
+    asset = document_assets.identify(text, entity=symbol, store=store)
+    if asset:
+        document_id = asset["document_id"]
     obs, failure = extract(symbol, document_id, text, source_url=source_url,
                            period=period, now=now)
     if failure:

@@ -218,6 +218,14 @@ CREATE TABLE IF NOT EXISTS document_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_docver_document
     ON document_versions(document_id, fetched_at);
+-- One source asset may concern several companies. This association is catalog
+-- metadata, not an extracted claim: it enables company-scoped discovery without
+-- copying the publisher-owned body once per ticker.
+CREATE TABLE IF NOT EXISTS document_entities (
+    document_id TEXT, entity TEXT, relation TEXT DEFAULT 'mentioned',
+    PRIMARY KEY (document_id, entity, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_document_entity ON document_entities(entity, document_id);
 CREATE TABLE IF NOT EXISTS document_chunks (
     chunk_id TEXT PRIMARY KEY, version_id TEXT, ordinal INTEGER,
     char_start INTEGER, char_end INTEGER, text TEXT, content_hash TEXT,
@@ -389,6 +397,10 @@ class TradingMemory:
             "SELECT document_id || '@' || substr(sha256,1,16), document_id, sha256, "
             "local_path, chars, source_url, fetched_at, fetched_at "
             "FROM source_documents WHERE ok = 1 AND sha256 IS NOT NULL AND sha256 != ''")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO document_entities (document_id,entity,relation) "
+            "SELECT document_id,upper(entity),'primary' FROM source_documents "
+            "WHERE entity IS NOT NULL AND entity != ''")
         # One-time compatibility bridge: before the processing ledger existed,
         # presence in source_documents was the chain consumer's paid/read marker.
         # Never repeat this backfill, or documents acquired later for PEAD would be
@@ -1333,7 +1345,26 @@ class TradingMemory:
                  str(version_path) if version_path else "", len(doc.text or ""),
                  doc.source_url, stamp, datetime.now(timezone.utc).isoformat(timespec="seconds")))
             self._index_document_version(version_id, doc.text or "")
+        entities = {doc.symbol.upper()}
+        entities.update(e.upper() for e in getattr(doc, "related_entities", ()) if e)
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO document_entities (document_id,entity,relation) "
+            "VALUES (?,?,?)",
+            [(doc.document_id, entity,
+              "primary" if entity == doc.symbol.upper() else "mentioned")
+             for entity in sorted(entities)])
         self.conn.commit()
+
+    def link_document_entities(self, document_id: str, entities, *,
+                               relation: str = "mentioned") -> int:
+        """Attach additional company discovery keys without copying the document."""
+        before = self.conn.total_changes
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO document_entities (document_id,entity,relation) "
+            "VALUES (?,?,?)",
+            [(document_id, str(entity).upper(), relation) for entity in entities if entity])
+        self.conn.commit()
+        return self.conn.total_changes - before
 
     def _index_document_version(self, version_id: str, text: str, *,
                                 chunk_chars: int = 2400, overlap: int = 240) -> int:
@@ -1386,8 +1417,9 @@ class TradingMemory:
             sql += " AND lower(c.text) LIKE ?"
             args.append(f"%{term.lower()}%")
         if entity:
-            sql += " AND d.entity=?"
-            args.append(entity.upper())
+            sql += (" AND (d.entity=? OR EXISTS (SELECT 1 FROM document_entities de "
+                    "WHERE de.document_id=d.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
         if source_contains:
             sql += " AND lower(d.source) LIKE ?"
             args.append(f"%{source_contains.lower()}%")
@@ -1412,6 +1444,20 @@ class TradingMemory:
         row = self.conn.execute(
             "SELECT * FROM document_versions WHERE document_id = ? "
             "ORDER BY fetched_at DESC, created_at DESC LIMIT 1", (document_id,)).fetchone()
+        return dict(row) if row else None
+
+    def document_by_content_hash(self, content_hash: str, *,
+                                 entity: str | None = None) -> dict | None:
+        sql = ("SELECT d.*,v.version_id,v.content_hash AS version_hash "
+               "FROM document_versions v JOIN source_documents d "
+               "ON d.document_id=v.document_id WHERE v.content_hash=? AND d.ok=1")
+        args: list = [content_hash]
+        if entity:
+            sql += (" AND (d.entity=? OR EXISTS (SELECT 1 FROM document_entities de "
+                    "WHERE de.document_id=d.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
+        sql += " ORDER BY v.fetched_at DESC LIMIT 1"
+        row = self.conn.execute(sql, args).fetchone()
         return dict(row) if row else None
 
     def begin_document_processing(self, document_id: str, consumer: str,
@@ -1505,8 +1551,9 @@ class TradingMemory:
         sql = "SELECT * FROM source_documents"
         where, args = [], []
         if entity:
-            where.append("entity = ?")
-            args.append(entity.upper())
+            where.append("(entity = ? OR EXISTS (SELECT 1 FROM document_entities de "
+                         "WHERE de.document_id=source_documents.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
         if ok_only:
             where.append("ok = 1")
         if doc_type:

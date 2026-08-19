@@ -131,40 +131,85 @@ def _fetch_url(url: str) -> str:
     return text
 
 
+def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *, store=None) -> tuple[str, str]:
+    """Persist only a period-compatible, structurally complete transcript."""
+    if not text:
+        return text, source
+    from . import document_assets, fiscal
+
+    period_ok, _ = fiscal.verify_transcript(fiscal_label, text, source)
+    body, _ = extract_body(text, source)
+    body_ok, _ = looks_like_transcript(body)
+    if not period_ok or not body_ok:
+        # Compatibility: callers still receive the body and apply their own guard.
+        # Rejected/short fixtures must never become a shared trusted asset.
+        return text, source
+    source_url = ""
+    for prefix in ("url:", "tavily:"):
+        if source.startswith(prefix):
+            source_url = source[len(prefix):]
+    if source.startswith("news:") and "http" in source:
+        source_url = source[source.index("http"):]
+    document_assets.ingest(
+        entity=symbol, key=fiscal_label or document_assets.stable_key(source, prefix="transcript"),
+        doc_type="transcript", text=body, source=source, source_url=source_url,
+        external_id=source_url or source,
+        title=f"{symbol.upper()} {fiscal_label} earnings call transcript".strip(),
+        related_entities=(symbol,), min_chars=_MIN_TRANSCRIPT_CHARS, store=store,
+    )
+    return body, source
+
+
 def fetch(symbol: str, fiscal_label: str = "", source: str | None = None,
-          company_name: str = "") -> tuple[str, str]:
+          company_name: str = "", *, store=None) -> tuple[str, str]:
     # 1/2) explicit override
     if source:
         if source.startswith("http://") or source.startswith("https://"):
             try:
-                return _fetch_url(source), f"url:{source}"
+                return _accepted(symbol, fiscal_label, _fetch_url(source),
+                                 f"url:{source}", store=store)
             except Exception:  # noqa: BLE001 - fall through
                 pass
         else:
             p = Path(source)
             if p.exists():
-                return p.read_text(encoding="utf-8"), f"file:{p}"
+                return _accepted(symbol, fiscal_label, p.read_text(encoding="utf-8"),
+                                 f"file:{p}", store=store)
 
     # 3) dropped manual file — the user's habit; authoritative when present, and
     # a clean full transcript beats brittle scraping (which can return page chrome).
     mp = manual_path(symbol, fiscal_label)
     if mp.exists():
-        return mp.read_text(encoding="utf-8"), f"file:{mp}"
+        return _accepted(symbol, fiscal_label, mp.read_text(encoding="utf-8"),
+                         f"file:{mp}", store=store)
+
+    # Shared accepted asset — after explicit/manual overrides, before every network
+    # tier. This is the point that makes PEAD and Evidence consume the same body.
+    from . import source_cache
+
+    cached = source_cache.load(symbol, fiscal_label, "transcript")
+    if cached:
+        if store is None:
+            from ..memory import get_store
+
+            store = get_store()
+        store.save_document(cached)
+        return cached.text, cached.source or "cache"
 
     # 4) FMP auto-fetch (latest transcript) if a paid key is configured
     text, src = _fmp(symbol, fiscal_label)
     if text:
-        return text, src
+        return _accepted(symbol, fiscal_label, text, src, store=store)
 
     # 5) web search (Tavily) -> the fool.com / investing transcript page (free tier)
     text, src = _from_search(symbol, fiscal_label, company_name)
     if text:
-        return text, src
+        return _accepted(symbol, fiscal_label, text, src, store=store)
 
     # 6) secondary: a transcript article already in our news feed (if any)
     text, src = _from_news(symbol, fiscal_label=fiscal_label)
     if text:
-        return text, src
+        return _accepted(symbol, fiscal_label, text, src, store=store)
 
     return "", "none"
 

@@ -149,7 +149,7 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
                      now: datetime | None = None) -> dict[str, ArticleRunStat]:
     """Discover, filter, fetch and read every declared article source."""
     from ..agents.evidence import observer
-    from ..data import source_cache
+    from ..data import document_assets
 
     now = now or datetime.now(timezone.utc)
     out: dict[str, ArticleRunStat] = {}
@@ -208,11 +208,14 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
             # ingestion stage before this consumer ran. Do not rewrite their catalog
             # metadata; web-only sources still enter the store here.
             if store.latest_document_version(document_id) is None:
-                doc = source_cache.store(source.entity, ref.slug, source.doc_type, body,
-                                         source=source.adapter, source_url=ref.url, now=now,
-                                         min_chars=1)  # source-specific guard already ran above
+                doc = document_assets.ingest(
+                    entity=source.entity, key=ref.slug, doc_type=source.doc_type, text=body,
+                    source=source.adapter, source_url=ref.url, external_id=ref.url,
+                    title=ref.title, published_at=(ref.published_at.isoformat()
+                                                   if ref.published_at else ""),
+                    now=now, min_chars=1, store=store,
+                )  # source-specific guard already ran above
                 if doc is not None:
-                    store.save_document(doc)       # mark before the expensive model call
                     document_id = doc.document_id
 
             version_id = store.begin_document_processing(

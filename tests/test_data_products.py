@@ -110,6 +110,7 @@ def test_company_package_keeps_shared_facts_and_task_views_separate():
     package = DataProducts(store).company_research_package("amd")
 
     assert package["entity"] == "AMD"
+    assert package["documents"][0]["doc_type"] == "transcript"
     assert package["facts"] == []
     assert package["pead_projections"][0]["profile_version"] == "prompt-v3"
 

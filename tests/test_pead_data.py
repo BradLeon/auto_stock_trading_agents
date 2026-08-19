@@ -79,6 +79,38 @@ def test_transcript_explicit_source_beats_fmp(monkeypatch, tmp_path):
     assert text == "explicit"          # explicit override wins
 
 
+def test_valid_transcript_is_shared_and_second_consumer_never_refetches(monkeypatch, tmp_path):
+    from ats.memory import get_store
+
+    body = (
+        "AMD second quarter 2026 earnings call. Operator: welcome. "
+        "Prepared Remarks from the Chief Executive Officer. "
+        "Chief Financial Officer discusses results. Question-and-Answer. Next question. "
+    ) * 40
+    monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
+    calls = []
+
+    def fmp(*_):
+        calls.append("fmp")
+        return body, "fmp:Q2-2026"
+
+    monkeypatch.setattr(transcript, "_fmp", fmp)
+    monkeypatch.setattr(transcript, "_from_search",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("search used")))
+
+    first, source = transcript.fetch("AMD", "Q2 2026", store=get_store())
+    assert first == body.strip() and source == "fmp:Q2-2026"
+
+    monkeypatch.setattr(transcript, "_fmp",
+                        lambda *_: (_ for _ in ()).throw(AssertionError("refetched")))
+    second, second_source = transcript.fetch("AMD", "Q2 2026", store=get_store())
+    assert second == first and second_source == source
+    assert calls == ["fmp"]
+    rows = get_store().documents(entity="AMD", doc_type="transcript")
+    assert len(rows) == 1
+    assert len(get_store().document_versions(rows[0]["document_id"])) == 1
+
+
 def test_pick_expiration_after_earnings():
     exps = ("2026-05-01", "2026-05-08", "2026-05-15")
     assert options._pick_expiration(exps, date(2026, 5, 6)) == "2026-05-08"

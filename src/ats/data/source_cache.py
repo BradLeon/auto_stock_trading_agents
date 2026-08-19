@@ -58,6 +58,10 @@ class CachedDoc:
     external_id: str = ""
     title: str = ""
     published_at: str = ""
+    # A publisher-owned document can concern several economic entities. Keeping the
+    # primary storage bucket separate from these associations prevents the same news
+    # body being copied once per ticker.
+    related_entities: tuple[str, ...] = ()
 
     @property
     def document_id(self) -> str:
@@ -121,7 +125,11 @@ def load(symbol: str, period: str, doc_type: str, *, min_chars: int = MIN_CHARS)
                      source_url=meta.get("source_url", ""),
                      fetched_at=meta.get("fetched_at", ""),
                      sha256=digest, from_cache=True,
-                     version_path=version_path if version_path.is_file() else p)
+                     version_path=version_path if version_path.is_file() else p,
+                     external_id=meta.get("external_id", ""),
+                     title=meta.get("title", ""),
+                     published_at=meta.get("published_at", ""),
+                     related_entities=tuple(filter(None, meta.get("related_entities", "").split(","))))
 
 
 def _split_frontmatter(raw: str) -> tuple[dict, str]:
@@ -152,7 +160,8 @@ def _split_frontmatter(raw: str) -> tuple[dict, str]:
 def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "",
           source_url: str = "", now: datetime | None = None,
           external_id: str = "", title: str = "",
-          published_at: str = "", min_chars: int = MIN_CHARS) -> CachedDoc | None:
+          published_at: str = "", related_entities: tuple[str, ...] = (),
+          min_chars: int = MIN_CHARS) -> CachedDoc | None:
     """Write a document to the cache. Callers must have run the guards first."""
     from ..config import canonical_entity
 
@@ -167,19 +176,18 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
         return None
     stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
     digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    header = "\n".join([
-        "---",
-        f"symbol: {sym}",
-        f"period: {period or ''}",
-        f"doc_type: {doc_type}",
-        f"source: {source}",
-        f"source_url: {source_url}",
-        f"fetched_at: {stamp}",
-        f"sha256: {digest}",
-        f"chars: {len(body)}",
-        "---",
-        "",
-    ])
+    import yaml
+
+    metadata = {
+        "symbol": sym, "period": period or "", "doc_type": doc_type,
+        "source": source, "source_url": source_url, "fetched_at": stamp,
+        "sha256": digest, "chars": len(body), "external_id": external_id,
+        "title": title, "published_at": published_at,
+        "related_entities": ",".join(sorted(set(related_entities))),
+    }
+    header = "---\n" + yaml.safe_dump(
+        metadata, allow_unicode=True, sort_keys=False, default_flow_style=False
+    ) + "---\n\n"
     rendered = header + body
     p.parent.mkdir(parents=True, exist_ok=True)
     version_path = _version_path(p, digest)
@@ -192,7 +200,8 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
     return CachedDoc(symbol=sym, period=period, doc_type=doc_type, text=body, path=p,
                      source=source, source_url=source_url, fetched_at=stamp,
                      sha256=digest, from_cache=False, version_path=version_path,
-                     external_id=external_id, title=title, published_at=published_at)
+                     external_id=external_id, title=title, published_at=published_at,
+                     related_entities=tuple(sorted(set(related_entities))))
 
 
 # --------------------------------------------------------------------------- #

@@ -353,7 +353,7 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 | pead_dossier | PEAD prep/monitor/score | Chief、行业分析师、monitor 自身 |
 | pead_events | monitor（含研报注入） | monitor 上下文、行业分析师 |
 | research_articles/insights | 研报通道 | 行业分析师、monitor |
-| source_documents / document_versions / document_chunks | 共享文档采集 | PEAD、Evidence、全文检索 |
+| source_documents / document_versions / document_entities / document_chunks | 共享文档采集 | PEAD、Evidence、公司包、全文检索 |
 | document_processing_runs | PEAD、Evidence 文档消费者 | 幂等控制、健康状态、成本审计 |
 | measurement_series / measurement_points | 结构化 source adapter | 指标查询、历史时点回放、Pandas |
 | evidence_facts / evidence_fact_projections | Evidence 抽取与投影 | Evidence、公司包、命题包 |

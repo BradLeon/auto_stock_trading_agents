@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..config import get_config, load_news_sources
 from ..schemas.news import NewsItem
@@ -20,7 +21,8 @@ log = logging.getLogger("ats.data.news")
 name = "news"
 
 
-def fetch_news(symbol: str, since: datetime, until: datetime | None = None) -> list[NewsItem]:
+def fetch_news(symbol: str, since: datetime, until: datetime | None = None, *,
+               store=None) -> list[NewsItem]:
     until = until or datetime.now(timezone.utc)
     sources_cfg = load_news_sources()
 
@@ -38,7 +40,67 @@ def fetch_news(symbol: str, since: datetime, until: datetime | None = None) -> l
             continue
         seen.add(it.id)
         out.append(it)
+    _catalog(out, store=store)
     return out
+
+
+def external_id(item: NewsItem) -> str:
+    """Cross-provider identity: canonical URL when present, provider id otherwise."""
+    if not item.url:
+        return f"news:{item.id}"
+    parts = urlsplit(item.url)
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                       if not k.lower().startswith("utm_")])
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, query, ""))
+
+
+def _catalog(items: list[NewsItem], *, store=None) -> None:
+    """Save the provider-visible headline/summary before any triage decision."""
+    from . import document_assets
+
+    for item in items:
+        identity = external_id(item)
+        body = item.headline.strip()
+        if item.summary.strip():
+            body += "\n\n" + item.summary.strip()
+        if not body:
+            continue
+        document_assets.ingest(
+            entity="NEWS", key=document_assets.stable_key(identity, prefix="news"),
+            doc_type="news", text=body, source=f"{item.source}:metadata",
+            source_url=item.url, external_id=identity, title=item.headline,
+            published_at=item.published_at.isoformat(),
+            related_entities=tuple(item.tickers), min_chars=1, store=store,
+        )
+
+
+def acquire_body(item: NewsItem, *, store=None) -> str:
+    """Return shared full text, fetching it at most once after metadata ingestion."""
+    from ..memory import get_store
+    from . import document_assets
+    from .web import fetch_article_text
+
+    store = store or get_store()
+    identity = external_id(item)
+    row, cached = document_assets.read_external(identity, store=store)
+    # Metadata versions are intentionally short. Once a real article body exists,
+    # every target and Workflow reuses it without another HTTP request.
+    if row and len(cached) >= 800:
+        store.link_document_entities(row["document_id"], item.tickers)
+        return cached
+    if not item.url:
+        return ""
+    body = fetch_article_text(item.url)
+    if not body:
+        return ""
+    doc = document_assets.ingest(
+        entity="NEWS", key=document_assets.stable_key(identity, prefix="news"),
+        doc_type="news", text=body, source=f"{item.source}:fulltext",
+        source_url=item.url, external_id=identity, title=item.headline,
+        published_at=item.published_at.isoformat(), related_entities=tuple(item.tickers),
+        min_chars=1, store=store,
+    )
+    return doc.text if doc else body
 
 
 # --------------------------------------------------------------------------- #

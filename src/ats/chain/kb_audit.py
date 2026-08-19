@@ -26,6 +26,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..data import industry
+
 log = logging.getLogger("ats.chain.kb_audit")
 
 # Verbs that make the KB the SOURCE of the following statement.
@@ -93,18 +95,41 @@ def _company_tokens(cfg) -> set[str]:
 
 
 def _criteria_of(path: Path) -> list[str]:
-    """The bolded titles of the numbered criteria in a note's §三.
+    """The bolded titles of the numbered criteria in a note's criteria section.
 
     Parsed rather than configured because the note IS the specification: if a criterion
     is added to the file, it should start being counted without anyone remembering to
     register it somewhere else.
+
+    The section is located by heading MEANING (`industry.criteria_spans`), not by section
+    number — see the comment there for what the old `split("## 三")` silently did to the
+    two notes that outgrew the four-section template.
     """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return []
-    section = text.split("## 三")[-1].split("## 四")[0] if "## 三" in text else ""
-    return re.findall(r"^\s*\d+\.\s*\*\*(.+?)\*\*", section, flags=re.M)
+    return re.findall(r"^\s*\d+\.\s*\*\*(.+?)\*\*",
+                      industry.criteria_text(text), flags=re.M)
+
+
+def _criteria_gap(path: Path) -> str:
+    """Why a mounted note contributed no criteria — "" when it contributed some.
+
+    Silence here used to be indistinguishable from health, and that is the actual defect:
+    zero criteria suppressed the coverage line, left `uncited` empty, and let the layer
+    render 「无异常」. A coverage metric that cannot say "I measured nothing" is worse
+    than no metric, because absence reads as a pass.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return "读不出来"
+    if not industry.criteria_spans(text):
+        return "没有标题含「判据」的小节，审计无从知道这份笔记的判据是哪几条"
+    if not _criteria_of(path):
+        return "判据小节里没有「数字. **加粗标题**」形式的条目，抽不出判据"
+    return ""
 
 
 def audit_layer(cfg, layer, basket) -> AuditReport:
@@ -123,6 +148,14 @@ def audit_layer(cfg, layer, basket) -> AuditReport:
 
     criteria = [c for p in sorted(own_paths) for c in _criteria_of(p)]
     rep.criteria_total = len(criteria)
+    for p in sorted(own_paths):
+        gap = _criteria_gap(p)
+        if gap:
+            # A note defect, not an analyst defect — but it invalidates this layer's
+            # coverage number, so it must not be reported as a clean run.
+            rep.findings.append(AuditFinding(
+                kind="no_criteria", layer=layer.key, symbol="",
+                detail=f"知识库「{p.stem}」{gap}　→ 本层的判据引用率不可信"))
     cited: set[str] = set()
 
     for row in basket.rows:
@@ -236,8 +269,11 @@ def as_section(reports: list[AuditReport]) -> list[str]:
         lines += [f"### {mark} {rep.layer}（{rep.rows} 个标的{cover}）", ""]
         for f in rep.findings:
             tag = {"fabricated": "🔴 编造引用", "cross_layer": "🟡 跨层串味",
-                   "ungrounded": "🟡 无出处"}.get(f.kind, f.kind)
-            lines.append(f"- {tag} **{f.symbol}**：{f.detail}")
+                   "ungrounded": "🟡 无出处",
+                   "no_criteria": "🟠 判据抽不出"}.get(f.kind, f.kind)
+            # no_criteria is about a note, not about a holding — it carries no symbol.
+            lines.append(f"- {tag} **{f.symbol}**：{f.detail}" if f.symbol
+                         else f"- {tag}：{f.detail}")
             if f.quote:
                 lines.append(f"  - 原文「{f.quote}」")
         shown = {k: v for k, v in (rep.grounding or {}).items() if v}

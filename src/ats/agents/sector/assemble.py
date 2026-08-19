@@ -142,8 +142,16 @@ def _kb_criteria(sc: SectorContext, cfg: SectorConfig) -> None:
         return
     kb = industry.fetch_named(paths)
     if kb:
-        cap = int(cfg.review.get("kb_criteria_chars", 24000))
-        sc.kb_criteria = industry.as_context(kb)[:cap]
+        # 默认值的真源是 config.py 的 setdefault（那里保证这个键一定存在），这里的
+        # 兜底只是防御性的——但两处必须一致，否则改了一处会以为改全了。
+        cap = int(cfg.review.get("kb_criteria_chars", 32000))
+        # 截断是静默的，且切的是拼接顺序最后一份笔记的尾部。真被切到时要留下痕迹，
+        # 否则下游看到的是一份看起来完整、实则缺了结尾的知识库。
+        joined = industry.as_context(kb)
+        if len(joined) > cap:
+            log.warning("kb criteria truncated: %d chars > cap %d — 末尾笔记的结尾已被切掉，"
+                        "考虑调高 review.kb_criteria_chars", len(joined), cap)
+        sc.kb_criteria = joined[:cap]
 
 
 # --------------------------------------------------------------------------- #
@@ -344,8 +352,12 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
 
 def _demand_lines(layer, claim, a) -> list[str]:
     silent = f" · 未发声 {', '.join(a.silent_witnesses)}" if a.silent_witnesses else ""
+    # `basis` travels with the verdict, or the analyst cannot tell a reading that two
+    # vantage points confirmed from one that only the interested parties asserted —
+    # they warrant different confidence and the verdict word alone hides the difference.
+    basis = {"self_reported": "（仅自述）", "thin": "（证据薄）"}.get(a.basis, "")
     out = [f"- [{layer.key}] {claim.statement}\n"
-           f"    结论 {a.verdict} · 证人覆盖 {a.coverage} · 独立证据簇 "
+           f"    结论 {a.verdict}{basis} · 证人覆盖 {a.coverage} · 独立证据簇 "
            f"{a.evidence_clusters} · 立场 {a.stance_classes} 类 · "
            f"支持 {a.support_score:.0f}/反驳 {a.refute_score:.0f}{silent}"]
     # The reasons travel with the verdict. Without them the analyst is asked to accept a

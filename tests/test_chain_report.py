@@ -1,6 +1,6 @@
 """Chain evidence — the weekly Obsidian report (hermetic)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ats.chain import report
 from ats.config import load_sector_config
@@ -130,3 +130,87 @@ def test_snapshot_day_is_utc_regardless_of_the_callers_timezone():
     assert {h["as_of"] for h in hist} <= {NOW.date().isoformat(),
                                           (NOW.date() - timedelta(days=1)).isoformat()}
     assert all(len(h["as_of"]) == 10 for h in hist), "stored as a date, not an instant"
+
+
+def test_third_party_sources_are_shown_grounded_in_stored_data(monkeypatch):
+    """The section exists so a reader can check WHY a claim cleared the stance gate on
+    a non-self-reported witness, without leaving the report. It must read the ledger,
+    never the network — the claims in the same report were computed against stored
+    rows, and a live re-fetch that had since revised would let the report disagree
+    with itself."""
+    from ats.chain import sources as chain_sources
+
+    store = get_store()
+    monkeypatch.setattr(chain_sources, "load_sources",
+                        lambda: [chain_sources.SourceDef(
+                            id="tw_ic_exports", label="台湾 IC 出口", adapter="tw_mof",
+                            entity="TW_IC_EXPORT", stance="regulator",
+                            observation_type="regulatory", cadence="monthly",
+                            concepts=["supply_tightness", "hbm_demand"],
+                            direction_from=["yoy", "mom"])])
+    store.save_observation(_obs("TW_IC_EXPORT", "supply_tightness",
+                                span="2026-06 台湾 IC 出口 …", metric="tw_ic_exports_mom"))
+
+    md = report.render(cfg=load_sector_config("ai_hardware"), store=store,
+                       as_of=NOW, ind_cfg={})
+    assert "## 第三方数据源" in md and "台湾 IC 出口" in md
+    assert "本报告不发网络请求" in md
+    assert "tw_ic_exports_mom" in md and "2026-06 台湾 IC 出口" in md
+
+
+def test_a_source_bound_to_two_concepts_is_shown_once_not_twice(monkeypatch):
+    """`collect()` persists one physical row per declared concept — the same print
+    filed under `supply_tightness` and again under `hbm_demand` is two DB rows so both
+    claims can find it. Showing "what this source said" twice reads like a duplication
+    bug; the section must dedupe on the reading, not the storage row."""
+    from ats.chain import sources as chain_sources
+
+    store = get_store()
+    monkeypatch.setattr(chain_sources, "load_sources",
+                        lambda: [chain_sources.SourceDef(
+                            id="tw_ic_exports", label="台湾 IC 出口", adapter="tw_mof",
+                            entity="TW_IC_EXPORT", stance="regulator",
+                            observation_type="regulatory", cadence="monthly",
+                            concepts=["supply_tightness", "hbm_demand"])])
+    # collect() re-derives the id including the concept precisely so the same print
+    # can occupy two rows; `_obs()` doesn't, so force distinct ids the same way.
+    span = "2026-06 台湾 IC 出口 同一条印数"
+    for concept in ("supply_tightness", "hbm_demand"):
+        obs = _obs("TW_IC_EXPORT", concept, span=span, metric="tw_ic_exports_mom")
+        store.save_observation(obs.model_copy(update={"id": f"tw-ic-{concept}"}))
+
+    md = report.render(cfg=load_sector_config("ai_hardware"), store=store,
+                       as_of=NOW, ind_cfg={})
+    # Scoped to the section itself: TW_IC_EXPORT and these concept keys are also real
+    # witnesses/dimensions in ai_hardware.yaml's own claims, so the span legitimately
+    # appears elsewhere in the report too (a real claim picking up the same fixture
+    # data is expected cross-talk in this test file, not what this test is about).
+    section = md.split("## 第三方数据源", 1)[1].split("\n## ", 1)[0]
+    assert section.count(span) == 1
+
+
+def test_a_failed_fetch_since_the_last_reading_is_flagged(monkeypatch):
+    """`collect()` only ever writes a `source_documents` row on FAILURE. If the most
+    recent attempt (by timestamp) is later than the most recent stored reading, the
+    source is currently in a failed state even though old data is still on file — the
+    report must say so rather than silently showing stale data as if it were current."""
+    from ats.chain import sources as chain_sources
+
+    store = get_store()
+    monkeypatch.setattr(chain_sources, "load_sources",
+                        lambda: [chain_sources.SourceDef(
+                            id="tw_ic_exports", label="台湾 IC 出口", adapter="tw_mof",
+                            entity="TW_IC_EXPORT", stance="regulator",
+                            observation_type="regulatory", cadence="monthly",
+                            concepts=["supply_tightness"])])
+    old = _obs("TW_IC_EXPORT", "supply_tightness", span="旧读数",
+              metric="tw_ic_exports_mom")
+    store.save_observation(old.model_copy(
+        update={"observed_at": NOW - timedelta(days=40)}))
+    store.save_document_failure("TW_IC_EXPORT", "", "series", source="tw_mof",
+                                note="tw_ic_exports 本轮取不到数据",
+                                at=NOW.isoformat())
+
+    md = report.render(cfg=load_sector_config("ai_hardware"), store=store,
+                       as_of=NOW, ind_cfg={})
+    assert "最近一次抓取失败" in md and "旧读数" in md

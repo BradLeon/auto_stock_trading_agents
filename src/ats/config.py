@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -282,8 +283,30 @@ def canonical_entity(symbol: str) -> str:
     000660.KS, and one earnings call filed under three ids would read as three
     independent witnesses — defeating the stance-diversity gate from the inside, which
     is the least visible way for it to fail. Unknown symbols pass through unchanged.
+
+    The `NAME (TICKER)` fallback exists because third-party prose names companies the
+    way a journalist does, not the way a filing does. Measured after wiring up the news
+    and newsletter sources (2026-08-18): `NVIDIA (NVDA)`, `MICRON (MU)`,
+    `APPLIED MATERIALS (AMAT)` all arrived as fresh unresolvable entities — and an
+    entity that resolves to nothing is not merely untidy, it is unreachable:
+    `corroborate.assess_layer` gathers rows BY entity, so those readings can never enter
+    any claim. Enumerating one alias per phrasing loses that race by construction; the
+    parenthesised ticker is the publisher already telling us the answer.
     """
-    return _alias_index().get((symbol or "").upper(), symbol)
+    key = (symbol or "").upper().strip()
+    idx = _alias_index()
+    if key in idx:
+        return idx[key]
+    # "NVIDIA (NVDA)" -> try NVDA, then the bare name. Only a trailing parenthetical of
+    # ticker-shaped text; anything else is left alone rather than guessed at.
+    m = re.fullmatch(r"(.+?)\s*\(([A-Z0-9.\-]{1,12})\)", key)
+    if m:
+        name, ticker = m.group(1).strip(), m.group(2)
+        for cand in (ticker, name):
+            if cand in idx:
+                return idx[cand]
+        return ticker            # unregistered, but at least stable across phrasings
+    return symbol
 
 
 def entity_meta(symbol: str) -> dict:
@@ -484,7 +507,15 @@ def load_sector_config(name: str = "ai_hardware"):
     raw.setdefault("review", {})
     r = raw["review"]
     r.setdefault("static_notes_chars", 36000)
-    r.setdefault("kb_criteria_chars", 24000)   # 各层 structure_notes 汇总给 sector_analyst
+    # 各层 structure_notes 汇总给 sector_analyst。2026-08-15 从 24000 提到 32000：
+    # 半导体设备.md 改写后九份笔记合计 22.9k，只剩 4.5% 余量，而**截断是静默的**且切的是
+    # 拼接顺序最后一份（L6）的尾部——正好是「常见误判」那节。上限只封顶不设目标，
+    # 提高它本身不增加 prompt 长度。
+    # 2026-08-18 从 32000 提到 44000：芯片设计.md 改写后九份已实测到 30.7k（上一条注释里
+    # 的 22.9k 当天就被那次改写作废了），余量只剩 4%；再挂上新增的 L1 Token经济.md（6.0k）
+    # 会到 36.7k，**正好复现上一次要避免的那次静默截断**。同一个坑第二次踩，说明单靠注释
+    # 里的一个数字盯不住——真正的护栏是 assemble._kb_criteria 里那条超限 warning。
+    r.setdefault("kb_criteria_chars", 44000)
     r.setdefault("insights_per_ticker", 3)
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)

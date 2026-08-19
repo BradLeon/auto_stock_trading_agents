@@ -284,7 +284,7 @@ class TradingMemory:
                           "ON trades(client_order_id)")
         ocols = {r["name"] for r in self.conn.execute(
             "PRAGMA table_info(evidence_observations)")}
-        for ddl in ("concept TEXT", "source_entity TEXT"):
+        for ddl in ("concept TEXT", "source_entity TEXT", "superseded_at TEXT"):
             if ocols and ddl.split()[0] not in ocols:
                 self.conn.execute(
                     f"ALTER TABLE evidence_observations ADD COLUMN {ddl}")
@@ -946,9 +946,46 @@ class TradingMemory:
         self.conn.commit()
         return existing is None
 
+    def supersede_document_observations(self, document_id: str, source_entity: str,
+                                        *, at: datetime | None = None) -> int:
+        """Retire the previous extraction of one document by one speaker.
+
+        `concept` is assigned by the model AT EXTRACTION TIME and frozen in the row. So
+        when a claim's dimension definitions change, re-extracting is the only way for
+        the new definitions to take effect — but the OLD rows do not disappear, and
+        their stale `concept` keeps them eligible. Both readings of the same sentence
+        then vote, and the older, wronger one usually wins on volume.
+
+        That is not hypothetical: `xpu_value_capture_per_capacity` was tightened
+        specifically to exclude consolidated gross margin, the re-extraction correctly
+        dropped that row — and the verdict did not move, because the previous run's copy
+        was still mapped and still refuting. One document, one speaker, two contradictory
+        classifications, both counted.
+
+        Rows are marked, never deleted. "Superseded" and "never observed" are different
+        states, and the audit trail is the whole point of storing spans. Callers that
+        assess evidence read only live rows; callers that audit history can still see
+        everything.
+
+        Ordering matters: mark first, then insert. `save_observation` uses INSERT OR
+        REPLACE, which drops and re-inserts the row, so any observation the new run
+        reproduces gets `superseded_at` reset to NULL by construction. What stays
+        retired is exactly what the new extraction no longer produces.
+        """
+        stamp = (at or datetime.now(timezone.utc)).isoformat()
+        cur = self.conn.execute(
+            "UPDATE evidence_observations SET superseded_at = ? "
+            "WHERE document_id = ? AND source_entity = ? AND superseded_at IS NULL",
+            (stamp, document_id, (source_entity or "").upper()))
+        self.conn.commit()
+        return cur.rowcount
+
     def observations(self, *, entity: str | None = None, metric: str | None = None,
-                     since: datetime | None = None, limit: int = 500) -> list[dict]:
+                     since: datetime | None = None, limit: int = 500,
+                     include_superseded: bool = False) -> list[dict]:
         sql = "SELECT * FROM evidence_observations WHERE 1=1"
+        if not include_superseded:
+            sql += " AND superseded_at IS NULL"
         args: list = []
         if entity:
             sql += " AND entity = ?"
@@ -1104,6 +1141,7 @@ class TradingMemory:
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM evidence_observations "
             "WHERE (concept IS NULL OR concept = '') AND COALESCE(discovery_evidence,0) = 0 "
+            "AND superseded_at IS NULL "
             "ORDER BY observed_at DESC LIMIT ?", (limit,)).fetchall()]
 
     def save_claim_proposal(self, proposal) -> None:

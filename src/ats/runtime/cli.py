@@ -825,9 +825,40 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         if not saved:
             print("（config/sources.yaml 里没有配置第三方源）")
             return 0
+        # -1 = the source could not be reached this round (true gap). 0 = it was
+        # reached but every point was already in the ledger (data is current, not
+        # stale). Printing both as "取不到数据" is the exact bug this distinguishes:
+        # a monthly source fetched twice in one month is 0-and-fine, not dead.
         for sid, n in sorted(saved.items()):
-            print(f"  {'✅' if n else '⚠️ '} {sid:<28}{n} 条新观测"
-                  + ("" if n else "　—— 取不到数据，已记成缺口而非沉默"))
+            if n < 0:
+                print(f"  ⚠️  {sid:<28}取不到数据，已记成缺口而非沉默")
+            elif n == 0:
+                print(f"  🟡 {sid:<28}0 条新观测　—— 已抓到最新数据，只是与上次相同")
+            else:
+                print(f"  ✅ {sid:<28}{n} 条新观测")
+        return 0
+
+    if action == "articles":
+        # The prose half of `collect`. Separate command because it costs a model call
+        # per article and takes minutes, while `collect` is arithmetic over a series.
+        from ..chain import articles as chain_articles
+
+        stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
+        if not stats:
+            print("（config/sources.yaml 里没有配置 article_sources）")
+            return 0
+        for sid, st in sorted(stats.items()):
+            if st.unreachable:
+                print(f"  ⚠️  {sid:<24}取不到文章列表，已记成缺口而非沉默")
+                continue
+            print(f"  📰 {sid:<24}扫 {st.scanned} 篇 · 命中 {st.matched} 篇 · "
+                  f"新抽取 {st.ingested} 篇 / {st.observations} 条观测")
+            if st.unreadable:
+                # Never fold this into the headline: a widening paywall must not read
+                # as the publisher having gone quiet.
+                print(f"     🚫 {st.unreadable} 篇取不到正文（付费或模板变更），已记成缺口")
+            for t in st.titles:
+                print(f"     · {t[:88]}")
         return 0
 
     if action == "kbreview":
@@ -865,12 +896,13 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                     rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
             for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):
                 claim = next(c for c in layer.claims if c.id == a.claim_id)
-                # 「◐」 = one-sided evidence, single stance -> unconfirmed, NOT conflicting
-                mark = ("◐" if (a.verdict == "mixed"
-                                and a.unresolved_reason == "single_stance")
+                # 「◐」 = one-sided AND too few independent filers -> unconfirmed,
+                # NOT conflicting. 「仅自述」 = it did resolve, on one vantage point.
+                mark = ("◐" if a.unresolved_reason == "single_stance"
                         else {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
                               "resolved": "📊", "unknown": "· "}.get(a.verdict, "· "))
-                print(f"{mark} {a.claim_id:20} {a.verdict:13} 覆盖 {a.coverage:6} "
+                basis = "（仅自述）" if a.basis == "self_reported" else ""
+                print(f"{mark} {a.claim_id:20} {a.verdict:13}{basis} 覆盖 {a.coverage:6} "
                       f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类")
                 print(f"     {claim.statement}")
                 if a.entity_readings:
@@ -1213,7 +1245,7 @@ def main(argv: list[str] | None = None) -> int:
     evi.add_argument("action",
                      choices=["observe", "show", "claims", "report", "sources",
                               "probe", "propose", "proposals", "review", "kbreview",
-                              "collect"])
+                              "collect", "articles"])
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")

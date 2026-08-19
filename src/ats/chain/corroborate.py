@@ -19,13 +19,28 @@ The three gates, in order (docs/CHAIN_EVIDENCE.md §4.5):
                 counting. Ten reprints of one report are one cluster; a company's press
                 release, earnings deck and call quoting the same number are one cluster;
                 and one call restating a plan across five fiscal periods is one cluster.
-  2. STANCE   — a verdict needs >= 2 DIFFERENT witness stances, taken from the CLAIM's
-                declared witness table. Read off the document instead, every filing is
-                the company's own call and the answer is always "incumbent", so
-                cross-stance corroboration could never be satisfied.
+  2. STANCE   — vantage diversity is GRADED, not required. >= 2 declared stances gives
+                `basis=corroborated`; one stance still yields the verdict as
+                `basis=self_reported` provided MIN_INDEPENDENT_SPEAKERS separate filers
+                spoke. Only below that does the engine decline. Stances come from the
+                CLAIM's declared witness table — read off the document instead, every
+                filing is the company's own call and the answer is always "incumbent".
   3. ISOLATION— a `relative` claim moves ONLY on `direct` dimensions about its subject.
                 A competitor expanding capacity proves industry supply grew; it does
                 NOT prove our holding lost share.
+
+Gate 2 was a veto until 2026-08-15 and is now a grade. The veto conflated two different
+properties: whether the speakers are INDEPENDENT, and whether they sit at DIFFERENT
+points in the chain. One company filing three documents fails both — that is real
+self-confirmation and is still blocked. But four competing suppliers agreeing fails only
+the second, and they are the least likely parties on earth to coordinate a story: if
+Lumentum says it is sold out, Coherent has every incentive to say it has capacity.
+Blocking that case returned `mixed` — a word meaning "the evidence conflicts" — over
+7 supporting clusters and 0 refuting ones, which is not a cautious reading but a wrong
+one. The cross-section path had already reached the right answer (EntityReading.basis:
+"the bias is common-mode and the COMPARISON still carries information"); this brings the
+two paths into line and deletes the per-claim `min_stance_classes` override that existed
+only to buy exemptions from the veto.
 
 Support and refute accumulate separately and are never netted: strong counter-evidence
 must stay visible rather than disappear into one score.
@@ -45,11 +60,19 @@ log = logging.getLogger("ats.chain.corroborate")
 # it may add weight but never counts as an independent witness class, which is what
 # stops "three sell-side notes" or a wall of reprints from confirming anything.
 PRIMARY_TYPES = {"reported_actual", "guidance", "counterparty", "regulatory"}
-# A claim may lower the stance-diversity threshold (ClaimDef.min_stance_classes) when
-# the question has one vantage point by construction. The exchange is source
-# multiplicity: below this many distinct speakers the relaxed threshold is ignored and
-# the sector default applies, so a lone company can never confirm a claim about itself.
-RELAXED_MIN_SPEAKERS = 3
+# When only one vantage point is represented, this many INDEPENDENT filers must have
+# spoken for the reading to stand (as `self_reported`). It is the substitute for vantage
+# diversity, not a waiver of it: the failure mode gate 2 exists to stop is one interested
+# party confirming itself, and that is a statement about speaker count, not about seats
+# in the value chain. Below this the verdict is withheld.
+MIN_INDEPENDENT_SPEAKERS = 3
+# How much bigger the majority must be than the minority for the direction to be
+# callable. Below this the claim is `mixed` — genuinely indecisive, not merely
+# contested. Stated as a ratio on purpose: an absolute dissent count makes 3-against-34
+# look like the same kind of doubt as 3-against-5, and a share threshold has to be
+# picked, which is how the previous rule ended up drawing the line between "分歧" and
+# "印证" two percentage points apart.
+DECISIVE_MAJORITY_RATIO = 2.0
 SECONDARY_TYPES = {"research", "media", "market"}
 
 
@@ -237,8 +260,14 @@ def cross_section(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
 
     assessment.entity_readings = out
     assessment.stance_classes = len({c.stance for c in clusters if c.stance and c.primary})
+    assessment.speakers = sorted({c.speaker for c in clusters if c.speaker})
     graded = [r for r in out if r.standing != "unknown"]
     assessment.verdict = "resolved" if len(graded) >= 2 else "unknown"
+    # The cohort-level basis is the weakest link: one corroborated reading does not make
+    # the comparison corroborated if the others are all self-reported.
+    if graded:
+        rank = {"thin": 0, "self_reported": 1, "corroborated": 2}
+        assessment.basis = min((r.basis for r in graded), key=lambda b: rank.get(b, 0))
     assessment.observation_ids = [i for c in clusters for i in c.observation_ids]
     assessment.note = (
         f"{len(graded)}/{len(claim.entities)} 家有读数 · "
@@ -259,15 +288,10 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         return cross_section(claim, rows, cfg=cfg, as_of=as_of, judge=judge)
     cfg = cfg or {}
     min_clusters = cfg.get("min_clusters", 2)
-    sector_min_stances = cfg.get("min_stance_classes", 2)
-    min_stances = (claim.min_stance_classes
-                   if claim.min_stance_classes is not None else sector_min_stances)
+    min_stances = cfg.get("min_stance_classes", 2)
     min_conf = cfg.get("min_confidence", 0.5)
-    # How much dissent overturns a majority. EITHER condition suffices: a few
-    # independent dissenting clusters matter even in a large body of evidence, and a
-    # large share matters even when the body is small.
-    min_dissent_clusters = cfg.get("min_dissent_clusters", 3)
-    min_dissent_share = cfg.get("min_dissent_share", 0.20)
+    # `min_dissent_clusters` / `min_dissent_share` used to be read here. Both are gone:
+    # dissent no longer vetoes, it is named (see DECISIVE_MAJORITY_RATIO).
     as_of = as_of or datetime.now(timezone.utc)
 
     expected = claim.expected_witnesses()
@@ -324,66 +348,97 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
         assessment.note = f"独立证据簇 {total} < {min_clusters}，证据不足"
         return assessment
 
-    # `mixed` means "the disagreement is unresolved", and a lone dissenting cluster
-    # against twenty-seven is not a disagreement — it is one reading worth checking.
-    # The old rule (any refute at all -> mixed) made that distinction impossible, and
-    # it got worse as coverage improved: with 38 clusters the same data returned
-    # `mixed 26/1` and `supportive 28/0` on consecutive runs, because the adjudicator
-    # wavers on borderline clusters and one flip decided the verdict.
+    # `mixed` means "I cannot tell you which way this reads" — nothing weaker. A
+    # minority does not overturn a majority merely by existing; it overturns it by
+    # making the majority INDECISIVE. The test is therefore a ratio, not a count:
+    # unless the majority is at least twice the minority, the split is too close to
+    # call and the claim is genuinely unresolved.
     #
-    # So the minority must be MATERIAL to overturn: either several independent clusters
-    # or a real share of the evidence. Below that the majority stands — but the
-    # dissenters are still named, and the note still says the dissent exists. It is
-    # demoted from veto to caveat, never hidden.
+    # Two earlier rules failed here, in opposite directions. "Any refute at all ->
+    # mixed" made a lone dissenting cluster veto twenty-seven. Replacing it with
+    # ">= 3 clusters OR >= 20% share" was still a veto, just a higher one, and the
+    # thresholds turned out to sit exactly where the data lives: measured across the
+    # book, `capex_funding_quality` tripped at 3 clusters and 20.0% — both conditions
+    # at their exact boundary — while `asic_substitution_delivering` passed at 18%.
+    # A two-point difference decided between "分歧" and "印证", and the adjudicator's
+    # own wobble moved the same claim between 3:12 and 4:15 on consecutive runs. A
+    # threshold that unstable is not measuring anything.
+    #
+    # What the minority IS worth is naming. "Every hyperscaler's free cash flow is
+    # tight except Microsoft" is a finding — and a more useful one than the majority
+    # alone — but only if Microsoft is reported as a named exception rather than
+    # averaged away into "unresolved". So dissent is preserved in full (`dissenters`,
+    # and every `judgements` row with its reason) and travels with the verdict.
     minority = min(support, refute, key=len) if (support and refute) else []
+    majority = max(support, refute, key=len) if (support and refute) else (support or refute)
     if minority:
         assessment.dissenters = sorted({c.speaker for c in minority})
-    material = bool(minority) and (
-        len(minority) >= min_dissent_clusters
-        or len(minority) / total >= min_dissent_share)
+    indecisive = bool(minority) and len(majority) < DECISIVE_MAJORITY_RATIO * len(minority)
 
-    if material:
+    if indecisive:
         assessment.verdict = "mixed"
         assessment.unresolved_reason = "dissent"
-        assessment.note = f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，分歧未消解"
+        assessment.note = (f"支持 {len(support)} 簇 vs 反驳 {len(refute)} 簇，"
+                           f"多数不足少数的 {DECISIVE_MAJORITY_RATIO:g} 倍，方向无法判定")
         return assessment
 
-    # An override buys nothing unless several independent filers are talking: the
-    # failure mode the gate guards against is one interested party confirming itself.
-    speakers = {c.speaker for c in (support + refute) if c.speaker}
-    relaxed = min_stances < sector_min_stances
-    if relaxed and len(speakers) < RELAXED_MIN_SPEAKERS:
-        min_stances = sector_min_stances
-        relaxed = False
+    # Gate 2, as a grade. Vantage diversity is what we WANT; independent-speaker count
+    # is what we REQUIRE. One company filing three documents fails both and is still
+    # withheld; four competing suppliers agreeing fails only the first, and is reported
+    # with the caveat attached rather than thrown away.
+    # PRIMARY only, exactly as the stance count is. Secondary material may add weight
+    # but can never establish a fact on its own, and the speaker floor is the substitute
+    # for the stance requirement — so counting research houses here would let three
+    # sell-side notes confirm a claim through the back door, which is the single thing
+    # PRIMARY_TYPES exists to prevent.
+    speakers = sorted({c.speaker for c in (support + refute) if c.speaker and c.primary})
+    assessment.speakers = speakers
 
-    if len(stances) < min_stances:
-        # Single-stance evidence, however voluminous, cannot confirm. Say WHY, or a
-        # reader takes "mixed" to mean "conflicting" rather than "unconfirmed" — and
-        # say WHICH WAY it leans, or "unconfirmed" reads as "we learned nothing".
-        # A claim can be refuted 9:1 by five independent filings and still land here.
-        assessment.verdict = "mixed"
+    if len(stances) < min_stances and len(speakers) < MIN_INDEPENDENT_SPEAKERS:
+        # One vantage AND too few filers — this is the self-confirmation case the gate
+        # exists for. `unknown`, not `mixed`: nothing here conflicts, there is simply
+        # not enough independent testimony to stand on. Say which way it leans anyway,
+        # or "unconfirmed" reads as "we learned nothing".
+        assessment.verdict = "unknown"
+        assessment.basis = "thin"
         assessment.unresolved_reason = "single_stance"
         lean = ("反驳" if len(refute) > len(support)
                 else "支持" if len(support) > len(refute) else "两向持平")
         tilt = (f"证据一边倒（{lean} {max(len(support), len(refute))} 簇 vs "
                 f"{min(len(support), len(refute))} 簇）" if support or refute else "无方向性证据")
-        assessment.note = (f"{tilt}，但仅 {len(stances)} 类立场"
-                           f"（{'/'.join(sorted(stances)) or '无'}），未达 {min_stances} 类确认门槛")
+        assessment.note = (
+            f"{tilt}，但仅 {len(stances)} 类立场（{'/'.join(sorted(stances)) or '无'}）"
+            f"且只有 {len(speakers)} 个独立说话人（需 {MIN_INDEPENDENT_SPEAKERS} 个）"
+            f"——证据来自同一视角的少数几方，不足以独立成立")
         return assessment
 
+    assessment.basis = "corroborated" if len(stances) >= min_stances else "self_reported"
     assessment.verdict = "supportive" if len(support) >= len(refute) else "contradicted"
     assessment.note = (f"{max(len(support), len(refute))} 个独立证据簇 · "
                        f"{len(stances)} 类立场（{'/'.join(sorted(stances))}）")
-    if relaxed:
-        # Never let a relaxed threshold be invisible: a reader must be able to see that
-        # this verdict rests on one vantage point, and on how many separate filers.
-        assessment.note += (f" · ⚠️ 本命题声明只有 {min_stances} 类立场可得"
-                            f"（单一视角问题），由 {len(speakers)} 个独立说话人支撑")
+    if assessment.basis == "self_reported":
+        # Never let single-vantage support pass as if it were corroborated: the reader
+        # must see that everyone who spoke sits on the same side of the table.
+        assessment.note += (f" · ⚠️ 仅自述（{'/'.join(sorted(stances))} 单一视角），"
+                            f"由 {len(speakers)} 个独立说话人支撑：{','.join(speakers)}")
     if minority:
-        assessment.note += (f" · ⚠️ 另有 {len(minority)} 簇异议"
-                            f"（{','.join(assessment.dissenters)}），未达翻案门槛")
+        # Framed as an EXCEPTION, not as a failed challenge. "未达翻案门槛" told the
+        # reader the minority had tried and lost, which invites skipping it — but the
+        # minority is often the most informative row in the claim: if every hyperscaler
+        # but one reports tightening cash flow, the one is what a reader should look at.
+        assessment.note += (f" · 具名例外：{','.join(assessment.dissenters)}"
+                            f"（{len(minority)} 簇，反向读数已保留）")
     if assessment.silent_witnesses:
         assessment.note += f" · 未发声：{','.join(assessment.silent_witnesses)}"
+    # An unjudged cluster and a genuinely neutral one are the same row downstream, so a
+    # partial adjudication does not look like a failure — it looks like a claim with
+    # less support than it has. Measured 2026-08-18: 11 of 17 clusters came back
+    # unjudged and the weekly output showed only the reduced score, with nothing to
+    # distinguish it from a claim whose evidence really was that thin.
+    unjudged = sum(1 for j in judgements if j.reason == "未获判读")
+    if unjudged:
+        assessment.note += (f" · ⚠️ {unjudged}/{len(judgements)} 簇未获判读"
+                            f"（判读器本轮未返回，已按中性处理——这是缺口不是中性结论）")
     return assessment
 
 

@@ -1,0 +1,24 @@
+# Applied Materials (AMAT) — PEAD stub · L6 半导体设备（沉积/刻蚀/量测/先进封装）。
+# 2026-08-15 新建。此前**没有这个文件**，AMAT 也不在 targets/observe，从未抽过第一方
+# 财报——台账里关于它的读数全是第三方转述。它是 L6 截面的第四家，不补齐这一家，
+# 截面就只剩三家，且缺了唯一一个"产品组合最宽、中国敞口最大"的对照组。
+#
+# **observe 名单成员，不可交易**：只贡献产业链证据，绝不进下单路径（见 config/pead.yaml）。
+# TODO: 定制打分卡（分部收入结构/中国占比/服务收入/先进封装增速）；财报前补 fiscal_label。
+
+symbol: AMAT
+company_name: "Applied Materials"
+fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对
+                              # AMAT 财年 10 月底结：FQ4 约 11 月中申报
+
+# 产业链关系：四大设备商里产品组合最宽的一家——沉积为主，同时覆盖刻蚀、量测与先进封装。
+# 知识库判据说"产品组合广度是最软的护城河"，所以它在截面里的作用恰恰是**反例对照**：
+# 广度能摊薄周期，但在可替代的工序上换不来定价权。
+signal_chain:
+  - {symbol: TSM,   role: downstream}   # 先进逻辑产能
+  - {symbol: SKHY,  role: downstream}   # HBM/DRAM 扩产
+  - {symbol: MU,    role: downstream}   # DRAM/NAND 产线
+  - {symbol: INTC,  role: downstream}   # IDM 扩产与工具支出
+  - {symbol: LRCX,  role: peer}         # 沉积/刻蚀直接竞争
+  - {symbol: KLAC,  role: peer}         # 部分量测环节直接竞争
+  - {symbol: ASML,  role: peer}         # 同吃 WFE 预算但工序不重叠

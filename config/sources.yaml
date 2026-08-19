@@ -91,5 +91,233 @@ sources:
     # 注意这让它落入 SECONDARY —— 能参与支持/反驳记分，但**不贡献立场类别**。这是对的：
     # 立场类别是"独立证人"的度量，而一家研究机构的报价不是一个新的经济位置。
 
+# ==============================================================================
+# 文章类第三方源 —— 上面 sources: 的兄弟，但走另一条通路
+# ==============================================================================
+#
+# 区别只有一个，但它决定了两者不能合并：**上面那些是数列，这些是散文**。
+# 数列靠公式变成观测（chain/sources.py::to_observations，全程不过 LLM）；文章必须被读。
+# 混进同一个声明块，就等于让 sources.py 悄悄失去它自己文档字符串所标榜的那个性质
+# ——「这些数字从未经过模型的判断」。所以另起一块，另走 chain/articles.py。
+#
+# --- 字段（与 sources: 不同的部分）---------------------------------------------
+# adapter          -> src/ats/data/articles/<adapter>.py，需实现 discover() 与 fetch_body()
+# entity           **发布者**，不是被报道的对象。它是「说话人」（source_entity），
+#                  文章里提到的公司才是 entity —— 一篇文章可以同时讲三家公司
+# pages            索引页往回翻几页。跨轮重叠是免费的：已入库的文章在花掉一次抓取
+#                  之前就被跳过，更别说模型调用
+# max_per_run      成本上限，只封顶模型调用，不封顶发现
+# min_body_chars   作用在**抽出的正文**上，不是整页。见下方 TrendForce 的注释
+# match            slug 关键词预筛（slug 里就有标题）。**只管成本不管正确性**——
+#                  concept_menu 是封闭菜单，漏网的离题文章会整篇落进未映射池，
+#                  任何命题都够不着。所以宁可宽：筛漏了丢的是真证据，
+#                  筛松了只浪费一次模型调用
+#
+# 立场与观测类型：entity 进 witnesses 表时给 regulator（它独立于任何一方当事人），
+# 但**逐行的 observation_type 由抽取模型判**——转述台积电指引的句子是 guidance（PRIMARY，
+# 贡献立场类），机构自己的观点是 research（SECONDARY，只贡献权重）。这意味着一条命题
+# 能否过立场闸，部分取决于模型的逐行判型。这不稳定但有语义依据，**不要试图用配置钉死
+# 类型** —— 那正是 supports_when 当初被删掉的同一类错误（见 schemas/chain.py::Concept）。
+
+article_sources:
+  trendforce_news:
+    label: TrendForce 新闻
+    adapter: trendforce
+    entity: TRENDFORCE
+    stance: regulator
+    doc_type: article
+    cadence: weekly
+    pages: 5              # 每页约 9 篇、每天发 7-9 篇 -> 覆盖约一周，周更作业够且有冗余
+    # 2026-08-17 由 12 提到 16：上面的关键词集扩了约三成（L4/XPU 一组），而
+    # max_per_run 是**硬上限**——不同步抬高，新增的加速器文章会在上限处挤掉存储/封装/
+    # 光互联的文章，等于用 L4 的覆盖率换 L3/L5 的覆盖率。这是本文件里已经写过一次的
+    # 教训（"过松的过滤器会静默挤掉真正该读的文章"），只是这次挤压来自上限而不是过滤器。
+    max_per_run: 16
+    min_body_chars: 800   # 与 data/source_cache.py 的 MIN_CHARS 对齐
+    # 2026-08-14 补光互联词。原来这一串全是存储/封装词，**一个光的都没有**，
+    # 于是 TrendForce 的光模块/CPO 报道从来没被抓过——直接后果是 L3 三条 common 命题
+    # 全部卡在「立场单一（只有 supplier）」，因为唯一能提供 regulator 立场的证人
+    # 被关键词挡在门外。这不是判读的问题，是取数的问题。
+    # 2026-08-17 补 L4/XPU 词。**与 2026-08-14 补光互联词那次是同一个毛病**：这串词里
+    # nvidia/marvell/broadcom/intel 早就有，但 gpu / asic / xpu / accelerator / amd
+    # **一个都没有**——于是 TrendForce 关于加速器本身（而不是它用的存储与封装）的报道
+    # 从来没被抓过。后果同样直接：L4 四家的台账里非自述读数总共只有 11 条，AVGO 与 MRVL
+    # 各 0 条，而 TrendForce 是这一层唯一现成的 regulator 立场来源。
+    # **这是取数问题，不是判读问题**——不补词，四条 L4 命题只能全部落在 self_reported。
+    match: [cowos, copos, emib, packaging, hbm, dram, nand, memory, foundry,
+            tsmc, wafer, samsung, sk-hynix, hynix, micron, intel, nvidia,
+            nanometer, 2nm, 3nm, advanced, osat, ase, capacity, yield,
+            # --- 光互联/互联层 ---
+            optical, optics, transceiver, laser, photonic, photonics, cpo,
+            co-packaged, npo, dsp, retimer, aec, interconnect, 800g, 1.6t, 3.2t,
+            eml, vcsel, inp, lumentum, coherent, credo, marvell, broadcom,
+            # --- L4 芯片设计 / XPU ---
+            # 刻意不加 `training` 与 `ai chip`：前者在标题里几乎总是泛指"AI 训练"而不是
+            # 芯片，后者与已有的 nvidia/gpu/asic 高度重叠。按本文件自己的教训——过松的
+            # 过滤器不只是费钱，它会在 max_per_run 上限处**静默挤掉真正该读的文章**。
+            gpu, asic, xpu, accelerator, amd, instinct, blackwell, rubin,
+            tpu, trainium, inference, hyperscaler]
+    # 为什么不用它的 RSS（2026-08-13 实测）：https://www.trendforce.com/news/feed/ 确实存在，
+    # 带全文与结构化 tags，本该是更好的源 —— 但它的**内容冻结在 2026-07-01**，
+    # 而站点每天都在发（索引页当天就有 08-13 的文章）。更阴的是它每次都带一个新的
+    # Last-Modified 重新分发，光看响应头看不出它是死的。所以发现走索引页翻页。
+    # 哪天它修好了，只需要改 data/articles/trendforce.py 的 discover() 一个函数。
+    #
+    # 付费墙怎么处理：**靠正文容器在不在，不靠检测付费特征**。实测否掉的三种做法——
+    #   · 按 "Subscribe"/"Member Center" 关键词判：每一页都命中（导航栏常驻），6/6 篇误报
+    #   · 按整页长度判：反向相关，付费的 research/dram 页纯文本 32,216 字符，
+    #     比任何正常文章都长，却一个字正文都没有
+    #   · 直接用整页文本：正文只占 47%，其余是导航与页脚；付费页则是 100% 噪音
+    # 采用的判据让**新出现的付费形态默认落在安全的一侧**（记成缺口），而不是默认被当成正文。
+    # 取不到正文记 save_document_failure —— 「读不到」和「没说」是两种状态，
+    # 只报成功会让付费墙扩大伪装成「TrendForce 最近没什么可说的」。
+
+  # 2026-08-18 新增。**这条链上唯一覆盖「结构性交易」的源。**
+  # 财报讲的是已经结束的那个季度；而融资平台、对客户的股权与担保、供应长约这类事情是
+  # **公告出来的**，等它出现在 10-Q 里，命题问的那件事早就变了。
+  #
+  # 实证：`xpu_revenue_funded_by_customers`（XPU 收入由客户自有资金还是厂商垫资支撑）
+  # 只靠第一方财报时判 unknown——独立证据簇 1 < 2。答案一直在这个源里：
+  #   [2026-08-11 DJ-N]《Nvidia, Wall Street Firms Set Financing Pact -- WSJ》
+  #     Apollo/Blackstone/BlackRock/Brookfield/高盛/KKR「aim to deploy over $500 billion
+  #     of outside capital」建立「compute financing platforms」；
+  #     并且——「Apollo and Blackstone earlier this year struck a deal with **Broadcom**
+  #     to set up a similar financing platform for the chip maker's customers.」
+  # 最后那句比标题值钱：它是**对博通自述 SPV 的独立印证**，而博通在台账里非自述读数为 0。
+  # 这个源正是截面摆脱「四家自己给自己打分」的出路。
+  #
+  # **不需要订阅**：下面这些 Dow Jones 与 Briefing.com 源是有资金账户默认开通的
+  # （TWS ▸ 配置 ▸ API ▸ 新闻配置里已勾选）。Benzinga / The Fly 在同一个对话框里但要另外
+  # 订阅，未订阅时它们根本不出现在 reqNewsProviders() 里，不需要特殊处理。
+  #
+  # ⚠️ **依赖 TWS 正在运行**。取不到时按现有约定记成 unreachable 缺口（"读不到"与
+  # "没说"是两种状态），不会静默当成"最近没新闻"。
+  #
+  # stance 用 regulator：同 TRENDFORCE 的理由——WitnessStance 枚举里没有 media，
+  # 这个位置要的是"独立于任何一方的第三方"，不是"当事人的某一方"。
+  # entity 用 DOWJONES 一个口径而不按 WSJ/Barron's/MarketWatch 拆：它们同属道琼斯，
+  # 同一件事的多篇报道**本来就该算一个证据簇**（不变式 3：十篇转载是一个簇）。
+  ibkr_news:
+    label: IBKR 新闻（道琼斯/Briefing）
+    adapter: ibkr_news
+    entity: DOWJONES
+    stance: regulator
+    doc_type: article
+    cadence: daily
+    pages: 3                # 对本适配器 = 回看 3 个 3 天切片
+    max_per_run: 10
+    min_body_chars: 600     # 通讯社正文比网页文章短，阈值低于 TrendForce 的 800
+    params:
+      lookback_days: 7
+      # 只扫这些标的的新闻。**不是全市场**——按 conId 逐个请求，名单越长越慢，
+      # 且与命题无关的公司只会把未映射池做大。先覆盖 L4 四家 + 最活跃的买方。
+      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+    # 关键词比 TrendForce 那份窄且偏"交易/结构"，因为这个源的价值不在于复述基本面
+    # （那些财报里都有），而在于**财报里没有的那类事实**。
+    match: [financing, finance, guarantee, backstop, prepay, prepayment, stake,
+            equity, invest, investment, vehicle, spv, lending, loan, debt,
+            apollo, blackstone, blackrock, brookfield, kkr, "goldman sachs",
+            supply, agreement, deal, pact, partnership, commitment, order,
+            capacity, gpu, asic, xpu, accelerator, chip, hbm, foundry, capex]
+
+  # 2026-08-18 接入。**文章已经在抓了，缺的只是通往命题的那一段。**
+  # config/news_sources.yaml 的 newsletter 管线（IMAP + Substack RSS）一直在收 SemiAnalysis，
+  # 产出 47 条 research_insights。但那张表的形状是 ticker/direction/summary/quote，
+  # **没有 concept、没有 stance、没有 source_entity**，所以任何命题都够不着它。
+  # 而躺在里面的东西是这样的：
+  #   AMD |「Meta is requesting a custom cut-down version of AMD's MI450X with half the
+  #         compute and HBM, which could significantly reduce AMD's volume...」
+  # 具名客户 + 具名项目的配置变更 + 量的方向，正是 xpu_account_and_customer_mix 最缺的，
+  # 而且**不是自述**——四家自己给自己打分的截面永远产不出这种读数。
+  #
+  # 两条管线读同一篇文章，是有意的不是浪费：
+  #   research_insights   回答「这对我持有的某只票意味着什么」→ 喂 PEAD 监控
+  #   evidence_observations 回答「这条事实属于哪个命题维度」→ 喂命题印证
+  # 两个不同的问题，合并只会让一个输出把两件事都做砸。成本由 max_per_run 封顶。
+  # 重复计数不是风险：闸 1 按**说话人**聚簇，SemiAnalysis 关于同一件事说多少遍都是一簇。
+  semianalysis:
+    label: SemiAnalysis（已订阅）
+    adapter: semianalysis
+    entity: SEMIANALYSIS
+    stance: regulator     # 同 TRENDFORCE / DOWJONES：枚举里没有 media，这个位置要的是
+                          # "独立于任何一方的第三方"，不是"当事人的某一方"
+    doc_type: article
+    cadence: weekly
+    pages: 3
+    max_per_run: 4        # 单篇 2-7 万字符，会被切成多个抽取窗口，比网页文章贵得多
+    min_body_chars: 2000
+    params:
+      lookback_days: 30
+      source_match: SemiAnalysis   # newsletter 管线里若以后有别家，这里限定只取它
+    # **刻意留空 = 全读。** 与 TrendForce/IBKR 相反：那两个是宽口径信息流，需要关键词
+    # 控成本；这个是逐篇订阅的深度分析，篇篇都值得读，加过滤只会漏掉真正的增量。
+    # 见 ArticleSourceDef.match 的注释：漏一篇丢的是真证据，多读一篇只多一次模型调用。
+    match: []
+
 # --- 已评估但暂不接入 ---------------------------------------------------------
-# （暂无）
+#
+# ## L1（AI 应用层）候选源 —— 2026-08-19 逐个实测
+#
+# 背景：L1 五条命题的需求端已定稿（全文在 config/sectors/ai_hardware.yaml 的 L1_app
+# 注释块），供给端就是下面这几个。**结论先行：可达性不是瓶颈，口径与历史才是。**
+#
+# 实测结果（curl，非推测）：
+#
+#   端点                                   状态    形态与要点
+#   ─────────────────────────────────────────────────────────────────────────────
+#   openrouter /api/v1/models              200    无鉴权 · 415 模型 / 60 厂商 · 逐档定价
+#                                                 (prompt/completion/cache) + created 戳
+#   openrouter /models/{id}/endpoints      200    逐 provider 定价（Azure / 原厂分列）
+#   epoch.ai notable_ai_models.csv         200    免费 · 1050 行 · Training compute (FLOP)
+#                                                 + 训练成本 + 组织 + 发布日期
+#   openai.com /news/rss.xml               200    标准 RSS
+#   anthropic.com /news                    200    **无 RSS**（/rss.xml 与 /news/rss.xml
+#                                                 均 404）；索引页 href 可提取
+#   huggingface /api/models                200    无鉴权（开源模型下载量）
+#   artificialanalysis.ai /api/v2/...      401    **要付费 key** → 放弃，用 epoch 替代
+#   api.deepseek.com                       401    → 走 huggingface + 第三方
+#
+# ### 为什么值得做：它绕开了「信不信 L1 自述」这个问题
+# OpenRouter 给的是**价目表，不是叙事**——没有解释空间，不需要 LLM 抽取，走
+# `sources:`（确定性序列）而不是 `article_sources:`，stance 同 TRENDFORCE 用 regulator。
+# 而且前沿与开源同表：**同一能力档位上闭源与开源的价差走势**，一张表就能读出来。
+#
+# ### 三个必须先解决的问题（这才是「暂不接入」的原因）
+#
+# ① **定价类 API 只给当前状态，没有历史。**
+#    现有两个序列源都是从提供方拿历史的（kr_ecos 一次抓 lookback+13 个月，在适配器内部
+#    自己算 yoy/mom）。OpenRouter / HuggingFace 问它今天只答今天。
+#    要做成序列**必须自己定期存快照**，而 memory/store.py 的 20 张表里没有一张适合放
+#    外部时序。**工作量因此不是「一个 90 行适配器」**，估计多 1.5–2 倍。
+#    ⚠️ 折中方案（第一版只产出水平值、等跑几周再补方向）**不可取**：方向正是这个源
+#    全部的价值所在，先做半截等于先做一个没用的版本。
+#
+# ② **定价序列不能做成篮子均价。**
+#    新模型上架、旧模型下架都会让均价跳变，而那不是价格变化。两种正确构造二选一：
+#      · 按模型血统追踪 —— 最贴近「单位能力价格」，但需人工维护血统映射表
+#      · 按能力档位分组 —— 用 context_length / 是否 reasoning 等 API 里直接可读的字段
+#        分档，全自动；且同档位内的闭源-开源价差正好回答「开源低价侵蚀」
+#    倾向第二个（不需要人维护映射），**但这是真正的设计取舍，定了才能写适配器**。
+#
+# ③ **Epoch 是回填型数据集。**
+#    Training compute 是事后反推的，近期覆盖率逐年下滑：
+#      2024H1 55% · 2024H2 41% · 2025H1 43% · 2025H2 33% · 2026H1 25% · 2026H2 38%
+#    含义很具体：**能回答「这条曲线的形状」，回答不了「当季有没有变化」**。
+#    当长期判据（tech_tenor）用可以，当季度读数用会一直是空的。
+#    好处是它**自带完整历史**，不受 ① 的快照问题影响 —— 所以它是这批里最容易先落地的。
+#
+# ### 与本文件既有教训的关系
+# `ibkr_news` 按 conId 逐个扫 `symbols`，**未上市公司根本扫不到**。关于模型公司融资结构
+# 的报道，只有被归到某只已列名标的的新闻流里时才捞得到。
+# **这个补关键词解决不了 —— 是适配器形状的问题**，与本文件上面两次「补词」的教训不同类。
+#
+# `trendforce` 的 match 里**没有任何 L1 词**，这个倒是同一个毛病的第三次（补光互联词、
+# 补 L4 词之后），可以顺手解决。
+#
+# ### 建议顺序
+#   1. epoch_ai_models（序列源，自带历史，无隐藏成本）
+#   2. openai_news（有 RSS，最省；先用它验证「L1 自述该怎么加权」）
+#   3. openrouter_pricing（价值最高，但要先定 ② 的口径并接受 ① 的快照成本）
+#   4. anthropic_news（同型但因无 RSS 贵一倍，等 2 跑通再复制）
+#   — huggingface：想清楚「下载量」代理什么再说。它测的是**开发者兴趣**，不是企业采用，
+#     很容易被当成后者用。

@@ -132,16 +132,17 @@ def main() -> int:
     w("## 1. `evidence_observations` — 本层命题够得着的部分")
     w("")
     rows = db.execute(
-        "SELECT * FROM evidence_observations WHERE concept IN (%s) "
-        "ORDER BY concept, entity" % ",".join("?" * len(concept_keys)),
+        "SELECT * FROM evidence_observations WHERE superseded_at IS NULL "
+        "AND concept IN (%s) ORDER BY concept, entity" % ",".join("?" * len(concept_keys)),
         sorted(concept_keys)).fetchall()
     by_concept: dict[str, list] = defaultdict(list)
     for r in rows:
         by_concept[r["concept"]].append(r)
-    total = db.execute("SELECT COUNT(*) FROM evidence_observations").fetchone()[0]
+    total = db.execute("SELECT COUNT(*) FROM evidence_observations "
+                       "WHERE superseded_at IS NULL").fetchone()[0]
     unmapped_n = db.execute(
         "SELECT COUNT(*) FROM evidence_observations WHERE (concept IS NULL OR concept='')"
-        " AND COALESCE(discovery_evidence,0)=0").fetchone()[0]
+        " AND COALESCE(discovery_evidence,0)=0 AND superseded_at IS NULL").fetchone()[0]
     w(f"全库 **{total}** 条 · 归到本层维度的 **{len(rows)}** 条 · "
       f"未映射池 **{unmapped_n}** 条")
     w("")
@@ -172,7 +173,7 @@ def main() -> int:
     un = db.execute(
         "SELECT entity, source_entity, metric, evidence_span FROM evidence_observations"
         " WHERE (concept IS NULL OR concept='') AND COALESCE(discovery_evidence,0)=0"
-        " AND entity IN (%s) ORDER BY entity LIMIT ?" % ",".join("?" * len(ents)),
+        " AND superseded_at IS NULL AND entity IN (%s) ORDER BY entity LIMIT ?" % ",".join("?" * len(ents)),
         [*sorted(ents), args.unmapped_cap]).fetchall()
     w(f"### 未映射池里属于本层相关公司的 — {len(un)} 条"
       f"（上限 {args.unmapped_cap}）")

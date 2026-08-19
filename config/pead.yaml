@@ -15,7 +15,23 @@ targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, CRDO, AVGO, MRVL, VRT, 
 # 供需由海力士/美光/三星三家共同决定，云 capex 由五家共同决定，只读自己持有的那家
 # 等于用几分之一的证据下注。
 # 与 targets 的区别：targets 可交易、走完整 PEAD 打分；observe 只贡献证据。
-observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX]
+# 2026-08-15 加 AMAT：它在 L6 的 tickers 里、是设备层截面的第四家，但此前既不在 targets
+# 也不在 observe，从未抽取过第一方财报——台账里关于它的 12 条全是 TrendForce 转述。
+# 不持有它，所以进 observe 而非 targets（只贡献证据，不进下单路径）。
+# 2026-08-17 加 AMD：**与 AMAT 完全同型的缺口**。它在 L4 的 tickers 里、是 XPU 截面的
+# 第四家、台账里已有 223 条读数，却既不在 targets 也不在 observe——而证据扫描只覆盖
+# targets+observe（runtime/scheduler.py 的 _observe_window），所以那 223 条是某次手动
+# `ats evidence observe` 留下的，**不会自动刷新**，horizon 一滚就全部过期。
+# 它是唯一的第二家外售通用 GPU，没有它，L4 截面里"通用平台路线"只剩 NVDA 一家自述。
+# 不持有，所以进 observe。
+# 2026-08-18 加 CRWV / NBIS（neocloud）。加它们的理由不是"多两家买方"，而是这一类
+# 主体**说得出别人说不出的话**：已装机机队的利用率、续租率、按小时租金、以及采购是自筹
+# 还是靠供应商融资——第一手的算力经济学。上一轮 xpu_order_funding_source 上最有价值的
+# 一条读数正是 CoreWeave CEO 说「一个把 5000 亿美元引进市场的通道只会压低我的资金成本」，
+# 而它当时够不着任何命题，因为 CRWV 既不在名单里也不是证人。
+# ⚠️ 它们的机队几乎全绑英伟达供应链：对 NVDA 是有力的客户侧佐证，对 ASIC 路线参考有限
+#（见 config/entities.yaml 里 NBIS 条目的说明）。
+observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX, INTC, AMAT, AMD, CRWV, NBIS]
 
 monitor:
   enabled: true

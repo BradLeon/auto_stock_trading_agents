@@ -17,6 +17,379 @@ layers:
     # xAI 已于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市并出财报，
     # 所以它不再是「无票据」——已登记为 entities.yaml 的 SPCX 并进入 L2 各命题的证人表。
     private: [OpenAI, Anthropic]             # 无票据，供 LLM 参考需求侧
+    structure_notes:
+      Token经济: config/knowledge/Token经济.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+    # 2026-08-18 人工新增。此前 docs/KNOWLEDGE.md 写着「L1 不写」，理由是只有一只票、
+    # cross_section._zscores 需要 ≥2 个样本——**理由本身没错，但它答的是另一个问题**。
+    # 单样本确实让本层的截面 z 分恒为 0，所以这份笔记不改变任何权重；它有两个别的用途：
+    #   ① `SectorContext.kb_criteria` 是**各层 structure_notes 的汇总**，sector_analyst
+    #      读的是全部九份。L2–L6 的景气叙事最终都挂在「本层能不能把算力卖成链外收入」
+    #      上，而此前那个前提**没有任何一份笔记写过**——它只存在于六份研报的散装叙述里。
+    #   ② 本层主要玩家未上市（见 private），判读只能靠对手方披露。「怎么读二手证人」
+    #      本身就是判据，写在笔记的第四节最后一条。
+    # 同时它消掉 chain/kb_review.py 的①盲区标记（has_kb = bool(layer.structure_notes)）。
+    #
+    # 文件名取「Token经济」而不是「AI应用」是**为了 kb_audit 的越层检测**：那个检测器用
+    # `if stem in why` 判断某层的理由里有没有引用它没拿到的笔记，而「AI应用」四个字会在
+    # 别层理由里自然出现（「AI应用需求」），会造出一串假阳性。stem 必须够独特。
+
+    # ========================================================================
+    # 【需求端草案 · 供给端待定】2026-08-19 设计，**尚未生效**（全文注释）
+    # ========================================================================
+    # ⚠️ **下面五条是「理想情况下该问什么」，不是最终形态。**
+    # 它们完全从「这个行业能不能长期成立」倒推出来，**写的时候没有让取数可行性参与决策**
+    # ——这是有意的，先问对问题，再问拿不拿得到。但代价是：**这五条几乎肯定要改。**
+    # 取数的形式与时效一旦摸清，至少三个地方会被迫调整：
+    #   · **维度要重切。** 拿得到的读数是季度的还是月度的、是水平值还是方向、是自述还是
+    #     强制披露，决定了一个 concept 能不能被证据答上。答不上的维度不该留着——
+    #     那正是 kb_review 的「④归因失败」（某维度的判读几乎全为 neutral）。
+    #   · **证人表要重写。** 现在有一批 expect_from 是**故意留空**的（找不到够格的名字，
+    #     填谁都是造沉默证人）。取数落地后要么填上，要么承认这个角度问不了。
+    #   · **命题可能要合并或删除。** 若两条最终共用同一批证人和同一批读数，它们就是
+    #     一条命题的两种说法，合并；若某条一年也等不到两个独立证据簇，删掉。
+    # 所以**不要把这段注释当成待办清单去逐条实现**，它是需求端的记录。
+    # 正确的下一步是先做取数（见 config/sources.yaml 末尾「L1 候选源」的实测结果），
+    # 再拿真实到手的数据回头改这五条。
+    #
+    # 刻意不激活的另一个理由：声明一个取不到文档的证人只会把覆盖率的分母做大，
+    # 看起来更差而并没有更差（本文件 L2/L4 已各踩过一次）。
+    # 每条末尾的「取数缺口」就是激活它之前必须先解决的东西。
+    #
+    # 起点问题不是「L1 该买哪只票」，而是**这个行业能不能长期成立**。所以五条按三个
+    # 相互独立的变量组织，而不是按主题：
+    #   A 需求是不是真的（用量与留存）           → ①
+    #   B 价值捕获：钱归谁                        → ②
+    #   C 支出会不会掉（三条曲线 + 信心 + 能力）  → ③④⑤
+    # 之所以要强调「相互独立」：一组直觉上的指标（场景落地、ARR、算力需求、价格、融资）
+    # 其实**五个都在测同一个变量**——需求还在不在。需求强时它们同时变绿，看起来是五个
+    # 独立确认，实际只有一个。而**五个全绿，行业仍然可能是一门坏生意**：那是光纤的结局
+    # ——需求是真的、渗透是真的、用量涨了几个数量级，投资人亏光，因为剩余价值流向了
+    # 下游用户而不是基础设施的建设者。②就是为了回答这个而存在的，它是唯一一条能在
+    # 其他两组全绿时给出否定答案的命题。
+    #
+    # ── 三类此前完全缺席的证人（这是第一版设计最大的错，记下来免得重犯）──────────
+    # 第一版的证人表**全是云厂和芯片公司，一个 AI Lab、一个应用公司都没有**。理由当时是
+    # 「未上市 → 披露是选择性的 → 偏差方向系统性向上」。这个观察没错，但由它推出的做法
+    # 错了：**那等于在证人名单里手工重建一道系统已经废掉的闸**。立场多样性在 2026-08-15
+    # 从「闸」改成了「档」——单一立场不再否决结论，只是给结论带上 basis=self_reported。
+    # 引擎的版本是逐簇加权，我那版是一刀切成零。两个后果：
+    #   · **有些事只有它们能说。** 降价是模型公司自己宣布的，云厂不会宣布别人的降价，
+    #     媒体是转述。把第一手来源删掉只留回声，然后抱怨这条维度「取数薄」。
+    #   · **沉默变得不可见。** expect_from 存在的全部理由就是让沉默显示成缺口而不是中性。
+    #     不声明它们，等于宣布「它们不说话是正常的」；而模型公司停止公布定价/ARR/能力
+    #     进展，是这条链上信息量最大的事件之一。
+    # 现成的先例就在本文件里：asic_substitution_delivering 把 NVDA/AMD 声明为 competitor，
+    # 注释写着「它们最有动机否认 ASIC 省钱，所以哪怕只让步一点都是强证据；而它们的
+    # 沉默本身也是读数」。这套逻辑原封不动适用于 AI Labs。
+    # 于是补三类：
+    #   (i)   L1 主体自述（incumbent）：OPENAI / ANTHROPIC / DEEPSEEK
+    #   (ii)  确定性序列（regulator）：模型定价、训练算力——**是价目表不是叙事**，
+    #         没有解释空间，绕开「信不信它自述」这个问题；不走 LLM 抽取
+    #   (iii) 应用层（customer / 被颠覆方）：**回答「天花板」的唯一第一方来源**。
+    #         而且它天然分成动机相反的两类——AI 原生应用有动机把渗透说大，按席位收费的
+    #         企业软件有动机把替代性说小，**两边都有人说，命题才真的可证伪**。
+    #         第一版用「不在本 sector 宇宙里」把这一类糊弄过去了，那是用取数便利定义
+    #         问题范围，反了。
+    #
+    # ⚠️ 三类里目前只有 (ii) 有现成路径。(i)(iii) 要先建取数——这正是上一轮对 L4 做过的
+    #    事：**财报答不了的问题，不是放弃提问，是去建取数路径。**
+    #
+    # ── 实测的取数事实（2026-08-19 逐个 curl 验过，不是推测）─────────────────────
+    #   OpenRouter /api/v1/models      200 无鉴权 · 415 模型 / 60 厂商 · 逐档定价
+    #                                  (prompt/completion/cache) + created 时间戳
+    #   OpenRouter /models/{id}/endpoints  200 · 逐 provider 定价（Azure/原厂分列）
+    #   Epoch AI notable_ai_models.csv 200 免费 · 1050 行 · 含 Training compute (FLOP)
+    #   OpenAI /news/rss.xml           200 标准 RSS
+    #   Anthropic /news                200 但**无 RSS**（/rss.xml 与 /news/rss.xml 均 404），
+    #                                  索引页 href 可提取 → 适配器工作量约为 OpenAI 的两倍
+    #   HuggingFace /api/models        200 无鉴权
+    #   Artificial Analysis API        **401 要付费 key** → 放弃，用 Epoch 替代
+    #   DeepSeek API                   401 → 走 HuggingFace + 第三方
+    #
+    # 两个已知的坑，供给端细化时先解决：
+    #   ⚠️ **定价类 API 只给当前状态，没有历史。** 现有两个序列源都是从提供方拿历史的
+    #      （kr_ecos 一次抓 lookback+13 个月，自己算 yoy/mom），而 OpenRouter/HF 问它
+    #      今天只答今天。要做成序列**必须自己定期存快照**，而 memory/store.py 现在
+    #      20 张表里没有一张适合放外部时序。工作量因此不是「一个 90 行适配器」。
+    #   ⚠️ **Epoch 是回填型数据集。** Training compute 是事后反推的，近期覆盖率逐年下滑
+    #      （2024H2 41% → 2025H2 33% → 2026H1 25%）。**能回答曲线的形状，回答不了
+    #      当季有没有变化**——当季度读数用会一直是空的。
+    #   ⚠️ 定价序列**不能做成篮子均价**：新模型上架/旧模型下架都会让均价跳变，而那不是
+    #      价格变化。两种正确构造二选一——按模型血统追踪（贴近「单位能力价格」，需人工
+    #      维护映射），或按能力档位分组（用 context_length / 是否 reasoning 等 API 里
+    #      直接可读的字段分档，全自动，且同档位内闭源与开源的价差正好回答开源侵蚀）。
+    #      **口径未定，先别写适配器。**
+    #
+    # ── 五条命题 ────────────────────────────────────────────────────────────────
+    # 全部 kind: common、feeds_factor 留空。留空是有意的：L1 只有一只票，截面 z 分单样本
+    # 恒为 0，挂 factor 没有意义。**这五条产出的是判断，不是分数**——它们不该改某一只票
+    # 的权重，它们该改你对 L2–L6 全部仓位的信心。
+    # statement 一律写成**多头假设**，让证据去证伪（沿用 capex_funding_quality 与
+    # xpu_revenue_funded_by_customers 的先例：方向反过来之后两边才都有人主动说）。
+    #
+    # claims:
+    #   # ① A 组：需求是不是真的
+    #   - id: ai_adoption_deepening
+    #     kind: common
+    #     statement: 企业对 AI 的采用正在从试点走向常态运营——渗透在**深化**，而不只是在铺宽
+    #     horizon: {from: 2026-09-01, to: 2027-12-31}
+    #     concepts:
+    #       - key: adoption_depth_vs_pilot
+    #         desc: 席位规模的扩张、从部门试点到全员部署、扩容与续约的表述。
+    #               ⛔ **不记新增客户 logo 数、案例数量、「又一个行业落地了」**——那是宽度，
+    #               而且是营销物料。**这个行业的失败形态不是「没有新场景」，是「场景一直
+    #               在增加、但每一个都停在试点」**，所以宽而浅地铺开是负面读数伪装成正面。
+    #         expect_from: []      # 见取数缺口：应用层名单未定
+    #       - key: budget_source_shift
+    #         desc: 这笔钱从**创新预算**还是**业务单元的运营预算**出（"from experimentation
+    #               to production / run-rate" 这类表述）。前者可以被一次预算审查砍掉，
+    #               后者砍掉要停业务。**当前的 AI 预算很大一部分对 ROI 不敏感**（董事会
+    #               压力、怕落后），这类支出可以在没有可证明回报的情况下持续数年——
+    #               2000 年前后的企业 IT 就是这个形态。所以预算的**来源**比金额有信息量。
+    #         expect_from: []
+    #       - key: consumption_retention
+    #         desc: 用量留存、续租、利用率、已交付容量的续约行为。
+    #               ⛔ 不记新签合同——那是承诺不是留存。
+    #         expect_from: [MSFT, GOOG, AMZN, ORCL, CRWV, NBIS]
+    #     falsifiers:
+    #       - 席位/用量增长主要来自新客户，而存量客户的用量走平
+    #       - 出现「预算从运营退回创新/实验」的反向表述
+    #       - 已交付容量出现不续租、退租或转租
+    #     witnesses:
+    #       - {entity: MSFT, stance: incumbent}
+    #       - {entity: GOOG, stance: incumbent}
+    #       - {entity: AMZN, stance: incumbent}
+    #       - {entity: ORCL, stance: incumbent}
+    #       - {entity: CRWV, stance: incumbent}
+    #       - {entity: NBIS, stance: incumbent}
+    #       - {entity: SEMIANALYSIS, stance: regulator}
+    #       # 待补 (i) L1 主体、(iii) 应用层——见下方取数缺口
+    #     # 取数缺口：**这条现在只能测「算力消耗的留存」，测不到「职能渗透的宽度」。**
+    #     #   上面这批证人是算力出租方，而「能否从 Coding 扩展到大部分知识工作」的第一方
+    #     #   证人是应用公司。前两个维度的 expect_from 因此**故意留空**——不是忘了填，
+    #     #   是现在没有一个够格的名字，填谁都是造沉默证人。
+    #     # 待定：应用层名单（人选未定，且每加一家都是持续的取数成本）。
+    #     #   我的倾向是先不扩宇宙、跑一轮看读数够不够——**扩 observe 的成本是每轮持续的，
+    #     #   删命题的成本是一次性的。**
+    #
+    #   # ② B 组：价值捕获。⚠️ **挂 L2_cloud，不挂本层**（证人与主体都在 L2）。
+    #   #    写在这里是因为它出自同一次设计；激活时移到 L2 的 claims 下。
+    #   - id: ai_surplus_retained_in_chain
+    #     kind: common
+    #     statement: AI 业务的单位经济随规模在改善——这条链正在把它创造的价值**留在链内**
+    #     horizon: {from: 2026-09-01, to: 2027-12-31}
+    #     concepts:
+    #       - key: ai_unit_economics_slope
+    #         desc: AI 相关业务毛利率 / 单位经济**随规模的方向**。
+    #               ⚠️ **只收方向与斜率，单期水平值是中性背景。**「AI 云毛利率 35–40%」
+    #               本身几乎不含信息，它的二阶导才含：规模涨而毛利改善 = 这一层在捕获
+    #               剩余；规模涨而毛利平或降 = **它只是过路**。
+    #               ⛔ 合并毛利率一律不算（见 legacy_margin_compression 的理由）。
+    #         expect_from: [MSFT, GOOG, AMZN, ORCL]
+    #       - key: legacy_margin_compression
+    #         desc: **非 AI** 的软件/云业务毛利率的方向。**这一维是分离器**：
+    #               综合毛利率下行其实是两件事叠在一起——(a) 收入从软件转向算力的组合
+    #               迁移（结构性的，不是恶化，见 knowledge/云服务.md §二）；
+    #               (b) 老业务自身的毛利被大模型压掉（剩余在真实外流）。
+    #               两者混在综合口径里看不出来，**单独看非 AI 业务的时间序列就能分开**：
+    #               稳住 = 纯组合迁移；下滑 = 剩余在流出这条链。
+    #               这两种情况对「行业能否成立」的含义完全相反。
+    #         expect_from: [MSFT, GOOG, AMZN, ORCL]
+    #       - key: incremental_return_on_capacity
+    #         desc: 增量投入资本换回的增量收入与现金毛利；单位容量（GW/机架）的收入与
+    #               回本周期。**对资本密集的租赁生意，毛利率是错的度量，ROIC 才是**——
+    #               40% 毛利但每 1 美元收入要 0.5 美元 capex、资产四年一换，和 40% 毛利
+    #               的软件生意不是同一门生意。
+    #               供应商声称的「客户投 1 美元产出 N 美元」也记这里：它是**可证伪的**，
+    #               而且是这条链上最直接的剩余归属主张。
+    #         expect_from: [MSFT, GOOG, AMZN, ORCL, NVDA, AVGO]
+    #     falsifiers:
+    #       - 规模翻倍而 AI 单位经济原地不动或下行
+    #       - 非 AI 业务毛利率与 AI 占比同步下滑（剩余在流出，不只是组合迁移）
+    #       - 单位容量的收入或回本周期恶化，而部署量仍在增长
+    #       - 供应商的「客户回报」主张与买方自己披露的单位经济背离
+    #     witnesses:
+    #       - {entity: MSFT, stance: incumbent}
+    #       - {entity: GOOG, stance: incumbent}
+    #       - {entity: AMZN, stance: incumbent}
+    #       - {entity: META, stance: incumbent}
+    #       - {entity: ORCL, stance: incumbent}
+    #       - {entity: NVDA, stance: supplier}
+    #       - {entity: AVGO, stance: supplier}
+    #       - {entity: SEMIANALYSIS, stance: regulator}
+    #       - {entity: DOWJONES,     stance: regulator}
+    #       # 待补 (iii) 应用层作 customer：**客户侧的毛利率与人均产出改善，是「剩余落在
+    #       # 客户那里」这个余项的直接证据**，也是四个落点里唯一还没有证人的那个。
+    #     # ⚠️ 与 L4 xpu_value_capture_per_capacity 的边界——**必须在 desc 里写死，否则会重**：
+    #     #   那条问的是「**加速器厂商自己**在单位算力里拿到多少钱」，并明确排除合并/分部
+    #     #   毛利率与组合稀释；这条问的是「**剩余最终沉淀在哪一层、以及有没有沉淀在链上**」。
+    #     #   两条问的不是同一件事，但字面都含「毛利率」，所以口径要正列举、逐条排除。
+    #     # 顺带的收益：L4 那条在 2026-08-18 把 ORCL 踢出去了，理由是它反复讲的是**自己卖云
+    #     #   的合同经济学**（「客户预付与自带硬件以相近或更好的利润率获得」「大型项目稳态
+    #     #   ROIC 20%+」）——那批读数**现在无处安放**。本条第三维正好接住它们，这是
+    #     #   「未映射聚集」应当产生新命题的标准形状（docs/KNOWLEDGE.md §4 信号②）。
+    #     # 取数缺口：**几乎没有。**证人全是已在取数的报表方，不依赖任何新适配器。
+    #     #   → 因此建议它第一个激活。
+    #
+    #   # ③ C 组：三条曲线
+    #   - id: token_spend_outgrowing_price_decline
+    #     kind: common
+    #     statement: 单位智能的价格在下行，但用量放大压过降价——**总支出仍在增长**
+    #     horizon: {from: 2026-09-01, to: 2027-12-31}
+    #     concepts:
+    #       - key: unit_price_trajectory
+    #         desc: 单位 token / 单位能力的价格方向，**以及降价的归因**——是成本曲线的
+    #               常态兑现（同等能力成本持续下行，与需求无关），还是竞争压迫下的被迫
+    #               让价。⚠️ **这两者在数字上一模一样，归因表述才是证据。**
+    #         expect_from: []      # 待补 L1 主体 + 定价序列源
+    #       - key: volume_amplification
+    #         desc: 单任务 token 的放大（reasoning 的思考 token、agentic 的多轮工具调用）、
+    #               调用量与吞吐。**这条增长曲线独立于「模型会不会更聪明」**，是本层最稳
+    #               的一段增长来源；它停了，说明连这条也没了。
+    #         expect_from: []      # 只有模型厂知道并公布计费方式
+    #       - key: rental_price_and_utilization
+    #         desc: 算力租赁价格**必须与利用率一起看**：价跌 + 量涨 + 支出涨 = 成本的常态
+    #               兑现；**价跌 + 量平 = 供给转松**。单看价格永远分不清这两种相反的机制。
+    #         expect_from: [MSFT, GOOG, AMZN, ORCL, CRWV, NBIS]
+    #     falsifiers:
+    #       - 单位价格下行的同时，调用量或支出走平
+    #       - 出租价格与利用率同向下行（= 供给转松，不是成本兑现）
+    #       - 单任务 token 放大倍数停止提升
+    #     witnesses:
+    #       - {entity: MSFT, stance: incumbent}
+    #       - {entity: GOOG, stance: incumbent}
+    #       - {entity: AMZN, stance: incumbent}
+    #       - {entity: ORCL, stance: incumbent}
+    #       - {entity: CRWV, stance: incumbent}
+    #       - {entity: NBIS, stance: incumbent}
+    #       - {entity: SEMIANALYSIS, stance: regulator}
+    #       # 待补 (i) OPENAI/ANTHROPIC 作 incumbent —— **降价是它们自己宣布的**；
+    #       # 待补 (ii) 模型定价序列源作 regulator。
+    #     # 取数缺口：前两个维度的第一手来源现在**一个都没接**。第一版把它们删掉后又说
+    #     #   这条「取数最薄」——那不是命题的性质，是设计缺陷的后果。
+    #     #   要 OpenRouter 定价源（含快照表）+ 至少一家 L1 的公告源。
+    #
+    #   # ④ C 组：信心燃料。它是 L2 capex_funding_quality（买方的钱从哪来）与
+    #   #    L4 xpu_revenue_funded_by_customers（卖方替买方垫了多少）的**第三个成员**：
+    #   #    **需求源头的烧钱由谁续**。三条合起来才是完整的资金链。
+    #   - id: frontier_lab_funding_sustained
+    #     kind: common
+    #     statement: 前沿模型公司的资金供给仍然充裕——融资仍在以**非递进恶化**的结构发生
+    #     horizon: {from: 2026-09-01, to: 2027-12-31}
+    #     concepts:
+    #       - key: lab_funding_structure
+    #         desc: 融资的**形态层级**：股权 → 债 → 结构化工具 → 供应商股权/担保/垫资。
+    #               **越靠后越说明前面的办法用完了**（同 资本开支链.md §二 对 L2 的判据）。
+    #               ⚠️ **频率比金额更重要**：一次性是扩张，节奏性是结构问题。
+    #         expect_from: [MSFT, GOOG, AMZN, NVDA, AVGO]
+    #       - key: lab_disclosure_credibility
+    #         desc: ARR / 订阅数 / 估值这类自述，**以及它们在交易对手强制披露里的对应物**。
+    #               ⚠️ ARR 不是会计口径——可以是「最近一个月×12」，可以含已承诺未交付，
+    #               可以含关联方；同一个词在不同公司、不同融资轮次意思都不一样。
+    #               **自述单独出现只作线索，与对手方披露对上才算证据。**
+    #         expect_from: []      # 待补 L1 主体
+    #       - key: ipo_and_disclosure_transition
+    #         desc: IPO 进程的推进或推迟。**这是这条链上最重要的单一事件**——它会把 L1 从
+    #               选择性披露变成强制披露，届时整套证据结构要重写。在那之前，进程本身
+    #               就是信心读数。
+    #         expect_from: []
+    #     falsifiers:
+    #       - 融资形态向后段迁移（出现强制可转、供应商担保占比上升）
+    #       - 融资频率从年度变成季度
+    #       - IPO 推迟或撤回
+    #       - 自述 ARR 与对手方披露的对应物出现持续背离
+    #     witnesses:
+    #       - {entity: DOWJONES,     stance: regulator}
+    #       - {entity: SEMIANALYSIS, stance: regulator}
+    #       - {entity: MSFT, stance: incumbent}    # 既是股东又是债主，须在自己财报里披露
+    #       - {entity: GOOG, stance: incumbent}
+    #       - {entity: AMZN, stance: incumbent}
+    #       - {entity: NVDA, stance: supplier}     # 担保与垫资的另一端
+    #       - {entity: AVGO, stance: supplier}
+    #       # 待补 (i) L1 主体。
+    #     # ⚠️ 这条是对第一版 #6 评价的修正。第一版按「这是不是关于 L1 的真值证据」评它，
+    #     #   得出「最脏的信源」。正确的读法是：**在一个由信心驱动 capex 的行业里，信心
+    #     #   本身就是必须独立追踪的变量**，而不是需要被穿透的噪声。它脏，但它**早**——
+    #     #   一级市场融资窗口关闭远早于云厂 capex 指引下修（指引是承诺，下修有代价，
+    #     #   买方永远最后一个说）。所以它在 C 组里排最前，不是最后。
+    #     # 取数缺口：**ibkr_news 按 conId 逐个扫固定 symbols，未上市公司根本扫不到**——
+    #     #   关于模型公司的融资结构报道，只有被归到某只已列名标的的新闻流里时才捞得到。
+    #     #   **补关键词解决不了，这是适配器形状的问题。**
+    #
+    #   # ⑤ C 组：能力曲线。**这条是在做取数评估时才补上的**——第一版四条里没有它，
+    #   #    因为我当时以为能力评测拿不到（Artificial Analysis API 401 要付费）。
+    #   #    实测发现 Epoch AI 的 CSV 是免费的，这条才变得可做。记下来提醒自己：
+    #   #    **第一版把「取不到数」和「不该问」混成了一件事。**
+    #   - id: frontier_capability_still_compounding
+    #     kind: common
+    #     statement: 前沿能力仍在以能支撑当前投入强度的速度提升——算力还换得到能力
+    #     horizon: {from: 2026-09-01, to: 2027-12-31}
+    #     concepts:
+    #       - key: capability_gain_per_generation
+    #         desc: 连续代际在**第三方公开评测**上的提升幅度（不是自家私有评测）。
+    #               ⚠️ 看的是**幅度的方向**，不是绝对分数。
+    #         expect_from: []      # 待补评测/算力序列源
+    #       - key: compute_to_capability_efficiency
+    #         desc: 同样倍数的算力换到的能力提升是在扩大还是缩小。⚠️ 「预训练触顶」不等于
+    #               「scaling 死了」——重心转向后训练与推理时计算，**这是需求换形状不是
+    #               需求见顶**。但新范式的陡峭期同样有尽头（RL 算力一旦逼近总训练算力的
+    #               量级，增速会从每几个月 10× 掉回每年约 4×）。所以问的是**当前这一段
+    #               跑道还剩多长**，不是「有没有撞墙」。
+    #         expect_from: []
+    #       - key: frontier_investment_commitment
+    #         desc: 谁还在为前沿训练花钱、谁在退出。⚠️ **某一家退出 ≠ 行业训练算力下降**：
+    #               ① 后训练是连续的不是一次性的，总量可能不降而形状变；② 前沿玩家少
+    #               一个，剩下的分母变小反而可能加码。所以要记的是**承诺的方向**，
+    #               不是玩家计数。
+    #         expect_from: [MSFT, GOOG, AMZN, META, NVDA]
+    #     falsifiers:
+    #       - 连续两代前沿模型在综合评测上的提升进入个位数以内
+    #       - 后训练算力的效率明显下降（同样倍数的算力换到的提升大幅缩水）
+    #       - 顶级研究者公开表示不知道下一个方向在哪
+    #     witnesses:
+    #       - {entity: SEMIANALYSIS, stance: regulator}
+    #       - {entity: MSFT, stance: incumbent}
+    #       - {entity: GOOG, stance: incumbent}
+    #       - {entity: META, stance: incumbent}
+    #       - {entity: NVDA, stance: supplier}
+    #       # 待补 (i) L1 主体、(ii) Epoch 训练算力序列源。
+    #     # ⚠️ **传导必须分开写，这是全链最容易一刀切的一条**（已写进 knowledge/Token经济.md
+    #     #   §三 退化信号表的末段）：能力曲线触顶时，**训练侧的算力增长逻辑被掐断，但
+    #     #   推理侧不会崩盘**——推理放大是模型行为的固化，不随「模型不再变聪明」消失。
+    #     #   对下游的含义是**推理相关环节从指数换挡为线性、绝对量仍增**，训练相关环节承压。
+    #     #   把两侧一起打折，会把换挡读成崩塌。
+    #     # 还有一个方向相反、容易被漏掉的推论：**前沿推进放缓会拉长加速器的经济寿命**，
+    #     #   这对 L1/L2 的利润表是**利好**（折旧是它们最大的成本项），对 L4–L6 是利空
+    #     #   （替换需求变慢）。**同一个事件在链条两端符号相反**，不能一刀切成「AI 见顶
+    #     #   利空全链」。
+    #     # 取数缺口：Epoch CSV 自带完整历史、无快照问题，**但它是回填型的**——见上文
+    #     #   覆盖率衰减。它答曲线的形状，不答当季变化。
+    #
+    # ── 有意搁置的一条：「已签算力承诺 vs 实际交付部署的差额」────────────────────
+    # 它的证据可得性其实是全场最好的（L2 的 RPO 与已交付容量、L4 的订单与出货，双方都是
+    # 被迫披露）。**搁置不是因为难，是因为它回答的是周期择时，不是行业能否成立**——
+    # 而这一轮的问题是后者。而且 L2 cloud_demand_still_accelerating 与 L4
+    # xpu_order_momentum_outpacing_revenue 已经在问相邻的问题：要建就必须先把
+    # 「承诺背后的 token 消耗有没有真的长出来」这个区别落到 concept 上，**那是建它的
+    # 前置条件，不是可以边做边看的事**。等上面五条跑过一轮再回来。
+    #
+    # ── 激活顺序（按取数依赖，不按重要性）────────────────────────────────────────
+    #   1. ② 价值捕获        —— 零新代码，证人全是已在取数的报表方；且它是唯一能在
+    #                            其他两组全绿时给出否定答案的一条
+    #   2. ⑤ 能力曲线        —— 只差 Epoch CSV 序列源（自带历史，无快照问题）
+    #   3. ④ 信心燃料        —— 要先解决 ibkr_news 扫不到未上市公司
+    #   4. ③ 三条曲线        —— 要 OpenRouter 定价源 + 快照表 + 先定口径（血统 vs 档位）
+    #   5. ① 需求深化        —— 要先定应用层名单（唯一一个不该由 agent 替人选的）
+    #
+    # ── 激活前的公共前置 ────────────────────────────────────────────────────────
+    #   · OPENAI / ANTHROPIC / DEEPSEEK 必须先登记 entities.yaml，否则关于它们的每条读数
+    #     都会各开一个 entity 键，上面五条**一条都够不着**。这是 entities.yaml 开头
+    #     SAMSUNG vs 005930.KS 那条教训的同型复发，只是这次是未上市主体。
+    #     `filings` 字段现在只有 sec|ir，未上市的要加第三种或复用 ir。
+    #   · trendforce 的 match 里**没有任何 L1 词**——这是 sources.yaml 里已经写过两次的
+    #     同一个毛病（补光互联词、补 L4 词）。
+    # ========================================================================
 
   - key: L2_cloud
     label: L2 云服务层（算力租用）
@@ -47,17 +420,20 @@ layers:
     #
     # statement 刻意写成**多头假设**，让证据去证伪它。首次判读即为 mixed（反驳 3 簇），
     # 那正是它的价值，不是要回避的结果。
+    # ⚠️ 还有一条**为本层设计、但尚未生效**的命题：`ai_surplus_retained_in_chain`
+    # （AI 创造的剩余有没有沉淀在这条链上，还是流向了链外的使用方）。它出自 2026-08-19
+    # 那次 L1 的设计讨论，所以**全文写在 L1_app 的注释块里**，激活时移到这里。
+    # 它是那一组里唯一取数缺口接近于零的一条——证人全是已在取数的报表方。
     claims:
       - id: capex_funding_quality
         kind: common
         statement: 超大规模厂商的 AI capex 由内生现金流支撑，未依赖递增的外部融资与表外承诺
         horizon: {from: 2026-08-01, to: 2027-12-31}
         # 「这笔 capex 是谁的钱」**只有钱的主人能回答**——供应商与客户拿不到它的资产
-        # 负债表。所以立场闸对这条命题不是"暂时凑不齐第二类"，而是**永远凑不齐**：
-        # 五家独立公司以 13:1 判为反驳，仍卡在 mixed。
-        # 声明单一视角后，引擎要求改由**说话人数量**兜底（≥3 家独立申报方），
-        # 见 chain/corroborate.py 的 RELAXED_MIN_SPEAKERS。
-        min_stance_classes: 1
+        # 负债表，所以这条命题永远只有一类立场。
+        # 曾经需要在这里声明 min_stance_classes: 1 来买一个豁免；2026-08-15 立场闸从
+        # "闸"改成"档"之后不再需要——6 个独立说话人自动够格，结论照出，
+        # 只是带上 basis=self_reported 的标注。那个旋钮已从 schema 删除。
         concepts:
           - key: external_funding_need
             desc: 为资本开支进行的债务发行、优先股/可转债/ATM 额度，以及净债务与杠杆率
@@ -286,17 +662,631 @@ layers:
       电力冷却: config/knowledge/电力冷却.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
 
+    # ── 2026-08-14 新增四条互联层命题 ──────────────────────────────────────────
+    # 此前本层**一条命题都没有**，后果是 concept_menu() 对 LITE/COHR/CRDO 返回空菜单，
+    # 它们的观测被 extract() 全部置空 concept：COHR 216 条、LITE 52 条 100% 未映射，
+    # MRVL 190 条里 164 条未映射（那 26 条已映射的全是定制硅/代工维度，**没有一条是光的**）。
+    # 证据一直在库里，只是没有落点——这是配置缺口不是数据缺口。
+    #
+    # 与知识库笔记的分工（config/knowledge/光互联.md 开头的范围契约写死了这条）：
+    # 笔记只写年度级不变的**判据**，不写"谁排第几"；本期排序由这里的命题用财报原文给出。
+    # 所以下面每条命题都对应笔记里的一条判据，而不是重复笔记的结论。
+    #
+    # 形状规则（沿用 L5 已确立的）：common 命题里所有供给侧同行一律 supplier，
+    # 不分 incumbent/competitor（那两个立场只在 relative 里有意义）；relative 命题的
+    # 每个 concept 必须 direct: true，否则闸 3 全挡（cloud_moat_hard_assets 曾因此 47 条出 0 簇）。
+    #
+    # **刻意不立的两条**（免得以后重复起草）：
+    #   ~~独立的 CPO 商业化时点命题~~：CPO 的一阶效应是替代**铜**不是替代可插拔光
+    #     （Cignal AI：最早的量产应用是替代铜），所以它属于下面第 ③ 条的机制，不单开；
+    #     而且 L5 的 packaging_capacity_addition 已经在收 CPO **产能**读数（台积电 COUPE），
+    #     再开一个 L3 的 CPO 产能维度会与它抢同一批行——与被删掉的
+    #     packaging_allocation_pressure 同一个毛病。
+    #   ~~衬底（AXT）专属命题~~：台账零证据，且 光互联.md 判据写明衬底需求是**派生**的、
+    #     "方向相同但时点滞后、幅度放大"——单立会与第 ① 条永远同向变动，互相稀释。
+    claims:
+      # ① 对应 光互联.md 判据一「瓶颈环节的所有权」：先确认瓶颈还在不在。
+      - id: optical_component_supply_gap
+        kind: common
+        statement: 光器件（EML / CW 激光器 / InP 衬底）的供给缺口仍在扩大而非收敛
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: optical_component_tightness
+            desc: 光器件供需缺口的**量化表述**、售罄状态、交期长短、是否成为出货瓶颈，
+                  以及**定价弹性**（"还有提价空间"本身就是缺口未消解的读数）。
+                  只记器件层（激光器/衬底/PIC）的紧张，不记模块组装产能——
+                  组装是薄利可替代环节，它紧不紧说明不了瓶颈在哪
+            expect_from: [LITE, COHR, MRVL, NVDA, TRENDFORCE]
+          - key: optical_capacity_buildout
+            desc: 激光器与衬底产能扩张的**规模与时点**——新增产线、晶圆尺寸代际推进、
+                  投产时间表、长约与预付。扩产是对需求强度的回应而非对紧张的否定；
+                  真正的反证是**投放速度快于订单能见度的延长**
+            expect_from: [LITE, COHR, TRENDFORCE]
+        falsifiers:
+          - 任一器件供应商披露供需缺口的量化数字收窄（如 LITE 的 EML 缺口从 >30% 下修）
+          - 出现"不再售罄""交期缩短""客户要求降价"这类表述
+          - 新增器件产能的投放速度快于买方订单能见度的延长
+        # AXT 不入列：衬底是本层最上游，但它零证据且需求是派生的（见上方注释）。
+        # AAOI 不入列：既非 target 也非 observe，零观测，声明了只会制造沉默证人。
+        witnesses:
+          - {entity: LITE, stance: supplier}
+          - {entity: COHR, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ② 对应 光互联.md 常见误判「定价权的直接读数是 ASP 的方向，不是毛利的水平」。
+      # 这条命题就是把那句话变成可证伪的追踪。
+      - id: rate_transition_pricing_power
+        kind: common
+        statement: 800G→1.6T 的代际切换仍在带来 ASP 与毛利上行，而非转入价格战
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: rate_transition_asp
+            desc: 速率代际切换带来的 **ASP 方向**与毛利结构变化——新一代相对上一代是
+                  溢价还是平价。**不记毛利率的绝对水平**（高毛利可能只是产品组合，
+                  光互联.md 明确警告过这个误判）。产品**品类**之间的 ASP 差异
+                  （分立器件 vs 整机模块）也记在这里，但要与代际切换分开判读
+            expect_from: [LITE, COHR, MRVL, CRDO, NVDA]
+          - key: rate_transition_ramp
+            desc: 新一代的出货节奏与收入占比，以及**上一代是否同步走弱**。
+                  两代同时增长是缺口未收敛的佐证；新一代放量而上一代掉头，
+                  才是切换进入替代期、议价窗口收窄的信号
+            expect_from: [LITE, COHR, MRVL, TRENDFORCE]
+        falsifiers:
+          - 新一代产品的 ASP 或毛利贡献不再高于上一代
+          - 上一代速率的收入掉头向下，同时新一代未同步放量
+          - 出现客户要求降价、或供应商主动放缓提价的表述
+        witnesses:
+          - {entity: LITE, stance: supplier}
+          - {entity: COHR, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: CRDO, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ③ 对应 铜连接.md「retimer/DSP 的能力可以向光 DSP 延伸——这是判断一家铜连接
+      # 公司久期的关键分叉点」。
+      #
+      # ⚠️ 起草时这条本来写的是「铜的可达距离尚未被 CPO/光方案侵蚀」，2026-08-14 首次
+      # 抽取 CRDO 后**推翻重写**：CRDO 管理层自己就让步了那个方向——「eventually we
+      # could get to 50/50 for sure... optical could actually exceed copper in the
+      # upcoming years」，且 CPO/NPO 首笔收入预期 FY2028。追踪一个当事人已经承认的
+      # 方向没有意义。真正未定、且决定持仓成败的是**转身能不能兑现、代价是什么**：
+      # 它铜侧毛利 68%，而自述光 DSP/SiPho PIC 是"两位数 ASP"、只有 ZeroFlap 整机是
+      # "三位数 ASP"——收入转过去了，毛利结构未必跟得过去。
+      - id: copper_ip_crosses_to_optical
+        kind: common
+        statement: 铜连接侧的 DSP / SerDes IP 正在成功转化为光侧收入，且未以毛利结构为代价
+        horizon: {from: 2026-08-01, to: 2028-06-30}
+        concepts:
+          - key: interconnect_ip_crossover
+            desc: 铜侧 IP 向光侧延伸的**收入兑现与时点**——光 DSP / PIC / 光模块的
+                  收入规模、增速、占比目标与爬坡时点，以及**它带来的毛利结构变化**。
+                  这是本条命题的核心：收入转过去不等于经济性转过去
+            expect_from: [CRDO, MRVL, LITE, COHR]
+          - key: copper_optical_boundary
+            desc: 铜光边界的移动——SerDes 代际对铜可达距离的影响、AEC 与光方案的分工
+                  变化、CPO/NPO 的量产时点与它先替代谁。**时点推迟或提前本身就是读数**
+            expect_from: [CRDO, MRVL, COHR, NVDA]
+        falsifiers:
+          - 光侧收入占比上升的同时毛利率下行（转身成功但经济性劣化）
+          - 光侧的量产/爬坡时点推迟，或 design win 落后于同业
+          - 铜侧收入掉头而光侧未同步接上（青黄不接）
+        witnesses:
+          - {entity: CRDO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: COHR, stance: supplier}
+          - {entity: LITE, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ④ 截面。维度取自两份知识库笔记**共有**的判据，这样铜光两侧才可比：
+      # 光互联.md 的排序是「瓶颈所有权 > 垂直整合 > 客户分散度 > 封装规模」，
+      # 铜连接.md 是「SerDes/DSP IP 深度 > 客户分散度(权重更高) > 下一代设计导入 > 产能」。
+      # 交集正是下面三条。
+      - id: interconnect_moat_distribution
+        kind: relative
+        entities: [LITE, COHR, MRVL, CRDO]
+        feeds_factor: moat_pricing
+        statement: 互联层的结构位置在 Lumentum / Coherent / Marvell / Credo 之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: interconnect_bottleneck_asset
+            desc: 自有的**瓶颈资产**——InP/EML 自供产能与垂直整合深度（光侧），
+                  SerDes/DSP 的 IP 深度与工艺代际（铜侧）。两份笔记各自的"最硬"
+                  一条在这里合并：拥有别人绕不开的东西
+            direct: true
+            expect_from: [LITE, COHR, MRVL, CRDO]
+          - key: interconnect_customer_concentration
+            desc: 客户集中度及其分散进展——前几大客户占比、10% 客户家数、
+                  新客户导入。铜连接.md 明确写本子层这条的**扣分权重比别的子层更高**：
+                  一个客户的架构选型变更就能改写全年
+            direct: true
+            expect_from: [LITE, COHR, MRVL, CRDO]
+          - key: interconnect_next_gen_design_in
+            desc: 下一代规格（1.6T/3.2T、CPO/NPO、下一代 AEC）的**设计导入与量产承诺**
+                  ——即久期能见度。设计赢单不等于上量承诺，两者要分开记
+            direct: true
+            expect_from: [LITE, COHR, MRVL, CRDO, NVDA]
+        falsifiers:
+          - 某家的瓶颈资产被绕开（客户改用替代方案或第二供应商）
+          - 某家的客户集中度进一步上升而同业在下降
+          - 某家在下一代规格上缺席，而同业已拿到具名客户的量产承诺
+        # NVDA 作 customer 是本条唯一的非自述读数来源：它 2026-03 同时投了 LITE 与 COHR
+        # 各 20 亿美元锁产能，谁被它选中、选中做什么，比任一家自述的护城河都重。
+        witnesses:
+          - {entity: LITE, stance: incumbent}
+          - {entity: COHR, stance: competitor}
+          - {entity: MRVL, stance: competitor}
+          - {entity: CRDO, stance: competitor}
+          - {entity: NVDA, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
   - key: L4_chip_design
     label: L4 芯片设计
-    question: 加速卡供需与 ASIC 替代节奏？
+    # 2026-08-17 收窄到 XPU/AI 加速器口径。本层只问「算力芯片本身」——网络与交换芯片、
+    # 光 DSP、铜连接归 L3（interconnect_moat_distribution 已在跑，MRVL 就在那条的 cohort
+    # 里）；HBM 与内存互联归 L5。**cohort 不因此变**，变的是每个维度 desc 里写死的边界：
+    # AVGO 的网络收入、MRVL 的光 DSP 收入不进本层任何一条命题。
+    question: XPU（GPU/ASIC）的订单节奏、单位算力价值捕获与四家之间的位置分布？
     tickers:
-      - {symbol: NVDA}
-      - {symbol: AMD}
-      - {symbol: AVGO, note: ASIC/网络}
-      - {symbol: MRVL, note: Marvell 定制ASIC+光DSP（横跨L3光互联，按合集归L4设计服务）}
+      - {symbol: NVDA, note: 外售通用加速平台的行业标准}
+      - {symbol: AMD,  note: 唯一的第二家外售通用 GPU —— 通用平台路线在截面里的对照组。
+                            observe 名单成员，只贡献证据、不进下单路径}
+      - {symbol: AVGO, note: 定制 XPU。**网络/交换芯片收入不在本层命题内**（归 L3），
+                            但它对外只给合并的「AI 收入」口径，判读时要注意这个口径差}
+      - {symbol: MRVL, note: 定制 XPU。**光 DSP 与互联收入不在本层命题内**——那部分由 L3 的
+                            interconnect_moat_distribution 负责，它已在那条的 cohort 里}
     structure_notes:
       芯片设计: config/knowledge/芯片设计.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+
+    # ── 2026-08-17 新增四条 XPU 命题 ─────────────────────────────────────────
+    # 此前本层**一条命题都没有**（L1 只有一只票，不算），而它挂着知识库、有四家标的。
+    # 后果与 L6 上一轮同型但规模更大：这四家目前只是**别人命题的证人**（NVDA 在 HBM 供给
+    # 里、MRVL 在互联截面里、AVGO 在先进制程里），concept_menu() 给它们的菜单全是关于
+    # 别人的维度，于是 761 条读数里 **588 条落在未映射池**：
+    #   NVDA 227 条 / 184 未映射（81%）   AMD  223 / 187（84%）
+    #   AVGO  75 条 /  62 未映射（83%）   MRVL 236 / 155（66%）
+    # 同时 L4 的 moat_pricing 只能由静态长文 + 毛利率给出 —— 正是 docs/CHAIN_EVIDENCE.md
+    # 开篇批评的那个状态。
+    #
+    # ⚠️ 与 L6 的一处**重要差别**：L4 未映射池里有相当比例是纯财务读数（revenue / FCF /
+    # 毛利 / 回购 / EPS / 股数）。那些本就该留在 PEAD 打分卡，**不该被任何命题吸收**——
+    # 所以 L4 未映射率的合理下限比 L6 高，别拿 L6 的数字当验收线。
+    #
+    # **命题集 = 知识库的收入分解式**（同 L6 那一轮的纪律）。config/knowledge/芯片设计.md
+    # 第十一节把 XPU 层的收入变化拆成：
+    #
+    #   收入变化 ≈ 部署算力规模 × 每单位算力的 XPU 内容价值 × 该厂商份额
+    #              + 系统/软件附加 − 代际交付延期与可达市场约束
+    #
+    #   部署算力规模与订单节奏 → ① xpu_order_momentum_outpacing_revenue  common
+    #   每单位内容价值与毛利   → ② xpu_value_capture_per_capacity        common
+    #   代际交付（时点+有效算力）→ ③ xpu_generation_cadence_delivering    common
+    #   份额 + 客户归属 + 系统  → ④ xpu_position_distribution             relative
+    #   收入的资金来源质量     → ⑤ xpu_revenue_funded_by_customers       common
+    #
+    # 一一对应保证**没有一项被漏掉、也没有两条命题问同一件事**，后者是这套系统里最贵的
+    # 错误（packaging_allocation_pressure / equipment_process_content / asic_external_revenue
+    # 三次同款失效）。
+    #
+    # ⑤ 不在分解式的五项里，它是**乘在整个式子上的质量系数**：同样的收入，客户自有资金
+    # 支撑的与厂商垫出来的，持续性不是一回事。首版把它当成 ④ 的一个维度，2026-08-17
+    # 首轮判读后拆出来独立成命题——诊断与留痕写在 ④ 被删掉的那一维原位。
+    #
+    # **刻意不立的三条**（免得以后重复起草）：
+    #   ~~市场可达性 / 出口管制命题~~ —— 台账里只有 NVDA（7 条）与 AMD（1 条）说话，
+    #     **2 个说话人 < MIN_INDEPENDENT_SPEAKERS=3**，立了永远判 unknown。判据与 L6 那轮
+    #     否掉独立光刻命题完全一样。中国与主权敞口降为 ④ 的 xpu_account_and_customer_mix
+    #     里的客户结构一维 —— **在那里它反而有区分度**（NVDA 主权收入 +80%、中国 DC 收入
+    #     被排除在 outlook 外，对比 AVGO 只有三个客户）。
+    #   ~~L4 侧的 ASIC 替代 common 命题~~ —— L2 的 asic_substitution_delivering 已经在问
+    #     「自研 ASIC 兑现了没有」（买方视角，common）。供给侧要问的是**订单在四家之间
+    #     怎么转移**，那是截面、就是 ④，不是第二条 common。
+    #   ~~独立的 XPU 供应锁定命题~~ —— 「对上游的采购承诺/预付/长约」在抽取模型眼里与 L5
+    #     的 foundry_node_demand_visibility（**MRVL 已有 7 行落在那里**）语义不可分，新开
+    #     一维只会抢同一批行。改为并入 xpu_demand_creation_commitment —— 用资产负债表锁定
+    #     **供应**与锁定**需求**本就是同一件事的两半；晶圆/封装口径的读数继续留在 L5。
+    #
+    # **AMD 此前既不在 targets 也不在 observe**（证据扫描只覆盖这两个名单，见
+    # runtime/scheduler.py 的 _observe_window），那 223 条读数不会自动刷新、horizon 一滚
+    # 全部过期。与上一轮发现 AMAT 同型，已按同样先例加入 observe 并补 config/pead/AMD.yaml。
+    claims:
+      # ① 直接回答「什么时点判断该层的投资力度」。形状取自 L2 的
+      # cloud_demand_still_accelerating（RPO 增速 vs 自身收入增速），换成 L4 口径：
+      # **订单承诺 vs 已出货收入**。AVGO 把这个差直接说出来了——「$30B bookings against
+      # the $10.8B we shipped」——book-to-bill 是本层最有信息量的周期读数。
+      #
+      # 与 L2 那条的边界：它的 demand_conversion 明确写着「不记该公司自身产品线的供需」
+      # 并把那部分指向「L5 的命题」，但 L5 没有一条在收加速器级别的订单读数。这条命题
+      # 填的就是 L2 显式留下的那个洞。
+      # 2026-08-17 首轮判读后收窄：原 statement 还带着「且未被厂商自身的融资安排稀释」
+      # 一句，并挂了第三个维度 xpu_demand_creation_commitment。已拆出去独立成命题 ⑤——
+      # 理由见 ⑤ 的注释。这条回到只问一件事：**订单节奏**。
+      - id: xpu_order_momentum_outpacing_revenue
+        kind: common
+        statement: 加速器的订单承诺与能见度仍在扩张——承诺增长快于已确认收入
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: xpu_order_visibility
+            desc: 加速器的订单承诺与能见度——bookings/backlog、能见度年限、design win 金额、
+                  客户 PO，以及已宣布但未交付的部署承诺规模（GW/机架/集群）。
+                  **与同期已出货收入的对比是本维度最有信息量的形态**（book-to-bill）。
+                  ⛔ 不记网络/交换/光模块的订单（那属于 L3）。
+                  ⛔ 不记数据中心与电力容量本身（那属于 L2 的 datacenter_capacity_delivered），
+                  只记**加速器**的承诺
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META, ORCL, SPCX]
+          # 需求的**质量**：订单能不能持续，取决于已经买回去的卡有没有在真烧。
+          # 与 L2 的 cloud_capacity_constraint 是两件事：那条问「云侧产能够不够」，
+          # 这条问「已装机的存量在什么利用水平上」。
+          # ⚠️ 首轮实测 7 行（ORCL 与其他买方 5、NVDA 2）。密度偏低但**信息量最高**：
+          # 拿到的是"全球 GPU 利用率 97.5%""到期的卡有 49% 的客户续租了其中 92%"
+          # 这类只有买方说得出、且直接证伪整条 AI 论点的读数。
+          # 若下一轮涨到两位数，**应把它升格成独立 common 命题**（"已部署算力仍在被
+          # 充分消耗"）——它现在寄居在订单命题里，是因为单独立一条还撑不住。
+          - key: installed_fleet_utilization
+            desc: 已装机加速器的利用率、续租率、租金价格与旧世代资产的残值——
+                  GPU 利用率、到期续租比例、按小时租金的方向、旧世代是否提前退役。
+                  ⛔ 不记云厂"产能受限/需求超过供给"的表述（那属于 L2 的
+                  cloud_capacity_constraint）——这里问的是**存量在不在被消耗**，
+                  不是增量够不够
+            expect_from: [ORCL, MSFT, GOOG, AMZN, SPCX, CRWV, NBIS, NVDA]
+        falsifiers:
+          - 任一家的 bookings 或能见度年限收缩，或 book-to-bill 掉到 1 以下
+          - 租金或利用率下行、续租率下降、旧世代加速器提前退役
+          - 买方推迟或缩量已宣布的部署承诺
+        # 买方证人是这条命题拿到第二类立场的关键：ORCL 的利用率与续租率、SPCX 的采购
+        # 承诺、AMZN 对实验室多年多 GW 承诺的描述，都是供给侧自己不会说的事。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: SPCX, stance: customer}
+          - {entity: CRWV, stance: customer}
+          - {entity: NBIS, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ② 这条把「轻资产 + 高毛利 ⇒ 该是 AI 主 Beta」从信念变成可证伪的命题。
+      # 知识库第二节的核心句：「高终端芯片金额不等于高 L4 利润留存」「高毛利是定价权的
+      # 结果；要追问客户为何不能迁移或压价」。
+      #
+      # 本命题最有价值的证据是 AVGO **同一家给出的两条互相矛盾的读数**：
+      #   「content per gigawatt will increase…XPU 价格会大幅上升」
+      #   「dollars per gigawatt, dollar billions per gigawatt is relatively stable」
+      # 内部张力比单向读数有信息量（同 L6 ① 的 INTC：工具支出指引 +40% 与 PP&E 实际
+      # 下降同时出自它自己）。判读时不要挑一条用，要把两条都带上。
+      - id: xpu_value_capture_per_capacity
+        kind: common
+        statement: 每单位部署算力里 XPU 拿到的内容价值与毛利留存仍在上升——未被存储/封装/电力成本挤压
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # ⚠️ 2026-08-18 大改口径。首版 desc 写的是「单位部署算力里**芯片**拿到多少钱」，
+          # 「芯片」两个字同时可以读成"整机 BOM 里的加速器模组"和"XPU 厂商自己收到的钱"，
+          # 判读器选了前者，于是把「Helios 比竞品多近 50% HBM」判成了内容价值上升的支持。
+          # **那条证据的方向其实是相反的**：HBM 含量更高意味着同一美元机架里更大一块流向
+          # 存储厂，在 HBM 涨价周期里，XPU 厂商自己拿到的那一份反而可能被压缩。
+          # 下面把这个区分写死，让判读器只需要**分类**，不需要做那三步反向推理。
+          - key: xpu_content_per_capacity
+            desc: 每 GW / 每机架 / 每集群里，**XPU 厂商自己确认为收入的那一部分**的方向与 ASP。
+                  ⚠️ 关键区分：**整机 BOM 的内容量 ≠ XPU 厂商拿到的钱**。
+                  "本代产品用了更多 HBM / 更贵的封装 / 更多电源模块"记的是**别人**拿到的钱
+                  变多了，它对本维度是**中性甚至反向**的读数（在上游涨价周期里尤其如此），
+                  **不要**把它读成本层内容价值上升；只有明确指向本公司**单位算力收入或 ASP**
+                  的表述才算正向。
+                  买方一侧的资本开支硅含量占比也记这里（"多少比例的 capex 是 CPU/GPU
+                  这类短寿命资产"），那是本维度上少有的非自述读数。
+                  ⚠️ 但**只有占比的方向变化才算证据，单期静态占比是中性背景**——
+                  "约三分之二的 capex 是短寿命资产"是一个水平值，没说它在升还是降。
+                  同一次电话会里"已经转向短寿命资产"与"占比约三分之二"讲的是同一件事，
+                  不要当成两条独立证据。
+                  ⛔ 不记服务器 CPU 的单位与 ASP（EPYC/Vera 这类通用 CPU 不是加速器）。
+                  ⛔ 不记网络/光模块的单位内容量（L3）
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META]
+          # ⚠️ 2026-08-18 大改口径。首版只排除了"软件与非 AI 分部毛利"，没排除**合并口径**，
+          # 于是「Q3 合并毛利率降至约 74%」进来了并被判成反驳。那个数字的机制是**业务组合
+          # 稀释**——高毛利软件业务占比下降、低毛利 AI 半导体占比上升——与"XPU 在单位算力
+          # 里的价值捕获"无关。最能说明问题的是：解释这个机制的原话就在同一份纪要里、
+          # 同一个维度里、已经抽出来了（"It's the mix... between software and non-AI to the
+          # very highly, rapidly growing AI semiconductor that is just diluting gross margin"），
+          # 判读器一次看得到全部证据簇，却仍按字面把合并毛利下行判成了反驳。
+          # **根子不是它没看见，是这个数字本来就不该进这个维度。** 口径改成正列举。
+          - key: xpu_margin_retention
+            desc: 只问**加速器业务本身**的毛利率方向及其归因——上游（HBM/晶圆/封装）涨价
+                  能否向客户传导、客户是否压价、定制 vs 外售的组合对加速器毛利的影响。
+                  ⚠️ 只收能归到加速器口径的读数。以下**一律不算**，即使它们的字面是"毛利率"：
+                  公司合并毛利率 / 合并营业利润率；任何**分部级**毛利率或营业利润率
+                  （半导体分部、基础设施软件分部等——半导体分部同时含网络、无线与非 AI
+                  产品，它的毛利率变化主要由这些产品的组合驱动，与加速器无关）。
+                  判据很简单：**这个数字里混进了加速器以外的业务，就不算。**
+                  "组合稀释"与"单位价值被挤压"是两回事，混用会把前者误读成后者。
+                  厂商自己解释毛利变化来自组合而非定价时，那是**中性背景**，
+                  不是对本命题的反驳。
+                  ⛔ 不记公司层面的净利/EPS/回购——那些是 PEAD 打分卡的事，不是链式证据
+            expect_from: [NVDA, AMD, AVGO, MRVL]
+        falsifiers:
+          - 每 GW/每机架的芯片内容价值走平或下行，而部署算力仍在增长
+          - 存储/封装涨价无法传导，加速器毛利连续两个观察期下行
+          - 买方把更多单位算力预算移向电力、存储或系统集成
+          - 厂商用降价换取份额（ASP 与出货量方向背离）
+        # 2026-08-18 移除 ORCL。它是**算力建设方不是 XPU 提供方**，对"加速器自身的毛利
+        # 与单位内容价值"给不出区分性读数，但它会不停地讲**自己的合同经济学**——
+        # 「客户预付与自带硬件以相近或更好的利润率获得」「大型项目稳态 ROIC 20%+」——
+        # 这些句子反复被抽进本命题的两个维度，讲的却是 ORCL 卖云服务的利润率，
+        # 不是加速器的毛利。连续两轮用 desc 排除都没挡住，因为它字面上确实在谈"margin"。
+        # 按本文件的老规矩处理：**名单宁短勿长，声明一个说不出区分度的证人只会把覆盖率
+        # 的分母做大，看起来更差而并没有更差。** ORCL 仍留在 ①（利用率与续租是它最好的
+        # 读数）、④（具名账户）、⑤（谁为加速器出钱），只从这条命题退出。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ③ 对应知识库第三节（「流片是高成本、低容错的离散事件，一次延期把收入曲线整体
+      # 后移」）、第七节 4（迭代速度本身成为壁垒）与第十节（证据等级）。
+      # Fabless 没有晶圆厂，所以资本开支不是有信息量的指标——**代际交付时点才是**。
+      - id: xpu_generation_cadence_delivering
+        kind: common
+        statement: 新一代加速器正按公布的年度节奏兑现——量产时点未推迟，且代际的单位任务成本改进在真实负载上兑现
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # ⚠️ 2026-08-18 补两条方向判据。首轮判读把
+          # 「we'll be supply constrained throughout the entire life of Vera Rubin」
+          # 判成了**支持**，理由是"供应受限说明需求高于供给"——那是把它当成需求信号读了，
+          # 而本维度问的是**交付**。这与 xpu_content_per_capacity 上"多用 HBM = 内容价值
+          # 上升"是同一类错：表面读数与它对本命题的含义方向相反。
+          - key: xpu_generation_timeline
+            desc: 新一代加速器从流片、量产、首出货到爬坡完成的**时点**及其变化
+                  （提前 / 按时 / 推迟本身就是读数），以及供应或良率是否限制了已承诺的爬坡。
+                  ⚠️ **本维度只问交付，不问需求。** "供应受限 / supply constrained /
+                  产能跟不上"是**约束**读数，对本命题是中性偏反向——即使它同时说明需求很强，
+                  那份需求信息属于命题 ①，不在这里计分。反过来，"供应已能满足承诺的爬坡"
+                  才是正向。
+                  **厂商为保障交付而做的上游安排也记这里**——库存、对晶圆/存储/封装供应商
+                  的采购承诺与预付款、产能锁定、多年需求展望。但它们是**投入不是结果**：
+                  锁产能说明在努力保交付，不等于时点已经兑现，除非同时给出时点未推迟的
+                  表述，否则按中性处理。
+                  钱付给上游换的是自己能不能出货，与命题 ⑤ 问的「客户那笔钱是谁出的」
+                  方向相反，不要混为一谈。
+                  ⛔ 不记代工厂自身的节点良率与爬坡（那属于 L5 的 node_yield_progress
+                  与 foundry_node_capacity_addition）——这里只记**加速器产品**的时点
+            expect_from: [NVDA, AMD, AVGO, MRVL, TSM]
+          - key: xpu_effective_performance_delivery
+            desc: 代际的**有效算力与单位任务成本**改进——真实负载下的吞吐、每美元 token、
+                  每瓦性能、成本下降幅度，以及客户侧能否复现。
+                  ⚠️ **峰值 FLOPS 与规格表数字不算兑现**（知识库第六节 1：客户购买的是
+                  有效算力与单位任务成本，不是规格表）。只记落到真实负载或单位任务成本
+                  上的读数；纯参数对比留空，不要硬套
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, ORCL]
+        falsifiers:
+          - 任一家推迟量产/出货时点，或供应约束限制了已承诺的爬坡
+          - 代际的每 token 成本改进放缓，或客户在真实负载上复现不出厂商声称的改进
+          - 出现重流片、良率问题或架构级回退
+        # TSM 作 supplier：加速器的量产时点在物理上受它的节点与封装排期约束，它是这条
+        # 命题上唯一能对交付时点给出非自述读数的一方。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: TSM,  stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ④ 截面。三个维度全部 direct: true —— relative 命题只在 direct 维度上移动（闸 3），
+      # 默认 false，cloud_moat_hard_assets 曾因此 47 条证据出 0 簇。
+      #
+      # 为什么是这三维、而不是「谁的份额高」：份额分母无人披露（没有一家给出 XPU 单位
+      # 出货或美元份额的可比口径），问了只会得到各家自己定义的口径。改问**位置的三个
+      # 可观测代理**：具名账户归属、交付形态深度、资产负债表绑定。
+      #
+      # **代际交付节奏刻意不作为本条的维度**：本期四家都在年度节奏上，那是整层共享的
+      # 问题（命题 ③），在这里再开一维只会与 xpu_generation_timeline 抢同一批句子。
+      # 若将来出现某一家连续两代延期而同业按时，再把它升为截面维度。
+      - id: xpu_position_distribution
+        kind: relative
+        entities: [NVDA, AMD, AVGO, MRVL]
+        feeds_factor: moat_pricing
+        statement: XPU 层的结构位置在 NVIDIA / AMD / Broadcom / Marvell 之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # entity 归属规则见下方长注释——这一维的成败全在它身上。
+          - key: xpu_account_and_customer_mix
+            desc: 具名客户/AI 实验室的加速器部署归属与**转移方向**（谁拿到哪个账户、
+                  独家还是双供、配额比例、下一代是否续用），以及客户结构的广度与集中度
+                  （云厂/实验室/主权/企业各占多少、前几大客户占比、新客户导入、
+                  受限市场的可达性差异）。
+                  ⛔ 不记网络/光互联的客户集中度（那属于 L3 的
+                  interconnect_customer_concentration）——这里只问**加速器账户**
+            direct: true
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META, ORCL, SPCX]
+          # ⚠️ 首轮抽取实测：**全库只有 4 行**（NVDA 2、AVGO 2，AMD 与 MRVL 各 0）。
+          # 保留但列为下一轮的头号复核对象，理由与判据一并留在这里：
+          #   · 拿到的那 4 行**正是设计它时想要的对照**——"只卖芯片不做机架"与"全栈"
+          #     出现在同一维度上，这不是噪音。
+          #   · AMD 的 0 行是**语义竞争的迹象，不是它没说**：它的机架级平台在同一轮里
+          #     拿到了 8 行 xpu_generation_timeline。「机架平台已投产、本季度开始出货」
+          #     在抽取模型眼里首先是一条**时点**事实，"交付形态"这个抽象没抢过它。
+          #     这正是 packaging_allocation_pressure / equipment_process_content 的
+          #     早期形态。
+          # **下一轮若仍是个位数且 AMD/MRVL 仍为 0，就删掉它**，把交付形态并进
+          # xpu_account_and_customer_mix（客户按什么形态采纳，本就是账户归属的一部分），
+          # 不要留着它假装在比较。
+          - key: xpu_platform_scope
+            desc: 交付形态的深度——裸芯片 / 板卡 / 整机架 / 网络与软件打包，各家在系统级
+                  交付与软件栈上的投入，以及客户是否按这个形态采纳。
+                  这一维天然可比：同一个问题上「只卖芯片、不做机架」与「机架级平台」与
+                  「全栈」是三种明确的位置，而不是一条高低轴。
+                  **记的是形态本身，不是某一代产品的量产时点**——后者属于命题 ③ 的
+                  xpu_generation_timeline。
+                  ⛔ 不记网络芯片本身的竞争位置（L3）
+            direct: true
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, ORCL]
+          # ⚠️ 这里原本还有第三维 xpu_demand_creation_commitment（"谁最依赖用资产负债表
+          # 锁定需求"），**2026-08-17 首轮判读后删除**，原因值得完整留痕——它是本文件里
+          # 第一次出现的**符号歧义**型失效，与 packaging_allocation_pressure 那类
+          # "两个 key 抢同一批句子"是不同的病。
+          #
+          # 症状：同一批证据、同一份配置，连跑三次得到三个不同的截面答案
+          #   （AVGO 强/中/中，MRVL 中/无读数/无读数），而这条命题 feeds moat_pricing，
+          #   摆动会一路传到复合排名与权重。
+          # 根因：那一维的 9 行读数里塞了**三种符号相反的事实**——
+          #   · MRVL 5 行全是对**上游供应商**的预付与产能锁定（保障交付，正向）
+          #   · AVGO 3 行全是为**下游客户**设的融资载体（"a vehicle to basically have
+          #     these chips funded for these LLM players"，客户付不起、卖方垫，负向）
+          #   · ORCL 1 行是客户自付（"customer prepayments and BYOH at similar or
+          #     better margins"）——那是这条轴的**对立面**本身
+          #   判读器每次都要重新决定这堆混合物算强还是算弱，于是每次结论不同。
+          #   最能说明问题的是它写过的一句判词：MRVL"只做上游预付所以偏弱"——
+          #   **拿供应保障的证据去比客户融资的位置，那句话本身就是维度错配的证据。**
+          # 处理：按符号切成两半，各归各家，一行证据都没丢——
+          #   上游锁供应 → 命题 ③ 的 xpu_generation_timeline（desc 已明确接手）
+          #   下游垫需求 → 新命题 ⑤ xpu_revenue_funded_by_customers（符号写进 statement）
+          # **不在这里保留一个"垫得越多越弱"的维度**：那要在 desc 里人工声明符号，
+          # 已经贴近被删掉的 supports_when 反模式；且截面三维只要有一维需要声明符号，
+          # 加权就重新变成判读器的自由裁量，摆动会以另一种形式回来。
+          # 现在剩下的两维符号都无歧义：覆盖越广越强、交付形态越深越强。
+        falsifiers:
+          - 某家在具名客户的下一代部署里被替换，或从独家变成双供
+          - 某家的客户集中度上升且第一大客户份额扩大，而同业在分散
+          - 某家的系统级方案被客户拆解回裸芯片采购
+        # ⚠️ **entity 归属规则**，这一维的成败全在它身上：
+        #   · 读数说的是「这笔算力用了谁的芯片」→ entity 记**芯片方**。
+        #     例：AMD 说某实验室部署 2GW MI450 → entity=AMD（不是那个实验室）。
+        #     台账里这条现在记成了 entity=ANTHROPIC，落在 cohort 外、闸 3 直接挡掉，
+        #     重抽后会归位。
+        #   · 读数说的是客户**自研项目本身**的进展 → entity 记那家客户，那属于 L2 的
+        #     custom_silicon_program（云厂的 TPU/Trainium/MTIA 部署与对外收入在那里）。
+        # **不把 ANTHROPIC / OPENAI 声明成证人**：它们无票据、永不发声，声明只会造两个
+        # 沉默证人并把覆盖率的分母做大——「名单宁短勿长」（L5 命题注释里那条）。
+        # 它们说过的话通过芯片方或云厂的财报进来，entity 按上面的规则落到 cohort 内。
+        #
+        # 买方证人是 AVGO/MRVL 摆脱 100% 自述的唯一出路：台账里关于这两家的读数
+        # **非自述为 0 条**（NVDA 11 条、AMD 1 条）。买方点名某家时 entity 落在 cohort 内、
+        # speaker 是买方，闸 3 照过，basis 直接从 self_reported 升到 corroborated。
+        # 2026-08-18 四家一律 supplier，**刻意不分 incumbent / competitor**。
+        # 首版按 L6 ⑤ 的样子写成 NVDA=incumbent、其余=competitor，那是错的：
+        # incumbent/competitor 这对标签是**旧的 subject 式命题**留下的化石——它预设了
+        # 一个主角、把问题读成「谁在挑战 NVDA」，而截面命题被发明出来正是为了取消主角
+        # （见 schemas/chain.py 里 entities 字段那段：sk_hbm_share 之所以被改写，就是因为
+        # 「以某家为主体」让它永远只有主体自述、实践上不可证伪）。
+        # statement 已经写成中立的「如何分布」，证人表不能把主角再塞回来。
+        # 机制上两种写法的 basis 结果相同（每家读数按 entity 分组，各自 1 类立场），
+        # 差别在判读器看到的框架——而它会照着框架写理由。
+        # ⚠️ L6 的 equipment_position_distribution 仍是 incumbent/competitor 写法，
+        # 同一个问题，尚未统一。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: SPCX, stance: customer}
+          - {entity: TSM,  stance: supplier}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ⑤ 2026-08-17 由 ④ 的一个维度拆出来独立成命题。它问的是**这笔收入的钱最终由谁出**。
+      #
+      # 起草 ④ 时我拒绝过给它单立 common 命题，理由是「问『融资性需求创造是否在扩大』，
+      # 支持证据每季度自动送上门、反驳证据没人主动披露，支持N/反驳0 实践上不可证伪」。
+      # **那个理由对下面这个写法不成立，因为方向反过来了。** 写成多头假设之后：
+      #   支持证据 = 客户掏现金、客户预付、自带硬件（ORCL「customer prepayments and
+      #              BYOH at similar or better margins」就是现成的一条）
+      #   反驳证据 = 每一个新宣布的表外载体、股权、担保（AVGO 的 Apollo/Blackstone
+      #              20GW 平台、首期 350 亿就是现成的一条）
+      # **两边都有人主动说**，命题才真的可证伪。这正是 L2 capex_funding_quality 的写法，
+      # 它的注释里写着「statement 刻意写成多头假设，让证据去证伪它。首次判读即为 mixed
+      # （反驳 3 簇），那正是它的价值，不是要回避的结果」。本条大概率同样首判 mixed。
+      #
+      # **它与 L2 的 capex_funding_quality 天然成对**：那条问「买方的钱从哪来」，这条问
+      # 「卖方替买方垫了多少」。两边同时恶化才是系统性信号，只看一边会得出相反结论——
+      # 这句话已写进 config/knowledge/芯片设计.md 第八节 A 第 7 条，此前没有命题承接它。
+      #
+      # **与命题 ③ 的边界是这条命题最容易被搞混的地方，所以两边都写了**：
+      # 钱付给**上游**换的是自己能不能出货（保障交付，归 ③ 的 xpu_generation_timeline）；
+      # 钱垫给**下游**换的是客户买不买得起（创造需求，归这里）。两者方向相反，
+      # 合在一个维度里正是 ④ 那一维被删掉的原因。
+      - id: xpu_revenue_funded_by_customers
+        kind: common
+        statement: XPU 层的收入仍主要由客户自有资金支撑——厂商自身的股权、担保、承购与表外载体未成为订单的实质来源
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # ⚠️ 2026-08-18 收窄口径。首轮判读时这一维**支持侧的 3 行全部来自 ORCL**，
+          # 而且说的是「ORCL 自己的客户预付给 ORCL / 自带硬件」——那是**下一层**的资金
+          # 结构（谁出钱买 ORCL 的云服务），不是「谁出钱买 XPU」。ORCL 作为 L4 的
+          # customer 立场没错，错的是这批读数答的是另一层的问题：它们的正确落点是
+          # L2 的 capex_funding_quality（那条问的就是买方这笔 capex 由谁的钱支撑，
+          # ORCL 已在它的证人表里、且被点名为"负债驱动 capex 最典型的一家"）。
+          # 结果是本命题在**零家 XPU 厂商发声**的情况下判了 supportive，支持 2 / 反驳 1
+          # 正好压在 DECISIVE_MAJORITY_RATIO=2.0 的线上——这个结论不该被当真。
+          - key: xpu_order_funding_source
+            desc: 问的是**买加速器的这笔钱由谁出**——一端是买方自有现金、买方自筹的债务与
+                  股权、买方向 XPU 厂商支付的预付款；另一端是 XPU 厂商提供的股权投资、担保与
+                  承购安排、为客户设立的表外融资载体、对客户算力采购的信用支持。
+                  方向指的是**XPU 厂商承担比例**的升降，不是绝对金额。
+                  买方说「我们的加速器是自己出钱买的」或「由芯片供应商安排融资」时，
+                  entity 记那家 **XPU 厂商**——那是本维度上最有价值的非自述读数。
+                  ⛔ **只看链条上这一跳：买方 → XPU 厂商。** 买方自己的客户如何付钱给买方
+                  一律不记——云厂/新云口中的"客户预付合同""自带硬件（BYOH）""RPO 里多少
+                  比例是预付类交易"，讲的是**它自己的客户**在为**它的云服务**出钱，
+                  与谁为加速器出钱隔了一层。那些读数属 L2 的 capex_funding_quality。
+                  ⛔ 不记 XPU 厂商对**上游供应商**的预付与产能锁定——那是保障交付不是
+                  创造需求，方向相反，属命题 ③ 的 xpu_generation_timeline
+            expect_from: [NVDA, AMD, AVGO, MRVL, MSFT, GOOG, AMZN, META, ORCL, SPCX, CRWV, NBIS]
+        falsifiers:
+          - 任一厂商为客户设立或扩大融资载体、提供担保或承购承诺
+          - 新增订单中由厂商股权/担保/表外载体支撑的比重上升
+          - 客户预付与自带硬件的比例下降
+          - 厂商对客户的股权投资出现减值，或被投客户推迟、取消采购
+        # 买方证人在这条命题上比在别处更重要：「这笔钱是谁出的」买方最清楚，而且
+        # 与 L2 capex_funding_quality 的道理一样——**钱的主人最有资格作证**。
+        # 区别是那条只留买方（供应商拿不到客户的资产负债表），这条两边都要：
+        # 表外载体与担保安排出现在**卖方**的披露里，客户自付则出现在**买方**的披露里，
+        # 两端各说各自看得见的那一半，合起来才是完整的资金来源结构。
+        witnesses:
+          - {entity: NVDA, stance: supplier}
+          - {entity: AMD,  stance: supplier}
+          - {entity: AVGO, stance: supplier}
+          - {entity: MRVL, stance: supplier}
+          - {entity: MSFT, stance: customer}
+          - {entity: GOOG, stance: customer}
+          - {entity: AMZN, stance: customer}
+          - {entity: META, stance: customer}
+          - {entity: ORCL, stance: customer}
+          - {entity: SPCX, stance: customer}
+          - {entity: CRWV, stance: customer}
+          - {entity: NBIS, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
 
   - key: L5_fab
     label: L5 芯片制造（Foundry+封装+存储）
@@ -355,13 +1345,13 @@ layers:
         concepts:
           - key: supply_tightness
             desc: 供给紧张程度——售罄比例、订单能见度、交期长短、是否成为出货瓶颈
-            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD, TSM]
+            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD, TSM, TRENDFORCE]
           - key: capacity_addition
             desc: 新增产能、扩产节奏与资本开支投放（含 bit 供给增长）
-            expect_from: [SKHY, MU, "005930.KS", TSM]
+            expect_from: [SKHY, MU, "005930.KS", TSM, TRENDFORCE]
           - key: hbm_demand
             desc: 下游对 HBM 的需求强度、采购计划与瓶颈表述
-            expect_from: [NVDA, AMD, MSFT]
+            expect_from: [NVDA, AMD, MSFT, KR_US_SUMMIT, TRENDFORCE]
           # 2026-08-07 新增。HBM 装到加速卡上必须过 CoWoS/先进封装这一关，所以封装吞吐
           # 是本命题机制里与存储供给并列的另一条链路——它紧，HBM 就到不了客户手上，
           # 无论存储厂产出多少。分开声明是因为两者会背离：存储宽松而封装紧，或反之。
@@ -373,6 +1363,17 @@ layers:
         #   TSM  CoWoS 是 HBM 上板的必经环节，产能与排期由它披露 → supplier
         # ASML/KLAC/LRCX 仍不入列：它们说的是 WFE 订单，对"HBM 此刻紧不紧"只是间接
         # read-through，进来只会稀释而不增加分辨力。
+        #
+        # 2026-08-13 加 KR_US_SUMMIT：旧金山峰会披露 SK 集团计划五年内向 Nvidia 等供应
+        # 7500 亿美元先进存储——这是需求侧的多年承诺，且是政府简报独立确认，不是 SK
+        # 自己财报电话会里的自述，stance 用 regulator。
+        #
+        # 2026-08-13 加 TRENDFORCE（文章类第三方源，见 config/sources.yaml 的
+        # article_sources）。三家存储厂各说自己供给多紧，是三个当事人不是交叉印证；
+        # TrendForce 在同一周里同时报道三家、且会写出买方抢货与产能分配这类
+        # 供给侧自己不会说的事。首轮抓取实测：它对 SKHY/MU/三星共产出 57 条读数，
+        # 但当时全部落在未映射池——**因为它没被声明到这条命题上**，
+        # concept_menu 只给了它 4 个封装维度。声明即是为了让那批读数有地方落。
         witnesses:
           - {entity: NVDA, stance: customer}
           - {entity: AMD, stance: customer}
@@ -381,6 +1382,8 @@ layers:
           - {entity: MU, stance: supplier}
           - {entity: "005930.KS", stance: supplier}
           - {entity: TSM, stance: supplier}
+          - {entity: KR_US_SUMMIT, stance: regulator}
+          - {entity: TRENDFORCE, stance: regulator}
       # 2026-08-07 由 sk_hbm_share 改写为截面比较。原来的形状是"SK Hynix 维持领先"
       # ——一条只有 SK 自己会回答的命题：闸 3 只收「关于主体」的读数，而财报电话会几乎
       # 从不点名竞争对手，于是它永远是 SK 自述 支持N/反驳0，实践上不可证伪。改成问
@@ -420,19 +1423,547 @@ layers:
           - 某家份额指引下修，同时另一家通过其核心客户认证
           - HBM ASP 连续两个观察期下修
 
+      # 2026-08-12 新增。与上面的 hbm_share_and_pricing_power 问的是**不同的问题**：
+      # 那条是 relative，问"三家之间谁的定价权更强"（排序）；这条是 common，问
+      # "整个 HBM 层的定价权本身还在不在扩张"（真假）——供给紧张（hbm_supply_tight）
+      # 不等于还能继续涨价，"售罄但 ASP 走平"是这个子层最常见的误判。
+      #
+      # 复用 hbm_pricing key（不新建）：一个 concept key 可被多条命题各自声明，
+      # corroborate._relevant_concept 逐命题查自己的 concept 表，两条命题共用同一批
+      # 观测互不影响——capex_funding_quality/asic_substitution_delivering 已验证过
+      # 这个模式，实测 concept 的证据数只会因为多一条命题声明而被更充分地抽取，不会被拆散。
+      #
+      # 第一方数据审计（2026-08-12）：三家里只有三星给具体 ASP 数字（DRAM 环比+40%），
+      # SK 海力士只讲定价机制不给数字（HBM 走年度 LTA，非现货报价——它自己解释了
+      # 为什么没有可追踪的周期性价格），美光只给毛利率。**没有一家披露 HBM 专属价格**。
+      # 第三方数据审计：TrendForce 免费价格表**没有 HBM 行**（核实过完整品类列表，
+      # 只有传统 DDR/LPDDR/GDDR）；免费新闻中心的 HBM 文章是定性叙事（"预计涨价数倍"），
+      # 无可追踪的周期性数字；真正的 HBM 报价在付费报告里，拿不到。**不新接源**——
+      # 现有 dram_contract_price（挤占机制，SK 海力士自己确认过）已是这个维度上
+      # 唯一能拿到的独立读数。
+      - id: hbm_pricing_still_expanding
+        kind: common
+        statement: HBM 的定价权仍在扩张——ASP/合约价仍在上行而非走平
+        horizon: {from: 2026-08-01, to: 2027-06-30}
+        concepts:
+          - key: hbm_pricing
+            desc: HBM/存储 ASP、合约价与毛利率的方向——上行/走平/下行。
+                  买方对存储成本上升的表述也算——它可能是"价格确实在涨"的佐证，
+                  也可能是压价前兆，由判读器按上下文区分（不是配置能预判的方向）。
+                  与第三方源 dram_contract_price 共享绑定：传统 DRAM 合约价上行是
+                  HBM 挤占产能的佐证，机制见该 adapter 的模块文档
+            expect_from: [SKHY, MU, "005930.KS", NVDA, AMD, TRENDFORCE]
+        falsifiers:
+          - 任一供应商披露 HBM/DRAM ASP 环比走平或下行
+          - 客户明确要求降价、缩短订单能见度或下调规格
+        # 与 hbm_share_and_pricing_power 用同一套证人（少 MSFT——它在存储成本上
+        # 没有可用表述，加了只会制造一个说不出区分度的沉默证人）。
+        #
+        # 2026-08-13 加 TRENDFORCE。这条命题此前在这个维度上**唯一**的独立读数是
+        # dram_contract_price（那张合约价表），而它 observation_type 是 market，
+        # 落入 SECONDARY，只贡献权重不贡献立场类。TrendForce 的现货价周报与
+        # 「买方以极高价格抢货」这类报道走的是文章通路，逐行判型里会出现
+        # reported_actual/guidance，才可能补上第二类立场——注意这取决于模型的
+        # 逐行判型，不是配置能保证的（见 config/sources.yaml 里的同一条说明）。
+        witnesses:
+          - {entity: SKHY, stance: supplier}
+          - {entity: MU, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # ── 2026-08-13 新增四条代工/封装命题 ─────────────────────────────────────
+      # TSM 此前在本文件里**只是别人命题的证人**（hbm_supply_tight 的 supplier、
+      # cloud_demand_still_accelerating 的 supplier），没有一条以它自己为主体的命题。
+      # 台账里它有 123 条观测，其中 **66 条落在未映射池**——制程组合、N2 爬坡的毛利
+      # 稀释、A14 的 SRAM 良率、COUPE 量产、海外厂稀释，全都没有维度可归。下面四条
+      # 命题主要就是给这批读数一个落点。
+      #
+      # 切分轴：**按产能类型分，不按产品线分**。起草时先按用户提的三条产品线
+      # （AI 加速器 / CPU 服务器芯片组 / CPO 光引擎）各立一组，查证后否掉了：
+      #   · 台积电官方路线图把 COUPE 分三步——SoIC-X 堆出光引擎裸片（2025 验证完成）、
+      #     **2026 起光引擎上 CoWoS interposer 与交换 ASIC 合封**、更远期光引擎直接
+      #     与计算芯粒同封。也就是说从 2026 这一步开始，CPO 和 GPU+HBM **吃的是同一
+      #     池 CoWoS 中介层产能**（IFTLE 642 标题即 "Integrated CoWoS and COUPE"）。
+      #     按产品线各立"缺口方向"命题，两条会永远同向变动，互相稀释。
+      #     ⚠️ 未查到的：140k wpm 的 CoWoS 目标里 CPO 与 GPU 各占多少配额，无第一方
+      #     拆分。所以只知道"共享池"，不知道"分池比例"——不要在判读时假装知道。
+      #   · CPU/服务器芯片组**不单独立命题**：全库对它只有"用台积电 3nm"一句，
+      #     无良率、无产能、无订单转移读数（Google Axion 的代工厂连归属都没查到）。
+      #     证据密度排序与收入权重排序是反的，立不立命题看前者。它的读数并入下面
+      #     的先进制程两条命题即可。
+      #
+      # 形状：缺口方向 → common（问真假）；竞对位置与订单转移 → relative（问分布）。
+      # 良率是**领先指标**、订单转移是**滞后确认**，两者因果相连，所以合在同一条
+      # relative 命题里作两个维度，不拆成两条互相稀释的薄命题。
+      #
+      # 为什么不复用 hbm_supply_tight 的 capacity_addition / supply_tightness：
+      # 那两个 key 的语义是**存储 bit 供给**（desc 里写着"含 bit 供给增长"），
+      # 晶圆厂产能是另一回事。这正是 cloud_capacity_constraint 当初要单开 key 的
+      # 同一个理由——MSFT 的 Azure 产能话术曾因共享 key 被误归进 HBM 命题。
+      # packaging_throughput 是唯一**真正同维度**的，所以复用（见下）。
+      - id: advanced_node_supply_gap
+        kind: common
+        statement: 先进制程晶圆的需求仍高于可用产能——缺口在扩大而非收敛
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: foundry_node_utilization
+            desc: 先进制程（7nm 及以下）的稼动率、满载/售罄表述、产能分配与排期。
+                  台积电的制程收入组合（N2/N3/N5/N7 各占多少、先进制程占晶圆收入比重）
+                  也记在这里——组合快速上移是产能被高阶需求挤占的读数。
+                  **不记存储 bit 供给**，那属于 hbm_supply_tight
+            expect_from: [TSM, "005930.KS", INTC]
+          - key: foundry_node_capacity_addition
+            desc: 先进制程的新增产能与爬坡节奏——新厂投产时点、节点爬坡进度、
+                  资本开支投放方向，以及**爬坡对毛利的稀释幅度**（台积电用它量化
+                  N2 与海外厂的爬坡强度，是产能投放规模的间接但可追踪的读数）
+            expect_from: [TSM, "005930.KS", INTC, ASML]
+          - key: foundry_node_demand_visibility
+            desc: 买方对先进制程的需求强度与订单能见度——长约、预付、产能预订、
+                  多代产品的节点选择。**只记与先进制程产能相关的表述**，
+                  不记该买方自身终端产品的需求好坏
+            expect_from: [NVDA, AMD, AVGO, MRVL, "005930.KS"]
+        falsifiers:
+          - 台积电或三星披露先进制程稼动率下滑、或出现产能空档
+          - 先进制程新增产能的投放速度快于买方订单能见度的延长
+          - 买方明确表示先进制程产能不再是约束、或转为削减预订
+        # ASML 入列的理由与 hbm_supply_tight 里把它排除的理由并不矛盾：那条命题问
+        # "HBM 此刻紧不紧"，WFE 订单只是间接 read-through；这条问的是**先进制程产能
+        # 本身**，而先进制程产能在物理上约等于 EUV/High-NA 装机量，它的出货与客户
+        # 分布是这个维度上最直接的独立读数（现有 INTC 的 4 条也正是出自它）。
+        witnesses:
+          - {entity: TSM, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+          - {entity: INTC, stance: supplier}
+          - {entity: ASML, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: MRVL, stance: customer}
+
+      # ⚠️ 2026-08-13 首轮判读暴露过两层问题，改了两次：
+      #   ① 漏声明：INTC/三星只写进了 packaging_capacity_addition 的 expect_from，
+      #     没进证人表——判读器拿不到"它们是供给侧同行"这个信号，只能凭常识现推，
+      #     推成了"它们是台积电的竞争对手，与本命题无关"。common 命题问的是**行业
+      #     供给缺口本身**，不是"以谁为主角、谁在挑战它"——所有代工/封装厂都是
+      #     同一视角的供给侧证人，一律 supplier，不分 incumbent/competitor（那两个
+      #     立场只在 relative 命题里有意义，因为那里的问题就是"谁相对谁"）。
+      #     hbm_supply_tight 与 advanced_node_supply_gap 已经是这么做的，这条当初
+      #     漏声明纯属疏忽。补声明后支持簇 2→3，但 INTC 仍全部判中性。
+      #   ② 补完证人表后问题仍在，根子是 statement 点了"CoWoS"这个台积电自家商标——
+      #     判读器据此技术性地认定"EMIB 与 CoWoS 非同一产能池，不算证据"，单独看
+      #     没错，但把命题的意图收窄成了"台积电 CoWoS 专属缺口"，而这条命题的本意
+      #     是"先进逻辑芯片封装（不分技术路线）整体是否仍供不应求"——不同方案服务
+      #     同一个行业需求，EMIB 积压也是"封装这个环节整体仍紧"的佐证。改成不点名
+      #     商标的措辞，把"谁的技术路线更强"完全留给下面的 relative 命题去问。
+      - id: advanced_packaging_supply_gap
+        kind: common
+        statement: 先进逻辑芯片封装（不分技术路线）的需求仍高于可用产能——缺口在扩大而非收敛
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          # 复用 hbm_supply_tight 的 key，不新建：那里问的是"封装紧不紧会不会卡住
+          # HBM 上板"，这里问的是"封装缺口本身的方向"，**同一个维度、两个问题**，
+          # 正是 hbm_pricing / custom_silicon_program 已验证过的共享模式。
+          - key: packaging_throughput
+            desc: 先进逻辑芯片封装（CoWoS/EMIB/CoPoS 等 2.5D/3D 方案，不论哪家哪种
+                  技术路线）的产能、排期与是否成为出货瓶颈。**不同技术路线服务的是
+                  同一个行业需求**——任一家的产能紧张/积压都算这个环节整体供需的
+                  佐证，不要求技术路线相同才算数，"谁的方案更强"是另一条命题的问题。
+                  **买方一侧的配额与排期表述也记在这里**（拿到多少产能、是否因封装
+                  而非晶圆受限、是否启用第二封装来源）——那是对供给侧自述的非自述印证
+            expect_from: [TSM, INTC, "005930.KS", NVDA, AMD, AVGO, MRVL, TRENDFORCE]
+          - key: packaging_capacity_addition
+            desc: 先进逻辑芯片封装的产能扩张节奏——月产能目标、新封装厂/产线投产
+                  时点、外包给 OSAT 的溢出比例（外包扩大既是产能扩张也是自有产能
+                  吃紧的读数），以及玻璃基板/面板级等下一代方案的验证与量产时点。
+                  同样**不分技术路线**，任一家的扩产/延迟都算行业产能供给的读数。
+                  台积电 COUPE/CPO 光引擎的产能表述也记在这里——它 2026 起整合进
+                  CoWoS 合封，与 GPU+HBM 消耗同一池中介层产能，不单开维度
+            expect_from: [TSM, INTC, "005930.KS", TRENDFORCE]
+        # 起草时这里还有第三个维度 packaging_allocation_pressure（买方侧的封装配额），
+        # 首轮抽取后删掉：NVDA/AMD/AVGO/MRVL 在它上面**全零**，而同一批公司关于封装的
+        # 话全被抽进了 packaging_throughput。两个 concept 在抽取模型眼里语义不可分，
+        # 后声明的那个只会抢同一批行——与当初否掉 asic_external_revenue 是同一个毛病。
+        # 买方视角没有丢：它并进了 packaging_throughput 的 desc 与 expect_from。
+        falsifiers:
+          - 任一家先进逻辑芯片封装的稼动率下滑、或下调月产能扩张目标，且无同业顶上
+          - 买方表示封装已不再是约束、或封装配额出现富余
+          - 外包给 OSAT 的比例下降且自有产能未同步吃紧
+        # 2026-08-13 加 TRENDFORCE：stance 用 regulator（同 dram_contract_price 的先例——
+        # WitnessStance 枚举没有 market，这个位置是"独立于任何一方的第三方"，不是"当事人
+        # 的某一方"，regulator 语义上就是这个坑，observation_type 才是 market）。
+        # 独立于台积电/Intel/三星任何一方，是这条命题第一个真正的非自述读数来源。
+        # 不进 entities.yaml（同 TW_IC_EXPORT 的先例，是研究机构不是上市公司，不需要
+        # 别名折叠或 downloader 路由）；通过 --file 手动喂文档，不走 chain_sources.
+        # collect()——TrendForce 这批是新闻稿，不是结构化价格表。
+        witnesses:
+          - {entity: TSM, stance: supplier}
+          - {entity: "005930.KS", stance: supplier}
+          - {entity: INTC, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: MRVL, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # 下面两条是 relative。cohort 都是 [TSM, 005930.KS, INTC]，但**不合并成一条**：
+      # 两个战场的相对位置正好相反——三星在制程上贴得近（2nm 项目赢单同比翻倍、
+      # 8nm 及以下满载、先进制程收入占比 2026 过半），在封装上远（CPO turnkey 排到
+      # 2029）；Intel 大致相反（18A 良率与 High-NA 首发在前，外部大客户上量未见）。
+      # 合成一条只会把这两个方向相反的信号平均成一团糊，而它们的分歧正是要看的东西。
+      #
+      # 所有维度必须 direct: true——relative 命题只在 direct 维度上移动（闸 3），
+      # 默认 false，cloud_moat_hard_assets 曾因此 47 条证据出 0 簇。
+      # 为什么产能在这里是 direct、在上面 advanced_node_supply_gap 里却不是：
+      # 那边是**行业供给**读数，竞争者扩产推不出"我方失份额"；这里的产能是**被比较
+      # 的资产本身**，每家读数各自落进自己那一行。同一个词，两种语义。
+      - id: advanced_node_competitive_position
+        kind: relative
+        entities: [TSM, "005930.KS", INTC]
+        feeds_factor: tech_tenor
+        statement: 先进制程的技术与量产位置在台积电 / 三星 / 英特尔之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: node_yield_progress
+            desc: 各家先进节点的良率与器件性能进展——具体良率数字、SRAM 良率、
+                  性能功耗密度对比、爬坡是否顺利。良率是**领先指标**：良率不达标时
+                  名义产能不等于可用产能，这是本条命题的因果起点
+            direct: true
+            expect_from: [TSM, "005930.KS", INTC]
+          - key: node_customer_wins
+            desc: 先进节点的客户赢单、流片与量产承诺——项目数、订单管线、
+                  谁通过认证、谁被替代、是否引入第二代工来源。这是良率进展的
+                  **滞后确认**：设计赢单不等于上量承诺，两者要分开记
+            direct: true
+            expect_from: [TSM, "005930.KS", INTC, NVDA, AMD, AVGO, MRVL, KR_US_SUMMIT]
+          - key: node_capacity_buildout
+            desc: 各家自身先进制程产能的建设进度与地理布局——新厂投产时点、
+                  节点产能规模、海外扩产的成本代价。只记**该家自己的**产能位置，
+                  行业总量缺口属于 advanced_node_supply_gap
+            direct: true
+            expect_from: [TSM, "005930.KS", INTC]
+        falsifiers:
+          - 三星或英特尔披露先进节点良率达到可量产水平，且拿下具名大客户的上量订单
+          - 台积电的节点爬坡时点推迟，或先进制程收入占比停止上移
+          - 任一大客户明确将先进节点订单分流至第二代工来源
+        # ASML 作 supplier 是这条命题里唯一的非自述读数来源：它会公开说 High-NA 谁先
+        # 拿到、谁先上产线——现有 INTC 的 4 条读数全部出自它。
+        # NVDA/AMD/AVGO/MRVL 作 customer：订单转移的表述只有买方说才算数，
+        # 代工厂自述赢单是**利益相关方自我申报**，basis 低一档。
+        # ⚠️ INTC 是 2026-08-13 才注册并进 observe 的，首轮判读时它大概率**三个维度
+        # 全零**。那是"还没抓过"不是"没进展"，判读时不要把它读成落后。
+        #
+        # 2026-08-13 加 KR_US_SUMMIT：2026-07-24 旧金山韩美 AI 峰会的政府简报——三星电子
+        # 与博通签 MOU，含 2000 亿美元先进存储供应与 AI 芯片代工合作。这条 entity 记的
+        # 是 005930.KS（关于三星），source_entity 是峰会简报本身，不是三星自述——政府
+        # 简报 + 双方联合披露，独立性比任一当事方自己说都强，stance 用 regulator
+        # （同 TRENDFORCE 的理由：这个位置是"独立于任何一方"，不是"当事人的某一方"）。
+        witnesses:
+          - {entity: TSM, stance: incumbent}
+          - {entity: "005930.KS", stance: competitor}
+          - {entity: INTC, stance: competitor}
+          - {entity: ASML, stance: supplier}
+          - {entity: NVDA, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: MRVL, stance: customer}
+          - {entity: KR_US_SUMMIT, stance: regulator}
+
+      # 不设 feeds_factor：CoWoS 的定价权（晶圆 ASP 向 7nm 靠拢）确实是 moat_pricing
+      # 的题中之义，但全库目前**没有一条封装 ASP/毛利的独立读数**——台积电只给公司级
+      # 毛利，不拆封装。挂上因子等于让一个没有价格读数的维度去动截面权重。
+      # 等真出现封装定价的可追踪读数再补。
+      - id: advanced_packaging_competitive_position
+        kind: relative
+        entities: [TSM, "005930.KS", INTC]
+        statement: 先进封装的技术与量产位置在台积电 / 三星 / 英特尔之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: packaging_yield_progress
+            desc: 各家**逻辑芯片先进封装**的良率与技术就绪度——EMIB/SoIC/CoWoS/CoPoS
+                  等 2.5D/3D 方案的验证与量产时点、玻璃基板与面板级封装的中试进度、
+                  光引擎（COUPE 及同类）的量产状态。**时点推迟或提前本身就是读数**。
+                  ⛔ 不记存储自身的堆叠与样品进度（HBM3E/HBM4/HBM4E 出货、DRAM 堆叠
+                  良率）——那属于 hbm_share_and_pricing_power 的 customer_qualification。
+                  首轮判读踩过这个坑：三星凭"行业首个 HBM4E 样品出货"被判为封装领先，
+                  但存储堆叠与 CoWoS 级逻辑封装是两个不同战场，混在一起会把一家在
+                  存储上的进度读成它在逻辑封装上追上了台积电
+            direct: true
+            expect_from: [TSM, INTC, "005930.KS", TRENDFORCE]
+          - key: packaging_customer_wins
+            desc: 逻辑芯片先进封装的客户承诺与订单归属——谁在谁家封装、是否启用第二
+                  封装来源、是否有具名客户的试产或转单、封装订单积压的方向。
+                  买方一侧的表述权重高于封装方自述。⛔ 同样不记存储客户的认证进展
+            direct: true
+            expect_from: [TSM, INTC, "005930.KS", NVDA, AVGO, AMD, TRENDFORCE]
+        falsifiers:
+          - 英特尔或三星的封装方案拿下具名大客户的量产订单（非仅试产/设计合作）
+          - 台积电的封装量产时点推迟，或具名客户将封装分流至第二来源
+          - 台积电与竞对在封装上转为合作结构（如共建标准/共用基板），
+            相对位置的问法本身即失效，需重写命题
+        # ⚠️ 起草时明知这条命题**当前几乎是台积电独角戏**：台账里三星 0 条封装读数
+        # （它的代工话术全在节点上）、英特尔 0 条（刚注册）。仍然声明，理由与
+        # asic_merchant_dependency 当初相同——**声明是为了让下一轮抽取有地方安放，
+        # 并让沉默被显式记成缺口而不是中性**。若两轮抽取后三星/英特尔仍全零，
+        # 该做的是把 cohort 收窄或废掉这条命题，不是留着它假装在比较。
+        # 2026-08-13 加 TRENDFORCE：它专题报过台积电 CoWoS vs Intel EMIB 的横向比较、
+        # 以及"GOOG/META 考虑转向 EMIB"这类具名客户动向——relative 命题的两个 direct
+        # 维度都是 gate 3 只吃 cohort 内实体，TRENDFORCE 说的事只要 entity 落在
+        # TSM/005930.KS/INTC 三家上就能过闸，不需要额外放宽隔离规则。
+        witnesses:
+          - {entity: TSM, stance: incumbent}
+          - {entity: INTC, stance: competitor}
+          - {entity: "005930.KS", stance: competitor}
+          - {entity: NVDA, stance: customer}
+          - {entity: AVGO, stance: customer}
+          - {entity: AMD, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
   - key: L6_equipment
     label: L6 半导体设备
     question: 设备订单（WFE）领先指标指向扩产还是收缩？
     tickers:
       - {symbol: ASML, note: EUV 最不可替代}
-      - {symbol: AMAT}
-      - {symbol: LRCX}
+      - {symbol: AMAT, note: 产品组合最宽（沉积/刻蚀/量测/先进封装），中国敞口最大}
+      - {symbol: LRCX, note: 刻蚀/沉积，存储敞口在四家里最高}
       - {symbol: KLAC, note: KLA Corp（正确代码 KLAC，原 KLA 错误）}
-      - {symbol: LSRCY, note: Lasertec ADR（EUV 掩模检测设备）}
-      - {symbol: "8035.T", note: TEL，TODO 用户确认}
     structure_notes:
       半导体设备: config/knowledge/半导体设备.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+
+    # ── 2026-08-15 新增五条设备层命题 ────────────────────────────────────────
+    # 此前本层**一条命题都没有**，concept_menu() 对 KLAC/LRCX/AMAT 返回空菜单，
+    # 390 条读数只有 1 条被映射（ASML 那 6 个菜单维度全来自 L5、全是关于**别人**的节点）。
+    #
+    # **命题集 = 知识库的收入分解式。** config/knowledge/半导体设备.md 第一节把设备公司
+    # 的收入变化拆成六项，并指出「六项里只有第一项是整层共享的，其余都是个股差异的来源」：
+    #
+    #   收入变化 ≈ 客户产能扩张 + 制程内容量 + 份额 + 价格与组合 + 存量服务 − 出口与交付约束
+    #
+    #   客户产能扩张   → ① wfe_cycle_still_expanding        common（唯一能拉到买方的）
+    #   制程内容量     → ② process_content_still_rising     common
+    #   存量服务       → ③ equipment_service_buffer         common
+    #   出口与交付约束 → ④ equipment_market_access_intact   common
+    #   份额 + 价格组合 → ⑤ equipment_position_distribution  relative
+    #
+    # 按分解式一一对应不是修辞：它保证**没有一项被漏掉、也没有两条命题问同一件事**，
+    # 而后者是这套系统里最贵的错误（packaging_allocation_pressure 因此被删）。
+    #
+    # **没有任何一条是"针对持仓"立的。** 起草时曾打算给 ASML 单立一条光刻命题，理由是
+    # 「光刻没有可比同业、进不了截面」——逻辑成立，但核对证据后推翻了：光刻强度只有 ASML
+    # 一家说话，**1 个说话人**在闸 2 分档规则下直接判 unknown（单一视角需 ≥3 个独立说话人），
+    # 立了也永远出不了结论。改为把问题放大成"制程内容量"（命题 ②），光刻降为其中一维，
+    # 于是 ASML/KLAC/LRCX 三家都能说话，而 ASML 关心的那件事一条不落。
+    # **判据是这个维度有没有 ≥3 个独立说话人，不是"我持有它"，也不是"它有没有同业"。**
+    #
+    # **刻意不立的两条**（免得以后重复起草）：
+    #   ~~独立的先进封装设备命题~~ —— 笔记确认先进封装是增量不是搬家、值得追踪，但 L5 的
+    #     packaging_capacity_addition 已在收这批读数（AMAT 那条已映射的行就是证据），
+    #     再开会抢同一批行。改放进 ② 的 process_content_intensity——那里问的是**每片晶圆的
+    #     内容量**，与 L5 问的**产能**是两件事。
+    #   ~~研发强度/花钱守位命题~~ —— 笔记把它改成了复合条件（研发强度↑ + 份额与新品收入未
+    #     改善 + 毛利与增量 ROIC↓ 三者同时成立），单个 concept 承载不了这种合取判断，
+    #     拆开后每一维又都会与 ⑤ 抢行。留给截面分析师在 moat_pricing 里综合。
+    #
+    # **LSRCY（Lasertec）与 8035.T（TEL）已于 2026-08-17 移出本层 tickers**：台账零证据、
+    # 不在 targets/observe，留在宇宙里只会每周多两次取不到内容的价格快照，并在给行业
+    # 分析师的层级表里占两行空位。
+    # Lasertec 尤其可惜——`半导体设备.md` 单独点出掩模检测「需求跟着掩模层数与新节点导入走，
+    # **不跟着 WFE 总量走**」，是本层唯一与 WFE 不同步的一段，本该是最好的对照组：
+    # 它能证伪"整层同涨同跌"。**要加回来的条件是先进 observe 拿到读数**，而不是先放回
+    # tickers 里等——后者正是它此前一直零证据的原因。
+    claims:
+      - id: wfe_cycle_still_expanding
+        kind: common
+        statement: 晶圆厂设备支出周期仍在上行，且买方的实际采购与设备商的预期一致
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: wfe_spend_outlook
+            desc: 设备商对 WFE 总量的预期、修正方向与分部拆分（逻辑/存储/封装各多少）。
+                  **买方一侧的设备采购承诺也记在这里**——工具支出的增减、新厂装机时点，
+                  以及"用旧工具改造替代新购"这类**反向**表述。
+                  ⚠️ 口径：WFE 通常特指**前道**设备，先进封装/组装设备是另一个预算与统计
+                  口径。记读数时要带上口径，否则两个不同口径的数字会被当成同一件事比较
+            expect_from: [KLAC, LRCX, ASML, AMAT, TSM, INTC, "005930.KS", MU, TRENDFORCE]
+          - key: equipment_lead_time_and_coverage
+            desc: 交期、订单覆盖率、积压订单与自身产能扩张计划。
+                  笔记明确交期与积压是**周期性读数、不构成跨周期护城河**——所以它只出现在
+                  这条周期命题里，**不进截面命题**
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+        falsifiers:
+          - 任一设备商下修 WFE 总量预期，或买方下修工具支出
+          - 买方转向工具复用/改造而非新购
+          - 交期缩短且订单覆盖率同步下降
+        # 这是五条里**唯一能拿到 2 类立场的**：买方读数已在库且双向——
+        # INTC「2026 工具支出 +40%」vs 台积电「把 5nm 工具改成 3nm」（复用而非新购，是真证伪）。
+        # ⚠️ 那两条现已映射到 L5 的 foundry_node_capacity_addition / capacity_addition。
+        # **不新开买方维度**，靠上面 desc 与 expect_from 把它们引到这里——
+        # 与 packaging_throughput 已验证的做法一致。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TSM, stance: customer}
+          - {entity: INTC, stance: customer}
+          - {entity: "005930.KS", stance: customer}
+          - {entity: MU, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      - id: process_content_still_rising
+        kind: common
+        statement: 单位晶圆/单位堆叠的设备内容量仍在上升——技术迁移带来的是净增加，不是步骤替代
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: process_content_intensity
+            desc: 每片晶圆或每层堆叠需要的本公司工序内容量、新工序的导入、
+                  SAM per wafer 的变化，以及**先进封装带来的新增工序**（混合键合、临时键合、
+                  减薄、翘曲控制、面板级）。这里问的是**每片晶圆的内容量**，
+                  ⛔ 不是产能——产能属于 L5 的 packaging_capacity_addition
+            expect_from: [LRCX, KLAC, AMAT, ASML, TSM, "005930.KS"]
+          - key: litho_intensity_trend
+            desc: 光刻层数与强度的方向（每代节点用多少 EUV 层、光刻强度是升是降），
+                  以及**客户用多重曝光等手段绕过最新一代光刻的迹象**。
+                  ⛔ 不记客户的节点良率与量产进度，那属于 L5 的 node_yield_progress
+            expect_from: [ASML, TSM, INTC, "005930.KS"]
+        falsifiers:
+          - 某代节点的工序步骤被合并或替代，导致净内容量下降
+          - 客户用多重曝光持续替代最新一代光刻
+          - 先进封装的增量被前道的减量抵消
+        # 对应笔记第三节改写后的判据：「**不是每道工序每一代都单调上升**」——
+        # EUV 单次曝光可替代多次 DUV 图形化，反而减少部分沉积/刻蚀/清洗步骤。
+        # 所以这条是可证伪的，而不是"节点越小设备越好"的同义反复。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TSM, stance: customer}
+          - {entity: "005930.KS", stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      - id: equipment_service_buffer
+        kind: common
+        statement: 服务与装机量收入正在提供跨周期缓冲——它的增速不随系统销售的周期同步回落
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: equipment_service_mix
+            desc: 服务/备件/装机量管理收入的规模、增速与占比方向，
+                  以及它与系统销售增速的**对比**（缓冲成立与否看的是两者的差，不是绝对水平）
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+          - key: installed_base_upgrade_demand
+            desc: 装机基数、装机利用率、升级改造需求与其附加值。
+                  已在库：ASML「客户想尽快在现有厂拿到更多产能，创造了很强的升级需求」、
+                  LRCX「导电刻蚀装机超 4 万腔体」「Akara 装机每年翻倍」
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+        falsifiers:
+          - 服务收入增速掉到系统销售增速以下
+          - 装机利用率或升级改造需求出现下滑表述
+          - 客户推迟维护/服务合同续约
+        # 把笔记里「**本层最被低估的一条**」变成可追踪的命题——全库此前无任何命题、
+        # 任何打分卡覆盖它。四家同为 supplier → 单一立场，但 4 个独立说话人 ≥3，
+        # 按 2026-08-15 改档后的闸 2 会出 supportive(self_reported) 而不是卡住。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      - id: equipment_market_access_intact
+        kind: common
+        statement: 出口管制与市场可达性尚未成为设备收入的实质约束
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: equipment_market_access
+            desc: 受限市场（尤其中国区）的收入占比与方向、出口许可的变化、特定客户的可达性，
+                  以及**竞争对手能否进入本公司进不去的市场**——可达性差异本身就是份额变化
+                  的来源（KLAC 那句「竞争对手能出货到我们进不去的中国晶圆厂」是这个维度上
+                  最有区分度的读数）
+            expect_from: [ASML, LRCX, AMAT, KLAC, TRENDFORCE]
+        falsifiers:
+          - 任一家披露受限市场收入占比下滑且归因于许可变化
+          - 出现新的管制范围扩大或许可撤销
+          - 某家因可达性差异丢掉具名客户或具名订单
+        # 对应笔记第五节新增的风险时间尺度表，核心句：
+        # 「**护城河可以完全没变，收入仍可能因为出口许可或客户资本开支在一个季度内下降。
+        #   不能用"护城河衰退慢"推导"盈利风险也慢"**。」这是旧版笔记完全没有的轴。
+        #
+        # **单 concept 是刻意的**：交付约束本可以单开一维，但它与命题 ① 的
+        # equipment_lead_time_and_coverage 在抽取模型眼里语义不可分，后声明的那个只会抢
+        # 同一批行——与被删掉的 packaging_allocation_pressure 同一个毛病。
+        # 单 concept 有先例（hbm_pricing_still_expanding），且 4 个说话人足够过簇数门槛。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TRENDFORCE, stance: regulator}
+
+      # 截面。四个维度全部 direct: true——relative 命题只在 direct 维度上移动（闸 3）。
+      # 维度的**排序**按新版笔记调整过：旧版说「存储/逻辑两个周期不同步，这往往是本层截面
+      # 区分度的主要来源」，新版加了限定——同一终端需求同时拉动两侧时两个周期会**阶段性
+      # 同步**，此时区分度更多来自份额与制程内容量。当下正是这种同步期。
+      - id: equipment_position_distribution
+        kind: relative
+        entities: [ASML, KLAC, LRCX, AMAT]
+        feeds_factor: moat_pricing
+        statement: 设备层的结构位置在 ASML / KLA / Lam / AMAT 之间如何分布
+        horizon: {from: 2026-08-01, to: 2027-12-31}
+        concepts:
+          - key: equipment_share_and_intensity
+            desc: SAM 占 WFE 的比重、份额的稳定性、新节点导入时是否仍拿到 POR/量产认证。
+                  这是笔记里 recipe 绑定深度的**可观测代理**（长期稳中有升本身就是绑定
+                  有效的证据）。已在库：LRCX「SAM 已到 WFE 的 36.5%、目标高 30%」、
+                  KLAC「是最接近对手的 6 倍」
+            direct: true
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+          # ⚠️ 这里原本还有一个 equipment_process_content（逐家的净内容量比较），
+          # 首轮抽取后删除：**全库只抽到 2 行**（只有 LRCX，其余三家 0），而命题 ② 的
+          # process_content_intensity 拿到 27 行。两个 concept 在抽取模型眼里语义不可分，
+          # "行业整体的内容量趋势"与"逐家的内容量比较"用的是同一批句子，后声明的那个
+          # 抢不过——与被删掉的 packaging_allocation_pressure 同一个毛病。
+          # 起草时明明在注释里写了"与命题 ② 同源"，还是造了这个重复维度，留痕备戒。
+          # 逐家的内容量差异没有丢：SAM per wafer 这类读数会落进下面的
+          # equipment_share_and_intensity（份额与内容量本就是同一个问题的两面）。
+          - key: equipment_segment_exposure
+            desc: 存储/逻辑/先进封装的收入敞口及其方向。
+                  ⚠️ **同一终端需求同时拉动存储与逻辑两侧时，两个周期会阶段性同步，
+                  此时本维度的区分度会明显下降**——四家敞口相似**不等于**没有差异，
+                  差异在上面两个维度里。判读时不要把"敞口接近"读成"位置相同"
+            direct: true
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+          - key: equipment_service_mix
+            desc: 服务/备件/装机量收入的占比与增速——逐家比较。
+                  笔记判据 3：服务占比越高，周期性打折应该越小
+            direct: true
+            expect_from: [ASML, KLAC, LRCX, AMAT]
+        falsifiers:
+          - 某家的工序被第二条技术路线绕开
+          - 某家在新节点导入时未被选中（丢 POR）
+          - 某家服务占比持续低于同业，且系统销售同步回落
+        # equipment_service_mix 复用命题 ③ 的 key：一个 key 可被多条命题各自声明，
+        # 且 direct 是**逐命题**的——③ 里非 direct（那是行业级问真假），这里 direct
+        # （逐家比较）。同 capacity_addition 与 datacenter_capacity_delivered 的先例：
+        # 同一个词，两种语义。
+        # 2026-08-18 四家一律 supplier，与 L4 的 xpu_position_distribution 统一。
+        # incumbent/competitor 这对标签是**旧 subject 式命题留下的化石**：它预设一个主角、
+        # 把问题读成「谁在挑战 ASML」，而截面命题被发明出来正是为了取消主角
+        # （见 schemas/chain.py 的 entities 字段注释：sk_hbm_share 被改写就是因为
+        # 「以某家为主体」让它永远只有主体自述、实践上不可证伪）。
+        # statement 已经是中立的「如何分布」，证人表不该把主角再塞回来。
+        # 机制上 basis 结果相同（读数按 entity 分组，各自 1 类立场），差别在判读器看到的
+        # 框架——它会照着框架写理由。L4 改完后实测：理由从「相对 NVDA 明显偏弱」这种
+        # 挑战者叙事，变成按维度逐条陈述各家自己的位置。
+        witnesses:
+          - {entity: ASML, stance: supplier}
+          - {entity: KLAC, stance: supplier}
+          - {entity: LRCX, stance: supplier}
+          - {entity: AMAT, stance: supplier}
+          - {entity: TSM, stance: customer}
+          - {entity: MU, stance: customer}
+          - {entity: TRENDFORCE, stance: regulator}
 
 # 每票轻量快照的抓取策略（限速关键）
 snapshot:

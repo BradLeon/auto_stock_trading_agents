@@ -1,0 +1,25 @@
+# Advanced Micro Devices (AMD) — PEAD stub · L4 芯片设计（XPU / AI 加速器）。
+# 2026-08-17 新建。此前**没有这个文件**，AMD 也不在 targets/observe——台账里那 223 条
+# 读数是某次手动 `ats evidence observe` 留下的，不会自动刷新，horizon 一滚全部过期。
+# 与 2026-08-15 发现 AMAT 的情况完全同型，按同样先例处理。
+#
+# **observe 名单成员，不可交易**：只贡献产业链证据，绝不进下单路径（见 config/pead.yaml）。
+# TODO: 定制打分卡（Instinct 数据中心收入/机架级平台爬坡/每美元 token）；财报前补 fiscal_label。
+
+symbol: AMD
+company_name: "Advanced Micro Devices"
+fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对
+                              # AMD 财年 12 月结：Q4 约 2 月初申报
+
+# 产业链关系：L4 里唯一的第二家**外售通用 GPU**。它在 XPU 截面里的作用不是"第二名"，
+# 而是**通用平台路线的对照组**——没有它，"外售平台 vs 定制 ASIC"这条轴上只剩 NVDA
+# 一家自述，而一家自述构不成比较（这正是 sk_hbm_share 当初被改写成截面的理由）。
+signal_chain:
+  - {symbol: MSFT,  role: downstream}   # Azure 上的机架级部署
+  - {symbol: ORCL,  role: downstream}   # OCI 加速器采购与利用率
+  - {symbol: META,  role: downstream}   # 推理侧部署
+  - {symbol: NVDA,  role: peer}         # 外售通用加速平台的直接竞争
+  - {symbol: AVGO,  role: peer}         # 定制 ASIC 路线，争同一批实验室/云厂账户
+  - {symbol: MRVL,  role: peer}         # 同上
+  - {symbol: TSM,   role: upstream}     # 先进制程与 CoWoS 排期
+  - {symbol: SKHY,  role: upstream}     # HBM 供给与成本

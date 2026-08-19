@@ -29,6 +29,29 @@ NOTE = """# 测试子层
 高毛利 ≠ 定价权。
 """
 
+# The same note after it outgrew the four-section template: criteria at §五, two extra
+# sections around them. Every check below that uses NOTE must also hold here — the old
+# `split("## 三")` implementation passed the whole suite while being a no-op on exactly
+# this shape, because no fixture ever moved the criteria off §三.
+NOTE_RENUMBERED = """# 测试子层
+## 一、收入分解
+收入 ≈ 产能 × 份额。
+## 二、价值链分工
+衬底 → 激光器 → 模块
+## 三、技术曲线
+光每代蚕食一段。
+## 四、Fabless 的边界
+轻资产不等于没有资本开支。
+## 五、护城河判据：先看平台
+1. **瓶颈环节的所有权** —— 拥有瓶颈 = 拥有定价权。**最硬**。
+2. **垂直整合深度** —— 打通了几段。
+3. **模块封装规模** —— 组装壁垒低。**最软**。
+## 六、风险的时间尺度
+物理替代慢，出口管制快。
+## 七、常见误判
+高毛利 ≠ 定价权。
+"""
+
 
 def _review(rows, layer_key="L3_dc_infra", as_of=NOW):
     return SectorReview(sector="ai_hardware", as_of=as_of, baskets=[
@@ -92,6 +115,50 @@ def test_criterion_citation_matches_how_people_actually_write():
     assert kb_audit._criterion_keys("系统级绑定（互联/整机）") == ["系统级绑定"]
 
 
+def test_criteria_are_parsed_by_heading_not_by_section_number(tmp_path):
+    """Same regression on the audit side: criteria at §五 must still be counted.
+
+    When they were not, nothing said so — `criteria_total` fell to 0, which suppressed
+    the coverage line, emptied `uncited`, and let the layer render 「无异常」.
+    """
+    p = tmp_path / "renumbered.md"
+    p.write_text(NOTE_RENUMBERED, encoding="utf-8")
+    assert kb_audit._criteria_of(p) == [
+        "瓶颈环节的所有权", "垂直整合深度", "模块封装规模"]
+    assert kb_audit._criteria_gap(p) == ""
+
+
+def test_every_mounted_note_yields_criteria():
+    """Pins the parser to the real notes, which is where the coupling actually broke.
+
+    The suite passed for as long as it did because every fixture put the criteria at §三.
+    This one fails the moment a note is restructured out of the parser's reach — which is
+    the event that silently disabled the audit for L4 and L6.
+    """
+    from ats.config import REPO_ROOT
+
+    cfg = load_sector_config("ai_hardware")
+    mounted = {rel for layer in cfg.layers for rel in layer.structure_notes.values()}
+    assert mounted, "no layer mounts a knowledge note — the audit would measure nothing"
+    for rel in sorted(mounted):
+        path = REPO_ROOT / rel
+        assert kb_audit._criteria_gap(path) == "", f"{rel}: {kb_audit._criteria_gap(path)}"
+        assert kb_audit._criteria_of(path), f"{rel} contributed no criteria"
+
+
+def test_a_note_with_no_criteria_section_is_reported_not_swallowed(tmp_path):
+    """Zero criteria must read as "measured nothing", never as a clean run."""
+    p = tmp_path / "headless.md"
+    p.write_text("# 笔记\n## 一、价值链分工\n只有分工，没有判据。\n", encoding="utf-8")
+    assert kb_audit._criteria_of(p) == []
+    assert "判据" in kb_audit._criteria_gap(p)
+
+    rep = kb_audit.AuditReport(layer="L9_test")
+    rep.findings.append(kb_audit.AuditFinding(
+        kind="no_criteria", layer="L9_test", symbol="", detail="x"))
+    assert not rep.ok, "a note defect must not leave the layer looking healthy"
+
+
 # --- perturbation transforms ---------------------------------------------- #
 def test_ablate_removes_only_the_moat_criteria():
     out = kb_perturb.ablate(NOTE)
@@ -126,6 +193,30 @@ def test_a_note_without_the_criteria_section_is_returned_unchanged():
     plain = "# 笔记\n只有一段话。\n"
     assert kb_perturb.ablate(plain) == plain
     assert kb_perturb.poison(plain) == plain
+
+
+def test_perturbation_finds_the_criteria_by_heading_not_by_section_number():
+    """The regression. A note whose criteria sit at §五 must still be ablated at §五 —
+    and the sections that merely HAPPEN to be §三/§四 must survive untouched.
+
+    Before this, `ablate` deleted 技术曲线 while writing a heading announcing that the
+    criteria had been removed, and `poison` returned the note unchanged — a control arm
+    labelled 投毒, whose null result reads as 「判据不是 load-bearing」. That is the one
+    conclusion the perturbation test exists to rule out, so the bug did not just lose
+    signal, it manufactured the wrong answer.
+    """
+    out = kb_perturb.ablate(NOTE_RENUMBERED)
+    assert "瓶颈环节的所有权" not in out and "模块封装规模" not in out
+    assert "光每代蚕食一段" in out                  # §三 kept — it is NOT the criteria
+    assert "轻资产不等于没有资本开支" in out          # §四 kept
+    assert "物理替代慢，出口管制快" in out            # §六 kept
+    assert "高毛利 ≠ 定价权" in out                 # §七 kept
+
+    poisoned = kb_perturb.poison(NOTE_RENUMBERED)
+    assert poisoned != NOTE_RENUMBERED
+    body = poisoned.split("## 五")[1].split("## 六")[0]
+    order = [ln for ln in body.splitlines() if ln.strip().startswith(("1.", "2.", "3."))]
+    assert "模块封装规模" in order[0] and "瓶颈环节的所有权" in order[-1]
 
 
 def test_perturbed_copies_never_touch_the_real_notes(tmp_path):

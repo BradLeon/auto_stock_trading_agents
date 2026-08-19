@@ -225,22 +225,14 @@ class ClaimDef(BaseModel):
     # company", and cross-stance corroboration could never be satisfied.
     witnesses: list[Witness] = Field(default_factory=list)
     falsifiers: list[str] = Field(default_factory=list)
-    # Per-claim override of the stance-diversity gate. None = use the sector default (2).
-    #
-    # Set this to 1 ONLY when the question admits a single vantage point **by
-    # construction** — then the gate is not delaying a verdict, it makes the claim
-    # undecidable forever. The live case: "is this company's capex funded internally"
-    # can only be answered by the company whose capex it is; suppliers and customers
-    # have no access to its balance sheet. Five independent filers refuted it 13 : 1
-    # and it still could not resolve.
-    #
-    # It is NOT an escape hatch for "this claim is inconvenient". The gate exists to
-    # stop a self-serving single source from confirming itself, and that failure mode
-    # is real whenever the speakers benefit from the reading. `corroborate` therefore
-    # refuses to honour a relaxed threshold unless the evidence also comes from at
-    # least `RELAXED_MIN_SPEAKERS` distinct speakers — relaxing vantage diversity
-    # requires source multiplicity in exchange.
-    min_stance_classes: int | None = None
+    # NOTE: there used to be a `min_stance_classes` per-claim override here, letting a
+    # claim declare that its question admits one vantage point by construction. It is
+    # gone, and nothing replaced it — because gate 2 stopped being a gate. Vantage
+    # diversity is now GRADED (ClaimAssessment.basis) rather than required, so the
+    # single-vantage case resolves on its own as long as enough independent filers
+    # spoke. The override existed only to buy an exemption from a veto that no longer
+    # exists, and it cost a judgement call ("is this single-vantage BY CONSTRUCTION?")
+    # on every new claim. See chain/corroborate.py's module docstring.
     horizon: Horizon | None = None
 
     @field_validator("entities")
@@ -364,13 +356,29 @@ class ClaimAssessment(BaseModel):
     refute_score: float = 0.0
     evidence_clusters: int = 0            # AFTER de-duplication by originating source
     stance_classes: int = 0               # distinct witness stances seen
+    speakers: list[str] = Field(default_factory=list)   # distinct filers behind the verdict
     witnesses_expected: int = 0
     witnesses_reported: int = 0
-    # WHY a verdict is `mixed`, because the two reasons mean opposite things to a
-    # reader. "dissent" = the evidence genuinely conflicts. "single_stance" = the
-    # evidence is one-sided but every witness shares a vantage point, so the engine
-    # declines to confirm it. Rendering both as 「分歧」 told the reader the evidence
-    # disagreed when it did not. Empty for every other verdict.
+    # What the verdict RESTS ON — the same label the cross-section has always carried,
+    # now on common claims too. `corroborated` = at least two vantage points agreed.
+    # `self_reported` = one vantage point, but several independent filers; the reading
+    # stands and carries this caveat instead of being withheld. `thin` = not enough to
+    # say anything.
+    #
+    # This replaced a veto. Vantage diversity used to be a GATE: single-stance evidence,
+    # however voluminous and however many separate companies produced it, returned
+    # `mixed`. That was wrong twice over — it called 7-support / 0-refute "mixed", a word
+    # that means conflict; and it treated four competing suppliers agreeing exactly like
+    # one company repeating itself, though only the latter is self-confirmation. The
+    # cross-section path had already solved this correctly (see EntityReading.basis:
+    # "the bias is common-mode and the COMPARISON still carries information"), so this
+    # is the two paths converging, not a new leniency.
+    basis: ReadingBasis = "thin"
+    # WHY a verdict could not be reached. "dissent" = the evidence genuinely conflicts
+    # (the only thing `mixed` may now mean). "single_stance" = one vantage AND too few
+    # independent filers to stand on its own, so the verdict is `unknown` — kept as a
+    # distinct reason because "nobody spoke" and "everyone who spoke shares a seat at
+    # the table" call for different fixes.
     unresolved_reason: Literal["", "dissent", "single_stance"] = ""
     dissenters: list[str] = Field(default_factory=list)
     # Declared witnesses that said nothing this period. Named, not folded into a
@@ -468,6 +476,73 @@ class SourceDef(BaseModel):
     @classmethod
     def _entity_upper(cls, v: str) -> str:
         return (v or "").upper()
+
+
+class ArticleSourceDef(BaseModel):
+    """A third-party evidence source that publishes PROSE rather than a series.
+
+    The sibling of `SourceDef`, and deliberately a separate declaration rather than a
+    flag on it: a statistical series becomes an Observation by formula (see
+    chain/sources.to_observations — no model in the loop), while an article has to be
+    read. Folding the two together would quietly cost `sources.py` the property its own
+    docstring sells, that its numbers never passed through a model's judgement.
+
+    Declared in config/sources.yaml under `article_sources:`; see that file for the
+    field-by-field rationale.
+    """
+
+    id: str
+    label: str = ""
+    adapter: str                          # data/articles/<adapter>.py
+    params: dict = Field(default_factory=dict)
+    entity: str                           # the PUBLISHER — it is the speaker, never the subject
+    stance: WitnessStance = "regulator"
+    doc_type: str = "article"
+    cadence: str = "weekly"
+    # How deep to page back through the index. Overlap between runs is free: an article
+    # already in the ledger is skipped before it costs a fetch, let alone a model call.
+    pages: int = 3
+    max_per_run: int = 12                 # cost ceiling on model calls, not on discovery
+    # Applies to the EXTRACTED body, never the whole page — a paywalled product page is
+    # the longest document on the site and contains no article at all.
+    min_body_chars: int = 800
+    # Cheap deterministic pre-filter on the URL slug (which carries the headline). This
+    # governs COST, not correctness: `observer.concept_menu` is a closed menu, so an
+    # off-topic article that slips through lands entirely in the unmapped pool where no
+    # claim can reach it. So prefer it wide — a miss here loses real evidence, while a
+    # false positive only wastes one model call.
+    match: list[str] = Field(default_factory=list)
+
+    @field_validator("entity")
+    @classmethod
+    def _entity_upper(cls, v: str) -> str:
+        return (v or "").upper()
+
+    @field_validator("match")
+    @classmethod
+    def _match_lower(cls, v: list[str]) -> list[str]:
+        return [str(s).lower() for s in (v or [])]
+
+
+class ArticleRef(BaseModel):
+    """One article as the DISCOVERER found it — before anything has been fetched.
+
+    Carries enough to decide whether the article is worth fetching at all: TrendForce
+    puts both the date and the headline in the URL, so the keyword filter and the
+    already-seen check both run before a single body request is made.
+    """
+
+    url: str
+    slug: str                             # stable per-article id; used in the document_id
+    title: str = ""
+    published_at: date | None = None
+
+    @field_validator("slug")
+    @classmethod
+    def _slug_required(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("slug must not be blank")
+        return v.strip()
 
 
 class SeriesPoint(BaseModel):

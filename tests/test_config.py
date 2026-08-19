@@ -63,15 +63,20 @@ layers:
 
 
 def test_signal_chain_falls_back_to_sector_layer_when_yaml_declares_none():
-    # AMD has no config/pead/AMD.yaml at all — falls back to its ai_hardware.yaml
-    # L4_chip_design layer peers. (chain/kb_review.py reports exactly this gap: the
+    # META has no config/pead/META.yaml at all — falls back to its ai_hardware.yaml
+    # L2_cloud layer peers. (chain/kb_review.py reports exactly this gap: the
     # fallback keeps the report populated but carries no role and no comment, so
     # `relation_hint` cannot tell 「上游 HBM 主供」 from 「上游 EUV」.)
-    cfg = load_pead_config("AMD")
+    #
+    # This used to be AMD, which was chainless for the same reason. It stopped being
+    # the right fixture on 2026-08-17 when AMD got a curated config/pead/AMD.yaml —
+    # it joined `observe` as the fourth name in the L4 XPU cross-section. The test was
+    # asserting on a gap, not on AMD, so the fixture moved rather than the assertion.
+    cfg = load_pead_config("META")
     peers = {s.symbol for s in cfg.signal_chain}
     assert peers, "expected a non-empty derived peer list"
-    assert "AMD" not in peers           # never include itself
-    assert "NVDA" in peers              # same L4_chip_design layer
+    assert "META" not in peers          # never include itself
+    assert "MSFT" in peers              # same L2_cloud layer
     assert all(s.role == "peer" for s in cfg.signal_chain)  # no guessed direction
 
 
@@ -88,3 +93,27 @@ def test_explicit_yaml_signal_chain_overrides_the_fallback():
 def test_signal_chain_fallback_empty_when_symbol_in_no_sector_layer():
     cfg = load_pead_config("NOT_A_REAL_TICKER")
     assert cfg.signal_chain == []
+
+
+def test_third_party_prose_names_resolve_to_the_listed_entity():
+    """Journalists name companies their way, not the filing's way. Measured after the
+    news + newsletter sources were wired up (2026-08-18): `NVIDIA (NVDA)`, `MICRON (MU)`,
+    `MICROSOFT`, `GOOGLE CLOUD` all arrived as fresh unresolvable entities.
+
+    An entity that resolves to nothing is not untidy, it is UNREACHABLE:
+    `corroborate.assess_layer` gathers rows by entity, so those readings can never enter
+    any claim. Enumerating one alias per phrasing loses that race, so the parenthesised
+    ticker — the publisher telling us the answer — is parsed as a fallback.
+    """
+    from ats.config import canonical_entity
+
+    assert canonical_entity("NVIDIA (NVDA)") == "NVDA"
+    assert canonical_entity("MICRON (MU)") == "MU"
+    assert canonical_entity("MICROSOFT") == "MSFT"        # MSFT was never registered
+    assert canonical_entity("GOOGLE CLOUD") == "GOOG"     # business line, not the issuer
+    assert canonical_entity("HY9H") == "SKHY"             # the original folding still holds
+    # Unregistered but ticker-shaped: fold to the ticker so at least it is STABLE across
+    # phrasings, instead of splitting into one identity per way of writing it.
+    assert canonical_entity("QUMULUSAI (QMLS)") == "QMLS"
+    # Not ticker-shaped: left alone rather than guessed at.
+    assert canonical_entity("SOME PRIVATE LAB") == "SOME PRIVATE LAB"

@@ -12,16 +12,27 @@
 # filings    该公司**原始文件**的披露地：sec 表示能在 EDGAR 找到，ir 表示只能取投资者
 #            关系页/纪要。取不到不是错误，会如实记成缺口。
 
+# ⚠️ 2026-08-13：别名表原本只登记**代码**，因为此前每份文档都是公司自己的财报——
+# 公司在自己的电话会里几乎不会用英文全名自称，所以「通俗名」这一类别名从没被用到。
+# 接入第三方文章后这个假设失效了：TrendForce 写的是 "SK hynix"、"Micron"、"Samsung"，
+# 抽取模型照抄原文，于是 SAMSUNG(12 条) 与 005930.KS(8 条) 被拆成两个实体键——
+# 正是本文件开头警告的那种「从内部骗过立场闸」的失效，只是这次走的是通俗名而不是代码。
+# 别名是**精确整串匹配**（config.py::_alias_index），所以 "SAMSUNG ELECTRO-MECHANICS"
+# 不会被 "SAMSUNG" 误折——那是另一家上市公司。
 entities:
   SKHY:
     name: SK hynix
-    aliases: [HY9H, "000660.KS", SKHYY, "000660"]
+    aliases: [HY9H, "000660.KS", SKHYY, "000660", "SK HYNIX", "SK HYNIX INC"]
     market: KRX
     filings: ir
 
   "005930.KS":
     name: Samsung Electronics
-    aliases: [SSNLF, "005930", SMSN]
+    # "SAMSUNG ELECTRONICS" 补于 2026-08-13：喂三方新闻（TrendForce/峰会简报）时，
+    # LLM 抽取按文中原文写公司全名，不是股票代码——canonical_entity() 现在也在逐条
+    # 观测的 entity 字段上生效（见 observer.py extract()），折不到就会开一个新
+    # entity 键，任何命题的证人/概念查询都够不着它。
+    aliases: [SSNLF, "005930", SMSN, "SAMSUNG ELECTRONICS", SAMSUNG]
     market: KRX
     filings: ir
 
@@ -31,7 +42,40 @@ entities:
   # canonical 取 GOOG：账户实际持有的是 C 类。
   GOOG:
     name: Alphabet
-    aliases: [GOOGL, GOOG.L, ALPHABET, GOOGLE]
+    # 2026-08-18 补 GOOGLE CLOUD / GCP：第三方文章按业务线称呼，而不是按上市主体。
+    # 台账里这个写法有 17 条读数，全部够不着任何命题——corroborate.assess_layer 是
+    # **按 entity 取行**的，一个折叠不了的名字等于这批证据不存在。
+    aliases: [GOOGL, GOOG.L, ALPHABET, GOOGLE, "GOOGLE CLOUD", GCP]
+    market: US
+    filings: sec
+
+  # 2026-08-18 新登记。MSFT 此前**根本不在这个注册表里**——它是 observe 名单成员、
+  # 是 L2/L4 多条命题的证人，但第三方源写 "MICROSOFT" 时折叠不到 MSFT，18 条读数
+  # 因此够不着任何命题。自家财报走 symbol=MSFT 那条路所以一直没暴露这个洞。
+  MSFT:
+    name: Microsoft
+    aliases: [MICROSOFT, "MICROSOFT CORPORATION", AZURE]
+    market: US
+    filings: sec
+
+  # 2026-08-18 新登记。它在 L2 的 tickers 里（标着 TODO 待确认），既非 target 也非
+  # observe，所以没有第一方财报；但它在**别人的**新闻里频繁出现（NVDA 的算力承诺、
+  # 实验室的部署去向）。登记只为让这些第三方读数能折叠到一个稳定身份。
+  CRWV:
+    name: CoreWeave
+    aliases: [COREWEAVE, "CORE WEAVE"]
+    market: US
+    filings: sec
+
+  # 2026-08-18 补。与 CRWV 同类的 neocloud。
+  # ⚠️ **这两家的证据价值是有方向性的，不要当成通用买方证人**：它们的机队几乎全绑
+  # 英伟达供应链，所以它们说的话对 NVDA 是有力的侧面佐证（客户视角的利用率、租金、
+  # 采购与融资安排），但对 ASIC 路线（AVGO/MRVL）参考有限——它们本来就不买定制芯片，
+  # 沉默不代表 ASIC 不行。截面判读时要记得这个不对称，别把"neocloud 没提 ASIC"
+  # 读成对 ASIC 的反向证据。
+  NBIS:
+    name: Nebius Group
+    aliases: [NEBIUS, "NEBIUS GROUP", YANDEX.NV]
     market: US
     filings: sec
 
@@ -48,25 +92,25 @@ entities:
 
   MU:
     name: Micron Technology
-    aliases: []
+    aliases: [MICRON, "MICRON TECHNOLOGY"]
     market: US
     filings: sec
 
   NVDA:
     name: NVIDIA
-    aliases: []
+    aliases: [NVIDIA, "NVIDIA CORPORATION"]
     market: US
     filings: sec
 
   AMD:
     name: Advanced Micro Devices
-    aliases: []
+    aliases: ["ADVANCED MICRO DEVICES"]
     market: US
     filings: sec
 
   AVGO:
     name: Broadcom
-    aliases: []
+    aliases: [BROADCOM, "BROADCOM INC"]
     market: US
     filings: sec
 
@@ -75,6 +119,57 @@ entities:
     aliases: ["2330.TW", TSMC]
     market: TWSE
     filings: sec          # 20-F + 英文法说会纪要
+
+  # 2026-08-13 补。它是先进制程与先进封装两条命题里唯一未注册的 cohort 成员——
+  # 台账里关于 Intel 的读数只有 4 条，且全部出自 ASML 之口（High-NA 谁先上量）。
+  # 转述能证明"别人怎么看它"，证明不了它自己报的 18A 良率与外部客户进展；
+  # 不注册 + 不进 observe，foundry_competitive_position 那两条命题的 Intel 一栏
+  # 就会永远空着，而空着会被读成"没进展"，不是"没抓过"。
+  INTC:
+    name: Intel
+    aliases: [INTEL, "INTEL FOUNDRY"]
+    market: US
+    filings: sec
+
+  # --- L3 光互联/互联层 -------------------------------------------------------
+  # 2026-08-14 补。这五家此前**一家都没注册**，而 L3 层马上要立命题。
+  # 别名取的是**通俗名**而不是代码，因为踩坑的是第三方散文不是公司自述：
+  # TrendForce 写的是 "Lumentum"/"Coherent"/"Credo"，抽取模型照抄原文，
+  # 折不到就各开一个新实体键，任何命题都够不着——与上一轮 SAMSUNG 被拆成两个键同型。
+  LITE:
+    name: Lumentum
+    aliases: [LUMENTUM, "LUMENTUM HOLDINGS"]
+    market: US
+    filings: sec
+
+  COHR:
+    name: Coherent
+    # II-VI 是合并前的旧名，老文章仍在用
+    aliases: [COHERENT, "COHERENT CORP", "II-VI", "II-VI INCORPORATED"]
+    market: US
+    filings: sec
+
+  CRDO:
+    name: Credo Technology
+    aliases: [CREDO, "CREDO TECHNOLOGY", "CREDO SEMICONDUCTOR", "CREDO SEMI"]
+    market: US
+    filings: sec
+
+  MRVL:
+    name: Marvell Technology
+    aliases: [MARVELL, "MARVELL TECHNOLOGY"]
+    market: US
+    filings: sec
+
+  # ⚠️ 账户实际持有的代码是 AXTI，配置各处写的是 AXT。这条别名只解决**证据侧**的
+  # 实体折叠；风控的分层归属走的是另一条路径（风控快照的 symbol_layers），
+  # 不会因为这条别名而修复——AXTI 目前仍显示「未分层」、其 3.03% 不计入 L3 上限。
+  # 已与用户确认本轮不修那一侧，此处留痕。
+  AXT:
+    name: AXT Inc
+    aliases: [AXTI, "AXT INC"]
+    market: US
+    filings: sec
 
   ASML:
     name: ASML Holding
@@ -94,9 +189,13 @@ entities:
     market: US
     filings: sec
 
+  # 2026-08-15 补别名。台账里它的 12 条读数全部存在 `APPLIED MATERIALS (AMAT)` 这个
+  # 键下——第三方文章（TrendForce）写的是"公司全名 (代码)"，抽取模型照抄原文，而这里
+  # aliases 是空的，于是折不回来。后果比 SAMSUNG 那次更彻底：`AMAT` 名下**一条读数都没有**，
+  # 把它声明成证人 = 声明一个永远沉默的证人。
   AMAT:
     name: Applied Materials
-    aliases: []
+    aliases: ["APPLIED MATERIALS", "APPLIED MATERIALS (AMAT)"]
     market: US
     filings: sec
 

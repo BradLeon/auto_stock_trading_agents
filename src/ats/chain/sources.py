@@ -147,6 +147,19 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
     One observation is emitted per declared concept: the same customs print is evidence
     on `supply_tightness` and on `hbm_demand`, and filing it once under a blank concept
     would leave it in the unmapped pool where no claim can reach it.
+
+    The return value has two zero-like states that must not be confused, so they are
+    NOT the same number:
+      * ``0``  — the source was reached and every point it returned was already in the
+        ledger. The data is current; nothing changed since last time. This is the
+        normal steady state for a monthly source fetched more than once a month.
+      * ``-1`` — the source could not be reached at all this round (network failure,
+        page structure changed, rate-limited). A gap, recorded via
+        `save_document_failure`. Confusing this with ``0`` is exactly the failure this
+        sentinel exists to prevent: TrendForce's contract-price page returned the same
+        "2H Jun" print twice in a row and both callers logged "0 new observations", but
+        one CLI surface then printed "取不到数据" over data that had, in fact, just
+        been fetched successfully — a live-and-current source reporting as dead.
     """
     now = now or datetime.now(timezone.utc)
     out: dict[str, int] = {}
@@ -155,7 +168,7 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
             continue
         points = fetch(source, lookback_months=lookback_months)
         if not points:
-            out[source.id] = 0
+            out[source.id] = -1
             try:
                 store.save_document_failure(source.entity, "", "series",
                                             source=source.adapter,

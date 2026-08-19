@@ -131,18 +131,23 @@ def test_undeclared_relation_is_how_new_topology_arrives():
 
 
 def test_a_speaker_with_no_chain_is_one_finding_not_one_per_counterparty():
-    """AMD has no pead config, so every company it names looks "undeclared". Six
+    """META has no pead config, so every company it names looks "undeclared". Six
     findings would bury the single thing to fix — and while the chain is missing,
-    `relation_hint` is empty, so descriptive references resolve to nobody."""
+    `relation_hint` is empty, so descriptive references resolve to nobody.
+
+    This used to be AMD, until AMD got a curated config/pead/AMD.yaml on 2026-08-17
+    (it joined `observe` as the fourth name in the L4 XPU cross-section). The subject
+    of the test is the chainless-speaker rollup, not AMD, so only the fixture moved.
+    """
     store = get_store()
-    for other in ["ANTHROPIC", "TSM", "MSFT"]:
-        store.save_observation(_obs("AMD", about=other, metric=f"rel_{other}"))
+    for other in ["ANTHROPIC", "TSM", "NVDA"]:
+        store.save_observation(_obs("META", about=other, metric=f"rel_{other}"))
 
     found = [f for f in kb_review.undeclared_relations(
-        load_sector_config("ai_hardware"), store) if f.subject.startswith("AMD")]
+        load_sector_config("ai_hardware"), store) if f.subject.startswith("META")]
     assert len(found) == 1
     assert "无 signal_chain" in found[0].subject
-    assert all(o in found[0].detail for o in ("ANTHROPIC", "TSM", "MSFT"))
+    assert all(o in found[0].detail for o in ("ANTHROPIC", "TSM", "NVDA"))
 
 
 def _assessment(claim_id, judgements, *, layer="L5_fab"):
@@ -183,15 +188,21 @@ def test_a_dimension_that_discriminates_is_not_reported():
 def test_declared_third_party_sources_are_not_strangers():
     """TW_IC_EXPORT is a customs bureau declared in config/sources.yaml. It appears in
     no ticker list by design, and flagging it every week would train the reader to skip
-    the one section whose whole job is to be read."""
+    the one section whose whole job is to be read.
+
+    The foil used to be INTC, until 2026-08-13 registered it for the foundry claims —
+    which is the check working, not breaking. The foil has to be a name genuinely in no
+    config: UMC is a real foundry that turns up in silicon-photonics commentary and is
+    deliberately not registered, so a reading about it SHOULD be reported.
+    """
     store = get_store()
     store.save_observation(_obs("TW_IC_EXPORT", metric="ic_exports_yoy"))
-    store.save_observation(_obs("ASML", about="INTC", metric="highna_adoption",
-                                span="Intel Foundry is using High-NA on 18A"))
+    store.save_observation(_obs("ASML", about="UMC", metric="photonics_capacity",
+                                span="UMC is shipping silicon photonics wafers"))
 
     found = kb_review.unfamiliar_entities(load_sector_config("ai_hardware"), store)
     subjects = {f.subject for f in found}
-    assert "INTC" in subjects
+    assert "UMC" in subjects
     assert "TW_IC_EXPORT" not in subjects
 
 

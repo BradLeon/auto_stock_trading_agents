@@ -842,6 +842,12 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         # The prose half of `collect`. Separate command because it costs a model call
         # per article and takes minutes, while `collect` is arithmetic over a series.
         from ..chain import articles as chain_articles
+        from ..data import research as research_data
+
+        # Newsletter acquisition is a source-stage operation shared by every consumer.
+        # The SemiAnalysis adapter below only discovers already-stored assets.
+        if not entity or entity == "semianalysis":
+            research_data.ingest_configured(store=store)
 
         stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
         if not stats:
@@ -1002,7 +1008,10 @@ def sector_probe(name: str = "ai_hardware", *, live_data: bool = True) -> int:
 def run_pead_research(*, use_llm: bool = True) -> list:
     """One research pass: ingest newsletters, extract per-ticker insights."""
     from ..agents.pead import research
+    from ..data import research as research_data
+    from ..memory import get_store
 
+    research_data.ingest_configured(store=get_store())
     insights = research.run(use_llm=use_llm)
     if not insights:
         print("📰 research — no new articles / no insights")
@@ -1214,10 +1223,56 @@ def _setup_logging() -> None:
     logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
 
 
+def run_data(action: str, value: str = "", *, source: str = "", series: str = "",
+             entity: str = "", since: str = "", as_of: str = "", limit: int = 20,
+             vintages: bool = False) -> int:
+    """Inspect stable data products without knowing their backing tables."""
+    import json
+
+    from ..data_platform import get_data_products
+
+    products = get_data_products()
+    if action == "health":
+        result = products.health()
+    elif action == "series":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.indicator_series(
+            source_id=source or None, series=series or None, entity=entity or None,
+            since=since or None, as_of=cutoff, include_vintages=vintages,
+        )
+    elif action == "search":
+        result = products.search_documents(
+            value, entity=entity or None, source_contains=source or None,
+            published_since=since or None, limit=limit,
+        )
+    elif action == "company":
+        result = products.company_research_package(value)
+    elif action == "claim":
+        result = products.claim_evidence_package(value, limit=limit)
+    elif action == "lineage":
+        result = products.lineage(value)
+    else:
+        raise ValueError(f"unknown data action: {action}")
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
+    data = sub.add_parser("data", help="统一数据产品 (health / series / search / company / claim / lineage)")
+    data.add_argument("action", choices=["health", "series", "search", "company", "claim",
+                                         "lineage"])
+    data.add_argument("value", nargs="?", default="",
+                      help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID")
+    data.add_argument("--source", default="", help="series: source ID；search: 来源过滤")
+    data.add_argument("--series", default="", help="series: 指标名称")
+    data.add_argument("--entity", default="", help="实体过滤")
+    data.add_argument("--since", default="", help="最早期间或发布日期")
+    data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
+    data.add_argument("--limit", type=int, default=20)
+    data.add_argument("--vintages", action="store_true", help="series: 包含所有修订版本")
     sub.add_parser("ibkr", help="probe IBKR paper connectivity (account + positions)")
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
     srv.add_argument("--host", default="0.0.0.0")
@@ -1336,6 +1391,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="score: run the Chief immediately after the recommendation persists")
     args = parser.parse_args(argv)
 
+    if args.command == "data":
+        if args.action in {"search", "company", "claim", "lineage"} and not args.value:
+            parser.error(f"data {args.action} requires VALUE")
+        return run_data(args.action, args.value, source=args.source, series=args.series,
+                        entity=args.entity, since=args.since, as_of=args.as_of,
+                        limit=args.limit, vintages=args.vintages)
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":

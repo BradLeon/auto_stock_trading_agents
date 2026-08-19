@@ -1,7 +1,7 @@
 # 数据源状态（Data Sources）
 
 PEAD 基本面分析 + 交易 Agent 的数据源清单：已接入并测试通过 vs 待接入。
-最后更新：2026-07-03（+ 行业知识接入）。
+最后更新：2026-08-19（+ 共享数据平台首期能力）。
 
 ## 如何测试
 
@@ -32,10 +32,10 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 | **consensus** 一致预期 | yfinance（无需 key） | 当季 EPS / 营收 一致预期（含 low/high）+ **分析师目标价**(mean/median/low/high/current) + **评级分布**(SB/B/H/S/SS 含近 4 月趋势) + **近 120 天升降级**(机构/评级/动作，最多 8 条) | → `pead_dossier.expectation_set` + prep 叙事/预期上下文 | Finnhub earnings 带预估、`/stock/recommendation`（免费）带评级，可交叉验证；Finnhub 目标价为付费端点 |
 | **runup** 抢跑/距高 | yfinance（无需 key） | 财报前 20 日相对 SMH/QQQ 超额收益、距 52w 高 | → `pead_dossier.market_setup` | 透支判断 |
 | **options** 期权 | **ThetaData 本地终端** → yfinance 兜底 | Expected Move、ATM IV、25Δ skew（BS 反解） | → `pead_dossier.market_setup` | ⚠️ 终端开着才准（IV≈真值）；终端没开走 yfinance 时 IV 退化，建议跑财报时开 `./scripts/start_thetadata.sh` |
-| **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 + **LLM 分诊降噪**（Gemini Flash 打 materiality 分，噪音不进 LLM 上下文）+ **关键新闻正文增强**（≥0.65 分抓全文喂 monitor） | → `pead_events`（含 triage_score/category） | 连续监控用；X/社媒见待接入 |
-| **research** 订阅研报 | Gmail IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | 高质量 newsletter 全文（SemiAnalysis 等，付费文只有邮件里全）→ LLM 提取 per-ticker insight（**含二阶传导**：如 Meta 出租算力→利空 MU/TSM），universe = targets+signal_chain | → `research_articles`/`research_insights`；material insight 注入 `pead_events` 流入 dossier | `ats pead research`；高置信推飞书。⚠️ Gmail 直连 993 被机场墙 → 走 **Gmail 过滤器自动转发到 QQ 邮箱**（`imap.qq.com` 直连），代码链路已实测通过、待真实自动转发邮件累积 |
-| **transcript** 电话会纪要 | Tavily（`TAVILY_API_KEY`）→ 手动落档兜底 | 财报电话会全文（搜 fool/investing 抓正文） | → `var/transcripts/` / dossier.actuals | FMP 也支持但需付费层（免费 402）；也可 `--transcript <链接/路径>` |
-| **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**（SEC，权威自动）+ **投资者 PPT**（Tavily，通用自动）+ 文件夹精选 | → score 的 actuals 抽取 | 文件夹 `信息源/<SYM>/` 有则优先用、自动补缺、不重复 |
+| **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 + **LLM 分诊降噪**（Gemini Flash 打 materiality 分，噪音不进 LLM 上下文）+ **关键新闻正文增强**（≥0.65 分抓全文喂 monitor） | 全部标题/摘要 → 共享文档资产；高价值全文 → 同一文档的新版本；事件状态 → `pead_events` | 相同 URL 跨 Provider/标的只保存和抓取一次；X/社媒见待接入 |
+| **research** 订阅研报 | Gmail IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | 高质量 newsletter 全文（SemiAnalysis 等，付费文只有邮件里全）→ LLM 提取 per-ticker insight（**含二阶传导**：如 Meta 出租算力→利空 MU/TSM），universe = targets+signal_chain | 共享原文 → `source_documents`/`document_versions`；PEAD 兼容结果 → `research_articles`/`research_insights` + `task_projections`；material insight 注入 `pead_events` | `ats pead research`；PEAD 与 Evidence 共用一次采集结果，各自记录处理版本。⚠️ Gmail 直连 993 被机场墙 → 走 **Gmail 过滤器自动转发到 QQ 邮箱**（`imap.qq.com` 直连） |
+| **transcript** 电话会纪要 | defeatbeta / Tavily / 手工文件 / FMP | 财报电话会全文 | 质量与报告期校验通过后 → 共享文档资产 → PEAD/Evidence 共用 | FMP 需付费层；也可 `--transcript <链接/路径>`；第二个 Workflow 不再重新抓取 |
+| **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**、SEC/手工公告、10-K/10-Q/6-K、**投资者 PPT** | 共享文档资产 → score / Evidence | 文件夹 `信息源/<SYM>/` 有则优先；按财报期复用，不重复访问 SEC/Tavily |
 | **industry** 行业知识 | 本地 Obsidian 笔记（`industry_notes.root`，策选白名单 md） | 稳定的**行业/产业链背景**（AI 硬件供应链分层框架、利润分布、周期护城河、AI Capex、L4-L6 估值）——判断标的**定位/护城河/周期/议价权** | → **prep 建 thesis** 时注入 narrative，经 `prior_narrative` 闭环传播到 monitor/score | 文件夹直读（复用 documents `_read_doc`）；每篇截断 12k；root 缺失静默跳过。**结构性背景**非实时报价，动态景气仍靠 news/research |
 
 **已验证（COHR 实测 2026-07-03）**：market(251 bar)、fundamentals(P/E 159 + 三表/CapEx/FCF/margins + 5 filings)、macro(F&G=32 / VIX 16 / UST10Y 4.48)、earnings(2026-08-11 amc, epsEst 1.65)、consensus(EPS 1.62 / PT 230~384~465 / 评级 4/13/4/0/0 / 升降级 8 条)、runup(vsSMH -13%)、options(yfinance 兜底 EM 31%/IV 107%；ThetaData 终端未开)、news(51 条)、**triage(51→保留15/丢弃36)**、**insights(SemiAnalysis EMIB-T 一文→5 条 per-ticker insight，经 `ATS_TEST_SENDER` 实测)**、transcript(Tavily 69K字)、documents(SEC 34K + deck 15K)、**industry(5 篇/53K字，prep 叙事已用上"L3 分层/InP 垂直整合护城河"等合集概念)**。research 数据层链路已通、待真实自动转发邮件。
@@ -65,12 +65,15 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 
 ## 存储机制
 
-- **Context Memory `var/ats.sqlite`**：`pead_dossier`（PEAD 活体档案：叙事/预期/期权/抢跑/信号链/实际/Scorecard/决策）、`pead_events`（新闻去重日志 + triage_score/triage_category 分诊结果）、`research_articles`/`research_insights`（newsletter 元数据 + 提取的 insight）、`reports`/`decisions`/`trades`/`performance`（日常组合循环）。
+- **共享文档资产**：正文保存在 `信息源/`（或 `ATS_DOCS_ROOT`）下；`source_documents` 保存逻辑文档目录，`document_versions` 保存不可变版本，`document_entities` 记录同一文档关联的多个公司，`document_chunks` 提供文本检索，`document_processing_runs` 区分各 Workflow 的处理状态和版本。所有业务来源统一经 `data.document_assets` 写入。
+- **结构化观测**：`chain.sources` 已接入的数据写入 `measurement_series`/`measurement_points`，同一期间的上游修订并存，并可按 `as_of` 回放；同比、环比等派生值查询时计算。既有行情、基本面、宏观、期权和 consensus 仍是运行时现取，尚未整体迁移。
+- **事实与任务解释**：`evidence_facts` 保存中性事实，`evidence_fact_projections` 保存 Evidence 的命题解释，`task_projections` 保存 PEAD / Sector 等带版本的任务视图。`evidence_observations`、`research_insights` 等旧表在兼容期继续双写。
+- **Context Memory `var/ats.sqlite`**：除上述数据平台目录外，继续保存 `pead_dossier`、`pead_events`、`reports`/`decisions`/`trades`/`performance` 等领域状态和决策记忆。
 - **新闻→决策闭环**：dossier 的 `narrative` 是唯一累积记忆——monitor 持续把分诊后的新闻 + 结构化维度变更折进它，prep 在财报前**读取并延续**（而非重置为种子），score 据此对基准打分。所以两条通道的产出能一路走到 Scorecard/下单，不会被 prep 冲掉。
 - **`var/checkpoints.sqlite`**：LangGraph 暂停态（异步飞书审批跨进程 resume）。
 - **`var/transcripts/<SYM>_<fiscal>.txt`**：手动落档纪要；**`信息源/<SYM>/`**（`docs_root`）：官方 PDF；**`半导体产业研究合集/`**（`industry_notes.root`）：行业知识 md（prep 注入，不落库）。
-- **原始行情/基本面/宏观/期权/consensus 不单独落库**——每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。
-- 查存储：`ats pead show <SYM>` / `sqlite3 var/ats.sqlite ".tables"`。
+- **尚未迁移的原始源**：行情/基本面/宏观/期权/consensus 仍每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。这是当前迁移边界，不再作为长期数据原则。
+- 查存储：`ats data health`、`ats data search "inference demand" --entity AMD`、`ats data series --source <source_id>`、`ats data company AMD`、`ats data claim <concept>`、`ats data lineage <projection_id>`。
 
 ## key 一览（`.env`）
 

@@ -23,6 +23,7 @@ log = logging.getLogger("ats.agents.pead.research")
 _DIRECTIONS = {"bullish", "bearish", "neutral"}
 _IMPACT_PATHS = {"direct", "supply_chain", "competitive", "demand", "macro"}
 _MAX_QUOTE_CHARS = 400
+PROCESSOR_VERSION = "pead-research-v1"
 
 
 def run(*, use_llm: bool = True) -> list[Insight]:
@@ -36,19 +37,41 @@ def run(*, use_llm: bool = True) -> list[Insight]:
     store = get_store()
 
     since = datetime.now(timezone.utc) - timedelta(days=rcfg["lookback_days"])
-    arts = [a for a in research_src.fetch_articles(since) if not store.article_seen(a.id)]
-    arts = arts[:rcfg["max_articles_per_run"]]
-    log.info("research: %d new articles", len(arts))
-    if not arts:
+    candidates = research_src.stored_articles(since, store=store)
+    log.info("research: %d stored article candidates", len(candidates))
+    if not candidates:
         return []
 
     universe_card, ticker_to_targets = _build_universe(g.get("targets", []))
     all_insights: list[Insight] = []
-    for art in arts:
+    claimed = 0
+    for art in candidates:
+        entity = research_src.publisher_entity(art.source)
+        doc_id = f"{entity}:{research_src.article_slug(art.id)}:article"
+
+        # Preserve the deployed seen-set without re-spending on the first migration
+        # run. New documents use the versioned processing ledger below.
+        if store.article_seen(art.id):
+            version_id = store.begin_document_processing(
+                doc_id, "pead", PROCESSOR_VERSION)
+            if version_id:
+                store.finish_document_processing(
+                    version_id, "pead", PROCESSOR_VERSION, ok=True,
+                    outputs=store.insight_count(art.id), note="migrated from research_articles")
+            continue
+
+        if claimed >= rcfg["max_articles_per_run"]:
+            break
+        version_id = store.begin_document_processing(doc_id, "pead", PROCESSOR_VERSION)
+        if not version_id:
+            continue
+        claimed += 1
         insights = _extract(art, universe_card, set(ticker_to_targets),
                             rcfg["article_chars"]) if use_llm else []
         store.save_article(art)
         store.save_insights(art.id, insights)
+        store.finish_document_processing(
+            version_id, "pead", PROCESSOR_VERSION, ok=True, outputs=len(insights))
         _inject_events(store, insights, art, ticker_to_targets, rcfg)
         _maybe_push(insights, art, rcfg)
         all_insights += insights

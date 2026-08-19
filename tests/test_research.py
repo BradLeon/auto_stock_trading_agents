@@ -43,6 +43,7 @@ def test_research_extracts_filters_and_injects(monkeypatch):
     _pin_universe(monkeypatch)
     monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
     monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
+    research_src.ingest(NOW, store=get_store())
 
     insights = research.run(use_llm=True)
 
@@ -66,6 +67,7 @@ def test_research_dedups_articles_on_second_run(monkeypatch):
     _pin_universe(monkeypatch)
     monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
     monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
+    research_src.ingest(NOW, store=get_store())
     research.run(use_llm=True)
     assert research.run(use_llm=True) == []          # article already seen
     assert len(get_store().recent_insights()) == 2   # not 4
@@ -73,6 +75,7 @@ def test_research_dedups_articles_on_second_run(monkeypatch):
 
 def test_research_llm_failure_still_marks_article_seen(monkeypatch):
     monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
+    research_src.ingest(NOW, store=get_store())
 
     def boom(*a, **k):
         raise RuntimeError("LLM down")
@@ -80,6 +83,28 @@ def test_research_llm_failure_still_marks_article_seen(monkeypatch):
     monkeypatch.setattr(research, "run_structured", boom)
     assert research.run(use_llm=True) == []
     assert get_store().article_seen("imap:msg1")
+
+
+def test_shared_ingestion_feeds_both_consumers_without_refetch(monkeypatch):
+    from ats.data.articles import semianalysis
+
+    calls = []
+
+    def _fetch(since):
+        calls.append(since)
+        return [ARTICLE]
+
+    monkeypatch.setattr(research_src, "fetch_articles", _fetch)
+    research_src.ingest(NOW, store=get_store())
+
+    # Both consumers now read disk/catalog only; discovery must not touch the fetcher.
+    monkeypatch.setattr(research_src, "fetch_articles",
+                        lambda since: (_ for _ in ()).throw(AssertionError("refetched")))
+    assert research_src.stored_articles(NOW, source_match="SemiAnalysis")
+    refs = semianalysis.discover(lookback_days=1, source_match="SemiAnalysis")
+    assert len(refs) == 1
+    assert semianalysis.fetch_body(refs[0].url) == ARTICLE.body
+    assert len(calls) == 1
 
 
 def test_build_universe_maps_chain_members():

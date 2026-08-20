@@ -25,7 +25,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from ...schemas.sector import ALLOCATIONS, LayerNameCall, LayerVerdict, SectorConfig
+from ...schemas.sector import (ALLOCATIONS, CandidateClaim, LayerNameCall,
+                               LayerVerdict, SectorConfig)
 from ..base import run_structured
 from .outputs import LayerVerdictView
 
@@ -43,7 +44,7 @@ def _now() -> datetime:
 
 
 def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = None,
-                  snapshot_block: str = "") -> str:
+                  snapshot_block: str = "", assessments=None) -> str:
     """Assemble ONE layer's context. Never includes another layer's material, and never
     includes macro."""
     from ...data import industry
@@ -55,7 +56,8 @@ def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict 
         f"本层要回答的问题：{layer.question}" if layer.question else "",
     ]
 
-    common_block, relative_block = assemble.layer_evidence_blocks(cfg, layer)
+    common_block, relative_block = assemble.layer_evidence_blocks(
+        cfg, layer, assessments)
     if not layer.claims:
         # A config gap, not an evidence gap. Saying "证据不足" here would file the
         # missing claims under "the industry was quiet this quarter" — and then nobody
@@ -129,9 +131,15 @@ def _basket_block(layer, basket) -> str:
 
 
 def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = None,
-        snapshot_block: str = "", use_llm: bool = True) -> tuple[LayerVerdict, bool]:
+        snapshot_block: str = "", use_llm: bool = True,
+        assessments=None) -> tuple[LayerVerdict, bool]:
     """Assess ONE layer. Returns (verdict, ok). `ok=False` means the call failed and the
-    verdict is a carried-forward or default stand-in that MUST NOT be persisted."""
+    verdict is a carried-forward or default stand-in that MUST NOT be persisted.
+
+    `assessments` lets the caller pass the claim verdicts it already computed, so the
+    report and the prompt render the SAME engine output — running it twice would re-read
+    the ledger and could disagree with itself.
+    """
     has_claims = bool(layer.claims)
     cross_ok = bool(basket is not None and basket.rows and basket.cross_section_applicable)
 
@@ -139,7 +147,7 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
         return _fallback(layer, prior, has_claims, cross_ok), False
 
     ctx = build_context(cfg, layer, basket=basket, prior=prior,
-                        snapshot_block=snapshot_block)
+                        snapshot_block=snapshot_block, assessments=assessments)
     try:
         view: LayerVerdictView = run_structured("layer_analyst", LayerVerdictView, ctx,
                                                 skill_slug="layer-analyst")
@@ -188,8 +196,23 @@ def _to_verdict(layer, view: LayerVerdictView, has_claims: bool,
     for c in calls:
         if c.symbol not in universe:
             log.warning("layer %s: dropped non-universe name call %r", layer.key, c.symbol)
+    # A candidate that cannot name a witness or a falsifier is not a proposition — it is
+    # a mood, and letting it through would make this section exactly the kind of空话 the
+    # claim discipline exists to prevent.
+    candidates = []
+    for c in getattr(view, "candidate_claims", []):
+        cand = CandidateClaim(statement=c.statement.strip(),
+                              witnesses=[w.strip().upper() for w in c.witnesses if w.strip()],
+                              falsifier=c.falsifier.strip(), why_now=c.why_now)
+        if cand.is_usable():
+            candidates.append(cand)
+        else:
+            log.info("layer %s: dropped candidate claim without witness/falsifier: %r",
+                     layer.key, cand.statement[:60])
+
     return LayerVerdict(
         layer_key=layer.key, as_of=_now(), allocation=allocation, confidence=conf,
+        candidate_claims=candidates,
         cycle_position=view.cycle_position,
         claim_attributions=list(view.claim_attributions),
         reversal_triggers=list(view.reversal_triggers),

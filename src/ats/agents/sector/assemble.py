@@ -324,7 +324,38 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
         sc.evidence_block = "## 产业链证据（来自各家财报原文的命题印证）\n" + "\n\n".join(blocks)
 
 
-def layer_claim_lines(cfg: SectorConfig, layer) -> tuple[list[str], list[str]]:
+def layer_assessments(cfg: SectorConfig, layer) -> list:
+    """This layer's claim verdicts as OBJECTS, before any formatting.
+
+    The formatted variants below feed the prompt; the report needs the same verdicts to
+    render the evidence chain (coverage, clusters, silent witnesses, per-cluster
+    judgements, per-entity readings). Running the engine twice would be both wasteful
+    and — because it re-reads the ledger — capable of disagreeing with itself, so both
+    consumers come through here.
+    """
+    from ...chain.corroborate import assess_layer
+    from ...chain.sources import source_entities_for
+    from ...memory import get_store
+
+    if not layer.claims:
+        return []
+    store = get_store()
+    ccfg = cfg.review.get("corroboration", {})
+    rows_by_entity: dict[str, list[dict]] = {}
+    for claim in layer.claims:
+        # Third-party sources are never NAMED in a claim — they bind by dimension — so
+        # iterating declared witnesses alone silently drops every non-company witness,
+        # which is exactly the `regulator` stance this block most needs.
+        for e in (claim.expected_witnesses()
+                  | {w.entity.upper() for w in claim.witnesses}
+                  | set(claim.entities)
+                  | source_entities_for(claim)):
+            if e not in rows_by_entity:
+                rows_by_entity[e] = store.observations(entity=e, limit=200)
+    return list(assess_layer(layer, rows_by_entity, cfg=ccfg))
+
+
+def layer_claim_lines(cfg: SectorConfig, layer, assessments=None) -> tuple[list[str], list[str]]:
     """One layer's claim verdicts, already split by kind: (common lines, relative lines).
 
     Split by kind rather than pooled, because the two answer different questions and
@@ -337,30 +368,15 @@ def layer_claim_lines(cfg: SectorConfig, layer) -> tuple[list[str], list[str]]:
     verdict may never be read as "who is winning" (competitor stronger != we are
     weaker), which is exactly what pooling them into one list invites.
     """
-    from ...chain.corroborate import assess_layer
     from ...chain.factor_evidence import BASIS_CN, STANDING_CN
-    from ...chain.sources import source_entities_for
-    from ...memory import get_store
 
-    if not layer.claims:
+    assessments = assessments if assessments is not None else layer_assessments(cfg, layer)
+    if not assessments:
         return [], []
-    store = get_store()
-    ccfg = cfg.review.get("corroboration", {})
-    rows_by_entity: dict[str, list[dict]] = {}
-    for claim in layer.claims:
-        # Third-party sources are never NAMED in a claim — they bind by dimension —
-        # so iterating declared witnesses alone silently drops every non-company
-        # witness, which is exactly the `regulator` stance this block most needs.
-        for e in (claim.expected_witnesses()
-                  | {w.entity.upper() for w in claim.witnesses}
-                  | set(claim.entities)
-                  | source_entities_for(claim)):
-            if e not in rows_by_entity:
-                rows_by_entity[e] = store.observations(entity=e, limit=200)
     by_id = {c.id: c for c in layer.claims}
     demand_lines: list[str] = []
     pricing_lines: list[str] = []
-    for a in assess_layer(layer, rows_by_entity, cfg=ccfg):
+    for a in assessments:
         claim = by_id.get(a.claim_id)
         if claim is None:
             continue
@@ -385,14 +401,14 @@ RELATIVE_BLOCK_HEADER = (
     "> 「仅自述」= 只有该公司自己说；「有交叉印证」= 客户或第三方也这么说。\n")
 
 
-def layer_evidence_blocks(cfg: SectorConfig, layer) -> tuple[str, str]:
+def layer_evidence_blocks(cfg: SectorConfig, layer, assessments=None) -> tuple[str, str]:
     """(common block, relative block) for ONE layer — the layer analyst's two inputs.
 
     Returns empty strings where the layer has nothing of that kind; the caller decides
     how to say so, because "no claims at all" and "claims that said nothing this
     quarter" must not be phrased the same way.
     """
-    demand, pricing = layer_claim_lines(cfg, layer)
+    demand, pricing = layer_claim_lines(cfg, layer, assessments)
     common = (COMMON_BLOCK_HEADER + "\n".join(demand)) if demand else ""
     relative = (RELATIVE_BLOCK_HEADER + "\n".join(pricing)) if pricing else ""
     return common, relative

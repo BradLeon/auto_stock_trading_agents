@@ -607,9 +607,14 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
 
 
 def run_cross_section(name: str = "ai_hardware", layer: str = "all",
-                      *, structure: bool = False, write_report: bool = True) -> int:
+                      *, structure: bool = False, write_report: bool = False) -> int:
     """Cross-sectional selection + sizing within a chain layer (WHO / HOW MUCH).
-    --structure blends the KB-grounded structure analyst (tech_tenor/moat_pricing)."""
+
+    **Prints only — never writes a file.** The layer report produced by the weekly review
+    already carries this table, and a second per-layer document would drift out of sync:
+    its `layer_cap` is a half-finished number until the allocation verdict exists.
+    This command is a debugging view of the current factors.
+    """
     from ..agents.sector import cross_section
     from ..config import load_sector_config
 
@@ -624,10 +629,7 @@ def run_cross_section(name: str = "ai_hardware", layer: str = "all",
         label = next((ly.label for ly in cfg.layers if ly.key == key), key)
         print(f"\n=== {label}  [{key}]{'  +结构层' if basket.structural else ''} ===")
         print(cross_section.format_table(rows, basket.layer_cap))
-        if write_report:
-            path = cross_section.write_report(rows, basket, cfg)
-            if path:
-                print(f"📝 {path}")
+    print("\n（本命令只打印，不写文件 —— 层报告由 `ats sector review` 产出，一层一份。）")
     return 0
 
 
@@ -1440,8 +1442,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.action == "crosssection":
-            return run_cross_section(args.name, args.layer, structure=args.structure,
-                                     write_report=not args.no_report)
+            return run_cross_section(args.name, args.layer, structure=args.structure)
         if args.action == "layer":
             return run_layer_review(args.name, args.layer, use_llm=not args.no_llm,
                                     live_data=not args.offline)

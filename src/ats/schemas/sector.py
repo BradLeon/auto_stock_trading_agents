@@ -215,6 +215,26 @@ class LayerBasket(BaseModel):
     rows: list[BasketRow] = Field(default_factory=list)
 
 
+class CandidateClaim(BaseModel):
+    """A proposition worth tracking that nobody has written down yet.
+
+    Separate from the induction engine's proposals on purpose (see design D19): that one
+    fires DETERMINISTICALLY off unmapped observations and lands in `claim_proposals` for
+    human adoption. This one is the analyst noticing something while reading, and it
+    goes no further than the report — it must never touch a verdict, a rank or a weight.
+
+    `witnesses` and `falsifier` are required in spirit: a candidate that cannot say who
+    would testify or what reading would kill it is not a proposition, it is a mood.
+    """
+    statement: str
+    witnesses: list[str] = Field(default_factory=list)   # who could speak to it
+    falsifier: str = ""                                  # what reading would refute it
+    why_now: str = ""                                    # what in this round raised it
+
+    def is_usable(self) -> bool:
+        return bool(self.statement and self.witnesses and self.falsifier)
+
+
 class LayerVerdict(BaseModel):
     """One layer's allocation call — HOW MUCH of this layer, and WHY.
 
@@ -242,6 +262,8 @@ class LayerVerdict(BaseModel):
     # the second is an EVIDENCE gap. Collapsing them hides the config gap forever.
     has_claims: bool = True
     rationale: str = ""
+    # Report-only (design D19): never feeds a verdict, a rank or a weight.
+    candidate_claims: list[CandidateClaim] = Field(default_factory=list)
 
     def is_valid(self) -> bool:
         return self.allocation in ALLOCATIONS

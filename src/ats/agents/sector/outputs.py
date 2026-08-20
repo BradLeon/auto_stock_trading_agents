@@ -92,6 +92,17 @@ class LayerNameCallView(BaseModel):
         "该理由是否只依赖「仅自述」的读数（没有客户或第三方交叉印证）"))
 
 
+class CandidateClaimView(BaseModel):
+    statement: str = Field(description=(
+        "一条**尚未预设、但值得追踪**的命题。写成可证伪的多头/空头假设，不要写成问题"))
+    witnesses: list[str] = Field(default_factory=list, description=(
+        "谁能就它作证（公司代码或第三方源）。**说不出证人就不要提这条候选**"))
+    falsifier: str = Field(default="", description=(
+        "什么读数会证伪它。必须具体到下一轮能核对；"
+        "「基本面恶化」这类无法判定的表述不算"))
+    why_now: str = Field(default="", description="本轮素材里的什么让你想到它")
+
+
 class LayerVerdictView(BaseModel):
     layer_key: str = Field(description="必须原样回填上下文里给出的 [layer key = ...]，禁止自造")
     allocation: str = Field(default="标配", description=(
@@ -112,11 +123,15 @@ class LayerVerdictView(BaseModel):
         "「基本面恶化」这类无法判定的表述不算"))
     name_calls: list[LayerNameCallView] = Field(default_factory=list)
     rationale: str = Field(default="", description="3-6 行本层总评")
+    candidate_claims: list[CandidateClaimView] = Field(default_factory=list, description=(
+        "读完本层素材后自发提出的候选追踪议题。**只进报告，不参与本期任何计算**"
+        "——不影响配置结论、不影响截面排序、不影响权重。宁缺勿滥：说不出证人或证伪条件"
+        "就不要提"))
 
     # Same failure macro/pead already hit: a model sometimes serializes a list field as
     # a string. Validation would fail and the whole layer would silently fall back to
     # last week's verdict — coerce instead of discarding a real answer.
-    @field_validator("name_calls", mode="before")
+    @field_validator("name_calls", "candidate_claims", mode="before")
     @classmethod
     def _coerce_name_calls(cls, v):
         return _as_objlist(v)

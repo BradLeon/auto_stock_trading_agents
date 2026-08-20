@@ -22,7 +22,7 @@ def _now() -> datetime:
 
 
 def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = True,
-        layers: bool = True) -> SectorReview:
+        layers: bool = True, write_reports: bool = True) -> SectorReview:
     """Weekly review. `layers=False` falls back to the pre-2026-08-20 single synthesis.
 
     New order (design D8), per layer: quant cross-section -> structure analyst ->
@@ -37,7 +37,8 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
     store = get_store()
 
     if layers:
-        return _run_layered(name, cfg, store, use_llm=use_llm, live_data=live_data)
+        return _run_layered(name, cfg, store, use_llm=use_llm, live_data=live_data,
+                            write_reports=write_reports)
 
     sc = assemble.build(cfg, live_data=live_data)
     log.info("sector %s: context %s", name, sc.stats())
@@ -61,31 +62,42 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
     return review
 
 
-def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool) -> SectorReview:
-    from . import cross_section, layer_review, rotation
+def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
+                 write_reports: bool = True) -> SectorReview:
+    from . import assemble as sector_assemble, cross_section, layer_review, rotation
 
     prior = store.latest_sector_review(name)
     bind = _bind_layer_budget()
     verdicts, raw_baskets, failed = [], [], []
     allocations: dict[str, str | None] = {}
+    pending_reports: list = []
 
     for layer in cfg.layers:
         prior_v = _prior_verdict(cfg, prior, layer)
-        basket = None
+        basket, rows = None, None
         try:
             # Budget first at FULL cap: the ranking and the relative split are
             # independent of the verdict, and the verdict needs the ranking to answer
             # "who". The total is re-scaled below once the verdict exists.
             if live_data:
-                # run_layer returns (rows, basket) — the rows are the working set, the
-                # basket is the persisted shape. Only the latter travels onward.
-                _, basket = cross_section.run_layer(name, layer.key, persist=False,
-                                                    structure=use_llm)
+                # run_layer returns (rows, basket) — the rows are the working set (the
+                # report's factor table renders from them), the basket is the persisted
+                # shape that carries onward.
+                rows, basket = cross_section.run_layer(name, layer.key, persist=False,
+                                                       structure=use_llm)
         except Exception as exc:  # noqa: BLE001 - a layer without prices still gets a verdict
             log.warning("cross-section failed for %s: %s", layer.key, exc)
 
+        # Computed ONCE and handed to both the prompt and the report: running the
+        # engine twice would re-read the ledger and could disagree with itself.
+        try:
+            assessments = sector_assemble.layer_assessments(cfg, layer)
+        except Exception as exc:  # noqa: BLE001 - a layer without evidence still gets a verdict
+            log.warning("claim assessment failed for %s: %s", layer.key, exc)
+            assessments = []
+
         verdict, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v,
-                                       use_llm=use_llm)
+                                       use_llm=use_llm, assessments=assessments)
         if not ok:
             failed.append(layer.key)
         else:
@@ -94,6 +106,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool) -> Se
         if basket is not None:
             raw_baskets.append((layer, basket))
         allocations[layer.key] = verdict.allocation if (ok and bind) else None
+        if ok:
+            pending_reports.append((layer, verdict, assessments, rows))
 
     # Group ceilings can only be applied once EVERY member's ask is known — two 超配
     # halves of a split layer add up past the pre-split envelope, and neither half can
@@ -104,6 +118,22 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool) -> Se
 
     view = rotation.run(cfg, verdicts, use_llm=use_llm) if verdicts else None
     review = _assemble_review(name, cfg, verdicts, baskets, view, failed)
+
+    # 一层一份报告，且只在这里写 —— `sector crosssection` 不再写文件，否则同一层会出现
+    # 两份互相不同步的文档（其中一份的 layer_cap 还是没经过配置结论的半成品）。
+    if write_reports and verdicts:
+        from . import report as report_mod
+
+        by_key = {b.layer_key: b for b in baskets}
+        for layer, verdict, assessments, rows in pending_reports:
+            try:
+                path = report_mod.write_layer(verdict, layer, cfg,
+                                              basket=by_key.get(layer.key),
+                                              assessments=assessments, rows=rows)
+                if path:
+                    log.info("layer report: %s", path)
+            except Exception as exc:  # noqa: BLE001 - a report must not fail the run
+                log.warning("layer report failed for %s: %s", layer.key, exc)
     if not verdicts:
         # Nothing was actually assessed. Persisting would put an empty review in front
         # of every downstream reader as `latest` — the exact failure the single-synthesis

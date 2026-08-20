@@ -79,7 +79,7 @@ def test_unknown_stance_falls_back_to_hold():
 def test_context_says_no_claims_not_missing_evidence(monkeypatch):
     layer = _layer(claims=[])
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     ctx = layer_review.build_context(_cfg(layer), layer)
     assert "## ⚠️ 本层无命题" in ctx          # 标题是分辨两种「没话说」的标记
     assert "配置缺口" in ctx
@@ -90,7 +90,7 @@ def test_context_says_missing_evidence_when_claims_exist_but_stayed_silent(monke
     layer = _layer(claims=[{"id": "c", "kind": "common", "statement": "x",
                             "concepts": [{"key": "k", "desc": "d"}]}])
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     ctx = layer_review.build_context(_cfg(layer), layer)
     assert "证据缺口" in ctx
     # 这一段**有意**提到「本层无命题」作对照，所以只能靠标题区分两种情况。
@@ -102,7 +102,7 @@ def test_context_never_carries_macro(monkeypatch):
     # 与「宏观变差」混在一起 —— 那两件事对仓位的含义相反。
     layer = _layer(claims=[])
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("common", "relative"))
+                        lambda cfg, ly, a=None: ("common", "relative"))
     ctx = layer_review.build_context(_cfg(layer), layer)
     for banned in ("宏观", "利率", "板块倾斜", "风险偏好"):
         assert banned not in ctx, f"层级上下文不得含宏观判断，却出现了「{banned}」"
@@ -111,7 +111,7 @@ def test_context_never_carries_macro(monkeypatch):
 def test_context_labels_the_prior_round_and_lists_its_triggers(monkeypatch):
     layer = _layer(claims=[])
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     prior = LayerVerdict(layer_key="L6_memory", as_of=NOW, allocation="超配",
                          confidence=0.7, reversal_triggers=["售罄表述消失", "出现降价指引"])
     ctx = layer_review.build_context(_cfg(layer), layer, prior=prior)
@@ -122,7 +122,7 @@ def test_context_labels_the_prior_round_and_lists_its_triggers(monkeypatch):
 def test_basket_block_warns_about_cross_subgroup_ranks(monkeypatch):
     layer = _layer(claims=[])
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     basket = LayerBasket(layer_key="L6_memory", as_of=NOW, rows=[
         BasketRow(symbol="MU", subgroup="HBM", rank=1),
         BasketRow(symbol="STX", subgroup="HDD", rank=2)])
@@ -133,7 +133,7 @@ def test_basket_block_warns_about_cross_subgroup_ranks(monkeypatch):
 def test_empty_basket_is_reported_as_cross_section_not_applicable(monkeypatch):
     layer = _layer(claims=[])
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     ctx = layer_review.build_context(_cfg(layer), layer,
                                      basket=LayerBasket(layer_key="L6_memory", as_of=NOW))
     assert "截面不适用" in ctx
@@ -149,7 +149,7 @@ def test_failure_carries_the_previous_verdict_forward_and_says_so(monkeypatch):
     monkeypatch.setattr("ats.agents.sector.layer_review.run_structured",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     v, ok = layer_review.run(_cfg(layer), layer, prior=prior)
     assert ok is False                       # 调用方据此决定不落库
     assert v.allocation == "超配"             # 沿用，而不是悄悄变成一次新的标配
@@ -161,7 +161,7 @@ def test_failure_without_a_prior_refuses_to_guess(monkeypatch):
     monkeypatch.setattr("ats.agents.sector.layer_review.run_structured",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
     v, ok = layer_review.run(_cfg(layer), layer)
     assert ok is False and v.confidence == 0.0
     assert "取不到判断" in v.rationale       # 取不到 ≠ 判断为中性
@@ -212,9 +212,10 @@ def test_layered_run_consumes_the_basket_from_run_layers_tuple(monkeypatch):
     monkeypatch.setattr(cross_section, "run_layer",
                         lambda *a, **k: (["rows"], basket))     # 真实签名：元组
     monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
-                        lambda cfg, ly: ("", ""))
+                        lambda cfg, ly, a=None: ("", ""))
 
-    def _capture(cfg_, layer, *, basket=None, prior=None, snapshot_block="", use_llm=True):
+    def _capture(cfg_, layer, *, basket=None, prior=None, snapshot_block="", use_llm=True,
+                 assessments=None):
         seen["basket"] = basket
         return layer_review._fallback(layer, None, True, False), False
 

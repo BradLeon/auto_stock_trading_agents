@@ -80,26 +80,26 @@
 
 ## 9. 跨层轮动与编排
 
-- [ ] 9.1 `sector-analyst/SKILL.md` 收窄为跨层轮动与一致性检查：消费八条 LayerVerdict（**不再收原始证据块、不再收宏观**），产出利润池迁移方向 + 一条可执行的层间加减建议 + 相邻层矛盾标注；不得推翻单层结论
-- [ ] 9.2 `review.py` 改为编排：逐层（量化截面 → 结构分析师 → 层级分析师）→ 跨层轮动；轮动失败时各层 LayerVerdict 已各自落库，周报缺轮动段
-- [ ] 9.3 部分层缺失时轮动仍产出，并显式列出缺失层、涉及缺失层的建议标注证据不足
-- [ ] 9.4 `report.py`：Obsidian 报告新增逐层章节（配置结论 + 议题归因 + 反转触发条件 + 同层选股），无命题的层显式标注；轮动段落引用各层结论
-- [ ] 9.5 `context.py`：注回下游的内容改为该标的所在层的最新配置结论 + 一句话依据
+- [x] 9.1 `sector-analyst/SKILL.md` 收窄为跨层轮动与一致性检查：消费八条 LayerVerdict（**不再收原始证据块、不再收宏观**），产出利润池迁移方向 + 一条可执行的层间加减建议 + 相邻层矛盾标注；不得推翻单层结论
+- [x] 9.2 `review.py` 改为编排：逐层（量化截面 → 结构分析师 → 层级分析师）→ 跨层轮动；轮动失败时各层 LayerVerdict 已各自落库，周报缺轮动段
+- [x] 9.3 部分层缺失时轮动仍产出，并显式列出缺失层、涉及缺失层的建议标注证据不足
+- [x] 9.4 `report.py`：Obsidian 报告新增逐层章节（配置结论 + 议题归因 + 反转触发条件 + 同层选股），无命题的层显式标注；轮动段落引用各层结论
+- [x] 9.5 `context.py`：注回下游的内容改为该标的所在层的最新配置结论 + 一句话依据
 
 ## 10. 落库与 CLI
 
-- [ ] 10.1 `memory/store.py`：LayerVerdict 落库（按 sector + layer_key + as_of），提供按层查历史；历史查询走 `legacy_keys` 解析，拆分前的记录标注为「合并口径」
-- [ ] 10.2 `cli.py` 新增 `ats sector layer <name> [--layer KEY] [--no-llm]`：跑单层或全部层的层级评审并打印结论
-- [ ] 10.3 `ats sector show` 增加层级结论展示（含使用率与其换算出的预算、无命题层的标注）
-- [ ] 10.4 `ats sector kbperturb` 跑通新层键，确认知识库消融检验仍在结构分析师这一阶段生效
+- [x] 10.1 `memory/store.py`：LayerVerdict 落库（按 sector + layer_key + as_of），提供按层查历史；历史查询走 `legacy_keys` 解析，拆分前的记录标注为「合并口径」
+- [x] 10.2 `cli.py` 新增 `ats sector layer <name> [--layer KEY] [--no-llm]`：跑单层或全部层的层级评审并打印结论
+- [x] 10.3 `ats sector show` 增加层级结论展示（含使用率与其换算出的预算、无命题层的标注）
+- [x] 10.4 `ats sector kbperturb` 跑通新层键，确认知识库消融检验仍在结构分析师这一阶段生效
 
 ## 11. 回归、影子运行与文档
 
-- [ ] 11.1 更新测试中的层键（`test_chief` / `test_sector` / `test_chain_*` / `test_risk` / `test_config`），全量测试通过
-- [ ] 11.2 比对 1.4 的 `concept_menu` 基线：每只原有票的键集合必须不变
-- [ ] 11.3 影子运行：`bind_layer_budget` 关闭（使用率恒 1.0）跑一次完整周度作业，与 1.3 的对照 basket 比对——差异应当**只**来自分层变化与新增标的
-- [ ] 11.4 打开 `bind_layer_budget` 再跑一次，记录八层的结论与换算预算，人工过一遍是否合理
-- [ ] 11.5 核对实际 token 成本与 design 里的估算；若显著超出，把跨层轮动的输入进一步压缩
-- [ ] 11.6 更新 `docs/SECTOR_ANALYST.md`（八层表、新流水线顺序、层级分析师一节、预算绑定与护栏不变式）
-- [ ] 11.7 更新 `docs/CHAIN_EVIDENCE.md`（命题的层归属规则 D12、证据块按层切分、电力层的命题缺口与两步法）、`docs/RISK_SYSTEM.md`（八层 + group cap + 静态 cap 与使用率的分工）、`README.md`
-- [ ] 11.8 在 `ai_hardware.yaml` 头部记下本次重构的判据（层的三重职责、层 vs subgroup 的分工、命题挂主体不挂证人），供以后再调分层时不必重新推导
+- [x] 11.1 更新测试中的层键（`test_chief` / `test_sector` / `test_chain_*` / `test_risk` / `test_config`），全量测试通过
+- [x] 11.2 比对 1.4 的 `concept_menu` 基线：每只原有票的键集合必须不变
+- [x] 11.3 影子运行：`bind_layer_budget` 关闭（使用率恒 1.0）跑一次完整周度作业，与 1.3 的对照 basket 比对——差异应当**只**来自分层变化与新增标的
+- [x] 11.4 打开 `bind_layer_budget` 再跑一次，记录八层的结论与换算预算，人工过一遍是否合理
+- [x] 11.5 核对实际 token 成本与 design 里的估算；若显著超出，把跨层轮动的输入进一步压缩
+- [x] 11.6 更新 `docs/SECTOR_ANALYST.md`（八层表、新流水线顺序、层级分析师一节、预算绑定与护栏不变式）
+- [x] 11.7 更新 `docs/CHAIN_EVIDENCE.md`（命题的层归属规则 D12、证据块按层切分、电力层的命题缺口与两步法）、`docs/RISK_SYSTEM.md`（八层 + group cap + 静态 cap 与使用率的分工）、`README.md`
+- [x] 11.8 在 `ai_hardware.yaml` 头部记下本次重构的判据（层的三重职责、层 vs subgroup 的分工、命题挂主体不挂证人），供以后再调分层时不必重新推导

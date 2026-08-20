@@ -656,7 +656,9 @@ def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
             except Exception as exc:  # noqa: BLE001
                 print(f"  （{layer.key} 截面取数失败：{exc}）")
         v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)
+        # 单层视图给的是**未经组上限约束**的数：组上限要等同组其余层都评完才算得出来。
         budget = cross_section.budget_for(layer, v.allocation if ok else None)
+        group = next((g for g in cfg.layer_groups if layer.key in g.layers), None)
         flags = []
         if not v.has_claims:
             flags.append("无命题(配置缺口)")
@@ -668,6 +670,9 @@ def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
         print(f"  配置 {v.allocation} · 信心 {v.confidence:.2f} · 预算 {budget:.1%} NAV"
               f" · 周期 {v.cycle_position or '—'}"
               + (f"\n  ⚠️ {'；'.join(flags)}" if flags else ""))
+        if group:
+            print(f"  （本层属跨层组 {group.key}（上限 {group.weight_cap:.0%}，成员 "
+                  f"{'+'.join(group.layers)}）—— 整轮评审时预算可能被组上限按比例压低）")
         for a in v.claim_attributions:
             print(f"    · {a}")
         for trg in v.reversal_triggers:

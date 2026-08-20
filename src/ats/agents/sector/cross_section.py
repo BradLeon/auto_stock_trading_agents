@@ -179,16 +179,46 @@ def utilization_for(allocation: str) -> float:
 
 
 def budget_for(layer, allocation: str | None) -> float:
-    """`weight_cap × utilization` — the sum a layer's basket may add up to.
+    """`weight_cap × utilization` — this layer's share, BEFORE any group ceiling.
 
     `weight_cap` stays the ceiling that is never exceeded; the verdict only decides how
     much of it to use. Note the risk check deliberately does NOT read this number (it
     reads the static cap): utilization answers "how much new money", a breach answers
     "is the existing book over the line", and sharing one number would let a 低配 call
     flag a full-but-compliant layer as breached.
+
+    ⚠️ This is the per-layer number only. When several layers share a `layer_group`
+    ceiling, use `budgets_for` — two 超配 halves of a split layer add up past the
+    pre-split envelope, which is exactly the loosening the group cap exists to stop.
     """
     cap = layer.weight_cap if layer.weight_cap is not None else 0.10
     return cap * (utilization_for(allocation) if allocation else 1.0)
+
+
+def budgets_for(cfg, allocations: dict) -> dict:
+    """Per-layer budgets with the `layer_group` ceilings applied. {layer key -> fraction}
+
+    Why this cannot live in `budget_for`: a group ceiling is a property of the SET, so
+    it can only be enforced once every member's ask is known. Splitting `L5_fab` (<=30%)
+    into memory (<=25%) and foundry (<=20%) means two 超配 verdicts propose 45% — the
+    pre-split envelope silently widened by half. The per-layer caps are not wrong; they
+    just cannot see each other.
+
+    Over-asking members are scaled down PRO RATA rather than truncated in config order:
+    the group cap says how much the pair may hold together, not which half is preferred,
+    and the verdicts have already expressed the tilt between them.
+    """
+    out = {ly.key: budget_for(ly, allocations.get(ly.key)) for ly in cfg.layers}
+    for g in getattr(cfg, "layer_groups", []):
+        members = [k for k in g.layers if k in out]
+        total = sum(out[k] for k in members)
+        if total > g.weight_cap > 0:
+            scale = g.weight_cap / total
+            log.info("layer_group %s: 提议合计 %.1f%% 超过上限 %.1f%%，按比例缩到上限"
+                     " (×%.3f)", g.key, total * 100, g.weight_cap * 100, scale)
+            for k in members:
+                out[k] *= scale
+    return out
 
 
 def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,

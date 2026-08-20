@@ -66,7 +66,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool) -> Se
 
     prior = store.latest_sector_review(name)
     bind = _bind_layer_budget()
-    verdicts, baskets, failed = [], [], []
+    verdicts, raw_baskets, failed = [], [], []
+    allocations: dict[str, str | None] = {}
 
     for layer in cfg.layers:
         prior_v = _prior_verdict(cfg, prior, layer)
@@ -91,10 +92,15 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool) -> Se
             verdicts.append(verdict)
 
         if basket is not None:
-            # Re-scale the basket to the verdict's share of the cap. Ranks and the
-            # relative split are untouched — only the total moves, and only downward.
-            allocation = verdict.allocation if (ok and bind) else None
-            baskets.append(_rescaled(basket, layer, allocation))
+            raw_baskets.append((layer, basket))
+        allocations[layer.key] = verdict.allocation if (ok and bind) else None
+
+    # Group ceilings can only be applied once EVERY member's ask is known — two 超配
+    # halves of a split layer add up past the pre-split envelope, and neither half can
+    # see the other. Ranks and the within-layer split are untouched; only totals move,
+    # and only downward.
+    budgets = cross_section.budgets_for(cfg, allocations)
+    baskets = [_rescaled(b, budgets.get(ly.key, b.layer_cap)) for ly, b in raw_baskets]
 
     view = rotation.run(cfg, verdicts, use_llm=use_llm) if verdicts else None
     review = _assemble_review(name, cfg, verdicts, baskets, view, failed)
@@ -128,14 +134,11 @@ def _prior_verdict(cfg, prior, layer):
     return None
 
 
-def _rescaled(basket, layer, allocation: str | None):
-    from . import cross_section
-
-    target = cross_section.budget_for(layer, allocation)
-    total = sum(r.weight for r in basket.rows)
-    if total <= 0:
+def _rescaled(basket, target: float):
+    """Scale a basket's weights to `target` in total. Ranks and ratios are untouched."""
+    if sum(r.weight for r in basket.rows) <= 0 or not basket.layer_cap:
         return basket.model_copy(update={"layer_cap": target})
-    factor = target / basket.layer_cap if basket.layer_cap else 0.0
+    factor = target / basket.layer_cap
     rows = [r.model_copy(update={"weight": r.weight * factor}) for r in basket.rows]
     return basket.model_copy(update={"layer_cap": target, "rows": rows})
 

@@ -118,6 +118,20 @@ def blind_spots(cfg, store) -> list[Finding]:
     clear it. Reporting them together sends the reader to the wrong file.
     """
     label_of = {ly.key: ly.label for ly in cfg.layers}
+
+    def _resolve(key: str, names) -> tuple[str, object | None]:
+        """历史 basket 可能带着拆分前的层键。解析到当前层并标注口径，否则重构当天
+        这张待办清单会指向一个已经不存在的层，读的人无从下手。"""
+        layer = cfg.layer_for_key_and_symbols(key, names)
+        if layer is None:
+            return f"{label_of.get(key, key)}（该层键已不存在）", None
+        if cfg.is_legacy_key(key):
+            # 更名与拆分要分开说：更名只是换了个名字，拆分意味着那段历史是在**更粗的
+            # 口径**下判的，两者对读者的含义不同。
+            note = ("拆分前的合并口径" if len(cfg.layers_by_key(key)) > 1 else "更名前")
+            return f"{layer.label}（历史记录写的是 {key}，{note}）", layer
+        return label_of.get(key, key), layer
+
     blind: dict[str, list[str]] = {}
     thin: dict[str, list[str]] = {}
     seen_layers: set[str] = set()
@@ -137,20 +151,22 @@ def blind_spots(cfg, store) -> list[Finding]:
                     thin.setdefault(basket.layer_key, []).append(row.symbol)
     out = []
     for key, names in sorted(blind.items()):
-        layer = next((ly for ly in cfg.layers if ly.key == key), None)
+        label, layer = _resolve(key, names)
         has_kb = bool(layer and layer.structure_notes)
         out.append(Finding(
             signal="① 盲区标记",
-            subject=f"{label_of.get(key, key)}：{', '.join(sorted(set(names)))}",
+            subject=f"{label}：{', '.join(sorted(set(names)))}",
             detail=f"结构分析师自报 {len(set(names))} 个标的**没有可用判据**"
                    + ("（该层已有 KB，但未覆盖这些名字所属的环节）" if has_kb
                       else "（该层没有任何 KB）"),
             action=("补写这些名字所属子层的知识库" if has_kb
-                    else f"为 {key} 新建 config/knowledge/*.md 并在 structure_notes 里挂上")))
+                    else f"为 {layer.key if layer else key} 新建 config/knowledge/*.md "
+                         f"并在 structure_notes 里挂上")))
     for key, names in sorted(thin.items()):
+        label, _ = _resolve(key, names)
         out.append(Finding(
             signal="① 盲区标记",
-            subject=f"{label_of.get(key, key)}：{', '.join(sorted(set(names)))}（缺证据）",
+            subject=f"{label}：{', '.join(sorted(set(names)))}（缺证据）",
             detail=f"{len(set(names))} 个标的**有判据但没有本期读数**可套——"
                    f"判据管怎么权衡，排序要靠台账里的实际表述",
             action="**这不是知识库的问题**：给该层立命题、补 witness_roster，"

@@ -146,13 +146,36 @@ def induce(store, *, sector: str = "ai_hardware", cfg: dict | None = None,
     return proposal, reason
 
 
+def _layer_label(layer_hint: str, sector: str = "ai_hardware") -> str:
+    """Render a stored layer hint, resolving keys that predate a layer split.
+
+    Old proposals carry the key that was current when they were induced (`L5_fab`).
+    Printing it raw sends the reader looking for a layer that no longer exists, and a
+    split key now covers two — so name both, and say the hint is pre-split rather than
+    silently picking one half.
+    """
+    from ..config import load_sector_config
+
+    try:
+        cfg = load_sector_config(sector)
+    except Exception:  # noqa: BLE001 - a missing config must not break the card
+        return layer_hint
+    layers = cfg.layers_by_key(layer_hint)
+    if not layers:
+        return f"{layer_hint}（该层键已不存在）"
+    if not cfg.is_legacy_key(layer_hint):
+        return layer_hint
+    names = " / ".join(ly.key for ly in layers)
+    return f"{layer_hint} → {names}（拆分前的合并口径）"
+
+
 def as_card(proposal: ClaimProposal, rows_by_id: dict[str, dict] | None = None) -> str:
     """Render the review card a person actually reads."""
     rows_by_id = rows_by_id or {}
     lines = [f"待确认命题（由 {len(proposal.observation_ids)} 条未映射观测积累触发）", "",
              f"  「{proposal.statement}」", ""]
     if proposal.layer_hint:
-        lines.append(f"  涉及层：{proposal.layer_hint}")
+        lines.append(f"  涉及层：{_layer_label(proposal.layer_hint)}")
     lines.append(f"  证人立场：{proposal.stance_note}")
     shown = [rows_by_id[i] for i in proposal.observation_ids if i in rows_by_id][:8]
     if shown:

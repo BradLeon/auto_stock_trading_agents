@@ -35,6 +35,8 @@ class SectorContext:
             f"(需求沿 L1→L6 传导; [PEAD] = 有活体档案的重点标的):",
         ]
         if self.macro_block:
+            # Kept for callers that set it explicitly; the weekly path no longer does
+            # (D16 — macro acts once, at the Chief).
             parts.append("## 宏观背景（自上而下：利率/风险偏好/板块倾斜 — 据此调整层与个股观点）\n"
                          + self.macro_block)
         if self.kb_criteria:
@@ -106,14 +108,13 @@ def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
     _insights_and_events(sc, symbols, pead_syms)
     _chain_evidence(sc, cfg)
 
-    # Top-down cascade: prepend the latest macro regime/tilts if enabled.
-    from ...config import load_pead_global
-
-    mr = load_pead_global()["macro_review"]
-    if mr.get("feed_sector", True):
-        from ..macro import context as macro_context
-
-        sc.macro_block = macro_context.sector_block(mr["name"])
+    # ⚠️ 宏观**不再注入行业链路**（2026-08-20，design D16）。
+    # 它在 Chief 已经有落点（chief/assemble.py 读宏观评审的 sector_tilts），行业这边再吃
+    # 一遍会让同一个利率/风险偏好判断被计两次；更糟的是归因污染——层级结论变差时读的人
+    # 分不清是产业景气变差还是宏观变差，而那两件事对仓位的含义相反（减这一层 vs 减总仓位）。
+    # 层级分析师改用**产业证据**判周期位置：capex 指引、订单与交期、库存、产能投放。
+    # `macro_block` 字段保留但不再填充，好让「谁在喂它」这件事在 diff 里看得见。
+    # 开关 config/pead.yaml 的 macro_review.feed_sector 因此对本链路不再有效。
 
     _kb_criteria(sc, cfg)
 
@@ -298,39 +299,12 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
     unchanged: a common verdict still may not be read as "who is winning", which is why
     the two blocks stay separate rather than being merged into one list.
     """
-    from ...chain.corroborate import assess_layer
-    from ...chain.factor_evidence import BASIS_CN, STANDING_CN
-    from ...chain.sources import source_entities_for
-    from ...memory import get_store
-
-    store = get_store()
-    ccfg = cfg.review.get("corroboration", {})
     demand_lines: list[str] = []
     pricing_lines: list[str] = []
     for layer in cfg.layers:
-        if not layer.claims:
-            continue
-        rows_by_entity: dict[str, list[dict]] = {}
-        for claim in layer.claims:
-            # Third-party sources are never NAMED in a claim — they bind by dimension —
-            # so iterating declared witnesses alone silently drops every non-company
-            # witness, which is exactly the `regulator` stance this block most needs.
-            for e in (claim.expected_witnesses()
-                      | {w.entity.upper() for w in claim.witnesses}
-                      | set(claim.entities)
-                      | source_entities_for(claim)):
-                if e not in rows_by_entity:
-                    rows_by_entity[e] = store.observations(entity=e, limit=200)
-        by_id = {c.id: c for c in layer.claims}
-        for a in assess_layer(layer, rows_by_entity, cfg=ccfg):
-            claim = by_id.get(a.claim_id)
-            if claim is None:
-                continue
-            if claim.kind == "relative":
-                pricing_lines.extend(_pricing_lines(layer, claim, a,
-                                                    STANDING_CN, BASIS_CN))
-            else:
-                demand_lines.extend(_demand_lines(layer, claim, a))
+        d, p = layer_claim_lines(cfg, layer)
+        demand_lines += d
+        pricing_lines += p
 
     blocks = []
     if demand_lines:
@@ -348,6 +322,80 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
             + "\n".join(pricing_lines))
     if blocks:
         sc.evidence_block = "## 产业链证据（来自各家财报原文的命题印证）\n" + "\n\n".join(blocks)
+
+
+def layer_claim_lines(cfg: SectorConfig, layer) -> tuple[list[str], list[str]]:
+    """One layer's claim verdicts, already split by kind: (common lines, relative lines).
+
+    Split by kind rather than pooled, because the two answer different questions and
+    have different consumers (see docs/CHAIN_EVIDENCE.md):
+
+      common   -> 这一层该给多少钱   the layer analyst's allocation call
+      relative -> 层内怎么排序/选谁  the structure factor, and the per-name rationale
+
+    Keeping them apart is the isolation invariant, not a formatting choice: a common
+    verdict may never be read as "who is winning" (competitor stronger != we are
+    weaker), which is exactly what pooling them into one list invites.
+    """
+    from ...chain.corroborate import assess_layer
+    from ...chain.factor_evidence import BASIS_CN, STANDING_CN
+    from ...chain.sources import source_entities_for
+    from ...memory import get_store
+
+    if not layer.claims:
+        return [], []
+    store = get_store()
+    ccfg = cfg.review.get("corroboration", {})
+    rows_by_entity: dict[str, list[dict]] = {}
+    for claim in layer.claims:
+        # Third-party sources are never NAMED in a claim — they bind by dimension —
+        # so iterating declared witnesses alone silently drops every non-company
+        # witness, which is exactly the `regulator` stance this block most needs.
+        for e in (claim.expected_witnesses()
+                  | {w.entity.upper() for w in claim.witnesses}
+                  | set(claim.entities)
+                  | source_entities_for(claim)):
+            if e not in rows_by_entity:
+                rows_by_entity[e] = store.observations(entity=e, limit=200)
+    by_id = {c.id: c for c in layer.claims}
+    demand_lines: list[str] = []
+    pricing_lines: list[str] = []
+    for a in assess_layer(layer, rows_by_entity, cfg=ccfg):
+        claim = by_id.get(a.claim_id)
+        if claim is None:
+            continue
+        if claim.kind == "relative":
+            pricing_lines.extend(_pricing_lines(layer, claim, a, STANDING_CN, BASIS_CN))
+        else:
+            demand_lines.extend(_demand_lines(layer, claim, a))
+    return demand_lines, pricing_lines
+
+
+COMMON_BLOCK_HEADER = (
+    "## 共同需求议题（common 命题 — **这一层该给多少钱**的依据）\n"
+    "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条 ＋/－ 后面是判读理由。\n"
+    "> **不要重新判断这些结论对不对**，把它们当作证据基础。覆盖率低或立场单一时，"
+    "说明证据还不足以下判断。\n"
+    "> ⚠️ 这些是**行业共同需求**的结论，**不得**读成「谁在赢」——竞争者变强不等于我方变弱。\n")
+
+RELATIVE_BLOCK_HEADER = (
+    "## 截面比较议题（relative 命题 — **层内选谁**的依据）\n"
+    "> 逐家读数由判读器横向比较同期财报原文得出。**与静态判据笔记冲突时以此为准**："
+    "笔记是稳定的结构背景，这里是本期实际发生的事。\n"
+    "> 「仅自述」= 只有该公司自己说；「有交叉印证」= 客户或第三方也这么说。\n")
+
+
+def layer_evidence_blocks(cfg: SectorConfig, layer) -> tuple[str, str]:
+    """(common block, relative block) for ONE layer — the layer analyst's two inputs.
+
+    Returns empty strings where the layer has nothing of that kind; the caller decides
+    how to say so, because "no claims at all" and "claims that said nothing this
+    quarter" must not be phrased the same way.
+    """
+    demand, pricing = layer_claim_lines(cfg, layer)
+    common = (COMMON_BLOCK_HEADER + "\n".join(demand)) if demand else ""
+    relative = (RELATIVE_BLOCK_HEADER + "\n".join(pricing)) if pricing else ""
+    return common, relative
 
 
 def _demand_lines(layer, claim, a) -> list[str]:

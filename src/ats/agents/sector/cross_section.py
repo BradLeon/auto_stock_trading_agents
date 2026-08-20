@@ -223,29 +223,43 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
 
 
 def _layer_view(sector_name: str, layer_key: str) -> str:
-    """The sector analyst's read on this layer, from the review that just ran.
+    """What was last concluded about this layer, for the within-layer scoring.
 
-    The weekly job already runs review -> cross-section in order, but the two shared
-    only a storage row: the within-layer scoring never saw what had just been concluded
-    about the layer. Best-effort — a missing review must not block the ranking.
+    The scoring used to read the CURRENT round's sector assessment, because the weekly
+    job ran review -> cross-section in that order. The order is now inverted — the layer
+    verdict is produced AFTER this ranking (design D8) — so what is available here is
+    the PREVIOUS round's verdict. At a weekly cadence that is a legitimate prior, but it
+    must be labelled as one: an unlabelled stale read invites the model to treat last
+    week's call as this week's conclusion.
+
+    Best-effort — a missing verdict must not block the ranking.
     """
     try:
         from ...config import load_sector_config
         from ...memory import get_store
 
         review = get_store().latest_sector_review(sector_name)
-        # 上一轮的评审可能用的是拆分前的层键；解析到当前层再取它的评估。
-        assessment = None
-        if review is not None:
-            assessment = review.layer_assessment(layer_key)
-            if assessment is None:
-                cfg = load_sector_config(sector_name)
-                for ly in cfg.layers_by_key(layer_key):
-                    for legacy in [ly.key, *ly.legacy_keys]:
-                        assessment = assessment or review.layer_assessment(legacy)
+        if review is None:
+            return ""
+        cfg = load_sector_config(sector_name)
+        keys = [layer_key]
+        for ly in cfg.layers_by_key(layer_key):
+            keys += [ly.key, *ly.legacy_keys]
+
+        verdict = next((v for k in keys if (v := review.verdict_for(k))), None)
+        if verdict is not None:
+            trig = "；".join(verdict.reversal_triggers[:3])
+            return (f"⚠️ 以下是**上一轮**（{verdict.as_of:%Y-%m-%d}）的结论，不是本期结论\n"
+                    f"配置：{verdict.allocation}（confidence {verdict.confidence:.2f}）\n"
+                    f"周期：{verdict.cycle_position or '—'}\n"
+                    + (f"当时的反转触发条件：{trig}" if trig else ""))
+
+        # 尚未产出过层级结论时，退回旧的层评估（同样标注为上一轮）。
+        assessment = next((a for k in keys if (a := review.layer_assessment(k))), None)
         if assessment is None:
             return ""
-        return (f"景气 {assessment.boom_score:.0f} [{assessment.signal}]\n"
+        return (f"⚠️ 以下是**上一轮**（{review.as_of:%Y-%m-%d}）的层评估，不是本期结论\n"
+                f"景气 {assessment.boom_score:.0f} [{assessment.signal}]\n"
                 f"供需：{assessment.supply_demand}\n"
                 f"定价权：{assessment.pricing_power}\n"
                 f"周期：{assessment.cycle_position}")

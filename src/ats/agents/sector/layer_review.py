@@ -100,9 +100,12 @@ def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict 
 
 
 def _basket_block(layer, basket) -> str:
-    if not basket.rows:
-        return ("## 截面排名\n（本层截面不适用：样本不足以计算 z 分。"
-                "只出配置结论，不做层内排序。）")
+    if not basket.rows or not basket.cross_section_applicable:
+        names = "、".join(r.symbol for r in basket.rows)
+        return ("## 截面排名\n"
+                "⚠️ **本层截面不适用**：可比样本少于两个，z 分全为 0，名次只是配置顺序的"
+                "副产品，不是发现。**只出配置结论，不要据名次做层内取舍。**"
+                + (f"\n本层预算全额落在 {names} 上（仍受单票限额约束）。" if names else ""))
     subgrouped = any(r.subgroup for r in basket.rows)
     head = ["## 截面排名（量化因子"
             + ("＋结构因子混合" if basket.structural else "，未跑结构层") + "）",
@@ -130,7 +133,7 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
     """Assess ONE layer. Returns (verdict, ok). `ok=False` means the call failed and the
     verdict is a carried-forward or default stand-in that MUST NOT be persisted."""
     has_claims = bool(layer.claims)
-    cross_ok = bool(basket is not None and basket.rows)
+    cross_ok = bool(basket is not None and basket.rows and basket.cross_section_applicable)
 
     if not use_llm:
         return _fallback(layer, prior, has_claims, cross_ok), False

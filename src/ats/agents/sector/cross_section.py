@@ -145,6 +145,52 @@ def _zscores(vals: list[float | None]) -> list[float]:
     return [((v - mu) / sd) if v is not None else 0.0 for v in vals]
 
 
+# Allocation -> share of the layer's cap this basket may use. Governance lives in
+# config (how far this account lets one judgement swing a budget); the judgement itself
+# is the layer analyst's and travels with its evidence. Falls back to these when
+# risk.yaml says nothing.
+DEFAULT_UTILIZATION = {"超配": 1.0, "标配": 0.6, "低配": 0.3, "清仓": 0.0}
+
+
+def utilization_for(allocation: str) -> float:
+    """The budget share for an allocation verdict, clamped to [0, 1].
+
+    Clamped in CODE, not by trusting the config: a `超配: 1.5` typo would otherwise
+    raise the ceiling that `weight_cap` exists to hold — and this whole mechanism is
+    only allowed to scale a layer DOWN.
+    """
+    from ...config import load_risk_yaml_section
+
+    table = load_risk_yaml_section("layer_utilization") or DEFAULT_UTILIZATION
+    # An unrecognised verdict falls back to the FLAT share, never to a full budget:
+    # "we could not read the call" must not spend like "conviction buy". (`_to_verdict`
+    # already coerces unknown allocations upstream; this is the second line.)
+    flat = DEFAULT_UTILIZATION["标配"]
+    if allocation not in table and allocation not in DEFAULT_UTILIZATION:
+        log.warning("unknown allocation %r — using the flat share %.2f", allocation, flat)
+        return flat
+    raw = table.get(allocation, DEFAULT_UTILIZATION.get(allocation, flat))
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        log.warning("layer_utilization[%r] is not a number (%r) — using the flat share",
+                    allocation, raw)
+        return flat
+
+
+def budget_for(layer, allocation: str | None) -> float:
+    """`weight_cap × utilization` — the sum a layer's basket may add up to.
+
+    `weight_cap` stays the ceiling that is never exceeded; the verdict only decides how
+    much of it to use. Note the risk check deliberately does NOT read this number (it
+    reads the static cap): utilization answers "how much new money", a breach answers
+    "is the existing book over the line", and sharing one number would let a 低配 call
+    flag a full-but-compliant layer as breached.
+    """
+    cap = layer.weight_cap if layer.weight_cap is not None else 0.10
+    return cap * (utilization_for(allocation) if allocation else 1.0)
+
+
 def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,
                 single_name_cap_frac: float = 0.40, weights: dict | None = None) -> list[FactorRow]:
     """Composite rank + risk-budgeted weights summing to `layer_cap` (fraction of
@@ -204,6 +250,17 @@ def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,
     return rows
 
 
+def cross_section_applies(rows: list[FactorRow]) -> bool:
+    """Whether a ranking over these rows means anything.
+
+    `_zscores` returns all zeros below two samples, so a one-name cohort produces a
+    composite of 0 and a rank of 1 — a number that looks like a finding and is not one.
+    Sizing is unaffected (the lone name takes the layer's budget); what this flag
+    suppresses is the claim that the ORDER carries information.
+    """
+    return sum(1 for r in rows if r.data_ok and r.sizable) >= 2
+
+
 def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
               structural: bool = False, subgroup_notes: dict | None = None):
     from ...schemas.sector import BasketRow, LayerBasket
@@ -211,6 +268,7 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
     return LayerBasket(
         layer_key=layer_key, as_of=datetime.now(timezone.utc), layer_cap=layer_cap,
         structural=structural, subgroup_notes=subgroup_notes or {},
+        cross_section_applicable=cross_section_applies(rows),
         rows=[BasketRow(
             symbol=r.symbol, subgroup=r.subgroup, composite=(0.0 if r.composite == NEG_INF else r.composite),
             rank=r.rank, quant_rank=r.quant_rank, weight=r.weight, data_ok=r.data_ok,
@@ -268,7 +326,8 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
         return ""
 
 
-def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structure: bool = False):
+def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
+              structure: bool = False, allocation: str | None = None):
     """Fetch factors for a layer's cohort (its tickers + cohort_extra peers), rank,
     size, and (if structure=True and KB notes exist) blend in the structure analyst's
     tech_tenor/moat_pricing overlay → re-rank. Persists the basket. Returns (rows, basket)."""
@@ -301,7 +360,9 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
         cohort.append(canon)
         subgroups[canon] = next((t.subgroup for t in layer.tickers if t.symbol == sym),
                                 "(peer)")
-    layer_cap = layer.weight_cap if layer.weight_cap is not None else 0.10
+    # 预算 = 静态上限 × 层级结论的使用率。allocation=None 时使用率为 1（等价旧行为），
+    # 由调用方在 config/pead.yaml 的 bind_layer_budget 关闭时传 None。
+    layer_cap = budget_for(layer, allocation)
 
     rows = fetch_factors(cohort, subgroups)
     extra = {canonical_entity(x) for x in layer.cohort_extra}

@@ -206,6 +206,11 @@ class LayerBasket(BaseModel):
     as_of: datetime
     layer_cap: float = 0.0                            # fraction of NAV the basket sums to
     structural: bool = False                          # True if the KB structure overlay ran
+    # False when the cohort was too small to standardise: `_zscores` returns all-zero
+    # below two samples, so every rank is an artefact of config order, not a finding.
+    # The budget still lands (a lone name takes the layer's share) — what is suppressed
+    # is the CLAIM that the ranking means something.
+    cross_section_applicable: bool = True
     subgroup_notes: dict = Field(default_factory=dict)  # subgroup -> tech-curve note (光进铜退…)
     rows: list[BasketRow] = Field(default_factory=list)
 

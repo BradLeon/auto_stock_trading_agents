@@ -165,3 +165,27 @@ def test_failure_without_a_prior_refuses_to_guess(monkeypatch):
     v, ok = layer_review.run(_cfg(layer), layer)
     assert ok is False and v.confidence == 0.0
     assert "取不到判断" in v.rationale       # 取不到 ≠ 判断为中性
+
+
+# --------------------------------------------------------------------------- #
+# 编排：空评审绝不落库
+# --------------------------------------------------------------------------- #
+def test_a_round_where_no_layer_produced_a_verdict_is_never_persisted(monkeypatch):
+    """一次什么都没评出来的运行，不得覆盖 latest。
+
+    下游（PEAD prep/monitor、Chief）读的都是 `latest_sector_review`。把一份空评审写成
+    latest，等于用「本轮没跑成」替换掉「上周的真实判断」——而两者在读的人眼里长得一样。
+    """
+    from ats.agents.sector import review as sector_review
+    from ats.config import load_sector_config
+    from ats.memory import get_store
+
+    cfg = load_sector_config("ai_hardware")
+    store = get_store()
+    saved = []
+    monkeypatch.setattr(store, "save_sector_review", lambda r: saved.append(r))
+    monkeypatch.setattr("ats.agents.sector.layer_review.run",
+                        lambda *a, **k: (layer_review._fallback(a[1], None, True, False), False))
+
+    sector_review._run_layered("ai_hardware", cfg, store, use_llm=False, live_data=False)
+    assert saved == [], "没有任何层产出结论时不得落库"

@@ -142,6 +142,13 @@ sector_review:
   inject_monitor: true  # monitor 上下文加 1-3 行 regime 提示
   # 截面选股：周报后自动跑各层排序（带结构层，即把产业链证据带进 moat_pricing）。
   cross_section: true
+  # 层级子行业分析师（2026-08-20 新增）：每层跑一次，产出配置结论（超配/标配/低配/清仓）
+  # 与层内选股。关掉 = 回到只有整行业一次合成的旧行为。
+  layer_analyst: true
+  # 让层级结论真的改变本层预算：basket 权重之和 = weight_cap × 使用率（risk.yaml 的
+  # layer_utilization）。**只下调不放大** —— weight_cap 仍是永不突破的天花板。
+  # 关掉 = 使用率恒为 1.0，等价于绑定之前的行为；这是本次变更的回滚开关。
+  bind_layer_budget: true
   # 把截面的「复合排名 vs 纯量化排名的分歧 + 依据」写进 Chief 上下文。
   # 刻意不给建议权重数字——Chief 是唯一决策者，把确定性模型算好的仓位直接递过去，
   # 它大概率照抄，等于决策权悄悄转移给一个没人为它负责的模型。

@@ -45,11 +45,11 @@
 
 - [x] 5.1 确认六只新票与电力层四只票当前**不在任何命题**的 `expect_from` / `witnesses` / `entities` 里（预期如此），把 `concept_menu` 返回空菜单的名单列出来
 - [x] 5.2 确认 `config/sources.yaml` 与下载器对这十只票的文档可达性；不可达的先记录，可达性不明的不要声明为证人
-- [ ] 5.3 跑一轮 `observe`（抽取），导出这十只票的**未映射池清单**：每只票产出多少条读数、都在说什么维度
-- [ ] 5.4 把 5.3 的结果写进 `ai_hardware.yaml` 的注释（沿用 TRENDFORCE 那条先例的写法：实测条数 + 落在未映射池 + 下一步），作为下一轮起草命题的输入
-- [ ] 5.5 **本次不新增任何 `expect_from` / `witnesses` / 新命题**；若 5.3 显示某只票已在大量产出可归属读数，单独记为下一轮的优先项，不在本变更里激活
+- [x] 5.3 跑一轮 `observe`（抽取），导出这十只票的**未映射池清单**：每只票产出多少条读数、都在说什么维度
+- [x] 5.4 把 5.3 的结果写进 `ai_hardware.yaml` 的注释（沿用 TRENDFORCE 那条先例的写法：实测条数 + 落在未映射池 + 下一步），作为下一轮起草命题的输入
+- [x] 5.5 **本次不新增任何 `expect_from` / `witnesses` / 新命题**；若 5.3 显示某只票已在大量产出可归属读数，单独记为下一轮的优先项，不在本变更里激活
 - [x] 5.6 `chain/induction.py`：`claim_proposals.layer_hint` 的历史提议走 `legacy_keys` 解析，不改写旧行
-- [ ] 5.7 跑一次 `chain` 的知识库评审，确认 ①盲区标记对 `L6_memory` 报出「已有 KB 但未覆盖 NAND/HDD」——**这是预期行为不是误报**，把它记为待评项（本次不补笔记，先看两轮读数）
+- [x] 5.7 跑一次 `chain` 的知识库评审，确认 ①盲区标记对 `L6_memory` 报出「已有 KB 但未覆盖 NAND/HDD」——**这是预期行为不是误报**，把它记为待评项（本次不补笔记，先看两轮读数）
 
 ## 6. 风控接线
 
@@ -72,11 +72,11 @@
 
 ## 8. 结论绑定预算
 
-- [ ] 8.1 `risk.yaml` 新增 `layer_utilization` 映射表（超配 1.0 / 标配 0.6 / 低配 0.3 / 清仓 0.0）
-- [ ] 8.2 `cross_section` 接受使用率参数：`layer_cap = weight_cap × clamp(utilization, 0, 1)`；排名与相对权重比例不受影响
-- [ ] 8.3 `config/pead.yaml` 的 `sector_review` 段新增开关：`layer_analyst`（是否跑层级分析师）与 `bind_layer_budget`（是否让结论改预算；关掉 = 使用率恒 1.0）
-- [ ] 8.4 单测：`weight_cap 30%` + 低配 → basket 合计 ≈9%；清仓 → 全 0 且不产生任何自动交易；使用率误设 1.5 被钳到 1.0；权重之和永不超过 `weight_cap`
-- [ ] 8.5 单票层（样本 <2）跳过 basket，只出 LayerVerdict 并标注「截面不适用」，预算全额落在该唯一标的上并受单票限额约束
+- [x] 8.1 `risk.yaml` 新增 `layer_utilization` 映射表（超配 1.0 / 标配 0.6 / 低配 0.3 / 清仓 0.0）
+- [x] 8.2 `cross_section` 接受使用率参数：`layer_cap = weight_cap × clamp(utilization, 0, 1)`；排名与相对权重比例不受影响
+- [x] 8.3 `config/pead.yaml` 的 `sector_review` 段新增开关：`layer_analyst`（是否跑层级分析师）与 `bind_layer_budget`（是否让结论改预算；关掉 = 使用率恒 1.0）
+- [x] 8.4 单测：`weight_cap 30%` + 低配 → basket 合计 ≈9%；清仓 → 全 0 且不产生任何自动交易；使用率误设 1.5 被钳到 1.0；权重之和永不超过 `weight_cap`
+- [x] 8.5 单票层（样本 <2）跳过 basket，只出 LayerVerdict 并标注「截面不适用」，预算全额落在该唯一标的上并受单票限额约束
 
 ## 9. 跨层轮动与编排
 

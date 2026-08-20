@@ -238,6 +238,11 @@ def _load_risk_yaml() -> dict:
     return _load_yaml(_config_dir() / "risk.yaml")
 
 
+def load_risk_yaml_section(key: str) -> dict:
+    """One top-level section of risk.yaml (e.g. `layer_utilization`), or {}."""
+    return _load_risk_yaml().get(key, {}) or {}
+
+
 @functools.lru_cache(maxsize=1)
 def get_config() -> Config:
     cfg_dir = _config_dir()

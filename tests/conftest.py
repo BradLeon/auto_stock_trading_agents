@@ -73,6 +73,33 @@ def _no_transcript_dataset(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_layer_analyst(monkeypatch):
+    """No test may reach the live layer analyst or the rotation pass.
+
+    Autouse because the failure mode is silent in the same way the adjudicator's is:
+    `layer_review.run` and `rotation.run` both swallow exceptions and degrade (to a
+    carried-forward verdict / to None), so a test that accidentally called out to a
+    model would not error — it would spend money, take a minute, and still look green.
+    That is exactly what happened on 2026-08-20: three tests written against the old
+    single-synthesis path kept patching only `review.run_structured`, and when `run()`
+    started defaulting to the layered path they silently began making real calls.
+
+    Raising (rather than returning a stub) is deliberate: a test that needs these must
+    say so by patching them, and one that does not should never be shaped by whatever a
+    stub happened to return.
+    """
+    def _blocked(role, schema, context, **kw):
+        raise AssertionError(
+            f"test reached the live model for role {role!r} — patch "
+            f"`layer_review.run_structured` / `rotation.run_structured` in this test")
+
+    from ats.agents.sector import layer_review, rotation
+
+    monkeypatch.setattr(layer_review, "run_structured", _blocked)
+    monkeypatch.setattr(rotation, "run_structured", _blocked)
+
+
+@pytest.fixture(autouse=True)
 def _stub_adjudicator(monkeypatch):
     """No test may reach the live cluster adjudicator.
 

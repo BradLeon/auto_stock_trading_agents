@@ -83,10 +83,21 @@ def main() -> int:
     ap.add_argument("after")
     ap.add_argument("--new-tickers", default="",
                     help="本次有意新增的代码，逗号分隔；不在此列的新增即失败")
+    ap.add_argument("--renamed", default="",
+                    help="本次有意更名的代码，形如 AXT=AXTI,OLD=NEW。"
+                         "没有这个开关，一次更名会同时报成「丢失旧代码」与「计划外新增」")
     args = ap.parse_args()
 
     before, after = load(args.before), load(args.after)
     expected_new = {s.strip().upper() for s in args.new_tickers.split(",") if s.strip()}
+    renames: dict[str, str] = {}
+    for pair in args.renamed.split(","):
+        if not pair.strip():
+            continue
+        old_sym, _, new_sym = pair.partition("=")
+        if not new_sym:
+            raise SystemExit(f"--renamed 需要 OLD=NEW 形式，收到 {pair!r}")
+        renames[old_sym.strip().upper()] = new_sym.strip().upper()
     fails: list[str] = []
     notes: list[str] = []
 
@@ -112,8 +123,18 @@ def main() -> int:
 
     # ④ tickers 并集 = 原并集 + 有意新增 ---------------------------------------
     tb, ta = tickers_of(before), tickers_of(after)
-    dropped = tb - ta
-    added = ta - tb
+    # 更名要先折叠，否则一次更名会同时触发「丢失旧代码」和「计划外新增」两条失败，
+    # 而它其实只是同一只票换了个写法。
+    tb_folded = {renames.get(s, s) for s in tb}
+    dropped = tb_folded - ta
+    added = ta - tb_folded
+    for old_sym, new_sym in sorted(renames.items()):
+        if old_sym not in tb:
+            fails.append(f"④ 声明更名 {old_sym}→{new_sym}，但改前并没有 {old_sym}")
+        elif new_sym not in ta:
+            fails.append(f"④ 声明更名 {old_sym}→{new_sym}，但改后并没有 {new_sym}")
+        else:
+            notes.append(f"④ {old_sym} → {new_sym}（有意更名，已折叠）")
     if dropped:
         fails.append(f"④ 丢失标的: {sorted(dropped)}")
     if added - expected_new:
@@ -130,10 +151,14 @@ def main() -> int:
     # ⑥ 每只原有票的 concept_menu 键集合不变 -----------------------------------
     # 「非空」不能作为通过条件：基线里 VRT/AAOI/AXT 与别名代码本来就空（见 D13）。
     # 真正要抓的是**静默变化**，所以比对键集合，并把本来就空的单独列出来提醒。
-    for sym in sorted(tb & ta):
-        mb, ma = menu_keys(before, sym), menu_keys(after, sym)
+    for sym in sorted(tb):
+        target = renames.get(sym, sym)
+        if target not in ta:
+            continue
+        mb, ma = menu_keys(before, sym), menu_keys(after, target)
         if mb != ma:
-            fails.append(f"⑥ {sym} 的可归属维度变了: "
+            label = sym if target == sym else f"{sym}→{target}"
+            fails.append(f"⑥ {label} 的可归属维度变了: "
                          f"-{sorted(mb - ma)} +{sorted(ma - mb)}")
         elif not mb:
             notes.append(f"⑥ {sym} 搬迁前后都是空菜单（读数无处可落，见 D13 两步法）")

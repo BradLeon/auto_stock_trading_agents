@@ -2,7 +2,7 @@
 
 The PEAD scorecard is a *time-series / event* signal (one name's earnings
 surprise: answers WHEN to act on a name). It never ranks peers against each
-other, so it gives no basis to pick among a layer's names (COHR/LITE/CRDO/AXT/
+other, so it gives no basis to pick among a layer's names (COHR/LITE/CRDO/AXTI/
 AAOI/VRT…) or size them. This module adds the missing *cross-sectional* leg:
 standardize a handful of factors WITHIN the cohort (Barra-lite z-scores),
 composite them into a rank (selection), then turn the rank into weights under a
@@ -612,7 +612,7 @@ if __name__ == "__main__":
         rows, basket = run_layer(sys.argv[1], sys.argv[2], persist=False)
         print(format_table(rows, basket.layer_cap))
     else:
-        syms = sys.argv[1:] or ["COHR", "LITE", "AAOI", "CRDO", "AXT", "VRT", "MRVL"]
+        syms = sys.argv[1:] or ["COHR", "LITE", "AAOI", "CRDO", "AXTI", "VRT", "MRVL"]
         rows = fetch_factors(syms)
         rank_cohort(rows, layer_cap=0.10)
         print(format_table(rows, 0.10))

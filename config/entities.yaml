@@ -161,13 +161,19 @@ entities:
     market: US
     filings: sec
 
-  # ⚠️ 账户实际持有的代码是 AXTI，配置各处写的是 AXT。这条别名只解决**证据侧**的
-  # 实体折叠；风控的分层归属走的是另一条路径（风控快照的 symbol_layers），
-  # 不会因为这条别名而修复——AXTI 目前仍显示「未分层」、其 3.03% 不计入 L3 上限。
-  # 已与用户确认本轮不修那一侧，此处留痕。
-  AXT:
+  # 2026-08-20 canonical 由 AXT 翻转为 **AXTI**。这不是命名偏好，是**修一个静默的取数错误**：
+  # 纳斯达克的上市代码就是 AXTI，`AXT` 在行情/基本面源上什么都取不到。实测对照——
+  #   AXT   mcap=—     revG=—       GM=—      fwdPE=—     → data_ok=False
+  #   AXTI  mcap=4.8B  revG=164.8%  GM=32.2%  fwdPE=33.0  → data_ok=True
+  # 后果不是「少一列数」：截面里它每一轮都被判 data_ok=False、排最后、**不参与定权**，
+  # 而层级分析师照纪律写「数据缺失，维持持有」——一条对错误输入的正确应用。
+  # 同时它也修掉了风控侧的漏计：账户持有的 AXTI 此前显示「未分层」，仓位不计入任何层上限。
+  # 修后实测（2026-08-20，net_liq 251,040）：L4 互联层由 4.0% 升到 5.5%，
+  # AXTI 从未分层持仓里消失。
+  # ⚠️ 市值 4.8B **低于** LIQ_FLOOR_USD(5e9)，会吃流动性折价——那是预期行为。
+  AXTI:
     name: AXT Inc
-    aliases: [AXTI, "AXT INC"]
+    aliases: [AXT, "AXT INC"]
     market: US
     filings: sec
 

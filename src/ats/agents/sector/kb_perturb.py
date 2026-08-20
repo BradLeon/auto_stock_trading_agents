@@ -146,7 +146,7 @@ def run(sector_name: str, layer_key: str, *, mode: str = "poison") -> tuple[ArmS
     if mode not in MODES:
         raise ValueError(f"mode must be one of {sorted(MODES)}")
     cfg = load_sector_config(sector_name)
-    layer = next((ly for ly in cfg.layers if ly.key == layer_key), None)
+    layer = cfg.layer_by_key(layer_key)          # 旧层键经 legacy_keys 仍可解析
     if layer is None:
         raise ValueError(f"layer {layer_key!r} not in sector {sector_name!r}")
     if not layer.structure_notes:

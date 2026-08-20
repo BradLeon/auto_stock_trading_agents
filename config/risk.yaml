@@ -44,10 +44,39 @@ sector_layer_caps:
   ai_hardware:
     L1_app: {weight_cap: 0.15}
     L2_cloud: {weight_cap: 0.25}
-    L3_dc_infra: {weight_cap: 0.15, weight_cap_hard: 0.20}
-    L4_chip_design: {weight_cap: 0.15}
-    L5_fab: {weight_cap: 0.30}
-    L6_equipment: {weight_cap: 0.15}
+    L3_dc_power: {weight_cap: 0.10}                          # 原 L3_dc_infra 拆出
+    L4_interconnect: {weight_cap: 0.15, weight_cap_hard: 0.20}  # 继承原 L3 的敞口性质
+    L5_chip_design: {weight_cap: 0.15}                       # 原 L4_chip_design，数值不变
+    L6_memory: {weight_cap: 0.25}                            # 原 L5_fab 拆出
+    L7_foundry_pkg: {weight_cap: 0.20}                       # 原 L5_fab 拆出
+    L8_equipment: {weight_cap: 0.15}                         # 原 L6_equipment，数值不变
+
+# 跨层上限 —— **拆层不得放大总敞口**。
+# 拆层有一个机械性副作用：L5_fab ≤30% 变成两个各自独立的 cap，两层同时满仓就能到
+# 25%+20%=45%。那等于在重构的掩护下悄悄放松了护栏。做法是**加一层新护栏而不是撤销旧的**：
+# 子层保留各自的 cap，它们的**合计**仍被拆分前的原值卡住。
+# 子层 cap 之和 > group cap 是**有意的**——允许配置在成员之间倾斜，但总量不动。
+layer_groups:
+  ai_hardware:
+    dc_infra:
+      label: 数据中心基建（电力冷却 + 互联与网络）
+      layers: [L3_dc_power, L4_interconnect]
+      weight_cap: 0.15          # 沿用拆分前的 L3_dc_infra
+      weight_cap_hard: 0.20
+    fab_memory:
+      label: 制造与存储（存储 + 代工封装）
+      layers: [L6_memory, L7_foundry_pkg]
+      weight_cap: 0.30          # 沿用拆分前的 L5_fab
+
+# 层级配置结论 → 本层预算使用率。**只下调，不放大**：
+# basket 权重之和 = weight_cap × clamp(使用率, 0, 1)，weight_cap 仍是永不突破的天花板。
+# 映射表在这里是因为它是**治理**（这个账户愿意让一条判断把预算摆动多大）；
+# 判断本身是语义，由层级分析师给出并连同证据归因一起落库。
+layer_utilization:
+  超配: 1.0
+  标配: 0.6
+  低配: 0.3
+  清仓: 0.0
 
 # sell-put 资金生存性
 option_survival:

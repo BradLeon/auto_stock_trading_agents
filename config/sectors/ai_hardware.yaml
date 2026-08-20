@@ -1,6 +1,37 @@
-# AI 硬件行业 — L1-L6 分层定义（sector_analyst 每周评审的宇宙）。
-# Seed 自「半导体产业研究合集/AI半导体产业链分析上篇-供应链全貌概览」，需求沿 L1→L6 传导。
+# AI 硬件行业 — L1-L8 分层定义（sector_analyst 每周评审的宇宙）。
+# Seed 自「半导体产业研究合集/AI半导体产业链分析上篇-供应链全貌概览」，需求沿 L1→L8 传导。
 # ⚠️ 本文件是行业结构/归属的真源；风险上限统一在 config/risk.yaml，layer key 必须对应。
+#
+# ════════════════════════════════════════════════════════════════════════════
+# 2026-08-20 六层重构为八层。**下面三条是判据本身，再调分层时直接引用，不要重新推导。**
+# ════════════════════════════════════════════════════════════════════════════
+#
+# ① 层同时承担三件事，好的切法要三者同时成立：
+#      ⑴ 需求传导链上的一个位置        —— 提示词里的 L1→L8 叙事
+#      ⑵ 截面 cohort（z 分的作用域）    —— cross_section.rank_cohort
+#      ⑶ 风险预算 / 相关簇单元          —— risk.yaml 的 sector_layer_caps
+#    原 L5_fab（台积电 + 存储三巨头）在 ⑵⑶ 上都不成立，原 L3_dc_infra（光/铜/衬底 +
+#    电力冷却）同样——那一层的 structure_notes 早就配了四份不同的判据笔记，
+#    它事实上已经是四个 cohort，只是共用一个 boom_score 和一个 cap。
+#
+# ② **拆层的判据是「定价机制」，不是「产业环节」。** 产业环节（设计→制造→封测→设备）
+#    回答的是「这东西怎么做出来的」，而层要回答的是「这两家放一起比 PEG/毛利率有没有
+#    意义」「它们会不会一起跌」。这条链上有四种定价机制：
+#      · 产能垄断型服务（卖方定价）      TSM 先进制程     毛利高且稳
+#      · 商品化周期品（供需定价）        DRAM/NAND/HDD    毛利大幅摆动
+#      · 技术代际替代（溢价窗口）        光模块 1.6T/CPO  毛利随代际起落
+#      · 机电装机量（招标/长单）         VRT/ETN/GEV      毛利平稳靠量
+#    反例最能说明问题：台积电与美光的毛利率差**不来自谁经营得更好**，来自商业模式，
+#    而 z 分会把它读成「台积电的质量因子更强」——一个每周都会出现的假信号。
+#
+# ③ **层是风险预算与景气判断单元；subgroup 只是叙述与比较的分组标签。**
+#    z 分在**整层**统一计算，subgroup 不参与标准化（组内样本太小会退化，见 L6 注释）。
+#
+# ④ **命题挂「被判断的主体」所在层，不挂「说话的人」所在层**；witness_roster 与
+#    expect_from 天然跨层，**不随拆层重切**（详见 L7_foundry_pkg 的注释）。
+#
+# 拆分前的历史靠各层的 legacy_keys 解析，**旧记录一律不改写**：一行写着 L5_fab 的结论
+# 是在「代工+存储」的合并口径下做出的，把它改写成 L6_memory 等于伪造当时的判断范围。
 
 name: ai_hardware
 label: AI硬件
@@ -641,25 +672,64 @@ layers:
           - {entity: NVDA, stance: competitor}
           - {entity: AMD,  stance: competitor}
 
-  - key: L3_dc_infra
-    label: L3 数据中心基建（电力/冷却/网络/光互联）
-    question: 机房/电力/光互联哪个环节仍是瓶颈？订单能见度多长？
-    # 子层：光互联(收发/光引擎) · 铜连接(AEC/DSP) · 上游衬底 · 电力冷却
+  - key: L3_dc_power
+    label: L3 数据中心电力与冷却
+    legacy_keys: [L3_dc_infra]
+    question: 供电与散热哪个环节仍是交付瓶颈？电网接入与机电交期能见度多长？
+    # 2026-08-20 从 L3_dc_infra 拆出。拆的判据是**定价机制**不是产业环节：
+    # 本层是机电装机量驱动（项目招标/长单、毛利平稳、靠量），互联层是技术代际替代驱动
+    # （新一代溢价窗口、毛利随代际起落）。两者的毛利率/PEG 放进同一批 z 分，比较的是
+    # 两个不同的东西；而 cap 要限住的是「一起跌」，它们并不一起跌。
+    # **本层不设 subgroup**（四只票分组是过度设计）——代价是 BE 与 ETN 会进同一张 z 分表
+    # 直接比，对冲办法只有下面每只票 note 里写明的敞口性质与定价机制。
+    tickers:
+      - {symbol: VRT,  subgroup: 电力冷却, note: Vertiv 电力/热管理/液冷，大盘动量}
+    # 截面同业（风控主层在别处）
+    cohort_extra: []
+    structure_notes:
+      电力冷却: config/knowledge/电力冷却.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+    # ⚠️ **本层零命题，这是拆分的直接后果，不是遗漏。**
+    # 原 L3_dc_infra 的四条命题（optical_component_supply_gap / rate_transition_pricing_power
+    # / copper_ip_crosses_to_optical / interconnect_moat_distribution）**全部是互联的**，
+    # 整块去了 L4_interconnect。
+    #
+    # 后果是**静默**的：observer.concept_menu 按「这家公司是不是某条命题的声明证人」过滤，
+    # 声明为空 → 菜单为空 → extract 把本层各票的观测 concept 全部置空 → 100% 未映射。
+    # 本仓踩过一次：2026-08-14 之前 L3 一条命题都没有，COHR 216 条、LITE 52 条读数全部
+    # 落在未映射池，当时的结论是「证据一直在库里，只是没有落点——这是配置缺口不是数据缺口」。
+    #
+    # **不在这里凭空起草命题**，走两步法（先观测再声明）：
+    #   ① 先跑一轮 observe，看本层四只票实际说了什么、未映射池里堆了什么
+    #   ② 拿真实读数起草命题——维度由读数决定，不是先设计维度再指望它答得上
+    # 判据不是「声明还是不声明」，是**这个实体是否已经在产出读数**：声明一个取不到文档或
+    # 说不出区分度的证人只会把覆盖率的分母做大；而不声明一个已在产出读数的实体，
+    # 会让那批读数无处可落。先例见 TRENDFORCE（首轮实测 57 条落在未映射池，然后才声明）。
+    claims: []
+  - key: L4_interconnect
+    label: L4 互联与网络（光/铜/衬底）
+    legacy_keys: [L3_dc_infra]
+    question: 光/铜/CPO 的替代边界移到哪了？器件缺口与代际切换的节奏如何？
+    # 2026-08-20 从 L3_dc_infra 拆出，电力冷却分到 L3_dc_power。
+    # **拆出的是「互联与网络」而不只是「光互联」**：光 / 铜 / CPO / 交换是同一个**互相替代**
+    # 的战场，放同一层 relative 命题才有对手可比；拆成两层则每层都成单一子层，
+    # 回到 L1 的单样本困境。
+    # 子层：光互联(收发/光引擎) · 铜连接(AEC/DSP) · 上游衬底
     tickers:
       - {symbol: COHR, subgroup: 光互联, note: 1.6T/InP 衬底自供}
       - {symbol: LITE, subgroup: 光互联, note: 收发+激光器}
       - {symbol: AAOI, subgroup: 光互联, note: 收发，含CATV，小盘高波}
       - {symbol: CRDO, subgroup: 铜连接, note: Credo AEC有源电缆+DSP/retimer，超高增速/贵}
       - {symbol: AXT,  subgroup: 衬底,   note: 化合物半导体衬底 InP/GaAs，小盘/中国敞口}
-      - {symbol: VRT,  subgroup: 电力冷却, note: Vertiv 电力/热管理/液冷，大盘动量}
-    # 截面同业（风控主层在别处：MRVL 风控=L4，此处仅作 L3 光/电 DSP 同业参与排序）
-    cohort_extra: [MRVL]
+    # 截面同业（风控主层在别处）：MRVL 风控=L5 芯片设计、AVGO 风控=L5，
+    # 二者的光 DSP / 交换芯片收入与本层同业，仅参与排序不占本层预算。
+    # 这两笔收入此前**无家可归**——被 L4 芯片设计的命题注释显式排除，又不属于原 L3 任何命题。
+    cohort_extra: [MRVL, AVGO]
     # 子层 → 策展知识库笔记（structure_analyst v2 定性结构层，--structure 时启用）
     structure_notes:
       光互联: config/knowledge/光互联.md
       铜连接: config/knowledge/铜连接.md
       衬底: config/knowledge/光互联.md      # 衬底判据写在光互联笔记里（需求派生自它）
-      电力冷却: config/knowledge/电力冷却.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
 
     # ── 2026-08-14 新增四条互联层命题 ──────────────────────────────────────────
@@ -823,8 +893,10 @@ layers:
           - {entity: NVDA, stance: customer}
           - {entity: TRENDFORCE, stance: regulator}
 
-  - key: L4_chip_design
-    label: L4 芯片设计
+  - key: L5_chip_design
+    label: L5 芯片设计
+    legacy_keys: [L4_chip_design]
+    # 2026-08-20 仅更名（原 L4_chip_design）：互联与电力各占一层后序号顺延。
     # 2026-08-17 收窄到 XPU/AI 加速器口径。本层只问「算力芯片本身」——网络与交换芯片、
     # 光 DSP、铜连接归 L3（interconnect_moat_distribution 已在跑，MRVL 就在那条的 cohort
     # 里）；HBM 与内存互联归 L5。**cohort 不因此变**，变的是每个维度 desc 里写死的边界：
@@ -1288,20 +1360,34 @@ layers:
           - {entity: DOWJONES, stance: regulator}
           - {entity: SEMIANALYSIS, stance: regulator}
 
-  - key: L5_fab
-    label: L5 芯片制造（Foundry+封装+存储）
-    question: CoWoS/HBM 产能缺口与涨价周期位置？
+  - key: L6_memory
+    label: L6 存储（HBM/常规DRAM/NAND/HDD）
+    legacy_keys: [L5_fab]
+    question: 存储周期走到哪了？HBM 产能缺口与涨价是否仍在扩大？
+    # 2026-08-20 从 L5_fab 拆出，代工与先进封装分到 L7_foundry_pkg。
+    # 拆的判据是**定价机制**：存储是商品化周期品（价格由 bit 供需定、毛利大幅摆动），
+    # 代工是产能垄断型服务（价格由卖方定、毛利高且稳）。两者的毛利率差**不来自谁经营得
+    # 更好**，来自商业模式——而 z 分会把它读成「台积电的质量因子更强」，一个每周都会
+    # 出现的假信号。原 L5_fab 的 30% 还是全表最松的一档 cap，恰好盖住相关性最低的两类资产。
+    #
+    # **subgroup 是叙述与比较的分组标签，不是 z 分的作用域**（2026-08-20 裁定）：
+    # z 分在**整层**统一计算，subgroup 不参与标准化。理由是组内样本太小（HDD 两只、
+    # NAND 一只），组内标准化会让 z 分主要反映组内排名，且单样本组恒为 0（_zscores 在
+    # 样本 <2 时的退化）。代价是 HDD 与 HBM 的毛利率/增速分布差异会被读成公司间差异——
+    # 对冲办法是层级分析师在叙述里按 subgroup 分开讲，不是改标准化口径。
     tickers:
-      - {symbol: TSM, note: 先进制程+CoWoS}
       - {symbol: MU, note: HBM}
       - {symbol: HY9H, note: SK海力士/HBM龙头（IBKR法兰克福ADR代码，用户实际持有）}
       - {symbol: SKHY, note: SK海力士 美国ADR（用户同时持有此代码）}
       - {symbol: "000660.KS", note: SK海力士 韩股（参考）}
       - {symbol: "005930.KS", note: 三星/HBM追赶}
+    cohort_extra: []
     structure_notes:
       存储: config/knowledge/HBM存储.md
-      代工封装: config/knowledge/先进封装代工.md
       资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+    # ⚠️ HBM存储.md 只覆盖 HBM，**不覆盖 NAND/HDD**。kb_review 的①盲区标记会命中
+    # 「该层已有 KB，但未覆盖这些名字所属的环节」——**那是预期行为不是误报**。
+    # 本次不补笔记：先看两轮读数，再决定值不值得为 NAND/HDD 单写一份判据。
     # HBM 主题的证人范围（2026-08-06 人工规定）。身份按 config/entities.yaml 归一：
     # 写 canonical，别名代码（HY9H / 000660.KS）自动折叠，不会被算成额外证人。
     #
@@ -1503,6 +1589,27 @@ layers:
       # 晶圆厂产能是另一回事。这正是 cloud_capacity_constraint 当初要单开 key 的
       # 同一个理由——MSFT 的 Azure 产能话术曾因共享 key 被误归进 HBM 命题。
       # packaging_throughput 是唯一**真正同维度**的，所以复用（见下）。
+  - key: L7_foundry_pkg
+    label: L7 代工与先进封装
+    legacy_keys: [L5_fab]
+    question: 先进制程与 CoWoS 的产能缺口在扩大还是收敛？三家的技术位置如何分布？
+    # 2026-08-20 从 L5_fab 拆出，存储分到 L6_memory（拆的理由写在那一层）。
+    tickers:
+      - {symbol: TSM, note: 先进制程+CoWoS}
+    cohort_extra: []
+    structure_notes:
+      代工封装: config/knowledge/先进封装代工.md
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+    # ── 命题挂「被判断的主体」所在层，不挂「说话的人」所在层 ──────────────────────
+    # 这条规则 2026-08-20 拆层时定死，**下次再动层结构直接引用，不要重吵**。
+    # 落到本层：先进制程与先进封装的四条命题判断的是**晶圆厂的产能与技术位置**，所以在这里；
+    # 而 hbm_supply_tight 判断的是**HBM 供给**，留在 L6_memory —— 尽管它的
+    # packaging_throughput 维度主证人是台积电（本层主体）。封装吞吐只是 HBM 那条供给链路上
+    # 的一环：它紧，HBM 就到不了客户手上，无论存储厂产出多少。
+    # 推论：**witness_roster 与 expect_from 不随拆层重切**。它们本来就跨层
+    # （upstream: [ASML, KLAC, LRCX, TSM] 在拆分前也不是同层公司）。按新层重切是错的——
+    # 那会把「谁能作证」偷换成「谁在同一层」。
+    claims:
       - id: advanced_node_supply_gap
         kind: common
         statement: 先进制程晶圆的需求仍高于可用产能——缺口在扩大而非收敛
@@ -1720,8 +1827,10 @@ layers:
           - {entity: AMD, stance: customer}
           - {entity: TRENDFORCE, stance: regulator}
 
-  - key: L6_equipment
-    label: L6 半导体设备
+  - key: L8_equipment
+    label: L8 半导体设备
+    legacy_keys: [L6_equipment]
+    # 2026-08-20 仅更名（原 L6_equipment）：互联与电力各占一层后序号顺延。
     question: 设备订单（WFE）领先指标指向扩产还是收缩？
     tickers:
       - {symbol: ASML, note: EUV 最不可替代}

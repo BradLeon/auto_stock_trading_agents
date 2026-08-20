@@ -53,7 +53,7 @@ NOTE_RENUMBERED = """# 测试子层
 """
 
 
-def _review(rows, layer_key="L3_dc_infra", as_of=NOW):
+def _review(rows, layer_key="L4_interconnect", as_of=NOW):
     return SectorReview(sector="ai_hardware", as_of=as_of, baskets=[
         LayerBasket(layer_key=layer_key, as_of=as_of, structural=True, rows=rows)])
 

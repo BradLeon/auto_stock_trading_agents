@@ -238,7 +238,12 @@ def audit(cfg, store, *, layer_key: str = "") -> list[AuditReport]:
             if basket.layer_key in seen or (layer_key and basket.layer_key != layer_key):
                 continue
             seen.add(basket.layer_key)
-            layer = next((ly for ly in cfg.layers if ly.key == basket.layer_key), None)
+            # 历史 basket 可能带着拆分前的层键（L5_fab 等）。按当前键找不到就走
+            # legacy_keys —— 否则重构当天，整段历史的判据审计会静默地什么都不报。
+            # 拆分键会同时命中两半，用 basket 自己的标的挑对那一半：否则会拿代工层的
+            # 判据去审存储层的 basket，而那种错**不报错**，只是审出一堆无意义的 finding。
+            layer = cfg.layer_for_key_and_symbols(
+                basket.layer_key, [r.symbol for r in basket.rows])
             if layer is None or not basket.structural:
                 continue        # no overlay ran -> nothing to audit
             try:

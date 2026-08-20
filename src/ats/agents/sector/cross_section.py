@@ -230,10 +230,19 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
     about the layer. Best-effort — a missing review must not block the ranking.
     """
     try:
+        from ...config import load_sector_config
         from ...memory import get_store
 
         review = get_store().latest_sector_review(sector_name)
-        assessment = review.layer_assessment(layer_key) if review else None
+        # 上一轮的评审可能用的是拆分前的层键；解析到当前层再取它的评估。
+        assessment = None
+        if review is not None:
+            assessment = review.layer_assessment(layer_key)
+            if assessment is None:
+                cfg = load_sector_config(sector_name)
+                for ly in cfg.layers_by_key(layer_key):
+                    for legacy in [ly.key, *ly.legacy_keys]:
+                        assessment = assessment or review.layer_assessment(legacy)
         if assessment is None:
             return ""
         return (f"景气 {assessment.boom_score:.0f} [{assessment.signal}]\n"
@@ -252,7 +261,7 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
     from ...config import canonical_entity, load_sector_config
 
     cfg = load_sector_config(sector_name)
-    layer = next((ly for ly in cfg.layers if ly.key == layer_key), None)
+    layer = cfg.layer_by_key(layer_key)          # 旧层键经 legacy_keys 仍可解析
     if layer is None:
         raise ValueError(f"layer {layer_key!r} not in sector {sector_name!r}")
 

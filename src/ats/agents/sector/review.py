@@ -75,8 +75,11 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool) -> Se
             # Budget first at FULL cap: the ranking and the relative split are
             # independent of the verdict, and the verdict needs the ranking to answer
             # "who". The total is re-scaled below once the verdict exists.
-            basket = cross_section.run_layer(name, layer.key, persist=False,
-                                             structure=use_llm) if live_data else None
+            if live_data:
+                # run_layer returns (rows, basket) — the rows are the working set, the
+                # basket is the persisted shape. Only the latter travels onward.
+                _, basket = cross_section.run_layer(name, layer.key, persist=False,
+                                                    structure=use_llm)
         except Exception as exc:  # noqa: BLE001 - a layer without prices still gets a verdict
             log.warning("cross-section failed for %s: %s", layer.key, exc)
 

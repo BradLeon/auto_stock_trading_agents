@@ -651,8 +651,8 @@ def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
         basket = None
         if live_data:
             try:
-                basket = cross_section.run_layer(name, layer.key, persist=False,
-                                                 structure=use_llm)
+                _, basket = cross_section.run_layer(name, layer.key, persist=False,
+                                                    structure=use_llm)
             except Exception as exc:  # noqa: BLE001
                 print(f"  （{layer.key} 截面取数失败：{exc}）")
         v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)

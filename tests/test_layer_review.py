@@ -189,3 +189,36 @@ def test_a_round_where_no_layer_produced_a_verdict_is_never_persisted(monkeypatc
 
     sector_review._run_layered("ai_hardware", cfg, store, use_llm=False, live_data=False)
     assert saved == [], "没有任何层产出结论时不得落库"
+
+
+def test_layered_run_consumes_the_basket_from_run_layers_tuple(monkeypatch):
+    """`cross_section.run_layer` 返回 (rows, basket)，不是 basket。
+
+    2026-08-20 实盘首跑就炸在这里，而全量测试是绿的 —— 因为没有一个测试用
+    `live_data=True` 走过这条路，截面取数在测试里从来没被调用。这里补上那一段接线。
+    """
+    from ats.agents.sector import cross_section
+    from ats.agents.sector import review as sector_review
+    from ats.config import load_sector_config
+    from ats.memory import get_store
+    from ats.schemas.sector import BasketRow, LayerBasket
+
+    cfg = load_sector_config("ai_hardware")
+    one = cfg.model_copy(update={"layers": cfg.layers[:1]})
+    basket = LayerBasket(layer_key=one.layers[0].key, as_of=NOW,
+                         rows=[BasketRow(symbol="GOOG", rank=1)])
+    seen = {}
+
+    monkeypatch.setattr(cross_section, "run_layer",
+                        lambda *a, **k: (["rows"], basket))     # 真实签名：元组
+    monkeypatch.setattr("ats.agents.sector.assemble.layer_evidence_blocks",
+                        lambda cfg, ly: ("", ""))
+
+    def _capture(cfg_, layer, *, basket=None, prior=None, snapshot_block="", use_llm=True):
+        seen["basket"] = basket
+        return layer_review._fallback(layer, None, True, False), False
+
+    monkeypatch.setattr(layer_review, "run", _capture)   # review.py 内是延迟 import
+    sector_review._run_layered("ai_hardware", one, get_store(),
+                               use_llm=False, live_data=True)
+    assert seen["basket"] is basket        # 拿到的是 basket 本身，不是元组

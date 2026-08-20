@@ -683,7 +683,25 @@ layers:
     # **本层不设 subgroup**（四只票分组是过度设计）——代价是 BE 与 ETN 会进同一张 z 分表
     # 直接比，对冲办法只有下面每只票 note 里写明的敞口性质与定价机制。
     tickers:
-      - {symbol: VRT,  subgroup: 电力冷却, note: Vertiv 电力/热管理/液冷，大盘动量}
+      # ⚠️ subgroup 字段在本层**不用**（四只票分组是过度设计）。VRT 这行保留的
+      # `subgroup: 电力冷却` 是拆分前带过来的历史值，本层不据此做任何分组。
+      - {symbol: VRT,  subgroup: 电力冷却, note: Vertiv 电力/热管理/液冷，大盘动量。机电装机量驱动}
+      # 2026-08-20 新增三只。不扩的话本层只剩 VRT 一票，而 _zscores 在样本 <2 时全返 0
+      # ——截面等于没跑。
+      - {symbol: ETN, note: 伊顿。数据中心配电。⚠️ AI 数据中心敞口**不是 100%**，
+          z 分里混着非 AI 业务；定价机制=机电装机量（项目招标/长单）}
+      - {symbol: GEV, note: GE Vernova。燃气轮机/电网设备，供电瓶颈的直接受益方。
+          ⚠️ AI 敞口同样不是 100%；定价机制=机电装机量}
+      - {symbol: BE,  note: Bloom Energy。固体氧化物燃料电池，**现场发电（behind-the-meter）**，
+          绕过电网接入排队——而接入排队正是本层「供电瓶颈」叙事里最硬的那条约束，
+          所以它是本层 **AI 纯度最高**的一只。
+          ⚠️ 但也是**最不同类**的一只：定价机制是**技术采纳曲线**，ETN/GEV 是机电装机量。
+          本层不设 subgroup，所以它会与 ETN/GEV 进同一张 z 分表直接比 —— 层级分析师
+          必须依据本条 note 说明它的可比性限制，不得仅凭它在层内的名次给结论。
+          实测（2026-08-20 首跑）：三条担心的降级路径**一条都没中** —— fwd_pe 42.3 可得、
+          revG +165.5% 为正、市值 $60.9B 远高于 LIQ_FLOOR_USD，data_ok=True 正常参与定权。
+          它 comp 0.48 排第一（增速+PEG 拉动，尽管 mom60 -31.7%），而 beta 3.83 把权重
+          压到 2.2% —— 低于排第二的 ETN 的 4.0%。**风险预算在起作用，这是对的。**}
     # 截面同业（风控主层在别处）
     cohort_extra: []
     structure_notes:
@@ -1376,11 +1394,22 @@ layers:
     # 样本 <2 时的退化）。代价是 HDD 与 HBM 的毛利率/增速分布差异会被读成公司间差异——
     # 对冲办法是层级分析师在叙述里按 subgroup 分开讲，不是改标准化口径。
     tickers:
-      - {symbol: MU, note: HBM}
-      - {symbol: HY9H, note: SK海力士/HBM龙头（IBKR法兰克福ADR代码，用户实际持有）}
-      - {symbol: SKHY, note: SK海力士 美国ADR（用户同时持有此代码）}
-      - {symbol: "000660.KS", note: SK海力士 韩股（参考）}
-      - {symbol: "005930.KS", note: 三星/HBM追赶}
+      - {symbol: MU, subgroup: HBM, note: HBM。⚠️ 它同时做 DRAM 与 NAND，
+          subgroup 按**主导驱动**归 HBM —— subgroup 是比较用的标签，不是收入拆分}
+      - {symbol: HY9H, subgroup: HBM, note: SK海力士/HBM龙头（IBKR法兰克福ADR代码，用户实际持有）}
+      - {symbol: SKHY, subgroup: HBM, note: SK海力士 美国ADR（用户同时持有此代码）}
+      - {symbol: "000660.KS", subgroup: HBM, note: SK海力士 韩股（参考）}
+      - {symbol: "005930.KS", subgroup: HBM, note: 三星/HBM追赶}
+      # 2026-08-20 新增。入本层的理由是 ③ 相关簇：**吃同一个存储 bit 周期 beta**，
+      # 不是「都是存储」。产能线与工艺不同（② 只在 subgroup 内成立），所以标 subgroup。
+      # ⚠️ 与 HBM 的机制联系强弱不同：HBM 单 bit 吃约三倍晶圆、挤占常规 DRAM 产能，
+      # 这是同一条产能线上的直接传导；而 NAND/HDD 是另一条产线，联系是「AI 存储需求
+      # 外溢」——**那是另一条命题**，本次不立（见 L3_dc_power 的两步法注释）。
+      - {symbol: SNDK, subgroup: NAND, note: SanDisk。2025 年从西部数据分拆的纯 NAND}
+      - {symbol: STX, subgroup: HDD, note: 希捷。近线 HDD；AI 存储需求外溢的直接承接方。
+          ⚠️ AI 数据中心敞口**不是 100%**，z 分里混着非 AI 业务}
+      - {symbol: WDC, subgroup: HDD, note: 西部数据（分拆 SanDisk 后为 HDD）。同上，
+          ⚠️ AI 敞口不是 100%}
     cohort_extra: []
     structure_notes:
       存储: config/knowledge/HBM存储.md
@@ -1388,6 +1417,22 @@ layers:
     # ⚠️ HBM存储.md 只覆盖 HBM，**不覆盖 NAND/HDD**。kb_review 的①盲区标记会命中
     # 「该层已有 KB，但未覆盖这些名字所属的环节」——**那是预期行为不是误报**。
     # 本次不补笔记：先看两轮读数，再决定值不值得为 NAND/HDD 单写一份判据。
+    #
+    # ── z 分口径：**层内统一计算，subgroup 不参与标准化**（2026-08-20 裁定）──────
+    # 备选方案是组内标准化，否决理由：组内样本太小（HDD 两只、NAND 一只），组内 z 分
+    # 主要反映组内排名而不是层内位置，单样本组还会恒为 0（_zscores 在样本 <2 时的退化）。
+    #
+    # **代价在扩容当天第一轮就出现了，实测记录在此**（2026-08-20，六只新票入表后首跑）：
+    #     SNDK  NAND  revG 371.6%  PEG 0.1  → comp  0.83  rank 1  wt 5.2%
+    #     MU    HBM   revG 345.7%  PEG 0.1  → comp  0.74  rank 2  wt 8.0%
+    #     STX   HDD   revG  48.5%  PEG 0.3  → comp -0.80  rank 5  wt 1.1%
+    #     WDC   HDD   revG  43.8%  PEG 0.3  → comp -1.39  rank 6  wt 0.5%
+    # 两只 HDD 垫底、权重被压到接近剔除。**但那多半不是「它们更差」，是 HDD 的因子分布
+    # 本来就与 HBM 不同**——增速一个数量级之差来自生意形态，不来自谁经营得更好。
+    # 这正是层内标准化的已知代价。
+    # **对冲办法不是改标准化口径，是层级分析师按 subgroup 分开讲**：跨 subgroup 的排名
+    # 先后可能含分组间的分布差异，不得仅凭名次断言跨组优劣（spec 已写死这条）。
+    # 若跑两轮后发现这个失真持续到影响判断，再考虑组内标准化——那要先解决单样本组的退化。
     # HBM 主题的证人范围（2026-08-06 人工规定）。身份按 config/entities.yaml 归一：
     # 写 canonical，别名代码（HY9H / 000660.KS）自动折叠，不会被算成额外证人。
     #

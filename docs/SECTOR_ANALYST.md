@@ -217,6 +217,9 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector review ai_hardware
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector review ai_hardware --no-llm      # 只组装+stub，不花钱
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector review ai_hardware --no-report    # 不写 Obsidian
 
+# 截面因子速查（只打印，不写文件 —— 文档由 sector review 的层报告产出）
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector crosssection ai_hardware --layer L6_memory
+
 # 只跑某一层（或全部层）的层级评审：配置结论 + 层内选股
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector layer ai_hardware --layer L6_memory
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector layer ai_hardware --layer all
@@ -273,6 +276,32 @@ ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告�
 
 ### 三路输出去向
 
-1. **SQLite** `var/ats.sqlite` 的 `sector_reviews` 表（支持历史对比/回测）。
-2. **Obsidian** `<output_dir>/行业分析-AI硬件-<日期>.md`（`output_dir` 在 sector 配置里；永远新建文件、不动你的手写笔记；同日重跑覆盖）。
-3. **注回 PEAD**：下一次 `pead prep`/`pead monitor` 自动带上最新行业评审的相关块。
+1. **SQLite** `var/ats.sqlite` 的 `sector_reviews` 表（payload 内含 `layer_verdicts`，支持历史对比/回测）。
+2. **Obsidian**（`output_dir` 在 sector 配置里；永远新建文件、不动你的手写笔记；同日重跑覆盖）：
+   - `层分析-AI硬件-<层标签>-<日期>.md` × 8 —— **每层一份，截面并入**
+   - `行业分析-AI硬件-<日期>.md` × 1 —— 跨层轮动 + 八层结论索引
+3. **注回 PEAD**：下一次 `pead prep`/`pead monitor` 自动带上最新层级结论。
+
+### 层报告的五节（结论先行）
+
+| 节 | 内容 | 性质 |
+|---|---|---|
+| 一、本层结论 | 层配置 + 预算 + 周期 + **逐票建议权重/stance 表** + 反转触发条件 | **结论** |
+| 二、议题证据链 | 逐条 common：结论、依据强度、证人覆盖、独立证据簇、立场类别、支持/反驳、**未发声证人**、逐句判读（说话人·维度·理由） | 为什么是这个配置 |
+| 三、截面明细 | 因子表 + **相对命题逐家读数**（位置·依据强度·说话人·理由） | 为什么是这个排序 |
+| 四、逐票取舍理由 | 每只票的依据与分歧、仅自述标记 | 为什么选它 |
+| 五、候选追踪议题 | 分析师自发提出，**只进报告不落库** | 下一轮的输入 |
+
+**第一节要能单独看完就下单**；后四节是给要核对的人的——没有它们第一节只是一个断言，
+但放在前面等于每周先读三千字才看到答案。**解法是顺序，不是取舍。**
+
+第②③节的数据**全部来自 `ClaimAssessment`**（`coverage` / `evidence_clusters` /
+`silent_witnesses` / `judgements` / `entity_readings`），此前只喂给提示词、没喂给读者。
+其中**沉默必须可见**：`expect_from` 存在的全部理由就是让沉默显示成缺口而不是中性。
+
+**候选追踪议题**与 induction 引擎分工：后者**确定性触发**、从未映射观测归纳、进
+`claim_proposals` 走人工采纳；前者是**语义的**、从分析师读到的素材提出、**只进报告**
+（代价：不去重、不被跟踪）。两者都只提议，只有人能把命题写进 yaml。
+
+> `ats sector crosssection` **只打印不写文件**：层报告已经含截面，第二份每层文档迟早
+> 会不同步——它的 `layer_cap` 在配置结论出来前还是个半成品。

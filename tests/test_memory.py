@@ -126,3 +126,31 @@ def test_documents_by_id_resolves_exactly_the_referenced_provenance():
 
 def test_documents_by_id_empty_input_returns_empty_without_querying():
     assert TradingMemory(":memory:").documents_by_id([]) == {}
+
+
+def test_claim_assessments_on_groups_by_layer_for_the_offline_rebuild():
+    """The offline path (`ats sector html <sector> --date`) has no in-memory review to
+    read from — this is the query it uses instead. Layers with no rows that day (e.g. a
+    layer added after this snapshot) must be absent from the result, not an empty list,
+    so the bundle builder can tell 'nothing happened' apart from 'never asked'."""
+    from ats.schemas.chain import ClaimAssessment
+
+    mem = TradingMemory(":memory:")
+    a1 = ClaimAssessment(claim_id="hbm_supply_tight", layer="L6_memory", as_of=NOW,
+                         verdict="supportive")
+    a2 = ClaimAssessment(claim_id="hbm_pricing_expand", layer="L6_memory", as_of=NOW,
+                         verdict="supportive")
+    a3 = ClaimAssessment(claim_id="cloud_capex", layer="L2_cloud", as_of=NOW,
+                         verdict="mixed")
+    for a in (a1, a2, a3):
+        mem.save_claim_assessment(a)
+
+    out = mem.claim_assessments_on(["L6_memory", "L2_cloud", "L1_app"],
+                                   NOW.date().isoformat())
+    assert [x.claim_id for x in out["L6_memory"]] == ["hbm_supply_tight", "hbm_pricing_expand"]
+    assert [x.claim_id for x in out["L2_cloud"]] == ["cloud_capex"]
+    assert "L1_app" not in out
+
+
+def test_claim_assessments_on_empty_layer_keys_returns_empty_without_querying():
+    assert TradingMemory(":memory:").claim_assessments_on([], NOW.date().isoformat()) == {}

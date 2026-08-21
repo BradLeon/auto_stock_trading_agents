@@ -1067,6 +1067,29 @@ class TradingMemory:
             "SELECT * FROM claim_assessments WHERE claim_id = ? ORDER BY as_of DESC "
             "LIMIT ?", (claim_id, limit)).fetchall()]
 
+    def claim_assessments_on(self, layer_keys: list[str], date: str) -> dict[str, list]:
+        """Full `ClaimAssessment` objects for a set of layers on one day, grouped by
+        layer key — the offline counterpart to what `_run_layered` holds in memory
+        during a live run. `date` is `YYYY-MM-DD` (the table's day-truncated key).
+
+        Returns deserialized objects, not raw rows: a reader (the viz bundle) needs the
+        nested judgements and entity_readings, which live only in `payload`, not in the
+        indexed columns.
+        """
+        from ..schemas.chain import ClaimAssessment
+
+        if not layer_keys:
+            return {}
+        placeholders = ",".join("?" * len(layer_keys))
+        rows = self.conn.execute(
+            f"SELECT layer, payload FROM claim_assessments "
+            f"WHERE layer IN ({placeholders}) AND as_of = ?",
+            [*layer_keys, date]).fetchall()
+        out: dict[str, list] = {}
+        for r in rows:
+            out.setdefault(r["layer"], []).append(ClaimAssessment.model_validate_json(r["payload"]))
+        return out
+
     def latest_claim_assessments(self, limit: int = 50) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM claim_assessments a WHERE as_of = ("

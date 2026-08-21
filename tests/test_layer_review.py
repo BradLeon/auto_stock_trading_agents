@@ -259,6 +259,80 @@ def test_a_bad_claim_assessment_row_does_not_cost_the_layer_its_verdict(monkeypa
     assert ran == [1], "the layer still went on to produce a verdict"
 
 
+def test_layered_run_writes_the_viz_dashboard_when_a_layer_succeeds(monkeypatch):
+    """`_run_layered` must build and write the HTML dashboard once at least one layer
+    actually produced a verdict — the dashboard's whole point is to show real
+    decisions, and skipping it would silently leave the live path untested (the only
+    other producer is the offline CLI, which never re-runs analysis)."""
+    from ats.agents.sector import review as sector_review, viz
+
+    cfg = SectorConfig(name="demo", layers=[_layer()], output_dir="/tmp/whatever")
+    saved_reviews = []
+    calls = {}
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return None
+
+        def save_claim_assessment(self, a):
+            pass
+
+        def save_sector_review(self, r):
+            saved_reviews.append(r)
+
+    def _run(cfg_, layer, **kw):
+        return layer_review._fallback(layer, None, True, True), True
+
+    def _fake_build_bundle(cfg_, review, *, assessments_by_layer, store):
+        calls["build_bundle"] = (cfg_, review, assessments_by_layer, store)
+        return {"fake": "bundle"}
+
+    def _fake_write_html(bundle, folder):
+        calls["write_html"] = (bundle, folder)
+        return "/tmp/whatever/fake.html"
+
+    monkeypatch.setattr("ats.agents.sector.assemble.layer_assessments",
+                        lambda cfg, layer, as_of=None: [])
+    monkeypatch.setattr(layer_review, "run", _run)
+    monkeypatch.setattr(viz, "build_bundle", _fake_build_bundle)
+    monkeypatch.setattr(viz, "write_html", _fake_write_html)
+
+    sector_review._run_layered("demo", cfg, _Store(), use_llm=False, live_data=False)
+    assert saved_reviews, "a successful layer must still produce and persist a review"
+    assert calls["build_bundle"][0] is cfg
+    assert calls["build_bundle"][1] is saved_reviews[0]
+    assert calls["write_html"] == ({"fake": "bundle"}, "/tmp/whatever")
+
+
+def test_viz_dashboard_failure_does_not_cost_the_review_its_persistence(monkeypatch):
+    """Best-effort like everything else in this path: a broken renderer must not
+    un-persist a review that eight layers' worth of real judgement already produced."""
+    from ats.agents.sector import review as sector_review, viz
+
+    cfg = SectorConfig(name="demo", layers=[_layer()], output_dir="/tmp/whatever")
+    saved_reviews = []
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return None
+
+        def save_claim_assessment(self, a):
+            pass
+
+        def save_sector_review(self, r):
+            saved_reviews.append(r)
+
+    monkeypatch.setattr("ats.agents.sector.assemble.layer_assessments",
+                        lambda cfg, layer, as_of=None: [])
+    monkeypatch.setattr(layer_review, "run",
+                        lambda cfg_, layer, **kw: (layer_review._fallback(layer, None, True, True), True))
+    monkeypatch.setattr(viz, "build_bundle",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    review = sector_review._run_layered("demo", cfg, _Store(), use_llm=False, live_data=False)
+    assert saved_reviews == [review]
+
+
 def test_layered_run_consumes_the_basket_from_run_layers_tuple(monkeypatch):
     """`cross_section.run_layer` 返回 (rows, basket)，不是 basket。
 

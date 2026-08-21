@@ -705,6 +705,50 @@ def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
     return review
 
 
+def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
+    """Offline rebuild of the viz dashboard from what a past review already produced.
+
+    Never calls an LLM, never touches yfinance/finnhub, never re-runs the corroboration
+    engine — reads the ledger and re-renders (mirrors `runtime/digest.py`'s "decoupled
+    from the workflows that produced the data" discipline). `date` picks WHICH stored
+    review to rebuild (default: the latest); the html always reflects that review's own
+    `as_of` day, since a review's `baskets`/`layer_verdicts` and that day's
+    `claim_assessments` rows must come from the same run to render one consistent story.
+    """
+    from ..agents.sector import viz
+    from ..config import load_sector_config
+    from ..memory import get_store
+
+    cfg = load_sector_config(name)
+    store = get_store()
+    review = None
+    if date:
+        for r in store.sector_review_history(name, limit=60):
+            if r.as_of.date().isoformat() == date:
+                review = r
+                break
+        if review is None:
+            print(f"（{name} 在 {date} 没有存档的 sector review —— "
+                  f"`ats sector review {name}` 跑过的日子才有）")
+            return 1
+    else:
+        review = store.latest_sector_review(name)
+        if review is None:
+            print(f"（{name} 还没有任何 sector review —— 先跑 `ats sector review {name}`）")
+            return 1
+
+    as_of_date = review.as_of.date().isoformat()
+    layer_keys = [ly.key for ly in cfg.layers]
+    assessments_by_layer = store.claim_assessments_on(layer_keys, as_of_date)
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer=assessments_by_layer, store=store)
+    path = viz.write_html(bundle, cfg.output_dir)
+    if path:
+        print(f"📊 {path}")
+        return 0
+    print("（output_dir 未配置或不存在 —— 看 config/sectors/<name>.yaml 的 output_dir）")
+    return 1
+
+
 def _evidence_sources(store, *, entity: str = "") -> int:
     """Primary-source coverage: who the roster declares vs whose documents we hold.
 
@@ -1302,10 +1346,13 @@ def main(argv: list[str] | None = None) -> int:
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
     se.add_argument("action",
-                    choices=["review", "show", "probe", "crosssection", "kbperturb", "layer"])
+                    choices=["review", "show", "probe", "crosssection", "kbperturb", "layer",
+                             "html"])
     se.add_argument("name", nargs="?", default="ai_hardware")
     se.add_argument("--layer", default="all",
                     help="crosssection/layer: layer key (e.g. L4_interconnect) or 'all'")
+    se.add_argument("--date", default="",
+                    help="html: YYYY-MM-DD 的已存档 review（默认最新一次）")
     se.add_argument("--structure", action="store_true", help="crosssection: blend KB structure analyst")
     se.add_argument("--mode", default="poison", choices=["poison", "ablate", "control"],
                     help="kbperturb: 倒序判据(poison) / 删掉判据(ablate) / "
@@ -1446,6 +1493,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "layer":
             return run_layer_review(args.name, args.layer, use_llm=not args.no_llm,
                                     live_data=not args.offline)
+        if args.action == "html":
+            return run_sector_html(args.name, date=args.date)
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0

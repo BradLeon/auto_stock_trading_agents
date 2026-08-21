@@ -215,3 +215,105 @@ def test_chainmap_edges_come_from_declared_customer_supplier_witness_stance():
     # so it must not appear in any edge either.
     edges = viz._chainmap(cfg)["edges"]
     assert all("CCC" not in nid for pair in edges for nid in pair)
+
+
+# --------------------------------------------------------------------------- #
+# `ats sector html` — the offline rebuild CLI (runtime/cli.py::run_sector_html)
+# --------------------------------------------------------------------------- #
+def test_run_sector_html_picks_the_review_matching_the_requested_date(monkeypatch):
+    """Two stored reviews exist; --date must select the one asked for, not whichever
+    `sector_review_history` happens to list first."""
+    from datetime import timedelta
+
+    from ats.agents.sector import viz
+    from ats.runtime import cli
+
+    cfg = _cfg()
+    old = _review()
+    newer = SectorReview(sector="test_sector", as_of=NOW + timedelta(days=1), regime="newer")
+    calls = {}
+
+    class _Store:
+        def sector_review_history(self, name, limit=60):
+            return [newer, old]
+
+        def claim_assessments_on(self, keys, date):
+            calls["date"] = date
+            return {}
+
+    def _fake_build_bundle(cfg_, review, *, assessments_by_layer, store):
+        calls["review"] = review
+        return {"b": 1}
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+    monkeypatch.setattr(viz, "build_bundle", _fake_build_bundle)
+    monkeypatch.setattr(viz, "write_html", lambda bundle, folder: "/x/out.html")
+
+    rc = cli.run_sector_html("test_sector", date=old.as_of.date().isoformat())
+    assert rc == 0
+    assert calls["review"] is old
+    assert calls["date"] == old.as_of.date().isoformat()
+
+
+def test_run_sector_html_defaults_to_the_latest_review_without_a_date(monkeypatch):
+    from ats.agents.sector import viz
+    from ats.runtime import cli
+
+    cfg = _cfg()
+    latest = _review()
+    calls = {}
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return latest
+
+        def claim_assessments_on(self, keys, date):
+            calls["date"] = date
+            return {}
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+    monkeypatch.setattr(viz, "build_bundle", lambda *a, **k: {"b": 1})
+    monkeypatch.setattr(viz, "write_html", lambda bundle, folder: "/x/out.html")
+
+    assert cli.run_sector_html("test_sector") == 0
+    assert calls["date"] == latest.as_of.date().isoformat()
+
+
+def test_run_sector_html_reports_missing_review_for_the_requested_date(monkeypatch, capsys):
+    from ats.runtime import cli
+
+    cfg = _cfg()
+
+    class _Store:
+        def sector_review_history(self, name, limit=60):
+            return []
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+
+    assert cli.run_sector_html("test_sector", date="2020-01-01") == 1
+    assert "没有存档" in capsys.readouterr().out
+
+
+def test_run_sector_html_reports_when_output_dir_is_unset(monkeypatch):
+    from ats.agents.sector import viz
+    from ats.runtime import cli
+
+    cfg = _cfg()
+    latest = _review()
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return latest
+
+        def claim_assessments_on(self, keys, date):
+            return {}
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+    monkeypatch.setattr(viz, "build_bundle", lambda *a, **k: {"b": 1})
+    monkeypatch.setattr(viz, "write_html", lambda bundle, folder: None)
+
+    assert cli.run_sector_html("test_sector") == 1

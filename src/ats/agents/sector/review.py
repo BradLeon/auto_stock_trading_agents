@@ -71,6 +71,9 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     verdicts, raw_baskets, failed = [], [], []
     allocations: dict[str, str | None] = {}
     pending_reports: list = []
+    # Every layer's assessments, keyed by layer — the viz bundle's live-path input
+    # (mirrors what the offline CLI reconstructs via store.claim_assessments_on()).
+    assessments_by_layer: dict[str, list] = {}
     # Captured once so every layer's ClaimAssessment snapshots to the SAME moment,
     # not eight microseconds apart — mirrors chain/report.py's `render`.
     run_at = _now()
@@ -98,6 +101,7 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
         except Exception as exc:  # noqa: BLE001 - a layer without evidence still gets a verdict
             log.warning("claim assessment failed for %s: %s", layer.key, exc)
             assessments = []
+        assessments_by_layer[layer.key] = assessments
 
         # Snapshot the verdicts so the viz bundle and `claim_assessment_history` can see
         # this run without re-invoking the judge — `_run_layered` used to compute these
@@ -156,6 +160,18 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
         log.warning("sector %s: no layer produced a verdict — not persisting", name)
         return prior or review
     store.save_sector_review(review)
+
+    if write_reports:
+        try:
+            from . import viz
+
+            bundle = viz.build_bundle(cfg, review, assessments_by_layer=assessments_by_layer,
+                                      store=store)
+            html_path = viz.write_html(bundle, cfg.output_dir)
+            if html_path:
+                log.info("sector viz html: %s", html_path)
+        except Exception as exc:  # noqa: BLE001 - the html dashboard must not fail the run
+            log.warning("sector viz html failed for %s: %s", name, exc)
     return review
 
 

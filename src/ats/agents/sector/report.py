@@ -136,11 +136,12 @@ def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
     cap = layer.weight_cap or 0.0
     head = [f"## 一、本层结论", "",
             f"### {verdict.allocation}　（信心 {verdict.confidence:.2f}）", ""]
-    b = f"{budget:.1%} NAV" if budget is not None else "—"
-    head += [f"- **本层预算**：{b}　（层上限 {cap:.0%}"
-             + ("；已被跨层组上限压低" if budget is not None and budget < cap * 0.999
-                and verdict.allocation == "超配" else "") + "）",
-             f"- **周期位置**：{verdict.cycle_position or '—'}"]
+    # 算式写出来，而不是只给结果：读的人要能自己验一遍这个数怎么来的，
+    # 也要能一眼看出 confidence **不参与**它 —— 那是两条独立的线。
+    head += [f"- **本层预算**：{_budget_derivation(verdict, cap, budget)}",
+             f"- **周期位置**：{verdict.cycle_position or '—'}",
+             f"- **信心 {verdict.confidence:.2f}**：这是对**结论本身**的把握程度，"
+             f"**不参与预算计算**（预算只看配置档位）"]
     flags = []
     if not verdict.has_claims:
         flags.append("**本层无命题**（配置缺口，不是本季没人发声）")
@@ -172,6 +173,22 @@ def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
     if verdict.rationale:
         head += ["> " + verdict.rationale.replace("\n", "\n> "), ""]
     return head
+
+
+def _budget_derivation(verdict, cap: float, budget: float | None) -> str:
+    """`层上限 × 使用率` 的算式。压低时说明是被什么压的 —— 只给一个结果数字，
+    读的人无从判断它是「本该如此」还是「哪里出了问题」。"""
+    from .cross_section import utilization_for
+
+    if budget is None:
+        return f"—　（层上限 {cap:.0%}；本轮无截面预算）"
+    util = utilization_for(verdict.allocation)
+    base = f"**{budget:.1%} NAV**　＝ 层上限 {cap:.0%} × 使用率 {util:.0%}（{verdict.allocation}）"
+    expected = cap * util
+    if budget < expected * 0.999:
+        # 层上限之外还有别的东西在收敛它 —— 目前唯一会这么做的是跨层组上限。
+        base += f"　⚠️ 实得低于算式值（{expected:.1%}），被跨层组上限按比例压到 {budget:.1%}"
+    return base
 
 
 def _section_claim_evidence(common, by_claim, verdict) -> list[str]:
@@ -229,6 +246,7 @@ def _section_cross_section(layer, basket, relative, by_claim, rows) -> list[str]
     if rows:
         from .cross_section import format_table
         lines += ["```", format_table(rows, basket.layer_cap), "```", ""]
+        lines += _column_legend(basket)
     else:
         lines += ["| 代码 | 子层 | 排名 | 复合分 | 权重 | 技术久期 | 护城河/定价权 |",
                   "|---|---|---|---|---|---|---|"]
@@ -267,6 +285,37 @@ def _section_cross_section(layer, basket, relative, by_claim, rows) -> list[str]
             lines.append("> ⚠️ 全部读数均为各家自述，无客户或第三方交叉印证——"
                          "可比性来自横向对照，而非单条的可信度。")
         lines.append("")
+    return lines
+
+
+def _column_legend(basket) -> list[str]:
+    """列名注解。表本身是给机器排版的定宽文本，缩写对读的人不自明。
+
+    最容易误读的是 `comp`：它是**各因子 z 分的加权和**，不是原始值的加权和 —— 一个
+    +0.65 的复合分说的是「在本层里比均值高多少个标准差」，脱离这一层它没有意义。
+    """
+    lines = ["<details><summary>列名注解（点开）</summary>", "",
+             "| 列 | 含义 | 说明 |", "|---|---|---|",
+             "| `sym` / `sub` | 代码 / 子层 | 子层只是分组标签，**不参与 z 分计算** |",
+             "| `mcap$B` | 市值（十亿美元） | 低于 50 亿触发流动性折价，权重被调低 |",
+             "| `beta` | 贝塔 | 定权时**除以**它——同样的分数，波动越大拿到的钱越少 |",
+             "| `revG%` | 营收同比增速 | → growth 因子 |",
+             "| `GM%` / `OM%` | 毛利率 / 营业利润率 | 二者均值 → quality 因子 |",
+             "| `fwdPE` | 前瞻市盈率 | |",
+             "| `PEG` | fwdPE ÷ 增速 | → value 因子，**越低越好**（记分时取负号） |",
+             "| `mom60` | 60 日涨跌幅 | → momentum 因子 |",
+             "| `revΔ` | 分析师评级净变化 | → revisions 因子，范围 −4..+4 |"]
+    if basket.structural:
+        lines += ["| `ten` | 技术久期 −2..+2 | 结构分析师读知识库打分：+ 在上升技术的一侧 |",
+                  "| `moat` | 护城河 / 定价权 −2..+2 | 同上：垂直整合、瓶颈所有权、客户集中度 |"]
+    lines += ["| `comp` | **复合分** | 各因子 **z 分** × 权重求和。z 分 = 比本层均值高几个"
+              "标准差，**换一层就没有可比性** |"]
+    lines.append("| `q→b` | 纯量化排名 → 混合结构因子后的排名 | 两者的差就是结构层改变了什么 |"
+                 if basket.structural else "| `rank` | 排名 | 按复合分降序 |")
+    lines += ["| `wt%` | 建议权重（占 NAV） | softmax(comp) × 1/beta × 流动性折价，"
+              "单票 ≤ 本层预算 × 40% |",
+              "", "⚠️ 数据取不到的票标 `⚠无数据`：**排最后且不参与定权**，它不是「评价为差」，"
+              "是「没有评价」。", "</details>", ""]
     return lines
 
 

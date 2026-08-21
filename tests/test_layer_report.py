@@ -222,3 +222,56 @@ def test_aggregate_report_is_an_index_not_a_copy():
     assert "八层结论索引" in md and "超配" in md
     # 细节留在层报告里：两份文档抄同一份内容，其中一份迟早悄悄过期。
     assert "独有的详细理由文本" not in md
+
+
+def test_cross_section_table_carries_a_column_legend():
+    """定宽表是给机器排版的，缩写对读的人不自明 —— 尤其 comp 是 z 分的加权和，
+    不是原始值的加权和，脱离本层没有可比性。"""
+    from ats.agents.sector.cross_section import FactorRow
+
+    rows = [FactorRow(symbol="MU", subgroup="HBM", market_cap=1e11, beta=2.0,
+                      rev_growth=0.3, gross_margin=0.5, rank=1, weight=0.1)]
+    md = report.render_layer(_verdict(), _cfg().layers[0], _cfg(), basket=_basket(), rows=rows)
+    assert "列名注解" in md
+    for col in ("`mcap$B`", "`beta`", "`PEG`", "`revΔ`", "`comp`", "`wt%`"):
+        assert col in md, f"注解里缺 {col}"
+    assert "越低越好" in md                       # PEG 的符号方向
+    assert "换一层就没有可比性" in md              # comp 是层内 z 分
+    assert "不参与定权" in md                     # 无数据 ≠ 评价为差
+
+
+def test_legend_shows_structure_columns_only_when_they_exist():
+    from ats.agents.sector.cross_section import FactorRow
+
+    rows = [FactorRow(symbol="MU", market_cap=1e11, rev_growth=0.3, rank=1)]
+    plain = report.render_layer(_verdict(), _cfg().layers[0], _cfg(),
+                                basket=_basket(structural=False), rows=rows)
+    assert "`ten`" not in plain and "`rank`" in plain
+
+    blended = report.render_layer(_verdict(), _cfg().layers[0], _cfg(),
+                                  basket=_basket(structural=True), rows=rows)
+    assert "`ten`" in blended and "`moat`" in blended and "`q→b`" in blended
+
+
+def test_budget_shows_its_arithmetic_not_just_the_number():
+    """只给一个结果数字，读的人无从判断它是「本该如此」还是「哪里出了问题」。"""
+    cfg = _cfg()                                   # L6_memory weight_cap = 0.25
+    md = report.render_layer(_verdict(allocation="超配"), cfg.layers[0], cfg,
+                             basket=_basket(layer_cap=0.25))
+    first = md.split("## 二、")[0]
+    assert "25.0% NAV" in first and "层上限 25%" in first and "使用率 100%" in first
+
+
+def test_a_compressed_budget_says_what_compressed_it():
+    # 层上限 25% × 超配 100% = 25%，但实得 16.7% —— 差额必须有交代。
+    md = report.render_layer(_verdict(allocation="超配"), _cfg().layers[0], _cfg(),
+                             basket=_basket(layer_cap=0.167))
+    assert "被跨层组上限按比例压到" in md and "25.0%" in md
+
+
+def test_confidence_is_stated_as_not_feeding_the_budget():
+    """confidence 与预算是两条独立的线 —— 报告必须说清楚，否则 0.78 和 15.0%
+    并排出现时，读的人会以为前者算出了后者。"""
+    md = report.render_layer(_verdict(confidence=0.78), _cfg().layers[0], _cfg(),
+                             basket=_basket())
+    assert "不参与预算计算" in md

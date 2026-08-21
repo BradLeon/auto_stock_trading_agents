@@ -121,35 +121,57 @@ def test_two_comparable_names_make_the_cross_section_meaningful():
 # --------------------------------------------------------------------------- #
 # 跨层组上限：拆层不得放大**建议敞口**（不只是已有持仓）
 # --------------------------------------------------------------------------- #
-def _ai_cfg():
-    from ats.config import load_sector_config
-    return load_sector_config("ai_hardware")
+def _grouped_cfg():
+    """带跨层组的**合成**配置。
+
+    刻意不用真实的 ai_hardware：那里 2026-08-21 已经取消了 layer_groups（组是迁移期的
+    脚手架，与「拆层正因为它们不同向」自相矛盾）。但**机制本身仍然保留**，因为它是唯一
+    能表达「每层单独看都合规、合计却越限」的东西。把机制的测试绑在某个 sector 的当期
+    政策上，等于每次调 cap 都要改测试 —— 那会让人倾向于不调。
+    """
+    from ats.schemas.sector import LayerGroup, SectorConfig
+
+    return SectorConfig(name="demo", layers=[
+        SectorLayer(key="A", label="A", weight_cap=0.25, tickers=[{"symbol": "X"}]),
+        SectorLayer(key="B", label="B", weight_cap=0.20, tickers=[{"symbol": "Y"}]),
+        SectorLayer(key="C", label="C", weight_cap=0.15, tickers=[{"symbol": "Z"}]),
+    ], layer_groups=[LayerGroup(key="ab", layers=["A", "B"], weight_cap=0.30)])
 
 
-def test_two_overweight_halves_of_a_split_layer_are_capped_by_their_group():
+def test_two_overweight_members_are_capped_by_their_group():
     """2026-08-20 实盘首跑发现的缺口。
 
     group 上限当时只加在 `risk/assess.py`（查**已有持仓**越没越界），而**分配预算**那条路
-    只认单层 weight_cap —— L6 与 L7 同时超配就会提议 25%+20%=45%，而拆分前的 L5_fab 上限
-    是 30%。护栏加在了错的一侧：等它响的时候，超额的仓位已经建出来了。
+    只认单层 weight_cap —— 两个成员同时超配就会提议 25%+20%=45%，越过组的 30%。
+    护栏加在了错的一侧：等它响的时候，超额的仓位已经按建议建出来了。
     """
-    cfg = _ai_cfg()
-    b = cs.budgets_for(cfg, {"L6_memory": "超配", "L7_foundry_pkg": "超配"})
-    assert b["L6_memory"] + b["L7_foundry_pkg"] == pytest.approx(0.30)   # 拆分前的口径
+    b = cs.budgets_for(_grouped_cfg(), {"A": "超配", "B": "超配"})
+    assert b["A"] + b["B"] == pytest.approx(0.30)
     # 按比例缩，不是按配置顺序截断：组上限说的是两者合计能有多少，不是偏好哪一半。
-    assert b["L6_memory"] / b["L7_foundry_pkg"] == pytest.approx(0.25 / 0.20)
+    assert b["A"] / b["B"] == pytest.approx(0.25 / 0.20)
 
 
 def test_a_group_under_its_ceiling_is_left_alone():
-    cfg = _ai_cfg()
-    b = cs.budgets_for(cfg, {"L6_memory": "低配", "L7_foundry_pkg": "低配"})
-    assert b["L6_memory"] == pytest.approx(0.25 * 0.3)
-    assert b["L7_foundry_pkg"] == pytest.approx(0.20 * 0.3)
+    b = cs.budgets_for(_grouped_cfg(), {"A": "低配", "B": "低配"})
+    assert b["A"] == pytest.approx(0.25 * 0.3)
+    assert b["B"] == pytest.approx(0.20 * 0.3)
 
 
 def test_group_ceiling_binds_even_when_no_single_layer_breaches():
     # 每一层单独看都在自己的 cap 内 —— 这正是组上限唯一存在的理由。
-    cfg = _ai_cfg()
-    b = cs.budgets_for(cfg, {"L3_dc_power": "标配", "L4_interconnect": "超配"})
-    assert b["L3_dc_power"] <= 0.10 and b["L4_interconnect"] <= 0.15   # 逐层合规
-    assert b["L3_dc_power"] + b["L4_interconnect"] == pytest.approx(0.15)  # 合计被卡住
+    b = cs.budgets_for(_grouped_cfg(), {"A": "标配", "B": "超配"})
+    assert b["A"] <= 0.25 and b["B"] <= 0.20                     # 逐层合规
+    assert b["A"] + b["B"] == pytest.approx(0.30)                # 合计被卡住
+
+
+def test_a_layer_outside_any_group_is_untouched():
+    b = cs.budgets_for(_grouped_cfg(), {"A": "超配", "B": "超配", "C": "超配"})
+    assert b["C"] == pytest.approx(0.15)                          # 不属于任何组
+
+
+def test_ai_hardware_no_longer_declares_groups():
+    """2026-08-21 取消。留一条断言而不是删掉，是因为「取消」本身是个决定：
+    以后要是有人重新加回来，应该是有意为之并同时更新这条。"""
+    from ats.config import load_sector_config
+
+    assert load_sector_config("ai_hardware").layer_groups == []

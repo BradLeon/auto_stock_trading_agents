@@ -1000,6 +1000,28 @@ class TradingMemory:
         args.append(limit)
         return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
+    def observations_by_id(self, ids: list[str]) -> dict[str, dict]:
+        """A batch of observations keyed by id — for a reader that already knows exactly
+        which ones it needs (a `ClaimAssessment.observation_ids` list) and must not
+        over-fetch. `observations()` answers "what do we have on this entity"; this
+        answers "these specific rows, and nothing else" — the shape the viz bundle
+        needs so a review that cited ~2k observations does not carry the other ~4.5k.
+        """
+        if not ids:
+            return {}
+        out: dict[str, dict] = {}
+        # SQLite's variable limit (999 by default) makes one giant IN(...) risky at
+        # review scale — batch it rather than assume the caller never crosses that line.
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"SELECT * FROM evidence_observations WHERE id IN ({placeholders})",
+                chunk).fetchall()
+            for r in rows:
+                out[r["id"]] = dict(r)
+        return out
+
     def has_observations_for_document(self, document_id: str) -> bool:
         """Already extracted from this filing? Then never fetch or re-read it.
 
@@ -1110,6 +1132,24 @@ class TradingMemory:
         sql += " ORDER BY fetched_at DESC LIMIT ?"
         args.append(limit)
         return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def documents_by_id(self, ids: list[str]) -> dict[str, dict]:
+        """A batch of source_documents keyed by document_id — the counterpart to
+        `observations_by_id`: once the bundle knows which observations it cited, it
+        resolves each one's `document_id` to exactly the provenance row it needs,
+        not every document ever fetched for that entity."""
+        if not ids:
+            return {}
+        out: dict[str, dict] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"SELECT * FROM source_documents WHERE document_id IN ({placeholders})",
+                chunk).fetchall()
+            for r in rows:
+                out[r["document_id"]] = dict(r)
+        return out
 
     def has_document(self, entity: str, period: str, doc_type: str) -> bool:
         row = self.conn.execute(

@@ -9,6 +9,14 @@ from ats.schemas.memory import PerformanceRecord, TradeLogEntry
 NOW = datetime.now(timezone.utc)
 
 
+def _obs(entity, metric, span, *, document_id="DOC1", concept=""):
+    from ats.schemas.chain import Observation
+
+    return Observation(document_id=document_id, entity=entity, metric=metric,
+                       concept=concept, observation_type="reported_actual", stance="incumbent",
+                       evidence_span=span, observed_at=NOW)
+
+
 def test_save_and_read_roundtrip():
     mem = TradingMemory(":memory:")
     mem.save_trades([TradeLogEntry(order_id="o1", cycle_id="cycle-1", symbol="NVDA",
@@ -51,3 +59,70 @@ def test_pead_events_dedup_is_per_symbol():
         assert mem.count_events(t) == 1
     # Same symbol twice is still idempotent.
     assert mem.append_events("COHR", [item]) == []
+
+
+def test_observations_by_id_fetches_exactly_the_cited_rows_not_the_whole_entity():
+    """The viz bundle knows exactly which observations a claim cited
+    (`ClaimAssessment.observation_ids`) and must not over-fetch — a review that cited
+    ~2k observations should not drag the other ~4.5k the entity ever produced along
+    with it. This is the batch counterpart to `observations()`, which answers a
+    different question ("what do we have on this entity")."""
+    mem = TradingMemory(":memory:")
+    a = _obs("SKHY", "hbm_supply", "cited span")
+    b = _obs("SKHY", "hbm_pricing", "also cited")
+    c = _obs("SKHY", "unrelated", "never cited")
+    for o in (a, b, c):
+        mem.save_observation(o)
+
+    fetched = mem.observations_by_id([a.id, b.id])
+    assert set(fetched) == {a.id, b.id}
+    assert fetched[a.id]["evidence_span"] == "cited span"
+    assert c.id not in fetched
+
+
+def test_observations_by_id_empty_input_returns_empty_without_querying():
+    assert TradingMemory(":memory:").observations_by_id([]) == {}
+
+
+def test_observations_by_id_batches_past_the_sqlite_variable_limit():
+    """SQLite's default IN(...) limit is 999 — a review's cited set can plausibly
+    exceed that (~2k observations per the design doc), so this must not just work
+    for a handful of ids."""
+    mem = TradingMemory(":memory:")
+    ids = []
+    for i in range(1200):
+        o = _obs("MU", f"metric{i}", f"span {i}", document_id=f"DOC{i}")
+        mem.save_observation(o)
+        ids.append(o.id)
+    fetched = mem.observations_by_id(ids)
+    assert len(fetched) == 1200
+    assert all(oid in fetched for oid in ids)
+
+
+def test_documents_by_id_resolves_exactly_the_referenced_provenance():
+    """Counterpart to `observations_by_id`: once the bundle knows which observations
+    it cited, it resolves each one's `document_id` to exactly that provenance row —
+    not every document ever fetched for the entity."""
+    from pathlib import Path
+
+    from ats.data.source_cache import CachedDoc
+
+    mem = TradingMemory(":memory:")
+    cited = CachedDoc(symbol="SKHY", period="FY2026Q2", doc_type="transcript",
+                      text="…", path=Path("/tmp/skhy-q2.md"), source="defeatbeta",
+                      sha256="abc123")
+    other = CachedDoc(symbol="SKHY", period="FY2026Q1", doc_type="transcript",
+                      text="…", path=Path("/tmp/skhy-q1.md"), source="defeatbeta",
+                      sha256="def456")
+    mem.save_document(cited)
+    mem.save_document(other)
+
+    fetched = mem.documents_by_id([cited.document_id])
+    assert set(fetched) == {cited.document_id}
+    assert fetched[cited.document_id]["source"] == "defeatbeta"
+    assert fetched[cited.document_id]["sha256"] == "abc123"
+    assert other.document_id not in fetched
+
+
+def test_documents_by_id_empty_input_returns_empty_without_querying():
+    assert TradingMemory(":memory:").documents_by_id([]) == {}

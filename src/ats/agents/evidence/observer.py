@@ -204,23 +204,29 @@ def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
 # Source hierarchy. A cached document may only pre-empt a fetch when it came from a
 # tier we would not improve on; otherwise the cache silently freezes whatever was
 # fetched first, which is how web-scraped material outlived the keyed dataset.
-_RANK_MANUAL = 3        # a person put this file in 信息源/<SYM>/ — authoritative
-_RANK_KEYED = 2         # defeatbeta: keyed by ticker, cannot return another company
-_RANK_PUBLIC = 1        # documents.gather: SEC/IR material, but assembled by search
-_RANK_SEARCH = 0        # tavily/web: the tier that returned Sherwin-Williams for SKHY
+#
+# Public on purpose (not `_`-prefixed): this classification used to only ever decide
+# a caching question, but the viz bundle (agents/sector/viz.py) now surfaces it as a
+# tier badge on every source document — "defeatbeta 直取" and "tavily 搜索拼接" carry
+# two tiers of trust and the reader has a right to see which one backs a quote. A
+# second real consumer means it stops being an implementation detail of this module.
+RANK_MANUAL = 3        # a person put this file in 信息源/<SYM>/ — authoritative
+RANK_KEYED = 2         # defeatbeta: keyed by ticker, cannot return another company
+RANK_PUBLIC = 1        # documents.gather: SEC/IR material, but assembled by search
+RANK_SEARCH = 0        # tavily/web: the tier that returned Sherwin-Williams for SKHY
 
 
-def _source_rank(source: str) -> int:
+def source_rank(source: str) -> int:
     s = (source or "").lower()
     if not s or s in ("manual", "cache") or s.startswith("file:") or s.startswith("doc:"):
-        return _RANK_MANUAL
+        return RANK_MANUAL
     # Keyed-by-ticker sources, whatever the vendor: the property that matters is that
     # you ask for a symbol and cannot be handed a different company.
     if s.startswith("defeatbeta") or s.startswith("fmp"):
-        return _RANK_KEYED
+        return RANK_KEYED
     if s.startswith("documents") or s.startswith("sec"):
-        return _RANK_PUBLIC
-    return _RANK_SEARCH
+        return RANK_PUBLIC
+    return RANK_SEARCH
 
 
 def _fetch_keyed(symbol: str, label: str, print_=None):
@@ -271,7 +277,7 @@ def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
     from ...data import sec, source_cache
 
     cached = source_cache.load(symbol, label, "release")
-    if cached and _source_rank(cached.source) >= _RANK_KEYED:
+    if cached and source_rank(cached.source) >= RANK_KEYED:
         return cached.text, cached.source, f"缓存命中：{cached.path.name}"
 
     text, url, note = sec.earnings_release(symbol, near=report_date)
@@ -379,7 +385,7 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         hit = source_cache.load(symbol, label, kind)
         if not hit:
             continue
-        if _source_rank(hit.source) >= _RANK_KEYED:
+        if source_rank(hit.source) >= RANK_KEYED:
             return hit.text, hit.source or "cache", f"缓存命中：{hit.path.name}"
         stale_hit = stale_hit or hit
 

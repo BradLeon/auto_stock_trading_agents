@@ -104,6 +104,37 @@ def test_silent_witnesses_render_as_a_named_gap_not_left_blank():
         in ly["evidence"]["silent"]
 
 
+def test_matrix_uses_named_exception_instead_of_any_refute_wins():
+    """Live regression: the overall capex claim was contradicted and named MSFT as
+    its sole supporting exception. MSFT also had refuting/neutral detail clusters, so
+    the old "any refute wins" renderer painted it red and contradicted the claim card.
+    """
+    cfg = _cfg()
+    store = TradingMemory(":memory:")
+    judgements = [
+        ClusterJudgement(cluster_key="a", polarity="support", speaker="AAA"),
+        ClusterJudgement(cluster_key="b", polarity="refute", speaker="AAA"),
+        ClusterJudgement(cluster_key="c", polarity="refute", speaker="BBB"),
+    ]
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW,
+                        verdict="contradicted", dissenters=["AAA"], judgements=judgements)
+    bundle = viz.build_bundle(cfg, _review(verdict=_verdict()),
+                              assessments_by_layer={"L1_test": [a]}, store=store)
+    row = bundle["layers"][0]["witness_matrix"]["rows"][0]
+    assert row["cells"]["AAA"] == "sup"
+    assert row["cells"]["BBB"] == "ref"
+
+
+def test_focused_evidence_hides_zero_count_stance_columns():
+    """The browser-side focus must not leave empty whole-layer columns ahead of the
+    two stance classes that actually support the selected claim."""
+    assert "col.style.display = focused && visible === 0 ? 'none' : '';" in viz.JS
+    focus_pos = viz.JS.index("state.focus = { kind: 'claim', id: claimId };")
+    filter_pos = viz.JS.index("applyEvidenceFilter();", focus_pos)
+    assert focus_pos < filter_pos
+    assert "card.dataset.claimId === focusId" in viz.JS
+
+
 def test_source_tier_is_surfaced_on_every_quote():
     cfg = _cfg()
     store = TradingMemory(":memory:")

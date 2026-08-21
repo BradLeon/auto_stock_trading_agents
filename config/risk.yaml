@@ -115,24 +115,24 @@ instruments:
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     exposure_multiplier: 2.0
     product_type: leveraged_etf
   HY9H:
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     product_type: cross_listing
   SKHY:
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     product_type: adr
   "000660.KS":
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     product_type: primary_listing

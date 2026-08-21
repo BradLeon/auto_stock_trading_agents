@@ -645,11 +645,14 @@ JS = """
   }
   function applyEvidenceFilter() {
     var kind = state.filters.evidence;
+    var focusId = state.focus && state.focus.kind === 'claim' ? state.focus.id : null;
     document.querySelectorAll('.panel[data-tab="evidence"] .evi-card').forEach(function (card) {
       var flags = (card.dataset.flags || '').split(' ').filter(Boolean);
-      var show = !kind || flags.indexOf(kind) !== -1;
+      var show = (!focusId || card.dataset.claimId === focusId) &&
+        (!kind || flags.indexOf(kind) !== -1);
       card.style.display = show ? '' : 'none';
     });
+    recomputeStanceCounts();
   }
   function resetFilters() {
     state.filters = { claims: null, evidence: null };
@@ -663,8 +666,8 @@ JS = """
   function clearFocus() {
     state.focus = null;
     focusBar.setAttribute('data-shown', 'false');
-    document.querySelectorAll('.evi-card, .trace-cluster').forEach(function (el) { el.style.display = ''; });
-    recomputeStanceCounts();
+    document.querySelectorAll('.trace-cluster').forEach(function (el) { el.style.display = ''; });
+    applyEvidenceFilter();
   }
 
   // Column headers ("供给方 30 簇") are written once for the WHOLE layer; a claim
@@ -673,12 +676,19 @@ JS = """
   // cheaper than re-rendering the panel, and correct in both directions (focus and
   // clear).
   function recomputeStanceCounts() {
+    var focused = Boolean(state.focus && state.focus.kind === 'claim');
     document.querySelectorAll('.stance-cols > div').forEach(function (col) {
       var head = col.querySelector('.stance-col-n');
       if (!head) { return; }
       var visible = Array.prototype.slice.call(col.querySelectorAll('.evi-card'))
         .filter(function (c) { return c.style.display !== 'none'; }).length;
       head.textContent = head.textContent.replace(/^\d+/, String(visible));
+      // A claim focus means "only this claim". Keeping whole-layer stance columns
+      // with a 0 count wastes the first grid row and can push the actual second
+      // vantage point below the fold (the live L2 case showed 供给方 9 / 客户方 0 /
+      // 同业 0, while 当事方 21 sat on the next row). Empty focused columns carry no
+      // information; the full layer view restores them when focus is cleared.
+      col.style.display = focused && visible === 0 ? 'none' : '';
     });
   }
 
@@ -798,11 +808,8 @@ JS = """
     var claimId = card.getAttribute('data-claim-id');
     var statement = card.querySelector('.claim-statement').textContent;
     activateTab('evidence');
-    document.querySelectorAll('.panel[data-tab="evidence"] .evi-card').forEach(function (evi) {
-      evi.style.display = (evi.getAttribute('data-claim-id') === claimId) ? '' : 'none';
-    });
-    recomputeStanceCounts();
     state.focus = { kind: 'claim', id: claimId };
+    applyEvidenceFilter();
     focusText.innerHTML = '聚焦命题 · <b>' + esc(statement) + '</b> —— 只显示与它相关的判读簇';
     focusBar.setAttribute('data-shown', 'true');
   }

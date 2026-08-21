@@ -335,20 +335,49 @@ def _witness_matrix(common: list, by_claim: dict) -> dict:
                 seen.add(w)
                 witnesses.append(w)
             js = [j for j in a.judgements if (j.speaker or "").upper() == w]
-            if any(j.polarity == "refute" for j in js):
-                cells[w] = "ref"
-            elif any(j.polarity == "support" for j in js):
-                cells[w] = "sup"
-            elif w in a.silent_witnesses:
-                cells[w] = "silent"
-            elif js:
-                cells[w] = "neu"
-            else:
-                cells[w] = "silent" if w in expected else "neu"
+            cells[w] = _witness_cell(a, w, js, expected)
         rows.append({"claim_id": a.claim_id,
                      "statement": (claim.statement if claim else a.claim_id),
                      "cells": cells})
     return {"witnesses": witnesses, "rows": rows}
+
+
+def _witness_cell(assessment, witness: str, judgements: list, expected: set[str]) -> str:
+    """Collapse one speaker's several cluster judgements into one matrix cell.
+
+    The assessment already records the minority speakers in ``dissenters``.  That is
+    the authoritative aggregation for a decisive verdict: for a contradicted claim,
+    a named dissenter is the supporting exception (and vice versa).  The old renderer
+    ignored it and used "any refute wins", so the live ``capex_funding_quality`` row
+    painted MSFT red despite the card immediately above naming MSFT as the sole
+    positive exception.
+
+    For unresolved/legacy assessments without a usable majority direction, fall back
+    to the speaker's own support/refute cluster counts; a tie is honestly neutral.
+    """
+    if not judgements:
+        return "silent" if witness in expected or witness in assessment.silent_witnesses else "neu"
+
+    dissenters = {(d or "").upper() for d in assessment.dissenters}
+    if witness in dissenters:
+        if assessment.verdict in ("contradicted", "falsified"):
+            return "sup"
+        if assessment.verdict in ("supportive", "resolved"):
+            return "ref"
+
+    support = sum(j.polarity == "support" for j in judgements)
+    refute = sum(j.polarity == "refute" for j in judgements)
+    if support and refute:
+        if assessment.verdict in ("supportive", "resolved"):
+            return "sup"
+        if assessment.verdict in ("contradicted", "falsified"):
+            return "ref"
+        return "sup" if support > refute else "ref" if refute > support else "neu"
+    if support:
+        return "sup"
+    if refute:
+        return "ref"
+    return "neu"
 
 
 # --------------------------------------------------------------------------- #

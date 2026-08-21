@@ -368,12 +368,10 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
     if layer is None:
         raise ValueError(f"layer {layer_key!r} not in sector {sector_name!r}")
 
-    # One row per COMPANY, not per listing. SK hynix is configured under three codes
-    # (SKHY / HY9H / 000660.KS) because the book holds more than one of them, and the
-    # cohort took all three: it ranked the same company three times and handed it 20.5%
-    # of a 30% layer budget. The structure analyst even wrote "HY9H 与 SKHY/000660.KS 为
-    # 同一经济实体" in its own rationale — and still scored all three, because it was
-    # given three rows.
+    # One row per COMPANY, not per listing. The sector config now uses only SKHY, but
+    # keep this fold as a defensive invariant for custom sectors and old configs: when
+    # SKHY / HY9H / 000660.KS were all present, the cohort ranked one company three
+    # times and handed it 20.5% of a 30% layer budget.
     #
     # Listing-level differences (liquidity premium, local pricing, listing vintage) are
     # real, but they are the portfolio's problem, not the analysts'. Selection and

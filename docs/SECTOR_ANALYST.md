@@ -28,7 +28,7 @@ MVP 覆盖 **AI 硬件产业链**，按 L1→L8 分层（需求沿 L1 向 L8 传
 | 层 | 含义 | 代表公司 | subgroup |
 |---|---|---|---|
 | L1 | AI 应用层（Token 经济） | GOOG + OpenAI/Anthropic（非上市） | — |
-| L2 | 云服务层（算力租用） | MSFT / AMZN / META / GOOG / CRWV | — |
+| L2 | 云服务层（算力租用） | MSFT / AMZN / META / GOOG / CRWV / SPCX | — |
 | L3 | 数据中心电力与冷却 | VRT / ETN / GEV / BE | —（不分组） |
 | L4 | 互联与网络 | COHR / LITE / AAOI / CRDO / AXT | 光互联/铜连接/衬底 |
 | L5 | 芯片设计 | NVDA / AMD / AVGO / MRVL | — |

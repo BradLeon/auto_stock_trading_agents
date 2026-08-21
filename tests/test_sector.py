@@ -424,10 +424,9 @@ def test_stale_baskets_are_not_carried_across_days(monkeypatch):
 
 
 def test_cohort_is_one_row_per_company_not_per_listing(monkeypatch):
-    """SK hynix is configured under three codes because the book holds more than one.
-    The cohort took all three: it ranked the same company three times and handed it
-    20.5% of a 30% layer budget. Listing-level differences are the portfolio's problem;
-    selection and relative ranking are about the business."""
+    """Defensive invariant for custom/legacy configs containing several listings.
+    Listing-level differences are the portfolio's problem; selection and relative
+    ranking are about the business."""
     from ats.agents.sector import cross_section
     from ats.schemas.sector import SectorConfig, SectorLayer, LayerTicker
 

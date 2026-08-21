@@ -20,13 +20,18 @@ the run its markdown reports; callers wrap this in a best-effort try/except.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
 
 from ...chain.factor_evidence import BASIS_CN, STANDING_CN
 from ...chain.report import VERDICT_MARK
 from ..evidence.observer import source_rank
 from .cross_section import utilization_for
+from .viz_assets import CSS, JS
 
 log = logging.getLogger("ats.agents.sector.viz")
 
@@ -41,6 +46,15 @@ POLARITY_TEXT = {"support": "支持", "refute": "反驳", "neutral": "中性"}
 STANCE_PILL_CLASS = {"增持": "in", "持有": "hold", "减持": "out"}
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
 MAX_CHAINMAP_EDGES = 90
+# Config labels are written "L6 存储（HBM/DRAM/NAND/HDD）" — the short code is already
+# baked in. The die and chain-map lane tag show the code and the name as two visually
+# separate pieces (code in mono, name in bold), so they need the name ALONE; the scope
+# bar and everywhere else use the full label as config wrote it.
+_LAYER_PREFIX_RE = re.compile(r"^L\d+[_\s]*")
+
+
+def _short_label(label: str) -> str:
+    return _LAYER_PREFIX_RE.sub("", label or "").strip() or label
 
 
 def build_bundle(cfg, review, *, assessments_by_layer: dict, store) -> dict:
@@ -116,7 +130,8 @@ def _chainmap(cfg) -> dict:
             node_id_of.setdefault(t.symbol.upper(), nid)
         if nodes:
             lanes.append({"key": ly.key, "short": ly.key.split("_")[0],
-                         "label": ly.label, "nodes": nodes})
+                         "label": ly.label, "short_label": _short_label(ly.label),
+                         "nodes": nodes})
 
     edges: set[tuple[str, str]] = set()
     for ly in cfg.layers:
@@ -149,6 +164,7 @@ def _layer_bundle(layer, verdict, basket, assessments, observations, documents, 
     budget_line = _budget_line(verdict, layer, basket)
     return {
         "key": layer.key, "short": layer.key.split("_")[0], "label": layer.label,
+        "short_label": _short_label(layer.label),
         "die": _die(layer, verdict, budget_line),
         "budget_formula": budget_line["formula"],
         "confidence": round(verdict.confidence, 2) if verdict else None,
@@ -197,17 +213,19 @@ def _budget_line(verdict, layer, basket) -> dict:
 
 def _die(layer, verdict, budget_line) -> dict:
     cap = layer.weight_cap or 0.0
+    label = _short_label(layer.label)
     if verdict is None:
-        return {"key": layer.key, "label": layer.label, "allocation": "—",
-                "alloc_class": "flat", "confidence": 0.0, "budget": 0.0, "cap": cap,
-                "budget_pct_of_cap": 0, "flags": ["本轮未产出结论"]}
+        return {"key": layer.key, "short": layer.key.split("_")[0], "label": label,
+                "allocation": "—", "alloc_class": "flat", "confidence": 0.0, "budget": 0.0,
+                "cap": cap, "budget_pct_of_cap": 0, "flags": ["本轮未产出结论"]}
     flags = []
     if not verdict.has_claims:
         flags.append("无命题")
     if not verdict.cross_section_applicable:
         flags.append("截面不适用")
     pct = round(100 * budget_line["amount"] / cap) if cap else 0
-    return {"key": layer.key, "label": layer.label, "allocation": verdict.allocation,
+    return {"key": layer.key, "short": layer.key.split("_")[0], "label": label,
+            "allocation": verdict.allocation,
             "alloc_class": ALLOC_CLASS.get(verdict.allocation, "flat"),
             "confidence": round(verdict.confidence, 2), "budget": budget_line["amount"],
             "cap": cap, "budget_pct_of_cap": max(0, min(100, pct)), "flags": flags}
@@ -458,3 +476,149 @@ def _xsection_view(basket) -> dict:
         })
     return {"rows": rows, "applicable": basket.cross_section_applicable,
             "structural": basket.structural}
+
+
+# --------------------------------------------------------------------------- #
+# render / write
+# --------------------------------------------------------------------------- #
+_HTML_SKELETON = """<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>{css}</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-row1">
+      <div class="topbar-title"><h1 id="pageTitle"></h1></div>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <span class="topbar-meta" id="asOfMeta"></span>
+        <div class="search">
+          <span style="font-size:13px;">⌕</span>
+          <input type="text" id="searchInput" placeholder="搜索公司 / 命题 / 原文关键词，回车跳转…">
+        </div>
+      </div>
+    </div>
+    <div class="topbar-signals" id="topbarSignals"></div>
+  </div>
+</div>
+
+<div class="shell">
+
+  <div class="chainmap-wrap" data-open="true" id="chainmapWrap">
+    <div class="chainmap-head">
+      <div class="chainmap-title-group">
+        <span class="rail-label">产业链全景</span>
+        <span class="chainmap-sub">需求沿层级传导；箭头示意订单/资金流向（简化示意，据证据源里声明的证人立场推导，非独立维护的完整依赖图）</span>
+      </div>
+      <button class="toggle-btn" id="chainmapToggle" aria-expanded="true"><span class="car">▾</span> 收起</button>
+    </div>
+    <div class="chainmap" id="chainmap">
+      <svg class="cm-svg" id="cmSvg">
+        <defs>
+          <marker id="cmArrow" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z"></path>
+          </marker>
+        </defs>
+      </svg>
+      <div class="cm-lanes" id="cmLanes"></div>
+      <div class="cm-foot">从这里开始：先看链条全貌，再点下方任意一层下钻到该层的配置结论、命题证据与溯源。</div>
+    </div>
+  </div>
+
+  <div class="rail-wrap">
+    <span class="rail-label">各层配置 · 点击切换下钻范围</span>
+    <div class="rail" id="rail" role="tablist" aria-label="产业链层"></div>
+  </div>
+
+  <div class="scope-bar">
+    <div class="scope-label">当前范围：<strong id="scopeLabel"></strong></div>
+    <details class="cycle-why">
+      <summary><span class="cw-closed">依据 ▾</span><span class="cw-open">收起依据 ▴</span></summary>
+      <div class="cycle-why-body" id="cycleWhyBody"></div>
+    </details>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" data-tab="decision" aria-selected="true">① 决策</button>
+    <button class="tab" data-tab="claims" aria-selected="false">② 命题 <span class="n">0</span></button>
+    <button class="tab" data-tab="evidence" aria-selected="false">③ 证据 <span class="n">0</span></button>
+    <button class="tab" data-tab="trace" aria-selected="false">④ 溯源</button>
+    <button class="tab" data-tab="xsection" aria-selected="false">⑤ 截面</button>
+  </div>
+
+  <div class="filters" data-for="claims">
+    <button class="filter-chip" data-kind="supportive" aria-pressed="false"><span class="dot"></span>只看印证</button>
+    <button class="filter-chip" data-kind="contradicted" aria-pressed="false"><span class="dot"></span>只看反驳</button>
+    <button class="filter-chip" data-kind="insufficient" aria-pressed="false"><span class="dot"></span>结论不足</button>
+  </div>
+  <div class="filters" data-for="evidence">
+    <button class="filter-chip" data-kind="cross" aria-pressed="false"><span class="dot"></span>只看交叉验证</button>
+    <button class="filter-chip" data-kind="refute" aria-pressed="false"><span class="dot"></span>只看反驳</button>
+    <button class="filter-chip" data-kind="silent" aria-pressed="false"><span class="dot"></span>只看沉默</button>
+  </div>
+
+  <div class="focus-bar" id="focusBar">
+    <span id="focusText"></span>
+    <button class="focus-clear" id="focusClear">× 清除聚焦</button>
+  </div>
+
+  <div class="panel" data-tab="decision" data-active="true"></div>
+  <div class="panel" data-tab="claims"></div>
+  <div class="panel" data-tab="evidence"></div>
+  <div class="panel" data-tab="trace"></div>
+  <div class="panel" data-tab="xsection"></div>
+
+  <div class="footnote">{footnote}</div>
+</div>
+
+<div class="popover" id="popover" role="tooltip"></div>
+
+<script type="application/json" id="bundleData">{bundle_json}</script>
+<script>{js}</script>
+</body>
+</html>
+"""
+
+
+def render_html(bundle: dict) -> str:
+    """The bundle -> a complete, self-contained HTML document (string). No network
+    calls, no external assets — everything a browser needs is in this one file
+    (see the plan's "关键设计决策": offline-openable, syncable, forwardable).
+    """
+    meta = bundle["meta"]
+    title = f"{meta['label']} 产业链 · 层级分析看板"
+    footnote = (f"{title} · 生成于 {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC · "
+               f"数据截至 {meta['as_of_display']} · universe {meta['universe_count']} 家"
+               f"（PEAD 覆盖 {len(meta['pead_symbols'])} 家）· "
+               f"行情/因子值的溯源只到 basket 快照，不到供应商侧的不可变留痕")
+    bundle_json = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
+    # A script tag's content ends at the first literal "</" the HTML parser sees,
+    # REGARDLESS of its type attribute — this is an HTML tokenizer rule, not a JS one.
+    # LLM-authored report text is the payload here, so it must be defended against
+    # deliberately, not just assumed clean. `\/` is a legal JSON escape for `/`.
+    bundle_json = bundle_json.replace("</", "<\\/")
+    return _HTML_SKELETON.format(title=title, css=CSS, footnote=footnote,
+                                 bundle_json=bundle_json, js=JS)
+
+
+def write_html(bundle: dict, folder: str | Path) -> Path | None:
+    """Write `层分析-<sector>-<date>.html` into `folder`. Same-day reruns overwrite —
+    mirrors every other report writer in this package (`report.py`, `chain/report.py`).
+    Returns None (does not raise) when `folder` is unset/missing, so a caller can
+    treat this the same best-effort way as the markdown writers.
+    """
+    if not folder:
+        log.info("sector viz html: output_dir unset — skipped")
+        return None
+    folder = Path(folder)
+    if not folder.is_dir():
+        log.warning("sector viz html: output_dir missing — skipped: %s", folder)
+        return None
+    meta = bundle["meta"]
+    path = folder / f"层分析-{meta['label']}-{meta['as_of_display']}.html"
+    path.write_text(render_html(bundle), encoding="utf-8")
+    return path

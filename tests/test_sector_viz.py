@@ -120,6 +120,34 @@ def test_source_tier_is_surfaced_on_every_quote():
     assert quotes[0]["text"] == "cited span"
 
 
+def test_a_non_url_source_url_is_dropped_not_rendered_as_a_link():
+    """Regression: defeatbeta stamps `source_url` with an internal pseudo-id
+    ("defeatbeta", "defeatbeta:COHR:2026-05-06") rather than a real link — confirmed
+    against production data on 2026-08-21. Rendering it as `<a href>` silently
+    resolves as a same-origin relative URL and opens a broken tab when clicked. Caught
+    by clicking through the real dashboard in a browser, not by a synthetic fixture."""
+    cfg = _cfg()
+    store = TradingMemory(":memory:")
+    doc = CachedDoc(symbol="AAA", period="FY2026Q2", doc_type="transcript", text="…",
+                    path=Path("/tmp/aaa.md"), source="defeatbeta", sha256="sha1",
+                    source_url="defeatbeta:AAA:2026-05-06", fetched_at=NOW.isoformat())
+    store.save_document(doc)
+    obs = Observation(document_id=doc.document_id, entity="AAA", source_entity="AAA",
+                      metric="m1", concept="k1", observation_type="reported_actual",
+                      stance="supplier", direction="up", evidence_span="cited span",
+                      observed_at=NOW, extraction_confidence=0.9, source_url="defeatbeta")
+    store.save_observation(obs)
+    j = ClusterJudgement(cluster_key="AAA|AAA|k1|up", polarity="support", speaker="AAA",
+                         concept="k1", stance="supplier", reason="r", observation_ids=[obs.id])
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                        judgements=[j])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    quote = bundle["layers"][0]["trace"]["clusters"][0]["quotes"][0]
+    assert quote["source_url"] == ""
+    assert quote["source"] == "defeatbeta"       # the adapter name still surfaces
+
+
 def test_only_the_cited_observation_is_loaded_not_the_whole_entity():
     """The claim cited ONE of the entity's observations — the other must never surface,
     the same discipline `observations_by_id` exists to enforce at the store layer."""
@@ -192,6 +220,32 @@ def test_cross_validation_flag_requires_two_distinct_witness_stances_not_two_quo
     flags = {c["speaker"]: c["cross"] for s in bundle2["layers"][0]["evidence"]["stances"]
             for c in s["clusters"]}
     assert flags == {"AAA": True, "CCC": True}
+
+
+def test_cycle_position_short_label_goes_to_the_scope_bar_full_reasoning_to_cycle_why():
+    """The skill writes `cycle_position` as one string shaped
+    '<早/中/晚周期短语>：<支撑理由>' (confirmed against a real 2026-08-21 run across all
+    8 layers). The scope bar must show only the short label — dumping the whole
+    sentence there breaks the '30 秒看完' decision-face design — while the reasoning
+    must still surface somewhere, not be silently dropped."""
+    cfg = _cfg()
+    store = TradingMemory(":memory:")
+    v = _verdict(cycle_position="中周期偏晚：三星与SK海力士内存产线维持100%稼动、"
+                                "DRAM/NAND库存极低")
+    review = _review(basket=_basket(), verdict=v)
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={}, store=store)
+    ly = bundle["layers"][0]
+    assert ly["cycle_position"] == "中周期偏晚"
+    assert ly["cycle_why"][0] == "三星与SK海力士内存产线维持100%稼动、DRAM/NAND库存极低"
+
+
+def test_cycle_position_without_a_colon_falls_back_to_the_whole_string_as_the_label():
+    cfg = _cfg()
+    store = TradingMemory(":memory:")
+    v = _verdict(cycle_position="早周期")
+    review = _review(basket=_basket(), verdict=v)
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={}, store=store)
+    assert bundle["layers"][0]["cycle_position"] == "早周期"
 
 
 def test_budget_uses_the_baskets_actual_post_rescale_cap_not_a_recomputed_formula():

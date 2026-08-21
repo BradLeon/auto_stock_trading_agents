@@ -154,3 +154,20 @@ def test_claim_assessments_on_groups_by_layer_for_the_offline_rebuild():
 
 def test_claim_assessments_on_empty_layer_keys_returns_empty_without_querying():
     assert TradingMemory(":memory:").claim_assessments_on([], NOW.date().isoformat()) == {}
+
+
+def test_save_claim_assessment_same_day_rerun_overwrites_not_duplicates():
+    """A verdict history exists to answer 'when did this turn from mixed to
+    contradicted' — the unit of version is the DAY, not the instant. Re-running the
+    same review three times on one day (as happened in production on 2026-08-07,
+    see save_claim_assessment's docstring) must leave one row per claim, not three."""
+    from ats.schemas.chain import ClaimAssessment
+
+    mem = TradingMemory(":memory:")
+    for verdict in ("unknown", "mixed", "supportive"):
+        mem.save_claim_assessment(ClaimAssessment(claim_id="hbm_supply_tight",
+                                                   layer="L6_memory", as_of=NOW,
+                                                   verdict=verdict))
+    rows = mem.claim_assessments_on(["L6_memory"], NOW.date().isoformat())["L6_memory"]
+    assert len(rows) == 1
+    assert rows[0].verdict == "supportive"       # last write wins, not the first

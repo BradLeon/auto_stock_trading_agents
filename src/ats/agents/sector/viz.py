@@ -162,14 +162,15 @@ def _layer_bundle(layer, verdict, basket, assessments, observations, documents, 
     common = [a for a in assessments if by_claim.get(a.claim_id)
               and by_claim[a.claim_id].kind != "relative"]
     budget_line = _budget_line(verdict, layer, basket)
+    cycle_label, cycle_detail = _split_cycle_position(verdict.cycle_position if verdict else "")
     return {
         "key": layer.key, "short": layer.key.split("_")[0], "label": layer.label,
         "short_label": _short_label(layer.label),
         "die": _die(layer, verdict, budget_line),
         "budget_formula": budget_line["formula"],
         "confidence": round(verdict.confidence, 2) if verdict else None,
-        "cycle_position": (verdict.cycle_position if verdict else "") or "—",
-        "cycle_why": _cycle_why(verdict),
+        "cycle_position": cycle_label or "—",
+        "cycle_why": _cycle_why(verdict, cycle_detail),
         "has_claims": bool(verdict.has_claims) if verdict else bool(layer.claims),
         "cross_section_applicable": (bool(verdict.cross_section_applicable)
                                     if verdict else True),
@@ -231,15 +232,35 @@ def _die(layer, verdict, budget_line) -> dict:
             "cap": cap, "budget_pct_of_cap": max(0, min(100, pct)), "flags": flags}
 
 
-def _cycle_why(verdict) -> list[str]:
-    """The 「依据」 disclosure: one line per common claim this layer's sizing rested on
-    (`claim_attributions`, already written for exactly this purpose), plus the layer
-    analyst's own synthesis (`rationale`) as the closing line. No new field — both
-    already exist on `LayerVerdict` and this is what they are for.
+def _split_cycle_position(text: str) -> tuple[str, str]:
+    """`LayerVerdict.cycle_position` comes back as one string, but in practice the
+    skill consistently writes it `<早/中/晚周期短语>：<支撑理由的完整句子>` — e.g.
+    "中周期偏晚：三星与SK海力士内存产线维持100%稼动…". The scope bar needs the short
+    label (`当前范围：… · 周期位置：中周期偏晚`, 30 秒看完); the long clause is real
+    reasoning and belongs in the 「依据」 disclosure, not silently dropped. Falls back
+    to the whole string as the label when there is no colon to split on — that shape
+    is still valid, it just has nothing to move.
+    """
+    for sep in ("：", ":"):
+        if sep in text:
+            label, _, detail = text.partition(sep)
+            return label.strip(), detail.strip()
+    return text.strip(), ""
+
+
+def _cycle_why(verdict, cycle_detail: str = "") -> list[str]:
+    """The 「依据」 disclosure: the cycle judgement's own reasoning (split out of
+    `cycle_position` by `_split_cycle_position`) first, then one line per common claim
+    this layer's sizing rested on (`claim_attributions`), then the layer analyst's
+    overall synthesis (`rationale`) as the closing line. No new field on the schema —
+    all three already exist on `LayerVerdict` and this is what they are for.
     """
     if verdict is None:
         return []
-    lines = [f"{CIRCLED[i] if i < len(CIRCLED) else i + 1} {t}"
+    lines = []
+    if cycle_detail:
+        lines.append(cycle_detail)
+    lines += [f"{CIRCLED[i] if i < len(CIRCLED) else i + 1} {t}"
              for i, t in enumerate(verdict.claim_attributions)]
     if verdict.rationale:
         lines.append(f"→ {verdict.rationale}")
@@ -397,6 +418,22 @@ def _evidence_view(assessments, by_claim, observations) -> dict:
     }
 
 
+def _web_url(*candidates: str) -> str:
+    """The first candidate that is actually an http(s) URL, else "".
+
+    `defeatbeta` stamps `source_url` with an internal pseudo-identifier — a bare
+    `"defeatbeta"` on the observation, `"defeatbeta:COHR:2026-05-06"` on the document —
+    never a fetchable link. Rendering that as `<a href>` doesn't just look wrong, it
+    navigates: browser-relative-URL-resolves `href="defeatbeta"` against the page's own
+    location and opens a broken same-origin tab. The reader still has `source` (the
+    adapter name) and `local_path` to go on; a non-URL is dropped, not disguised.
+    """
+    for c in candidates:
+        if c and (c.startswith("http://") or c.startswith("https://")):
+            return c
+    return ""
+
+
 def _quotes(obs_ids: list[str], observations: dict, documents: dict) -> list[dict]:
     out = []
     for oid in obs_ids:
@@ -410,7 +447,7 @@ def _quotes(obs_ids: list[str], observations: dict, documents: dict) -> list[dic
             "entity": o.get("source_entity") or o.get("entity") or "",
             "period": o.get("period") or "", "source": doc.get("source") or "",
             "tier": TIER_CN.get(rank, "search"),
-            "source_url": doc.get("source_url") or o.get("source_url") or "",
+            "source_url": _web_url(doc.get("source_url") or "", o.get("source_url") or ""),
             "local_path": doc.get("local_path") or "", "sha256": doc.get("sha256") or "",
             "fetched_at": doc.get("fetched_at") or "",
         })

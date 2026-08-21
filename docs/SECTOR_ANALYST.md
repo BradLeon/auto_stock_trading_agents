@@ -143,6 +143,8 @@ SectorReview → ① sqlite sector_reviews 表（payload 内含 layer_verdicts�
 | `src/ats/skills/layer-analyst/SKILL.md` | 层级分析师提示词（四档判据 + 校准纪律） |
 | `scripts/verify_layer_migration.py` | 分层重构的不变量校验（改分层时先跑它） |
 | `src/ats/agents/sector/report.py` | Obsidian markdown 渲染/写入 |
+| `src/ats/agents/sector/viz.py` | 可交互 HTML 看板：`build_bundle()` 数据装配 + `render_html()`/`write_html()` |
+| `src/ats/agents/sector/viz_assets.py` | 看板的 CSS/JS 常量 |
 | `src/ats/agents/sector/context.py` | 注回 PEAD 的 prep_block/monitor_hint |
 | `src/ats/agents/sector/cross_section.py` | 截面选股：层内排序 + 权重分配（确定性，无 LLM） |
 | `src/ats/agents/sector/structure.py` | 结构层：KB 定性评审 → tech_tenor / moat_pricing |
@@ -254,6 +256,10 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector layer ai_hardware --la
 
 # 看最新评审 + 历史（含各层配置结论与换算出的预算）
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector show ai_hardware
+
+# 从库离线重建可交互 HTML 看板（不打 LLM、不碰行情；--date 缺省取最新一次存档）
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector html ai_hardware
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector html ai_hardware --date 2026-08-21
 ```
 
 > 改分层结构时**先跑不变量校验**，别靠肉眼读 2000 行 diff：
@@ -302,13 +308,30 @@ ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告�
 单层区间 5.2k（L3，无命题）~ 21.9k（L5）。实跑耗时约 10 分钟。
 注入 PEAD 的增量 ≤300 tokens。每周 yfinance 调用随宇宙从 25 只增至 31 只。
 
-### 三路输出去向
+### 四路输出去向
 
 1. **SQLite** `var/ats.sqlite` 的 `sector_reviews` 表（payload 内含 `layer_verdicts`，支持历史对比/回测）。
 2. **Obsidian**（`output_dir` 在 sector 配置里；永远新建文件、不动你的手写笔记；同日重跑覆盖）：
    - `层分析-AI硬件-<层标签>-<日期>.md` × 8 —— **每层一份，截面并入**
    - `行业分析-AI硬件-<日期>.md` × 1 —— 跨层轮动 + 八层结论索引
+   - `层分析-AI硬件-<日期>.html` × 1 —— 见下方「可交互看板」
 3. **注回 PEAD**：下一次 `pead prep`/`pead monitor` 自动带上最新层级结论。
+
+### 可交互看板（`agents/sector/viz.py`）
+
+md 报告答「每层结论是什么」；HTML 看板答**为什么**——同一份数据，换一种读法：
+自顶向下 决策→命题→证据→溯源→截面 五个 tab，点一条命题下钻到判读簇、点一个判读簇
+下钻到它引用的 `evidence_span` 原文与来源文档（层级/URL/本地路径）。单文件、内嵌
+JSON、纯客户端渲染，不建服务、不进前端工具链，可离线打开可直接发人。
+
+- **两条产出路径，同一个 `build_bundle()`**：周报跑完自动写（best-effort，渲染失败
+  不影响评审落库）；离线重建用 `ats sector html <name> [--date]`——只读库，不打 LLM、
+  不碰行情，`--date` 缺省取最新一次存档的 review。
+- **已知局限**（页面本身也会说）：行情/因子值的溯源只到 basket 快照，没有供应商侧
+  的不可变留痕；产业链全景图的连线是从证据里声明的证人立场（customer/supplier）
+  推出来的简化示意，不是独立维护的完整依赖图。
+- CSS/JS 常量在 `agents/sector/viz_assets.py`（与数据装配分开，便于单独迭代样式）；
+  UI/交互先做过一版无数据的原型给人工 review 通过，再接的真实数据。
 
 ### 层报告的五节（结论先行）
 

@@ -71,6 +71,9 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     verdicts, raw_baskets, failed = [], [], []
     allocations: dict[str, str | None] = {}
     pending_reports: list = []
+    # Captured once so every layer's ClaimAssessment snapshots to the SAME moment,
+    # not eight microseconds apart — mirrors chain/report.py's `render`.
+    run_at = _now()
 
     for layer in cfg.layers:
         prior_v = _prior_verdict(cfg, prior, layer)
@@ -91,10 +94,22 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
         # Computed ONCE and handed to both the prompt and the report: running the
         # engine twice would re-read the ledger and could disagree with itself.
         try:
-            assessments = sector_assemble.layer_assessments(cfg, layer)
+            assessments = sector_assemble.layer_assessments(cfg, layer, as_of=run_at)
         except Exception as exc:  # noqa: BLE001 - a layer without evidence still gets a verdict
             log.warning("claim assessment failed for %s: %s", layer.key, exc)
             assessments = []
+
+        # Snapshot the verdicts so the viz bundle and `claim_assessment_history` can see
+        # this run without re-invoking the judge — `_run_layered` used to compute these
+        # and then drop them; `save_claim_assessment` was only ever called from
+        # `ats evidence report`, so the stored snapshot was stuck on whatever layer keys
+        # that command last ran under. Best-effort: one bad row must not cost the layer
+        # its verdict.
+        for a in assessments:
+            try:
+                store.save_claim_assessment(a)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("claim assessment persist skipped for %s: %s", a.claim_id, exc)
 
         verdict, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v,
                                        use_llm=use_llm, assessments=assessments)

@@ -191,6 +191,74 @@ def test_a_round_where_no_layer_produced_a_verdict_is_never_persisted(monkeypatc
     assert saved == [], "没有任何层产出结论时不得落库"
 
 
+def test_layered_run_persists_the_claim_assessments_it_computes(monkeypatch):
+    """`_run_layered` used to compute `ClaimAssessment`s and then drop them.
+
+    `save_claim_assessment` was only ever called from `ats evidence report`, so the
+    stored snapshot was stuck on whatever layer keys THAT command last ran under —
+    the weekly review's own judge output never reached the table `claim_assessment_history`
+    and the viz bundle both read from. Persistence must happen even when the layer's
+    verdict call itself is stubbed to fail, since it is computed and saved BEFORE
+    `layer_review.run` is invoked.
+    """
+    from ats.agents.sector import review as sector_review
+    from ats.schemas.chain import ClaimAssessment
+
+    cfg = SectorConfig(name="demo", layers=[_layer()])
+    fake = [ClaimAssessment(claim_id="hbm_supply_tight", as_of=NOW, verdict="supportive"),
+            ClaimAssessment(claim_id="hbm_pricing_expand", as_of=NOW, verdict="supportive")]
+    saved = []
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return None
+
+        def save_claim_assessment(self, a):
+            saved.append(a)
+
+    monkeypatch.setattr("ats.agents.sector.assemble.layer_assessments",
+                        lambda cfg, layer, as_of=None: fake)
+    monkeypatch.setattr(layer_review, "run",
+                        lambda *a, **k: (layer_review._fallback(a[1], None, True, False), False))
+
+    sector_review._run_layered("demo", cfg, _Store(), use_llm=False, live_data=False)
+    assert [a.claim_id for a in saved] == ["hbm_supply_tight", "hbm_pricing_expand"]
+
+
+def test_a_bad_claim_assessment_row_does_not_cost_the_layer_its_verdict(monkeypatch):
+    """Persistence is best-effort: one row failing to save must not stop the layer
+    from producing a verdict, and must not stop the OTHER assessment from saving."""
+    from ats.agents.sector import review as sector_review
+    from ats.schemas.chain import ClaimAssessment
+
+    cfg = SectorConfig(name="demo", layers=[_layer()])
+    fake = [ClaimAssessment(claim_id="ok_one", as_of=NOW, verdict="supportive"),
+            ClaimAssessment(claim_id="bad_one", as_of=NOW, verdict="supportive")]
+    saved = []
+    ran = []
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return None
+
+        def save_claim_assessment(self, a):
+            if a.claim_id == "bad_one":
+                raise RuntimeError("disk full")
+            saved.append(a)
+
+    def _run(cfg_, layer, **kw):
+        ran.append(1)
+        return layer_review._fallback(layer, None, True, False), False
+
+    monkeypatch.setattr("ats.agents.sector.assemble.layer_assessments",
+                        lambda cfg, layer, as_of=None: fake)
+    monkeypatch.setattr(layer_review, "run", _run)
+
+    sector_review._run_layered("demo", cfg, _Store(), use_llm=False, live_data=False)
+    assert [a.claim_id for a in saved] == ["ok_one"]
+    assert ran == [1], "the layer still went on to produce a verdict"
+
+
 def test_layered_run_consumes_the_basket_from_run_layers_tuple(monkeypatch):
     """`cross_section.run_layer` 返回 (rows, basket)，不是 basket。
 

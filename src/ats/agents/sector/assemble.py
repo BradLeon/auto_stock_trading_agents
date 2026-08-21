@@ -324,7 +324,7 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
         sc.evidence_block = "## 产业链证据（来自各家财报原文的命题印证）\n" + "\n\n".join(blocks)
 
 
-def layer_assessments(cfg: SectorConfig, layer) -> list:
+def layer_assessments(cfg: SectorConfig, layer, *, as_of=None) -> list:
     """This layer's claim verdicts as OBJECTS, before any formatting.
 
     The formatted variants below feed the prompt; the report needs the same verdicts to
@@ -332,6 +332,14 @@ def layer_assessments(cfg: SectorConfig, layer) -> list:
     judgements, per-entity readings). Running the engine twice would be both wasteful
     and — because it re-reads the ledger — capable of disagreeing with itself, so both
     consumers come through here.
+
+    `as_of` should be the REVIEW's timestamp, not wall-clock (mirrors chain/report.py's
+    `render`): every layer in one run shares it, so the eight `ClaimAssessment` rows a
+    single weekly run produces all snapshot to the same moment rather than eight
+    microseconds apart. `save_claim_assessment` truncates to the day regardless, but
+    passing the real moment through keeps this path honest with the one that already
+    does — and the day-only truncation is an implementation detail this call site
+    should not have to know about to behave correctly.
     """
     from ...chain.corroborate import assess_layer
     from ...chain.sources import source_entities_for
@@ -352,7 +360,7 @@ def layer_assessments(cfg: SectorConfig, layer) -> list:
                   | source_entities_for(claim)):
             if e not in rows_by_entity:
                 rows_by_entity[e] = store.observations(entity=e, limit=200)
-    return list(assess_layer(layer, rows_by_entity, cfg=ccfg))
+    return list(assess_layer(layer, rows_by_entity, cfg=ccfg, as_of=as_of))
 
 
 def layer_claim_lines(cfg: SectorConfig, layer, assessments=None) -> tuple[list[str], list[str]]:

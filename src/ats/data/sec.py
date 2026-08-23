@@ -94,7 +94,61 @@ def exhibit_text(cik: str, accession: str) -> tuple[str, str]:
     return text, url
 
 
-def earnings_release(symbol: str, *, near: str = "") -> tuple[str, str, str]:
+def earnings_release_record(symbol: str, *, near: str = "",
+                            period: str = "") -> dict | None:
+    """Strict event-bound release metadata, or None when no validated exhibit exists."""
+    from datetime import date
+
+    from ..config import canonical_entity, entity_meta
+    from . import defeatbeta, fiscal
+    from .admission import mentions_entity
+
+    if not near:
+        log.info("sec: refusing unanchored latest-filing lookup for %s", symbol)
+        return None
+    hits = defeatbeta.filings(symbol, near=near)
+    for filing in hits:
+        if (canonical_entity(filing.symbol).upper() != canonical_entity(symbol).upper()
+                or not str(filing.cik).isdigit()):
+            log.warning("sec: rejected filing identity/CIK %s %s for %s",
+                        filing.symbol, filing.cik, symbol)
+            continue
+        text, url = exhibit_text(filing.cik, filing.accession)
+        if not text:
+            continue
+        company = entity_meta(symbol).get("name", "")
+        if not mentions_entity(text, symbol, company):
+            log.warning("sec: %s exhibit %s failed issuer identity", symbol, filing.accession)
+            continue
+        low = text[:12000].lower()
+        earnings_hits = sum(marker in low for marker in (
+            "financial results", "quarter ended", "revenue", "net income",
+            "earnings per share", "guidance",
+        ))
+        if earnings_hits < 2:
+            log.warning("sec: %s exhibit %s lacks earnings semantics", symbol, filing.accession)
+            continue
+        if period:
+            target = fiscal.parse_label(period)
+            detected = fiscal.detect_period(text, url)
+            if None in target or detected != target:
+                log.warning("sec: %s exhibit %s period %s != %s",
+                            symbol, filing.accession, detected, target)
+                continue
+        try:
+            filed = date.fromisoformat(filing.filing_date[:10])
+        except ValueError:
+            filed = None
+        return {
+            "label": f"SEC {filing.form_type} earnings release ({filing.filing_date})",
+            "text": text, "filed": filed, "source_url": url,
+            "accession": filing.accession, "cik": filing.cik,
+            "form_type": filing.form_type,
+        }
+    return None
+
+
+def earnings_release(symbol: str, *, near: str = "", period: str = "") -> tuple[str, str, str]:
     """(text, url, note) for the earnings release nearest `near` (the print date).
 
     `near` matters: a company files hundreds of 8-Ks, and only the one landing on the
@@ -102,14 +156,9 @@ def earnings_release(symbol: str, *, near: str = "") -> tuple[str, str, str]:
     shelf registrations — which is exactly the class of error the keyed sources were
     adopted to eliminate, so reintroducing it here would be self-defeating.
     """
-    from . import defeatbeta
-
-    hits = defeatbeta.filings(symbol, near=near)
-    if not hits:
+    record = earnings_release_record(symbol, near=near, period=period)
+    if record is None:
         return "", "", f"未找到 {near or '近期'} 附近的 8-K/6-K 备案"
-    for filing in hits:
-        text, url = exhibit_text(filing.cik, filing.accession)
-        if text:
-            return text, url, (f"{filing.form_type} 财报稿 · 备案日 {filing.filing_date}"
-                               f" · accession {filing.accession}")
-    return "", "", f"{hits[0].form_type}@{hits[0].filing_date} 无可用 ex99 附件"
+    return record["text"], record["source_url"], (
+        f"{record['form_type']} 财报稿 · 备案日 {record['filed']}"
+        f" · accession {record['accession']}")

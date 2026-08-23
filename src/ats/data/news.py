@@ -27,18 +27,25 @@ def fetch_news(symbol: str, since: datetime, until: datetime | None = None, *,
     sources_cfg = load_news_sources()
 
     items: list[NewsItem] = []
+    yahoo_cfg = sources_cfg.get("yahoo_news", {}) or {}
+    if yahoo_cfg.get("enabled", False):
+        from . import yahoo_news
+
+        items += yahoo_news.stored(symbol, since, store=store)
     fh = safe_fetch(lambda: _finnhub(symbol, since, until), source=f"finnhub:{symbol}")
     if fh:
         items += fh
     items += _rss(symbol, since, sources_cfg)
     items += _x(symbol, since, sources_cfg)
 
-    # Dedup by id, keep newest first.
+    # Cross-provider dedup uses the canonical URL. Provider ids remain the fallback for
+    # feeds (such as IBKR) that expose no public publisher URL.
     seen, out = set(), []
     for it in sorted(items, key=lambda x: x.published_at, reverse=True):
-        if it.id in seen:
+        identity = external_id(it)
+        if identity in seen:
             continue
-        seen.add(it.id)
+        seen.add(identity)
         out.append(it)
     _catalog(out, store=store)
     return out
@@ -48,30 +55,71 @@ def external_id(item: NewsItem) -> str:
     """Cross-provider identity: canonical URL when present, provider id otherwise."""
     if not item.url:
         return f"news:{item.id}"
-    parts = urlsplit(item.url)
+    parts = urlsplit(item.url.strip())
     query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                       if not k.lower().startswith("utm_")])
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, query, ""))
+                       if not k.lower().startswith("utm_") and k.lower() not in {
+                           "guccounter", "guce_referrer", "guce_referrer_sig"}])
+    host = parts.netloc.lower().removeprefix("www.")
+    path = parts.path.rstrip("/") or "/"
+    return urlunsplit((parts.scheme.lower(), host, path, query, ""))
 
 
 def _catalog(items: list[NewsItem], *, store=None) -> None:
     """Save the provider-visible headline/summary before any triage decision."""
     from . import document_assets
 
+    if store is None:
+        from ..memory import get_store
+
+        store = get_store()
+
     for item in items:
         identity = external_id(item)
-        body = item.headline.strip()
-        if item.summary.strip():
+        structured_body = item.structured_body()
+        body = structured_body or item.headline.strip()
+        if not structured_body and item.summary.strip():
             body += "\n\n" + item.summary.strip()
         if not body:
             continue
-        document_assets.ingest(
+        published = item.published_at.isoformat()
+        existing = store.document_by_external_id(identity)
+        if existing is None:
+            existing = store.document_by_story(item.headline, published)
+        # A complete copy already held through another provider is the canonical asset;
+        # retain this provider as an alias instead of re-indexing the same story.
+        if existing is not None and int(existing.get("chars") or 0) >= 800:
+            store.link_document_entities(existing["document_id"], item.tickers)
+            metadata = {
+                "publisher": item.publisher, "report_date": item.report_date,
+                "article_type": item.article_type,
+                "snapshot_updated_at": item.snapshot_updated_at,
+                "snapshot_lag_hours": item.snapshot_lag_hours,
+                "paragraphs": [row.model_dump() for row in item.paragraphs],
+            }
+            store.save_document_alias(
+                existing["document_id"], source=item.source, source_url=item.url,
+                external_id=identity, title=item.headline, published_at=published,
+                metadata=metadata)
+            continue
+        doc = document_assets.ingest(
             entity="NEWS", key=document_assets.stable_key(identity, prefix="news"),
-            doc_type="news", text=body, source=f"{item.source}:metadata",
+            doc_type="news_item", text=body,
+            source=(f"{item.source}:structured" if structured_body
+                    else f"{item.source}:metadata"),
             source_url=item.url, external_id=identity, title=item.headline,
-            published_at=item.published_at.isoformat(),
+            published_at=published,
             related_entities=tuple(item.tickers), min_chars=1, store=store,
+            carrier_format="structured_dataset" if structured_body else "api_json",
         )
+        if doc is not None and structured_body and item.source == "yahoo:defeatbeta":
+            from . import yahoo_news
+
+            yahoo_news.save_structure(item, doc)
+        if doc is not None:
+            store.save_document_alias(
+                doc.document_id, source=item.source, source_url=item.url,
+                external_id=identity, title=item.headline, published_at=published,
+                metadata={"publisher": item.publisher, "report_date": item.report_date})
 
 
 def acquire_body(item: NewsItem, *, store=None) -> str:
@@ -88,6 +136,9 @@ def acquire_body(item: NewsItem, *, store=None) -> str:
     if row and len(cached) >= 800:
         store.link_document_entities(row["document_id"], item.tickers)
         return cached
+    structured = item.structured_body()
+    if structured:
+        return structured
     if not item.url:
         return ""
     body = fetch_article_text(item.url)
@@ -95,7 +146,7 @@ def acquire_body(item: NewsItem, *, store=None) -> str:
         return ""
     doc = document_assets.ingest(
         entity="NEWS", key=document_assets.stable_key(identity, prefix="news"),
-        doc_type="news", text=body, source=f"{item.source}:fulltext",
+        doc_type="news_item", text=body, source=f"{item.source}:fulltext",
         source_url=item.url, external_id=identity, title=item.headline,
         published_at=item.published_at.isoformat(), related_entities=tuple(item.tickers),
         min_chars=1, store=store,

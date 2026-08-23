@@ -21,6 +21,8 @@ uv pip install --python .venv socksio
 
 - [ ] 拷贝环境文件：`cp .env.example .env`
 - [ ] 验证：`PYTHONPATH=src .venv/bin/python -m pytest -q` → **全绿**
+- [ ] 验证数据发布闸：`ats data health` 与 `ats data quality`；统一读回和自动
+  accepted 的 identity/period 正确率必须为 100%，quarantine 不得进入默认查询。
 
 > 下文命令统一用 `PYTHONPATH=src .venv/bin/python -m ats.runtime.cli <cmd>`。可在 `.venv` 激活后直接用 `ats <cmd>`。
 

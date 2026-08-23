@@ -66,6 +66,7 @@ CLIENT_ID = int(os.getenv("ATS_IBKR_NEWS_CLIENT_ID", "190"))
 URL_PREFIX = "ibkr-news"
 _SLICE_DAYS = 3                 # short enough that totalResults never truncates a slice
 _PER_SLICE = 100
+_OVERLAP_MINUTES = 10           # replay boundary rows; stable ids make this idempotent
 
 _ib = None                      # one connection per process, reused across the run
 
@@ -112,6 +113,13 @@ def _slug(article_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", article_id or "").strip("-")
 
 
+def _article_slug(provider: str, article_id: str) -> str:
+    """Provider-scoped stable id without duplicating prefixes embedded by IBKR."""
+    raw = article_id if article_id.upper().startswith(provider.upper()) else \
+        f"{provider}-{article_id}"
+    return _slug(raw)
+
+
 def to_text(article_text: str) -> str:
     """Dow Jones bodies are HTML fragments with numeric entities. Plain text out.
 
@@ -125,28 +133,36 @@ def to_text(article_text: str) -> str:
 
 
 def discover(*, pages: int = 3, symbols: list[str] | None = None,
-             lookback_days: int = 7, **_) -> list[ArticleRef]:
+             lookback_days: int = 7, now: datetime | None = None,
+             **_) -> list[ArticleRef]:
     """Headlines for the declared symbols, newest first. Bodies are NOT fetched here.
 
     `pages` is honoured as "how many lookback slices", so the shared config field keeps
     meaning "how far back to sweep" rather than becoming adapter-specific vocabulary.
     """
-    from ib_async import Stock
-
     symbols = [s.upper() for s in (symbols or [])]
     if not symbols:
         log.warning("ibkr_news: no symbols declared — nothing to discover")
         return []
 
+    from ib_async import Stock
+
     ib = _client()
-    providers = "+".join(p.code for p in ib.reqNewsProviders())
+    try:
+        provider_rows = ib.reqNewsProviders() or []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("ibkr_news: provider lookup failed — %s", exc)
+        return []
+    providers = "+".join(str(p.code) for p in provider_rows if getattr(p, "code", ""))
     if not providers:
         log.warning("ibkr_news: account exposes no news providers")
         return []
 
-    now = datetime.now(timezone.utc)
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     span = max(lookback_days, pages * _SLICE_DAYS)
-    fmt = "%Y-%m-%d %H:%M:%S"
+    # IBKR Historical News accepts UTC as ``yyyyMMdd-HH:mm:ss``. The former ISO-like
+    # value timed out and sometimes surfaced as None, which looked like zero news.
+    fmt = "%Y%m%d-%H:%M:%S"
     out: dict[str, ArticleRef] = {}
 
     for sym in symbols:
@@ -163,23 +179,26 @@ def discover(*, pages: int = 3, symbols: list[str] | None = None,
         # Newest slice first: if max_per_run bites, it should bite on the OLD end.
         edge = now
         while edge > now - timedelta(days=span):
-            start = edge - timedelta(days=_SLICE_DAYS)
+            start = max(now - timedelta(days=span), edge - timedelta(days=_SLICE_DAYS))
+            query_start = start - timedelta(minutes=_OVERLAP_MINUTES)
             try:
-                heads = ib.reqHistoricalNews(c.conId, providers, start.strftime(fmt),
+                heads = ib.reqHistoricalNews(c.conId, providers, query_start.strftime(fmt),
                                              edge.strftime(fmt), _PER_SLICE)
             except Exception as exc:  # noqa: BLE001
                 log.warning("ibkr_news: %s slice %s failed — %s", sym, start.date(), exc)
                 heads = []
-            for h in heads:
+            for h in heads or ():
                 title = _clean_headline(h.headline)
-                slug = _slug(h.articleId)
+                provider = str(getattr(h, "providerCode", "") or "")
+                article_id = str(getattr(h, "articleId", "") or "")
+                slug = _article_slug(provider, article_id)
                 # A headline that is only a control code or a wire marker carries no
                 # claim-relevant content and would just burn a body request.
                 if not slug or len(title) < 12 or slug in out:
                     continue
                 when = h.time
                 out[slug] = ArticleRef(
-                    url=f"{URL_PREFIX}://{h.providerCode}/{h.articleId}",
+                    url=f"{URL_PREFIX}://{provider}/{article_id}",
                     slug=slug, title=title,
                     published_at=when.date() if hasattr(when, "date") else None)
             edge = start

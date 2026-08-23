@@ -204,9 +204,36 @@ CREATE TABLE IF NOT EXISTS source_documents (
     document_id TEXT PRIMARY KEY, entity TEXT, period TEXT, doc_type TEXT,
     source TEXT, source_url TEXT, local_path TEXT, sha256 TEXT,
     chars INTEGER, ok INTEGER DEFAULT 1, note TEXT, fetched_at TEXT,
-    external_id TEXT, title TEXT, published_at TEXT
+    external_id TEXT, title TEXT, published_at TEXT,
+    completeness TEXT DEFAULT 'full', truncation_reason TEXT, carrier_format TEXT,
+    mime_source TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_srcdoc_entity ON source_documents(entity, period);
+-- Every automatically discovered body first lands here as an auditable candidate.
+-- Accepted rows point at source_documents; quarantined rows may point at an isolated
+-- raw file but never acquire a document version/chunk and are invisible by default.
+CREATE TABLE IF NOT EXISTS document_candidates (
+    candidate_id TEXT PRIMARY KEY, document_id TEXT, status TEXT,
+    expected_entity TEXT, claimed_entity TEXT, target_period TEXT, claimed_period TEXT,
+    expected_semantic TEXT, claimed_semantic TEXT, carrier_format TEXT,
+    completeness TEXT, source TEXT, source_url TEXT, external_id TEXT, title TEXT,
+    published_at TEXT, discovered_at TEXT, content_hash TEXT, chars INTEGER,
+    raw_path TEXT, reason_codes TEXT, validation_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_doccandidate_status
+    ON document_candidates(status, source, discovered_at);
+CREATE TABLE IF NOT EXISTS earnings_events (
+    event_id TEXT PRIMARY KEY, entity TEXT, report_date TEXT,
+    fiscal_year INTEGER, fiscal_quarter INTEGER, status TEXT,
+    evidence_json TEXT, conflicts_json TEXT, resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_earnings_event_entity
+    ON earnings_events(entity, report_date);
+CREATE TABLE IF NOT EXISTS newsletter_cursors (
+    mailbox TEXT, folder TEXT, sender TEXT, uidvalidity TEXT, last_uid INTEGER,
+    last_message_id TEXT, watermark TEXT, updated_at TEXT,
+    PRIMARY KEY (mailbox, folder, sender)
+);
 -- Immutable content versions behind the mutable source_documents inventory row.
 -- A logical document may be corrected by its publisher or re-fetched after a parser
 -- change; old bytes remain addressable so every downstream result can name the exact
@@ -226,6 +253,15 @@ CREATE TABLE IF NOT EXISTS document_entities (
     PRIMARY KEY (document_id, entity, relation)
 );
 CREATE INDEX IF NOT EXISTS idx_document_entity ON document_entities(entity, document_id);
+-- Alternate provider identities for the same real-world story. This prevents Yahoo,
+-- Finnhub and IBKR copies from becoming separate logical documents while preserving
+-- every provider's provenance.
+CREATE TABLE IF NOT EXISTS document_source_aliases (
+    alias_id TEXT PRIMARY KEY, document_id TEXT, source TEXT, source_url TEXT,
+    external_id TEXT, title TEXT, published_at TEXT, metadata_json TEXT, created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_document_alias_doc
+    ON document_source_aliases(document_id, source);
 CREATE TABLE IF NOT EXISTS document_chunks (
     chunk_id TEXT PRIMARY KEY, version_id TEXT, ordinal INTEGER,
     char_start INTEGER, char_end INTEGER, text TEXT, content_hash TEXT,
@@ -256,7 +292,9 @@ CREATE TABLE IF NOT EXISTS data_sources (
 CREATE TABLE IF NOT EXISTS ingestion_runs (
     run_id TEXT PRIMARY KEY, source_id TEXT, kind TEXT,
     started_at TEXT, completed_at TEXT, status TEXT,
-    discovered INTEGER DEFAULT 0, accepted INTEGER DEFAULT 0, note TEXT
+    discovered INTEGER DEFAULT 0, accepted INTEGER DEFAULT 0,
+    quarantined INTEGER DEFAULT 0, reason_codes TEXT,
+    snapshot_updated_at TEXT, snapshot_lag_hours REAL, note TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ingestion_source
     ON ingestion_runs(source_id, started_at);
@@ -381,9 +419,16 @@ class TradingMemory:
                 self.conn.execute(
                     f"ALTER TABLE evidence_observations ADD COLUMN {ddl}")
         dcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(source_documents)")}
-        for ddl in ("external_id TEXT", "title TEXT", "published_at TEXT"):
+        for ddl in ("external_id TEXT", "title TEXT", "published_at TEXT",
+                    "completeness TEXT DEFAULT 'full'", "truncation_reason TEXT",
+                    "carrier_format TEXT", "mime_source TEXT"):
             if dcols and ddl.split()[0] not in dcols:
                 self.conn.execute(f"ALTER TABLE source_documents ADD COLUMN {ddl}")
+        rcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(ingestion_runs)")}
+        for ddl in ("quarantined INTEGER DEFAULT 0", "reason_codes TEXT",
+                    "snapshot_updated_at TEXT", "snapshot_lag_hours REAL"):
+            if rcols and ddl.split()[0] not in rcols:
+                self.conn.execute(f"ALTER TABLE ingestion_runs ADD COLUMN {ddl}")
         fact_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(evidence_facts)")}
         if fact_cols and "document_version_id" not in fact_cols:
             self.conn.execute("ALTER TABLE evidence_facts ADD COLUMN document_version_id TEXT")
@@ -1328,12 +1373,16 @@ class TradingMemory:
         self.conn.execute(
             "INSERT OR REPLACE INTO source_documents (document_id,entity,period,doc_type,"
             "source,source_url,local_path,sha256,chars,ok,note,fetched_at,"
-            "external_id,title,published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "external_id,title,published_at,completeness,truncation_reason,carrier_format,"
+            "mime_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (doc.document_id, doc.symbol.upper(), doc.period, doc.doc_type, doc.source,
              doc.source_url, str(doc.path) if doc.path else "", doc.sha256,
              len(doc.text or ""), 1 if ok else 0, note, stamp,
              getattr(doc, "external_id", ""), getattr(doc, "title", ""),
-             getattr(doc, "published_at", "")))
+             getattr(doc, "published_at", ""), getattr(doc, "completeness", "full"),
+             getattr(doc, "truncation_reason", ""), getattr(doc, "carrier_format", ""),
+             getattr(doc, "mime_source", "")))
+
         if ok and doc.sha256:
             version_id = self.document_version_id(doc.document_id, doc.sha256)
             version_path = getattr(doc, "version_path", None) or doc.path
@@ -1365,6 +1414,70 @@ class TradingMemory:
             [(document_id, str(entity).upper(), relation) for entity in entities if entity])
         self.conn.commit()
         return self.conn.total_changes - before
+
+    def save_document_alias(self, document_id: str, *, source: str,
+                            source_url: str = "", external_id: str = "",
+                            title: str = "", published_at: str = "",
+                            metadata: dict | None = None) -> str:
+        """Attach another provider identity to an existing logical document."""
+        import hashlib
+        import json
+
+        identity = external_id or source_url or f"{title}|{published_at}"
+        alias_id = hashlib.sha1(f"{source}|{identity}".encode()).hexdigest()[:24]
+        self.conn.execute(
+            "INSERT OR REPLACE INTO document_source_aliases "
+            "(alias_id,document_id,source,source_url,external_id,title,published_at,"
+            "metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (alias_id, document_id, source, source_url, external_id, title, published_at,
+             json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+             datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        self.conn.commit()
+        return alias_id
+
+    def document_aliases(self, document_id: str | None = None, *,
+                         limit: int = 200) -> list[dict]:
+        sql, args = "SELECT * FROM document_source_aliases", []
+        if document_id:
+            sql += " WHERE document_id=?"
+            args.append(document_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def documents_by_alias_source(self, source_contains: str, *, entity: str | None = None,
+                                  published_since: str | None = None,
+                                  limit: int = 1000) -> list[dict]:
+        sql = ("SELECT DISTINCT d.* FROM source_documents d "
+               "JOIN document_source_aliases a ON a.document_id=d.document_id "
+               "WHERE d.ok=1 AND lower(a.source) LIKE ?")
+        args: list = [f"%{source_contains.lower()}%"]
+        if entity:
+            sql += (" AND (d.entity=? OR EXISTS (SELECT 1 FROM document_entities de "
+                    "WHERE de.document_id=d.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
+        if published_since:
+            sql += " AND d.published_at>=?"
+            args.append(published_since)
+        sql += " ORDER BY d.published_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def document_by_story(self, title: str, published_at: str = "") -> dict | None:
+        """Exact normalized headline/date fallback when a provider has no public URL."""
+        import re
+
+        normalized = re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+        if not normalized:
+            return None
+        rows = self.conn.execute(
+            "SELECT * FROM source_documents WHERE ok=1 AND substr(published_at,1,10)=? "
+            "ORDER BY chars DESC", ((published_at or "")[:10],)).fetchall()
+        for row in rows:
+            candidate = re.sub(r"[^a-z0-9]+", " ", (row["title"] or "").lower()).strip()
+            if candidate == normalized:
+                return dict(row)
+        return None
 
     def _index_document_version(self, version_id: str, text: str, *,
                                 chunk_chars: int = 2400, overlap: int = 240) -> int:
@@ -1545,6 +1658,106 @@ class TradingMemory:
              (at or datetime.now(timezone.utc).isoformat(timespec="seconds"))))
         self.conn.commit()
 
+    def save_document_candidate(self, candidate, validation, *, raw_path: str = "",
+                                document_id: str = "") -> None:
+        """Persist an admission decision without exposing quarantine to asset queries."""
+        import json
+
+        from ..data.admission import result_json
+        from ..data.document_types import semantic_type
+
+        try:
+            expected_semantic = semantic_type(candidate.expected_semantic).value
+        except (KeyError, ValueError):
+            expected_semantic = str(candidate.expected_semantic or "")
+        try:
+            claimed_semantic = semantic_type(candidate.claimed_semantic).value
+        except (KeyError, ValueError):
+            claimed_semantic = str(candidate.claimed_semantic or "")
+        self.conn.execute(
+            "INSERT OR REPLACE INTO document_candidates (candidate_id,document_id,status,"
+            "expected_entity,claimed_entity,target_period,claimed_period,expected_semantic,"
+            "claimed_semantic,carrier_format,completeness,source,source_url,external_id,title,"
+            "published_at,discovered_at,content_hash,chars,raw_path,reason_codes,validation_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (candidate.candidate_id, document_id, validation.status,
+             candidate.expected_entity.upper(), candidate.claimed_entity.upper(),
+             candidate.target_period, candidate.claimed_period, expected_semantic,
+             claimed_semantic, str(candidate.carrier_format), candidate.completeness,
+             candidate.source, candidate.source_url, candidate.external_id, candidate.title,
+             candidate.published_at, candidate.discovered_at, candidate.content_hash,
+             len(candidate.text or ""), raw_path,
+             json.dumps(validation.reason_codes, ensure_ascii=False), result_json(validation)))
+        self.conn.commit()
+
+    def document_candidates(self, *, status: str | None = None,
+                            source: str | None = None, limit: int = 200) -> list[dict]:
+        sql, args = "SELECT * FROM document_candidates", []
+        where = []
+        if status:
+            where.append("status=?")
+            args.append(status)
+        if source:
+            where.append("source=?")
+            args.append(source)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY discovered_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def save_earnings_event(self, resolution) -> str:
+        """Persist resolved/conflicting event evidence as the period audit anchor."""
+        import json
+
+        event = resolution.event
+        if event is not None:
+            event_id = event.event_id
+            entity, report_date = event.entity, str(event.report_date)
+            fiscal_year, fiscal_quarter = event.fiscal_year, event.fiscal_quarter
+        else:
+            evidence = resolution.evidence
+            entity = ""
+            for item in evidence:
+                if getattr(item, "reference", "").startswith("entity:"):
+                    entity = item.reference.split(":", 1)[1].upper()
+                    break
+            seed = "|".join(f"{e.source}:{e.report_date}:{e.fiscal_label}" for e in evidence)
+            import hashlib
+
+            event_id = f"unresolved:{hashlib.sha1(seed.encode()).hexdigest()[:16]}"
+            report_date, fiscal_year, fiscal_quarter = "", None, None
+        evidence_json = json.dumps([
+            {
+                "source": item.source, "report_date": str(item.date or ""),
+                "fiscal_period": (
+                    f"{item.period[0]}Q{item.period[1]}" if item.period else ""),
+                "reference": item.reference,
+            }
+            for item in resolution.evidence
+        ], ensure_ascii=False, sort_keys=True)
+        conflicts_json = json.dumps([
+            conflict.__dict__ for conflict in resolution.conflicts
+        ], ensure_ascii=False, sort_keys=True)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO earnings_events (event_id,entity,report_date,"
+            "fiscal_year,fiscal_quarter,status,evidence_json,conflicts_json,resolved_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, entity, report_date, fiscal_year, fiscal_quarter, resolution.status,
+             evidence_json, conflicts_json,
+             datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        self.conn.commit()
+        return event_id
+
+    def earnings_events(self, entity: str | None = None, *, limit: int = 50) -> list[dict]:
+        sql, args = "SELECT * FROM earnings_events", []
+        if entity:
+            sql += " WHERE entity=?"
+            args.append(entity.upper())
+        sql += " ORDER BY report_date DESC,resolved_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
     def documents(self, entity: str | None = None, *, ok_only: bool = True,
                   doc_type: str | None = None, source_contains: str | None = None,
                   published_since: str | None = None, limit: int = 200) -> list[dict]:
@@ -1557,8 +1770,15 @@ class TradingMemory:
         if ok_only:
             where.append("ok = 1")
         if doc_type:
-            where.append("doc_type = ?")
-            args.append(doc_type)
+            from ..data.document_types import compatible_type_values
+
+            try:
+                current, legacy = compatible_type_values(doc_type)
+                where.append("doc_type IN (?, ?)")
+                args.extend([current, legacy])
+            except (KeyError, ValueError):
+                where.append("doc_type = ?")
+                args.append(doc_type)
         if source_contains:
             where.append("lower(source) LIKE ?")
             args.append(f"%{source_contains.lower()}%")
@@ -1578,9 +1798,16 @@ class TradingMemory:
         return dict(row) if row else None
 
     def has_document(self, entity: str, period: str, doc_type: str) -> bool:
+        from ..data.document_types import compatible_type_values
+
+        try:
+            current, legacy = compatible_type_values(doc_type)
+        except (KeyError, ValueError):
+            current = legacy = doc_type
         row = self.conn.execute(
-            "SELECT ok FROM source_documents WHERE document_id = ?",
-            (f"{entity.upper()}:{period or 'unknown'}:{doc_type}",)).fetchone()
+            "SELECT ok FROM source_documents WHERE document_id IN (?, ?)",
+            (f"{entity.upper()}:{period or 'unknown'}:{current}",
+             f"{entity.upper()}:{period or 'unknown'}:{legacy}")).fetchone()
         return bool(row and row["ok"])
 
     def freeze_as_discovery(self, observation_ids: list[str]) -> int:
@@ -1704,12 +1931,20 @@ class TradingMemory:
         return run_id
 
     def finish_ingestion(self, run_id: str, *, status: str, discovered: int = 0,
-                         accepted: int = 0, note: str = "",
+                         accepted: int = 0, quarantined: int = 0,
+                         reason_codes: dict | list | tuple | None = None,
+                         snapshot_updated_at: str = "",
+                         snapshot_lag_hours: float | None = None, note: str = "",
                          at: datetime | None = None) -> None:
+        import json
+
         stamp = (at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
         self.conn.execute(
-            "UPDATE ingestion_runs SET completed_at=?,status=?,discovered=?,accepted=?,note=? "
-            "WHERE run_id=?", (stamp, status, discovered, accepted, note, run_id))
+            "UPDATE ingestion_runs SET completed_at=?,status=?,discovered=?,accepted=?,"
+            "quarantined=?,reason_codes=?,snapshot_updated_at=?,snapshot_lag_hours=?,note=? "
+            "WHERE run_id=?", (stamp, status, discovered, accepted, quarantined,
+            json.dumps(reason_codes or {}, ensure_ascii=False, sort_keys=True),
+            snapshot_updated_at, snapshot_lag_hours, note, run_id))
         self.conn.commit()
 
     def ingestion_history(self, source_id: str | None = None, *,
@@ -1724,7 +1959,8 @@ class TradingMemory:
 
     def data_source_health(self) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
-            "SELECT s.*,r.status,r.started_at,r.completed_at,r.discovered,r.accepted,r.note "
+            "SELECT s.*,r.status,r.started_at,r.completed_at,r.discovered,r.accepted,"
+            "r.quarantined,r.reason_codes,r.snapshot_updated_at,r.snapshot_lag_hours,r.note "
             "FROM data_sources s LEFT JOIN ingestion_runs r ON r.run_id=("
             " SELECT r2.run_id FROM ingestion_runs r2 WHERE r2.source_id=s.source_id "
             " ORDER BY r2.started_at DESC LIMIT 1) ORDER BY s.source_id").fetchall()]
@@ -1735,6 +1971,33 @@ class TradingMemory:
             "sum(CASE WHEN ok=0 THEN 1 ELSE 0 END) AS failures,"
             "max(fetched_at) AS latest_fetch FROM source_documents "
             "GROUP BY source ORDER BY source").fetchall()]
+
+    def document_candidate_health(self) -> list[dict]:
+        """Admission totals and reason codes by source/status for release reports."""
+        import json
+
+        rows = self.conn.execute(
+            "SELECT source,status,reason_codes,count(*) AS candidates "
+            "FROM document_candidates GROUP BY source,status,reason_codes "
+            "ORDER BY source,status").fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["reason_codes"] = json.loads(item.get("reason_codes") or "[]")
+            except json.JSONDecodeError:
+                item["reason_codes"] = ["invalid_reason_code_payload"]
+            out.append(item)
+        return out
+
+    def document_quality_inventory(self) -> list[dict]:
+        """Accepted inventory grouped by source, semantic and completeness."""
+        return [dict(row) for row in self.conn.execute(
+            "SELECT source,doc_type,coalesce(completeness,'full') AS completeness,"
+            "count(*) AS documents,sum(chars) AS chars,max(published_at) AS latest_published,"
+            "max(fetched_at) AS latest_fetch FROM source_documents WHERE ok=1 "
+            "GROUP BY source,doc_type,coalesce(completeness,'full') "
+            "ORDER BY source,doc_type,completeness").fetchall()]
 
     def save_measurement_points(self, source, points, *,
                                 fetched_at: datetime | None = None) -> int:
@@ -1950,6 +2213,25 @@ class TradingMemory:
                 "SELECT * FROM research_insights ORDER BY rowid DESC LIMIT ?",
                 (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    def newsletter_cursor(self, mailbox: str, folder: str, sender: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM newsletter_cursors WHERE mailbox=? AND folder=? AND sender=?",
+            (mailbox, folder, sender.lower()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_newsletter_cursor(self, *, mailbox: str, folder: str, sender: str,
+                               uidvalidity: str, last_uid: int,
+                               last_message_id: str, watermark: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO newsletter_cursors "
+            "(mailbox,folder,sender,uidvalidity,last_uid,last_message_id,watermark,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (mailbox, folder, sender.lower(), uidvalidity, int(last_uid), last_message_id,
+             watermark, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+        )
+        self.conn.commit()
 
     # --- sector reviews --------------------------------------------------- #
     def save_sector_review(self, review) -> None:

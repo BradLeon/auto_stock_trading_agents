@@ -131,33 +131,66 @@ def _fetch_url(url: str) -> str:
     return text
 
 
-def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *, store=None) -> tuple[str, str]:
-    """Persist only a period-compatible, structurally complete transcript."""
+def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *,
+              company_name: str = "", structured=None, store=None) -> tuple[str, str]:
+    """Run every transcript source through the central admission gate."""
     if not text:
         return text, source
-    from . import document_assets, fiscal
+    from ..config import entity_meta
+    from ..memory import get_store
+    from . import admission, defeatbeta, fiscal
+    from .document_types import CarrierFormat
 
-    period_ok, _ = fiscal.verify_transcript(fiscal_label, text, source)
+    store = store or get_store()
+    company_name = company_name or entity_meta(symbol).get("name", "")
     body, _ = extract_body(text, source)
     body_ok, _ = looks_like_transcript(body)
-    if not period_ok or not body_ok:
-        # Compatibility: callers still receive the body and apply their own guard.
-        # Rejected/short fixtures must never become a shared trusted asset.
-        return text, source
+    manual = source.startswith("file:")
+    claimed_entity = symbol if (
+        manual or structured is not None
+        or admission.mentions_entity(body, symbol, company_name)
+    ) else ""
+    if structured is not None:
+        claimed_period = structured.label
+    elif manual:
+        # A manual override is explicitly named for this target period. Its provenance
+        # is stronger than prose regexes, but an unresolved target still fails centrally.
+        claimed_period = fiscal_label
+    else:
+        detected = fiscal.detect_period(body, source)
+        claimed_period = f"Q{detected[1]} FY{detected[0]}" if detected else ""
     source_url = ""
     for prefix in ("url:", "tavily:"):
         if source.startswith(prefix):
             source_url = source[len(prefix):]
     if source.startswith("news:") and "http" in source:
         source_url = source[source.index("http"):]
-    document_assets.ingest(
-        entity=symbol, key=fiscal_label or document_assets.stable_key(source, prefix="transcript"),
-        doc_type="transcript", text=body, source=source, source_url=source_url,
-        external_id=source_url or source,
+    metadata = ({"paragraphs": structured.paragraphs} if structured is not None else {})
+    candidate = admission.CandidateDocument(
+        expected_entity=symbol, claimed_entity=claimed_entity,
+        target_period=fiscal_label, claimed_period=claimed_period,
+        expected_semantic="earnings_transcript", claimed_semantic="transcript",
+        text=body, source=source, source_url=source_url,
+        external_id=(f"defeatbeta:{structured.symbol}:{structured.report_date}"
+                     if structured is not None else source_url or source),
         title=f"{symbol.upper()} {fiscal_label} earnings call transcript".strip(),
-        related_entities=(symbol,), min_chars=_MIN_TRANSCRIPT_CHARS, store=store,
+        published_at=str(structured.report_date) if structured is not None else "",
+        carrier_format=(CarrierFormat.STRUCTURED_TEXT if structured is not None
+                        else CarrierFormat.PLAIN_TEXT if manual else CarrierFormat.HTML),
+        completeness="full" if body_ok else "unknown",
+        min_chars=_MIN_TRANSCRIPT_CHARS, related_entities=(symbol,), metadata=metadata,
     )
-    return body, source
+    extensions = (defeatbeta.structured_transcript_issues,) if structured is not None else ()
+    outcome = admission.admit(candidate, extensions=extensions, store=store)
+    if not outcome.validation.accepted or outcome.document is None:
+        return "", f"quarantined:{source}"
+    if structured is not None:
+        raw_path = defeatbeta.save_structure(structured, outcome.document)
+        store.save_document_candidate(
+            candidate, outcome.validation, raw_path=str(raw_path or ""),
+            document_id=outcome.document.document_id,
+        )
+    return outcome.document.text, source
 
 
 def fetch(symbol: str, fiscal_label: str = "", source: str | None = None,
@@ -167,49 +200,74 @@ def fetch(symbol: str, fiscal_label: str = "", source: str | None = None,
         if source.startswith("http://") or source.startswith("https://"):
             try:
                 return _accepted(symbol, fiscal_label, _fetch_url(source),
-                                 f"url:{source}", store=store)
+                                 f"url:{source}", company_name=company_name, store=store)
             except Exception:  # noqa: BLE001 - fall through
                 pass
         else:
             p = Path(source)
             if p.exists():
                 return _accepted(symbol, fiscal_label, p.read_text(encoding="utf-8"),
-                                 f"file:{p}", store=store)
+                                 f"file:{p}", company_name=company_name, store=store)
 
     # 3) dropped manual file — the user's habit; authoritative when present, and
     # a clean full transcript beats brittle scraping (which can return page chrome).
     mp = manual_path(symbol, fiscal_label)
     if mp.exists():
         return _accepted(symbol, fiscal_label, mp.read_text(encoding="utf-8"),
-                         f"file:{mp}", store=store)
+                         f"file:{mp}", company_name=company_name, store=store)
 
-    # Shared accepted asset — after explicit/manual overrides, before every network
-    # tier. This is the point that makes PEAD and Evidence consume the same body.
-    from . import source_cache
+    # A manual/official accepted cache is an override. A weaker historical scrape may
+    # not short-circuit the keyed structured source merely because it arrived first.
+    from . import defeatbeta, fiscal, source_cache
 
-    cached = source_cache.load(symbol, fiscal_label, "transcript")
-    if cached:
-        if store is None:
-            from ..memory import get_store
+    cached_docs = [source_cache.load(symbol, fiscal_label, kind)
+                   for kind in ("earnings_transcript", "transcript")]
+    cached_docs = [doc for doc in cached_docs if doc is not None]
+    for cached in cached_docs:
+        if (cached.source or "manual").lower().startswith(("file:", "manual", "official")):
+            return cached.text, cached.source or "cache"
+    for cached in cached_docs:
+        if (cached.source or "").lower().startswith("defeatbeta"):
+            return cached.text, cached.source
 
-            store = get_store()
-        store.save_document(cached)
-        return cached.text, cached.source or "cache"
+    # Structured primary source: only an exact, fully resolved fiscal period may enter.
+    year, quarter = fiscal.parse_label(fiscal_label)
+    if year and quarter:
+        structured = defeatbeta.fetch(symbol, fiscal_year=year, fiscal_quarter=quarter)
+        if structured is not None:
+            accepted = _accepted(
+                symbol, fiscal_label, structured.text, "defeatbeta",
+                company_name=company_name, structured=structured, store=store,
+            )
+            if accepted[0]:
+                return accepted
+    for cached in cached_docs:
+        if (cached.source or "").lower().startswith("fmp"):
+            return cached.text, cached.source
 
     # 4) FMP auto-fetch (latest transcript) if a paid key is configured
     text, src = _fmp(symbol, fiscal_label)
     if text:
-        return _accepted(symbol, fiscal_label, text, src, store=store)
+        accepted = _accepted(symbol, fiscal_label, text, src,
+                             company_name=company_name, store=store)
+        if accepted[0]:
+            return accepted
 
     # 5) web search (Tavily) -> the fool.com / investing transcript page (free tier)
     text, src = _from_search(symbol, fiscal_label, company_name)
     if text:
-        return _accepted(symbol, fiscal_label, text, src, store=store)
+        accepted = _accepted(symbol, fiscal_label, text, src,
+                             company_name=company_name, store=store)
+        if accepted[0]:
+            return accepted
 
     # 6) secondary: a transcript article already in our news feed (if any)
     text, src = _from_news(symbol, fiscal_label=fiscal_label)
     if text:
-        return _accepted(symbol, fiscal_label, text, src, store=store)
+        accepted = _accepted(symbol, fiscal_label, text, src,
+                             company_name=company_name, store=store)
+        if accepted[0]:
+            return accepted
 
     return "", "none"
 
@@ -259,9 +317,9 @@ def _pick_candidate(results: list[dict], target: tuple[int | None, int | None]) 
         if not matched:
             return None
         return max(matched, key=lambda r: len(r.get("raw_content") or ""))
-    # Target quarter unknown (unparseable fiscal_label): can't verify, so fall back
-    # to longest — the period guard downstream is the remaining safety net.
-    return max(usable, key=lambda r: len(r.get("raw_content") or ""), default=None)
+    # An unresolved target cannot safely select an automatic page. Keep every result
+    # outside the trusted asset path until an earnings event supplies year + quarter.
+    return None
 
 
 def _from_search(symbol: str, fiscal_label: str = "",

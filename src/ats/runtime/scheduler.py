@@ -12,7 +12,7 @@ scheduled run would block on terminal input, so a warning is emitted.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from ..config import get_config
@@ -175,7 +175,7 @@ def _confirm_reported(symbol: str, print_) -> tuple[bool, str]:
     from ..data import documents
     from ..data.base import safe_fetch
 
-    rel = safe_fetch(lambda: documents.sec_8k_release(symbol),
+    rel = safe_fetch(lambda: documents.sec_8k_release(symbol, near=str(print_.date)),
                      source=f"sec-8k:{symbol}", attempts=2)
     if not rel:
         return (False, "无实际 EPS，且未取到 8-K")
@@ -427,6 +427,7 @@ def _daily(*, dry_run: bool) -> None:
     # session, so tying them to the mon-fri trading-day cascade was never necessary,
     # and running them over the weekend keeps Monday's cascade free of the extra load.
     _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
+    _news_backfill_daily()
     pead_daily(dry_run=dry_run)
     _technical_daily()
     _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
@@ -434,6 +435,35 @@ def _daily(*, dry_run: bool) -> None:
     _perf_risk_digest()  # surface perf + 6-layer risk: Obsidian .md + Feishu card
     _journal_marks()     # score elapsed prediction horizons + rewrite the ledger
     _chief_daily(dry_run=dry_run)   # LAST: the Chief reads everything fresh and decides
+
+
+def _news_backfill_daily() -> None:
+    """Acquire Yahoo history once; every PEAD monitor then reads shared assets."""
+    from datetime import timedelta
+
+    from ..config import load_news_sources, load_pead_config, load_pead_global
+    from ..data import yahoo_news
+    from ..memory import get_store
+
+    source_cfg = (load_news_sources() or {}).get("yahoo_news", {}) or {}
+    if not source_cfg.get("enabled", False):
+        return
+    pead = load_pead_global()
+    symbols = [*(pead.get("targets") or []), *(pead.get("observe") or [])]
+    for target in pead.get("targets") or []:
+        try:
+            symbols.extend(item.symbol for item in load_pead_config(target).signal_chain)
+        except Exception as exc:  # noqa: BLE001 - one config must not suppress the backfill
+            log.warning("Yahoo news symbol expansion failed for %s: %s", target, exc)
+    now = datetime.now(timezone.utc)
+    lookback = int(source_cfg.get("backfill_days", pead.get("monitor", {}).get(
+        "lookback_days", 7)))
+    batch = yahoo_news.backfill(
+        list(dict.fromkeys(str(symbol).upper() for symbol in symbols)),
+        now - timedelta(days=lookback), now, store=get_store(), now=now,
+        stale_after_hours=float(source_cfg.get("stale_after_hours", 72)))
+    log.info("Yahoo news backfill: %s, %d discovered, %d unique, %d quarantined",
+             batch.status, batch.discovered, len(batch.items), batch.quarantined)
 
 
 def _intel_digest() -> None:

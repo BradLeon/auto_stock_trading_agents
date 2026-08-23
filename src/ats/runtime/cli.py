@@ -1234,6 +1234,8 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     products = get_data_products()
     if action == "health":
         result = products.health()
+    elif action == "quality":
+        result = products.quality()
     elif action == "series":
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         result = products.indicator_series(
@@ -1261,9 +1263,9 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
-    data = sub.add_parser("data", help="统一数据产品 (health / series / search / company / claim / lineage)")
-    data.add_argument("action", choices=["health", "series", "search", "company", "claim",
-                                         "lineage"])
+    data = sub.add_parser("data", help="统一数据产品 (health / quality / series / search / company / claim / lineage)")
+    data.add_argument("action", choices=["health", "quality", "series", "search", "company",
+                                         "claim", "lineage"])
     data.add_argument("value", nargs="?", default="",
                       help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID")
     data.add_argument("--source", default="", help="series: source ID；search: 来源过滤")

@@ -186,12 +186,27 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
                 continue
             stat.matched += 1
 
-            try:
-                body = mod.fetch_body(ref.url)
-            except Exception as exc:  # noqa: BLE001 - one bad page, not the whole source
-                log.warning("articles: %s body fetch failed for %s — %s",
-                            source.id, ref.slug, exc)
+            published = ref.published_at.isoformat() if ref.published_at else ""
+            shared = store.document_by_story(ref.title, published)
+            if shared is not None and int(shared.get("chars") or 0) >= source.min_body_chars:
+                # Yahoo/Finnhub may already hold the same story. Reuse its exact bytes,
+                # but retain the IBKR/publisher identity and witness association.
+                store.save_document_alias(
+                    shared["document_id"], source=source.adapter, source_url=ref.url,
+                    external_id=ref.url, title=ref.title, published_at=published)
+                store.link_document_entities(shared["document_id"], [source.entity])
+                body = document_assets.read_document(shared["document_id"], store=store)
+                document_id = shared["document_id"]
+            else:
                 body = ""
+
+            if not body:
+                try:
+                    body = mod.fetch_body(ref.url)
+                except Exception as exc:  # noqa: BLE001 - one bad page, not the whole source
+                    log.warning("articles: %s body fetch failed for %s — %s",
+                                source.id, ref.slug, exc)
+                    body = ""
             if len(body) < source.min_body_chars:
                 # Paywalled, or the template moved. Either way it is a GAP: recorded so
                 # a widening paywall shows up as missing evidence rather than as the

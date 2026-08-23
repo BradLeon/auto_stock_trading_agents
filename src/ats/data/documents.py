@@ -29,6 +29,7 @@ _DECK_KW = ("presentation", "investor", "deck", "slide")
 
 
 def gather(symbol: str, docs_root: str | None = None, *, period: str = "",
+           report_date: str = "",
            store=None) -> list[tuple[str, str]]:
     """Earnings release + investor presentation + any extra curated docs.
 
@@ -41,7 +42,7 @@ def gather(symbol: str, docs_root: str | None = None, *, period: str = "",
     new_docs: list[tuple[str, str]] = []
     metadata: dict[str, dict] = {}
 
-    f_release = _classify(folder, _RELEASE_KW)
+    f_release = _first_semantic(folder, "company_release")
     if f_release:
         docs.append(f_release); new_docs.append(f_release); used.add(f_release[0])
     else:
@@ -49,13 +50,14 @@ def gather(symbol: str, docs_root: str | None = None, *, period: str = "",
         if cached:
             docs.append(cached)
         else:
-            rel = safe_fetch(lambda: sec_8k_release(symbol), source=f"sec-8k:{symbol}", attempts=2)
+            rel = safe_fetch(lambda: sec_8k_release(symbol, near=report_date, period=period),
+                             source=f"sec-8k:{symbol}", attempts=2)
             if rel:
                 item = (rel["label"], rel["text"])
                 docs.append(item); new_docs.append(item)
                 metadata[rel["label"]] = rel
 
-    f_deck = _classify(folder, _DECK_KW)
+    f_deck = _first_semantic(folder, "investor_presentation")
     if f_deck:
         docs.append(f_deck); new_docs.append(f_deck); used.add(f_deck[0])
     else:
@@ -70,38 +72,100 @@ def gather(symbol: str, docs_root: str | None = None, *, period: str = "",
     extras = [d for d in folder if d[0] not in used]
     docs += extras                                  # extra curated docs (e.g. a saved 10-K)
     new_docs += extras
-    _persist(symbol, period, new_docs, metadata=metadata, store=store)
-    return docs
+    accepted = _persist(symbol, period, new_docs, metadata=metadata, store=store)
+    new_labels = {label for label, _ in new_docs}
+    return [item for item in docs if item[0] not in new_labels or item[0] in accepted]
 
 
 def _cached(symbol: str, period: str, doc_type: str) -> tuple[str, str] | None:
     if not period:
         return None
     from . import source_cache
+    from .document_types import compatible_type_values
 
-    doc = source_cache.load(symbol, period, doc_type)
-    if not doc:
-        return None
-    return (doc.title or f"cached {doc_type} ({period})", doc.text)
+    try:
+        kinds = compatible_type_values(doc_type)
+    except (KeyError, ValueError):
+        kinds = (doc_type, doc_type)
+    for kind in kinds:
+        doc = source_cache.load(symbol, period, kind)
+        if doc:
+            return (doc.title or f"cached {doc_type} ({period})", doc.text)
+    return None
+
+
+def classify_semantic(label: str) -> str:
+    """Classify business meaning; presentation overrides the word 'earnings'."""
+    low = label.lower()
+    if any(k in low for k in _DECK_KW):
+        return "investor_presentation"
+    if any(k in low for k in ("10-k", "10-q", "6-k", "20-f", "filing", "annual report")):
+        return "regulatory_filing"
+    if any(k in low for k in ("release", "press", "8-k", "8k", "financial results")):
+        return "company_release"
+    return "announcement"
+
+
+def _official_domains(symbol: str) -> tuple[str, ...]:
+    from ..config import entity_meta
+
+    return tuple(str(domain).lower() for domain in (
+        entity_meta(symbol).get("ir_domains", []) or []
+    ))
+
+
+def official_document_issues(candidate) -> list:
+    """Validate source authority and semantic shape after Tavily URL discovery."""
+    from urllib.parse import urlparse
+
+    from .admission import ValidationIssue
+    from .document_types import semantic_type
+
+    issues = []
+    host = (urlparse(candidate.source_url).hostname or "").lower()
+    source = candidate.source.lower()
+    allowed = tuple(str(item).lower() for item in (
+        candidate.metadata.get("official_domains", ()) or ()))
+    if source == "sec":
+        if not host.endswith("sec.gov"):
+            issues.append(ValidationIssue("source", "sec_domain_mismatch", host))
+    elif source in {"tavily", "ir"}:
+        if not allowed:
+            issues.append(ValidationIssue("source", "official_domain_unconfigured", host))
+        elif not any(host == domain or host.endswith(f".{domain}") for domain in allowed):
+            issues.append(ValidationIssue("source", "official_domain_mismatch", host))
+
+    try:
+        semantic = semantic_type(candidate.expected_semantic).value
+    except ValueError:
+        return issues
+    head = f"{candidate.title}\n{candidate.text[:12000]}".lower()
+    if semantic == "investor_presentation":
+        if not any(marker in head for marker in ("investor presentation", "earnings presentation",
+                                                  "results presentation", "slides")):
+            issues.append(ValidationIssue("type", "presentation_semantics_missing"))
+    elif semantic == "company_release":
+        hits = sum(marker in head for marker in (
+            "financial results", "quarter ended", "revenue", "net income",
+            "earnings per share", "guidance",
+        ))
+        if hits < 2:
+            issues.append(ValidationIssue("type", "release_semantics_missing"))
+    return issues
 
 
 def _persist(symbol: str, period: str, docs: list[tuple[str, str]], *,
-             metadata: dict[str, dict] | None = None, store=None) -> None:
+             metadata: dict[str, dict] | None = None, store=None) -> set[str]:
     """Register accepted official documents while preserving the tuple API."""
-    from . import document_assets
+    from ..config import entity_meta
+    from . import admission, document_assets, fiscal
+    from .document_types import infer_carrier_format
 
     metadata = metadata or {}
+    accepted: set[str] = set()
     for label, text in docs:
         meta = metadata.get(label, {})
-        low = label.lower()
-        if any(k in low for k in _RELEASE_KW):
-            doc_type = "release"
-        elif any(k in low for k in _DECK_KW):
-            doc_type = "deck"
-        elif any(k in low for k in ("10-k", "10-q", "6-k", "filing", "annual report")):
-            doc_type = "filing"
-        else:
-            doc_type = "announcement"
+        doc_type = classify_semantic(label)
         url_match = re.search(r"(?:tavily:)?(https?://[^)\s]+)", label)
         source_url = meta.get("source_url") or (url_match.group(1) if url_match else "")
         source = ("sec" if label.startswith("SEC ") else
@@ -109,18 +173,44 @@ def _persist(symbol: str, period: str, docs: list[tuple[str, str]], *,
                   "manual" if label.startswith("doc:") else "documents")
         # Release/deck are one-per-period roles. Extra filings and announcements use
         # their own stable label so several documents for the same quarter coexist.
-        key = period if period and doc_type in {"release", "deck"} else \
+        key = period if period and doc_type in {"company_release", "investor_presentation"} else \
             document_assets.stable_key(f"{period}|{label}", prefix=doc_type)
         published = ""
         filed = re.search(r"\((\d{4}-\d{2}-\d{2})\)", label)
         if filed:
             published = filed.group(1)
-        document_assets.ingest(
-            entity=symbol, key=key, doc_type=doc_type, text=text, source=source,
-            source_url=source_url,
+        if source == "manual":
+            document = document_assets.ingest(
+                entity=symbol, key=key, doc_type=doc_type, text=text, source=source,
+                source_url=source_url,
+                external_id=meta.get("accession") or source_url or f"{symbol}:{label}",
+                title=label, published_at=published, related_entities=(symbol,), store=store,
+            )
+            if document is not None:
+                accepted.add(label)
+            continue
+
+        company = entity_meta(symbol).get("name", "")
+        claimed_entity = symbol if admission.mentions_entity(text, symbol, company) else ""
+        detected = fiscal.detect_period(text, f"{label} {source_url}")
+        claimed_period = f"Q{detected[1]} FY{detected[0]}" if detected else ""
+        candidate = admission.CandidateDocument(
+            expected_entity=symbol, claimed_entity=claimed_entity,
+            target_period=period, claimed_period=claimed_period,
+            expected_semantic=doc_type, claimed_semantic=doc_type,
+            text=text, source=source, source_url=source_url,
             external_id=meta.get("accession") or source_url or f"{symbol}:{label}",
-            title=label, published_at=published, related_entities=(symbol,), store=store,
+            title=label, published_at=published,
+            carrier_format=infer_carrier_format(source_url or label),
+            completeness="full", min_chars=_MIN_DOC_CHARS,
+            related_entities=(symbol,),
+            metadata={"official_domains": _official_domains(symbol)},
         )
+        outcome = admission.admit(
+            candidate, extensions=(official_document_issues,), store=store)
+        if outcome.validation.accepted:
+            accepted.add(label)
+    return accepted
 
 
 def _classify(folder: list[tuple[str, str]], keywords: tuple[str, ...]) -> tuple[str, str] | None:
@@ -128,6 +218,10 @@ def _classify(folder: list[tuple[str, str]], keywords: tuple[str, ...]) -> tuple
         if any(k in label.lower() for k in keywords):
             return (label, text)
     return None
+
+
+def _first_semantic(folder: list[tuple[str, str]], semantic: str) -> tuple[str, str] | None:
+    return next((item for item in folder if classify_semantic(item[0]) == semantic), None)
 
 
 # --------------------------------------------------------------------------- #
@@ -145,7 +239,7 @@ def _sec_8k_release(symbol: str) -> tuple[str, str] | None:
     return (rel["label"], rel["text"]) if rel else None
 
 
-def sec_8k_release(symbol: str) -> dict | None:
+def sec_8k_release(symbol: str, *, near: str = "", period: str = "") -> dict | None:
     """Latest 8-K Exhibit 99.1 as {label, text, filed: date|None}.
 
     The filing DATE is what makes this usable as a "has the print happened" probe:
@@ -153,51 +247,9 @@ def sec_8k_release(symbol: str) -> dict | None:
     populate an actual EPS. Callers must still check the date against the expected
     print — the newest 8-K may be an unrelated filing, or last quarter's release.
     """
-    import httpx
+    from . import sec
 
-    from .fundamentals import _ticker_to_cik
-
-    cik = _ticker_to_cik().get(symbol.upper())
-    if not cik:
-        return None
-    sub = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
-                    headers=_headers(), timeout=20)
-    sub.raise_for_status()
-    recent = sub.json().get("filings", {}).get("recent", {})
-    forms, accns, dates = (recent.get("form", []), recent.get("accessionNumber", []),
-                           recent.get("filingDate", []))
-    accn = filed = None
-    for form, a, d in zip(forms, accns, dates):
-        if form == "8-K":
-            accn, filed = a.replace("-", ""), d
-            break
-    if not accn:
-        return None
-
-    base = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accn}"
-    idx = httpx.get(f"{base}/index.json", headers=_headers(), timeout=20)
-    idx.raise_for_status()
-    files = [it for it in idx.json().get("directory", {}).get("item", [])
-             if it.get("name", "").lower().endswith(".htm")]
-    # The press release is the largest 'ex99' exhibit (e.g. d...dex991.htm).
-    ex99 = [f for f in files if "ex99" in f["name"].lower()]
-    pick = max(ex99 or files, key=lambda f: int(f.get("size", 0)), default=None)
-    if not pick:
-        return None
-    doc = httpx.get(f"{base}/{pick['name']}", headers=_headers(), timeout=20)
-    doc.raise_for_status()
-    text = _text(doc.text)
-    if len(text) < _MIN_DOC_CHARS:
-        return None
-    filed_date = None
-    if filed:
-        try:
-            filed_date = date.fromisoformat(filed)
-        except ValueError:
-            pass
-    return {"label": f"SEC 8-K earnings release ({filed})", "text": text,
-            "filed": filed_date, "source_url": f"{base}/{pick['name']}",
-            "accession": accn}
+    return sec.earnings_release_record(symbol, near=near, period=period)
 
 
 _XBRL_MARKERS = ("IDEA: XBRL DOCUMENT", "Namespace Prefix: dei_", "X - Definition")

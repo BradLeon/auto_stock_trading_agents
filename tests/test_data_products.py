@@ -131,6 +131,7 @@ def test_health_summarises_source_runs_and_document_processing():
 
     assert health["structured_sources"][0]["status"] == "unreachable"
     assert health["document_sources"][0]["documents"] == 1
+    assert health["candidate_admission"] == []
     assert health["processing"] == {
         "total": 1, "running": 0, "failed": 1, "succeeded": 0,
     }
@@ -148,3 +149,50 @@ def test_data_cli_exposes_products_as_json(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload[0]["entity"] == "AMD"
     assert payload[0]["version_id"]
+
+
+def test_quality_reports_coverage_correctness_completeness_lag_and_consistency(capsys):
+    import json
+
+    from ats.data.admission import CandidateDocument, admit
+    from ats.runtime.cli import main
+
+    store = get_store()
+    good = CandidateDocument(
+        expected_entity="AMD", claimed_entity="AMD", target_period="2026Q2",
+        claimed_period="Q2 FY2026", expected_semantic="news_item",
+        claimed_semantic="news", text="Complete AMD article. " * 80,
+        source="fixture", title="AMD update", published_at=NOW.isoformat(),
+        completeness="full", min_chars=1)
+    bad = CandidateDocument(
+        expected_entity="AMD", claimed_entity="INTC", target_period="2026Q2",
+        claimed_period="Q1 FY2026", expected_semantic="news_item",
+        claimed_semantic="news", text="Wrong company and period. " * 80,
+        source="fixture", title="Wrong update", published_at=NOW.isoformat(),
+        completeness="partial", min_chars=1)
+    assert admit(good, store=store).validation.accepted
+    assert not admit(bad, store=store).validation.accepted
+    source = _source()
+    store.register_data_source(source, at=NOW)
+    run = store.begin_ingestion(source.id, kind="structured", at=NOW)
+    store.finish_ingestion(
+        run, status="stale", discovered=2, accepted=1, quarantined=1,
+        reason_codes={"period_mismatch": 1}, snapshot_updated_at="2026-08-01T00:00:00Z",
+        snapshot_lag_hours=432.0, at=NOW)
+
+    quality = DataProducts(store).quality()
+
+    assert quality["coverage"]["admission_rate"] == 0.5
+    assert quality["correctness"]["identity"]["rate"] == 1.0
+    assert quality["correctness"]["period"]["rate"] == 1.0
+    assert quality["candidate_checks"]["identity"]["rate"] == 0.5
+    assert quality["candidate_checks"]["period"]["rate"] == 0.5
+    assert quality["completeness"]["rate"] == 1.0
+    assert quality["read_consistency"]["rate"] == 1.0
+    assert quality["reason_codes"] == {
+        "completeness_partial": 1, "identity_mismatch": 1, "period_mismatch": 1}
+    assert quality["source_lag"][0]["snapshot_lag_hours"] == 432.0
+
+    assert main(["data", "quality"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["read_consistency"]["rate"] == 1.0

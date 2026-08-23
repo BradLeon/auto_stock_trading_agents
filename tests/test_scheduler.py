@@ -1,6 +1,7 @@
 """Phase 10: scheduler — NYSE session gating (offline calendar data)."""
 
 from datetime import date, datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from ats.runtime import scheduler
@@ -74,3 +75,24 @@ def test_chief_daily_runs_with_scheduled_source(monkeypatch):
     scheduler._chief_daily(dry_run=True)
     assert len(calls) == 1
     assert calls[0]["source"] == "scheduled" and calls[0]["dry_run"] is True
+
+
+def test_yahoo_news_is_backfilled_once_for_the_shared_universe(monkeypatch):
+    from ats import config
+    from ats.data import yahoo_news
+
+    calls = []
+    monkeypatch.setattr(config, "load_news_sources", lambda: {
+        "yahoo_news": {"enabled": True, "backfill_days": 7,
+                       "stale_after_hours": 72}})
+    monkeypatch.setattr(config, "load_pead_global", lambda: {
+        "targets": ["AMD"], "observe": ["TSM"], "monitor": {"lookback_days": 7}})
+    monkeypatch.setattr(config, "load_pead_config", lambda _symbol: SimpleNamespace(
+        signal_chain=[SimpleNamespace(symbol="NVDA"), SimpleNamespace(symbol="TSM")]))
+    monkeypatch.setattr(yahoo_news, "backfill", lambda symbols, *a, **k:
+                        calls.append(symbols) or yahoo_news.YahooNewsBatch(
+                            (), "zero_matches"))
+
+    scheduler._news_backfill_daily()
+
+    assert calls == [["AMD", "TSM", "NVDA"]]

@@ -47,7 +47,9 @@ def run(*, use_llm: bool = True) -> list[Insight]:
     claimed = 0
     for art in candidates:
         entity = research_src.publisher_entity(art.source)
-        doc_id = f"{entity}:{research_src.article_slug(art.id)}:article"
+        catalog = store.document_by_external_id(art.id)
+        doc_id = (catalog or {}).get("document_id") or \
+            f"{entity}:{research_src.article_slug(art.id)}:research_article"
 
         # Preserve the deployed seen-set without re-spending on the first migration
         # run. New documents use the versioned processing ledger below.

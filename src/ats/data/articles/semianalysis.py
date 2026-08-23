@@ -98,7 +98,8 @@ def fetch_body(url: str) -> str:
     from .. import source_cache
 
     slug = (url or "").split("://", 1)[-1]
-    doc = source_cache.load("SEMIANALYSIS", slug, "article", min_chars=1)
+    doc = (source_cache.load("SEMIANALYSIS", slug, "research_article", min_chars=1)
+           or source_cache.load("SEMIANALYSIS", slug, "article", min_chars=1))
     if doc is None:
         log.warning("semianalysis: shared body missing for %s", url)
         return ""

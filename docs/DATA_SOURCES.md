@@ -1,7 +1,7 @@
 # 数据源状态（Data Sources）
 
 PEAD 基本面分析 + 交易 Agent 的数据源清单：已接入并测试通过 vs 待接入。
-最后更新：2026-08-19（+ 共享数据平台首期能力）。
+最后更新：2026-08-23（+ 非结构化准入、真实回填与质量发布闸）。
 
 ## 如何测试
 
@@ -32,9 +32,9 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 | **consensus** 一致预期 | yfinance（无需 key） | 当季 EPS / 营收 一致预期（含 low/high）+ **分析师目标价**(mean/median/low/high/current) + **评级分布**(SB/B/H/S/SS 含近 4 月趋势) + **近 120 天升降级**(机构/评级/动作，最多 8 条) | → `pead_dossier.expectation_set` + prep 叙事/预期上下文 | Finnhub earnings 带预估、`/stock/recommendation`（免费）带评级，可交叉验证；Finnhub 目标价为付费端点 |
 | **runup** 抢跑/距高 | yfinance（无需 key） | 财报前 20 日相对 SMH/QQQ 超额收益、距 52w 高 | → `pead_dossier.market_setup` | 透支判断 |
 | **options** 期权 | **ThetaData 本地终端** → yfinance 兜底 | Expected Move、ATM IV、25Δ skew（BS 反解） | → `pead_dossier.market_setup` | ⚠️ 终端开着才准（IV≈真值）；终端没开走 yfinance 时 IV 退化，建议跑财报时开 `./scripts/start_thetadata.sh` |
-| **news** 新闻 | Finnhub（`FINNHUB_API_KEY`）+ 策选 RSS | 标的 + 信号链公司新闻（标题/摘要/链接/时间），去重 + **LLM 分诊降噪**（Gemini Flash 打 materiality 分，噪音不进 LLM 上下文）+ **关键新闻正文增强**（≥0.65 分抓全文喂 monitor） | 全部标题/摘要 → 共享文档资产；高价值全文 → 同一文档的新版本；事件状态 → `pead_events` | 相同 URL 跨 Provider/标的只保存和抓取一次；X/社媒见待接入 |
-| **research** 订阅研报 | Gmail IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | 高质量 newsletter 全文（SemiAnalysis 等，付费文只有邮件里全）→ LLM 提取 per-ticker insight（**含二阶传导**：如 Meta 出租算力→利空 MU/TSM），universe = targets+signal_chain | 共享原文 → `source_documents`/`document_versions`；PEAD 兼容结果 → `research_articles`/`research_insights` + `task_projections`；material insight 注入 `pead_events` | `ats pead research`；PEAD 与 Evidence 共用一次采集结果，各自记录处理版本。⚠️ Gmail 直连 993 被机场墙 → 走 **Gmail 过滤器自动转发到 QQ 邮箱**（`imap.qq.com` 直连） |
-| **transcript** 电话会纪要 | defeatbeta / Tavily / 手工文件 / FMP | 财报电话会全文 | 质量与报告期校验通过后 → 共享文档资产 → PEAD/Evidence 共用 | FMP 需付费层；也可 `--transcript <链接/路径>`；第二个 Workflow 不再重新抓取 |
+| **news** 新闻 | IBKR 盘中 + defeatbeta/Yahoo 日级回填 + Finnhub/RSS 补充 | 标的与信号链新闻；Yahoo 保留 UUID、publisher、report date 和段落结构 | 规范 URL/来源别名去重后 → `news_item` 共享资产；事件状态 → `pead_events` | Yahoo 路由在发布闸前由 `news_sources.yaml` 开关控制；Tavily 不再作为新闻主数据源 |
+| **research** 订阅研报 | IMAP（`GMAIL_ADDRESS`+`GMAIL_APP_PASSWORD`）+ Substack RSS | Newsletter 正文与完整性证据 → per-ticker insight | `research_article` 共享资产；UIDVALIDITY/UID/Message-ID 游标；PEAD/Evidence 各自记录处理版本 | 首次回填 30 天，后续重叠增量；partial/teaser 保存但默认不供 Agent 当完整正文使用 |
+| **transcript** 电话会纪要 | 人工/官方覆盖 → defeatbeta 结构化主源 → FMP 等结构化回退 → Tavily 候选 | 精确 symbol + fiscal period；保留 speaker/paragraph 顺序和数据集快照延迟 | 校验通过 → `earnings_transcript` 共享资产 → PEAD/Evidence 共用；失败 → quarantine | 不再允许“期间未知则放行”；网页候选需通过正文结构和噪声检查 |
 | **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**、SEC/手工公告、10-K/10-Q/6-K、**投资者 PPT** | 共享文档资产 → score / Evidence | 文件夹 `信息源/<SYM>/` 有则优先；按财报期复用，不重复访问 SEC/Tavily |
 | **industry** 行业知识 | 本地 Obsidian 笔记（`industry_notes.root`，策选白名单 md） | 稳定的**行业/产业链背景**（AI 硬件供应链分层框架、利润分布、周期护城河、AI Capex、L4-L6 估值）——判断标的**定位/护城河/周期/议价权** | → **prep 建 thesis** 时注入 narrative，经 `prior_narrative` 闭环传播到 monitor/score | 文件夹直读（复用 documents `_read_doc`）；每篇截断 12k；root 缺失静默跳过。**结构性背景**非实时报价，动态景气仍靠 news/research |
 
@@ -73,7 +73,14 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 - **`var/checkpoints.sqlite`**：LangGraph 暂停态（异步飞书审批跨进程 resume）。
 - **`var/transcripts/<SYM>_<fiscal>.txt`**：手动落档纪要；**`信息源/<SYM>/`**（`docs_root`）：官方 PDF；**`半导体产业研究合集/`**（`industry_notes.root`）：行业知识 md（prep 注入，不落库）。
 - **尚未迁移的原始源**：行情/基本面/宏观/期权/consensus 仍每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。这是当前迁移边界，不再作为长期数据原则。
-- 查存储：`ats data health`、`ats data search "inference demand" --entity AMD`、`ats data series --source <source_id>`、`ats data company AMD`、`ats data claim <concept>`、`ats data lineage <projection_id>`。
+- 查存储：`ats data health`、`ats data quality`、`ats data search "inference demand" --entity AMD`、`ats data series --source <source_id>`、`ats data company AMD`、`ats data claim <concept>`、`ats data lineage <projection_id>`。
+
+## 非结构化数据运维闸
+
+1. `ats data health`：确认每个来源是成功、零匹配、陈旧、不可达还是未授权，并查看 accepted/quarantined/reason-code。
+2. `ats data quality`：发布前要求统一读回一致性 100%，自动 accepted 抽样的 identity/period 正确率 100%，且 quarantine 不进入默认查询。
+3. Newsletter 游标仅在全部资产落盘后推进；UIDVALIDITY 变化会触发受控日期回填。
+4. defeatbeta/Yahoo 的 `spec.json` 决定 snapshot lag。数据集声明 ODC-BY 且以研究/教育用途为说明；不得因“公开可下载”推导出可任意再分发，生产用途需单独复核条款。
 
 ## key 一览（`.env`）
 

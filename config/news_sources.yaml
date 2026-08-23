@@ -12,10 +12,18 @@ rss:
 newsletters:
   imap:                            # Gmail IMAP (GMAIL_ADDRESS/GMAIL_APP_PASSWORD in .env)
     folder: INBOX
+    overlap_uids: 20               # replay boundary messages; Message-ID dedup is stable
     senders:                       # matched against the From header
       - {name: SemiAnalysis, email: semianalysis@substack.com}
   research_feeds:                  # RSS: free posts carry full text
     - {name: SemiAnalysis, url: https://semianalysis.com/feed/}
+
+# Structured Yahoo Finance history. Kept behind a release gate until the isolated
+# stage-one run passes; once enabled it is queried before Finnhub/RSS.
+yahoo_news:
+  enabled: true
+  backfill_days: 7
+  stale_after_hours: 72
 
 # X / social accounts to track (X API is restricted — adapter is a stub for now).
 x_accounts:

@@ -11,6 +11,69 @@ def _body(marker: str) -> str:
     return (f"{marker}: publisher supplied research body. " * 40).strip()
 
 
+def test_frontmatter_parser_preserves_markdown_horizontal_rules():
+    body = "first section\n\n---\n\nsecond section"
+    raw = "---\nsymbol: TSM\ndoc_type: transcript\n---\n\n" + body
+
+    meta, loaded = source_cache._split_frontmatter(raw)
+
+    assert meta == {"symbol": "TSM", "doc_type": "transcript"}
+    assert loaded == body
+
+
+def test_frontmatter_parser_keeps_plain_and_corrupt_files_readable():
+    plain = "manual text\n\n---\n\nbody continues"
+    assert source_cache._split_frontmatter(plain) == ({}, plain)
+
+    corrupt = "---\n[not: valid: yaml\n---\n\nrecoverable body"
+    meta, body = source_cache._split_frontmatter(corrupt)
+    assert meta == {}
+    assert body == "recoverable body"
+
+
+def test_latest_version_readback_preserves_full_body_with_horizontal_rule():
+    store = get_store()
+    first_body = _body("old")
+    latest_body = _body("head") + "\n\n---\n\n" + _body("tail")
+    first = document_assets.ingest(
+        entity="TSM", key="2026Q2", doc_type="transcript", text=first_body,
+        source="fixture", min_chars=1, store=store,
+    )
+    latest = document_assets.ingest(
+        entity="TSM", key="2026Q2", doc_type="transcript", text=latest_body,
+        source="fixture", min_chars=1, store=store,
+    )
+
+    assert first is not None and latest is not None
+    assert len(store.document_versions(latest.document_id)) == 2
+    assert document_assets.read_document(latest.document_id, store=store) == latest_body
+
+
+def test_readback_rejects_version_bytes_that_disagree_with_catalog():
+    store = get_store()
+    doc = document_assets.ingest(
+        entity="TSM", key="2026Q2", doc_type="transcript", text=_body("original"),
+        source="fixture", min_chars=1, store=store,
+    )
+    assert doc is not None and doc.version_path is not None
+
+    doc.version_path.write_text("tampered bytes", encoding="utf-8")
+
+    assert document_assets.read_document(doc.document_id, store=store) == ""
+
+
+def test_source_cache_rejects_visible_body_with_stale_frontmatter_hash():
+    doc = source_cache.store(
+        "TSM", "2026Q2", "transcript", _body("original"),
+        source="fixture", min_chars=1,
+    )
+    assert doc is not None
+    raw = doc.path.read_text(encoding="utf-8")
+    doc.path.write_text(raw.replace("original", "modified", 1), encoding="utf-8")
+
+    assert source_cache.load("TSM", "2026Q2", "transcript", min_chars=1) is None
+
+
 def test_document_content_versions_are_immutable_and_latest_stays_compatible():
     store = get_store()
     t0 = datetime(2026, 8, 19, tzinfo=timezone.utc)

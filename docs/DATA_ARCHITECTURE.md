@@ -722,6 +722,41 @@ Agent 结论
 
 **实施状态：已完成。** 当前统一入口覆盖财报稿、SEC/手工公告、投资者材料、电话会纪要、普通新闻、Newsletter 及 Chain Article。手工文件继续拥有最高优先级；普通新闻全文仍按重要度分级获取。
 
+### 阶段一的准入与来源策略（2026-08）
+
+阶段一的“统一”不是把所有抓到的文本都放进知识库，而是统一执行
+`候选 → 确定性校验 → accepted / quarantined`。默认查询、全文分块和 Agent
+只能看到 accepted；quarantined 保留原始正文、来源和全部 reason-code，供人工修正。
+
+文档的“业务语义”和“文件载体”分别记录。`article`、`news`、`release`、`deck`、
+`transcript`、`filing` 是兼容期旧名称；新写入分别使用 `research_article`、
+`news_item`、`company_release`、`investor_presentation`、`earnings_transcript`、
+`regulatory_filing`。HTML、PDF、邮件、结构化数据集只是载体，不决定文档语义。
+
+各类来源按用途排序，而不是设置一个全局“最好来源”：
+
+| 资料 | 首选 | 回退与约束 |
+|---|---|---|
+| 电话会纪要 | 人工/公司官方覆盖，其次 defeatbeta 结构化纪要 | FMP 等结构化源补充；Tavily 只发现候选，必须绑定目标财报事件 |
+| 公司公告 | 目标事件附近的 SEC 8-K/6-K 正式 exhibit | 公司官方 IR；没有业绩附件时禁止拿最大 HTML 充数 |
+| 投资者材料 | 人工文件、登记的官方 IR 域名 | 搜索结果只作候选，需通过公司、期间和 presentation 语义校验 |
+| 盘中新闻 | IBKR readonly 新闻通道 | 单标的/单时间片故障局部降级，重叠窗口按稳定 provider article id 去重 |
+| 日级/历史新闻 | defeatbeta 的 Yahoo News 结构化镜像 | Finnhub/RSS 补充；规范 URL 去重，IBKR 无公开 URL 时以同标题同发布日期建立来源别名 |
+| 订阅研报 | IMAP 邮件，其次公开 RSS | UIDVALIDITY + UID/Message-ID 持久游标；partial/teaser 默认不可当完整研报消费 |
+
+Newsletter 首次运行回填配置天数，之后从成功水位重叠增量读取。只有本轮邮件全部
+持久化后才推进游标；`max_articles_per_run` 只限制下游模型加工，不限制原始邮件入库。
+正文完整性保留 `full / partial / teaser` 和具体截断证据。
+
+运维查询：`ats data health` 查看来源状态和处理失败，`ats data quality` 查看覆盖率、
+identity/period 正确率、正文完整率、快照延迟和统一读回一致性。来源状态明确区分
+`succeeded`、`zero_matches`、`stale`、`unreachable` 与 `unauthorized`。
+
+defeatbeta 数据集页面当前声明 ODC-BY，底层数据来自 Yahoo Finance、Nasdaq 和美国财政部，
+并注明用于研究/教育。系统只保存研究所需内容与 provenance，不应把镜像重新对外分发；
+上线前需按实际用途再次核查上游条款。`spec.json` 的单文件更新时间是快照时效依据，
+查询成功但超过阈值仍标记 `stale`，不得静默当作最新数据。
+
 ### 阶段二：结构化数据沉淀
 
 **目标：结构化数据可以查询、计算、回放和画图。**

@@ -40,10 +40,10 @@ def test_verify_transcript_rejects_wrong_quarter():
     ok, why = fiscal.verify_transcript("Q2 FY2026", "body", "url:...q2-2026")
     assert ok is True
 
-    # undetectable period -> allowed but flagged (⚠️), never a silent pass
+    # An automatic candidate with an undetectable period is quarantined.
     ok, why = fiscal.verify_transcript("Q2 FY2026", "plain body", "none")
-    assert ok is True and "⚠️" in why
+    assert ok is False and "period unresolved" in why
 
-    # target quarter not encoded -> can't compare, skip the check
+    # An incomplete target cannot authorize an automatic candidate either.
     ok, why = fiscal.verify_transcript("Q FY2026", "body", "tavily:...q1-2026")
-    assert ok is True and "跳过" in why
+    assert ok is False and "period unresolved" in why

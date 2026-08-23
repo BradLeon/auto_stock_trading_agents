@@ -6,7 +6,9 @@ or index currently serves them. Storage can evolve without changing agent contra
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
+import json
 
 
 class DataProducts:
@@ -70,12 +72,105 @@ class DataProducts:
         return {
             "structured_sources": self.store.data_source_health(),
             "document_sources": self.store.document_source_health(),
+            "candidate_admission": self.store.document_candidate_health(),
             "processing": {
                 "total": len(processing),
                 "running": sum(r["status"] == "running" for r in processing),
                 "failed": sum(r["status"] == "failed" for r in processing),
                 "succeeded": sum(r["status"] == "succeeded" for r in processing),
             },
+        }
+
+    def quality(self) -> dict:
+        """Queryable release-gate metrics for accepted and quarantined documents."""
+        from ..data import document_assets
+
+        candidates = self.store.document_candidates(limit=100_000)
+        check_counts = {
+            "identity": {"checked": 0, "passed": 0},
+            "period": {"checked": 0, "passed": 0},
+        }
+        candidate_check_counts = {
+            "identity": {"checked": 0, "passed": 0},
+            "period": {"checked": 0, "passed": 0},
+        }
+        reasons: Counter[str] = Counter()
+        for row in candidates:
+            try:
+                validation = json.loads(row.get("validation_json") or "{}")
+            except json.JSONDecodeError:
+                validation = {}
+                reasons["invalid_validation_json"] += 1
+            checks = validation.get("checks") or {}
+            for name in candidate_check_counts:
+                if name in checks:
+                    candidate_check_counts[name]["checked"] += 1
+                    candidate_check_counts[name]["passed"] += int(bool(checks[name]))
+                    if row.get("status") == "accepted":
+                        check_counts[name]["checked"] += 1
+                        check_counts[name]["passed"] += int(bool(checks[name]))
+            for issue in validation.get("issues") or ():
+                reasons[str(issue.get("code") or "unknown_reason")] += 1
+
+        inventory = self.store.document_quality_inventory()
+        total_docs = sum(int(row["documents"] or 0) for row in inventory)
+        full_docs = sum(int(row["documents"] or 0) for row in inventory
+                        if row["completeness"] == "full")
+        docs = self.store.documents(limit=100_000)
+        consistency_issues: list[dict] = []
+        checked = 0
+        for row in docs:
+            checked += 1
+            version = self.store.latest_document_version(row["document_id"])
+            if version is None:
+                consistency_issues.append({
+                    "document_id": row["document_id"], "reason": "version_missing"})
+                continue
+            body = document_assets.read_document(row["document_id"], store=self.store)
+            if not body:
+                consistency_issues.append({
+                    "document_id": row["document_id"], "reason": "read_mismatch"})
+
+        accepted_candidates = sum(row.get("status") == "accepted" for row in candidates)
+        quarantined_candidates = sum(row.get("status") == "quarantined"
+                                     for row in candidates)
+
+        def ratio(passed: int, denominator: int) -> float | None:
+            return round(passed / denominator, 6) if denominator else None
+
+        return {
+            "coverage": {
+                "accepted_documents": total_docs,
+                "candidates": len(candidates),
+                "accepted_candidates": accepted_candidates,
+                "quarantined_candidates": quarantined_candidates,
+                "admission_rate": ratio(accepted_candidates, len(candidates)),
+            },
+            "correctness": {
+                name: {**counts, "rate": ratio(counts["passed"], counts["checked"])}
+                for name, counts in check_counts.items()
+            },
+            "candidate_checks": {
+                name: {**counts, "rate": ratio(counts["passed"], counts["checked"])}
+                for name, counts in candidate_check_counts.items()
+            },
+            "completeness": {
+                "documents": total_docs, "full": full_docs,
+                "rate": ratio(full_docs, total_docs),
+            },
+            "source_lag": [
+                {"source_id": row["source_id"], "status": row.get("status"),
+                 "snapshot_updated_at": row.get("snapshot_updated_at"),
+                 "snapshot_lag_hours": row.get("snapshot_lag_hours")}
+                for row in self.store.data_source_health()
+            ],
+            "read_consistency": {
+                "checked": checked, "passed": checked - len(consistency_issues),
+                "rate": ratio(checked - len(consistency_issues), checked),
+                "issues": consistency_issues,
+            },
+            "reason_codes": dict(sorted(reasons.items())),
+            "inventory": inventory,
         }
 
     def lineage(self, projection_id: str) -> dict | None:

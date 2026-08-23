@@ -8,11 +8,14 @@ entity associations, chunks and lineage are applied consistently.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
 
 from . import source_cache
+
+log = logging.getLogger("ats.data.document_assets")
 
 
 def stable_key(value: str, *, prefix: str = "doc") -> str:
@@ -27,6 +30,9 @@ def ingest(*, entity: str, key: str, doc_type: str, text: str,
            source: str = "", source_url: str = "", external_id: str = "",
            title: str = "", published_at: str = "",
            related_entities: tuple[str, ...] = (), min_chars: int = source_cache.MIN_CHARS,
+           completeness: str = "full", truncation_reason: str = "",
+           carrier_format: str = "plain_text",
+           mime_source: str = "",
            now: datetime | None = None, note: str = "", store=None):
     """Persist one accepted body and return its ``CachedDoc`` compatibility object."""
     from ..memory import get_store
@@ -35,7 +41,10 @@ def ingest(*, entity: str, key: str, doc_type: str, text: str,
     doc = source_cache.store(
         entity, key, doc_type, text, source=source, source_url=source_url,
         external_id=external_id, title=title, published_at=published_at,
-        related_entities=related_entities, min_chars=min_chars, now=now,
+        related_entities=related_entities, completeness=completeness,
+        truncation_reason=truncation_reason, carrier_format=carrier_format,
+        mime_source=mime_source,
+        min_chars=min_chars, now=now,
     )
     if doc is not None:
         store.save_document(doc, note=note)
@@ -58,7 +67,15 @@ def read_document(document_id: str, *, store=None) -> str:
             path.read_text(encoding="utf-8", errors="ignore"))
     except OSError:
         return ""
-    return body.strip()
+    body = body.strip()
+    if not source_cache.body_is_consistent(
+        body,
+        expected_hash=version.get("content_hash", ""),
+        expected_chars=version.get("chars"),
+    ):
+        log.error("document asset integrity mismatch: %s (%s)", document_id, path)
+        return ""
+    return body
 
 
 def read_external(external_id: str, *, store=None) -> tuple[dict | None, str]:

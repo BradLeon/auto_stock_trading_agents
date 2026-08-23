@@ -86,12 +86,11 @@ def test_query_names_the_quarter(monkeypatch):
     assert "Alphabet" in seen[0]
 
 
-def test_unparseable_label_falls_back_to_longest(monkeypatch):
-    """'Q FY2026' encodes no quarter — can't verify, so keep the old behaviour and
-    let the downstream period guard be the safety net."""
+def test_unparseable_label_does_not_select_an_automatic_candidate(monkeypatch):
+    """A year-only target cannot authorize whichever search result is longest."""
     _stub(monkeypatch, OBSERVED_MISS)
     text, _ = transcript._from_search("SKHY", "Q FY2026", "SK Hynix")
-    assert text == BODY * 6
+    assert text == ""
 
 
 def test_short_pages_are_never_candidates(monkeypatch):

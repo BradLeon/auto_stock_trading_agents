@@ -49,6 +49,7 @@ monitor:
 research:
   enabled: true
   lookback_days: 2
+  backfill_days: 30            # acquisition window; persistent UID cursor narrows later runs
   max_articles_per_run: 8
   article_chars: 40000           # per-article cap fed to the extraction LLM
   min_confidence_event: 0.6      # >= this -> insight becomes a pead_events entry

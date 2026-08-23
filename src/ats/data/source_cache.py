@@ -62,6 +62,10 @@ class CachedDoc:
     # primary storage bucket separate from these associations prevents the same news
     # body being copied once per ticker.
     related_entities: tuple[str, ...] = ()
+    completeness: str = "full"
+    truncation_reason: str = ""
+    carrier_format: str = "plain_text"
+    mime_source: str = ""
 
     @property
     def document_id(self) -> str:
@@ -117,7 +121,12 @@ def load(symbol: str, period: str, doc_type: str, *, min_chars: int = MIN_CHARS)
     meta, body = _split_frontmatter(raw)
     if len(body.strip()) < min_chars:
         return None
-    digest = meta.get("sha256", "") or hashlib.sha256(body.encode("utf-8")).hexdigest()
+    stored_hash = meta.get("sha256", "")
+    if not body_is_consistent(body, expected_hash=stored_hash,
+                              expected_chars=meta.get("chars")):
+        log.warning("source_cache: integrity mismatch in %s", p)
+        return None
+    digest = stored_hash or hashlib.sha256(body.encode("utf-8")).hexdigest()
     version_path = _version_path(p, digest)
     return CachedDoc(symbol=sym, period=meta.get("period", period),
                      doc_type=meta.get("doc_type", doc_type), text=body,
@@ -129,29 +138,56 @@ def load(symbol: str, period: str, doc_type: str, *, min_chars: int = MIN_CHARS)
                      external_id=meta.get("external_id", ""),
                      title=meta.get("title", ""),
                      published_at=meta.get("published_at", ""),
-                     related_entities=tuple(filter(None, meta.get("related_entities", "").split(","))))
+                     related_entities=tuple(filter(None, meta.get("related_entities", "").split(","))),
+                     completeness=meta.get("completeness", "full") or "full",
+                     truncation_reason=meta.get("truncation_reason", ""),
+                     carrier_format=meta.get("carrier_format", "plain_text") or "plain_text",
+                     mime_source=meta.get("mime_source", ""))
 
 
 def _split_frontmatter(raw: str) -> tuple[dict, str]:
     """Parse `---\\n...\\n---\\n` frontmatter. Files without it are hand-dropped text."""
-    if not raw.startswith("---"):
-        return {}, raw
-    parts = raw.split("\n---", 2)
-    if len(parts) < 2:
+    match = re.match(
+        r"\A---[ \t]*\r?\n(?P<header>.*?)\r?\n---[ \t]*\r?\n(?P<body>.*)\Z",
+        raw,
+        flags=re.DOTALL,
+    )
+    if match is None:
         return {}, raw
     import yaml
 
     try:
-        meta = yaml.safe_load(parts[0].lstrip("-").strip()) or {}
+        meta = yaml.safe_load(match.group("header")) or {}
     except Exception:  # noqa: BLE001 - a corrupt header must not lose the body
         meta = {}
+    body = match.group("body")
+    # ``store`` writes one visual blank line between metadata and prose. Remove that
+    # separator only; independent ``---`` lines later in Markdown are body content.
+    if body.startswith("\r\n"):
+        body = body[2:]
+    elif body.startswith("\n"):
+        body = body[1:]
     if not isinstance(meta, dict):
-        return {}, parts[1].lstrip("\n")
+        return {}, body
     # yaml turns an ISO timestamp into a datetime and a bare FY26 into an int; every
     # consumer here treats these as strings (sorting, formatting), and a mixed-type
     # column raises only for the user whose vault happens to hold both kinds of file.
     return ({k: ("" if v is None else str(v)) for k, v in meta.items()},
-            parts[1].lstrip("\n"))
+            body)
+
+
+def body_is_consistent(body: str, *, expected_hash: str = "",
+                       expected_chars: int | str | None = None) -> bool:
+    """Verify bytes read from disk against catalog/frontmatter integrity metadata."""
+    if expected_hash and hashlib.sha256(body.encode("utf-8")).hexdigest() != expected_hash:
+        return False
+    if expected_chars not in (None, ""):
+        try:
+            if len(body) != int(expected_chars):
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -161,6 +197,9 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
           source_url: str = "", now: datetime | None = None,
           external_id: str = "", title: str = "",
           published_at: str = "", related_entities: tuple[str, ...] = (),
+          completeness: str = "full", truncation_reason: str = "",
+          carrier_format: str = "plain_text",
+          mime_source: str = "",
           min_chars: int = MIN_CHARS) -> CachedDoc | None:
     """Write a document to the cache. Callers must have run the guards first."""
     from ..config import canonical_entity
@@ -184,6 +223,9 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
         "sha256": digest, "chars": len(body), "external_id": external_id,
         "title": title, "published_at": published_at,
         "related_entities": ",".join(sorted(set(related_entities))),
+        "completeness": completeness, "truncation_reason": truncation_reason,
+        "carrier_format": carrier_format,
+        "mime_source": mime_source,
     }
     header = "---\n" + yaml.safe_dump(
         metadata, allow_unicode=True, sort_keys=False, default_flow_style=False
@@ -201,7 +243,9 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
                      source=source, source_url=source_url, fetched_at=stamp,
                      sha256=digest, from_cache=False, version_path=version_path,
                      external_id=external_id, title=title, published_at=published_at,
-                     related_entities=tuple(sorted(set(related_entities))))
+                     related_entities=tuple(sorted(set(related_entities))),
+                     completeness=completeness, truncation_reason=truncation_reason,
+                     carrier_format=carrier_format, mime_source=mime_source)
 
 
 # --------------------------------------------------------------------------- #

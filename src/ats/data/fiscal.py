@@ -92,17 +92,17 @@ def detect_period(text: str, source: str = "") -> tuple[int, int] | None:
 def verify_transcript(label: str, text: str, source: str = "") -> tuple[bool, str]:
     """Policy gate for scoring. Returns (ok, reason).
 
-    - target quarter not encoded in the label -> can't compare, allow (skip).
-    - transcript period undetectable          -> allow, but reason flags the gap.
+    - target quarter not encoded in the label -> reject as unresolved.
+    - transcript period undetectable          -> reject as unresolved.
     - CONFIRMED mismatch (period != target)   -> reject; caller must refuse to score.
     """
     ty, tq = parse_label(label)
-    if tq is None:
-        return (True, f"目标季未在 fiscal_label='{label}' 中编码，跳过报告期核对")
+    if ty is None or tq is None:
+        return (False, f"目标季未在 fiscal_label='{label}' 中完整编码，period unresolved")
     period = detect_period(text, source)
     if period is None:
-        return (True, f"⚠️ transcript 报告期无法从来源/正文识别（source={source!r}），"
-                      f"未能核对是否={ty}Q{tq}，谨慎放行")
+        return (False, f"transcript 报告期无法从来源/正文识别（source={source!r}），"
+                       "period unresolved")
     py, pq = period
     if (py, pq) == (ty, tq):
         return (True, f"报告期核对通过：{py}Q{pq}")

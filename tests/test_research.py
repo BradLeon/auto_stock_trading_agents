@@ -27,6 +27,10 @@ ARTICLE = Article(id="imap:msg1", source="newsletter:SemiAnalysis",
                   published_at=NOW)
 
 
+def _batch(*articles):
+    return research_src.AcquisitionBatch(tuple(articles))
+
+
 def _view():
     return InsightBatchView(article_gist="Meta compute rental", insights=[
         InsightItemView(ticker="TSM", direction="bearish", impact_path="supply_chain",
@@ -41,7 +45,7 @@ def _view():
 
 def test_research_extracts_filters_and_injects(monkeypatch):
     _pin_universe(monkeypatch)
-    monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
+    monkeypatch.setattr(research_src, "fetch_batch", lambda since, **k: _batch(ARTICLE))
     monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
     research_src.ingest(NOW, store=get_store())
 
@@ -65,7 +69,7 @@ def test_research_extracts_filters_and_injects(monkeypatch):
 
 def test_research_dedups_articles_on_second_run(monkeypatch):
     _pin_universe(monkeypatch)
-    monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
+    monkeypatch.setattr(research_src, "fetch_batch", lambda since, **k: _batch(ARTICLE))
     monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
     research_src.ingest(NOW, store=get_store())
     research.run(use_llm=True)
@@ -74,7 +78,7 @@ def test_research_dedups_articles_on_second_run(monkeypatch):
 
 
 def test_research_llm_failure_still_marks_article_seen(monkeypatch):
-    monkeypatch.setattr(research_src, "fetch_articles", lambda since: [ARTICLE])
+    monkeypatch.setattr(research_src, "fetch_batch", lambda since, **k: _batch(ARTICLE))
     research_src.ingest(NOW, store=get_store())
 
     def boom(*a, **k):
@@ -94,12 +98,13 @@ def test_shared_ingestion_feeds_both_consumers_without_refetch(monkeypatch):
         calls.append(since)
         return [ARTICLE]
 
-    monkeypatch.setattr(research_src, "fetch_articles", _fetch)
+    monkeypatch.setattr(research_src, "fetch_batch",
+                        lambda since, **k: _batch(*_fetch(since)))
     research_src.ingest(NOW, store=get_store())
 
     # Both consumers now read disk/catalog only; discovery must not touch the fetcher.
-    monkeypatch.setattr(research_src, "fetch_articles",
-                        lambda since: (_ for _ in ()).throw(AssertionError("refetched")))
+    monkeypatch.setattr(research_src, "fetch_batch",
+                        lambda since, **k: (_ for _ in ()).throw(AssertionError("refetched")))
     assert research_src.stored_articles(NOW, source_match="SemiAnalysis")
     refs = semianalysis.discover(lookback_days=1, source_match="SemiAnalysis")
     assert len(refs) == 1

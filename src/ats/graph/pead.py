@@ -358,7 +358,8 @@ def score_fetch(state: PeadState) -> dict:
     if state.live_data:
         from ..data import documents
 
-        docs = documents.gather(state.symbol, period=state.fiscal_label)
+        docs = documents.gather(
+            state.symbol, period=state.fiscal_label, report_date=state.earnings_date)
         out["documents_text"] = "\n\n".join(f"### {label}\n{txt[:25000]}" for label, txt in docs)
 
     # Minimum-evidence guard: with neither a transcript nor an earnings release there

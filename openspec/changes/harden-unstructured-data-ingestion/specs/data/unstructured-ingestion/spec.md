@@ -82,7 +82,17 @@
 
 ### Requirement: 正式公告和演示材料必须绑定公司与事件
 
-SEC/IR 文档 SHALL 通过公司身份、来源域名或 CIK、form/exhibit 类型和目标事件日期校验。SEC 8-K 路径 SHALL 只在确认目标 Exhibit 99.x 及业绩语义后接受 release；无匹配 Exhibit 时 SHALL 记录缺口，不得回退到最大 HTML。Investor presentation SHALL 确认公司、期间和演示语义。
+SEC/IR 文档 SHALL 通过公司身份、来源域名或 CIK、form/exhibit 类型和目标事件日期校验。SEC 8-K 路径 SHALL 只在确认目标 Exhibit 99.x 及业绩语义后接受 release；无匹配 Exhibit 时 SHALL 记录缺口，不得回退到最大 HTML。Investor presentation SHALL 确认公司、期间和演示语义。系统 SHALL 将 10-Q/10-K 主申报文件作为独立 regulatory filing 获取和保存，不得用 release 附件代替，也不得把整份 filing 误分类为 release。
+
+系统 SHALL 在联网前检查当前财报事件是否已有可复用的 accepted 官方资产。历史 `unknown-release` 或旧类型资产只有在重新通过公司身份、目标期间、业绩语义与 SEC provenance 校验后才可迁移到事件键；未经重新校验不得因“历史上下载成功”自动放行。
+
+SEC 传输层 SHALL 对临时连接失败作有限重试，并分别报告 filing metadata、filing index、完整 submission、exhibit 和 primary filing 的状态。所有官方端点均不可达时 SHALL 记录 `unreachable` 及原因，SHALL NOT 把空结果报告为“运行成功且没有文档”。
+
+系统 SHALL 优先使用 SEC submissions 官方元数据保留 form、items、primary document、CIK、accession、filing date 与 report date；第三方 filing 镜像缺行或不可达时 SHALL 回退官方 submissions，而不是停止官方披露发现。美国国内发行人的 earnings release 候选 SHALL 优先绑定 8-K Item 2.02，并结合 Item 9.01、附件 description 与正文业绩语义。系统 SHALL 检查 filing 中所有 EX-99 和必要的 primary document，SHALL NOT 按文件名或最大附件自动选择 release。
+
+财期校验 SHALL 收集而非首个命中正文中的期间候选，并区分主报告期、同比期间、环比期间与指引期间。目标 earnings event、标题/主语义、报告截止日、form/items 和正文候选 SHALL 联合决定绑定；同比或环比期间 SHALL NOT 覆盖主报告期。
+
+系统 SHALL 依据 SEC filing history 区分 domestic、foreign private issuer 与 Canadian foreign private issuer。foreign private issuer 的 company release MAY 位于 EX-99 或 6-K primary document；中期 regulatory filing SHALL 从包含 interim financial statements、operating and financial review 或 statutory interim report 的 6-K 正文/附件取得，年度 regulatory filing SHALL 使用 20-F；Canadian foreign private issuer 年度 SHALL 使用 40-F。不得因其没有 10-Q/10-K 将其统一报告为普通 missing。
 
 #### Scenario: 最新 8-K 是融资事件
 
@@ -101,6 +111,54 @@ SEC/IR 文档 SHALL 通过公司身份、来源域名或 CIK、form/exhibit 类�
 - **WHEN** 已验证材料的标题为 Earnings Presentation
 - **THEN** 文档语义 SHALL 为 investor presentation
 - **AND** 标题中的 earnings 一词 SHALL NOT 使其分类为 company release
+
+#### Scenario: 旧 release 在新季度键下复用
+
+- **WHEN** 目录中已有 `unknown-release`，其 SEC URL、公司身份、财报期间和业绩语义与目标 earnings event 一致
+- **THEN** 系统 SHALL 在不重新联网的情况下将其迁移为该事件的 company release
+- **AND** 新文档 SHALL 保留原 URL、accession、内容哈希和旧版本 lineage
+
+#### Scenario: 下载周期性 SEC filing
+
+- **WHEN** 目标公司在 earnings event 附近存在 10-Q 或对应年度的 10-K
+- **THEN** 系统 SHALL 下载该 accession 的 primary filing document 并保存为 regulatory filing
+- **AND** release 与 filing SHALL 使用不同 document id、不同本地文件和各自的 form/accession provenance
+
+#### Scenario: SEC 官方端点不可达
+
+- **WHEN** SEC index、完整 submission 和 primary document 在有限重试后均因连接错误不可达
+- **THEN** 来源健康 SHALL 记录 `unreachable`、失败阶段、目标 accession 和错误类别
+- **AND** 系统 SHALL 保留已验证缓存可用性，但 SHALL NOT 声称本轮完成了新下载
+
+#### Scenario: 正确 release 同时包含比较期间
+
+- **WHEN** AMZN 的 Item 2.02 EX-99.1 先声明 2026 第二季度结果，随后比较 2025 第二季度
+- **THEN** 系统 SHALL 将主报告期绑定为 2026 Q2
+- **AND** 2025 同比期间 SHALL NOT 使正确 release 被误判为旧财季
+
+#### Scenario: 财年季度使用不同英文词序
+
+- **WHEN** MSFT 或 KLAC 的正确 Item 2.02 EX-99.1 使用 `quarter ended` 或 `fiscal 2026 fourth quarter` 表达目标期间
+- **THEN** 系统 SHALL 结合 earnings event 与正文确定目标财期
+- **AND** SHALL NOT 因旧单一正则无法解析而报告 release missing
+
+#### Scenario: 同一 6-K 有多个 EX-99
+
+- **WHEN** ASML 的同一 6-K 同时包含 press release、presentation、financial statements 与 statutory interim report
+- **THEN** 系统 SHALL 按 description、标题和正文语义分别分类全部附件
+- **AND** SHALL NOT 因 statutory interim report 文件最大而把它当作 company release
+
+#### Scenario: 外国发行人财报位于 6-K 主文档
+
+- **WHEN** SKHY 在目标 earnings event 的 6-K primary document 中直接披露 preliminary quarterly results 且没有 EX-99
+- **THEN** 该 primary document SHALL 可作为经验证的 company release
+- **AND** 无 EX-99 SHALL NOT 单独导致 release missing
+
+#### Scenario: 外国发行人的中期和年度 filing
+
+- **WHEN** TSM 在 earnings release 后另行提交包含目标季度合并财务报表的 6-K，或 foreign issuer 提交对应年度的 20-F/40-F
+- **THEN** 系统 SHALL 将前者保存为目标季度 regulatory filing，将后者保存为年度 regulatory filing
+- **AND** SHALL 保留各自 accession、form、附件角色和来源 URL
 
 ### Requirement: IBKR 新闻连接和分页失败可局部降级
 
@@ -171,4 +229,3 @@ Newsletter 首次接入 SHALL 支持可配置历史回填，后续 SHALL 按邮�
 - **WHEN** defeatbeta 的 spec 更新时间超过配置的最大允许延迟
 - **THEN** 来源健康报告 SHALL 标记 stale 并显示延迟
 - **AND** 最新数据查询 SHALL 优先尝试更及时的来源或显式返回陈旧状态
-

@@ -56,3 +56,19 @@
 - [x] 8.3 在全新隔离目录单独运行阶段一真实采集，逐类检查覆盖、实体、期间、完整性、版本、读取和来源时效
 - [x] 8.4 验收统一读取一致性 100%、自动 accepted 抽样 identity/period 正确率 100%、隔离候选不进入默认查询，并确认 LLM/评分/交易记录均为 0
 - [x] 8.5 输出最终运行报告、质量缺口和生产切换建议；仅在发布闸通过后才将新来源路由设为生产默认
+
+## 9. 正式披露回归修复（release 与 10-Q/10-K）
+
+- [x] 9.1 为旧 `unknown-release` 精确重校验与事件键迁移增加测试并实现复用，保留 SEC provenance、内容版本和 lineage
+- [x] 9.2 为 SEC 传输增加有限重试、filing index/完整 submission 解析回退及阶段化 `unreachable` 结果，禁止静默空成功
+- [x] 9.3 按 accession 下载 10-Q/10-K primary document，作为独立 regulatory filing 入库，并与 company release 分离去重、版本和查询
+- [x] 9.4 运行 SEC/release/filing/document asset 专项单元与集成测试；本组全部通过后再进行真实源测试
+- [x] 9.5 在全新隔离目录只运行 earnings release 与 10-Q/10-K 的真实采集，核对覆盖、实体、期间、form/accession、文件读取与来源失败状态，输出专项报告；不运行其他数据源
+
+## 10. SEC 文档角色、财期与外国发行人完整性
+
+- [x] 10.1 为 AMZN 同比期间、MSFT `quarter ended`、KLAC `fiscal fourth quarter` 增加失败复现测试；实现多候选财期解析与 earnings-event 联合绑定
+- [x] 10.2 以 SEC submissions 官方 form/items/primary-document 元数据补强候选发现，保留 filing index description，逐个分类全部 EX-99，删除“最大附件即 release”规则
+- [x] 10.3 支持经严格校验的 6-K primary document 作为 foreign issuer release，并按 filing history 判定 domestic/20-F/40-F 报告制度
+- [x] 10.4 为 foreign issuer 获取包含中期财务报表/运营回顾的 6-K regulatory filing，并为年度事件获取 20-F/40-F；与 company release 保持独立角色和 provenance
+- [x] 10.5 运行 AMZN/MSFT/KLAC/TSM/SKHY/ASML/NBIS 专项单元与集成测试；全部通过后只对这些实体运行官方披露真实隔离验收并输出新报告，不运行其他来源

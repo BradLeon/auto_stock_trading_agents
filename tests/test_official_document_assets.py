@@ -1,5 +1,6 @@
 """Financial releases, filings and decks enter the shared document asset layer."""
 
+import json
 from datetime import date
 
 from ats.data import document_assets, documents
@@ -50,6 +51,63 @@ def test_remote_release_and_deck_are_catalogued_then_reused_without_network(monk
         lambda *_: (_ for _ in ()).throw(AssertionError("deck refetched")))
     second = documents.gather("AMD", period="2026Q2", store=store)
     assert [body for _, body in second] == [body for _, body in first]
+
+
+def test_legacy_unknown_release_is_revalidated_and_migrated_to_exact_event(monkeypatch):
+    store = get_store()
+    legacy = document_assets.ingest(
+        entity="AMD", key="", doc_type="release", text=_body("release"),
+        source="sec",
+        source_url=("https://www.sec.gov/Archives/edgar/data/2488/"
+                    "000000248826000001/q22026991.htm"),
+        external_id="0000002488-26-000001",
+        title="SEC 8-K earnings release (2026-08-04)",
+        published_at="2026-08-04", related_entities=("AMD",), min_chars=1,
+        store=store,
+    )
+    assert legacy is not None and legacy.period == ""
+    monkeypatch.setattr(documents, "_from_folder", lambda *a: [])
+    monkeypatch.setattr(
+        documents, "sec_8k_release",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("SEC refetched")),
+    )
+    monkeypatch.setattr(documents, "_tavily_deck", lambda *_: None)
+    monkeypatch.setattr(documents, "sec_periodic_filing", lambda *_a, **_k: None)
+
+    gathered = documents.gather(
+        "AMD", period="Q2 FY2026", report_date="2026-08-04", store=store)
+
+    assert gathered == [("SEC 8-K earnings release (2026-08-04)", _body("release"))]
+    exact = next(row for row in store.documents(entity="AMD")
+                 if row["document_id"] == "AMD:Q2 FY2026:company_release")
+    assert exact["source"] == "sec"
+    assert exact["external_id"] == "0000002488-26-000001"
+    assert exact["sha256"] == legacy.sha256
+    aliases = store.document_aliases(exact["document_id"])
+    assert len(aliases) == 1 and aliases[0]["source"] == "legacy_cache"
+    assert json.loads(aliases[0]["metadata_json"])["legacy_document_id"] == legacy.document_id
+
+
+def test_legacy_unknown_release_with_wrong_period_is_quarantined(monkeypatch):
+    store = get_store()
+    wrong = ("AMD Q1 2026 financial results. Revenue, net income, earnings per share "
+             "and guidance. " * 80).strip()
+    assert document_assets.ingest(
+        entity="AMD", key="", doc_type="release", text=wrong, source="sec",
+        source_url=("https://www.sec.gov/Archives/edgar/data/2488/"
+                    "000000248826000001/q12026991.htm"),
+        external_id="0000002488-26-000001", min_chars=1, store=store,
+    ) is not None
+    monkeypatch.setattr(documents, "_from_folder", lambda *a: [])
+    monkeypatch.setattr(documents, "sec_8k_release", lambda *_a, **_k: None)
+    monkeypatch.setattr(documents, "_tavily_deck", lambda *_: None)
+    monkeypatch.setattr(documents, "sec_periodic_filing", lambda *_a, **_k: None)
+
+    assert documents.gather(
+        "AMD", period="Q2 FY2026", report_date="2026-08-04", store=store) == []
+    assert not store.has_document("AMD", "Q2 FY2026", "company_release")
+    candidate = store.document_candidates(status="quarantined")[0]
+    assert "period_mismatch" in json.loads(candidate["reason_codes"])
 
 
 def test_curated_filing_and_announcement_are_separate_assets(monkeypatch):

@@ -445,11 +445,25 @@ class Filing:
     form_type: str
     filing_date: str
     url: str
+    report_date: str = ""
+    items: str = ""
+    primary_document: str = ""
+
+
+class FilingResults(list[Filing]):
+    """List-compatible metadata result that keeps mirror failures observable."""
+
+    def __init__(self, values=(), *, status: str = "succeeded", error: str = "",
+                 source_uri: str = ""):
+        super().__init__(values)
+        self.status = status
+        self.error = error
+        self.source_uri = source_uri
 
 
 def filings(symbol: str, *, forms: tuple[str, ...] = EARNINGS_FORMS,
             near: str = "", window_days: int = 4,
-            config: DefeatBetaConfig | None = None) -> list[Filing]:
+            config: DefeatBetaConfig | None = None) -> FilingResults:
     """Filing METADATA for a symbol — the table carries no document text.
 
     That is the useful shape rather than a limitation: it hands us the CIK and the
@@ -478,13 +492,18 @@ def filings(symbol: str, *, forms: tuple[str, ...] = EARNINGS_FORMS,
             where.append("filing_date BETWEEN ? AND ?")
             args += [str(pivot - timedelta(days=window_days)),
                      str(pivot + timedelta(days=window_days))]
-    sql = (f"SELECT symbol, cik, accession_number, form_type, filing_date, filing_url "
+    sql = (f"SELECT symbol, cik, accession_number, form_type, filing_date, filing_url, "
+           f"report_date "
            f"FROM read_parquet('{_uri(config.filings_uri)}') WHERE {' AND '.join(where)} "
            f"ORDER BY filing_date DESC LIMIT 20")
     try:
         rows = _connect(config.filings_uri).execute(sql, args).fetchall()
     except Exception as exc:  # noqa: BLE001 - a mirror outage must not break the window
         log.info("defeatbeta: filing query failed for %s (%s)", sym, exc)
-        return []
-    return [Filing(symbol=r[0], cik=str(r[1]), accession=str(r[2]), form_type=str(r[3]),
-                   filing_date=str(r[4]), url=str(r[5] or "")) for r in rows]
+        return FilingResults(status="unreachable", error=str(exc),
+                             source_uri=config.filings_uri)
+    values = [Filing(symbol=r[0], cik=str(r[1]), accession=str(r[2]), form_type=str(r[3]),
+                     filing_date=str(r[4]), url=str(r[5] or ""),
+                     report_date=str(r[6] or "")) for r in rows]
+    return FilingResults(values, status="succeeded" if values else "missing",
+                         source_uri=config.filings_uri)

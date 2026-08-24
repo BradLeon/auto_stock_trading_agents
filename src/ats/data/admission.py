@@ -47,7 +47,12 @@ class CandidateDocument:
     @property
     def candidate_id(self) -> str:
         identity = self.external_id or self.source_url or self.title
-        raw = "|".join((self.source, identity, self.content_hash))
+        # One physical filing can legitimately serve several business roles (for
+        # example SK hynix's 6-K is both earnings release and interim regulatory
+        # report). Role is therefore part of candidate identity even when accession
+        # and bytes are identical.
+        raw = "|".join((self.source, identity, str(self.expected_semantic),
+                        self.content_hash))
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -254,6 +259,8 @@ def admit(
         title=candidate.title,
         published_at=candidate.published_at,
         related_entities=candidate.related_entities,
+        completeness=candidate.completeness,
+        carrier_format=str(candidate.carrier_format),
         min_chars=candidate.min_chars,
         store=store,
     )

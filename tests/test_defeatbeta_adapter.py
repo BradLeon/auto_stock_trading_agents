@@ -11,6 +11,7 @@ from ats.data.defeatbeta import (
     coverage_smoke,
     dataset_snapshot,
     fetch,
+    filings,
     save_structure,
     structured_transcript_issues,
 )
@@ -92,6 +93,36 @@ def test_missing_spec_is_visible_without_breaking_transcript_fetch(tmp_path):
 
     assert snapshot.updated_at == "" and snapshot.lag_hours is None
     assert transcript is not None and transcript.snapshot.updated_at == ""
+
+
+def test_periodic_filing_metadata_keeps_form_accession_and_report_date(tmp_path):
+    config = _fixture(tmp_path)
+    con = duckdb.connect()
+    con.execute(
+        "CREATE TABLE sec_filings (symbol VARCHAR, cik VARCHAR, accession_number VARCHAR, "
+        "company_name VARCHAR, form_type VARCHAR, form_type_description VARCHAR, "
+        "filing_date DATE, report_date DATE, acceptance_date_time TIMESTAMP, "
+        "filing_url VARCHAR)"
+    )
+    con.execute(
+        "INSERT INTO sec_filings VALUES "
+        "('AMD','2488','0000002488-26-000099','Advanced Micro Devices','10-Q',"
+        "'Quarterly report','2026-08-05','2026-06-30','2026-08-05 16:01:00',"
+        "'https://www.sec.gov/filing'),"
+        "('AMD','2488','0000002488-26-000088','Advanced Micro Devices','8-K',"
+        "'Current report','2026-08-04','2026-08-04','2026-08-04 16:01:00',"
+        "'https://www.sec.gov/release')"
+    )
+    con.execute(f"COPY sec_filings TO '{config.filings_uri}' (FORMAT PARQUET)")
+
+    result = filings(
+        "AMD", forms=("10-Q", "10-K"), near="2026-08-04", window_days=14,
+        config=config)
+
+    assert len(result) == 1
+    assert result[0].form_type == "10-Q"
+    assert result[0].accession == "0000002488-26-000099"
+    assert result[0].report_date == "2026-06-30"
 
 
 def _structured_candidate(paragraphs):

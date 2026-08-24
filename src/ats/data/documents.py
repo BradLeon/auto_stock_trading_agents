@@ -30,54 +30,117 @@ _DECK_KW = ("presentation", "investor", "deck", "slide")
 
 def gather(symbol: str, docs_root: str | None = None, *, period: str = "",
            report_date: str = "",
-           store=None) -> list[tuple[str, str]]:
-    """Earnings release + investor presentation + any extra curated docs.
+           store=None, include_deck: bool = True,
+           include_periodic_filings: bool = True) -> list[tuple[str, str]]:
+    """Earnings release + SEC periodic filing + optional deck and curated documents.
 
     Priority per doc type: a curated file in <docs_root>/<SYM>/ (most precise) wins;
     otherwise auto-fetch — release from SEC 8-K, deck via Tavily. No duplicates.
     """
+    from ..memory import get_store
+    from .sec import SecRecordResult
+
+    store = store or get_store()
     folder = _from_folder(symbol, docs_root)
     used: set[str] = set()
     docs: list[tuple[str, str]] = []
     new_docs: list[tuple[str, str]] = []
     metadata: dict[str, dict] = {}
+    sec_runs: list[tuple[str, SecRecordResult, str]] = []
 
     f_release = _first_semantic(folder, "company_release")
     if f_release:
         docs.append(f_release); new_docs.append(f_release); used.add(f_release[0])
     else:
-        cached = _cached(symbol, period, "release")
+        cached = _cached(symbol, period, "release", store=store)
         if cached:
             docs.append(cached)
         else:
-            rel = safe_fetch(lambda: sec_8k_release(symbol, near=report_date, period=period),
+            rel_result = safe_fetch(
+                lambda: sec_8k_release(
+                    symbol, near=report_date, period=period, detailed=True),
                              source=f"sec-8k:{symbol}", attempts=2)
+            if isinstance(rel_result, SecRecordResult):
+                rel = rel_result.record
+                sec_runs.append(("earnings_release", rel_result,
+                                 rel["label"] if rel else ""))
+            else:  # test and third-party compatibility with the historical dict API
+                rel = rel_result
             if rel:
                 item = (rel["label"], rel["text"])
                 docs.append(item); new_docs.append(item)
                 metadata[rel["label"]] = rel
 
-    f_deck = _first_semantic(folder, "investor_presentation")
-    if f_deck:
-        docs.append(f_deck); new_docs.append(f_deck); used.add(f_deck[0])
-    else:
-        cached = _cached(symbol, period, "deck")
-        if cached:
-            docs.append(cached)
+    if include_periodic_filings and report_date and period:
+        cached_filing = _cached(symbol, period, "filing", store=store)
+        if cached_filing:
+            docs.append(cached_filing)
         else:
-            deck = safe_fetch(lambda: _tavily_deck(symbol), source=f"tavily-deck:{symbol}", attempts=1)
-            if deck:
-                docs.append(deck); new_docs.append(deck)
+            filing_result = safe_fetch(
+                lambda: sec_periodic_filing(
+                    symbol, near=report_date, period=period, detailed=True),
+                source=f"sec-periodic:{symbol}", attempts=2,
+            )
+            if isinstance(filing_result, SecRecordResult):
+                filing = filing_result.record
+                sec_runs.append(("periodic_filing", filing_result,
+                                 filing["label"] if filing else ""))
+            else:
+                filing = filing_result
+            if filing:
+                item = (filing["label"], filing["text"])
+                docs.append(item); new_docs.append(item)
+                metadata[filing["label"]] = filing
+
+    if include_deck:
+        f_deck = _first_semantic(folder, "investor_presentation")
+        if f_deck:
+            docs.append(f_deck); new_docs.append(f_deck); used.add(f_deck[0])
+        else:
+            cached = _cached(symbol, period, "deck", store=store)
+            if cached:
+                docs.append(cached)
+            else:
+                deck = safe_fetch(lambda: _tavily_deck(symbol), source=f"tavily-deck:{symbol}", attempts=1)
+                if deck:
+                    docs.append(deck); new_docs.append(deck)
 
     extras = [d for d in folder if d[0] not in used]
     docs += extras                                  # extra curated docs (e.g. a saved 10-K)
     new_docs += extras
     accepted = _persist(symbol, period, new_docs, metadata=metadata, store=store)
+    for role, result, label in sec_runs:
+        _record_sec_run(symbol, role, result, accepted=label in accepted, store=store)
     new_labels = {label for label, _ in new_docs}
     return [item for item in docs if item[0] not in new_labels or item[0] in accepted]
 
 
-def _cached(symbol: str, period: str, doc_type: str) -> tuple[str, str] | None:
+def _record_sec_run(symbol: str, role: str, result, *, accepted: bool, store) -> None:
+    """Expose SEC missing/unreachable stages instead of presenting an empty success."""
+    source = type("SecOfficialSource", (), {
+        "id": f"sec_official:{role}:{symbol.upper()}",
+        "label": f"SEC official {role.replace('_', ' ')}",
+        "adapter": "sec.edgar", "cadence": "quarterly", "entity": symbol.upper(),
+    })()
+    store.register_data_source(source, kind="unstructured")
+    run_id = store.begin_ingestion(source.id, kind="unstructured")
+    status = result.status
+    if result.record is not None and not accepted:
+        status = "quarantined"
+    reason_codes: dict[str, int] = {}
+    for failure in result.errors:
+        code = f"{failure.stage}:{failure.error_type}"
+        reason_codes[code] = reason_codes.get(code, 0) + 1
+    note = "; ".join(f"{item.stage}: {item.message}" for item in result.errors[-3:])
+    store.finish_ingestion(
+        run_id, status=status, discovered=result.discovered,
+        accepted=1 if accepted else 0,
+        quarantined=1 if result.record is not None and not accepted else 0,
+        reason_codes=reason_codes, note=note,
+    )
+
+
+def _cached(symbol: str, period: str, doc_type: str, *, store=None) -> tuple[str, str] | None:
     if not period:
         return None
     from . import source_cache
@@ -91,7 +154,73 @@ def _cached(symbol: str, period: str, doc_type: str) -> tuple[str, str] | None:
         doc = source_cache.load(symbol, period, kind)
         if doc:
             return (doc.title or f"cached {doc_type} ({period})", doc.text)
+    # Pre-event-ledger assets were written as ``<SYM>-unknown-release.md``.  They
+    # remain useful, but only after passing today's strict event gate; blindly treating
+    # every historical cache hit as trusted would re-admit the exact stale/wrong-company
+    # files this layer was introduced to quarantine.
+    if doc_type in {"release", "company_release"}:
+        migrated = _migrate_legacy_release(symbol, period, kinds, store=store)
+        if migrated:
+            return migrated
     return None
+
+
+def _accession_from_url(url: str) -> str:
+    """Recover a canonical accession from either a hyphenated SEC filename or dir."""
+    match = re.search(r"(\d{10}-\d{2}-\d{6})", url or "")
+    if match:
+        return match.group(1)
+    for raw in re.findall(r"(?<!\d)(\d{18})(?!\d)", url or ""):
+        return f"{raw[:10]}-{raw[10:12]}-{raw[12:]}"
+    return ""
+
+
+def _migrate_legacy_release(symbol: str, period: str, kinds: tuple[str, ...], *,
+                            store=None) -> tuple[str, str] | None:
+    """Re-admit a pre-ledger ``unknown-release`` under its exact event key."""
+    if not period:
+        return None
+    from ..config import entity_meta
+    from ..memory import get_store
+    from . import admission, fiscal, source_cache
+    from .document_types import infer_carrier_format
+
+    store = store or get_store()
+    legacy = None
+    for kind in kinds:
+        legacy = source_cache.load(symbol, "", kind)
+        if legacy is not None:
+            break
+    if legacy is None:
+        return None
+    url = legacy.source_url or ""
+    company = entity_meta(symbol).get("name", "")
+    claimed_entity = symbol if admission.mentions_entity(legacy.text, symbol, company) else ""
+    detected = fiscal.detect_period(legacy.text, url)
+    claimed_period = f"Q{detected[1]} FY{detected[0]}" if detected else ""
+    candidate = admission.CandidateDocument(
+        expected_entity=symbol, claimed_entity=claimed_entity,
+        target_period=period, claimed_period=claimed_period,
+        expected_semantic="company_release", claimed_semantic="company_release",
+        text=legacy.text, source="sec" if "sec.gov" in url.lower() else legacy.source,
+        source_url=url, external_id=legacy.external_id or _accession_from_url(url),
+        title=legacy.title or f"SEC legacy earnings release ({period})",
+        published_at=legacy.published_at,
+        carrier_format=infer_carrier_format(url), completeness="full",
+        min_chars=_MIN_DOC_CHARS, related_entities=(symbol,),
+    )
+    outcome = admission.admit(
+        candidate, extensions=(official_document_issues,), store=store)
+    if not outcome.validation.accepted or outcome.document is None:
+        return None
+    store.save_document_alias(
+        outcome.document.document_id, source="legacy_cache", source_url=url,
+        external_id=legacy.external_id or legacy.document_id,
+        title=legacy.title, published_at=legacy.published_at,
+        metadata={"legacy_document_id": legacy.document_id,
+                  "legacy_path": str(legacy.path), "content_hash": legacy.sha256},
+    )
+    return (candidate.title, outcome.document.text)
 
 
 def classify_semantic(label: str) -> str:
@@ -147,10 +276,18 @@ def official_document_issues(candidate) -> list:
     elif semantic == "company_release":
         hits = sum(marker in head for marker in (
             "financial results", "quarter ended", "revenue", "net income",
-            "earnings per share", "guidance",
+            "earnings per share", "guidance", "preliminary results of operations",
+            "operating profit", "profit for the period", "quarterly results",
         ))
         if hits < 2:
             issues.append(ValidationIssue("type", "release_semantics_missing"))
+    elif semantic == "regulatory_filing":
+        form = str(candidate.metadata.get("form_type") or "").upper()
+        if form not in {"10-Q", "10-K", "6-K", "20-F", "40-F"}:
+            issues.append(ValidationIssue("type", "periodic_form_invalid", form))
+        elif form.lower() not in head and not any(marker in head for marker in (
+                "quarterly report", "annual report")):
+            issues.append(ValidationIssue("type", "periodic_form_semantics_missing", form))
     return issues
 
 
@@ -165,7 +302,7 @@ def _persist(symbol: str, period: str, docs: list[tuple[str, str]], *,
     accepted: set[str] = set()
     for label, text in docs:
         meta = metadata.get(label, {})
-        doc_type = classify_semantic(label)
+        doc_type = str(meta.get("document_role") or classify_semantic(label))
         url_match = re.search(r"(?:tavily:)?(https?://[^)\s]+)", label)
         source_url = meta.get("source_url") or (url_match.group(1) if url_match else "")
         source = ("sec" if label.startswith("SEC ") else
@@ -175,7 +312,7 @@ def _persist(symbol: str, period: str, docs: list[tuple[str, str]], *,
         # their own stable label so several documents for the same quarter coexist.
         key = period if period and doc_type in {"company_release", "investor_presentation"} else \
             document_assets.stable_key(f"{period}|{label}", prefix=doc_type)
-        published = ""
+        published = str(meta.get("filing_date") or meta.get("report_date") or "")[:10]
         filed = re.search(r"\((\d{4}-\d{2}-\d{2})\)", label)
         if filed:
             published = filed.group(1)
@@ -193,7 +330,8 @@ def _persist(symbol: str, period: str, docs: list[tuple[str, str]], *,
         company = entity_meta(symbol).get("name", "")
         claimed_entity = symbol if admission.mentions_entity(text, symbol, company) else ""
         detected = fiscal.detect_period(text, f"{label} {source_url}")
-        claimed_period = f"Q{detected[1]} FY{detected[0]}" if detected else ""
+        claimed_period = str(meta.get("claimed_period") or (
+            f"Q{detected[1]} FY{detected[0]}" if detected else ""))
         candidate = admission.CandidateDocument(
             expected_entity=symbol, claimed_entity=claimed_entity,
             target_period=period, claimed_period=claimed_period,
@@ -204,12 +342,32 @@ def _persist(symbol: str, period: str, docs: list[tuple[str, str]], *,
             carrier_format=infer_carrier_format(source_url or label),
             completeness="full", min_chars=_MIN_DOC_CHARS,
             related_entities=(symbol,),
-            metadata={"official_domains": _official_domains(symbol)},
+            metadata={
+                "official_domains": _official_domains(symbol),
+                "form_type": meta.get("form_type", ""),
+                "cik": meta.get("cik", ""),
+                "report_date": meta.get("report_date", ""),
+                "filing_regime": meta.get("filing_regime", ""),
+            },
         )
         outcome = admission.admit(
             candidate, extensions=(official_document_issues,), store=store)
         if outcome.validation.accepted:
             accepted.add(label)
+            if source == "sec" and outcome.document is not None:
+                store.save_document_alias(
+                    outcome.document.document_id, source=f"sec_metadata:{doc_type}",
+                    source_url=source_url,
+                    external_id=meta.get("accession") or source_url,
+                    title=label, published_at=published,
+                    metadata={
+                        "cik": meta.get("cik", ""),
+                        "form_type": meta.get("form_type", ""),
+                        "report_date": meta.get("report_date", ""),
+                        "filing_regime": meta.get("filing_regime", ""),
+                        "claimed_period": claimed_period,
+                    },
+                )
     return accepted
 
 
@@ -239,7 +397,8 @@ def _sec_8k_release(symbol: str) -> tuple[str, str] | None:
     return (rel["label"], rel["text"]) if rel else None
 
 
-def sec_8k_release(symbol: str, *, near: str = "", period: str = "") -> dict | None:
+def sec_8k_release(symbol: str, *, near: str = "", period: str = "",
+                   detailed: bool = False):
     """Latest 8-K Exhibit 99.1 as {label, text, filed: date|None}.
 
     The filing DATE is what makes this usable as a "has the print happened" probe:
@@ -249,7 +408,17 @@ def sec_8k_release(symbol: str, *, near: str = "", period: str = "") -> dict | N
     """
     from . import sec
 
-    return sec.earnings_release_record(symbol, near=near, period=period)
+    result = sec.earnings_release_result(symbol, near=near, period=period)
+    return result if detailed else result.record
+
+
+def sec_periodic_filing(symbol: str, *, near: str = "", period: str = "",
+                        detailed: bool = False):
+    """Event-bound SEC 10-Q/10-K/6-K/20-F/40-F with structured status."""
+    from . import sec
+
+    result = sec.periodic_filing_result(symbol, near=near, period=period)
+    return result if detailed else result.record
 
 
 _XBRL_MARKERS = ("IDEA: XBRL DOCUMENT", "Namespace Prefix: dei_", "X - Definition")

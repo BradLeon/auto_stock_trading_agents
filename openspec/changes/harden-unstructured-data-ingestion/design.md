@@ -48,6 +48,20 @@
 
 SEC 查询从 earnings event 日期附近寻找 8-K/6-K/20-F/10-Q 候选，并校验 CIK、form、exhibit 名称及正文业绩语义。没有 `ex99` 或等价正式附件时不再回退到最大 HTML。IR deck 仅接受注册表声明的官方域名或人工文件，搜索引擎结果必须额外通过公司与期间校验。
 
+Earnings release 与 periodic filing 是两个资产角色：前者是 8-K/6-K 中经确认的 EX-99.x 业绩附件，后者是 10-Q/10-K 的 primary document。二者分别保存 accession、form、源 URL 和独立 document id；不得用整份 10-Q 冒充 release，也不得因已有 release 而跳过 10-Q/10-K。
+
+正式披露读取顺序为：精确事件键缓存 → 对旧 `unknown-release`/旧类型缓存做重新准入并迁移 → SEC 新下载。旧资产迁移必须重新核对 SEC provenance、公司、期间和业绩语义，避免把历史宽松路径留下的错误文件直接升级。
+
+SEC 网络访问由单一传输边界负责有限重试和阶段化错误。附件发现优先 filing index；index 不可用时可从完整 submission 的 `<TYPE>`/`<FILENAME>` 确定 EX-99 与 primary document，不能按最大文件猜测。所有路径不可达时写入来源健康状态，缓存命中与本轮新下载分别计数。
+
+SEC 官方 submissions 元数据优先承担候选发现与角色约束，并保留 `items`、`primaryDocument`、form、filing/report date、CIK 和 accession。第三方 filing parquet 作为可缓存镜像与降级入口，但不得因其快照缺行或暂时不可达而阻止查询 SEC 官方 submissions。美国国内发行人的 8-K earnings release 优先要求 Item 2.02，并结合 Item 9.01、附件描述和正文语义；“事件日最新文件”只能用于排序，不能单独成为准入依据。
+
+同一 filing 的全部 EX-99 与 primary document 都先形成带 description/type 的候选，再按业务角色分类。`press release`/`financial results` 候选可成为 company release；`presentation`、`financial statements`、`statutory interim report` 分别进入各自角色，禁止选择最大 EX-99。外国私人发行人的财报可能直接写在 6-K primary document 中；当它通过实体、事件、财期和 earnings 语义校验时，即使没有 EX-99 也可成为 company release。
+
+财期绑定不再取正文第一个正则命中。解析器收集标题、正文开头、报告截止日和同比/环比语句中的全部候选，并以目标 earnings event、当前年度、`reports/results` 邻近度和 filing items 联合判定。比较期间不得覆盖主报告期；在 CIK、Item 2.02、事件日期和 release 角色均精确匹配时，文本只提供截止日而未写 Qn 的候选可由已验证 earnings event 完成绑定。
+
+报告制度由 SEC filing history 判定并缓存，而不是由交易市场或公司名称猜测：近期 `10-Q/10-K/8-K` 表示 domestic，`6-K/20-F` 表示 foreign private issuer，`6-K/40-F` 表示 Canadian foreign private issuer；冲突状态进入健康报告。domestic 的季度/年度 regulatory filing 分别为 10-Q/10-K；foreign 的季度资产为包含 interim financial statements、operating and financial review 或 statutory interim report 的 6-K 正文/附件，年度资产为 20-F/40-F。外国发行人的中期 filing 可以晚于 earnings release，使用独立、受限的后向窗口和内容角色校验。
+
 ### 6. 新闻采用双速通道
 
 IBKR 负责盘中增量：修正为 IBKR 接受的 UTC/时区日期格式，将连接、provider、合约、slice 与 article body 分层捕获失败，`None` 视为局部空结果。defeatbeta/Yahoo News 负责日级回填和历史正文，Finnhub/RSS 继续作为补充。
@@ -88,6 +102,7 @@ TWS 是运行依赖而不是持久源；断开时状态为 unreachable，恢复�
 5. 修复 IBKR 并启用新闻重叠游标；验证 TWS 开/关两种状态。
 6. 上线 Newsletter 首次回填和增量游标；回填窗口以配置控制。
 7. 运行一次完整隔离采集，质量报告达到发布闸后才切换生产默认源。
+8. 对本次回归只运行正式披露专项：以独立目录验证 legacy release 迁移、earnings release、10-Q/10-K、失败状态、文件版本与默认查询；不重新采集其他非结构化来源。
+9. 补充运行 AMZN/MSFT/KLAC 与 TSM/SKHY/ASML/NBIS 的正式披露专项，验证 Item 2.02、全部 EX-99 角色、6-K 主文档、外国中期 filing 与 20-F/40-F 路由；`stock_statement` 留待结构化数据层。
 
 回滚时关闭各新 source/validator feature flag，旧读取和历史 catalog 保持可用；新隔离记录与不可变版本无需删除。
-

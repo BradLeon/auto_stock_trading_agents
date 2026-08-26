@@ -1,11 +1,97 @@
-# Structured research data catalog and release gates.
+# Structured research data catalog and checked-in release baseline.
 #
-# This file is the machine-readable boundary for build-structured-data-foundation.
-# `catalog_status` describes implementation state; it is not inferred from whether a
-# Python module happens to exist. Runtime/excluded entries are deliberate non-datasets.
+# PURPOSE
+# -------
+# This is the source of truth for registered structured sources, datasets, metrics,
+# Provider mappings, quality gates, and checked-in rollout modes. It does NOT contain
+# secrets, does NOT prove that a database currently contains data, and does NOT create
+# scheduled jobs. Inspect actual coverage with `ats data catalog/availability`.
+#
+# SAFE CHANGE RULES
+# -----------------
+# 1. Add a persistent source under `sources`, reference it from exactly one dataset,
+#    register its adapter key in src/ats/structured/runtime_registry.py, and start its
+#    checked-in source mode at `legacy`.
+# 2. A source that has written ingestion runs, artifacts, observations, or snapshots
+#    must not be hard-deleted or renamed. Stop it by rolling its source mode back to
+#    `legacy` and remove it from future primary/fallback selection while retaining the
+#    source identity for historical lineage.
+# 3. Secrets belong in `.env` or the deployment environment, never in this file.
+# 4. `cadence` is descriptive metadata used by quality/operations. It is NOT cron.
+#    Automated collection currently requires an external scheduler to invoke
+#    `ats data ingest`; the existing `ats schedule` command does not schedule these
+#    structured sources.
+# 5. Source and dataset references are bidirectional: each `sources.<id>.datasets`
+#    entry must include a dataset whose `primary_sources` or `fallback_sources` also
+#    contains that source id.
+#
+# TOP-LEVEL SCHEMA
+# ----------------
+# version                    Config schema version; currently only 1.
+# feature_flags              Checked-in source ingestion and consumer read modes.
+# allowed_ingestion_statuses Legal terminal states emitted by ingestion runs.
+# entities                   Stable non-security entities maintained in this catalog.
+# sources                    Provider/runtime source registry and request budgets.
+# datasets                   Business datasets, source priority, quality, acceptance.
+# metric_definitions         Provider-neutral metric semantics.
+# provider_mappings          Provider-native field -> metric id mappings.
+# unmapped_policy            Policy for fields whose semantics are unresolved.
+# migration_consumers        Persistent/runtime boundaries for existing consumers.
+#
+# LEGAL STATUS VALUES
+# -------------------
+# catalog_status:
+#   current          implemented and mature capability
+#   current_partial  implemented, but coverage/rollout/observation is incomplete
+#   planned          registered intent; unified ingestion must reject it
+#   deferred         known source/dataset, deliberately postponed
+#   runtime_excluded runtime-only input; must never enter structured persistence
+# persistence: persistent | runtime
+# rollout mode: legacy | shadow | platform | fallback
+#
+# `catalog_status` is capability maturity. Rollout mode is runtime selection. Actual
+# queryability comes from accepted observations. Do not use these concepts as aliases.
+#
+# PERSISTENT SOURCE SHAPE
+# -----------------------
+# source_id:
+#   catalog_status: current_partial       # one of the values above
+#   persistence: persistent               # persistent sources only
+#   provider: Human-readable Provider
+#   upstream: Optional original upstream  # when host != business source
+#   adapter: stable_runtime_adapter_key    # controlled registry key, not import path
+#   datasets: [one_dataset_id]             # current unified ingest requires one
+#   cadence: monthly                       # descriptive, not a schedule expression
+#   retention: query_slice                 # artifact/source retention policy label
+#   internal_request_budget:               # internal guardrail, not official QPS
+#     concurrency: 1
+#     requests_per_run: 1
+#     timeout_seconds: 30
+#
+# DATASET SHAPE
+# -------------
+# dataset_id:
+#   catalog_status: current_partial
+#   entities: [OPTIONAL_FIXED_ENTITY]
+#   entity_registry: optional/path.yaml
+#   coverage_from: [optional/business/config.yaml]
+#   expected_cadence: monthly
+#   primary_sources: [authoritative_source]
+#   fallback_sources: [optional_mirror]
+#   core_metrics: [metric.id]
+#   quality: {... machine release thresholds ...}
+#   acceptance_samples: [representative_entity]
+#   rollback_on: [reason_code]
+#
+# Operational details and field-by-field guidance:
+# docs/STRUCTURED_DATA_OPERATIONS.md
 
 version: 1
 
+# Checked-in baseline only. Runtime resolution order is:
+# environment override -> release overlay -> this section -> default_mode.
+# `sources` controls whether unified ingestion may run. `consumers` controls read paths.
+# Changing a source to platform does not automatically switch a consumer.
 feature_flags:
   default_mode: legacy
   sources:
@@ -25,6 +111,8 @@ feature_flags:
     sector_fundamentals: legacy
   consumer_sources: {}
 
+# Terminal statuses have distinct operational meaning. In particular,
+# not_yet_published, no_coverage, and unreachable must never be merged into "missing".
 allowed_ingestion_statuses:
   - succeeded
   - no_change
@@ -38,6 +126,8 @@ allowed_ingestion_statuses:
   - validation_failed
   - partial
 
+# Stable economic entities that do not naturally live in the listed-security registry.
+# Do not create a fake ticker for a private company.
 entities:
   OPENAI:
     kind: private_company
@@ -50,6 +140,8 @@ entities:
     aliases: [Anthropic, Anthropic PBC]
     securities: []
 
+# Provider sources. `adapter` must match a controlled runtime adapter key.
+# `internal_request_budget` is our conservative limit, not a Provider SLA/QPS claim.
 sources:
   tw_mof_exports:
     catalog_status: current_partial
@@ -126,7 +218,8 @@ sources:
     internal_request_budget: {concurrency: 1}
 
   # Deliberate non-datasets. These entries must never be scheduled, backfilled or
-  # written to the structured repository/artifact store by this change.
+  # written to the structured repository/artifact store. They have no datasets and
+  # use persistence=runtime plus catalog_status=runtime_excluded.
   ibkr_market:
     catalog_status: runtime_excluded
     persistence: runtime
@@ -156,6 +249,8 @@ sources:
     datasets: []
     excludes: [option_chain, greeks, implied_volatility]
 
+# Business datasets. Source references must be reciprocal with `sources.*.datasets`.
+# `quality` values are release gates; do not loosen them merely to make a run pass.
 datasets:
   regional_tw_exports:
     catalog_status: current_partial
@@ -270,6 +365,9 @@ datasets:
     acceptance_samples: [OPENAI, ANTHROPIC]
     rollback_on: [evidence_incomplete, unit_unresolved, event_duplicate, sample_error]
 
+# Provider-neutral metrics. An id is a durable contract once observations use it.
+# Semantically different GAAP/non-GAAP, point-in-time/period, or raw/derived values
+# require separate definitions rather than an ambiguous mapping.
 metric_definitions:
   regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
   regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
@@ -313,6 +411,8 @@ metric_definitions:
   event.valuation.reported: {value_type: number, unit_family: currency, period_basis: event}
   company.arr: {value_type: number, unit_family: currency, period_basis: point_in_time}
 
+# Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
+# must remain pending under `unmapped_policy`; never guess a convenient metric.
 provider_mappings:
   sec_companyfacts:
     "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": financial.revenue.gaap
@@ -408,12 +508,15 @@ provider_mappings:
     rating_sell: consensus.rating.sell_count
     rating_strong_sell: consensus.rating.strong_sell_count
 
+# Unresolved fields remain traceable but unavailable to default consumer queries.
 unmapped_policy:
   action: retain_pending_mapping
   preserve_provider_field: true
   preserve_raw_artifact: true
   publish_to_default_query: false
 
+# Documentation of consumer contracts and the persistent/runtime boundary. Runtime
+# price/options inputs remain outside this structured persistent platform.
 migration_consumers:
   pead:
     current_contracts: [FundamentalData, consensus_dict]

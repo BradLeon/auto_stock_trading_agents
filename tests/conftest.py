@@ -17,12 +17,17 @@ from ats.schemas.memory import TradeLogEntry  # noqa: E402
 def _isolate_db(tmp_path, monkeypatch):
     """Point Context Memory + checkpoints at throwaway DBs per test."""
     monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "mem.sqlite"))
+    monkeypatch.delenv("ATS_STRUCTURED_DB_PATH", raising=False)
+    monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "structured_artifacts"))
     monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
     from ats.memory import reset_store_cache
+    from ats.structured import reset_repository_cache
 
     reset_store_cache()
+    reset_repository_cache()
     yield
     reset_store_cache()
+    reset_repository_cache()
 
 
 @pytest.fixture(autouse=True)

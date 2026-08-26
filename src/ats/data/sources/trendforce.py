@@ -20,8 +20,16 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 
 from ...schemas.chain import SeriesPoint
+from ...structured import (
+    AdapterArtifact,
+    AdapterBatch,
+    FetchRequest,
+    IngestionStatus,
+    NativeRecord,
+)
 
 log = logging.getLogger("ats.data.sources.trendforce")
 
@@ -60,18 +68,8 @@ def _change(cell: str) -> float | None:
     return 0.0                       # an em-dash row: published as unchanged
 
 
-def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
-          **_) -> list[SeriesPoint]:
-    """One point per tracked item for the latest published session.
-
-    `lookback_months` is ignored: the public table shows only the current session. The
-    change TrendForce publishes is against the prior session, so `mom` comes straight
-    from the page rather than being derived — we never see the history to derive it
-    from, and inventing one from a single snapshot would be fabrication.
-    """
-    import httpx
-
-    html = httpx.get(URL, headers=HEADERS, timeout=30, follow_redirects=True).text
+def parse_html(html: str, *, items: tuple[str, ...] = DEFAULT_ITEMS) -> tuple[str, str, list[SeriesPoint]]:
+    """Parse one public table snapshot without network access."""
     session = (_SESSION.search(html).group(1).strip() if _SESSION.search(html)
                else "latest")
     updated = _UPDATED.search(html)
@@ -97,4 +95,71 @@ def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
     log.info("trendforce: session %s, %d items", session, len(out))
     if updated and not out:
         log.warning("trendforce: page parsed but no tracked item matched %s", items)
-    return out
+    return session, updated.group(1) if updated else "", out
+
+
+def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
+          **_) -> list[SeriesPoint]:
+    """One point per tracked item for the latest published session.
+
+    `lookback_months` is ignored: the public table shows only the current session. The
+    change TrendForce publishes is against the prior session, so `mom` comes straight
+    from the page rather than being derived — we never see the history to derive it
+    from, and inventing one from a single snapshot would be fabrication.
+    """
+    import httpx
+
+    html = httpx.get(URL, headers=HEADERS, timeout=30, follow_redirects=True).text
+    return parse_html(html, items=items)[2]
+
+
+class TrendForceDRAMAdapter:
+    source_id = "trendforce_dram"
+    dataset_id = "industry_dram_contract_price"
+
+    def __init__(self, *, client=None, clock=None):
+        self.client = client
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def fetch(self, request: FetchRequest) -> AdapterBatch:
+        import httpx
+
+        client = self.client or httpx
+        fetched_at = self.clock().astimezone(timezone.utc)
+        response = client.get(URL, headers=HEADERS, timeout=30, follow_redirects=True)
+        if hasattr(response, "raise_for_status"):
+            response.raise_for_status()
+        html = response.text
+        items = tuple(request.query_scope.get("items") or DEFAULT_ITEMS)
+        session, updated, points = parse_html(html, items=items)
+        published = None
+        if updated:
+            published = datetime.strptime(updated, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        records = [NativeRecord(
+            entity_id="DRAM_CONTRACT_PRICE",
+            provider_field="industry.dram_contract_price",
+            period=point.period,
+            value=point.value,
+            unit="USD/item",
+            currency="USD",
+            period_basis="published_session",
+            published_at=published,
+            dimensions={"item": point.series},
+            raw={"item": point.series, "published_mom": point.mom,
+                 "source_unit": point.unit},
+        ) for point in points]
+        headers = getattr(response, "headers", {}) or {}
+        version = str(headers.get("etag") or headers.get("last-modified") or updated)
+        return AdapterBatch(
+            source_id=request.source_id,
+            dataset_id=request.dataset_id,
+            status=IngestionStatus.SUCCEEDED if records else IngestionStatus.ZERO_MATCH,
+            fetched_at=fetched_at,
+            records=records,
+            artifacts=[AdapterArtifact(
+                payload=html, query_scope={**request.query_scope, "items": list(items)},
+                source_url=URL, source_version=version, media_type="text/html",
+                retention="constrained_snapshot",
+                metadata={"session": session, "updated": updated})],
+            provider_metadata={"session": session, "updated": updated,
+                               "source_version": version})

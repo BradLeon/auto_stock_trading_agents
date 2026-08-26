@@ -179,7 +179,7 @@ def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> d
 
         cons_txt = ""
         if consensus_for == "all" or (consensus_for == "pead_targets" and sym in pead_syms):
-            c = consensus_src.fetch(sym)
+            c = consensus_src.fetch(sym, consumer="sector_consensus")
             if c.get("target_mean") is not None:
                 cons_txt = (f" | PT {_fmt(c.get('target_mean'))} vs px {_fmt(c.get('target_current'))}, "
                             f"SB{c.get('rating_strong_buy')}/B{c.get('rating_buy')}/"

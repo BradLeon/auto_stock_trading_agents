@@ -123,7 +123,7 @@ def fetch_factors(symbols: list[str], subgroups: dict[str, str] | None = None) -
     for s in symbols:
         lt = fundamentals.fetch_light(s)
         closes = prices.get(s) or []
-        cons = consensus_src.fetch(s)
+        cons = consensus_src.fetch(s, consumer="sector_consensus")
         rows.append(FactorRow(
             symbol=s, subgroup=subgroups.get(s, ""),
             market_cap=lt.get("market_cap"), beta=lt.get("beta"),

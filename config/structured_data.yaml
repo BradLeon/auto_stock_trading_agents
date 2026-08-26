@@ -1,0 +1,438 @@
+# Structured research data catalog and release gates.
+#
+# This file is the machine-readable boundary for build-structured-data-foundation.
+# `catalog_status` describes implementation state; it is not inferred from whether a
+# Python module happens to exist. Runtime/excluded entries are deliberate non-datasets.
+
+version: 1
+
+feature_flags:
+  default_mode: legacy
+  sources:
+    tw_mof_exports: platform
+    kr_ecos_exports: platform
+    trendforce_dram: legacy
+    sec_companyfacts: shadow
+    company_disclosures: legacy
+    defeatbeta_stock_statement: shadow
+    yfinance_consensus: shadow
+    accepted_document_evidence: platform
+  consumers:
+    chain_regional: platform
+    pead_consensus: platform
+    sector_consensus: platform
+    pead_fundamentals: legacy
+    sector_fundamentals: legacy
+  consumer_sources: {}
+
+allowed_ingestion_statuses:
+  - succeeded
+  - no_change
+  - zero_match
+  - not_yet_published
+  - no_coverage
+  - stale
+  - unreachable
+  - unauthorized
+  - parse_failed
+  - validation_failed
+  - partial
+
+entities:
+  OPENAI:
+    kind: private_company
+    canonical_name: OpenAI
+    aliases: [OpenAI, OpenAI Group, OpenAI Global]
+    securities: []
+  ANTHROPIC:
+    kind: private_company
+    canonical_name: Anthropic
+    aliases: [Anthropic, Anthropic PBC]
+    securities: []
+
+sources:
+  tw_mof_exports:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Taiwan Ministry of Finance
+    adapter: tw_mof
+    datasets: [regional_tw_exports]
+    cadence: monthly
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_run: 2, timeout_seconds: 60}
+  kr_ecos_exports:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Bank of Korea ECOS
+    adapter: kr_ecos
+    datasets: [regional_kr_exports]
+    cadence: monthly
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, page_size: 10, timeout_seconds: 30}
+  trendforce_dram:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: TrendForce public price table
+    adapter: trendforce
+    datasets: [industry_dram_contract_price]
+    cadence: monthly
+    retention: constrained_snapshot
+    internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30}
+  sec_companyfacts:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: SEC EDGAR
+    adapter: sec_companyfacts
+    datasets: [company_financials]
+    cadence: event
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_second: 5, timeout_seconds: 30}
+  company_disclosures:
+    catalog_status: planned
+    persistence: persistent
+    provider: issuer or equivalent official disclosure
+    adapter: company_disclosures
+    datasets: [company_financials]
+    cadence: event
+    retention: source_policy
+    internal_request_budget: {concurrency: 1, requests_per_second: 1, timeout_seconds: 30}
+  defeatbeta_stock_statement:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: defeatbeta mirror hosted by HuggingFace
+    upstream: Yahoo Finance structured statement data
+    adapter: defeatbeta_stock_statement
+    datasets: [company_financials]
+    cadence: snapshot
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, timeout_seconds: 60}
+  yfinance_consensus:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Yahoo Finance via yfinance
+    adapter: consensus
+    datasets: [market_consensus]
+    cadence: event_snapshot
+    retention: normalized_snapshot
+    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+  accepted_document_evidence:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: accepted document asset layer
+    adapter: document_numeric_evidence
+    datasets: [private_company_events]
+    cadence: event
+    retention: evidence_link_only
+    internal_request_budget: {concurrency: 1}
+
+  # Deliberate non-datasets. These entries must never be scheduled, backfilled or
+  # written to the structured repository/artifact store by this change.
+  ibkr_market:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: Interactive Brokers
+    adapter: ats.broker
+    datasets: []
+    excludes: [ticker_price, ohlcv, order_book, option_chain, greeks, implied_volatility]
+  yfinance_market:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: Yahoo Finance via yfinance
+    adapter: market_data
+    datasets: []
+    excludes: [ticker_price, ohlcv]
+  yfinance_options:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: Yahoo Finance via yfinance
+    adapter: options
+    datasets: []
+    excludes: [option_chain, greeks, implied_volatility]
+  thetadata_options:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: ThetaData
+    adapter: options
+    datasets: []
+    excludes: [option_chain, greeks, implied_volatility]
+
+datasets:
+  regional_tw_exports:
+    catalog_status: current_partial
+    entities: [TW_IC_EXPORT]
+    expected_cadence: monthly
+    primary_sources: [tw_mof_exports]
+    core_metrics: [regional.tw_ic_exports.value]
+    quality:
+      coverage_ratio_min: 1.0
+      require_period_continuity: true
+      freshness_hours_max: 1488   # 62 days; publication lag is source-specific
+      reconciliation_abs_tolerance: 0.000001
+      shadow_abs_tolerance: 0.000001
+    acceptance_samples: [TW_IC_EXPORT]
+    rollback_on: [period_gap, unit_change, shadow_mismatch, stale]
+  regional_kr_exports:
+    catalog_status: current_partial
+    entities: [KR_SEMI_EXPORT]
+    expected_cadence: monthly
+    primary_sources: [kr_ecos_exports]
+    core_metrics: [regional.kr_semiconductor_exports.index]
+    quality:
+      coverage_ratio_min: 1.0
+      require_period_continuity: true
+      freshness_hours_max: 1488
+      reconciliation_abs_tolerance: 0.000001
+      shadow_abs_tolerance: 0.000001
+    acceptance_samples: [KR_SEMI_EXPORT]
+    rollback_on: [period_gap, unit_change, shadow_mismatch, stale]
+  industry_dram_contract_price:
+    catalog_status: current_partial
+    entities: [DRAM_CONTRACT_PRICE]
+    expected_cadence: monthly
+    primary_sources: [trendforce_dram]
+    core_metrics: [industry.dram_contract_price]
+    quality:
+      coverage_ratio_min: 0.66
+      require_period_continuity: false
+      freshness_hours_max: 1488
+    rollback_on: [parse_failed, stale]
+  company_financials:
+    catalog_status: current_partial
+    entity_registry: config/entities.yaml
+    coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
+    expected_cadence: quarterly_or_issuer_period
+    primary_sources: [sec_companyfacts, company_disclosures]
+    fallback_sources: [defeatbeta_stock_statement]
+    core_metrics:
+      - financial.revenue.gaap
+      - financial.gross_profit.gaap
+      - financial.operating_income.gaap
+      - financial.net_income.gaap
+      - financial.eps.diluted.gaap
+      - financial.cash_from_operations.gaap
+      - financial.capex.gaap
+      - financial.free_cash_flow
+      - financial.cash_and_equivalents.gaap
+      - financial.inventory.gaap
+      - financial.total_debt.gaap
+      - financial.gross_margin.gaap
+      - financial.operating_margin.gaap
+    quality:
+      core_metric_coverage_ratio_min: 0.80
+      require_period_continuity: true
+      freshness_hours_max: 240
+      reconciliation_relative_tolerance: 0.001
+      shadow_relative_tolerance: 0.001
+      pending_mapping_loss_max: 0
+    acceptance_samples: [AMZN, MSFT, KLAC, TSM, mirror_missing_entity]
+    rollback_on: [wrong_entity, wrong_period, unit_change, future_leakage, shadow_mismatch]
+  market_consensus:
+    catalog_status: current_partial
+    coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
+    expected_cadence: event_snapshot
+    primary_sources: [yfinance_consensus]
+    core_metrics:
+      - consensus.eps.reported_actual
+      - consensus.eps.mean
+      - consensus.eps.low
+      - consensus.eps.high
+      - consensus.revenue.mean
+      - consensus.revenue.low
+      - consensus.revenue.high
+      - consensus.price_target.mean
+      - consensus.price_target.median
+      - consensus.price_target.low
+      - consensus.price_target.high
+      - consensus.rating.strong_buy_count
+      - consensus.rating.buy_count
+      - consensus.rating.hold_count
+      - consensus.rating.sell_count
+      - consensus.rating.strong_sell_count
+      - consensus.rating.change
+    quality:
+      required_any: [consensus.eps.mean, consensus.revenue.mean, consensus.price_target.mean]
+      freshness_hours_max: 168
+      require_concrete_target_period: true
+      shadow_relative_tolerance: 0.000001
+    acceptance_samples: [AMZN, MSFT, KLAC, TSM]
+    rollback_on: [target_period_conflict, future_leakage, stale, shadow_mismatch]
+  private_company_events:
+    catalog_status: current_partial
+    entities: [OPENAI, ANTHROPIC]
+    expected_cadence: event
+    primary_sources: [accepted_document_evidence]
+    core_metrics: [event.funding.amount, event.valuation.pre_money,
+                   event.valuation.post_money, event.valuation.reported, company.arr]
+    quality:
+      verified_sample_accuracy_min: 1.0
+      require_document_version_span: true
+      require_human_verification_for_release: true
+    acceptance_samples: [OPENAI, ANTHROPIC]
+    rollback_on: [evidence_incomplete, unit_unresolved, event_duplicate, sample_error]
+
+metric_definitions:
+  regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
+  regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
+  industry.dram_contract_price: {value_type: number, unit_family: currency_per_item, cadence: monthly}
+  financial.revenue.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.gross_profit.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.operating_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.net_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.eps.diluted.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
+  financial.cash_from_operations.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], adjustment: gaap}
+  financial.capex.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], adjustment: gaap}
+  financial.free_cash_flow: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], derived: true}
+  financial.cash_and_equivalents.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.inventory.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_debt.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_assets.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_liabilities.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.stockholders_equity.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.gross_margin.gaap: {value_type: number, unit_family: ratio, period_basis: [quarter, annual], derived: true}
+  financial.operating_margin.gaap: {value_type: number, unit_family: ratio, period_basis: [quarter, annual], derived: true}
+  consensus.eps.mean: {value_type: number, unit_family: currency_per_share, period_basis: target_quarter}
+  consensus.eps.reported_actual: {value_type: number, unit_family: currency_per_share, period_basis: quarter}
+  consensus.eps.low: {value_type: number, unit_family: currency_per_share, period_basis: target_quarter}
+  consensus.eps.high: {value_type: number, unit_family: currency_per_share, period_basis: target_quarter}
+  consensus.revenue.mean: {value_type: number, unit_family: currency, period_basis: target_quarter}
+  consensus.revenue.low: {value_type: number, unit_family: currency, period_basis: target_quarter}
+  consensus.revenue.high: {value_type: number, unit_family: currency, period_basis: target_quarter}
+  consensus.price_target.mean: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.price_target.median: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.price_target.low: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.price_target.high: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.rating.strong_buy_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.buy_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.hold_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.sell_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.strong_sell_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.change: {value_type: record, unit_family: categorical, period_basis: event}
+  event.funding.amount: {value_type: number, unit_family: currency, period_basis: event}
+  event.valuation.pre_money: {value_type: number, unit_family: currency, period_basis: event}
+  event.valuation.post_money: {value_type: number, unit_family: currency, period_basis: event}
+  event.valuation.reported: {value_type: number, unit_family: currency, period_basis: event}
+  company.arr: {value_type: number, unit_family: currency, period_basis: point_in_time}
+
+provider_mappings:
+  sec_companyfacts:
+    "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": financial.revenue.gaap
+    "us-gaap:Revenues": financial.revenue.gaap
+    "us-gaap:SalesRevenueNet": financial.revenue.gaap
+    "ifrs-full:Revenue": financial.revenue.gaap
+    "us-gaap:GrossProfit": financial.gross_profit.gaap
+    "ifrs-full:GrossProfit": financial.gross_profit.gaap
+    "us-gaap:OperatingIncomeLoss": financial.operating_income.gaap
+    "ifrs-full:ProfitLossFromOperatingActivities": financial.operating_income.gaap
+    "us-gaap:NetIncomeLoss": financial.net_income.gaap
+    "ifrs-full:ProfitLoss": financial.net_income.gaap
+    "us-gaap:EarningsPerShareDiluted": financial.eps.diluted.gaap
+    "ifrs-full:DilutedEarningsLossPerShare": financial.eps.diluted.gaap
+    "us-gaap:NetCashProvidedByUsedInOperatingActivities": financial.cash_from_operations.gaap
+    "ifrs-full:CashFlowsFromUsedInOperatingActivities": financial.cash_from_operations.gaap
+    "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment": financial.capex.gaap
+    "ifrs-full:PurchaseOfPropertyPlantAndEquipment": financial.capex.gaap
+    "us-gaap:CashAndCashEquivalentsAtCarryingValue": financial.cash_and_equivalents.gaap
+    "ifrs-full:CashAndCashEquivalents": financial.cash_and_equivalents.gaap
+    "us-gaap:InventoryNet": financial.inventory.gaap
+    "ifrs-full:Inventories": financial.inventory.gaap
+    "us-gaap:LongTermDebtAndFinanceLeaseObligations": financial.total_debt.gaap
+    "us-gaap:LongTermDebt": financial.total_debt.gaap
+    "ifrs-full:Borrowings": financial.total_debt.gaap
+    "us-gaap:Assets": financial.total_assets.gaap
+    "ifrs-full:Assets": financial.total_assets.gaap
+    "us-gaap:Liabilities": financial.total_liabilities.gaap
+    "ifrs-full:Liabilities": financial.total_liabilities.gaap
+    "us-gaap:StockholdersEquity": financial.stockholders_equity.gaap
+    "ifrs-full:Equity": financial.stockholders_equity.gaap
+  defeatbeta_stock_statement:
+    total_revenue: financial.revenue.gaap
+    operating_revenue: financial.revenue.gaap
+    gross_profit: financial.gross_profit.gaap
+    operating_income: financial.operating_income.gaap
+    total_operating_income_as_reported: financial.operating_income.gaap
+    net_income: financial.net_income.gaap
+    net_income_common_stockholders: financial.net_income.gaap
+    diluted_eps: financial.eps.diluted.gaap
+    operating_cash_flow: financial.cash_from_operations.gaap
+    cash_flow_from_continuing_operating_activities: financial.cash_from_operations.gaap
+    capital_expenditure: financial.capex.gaap
+    purchase_of_ppe: financial.capex.gaap
+    cash_and_cash_equivalents: financial.cash_and_equivalents.gaap
+    cash: financial.cash_and_equivalents.gaap
+    inventory: financial.inventory.gaap
+    total_debt: financial.total_debt.gaap
+    total_assets: financial.total_assets.gaap
+    total_liabilities_net_minority_interest: financial.total_liabilities.gaap
+    stockholders_equity: financial.stockholders_equity.gaap
+  yfinance_consensus:
+    reported_eps_actual: consensus.eps.reported_actual
+    eps_0q_avg: consensus.eps.mean
+    eps_0q_low: consensus.eps.low
+    eps_0q_high: consensus.eps.high
+    revenue_0q_avg: consensus.revenue.mean
+    revenue_0q_low: consensus.revenue.low
+    revenue_0q_high: consensus.revenue.high
+    price_target_mean: consensus.price_target.mean
+    price_target_median: consensus.price_target.median
+    price_target_low: consensus.price_target.low
+    price_target_high: consensus.price_target.high
+    rating_0m_strong_buy: consensus.rating.strong_buy_count
+    rating_0m_buy: consensus.rating.buy_count
+    rating_0m_hold: consensus.rating.hold_count
+    rating_0m_sell: consensus.rating.sell_count
+    rating_0m_strong_sell: consensus.rating.strong_sell_count
+    rating_change_score: consensus.rating.change
+  legacy_fundamentals:
+    Revenue: financial.revenue.gaap
+    Gross Margin: financial.gross_margin.gaap
+    Operating Margin: financial.operating_margin.gaap
+    Net Income: financial.net_income.gaap
+    Diluted EPS: financial.eps.diluted.gaap
+    CapEx: financial.capex.gaap
+    Free Cash Flow: financial.free_cash_flow
+    Total Debt: financial.total_debt.gaap
+  legacy_consensus:
+    eps: consensus.eps.mean
+    eps_low: consensus.eps.low
+    eps_high: consensus.eps.high
+    revenue: consensus.revenue.mean
+    revenue_low: consensus.revenue.low
+    revenue_high: consensus.revenue.high
+    target_mean: consensus.price_target.mean
+    target_median: consensus.price_target.median
+    target_low: consensus.price_target.low
+    target_high: consensus.price_target.high
+    rating_strong_buy: consensus.rating.strong_buy_count
+    rating_buy: consensus.rating.buy_count
+    rating_hold: consensus.rating.hold_count
+    rating_sell: consensus.rating.sell_count
+    rating_strong_sell: consensus.rating.strong_sell_count
+
+unmapped_policy:
+  action: retain_pending_mapping
+  preserve_provider_field: true
+  preserve_raw_artifact: true
+  publish_to_default_query: false
+
+migration_consumers:
+  pead:
+    current_contracts: [FundamentalData, consensus_dict]
+    persistent_datasets: [company_financials, market_consensus]
+    runtime_inputs: [ticker_price, ohlcv, option_chain, greeks, implied_volatility]
+    initial_mode: legacy
+  sector:
+    current_contracts: [fundamentals_light_dict, consensus_dict]
+    persistent_datasets: [company_financials, market_consensus]
+    runtime_inputs: [ticker_price, ohlcv, momentum]
+    initial_mode: legacy
+  chain:
+    current_contracts: [SeriesPoint, Observation]
+    persistent_datasets: [regional_tw_exports, regional_kr_exports,
+                          industry_dram_contract_price]
+    runtime_inputs: []
+    initial_mode: legacy
+  risk:
+    current_contracts: [fundamentals_light_dict]
+    persistent_datasets: []
+    runtime_inputs: [beta, ticker_price, option_chain, greeks]
+    initial_mode: legacy

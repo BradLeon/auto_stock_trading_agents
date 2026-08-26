@@ -1,12 +1,41 @@
 # 投资研究数据平台需求与架构设计
 
-> 版本：0.2（首期能力已实施）  
+> 版本：0.3（阶段二结构化底座已验收，2026-08-25）
 > 定位：产品需求与逻辑架构文档  
 > 读者：系统设计者、Agent / Workflow 开发者、数据源接入者
 
 ---
 
 ## 1. 文档摘要
+
+### 1.0 按角色阅读
+
+本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分，且都以机器目录 [`config/structured_data.yaml`](../config/structured_data.yaml) 为状态事实源：
+
+| 读者 | 首选文档 | 主要回答 |
+|---|---|---|
+| 开发者 | [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md) | 组件架构、领域模型、数据流、适配器契约、扩展和测试 |
+| 运维者 | [结构化数据运维指南](STRUCTURED_DATA_OPERATIONS.md) | 来源覆盖、认证与预算、调度、质量门、故障、回滚和验收 |
+| 使用者 / Agent 作者 | [结构化数据使用手册](STRUCTURED_DATA_USER_GUIDE.md) | 如何发现、查询、计算、追溯并组合 persistent/runtime 数据 |
+
+可执行入口：
+
+- 运维新增来源、评测与发布：见 [接入—评测—发布 Runbook](STRUCTURED_DATA_OPERATIONS.md#43-从新增来源到发布可执行-runbook)。
+- 当前实际可用数据：运行 `ats data catalog --format markdown`，再用 `data describe`、`data availability` 和 `data examples`；不要从静态文档推断数据库覆盖。
+- 自主 Agent：使用 [`.agents/skills/structured-data-consumer/SKILL.md`](../.agents/skills/structured-data-consumer/SKILL.md)；确定性 Workflow 继续调用 DataProducts，不依赖 Skill。
+
+实现过程与真实源专项证据：
+
+- [现状基线](STRUCTURED_DATA_BASELINE_2026-08-25.md)
+- [SQLite 性能基准](STRUCTURED_DATA_BENCHMARK_2026-08-25.md)
+- [台湾/韩国区域序列验收](STRUCTURED_DATA_REGIONAL_VALIDATION_2026-08-25.md)
+- [官方财务与 stock_statement 验收](STRUCTURED_DATA_FINANCIAL_VALIDATION_2026-08-25.md)
+- [市场 Consensus 验收](STRUCTURED_DATA_CONSENSUS_VALIDATION_2026-08-25.md)
+- [融资、估值与 ARR 证据验收](STRUCTURED_DATA_EVIDENCE_VALIDATION_2026-08-25.md)
+- [六个数据集五维质量与数量对账](STRUCTURED_DATA_QUALITY_VALIDATION_2026-08-25.md)
+- [消费者迁移、Workflow 回归与离线重放](STRUCTURED_DATA_CONSUMER_VALIDATION_2026-08-25.md)
+- [阶段二最终验收与遗留缺口](STRUCTURED_DATA_FINAL_ACCEPTANCE_2026-08-25.md)
+- [结构化数据可操作产品面补充验收](STRUCTURED_DATA_PRODUCT_SURFACES_ACCEPTANCE_2026-08-26.md)
 
 本次重构的目的，不是简单地把数据分成“结构化数据库”和“向量数据库”，而是把当前由各个 Agent 自行取数、加工、保存的模式，升级为一套共享的研究数据基础设施。
 
@@ -24,7 +53,7 @@
 
 这五类对象生命周期不同，因此不能全部塞进同一个数据库，也不能让某个 Agent 的输出反过来成为全系统的“事实”。
 
-### 1.1 当前实施状态（2026-08-19）
+### 1.1 当前实施状态（2026-08-25）
 
 本轮已经交付支撑该架构的首期平台能力，同时保留原有表和 Workflow 作为兼容接口：
 
@@ -33,15 +62,17 @@
 - PEAD 与 Evidence 共用经过报告期和正文质量校验的纪要；SemiAnalysis 等订阅内容不再由多个 Workflow 分别连接 IMAP / RSS。
 - 普通新闻先保存 Provider 可见的标题/摘要，高价值正文抓取后升级同一逻辑文档；相同 URL 跨 Finnhub/RSS、跨公司只保存一次。
 - 每个文档版本按消费者和处理器版本记录处理状态，数据源不可达、加工失败与零结果不再混为一谈。
-- `chain.sources` 接入的结构化点按修订版本保存，支持 `as_of` 历史时点查询；同比、环比等派生值不写入原始层。
+- 台湾/韩国出口、官方财务、defeatbeta `stock_statement`、市场 Consensus 和已核验证据数值已接入统一 artifact、准入、vintage 与 `as_of` 查询；同比、环比等派生值不写入原始层。
+- 财务专项暴露了官方时效、外国发行人覆盖和跨源口径差异，因此 fundamentals 默认仍走 legacy；达到质量门的 PEAD / Sector Consensus 与 Chain 区域序列已切 platform，并保留独立回滚开关。
 - Evidence 中性事实与命题解释已经拆分；PEAD、Sector 的分析结果同时写入带版本的任务投影。
 - 新增稳定的数据产品接口和 `ats data` 运维入口，覆盖指标、全文检索、公司包、命题包、健康状态和血缘。
+- 新增统一来源注册/隔离采集/发布门/回滚闭环，以及由实际数据库动态生成的 `catalog / describe / availability / examples`；发布运行状态写入可审计 release overlay。
 - 旧库启动时自动进行加法迁移；旧表继续保留并双写，现有 Workflow 无需一次性切换。
 
 首期有意保留以下边界：
 
-- 行情、财报、宏观、期权等既有运行时数据源尚未全部迁入结构化原始层；新模型先在 `chain.sources` 验证。
-- 当前保存的是标准化点及其原始字段载荷，尚未为所有 Provider 保存完整 HTTP 响应文件。
+- ticker 股价、OHLCV、订单簿、期权链、Greeks 和 IV 被明确归类为 runtime/excluded，不迁移、不回填，也不写 structured artifact。
+- 持久来源按保留策略保存完整响应或可复现查询切片；受来源条款约束的页面只保存必要内容和血缘。
 - 普通新闻遵循分级采集：全部保存标题/摘要，只有达到正文增强阈值的新闻保存全文；这是成本策略，不是数据旁路。
 - 全文检索为本地确定性文本检索，尚未引入向量索引；知识图谱和图数据库仍按真实查询瓶颈决定是否建设。
 - 公司研究包和数据健康视图是 V1 API / CLI 产品，不等同于完整图形化研究工作台。
@@ -700,7 +731,7 @@ Agent 结论
 
 ## 16. 分阶段建设路线
 
-当前里程碑状态：阶段一的主要非结构化来源已完成统一迁移；阶段二的平台底座已完成但既有行情/财务源尚待迁入；阶段三已完成兼容拆分；阶段四已交付 V1 查询与 CLI。
+当前里程碑状态：阶段一的主要非结构化来源已完成统一迁移；阶段二已完成平台底座、首批数据源、运维质量面、消费者回归与最终验收；阶段三已完成兼容拆分；阶段四已有 V1 查询能力。行情与期权属于 runtime/excluded，而不是阶段二迁移缺口。财务等未通过质量门的消费者继续 legacy，详见最终验收报告。
 
 ### 阶段一：统一文档资产
 
@@ -775,6 +806,8 @@ defeatbeta 数据集页面当前声明 ODC-BY，底层数据来自 Yahoo Finance
 - 某次历史分析可以使用当时可见的数据重放。
 - 上游数据修订不会覆盖旧版本。
 - 常用指标可以直接进行跨公司和跨期比较。
+
+**实施状态：已完成并通过最终验收。** 统一目录、artifact、中央准入、不可变 vintage、DataProducts、只读 SQL/Pandas、派生计算、快照重放以及首批五类持久数据已经实现。区域序列与 Consensus 已按消费者切换并保留回滚；财务因质量门失败保持 legacy，未覆盖来源作为后续独立 OpenSpec 输入。
 
 ### 阶段三：共享事实与任务投影分离
 

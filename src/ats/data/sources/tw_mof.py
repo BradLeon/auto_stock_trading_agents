@@ -1,92 +1,179 @@
-"""Taiwan Ministry of Finance — monthly exports by commodity.
+"""Taiwan Ministry of Finance monthly export levels.
 
-The `電子零組件` (electronic components) line covers TSMC, Nanya and the packaging
-chain. Two properties make it worth more than another company's account of itself:
-the MoF has no position in the trade, and it publishes monthly rather than quarterly —
-the June 2026 print was available on 2026-08-07, while several witnesses' latest
-filings were still from Q2.
-
-Keyless: the dataset (data.gov.tw #8380) resolves to a CSV on web02.mof.gov.tw. Values
-are millions of USD; years are on the ROC calendar (民國 115 = 2026).
+The structured adapter returns official source-native levels and a reproducible CSV
+artifact. YoY/MoM exist only in the legacy compatibility wrapper and are calculated by
+the shared derivation engine, never synthesized by the provider parser.
 """
 
 from __future__ import annotations
 
+import calendar
 import csv
+from datetime import datetime, timezone
 import io
 import logging
 import re
 
 from ...schemas.chain import SeriesPoint
+from ...structured import (
+    AdapterArtifact,
+    AdapterBatch,
+    DerivationDefinition,
+    FetchRequest,
+    IngestionStatus,
+    NativeRecord,
+)
+from ...structured.derivations import calculate
+
 
 log = logging.getLogger("ats.data.sources.tw_mof")
 
 DATASET = "https://data.gov.tw/api/v2/rest/dataset/8380"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ats-bot)"}
+HEADERS = {"User-Agent": "ats-research-data/1.0 (contact configured by operator)"}
 ROC_OFFSET = 1911
-# The CSV has no stable column index — the ministry adds commodity lines over time — so
-# the column is located by its Chinese label each run rather than pinned to a position.
 COLUMN_KEYWORDS = {"electronic_components": "電子零組件", "total": "總計"}
+METRIC_ID = "regional.tw_ic_exports.value"
 _MONTH = re.compile(r"^(\d{2,3})年\s*(\d{1,2})月$")
 
 
-def _resource_url() -> str:
-    import httpx
-
-    meta = httpx.get(DATASET, headers=HEADERS, timeout=30).json()
-    return meta["result"]["distribution"][0]["resourceDownloadUrl"]
-
-
 def _column(header: list[str], keyword: str) -> int:
-    for i, name in enumerate(header):
+    for index, name in enumerate(header):
         if keyword in name:
-            return i
+            return index
     raise LookupError(f"column {keyword!r} not found in the MoF export table")
+
+
+def _distribution(metadata: dict) -> dict:
+    distributions = metadata.get("result", {}).get("distribution", [])
+    if not distributions:
+        raise ValueError("Taiwan MoF dataset metadata has no distribution")
+    return distributions[0]
+
+
+def _resource_url(metadata: dict) -> str:
+    url = _distribution(metadata).get("resourceDownloadUrl", "")
+    if not url:
+        raise ValueError("Taiwan MoF distribution has no resourceDownloadUrl")
+    return str(url)
+
+
+def _source_version(metadata: dict) -> str:
+    distribution = _distribution(metadata)
+    for body in (distribution, metadata.get("result", {})):
+        for key in ("resourceModified", "modified", "metadataModified", "issued"):
+            if body.get(key):
+                return str(body[key])
+    return ""
+
+
+def parse_csv(raw: bytes | str, *, item: str = "electronic_components") -> list[NativeRecord]:
+    """Parse source rows deterministically; malformed numeric rows are not fabricated."""
+    text = (raw.decode("utf-8-sig", "strict") if isinstance(raw, bytes)
+            else raw.lstrip("\ufeff"))
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows:
+        return []
+    keyword = COLUMN_KEYWORDS.get(item, item)
+    column = _column(rows[0], keyword)
+    records = []
+    for row in rows[1:]:
+        if not row or len(row) <= column:
+            continue
+        match = _MONTH.match(row[0].strip())
+        if not match:
+            continue
+        year = int(match.group(1)) + ROC_OFFSET
+        month = int(match.group(2))
+        try:
+            value = float(row[column].replace(",", "").strip())
+        except ValueError:
+            continue
+        period = f"{year:04d}-{month:02d}"
+        records.append(NativeRecord(
+            entity_id="TW_IC_EXPORT", provider_field=METRIC_ID, period=period,
+            value=value, unit="百万美元", currency="USD", period_basis="month",
+            period_start=f"{period}-01",
+            period_end=f"{period}-{calendar.monthrange(year, month)[1]:02d}",
+            raw={"roc_period": row[0].strip(), "column": rows[0][column],
+                 "source_value": row[column]}))
+    return sorted(records, key=lambda record: record.period)
+
+
+class TaiwanMOFAdapter:
+    source_id = "tw_mof_exports"
+    dataset_id = "regional_tw_exports"
+
+    def __init__(self, *, client=None, clock=None):
+        self.client = client
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def fetch(self, request: FetchRequest) -> AdapterBatch:
+        import httpx
+
+        client = self.client or httpx
+        fetched_at = self.clock().astimezone(timezone.utc)
+        metadata = client.get(DATASET, headers=HEADERS, timeout=30).json()
+        url = _resource_url(metadata)
+        response = client.get(
+            url, headers=HEADERS, timeout=60, follow_redirects=True)
+        raw = response.content
+        item = str(request.query_scope.get("item", "electronic_components"))
+        records = parse_csv(raw, item=item)
+        requested_periods = set(request.periods)
+        if requested_periods:
+            records = [record for record in records if record.period in requested_periods]
+        lookback = int(request.query_scope.get("lookback_months", 0) or 0)
+        if lookback:
+            records = records[-lookback:]
+        version = _source_version(metadata)
+        coverage = {
+            "first_period": records[0].period if records else "",
+            "last_period": records[-1].period if records else "",
+            "period_count": len(records),
+            "publication_time_status": "not_supplied_by_dataset_endpoint",
+        }
+        return AdapterBatch(
+            source_id=request.source_id, dataset_id=request.dataset_id,
+            status=IngestionStatus.SUCCEEDED if records else IngestionStatus.ZERO_MATCH,
+            fetched_at=fetched_at, records=records,
+            artifacts=[AdapterArtifact(
+                payload=raw, query_scope={**request.query_scope, "periods": request.periods},
+                source_url=url, source_version=version, media_type="text/csv",
+                retention="full_response", metadata={
+                    "catalog_url": DATASET, "coverage": coverage,
+                    "distribution": _distribution(metadata),
+                })],
+            provider_metadata={"source_version": version, "coverage": coverage})
+
+
+def _legacy_points(records: list[NativeRecord], lookback_months: int) -> list[SeriesPoint]:
+    rows = [record.model_dump(mode="json") | {
+        "metric_id": METRIC_ID, "source_id": "tw_mof_exports",
+        "dataset_id": "regional_tw_exports", "observation_id": "",
+        "adjustment": "", "dimensions_json": "{}",
+    } for record in records]
+    yoy = {row["period"]: row for row in calculate(rows, DerivationDefinition(
+        id="yoy:regional.tw_ic_exports.value", version="v1", operation="yoy",
+        inputs=[METRIC_ID], output_metric_id=f"{METRIC_ID}.yoy"))}
+    mom = {row["period"]: row for row in calculate(rows, DerivationDefinition(
+        id="mom:regional.tw_ic_exports.value", version="v1", operation="mom",
+        inputs=[METRIC_ID], output_metric_id=f"{METRIC_ID}.mom"))}
+    return [SeriesPoint(
+        period=record.period, value=float(record.value), unit=record.unit,
+        yoy=yoy[record.period]["value"], mom=mom[record.period]["value"],
+        published_at=record.published_at.date() if record.published_at else None)
+        for record in records[-lookback_months:]]
 
 
 def fetch(*, lookback_months: int = 6, item: str = "electronic_components",
           **_) -> list[SeriesPoint]:
-    """Monthly export value, newest last. Raises on failure — chain.sources.fetch
-    converts that into a recorded gap, which is what an agency outage is."""
-    import httpx
-
-    keyword = COLUMN_KEYWORDS.get(item, item)
-    raw = httpx.get(_resource_url(), headers=HEADERS, timeout=60,
-                    follow_redirects=True).content.decode("utf-8-sig", "ignore")
-    rows = list(csv.reader(io.StringIO(raw)))
-    if not rows:
-        return []
-    col = _column(rows[0], keyword)
-
-    monthly: list[tuple[str, float]] = []
-    for row in rows[1:]:
-        if not row or len(row) <= col:
-            continue
-        m = _MONTH.match(row[0].strip())
-        if not m:
-            continue          # skips annual totals and "115年 (1~6月)" cumulative lines
-        try:
-            value = float(row[col])
-        except ValueError:
-            continue
-        monthly.append((f"{int(m.group(1)) + ROC_OFFSET}-{int(m.group(2)):02d}", value))
-
-    by_period = dict(monthly)
-    out: list[SeriesPoint] = []
-    for period, value in monthly[-lookback_months:]:
-        year, month = (int(p) for p in period.split("-"))
-        prev_m = f"{year - 1}-12" if month == 1 else f"{year}-{month - 1:02d}"
-        prev_y = f"{year - 1}-{month:02d}"
-        out.append(SeriesPoint(
-            period=period, value=value, unit="百万美元",
-            yoy=_change(value, by_period.get(prev_y)),
-            mom=_change(value, by_period.get(prev_m))))
-    log.info("tw_mof: %d monthly points, latest %s", len(out),
-             out[-1].period if out else "n/a")
-    return out
-
-
-def _change(now: float, before: float | None) -> float | None:
-    if not before:
-        return None
-    return (now - before) / before
+    """Legacy Chain contract assembled from raw levels plus shared derivations."""
+    requested = lookback_months + 12
+    batch = TaiwanMOFAdapter().fetch(FetchRequest(
+        source_id="tw_mof_exports", dataset_id="regional_tw_exports",
+        entities=["TW_IC_EXPORT"],
+        query_scope={"lookback_months": requested, "item": item}))
+    points = _legacy_points(batch.records, lookback_months)
+    log.info("tw_mof: %d monthly points, latest %s", len(points),
+             points[-1].period if points else "n/a")
+    return points

@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from functools import lru_cache
+import logging
 
 from ..config import get_config
 from ..schemas.fundamentals import Filing, FinancialStatements, FundamentalData, StatementMetric
 from .base import safe_fetch
 
 name = "fundamentals"
+log = logging.getLogger("ats.data.fundamentals")
 
 _METRIC_KEYS = {
     "market_cap": "marketCap",
@@ -29,7 +31,7 @@ _METRIC_KEYS = {
 _FORMS = {"10-K", "10-Q", "8-K"}
 
 
-def fetch(symbol: str) -> FundamentalData:
+def _legacy_fetch(symbol: str, *, include_statements: bool = True) -> FundamentalData:
     data = FundamentalData(symbol=symbol, as_of=datetime.now(timezone.utc))
 
     info = safe_fetch(lambda: _yf_info(symbol), source=f"yf-info:{symbol}")
@@ -41,9 +43,10 @@ def fetch(symbol: str) -> FundamentalData:
             if isinstance(val, (int, float)):
                 setattr(data, field, float(val))
 
-    data.statements = safe_fetch(lambda: _statements(symbol), source=f"yf-stmt:{symbol}")
-    if data.statements is None:
-        data.notes.append("quarterly statements unavailable")
+    if include_statements:
+        data.statements = safe_fetch(lambda: _statements(symbol), source=f"yf-stmt:{symbol}")
+        if data.statements is None:
+            data.notes.append("quarterly statements unavailable")
 
     filings = safe_fetch(lambda: _sec_filings(symbol), source=f"sec:{symbol}", attempts=2)
     if filings:
@@ -51,6 +54,26 @@ def fetch(symbol: str) -> FundamentalData:
     elif filings is None:
         data.notes.append("SEC filings unavailable")
     return data
+
+
+def fetch(symbol: str, *, consumer: str = "pead_fundamentals") -> FundamentalData:
+    """Compatibility DTO with reversible legacy/shadow/platform/fallback reads."""
+    from ..structured import read_mode
+
+    mode = read_mode(consumer, source_id="sec_companyfacts")
+    if mode == "legacy":
+        return _legacy_fetch(symbol)
+    if mode == "platform":
+        return _platform_fetch(symbol, consumer=consumer)
+    if mode == "fallback":
+        platform = _platform_fetch(symbol, consumer=consumer)
+        return platform if platform.statements and platform.statements.lines \
+            else _legacy_fetch(symbol)
+    legacy = _legacy_fetch(symbol)
+    platform = _platform_fetch(symbol, consumer=consumer)
+    if _statement_signature(legacy.statements) != _statement_signature(platform.statements):
+        log.warning("fundamentals: structured shadow mismatch for %s", symbol)
+    return legacy
 
 
 def _yf_info(symbol: str) -> dict:
@@ -221,6 +244,117 @@ def _margin(label, profit, rev):
                            qoq=round(cur - qoq_v, 1) if (cur is not None and qoq_v is not None) else None,
                            yoy=round(cur - yoy_v, 1) if (cur is not None and yoy_v is not None) else None,
                            unit="%", delta_unit="pp")
+
+
+def _statement_signature(value: FinancialStatements | None) -> tuple:
+    if value is None:
+        return ()
+    return (value.period, tuple(
+        (line.label, line.value, line.qoq, line.yoy, line.unit, line.delta_unit)
+        for line in value.lines))
+
+
+def _structured_statements(symbol: str, products) -> tuple[FinancialStatements | None,
+                                                            list[dict]]:
+    """Assemble the legacy statement DTO from selected persistent observations."""
+    metrics = (
+        "financial.revenue.gaap", "financial.gross_profit.gaap",
+        "financial.operating_income.gaap", "financial.net_income.gaap",
+        "financial.eps.diluted.gaap", "financial.cash_from_operations.gaap",
+        "financial.capex.gaap", "financial.total_debt.gaap",
+    )
+    by_metric: dict[str, list[dict]] = {}
+    for metric in metrics:
+        result = products.metric_series(
+            metric=metric, entity=symbol, dataset="company_financials", quality="loose")
+        by_metric[metric] = result["rows"]
+
+    def ordered(metric: str, basis: str) -> list[dict]:
+        rows = [row for row in by_metric.get(metric, [])
+                if row.get("period_basis") == basis]
+        return sorted(rows, key=lambda row: row["period"], reverse=True)
+
+    revenue_rows = ordered("financial.revenue.gaap", "quarter")
+    if not revenue_rows:
+        return None, []
+    period = revenue_rows[0]["period"]
+
+    used: dict[str, dict] = {}
+
+    def triple(metric: str, basis: str = "quarter") -> tuple:
+        rows = ordered(metric, basis)
+        selected = rows[:2] + (rows[4:5] if len(rows) > 4 else [])
+        for row in selected:
+            used[row["observation_id"]] = row
+        current = rows[0]["value"] if rows else None
+        previous = rows[1]["value"] if len(rows) > 1 else None
+        year_ago = rows[4]["value"] if len(rows) > 4 else None
+        return current, previous, year_ago
+
+    revenue = triple("financial.revenue.gaap")
+    gross_profit = triple("financial.gross_profit.gaap")
+    operating_income = triple("financial.operating_income.gaap")
+    net_income = triple("financial.net_income.gaap")
+    eps = triple("financial.eps.diluted.gaap")
+    cash_from_operations = triple("financial.cash_from_operations.gaap")
+    capex = triple("financial.capex.gaap")
+    debt_rows = ordered("financial.total_debt.gaap", "instant")
+    debt = tuple((debt_rows[index]["value"] if len(debt_rows) > index else None)
+                 for index in (0, 1, 4))
+    for row in debt_rows[:2] + (debt_rows[4:5] if len(debt_rows) > 4 else []):
+        used[row["observation_id"]] = row
+
+    free_cash_flow = tuple(
+        (cash_from_operations[index] - capex[index]
+         if cash_from_operations[index] is not None and capex[index] is not None else None)
+        for index in range(3))
+    lines = [
+        _dollar_metric("Revenue", *revenue),
+        _margin("Gross Margin", gross_profit, revenue),
+        _margin("Operating Margin", operating_income, revenue),
+        _dollar_metric("Net Income", *net_income),
+    ]
+    if eps[0] is not None:
+        lines.append(StatementMetric(
+            label="Diluted EPS", value=round(eps[0], 2),
+            qoq=_pct(eps[0], eps[1]), yoy=_pct(eps[0], eps[2]), unit="$"))
+    lines.extend([
+        _dollar_metric("CapEx", *capex),
+        _dollar_metric("Free Cash Flow", *free_cash_flow),
+        _dollar_metric("Total Debt", *debt),
+    ])
+    return (FinancialStatements(
+        period=period, lines=[line for line in lines if line.value is not None]),
+        list(used.values()))
+
+
+def _platform_fetch(symbol: str, *, consumer: str) -> FundamentalData:
+    """Refresh official facts, then assemble only the persistent statement section."""
+    from ..data_platform import DataProducts
+    from ..structured import FetchRequest, IngestionPipeline, get_repository
+    from .sources.company_financials import SECCompanyFactsAdapter
+
+    data = _legacy_fetch(symbol, include_statements=False)
+    repository = get_repository()
+    repository.bootstrap_catalog()
+    try:
+        IngestionPipeline(repository).run(
+            SECCompanyFactsAdapter(), FetchRequest(
+                source_id="sec_companyfacts", dataset_id="company_financials",
+                entities=[symbol], query_scope={"since": "2020-01-01"}))
+    except Exception as exc:  # existing accepted rows remain queryable during outages
+        log.warning("fundamentals: SEC structured refresh failed for %s: %s", symbol, exc)
+    products = DataProducts(structured_repository=repository)
+    data.statements, rows = _structured_statements(symbol.upper(), products)
+    if data.statements is None:
+        data.notes.append("structured quarterly statements unavailable")
+    elif rows:
+        manifest = products.snapshot_manifest(
+            consumer=consumer, purpose=f"fundamentals:{symbol.upper()}",
+            as_of=datetime.now(timezone.utc), rows=rows,
+            metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
+        data.notes.append(f"structured snapshot {manifest['snapshot_id']}")
+    return data
 
 
 # --- SEC EDGAR -------------------------------------------------------------- #

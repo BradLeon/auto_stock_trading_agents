@@ -134,10 +134,86 @@ def fetch(source: SourceDef, *, lookback_months: int = 6) -> list[SeriesPoint]:
         log.warning("sources: no adapter %r for %s (%s)", source.adapter, source.id, exc)
         return []
     try:
-        return list(mod.fetch(lookback_months=lookback_months, **source.params))
+        if source.adapter not in {"tw_mof", "kr_ecos"}:
+            return list(mod.fetch(lookback_months=lookback_months, **source.params))
+        from ..structured import read_mode
+
+        mode = read_mode("chain_regional", source_id=source.id)
+        if mode == "legacy":
+            return list(mod.fetch(lookback_months=lookback_months, **source.params))
+        platform = _platform_fetch(source, lookback_months=lookback_months)
+        if mode == "platform":
+            return platform
+        if mode == "fallback":
+            return platform or list(mod.fetch(
+                lookback_months=lookback_months, **source.params))
+        legacy = list(mod.fetch(lookback_months=lookback_months, **source.params))
+        if _point_signature(platform) != _point_signature(legacy):
+            log.warning("sources: structured shadow mismatch for %s", source.id)
+        return legacy
     except Exception as exc:  # noqa: BLE001 - an agency outage must not break a window
         log.warning("sources: %s fetch failed — %s", source.id, exc)
         return []
+
+
+def _point_signature(points: list[SeriesPoint]) -> list[tuple]:
+    return [(point.period, point.value, point.unit, point.yoy, point.mom)
+            for point in points]
+
+
+def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPoint]:
+    """Ingest accepted regional levels, then assemble the legacy Chain contract."""
+    from ..data.sources import kr_ecos, tw_mof
+    from ..data_platform import DataProducts
+    from ..structured import FetchRequest, IngestionPipeline, get_repository
+
+    if source.adapter == "tw_mof":
+        adapter = tw_mof.TaiwanMOFAdapter()
+        source_id, dataset_id = "tw_mof_exports", "regional_tw_exports"
+        entity_id, metric_id = "TW_IC_EXPORT", tw_mof.METRIC_ID
+        scope = {"lookback_months": lookback_months + 12,
+                 "item": source.params.get("item", "electronic_components")}
+    else:
+        adapter = kr_ecos.KoreaECOSAdapter()
+        source_id, dataset_id = "kr_ecos_exports", "regional_kr_exports"
+        entity_id, metric_id = "KR_SEMI_EXPORT", kr_ecos.METRIC_ID
+        scope = {"lookback_months": lookback_months + 12,
+                 "stat": source.params.get("stat", "403Y001"),
+                 "item": source.params.get("item", "3091AA")}
+    repository = get_repository()
+    repository.bootstrap_catalog()
+    request = FetchRequest(
+        source_id=source_id, dataset_id=dataset_id, entities=[entity_id],
+        query_scope=scope)
+    run = IngestionPipeline(repository).run(adapter, request)
+    if run["status"] not in {"succeeded", "no_change"}:
+        return []
+    products = DataProducts(structured_repository=repository)
+    levels = products.metric_series(
+        metric=metric_id, entity=entity_id, dataset=dataset_id,
+        source_id=source_id, quality="loose")
+    yoy = {row["period"]: row for row in products.derive(
+        operation="yoy", query_result=levels)["rows"]}
+    mom = {row["period"]: row for row in products.derive(
+        operation="mom", query_result=levels)["rows"]}
+    if levels["rows"]:
+        products.snapshot_manifest(
+            consumer="chain_regional", purpose=f"regional:{source.id}",
+            as_of=datetime.now(timezone.utc), rows=levels["rows"],
+            metadata={
+                "source_definition": source.id,
+                "derivations": ["yoy:v1", "mom:v1"],
+                "runtime_inputs_included": False,
+            })
+    output = []
+    for row in levels["rows"][-lookback_months:]:
+        published = (datetime.fromisoformat(row["published_at"]).date()
+                     if row.get("published_at") else None)
+        output.append(SeriesPoint(
+            period=row["period"], value=row["value"], unit=row["unit"],
+            yoy=yoy[row["period"]]["value"], mom=mom[row["period"]]["value"],
+            published_at=published))
+    return output
 
 
 def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None,

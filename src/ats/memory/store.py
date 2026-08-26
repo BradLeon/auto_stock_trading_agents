@@ -3,6 +3,11 @@
 Persists each cycle's reports, decisions, trades, and performance so the Manager
 can be fed prior outcomes and the Boss can pull a name's history on demand. The
 semantic/vector layer (Chroma) is a later add; this is the structured backbone.
+
+During the data-layer unification this module still initializes legacy data-layer
+tables for backward compatibility. New data-layer repositories own those tables;
+new data-layer schema must not be added here. Workflow memory remains the
+long-term responsibility of :mod:`ats.memory`.
 """
 
 from __future__ import annotations

@@ -1,0 +1,8 @@
+version: 1
+source_ids: [sec_companyfacts, company_disclosures]
+adapter: sec_companyfacts
+secrets_env: [SEC_USER_AGENT]
+request_budget:
+  concurrency: 1
+  requests_per_second: 5
+  timeout_seconds: 30

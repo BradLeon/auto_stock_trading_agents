@@ -2,18 +2,26 @@
 
 > 读者：数据源运维者、发布负责人、故障处理者
 > 适用范围：持久化结构化研究数据；不包含 IBKR/yfinance 股价和期权行情
-> 当前状态：阶段二实现基线，2026-08-26
+> 当前状态：统一数据层迁移期，2026-08-26
 
 ## 1. 先回答六个最常见的运维问题
 
 | 问题 | 答案 |
 |---|---|
-| 在哪里新增或修改数据源？ | [`config/structured_data.yaml`](../config/structured_data.yaml) 的 `sources.<source_id>`；同时必须更新对应 `datasets` 引用、Provider mapping、Adapter 和运行注册。 |
+| 在哪里新增或修改数据源？ | 首先修改 [`config/data/catalog.yaml`](../config/data/catalog.yaml) 及对应 `config/data/structured.yaml`、`config/data/unstructured.yaml`；Provider 请求约束放在 `config/data/providers/`。兼容期的结构化详细字段仍映射到 [`config/structured_data.yaml`](../config/structured_data.yaml)。同时必须更新对应 dataset 引用、Adapter 和运行注册。 |
 | 在哪里停用数据源？ | 先通过 release overlay 把 source mode 回滚到 `legacy`；不要直接删除 YAML。默认文件是 `var/structured_data/releases.yaml`。 |
 | 在哪里删除数据源？ | 已产生采集历史、artifact 或 observation 的来源不做硬删除，而是停止采集并退出主源/回退源选择，保留目录项供历史血缘解析。只有从未产生持久数据且没有任何引用的来源才可删除配置和代码注册。 |
 | 手动采集怎么触发？ | `ats_cli data ingest --source <source_id> ...`。首次真实源测试必须同时指定隔离 `--db` 和 `--artifact-root`，并使用 `--force`。 |
 | 自动采集怎么触发？ | 当前没有内建的 structured ingestion scheduler。`ats schedule` 是交易/研究 Workflow 调度器，不会自动执行 `ats data ingest`。自动采集需由 cron、launchd 或部署平台按计划调用同一个 `data ingest` 命令。 |
 | 哪个文件决定“当前是否运行”？ | checked-in 基线在 `feature_flags.sources`；临时生产覆盖在 `var/structured_data/releases.yaml`。解析优先级为环境变量 → release overlay → checked-in config → `legacy`。 |
+
+统一配置只读校验：
+
+```bash
+ats_cli data config
+```
+
+该命令检查 catalog 版本、legacy overlay 文件、来源/dataset 引用、adapter 注册、运行状态和 runtime/excluded 边界；它不联网、不写数据库、不修改发布状态。
 
 本手册只讲运维操作。研究者如何发现、查询和计算数据，见[结构化数据层使用手册](STRUCTURED_DATA_USER_GUIDE.md)。
 
@@ -74,7 +82,20 @@ export ATS_STRUCTURED_RELEASE_FILE="/absolute/path/to/releases.yaml"
 
 ## 4. 配置文件完整说明
 
-结构化数据的机器配置只有一个主入口：[`config/structured_data.yaml`](../config/structured_data.yaml)。它描述“系统支持什么和 checked-in 默认模式”，不保存密钥，也不代表数据库中已经有数据。
+统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它索引结构化、非结构化和 runtime 配置；详细内容分别位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。`config/structured_data.yaml`、`config/sources.yaml`、`config/news_sources.yaml` 是兼容期的 legacy overlay，不能再作为新入口单独维护。
+
+配置职责边界：
+
+| 路径 | 运维职责 | 是否保存密钥 |
+|---|---|---:|
+| `config/data/catalog.yaml` | 数据源、数据集、领域、状态和 legacy 引用总目录 | 否 |
+| `config/data/structured.yaml` | 指标、映射、结构化质量门 | 否 |
+| `config/data/unstructured.yaml` | 文档类型、正文策略、准入和保留规则 | 否 |
+| `config/data/providers/*.yaml` | Provider endpoint、预算、所需环境变量名 | 否 |
+| `config/data/schedules.yaml` | 触发意图和预算；不直接创建 scheduler job | 否 |
+| `config/pead.yaml`、`config/sectors/` | Workflow 消费者配置 | 视现有约定 |
+
+密钥仍只能放在 `.env` 或部署环境。
 
 ### 4.1 顶层结构
 
@@ -222,9 +243,9 @@ FINNHUB_API_KEY=
 
 | 顺序 | 位置 | 要做什么 |
 |---:|---|---|
-| 1 | `config/structured_data.yaml` | 增加 source，关联 dataset，配置预算、质量门、验收样本和初始 `legacy` mode |
-| 2 | `src/ats/data/sources/` | 实现只返回 Provider 原生 batch 的 Adapter，不直接写业务表 |
-| 3 | `src/ats/structured/runtime_registry.py` | 将稳定 adapter key 注册到受控工厂，并声明是否要求 entity |
+| 1 | `config/data/catalog.yaml`、`config/data/structured.yaml` | 增加 source/dataset，关联实体、预算、质量门、验收样本和初始 `legacy` mode；`config/structured_data.yaml` 只作为兼容 overlay 同步检查 |
+| 2 | `src/ats/data/adapters/structured/` 或 `src/ats/data/adapters/unstructured/` | 实现只返回 Provider 原生 batch 的 Adapter，不直接写业务表；对应旧实现只通过 `ats.data.compat` 复用 |
+| 3 | `src/ats/data/adapters/structured/registry.py` 及受控 runtime registry | 将稳定 adapter key 注册到受控工厂，并声明是否要求 entity；旧 `ats.structured.runtime_registry` 是兼容入口（历史路径 `src/ats/structured/runtime_registry.py` 仍由兼容层承接） |
 | 4 | tests、fixture 和本手册来源矩阵 | 覆盖成功、空响应、未发布、权限、限流、字段变化和隔离写入 |
 
 建议初始配置：
@@ -326,7 +347,7 @@ ats_cli data ingest \
 
 | 参数 | 何时使用 |
 |---|---|
-| `--source` | 必填；`config/structured_data.yaml` 中的 source ID |
+| `--source` | 必填；统一目录 `config/data/catalog.yaml`（及其 domain 文件）中的稳定 source ID |
 | `--entity` | 公司财务、Consensus 等按实体来源必填；当前 CLI 一次一个实体 |
 | `--periods` | 明确目标期间；可重复传入 |
 | `--since` | 传给 Provider query scope 的起点 |

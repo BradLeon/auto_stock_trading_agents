@@ -1,0 +1,21 @@
+# Unstructured-domain extensions to the unified catalog.
+# Existing numeric evidence and article/news registries are loaded from the
+# explicit legacy paths in catalog.yaml during the compatibility period.
+version: 1
+legacy_registries:
+  evidence: ../sources.yaml
+  news: ../news_sources.yaml
+document_types:
+  - earnings_release
+  - sec_filing
+  - transcript
+  - research
+  - article
+  - news
+  - deck
+admission:
+  require_source_url: true
+  quarantine_on_short_body: true
+retention:
+  default: source_policy
+sources: {}

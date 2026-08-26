@@ -1,0 +1,21 @@
+# Unified data-layer catalog index.
+# Detailed legacy registries remain referenced explicitly until their entries are
+# migrated. Secrets never belong in this file.
+version: 1
+
+legacy:
+  structured_catalog: ../structured_data.yaml
+  sources: ../sources.yaml
+  news_sources: ../news_sources.yaml
+
+domains:
+  structured: structured.yaml
+  unstructured: unstructured.yaml
+  schedules: schedules.yaml
+
+providers_dir: providers
+
+# Explicit entries override legacy entries with the same stable ID. New entries
+# must declare their domain, adapter, status, and dataset/source references.
+sources: {}
+datasets: {}

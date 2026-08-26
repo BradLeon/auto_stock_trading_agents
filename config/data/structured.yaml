@@ -1,0 +1,8 @@
+# Structured-domain extensions to the unified catalog.
+# The current source of detailed definitions remains ../structured_data.yaml;
+# this file is the migration target for metric and dataset definitions.
+version: 1
+legacy_catalog: ../structured_data.yaml
+sources: {}
+datasets: {}
+metrics: {}

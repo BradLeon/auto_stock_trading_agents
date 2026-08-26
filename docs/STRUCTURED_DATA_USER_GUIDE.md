@@ -2,7 +2,7 @@
 
 > 读者：研究者、Agent / Workflow 使用者、临时分析脚本作者
 > 目标：知道当前有什么数据，并正确地查询、计算和追溯
-> 当前状态：阶段二实现基线，2026-08-26
+> 当前状态：统一数据层迁移期，2026-08-26
 
 ## 1. 这本手册负责什么
 
@@ -15,6 +15,16 @@
 5. Agent 和确定性 Workflow 应调用哪个接口？
 
 新增来源、采集、QPS、质量验收、发布、回滚和自动任务属于运维职责，见[结构化数据层运维指南](STRUCTURED_DATA_OPERATIONS.md)。本手册不再重复 `sources`、`datasets`、`metrics`、`ingest`、`publish` 等运维命令。`data health` 和 `data quality` 也是运维诊断命令；使用者只消费查询结果中随行的质量字段，发现异常时把 dataset、entity、metric、`known_at` 和 observation ID 交给运维排查。
+
+数据层统一后，使用者只需记住三个消费入口：
+
+| 需求 | 入口 | 数据是否持久化 |
+|---|---|---:|
+| 财务、Consensus、区域/行业指标、融资/ARR 等数值 | `ats.data.products` / `data series` | 是，支持 `as_of` 和 vintage |
+| 财报、公告、纪要、新闻、研报、证据 | `ats.data.products` 的文档/证据方法 | 是，保存文档版本和血缘 |
+| 当前股价、OHLCV、期权链、Greeks、IV | `ats.data.runtime` 或现有 IBKR/yfinance/ThetaData | 否，不能历史重放 |
+
+结构化与非结构化共享来源、实体、质量和血缘语义，但使用者不应直接访问文件路径、SQLite 表或 Provider API。
 
 ## 2. 先理解数据边界
 
@@ -74,6 +84,14 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data catalog --format markdow
 ```bash
 export ATS_STRUCTURED_DB_PATH="/absolute/path/to/structured.sqlite"
 ```
+
+如果只想确认数据层配置和来源状态，不需要打开数据库：
+
+```bash
+ats_cli data config
+```
+
+这是只读校验命令；实际可查询覆盖仍以 `data catalog` 和 `data availability` 为准。
 
 CLI 默认输出 JSON；`catalog`、`describe`、`availability`、`examples` 支持 `--format markdown`。数值查询 `series`、`derive`、`cross-section` 和 `lineage` 输出 JSON。
 

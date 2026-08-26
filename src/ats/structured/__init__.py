@@ -1,4 +1,10 @@
-"""Governed persistent structured research data."""
+"""Deprecated compatibility facade for governed structured research data.
+
+New code should import structured catalog, stores, pipelines, and products from
+``ats.data``. The legacy surface remains during staged consumer migration.
+"""
+
+__deprecated__ = True
 
 from .artifacts import ArtifactStore, default_artifact_root
 from .catalog import StructuredCatalog

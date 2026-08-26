@@ -8,7 +8,7 @@
 
 本项目的结构化数据层不是“把所有数字放进 SQLite”，而是把低频、可复用、需要追溯和历史重放的研究事实，变成独立于 Agent 的共享数据产品。
 
-来源、数据集、指标和消费者开关以 `config/structured_data.yaml` 为机器事实源；本文解释这些配置背后的架构约束，不建立第二套目录。
+统一数据目录入口是 `config/data/catalog.yaml`；`config/structured_data.yaml` 在兼容期内仍是结构化详细定义的 legacy overlay。本文解释这些配置背后的架构约束，不建立第二套目录。
 
 一条数值只有同时回答以下问题，才可以进入默认查询：
 
@@ -21,6 +21,65 @@
 7. 它通过了哪些质量检查？
 
 高频市场输入不属于本层。ticker 股价、OHLCV、订单簿、期权链、Greeks、IV 继续由 IBKR、yfinance 或 ThetaData 在 Workflow 运行时查询，不建立持久副本。
+
+## 1.1 统一数据层代码树和依赖规则
+
+结构化和非结构化数据共用数据层生命周期，但不共用领域存储模型：
+
+```text
+ats.data.core / catalog
+          ↓
+adapters → pipelines → stores → products
+                              ↑
+                       agents / workflows
+```
+
+目标目录：
+
+```text
+ats/data/
+├── core/                  # EntityRef、SourceRef、LineageRef、Quality、IngestionRun
+├── catalog/               # DataCatalog 与 StructuredCatalog 兼容入口
+├── adapters/structured/   # Provider 访问与原生字段转换
+├── adapters/unstructured/ # 文档、新闻、RSS、研报、SEC 访问
+├── pipelines/             # 清洗、标准化、准入、vintage、发布
+├── stores/                # structured/unstructured repository 与 artifact
+├── products/              # Agent/Workflow 的查询和计算 facade
+├── runtime/               # 即时行情/期权；不持久化
+└── compat/                # 旧入口转发，禁止新增业务逻辑
+```
+
+依赖约束：
+
+- adapter 只访问 Provider 和返回候选，不直接写库、不导入 products 或 memory。
+- pipeline 负责编排、准入、标准化和发布，不把 Agent 判断写入事实层。
+- store 负责持久化，不发起网络请求。
+- product 只依赖 store/pipeline 输出，不依赖具体 Provider。
+- structured/unstructured 只能通过 `data.core` 或 products 交互，不能互相导入实现。
+
+旧入口兼容关系：
+
+```python
+from ats.data.products import get_data_products       # 新入口
+from ats.data_platform import get_data_products       # 兼容入口
+from ats.data.catalog import StructuredCatalog        # 新结构化入口
+from ats.structured import StructuredCatalog           # 兼容入口
+```
+
+新模块的实现应放在 `ats.data`；旧模块只转发到新实现。
+
+## 1.2 配置与测试入口
+
+新增来源先查看并修改 `config/data/catalog.yaml`、对应领域 YAML 和 `config/data/providers/` 模板；Workflow 配置仍放在 `config/pead.yaml`、`config/sectors/` 等位置。运行 `ats data config` 做只读引用、状态、adapter 和 legacy overlay 校验。
+
+每次改变数据层边界至少运行：
+
+```bash
+PYTHONPATH=src .venv/bin/python -c \
+  'import sys,types; sys.modules["readline"]=types.ModuleType("readline"); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))' \
+  -q tests/test_data_layer_architecture.py tests/test_data_catalog.py \
+  tests/test_data_store_ownership.py
+```
 
 ## 2. 状态标记
 

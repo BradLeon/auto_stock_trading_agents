@@ -1,6 +1,6 @@
 # 投资研究数据平台需求与架构设计
 
-> 版本：0.3（阶段二结构化底座已验收，2026-08-25）
+> 版本：0.4（统一数据层命名空间首期落地，2026-08-26）
 > 定位：产品需求与逻辑架构文档  
 > 读者：系统设计者、Agent / Workflow 开发者、数据源接入者
 
@@ -10,7 +10,7 @@
 
 ### 1.0 按角色阅读
 
-本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分，且都以机器目录 [`config/structured_data.yaml`](../config/structured_data.yaml) 为状态事实源：
+本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)；结构化旧配置 [`config/structured_data.yaml`](../config/structured_data.yaml)、证据源和新闻源配置在兼容期内由 catalog overlay 加载。
 
 | 读者 | 首选文档 | 主要回答 |
 |---|---|---|
@@ -23,6 +23,37 @@
 - 运维新增来源、评测与发布：见 [接入—评测—发布 Runbook](STRUCTURED_DATA_OPERATIONS.md#43-从新增来源到发布可执行-runbook)。
 - 当前实际可用数据：运行 `ats data catalog --format markdown`，再用 `data describe`、`data availability` 和 `data examples`；不要从静态文档推断数据库覆盖。
 - 自主 Agent：使用 [`.agents/skills/structured-data-consumer/SKILL.md`](../.agents/skills/structured-data-consumer/SKILL.md)；确定性 Workflow 继续调用 DataProducts，不依赖 Skill。
+
+### 1.0.1 统一数据层代码树（当前入口）
+
+结构化和非结构化数据不再被视为两个独立平台，而是同一数据层下的两个领域：
+
+```text
+Agent / Workflow
+      ↓
+ats.data.products / ats.data.runtime
+      ↓
+ats.data.pipelines
+      ↓
+ats.data.adapters + ats.data.stores
+      ↓
+Provider / filesystem / SQLite
+```
+
+```text
+src/ats/data/
+├── core/                 # 实体、来源、血缘、质量、采集运行契约
+├── catalog/              # 统一 catalog loader；含结构化兼容目录
+├── adapters/structured/  # 数值 Provider 入口
+├── adapters/unstructured/# SEC、release、transcript、RSS、研报、新闻入口
+├── pipelines/            # 采集、清洗、准入、标准化、发布
+├── stores/               # structured/unstructured repository 与 artifact
+├── products/             # Agent/Workflow 查询产品
+├── runtime/              # 即时行情和期权，不进入持久层
+└── compat/               # 迁移期旧入口桥接
+```
+
+当前仍保留 `ats.structured`、`ats.data_platform` 和 `memory.store` 的兼容实现；新代码应优先使用 `ats.data.*`。兼容层只允许转发，不应再增加业务逻辑。
 
 实现过程与真实源专项证据：
 
@@ -53,7 +84,7 @@
 
 这五类对象生命周期不同，因此不能全部塞进同一个数据库，也不能让某个 Agent 的输出反过来成为全系统的“事实”。
 
-### 1.1 当前实施状态（2026-08-25）
+### 1.1 当前实施状态（2026-08-26）
 
 本轮已经交付支撑该架构的首期平台能力，同时保留原有表和 Workflow 作为兼容接口：
 
@@ -68,6 +99,9 @@
 - 新增稳定的数据产品接口和 `ats data` 运维入口，覆盖指标、全文检索、公司包、命题包、健康状态和血缘。
 - 新增统一来源注册/隔离采集/发布门/回滚闭环，以及由实际数据库动态生成的 `catalog / describe / availability / examples`；发布运行状态写入可审计 release overlay。
 - 旧库启动时自动进行加法迁移；旧表继续保留并双写，现有 Workflow 无需一次性切换。
+- 已新增统一 `ats.data` 命名空间、跨结构化/非结构化 core contracts、repository ownership 和架构依赖测试。
+- 已新增 `config/data/catalog.yaml`、结构化/非结构化分域配置、调度说明和 Provider 模板；`ats data config` 只读校验这些配置并显示 legacy overlay 状态。
+- 已新增 `ats.data.rollout` 统一访问 source/consumer feature flags、release overlay、回滚历史和 staged reconciliation。
 
 首期有意保留以下边界：
 

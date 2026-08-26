@@ -12,18 +12,27 @@ import json
 
 
 class DataProducts:
-    def __init__(self, store=None, structured_repository=None):
+    def __init__(self, store=None, structured_repository=None, unstructured_repository=None):
         if store is None:
             from ..memory import get_store
 
             store = get_store()
         self.store = store
         self._structured_repository = structured_repository
+        self._unstructured_repository = unstructured_repository
+
+    @property
+    def unstructured(self):
+        if self._unstructured_repository is None:
+            from ..data.stores.unstructured.repository import UnstructuredRepository
+
+            self._unstructured_repository = UnstructuredRepository(self.store)
+        return self._unstructured_repository
 
     @property
     def structured(self):
         if self._structured_repository is None:
-            from ..structured import get_repository
+            from ..data.stores.structured.repository import get_repository
 
             self._structured_repository = get_repository()
             self._structured_repository.bootstrap_catalog()
@@ -519,18 +528,18 @@ class DataProducts:
         key = entity.upper()
         return {
             "entity": key,
-            "documents": self.store.documents(
+            "documents": self.unstructured.documents(
                 entity=key, published_since=since.isoformat() if since else None, limit=1000),
             "measurements": self.store.measurements(entity=key, limit=2000),
-            "facts": self.store.facts(entity=key, since=since, limit=1000),
-            "pead_projections": self.store.task_projections(
+            "facts": self.unstructured.facts(entity=key, since=since, limit=1000),
+            "pead_projections": self.unstructured.task_projections(
                 profile="pead_research", target_type="entity", target_id=key, limit=500),
         }
 
     def claim_evidence_package(self, concept: str, *, limit: int = 500) -> dict:
-        projections = self.store.fact_projections(concept=concept, limit=limit)
+        projections = self.unstructured.fact_projections(concept=concept, limit=limit)
         fact_ids = {p["fact_id"] for p in projections}
-        facts = {f["fact_id"]: f for f in self.store.facts(
+        facts = {f["fact_id"]: f for f in self.unstructured.facts(
             include_superseded=False, limit=max(limit * 4, 500)) if f["fact_id"] in fact_ids}
         return {
             "concept": concept,
@@ -542,16 +551,16 @@ class DataProducts:
                          source_contains: str | None = None,
                          published_since: str | None = None,
                          limit: int = 20) -> list[dict]:
-        return self.store.search_document_chunks(
+        return self.unstructured.search_document_chunks(
             query, entity=entity, source_contains=source_contains,
             published_since=published_since, limit=limit)
 
     def health(self) -> dict:
-        processing = self.store.document_processing(limit=5000)
+        processing = self.unstructured.document_processing(limit=5000)
         return {
-            "structured_sources": self.store.data_source_health(),
-            "document_sources": self.store.document_source_health(),
-            "candidate_admission": self.store.document_candidate_health(),
+            "structured_sources": self.unstructured.data_source_health(),
+            "document_sources": self.unstructured.document_source_health(),
+            "candidate_admission": self.unstructured.document_candidate_health(),
             "processing": {
                 "total": len(processing),
                 "running": sum(r["status"] == "running" for r in processing),
@@ -564,7 +573,7 @@ class DataProducts:
         """Queryable release-gate metrics for accepted and quarantined documents."""
         from ..data import document_assets
 
-        candidates = self.store.document_candidates(limit=100_000)
+        candidates = self.unstructured.document_candidates(limit=100_000)
         check_counts = {
             "identity": {"checked": 0, "passed": 0},
             "period": {"checked": 0, "passed": 0},
@@ -591,21 +600,21 @@ class DataProducts:
             for issue in validation.get("issues") or ():
                 reasons[str(issue.get("code") or "unknown_reason")] += 1
 
-        inventory = self.store.document_quality_inventory()
+        inventory = self.unstructured.document_quality_inventory()
         total_docs = sum(int(row["documents"] or 0) for row in inventory)
         full_docs = sum(int(row["documents"] or 0) for row in inventory
                         if row["completeness"] == "full")
-        docs = self.store.documents(limit=100_000)
+        docs = self.unstructured.documents(limit=100_000)
         consistency_issues: list[dict] = []
         checked = 0
         for row in docs:
             checked += 1
-            version = self.store.latest_document_version(row["document_id"])
+            version = self.unstructured.latest_document_version(row["document_id"])
             if version is None:
                 consistency_issues.append({
                     "document_id": row["document_id"], "reason": "version_missing"})
                 continue
-            body = document_assets.read_document(row["document_id"], store=self.store)
+            body = document_assets.read_document(row["document_id"], store=self.unstructured)
             if not body:
                 consistency_issues.append({
                     "document_id": row["document_id"], "reason": "read_mismatch"})
@@ -641,7 +650,7 @@ class DataProducts:
                 {"source_id": row["source_id"], "status": row.get("status"),
                  "snapshot_updated_at": row.get("snapshot_updated_at"),
                  "snapshot_lag_hours": row.get("snapshot_lag_hours")}
-                for row in self.store.data_source_health()
+                for row in self.unstructured.data_source_health()
             ],
             "read_consistency": {
                 "checked": checked, "passed": checked - len(consistency_issues),
@@ -654,7 +663,7 @@ class DataProducts:
 
     def lineage(self, identifier: str) -> dict | None:
         structured = self.structured.lineage(identifier)
-        return structured if structured is not None else self.store.projection_lineage(identifier)
+        return structured if structured is not None else self.unstructured.projection_lineage(identifier)
 
 
 def get_data_products() -> DataProducts:

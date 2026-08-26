@@ -1,0 +1,11 @@
+# Schedules describe intent and budgets; an external scheduler currently invokes
+# the CLI. This file does not create jobs by itself.
+version: 1
+structured:
+  trigger: external_scheduler
+  command: ats data ingest
+  default_timezone: UTC
+unstructured:
+  trigger: external_scheduler
+  command: ats data ingest
+  default_timezone: UTC

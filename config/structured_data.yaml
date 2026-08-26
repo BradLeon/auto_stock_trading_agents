@@ -1,5 +1,10 @@
 # Structured research data catalog and checked-in release baseline.
 #
+# DEPRECATED ENTRYPOINT (compatibility period): new source/dataset configuration
+# starts at config/data/catalog.yaml and its domain/provider files. This file is
+# still loaded as the structured legacy overlay; do not create a second source of
+# truth by editing it without updating the unified catalog plan.
+#
 # PURPOSE
 # -------
 # This is the source of truth for registered structured sources, datasets, metrics,

@@ -1235,6 +1235,20 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     """Inspect stable data products without knowing their backing tables."""
     import json
 
+    if action == "config":
+        from ..data.catalog import load_data_catalog
+
+        catalog = load_data_catalog()
+        validation = catalog.validate()
+        result = {
+            "catalog": str(catalog.path),
+            "version": catalog.version,
+            "validation": validation.model_dump(mode="json"),
+            "statuses": catalog.statuses(),
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if validation.valid else 2
+
     from ..data_platform import get_data_products
 
     products = get_data_products()
@@ -1425,7 +1439,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "describe", "availability", "examples", "releases",
+        "catalog", "config", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",

@@ -1,4 +1,6 @@
 # News sources for the continuous PEAD monitor.
+# 兼容期说明：统一入口为 config/data/catalog.yaml；此文件作为非结构化
+# legacy overlay 保留，新来源应登记到 config/data/unstructured.yaml。
 
 # Curated RSS feeds (ticker-keyword matched). Items are matched to a ticker by
 # keyword (see keywords_by_ticker) since RSS has no ticker field.

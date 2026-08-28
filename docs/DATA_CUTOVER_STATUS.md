@@ -24,7 +24,8 @@
 | `sector_agent` | 2026-08-28 对台湾财政部与韩国 ECOS 两个来源真实 shadow 对账；2 个自然日、active-window 0 mismatch | 区域产品的 source override、YoY/MoM、血缘、故障回退和 Sector 装配/输出渲染测试通过；真实装配确认输出带来源、期间和 observation ID | `shadow`；两个区域 dataset 五维质量均 `passed`，但尚未执行 10.5 的 platform 发布 |
 | `macro_agent` | 2026-08-28 对同一两个来源真实 shadow 对账；最近网络瞬断后的有效窗口 1 个自然日、0 mismatch | Macro 装配/输出渲染及 runtime-macro 边界测试通过；`--no-llm` 不再隐式触发证据 LLM 判读 | `shadow`；两个区域 dataset 五维质量均 `passed`，但尚未执行 10.5 的 platform 发布 |
 | `evidence_chain` | 2026-08-26 已对账 | Evidence/Chain 回归通过 | `shadow`；写入仍在 legacy memory |
-| `chief_graph` | 2026-08-26 已对账 | Chief 回归通过 | `shadow`；它消费 Agent 产物而非直接迁移决策状态 |
+| `chief_graph` | 不适用直接库双读：只消费上游 Agent 的 memory 产物 | Chief graph 端到端回归通过；统一输入边界与独立 shadow→legacy 回滚演练通过 | `shadow`；它不把 dossier、决策、交易或运行结果重分类为数据层输入，因此没有伪造“直接数据对账”记录 |
+| `runtime_scheduler` | 不适用单一持久读模型：入口协调 runtime 日历、官方披露和采集 pipeline | 日常调度、PEAD 窗口、官方发布确认、新闻/研究采集及隔离 shadow→legacy 回滚演练通过 | `shadow`；已改为 `ats.data.runtime`、`ats.data.products` 和 `ats.data.pipelines.unstructured` 入口；尚未执行 10.5 的 platform 发布 |
 
 本次 PEAD 验收：`test_structured_consumer_migration.py`、`test_consumer_cutover_records.py`、
 `test_pead_data.py`、`test_pead_graph.py`、`test_pead_score.py` 与 `test_pead_report.py` 均通过；
@@ -51,6 +52,13 @@ observation ID 已经在产品读取与对账记录中验证。受控装配会�
 新闻与证据扫描，但保留真实区域 dual-read，因此验证的是数据产品到报告上下文的实际链路，而非
 mock 数据。完整 Sector live review 的全市场快照仍可能超过本轮 60 秒测试预算，不作为 platform
 发布依据。
+
+Chief 与 scheduler 的 10.4 验收只对数据**输入边界**做切换验证：Chief 的上游财务、文档、
+证据和 Consensus 仍由已经 shadow 的 Agent 数据产品提供，而 Chief 报告、审批、交易和运行状态
+留在 `ats.memory`。scheduler 的财报日历是 runtime 输入，SEC release/news/research 则经统一
+products/pipelines 进入下游；两者都不能以“Workflow 成功运行”代替数据层新旧库对账。因而本轮
+发布/回滚演练使用隔离 release overlay，留下可审计 history，但没有写入生产 overlay 或提升到
+`platform`。
 
 每天的只读检查：
 

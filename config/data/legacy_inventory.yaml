@@ -129,11 +129,11 @@ consumers:
     rollback: consumer mode legacy
   - id: chief-graph
     paths: [src/ats/agents/chief, src/ats/graph/chief.py]
-    target_interface: ats.data.products
+    target_interface: ats.data.products boundary metadata + upstream products/runtime; ats.memory for workflow outputs
     sources: [company_financials, market_consensus, private_company_events]
     rollback: consumer mode legacy
   - id: runtime-scheduler
     paths: [src/ats/runtime/cli.py, src/ats/runtime/scheduler.py]
-    target_interface: ats.data.products + ats.data.runtime
-    sources: [company_financials, documents, runtime_market]
+    target_interface: ats.data.products + ats.data.runtime + ats.data.pipelines.unstructured
+    sources: [company_financials, documents, research, news, runtime_market]
     rollback: release overlay rollback

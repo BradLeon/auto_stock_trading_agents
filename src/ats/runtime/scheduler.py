@@ -170,27 +170,15 @@ def _confirm_reported(symbol: str, print_) -> tuple[bool, str]:
     the print date: that is last quarter's release, and scoring on it would invent a
     surprise out of stale numbers.
     """
-    if print_.reported:
-        return (True, f"已公布（eps_actual={print_.eps_actual}）")
-    from ..data import documents
-    from ..data.base import safe_fetch
+    from ..data.products import earnings
 
-    rel = safe_fetch(lambda: documents.sec_8k_release(symbol, near=str(print_.date)),
-                     source=f"sec-8k:{symbol}", attempts=2)
-    if not rel:
-        return (False, "无实际 EPS，且未取到 8-K")
-    filed = rel.get("filed")
-    if filed is None:
-        return (False, "8-K 无申报日期，无法确认是本季")
-    if filed < print_.date:
-        return (False, f"最新 8-K 申报于 {filed}，早于财报日 {print_.date}（上一季）")
-    return (True, f"8-K 申报于 {filed}（≥ 财报日 {print_.date}）")
+    return earnings.confirm_reported(symbol, print_)
 
 
 def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
     """Per-target: monitor (context update), plus prep/score by earnings proximity."""
     from ..config import load_pead_global
-    from ..data import earnings_calendar
+    from ..data.runtime import earnings as earnings_calendar
     from .cli import run_pead, run_pead_monitor, run_pead_research
 
     g = load_pead_global()
@@ -241,7 +229,7 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     considered, not just what ran.
     """
     from ..config import load_pead_config, load_pead_global
-    from ..data import earnings_calendar, period
+    from ..data.runtime import earnings as earnings_calendar
     from ..memory import get_store
     from .cli import run_chief, run_pead
 
@@ -276,7 +264,7 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
             cfg = load_pead_config(sym)
             pr = earnings_calendar.last_print(
                 sym, as_of=today, back_days=sched.get("score_lookback_days", 4) + 3)
-            label = period.resolve_fiscal_label(
+            label = earnings_calendar.resolve_fiscal_label(
                 sym, pr, config_label=cfg.fiscal_label, store=store)[0] if pr else cfg.fiscal_label
             state = store.score_state(sym, label) if label else "unscored"
             action, why = _score_plan(window, today, pr, state, sched)
@@ -299,7 +287,7 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
                 continue
 
             # Pin the resolved label so the Chief reads the same key tomorrow.
-            period.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
+            earnings_calendar.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
             run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, chief=False)
             # Stamp which window scored it and how far behind the print we were, so the
             # cost of fixed windows is measurable rather than assumed.
@@ -364,7 +352,7 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
     only write to the evidence tables.
     """
     from ..agents.evidence import observer
-    from ..data import earnings_calendar
+    from ..data.runtime import earnings as earnings_calendar
     from ..memory import get_store
 
     if not names:
@@ -392,9 +380,9 @@ def _observe_window(window: str, today, sched: dict, outcomes: dict, names) -> N
             text, src, note = observer.fetch_document(sym, print_=pr, store=store)
             if note:
                 log.info("observe[%s] %s: %s", window, sym, note)
-            from ..data import document_assets
+            from ..data.pipelines.unstructured import documents as document_pipeline
 
-            asset = document_assets.identify(text, entity=sym, store=store)
+            asset = document_pipeline.identify(text, entity=sym, store=store)
             if asset and store.has_observations_for_document(asset["document_id"]):
                 continue
             res = observer.observe_document(sym, doc_id, text, source_url=src,
@@ -426,6 +414,10 @@ def _daily(*, dry_run: bool) -> None:
     # the "weekly_review" cron job) — they don't touch the broker or need a trading
     # session, so tying them to the mon-fri trading-day cascade was never necessary,
     # and running them over the weekend keeps Monday's cascade free of the extra load.
+    from ..data.products import workflow_data_boundary
+
+    boundary = workflow_data_boundary("runtime_scheduler")
+    log.info("scheduler input boundary: consumer=%s mode=%s", boundary.consumer, boundary.mode)
     _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
     _news_backfill_daily()
     pead_daily(dry_run=dry_run)
@@ -442,7 +434,7 @@ def _news_backfill_daily() -> None:
     from datetime import timedelta
 
     from ..config import load_news_sources, load_pead_config, load_pead_global
-    from ..data import yahoo_news
+    from ..data.pipelines.unstructured import news as news_pipeline
     from ..memory import get_store
 
     source_cfg = (load_news_sources() or {}).get("yahoo_news", {}) or {}
@@ -458,7 +450,7 @@ def _news_backfill_daily() -> None:
     now = datetime.now(timezone.utc)
     lookback = int(source_cfg.get("backfill_days", pead.get("monitor", {}).get(
         "lookback_days", 7)))
-    batch = yahoo_news.backfill(
+    batch = news_pipeline.backfill(
         list(dict.fromkeys(str(symbol).upper() for symbol in symbols)),
         now - timedelta(days=lookback), now, store=get_store(), now=now,
         stale_after_hours=float(source_cfg.get("stale_after_hours", 72)))
@@ -702,11 +694,11 @@ def _cross_section_weekly(name: str) -> None:
     # against a site whose template can move), so it gets its own guard.
     try:
         from ..chain import articles as chain_articles
-        from ..data import research as research_data
+        from ..data.pipelines.unstructured import research as research_pipeline
 
         # One acquisition stage feeds both PEAD and chain consumers. The adapter for
         # subscribed research reads the shared catalog and never reconnects to IMAP.
-        research_data.ingest_configured(store=get_store())
+        research_pipeline.ingest_configured(store=get_store())
 
         for sid, stat in chain_articles.collect_articles(get_store()).items():
             if stat.unreachable:

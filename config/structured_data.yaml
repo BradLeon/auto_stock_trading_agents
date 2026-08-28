@@ -126,6 +126,9 @@ feature_flags:
     # their reads are shadow-compared. Their processing/decision writes remain legacy.
     pead_research: shadow
     evidence_chain: shadow
+    # Scheduler has migrated to unified runtime/products/pipeline entrypoints.
+    # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
+    runtime_scheduler: shadow
     chief_graph: shadow
   consumer_sources: {}
 

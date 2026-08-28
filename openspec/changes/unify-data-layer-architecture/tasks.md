@@ -79,7 +79,7 @@
 - [x] 10.1 Move PEAD and company-fundamental consumers to `ats.data.products` / `ats.data.runtime`; compare old and new inputs, scores, reports and failure behavior in shadow mode, after issuer-specific core-field coverage and period semantics pass.
 - [x] 10.2 Move Sector and macro/regional consumers to the unified products; verify source selection, derived calculations, freshness and report outputs in shadow mode.
 - [x] 10.3 Move Evidence, Chain, research and document consumers to unified unstructured products; verify document identity, text/version selection, evidence lineage and report outputs in shadow mode.
-- [ ] 10.4 Move Chief and scheduled Workflow entrypoints to the unified consumer interfaces; complete end-to-end execution, release records and per-consumer rollback drills.
+- [x] 10.4 Move Chief and scheduled Workflow entrypoints to the unified consumer interfaces; complete end-to-end execution, release records and per-consumer rollback drills.
 - [ ] 10.5 Publish only consumers with at least one successful same-day reconciliation and no mismatch, plus passed coverage/freshness/output gates, to platform mode; leave any unqualified consumer on legacy/fallback with an explicit gap record.
 
 ## 11. Legacy retirement and final acceptance

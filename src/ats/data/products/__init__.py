@@ -11,6 +11,8 @@ from .structured import StructuredDataProducts, get_structured_products
 from .unstructured import UnstructuredDataProducts, get_unstructured_products
 from .routing import UnstructuredReadRouter, get_unstructured_read_router
 from .regional import RegionalPoint, RegionalProducts, RegionalSnapshot
+from .earnings import confirm_reported
+from .workflows import WorkflowDataBoundary, workflow_data_boundary
 
 
 def get_platform_data_products() -> DataProducts:
@@ -35,4 +37,7 @@ __all__ = [
     "RegionalPoint",
     "RegionalProducts",
     "RegionalSnapshot",
+    "confirm_reported",
+    "WorkflowDataBoundary",
+    "workflow_data_boundary",
 ]

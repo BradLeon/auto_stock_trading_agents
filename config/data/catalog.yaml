@@ -12,6 +12,8 @@ domains:
   structured: structured.yaml
   unstructured: unstructured.yaml
   schedules: schedules.yaml
+  legacy_inventory: legacy_inventory.yaml
+  migration: migration.yaml
 
 providers_dir: providers
 

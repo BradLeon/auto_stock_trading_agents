@@ -36,10 +36,22 @@ def _sec_companyfacts():
     return SECCompanyFactsAdapter()
 
 
+def _company_disclosures():
+    from ..data.sources.company_financials import CompanyDisclosuresAdapter
+
+    return CompanyDisclosuresAdapter()
+
+
 def _defeatbeta():
     from ..data.sources.company_financials import DefeatBetaStatementAdapter
 
     return DefeatBetaStatementAdapter()
+
+
+def _yfinance_financials():
+    from ..data.sources.company_financials import YFinanceFinancialStatementsAdapter
+
+    return YFinanceFinancialStatementsAdapter()
 
 
 def _consensus():
@@ -59,8 +71,12 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
     "sec_companyfacts": RuntimeSourceSpec(
         "sec_companyfacts", _sec_companyfacts, requires_entities=True),
+    "company_disclosures": RuntimeSourceSpec(
+        "company_disclosures", _company_disclosures, requires_entities=True),
     "defeatbeta_stock_statement": RuntimeSourceSpec(
         "defeatbeta_stock_statement", _defeatbeta, requires_entities=True),
+    "yfinance_financials": RuntimeSourceSpec(
+        "yfinance_financials", _yfinance_financials, requires_entities=True),
     "consensus": RuntimeSourceSpec("consensus", _consensus, requires_entities=True),
     "trendforce": RuntimeSourceSpec("trendforce", _trendforce),
     "document_numeric_evidence": RuntimeSourceSpec(

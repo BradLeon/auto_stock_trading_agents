@@ -34,7 +34,7 @@
 
 | dataset | 研究内容 | 典型指标 |
 |---|---|---|
-| `company_financials` | 官方财务和 defeatbeta `stock_statement` 补充 | 收入、利润、EPS、现金流、资产负债、派生 margin/FCF |
+| `company_financials` | 官方财务优先，defeatbeta 与受管 yfinance 三表仅补字段/离散季度缺口 | 收入、利润、普通股/ADR EPS、市场调整 EPS、官方/Provider 债务、现金流、资产负债、派生 margin/FCF |
 | `market_consensus` | 每次真实抓取的市场预期 snapshot | EPS、收入预测、目标价、评级分布 |
 | `regional_tw_exports` | 台湾 IC/电子零组件月度出口 | 官方水平值及平台派生 yoy/mom |
 | `regional_kr_exports` | 韩国半导体出口月度序列 | 官方水平/指数及平台派生 yoy/mom |

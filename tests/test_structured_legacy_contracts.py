@@ -138,7 +138,7 @@ def test_structured_catalog_freezes_scope_metrics_gates_and_runtime_exclusions()
         "publish_to_default_query": False,
     }
     assert catalog["datasets"]["company_financials"]["acceptance_samples"] == [
-        "AMZN", "MSFT", "KLAC", "TSM", "mirror_missing_entity"]
+        "AMZN", "MSFT", "KLAC", "TSM"]
     assert catalog["datasets"]["market_consensus"]["quality"][
         "require_concrete_target_period"] is True
     assert "financial.revenue.gaap" in catalog["metric_definitions"]

@@ -30,6 +30,7 @@
 - [x] 4.4 Move structured discovery, selection, derivation, and reporting surfaces into `ats.data.products.structured`.
 - [x] 4.5 Verify SEC/company financials, defeatbeta `stock_statement`, Consensus, regional series, and evidence-derived observations through source-level smoke tests.
 - [x] 4.6 Run structured query, as-of/vintage, quality, release/rollback, compatibility, and consumer regression tests; stop the migration on any reconciliation failure.
+- [x] 4.7 Promote the existing legacy yfinance financial-statement reader into a governed `company_financials` fallback; retain raw lineage and reporting currency, prohibit runtime market persistence, preserve TSM ordinary-share versus ADR EPS, market-adjusted versus issuer EPS, and official versus Provider debt semantics; repair pre-governance persisted series through a backed-up, latest-vintage-aware semantic migration; and verify AMZN/MSFT/KLAC/TSM current-quarter coverage in isolated and production-compatible runs.
 
 ## 5. Unstructured data implementation migration
 
@@ -48,7 +49,7 @@
 - [x] 6.4 Add dual-read or reconciliation checks where old and new repositories share legacy tables, with explicit failure reporting.
 - [x] 6.5 Test database initialization, migration, restart, rollback, and existing Workflow behavior before considering physical database separation.
 
-## 7. Documentation, staged rollout, and deprecation
+## 7. Phase-one documentation, staged rollout, and compatibility
 
 - [x] 7.1 Update `docs/DATA_ARCHITECTURE.md` with the unified target tree, dependency diagram, ownership rules, and current migration status.
 - [x] 7.2 Add or update the developer guide with component contracts, extension points, import rules, data flow diagrams, and test strategy.
@@ -56,5 +57,35 @@
 - [x] 7.4 Add or update the user guide with dynamic discovery, structured/unstructured query examples, runtime market boundaries, and Agent/Workflow usage patterns.
 - [x] 7.5 Add documentation checks that verify command examples, configuration paths, compatibility status, and runtime/excluded wording against the implementation.
 - [x] 7.6 Introduce per-source and per-consumer feature flags, shadow comparison, release criteria, and rollback records for staged cutover.
-- [x] 7.7 Mark legacy modules and configuration paths deprecated only after all affected consumers pass reconciliation and full regression tests.
-- [x] 7.8 Run the complete data-layer test suite and publish a migration acceptance report before removing any duplicate implementation.
+- [x] 7.7 Mark legacy modules and configuration paths as compatibility surfaces; do not remove or claim their consumers have migrated.
+- [x] 7.8 Run the phase-one architecture and data-layer regression suite and publish an acceptance report that explicitly excludes physical data migration, consumer cutover, and legacy removal.
+
+## 8. Legacy inventory and migration preparation
+
+- [x] 8.1 Inventory every legacy data module, configuration alias, SQLite table, artifact/document location, and public import; map each to its target `ats.data` owner and rollback path.
+- [x] 8.2 Inventory all Agent and Workflow consumers of legacy data paths, including PEAD, Sector, Evidence/Chain, Chief and scheduled entrypoints; record each consumer's target product/runtime interface and dependent sources.
+- [x] 8.3 Define versioned migration manifests and backups for structured observations/artifacts and unstructured documents/versions/chunks/aliases/evidence, including stable IDs, batching keys, resume behavior, and reconciliation thresholds.
+- [x] 8.4 Add dry-run validation that rejects an incomplete inventory, unowned legacy asset, missing backup, or migration plan without an explicit rollback path.
+
+## 9. Persistent data migration and reconciliation
+
+- [x] 9.1 Implement resumable, idempotent migration for legacy `measurement_*` and existing `structured_*` observations, vintages, derived records, artifacts, catalog metadata and ingestion runs into the owned data repositories without losing lineage or quality status.
+- [x] 9.2 Implement resumable, idempotent migration for non-structured document metadata, immutable versions, source cache, chunks, aliases, evidence, and related asset references.
+- [x] 9.3 Run source- and data-domain-level migration rehearsals against isolated copies; reconcile counts, IDs, hashes, period/vintage coverage, lineage, quality and consumer query results.
+- [x] 9.4 Run the approved migration against the selected production data copies, record manifests and discrepancies, and keep legacy writes/reads recoverable until cutover is accepted.
+
+## 10. Agent and Workflow consumer cutover
+
+- [ ] 10.1 Move PEAD and company-fundamental consumers to `ats.data.products` / `ats.data.runtime`; compare old and new inputs, scores, reports and failure behavior in shadow mode, after issuer-specific core-field coverage and period semantics pass.
+- [ ] 10.2 Move Sector and macro/regional consumers to the unified products; verify source selection, derived calculations, freshness and report outputs in shadow mode.
+- [x] 10.3 Move Evidence, Chain, research and document consumers to unified unstructured products; verify document identity, text/version selection, evidence lineage and report outputs in shadow mode.
+- [ ] 10.4 Move Chief and scheduled Workflow entrypoints to the unified consumer interfaces; complete end-to-end execution, release records and per-consumer rollback drills.
+- [ ] 10.5 Publish only consumers with at least one successful same-day reconciliation and no mismatch, plus passed coverage/freshness/output gates, to platform mode; leave any unqualified consumer on legacy/fallback with an explicit gap record.
+
+## 11. Legacy retirement and final acceptance
+
+- [ ] 11.1 Freeze new writes and imports to each legacy path only after its data-domain and consumer cutovers pass; add enforcement tests for the retirement boundary.
+- [ ] 11.2 Delete retired legacy modules, configuration aliases, duplicate repository logic and obsolete schema only one approved retirement object at a time; preserve backups, manifests and recovery tooling.
+- [ ] 11.3 Run full data-layer, migration recovery, all affected Agent/Workflow end-to-end and regression suites after each retirement batch; stop on any reconciliation or behavior failure.
+- [ ] 11.4 Publish a final production migration and cutover acceptance report covering data domains, consumers, retirement objects, stable observation evidence and rollback verification.
+- [ ] 11.5 Reconcile the final implementation with this change, validate OpenSpec strictly, and archive only after no legacy retirement object remains pending.

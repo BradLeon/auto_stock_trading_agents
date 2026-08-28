@@ -346,7 +346,23 @@ def _failure_section(store) -> list[str]:
 
 
 def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
-    """Build the markdown. `cfg` is a SectorConfig; `store` the TradingMemory."""
+    """Build the markdown with an independently reversible evidence-data read path."""
+    from ..data.products import get_unstructured_read_router
+
+    reader = get_unstructured_read_router(
+        consumer="evidence_chain", legacy_repository=store)
+    try:
+        return _render(cfg, reader, as_of=as_of, ind_cfg=ind_cfg)
+    finally:
+        reader.close()
+
+
+def _render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
+    """Render with immutable document/evidence reads routed through ``store``.
+
+    The router delegates claim-assessment and other Workflow-memory operations to the
+    legacy store.  That boundary is intentional until their own write cutover passes.
+    """
     from .corroborate import assess_layer
     from .sources import source_entities_for as _source_entities
 

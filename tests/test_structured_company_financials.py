@@ -3,12 +3,19 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+from types import SimpleNamespace
+
+import pandas as pd
 
 from ats.data.defeatbeta import DatasetSnapshot
 from ats.data.sources.company_financials import (
+    CompanyDisclosuresAdapter,
     DefeatBetaStatementAdapter,
     SECCompanyFactsAdapter,
+    YFinanceFinancialStatementsAdapter,
+    parse_amazon_quarterly_release,
     parse_companyfacts,
+    parse_tsmc_quarterly_release,
 )
 from ats.structured import (
     FetchRequest,
@@ -20,6 +27,30 @@ from ats.structured.quality import financial_quality
 
 
 NOW = datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc)
+
+TSMC_Q2_RELEASE = """
+TSMC Reports Second Quarter EPS of NT$27.25. TSMC today announced consolidated revenue
+of NT$1,270.38 billion, net income of NT$706.56 billion, and diluted earnings per share
+of NT$27.25 (US$4.31 per ADR unit) for the second quarter ended June 30, 2026. All figures were prepared in
+accordance with TIFRS on a consolidated basis. TSMC's 2026 second quarter consolidated
+results: (Unit: NT$ million, except for EPS) 2Q26 Amount Net sales 1,270,381 Gross profit
+860,311 Income from operations 766,603 Income before tax 862,430 Net income 706,562
+EPS (NT$) 27.25.
+"""
+
+AMAZON_Q2_RELEASE = """
+AMAZON.COM ANNOUNCES SECOND QUARTER RESULTS. Amazon.com announced financial results for
+its second quarter ended June 30, 2026. Consolidated Statements of Cash Flows (in millions)
+Three Months Ended June 30, Six Months Ended June 30, Twelve Months Ended June 30, 2025 2026
+2025 2026 2025 2026 Net cash provided by (used in) operating activities 32,515 45,387 49,530
+71,419 121,137 161,403 Purchases of property and equipment (32,183) (54,208) (57,202)
+(98,411) (107,656) (173,028) Consolidated Statements of Operations (in millions, except per
+share data) Three Months Ended June 30, Six Months Ended June 30, 2025 2026 2025 2026 Total
+net sales 167,702 200,606 323,369 382,125 Operating expenses: Cost of sales 80,809 95,778
+157,785 183,241 Operating income 19,171 27,461 37,576 51,313 Net income 18,164 62,647 35,291
+92,902 Diluted earnings per share $ 1.68 $ 5.75 $ 3.27 $ 8.53 Consolidated Statements of
+Comprehensive Income
+"""
 
 
 class _Response:
@@ -89,6 +120,8 @@ def _companyfacts(*, taxonomy="us-gaap", currency="USD"):
         "CashAndCashEquivalentsAtCarryingValue": {"units": {currency: [
             _fact(50, start="")] }},
         "InventoryNet": {"units": {currency: [_fact(15, start="")] }},
+        "DebtLongtermAndShorttermCombinedAmount": {"units": {currency: [
+            _fact(30, start="")] }},
         "LongTermDebtAndFinanceLeaseObligations": {"units": {currency: [
             _fact(25, start="")] }},
         "Assets": {"units": {currency: [_fact(200, start="")] }},
@@ -131,6 +164,9 @@ def test_companyfacts_prefers_latest_revision_and_distinguishes_quarter_ytd_inst
                 if "PaymentsToAcquire" in row.provider_field).value == 10
     assert next(row for row in records
                 if "EarningsPerShare" in row.provider_field).unit == "USD/share"
+    by_metric = {row.provider_field: row for row in records}
+    assert by_metric["us-gaap:DebtLongtermAndShorttermCombinedAmount"].value == 30
+    assert by_metric["us-gaap:LongTermDebtAndFinanceLeaseObligations"].value == 25
 
 
 def test_sec_adapter_ingests_full_artifact_and_ifrs_foreign_issuer(tmp_path):
@@ -171,6 +207,85 @@ def test_sec_missing_cik_is_no_coverage_not_wrong_entity(tmp_path):
     assert repo.observations() == []
 
 
+def test_tsmc_official_release_parses_reported_quarter_only() -> None:
+    records = parse_tsmc_quarterly_release(TSMC_Q2_RELEASE, published_at=NOW)
+
+    assert {row.provider_field: row.value for row in records} == {
+        "tsmc_release:net_sales": 1_270_381_000_000.0,
+        "tsmc_release:gross_profit": 860_311_000_000.0,
+        "tsmc_release:operating_income": 766_603_000_000.0,
+        "tsmc_release:net_income": 706_562_000_000.0,
+        "tsmc_release:diluted_eps": 27.25,
+        "tsmc_release:diluted_eps_adr": 4.31,
+    }
+    assert {row.period for row in records} == {"2026-06-30"}
+    assert {row.period_start for row in records} == {"2026-04-01"}
+    assert {row.currency for row in records} == {"TWD", "USD"}
+    assert next(row for row in records
+                if row.provider_field == "tsmc_release:diluted_eps_adr").unit == "USD/ADR"
+    assert all(row.dimensions["taxonomy"] == "TIFRS" for row in records)
+
+
+def test_amazon_official_release_parses_current_quarter_core_fields() -> None:
+    records = parse_amazon_quarterly_release(AMAZON_Q2_RELEASE, published_at=NOW)
+    by_field = {row.provider_field: row for row in records}
+
+    assert by_field["amzn_release:net_sales"].value == 200_606_000_000
+    assert by_field["amzn_release:gross_profit_derived"].value == 104_828_000_000
+    assert by_field["amzn_release:capex"].value == 54_208_000_000
+    assert by_field["amzn_release:diluted_eps"].value == 5.75
+    assert by_field["amzn_release:gross_profit_derived"].raw["calculation"] == \
+        "Total net sales - Cost of sales"
+
+
+def test_company_disclosures_adapter_ingests_verified_tsm_release(tmp_path):
+    repo = _repo(tmp_path)
+    result = SimpleNamespace(
+        status="succeeded", stage="exhibit", record={
+            "text": TSMC_Q2_RELEASE, "filed": NOW.date(),
+            "source_url": "https://www.sec.gov/Archives/edgar/data/1046179/release.htm",
+            "accession": "0001046179-26-000451", "cik": "0001046179", "form_type": "6-K",
+        })
+    adapter = CompanyDisclosuresAdapter(release_fetcher=lambda *_, **__: result,
+                                        clock=lambda: NOW)
+    request = FetchRequest(
+        source_id="company_disclosures", dataset_id="company_financials", entities=["TSM"],
+        query_scope={"near": "2026-07-16", "period": "Q2 FY2026"})
+
+    outcome = IngestionPipeline(repo).run(adapter, request)
+    rows = repo.observations(entity_id="TSM")
+
+    assert outcome["status"] == "succeeded" and outcome["accepted"] == 6
+    assert {row["metric_id"] for row in rows} == {
+        "financial.revenue.gaap", "financial.gross_profit.gaap",
+        "financial.operating_income.gaap", "financial.net_income.gaap",
+        "financial.eps.diluted.gaap", "financial.eps.diluted.adr"}
+    assert {row["period"] for row in rows} == {"2026-06-30"}
+    assert {row["source_id"] for row in rows} == {"company_disclosures"}
+    by_metric = {row["metric_id"]: row for row in rows}
+    assert by_metric["financial.revenue.gaap"]["value"] == 1_270_381_000_000.0
+    assert by_metric["financial.net_income.gaap"]["value"] == 706_562_000_000.0
+    assert by_metric["financial.eps.diluted.gaap"]["value"] == 27.25
+    assert by_metric["financial.eps.diluted.adr"]["value"] == 4.31
+    assert by_metric["financial.eps.diluted.adr"]["unit"] == "USD/ADR"
+    artifact = repo.lineage(rows[0]["observation_id"])["artifact"]
+    assert artifact["source_version"] == "0001046179-26-000451"
+    assert artifact["source_url"].endswith("release.htm")
+
+
+def test_company_disclosures_explicitly_reports_non_tsm_as_no_coverage(tmp_path):
+    repo = _repo(tmp_path)
+    adapter = CompanyDisclosuresAdapter(clock=lambda: NOW)
+    request = FetchRequest(
+        source_id="company_disclosures", dataset_id="company_financials", entities=["MSFT"],
+        query_scope={"near": "2026-07-16", "period": "Q2 FY2026"})
+
+    outcome = IngestionPipeline(repo).run(adapter, request)
+
+    assert outcome["status"] == "no_coverage"
+    assert repo.observations() == []
+
+
 def test_defeatbeta_predicate_slice_mapping_pending_pool_and_provenance(tmp_path):
     repo = _repo(tmp_path)
     connection = _Connection([
@@ -193,7 +308,7 @@ def test_defeatbeta_predicate_slice_mapping_pending_pool_and_provenance(tmp_path
     request = FetchRequest(
         source_id="defeatbeta_stock_statement", dataset_id="company_financials",
         entities=["MSFT"], periods=["2026-06-30"],
-        query_scope={"currency": "USD", "since": "2026-01-01"})
+        query_scope={"currency": "USD", "since": "2026-01-01", "include_unmapped": True})
 
     result = IngestionPipeline(repo).run(adapter, request)
     rows = repo.observations()
@@ -210,6 +325,95 @@ def test_defeatbeta_predicate_slice_mapping_pending_pool_and_provenance(tmp_path
     assert metadata["host"] == "huggingface"
     assert metadata["dataset"] == "defeatbeta/yahoo-finance-data"
     assert artifact["source_version"] == snapshot.updated_at
+
+
+def test_defeatbeta_uses_entity_currency_and_instant_basis_for_balance_sheet(tmp_path):
+    repo = _repo(tmp_path)
+    connection = _Connection([
+        ("TSM", "2026-06-30", "total_revenue", Decimal("1270381000000"),
+         "income_statement", "quarterly"),
+        ("TSM", "2026-06-30", "capital_expenditure", Decimal("-496002000000"),
+         "cash_flow", "quarterly"),
+        ("TSM", "2026-06-30", "operating_cash_flow", Decimal("783365000000"),
+         "cash_flow", "quarterly"),
+        ("TSM", "2026-06-30", "total_debt", Decimal("982447000000"),
+         "balance_sheet", "quarterly"),
+        ("TSM", "2026-06-30", "diluted_eps", Decimal("136.23"),
+         "income_statement", "quarterly"),
+        ("TSM", "2026-06-30", "unmapped_yahoo_field", Decimal("1"),
+         "balance_sheet", "quarterly"),
+    ])
+    adapter = DefeatBetaStatementAdapter(
+        uri="fixture.parquet", connection_factory=lambda _: connection,
+        snapshot_loader=lambda **_: DatasetSnapshot(updated_at=NOW.isoformat()),
+        clock=lambda: NOW)
+
+    result = IngestionPipeline(repo).run(adapter, FetchRequest(
+        source_id="defeatbeta_stock_statement", dataset_id="company_financials",
+        entities=["TSM"], periods=["2026-06-30"]))
+
+    rows = {row["metric_id"]: row for row in repo.observations(entity_id="TSM")}
+    assert result["accepted"] == 5 and result["quarantined"] == 0
+    assert rows["financial.capex.gaap"]["value"] == 496_002_000_000
+    assert rows["financial.capex.gaap"]["currency"] == "TWD"
+    assert rows["financial.total_debt.provider_reported"]["period_basis"] == "instant"
+    assert rows["financial.eps.diluted.adr"]["value"] == 136.23
+    assert rows["financial.eps.diluted.adr"]["unit"] == "TWD/ADR"
+    assert repo.pending_mappings() == []
+
+
+def test_yfinance_financials_is_statement_only_and_preserves_quarter_fields(tmp_path):
+    repo = _repo(tmp_path)
+    quarter = pd.Timestamp("2026-06-30")
+    annual = pd.Timestamp("2025-12-31")
+
+    def frame(rows):
+        return pd.DataFrame({quarter: [value[0] for value in rows.values()],
+                             annual: [value[1] for value in rows.values()]},
+                            index=list(rows))
+
+    ticker = SimpleNamespace(
+        quarterly_income_stmt=frame({
+            "Total Revenue": (200_606_000_000, 213_386_000_000),
+            "Gross Profit": (103_000_000_000, 103_427_000_000),
+            "Operating Income": (27_461_000_000, 24_977_000_000),
+            "Net Income": (62_647_000_000, 21_192_000_000),
+            "Diluted EPS": (5.75, 2.00),
+        }),
+        quarterly_cashflow=frame({
+            "Operating Cash Flow": (45_387_000_000, 54_459_000_000),
+            "Capital Expenditure": (-44_203_000_000, -39_522_000_000),
+        }),
+        quarterly_balance_sheet=frame({
+            "Cash And Cash Equivalents": (80_000_000_000, 75_000_000_000),
+            "Inventory": (40_000_000_000, 38_000_000_000),
+            "Total Debt": (132_995_000_000, 120_000_000_000),
+            "Total Assets": (650_000_000_000, 620_000_000_000),
+            "Total Liabilities Net Minority Interest": (390_000_000_000, 370_000_000_000),
+            "Stockholders Equity": (260_000_000_000, 250_000_000_000),
+        }),
+        income_stmt=pd.DataFrame(), cashflow=pd.DataFrame(), balance_sheet=pd.DataFrame(),
+    )
+    adapter = YFinanceFinancialStatementsAdapter(
+        ticker_factory=lambda symbol: ticker, clock=lambda: NOW)
+
+    result = IngestionPipeline(repo).run(adapter, FetchRequest(
+        source_id="yfinance_financials", dataset_id="company_financials",
+        entities=["AMZN"], periods=["2026-06-30"]))
+
+    rows = {row["metric_id"]: row for row in repo.observations(entity_id="AMZN")}
+    assert result["status"] == "succeeded" and result["quarantined"] == 0
+    assert rows["financial.gross_profit.gaap"]["value"] == 103_000_000_000
+    assert rows["financial.capex.gaap"]["value"] == 44_203_000_000
+    assert rows["financial.eps.diluted.market_adjusted"]["value"] == 5.75
+    assert rows["financial.eps.diluted.market_adjusted"]["adjustment"] == "split_adjusted"
+    assert rows["financial.total_debt.provider_reported"]["period_basis"] == "instant"
+    assert rows["financial.total_debt.provider_reported"]["adjustment"] == "provider_reported"
+    assert {row["currency"] for row in rows.values()} == {"USD"}
+    artifact = repo.lineage(rows["financial.revenue.gaap"]["observation_id"])["artifact"]
+    metadata = json.loads(artifact["metadata_json"])
+    assert metadata["coverage"]["market_data_requested"] is False
+    assert "financials" in artifact["source_url"]
 
 
 def test_official_and_mirror_remain_parallel_and_official_wins(tmp_path):
@@ -243,6 +447,32 @@ def test_official_and_mirror_remain_parallel_and_official_wins(tmp_path):
     assert loose["rows"][0]["value"] == 102
     assert loose["rows"][0]["conflict"] is True
     assert repo.conn.execute("SELECT count(*) FROM structured_conflicts").fetchone()[0] >= 1
+
+
+def test_market_adjusted_eps_and_provider_debt_do_not_conflict_with_official_series(tmp_path):
+    repo = _repo(tmp_path)
+    sec_adapter = SECCompanyFactsAdapter(
+        client=_SECClient(_companyfacts()), clock=lambda: NOW)
+    IngestionPipeline(repo).run(sec_adapter, FetchRequest(
+        source_id="sec_companyfacts", dataset_id="company_financials",
+        entities=["MSFT"], periods=["2026-06-30"]))
+    mirror = DefeatBetaStatementAdapter(
+        uri="fixture.parquet", connection_factory=lambda _: _Connection([
+            ("MSFT", "2026-06-30", "diluted_eps", Decimal("0.25"),
+             "income_statement", "quarterly"),
+            ("MSFT", "2026-06-30", "total_debt", Decimal("50.00"),
+             "balance_sheet", "quarterly"),
+        ]), snapshot_loader=lambda **_: DatasetSnapshot(updated_at=NOW.isoformat()),
+        clock=lambda: NOW)
+    outcome = IngestionPipeline(repo).run(mirror, FetchRequest(
+        source_id="defeatbeta_stock_statement", dataset_id="company_financials",
+        entities=["MSFT"], periods=["2026-06-30"], query_scope={"currency": "USD"}))
+
+    assert outcome["accepted"] == 2
+    assert repo.conn.execute("SELECT count(*) FROM structured_conflicts").fetchone()[0] == 0
+    rows = {row["metric_id"]: row for row in repo.observations(entity_id="MSFT")}
+    assert rows["financial.eps.diluted.market_adjusted"]["adjustment"] == "split_adjusted"
+    assert rows["financial.total_debt.provider_reported"]["adjustment"] == "provider_reported"
 
 
 def test_report_date_identity_supports_different_fiscal_year_ends():

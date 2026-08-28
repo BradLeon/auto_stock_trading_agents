@@ -152,7 +152,7 @@ Provider 接入、原始保存、映射、准入和质量判断由平台完成�
 本变更的目标范围包括：
 
 - 公司官方财务报表事实及其修订。
-- defeatbeta `stock_statement` 的目标实体/期间切片。
+- defeatbeta `stock_statement` 与受管 yfinance 三表的目标实体/期间切片（仅低频财务 fallback）。
 - 市场 Consensus 的真实抓取快照。
 - 台湾、韩国官方月度出口序列。
 - 经文档证据和人工/规则核验的融资、估值、ARR 等事件数值。
@@ -386,6 +386,8 @@ Provider field / XBRL concept
 - 证据型事件：融资金额、投后/投前估值、ARR；只有证据齐全并核验后发布。
 
 以下维度不可合并：GAAP 与 non-GAAP、单季与累计、reported 与 consensus、币种不同且未显式换算、公司财期不同且未归一。
+
+同一指标名称也不代表相同经济口径：`financial.eps.diluted.gaap` 是普通股原始每股 EPS，`financial.eps.diluted.adr` 是每 ADR EPS；TSM 的官方 `USD/ADR` 优先，镜像的 `TWD/ADR` 仅作带单位 fallback。Provider 给出的历史拆股调整 EPS 必须映射为 `financial.eps.diluted.market_adjusted`，不得覆盖原始 EPS。`financial.long_term_debt.gaap` 与 `financial.total_debt.gaap` 同样不可互换：SEC 的 `LongTermDebt` 是前者，`DebtLongtermAndShorttermCombinedAmount` 才是后者。Provider `total_debt` 可能包含经营租赁等额外项目，必须映射为 `financial.total_debt.provider_reported`，只能在数值定义已书面确认后才与官方总债务核对。新增映射前必须验证原始 concept/Provider 定义，而不只比较字段名或数值大小。
 
 ## 10. Adapter 契约
 

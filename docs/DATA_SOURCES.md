@@ -67,7 +67,7 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 
 - **共享文档资产**：正文保存在 `信息源/`（或 `ATS_DOCS_ROOT`）下；`source_documents` 保存逻辑文档目录，`document_versions` 保存不可变版本，`document_entities` 记录同一文档关联的多个公司，`document_chunks` 提供文本检索，`document_processing_runs` 区分各 Workflow 的处理状态和版本。所有业务来源统一经 `data.document_assets` 写入。
 - **结构化观测**：`chain.sources` 已接入的数据写入 `measurement_series`/`measurement_points`，同一期间的上游修订并存，并可按 `as_of` 回放；同比、环比等派生值查询时计算。既有行情、基本面、宏观、期权和 consensus 仍是运行时现取，尚未整体迁移。
-- **事实与任务解释**：`evidence_facts` 保存中性事实，`evidence_fact_projections` 保存 Evidence 的命题解释，`task_projections` 保存 PEAD / Sector 等带版本的任务视图。`evidence_observations`、`research_insights` 等旧表在兼容期继续双写。
+- **事实与任务解释**：`evidence_facts` 保存可复用的中性事实，`evidence_fact_projections` 保存可复用的证据投影；`task_projections`、`claim_proposals`、`claim_assessments` 与 Chain/Chief/Workflow 的运行结果则是带版本的任务状态，保留在 memory，不能被当作结构化或非结构化的输入源迁移或发布。`evidence_observations`、`research_insights` 等旧表在兼容期继续双写。
 - **Context Memory `var/ats.sqlite`**：除上述数据平台目录外，继续保存 `pead_dossier`、`pead_events`、`reports`/`decisions`/`trades`/`performance` 等领域状态和决策记忆。
 - **新闻→决策闭环**：dossier 的 `narrative` 是唯一累积记忆——monitor 持续把分诊后的新闻 + 结构化维度变更折进它，prep 在财报前**读取并延续**（而非重置为种子），score 据此对基准打分。所以两条通道的产出能一路走到 Scorecard/下单，不会被 prep 冲掉。
 - **`var/checkpoints.sqlite`**：LangGraph 暂停态（异步飞书审批跨进程 resume）。

@@ -1231,7 +1231,9 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
              db_path: str = "", artifact_root: str = "", force: bool = False,
              apply: bool = False, mode: str = "platform", consumer: str = "",
              release_file: str = "", kind: str = "", operation: str = "",
-             window: int = 0, entities: str = "", period: str = "") -> int:
+             window: int = 0, entities: str = "", period: str = "",
+             migration_domain: str = "", source_db: str = "", target_db: str = "",
+             backup_root: str = "") -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
 
@@ -1248,6 +1250,96 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         }
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if validation.valid else 2
+
+    if action == "migration-plan":
+        from ..data.migration import load_migration_inventory
+
+        inventory = load_migration_inventory()
+        result = inventory.summary()
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["validation"]["valid"] else 2
+
+    if action == "cutover-check":
+        from ..data.migration import default_data_db_path
+        from ..data.cutover import compare_consumer_data
+        from ..memory import get_store
+
+        if not consumer:
+            raise ValueError("cutover-check requires --consumer")
+        result = compare_consumer_data(
+            consumer=consumer, entity=entity, legacy_db=source_db or get_store().path,
+            data_db=target_db or default_data_db_path())
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["status"] == "reconciled" else 2
+
+    if action == "cutover-status":
+        from ..data.cutover import consumer_cutover_status
+        from ..data.migration import default_data_db_path, load_migration_inventory
+
+        if not consumer:
+            raise ValueError("cutover-status requires --consumer")
+        policy = load_migration_inventory().consumer_cutover
+        result = consumer_cutover_status(
+            consumer=consumer, data_db=target_db or default_data_db_path(),
+            minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
+            maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["eligible"] else 2
+
+    if action == "migrate":
+        from ..data.migration import (
+            SQLiteMigrationRunner,
+            GovernedStructuredMigrationRunner,
+            StructuredLegacyMigrationRunner,
+            default_data_db_path,
+            load_migration_inventory,
+        )
+        from ..memory import get_store
+
+        inventory = load_migration_inventory()
+        validation = inventory.validate()
+        if not validation.valid:
+            result = {"status": "invalid_plan", "validation": validation.model_dump(mode="json")}
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return 2
+        if not migration_domain:
+            raise ValueError("migrate requires --migration-domain")
+        domain = next((item for item in inventory.domains if item.id == migration_domain), None)
+        if domain is None:
+            raise ValueError(f"unknown migration domain: {migration_domain}")
+        configured_backup = inventory.backup.get("default_root", "var/data_migration_backups")
+        source_path = source_db or get_store().path
+        target_path = Path(target_db) if target_db else default_data_db_path()
+        if domain.id == "structured-governed-history":
+            from ..structured.artifacts import default_artifact_root
+
+            runner = GovernedStructuredMigrationRunner(
+                source_path, target_path,
+                source_artifact_root=default_artifact_root(),
+                target_artifact_root=artifact_root or target_path.parent / "structured_artifacts")
+        elif domain.id == "structured-legacy-measurements":
+            runner = StructuredLegacyMigrationRunner(
+                source_path, target_path,
+                artifact_root=artifact_root or target_path.parent / "structured_artifacts")
+        else:
+            runner = SQLiteMigrationRunner(source_path, target_path)
+        result = runner.run(
+            domain, backup_root=backup_root or configured_backup,
+            dry_run=not apply).model_dump()
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["reconciled"] else 2
+
+    if action == "repair-company-financials":
+        from ..data.migration import CompanyFinancialSemanticRepair, default_data_db_path
+
+        target_path = Path(db_path or target_db or default_data_db_path())
+        repair = CompanyFinancialSemanticRepair(target_path)
+        result = repair.run(
+            backup_root=backup_root or "var/data_migration_backups",
+            dry_run=not apply).model_dump()
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["reconciled"] else 2
 
     from ..data_platform import get_data_products
 
@@ -1312,6 +1404,21 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                     check = manager.check_consumer(target_id, mode=mode) \
                         if target_kind == "consumer" else manager.check_source(
                             target_id, mode=mode)
+                    if target_kind == "consumer" and mode == "platform":
+                        from ..data.cutover import consumer_cutover_status
+                        from ..data.migration import default_data_db_path, load_migration_inventory
+
+                        policy = load_migration_inventory().consumer_cutover
+                        stability = consumer_cutover_status(
+                            consumer=target_id, data_db=target_db or default_data_db_path(),
+                            minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
+                            maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
+                        )
+                        check["checks"].append({
+                            "check": "stability_observation", "passed": stability["eligible"],
+                            "detail": stability["reason"], "status": stability,
+                        })
+                        check["ready"] = bool(check["ready"] and stability["eligible"])
                     result = manager.apply(check) if action == "publish" and apply else {
                         **check, "applied": False,
                         "operation": "publish_preview" if action == "publish"
@@ -1439,7 +1546,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "config", "describe", "availability", "examples", "releases",
+        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "cutover-check", "cutover-status", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",
@@ -1466,19 +1573,27 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--query-scope", default="",
                       help="ingest: Provider 查询范围 JSON")
     data.add_argument("--db", dest="db_path", default="",
-                      help="ingest/release: 隔离 SQLite 路径")
+                      help="ingest/release/repair-company-financials: 隔离或目标 SQLite 路径")
     data.add_argument("--artifact-root", default="",
-                      help="ingest: 隔离 raw artifact 目录（需同时 --db）")
+                      help="ingest: 隔离 raw artifact 目录（需同时 --db）；migrate structured: 目标 artifact 目录")
     data.add_argument("--force", action="store_true",
                       help="ingest: 仅用于隔离验收，绕过 legacy source mode")
     data.add_argument("--apply", action="store_true",
-                      help="publish/rollback: 显式写入 release overlay")
+                      help="publish/rollback/repair-company-financials: 显式执行写操作")
     data.add_argument("--mode", choices=["legacy", "shadow", "platform", "fallback"],
                       default="platform", help="publish/rollback 目标模式")
     data.add_argument("--consumer", default="",
-                      help="publish/rollback: 消费者 ID；与 --source 二选一")
+                      help="publish/rollback/cutover-check/cutover-status: 消费者 ID；与 --source 二选一")
     data.add_argument("--release-file", default="",
                       help="发布覆盖层路径，默认 var/structured_data/releases.yaml")
+    data.add_argument("--migration-domain", default="",
+                      help="migrate: config/data/migration.yaml 中的迁移域")
+    data.add_argument("--source-db", default="",
+                      help="migrate: legacy SQLite 源库；默认 ATS_DB_PATH")
+    data.add_argument("--target-db", default="",
+                      help="migrate: 新数据 SQLite 目标库；默认 ATS_DATA_DB_PATH")
+    data.add_argument("--backup-root", default="",
+                      help="migrate/repair-company-financials: 已验证备份目录；迁移默认 config/data/migration.yaml")
     data.add_argument("--operation", choices=["yoy", "mom", "rolling"], default="",
                       help="derive: 派生运算")
     data.add_argument("--window", type=int, default=0, help="derive rolling 窗口")
@@ -1616,7 +1731,9 @@ def main(argv: list[str] | None = None) -> int:
                         apply=args.apply, mode=args.mode, consumer=args.consumer,
                         release_file=args.release_file, kind=args.kind,
                         operation=args.operation, window=args.window,
-                        entities=args.entities, period=args.period)
+                        entities=args.entities, period=args.period,
+                        migration_domain=args.migration_domain, source_db=args.source_db,
+                        target_db=args.target_db, backup_root=args.backup_root)
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":

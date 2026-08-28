@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 import hashlib
+import json
 import math
 from typing import Protocol
 
@@ -101,8 +102,12 @@ class CentralAdmission:
             and row["unit"] == record.unit and row["currency"] == record.currency
             and row["period_basis"] == record.period_basis
             and row["adjustment"] == record.adjustment]
+        dataset_quality = json.loads(dataset.get("quality_json", "{}")) if dataset else {}
+        reconciliation_tolerance = float(
+            dataset_quality.get("reconciliation_relative_tolerance", 1e-9))
         quality = QualityStatus.CONFLICT if any(
-            not math.isclose(float(row["value"]), numeric, rel_tol=1e-9, abs_tol=1e-9)
+            not math.isclose(float(row["value"]), numeric,
+                             rel_tol=reconciliation_tolerance, abs_tol=1e-9)
             for row in conflict_rows) else QualityStatus.ACCEPTED
         observation = ObservationInput(
             series=SeriesIdentity(
@@ -121,7 +126,8 @@ class CentralAdmission:
         vintage = self.repository.save_observation(observation)
         if quality == QualityStatus.CONFLICT:
             for other in conflict_rows:
-                if math.isclose(float(other["value"]), numeric, rel_tol=1e-9, abs_tol=1e-9):
+                if math.isclose(float(other["value"]), numeric,
+                                rel_tol=reconciliation_tolerance, abs_tol=1e-9):
                     continue
                 absolute = abs(float(other["value"]) - numeric)
                 relative = absolute / abs(float(other["value"])) if other["value"] else None

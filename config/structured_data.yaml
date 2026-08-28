@@ -104,16 +104,25 @@ feature_flags:
     kr_ecos_exports: platform
     trendforce_dram: legacy
     sec_companyfacts: shadow
-    company_disclosures: legacy
+    company_disclosures: shadow
     defeatbeta_stock_statement: shadow
+    yfinance_financials: shadow
     yfinance_consensus: shadow
     accepted_document_evidence: platform
   consumers:
     chain_regional: platform
     pead_consensus: platform
     sector_consensus: platform
-    pead_fundamentals: legacy
+    # Shadow is a controlled dual-read: the PEAD DTO continues to return the
+    # legacy value while the governed statement selection is independently read
+    # and compared.  It is not a production cutover.
+    pead_fundamentals: shadow
     sector_fundamentals: legacy
+    # Unstructured data consumers use the same compatibility release overlay while
+    # their reads are shadow-compared. Their processing/decision writes remain legacy.
+    pead_research: shadow
+    evidence_chain: shadow
+    chief_graph: shadow
   consumer_sources: {}
 
 # Terminal statuses have distinct operational meaning. In particular,
@@ -185,7 +194,9 @@ sources:
     retention: full_response
     internal_request_budget: {concurrency: 1, requests_per_second: 5, timeout_seconds: 30}
   company_disclosures:
-    catalog_status: planned
+    # Current partial: official TSM quarterly release (SEC 6-K/EX-99.1) only.
+    # No annual 20-F obligation is implied by this source's acceptance scope.
+    catalog_status: current_partial
     persistence: persistent
     provider: issuer or equivalent official disclosure
     adapter: company_disclosures
@@ -203,6 +214,18 @@ sources:
     cadence: snapshot
     retention: query_slice
     internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, timeout_seconds: 60}
+  yfinance_financials:
+    # Promoted from the legacy fundamentals reader strictly for low-frequency
+    # financial statement gaps.  Prices, OHLCV, options and quote metadata remain
+    # runtime-only under yfinance_market / yfinance_options below.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Yahoo Finance via yfinance
+    adapter: yfinance_financials
+    datasets: [company_financials]
+    cadence: event
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
   yfinance_consensus:
     catalog_status: current_partial
     persistence: persistent
@@ -301,8 +324,10 @@ datasets:
     entity_registry: config/entities.yaml
     coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
     expected_cadence: quarterly_or_issuer_period
-    primary_sources: [sec_companyfacts, company_disclosures]
-    fallback_sources: [defeatbeta_stock_statement]
+    # A timely, issuer-reported quarterly release wins where it is accepted;
+    # Company Facts remains primary for the rest of the covered universe.
+    primary_sources: [company_disclosures, sec_companyfacts]
+    fallback_sources: [defeatbeta_stock_statement, yfinance_financials]
     core_metrics:
       - financial.revenue.gaap
       - financial.gross_profit.gaap
@@ -311,12 +336,11 @@ datasets:
       - financial.eps.diluted.gaap
       - financial.cash_from_operations.gaap
       - financial.capex.gaap
-      - financial.free_cash_flow
       - financial.cash_and_equivalents.gaap
       - financial.inventory.gaap
       - financial.total_debt.gaap
-      - financial.gross_margin.gaap
-      - financial.operating_margin.gaap
+      # FCF and margins are governed query-time derivations of the raw core fields
+      # above; they must not be counted as missing source observations.
     quality:
       core_metric_coverage_ratio_min: 0.80
       require_period_continuity: true
@@ -324,7 +348,9 @@ datasets:
       reconciliation_relative_tolerance: 0.001
       shadow_relative_tolerance: 0.001
       pending_mapping_loss_max: 0
-    acceptance_samples: [AMZN, MSFT, KLAC, TSM, mirror_missing_entity]
+    # Explicit operational coverage only.  `MIRROR_MISSING` remains a unit-test
+    # negative case, not a company the platform promises to cover.
+    acceptance_samples: [AMZN, MSFT, KLAC, TSM]
     rollback_on: [wrong_entity, wrong_period, unit_change, future_leakage, shadow_mismatch]
   market_consensus:
     catalog_status: current_partial
@@ -382,12 +408,19 @@ metric_definitions:
   financial.operating_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
   financial.net_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
   financial.eps.diluted.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
+  financial.eps.diluted.market_adjusted: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: split_adjusted}
+  # ADR EPS is economically distinct from ordinary-share EPS.  The unit records
+  # whether the issuer reported USD/ADR directly or the mirror provided TWD/ADR.
+  financial.eps.diluted.adr: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
   financial.cash_from_operations.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], adjustment: gaap}
   financial.capex.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], adjustment: gaap}
   financial.free_cash_flow: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], derived: true}
   financial.cash_and_equivalents.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
   financial.inventory.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  # Long-term debt excludes current maturities; it is not a substitute for total debt.
+  financial.long_term_debt.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
   financial.total_debt.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_debt.provider_reported: {value_type: number, unit_family: currency, period_basis: instant, adjustment: provider_reported}
   financial.total_assets.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
   financial.total_liabilities.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
   financial.stockholders_equity.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
@@ -419,6 +452,20 @@ metric_definitions:
 # Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
 # must remain pending under `unmapped_policy`; never guess a convenient metric.
 provider_mappings:
+  company_disclosures:
+    tsmc_release:net_sales: financial.revenue.gaap
+    tsmc_release:gross_profit: financial.gross_profit.gaap
+    tsmc_release:operating_income: financial.operating_income.gaap
+    tsmc_release:net_income: financial.net_income.gaap
+    tsmc_release:diluted_eps: financial.eps.diluted.gaap
+    tsmc_release:diluted_eps_adr: financial.eps.diluted.adr
+    amzn_release:net_sales: financial.revenue.gaap
+    amzn_release:gross_profit_derived: financial.gross_profit.gaap
+    amzn_release:operating_income: financial.operating_income.gaap
+    amzn_release:net_income: financial.net_income.gaap
+    amzn_release:diluted_eps: financial.eps.diluted.gaap
+    amzn_release:cash_from_operations: financial.cash_from_operations.gaap
+    amzn_release:capex: financial.capex.gaap
   sec_companyfacts:
     "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": financial.revenue.gaap
     "us-gaap:Revenues": financial.revenue.gaap
@@ -440,9 +487,10 @@ provider_mappings:
     "ifrs-full:CashAndCashEquivalents": financial.cash_and_equivalents.gaap
     "us-gaap:InventoryNet": financial.inventory.gaap
     "ifrs-full:Inventories": financial.inventory.gaap
-    "us-gaap:LongTermDebtAndFinanceLeaseObligations": financial.total_debt.gaap
-    "us-gaap:LongTermDebt": financial.total_debt.gaap
+    "us-gaap:DebtLongtermAndShorttermCombinedAmount": financial.total_debt.gaap
     "ifrs-full:Borrowings": financial.total_debt.gaap
+    "us-gaap:LongTermDebtAndFinanceLeaseObligations": financial.long_term_debt.gaap
+    "us-gaap:LongTermDebt": financial.long_term_debt.gaap
     "us-gaap:Assets": financial.total_assets.gaap
     "ifrs-full:Assets": financial.total_assets.gaap
     "us-gaap:Liabilities": financial.total_liabilities.gaap
@@ -457,7 +505,8 @@ provider_mappings:
     total_operating_income_as_reported: financial.operating_income.gaap
     net_income: financial.net_income.gaap
     net_income_common_stockholders: financial.net_income.gaap
-    diluted_eps: financial.eps.diluted.gaap
+    diluted_eps: financial.eps.diluted.market_adjusted
+    tsm_diluted_eps_adr_twd: financial.eps.diluted.adr
     operating_cash_flow: financial.cash_from_operations.gaap
     cash_flow_from_continuing_operating_activities: financial.cash_from_operations.gaap
     capital_expenditure: financial.capex.gaap
@@ -465,7 +514,21 @@ provider_mappings:
     cash_and_cash_equivalents: financial.cash_and_equivalents.gaap
     cash: financial.cash_and_equivalents.gaap
     inventory: financial.inventory.gaap
-    total_debt: financial.total_debt.gaap
+    total_debt: financial.total_debt.provider_reported
+    total_assets: financial.total_assets.gaap
+    total_liabilities_net_minority_interest: financial.total_liabilities.gaap
+    stockholders_equity: financial.stockholders_equity.gaap
+  yfinance_financials:
+    total_revenue: financial.revenue.gaap
+    gross_profit: financial.gross_profit.gaap
+    operating_income: financial.operating_income.gaap
+    net_income: financial.net_income.gaap
+    diluted_eps: financial.eps.diluted.market_adjusted
+    operating_cash_flow: financial.cash_from_operations.gaap
+    capital_expenditure: financial.capex.gaap
+    cash_and_cash_equivalents: financial.cash_and_equivalents.gaap
+    inventory: financial.inventory.gaap
+    total_debt: financial.total_debt.provider_reported
     total_assets: financial.total_assets.gaap
     total_liabilities_net_minority_interest: financial.total_liabilities.gaap
     stockholders_equity: financial.stockholders_equity.gaap

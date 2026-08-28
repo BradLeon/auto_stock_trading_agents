@@ -58,6 +58,15 @@ entities:
     market: US
     filings: sec
 
+  # Structured financial fallback coverage requires the same canonical entity
+  # registry as document ingestion.  Amazon was a PEAD/sector consumer but had
+  # not been registered because its prior financial path used the ticker directly.
+  AMZN:
+    name: Amazon.com
+    aliases: [AMAZON, "AMAZON.COM", "AMAZON.COM INC"]
+    market: US
+    filings: sec
+
   # 2026-08-18 新登记。它在 L2 的 tickers 里（标着 TODO 待确认），既非 target 也非
   # observe，所以没有第一方财报；但它在**别人的**新闻里频繁出现（NVDA 的算力承诺、
   # 实验室的部署去向）。登记只为让这些第三方读数能折叠到一个稳定身份。
@@ -119,6 +128,10 @@ entities:
     aliases: ["2330.TW", TSMC]
     market: TWSE
     filings: sec          # 20-F + 英文法说会纪要
+    # Structured statement mirrors do not carry an issuer currency column.  This is
+    # the reporting currency of the underlying TSMC statements, not the ADR quote
+    # currency.  Consumers therefore keep TIFRS amounts in TWD and never infer FX.
+    financial_statement_currency: TWD
 
   # 2026-08-13 补。它是先进制程与先进封装两条命题里唯一未注册的 cohort 成员——
   # 台账里关于 Intel 的读数只有 4 条，且全部出自 ASML 之口（High-NA 谁先上量）。

@@ -67,6 +67,7 @@ src/ats/data/
 - [消费者迁移、Workflow 回归与离线重放](STRUCTURED_DATA_CONSUMER_VALIDATION_2026-08-25.md)
 - [阶段二最终验收与遗留缺口](STRUCTURED_DATA_FINAL_ACCEPTANCE_2026-08-25.md)
 - [结构化数据可操作产品面补充验收](STRUCTURED_DATA_PRODUCT_SURFACES_ACCEPTANCE_2026-08-26.md)
+- [数据层消费者切换状态与稳定观察期](DATA_CUTOVER_STATUS.md)
 
 本次重构的目的，不是简单地把数据分成“结构化数据库”和“向量数据库”，而是把当前由各个 Agent 自行取数、加工、保存的模式，升级为一套共享的研究数据基础设施。
 
@@ -94,8 +95,9 @@ src/ats/data/
 - 普通新闻先保存 Provider 可见的标题/摘要，高价值正文抓取后升级同一逻辑文档；相同 URL 跨 Finnhub/RSS、跨公司只保存一次。
 - 每个文档版本按消费者和处理器版本记录处理状态，数据源不可达、加工失败与零结果不再混为一谈。
 - 台湾/韩国出口、官方财务、defeatbeta `stock_statement`、市场 Consensus 和已核验证据数值已接入统一 artifact、准入、vintage 与 `as_of` 查询；同比、环比等派生值不写入原始层。
-- 财务专项暴露了官方时效、外国发行人覆盖和跨源口径差异，因此 fundamentals 默认仍走 legacy；达到质量门的 PEAD / Sector Consensus 与 Chain 区域序列已切 platform，并保留独立回滚开关。
-- Evidence 中性事实与命题解释已经拆分；PEAD、Sector 的分析结果同时写入带版本的任务投影。
+- 财务专项暴露了官方时效、外国发行人覆盖和跨源口径差异。TSM 的 Q1/Q2 FY2026 官方 SEC 6-K/EX-99.1 同时保存普通股 `TWD/share` 与直接披露的 ADR EPS `USD/ADR`，PEAD 优先后者；镜像的拆股调整 EPS 独立为 market-adjusted 系列。SEC 的 `LongTermDebt` 单列，只有 `DebtLongtermAndShorttermCombinedAmount` 映射为官方总债务；Provider `total_debt` 单列为 provider-reported。上述语义已在隔离库和主库完成带备份的历史重分类：AMZN、MSFT、KLAC、TSM 最新覆盖均到 2026-06-30，旧的 22 个范围内假冲突已清除。主库仍有 MRVL 的 6 个独立跨源差异，已显式保留且不作为本财务语义修复的通过证据。PEAD fundamentals 仍处于 shadow 双读，尚未切 platform。达到质量门的 PEAD / Sector Consensus 与 Chain 区域序列已切 platform，并保留独立回滚开关。
+- Evidence 中性事实与命题解释已经拆分；PEAD、Sector 的任务投影、命题判断与 Chain/Chief
+  运行结果属于 workflow memory，不作为跨 Workflow 的数据层输入源。
 - 新增稳定的数据产品接口和 `ats data` 运维入口，覆盖指标、全文检索、公司包、命题包、健康状态和血缘。
 - 新增统一来源注册/隔离采集/发布门/回滚闭环，以及由实际数据库动态生成的 `catalog / describe / availability / examples`；发布运行状态写入可审计 release overlay。
 - 旧库启动时自动进行加法迁移；旧表继续保留并双写，现有 Workflow 无需一次性切换。
@@ -751,13 +753,13 @@ Agent 结论
 | `document_chunks` | 可定位的全文检索索引 |
 | `document_processing_runs` | 各消费者的加工版本、结果和失败状态 |
 | `research_articles` | 兼容文档目录；正文由共享文档资产保存 |
-| `research_insights` + `task_projections` | PEAD 兼容结果与版本化任务投影 |
+| `research_insights` + `task_projections` | PEAD 兼容结果与版本化任务投影；属于 workflow memory，不是数据层输入 |
 | `evidence_observations` | Evidence 兼容表，迁移期继续双写 |
 | `evidence_facts` + `evidence_fact_projections` | 中性事实与 Evidence 任务解释 |
 | `measurement_series` + `measurement_points` | 结构化原始观测及修订版本 |
 | `knowledge/*.md` | 人工策展知识 |
 | `pead_dossier` | PEAD 的领域状态与分析结果 |
-| `claim_assessments` | Evidence Workflow 的领域结论 |
+| `claim_assessments` | Evidence Workflow 的领域结论；属于 workflow memory，不是数据层输入 |
 
 迁移过程中应维持现有 Workflow 正常运行，通过兼容视图逐步切换，不要求一次性重写所有调用方。
 

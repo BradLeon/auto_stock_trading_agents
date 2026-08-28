@@ -14,14 +14,16 @@
 - 让 `ats.data_platform` 和 `ats.structured` 在迁移期成为兼容转发层。
 - 拆分数据层 repository 的代码所有权，降低 `ats.memory` 的混合职责。
 - 为开发者、运维者、使用者提供可执行且与代码同步的文档。
+- 在 facade 阶段后，完成旧数据、旧调用方和旧实现的受控迁移与退役，而不是永久保留双路径。
 
 **Non-Goals:**
 
-- 本变更不引入新的外部数据 Provider，不扩大数据覆盖范围。
+- 本变更不引入新的外部数据 Provider；但可以将已经由 legacy 路径使用的 Provider 以受管 adapter 形式迁入，以修复既有消费者的字段或时效缺口。
 - 本变更不把文档、数值观测和 Workflow 决策强行合并为同一数据模型或同一查询表。
 - 本变更不持久化 ticker 股价、OHLCV、订单簿、期权链、Greeks 或隐含波动率。
 - 本变更不在第一阶段删除旧表、旧配置或旧导入路径。
 - 本变更不决定向量数据库、知识图谱或独立时序数据库的选型。
+- 本变更不以 mock 或 facade 测试通过替代旧数据迁移、真实消费者切换或生产验收。
 
 ## Decisions
 
@@ -107,9 +109,61 @@ config/
 
 数据层 repository 的边界为：结构化观测、原始 artifact、文档元数据/版本/分块、证据、ingestion runs。交易、决策、性能和 agent run 仍属于 memory。
 
+### 5.1 既有 yfinance 报表读取作为受管财务 fallback
+
+`yfinance` 已由 legacy fundamentals 路径用于公司三表读取，因此将其迁入
+`company_financials` 不构成新增外部 Provider。新 adapter 只读取低频的季度/年度财务
+报表行，保留原始响应、查询时点、实体、报告期、币种和 source version；它不得读取或
+写入价格、OHLCV、订单簿、期权链或其他 runtime 市场数据。
+
+选择优先级仍为发行人披露/SEC Facts 优先、defeatbeta 镜像与 yfinance 只补缺。对于缺少
+XBRL 标准概念（例如当季毛利或 CapEx）或仅有全年/YTD 而消费者要求离散季度的美国发行人，
+受管 yfinance 行可以被选择；跨源冲突必须保留并阻断严格质量模式。每次发布前，需在隔离库
+验证当前报告期、核心字段、币种/单位、与既有路径的差异及退回 legacy 的行为。
+
+### 5.2 财务语义的边界：ADR EPS 与债务
+
+每股指标的经济单位不能由 entity 的报告币种推断。TSM 的官方 release 同时给出
+普通股 `NT$/share` 和 ADR `US$/ADR`，因此二者作为不同 metric 发布；基础面 DTO
+优先 ADR metric，缺失时才退到带 `TWD/ADR` 单位的镜像 fallback 或普通股原值，绝不
+把 5:1 ADR 比例当作跨源数据错误。镜像或 fallback 返回的历史每股值还可能经过市场
+调整（KLAC 的历史 EPS 即显示 10:1 拆股调整）；该值发布到独立的
+`financial.eps.diluted.market_adjusted`，而不是覆盖发行人的原始 GAAP 每股值。
+
+债务也不以字段名称相同就视为同一概念。`us-gaap:LongTermDebt` 明确排除资本租赁且
+不包含全部当前到期债务，必须单列为长期债务。若存在
+`us-gaap:DebtLongtermAndShorttermCombinedAmount`，它才是总债务的优先官方事实。
+镜像或 fallback 的 `total_debt` 发布为 `financial.total_debt.provider_reported`；在未能
+证明其是否包含融资/经营租赁、短债或其他项目以前，它只可作产品 fallback，不可与官方
+总债务自动对账。这样既保留镜像的补缺价值，也不会用错误的 SEC alias 或 Provider
+定义制造 3%–43% 的假冲突。
+
+已写入旧库的错误语义不能靠追加新 observation 自动修复。历史修复必须先建立 SQLite
+一致性备份，再以事务重分类旧镜像 series、保留原 observation/artifact ID、更新 candidate
+的 metric 血缘，并以最新 vintage 与 dataset 配置的对账容差重算冲突。旧 TSM release 的
+“NT$ million”未缩放值已经被缩放后的新 vintage 取代；重算不得把该被取代的历史版本重新
+当作有效来源。迁移结果必须分别报告受影响实体的未解决冲突和范围外既存冲突，后者不能被
+静默掩盖。
+
 ### 6. 按阶段迁移，每阶段设置回滚点
 
 每个阶段都先引入新入口，再迁移调用方，最后删除重复实现。每阶段必须通过导入兼容、配置校验、数据产品回归、受影响来源 smoke test 和受影响 Workflow 回归；失败时只回退当前阶段的 feature flag 或兼容转发，不删除已有数据。
+
+### 7. 将“兼容 facade 完成”与“旧实现退役”分成独立里程碑
+
+现有代码仅完成 facade、配置总目录和代码所有权边界；这些措施允许新旧入口共享底层资产，但不构成数据迁移或消费者切换。后续里程碑必须以可审计的 migration manifest 驱动，按下列顺序推进：
+
+1. 建立 legacy inventory：每个旧模块、配置 alias、表、artifact 目录、文档索引及其 Agent/Workflow 调用方都要有稳定 ID、owner、数据量、血缘和回退路径。
+2. 为每个数据域建立可续跑迁移单元。结构化迁移必须同时覆盖历史 `measurement_*` 表和已经受管但仍位于旧 SQLite 的 `structured_*` 表；观测以 dataset/entity/period/vintage 为单位，文档以 document/version/chunk/alias/evidence 为单位，artifact 以内容 hash 与关联记录为单位。
+3. 每个迁移单元在写入前备份或保留原始资产，写入后比较计数、主键、内容 hash、期间范围、版本/known_at、血缘和质量状态。差异必须显式记录，不得静默跳过。
+4. 新 repository 完成读写验收后，先采用 shadow 双读；一个 consumer 在至少一个自然日有一次无 mismatch 的对账记录，且 coverage、时效和输出验收通过后，才可切至 platform。任一异常可按 source/consumer 独立切回 legacy。
+5. 全部调用方迁移且达到上述发布门后，删除旧实现和 alias。删除前冻结 legacy 路径的新写入，并保留可恢复的备份、迁移 manifest 和发布记录。
+
+Workflow 的 task projection、claim proposal/assessment、PEAD/Sector/Chain/Chief 的报告和运行结果是
+`ats.memory` 的内部状态：它们可以引用已发布数据的 lineage，但不是可供其他 Workflow 复用的
+结构化或非结构化输入，也不属于数据迁移 domain 或 consumer 数据对账范围。
+
+不采用一次性全库复制或全局开关切换：两种方式都会放大大文件、历史版本和 Workflow 输出差异的排查范围。
 
 ## Risks / Trade-offs
 
@@ -119,18 +173,17 @@ config/
 - [memory.store 拆分影响旧 Workflow] → 先按 repository 接口隔离代码所有权，保留旧表和回退路径，完成消费者迁移后再做物理迁移。
 - [目录重排导致导入路径破坏] → 为所有公开旧路径保留兼容模块，加入全仓库 import smoke test，并设置弃用日志而非立即删除。
 - [新目录过度设计] → 第一阶段只建立边界和 facade，只有在现有职责明确时才移动文件；不为未来的向量库或知识图谱预建无用抽象。
+- [yfinance 报表语义与 SEC 不一致] → 限制为 fallback、保留 provider 原始行与报告期，按 source/period 比较；缺失币种、时点不清或跨源冲突时不在严格查询中发布。
 
 ## Migration Plan
 
-1. **基线与契约**：冻结当前公开导入、CLI、配置和数据库表清单，建立目标目录、依赖规则和兼容测试。
-2. **命名空间与产品 facade**：新增 `ats.data.core/catalog/products`，将 `ats.data_platform` 改为转发层，保持所有现有消费者运行。
-3. **结构化迁移**：逐步迁移 catalog、structured pipeline、repository 和 discovery，保留 `ats.structured` 转发；对结构化来源和消费者逐个回归。
-4. **非结构化迁移**：按 adapters、pipelines、stores 拆分 SEC、release、transcript、RSS、研报和证据路径；对文档完整性和血缘做回归。
-5. **配置统一**：引入 `config/data/` 与统一 loader，先 shadow-load 和对账，再切换默认配置入口；旧配置保持只读兼容。
-6. **memory 所有权迁移**：将数据层 repository/schema 迁出 `ats.memory`，先共用 SQLite，再按实际需要决定物理拆库。
-7. **退役旧逻辑**：所有来源和消费者完成对账、发布和稳定运行后，逐个删除旧实现；最后移除兼容层和旧配置别名。
+1. **阶段一：基线与 facade**：建立目标目录、依赖规则、compatibility facade 与基础回归。该阶段已完成，但不改变生产数据或消费者默认路径。
+2. **阶段二：legacy inventory 与迁移准备**：补全旧模块、配置、表、artifact、文档资产和消费者矩阵；为每个数据域定义迁移 manifest、备份、范围、对账键和 rollback 条件。
+3. **阶段三：数据迁移与双读**：先迁移历史 `measurement_*` 及既有 `structured_*` observations/artifacts/catalog/run records，再迁移非结构化 documents/versions/chunks/evidence；每批迁移均执行计数、hash、vintage、血缘和查询结果对账，并保留可续跑状态。仅完成其中一类结构化表不得将结构化域标记为完成。
+4. **阶段四：Agent/Workflow 切换**：逐个将 PEAD、Sector、Evidence/Chain、Chief 和其他直接使用 legacy data 路径的调用方改为 `ats.data.products` / `ats.data.runtime`；以 shadow 输出和端到端回归作为 platform 切换门槛。
+5. **阶段五：旧逻辑退役**：旧数据和全部消费者通过验收并完成稳定观察后，冻结旧路径写入，删除旧模块、配置 alias 与重复实现；最后执行全仓导入扫描、数据库/文件恢复演练和最终验收报告。
 
-回滚策略：任一阶段只回退新入口的 feature flag 或兼容转发，恢复旧读取路径；不删除已经保存的 artifact、文档版本、观测 vintage 或运行记录。
+回滚策略：阶段二至四的任一失败只回退相应 source 或 consumer 的 mode，保留旧读取路径与已保存的原始资产。阶段五删除前必须具备经验证的备份和恢复步骤；一旦删除开始，恢复通过备份/manifest 进行，不得依赖已移除代码。
 
 ## Deferred Decisions
 

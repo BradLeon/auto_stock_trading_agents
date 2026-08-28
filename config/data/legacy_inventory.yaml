@@ -1,0 +1,139 @@
+# Retirement inventory for the data-layer cutover. Every entry must remain
+# until its data migration, consumer cutover and rollback verification pass.
+version: 1
+
+legacy_objects:
+  - id: data-platform-products
+    kind: module
+    paths: [src/ats/data_platform/__init__.py, src/ats/data_platform/products.py]
+    target_owner: ats.data.products
+    data_domains: [structured, unstructured]
+    rollback: import compatibility facade
+  - id: structured-catalog
+    kind: module
+    paths: [src/ats/structured/__init__.py, src/ats/structured/catalog.py, src/ats/structured/models.py]
+    target_owner: ats.data.catalog
+    data_domains: [structured]
+    rollback: import compatibility facade
+  - id: structured-repository
+    kind: module
+    paths: [src/ats/structured/repository.py, src/ats/structured/artifacts.py]
+    target_owner: ats.data.stores.structured
+    data_domains: [structured]
+    rollback: source and consumer mode legacy
+  - id: structured-pipeline
+    kind: module
+    paths: [src/ats/structured/ingestion.py, src/ats/structured/quality.py, src/ats/structured/derivations.py]
+    target_owner: ats.data.pipelines.structured
+    data_domains: [structured]
+    rollback: source mode legacy
+  - id: structured-products
+    kind: module
+    paths: [src/ats/structured/discovery.py, src/ats/structured/selection.py, src/ats/structured/reporting.py]
+    target_owner: ats.data.products.structured
+    data_domains: [structured]
+    rollback: consumer mode legacy
+  - id: structured-rollout
+    kind: module
+    paths: [src/ats/structured/flags.py, src/ats/structured/release.py, src/ats/structured/runtime_registry.py]
+    target_owner: ats.data.rollout
+    data_domains: [structured]
+    rollback: release overlay rollback
+  - id: structured-evidence
+    kind: module
+    paths: [src/ats/structured/evidence.py]
+    target_owner: ats.data.stores.unstructured
+    data_domains: [unstructured, structured]
+    rollback: consumer mode legacy
+  - id: flat-data-providers
+    kind: module
+    paths:
+      - src/ats/data/sec.py
+      - src/ats/data/transcript.py
+      - src/ats/data/admission.py
+      - src/ats/data/base.py
+      - src/ats/data/news.py
+      - src/ats/data/research.py
+      - src/ats/data/document_assets.py
+      - src/ats/data/documents.py
+      - src/ats/data/document_types.py
+      - src/ats/data/source_cache.py
+      - src/ats/data/earnings_calendar.py
+      - src/ats/data/earnings_events.py
+      - src/ats/data/factset.py
+      - src/ats/data/fiscal.py
+      - src/ats/data/fundamentals.py
+      - src/ats/data/consensus.py
+      - src/ats/data/indicators.py
+      - src/ats/data/industry.py
+      - src/ats/data/macro.py
+      - src/ats/data/market_data.py
+      - src/ats/data/options.py
+      - src/ats/data/period.py
+      - src/ats/data/runup.py
+      - src/ats/data/sector_snapshot.py
+      - src/ats/data/web.py
+      - src/ats/data/websearch.py
+      - src/ats/data/yahoo_news.py
+      - src/ats/data/articles
+      - src/ats/data/sources
+    target_owner: ats.data.adapters / ats.data.pipelines / ats.data.products
+    data_domains: [structured, unstructured, runtime]
+    rollback: per-source and per-consumer legacy mode
+  - id: memory-data-tables
+    kind: database
+    paths: [var/ats.sqlite, src/ats/memory/store.py]
+    target_owner: ats.data.stores
+    data_domains: [structured, unstructured]
+    rollback: retained source database plus verified backup
+  - id: legacy-structured-config
+    kind: config
+    paths: [config/structured_data.yaml]
+    target_owner: config/data/structured.yaml
+    data_domains: [structured]
+    rollback: catalog legacy overlay
+  - id: legacy-unstructured-config
+    kind: config
+    paths: [config/sources.yaml, config/news_sources.yaml]
+    target_owner: config/data/unstructured.yaml
+    data_domains: [unstructured]
+    rollback: catalog legacy overlay
+  - id: structured-artifact-root
+    kind: artifact
+    paths: [var/structured_artifacts]
+    target_owner: ats.data.stores.structured
+    data_domains: [structured]
+    rollback: immutable backup plus retained root
+  - id: document-asset-root
+    kind: document_root
+    paths: [ATS_DOCS_ROOT, config/pead.yaml:docs_root]
+    target_owner: ats.data.stores.unstructured
+    data_domains: [unstructured]
+    rollback: retained source files and manifest
+
+consumers:
+  - id: pead-graph
+    paths: [src/ats/graph/pead.py, src/ats/agents/pead]
+    target_interface: ats.data.products + ats.data.runtime
+    sources: [company_financials, market_consensus, earnings_release, sec_filing, transcript, news]
+    rollback: consumer mode legacy
+  - id: sector-agent
+    paths: [src/ats/agents/sector]
+    target_interface: ats.data.products
+    sources: [regional_tw_exports, regional_kr_exports, industry_dram_contract_price, company_financials, market_consensus]
+    rollback: consumer mode legacy
+  - id: evidence-chain
+    paths: [src/ats/agents/evidence, src/ats/chain]
+    target_interface: ats.data.products.unstructured
+    sources: [sec_filing, earnings_release, transcript, research, rss, news, private_company_events]
+    rollback: consumer mode legacy
+  - id: chief-graph
+    paths: [src/ats/agents/chief, src/ats/graph/chief.py]
+    target_interface: ats.data.products
+    sources: [company_financials, market_consensus, private_company_events]
+    rollback: consumer mode legacy
+  - id: runtime-scheduler
+    paths: [src/ats/runtime/cli.py, src/ats/runtime/scheduler.py]
+    target_interface: ats.data.products + ats.data.runtime
+    sources: [company_financials, documents, runtime_market]
+    rollback: release overlay rollback

@@ -43,10 +43,14 @@ ats_cli data config
 | `publish` | 默认预览；带 `--apply` 才写 release overlay | 否 | 仅 `--apply` 写 overlay | 仅 `--apply` |
 | `rollback` | 默认预览；带 `--apply` 才切回指定 mode | 否 | 仅 `--apply` 写 overlay | 仅 `--apply` |
 | `releases` | 查看当前 overlay 和审计历史 | 否 | 否 | 否 |
+| `cutover-check` | 对账某 consumer 的 legacy/data 数据，并写审计记录 | 否 | 仅写 data DB 审计记录 | 否 |
+| `cutover-status` | 查看消费者是否已有一日无 mismatch 的对账资格 | 否 | 否 | 否 |
 
 ### 2.2 使用者命令
 
 `catalog`、`describe`、`availability`、`examples`、`series`、`derive`、`cross-section` 和 `lineage` 属于数据消费面，统一在使用手册说明。本手册仅在发布验收时引用 `catalog` 检查最终可见状态，不重复讲查询语法。`data series` 是使用者取数命令，不是采集或运维命令。
+
+消费者切换的完整状态与执行示例见[数据层消费者切换状态](DATA_CUTOVER_STATUS.md)。`publish --consumer ... --mode platform` 会额外检查 `config/data/migration.yaml` 中定义的成功对账与 mismatch 门；当 `cutover-status` 未满足时必须保持 `shadow`、`legacy` 或 `fallback`。
 
 特别说明：`data sources` 是运维机器清单，不证明数据库中已有可查询数据；使用者应通过 `data catalog` 和 `data availability` 判断实际覆盖。
 
@@ -120,7 +124,7 @@ feature_flags:
   sources:
     sec_companyfacts: shadow
   consumers:
-    pead_fundamentals: legacy
+    pead_fundamentals: shadow
   consumer_sources: {}
 ```
 
@@ -468,7 +472,32 @@ ats_cli data artifacts \
 
 通过标准：dataset `overall_status=passed`；错误实体、错误期间、单位突变、future leakage 均为 0；pending mapping 和 conflict 满足 `datasets.company_financials.quality` 的阈值。
 
-### 7.5 生产 shadow 与 platform 发布
+### 7.5 历史财务语义修复（写操作）
+
+只在代码修复了既有 metric 语义、而旧 observation 已按旧语义持久化时使用。本命令的
+范围固定为 `company_financials` 中早期 defeatbeta 镜像的 EPS/债务 series；它不会重新
+下载数据、不会读取或保存行情，也不会删除 artifact 或 observation。默认仅输出预演：
+
+```bash
+ats_cli data repair-company-financials --db var/data.sqlite
+```
+
+确认预演中的实体、旧/新 metric、单位和 observation 数量后，显式写入。该操作会先执行
+SQLite 一致性备份，并在 `var/data_migration_backups/` 写入审计记录：
+
+```bash
+ats_cli data repair-company-financials \
+  --db var/data.sqlite \
+  --backup-root var/data_migration_backups \
+  --apply
+```
+
+预期结果的关键字段为 `reconciled=true`、`scope_open_conflicts=0` 和非空
+`backup_path`。`unrelated_open_conflicts` 是该命令范围外的历史问题，必须单独建单处理；
+不得因为本修复通过就宣称整个 dataset 的全局质量门已通过。第二次运行应输出
+`series=[]`，证明迁移可安全重跑。
+
+### 7.6 生产 shadow 与 platform 发布
 
 默认先预览，不改变状态：
 
@@ -510,7 +539,17 @@ ats_cli data releases
 
 发布 source 只控制统一采集路径，不会自动切换 PEAD/Sector consumer。consumer 发布必须独立完成 reconciliation。
 
-### 7.6 回滚演练
+PEAD 的 shadow 对账不是简单比较两份 DTO 的字节是否一致。相同期间且数值不同、任一侧缺少
+Revenue/Gross Margin/Operating Margin/Net Income/Diluted EPS/CapEx/Free Cash Flow/Total Debt，或
+platform 期间不比 legacy 更新，均为 `mismatch`。只有两个完整输入一致，或 platform 的完整
+报表期间更晚、并明确记录 `governed_upgrade`，才会写入 `reconciled`。这样不会把旧 yfinance
+报表滞后一个季度误判为数据质量问题，也不会用“更新”掩盖同期间的取数差异。
+
+`cutover-status` 保留所有历史 mismatch 供审计，但发布资格从最近一次 mismatch 后的新观察窗口
+计算；因此修复后需要至少一条新的、同日无 mismatch 的真实对账记录。历史问题不会被删除，也
+不能用旧的成功记录跳过修复后的重新验收。
+
+### 7.7 回滚演练
 
 ```bash
 ats_cli data rollback --source sec_companyfacts --mode legacy
@@ -586,8 +625,9 @@ ats_cli data releases
 | `kr_ecos_exports` | `current_partial` | `persistent` | `regional_kr_exports` |
 | `trendforce_dram` | `current_partial` | `persistent` | `industry_dram_contract_price` |
 | `sec_companyfacts` | `current_partial` | `persistent` | `company_financials` |
-| `company_disclosures` | `planned` | `persistent` | `company_financials` |
+| `company_disclosures` | `current_partial` | `persistent` | `company_financials` |
 | `defeatbeta_stock_statement` | `current_partial` | `persistent` | `company_financials` |
+| `yfinance_financials` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_consensus` | `current_partial` | `persistent` | `market_consensus` |
 | `accepted_document_evidence` | `current_partial` | `persistent` | `private_company_events` |
 | `ibkr_market` | `runtime_excluded` | `runtime` | — |
@@ -612,12 +652,15 @@ ats_cli data releases
 | `kr_ecos_exports` | `regional_kr_exports` | `current_partial` | `platform` | monthly | concurrency 1；分页 10；30s |
 | `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `legacy` | monthly | concurrency 1；每次 1 请求；30s |
 | `sec_companyfacts` | `company_financials` | `current_partial` | `shadow` | event | concurrency 1；内部上限 5 req/s；30s |
-| `company_disclosures` | `company_financials` | `planned` | `legacy` | event | concurrency 1；内部上限 1 req/s；30s |
+| `company_disclosures` | `company_financials` | `current_partial` | `shadow` | event | 当前覆盖 TSM 与 AMZN 的官方季度 earnings release；TSM 直接保存普通股 `TWD/share` 与 ADR `USD/ADR` EPS；concurrency 1；内部上限 1 req/s；30s |
 | `defeatbeta_stock_statement` | `company_financials` | `current_partial` | `shadow` | snapshot | 每实体一个 query slice；60s |
+| `yfinance_financials` | `company_financials` | `current_partial` | `shadow` | event | 仅季度/年度三表 fallback；不请求或保存股价、OHLCV、期权或 quote metadata；concurrency 1；间隔至少 1s；30s |
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |
 | `accepted_document_evidence` | `private_company_events` | `current_partial` | `platform` | event | 本地 accepted 文档增量 |
 
 外部 Provider 没有可验证 QPS 时一律写 `unknown`；表中的数字是内部保护预算，不是 Provider 承诺。SEC 还必须遵守其当前 fair-access 政策并发送描述性 User-Agent。
+
+财务对账前先检查语义：`LongTermDebt` 是长期债务，不能与镜像 `total_debt` 直接比较；存在 `DebtLongtermAndShorttermCombinedAmount` 时才以它作为 SEC 总债务。Provider `total_debt` 必须作为 `financial.total_debt.provider_reported` 独立保存；除非已确认其不包含租赁或其他额外项目，否则不得把它加入官方总债务的自动对账。TSM 的普通股 `TWD/share` 与 ADR `USD/ADR`、Provider 的拆股调整 EPS 与原始 EPS也都属于不同指标。看到此类差异应先运行血缘查询并核对 `metric_id`、`unit`、`currency`、`adjustment` 和原始 XBRL concept/Provider 字段，不得通过放宽 reconciliation 阈值掩盖。
 
 以下来源是 `runtime_excluded`，不得创建结构化采集或回填任务：`ibkr_market`、`yfinance_market`、`yfinance_options`、`thetadata_options`。
 

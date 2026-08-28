@@ -71,9 +71,35 @@ def fetch(symbol: str, *, consumer: str = "pead_fundamentals") -> FundamentalDat
             else _legacy_fetch(symbol)
     legacy = _legacy_fetch(symbol)
     platform = _platform_fetch(symbol, consumer=consumer)
-    if _statement_signature(legacy.statements) != _statement_signature(platform.statements):
+    legacy_signature = _statement_signature(legacy.statements)
+    platform_signature = _statement_signature(platform.statements)
+    comparison = _reconcile_statements(legacy.statements, platform.statements)
+    _record_shadow_comparison(
+        consumer=consumer, symbol=symbol, matched=comparison["matched"],
+        legacy_signature=legacy_signature, platform_signature=platform_signature,
+        reconciliation=comparison)
+    if not comparison["matched"]:
         log.warning("fundamentals: structured shadow mismatch for %s", symbol)
     return legacy
+
+
+def _record_shadow_comparison(*, consumer: str, symbol: str, matched: bool,
+                              legacy_signature: tuple, platform_signature: tuple,
+                              reconciliation: dict | None = None) -> None:
+    """Persist PEAD's DTO comparison; failure to audit never changes legacy output."""
+    try:
+        from .cutover import record_consumer_comparison
+        from .runtime import platform_data_db_path
+
+        record_consumer_comparison(
+            consumer=consumer, entity=symbol, data_db=platform_data_db_path(),
+            status="reconciled" if matched else "mismatch",
+            details={"input": "fundamental_statements", "legacy": legacy_signature,
+                     "platform": platform_signature,
+                     "reconciliation": reconciliation or {}},
+        )
+    except Exception as exc:  # shadow audit is observability, never an availability risk
+        log.warning("fundamentals: failed to record shadow comparison for %s: %s", symbol, exc)
 
 
 def _yf_info(symbol: str) -> dict:
@@ -197,9 +223,9 @@ def _pct(cur, base):
     return round((cur / base - 1) * 100, 1)
 
 
-def _dollar_metric(label, cur, prev, yago):
+def _dollar_metric(label, cur, prev, yago, *, unit: str = "$M"):
     return StatementMetric(label=label, value=round(cur / 1e6, 0) if cur is not None else None,
-                           qoq=_pct(cur, prev), yoy=_pct(cur, yago), unit="$M", delta_unit="%")
+                           qoq=_pct(cur, prev), yoy=_pct(cur, yago), unit=unit, delta_unit="%")
 
 
 def _statements(symbol: str) -> FinancialStatements:
@@ -254,14 +280,62 @@ def _statement_signature(value: FinancialStatements | None) -> tuple:
         for line in value.lines))
 
 
+_PEAD_CORE_STATEMENT_LINES = frozenset({
+    "Revenue", "Gross Margin", "Operating Margin", "Net Income", "Diluted EPS",
+    "CapEx", "Free Cash Flow", "Total Debt",
+})
+
+
+def _reconcile_statements(legacy: FinancialStatements | None,
+                          platform: FinancialStatements | None) -> dict:
+    """Compare PEAD statement inputs without mistaking a current governed period
+    for a legacy mismatch.
+
+    The legacy fetch remains the returned DTO while in shadow mode.  A newer
+    platform quarter can be accepted only when both sides contain PEAD's complete
+    statement contract.  Missing fields, a stale platform period, or a different
+    value for the same reported period remain release-blocking mismatches.
+    """
+    if _statement_signature(legacy) == _statement_signature(platform):
+        return {"matched": True, "kind": "exact", "reason": "identical_statement_dto"}
+    if legacy is None or platform is None:
+        return {
+            "matched": False, "kind": "mismatch",
+            "reason": "statement_unavailable_on_one_side",
+        }
+    legacy_lines = {line.label for line in legacy.lines if line.value is not None}
+    platform_lines = {line.label for line in platform.lines if line.value is not None}
+    missing_legacy = sorted(_PEAD_CORE_STATEMENT_LINES - legacy_lines)
+    missing_platform = sorted(_PEAD_CORE_STATEMENT_LINES - platform_lines)
+    if missing_legacy or missing_platform:
+        return {
+            "matched": False, "kind": "mismatch", "reason": "core_statement_incomplete",
+            "missing_legacy": missing_legacy, "missing_platform": missing_platform,
+        }
+    if platform.period <= legacy.period:
+        return {
+            "matched": False, "kind": "mismatch", "reason": "platform_period_not_newer",
+            "legacy_period": legacy.period, "platform_period": platform.period,
+        }
+    return {
+        "matched": True, "kind": "governed_upgrade",
+        "reason": "complete_current_platform_period",
+        "legacy_period": legacy.period, "platform_period": platform.period,
+        "value_difference_review_required": True,
+    }
+
+
 def _structured_statements(symbol: str, products) -> tuple[FinancialStatements | None,
                                                             list[dict]]:
     """Assemble the legacy statement DTO from selected persistent observations."""
     metrics = (
         "financial.revenue.gaap", "financial.gross_profit.gaap",
         "financial.operating_income.gaap", "financial.net_income.gaap",
-        "financial.eps.diluted.gaap", "financial.cash_from_operations.gaap",
+        "financial.eps.diluted.gaap", "financial.eps.diluted.adr",
+        "financial.eps.diluted.market_adjusted",
+        "financial.cash_from_operations.gaap",
         "financial.capex.gaap", "financial.total_debt.gaap",
+        "financial.total_debt.provider_reported",
     )
     by_metric: dict[str, list[dict]] = {}
     for metric in metrics:
@@ -278,6 +352,9 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
     if not revenue_rows:
         return None, []
     period = revenue_rows[0]["period"]
+    currency = str(revenue_rows[0].get("currency") or "")
+    money_unit = "$M" if currency in {"", "USD"} else f"{currency} M"
+    eps_unit = "$" if currency in {"", "USD"} else f"{currency}/share"
 
     used: dict[str, dict] = {}
 
@@ -295,10 +372,24 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
     gross_profit = triple("financial.gross_profit.gaap")
     operating_income = triple("financial.operating_income.gaap")
     net_income = triple("financial.net_income.gaap")
-    eps = triple("financial.eps.diluted.gaap")
+    # For ADR issuers, a directly disclosed ADR EPS is the user-facing default.
+    # If it is unavailable, the source-native TWD/ADR fallback is selected before
+    # the issuer's ordinary-share EPS.  The unit remains explicit in all cases.
+    eps_metric = ("financial.eps.diluted.adr"
+                  if ordered("financial.eps.diluted.adr", "quarter")
+                  else "financial.eps.diluted.market_adjusted"
+                  if ordered("financial.eps.diluted.market_adjusted", "quarter")
+                  else "financial.eps.diluted.gaap")
+    eps = triple(eps_metric)
+    eps_rows = ordered(eps_metric, "quarter")
+    eps_unit = str(eps_rows[0].get("unit") or eps_unit) if eps_rows else eps_unit
     cash_from_operations = triple("financial.cash_from_operations.gaap")
     capex = triple("financial.capex.gaap")
-    debt_rows = ordered("financial.total_debt.gaap", "instant")
+    # Official total debt has a controlled XBRL definition.  Provider-reported
+    # total debt can remain a useful coverage fallback, but it may include lease
+    # obligations and is only selected when the official series is absent.
+    debt_rows = (ordered("financial.total_debt.gaap", "instant") or
+                 ordered("financial.total_debt.provider_reported", "instant"))
     debt = tuple((debt_rows[index]["value"] if len(debt_rows) > index else None)
                  for index in (0, 1, 4))
     for row in debt_rows[:2] + (debt_rows[4:5] if len(debt_rows) > 4 else []):
@@ -309,19 +400,19 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
          if cash_from_operations[index] is not None and capex[index] is not None else None)
         for index in range(3))
     lines = [
-        _dollar_metric("Revenue", *revenue),
+        _dollar_metric("Revenue", *revenue, unit=money_unit),
         _margin("Gross Margin", gross_profit, revenue),
         _margin("Operating Margin", operating_income, revenue),
-        _dollar_metric("Net Income", *net_income),
+        _dollar_metric("Net Income", *net_income, unit=money_unit),
     ]
     if eps[0] is not None:
         lines.append(StatementMetric(
             label="Diluted EPS", value=round(eps[0], 2),
-            qoq=_pct(eps[0], eps[1]), yoy=_pct(eps[0], eps[2]), unit="$"))
+            qoq=_pct(eps[0], eps[1]), yoy=_pct(eps[0], eps[2]), unit=eps_unit))
     lines.extend([
-        _dollar_metric("CapEx", *capex),
-        _dollar_metric("Free Cash Flow", *free_cash_flow),
-        _dollar_metric("Total Debt", *debt),
+        _dollar_metric("CapEx", *capex, unit=money_unit),
+        _dollar_metric("Free Cash Flow", *free_cash_flow, unit=money_unit),
+        _dollar_metric("Total Debt", *debt, unit=money_unit),
     ])
     return (FinancialStatements(
         period=period, lines=[line for line in lines if line.value is not None]),
@@ -330,31 +421,87 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
 
 def _platform_fetch(symbol: str, *, consumer: str) -> FundamentalData:
     """Refresh official facts, then assemble only the persistent statement section."""
-    from ..data_platform import DataProducts
-    from ..structured import FetchRequest, IngestionPipeline, get_repository
-    from .sources.company_financials import SECCompanyFactsAdapter
+    from ..data.products import DataProducts
+    from ..data.runtime import get_platform_structured_repository
+    from ..structured import FetchRequest, IngestionPipeline
+    from .sources.company_financials import (
+        CompanyDisclosuresAdapter,
+        DefeatBetaStatementAdapter,
+        SECCompanyFactsAdapter,
+        YFinanceFinancialStatementsAdapter,
+    )
 
     data = _legacy_fetch(symbol, include_statements=False)
-    repository = get_repository()
-    repository.bootstrap_catalog()
+    repository = get_platform_structured_repository()
     try:
-        IngestionPipeline(repository).run(
-            SECCompanyFactsAdapter(), FetchRequest(
-                source_id="sec_companyfacts", dataset_id="company_financials",
-                entities=[symbol], query_scope={"since": "2020-01-01"}))
-    except Exception as exc:  # existing accepted rows remain queryable during outages
-        log.warning("fundamentals: SEC structured refresh failed for %s: %s", symbol, exc)
-    products = DataProducts(structured_repository=repository)
-    data.statements, rows = _structured_statements(symbol.upper(), products)
-    if data.statements is None:
-        data.notes.append("structured quarterly statements unavailable")
-    elif rows:
-        manifest = products.snapshot_manifest(
-            consumer=consumer, purpose=f"fundamentals:{symbol.upper()}",
-            as_of=datetime.now(timezone.utc), rows=rows,
-            metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
-        data.notes.append(f"structured snapshot {manifest['snapshot_id']}")
-    return data
+        if symbol.upper() in {"TSM", "AMZN"}:
+            # TSM and AMZN have issuer-verified earnings-release parsers.  Their
+            # timely reported quarter is the primary statement anchor.
+            from . import earnings_calendar
+
+            latest = earnings_calendar.last_print(symbol, back_days=120)
+            if latest and latest.quarter and latest.year:
+                try:
+                    IngestionPipeline(repository).run(
+                        CompanyDisclosuresAdapter(), FetchRequest(
+                            source_id="company_disclosures", dataset_id="company_financials",
+                            entities=[symbol], query_scope={
+                                "near": latest.date.isoformat(),
+                                "period": f"Q{latest.quarter} FY{latest.year}",
+                            }))
+                except Exception as exc:  # retained accepted release rows remain queryable
+                    log.warning("fundamentals: official release refresh failed for %s: %s",
+                                symbol, exc)
+        try:
+            IngestionPipeline(repository).run(
+                SECCompanyFactsAdapter(), FetchRequest(
+                    source_id="sec_companyfacts", dataset_id="company_financials",
+                    entities=[symbol], query_scope={"since": "2020-01-01"}))
+        except Exception as exc:  # existing accepted rows remain queryable during outages
+            log.warning("fundamentals: SEC structured refresh failed for %s: %s", symbol, exc)
+        if symbol.upper() == "TSM":
+            # TSM's official release is the authoritative same-quarter P&L anchor.
+            # Its governed Yahoo-statement mirror fills only the release's omitted
+            # CFO, CapEx, cash and debt fields in the same native TWD reporting
+            # currency.  No ADR or FX conversion is introduced here.
+            try:
+                IngestionPipeline(repository).run(
+                    DefeatBetaStatementAdapter(), FetchRequest(
+                        source_id="defeatbeta_stock_statement",
+                        dataset_id="company_financials", entities=[symbol],
+                        query_scope={"since": "2020-01-01"}))
+            except Exception as exc:  # existing accepted mirror rows remain queryable
+                log.warning("fundamentals: TSM statement mirror refresh failed for %s: %s",
+                            symbol, exc)
+        else:
+            from ..config import entity_meta
+
+            if entity_meta(symbol).get("market") == "US":
+                # This is the same low-frequency statement endpoint that legacy
+                # fundamentals used, now persisted with a governed raw slice.  It
+                # is a fallback only: SEC/issuer rows still win on equal periods.
+                try:
+                    IngestionPipeline(repository).run(
+                        YFinanceFinancialStatementsAdapter(), FetchRequest(
+                            source_id="yfinance_financials",
+                            dataset_id="company_financials", entities=[symbol],
+                            query_scope={"since": "2025-01-01"}))
+                except Exception as exc:  # historical accepted rows stay queryable
+                    log.warning("fundamentals: yfinance statement fallback failed for %s: %s",
+                                symbol, exc)
+        products = DataProducts(structured_repository=repository)
+        data.statements, rows = _structured_statements(symbol.upper(), products)
+        if data.statements is None:
+            data.notes.append("structured quarterly statements unavailable")
+        elif rows:
+            manifest = products.snapshot_manifest(
+                consumer=consumer, purpose=f"fundamentals:{symbol.upper()}",
+                as_of=datetime.now(timezone.utc), rows=rows,
+                metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
+            data.notes.append(f"structured snapshot {manifest['snapshot_id']}")
+        return data
+    finally:
+        repository.close()
 
 
 # --- SEC EDGAR -------------------------------------------------------------- #

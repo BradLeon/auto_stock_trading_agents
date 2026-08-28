@@ -98,14 +98,24 @@ def ingest_configured(*, store=None) -> list[Article]:
 
 
 def stored_articles(since: datetime, *, source_match: str = "", store=None,
-                    limit: int = 500, allow_incomplete: bool = False) -> list[Article]:
+                    limit: int = 500, allow_incomplete: bool = False,
+                    consumer: str = "pead_research") -> list[Article]:
     """Read research bodies from the shared document asset store; never uses network."""
     from ..memory import get_store
     from .source_cache import _split_frontmatter
 
     store = store or get_store()
-    rows = store.documents(doc_type="article", published_since=since.isoformat(),
-                           source_contains=source_match or None, limit=limit)
+    # Reading accepted document history is data-layer work.  The PEAD workflow still
+    # owns its processing lease and insight/event writes in memory, so route only this
+    # immutable input and leave those write contracts untouched until retirement.
+    from .products import get_unstructured_read_router
+
+    reader = get_unstructured_read_router(consumer=consumer, legacy_repository=store)
+    try:
+        rows = reader.documents(doc_type="article", published_since=since.isoformat(),
+                                source_contains=source_match or None, limit=limit)
+    finally:
+        reader.close()
     out: list[Article] = []
     for row in rows:
         completeness = row.get("completeness") or "full"

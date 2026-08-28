@@ -206,9 +206,9 @@ def test_discovery_health_lineage_and_snapshot_replay_are_stable(tmp_path):
     _save(repo, value=150, known_at=T0 + timedelta(days=30))
     replay = products.replay_snapshot(manifest["snapshot_id"])
 
-    assert len(products.sources()) == 12
+    assert len(products.sources()) == 13
     assert len(products.datasets()) == 6
-    assert len(products.metrics()) == 41
+    assert len(products.metrics()) == 45
     assert any(row["source_id"] == "sec_companyfacts" for row in products.structured_health())
     assert products.lineage(first)["artifact"]["source_url"] == "https://example.test/data"
     assert [row["value"] for row in replay["rows"]] == [100]

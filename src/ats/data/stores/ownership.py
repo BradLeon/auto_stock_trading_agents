@@ -6,13 +6,14 @@ DATA_LAYER_TABLES = frozenset({
     "document_processing_runs", "data_sources", "ingestion_runs",
     "measurement_series", "measurement_points", "evidence_observations",
     "evidence_failures", "evidence_facts", "evidence_fact_projections",
-    "task_projections", "claim_proposals", "claim_assessments", "earnings_events",
+    "earnings_events",
     "newsletter_cursors", "data_migrations",
 })
 
 WORKFLOW_MEMORY_TABLES = frozenset({
     "cycles", "decisions", "trades", "performance", "pead_dossier", "pead_events",
-    "research_articles", "research_insights", "sector_reviews", "macro_reviews",
+    "research_articles", "research_insights", "task_projections", "claim_proposals",
+    "claim_assessments", "sector_reviews", "macro_reviews",
     "technical_reviews", "fills", "risk_reviews", "score_consumption", "pead_periods",
     "pead_score_runs", "journal_entries", "journal_meta", "predictions",
     "prediction_outcomes", "trade_episodes",

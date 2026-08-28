@@ -175,27 +175,30 @@ def _comparison_signature(value: dict) -> dict:
 
 
 def _platform_fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
-    from ..data_platform import DataProducts
-    from ..structured import FetchRequest, IngestionPipeline, get_repository
+    from ..data.products import DataProducts
+    from ..data.runtime import get_platform_structured_repository
+    from ..structured import FetchRequest, IngestionPipeline
     from .sources.market_consensus import YFinanceConsensusAdapter
 
-    repository = get_repository()
-    repository.bootstrap_catalog()
-    request = FetchRequest(
-        source_id="yfinance_consensus", dataset_id="market_consensus",
-        entities=[symbol], query_scope={})
-    result = IngestionPipeline(repository).run(YFinanceConsensusAdapter(), request)
-    if result["status"] not in {"succeeded", "partial", "no_change"}:
-        return {"eps": None, "revenue": None, "eps_low": None, "eps_high": None,
-                "revenue_low": None, "revenue_high": None, **_ANALYST_DEFAULTS}
-    products = DataProducts(structured_repository=repository)
-    snapshot = products.consensus_snapshot(entity=symbol)
-    if snapshot["rows"]:
-        products.snapshot_manifest(
-            consumer=consumer, purpose=f"consensus:{symbol.upper()}",
-            as_of=datetime.fromisoformat(snapshot["known_at"]), rows=snapshot["rows"],
-            metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
-    return products.consensus_legacy_dict(entity=symbol)
+    repository = get_platform_structured_repository()
+    try:
+        request = FetchRequest(
+            source_id="yfinance_consensus", dataset_id="market_consensus",
+            entities=[symbol], query_scope={})
+        result = IngestionPipeline(repository).run(YFinanceConsensusAdapter(), request)
+        if result["status"] not in {"succeeded", "partial", "no_change"}:
+            return {"eps": None, "revenue": None, "eps_low": None, "eps_high": None,
+                    "revenue_low": None, "revenue_high": None, **_ANALYST_DEFAULTS}
+        products = DataProducts(structured_repository=repository)
+        snapshot = products.consensus_snapshot(entity=symbol)
+        if snapshot["rows"]:
+            products.snapshot_manifest(
+                consumer=consumer, purpose=f"consensus:{symbol.upper()}",
+                as_of=datetime.fromisoformat(snapshot["known_at"]), rows=snapshot["rows"],
+                metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
+        return products.consensus_legacy_dict(entity=symbol)
+    finally:
+        repository.close()
 
 
 def fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:

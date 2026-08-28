@@ -16,6 +16,13 @@ def test_legacy_sqlite_tables_have_explicit_data_or_memory_ownership():
     assert DATA_LAYER_TABLES.isdisjoint(WORKFLOW_MEMORY_TABLES)
 
 
+def test_workflow_results_are_memory_not_data_layer_inputs():
+    workflow_state = {"task_projections", "claim_proposals", "claim_assessments"}
+
+    assert workflow_state <= WORKFLOW_MEMORY_TABLES
+    assert workflow_state.isdisjoint(DATA_LAYER_TABLES)
+
+
 def test_data_products_routes_document_reads_through_data_repository():
     class Backend:
         def documents(self, **_):

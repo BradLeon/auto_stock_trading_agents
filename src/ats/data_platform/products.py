@@ -532,7 +532,7 @@ class DataProducts:
                 entity=key, published_since=since.isoformat() if since else None, limit=1000),
             "measurements": self.store.measurements(entity=key, limit=2000),
             "facts": self.unstructured.facts(entity=key, since=since, limit=1000),
-            "pead_projections": self.unstructured.task_projections(
+            "pead_projections": self.store.task_projections(
                 profile="pead_research", target_type="entity", target_id=key, limit=500),
         }
 

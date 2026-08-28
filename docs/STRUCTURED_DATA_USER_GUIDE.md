@@ -537,7 +537,8 @@ PEAD、Sector、Chain 等 Workflow 不依赖 Prompt 或 Skill 才能正确运行
 | Workflow | persistent 输入 | runtime 输入 |
 |---|---|---|
 | PEAD | 财务 actual、历史财期、Consensus snapshot | 当前价格、run-up、期权 expected move |
-| Sector | 可比财务和 Consensus 横截面 | momentum、当前市场状态 |
+| Sector | 可比财务、Consensus 横截面、台湾/韩国月度半导体需求 | momentum、当前市场状态 |
+| Macro | 台湾/韩国月度半导体需求（对宏观判断的补充） | FRED/yfinance 宏观指标、新闻和市场状态 |
 | Chain | 台湾/韩国官方水平及平台派生 yoy/mom | 当前无结构化行情依赖 |
 | Evidence | 已核验融资、估值、ARR observation | 新闻解释和 Agent 命题不作为共享事实 |
 
@@ -566,6 +567,11 @@ workflow_inputs = products.compose_inputs(
 ```
 
 输出明确分为 `persistent` 和 `runtime`。只有 persistent observation IDs 进入 structured snapshot；即时价格按既有 Journal/任务记录保存本次使用结果。
+
+Sector 与 Macro 当前处于 `shadow`：它们会同时读取旧路径和受管区域产品、写入对账记录，却仍将
+旧路径结果交给报告，以便可逆验证。区域区块会标明 `source`、`known_at` 和 `observation`；这三项
+用于核查来源和血缘。`--no-llm` 的 Sector 运行不会偷偷调用证据判读模型，未做语义判读的证据会被
+明确标记为缺口，而不是伪装成中性结论。
 
 ## 13. 常见问题
 

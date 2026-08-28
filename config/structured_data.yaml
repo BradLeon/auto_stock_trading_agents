@@ -112,7 +112,11 @@ feature_flags:
   consumers:
     chain_regional: platform
     pead_consensus: platform
-    sector_consensus: platform
+    # 10.2 validation starts in shadow.  Do not regard the historical platform
+    # default as a consumer release until inputs and report output are reconciled.
+    sector_consensus: shadow
+    sector_agent: shadow
+    macro_agent: shadow
     # Shadow is a controlled dual-read: the PEAD DTO continues to return the
     # legacy value while the governed statement selection is independently read
     # and compared.  It is not a production cutover.

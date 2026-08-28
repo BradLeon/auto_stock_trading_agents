@@ -27,7 +27,7 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
 
     cfg = load_sector_config(name)
     store = get_store()
-    sc = assemble.build(cfg, live_data=live_data)
+    sc = assemble.build(cfg, live_data=live_data, allow_llm_evidence=use_llm)
     log.info("sector %s: context %s", name, sc.stats())
 
     if not use_llm:

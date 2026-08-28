@@ -10,6 +10,7 @@ from ats.data_platform.products import DataProducts, get_data_products
 from .structured import StructuredDataProducts, get_structured_products
 from .unstructured import UnstructuredDataProducts, get_unstructured_products
 from .routing import UnstructuredReadRouter, get_unstructured_read_router
+from .regional import RegionalPoint, RegionalProducts, RegionalSnapshot
 
 
 def get_platform_data_products() -> DataProducts:
@@ -31,4 +32,7 @@ __all__ = [
     "get_structured_products",
     "get_unstructured_products",
     "get_unstructured_read_router",
+    "RegionalPoint",
+    "RegionalProducts",
+    "RegionalSnapshot",
 ]

@@ -128,6 +128,46 @@ def test_assemble_offline_reads_store(monkeypatch):
     assert "(offline)" in ctx                                      # no yfinance
 
 
+def test_assemble_live_renders_governed_regional_block(monkeypatch):
+    """The actual Sector assembly, not only the DTO, receives the shadow input."""
+    from ats.data import industry, regional
+
+    calls = []
+
+    class Snapshot:
+        def render(self):
+            return "REGIONAL GOVERNED OUTPUT"
+
+    monkeypatch.setattr(assemble, "_snapshots", lambda *args: {})
+    monkeypatch.setattr(assemble, "_pead_conclusions", lambda *args: None)
+    monkeypatch.setattr(assemble, "_insights_and_events", lambda *args: None)
+    monkeypatch.setattr(assemble, "_chain_evidence", lambda *args, **kwargs: None)
+    monkeypatch.setattr(assemble, "_kb_criteria", lambda *args: None)
+    monkeypatch.setattr(industry, "fetch_notes", lambda: [])
+    monkeypatch.setattr("ats.config.is_pead_covered", lambda _symbol: False)
+    monkeypatch.setattr("ats.config.load_pead_global",
+                        lambda: {"macro_review": {"feed_sector": False}})
+    monkeypatch.setattr(regional, "fetch",
+                        lambda *, consumer: calls.append(consumer) or Snapshot())
+
+    sc = assemble.build(CFG, live_data=True, allow_llm_evidence=False)
+
+    assert calls == ["sector_agent"]
+    assert "REGIONAL GOVERNED OUTPUT" in sc.as_context()
+    assert sc.stats()["regional_chars"] > 0
+
+
+def test_no_llm_evidence_judge_marks_semantic_gap():
+    from types import SimpleNamespace
+
+    rows = assemble._no_llm_judge(None, [SimpleNamespace(
+        key="cluster", speaker="AMD", concept="supply", stance="company",
+        primary=True, observation_ids=["obs-1"])] )
+
+    assert rows[0].polarity == "neutral"
+    assert rows[0].reason == "未运行 LLM 判读（--no-llm）"
+
+
 def test_sector_analyst_gets_the_criteria_before_the_evidence(monkeypatch, tmp_path):
     """The curated notes used to reach only the cross-section's structure analyst, while
     the sector analyst re-derived the same criteria from 36k of raw research every week.
@@ -157,7 +197,7 @@ def test_review_clamps_and_persists(monkeypatch):
     monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
     monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
     monkeypatch.setattr(assemble, "build",
-                        lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
+                        lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
 
     r = sector_review.run("test_sector", use_llm=True, live_data=False)
     assert [a.key for a in r.layers] == ["L3"]                    # bogus key dropped
@@ -203,7 +243,7 @@ def test_sector_view_coerces_stringified_layers_and_calls():
 def test_review_llm_failure_keeps_prior(monkeypatch):
     monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
     monkeypatch.setattr(assemble, "build",
-                        lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
+                        lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
     prior = SectorReview(sector="test_sector", as_of=NOW, regime="PRIOR REGIME")
     get_store().save_sector_review(prior)
 
@@ -396,7 +436,7 @@ def test_a_new_review_keeps_the_same_days_baskets(monkeypatch):
     monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
     monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
     monkeypatch.setattr(assemble, "build",
-                        lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
+                        lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
     out = sector_review.run("test_sector", use_llm=True, live_data=False)
     assert [b.layer_key for b in out.baskets] == ["L5_fab"]
 
@@ -418,7 +458,7 @@ def test_stale_baskets_are_not_carried_across_days(monkeypatch):
     monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
     monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
     monkeypatch.setattr(assemble, "build",
-                        lambda cfg, live_data=True: assemble.SectorContext(cfg=cfg))
+                        lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
     assert sector_review.run("test_sector", use_llm=True, live_data=False).baskets == []
 
 

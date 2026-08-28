@@ -22,6 +22,7 @@ class MacroContext:
     theme_blocks: list[str] = field(default_factory=list)
     earnings_block: str = ""          # FactSet Earnings Insight (S&P500 盈利/估值 backdrop)
     earnings_source: str = ""
+    regional_block: str = ""
 
     def as_context(self) -> str:
         parts = [
@@ -33,6 +34,8 @@ class MacroContext:
             parts.append(
                 f"## S&P500 盈利/估值 backdrop（FactSet Earnings Insight，{self.earnings_source}）\n"
                 + self.earnings_block)
+        if self.regional_block:
+            parts.append("## 区域半导体需求（持久化月度序列）\n" + self.regional_block)
         parts.append("## 分主题（定量关联 + 近期新闻）\n" + "\n\n".join(self.theme_blocks))
         return "\n\n".join(parts)
 
@@ -43,16 +46,24 @@ class MacroContext:
             "theme_chars": sum(len(b) for b in self.theme_blocks),
             "earnings_chars": len(self.earnings_block),
             "earnings_source": self.earnings_source or "-",
+            "regional_chars": len(self.regional_block),
             "total_chars": len(self.as_context()),
         }
 
 
 def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
-    from ...data import macro as macro_src
+    from ...data.runtime import macro as macro_src
 
     mc = MacroContext(cfg=cfg)
     data = macro_src.fetch() if live_data else None
     mc.quant_block = data.to_context() if data else "(offline — 定量数据跳过)"
+    if live_data:
+        from ...data import regional
+        try:
+            mc.regional_block = regional.fetch(consumer="macro_agent").render()
+        except Exception as exc:  # regional evidence is additive, never blocks regime review
+            log.warning("macro regional snapshot unavailable: %s", exc)
+            mc.regional_block = "(区域月度数据不可用)"
 
     # FactSet Earnings Insight — S&P500 盈利/估值 backdrop.
     if live_data and cfg.factset.get("enabled", True):

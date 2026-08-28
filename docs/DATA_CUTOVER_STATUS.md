@@ -4,8 +4,9 @@
 
 ## 已完成的阶段 10 实现
 
-- 结构化读取：PEAD 的 Consensus/财务数据和 Sector 的 Consensus/区域数列已通过
-  `ats.data.products` / `ats.data.runtime` 的可回退路径读取；runtime 行情仍不入库。
+- 结构化读取：PEAD 的 Consensus/财务数据，以及 Sector/Macro 的 Consensus、台湾/韩国
+  区域数列均通过 `ats.data.products` / `ats.data.runtime` 的可回退路径读取；runtime 行情
+  和实时宏观指标仍不入库。
 - 非结构化读取：PEAD 研究文章和 Evidence/Chain 报告通过
   `UnstructuredReadRouter` 读取已迁移的文档、版本、证据和投影。在 `shadow` 下会比对
   新旧结果并返回 legacy 结果；目标库不可达时同样安全回退。
@@ -20,7 +21,8 @@
 | Consumer | 真实库对账 | 端到端回归 | 当前 mode / 发布资格 |
 |---|---|---|---|
 | `pead_fundamentals` | 2026-08-28 对 AMZN/MSFT/KLAC/TSM 完成真实 shadow；最近 mismatch 后有 4 条同日 `reconciled`、0 条 active-window mismatch | PEAD prep/score/report 与结构化回归通过；shadow 始终返回 legacy DTO，平台异常也回退 legacy | `shadow`；10.1 已验收，尚未执行 10.5 的 platform 发布。AMZN 是完整官方报表对 legacy 缺字段的升级；MSFT/KLAC 是 EPS 单位与官方 debt 定义升级；TSM 是 `TWD/ADR` 单位修正 |
-| `sector_agent` | 2026-08-26 已对账、无 mismatch | Sector 回归通过 | 台湾/韩国区域数列已采集并可查询；仍为 `shadow`，待输出与 freshness 验收 |
+| `sector_agent` | 2026-08-28 对台湾财政部与韩国 ECOS 两个来源真实 shadow 对账；2 个自然日、active-window 0 mismatch | 区域产品的 source override、YoY/MoM、血缘、故障回退和 Sector 装配/输出渲染测试通过；真实装配确认输出带来源、期间和 observation ID | `shadow`；两个区域 dataset 五维质量均 `passed`，但尚未执行 10.5 的 platform 发布 |
+| `macro_agent` | 2026-08-28 对同一两个来源真实 shadow 对账；最近网络瞬断后的有效窗口 1 个自然日、0 mismatch | Macro 装配/输出渲染及 runtime-macro 边界测试通过；`--no-llm` 不再隐式触发证据 LLM 判读 | `shadow`；两个区域 dataset 五维质量均 `passed`，但尚未执行 10.5 的 platform 发布 |
 | `evidence_chain` | 2026-08-26 已对账 | Evidence/Chain 回归通过 | `shadow`；写入仍在 legacy memory |
 | `chief_graph` | 2026-08-26 已对账 | Chief 回归通过 | `shadow`；它消费 Agent 产物而非直接迁移决策状态 |
 
@@ -43,6 +45,12 @@ MSFT 1,314 条、KLAC 1,022 条、TSM 128 条；台湾财政部电子零组件�
 韩国 ECOS 半导体出口金额指数 19 条（至 2026-07）。TSM 在 SEC Company Facts 中目前只映射到
 2024-12-31；该缺口已由 `company_disclosures` 的官方 Q1/Q2 FY2026 earnings release 补齐。该来源
 只承担季度披露，不以 20-F 年报覆盖作为 PEAD 的验收要求。
+
+Sector/Macro 的 `shadow` 输出故意保留 legacy 数值；对应 platform 候选的 `known_at` 和
+observation ID 已经在产品读取与对账记录中验证。受控装配会屏蔽与本项无关的逐个股实时行情、
+新闻与证据扫描，但保留真实区域 dual-read，因此验证的是数据产品到报告上下文的实际链路，而非
+mock 数据。完整 Sector live review 的全市场快照仍可能超过本轮 60 秒测试预算，不作为 platform
+发布依据。
 
 每天的只读检查：
 

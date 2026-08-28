@@ -69,10 +69,16 @@ def test_assemble_offline_and_live(monkeypatch):
     monkeypatch.setattr("ats.data.websearch.search_news",
                         lambda q, **k: [{"title": "Iran headline", "url": "u",
                                          "content": "conflict escalates", "published": "2026-07-01"}])
+    class Snapshot:
+        def render(self):
+            return "REGIONAL GOVERNED OUTPUT"
+    monkeypatch.setattr("ats.data.regional.fetch", lambda *, consumer: Snapshot())
     mc = assemble.build(CFG, live_data=True)
     ctx = mc.as_context()
     assert "fed_funds=3.63" in ctx and "hy_oas=2.75" in ctx        # theme quant fields
     assert "Iran headline" in ctx and "conflict escalates" in ctx  # tavily news
+    assert "REGIONAL GOVERNED OUTPUT" in ctx
+    assert mc.stats()["regional_chars"] > 0
     assert mc.stats()["themes"] == 3
 
     mc2 = assemble.build(CFG, live_data=False)

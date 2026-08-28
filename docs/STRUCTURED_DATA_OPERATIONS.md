@@ -553,7 +553,39 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 计算；因此修复后需要至少一条新的、同日无 mismatch 的真实对账记录。历史问题不会被删除，也
 不能用旧的成功记录跳过修复后的重新验收。
 
-### 7.7 回滚演练
+### 7.7 Sector/Macro 区域数列 shadow 验收
+
+这两个消费者共同读取 `regional_tw_exports` 和 `regional_kr_exports`，但它们和
+`chain_regional` 是不同 consumer：不要因为 Chain 已是 platform 就发布 Sector/Macro。
+
+先只刷新两个持久化来源（不重新采集行情、新闻或其他数据）：
+
+```bash
+ats_cli data ingest --source tw_mof_exports
+ats_cli data ingest --source kr_ecos_exports
+
+# 预期：两个报告均为 overall=passed；不是只看命令退出码。
+ats_cli data quality --dataset regional_tw_exports --format markdown
+ats_cli data quality --dataset regional_kr_exports --format markdown
+```
+
+再检查每个 consumer 的真实 dual-read。`stable` 表示自最近一次 mismatch 之后，至少已有一日
+成功对账且当前有效窗口没有 mismatch；它只赋予“可评审”资格，**不会自动发布**：
+
+```bash
+ats_cli data cutover-status --consumer sector_agent
+ats_cli data cutover-status --consumer macro_agent
+
+# 本阶段仍预期 ready=false：checked-in config 明确保持 shadow，等待 10.5 的发布审批。
+ats_cli data release-check --consumer sector_agent --mode platform
+ats_cli data release-check --consumer macro_agent --mode platform
+```
+
+报告输入应包含两个区域条目及 `source`、`known_at`、`observation` 血缘字段。使用者在 shadow
+模式看到的是 legacy 返回值；运维必须以 `data_consumer_cutover_records` 的对账详情和 platform
+产品读取确认候选值，不得把 shadow 的 legacy 显示误认为没有走平台读。
+
+### 7.8 回滚演练
 
 ```bash
 ats_cli data rollback --source sec_companyfacts --mode legacy

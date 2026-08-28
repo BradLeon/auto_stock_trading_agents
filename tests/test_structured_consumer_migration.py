@@ -147,6 +147,22 @@ def test_fundamental_read_modes_preserve_public_dto(monkeypatch) -> None:
     assert fundamentals.fetch("MSFT") is legacy  # platform has no statement rows
 
 
+def test_sector_consensus_shadow_returns_legacy_on_platform_failure(monkeypatch) -> None:
+    from ats.data import consensus
+
+    legacy = {"eps": 1.0, "revenue": 100.0}
+    recorded = []
+    monkeypatch.setattr(consensus, "_legacy_fetch", lambda *_: legacy)
+    monkeypatch.setattr(consensus, "_platform_fetch",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")))
+    monkeypatch.setattr(consensus, "_record_shadow_comparison",
+                        lambda **kwargs: recorded.append(kwargs))
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_CONSENSUS_MODE", "shadow")
+
+    assert consensus.fetch("MSFT", consumer="sector_consensus") is legacy
+    assert recorded[0]["reason"] == "platform_failure:RuntimeError"
+
+
 def test_pead_shadow_reconciles_complete_newer_governed_statement() -> None:
     labels = ("Revenue", "Gross Margin", "Operating Margin", "Net Income", "Diluted EPS",
               "CapEx", "Free Cash Flow", "Total Debt")

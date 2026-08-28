@@ -151,4 +151,8 @@ def test_semantic_consumer_comparison_is_a_release_gate_record(tmp_path) -> None
 
     assert recorded["status"] == "mismatch"
     status = consumer_cutover_status(consumer="pead_fundamentals", data_db=target)
-    assert status["eligible"] is False and status["mismatches"] == 1
+    # A recorded mismatch remains auditable but starts a fresh clean observation
+    # window; it must not be eligible until a new reconciliation arrives.
+    assert status["eligible"] is False and status["mismatches"] == 0
+    assert status["latest_historical_mismatch_at"]
+    assert status["reason"] == "observation_period_incomplete"

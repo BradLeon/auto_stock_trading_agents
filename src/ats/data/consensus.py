@@ -174,6 +174,23 @@ def _comparison_signature(value: dict) -> dict:
         "rating_strong_sell")}
 
 
+def _record_shadow_comparison(*, consumer: str, symbol: str, legacy: dict,
+                              platform: dict, matched: bool, reason: str) -> None:
+    """Persist consensus cutover evidence without changing a legacy response."""
+    try:
+        from .cutover import record_consumer_comparison
+        from .runtime import platform_data_db_path
+        record_consumer_comparison(
+            consumer=consumer, entity=symbol, data_db=platform_data_db_path(),
+            status="reconciled" if matched else "mismatch",
+            details={"input": "market_consensus", "reason": reason,
+                     "legacy": _comparison_signature(legacy),
+                     "platform": _comparison_signature(platform)},
+        )
+    except Exception as exc:  # observability must not break a Sector review
+        log.warning("consensus: failed to record %s comparison for %s: %s", consumer, symbol, exc)
+
+
 def _platform_fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
     from ..data.products import DataProducts
     from ..data.runtime import get_platform_structured_repository
@@ -213,10 +230,25 @@ def fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
     if mode == "platform":
         return platform_fetch()
     if mode == "fallback":
-        platform = platform_fetch()
+        try:
+            platform = platform_fetch()
+        except Exception as exc:
+            log.warning("consensus: platform fallback failed for %s: %s", symbol, exc)
+            return _legacy_fetch(symbol)
         return platform if _has_values(platform) else _legacy_fetch(symbol)
     legacy = _legacy_fetch(symbol)
-    platform = platform_fetch()
-    if _comparison_signature(legacy) != _comparison_signature(platform):
+    try:
+        platform = platform_fetch()
+    except Exception as exc:
+        _record_shadow_comparison(
+            consumer=consumer, symbol=symbol, legacy=legacy, platform={}, matched=False,
+            reason=f"platform_failure:{type(exc).__name__}")
+        log.warning("consensus: structured shadow refresh failed for %s: %s", symbol, exc)
+        return legacy
+    matched = _comparison_signature(legacy) == _comparison_signature(platform)
+    _record_shadow_comparison(
+        consumer=consumer, symbol=symbol, legacy=legacy, platform=platform, matched=matched,
+        reason="identical_consensus_snapshot" if matched else "consensus_signature_mismatch")
+    if not matched:
         log.warning("consensus: structured shadow mismatch for %s", symbol)
     return legacy

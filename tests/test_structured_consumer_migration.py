@@ -82,6 +82,7 @@ def test_fundamental_platform_assembles_legacy_statement_shape_and_snapshot(tmp_
     assert rendered["Revenue"].value == 150
     assert rendered["Gross Margin"].value == 50.0
     assert rendered["Operating Margin"].value == 20.0
+    assert rendered["CapEx"].value < 0
     assert rendered["Free Cash Flow"].value == 15
     assert all(row["observation_id"] for row in rows)
 
@@ -157,13 +158,15 @@ def test_pead_shadow_reconciles_complete_newer_governed_statement() -> None:
     result = fundamentals._reconcile_statements(legacy, platform)
 
     assert result["matched"] is True
-    assert result["kind"] == "governed_upgrade"
+    assert result["kind"] == "governed_period_upgrade"
     assert result["value_difference_review_required"] is True
 
 
 def test_pead_shadow_blocks_incomplete_or_non_newer_statement() -> None:
+    labels = ("Revenue", "Gross Margin", "Operating Margin", "Net Income", "Diluted EPS",
+              "CapEx", "Free Cash Flow", "Total Debt")
     legacy = FinancialStatements(
-        period="2026-06-30", lines=[StatementMetric(label="Revenue", value=1.0)])
+        period="2026-06-30", lines=[StatementMetric(label=label, value=1.0) for label in labels])
     platform = FinancialStatements(
         period="2026-06-30", lines=[StatementMetric(label="Revenue", value=2.0)])
 
@@ -171,6 +174,44 @@ def test_pead_shadow_blocks_incomplete_or_non_newer_statement() -> None:
 
     assert result["matched"] is False
     assert result["reason"] == "core_statement_incomplete"
+
+
+def test_pead_shadow_accepts_same_period_unit_and_official_debt_correction() -> None:
+    labels = ("Revenue", "Gross Margin", "Operating Margin", "Net Income", "Diluted EPS",
+              "CapEx", "Free Cash Flow", "Total Debt")
+    legacy = FinancialStatements(
+        period="2026-06-30", lines=[StatementMetric(label=label, value=1.0, unit="$M")
+                                      for label in labels])
+    platform = FinancialStatements(
+        period="2026-06-30", lines=[
+            StatementMetric(label=label, value=2.0 if label == "Total Debt" else 1.0,
+                            unit="USD/share" if label == "Diluted EPS" else "$M")
+            for label in labels])
+
+    result = fundamentals._reconcile_statements(legacy, platform)
+
+    assert result["matched"] is True
+    assert result["kind"] == "governed_semantic_upgrade"
+    assert result["changed_units"] == ["Diluted EPS"]
+    assert result["debt_definition_changed"] is True
+
+
+def test_pead_shadow_and_fallback_keep_legacy_output_on_platform_failure(monkeypatch) -> None:
+    legacy = FundamentalData(symbol="MSFT", as_of=NOW, notes=["legacy"])
+    monkeypatch.setattr(fundamentals, "_legacy_fetch", lambda *_, **__: legacy)
+    monkeypatch.setattr(
+        fundamentals, "_platform_fetch",
+        lambda *_, **__: (_ for _ in ()).throw(RuntimeError("platform unavailable")))
+    comparisons = []
+    monkeypatch.setattr(
+        fundamentals, "_record_shadow_comparison", lambda **kwargs: comparisons.append(kwargs))
+
+    monkeypatch.setenv("ATS_STRUCTURED_PEAD_FUNDAMENTALS_MODE", "shadow")
+    assert fundamentals.fetch("MSFT") is legacy
+    assert comparisons[0]["reconciliation"]["kind"] == "platform_failure"
+
+    monkeypatch.setenv("ATS_STRUCTURED_PEAD_FUNDAMENTALS_MODE", "fallback")
+    assert fundamentals.fetch("MSFT") is legacy
 
 
 def test_metric_query_keeps_distinct_period_bases_and_records_chart_snapshot(tmp_path) -> None:

@@ -1,6 +1,6 @@
 # 数据层消费者切换状态
 
-> 状态截至 2026-08-27。本文记录当前发布资格，不替代动态检查命令。
+> 状态截至 2026-08-28。本文记录当前发布资格，不替代动态检查命令。
 
 ## 已完成的阶段 10 实现
 
@@ -19,18 +19,24 @@
 
 | Consumer | 真实库对账 | 端到端回归 | 当前 mode / 发布资格 |
 |---|---|---|---|
-| `pead_fundamentals` | 2026-08-27 已完成新旧双读；`data_consumer_cutover_records` 记录 1 个 EPS/货币口径 mismatch | PEAD 与结构化回归通过 | `shadow`；TSM Q1/Q2 FY2026 由官方 SEC 6-K/EX-99.1 入库（TIFRS，TWD），旧 yfinance ADR/报表口径不等价，未达 platform 发布门 |
+| `pead_fundamentals` | 2026-08-28 对 AMZN/MSFT/KLAC/TSM 完成真实 shadow；最近 mismatch 后有 4 条同日 `reconciled`、0 条 active-window mismatch | PEAD prep/score/report 与结构化回归通过；shadow 始终返回 legacy DTO，平台异常也回退 legacy | `shadow`；10.1 已验收，尚未执行 10.5 的 platform 发布。AMZN 是完整官方报表对 legacy 缺字段的升级；MSFT/KLAC 是 EPS 单位与官方 debt 定义升级；TSM 是 `TWD/ADR` 单位修正 |
 | `sector_agent` | 2026-08-26 已对账、无 mismatch | Sector 回归通过 | 台湾/韩国区域数列已采集并可查询；仍为 `shadow`，待输出与 freshness 验收 |
 | `evidence_chain` | 2026-08-26 已对账 | Evidence/Chain 回归通过 | `shadow`；写入仍在 legacy memory |
 | `chief_graph` | 2026-08-26 已对账 | Chief 回归通过 | `shadow`；它消费 Agent 产物而非直接迁移决策状态 |
 
-本次回归：消费者/迁移读取用例 20 项通过；PEAD、Sector、Evidence/Chain、Chief 用例 130 项通过。
+本次 PEAD 验收：`test_structured_consumer_migration.py`、`test_consumer_cutover_records.py`、
+`test_pead_data.py`、`test_pead_graph.py`、`test_pead_score.py` 与 `test_pead_report.py` 均通过；
+覆盖 shadow 输入、单位/债务语义、CapEx/FCF 展示、失败回退、prep、score 与报告渲染。
 
 ## 发布门与下一步
 
 `config/data/migration.yaml` 要求 consumer 至少产生 **1 个自然日内 1 次**成功对账记录，且没有
 未解决 mismatch，才具备 `platform` 发布资格。重复检查仍会保留审计记录，但不以次数替代
 coverage、时效和输出验收。
+
+注意：`company_financials` 全局质量报告仍显示 MRVL 的 6 条既存跨源冲突（CapEx/营业利润，约
+1.2%），它们不在 AMZN/MSFT/KLAC/TSM 的 10.1 发行人范围内，未被删除或忽略。它们会继续让
+全局 source 发布检查失败，必须单独修复；PEAD 也尚未切到 platform。
 
 本轮实际补齐的原始采集（均保存 artifact 与血缘）如下：SEC Company Facts 为 AMZN 1,102 条、
 MSFT 1,314 条、KLAC 1,022 条、TSM 128 条；台湾财政部电子零组件出口 307 条（至 2026-07）；

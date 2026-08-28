@@ -66,11 +66,27 @@ def fetch(symbol: str, *, consumer: str = "pead_fundamentals") -> FundamentalDat
     if mode == "platform":
         return _platform_fetch(symbol, consumer=consumer)
     if mode == "fallback":
-        platform = _platform_fetch(symbol, consumer=consumer)
+        try:
+            platform = _platform_fetch(symbol, consumer=consumer)
+        except Exception as exc:
+            log.warning("fundamentals: platform fallback failed for %s: %s", symbol, exc)
+            return _legacy_fetch(symbol)
         return platform if platform.statements and platform.statements.lines \
             else _legacy_fetch(symbol)
     legacy = _legacy_fetch(symbol)
-    platform = _platform_fetch(symbol, consumer=consumer)
+    try:
+        platform = _platform_fetch(symbol, consumer=consumer)
+    except Exception as exc:
+        # Shadow is an observability mode, so a platform outage must never turn
+        # into a PEAD availability outage while legacy remains healthy.
+        legacy_signature = _statement_signature(legacy.statements)
+        _record_shadow_comparison(
+            consumer=consumer, symbol=symbol, matched=False,
+            legacy_signature=legacy_signature, platform_signature=(),
+            reconciliation={"matched": False, "kind": "platform_failure",
+                            "reason": type(exc).__name__})
+        log.warning("fundamentals: structured shadow refresh failed for %s: %s", symbol, exc)
+        return legacy
     legacy_signature = _statement_signature(legacy.statements)
     platform_signature = _statement_signature(platform.statements)
     comparison = _reconcile_statements(legacy.statements, platform.statements)
@@ -307,21 +323,63 @@ def _reconcile_statements(legacy: FinancialStatements | None,
     platform_lines = {line.label for line in platform.lines if line.value is not None}
     missing_legacy = sorted(_PEAD_CORE_STATEMENT_LINES - legacy_lines)
     missing_platform = sorted(_PEAD_CORE_STATEMENT_LINES - platform_lines)
-    if missing_legacy or missing_platform:
+    if missing_platform:
         return {
             "matched": False, "kind": "mismatch", "reason": "core_statement_incomplete",
             "missing_legacy": missing_legacy, "missing_platform": missing_platform,
         }
-    if platform.period <= legacy.period:
+    if missing_legacy:
+        if platform.period < legacy.period:
+            return {
+                "matched": False, "kind": "mismatch", "reason": "platform_period_older",
+                "legacy_period": legacy.period, "platform_period": platform.period,
+                "missing_legacy": missing_legacy,
+            }
         return {
-            "matched": False, "kind": "mismatch", "reason": "platform_period_not_newer",
+            "matched": True, "kind": "governed_availability_upgrade",
+            "reason": "platform_complete_legacy_incomplete",
+            "legacy_period": legacy.period, "platform_period": platform.period,
+            "missing_legacy": missing_legacy,
+            "value_difference_review_required": True,
+        }
+    if platform.period < legacy.period:
+        return {
+            "matched": False, "kind": "mismatch", "reason": "platform_period_older",
             "legacy_period": legacy.period, "platform_period": platform.period,
         }
+    if platform.period > legacy.period:
+        return {
+            "matched": True, "kind": "governed_period_upgrade",
+            "reason": "complete_current_platform_period",
+            "legacy_period": legacy.period, "platform_period": platform.period,
+            "value_difference_review_required": True,
+        }
+
+    legacy_values = {line.label: line.value for line in legacy.lines}
+    platform_values = {line.label: line.value for line in platform.lines}
+    changed_values = sorted(
+        label for label in _PEAD_CORE_STATEMENT_LINES - {"Total Debt"}
+        if legacy_values.get(label) != platform_values.get(label)
+    )
+    if changed_values:
+        return {
+            "matched": False, "kind": "mismatch", "reason": "same_period_core_value_difference",
+            "period": platform.period, "changed_values": changed_values,
+        }
+    legacy_units = {line.label: line.unit for line in legacy.lines}
+    platform_units = {line.label: line.unit for line in platform.lines}
+    changed_units = sorted(
+        label for label in _PEAD_CORE_STATEMENT_LINES
+        if legacy_units.get(label) != platform_units.get(label)
+    )
+    debt_changed = legacy_values.get("Total Debt") != platform_values.get("Total Debt")
     return {
-        "matched": True, "kind": "governed_upgrade",
-        "reason": "complete_current_platform_period",
-        "legacy_period": legacy.period, "platform_period": platform.period,
-        "value_difference_review_required": True,
+        "matched": True,
+        "kind": "governed_semantic_upgrade",
+        "reason": "same_period_unit_or_debt_definition_correction",
+        "period": platform.period,
+        "changed_units": changed_units,
+        "debt_definition_changed": debt_changed,
     }
 
 
@@ -384,7 +442,11 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
     eps_rows = ordered(eps_metric, "quarter")
     eps_unit = str(eps_rows[0].get("unit") or eps_unit) if eps_rows else eps_unit
     cash_from_operations = triple("financial.cash_from_operations.gaap")
-    capex = triple("financial.capex.gaap")
+    # Persistent CapEx is stored as a positive investment amount.  PEAD's
+    # long-standing DTO displays cash outflows as negative values, matching the
+    # legacy yfinance statement and keeping FCF = CFO + displayed CapEx.
+    capex_raw = triple("financial.capex.gaap")
+    capex = tuple(-abs(value) if value is not None else None for value in capex_raw)
     # Official total debt has a controlled XBRL definition.  Provider-reported
     # total debt can remain a useful coverage fallback, but it may include lease
     # obligations and is only selected when the official series is absent.
@@ -396,8 +458,8 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
         used[row["observation_id"]] = row
 
     free_cash_flow = tuple(
-        (cash_from_operations[index] - capex[index]
-         if cash_from_operations[index] is not None and capex[index] is not None else None)
+        (cash_from_operations[index] + capex[index]
+         if cash_from_operations[index] is not None and capex_raw[index] is not None else None)
         for index in range(3))
     lines = [
         _dollar_metric("Revenue", *revenue, unit=money_unit),

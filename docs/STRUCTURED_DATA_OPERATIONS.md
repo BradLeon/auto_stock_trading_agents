@@ -539,11 +539,15 @@ ats_cli data releases
 
 发布 source 只控制统一采集路径，不会自动切换 PEAD/Sector consumer。consumer 发布必须独立完成 reconciliation。
 
-PEAD 的 shadow 对账不是简单比较两份 DTO 的字节是否一致。相同期间且数值不同、任一侧缺少
-Revenue/Gross Margin/Operating Margin/Net Income/Diluted EPS/CapEx/Free Cash Flow/Total Debt，或
-platform 期间不比 legacy 更新，均为 `mismatch`。只有两个完整输入一致，或 platform 的完整
-报表期间更晚、并明确记录 `governed_upgrade`，才会写入 `reconciled`。这样不会把旧 yfinance
-报表滞后一个季度误判为数据质量问题，也不会用“更新”掩盖同期间的取数差异。
+PEAD 的 shadow 对账不是简单比较两份 DTO 的字节是否一致。相同期间的 Revenue、毛利率、营业
+利润率、Net Income、Diluted EPS、CapEx 与 Free Cash Flow 数值不同，或 platform 缺少任一
+核心字段，均为 `mismatch`。platform 期间更旧也会阻断。
+
+下列差异是可审计的 `reconciled` 升级，而不是被阈值掩盖的 mismatch：platform 报表完整但
+legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告期更晚
+（`governed_period_upgrade`）；同期间仅修正显式单位，或从 Provider-reported debt 切换到有
+明确 XBRL 定义的官方 total debt（`governed_semantic_upgrade`）。每条记录都会保留变更字段、
+期间和是否发生债务定义切换；任何同期间经营数据数值差异仍会阻断发布。
 
 `cutover-status` 保留所有历史 mismatch 供审计，但发布资格从最近一次 mismatch 后的新观察窗口
 计算；因此修复后需要至少一条新的、同日无 mismatch 的真实对账记录。历史问题不会被删除，也

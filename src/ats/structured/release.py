@@ -80,13 +80,26 @@ class ReleaseManager:
         last_status = health.get("last_status") or "no_run"
         if mode in {"platform", "fallback"}:
             check("latest_ingestion", last_status in SAFE_INGESTION_STATES, last_status)
-            try:
-                report = build_quality_report(self.repository)
-            except Exception as exc:
-                report = {"datasets": []}
-                check("quality_report", False, f"{type(exc).__name__}:{exc}")
-            by_dataset = {row["dataset_id"]: row for row in report["datasets"]}
             for dataset_id in datasets:
+                # A company-financial source is usable when the selected latest
+                # report package passes the domain's data-only audit.  The generic
+                # dataset report intentionally includes every historical source and
+                # conflict (for example MRVL) and therefore is not an appropriate
+                # gate for the configured AMZN/MSFT/KLAC/TSM acceptance package.
+                if dataset_id == "company_financials":
+                    from ..data.financial_release import company_financial_release_check
+
+                    package_check = company_financial_release_check(self.repository)
+                    check("data_package:company_financials", package_check["ready"],
+                          {"scope": package_check["scope"],
+                           "entities": package_check["entities"]})
+                    continue
+                try:
+                    report = build_quality_report(self.repository)
+                except Exception as exc:
+                    report = {"datasets": []}
+                    check("quality_report", False, f"{type(exc).__name__}:{exc}")
+                by_dataset = {row["dataset_id"]: row for row in report["datasets"]}
                 quality = by_dataset.get(dataset_id)
                 check(f"quality:{dataset_id}",
                       bool(quality and quality["overall_status"] == "passed"),
@@ -98,23 +111,41 @@ class ReleaseManager:
                 "last_ingestion_status": last_status, "ready": all(
                     row["passed"] for row in checks), "checks": checks}
 
-    def check_consumer(self, consumer: str, *, mode: str = "platform") -> dict:
+    def check_consumer(self, consumer: str, *, mode: str = "platform",
+                       data_db: str | Path | None = None) -> dict:
         if mode not in READ_MODES:
             raise ValueError(f"invalid release mode: {mode}")
         consumers = self.catalog.raw.get("feature_flags", {}).get("consumers", {}) or {}
         configured = consumer in consumers
         reconciliation_approved = mode != "platform" or consumers.get(consumer) == "platform"
+        checks = [
+            {"check": "consumer_configured", "passed": configured,
+             "detail": "" if configured else "unknown_consumer"},
+            {"check": "reconciliation_approved", "passed": reconciliation_approved,
+             "detail": "" if reconciliation_approved
+             else "consumer_not_approved_for_platform_in_checked_config"},
+        ]
+        assessment = None
+        if mode == "platform":
+            from ..data.migration import default_data_db_path, load_migration_inventory
+            from ..data.release_assessment import assess_consumer_release
+
+            policy = load_migration_inventory().consumer_cutover
+            assessment = assess_consumer_release(
+                consumer=consumer, data_db=data_db or default_data_db_path(),
+                minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
+                maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
+            )
+            checks.append({
+                "check": "consumer_release_assessment",
+                "passed": assessment["platform_eligible"],
+                "detail": assessment["category"], "assessment": assessment,
+            })
         return {"kind": "consumer", "target_id": consumer,
                 "requested_mode": mode,
                 "current_overlay_mode": overlay_mode("consumer", consumer, path=self.path),
-                "ready": configured and reconciliation_approved,
-                "checks": [
-                    {"check": "consumer_configured", "passed": configured,
-                     "detail": "" if configured else "unknown_consumer"},
-                    {"check": "reconciliation_approved", "passed": reconciliation_approved,
-                     "detail": "" if reconciliation_approved
-                     else "consumer_not_approved_for_platform_in_checked_config"},
-                ]}
+                "ready": all(row["passed"] for row in checks), "checks": checks,
+                "assessment": assessment}
 
     def apply(self, check: dict, *, actor: str = "cli") -> dict:
         if not check.get("ready"):

@@ -68,6 +68,11 @@ from ats.structured import StructuredCatalog           # 兼容入口
 
 新模块的实现应放在 `ats.data`；旧模块只转发到新实现。
 
+即时市场输入的实现归属 `ats.data.runtime.market_data`（IBKR/yfinance 行情调用方）和
+`ats.data.runtime.options`（ThetaData/yfinance 期权调用方）。`ats.data.market_data` 与
+`ats.data.options` 是保持既有 Trader、Risk 与 CLI 导入契约的模块别名；它们不得新增持久化逻辑，
+也不得在 structured catalog 中声明 dataset。
+
 ## 1.2 配置与测试入口
 
 新增来源先查看并修改 `config/data/catalog.yaml`、对应领域 YAML 和 `config/data/providers/` 模板；Workflow 配置仍放在 `config/pead.yaml`、`config/sectors/` 等位置。运行 `ats data config` 做只读引用、状态、adapter 和 legacy overlay 校验。

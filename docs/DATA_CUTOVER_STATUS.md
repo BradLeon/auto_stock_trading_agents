@@ -1,6 +1,25 @@
 # 数据层消费者切换状态
 
-> 状态截至 2026-08-28。本文记录当前发布资格，不替代动态检查命令。
+> 状态截至 2026-08-29。本文只记录**消费者读取路径**的切换状态，不替代动态检查命令。
+> 消费者分类和 `data release-assessment` 不再是数据源或数据集发布门；数据发布只看原始数据、
+> 血缘、报告期/单位、完整性、时效、质量和派生重算。feature flag 不是验收证据。
+
+## 数据发布与消费者切换的边界
+
+`company_financials` 的发布资格应使用：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data financial-package-check
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data release-check \
+  --source defeatbeta_stock_statement --mode platform
+```
+
+前者只检查 AMZN、MSFT、KLAC、TSM 当前完整报表包的 artifact/lineage、实体、期间、币种、
+核心字段、时效、资产负债表质量与派生 XBRL 重算；后者再检查来源注册和最近采集状态。两者均不
+读取 consumer mode、shadow 记录或 Workflow 运行结果。2026-08-29 的当前结果为四个验收实体均
+通过：AMZN 是 SEC Facts + 同期 IR 的受控官方披露包，MSFT/KLAC/TSM 使用优先级最高的
+DefeatBeta 报表包。`market_consensus` 由权威 Provider snapshot 发布；分析师覆盖面或修订造成的
+consumer 数值差异应保留其 source/known-at，而不阻塞数据发布。
 
 ## 已完成的阶段 10 实现
 
@@ -16,30 +35,38 @@
   `var/data.sqlite:data_consumer_cutover_records`。对账按实体血缘过滤 document/version/chunk、
   evidence fact/projection 和 structured series，而不是用全库总数冒充实体对账。
 
-## 当前验收结果
+## 当前验收结果与 10.5 分类
 
-| Consumer | 真实库对账 | 端到端回归 | 当前 mode / 发布资格 |
+| Consumer | 10.5 分类与真实库证据 | 当前 mode / 处理 |
 |---|---|---|---|
-| `pead_fundamentals` | 2026-08-28 对 AMZN/MSFT/KLAC/TSM 完成真实 shadow；最近 mismatch 后有 4 条同日 `reconciled`、0 条 active-window mismatch | PEAD prep/score/report 与结构化回归通过；shadow 始终返回 legacy DTO，平台异常也回退 legacy | `shadow`；10.1 已验收，尚未执行 10.5 的 platform 发布。AMZN 是完整官方报表对 legacy 缺字段的升级；MSFT/KLAC 是 EPS 单位与官方 debt 定义升级；TSM 是 `TWD/ADR` 单位修正 |
-| `sector_agent` | 2026-08-28 对台湾财政部与韩国 ECOS 两个来源真实 shadow 对账；2 个自然日、active-window 0 mismatch | 区域产品的 source override、YoY/MoM、血缘、故障回退和 Sector 装配/输出渲染测试通过；真实装配确认输出带来源、期间和 observation ID | `shadow`；两个区域 dataset 五维质量均 `passed`，但尚未执行 10.5 的 platform 发布 |
-| `macro_agent` | 2026-08-28 对同一两个来源真实 shadow 对账；最近网络瞬断后的有效窗口 1 个自然日、0 mismatch | Macro 装配/输出渲染及 runtime-macro 边界测试通过；`--no-llm` 不再隐式触发证据 LLM 判读 | `shadow`；两个区域 dataset 五维质量均 `passed`，但尚未执行 10.5 的 platform 发布 |
-| `evidence_chain` | 2026-08-26 已对账 | Evidence/Chain 回归通过 | `shadow`；写入仍在 legacy memory |
-| `chief_graph` | 不适用直接库双读：只消费上游 Agent 的 memory 产物 | Chief graph 端到端回归通过；统一输入边界与独立 shadow→legacy 回滚演练通过 | `shadow`；它不把 dossier、决策、交易或运行结果重分类为数据层输入，因此没有伪造“直接数据对账”记录 |
-| `runtime_scheduler` | 不适用单一持久读模型：入口协调 runtime 日历、官方披露和采集 pipeline | 日常调度、PEAD 窗口、官方发布确认、新闻/研究采集及隔离 shadow→legacy 回滚演练通过 | `shadow`；已改为 `ats.data.runtime`、`ats.data.products` 和 `ats.data.pipelines.unstructured` 入口；尚未执行 10.5 的 platform 发布 |
+| `pead_fundamentals` | `governed_upgrade`：AMZN 是完整官方报表补齐 legacy 缺字段；MSFT/KLAC 是 EPS 单位与官方债务定义；TSM 是 `TWD/ADR` 单位修正。四个真实 shadow 记录同日稳定。 | `shadow`。需要写入独立复核记录（原始 artifact/lineage、期间单位经济定义、freshness、PEAD 输出）后才可 platform。 |
+| `sector_agent` | `equivalent`：台湾财政部与韩国 ECOS 的 2026-07 level、YoY、MoM 与单位相同；有效窗口无 mismatch。 | 数据证据已满足；仍是 `shadow`，等待发布负责人显式批准并修改 checked-in consumer 基线。 |
+| `macro_agent` | `governed_upgrade` 候选：legacy 发生 `ConnectError` 并返回空值，platform 有已治理的 2026-07 结果；这不是数值 mismatch。 | `shadow`。网络失败本身不能放行；必须独立复核 raw official artifact、已知时点和 Macro 输出，随后再记录验证。 |
+| `evidence_chain` | `equivalent`（仅迁移存储）：2026-08-26 的 document/version/chunk/evidence 实体血缘对账通过。 | `shadow`。表 hash 不足以证明 `UnstructuredReadRouter` 的正文/版本/证据输出等价；需补一次真实消费者输出对账。写入继续属于 legacy workflow memory。 |
+| `sector_consensus` | `equivalent`：当前 consumer 输出对账稳定。 | 数据证据已满足；维持 `shadow`，待独立发布决策。 |
+| `pead_consensus` | `platform_regression`：MSFT 的 EPS consensus signature 为 3.2（legacy）对 3.4（platform）。 | 已从历史 `platform` 基线降为 `shadow`；先解释 Provider 时点/定义差异并完成新的真实对账。 |
+| `chain_regional` | `evidence_incomplete`：没有消费者级 shadow 记录。 | 已从历史 `platform` 基线降为 `shadow`；需完成真实 dual-read、coverage/freshness/output 验收。 |
+| `sector_fundamentals`、`pead_research` | `evidence_incomplete`：没有消费者级 shadow 记录。 | 分别保持 `legacy`、`shadow`；不得发布。 |
+| `chief_graph` | `orchestration_boundary`：它消费上游 Agent/Workflow memory 产物；旧的 `chief-graph` 表 hash 记录会被发布评估明确忽略。 | 不可发布为 data-consumer `platform`。验收应看上游消费者状态、Chief 端到端回归和 rollback drill。 |
+| `runtime_scheduler` | `orchestration_boundary`：它协调 runtime 日历、产品和采集 pipeline，没有同一持久数据的 legacy/platform 替代读模型。 | 不可发布为 data-consumer `platform`。验收应看上游状态、scheduler 端到端回归和 rollback drill。 |
+
+所有候选均在[`config/data/consumer_release.yaml`](../config/data/consumer_release.yaml) 中登记；没有
+消费者级真实 shadow 记录时，评估会返回 `evidence_incomplete`，不得因历史 feature flag 直接发布。
 
 本次 PEAD 验收：`test_structured_consumer_migration.py`、`test_consumer_cutover_records.py`、
 `test_pead_data.py`、`test_pead_graph.py`、`test_pead_score.py` 与 `test_pead_report.py` 均通过；
 覆盖 shadow 输入、单位/债务语义、CapEx/FCF 展示、失败回退、prep、score 与报告渲染。
 
-## 发布门与下一步
+## 消费者切换门与下一步（非数据发布门）
 
 `config/data/migration.yaml` 要求 consumer 至少产生 **1 个自然日内 1 次**成功对账记录，且没有
-未解决 mismatch，才具备 `platform` 发布资格。重复检查仍会保留审计记录，但不以次数替代
-coverage、时效和输出验收。
+未解决 mismatch。10.5 进一步要求 `config/data/consumer_release.yaml` 将入口标记为直接数据消费者，
+并通过 coverage、freshness、输出证据门。若差异属于 `governed_upgrade`，还必须写入独立复核记录；
+legacy 网络失败不能自动代替复核。重复检查仍会保留审计记录，但不以次数替代这些门。
 
-注意：`company_financials` 全局质量报告仍显示 MRVL 的 6 条既存跨源冲突（CapEx/营业利润，约
-1.2%），它们不在 AMZN/MSFT/KLAC/TSM 的 10.1 发行人范围内，未被删除或忽略。它们会继续让
-全局 source 发布检查失败，必须单独修复；PEAD 也尚未切到 platform。
+注意：`company_financials` 全局质量报告仍显示 MRVL 的既存跨源冲突（CapEx/营业利润，约
+1.2%）。它们不在 AMZN/MSFT/KLAC/TSM 的数据发布验收范围内，仍保留以待单独修复，但不会阻塞
+已通过 `financial-package-check` 的公司财务数据发布；PEAD 是否切到 platform 是独立消费者决策。
 
 本轮实际补齐的原始采集（均保存 artifact 与血缘）如下：SEC Company Facts 为 AMZN 1,102 条、
 MSFT 1,314 条、KLAC 1,022 条、TSM 128 条；台湾财政部电子零组件出口 307 条（至 2026-07）；
@@ -67,13 +94,14 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data cutover-check \
   --consumer evidence_chain --entity NVDA \
   --source-db var/ats.sqlite --target-db var/data.sqlite
 
-PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data cutover-status \
-  --consumer evidence_chain --target-db var/data.sqlite
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data release-assessment \
+  --consumer macro_agent --target-db var/data.sqlite
 ```
 
-第二条命令在尚无成功对账或存在 mismatch 时以退出码 `2` 表示“尚不可发布”，不是数据错误。条件满足后，先运行
-`data release-check --consumer <ID> --mode platform`；只有 `ready=true` 才可使用
-`data publish --consumer <ID> --mode platform --apply`。任意 mismatch 或运行异常都执行
-`data rollback --consumer <ID> --mode legacy --apply`。
+`release-assessment` 是只读分类命令：`0` 表示直接数据消费者的数据证据完整，`2` 表示仍有明确
+gap；对编排边界返回 `2` 是预期行为，不是数据错误。它通过后仍须先运行
+`data release-check --consumer <ID> --mode platform`。只有 `ready=true`、且发布负责人已在
+checked-in config 批准，才可使用 `data publish --consumer <ID> --mode platform --apply`。任意
+mismatch 或运行异常都执行 `data rollback --consumer <ID> --mode legacy --apply`。
 
 阶段 11（冻结 legacy 写入、删除旧实现及 schema）必须等待这些发布资格全部通过后才开始。

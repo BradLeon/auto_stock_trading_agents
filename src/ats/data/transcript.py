@@ -146,18 +146,17 @@ def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *,
     body, _ = extract_body(text, source)
     body_ok, _ = looks_like_transcript(body)
     manual = source.startswith("file:")
+    # A local filename is provenance, not proof that its body belongs to the
+    # requested issuer.  Treat manual files exactly like automatic candidates for
+    # entity and reported-period validation; otherwise a misnamed drop can bypass
+    # the very guard that quarantines a web result for the same mistake.
     claimed_entity = symbol if (
-        manual or structured is not None
-        or admission.mentions_entity(body, symbol, company_name)
+        structured is not None or admission.mentions_entity(body, symbol, company_name)
     ) else ""
     if structured is not None:
         claimed_period = structured.label
-    elif manual:
-        # A manual override is explicitly named for this target period. Its provenance
-        # is stronger than prose regexes, but an unresolved target still fails centrally.
-        claimed_period = fiscal_label
     else:
-        detected = fiscal.detect_period(body, source)
+        detected = fiscal.detect_period(body, "" if manual else source)
         claimed_period = f"Q{detected[1]} FY{detected[0]}" if detected else ""
     source_url = ""
     for prefix in ("url:", "tavily:"):

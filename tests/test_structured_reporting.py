@@ -151,6 +151,27 @@ def test_markdown_and_machine_report_have_the_same_dimensions(tmp_path) -> None:
     assert "Deduplication rate" in markdown
 
 
+def test_freshness_can_gate_on_underlying_source_period_lag(tmp_path) -> None:
+    repo = _repository(tmp_path)
+    repo.conn.execute(
+        "UPDATE structured_datasets SET quality_json=? WHERE dataset_id=?",
+        (json.dumps({"freshness_hours_max": 240, "source_period_lag_days_max": 30}),
+         "regional_tw_exports"))
+    artifact = _artifact(repo)
+    observation = _observation(repo, artifact.id)
+    repo.conn.execute(
+        "UPDATE structured_observations SET period_end=? WHERE observation_id=?",
+        ("2026-06-30", observation.id))
+    _finish(repo, "succeeded")
+
+    freshness = _tw(build_quality_report(
+        repo, dataset_id="regional_tw_exports", now=NOW))["dimensions"]["freshness"]
+
+    assert freshness["status"] == "stale"
+    assert freshness["latest_period_end"] == "2026-06-30"
+    assert freshness["source_period_lag_days"] > 30
+
+
 def test_cli_structured_quality_and_inventory(monkeypatch, capsys, tmp_path) -> None:
     from ats.data_platform.products import DataProducts
     from ats.runtime import cli

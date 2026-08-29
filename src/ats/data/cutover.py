@@ -186,6 +186,39 @@ def record_consumer_comparison(*, consumer: str, entity: str, data_db: str | Pat
         conn.close()
 
 
+def record_consumer_release_verification(*, consumer: str, entity: str,
+                                         data_db: str | Path, details: dict) -> dict:
+    """Record an independently reviewed governed upgrade for a release gate.
+
+    The caller must supply the review's lineage, period/unit/economic-definition,
+    freshness and downstream output evidence.  This helper intentionally does
+    not infer verification from a failed legacy request.
+    """
+    required = {"lineage", "period_unit_definition", "freshness", "output"}
+    missing = sorted(key for key in required if not details.get(key))
+    if missing:
+        raise ValueError("release verification missing: " + ", ".join(missing))
+    checked_at = datetime.now(timezone.utc).isoformat()
+    path = Path(data_db)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(_SCHEMA)
+        result = {
+            "consumer": _consumer_id(consumer), "entity": entity.upper(),
+            "checked_at": checked_at, "status": "reconciled",
+            "comparison_type": "release_verification", "independently_verified": True,
+            "details": {"comparison_type": "release_verification",
+                        "independently_verified": True, **details},
+        }
+        conn.execute("INSERT INTO data_consumer_cutover_records VALUES (?,?,?,?,?,?)", (
+            uuid4().hex, result["consumer"], result["entity"], checked_at,
+            result["status"], json.dumps(result, ensure_ascii=False, sort_keys=True)))
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
 def compare_consumer_data(*, consumer: str, entity: str = "",
                           legacy_db: str | Path, data_db: str | Path,
                           record: bool = True) -> dict:
@@ -221,4 +254,7 @@ def compare_consumer_data(*, consumer: str, entity: str = "",
         new.close()
 
 
-__all__ = ["compare_consumer_data", "consumer_cutover_status", "record_consumer_comparison"]
+__all__ = [
+    "compare_consumer_data", "consumer_cutover_status", "record_consumer_comparison",
+    "record_consumer_release_verification",
+]

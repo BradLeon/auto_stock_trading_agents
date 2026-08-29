@@ -9,10 +9,10 @@
 - 将当前 `ats.data_platform` 的数据产品接口收敛到 `ats.data.products`，将 `ats.structured` 收敛到 `ats.data` 的结构化子树；迁移期间保留旧导入路径作为兼容转发层。
 - 明确适配器、管道、存储和产品之间的单向依赖，禁止适配器直接写库、产品直接访问 Provider，以及结构化和非结构化实现相互反向依赖。
 - 建立 `config/data/` 配置层级和统一 catalog loader，区分来源注册、结构化数据集、非结构化文档源、Provider 配置、调度策略和 Workflow 配置。
-- 将现有 legacy yfinance 财务报表读取提升为受管的 `company_financials` fallback：仅持久化低频、可审计的收入、利润、现金流、CapEx、资产负债表和 EPS，不持久化行情或期权数据；SEC/发行人披露仍优先。
+- 将现有 defeatbeta、yfinance、SEC 与发行人披露统一为受管的 `company_financials` 来源链：按可达性依次尝试 defeatbeta、yfinance、SEC Facts、发行人 IR；一旦前序来源提供同一报告期的完整财务报表合同，即停止后续抓取。仅持久化低频、可审计的收入、利润、现金流、CapEx、资产负债表和 EPS，不持久化行情或期权数据。
 - 逐步从 `ats.memory` 拆出数据层 schema 与 repository；过渡期保持旧数据库、旧 Workflow 和旧 CLI 可运行，按来源和消费者独立切换。
 - 在 facade 稳定后，迁移旧实现持有的 `measurement_*` 与既有 `structured_*` observations/artifacts/运行记录，以及文档、版本、分块和证据；迁移必须可恢复、可续跑、可对账，且不得丢失版本、血缘或审计信息。
-- 将每个 Agent 与 Workflow 显式切换到统一数据产品路径，并以新旧输出对账、回滚演练和端到端验收作为发布门。
+- 将每个直接消费可切换数据产品的 Agent 与 Workflow 显式切换到统一数据产品路径；调用方自身改动时以新旧输出对账、回滚演练和端到端验收作为**消费者切换门**，但不把它们作为数据源或数据集发布门；区分等价结果、经独立验证的受管升级、平台回归和仅编排边界，避免将旧路径故障或 Workflow memory 误判为平台数据错误。
 - 只有全部数据迁移、消费者切换和稳定性验收完成后，才删除旧模块、旧配置 alias、重复 repository 实现和不再需要的旧 schema；在此之前不得归档本变更。
 - 交付开发者、运维者和使用者可阅读的统一数据层架构文档，包含目标目录、依赖规则、配置字段、迁移步骤、测试门槛和兼容周期。
 
@@ -24,7 +24,7 @@
 
 ### Modified Capabilities
 
-`company_financials` 的持久化 fallback 覆盖范围扩展至既有 yfinance 报表读取，以补足 SEC Facts 或 defeatbeta 镜像缺失的当季离散季度及概念。TSM 的每普通股 EPS、每 ADR EPS 与币种必须作为独立、显式单位的指标；Provider 的拆股调整 EPS 与报告口径 total debt 也不得冒充发行人原始值。SEC 的长期债务与总债务必须分开映射。行情读取仍属于 runtime 边界。
+`company_financials` 的受管来源链覆盖既有 defeatbeta、yfinance、SEC Facts 与发行人 IR。每个实体/报告期必须选定一个完整报表包来源，不得把不同 Provider 的字段静默拼接成同一“官方口径”；仅当 SEC Facts 与同实体、同报告期的发行人 IR 单独均不完整时，才允许形成保留字段级血缘的官方披露包。Provider 数据必须保留其 Provider 身份，不得标注为发行人原始披露。TSM 的每普通股 EPS、每 ADR EPS 与币种必须作为独立、显式单位的指标；Provider 的拆股调整 EPS 与报告口径 total debt 也不得冒充发行人原始值。SEC 的长期债务与总债务必须分开映射。行情读取仍属于 runtime 边界，P/E 由受管 EPS 与 runtime 价格按需计算。
 
 ## Impact
 

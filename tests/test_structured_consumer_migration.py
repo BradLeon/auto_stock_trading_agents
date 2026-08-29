@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from ats.data import fundamentals
+from ats.data.financial_release import company_financial_release_check
 from ats.data_platform import DataProducts
 from ats.schemas.fundamentals import FinancialStatements, FundamentalData, StatementMetric
 from ats.structured import (
@@ -29,24 +30,30 @@ def _repo(tmp_path):
 
 
 def _save(repo, *, metric, period, value, basis="quarter", known_at=NOW,
-          entity="MSFT", unit="USD", currency="USD"):
+          entity="MSFT", unit="USD", currency="USD", source_id="sec_companyfacts",
+          adjustment="gaap"):
     artifact = repo.put_artifact(
         {"metric": metric, "period": period, "value": value},
         ArtifactDescriptor(
-            source_id="sec_companyfacts", dataset_id="company_financials",
+            source_id=source_id, dataset_id="company_financials",
             fetched_at=known_at, query_scope={"metric": metric, "period": period}))
     return repo.save_observation(ObservationInput(
         series=SeriesIdentity(
-            source_id="sec_companyfacts", dataset_id="company_financials",
+            source_id=source_id, dataset_id="company_financials",
             entity_id=entity, metric_id=metric, unit=unit, currency=currency,
-            period_basis=basis, adjustment="gaap"),
+            period_basis=basis, adjustment=adjustment),
         period=period, value=value, published_at=known_at,
         known_at=known_at, fetched_at=known_at, artifact_id=artifact.id)).id
 
 
-def test_source_and_consumer_rollout_flags_are_independent(monkeypatch) -> None:
+def test_source_and_consumer_rollout_flags_are_independent(monkeypatch, tmp_path) -> None:
+    # Runtime release overlays are machine state and may be intentionally ahead
+    # of the checked-in baseline.  This test exercises baseline/env precedence.
+    monkeypatch.setenv("ATS_STRUCTURED_RELEASE_FILE", str(tmp_path / "releases.yaml"))
     assert source_mode("tw_mof_exports") == "platform"
-    assert read_mode("chain_regional", source_id="tw_mof_exports") == "platform"
+    # 10.5 reverts the historic platform baseline until this consumer has
+    # consumer-specific shadow evidence rather than source-level evidence only.
+    assert read_mode("chain_regional", source_id="tw_mof_exports") == "shadow"
     assert source_mode("sec_companyfacts") == "shadow"
     assert source_mode("company_disclosures") == "shadow"
     assert read_mode("pead_fundamentals", source_id="sec_companyfacts") == "shadow"
@@ -122,6 +129,142 @@ def test_fundamental_platform_prefers_disclosed_adr_eps_for_tsm(tmp_path) -> Non
     rendered = {line.label: line for line in statement.lines}
     assert rendered["Diluted EPS"].value == 3.5
     assert rendered["Diluted EPS"].unit == "USD/ADR"
+
+
+def test_complete_report_package_requires_one_source_and_all_three_statements(tmp_path) -> None:
+    repo = _repo(tmp_path)
+    period = "2026-06-30"
+    source = "defeatbeta_stock_statement"
+    for metric, value in {
+        "financial.revenue.gaap": 100_000_000,
+        "financial.gross_profit.gaap": 50_000_000,
+        "financial.operating_income.gaap": 20_000_000,
+        "financial.net_income.gaap": 10_000_000,
+        "financial.eps.diluted.market_adjusted": 1.2,
+        "financial.cash_from_operations.gaap": 15_000_000,
+        "financial.capex.gaap": 5_000_000,
+    }.items():
+        _save(repo, metric=metric, period=period, value=value, source_id=source,
+              adjustment="split_adjusted" if metric.endswith("market_adjusted") else "gaap")
+    for metric, value in {
+        "financial.cash_and_equivalents.gaap": 20_000_000,
+        "financial.total_debt.provider_reported": 30_000_000,
+        "financial.total_assets.gaap": 200_000_000,
+        "financial.total_liabilities.gaap": 80_000_000,
+        "financial.stockholders_equity.gaap": 120_000_000,
+    }.items():
+        _save(repo, metric=metric, period=period, value=value, basis="instant",
+              source_id=source,
+              adjustment="provider_reported" if metric.endswith("provider_reported") else "gaap")
+
+    package = fundamentals._complete_report_package(
+        repo, source_id=source, symbol="MSFT")
+    assert package is not None
+    assert package["source_id"] == source and package["period"] == period
+
+    # A different source cannot patch a missing report-package field.
+    repo2 = _repo(tmp_path / "incomplete")
+    for metric, value in {
+        "financial.revenue.gaap": 100_000_000,
+        "financial.gross_profit.gaap": 50_000_000,
+    }.items():
+        _save(repo2, metric=metric, period=period, value=value, source_id=source)
+    _save(repo2, metric="financial.operating_income.gaap", period=period,
+          value=20_000_000, source_id="sec_companyfacts")
+    assert fundamentals._complete_report_package(repo2, source_id=source, symbol="MSFT") is None
+
+
+def test_company_financial_release_is_data_only_and_checks_complete_package(tmp_path) -> None:
+    repo = _repo(tmp_path)
+    period = "2026-06-30"
+    source = "defeatbeta_stock_statement"
+    quarterly = {
+        "financial.revenue.gaap": 100_000_000,
+        "financial.gross_profit.gaap": 50_000_000,
+        "financial.operating_income.gaap": 20_000_000,
+        "financial.net_income.gaap": 10_000_000,
+        "financial.eps.diluted.market_adjusted": 1.2,
+        "financial.cash_from_operations.gaap": 15_000_000,
+        "financial.capex.gaap": 5_000_000,
+    }
+    instant = {
+        "financial.cash_and_equivalents.gaap": 20_000_000,
+        "financial.total_debt.provider_reported": 30_000_000,
+        "financial.total_assets.gaap": 200_000_000,
+        "financial.total_liabilities.gaap": 80_000_000,
+        "financial.stockholders_equity.gaap": 120_000_000,
+    }
+    for metric, value in quarterly.items():
+        _save(repo, metric=metric, period=period, value=value, source_id=source,
+              adjustment="split_adjusted" if metric.endswith("market_adjusted") else "gaap")
+    for metric, value in instant.items():
+        _save(repo, metric=metric, period=period, value=value, basis="instant", source_id=source,
+              adjustment="provider_reported" if metric.endswith("provider_reported") else "gaap")
+
+    result = company_financial_release_check(repo, entities=["MSFT"], now=NOW)
+
+    assert result["ready"] is True
+    assert result["scope"] == "data_only_no_consumer_or_workflow_gate"
+    assert all(check["passed"] for check in result["entities"][0]["checks"])
+
+
+def test_official_disclosure_bundle_only_combines_sec_and_issuer_release(tmp_path) -> None:
+    repo = _repo(tmp_path)
+    period = "2026-06-30"
+    for metric, value in {
+        "financial.revenue.gaap": 100_000_000,
+        "financial.gross_profit.gaap": 50_000_000,
+        "financial.operating_income.gaap": 20_000_000,
+        "financial.net_income.gaap": 10_000_000,
+        "financial.eps.diluted.gaap": 1.2,
+        "financial.cash_from_operations.gaap": 15_000_000,
+    }.items():
+        _save(repo, metric=metric, period=period, value=value, source_id="sec_companyfacts")
+    for metric, value in {
+        "financial.cash_and_equivalents.gaap": 20_000_000,
+        "financial.total_debt.gaap": 30_000_000,
+        "financial.total_assets.gaap": 200_000_000,
+        "financial.total_liabilities.gaap": 80_000_000,
+        "financial.stockholders_equity.gaap": 120_000_000,
+    }.items():
+        _save(repo, metric=metric, period=period, value=value, basis="instant",
+              source_id="sec_companyfacts")
+    _save(repo, metric="financial.capex.gaap", period=period, value=5_000_000,
+          source_id="company_disclosures")
+
+    assert fundamentals._complete_report_package(
+        repo, source_id="sec_companyfacts", symbol="MSFT") is None
+    package = fundamentals._complete_report_package(
+        repo, source_id=("sec_companyfacts", "company_disclosures"), symbol="MSFT")
+
+    assert package is not None
+    assert package["source_id"] == "official_disclosure_bundle"
+    assert package["source_by_metric"]["financial.capex.gaap"] == "company_disclosures"
+
+
+def test_financial_source_chain_stops_after_first_complete_package(monkeypatch) -> None:
+    calls = []
+
+    class _Pipeline:
+        def __init__(self, _repository):
+            pass
+
+        def run(self, _adapter, request):
+            calls.append(request.source_id)
+            return {"status": "succeeded"}
+
+    class _Adapter:
+        pass
+
+    monkeypatch.setattr("ats.structured.IngestionPipeline", _Pipeline)
+    monkeypatch.setattr(fundamentals, "_complete_report_package", lambda _repo, *, source_id, symbol:
+                        {"source_id": source_id, "period": "2026-06-30"}
+                        if source_id == "defeatbeta_stock_statement" else None)
+
+    package = fundamentals._refresh_report_package(object(), symbol="MSFT")
+
+    assert package is not None and package["source_id"] == "defeatbeta_stock_statement"
+    assert calls == ["defeatbeta_stock_statement"]
 
 
 def test_fundamental_read_modes_preserve_public_dto(monkeypatch) -> None:

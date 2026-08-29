@@ -711,7 +711,8 @@ def earnings_release_result(symbol: str, *, near: str = "",
             log.warning("sec: %s exhibit %s lacks earnings semantics", symbol, filing.accession)
             continue
         if period:
-            period_ok, period_reason = fiscal.verify_release_period(period, text, url)
+            period_ok, period_reason = fiscal.verify_release_period(
+                period, text, url, event_date=near)
             if not period_ok:
                 log.warning("sec: %s exhibit %s rejected: %s",
                             symbol, filing.accession, period_reason)

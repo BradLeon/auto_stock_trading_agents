@@ -113,13 +113,38 @@ class DataProducts:
                                      else "all_sources_requested", conflict=False))
         else:
             selector = SourceSelector(self.structured)
-            group_fields = (
-                "period", "period_basis", "adjustment", "unit", "currency")
-            groups = sorted({tuple(row.get(field, "") for field in group_fields)
-                             for row in rows})
+            group_fields = ("period", "period_basis", "adjustment", "unit", "currency")
+
+            def dimensions(row: dict) -> dict:
+                try:
+                    value = json.loads(row.get("dimensions_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    value = {}
+                return value if isinstance(value, dict) else {}
+
+            # Only dimension keys that vary *within the same source* split a
+            # selection group.  This preserves independent product series such
+            # as TrendForce's three DRAM items, while source-specific annotation
+            # dimensions (SEC taxonomy vs. mirror finance_type) do not prevent a
+            # legitimate cross-source comparison of the same financial fact.
+            values_by_source_key: dict[tuple[str, str], set[str]] = {}
+            for row in rows:
+                for key, value in dimensions(row).items():
+                    values_by_source_key.setdefault((row["source_id"], key), set()).add(
+                        json.dumps(value, sort_keys=True))
+            discriminating_keys = sorted({key for (_source, key), values
+                                         in values_by_source_key.items() if len(values) > 1})
+
+            def group_key(row: dict) -> tuple:
+                return (
+                    *(row.get(field, "") for field in group_fields),
+                    *(json.dumps(dimensions(row).get(key), sort_keys=True)
+                      for key in discriminating_keys),
+                )
+
+            groups = sorted({group_key(row) for row in rows})
             for group in groups:
-                period_rows = [row for row in rows if tuple(
-                    row.get(field, "") for field in group_fields) == group]
+                period_rows = [row for row in rows if group_key(row) == group]
                 latest_by_source: dict[str, dict] = {}
                 for row in period_rows:
                     current = latest_by_source.get(row["source_id"])
@@ -143,6 +168,8 @@ class DataProducts:
                 if choice.conflict:
                     conflicts.append({
                         "period": group[0], "period_basis": group[1],
+                        "dimensions": {key: json.loads(group[index + len(group_fields)])
+                                       for index, key in enumerate(discriminating_keys)},
                         "selected_source": choice.selected_source,
                         "sources": sorted(latest_by_source),
                         "values": {key: value["value"]

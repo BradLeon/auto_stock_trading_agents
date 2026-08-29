@@ -198,3 +198,22 @@ def test_consensus_read_mode_shadow_and_platform_are_independently_reversible(
     assert legacy_consensus.fetch("MSFT") is platform
     monkeypatch.setenv("ATS_STRUCTURED_PEAD_CONSENSUS_MODE", "legacy")
     assert legacy_consensus.fetch("MSFT") is legacy
+
+
+def test_consensus_provider_revision_is_accepted_with_auditable_provider_identity(monkeypatch):
+    from ats.data import cutover
+
+    recorded = []
+    monkeypatch.setattr(cutover, "record_consumer_comparison",
+                        lambda **kwargs: recorded.append(kwargs))
+
+    legacy_consensus._record_shadow_comparison(
+        consumer="pead_consensus", symbol="MSFT",
+        legacy={"eps": 3.2, **legacy_consensus._ANALYST_DEFAULTS},
+        platform={"eps": 3.4, **legacy_consensus._ANALYST_DEFAULTS},
+        matched=False, reason="consensus_signature_mismatch")
+
+    assert recorded[0]["status"] == "reconciled"
+    reconciliation = recorded[0]["details"]["reconciliation"]
+    assert reconciliation["kind"] == "authoritative_provider_snapshot"
+    assert reconciliation["source_id"] == "yfinance_consensus"

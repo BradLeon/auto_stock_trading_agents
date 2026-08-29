@@ -70,6 +70,15 @@ def test_runtime_sources_are_explicit_non_datasets():
                                 dataset.fallback_sources} for source in runtime)
 
 
+def test_runtime_market_and_option_implementations_keep_legacy_imports() -> None:
+    import importlib
+
+    from ats.data.runtime import market_data as runtime_market, options as runtime_options
+
+    assert importlib.import_module("ats.data.market_data") is runtime_market
+    assert importlib.import_module("ats.data.options") is runtime_options
+
+
 def test_runtime_queries_preserve_existing_contract_without_database_writes(
         tmp_path, monkeypatch):
     repo = _repo(tmp_path)

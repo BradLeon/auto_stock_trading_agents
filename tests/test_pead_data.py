@@ -22,6 +22,15 @@ def test_transcript_reads_manual_file(tmp_path):
     assert text == body.strip() and src.startswith("file:")
 
 
+def test_manual_transcript_cannot_bypass_entity_or_period_validation(tmp_path):
+    p = tmp_path / "wrong.txt"
+    p.write_text(_valid_transcript("Microsoft MSFT", "Q1 2026"), encoding="utf-8")
+
+    text, source = transcript.fetch("COHR", "Q3 FY2026", source=str(p))
+
+    assert text == "" and source.startswith("quarantined:file:")
+
+
 def test_transcript_none_when_missing(monkeypatch, tmp_path):
     # No manual file, no FMP, no search, no news -> empty + "none".
     monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")

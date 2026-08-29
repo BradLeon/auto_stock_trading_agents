@@ -4,6 +4,7 @@ from ats.data.admission import (
     CandidateDocument,
     ValidationIssue,
     admit,
+    mentions_entity,
     validate_candidate,
 )
 from ats.data.document_types import CarrierFormat
@@ -54,6 +55,13 @@ def test_tsm_candidate_for_a_different_company_is_quarantined():
     result = validate_candidate(_candidate(claimed_entity="CRTO"))
 
     assert result.reason_codes == ("identity_mismatch",)
+
+
+def test_entity_mention_accepts_configured_legacy_issuer_alias_after_ixbrl_prefix():
+    body = ("xbrl taxonomy context " * 1000) + "II-VI Incorporated annual report"
+
+    assert mentions_entity(body, "COHR", "Coherent")
+    assert not mentions_entity("MVRL reports results", "MRVL", "Marvell Technology")
 
 
 def test_empty_todo_and_unparseable_strong_fields_never_auto_pass():

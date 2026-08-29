@@ -95,7 +95,10 @@ def _period(value: str) -> tuple[int, int] | None:
 def mentions_entity(text: str, symbol: str, company_name: str = "") -> bool:
     """Conservatively verify issuer identity near the document opening."""
     head = re.sub(r"https?://\S+|\[[^\]]*\]\([^)]*\)", " ", (text or "")[:40000]).lower()
-    head = re.sub(r"\s+", " ", head)[:8000]
+    # Inline-XBRL can put its issuer cover page well after taxonomy contexts.  The
+    # first 40k characters are still an opening-document check, while 8k was too
+    # short to identify COHR's valid 10-K.
+    head = re.sub(r"\s+", " ", head)
 
     def hit(needle: str) -> bool:
         return re.search(rf"(?<![a-z0-9_-]){re.escape(needle)}(?![a-z0-9_-])", head) is not None
@@ -103,9 +106,21 @@ def mentions_entity(text: str, symbol: str, company_name: str = "") -> bool:
     ticker = (symbol or "").lower()
     if ticker and (hit(ticker) or hit(ticker.split(".")[0])):
         return True
-    name = re.sub(r"\s+", " ", re.sub(
-        r"[^a-z0-9 ]+", " ", (company_name or "").lower())).strip()
-    if len(name.split()) > 1 and name in head:
+    names = [company_name]
+    try:
+        from ..config import entity_meta
+
+        meta = entity_meta(symbol)
+        names.extend([meta.get("name", ""), *(meta.get("aliases", []) or [])])
+    except Exception:  # pragma: no cover - identity checking must stay fail-closed
+        pass
+    normalized_names = []
+    for value in names:
+        name = re.sub(r"\s+", " ", re.sub(
+            r"[^a-z0-9 ]+", " ", str(value or "").lower())).strip()
+        if name and name not in normalized_names:
+            normalized_names.append(name)
+    if any(len(name.split()) > 1 and name in head for name in normalized_names):
         return True
     generic = {
         "inc", "corp", "ltd", "plc", "the", "and", "group", "co", "holding",
@@ -116,7 +131,12 @@ def mentions_entity(text: str, symbol: str, company_name: str = "") -> bool:
         "products", "research", "manufacturing", "instruments", "labs",
         "laboratories", "microelectronics", "limited", "sa", "nv", "ag",
     }
-    return any(hit(token) for token in name.split() if len(token) >= 3 and token not in generic)
+    return any(
+        hit(token)
+        for name in normalized_names
+        for token in name.split()
+        if len(token) >= 3 and token not in generic
+    )
 
 
 def validate_candidate(

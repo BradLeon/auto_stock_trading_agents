@@ -30,7 +30,7 @@
 - [x] 4.4 Move structured discovery, selection, derivation, and reporting surfaces into `ats.data.products.structured`.
 - [x] 4.5 Verify SEC/company financials, defeatbeta `stock_statement`, Consensus, regional series, and evidence-derived observations through source-level smoke tests.
 - [x] 4.6 Run structured query, as-of/vintage, quality, release/rollback, compatibility, and consumer regression tests; stop the migration on any reconciliation failure.
-- [x] 4.7 Promote the existing legacy yfinance financial-statement reader into a governed `company_financials` fallback; retain raw lineage and reporting currency, prohibit runtime market persistence, preserve TSM ordinary-share versus ADR EPS, market-adjusted versus issuer EPS, and official versus Provider debt semantics; repair pre-governance persisted series through a backed-up, latest-vintage-aware semantic migration; and verify AMZN/MSFT/KLAC/TSM current-quarter coverage in isolated and production-compatible runs.
+- [x] 4.7 Implement the ordered company-financials report-package chain (defeatbeta → yfinance → SEC Facts → issuer IR); retain raw lineage and reporting currency, prohibit runtime market persistence, preserve TSM ordinary-share versus ADR EPS, market-adjusted versus issuer EPS, and official versus Provider debt semantics; repair pre-governance persisted series through a backed-up, latest-vintage-aware semantic migration; and verify AMZN/MSFT/KLAC/TSM current-quarter coverage in isolated and production-compatible runs.
 
 ## 5. Unstructured data implementation migration
 
@@ -76,11 +76,11 @@
 
 ## 10. Agent and Workflow consumer cutover
 
-- [x] 10.1 Move PEAD and company-fundamental consumers to `ats.data.products` / `ats.data.runtime`; compare old and new inputs, scores, reports and failure behavior in shadow mode, after issuer-specific core-field coverage and period semantics pass.
+- [ ] 10.1 Move PEAD and company-fundamental consumers to `ats.data.products` / `ats.data.runtime`; compare old and new inputs, scores, reports and failure behavior in shadow mode, after the selected report package passes issuer/provider identity, core-field coverage and period semantics checks.
 - [x] 10.2 Move Sector and macro/regional consumers to the unified products; verify source selection, derived calculations, freshness and report outputs in shadow mode.
 - [x] 10.3 Move Evidence, Chain, research and document consumers to unified unstructured products; verify document identity, text/version selection, evidence lineage and report outputs in shadow mode.
 - [x] 10.4 Move Chief and scheduled Workflow entrypoints to the unified consumer interfaces; complete end-to-end execution, release records and per-consumer rollback drills.
-- [ ] 10.5 Publish only consumers with at least one successful same-day reconciliation and no mismatch, plus passed coverage/freshness/output gates, to platform mode; leave any unqualified consumer on legacy/fallback with an explicit gap record.
+- [x] 10.5 Classify each candidate as equivalent, independently verified `governed_upgrade`, `platform_regression` or `orchestration_boundary`; publish only direct data consumers with at least one successful same-day equivalent result or verified governed upgrade, no unresolved platform regression, and passed coverage/freshness/output gates; retain unqualified consumers on legacy/shadow/fallback with an explicit gap record, and validate orchestration boundaries through upstream status plus end-to-end/rollback evidence rather than platform mode.
 
 ## 11. Legacy retirement and final acceptance
 

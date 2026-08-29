@@ -1,6 +1,23 @@
 # 数据源状态（Data Sources）
 
 PEAD 基本面分析 + 交易 Agent 的数据源清单：已接入并测试通过 vs 待接入。
+
+## PEAD 官方披露验收（当前持仓范围）
+
+财报发布稿（earnings release）、监管定期披露（美国发行人的 10-Q/10-K；外国发行人的 6-K/20-F/40-F）及电话会纪要必须围绕同一个“最新已发布业绩事件”分别验收。文件存在不等于通过：每一份还会校验发行主体、财年季度、披露日期、文档角色、SEC form/accession、来源和正文质量。
+
+本轮范围由 `config/pead.yaml` 的 `targets` 唯一决定：`GOOG NVDA SKHY TSM ASML COHR LRCX LITE AVGO MRVL MSFT`。`observe` 或历史资产不会扩大本次验收范围。
+
+在隔离目录运行（不会写入生产文档库，也不会触发 LLM、PEAD 打分、Chief、下单或交易）：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data pead-official-disclosure-coverage \
+  --db /private/tmp/pead-official-disclosures.sqlite \
+  --artifact-root /private/tmp/pead-official-disclosures \
+  --report-path /private/tmp/pead-official-disclosures/PEAD_OFFICIAL_DISCLOSURE_ACCEPTANCE.md
+```
+
+命令在标准输出返回机器可读 JSON（完整 roster、每家公司事件和三种角色的状态），同时写入 Markdown 报告。退出码 `0` 表示所有三件套均已通过；`2` 表示至少一个角色仍为 `missing`、`not_yet_available`、`unreachable` 或 `quarantined`，需要查看报告中的原因码。隔离目录应使用新的空目录，便于人工复核本轮下载内容。
 最后更新：2026-08-23（+ 非结构化准入、真实回填与质量发布闸）。
 
 ## 如何测试

@@ -301,6 +301,41 @@ _PEAD_CORE_STATEMENT_LINES = frozenset({
     "CapEx", "Free Cash Flow", "Total Debt",
 })
 
+# A company-quarter is publishable only as one coherent report package.  These
+# are the persistent source rows required to support the PEAD statement view and
+# the standard income-statement, cash-flow and balance-sheet queries.  Margins
+# and free cash flow are intentionally derived from these raw rows; P/E remains
+# a runtime calculation because ticker price is not persistent data.
+_FINANCIAL_SOURCE_PRIORITY = (
+    "defeatbeta_stock_statement",
+    "yfinance_financials",
+    "sec_companyfacts",
+    "company_disclosures",
+)
+_PACKAGE_QUARTER_METRICS = frozenset({
+    "financial.revenue.gaap",
+    "financial.gross_profit.gaap",
+    "financial.operating_income.gaap",
+    "financial.net_income.gaap",
+    "financial.cash_from_operations.gaap",
+    "financial.capex.gaap",
+})
+_PACKAGE_INSTANT_METRICS = frozenset({
+    "financial.cash_and_equivalents.gaap",
+    "financial.total_assets.gaap",
+    "financial.total_liabilities.gaap",
+    "financial.stockholders_equity.gaap",
+})
+_PACKAGE_EPS_METRICS = (
+    "financial.eps.diluted.adr",
+    "financial.eps.diluted.market_adjusted",
+    "financial.eps.diluted.gaap",
+)
+_PACKAGE_DEBT_METRICS = (
+    "financial.total_debt.gaap",
+    "financial.total_debt.provider_reported",
+)
+
 
 def _reconcile_statements(legacy: FinancialStatements | None,
                           platform: FinancialStatements | None) -> dict:
@@ -383,9 +418,92 @@ def _reconcile_statements(legacy: FinancialStatements | None,
     }
 
 
-def _structured_statements(symbol: str, products) -> tuple[FinancialStatements | None,
-                                                            list[dict]]:
-    """Assemble the legacy statement DTO from selected persistent observations."""
+def _complete_report_package(repository, *, source_id: str | tuple[str, ...],
+                             symbol: str) -> dict | None:
+    """Return the newest complete quarterly package from one source or official bundle.
+
+    This deliberately reads all raw accepted observations from one source rather
+    than invoking metric-level source selection.  A field-level selector can
+    make an incomplete issuer release look complete by borrowing cash-flow or
+    balance-sheet facts from another provider, which is not an auditable report
+    package.  The sole two-source exception is the explicitly requested SEC +
+    issuer-IR official disclosure bundle, whose selected source is retained for
+    every field.
+    """
+    source_ids = (source_id,) if isinstance(source_id, str) else tuple(source_id)
+    rows = []
+    for current_source in source_ids:
+        rows.extend(repository.observations(
+            dataset_id="company_financials", source_id=current_source,
+            entity_id=symbol.upper(), latest_only=True, accepted_only=True,
+            limit=100_000))
+    if not rows:
+        return None
+    by_period: dict[str, list[dict]] = {}
+    for row in rows:
+        period = str(row.get("period") or "")
+        if period:
+            by_period.setdefault(period, []).append(row)
+    # Do not declare an older complete quarter current merely because the source
+    # also exposed a newer, incomplete quarter.  That was the AMZN failure mode:
+    # Q1 looked complete while the released Q2 had only EPS in Yahoo.
+    latest_observed_period = max(by_period)
+    for period in (latest_observed_period,):
+        package = by_period[period]
+        def choose(metric: str, basis: str) -> dict | None:
+            for current_source in source_ids:
+                matches = [row for row in package if row["source_id"] == current_source
+                           and row["metric_id"] == metric
+                           and row.get("period_basis") == basis]
+                if matches:
+                    return max(matches, key=lambda row: (row["known_at"], row["fetched_at"]))
+            return None
+
+        selected = {}
+        for metric in _PACKAGE_QUARTER_METRICS:
+            selected[metric] = choose(metric, "quarter")
+        for metric in _PACKAGE_INSTANT_METRICS:
+            selected[metric] = choose(metric, "instant")
+        eps_present = next(((metric, choose(metric, "quarter"))
+                            for metric in _PACKAGE_EPS_METRICS
+                            if choose(metric, "quarter")), None)
+        debt_present = next(((metric, choose(metric, "instant"))
+                             for metric in _PACKAGE_DEBT_METRICS
+                             if choose(metric, "instant")), None)
+        missing = sorted(metric for metric, row in selected.items() if row is None)
+        if eps_present is None:
+            missing.append("financial.eps.diluted.(adr|market_adjusted|gaap)")
+        if debt_present is None:
+            missing.append("financial.total_debt.(gaap|provider_reported)")
+        selected_rows = [row for row in selected.values() if row]
+        if eps_present:
+            selected_rows.append(eps_present[1])
+        if debt_present:
+            selected_rows.append(debt_present[1])
+        currencies = {str(row.get("currency") or "") for row in selected_rows
+                      if row.get("metric_id") not in _PACKAGE_EPS_METRICS}
+        if not currencies or "" in currencies or len(currencies) != 1:
+            missing.append("reporting_currency")
+        if not missing:
+            return {
+                "source_id": source_ids[0] if len(source_ids) == 1 else "official_disclosure_bundle",
+                "source_ids": source_ids, "period": period,
+                "currency": next(iter(currencies)), "eps_metric": eps_present[0],
+                "debt_metric": debt_present[0], "rows": selected_rows,
+                "source_by_metric": {metric: row["source_id"]
+                                     for metric, row in selected.items() if row} | {
+                    eps_present[0]: eps_present[1]["source_id"],
+                    debt_present[0]: debt_present[1]["source_id"],
+                },
+            }
+    return None
+
+
+def _structured_statements(symbol: str, products, *, source_id: str = "",
+                           report_period: str = "",
+                           source_by_metric: dict[str, str] | None = None) -> tuple[FinancialStatements | None,
+                                                                                        list[dict]]:
+    """Assemble the legacy statement DTO from one selected report-package source."""
     metrics = (
         "financial.revenue.gaap", "financial.gross_profit.gaap",
         "financial.operating_income.gaap", "financial.net_income.gaap",
@@ -397,9 +515,14 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
     )
     by_metric: dict[str, list[dict]] = {}
     for metric in metrics:
-        result = products.metric_series(
-            metric=metric, entity=symbol, dataset="company_financials", quality="loose")
-        by_metric[metric] = result["rows"]
+        kwargs = {"metric": metric, "entity": symbol,
+                  "dataset": "company_financials", "quality": "loose"}
+        selected_source = (source_by_metric or {}).get(metric, source_id)
+        if selected_source:
+            kwargs["source_id"] = selected_source
+        result = products.metric_series(**kwargs)
+        by_metric[metric] = [row for row in result["rows"]
+                             if not report_period or str(row.get("period") or "") <= report_period]
 
     def ordered(metric: str, basis: str) -> list[dict]:
         rows = [row for row in by_metric.get(metric, [])
@@ -409,7 +532,7 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
     revenue_rows = ordered("financial.revenue.gaap", "quarter")
     if not revenue_rows:
         return None, []
-    period = revenue_rows[0]["period"]
+    period = report_period or revenue_rows[0]["period"]
     currency = str(revenue_rows[0].get("currency") or "")
     money_unit = "$M" if currency in {"", "USD"} else f"{currency} M"
     eps_unit = "$" if currency in {"", "USD"} else f"{currency}/share"
@@ -481,10 +604,24 @@ def _structured_statements(symbol: str, products) -> tuple[FinancialStatements |
         list(used.values()))
 
 
-def _platform_fetch(symbol: str, *, consumer: str) -> FundamentalData:
-    """Refresh official facts, then assemble only the persistent statement section."""
-    from ..data.products import DataProducts
-    from ..data.runtime import get_platform_structured_repository
+def _company_disclosure_scope(symbol: str) -> dict:
+    """Return the event anchor required by the bounded IR/release adapter."""
+    from . import earnings_calendar
+
+    latest = earnings_calendar.last_print(symbol, back_days=120)
+    if latest and latest.quarter and latest.year:
+        return {"near": latest.date.isoformat(),
+                "period": f"Q{latest.quarter} FY{latest.year}"}
+    return {}
+
+
+def _refresh_report_package(repository, *, symbol: str) -> dict | None:
+    """Ingest only until the first source yields one complete financial package.
+
+    The ordered source list is a data-policy boundary, not merely a display
+    preference.  It prevents a later SEC/IR pull from overriding or silently
+    patching a usable defeatbeta/yfinance report package.
+    """
     from ..structured import FetchRequest, IngestionPipeline
     from .sources.company_financials import (
         CompanyDisclosuresAdapter,
@@ -493,74 +630,83 @@ def _platform_fetch(symbol: str, *, consumer: str) -> FundamentalData:
         YFinanceFinancialStatementsAdapter,
     )
 
+    adapters = {
+        "defeatbeta_stock_statement": DefeatBetaStatementAdapter,
+        "yfinance_financials": YFinanceFinancialStatementsAdapter,
+        "sec_companyfacts": SECCompanyFactsAdapter,
+        "company_disclosures": CompanyDisclosuresAdapter,
+    }
+    pipeline = IngestionPipeline(repository)
+    for source_id in _FINANCIAL_SOURCE_PRIORITY:
+        scope = {"since": "2025-01-01"}
+        if source_id == "sec_companyfacts":
+            scope = {"since": "2020-01-01"}
+        elif source_id == "company_disclosures":
+            scope = _company_disclosure_scope(symbol)
+            if not scope:
+                log.info("fundamentals: no issuer-release event anchor for %s", symbol)
+                continue
+        try:
+            result = pipeline.run(
+                adapters[source_id](),
+                FetchRequest(source_id=source_id, dataset_id="company_financials",
+                             entities=[symbol], query_scope=scope))
+        except Exception as exc:
+            log.warning("fundamentals: %s refresh failed for %s: %s", source_id, symbol, exc)
+            continue
+        package = _complete_report_package(
+            repository, source_id=source_id, symbol=symbol)
+        if package is not None:
+            package["ingestion_status"] = result.get("status", "")
+            return package
+        # SEC Facts and a dated issuer release are both official disclosures.
+        # They may be composed only after neither one supplied a complete package
+        # alone (for example AMZN's SEC facts supply the balance sheet while the
+        # issuer release supplies the explicitly reported CapEx).  Provider rows
+        # are never mixed into this official bundle.
+        if source_id == "company_disclosures":
+            package = _complete_report_package(
+                repository,
+                source_id=("sec_companyfacts", "company_disclosures"),
+                symbol=symbol)
+            if package is not None:
+                package["ingestion_status"] = result.get("status", "")
+                return package
+        log.info("fundamentals: %s did not provide a complete report package for %s (%s)",
+                 source_id, symbol, result.get("status", "unknown"))
+    return None
+
+
+def _platform_fetch(symbol: str, *, consumer: str) -> FundamentalData:
+    """Refresh and select one governed company-financial report package."""
+    from ..data.products import DataProducts
+    from ..data.runtime import get_platform_structured_repository
+
     data = _legacy_fetch(symbol, include_statements=False)
     repository = get_platform_structured_repository()
     try:
-        if symbol.upper() in {"TSM", "AMZN"}:
-            # TSM and AMZN have issuer-verified earnings-release parsers.  Their
-            # timely reported quarter is the primary statement anchor.
-            from . import earnings_calendar
-
-            latest = earnings_calendar.last_print(symbol, back_days=120)
-            if latest and latest.quarter and latest.year:
-                try:
-                    IngestionPipeline(repository).run(
-                        CompanyDisclosuresAdapter(), FetchRequest(
-                            source_id="company_disclosures", dataset_id="company_financials",
-                            entities=[symbol], query_scope={
-                                "near": latest.date.isoformat(),
-                                "period": f"Q{latest.quarter} FY{latest.year}",
-                            }))
-                except Exception as exc:  # retained accepted release rows remain queryable
-                    log.warning("fundamentals: official release refresh failed for %s: %s",
-                                symbol, exc)
-        try:
-            IngestionPipeline(repository).run(
-                SECCompanyFactsAdapter(), FetchRequest(
-                    source_id="sec_companyfacts", dataset_id="company_financials",
-                    entities=[symbol], query_scope={"since": "2020-01-01"}))
-        except Exception as exc:  # existing accepted rows remain queryable during outages
-            log.warning("fundamentals: SEC structured refresh failed for %s: %s", symbol, exc)
-        if symbol.upper() == "TSM":
-            # TSM's official release is the authoritative same-quarter P&L anchor.
-            # Its governed Yahoo-statement mirror fills only the release's omitted
-            # CFO, CapEx, cash and debt fields in the same native TWD reporting
-            # currency.  No ADR or FX conversion is introduced here.
-            try:
-                IngestionPipeline(repository).run(
-                    DefeatBetaStatementAdapter(), FetchRequest(
-                        source_id="defeatbeta_stock_statement",
-                        dataset_id="company_financials", entities=[symbol],
-                        query_scope={"since": "2020-01-01"}))
-            except Exception as exc:  # existing accepted mirror rows remain queryable
-                log.warning("fundamentals: TSM statement mirror refresh failed for %s: %s",
-                            symbol, exc)
-        else:
-            from ..config import entity_meta
-
-            if entity_meta(symbol).get("market") == "US":
-                # This is the same low-frequency statement endpoint that legacy
-                # fundamentals used, now persisted with a governed raw slice.  It
-                # is a fallback only: SEC/issuer rows still win on equal periods.
-                try:
-                    IngestionPipeline(repository).run(
-                        YFinanceFinancialStatementsAdapter(), FetchRequest(
-                            source_id="yfinance_financials",
-                            dataset_id="company_financials", entities=[symbol],
-                            query_scope={"since": "2025-01-01"}))
-                except Exception as exc:  # historical accepted rows stay queryable
-                    log.warning("fundamentals: yfinance statement fallback failed for %s: %s",
-                                symbol, exc)
+        package = _refresh_report_package(repository, symbol=symbol.upper())
         products = DataProducts(structured_repository=repository)
-        data.statements, rows = _structured_statements(symbol.upper(), products)
+        if package is None:
+            data.statements, rows = None, []
+        else:
+            data.statements, rows = _structured_statements(
+                symbol.upper(), products, source_id=package["source_id"],
+                report_period=package["period"],
+                source_by_metric=package.get("source_by_metric"))
         if data.statements is None:
             data.notes.append("structured quarterly statements unavailable")
         elif rows:
             manifest = products.snapshot_manifest(
                 consumer=consumer, purpose=f"fundamentals:{symbol.upper()}",
                 as_of=datetime.now(timezone.utc), rows=rows,
-                metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
+                metadata={"symbol": symbol.upper(), "runtime_inputs_included": False,
+                          "report_package_source": package["source_id"],
+                          "report_package_sources": list(package.get("source_ids") or []),
+                          "report_package_period": package["period"]})
             data.notes.append(f"structured snapshot {manifest['snapshot_id']}")
+            data.notes.append(
+                f"structured report package {package['source_id']}:{package['period']}")
         return data
     finally:
         repository.close()

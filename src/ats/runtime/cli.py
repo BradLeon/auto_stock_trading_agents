@@ -1233,9 +1233,51 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
              release_file: str = "", kind: str = "", operation: str = "",
              window: int = 0, entities: str = "", period: str = "",
              migration_domain: str = "", source_db: str = "", target_db: str = "",
-             backup_root: str = "") -> int:
+             backup_root: str = "", report_path: str = "") -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
+
+    if action == "pead-official-disclosure-coverage":
+        import os
+        from pathlib import Path
+
+        from ..data.pead_official_disclosures import (
+            active_pead_targets,
+            collect_active_packages,
+            write_acceptance_report,
+        )
+        from ..memory.store import TradingMemory
+
+        if not db_path or not artifact_root:
+            raise ValueError(
+                "pead-official-disclosure-coverage requires --db and --artifact-root "
+                "so acceptance cannot write production documents")
+        previous_root = os.environ.get("ATS_DOCS_ROOT")
+        os.environ["ATS_DOCS_ROOT"] = artifact_root
+        store = TradingMemory(db_path)
+        try:
+            packages = collect_active_packages(store=store)
+            report = write_acceptance_report(
+                report_path or Path(artifact_root) / "PEAD_OFFICIAL_DISCLOSURE_ACCEPTANCE.md",
+                packages)
+            result = {
+                "scope": active_pead_targets(),
+                "packages": [package.as_dict() for package in packages],
+                "report": str(report),
+                "complete": all(package.complete for package in packages),
+                "side_effects": {
+                    "llm": 0, "pead_scoring": 0, "chief": 0,
+                    "broker_orders": 0, "trades": 0,
+                },
+            }
+        finally:
+            store.conn.close()
+            if previous_root is None:
+                os.environ.pop("ATS_DOCS_ROOT", None)
+            else:
+                os.environ["ATS_DOCS_ROOT"] = previous_root
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["complete"] else 2
 
     if action == "config":
         from ..data.catalog import load_data_catalog
@@ -1286,6 +1328,21 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["eligible"] else 2
+
+    if action == "release-assessment":
+        from ..data.migration import default_data_db_path, load_migration_inventory
+        from ..data.release_assessment import assess_consumer_release
+
+        if not consumer:
+            raise ValueError("release-assessment requires --consumer")
+        policy = load_migration_inventory().consumer_cutover
+        result = assess_consumer_release(
+            consumer=consumer, data_db=target_db or default_data_db_path(),
+            minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
+            maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["platform_eligible"] else 2
 
     if action == "migrate":
         from ..data.migration import (
@@ -1341,9 +1398,25 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["reconciled"] else 2
 
-    from ..data_platform import get_data_products
+    if action == "financial-package-check":
+        from ..data.financial_release import company_financial_release_check
+        from ..data.runtime import get_platform_structured_repository
 
-    products = get_data_products()
+        repository = get_platform_structured_repository()
+        try:
+            result = company_financial_release_check(
+                repository, entities=[entity] if entity else None)
+        finally:
+            repository.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["ready"] else 2
+
+    # Interactive data commands are the governed platform surface.  The
+    # compatibility facade defaults to the legacy SQLite path, which made the
+    # CLI report ``no_coverage`` even when var/data.sqlite had accepted rows.
+    from ..data.products import get_platform_data_products
+
+    products = get_platform_data_products()
     if db_path and action not in {
             "validate-source", "ingest", "release-check", "publish", "rollback"}:
         from ..data_platform import DataProducts
@@ -1401,24 +1474,10 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                     result = manager.rollback(
                         kind=target_kind, target_id=target_id, mode=mode) if apply else preview
                 else:
-                    check = manager.check_consumer(target_id, mode=mode) \
+                    check = manager.check_consumer(
+                        target_id, mode=mode, data_db=target_db or None) \
                         if target_kind == "consumer" else manager.check_source(
                             target_id, mode=mode)
-                    if target_kind == "consumer" and mode == "platform":
-                        from ..data.cutover import consumer_cutover_status
-                        from ..data.migration import default_data_db_path, load_migration_inventory
-
-                        policy = load_migration_inventory().consumer_cutover
-                        stability = consumer_cutover_status(
-                            consumer=target_id, data_db=target_db or default_data_db_path(),
-                            minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
-                            maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
-                        )
-                        check["checks"].append({
-                            "check": "stability_observation", "passed": stability["eligible"],
-                            "detail": stability["reason"], "status": stability,
-                        })
-                        check["ready"] = bool(check["ready"] and stability["eligible"])
                     result = manager.apply(check) if action == "publish" and apply else {
                         **check, "applied": False,
                         "operation": "publish_preview" if action == "publish"
@@ -1546,7 +1605,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "cutover-check", "cutover-status", "describe", "availability", "examples", "releases",
+        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "cutover-check", "cutover-status", "release-assessment", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",
@@ -1576,6 +1635,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="ingest/release/repair-company-financials: 隔离或目标 SQLite 路径")
     data.add_argument("--artifact-root", default="",
                       help="ingest: 隔离 raw artifact 目录（需同时 --db）；migrate structured: 目标 artifact 目录")
+    data.add_argument("--report-path", default="",
+                      help="pead-official-disclosure-coverage: Markdown 验收报告输出路径")
     data.add_argument("--force", action="store_true",
                       help="ingest: 仅用于隔离验收，绕过 legacy source mode")
     data.add_argument("--apply", action="store_true",
@@ -1583,7 +1644,7 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--mode", choices=["legacy", "shadow", "platform", "fallback"],
                       default="platform", help="publish/rollback 目标模式")
     data.add_argument("--consumer", default="",
-                      help="publish/rollback/cutover-check/cutover-status: 消费者 ID；与 --source 二选一")
+                      help="publish/rollback/cutover-check/cutover-status/release-assessment: 消费者 ID；与 --source 二选一")
     data.add_argument("--release-file", default="",
                       help="发布覆盖层路径，默认 var/structured_data/releases.yaml")
     data.add_argument("--migration-domain", default="",
@@ -1733,7 +1794,8 @@ def main(argv: list[str] | None = None) -> int:
                         operation=args.operation, window=args.window,
                         entities=args.entities, period=args.period,
                         migration_domain=args.migration_domain, source_db=args.source_db,
-                        target_db=args.target_db, backup_root=args.backup_root)
+                        target_db=args.target_db, backup_root=args.backup_root,
+                        report_path=args.report_path)
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":

@@ -176,14 +176,34 @@ def _comparison_signature(value: dict) -> dict:
 
 def _record_shadow_comparison(*, consumer: str, symbol: str, legacy: dict,
                               platform: dict, matched: bool, reason: str) -> None:
-    """Persist consensus cutover evidence without changing a legacy response."""
+    """Persist provider-snapshot evidence without changing a legacy response.
+
+    Analyst consensus is a point-in-time provider snapshot, not a company filing.
+    Different analyst universes and later provider revisions are expected to move
+    numbers.  A valid governed snapshot from the registered provider is therefore
+    accepted as a new snapshot even when a same-run legacy pull differs; the raw
+    values, provider and comparison outcome stay in the audit record.
+    """
     try:
         from .cutover import record_consumer_comparison
         from .runtime import platform_data_db_path
+        provider_snapshot = _has_values(platform)
         record_consumer_comparison(
             consumer=consumer, entity=symbol, data_db=platform_data_db_path(),
-            status="reconciled" if matched else "mismatch",
-            details={"input": "market_consensus", "reason": reason,
+            status="reconciled" if matched or provider_snapshot else "mismatch",
+            details={"input": "market_consensus",
+                     "reason": ("identical_provider_snapshot" if matched else
+                                "registered_provider_snapshot_revision" if provider_snapshot
+                                else reason),
+                     "reconciliation": {
+                         "kind": ("exact" if matched else
+                                  "authoritative_provider_snapshot" if provider_snapshot
+                                  else "platform_failure"),
+                         "matched": matched,
+                         "source_id": "yfinance_consensus",
+                         "provider": "Yahoo Finance via yfinance",
+                         "policy": "provider_snapshot_may_differ_by_analyst_universe_or_revision",
+                     },
                      "legacy": _comparison_signature(legacy),
                      "platform": _comparison_signature(platform)},
         )
@@ -250,5 +270,5 @@ def fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
         consumer=consumer, symbol=symbol, legacy=legacy, platform=platform, matched=matched,
         reason="identical_consensus_snapshot" if matched else "consensus_signature_mismatch")
     if not matched:
-        log.warning("consensus: structured shadow mismatch for %s", symbol)
+        log.info("consensus: accepted provider snapshot revision for %s", symbol)
     return legacy

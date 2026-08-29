@@ -141,13 +141,17 @@ def test_release_check_blocks_no_run_and_runtime_source(tmp_path):
 
 
 def test_trendforce_current_source_uses_unified_batch_and_raw_artifact(tmp_path):
-    from ats.data.sources.trendforce import TrendForceDRAMAdapter
+    from ats.data.sources.trendforce import TrendForceDRAMAdapter, parse_html
     from ats.structured import FetchRequest, IngestionPipeline
 
     html = """
     DRAM Contract Price (2H Aug) Last Update 2026-08-25
     <table><tr><td>DDR5 8GB SO-DIMM</td><td>10</td><td>8</td>
     <td>9.25</td><td>&#9650; 2.00 %</td><td>0</td></tr></table>
+    <table><tr><td>DDR4 16Gb 2Gx8</td><td>10</td><td>8</td>
+    <td>8.25</td><td>&#9650; 1.00 %</td><td>0</td></tr></table>
+    <table><tr><td>DDR4 8Gb 1Gx8</td><td>10</td><td>8</td>
+    <td>7.25</td><td>&#9650; 0.50 %</td><td>0</td></tr></table>
     """
 
     class _Response:
@@ -171,12 +175,27 @@ def test_trendforce_current_source_uses_unified_batch_and_raw_artifact(tmp_path)
             client=_Client(), clock=lambda: datetime(2026, 8, 26, tzinfo=timezone.utc)),
         FetchRequest(source_id="trendforce_dram",
                      dataset_id="industry_dram_contract_price"))
-    assert result["status"] == "succeeded"
+    assert result["status"] == "succeeded" and result["accepted"] == 3
     row = repository.observations(dataset_id="industry_dram_contract_price")[0]
     assert row["value"] == 9.25
+    assert row["period"] == "2026-08-16"
+    assert row["period_start"] == "2026-08-16"
+    assert row["period_end"] == "2026-08-31"
+    assert json.loads(row["raw_payload"])["source_session"] == "2H Aug"
     artifact = repository.lineage(row["observation_id"])["artifact"]
     assert artifact["media_type"] == "text/html"
     assert artifact["source_version"] == "fixture-v1"
+
+    session, updated, points = parse_html(html.replace("2H Aug", "2H Jun"))
+    assert (session, updated, points[0].period) == ("2H Jun", "2026-08-25", "2026-06-16")
+
+    from ats.data_platform import DataProducts
+
+    selected = DataProducts(structured_repository=repository).metric_series(
+        metric="industry.dram_contract_price", entity="DRAM_CONTRACT_PRICE",
+        dataset="industry_dram_contract_price")
+    assert {json.loads(row["dimensions_json"])["item"] for row in selected["rows"]} == {
+        "DDR5 8GB SO-DIMM", "DDR4 16Gb 2Gx8", "DDR4 8Gb 1Gx8"}
 
 
 def test_dynamic_catalog_changes_with_actual_observations(tmp_path):
@@ -217,10 +236,10 @@ def test_data_products_and_cli_expose_same_dynamic_catalog(tmp_path, monkeypatch
     # and assert CLI serialization against the product object it receives.
     expected = DataDiscovery(repository, catalog=catalog).catalog_view()
     monkeypatch.setattr(products, "structured_catalog", lambda: expected)
-    import ats.data_platform as platform
+    import ats.data.products as products_module
     from ats.runtime.cli import run_data
 
-    monkeypatch.setattr(platform, "get_data_products", lambda: products)
+    monkeypatch.setattr(products_module, "get_platform_data_products", lambda: products)
     assert run_data("catalog") == 0
     assert json.loads(capsys.readouterr().out) == expected
 

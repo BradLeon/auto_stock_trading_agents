@@ -61,6 +61,19 @@ _FIELD_TO_METRIC = {field: metric for metric, fields in XBRL_CONCEPTS.items()
                     for field in fields}
 _FIELD_PRIORITY = {field: rank for fields in XBRL_CONCEPTS.values()
                    for rank, field in enumerate(fields)}
+_DERIVED_INPUT_CONCEPTS = {
+    "us-gaap:CostOfGoodsAndServicesSold": "cost_of_revenue",
+    "ifrs-full:CostOfSales": "cost_of_revenue",
+    "us-gaap:LiabilitiesAndStockholdersEquity": "liabilities_and_equity",
+    "us-gaap:LongTermDebtCurrent": "debt_current",
+    "us-gaap:LongTermDebtNoncurrent": "debt_noncurrent",
+}
+_DERIVED_INPUT_BASIS_METRIC = {
+    "cost_of_revenue": "financial.revenue.gaap",
+    "liabilities_and_equity": "financial.total_assets.gaap",
+    "debt_current": "financial.total_debt.gaap",
+    "debt_noncurrent": "financial.total_debt.gaap",
+}
 _INSTANT_METRICS = {
     "financial.cash_and_equivalents.gaap", "financial.inventory.gaap",
     "financial.total_debt.gaap", "financial.long_term_debt.gaap",
@@ -322,15 +335,18 @@ def _currency_and_unit(metric: str, xbrl_unit: str) -> tuple[str, str]:
 def parse_companyfacts(payload: dict, *, symbol: str) -> list[NativeRecord]:
     """Normalize only mapped concepts and retain the newest filed fact per period."""
     candidates: dict[tuple[str, str, str], tuple[tuple, NativeRecord]] = {}
+    derivation_inputs: dict[tuple[str, str, str], tuple[tuple, NativeRecord]] = {}
     facts_root = payload.get("facts", {}) if isinstance(payload, dict) else {}
     for taxonomy in ("us-gaap", "ifrs-full"):
         for concept, body in (facts_root.get(taxonomy, {}) or {}).items():
             provider_field = f"{taxonomy}:{concept}"
             metric = _FIELD_TO_METRIC.get(provider_field)
-            if not metric:
+            input_role = _DERIVED_INPUT_CONCEPTS.get(provider_field)
+            if not metric and not input_role:
                 continue
             for xbrl_unit, facts in (body.get("units", {}) or {}).items():
-                currency, unit = _currency_and_unit(metric, xbrl_unit)
+                record_metric = metric or _DERIVED_INPUT_BASIS_METRIC[input_role]
+                currency, unit = _currency_and_unit(record_metric, xbrl_unit)
                 for fact in facts or []:
                     if str(fact.get("form", "")).upper() not in {
                             "10-Q", "10-K", "20-F", "40-F", "6-K"}:
@@ -338,7 +354,7 @@ def parse_companyfacts(payload: dict, *, symbol: str) -> list[NativeRecord]:
                     end = str(fact.get("end", ""))[:10]
                     if not end or fact.get("val") is None:
                         continue
-                    basis = _period_basis(metric, fact)
+                    basis = _period_basis(record_metric, fact)
                     if basis == "unsupported":
                         continue
                     published = _aware_date(str(fact.get("filed", "")))
@@ -362,15 +378,74 @@ def parse_companyfacts(payload: dict, *, symbol: str) -> list[NativeRecord]:
                             "xbrl_unit": xbrl_unit, "fact": fact,
                             "fiscal_label": fiscal_label,
                         })
-                    key = (metric, end, basis)
-                    rank = (_FIELD_PRIORITY[provider_field],
+                    rank = (_FIELD_PRIORITY.get(provider_field, 999),
                             str(fact.get("filed", "")), str(fact.get("accn", "")))
-                    current = candidates.get(key)
-                    # Lower alias priority wins; within one concept the latest filing wins.
-                    if current is None or rank[0] < current[0][0] or (
-                            rank[0] == current[0][0] and rank[1:] > current[0][1:]):
-                        candidates[key] = (rank, record)
-    return sorted((record for _, record in candidates.values()),
+                    if metric:
+                        key = (metric, end, basis)
+                        current = candidates.get(key)
+                        # Lower alias priority wins; within one concept the latest filing wins.
+                        if current is None or rank[0] < current[0][0] or (
+                                rank[0] == current[0][0] and rank[1:] > current[0][1:]):
+                            candidates[key] = (rank, record)
+                    else:
+                        key = (input_role, end, basis)
+                        current = derivation_inputs.get(key)
+                        if current is None or rank[1:] > current[0][1:]:
+                            derivation_inputs[key] = (rank, record)
+
+    selected = {key: record for key, (_, record) in candidates.items()}
+    inputs = {key: record for key, (_, record) in derivation_inputs.items()}
+
+    def add_derived(*, metric: str, provider_field: str, period: str,
+                    basis: str, left: NativeRecord, right: NativeRecord,
+                    value: float, calculation: str) -> None:
+        if (metric, period, basis) in selected:
+            return
+        published = [item for item in (left.published_at, right.published_at) if item]
+        selected[(metric, period, basis)] = NativeRecord(
+            entity_id=symbol, provider_field=provider_field, period=period, value=value,
+            unit=left.unit, currency=left.currency, period_basis=basis, adjustment="gaap",
+            period_start=left.period_start, period_end=period,
+            published_at=max(published) if published else None,
+            dimensions={"taxonomy": "us-gaap", "statement_scope": "reported",
+                        "derivation": "official_xbrl_components"},
+            raw={"calculation": calculation,
+                 "left": {"provider_field": left.provider_field, "value": left.value,
+                          "fact": left.raw.get("fact", {})},
+                 "right": {"provider_field": right.provider_field, "value": right.value,
+                           "fact": right.raw.get("fact", {})}})
+
+    for (_, period, basis), revenue in list(selected.items()):
+        if revenue.provider_field not in XBRL_CONCEPTS["financial.revenue.gaap"]:
+            continue
+        cost = inputs.get(("cost_of_revenue", period, basis))
+        if cost and revenue.currency == cost.currency:
+            add_derived(metric="financial.gross_profit.gaap",
+                        provider_field="derived:revenue_minus_cost_of_revenue",
+                        period=period, basis=basis, left=revenue, right=cost,
+                        value=revenue.value - cost.value,
+                        calculation="revenue - cost_of_revenue")
+    for (_, period, basis), total in list(inputs.items()):
+        if total.provider_field != "us-gaap:LiabilitiesAndStockholdersEquity":
+            continue
+        equity = selected.get(("financial.stockholders_equity.gaap", period, basis))
+        if equity and total.currency == equity.currency:
+            add_derived(metric="financial.total_liabilities.gaap",
+                        provider_field="derived:liabilities_and_equity_minus_equity",
+                        period=period, basis=basis, left=total, right=equity,
+                        value=total.value - equity.value,
+                        calculation="liabilities_and_equity - stockholders_equity")
+    for (role, period, basis), current in list(inputs.items()):
+        if role != "debt_current":
+            continue
+        noncurrent = inputs.get(("debt_noncurrent", period, basis))
+        if noncurrent and current.currency == noncurrent.currency:
+            add_derived(metric="financial.total_debt.gaap",
+                        provider_field="derived:current_debt_plus_noncurrent_debt",
+                        period=period, basis=basis, left=current, right=noncurrent,
+                        value=current.value + noncurrent.value,
+                        calculation="long_term_debt_current + long_term_debt_noncurrent")
+    return sorted(selected.values(),
                   key=lambda row: (row.period, row.provider_field, row.period_basis))
 
 

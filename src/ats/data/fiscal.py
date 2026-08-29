@@ -14,6 +14,7 @@ Two jobs:
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 from html import unescape
 
 _WORD_Q = {"first": 1, "second": 2, "third": 3, "fourth": 4}
@@ -130,6 +131,8 @@ _RELEASE_FY_WORD_Q = re.compile(
     r"(first|second|third|fourth)\s+quarter\b",
     re.I,
 )
+_RELEASE_QUARTER_ENDED_DATE = re.compile(
+    r"\bquarter\s+ended\s+([A-Za-z]+)\s+(\d{1,2}),?\s+(20\d\d)\b", re.I)
 
 
 def _release_period_candidates(text: str, source: str = "") -> list[tuple[int, int, int, str]]:
@@ -201,7 +204,8 @@ def _release_period_candidates(text: str, source: str = "") -> list[tuple[int, i
     return candidates
 
 
-def verify_release_period(label: str, text: str, source: str = "") -> tuple[bool, str]:
+def verify_release_period(label: str, text: str, source: str = "", *,
+                          event_date: str | date | None = None) -> tuple[bool, str]:
     """Verify that an earnings release's *primary* reporting period matches ``label``.
 
     Unlike transcript verification, this considers every explicit period and gives
@@ -214,6 +218,27 @@ def verify_release_period(label: str, text: str, source: str = "") -> tuple[bool
         return (False, f"目标季未在 fiscal_label='{label}' 中完整编码，period unresolved")
     candidates = _release_period_candidates(text, source)
     if not candidates:
+        # Some issuers name the result only by its period end-date.  That date
+        # cannot encode a fiscal quarter by itself, so use it only with the
+        # independently resolved release event and a bounded report-to-release lag.
+        if event_date:
+            raw_event_date = event_date.isoformat() if isinstance(event_date, date) else str(event_date)
+            try:
+                released = date.fromisoformat(raw_event_date[:10])
+            except ValueError:
+                released = None
+            target_year, _target_quarter = target
+            normalized = unescape(f"{source or ''}\n{text or ''}")[:12000]
+            for match in _RELEASE_QUARTER_ENDED_DATE.finditer(normalized):
+                try:
+                    ended = datetime.strptime(
+                        f"{match.group(1)} {match.group(2)} {match.group(3)}",
+                        "%B %d %Y").date()
+                except ValueError:
+                    continue
+                interval = (released - ended).days if released else -1
+                if ended.year == target_year and 0 <= interval <= 100:
+                    return (True, f"主报告期按期末日与事件绑定核对通过：{ended.isoformat()}")
         return (False, "earnings release 主报告期无法识别，period unresolved")
     ty, tq = target
     target_scores = [score for year, quarter, score, _ in candidates

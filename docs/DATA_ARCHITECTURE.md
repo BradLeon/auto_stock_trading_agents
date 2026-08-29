@@ -62,6 +62,7 @@ src/ats/data/
 - [台湾/韩国区域序列验收](STRUCTURED_DATA_REGIONAL_VALIDATION_2026-08-25.md)
 - [官方财务与 stock_statement 验收](STRUCTURED_DATA_FINANCIAL_VALIDATION_2026-08-25.md)
 - [市场 Consensus 验收](STRUCTURED_DATA_CONSENSUS_VALIDATION_2026-08-25.md)
+- [TrendForce DRAM 合约价验收](STRUCTURED_DATA_TRENDFORCE_VALIDATION_2026-08-29.md)
 - [融资、估值与 ARR 证据验收](STRUCTURED_DATA_EVIDENCE_VALIDATION_2026-08-25.md)
 - [六个数据集五维质量与数量对账](STRUCTURED_DATA_QUALITY_VALIDATION_2026-08-25.md)
 - [消费者迁移、Workflow 回归与离线重放](STRUCTURED_DATA_CONSUMER_VALIDATION_2026-08-25.md)
@@ -107,7 +108,7 @@ src/ats/data/
 
 首期有意保留以下边界：
 
-- ticker 股价、OHLCV、订单簿、期权链、Greeks 和 IV 被明确归类为 runtime/excluded，不迁移、不回填，也不写 structured artifact。
+- ticker 股价、OHLCV、订单簿、期权链、Greeks 和 IV 被明确归类为 runtime/excluded，不迁移、不回填，也不写 structured artifact；其实现归属 `ats.data.runtime.market_data` 与 `ats.data.runtime.options`，旧 `ats.data.market_data` / `ats.data.options` 仅为兼容模块别名。
 - 持久来源按保留策略保存完整响应或可复现查询切片；受来源条款约束的页面只保存必要内容和血缘。
 - 普通新闻遵循分级采集：全部保存标题/摘要，只有达到正文增强阈值的新闻保存全文；这是成本策略，不是数据旁路。
 - 全文检索为本地确定性文本检索，尚未引入向量索引；知识图谱和图数据库仍按真实查询瓶颈决定是否建设。

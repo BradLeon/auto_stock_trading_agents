@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Iterable
+from typing import Callable, Iterable
 
 from . import fiscal
 
@@ -128,3 +128,75 @@ def resolve_event(entity: str, evidence: Iterable[EventEvidence], *,
     )
     return EventResolution(
         "conflict" if conflicts else "resolved", event, tuple(conflicts), items)
+
+
+def resolve_latest_event(
+        entity: str, *, store=None, as_of: date | None = None,
+        config_label: str = "", calendar_fetcher: Callable | None = None,
+        transcript_fetcher: Callable | None = None) -> EventResolution:
+    """Resolve and persist the latest *disclosed* earnings event for one issuer.
+
+    A calendar date without reported actuals is only an estimate; it must never
+    create an event key that allows a future filing or a previous-quarter asset
+    to be admitted.  When calendar metadata lacks a fiscal period, a structured
+    transcript may supply it, but the two dates still pass the normal conflict
+    check in :func:`resolve_event`.
+
+    Fetchers are injectable so operational orchestration and deterministic tests
+    use exactly the same resolver without a network dependency.
+    """
+    from ..config import canonical_entity, load_pead_config
+
+    canonical = canonical_entity(entity).upper()
+    if not config_label:
+        config_label = load_pead_config(canonical).fiscal_label
+    if calendar_fetcher is None:
+        from .runtime import earnings as calendar
+
+        calendar_fetcher = calendar.last_print
+    if transcript_fetcher is None:
+        from . import defeatbeta
+
+        transcript_fetcher = defeatbeta.fetch
+
+    evidence = [EventEvidence("entity", reference=f"entity:{canonical}")]
+    calendar_has_period = False
+    try:
+        print_ = calendar_fetcher(canonical, as_of=as_of, back_days=150)
+    except Exception:  # noqa: BLE001 - event state must be explicit, not fatal
+        print_ = None
+    if print_ is not None and getattr(print_, "reported", False):
+        calendar_has_period = bool(
+            getattr(print_, "year", None) and getattr(print_, "quarter", None))
+        evidence.append(EventEvidence(
+            "calendar", getattr(print_, "date", None),
+            getattr(print_, "year", None), getattr(print_, "quarter", None),
+            reference="calendar:" + ",".join(getattr(print_, "sources", ()) or (canonical,)),
+        ))
+
+    # A configured label is evidence only when it names a complete fiscal period;
+    # placeholders such as TODO are retained in no automatic event decision.
+    if fiscal.parse_label(config_label) != (None, None):
+        evidence.append(EventEvidence(
+            "config", fiscal_label=config_label, reference=f"config:{canonical}"))
+
+    # The structured transcript is a period-bearing fallback, never a substitute
+    # for an actual calendar date.  It is useful for fiscal-year-offset issuers
+    # whose calendar provider omits quarter/year (the MRVL regression).
+    if not calendar_has_period:
+        try:
+            transcript = transcript_fetcher(canonical)
+        except Exception:  # noqa: BLE001 - provider availability is reflected in outcome
+            transcript = None
+        if transcript is not None:
+            evidence.append(EventEvidence(
+                "transcript", getattr(transcript, "report_date", None),
+                getattr(transcript, "fiscal_year", None),
+                getattr(transcript, "fiscal_quarter", None),
+                reference=f"transcript:{canonical}",
+            ))
+
+    result = resolve_event(canonical, evidence)
+    if store is not None:
+        store.save_earnings_event(result)
+    return result

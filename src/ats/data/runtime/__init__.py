@@ -5,7 +5,7 @@ from .repository import (
     platform_artifact_root,
     platform_data_db_path,
 )
-from . import earnings, macro
+from . import earnings, macro, market_data, options
 
 __all__ = [
     "get_platform_structured_repository",
@@ -13,4 +13,6 @@ __all__ = [
     "platform_data_db_path",
     "earnings",
     "macro",
+    "market_data",
+    "options",
 ]

@@ -36,6 +36,15 @@ def _age_hours(value: str, now: datetime) -> float | None:
     return max(0.0, (now - parsed.astimezone(timezone.utc)).total_seconds() / 3600)
 
 
+def _age_days(value: str, now: datetime) -> float | None:
+    """Return age of an ISO observation period, when a dataset requests it."""
+    try:
+        parsed = datetime.fromisoformat(value[:10]).replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, (now - parsed).total_seconds() / 86400)
+
+
 def _dimension(status: str, **details) -> dict[str, Any]:
     return {"status": status, **details}
 
@@ -112,8 +121,15 @@ def build_quality_report(repository, *, dataset_id: str | None = None,
         latest_known_at = max((row.get("known_at", "") for row in rows), default="")
         age = _age_hours(latest_known_at, now)
         maximum_age = quality.get("freshness_hours_max")
+        maximum_period_lag = quality.get("source_period_lag_days_max")
+        latest_period_end = max((str(row.get("period_end") or row.get("period") or "")
+                                 for row in rows), default="")
+        period_lag = _age_days(latest_period_end, now) if maximum_period_lag is not None else None
         if age is None:
             freshness_status = "no_data"
+        elif maximum_period_lag is not None and (
+                period_lag is None or period_lag > float(maximum_period_lag)):
+            freshness_status = "stale"
         elif maximum_age is None:
             freshness_status = "not_configured"
         elif age > float(maximum_age):
@@ -122,7 +138,10 @@ def build_quality_report(repository, *, dataset_id: str | None = None,
             freshness_status = "passed"
         freshness = _dimension(
             freshness_status, latest_known_at=latest_known_at or None,
-            age_hours=age, maximum_hours=maximum_age)
+            age_hours=age, maximum_hours=maximum_age,
+            latest_period_end=latest_period_end or None,
+            source_period_lag_days=period_lag,
+            source_period_lag_days_max=maximum_period_lag)
 
         pending = repository.pending_mappings(status="pending", limit=1_000_000)
         pending = [row for row in pending if row["dataset_id"] == current_id]

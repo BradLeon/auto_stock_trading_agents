@@ -109,17 +109,23 @@ config/
 
 数据层 repository 的边界为：结构化观测、原始 artifact、文档元数据/版本/分块、证据、ingestion runs。交易、决策、性能和 agent run 仍属于 memory。
 
-### 5.1 既有 yfinance 报表读取作为受管财务 fallback
+### 5.1 受管公司财务来源链与完整报表合同
 
-`yfinance` 已由 legacy fundamentals 路径用于公司三表读取，因此将其迁入
-`company_financials` 不构成新增外部 Provider。新 adapter 只读取低频的季度/年度财务
+`defeatbeta` 与 `yfinance` 已由既有读取路径使用；将它们和 SEC Facts、发行人 IR 收敛到
+`company_financials` 不构成新增外部 Provider。每个 adapter 只读取低频的季度/年度财务
 报表行，保留原始响应、查询时点、实体、报告期、币种和 source version；它不得读取或
 写入价格、OHLCV、订单簿、期权链或其他 runtime 市场数据。
 
-选择优先级仍为发行人披露/SEC Facts 优先、defeatbeta 镜像与 yfinance 只补缺。对于缺少
-XBRL 标准概念（例如当季毛利或 CapEx）或仅有全年/YTD 而消费者要求离散季度的美国发行人，
-受管 yfinance 行可以被选择；跨源冲突必须保留并阻断严格质量模式。每次发布前，需在隔离库
-验证当前报告期、核心字段、币种/单位、与既有路径的差异及退回 legacy 的行为。
+按可达性依次尝试 `defeatbeta_stock_statement`、`yfinance_financials`、`sec_companyfacts`、
+`company_disclosures`。来源链在第一个提供同一实体、同一报告期、可确认币种/单位且覆盖收入、
+毛利、营业利润、净利润、EPS、经营现金流、CapEx、现金、总资产、总负债、权益及债务的报表包
+后停止；毛利率、营业利润率和 FCF 由该报表包派生。任何缺失、陈旧、单位不明或不完整的前序
+来源才允许进入下一来源。不同 Provider 的结果只可保留作审计，不得逐字段拼接成一个“官方”报表。
+唯一受控例外是：SEC Facts 与同实体、同报告期、同币种的发行人 IR 单独均不完整时，可组成
+`official_disclosure_bundle`；每个字段仍须记录其 SEC 或 IR artifact，任何由 XBRL 输入推导的行
+都必须可重算。Provider 数据须标记为 Provider-reported，SEC/IR 数据才可标记为 official。P/E 不持久化，因为价格属于
+runtime，只以已发布 EPS 和即时价格按需计算。每次发布前，需在隔离库及当前 platform target
+验证当前报告期、核心字段、币种/单位、来源停止条件、与既有路径的差异及退回 legacy 的行为。
 
 ### 5.2 财务语义的边界：ADR EPS 与债务
 
@@ -163,7 +169,7 @@ CapEx 在持久层以正投资额保存，在 PEAD DTO 中按现金流出显示�
 1. 建立 legacy inventory：每个旧模块、配置 alias、表、artifact 目录、文档索引及其 Agent/Workflow 调用方都要有稳定 ID、owner、数据量、血缘和回退路径。
 2. 为每个数据域建立可续跑迁移单元。结构化迁移必须同时覆盖历史 `measurement_*` 表和已经受管但仍位于旧 SQLite 的 `structured_*` 表；观测以 dataset/entity/period/vintage 为单位，文档以 document/version/chunk/alias/evidence 为单位，artifact 以内容 hash 与关联记录为单位。
 3. 每个迁移单元在写入前备份或保留原始资产，写入后比较计数、主键、内容 hash、期间范围、版本/known_at、血缘和质量状态。差异必须显式记录，不得静默跳过。
-4. 新 repository 完成读写验收后，先采用 shadow 双读；一个 consumer 在至少一个自然日有一次无 mismatch 的对账记录，且 coverage、时效和输出验收通过后，才可切至 platform。任一异常可按 source/consumer 独立切回 legacy。
+4. 新 repository 完成读写验收后，数据源/数据集的发布只以数据层证据决定：原始 artifact/lineage、实体与报告期、单位/币种、完整性、时效、质量状态，以及原始指标到派生指标的可复算对账均须通过。数据源/数据集发布不得等待 Agent/Workflow shadow 观察期。消费者仅在其自身读取实现或输出逻辑变更时执行一次即时 smoke/regression；其结果是调用方回归证据，不是数据层发布门。旧路径的网络错误不能替代数据质量证据；任一异常可按 source/consumer 独立切回 legacy。
 5. 全部调用方迁移且达到上述发布门后，删除旧实现和 alias。删除前冻结 legacy 路径的新写入，并保留可恢复的备份、迁移 manifest 和发布记录。
 
 Workflow 的 task projection、claim proposal/assessment、PEAD/Sector/Chain/Chief 的报告和运行结果是
@@ -180,7 +186,7 @@ Workflow 的 task projection、claim proposal/assessment、PEAD/Sector/Chain/Chi
 - [memory.store 拆分影响旧 Workflow] → 先按 repository 接口隔离代码所有权，保留旧表和回退路径，完成消费者迁移后再做物理迁移。
 - [目录重排导致导入路径破坏] → 为所有公开旧路径保留兼容模块，加入全仓库 import smoke test，并设置弃用日志而非立即删除。
 - [新目录过度设计] → 第一阶段只建立边界和 facade，只有在现有职责明确时才移动文件；不为未来的向量库或知识图谱预建无用抽象。
-- [yfinance 报表语义与 SEC 不一致] → 限制为 fallback、保留 provider 原始行与报告期，按 source/period 比较；缺失币种、时点不清或跨源冲突时不在严格查询中发布。
+- [Provider 报表语义与 SEC/IR 不一致] → 选择单一完整报表包、保留 provider 原始行与报告期和身份；缺失币种、时点不清、核心字段不全或同包内口径不明时继续后续来源，不把 Provider 字段混合后发布。SEC Facts 与同期间 IR 的受控官方包必须保留字段级来源且通过原始到派生重算。
 
 ## Migration Plan
 

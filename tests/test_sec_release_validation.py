@@ -127,3 +127,23 @@ def test_release_period_binding_prefers_6k_current_period_table_column():
     ok, reason = fiscal.verify_release_period("Q2 FY2026", body)
 
     assert ok, reason
+
+
+def test_release_period_binding_accepts_end_date_with_resolved_event_anchor():
+    body = "Lam Research reports financial results for the quarter ended June 28, 2026."
+
+    ok, reason = fiscal.verify_release_period(
+        "Q4 FY2026", body, event_date="2026-07-29")
+
+    assert ok
+    assert "期末日与事件绑定" in reason
+
+
+def test_release_period_binding_rejects_stale_end_date_even_in_same_fiscal_year():
+    body = "Lam Research reports financial results for the quarter ended March 29, 2026."
+
+    ok, reason = fiscal.verify_release_period(
+        "Q4 FY2026", body, event_date="2026-07-29")
+
+    assert not ok
+    assert "period unresolved" in reason

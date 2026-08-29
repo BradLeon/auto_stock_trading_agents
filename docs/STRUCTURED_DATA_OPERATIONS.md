@@ -39,18 +39,24 @@ ats_cli data config
 | `health` / `coverage` / `quality` | 查看健康和五维质量门 | 否 | 否 | 否 |
 | `conflicts` / `pending-mappings` | 查看冲突和未映射字段 | 否 | 否 | 否 |
 | `ingestion-history` / `artifacts` | 审计运行历史和原始资产用量 | 否 | 否 | 否 |
+| `financial-package-check` | 对 `company_financials` 的验收样本做原始数据、字段血缘、报告期、币种、完整性、时效与派生重算检查；不读取任何 consumer | 否 | 否 | 否 |
 | `release-check` | 读取最近运行与质量门，判断能否发布 | 否 | 否 | 否 |
 | `publish` | 默认预览；带 `--apply` 才写 release overlay | 否 | 仅 `--apply` 写 overlay | 仅 `--apply` |
 | `rollback` | 默认预览；带 `--apply` 才切回指定 mode | 否 | 仅 `--apply` 写 overlay | 仅 `--apply` |
 | `releases` | 查看当前 overlay 和审计历史 | 否 | 否 | 否 |
 | `cutover-check` | 对账某 consumer 的 legacy/data 数据，并写审计记录 | 否 | 仅写 data DB 审计记录 | 否 |
 | `cutover-status` | 查看消费者是否已有一日无 mismatch 的对账资格 | 否 | 否 | 否 |
+| `release-assessment` | 将消费者证据分类为等价、治理升级、平台回归或编排边界 | 否 | 否 | 否 |
 
 ### 2.2 使用者命令
 
 `catalog`、`describe`、`availability`、`examples`、`series`、`derive`、`cross-section` 和 `lineage` 属于数据消费面，统一在使用手册说明。本手册仅在发布验收时引用 `catalog` 检查最终可见状态，不重复讲查询语法。`data series` 是使用者取数命令，不是采集或运维命令。
 
-消费者切换的完整状态与执行示例见[数据层消费者切换状态](DATA_CUTOVER_STATUS.md)。`publish --consumer ... --mode platform` 会额外检查 `config/data/migration.yaml` 中定义的成功对账与 mismatch 门；当 `cutover-status` 未满足时必须保持 `shadow`、`legacy` 或 `fallback`。
+消费者切换的完整状态与执行示例见[数据层消费者切换状态](DATA_CUTOVER_STATUS.md)。
+`cutover-check`、`cutover-status`、`release-assessment` 与 `publish --consumer` 是**消费者读取路径**
+的独立变更流程；它们不会阻塞 source 或 dataset 的数据发布。相反，`financial-package-check` 和
+`release-check --source` 是数据发布流程：只检查原始 artifact/lineage、实体/报告期、单位/币种、
+完整性、时效、质量以及原始到派生计算的可复算性。
 
 特别说明：`data sources` 是运维机器清单，不证明数据库中已有可查询数据；使用者应通过 `data catalog` 和 `data availability` 判断实际覆盖。
 
@@ -97,6 +103,7 @@ export ATS_STRUCTURED_RELEASE_FILE="/absolute/path/to/releases.yaml"
 | `config/data/unstructured.yaml` | 文档类型、正文策略、准入和保留规则 | 否 |
 | `config/data/providers/*.yaml` | Provider endpoint、预算、所需环境变量名 | 否 |
 | `config/data/schedules.yaml` | 触发意图和预算；不直接创建 scheduler job | 否 |
+| `config/data/consumer_release.yaml` | 消费者分类、直接输入、发布门与编排边界验收要求 | 否 |
 | `config/pead.yaml`、`config/sectors/` | Workflow 消费者配置 | 视现有约定 |
 
 密钥仍只能放在 `.env` 或部署环境。
@@ -513,7 +520,17 @@ ats_cli data ingest --source sec_companyfacts --entity MSFT
 ats_cli data release-check --source sec_companyfacts --mode platform
 ```
 
-`release-check` 预期结构：
+公司财务先执行数据专项预检（不访问 Agent、Workflow 或 `data_consumer_cutover_records`）：
+
+```bash
+ats_cli data financial-package-check
+```
+
+预期 `ready=true`，且每个验收实体显示已选报表包、`source_by_metric`、报告期、币种、artifact
+血缘、时效、资产负债表质量和派生 XBRL 重算结果。AMZN 等 SEC Facts 与发行人披露各自不完整的
+场景会显式显示 `official_disclosure_bundle`；它只允许 SEC + 同期发行人 IR，并保留字段级来源。
+
+随后执行 source 发布预检：
 
 ```json
 {
@@ -525,7 +542,7 @@ ats_cli data release-check --source sec_companyfacts --mode platform
   "checks": [
     {"check": "registration", "passed": true},
     {"check": "latest_ingestion", "passed": true},
-    {"check": "quality:company_financials", "passed": true}
+    {"check": "data_package:company_financials", "passed": true}
   ]
 }
 ```
@@ -537,7 +554,9 @@ ats_cli data publish --source sec_companyfacts --mode platform --apply
 ats_cli data releases
 ```
 
-发布 source 只控制统一采集路径，不会自动切换 PEAD/Sector consumer。consumer 发布必须独立完成 reconciliation。
+发布 source 只控制统一采集路径，不会自动切换 PEAD/Sector consumer；消费者仍可保持 `shadow` 或
+`legacy`。消费者 reconciliation 只在其自身读取实现或输出逻辑变更时作为该调用方的回归证据，
+不是已经通过数据专项预检的数据发布门。
 
 PEAD 的 shadow 对账不是简单比较两份 DTO 的字节是否一致。相同期间的 Revenue、毛利率、营业
 利润率、Net Income、Diluted EPS、CapEx 与 Free Cash Flow 数值不同，或 platform 缺少任一
@@ -575,6 +594,11 @@ ats_cli data quality --dataset regional_kr_exports --format markdown
 ```bash
 ats_cli data cutover-status --consumer sector_agent
 ats_cli data cutover-status --consumer macro_agent
+
+# 先解释真实差异。ConnectError + 非空 platform 结果会是待独立复核的 governed_upgrade，
+# 而不是自动当作平台回归或自动放行。
+ats_cli data release-assessment --consumer sector_agent
+ats_cli data release-assessment --consumer macro_agent
 
 # 本阶段仍预期 ready=false：checked-in config 明确保持 shadow，等待 10.5 的发布审批。
 ats_cli data release-check --consumer sector_agent --mode platform
@@ -625,6 +649,7 @@ ats_cli data releases
 | 命令 | 默认行为 | 写操作条件 |
 |---|---|---|
 | `release-check --source ID --mode platform` | 只读预检 | 永不写 |
+| `release-assessment --consumer ID` | 只读消费者证据分类；编排边界返回不可发布是预期 | 永不写 |
 | `publish --source ID --mode MODE` | 只读预览 | 加 `--apply` 才写 overlay |
 | `publish --consumer ID --mode MODE` | 只读预览 | 加 `--apply`，且 consumer 已在 checked-in config 获准 |
 | `rollback --source/--consumer ID --mode legacy` | 只读预览 | 加 `--apply` 才写 overlay |
@@ -665,7 +690,7 @@ ats_cli data releases
 | `defeatbeta_stock_statement` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_financials` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_consensus` | `current_partial` | `persistent` | `market_consensus` |
-| `accepted_document_evidence` | `current_partial` | `persistent` | `private_company_events` |
+| `accepted_document_evidence` | `deferred` | `persistent` | `private_company_events` |
 | `ibkr_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_options` | `runtime_excluded` | `runtime` | — |
@@ -678,7 +703,7 @@ ats_cli data releases
 | `industry_dram_contract_price` | `current_partial` |
 | `company_financials` | `current_partial` |
 | `market_consensus` | `current_partial` |
-| `private_company_events` | `current_partial` |
+| `private_company_events` | `deferred` |
 
 ### 10.2 请求预算与 checked-in mode
 
@@ -686,19 +711,25 @@ ats_cli data releases
 |---|---|---|---|---|---|
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |
 | `kr_ecos_exports` | `regional_kr_exports` | `current_partial` | `platform` | monthly | concurrency 1；分页 10；30s |
-| `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `legacy` | monthly | concurrency 1；每次 1 请求；30s |
+| `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `shadow` | monthly | concurrency 1；每次 1 请求；30s；页面半月 session 与发布日期均需验收 |
 | `sec_companyfacts` | `company_financials` | `current_partial` | `shadow` | event | concurrency 1；内部上限 5 req/s；30s |
 | `company_disclosures` | `company_financials` | `current_partial` | `shadow` | event | 当前覆盖 TSM 与 AMZN 的官方季度 earnings release；TSM 直接保存普通股 `TWD/share` 与 ADR `USD/ADR` EPS；concurrency 1；内部上限 1 req/s；30s |
 | `defeatbeta_stock_statement` | `company_financials` | `current_partial` | `shadow` | snapshot | 每实体一个 query slice；60s |
 | `yfinance_financials` | `company_financials` | `current_partial` | `shadow` | event | 仅季度/年度三表 fallback；不请求或保存股价、OHLCV、期权或 quote metadata；concurrency 1；间隔至少 1s；30s |
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |
-| `accepted_document_evidence` | `private_company_events` | `current_partial` | `platform` | event | 本地 accepted 文档增量 |
+| `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
 
 外部 Provider 没有可验证 QPS 时一律写 `unknown`；表中的数字是内部保护预算，不是 Provider 承诺。SEC 还必须遵守其当前 fair-access 政策并发送描述性 User-Agent。
 
 财务对账前先检查语义：`LongTermDebt` 是长期债务，不能与镜像 `total_debt` 直接比较；存在 `DebtLongtermAndShorttermCombinedAmount` 时才以它作为 SEC 总债务。Provider `total_debt` 必须作为 `financial.total_debt.provider_reported` 独立保存；除非已确认其不包含租赁或其他额外项目，否则不得把它加入官方总债务的自动对账。TSM 的普通股 `TWD/share` 与 ADR `USD/ADR`、Provider 的拆股调整 EPS 与原始 EPS也都属于不同指标。看到此类差异应先运行血缘查询并核对 `metric_id`、`unit`、`currency`、`adjustment` 和原始 XBRL concept/Provider 字段，不得通过放宽 reconciliation 阈值掩盖。
 
 以下来源是 `runtime_excluded`，不得创建结构化采集或回填任务：`ibkr_market`、`yfinance_market`、`yfinance_options`、`thetadata_options`。
+
+`private_company_events` 也不在本轮采集范围：它是保留 schema 的 `deferred` persistent dataset，
+当前正确状态为 `no_coverage`，而不是失败或零值。不得为了消除该状态而制造事件 observation。
+
+TrendForce DRAM 的一次真实采集、期间标准化与发布验收记录见
+[TrendForce DRAM 数据验证（2026-08-29）](STRUCTURED_DATA_TRENDFORCE_VALIDATION_2026-08-29.md)。
 
 ## 11. 质量门和发布标准
 
@@ -708,9 +739,9 @@ ats_cli data releases
 |---|---|
 | 注册 | `validate-source.valid=true` |
 | 隔离采集 | 计数可对账；代表样本的实体、期间、单位和原始来源人工正确 |
-| 质量 | dataset `overall_status=passed` |
+| 质量 | 一般 dataset 使用 `overall_status=passed`；`company_financials` 使用 `financial-package-check.ready=true`，避免历史范围外冲突阻塞当前验收报表包 |
 | 最近运行 | `succeeded` 或 `no_change` |
-| 发布预检 | `release-check.ready=true` |
+| 发布预检 | `financial-package-check.ready=true`（公司财务）及 `release-check --source ID --mode platform` 的 `ready=true` |
 | 显式发布 | overlay history 产生记录，实际 mode 可查 |
 | 回滚 | mode 恢复且历史数据、其他来源和消费者不受影响 |
 

@@ -97,7 +97,8 @@ def test_role_docs_expose_executable_lifecycle_and_dynamic_discovery() -> None:
 
     for token in (
         "src/ats/structured/runtime_registry.py", "data validate-source",
-        "data ingest", "data release-check", "data publish", "data rollback",
+        "data ingest", "data financial-package-check", "data release-check", "data publish", "data rollback",
+        "data release-assessment", "config/data/consumer_release.yaml",
         "var/structured_data/releases.yaml", "--apply",
     ):
         assert token in operations
@@ -128,6 +129,6 @@ def test_cli_help_lists_documented_structured_actions(capsys) -> None:
     output = capsys.readouterr().out
     for action in (
         "catalog", "describe", "availability", "examples", "validate-source",
-        "ingest", "release-check", "publish", "rollback", "derive", "cross-section",
+        "ingest", "financial-package-check", "release-check", "release-assessment", "publish", "rollback", "derive", "cross-section",
     ):
         assert action in output

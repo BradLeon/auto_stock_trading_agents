@@ -38,8 +38,8 @@
 | `market_consensus` | 每次真实抓取的市场预期 snapshot | EPS、收入预测、目标价、评级分布 |
 | `regional_tw_exports` | 台湾 IC/电子零组件月度出口 | 官方水平值及平台派生 yoy/mom |
 | `regional_kr_exports` | 韩国半导体出口月度序列 | 官方水平/指数及平台派生 yoy/mom |
-| `industry_dram_contract_price` | DRAM 合约价研究序列 | 合约价格及版本 |
-| `private_company_events` | 经证据核验的私营公司事件 | 融资、估值、ARR |
+| `industry_dram_contract_price` | TrendForce 公开页面的 DRAM 半月合约价 session | 合约价格、页面发布日期、原始 session 与版本 |
+| `private_company_events` | 经证据核验的私营公司事件（本轮暂不采集） | 融资、估值、ARR；当前应为 `no_coverage` |
 
 这张表表示“系统注册了这些能力”，不表示当前数据库已经有数据。实际覆盖必须通过 `catalog` 和 `availability` 查询。
 

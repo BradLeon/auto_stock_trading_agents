@@ -95,23 +95,31 @@ version: 1
 
 # Checked-in baseline only. Runtime resolution order is:
 # environment override -> release overlay -> this section -> default_mode.
-# `sources` controls whether unified ingestion may run. `consumers` controls read paths.
-# Changing a source to platform does not automatically switch a consumer.
+# `sources` controls governed data availability and data-layer release. `consumers`
+# controls read paths only.  Source release is based on raw/derived data validation;
+# it does not wait for Agent or Workflow shadow observation.
 feature_flags:
   default_mode: legacy
   sources:
     tw_mof_exports: platform
     kr_ecos_exports: platform
-    trendforce_dram: legacy
+    # This source may collect in the governed layer after isolated acceptance;
+    # its own data-only release check still decides whether it can be published.
+    trendforce_dram: shadow
     sec_companyfacts: shadow
     company_disclosures: shadow
     defeatbeta_stock_statement: shadow
     yfinance_financials: shadow
     yfinance_consensus: shadow
-    accepted_document_evidence: platform
+    # Private-company events are intentionally deferred and therefore do not
+    # enter the persistent layer until a later, separately approved scope.
+    accepted_document_evidence: legacy
   consumers:
-    chain_regional: platform
-    pead_consensus: platform
+    # 10.5: consumer-specific platform evidence is incomplete.  Keep both
+    # routes in shadow until release-assessment passes; a source-level platform
+    # mode or a historic default must not bypass the consumer release gate.
+    chain_regional: shadow
+    pead_consensus: shadow
     # 10.2 validation starts in shadow.  Do not regard the historical platform
     # default as a consumer release until inputs and report output are reconciled.
     sector_consensus: shadow
@@ -243,7 +251,9 @@ sources:
     retention: normalized_snapshot
     internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
   accepted_document_evidence:
-    catalog_status: current_partial
+    # The evidence workbench remains available for a future approved source, but
+    # no private-company event acquisition or publication is scheduled now.
+    catalog_status: deferred
     persistence: persistent
     provider: accepted document asset layer
     adapter: document_numeric_evidence
@@ -325,16 +335,25 @@ datasets:
       coverage_ratio_min: 0.66
       require_period_continuity: false
       freshness_hours_max: 1488
+      # TrendForce labels a half-month market session (for example ``2H Jun``).
+      # A page can be fresh while the disclosed session is old; check both.
+      source_period_lag_days_max: 90
     rollback_on: [parse_failed, stale]
   company_financials:
     catalog_status: current_partial
     entity_registry: config/entities.yaml
     coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
     expected_cadence: quarterly_or_issuer_period
-    # A timely, issuer-reported quarterly release wins where it is accepted;
-    # Company Facts remains primary for the rest of the covered universe.
-    primary_sources: [company_disclosures, sec_companyfacts]
-    fallback_sources: [defeatbeta_stock_statement, yfinance_financials]
+    # One report package is selected per entity/reporting period.  The ingestion
+    # chain stops at the first complete package, in this availability order;
+    # later Provider sources are not used to patch individual fields into that
+    # package.  The only controlled exception is an `official_disclosure_bundle`
+    # made from SEC Facts + same-entity/same-period issuer IR when both official
+    # sources are individually incomplete; each selected field retains its source
+    # artifact and any XBRL derivation must be reproducible.  This package-level
+    # data gate does not read consumer shadow records or Workflow memory.
+    primary_sources: [defeatbeta_stock_statement, yfinance_financials, sec_companyfacts, company_disclosures]
+    fallback_sources: []
     core_metrics:
       - financial.revenue.gaap
       - financial.gross_profit.gaap
@@ -390,7 +409,9 @@ datasets:
     acceptance_samples: [AMZN, MSFT, KLAC, TSM]
     rollback_on: [target_period_conflict, future_leakage, stale, shadow_mismatch]
   private_company_events:
-    catalog_status: current_partial
+    # Intentionally empty in this release.  Keep its schema and review workflow
+    # registered so a later approved source can be added without a data-model fork.
+    catalog_status: deferred
     entities: [OPENAI, ANTHROPIC]
     expected_cadence: event
     primary_sources: [accepted_document_evidence]
@@ -480,6 +501,7 @@ provider_mappings:
     "ifrs-full:Revenue": financial.revenue.gaap
     "us-gaap:GrossProfit": financial.gross_profit.gaap
     "ifrs-full:GrossProfit": financial.gross_profit.gaap
+    "derived:revenue_minus_cost_of_revenue": financial.gross_profit.gaap
     "us-gaap:OperatingIncomeLoss": financial.operating_income.gaap
     "ifrs-full:ProfitLossFromOperatingActivities": financial.operating_income.gaap
     "us-gaap:NetIncomeLoss": financial.net_income.gaap
@@ -502,6 +524,8 @@ provider_mappings:
     "ifrs-full:Assets": financial.total_assets.gaap
     "us-gaap:Liabilities": financial.total_liabilities.gaap
     "ifrs-full:Liabilities": financial.total_liabilities.gaap
+    "derived:liabilities_and_equity_minus_equity": financial.total_liabilities.gaap
+    "derived:current_debt_plus_noncurrent_debt": financial.total_debt.gaap
     "us-gaap:StockholdersEquity": financial.stockholders_equity.gaap
     "ifrs-full:Equity": financial.stockholders_equity.gaap
   defeatbeta_stock_statement:

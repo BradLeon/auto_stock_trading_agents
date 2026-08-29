@@ -78,19 +78,37 @@
 - **THEN** 系统 SHALL 路由到 runtime 查询入口
 - **AND** 结构化持久层 SHALL NOT 因该请求新增观测版本或原始行情 artifact
 
-### Requirement: 既有财务报表 Provider 可以受管为低频 fallback
+### Requirement: 公司财务必须采用可审计的单一报表包来源链
 
-系统 MAY 将已由 legacy 公司基本面读取使用的 Provider 提升为受管的
-`company_financials` fallback，以补足发行人披露、SEC Facts 或既有镜像来源未覆盖的
-报告期或字段。该 fallback SHALL 仅发布具有实体、报告期、币种/单位、原始响应和
-查询血缘的低频财务报表行；发行人披露与 SEC Facts SHALL 保持优先级。此规定 SHALL NOT
+系统 SHALL 将已由既有公司基本面读取使用的 defeatbeta、yfinance、SEC Facts 与发行人 IR
+统一为 `company_financials` 的低频来源链，并按 `defeatbeta_stock_statement`、
+`yfinance_financials`、`sec_companyfacts`、`company_disclosures` 的顺序尝试。来源链 SHALL
+在首个为同一实体/报告期提供完整财务报表合同的来源后停止；完整合同至少包含收入、毛利、
+营业利润、净利润、EPS、经营现金流、CapEx、现金、总资产、总负债、权益与债务，且实体、
+报告期和币种/单位均可确认。毛利率、营业利润率、FCF SHALL 从该合同派生；P/E SHALL 由受管
+EPS 和 runtime 价格按需计算而不得持久化。系统 SHALL NOT 将不同 Provider 的字段静默拼接为同一
+报表，Provider 行 SHALL 保留 Provider 身份且不得冒充发行人原始披露。只有当 SEC Facts 与同一
+实体、报告期、币种的发行人 IR 单独均不完整时，系统 MAY 组成带字段级 artifact lineage 和原始到派生
+重算证据的 `official_disclosure_bundle`。此规定 SHALL NOT
 授权持久化 yfinance 或其他 Provider 的股票行情、OHLCV、订单簿、期权链或其他 runtime 输入。
 
-#### Scenario: 美国发行人缺失当季财务字段
+#### Scenario: 前序来源提供完整当季财务报表
 
-- **WHEN** SEC Facts 或镜像来源无法提供美国发行人当前离散季度的核心财务字段
-- **THEN** 系统 MAY 以受管的既有财务报表 Provider 采集该字段，并保存原始来源、报告期、币种、known-at 与质量状态
-- **AND** 查询选择 SHALL 保持官方来源优先，并将跨源不一致记录为可审计冲突
+- **WHEN** defeatbeta 或 yfinance 为美国发行人提供可确认的当季完整财务报表合同
+- **THEN** 系统 SHALL 仅发布该来源的报表包、原始来源、报告期、币种、known-at 与质量状态
+- **AND** SHALL NOT 再抓取或以 SEC/IR 字段补齐该报表包
+
+#### Scenario: 前序来源无法提供完整财务报表
+
+- **WHEN** 当前来源缺少核心字段、报告期不正确、单位不明或质量门失败
+- **THEN** 系统 SHALL 记录该来源失败原因并尝试来源链中的下一个来源
+- **AND** 只有来源链全部失败时，`company_financials` 才可保持无覆盖或不可发布
+
+#### Scenario: 两个官方披露共同构成完整报表
+
+- **WHEN** SEC Facts 与同实体、同报告期的发行人 IR 分别缺少不同核心字段，且二者均有可追溯官方 artifact
+- **THEN** 系统 MAY 发布字段级标记为 `official_disclosure_bundle` 的报表包
+- **AND** 系统 SHALL NOT 将任何 Provider 字段混入该包，并 SHALL 对所有派生 XBRL 行执行可复算校验
 
 #### Scenario: 财务 fallback 无法确认币种或报告期
 
@@ -170,19 +188,33 @@
 
 ### Requirement: Agent 与 Workflow 必须以可回滚方式切换到统一数据产品
 
-系统 SHALL 盘点所有直接导入 legacy 数据模块或读取 legacy 数据表/路径的 Agent 与 Workflow，并为每个消费者记录目标数据产品、依赖 source、shadow 对账结果、发布 mode 和回滚入口。消费者 SHALL 仅在相关数据迁移和端到端回归通过后切换为 platform；未切换或对账失败的消费者 SHALL 保持 legacy 或 fallback，而不是由全局开关强制升级。
+系统 SHALL 盘点所有直接导入 legacy 数据模块或读取 legacy 数据表/路径的 Agent 与 Workflow，并为每个直接数据消费者记录目标数据产品、依赖 source、回滚入口和必要的调用方 smoke/regression。数据源或数据集是否可发布 SHALL 只由原始 artifact/lineage、实体/报告期、单位/币种、完整性、时效、质量状态以及原始到派生计算的可复算对账决定，SHALL NOT 等待 Agent/Workflow shadow 对账或稳定观察期。消费者只有在自身读取实现或输出逻辑变更时才需要即时回归；未切换的消费者 SHALL 保持原 mode，而不是阻塞其依赖数据源的发布。只编排上游结果、只触发采集或只写入 Workflow memory 的入口 SHALL NOT 被伪装成数据发布门。
 
 #### Scenario: 切换一个 Workflow 消费者
 
-- **WHEN** 一个 Workflow 已完成所依赖 source 的数据迁移与 shadow 对账
-- **THEN** 运维者 SHALL 能为该消费者独立发布到 platform mode
-- **AND** 系统 SHALL 保存新旧输出、关键输入血缘和发布记录，以支持问题追溯和回滚
+- **WHEN** 一个 Workflow 的读取实现或输出逻辑发生切换
+- **THEN** 运维者 SHALL 运行一次即时 smoke/regression，并能为该消费者独立回滚
+- **AND** 该回归 SHALL NOT 阻塞已通过数据完整性、血缘和派生计算对账的数据源/数据集发布
 
 #### Scenario: 消费者输出发生不一致
 
 - **WHEN** shadow 或端到端验收发现新路径与 legacy 路径的结果超出该消费者定义的容差
 - **THEN** 系统 SHALL 阻止该消费者发布到 platform
 - **AND** SHALL 提供将该消费者切回 legacy 或 fallback 的独立回滚路径
+
+#### Scenario: 旧路径暂时不可达而新路径有可追溯数据
+
+- **WHEN** shadow 比较发现 legacy 请求失败、过期或返回空结果，而平台路径返回候选数据
+- **THEN** 系统 SHALL 记录 legacy 失败的错误、平台实体/期间/单位/经济定义、artifact 或 observation lineage、known-at/freshness 及下游输出差异
+- **AND** 只有这些证据证明平台结果完整、正确且不劣于旧路径时，评估 SHALL 将该差异标记为 `governed_upgrade` 而不是 `platform_regression`
+- **AND** legacy 失败本身 SHALL NOT 自动使该消费者获得 platform 发布资格
+
+#### Scenario: Chief 或 scheduler 仅编排数据消费者
+
+- **WHEN** Chief 读取 Agent/Workflow memory 产物，或 scheduler 协调 runtime 输入和采集 pipeline 而没有同一持久数据的 legacy/platform 可替换读模型
+- **THEN** 系统 SHALL 将该入口记录为 `orchestration_boundary`
+- **AND** SHALL 以其上游数据消费者的发布状态、该入口端到端回归和独立回滚演练作为验收证据
+- **AND** SHALL NOT 写入伪造的 data-consumer reconciliation 或将 mode 改为 platform 作为验收替代
 
 ### Requirement: 旧实现只能在全量迁移和稳定验收后退役
 

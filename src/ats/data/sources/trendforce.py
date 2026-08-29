@@ -41,6 +41,14 @@ _UP, _DOWN = "&#9650;", "&#9660;"
 _PCT = re.compile(r"([\d.]+)\s*%")
 _SESSION = re.compile(r"DRAM Contract Price\s*\(([^)]+)\)")
 _UPDATED = re.compile(r"Last Update\s*(\d{4}-\d{2}-\d{2})")
+_SESSION_WINDOW = re.compile(
+    r"^(?P<half>[12])H\s+(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$",
+    re.I,
+)
+_MONTHS = {name: index for index, name in enumerate(
+    ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+    start=1,
+)}
 # Default basket: mainstream server/PC parts. Deliberately not the whole table — the
 # eTT and legacy DDR3 lines move on different end markets and would add noise, which
 # is the same reason a witness gets excluded for having no discriminating read.
@@ -68,11 +76,31 @@ def _change(cell: str) -> float | None:
     return 0.0                       # an em-dash row: published as unchanged
 
 
+def _session_window(session: str, updated: str) -> tuple[str, str, str]:
+    """Normalize TrendForce's ``2H Jun`` label into an auditable ISO window."""
+    match = _SESSION_WINDOW.match(session.strip())
+    if not match or not updated:
+        return session, "", ""
+    published = datetime.strptime(updated, "%Y-%m-%d").date()
+    month = _MONTHS[match.group("month").title()]
+    # A December session on a January update page belongs to the prior year.
+    year = published.year - int(month > published.month)
+    start_day, end_day = (1, 15) if match.group("half") == "1" else (16, 31)
+    import calendar
+
+    end_day = min(end_day, calendar.monthrange(year, month)[1])
+    start = datetime(year, month, start_day).date().isoformat()
+    end = datetime(year, month, end_day).date().isoformat()
+    return start, start, end
+
+
 def parse_html(html: str, *, items: tuple[str, ...] = DEFAULT_ITEMS) -> tuple[str, str, list[SeriesPoint]]:
     """Parse one public table snapshot without network access."""
     session = (_SESSION.search(html).group(1).strip() if _SESSION.search(html)
                else "latest")
     updated = _UPDATED.search(html)
+    updated_text = updated.group(1) if updated else ""
+    period, _, _ = _session_window(session, updated_text)
     wanted = {i.lower() for i in items}
 
     out: list[SeriesPoint] = []
@@ -90,12 +118,12 @@ def parse_html(html: str, *, items: tuple[str, ...] = DEFAULT_ITEMS) -> tuple[st
             average = float(cells[3])
         except ValueError:
             continue
-        out.append(SeriesPoint(period=session, series=cells[0], value=average,
+        out.append(SeriesPoint(period=period, series=cells[0], value=average,
                                unit="USD", mom=change))
     log.info("trendforce: session %s, %d items", session, len(out))
     if updated and not out:
         log.warning("trendforce: page parsed but no tracked item matched %s", items)
-    return session, updated.group(1) if updated else "", out
+    return session, updated_text, out
 
 
 def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
@@ -132,6 +160,7 @@ class TrendForceDRAMAdapter:
         html = response.text
         items = tuple(request.query_scope.get("items") or DEFAULT_ITEMS)
         session, updated, points = parse_html(html, items=items)
+        period, period_start, period_end = _session_window(session, updated)
         published = None
         if updated:
             published = datetime.strptime(updated, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -139,14 +168,18 @@ class TrendForceDRAMAdapter:
             entity_id="DRAM_CONTRACT_PRICE",
             provider_field="industry.dram_contract_price",
             period=point.period,
+            period_start=period_start,
+            period_end=period_end,
             value=point.value,
             unit="USD/item",
             currency="USD",
-            period_basis="published_session",
+            period_basis="half_month_session",
             published_at=published,
             dimensions={"item": point.series},
             raw={"item": point.series, "published_mom": point.mom,
-                 "source_unit": point.unit},
+                 "source_unit": point.unit, "source_session": session,
+                 "session_period": period, "session_period_start": period_start,
+                 "session_period_end": period_end},
         ) for point in points]
         headers = getattr(response, "headers", {}) or {}
         version = str(headers.get("etag") or headers.get("last-modified") or updated)

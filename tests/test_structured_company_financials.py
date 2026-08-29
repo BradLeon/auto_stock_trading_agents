@@ -169,6 +169,26 @@ def test_companyfacts_prefers_latest_revision_and_distinguishes_quarter_ytd_inst
     assert by_metric["us-gaap:LongTermDebtAndFinanceLeaseObligations"].value == 25
 
 
+def test_companyfacts_derives_missing_standard_rows_from_official_xbrl_components():
+    payload = _companyfacts()
+    facts = payload["facts"]["us-gaap"]
+    facts.pop("GrossProfit")
+    facts.pop("Liabilities")
+    facts.pop("DebtLongtermAndShorttermCombinedAmount")
+    facts["CostOfGoodsAndServicesSold"] = {"units": {"USD": [_fact(42)]}}
+    facts["LiabilitiesAndStockholdersEquity"] = {"units": {"USD": [_fact(200, start="")]}}
+    facts["LongTermDebtCurrent"] = {"units": {"USD": [_fact(5, start="")]}}
+    facts["LongTermDebtNoncurrent"] = {"units": {"USD": [_fact(25, start="")]}}
+
+    records = {row.provider_field: row for row in parse_companyfacts(payload, symbol="MSFT")}
+
+    assert records["derived:revenue_minus_cost_of_revenue"].value == 60
+    assert records["derived:liabilities_and_equity_minus_equity"].value == 120
+    assert records["derived:current_debt_plus_noncurrent_debt"].value == 30
+    assert records["derived:current_debt_plus_noncurrent_debt"].raw["calculation"] == \
+        "long_term_debt_current + long_term_debt_noncurrent"
+
+
 def test_sec_adapter_ingests_full_artifact_and_ifrs_foreign_issuer(tmp_path):
     repo = _repo(tmp_path)
     payload = _companyfacts(taxonomy="ifrs-full", currency="TWD")
@@ -416,7 +436,7 @@ def test_yfinance_financials_is_statement_only_and_preserves_quarter_fields(tmp_
     assert "financials" in artifact["source_url"]
 
 
-def test_official_and_mirror_remain_parallel_and_official_wins(tmp_path):
+def test_official_and_mirror_remain_parallel_and_configured_report_source_wins(tmp_path):
     repo = _repo(tmp_path)
     sec_adapter = SECCompanyFactsAdapter(
         client=_SECClient(_companyfacts()), clock=lambda: NOW)
@@ -443,8 +463,8 @@ def test_official_and_mirror_remain_parallel_and_official_wins(tmp_path):
         metric="financial.revenue.gaap", entity="MSFT", dataset="company_financials",
         quality="loose")
 
-    assert loose["rows"][0]["source_id"] == "sec_companyfacts"
-    assert loose["rows"][0]["value"] == 102
+    assert loose["rows"][0]["source_id"] == "defeatbeta_stock_statement"
+    assert loose["rows"][0]["value"] == 99
     assert loose["rows"][0]["conflict"] is True
     assert repo.conn.execute("SELECT count(*) FROM structured_conflicts").fetchone()[0] >= 1
 

@@ -178,6 +178,19 @@ Workflow 的 task projection、claim proposal/assessment、PEAD/Sector/Chain/Chi
 
 不采用一次性全库复制或全局开关切换：两种方式都会放大大文件、历史版本和 Workflow 输出差异的排查范围。
 
+### 8. 第三方非结构化来源先以数据源门槛独立发布
+
+TrendForce 文章、SemiAnalysis 订阅文章和 IBKR News 都是多个研究产品可能复用的原始输入，必须先进入共享的非结构化资产层；消费者只能在其上建立各自的检索、分类或实体关系投影，不能各自重新抓取、保存或判断同一篇原文。
+
+本阶段的验收对象是单个数据源，而不是 Agent 或 Workflow 输出。每份候选资产必须保留来源原生标识、canonical URL、采集时间、发布时间、正文提取结果、内容 hash、实体/主题标签、质量状态和运行记录。发布门仅检查数据本身：范围覆盖、来源真实性、正文可用性、去重、时效、血缘以及可重放的质量判定；不要求消费者 shadow 对账，也不因尚未切换的消费者阻塞数据源发布。
+
+- **TrendForce 文章**：以文章索引发现为主，RSS 仅作为辅助线索；每篇文档保存入口页与正文获取的状态。付费墙、摘要不足或 RSS 过期必须分别记录为 `partial` / `unreachable`，不能被“发现了 URL”误判为已覆盖。TrendForce DRAM 合约价属于结构化数据集，与文章资产分别注册、运行和验收。
+- **SemiAnalysis（IMAP/RSS）**：复用 `data.research.ingest` 的邮件与 RSS 获取能力，不另建邮箱抓取器。以 IMAP `Message-ID` / UID 与 canonical URL 作为稳定去重键；同一窗口内的所有匹配邮件与 RSS 项都要进入候选账本，邮件正文优先于 RSS 摘要，二者可合并为同一文档版本但不可静默丢弃。未订阅导致的预览正文可以发布，但文档版本、质量结果和验收报告必须显式为 `partial`；它不是全文，也不得覆盖以后取得的完整版本。
+- **IBKR News（第一优先级）**：使用只读 TWS/IB Gateway 新闻接口，不持久化行情或期权数据。历史补采恢复 legacy 语义：每次运行使用 `reqNewsProviders()` 返回的全部 provider，并为每篇资产保留 provider/article ID、查询实体、原始精确新闻时间及其时区/会话标识；正文预算和质量门再决定可发布范围。标题必须独立命中查询实体 ticker、公司名或登记别名；不命中的候选进入 `association_rejected` 账本而不取正文。去重按 provider/article ID、标准化标题与精确时间、正文 hash 分层进行，正文预算按最新、主体通过的唯一候选分配。provider 枚举为空时，以 `IB.sleep` 进行有界重试，最终空结果只能标记为当前会话 `provider_unavailable`，不得推断为无 entitlement。只读诊断可以显式探测刚刚已知的 provider，即使当次枚举暂时为空；这只能用于分辨枚举波动与历史新闻能力，生产采集仍必须使用新鲜的动态枚举，不能把该临时 provider 当作发布范围。扩展超时的底层请求必须复用 `ib_async` 的 TWS wire 时间格式，不能把 Python `datetime` 原样传入 socket；TWS 对该请求的明确拒绝会立即结束本次等待，并分类为订阅不足或请求被拒绝，而不会伪装成超时。对 `reqHistoricalNews` 返回的每个 `(providerCode, articleId)`，以原样参数调用 `reqNewsArticle`；短暂的空正文或异常可有界重试，二进制/PDF 返回仍明确记为正文缺口。验收按已配置的标的、provider 和时间切片逐项记录；TWS 未连接、缺少新闻权限、provider 不可用、请求受限和确实没有新闻是不同状态，只有最后一种才可计为“零篇但成功”。诊断入口还必须输出只读连接、server version、可用 provider、合约 conId、每个探针的 API 错误回调及是否收到 `historicalNewsEnd`，使无响应能区分为请求格式、单一 provider、权限或服务端无回调。
+- **yfinance Yahoo News（仅可达性 fallback）**：该来源调用 `Ticker.news`，与 defeatbeta 的 Yahoo 日级镜像分别注册、运行和验收。它不是 IBKR 健康时的并行主来源；仅在 IBKR 的 TWS 不可达、权限/订阅不足、动态 provider 不可用、请求受限/拒绝，或指定标的/切片失败时，处理失败的范围。IBKR 正常完成但没有新闻时不得触发 Yahoo fallback。按 PEAD 当前 targets 逐一请求，保留 Yahoo content ID、publisher、原始发布时间、Yahoo canonical URL、查询实体与抓取时点；同一 Yahoo ID 或 canonical URL 只形成一个候选。主体准入严格采用 `title_verified`：标题须命中该实体 ticker、注册公司名或别名的完整词组；仅由 Yahoo 推荐关系带回、标题未命中的候选标为 `association_rejected`，保留在报告而不取正文/不发布。通过标题门的候选仅在直接取得正文且正文仍能验证标题锚点时才可接受；页面壳、导航、付费墙、视频或正文错配均记录为缺口。来源验收输出 PEAD 每个标的的全部标题、URL、publisher、时间和主体判定，供人工审阅；未获人工审阅前不写入 source release overlay。
+
+所有真实来源运行必须先通过确定性单元测试，并在隔离数据库/资产目录中执行。来源级报告将每个来源分类为 `equivalent`、`governed_upgrade`、`platform_regression`、`partial` 或 `unreachable`；只有无未解释平台回归且满足该来源覆盖/质量门的范围才可标记为 `platform`。失败范围保持 `legacy` 或 `shadow`，并保留可重试游标和缺口原因。本子阶段明确不修改消费者路由、不删除旧采集逻辑；这些是后续统一消费者验收与 legacy retirement 的独立工作。
+
 ## Risks / Trade-offs
 
 - [循环依赖在移动期间短暂增加] → 先建立 core/interfaces 和架构 import test，再移动实现；禁止通过局部动态 import 掩盖长期循环。
@@ -187,14 +200,18 @@ Workflow 的 task projection、claim proposal/assessment、PEAD/Sector/Chain/Chi
 - [目录重排导致导入路径破坏] → 为所有公开旧路径保留兼容模块，加入全仓库 import smoke test，并设置弃用日志而非立即删除。
 - [新目录过度设计] → 第一阶段只建立边界和 facade，只有在现有职责明确时才移动文件；不为未来的向量库或知识图谱预建无用抽象。
 - [Provider 报表语义与 SEC/IR 不一致] → 选择单一完整报表包、保留 provider 原始行与报告期和身份；缺失币种、时点不清、核心字段不全或同包内口径不明时继续后续来源，不把 Provider 字段混合后发布。SEC Facts 与同期间 IR 的受控官方包必须保留字段级来源且通过原始到派生重算。
+- [TrendForce 付费墙或 RSS 过期造成假覆盖] → 分离发现、正文获取和质量准入状态，并在报告中按原因标记缺口。
+- [SemiAnalysis 邮件与 RSS 重复或只处理最新一封] → 以 Message-ID/UID 与 canonical URL 去重，并以窗口候选数、准入数、重复数和失败数验收。
+- [IBKR TWS 连接、权限与限流被误判为无新闻] → 对每个标的/provider/时间切片记录可区分的运行状态，只读访问并遵守 provider 节流。
 
 ## Migration Plan
 
 1. **阶段一：基线与 facade**：建立目标目录、依赖规则、compatibility facade 与基础回归。该阶段已完成，但不改变生产数据或消费者默认路径。
 2. **阶段二：legacy inventory 与迁移准备**：补全旧模块、配置、表、artifact、文档资产和消费者矩阵；为每个数据域定义迁移 manifest、备份、范围、对账键和 rollback 条件。
 3. **阶段三：数据迁移与双读**：先迁移历史 `measurement_*` 及既有 `structured_*` observations/artifacts/catalog/run records，再迁移非结构化 documents/versions/chunks/evidence；每批迁移均执行计数、hash、vintage、血缘和查询结果对账，并保留可续跑状态。仅完成其中一类结构化表不得将结构化域标记为完成。
-4. **阶段四：Agent/Workflow 切换**：逐个将 PEAD、Sector、Evidence/Chain、Chief 和其他直接使用 legacy data 路径的调用方改为 `ats.data.products` / `ats.data.runtime`；以 shadow 输出和端到端回归作为 platform 切换门槛。
-5. **阶段五：旧逻辑退役**：旧数据和全部消费者通过验收并完成稳定观察后，冻结旧路径写入，删除旧模块、配置 alias 与重复实现；最后执行全仓导入扫描、数据库/文件恢复演练和最终验收报告。
+4. **阶段四 A：第三方非结构化来源级发布**：在不修改消费者路由的前提下，分别完成 TrendForce 文章、SemiAnalysis（IMAP/RSS）和 IBKR News 的共享资产、覆盖账本、隔离采集和来源质量报告；满足门槛的 source 范围可发布为 `platform`，其余保持 `legacy`/`shadow` 并留下缺口记录。
+5. **阶段四 B：Agent/Workflow 切换**：逐个将 PEAD、Sector、Evidence/Chain、Chief 和其他直接使用 legacy data 路径的调用方改为 `ats.data.products` / `ats.data.runtime`；仅在调用方自身变更时执行即时 smoke/regression 与回滚演练，不把它当作已通过数据源发布的前置条件。
+6. **阶段五：旧逻辑退役**：旧数据和全部消费者通过验收并完成稳定观察后，冻结旧路径写入，删除旧模块、配置 alias 与重复实现；最后执行全仓导入扫描、数据库/文件恢复演练和最终验收报告。
 
 回滚策略：阶段二至四的任一失败只回退相应 source 或 consumer 的 mode，保留旧读取路径与已保存的原始资产。阶段五删除前必须具备经验证的备份和恢复步骤；一旦删除开始，恢复通过备份/manifest 进行，不得依赖已移除代码。
 

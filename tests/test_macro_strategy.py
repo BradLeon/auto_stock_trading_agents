@@ -65,24 +65,47 @@ def test_load_macro_config_missing_raises(monkeypatch, tmp_path):
 
 def test_assemble_offline_and_live(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63, ust_10y=4.48, hy_oas=2.75, ig_oas=0.75)
-    monkeypatch.setattr("ats.data.macro.fetch", lambda: data)
+    monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
     monkeypatch.setattr("ats.data.websearch.search_news",
                         lambda q, **k: [{"title": "Iran headline", "url": "u",
                                          "content": "conflict escalates", "published": "2026-07-01"}])
+    monkeypatch.setattr("ats.data.factset.fetch_earnings_insight", lambda _cfg: ("", "disabled"))
+    consumers = []
+
     class Snapshot:
         def render(self):
             return "REGIONAL GOVERNED OUTPUT"
-    monkeypatch.setattr("ats.data.regional.fetch", lambda *, consumer: Snapshot())
+
+    def regional_snapshot(*, consumer):
+        consumers.append(consumer)
+        return Snapshot()
+
+    monkeypatch.setattr("ats.data.regional.fetch", regional_snapshot)
     mc = assemble.build(CFG, live_data=True)
     ctx = mc.as_context()
     assert "fed_funds=3.63" in ctx and "hy_oas=2.75" in ctx        # theme quant fields
     assert "Iran headline" in ctx and "conflict escalates" in ctx  # tavily news
     assert "REGIONAL GOVERNED OUTPUT" in ctx
+    assert consumers == ["macro_agent"]
     assert mc.stats()["regional_chars"] > 0
     assert mc.stats()["themes"] == 3
 
     mc2 = assemble.build(CFG, live_data=False)
     assert "offline" in mc2.as_context()                            # no network
+
+
+def test_assemble_keeps_macro_workflow_available_when_regional_product_fails(monkeypatch):
+    data = MacroData(as_of=NOW, fed_funds=3.63)
+    monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
+    monkeypatch.setattr("ats.data.websearch.search_news", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("ats.data.regional.fetch",
+                        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unavailable")))
+    cfg = CFG.model_copy(update={"factset": {"enabled": False}})
+
+    context = assemble.build(cfg, live_data=True)
+
+    assert context.regional_block == "(区域月度数据不可用)"
+    assert context.quant_block
 
 
 def test_factset_download_and_local_fallback(monkeypatch, tmp_path):
@@ -113,7 +136,7 @@ def test_factset_download_and_local_fallback(monkeypatch, tmp_path):
 
 def test_assemble_includes_factset(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63)
-    monkeypatch.setattr("ats.data.macro.fetch", lambda: data)
+    monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
     monkeypatch.setattr("ats.data.websearch.search_news", lambda q, **k: [])
     monkeypatch.setattr("ats.data.factset.fetch_earnings_insight",
                         lambda cfg: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4", "factset:x.pdf"))

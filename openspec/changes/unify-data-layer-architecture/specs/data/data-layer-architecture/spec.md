@@ -216,6 +216,64 @@ EPS 和 runtime 价格按需计算而不得持久化。系统 SHALL NOT 将不�
 - **AND** SHALL 以其上游数据消费者的发布状态、该入口端到端回归和独立回滚演练作为验收证据
 - **AND** SHALL NOT 写入伪造的 data-consumer reconciliation 或将 mode 改为 platform 作为验收替代
 
+### Requirement: 第三方非结构化来源必须先完成数据源级验收与发布
+
+系统 SHALL 将 TrendForce 文章、SemiAnalysis（IMAP/RSS）和 IBKR News 作为独立注册的非结构化来源，以共享文档资产、版本、运行和质量契约保存。每个候选文档 SHALL 保留来源原生标识、canonical URL、发布时间、采集时间、正文提取状态、内容 hash、来源/实体或主题范围、质量结论和运行血缘。来源级发布 SHALL 仅以范围覆盖、来源真实性、正文可用性、时间、去重、时效、血缘和质量门决定，SHALL NOT 等待 Agent 或 Workflow 消费者切换、shadow 对账或稳定观察期；本阶段 SHALL NOT 删除 legacy 实现或修改消费者读取路由。
+
+TrendForce 文章 SHALL 与 TrendForce DRAM 合约价结构化数据集分开注册、存储、运行和验收。SemiAnalysis SHALL 复用研究邮件/RSS 采集管道，以 IMAP `Message-ID` 或 UID、canonical URL 和内容 hash 去重，并枚举时间窗口内所有匹配的邮件及 RSS 项；可验证的邮件正文 SHALL 优先于 RSS 摘要。IBKR News SHALL 仅通过只读 TWS/IB Gateway 新闻访问采集，不得持久化行情或期权数据，且 SHALL 区分连接失败、权限或订阅缺失、provider/节流失败与确实不存在新闻。
+
+当 SemiAnalysis 因未订阅仅可取得可验证的预览正文时，系统 MAY 将该资产发布到 platform，但 SHALL 将正文和 document version 的完整性标记为 `partial`、保留内容 hash、原生邮件标识和 canonical URL，并 SHALL 禁止将其表达为完整文章或覆盖其后的完整版本。IBKR News SHALL 是新闻新路径的第一优先级，并在历史补采中使用 `reqNewsProviders()` 返回的全部当次会话 provider。每条候选 SHALL 保留 provider/article ID、查询实体、原始精确新闻时间及其时区/会话标识；标题 SHALL 独立命中查询实体 ticker、公司名或登记别名，否则 SHALL 标为 `association_rejected`，不得消耗正文预算或作为该实体的覆盖。系统 SHALL 按 provider/article ID、标准化标题与精确时间、正文 hash 分层去重，并优先对最新的、标题主体通过的唯一候选获取正文。provider 枚举 SHALL 以事件循环安全的有界重试处理瞬时空响应，重试后仍为空时 SHALL 标记为 `provider_unavailable`，不得推断为零新闻或缺少 entitlement。只读诊断 MAY 用操作员显式给出的刚验证 provider 直接探测历史新闻，以区分 provider 枚举波动与历史接口故障；该结果 SHALL NOT 代替生产采集所需的当次动态 provider 枚举，或作为来源发布依据。若为延长超时直接调用底层 API，SHALL 使用与公共 `ib_async` API 相同的 TWS wire 日期格式；目标 historical-news request 收到明确 API 错误时，系统 SHALL 立即记录其错误码与文本，并归类为 provider 未订阅或请求拒绝，而非超时。系统 SHALL 使用历史头条原样返回的 `(providerCode, articleId)` 调用 `reqNewsArticle` 获取正文，并以事件循环安全的有界重试处理短暂正文空响应；二进制/PDF 或最终无正文 SHALL 保留为正文缺口。IBKR News SHALL 提供只读诊断，输出连接状态、server version、可用 provider、合约 conId、请求参数、API error 回调以及是否收到 `historicalNewsEnd`，以区分单个 provider、请求格式、权限和服务端无回调。
+
+`yfinance_live_news` SHALL 与 defeatbeta Yahoo 日级镜像、IBKR News 作为三个独立来源管理。它 SHALL 仅在 IBKR 的 TWS 不可达、权限/订阅不足、动态 provider 不可用、请求受限/拒绝或指定标的/切片失败时，作为失败范围的 fallback；IBKR 正常完成但无新闻 SHALL NOT 触发 Yahoo。系统 SHALL 按当前 PEAD targets 读取 `Ticker.news` 的候选，保留 Yahoo 原生 ID、publisher、原始发布时间、canonical URL、查询实体和抓取时点，并以 Yahoo ID 或 canonical URL 去重。Yahoo 的 ticker 推荐关系 SHALL NOT 单独构成主体正确性证据：候选标题必须命中查询实体的 ticker、注册公司名或已登记别名，才可标为 `title_verified` 并进入正文抓取；未命中的候选 SHALL 标记为 `association_rejected`，出现在验收报告中但不得作为文档资产或来源覆盖成功。正文 SHALL 由候选 URL 直接取得，并验证标题锚点仍在正文中；正文不可得、页面壳、视频或标题错配 SHALL 作为可追溯缺口。该来源的来源级验收 SHALL 输出 PEAD 实体、标题、URL、publisher、发布时间和关联判定的完整清单，且在人工审阅该清单前 SHALL NOT 更新其 source release overlay 或消费者路由。
+
+#### Scenario: TrendForce RSS 过期或文章正文受付费墙限制
+
+- **WHEN** 文章索引可发现候选 URL，但 RSS 过期、正文不足或付费墙阻止获取
+- **THEN** 系统 SHALL 分别记录发现、正文获取与质量准入结果，并将该范围标记为 `partial` 或 `unreachable`
+- **AND** 系统 SHALL NOT 因仅获得 URL、标题或摘要而将该文档计为完整覆盖或已发布资产
+
+#### Scenario: SemiAnalysis 在同一窗口出现多封邮件和重复 RSS 项
+
+- **WHEN** IMAP 与 RSS 在同一采集窗口返回多篇 SemiAnalysis 候选，且部分候选代表同一篇文章
+- **THEN** 系统 SHALL 将全部候选记录进覆盖账本，并以邮件标识、canonical URL 和内容 hash 执行可审计去重
+- **AND** 系统 SHALL 保存候选数、准入数、重复数、失败数与缺口原因，且优先保存可验证的邮件正文
+
+#### Scenario: SemiAnalysis 只有未订阅预览正文
+
+- **WHEN** IMAP 邮件或 RSS 证明来源、标识和时间有效，但正文在订阅边界截断
+- **THEN** 系统 MAY 发布该文档为 `partial`，并在文档版本、血缘与验收报告中保留这一完整性状态
+- **AND** 系统 SHALL NOT 将它计为全文、移除内容截断提示或覆盖之后取得的完整版本
+
+#### Scenario: IBKR TWS 不可连接或没有新闻权限
+
+- **WHEN** IBKR News 采集因 TWS/IB Gateway 未连接、新闻权限不足、provider 不可用或请求节流而无法完成
+- **THEN** 系统 SHALL 记录与“零篇新闻”不同的失败状态、标的、provider 与时间切片
+- **AND** 该失败范围 SHALL NOT 被标记为已通过覆盖验收或 `platform`
+
+#### Scenario: IBKR 历史新闻请求无响应
+
+- **WHEN** 只读 TWS 连接和 provider 枚举成功，但 `reqHistoricalNews` 在限定等待时间内既未回调结果也未回调错误
+- **THEN** 诊断 SHALL 记录 server version、conId、provider、起止时间、请求 ID、API errors 与 `historicalNewsEnd` 缺失
+- **AND** 系统 SHALL 将该范围标记为服务端无回调或待确认权限，而不是“零新闻”
+
+#### Scenario: Yahoo 推荐新闻与查询实体不一致
+
+- **WHEN** `Ticker.news` 为某个 PEAD 标的返回新闻，但标题不包含该标的的 ticker、公司名或实体别名
+- **THEN** 系统 SHALL 将候选记录为 `association_rejected`，保留标题、URL、publisher、发布时间和查询实体以供审阅
+- **AND** 系统 SHALL NOT 获取其正文、将其计入覆盖或发布为该标的的新闻资产
+
+#### Scenario: Yahoo 候选标题正确但正文错误或不可得
+
+- **WHEN** Yahoo 候选通过标题主体门，但 URL 对应页面正文无法取得或不包含可验证的标题锚点
+- **THEN** 系统 SHALL 将候选记录为正文缺口或 `title_body_mismatch`
+- **AND** 该候选 SHALL NOT 作为完整新闻文档发布
+
+#### Scenario: 单个来源仅有部分范围达到发布门
+
+- **WHEN** 某来源只有部分实体、主题或时间范围通过正文、时间、去重、质量与血缘检查
+- **THEN** 系统 SHALL 仅将通过范围发布为 `platform`，并为其余范围保留 `legacy` 或 `shadow` 状态及可重试游标
+- **AND** 系统 SHALL 输出来源级验收报告，而不得因消费者尚未切换而阻止通过范围发布
+
 ### Requirement: 旧实现只能在全量迁移和稳定验收后退役
 
 系统 SHALL 将 legacy 模块、配置 alias、重复 repository 实现和不再需要的旧 schema 视为独立退役对象。每个对象在删除前 SHALL 证明其持有的数据已完成迁移与对账、所有调用方已切换、回滚/恢复步骤已演练并通过约定的稳定观察期。OpenSpec change SHALL NOT 被归档，直到所有退役对象的验收状态为通过或被用户明确接受为长期保留。

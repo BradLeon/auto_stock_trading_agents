@@ -187,7 +187,7 @@ def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> d
         m2 = sector_snapshot.momentum(closes, days[1]) if len(days) > 1 else None
         dh = sector_snapshot.dist_to_high(closes)
 
-        f = fundamentals.fetch_light(sym)
+        f = fundamentals.fetch_light(sym, consumer="sector_fundamentals")
         time.sleep(sleep_s)
 
         cons_txt = ""

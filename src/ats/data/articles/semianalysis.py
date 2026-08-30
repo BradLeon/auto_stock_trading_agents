@@ -63,34 +63,69 @@ def _slug(article_id: str) -> str:
     return article_slug(article_id)
 
 
-def discover(*, pages: int = 3, lookback_days: int = 30, source_match: str = "",
-             **_) -> list[ArticleRef]:
+def _stored(*, pages: int, lookback_days: int, source_match: str):
+    """Read the shared asset catalog and retain native-mail/RSS provenance."""
+    from ..research import stored_articles
+
+    since = datetime.now(timezone.utc) - timedelta(days=max(lookback_days, pages * 10))
+    arts = stored_articles(since, source_match=source_match, allow_incomplete=True,
+                           consumer="unstructured_source_acceptance")
+    if source_match:
+        arts = [a for a in arts if source_match.lower() in (a.source or "").lower()]
+    return since, arts
+
+
+def discover_with_status(*, pages: int = 3, lookback_days: int = 30, source_match: str = "",
+                         **_) -> tuple[list[ArticleRef], dict]:
     """Newsletter articles already present in the shared document catalog.
 
     `source_match` narrows to one publisher when the newsletter config carries several
     (`Article.source` is `newsletter:<name>`); empty means take everything declared.
     """
-    from ..research import stored_articles
-
-    since = datetime.now(timezone.utc) - timedelta(days=max(lookback_days, pages * 10))
     try:
-        arts = stored_articles(since, source_match=source_match)
+        since, arts = _stored(pages=pages, lookback_days=lookback_days, source_match=source_match)
     except Exception as exc:  # noqa: BLE001 - caller records the gap
         log.warning("semianalysis: fetch failed — %s", exc)
-        return []
+        return [], {"status": "unreachable", "error": f"{type(exc).__name__}:{exc}",
+                    "acquisition": "shared_research_asset_catalog"}
 
     out = []
     for a in arts:
         if source_match and source_match.lower() not in (a.source or "").lower():
             continue
-        if not (a.body or "").strip():
-            continue                  # header-only mail: a gap, not an article
         slug = _slug(a.id)
         out.append(ArticleRef(url=f"{URL_PREFIX}://{slug}", slug=slug,
                               title=a.title or slug,
                               published_at=a.published_at.date()))
-    log.info("semianalysis: %d article(s) with bodies since %s", len(out), since.date())
-    return out
+    log.info("semianalysis: %d article candidate(s) since %s", len(out), since.date())
+    return out, {"status": "succeeded", "acquisition": "shared_research_asset_catalog",
+                 "candidates_in_catalog": len(out), "since": since.isoformat()}
+
+
+def discover(*, pages: int = 3, lookback_days: int = 30, source_match: str = "",
+             **kwargs) -> list[ArticleRef]:
+    """Compatibility list API; bodies remain validated by the calling pipeline."""
+    return discover_with_status(pages=pages, lookback_days=lookback_days,
+                                source_match=source_match, **kwargs)[0]
+
+
+def provenance(ref: ArticleRef) -> dict[str, str]:
+    """Recover native mail/RSS id and canonical post URL from the shared asset."""
+    try:
+        _since, articles = _stored(pages=1, lookback_days=3650, source_match="SemiAnalysis")
+    except Exception:  # noqa: BLE001 - acceptance will record the body/candidate gap
+        return {"native_id": ref.slug, "canonical_url": ref.url}
+    for article in articles:
+        if _slug(article.id) == ref.slug:
+            return {
+                "native_id": article.id,
+                "canonical_url": article.url or ref.url,
+                "source_carrier": "imap" if article.id.startswith("imap:") else "rss",
+                "message_id": article.message_id or "",
+                "uid": str(article.uid or ""),
+                "completeness": article.completeness,
+            }
+    return {"native_id": ref.slug, "canonical_url": ref.url}
 
 
 def fetch_body(url: str) -> str:

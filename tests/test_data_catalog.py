@@ -18,7 +18,7 @@ def test_unified_catalog_loads_legacy_structured_and_unstructured_registries():
         "company_financials", "market_consensus", "regional_tw_exports",
     }
     assert {item.id for item in catalog.unstructured_sources()} >= {
-        "trendforce_news", "ibkr_news", "semianalysis",
+        "trendforce_news", "ibkr_news", "semianalysis", "yfinance_live_news",
     }
     assert catalog.validate().valid is True
 

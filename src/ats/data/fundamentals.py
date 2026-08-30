@@ -137,7 +137,50 @@ _LIGHT_CACHE: dict[str, tuple[float, dict]] = {}
 _LIGHT_TTL = 1800.0        # in-process cache: dedupe repeat pulls within a run/hour
 
 
-def fetch_light(symbol: str) -> dict:
+def _platform_light(symbol: str) -> dict:
+    """Read low-frequency operating metrics from the selected report package.
+
+    This deliberately does not refresh a Provider.  Sector reviews may call this
+    for a wide universe, so report-package ingestion remains an explicit pipeline
+    action.  Market capitalization, valuation and beta remain runtime inputs.
+    """
+    from ..data.products import DataProducts
+    from ..data.runtime import get_platform_structured_repository
+
+    repository = get_platform_structured_repository()
+    try:
+        package = None
+        for source_id in _FINANCIAL_SOURCE_PRIORITY:
+            package = _complete_report_package(repository, source_id=source_id,
+                                                symbol=symbol.upper())
+            if package is not None:
+                break
+        if package is None:
+            package = _complete_report_package(
+                repository, source_id=("sec_companyfacts", "company_disclosures"),
+                symbol=symbol.upper())
+        if package is None:
+            return {}
+        statement, _ = _structured_statements(
+            symbol.upper(), DataProducts(structured_repository=repository),
+            source_id=package["source_id"], report_period=package["period"],
+            source_by_metric=package.get("source_by_metric"))
+        if statement is None:
+            return {}
+        lines = {line.label: line for line in statement.lines}
+        result = {}
+        if lines.get("Gross Margin") and lines["Gross Margin"].value is not None:
+            result["gross_margin"] = lines["Gross Margin"].value / 100
+        if lines.get("Operating Margin") and lines["Operating Margin"].value is not None:
+            result["op_margin"] = lines["Operating Margin"].value / 100
+        if lines.get("Revenue") and lines["Revenue"].yoy is not None:
+            result["rev_growth"] = lines["Revenue"].yoy / 100
+        return result
+    finally:
+        repository.close()
+
+
+def fetch_light(symbol: str, *, consumer: str = "sector_fundamentals") -> dict:
     """One-call valuation/margin/beta snapshot for wide-universe scans.
     Returns {market_cap, pe, fwd_pe, gross_margin, op_margin, rev_growth, beta} (None-filled).
     yfinance primary; finnhub fills gaps when yf rate-limits or lacks micro-cap
@@ -166,7 +209,24 @@ def fetch_light(symbol: str) -> dict:
 
     if any(v is not None for v in out.values()):
         _LIGHT_CACHE[symbol] = (_t.time(), dict(out))
-    return out
+    from ..structured import read_mode
+
+    mode = read_mode(consumer)
+    if mode == "legacy":
+        return out
+    try:
+        governed = _platform_light(symbol)
+    except Exception as exc:  # the runtime snapshot remains the declared fallback
+        log.warning("fundamentals: governed light snapshot unavailable for %s: %s", symbol, exc)
+        return out
+    if mode == "shadow":
+        if governed and any(out.get(key) != value for key, value in governed.items()):
+            log.info("fundamentals: governed light shadow difference for %s", symbol)
+        return out
+    # Platform/fallback use governed low-frequency accounting fields first.  Fields
+    # absent from a valid report package remain runtime values rather than being
+    # fabricated as zero; market cap, P/E and beta are runtime by design.
+    return {**out, **governed}
 
 
 def _finnhub_light(symbol: str) -> dict:

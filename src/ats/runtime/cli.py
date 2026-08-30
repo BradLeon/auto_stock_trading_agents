@@ -1224,7 +1224,7 @@ def _setup_logging() -> None:
 
 
 def run_data(action: str, value: str = "", *, source: str = "", series: str = "",
-             entity: str = "", since: str = "", as_of: str = "", limit: int = 20,
+             entity: str = "", provider: list[str] | None = None, since: str = "", as_of: str = "", limit: int = 20,
              vintages: bool = False, dataset: str = "", metric: str = "",
              status: str = "", output_format: str = "json",
              periods: list[str] | None = None, query_scope: str = "",
@@ -1233,7 +1233,10 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
              release_file: str = "", kind: str = "", operation: str = "",
              window: int = 0, entities: str = "", period: str = "",
              migration_domain: str = "", source_db: str = "", target_db: str = "",
-             backup_root: str = "", report_path: str = "") -> int:
+             backup_root: str = "", report_path: str = "", acquire: bool = False,
+             provider_lookup_attempts: int = 3,
+             provider_lookup_retry_seconds: float = 1.0,
+             approve_title_url_review: bool = False) -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
 
@@ -1278,6 +1281,102 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 os.environ["ATS_DOCS_ROOT"] = previous_root
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["complete"] else 2
+
+    if action == "ibkr-news-diagnostics":
+        from ..data.articles.ibkr_news import diagnose
+
+        result = diagnose(
+            symbol=entity or value or "NVDA", providers=provider or None,
+            provider_lookup_attempts=provider_lookup_attempts,
+            provider_lookup_retry_seconds=provider_lookup_retry_seconds)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action in {"source-acceptance", "source-publish", "source-releases"}:
+        from ..data.pipelines.unstructured.source_acceptance import (
+            assess_article_source,
+            load_release_overlay,
+            publish_source,
+            write_acceptance_report,
+        )
+
+        if action == "source-releases":
+            print(json.dumps(load_release_overlay(release_file or None), ensure_ascii=False,
+                             indent=2, default=str))
+            return 0
+        source_id = source or value
+        if not source_id:
+            raise ValueError(f"{action} requires --source or VALUE")
+        previous_env: dict[str, str | None] = {}
+        isolated_store = None
+        try:
+            if acquire:
+                if source_id != "semianalysis":
+                    raise ValueError("--acquire is currently only supported for semianalysis")
+                if not db_path or not artifact_root:
+                    raise ValueError("source-acceptance --acquire requires --db and --artifact-root")
+                # Mail/RSS acquisition is permitted only into explicitly supplied
+                # isolated storage.  The acceptance pass below then reads that same
+                # immutable asset catalog; no Chain/PEAD/Chief operation is invoked.
+                import os
+
+                from ..data import research as research_data
+                from ..memory import TradingMemory, reset_store_cache
+
+                previous_env = {name: os.environ.get(name) for name in ("ATS_DB_PATH", "ATS_DOCS_ROOT")}
+                os.environ["ATS_DB_PATH"] = db_path
+                os.environ["ATS_DOCS_ROOT"] = artifact_root
+                reset_store_cache()
+                isolated_store = TradingMemory(db_path)
+                batch = research_data.ingest_configured_batch(store=isolated_store)
+                acquired = list(batch.articles)
+            else:
+                acquired = []
+            result = assess_article_source(
+                source_id, human_review_approved=approve_title_url_review)
+            result["acquisition"] = {"requested": acquire, "articles": len(acquired),
+                                     "isolated": bool(acquire),
+                                     "transport_status": batch.transport_status if acquire else {}}
+            if acquire and not batch.complete:
+                result["outcome"] = "partial"
+                result["classification"] = "partial"
+                result["platform_eligible"] = False
+                result["checks"].append({
+                    "check": "acquisition_transport_completeness", "passed": False,
+                    "detail": batch.transport_status,
+                })
+        finally:
+            if isolated_store is not None:
+                isolated_store.conn.close()
+            if previous_env:
+                import os
+
+                from ..memory import reset_store_cache
+
+                for name, previous in previous_env.items():
+                    if previous is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = previous
+                reset_store_cache()
+        if report_path:
+            result["report"] = str(write_acceptance_report(result, report_path))
+        if action == "source-publish":
+            if apply:
+                result["release"] = publish_source(
+                    result, path=release_file or None, mode=mode)
+            else:
+                result["release"] = {"applied": False, "mode": mode,
+                                     "reason": "pass --apply to mutate release overlay"}
+        # A source report intentionally keeps the complete candidate ledger on disk.
+        # Do not flood an operator's terminal with hundreds of deferred headlines.
+        rendered = result
+        if report_path:
+            rendered = {key: value for key, value in result.items() if key != "candidates"}
+            rendered["candidate_count"] = len(result["candidates"])
+            rendered["candidate_preview"] = result["candidates"][:20]
+        print(json.dumps(rendered, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["platform_eligible"] else 2
 
     if action == "config":
         from ..data.catalog import load_data_catalog
@@ -1605,7 +1704,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "cutover-check", "cutover-status", "release-assessment", "describe", "availability", "examples", "releases",
+        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "cutover-check", "cutover-status", "release-assessment", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",
@@ -1614,6 +1713,14 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("value", nargs="?", default="",
                       help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID")
     data.add_argument("--source", default="", help="series: source ID；search: 来源过滤")
+    data.add_argument("--provider", action="append", default=[],
+                      help="ibkr-news-diagnostics: 待探测的 provider code，可重复；默认探测全部可用项")
+    data.add_argument("--provider-lookup-attempts", type=int, default=3,
+                      help="ibkr-news-diagnostics: provider 枚举的最大尝试次数（默认 3）")
+    data.add_argument("--provider-lookup-retry-seconds", type=float, default=1.0,
+                      help="ibkr-news-diagnostics: provider 枚举重试间隔秒数（默认 1）")
+    data.add_argument("--approve-title-url-review", action="store_true",
+                      help="source-acceptance/source-publish: 明确确认已人工审阅标题/URL 清单")
     data.add_argument("--series", default="", help="series: 指标名称")
     data.add_argument("--metric", default="", help="series: 统一结构化 metric ID")
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
@@ -1636,17 +1743,19 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--artifact-root", default="",
                       help="ingest: 隔离 raw artifact 目录（需同时 --db）；migrate structured: 目标 artifact 目录")
     data.add_argument("--report-path", default="",
-                      help="pead-official-disclosure-coverage: Markdown 验收报告输出路径")
+                      help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径")
     data.add_argument("--force", action="store_true",
                       help="ingest: 仅用于隔离验收，绕过 legacy source mode")
+    data.add_argument("--acquire", action="store_true",
+                      help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库")
     data.add_argument("--apply", action="store_true",
-                      help="publish/rollback/repair-company-financials: 显式执行写操作")
+                      help="publish/rollback/source-publish/repair-company-financials: 显式执行写操作")
     data.add_argument("--mode", choices=["legacy", "shadow", "platform", "fallback"],
                       default="platform", help="publish/rollback 目标模式")
     data.add_argument("--consumer", default="",
                       help="publish/rollback/cutover-check/cutover-status/release-assessment: 消费者 ID；与 --source 二选一")
     data.add_argument("--release-file", default="",
-                      help="发布覆盖层路径，默认 var/structured_data/releases.yaml")
+                      help="发布覆盖层路径；structured 默认 var/structured_data，source-* 默认 var/data/unstructured")
     data.add_argument("--migration-domain", default="",
                       help="migrate: config/data/migration.yaml 中的迁移域")
     data.add_argument("--source-db", default="",
@@ -1783,7 +1892,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.action in {"search", "company", "claim", "lineage"} and not args.value:
             parser.error(f"data {args.action} requires VALUE")
         return run_data(args.action, args.value, source=args.source, series=args.series,
-                        entity=args.entity, since=args.since, as_of=args.as_of,
+                        entity=args.entity, provider=args.provider, since=args.since, as_of=args.as_of,
                         limit=args.limit, vintages=args.vintages, dataset=args.dataset,
                         metric=args.metric, status=args.status,
                         output_format=args.output_format, periods=args.periods,
@@ -1795,7 +1904,10 @@ def main(argv: list[str] | None = None) -> int:
                         entities=args.entities, period=args.period,
                         migration_domain=args.migration_domain, source_db=args.source_db,
                         target_db=args.target_db, backup_root=args.backup_root,
-                        report_path=args.report_path)
+                        report_path=args.report_path, acquire=args.acquire,
+                        provider_lookup_attempts=args.provider_lookup_attempts,
+                        provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,
+                        approve_title_url_review=args.approve_title_url_review)
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":

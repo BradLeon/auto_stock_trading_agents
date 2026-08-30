@@ -44,6 +44,13 @@ class AcquisitionBatch:
     articles: tuple[Article, ...]
     cursor_updates: tuple[CursorUpdate, ...] = ()
     complete: bool = True
+    candidate_count: int = 0
+    duplicate_count: int = 0
+    transport_status: dict[str, dict] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.transport_status is None:
+            object.__setattr__(self, "transport_status", {})
 
 
 def article_slug(article_id: str) -> str:
@@ -57,7 +64,60 @@ def publisher_entity(source: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper() or "RESEARCH"
 
 
-def ingest(since: datetime, *, store=None) -> list[Article]:
+def canonical_article_url(value: str) -> str:
+    """Stable cross-carrier identity for a newsletter post.
+
+    IMAP links normally contain campaign parameters while RSS links do not.  The
+    canonical URL lets the shared acquisition path retain the complete email body
+    without admitting the same SemiAnalysis post again from RSS.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if parsed.scheme in {"http", "https"}:
+        return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(),
+                           parsed.path.rstrip("/"), "", ""))
+    return value.strip()
+
+
+def _article_priority(article: Article) -> tuple[int, int]:
+    """Prefer a complete IMAP message over an RSS copy of the same post."""
+    carrier = 0 if article.id.startswith("imap:") else 1
+    completeness = {"full": 0, "partial": 1, "teaser": 2}.get(article.completeness, 3)
+    return carrier, completeness
+
+
+def deduplicate_articles(items: list[Article]) -> tuple[list[Article], int]:
+    """Deduplicate all acquired candidates by native id, URL, and content hash.
+
+    The returned order is newest first, with a complete IMAP message winning ties.
+    The duplicate count is kept in :class:`AcquisitionBatch` so an acceptance report
+    can distinguish "only one article arrived" from "two transports delivered one
+    article" without persisting a second document version.
+    """
+    ordered = sorted(items, key=lambda a: (a.published_at, tuple(-x for x in _article_priority(a))),
+                     reverse=True)
+    seen: set[str] = set()
+    out: list[Article] = []
+    duplicates = 0
+    for article in ordered:
+        keys = {f"id:{article.id}"}
+        canonical = canonical_article_url(article.url)
+        if canonical:
+            keys.add(f"url:{canonical}")
+        if article.body:
+            keys.add("hash:" + hashlib.sha256(article.body.encode("utf-8")).hexdigest())
+        if keys & seen:
+            duplicates += 1
+            continue
+        seen |= keys
+        out.append(article)
+    return out, duplicates
+
+
+def ingest_batch(since: datetime, *, store=None) -> AcquisitionBatch:
     """Fetch once, persist accepted bodies, and return the discovered articles.
 
     This is the only newsletter function allowed to touch IMAP/RSS. PEAD and chain
@@ -84,7 +144,12 @@ def ingest(since: datetime, *, store=None) -> list[Article]:
     if batch.complete and persisted:
         for cursor in batch.cursor_updates:
             store.save_newsletter_cursor(**cursor.__dict__)
-    return articles
+    return batch
+
+
+def ingest(since: datetime, *, store=None) -> list[Article]:
+    """Compatibility list API around the provenance-preserving ingestion batch."""
+    return list(ingest_batch(since, store=store).articles)
 
 
 def ingest_configured(*, store=None) -> list[Article]:
@@ -95,6 +160,16 @@ def ingest_configured(*, store=None) -> list[Article]:
     since = datetime.now(timezone.utc) - timedelta(
         days=int(cfg.get("backfill_days", cfg.get("lookback_days", 30))))
     return ingest(since, store=store)
+
+
+def ingest_configured_batch(*, store=None) -> AcquisitionBatch:
+    """Configured acquisition with transport completeness for source acceptance."""
+    from ..config import load_pead_global
+
+    cfg = load_pead_global().get("research", {}) or {}
+    since = datetime.now(timezone.utc) - timedelta(
+        days=int(cfg.get("backfill_days", cfg.get("lookback_days", 30))))
+    return ingest_batch(since, store=store)
 
 
 def stored_articles(since: datetime, *, source_match: str = "", store=None,
@@ -155,18 +230,18 @@ def fetch_batch(since: datetime, *, store=None) -> AcquisitionBatch:
     if imap_batch is None:
         imap_batch = AcquisitionBatch((), (), False)
     items: list[Article] = list(imap_batch.articles)
-    items += safe_fetch(lambda: _substack_rss(since, cfg.get("research_feeds", []) or []),
-                        source="research:rss") or []
+    rss_items, rss_status = _rss_batch(since, cfg.get("research_feeds", []) or [])
+    items += rss_items
 
-    items.sort(key=lambda a: a.published_at, reverse=True)
-    seen: set[str] = set()
-    out = []
-    for a in items:
-        if a.id in seen:
-            continue
-        seen.add(a.id)
-        out.append(a)
-    return AcquisitionBatch(tuple(out), imap_batch.cursor_updates, imap_batch.complete)
+    out, duplicates = deduplicate_articles(items)
+    transport_status = {
+        "imap": {"status": "succeeded" if imap_batch.complete else "partial"},
+        "rss": rss_status,
+    }
+    complete = imap_batch.complete and rss_status["status"] == "succeeded"
+    return AcquisitionBatch(tuple(out), imap_batch.cursor_updates, complete,
+                            candidate_count=len(items), duplicate_count=duplicates,
+                            transport_status=transport_status)
 
 
 def fetch_articles(since: datetime, *, store=None) -> list[Article]:
@@ -402,6 +477,21 @@ def _web_link(html: str) -> str:
 # --------------------------------------------------------------------------- #
 # Substack RSS — free posts embed the full body; teasers get a page fetch
 # --------------------------------------------------------------------------- #
+def _rss_batch(since: datetime, feeds: list[dict]) -> tuple[list[Article], dict]:
+    """Fetch each feed independently so a broken RSS endpoint is never silent."""
+    out: list[Article] = []
+    failures: list[dict[str, str]] = []
+    for feed in feeds:
+        name = str(feed.get("name", "?"))
+        try:
+            out.extend(_substack_rss(since, [feed]))
+        except Exception as exc:  # noqa: BLE001 - retain IMAP results but expose the gap
+            log.warning("research rss: %s failed — %s", name, exc)
+            failures.append({"feed": name, "error": f"{type(exc).__name__}:{exc}"})
+    return out, {"status": "partial" if failures else "succeeded",
+                 "feeds": len(feeds), "failed_feeds": failures}
+
+
 def _substack_rss(since: datetime, feeds: list[dict]) -> list[Article]:
     import feedparser
 

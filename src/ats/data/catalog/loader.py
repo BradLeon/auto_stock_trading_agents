@@ -142,15 +142,27 @@ class DataCatalog:
         return load_consumer_release_inventory(path)
 
     def unstructured_sources(self) -> list[CatalogSource]:
+        configured_path = self.path.parent / ((self.raw.get("domains") or {}).get(
+            "unstructured") or "unstructured.yaml")
+        configured = yaml.safe_load(configured_path.read_text(encoding="utf-8")) or {}
+        explicit = configured.get("sources") or {}
+        out: list[CatalogSource] = [
+            CatalogSource(id=source_id, **(row or {}))
+            for source_id, row in explicit.items()
+        ]
+        explicit_ids = {item.id for item in out}
         raw = self.unstructured_registry()
-        out: list[CatalogSource] = []
         for source_id, row in (raw.get("sources") or {}).items():
+            if source_id in explicit_ids:
+                continue
             out.append(CatalogSource(
                 id=source_id, domain="unstructured", provider=row.get("label", ""),
                 adapter=row.get("adapter", ""), status="registered",
                 cadence=row.get("cadence", ""), policy={"legacy_registry": "sources"},
             ))
         for source_id, row in (raw.get("article_sources") or {}).items():
+            if source_id in explicit_ids:
+                continue
             out.append(CatalogSource(
                 id=source_id, domain="unstructured", provider=row.get("label", ""),
                 adapter=row.get("adapter", ""), status="registered",

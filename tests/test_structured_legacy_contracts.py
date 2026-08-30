@@ -77,6 +77,30 @@ def test_fundamentals_light_contract_is_none_filled_and_never_raises(monkeypatch
     }
 
 
+def test_sector_light_fundamentals_use_governed_accounting_metrics_in_platform_mode(monkeypatch):
+    fundamentals._LIGHT_CACHE.clear()
+    monkeypatch.setattr(fundamentals, "safe_fetch", lambda *_, **__: {
+        "marketCap": 1_000_000, "trailingPE": 20, "grossMargins": 0.1,
+        "operatingMargins": 0.1, "revenueGrowth": 0.1, "beta": 1.2,
+    })
+    monkeypatch.setattr(fundamentals, "_platform_light", lambda _symbol: {
+        "gross_margin": 0.6, "op_margin": 0.3, "rev_growth": 0.2,
+    })
+
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FUNDAMENTALS_MODE", "platform")
+    platform = fundamentals.fetch_light("MSFT", consumer="sector_fundamentals")
+    assert platform["gross_margin"] == 0.6
+    assert platform["op_margin"] == 0.3
+    assert platform["rev_growth"] == 0.2
+    assert platform["market_cap"] == 1_000_000
+    assert platform["pe"] == 20
+
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FUNDAMENTALS_MODE", "shadow")
+    shadow = fundamentals.fetch_light("MSFT", consumer="sector_fundamentals")
+    assert shadow["gross_margin"] == 0.1
+    assert shadow["op_margin"] == 0.1
+
+
 def test_consensus_public_contract_has_fixed_keys_and_partial_success(monkeypatch):
     monkeypatch.setenv("ATS_STRUCTURED_PEAD_CONSENSUS_MODE", "legacy")
     estimates = {

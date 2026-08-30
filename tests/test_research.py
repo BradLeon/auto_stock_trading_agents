@@ -112,6 +112,38 @@ def test_shared_ingestion_feeds_both_consumers_without_refetch(monkeypatch):
     assert len(calls) == 1
 
 
+def test_cross_carrier_duplicate_prefers_imap_body_and_records_duplicate_count(monkeypatch):
+    imap = ARTICLE.model_copy(update={
+        "id": "imap:<same-post@test>", "url": "https://semianalysis.com/p/same-post?utm=email",
+        "body": "complete email body " * 200, "message_id": "<same-post@test>",
+    })
+    rss = ARTICLE.model_copy(update={
+        "id": "substack:same-post", "source": "substack:SemiAnalysis",
+        "url": "https://semianalysis.com/p/same-post", "body": "RSS teaser",
+        "completeness": "teaser",
+    })
+    monkeypatch.setattr(research_src, "_imap_batch", lambda *a, **k: _batch(imap))
+    monkeypatch.setattr(research_src, "_substack_rss", lambda *a, **k: [rss])
+
+    batch = research_src.fetch_batch(NOW)
+
+    assert batch.candidate_count == 2 and batch.duplicate_count == 1
+    assert len(batch.articles) == 1
+    assert batch.articles[0].id == "imap:<same-post@test>"
+
+
+def test_rss_failure_is_reported_as_a_transport_gap(monkeypatch):
+    monkeypatch.setattr(research_src, "_imap_batch", lambda *a, **k: _batch())
+    monkeypatch.setattr(research_src, "_substack_rss",
+                        lambda *a, **k: (_ for _ in ()).throw(ConnectionError("feed down")))
+
+    batch = research_src.fetch_batch(NOW)
+
+    assert batch.complete is False
+    assert batch.transport_status["rss"]["status"] == "partial"
+    assert batch.transport_status["rss"]["failed_feeds"][0]["feed"] == "SemiAnalysis"
+
+
 def test_build_universe_maps_chain_members():
     card, mapping = research._build_universe(["COHR"])
     assert "COHR (target)" in card

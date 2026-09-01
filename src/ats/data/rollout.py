@@ -1,7 +1,7 @@
 """Unified staged rollout entrypoint for source and consumer migration."""
 
-from ats.structured.flags import READ_MODES, read_mode, source_mode
-from ats.structured.release import (
+from .rollout_modes import READ_MODES, read_mode, source_mode
+from .release import (
     ReleaseManager,
     default_release_path,
     load_release_overlay,

@@ -49,7 +49,7 @@ layers:
     #   · **命题可能要合并或删除。** 若两条最终共用同一批证人和同一批读数，它们就是
     #     一条命题的两种说法，合并；若某条一年也等不到两个独立证据簇，删掉。
     # 所以**不要把这段注释当成待办清单去逐条实现**，它是需求端的记录。
-    # 正确的下一步是先做取数（见 config/sources.yaml 末尾「L1 候选源」的实测结果），
+    # 正确的下一步是先做取数（见 config/data/sources.yaml 末尾「L1 候选源」的实测结果），
     # 再拿真实到手的数据回头改这五条。
     #
     # 刻意不激活的另一个理由：声明一个取不到文档的证人只会把覆盖率的分母做大，
@@ -1368,7 +1368,7 @@ layers:
         # 7500 亿美元先进存储——这是需求侧的多年承诺，且是政府简报独立确认，不是 SK
         # 自己财报电话会里的自述，stance 用 regulator。
         #
-        # 2026-08-13 加 TRENDFORCE（文章类第三方源，见 config/sources.yaml 的
+        # 2026-08-13 加 TRENDFORCE（文章类第三方源，见 config/data/sources.yaml 的
         # article_sources）。三家存储厂各说自己供给多紧，是三个当事人不是交叉印证；
         # TrendForce 在同一周里同时报道三家、且会写出买方抢货与产能分配这类
         # 供给侧自己不会说的事。首轮抓取实测：它对 SKHY/MU/三星共产出 57 条读数，
@@ -1464,7 +1464,7 @@ layers:
         # 落入 SECONDARY，只贡献权重不贡献立场类。TrendForce 的现货价周报与
         # 「买方以极高价格抢货」这类报道走的是文章通路，逐行判型里会出现
         # reported_actual/guidance，才可能补上第二类立场——注意这取决于模型的
-        # 逐行判型，不是配置能保证的（见 config/sources.yaml 里的同一条说明）。
+        # 逐行判型，不是配置能保证的（见 config/data/sources.yaml 里的同一条说明）。
         witnesses:
           - {entity: SKHY, stance: supplier}
           - {entity: MU, stance: supplier}

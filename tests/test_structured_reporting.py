@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from ats.structured import (
+from ats.data.structured import (
     ArtifactDescriptor,
     ObservationInput,
     QualityStatus,
@@ -173,7 +173,7 @@ def test_freshness_can_gate_on_underlying_source_period_lag(tmp_path) -> None:
 
 
 def test_cli_structured_quality_and_inventory(monkeypatch, capsys, tmp_path) -> None:
-    from ats.data_platform.products import DataProducts
+    from ats.data.products.products import DataProducts
     from ats.runtime import cli
 
     class EmptyDocumentStore:
@@ -181,7 +181,7 @@ def test_cli_structured_quality_and_inventory(monkeypatch, capsys, tmp_path) -> 
 
     products = DataProducts(
         store=EmptyDocumentStore(), structured_repository=_repository(tmp_path))
-    monkeypatch.setattr("ats.data_platform.get_data_products", lambda: products)
+    monkeypatch.setattr("ats.data.products.get_data_products", lambda: products)
 
     assert cli.run_data("sources") == 0
     sources = json.loads(capsys.readouterr().out)

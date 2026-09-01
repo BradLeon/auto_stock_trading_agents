@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 import logging
 
 from ...schemas.chain import SeriesPoint
-from ...structured import (
+from ..structured import (
     AdapterArtifact,
     AdapterBatch,
     DerivationDefinition,
@@ -20,7 +20,7 @@ from ...structured import (
     IngestionStatus,
     NativeRecord,
 )
-from ...structured.derivations import calculate
+from ..pipelines.structured.derivations import calculate
 
 
 log = logging.getLogger("ats.data.sources.kr_ecos")

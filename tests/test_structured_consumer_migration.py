@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 from ats.data import fundamentals
 from ats.data.financial_release import company_financial_release_check
-from ats.data_platform import DataProducts
+from ats.data.products import DataProducts
 from ats.schemas.fundamentals import FinancialStatements, FundamentalData, StatementMetric
-from ats.structured import (
+from ats.data.structured import (
     ArtifactDescriptor,
     ObservationInput,
     SeriesIdentity,
@@ -256,7 +256,7 @@ def test_financial_source_chain_stops_after_first_complete_package(monkeypatch) 
     class _Adapter:
         pass
 
-    monkeypatch.setattr("ats.structured.IngestionPipeline", _Pipeline)
+    monkeypatch.setattr("ats.data.structured.IngestionPipeline", _Pipeline)
     monkeypatch.setattr(fundamentals, "_complete_report_package", lambda _repo, *, source_id, symbol:
                         {"source_id": source_id, "period": "2026-06-30"}
                         if source_id == "defeatbeta_stock_statement" else None)

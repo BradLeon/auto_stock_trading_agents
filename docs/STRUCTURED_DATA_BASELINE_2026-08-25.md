@@ -22,7 +22,7 @@
 ## 2. 盘点交付物
 
 - 迁移矩阵：`docs/STRUCTURED_DATA_MIGRATION_MATRIX.md`
-- 机器可读范围、指标和质量门：`config/structured_data.yaml`
+- 机器可读范围、指标和质量门：`config/data/structured.yaml`
 - 旧路径特征测试：`tests/test_structured_legacy_contracts.py`
 
 盘点确认：财务与 Consensus 当前由 PEAD、Sector 运行时调用；Chain 区域序列已写 measurement；`stock_statement` 尚无生产 Adapter/消费者；IBKR/yfinance 行情与期权均登记为 runtime/excluded。

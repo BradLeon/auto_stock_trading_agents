@@ -37,10 +37,10 @@ def gather(symbol: str, docs_root: str | None = None, *, period: str = "",
     Priority per doc type: a curated file in <docs_root>/<SYM>/ (most precise) wins;
     otherwise auto-fetch — release from SEC 8-K, deck via Tavily. No duplicates.
     """
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from .sec import SecRecordResult
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     folder = _from_folder(symbol, docs_root)
     used: set[str] = set()
     docs: list[tuple[str, str]] = []
@@ -181,11 +181,11 @@ def _migrate_legacy_release(symbol: str, period: str, kinds: tuple[str, ...], *,
     if not period:
         return None
     from ..config import entity_meta
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import admission, fiscal, source_cache
     from .document_types import infer_carrier_format
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     legacy = None
     for kind in kinds:
         legacy = source_cache.load(symbol, "", kind)

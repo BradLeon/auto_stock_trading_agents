@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 import json
 
-from .catalog import StructuredCatalog
-from .flags import source_mode
+from ..catalog.structured import StructuredCatalog
+from ..rollout_modes import source_mode
 from .reporting import build_quality_report
 
 
@@ -184,7 +184,7 @@ class DataDiscovery:
                     "observation_id": row["observation_id"]},
                 "examples": commands,
                 "python": (
-                    "from ats.data_platform import get_data_products\n"
+                    "from ats.data.products import get_data_products\n"
                     "data = get_data_products().metric_series(\n"
                     f"    dataset={dataset_id!r}, metric={metric!r}, entity={entity!r})")}
 

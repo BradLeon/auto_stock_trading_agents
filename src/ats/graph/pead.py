@@ -336,7 +336,7 @@ def score_fetch(state: PeadState) -> dict:
     package = None
     package_mode = "legacy"
     if state.live_data and not state.transcript_source:
-        from ..structured import read_mode
+        from ..data.structured import read_mode
 
         package_mode = read_mode("pead_graph")
         if package_mode in {"platform", "fallback", "shadow"}:

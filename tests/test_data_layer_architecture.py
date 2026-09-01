@@ -69,7 +69,7 @@ def test_data_layer_package_skeleton_exists():
 
 
 def test_adapters_do_not_depend_on_consumers_or_memory():
-    forbidden = ("ats.data.products", "ats.data_platform", "ats.memory", "ats.structured")
+    forbidden = ("ats.data.products", "ats.data.products", "ats.memory", "ats.data.structured")
     assert not _violations("adapters", forbidden)
 
 
@@ -79,12 +79,12 @@ def test_stores_do_not_depend_on_adapters_or_network_clients():
 
 
 def test_runtime_does_not_depend_on_persistent_stores():
-    forbidden = ("ats.data.stores", "ats.structured", "ats.memory")
+    forbidden = ("ats.data.stores", "ats.data.structured", "ats.memory")
     assert not _violations("runtime", forbidden)
 
 
 def test_new_products_do_not_import_provider_adapters():
-    forbidden = ("ats.data.adapters", "ats.data.sources", "ats.structured.runtime_registry")
+    forbidden = ("ats.data.adapters", "ats.data.sources", "ats.data.structured.runtime_registry")
     assert not _violations("products", forbidden)
 
 
@@ -113,8 +113,8 @@ def test_core_contracts_are_domain_neutral_and_timezone_safe():
 
 
 def test_product_compatibility_entrypoints_share_the_same_implementation():
-    from ats.data_platform import DataProducts as LegacyDataProducts
-    from ats.data_platform import get_data_products as legacy_get
+    from ats.data.products import DataProducts as LegacyDataProducts
+    from ats.data.products import get_data_products as legacy_get
     from ats.data.products import DataProducts, get_data_products
 
     assert DataProducts is LegacyDataProducts
@@ -122,7 +122,7 @@ def test_product_compatibility_entrypoints_share_the_same_implementation():
 
 
 def test_structured_compatibility_entrypoint_reexports_legacy_surface():
-    import ats.structured as legacy
+    import ats.data.structured as legacy
     import ats.data.structured as unified
 
     assert unified.StructuredCatalog is legacy.StructuredCatalog
@@ -134,12 +134,30 @@ def test_structured_lifecycle_surfaces_share_legacy_implementations():
     from ats.data.pipelines.structured.ingestion import IngestionPipeline
     from ats.data.products.structured import StructuredDataProducts
     from ats.data.stores.structured.repository import SQLiteStructuredRepository
-    from ats.structured import IngestionPipeline as LegacyPipeline
-    from ats.structured import SQLiteStructuredRepository as LegacyRepository
-    from ats.structured import validate_source_registration as legacy_validate
-    from ats.data_platform import DataProducts as LegacyProducts
+    from ats.data.structured import IngestionPipeline as LegacyPipeline
+    from ats.data.structured import SQLiteStructuredRepository as LegacyRepository
+    from ats.data.structured import validate_source_registration as legacy_validate
+    from ats.data.products import DataProducts as LegacyProducts
 
     assert validate_source_registration is legacy_validate
     assert IngestionPipeline is LegacyPipeline
     assert SQLiteStructuredRepository is LegacyRepository
     assert StructuredDataProducts is LegacyProducts
+
+
+def test_retired_namespaces_and_config_aliases_are_absent():
+    retired_paths = (
+        ROOT / "src" / "ats" / "structured",
+        ROOT / "src" / "ats" / "data_platform",
+        ROOT / "config" / "structured_data.yaml",
+        ROOT / "config" / "sources.yaml",
+        ROOT / "config" / "news_sources.yaml",
+    )
+    # Python bytecode directories are ignored build residue; the importable package
+    # and configuration aliases themselves must be absent.
+    assert not any(path.is_file() or (path / "__init__.py").is_file()
+                       for path in retired_paths)
+    for path in (ROOT / "src" / "ats").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "ats.data_platform" not in text
+        assert "from ats.structured" not in text

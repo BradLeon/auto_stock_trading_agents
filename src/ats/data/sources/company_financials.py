@@ -7,7 +7,7 @@ from decimal import Decimal
 import html
 import re
 
-from ...structured import (
+from ..structured import (
     AdapterArtifact,
     AdapterBatch,
     AdapterFailure,

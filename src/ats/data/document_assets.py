@@ -35,9 +35,9 @@ def ingest(*, entity: str, key: str, doc_type: str, text: str,
            mime_source: str = "",
            now: datetime | None = None, note: str = "", store=None):
     """Persist one accepted body and return its ``CachedDoc`` compatibility object."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     doc = source_cache.store(
         entity, key, doc_type, text, source=source, source_url=source_url,
         external_id=external_id, title=title, published_at=published_at,
@@ -53,9 +53,9 @@ def ingest(*, entity: str, key: str, doc_type: str, text: str,
 
 def read_document(document_id: str, *, store=None) -> str:
     """Read the latest immutable body for a catalog document without network access."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     version = store.latest_document_version(document_id)
     if not version:
         return ""
@@ -80,20 +80,20 @@ def read_document(document_id: str, *, store=None) -> str:
 
 def read_external(external_id: str, *, store=None) -> tuple[dict | None, str]:
     """Resolve a provider id to its shared document and body."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     row = store.document_by_external_id(external_id)
     return (row, read_document(row["document_id"], store=store) if row else "")
 
 
 def identify(text: str, *, entity: str | None = None, store=None) -> dict | None:
     """Resolve exact accepted text to its catalog asset for downstream lineage."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
 
     body = (text or "").strip()
     if not body:
         return None
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     return store.document_by_content_hash(
         hashlib.sha256(body.encode("utf-8")).hexdigest(), entity=entity)

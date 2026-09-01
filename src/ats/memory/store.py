@@ -373,6 +373,32 @@ class TradingMemory:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self._migrate()
+        self._retire_data_tables()
+
+    def _retire_data_tables(self) -> None:
+        """Enforce the boundary: this database is Workflow memory, never a data store."""
+        views = ("structured_observations_selected", "structured_observations_accepted")
+        tables = (
+            "structured_artifact_blobs", "structured_artifacts", "structured_sources",
+            "structured_datasets", "structured_metrics", "structured_provider_mappings",
+            "structured_pending_mappings", "structured_series", "structured_observations",
+            "structured_derivations", "structured_evidence_links", "structured_entities",
+            "structured_events", "structured_evidence_candidates", "structured_evidence_reviews",
+            "structured_snapshots", "structured_snapshot_items", "structured_ingestion_runs",
+            "structured_candidates", "structured_conflicts", "structured_legacy_audits",
+            "structured_migrations", "source_documents", "document_candidates",
+            "document_versions", "document_entities", "document_source_aliases",
+            "document_chunks", "document_processing_runs", "newsletter_cursors",
+            "data_sources", "ingestion_runs", "measurement_series", "measurement_points",
+            "evidence_observations", "evidence_failures", "evidence_facts",
+            "evidence_fact_projections",
+        )
+        self.conn.execute("PRAGMA foreign_keys=OFF")
+        for name in views:
+            self.conn.execute(f'DROP VIEW IF EXISTS "{name}"')
+        for name in tables:
+            self.conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+        self.conn.commit()
 
     def _migrate(self) -> None:
         """Additive column migrations (kept out of _SCHEMA so old DBs get them too)."""

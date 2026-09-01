@@ -201,7 +201,7 @@ ats_cli data examples --dataset market_consensus
     "ats data series --dataset market_consensus --metric consensus.eps.high --entity MRVL",
     "ats data lineage 151c96f69498d1c1a641493e"
   ],
-  "python": "from ats.data_platform import ..."
+  "python": "from ats.data.products import ..."
 }
 ```
 
@@ -444,7 +444,7 @@ ats_cli data cross-section \
 
 ```python
 from datetime import datetime, timezone
-from ats.data_platform import get_data_products
+from ats.data.products import get_data_products
 
 products = get_data_products()
 
@@ -546,7 +546,7 @@ PEAD、Sector、Chain 等 Workflow 不依赖 Prompt 或 Skill 才能正确运行
 
 ```python
 from ats.data import market_data
-from ats.data_platform import get_data_products
+from ats.data.products import get_data_products
 from ats.schemas.market import Ticker
 
 products = get_data_products()
@@ -575,7 +575,7 @@ Sector 与 Macro 当前处于 `shadow`：它们会同时读取旧路径和受管
 
 ## 13. 常见问题
 
-### 为什么 `config/structured_data.yaml` 有这个 dataset，但 catalog 显示 no data？
+### 为什么 `config/data/structured.yaml` 有这个 dataset，但 catalog 显示 no data？
 
 YAML 表示注册能力，数据库 observation 才表示实际数据。查看 `availability`；采集与发布问题由运维手册处理。
 

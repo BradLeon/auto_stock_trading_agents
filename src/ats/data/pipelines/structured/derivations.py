@@ -6,7 +6,7 @@ from collections import defaultdict
 import re
 from statistics import mean
 
-from .models import DerivationDefinition
+from ...core.structured_models import DerivationDefinition
 
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")

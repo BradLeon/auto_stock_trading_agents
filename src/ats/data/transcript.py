@@ -137,11 +137,11 @@ def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *,
     if not text:
         return text, source
     from ..config import entity_meta
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import admission, defeatbeta, fiscal
     from .document_types import CarrierFormat
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     company_name = company_name or entity_meta(symbol).get("name", "")
     body, _ = extract_body(text, source)
     body_ok, _ = looks_like_transcript(body)

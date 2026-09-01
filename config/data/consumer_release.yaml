@@ -1,5 +1,5 @@
 # Consumer cutover policy.  This is an acceptance inventory, not a runtime
-# feature-flag overlay.  Runtime selection remains in config/structured_data.yaml
+# feature-flag overlay.  Runtime selection remains in config/data/structured.yaml
 # and var/structured_data/releases.yaml.
 version: 1
 
@@ -9,55 +9,55 @@ consumers:
     interface: ats.data.products.structured
     inputs: [company_financials]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   pead_consensus:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [market_consensus]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   pead_graph:
     kind: direct_data
     interface: ats.data.products.structured + ats.data.products.unstructured
     inputs: [company_financials, market_consensus, earnings_release, sec_filing, transcript, research, news]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   pead_monitor:
     kind: direct_data
     interface: ats.data.products.unstructured
     inputs: [news]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   sector_consensus:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [market_consensus]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   sector_agent:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [regional_tw_exports, regional_kr_exports, company_financials, market_consensus]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   macro_agent:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [regional_tw_exports, regional_kr_exports]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   chain_regional:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [regional_tw_exports, regional_kr_exports]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   sector_constituent_financials:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [company_financials]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   pead_research:
     kind: direct_data
     interface: ats.data.products.unstructured
@@ -65,23 +65,23 @@ consumers:
     # News is separately owned by the PEAD monitor/Graph route.
     inputs: [research]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   evidence_chain:
     kind: direct_data
     interface: ats.data.products.unstructured
     inputs: [sec_filing, earnings_release, transcript, research, rss, news]
     gates: [coverage, freshness, output]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
 
   chief_graph:
     kind: orchestration_boundary
     interface: ats.data.products boundary metadata + ats.memory outputs
     upstream_consumers: [pead_fundamentals, sector_agent, macro_agent, evidence_chain]
     required_evidence: [upstream_release_status, end_to_end_regression, rollback_drill]
-    rollback: consumer mode legacy
+    rollback: restore verified platform data backup
   runtime_scheduler:
     kind: orchestration_boundary
     interface: ats.data.products + ats.data.runtime + ats.data.pipelines
     upstream_consumers: [pead_fundamentals, sector_agent, macro_agent, evidence_chain]
     required_evidence: [upstream_release_status, end_to_end_regression, rollback_drill]
-    rollback: release overlay rollback
+    rollback: restore verified platform data backup

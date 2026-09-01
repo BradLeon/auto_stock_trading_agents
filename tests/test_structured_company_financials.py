@@ -17,13 +17,13 @@ from ats.data.sources.company_financials import (
     parse_companyfacts,
     parse_tsmc_quarterly_release,
 )
-from ats.structured import (
+from ats.data.structured import (
     FetchRequest,
     IngestionPipeline,
     SQLiteStructuredRepository,
     StructuredCatalog,
 )
-from ats.structured.quality import financial_quality
+from ats.data.structured.quality import financial_quality
 
 
 NOW = datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc)
@@ -456,7 +456,7 @@ def test_official_and_mirror_remain_parallel_and_configured_report_source_wins(t
         entities=["MSFT"], periods=["2026-06-30"], query_scope={"currency": "USD"})
     IngestionPipeline(repo).run(mirror, mirror_request)
 
-    from ats.data_platform import DataProducts
+    from ats.data.products import DataProducts
 
     products = DataProducts(structured_repository=repo)
     loose = products.metric_series(
@@ -569,7 +569,7 @@ def test_core_financial_formulas_are_versioned_query_time_results(tmp_path):
     IngestionPipeline(repo).run(adapter, FetchRequest(
         source_id="sec_companyfacts", dataset_id="company_financials",
         entities=["MSFT"], periods=["2026-06-30"]))
-    from ats.data_platform import DataProducts
+    from ats.data.products import DataProducts
 
     products = DataProducts(structured_repository=repo)
     fcf = products.financial_derived(metric="financial.free_cash_flow", entity="MSFT")

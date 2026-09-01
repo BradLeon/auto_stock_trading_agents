@@ -34,7 +34,7 @@
 
 | 消费者 | 类型 | 实际入口与依赖 | 特殊边界 | 本轮任务 |
 | --- | --- | --- | --- | --- |
-| `sector_agent` | 直接持久化数据读取 + 间接证据读取 + runtime | `assemble.build()` 直接调用 `regional.fetch(consumer="sector_agent")`，并在 `_snapshots()` 调用基本面、Consensus 与价格 snapshot；`_chain_evidence()` 读取 Chain claim evidence | `trendforce_dram` / `industry_dram_contract_price` **不是** sector 的直接 dataset。`config/sources.yaml:dram_contract_price` 先作为 `hbm_pricing`、`supply_tightness` 的 Chain 来源，再经 claim evidence 注入 `_chain_evidence()` | 15.1 ✓（2026-08-30；受用户确认的 `unknown` 降级判读） |
+| `sector_agent` | 直接持久化数据读取 + 间接证据读取 + runtime | `assemble.build()` 直接调用 `regional.fetch(consumer="sector_agent")`，并在 `_snapshots()` 调用基本面、Consensus 与价格 snapshot；`_chain_evidence()` 读取 Chain claim evidence | `trendforce_dram` / `industry_dram_contract_price` **不是** sector 的直接 dataset。`config/data/sources.yaml:dram_contract_price` 先作为 `hbm_pricing`、`supply_tightness` 的 Chain 来源，再经 claim evidence 注入 `_chain_evidence()` | 15.1 ✓（2026-08-30；受用户确认的 `unknown` 降级判读） |
 | PEAD Graph | 直接持久化数据读取 + runtime | `ats.graph.pead` 的 prep/score：财务、Consensus、release/filing/transcript；研究洞察和连续新闻分别由 `pead_research` 与 `pead_monitor` 的受管读取写入 Workflow memory 后进入分析上下文；价格、期权、日历为 runtime | runtime 价格/期权不得写入结构化库；dossier/score/report 留在 memory | 15.2 ✓（2026-08-30） |
 | `chief_graph` | 编排边界 | `ats.graph.chief.assemble_context()` → `workflow_data_boundary("chief_graph")`，随后汇总 Agent/Workflow memory 产物 | Chief dossier、决策、交易状态属于 memory，不是结构化或非结构化输入 | 16.1 ✓（2026-08-31） |
 | `runtime_scheduler` | 编排边界 | `ats.runtime.scheduler._daily()` → `workflow_data_boundary("runtime_scheduler")`，并触发采集 pipeline、PEAD、Chief 等 | 负责触发与失败隔离；自身没有可替代的持久数据读模型 | 16.2 ✓（2026-08-31） |

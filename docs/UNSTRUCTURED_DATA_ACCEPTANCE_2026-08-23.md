@@ -50,7 +50,7 @@ Parquet。IBKR 继续负责盘中增量，Finnhub/RSS 继续补充；旧读取�
 
 ## 生产切换与回滚
 
-- 切换：启用 `config/news_sources.yaml` 的 `yahoo_news.enabled`。调度器在 PEAD monitor
+- 切换：启用 `config/data/news_sources.yaml` 的 `yahoo_news.enabled`。调度器在 PEAD monitor
   前对完整覆盖名单做一次批量回填，随后各 Workflow 只读共享文档资产。
 - 观测：每日检查 `ats data health`；发布或故障排查时运行 `ats data quality`。
 - 回滚：关闭 `yahoo_news.enabled` 即停止新 Yahoo 回填；既有资产、来源别名、quarantine

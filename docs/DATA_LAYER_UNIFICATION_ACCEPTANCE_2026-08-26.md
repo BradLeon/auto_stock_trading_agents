@@ -18,7 +18,7 @@
 - `ats.data.products`：Agent/Workflow 使用的数据产品入口；
 - `ats.data.rollout`：source/consumer mode、shadow 对账、发布和回滚入口。
 
-旧的 `ats.data_platform`、`ats.structured`、`config/structured_data.yaml`、`config/sources.yaml` 和 `config/news_sources.yaml` 保留为兼容层；本阶段没有删除或迁移历史数据。
+旧的 `ats.data_platform`、`ats.structured`、`config/data/structured.yaml`、`config/data/sources.yaml` 和 `config/data/news_sources.yaml` 保留为兼容层；本阶段没有删除或迁移历史数据。
 
 ## 2. 配置与发布验收
 
@@ -53,7 +53,7 @@ PYTHONPATH=src .venv/bin/python -c 'import sys,types; sys.modules["readline"] = 
 
 覆盖：统一 catalog、命名空间、结构化财务/Consensus/区域序列/证据、生命周期/as-of/vintage/质量/发布、文档准入/资产/类型、SEC/earnings/transcript/news/research、数据迁移/存储/对账、PEAD、Sector、Chain 和相关 Workflow。
 
-结果：首次运行 **530 passed、1 failed**。唯一失败是已有文档一致性测试要求旧路径 `src/ats/structured/runtime_registry.py` 出现在兼容说明中；补充该说明后专项复测如下：
+结果：首次运行 **530 passed、1 failed**。唯一失败是已有文档一致性测试要求旧路径 `src/ats/data/adapters/structured/registry.py` 出现在兼容说明中；补充该说明后专项复测如下：
 
 ```bash
 PYTHONPATH=src .venv/bin/python -c 'import sys,types; sys.modules["readline"] = types.ModuleType("readline"); import pytest; raise SystemExit(pytest.main(["-q", "tests/test_structured_docs_consistency.py", "tests/test_data_layer_docs.py"]))'

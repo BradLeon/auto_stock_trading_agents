@@ -3,10 +3,10 @@
 import re
 
 from ats.data.stores import DATA_LAYER_TABLES, WORKFLOW_MEMORY_TABLES, reconcile_rows
-from ats.data.stores.unstructured.repository import UnstructuredRepository
-from ats.data_platform import DataProducts
+from ats.data.stores.unstructured import PlatformUnstructuredRepository
+from ats.data.products import DataProducts
 from ats.memory.store import _SCHEMA
-from ats.structured import SQLiteStructuredRepository, StructuredCatalog
+from ats.data.structured import SQLiteStructuredRepository, StructuredCatalog
 
 
 def test_legacy_sqlite_tables_have_explicit_data_or_memory_ownership():
@@ -23,7 +23,7 @@ def test_workflow_results_are_memory_not_data_layer_inputs():
     assert workflow_state.isdisjoint(DATA_LAYER_TABLES)
 
 
-def test_data_products_routes_document_reads_through_data_repository():
+def test_data_products_routes_document_reads_through_data_repository(tmp_path):
     class Backend:
         def documents(self, **_):
             return []
@@ -35,9 +35,11 @@ def test_data_products_routes_document_reads_through_data_repository():
             return []
 
     backend = Backend()
-    products = DataProducts(store=backend)
-    assert isinstance(products.unstructured, UnstructuredRepository)
-    assert products.unstructured.backend is backend
+    products = DataProducts(unstructured_repository=backend)
+    assert products.unstructured is backend
+    repository = PlatformUnstructuredRepository(tmp_path / "data.sqlite", writable=True)
+    assert isinstance(repository, PlatformUnstructuredRepository)
+    repository.close()
 
 
 def test_reconciliation_reports_missing_unexpected_and_value_differences():

@@ -23,44 +23,15 @@ name = "news"
 
 def fetch_news(symbol: str, since: datetime, until: datetime | None = None, *,
                store=None, consumer: str = "pead_monitor") -> list[NewsItem]:
+    """Read released news only; scheduled ingestion owns source acquisition.
+
+    A consumer must never fall back to an ad-hoc provider request: doing so bypasses
+    entity admission, deduplication and the platform lineage recorded at ingestion.
+    """
     until = until or datetime.now(timezone.utc)
-    from ..structured import read_mode
+    from .products.unstructured import platform_news_items
 
-    mode = read_mode(consumer)
-    if mode in {"platform", "fallback", "shadow"}:
-        from .products.unstructured import platform_news_items
-
-        platform_items = platform_news_items(entity=symbol, since=since, until=until)
-        if mode == "platform":
-            return platform_items
-        if mode == "fallback" and platform_items:
-            return platform_items
-
-    sources_cfg = load_news_sources()
-
-    items: list[NewsItem] = []
-    yahoo_cfg = sources_cfg.get("yahoo_news", {}) or {}
-    if yahoo_cfg.get("enabled", False):
-        from . import yahoo_news
-
-        items += yahoo_news.stored(symbol, since, store=store)
-    fh = safe_fetch(lambda: _finnhub(symbol, since, until), source=f"finnhub:{symbol}")
-    if fh:
-        items += fh
-    items += _rss(symbol, since, sources_cfg)
-    items += _x(symbol, since, sources_cfg)
-
-    # Cross-provider dedup uses the canonical URL. Provider ids remain the fallback for
-    # feeds (such as IBKR) that expose no public publisher URL.
-    seen, out = set(), []
-    for it in sorted(items, key=lambda x: x.published_at, reverse=True):
-        identity = external_id(it)
-        if identity in seen:
-            continue
-        seen.add(identity)
-        out.append(it)
-    _catalog(out, store=store)
-    return out
+    return platform_news_items(entity=symbol, since=since, until=until)
 
 
 def external_id(item: NewsItem) -> str:
@@ -81,9 +52,9 @@ def _catalog(items: list[NewsItem], *, store=None) -> None:
     from . import document_assets
 
     if store is None:
-        from ..memory import get_store
+        from .stores.unstructured import get_data_ingestion_store
 
-        store = get_store()
+        store = get_data_ingestion_store()
 
     for item in items:
         identity = external_id(item)
@@ -146,11 +117,11 @@ def acquire_body(item: NewsItem, *, store=None) -> str:
             return _read_version_text(version or {})
         finally:
             repository.close()
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import document_assets
     from .web import fetch_article_text
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     identity = external_id(item)
     row, cached = document_assets.read_external(identity, store=store)
     # Metadata versions are intentionally short. Once a real article body exists,

@@ -80,7 +80,7 @@ ticker 股价、OHLCV、订单簿、期权链、Greeks 和 IV 仍由 IBKR、yfin
 - 运维者：机器目录镜像、已接入/planned/runtime-excluded、认证、QPS unknown 与内部预算、调度、五维质量、故障、回滚、退役和验收命令均已覆盖。
 - 使用者：数据发现、CLI、Python、SQL、Pandas、latest/vintages/`as_of`、横截面、派生、血缘，以及 persistent/runtime 组合均给出当前可运行示例。
 
-总入口为 [DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)，状态事实源为 `config/structured_data.yaml`。
+总入口为 [DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)，状态事实源为 `config/data/structured.yaml`。
 
 ## 7. 未覆盖与后续小变更输入
 

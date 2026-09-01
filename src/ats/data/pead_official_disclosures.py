@@ -271,10 +271,10 @@ def collect_latest_package(
         filing_fetcher: Callable | None = None, transcript_fetcher: Callable | None = None,
         config_label: str = "") -> OfficialDisclosurePackage:
     """Collect/revalidate one PEAD issuer's latest event-bound disclosure package."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import defeatbeta, sec
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     checked = _now_date(now)
     event_resolver = event_resolver or resolve_latest_event
     resolution = event_resolver(

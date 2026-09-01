@@ -247,7 +247,7 @@ article_sources:
     match: []
 
   # 2026-08-18 接入。**文章已经在抓了，缺的只是通往命题的那一段。**
-  # config/news_sources.yaml 的 newsletter 管线（IMAP + Substack RSS）一直在收 SemiAnalysis，
+  # config/data/news_sources.yaml 的 newsletter 管线（IMAP + Substack RSS）一直在收 SemiAnalysis，
   # 产出 47 条 research_insights。但那张表的形状是 ticker/direction/summary/quote，
   # **没有 concept、没有 stance、没有 source_entity**，所以任何命题都够不着它。
   # 而躺在里面的东西是这样的：

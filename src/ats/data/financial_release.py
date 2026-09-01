@@ -41,8 +41,8 @@ def company_financial_release_check(repository, *, entities: list[str] | None = 
     and any stored official-XBRL derivation.  It deliberately does not inspect
     consumer modes or consumer shadow records.
     """
-    from ..structured import StructuredCatalog
-    from ..structured.quality import financial_quality
+    from .structured import StructuredCatalog
+    from .pipelines.structured.quality import financial_quality
 
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     dataset = repository.dataset("company_financials") or {}

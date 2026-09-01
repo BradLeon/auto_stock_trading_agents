@@ -21,7 +21,7 @@ def _isolate_db(tmp_path, monkeypatch):
     monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "structured_artifacts"))
     monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
     from ats.memory import reset_store_cache
-    from ats.structured import reset_repository_cache
+    from ats.data.structured import reset_repository_cache
 
     reset_store_cache()
     reset_repository_cache()

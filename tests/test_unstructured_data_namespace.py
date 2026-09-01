@@ -23,7 +23,7 @@ def test_unstructured_pipeline_and_store_surfaces_reexport_single_implementation
     from ats.data.pipelines.unstructured.documents import ingest
     from ats.data.products import UnstructuredDataProducts
     from ats.data.stores.unstructured.documents import store
-    from ats.data_platform import DataProducts
+    from ats.data.products import DataProducts
 
     assert admit is legacy_admit
     assert ingest is legacy_ingest

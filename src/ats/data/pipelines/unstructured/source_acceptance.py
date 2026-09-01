@@ -47,10 +47,10 @@ def default_release_path() -> Path:
 
 
 def _load_article_sources() -> dict[str, ArticleSourceDef]:
-    """Read the compatibility registry without importing the Chain consumer."""
+    """Read the unified registry without importing the Chain consumer."""
     from ....config import _config_dir, _load_yaml
 
-    raw = _load_yaml(_config_dir() / "sources.yaml").get("article_sources", {}) or {}
+    raw = _load_yaml(_config_dir() / "data" / "sources.yaml").get("article_sources", {}) or {}
     return {source_id: ArticleSourceDef(id=source_id, **(body or {}))
             for source_id, body in raw.items()}
 

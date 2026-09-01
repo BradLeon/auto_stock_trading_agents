@@ -1,16 +1,12 @@
 # Unified data-layer catalog index.
-# Detailed legacy registries remain referenced explicitly until their entries are
-# migrated. Secrets never belong in this file.
+# Detailed registries live under this directory. Secrets never belong in this file.
 version: 1
-
-legacy:
-  structured_catalog: ../structured_data.yaml
-  sources: ../sources.yaml
-  news_sources: ../news_sources.yaml
 
 domains:
   structured: structured.yaml
   unstructured: unstructured.yaml
+  sources: sources.yaml
+  news_sources: news_sources.yaml
   schedules: schedules.yaml
   legacy_inventory: legacy_inventory.yaml
   migration: migration.yaml

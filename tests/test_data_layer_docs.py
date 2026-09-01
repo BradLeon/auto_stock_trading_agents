@@ -23,7 +23,7 @@ def test_developer_doc_describes_component_boundaries_and_imports():
     text = _read("STRUCTURED_DATA_DEVELOPER.md")
     for value in (
         "ats/data/", "adapters/structured", "adapters/unstructured", "pipelines",
-        "stores", "products", "ats.data.products", "ats.data_platform",
+        "stores", "products", "ats.data.products", "ats.data.products",
         "ats data config",
     ):
         assert value in text

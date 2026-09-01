@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from .models import (
+from ...core.structured_models import (
     ArtifactDescriptor,
     EvidenceCandidateInput,
     EvidenceLink,
@@ -36,8 +36,8 @@ def _utc(value: datetime | None = None) -> datetime:
 
 
 def _default_document_resolver(document_id: str, version_id: str) -> dict | None:
-    from ..data import source_cache
-    from ..memory import get_store
+    from ... import source_cache
+    from ....memory import get_store
 
     store = get_store()
     version = next((row for row in store.document_versions(document_id)

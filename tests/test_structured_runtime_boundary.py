@@ -6,9 +6,9 @@ import pandas as pd
 import pytest
 
 from ats.data import market_data, options
-from ats.data_platform import DataProducts
+from ats.data.products import DataProducts
 from ats.schemas.market import Ticker
-from ats.structured import (
+from ats.data.structured import (
     AdapterBatch,
     ArtifactDescriptor,
     FetchRequest,

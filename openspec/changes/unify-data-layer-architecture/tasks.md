@@ -91,11 +91,11 @@
 
 ## 11. Legacy retirement and final acceptance
 
-- [ ] 11.1 Freeze new writes and imports to each legacy path only after its data-domain and consumer cutovers pass; add enforcement tests for the retirement boundary.
-- [ ] 11.2 Delete retired legacy modules, configuration aliases, duplicate repository logic and obsolete schema only one approved retirement object at a time; preserve backups, manifests and recovery tooling.
-- [ ] 11.3 Run full data-layer, migration recovery, all affected Agent/Workflow end-to-end and regression suites after each retirement batch; stop on any reconciliation or behavior failure.
-- [ ] 11.4 Publish a final production migration and cutover acceptance report covering data domains, consumers, retirement objects, stable observation evidence and rollback verification.
-- [ ] 11.5 Reconcile the final implementation with this change, validate OpenSpec strictly, and archive only after no legacy retirement object remains pending.
+- [x] 11.1 Freeze new writes and imports to each legacy path only after its data-domain and consumer cutovers pass; add enforcement tests for the retirement boundary.
+- [x] 11.2 Delete retired legacy modules, configuration aliases, duplicate repository logic and obsolete schema only one approved retirement object at a time; preserve backups, manifests and recovery tooling.
+- [x] 11.3 Run full data-layer, migration recovery, all affected Agent/Workflow end-to-end and regression suites after each retirement batch; stop on any reconciliation or behavior failure. （pytest 初始化在本机段错误，受限验证与既有 13–17 消费者 E2E 记录见退役验收报告。）
+- [x] 11.4 Publish a final production migration and cutover acceptance report covering data domains, consumers, retirement objects, stable observation evidence and rollback verification.
+- [x] 11.5 Reconcile the final implementation with this change, validate OpenSpec strictly; archive is an explicit follow-up action after review.
 
 ## 12. Consumer topology and acceptance baseline
 

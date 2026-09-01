@@ -46,7 +46,7 @@ def workflow_data_boundary(consumer: str) -> WorkflowDataBoundary:
     normalized = consumer.strip().lower().replace("-", "_")
     if normalized not in _BOUNDARIES:
         raise ValueError(f"unknown workflow data boundary: {consumer}")
-    from ..structured import read_mode
+    from ..rollout_modes import read_mode
 
     body = _BOUNDARIES[normalized]
     return WorkflowDataBoundary(

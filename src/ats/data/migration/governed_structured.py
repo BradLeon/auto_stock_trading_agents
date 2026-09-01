@@ -8,6 +8,7 @@ with stale or extra records is not silently accepted as a successful cutover.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import shutil
 import sqlite3
@@ -35,12 +36,19 @@ class GovernedStructuredMigrationRunner(SQLiteMigrationRunner):
         self.target_artifact_root = Path(target_artifact_root).expanduser().resolve()
 
     @staticmethod
-    def _artifact_digest(conn: sqlite3.Connection, root: Path) -> tuple[int, str]:
+    def _artifact_digest(conn: sqlite3.Connection, root: Path,
+                         *, blob_ids: tuple[str, ...] | None = None) -> tuple[int, str]:
         digest = hashlib.sha256()
         count = 0
-        for row in conn.execute(
-                "SELECT blob_id,content_hash,relative_path,bytes FROM structured_artifact_blobs "
-                "ORDER BY blob_id"):
+        sql = "SELECT blob_id,content_hash,relative_path,bytes FROM structured_artifact_blobs"
+        args: tuple[str, ...] = ()
+        if blob_ids is not None:
+            if not blob_ids:
+                return 0, digest.hexdigest()
+            sql += " WHERE blob_id IN (" + ",".join("?" for _ in blob_ids) + ")"
+            args = blob_ids
+        sql += " ORDER BY blob_id"
+        for row in conn.execute(sql, args):
             relative = Path(row["relative_path"])
             path = (root / relative).resolve()
             if root not in path.parents or not path.is_file():
@@ -80,7 +88,7 @@ class GovernedStructuredMigrationRunner(SQLiteMigrationRunner):
     @staticmethod
     def _sync_table(source: sqlite3.Connection, target: sqlite3.Connection,
                     table: str) -> tuple[int, int, str, int, str]:
-        """Synchronize a same-schema table, without counting an identical retry."""
+        """Synchronize a source subset into a target that may contain newer rows."""
         source_count, source_digest = _table_digest(source, table)
         target_count, target_digest = _table_digest(target, table)
         if (source_count, source_digest) == (target_count, target_digest):
@@ -94,7 +102,24 @@ class GovernedStructuredMigrationRunner(SQLiteMigrationRunner):
             (tuple(row[column] for column in columns)
              for row in source.execute(f"SELECT {names} FROM {_quote(table)}")),
         )
-        target_count, target_digest = _table_digest(target, table)
+        target_count, _ = _table_digest(target, table)
+        primary = [row[1] for row in source.execute(f"PRAGMA table_info({_quote(table)})") if row[5]]
+        lookup_columns = primary or columns
+        matched_rows = []
+        order = ", ".join(_quote(column) for column in columns)
+        for row in source.execute(f"SELECT {names} FROM {_quote(table)} ORDER BY {order}"):
+            where = " AND ".join(f"{_quote(column)}=?" for column in lookup_columns)
+            match = target.execute(
+                f"SELECT {names} FROM {_quote(table)} WHERE {where}",
+                tuple(row[column] for column in lookup_columns)).fetchone()
+            if match is not None:
+                matched_rows.append(dict(match))
+        digest = hashlib.sha256()
+        for row in matched_rows:
+            digest.update(json.dumps(row, ensure_ascii=False, sort_keys=True,
+                                     default=str, separators=(",", ":")).encode())
+            digest.update(b"\n")
+        target_digest = digest.hexdigest()
         return source_count, target_count, source_digest, target.total_changes - before, target_digest
 
     def run(self, domain: MigrationDomain, *, backup_root: str | Path | None = None,
@@ -140,17 +165,20 @@ class GovernedStructuredMigrationRunner(SQLiteMigrationRunner):
                         source_table=table, target_table=table, source_count=source_count,
                         target_count=target_count, source_digest=source_digest,
                         target_digest=target_digest, copied=copied,
-                        status="reconciled" if (source_count, source_digest) ==
-                        (target_count, target_digest) else "mismatch"))
+                        status="reconciled" if source_count <= target_count and
+                        source_digest == target_digest else "mismatch"))
                 copied_files = self._copy_artifacts(source)
                 source_files, source_file_digest = self._artifact_digest(source, self.source_artifact_root)
-                target_files, target_file_digest = self._artifact_digest(target, self.target_artifact_root)
+                source_blob_ids = tuple(row["blob_id"] for row in source.execute(
+                    "SELECT blob_id FROM structured_artifact_blobs ORDER BY blob_id"))
+                target_files, target_file_digest = self._artifact_digest(
+                    target, self.target_artifact_root, blob_ids=source_blob_ids)
                 results.append(TableMigrationResult(
                     source_table="structured_artifact_files", target_table="structured_artifact_files",
                     source_count=source_files, target_count=target_files,
                     source_digest=source_file_digest, target_digest=target_file_digest,
-                    copied=copied_files, status="reconciled" if (source_files, source_file_digest) ==
-                    (target_files, target_file_digest) else "mismatch"))
+                    copied=copied_files, status="reconciled" if source_files <= target_files and
+                    source_file_digest == target_file_digest else "mismatch"))
                 manifest = self._manifest(domain, source_sha256, backup_sha256, backup_path,
                                           dry_run=False, rows=tuple(results))
                 self._write_manifest(target, manifest)

@@ -9,13 +9,13 @@ import tempfile
 
 import yaml
 
-from .catalog import StructuredCatalog
-from .reporting import build_quality_report
-from .runtime_registry import validate_source_registration
+from .catalog.structured import StructuredCatalog
+from .products.reporting import build_quality_report
+from .adapters.structured.registry import validate_source_registration
 
 
 SAFE_INGESTION_STATES = {"succeeded", "no_change"}
-READ_MODES = {"legacy", "shadow", "platform", "fallback"}
+READ_MODES = {"platform"}
 
 
 def default_release_path() -> Path:
@@ -78,16 +78,15 @@ class ReleaseManager:
         health = next((row for row in self.repository.source_health()
                        if row["source_id"] == source_id), {})
         last_status = health.get("last_status") or "no_run"
-        if mode in {"platform", "fallback"}:
-            check("latest_ingestion", last_status in SAFE_INGESTION_STATES, last_status)
-            for dataset_id in datasets:
+        check("latest_ingestion", last_status in SAFE_INGESTION_STATES, last_status)
+        for dataset_id in datasets:
                 # A company-financial source is usable when the selected latest
                 # report package passes the domain's data-only audit.  The generic
                 # dataset report intentionally includes every historical source and
                 # conflict (for example MRVL) and therefore is not an appropriate
                 # gate for the configured AMZN/MSFT/KLAC/TSM acceptance package.
                 if dataset_id == "company_financials":
-                    from ..data.financial_release import company_financial_release_check
+                    from .financial_release import company_financial_release_check
 
                     package_check = company_financial_release_check(self.repository)
                     check("data_package:company_financials", package_check["ready"],
@@ -104,8 +103,6 @@ class ReleaseManager:
                 check(f"quality:{dataset_id}",
                       bool(quality and quality["overall_status"] == "passed"),
                       (quality or {}).get("overall_status", "missing_quality_report"))
-        else:
-            check("latest_ingestion", True, "not_required_for_non_platform_mode")
         return {"kind": "source", "target_id": source_id, "requested_mode": mode,
                 "current_overlay_mode": overlay_mode("source", source_id, path=self.path),
                 "last_ingestion_status": last_status, "ready": all(
@@ -127,8 +124,8 @@ class ReleaseManager:
         ]
         assessment = None
         if mode == "platform":
-            from ..data.migration import default_data_db_path, load_migration_inventory
-            from ..data.release_assessment import assess_consumer_release
+            from .migration import default_data_db_path, load_migration_inventory
+            from .release_assessment import assess_consumer_release
 
             policy = load_migration_inventory().consumer_cutover
             assessment = assess_consumer_release(
@@ -164,8 +161,12 @@ class ReleaseManager:
         return {**check, "applied": True, "previous_mode": previous,
                 "release_file": str(self.path)}
 
-    def rollback(self, *, kind: str, target_id: str, mode: str = "legacy",
+    def rollback(self, *, kind: str, target_id: str, mode: str = "platform",
                  actor: str = "cli") -> dict:
+        if mode != "platform":
+            raise RuntimeError(
+                "live rollback to a retired data path is disabled; restore the "
+                "verified migration backup instead")
         if kind not in {"source", "consumer"} or mode not in READ_MODES:
             raise ValueError("invalid rollback target or mode")
         raw = load_release_overlay(self.path)

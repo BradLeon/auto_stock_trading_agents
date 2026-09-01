@@ -9,6 +9,17 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+__all__ = [
+    "AdapterArtifact", "AdapterBatch", "AdapterFailure", "AdmissionResult",
+    "ArtifactDescriptor", "CatalogStatus", "DataSnapshot", "DerivationDefinition",
+    "EvidenceCandidateInput", "EvidenceLink", "FetchRequest", "IngestionStatus",
+    "MetricDefinition", "NativeRecord", "ObservationInput", "ObservationVintage",
+    "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "SeriesIdentity",
+    "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
+    "VerificationStatus",
+]
+
+
 class Persistence(str, Enum):
     PERSISTENT = "persistent"
     RUNTIME = "runtime"

@@ -6,7 +6,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from ...structured import (
+from ..structured import (
     AdapterArtifact,
     AdapterBatch,
     AdapterFailure,

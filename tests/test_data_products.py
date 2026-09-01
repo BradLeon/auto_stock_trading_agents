@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 
 from ats.data import source_cache
-from ats.data_platform import DataProducts
+from ats.data.products import DataProducts
 from ats.memory import get_store
 from ats.schemas.chain import Observation, SeriesPoint, SourceDef
 

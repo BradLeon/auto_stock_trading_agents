@@ -2,7 +2,7 @@
 
 > 盘点日期：2026-08-25
 > 用途：固定平台改造前的消费者、返回契约、覆盖和迁移边界
-> 机器可读配置：[`config/structured_data.yaml`](../config/structured_data.yaml)
+> 机器可读配置：[`config/data/structured.yaml`](../config/data/structured.yaml)
 
 ## 1. 结论
 

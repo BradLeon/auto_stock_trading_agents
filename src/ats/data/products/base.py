@@ -13,10 +13,8 @@ import json
 
 class DataProducts:
     def __init__(self, store=None, structured_repository=None, unstructured_repository=None):
-        if store is None:
-            from ..memory import get_store
-
-            store = get_store()
+        # ``store`` is retained only for explicitly injected test fixtures.  The
+        # released product surface never opens ``ats.memory`` for persistent data.
         self.store = store
         self._structured_repository = structured_repository
         self._unstructured_repository = unstructured_repository
@@ -24,27 +22,26 @@ class DataProducts:
     @property
     def unstructured(self):
         if self._unstructured_repository is None:
-            from ..data.stores.unstructured.repository import UnstructuredRepository
+            from ..stores.unstructured import get_platform_unstructured_repository
 
-            self._unstructured_repository = UnstructuredRepository(self.store)
+            self._unstructured_repository = get_platform_unstructured_repository()
         return self._unstructured_repository
 
     @property
     def structured(self):
         if self._structured_repository is None:
-            from ..data.stores.structured.repository import get_repository
+            from ..runtime import get_platform_structured_repository
 
-            self._structured_repository = get_repository()
-            self._structured_repository.bootstrap_catalog()
+            self._structured_repository = get_platform_structured_repository()
         return self._structured_repository
 
     def indicator_series(self, *, source_id: str | None = None,
                          series: str | None = None, entity: str | None = None,
                          since: str | None = None, as_of: datetime | None = None,
                          include_vintages: bool = False, as_frame: bool = False):
-        rows = self.store.measurements(
-            source_id=source_id, series=series, entity=entity, since=since,
-            as_of=as_of, latest_only=not include_vintages)
+        rows = self.structured.observations(
+            source_id=source_id, metric_id=series, entity_id=entity, since=since,
+            as_of=as_of, latest_only=not include_vintages, accepted_only=True)
         if not as_frame:
             return rows
         try:
@@ -104,7 +101,7 @@ class DataProducts:
         selected: list[dict] = []
         rejected: list[dict] = []
         conflicts: list[dict] = []
-        from ..structured import SourceSelector
+        from .selection import SourceSelector
 
         if source_id or source_strategy == "all" or not rows:
             for row in rows:
@@ -273,8 +270,8 @@ class DataProducts:
                statistic: str = "mean", fx_result: dict | None = None,
                right_result: dict | None = None,
                target_currency: str = "", convention: str = "multiply") -> dict:
-        from ..structured import DerivationDefinition
-        from ..structured.derivations import calculate
+        from ..core.structured_models import DerivationDefinition
+        from ..pipelines.structured.derivations import calculate
 
         parameters = {}
         if operation == "rolling":
@@ -341,22 +338,22 @@ class DataProducts:
         return self.structured.metrics()
 
     def structured_catalog(self) -> dict:
-        from ..structured import DataDiscovery
+        from .discovery import DataDiscovery
 
         return DataDiscovery(self.structured).catalog_view()
 
     def describe_structured(self, value: str, *, kind: str = "") -> dict:
-        from ..structured import DataDiscovery
+        from .discovery import DataDiscovery
 
         return DataDiscovery(self.structured).describe(value, kind=kind)
 
     def structured_availability(self, *, entity: str = "", dataset: str = "") -> dict:
-        from ..structured import DataDiscovery
+        from .discovery import DataDiscovery
 
         return DataDiscovery(self.structured).availability(entity=entity, dataset=dataset)
 
     def structured_examples(self, *, dataset: str = "") -> dict:
-        from ..structured import DataDiscovery
+        from .discovery import DataDiscovery
 
         return DataDiscovery(self.structured).examples(dataset=dataset)
 
@@ -388,7 +385,7 @@ class DataProducts:
 
     def financial_quality(self, *, entity: str | None = None,
                           as_of: datetime | None = None) -> dict:
-        from ..structured.quality import financial_quality
+        from ..pipelines.structured.quality import financial_quality
 
         rows = self.structured.observations(
             dataset_id="company_financials", entity_id=entity, as_of=as_of,
@@ -478,7 +475,7 @@ class DataProducts:
     def consensus_quality(self, *, entity: str | None = None,
                           as_of: datetime | None = None,
                           now: datetime | None = None) -> dict:
-        from ..structured.quality import consensus_quality
+        from ..pipelines.structured.quality import consensus_quality
 
         rows = self.structured.observations(
             dataset_id="market_consensus", source_id="yfinance_consensus",
@@ -504,7 +501,7 @@ class DataProducts:
 
     def structured_quality_report(self, *, dataset: str | None = None,
                                   now: datetime | None = None) -> dict:
-        from ..structured import build_quality_report
+        from .reporting import build_quality_report
 
         return build_quality_report(self.structured, dataset_id=dataset, now=now)
 
@@ -557,10 +554,10 @@ class DataProducts:
             "entity": key,
             "documents": self.unstructured.documents(
                 entity=key, published_since=since.isoformat() if since else None, limit=1000),
-            "measurements": self.store.measurements(entity=key, limit=2000),
+            "measurements": self.structured.observations(entity_id=key, limit=2000),
             "facts": self.unstructured.facts(entity=key, since=since, limit=1000),
-            "pead_projections": self.store.task_projections(
-                profile="pead_research", target_type="entity", target_id=key, limit=500),
+            # Workflow projections are deliberately memory outputs, not data products.
+            "pead_projections": [],
         }
 
     def claim_evidence_package(self, concept: str, *, limit: int = 500) -> dict:
@@ -598,7 +595,7 @@ class DataProducts:
 
     def quality(self) -> dict:
         """Queryable release-gate metrics for accepted and quarantined documents."""
-        from ..data import document_assets
+        from .. import document_assets
 
         candidates = self.unstructured.document_candidates(limit=100_000)
         check_counts = {
@@ -694,4 +691,10 @@ class DataProducts:
 
 
 def get_data_products() -> DataProducts:
-    return DataProducts()
+    from ..runtime import get_platform_structured_repository
+    from ..stores.unstructured import get_platform_unstructured_repository
+
+    return DataProducts(
+        structured_repository=get_platform_structured_repository(),
+        unstructured_repository=get_platform_unstructured_repository(),
+    )

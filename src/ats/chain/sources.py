@@ -19,7 +19,7 @@ model judges the fact; neither does the other's job.
 Adapters live in data/sources/<adapter>.py. That layer is deliberately NOT abstracted:
 every agency's API differs, and pretending otherwise would produce a config language
 that is just Python with worse errors. What IS uniform is the declaration and the
-output — see config/sources.yaml.
+output — see config/data/sources.yaml.
 """
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ FLAT_BAND = 0.02
 
 
 def load_sources() -> list[SourceDef]:
-    """Read config/sources.yaml. Missing file is fine — no third-party sources."""
+    """Read config/data/sources.yaml. Missing file is fine — no third-party sources."""
     from ..config import _config_dir, _load_yaml
 
-    raw = _load_yaml(_config_dir() / "sources.yaml").get("sources", {}) or {}
+    raw = _load_yaml(_config_dir() / "data" / "sources.yaml").get("sources", {}) or {}
     out = []
     for sid, body in raw.items():
         try:
@@ -136,7 +136,7 @@ def fetch(source: SourceDef, *, lookback_months: int = 6) -> list[SeriesPoint]:
     try:
         if source.adapter not in {"tw_mof", "kr_ecos"}:
             return list(mod.fetch(lookback_months=lookback_months, **source.params))
-        from ..structured import read_mode
+        from ..data.structured import read_mode
 
         mode = read_mode("chain_regional", source_id=source.id)
         if mode == "legacy":
@@ -174,7 +174,7 @@ def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPo
     from ..data.sources import kr_ecos, tw_mof
     from ..data.products import DataProducts
     from ..data.runtime import get_platform_structured_repository
-    from ..structured import FetchRequest, IngestionPipeline
+    from ..data.structured import FetchRequest, IngestionPipeline
 
     if source.adapter == "tw_mof":
         adapter = tw_mof.TaiwanMOFAdapter()

@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from ats.data.migration import GovernedStructuredMigrationRunner, load_migration_inventory
-from ats.structured import ArtifactDescriptor, ObservationInput, SeriesIdentity, SQLiteStructuredRepository
+from ats.data.structured import ArtifactDescriptor, ObservationInput, SeriesIdentity, SQLiteStructuredRepository
 
 
 def _domain():

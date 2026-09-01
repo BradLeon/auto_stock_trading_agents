@@ -253,10 +253,10 @@ def admit(
     store=None,
 ) -> AdmissionOutcome:
     """Validate, audit the decision, and persist only accepted bodies to assets."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import document_assets
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     validation = validate_candidate(candidate, extensions=extensions)
     if not validation.accepted:
         path = _write_quarantine(candidate)

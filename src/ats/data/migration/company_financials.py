@@ -252,7 +252,7 @@ class CompanyFinancialSemanticRepair:
             conn.executescript(_REPAIR_SCHEMA)
             # Catalog bootstrap makes the new governed metric definitions and provider
             # mappings visible before rows use them.
-            from ...structured import SQLiteStructuredRepository
+            from ..structured import SQLiteStructuredRepository
 
             repo = SQLiteStructuredRepository(self.path)
             try:

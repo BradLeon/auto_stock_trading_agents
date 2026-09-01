@@ -18,8 +18,8 @@
 
 | 接口 | 位置/命令 | 验收结果 |
 |---|---|---|
-| 机器配置 | `config/structured_data.yaml` | source/dataset/metric、预算、质量门、默认 mode 统一登记 |
-| 运行注册 | `src/ats/structured/runtime_registry.py` | YAML adapter key 只映射到受控工厂，不允许任意动态 import |
+| 机器配置 | `config/data/structured.yaml` | source/dataset/metric、预算、质量门、默认 mode 统一登记 |
+| 运行注册 | `src/ats/data/adapters/structured/registry.py` | YAML adapter key 只映射到受控工厂，不允许任意动态 import |
 | 配置校验 | `ats data validate-source --source <id>` | 返回逐项 checks 与稳定 reason codes；不联网、不写库 |
 | 隔离采集 | `ats data ingest --source <id> --force --db <path> --artifact-root <path>` | DB/artifact 均可定向到隔离目录；runtime/excluded 仍不可绕过 |
 | 发布门 | `ats data release-check --source <id> --mode platform` | 联合运行注册、最近采集和关联数据集五维质量 |

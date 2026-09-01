@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from .models import SourceSelection
-from .repository import SQLiteStructuredRepository
+from ..core.structured_models import SourceSelection
+from ..stores.structured.repository import SQLiteStructuredRepository
 
 
 class SourceSelector:

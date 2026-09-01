@@ -9,7 +9,7 @@ import pytest
 from ats.data.sources import kr_ecos, tw_mof
 from ats.chain import sources as chain_sources
 from ats.schemas.chain import SeriesPoint, SourceDef
-from ats.structured import (
+from ats.data.structured import (
     FetchRequest,
     IngestionPipeline,
     SQLiteStructuredRepository,

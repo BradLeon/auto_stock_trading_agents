@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from ats.data.migration import CompanyFinancialSemanticRepair
-from ats.structured import (
+from ats.data.structured import (
     ArtifactDescriptor,
     ObservationInput,
     SeriesIdentity,

@@ -5,8 +5,8 @@ import json
 
 import yaml
 
-from ats.data_platform import DataProducts
-from ats.structured import (
+from ats.data.products import DataProducts
+from ats.data.structured import (
     AdapterArtifact,
     AdapterBatch,
     DataDiscovery,
@@ -109,7 +109,7 @@ def test_source_lifecycle_validates_ingests_publishes_and_rolls_back(tmp_path, m
     assert load_release_overlay(release_file)["sources"]["fake_source"] == "platform"
 
     monkeypatch.setenv("ATS_STRUCTURED_RELEASE_FILE", str(release_file))
-    from ats.structured.flags import source_mode
+    from ats.data.structured.flags import source_mode
 
     assert source_mode("fake_source") == "platform"
     manager.rollback(kind="source", target_id="fake_source", actor="pytest")
@@ -142,7 +142,7 @@ def test_release_check_blocks_no_run_and_runtime_source(tmp_path):
 
 def test_trendforce_current_source_uses_unified_batch_and_raw_artifact(tmp_path):
     from ats.data.sources.trendforce import TrendForceDRAMAdapter, parse_html
-    from ats.structured import FetchRequest, IngestionPipeline
+    from ats.data.structured import FetchRequest, IngestionPipeline
 
     html = """
     DRAM Contract Price (2H Aug) Last Update 2026-08-25
@@ -189,7 +189,7 @@ def test_trendforce_current_source_uses_unified_batch_and_raw_artifact(tmp_path)
     session, updated, points = parse_html(html.replace("2H Aug", "2H Jun"))
     assert (session, updated, points[0].period) == ("2H Jun", "2026-08-25", "2026-06-16")
 
-    from ats.data_platform import DataProducts
+    from ats.data.products import DataProducts
 
     selected = DataProducts(structured_repository=repository).metric_series(
         metric="industry.dram_contract_price", entity="DRAM_CONTRACT_PRICE",

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 LegacyKind = Literal["module", "config", "database", "artifact", "document_root"]
+RetirementStatus = Literal["active", "retired", "retained", "reclassified"]
 
 
 class LegacyObject(BaseModel):
@@ -19,6 +20,7 @@ class LegacyObject(BaseModel):
     target_owner: str = ""
     data_domains: list[str] = Field(min_length=1)
     rollback: str = ""
+    status: RetirementStatus = "active"
 
 
 class LegacyConsumer(BaseModel):
@@ -81,7 +83,7 @@ class MigrationInventory:
         migration_file = migration_file.expanduser().resolve()
         inventory = _load(inventory_file)
         migration = _load(migration_file)
-        if inventory.get("version") != 1:
+        if inventory.get("version") not in {1, 2}:
             raise ValueError("unsupported legacy inventory version")
         if migration.get("version") != 1:
             raise ValueError("unsupported migration plan version")
@@ -126,8 +128,12 @@ class MigrationInventory:
         for item in self.legacy_objects:
             check(f"legacy:{item.id}:unique", item.id not in seen, "legacy_id_duplicate")
             seen.add(item.id)
-            check(f"legacy:{item.id}:paths", all(self._path_exists(path) for path in item.paths),
-                  "legacy_path_missing")
+            paths_exist = all(self._path_exists(path) for path in item.paths)
+            if item.status == "retired":
+                check(f"legacy:{item.id}:paths_removed", not paths_exist,
+                      "retired_legacy_path_still_present")
+            else:
+                check(f"legacy:{item.id}:paths", paths_exist, "legacy_path_missing")
             check(f"legacy:{item.id}:owner", bool(item.target_owner), "legacy_owner_missing")
             check(f"legacy:{item.id}:rollback", bool(item.rollback), "legacy_rollback_missing")
 

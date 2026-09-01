@@ -1,10 +1,10 @@
 # Unstructured-domain extensions to the unified catalog.
-# Existing numeric evidence and article/news registries are loaded from the
-# explicit legacy paths in catalog.yaml during the compatibility period.
+# Detailed third-party and news registries are in ``sources.yaml`` and
+# ``news_sources.yaml`` in this directory.
 version: 1
 legacy_registries:
-  evidence: ../sources.yaml
-  news: ../news_sources.yaml
+  evidence: sources.yaml
+  news: news_sources.yaml
 document_types:
   - earnings_release
   - sec_filing
@@ -18,8 +18,8 @@ admission:
   quarantine_on_short_body: true
 retention:
   default: source_policy
-# 这些条目是来源级发布的配置索引；详细的抓取参数仍由兼容期内的
-# config/sources.yaml 与 config/news_sources.yaml 持有。status 仅是初始安全模式，
+# 这些条目是来源级发布的配置索引；详细的抓取参数由同目录的
+# sources.yaml 与 news_sources.yaml 持有。status 仅是初始安全模式，
 # 实际是否可发布必须由 source-acceptance 的数据质量报告决定。
 sources:
   trendforce_news:
@@ -32,7 +32,7 @@ sources:
       max_pages: 5
       max_body_requests: 16
     policy:
-      registry: ../sources.yaml#article_sources.trendforce_news
+      registry: sources.yaml#article_sources.trendforce_news
       scope: article_index
       minimum_body_chars: 800
       max_body_attempts: 2
@@ -48,7 +48,7 @@ sources:
     request_budget:
       max_items_per_run: 4
     policy:
-      registry: ../sources.yaml#article_sources.semianalysis
+      registry: sources.yaml#article_sources.semianalysis
       acquisition: research_imap_and_rss
       minimum_body_chars: 2000
       lookback_days: 30
@@ -70,7 +70,7 @@ sources:
       slice_days: 3
       max_body_requests: 10
     policy:
-      registry: ../sources.yaml#article_sources.ibkr_news
+      registry: sources.yaml#article_sources.ibkr_news
       access: tws_read_only
       minimum_body_chars: 600
       lookback_days: 7
@@ -100,7 +100,7 @@ sources:
       max_items_per_entity: 10
       max_body_requests: 24
     policy:
-      registry: ../sources.yaml#article_sources.yfinance_live_news
+      registry: sources.yaml#article_sources.yfinance_live_news
       acquisition: yfinance_ticker_news
       entities: dynamic_pead_targets
       minimum_body_chars: 800

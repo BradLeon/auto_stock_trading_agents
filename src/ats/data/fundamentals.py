@@ -58,7 +58,7 @@ def _legacy_fetch(symbol: str, *, include_statements: bool = True) -> Fundamenta
 
 def fetch(symbol: str, *, consumer: str = "pead_fundamentals") -> FundamentalData:
     """Compatibility DTO with reversible legacy/shadow/platform/fallback reads."""
-    from ..structured import read_mode
+    from .structured import read_mode
 
     mode = read_mode(consumer, source_id="sec_companyfacts")
     if mode == "legacy":
@@ -218,7 +218,7 @@ def fetch_light(symbol: str, *, consumer: str = "runtime_light") -> dict:
 
     if any(v is not None for v in out.values()):
         _LIGHT_CACHE[symbol] = (_t.time(), dict(out))
-    from ..structured import read_mode
+    from .structured import read_mode
 
     mode = read_mode(consumer)
     if mode == "legacy":
@@ -248,7 +248,7 @@ def fetch_constituent_financials(symbol: str, *,
     platform/fallback mode a missing report package is explicit and never filled
     from a Provider's TTM/web fields.
     """
-    from ..structured import read_mode
+    from .structured import read_mode
 
     # Preserve the established, rate-limited runtime query and legacy comparison
     # path without allowing its accounting fields to masquerade as platform data.
@@ -749,7 +749,7 @@ def _refresh_report_package(repository, *, symbol: str) -> dict | None:
     preference.  It prevents a later SEC/IR pull from overriding or silently
     patching a usable defeatbeta/yfinance report package.
     """
-    from ..structured import FetchRequest, IngestionPipeline
+    from .structured import FetchRequest, IngestionPipeline
     from .sources.company_financials import (
         CompanyDisclosuresAdapter,
         DefeatBetaStatementAdapter,

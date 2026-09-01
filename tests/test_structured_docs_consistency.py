@@ -5,7 +5,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CATALOG_PATH = ROOT / "config" / "structured_data.yaml"
+CATALOG_PATH = ROOT / "config" / "data" / "structured.yaml"
 ARCHITECTURE_PATH = ROOT / "docs" / "DATA_ARCHITECTURE.md"
 DEVELOPER_PATH = ROOT / "docs" / "STRUCTURED_DATA_DEVELOPER.md"
 OPERATIONS_PATH = ROOT / "docs" / "STRUCTURED_DATA_OPERATIONS.md"
@@ -30,7 +30,7 @@ def test_architecture_is_the_role_document_entry_point() -> None:
         "STRUCTURED_DATA_USER_GUIDE.md",
     ):
         assert f"]({filename})" in architecture
-    assert "../config/structured_data.yaml" in architecture
+    assert "../config/data/structured.yaml" in architecture
 
 
 def test_architecture_links_every_structured_validation_report() -> None:
@@ -76,8 +76,8 @@ def test_role_docs_share_catalog_and_command_vocabulary() -> None:
     operations = _read(OPERATIONS_PATH)
     user_guide = _read(USER_GUIDE_PATH)
 
-    assert "config/structured_data.yaml" in developer
-    assert "config/structured_data.yaml" in operations
+    assert "config/data/structured.yaml" in developer
+    assert "config/data/structured.yaml" in operations
     assert "data health" in operations and "data health" in user_guide
     assert "data quality" in operations and "data quality" in user_guide
     assert "data series" in operations and "data series" in user_guide

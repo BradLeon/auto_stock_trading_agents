@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
 
-from ats.structured import (
+from ats.data.structured import (
     ArtifactDescriptor,
     MetricDefinition,
     ObservationInput,
@@ -52,7 +52,7 @@ def test_empty_database_bootstraps_catalog_without_workflow_tables(tmp_path):
 
 
 def test_repository_uses_separate_path_when_configured(monkeypatch, tmp_path):
-    from ats.structured.repository import default_db_path
+    from ats.data.structured.repository import default_db_path
 
     legacy = tmp_path / "legacy.sqlite"
     structured = tmp_path / "only-structured.sqlite"

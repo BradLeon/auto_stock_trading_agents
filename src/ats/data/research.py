@@ -1,6 +1,6 @@
 """Newsletter/research article ingestion — Gmail IMAP + Substack RSS, full text.
 
-High-signal subscribed sources (config/news_sources.yaml `newsletters:`) are read
+High-signal subscribed sources (config/data/news_sources.yaml `newsletters:`) are read
 in full — no ticker-keyword filter. Paid newsletter posts are only complete in
 email, hence the IMAP path; the RSS path covers free posts. Each adapter degrades
 independently (no creds / dead feed -> skipped, never raises).
@@ -139,10 +139,10 @@ def ingest_batch(since: datetime, *, store=None) -> AcquisitionBatch:
     consumers read `stored_articles` instead, so adding a consumer never adds another
     source-specific fetch path.
     """
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import document_assets
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     batch = fetch_batch(since, store=store)
     articles = list(batch.articles)
     persisted = True
@@ -191,10 +191,10 @@ def stored_articles(since: datetime, *, source_match: str = "", store=None,
                     limit: int = 500, allow_incomplete: bool = False,
                     consumer: str = "pead_research") -> list[Article]:
     """Read research bodies from the shared document asset store; never uses network."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from .source_cache import _split_frontmatter
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     # Reading accepted document history is data-layer work.  The PEAD workflow still
     # owns its processing lease and insight/event writes in memory, so route only this
     # immutable input and leave those write contracts untouched until retirement.

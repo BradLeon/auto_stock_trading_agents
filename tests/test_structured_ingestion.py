@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 import json
 
-from ats.structured import (
+from ats.data.structured import (
     AdapterArtifact,
     AdapterBatch,
     AdapterFailure,

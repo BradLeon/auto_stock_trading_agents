@@ -179,7 +179,11 @@ def _insert_rows(source: sqlite3.Connection, target: sqlite3.Connection,
     rows = source.execute(f"SELECT {names} FROM {_quote(source_table)}")
     before = target.total_changes
     target.executemany(
-        f"INSERT OR IGNORE INTO {_quote(target_table)} ({names}) VALUES ({placeholders})",
+        # A stable legacy identity may have received metadata-only corrections
+        # (for example ``fetched_at``) after an earlier rehearsal.  The source
+        # remains authoritative for this one-time migration batch, so refresh the
+        # identical primary key instead of silently retaining stale target fields.
+        f"INSERT OR REPLACE INTO {_quote(target_table)} ({names}) VALUES ({placeholders})",
         (tuple(row[column] for column in columns) for row in rows),
     )
     return target.total_changes - before

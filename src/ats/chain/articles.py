@@ -69,10 +69,10 @@ class ArticleRunStat:
 
 
 def load_article_sources() -> list[ArticleSourceDef]:
-    """Read config/sources.yaml `article_sources:`. Missing key is fine — none declared."""
+    """Read config/data/sources.yaml `article_sources:`. Missing key is fine."""
     from ..config import _config_dir, _load_yaml
 
-    raw = _load_yaml(_config_dir() / "sources.yaml").get("article_sources", {}) or {}
+    raw = _load_yaml(_config_dir() / "data" / "sources.yaml").get("article_sources", {}) or {}
     out = []
     for sid, body in raw.items():
         try:

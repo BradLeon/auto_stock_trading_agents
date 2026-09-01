@@ -166,10 +166,10 @@ def save_structure(item: NewsItem, document) -> Path | None:
 def stored(symbol: str, since: datetime, *, store=None,
            limit: int = 2000) -> list[NewsItem]:
     """Read already-backfilled Yahoo stories; consumers never query Parquet directly."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import document_assets
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     cutoff = since.astimezone(timezone.utc).isoformat()
     rows = store.documents(
         entity=symbol, doc_type="news_item", source_contains="yahoo:defeatbeta",
@@ -201,10 +201,10 @@ def backfill(symbols: list[str], since: datetime, until: datetime | None = None,
              now: datetime | None = None,
              stale_after_hours: float = 72.0) -> YahooNewsBatch:
     """Persist one date-bounded daily backfill for a symbol universe."""
-    from ..memory import get_store
+    from .stores.unstructured import get_data_ingestion_store
     from . import news as news_store
 
-    store = store or get_store()
+    store = store or get_data_ingestion_store()
     from ..config import canonical_entity
 
     unique_symbols = list(dict.fromkeys(canonical_entity(symbol).upper()

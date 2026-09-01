@@ -214,7 +214,7 @@ def _record_shadow_comparison(*, consumer: str, symbol: str, legacy: dict,
 def _platform_fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
     from ..data.products import DataProducts
     from ..data.runtime import get_platform_structured_repository
-    from ..structured import FetchRequest, IngestionPipeline
+    from .structured import FetchRequest, IngestionPipeline
     from .sources.market_consensus import YFinanceConsensusAdapter
 
     repository = get_platform_structured_repository()
@@ -240,7 +240,7 @@ def _platform_fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
 
 def fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
     """Compatibility contract with independently reversible structured read modes."""
-    from ..structured import read_mode
+    from .structured import read_mode
 
     mode = read_mode(consumer, source_id="yfinance_consensus")
     platform_fetch = lambda: (_platform_fetch(symbol) if consumer == "pead_consensus"

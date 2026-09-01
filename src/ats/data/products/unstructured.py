@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from ats.data_platform.products import DataProducts
+from .base import DataProducts
 
 
 _ROLE_TYPES = {

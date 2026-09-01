@@ -78,7 +78,7 @@ def _record(*, consumer: str, source_id: str, legacy: RegionalSnapshot,
 
 def _select_source(*, consumer: str, source_id: str) -> RegionalSnapshot:
     """Resolve one regional source so source-scoped overrides are never ignored."""
-    from ..structured import read_mode
+    from .structured import read_mode
 
     mode = read_mode(consumer, source_id=source_id)
     source_ids = frozenset((source_id,))

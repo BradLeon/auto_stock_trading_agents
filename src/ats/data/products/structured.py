@@ -5,7 +5,7 @@ one compatibility contract. Domain-specific methods can later be extracted from
 the combined facade without changing callers.
 """
 
-from ats.data_platform.products import DataProducts
+from .base import DataProducts
 
 StructuredDataProducts = DataProducts
 

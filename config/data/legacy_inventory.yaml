@@ -1,6 +1,6 @@
 # Retirement inventory for the data-layer cutover. Every entry must remain
 # until its data migration, consumer cutover and rollback verification pass.
-version: 1
+version: 2
 
 legacy_objects:
   - id: data-platform-products
@@ -8,43 +8,50 @@ legacy_objects:
     paths: [src/ats/data_platform/__init__.py, src/ats/data_platform/products.py]
     target_owner: ats.data.products
     data_domains: [structured, unstructured]
-    rollback: import compatibility facade
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; no live legacy import
   - id: structured-catalog
     kind: module
     paths: [src/ats/structured/__init__.py, src/ats/structured/catalog.py, src/ats/structured/models.py]
     target_owner: ats.data.catalog
     data_domains: [structured]
-    rollback: import compatibility facade
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; no live legacy import
   - id: structured-repository
     kind: module
     paths: [src/ats/structured/repository.py, src/ats/structured/artifacts.py]
     target_owner: ats.data.stores.structured
     data_domains: [structured]
-    rollback: source and consumer mode legacy
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; no live legacy read/write
   - id: structured-pipeline
     kind: module
     paths: [src/ats/structured/ingestion.py, src/ats/structured/quality.py, src/ats/structured/derivations.py]
     target_owner: ats.data.pipelines.structured
     data_domains: [structured]
-    rollback: source mode legacy
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; no live legacy source mode
   - id: structured-products
     kind: module
     paths: [src/ats/structured/discovery.py, src/ats/structured/selection.py, src/ats/structured/reporting.py]
     target_owner: ats.data.products.structured
     data_domains: [structured]
-    rollback: consumer mode legacy
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; no live legacy consumer mode
   - id: structured-rollout
     kind: module
     paths: [src/ats/structured/flags.py, src/ats/structured/release.py, src/ats/structured/runtime_registry.py]
     target_owner: ats.data.rollout
     data_domains: [structured]
-    rollback: release overlay rollback
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; release overlays are audit-only
   - id: structured-evidence
     kind: module
     paths: [src/ats/structured/evidence.py]
     target_owner: ats.data.stores.unstructured
     data_domains: [unstructured, structured]
-    rollback: consumer mode legacy
+    status: retired
+    rollback: restore the verified repository backup and migration manifest; no live legacy consumer mode
   - id: flat-data-providers
     kind: module
     paths:
@@ -79,61 +86,67 @@ legacy_objects:
       - src/ats/data/sources
     target_owner: ats.data.adapters / ats.data.pipelines / ats.data.products
     data_domains: [structured, unstructured, runtime]
-    rollback: per-source and per-consumer legacy mode
+    status: reclassified
+    rollback: native ats.data adapters/pipelines/products remain the active implementation
   - id: memory-data-tables
     kind: database
     paths: [var/ats.sqlite, src/ats/memory/store.py]
     target_owner: ats.data.stores
     data_domains: [structured, unstructured]
-    rollback: retained source database plus verified backup
+    status: retained
+    rollback: workflow memory remains in var/ats.sqlite; retired data tables restore only from verified backup
   - id: legacy-structured-config
     kind: config
     paths: [config/structured_data.yaml]
     target_owner: config/data/structured.yaml
     data_domains: [structured]
-    rollback: catalog legacy overlay
+    status: retired
+    rollback: restore config/data/structured.yaml from Git and verified migration manifest; no config alias
   - id: legacy-unstructured-config
     kind: config
     paths: [config/sources.yaml, config/news_sources.yaml]
     target_owner: config/data/unstructured.yaml
     data_domains: [unstructured]
-    rollback: catalog legacy overlay
+    status: retired
+    rollback: restore config/data/sources.yaml and news_sources.yaml from Git; no config alias
   - id: structured-artifact-root
     kind: artifact
     paths: [var/structured_artifacts]
     target_owner: ats.data.stores.structured
     data_domains: [structured]
-    rollback: immutable backup plus retained root
+    status: retained
+    rollback: immutable data artifacts are retained under the governed root and verified backup
   - id: document-asset-root
     kind: document_root
     paths: [ATS_DOCS_ROOT, config/pead.yaml:docs_root]
     target_owner: ats.data.stores.unstructured
     data_domains: [unstructured]
-    rollback: retained source files and manifest
+    status: retained
+    rollback: immutable user-visible source files remain under the governed document root and manifest
 
 consumers:
   - id: pead-graph
     paths: [src/ats/graph/pead.py, src/ats/agents/pead]
     target_interface: ats.data.products + ats.data.runtime
     sources: [company_financials, market_consensus, earnings_release, sec_filing, transcript, news]
-    rollback: consumer mode legacy
+    rollback: restore the verified platform data backup; no live legacy mode
   - id: sector-agent
     paths: [src/ats/agents/sector]
     target_interface: ats.data.products
     sources: [regional_tw_exports, regional_kr_exports, industry_dram_contract_price, company_financials, market_consensus]
-    rollback: consumer mode legacy
+    rollback: restore the verified platform data backup; no live legacy mode
   - id: evidence-chain
     paths: [src/ats/agents/evidence, src/ats/chain]
     target_interface: ats.data.products.unstructured
     sources: [sec_filing, earnings_release, transcript, research, rss, news, private_company_events]
-    rollback: consumer mode legacy
+    rollback: restore the verified platform data backup; no live legacy mode
   - id: chief-graph
     paths: [src/ats/agents/chief, src/ats/graph/chief.py]
     target_interface: ats.data.products boundary metadata + upstream products/runtime; ats.memory for workflow outputs
     sources: [company_financials, market_consensus, private_company_events]
-    rollback: consumer mode legacy
+    rollback: restore the verified platform data backup; no live legacy mode
   - id: runtime-scheduler
     paths: [src/ats/runtime/cli.py, src/ats/runtime/scheduler.py]
     target_interface: ats.data.products + ats.data.runtime + ats.data.pipelines.unstructured
     sources: [company_financials, documents, research, news, runtime_market]
-    rollback: release overlay rollback
+    rollback: restore the verified platform data backup; no live legacy mode

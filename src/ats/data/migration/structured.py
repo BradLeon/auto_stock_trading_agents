@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from .inventory import MigrationDomain
 from .runner import _sha256, _table_digest
-from ...structured import (
+from ..structured import (
     ArtifactDescriptor,
     ObservationInput,
     QualityStatus,
@@ -116,14 +116,6 @@ class StructuredLegacyMigrationRunner:
             missing = required - actual
             if missing:
                 raise RuntimeError(f"missing structured legacy tables: {sorted(missing)}")
-            point_count, point_digest = _table_digest(source, "measurement_points")
-            run_count, run_digest = _table_digest(source, "ingestion_runs")
-            legacy_source_count, legacy_source_digest = _table_digest(source, "data_sources")
-            source_count = point_count + run_count + legacy_source_count
-            source_digest = hashlib.sha256(
-                f"measurement_points:{point_digest}\ningestion_runs:{run_digest}\n"
-                f"data_sources:{legacy_source_digest}\n".encode()
-            ).hexdigest()
             rows = source.execute(
                 "SELECT p.*, s.source_id, s.series, s.entity, s.unit AS series_unit, s.cadence "
                 "FROM measurement_points p JOIN measurement_series s ON s.series_id=p.series_id "
@@ -139,7 +131,22 @@ class StructuredLegacyMigrationRunner:
             metric_ids = {item.id: item for item in catalog.metrics()}
             mappings = {(provider, field): metric for provider, field, metric
                         in catalog.provider_mappings()}
-            legacy_sources = source.execute("SELECT * FROM data_sources ORDER BY source_id").fetchall()
+            # ``data_sources`` and ``ingestion_runs`` are shared with the historic
+            # document pipeline.  They are not structured measurements merely
+            # because they live in the same former SQLite file; migrate only rows
+            # registered by the structured catalog.
+            legacy_sources = [row for row in source.execute(
+                "SELECT * FROM data_sources ORDER BY source_id").fetchall()
+                if str(row["source_id"] or "") in configured_sources]
+            run_rows = [row for row in source.execute(
+                "SELECT * FROM ingestion_runs ORDER BY run_id").fetchall()
+                if str(row["source_id"] or "") in configured_sources]
+            source_count = len(rows) + len(run_rows) + len(legacy_sources)
+            source_digest = hashlib.sha256(json.dumps({
+                "measurement_points": [dict(row) for row in rows],
+                "ingestion_runs": [dict(row) for row in run_rows],
+                "data_sources": [dict(row) for row in legacy_sources],
+            }, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
             unmapped: list[dict[str, str]] = []
             for row in legacy_sources:
                 if str(row["source_id"] or "") not in configured_sources:
@@ -152,11 +159,6 @@ class StructuredLegacyMigrationRunner:
                 if not source_def or not source_def.datasets or not metric_id:
                     unmapped.append({"legacy_point_id": str(row["point_id"]),
                                      "status": "skipped", "reason": "metric_or_dataset_unmapped"})
-            for row in source.execute("SELECT * FROM ingestion_runs ORDER BY run_id"):
-                source_def = configured_sources.get(str(row["source_id"] or ""))
-                if not source_def or not source_def.datasets:
-                    unmapped.append({"legacy_point_id": f"run:{row['run_id']}",
-                                     "status": "skipped", "reason": "run_source_unmapped"})
             if dry_run:
                 skipped = len(unmapped)
                 return StructuredMigrationManifest(
@@ -231,8 +233,6 @@ class StructuredLegacyMigrationRunner:
                     outcomes.append({"legacy_point_id": str(row["point_id"]),
                                      "observation_id": observation.id,
                                      "status": "migrated", "reason": ""})
-                run_rows = source.execute(
-                    "SELECT * FROM ingestion_runs ORDER BY run_id").fetchall()
                 for row in run_rows:
                     source_id = str(row["source_id"] or "")
                     source_def = configured_sources.get(source_id)

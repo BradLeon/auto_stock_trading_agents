@@ -5,8 +5,8 @@ import sqlite3
 
 import pytest
 
-from ats.data_platform import DataProducts
-from ats.structured import (
+from ats.data.products import DataProducts
+from ats.data.structured import (
     ArtifactDescriptor,
     ObservationInput,
     QualityStatus,

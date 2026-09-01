@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from ats.data import regional
 from ats.data.products import DataProducts, RegionalPoint, RegionalProducts, RegionalSnapshot
-from ats.structured import ArtifactDescriptor, ObservationInput, SeriesIdentity, SQLiteStructuredRepository
+from ats.data.structured import ArtifactDescriptor, ObservationInput, SeriesIdentity, SQLiteStructuredRepository
 
 
 NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)

@@ -8,7 +8,7 @@
 
 本项目的结构化数据层不是“把所有数字放进 SQLite”，而是把低频、可复用、需要追溯和历史重放的研究事实，变成独立于 Agent 的共享数据产品。
 
-统一数据目录入口是 `config/data/catalog.yaml`；`config/structured_data.yaml` 在兼容期内仍是结构化详细定义的 legacy overlay。本文解释这些配置背后的架构约束，不建立第二套目录。
+统一数据目录入口是 `config/data/catalog.yaml`；`config/data/structured.yaml` 在兼容期内仍是结构化详细定义的 legacy overlay。本文解释这些配置背后的架构约束，不建立第二套目录。
 
 一条数值只有同时回答以下问题，才可以进入默认查询：
 
@@ -61,9 +61,9 @@ ats/data/
 
 ```python
 from ats.data.products import get_data_products       # 新入口
-from ats.data_platform import get_data_products       # 兼容入口
+from ats.data.products import get_data_products       # 兼容入口
 from ats.data.catalog import StructuredCatalog        # 新结构化入口
-from ats.structured import StructuredCatalog           # 兼容入口
+from ats.data.structured import StructuredCatalog           # 兼容入口
 ```
 
 新模块的实现应放在 `ats.data`；旧模块只转发到新实现。
@@ -248,7 +248,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    YAML["config/structured_data.yaml"] --> VR["Runtime Source Registry"]
+    YAML["config/data/structured.yaml"] --> VR["Runtime Source Registry"]
     AD["Provider Adapter"] --> VR
     VR --> VAL["validate-source"]
     VR --> ING["isolated / production ingest"]
@@ -445,7 +445,7 @@ Repository 是存储抽象，DataProducts 是消费者抽象。Agent 只能依�
 `CURRENT`：
 
 ```python
-from ats.data_platform import get_data_products
+from ats.data.products import get_data_products
 
 products = get_data_products()
 rows = products.indicator_series(
@@ -536,10 +536,10 @@ manifest = products.snapshot_manifest(
 
 ## 16. 接入新来源的标准步骤
 
-1. 在 `config/structured_data.yaml` 登记 source、dataset、用途、覆盖、认证、保存约束、内部请求预算、质量门和验收样本。
+1. 在 `config/data/structured.yaml` 登记 source、dataset、用途、覆盖、认证、保存约束、内部请求预算、质量门和验收样本。
 2. 为 Provider 原始响应建立固定 fixture，先定义成功、空响应、未发布、限流、权限不足和字段变化。
 3. 实现 Adapter batch，不写业务表。
-4. 在 `src/ats/structured/runtime_registry.py` 注册受控 adapter key 和工厂；YAML 不允许任意动态 import。
+4. 在 `src/ats/data/adapters/structured/registry.py` 注册受控 adapter key 和工厂；YAML 不允许任意动态 import。
 5. 建立实体、指标、期间、单位和币种映射；未知字段进入 pending mapping。
 6. 运行 `ats data validate-source --source <id>`，增加 adapter contract tests 和中央准入测试。
 7. 使用 `ats data ingest --source <id> --force --db <isolated.sqlite> --artifact-root <isolated-dir>` 跑隔离端到端与少量真实源 smoke。

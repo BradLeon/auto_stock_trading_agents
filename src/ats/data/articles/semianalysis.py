@@ -3,7 +3,7 @@
 ## Why a bridge and not a new fetcher
 
 The articles were already arriving. `data/research.fetch_articles` has been pulling them
-(Gmail IMAP + Substack RSS, declared in `config/news_sources.yaml`) and mining them into
+(Gmail IMAP + Substack RSS, declared in `config/data/news_sources.yaml`) and mining them into
 `research_insights` — 47 rows across 23 tickers. But `research_insights` has a different
 shape entirely: ticker, direction, summary, quote. No `concept`, no `stance`, no
 `source_entity`. So no claim could ever reach any of it.
@@ -16,7 +16,7 @@ That was a real loss, not a theoretical one. Sitting in that table:
 That is a `xpu_account_and_customer_mix` reading of exactly the kind the cross-section
 starves for — a NAMED customer changing a NAMED program's configuration — and it is
 **not self-reported**, which is the property four companies grading themselves can never
-supply. `config/sources.yaml` had flagged this connection as a deferred decision; this
+supply. `config/data/sources.yaml` had flagged this connection as a deferred decision; this
 module is the decision.
 
 ## The two-pipelines question

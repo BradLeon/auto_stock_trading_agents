@@ -10,7 +10,7 @@
 
 ### 1.0 按角色阅读
 
-本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)；结构化旧配置 [`config/structured_data.yaml`](../config/structured_data.yaml)、证据源和新闻源配置在兼容期内由 catalog overlay 加载。
+本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)；结构化旧配置 [`config/data/structured.yaml`](../config/data/structured.yaml)、证据源和新闻源配置在兼容期内由 catalog overlay 加载。
 
 | 读者 | 首选文档 | 主要回答 |
 |---|---|---|
@@ -53,7 +53,7 @@ src/ats/data/
 └── compat/               # 迁移期旧入口桥接
 ```
 
-当前仍保留 `ats.structured`、`ats.data_platform` 和 `memory.store` 的兼容实现；新代码应优先使用 `ats.data.*`。兼容层只允许转发，不应再增加业务逻辑。
+当前仍保留 `ats.data.structured`、`ats.data.products` 和 `memory.store` 的兼容实现；新代码应优先使用 `ats.data.*`。兼容层只允许转发，不应再增加业务逻辑。
 
 实现过程与真实源专项证据：
 

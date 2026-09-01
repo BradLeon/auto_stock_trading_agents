@@ -9,14 +9,14 @@ from ats.data.sources.market_consensus import (
     _json_safe,
     _next_quarter_end,
 )
-from ats.data_platform import DataProducts
-from ats.structured import (
+from ats.data.products import DataProducts
+from ats.data.structured import (
     FetchRequest,
     IngestionPipeline,
     SQLiteStructuredRepository,
     StructuredCatalog,
 )
-from ats.structured.quality import consensus_quality
+from ats.data.structured.quality import consensus_quality
 
 
 T1 = datetime(2026, 8, 20, 8, 0, tzinfo=timezone.utc)

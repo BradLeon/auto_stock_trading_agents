@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from ats.chain import sources
 from ats.schemas.chain import SourceDef
-from ats.structured import ArtifactDescriptor, ObservationInput, SeriesIdentity, SQLiteStructuredRepository
+from ats.data.structured import ArtifactDescriptor, ObservationInput, SeriesIdentity, SQLiteStructuredRepository
 
 
 NOW = datetime(2026, 8, 30, tzinfo=timezone.utc)
@@ -67,7 +67,7 @@ def test_chain_regional_reads_platform_levels_and_derivations(monkeypatch, tmp_p
         return repository
 
     monkeypatch.setattr("ats.data.runtime.get_platform_structured_repository", platform_repository)
-    monkeypatch.setattr("ats.structured.IngestionPipeline", _NoChangePipeline)
+    monkeypatch.setattr("ats.data.structured.IngestionPipeline", _NoChangePipeline)
     monkeypatch.setenv("ATS_STRUCTURED_CHAIN_REGIONAL_MODE", "platform")
 
     definitions = (
@@ -101,7 +101,7 @@ def test_chain_regional_uses_accepted_platform_vintage_when_refresh_is_unreachab
         return repository
 
     monkeypatch.setattr("ats.data.runtime.get_platform_structured_repository", platform_repository)
-    monkeypatch.setattr("ats.structured.IngestionPipeline", _UnavailablePipeline)
+    monkeypatch.setattr("ats.data.structured.IngestionPipeline", _UnavailablePipeline)
     monkeypatch.setenv("ATS_STRUCTURED_CHAIN_REGIONAL_MODE", "platform")
     definition = SourceDef(
         id="tw_ic_exports", label="台湾 IC 出口", adapter="tw_mof", entity="TW_IC_EXPORT",

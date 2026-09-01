@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from ats.data_platform.products import DataProducts
+from .base import DataProducts
 
 
 @dataclass(frozen=True)

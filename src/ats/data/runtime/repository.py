@@ -1,6 +1,7 @@
 """Repository selection for a released data-platform consumer.
 
-Legacy consumers keep using ``ATS_DB_PATH`` through ``ats.structured``. A
+The retired compatibility package used ``ATS_DB_PATH``.  New consumers use
+``ATS_DATA_DB_PATH`` through ``ats.data``.
 consumer explicitly released to platform mode uses the independently migrated
 data database instead.
 """

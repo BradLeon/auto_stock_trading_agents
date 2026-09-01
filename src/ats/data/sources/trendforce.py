@@ -23,7 +23,7 @@ import re
 from datetime import datetime, timezone
 
 from ...schemas.chain import SeriesPoint
-from ...structured import (
+from ..structured import (
     AdapterArtifact,
     AdapterBatch,
     FetchRequest,

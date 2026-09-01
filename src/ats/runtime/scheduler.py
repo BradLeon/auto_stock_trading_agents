@@ -706,31 +706,21 @@ def _cross_section_weekly(name: str) -> None:
     # article ingestion is the slower, more failure-prone half (one model call per piece
     # against a site whose template can move), so it gets its own guard.
     try:
-        from ..chain import articles as chain_articles
         from ..data.pipelines.unstructured import research as research_pipeline
+        from ..data.stores.unstructured import get_data_ingestion_store
 
         # One acquisition stage feeds both PEAD and chain consumers. The adapter for
         # subscribed research reads the shared catalog and never reconnects to IMAP.
-        research_pipeline.ingest_configured(store=get_store())
-
-        for sid, stat in chain_articles.collect_articles(get_store()).items():
-            if stat.unreachable:
-                log.warning("article source %s: unreachable this round (recorded as a gap)", sid)
-            else:
-                log.info("article source %s: scanned %d, matched %d, ingested %d "
-                         "(%d new observations, %d unreadable)", sid, stat.scanned,
-                         stat.matched, stat.ingested, stat.observations, stat.unreadable)
+        data_store = get_data_ingestion_store()
+        try:
+            research_pipeline.ingest_configured(store=data_store)
+        finally:
+            data_store.close()
     except Exception as exc:  # noqa: BLE001 - a publisher outage must not break the job
         log.warning("article source collection failed: %s", exc)
 
-    try:
-        from ..chain import sources as chain_sources
-
-        saved = chain_sources.collect(get_store())
-        # -1 per id = could not reach it this round (a gap); 0 = reached, nothing new.
-        log.info("third-party sources: %s", saved or "(none configured)")
-    except Exception as exc:  # noqa: BLE001 - a source outage must not break the job
-        log.warning("third-party source collection failed: %s", exc)
+    # Third-party structured sources are scheduled by ``ats data ingest`` and write
+    # directly to the platform repository; Chain has no parallel legacy ledger.
 
     try:
         from ..chain import report as chain_report

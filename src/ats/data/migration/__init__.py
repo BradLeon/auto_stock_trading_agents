@@ -12,6 +12,7 @@ from .runner import MigrationManifest, SQLiteMigrationRunner, TableMigrationResu
 from .governed_structured import GovernedStructuredMigrationRunner
 from .structured import StructuredLegacyMigrationRunner, StructuredMigrationManifest
 from .company_financials import CompanyFinancialSemanticRepair, CompanyFinancialSemanticRepairResult
+from .retirement import LegacyDataRetirement
 
 __all__ = [
     "LegacyConsumer",
@@ -29,4 +30,5 @@ __all__ = [
     "TableMigrationResult",
     "default_data_db_path",
     "load_migration_inventory",
+    "LegacyDataRetirement",
 ]

@@ -828,7 +828,7 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
 
         saved = chain_sources.collect(store)
         if not saved:
-            print("（config/sources.yaml 里没有配置第三方源）")
+            print("（config/data/sources.yaml 里没有配置第三方源）")
             return 0
         # -1 = the source could not be reached this round (true gap). 0 = it was
         # reached but every point was already in the ledger (data is current, not
@@ -856,7 +856,7 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
 
         stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
         if not stats:
-            print("（config/sources.yaml 里没有配置 article_sources）")
+            print("（config/data/sources.yaml 里没有配置 article_sources）")
             return 0
         for sid, st in sorted(stats.items()):
             if st.unreachable:
@@ -1014,9 +1014,13 @@ def run_pead_research(*, use_llm: bool = True) -> list:
     """One research pass: ingest newsletters, extract per-ticker insights."""
     from ..agents.pead import research
     from ..data import research as research_data
-    from ..memory import get_store
+    from ..data.stores.unstructured import get_data_ingestion_store
 
-    research_data.ingest_configured(store=get_store())
+    data_store = get_data_ingestion_store()
+    try:
+        research_data.ingest_configured(store=data_store)
+    finally:
+        data_store.close()
     insights = research.run(use_llm=use_llm)
     if not insights:
         print("📰 research — no new articles / no insights")
@@ -1407,6 +1411,17 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["validation"]["valid"] else 2
 
+    if action == "retire-legacy-data":
+        from ..data.migration import LegacyDataRetirement, default_data_db_path
+        from ..memory import get_store
+
+        result = LegacyDataRetirement(
+            source_db or get_store().path,
+            target_db or default_data_db_path(),
+        ).retire(backup_root=backup_root or "var/data_migration_backups", apply=apply)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.get("ready") else 2
+
     if action == "cutover-check":
         from ..data.migration import default_data_db_path
         from ..data.cutover import compare_consumer_data
@@ -1501,12 +1516,13 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         source_path = source_db or get_store().path
         target_path = Path(target_db) if target_db else default_data_db_path()
         if domain.id == "structured-governed-history":
-            from ..structured.artifacts import default_artifact_root
+            from ..data.stores.structured.artifacts import default_artifact_root
+            from ..data.runtime import platform_artifact_root
 
             runner = GovernedStructuredMigrationRunner(
                 source_path, target_path,
                 source_artifact_root=default_artifact_root(),
-                target_artifact_root=artifact_root or target_path.parent / "structured_artifacts")
+                target_artifact_root=artifact_root or platform_artifact_root())
         elif domain.id == "structured-legacy-measurements":
             runner = StructuredLegacyMigrationRunner(
                 source_path, target_path,
@@ -1551,14 +1567,14 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     products = get_platform_data_products()
     if db_path and action not in {
             "validate-source", "ingest", "release-check", "publish", "rollback"}:
-        from ..data_platform import DataProducts
-        from ..structured import SQLiteStructuredRepository
+        from ..data.products import DataProducts
+        from ..data.structured import SQLiteStructuredRepository
 
         isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
         isolated.bootstrap_catalog()
         products = DataProducts(store=products.store, structured_repository=isolated)
     if action in {"validate-source", "ingest", "release-check", "publish", "rollback"}:
-        from ..structured import (
+        from ..data.structured import (
             ReleaseManager,
             SQLiteStructuredRepository,
             StructuredCatalog,
@@ -1628,7 +1644,7 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     elif action == "examples":
         result = products.structured_examples(dataset=dataset)
     elif action == "releases":
-        from ..structured import load_release_overlay
+        from ..data.structured import load_release_overlay
 
         result = load_release_overlay(release_file or None)
     elif action == "sources":
@@ -1642,7 +1658,7 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     elif action == "quality":
         structured = products.structured_quality_report(dataset=dataset or None)
         if output_format == "markdown":
-            from ..structured import render_quality_markdown
+            from ..data.structured import render_quality_markdown
 
             print(render_quality_markdown(structured), end="")
             return 0
@@ -1723,7 +1739,7 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         raise ValueError(f"unknown data action: {action}")
     if output_format == "markdown" and action in {
             "catalog", "describe", "availability", "examples"}:
-        from ..structured import render_discovery_markdown
+        from ..data.structured import render_discovery_markdown
 
         print(render_discovery_markdown(result), end="")
     else:
@@ -1737,7 +1753,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "consumer-acceptance", "cutover-check", "cutover-status", "release-assessment", "consumer-release-records", "describe", "availability", "examples", "releases",
+        "catalog", "config", "migration-plan", "migrate", "retire-legacy-data", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "consumer-acceptance", "cutover-check", "cutover-status", "release-assessment", "consumer-release-records", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",
@@ -1779,13 +1795,13 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--report-path", default="",
                       help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径")
     data.add_argument("--force", action="store_true",
-                      help="ingest: 仅用于隔离验收，绕过 legacy source mode")
+                      help="ingest: 仅用于隔离验收，跳过已发布 source 的重复保护")
     data.add_argument("--acquire", action="store_true",
                       help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库")
     data.add_argument("--apply", action="store_true",
                       help="publish/rollback/source-publish/repair-company-financials: 显式执行写操作")
-    data.add_argument("--mode", choices=["legacy", "shadow", "platform", "fallback"],
-                      default="platform", help="publish/rollback 目标模式")
+    data.add_argument("--mode", choices=["platform"], default="platform",
+                      help="publish: 唯一受支持的数据路径")
     data.add_argument("--consumer", default="",
                       help="consumer-acceptance/publish/rollback/cutover-check/cutover-status/release-assessment/consumer-release-records: 消费者 ID；与 --source 二选一")
     data.add_argument("--release-file", default="",

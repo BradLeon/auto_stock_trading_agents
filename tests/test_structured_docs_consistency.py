@@ -33,24 +33,6 @@ def test_architecture_is_the_role_document_entry_point() -> None:
     assert "../config/data/structured.yaml" in architecture
 
 
-def test_architecture_links_every_structured_validation_report() -> None:
-    architecture = _read(ARCHITECTURE_PATH)
-    expected = (
-        "STRUCTURED_DATA_BASELINE_2026-08-25.md",
-        "STRUCTURED_DATA_BENCHMARK_2026-08-25.md",
-        "STRUCTURED_DATA_REGIONAL_VALIDATION_2026-08-25.md",
-        "STRUCTURED_DATA_FINANCIAL_VALIDATION_2026-08-25.md",
-        "STRUCTURED_DATA_CONSENSUS_VALIDATION_2026-08-25.md",
-        "STRUCTURED_DATA_EVIDENCE_VALIDATION_2026-08-25.md",
-        "STRUCTURED_DATA_QUALITY_VALIDATION_2026-08-25.md",
-        "STRUCTURED_DATA_CONSUMER_VALIDATION_2026-08-25.md",
-        "STRUCTURED_DATA_FINAL_ACCEPTANCE_2026-08-25.md",
-    )
-    for filename in expected:
-        assert f"]({filename})" in architecture
-        assert (ROOT / "docs" / filename).is_file()
-
-
 def test_operations_source_matrix_matches_machine_catalog() -> None:
     operations = _read(OPERATIONS_PATH)
     catalog = _catalog()
@@ -96,9 +78,8 @@ def test_role_docs_expose_executable_lifecycle_and_dynamic_discovery() -> None:
     architecture = _read(ARCHITECTURE_PATH)
 
     for token in (
-        "src/ats/structured/runtime_registry.py", "data validate-source",
-        "data ingest", "data financial-package-check", "data release-check", "data publish", "data rollback",
-        "data release-assessment", "config/data/consumer_release.yaml",
+        "src/ats/data/adapters/structured/registry.py", "data validate-source",
+        "data ingest", "data financial-package-check", "data release-check", "data publish",
         "var/structured_data/releases.yaml", "--apply",
     ):
         assert token in operations

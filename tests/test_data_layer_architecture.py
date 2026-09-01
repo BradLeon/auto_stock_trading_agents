@@ -63,7 +63,6 @@ def test_data_layer_package_skeleton_exists():
         DATA / "stores" / "structured",
         DATA / "stores" / "unstructured",
         DATA / "runtime",
-        DATA / "compat",
     ]
     assert all(path.is_dir() for path in expected)
 

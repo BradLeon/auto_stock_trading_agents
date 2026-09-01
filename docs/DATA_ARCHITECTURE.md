@@ -50,25 +50,9 @@ src/ats/data/
 ├── stores/               # structured/unstructured repository 与 artifact
 ├── products/             # Agent/Workflow 查询产品
 ├── runtime/              # 即时行情和期权，不进入持久层
-└── compat/               # 迁移期旧入口桥接
 ```
 
-当前仍保留 `ats.data.structured`、`ats.data.products` 和 `memory.store` 的兼容实现；新代码应优先使用 `ats.data.*`。兼容层只允许转发，不应再增加业务逻辑。
-
-实现过程与真实源专项证据：
-
-- [现状基线](STRUCTURED_DATA_BASELINE_2026-08-25.md)
-- [SQLite 性能基准](STRUCTURED_DATA_BENCHMARK_2026-08-25.md)
-- [台湾/韩国区域序列验收](STRUCTURED_DATA_REGIONAL_VALIDATION_2026-08-25.md)
-- [官方财务与 stock_statement 验收](STRUCTURED_DATA_FINANCIAL_VALIDATION_2026-08-25.md)
-- [市场 Consensus 验收](STRUCTURED_DATA_CONSENSUS_VALIDATION_2026-08-25.md)
-- [TrendForce DRAM 合约价验收](STRUCTURED_DATA_TRENDFORCE_VALIDATION_2026-08-29.md)
-- [融资、估值与 ARR 证据验收](STRUCTURED_DATA_EVIDENCE_VALIDATION_2026-08-25.md)
-- [六个数据集五维质量与数量对账](STRUCTURED_DATA_QUALITY_VALIDATION_2026-08-25.md)
-- [消费者迁移、Workflow 回归与离线重放](STRUCTURED_DATA_CONSUMER_VALIDATION_2026-08-25.md)
-- [阶段二最终验收与遗留缺口](STRUCTURED_DATA_FINAL_ACCEPTANCE_2026-08-25.md)
-- [结构化数据可操作产品面补充验收](STRUCTURED_DATA_PRODUCT_SURFACES_ACCEPTANCE_2026-08-26.md)
-- [数据层消费者切换状态与稳定观察期](DATA_CUTOVER_STATUS.md)
+`ats.data.structured` 和 `ats.data.products` 是当前公开的数据层入口；`memory.store` 只保存 Workflow 状态。历史迁移与验收快照由 Git 历史保存，不作为运行手册的一部分。
 
 本次重构的目的，不是简单地把数据分成“结构化数据库”和“向量数据库”，而是把当前由各个 Agent 自行取数、加工、保存的模式，升级为一套共享的研究数据基础设施。
 
@@ -103,8 +87,8 @@ src/ats/data/
 - 新增统一来源注册/隔离采集/发布门/回滚闭环，以及由实际数据库动态生成的 `catalog / describe / availability / examples`；发布运行状态写入可审计 release overlay。
 - 旧库启动时自动进行加法迁移；旧表继续保留并双写，现有 Workflow 无需一次性切换。
 - 已新增统一 `ats.data` 命名空间、跨结构化/非结构化 core contracts、repository ownership 和架构依赖测试。
-- 已新增 `config/data/catalog.yaml`、结构化/非结构化分域配置、调度说明和 Provider 模板；`ats data config` 只读校验这些配置并显示 legacy overlay 状态。
-- 已新增 `ats.data.rollout` 统一访问 source/consumer feature flags、release overlay、回滚历史和 staged reconciliation。
+- 已新增 `config/data/catalog.yaml`、结构化/非结构化分域配置、调度说明和 Provider 模板；`ats data config` 只读校验当前配置。
+- 数据读取和写入统一走 platform；发布记录只反映来源质量门，不再维护消费者切换或 staged reconciliation。
 
 首期有意保留以下边界：
 

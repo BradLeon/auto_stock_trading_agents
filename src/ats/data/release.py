@@ -108,47 +108,13 @@ class ReleaseManager:
                 "last_ingestion_status": last_status, "ready": all(
                     row["passed"] for row in checks), "checks": checks}
 
-    def check_consumer(self, consumer: str, *, mode: str = "platform",
-                       data_db: str | Path | None = None) -> dict:
-        if mode not in READ_MODES:
-            raise ValueError(f"invalid release mode: {mode}")
-        consumers = self.catalog.raw.get("feature_flags", {}).get("consumers", {}) or {}
-        configured = consumer in consumers
-        reconciliation_approved = mode != "platform" or consumers.get(consumer) == "platform"
-        checks = [
-            {"check": "consumer_configured", "passed": configured,
-             "detail": "" if configured else "unknown_consumer"},
-            {"check": "reconciliation_approved", "passed": reconciliation_approved,
-             "detail": "" if reconciliation_approved
-             else "consumer_not_approved_for_platform_in_checked_config"},
-        ]
-        assessment = None
-        if mode == "platform":
-            from .migration import default_data_db_path, load_migration_inventory
-            from .release_assessment import assess_consumer_release
-
-            policy = load_migration_inventory().consumer_cutover
-            assessment = assess_consumer_release(
-                consumer=consumer, data_db=data_db or default_data_db_path(),
-                minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
-                maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
-            )
-            checks.append({
-                "check": "consumer_release_assessment",
-                "passed": assessment["platform_eligible"],
-                "detail": assessment["category"], "assessment": assessment,
-            })
-        return {"kind": "consumer", "target_id": consumer,
-                "requested_mode": mode,
-                "current_overlay_mode": overlay_mode("consumer", consumer, path=self.path),
-                "ready": all(row["passed"] for row in checks), "checks": checks,
-                "assessment": assessment}
-
     def apply(self, check: dict, *, actor: str = "cli") -> dict:
         if not check.get("ready"):
             raise ValueError("release check failed; overlay was not changed")
         raw = load_release_overlay(self.path)
-        plural = "sources" if check["kind"] == "source" else "consumers"
+        if check["kind"] != "source":
+            raise ValueError("only source publication remains after consumer cutover")
+        plural = "sources"
         previous = raw[plural].get(check["target_id"], "")
         raw[plural][check["target_id"]] = check["requested_mode"]
         raw["history"].append({
@@ -160,24 +126,3 @@ class ReleaseManager:
         _write_overlay(raw, self.path)
         return {**check, "applied": True, "previous_mode": previous,
                 "release_file": str(self.path)}
-
-    def rollback(self, *, kind: str, target_id: str, mode: str = "platform",
-                 actor: str = "cli") -> dict:
-        if mode != "platform":
-            raise RuntimeError(
-                "live rollback to a retired data path is disabled; restore the "
-                "verified migration backup instead")
-        if kind not in {"source", "consumer"} or mode not in READ_MODES:
-            raise ValueError("invalid rollback target or mode")
-        raw = load_release_overlay(self.path)
-        plural = "sources" if kind == "source" else "consumers"
-        previous = raw[plural].get(target_id, "")
-        raw[plural][target_id] = mode
-        raw["history"].append({
-            "at": datetime.now(timezone.utc).isoformat(), "actor": actor,
-            "kind": kind, "target_id": target_id, "previous_mode": previous,
-            "mode": mode, "action": "rollback",
-        })
-        _write_overlay(raw, self.path)
-        return {"kind": kind, "target_id": target_id, "previous_mode": previous,
-                "mode": mode, "applied": True, "release_file": str(self.path)}

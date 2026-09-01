@@ -42,21 +42,14 @@ ats_cli data config
 | `financial-package-check` | 对 `company_financials` 的验收样本做原始数据、字段血缘、报告期、币种、完整性、时效与派生重算检查；不读取任何 consumer | 否 | 否 | 否 |
 | `release-check` | 读取最近运行与质量门，判断能否发布 | 否 | 否 | 否 |
 | `publish` | 默认预览；带 `--apply` 才写 release overlay | 否 | 仅 `--apply` 写 overlay | 仅 `--apply` |
-| `rollback` | 默认预览；带 `--apply` 才切回指定 mode | 否 | 仅 `--apply` 写 overlay | 仅 `--apply` |
 | `releases` | 查看当前 overlay 和审计历史 | 否 | 否 | 否 |
-| `cutover-check` | 对账某 consumer 的 legacy/data 数据，并写审计记录 | 否 | 仅写 data DB 审计记录 | 否 |
-| `cutover-status` | 查看消费者是否已有一日无 mismatch 的对账资格 | 否 | 否 | 否 |
-| `release-assessment` | 将消费者证据分类为等价、治理升级、平台回归或编排边界 | 否 | 否 | 否 |
 
 ### 2.2 使用者命令
 
 `catalog`、`describe`、`availability`、`examples`、`series`、`derive`、`cross-section` 和 `lineage` 属于数据消费面，统一在使用手册说明。本手册仅在发布验收时引用 `catalog` 检查最终可见状态，不重复讲查询语法。`data series` 是使用者取数命令，不是采集或运维命令。
 
-消费者切换的完整状态与执行示例见[数据层消费者切换状态](DATA_CUTOVER_STATUS.md)。
-`cutover-check`、`cutover-status`、`release-assessment` 与 `publish --consumer` 是**消费者读取路径**
-的独立变更流程；它们不会阻塞 source 或 dataset 的数据发布。相反，`financial-package-check` 和
-`release-check --source` 是数据发布流程：只检查原始 artifact/lineage、实体/报告期、单位/币种、
-完整性、时效、质量以及原始到派生计算的可复算性。
+消费者统一读取已发布的 platform 数据；`financial-package-check` 和 `release-check --source` 是
+数据发布流程，只检查原始 artifact/lineage、实体/报告期、单位/币种、完整性、时效、质量以及原始到派生计算的可复算性。
 
 特别说明：`data sources` 是运维机器清单，不证明数据库中已有可查询数据；使用者应通过 `data catalog` 和 `data availability` 判断实际覆盖。
 
@@ -92,18 +85,17 @@ export ATS_STRUCTURED_RELEASE_FILE="/absolute/path/to/releases.yaml"
 
 ## 4. 配置文件完整说明
 
-统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它索引结构化、非结构化和 runtime 配置；详细内容分别位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。`config/data/structured.yaml`、`config/data/sources.yaml`、`config/data/news_sources.yaml` 是兼容期的 legacy overlay，不能再作为新入口单独维护。
+统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它索引结构化、非结构化和 runtime 配置；详细内容分别位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。
 
 配置职责边界：
 
 | 路径 | 运维职责 | 是否保存密钥 |
 |---|---|---:|
-| `config/data/catalog.yaml` | 数据源、数据集、领域、状态和 legacy 引用总目录 | 否 |
+| `config/data/catalog.yaml` | 数据源、数据集、领域与状态总目录 | 否 |
 | `config/data/structured.yaml` | 指标、映射、结构化质量门 | 否 |
 | `config/data/unstructured.yaml` | 文档类型、正文策略、准入和保留规则 | 否 |
 | `config/data/providers/*.yaml` | Provider endpoint、预算、所需环境变量名 | 否 |
 | `config/data/schedules.yaml` | 触发意图和预算；不直接创建 scheduler job | 否 |
-| `config/data/consumer_release.yaml` | 消费者分类、直接输入、发布门与编排边界验收要求 | 否 |
 | `config/pead.yaml`、`config/sectors/` | Workflow 消费者配置 | 视现有约定 |
 
 密钥仍只能放在 `.env` 或部署环境。
@@ -290,7 +282,7 @@ sources:
 | Provider 字段变化 | Adapter fixture、`provider_mappings`、pending mapping |
 | 请求频率或分页变化 | `internal_request_budget`、Provider 限制、自动任务频率 |
 | 新增业务指标 | `metric_definitions`、dataset `core_metrics`、单位/期间校验 |
-| 主源/回退源变化 | dataset 来源顺序、冲突报告、消费者 shadow 对账 |
+| 主源/回退源变化 | dataset 来源顺序、冲突报告与实际查询复核 |
 | 保存策略变化 | `retention`、授权限制、artifact 存储用量和历史血缘 |
 | 实体覆盖变化 | `entities`/`coverage_from`、验收样本和 coverage 阈值 |
 
@@ -300,24 +292,14 @@ sources:
 
 “停止请求”和“删除历史”是两件不同的事。
 
-临时暂停采集：
-
-```bash
-ats_cli data rollback --source sec_companyfacts --mode legacy
-ats_cli data rollback --source sec_companyfacts --mode legacy --apply
-ats_cli data releases
-```
-
-第一条只预览，第二条才写 release overlay。切回 `legacy` 后，非 `--force` 的统一 ingest 会被拒绝。已有 artifact、observation、snapshot 和失败记录不删除。
+临时暂停采集：停止对应 scheduler/cron，并在来源配置中将 source 标记为非发布状态；已有 artifact、observation、snapshot 和失败记录不删除。
 
 对于已经产生历史数据、需要永久退出默认来源选择的来源：
 
-1. 将 source mode 切到 `legacy`；
-2. 从相关 dataset 的 `primary_sources` / `fallback_sources` 中移除；
-3. 将依赖它的 consumer 切回安全路径并完成回滚验证；
-4. 保留 `sources.<source_id>`、历史 Provider mapping 和运行注册，使旧 observation 与 snapshot 仍可解析；
-5. 停止外部 cron/launchd 任务；
-6. 在来源矩阵记录停止原因和日期。
+1. 从相关 dataset 的 `primary_sources` / `fallback_sources` 中移除；
+2. 保留 `sources.<source_id>`、历史 Provider mapping 和运行注册，使旧 observation 与 snapshot 仍可解析；
+3. 停止外部 cron/launchd 任务；
+4. 在来源矩阵记录停止原因和日期。
 
 当前系统没有“删除已发布来源及其历史数据”的管理命令，这是刻意的审计保护，不是遗漏的操作步骤。
 
@@ -568,57 +550,6 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 明确 XBRL 定义的官方 total debt（`governed_semantic_upgrade`）。每条记录都会保留变更字段、
 期间和是否发生债务定义切换；任何同期间经营数据数值差异仍会阻断发布。
 
-`cutover-status` 保留所有历史 mismatch 供审计，但发布资格从最近一次 mismatch 后的新观察窗口
-计算；因此修复后需要至少一条新的、同日无 mismatch 的真实对账记录。历史问题不会被删除，也
-不能用旧的成功记录跳过修复后的重新验收。
-
-### 7.7 Sector/Macro 区域数列 shadow 验收
-
-这两个消费者共同读取 `regional_tw_exports` 和 `regional_kr_exports`，但它们和
-`chain_regional` 是不同 consumer：不要因为 Chain 已是 platform 就发布 Sector/Macro。
-
-先只刷新两个持久化来源（不重新采集行情、新闻或其他数据）：
-
-```bash
-ats_cli data ingest --source tw_mof_exports
-ats_cli data ingest --source kr_ecos_exports
-
-# 预期：两个报告均为 overall=passed；不是只看命令退出码。
-ats_cli data quality --dataset regional_tw_exports --format markdown
-ats_cli data quality --dataset regional_kr_exports --format markdown
-```
-
-再检查每个 consumer 的真实 dual-read。`stable` 表示自最近一次 mismatch 之后，至少已有一日
-成功对账且当前有效窗口没有 mismatch；它只赋予“可评审”资格，**不会自动发布**：
-
-```bash
-ats_cli data cutover-status --consumer sector_agent
-ats_cli data cutover-status --consumer macro_agent
-
-# 先解释真实差异。ConnectError + 非空 platform 结果会是待独立复核的 governed_upgrade，
-# 而不是自动当作平台回归或自动放行。
-ats_cli data release-assessment --consumer sector_agent
-ats_cli data release-assessment --consumer macro_agent
-
-# 本阶段仍预期 ready=false：checked-in config 明确保持 shadow，等待 10.5 的发布审批。
-ats_cli data release-check --consumer sector_agent --mode platform
-ats_cli data release-check --consumer macro_agent --mode platform
-```
-
-报告输入应包含两个区域条目及 `source`、`known_at`、`observation` 血缘字段。使用者在 shadow
-模式看到的是 legacy 返回值；运维必须以 `data_consumer_cutover_records` 的对账详情和 platform
-产品读取确认候选值，不得把 shadow 的 legacy 显示误认为没有走平台读。
-
-### 7.8 回滚演练
-
-```bash
-ats_cli data rollback --source sec_companyfacts --mode legacy
-ats_cli data rollback --source sec_companyfacts --mode legacy --apply
-ats_cli data releases
-```
-
-通过标准：source mode 变为 `legacy`；历史 ingestion run、artifact 和 observation 仍可查询；其他 source/consumer 不受影响。
-
 ## 8. 运维命令参考
 
 ### 8.1 注册与状态
@@ -644,16 +575,12 @@ ats_cli data releases
 | `ats_cli data pending-mappings` | 未映射 Provider 字段 | provider field、样本、状态 |
 | `ats_cli data artifacts --source ID` | 存储与去重 | artifact count、bytes、dedupe/retention |
 
-### 8.3 发布和回滚
+### 8.3 来源发布
 
 | 命令 | 默认行为 | 写操作条件 |
 |---|---|---|
 | `release-check --source ID --mode platform` | 只读预检 | 永不写 |
-| `release-assessment --consumer ID` | 只读消费者证据分类；编排边界返回不可发布是预期 | 永不写 |
-| `consumer-release-records --consumer ID` | 查看持久化的通过/保留/编排边界决定及证据 | 永不写 |
-| `publish --source ID --mode MODE` | 只读预览 | 加 `--apply` 才写 overlay |
-| `publish --consumer ID --mode MODE` | 只读预览 | 加 `--apply`，且 consumer 已在 checked-in config 获准 |
-| `rollback --source/--consumer ID --mode legacy` | 只读预览 | 加 `--apply` 才写 overlay |
+| `publish --source ID --mode platform` | 只读预览 | 加 `--apply` 才写来源发布记录 |
 
 不要把“退出码为 0”当成数据验收通过。命令成功只说明程序完成；业务通过由返回 status、计数、质量门和人工抽查共同决定。
 
@@ -729,8 +656,7 @@ ats_cli data releases
 `private_company_events` 也不在本轮采集范围：它是保留 schema 的 `deferred` persistent dataset，
 当前正确状态为 `no_coverage`，而不是失败或零值。不得为了消除该状态而制造事件 observation。
 
-TrendForce DRAM 的一次真实采集、期间标准化与发布验收记录见
-[TrendForce DRAM 数据验证（2026-08-29）](STRUCTURED_DATA_TRENDFORCE_VALIDATION_2026-08-29.md)。
+TrendForce DRAM 的采集、期间标准化与发布应以本手册的 source health、质量报告和实际查询结果验收。
 
 ## 11. 质量门和发布标准
 
@@ -794,5 +720,3 @@ TrendForce DRAM 的一次真实采集、期间标准化与发布验收记录见
 - [结构化数据层使用手册](STRUCTURED_DATA_USER_GUIDE.md)
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
-- [五维质量验收报告](STRUCTURED_DATA_QUALITY_VALIDATION_2026-08-25.md)
-- [消费者迁移与重放验收](STRUCTURED_DATA_CONSUMER_VALIDATION_2026-08-25.md)

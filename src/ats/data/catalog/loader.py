@@ -124,15 +124,6 @@ class DataCatalog:
     def unstructured_news(self) -> dict[str, Any]:
         return self._load_registry("news_sources", "news_sources.yaml")
 
-    def consumer_release_inventory(self) -> dict[str, Any]:
-        """Return the checked-in consumer release classification inventory."""
-        configured = ((self.raw.get("domains") or {}).get("consumer_release")
-                      or "consumer_release.yaml")
-        path = (self.path.parent / configured).resolve()
-        from ..release_assessment import load_consumer_release_inventory
-
-        return load_consumer_release_inventory(path)
-
     def unstructured_sources(self) -> list[CatalogSource]:
         configured_path = self.path.parent / ((self.raw.get("domains") or {}).get(
             "unstructured") or "unstructured.yaml")
@@ -205,20 +196,6 @@ class DataCatalog:
         }.items():
             check(f"domain:{key}:exists", self._domain_path(key, default).exists(),
                   f"domain_config_missing:{key}")
-        consumer_release = ((self.raw.get("domains") or {}).get("consumer_release")
-                            or "consumer_release.yaml")
-        consumer_release_path = (self.path.parent / consumer_release).resolve()
-        check("domain:consumer_release:exists", consumer_release_path.exists(),
-              "consumer_release_inventory_missing")
-        if consumer_release_path.exists():
-            try:
-                self.consumer_release_inventory()
-            except (OSError, ValueError, yaml.YAMLError) as exc:
-                check("domain:consumer_release:valid", False,
-                      f"consumer_release_inventory_invalid:{type(exc).__name__}")
-            else:
-                check("domain:consumer_release:valid", True)
-
         try:
             structured = self.structured_catalog()
         except FileNotFoundError:

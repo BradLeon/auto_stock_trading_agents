@@ -622,4 +622,3 @@ HuggingFace 是 defeatbeta 数据集的托管/传输渠道；业务 provenance �
 - [结构化数据层运维指南](STRUCTURED_DATA_OPERATIONS.md)
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
-- [数据目录补充验收](STRUCTURED_DATA_PRODUCT_SURFACES_ACCEPTANCE_2026-08-26.md)

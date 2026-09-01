@@ -9,8 +9,6 @@ domains:
   news_sources: news_sources.yaml
   schedules: schedules.yaml
   legacy_inventory: legacy_inventory.yaml
-  migration: migration.yaml
-  consumer_release: consumer_release.yaml
 
 providers_dir: providers
 

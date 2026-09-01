@@ -1238,11 +1238,10 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
              status: str = "", output_format: str = "json",
              periods: list[str] | None = None, query_scope: str = "",
              db_path: str = "", artifact_root: str = "", force: bool = False,
-             apply: bool = False, mode: str = "platform", consumer: str = "",
+             apply: bool = False, mode: str = "platform",
              release_file: str = "", kind: str = "", operation: str = "",
              window: int = 0, entities: str = "", period: str = "",
-             migration_domain: str = "", source_db: str = "", target_db: str = "",
-             backup_root: str = "", report_path: str = "", acquire: bool = False,
+             report_path: str = "", acquire: bool = False,
              provider_lookup_attempts: int = 3,
              provider_lookup_retry_seconds: float = 1.0,
              approve_title_url_review: bool = False) -> int:
@@ -1403,149 +1402,6 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if validation.valid else 2
 
-    if action == "migration-plan":
-        from ..data.migration import load_migration_inventory
-
-        inventory = load_migration_inventory()
-        result = inventory.summary()
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["validation"]["valid"] else 2
-
-    if action == "retire-legacy-data":
-        from ..data.migration import LegacyDataRetirement, default_data_db_path
-        from ..memory import get_store
-
-        result = LegacyDataRetirement(
-            source_db or get_store().path,
-            target_db or default_data_db_path(),
-        ).retire(backup_root=backup_root or "var/data_migration_backups", apply=apply)
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result.get("ready") else 2
-
-    if action == "cutover-check":
-        from ..data.migration import default_data_db_path
-        from ..data.cutover import compare_consumer_data
-        from ..memory import get_store
-
-        if not consumer:
-            raise ValueError("cutover-check requires --consumer")
-        result = compare_consumer_data(
-            consumer=consumer, entity=entity, legacy_db=source_db or get_store().path,
-            data_db=target_db or default_data_db_path())
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["status"] == "reconciled" else 2
-
-    if action == "cutover-status":
-        from ..data.cutover import consumer_cutover_status
-        from ..data.migration import default_data_db_path, load_migration_inventory
-
-        if not consumer:
-            raise ValueError("cutover-status requires --consumer")
-        policy = load_migration_inventory().consumer_cutover
-        result = consumer_cutover_status(
-            consumer=consumer, data_db=target_db or default_data_db_path(),
-            minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
-            maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["eligible"] else 2
-
-    if action == "release-assessment":
-        from ..data.migration import default_data_db_path, load_migration_inventory
-        from ..data.release_assessment import assess_consumer_release
-
-        if not consumer:
-            raise ValueError("release-assessment requires --consumer")
-        policy = load_migration_inventory().consumer_cutover
-        result = assess_consumer_release(
-            consumer=consumer, data_db=target_db or default_data_db_path(),
-            minimum_distinct_reconciled_days=int(policy.get("minimum_distinct_reconciled_days", 1)),
-            maximum_mismatches=int(policy.get("maximum_mismatches", 0)),
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["platform_eligible"] else 2
-
-    if action == "consumer-acceptance":
-        from ..data.migration import default_data_db_path
-        from .consumer_acceptance import run_consumer_acceptance
-
-        if not consumer:
-            raise ValueError("consumer-acceptance requires --consumer")
-        result = run_consumer_acceptance(
-            consumer=consumer, entity=entity or value,
-            data_db=target_db or default_data_db_path(),
-            lookback_days=limit if limit != 20 else 7,
-            record=apply,
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["status"] == "reconciled" else 2
-
-    if action == "consumer-release-records":
-        from ..data.cutover import consumer_release_records
-        from ..data.migration import default_data_db_path
-
-        if not consumer:
-            raise ValueError("consumer-release-records requires --consumer")
-        result = consumer_release_records(
-            consumer=consumer, data_db=target_db or default_data_db_path())
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0
-
-    if action == "migrate":
-        from ..data.migration import (
-            SQLiteMigrationRunner,
-            GovernedStructuredMigrationRunner,
-            StructuredLegacyMigrationRunner,
-            default_data_db_path,
-            load_migration_inventory,
-        )
-        from ..memory import get_store
-
-        inventory = load_migration_inventory()
-        validation = inventory.validate()
-        if not validation.valid:
-            result = {"status": "invalid_plan", "validation": validation.model_dump(mode="json")}
-            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-            return 2
-        if not migration_domain:
-            raise ValueError("migrate requires --migration-domain")
-        domain = next((item for item in inventory.domains if item.id == migration_domain), None)
-        if domain is None:
-            raise ValueError(f"unknown migration domain: {migration_domain}")
-        configured_backup = inventory.backup.get("default_root", "var/data_migration_backups")
-        source_path = source_db or get_store().path
-        target_path = Path(target_db) if target_db else default_data_db_path()
-        if domain.id == "structured-governed-history":
-            from ..data.stores.structured.artifacts import default_artifact_root
-            from ..data.runtime import platform_artifact_root
-
-            runner = GovernedStructuredMigrationRunner(
-                source_path, target_path,
-                source_artifact_root=default_artifact_root(),
-                target_artifact_root=artifact_root or platform_artifact_root())
-        elif domain.id == "structured-legacy-measurements":
-            runner = StructuredLegacyMigrationRunner(
-                source_path, target_path,
-                artifact_root=artifact_root or target_path.parent / "structured_artifacts")
-        else:
-            runner = SQLiteMigrationRunner(source_path, target_path)
-        result = runner.run(
-            domain, backup_root=backup_root or configured_backup,
-            dry_run=not apply).model_dump()
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["reconciled"] else 2
-
-    if action == "repair-company-financials":
-        from ..data.migration import CompanyFinancialSemanticRepair, default_data_db_path
-
-        target_path = Path(db_path or target_db or default_data_db_path())
-        repair = CompanyFinancialSemanticRepair(target_path)
-        result = repair.run(
-            backup_root=backup_root or "var/data_migration_backups",
-            dry_run=not apply).model_dump()
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["reconciled"] else 2
-
     if action == "financial-package-check":
         from ..data.financial_release import company_financial_release_check
         from ..data.runtime import get_platform_structured_repository
@@ -1573,7 +1429,7 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
         isolated.bootstrap_catalog()
         products = DataProducts(store=products.store, structured_repository=isolated)
-    if action in {"validate-source", "ingest", "release-check", "publish", "rollback"}:
+    if action in {"validate-source", "ingest", "release-check", "publish"}:
         from ..data.structured import (
             ReleaseManager,
             SQLiteStructuredRepository,
@@ -1611,25 +1467,14 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
             else:
                 manager = ReleaseManager(
                     repository, catalog=catalog, path=release_file or None)
-                target_kind = "consumer" if consumer else "source"
-                target_id = consumer or target_source
+                target_id = target_source
                 if not target_id:
-                    raise ValueError(f"{action} requires --source or --consumer")
-                if action == "rollback":
-                    preview = {"kind": target_kind, "target_id": target_id,
-                               "requested_mode": mode, "ready": True,
-                               "applied": False, "operation": "rollback"}
-                    result = manager.rollback(
-                        kind=target_kind, target_id=target_id, mode=mode) if apply else preview
-                else:
-                    check = manager.check_consumer(
-                        target_id, mode=mode, data_db=target_db or None) \
-                        if target_kind == "consumer" else manager.check_source(
-                            target_id, mode=mode)
-                    result = manager.apply(check) if action == "publish" and apply else {
-                        **check, "applied": False,
-                        "operation": "publish_preview" if action == "publish"
-                        else "release_check"}
+                    raise ValueError(f"{action} requires --source or VALUE")
+                check = manager.check_source(target_id, mode=mode)
+                result = manager.apply(check) if action == "publish" and apply else {
+                    **check, "applied": False,
+                    "operation": "publish_preview" if action == "publish"
+                    else "release_check"}
         finally:
             if close_repository:
                 repository.close()
@@ -1753,8 +1598,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "config", "migration-plan", "migrate", "retire-legacy-data", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "consumer-acceptance", "cutover-check", "cutover-status", "release-assessment", "consumer-release-records", "describe", "availability", "examples", "releases",
-        "validate-source", "ingest", "release-check", "publish", "rollback",
+        "catalog", "config", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "describe", "availability", "examples", "releases",
+        "validate-source", "ingest", "release-check", "publish",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",
         "search", "company", "claim", "lineage", "conflicts", "pending-mappings",
@@ -1776,8 +1621,7 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--entity", default="", help="实体过滤")
     data.add_argument("--since", default="", help="最早期间或发布日期")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
-    data.add_argument("--limit", type=int, default=20,
-                      help="通用结果条数；consumer-acceptance 时为新闻回看天数（默认 7）")
+    data.add_argument("--limit", type=int, default=20, help="通用结果条数")
     data.add_argument("--status", default="", help="conflicts / pending-mappings 状态过滤")
     data.add_argument("--format", dest="output_format", choices=["json", "markdown"],
                       default="json", help="quality/catalog/describe 等输出格式")
@@ -1789,9 +1633,9 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--query-scope", default="",
                       help="ingest: Provider 查询范围 JSON")
     data.add_argument("--db", dest="db_path", default="",
-                      help="ingest/release/repair-company-financials: 隔离或目标 SQLite 路径")
+                      help="ingest/release: 隔离或目标 SQLite 路径")
     data.add_argument("--artifact-root", default="",
-                      help="ingest: 隔离 raw artifact 目录（需同时 --db）；migrate structured: 目标 artifact 目录")
+                      help="ingest: 隔离 raw artifact 目录（需同时 --db）")
     data.add_argument("--report-path", default="",
                       help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径")
     data.add_argument("--force", action="store_true",
@@ -1799,21 +1643,11 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--acquire", action="store_true",
                       help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库")
     data.add_argument("--apply", action="store_true",
-                      help="publish/rollback/source-publish/repair-company-financials: 显式执行写操作")
+                      help="publish/source-publish: 显式执行写操作")
     data.add_argument("--mode", choices=["platform"], default="platform",
                       help="publish: 唯一受支持的数据路径")
-    data.add_argument("--consumer", default="",
-                      help="consumer-acceptance/publish/rollback/cutover-check/cutover-status/release-assessment/consumer-release-records: 消费者 ID；与 --source 二选一")
     data.add_argument("--release-file", default="",
                       help="发布覆盖层路径；structured 默认 var/structured_data，source-* 默认 var/data/unstructured")
-    data.add_argument("--migration-domain", default="",
-                      help="migrate: config/data/migration.yaml 中的迁移域")
-    data.add_argument("--source-db", default="",
-                      help="migrate: legacy SQLite 源库；默认 ATS_DB_PATH")
-    data.add_argument("--target-db", default="",
-                      help="migrate: 新数据 SQLite 目标库；默认 ATS_DATA_DB_PATH")
-    data.add_argument("--backup-root", default="",
-                      help="migrate/repair-company-financials: 已验证备份目录；迁移默认 config/data/migration.yaml")
     data.add_argument("--operation", choices=["yoy", "mom", "rolling"], default="",
                       help="derive: 派生运算")
     data.add_argument("--window", type=int, default=0, help="derive rolling 窗口")
@@ -1950,12 +1784,10 @@ def main(argv: list[str] | None = None) -> int:
                         output_format=args.output_format, periods=args.periods,
                         query_scope=args.query_scope, db_path=args.db_path,
                         artifact_root=args.artifact_root, force=args.force,
-                        apply=args.apply, mode=args.mode, consumer=args.consumer,
+                        apply=args.apply, mode=args.mode,
                         release_file=args.release_file, kind=args.kind,
                         operation=args.operation, window=args.window,
                         entities=args.entities, period=args.period,
-                        migration_domain=args.migration_domain, source_db=args.source_db,
-                        target_db=args.target_db, backup_root=args.backup_root,
                         report_path=args.report_path, acquire=args.acquire,
                         provider_lookup_attempts=args.provider_lookup_attempts,
                         provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,

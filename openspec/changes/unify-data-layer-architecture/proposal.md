@@ -10,10 +10,13 @@
 - 明确适配器、管道、存储和产品之间的单向依赖，禁止适配器直接写库、产品直接访问 Provider，以及结构化和非结构化实现相互反向依赖。
 - 建立 `config/data/` 配置层级和统一 catalog loader，区分来源注册、结构化数据集、非结构化文档源、Provider 配置、调度策略和 Workflow 配置。
 - 将现有 defeatbeta、yfinance、SEC 与发行人披露统一为受管的 `company_financials` 来源链：按可达性依次尝试 defeatbeta、yfinance、SEC Facts、发行人 IR；一旦前序来源提供同一报告期的完整财务报表合同，即停止后续抓取。仅持久化低频、可审计的收入、利润、现金流、CapEx、资产负债表和 EPS，不持久化行情或期权数据。
+- 将原名为 `sector_fundamentals` 的行业成分股财务读取明确为 `sector_constituent_financials`：它复用 PEAD 的同一 `company_financials` 完整报表包、来源优先级与报告期选择，不是行业级财务或 FactSet 行业报告数据集；市值、P/E、Forward P/E 与 Beta 继续作为 runtime 输入，与持久化财报事实分离。
 - 逐步从 `ats.memory` 拆出数据层 schema 与 repository；过渡期保持旧数据库、旧 Workflow 和旧 CLI 可运行，按来源和消费者独立切换。
 - 在 facade 稳定后，迁移旧实现持有的 `measurement_*` 与既有 `structured_*` observations/artifacts/运行记录，以及文档、版本、分块和证据；迁移必须可恢复、可续跑、可对账，且不得丢失版本、血缘或审计信息。
 - 将每个直接消费可切换数据产品的 Agent 与 Workflow 显式切换到统一数据产品路径；调用方自身改动时以新旧输出对账、回滚演练和端到端验收作为**消费者切换门**，但不把它们作为数据源或数据集发布门；区分等价结果、经独立验证的受管升级、平台回归和仅编排边界，避免将旧路径故障或 Workflow memory 误判为平台数据错误。
 - 在 task 10.5 的数据层发布范围内，逐个完成 TrendForce 文章、SemiAnalysis（IMAP/RSS）和 IBKR News 的新路径资产沉淀、覆盖账本、隔离验收与来源级发布。本轮只判断数据本身的实体/来源、正文、时间、覆盖、去重、时效、质量和血缘；不切换任何 Agent/Workflow 消费者，也不删除 legacy 路径。SemiAnalysis 未订阅时可将可验证的邮件预览正文发布为明确标记 `partial` 的资产，绝不得伪装为全文；TrendForce 的文章与 DRAM 合约价是两个独立数据集，禁止混作同一验收对象。
+- `pead_research` 只消费第三方研究文章，不消费官方披露或股票新闻。它可以消费 SemiAnalysis 的可验证 `partial` 预览正文，但必须将完整性、截断原因和 immutable document/version 血缘保留到其 Workflow memory 的 insight、projection 与事件输出链路；不得将预览描述为完整文章。该消费者的发布以 platform 输入选择、处理流程、输出血缘与回滚验证为准，不以 legacy 输出等价为前置条件。
+- `evidence_chain` 的发布以实际 platform Chain 报告为准：仅验证其合同中的非结构化 documents、versions、chunks、evidence facts/observations/projections 与失败记录，以及报告和 Workflow memory claim assessment 输出。通用迁移检查中的 `structured_observations` 不属于该消费者的读取合同，不得作为其发布阻塞；结构化 Chain 输入由各自消费者单独验收。验收报告必须可在隔离 memory 中以 no-LLM 模式重放，不得因外部 adjudicator 不可达而伪造或阻断发布。
 - 确立 IBKR News 为新闻新路径的第一优先级：其可达、动态 provider 枚举与历史请求健康时只采集 IBKR；`yfinance_live_news` 只在 TWS 不可达、权限/订阅不足、provider 不可用、请求受限/拒绝或指定切片失败时，作为对应失败范围的 fallback，而不是与 IBKR 正常双采集或等价替代。IBKR 候选必须保留精确原始新闻时间、查询实体、provider/article ID、标准化标题和正文 hash，并以标题实体校验与分层去重防止无关或重复头条耗尽正文预算。Yahoo 仍保存原生 ID、publisher、发布时间和 canonical URL；只接纳标题中明确命中 PEAD 实体 ticker/公司名/已登记别名的候选，取得正文后还须验证标题锚点。未命中的 Yahoo 推荐项必须以 `association_rejected` 记录在验收清单中，不得进入可发布资产；正文不完整或页面正文与标题不一致同样不得发布。
 - 只有全部数据迁移、消费者切换和稳定性验收完成后，才删除旧模块、旧配置 alias、重复 repository 实现和不再需要的旧 schema；在此之前不得归档本变更。
 - 交付开发者、运维者和使用者可阅读的统一数据层架构文档，包含目标目录、依赖规则、配置字段、迁移步骤、测试门槛和兼容周期。

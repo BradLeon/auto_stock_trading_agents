@@ -77,7 +77,7 @@ def test_fundamentals_light_contract_is_none_filled_and_never_raises(monkeypatch
     }
 
 
-def test_sector_light_fundamentals_use_governed_accounting_metrics_in_platform_mode(monkeypatch):
+def test_legacy_light_compatibility_can_overlay_governed_accounting_metrics(monkeypatch):
     fundamentals._LIGHT_CACHE.clear()
     monkeypatch.setattr(fundamentals, "safe_fetch", lambda *_, **__: {
         "marketCap": 1_000_000, "trailingPE": 20, "grossMargins": 0.1,
@@ -87,18 +87,49 @@ def test_sector_light_fundamentals_use_governed_accounting_metrics_in_platform_m
         "gross_margin": 0.6, "op_margin": 0.3, "rev_growth": 0.2,
     })
 
-    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FUNDAMENTALS_MODE", "platform")
-    platform = fundamentals.fetch_light("MSFT", consumer="sector_fundamentals")
+    monkeypatch.setenv("ATS_STRUCTURED_RUNTIME_LIGHT_MODE", "platform")
+    platform = fundamentals.fetch_light("MSFT", consumer="runtime_light")
     assert platform["gross_margin"] == 0.6
     assert platform["op_margin"] == 0.3
     assert platform["rev_growth"] == 0.2
     assert platform["market_cap"] == 1_000_000
     assert platform["pe"] == 20
 
-    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FUNDAMENTALS_MODE", "shadow")
-    shadow = fundamentals.fetch_light("MSFT", consumer="sector_fundamentals")
+    monkeypatch.setenv("ATS_STRUCTURED_RUNTIME_LIGHT_MODE", "shadow")
+    shadow = fundamentals.fetch_light("MSFT", consumer="runtime_light")
     assert shadow["gross_margin"] == 0.1
     assert shadow["op_margin"] == 0.1
+
+
+def test_sector_constituent_financials_keeps_runtime_separate_and_marks_no_coverage(monkeypatch):
+    runtime = {
+        "market_cap": 1_000_000, "pe": 20, "fwd_pe": 18,
+        "gross_margin": 0.1, "op_margin": 0.1, "rev_growth": 0.1, "beta": 1.2,
+    }
+    monkeypatch.setattr(fundamentals, "fetch_light", lambda *_args, **_kwargs: dict(runtime))
+    monkeypatch.setattr(fundamentals, "_platform_constituent_accounting", lambda _symbol: {
+        "metrics": {"gross_margin": 0.6, "op_margin": 0.3, "rev_growth": 0.2},
+        "source": "defeatbeta_stock_statement", "report_period": "2026-06-30",
+    })
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_CONSTITUENT_FINANCIALS_MODE", "platform")
+
+    result = fundamentals.fetch_constituent_financials("MSFT")
+    assert result["market_cap"] == 1_000_000
+    assert result["pe"] == 20
+    assert result["gross_margin"] == 0.6
+    assert result["accounting_status"] == "covered"
+    assert result["accounting_source"] == "defeatbeta_stock_statement"
+    assert result["accounting_report_period"] == "2026-06-30"
+
+    monkeypatch.setattr(fundamentals, "_platform_constituent_accounting", lambda _symbol: {
+        "metrics": {}, "source": "", "report_period": "",
+    })
+    missing = fundamentals.fetch_constituent_financials("NO_DATA")
+    assert missing["gross_margin"] is None
+    assert missing["op_margin"] is None
+    assert missing["rev_growth"] is None
+    assert missing["market_cap"] == 1_000_000
+    assert missing["accounting_status"] == "no_coverage"
 
 
 def test_consensus_public_contract_has_fixed_keys_and_partial_success(monkeypatch):

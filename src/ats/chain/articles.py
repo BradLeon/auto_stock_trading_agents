@@ -145,6 +145,35 @@ def _seen_document_ids(store, entity: str) -> set[str]:
     return seen
 
 
+def _related_entities(mod, ref: ArticleRef, source: ArticleSourceDef) -> tuple[str, ...]:
+    """Keep a publisher witness while indexing only verified ticker associations.
+
+    Article sources such as IBKR News are configured with a publisher entity
+    (``DOWJONES``) because Chain uses it as an independent witness.  That must not
+    erase the ticker(s) for which the API returned and title-verified the article:
+    PEAD's monitor reads by ticker, whereas Chain reads by witness.  Adapter
+    provenance is the only source of such associations; a ticker merely present in
+    an API recommendation is deliberately not linked.
+    """
+    entities = {source.entity.upper()}
+    provenance = getattr(mod, "provenance", None)
+    if not callable(provenance):
+        return tuple(sorted(entities))
+    try:
+        raw = provenance(ref) or {}
+    except Exception as exc:  # noqa: BLE001 - association enrichment is best effort
+        log.warning("articles: provenance lookup failed for %s/%s: %s",
+                    source.id, ref.slug, exc)
+        return tuple(sorted(entities))
+    if str(raw.get("entity_association") or "") != "title_verified":
+        return tuple(sorted(entities))
+    for value in str(raw.get("title_verified_entities") or "").split(","):
+        value = value.strip().upper()
+        if value:
+            entities.add(value)
+    return tuple(sorted(entities))
+
+
 def collect_articles(store, *, source_ids: set[str] | None = None,
                      now: datetime | None = None) -> dict[str, ArticleRunStat]:
     """Discover, filter, fetch and read every declared article source."""
@@ -182,7 +211,13 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
             if not _wanted(ref, source):
                 continue
             document_id = f"{source.entity}:{ref.slug}:{source.doc_type}"
+            related_entities = _related_entities(mod, ref, source)
             if document_id in seen:
+                # Older IBKR runs retained the publisher witness but predated ticker
+                # association provenance.  A fresh, title-verified rediscovery can
+                # safely add that missing association without fetching a body or
+                # re-running Chain extraction.
+                store.link_document_entities(document_id, related_entities)
                 continue
             stat.matched += 1
 
@@ -194,7 +229,7 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
                 store.save_document_alias(
                     shared["document_id"], source=source.adapter, source_url=ref.url,
                     external_id=ref.url, title=ref.title, published_at=published)
-                store.link_document_entities(shared["document_id"], [source.entity])
+                store.link_document_entities(shared["document_id"], related_entities)
                 body = document_assets.read_document(shared["document_id"], store=store)
                 document_id = shared["document_id"]
             else:
@@ -228,7 +263,8 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
                     source=source.adapter, source_url=ref.url, external_id=ref.url,
                     title=ref.title, published_at=(ref.published_at.isoformat()
                                                    if ref.published_at else ""),
-                    now=now, min_chars=1, store=store,
+                    now=now, min_chars=1, related_entities=related_entities,
+                    store=store,
                 )  # source-specific guard already ran above
                 if doc is not None:
                     document_id = doc.document_id

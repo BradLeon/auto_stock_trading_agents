@@ -26,6 +26,21 @@ name = "research"
 _MIN_RSS_BODY = 1500     # below this, an RSS body is a paid-post teaser -> fetch the page
 _IMAP_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_NEWS_SOURCES = ("ibkr_news", "yfinance_live_news", "yahoo_news")
+
+
+def is_pead_research_article(article: Article) -> bool:
+    """Return whether the PEAD research reader may interpret this article.
+
+    SemiAnalysis previews are intentional, useful research inputs for an
+    unsubscribed account.  They remain partial documents, rather than being
+    silently promoted to full text.  Other incomplete/teaser research sources
+    need their own consumer policy before they can enter PEAD research.
+    """
+    if article.completeness == "full":
+        return True
+    return (article.completeness == "partial"
+            and "semianalysis" in article.source.lower())
 
 
 @dataclass(frozen=True)
@@ -185,34 +200,64 @@ def stored_articles(since: datetime, *, source_match: str = "", store=None,
     # immutable input and leave those write contracts untouched until retirement.
     from .products import get_unstructured_read_router
 
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+
     reader = get_unstructured_read_router(consumer=consumer, legacy_repository=store)
     try:
-        rows = reader.documents(doc_type="article", published_since=since.isoformat(),
-                                source_contains=source_match or None, limit=limit)
+        # Some migrated carrier-oriented records predate ``published_at`` metadata.
+        # Query the bounded catalog first, then apply the effective publication-time
+        # filter below after combining catalog, frontmatter, and fetch provenance.
+        rows = reader.documents(doc_type="article", source_contains=source_match or None,
+                                limit=limit)
     finally:
         reader.close()
     out: list[Article] = []
     for row in rows:
-        completeness = row.get("completeness") or "full"
-        if completeness != "full" and not allow_incomplete:
-            continue
-        external_id = row.get("external_id") or ""
+        # Historical assets used the carrier-oriented ``article`` type for both
+        # research and wire news.  PEAD research extracts durable research
+        # insights; it must not silently process IBKR/Yahoo headlines, which are
+        # owned by the PEAD monitor/Graph path.  New semantic rows are already
+        # distinct; this source guard preserves the same boundary during migration.
         path = Path(row.get("local_path") or "")
-        if not external_id or not path.is_file():
+        if not path.is_file():
             continue
         try:
-            _, body = _split_frontmatter(path.read_text(encoding="utf-8", errors="ignore"))
-            published = datetime.fromisoformat(row.get("published_at") or "")
+            metadata, body = _split_frontmatter(
+                path.read_text(encoding="utf-8", errors="ignore"))
         except (OSError, ValueError):
+            continue
+        source_value = row.get("source") or metadata.get("source") or "research"
+        source = str(source_value).lower()
+        if any(marker in source for marker in _NEWS_SOURCES):
+            continue
+        completeness = row.get("completeness") or metadata.get("completeness") or "full"
+        if completeness != "full" and not allow_incomplete:
+            continue
+        published_raw = (row.get("published_at") or metadata.get("published_at") or
+                         row.get("fetched_at") or metadata.get("fetched_at") or "")
+        try:
+            published = datetime.fromisoformat(str(published_raw).replace("Z", "+00:00"))
+        except ValueError:
             continue
         if published.tzinfo is None:
             published = published.replace(tzinfo=timezone.utc)
-        out.append(Article(id=external_id, source=row.get("source") or "research",
-                           title=row.get("title") or "", url=row.get("source_url") or "",
+        if published < since:
+            continue
+        # ``document_id`` is the migration's stable identity.  It is the final
+        # fallback only for records written before article-native IDs were cataloged.
+        external_id = (row.get("external_id") or metadata.get("external_id") or
+                       row.get("document_id") or "")
+        if not external_id:
+            continue
+        out.append(Article(id=str(external_id), source=str(source_value),
+                           title=row.get("title") or metadata.get("title") or "",
+                           url=row.get("source_url") or metadata.get("source_url") or "",
                            body=body, published_at=published,
                            completeness=completeness,
-                           truncation_reason=row.get("truncation_reason") or "",
-                           mime_source=row.get("mime_source") or ""))
+                           truncation_reason=(row.get("truncation_reason") or
+                                              metadata.get("truncation_reason") or ""),
+                           mime_source=row.get("mime_source") or metadata.get("mime_source") or ""))
     out.sort(key=lambda a: a.published_at, reverse=True)
     return out
 

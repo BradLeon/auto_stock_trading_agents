@@ -46,6 +46,26 @@ def _net_liq(state: PeadState) -> float:
     return get_config().app.account.net_liquidation_usd
 
 
+def _published_event_date(package) -> str:
+    """Prefer the accepted release date once score reads an event-bound package.
+
+    ``prep_fetch`` legitimately records the *next* calendar event so option expiry can
+    be selected before earnings.  A later score, however, is anchored to immutable
+    documents for a completed event.  Carrying that future calendar date into the
+    score dossier makes the report header and score ledger describe a different event
+    from the release/filing/transcript they actually consumed.
+    """
+    for role in ("earnings_release", "regulatory_filing", "earnings_transcript"):
+        item = next((doc for doc in package.documents if doc.role == role), None)
+        if item is None or not item.published_at:
+            continue
+        try:
+            return datetime.fromisoformat(item.published_at.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
 # --------------------------------------------------------------------------- #
 # Shared
 # --------------------------------------------------------------------------- #
@@ -308,9 +328,34 @@ def score_fetch(state: PeadState) -> dict:
 
     out["fundamentals_text"] = (fund_src.fetch(state.symbol).to_context()
                                 if state.live_data else "(offline)")
-    # Fetch the transcript when explicitly provided, or in live mode; skip offline
-    # (avoids network in tests / offline runs).
-    if state.transcript_source or state.live_data:
+    # An explicit operator-supplied transcript remains authoritative.  Otherwise
+    # platform/fallback modes read the event-bound immutable package first; they do
+    # not trigger a new SEC, transcript, RSS, or web fetch inside a scoring run.
+    # Legacy/shadow retain the established discovery path until PEAD's own shadow
+    # reconciliation is completed in task 10.1.
+    package = None
+    package_mode = "legacy"
+    if state.live_data and not state.transcript_source:
+        from ..structured import read_mode
+
+        package_mode = read_mode("pead_graph")
+        if package_mode in {"platform", "fallback", "shadow"}:
+            from ..data.products.unstructured import platform_earnings_document_package
+
+            package = platform_earnings_document_package(
+                entity=state.symbol, period=state.fiscal_label)
+
+    use_package = bool(package and package.scoreable and package_mode in {"platform", "fallback"})
+    if use_package:
+        transcript = package.transcript
+        text = transcript.text if transcript else ""
+        src = (f"platform:{transcript.source}:{transcript.version_id}"
+               if transcript else "platform:no_transcript")
+        out["documents_text"] = package.official_text()
+        out["document_lineage"] = [item.lineage for item in package.documents]
+        if event_date := _published_event_date(package):
+            out["earnings_date"] = event_date
+    elif state.transcript_source or state.live_data:
         text, src = transcript_src.fetch(state.symbol, state.fiscal_label,
                                          state.transcript_source,
                                          company_name=state.config.company_name)
@@ -354,8 +399,9 @@ def score_fetch(state: PeadState) -> dict:
         log.info("%s: 无纪要，按 v1（仅财报稿/8-K）打分，权重将重新归一且仓位减半",
                  state.symbol)
 
-    # Official documents: SEC 8-K earnings release + investor decks from the folder.
-    if state.live_data:
+    # Legacy/shadow still use the compatibility collector.  Platform/fallback already
+    # has the selected immutable release/filing versions above.
+    if state.live_data and not use_package:
         from ..data import documents
 
         docs = documents.gather(

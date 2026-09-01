@@ -115,7 +115,12 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
                   f"(门槛 {sc.threshold:+.1f}) — {sc.band}")
         print(f"决策情景: {result.get('decision_band', '—')} · 建议 {len(recs)} 条")
         for d in recs:
-            size = f"${d.notional_usd:,.0f}" if d.notional_usd else (f"{d.qty:.0f}股" if d.qty else "")
+            # PEAD persists a recommendation, not an executable TradeDecision.
+            # Keep the CLI presentation on its public ``*_hint`` contract so a
+            # completed graph cannot be reported as a command failure.
+            notional = getattr(d, "notional_hint", None)
+            quantity = getattr(d, "qty_hint", None)
+            size = f"${notional:,.0f}" if notional else (f"{quantity:.0f}股" if quantity else "")
             print(f"  • 建议 {d.action} {d.symbol} {size}")
     print("=" * 70)
 
@@ -1242,7 +1247,6 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
 
     if action == "pead-official-disclosure-coverage":
         import os
-        from pathlib import Path
 
         from ..data.pead_official_disclosures import (
             active_pead_targets,
@@ -1295,6 +1299,7 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     if action in {"source-acceptance", "source-publish", "source-releases"}:
         from ..data.pipelines.unstructured.source_acceptance import (
             assess_article_source,
+            assess_ibkr_news_with_fallback,
             load_release_overlay,
             publish_source,
             write_acceptance_report,
@@ -1332,8 +1337,10 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 acquired = list(batch.articles)
             else:
                 acquired = []
-            result = assess_article_source(
-                source_id, human_review_approved=approve_title_url_review)
+            result = (assess_ibkr_news_with_fallback(
+                human_review_approved=approve_title_url_review)
+                if source_id == "ibkr_news" else assess_article_source(
+                    source_id, human_review_approved=approve_title_url_review))
             result["acquisition"] = {"requested": acquire, "articles": len(acquired),
                                      "isolated": bool(acquire),
                                      "transport_status": batch.transport_status if acquire else {}}
@@ -1442,6 +1449,32 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["platform_eligible"] else 2
+
+    if action == "consumer-acceptance":
+        from ..data.migration import default_data_db_path
+        from .consumer_acceptance import run_consumer_acceptance
+
+        if not consumer:
+            raise ValueError("consumer-acceptance requires --consumer")
+        result = run_consumer_acceptance(
+            consumer=consumer, entity=entity or value,
+            data_db=target_db or default_data_db_path(),
+            lookback_days=limit if limit != 20 else 7,
+            record=apply,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["status"] == "reconciled" else 2
+
+    if action == "consumer-release-records":
+        from ..data.cutover import consumer_release_records
+        from ..data.migration import default_data_db_path
+
+        if not consumer:
+            raise ValueError("consumer-release-records requires --consumer")
+        result = consumer_release_records(
+            consumer=consumer, data_db=target_db or default_data_db_path())
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
 
     if action == "migrate":
         from ..data.migration import (
@@ -1704,7 +1737,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
-        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "cutover-check", "cutover-status", "release-assessment", "describe", "availability", "examples", "releases",
+        "catalog", "config", "migration-plan", "migrate", "repair-company-financials", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "consumer-acceptance", "cutover-check", "cutover-status", "release-assessment", "consumer-release-records", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section",
@@ -1727,7 +1760,8 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--entity", default="", help="实体过滤")
     data.add_argument("--since", default="", help="最早期间或发布日期")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
-    data.add_argument("--limit", type=int, default=20)
+    data.add_argument("--limit", type=int, default=20,
+                      help="通用结果条数；consumer-acceptance 时为新闻回看天数（默认 7）")
     data.add_argument("--status", default="", help="conflicts / pending-mappings 状态过滤")
     data.add_argument("--format", dest="output_format", choices=["json", "markdown"],
                       default="json", help="quality/catalog/describe 等输出格式")
@@ -1753,7 +1787,7 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--mode", choices=["legacy", "shadow", "platform", "fallback"],
                       default="platform", help="publish/rollback 目标模式")
     data.add_argument("--consumer", default="",
-                      help="publish/rollback/cutover-check/cutover-status/release-assessment: 消费者 ID；与 --source 二选一")
+                      help="consumer-acceptance/publish/rollback/cutover-check/cutover-status/release-assessment/consumer-release-records: 消费者 ID；与 --source 二选一")
     data.add_argument("--release-file", default="",
                       help="发布覆盖层路径；structured 默认 var/structured_data，source-* 默认 var/data/unstructured")
     data.add_argument("--migration-domain", default="",
@@ -1777,6 +1811,8 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    sch.add_argument("--no-llm", action="store_true",
+                     help="run the same schedule without external-model calls (useful for safe acceptance checks)")
     sch.add_argument("--window", choices=["amc", "bmo"],
                      help="run one PEAD score window immediately, then exit")
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
@@ -1918,7 +1954,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule":
         from .scheduler import start
 
-        start(dry_run=not args.live, run_once=args.now, window=args.window)
+        start(dry_run=not args.live, run_once=args.now, window=args.window,
+              use_llm=not args.no_llm)
         return 0
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)

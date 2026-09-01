@@ -12,6 +12,9 @@ class _Legacy:
     def save_insights(self, *_args):
         return "legacy-write"
 
+    def observation_failures(self, **_kwargs):
+        return [{"document_id": "legacy-failure"}]
+
 
 class _Platform:
     def __init__(self, rows):
@@ -20,6 +23,9 @@ class _Platform:
 
     def documents(self, **_kwargs):
         return self.rows
+
+    def observation_failures(self, **_kwargs):
+        return [{"document_id": "platform-failure"}]
 
     def close(self):
         self.closed = True
@@ -48,3 +54,12 @@ def test_router_without_a_provisioned_platform_keeps_the_declared_legacy_path() 
         consumer="evidence_chain", legacy_repository=legacy,
         platform_repository=None, mode="shadow")
     assert router.documents() == [{"document_id": "doc-1"}]
+
+
+def test_platform_routes_persisted_evidence_failures_but_not_workflow_writes() -> None:
+    router = UnstructuredReadRouter(
+        consumer="evidence_chain", legacy_repository=_Legacy(),
+        platform_repository=_Platform([]), mode="platform")
+
+    assert router.observation_failures() == [{"document_id": "platform-failure"}]
+    assert router.save_insights() == "legacy-write"

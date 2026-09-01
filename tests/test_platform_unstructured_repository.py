@@ -34,6 +34,8 @@ def _target(path):
             stance TEXT, direction TEXT, value REAL, unit TEXT, evidence_span TEXT,
             observed_at TEXT, discovery_evidence INTEGER, extraction_confidence REAL,
             concept TEXT, source_entity TEXT, superseded_at TEXT);
+        CREATE TABLE data_evidence_failures (document_id TEXT, entity TEXT, reason TEXT, at TEXT,
+            PRIMARY KEY(document_id, entity));
         CREATE TABLE data_task_projections (projection_id TEXT PRIMARY KEY, profile TEXT,
             profile_version TEXT, input_kind TEXT, input_ref TEXT, target_type TEXT,
             target_id TEXT, payload TEXT, created_at TEXT, expires_at TEXT);
@@ -50,6 +52,7 @@ def _target(path):
     conn.execute("INSERT INTO data_evidence_facts VALUES ('f1','doc-1','v1','url','NVDA','NVDA','demand','2026Q2','guidance',1,'x','span','2026-08-01',1,0,NULL)")
     conn.execute("INSERT INTO data_evidence_projections VALUES ('p1','f1','o1','chain','v1','demand','management','up','{}','2026-08-01',NULL)")
     conn.execute("INSERT INTO data_evidence_observations VALUES ('o1','doc-1','url','NVDA','demand','2026Q2','guidance','management','up',1,'x','span','2026-08-01',0,1,'demand','NVDA',NULL)")
+    conn.execute("INSERT INTO data_evidence_failures VALUES ('doc-1','NVDA','no relevant fact','2026-08-01')")
     conn.commit(); conn.close()
 
 
@@ -64,5 +67,6 @@ def test_migrated_document_and_evidence_queries_preserve_identity(tmp_path):
         assert repository.facts(entity="NVDA")[0]["fact_id"] == "f1"
         assert repository.fact_projections(concept="demand")[0]["projection_id"] == "p1"
         assert repository.observations(entity="NVDA")[0]["id"] == "o1"
+        assert repository.observation_failures()[0]["document_id"] == "doc-1"
     finally:
         repository.close()

@@ -75,6 +75,35 @@ def test_scheduler_daily_uses_its_boundary_before_workflow_side_effects(monkeypa
     assert seen == ["runtime_scheduler"]
 
 
+def test_scheduler_isolates_a_failed_stage_and_runs_later_stages(monkeypatch, caplog):
+    """A source/batch failure must not suppress the rest of the daily cascade."""
+    stages: list[str] = []
+    monkeypatch.setattr(scheduler, "_event_triggers", lambda **_kwargs: stages.append("events"))
+
+    def fail_news():
+        stages.append("news")
+        raise RuntimeError("publisher unavailable")
+
+    monkeypatch.setattr(scheduler, "_news_backfill_daily", fail_news)
+    monkeypatch.setattr(scheduler, "pead_daily",
+                        lambda **_kwargs: stages.append("pead"))
+    monkeypatch.setattr(scheduler, "_technical_daily", lambda: stages.append("technical"))
+    monkeypatch.setattr(scheduler, "_intel_digest", lambda **_kwargs: stages.append("intel"))
+    monkeypatch.setattr(scheduler, "_perf_snapshot", lambda: stages.append("performance"))
+    monkeypatch.setattr(scheduler, "_perf_risk_digest", lambda: stages.append("risk"))
+    monkeypatch.setattr(scheduler, "_journal_marks", lambda: stages.append("journal"))
+    monkeypatch.setattr(scheduler, "_chief_daily",
+                        lambda **_kwargs: stages.append("chief"))
+
+    with caplog.at_level("WARNING"):
+        scheduler._daily(dry_run=True)
+
+    assert stages == [
+        "events", "news", "pead", "technical", "intel", "performance", "risk", "journal", "chief",
+    ]
+    assert "daily stage news backfill failed: publisher unavailable" in caplog.text
+
+
 def test_scheduler_data_accesses_use_unified_runtime_products_and_pipelines():
     source = (Path(__file__).resolve().parents[1] / "src/ats/runtime/scheduler.py").read_text(
         encoding="utf-8")

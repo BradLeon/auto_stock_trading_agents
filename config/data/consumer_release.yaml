@@ -16,6 +16,18 @@ consumers:
     inputs: [market_consensus]
     gates: [coverage, freshness, output]
     rollback: consumer mode legacy
+  pead_graph:
+    kind: direct_data
+    interface: ats.data.products.structured + ats.data.products.unstructured
+    inputs: [company_financials, market_consensus, earnings_release, sec_filing, transcript, research, news]
+    gates: [coverage, freshness, output]
+    rollback: consumer mode legacy
+  pead_monitor:
+    kind: direct_data
+    interface: ats.data.products.unstructured
+    inputs: [news]
+    gates: [coverage, freshness, output]
+    rollback: consumer mode legacy
   sector_consensus:
     kind: direct_data
     interface: ats.data.products.structured
@@ -40,7 +52,7 @@ consumers:
     inputs: [regional_tw_exports, regional_kr_exports]
     gates: [coverage, freshness, output]
     rollback: consumer mode legacy
-  sector_fundamentals:
+  sector_constituent_financials:
     kind: direct_data
     interface: ats.data.products.structured
     inputs: [company_financials]
@@ -49,7 +61,9 @@ consumers:
   pead_research:
     kind: direct_data
     interface: ats.data.products.unstructured
-    inputs: [research, news]
+    # Research-insight extraction consumes durable third-party research only.
+    # News is separately owned by the PEAD monitor/Graph route.
+    inputs: [research]
     gates: [coverage, freshness, output]
     rollback: consumer mode legacy
   evidence_chain:

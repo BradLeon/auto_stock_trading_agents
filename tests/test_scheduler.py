@@ -77,6 +77,39 @@ def test_chief_daily_runs_with_scheduled_source(monkeypatch):
     assert calls[0]["source"] == "scheduled" and calls[0]["dry_run"] is True
 
 
+def test_daily_no_llm_mode_reaches_event_pead_and_chief(monkeypatch):
+    """The safe scheduler acceptance mode must propagate to every LLM-capable stage."""
+    seen = {}
+    monkeypatch.setattr(scheduler, "_news_backfill_daily", lambda: None)
+    monkeypatch.setattr(scheduler, "_technical_daily", lambda: None)
+    monkeypatch.setattr(scheduler, "_intel_digest", lambda **_kwargs: None)
+    monkeypatch.setattr(scheduler, "_perf_snapshot", lambda: None)
+    monkeypatch.setattr(scheduler, "_perf_risk_digest", lambda: None)
+    monkeypatch.setattr(scheduler, "_journal_marks", lambda: None)
+    monkeypatch.setattr(scheduler, "_event_triggers",
+                        lambda **kwargs: seen.setdefault("events", kwargs["use_llm"]))
+    monkeypatch.setattr(scheduler, "pead_daily",
+                        lambda **kwargs: seen.setdefault("pead", kwargs["use_llm"]))
+    monkeypatch.setattr(scheduler, "_intel_digest",
+                        lambda **kwargs: seen.setdefault("intel", kwargs["use_llm"]))
+    monkeypatch.setattr(scheduler, "_chief_daily",
+                        lambda **kwargs: seen.setdefault("chief", kwargs["use_llm"]))
+
+    scheduler._daily(dry_run=True, use_llm=False)
+
+    assert seen == {"events": False, "pead": False, "intel": False, "chief": False}
+
+
+def test_schedule_cli_exposes_safe_no_llm_run_once(monkeypatch):
+    from ats.runtime.cli import main
+
+    seen = {}
+    monkeypatch.setattr(scheduler, "start", lambda **kwargs: seen.update(kwargs))
+
+    assert main(["schedule", "--now", "--no-llm"]) == 0
+    assert seen == {"dry_run": True, "run_once": True, "window": None, "use_llm": False}
+
+
 def test_yahoo_news_is_backfilled_once_for_the_shared_universe(monkeypatch):
     from ats import config
     from ats.data import yahoo_news

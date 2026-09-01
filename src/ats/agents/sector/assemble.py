@@ -187,7 +187,7 @@ def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> d
         m2 = sector_snapshot.momentum(closes, days[1]) if len(days) > 1 else None
         dh = sector_snapshot.dist_to_high(closes)
 
-        f = fundamentals.fetch_light(sym, consumer="sector_fundamentals")
+        f = fundamentals.fetch_constituent_financials(sym)
         time.sleep(sleep_s)
 
         cons_txt = ""
@@ -209,7 +209,10 @@ def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> d
                    + (f" (vs {cfg.sector_etf} {_signed(_rel(m1, etf_mom))})" if m1 is not None and etf_mom is not None else "")
                    + (f" {days[1]}d {_signed(m2)}" if m2 is not None else "")
                    + (f" 距高{_signed(dh)}" if dh is not None else ""))
-        out[sym] = " ".join(parts) + " | " + mom_txt + cons_txt
+        accounting_note = "" if f.get("accounting_status") == "covered" else (
+            f" | 财报{f.get('accounting_status', 'unavailable')}"
+        )
+        out[sym] = " ".join(parts) + " | " + mom_txt + cons_txt + accounting_note
     return out
 
 
@@ -371,7 +374,17 @@ def _no_llm_judge(_claim, clusters):
     not make an unrecorded semantic decision about whether a cluster supports a claim.
     The explicit neutral reason reaches the rendered evidence block.
     """
-    from ...schemas.chain import ClusterJudgement
+    from ...schemas.chain import ClusterJudgement, EntityReading
+
+    # ``relative`` claims are adjudicated as a cross-section and therefore pass a
+    # mapping of entity -> clusters, not a flat cluster list.  Treating that mapping
+    # as clusters made `sector review --no-llm` crash after all data inputs had been
+    # assembled.  Explicitly return unknown readings: no-LLM means no comparative
+    # conclusion, not a fabricated neutral ranking.
+    if isinstance(clusters, dict):
+        return [EntityReading(entity=str(entity).upper(), standing="unknown",
+                              reason="未运行 LLM 判读（--no-llm）")
+                for entity in clusters]
 
     return [ClusterJudgement(
         cluster_key=cluster.key, polarity="neutral", reason="未运行 LLM 判读（--no-llm）",

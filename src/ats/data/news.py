@@ -22,8 +22,20 @@ name = "news"
 
 
 def fetch_news(symbol: str, since: datetime, until: datetime | None = None, *,
-               store=None) -> list[NewsItem]:
+               store=None, consumer: str = "pead_monitor") -> list[NewsItem]:
     until = until or datetime.now(timezone.utc)
+    from ..structured import read_mode
+
+    mode = read_mode(consumer)
+    if mode in {"platform", "fallback", "shadow"}:
+        from .products.unstructured import platform_news_items
+
+        platform_items = platform_news_items(entity=symbol, since=since, until=until)
+        if mode == "platform":
+            return platform_items
+        if mode == "fallback" and platform_items:
+            return platform_items
+
     sources_cfg = load_news_sources()
 
     items: list[NewsItem] = []
@@ -124,6 +136,16 @@ def _catalog(items: list[NewsItem], *, store=None) -> None:
 
 def acquire_body(item: NewsItem, *, store=None) -> str:
     """Return shared full text, fetching it at most once after metadata ingestion."""
+    if item.source.startswith("platform:"):
+        from .products.unstructured import _read_version_text
+        from .stores.unstructured import get_platform_unstructured_repository
+
+        repository = get_platform_unstructured_repository()
+        try:
+            version = repository.latest_document_version(item.id)
+            return _read_version_text(version or {})
+        finally:
+            repository.close()
     from ..memory import get_store
     from . import document_assets
     from .web import fetch_article_text

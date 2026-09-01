@@ -168,6 +168,15 @@ def test_no_llm_evidence_judge_marks_semantic_gap():
     assert rows[0].reason == "未运行 LLM 判读（--no-llm）"
 
 
+def test_no_llm_cross_section_judge_returns_explicit_unknowns():
+    rows = assemble._no_llm_judge(None, {"MU": [], "SKHY": []})
+
+    assert [(row.entity, row.standing, row.reason) for row in rows] == [
+        ("MU", "unknown", "未运行 LLM 判读（--no-llm）"),
+        ("SKHY", "unknown", "未运行 LLM 判读（--no-llm）"),
+    ]
+
+
 def test_sector_analyst_gets_the_criteria_before_the_evidence(monkeypatch, tmp_path):
     """The curated notes used to reach only the cross-section's structure analyst, while
     the sector analyst re-derived the same criteria from 36k of raw research every week.

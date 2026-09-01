@@ -51,6 +51,21 @@ STANCE_CN = {"customer": "客户", "supplier": "供应商", "competitor": "竞�
             "incumbent": "当事方", "regulator": "监管/统计机构"}
 
 
+def _no_llm_judge(_claim, clusters):
+    """Keep a report reproducible when semantic adjudication is intentionally off."""
+    from ..schemas.chain import ClusterJudgement, EntityReading
+
+    if isinstance(clusters, dict):
+        return [EntityReading(entity=str(entity).upper(), standing="unknown",
+                              reason="未运行 LLM 判读（no-LLM 验收）")
+                for entity in clusters]
+    return [ClusterJudgement(
+        cluster_key=cluster.key, polarity="neutral", reason="未运行 LLM 判读（no-LLM 验收）",
+        speaker=cluster.speaker, concept=cluster.concept, stance=cluster.stance,
+        primary=cluster.primary, observation_ids=cluster.observation_ids)
+        for cluster in clusters]
+
+
 def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
     lines = ["## 命题印证", "",
              "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条判读都附理由，"
@@ -345,19 +360,21 @@ def _failure_section(store) -> list[str]:
             + [""])
 
 
-def render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
+def render(cfg, store, *, as_of, ind_cfg: dict | None = None,
+           allow_llm: bool = True) -> str:
     """Build the markdown with an independently reversible evidence-data read path."""
     from ..data.products import get_unstructured_read_router
 
     reader = get_unstructured_read_router(
         consumer="evidence_chain", legacy_repository=store)
     try:
-        return _render(cfg, reader, as_of=as_of, ind_cfg=ind_cfg)
+        return _render(cfg, reader, as_of=as_of, ind_cfg=ind_cfg, allow_llm=allow_llm)
     finally:
         reader.close()
 
 
-def _render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
+def _render(cfg, store, *, as_of, ind_cfg: dict | None = None,
+            allow_llm: bool = True) -> str:
     """Render with immutable document/evidence reads routed through ``store``.
 
     The router delegates claim-assessment and other Workflow-memory operations to the
@@ -382,7 +399,9 @@ def _render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
         # Stamp the snapshot with the REPORT's as_of, not wall-clock: otherwise
         # re-rendering the same report writes a second row instead of replacing
         # one, and the history reads as change when nothing changed.
-        assessments = assess_layer(layer, rows_by_entity, cfg=ccfg, as_of=as_of)
+        assessments = assess_layer(
+            layer, rows_by_entity, cfg=ccfg, as_of=as_of,
+            judge=None if allow_llm else _no_llm_judge)
         assessments_by_layer[layer.key] = assessments
         # Snapshot the verdicts. Versioned by (claim_id, as_of) so the table answers
         # "when did this turn from mixed to contradicted" — the only question a verdict
@@ -418,7 +437,8 @@ def _render(cfg, store, *, as_of, ind_cfg: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-def write(cfg, store, *, as_of, ind_cfg: dict | None = None) -> Path | None:
+def write(cfg, store, *, as_of, ind_cfg: dict | None = None,
+          allow_llm: bool = True) -> Path | None:
     if not cfg.output_dir:
         log.info("chain evidence report: output_dir unset — skipped")
         return None
@@ -427,5 +447,6 @@ def write(cfg, store, *, as_of, ind_cfg: dict | None = None) -> Path | None:
         log.warning("chain evidence report: output_dir missing — skipped: %s", folder)
         return None
     path = folder / f"产业链证据-{cfg.label}-{as_of:%Y-%m-%d}.md"
-    path.write_text(render(cfg, store, as_of=as_of, ind_cfg=ind_cfg), encoding="utf-8")
+    path.write_text(render(cfg, store, as_of=as_of, ind_cfg=ind_cfg,
+                          allow_llm=allow_llm), encoding="utf-8")
     return path

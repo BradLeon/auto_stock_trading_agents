@@ -17,6 +17,17 @@ CREATE TABLE IF NOT EXISTS data_consumer_cutover_records (
 );
 CREATE INDEX IF NOT EXISTS idx_data_cutover_consumer
     ON data_consumer_cutover_records(consumer, checked_at DESC);
+
+-- A release decision is not another shadow observation.  In particular a retained
+-- decision must not count as a mismatch and make a later corrected observation
+-- window appear unhealthy.  Keep the decision/evidence ledger separate.
+CREATE TABLE IF NOT EXISTS data_consumer_release_records (
+    record_id TEXT PRIMARY KEY, consumer TEXT NOT NULL, recorded_at TEXT NOT NULL,
+    decision TEXT NOT NULL, category TEXT NOT NULL, platform_eligible INTEGER NOT NULL,
+    mode_before TEXT NOT NULL, mode_after TEXT NOT NULL, details_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_data_consumer_release_records_consumer
+    ON data_consumer_release_records(consumer, recorded_at DESC);
 """
 
 
@@ -219,6 +230,69 @@ def record_consumer_release_verification(*, consumer: str, entity: str,
         conn.close()
 
 
+def record_consumer_release_decision(*, consumer: str, data_db: str | Path,
+                                     assessment: dict, decision: str,
+                                     mode_before: str, mode_after: str,
+                                     details: dict) -> dict:
+    """Persist the final per-consumer release decision and its review evidence.
+
+    The decision ledger intentionally has no influence on ``consumer_cutover_status``:
+    it records the operator's conclusion *after* a comparison, rather than creating
+    synthetic reconciliation evidence.  A platform publication is accepted only when
+    the supplied assessment has independently passed its release gate.
+    """
+    normalized = _consumer_id(consumer)
+    expected = {"published", "retained", "orchestration_boundary"}
+    if decision not in expected:
+        raise ValueError("invalid consumer release decision: " + decision)
+    category = str(assessment.get("category") or "")
+    eligible = bool(assessment.get("platform_eligible"))
+    if decision == "published" and not eligible:
+        raise ValueError("cannot publish consumer without a passing release assessment")
+    if decision == "orchestration_boundary" and category != "orchestration_boundary":
+        raise ValueError("orchestration_boundary decision requires orchestration category")
+    required = {"inputs", "output", "lineage", "failure_handling", "rollback"}
+    missing = sorted(key for key in required if not details.get(key))
+    if missing:
+        raise ValueError("consumer release record missing: " + ", ".join(missing))
+
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    result = {
+        "record_id": uuid4().hex, "consumer": normalized, "recorded_at": recorded_at,
+        "decision": decision, "category": category, "platform_eligible": eligible,
+        "mode_before": mode_before, "mode_after": mode_after, "details": details,
+    }
+    conn = sqlite3.connect(Path(data_db))
+    try:
+        conn.executescript(_SCHEMA)
+        conn.execute("INSERT INTO data_consumer_release_records VALUES (?,?,?,?,?,?,?,?,?)", (
+            result["record_id"], result["consumer"], recorded_at, decision, category,
+            int(eligible), mode_before, mode_after,
+            json.dumps(result, ensure_ascii=False, sort_keys=True)))
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
+def consumer_release_records(*, consumer: str, data_db: str | Path) -> list[dict]:
+    """Return durable release decisions without affecting consumer eligibility."""
+    path = Path(data_db)
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    try:
+        if not _table_exists(conn, "data_consumer_release_records"):
+            return []
+        rows = conn.execute(
+            "SELECT details_json FROM data_consumer_release_records "
+            "WHERE consumer=? ORDER BY recorded_at", (_consumer_id(consumer),)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [json.loads(row[0]) for row in rows]
+
+
 def compare_consumer_data(*, consumer: str, entity: str = "",
                           legacy_db: str | Path, data_db: str | Path,
                           record: bool = True) -> dict:
@@ -256,5 +330,6 @@ def compare_consumer_data(*, consumer: str, entity: str = "",
 
 __all__ = [
     "compare_consumer_data", "consumer_cutover_status", "record_consumer_comparison",
-    "record_consumer_release_verification",
+    "record_consumer_release_verification", "record_consumer_release_decision",
+    "consumer_release_records",
 ]

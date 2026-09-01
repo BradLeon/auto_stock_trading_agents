@@ -26,7 +26,7 @@ class UnstructuredReadRouter:
 
     _READ_METHODS = {
         "documents", "latest_document_version", "search_document_chunks",
-        "observations", "facts", "fact_projections",
+        "observations", "observation_failures", "facts", "fact_projections",
         "document_processing",
     }
 

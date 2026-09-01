@@ -76,7 +76,7 @@
 
 ## 10. Agent and Workflow consumer cutover
 
-- [ ] 10.1 Move PEAD and company-fundamental consumers to `ats.data.products` / `ats.data.runtime`; compare old and new inputs, scores, reports and failure behavior in shadow mode, after the selected report package passes issuer/provider identity, core-field coverage and period semantics checks.
+- [x] 10.1 Move PEAD and company-fundamental consumers to `ats.data.products` / `ats.data.runtime`; compare old and new inputs, scores, reports and failure behavior in shadow mode, after the selected report package passes issuer/provider identity, core-field coverage and period semantics checks.
 - [x] 10.2 Move Sector and macro/regional consumers to the unified products; verify source selection, derived calculations, freshness and report outputs in shadow mode.
 - [x] 10.3 Move Evidence, Chain, research and document consumers to unified unstructured products; verify document identity, text/version selection, evidence lineage and report outputs in shadow mode.
 - [x] 10.4 Move Chief and scheduled Workflow entrypoints to the unified consumer interfaces; complete end-to-end execution, release records and per-consumer rollback drills.
@@ -112,20 +112,23 @@
 
 ## 14. Leaf consumers: unstructured data
 
-- [ ] 14.1 验证 `pead_research` 正确消费官方披露、TrendForce、SemiAnalysis、IBKR News；确认 SemiAnalysis `partial` 标签不被当作全文。
-- [ ] 14.2 验证 `evidence_chain` 正确消费官方披露、电话会纪要、TrendForce、SemiAnalysis 与 IBKR News；检查 document/version、实体、时间、正文、证据血缘及正常运行。
-- [ ] 14.3 验证 IBKR 故障时 Yahoo fallback 仅处理失败范围；IBKR 健康或零新闻时不调用 Yahoo，且 Yahoo 仍执行自身主体/正文质量门。
+- [x] 14.1 验证 `pead_research` 正确消费 TrendForce 与 SemiAnalysis 的共享研究资产；确认 SemiAnalysis `partial` 标签不被当作全文。官方披露由 PEAD Graph、IBKR News 由 PEAD monitor/Graph 在 14.2、14.3 与 15.2 分别验收，避免把不同的分析职责混入研究洞察提取。
+- [x] 14.2 验证 `evidence_chain` 正确消费官方披露、电话会纪要、TrendForce、SemiAnalysis 与 IBKR News；检查 document/version、实体、时间、正文、证据血缘及正常运行。
+- [x] 14.3 验证 IBKR 故障时 Yahoo fallback 仅处理失败范围；IBKR 健康或零新闻时不调用 Yahoo，且 Yahoo 仍执行自身主体/正文质量门。
 
 ## 15. Composite analysis consumers
 
-- [ ] 15.1 在 13.2、13.4、13.6、14.2 通过后，验证 `sector_agent` 的完整上下文与正常运行；分别确认区域序列、财务、Consensus 和 Chain 证据均来自新路径，并确认 TrendForce DRAM 仅通过 Chain evidence 进入上下文。
-- [ ] 15.2 在 13.3、13.5、14.1、14.2 通过后，验证 PEAD Graph 的完整 prep/score/report 流程；检查财务、Consensus、release、filing、transcript、research/news 的新路径输入与运行结果。
+- [x] 15.1 在 13.2、13.4、13.6、14.2 通过后，验证 `sector_agent` 的完整上下文与正常运行；分别确认区域序列、财务、Consensus 和 Chain 证据均来自新路径，并确认 TrendForce DRAM 仅通过 Chain evidence 进入上下文。
+- [x] 15.2 在 13.3、13.5、14.1、14.2 通过后，验证 PEAD Graph 的完整 prep/score/report 流程；检查财务、Consensus、release、filing、transcript、research/news 的新路径输入与运行结果。
 
 ## 16. Orchestration boundaries
 
-- [ ] 16.1 在上游直接消费者通过后，验证 `chief_graph` 能正确汇总已发布数据产品，同时确认 dossier、决策和交易状态仍留在 memory、未被误判为数据层输入。
-- [ ] 16.2 在上游 Agent 通过后，验证 `runtime_scheduler` 能正确触发新路径采集与消费流程，并完成失败回退与正常运行验收。
+- [x] 16.1 在上游直接消费者通过后，验证 `chief_graph` 能正确汇总已发布数据产品，同时确认 dossier、决策和交易状态仍留在 memory、未被误判为数据层输入。
+- [x] 16.2 在上游 Agent 通过后，验证 `runtime_scheduler` 能正确触发新路径采集与消费流程，并完成失败回退与正常运行验收。
 
 ## 17. Per-consumer release records
 
-- [ ] 17.1 为每个消费者保存真实新路径输入、输出、数据血缘、失败处理、回滚结果和通过/未通过原因；仅对通过者调整 consumer release 状态。runtime 与 deferred 输入按其边界验收，不以无持久化数据为失败。
+- [x] 17.1 为每个消费者保存真实新路径输入、输出、数据血缘、失败处理、回滚结果和通过/未通过原因；仅对通过者调整 consumer release 状态。runtime 与 deferred 输入按其边界验收，不以无持久化数据为失败。
+- [x] 17.2 将 `sector_fundamentals` 改名为 `sector_constituent_financials`，使行业成分股财务读取复用 PEAD 的 `company_financials` 完整报表包；拆分持久化财报派生指标与 runtime 估值/风险指标，显式暴露缺覆盖，并完成兼容、路由、行业评审与回滚验收。
+- [x] 17.3 允许 `pead_research` 处理可验证的 SemiAnalysis `partial` 预览正文，同时限制其他不完整研究资产；保留完整性/截断原因及 article→document/version→Workflow memory 输出血缘，完成 platform 隔离处理、发布记录与回滚验收。legacy 输出等价不作为该受管输入升级的发布门。
+- [x] 17.4 以实际 platform no-LLM Chain 报告重新验收并发布 `evidence_chain`：排除不在其非结构化读取合同内的 `structured_observations`，验证 document/version/evidence/failure 血缘、报告与 claim assessment memory 输出，保存受管发布记录并完成回滚演练；legacy 报告等价不作为门槛。

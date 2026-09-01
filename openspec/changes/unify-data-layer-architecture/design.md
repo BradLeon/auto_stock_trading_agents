@@ -127,6 +127,13 @@ config/
 runtime，只以已发布 EPS 和即时价格按需计算。每次发布前，需在隔离库及当前 platform target
 验证当前报告期、核心字段、币种/单位、来源停止条件、与既有路径的差异及退回 legacy 的行为。
 
+`sector_constituent_financials` 是上述同一报表包的轻量消费者，而非独立的行业财务来源。
+它按各行业配置中的成分股逐一读取最新完整 `company_financials` 报表包，并只从该包派生
+毛利率、营业利润率与收入同比；不得把 Provider 的 TTM 或网页字段静默填入缺失的持久化
+财报值。市值、Trailing/Forward P/E 与 Beta 继续由 runtime 查询提供，且不参与该消费者的
+持久化财务对账。缺少合格报表包时，消费者必须显式暴露 `no_coverage`，而不是伪装为已受管
+财务事实。
+
 ### 5.2 财务语义的边界：ADR EPS 与债务
 
 每股指标的经济单位不能由 entity 的报告币种推断。TSM 的官方 release 同时给出
@@ -186,10 +193,17 @@ TrendForce 文章、SemiAnalysis 订阅文章和 IBKR News 都是多个研究产
 
 - **TrendForce 文章**：以文章索引发现为主，RSS 仅作为辅助线索；每篇文档保存入口页与正文获取的状态。付费墙、摘要不足或 RSS 过期必须分别记录为 `partial` / `unreachable`，不能被“发现了 URL”误判为已覆盖。TrendForce DRAM 合约价属于结构化数据集，与文章资产分别注册、运行和验收。
 - **SemiAnalysis（IMAP/RSS）**：复用 `data.research.ingest` 的邮件与 RSS 获取能力，不另建邮箱抓取器。以 IMAP `Message-ID` / UID 与 canonical URL 作为稳定去重键；同一窗口内的所有匹配邮件与 RSS 项都要进入候选账本，邮件正文优先于 RSS 摘要，二者可合并为同一文档版本但不可静默丢弃。未订阅导致的预览正文可以发布，但文档版本、质量结果和验收报告必须显式为 `partial`；它不是全文，也不得覆盖以后取得的完整版本。
+- **PEAD Research 消费规则**：`pead_research` 的输入范围仅为 TrendForce、SemiAnalysis 等第三方 `research_article` 共享资产；官方 release/filing/transcript 由 PEAD Graph 消费，IBKR/Yahoo 新闻由 monitor/Graph 消费。除完整研究文章外，允许 SemiAnalysis 的 `partial` 预览正文进入提取；其他不完整研究资产仍不进入该消费者。提取提示和每项 Workflow memory 输出必须能经 `article_id → document → immutable version` 回溯至 `completeness` 与 `truncation_reason`，并明确限制为原文可见信息，不能把预览补全或标示为全文。发布验收以 platform 只读选择、隔离处理 smoke、输出的 article/version 血缘、失败隔离和 rollback drill 组成；legacy 结果只可作背景，非发布门。
 - **IBKR News（第一优先级）**：使用只读 TWS/IB Gateway 新闻接口，不持久化行情或期权数据。历史补采恢复 legacy 语义：每次运行使用 `reqNewsProviders()` 返回的全部 provider，并为每篇资产保留 provider/article ID、查询实体、原始精确新闻时间及其时区/会话标识；正文预算和质量门再决定可发布范围。标题必须独立命中查询实体 ticker、公司名或登记别名；不命中的候选进入 `association_rejected` 账本而不取正文。去重按 provider/article ID、标准化标题与精确时间、正文 hash 分层进行，正文预算按最新、主体通过的唯一候选分配。provider 枚举为空时，以 `IB.sleep` 进行有界重试，最终空结果只能标记为当前会话 `provider_unavailable`，不得推断为无 entitlement。只读诊断可以显式探测刚刚已知的 provider，即使当次枚举暂时为空；这只能用于分辨枚举波动与历史新闻能力，生产采集仍必须使用新鲜的动态枚举，不能把该临时 provider 当作发布范围。扩展超时的底层请求必须复用 `ib_async` 的 TWS wire 时间格式，不能把 Python `datetime` 原样传入 socket；TWS 对该请求的明确拒绝会立即结束本次等待，并分类为订阅不足或请求被拒绝，而不会伪装成超时。对 `reqHistoricalNews` 返回的每个 `(providerCode, articleId)`，以原样参数调用 `reqNewsArticle`；短暂的空正文或异常可有界重试，二进制/PDF 返回仍明确记为正文缺口。验收按已配置的标的、provider 和时间切片逐项记录；TWS 未连接、缺少新闻权限、provider 不可用、请求受限和确实没有新闻是不同状态，只有最后一种才可计为“零篇但成功”。诊断入口还必须输出只读连接、server version、可用 provider、合约 conId、每个探针的 API 错误回调及是否收到 `historicalNewsEnd`，使无响应能区分为请求格式、单一 provider、权限或服务端无回调。
 - **yfinance Yahoo News（仅可达性 fallback）**：该来源调用 `Ticker.news`，与 defeatbeta 的 Yahoo 日级镜像分别注册、运行和验收。它不是 IBKR 健康时的并行主来源；仅在 IBKR 的 TWS 不可达、权限/订阅不足、动态 provider 不可用、请求受限/拒绝，或指定标的/切片失败时，处理失败的范围。IBKR 正常完成但没有新闻时不得触发 Yahoo fallback。按 PEAD 当前 targets 逐一请求，保留 Yahoo content ID、publisher、原始发布时间、Yahoo canonical URL、查询实体与抓取时点；同一 Yahoo ID 或 canonical URL 只形成一个候选。主体准入严格采用 `title_verified`：标题须命中该实体 ticker、注册公司名或别名的完整词组；仅由 Yahoo 推荐关系带回、标题未命中的候选标为 `association_rejected`，保留在报告而不取正文/不发布。通过标题门的候选仅在直接取得正文且正文仍能验证标题锚点时才可接受；页面壳、导航、付费墙、视频或正文错配均记录为缺口。来源验收输出 PEAD 每个标的的全部标题、URL、publisher、时间和主体判定，供人工审阅；未获人工审阅前不写入 source release overlay。
 
 所有真实来源运行必须先通过确定性单元测试，并在隔离数据库/资产目录中执行。来源级报告将每个来源分类为 `equivalent`、`governed_upgrade`、`platform_regression`、`partial` 或 `unreachable`；只有无未解释平台回归且满足该来源覆盖/质量门的范围才可标记为 `platform`。失败范围保持 `legacy` 或 `shadow`，并保留可重试游标和缺口原因。本子阶段明确不修改消费者路由、不删除旧采集逻辑；这些是后续统一消费者验收与 legacy retirement 的独立工作。
+
+### 8.1 Evidence Chain 以实际 platform 报告验收，而非通用表哈希
+
+`evidence_chain` 的可切换读取合同是非结构化 document/evidence 产品：官方 release、filing、transcript、第三方 research/RSS/news 的 immutable document/version/chunk，及其 facts、evidence observations、projections 与失败记录。Chain report 基于这些观测产生命题覆盖、证据簇和可追溯原文；claim assessment、提案和报告文件则是 Workflow memory 输出或展示，不成为数据层输入。
+
+通用数据库迁移比较覆盖 `structured_observations`，但该表不是 `evidence_chain` 的读取合同；例如 NVDA 的 84/252 行差异必须留给结构化数据消费者处置，不能把已验证的非结构化报告错误地降级为 platform regression。发布验收必须在复制的 Workflow memory 中强制 `evidence_chain=platform`，用真实行业配置和固定 `as_of` 渲染 no-LLM 报告，验证报告非空、命题输出可追溯到 platform evidence observation 与 immutable document/version，且失败记录仍被展示。no-LLM 路径必须输出明确的未裁决/unknown，而不是调用外部 LLM 或伪造语义结论。完成该验收后，以 `governed_platform_evidence_report_upgrade` 保存 comparison/independent verification，执行 `platform → legacy → platform` 演练；legacy 报告字节等价不是门槛。
 
 ## Risks / Trade-offs
 

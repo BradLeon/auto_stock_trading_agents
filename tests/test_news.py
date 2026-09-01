@@ -30,6 +30,16 @@ def test_finnhub_failure_degrades_to_other_sources(monkeypatch):
     assert [i.id for i in out] == ["r1"]          # finnhub died, rss survived
 
 
+def test_platform_news_does_not_call_legacy_providers(monkeypatch):
+    item = _item("platform")
+    monkeypatch.setenv("ATS_STRUCTURED_PEAD_MONITOR_MODE", "platform")
+    monkeypatch.setattr("ats.data.products.unstructured.platform_news_items",
+                        lambda **_kwargs: [item])
+    monkeypatch.setattr(news, "_finnhub", lambda *_args: (_ for _ in ()).throw(AssertionError("legacy")))
+
+    assert news.fetch_news("NVDA", SINCE, consumer="pead_monitor") == [item]
+
+
 def test_rss_keyword_filter():
     feed = {"name": "Test", "url": "http://x"}
     entries = [{"title": "Coherent ships 1.6T optics", "summary": "", "link": "u1",

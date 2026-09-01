@@ -144,6 +144,38 @@ def test_ibkr_fallback_only_activates_for_unavailability_or_failed_slices():
     assert slice_failure["entities"] == ["NVDA"]
 
 
+def test_ibkr_fallback_executes_yahoo_only_for_the_declared_failure_scope(monkeypatch):
+    calls = []
+
+    def assess(source_id, **kwargs):
+        calls.append((source_id, kwargs.get("adapter_params")))
+        if source_id == "ibkr_news":
+            return {"fallback": {"activate": True, "source_id": "yfinance_live_news",
+                                 "scope": "failed_slices", "entities": ["NVDA"]}}
+        return {"source_id": source_id, "platform_eligible": False}
+
+    monkeypatch.setattr(acceptance, "assess_article_source", assess)
+    result = acceptance.assess_ibkr_news_with_fallback(now=NOW)
+
+    assert calls == [("ibkr_news", None), ("yfinance_live_news", {"symbols": ["NVDA"]})]
+    assert result["fallback"]["attempted"] is True
+
+
+def test_ibkr_zero_news_never_calls_yahoo(monkeypatch):
+    calls = []
+
+    def assess(source_id, **kwargs):
+        calls.append(source_id)
+        return {"fallback": {"activate": False, "source_id": "yfinance_live_news",
+                             "scope": "none", "reason": "primary_completed_including_zero_news"}}
+
+    monkeypatch.setattr(acceptance, "assess_article_source", assess)
+    result = acceptance.assess_ibkr_news_with_fallback(now=NOW)
+
+    assert calls == ["ibkr_news"]
+    assert result["fallback"]["attempted"] is False
+
+
 def test_ibkr_body_dedupe_uses_normalized_title_and_content_hash(monkeypatch):
     source = _source("ibkr_news", adapter="ibkr_news", minimum=600)
     refs = [_ref("dj-1"), _ref("br-2")]

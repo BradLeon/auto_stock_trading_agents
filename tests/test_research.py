@@ -112,6 +112,105 @@ def test_shared_ingestion_feeds_both_consumers_without_refetch(monkeypatch):
     assert len(calls) == 1
 
 
+def test_pead_research_reader_excludes_news_but_can_return_partial_for_policy(monkeypatch, tmp_path):
+    full = tmp_path / "full.md"
+    partial = tmp_path / "partial.md"
+    news = tmp_path / "news.md"
+    full.write_text("complete research body", encoding="utf-8")
+    partial.write_text("preview body", encoding="utf-8")
+    news.write_text("wire headline body", encoding="utf-8")
+
+    class Reader:
+        def documents(self, **_kwargs):
+            return [
+                {"external_id": "trendforce:1", "source": "trendforce",
+                 "title": "DRAM outlook", "source_url": "https://trendforce.test/1",
+                 "local_path": str(full), "published_at": NOW.isoformat(), "completeness": "full"},
+                {"external_id": "semi:1", "source": "newsletter:SemiAnalysis",
+                 "title": "Preview", "source_url": "https://semi.test/1",
+                 "local_path": str(partial), "published_at": NOW.isoformat(), "completeness": "partial"},
+                {"external_id": "ibkr:1", "source": "ibkr_news",
+                 "title": "MSFT wire", "source_url": "https://wire.test/1",
+                 "local_path": str(news), "published_at": NOW.isoformat(), "completeness": "full"},
+            ]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("ats.data.products.get_unstructured_read_router",
+                        lambda **_kwargs: Reader())
+
+    full_only = research_src.stored_articles(NOW, store=object())
+    assert [article.id for article in full_only] == ["trendforce:1"]
+    with_partial = research_src.stored_articles(NOW, store=object(), allow_incomplete=True)
+    assert [article.id for article in with_partial] == ["trendforce:1", "semi:1"]
+
+
+def test_pead_research_allows_only_semianalysis_partial_previews():
+    full = ARTICLE.model_copy(update={"completeness": "full"})
+    semi_preview = ARTICLE.model_copy(update={"completeness": "partial"})
+    trendforce_preview = ARTICLE.model_copy(update={
+        "source": "trendforce", "completeness": "partial"})
+    teaser = ARTICLE.model_copy(update={"completeness": "teaser"})
+
+    assert research_src.is_pead_research_article(full) is True
+    assert research_src.is_pead_research_article(semi_preview) is True
+    assert research_src.is_pead_research_article(trendforce_preview) is False
+    assert research_src.is_pead_research_article(teaser) is False
+
+
+def test_research_uses_stable_document_id_for_pre_metadata_article(monkeypatch):
+    _pin_universe(monkeypatch)
+    migrated = ARTICLE.model_copy(update={"id": "SEMIANALYSIS:imap-123:research_article"})
+    monkeypatch.setattr(research_src, "stored_articles", lambda *_args, **_kwargs: [migrated])
+    monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
+    store = get_store()
+    from ats.data import document_assets
+
+    document_assets.ingest(
+        entity="SEMIANALYSIS", key="imap-123", doc_type="research_article",
+        text=migrated.body, source=migrated.source, source_url=migrated.url,
+        external_id="", title=migrated.title, published_at=migrated.published_at.isoformat(),
+        min_chars=1, store=store)
+
+    research.run(use_llm=True, since=NOW)
+
+    assert store.document_processing(
+        document_id="SEMIANALYSIS:imap-123:research_article", consumer="pead",
+        processor_version=research.PROCESSOR_VERSION)
+
+
+def test_stored_articles_recovers_pre_metadata_migration_records(monkeypatch, tmp_path):
+    historical = tmp_path / "historical.md"
+    historical.write_text("migrated SemiAnalysis body", encoding="utf-8")
+
+    class Reader:
+        def documents(self, **kwargs):
+            # The old migration populated stable document identity and fetch lineage,
+            # but did not backfill article-native ID or published_at.
+            assert "published_since" not in kwargs
+            return [{
+                "document_id": "SEMIANALYSIS:imap-123:article",
+                "source": "semianalysis",
+                "local_path": str(historical),
+                "fetched_at": NOW.isoformat(),
+                "external_id": None,
+                "published_at": None,
+            }]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("ats.data.products.get_unstructured_read_router",
+                        lambda **_kwargs: Reader())
+
+    articles = research_src.stored_articles(NOW, store=object())
+
+    assert len(articles) == 1
+    assert articles[0].id == "SEMIANALYSIS:imap-123:article"
+    assert articles[0].published_at == NOW
+
+
 def test_cross_carrier_duplicate_prefers_imap_body_and_records_duplicate_count(monkeypatch):
     imap = ARTICLE.model_copy(update={
         "id": "imap:<same-post@test>", "url": "https://semianalysis.com/p/same-post?utm=email",

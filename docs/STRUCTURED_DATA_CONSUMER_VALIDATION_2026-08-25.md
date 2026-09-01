@@ -40,7 +40,7 @@
 | `pead_consensus` | `platform` | 真实专项 60/60 可比标量一致、两个可见时点无前视、消费者 DTO smoke 通过 | `ATS_STRUCTURED_PEAD_CONSENSUS_MODE=legacy` |
 | `sector_consensus` | `platform` | 与 PEAD 共用持久 snapshot，但独立消费者开关和 manifest | `ATS_STRUCTURED_SECTOR_CONSENSUS_MODE=legacy` |
 | `pead_fundamentals` | `legacy` | 平台可组装 DTO，但财务质量总门仍失败 | 可单次用 `shadow`；不切 platform |
-| `sector_fundamentals` | `legacy` | `fetch_light` 的估值、beta、TTM 指标属于 runtime 语义，不能用季度持久事实静默替代 | 保持现状 |
+| `sector_constituent_financials`（当时名为 `sector_fundamentals`） | `legacy` | 成分股财报指标现复用 PEAD 报表包；估值、beta 仍属于 runtime，不能用季度持久事实静默替代 | 保持现状 |
 
 来源开关使用 `ATS_STRUCTURED_SOURCE_<SOURCE_ID>_MODE`，消费者开关使用 `ATS_STRUCTURED_<CONSUMER>_MODE`，单消费者/单来源组合还可使用 `ATS_STRUCTURED_<CONSUMER>_<SOURCE_ID>_MODE`。回退只影响相应消费者，不删除新表、artifact 或历史 manifest。
 

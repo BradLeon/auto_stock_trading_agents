@@ -89,12 +89,14 @@ def _adapter_provenance(adapter, ref: ArticleRef) -> dict[str, str]:
     return {"native_id": ref.slug, "canonical_url": _canonical_url(ref.url)}
 
 
-def _diagnostic_discover(adapter, source: ArticleSourceDef) -> tuple[list[ArticleRef], dict[str, Any]]:
+def _diagnostic_discover(adapter, source: ArticleSourceDef, *,
+                         params: dict[str, Any] | None = None) -> tuple[list[ArticleRef], dict[str, Any]]:
+    params = params if params is not None else dict(source.params)
     detailed = getattr(adapter, "discover_with_status", None)
     if callable(detailed):
-        refs, status = detailed(pages=source.pages, **source.params)
+        refs, status = detailed(pages=source.pages, **params)
         return list(refs), dict(status or {})
-    refs = adapter.discover(pages=source.pages, **source.params)
+    refs = adapter.discover(pages=source.pages, **params)
     return list(refs), {"status": "succeeded", "diagnostic": "adapter_has_no_detailed_status"}
 
 
@@ -156,7 +158,8 @@ def fallback_plan(*, source_id: str, outcome: str, discovery: dict[str, Any],
 
 def assess_article_source(source_id: str, *, now: datetime | None = None,
                           policy_path: str | Path | None = None,
-                          human_review_approved: bool = False) -> dict[str, Any]:
+                          human_review_approved: bool = False,
+                          adapter_params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Perform a source-only, read-only acceptance pass.
 
     Each discovered candidate becomes a ledger row in the returned report.  This is
@@ -184,7 +187,8 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
         "release_requires_human_title_url_review", False))
     since = now.date() - timedelta(days=lookback_days) if lookback_days else None
     try:
-        refs, discovery = _diagnostic_discover(adapter, source)
+        refs, discovery = _diagnostic_discover(
+            adapter, source, params={**dict(source.params), **dict(adapter_params or {})})
     except Exception as exc:  # source failure, not an empty publishing window
         refs, discovery = [], {"status": "unreachable", "error": f"{type(exc).__name__}:{exc}"}
 
@@ -345,6 +349,31 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
     return result
 
 
+def assess_ibkr_news_with_fallback(*, now: datetime | None = None,
+                                    policy_path: str | Path | None = None,
+                                    human_review_approved: bool = False) -> dict[str, Any]:
+    """Assess Yahoo only for IBKR's explicitly failed availability scope."""
+    primary = assess_article_source(
+        "ibkr_news", now=now, policy_path=policy_path,
+        human_review_approved=human_review_approved)
+    decision = dict(primary.get("fallback") or {})
+    decision["attempted"] = False
+    if not decision.get("activate"):
+        primary["fallback"] = decision
+        return primary
+
+    params: dict[str, Any] = {}
+    if decision.get("scope") == "failed_slices":
+        params["symbols"] = list(decision.get("entities") or [])
+    decision["attempted"] = True
+    # Yahoo remains independently subject to title association and body quality gates.
+    decision["assessment"] = assess_article_source(
+        str(decision["source_id"]), now=now, policy_path=policy_path,
+        human_review_approved=human_review_approved, adapter_params=params)
+    primary["fallback"] = decision
+    return primary
+
+
 def write_acceptance_report(result: dict[str, Any], path: str | Path) -> Path:
     """Persist a human-readable report only at an explicit caller-provided path."""
     target = Path(path)
@@ -425,7 +454,7 @@ def publish_source(result: dict[str, Any], *, path: str | Path | None = None,
 
 
 __all__ = [
-    "assess_article_source", "default_policy_path", "default_release_path",
+    "assess_article_source", "assess_ibkr_news_with_fallback", "default_policy_path", "default_release_path",
     "fallback_plan", "load_policy", "load_release_overlay", "publish_source",
     "write_acceptance_report",
 ]

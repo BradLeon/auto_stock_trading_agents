@@ -131,8 +131,18 @@ def _comparison_category(row: dict | None) -> tuple[str, str, bool]:
 
     legacy, platform = details.get("legacy"), details.get("platform")
     reason = str(details.get("reason") or reconciliation.get("reason") or "mismatch")
-    if not _payload_present(legacy) and _payload_present(platform) and (
-            reason.endswith("Error") or "unreachable" in reason.lower() or "timeout" in reason.lower()):
+    # A shadow read can be unable to build the legacy DTO without raising a
+    # transport exception (for example, an old provider returns no statements).
+    # This is not evidence that a complete, lineaged platform package regressed.
+    # Treat it as a governed-upgrade candidate, which still requires a separate
+    # independent review before publication.
+    legacy_unavailable = (
+        reason == "statement_unavailable_on_one_side"
+        or reason.endswith("Error")
+        or "unreachable" in reason.lower()
+        or "timeout" in reason.lower()
+    )
+    if not _payload_present(legacy) and _payload_present(platform) and legacy_unavailable:
         return GOVERNED_UPGRADE, f"legacy_unavailable:{reason}", True
     return PLATFORM_REGRESSION, reason, False
 

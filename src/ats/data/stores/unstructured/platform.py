@@ -40,6 +40,11 @@ class PlatformUnstructuredRepository:
             sql += " AND observed_at>=?"; args.append(since.isoformat())
         return self._rows(sql + " ORDER BY observed_at DESC LIMIT ?", [*args, limit])
 
+    def observation_failures(self, limit: int = 50) -> list[dict]:
+        """Return persisted extraction gaps without falling back to Workflow memory."""
+        return self._rows(
+            "SELECT * FROM data_evidence_failures ORDER BY at DESC LIMIT ?", [limit])
+
     def facts(self, *, entity: str | None = None, document_id: str | None = None,
               since: datetime | None = None, include_superseded: bool = False,
               limit: int = 500) -> list[dict]:

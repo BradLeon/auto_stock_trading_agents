@@ -409,7 +409,7 @@ def _technical_daily() -> None:
         log.warning("technical review failed: %s", exc)
 
 
-def _daily(*, dry_run: bool) -> None:
+def _daily(*, dry_run: bool, use_llm: bool = True) -> None:
     # Macro/sector weekly review moved to its own Saturday job (see _weekly_review /
     # the "weekly_review" cron job) — they don't touch the broker or need a trading
     # session, so tying them to the mon-fri trading-day cascade was never necessary,
@@ -418,15 +418,28 @@ def _daily(*, dry_run: bool) -> None:
 
     boundary = workflow_data_boundary("runtime_scheduler")
     log.info("scheduler input boundary: consumer=%s mode=%s", boundary.consumer, boundary.mode)
-    _event_triggers()    # FOMC/CPI/行业会议 -> extra analyst runs, cascade into today
-    _news_backfill_daily()
-    pead_daily(dry_run=dry_run)
-    _technical_daily()
-    _intel_digest()      # surface today's intel: Obsidian .md + Feishu card
-    _perf_snapshot()
-    _perf_risk_digest()  # surface perf + 6-layer risk: Obsidian .md + Feishu card
-    _journal_marks()     # score elapsed prediction horizons + rewrite the ledger
-    _chief_daily(dry_run=dry_run)   # LAST: the Chief reads everything fresh and decides
+    # Every stage is independently best-effort.  A publisher or runtime-provider
+    # outage must be visible, but it must not suppress the remaining data products
+    # or the final dry-run Chief pass.  Individual helpers also catch their own
+    # fine-grained failures; this outer boundary covers configuration/import and
+    # batch-level failures before those helpers can establish their own isolation.
+    stages = (
+        ("event triggers", lambda: _event_triggers(use_llm=use_llm)),
+        ("news backfill", _news_backfill_daily),
+        ("PEAD daily", lambda: pead_daily(dry_run=dry_run)),
+        ("technical daily", _technical_daily),
+        ("intel digest", lambda: _intel_digest(use_llm=use_llm)),
+        ("performance snapshot", _perf_snapshot),
+        ("performance/risk digest", _perf_risk_digest),
+        ("journal marks", _journal_marks),
+        # LAST: the Chief reads every successfully refreshed upstream artifact.
+        ("chief daily", lambda: _chief_daily(dry_run=dry_run, use_llm=use_llm)),
+    )
+    for stage, run in stages:
+        try:
+            run()
+        except Exception as exc:  # noqa: BLE001 - one scheduled stage must not stop the cycle
+            log.warning("daily stage %s failed: %s", stage, exc)
 
 
 def _news_backfill_daily() -> None:
@@ -458,11 +471,11 @@ def _news_backfill_daily() -> None:
              batch.status, batch.discovered, len(batch.items), batch.quarantined)
 
 
-def _intel_digest() -> None:
+def _intel_digest(*, use_llm: bool = True) -> None:
     try:
         from .digest import intel_digest
 
-        p = intel_digest()
+        p = intel_digest(use_llm=use_llm)
         if p:
             log.info("intel digest -> %s", p)
     except Exception as exc:  # noqa: BLE001 - digest must not break the daily job
@@ -530,7 +543,7 @@ def _push_risk_alert(review) -> None:
         log.info("risk alert push skipped: %s", exc)
 
 
-def _event_triggers() -> list[str]:
+def _event_triggers(*, use_llm: bool = True) -> list[str]:
     """Fire analyst refreshes for today's calendar events (config/events.yaml).
     Returns the fired event labels (testable)."""
     from ..config import load_events, load_pead_global
@@ -545,14 +558,14 @@ def _event_triggers() -> list[str]:
         for trig in ev.triggers:
             try:
                 if trig == "macro":
-                    run_macro_review(load_pead_global()["macro_review"]["name"])
+                    run_macro_review(load_pead_global()["macro_review"]["name"], use_llm=use_llm)
                 elif trig == "sector":
                     for name in load_pead_global()["sector_review"]["sectors"]:
-                        run_sector_review(name)
+                        run_sector_review(name, use_llm=use_llm)
                 elif trig.startswith("sector:"):
-                    run_sector_review(trig.split(":", 1)[1])
+                    run_sector_review(trig.split(":", 1)[1], use_llm=use_llm)
                 elif trig.startswith("pead:"):
-                    run_pead_monitor(trig.split(":", 1)[1])
+                    run_pead_monitor(trig.split(":", 1)[1], use_llm=use_llm)
                 else:
                     log.warning("unknown event trigger %r on %s", trig, ev.label)
                     continue
@@ -562,7 +575,7 @@ def _event_triggers() -> list[str]:
     return fired
 
 
-def _chief_daily(*, dry_run: bool) -> None:
+def _chief_daily(*, dry_run: bool, use_llm: bool = True) -> None:
     """Daily decision收口: the Chief reads all fresh artifacts and (via the trader's
     single approval gate) proposes/executes trades. Quiet days -> zero decisions."""
     if not is_trading_session():
@@ -570,7 +583,7 @@ def _chief_daily(*, dry_run: bool) -> None:
     try:
         from .cli import run_chief
 
-        run_chief(dry_run=dry_run, channel=get_config().app.channel.kind,
+        run_chief(dry_run=dry_run, use_llm=use_llm, channel=get_config().app.channel.kind,
                   source="scheduled")
     except Exception as exc:  # noqa: BLE001 - chief must not break the daily job
         log.warning("chief daily run failed: %s", exc)
@@ -772,7 +785,8 @@ def _attach_job_logging(scheduler) -> None:
                            EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
 
 
-def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None) -> None:
+def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None,
+          use_llm: bool = True) -> None:
     from ..config import load_pead_global
 
     cfg = get_config().app.schedule
@@ -780,7 +794,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         pead_score_window(window, dry_run=dry_run)
         return
     if run_once:
-        _daily(dry_run=dry_run)
+        _daily(dry_run=dry_run, use_llm=use_llm)
         return
 
     from apscheduler.executors.pool import ThreadPoolExecutor
@@ -804,7 +818,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
                                   executors={"default": ThreadPoolExecutor(1)})
     _attach_job_logging(scheduler)
     scheduler.add_job(
-        lambda: _daily(dry_run=dry_run),
+        lambda: _daily(dry_run=dry_run, use_llm=use_llm),
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
         id="daily_cycle", misfire_grace_time=grace,
     )

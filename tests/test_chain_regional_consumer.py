@@ -22,6 +22,16 @@ class _NoChangePipeline:
         return {"status": "no_change"}
 
 
+class _UnavailablePipeline:
+    """A refresh gap must not hide an already accepted monthly vintage."""
+
+    def __init__(self, _repository):
+        pass
+
+    def run(self, _adapter, _request):
+        return {"status": "unreachable"}
+
+
 def _seed(repo, *, source, dataset, entity, metric, unit, start):
     for index in range(14):
         year = 2025 + (start + index - 1) // 12
@@ -74,3 +84,30 @@ def test_chain_regional_reads_platform_levels_and_derivations(monkeypatch, tmp_p
         assert all(point.yoy is not None and point.mom is not None for point in points)
         assert points[-1].yoy == (113 / 101 - 1)
         assert points[-1].mom == (113 / 112 - 1)
+
+
+def test_chain_regional_uses_accepted_platform_vintage_when_refresh_is_unreachable(
+        monkeypatch, tmp_path) -> None:
+    database = tmp_path / "regional.sqlite"
+    seed = SQLiteStructuredRepository(database, artifact_root=tmp_path / "artifacts")
+    seed.bootstrap_catalog()
+    _seed(seed, source="tw_mof_exports", dataset="regional_tw_exports", entity="TW_IC_EXPORT",
+          metric="regional.tw_ic_exports.value", unit="USD M", start=6)
+    seed.close()
+
+    def platform_repository():
+        repository = SQLiteStructuredRepository(database, artifact_root=tmp_path / "artifacts")
+        repository.bootstrap_catalog()
+        return repository
+
+    monkeypatch.setattr("ats.data.runtime.get_platform_structured_repository", platform_repository)
+    monkeypatch.setattr("ats.structured.IngestionPipeline", _UnavailablePipeline)
+    monkeypatch.setenv("ATS_STRUCTURED_CHAIN_REGIONAL_MODE", "platform")
+    definition = SourceDef(
+        id="tw_ic_exports", label="台湾 IC 出口", adapter="tw_mof", entity="TW_IC_EXPORT",
+        stance="regulator", observation_type="regulatory", cadence="monthly",
+        concepts=["supply_tightness"], direction_from=["yoy", "mom"])
+
+    points = sources.fetch(definition, lookback_months=2)
+
+    assert [point.period for point in points] == ["2026-06", "2026-07"]

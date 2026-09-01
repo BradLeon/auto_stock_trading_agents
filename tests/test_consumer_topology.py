@@ -25,8 +25,12 @@ def test_direct_consumer_contracts_keep_persistent_inputs_explicit() -> None:
     assert consumers["macro_agent"]["inputs"] == [
         "regional_tw_exports", "regional_kr_exports"]
     assert consumers["pead_fundamentals"]["inputs"] == ["company_financials"]
-    assert consumers["sector_fundamentals"]["inputs"] == ["company_financials"]
+    assert consumers["sector_constituent_financials"]["inputs"] == ["company_financials"]
     assert consumers["pead_consensus"]["inputs"] == ["market_consensus"]
+    assert consumers["pead_graph"]["inputs"] == [
+        "company_financials", "market_consensus", "earnings_release", "sec_filing",
+        "transcript", "research", "news"]
+    assert consumers["pead_monitor"]["inputs"] == ["news"]
     assert consumers["sector_consensus"]["inputs"] == ["market_consensus"]
 
 
@@ -41,8 +45,9 @@ def test_regional_and_company_products_are_reached_through_consumer_scoped_facad
     assert 'regional.fetch(consumer="macro_agent")' in macro
     assert "fund_src.fetch(state.symbol)" in pead
     assert "consensus_src.fetch(state.symbol)" in pead
+    assert "platform_earnings_document_package" in pead
     assert 'regional.fetch(consumer="sector_agent")' in sector
-    assert 'fundamentals.fetch_light(sym, consumer="sector_fundamentals")' in sector
+    assert "fundamentals.fetch_constituent_financials(sym)" in sector
     assert 'consensus_src.fetch(sym, consumer="sector_consensus")' in sector
 
 

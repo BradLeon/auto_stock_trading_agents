@@ -131,13 +131,16 @@ def _yf_info(symbol: str) -> dict:
 _LIGHT_KEYS = {"market_cap": "marketCap", "pe": "trailingPE", "fwd_pe": "forwardPE",
                "gross_margin": "grossMargins", "op_margin": "operatingMargins",
                "rev_growth": "revenueGrowth", "beta": "beta"}
+_CONSTITUENT_ACCOUNTING_KEYS = ("gross_margin", "op_margin", "rev_growth")
+_CONSTITUENT_RUNTIME_KEYS = ("market_cap", "pe", "fwd_pe", "beta")
+SECTOR_CONSTITUENT_FINANCIALS = "sector_constituent_financials"
 
 
 _LIGHT_CACHE: dict[str, tuple[float, dict]] = {}
 _LIGHT_TTL = 1800.0        # in-process cache: dedupe repeat pulls within a run/hour
 
 
-def _platform_light(symbol: str) -> dict:
+def _platform_constituent_accounting(symbol: str) -> dict:
     """Read low-frequency operating metrics from the selected report package.
 
     This deliberately does not refresh a Provider.  Sector reviews may call this
@@ -160,13 +163,13 @@ def _platform_light(symbol: str) -> dict:
                 repository, source_id=("sec_companyfacts", "company_disclosures"),
                 symbol=symbol.upper())
         if package is None:
-            return {}
+            return {"metrics": {}, "source": "", "report_period": ""}
         statement, _ = _structured_statements(
             symbol.upper(), DataProducts(structured_repository=repository),
             source_id=package["source_id"], report_period=package["period"],
             source_by_metric=package.get("source_by_metric"))
         if statement is None:
-            return {}
+            return {"metrics": {}, "source": "", "report_period": ""}
         lines = {line.label: line for line in statement.lines}
         result = {}
         if lines.get("Gross Margin") and lines["Gross Margin"].value is not None:
@@ -175,12 +178,18 @@ def _platform_light(symbol: str) -> dict:
             result["op_margin"] = lines["Operating Margin"].value / 100
         if lines.get("Revenue") and lines["Revenue"].yoy is not None:
             result["rev_growth"] = lines["Revenue"].yoy / 100
-        return result
+        return {"metrics": result, "source": package["source_id"],
+                "report_period": package["period"]}
     finally:
         repository.close()
 
 
-def fetch_light(symbol: str, *, consumer: str = "sector_fundamentals") -> dict:
+def _platform_light(symbol: str) -> dict:
+    """Compatibility view of governed accounting metrics without lineage metadata."""
+    return _platform_constituent_accounting(symbol)["metrics"]
+
+
+def fetch_light(symbol: str, *, consumer: str = "runtime_light") -> dict:
     """One-call valuation/margin/beta snapshot for wide-universe scans.
     Returns {market_cap, pe, fwd_pe, gross_margin, op_margin, rev_growth, beta} (None-filled).
     yfinance primary; finnhub fills gaps when yf rate-limits or lacks micro-cap
@@ -227,6 +236,64 @@ def fetch_light(symbol: str, *, consumer: str = "sector_fundamentals") -> dict:
     # absent from a valid report package remain runtime values rather than being
     # fabricated as zero; market cap, P/E and beta are runtime by design.
     return {**out, **governed}
+
+
+def fetch_constituent_financials(symbol: str, *,
+                                 consumer: str = SECTOR_CONSTITUENT_FINANCIALS) -> dict:
+    """Return one sector constituent's governed accounting plus runtime market view.
+
+    This is deliberately a consumer view, not an industry-level dataset.  Its
+    accounting metrics use exactly the same complete report-package selection as
+    PEAD; market cap, valuation and beta remain transient runtime inputs.  In
+    platform/fallback mode a missing report package is explicit and never filled
+    from a Provider's TTM/web fields.
+    """
+    from ..structured import read_mode
+
+    # Preserve the established, rate-limited runtime query and legacy comparison
+    # path without allowing its accounting fields to masquerade as platform data.
+    legacy = fetch_light(symbol, consumer="runtime_light")
+    runtime = {key: legacy.get(key) for key in _CONSTITUENT_RUNTIME_KEYS}
+    mode = read_mode(consumer)
+    if mode == "legacy":
+        return {
+            **legacy,
+            "accounting_status": "legacy_provider",
+            "accounting_source": "runtime_provider",
+            "accounting_report_period": "",
+        }
+
+    try:
+        governed_detail = _platform_constituent_accounting(symbol)
+    except Exception as exc:  # no silent Provider accounting fallback
+        log.warning("fundamentals: governed constituent accounting unavailable for %s: %s", symbol, exc)
+        governed_detail = {"metrics": {}, "source": "", "report_period": ""}
+    governed = governed_detail["metrics"]
+
+    platform = {
+        **runtime,
+        **{key: governed.get(key) for key in _CONSTITUENT_ACCOUNTING_KEYS},
+        "accounting_status": "covered" if governed else "no_coverage",
+        "accounting_source": governed_detail["source"],
+        "accounting_report_period": governed_detail["report_period"],
+    }
+    if mode == "shadow":
+        if any(legacy.get(key) != platform.get(key) for key in _CONSTITUENT_ACCOUNTING_KEYS):
+            log.info("fundamentals: constituent accounting shadow difference for %s", symbol)
+        return {
+            **legacy,
+            "accounting_status": "legacy_provider",
+            "accounting_source": "runtime_provider",
+            "accounting_report_period": "",
+        }
+    if mode == "fallback" and not governed:
+        return {
+            **legacy,
+            "accounting_status": "legacy_provider_fallback",
+            "accounting_source": "runtime_provider",
+            "accounting_report_period": "",
+        }
+    return platform
 
 
 def _finnhub_light(symbol: str) -> dict:

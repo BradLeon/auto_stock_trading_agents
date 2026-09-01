@@ -116,6 +116,16 @@ EPS 和 runtime 价格按需计算而不得持久化。系统 SHALL NOT 将不�
 - **THEN** 该行 SHALL 被隔离而不得发布到严格财务查询
 - **AND** 该失败 SHALL NOT 使行情数据进入持久化结构化层
 
+#### Scenario: 行业评审读取成分股财务
+
+- **WHEN** 行业评审为其配置的成分股读取财务快照
+- **THEN** `sector_constituent_financials` SHALL 使用与 `pead_fundamentals` 相同的
+  `company_financials` 完整报表包选择、来源优先级、报告期与血缘规则
+- **AND** 毛利率、营业利润率和收入同比 SHALL 从选定报表包派生；市值、Trailing/Forward P/E
+  与 Beta SHALL 保持 runtime 输入，不得作为持久化财报字段或财报对账对象
+- **AND** 缺少合格报表包的实体 SHALL 显式返回 `no_coverage`，不得以 Provider TTM/网页字段
+  冒充受管财务覆盖
+
 ### Requirement: 每股与债务指标必须保留不可互换的经济口径
 
 系统 SHALL 将普通股原始 EPS、ADR EPS、市场/Provider 调整后 EPS、长期债务、官方总债务及 Provider 报告总债务作为独立的受管指标或具有等效不可混淆维度的系列。ADR EPS SHALL 保存 ADR 单位与币种；发行人直接披露的 ADR EPS SHALL 优先于由普通股口径或镜像推断的值。Provider 的历史每股值（例如拆股调整）与其 total-debt 定义 SHALL NOT 覆盖或冒充官方 GAAP 指标。`LongTermDebt` 或其他明确排除当前到期债务/租赁的 XBRL 概念 SHALL NOT 被映射为总债务。跨来源核对 SHALL 仅在单位、期间和经济定义相同的指标之间进行。
@@ -223,6 +233,10 @@ EPS 和 runtime 价格按需计算而不得持久化。系统 SHALL NOT 将不�
 TrendForce 文章 SHALL 与 TrendForce DRAM 合约价结构化数据集分开注册、存储、运行和验收。SemiAnalysis SHALL 复用研究邮件/RSS 采集管道，以 IMAP `Message-ID` 或 UID、canonical URL 和内容 hash 去重，并枚举时间窗口内所有匹配的邮件及 RSS 项；可验证的邮件正文 SHALL 优先于 RSS 摘要。IBKR News SHALL 仅通过只读 TWS/IB Gateway 新闻访问采集，不得持久化行情或期权数据，且 SHALL 区分连接失败、权限或订阅缺失、provider/节流失败与确实不存在新闻。
 
 当 SemiAnalysis 因未订阅仅可取得可验证的预览正文时，系统 MAY 将该资产发布到 platform，但 SHALL 将正文和 document version 的完整性标记为 `partial`、保留内容 hash、原生邮件标识和 canonical URL，并 SHALL 禁止将其表达为完整文章或覆盖其后的完整版本。IBKR News SHALL 是新闻新路径的第一优先级，并在历史补采中使用 `reqNewsProviders()` 返回的全部当次会话 provider。每条候选 SHALL 保留 provider/article ID、查询实体、原始精确新闻时间及其时区/会话标识；标题 SHALL 独立命中查询实体 ticker、公司名或登记别名，否则 SHALL 标为 `association_rejected`，不得消耗正文预算或作为该实体的覆盖。系统 SHALL 按 provider/article ID、标准化标题与精确时间、正文 hash 分层去重，并优先对最新的、标题主体通过的唯一候选获取正文。provider 枚举 SHALL 以事件循环安全的有界重试处理瞬时空响应，重试后仍为空时 SHALL 标记为 `provider_unavailable`，不得推断为零新闻或缺少 entitlement。只读诊断 MAY 用操作员显式给出的刚验证 provider 直接探测历史新闻，以区分 provider 枚举波动与历史接口故障；该结果 SHALL NOT 代替生产采集所需的当次动态 provider 枚举，或作为来源发布依据。若为延长超时直接调用底层 API，SHALL 使用与公共 `ib_async` API 相同的 TWS wire 日期格式；目标 historical-news request 收到明确 API 错误时，系统 SHALL 立即记录其错误码与文本，并归类为 provider 未订阅或请求拒绝，而非超时。系统 SHALL 使用历史头条原样返回的 `(providerCode, articleId)` 调用 `reqNewsArticle` 获取正文，并以事件循环安全的有界重试处理短暂正文空响应；二进制/PDF 或最终无正文 SHALL 保留为正文缺口。IBKR News SHALL 提供只读诊断，输出连接状态、server version、可用 provider、合约 conId、请求参数、API error 回调以及是否收到 `historicalNewsEnd`，以区分单个 provider、请求格式、权限和服务端无回调。
+
+`pead_research` SHALL 仅从共享 `research_article` 资产读取第三方研究材料；它 SHALL NOT 将 earnings release、SEC filing、transcript、IBKR News 或 Yahoo News 当作研究输入。除 `full` 文档外，它 MAY 处理来源为 SemiAnalysis 的可验证 `partial` 文档，但 SHALL 保留该文档 version 的 `completeness`、`truncation_reason`、article ID 和 document/version 血缘，且提取结果 SHALL 仅陈述预览正文中可见的信息，不得将其称为完整文章。其他 `partial` 或 `teaser` 研究资产 SHALL NOT 被该消费者处理。其 platform 发布 SHALL 由隔离处理 smoke、选中输入的 document/version/完整性检查、Workflow memory insight/projection/event 输出血缘、失败隔离及 rollback drill 验收；SHALL NOT 要求 legacy 输出逐项等价。
+
+`evidence_chain` SHALL 以实际 platform Chain report 的非结构化读取合同验收：documents、immutable versions/chunks、facts、evidence observations/projections 与 failures。`structured_observations` SHALL NOT 被作为该消费者的 comparison 输入或 platform 发布门，因为它不属于该报告的非结构化读取合同。验收 SHALL 在隔离 Workflow memory 中将该消费者路由到 platform，以真实行业配置和固定时点生成 no-LLM 报告；报告 SHALL 非空，命题所引用的 observation IDs SHALL 对应 platform evidence observation。当前受管文档的引用 SHALL 解析至 immutable document/version；早于 document-version 存储的历史证据观测 SHALL 显式标为 `evidence_snapshot`，并至少保留 observation ID、document ID、source URL、实体、来源实体、观测时间及原文证据片段，不得冒充完整文档版本。no-LLM 渲染 SHALL 以显式 unknown/未裁决表示未运行的语义 adjudication，SHALL NOT 调用外部 LLM 或把未裁决证据表达成已裁决结论。通过后的 release SHALL 保存 platform 输入、报告摘要/hash、claim assessment memory 输出、失败处理和 rollback evidence，且 SHALL NOT 要求 legacy 报告逐字等价。
 
 `yfinance_live_news` SHALL 与 defeatbeta Yahoo 日级镜像、IBKR News 作为三个独立来源管理。它 SHALL 仅在 IBKR 的 TWS 不可达、权限/订阅不足、动态 provider 不可用、请求受限/拒绝或指定标的/切片失败时，作为失败范围的 fallback；IBKR 正常完成但无新闻 SHALL NOT 触发 Yahoo。系统 SHALL 按当前 PEAD targets 读取 `Ticker.news` 的候选，保留 Yahoo 原生 ID、publisher、原始发布时间、canonical URL、查询实体和抓取时点，并以 Yahoo ID 或 canonical URL 去重。Yahoo 的 ticker 推荐关系 SHALL NOT 单独构成主体正确性证据：候选标题必须命中查询实体的 ticker、注册公司名或已登记别名，才可标为 `title_verified` 并进入正文抓取；未命中的候选 SHALL 标记为 `association_rejected`，出现在验收报告中但不得作为文档资产或来源覆盖成功。正文 SHALL 由候选 URL 直接取得，并验证标题锚点仍在正文中；正文不可得、页面壳、视频或标题错配 SHALL 作为可追溯缺口。该来源的来源级验收 SHALL 输出 PEAD 实体、标题、URL、publisher、发布时间和关联判定的完整清单，且在人工审阅该清单前 SHALL NOT 更新其 source release overlay 或消费者路由。
 

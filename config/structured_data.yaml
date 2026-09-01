@@ -115,25 +115,48 @@ feature_flags:
     # enter the persistent layer until a later, separately approved scope.
     accepted_document_evidence: legacy
   consumers:
-    # 10.5: consumer-specific platform evidence is incomplete.  Keep both
-    # routes in shadow until release-assessment passes; a source-level platform
-    # mode or a historic default must not bypass the consumer release gate.
-    chain_regional: shadow
-    pead_consensus: shadow
+    # A source-level platform mode never bypasses a consumer release gate.  Each
+    # direct consumer remains shadow/legacy until its durable release record has a
+    # passing assessment; only the explicitly listed platform consumers below have
+    # completed that review.
+    # 台湾/韩国官方月度出口序列已完成 2026-06/07 的真实 legacy/platform
+    # 点位、衍生同比/环比及 Chain observation 等价验收。
+    chain_regional: platform
+    # Current provider snapshot is accepted with source/known-at lineage; revisions
+    # can differ from a prior analyst universe without being a data regression.
+    pead_consensus: platform
     # 10.2 validation starts in shadow.  Do not regard the historical platform
     # default as a consumer release until inputs and report output are reconciled.
-    sector_consensus: shadow
-    sector_agent: shadow
-    macro_agent: shadow
-    # Shadow is a controlled dual-read: the PEAD DTO continues to return the
-    # legacy value while the governed statement selection is independently read
-    # and compared.  It is not a production cutover.
-    pead_fundamentals: shadow
-    sector_fundamentals: legacy
-    # Unstructured data consumers use the same compatibility release overlay while
-    # their reads are shadow-compared. Their processing/decision writes remain legacy.
-    pead_research: shadow
-    evidence_chain: shadow
+    sector_consensus: platform
+    # The complete context acceptance (including indirect Chain evidence) is recorded
+    # in the per-consumer release ledger; unknown evidence remains explicit, not a
+    # fabricated data point.
+    sector_agent: platform
+    # Legacy regional fetch failures were independently checked against the official,
+    # governed monthly observations before this consumer release.
+    macro_agent: platform
+    # MSFT's old DTO became unavailable.  The governed package was independently
+    # verified for lineage, FY2026 Q4 period/unit semantics, freshness and the
+    # complete PEAD statement contract before this consumer was published.
+    pead_fundamentals: platform
+    # NVDA Q2 FY2027 isolated legacy/platform comparison retained equal
+    # deterministic score/decision behaviour while platform corrected legacy's
+    # stale calendar event to the accepted immutable document package.
+    pead_graph: platform
+    # NVDA 七日窗口已验证：受管 IBKR News（Yahoo 仅在 IBKR 不可达时兜底）
+    # 的版本血缘、时效与 monitor 输出均已独立验收。
+    pead_monitor: platform
+    # Per-company accounting view used by the sector workflow.  It shares PEAD's
+    # complete company_financials report package; valuation and beta stay runtime.
+    sector_constituent_financials: platform
+    # PEAD research reads governed third-party research assets from platform.
+    # Its processing lease and insight/event outputs remain Workflow memory.
+    # SemiAnalysis previews are explicitly partial; they are not full articles.
+    pead_research: platform
+    # Actual platform Chain report acceptance passed with explicit no-LLM unknowns.
+    # Each cited evidence item has either immutable document/version lineage or a
+    # labelled historical evidence snapshot; structured observations are excluded.
+    evidence_chain: platform
     # Scheduler has migrated to unified runtime/products/pipeline entrypoints.
     # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
     runtime_scheduler: shadow

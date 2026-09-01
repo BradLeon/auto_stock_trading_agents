@@ -161,6 +161,14 @@ def _point_signature(points: list[SeriesPoint]) -> list[tuple]:
             for point in points]
 
 
+def _legacy_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPoint]:
+    """Read the pre-platform adapter contract for an explicit acceptance comparison."""
+    import importlib
+
+    mod = importlib.import_module(f"..data.sources.{source.adapter}", __package__)
+    return list(mod.fetch(lookback_months=lookback_months, **source.params))
+
+
 def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPoint]:
     """Ingest accepted regional levels, then assemble the legacy Chain contract."""
     from ..data.sources import kr_ecos, tw_mof
@@ -187,12 +195,20 @@ def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPo
             source_id=source_id, dataset_id=dataset_id, entities=[entity_id],
             query_scope=scope)
         run = IngestionPipeline(repository).run(adapter, request)
+        # ``collect`` is the scheduled refresh path, but a provider outage during
+        # this invocation must not erase a still-current, accepted monthly series
+        # from the Chain consumer.  Read the latest governed vintage below even
+        # when this refresh failed; return [] only if the repository itself has no
+        # usable level.  The ingestion run keeps the refresh gap explicit.
         if run["status"] not in {"succeeded", "no_change"}:
-            return []
+            log.warning("sources: %s refresh %s; reading accepted governed vintage if present",
+                        source.id, run["status"])
         products = DataProducts(structured_repository=repository)
         levels = products.metric_series(
             metric=metric_id, entity=entity_id, dataset=dataset_id,
             source_id=source_id, quality="loose")
+        if not levels["rows"]:
+            return []
         yoy = {row["period"]: row for row in products.derive(
             operation="yoy", query_result=levels)["rows"]}
         mom = {row["period"]: row for row in products.derive(

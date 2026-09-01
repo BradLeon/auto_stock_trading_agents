@@ -38,9 +38,9 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
     since = _now() - timedelta(days=lookback_days)
 
     # Gather news on the target + signal-chain peers; store deduped.
-    collected: list[NewsItem] = list(news_src.fetch_news(symbol, since))
+    collected: list[NewsItem] = list(news_src.fetch_news(symbol, since, consumer="pead_monitor"))
     for sc in cfg.signal_chain:
-        collected += news_src.fetch_news(sc.symbol, since)
+        collected += news_src.fetch_news(sc.symbol, since, consumer="pead_monitor")
     fresh = store.append_events(symbol, collected)
     log.info("monitor %s: %d fetched, %d new", symbol, len(collected), len(fresh))
 

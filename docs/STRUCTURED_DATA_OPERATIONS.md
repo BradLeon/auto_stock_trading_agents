@@ -650,6 +650,7 @@ ats_cli data releases
 |---|---|---|
 | `release-check --source ID --mode platform` | 只读预检 | 永不写 |
 | `release-assessment --consumer ID` | 只读消费者证据分类；编排边界返回不可发布是预期 | 永不写 |
+| `consumer-release-records --consumer ID` | 查看持久化的通过/保留/编排边界决定及证据 | 永不写 |
 | `publish --source ID --mode MODE` | 只读预览 | 加 `--apply` 才写 overlay |
 | `publish --consumer ID --mode MODE` | 只读预览 | 加 `--apply`，且 consumer 已在 checked-in config 获准 |
 | `rollback --source/--consumer ID --mode legacy` | 只读预览 | 加 `--apply` 才写 overlay |

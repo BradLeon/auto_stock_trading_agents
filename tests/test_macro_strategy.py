@@ -222,8 +222,14 @@ def test_injection_and_cascade(monkeypatch):
     assert macro_context.prep_block("COHR") == ""
 
 
-def test_sector_assemble_ingests_macro(monkeypatch):
-    """Sector review's assemble picks up the macro background block (cascade)."""
+def test_sector_assemble_does_not_ingest_macro(monkeypatch):
+    """宏观**不进**行业链路（2026-08-20，design D16）。
+
+    这个测试从「断言注入」反转成「断言不注入」，因为宏观在 Chief 已经有落点
+    （chief/assemble.py 读宏观评审的 sector_tilts）。行业这边再吃一遍有两个后果：
+    同一个利率/风险偏好判断被计两次；层级结论变差时分不清是产业景气变差还是宏观变差——
+    而那两件事对仓位的含义相反（减这一层 vs 减总仓位）。
+    """
     from ats.agents.sector import assemble as sector_assemble
     from ats.schemas.sector import SectorConfig
 
@@ -237,7 +243,8 @@ def test_sector_assemble_ingests_macro(monkeypatch):
         review={"static_notes_chars": 100, "insights_per_ticker": 1, "events_lookback_days": 14,
                 "events_min_triage": 0.6, "dossier_excerpt_chars": 50})
     sc = sector_assemble.build(scfg, live_data=False)
-    assert "MACRO REGIME MARKER" in sc.as_context()                # macro fed into sector
+    assert sc.macro_block == ""                                    # 不再填充
+    assert "MACRO REGIME MARKER" not in sc.as_context()            # 也不出现在上下文里
 
 
 def test_scheduler_macro_before_sector(monkeypatch):

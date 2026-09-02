@@ -70,3 +70,51 @@ def test_migrated_document_and_evidence_queries_preserve_identity(tmp_path):
         assert repository.observation_failures()[0]["document_id"] == "doc-1"
     finally:
         repository.close()
+
+
+def test_batch_queries_fetch_only_cited_rows(tmp_path):
+    path = tmp_path / "data.sqlite"
+    _target(path)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "INSERT INTO data_documents (document_id,entity,source,sha256,ok,fetched_at) "
+        "VALUES ('doc-2','NVDA','other','other-hash',1,'2026-08-02')")
+    conn.execute(
+        "INSERT INTO data_evidence_observations "
+        "(id,document_id,entity,metric,evidence_span,observed_at) "
+        "VALUES ('o2','doc-2','NVDA','supply','not cited','2026-08-02')")
+    conn.commit()
+    conn.close()
+
+    repository = PlatformUnstructuredRepository(path)
+    try:
+        observations = repository.observations_by_id(["o1"])
+        documents = repository.documents_by_id(["doc-1"])
+        assert set(observations) == {"o1"}
+        assert observations["o1"]["evidence_span"] == "span"
+        assert set(documents) == {"doc-1"}
+        assert documents["doc-1"]["sha256"] == "hash"
+        assert repository.observations_by_id([]) == {}
+        assert repository.documents_by_id([]) == {}
+    finally:
+        repository.close()
+
+
+def test_observation_batching_exceeds_sqlite_variable_limit(tmp_path):
+    path = tmp_path / "data.sqlite"
+    _target(path)
+    ids = [f"bulk-{i}" for i in range(1200)]
+    conn = sqlite3.connect(path)
+    conn.executemany(
+        "INSERT INTO data_evidence_observations (id,document_id,entity,metric) "
+        "VALUES (?, 'doc-1', 'NVDA', 'demand')",
+        [(value,) for value in ids],
+    )
+    conn.commit()
+    conn.close()
+
+    repository = PlatformUnstructuredRepository(path)
+    try:
+        assert set(repository.observations_by_id(ids)) == set(ids)
+    finally:
+        repository.close()

@@ -2,7 +2,7 @@
 
 The PEAD scorecard is a *time-series / event* signal (one name's earnings
 surprise: answers WHEN to act on a name). It never ranks peers against each
-other, so it gives no basis to pick among a layer's names (COHR/LITE/CRDO/AXT/
+other, so it gives no basis to pick among a layer's names (COHR/LITE/CRDO/AXTI/
 AAOI/VRT…) or size them. This module adds the missing *cross-sectional* leg:
 standardize a handful of factors WITHIN the cohort (Barra-lite z-scores),
 composite them into a rank (selection), then turn the rank into weights under a
@@ -145,6 +145,82 @@ def _zscores(vals: list[float | None]) -> list[float]:
     return [((v - mu) / sd) if v is not None else 0.0 for v in vals]
 
 
+# Allocation -> share of the layer's cap this basket may use. Governance lives in
+# config (how far this account lets one judgement swing a budget); the judgement itself
+# is the layer analyst's and travels with its evidence. Falls back to these when
+# risk.yaml says nothing.
+DEFAULT_UTILIZATION = {"超配": 1.0, "标配": 0.6, "低配": 0.3, "清仓": 0.0}
+
+
+def utilization_for(allocation: str) -> float:
+    """The budget share for an allocation verdict, clamped to [0, 1].
+
+    Clamped in CODE, not by trusting the config: a `超配: 1.5` typo would otherwise
+    raise the ceiling that `weight_cap` exists to hold — and this whole mechanism is
+    only allowed to scale a layer DOWN.
+    """
+    from ...config import load_risk_yaml_section
+
+    table = load_risk_yaml_section("layer_utilization") or DEFAULT_UTILIZATION
+    # An unrecognised verdict falls back to the FLAT share, never to a full budget:
+    # "we could not read the call" must not spend like "conviction buy". (`_to_verdict`
+    # already coerces unknown allocations upstream; this is the second line.)
+    flat = DEFAULT_UTILIZATION["标配"]
+    if allocation not in table and allocation not in DEFAULT_UTILIZATION:
+        log.warning("unknown allocation %r — using the flat share %.2f", allocation, flat)
+        return flat
+    raw = table.get(allocation, DEFAULT_UTILIZATION.get(allocation, flat))
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        log.warning("layer_utilization[%r] is not a number (%r) — using the flat share",
+                    allocation, raw)
+        return flat
+
+
+def budget_for(layer, allocation: str | None) -> float:
+    """`weight_cap × utilization` — this layer's share, BEFORE any group ceiling.
+
+    `weight_cap` stays the ceiling that is never exceeded; the verdict only decides how
+    much of it to use. Note the risk check deliberately does NOT read this number (it
+    reads the static cap): utilization answers "how much new money", a breach answers
+    "is the existing book over the line", and sharing one number would let a 低配 call
+    flag a full-but-compliant layer as breached.
+
+    ⚠️ This is the per-layer number only. When several layers share a `layer_group`
+    ceiling, use `budgets_for` — two 超配 halves of a split layer add up past the
+    pre-split envelope, which is exactly the loosening the group cap exists to stop.
+    """
+    cap = layer.weight_cap if layer.weight_cap is not None else 0.10
+    return cap * (utilization_for(allocation) if allocation else 1.0)
+
+
+def budgets_for(cfg, allocations: dict) -> dict:
+    """Per-layer budgets with the `layer_group` ceilings applied. {layer key -> fraction}
+
+    Why this cannot live in `budget_for`: a group ceiling is a property of the SET, so
+    it can only be enforced once every member's ask is known. Splitting `L5_fab` (<=30%)
+    into memory (<=25%) and foundry (<=20%) means two 超配 verdicts propose 45% — the
+    pre-split envelope silently widened by half. The per-layer caps are not wrong; they
+    just cannot see each other.
+
+    Over-asking members are scaled down PRO RATA rather than truncated in config order:
+    the group cap says how much the pair may hold together, not which half is preferred,
+    and the verdicts have already expressed the tilt between them.
+    """
+    out = {ly.key: budget_for(ly, allocations.get(ly.key)) for ly in cfg.layers}
+    for g in getattr(cfg, "layer_groups", []):
+        members = [k for k in g.layers if k in out]
+        total = sum(out[k] for k in members)
+        if total > g.weight_cap > 0:
+            scale = g.weight_cap / total
+            log.info("layer_group %s: 提议合计 %.1f%% 超过上限 %.1f%%，按比例缩到上限"
+                     " (×%.3f)", g.key, total * 100, g.weight_cap * 100, scale)
+            for k in members:
+                out[k] *= scale
+    return out
+
+
 def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,
                 single_name_cap_frac: float = 0.40, weights: dict | None = None) -> list[FactorRow]:
     """Composite rank + risk-budgeted weights summing to `layer_cap` (fraction of
@@ -204,6 +280,17 @@ def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,
     return rows
 
 
+def cross_section_applies(rows: list[FactorRow]) -> bool:
+    """Whether a ranking over these rows means anything.
+
+    `_zscores` returns all zeros below two samples, so a one-name cohort produces a
+    composite of 0 and a rank of 1 — a number that looks like a finding and is not one.
+    Sizing is unaffected (the lone name takes the layer's budget); what this flag
+    suppresses is the claim that the ORDER carries information.
+    """
+    return sum(1 for r in rows if r.data_ok and r.sizable) >= 2
+
+
 def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
               structural: bool = False, subgroup_notes: dict | None = None):
     from ...schemas.sector import BasketRow, LayerBasket
@@ -211,6 +298,7 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
     return LayerBasket(
         layer_key=layer_key, as_of=datetime.now(timezone.utc), layer_cap=layer_cap,
         structural=structural, subgroup_notes=subgroup_notes or {},
+        cross_section_applicable=cross_section_applies(rows),
         rows=[BasketRow(
             symbol=r.symbol, subgroup=r.subgroup, composite=(0.0 if r.composite == NEG_INF else r.composite),
             rank=r.rank, quant_rank=r.quant_rank, weight=r.weight, data_ok=r.data_ok,
@@ -223,20 +311,43 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
 
 
 def _layer_view(sector_name: str, layer_key: str) -> str:
-    """The sector analyst's read on this layer, from the review that just ran.
+    """What was last concluded about this layer, for the within-layer scoring.
 
-    The weekly job already runs review -> cross-section in order, but the two shared
-    only a storage row: the within-layer scoring never saw what had just been concluded
-    about the layer. Best-effort — a missing review must not block the ranking.
+    The scoring used to read the CURRENT round's sector assessment, because the weekly
+    job ran review -> cross-section in that order. The order is now inverted — the layer
+    verdict is produced AFTER this ranking (design D8) — so what is available here is
+    the PREVIOUS round's verdict. At a weekly cadence that is a legitimate prior, but it
+    must be labelled as one: an unlabelled stale read invites the model to treat last
+    week's call as this week's conclusion.
+
+    Best-effort — a missing verdict must not block the ranking.
     """
     try:
+        from ...config import load_sector_config
         from ...memory import get_store
 
         review = get_store().latest_sector_review(sector_name)
-        assessment = review.layer_assessment(layer_key) if review else None
+        if review is None:
+            return ""
+        cfg = load_sector_config(sector_name)
+        keys = [layer_key]
+        for ly in cfg.layers_by_key(layer_key):
+            keys += [ly.key, *ly.legacy_keys]
+
+        verdict = next((v for k in keys if (v := review.verdict_for(k))), None)
+        if verdict is not None:
+            trig = "；".join(verdict.reversal_triggers[:3])
+            return (f"⚠️ 以下是**上一轮**（{verdict.as_of:%Y-%m-%d}）的结论，不是本期结论\n"
+                    f"配置：{verdict.allocation}（confidence {verdict.confidence:.2f}）\n"
+                    f"周期：{verdict.cycle_position or '—'}\n"
+                    + (f"当时的反转触发条件：{trig}" if trig else ""))
+
+        # 尚未产出过层级结论时，退回旧的层评估（同样标注为上一轮）。
+        assessment = next((a for k in keys if (a := review.layer_assessment(k))), None)
         if assessment is None:
             return ""
-        return (f"景气 {assessment.boom_score:.0f} [{assessment.signal}]\n"
+        return (f"⚠️ 以下是**上一轮**（{review.as_of:%Y-%m-%d}）的层评估，不是本期结论\n"
+                f"景气 {assessment.boom_score:.0f} [{assessment.signal}]\n"
                 f"供需：{assessment.supply_demand}\n"
                 f"定价权：{assessment.pricing_power}\n"
                 f"周期：{assessment.cycle_position}")
@@ -245,23 +356,22 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
         return ""
 
 
-def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structure: bool = False):
+def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
+              structure: bool = False, allocation: str | None = None):
     """Fetch factors for a layer's cohort (its tickers + cohort_extra peers), rank,
     size, and (if structure=True and KB notes exist) blend in the structure analyst's
     tech_tenor/moat_pricing overlay → re-rank. Persists the basket. Returns (rows, basket)."""
     from ...config import canonical_entity, load_sector_config
 
     cfg = load_sector_config(sector_name)
-    layer = next((ly for ly in cfg.layers if ly.key == layer_key), None)
+    layer = cfg.layer_by_key(layer_key)          # 旧层键经 legacy_keys 仍可解析
     if layer is None:
         raise ValueError(f"layer {layer_key!r} not in sector {sector_name!r}")
 
-    # One row per COMPANY, not per listing. SK hynix is configured under three codes
-    # (SKHY / HY9H / 000660.KS) because the book holds more than one of them, and the
-    # cohort took all three: it ranked the same company three times and handed it 20.5%
-    # of a 30% layer budget. The structure analyst even wrote "HY9H 与 SKHY/000660.KS 为
-    # 同一经济实体" in its own rationale — and still scored all three, because it was
-    # given three rows.
+    # One row per COMPANY, not per listing. The sector config now uses only SKHY, but
+    # keep this fold as a defensive invariant for custom sectors and old configs: when
+    # SKHY / HY9H / 000660.KS were all present, the cohort ranked one company three
+    # times and handed it 20.5% of a 30% layer budget.
     #
     # Listing-level differences (liquidity premium, local pricing, listing vintage) are
     # real, but they are the portfolio's problem, not the analysts'. Selection and
@@ -278,7 +388,9 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
         cohort.append(canon)
         subgroups[canon] = next((t.subgroup for t in layer.tickers if t.symbol == sym),
                                 "(peer)")
-    layer_cap = layer.weight_cap if layer.weight_cap is not None else 0.10
+    # 预算 = 静态上限 × 层级结论的使用率。allocation=None 时使用率为 1（等价旧行为），
+    # 由调用方在 config/pead.yaml 的 bind_layer_budget 关闭时传 None。
+    layer_cap = budget_for(layer, allocation)
 
     rows = fetch_factors(cohort, subgroups)
     extra = {canonical_entity(x) for x in layer.cohort_extra}
@@ -296,11 +408,15 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True, structu
     if structure:
         try:
             from ...chain import factor_evidence
-            from ...memory import get_store
+            from ...data.products import get_unstructured_read_router
 
-            packs = factor_evidence.packs_for_layer(
-                layer, get_store(), cfg=cfg.review.get("corroboration", {}))
-            evidence_ctx = factor_evidence.as_context(packs)
+            reader = get_unstructured_read_router(consumer="sector_agent")
+            try:
+                packs = factor_evidence.packs_for_layer(
+                    layer, reader, cfg=cfg.review.get("corroboration", {}))
+                evidence_ctx = factor_evidence.as_context(packs)
+            finally:
+                reader.close()
         except Exception as exc:  # noqa: BLE001 - evidence is an overlay, never a blocker
             log.warning("chain evidence unavailable for %s: %s", layer_key, exc)
 
@@ -498,7 +614,7 @@ if __name__ == "__main__":
         rows, basket = run_layer(sys.argv[1], sys.argv[2], persist=False)
         print(format_table(rows, basket.layer_cap))
     else:
-        syms = sys.argv[1:] or ["COHR", "LITE", "AAOI", "CRDO", "AXT", "VRT", "MRVL"]
+        syms = sys.argv[1:] or ["COHR", "LITE", "AAOI", "CRDO", "AXTI", "VRT", "MRVL"]
         rows = fetch_factors(syms)
         rank_cohort(rows, layer_cap=0.10)
         print(format_table(rows, 0.10))

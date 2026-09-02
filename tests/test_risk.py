@@ -363,7 +363,7 @@ def test_symbol_layer_mapping_explicit(monkeypatch):
     pf = _pf([_pos("KLAC", 0.05, beta=1.0), _pos("TSLA", 0.05, beta=1.0)], cash=900_000)
     review = risk_assess.assess(pf)
     m = {sl.symbol: sl.layer for sl in review.symbol_layers}
-    assert m["KLAC"] == "L6_equipment"
+    assert m["KLAC"] == "L8_equipment"
     assert m["TSLA"] == ""
 
 

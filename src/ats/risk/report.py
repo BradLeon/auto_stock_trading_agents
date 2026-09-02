@@ -171,6 +171,17 @@ def render(review: RiskReview, rc=None) -> str:
             mark = " ⚠️" if le.breached else ""
             cap = f"{le.cap:.0%}" if le.cap is not None else "—"
             lines.append(f"| {le.label} | {le.weight:.1%}{mark} | {cap} |")
+        # 跨层上限单独一段。拆层把一个 cap 变成两个，group 上限把它们重新绑回拆分前的
+        # 总量——**单层都没越限而合计越限**是它唯一存在的理由，所以它必须自己显示，
+        # 不能折进上面那张按层的表里。
+        if r.chain_layer_groups:
+            lines += ["", "### 跨层上限（拆层不得放大总敞口）", "",
+                      "| 组 | 成员层 | 合计 | 上限 |", "|---|---|---|---|"]
+            for g in r.chain_layer_groups:
+                mark = " ⚠️" if g.breached else ""
+                cap = f"{g.cap:.0%}" if g.cap is not None else "—"
+                lines.append(f"| {g.label} | {' + '.join(g.members)} | "
+                             f"{g.weight:.1%}{mark} | {cap} |")
 
     if r.clusters:
         lines += ["", "## 相关簇（AI 主题拥挤度）", ""]

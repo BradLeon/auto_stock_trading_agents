@@ -11,6 +11,7 @@ ATS_CONFIG_DIR env var (useful in tests).
 from __future__ import annotations
 
 import functools
+import logging
 import os
 import re
 from pathlib import Path
@@ -18,6 +19,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger("ats.config")
 
 from .schemas.market import Ticker
 
@@ -233,6 +236,11 @@ def _load_yaml(path: Path) -> dict:
 def _load_risk_yaml() -> dict:
     """Return the single source of truth for all adjustable risk configuration."""
     return _load_yaml(_config_dir() / "risk.yaml")
+
+
+def load_risk_yaml_section(key: str) -> dict:
+    """One top-level section of risk.yaml (e.g. `layer_utilization`), or {}."""
+    return _load_risk_yaml().get(key, {}) or {}
 
 
 @functools.lru_cache(maxsize=1)
@@ -493,13 +501,43 @@ def load_sector_config(name: str = "ai_hardware"):
     raw = _load_yaml(_config_dir() / "sectors" / f"{name}.yaml")
     if not raw:
         raise FileNotFoundError(f"config/sectors/{name}.yaml not found")
-    cap_config = (_load_risk_yaml().get("sector_layer_caps", {}).get(name, {}) or {})
+    risk_yaml = _load_risk_yaml()
+    cap_config = (risk_yaml.get("sector_layer_caps", {}).get(name, {}) or {})
+    layer_keys = [layer.get("key") for layer in raw.get("layers", [])]
     for layer in raw.get("layers", []):
         caps = cap_config.get(layer.get("key"), {}) or {}
         if "weight_cap" in caps:
             layer["weight_cap"] = caps["weight_cap"]
         if "weight_cap_hard" in caps:
             layer["weight_cap_hard"] = caps["weight_cap_hard"]
+
+    # Caps and layers must line up both ways. A layer with no cap silently falls back to
+    # the conservative default in cross_section (0.10) — which is safe but invisible, and
+    # a cap left behind by a renamed layer is a guard that stopped guarding anything.
+    for key in layer_keys:
+        if key not in cap_config:
+            log.warning("sector %s: layer %r has no weight_cap in risk.yaml "
+                        "sector_layer_caps — its cross-section budget falls back to the "
+                        "conservative default", name, key)
+    for key in cap_config:
+        if key not in layer_keys:
+            log.warning("sector %s: risk.yaml declares a cap for %r, which is not a layer "
+                        "in this sector (stale after a rename?)", name, key)
+
+    groups_cfg = (risk_yaml.get("layer_groups", {}).get(name, {}) or {})
+    groups = []
+    for gkey, gval in groups_cfg.items():
+        members = list((gval or {}).get("layers") or [])
+        unknown = [m for m in members if m not in layer_keys]
+        if unknown:
+            log.warning("sector %s: layer_group %r names unknown layers %s — they are "
+                        "dropped from the group ceiling", name, gkey, unknown)
+            members = [m for m in members if m in layer_keys]
+        groups.append({"key": gkey, "label": (gval or {}).get("label", ""),
+                       "layers": members,
+                       "weight_cap": (gval or {}).get("weight_cap", 1.0),
+                       "weight_cap_hard": (gval or {}).get("weight_cap_hard")})
+    raw["layer_groups"] = groups
     raw.setdefault("snapshot", {})
     raw["snapshot"].setdefault("momentum_days", [20, 60])
     raw["snapshot"].setdefault("consensus_for", "pead_targets")

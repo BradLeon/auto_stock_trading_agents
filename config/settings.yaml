@@ -46,6 +46,12 @@ llm:
     macro_strategist: {model: openai/gpt-5.6-terra, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 terra（2026-08-03）
     pead_analyst: {model: openai/gpt-5.6-terra}  # PEAD prep framework/narrative/expectations (token-heavy)（2026-08-03 换 terra）
     structure_analyst: {model: openai/gpt-5.6-terra, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权（2026-08-03 换 terra）
+    # 层级子行业分析师（2026-08-20 新增）：每层一次，产出配置结论（超配/标配/低配/清仓）
+    # 与层内选股。上下文只含本层素材，比原来的全行业合成小得多，所以同档模型跑八次的
+    # 总量与原来跑一次同量级。它的产出**会改变本层预算使用率**，所以不放低档。
+    layer_analyst: {model: openai/gpt-5.6-terra, max_tokens: 12000}
+    # 跨层轮动（收窄后的 sector_analyst 第二段）：只消费八条层级结论，输入紧凑。
+    layer_rotation: {model: openai/gpt-5.6-terra, max_tokens: 8192}
     invalidation_check: {model: openai/gpt-5.6-terra, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，判读需稳定（2026-08-03 换 terra）
     # --- Opus tier: genuine judgment that drives trades, low frequency ---
     chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus

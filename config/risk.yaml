@@ -40,14 +40,61 @@ limits:
     BRK-B: 0.0
 
 # 各行业产业链层限额；key 必须匹配 config/sectors/<sector>.yaml 的 layer key
+# 2026-08-21 按**八层结构本身**重设（此前的数值是从六层继承来的，L4/L5/L8 甚至只是
+# 原样搬过来的旧数）。定 cap 的四条依据，按重要性排序：
+#   ① **有没有命题** —— 没有证据基础的层不该给高上限。这条排第一，因为它决定的不是
+#      「这层好不好」，而是「我们有没有能力判断它好不好」。
+#   ② 层内资产同质性 —— 层内越同向，同一个 cap 的实际风险越大（分散不起来）。
+#   ③ 链上位置与不可替代性 —— 越靠瓶颈、越难替代，值得越高上限。
+#   ④ 周期回撤幅度 —— 商品化周期品的历史回撤远大于产能垄断型服务。
+#
+# ⚠️ **cap 是天花板，不是分配**：八层合计 135% 是正常的，它们不会同时满仓
+#    （还有总杠杆、现金下限、单票上限、相关簇上限管着）。六层时合计也是 115%。
+#
+# ⚠️ **单票层的实际上限是 cap × 40%**（单票限额 single_name_cap_frac）：
+#    L1(GOOG) 10% → 实际最多 4%；L7(TSM) 20% → 实际最多 8%。
+#    L7 给到 20% 正是为了让 TSM 能到 8%，不是因为它比 L4 重要。
 sector_layer_caps:
   ai_hardware:
-    L1_app: {weight_cap: 0.15}
+    # 单票(GOOG)且**本层无命题** —— 判断没有证据基础，且 GOOG 兼属 L2。实际上限 4%。
+    L1_app: {weight_cap: 0.10}
+    # 需求源头；超大市值、现金流防御性最强；5 条命题是全链最完备的一层。
     L2_cloud: {weight_cap: 0.25}
-    L3_dc_infra: {weight_cap: 0.15, weight_cap_hard: 0.20}
-    L4_chip_design: {weight_cap: 0.15}
-    L5_fab: {weight_cap: 0.30}
-    L6_equipment: {weight_cap: 0.15}
+    # **本层无命题**（拆分后四条命题全归了互联层，见 sector yaml 的两步法注释）。
+    # 四只票能跑截面，但配置结论没有议题支撑 —— 上限压低直到命题建起来。
+    L3_dc_power: {weight_cap: 0.10}
+    # 技术代际替代驱动：份额战激烈、beta 高（1.5~3.8）、代际切换点上下波动大。
+    # 4 条命题证据充分，但资产本身的波动性不支持更高上限。
+    L4_interconnect: {weight_cap: 0.15, weight_cap_hard: 0.20}
+    # 这条链的**价值捕获中心**，NVDA 是行业标准，5 条命题。
+    # 但它同时是全市场最拥挤的交易 —— 高上限给的是重要性，不是安全性。
+    L5_chip_design: {weight_cap: 0.20}
+    # 商品化周期品，**历史回撤是全链最大的**（存储周期 -50% 并不罕见）。
+    # 当前三条命题同向支持紧缺，但周期品的高位恰恰是不该给最高上限的时候。
+    L6_memory: {weight_cap: 0.20}
+    # TSM 是全链最不可替代的一环，4 条命题。**单票层**：20% 的实际含义是「允许 TSM
+    # 占到 8% NAV」，而不是「这层比互联层重要」。
+    L7_foundry_pkg: {weight_cap: 0.20}
+    # 最领先的周期指标；寡头格局稳定、ASML 不可替代。
+    L8_equipment: {weight_cap: 0.15}
+
+# 2026-08-21 **取消 layer_groups**（原有 dc_infra ≤15% / fab_memory ≤30%）。
+# 它是**迁移期的脚手架，不是永久结构**：当时拆层把 L5_fab 的一个 30% cap 变成两个独立
+# cap（25%+20%=45%），加组是为了不在「重构」的名义下悄悄放大敞口。
+# 但它与拆层的初衷自相矛盾 —— 拆 L6/L7 的依据正是**它们不同向**（代工是产能垄断型服务、
+# 存储是商品化周期品），再用一个共享上限把它们绑回一起，等于宣称它们是同一个风险簇。
+# 现在八层的 cap 是**有意按八层结构重定**的，不再需要那个防止自己无意改变政策的装置。
+# 真实的同向性由 limits.cluster_weight_cap 按实测价格相关性管，而不是我手工划的组。
+
+# 层级配置结论 → 本层预算使用率。**只下调，不放大**：
+# basket 权重之和 = weight_cap × clamp(使用率, 0, 1)，weight_cap 仍是永不突破的天花板。
+# 映射表在这里是因为它是**治理**（这个账户愿意让一条判断把预算摆动多大）；
+# 判断本身是语义，由层级分析师给出并连同证据归因一起落库。
+layer_utilization:
+  超配: 1.0
+  标配: 0.6
+  低配: 0.3
+  清仓: 0.0
 
 # sell-put 资金生存性
 option_survival:
@@ -68,24 +115,24 @@ instruments:
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     exposure_multiplier: 2.0
     product_type: leveraged_etf
   HY9H:
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     product_type: cross_listing
   SKHY:
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     product_type: adr
   "000660.KS":
     economic_entity: SK_HYNIX
     label: SK Hynix
     risk_symbol: HY9H
-    layer_symbol: HY9H
+    layer_symbol: SKHY
     product_type: primary_listing

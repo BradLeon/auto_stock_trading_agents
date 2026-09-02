@@ -1,0 +1,435 @@
+"""build_bundle() — the data assembly behind the HTML dashboard (viz.py).
+
+A small self-contained SectorConfig (not the real ai_hardware config) so these tests
+stay fast and independent of that config's contents changing. Mirrors the same shapes
+`_run_layered` / `ats sector html` will actually pass: a `SectorConfig`, a
+`SectorReview`, a `{layer_key: [ClaimAssessment]}` map, and an injected data reader.
+"""
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from ats.agents.sector import viz
+from ats.data.source_cache import CachedDoc
+from ats.schemas.chain import ClaimAssessment, ClaimDef, ClusterJudgement, EntityReading, \
+    Observation, Witness
+from ats.schemas.sector import BasketRow, LayerBasket, LayerNameCall, LayerTicker, \
+    LayerVerdict, SectorConfig, SectorLayer, SectorReview
+
+NOW = datetime(2026, 8, 21, 8, 0, tzinfo=timezone.utc)
+
+
+class FakeDataStore:
+    """Small platform-reader double; Workflow memory no longer owns these rows."""
+
+    def __init__(self, *_args):
+        self.observation_rows = {}
+        self.document_rows = {}
+
+    def save_document(self, doc):
+        self.document_rows[doc.document_id] = {
+            "document_id": doc.document_id,
+            "entity": doc.symbol.upper(),
+            "period": doc.period,
+            "doc_type": doc.doc_type,
+            "source": doc.source,
+            "source_url": doc.source_url,
+            "local_path": str(doc.path),
+            "sha256": doc.sha256,
+            "fetched_at": doc.fetched_at,
+        }
+
+    def save_observation(self, obs):
+        self.observation_rows[obs.id] = obs.model_dump(mode="json")
+
+    def observations_by_id(self, ids):
+        return {key: self.observation_rows[key] for key in ids
+                if key in self.observation_rows}
+
+    def documents_by_id(self, ids):
+        return {key: self.document_rows[key] for key in ids
+                if key in self.document_rows}
+
+
+def _cfg(layers=None):
+    layer = SectorLayer(
+        key="L1_test", label="测试层", weight_cap=0.10,
+        tickers=[LayerTicker(symbol="AAA"), LayerTicker(symbol="BBB")],
+        claims=[
+            ClaimDef(id="c_common", kind="common", statement="测试共同命题", layer="L1_test",
+                     witnesses=[Witness(entity="AAA", stance="supplier"),
+                               Witness(entity="CCC", stance="customer")]),
+            ClaimDef(id="c_rel", kind="relative", statement="测试相对命题", layer="L1_test",
+                     entities=["AAA", "BBB"],
+                     witnesses=[Witness(entity="AAA", stance="incumbent"),
+                               Witness(entity="BBB", stance="competitor")]),
+        ])
+    return SectorConfig(name="test_sector", label="测试行业", layers=(layers or [layer]))
+
+
+def _doc(store, *, symbol="AAA", source="defeatbeta", doc_id_seed="1"):
+    doc = CachedDoc(symbol=symbol, period="FY2026Q2", doc_type="transcript", text="…",
+                    path=Path(f"/tmp/{symbol}-{doc_id_seed}.md"), source=source,
+                    sha256=f"sha{doc_id_seed}", fetched_at=NOW.isoformat())
+    store.save_document(doc)
+    return doc
+
+
+def _obs(store, doc, *, entity="AAA", metric="m1", span="cited span", concept="k1"):
+    o = Observation(document_id=doc.document_id, entity=entity, source_entity=entity,
+                    metric=metric, concept=concept, observation_type="reported_actual",
+                    stance="supplier", direction="up", evidence_span=span, observed_at=NOW,
+                    extraction_confidence=0.9)
+    store.save_observation(o)
+    return o
+
+
+def _review(layer_key="L1_test", *, basket=None, verdict=None):
+    return SectorReview(sector="test_sector", as_of=NOW, regime="测试 regime",
+                        rotation_advice="测试轮动",
+                        baskets=[basket] if basket else [],
+                        layer_verdicts=[verdict] if verdict else [])
+
+
+def _verdict(layer_key="L1_test", **kw):
+    defaults = dict(layer_key=layer_key, as_of=NOW, allocation="标配", confidence=0.5,
+                    cycle_position="中周期", claim_attributions=["测试依据"],
+                    rationale="测试综合")
+    defaults.update(kw)
+    return LayerVerdict(**defaults)
+
+
+def _basket(layer_key="L1_test", **kw):
+    defaults = dict(layer_key=layer_key, as_of=NOW, layer_cap=0.06,
+                    rows=[BasketRow(symbol="AAA", composite=0.3, rank=1, weight=0.04,
+                                    factors={"growth": 0.5}, metrics={"rev_growth": 0.1})])
+    defaults.update(kw)
+    return LayerBasket(**defaults)
+
+
+def test_every_configured_layer_appears_even_with_no_verdict_this_round():
+    """A layer that produced nothing this round must still show up — silently dropping
+    it would look like the layer never existed rather than 'no verdict this time'."""
+    cfg = _cfg()
+    review = _review()
+    store = FakeDataStore()
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={}, store=store)
+    assert len(bundle["layers"]) == 1
+    ly = bundle["layers"][0]
+    assert ly["key"] == "L1_test"
+    assert ly["die"]["allocation"] == "—"
+    assert "本轮未产出结论" in ly["die"]["flags"]
+
+
+def test_silent_witnesses_render_as_a_named_gap_not_left_blank():
+    cfg = _cfg()
+    store = FakeDataStore()
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                        support_score=3, silent_witnesses=["CCC"])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    ly = bundle["layers"][0]
+    matrix_row = ly["witness_matrix"]["rows"][0]
+    assert matrix_row["cells"]["CCC"] == "silent"
+    assert {"speaker": "CCC", "claim_id": "c_common", "statement": "测试共同命题"} \
+        in ly["evidence"]["silent"]
+
+
+def test_matrix_uses_named_exception_instead_of_any_refute_wins():
+    """Live regression: the overall capex claim was contradicted and named MSFT as
+    its sole supporting exception. MSFT also had refuting/neutral detail clusters, so
+    the old "any refute wins" renderer painted it red and contradicted the claim card.
+    """
+    cfg = _cfg()
+    store = FakeDataStore()
+    judgements = [
+        ClusterJudgement(cluster_key="a", polarity="support", speaker="AAA"),
+        ClusterJudgement(cluster_key="b", polarity="refute", speaker="AAA"),
+        ClusterJudgement(cluster_key="c", polarity="refute", speaker="BBB"),
+    ]
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW,
+                        verdict="contradicted", dissenters=["AAA"], judgements=judgements)
+    bundle = viz.build_bundle(cfg, _review(verdict=_verdict()),
+                              assessments_by_layer={"L1_test": [a]}, store=store)
+    row = bundle["layers"][0]["witness_matrix"]["rows"][0]
+    assert row["cells"]["AAA"] == "sup"
+    assert row["cells"]["BBB"] == "ref"
+
+
+def test_focused_evidence_hides_zero_count_stance_columns():
+    """The browser-side focus must not leave empty whole-layer columns ahead of the
+    two stance classes that actually support the selected claim."""
+    assert "col.style.display = focused && visible === 0 ? 'none' : '';" in viz.JS
+    focus_pos = viz.JS.index("state.focus = { kind: 'claim', id: claimId };")
+    filter_pos = viz.JS.index("applyEvidenceFilter();", focus_pos)
+    assert focus_pos < filter_pos
+    assert "card.dataset.claimId === focusId" in viz.JS
+
+
+def test_source_tier_is_surfaced_on_every_quote():
+    cfg = _cfg()
+    store = FakeDataStore()
+    doc = _doc(store, source="defeatbeta")
+    obs = _obs(store, doc)
+    j = ClusterJudgement(cluster_key="AAA|AAA|k1|up", polarity="support", speaker="AAA",
+                         concept="k1", stance="supplier", reason="r", observation_ids=[obs.id])
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                        judgements=[j])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    quotes = bundle["layers"][0]["trace"]["clusters"][0]["quotes"]
+    assert quotes[0]["tier"] == "keyed"          # defeatbeta -> RANK_KEYED
+    assert quotes[0]["text"] == "cited span"
+
+
+def test_a_non_url_source_url_is_dropped_not_rendered_as_a_link():
+    """Regression: defeatbeta stamps `source_url` with an internal pseudo-id
+    ("defeatbeta", "defeatbeta:COHR:2026-05-06") rather than a real link — confirmed
+    against production data on 2026-08-21. Rendering it as `<a href>` silently
+    resolves as a same-origin relative URL and opens a broken tab when clicked. Caught
+    by clicking through the real dashboard in a browser, not by a synthetic fixture."""
+    cfg = _cfg()
+    store = FakeDataStore()
+    doc = CachedDoc(symbol="AAA", period="FY2026Q2", doc_type="transcript", text="…",
+                    path=Path("/tmp/aaa.md"), source="defeatbeta", sha256="sha1",
+                    source_url="defeatbeta:AAA:2026-05-06", fetched_at=NOW.isoformat())
+    store.save_document(doc)
+    obs = Observation(document_id=doc.document_id, entity="AAA", source_entity="AAA",
+                      metric="m1", concept="k1", observation_type="reported_actual",
+                      stance="supplier", direction="up", evidence_span="cited span",
+                      observed_at=NOW, extraction_confidence=0.9, source_url="defeatbeta")
+    store.save_observation(obs)
+    j = ClusterJudgement(cluster_key="AAA|AAA|k1|up", polarity="support", speaker="AAA",
+                         concept="k1", stance="supplier", reason="r", observation_ids=[obs.id])
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                        judgements=[j])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    quote = bundle["layers"][0]["trace"]["clusters"][0]["quotes"][0]
+    assert quote["source_url"] == ""
+    assert quote["source"] == "defeatbeta"       # the adapter name still surfaces
+
+
+def test_only_the_cited_observation_is_loaded_not_the_whole_entity():
+    """The claim cited ONE of the entity's observations — the other must never surface,
+    the same discipline `observations_by_id` exists to enforce at the store layer."""
+    cfg = _cfg()
+    store = FakeDataStore()
+    doc = _doc(store)
+    cited = _obs(store, doc, span="cited span")
+    _obs(store, doc, metric="m2", span="never cited")
+    j = ClusterJudgement(cluster_key="AAA|AAA|k1|up", polarity="support", speaker="AAA",
+                         concept="k1", stance="supplier", observation_ids=[cited.id])
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                        judgements=[j])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    all_text = [q["text"] for c in bundle["layers"][0]["trace"]["clusters"] for q in c["quotes"]]
+    assert all_text == ["cited span"]
+
+
+def test_cluster_key_is_the_stable_id_linking_evidence_to_trace():
+    cfg = _cfg()
+    store = FakeDataStore()
+    doc = _doc(store)
+    obs = _obs(store, doc)
+    j = ClusterJudgement(cluster_key="AAA|AAA|k1|up", polarity="support", speaker="AAA",
+                         concept="k1", stance="supplier", observation_ids=[obs.id])
+    a = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                        judgements=[j])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    ly = bundle["layers"][0]
+    evi_key = ly["evidence"]["stances"][0]["clusters"][0]["cluster_key"]
+    trace_key = ly["trace"]["clusters"][0]["cluster_key"]
+    assert evi_key == trace_key == "AAA|AAA|k1|up"
+
+
+def test_relative_claim_gets_entity_readings_not_a_support_refute_bar_and_stays_out_of_the_matrix():
+    cfg = _cfg()
+    store = FakeDataStore()
+    er = EntityReading(entity="AAA", standing="strong", reason="领先", basis="self_reported")
+    a = ClaimAssessment(claim_id="c_rel", layer="L1_test", as_of=NOW, verdict="resolved",
+                        entity_readings=[er])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a]}, store=store)
+    claim = bundle["layers"][0]["claims"][0]
+    assert claim["kind"] == "relative"
+    assert claim["support_score"] == 0.0 and claim["refute_score"] == 0.0
+    assert claim["entity_readings"][0]["entity"] == "AAA"
+    assert bundle["layers"][0]["witness_matrix"]["rows"] == []
+
+
+def test_cross_validation_flag_requires_two_distinct_witness_stances_not_two_quotes_from_one():
+    cfg = _cfg()
+    store = FakeDataStore()
+    doc = _doc(store)
+    o1 = _obs(store, doc, span="span one")
+    o2 = _obs(store, doc, entity="CCC", metric="m2", span="span two")
+    j_single = ClusterJudgement(cluster_key="AAA|AAA|k1|up", polarity="support", speaker="AAA",
+                                concept="k1", stance="supplier", observation_ids=[o1.id])
+    a_single = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW,
+                               verdict="supportive", judgements=[j_single])
+    review = _review(basket=_basket(), verdict=_verdict())
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a_single]}, store=store)
+    assert bundle["layers"][0]["evidence"]["stances"][0]["clusters"][0]["cross"] is False
+
+    j2 = ClusterJudgement(cluster_key="CCC|CCC|k1|up", polarity="support", speaker="CCC",
+                          concept="k1", stance="customer", observation_ids=[o2.id])
+    a_two = ClaimAssessment(claim_id="c_common", layer="L1_test", as_of=NOW, verdict="supportive",
+                            judgements=[j_single, j2])
+    bundle2 = viz.build_bundle(cfg, review, assessments_by_layer={"L1_test": [a_two]}, store=store)
+    flags = {c["speaker"]: c["cross"] for s in bundle2["layers"][0]["evidence"]["stances"]
+            for c in s["clusters"]}
+    assert flags == {"AAA": True, "CCC": True}
+
+
+def test_cycle_position_short_label_goes_to_the_scope_bar_full_reasoning_to_cycle_why():
+    """The skill writes `cycle_position` as one string shaped
+    '<早/中/晚周期短语>：<支撑理由>' (confirmed against a real 2026-08-21 run across all
+    8 layers). The scope bar must show only the short label — dumping the whole
+    sentence there breaks the '30 秒看完' decision-face design — while the reasoning
+    must still surface somewhere, not be silently dropped."""
+    cfg = _cfg()
+    store = FakeDataStore()
+    v = _verdict(cycle_position="中周期偏晚：三星与SK海力士内存产线维持100%稼动、"
+                                "DRAM/NAND库存极低")
+    review = _review(basket=_basket(), verdict=v)
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={}, store=store)
+    ly = bundle["layers"][0]
+    assert ly["cycle_position"] == "中周期偏晚"
+    assert ly["cycle_why"][0] == "三星与SK海力士内存产线维持100%稼动、DRAM/NAND库存极低"
+
+
+def test_cycle_position_without_a_colon_falls_back_to_the_whole_string_as_the_label():
+    cfg = _cfg()
+    store = FakeDataStore()
+    v = _verdict(cycle_position="早周期")
+    review = _review(basket=_basket(), verdict=v)
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={}, store=store)
+    assert bundle["layers"][0]["cycle_position"] == "早周期"
+
+
+def test_budget_uses_the_baskets_actual_post_rescale_cap_not_a_recomputed_formula():
+    """Mirrors report.py's `_budget_derivation`: when a group ceiling squeezed the
+    basket below the formula value, the die must show what was ACTUALLY granted."""
+    cfg = _cfg()
+    store = FakeDataStore()
+    squeezed_basket = _basket(layer_cap=0.03)     # formula would say 0.10 * 0.6 = 0.06
+    review = _review(basket=squeezed_basket, verdict=_verdict(allocation="标配"))
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer={}, store=store)
+    die = bundle["layers"][0]["die"]
+    assert die["budget"] == 0.03
+    assert "被跨层组上限按比例压到 3.0%" in bundle["layers"][0]["budget_formula"]
+
+
+def test_chainmap_edges_come_from_declared_customer_supplier_witness_stance():
+    cfg = _cfg()
+    lanes = {lane["key"]: lane for lane in viz._chainmap(cfg)["lanes"]}
+    assert {"AAA", "BBB"} == {n["symbol"] for n in lanes["L1_test"]["nodes"]}
+    # CCC is a witness (customer stance) but not a layer ticker anywhere -> no node,
+    # so it must not appear in any edge either.
+    edges = viz._chainmap(cfg)["edges"]
+    assert all("CCC" not in nid for pair in edges for nid in pair)
+
+
+# --------------------------------------------------------------------------- #
+# `ats sector html` — the offline rebuild CLI (runtime/cli.py::run_sector_html)
+# --------------------------------------------------------------------------- #
+def test_run_sector_html_picks_the_review_matching_the_requested_date(monkeypatch):
+    """Two stored reviews exist; --date must select the one asked for, not whichever
+    `sector_review_history` happens to list first."""
+    from datetime import timedelta
+
+    from ats.agents.sector import viz
+    from ats.runtime import cli
+
+    cfg = _cfg()
+    old = _review()
+    newer = SectorReview(sector="test_sector", as_of=NOW + timedelta(days=1), regime="newer")
+    calls = {}
+
+    class _Store:
+        def sector_review_history(self, name, limit=60):
+            return [newer, old]
+
+        def claim_assessments_on(self, keys, date):
+            calls["date"] = date
+            return {}
+
+    def _fake_build_bundle(cfg_, review, *, assessments_by_layer):
+        calls["review"] = review
+        return {"b": 1}
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+    monkeypatch.setattr(viz, "build_bundle", _fake_build_bundle)
+    monkeypatch.setattr(viz, "write_html", lambda bundle, folder: "/x/out.html")
+
+    rc = cli.run_sector_html("test_sector", date=old.as_of.date().isoformat())
+    assert rc == 0
+    assert calls["review"] is old
+    assert calls["date"] == old.as_of.date().isoformat()
+
+
+def test_run_sector_html_defaults_to_the_latest_review_without_a_date(monkeypatch):
+    from ats.agents.sector import viz
+    from ats.runtime import cli
+
+    cfg = _cfg()
+    latest = _review()
+    calls = {}
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return latest
+
+        def claim_assessments_on(self, keys, date):
+            calls["date"] = date
+            return {}
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+    monkeypatch.setattr(viz, "build_bundle", lambda *a, **k: {"b": 1})
+    monkeypatch.setattr(viz, "write_html", lambda bundle, folder: "/x/out.html")
+
+    assert cli.run_sector_html("test_sector") == 0
+    assert calls["date"] == latest.as_of.date().isoformat()
+
+
+def test_run_sector_html_reports_missing_review_for_the_requested_date(monkeypatch, capsys):
+    from ats.runtime import cli
+
+    cfg = _cfg()
+
+    class _Store:
+        def sector_review_history(self, name, limit=60):
+            return []
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+
+    assert cli.run_sector_html("test_sector", date="2020-01-01") == 1
+    assert "没有存档" in capsys.readouterr().out
+
+
+def test_run_sector_html_reports_when_output_dir_is_unset(monkeypatch):
+    from ats.agents.sector import viz
+    from ats.runtime import cli
+
+    cfg = _cfg()
+    latest = _review()
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return latest
+
+        def claim_assessments_on(self, keys, date):
+            return {}
+
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
+    monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
+    monkeypatch.setattr(viz, "build_bundle", lambda *a, **k: {"b": 1})
+    monkeypatch.setattr(viz, "write_html", lambda bundle, folder: None)
+
+    assert cli.run_sector_html("test_sector") == 1

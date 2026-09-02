@@ -55,6 +55,21 @@ class PlatformUnstructuredRepository:
             sql += " AND observed_at>=?"; args.append(since.isoformat())
         return self._rows(sql + " ORDER BY observed_at DESC LIMIT ?", [*args, limit])
 
+    def observations_by_id(self, ids: list[str]) -> dict[str, dict]:
+        """Return exactly the cited observations, keyed by their stable ids."""
+        if not ids:
+            return {}
+        out: dict[str, dict] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"SELECT * FROM data_evidence_observations WHERE id IN ({placeholders})",
+                chunk).fetchall()
+            for row in rows:
+                out[row["id"]] = dict(row)
+        return out
+
     def observation_failures(self, limit: int = 50) -> list[dict]:
         """Return persisted extraction gaps without falling back to Workflow memory."""
         return self._rows(
@@ -116,6 +131,21 @@ class PlatformUnstructuredRepository:
         if where:
             sql += " WHERE " + " AND ".join(where)
         return self._rows(sql + " ORDER BY fetched_at DESC LIMIT ?", [*args, limit])
+
+    def documents_by_id(self, ids: list[str]) -> dict[str, dict]:
+        """Resolve exactly the source documents referenced by cited observations."""
+        if not ids:
+            return {}
+        out: dict[str, dict] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"SELECT * FROM data_documents WHERE document_id IN ({placeholders})",
+                chunk).fetchall()
+            for row in rows:
+                out[row["document_id"]] = dict(row)
+        return out
 
     def latest_document_version(self, document_id: str) -> dict | None:
         row = self.conn.execute(

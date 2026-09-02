@@ -53,6 +53,10 @@ class LayerExposure(BaseModel):
     weight: float = 0.0
     cap: float | None = None
     breached: bool = False
+    # True for a layer_group row — a ceiling over several layers at once, added so a
+    # SPLIT cannot loosen a guard by turning one cap into two independent ones.
+    is_group: bool = False
+    members: list[str] = Field(default_factory=list)   # group rows only
 
 
 class CashEquivalent(BaseModel):
@@ -271,6 +275,10 @@ class RiskReview(BaseModel):
     symbol_layers: list[SymbolLayer] = Field(default_factory=list)  # explicit symbol→layer map
     portfolio_beta: float | None = None
     chain_layers: list[LayerExposure] = Field(default_factory=list)
+    # 跨层上限（layer_groups）。**独立字段而不是混进 chain_layers**：后者的既有消费者
+    # 一律假设每行是一个层——混进去会让 blocked_layers 冒出一个不是层键的 key，
+    # 也会让「占比最高的层」把一个必然更大的合计行选出来。
+    chain_layer_groups: list[LayerExposure] = Field(default_factory=list)
     clusters: list[Cluster] = Field(default_factory=list)
     drawdown_pct: float | None = None
     daily_pnl_pct: float | None = None

@@ -16,7 +16,7 @@ from ats.data.structured import (
     SQLiteStructuredRepository,
     StructuredCatalog,
 )
-from ats.data.structured.quality import consensus_quality
+from ats.data.pipelines.structured.quality import consensus_quality
 
 
 T1 = datetime(2026, 8, 20, 8, 0, tzinfo=timezone.utc)

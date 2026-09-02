@@ -208,7 +208,7 @@ def test_review_clamps_and_persists(monkeypatch):
     monkeypatch.setattr(assemble, "build",
                         lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
 
-    r = sector_review.run("test_sector", use_llm=True, live_data=False)
+    r = sector_review.run("test_sector", use_llm=True, live_data=False, layers=False)
     assert [a.key for a in r.layers] == ["L3"]                    # bogus key dropped
     assert r.layers[0].boom_score == 100.0                        # clamped
     cohr = r.call_for("COHR")
@@ -260,7 +260,7 @@ def test_review_llm_failure_keeps_prior(monkeypatch):
         raise RuntimeError("LLM down")
 
     monkeypatch.setattr(sector_review, "run_structured", boom)
-    r = sector_review.run("test_sector", use_llm=True, live_data=False)
+    r = sector_review.run("test_sector", use_llm=True, live_data=False, layers=False)
     assert r.regime == "PRIOR REGIME"                             # prior returned
     assert get_store().latest_sector_review("test_sector").regime == "PRIOR REGIME"
 
@@ -446,7 +446,7 @@ def test_a_new_review_keeps_the_same_days_baskets(monkeypatch):
     monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
     monkeypatch.setattr(assemble, "build",
                         lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
-    out = sector_review.run("test_sector", use_llm=True, live_data=False)
+    out = sector_review.run("test_sector", use_llm=True, live_data=False, layers=False)
     assert [b.layer_key for b in out.baskets] == ["L5_fab"]
 
 
@@ -468,14 +468,14 @@ def test_stale_baskets_are_not_carried_across_days(monkeypatch):
     monkeypatch.setattr(sector_review, "run_structured", lambda *a, **k: _view())
     monkeypatch.setattr(assemble, "build",
                         lambda cfg, live_data=True, **_kwargs: assemble.SectorContext(cfg=cfg))
-    assert sector_review.run("test_sector", use_llm=True, live_data=False).baskets == []
+    assert sector_review.run("test_sector", use_llm=True, live_data=False,
+                             layers=False).baskets == []
 
 
 def test_cohort_is_one_row_per_company_not_per_listing(monkeypatch):
-    """SK hynix is configured under three codes because the book holds more than one.
-    The cohort took all three: it ranked the same company three times and handed it
-    20.5% of a 30% layer budget. Listing-level differences are the portfolio's problem;
-    selection and relative ranking are about the business."""
+    """Defensive invariant for custom/legacy configs containing several listings.
+    Listing-level differences are the portfolio's problem; selection and relative
+    ranking are about the business."""
     from ats.agents.sector import cross_section
     from ats.schemas.sector import SectorConfig, SectorLayer, LayerTicker
 
@@ -498,3 +498,19 @@ def test_cohort_is_one_row_per_company_not_per_listing(monkeypatch):
     # Three SK hynix listings fold onto the US ADR — which is the canonical id in
     # config/entities.yaml, so "prefer the US ticker" needs no separate rule.
     assert seen["cohort"] == ["TSM", "MU", "SKHY", "005930.KS"]
+
+
+def test_run_defaults_to_the_layered_path(monkeypatch):
+    """`run()` 默认走分层路径，`layers=False` 才回到旧的单次合成。
+
+    这条断言存在的理由是 2026-08-20 的一次真实事故：三个针对旧路径写的测试只 patch 了
+    `review.run_structured`，而分层路径调的是 `layer_review` / `rotation` 里的同名函数 ——
+    默认值一改，它们就**静默地开始打真实网络**，还照样显示为绿。conftest 现在有
+    `_no_live_layer_analyst` 兜底，这里再钉住默认值本身。
+    """
+    monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
+    called = {}
+    monkeypatch.setattr(sector_review, "_run_layered",
+                        lambda *a, **k: called.setdefault("layered", True))
+    sector_review.run("test_sector", use_llm=False, live_data=False)
+    assert called.get("layered") is True

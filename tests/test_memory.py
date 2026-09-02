@@ -51,3 +51,48 @@ def test_pead_events_dedup_is_per_symbol():
         assert mem.count_events(t) == 1
     # Same symbol twice is still idempotent.
     assert mem.append_events("COHR", [item]) == []
+
+
+def test_claim_assessments_on_groups_by_layer_for_the_offline_rebuild():
+    """The offline path (`ats sector html <sector> --date`) has no in-memory review to
+    read from — this is the query it uses instead. Layers with no rows that day (e.g. a
+    layer added after this snapshot) must be absent from the result, not an empty list,
+    so the bundle builder can tell 'nothing happened' apart from 'never asked'."""
+    from ats.schemas.chain import ClaimAssessment
+
+    mem = TradingMemory(":memory:")
+    a1 = ClaimAssessment(claim_id="hbm_supply_tight", layer="L6_memory", as_of=NOW,
+                         verdict="supportive")
+    a2 = ClaimAssessment(claim_id="hbm_pricing_expand", layer="L6_memory", as_of=NOW,
+                         verdict="supportive")
+    a3 = ClaimAssessment(claim_id="cloud_capex", layer="L2_cloud", as_of=NOW,
+                         verdict="mixed")
+    for a in (a1, a2, a3):
+        mem.save_claim_assessment(a)
+
+    out = mem.claim_assessments_on(["L6_memory", "L2_cloud", "L1_app"],
+                                   NOW.date().isoformat())
+    assert [x.claim_id for x in out["L6_memory"]] == ["hbm_supply_tight", "hbm_pricing_expand"]
+    assert [x.claim_id for x in out["L2_cloud"]] == ["cloud_capex"]
+    assert "L1_app" not in out
+
+
+def test_claim_assessments_on_empty_layer_keys_returns_empty_without_querying():
+    assert TradingMemory(":memory:").claim_assessments_on([], NOW.date().isoformat()) == {}
+
+
+def test_save_claim_assessment_same_day_rerun_overwrites_not_duplicates():
+    """A verdict history exists to answer 'when did this turn from mixed to
+    contradicted' — the unit of version is the DAY, not the instant. Re-running the
+    same review three times on one day (as happened in production on 2026-08-07,
+    see save_claim_assessment's docstring) must leave one row per claim, not three."""
+    from ats.schemas.chain import ClaimAssessment
+
+    mem = TradingMemory(":memory:")
+    for verdict in ("unknown", "mixed", "supportive"):
+        mem.save_claim_assessment(ClaimAssessment(claim_id="hbm_supply_tight",
+                                                   layer="L6_memory", as_of=NOW,
+                                                   verdict=verdict))
+    rows = mem.claim_assessments_on(["L6_memory"], NOW.date().isoformat())["L6_memory"]
+    assert len(rows) == 1
+    assert rows[0].verdict == "supportive"       # last write wins, not the first

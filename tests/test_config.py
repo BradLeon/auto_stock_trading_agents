@@ -7,7 +7,7 @@ derives peers from the ticker's sector layer so a new PEAD target never silently
 ships without a cross-symbol view; a curated YAML entry still wins.
 """
 
-from ats.config import load_pead_config
+from ats.config import load_pead_config, load_sector_config
 
 
 def test_risk_yaml_is_single_source_for_all_adjustable_risk_config(monkeypatch, tmp_path):
@@ -117,3 +117,26 @@ def test_third_party_prose_names_resolve_to_the_listed_entity():
     assert canonical_entity("QUMULUSAI (QMLS)") == "QMLS"
     # Not ticker-shaped: left alone rather than guessed at.
     assert canonical_entity("SOME PRIVATE LAB") == "SOME PRIVATE LAB"
+
+
+def test_ai_hardware_uses_one_sector_ticker_per_company_and_tracks_l2_operators():
+    """Sector analysis is company-level even when the execution book holds several
+    listings. Listed L2 operators should not participate in only one of cross-section
+    or proposition tracking while disappearing from the other."""
+    cfg = load_sector_config("ai_hardware")
+    memory = cfg.layer_by_key("L6_memory")
+    assert memory is not None
+    memory_symbols = [t.symbol for t in memory.tickers]
+    assert "SKHY" in memory_symbols
+    assert "HY9H" not in memory_symbols and "000660.KS" not in memory_symbols
+    from ats.config import load_instrument_risk_registry
+    registry = load_instrument_risk_registry()
+    for execution_symbol in ("7709", "HY9H", "SKHY", "000660.KS"):
+        assert cfg.layer_of(registry.resolve(execution_symbol).layer_symbol) == "L6_memory"
+
+    cloud = cfg.layer_by_key("L2_cloud")
+    assert cloud is not None
+    assert {"CRWV", "SPCX"} <= {t.symbol for t in cloud.tickers}
+    demand = next(c for c in cloud.claims if c.id == "cloud_demand_still_accelerating")
+    assert "CRWV" in demand.expected_witnesses()
+    assert demand.stance_of("CRWV") == "incumbent"

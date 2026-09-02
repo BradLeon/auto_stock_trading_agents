@@ -2,7 +2,11 @@
 
 站在**行业视角**、自下而上聚合整条产业链的分析师 Agent。与 PEAD 的**企业级**基本面分析互补：PEAD 盯单个标的的财报预期差，行业分析师看整条链条的景气度、供需、定价权、资金流，产出**层间轮动**和**个股增持/持有/减持**建议。
 
-MVP 覆盖 **AI 硬件产业链**，按 L1→L6 分层（需求沿 L1 向 L6 传导）。
+MVP 覆盖 **AI 硬件产业链**，按 L1→L8 分层（需求沿 L1 向 L8 传导）。
+
+> **2026-08-20 重构**：六层拆成八层，并新增**层级子行业分析师**。此前的输出是「这层景气吗」
+> （0-100 分 + bullish/neutral/bearish），**没有仓位含义**；现在每层产出**配置结论**
+> （超配/标配/低配/清仓），并直接决定该层的预算使用率。
 
 ---
 
@@ -10,27 +14,53 @@ MVP 覆盖 **AI 硬件产业链**，按 L1→L6 分层（需求沿 L1 向 L6 传
 
 一次运行产出一份**周度行业评审**，包含：
 
-1. **分层评审（L1-L6）**：每层给出
-   - **景气度**（0-100 分）
-   - **供需**（紧张/平衡/过剩 + 依据）
-   - **定价权**（哪个环节集中利润）
-   - **资金流**（以相对动量/估值扩张为 proxy）
-   - **周期位置**（早/中/晚周期）
-   - **信号**（bullish/neutral/bearish）
-2. **层间轮动建议**：利润池正从哪层迁移到哪层，加/减哪层。
-3. **个股观点**：universe 里每家公司一条 stance（增持/持有/减持）+ conviction + 理由，锚定实际数据。
-4. **行业 regime**：一句话自包含的行业状态判断。
+1. **逐层配置结论（L1-L8）**：每层给出
+   - **配置**：超配 / 标配 / 低配 / 清仓 —— **它决定本层预算的使用率**
+   - **confidence**（0-1）与**周期位置**（依据限定为产业证据）
+   - **议题归因**：每条 common 命题一行，说明它对本层配置的含义
+   - **反转触发条件**：下一轮能直接核对的观察项
+   - **层内选股**：本层每只标的一条 stance + 理由
+2. **跨层轮动建议**：利润池正从哪层迁移到哪层，加/减哪层。
+3. **行业 regime**：一句话自包含的行业状态判断。
 
-**AI 硬件的 L1-L6 分层**（seed 自用户的「半导体产业研究合集」）：
+**AI 硬件的 L1-L8 分层**：
 
-| 层 | 含义 | 代表公司 |
-|---|---|---|
-| L1 | AI 应用层（Token 经济） | GOOGL + OpenAI/Anthropic/xAI（非上市） |
-| L2 | 云服务层（算力租用） | MSFT / AMZN / META / GOOGL / CRWV |
-| L3 | 数据中心基建（电力/冷却/网络/光互联） | COHR / LITE / AAOI / VRT |
-| L4 | 芯片设计 | NVDA / AMD / AVGO / MRVL |
-| L5 | 芯片制造（Foundry+封装+存储） | TSM / MU / SK海力士 / 三星 |
-| L6 | 半导体设备 | ASML / AMAT / LRCX / KLA / TEL |
+| 层 | 含义 | 代表公司 | subgroup |
+|---|---|---|---|
+| L1 | AI 应用层（Token 经济） | GOOG + OpenAI/Anthropic（非上市） | — |
+| L2 | 云服务层（算力租用） | MSFT / AMZN / META / GOOG / CRWV / SPCX | — |
+| L3 | 数据中心电力与冷却 | VRT / ETN / GEV / BE | —（不分组） |
+| L4 | 互联与网络 | COHR / LITE / AAOI / CRDO / AXT | 光互联/铜连接/衬底 |
+| L5 | 芯片设计 | NVDA / AMD / AVGO / MRVL | — |
+| L6 | 存储 | SKHY / MU / 三星 / SNDK / STX / WDC | HBM/常规DRAM/NAND/HDD |
+| L7 | 代工与先进封装 | TSM | — |
+| L8 | 半导体设备 | ASML / AMAT / LRCX / KLAC | — |
+
+### 为什么这么分层
+
+层同时承担三件事，好的切法要三者**同时**成立：① 需求传导链上的位置 ② 截面 cohort
+（z 分的作用域）③ 风险预算 / 相关簇单元。
+
+**拆层的判据是「定价机制」，不是「产业环节」。** 产业环节回答「这东西怎么做出来的」，
+而层要回答「这两家放一起比 PEG/毛利率有没有意义」「它们会不会一起跌」。四种机制：
+
+| 机制 | 价格由谁定 | 典型 | 财务特征 |
+|---|---|---|---|
+| 产能垄断型服务 | 卖方 | TSM 先进制程 | 毛利高且稳 |
+| 商品化周期品 | 供需（bit 现货价） | DRAM/NAND/HDD | 毛利大幅摆动 |
+| 技术代际替代 | 溢价窗口 | 光模块 1.6T/CPO | 毛利随代际起落 |
+| 机电装机量 | 招标/长单 | VRT/ETN/GEV | 毛利平稳靠量 |
+
+反例最能说明问题：**台积电与美光的毛利率差不来自谁经营得更好，来自商业模式**——
+而 z 分会把它读成「台积电的质量因子更强」，一个每周都会出现的假信号。
+
+**层是风险预算与景气判断单元；subgroup 只是叙述与比较的分组标签。** z 分在**整层**
+统一计算，subgroup 不参与标准化（组内样本太小会退化）。代价是跨 subgroup 的名次先后
+可能只是两组的因子分布不同，所以分析师不得仅凭名次断言跨组优劣。
+
+**层键更名后历史靠 `legacy_keys` 解析，旧记录一律不改写**：一行写着 `L5_fab` 的结论是在
+「代工+存储」的合并口径下做出的，改写它等于伪造当时的判断范围。拆分产生一对多，
+按 basket 里的标的挑对应的那一半。
 
 ---
 
@@ -41,26 +71,63 @@ MVP 覆盖 **AI 硬件产业链**，按 L1→L6 分层（需求沿 L1 向 L6 传
 ```
 config/sectors/ai_hardware.yaml（分层+成分股，用户可校正的唯一真源）
         ↓
-assemble.build() 上下文组装（纯代码，无 LLM）：
-  · 静态：半导体产业研究合集（36k 字符上限）
-  · 动态：1 次批量 yf.download 价格 + 轻量 get_info + consensus(仅 PEAD 标的)
-  · PEAD：dossier 叙事尾部 + Scorecard + 近期 insight + 高分 triage 事件
+每层并行：
+  ① fetch_factors + rank_cohort   纯代码 ────────→ 量化 basket
+  ② structure.assess              KB + relative 读数 → tech_tenor/moat_pricing → 混合重排
+  ③ layer_review.run              common 结论（该给多少钱）
+                                  relative 读数（选谁）
+                                  判据笔记 + 混合 basket
+                                  上一轮本层 verdict ──→ LayerVerdict
+                                                        └→ 使用率 → 重算权重（排名不变）
+全部层完成后：
+  ④ rotation.run                  8 条 LayerVerdict ──→ 轮动建议 + 一致性检查
         ↓
-run_structured("sector_analyst" / Opus)  单次合成
-        ↓
-SectorReview → ① sqlite sector_reviews 表
+SectorReview → ① sqlite sector_reviews 表（payload 内含 layer_verdicts）
              → ② Obsidian 行业分析-AI硬件-<日期>.md
              → ③ 注回 PEAD prep/monitor 上下文
 ```
 
+⚠️ **三个阶段都不吃宏观**，② 不吃 common，③ 的两类证据分开定向 —— 见下。
+
 ### 关键设计决策
 
-- **单次 Opus 合成，不做两阶段**：层间轮动本质是跨层比较，必须在同一上下文里完成；分层调用会把 36k 静态背景重复发 6 次、成本翻倍且无收益。上下文 ~50k 字符，成本约 **$0.3-0.6/次**。
+- **两类议题各自定向**（这条分工本来就在代码里，只是此前没写成设计）：
+
+  | 命题类型 | 去向 | 回答 | 形态 |
+  |---|---|---|---|
+  | `common` | 层级分析师 | 这一层该给多少钱 | 结论 + 覆盖率 + basis |
+  | `relative` | 结构分析师 | 层内怎么排序 | 逐家读数 → 结构因子 |
+  | `relative` | 层级分析师的选股段 | **为什么**选它 | 读数原文，不是因子分数 |
+
+  `chain/factor_evidence.py` 一行写死 `kind != "relative"` 就跳过，所以结构因子只吃
+  relative。**common 不得进结构因子**：那等于让「行业需求好」改写「谁在赢」，正是
+  `CHAIN_EVIDENCE.md` 不变式 2 要挡的。relative 走两条路不是重复计价——一个压成数进
+  复合排名，一个读原文写理由，冲突时以读数原文为准。
+
+- **宏观退出整条行业链路**：Chief 已经读宏观 `sector_tilts`，行业这边再吃一遍会让同一个
+  判断被计两次；更糟的是**归因污染**——层级结论变差时分不清是产业景气变差还是宏观变差，
+  而那两件事对仓位的含义相反（减这一层 vs 减总仓位）。周期位置改用产业证据
+  （capex 指引 / 订单交期 / 库存 / 产能投放）。
+
+- **改成两阶段，但轮动仍在同一上下文**：原来的理由是「层间轮动本质是跨层比较，必须在同一
+  上下文里完成」——这条**仍然成立**，只是轮动现在比较的是 8 条紧凑结论而不是全部原始素材。
+  层级判断反而必须分开：每层只看自己的证据，上下文从单次 128.9k 字符降到每层 5~10k。
+
+- **结构分析师不并入层级分析师**（上下文高度重叠、能省 8 次调用）：`ats sector kbperturb`
+  这件仪器专门检验「知识库是否真的在起作用」，它依赖结构打分是一个**可单独消融的阶段**。
+  合并会让这个检验失去对照组。代价是结构分析师改吃**上一轮**的 LayerVerdict（周度节奏下
+  是合法先验），提示词里明确标注它是上一轮的。
+
+- **「本层无命题」与「证据缺失」必须分开**：前者是**配置缺口**（该建的命题没建），
+  后者是**证据缺口**（本季没人发声）。两者都给标配 + confidence ≤0.3，但混为一谈会让
+  配置缺口被当成「行业没消息」而永远不被发现。无命题时 confidence 上限**在代码里钳**。
 - **限速优先（yfinance 易被限流）**：universe ~22 家 × 多端点很容易 429。方案是 **1 次批量 `yf.download`** 拿全 universe 收盘价（动量/距高全从这算）+ 轻量 `get_info`（限速 0.8s/票，只取估值/毛利）+ **consensus 只拉 PEAD 标的**（4 端点/票太重）。约 45 次调用/周 vs 无脑做法 175 次。全部走 `safe_fetch`，某票限流退化成 `(n/a)` 而非炸掉整跑。
 - **校准纪律写进 skill**：多数周是"无变化"就直说；conviction 默认 ≤0.6，多源证据同向才上调；数据缺失的票强制 stance=持有、conviction≤0.3；标 `[PEAD]` 的票必须与其活体档案结论一致或说明分歧。
 - **闭环注回 PEAD**：最新评审的 regime + 该票所在层评估 + 个股 call 注入 PEAD prep 的 `industry_context`；monitor 上下文加 1-3 行 regime 提示帮 Flash 校准 materiality（如"L3 光互联已是共识瓶颈"会让又一条光互联利好判低分）。因为 prep 通过 `prior_narrative` 闭环传播，**注入一次即全程可见**。
 - **不上 RAG / 不做蒸馏缓存**：8 篇静态小库文件夹直读足够；周度低频，直接注入 Opus 成本可忽略。
-- **LLM 失败不落库**：合成失败返回上一次 review（或 stub），绝不用 stub 覆盖 latest。
+- **LLM 失败不落库**：单层失败回退到该层上一次的 LayerVerdict（没有则拒绝猜测，
+  confidence=0），不中止其余层；**没有任何层产出结论时整轮不落库**——否则会用「本轮没跑成」
+  替换掉「上周的真实判断」，而两者在下游读者眼里长得一样。轮动失败只让周报缺一段。
 
 ### 关键文件
 
@@ -70,8 +137,14 @@ SectorReview → ① sqlite sector_reviews 表
 | `src/ats/schemas/sector.py` | SectorConfig / SectorReview 等 schema |
 | `src/ats/data/sector_snapshot.py` | 批量价格（1 次 download）+ 动量/距高 |
 | `src/ats/agents/sector/assemble.py` | 多源上下文组装（核心） |
-| `src/ats/agents/sector/review.py` | 编排 + Opus 合成 + clamp/校验 |
+| `src/ats/agents/sector/review.py` | 编排：逐层（截面→结构→层级）→ 跨层轮动 |
+| `src/ats/agents/sector/layer_review.py` | **层级子行业分析师**：按层组装 → LayerVerdict |
+| `src/ats/agents/sector/rotation.py` | 跨层轮动：只消费 8 条 LayerVerdict |
+| `src/ats/skills/layer-analyst/SKILL.md` | 层级分析师提示词（四档判据 + 校准纪律） |
+| `scripts/verify_layer_migration.py` | 分层重构的不变量校验（改分层时先跑它） |
 | `src/ats/agents/sector/report.py` | Obsidian markdown 渲染/写入 |
+| `src/ats/agents/sector/viz.py` | 可交互 HTML 看板：`build_bundle()` 数据装配 + `render_html()`/`write_html()` |
+| `src/ats/agents/sector/viz_assets.py` | 看板的 CSS/JS 常量 |
 | `src/ats/agents/sector/context.py` | 注回 PEAD 的 prep_block/monitor_hint |
 | `src/ats/agents/sector/cross_section.py` | 截面选股：层内排序 + 权重分配（确定性，无 LLM） |
 | `src/ats/agents/sector/structure.py` | 结构层：KB 定性评审 → tech_tenor / moat_pricing |
@@ -88,11 +161,75 @@ cohort 内**把几个因子标准化成 z 分（Barra-lite），复合成排名�
 - 层预算来自 `config/risk.yaml` 的 `sector_layer_caps`；`cohort_extra` 的票参与排名
   但不占预算
 
-> **当前局限**：结构层的触发条件是"该层配了 `structure_notes` 知识库"，而目前**只有
-> L3 光互联层配了**。因此 L4 / L5 / L6 从未跑过结构层，这些层的 `moat_pricing` 恒为
-> 空值、记 0 分、cohort-neutral——也就是说，表达"海力士被三星反超"的那个因子，在 HBM
-> 层压根没被计算过。补齐知识库、并给这个因子接上事件级证据的设计见
-> [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
+### 配置结论 → 预算使用率（谁决定多少钱）
+
+层级配置结论映射为**本层预算使用率**，截面 basket 的权重之和 =
+`weight_cap × clamp(使用率, 0, 1)`：
+
+| 结论 | 使用率 | L6 存储（cap 25%）实际预算 |
+|---|---|---|
+| 超配 | 100% | 25.0% NAV |
+| 标配 | 60% | 15.0% NAV |
+| 低配 | 30% | 7.5% NAV |
+| 清仓 | 0% | 0 |
+
+**护栏不变式（这条不能松）**：
+
+- `weight_cap` 仍是**永不突破的天花板**。使用率只允许把层**往下调**，钳制在**代码里**做
+  ——配置把「超配」误写成 1.5 也不会抬高上限。
+- **风控检查读静态 cap，预算分配读调整后的 cap。** 使用率答的是「新增资金投多少」，
+  breach 答的是「已有持仓越没越界」。共用一个数会让一条「低配」把满仓但合规的层瞬间
+  判成超限、触发不必要的减仓——那是**用建议信号冒充风险事件**。
+- 未知档位回落到**标配**那一档，不是满额：「读不出这条结论」不能花得像「高信心买入」。
+- 清仓不自动下单，仍走 Chief 提案 + 人工审批。
+- 映射表在 `config/risk.yaml` 的 `layer_utilization`（治理归配置），结论由模型给出并
+  连同证据归因一起落库（判断归模型且留痕）。
+- 回滚开关：`config/pead.yaml` 的 `bind_layer_budget: false` → 使用率恒为 1.0。
+
+### 八层的 cap 怎么定的（2026-08-21 重设）
+
+此前的数值是从六层继承来的（L4/L5/L8 甚至只是原样搬过来的旧数）。重设时按**结构性判据**
+定，不看当时的实际持仓。四条依据，按重要性排序：
+
+1. **有没有命题** —— 没有证据基础的层不该给高上限。排第一，因为它决定的不是「这层好不好」，
+   而是「我们有没有能力判断它好不好」。
+2. **层内资产同质性** —— 层内越同向，同一个 cap 的实际风险越大（分散不起来）。
+3. **链上位置与不可替代性** —— 越靠瓶颈、越难替代，值得越高上限。
+4. **周期回撤幅度** —— 商品化周期品的历史回撤远大于产能垄断型服务。
+
+| 层 | cap | 票数 | 实际上限 | 主要依据 |
+|---|---|---|---|---|
+| L1 应用 | 10% | 1 | **4%** | 单票且**无命题**；GOOG 兼属 L2 |
+| L2 云服务 | 25% | 5 | 25% | 需求源头；防御性最强；5 条命题最完备 |
+| L3 电力与冷却 | 10% | 4 | 10% | **无命题**——上限压低直到命题建起来 |
+| L4 互联与网络 | 15% | 5 | 15% | 技术代际替代、beta 1.5~3.8、份额战 |
+| L5 芯片设计 | 20% | 4 | 20% | 价值捕获中心；也是最拥挤的交易 |
+| L6 存储 | 20% | 8 | 20% | 商品化周期品，**全链最大回撤** |
+| L7 代工与先进封装 | 20% | 1 | **8%** | TSM 最不可替代；单票层 |
+| L8 半导体设备 | 15% | 4 | 15% | 最领先周期指标；寡头稳定 |
+| **合计** | **135%** | | 117% | |
+
+**cap 是天花板，不是分配**：合计 135% 正常——八层不会同时满仓，还有总杠杆、现金下限、
+单票上限、相关簇上限管着。六层时合计也是 115%。
+
+> ⚠️ **单票层的实际上限是 `cap × 40%`**（`single_name_cap_frac`）：单票拿不到超过层上限
+> 40% 的仓位，而它是唯一的票，溢出无处可去，**剩下 60% 不分配**。所以 L7 给到 20% 的含义
+> 是「允许 TSM 占到 8% NAV」，不是「它比互联层重要」。别把 `weight_cap` 当成单票层会用满的数。
+
+### 跨层上限（`layer_groups`）—— 机制保留，`ai_hardware` 已取消
+
+拆层有一个机械性副作用：`L5_fab ≤30%` 变成两个独立 cap，两层同时满仓就到 45%——**那等于
+在重构的掩护下放松护栏**。当时的做法是加一条组上限把总量钉回拆分前的原值。
+
+**2026-08-21 取消**：它是**迁移期的脚手架，不是永久结构**。它与拆层的初衷自相矛盾——
+拆 L6/L7 的依据正是**它们不同向**（代工是产能垄断型服务、存储是商品化周期品），
+再用共享上限绑回一起，等于宣称它们是同一个风险簇。八层的 cap 现在是**有意按八层结构
+重定**的，不再需要那个防止自己无意改变政策的装置。真实的同向性交给
+`limits.cluster_weight_cap` 按**实测价格相关性**聚类，而不是手工划的组。
+
+**机制本身保留**（代码与测试都在，用合成配置测）：别的 sector 或以后的拆层还会需要它。
+它能表达的是「每层单独看都合规、合计却越限」——逐层看不出任何问题的那种情况。
+组越限时**组内每一层都进 `blocked_layers`**：只封「组」封不住新买单，下游按层键判断。
 
 ---
 
@@ -110,9 +247,29 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector review ai_hardware
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector review ai_hardware --no-llm      # 只组装+stub，不花钱
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector review ai_hardware --no-report    # 不写 Obsidian
 
-# 看最新评审 + 历史
+# 截面因子速查（只打印，不写文件 —— 文档由 sector review 的层报告产出）
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector crosssection ai_hardware --layer L6_memory
+
+# 只跑某一层（或全部层）的层级评审：配置结论 + 层内选股
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector layer ai_hardware --layer L6_memory
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector layer ai_hardware --layer all
+
+# 看最新评审 + 历史（含各层配置结论与换算出的预算）
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector show ai_hardware
+
+# 从库离线重建可交互 HTML 看板（不打 LLM、不碰行情；--date 缺省取最新一次存档）
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector html ai_hardware
+PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector html ai_hardware --date 2026-08-21
 ```
+
+> 改分层结构时**先跑不变量校验**，别靠肉眼读 2000 行 diff：
+> ```bash
+> .venv/bin/python scripts/verify_layer_migration.py <改前.yaml> config/sectors/ai_hardware.yaml \
+>     --new-tickers SNDK,STX,WDC
+> ```
+> 它比对命题 id / concepts+expect_from / witnesses / 标的并集 / 笔记路径 /
+> **每票的 concept_menu 键集合**。最后一项抓的是最阴的那种错：碰坏一条命题的证人声明
+> **不会报错**，症状是那家公司的观测静默地全部未映射。
 
 ### 自动调度
 
@@ -131,7 +288,10 @@ ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告�
 编辑 `config/sectors/ai_hardware.yaml` 的对应层 `tickers`，一行一个 `{symbol, note}`。**注意**：
 - **symbol 必须是 yfinance 能识别的交易代码**（如 Marvell 是 `MRVL` 不是 MVRL；韩股 `000660.KS`、日股 `8035.T`）。
 - 这个 yaml 是**唯一真源**，层 key 会被 LLM 逐字回显，你的改动自动传播到报告和注入，无需改代码。
-- 标 `TODO 用户确认` 的归层请校正（如 CRWV/VRT/TEL）。
+- 标 `TODO 用户确认` 的归层请校正（如 CRWV/TEL）。
+- **新增标的默认没有可归属维度**：它不在任何命题的证人声明里 → `concept_menu` 返回空菜单
+  → 它的观测 100% 未映射。补声明前走**两步法**（先观测再声明），见
+  [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
 
 ### 普通成分股 vs PEAD 标的
 
@@ -140,10 +300,59 @@ ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告�
 
 ### 成本
 
-约 **$0.3-0.6/次**（单次 Opus，~50k 输入/3k 输出）。注入 PEAD 的增量 ≤300 tokens。限速设计后每周仅 ~45 次 yfinance 调用。
+调用数从 ~9 增至 ~17（8 次结构 + 8 次层级 + 1 次轮动），但**输入总量反而下降**——
+2026-08-20 实测：八层合计 105,533 字符 + 跨层轮动 6,791 = **112,324**，
+对比改造前单次全行业 **128,879**，**降 13%**。
 
-### 三路输出去向
+原因是 36k 静态合集与 44k 判据笔记不再整份发给一次合成，每层只拿自己那几份。
+单层区间 5.2k（L3，无命题）~ 21.9k（L5）。实跑耗时约 10 分钟。
+注入 PEAD 的增量 ≤300 tokens。每周 yfinance 调用随宇宙从 25 只增至 31 只。
 
-1. **SQLite** `var/ats.sqlite` 的 `sector_reviews` 表（支持历史对比/回测）。
-2. **Obsidian** `<output_dir>/行业分析-AI硬件-<日期>.md`（`output_dir` 在 sector 配置里；永远新建文件、不动你的手写笔记；同日重跑覆盖）。
-3. **注回 PEAD**：下一次 `pead prep`/`pead monitor` 自动带上最新行业评审的相关块。
+### 四路输出去向
+
+1. **SQLite** `var/ats.sqlite` 的 `sector_reviews` 表（payload 内含 `layer_verdicts`，支持历史对比/回测）。
+2. **Obsidian**（`output_dir` 在 sector 配置里；永远新建文件、不动你的手写笔记；同日重跑覆盖）：
+   - `层分析-AI硬件-<层标签>-<日期>.md` × 8 —— **每层一份，截面并入**
+   - `行业分析-AI硬件-<日期>.md` × 1 —— 跨层轮动 + 八层结论索引
+   - `层分析-AI硬件-<日期>.html` × 1 —— 见下方「可交互看板」
+3. **注回 PEAD**：下一次 `pead prep`/`pead monitor` 自动带上最新层级结论。
+
+### 可交互看板（`agents/sector/viz.py`）
+
+md 报告答「每层结论是什么」；HTML 看板答**为什么**——同一份数据，换一种读法：
+自顶向下 决策→命题→证据→溯源→截面 五个 tab，点一条命题下钻到判读簇、点一个判读簇
+下钻到它引用的 `evidence_span` 原文与来源文档（层级/URL/本地路径）。单文件、内嵌
+JSON、纯客户端渲染，不建服务、不进前端工具链，可离线打开可直接发人。
+
+- **两条产出路径，同一个 `build_bundle()`**：周报跑完自动写（best-effort，渲染失败
+  不影响评审落库）；离线重建用 `ats sector html <name> [--date]`——只读库，不打 LLM、
+  不碰行情，`--date` 缺省取最新一次存档的 review。
+- **已知局限**（页面本身也会说）：行情/因子值的溯源只到 basket 快照，没有供应商侧
+  的不可变留痕；产业链全景图的连线是从证据里声明的证人立场（customer/supplier）
+  推出来的简化示意，不是独立维护的完整依赖图。
+- CSS/JS 常量在 `agents/sector/viz_assets.py`（与数据装配分开，便于单独迭代样式）；
+  UI/交互先做过一版无数据的原型给人工 review 通过，再接的真实数据。
+
+### 层报告的五节（结论先行）
+
+| 节 | 内容 | 性质 |
+|---|---|---|
+| 一、本层结论 | 层配置 + 预算 + 周期 + **逐票建议权重/stance 表** + 反转触发条件 | **结论** |
+| 二、议题证据链 | 逐条 common：结论、依据强度、证人覆盖、独立证据簇、立场类别、支持/反驳、**未发声证人**、逐句判读（说话人·维度·理由） | 为什么是这个配置 |
+| 三、截面明细 | 因子表 + **相对命题逐家读数**（位置·依据强度·说话人·理由） | 为什么是这个排序 |
+| 四、逐票取舍理由 | 每只票的依据与分歧、仅自述标记 | 为什么选它 |
+| 五、候选追踪议题 | 分析师自发提出，**只进报告不落库** | 下一轮的输入 |
+
+**第一节要能单独看完就下单**；后四节是给要核对的人的——没有它们第一节只是一个断言，
+但放在前面等于每周先读三千字才看到答案。**解法是顺序，不是取舍。**
+
+第②③节的数据**全部来自 `ClaimAssessment`**（`coverage` / `evidence_clusters` /
+`silent_witnesses` / `judgements` / `entity_readings`），此前只喂给提示词、没喂给读者。
+其中**沉默必须可见**：`expect_from` 存在的全部理由就是让沉默显示成缺口而不是中性。
+
+**候选追踪议题**与 induction 引擎分工：后者**确定性触发**、从未映射观测归纳、进
+`claim_proposals` 走人工采纳；前者是**语义的**、从分析师读到的素材提出、**只进报告**
+（代价：不去重、不被跟踪）。两者都只提议，只有人能把命题写进 yaml。
+
+> `ats sector crosssection` **只打印不写文件**：层报告已经含截面，第二份每层文档迟早
+> 会不同步——它的 `layer_cap` 在配置结论出来前还是个半成品。

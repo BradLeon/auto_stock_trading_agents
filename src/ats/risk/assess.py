@@ -293,7 +293,11 @@ def _build_directive(r: RiskReview, rc, policy, net_liq: float) -> RiskDirective
     blocked_entities = sorted(
         e.economic_entity for e in r.economic_exposures
         if abs(e.net_delta_weight) > rc.max_position_pct)
-    blocked_layers = sorted(le.key for le in r.chain_layers if le.breached)
+    # 组越限 → 组内每一层都进 blocked_layers。组上限存在的全部意义就是「两半都没越限
+    # 但合计越了」，那时逐层看不出任何问题，只封组是封不住新买单的（下游按层键判断）。
+    blocked_layers = sorted(
+        {le.key for le in r.chain_layers if le.breached}
+        | {m for g in r.chain_layer_groups if g.breached for m in g.members})
     data_invalid = net_liq <= 0 or bool(
         r.option_survival and r.option_survival.has_unknown_probability)
     emergency = any(b.layer.startswith(("L4-回撤", "L4-日亏", "L2-期权全额指派"))
@@ -499,6 +503,10 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
                 layer_w[lk] = layer_w.get(lk, 0.0) + w
             underlying_by_entity[s].layer = lk or ""
             economic_by_entity[s].layer = lk or ""
+        # ⚠️ 这里读的必须是**静态** `weight_cap`，绝不能是层级分析师的预算使用率调整过的值。
+        # 两者回答不同的问题：使用率是「新增资金愿意投多少」，breach 是「已有持仓是否越界」。
+        # 共用一个数会让一条「低配」结论把满仓但合规的层瞬间判成超限、触发不必要的减仓
+        # —— 那是用建议信号冒充风险事件。使用率只作用在 cross_section 的 basket 预算上。
         for lk, w in layer_w.items():
             cap = caps.get(lk)
             breached = cap is not None and w > cap
@@ -507,6 +515,25 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
             if breached:
                 r.breaches.append(Breach(layer=f"L1-{lk}", limit=f"≤{cap:.0%}",
                                          actual=f"{w:.0%}", action="缩/block 入该层的新买单"))
+
+        # 跨层上限。拆层把一个 cap 变成两个独立的 cap，两半同时满仓就能超过拆分前允许的
+        # 总量 —— 那等于在重构的掩护下放松护栏。group 上限把子层重新绑成一个天花板，
+        # 数值取拆分前的原值，所以**单层都没越限而合计越限**时它仍然会响。
+        for g in scfg.layer_groups:
+            gw = round(sum(layer_w.get(k, 0.0) for k in g.layers), 4)
+            hard = g.weight_cap_hard
+            breached = gw > g.weight_cap
+            r.chain_layer_groups.append(LayerExposure(
+                key=g.key, label=g.label or g.key, weight=gw, cap=g.weight_cap,
+                breached=breached, is_group=True, members=list(g.layers)))
+            if breached:
+                over_hard = hard is not None and gw > hard
+                r.breaches.append(Breach(
+                    layer=f"L1-组{g.key}", limit=f"≤{g.weight_cap:.0%}" + (
+                        f"（硬顶 {hard:.0%}）" if hard is not None else ""),
+                    actual=f"{gw:.0%}（{'+'.join(g.layers)}）",
+                    action=("block 入该组任一层的新买单" if over_hard
+                            else "缩/block 入该组的新买单")))
     except Exception as exc:  # noqa: BLE001
         log.warning("chain-layer concentration skipped: %s", exc)
 

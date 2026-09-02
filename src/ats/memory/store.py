@@ -1378,6 +1378,29 @@ class TradingMemory:
             "SELECT * FROM claim_assessments WHERE claim_id = ? ORDER BY as_of DESC "
             "LIMIT ?", (claim_id, limit)).fetchall()]
 
+    def claim_assessments_on(self, layer_keys: list[str], date: str) -> dict[str, list]:
+        """Full `ClaimAssessment` objects for a set of layers on one day, grouped by
+        layer key — the offline counterpart to what `_run_layered` holds in memory
+        during a live run. `date` is `YYYY-MM-DD` (the table's day-truncated key).
+
+        Returns deserialized objects, not raw rows: a reader (the viz bundle) needs the
+        nested judgements and entity_readings, which live only in `payload`, not in the
+        indexed columns.
+        """
+        from ..schemas.chain import ClaimAssessment
+
+        if not layer_keys:
+            return {}
+        placeholders = ",".join("?" * len(layer_keys))
+        rows = self.conn.execute(
+            f"SELECT layer, payload FROM claim_assessments "
+            f"WHERE layer IN ({placeholders}) AND as_of = ?",
+            [*layer_keys, date]).fetchall()
+        out: dict[str, list] = {}
+        for r in rows:
+            out.setdefault(r["layer"], []).append(ClaimAssessment.model_validate_json(r["payload"]))
+        return out
+
     def latest_claim_assessments(self, limit: int = 50) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM claim_assessments a WHERE as_of = ("
@@ -2285,6 +2308,32 @@ class TradingMemory:
             "SELECT payload FROM sector_reviews WHERE sector = ? ORDER BY as_of DESC LIMIT 1",
             (sector,)).fetchone()
         return SectorReview.model_validate_json(row["payload"]) if row else None
+
+    def layer_verdict_history(self, sector: str, layer_key: str, limit: int = 12) -> list:
+        """This layer's allocation calls over time, newest first.
+
+        Returns (verdict, is_legacy) pairs. `is_legacy` marks rows recorded under a key
+        that predates a split — those calls were made under a COARSER lens (one verdict
+        covering what is now two layers), so a caller comparing them against today's
+        must be able to say so rather than plotting them as one continuous series.
+        """
+        from ..config import load_sector_config
+
+        try:
+            cfg = load_sector_config(sector)
+        except Exception:  # noqa: BLE001 - history must not depend on a loadable config
+            keys, legacy = {layer_key}, set()
+        else:
+            layer = cfg.layer_by_key(layer_key)
+            legacy = set(layer.legacy_keys) if layer else set()
+            keys = {layer.key, *legacy} if layer else {layer_key}
+
+        out = []
+        for review in self.sector_review_history(sector, limit=limit):
+            for v in getattr(review, "layer_verdicts", []):
+                if v.layer_key in keys:
+                    out.append((v, v.layer_key in legacy))
+        return out
 
     def sector_review_history(self, sector: str, limit: int = 8) -> list:
         """Recent reviews in full, newest first — payloads, not just the summary row.

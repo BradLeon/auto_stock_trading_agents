@@ -23,7 +23,7 @@ from ats.data.structured import (
     SQLiteStructuredRepository,
     StructuredCatalog,
 )
-from ats.data.structured.quality import financial_quality
+from ats.data.pipelines.structured.quality import financial_quality
 
 
 NOW = datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc)

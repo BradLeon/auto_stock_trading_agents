@@ -612,9 +612,14 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
 
 
 def run_cross_section(name: str = "ai_hardware", layer: str = "all",
-                      *, structure: bool = False, write_report: bool = True) -> int:
+                      *, structure: bool = False, write_report: bool = False) -> int:
     """Cross-sectional selection + sizing within a chain layer (WHO / HOW MUCH).
-    --structure blends the KB-grounded structure analyst (tech_tenor/moat_pricing)."""
+
+    **Prints only — never writes a file.** The layer report produced by the weekly review
+    already carries this table, and a second per-layer document would drift out of sync:
+    its `layer_cap` is a half-finished number until the allocation verdict exists.
+    This command is a debugging view of the current factors.
+    """
     from ..agents.sector import cross_section
     from ..config import load_sector_config
 
@@ -629,10 +634,59 @@ def run_cross_section(name: str = "ai_hardware", layer: str = "all",
         label = next((ly.label for ly in cfg.layers if ly.key == key), key)
         print(f"\n=== {label}  [{key}]{'  +结构层' if basket.structural else ''} ===")
         print(cross_section.format_table(rows, basket.layer_cap))
-        if write_report:
-            path = cross_section.write_report(rows, basket, cfg)
-            if path:
-                print(f"📝 {path}")
+    print("\n（本命令只打印，不写文件 —— 层报告由 `ats sector review` 产出，一层一份。）")
+    return 0
+
+
+def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
+                     use_llm: bool = True, live_data: bool = True) -> int:
+    """层级评审：一层或全部层的配置结论（超配/标配/低配/清仓）+ 层内选股。"""
+    from ..agents.sector import cross_section, layer_review
+    from ..config import load_sector_config
+    from ..memory import get_store
+
+    cfg = load_sector_config(name)
+    layers = cfg.layers if layer_key in ("", "all") else cfg.layers_by_key(layer_key)
+    if not layers:
+        print(f"❌ 层 {layer_key!r} 不在 {name}（可用：{', '.join(l.key for l in cfg.layers)}）")
+        return 2
+    prior = get_store().latest_sector_review(name)
+
+    for layer in layers:
+        prior_v = next((prior.verdict_for(k) for k in [layer.key, *layer.legacy_keys]
+                        if prior and prior.verdict_for(k)), None)
+        basket = None
+        if live_data:
+            try:
+                _, basket = cross_section.run_layer(name, layer.key, persist=False,
+                                                    structure=use_llm)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  （{layer.key} 截面取数失败：{exc}）")
+        v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)
+        # 单层视图给的是**未经组上限约束**的数：组上限要等同组其余层都评完才算得出来。
+        budget = cross_section.budget_for(layer, v.allocation if ok else None)
+        group = next((g for g in cfg.layer_groups if layer.key in g.layers), None)
+        flags = []
+        if not v.has_claims:
+            flags.append("无命题(配置缺口)")
+        if not v.cross_section_applicable:
+            flags.append("截面不适用")
+        if not ok:
+            flags.append("本轮未产出，下为沿用/占位")
+        print(f"\n=== {layer.label}  [{layer.key}] ===")
+        print(f"  配置 {v.allocation} · 信心 {v.confidence:.2f} · 预算 {budget:.1%} NAV"
+              f" · 周期 {v.cycle_position or '—'}"
+              + (f"\n  ⚠️ {'；'.join(flags)}" if flags else ""))
+        if group:
+            print(f"  （本层属跨层组 {group.key}（上限 {group.weight_cap:.0%}，成员 "
+                  f"{'+'.join(group.layers)}）—— 整轮评审时预算可能被组上限按比例压低）")
+        for a in v.claim_attributions:
+            print(f"    · {a}")
+        for trg in v.reversal_triggers:
+            print(f"    反转看: {trg}")
+        for c in v.name_calls:
+            mark = " (仅自述)" if c.self_reported_only else ""
+            print(f"    {c.symbol:<10}{c.stance}{mark}  {c.rationale[:70]}")
     return 0
 
 
@@ -654,6 +708,50 @@ def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
         path = report.write(review, load_sector_config(name))
         print(f"   📝 {path}" if path else "   (report dir unset — skipped)")
     return review
+
+
+def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
+    """Offline rebuild of the viz dashboard from what a past review already produced.
+
+    Never calls an LLM, never touches yfinance/finnhub, never re-runs the corroboration
+    engine — reads the ledger and re-renders (mirrors `runtime/digest.py`'s "decoupled
+    from the workflows that produced the data" discipline). `date` picks WHICH stored
+    review to rebuild (default: the latest); the html always reflects that review's own
+    `as_of` day, since a review's `baskets`/`layer_verdicts` and that day's
+    `claim_assessments` rows must come from the same run to render one consistent story.
+    """
+    from ..agents.sector import viz
+    from ..config import load_sector_config
+    from ..memory import get_store
+
+    cfg = load_sector_config(name)
+    store = get_store()
+    review = None
+    if date:
+        for r in store.sector_review_history(name, limit=60):
+            if r.as_of.date().isoformat() == date:
+                review = r
+                break
+        if review is None:
+            print(f"（{name} 在 {date} 没有存档的 sector review —— "
+                  f"`ats sector review {name}` 跑过的日子才有）")
+            return 1
+    else:
+        review = store.latest_sector_review(name)
+        if review is None:
+            print(f"（{name} 还没有任何 sector review —— 先跑 `ats sector review {name}`）")
+            return 1
+
+    as_of_date = review.as_of.date().isoformat()
+    layer_keys = [ly.key for ly in cfg.layers]
+    assessments_by_layer = store.claim_assessments_on(layer_keys, as_of_date)
+    bundle = viz.build_bundle(cfg, review, assessments_by_layer=assessments_by_layer)
+    path = viz.write_html(bundle, cfg.output_dir)
+    if path:
+        print(f"📊 {path}")
+        return 0
+    print("（output_dir 未配置或不存在 —— 看 config/sectors/<name>.yaml 的 output_dir）")
+    return 1
 
 
 def _evidence_sources(store, *, entity: str = "") -> int:
@@ -991,6 +1089,23 @@ def sector_show(name: str = "ai_hardware") -> int:
         return 0
     print(f"=== sector review {name} @ {latest.as_of:%Y-%m-%d} ===")
     print(f"Regime: {latest.regime}\n\n{latest.summary}\n")
+    if latest.layer_verdicts:
+        from ..agents.sector import cross_section
+        from ..config import load_sector_config
+
+        cfg = load_sector_config(name)
+        order = {ly.key: i for i, ly in enumerate(cfg.layers)}
+        for v in sorted(latest.layer_verdicts, key=lambda x: order.get(x.layer_key, 99)):
+            layer = cfg.layer_by_key(v.layer_key)
+            label = layer.label if layer else v.layer_key
+            budget = cross_section.budget_for(layer, v.allocation) if layer else 0.0
+            flags = []
+            if not v.has_claims:
+                flags.append("无命题")
+            if not v.cross_section_applicable:
+                flags.append("截面不适用")
+            print(f"  {label}: {v.allocation} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
+                  + (f"  ⚠️ {'、'.join(flags)}" if flags else ""))
     for a in latest.layers:
         print(f"  {a.label}: 景气 {a.boom_score:.0f} [{a.signal}]")
     print("\nHistory:")
@@ -1669,9 +1784,13 @@ def main(argv: list[str] | None = None) -> int:
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
     se.add_argument("action",
-                    choices=["review", "show", "probe", "crosssection", "kbperturb"])
+                    choices=["review", "show", "probe", "crosssection", "kbperturb", "layer",
+                             "html"])
     se.add_argument("name", nargs="?", default="ai_hardware")
-    se.add_argument("--layer", default="all", help="crosssection: layer key (e.g. L3_dc_infra) or 'all'")
+    se.add_argument("--layer", default="all",
+                    help="crosssection/layer: layer key (e.g. L4_interconnect) or 'all'")
+    se.add_argument("--date", default="",
+                    help="html: YYYY-MM-DD 的已存档 review（默认最新一次）")
     se.add_argument("--structure", action="store_true", help="crosssection: blend KB structure analyst")
     se.add_argument("--mode", default="poison", choices=["poison", "ablate", "control"],
                     help="kbperturb: 倒序判据(poison) / 删掉判据(ablate) / "
@@ -1827,8 +1946,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.action == "crosssection":
-            return run_cross_section(args.name, args.layer, structure=args.structure,
-                                     write_report=not args.no_report)
+            return run_cross_section(args.name, args.layer, structure=args.structure)
+        if args.action == "layer":
+            return run_layer_review(args.name, args.layer, use_llm=not args.no_llm,
+                                    live_data=not args.offline)
+        if args.action == "html":
+            return run_sector_html(args.name, date=args.date)
         run_sector_review(args.name, use_llm=not args.no_llm,
                           live_data=not args.offline, write_report=not args.no_report)
         return 0

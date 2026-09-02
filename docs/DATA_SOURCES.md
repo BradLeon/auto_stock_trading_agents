@@ -61,6 +61,10 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 - **Gemini 2.5 Flash**（便宜高频/纯抽取）：`news_triage`（新闻分诊）、`context_monitor`（monitor 折新闻进 thesis）、`actuals_extract`（财报实际值抽取）
 - **Opus 4.8**（真金白银的判断，低频）：`manager`（日常调仓）、prep 定调（叙事/预期）、`pead-scorer`（打分驱动下单）、`research_extract`（二阶传导推理是核心价值）
 
+第三方研究文章进入共享资料库后，会分别提供给行业研究、第三方研究提炼和命题证据分析；三个消费者各自写入不同的 Workflow Memory。点击图片可打开交互版并切换到其他非结构化数据产品。
+
+[![非结构化研究资料的消费者与血缘](assets/data-lineage/unstructured-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+
 ---
 
 ## ⬜ 待接入 / 待测试

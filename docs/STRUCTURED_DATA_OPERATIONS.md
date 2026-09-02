@@ -604,6 +604,10 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 
 ## 10. 当前来源、请求预算与覆盖
 
+运维人员可以先通过下图确认持久化数据、实时输入、独立消费者和 Workflow Memory 的边界，再结合后续配置矩阵检查具体 source ID。点击图片可打开交互版。
+
+[![数据层运维全景](assets/data-lineage/data-layer-overview.png)](DATA_LINEAGE_EXPLORER.html)
+
 ### 10.1 机器配置一致性矩阵
 
 下表按机器配置的 source ID、能力状态、持久化边界和 dataset 逐行列出。修改 `config/data/structured.yaml` 时必须同步更新本表；这张表不代表当前数据库一定有数据。

@@ -308,6 +308,10 @@ flowchart TB
     G -. 贯穿 .-> E
 ```
 
+目标分层落实到当前系统中的具体来源、数据产品、消费者和 Workflow Memory 如下。点击图片可打开交互版，并选择任一数据产品查看完整下游关系。
+
+[![当前数据层血缘全景](assets/data-lineage/data-layer-overview.png)](DATA_LINEAGE_EXPLORER.html)
+
 这套架构从上到下回答五个问题：
 
 1. 谁要使用数据？

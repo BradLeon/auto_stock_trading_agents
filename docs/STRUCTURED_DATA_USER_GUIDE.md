@@ -43,6 +43,10 @@
 
 这张表表示“系统注册了这些能力”，不表示当前数据库已经有数据。实际覆盖必须通过 `catalog` 和 `availability` 查询。
 
+下图以公司财务与 Consensus 为例，标出可复用的结构化数据、使用它们的独立 Workflow，以及后续形成的运行记忆。点击图片可打开交互版。
+
+[![结构化持久数据的消费者与血缘](assets/data-lineage/structured-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+
 ### 2.2 Runtime：按需查询、不能从结构化库重放
 
 以下数据不在本结构化持久层：
@@ -52,6 +56,10 @@
 - IBKR 账户、持仓和成交状态。
 
 需要这些数据时继续使用 IBKR、yfinance 或 ThetaData 的现有运行时接口。Workflow 可以把 persistent 和 runtime 输入组合在一起，但 structured snapshot 只重放 persistent 部分。
+
+下图显示实时输入不会进入持久化数据产品；它在任务运行时直接提供给 `technical_review` 或作为 `pead_prep` 的即时估值输入。
+
+[![实时输入、消费者与 Workflow Memory](assets/data-lineage/runtime-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
 
 ## 3. 一次性设置命令环境
 

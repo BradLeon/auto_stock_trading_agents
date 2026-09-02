@@ -348,6 +348,10 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 中性事实、任务投影与最终决策。正文仍保存在文件资产中，SQLite 保存不可变版本、
 文本分块、处理台账和血缘。向量记忆层尚未接入，见第 12 节路线图。
 
+下图聚焦 Workflow Memory：它保存工作流产出，不是外部数据源；点击图片可打开交互版，继续查看其他 Memory 类型及其读取者。
+
+[![Workflow Memory 的内容、写入者和读取者](assets/data-lineage/workflow-memory-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+
 | 表 | 写入者 | 读取者 |
 |---|---|---|
 | pead_dossier | PEAD prep/monitor/score | Chief、行业分析师、monitor 自身 |

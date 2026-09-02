@@ -1,0 +1,7 @@
+interface:
+  display_name: "Structured Data Consumer"
+  short_description: "Discover and query governed research data"
+  default_prompt: "Use $structured-data-consumer to discover and query the available structured data for my research question."
+
+policy:
+  allow_implicit_invocation: true

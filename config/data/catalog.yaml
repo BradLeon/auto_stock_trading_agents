@@ -1,0 +1,18 @@
+# Unified data-layer catalog index.
+# Detailed registries live under this directory. Secrets never belong in this file.
+version: 1
+
+domains:
+  structured: structured.yaml
+  unstructured: unstructured.yaml
+  sources: sources.yaml
+  news_sources: news_sources.yaml
+  schedules: schedules.yaml
+  legacy_inventory: legacy_inventory.yaml
+
+providers_dir: providers
+
+# Explicit entries override legacy entries with the same stable ID. New entries
+# must declare their domain, adapter, status, and dataset/source references.
+sources: {}
+datasets: {}

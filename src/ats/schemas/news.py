@@ -7,6 +7,14 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class NewsParagraph(BaseModel):
+    """One source paragraph from a structured news dataset."""
+
+    paragraph_number: int
+    highlight: str = ""
+    paragraph: str = ""
+
+
 class NewsItem(BaseModel):
     id: str                          # dedup key (provider id or url)
     source: str                      # finnhub | rss:<name> | x:<account>
@@ -15,9 +23,27 @@ class NewsItem(BaseModel):
     url: str = ""
     published_at: datetime
     tickers: list[str] = Field(default_factory=list)
+    publisher: str = ""
+    report_date: str = ""
+    article_type: str = ""
+    paragraphs: list[NewsParagraph] = Field(default_factory=list)
+    snapshot_updated_at: str = ""
+    snapshot_lag_hours: float | None = None
 
     def one_line(self) -> str:
         return f"[{self.published_at:%Y-%m-%d} {self.source}] {self.headline}"
+
+    def structured_body(self) -> str:
+        blocks: list[str] = []
+        for row in sorted(self.paragraphs, key=lambda item: item.paragraph_number):
+            text = row.paragraph.strip()
+            if not text:
+                continue
+            if row.highlight.strip():
+                blocks.append(f"## {row.highlight.strip()}\n\n{text}")
+            else:
+                blocks.append(text)
+        return "\n\n".join(blocks)
 
 
 class ExpectationChange(BaseModel):

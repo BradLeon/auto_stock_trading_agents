@@ -77,20 +77,24 @@ def _slug_title(slug: str) -> str:
     return words
 
 
-def discover(*, pages: int = 3, **_) -> list[ArticleRef]:
+def discover_with_status(*, pages: int = 3, **_) -> tuple[list[ArticleRef], dict]:
     """Recent articles from the news index, newest first, deduped across pages.
 
     One request per page and no article bodies. Overlap between runs is intentional:
     the caller drops anything already in the ledger before it costs a fetch.
     """
     seen: dict[str, ArticleRef] = {}
+    failed_pages: list[dict[str, str | int]] = []
+    succeeded_pages = 0
     for page in range(1, max(1, pages) + 1):
         url = INDEX if page == 1 else f"{INDEX}page/{page}/"
         try:
             html = _get(url)
         except Exception as exc:  # noqa: BLE001 - one bad page must not lose the others
             log.warning("trendforce: index page %d unreachable: %s", page, exc)
+            failed_pages.append({"page": page, "error": f"{type(exc).__name__}:{exc}"})
             continue
+        succeeded_pages += 1
         found = 0
         for y, m, d, slug in _ARTICLE.findall(html):
             if slug in seen:
@@ -106,7 +110,21 @@ def discover(*, pages: int = 3, **_) -> list[ArticleRef]:
         log.info("trendforce: index page %d -> %d new links", page, found)
         if not found and page > 1:
             break                                  # ran off the end of the archive
-    return sorted(seen.values(), key=lambda a: (a.published_at or date.min), reverse=True)
+    status = "succeeded" if succeeded_pages else "unreachable"
+    return (sorted(seen.values(), key=lambda a: (a.published_at or date.min), reverse=True),
+            {"status": status, "pages_requested": max(1, pages),
+             "pages_succeeded": succeeded_pages, "failed_slices": failed_pages,
+             "discovery_method": "news_index"})
+
+
+def discover(*, pages: int = 3, **kwargs) -> list[ArticleRef]:
+    """Compatibility list API; detailed callers should use ``discover_with_status``."""
+    return discover_with_status(pages=pages, **kwargs)[0]
+
+
+def provenance(ref: ArticleRef) -> dict[str, str]:
+    """Stable publisher identity for a source-only acceptance ledger."""
+    return {"native_id": ref.slug, "canonical_url": ref.url}
 
 
 def extract_body(html: str) -> str:

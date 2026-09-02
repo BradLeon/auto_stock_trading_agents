@@ -5,11 +5,30 @@ from datetime import date
 from ats.data import consensus, earnings_calendar, options, runup, transcript
 
 
+def _valid_transcript(company: str = "Coherent COHR", period: str = "Q3 2026") -> str:
+    return (
+        f"{company} {period} earnings call. Operator: welcome. "
+        "Prepared Remarks from the Chief Executive Officer. "
+        "Chief Financial Officer discusses results. Question-and-Answer. Next question. "
+        "Operator: Thank you. This concludes the call. "
+    ) * 40
+
+
 def test_transcript_reads_manual_file(tmp_path):
     p = tmp_path / "t.txt"
-    p.write_text("hello call", encoding="utf-8")
+    body = _valid_transcript()
+    p.write_text(body, encoding="utf-8")
     text, src = transcript.fetch("COHR", "Q3 FY2026", source=str(p))
-    assert text == "hello call" and src.startswith("file:")
+    assert text == body.strip() and src.startswith("file:")
+
+
+def test_manual_transcript_cannot_bypass_entity_or_period_validation(tmp_path):
+    p = tmp_path / "wrong.txt"
+    p.write_text(_valid_transcript("Microsoft MSFT", "Q1 2026"), encoding="utf-8")
+
+    text, source = transcript.fetch("COHR", "Q3 FY2026", source=str(p))
+
+    assert text == "" and source.startswith("quarantined:file:")
 
 
 def test_transcript_none_when_missing(monkeypatch, tmp_path):
@@ -25,10 +44,10 @@ def test_transcript_none_when_missing(monkeypatch, tmp_path):
 def test_transcript_search_used_before_news(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("", ""))
     monkeypatch.setattr(transcript, "_from_search",
-                        lambda s, *a: ("SEARCH TEXT", "tavily:fool.com/x"))
+                        lambda s, *a: (_valid_transcript(), "tavily:fool.com/cohr-q3-2026"))
     monkeypatch.setattr(transcript, "_from_news", lambda s, **k: ("NEWS TEXT", "news:..."))
     text, src = transcript.fetch("COHR", "Q3 FY2026")
-    assert text == "SEARCH TEXT" and src.startswith("tavily:")
+    assert text == _valid_transcript().strip() and src.startswith("tavily:")
 
 
 def test_transcript_from_news_finds_and_scrapes(monkeypatch):
@@ -66,17 +85,51 @@ def test_transcript_from_news_skips_short_pages(monkeypatch):
 
 def test_transcript_fmp_used_when_no_override(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
-    monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("fmp body", "fmp:Q1-2026"))
+    body = _valid_transcript()
+    monkeypatch.setattr(transcript, "_fmp", lambda s, *a: (body, "fmp:Q3-2026"))
     text, src = transcript.fetch("COHR", "Q3 FY2026")
-    assert text == "fmp body" and src == "fmp:Q1-2026"
+    assert text == body.strip() and src == "fmp:Q3-2026"
 
 
 def test_transcript_explicit_source_beats_fmp(monkeypatch, tmp_path):
     p = tmp_path / "t.txt"
-    p.write_text("explicit", encoding="utf-8")
+    body = _valid_transcript()
+    p.write_text(body, encoding="utf-8")
     monkeypatch.setattr(transcript, "_fmp", lambda s, *a: ("fmp body", "fmp:Q1-2026"))
     text, src = transcript.fetch("COHR", "Q3 FY2026", source=str(p))
-    assert text == "explicit"          # explicit override wins
+    assert text == body.strip()          # explicit override wins
+
+
+def test_valid_transcript_is_shared_and_second_consumer_never_refetches(monkeypatch, tmp_path):
+    from ats.memory import get_store
+
+    body = (
+        "AMD second quarter 2026 earnings call. Operator: welcome. "
+        "Prepared Remarks from the Chief Executive Officer. "
+        "Chief Financial Officer discusses results. Question-and-Answer. Next question. "
+    ) * 40
+    monkeypatch.setattr(transcript, "manual_path", lambda *a: tmp_path / "missing.txt")
+    calls = []
+
+    def fmp(*_):
+        calls.append("fmp")
+        return body, "fmp:Q2-2026"
+
+    monkeypatch.setattr(transcript, "_fmp", fmp)
+    monkeypatch.setattr(transcript, "_from_search",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("search used")))
+
+    first, source = transcript.fetch("AMD", "Q2 2026", store=get_store())
+    assert first == body.strip() and source == "fmp:Q2-2026"
+
+    monkeypatch.setattr(transcript, "_fmp",
+                        lambda *_: (_ for _ in ()).throw(AssertionError("refetched")))
+    second, second_source = transcript.fetch("AMD", "Q2 2026", store=get_store())
+    assert second == first and second_source == source
+    assert calls == ["fmp"]
+    rows = get_store().documents(entity="AMD", doc_type="transcript")
+    assert len(rows) == 1
+    assert len(get_store().document_versions(rows[0]["document_id"])) == 1
 
 
 def test_pick_expiration_after_earnings():

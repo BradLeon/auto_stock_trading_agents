@@ -159,46 +159,9 @@ def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
     pass. Aliases are stripped to a distinctive token ("SK Hynix" -> "hynix") so that
     "SK hynix Inc." and "SK Hynix" both match.
     """
-    import re
+    from ...data.admission import mentions_entity
 
-    # Strip URLs BEFORE slicing. Scraped transcript pages open with a block of
-    # related-story links, and one of those slugs ("...spacex-amd-dip-post-earnings...")
-    # was enough to certify an Apple earnings call as AMD's. A link to a story about a
-    # company is not that company speaking. Slicing first would also be wrong: on these
-    # pages the first 8k characters are almost entirely link markup, so the company's
-    # own name would fall outside the window.
-    head = re.sub(r"https?://\S+|\[[^\]]*\]\([^)]*\)", " ", (text or "")[:40000]).lower()
-    head = re.sub(r"\s+", " ", head)[:8000]
-
-    # Word boundaries, never bare substring, and `-`/`_` count as word characters so a
-    # slug cannot supply the boundary. Substring matching had contributed the other half
-    # of the same failure: "Advanced Micro Devices" yields the token "micro", which
-    # occurs inside unrelated words. A false PASS is the dangerous direction — a false
-    # reject merely falls back to the next source.
-    def _hit(needle: str) -> bool:
-        return re.search(rf"(?<![a-z0-9_-]){re.escape(needle)}(?![a-z0-9_-])",
-                         head) is not None
-
-    if _hit(symbol.lower()) or _hit(symbol.split(".")[0].lower()):
-        return True                       # the ticker itself is decisive
-
-    name = re.sub(r"[^a-z0-9 ]+", " ", (company_name or "").lower())
-    name = re.sub(r"\s+", " ", name).strip()
-    if len(name.split()) > 1 and name in re.sub(r"\s+", " ", head):
-        return True                       # full legal name as a phrase — filings use it
-
-    # A single name token only counts when it is distinctive on its own. "hynix",
-    # "nvidia", "micron", "samsung" identify a company; "advanced", "micro", "devices"
-    # do not, and neither do the corporate suffixes.
-    generic = {"inc", "corp", "ltd", "plc", "the", "and", "group", "co", "holding",
-               "holdings", "technologies", "technology", "corporation", "company",
-               "international", "electronics", "electronic", "semiconductor",
-               "semiconductors", "advanced", "micro", "devices", "device", "systems",
-               "system", "solutions", "digital", "global", "industries", "materials",
-               "products", "research", "manufacturing", "instruments", "labs",
-               "laboratories", "microelectronics", "limited", "sa", "nv", "ag"}
-    tokens = [p.strip(".").lower() for p in name.split()]
-    return any(_hit(t) for t in tokens if len(t) >= 3 and t not in generic)
+    return mentions_entity(text, symbol, company_name)
 
 
 # Source hierarchy. A cached document may only pre-empt a fetch when it came from a
@@ -268,7 +231,7 @@ def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
     Keeping them as two documents also keeps their observation ids distinct and lets
     one fail without taking the other down.
     """
-    from ...data import sec, source_cache
+    from ...data import document_assets, sec, source_cache
 
     cached = source_cache.load(symbol, label, "release")
     if cached and _source_rank(cached.source) >= _RANK_KEYED:
@@ -299,13 +262,14 @@ def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
                 pass
         return "", "", "财报稿未提及本公司 → 记为缺口"
 
-    stored = source_cache.store(symbol, label, "release", text, source="sec",
-                                source_url=url)
-    if stored and store is not None:
-        try:
-            store.save_document(stored, note=note)
-        except Exception as exc:  # noqa: BLE001
-            log.info("evidence %s: could not record release (%s)", symbol, exc)
+    try:
+        document_assets.ingest(
+            entity=symbol, key=label, doc_type="release", text=text, source="sec",
+            source_url=url, external_id=url, title=f"{symbol} {label} earnings release",
+            related_entities=(symbol,), note=note, store=store,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.info("evidence %s: could not record release (%s)", symbol, exc)
     return text, "sec", note
 
 
@@ -336,7 +300,7 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         indistinguishable from a real one once it is in the table.
     """
     from ...config import canonical_entity, entity_meta, load_pead_config
-    from ...data import documents, fiscal, period, source_cache, transcript
+    from ...data import document_assets, documents, fiscal, period, source_cache, transcript
 
     symbol = canonical_entity(symbol)
     config_label, company = "", entity_meta(symbol).get("name", "")
@@ -374,41 +338,11 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
     # Both doc types, in preference order: a name that never yields a transcript falls
     # back to `release` every run, and checking only "transcript" would mean it never
     # hits cache at all.
-    stale_hit = None
-    for kind in ("transcript", "release"):
-        hit = source_cache.load(symbol, label, kind)
-        if not hit:
-            continue
-        if _source_rank(hit.source) >= _RANK_KEYED:
-            return hit.text, hit.source or "cache", f"缓存命中：{hit.path.name}"
-        stale_hit = stale_hit or hit
-
-    # Tier 1: the keyed dataset. Ahead of every search path because it cannot return
-    # another company's document at all — that is a structural property, not an
-    # accuracy claim, and it retires the failure mode five witnesses hit in one day.
-    # Its fiscal columns also make the period check an equality test; the guards below
-    # still run, but on this path they have nothing left to catch.
-    keyed = _fetch_keyed(symbol, label, print_)
-    if keyed is not None:
-        doc, stale = keyed
-        cached = source_cache.store(symbol, doc.label, "transcript", doc.text,
-                                    source="defeatbeta",
-                                    source_url=f"defeatbeta:{doc.symbol}:{doc.report_date}")
-        note = f"数据集直取 {doc.label} · 披露日 {doc.report_date}"
-        if stale:
-            note = f"{stale} · 披露日 {doc.report_date}"
-        if cached and store is not None:
-            try:
-                store.save_document(cached, note=note)
-            except Exception as exc:  # noqa: BLE001
-                log.info("evidence %s: could not record document (%s)", symbol, exc)
-        # The transcript's OWN quarter is passed on, not the one we asked for: the
-        # observation's period must describe the fact, never the query.
-        return doc.text, "defeatbeta", note
+    stale_hit = source_cache.load(symbol, label, "release")
 
     text, src = "", ""
     try:
-        text, src = transcript.fetch(symbol, label, company_name=company)
+        text, src = transcript.fetch(symbol, label, company_name=company, store=store)
     except Exception as exc:  # noqa: BLE001
         log.info("evidence %s: transcript unavailable (%s)", symbol, exc)
 
@@ -429,12 +363,7 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         # fiscal label will not resolve the period guard never even runs.
         if not _mentions_company(body, symbol, company):
             return f"取回的文档未提及本公司（来源 {source}）", ""
-        if not label:
-            return "", ""            # nothing to check against; unknown is not wrong
         ok, why = fiscal.verify_transcript(label, body, source)
-        # `verify_transcript` rejects only on a POSITIVE mismatch — an unparseable
-        # period passes. Samsung and Nanya both publish current material with no
-        # machine-readable label, and demanding proof of the period would drop them.
         return ("" if ok else f"报告期核对未通过（{why}）"), why
 
     note, rejected, attempted_url = "", "", src
@@ -444,7 +373,7 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
             log.warning("evidence %s: transcript rejected — %s", symbol, rejected)
             text, src, note = "", "", rejected + " → 改用公开文档"
         else:
-            note = why
+            note = ("结构化纪要通过统一准入" if src.startswith("defeatbeta") else why)
     if rejected and store is not None:
         # Record the rejection with its URL. It does not block a later retry (the right
         # transcript may simply not be published yet) — it makes "we tried and got the
@@ -465,7 +394,9 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         # were thrown away with it. Hand-dropped files are the ONLY source for names the
         # dataset does not carry — they must not be hostage to a search result.
         kept, dropped = [], []
-        for lab, piece in documents.gather(symbol):
+        report_date = str(getattr(print_, "date", "") or "")
+        for lab, piece in documents.gather(
+                symbol, period=label, report_date=report_date, store=store):
             if not (piece or "").strip():
                 continue
             why, _d = _screen(piece, f"documents:{lab}", "release")
@@ -499,13 +430,15 @@ def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, s
         return (stale_hit.text, stale_hit.source or "cache",
                 f"{note + ' / ' if note else ''}回落到旧缓存（来源 {stale_hit.source}）")
 
-    if text.strip():
-        cached = source_cache.store(symbol, label, doc_type, text, source=src, source_url=src)
-        if cached and store is not None:
-            try:
-                store.save_document(cached, note=note)
-            except Exception as exc:  # noqa: BLE001
-                log.info("evidence %s: could not record document (%s)", symbol, exc)
+    if text.strip() and doc_type != "transcript":
+        try:
+            document_assets.ingest(
+                entity=symbol, key=label, doc_type=doc_type, text=text, source=src,
+                source_url=src, external_id=src, title=f"{symbol} {label} {doc_type}",
+                related_entities=(symbol,), note=note, store=store,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.info("evidence %s: could not record document (%s)", symbol, exc)
     return text, src, note
 
 
@@ -677,6 +610,14 @@ def observe_document(symbol: str, document_id: str, text: str, *, source_url: st
 
     store = store or get_store()
     now = now or datetime.now(timezone.utc)
+    # Compatibility callers historically invented ids such as ``MU:20260805``.
+    # Once the exact body is in the shared catalog, facts must point to that immutable
+    # asset instead so lineage opens the source version rather than a synthetic key.
+    from ...data import document_assets
+
+    asset = document_assets.identify(text, entity=symbol, store=store)
+    if asset:
+        document_id = asset["document_id"]
     obs, failure = extract(symbol, document_id, text, source_url=source_url,
                            period=period, now=now)
     if failure:

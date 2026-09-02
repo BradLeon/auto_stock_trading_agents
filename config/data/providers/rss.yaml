@@ -1,0 +1,8 @@
+version: 1
+source_ids: [trendforce_news, semianalysis, ibkr_news]
+adapter: rss
+secrets_env: [GMAIL_ADDRESS, GMAIL_APP_PASSWORD]
+request_budget:
+  concurrency: 1
+  max_items_per_run: 20
+  timeout_seconds: 60

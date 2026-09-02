@@ -109,3 +109,56 @@ def test_score_phase_completes_without_interrupt():
     d = get_store().get_dossier("COHR", result["fiscal_label"])
     assert d is not None and d.phase == "score"
     assert result.get("decision_band", "") in d.decision_summary   # 建议入档
+
+
+def test_platform_score_reads_event_bound_documents_without_legacy_fetch(monkeypatch):
+    """Platform PEAD scores immutable documents; it must not silently re-scrape them."""
+    from ats.data.products.unstructured import EarningsDocument, EarningsDocumentPackage
+    from ats.graph import pead
+    from ats.schemas.fundamentals import FundamentalData
+
+    transcript = EarningsDocument(
+        role="earnings_transcript", document_id="NVDA:Q2 FY2027:earnings_transcript",
+        version_id="transcript-v1", source="defeatbeta", source_url="", published_at="",
+        title="NVDA Q2 FY2027 transcript", text="FULL TRANSCRIPT",
+    )
+    release = EarningsDocument(
+        role="earnings_release", document_id="NVDA:Q2 FY2027:company_release",
+        version_id="release-v1", source="sec", source_url="https://sec/release",
+        published_at="2026-08-26", title="NVDA release", text="FULL RELEASE",
+    )
+    package = EarningsDocumentPackage(
+        entity="NVDA", period="Q2 FY2027", documents=(release, transcript),
+        repository="PlatformUnstructuredRepository")
+    state = PeadState(symbol="NVDA", phase="score", as_of=NOW, live_data=True,
+                      use_broker=False, config=__import__("ats.config", fromlist=["load_pead_config"]).load_pead_config("NVDA"))
+    state.earnings_date = "2026-11-17"  # stale next-event date carried from prep
+    monkeypatch.setenv("ATS_STRUCTURED_PEAD_GRAPH_MODE", "platform")
+    monkeypatch.setattr("ats.data.products.unstructured.platform_earnings_document_package",
+                        lambda **_kwargs: package)
+    monkeypatch.setattr("ats.data.fundamentals.fetch", lambda *_args, **_kwargs: FundamentalData(symbol="NVDA", as_of=NOW))
+    monkeypatch.setattr("ats.data.transcript.fetch", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy transcript fetch")))
+    monkeypatch.setattr("ats.data.transcript.extract_body", lambda text, _src: (text, ""))
+    monkeypatch.setattr("ats.data.transcript.looks_like_transcript", lambda _text: (True, "ok"))
+    monkeypatch.setattr("ats.data.fiscal.verify_transcript", lambda *_args: (True, "period ok"))
+
+    out = pead.score_fetch(state)
+
+    assert out["transcript_text"] == "FULL TRANSCRIPT"
+    assert out["documents_text"] == "### NVDA release\nFULL RELEASE"
+    assert out["transcript_resolved_source"].startswith("platform:defeatbeta:transcript-v1")
+    assert [row["document_id"] for row in out["document_lineage"]] == [
+        "NVDA:Q2 FY2027:company_release", "NVDA:Q2 FY2027:earnings_transcript"]
+    assert out["earnings_date"] == "2026-08-26"
+
+
+def test_cli_score_report_uses_recommendation_hint_fields(capsys):
+    from ats.runtime.cli import _pead_report
+    from ats.schemas.pead import PeadRecommendation
+
+    _pead_report("NVDA", "score", {
+        "decisions": [PeadRecommendation(symbol="NVDA", action="BUY", notional_hint=12_000)],
+        "decision_band": "test",
+    })
+
+    assert "建议 BUY NVDA $12,000" in capsys.readouterr().out

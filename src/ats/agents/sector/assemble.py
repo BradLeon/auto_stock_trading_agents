@@ -26,6 +26,7 @@ class SectorContext:
     insight_lines: list[str] = field(default_factory=list)
     event_lines: list[str] = field(default_factory=list)
     macro_block: str = ""
+    regional_block: str = ""
     kb_criteria: str = ""
     evidence_block: str = ""
 
@@ -37,6 +38,8 @@ class SectorContext:
         if self.macro_block:
             parts.append("## 宏观背景（自上而下：利率/风险偏好/板块倾斜 — 据此调整层与个股观点）\n"
                          + self.macro_block)
+        if self.regional_block:
+            parts.append("## 区域半导体需求（持久化月度序列）\n" + self.regional_block)
         if self.kb_criteria:
             # BEFORE the evidence on purpose, mirroring structure.assess and
             # graph/pead.py: the criteria say how to weigh a reading, the ledger says
@@ -69,12 +72,14 @@ class SectorContext:
             "insights": len(self.insight_lines),
             "events": len(self.event_lines),
             "static_chars": len(self.static_notes),
+            "regional_chars": len(self.regional_block),
             "kb_chars": len(self.kb_criteria),
             "total_chars": len(self.as_context()),
         }
 
 
-def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
+def build(cfg: SectorConfig, *, live_data: bool = True,
+          allow_llm_evidence: bool = True) -> SectorContext:
     from ...config import is_pead_covered
     from ...data import industry
 
@@ -104,7 +109,15 @@ def build(cfg: SectorConfig, *, live_data: bool = True) -> SectorContext:
 
     _pead_conclusions(sc, pead_syms)
     _insights_and_events(sc, symbols, pead_syms)
-    _chain_evidence(sc, cfg)
+    _chain_evidence(sc, cfg, allow_llm=allow_llm_evidence)
+
+    if live_data:
+        from ...data import regional
+        try:
+            sc.regional_block = regional.fetch(consumer="sector_agent").render()
+        except Exception as exc:  # legacy regional sources must not stop the review
+            log.warning("sector regional snapshot unavailable: %s", exc)
+            sc.regional_block = "(区域月度数据不可用)"
 
     # Top-down cascade: prepend the latest macro regime/tilts if enabled.
     from ...config import load_pead_global
@@ -174,12 +187,12 @@ def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> d
         m2 = sector_snapshot.momentum(closes, days[1]) if len(days) > 1 else None
         dh = sector_snapshot.dist_to_high(closes)
 
-        f = fundamentals.fetch_light(sym)
+        f = fundamentals.fetch_constituent_financials(sym)
         time.sleep(sleep_s)
 
         cons_txt = ""
         if consensus_for == "all" or (consensus_for == "pead_targets" and sym in pead_syms):
-            c = consensus_src.fetch(sym)
+            c = consensus_src.fetch(sym, consumer="sector_consensus")
             if c.get("target_mean") is not None:
                 cons_txt = (f" | PT {_fmt(c.get('target_mean'))} vs px {_fmt(c.get('target_current'))}, "
                             f"SB{c.get('rating_strong_buy')}/B{c.get('rating_buy')}/"
@@ -196,7 +209,10 @@ def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> d
                    + (f" (vs {cfg.sector_etf} {_signed(_rel(m1, etf_mom))})" if m1 is not None and etf_mom is not None else "")
                    + (f" {days[1]}d {_signed(m2)}" if m2 is not None else "")
                    + (f" 距高{_signed(dh)}" if dh is not None else ""))
-        out[sym] = " ".join(parts) + " | " + mom_txt + cons_txt
+        accounting_note = "" if f.get("accounting_status") == "covered" else (
+            f" | 财报{f.get('accounting_status', 'unavailable')}"
+        )
+        out[sym] = " ".join(parts) + " | " + mom_txt + cons_txt + accounting_note
     return out
 
 
@@ -277,7 +293,7 @@ def _insights_and_events(sc: SectorContext, symbols: list[str], pead_syms: list[
                     f"- [{e['published_at'][:10]} {score:.1f}] ({sym}) {e['headline'][:110]}")
 
 
-def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
+def _chain_evidence(sc: SectorContext, cfg: SectorConfig, *, allow_llm: bool = True) -> None:
     """Claim verdicts from the evidence ledger, split to match the layer table's columns.
 
     BOTH kinds come here, and they are kept apart because the layer table already
@@ -322,7 +338,8 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
                 if e not in rows_by_entity:
                     rows_by_entity[e] = store.observations(entity=e, limit=200)
         by_id = {c.id: c for c in layer.claims}
-        for a in assess_layer(layer, rows_by_entity, cfg=ccfg):
+        for a in assess_layer(layer, rows_by_entity, cfg=ccfg,
+                              judge=None if allow_llm else _no_llm_judge):
             claim = by_id.get(a.claim_id)
             if claim is None:
                 continue
@@ -348,6 +365,32 @@ def _chain_evidence(sc: SectorContext, cfg: SectorConfig) -> None:
             + "\n".join(pricing_lines))
     if blocks:
         sc.evidence_block = "## 产业链证据（来自各家财报原文的命题印证）\n" + "\n\n".join(blocks)
+
+
+def _no_llm_judge(_claim, clusters):
+    """Keep `--no-llm` deterministic without silently treating an outage as evidence.
+
+    A no-LLM review may still surface governed observations and coverage, but it must
+    not make an unrecorded semantic decision about whether a cluster supports a claim.
+    The explicit neutral reason reaches the rendered evidence block.
+    """
+    from ...schemas.chain import ClusterJudgement, EntityReading
+
+    # ``relative`` claims are adjudicated as a cross-section and therefore pass a
+    # mapping of entity -> clusters, not a flat cluster list.  Treating that mapping
+    # as clusters made `sector review --no-llm` crash after all data inputs had been
+    # assembled.  Explicitly return unknown readings: no-LLM means no comparative
+    # conclusion, not a fabricated neutral ranking.
+    if isinstance(clusters, dict):
+        return [EntityReading(entity=str(entity).upper(), standing="unknown",
+                              reason="未运行 LLM 判读（--no-llm）")
+                for entity in clusters]
+
+    return [ClusterJudgement(
+        cluster_key=cluster.key, polarity="neutral", reason="未运行 LLM 判读（--no-llm）",
+        speaker=cluster.speaker, concept=cluster.concept, stance=cluster.stance,
+        primary=cluster.primary, observation_ids=cluster.observation_ids)
+        for cluster in clusters]
 
 
 def _demand_lines(layer, claim, a) -> list[str]:

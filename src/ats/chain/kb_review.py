@@ -343,7 +343,7 @@ def unfamiliar_entities(cfg, store) -> list[Finding]:
     from .sources import load_sources
 
     known = {_canon(s) for s in load_entities()}
-    # Third-party series declare their own entity id in config/sources.yaml and appear
+    # Third-party series declare their own entity id in config/data/sources.yaml and appear
     # in no ticker list by design — TW_IC_EXPORT is a customs bureau, not a company.
     known |= {_canon(s.entity) for s in load_sources()}
     for layer in cfg.layers:

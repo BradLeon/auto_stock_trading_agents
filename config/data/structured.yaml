@@ -1,0 +1,663 @@
+# Structured research data catalog and checked-in release baseline.
+#
+# DEPRECATED ENTRYPOINT (compatibility period): new source/dataset configuration
+# starts at config/data/catalog.yaml and its domain/provider files. This file is
+# still loaded as the structured legacy overlay; do not create a second source of
+# truth by editing it without updating the unified catalog plan.
+#
+# PURPOSE
+# -------
+# This is the source of truth for registered structured sources, datasets, metrics,
+# Provider mappings, quality gates, and checked-in rollout modes. It does NOT contain
+# secrets, does NOT prove that a database currently contains data, and does NOT create
+# scheduled jobs. Inspect actual coverage with `ats data catalog/availability`.
+#
+# SAFE CHANGE RULES
+# -----------------
+# 1. Add a persistent source under `sources`, reference it from exactly one dataset,
+#    register its adapter key in src/ats/structured/runtime_registry.py, and start its
+#    checked-in source mode at `legacy`.
+# 2. A source that has written ingestion runs, artifacts, observations, or snapshots
+#    must not be hard-deleted or renamed. Stop it by rolling its source mode back to
+#    `legacy` and remove it from future primary/fallback selection while retaining the
+#    source identity for historical lineage.
+# 3. Secrets belong in `.env` or the deployment environment, never in this file.
+# 4. `cadence` is descriptive metadata used by quality/operations. It is NOT cron.
+#    Automated collection currently requires an external scheduler to invoke
+#    `ats data ingest`; the existing `ats schedule` command does not schedule these
+#    structured sources.
+# 5. Source and dataset references are bidirectional: each `sources.<id>.datasets`
+#    entry must include a dataset whose `primary_sources` or `fallback_sources` also
+#    contains that source id.
+#
+# TOP-LEVEL SCHEMA
+# ----------------
+# version                    Config schema version; currently only 1.
+# feature_flags              Checked-in source ingestion and consumer read modes.
+# allowed_ingestion_statuses Legal terminal states emitted by ingestion runs.
+# entities                   Stable non-security entities maintained in this catalog.
+# sources                    Provider/runtime source registry and request budgets.
+# datasets                   Business datasets, source priority, quality, acceptance.
+# metric_definitions         Provider-neutral metric semantics.
+# provider_mappings          Provider-native field -> metric id mappings.
+# unmapped_policy            Policy for fields whose semantics are unresolved.
+# migration_consumers        Persistent/runtime boundaries for existing consumers.
+#
+# LEGAL STATUS VALUES
+# -------------------
+# catalog_status:
+#   current          implemented and mature capability
+#   current_partial  implemented, but coverage/rollout/observation is incomplete
+#   planned          registered intent; unified ingestion must reject it
+#   deferred         known source/dataset, deliberately postponed
+#   runtime_excluded runtime-only input; must never enter structured persistence
+# persistence: persistent | runtime
+# rollout mode: legacy | shadow | platform | fallback
+#
+# `catalog_status` is capability maturity. Rollout mode is runtime selection. Actual
+# queryability comes from accepted observations. Do not use these concepts as aliases.
+#
+# PERSISTENT SOURCE SHAPE
+# -----------------------
+# source_id:
+#   catalog_status: current_partial       # one of the values above
+#   persistence: persistent               # persistent sources only
+#   provider: Human-readable Provider
+#   upstream: Optional original upstream  # when host != business source
+#   adapter: stable_runtime_adapter_key    # controlled registry key, not import path
+#   datasets: [one_dataset_id]             # current unified ingest requires one
+#   cadence: monthly                       # descriptive, not a schedule expression
+#   retention: query_slice                 # artifact/source retention policy label
+#   internal_request_budget:               # internal guardrail, not official QPS
+#     concurrency: 1
+#     requests_per_run: 1
+#     timeout_seconds: 30
+#
+# DATASET SHAPE
+# -------------
+# dataset_id:
+#   catalog_status: current_partial
+#   entities: [OPTIONAL_FIXED_ENTITY]
+#   entity_registry: optional/path.yaml
+#   coverage_from: [optional/business/config.yaml]
+#   expected_cadence: monthly
+#   primary_sources: [authoritative_source]
+#   fallback_sources: [optional_mirror]
+#   core_metrics: [metric.id]
+#   quality: {... machine release thresholds ...}
+#   acceptance_samples: [representative_entity]
+#   rollback_on: [reason_code]
+#
+# Operational details and field-by-field guidance:
+# docs/STRUCTURED_DATA_OPERATIONS.md
+
+version: 1
+
+# Checked-in baseline only. Runtime resolution order is:
+# environment override -> release overlay -> this section -> default_mode.
+# `sources` controls governed data availability and data-layer release. `consumers`
+# controls read paths only.  Source release is based on raw/derived data validation;
+# it does not wait for Agent or Workflow shadow observation.
+feature_flags:
+  default_mode: legacy
+  sources:
+    tw_mof_exports: platform
+    kr_ecos_exports: platform
+    # This source may collect in the governed layer after isolated acceptance;
+    # its own data-only release check still decides whether it can be published.
+    trendforce_dram: shadow
+    sec_companyfacts: shadow
+    company_disclosures: shadow
+    defeatbeta_stock_statement: shadow
+    yfinance_financials: shadow
+    yfinance_consensus: shadow
+    # Private-company events are intentionally deferred and therefore do not
+    # enter the persistent layer until a later, separately approved scope.
+    accepted_document_evidence: legacy
+  consumers:
+    # A source-level platform mode never bypasses a consumer release gate.  Each
+    # direct consumer remains shadow/legacy until its durable release record has a
+    # passing assessment; only the explicitly listed platform consumers below have
+    # completed that review.
+    # 台湾/韩国官方月度出口序列已完成 2026-06/07 的真实 legacy/platform
+    # 点位、衍生同比/环比及 Chain observation 等价验收。
+    chain_regional: platform
+    # Current provider snapshot is accepted with source/known-at lineage; revisions
+    # can differ from a prior analyst universe without being a data regression.
+    pead_consensus: platform
+    # 10.2 validation starts in shadow.  Do not regard the historical platform
+    # default as a consumer release until inputs and report output are reconciled.
+    sector_consensus: platform
+    # The complete context acceptance (including indirect Chain evidence) is recorded
+    # in the per-consumer release ledger; unknown evidence remains explicit, not a
+    # fabricated data point.
+    sector_agent: platform
+    # Legacy regional fetch failures were independently checked against the official,
+    # governed monthly observations before this consumer release.
+    macro_agent: platform
+    # MSFT's old DTO became unavailable.  The governed package was independently
+    # verified for lineage, FY2026 Q4 period/unit semantics, freshness and the
+    # complete PEAD statement contract before this consumer was published.
+    pead_fundamentals: platform
+    # NVDA Q2 FY2027 isolated legacy/platform comparison retained equal
+    # deterministic score/decision behaviour while platform corrected legacy's
+    # stale calendar event to the accepted immutable document package.
+    pead_graph: platform
+    # NVDA 七日窗口已验证：受管 IBKR News（Yahoo 仅在 IBKR 不可达时兜底）
+    # 的版本血缘、时效与 monitor 输出均已独立验收。
+    pead_monitor: platform
+    # Per-company accounting view used by the sector workflow.  It shares PEAD's
+    # complete company_financials report package; valuation and beta stay runtime.
+    sector_constituent_financials: platform
+    # PEAD research reads governed third-party research assets from platform.
+    # Its processing lease and insight/event outputs remain Workflow memory.
+    # SemiAnalysis previews are explicitly partial; they are not full articles.
+    pead_research: platform
+    # Actual platform Chain report acceptance passed with explicit no-LLM unknowns.
+    # Each cited evidence item has either immutable document/version lineage or a
+    # labelled historical evidence snapshot; structured observations are excluded.
+    evidence_chain: platform
+    # Scheduler has migrated to unified runtime/products/pipeline entrypoints.
+    # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
+    runtime_scheduler: shadow
+    chief_graph: shadow
+  consumer_sources: {}
+
+# Terminal statuses have distinct operational meaning. In particular,
+# not_yet_published, no_coverage, and unreachable must never be merged into "missing".
+allowed_ingestion_statuses:
+  - succeeded
+  - no_change
+  - zero_match
+  - not_yet_published
+  - no_coverage
+  - stale
+  - unreachable
+  - unauthorized
+  - parse_failed
+  - validation_failed
+  - partial
+
+# Stable economic entities that do not naturally live in the listed-security registry.
+# Do not create a fake ticker for a private company.
+entities:
+  OPENAI:
+    kind: private_company
+    canonical_name: OpenAI
+    aliases: [OpenAI, OpenAI Group, OpenAI Global]
+    securities: []
+  ANTHROPIC:
+    kind: private_company
+    canonical_name: Anthropic
+    aliases: [Anthropic, Anthropic PBC]
+    securities: []
+
+# Provider sources. `adapter` must match a controlled runtime adapter key.
+# `internal_request_budget` is our conservative limit, not a Provider SLA/QPS claim.
+sources:
+  tw_mof_exports:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Taiwan Ministry of Finance
+    adapter: tw_mof
+    datasets: [regional_tw_exports]
+    cadence: monthly
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_run: 2, timeout_seconds: 60}
+  kr_ecos_exports:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Bank of Korea ECOS
+    adapter: kr_ecos
+    datasets: [regional_kr_exports]
+    cadence: monthly
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, page_size: 10, timeout_seconds: 30}
+  trendforce_dram:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: TrendForce public price table
+    adapter: trendforce
+    datasets: [industry_dram_contract_price]
+    cadence: monthly
+    retention: constrained_snapshot
+    internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30}
+  sec_companyfacts:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: SEC EDGAR
+    adapter: sec_companyfacts
+    datasets: [company_financials]
+    cadence: event
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_second: 5, timeout_seconds: 30}
+  company_disclosures:
+    # Current partial: official TSM quarterly release (SEC 6-K/EX-99.1) only.
+    # No annual 20-F obligation is implied by this source's acceptance scope.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: issuer or equivalent official disclosure
+    adapter: company_disclosures
+    datasets: [company_financials]
+    cadence: event
+    retention: source_policy
+    internal_request_budget: {concurrency: 1, requests_per_second: 1, timeout_seconds: 30}
+  defeatbeta_stock_statement:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: defeatbeta mirror hosted by HuggingFace
+    upstream: Yahoo Finance structured statement data
+    adapter: defeatbeta_stock_statement
+    datasets: [company_financials]
+    cadence: snapshot
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, timeout_seconds: 60}
+  yfinance_financials:
+    # Promoted from the legacy fundamentals reader strictly for low-frequency
+    # financial statement gaps.  Prices, OHLCV, options and quote metadata remain
+    # runtime-only under yfinance_market / yfinance_options below.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Yahoo Finance via yfinance
+    adapter: yfinance_financials
+    datasets: [company_financials]
+    cadence: event
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+  yfinance_consensus:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Yahoo Finance via yfinance
+    adapter: consensus
+    datasets: [market_consensus]
+    cadence: event_snapshot
+    retention: normalized_snapshot
+    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+  accepted_document_evidence:
+    # The evidence workbench remains available for a future approved source, but
+    # no private-company event acquisition or publication is scheduled now.
+    catalog_status: deferred
+    persistence: persistent
+    provider: accepted document asset layer
+    adapter: document_numeric_evidence
+    datasets: [private_company_events]
+    cadence: event
+    retention: evidence_link_only
+    internal_request_budget: {concurrency: 1}
+
+  # Deliberate non-datasets. These entries must never be scheduled, backfilled or
+  # written to the structured repository/artifact store. They have no datasets and
+  # use persistence=runtime plus catalog_status=runtime_excluded.
+  ibkr_market:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: Interactive Brokers
+    adapter: ats.broker
+    datasets: []
+    excludes: [ticker_price, ohlcv, order_book, option_chain, greeks, implied_volatility]
+  yfinance_market:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: Yahoo Finance via yfinance
+    adapter: market_data
+    datasets: []
+    excludes: [ticker_price, ohlcv]
+  yfinance_options:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: Yahoo Finance via yfinance
+    adapter: options
+    datasets: []
+    excludes: [option_chain, greeks, implied_volatility]
+  thetadata_options:
+    catalog_status: runtime_excluded
+    persistence: runtime
+    provider: ThetaData
+    adapter: options
+    datasets: []
+    excludes: [option_chain, greeks, implied_volatility]
+
+# Business datasets. Source references must be reciprocal with `sources.*.datasets`.
+# `quality` values are release gates; do not loosen them merely to make a run pass.
+datasets:
+  regional_tw_exports:
+    catalog_status: current_partial
+    entities: [TW_IC_EXPORT]
+    expected_cadence: monthly
+    primary_sources: [tw_mof_exports]
+    core_metrics: [regional.tw_ic_exports.value]
+    quality:
+      coverage_ratio_min: 1.0
+      require_period_continuity: true
+      freshness_hours_max: 1488   # 62 days; publication lag is source-specific
+      reconciliation_abs_tolerance: 0.000001
+      shadow_abs_tolerance: 0.000001
+    acceptance_samples: [TW_IC_EXPORT]
+    rollback_on: [period_gap, unit_change, shadow_mismatch, stale]
+  regional_kr_exports:
+    catalog_status: current_partial
+    entities: [KR_SEMI_EXPORT]
+    expected_cadence: monthly
+    primary_sources: [kr_ecos_exports]
+    core_metrics: [regional.kr_semiconductor_exports.index]
+    quality:
+      coverage_ratio_min: 1.0
+      require_period_continuity: true
+      freshness_hours_max: 1488
+      reconciliation_abs_tolerance: 0.000001
+      shadow_abs_tolerance: 0.000001
+    acceptance_samples: [KR_SEMI_EXPORT]
+    rollback_on: [period_gap, unit_change, shadow_mismatch, stale]
+  industry_dram_contract_price:
+    catalog_status: current_partial
+    entities: [DRAM_CONTRACT_PRICE]
+    expected_cadence: monthly
+    primary_sources: [trendforce_dram]
+    core_metrics: [industry.dram_contract_price]
+    quality:
+      coverage_ratio_min: 0.66
+      require_period_continuity: false
+      freshness_hours_max: 1488
+      # TrendForce labels a half-month market session (for example ``2H Jun``).
+      # A page can be fresh while the disclosed session is old; check both.
+      source_period_lag_days_max: 90
+    rollback_on: [parse_failed, stale]
+  company_financials:
+    catalog_status: current_partial
+    entity_registry: config/entities.yaml
+    coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
+    expected_cadence: quarterly_or_issuer_period
+    # One report package is selected per entity/reporting period.  The ingestion
+    # chain stops at the first complete package, in this availability order;
+    # later Provider sources are not used to patch individual fields into that
+    # package.  The only controlled exception is an `official_disclosure_bundle`
+    # made from SEC Facts + same-entity/same-period issuer IR when both official
+    # sources are individually incomplete; each selected field retains its source
+    # artifact and any XBRL derivation must be reproducible.  This package-level
+    # data gate does not read consumer shadow records or Workflow memory.
+    primary_sources: [defeatbeta_stock_statement, yfinance_financials, sec_companyfacts, company_disclosures]
+    fallback_sources: []
+    core_metrics:
+      - financial.revenue.gaap
+      - financial.gross_profit.gaap
+      - financial.operating_income.gaap
+      - financial.net_income.gaap
+      - financial.eps.diluted.gaap
+      - financial.cash_from_operations.gaap
+      - financial.capex.gaap
+      - financial.cash_and_equivalents.gaap
+      - financial.inventory.gaap
+      - financial.total_debt.gaap
+      # FCF and margins are governed query-time derivations of the raw core fields
+      # above; they must not be counted as missing source observations.
+    quality:
+      core_metric_coverage_ratio_min: 0.80
+      require_period_continuity: true
+      freshness_hours_max: 240
+      reconciliation_relative_tolerance: 0.001
+      shadow_relative_tolerance: 0.001
+      pending_mapping_loss_max: 0
+    # Explicit operational coverage only.  `MIRROR_MISSING` remains a unit-test
+    # negative case, not a company the platform promises to cover.
+    acceptance_samples: [AMZN, MSFT, KLAC, TSM]
+    rollback_on: [wrong_entity, wrong_period, unit_change, future_leakage, shadow_mismatch]
+  market_consensus:
+    catalog_status: current_partial
+    coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
+    expected_cadence: event_snapshot
+    primary_sources: [yfinance_consensus]
+    core_metrics:
+      - consensus.eps.reported_actual
+      - consensus.eps.mean
+      - consensus.eps.low
+      - consensus.eps.high
+      - consensus.revenue.mean
+      - consensus.revenue.low
+      - consensus.revenue.high
+      - consensus.price_target.mean
+      - consensus.price_target.median
+      - consensus.price_target.low
+      - consensus.price_target.high
+      - consensus.rating.strong_buy_count
+      - consensus.rating.buy_count
+      - consensus.rating.hold_count
+      - consensus.rating.sell_count
+      - consensus.rating.strong_sell_count
+      - consensus.rating.change
+    quality:
+      required_any: [consensus.eps.mean, consensus.revenue.mean, consensus.price_target.mean]
+      freshness_hours_max: 168
+      require_concrete_target_period: true
+      shadow_relative_tolerance: 0.000001
+    acceptance_samples: [AMZN, MSFT, KLAC, TSM]
+    rollback_on: [target_period_conflict, future_leakage, stale, shadow_mismatch]
+  private_company_events:
+    # Intentionally empty in this release.  Keep its schema and review workflow
+    # registered so a later approved source can be added without a data-model fork.
+    catalog_status: deferred
+    entities: [OPENAI, ANTHROPIC]
+    expected_cadence: event
+    primary_sources: [accepted_document_evidence]
+    core_metrics: [event.funding.amount, event.valuation.pre_money,
+                   event.valuation.post_money, event.valuation.reported, company.arr]
+    quality:
+      verified_sample_accuracy_min: 1.0
+      require_document_version_span: true
+      require_human_verification_for_release: true
+    acceptance_samples: [OPENAI, ANTHROPIC]
+    rollback_on: [evidence_incomplete, unit_unresolved, event_duplicate, sample_error]
+
+# Provider-neutral metrics. An id is a durable contract once observations use it.
+# Semantically different GAAP/non-GAAP, point-in-time/period, or raw/derived values
+# require separate definitions rather than an ambiguous mapping.
+metric_definitions:
+  regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
+  regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
+  industry.dram_contract_price: {value_type: number, unit_family: currency_per_item, cadence: monthly}
+  financial.revenue.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.gross_profit.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.operating_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.net_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
+  financial.eps.diluted.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
+  financial.eps.diluted.market_adjusted: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: split_adjusted}
+  # ADR EPS is economically distinct from ordinary-share EPS.  The unit records
+  # whether the issuer reported USD/ADR directly or the mirror provided TWD/ADR.
+  financial.eps.diluted.adr: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
+  financial.cash_from_operations.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], adjustment: gaap}
+  financial.capex.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], adjustment: gaap}
+  financial.free_cash_flow: {value_type: number, unit_family: currency, period_basis: [quarter, ytd, annual], derived: true}
+  financial.cash_and_equivalents.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.inventory.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  # Long-term debt excludes current maturities; it is not a substitute for total debt.
+  financial.long_term_debt.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_debt.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_debt.provider_reported: {value_type: number, unit_family: currency, period_basis: instant, adjustment: provider_reported}
+  financial.total_assets.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.total_liabilities.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.stockholders_equity.gaap: {value_type: number, unit_family: currency, period_basis: instant, adjustment: gaap}
+  financial.gross_margin.gaap: {value_type: number, unit_family: ratio, period_basis: [quarter, annual], derived: true}
+  financial.operating_margin.gaap: {value_type: number, unit_family: ratio, period_basis: [quarter, annual], derived: true}
+  consensus.eps.mean: {value_type: number, unit_family: currency_per_share, period_basis: target_quarter}
+  consensus.eps.reported_actual: {value_type: number, unit_family: currency_per_share, period_basis: quarter}
+  consensus.eps.low: {value_type: number, unit_family: currency_per_share, period_basis: target_quarter}
+  consensus.eps.high: {value_type: number, unit_family: currency_per_share, period_basis: target_quarter}
+  consensus.revenue.mean: {value_type: number, unit_family: currency, period_basis: target_quarter}
+  consensus.revenue.low: {value_type: number, unit_family: currency, period_basis: target_quarter}
+  consensus.revenue.high: {value_type: number, unit_family: currency, period_basis: target_quarter}
+  consensus.price_target.mean: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.price_target.median: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.price_target.low: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.price_target.high: {value_type: number, unit_family: currency_per_share, period_basis: snapshot}
+  consensus.rating.strong_buy_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.buy_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.hold_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.sell_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.strong_sell_count: {value_type: integer, unit_family: count, period_basis: snapshot}
+  consensus.rating.change: {value_type: record, unit_family: categorical, period_basis: event}
+  event.funding.amount: {value_type: number, unit_family: currency, period_basis: event}
+  event.valuation.pre_money: {value_type: number, unit_family: currency, period_basis: event}
+  event.valuation.post_money: {value_type: number, unit_family: currency, period_basis: event}
+  event.valuation.reported: {value_type: number, unit_family: currency, period_basis: event}
+  company.arr: {value_type: number, unit_family: currency, period_basis: point_in_time}
+
+# Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
+# must remain pending under `unmapped_policy`; never guess a convenient metric.
+provider_mappings:
+  company_disclosures:
+    tsmc_release:net_sales: financial.revenue.gaap
+    tsmc_release:gross_profit: financial.gross_profit.gaap
+    tsmc_release:operating_income: financial.operating_income.gaap
+    tsmc_release:net_income: financial.net_income.gaap
+    tsmc_release:diluted_eps: financial.eps.diluted.gaap
+    tsmc_release:diluted_eps_adr: financial.eps.diluted.adr
+    amzn_release:net_sales: financial.revenue.gaap
+    amzn_release:gross_profit_derived: financial.gross_profit.gaap
+    amzn_release:operating_income: financial.operating_income.gaap
+    amzn_release:net_income: financial.net_income.gaap
+    amzn_release:diluted_eps: financial.eps.diluted.gaap
+    amzn_release:cash_from_operations: financial.cash_from_operations.gaap
+    amzn_release:capex: financial.capex.gaap
+  sec_companyfacts:
+    "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": financial.revenue.gaap
+    "us-gaap:Revenues": financial.revenue.gaap
+    "us-gaap:SalesRevenueNet": financial.revenue.gaap
+    "ifrs-full:Revenue": financial.revenue.gaap
+    "us-gaap:GrossProfit": financial.gross_profit.gaap
+    "ifrs-full:GrossProfit": financial.gross_profit.gaap
+    "derived:revenue_minus_cost_of_revenue": financial.gross_profit.gaap
+    "us-gaap:OperatingIncomeLoss": financial.operating_income.gaap
+    "ifrs-full:ProfitLossFromOperatingActivities": financial.operating_income.gaap
+    "us-gaap:NetIncomeLoss": financial.net_income.gaap
+    "ifrs-full:ProfitLoss": financial.net_income.gaap
+    "us-gaap:EarningsPerShareDiluted": financial.eps.diluted.gaap
+    "ifrs-full:DilutedEarningsLossPerShare": financial.eps.diluted.gaap
+    "us-gaap:NetCashProvidedByUsedInOperatingActivities": financial.cash_from_operations.gaap
+    "ifrs-full:CashFlowsFromUsedInOperatingActivities": financial.cash_from_operations.gaap
+    "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment": financial.capex.gaap
+    "ifrs-full:PurchaseOfPropertyPlantAndEquipment": financial.capex.gaap
+    "us-gaap:CashAndCashEquivalentsAtCarryingValue": financial.cash_and_equivalents.gaap
+    "ifrs-full:CashAndCashEquivalents": financial.cash_and_equivalents.gaap
+    "us-gaap:InventoryNet": financial.inventory.gaap
+    "ifrs-full:Inventories": financial.inventory.gaap
+    "us-gaap:DebtLongtermAndShorttermCombinedAmount": financial.total_debt.gaap
+    "ifrs-full:Borrowings": financial.total_debt.gaap
+    "us-gaap:LongTermDebtAndFinanceLeaseObligations": financial.long_term_debt.gaap
+    "us-gaap:LongTermDebt": financial.long_term_debt.gaap
+    "us-gaap:Assets": financial.total_assets.gaap
+    "ifrs-full:Assets": financial.total_assets.gaap
+    "us-gaap:Liabilities": financial.total_liabilities.gaap
+    "ifrs-full:Liabilities": financial.total_liabilities.gaap
+    "derived:liabilities_and_equity_minus_equity": financial.total_liabilities.gaap
+    "derived:current_debt_plus_noncurrent_debt": financial.total_debt.gaap
+    "us-gaap:StockholdersEquity": financial.stockholders_equity.gaap
+    "ifrs-full:Equity": financial.stockholders_equity.gaap
+  defeatbeta_stock_statement:
+    total_revenue: financial.revenue.gaap
+    operating_revenue: financial.revenue.gaap
+    gross_profit: financial.gross_profit.gaap
+    operating_income: financial.operating_income.gaap
+    total_operating_income_as_reported: financial.operating_income.gaap
+    net_income: financial.net_income.gaap
+    net_income_common_stockholders: financial.net_income.gaap
+    diluted_eps: financial.eps.diluted.market_adjusted
+    tsm_diluted_eps_adr_twd: financial.eps.diluted.adr
+    operating_cash_flow: financial.cash_from_operations.gaap
+    cash_flow_from_continuing_operating_activities: financial.cash_from_operations.gaap
+    capital_expenditure: financial.capex.gaap
+    purchase_of_ppe: financial.capex.gaap
+    cash_and_cash_equivalents: financial.cash_and_equivalents.gaap
+    cash: financial.cash_and_equivalents.gaap
+    inventory: financial.inventory.gaap
+    total_debt: financial.total_debt.provider_reported
+    total_assets: financial.total_assets.gaap
+    total_liabilities_net_minority_interest: financial.total_liabilities.gaap
+    stockholders_equity: financial.stockholders_equity.gaap
+  yfinance_financials:
+    total_revenue: financial.revenue.gaap
+    gross_profit: financial.gross_profit.gaap
+    operating_income: financial.operating_income.gaap
+    net_income: financial.net_income.gaap
+    diluted_eps: financial.eps.diluted.market_adjusted
+    operating_cash_flow: financial.cash_from_operations.gaap
+    capital_expenditure: financial.capex.gaap
+    cash_and_cash_equivalents: financial.cash_and_equivalents.gaap
+    inventory: financial.inventory.gaap
+    total_debt: financial.total_debt.provider_reported
+    total_assets: financial.total_assets.gaap
+    total_liabilities_net_minority_interest: financial.total_liabilities.gaap
+    stockholders_equity: financial.stockholders_equity.gaap
+  yfinance_consensus:
+    reported_eps_actual: consensus.eps.reported_actual
+    eps_0q_avg: consensus.eps.mean
+    eps_0q_low: consensus.eps.low
+    eps_0q_high: consensus.eps.high
+    revenue_0q_avg: consensus.revenue.mean
+    revenue_0q_low: consensus.revenue.low
+    revenue_0q_high: consensus.revenue.high
+    price_target_mean: consensus.price_target.mean
+    price_target_median: consensus.price_target.median
+    price_target_low: consensus.price_target.low
+    price_target_high: consensus.price_target.high
+    rating_0m_strong_buy: consensus.rating.strong_buy_count
+    rating_0m_buy: consensus.rating.buy_count
+    rating_0m_hold: consensus.rating.hold_count
+    rating_0m_sell: consensus.rating.sell_count
+    rating_0m_strong_sell: consensus.rating.strong_sell_count
+    rating_change_score: consensus.rating.change
+  legacy_fundamentals:
+    Revenue: financial.revenue.gaap
+    Gross Margin: financial.gross_margin.gaap
+    Operating Margin: financial.operating_margin.gaap
+    Net Income: financial.net_income.gaap
+    Diluted EPS: financial.eps.diluted.gaap
+    CapEx: financial.capex.gaap
+    Free Cash Flow: financial.free_cash_flow
+    Total Debt: financial.total_debt.gaap
+  legacy_consensus:
+    eps: consensus.eps.mean
+    eps_low: consensus.eps.low
+    eps_high: consensus.eps.high
+    revenue: consensus.revenue.mean
+    revenue_low: consensus.revenue.low
+    revenue_high: consensus.revenue.high
+    target_mean: consensus.price_target.mean
+    target_median: consensus.price_target.median
+    target_low: consensus.price_target.low
+    target_high: consensus.price_target.high
+    rating_strong_buy: consensus.rating.strong_buy_count
+    rating_buy: consensus.rating.buy_count
+    rating_hold: consensus.rating.hold_count
+    rating_sell: consensus.rating.sell_count
+    rating_strong_sell: consensus.rating.strong_sell_count
+
+# Unresolved fields remain traceable but unavailable to default consumer queries.
+unmapped_policy:
+  action: retain_pending_mapping
+  preserve_provider_field: true
+  preserve_raw_artifact: true
+  publish_to_default_query: false
+
+# Documentation of consumer contracts and the persistent/runtime boundary. Runtime
+# price/options inputs remain outside this structured persistent platform.
+migration_consumers:
+  pead:
+    current_contracts: [FundamentalData, consensus_dict]
+    persistent_datasets: [company_financials, market_consensus]
+    runtime_inputs: [ticker_price, ohlcv, option_chain, greeks, implied_volatility]
+    initial_mode: legacy
+  sector:
+    current_contracts: [fundamentals_light_dict, consensus_dict]
+    persistent_datasets: [company_financials, market_consensus]
+    runtime_inputs: [ticker_price, ohlcv, momentum]
+    initial_mode: legacy
+  chain:
+    current_contracts: [SeriesPoint, Observation]
+    persistent_datasets: [regional_tw_exports, regional_kr_exports,
+                          industry_dram_contract_price]
+    runtime_inputs: []
+    initial_mode: legacy
+  risk:
+    current_contracts: [fundamentals_light_dict]
+    persistent_datasets: []
+    runtime_inputs: [beta, ticker_price, option_chain, greeks]
+    initial_mode: legacy

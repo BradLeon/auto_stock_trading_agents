@@ -38,9 +38,9 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
     since = _now() - timedelta(days=lookback_days)
 
     # Gather news on the target + signal-chain peers; store deduped.
-    collected: list[NewsItem] = list(news_src.fetch_news(symbol, since))
+    collected: list[NewsItem] = list(news_src.fetch_news(symbol, since, consumer="pead_monitor"))
     for sc in cfg.signal_chain:
-        collected += news_src.fetch_news(sc.symbol, since)
+        collected += news_src.fetch_news(sc.symbol, since, consumer="pead_monitor")
     fresh = store.append_events(symbol, collected)
     log.info("monitor %s: %d fetched, %d new", symbol, len(collected), len(fresh))
 
@@ -71,7 +71,7 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
                    if scores.get(i.id, (0.0, ""))[0] >= tcfg["fulltext_score"]]
             articles = [(it, body, scores[it.id][0]) for it, body in
                         triage.enrich(hot, max_items=tcfg["max_fulltext"],
-                                      max_chars=tcfg["fulltext_chars"])]
+                                      max_chars=tcfg["fulltext_chars"], store=store)]
             log.info("monitor %s: triage kept %d/%d, %d bodies fetched",
                      symbol, len(material), len(fresh), len(articles))
 

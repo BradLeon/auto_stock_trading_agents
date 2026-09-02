@@ -15,6 +15,23 @@ from ats.schemas.chain import Observation, ObservationFailure
 NOW = datetime.now(timezone.utc)
 
 
+def _structured_transcript(symbol: str, year: int, quarter: int, report_date: str):
+    from ats.data.defeatbeta import Paragraph, Transcript
+
+    company = {"SKHY": "SK hynix", "MU": "Micron", "NVDA": "NVIDIA"}.get(symbol, symbol)
+    paragraphs = (
+        Paragraph(0, "Operator", f"Welcome to the {company} Q{quarter} {year} earnings call. " * 8),
+        Paragraph(1, "Chief Executive Officer", "These are our prepared remarks. " * 12),
+        Paragraph(2, "Chief Financial Officer", "Revenue and margin improved. " * 12),
+        Paragraph(3, "Operator", "We will now begin the question-and-answer session. " * 8),
+        Paragraph(4, "Analyst", "Could you discuss AI demand and capacity? " * 8),
+        Paragraph(5, "Chief Executive Officer", "AI demand remains robust. " * 12),
+        Paragraph(6, "Operator", "Thank you. This concludes the call. " * 8),
+    )
+    return Transcript(symbol=symbol, fiscal_year=year, fiscal_quarter=quarter,
+                      report_date=report_date, paragraphs=paragraphs)
+
+
 def _obs(**kw):
     base = dict(document_id="mu-fy26q3", entity="MU", metric="hbm_capacity",
                 period="FY26Q3", observation_type="guidance", stance="supplier",
@@ -487,12 +504,17 @@ def test_fetch_hits_cache_without_network(tmp_path, monkeypatch):
 
     from ats.data import source_cache
 
-    source_cache.store("MU", "", "transcript", "Micron cached body. " * 100, source="fmp")
-    monkeypatch.setattr("ats.data.transcript.fetch", _boom)
+    cached_body = (
+        "Micron Q3 2026 earnings call. Operator: welcome. Prepared Remarks. "
+        "Chief Executive Officer. Chief Financial Officer. Question-and-Answer. "
+        "Operator: Thank you. This concludes the call. "
+    ) * 40
+    source_cache.store("MU", "Q3 FY2026", "transcript", cached_body, source="fmp")
     monkeypatch.setattr("ats.data.documents.gather", _boom)
-    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
+                        lambda *a, **k: ("Q3 FY2026", ""))
     text, src, note = obs.fetch_document("MU")
-    assert "Micron cached body" in text and "缓存命中" in note
+    assert "Micron Q3 2026" in text and src == "fmp"
 
 
 def test_keyed_dataset_wins_over_every_search_path(tmp_path, monkeypatch):
@@ -505,22 +527,23 @@ def test_keyed_dataset_wins_over_every_search_path(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("a keyed hit must not fall through to search")
 
-    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: defeatbeta.Transcript(
-        symbol="SKHY", fiscal_year=2026, fiscal_quarter=2, report_date="2026-07-29",
-        text="Park Seong-hwan: SK hynix second quarter earnings call. " * 40))
-    monkeypatch.setattr("ats.data.transcript.fetch", _boom)
+    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: _structured_transcript(
+        "SKHY", 2026, 2, "2026-07-29"))
+    monkeypatch.setattr("ats.data.transcript._fmp", _boom)
+    monkeypatch.setattr("ats.data.transcript._from_search", _boom)
+    monkeypatch.setattr("ats.data.transcript._from_news", _boom)
     monkeypatch.setattr("ats.data.documents.gather", _boom)
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
                         lambda *a, **k: ("Q2 FY2026", ""))
 
     store = get_store()
     text, src, note = obs.fetch_document("HY9H", store=store)   # via an alias
-    assert src == "defeatbeta" and "2026-07-29" in note
+    assert src == "defeatbeta" and "结构化纪要" in note
     assert store.has_document("SKHY", "Q2 FY2026", "transcript")
 
     monkeypatch.setattr(defeatbeta, "fetch", _boom)             # second run: cache only
     text2, src2, note2 = obs.fetch_document("000660.KS", store=store)
-    assert text2.strip() == text.strip() and "缓存命中" in note2
+    assert text2.strip() == text.strip() and src2 == "defeatbeta"
 
 
 def test_a_web_scraped_cache_does_not_outrank_the_keyed_dataset(tmp_path, monkeypatch):
@@ -532,9 +555,8 @@ def test_a_web_scraped_cache_does_not_outrank_the_keyed_dataset(tmp_path, monkey
 
     source_cache.store("MU", "Q3 FY2026", "transcript", "scraped from investing dot com " * 60,
                        source="tavily:https://www.investing.com/news/x")
-    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: defeatbeta.Transcript(
-        symbol="MU", fiscal_year=2026, fiscal_quarter=3, report_date="2026-06-24",
-        text="Sanjay Mehrotra: Micron third quarter results. " * 60))
+    monkeypatch.setattr(defeatbeta, "fetch", lambda *a, **k: _structured_transcript(
+        "MU", 2026, 3, "2026-06-24"))
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
                         lambda *a, **k: ("Q3 FY2026", ""))
 
@@ -542,9 +564,8 @@ def test_a_web_scraped_cache_does_not_outrank_the_keyed_dataset(tmp_path, monkey
     assert src == "defeatbeta" and "investing" not in text
 
 
-def test_a_weaker_cached_copy_is_still_used_when_nothing_better_exists(tmp_path, monkeypatch):
-    """Demoting the search tier must not turn a witness we can still read into a gap:
-    Nanya and Samsung are not in the dataset at all."""
+def test_a_weaker_cached_copy_is_not_promoted_after_strict_admission(tmp_path, monkeypatch):
+    """Historical Tavily cache stays auditable but is not a trusted fallback."""
     from ats.agents.evidence import observer as obs
     from ats.data import source_cache
 
@@ -555,10 +576,10 @@ def test_a_weaker_cached_copy_is_still_used_when_nothing_better_exists(tmp_path,
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
 
     text, _src, note = obs.fetch_document("2408.TW")
-    assert "Nanya Technology" in text and "回落到旧缓存" in note
+    assert text == "" and "记为缺口" in note
 
 
-def test_unpublished_quarter_falls_back_but_is_labelled(monkeypatch):
+def test_unpublished_quarter_is_a_visible_gap_not_a_previous_quarter(monkeypatch):
     """The target quarter goes INTO the query, never "latest, checked afterwards" —
     that ordering is what served NVDA an eleven-month-old deck.
 
@@ -576,18 +597,16 @@ def test_unpublished_quarter_falls_back_but_is_labelled(monkeypatch):
         asked.append((fiscal_year, fiscal_quarter))
         if fiscal_quarter == 2:
             return None                    # Q2 FY2027 not published yet
-        return defeatbeta.Transcript(symbol="NVDA", fiscal_year=2027, fiscal_quarter=1,
-                                     report_date="2026-05-20",
-                                     text="Colette Kress: first quarter results. " * 60)
+        return _structured_transcript("NVDA", 2027, 1, "2026-05-20")
 
     monkeypatch.setattr(defeatbeta, "fetch", _fetch)
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
                         lambda *a, **k: ("Q2 FY2027", ""))
+    monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [])
 
     text, src, note = obs.fetch_document("NVDA")
-    assert asked[0] == (2027, 2)           # exact quarter first, not "latest"
-    assert src == "defeatbeta" and text.strip()
-    assert "尚未发布" in note and "Q1 FY2027" in note
+    assert asked == [(2027, 2)]             # no unlabelled latest fallback
+    assert text == "" and src == "documents" and "记为缺口" in note
 
 
 def test_one_bad_gathered_piece_does_not_condemn_the_hand_dropped_ones(tmp_path, monkeypatch):
@@ -601,9 +620,11 @@ def test_one_bad_gathered_piece_does_not_condemn_the_hand_dropped_ones(tmp_path,
     monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
     monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [
         ("investor presentation (tavily:…NEM…)", "NEWMONT CORPORATION gold AISC " * 200),
-        ("doc:samsung_2026Q2_script.pdf", "Samsung Electronics second quarter results. " * 200),
+        ("doc:samsung_2026Q2_script.pdf",
+         "Samsung Electronics second quarter 2026 results. " * 200),
     ])
-    monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
+    monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
+                        lambda *a, **k: ("Q2 FY2026", ""))
 
     text, src, note = obs.fetch_document("005930.KS")
     assert "Samsung Electronics" in text
@@ -669,10 +690,8 @@ def test_fallback_documents_are_period_guarded_too(tmp_path, monkeypatch):
     assert not store.has_document("NVDA", "Q2 FY2027", "release")
 
 
-def test_current_material_without_a_parseable_period_still_passes(tmp_path, monkeypatch):
-    """Samsung and Nanya publish current material with no machine-readable fiscal
-    label. Demanding proof of the period would drop two real witnesses, so the guard
-    rejects only a POSITIVE mismatch."""
+def test_current_material_without_a_parseable_period_is_not_auto_accepted(tmp_path, monkeypatch):
+    """Unknown target/reporting periods are quarantined instead of cautiously passed."""
     from ats.agents.evidence import observer as obs
 
     monkeypatch.setattr("ats.data.transcript.fetch", lambda *a, **k: ("", ""))
@@ -680,7 +699,7 @@ def test_current_material_without_a_parseable_period_still_passes(tmp_path, monk
                         lambda *a, **k: [("rel", "Samsung Electronics results. " * 80)])
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label", lambda *a, **k: ("", ""))
     text, src, note = obs.fetch_document("005930.KS")
-    assert "Samsung Electronics" in text and src == "documents"
+    assert text == "" and src == "documents" and "period unresolved" in note
 
 
 def test_rejected_document_is_recorded_with_its_url(tmp_path, monkeypatch):

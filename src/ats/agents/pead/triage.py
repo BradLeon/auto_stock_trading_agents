@@ -46,9 +46,10 @@ def score_items(symbol: str, thesis: str, items: list[NewsItem]) -> dict[str, tu
     return scores
 
 
-def enrich(items: list[NewsItem], *, max_items: int, max_chars: int) -> list[tuple[NewsItem, str]]:
+def enrich(items: list[NewsItem], *, max_items: int, max_chars: int,
+           store=None) -> list[tuple[NewsItem, str]]:
     """Fetch article bodies for the given items (already sorted by importance)."""
-    from ...data.web import fetch_article_text
+    from ...data import news
 
     out: list[tuple[NewsItem, str]] = []
     for it in items:
@@ -56,7 +57,7 @@ def enrich(items: list[NewsItem], *, max_items: int, max_chars: int) -> list[tup
             break
         if not it.url:
             continue
-        body = fetch_article_text(it.url)
+        body = news.acquire_body(it, store=store)
         if body:
             out.append((it, body[:max_chars]))
     return out

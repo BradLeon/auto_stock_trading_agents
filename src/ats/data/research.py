@@ -1,6 +1,6 @@
 """Newsletter/research article ingestion — Gmail IMAP + Substack RSS, full text.
 
-High-signal subscribed sources (config/news_sources.yaml `newsletters:`) are read
+High-signal subscribed sources (config/data/news_sources.yaml `newsletters:`) are read
 in full — no ticker-keyword filter. Paid newsletter posts are only complete in
 email, hence the IMAP path; the RSS path covers free posts. Each adapter degrades
 independently (no creds / dead feed -> skipped, never raises).
@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from ..schemas.research import Article
 from .base import safe_fetch
@@ -24,28 +26,272 @@ name = "research"
 _MIN_RSS_BODY = 1500     # below this, an RSS body is a paid-post teaser -> fetch the page
 _IMAP_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_NEWS_SOURCES = ("ibkr_news", "yfinance_live_news", "yahoo_news")
 
 
-def fetch_articles(since: datetime) -> list[Article]:
+def is_pead_research_article(article: Article) -> bool:
+    """Return whether the PEAD research reader may interpret this article.
+
+    SemiAnalysis previews are intentional, useful research inputs for an
+    unsubscribed account.  They remain partial documents, rather than being
+    silently promoted to full text.  Other incomplete/teaser research sources
+    need their own consumer policy before they can enter PEAD research.
+    """
+    if article.completeness == "full":
+        return True
+    return (article.completeness == "partial"
+            and "semianalysis" in article.source.lower())
+
+
+@dataclass(frozen=True)
+class CursorUpdate:
+    mailbox: str
+    folder: str
+    sender: str
+    uidvalidity: str
+    last_uid: int
+    last_message_id: str
+    watermark: str
+
+
+@dataclass(frozen=True)
+class AcquisitionBatch:
+    articles: tuple[Article, ...]
+    cursor_updates: tuple[CursorUpdate, ...] = ()
+    complete: bool = True
+    candidate_count: int = 0
+    duplicate_count: int = 0
+    transport_status: dict[str, dict] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.transport_status is None:
+            object.__setattr__(self, "transport_status", {})
+
+
+def article_slug(article_id: str) -> str:
+    """Stable filesystem identity shared by every consumer of a research article."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", article_id or "").strip("-")[:120]
+
+
+def publisher_entity(source: str) -> str:
+    """Canonical publisher id for the shared document catalog."""
+    name = (source or "research").split(":", 1)[-1]
+    return re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper() or "RESEARCH"
+
+
+def canonical_article_url(value: str) -> str:
+    """Stable cross-carrier identity for a newsletter post.
+
+    IMAP links normally contain campaign parameters while RSS links do not.  The
+    canonical URL lets the shared acquisition path retain the complete email body
+    without admitting the same SemiAnalysis post again from RSS.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if parsed.scheme in {"http", "https"}:
+        return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(),
+                           parsed.path.rstrip("/"), "", ""))
+    return value.strip()
+
+
+def _article_priority(article: Article) -> tuple[int, int]:
+    """Prefer a complete IMAP message over an RSS copy of the same post."""
+    carrier = 0 if article.id.startswith("imap:") else 1
+    completeness = {"full": 0, "partial": 1, "teaser": 2}.get(article.completeness, 3)
+    return carrier, completeness
+
+
+def deduplicate_articles(items: list[Article]) -> tuple[list[Article], int]:
+    """Deduplicate all acquired candidates by native id, URL, and content hash.
+
+    The returned order is newest first, with a complete IMAP message winning ties.
+    The duplicate count is kept in :class:`AcquisitionBatch` so an acceptance report
+    can distinguish "only one article arrived" from "two transports delivered one
+    article" without persisting a second document version.
+    """
+    ordered = sorted(items, key=lambda a: (a.published_at, tuple(-x for x in _article_priority(a))),
+                     reverse=True)
+    seen: set[str] = set()
+    out: list[Article] = []
+    duplicates = 0
+    for article in ordered:
+        keys = {f"id:{article.id}"}
+        canonical = canonical_article_url(article.url)
+        if canonical:
+            keys.add(f"url:{canonical}")
+        if article.body:
+            keys.add("hash:" + hashlib.sha256(article.body.encode("utf-8")).hexdigest())
+        if keys & seen:
+            duplicates += 1
+            continue
+        seen |= keys
+        out.append(article)
+    return out, duplicates
+
+
+def ingest_batch(since: datetime, *, store=None) -> AcquisitionBatch:
+    """Fetch once, persist accepted bodies, and return the discovered articles.
+
+    This is the only newsletter function allowed to touch IMAP/RSS. PEAD and chain
+    consumers read `stored_articles` instead, so adding a consumer never adds another
+    source-specific fetch path.
+    """
+    from .stores.unstructured import get_data_ingestion_store
+    from . import document_assets
+
+    store = store or get_data_ingestion_store()
+    batch = fetch_batch(since, store=store)
+    articles = list(batch.articles)
+    persisted = True
+    for art in articles:
+        document = document_assets.ingest(
+            entity=publisher_entity(art.source), key=article_slug(art.id),
+            doc_type="research_article", text=art.body,
+            source=art.source, source_url=art.url, external_id=art.id, title=art.title,
+            published_at=art.published_at.isoformat(), min_chars=1, store=store,
+            completeness=art.completeness, truncation_reason=art.truncation_reason,
+            carrier_format="email" if art.mime_source else "html",
+            mime_source=art.mime_source)
+        persisted = persisted and document is not None
+    if batch.complete and persisted:
+        for cursor in batch.cursor_updates:
+            store.save_newsletter_cursor(**cursor.__dict__)
+    return batch
+
+
+def ingest(since: datetime, *, store=None) -> list[Article]:
+    """Compatibility list API around the provenance-preserving ingestion batch."""
+    return list(ingest_batch(since, store=store).articles)
+
+
+def ingest_configured(*, store=None) -> list[Article]:
+    """Run the single configured newsletter acquisition window."""
+    from ..config import load_pead_global
+
+    cfg = load_pead_global().get("research", {}) or {}
+    since = datetime.now(timezone.utc) - timedelta(
+        days=int(cfg.get("backfill_days", cfg.get("lookback_days", 30))))
+    return ingest(since, store=store)
+
+
+def ingest_configured_batch(*, store=None) -> AcquisitionBatch:
+    """Configured acquisition with transport completeness for source acceptance."""
+    from ..config import load_pead_global
+
+    cfg = load_pead_global().get("research", {}) or {}
+    since = datetime.now(timezone.utc) - timedelta(
+        days=int(cfg.get("backfill_days", cfg.get("lookback_days", 30))))
+    return ingest_batch(since, store=store)
+
+
+def stored_articles(since: datetime, *, source_match: str = "", store=None,
+                    limit: int = 500, allow_incomplete: bool = False,
+                    consumer: str = "pead_research") -> list[Article]:
+    """Read research bodies from the shared document asset store; never uses network."""
+    from .stores.unstructured import get_data_ingestion_store
+    from .source_cache import _split_frontmatter
+
+    store = store or get_data_ingestion_store()
+    # Reading accepted document history is data-layer work.  The PEAD workflow still
+    # owns its processing lease and insight/event writes in memory, so route only this
+    # immutable input and leave those write contracts untouched until retirement.
+    from .products import get_unstructured_read_router
+
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+
+    reader = get_unstructured_read_router(consumer=consumer, legacy_repository=store)
+    try:
+        # Some migrated carrier-oriented records predate ``published_at`` metadata.
+        # Query the bounded catalog first, then apply the effective publication-time
+        # filter below after combining catalog, frontmatter, and fetch provenance.
+        rows = reader.documents(doc_type="article", source_contains=source_match or None,
+                                limit=limit)
+    finally:
+        reader.close()
+    out: list[Article] = []
+    for row in rows:
+        # Historical assets used the carrier-oriented ``article`` type for both
+        # research and wire news.  PEAD research extracts durable research
+        # insights; it must not silently process IBKR/Yahoo headlines, which are
+        # owned by the PEAD monitor/Graph path.  New semantic rows are already
+        # distinct; this source guard preserves the same boundary during migration.
+        path = Path(row.get("local_path") or "")
+        if not path.is_file():
+            continue
+        try:
+            metadata, body = _split_frontmatter(
+                path.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, ValueError):
+            continue
+        source_value = row.get("source") or metadata.get("source") or "research"
+        source = str(source_value).lower()
+        if any(marker in source for marker in _NEWS_SOURCES):
+            continue
+        completeness = row.get("completeness") or metadata.get("completeness") or "full"
+        if completeness != "full" and not allow_incomplete:
+            continue
+        published_raw = (row.get("published_at") or metadata.get("published_at") or
+                         row.get("fetched_at") or metadata.get("fetched_at") or "")
+        try:
+            published = datetime.fromisoformat(str(published_raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        if published < since:
+            continue
+        # ``document_id`` is the migration's stable identity.  It is the final
+        # fallback only for records written before article-native IDs were cataloged.
+        external_id = (row.get("external_id") or metadata.get("external_id") or
+                       row.get("document_id") or "")
+        if not external_id:
+            continue
+        out.append(Article(id=str(external_id), source=str(source_value),
+                           title=row.get("title") or metadata.get("title") or "",
+                           url=row.get("source_url") or metadata.get("source_url") or "",
+                           body=body, published_at=published,
+                           completeness=completeness,
+                           truncation_reason=(row.get("truncation_reason") or
+                                              metadata.get("truncation_reason") or ""),
+                           mime_source=row.get("mime_source") or metadata.get("mime_source") or ""))
+    out.sort(key=lambda a: a.published_at, reverse=True)
+    return out
+
+
+def fetch_batch(since: datetime, *, store=None) -> AcquisitionBatch:
+    """Acquire every new asset; downstream processing limits do not apply here."""
     """All newsletter articles since `since`, deduped by id, newest first."""
     from ..config import load_news_sources
 
     cfg = (load_news_sources() or {}).get("newsletters", {}) or {}
-    items: list[Article] = []
-    items += safe_fetch(lambda: _imap(since, cfg.get("imap", {}) or {}),
-                        source="research:imap") or []
-    items += safe_fetch(lambda: _substack_rss(since, cfg.get("research_feeds", []) or []),
-                        source="research:rss") or []
+    imap_batch = safe_fetch(
+        lambda: _imap_batch(since, cfg.get("imap", {}) or {}, store=store),
+        source="research:imap",
+    )
+    if imap_batch is None:
+        imap_batch = AcquisitionBatch((), (), False)
+    items: list[Article] = list(imap_batch.articles)
+    rss_items, rss_status = _rss_batch(since, cfg.get("research_feeds", []) or [])
+    items += rss_items
 
-    items.sort(key=lambda a: a.published_at, reverse=True)
-    seen: set[str] = set()
-    out = []
-    for a in items:
-        if a.id in seen:
-            continue
-        seen.add(a.id)
-        out.append(a)
-    return out
+    out, duplicates = deduplicate_articles(items)
+    transport_status = {
+        "imap": {"status": "succeeded" if imap_batch.complete else "partial"},
+        "rss": rss_status,
+    }
+    complete = imap_batch.complete and rss_status["status"] == "succeeded"
+    return AcquisitionBatch(tuple(out), imap_batch.cursor_updates, complete,
+                            candidate_count=len(items), duplicate_count=duplicates,
+                            transport_status=transport_status)
+
+
+def fetch_articles(since: datetime, *, store=None) -> list[Article]:
+    """Compatibility list API around the cursor-aware acquisition batch."""
+    return list(fetch_batch(since, store=store).articles)
 
 
 # --------------------------------------------------------------------------- #
@@ -90,7 +336,11 @@ def _imap_connect(host: str):
     return _ProxyIMAP4SSL(host)
 
 
-def _imap(since: datetime, cfg: dict) -> list[Article]:
+def _imap(since: datetime, cfg: dict, *, store=None) -> list[Article]:
+    return list(_imap_batch(since, cfg, store=store).articles)
+
+
+def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
     import email
     import email.utils
 
@@ -105,7 +355,7 @@ def _imap(since: datetime, cfg: dict) -> list[Article]:
         senders.append({"name": "test-override", "email": test_sender})
     if not (secrets.gmail_address and secrets.gmail_app_password and senders):
         log.info("research imap: no creds or senders configured — skipping")
-        return []
+        return AcquisitionBatch(())
 
     # IMAP SINCE is date-only (server internal date): search one extra day back
     # and re-filter on the Date header client-side.
@@ -113,41 +363,76 @@ def _imap(since: datetime, cfg: dict) -> list[Article]:
     imap_date = f"{d.day:02d}-{_IMAP_MONTHS[d.month - 1]}-{d.year}"
 
     out: list[Article] = []
+    updates: list[CursorUpdate] = []
+    complete = True
     conn = _imap_connect(secrets.gmail_imap_host)
     try:
         conn.login(secrets.gmail_address, secrets.gmail_app_password)
-        conn.select(cfg.get("folder", "INBOX"), readonly=True)
+        folder = cfg.get("folder", "INBOX")
+        conn.select(folder, readonly=True)
+        validity_response = conn.response("UIDVALIDITY")
+        validity_values = validity_response[1] if validity_response else []
+        uidvalidity = str((validity_values or [b""])[0].decode() if isinstance(
+            (validity_values or [b""])[0], bytes) else (validity_values or [""])[0])
+        mailbox = secrets.gmail_address
         for sender in senders:
             sname, semail = sender.get("name", "?"), sender.get("email", "")
             if not semail:
                 continue
-            _, data = conn.uid("SEARCH", None, f'(SINCE "{imap_date}" FROM "{semail}")')
+            cursor = store.newsletter_cursor(mailbox, folder, semail) if store else None
+            if cursor and cursor.get("uidvalidity") == uidvalidity:
+                overlap = int(cfg.get("overlap_uids", 20))
+                start_uid = max(1, int(cursor.get("last_uid") or 0) - overlap)
+                criteria = f'(UID {start_uid}:* FROM "{semail}")'
+            else:
+                criteria = f'(SINCE "{imap_date}" FROM "{semail}")'
+            status, data = conn.uid("SEARCH", None, criteria)
+            if status != "OK":
+                complete = False
+                continue
             uids = (data[0] or b"").split()
             log.info("research imap: %s (%s) -> %d messages", sname, semail, len(uids))
+            last_uid, last_mid, watermark = 0, "", ""
             for uid in uids:
-                _, msg_data = conn.uid("FETCH", uid, "(RFC822)")
+                status, msg_data = conn.uid("FETCH", uid, "(RFC822)")
+                if status != "OK":
+                    complete = False
+                    continue
                 if not msg_data or not msg_data[0]:
+                    complete = False
                     continue
                 msg = email.message_from_bytes(msg_data[0][1])
                 pub = _msg_date(msg)
                 if pub is None or pub < since:
                     continue
                 subject = _decode_header(msg.get("Subject", ""))
-                body, html = _extract_body(msg)
+                body, html, mime_source = _extract_body_details(msg)
                 if not body:
+                    complete = False
                     continue
                 mid = (msg.get("Message-ID") or "").strip()
                 if not mid:
                     mid = hashlib.sha1(f"{subject}{pub.isoformat()}".encode()).hexdigest()
+                completeness, truncation = classify_completeness(body, html)
+                uid_int = int(uid.decode() if isinstance(uid, bytes) else uid)
                 out.append(Article(
                     id=f"imap:{mid}", source=f"newsletter:{sname}", title=subject,
-                    url=_web_link(html), body=body, published_at=pub))
+                    url=_web_link(html), body=body, published_at=pub,
+                    completeness=completeness, truncation_reason=truncation,
+                    mime_source=mime_source, mailbox=mailbox, folder=folder,
+                    sender=semail, uidvalidity=uidvalidity, uid=uid_int,
+                    message_id=mid))
+                if uid_int >= last_uid:
+                    last_uid, last_mid, watermark = uid_int, mid, pub.isoformat()
+            if last_uid:
+                updates.append(CursorUpdate(
+                    mailbox, folder, semail, uidvalidity, last_uid, last_mid, watermark))
     finally:
         try:
             conn.logout()
         except Exception:  # noqa: BLE001
             pass
-    return out
+    return AcquisitionBatch(tuple(out), tuple(updates), complete)
 
 
 def _msg_date(msg) -> datetime | None:
@@ -172,8 +457,8 @@ def _decode_header(raw: str) -> str:
     return " ".join("".join(parts).split())   # collapse header folding whitespace
 
 
-def _extract_body(msg) -> tuple[str, str]:
-    """Walk MIME parts; prefer text/html (stripped). Returns (text, raw_html)."""
+def _extract_body_details(msg) -> tuple[str, str, str]:
+    """Walk MIME parts; prefer HTML and retain the chosen MIME provenance."""
     html, plain = "", ""
     parts = msg.walk() if msg.is_multipart() else [msg]
     for part in parts:
@@ -189,8 +474,41 @@ def _extract_body(msg) -> tuple[str, str]:
         elif ctype == "text/plain" and not plain:
             plain = text
     if html:
-        return strip_html(html), html
-    return re.sub(r"\s+", " ", plain).strip(), ""
+        return strip_html(html), html, "text/html"
+    return re.sub(r"\s+", " ", plain).strip(), "", "text/plain" if plain else ""
+
+
+def _extract_body(msg) -> tuple[str, str]:
+    """Compatibility wrapper returning (text, raw_html)."""
+    text, html, _mime = _extract_body_details(msg)
+    return text, html
+
+
+_STRONG_TRUNCATION_PATTERNS = (
+    (re.compile(r"subscribe to [^.\n]{0,80}?\s+to unlock the rest", re.I),
+     "subscribe to unlock the rest"),
+    (re.compile(r"subscribe to unlock(?: the rest)?", re.I), "subscribe to unlock"),
+    (re.compile(r"continue reading by subscribing", re.I),
+     "continue reading by subscribing"),
+    (re.compile(r"this post is for paid subscribers", re.I),
+     "this post is for paid subscribers"),
+    (re.compile(r"read the full post", re.I), "read the full post"),
+)
+
+
+def classify_completeness(body: str, raw_html: str = "") -> tuple[str, str]:
+    """Explain whether a newsletter body is full, partial, or only a teaser."""
+    text = re.sub(r"\s+", " ", body or "").strip()
+    searchable = f"{text}\n{strip_html(raw_html) if raw_html else ''}"
+    reason = next(
+        (reason for pattern, reason in _STRONG_TRUNCATION_PATTERNS
+         if pattern.search(searchable)),
+        "",
+    )
+    if not reason:
+        return "full", ""
+    status = "teaser" if len(text) < 2000 else "partial"
+    return status, reason
 
 
 def _web_link(html: str) -> str:
@@ -204,6 +522,21 @@ def _web_link(html: str) -> str:
 # --------------------------------------------------------------------------- #
 # Substack RSS — free posts embed the full body; teasers get a page fetch
 # --------------------------------------------------------------------------- #
+def _rss_batch(since: datetime, feeds: list[dict]) -> tuple[list[Article], dict]:
+    """Fetch each feed independently so a broken RSS endpoint is never silent."""
+    out: list[Article] = []
+    failures: list[dict[str, str]] = []
+    for feed in feeds:
+        name = str(feed.get("name", "?"))
+        try:
+            out.extend(_substack_rss(since, [feed]))
+        except Exception as exc:  # noqa: BLE001 - retain IMAP results but expose the gap
+            log.warning("research rss: %s failed — %s", name, exc)
+            failures.append({"feed": name, "error": f"{type(exc).__name__}:{exc}"})
+    return out, {"status": "partial" if failures else "succeeded",
+                 "feeds": len(feeds), "failed_feeds": failures}
+
+
 def _substack_rss(since: datetime, feeds: list[dict]) -> list[Article]:
     import feedparser
 
@@ -227,11 +560,13 @@ def _substack_rss(since: datetime, feeds: list[dict]) -> list[Article]:
                     body = fetched
             if not body:
                 continue
+            completeness, truncation = classify_completeness(body)
             out.append(Article(
                 id=f"substack:{e.get('id') or e.get('link', e.get('title', ''))}",
                 source=f"substack:{fname}", title=e.get("title", ""),
                 url=e.get("link", ""), body=body,
-                published_at=pub or datetime.now(timezone.utc)))
+                published_at=pub or datetime.now(timezone.utc),
+                completeness=completeness, truncation_reason=truncation))
     return out
 
 

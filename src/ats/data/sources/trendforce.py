@@ -20,8 +20,16 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 
 from ...schemas.chain import SeriesPoint
+from ..structured import (
+    AdapterArtifact,
+    AdapterBatch,
+    FetchRequest,
+    IngestionStatus,
+    NativeRecord,
+)
 
 log = logging.getLogger("ats.data.sources.trendforce")
 
@@ -33,6 +41,14 @@ _UP, _DOWN = "&#9650;", "&#9660;"
 _PCT = re.compile(r"([\d.]+)\s*%")
 _SESSION = re.compile(r"DRAM Contract Price\s*\(([^)]+)\)")
 _UPDATED = re.compile(r"Last Update\s*(\d{4}-\d{2}-\d{2})")
+_SESSION_WINDOW = re.compile(
+    r"^(?P<half>[12])H\s+(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$",
+    re.I,
+)
+_MONTHS = {name: index for index, name in enumerate(
+    ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+    start=1,
+)}
 # Default basket: mainstream server/PC parts. Deliberately not the whole table — the
 # eTT and legacy DDR3 lines move on different end markets and would add noise, which
 # is the same reason a witness gets excluded for having no discriminating read.
@@ -60,21 +76,31 @@ def _change(cell: str) -> float | None:
     return 0.0                       # an em-dash row: published as unchanged
 
 
-def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
-          **_) -> list[SeriesPoint]:
-    """One point per tracked item for the latest published session.
+def _session_window(session: str, updated: str) -> tuple[str, str, str]:
+    """Normalize TrendForce's ``2H Jun`` label into an auditable ISO window."""
+    match = _SESSION_WINDOW.match(session.strip())
+    if not match or not updated:
+        return session, "", ""
+    published = datetime.strptime(updated, "%Y-%m-%d").date()
+    month = _MONTHS[match.group("month").title()]
+    # A December session on a January update page belongs to the prior year.
+    year = published.year - int(month > published.month)
+    start_day, end_day = (1, 15) if match.group("half") == "1" else (16, 31)
+    import calendar
 
-    `lookback_months` is ignored: the public table shows only the current session. The
-    change TrendForce publishes is against the prior session, so `mom` comes straight
-    from the page rather than being derived — we never see the history to derive it
-    from, and inventing one from a single snapshot would be fabrication.
-    """
-    import httpx
+    end_day = min(end_day, calendar.monthrange(year, month)[1])
+    start = datetime(year, month, start_day).date().isoformat()
+    end = datetime(year, month, end_day).date().isoformat()
+    return start, start, end
 
-    html = httpx.get(URL, headers=HEADERS, timeout=30, follow_redirects=True).text
+
+def parse_html(html: str, *, items: tuple[str, ...] = DEFAULT_ITEMS) -> tuple[str, str, list[SeriesPoint]]:
+    """Parse one public table snapshot without network access."""
     session = (_SESSION.search(html).group(1).strip() if _SESSION.search(html)
                else "latest")
     updated = _UPDATED.search(html)
+    updated_text = updated.group(1) if updated else ""
+    period, _, _ = _session_window(session, updated_text)
     wanted = {i.lower() for i in items}
 
     out: list[SeriesPoint] = []
@@ -92,9 +118,81 @@ def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
             average = float(cells[3])
         except ValueError:
             continue
-        out.append(SeriesPoint(period=session, series=cells[0], value=average,
+        out.append(SeriesPoint(period=period, series=cells[0], value=average,
                                unit="USD", mom=change))
     log.info("trendforce: session %s, %d items", session, len(out))
     if updated and not out:
         log.warning("trendforce: page parsed but no tracked item matched %s", items)
-    return out
+    return session, updated_text, out
+
+
+def fetch(*, lookback_months: int = 6, items: tuple[str, ...] = DEFAULT_ITEMS,
+          **_) -> list[SeriesPoint]:
+    """One point per tracked item for the latest published session.
+
+    `lookback_months` is ignored: the public table shows only the current session. The
+    change TrendForce publishes is against the prior session, so `mom` comes straight
+    from the page rather than being derived — we never see the history to derive it
+    from, and inventing one from a single snapshot would be fabrication.
+    """
+    import httpx
+
+    html = httpx.get(URL, headers=HEADERS, timeout=30, follow_redirects=True).text
+    return parse_html(html, items=items)[2]
+
+
+class TrendForceDRAMAdapter:
+    source_id = "trendforce_dram"
+    dataset_id = "industry_dram_contract_price"
+
+    def __init__(self, *, client=None, clock=None):
+        self.client = client
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def fetch(self, request: FetchRequest) -> AdapterBatch:
+        import httpx
+
+        client = self.client or httpx
+        fetched_at = self.clock().astimezone(timezone.utc)
+        response = client.get(URL, headers=HEADERS, timeout=30, follow_redirects=True)
+        if hasattr(response, "raise_for_status"):
+            response.raise_for_status()
+        html = response.text
+        items = tuple(request.query_scope.get("items") or DEFAULT_ITEMS)
+        session, updated, points = parse_html(html, items=items)
+        period, period_start, period_end = _session_window(session, updated)
+        published = None
+        if updated:
+            published = datetime.strptime(updated, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        records = [NativeRecord(
+            entity_id="DRAM_CONTRACT_PRICE",
+            provider_field="industry.dram_contract_price",
+            period=point.period,
+            period_start=period_start,
+            period_end=period_end,
+            value=point.value,
+            unit="USD/item",
+            currency="USD",
+            period_basis="half_month_session",
+            published_at=published,
+            dimensions={"item": point.series},
+            raw={"item": point.series, "published_mom": point.mom,
+                 "source_unit": point.unit, "source_session": session,
+                 "session_period": period, "session_period_start": period_start,
+                 "session_period_end": period_end},
+        ) for point in points]
+        headers = getattr(response, "headers", {}) or {}
+        version = str(headers.get("etag") or headers.get("last-modified") or updated)
+        return AdapterBatch(
+            source_id=request.source_id,
+            dataset_id=request.dataset_id,
+            status=IngestionStatus.SUCCEEDED if records else IngestionStatus.ZERO_MATCH,
+            fetched_at=fetched_at,
+            records=records,
+            artifacts=[AdapterArtifact(
+                payload=html, query_scope={**request.query_scope, "items": list(items)},
+                source_url=URL, source_version=version, media_type="text/html",
+                retention="constrained_snapshot",
+                metadata={"session": session, "updated": updated})],
+            provider_metadata={"session": session, "updated": updated,
+                               "source_version": version})

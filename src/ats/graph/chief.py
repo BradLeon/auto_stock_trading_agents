@@ -39,8 +39,11 @@ def _now() -> datetime:
 
 def assemble_context(state: ChiefDecisionState) -> dict:
     from ..trader import execute as texec
+    from ..data.products import workflow_data_boundary
 
     out: dict = {}
+    boundary = workflow_data_boundary("chief_graph")
+    log.info("chief input boundary: consumer=%s mode=%s", boundary.consumer, boundary.mode)
     if not state.event_data:
         out["event_data"] = texec.pead_event_data()
     if not state.decide:

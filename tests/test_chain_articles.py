@@ -203,6 +203,25 @@ def test_the_slug_names_the_document_but_never_the_period(wire):
     assert calls[0]["source_url"] == ref.url
 
 
+def test_title_verified_ibkr_target_is_linked_without_replacing_publisher_witness(wire):
+    """Chain still attributes the observation to Dow Jones, while PEAD can read NVDA."""
+    class _IBKRAdapter(_Adapter):
+        def provenance(self, _ref):
+            return {"entity_association": "title_verified",
+                    "title_verified_entities": "NVDA"}
+
+    ref = _ref("nvidia-supply-update")
+    source = _source(id="ibkr", adapter="ibkr_news", entity="DOWJONES", match=[])
+    wire(source, _IBKRAdapter([ref]))
+    store = get_store()
+
+    articles.collect_articles(store, now=NOW)
+
+    row = next(item for item in store.documents(entity="DOWJONES") if ref.slug in item["document_id"])
+    linked = {item["document_id"] for item in store.documents(entity="NVDA")}
+    assert row["document_id"] in linked
+
+
 def test_the_model_call_is_capped_however_much_matched(wire):
     """`max_per_run` is a cost ceiling on extraction, not on discovery — a backlog after
     an outage must not turn into an unbounded bill."""

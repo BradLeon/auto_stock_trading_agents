@@ -38,7 +38,10 @@ def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
     """
     if not live_data:
         return {}
-    from ...data import macro as macro_data
+    # FRED/yfinance indicators are time-sensitive runtime inputs.  They are
+    # intentionally kept behind the runtime facade instead of being treated as
+    # governed, persisted structured observations.
+    from ...data.runtime import macro as macro_data
 
     series = macro_data.fetch_series()
     if not series:

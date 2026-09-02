@@ -35,6 +35,8 @@ def test_wire_markers_are_stripped_and_junk_rows_are_droppable():
 
 def test_article_ids_become_filesystem_and_document_id_safe_slugs():
     assert ibkr_news._slug("DJ-N$1f249a57") == "DJ-N-1f249a57"
+    assert ibkr_news._article_slug("DJ-N", "DJ-N$1f249a57") == "DJ-N-1f249a57"
+    assert ibkr_news._article_slug("DJ-N", "42") == "DJ-N-42"
     assert ibkr_news._slug("") == ""
 
 

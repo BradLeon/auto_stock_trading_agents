@@ -1,4 +1,6 @@
 # 第三方证据源注册表 —— 不依赖任何公司自述的证据。
+# 兼容期说明：统一入口为 config/data/catalog.yaml；此文件由 catalog legacy
+# overlay 读取，新来源不要只修改本文件。
 #
 # 为什么需要它：截至 2026-08-07，两条 L5 命题的证据**全部**来自公司自己的财报纪要。
 # 立场多样性闸因此只能在 customer / supplier 之间取得，而这两类都是当事人。海关统计和
@@ -209,6 +211,11 @@ article_sources:
     min_body_chars: 600     # 通讯社正文比网页文章短，阈值低于 TrendForce 的 800
     params:
       lookback_days: 7
+      # 不固定 provider：恢复 legacy 的覆盖语义，使用本次 TWS 会话由
+      # reqNewsProviders() 返回的全部 API 新闻源。每篇仍保留 provider 原生标识，
+      # 正文预算、质量门和验收报告决定可用范围，不能仅因出现在列表中而发布。
+      provider_lookup_attempts: 3
+      provider_lookup_retry_seconds: 1
       # 只扫这些标的的新闻。**不是全市场**——按 conId 逐个请求，名单越长越慢，
       # 且与命题无关的公司只会把未映射池做大。先覆盖 L4 四家 + 最活跃的买方。
       symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
@@ -220,8 +227,27 @@ article_sources:
             supply, agreement, deal, pact, partnership, commitment, order,
             capacity, gpu, asic, xpu, accelerator, chip, hbm, foundry, capex]
 
+  # Yahoo Finance 的实时推荐新闻。它不替代 IBKR/Dow Jones，也不替代 defeatbeta
+  # 的 Yahoo 日级段落镜像：只在 IBKR/TWS 或供应商不可达、或历史切片失败时兜底；
+  # IBKR 健康但返回零新闻时不得调用此源，以免把两条不同编辑流混为同一主数据集。
+  # yfinance 的 ticker 推荐会混入行业/热门股票，adapter 因而只接受标题明确命中
+  # 查询实体 ticker、公司名或 entities.yaml 别名的候选；未命中的标题进入验收清单，
+  # 但绝不作为该实体的文档或证据发布。
+  yfinance_live_news:
+    label: Yahoo Finance 实时新闻（yfinance）
+    adapter: yfinance_live_news
+    entity: YAHOO_FINANCE
+    stance: regulator
+    doc_type: news
+    cadence: daily
+    pages: 1
+    max_per_run: 24
+    min_body_chars: 800
+    params: {}
+    match: []
+
   # 2026-08-18 接入。**文章已经在抓了，缺的只是通往命题的那一段。**
-  # config/news_sources.yaml 的 newsletter 管线（IMAP + Substack RSS）一直在收 SemiAnalysis，
+  # config/data/news_sources.yaml 的 newsletter 管线（IMAP + Substack RSS）一直在收 SemiAnalysis，
   # 产出 47 条 research_insights。但那张表的形状是 ticker/direction/summary/quote，
   # **没有 concept、没有 stance、没有 source_entity**，所以任何命题都够不着它。
   # 而躺在里面的东西是这样的：

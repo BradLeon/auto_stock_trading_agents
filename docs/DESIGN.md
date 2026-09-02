@@ -341,18 +341,27 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 
 两栏内部都不按盈亏排序——排序本身就是一种叙事选择，这里刻意不做。
 
-## 10. Context Memory：为什么用一张 SQLite 而不是向量库
+## 10. Context Memory 与共享数据平台
 
-个人投资者规模下，结构化字段的可审计性比"语义相似检索"更重要——每一次
-Chief 决策、每一次风控破限、每一笔成交，都需要能被精确回溯到具体的行，
-而不是"大概相关的一段文本"。向量记忆层（Chroma）在依赖清单里已经声明但
-未实际接入，见第 12 节路线图。
+个人投资者规模下，结构化字段的可审计性比先引入复杂基础设施更重要。当前用
+一张 SQLite 同时承载决策记忆和首期数据平台目录，但在逻辑上严格区分原始资料、
+中性事实、任务投影与最终决策。正文仍保存在文件资产中，SQLite 保存不可变版本、
+文本分块、处理台账和血缘。向量记忆层尚未接入，见第 12 节路线图。
+
+下图聚焦 Workflow Memory：它保存工作流产出，不是外部数据源；点击图片可打开交互版，继续查看其他 Memory 类型及其读取者。
+
+[![Workflow Memory 的内容、写入者和读取者](assets/data-lineage/workflow-memory-lineage.png)](DATA_LINEAGE_EXPLORER.html)
 
 | 表 | 写入者 | 读取者 |
 |---|---|---|
 | pead_dossier | PEAD prep/monitor/score | Chief、行业分析师、monitor 自身 |
 | pead_events | monitor（含研报注入） | monitor 上下文、行业分析师 |
 | research_articles/insights | 研报通道 | 行业分析师、monitor |
+| source_documents / document_versions / document_entities / document_chunks | 共享文档采集 | PEAD、Evidence、公司包、全文检索 |
+| document_processing_runs | PEAD、Evidence 文档消费者 | 幂等控制、健康状态、成本审计 |
+| measurement_series / measurement_points | 结构化 source adapter | 指标查询、历史时点回放、Pandas |
+| evidence_facts / evidence_fact_projections | Evidence 抽取与投影 | Evidence、公司包、命题包 |
+| task_projections | PEAD、Sector 等任务 | Agent 专属视图、版本审计、血缘 |
 | sector_reviews | 行业分析师 | Chief、PEAD 注入 |
 | macro_reviews | 宏观策略师 | Chief、行业/PEAD 注入 |
 | technical_reviews | 技术面分析师（每日） | Chief |
@@ -362,8 +371,9 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 | cycles/decisions | Chief 决策图 | Chief 自反馈、审计 |
 | journal_entries / trade_episodes / predictions / prediction_outcomes | 交易日志（reconcile/episodes/marks/score） | Chief 战绩反馈、critic 复盘 |
 
-原始行情/基本面等不落库（运行时现取），保持"数据是活的、决策记录是静态的"
-这条区分。
+结构化数据已经采用“原始观测版本不变、任务解释可重算”的原则，但目前只覆盖
+`chain.sources` 主链路；行情、基本面、宏观、期权等既有运行时源仍待渐进迁移。
+详细目标、边界和路线见 `docs/DATA_ARCHITECTURE.md`。
 
 ## 11. 人在回路（HITL）：唯一审批点的实现含义
 
@@ -397,6 +407,7 @@ Chief 决策、每一次风控破限、每一笔成交，都需要能被精确�
 - 代码规范、环境搭建、运维操作 → `docs/DEVELOPMENT.md`
 - workflow 细节表、触发路由表 → `docs/WORKFLOWS.md`
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`
+- 共享数据平台的产品需求、架构与实施边界 → `docs/DATA_ARCHITECTURE.md`
 - 行业分析师 L1-L6 分层方法论 → `docs/SECTOR_ANALYST.md`
 - 跨公司证据如何进入截面因子（共同需求 vs 相对份额）→ `docs/CHAIN_EVIDENCE.md`
 - 静态知识分层、谁读知识库、怎么发现它该更新 → `docs/KNOWLEDGE.md`

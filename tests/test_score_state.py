@@ -138,7 +138,7 @@ def test_8k_filed_on_the_print_date_confirms_the_release(monkeypatch):
     from ats.data import documents
 
     monkeypatch.setattr(documents, "sec_8k_release",
-                        lambda s: {"label": "8-K", "text": "x" * 3000,
+                        lambda s, **k: {"label": "8-K", "text": "x" * 3000,
                                    "filed": date(2026, 7, 22)})
     ok, why = scheduler._confirm_reported("GOOG", _print(eps_actual=None))
     assert ok and "8-K" in why
@@ -150,7 +150,7 @@ def test_stale_8k_does_not_confirm(monkeypatch):
     from ats.data import documents
 
     monkeypatch.setattr(documents, "sec_8k_release",
-                        lambda s: {"label": "8-K", "text": "x" * 3000,
+                        lambda s, **k: {"label": "8-K", "text": "x" * 3000,
                                    "filed": date(2026, 4, 29)})
     ok, why = scheduler._confirm_reported("GOOG", _print(eps_actual=None))
     assert not ok and "早于财报日" in why
@@ -159,7 +159,7 @@ def test_stale_8k_does_not_confirm(monkeypatch):
 def test_no_evidence_at_all_defers(monkeypatch):
     from ats.data import documents
 
-    monkeypatch.setattr(documents, "sec_8k_release", lambda s: None)
+    monkeypatch.setattr(documents, "sec_8k_release", lambda s, **k: None)
     ok, why = scheduler._confirm_reported("GOOG", _print(eps_actual=None))
     assert not ok and "8-K" in why
 

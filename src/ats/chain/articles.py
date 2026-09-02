@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from ..schemas.chain import ArticleRef, ArticleSourceDef
 
 log = logging.getLogger("ats.chain.articles")
+PROCESSOR_VERSION = "chain-observer-v1"
 
 
 @dataclass
@@ -68,10 +69,10 @@ class ArticleRunStat:
 
 
 def load_article_sources() -> list[ArticleSourceDef]:
-    """Read config/sources.yaml `article_sources:`. Missing key is fine — none declared."""
+    """Read config/data/sources.yaml `article_sources:`. Missing key is fine."""
     from ..config import _config_dir, _load_yaml
 
-    raw = _load_yaml(_config_dir() / "sources.yaml").get("article_sources", {}) or {}
+    raw = _load_yaml(_config_dir() / "data" / "sources.yaml").get("article_sources", {}) or {}
     out = []
     for sid, body in raw.items():
         try:
@@ -127,24 +128,57 @@ def _wanted(ref: ArticleRef, source: ArticleSourceDef) -> bool:
 
 
 def _seen_document_ids(store, entity: str) -> set[str]:
-    """Every document already on file for this publisher, successes AND failures.
+    """Documents this consumer spent work on, plus known-unreadable source failures.
 
     One query per run rather than one per article, and `ok_only=False` on purpose: a
     known-unreadable article must stay skipped, or the paywall gets re-probed weekly.
     """
     try:
+        seen = store.processed_document_ids("chain", PROCESSOR_VERSION, entity=entity)
         rows = store.documents(entity=entity, ok_only=False, limit=5000)
     except Exception as exc:  # noqa: BLE001
         log.warning("articles: could not read document inventory for %s — %s", entity, exc)
         return set()
-    return {r["document_id"] for r in rows if r.get("document_id")}
+    # A failed body fetch has no accepted content version, so it cannot have a normal
+    # processing row. Keep those ids in the negative cache exactly as before.
+    seen |= {r["document_id"] for r in rows if r.get("document_id") and not r.get("ok")}
+    return seen
+
+
+def _related_entities(mod, ref: ArticleRef, source: ArticleSourceDef) -> tuple[str, ...]:
+    """Keep a publisher witness while indexing only verified ticker associations.
+
+    Article sources such as IBKR News are configured with a publisher entity
+    (``DOWJONES``) because Chain uses it as an independent witness.  That must not
+    erase the ticker(s) for which the API returned and title-verified the article:
+    PEAD's monitor reads by ticker, whereas Chain reads by witness.  Adapter
+    provenance is the only source of such associations; a ticker merely present in
+    an API recommendation is deliberately not linked.
+    """
+    entities = {source.entity.upper()}
+    provenance = getattr(mod, "provenance", None)
+    if not callable(provenance):
+        return tuple(sorted(entities))
+    try:
+        raw = provenance(ref) or {}
+    except Exception as exc:  # noqa: BLE001 - association enrichment is best effort
+        log.warning("articles: provenance lookup failed for %s/%s: %s",
+                    source.id, ref.slug, exc)
+        return tuple(sorted(entities))
+    if str(raw.get("entity_association") or "") != "title_verified":
+        return tuple(sorted(entities))
+    for value in str(raw.get("title_verified_entities") or "").split(","):
+        value = value.strip().upper()
+        if value:
+            entities.add(value)
+    return tuple(sorted(entities))
 
 
 def collect_articles(store, *, source_ids: set[str] | None = None,
                      now: datetime | None = None) -> dict[str, ArticleRunStat]:
     """Discover, filter, fetch and read every declared article source."""
     from ..agents.evidence import observer
-    from ..data import source_cache
+    from ..data import document_assets
 
     now = now or datetime.now(timezone.utc)
     out: dict[str, ArticleRunStat] = {}
@@ -177,16 +211,37 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
             if not _wanted(ref, source):
                 continue
             document_id = f"{source.entity}:{ref.slug}:{source.doc_type}"
+            related_entities = _related_entities(mod, ref, source)
             if document_id in seen:
+                # Older IBKR runs retained the publisher witness but predated ticker
+                # association provenance.  A fresh, title-verified rediscovery can
+                # safely add that missing association without fetching a body or
+                # re-running Chain extraction.
+                store.link_document_entities(document_id, related_entities)
                 continue
             stat.matched += 1
 
-            try:
-                body = mod.fetch_body(ref.url)
-            except Exception as exc:  # noqa: BLE001 - one bad page, not the whole source
-                log.warning("articles: %s body fetch failed for %s — %s",
-                            source.id, ref.slug, exc)
+            published = ref.published_at.isoformat() if ref.published_at else ""
+            shared = store.document_by_story(ref.title, published)
+            if shared is not None and int(shared.get("chars") or 0) >= source.min_body_chars:
+                # Yahoo/Finnhub may already hold the same story. Reuse its exact bytes,
+                # but retain the IBKR/publisher identity and witness association.
+                store.save_document_alias(
+                    shared["document_id"], source=source.adapter, source_url=ref.url,
+                    external_id=ref.url, title=ref.title, published_at=published)
+                store.link_document_entities(shared["document_id"], related_entities)
+                body = document_assets.read_document(shared["document_id"], store=store)
+                document_id = shared["document_id"]
+            else:
                 body = ""
+
+            if not body:
+                try:
+                    body = mod.fetch_body(ref.url)
+                except Exception as exc:  # noqa: BLE001 - one bad page, not the whole source
+                    log.warning("articles: %s body fetch failed for %s — %s",
+                                source.id, ref.slug, exc)
+                    body = ""
             if len(body) < source.min_body_chars:
                 # Paywalled, or the template moved. Either way it is a GAP: recorded so
                 # a widening paywall shows up as missing evidence rather than as the
@@ -199,11 +254,26 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
                     at=now.isoformat())
                 continue
 
-            doc = source_cache.store(source.entity, ref.slug, source.doc_type, body,
-                                     source=source.adapter, source_url=ref.url, now=now)
-            if doc is not None:
-                store.save_document(doc)           # "we already paid for this one"
-                document_id = doc.document_id
+            # Managed sources such as subscribed research were persisted by the shared
+            # ingestion stage before this consumer ran. Do not rewrite their catalog
+            # metadata; web-only sources still enter the store here.
+            if store.latest_document_version(document_id) is None:
+                doc = document_assets.ingest(
+                    entity=source.entity, key=ref.slug, doc_type=source.doc_type, text=body,
+                    source=source.adapter, source_url=ref.url, external_id=ref.url,
+                    title=ref.title, published_at=(ref.published_at.isoformat()
+                                                   if ref.published_at else ""),
+                    now=now, min_chars=1, related_entities=related_entities,
+                    store=store,
+                )  # source-specific guard already ran above
+                if doc is not None:
+                    document_id = doc.document_id
+
+            version_id = store.begin_document_processing(
+                document_id, "chain", PROCESSOR_VERSION)
+            if not version_id:
+                # Another run/version already paid for this exact processing step.
+                continue
 
             # period="" on purpose. In observer.extract it is a per-ROW fallback
             # (`period=(v.period or period or "")`), so passing the slug would stamp it
@@ -214,6 +284,10 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
             stat.ingested += 1
             stat.observations += res.get("new", 0)
             stat.titles.append(ref.title or ref.slug)
+            store.finish_document_processing(
+                version_id, "chain", PROCESSOR_VERSION,
+                ok=not bool(res.get("failure")), outputs=res.get("new", 0),
+                note=res.get("failure", ""))
             if res.get("failure"):
                 log.info("articles: %s extraction failed for %s — %s",
                          source.id, ref.slug, res["failure"])

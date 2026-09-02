@@ -252,8 +252,8 @@ def reset_config_cache() -> None:
 
 
 def load_news_sources() -> dict:
-    """Load config/news_sources.yaml (RSS feeds, X accounts, keyword filters)."""
-    return _load_yaml(_config_dir() / "news_sources.yaml")
+    """Load config/data/news_sources.yaml (RSS feeds, X accounts, keyword filters)."""
+    return _load_yaml(_config_dir() / "data" / "news_sources.yaml")
 
 
 @functools.lru_cache(maxsize=1)

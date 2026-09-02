@@ -8,8 +8,8 @@ standardize a handful of factors WITHIN the cohort (Barra-lite z-scores),
 composite them into a rank (selection), then turn the rank into weights under a
 risk budget (inverse-beta + a small-cap liquidity haircut + a single-name cap).
 
-Factors are sourced from yfinance/finnhub (fundamentals.fetch_light), price
-momentum (sector_snapshot) and analyst rating revisions (consensus.rating_trend).
+Factors use governed constituent accounting where covered, runtime valuation/beta,
+price momentum (sector_snapshot) and analyst rating revisions (consensus.rating_trend).
 Purity / competitive-position (need LLM/manual tags) come later. Deterministic +
 auditable: weights and the composite are pure code; nothing here calls an LLM.
 """
@@ -121,9 +121,9 @@ def fetch_factors(symbols: list[str], subgroups: dict[str, str] | None = None) -
     prices = sector_snapshot.fetch_prices(symbols, period="1y")
     rows: list[FactorRow] = []
     for s in symbols:
-        lt = fundamentals.fetch_light(s)
+        lt = fundamentals.fetch_constituent_financials(s)
         closes = prices.get(s) or []
-        cons = consensus_src.fetch(s)
+        cons = consensus_src.fetch(s, consumer="sector_consensus")
         rows.append(FactorRow(
             symbol=s, subgroup=subgroups.get(s, ""),
             market_cap=lt.get("market_cap"), beta=lt.get("beta"),

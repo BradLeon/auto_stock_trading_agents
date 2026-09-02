@@ -450,7 +450,7 @@ class SourceDef(BaseModel):
     Customs bureaus and pricing agencies are not party to anything, so the `regulator`
     stance they carry is the scarcest kind of evidence this system can hold: the one
     kind that a single company's narrative cannot colour. Declared in
-    config/sources.yaml; see that file for the field-by-field rationale.
+    config/data/sources.yaml; see that file for the field-by-field rationale.
     """
 
     id: str
@@ -487,7 +487,7 @@ class ArticleSourceDef(BaseModel):
     read. Folding the two together would quietly cost `sources.py` the property its own
     docstring sells, that its numbers never passed through a model's judgement.
 
-    Declared in config/sources.yaml under `article_sources:`; see that file for the
+    Declared in config/data/sources.yaml under `article_sources:`; see that file for the
     field-by-field rationale.
     """
 

@@ -1,0 +1,116 @@
+# Unstructured-domain extensions to the unified catalog.
+# Detailed third-party and news registries are in ``sources.yaml`` and
+# ``news_sources.yaml`` in this directory.
+version: 1
+legacy_registries:
+  evidence: sources.yaml
+  news: news_sources.yaml
+document_types:
+  - earnings_release
+  - sec_filing
+  - transcript
+  - research
+  - article
+  - news
+  - deck
+admission:
+  require_source_url: true
+  quarantine_on_short_body: true
+retention:
+  default: source_policy
+# 这些条目是来源级发布的配置索引；详细的抓取参数由同目录的
+# sources.yaml 与 news_sources.yaml 持有。status 仅是初始安全模式，
+# 实际是否可发布必须由 source-acceptance 的数据质量报告决定。
+sources:
+  trendforce_news:
+    domain: unstructured
+    provider: TrendForce
+    adapter: trendforce
+    status: registered
+    cadence: weekly
+    request_budget:
+      max_pages: 5
+      max_body_requests: 16
+    policy:
+      registry: sources.yaml#article_sources.trendforce_news
+      scope: article_index
+      minimum_body_chars: 800
+      max_body_attempts: 2
+      lookback_days: 14
+      fallback_mode: legacy
+      separate_dataset: industry_dram_contract_price
+  semianalysis:
+    domain: unstructured
+    provider: SemiAnalysis
+    adapter: semianalysis
+    status: registered
+    cadence: weekly
+    request_budget:
+      max_items_per_run: 4
+    policy:
+      registry: sources.yaml#article_sources.semianalysis
+      acquisition: research_imap_and_rss
+      minimum_body_chars: 2000
+      lookback_days: 30
+      dedup_keys: [message_id_or_uid, canonical_url, content_hash]
+      body_preference: imap_email
+      # 未订阅时邮件通常只含可验证的预览正文。预览可作为带 completeness=partial
+      # 标签的研究输入发布；它不能被后续产品误读为全文，也不能覆盖未来取得的完整版本。
+      allow_partial_bodies: true
+      partial_body_disclosure: subscriber_preview_or_paywall_boundary
+      fallback_mode: legacy
+  ibkr_news:
+    domain: unstructured
+    provider: IBKR News
+    adapter: ibkr_news
+    status: registered
+    cadence: daily
+    request_budget:
+      lookback_days: 7
+      slice_days: 3
+      max_body_requests: 10
+    policy:
+      registry: sources.yaml#article_sources.ibkr_news
+      access: tws_read_only
+      minimum_body_chars: 600
+      lookback_days: 7
+      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+      providers: dynamic_tws_session
+      # IBKR 是股票新闻的主来源。Yahoo 只在 TWS/供应商不可达或某个
+      # historical-news 切片失败时按相同标的范围兜底；“没有新闻”是正常结果，
+      # 不会触发双源混采。
+      priority: primary
+      require_entity_verified: true
+      association_gate: title_ticker_company_or_registered_alias
+      dedup_keys: [provider_article_id, normalised_title_and_exact_time, content_hash]
+      failure_states: [tws_unreachable, unauthorized, provider_unavailable, rate_limited,
+                       request_rejected]
+      fallback:
+        source_id: yfinance_live_news
+        activate_on: [unreachable, tws_unreachable, unauthorized, provider_unavailable,
+                      rate_limited, request_rejected]
+      fallback_mode: yfinance_live_news
+  yfinance_live_news:
+    domain: unstructured
+    provider: Yahoo Finance via yfinance
+    adapter: yfinance_live_news
+    status: registered
+    cadence: daily
+    request_budget:
+      max_items_per_entity: 10
+      max_body_requests: 24
+    policy:
+      registry: sources.yaml#article_sources.yfinance_live_news
+      acquisition: yfinance_ticker_news
+      entities: dynamic_pead_targets
+      minimum_body_chars: 800
+      lookback_days: 2
+      require_entity_verified: true
+      association_gate: title_ticker_company_or_registered_alias
+      body_gate: direct_article_container_with_title_anchor
+      dedup_keys: [yahoo_content_id, canonical_url]
+      # 不是与 IBKR 并行的普通新闻源；只接受 IBKR 可达性/切片失败后的兜底调用。
+      priority: availability_fallback
+      fallback_for: ibkr_news
+      fallback_mode: none
+      release_requires_human_title_url_review: true

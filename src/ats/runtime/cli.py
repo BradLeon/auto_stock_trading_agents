@@ -115,7 +115,12 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
                   f"(门槛 {sc.threshold:+.1f}) — {sc.band}")
         print(f"决策情景: {result.get('decision_band', '—')} · 建议 {len(recs)} 条")
         for d in recs:
-            size = f"${d.notional_usd:,.0f}" if d.notional_usd else (f"{d.qty:.0f}股" if d.qty else "")
+            # PEAD persists a recommendation, not an executable TradeDecision.
+            # Keep the CLI presentation on its public ``*_hint`` contract so a
+            # completed graph cannot be reported as a command failure.
+            notional = getattr(d, "notional_hint", None)
+            quantity = getattr(d, "qty_hint", None)
+            size = f"${notional:,.0f}" if notional else (f"{quantity:.0f}股" if quantity else "")
             print(f"  • 建议 {d.action} {d.symbol} {size}")
     print("=" * 70)
 
@@ -823,7 +828,7 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
 
         saved = chain_sources.collect(store)
         if not saved:
-            print("（config/sources.yaml 里没有配置第三方源）")
+            print("（config/data/sources.yaml 里没有配置第三方源）")
             return 0
         # -1 = the source could not be reached this round (true gap). 0 = it was
         # reached but every point was already in the ledger (data is current, not
@@ -842,10 +847,16 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         # The prose half of `collect`. Separate command because it costs a model call
         # per article and takes minutes, while `collect` is arithmetic over a series.
         from ..chain import articles as chain_articles
+        from ..data import research as research_data
+
+        # Newsletter acquisition is a source-stage operation shared by every consumer.
+        # The SemiAnalysis adapter below only discovers already-stored assets.
+        if not entity or entity == "semianalysis":
+            research_data.ingest_configured(store=store)
 
         stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
         if not stats:
-            print("（config/sources.yaml 里没有配置 article_sources）")
+            print("（config/data/sources.yaml 里没有配置 article_sources）")
             return 0
         for sid, st in sorted(stats.items()):
             if st.unreachable:
@@ -1002,7 +1013,14 @@ def sector_probe(name: str = "ai_hardware", *, live_data: bool = True) -> int:
 def run_pead_research(*, use_llm: bool = True) -> list:
     """One research pass: ingest newsletters, extract per-ticker insights."""
     from ..agents.pead import research
+    from ..data import research as research_data
+    from ..data.stores.unstructured import get_data_ingestion_store
 
+    data_store = get_data_ingestion_store()
+    try:
+        research_data.ingest_configured(store=data_store)
+    finally:
+        data_store.close()
     insights = research.run(use_llm=use_llm)
     if not insights:
         print("📰 research — no new articles / no insights")
@@ -1214,10 +1232,428 @@ def _setup_logging() -> None:
     logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
 
 
+def run_data(action: str, value: str = "", *, source: str = "", series: str = "",
+             entity: str = "", provider: list[str] | None = None, since: str = "", as_of: str = "", limit: int = 20,
+             vintages: bool = False, dataset: str = "", metric: str = "",
+             status: str = "", output_format: str = "json",
+             periods: list[str] | None = None, query_scope: str = "",
+             db_path: str = "", artifact_root: str = "", force: bool = False,
+             apply: bool = False, mode: str = "platform",
+             release_file: str = "", kind: str = "", operation: str = "",
+             window: int = 0, entities: str = "", period: str = "",
+             report_path: str = "", acquire: bool = False,
+             provider_lookup_attempts: int = 3,
+             provider_lookup_retry_seconds: float = 1.0,
+             approve_title_url_review: bool = False) -> int:
+    """Inspect stable data products without knowing their backing tables."""
+    import json
+
+    if action == "pead-official-disclosure-coverage":
+        import os
+
+        from ..data.pead_official_disclosures import (
+            active_pead_targets,
+            collect_active_packages,
+            write_acceptance_report,
+        )
+        from ..memory.store import TradingMemory
+
+        if not db_path or not artifact_root:
+            raise ValueError(
+                "pead-official-disclosure-coverage requires --db and --artifact-root "
+                "so acceptance cannot write production documents")
+        previous_root = os.environ.get("ATS_DOCS_ROOT")
+        os.environ["ATS_DOCS_ROOT"] = artifact_root
+        store = TradingMemory(db_path)
+        try:
+            packages = collect_active_packages(store=store)
+            report = write_acceptance_report(
+                report_path or Path(artifact_root) / "PEAD_OFFICIAL_DISCLOSURE_ACCEPTANCE.md",
+                packages)
+            result = {
+                "scope": active_pead_targets(),
+                "packages": [package.as_dict() for package in packages],
+                "report": str(report),
+                "complete": all(package.complete for package in packages),
+                "side_effects": {
+                    "llm": 0, "pead_scoring": 0, "chief": 0,
+                    "broker_orders": 0, "trades": 0,
+                },
+            }
+        finally:
+            store.conn.close()
+            if previous_root is None:
+                os.environ.pop("ATS_DOCS_ROOT", None)
+            else:
+                os.environ["ATS_DOCS_ROOT"] = previous_root
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["complete"] else 2
+
+    if action == "ibkr-news-diagnostics":
+        from ..data.articles.ibkr_news import diagnose
+
+        result = diagnose(
+            symbol=entity or value or "NVDA", providers=provider or None,
+            provider_lookup_attempts=provider_lookup_attempts,
+            provider_lookup_retry_seconds=provider_lookup_retry_seconds)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action in {"source-acceptance", "source-publish", "source-releases"}:
+        from ..data.pipelines.unstructured.source_acceptance import (
+            assess_article_source,
+            assess_ibkr_news_with_fallback,
+            load_release_overlay,
+            publish_source,
+            write_acceptance_report,
+        )
+
+        if action == "source-releases":
+            print(json.dumps(load_release_overlay(release_file or None), ensure_ascii=False,
+                             indent=2, default=str))
+            return 0
+        source_id = source or value
+        if not source_id:
+            raise ValueError(f"{action} requires --source or VALUE")
+        previous_env: dict[str, str | None] = {}
+        isolated_store = None
+        try:
+            if acquire:
+                if source_id != "semianalysis":
+                    raise ValueError("--acquire is currently only supported for semianalysis")
+                if not db_path or not artifact_root:
+                    raise ValueError("source-acceptance --acquire requires --db and --artifact-root")
+                # Mail/RSS acquisition is permitted only into explicitly supplied
+                # isolated storage.  The acceptance pass below then reads that same
+                # immutable asset catalog; no Chain/PEAD/Chief operation is invoked.
+                import os
+
+                from ..data import research as research_data
+                from ..memory import TradingMemory, reset_store_cache
+
+                previous_env = {name: os.environ.get(name) for name in ("ATS_DB_PATH", "ATS_DOCS_ROOT")}
+                os.environ["ATS_DB_PATH"] = db_path
+                os.environ["ATS_DOCS_ROOT"] = artifact_root
+                reset_store_cache()
+                isolated_store = TradingMemory(db_path)
+                batch = research_data.ingest_configured_batch(store=isolated_store)
+                acquired = list(batch.articles)
+            else:
+                acquired = []
+            result = (assess_ibkr_news_with_fallback(
+                human_review_approved=approve_title_url_review)
+                if source_id == "ibkr_news" else assess_article_source(
+                    source_id, human_review_approved=approve_title_url_review))
+            result["acquisition"] = {"requested": acquire, "articles": len(acquired),
+                                     "isolated": bool(acquire),
+                                     "transport_status": batch.transport_status if acquire else {}}
+            if acquire and not batch.complete:
+                result["outcome"] = "partial"
+                result["classification"] = "partial"
+                result["platform_eligible"] = False
+                result["checks"].append({
+                    "check": "acquisition_transport_completeness", "passed": False,
+                    "detail": batch.transport_status,
+                })
+        finally:
+            if isolated_store is not None:
+                isolated_store.conn.close()
+            if previous_env:
+                import os
+
+                from ..memory import reset_store_cache
+
+                for name, previous in previous_env.items():
+                    if previous is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = previous
+                reset_store_cache()
+        if report_path:
+            result["report"] = str(write_acceptance_report(result, report_path))
+        if action == "source-publish":
+            if apply:
+                result["release"] = publish_source(
+                    result, path=release_file or None, mode=mode)
+            else:
+                result["release"] = {"applied": False, "mode": mode,
+                                     "reason": "pass --apply to mutate release overlay"}
+        # A source report intentionally keeps the complete candidate ledger on disk.
+        # Do not flood an operator's terminal with hundreds of deferred headlines.
+        rendered = result
+        if report_path:
+            rendered = {key: value for key, value in result.items() if key != "candidates"}
+            rendered["candidate_count"] = len(result["candidates"])
+            rendered["candidate_preview"] = result["candidates"][:20]
+        print(json.dumps(rendered, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["platform_eligible"] else 2
+
+    if action == "config":
+        from ..data.catalog import load_data_catalog
+
+        catalog = load_data_catalog()
+        validation = catalog.validate()
+        result = {
+            "catalog": str(catalog.path),
+            "version": catalog.version,
+            "validation": validation.model_dump(mode="json"),
+            "statuses": catalog.statuses(),
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if validation.valid else 2
+
+    if action == "financial-package-check":
+        from ..data.financial_release import company_financial_release_check
+        from ..data.runtime import get_platform_structured_repository
+
+        repository = get_platform_structured_repository()
+        try:
+            result = company_financial_release_check(
+                repository, entities=[entity] if entity else None)
+        finally:
+            repository.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["ready"] else 2
+
+    # Interactive data commands are the governed platform surface.  The
+    # compatibility facade defaults to the legacy SQLite path, which made the
+    # CLI report ``no_coverage`` even when var/data.sqlite had accepted rows.
+    from ..data.products import get_platform_data_products
+
+    products = get_platform_data_products()
+    if db_path and action not in {
+            "validate-source", "ingest", "release-check", "publish", "rollback"}:
+        from ..data.products import DataProducts
+        from ..data.structured import SQLiteStructuredRepository
+
+        isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
+        isolated.bootstrap_catalog()
+        products = DataProducts(store=products.store, structured_repository=isolated)
+    if action in {"validate-source", "ingest", "release-check", "publish"}:
+        from ..data.structured import (
+            ReleaseManager,
+            SQLiteStructuredRepository,
+            StructuredCatalog,
+            ingest_source,
+            validate_source_registration,
+        )
+
+        catalog = StructuredCatalog.load()
+        repository = products.structured
+        close_repository = False
+        if db_path or artifact_root:
+            if not db_path:
+                raise ValueError("--artifact-root requires --db for an isolated run")
+            repository = SQLiteStructuredRepository(
+                db_path, artifact_root=artifact_root or None)
+            repository.bootstrap_catalog(catalog)
+            close_repository = True
+        target_source = source or value
+        try:
+            if action == "validate-source":
+                if not target_source:
+                    raise ValueError("validate-source requires --source or VALUE")
+                result = validate_source_registration(target_source, catalog=catalog)
+            elif action == "ingest":
+                if not target_source:
+                    raise ValueError("ingest requires --source or VALUE")
+                scope = json.loads(query_scope) if query_scope else {}
+                if since:
+                    scope.setdefault("since", since)
+                result = ingest_source(
+                    repository, target_source,
+                    entities=[entity] if entity else [], periods=periods or [],
+                    query_scope=scope, catalog=catalog, force=force)
+            else:
+                manager = ReleaseManager(
+                    repository, catalog=catalog, path=release_file or None)
+                target_id = target_source
+                if not target_id:
+                    raise ValueError(f"{action} requires --source or VALUE")
+                check = manager.check_source(target_id, mode=mode)
+                result = manager.apply(check) if action == "publish" and apply else {
+                    **check, "applied": False,
+                    "operation": "publish_preview" if action == "publish"
+                    else "release_check"}
+        finally:
+            if close_repository:
+                repository.close()
+    elif action == "catalog":
+        result = products.structured_catalog()
+    elif action == "describe":
+        if not value:
+            raise ValueError("describe requires VALUE")
+        result = products.describe_structured(value, kind=kind)
+    elif action == "availability":
+        result = products.structured_availability(entity=entity, dataset=dataset)
+    elif action == "examples":
+        result = products.structured_examples(dataset=dataset)
+    elif action == "releases":
+        from ..data.structured import load_release_overlay
+
+        result = load_release_overlay(release_file or None)
+    elif action == "sources":
+        result = products.sources()
+    elif action == "datasets":
+        result = products.datasets()
+    elif action == "metrics":
+        result = products.metrics()
+    elif action == "health":
+        result = products.health()
+    elif action == "quality":
+        structured = products.structured_quality_report(dataset=dataset or None)
+        if output_format == "markdown":
+            from ..data.structured import render_quality_markdown
+
+            print(render_quality_markdown(structured), end="")
+            return 0
+        # Preserve the historical document-quality top-level contract while adding
+        # the structured report under an explicit namespace.
+        result = structured if dataset else {
+            **products.quality(), "structured": structured}
+    elif action == "coverage":
+        report = products.structured_quality_report(dataset=dataset or None)
+        result = {
+            "generated_at": report["generated_at"],
+            "dataset_filter": report["dataset_filter"],
+            "datasets": [{
+                "dataset_id": row["dataset_id"],
+                "catalog_status": row["catalog_status"],
+                "coverage": row["dimensions"]["coverage"],
+            } for row in report["datasets"]],
+        }
+    elif action == "series":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        if metric:
+            if not entity:
+                raise ValueError("structured metric series requires --entity")
+            result = products.metric_series(
+                metric=metric, entity=entity, dataset=dataset or None,
+                source_id=source or None, since=since or None, as_of=cutoff,
+                include_vintages=vintages,
+                source_strategy="all" if source else "selected")
+        else:
+            result = products.indicator_series(
+                source_id=source or None, series=series or None, entity=entity or None,
+                since=since or None, as_of=cutoff, include_vintages=vintages,
+            )
+    elif action == "derive":
+        if not metric or not entity or not operation:
+            raise ValueError("derive requires --metric, --entity and --operation")
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        base = products.metric_series(
+            metric=metric, entity=entity, dataset=dataset or None,
+            since=since or None, as_of=cutoff, include_vintages=vintages,
+            quality="strict")
+        result = products.derive(
+            operation=operation, query_result=base,
+            window=window or None, min_periods=window or None)
+    elif action == "cross-section":
+        selected_entities = [item.strip().upper() for item in entities.split(",")
+                             if item.strip()]
+        if not metric or not selected_entities or not period:
+            raise ValueError(
+                "cross-section requires --metric, --entities and --period")
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.cross_section(
+            metric=metric, entities=selected_entities, period=period,
+            dataset=dataset or None, as_of=cutoff)
+    elif action == "search":
+        result = products.search_documents(
+            value, entity=entity or None, source_contains=source or None,
+            published_since=since or None, limit=limit,
+        )
+    elif action == "company":
+        result = products.company_research_package(value)
+    elif action == "claim":
+        result = products.claim_evidence_package(value, limit=limit)
+    elif action == "lineage":
+        result = products.lineage(value)
+    elif action == "conflicts":
+        result = products.structured_conflicts(
+            dataset_id=dataset or None, status=status or "open", limit=limit)
+    elif action == "pending-mappings":
+        result = products.structured_pending_mappings(
+            status=status or "pending", limit=limit)
+    elif action == "ingestion-history":
+        result = products.structured_ingestion_history(
+            source_id=source or None, dataset_id=dataset or None, limit=limit)
+    elif action == "artifacts":
+        result = products.structured_artifact_usage(source=source or None)
+    else:
+        raise ValueError(f"unknown data action: {action}")
+    if output_format == "markdown" and action in {
+            "catalog", "describe", "availability", "examples"}:
+        from ..data.structured import render_discovery_markdown
+
+        print(render_discovery_markdown(result), end="")
+    else:
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
+    data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
+    data.add_argument("action", choices=[
+        "catalog", "config", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "describe", "availability", "examples", "releases",
+        "validate-source", "ingest", "release-check", "publish",
+        "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
+        "derive", "cross-section",
+        "search", "company", "claim", "lineage", "conflicts", "pending-mappings",
+        "ingestion-history", "artifacts"])
+    data.add_argument("value", nargs="?", default="",
+                      help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID")
+    data.add_argument("--source", default="", help="series: source ID；search: 来源过滤")
+    data.add_argument("--provider", action="append", default=[],
+                      help="ibkr-news-diagnostics: 待探测的 provider code，可重复；默认探测全部可用项")
+    data.add_argument("--provider-lookup-attempts", type=int, default=3,
+                      help="ibkr-news-diagnostics: provider 枚举的最大尝试次数（默认 3）")
+    data.add_argument("--provider-lookup-retry-seconds", type=float, default=1.0,
+                      help="ibkr-news-diagnostics: provider 枚举重试间隔秒数（默认 1）")
+    data.add_argument("--approve-title-url-review", action="store_true",
+                      help="source-acceptance/source-publish: 明确确认已人工审阅标题/URL 清单")
+    data.add_argument("--series", default="", help="series: 指标名称")
+    data.add_argument("--metric", default="", help="series: 统一结构化 metric ID")
+    data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
+    data.add_argument("--entity", default="", help="实体过滤")
+    data.add_argument("--since", default="", help="最早期间或发布日期")
+    data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
+    data.add_argument("--limit", type=int, default=20, help="通用结果条数")
+    data.add_argument("--status", default="", help="conflicts / pending-mappings 状态过滤")
+    data.add_argument("--format", dest="output_format", choices=["json", "markdown"],
+                      default="json", help="quality/catalog/describe 等输出格式")
+    data.add_argument("--vintages", action="store_true", help="series: 包含所有修订版本")
+    data.add_argument("--kind", choices=["source", "dataset", "metric"], default="",
+                      help="describe: 限定对象类型")
+    data.add_argument("--periods", action="append", default=[],
+                      help="ingest: 目标期间，可重复")
+    data.add_argument("--query-scope", default="",
+                      help="ingest: Provider 查询范围 JSON")
+    data.add_argument("--db", dest="db_path", default="",
+                      help="ingest/release: 隔离或目标 SQLite 路径")
+    data.add_argument("--artifact-root", default="",
+                      help="ingest: 隔离 raw artifact 目录（需同时 --db）")
+    data.add_argument("--report-path", default="",
+                      help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径")
+    data.add_argument("--force", action="store_true",
+                      help="ingest: 仅用于隔离验收，跳过已发布 source 的重复保护")
+    data.add_argument("--acquire", action="store_true",
+                      help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库")
+    data.add_argument("--apply", action="store_true",
+                      help="publish/source-publish: 显式执行写操作")
+    data.add_argument("--mode", choices=["platform"], default="platform",
+                      help="publish: 唯一受支持的数据路径")
+    data.add_argument("--release-file", default="",
+                      help="发布覆盖层路径；structured 默认 var/structured_data，source-* 默认 var/data/unstructured")
+    data.add_argument("--operation", choices=["yoy", "mom", "rolling"], default="",
+                      help="derive: 派生运算")
+    data.add_argument("--window", type=int, default=0, help="derive rolling 窗口")
+    data.add_argument("--entities", default="",
+                      help="cross-section: 逗号分隔实体")
+    data.add_argument("--period", default="", help="cross-section: 比较期间")
     sub.add_parser("ibkr", help="probe IBKR paper connectivity (account + positions)")
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
     srv.add_argument("--host", default="0.0.0.0")
@@ -1225,6 +1661,8 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    sch.add_argument("--no-llm", action="store_true",
+                     help="run the same schedule without external-model calls (useful for safe acceptance checks)")
     sch.add_argument("--window", choices=["amc", "bmo"],
                      help="run one PEAD score window immediately, then exit")
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
@@ -1336,6 +1774,24 @@ def main(argv: list[str] | None = None) -> int:
                     help="score: run the Chief immediately after the recommendation persists")
     args = parser.parse_args(argv)
 
+    if args.command == "data":
+        if args.action in {"search", "company", "claim", "lineage"} and not args.value:
+            parser.error(f"data {args.action} requires VALUE")
+        return run_data(args.action, args.value, source=args.source, series=args.series,
+                        entity=args.entity, provider=args.provider, since=args.since, as_of=args.as_of,
+                        limit=args.limit, vintages=args.vintages, dataset=args.dataset,
+                        metric=args.metric, status=args.status,
+                        output_format=args.output_format, periods=args.periods,
+                        query_scope=args.query_scope, db_path=args.db_path,
+                        artifact_root=args.artifact_root, force=args.force,
+                        apply=args.apply, mode=args.mode,
+                        release_file=args.release_file, kind=args.kind,
+                        operation=args.operation, window=args.window,
+                        entities=args.entities, period=args.period,
+                        report_path=args.report_path, acquire=args.acquire,
+                        provider_lookup_attempts=args.provider_lookup_attempts,
+                        provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,
+                        approve_title_url_review=args.approve_title_url_review)
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":
@@ -1346,7 +1802,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule":
         from .scheduler import start
 
-        start(dry_run=not args.live, run_once=args.now, window=args.window)
+        start(dry_run=not args.live, run_once=args.now, window=args.window,
+              use_llm=not args.no_llm)
         return 0
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)

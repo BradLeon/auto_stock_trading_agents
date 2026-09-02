@@ -15,6 +15,15 @@ class Article(BaseModel):
     url: str = ""
     body: str = ""
     published_at: datetime
+    completeness: str = "full"       # full | partial | teaser
+    truncation_reason: str = ""
+    mime_source: str = ""
+    mailbox: str = ""
+    folder: str = ""
+    sender: str = ""
+    uidvalidity: str = ""
+    uid: int | None = None
+    message_id: str = ""
 
 
 class Insight(BaseModel):

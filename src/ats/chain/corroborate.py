@@ -183,7 +183,7 @@ def build_clusters(claim: ClaimDef, rows: list[dict], *,
                 direction=r.get("direction") or "flat",
                 # Companies get their stance from the claim's witness table; a customs
                 # bureau is in no claim's witness table, so it declares its own in
-                # config/sources.yaml. Either way the stance is DECLARED, never read
+                # config/data/sources.yaml. Either way the stance is DECLARED, never read
                 # off the material — which is the invariant that matters.
                 stance=claim.stance_of(_speaker(r)) or _source_stance(_speaker(r)),
                 primary=r.get("observation_type") in PRIMARY_TYPES)

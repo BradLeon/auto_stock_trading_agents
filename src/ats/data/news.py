@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..config import get_config, load_news_sources
 from ..schemas.news import NewsItem
@@ -20,25 +21,130 @@ log = logging.getLogger("ats.data.news")
 name = "news"
 
 
-def fetch_news(symbol: str, since: datetime, until: datetime | None = None) -> list[NewsItem]:
+def fetch_news(symbol: str, since: datetime, until: datetime | None = None, *,
+               store=None, consumer: str = "pead_monitor") -> list[NewsItem]:
+    """Read released news only; scheduled ingestion owns source acquisition.
+
+    A consumer must never fall back to an ad-hoc provider request: doing so bypasses
+    entity admission, deduplication and the platform lineage recorded at ingestion.
+    """
     until = until or datetime.now(timezone.utc)
-    sources_cfg = load_news_sources()
+    from .products.unstructured import platform_news_items
 
-    items: list[NewsItem] = []
-    fh = safe_fetch(lambda: _finnhub(symbol, since, until), source=f"finnhub:{symbol}")
-    if fh:
-        items += fh
-    items += _rss(symbol, since, sources_cfg)
-    items += _x(symbol, since, sources_cfg)
+    return platform_news_items(entity=symbol, since=since, until=until)
 
-    # Dedup by id, keep newest first.
-    seen, out = set(), []
-    for it in sorted(items, key=lambda x: x.published_at, reverse=True):
-        if it.id in seen:
+
+def external_id(item: NewsItem) -> str:
+    """Cross-provider identity: canonical URL when present, provider id otherwise."""
+    if not item.url:
+        return f"news:{item.id}"
+    parts = urlsplit(item.url.strip())
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                       if not k.lower().startswith("utm_") and k.lower() not in {
+                           "guccounter", "guce_referrer", "guce_referrer_sig"}])
+    host = parts.netloc.lower().removeprefix("www.")
+    path = parts.path.rstrip("/") or "/"
+    return urlunsplit((parts.scheme.lower(), host, path, query, ""))
+
+
+def _catalog(items: list[NewsItem], *, store=None) -> None:
+    """Save the provider-visible headline/summary before any triage decision."""
+    from . import document_assets
+
+    if store is None:
+        from .stores.unstructured import get_data_ingestion_store
+
+        store = get_data_ingestion_store()
+
+    for item in items:
+        identity = external_id(item)
+        structured_body = item.structured_body()
+        body = structured_body or item.headline.strip()
+        if not structured_body and item.summary.strip():
+            body += "\n\n" + item.summary.strip()
+        if not body:
             continue
-        seen.add(it.id)
-        out.append(it)
-    return out
+        published = item.published_at.isoformat()
+        existing = store.document_by_external_id(identity)
+        if existing is None:
+            existing = store.document_by_story(item.headline, published)
+        # A complete copy already held through another provider is the canonical asset;
+        # retain this provider as an alias instead of re-indexing the same story.
+        if existing is not None and int(existing.get("chars") or 0) >= 800:
+            store.link_document_entities(existing["document_id"], item.tickers)
+            metadata = {
+                "publisher": item.publisher, "report_date": item.report_date,
+                "article_type": item.article_type,
+                "snapshot_updated_at": item.snapshot_updated_at,
+                "snapshot_lag_hours": item.snapshot_lag_hours,
+                "paragraphs": [row.model_dump() for row in item.paragraphs],
+            }
+            store.save_document_alias(
+                existing["document_id"], source=item.source, source_url=item.url,
+                external_id=identity, title=item.headline, published_at=published,
+                metadata=metadata)
+            continue
+        doc = document_assets.ingest(
+            entity="NEWS", key=document_assets.stable_key(identity, prefix="news"),
+            doc_type="news_item", text=body,
+            source=(f"{item.source}:structured" if structured_body
+                    else f"{item.source}:metadata"),
+            source_url=item.url, external_id=identity, title=item.headline,
+            published_at=published,
+            related_entities=tuple(item.tickers), min_chars=1, store=store,
+            carrier_format="structured_dataset" if structured_body else "api_json",
+        )
+        if doc is not None and structured_body and item.source == "yahoo:defeatbeta":
+            from . import yahoo_news
+
+            yahoo_news.save_structure(item, doc)
+        if doc is not None:
+            store.save_document_alias(
+                doc.document_id, source=item.source, source_url=item.url,
+                external_id=identity, title=item.headline, published_at=published,
+                metadata={"publisher": item.publisher, "report_date": item.report_date})
+
+
+def acquire_body(item: NewsItem, *, store=None) -> str:
+    """Return shared full text, fetching it at most once after metadata ingestion."""
+    if item.source.startswith("platform:"):
+        from .products.unstructured import _read_version_text
+        from .stores.unstructured import get_platform_unstructured_repository
+
+        repository = get_platform_unstructured_repository()
+        try:
+            version = repository.latest_document_version(item.id)
+            return _read_version_text(version or {})
+        finally:
+            repository.close()
+    from .stores.unstructured import get_data_ingestion_store
+    from . import document_assets
+    from .web import fetch_article_text
+
+    store = store or get_data_ingestion_store()
+    identity = external_id(item)
+    row, cached = document_assets.read_external(identity, store=store)
+    # Metadata versions are intentionally short. Once a real article body exists,
+    # every target and Workflow reuses it without another HTTP request.
+    if row and len(cached) >= 800:
+        store.link_document_entities(row["document_id"], item.tickers)
+        return cached
+    structured = item.structured_body()
+    if structured:
+        return structured
+    if not item.url:
+        return ""
+    body = fetch_article_text(item.url)
+    if not body:
+        return ""
+    doc = document_assets.ingest(
+        entity="NEWS", key=document_assets.stable_key(identity, prefix="news"),
+        doc_type="news_item", text=body, source=f"{item.source}:fulltext",
+        source_url=item.url, external_id=identity, title=item.headline,
+        published_at=item.published_at.isoformat(), related_entities=tuple(item.tickers),
+        min_chars=1, store=store,
+    )
+    return doc.text if doc else body
 
 
 # --------------------------------------------------------------------------- #

@@ -86,6 +86,10 @@ flowchart LR
     ML -.战绩反馈.-> CH
 ```
 
+下图把外部来源、持久化数据、实时输入、独立 Agent / Workflow、运行记忆及主要读取者放在同一张血缘图中。点击图片可打开交互版并逐项查看消费者。
+
+[![数据层全景：来源、数据产品、Workflow Memory 与消费者](docs/assets/data-lineage/data-layer-overview.png)](docs/DATA_LINEAGE_EXPLORER.html)
+
 分析师之间是"平级"关系：行业分析师可以参考宏观策略师**已经发布**的结论作为
 背景，PEAD 分析师可以参考行业和宏观的结论作为背景——但没有人能**修改**别人的
 产出，更没有人能绕过 Chief 自己下单。

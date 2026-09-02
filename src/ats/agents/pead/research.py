@@ -23,9 +23,10 @@ log = logging.getLogger("ats.agents.pead.research")
 _DIRECTIONS = {"bullish", "bearish", "neutral"}
 _IMPACT_PATHS = {"direct", "supply_chain", "competitive", "demand", "macro"}
 _MAX_QUOTE_CHARS = 400
+PROCESSOR_VERSION = "pead-research-v1"
 
 
-def run(*, use_llm: bool = True) -> list[Insight]:
+def run(*, use_llm: bool = True, since: datetime | None = None) -> list[Insight]:
     """One research pass: ingest new articles, extract insights, inject events."""
     from ...config import load_pead_global
     from ...data import research as research_src
@@ -35,20 +36,54 @@ def run(*, use_llm: bool = True) -> list[Insight]:
     rcfg = g["research"]
     store = get_store()
 
-    since = datetime.now(timezone.utc) - timedelta(days=rcfg["lookback_days"])
-    arts = [a for a in research_src.fetch_articles(since) if not store.article_seen(a.id)]
-    arts = arts[:rcfg["max_articles_per_run"]]
-    log.info("research: %d new articles", len(arts))
-    if not arts:
+    since = since or (datetime.now(timezone.utc) - timedelta(days=rcfg["lookback_days"]))
+    candidates = [
+        article for article in research_src.stored_articles(
+            since, store=store, allow_incomplete=True)
+        if research_src.is_pead_research_article(article)
+    ]
+    log.info("research: %d stored article candidates", len(candidates))
+    if not candidates:
         return []
 
     universe_card, ticker_to_targets = _build_universe(g.get("targets", []))
     all_insights: list[Insight] = []
-    for art in arts:
+    claimed = 0
+    for art in candidates:
+        entity = research_src.publisher_entity(art.source)
+        catalog = store.document_by_external_id(art.id)
+        # Older migrated research assets may not have carried their native
+        # article ID.  ``stored_articles`` intentionally returns the stable
+        # document ID for them; retain that exact version lineage instead of
+        # synthesising a second, unresolvable document key.
+        legacy_document = store.latest_document_version(art.id)
+        doc_id = ((catalog or {}).get("document_id") or
+                  (art.id if legacy_document else "") or
+                  f"{entity}:{research_src.article_slug(art.id)}:research_article")
+
+        # Preserve the deployed seen-set without re-spending on the first migration
+        # run. New documents use the versioned processing ledger below.
+        if store.article_seen(art.id):
+            version_id = store.begin_document_processing(
+                doc_id, "pead", PROCESSOR_VERSION)
+            if version_id:
+                store.finish_document_processing(
+                    version_id, "pead", PROCESSOR_VERSION, ok=True,
+                    outputs=store.insight_count(art.id), note="migrated from research_articles")
+            continue
+
+        if claimed >= rcfg["max_articles_per_run"]:
+            break
+        version_id = store.begin_document_processing(doc_id, "pead", PROCESSOR_VERSION)
+        if not version_id:
+            continue
+        claimed += 1
         insights = _extract(art, universe_card, set(ticker_to_targets),
                             rcfg["article_chars"]) if use_llm else []
         store.save_article(art)
         store.save_insights(art.id, insights)
+        store.finish_document_processing(
+            version_id, "pead", PROCESSOR_VERSION, ok=True, outputs=len(insights))
         _inject_events(store, insights, art, ticker_to_targets, rcfg)
         _maybe_push(insights, art, rcfg)
         all_insights += insights
@@ -59,10 +94,13 @@ def _extract(art: Article, universe_card: str, universe: set[str],
              max_chars: int) -> list[Insight]:
     ctx = (
         f"Universe (targets and their signal-chain members):\n{universe_card}\n\n"
-        f"Article from {art.source} ({art.published_at:%Y-%m-%d}): {art.title}\n"
+        f"Article from {art.source} ({art.published_at:%Y-%m-%d}; "
+        f"completeness={art.completeness}): {art.title}\n"
         f"---\n{art.body[:max_chars]}\n---\n\n"
         "Extract per-ticker insights (direct AND second-order read-throughs). "
-        "Only universe tickers. An empty list is a valid answer."
+        "Only universe tickers. An empty list is a valid answer. "
+        "If completeness is partial, use only information visible in this preview; "
+        "do not infer omitted content or describe it as the full article."
     )
     try:
         view: InsightBatchView = run_structured("research_extract", InsightBatchView, ctx,

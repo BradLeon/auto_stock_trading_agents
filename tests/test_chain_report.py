@@ -36,6 +36,20 @@ def test_report_shows_verdict_coverage_silence_and_source_text():
     assert "竞争者扩产不等于我方失份额" in md               # the load-bearing rule is stated
 
 
+def test_no_llm_report_is_explicitly_unadjudicated(monkeypatch):
+    """Release acceptance must never turn an unavailable LLM into a verdict."""
+    store = get_store()
+    store.save_observation(_obs("SKHY", "hbm_share", direction="down", span="share decline"))
+    monkeypatch.setattr(
+        "ats.agents.evidence.adjudicator.judge",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM called")))
+
+    md = report.render(load_sector_config("ai_hardware"), store, as_of=NOW,
+                       ind_cfg={}, allow_llm=False)
+
+    assert "未运行 LLM 判读（no-LLM 验收）" in md
+
+
 def test_report_surfaces_pool_pending_proposals_and_failures():
     store = get_store()
     store.save_observation(_obs("COHR", "", metric="optical_lead_time",

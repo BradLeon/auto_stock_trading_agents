@@ -19,7 +19,7 @@ model judges the fact; neither does the other's job.
 Adapters live in data/sources/<adapter>.py. That layer is deliberately NOT abstracted:
 every agency's API differs, and pretending otherwise would produce a config language
 that is just Python with worse errors. What IS uniform is the declaration and the
-output — see config/sources.yaml.
+output — see config/data/sources.yaml.
 """
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ FLAT_BAND = 0.02
 
 
 def load_sources() -> list[SourceDef]:
-    """Read config/sources.yaml. Missing file is fine — no third-party sources."""
+    """Read config/data/sources.yaml. Missing file is fine — no third-party sources."""
     from ..config import _config_dir, _load_yaml
 
-    raw = _load_yaml(_config_dir() / "sources.yaml").get("sources", {}) or {}
+    raw = _load_yaml(_config_dir() / "data" / "sources.yaml").get("sources", {}) or {}
     out = []
     for sid, body in raw.items():
         try:
@@ -134,10 +134,105 @@ def fetch(source: SourceDef, *, lookback_months: int = 6) -> list[SeriesPoint]:
         log.warning("sources: no adapter %r for %s (%s)", source.adapter, source.id, exc)
         return []
     try:
-        return list(mod.fetch(lookback_months=lookback_months, **source.params))
+        if source.adapter not in {"tw_mof", "kr_ecos"}:
+            return list(mod.fetch(lookback_months=lookback_months, **source.params))
+        from ..data.structured import read_mode
+
+        mode = read_mode("chain_regional", source_id=source.id)
+        if mode == "legacy":
+            return list(mod.fetch(lookback_months=lookback_months, **source.params))
+        platform = _platform_fetch(source, lookback_months=lookback_months)
+        if mode == "platform":
+            return platform
+        if mode == "fallback":
+            return platform or list(mod.fetch(
+                lookback_months=lookback_months, **source.params))
+        legacy = list(mod.fetch(lookback_months=lookback_months, **source.params))
+        if _point_signature(platform) != _point_signature(legacy):
+            log.warning("sources: structured shadow mismatch for %s", source.id)
+        return legacy
     except Exception as exc:  # noqa: BLE001 - an agency outage must not break a window
         log.warning("sources: %s fetch failed — %s", source.id, exc)
         return []
+
+
+def _point_signature(points: list[SeriesPoint]) -> list[tuple]:
+    return [(point.period, point.value, point.unit, point.yoy, point.mom)
+            for point in points]
+
+
+def _legacy_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPoint]:
+    """Read the pre-platform adapter contract for an explicit acceptance comparison."""
+    import importlib
+
+    mod = importlib.import_module(f"..data.sources.{source.adapter}", __package__)
+    return list(mod.fetch(lookback_months=lookback_months, **source.params))
+
+
+def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPoint]:
+    """Ingest accepted regional levels, then assemble the legacy Chain contract."""
+    from ..data.sources import kr_ecos, tw_mof
+    from ..data.products import DataProducts
+    from ..data.runtime import get_platform_structured_repository
+    from ..data.structured import FetchRequest, IngestionPipeline
+
+    if source.adapter == "tw_mof":
+        adapter = tw_mof.TaiwanMOFAdapter()
+        source_id, dataset_id = "tw_mof_exports", "regional_tw_exports"
+        entity_id, metric_id = "TW_IC_EXPORT", tw_mof.METRIC_ID
+        scope = {"lookback_months": lookback_months + 12,
+                 "item": source.params.get("item", "electronic_components")}
+    else:
+        adapter = kr_ecos.KoreaECOSAdapter()
+        source_id, dataset_id = "kr_ecos_exports", "regional_kr_exports"
+        entity_id, metric_id = "KR_SEMI_EXPORT", kr_ecos.METRIC_ID
+        scope = {"lookback_months": lookback_months + 12,
+                 "stat": source.params.get("stat", "403Y001"),
+                 "item": source.params.get("item", "3091AA")}
+    repository = get_platform_structured_repository()
+    try:
+        request = FetchRequest(
+            source_id=source_id, dataset_id=dataset_id, entities=[entity_id],
+            query_scope=scope)
+        run = IngestionPipeline(repository).run(adapter, request)
+        # ``collect`` is the scheduled refresh path, but a provider outage during
+        # this invocation must not erase a still-current, accepted monthly series
+        # from the Chain consumer.  Read the latest governed vintage below even
+        # when this refresh failed; return [] only if the repository itself has no
+        # usable level.  The ingestion run keeps the refresh gap explicit.
+        if run["status"] not in {"succeeded", "no_change"}:
+            log.warning("sources: %s refresh %s; reading accepted governed vintage if present",
+                        source.id, run["status"])
+        products = DataProducts(structured_repository=repository)
+        levels = products.metric_series(
+            metric=metric_id, entity=entity_id, dataset=dataset_id,
+            source_id=source_id, quality="loose")
+        if not levels["rows"]:
+            return []
+        yoy = {row["period"]: row for row in products.derive(
+            operation="yoy", query_result=levels)["rows"]}
+        mom = {row["period"]: row for row in products.derive(
+            operation="mom", query_result=levels)["rows"]}
+        if levels["rows"]:
+            products.snapshot_manifest(
+                consumer="chain_regional", purpose=f"regional:{source.id}",
+                as_of=datetime.now(timezone.utc), rows=levels["rows"],
+                metadata={
+                    "source_definition": source.id,
+                    "derivations": ["yoy:v1", "mom:v1"],
+                    "runtime_inputs_included": False,
+                })
+        output = []
+        for row in levels["rows"][-lookback_months:]:
+            published = (datetime.fromisoformat(row["published_at"]).date()
+                         if row.get("published_at") else None)
+            output.append(SeriesPoint(
+                period=row["period"], value=row["value"], unit=row["unit"],
+                yoy=yoy[row["period"]]["value"], mom=mom[row["period"]]["value"],
+                published_at=published))
+        return output
+    finally:
+        repository.close()
 
 
 def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None,
@@ -166,9 +261,13 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
     for source in load_sources():
         if concepts and not (set(source.concepts) & concepts):
             continue
+        store.register_data_source(source, kind="structured", at=now)
+        run_id = store.begin_ingestion(source.id, kind="structured", at=now)
         points = fetch(source, lookback_months=lookback_months)
         if not points:
             out[source.id] = -1
+            store.finish_ingestion(run_id, status="unreachable", note="本轮取不到数据",
+                                   at=now)
             try:
                 store.save_document_failure(source.entity, "", "series",
                                             source=source.adapter,
@@ -176,6 +275,7 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
             except Exception:  # noqa: BLE001
                 pass
             continue
+        raw_saved = store.save_measurement_points(source, points, fetched_at=now)
         saved = 0
         for obs in to_observations(source, points, now=now):
             for concept in source.concepts:
@@ -184,10 +284,15 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
                 # period), and two concepts off one print must not collide.
                 row = row.model_copy(update={"id": Observation.deterministic_id(
                     row.document_id, row.entity, f"{row.metric}:{concept}", row.period)})
-                if store.save_observation(row):
+                if store.save_observation(
+                        row, projection_profile="structured_evidence",
+                        projection_version="v1"):
                     saved += 1
         out[source.id] = saved
-        log.info("sources: %s -> %d new observations", source.id, saved)
+        store.finish_ingestion(run_id, status="succeeded", discovered=len(points),
+                               accepted=raw_saved, at=now)
+        log.info("sources: %s -> %d raw point vintages, %d new observations",
+                 source.id, raw_saved, saved)
     return out
 
 

@@ -3,6 +3,11 @@
 Persists each cycle's reports, decisions, trades, and performance so the Manager
 can be fed prior outcomes and the Boss can pull a name's history on demand. The
 semantic/vector layer (Chroma) is a later add; this is the structured backbone.
+
+During the data-layer unification this module still initializes legacy data-layer
+tables for backward compatibility. New data-layer repositories own those tables;
+new data-layer schema must not be added here. Workflow memory remains the
+long-term responsibility of :mod:`ats.memory`.
 """
 
 from __future__ import annotations
@@ -203,9 +208,139 @@ CREATE TABLE IF NOT EXISTS evidence_failures (
 CREATE TABLE IF NOT EXISTS source_documents (
     document_id TEXT PRIMARY KEY, entity TEXT, period TEXT, doc_type TEXT,
     source TEXT, source_url TEXT, local_path TEXT, sha256 TEXT,
-    chars INTEGER, ok INTEGER DEFAULT 1, note TEXT, fetched_at TEXT
+    chars INTEGER, ok INTEGER DEFAULT 1, note TEXT, fetched_at TEXT,
+    external_id TEXT, title TEXT, published_at TEXT,
+    completeness TEXT DEFAULT 'full', truncation_reason TEXT, carrier_format TEXT,
+    mime_source TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_srcdoc_entity ON source_documents(entity, period);
+-- Every automatically discovered body first lands here as an auditable candidate.
+-- Accepted rows point at source_documents; quarantined rows may point at an isolated
+-- raw file but never acquire a document version/chunk and are invisible by default.
+CREATE TABLE IF NOT EXISTS document_candidates (
+    candidate_id TEXT PRIMARY KEY, document_id TEXT, status TEXT,
+    expected_entity TEXT, claimed_entity TEXT, target_period TEXT, claimed_period TEXT,
+    expected_semantic TEXT, claimed_semantic TEXT, carrier_format TEXT,
+    completeness TEXT, source TEXT, source_url TEXT, external_id TEXT, title TEXT,
+    published_at TEXT, discovered_at TEXT, content_hash TEXT, chars INTEGER,
+    raw_path TEXT, reason_codes TEXT, validation_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_doccandidate_status
+    ON document_candidates(status, source, discovered_at);
+CREATE TABLE IF NOT EXISTS earnings_events (
+    event_id TEXT PRIMARY KEY, entity TEXT, report_date TEXT,
+    fiscal_year INTEGER, fiscal_quarter INTEGER, status TEXT,
+    evidence_json TEXT, conflicts_json TEXT, resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_earnings_event_entity
+    ON earnings_events(entity, report_date);
+CREATE TABLE IF NOT EXISTS newsletter_cursors (
+    mailbox TEXT, folder TEXT, sender TEXT, uidvalidity TEXT, last_uid INTEGER,
+    last_message_id TEXT, watermark TEXT, updated_at TEXT,
+    PRIMARY KEY (mailbox, folder, sender)
+);
+-- Immutable content versions behind the mutable source_documents inventory row.
+-- A logical document may be corrected by its publisher or re-fetched after a parser
+-- change; old bytes remain addressable so every downstream result can name the exact
+-- input it used.
+CREATE TABLE IF NOT EXISTS document_versions (
+    version_id TEXT PRIMARY KEY, document_id TEXT, content_hash TEXT,
+    local_path TEXT, chars INTEGER, source_url TEXT, fetched_at TEXT, created_at TEXT,
+    UNIQUE(document_id, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_docver_document
+    ON document_versions(document_id, fetched_at);
+-- One source asset may concern several companies. This association is catalog
+-- metadata, not an extracted claim: it enables company-scoped discovery without
+-- copying the publisher-owned body once per ticker.
+CREATE TABLE IF NOT EXISTS document_entities (
+    document_id TEXT, entity TEXT, relation TEXT DEFAULT 'mentioned',
+    PRIMARY KEY (document_id, entity, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_document_entity ON document_entities(entity, document_id);
+-- Alternate provider identities for the same real-world story. This prevents Yahoo,
+-- Finnhub and IBKR copies from becoming separate logical documents while preserving
+-- every provider's provenance.
+CREATE TABLE IF NOT EXISTS document_source_aliases (
+    alias_id TEXT PRIMARY KEY, document_id TEXT, source TEXT, source_url TEXT,
+    external_id TEXT, title TEXT, published_at TEXT, metadata_json TEXT, created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_document_alias_doc
+    ON document_source_aliases(document_id, source);
+CREATE TABLE IF NOT EXISTS document_chunks (
+    chunk_id TEXT PRIMARY KEY, version_id TEXT, ordinal INTEGER,
+    char_start INTEGER, char_end INTEGER, text TEXT, content_hash TEXT,
+    UNIQUE(version_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_version ON document_chunks(version_id, ordinal);
+-- Per-consumer processing ledger. The processor version is part of the identity:
+-- changing a prompt/model/schema is a legitimate reprocessing run, while a scheduler
+-- retry of the same version must not spend money twice. Failed runs remain explicit;
+-- they can be retried only by a new processor version or an intentional reset.
+CREATE TABLE IF NOT EXISTS document_processing_runs (
+    version_id TEXT, consumer TEXT, processor_version TEXT,
+    status TEXT, started_at TEXT, completed_at TEXT,
+    outputs INTEGER DEFAULT 0, note TEXT,
+    PRIMARY KEY (version_id, consumer, processor_version)
+);
+CREATE INDEX IF NOT EXISTS idx_docproc_consumer
+    ON document_processing_runs(consumer, status, completed_at);
+CREATE TABLE IF NOT EXISTS data_migrations (
+    key TEXT PRIMARY KEY, applied_at TEXT, note TEXT
+);
+-- Structured source catalog and immutable point vintages. Derived changes (yoy/mom,
+-- thresholds, z-scores) do not live here; they are recomputed from accepted values.
+CREATE TABLE IF NOT EXISTS data_sources (
+    source_id TEXT PRIMARY KEY, kind TEXT, label TEXT, adapter TEXT,
+    cadence TEXT, entity TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS ingestion_runs (
+    run_id TEXT PRIMARY KEY, source_id TEXT, kind TEXT,
+    started_at TEXT, completed_at TEXT, status TEXT,
+    discovered INTEGER DEFAULT 0, accepted INTEGER DEFAULT 0,
+    quarantined INTEGER DEFAULT 0, reason_codes TEXT,
+    snapshot_updated_at TEXT, snapshot_lag_hours REAL, note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ingestion_source
+    ON ingestion_runs(source_id, started_at);
+CREATE TABLE IF NOT EXISTS measurement_series (
+    series_id TEXT PRIMARY KEY, source_id TEXT, series TEXT,
+    label TEXT, entity TEXT, unit TEXT, cadence TEXT, updated_at TEXT,
+    UNIQUE(source_id, series)
+);
+CREATE TABLE IF NOT EXISTS measurement_points (
+    point_id TEXT PRIMARY KEY, series_id TEXT, period TEXT,
+    value REAL, unit TEXT, published_at TEXT, fetched_at TEXT,
+    content_hash TEXT, raw_payload TEXT,
+    UNIQUE(series_id, period, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_measurement_period
+    ON measurement_points(series_id, period, fetched_at);
+-- Neutral, re-checkable facts are shared. Their task interpretation is a separate,
+-- versioned projection so PEAD, evidence and sector views cannot overwrite each other.
+CREATE TABLE IF NOT EXISTS evidence_facts (
+    fact_id TEXT PRIMARY KEY, document_id TEXT, document_version_id TEXT, source_url TEXT,
+    entity TEXT, source_entity TEXT, metric TEXT, period TEXT,
+    observation_type TEXT, value REAL, unit TEXT, evidence_span TEXT,
+    observed_at TEXT, extraction_confidence REAL DEFAULT 1.0,
+    discovery_evidence INTEGER DEFAULT 0, superseded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fact_entity ON evidence_facts(entity, metric);
+CREATE INDEX IF NOT EXISTS idx_fact_document ON evidence_facts(document_id, source_entity);
+CREATE TABLE IF NOT EXISTS evidence_fact_projections (
+    projection_id TEXT PRIMARY KEY, fact_id TEXT, legacy_observation_id TEXT,
+    profile TEXT, profile_version TEXT, concept TEXT, stance TEXT, direction TEXT,
+    payload TEXT, created_at TEXT, superseded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fact_projection
+    ON evidence_fact_projections(profile, profile_version, concept, fact_id);
+CREATE TABLE IF NOT EXISTS task_projections (
+    projection_id TEXT PRIMARY KEY, profile TEXT, profile_version TEXT,
+    input_kind TEXT, input_ref TEXT, target_type TEXT, target_id TEXT,
+    payload TEXT, created_at TEXT, expires_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_task_projection
+    ON task_projections(profile, target_type, target_id, created_at);
 -- Propositions the system induced but a human has not adopted. Deliberately a
 -- separate table from claims: agents propose, only a person extends the axes.
 CREATE TABLE IF NOT EXISTS claim_proposals (
@@ -238,6 +373,32 @@ class TradingMemory:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self._migrate()
+        self._retire_data_tables()
+
+    def _retire_data_tables(self) -> None:
+        """Enforce the boundary: this database is Workflow memory, never a data store."""
+        views = ("structured_observations_selected", "structured_observations_accepted")
+        tables = (
+            "structured_artifact_blobs", "structured_artifacts", "structured_sources",
+            "structured_datasets", "structured_metrics", "structured_provider_mappings",
+            "structured_pending_mappings", "structured_series", "structured_observations",
+            "structured_derivations", "structured_evidence_links", "structured_entities",
+            "structured_events", "structured_evidence_candidates", "structured_evidence_reviews",
+            "structured_snapshots", "structured_snapshot_items", "structured_ingestion_runs",
+            "structured_candidates", "structured_conflicts", "structured_legacy_audits",
+            "structured_migrations", "source_documents", "document_candidates",
+            "document_versions", "document_entities", "document_source_aliases",
+            "document_chunks", "document_processing_runs", "newsletter_cursors",
+            "data_sources", "ingestion_runs", "measurement_series", "measurement_points",
+            "evidence_observations", "evidence_failures", "evidence_facts",
+            "evidence_fact_projections",
+        )
+        self.conn.execute("PRAGMA foreign_keys=OFF")
+        for name in views:
+            self.conn.execute(f'DROP VIEW IF EXISTS "{name}"')
+        for name in tables:
+            self.conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+        self.conn.commit()
 
     def _migrate(self) -> None:
         """Additive column migrations (kept out of _SCHEMA so old DBs get them too)."""
@@ -288,8 +449,96 @@ class TradingMemory:
             if ocols and ddl.split()[0] not in ocols:
                 self.conn.execute(
                     f"ALTER TABLE evidence_observations ADD COLUMN {ddl}")
+        dcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(source_documents)")}
+        for ddl in ("external_id TEXT", "title TEXT", "published_at TEXT",
+                    "completeness TEXT DEFAULT 'full'", "truncation_reason TEXT",
+                    "carrier_format TEXT", "mime_source TEXT"):
+            if dcols and ddl.split()[0] not in dcols:
+                self.conn.execute(f"ALTER TABLE source_documents ADD COLUMN {ddl}")
+        rcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(ingestion_runs)")}
+        for ddl in ("quarantined INTEGER DEFAULT 0", "reason_codes TEXT",
+                    "snapshot_updated_at TEXT", "snapshot_lag_hours REAL"):
+            if rcols and ddl.split()[0] not in rcols:
+                self.conn.execute(f"ALTER TABLE ingestion_runs ADD COLUMN {ddl}")
+        fact_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(evidence_facts)")}
+        if fact_cols and "document_version_id" not in fact_cols:
+            self.conn.execute("ALTER TABLE evidence_facts ADD COLUMN document_version_id TEXT")
+        # Existing deployments already have the latest logical-document inventory.
+        # Promote rows with a real content hash into the immutable version catalog;
+        # failed fetches deliberately have no version because no accepted bytes exist.
+        self.conn.execute(
+            "INSERT OR IGNORE INTO document_versions "
+            "(version_id,document_id,content_hash,local_path,chars,source_url,"
+            " fetched_at,created_at) "
+            "SELECT document_id || '@' || substr(sha256,1,16), document_id, sha256, "
+            "local_path, chars, source_url, fetched_at, fetched_at "
+            "FROM source_documents WHERE ok = 1 AND sha256 IS NOT NULL AND sha256 != ''")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO document_entities (document_id,entity,relation) "
+            "SELECT document_id,upper(entity),'primary' FROM source_documents "
+            "WHERE entity IS NOT NULL AND entity != ''")
+        # One-time compatibility bridge: before the processing ledger existed,
+        # presence in source_documents was the chain consumer's paid/read marker.
+        # Never repeat this backfill, or documents acquired later for PEAD would be
+        # incorrectly marked as already observed by chain after a process restart.
+        migration = "document_processing_chain_v1"
+        done = self.conn.execute(
+            "SELECT 1 FROM data_migrations WHERE key = ?", (migration,)).fetchone()
+        if not done:
+            stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            self.conn.execute(
+                "INSERT OR IGNORE INTO document_processing_runs "
+                "(version_id,consumer,processor_version,status,started_at,completed_at,"
+                " outputs,note) SELECT version_id,'chain','chain-observer-v1','succeeded',"
+                " created_at,created_at,0,'migrated from source_documents' "
+                "FROM document_versions")
+            self.conn.execute(
+                "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
+                (migration, stamp, "legacy source_documents were chain seen-set"))
+        self._migrate_shared_facts()
         self._migrate_pead_events_pk()
         self.conn.commit()
+
+    def _migrate_shared_facts(self) -> None:
+        """One-time additive split of legacy observations into facts + projections."""
+        import hashlib
+        import json
+
+        key = "shared_facts_v1"
+        if self.conn.execute("SELECT 1 FROM data_migrations WHERE key=?", (key,)).fetchone():
+            return
+        rows = self.conn.execute("SELECT * FROM evidence_observations").fetchall()
+        for row in rows:
+            raw = f"{row['document_id']}|{(row['entity'] or '').upper()}|" \
+                  f"{(row['metric'] or '').lower()}|{row['period'] or ''}"
+            fact_id = hashlib.sha1(raw.encode()).hexdigest()[:20]
+            version = self.latest_document_version(row["document_id"])
+            self.conn.execute(
+                "INSERT OR REPLACE INTO evidence_facts "
+                "(fact_id,document_id,document_version_id,source_url,entity,source_entity,metric,period,"
+                " observation_type,value,unit,evidence_span,observed_at,"
+                " extraction_confidence,discovery_evidence,superseded_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (fact_id, row["document_id"], version["version_id"] if version else "",
+                 row["source_url"], row["entity"],
+                 row["source_entity"], row["metric"], row["period"],
+                 row["observation_type"], row["value"], row["unit"],
+                 row["evidence_span"], row["observed_at"], row["extraction_confidence"],
+                 row["discovery_evidence"], row["superseded_at"]))
+            projection_id = hashlib.sha1(
+                f"{row['id']}|legacy-evidence|v1".encode()).hexdigest()[:20]
+            payload = json.dumps({"migrated": True}, ensure_ascii=False)
+            self.conn.execute(
+                "INSERT OR REPLACE INTO evidence_fact_projections "
+                "(projection_id,fact_id,legacy_observation_id,profile,profile_version,"
+                " concept,stance,direction,payload,created_at,superseded_at) "
+                "VALUES (?,?,?,'legacy-evidence','v1',?,?,?,?,?,?)",
+                (projection_id, fact_id, row["id"], row["concept"], row["stance"],
+                 row["direction"], payload, row["observed_at"], row["superseded_at"]))
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
+            (key, stamp, f"migrated {len(rows)} legacy observations"))
 
     def _migrate_pead_events_pk(self) -> None:
         """pead_events: global `id` PK -> composite (symbol, id).
@@ -915,7 +1164,8 @@ class TradingMemory:
         return fresh
 
     # --- chain evidence --------------------------------------------------- #
-    def save_observation(self, obs) -> bool:
+    def save_observation(self, obs, *, projection_profile: str = "evidence_observer",
+                         projection_version: str = "v1") -> bool:
         """Idempotent upsert. Returns True if this observation is new.
 
         The id is deterministic over (document, entity, metric, period), so
@@ -932,6 +1182,41 @@ class TradingMemory:
         # eligible to confirm that same claim. Cf. the prep/score overwrite incident
         # in docs/DEVELOPMENT.md §10.
         frozen = 1 if (obs.discovery_evidence or (existing and existing[0])) else 0
+        # Shared neutral fact: deliberately excludes concept/stance/direction, which
+        # are interpretations for a task profile rather than properties of the quote.
+        import hashlib
+        import json
+
+        fact_raw = f"{obs.document_id}|{obs.entity.upper()}|{obs.metric.lower()}|{obs.period}"
+        fact_id = hashlib.sha1(fact_raw.encode()).hexdigest()[:20]
+        prior_fact = self.conn.execute(
+            "SELECT discovery_evidence FROM evidence_facts WHERE fact_id=?", (fact_id,)
+        ).fetchone()
+        fact_frozen = 1 if (frozen or (prior_fact and prior_fact[0])) else 0
+        document_version = self.latest_document_version(obs.document_id)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO evidence_facts "
+            "(fact_id,document_id,document_version_id,source_url,entity,source_entity,metric,period,"
+            " observation_type,value,unit,evidence_span,observed_at,"
+            " extraction_confidence,discovery_evidence,superseded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+            (fact_id, obs.document_id,
+             document_version["version_id"] if document_version else "",
+             obs.source_url, obs.entity.upper(),
+             (obs.source_entity or obs.entity).upper(), obs.metric, obs.period,
+             obs.observation_type, obs.value, obs.unit, obs.evidence_span,
+             obs.observed_at.isoformat(), obs.extraction_confidence, fact_frozen))
+        projection_id = hashlib.sha1(
+            f"{obs.id}|{projection_profile}|{projection_version}".encode()).hexdigest()[:20]
+        self.conn.execute(
+            "INSERT OR REPLACE INTO evidence_fact_projections "
+            "(projection_id,fact_id,legacy_observation_id,profile,profile_version,"
+            " concept,stance,direction,payload,created_at,superseded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,NULL)",
+            (projection_id, fact_id, obs.id, projection_profile, projection_version,
+             obs.concept, obs.stance, obs.direction,
+             json.dumps({"observation_id": obs.id}, ensure_ascii=False),
+             obs.observed_at.isoformat()))
         self.conn.execute(
             "INSERT OR REPLACE INTO evidence_observations "
             "(id,document_id,source_url,entity,source_entity,metric,concept,period,"
@@ -977,6 +1262,19 @@ class TradingMemory:
             "UPDATE evidence_observations SET superseded_at = ? "
             "WHERE document_id = ? AND source_entity = ? AND superseded_at IS NULL",
             (stamp, document_id, (source_entity or "").upper()))
+        fact_ids = [r["fact_id"] for r in self.conn.execute(
+            "SELECT fact_id FROM evidence_facts WHERE document_id=? AND source_entity=? "
+            "AND superseded_at IS NULL",
+            (document_id, (source_entity or "").upper())).fetchall()]
+        self.conn.execute(
+            "UPDATE evidence_facts SET superseded_at=? WHERE document_id=? "
+            "AND source_entity=? AND superseded_at IS NULL",
+            (stamp, document_id, (source_entity or "").upper()))
+        if fact_ids:
+            self.conn.execute(
+                "UPDATE evidence_fact_projections SET superseded_at=? WHERE fact_id IN (%s) "
+                "AND superseded_at IS NULL" % ",".join("?" * len(fact_ids)),
+                [stamp, *fact_ids])
         self.conn.commit()
         return cur.rowcount
 
@@ -997,6 +1295,41 @@ class TradingMemory:
             sql += " AND observed_at >= ?"
             args.append(since.isoformat())
         sql += " ORDER BY observed_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def facts(self, *, entity: str | None = None, document_id: str | None = None,
+              since: datetime | None = None, include_superseded: bool = False,
+              limit: int = 500) -> list[dict]:
+        sql, args = "SELECT * FROM evidence_facts WHERE 1=1", []
+        if not include_superseded:
+            sql += " AND superseded_at IS NULL"
+        if entity:
+            sql += " AND entity=?"
+            args.append(entity.upper())
+        if document_id:
+            sql += " AND document_id=?"
+            args.append(document_id)
+        if since:
+            sql += " AND observed_at>=?"
+            args.append(since.isoformat())
+        sql += " ORDER BY observed_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def fact_projections(self, *, fact_id: str | None = None,
+                         profile: str | None = None, concept: str | None = None,
+                         include_superseded: bool = False,
+                         limit: int = 500) -> list[dict]:
+        sql, args = "SELECT * FROM evidence_fact_projections WHERE 1=1", []
+        if not include_superseded:
+            sql += " AND superseded_at IS NULL"
+        for column, value in (("fact_id", fact_id), ("profile", profile),
+                              ("concept", concept)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        sql += " ORDER BY created_at DESC LIMIT ?"
         args.append(limit)
         return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
@@ -1066,15 +1399,275 @@ class TradingMemory:
     # Primary-source inventory (metadata; text lives under docs_root)
     # ----------------------------------------------------------------- #
     def save_document(self, doc, *, ok: bool = True, note: str = "") -> None:
-        """Record a fetched/cached source document. `doc` is a data.source_cache.CachedDoc."""
+        """Record a logical document and its immutable accepted content version."""
+        stamp = doc.fetched_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         self.conn.execute(
             "INSERT OR REPLACE INTO source_documents (document_id,entity,period,doc_type,"
-            "source,source_url,local_path,sha256,chars,ok,note,fetched_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "source,source_url,local_path,sha256,chars,ok,note,fetched_at,"
+            "external_id,title,published_at,completeness,truncation_reason,carrier_format,"
+            "mime_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (doc.document_id, doc.symbol.upper(), doc.period, doc.doc_type, doc.source,
              doc.source_url, str(doc.path) if doc.path else "", doc.sha256,
-             len(doc.text or ""), 1 if ok else 0, note, doc.fetched_at))
+             len(doc.text or ""), 1 if ok else 0, note, stamp,
+             getattr(doc, "external_id", ""), getattr(doc, "title", ""),
+             getattr(doc, "published_at", ""), getattr(doc, "completeness", "full"),
+             getattr(doc, "truncation_reason", ""), getattr(doc, "carrier_format", ""),
+             getattr(doc, "mime_source", "")))
+
+        if ok and doc.sha256:
+            version_id = self.document_version_id(doc.document_id, doc.sha256)
+            version_path = getattr(doc, "version_path", None) or doc.path
+            self.conn.execute(
+                "INSERT OR IGNORE INTO document_versions "
+                "(version_id,document_id,content_hash,local_path,chars,source_url,"
+                " fetched_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (version_id, doc.document_id, doc.sha256,
+                 str(version_path) if version_path else "", len(doc.text or ""),
+                 doc.source_url, stamp, datetime.now(timezone.utc).isoformat(timespec="seconds")))
+            self._index_document_version(version_id, doc.text or "")
+        entities = {doc.symbol.upper()}
+        entities.update(e.upper() for e in getattr(doc, "related_entities", ()) if e)
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO document_entities (document_id,entity,relation) "
+            "VALUES (?,?,?)",
+            [(doc.document_id, entity,
+              "primary" if entity == doc.symbol.upper() else "mentioned")
+             for entity in sorted(entities)])
         self.conn.commit()
+
+    def link_document_entities(self, document_id: str, entities, *,
+                               relation: str = "mentioned") -> int:
+        """Attach additional company discovery keys without copying the document."""
+        before = self.conn.total_changes
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO document_entities (document_id,entity,relation) "
+            "VALUES (?,?,?)",
+            [(document_id, str(entity).upper(), relation) for entity in entities if entity])
+        self.conn.commit()
+        return self.conn.total_changes - before
+
+    def save_document_alias(self, document_id: str, *, source: str,
+                            source_url: str = "", external_id: str = "",
+                            title: str = "", published_at: str = "",
+                            metadata: dict | None = None) -> str:
+        """Attach another provider identity to an existing logical document."""
+        import hashlib
+        import json
+
+        identity = external_id or source_url or f"{title}|{published_at}"
+        alias_id = hashlib.sha1(f"{source}|{identity}".encode()).hexdigest()[:24]
+        self.conn.execute(
+            "INSERT OR REPLACE INTO document_source_aliases "
+            "(alias_id,document_id,source,source_url,external_id,title,published_at,"
+            "metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (alias_id, document_id, source, source_url, external_id, title, published_at,
+             json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+             datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        self.conn.commit()
+        return alias_id
+
+    def document_aliases(self, document_id: str | None = None, *,
+                         limit: int = 200) -> list[dict]:
+        sql, args = "SELECT * FROM document_source_aliases", []
+        if document_id:
+            sql += " WHERE document_id=?"
+            args.append(document_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def documents_by_alias_source(self, source_contains: str, *, entity: str | None = None,
+                                  published_since: str | None = None,
+                                  limit: int = 1000) -> list[dict]:
+        sql = ("SELECT DISTINCT d.* FROM source_documents d "
+               "JOIN document_source_aliases a ON a.document_id=d.document_id "
+               "WHERE d.ok=1 AND lower(a.source) LIKE ?")
+        args: list = [f"%{source_contains.lower()}%"]
+        if entity:
+            sql += (" AND (d.entity=? OR EXISTS (SELECT 1 FROM document_entities de "
+                    "WHERE de.document_id=d.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
+        if published_since:
+            sql += " AND d.published_at>=?"
+            args.append(published_since)
+        sql += " ORDER BY d.published_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def document_by_story(self, title: str, published_at: str = "") -> dict | None:
+        """Exact normalized headline/date fallback when a provider has no public URL."""
+        import re
+
+        normalized = re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+        if not normalized:
+            return None
+        rows = self.conn.execute(
+            "SELECT * FROM source_documents WHERE ok=1 AND substr(published_at,1,10)=? "
+            "ORDER BY chars DESC", ((published_at or "")[:10],)).fetchall()
+        for row in rows:
+            candidate = re.sub(r"[^a-z0-9]+", " ", (row["title"] or "").lower()).strip()
+            if candidate == normalized:
+                return dict(row)
+        return None
+
+    def _index_document_version(self, version_id: str, text: str, *,
+                                chunk_chars: int = 2400, overlap: int = 240) -> int:
+        """Deterministic local full-text chunks; safe to call repeatedly."""
+        import hashlib
+
+        body = (text or "").strip()
+        if not body:
+            return 0
+        ordinal, start, saved = 0, 0, 0
+        while start < len(body):
+            end = min(len(body), start + chunk_chars)
+            if end < len(body):
+                # Prefer a nearby paragraph/sentence boundary without requiring one.
+                floor = start + chunk_chars // 2
+                candidates = [body.rfind(mark, floor, end) for mark in ("\n\n", "。", ". ")]
+                boundary = max(candidates)
+                if boundary > floor:
+                    end = boundary + (2 if body[boundary:boundary + 2] in ("\n\n", ". ") else 1)
+            chunk = body[start:end]
+            digest = hashlib.sha256(chunk.encode()).hexdigest()
+            chunk_id = hashlib.sha1(
+                f"{version_id}|{ordinal}|{digest}".encode()).hexdigest()[:20]
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO document_chunks "
+                "(chunk_id,version_id,ordinal,char_start,char_end,text,content_hash) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (chunk_id, version_id, ordinal, start, end, chunk, digest))
+            saved += max(0, cur.rowcount)
+            if end >= len(body):
+                break
+            start = max(start + 1, end - overlap)
+            ordinal += 1
+        return saved
+
+    def search_document_chunks(self, query: str, *, entity: str | None = None,
+                               source_contains: str | None = None,
+                               published_since: str | None = None,
+                               limit: int = 20) -> list[dict]:
+        """Metadata-filtered local full-text search with exact source locations."""
+        terms = [t for t in (query or "").split() if t]
+        if not terms:
+            return []
+        sql = ("SELECT c.chunk_id,c.version_id,c.ordinal,c.char_start,c.char_end,c.text,"
+               "v.document_id,d.entity,d.source,d.source_url,d.title,d.published_at "
+               "FROM document_chunks c JOIN document_versions v ON v.version_id=c.version_id "
+               "JOIN source_documents d ON d.document_id=v.document_id WHERE d.ok=1")
+        args: list = []
+        for term in terms:
+            sql += " AND lower(c.text) LIKE ?"
+            args.append(f"%{term.lower()}%")
+        if entity:
+            sql += (" AND (d.entity=? OR EXISTS (SELECT 1 FROM document_entities de "
+                    "WHERE de.document_id=d.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
+        if source_contains:
+            sql += " AND lower(d.source) LIKE ?"
+            args.append(f"%{source_contains.lower()}%")
+        if published_since:
+            sql += " AND d.published_at>=?"
+            args.append(published_since)
+        sql += " ORDER BY d.published_at DESC,c.ordinal LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    @staticmethod
+    def document_version_id(document_id: str, content_hash: str) -> str:
+        """Stable identity for one exact body of one logical document."""
+        return f"{document_id}@{content_hash[:16]}"
+
+    def document_versions(self, document_id: str) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM document_versions WHERE document_id = ? "
+            "ORDER BY fetched_at DESC, created_at DESC", (document_id,)).fetchall()]
+
+    def latest_document_version(self, document_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM document_versions WHERE document_id = ? "
+            "ORDER BY fetched_at DESC, created_at DESC LIMIT 1", (document_id,)).fetchone()
+        return dict(row) if row else None
+
+    def document_by_content_hash(self, content_hash: str, *,
+                                 entity: str | None = None) -> dict | None:
+        sql = ("SELECT d.*,v.version_id,v.content_hash AS version_hash "
+               "FROM document_versions v JOIN source_documents d "
+               "ON d.document_id=v.document_id WHERE v.content_hash=? AND d.ok=1")
+        args: list = [content_hash]
+        if entity:
+            sql += (" AND (d.entity=? OR EXISTS (SELECT 1 FROM document_entities de "
+                    "WHERE de.document_id=d.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
+        sql += " ORDER BY v.fetched_at DESC LIMIT 1"
+        row = self.conn.execute(sql, args).fetchone()
+        return dict(row) if row else None
+
+    def begin_document_processing(self, document_id: str, consumer: str,
+                                  processor_version: str = "v1", *,
+                                  at: str | None = None) -> str | None:
+        """Claim one exact document version for a consumer, once.
+
+        Returns the version id when this caller owns a new run, otherwise ``None``.
+        The row is written before the expensive operation, so scheduler retries cannot
+        duplicate spend. A new processor version remains eligible by construction.
+        """
+        latest = self.latest_document_version(document_id)
+        if latest is None:
+            return None
+        stamp = at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO document_processing_runs "
+            "(version_id,consumer,processor_version,status,started_at,outputs,note) "
+            "VALUES (?,?,?,'running',?,0,'')",
+            (latest["version_id"], consumer, processor_version, stamp))
+        self.conn.commit()
+        return latest["version_id"] if cur.rowcount else None
+
+    def finish_document_processing(self, version_id: str, consumer: str,
+                                   processor_version: str = "v1", *,
+                                   ok: bool, outputs: int = 0, note: str = "",
+                                   at: str | None = None) -> None:
+        stamp = at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.conn.execute(
+            "UPDATE document_processing_runs SET status=?, completed_at=?, outputs=?, note=? "
+            "WHERE version_id=? AND consumer=? AND processor_version=?",
+            ("succeeded" if ok else "failed", stamp, outputs, note,
+             version_id, consumer, processor_version))
+        self.conn.commit()
+
+    def document_processing(self, document_id: str | None = None, *,
+                            consumer: str | None = None,
+                            processor_version: str | None = None,
+                            limit: int = 200) -> list[dict]:
+        sql = ("SELECT p.*, v.document_id, v.content_hash FROM document_processing_runs p "
+               "JOIN document_versions v ON v.version_id = p.version_id WHERE 1=1")
+        args: list = []
+        if document_id:
+            sql += " AND v.document_id = ?"
+            args.append(document_id)
+        if consumer:
+            sql += " AND p.consumer = ?"
+            args.append(consumer)
+        if processor_version:
+            sql += " AND p.processor_version = ?"
+            args.append(processor_version)
+        sql += " ORDER BY p.started_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def processed_document_ids(self, consumer: str, processor_version: str, *,
+                               entity: str | None = None) -> set[str]:
+        sql = ("SELECT DISTINCT v.document_id FROM document_processing_runs p "
+               "JOIN document_versions v ON v.version_id=p.version_id "
+               "LEFT JOIN source_documents d ON d.document_id=v.document_id "
+               "WHERE p.consumer=? AND p.processor_version=?")
+        args: list = [consumer, processor_version]
+        if entity:
+            sql += " AND d.entity=?"
+            args.append(entity.upper())
+        return {r["document_id"] for r in self.conn.execute(sql, args).fetchall()}
 
     def save_document_failure(self, entity: str, period: str, doc_type: str, *,
                               source: str = "", source_url: str = "", note: str = "",
@@ -1096,25 +1689,156 @@ class TradingMemory:
              (at or datetime.now(timezone.utc).isoformat(timespec="seconds"))))
         self.conn.commit()
 
+    def save_document_candidate(self, candidate, validation, *, raw_path: str = "",
+                                document_id: str = "") -> None:
+        """Persist an admission decision without exposing quarantine to asset queries."""
+        import json
+
+        from ..data.admission import result_json
+        from ..data.document_types import semantic_type
+
+        try:
+            expected_semantic = semantic_type(candidate.expected_semantic).value
+        except (KeyError, ValueError):
+            expected_semantic = str(candidate.expected_semantic or "")
+        try:
+            claimed_semantic = semantic_type(candidate.claimed_semantic).value
+        except (KeyError, ValueError):
+            claimed_semantic = str(candidate.claimed_semantic or "")
+        self.conn.execute(
+            "INSERT OR REPLACE INTO document_candidates (candidate_id,document_id,status,"
+            "expected_entity,claimed_entity,target_period,claimed_period,expected_semantic,"
+            "claimed_semantic,carrier_format,completeness,source,source_url,external_id,title,"
+            "published_at,discovered_at,content_hash,chars,raw_path,reason_codes,validation_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (candidate.candidate_id, document_id, validation.status,
+             candidate.expected_entity.upper(), candidate.claimed_entity.upper(),
+             candidate.target_period, candidate.claimed_period, expected_semantic,
+             claimed_semantic, str(candidate.carrier_format), candidate.completeness,
+             candidate.source, candidate.source_url, candidate.external_id, candidate.title,
+             candidate.published_at, candidate.discovered_at, candidate.content_hash,
+             len(candidate.text or ""), raw_path,
+             json.dumps(validation.reason_codes, ensure_ascii=False), result_json(validation)))
+        self.conn.commit()
+
+    def document_candidates(self, *, status: str | None = None,
+                            source: str | None = None, limit: int = 200) -> list[dict]:
+        sql, args = "SELECT * FROM document_candidates", []
+        where = []
+        if status:
+            where.append("status=?")
+            args.append(status)
+        if source:
+            where.append("source=?")
+            args.append(source)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY discovered_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def save_earnings_event(self, resolution) -> str:
+        """Persist resolved/conflicting event evidence as the period audit anchor."""
+        import json
+
+        event = resolution.event
+        if event is not None:
+            event_id = event.event_id
+            entity, report_date = event.entity, str(event.report_date)
+            fiscal_year, fiscal_quarter = event.fiscal_year, event.fiscal_quarter
+        else:
+            evidence = resolution.evidence
+            entity = ""
+            for item in evidence:
+                if getattr(item, "reference", "").startswith("entity:"):
+                    entity = item.reference.split(":", 1)[1].upper()
+                    break
+            seed = "|".join(f"{e.source}:{e.report_date}:{e.fiscal_label}" for e in evidence)
+            import hashlib
+
+            event_id = f"unresolved:{hashlib.sha1(seed.encode()).hexdigest()[:16]}"
+            report_date, fiscal_year, fiscal_quarter = "", None, None
+        evidence_json = json.dumps([
+            {
+                "source": item.source, "report_date": str(item.date or ""),
+                "fiscal_period": (
+                    f"{item.period[0]}Q{item.period[1]}" if item.period else ""),
+                "reference": item.reference,
+            }
+            for item in resolution.evidence
+        ], ensure_ascii=False, sort_keys=True)
+        conflicts_json = json.dumps([
+            conflict.__dict__ for conflict in resolution.conflicts
+        ], ensure_ascii=False, sort_keys=True)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO earnings_events (event_id,entity,report_date,"
+            "fiscal_year,fiscal_quarter,status,evidence_json,conflicts_json,resolved_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, entity, report_date, fiscal_year, fiscal_quarter, resolution.status,
+             evidence_json, conflicts_json,
+             datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        self.conn.commit()
+        return event_id
+
+    def earnings_events(self, entity: str | None = None, *, limit: int = 50) -> list[dict]:
+        sql, args = "SELECT * FROM earnings_events", []
+        if entity:
+            sql += " WHERE entity=?"
+            args.append(entity.upper())
+        sql += " ORDER BY report_date DESC,resolved_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
     def documents(self, entity: str | None = None, *, ok_only: bool = True,
-                  limit: int = 200) -> list[dict]:
+                  doc_type: str | None = None, source_contains: str | None = None,
+                  published_since: str | None = None, limit: int = 200) -> list[dict]:
         sql = "SELECT * FROM source_documents"
         where, args = [], []
         if entity:
-            where.append("entity = ?")
-            args.append(entity.upper())
+            where.append("(entity = ? OR EXISTS (SELECT 1 FROM document_entities de "
+                         "WHERE de.document_id=source_documents.document_id AND de.entity=?))")
+            args.extend([entity.upper(), entity.upper()])
         if ok_only:
             where.append("ok = 1")
+        if doc_type:
+            from ..data.document_types import compatible_type_values
+
+            try:
+                current, legacy = compatible_type_values(doc_type)
+                where.append("doc_type IN (?, ?)")
+                args.extend([current, legacy])
+            except (KeyError, ValueError):
+                where.append("doc_type = ?")
+                args.append(doc_type)
+        if source_contains:
+            where.append("lower(source) LIKE ?")
+            args.append(f"%{source_contains.lower()}%")
+        if published_since:
+            where.append("published_at >= ?")
+            args.append(published_since)
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY fetched_at DESC LIMIT ?"
         args.append(limit)
         return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
-    def has_document(self, entity: str, period: str, doc_type: str) -> bool:
+    def document_by_external_id(self, external_id: str) -> dict | None:
         row = self.conn.execute(
-            "SELECT ok FROM source_documents WHERE document_id = ?",
-            (f"{entity.upper()}:{period or 'unknown'}:{doc_type}",)).fetchone()
+            "SELECT * FROM source_documents WHERE external_id=? AND ok=1 "
+            "ORDER BY fetched_at DESC LIMIT 1", (external_id,)).fetchone()
+        return dict(row) if row else None
+
+    def has_document(self, entity: str, period: str, doc_type: str) -> bool:
+        from ..data.document_types import compatible_type_values
+
+        try:
+            current, legacy = compatible_type_values(doc_type)
+        except (KeyError, ValueError):
+            current = legacy = doc_type
+        row = self.conn.execute(
+            "SELECT ok FROM source_documents WHERE document_id IN (?, ?)",
+            (f"{entity.upper()}:{period or 'unknown'}:{current}",
+             f"{entity.upper()}:{period or 'unknown'}:{legacy}")).fetchone()
         return bool(row and row["ok"])
 
     def freeze_as_discovery(self, observation_ids: list[str]) -> int:
@@ -1127,6 +1851,10 @@ class TradingMemory:
             return 0
         cur = self.conn.execute(
             "UPDATE evidence_observations SET discovery_evidence = 1 WHERE id IN (%s)"
+            % ",".join("?" * len(observation_ids)), observation_ids)
+        self.conn.execute(
+            "UPDATE evidence_facts SET discovery_evidence=1 WHERE fact_id IN ("
+            "SELECT fact_id FROM evidence_fact_projections WHERE legacy_observation_id IN (%s))"
             % ",".join("?" * len(observation_ids)), observation_ids)
         self.conn.commit()
         return cur.rowcount
@@ -1204,13 +1932,273 @@ class TradingMemory:
             [(score, cat, eid) for eid, (score, cat) in scores.items()])
         self.conn.commit()
 
+    # ----------------------------------------------------------------- #
+    # Shared structured observations (raw accepted points, never derivatives)
+    # ----------------------------------------------------------------- #
+    def register_data_source(self, source, *, kind: str = "structured",
+                             at: datetime | None = None) -> None:
+        stamp = (at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT OR REPLACE INTO data_sources "
+            "(source_id,kind,label,adapter,cadence,entity,updated_at) VALUES (?,?,?,?,?,?,?)",
+            (source.id, kind, getattr(source, "label", ""),
+             getattr(source, "adapter", ""), getattr(source, "cadence", ""),
+             getattr(source, "entity", ""), stamp))
+        self.conn.commit()
+
+    def begin_ingestion(self, source_id: str, *, kind: str,
+                        at: datetime | None = None) -> str:
+        import hashlib
+        import uuid
+
+        stamp = (at or datetime.now(timezone.utc)).isoformat(timespec="microseconds")
+        run_id = hashlib.sha1(
+            f"{source_id}|{kind}|{stamp}|{uuid.uuid4().hex}".encode()).hexdigest()[:20]
+        self.conn.execute(
+            "INSERT INTO ingestion_runs "
+            "(run_id,source_id,kind,started_at,status) VALUES (?,?,?,?,'running')",
+            (run_id, source_id, kind, stamp))
+        self.conn.commit()
+        return run_id
+
+    def finish_ingestion(self, run_id: str, *, status: str, discovered: int = 0,
+                         accepted: int = 0, quarantined: int = 0,
+                         reason_codes: dict | list | tuple | None = None,
+                         snapshot_updated_at: str = "",
+                         snapshot_lag_hours: float | None = None, note: str = "",
+                         at: datetime | None = None) -> None:
+        import json
+
+        stamp = (at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+        self.conn.execute(
+            "UPDATE ingestion_runs SET completed_at=?,status=?,discovered=?,accepted=?,"
+            "quarantined=?,reason_codes=?,snapshot_updated_at=?,snapshot_lag_hours=?,note=? "
+            "WHERE run_id=?", (stamp, status, discovered, accepted, quarantined,
+            json.dumps(reason_codes or {}, ensure_ascii=False, sort_keys=True),
+            snapshot_updated_at, snapshot_lag_hours, note, run_id))
+        self.conn.commit()
+
+    def ingestion_history(self, source_id: str | None = None, *,
+                          limit: int = 100) -> list[dict]:
+        sql, args = "SELECT * FROM ingestion_runs", []
+        if source_id:
+            sql += " WHERE source_id=?"
+            args.append(source_id)
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def data_source_health(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT s.*,r.status,r.started_at,r.completed_at,r.discovered,r.accepted,"
+            "r.quarantined,r.reason_codes,r.snapshot_updated_at,r.snapshot_lag_hours,r.note "
+            "FROM data_sources s LEFT JOIN ingestion_runs r ON r.run_id=("
+            " SELECT r2.run_id FROM ingestion_runs r2 WHERE r2.source_id=s.source_id "
+            " ORDER BY r2.started_at DESC LIMIT 1) ORDER BY s.source_id").fetchall()]
+
+    def document_source_health(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT source,count(*) AS documents,"
+            "sum(CASE WHEN ok=0 THEN 1 ELSE 0 END) AS failures,"
+            "max(fetched_at) AS latest_fetch FROM source_documents "
+            "GROUP BY source ORDER BY source").fetchall()]
+
+    def document_candidate_health(self) -> list[dict]:
+        """Admission totals and reason codes by source/status for release reports."""
+        import json
+
+        rows = self.conn.execute(
+            "SELECT source,status,reason_codes,count(*) AS candidates "
+            "FROM document_candidates GROUP BY source,status,reason_codes "
+            "ORDER BY source,status").fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["reason_codes"] = json.loads(item.get("reason_codes") or "[]")
+            except json.JSONDecodeError:
+                item["reason_codes"] = ["invalid_reason_code_payload"]
+            out.append(item)
+        return out
+
+    def document_quality_inventory(self) -> list[dict]:
+        """Accepted inventory grouped by source, semantic and completeness."""
+        return [dict(row) for row in self.conn.execute(
+            "SELECT source,doc_type,coalesce(completeness,'full') AS completeness,"
+            "count(*) AS documents,sum(chars) AS chars,max(published_at) AS latest_published,"
+            "max(fetched_at) AS latest_fetch FROM source_documents WHERE ok=1 "
+            "GROUP BY source,doc_type,coalesce(completeness,'full') "
+            "ORDER BY source,doc_type,completeness").fetchall()]
+
+    def save_measurement_points(self, source, points, *,
+                                fetched_at: datetime | None = None) -> int:
+        """Persist immutable raw point vintages. Returns newly accepted versions."""
+        import hashlib
+        import json
+
+        stamp = (fetched_at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+        saved = 0
+        for point in points:
+            series = point.series or "value"
+            series_id = f"{source.id}:{series}"
+            self.conn.execute(
+                "INSERT INTO measurement_series "
+                "(series_id,source_id,series,label,entity,unit,cadence,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(series_id) DO UPDATE SET "
+                "label=excluded.label,entity=excluded.entity,unit=excluded.unit,"
+                "cadence=excluded.cadence,updated_at=excluded.updated_at",
+                (series_id, source.id, series, getattr(source, "label", source.id),
+                 getattr(source, "entity", ""), point.unit,
+                 getattr(source, "cadence", ""), stamp))
+            published = point.published_at.isoformat() if point.published_at else ""
+            # Exclude yoy/mom by construction: those are transformations, even when a
+            # provider happens to include them in the response DTO.
+            raw = point.model_dump(mode="json", exclude={"yoy", "mom"})
+            payload = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+            content_hash = hashlib.sha256(payload.encode()).hexdigest()
+            point_id = hashlib.sha1(
+                f"{series_id}|{point.period}|{content_hash}".encode()).hexdigest()[:20]
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO measurement_points "
+                "(point_id,series_id,period,value,unit,published_at,fetched_at,"
+                " content_hash,raw_payload) VALUES (?,?,?,?,?,?,?,?,?)",
+                (point_id, series_id, point.period, point.value, point.unit,
+                 published, stamp, content_hash, payload))
+            saved += max(0, cur.rowcount)
+        self.conn.commit()
+        return saved
+
+    def measurements(self, *, source_id: str | None = None,
+                     series: str | None = None, since: str | None = None,
+                     entity: str | None = None,
+                     as_of: datetime | None = None, latest_only: bool = True,
+                     limit: int = 5000) -> list[dict]:
+        """Query point vintages, optionally as they were knowable at `as_of`."""
+        sql = ("SELECT p.*,s.source_id,s.series,s.label,s.entity,s.cadence "
+               "FROM measurement_points p JOIN measurement_series s "
+               "ON s.series_id=p.series_id WHERE 1=1")
+        args: list = []
+        if source_id:
+            sql += " AND s.source_id=?"
+            args.append(source_id)
+        if series:
+            sql += " AND s.series=?"
+            args.append(series)
+        if entity:
+            sql += " AND s.entity=?"
+            args.append(entity.upper())
+        if since:
+            sql += " AND p.period>=?"
+            args.append(since)
+        cutoff = as_of.isoformat(timespec="seconds") if as_of else None
+        if cutoff:
+            # Both conditions matter: a backdated published_at does not mean this
+            # system possessed the point before fetched_at.
+            sql += " AND p.fetched_at<=? AND (p.published_at='' OR p.published_at<=?)"
+            args.extend([cutoff, cutoff])
+        if latest_only:
+            sql += (" AND NOT EXISTS (SELECT 1 FROM measurement_points newer "
+                    "WHERE newer.series_id=p.series_id AND newer.period=p.period "
+                    "AND newer.fetched_at>p.fetched_at)")
+            if cutoff:
+                # The newer-version exclusion must use the same historical knowledge
+                # boundary, otherwise a future revision hides the point known then.
+                sql = sql[:-1] + " AND newer.fetched_at<=?)"
+                args.append(cutoff)
+        sql += " ORDER BY p.period, p.fetched_at LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def save_task_projection(self, *, profile: str, profile_version: str,
+                             input_kind: str, input_ref: str,
+                             target_type: str, target_id: str, payload,
+                             created_at: str | None = None,
+                             expires_at: str = "") -> str:
+        """Persist one versioned task interpretation without changing its input."""
+        import hashlib
+        import json
+
+        stamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        projection_id = hashlib.sha1(
+            f"{profile}|{profile_version}|{input_kind}|{input_ref}|"
+            f"{target_type}|{target_id}".encode()).hexdigest()[:20]
+        if hasattr(payload, "model_dump"):
+            body = payload.model_dump(mode="json")
+        else:
+            body = payload
+        encoded = json.dumps(body, ensure_ascii=False, sort_keys=True)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO task_projections "
+            "(projection_id,profile,profile_version,input_kind,input_ref,target_type,"
+            " target_id,payload,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (projection_id, profile, profile_version, input_kind, input_ref,
+             target_type, target_id, encoded, stamp, expires_at))
+        self.conn.commit()
+        return projection_id
+
+    def task_projections(self, *, profile: str | None = None,
+                         target_type: str | None = None,
+                         target_id: str | None = None,
+                         input_ref: str | None = None,
+                         limit: int = 500) -> list[dict]:
+        sql, args = "SELECT * FROM task_projections WHERE 1=1", []
+        for column, value in (("profile", profile), ("target_type", target_type),
+                              ("target_id", target_id), ("input_ref", input_ref)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def projection_lineage(self, projection_id: str) -> dict | None:
+        """Resolve either projection family back to its fact/document/source input."""
+        task = self.conn.execute(
+            "SELECT * FROM task_projections WHERE projection_id=?", (projection_id,)
+        ).fetchone()
+        if task:
+            out = {"projection": dict(task), "fact": None,
+                   "document_version": None, "document": None}
+            if task["input_kind"] == "document_version":
+                version = self.conn.execute(
+                    "SELECT * FROM document_versions WHERE version_id=?",
+                    (task["input_ref"],)).fetchone()
+                if version:
+                    out["document_version"] = dict(version)
+                    doc = self.conn.execute(
+                        "SELECT * FROM source_documents WHERE document_id=?",
+                        (version["document_id"],)).fetchone()
+                    out["document"] = dict(doc) if doc else None
+            return out
+        projected = self.conn.execute(
+            "SELECT * FROM evidence_fact_projections WHERE projection_id=?",
+            (projection_id,)).fetchone()
+        if not projected:
+            return None
+        fact = self.conn.execute(
+            "SELECT * FROM evidence_facts WHERE fact_id=?", (projected["fact_id"],)
+        ).fetchone()
+        out = {"projection": dict(projected), "fact": dict(fact) if fact else None,
+               "document_version": None, "document": None}
+        if fact:
+            if fact["document_version_id"]:
+                version = self.conn.execute(
+                    "SELECT * FROM document_versions WHERE version_id=?",
+                    (fact["document_version_id"],)).fetchone()
+                out["document_version"] = dict(version) if version else None
+            doc = self.conn.execute(
+                "SELECT * FROM source_documents WHERE document_id=?",
+                (fact["document_id"],)).fetchone()
+            out["document"] = dict(doc) if doc else None
+        return out
+
     # --- research (newsletters) ------------------------------------------ #
     def article_seen(self, article_id: str) -> bool:
         return self.conn.execute("SELECT 1 FROM research_articles WHERE id = ?",
                                  (article_id,)).fetchone() is not None
 
     def save_article(self, art) -> None:
-        """Store article metadata only (bodies are not persisted)."""
+        """Legacy compatibility index; the body lives in the shared document store."""
         from datetime import datetime, timezone
 
         self.conn.execute(
@@ -1219,7 +2207,14 @@ class TradingMemory:
              datetime.now(timezone.utc).isoformat(), len(art.body)))
         self.conn.commit()
 
-    def save_insights(self, article_id: str, insights) -> None:
+    def insight_count(self, article_id: str) -> int:
+        row = self.conn.execute(
+            "SELECT count(*) AS n FROM research_insights WHERE article_id = ?",
+            (article_id,)).fetchone()
+        return int(row["n"] if row else 0)
+
+    def save_insights(self, article_id: str, insights, *,
+                      profile_version: str = "v1") -> None:
         from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc).isoformat()
@@ -1228,6 +2223,16 @@ class TradingMemory:
             [(article_id, i.ticker, i.direction, i.impact_path, i.summary,
               i.evidence_quote, i.confidence, now) for i in insights])
         self.conn.commit()
+        doc = self.document_by_external_id(article_id)
+        version = self.latest_document_version(doc["document_id"]) if doc else None
+        input_kind = "document_version" if version else "external_article"
+        input_ref = version["version_id"] if version else article_id
+        for insight in insights:
+            self.save_task_projection(
+                profile="pead_research", profile_version=profile_version,
+                input_kind=input_kind, input_ref=input_ref,
+                target_type="entity", target_id=insight.ticker.upper(), payload=insight,
+                created_at=now)
 
     def recent_insights(self, ticker: str | None = None, limit: int = 20) -> list[dict]:
         if ticker:
@@ -1240,6 +2245,25 @@ class TradingMemory:
                 (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def newsletter_cursor(self, mailbox: str, folder: str, sender: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM newsletter_cursors WHERE mailbox=? AND folder=? AND sender=?",
+            (mailbox, folder, sender.lower()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_newsletter_cursor(self, *, mailbox: str, folder: str, sender: str,
+                               uidvalidity: str, last_uid: int,
+                               last_message_id: str, watermark: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO newsletter_cursors "
+            "(mailbox,folder,sender,uidvalidity,last_uid,last_message_id,watermark,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (mailbox, folder, sender.lower(), uidvalidity, int(last_uid), last_message_id,
+             watermark, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+        )
+        self.conn.commit()
+
     # --- sector reviews --------------------------------------------------- #
     def save_sector_review(self, review) -> None:
         self.conn.execute(
@@ -1247,6 +2271,12 @@ class TradingMemory:
             (review.sector, review.as_of.isoformat(), review.regime, review.summary,
              review.model_dump_json()))
         self.conn.commit()
+        self.save_task_projection(
+            profile="sector_review", profile_version="v1",
+            input_kind="review_context",
+            input_ref=f"sector:{review.sector}:{review.as_of.isoformat()}",
+            target_type="sector", target_id=review.sector, payload=review,
+            created_at=review.as_of.isoformat())
 
     def latest_sector_review(self, sector: str):
         from ..schemas.sector import SectorReview

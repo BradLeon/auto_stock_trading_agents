@@ -1,0 +1,8 @@
+version: 1
+source_ids: [yfinance_consensus, yfinance_market, yfinance_options]
+adapter: yfinance
+secrets_env: []
+request_budget:
+  concurrency: 1
+  min_interval_seconds: 1
+  timeout_seconds: 30

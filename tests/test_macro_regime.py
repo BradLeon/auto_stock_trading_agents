@@ -633,6 +633,9 @@ def test_skill_states_the_numbers_are_not_the_models_to_rewrite():
     assert "象限判定不可推翻" in text
     assert "禁止对单个公司的盈利" in text            # role boundary vs 基本面分析师
     assert "falsifier" in text and "可观测" in text
+    assert "FactSet 不能只复述数字" in text
+    assert "增长质量" in text and "集中" in text and "GAAP/Non-GAAP" in text
+    assert "区分数据事实与模型解释" in text
     assert "## Security" in text
 
 

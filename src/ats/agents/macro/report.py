@@ -20,6 +20,17 @@ _QUADRANT_LABEL = {
 _STATE_LABEL = {"confirmed": "已确认", "provisional": "暂定",
                 "insufficient": "证据不足"}
 
+_FACTSET_JUDGMENT_LABELS = {
+    "growth_quality": "1. 盈利增长强度及营收支撑",
+    "concentration": "2. 盈利改善的广度与集中度",
+    "surprise_drivers": "3. 超预期的需求、利润率、成本或口径驱动",
+    "guidance_margin_consistency": "4. 盈利预测、公司指引与利润率是否互相印证",
+    "valuation": "5. 估值是否已经反映较强盈利",
+    "analyst_expectations": "6. 分析师评级和目标价反映的预期",
+    "conflicts_and_limitations": "7. 数据与正文的矛盾或解释限制",
+    "market_and_sector_implications": "8. 对大盘和板块的含义",
+}
+
 
 def _delta_section(review: MacroReview) -> list[str]:
     """Highest-priority answer: what changed since the prior formal review."""
@@ -172,6 +183,63 @@ def _indicator_appendix(review: MacroReview) -> list[str]:
     return lines + [""]
 
 
+def _factset_section(review: MacroReview) -> list[str]:
+    material = review.factset_material
+    assessment = review.factset_earnings_assessment
+    if material is None:
+        return ["## FactSet 盈利周期判断", "",
+                "- 本期未取得正式发布的 FactSet 分析材料，因此未形成判断。", ""]
+    lines = ["## FactSet 盈利周期判断", "",
+             f"> 报告日期：{material.report_date or '未知'}；数据新鲜度："
+             f"{material.freshness}；已提供给模型的结构化数据："
+             f"{len(material.observations)} 项。", ""]
+    if material.warnings:
+        lines += ["> 质量/可用性说明：" + "; ".join(material.warnings), ""]
+    lines += ["### 数据事实（程序读取，非模型解释）", "",
+              "| 指标 | 期间/口径 | 数值 | 原始证据 |", "|---|---|---:|---|"]
+    for item in material.observations:
+        if item.unit == "ratio":
+            value = f"{item.value * 100:.1f}%"
+        elif item.unit == "count":
+            value = f"{item.value:g}"
+        elif item.unit == "multiple":
+            value = f"{item.value:g} 倍"
+        else:
+            value = f"{item.value:g} {item.unit}"
+        pages = ", ".join(f"第 {page} 页" for page in item.page_numbers) or "数据记录"
+        basis = item.period
+        if item.estimate_state != "not_applicable":
+            basis += f" / {item.estimate_state}"
+        lines.append(f"| `{item.metric_id}` | {basis} | {value} | {pages}；"
+                     f"`{item.observation_id}` |")
+    if material.diagnostics:
+        lines += ["", "### 程序计算的关系", "",
+                  "| 关系 | 结果 | 输入数据编号 |", "|---|---:|---|"]
+        units = {"percentage_point": " 个百分点", "percent": "%",
+                 "ratio": " 倍", "count": " 家"}
+        for item in material.diagnostics:
+            refs = ", ".join(f"`{value}`" for value in item.input_observation_ids)
+            lines.append(f"| {item.label} | {item.value:g}{units.get(item.unit, item.unit)} | {refs} |")
+    lines += ["", "### 模型解释（必须以上述数据和正文页码为依据）", ""]
+    if assessment is None:
+        lines.append("- 本期没有生成 FactSet 盈利周期解释；数据事实仍保留供人工核对。")
+        return lines + [""]
+    for field_name, judgment in assessment:
+        lines += [f"#### {_FACTSET_JUDGMENT_LABELS[field_name]}", "",
+                  judgment.conclusion or "—"]
+        evidence = []
+        if judgment.metric_ids:
+            evidence.append("数据：" + ", ".join(f"`{item}`" for item in judgment.metric_ids))
+        if judgment.page_numbers:
+            evidence.append("正文：" + "、".join(f"第 {page} 页" for page in judgment.page_numbers))
+        if evidence:
+            lines.append("- 依据：" + "；".join(evidence))
+        if judgment.caution:
+            lines.append("- 谨慎说明：" + judgment.caution)
+        lines.append("")
+    return lines
+
+
 def render(review: MacroReview, cfg: MacroConfig) -> str:
     lines = [
         f"# 🤖 宏观分析 — {cfg.label}（{review.as_of:%Y-%m-%d}）",
@@ -182,6 +250,7 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
     ]
     lines += _delta_section(review)
     lines += _deterministic_section(review)
+    lines += _factset_section(review)
     lines += [
         "## 行业状态（regime）",
         f"**{review.regime}**",
@@ -199,10 +268,13 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
     for t in review.sector_tilts:
         lines.append(f"| {t.sector} | **{t.stance}** | {t.rationale} |")
 
-    lines += ["", "## 资产含义", review.asset_implications or "—", "",
-              "## 主题评估", "", "| 主题 | 方向 | 对市场传导 | 信号 |", "|---|---|---|---|"]
-    for a in review.themes:
-        lines.append(f"| {a.label} | {a.direction} | {a.transmission} | {a.signal} |")
+    lines += ["", "## 资产含义", review.asset_implications or "—", "", "## 主题评估", ""]
+    if review.themes:
+        lines += ["| 主题 | 方向 | 对市场传导 | 信号 |", "|---|---|---|---|"]
+        for a in review.themes:
+            lines.append(f"| {a.label} | {a.direction} | {a.transmission} | {a.signal} |")
+    else:
+        lines.append("本次模型未返回可识别的逐主题结构化条目；总评、利率路径、板块倾向和资产含义仍保留。")
 
     lines += ["", "## 主要风险", ""]
     lines += [f"- {r}" for r in review.top_risks]

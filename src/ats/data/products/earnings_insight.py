@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
 import json
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -91,6 +92,104 @@ class EarningsInsightSnapshot(BaseModel):
         default_factory=dict)
     status: EarningsInsightStatus = Field(default_factory=EarningsInsightStatus)
     lineage: EarningsInsightLineage = Field(default_factory=EarningsInsightLineage)
+
+
+class EarningsInsightDiagnostic(BaseModel):
+    """A deterministic relationship, with the source observations kept explicit."""
+
+    diagnostic_id: str
+    label: str
+    value: float
+    unit: str
+    input_observation_ids: list[str] = Field(default_factory=list)
+
+
+class EarningsInsightNarrativeEvidence(BaseModel):
+    """One bounded excerpt selected from the stored report pages."""
+
+    topic: str
+    topic_label: str
+    page_number: int
+    section_title: str = ""
+    char_start: int
+    char_end: int
+    text: str
+    document_id: str = ""
+    version_id: str = ""
+
+
+class EarningsInsightAnalysisPacket(BaseModel):
+    """Complete but bounded evidence prepared for Macro and Sector consumers."""
+
+    report: EarningsInsightReport = Field(default_factory=EarningsInsightReport)
+    status: EarningsInsightStatus = Field(default_factory=EarningsInsightStatus)
+    observation_groups: dict[str, list[EarningsInsightObservation]] = Field(
+        default_factory=dict)
+    diagnostics: list[EarningsInsightDiagnostic] = Field(default_factory=list)
+    narrative_evidence: list[EarningsInsightNarrativeEvidence] = Field(
+        default_factory=list)
+    sectors: dict[str, dict[str, dict[str, EarningsInsightObservation]]] = Field(
+        default_factory=dict)
+    lineage: EarningsInsightLineage = Field(default_factory=EarningsInsightLineage)
+
+    @property
+    def observation_count(self) -> int:
+        return sum(len(items) for items in self.observation_groups.values())
+
+    @property
+    def index(self) -> dict[str, dict[str, EarningsInsightObservation]]:
+        """Compatibility view for the narrow legacy EarningsBackdrop mapper."""
+        periods: dict[str, dict[str, EarningsInsightObservation]] = {}
+        for items in self.observation_groups.values():
+            for item in items:
+                periods.setdefault(item.period, {})[item.metric_id] = item
+        return periods
+
+
+_ANALYSIS_GROUPS = {
+    "reporting_progress": {"earnings.reporting.coverage"},
+    "earnings_revenue_surprises": {
+        "earnings.eps.above_estimate_share", "earnings.eps.inline_estimate_share",
+        "earnings.eps.below_estimate_share", "earnings.revenue.above_estimate_share",
+        "earnings.revenue.inline_estimate_share", "earnings.revenue.below_estimate_share",
+        "earnings.eps.surprise_pct", "earnings.revenue.surprise_pct",
+    },
+    "earnings_revenue_growth": {
+        "earnings.eps.yoy_growth", "earnings.revenue.yoy_growth",
+    },
+    "profit_margin": {"earnings.net_profit_margin"},
+    "company_guidance": {
+        "earnings.guidance.positive_count", "earnings.guidance.negative_count",
+    },
+    "estimate_revision_breadth": {"earnings.revision.improved_sector_count"},
+    "valuation": {
+        "valuation.forward_pe", "valuation.trailing_pe",
+        "valuation.forward_pe.average_5y", "valuation.forward_pe.average_10y",
+        "valuation.trailing_pe.average_5y", "valuation.trailing_pe.average_10y",
+    },
+    "ratings_and_target_price": {
+        "consensus.rating.buy_share", "consensus.rating.hold_share",
+        "consensus.rating.sell_share", "consensus.target.upside",
+    },
+}
+
+_NARRATIVE_TOPICS = (
+    ("earnings_concentration", "盈利集中度",
+     (r"exclud(?:e|ing)[^.]{0,220}(?:alphabet|amazon)",
+      r"(?:alphabet|amazon)[^.]{0,220}(?:contribut|earnings growth)")),
+    ("excluding_major_companies", "剔除主要公司后的增长",
+     (r"exclud(?:e|ing)[^.]{0,260}(?:growth rate|earnings growth)",)),
+    ("gaap_non_gaap", "GAAP 与 Non-GAAP 口径",
+     (r"non[- ]gaap", r"gaap earnings")),
+    ("sector_contribution", "行业贡献",
+     (r"largest contributor", r"due to the [^.]{0,100} sector",
+      r"sector was the largest")),
+    ("margin_drivers", "利润率变化原因",
+     (r"profit margin[^.]{0,260}(?:due to|because|driven|increase|decrease)",
+      r"margin[^.]{0,180}(?:cost|expense|pricing)")),
+    ("valuation_and_sentiment", "估值、评级和目标价背景",
+     (r"forward 12-month p/e", r"buy ratings", r"target price")),
+)
 
 
 def _json(value: str, default):
@@ -257,6 +356,190 @@ def load_snapshot(products, *, as_of: datetime | None = None,
             }))
 
 
+def _latest_index_observations(
+        snapshot: EarningsInsightSnapshot) -> list[EarningsInsightObservation]:
+    """Select one released value per index metric without inventing missing data."""
+    by_metric: dict[str, EarningsInsightObservation] = {}
+    for period_metrics in snapshot.index.values():
+        for item in period_metrics.values():
+            current = by_metric.get(item.metric_id)
+            if current is None or (item.known_at, item.period) > (
+                    current.known_at, current.period):
+                by_metric[item.metric_id] = item
+    return sorted(by_metric.values(), key=lambda item: (item.metric_id, item.period))
+
+
+def _group_observations(
+        observations: list[EarningsInsightObservation],
+        warnings: list[str]) -> dict[str, list[EarningsInsightObservation]]:
+    groups = {name: [] for name in _ANALYSIS_GROUPS}
+    unknown: list[EarningsInsightObservation] = []
+    for item in observations:
+        group_name = next((name for name, metrics in _ANALYSIS_GROUPS.items()
+                           if item.metric_id in metrics), "")
+        if group_name:
+            groups[group_name].append(item)
+        else:
+            unknown.append(item)
+    if unknown:
+        groups["other"] = unknown
+        warnings.append("unclassified_index_metrics:" + ",".join(
+            item.metric_id for item in unknown))
+    return groups
+
+
+def _diagnostics(
+        observations: list[EarningsInsightObservation]) -> list[EarningsInsightDiagnostic]:
+    by_metric = {item.metric_id: item for item in observations}
+    results: list[EarningsInsightDiagnostic] = []
+
+    def difference(diagnostic_id: str, label: str, left: str, right: str,
+                   *, scale: float = 1.0, unit: str) -> None:
+        lhs, rhs = by_metric.get(left), by_metric.get(right)
+        if lhs is None or rhs is None:
+            return
+        results.append(EarningsInsightDiagnostic(
+            diagnostic_id=diagnostic_id, label=label,
+            value=round((lhs.value - rhs.value) * scale, 4), unit=unit,
+            input_observation_ids=[lhs.observation_id, rhs.observation_id]))
+
+    difference(
+        "eps_minus_revenue_growth", "盈利增长减营收增长",
+        "earnings.eps.yoy_growth", "earnings.revenue.yoy_growth",
+        scale=100, unit="percentage_point")
+    difference(
+        "eps_minus_revenue_surprise", "盈利超预期幅度减营收超预期幅度",
+        "earnings.eps.surprise_pct", "earnings.revenue.surprise_pct",
+        scale=100, unit="percentage_point")
+
+    positive = by_metric.get("earnings.guidance.positive_count")
+    negative = by_metric.get("earnings.guidance.negative_count")
+    if positive is not None and negative is not None:
+        inputs = [positive.observation_id, negative.observation_id]
+        if negative.value:
+            results.append(EarningsInsightDiagnostic(
+                diagnostic_id="positive_negative_guidance_ratio",
+                label="正面指引与负面指引之比",
+                value=round(positive.value / negative.value, 4), unit="ratio",
+                input_observation_ids=inputs))
+        results.append(EarningsInsightDiagnostic(
+            diagnostic_id="positive_minus_negative_guidance",
+            label="正面指引减负面指引家数",
+            value=round(positive.value - negative.value, 4), unit="count",
+            input_observation_ids=inputs))
+
+    for prefix, label in (("forward", "前瞻市盈率"), ("trailing", "过去十二个月市盈率")):
+        current = by_metric.get(f"valuation.{prefix}_pe")
+        if current is None:
+            continue
+        for horizon, horizon_label in (("5y", "五年均值"), ("10y", "十年均值")):
+            average = by_metric.get(f"valuation.{prefix}_pe.average_{horizon}")
+            if average is None or not average.value:
+                continue
+            results.append(EarningsInsightDiagnostic(
+                diagnostic_id=f"{prefix}_pe_vs_{horizon}_average",
+                label=f"{label}相对{horizon_label}",
+                value=round((current.value / average.value - 1) * 100, 4),
+                unit="percent", input_observation_ids=[
+                    current.observation_id, average.observation_id]))
+    return results
+
+
+def _bounded_excerpt(text: str, match: re.Match[str], *, limit: int = 900) -> tuple[int, int, str]:
+    """Keep a paragraph-sized citation around a matched analytical statement."""
+    window_start = max(0, match.start() - 600)
+    sentence_start = text.rfind(". ", window_start, match.start())
+    newline_start = text.rfind("\n", window_start, match.start())
+    boundary = max(sentence_start + 2 if sentence_start >= 0 else 0,
+                   newline_start + 1 if newline_start >= 0 else 0)
+    start = boundary if boundary else window_start
+    search_end = min(len(text), match.end() + 520)
+    sentence_end = text.find(". ", match.end(), search_end)
+    newline_end = text.find("\n", match.end(), search_end)
+    candidates = [value for value in (
+        sentence_end + 1 if sentence_end >= 0 else -1,
+        newline_end if newline_end >= 0 else -1) if value >= match.end()]
+    end = min(candidates) if candidates else search_end
+    if end - start < 140:
+        end = min(len(text), start + max(140, match.end() - start + 220))
+    if end - start > limit:
+        end = start + limit
+    raw = text[start:end]
+    leading = len(raw) - len(raw.lstrip())
+    trailing = len(raw.rstrip())
+    start += leading
+    end = start + max(0, trailing - leading)
+    return start, end, re.sub(r"\s+", " ", text[start:end]).strip()
+
+
+def _select_narrative_evidence(
+        products, snapshot: EarningsInsightSnapshot,
+        *, limit: int = 6) -> list[EarningsInsightNarrativeEvidence]:
+    if not snapshot.report.version_id:
+        return []
+    pages = products.unstructured.document_pages(snapshot.report.version_id)
+    selected: list[EarningsInsightNarrativeEvidence] = []
+    used_spans: set[tuple[int, int, int]] = set()
+    for topic, label, patterns in _NARRATIVE_TOPICS:
+        chosen = None
+        candidates = [
+            page for page in pages
+            if "table of contents" not in str(page.get("section_title") or "").lower()]
+        if topic == "valuation_and_sentiment":
+            candidates.sort(key=lambda page: (
+                int(page.get("page_number") or 0) < 15,
+                int(page.get("page_number") or 0)))
+        for page in candidates:
+            text = str(page.get("text") or "")
+            for pattern in patterns:
+                match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+                if match:
+                    chosen = (page, text, match)
+                    break
+            if chosen:
+                break
+        if chosen is None:
+            continue
+        page, page_text, match = chosen
+        local_start, local_end, excerpt = _bounded_excerpt(page_text, match)
+        page_number = int(page.get("page_number") or 0)
+        span_key = (page_number, local_start, local_end)
+        if not excerpt or span_key in used_spans:
+            continue
+        used_spans.add(span_key)
+        page_char_start = int(page.get("char_start") or 0)
+        selected.append(EarningsInsightNarrativeEvidence(
+            topic=topic, topic_label=label, page_number=page_number,
+            section_title=str(page.get("section_title") or ""),
+            char_start=page_char_start + local_start,
+            char_end=page_char_start + local_end, text=excerpt,
+            document_id=snapshot.report.document_id,
+            version_id=snapshot.report.version_id))
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def load_analysis_packet(products, *, as_of: datetime | None = None,
+                         version_id: str = "") -> EarningsInsightAnalysisPacket:
+    """Build the bounded, traceable FactSet input shared by analysis workflows."""
+    snapshot = load_snapshot(products, as_of=as_of, version_id=version_id)
+    warnings = list(snapshot.status.warnings)
+    observations = _latest_index_observations(snapshot)
+    groups = _group_observations(observations, warnings)
+    expected = set().union(*_ANALYSIS_GROUPS.values())
+    present = {item.metric_id for item in observations}
+    missing = sorted(expected - present)
+    if missing:
+        warnings.append("missing_index_metrics:" + ",".join(missing))
+    status = snapshot.status.model_copy(update={"warnings": list(dict.fromkeys(warnings))})
+    return EarningsInsightAnalysisPacket(
+        report=snapshot.report, status=status, observation_groups=groups,
+        diagnostics=_diagnostics(observations),
+        narrative_evidence=_select_narrative_evidence(products, snapshot),
+        sectors=snapshot.sectors, lineage=snapshot.lineage)
+
+
 def available_vintages(products, *, as_of: datetime | None = None,
                        limit: int = 500) -> list[EarningsInsightSnapshot]:
     manifests = products.structured.release_manifests(
@@ -377,9 +660,11 @@ def to_earnings_backdrop(snapshot: EarningsInsightSnapshot):
 
 
 __all__ = [
+    "EarningsInsightAnalysisPacket", "EarningsInsightDiagnostic",
     "EarningsInsightEvidence", "EarningsInsightLineage",
+    "EarningsInsightNarrativeEvidence",
     "EarningsInsightObservation", "EarningsInsightPartitionStatus",
     "EarningsInsightReport", "EarningsInsightSnapshot", "EarningsInsightStatus",
-    "available_vintages", "load_snapshot", "operational_status",
+    "available_vintages", "load_analysis_packet", "load_snapshot", "operational_status",
     "to_earnings_backdrop",
 ]

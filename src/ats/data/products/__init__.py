@@ -13,13 +13,17 @@ from .routing import UnstructuredReadRouter, get_unstructured_read_router
 from .regional import RegionalPoint, RegionalProducts, RegionalSnapshot
 from .earnings import confirm_reported
 from .earnings_insight import (
+    EarningsInsightAnalysisPacket,
+    EarningsInsightDiagnostic,
     EarningsInsightEvidence,
     EarningsInsightLineage,
     EarningsInsightObservation,
+    EarningsInsightNarrativeEvidence,
     EarningsInsightPartitionStatus,
     EarningsInsightReport,
     EarningsInsightSnapshot,
     EarningsInsightStatus,
+    load_analysis_packet,
     to_earnings_backdrop,
 )
 from .workflows import WorkflowDataBoundary, workflow_data_boundary
@@ -48,13 +52,17 @@ __all__ = [
     "RegionalProducts",
     "RegionalSnapshot",
     "confirm_reported",
+    "EarningsInsightAnalysisPacket",
+    "EarningsInsightDiagnostic",
     "EarningsInsightEvidence",
     "EarningsInsightLineage",
     "EarningsInsightObservation",
+    "EarningsInsightNarrativeEvidence",
     "EarningsInsightPartitionStatus",
     "EarningsInsightReport",
     "EarningsInsightSnapshot",
     "EarningsInsightStatus",
+    "load_analysis_packet",
     "to_earnings_backdrop",
     "WorkflowDataBoundary",
     "workflow_data_boundary",

@@ -116,7 +116,9 @@ feature_flags:
     accepted_document_evidence: legacy
     factset_earnings_insight_doc: shadow
     factset_earnings_insight_metrics: shadow
-    factset_earnings_insight_index: shadow
+    # 082826 index acceptance and Macro dual-read are complete; this partition is
+    # now the formal governed source for the Macro consumer.
+    factset_earnings_insight_index: platform
     factset_earnings_insight_sector: shadow
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
@@ -165,7 +167,9 @@ feature_flags:
     # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
     runtime_scheduler: shadow
     chief_graph: shadow
-    macro_factset: shadow
+    # 9.2 cutover: Macro reads the released index partition only.  Sector remains
+    # shadow until its independent 9.3 production promotion.
+    macro_factset: platform
     sector_factset: shadow
   consumer_sources: {}
 

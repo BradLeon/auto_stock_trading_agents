@@ -224,6 +224,31 @@ def test_aggregate_report_is_an_index_not_a_copy():
     assert "独有的详细理由文本" not in md
 
 
+def test_aggregate_report_renders_macro_factset_comparison_and_unavailability():
+    from ats.schemas.sector import SectorReview, TopDownComparison
+
+    review = SectorReview(
+        sector="demo", as_of=NOW, regime="中性",
+        top_down_comparison=TopDownComparison(
+            macro_background="实际利率偏高，压制长久期资产。",
+            factset_background="行业数据仍处于影子验证阶段。",
+            agreements=["云需求与应用层证据一致。"],
+            divergences=["标准行业总量强，但设备层订单偏弱。"],
+            recommendation_impact="维持层间建议，不修改单层配置。",
+            availability_notes=["FactSet 十一行业数据仍处于影子验证阶段。"],
+            macro_review_date="2026-09-03",
+            factset_report_date="2026-08-28",
+            factset_version_id="factset@082826"))
+    text = report.render(review, _cfg())
+
+    assert "宏观与 FactSet 对照" in text
+    assert "实际利率偏高" in text
+    assert "标准行业总量强" in text
+    assert "维持层间建议" in text
+    assert "未采用数据及原因" in text and "影子验证阶段" in text
+    assert "没有回写或修改任何单层结论" in text
+
+
 def test_cross_section_table_carries_a_column_legend():
     """定宽表是给机器排版的，缩写对读的人不自明 —— 尤其 comp 是 z 分的加权和，
     不是原始值的加权和，脱离本层没有可比性。"""

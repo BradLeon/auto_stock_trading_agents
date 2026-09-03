@@ -191,6 +191,24 @@ Operational CLI/reporting will support:
 - query latest, `as_of`, and all vintages;
 - reprocess an artifact with a new extractor version without redownloading it.
 
+### 10. Analysis consumers receive a bounded evidence packet, not the compatibility DTO or full prose
+
+`EarningsInsightSnapshot` remains the report-consistent source of truth. A typed analysis packet groups every released index observation by decision topic, computes formula-backed diagnostics with input observation IDs, and selects at most six narrative excerpts from `data_document_pages`. Narrative selection uses registered section/title anchors and bounded patterns for concentration, accounting basis, sector drivers, margin, valuation, and ratings. Each excerpt retains version, page, and character offsets. The legacy `EarningsBackdrop` remains a compatibility adapter only.
+
+Sending the first sixteen pages wholesale was rejected because it increases token cost, licensed-text exposure, noise, and prompt-injection surface. Keeping the compatibility DTO as the main prompt was rejected because it discards most accepted observations and all explanatory evidence.
+
+### 11. Macro has a first-class earnings-cycle assessment
+
+Macro receives the full packet regardless of network mode. Its persisted output and report add a structured FactSet assessment covering growth quality, breadth/concentration, surprise quality, margins/guidance, valuation/sentiment, conflicts/limitations, market implications, and cited observation/page references. Deterministic tables render all applicable observations and diagnostics; the model explains them but cannot alter their values.
+
+`--offline` means “no live network acquisition,” not “discard local governed products.” A live production review still combines the packet with rates, inflation, employment, credit and market pricing.
+
+### 12. Macro and FactSet enter Sector only after all layer verdicts are fixed
+
+The layered Sector path loads the latest formal Macro review and the FactSet sector overlay once, after producing all eight layer verdicts. The rotation prompt may use these inputs to explain alignment, divergence, and the final cross-layer add/trim recommendation, but it cannot mutate layer allocations, confidence, or name calls. The persisted Sector review and report expose what top-down context was available, what was used, and why unavailable/shadow/stale context was omitted.
+
+Passing top-down context into each layer was rejected because GICS sectors are not AI-hardware layers and Macro already affects portfolio risk at Chief. Excluding top-down context from the final synthesis was also rejected because it hides economically relevant contradictions from the reader.
+
 ## Risks / Trade-offs
 
 - **[FactSet changes PDF layout or protection]** → Classify templates by anchors and extractor version; quarantine unknown templates while retaining the raw document and alerting operators.
@@ -201,6 +219,8 @@ Operational CLI/reporting will support:
 - **[Licensed charts leak into outputs]** → Keep raw/crops behind internal artifact access, prefer regenerated charts from released observations, and include source/license metadata in internal views.
 - **[A new OCR system increases native dependencies]** → Make it an optional chart adapter; index text release works without it, and startup/source acceptance reports dependency availability.
 - **[More structured fields create false precision]** → Limit V1 to repeated, decision-useful metric families; preserve raw wording and state/period semantics, and leave long-tail company tables as document evidence.
+- **[Narrative excerpts overfit one weekly template]** → Select by registered topic plus section anchors, cap excerpts, preserve page references, and surface an explicit missing topic instead of widening to the full document.
+- **[Macro is counted twice]** → Allow Macro only in the final Sector synthesis, prohibit it from changing layer verdicts, and make its effect on the cross-layer recommendation explicit in the report.
 
 ## Migration Plan
 
@@ -210,7 +230,8 @@ Operational CLI/reporting will support:
 4. Add DataProducts and the `EarningsBackdrop` compatibility mapper. Run a Macro dual-read comparison for the current report; compare values, period/state labels, freshness, and rendered review text.
 5. Promote the index source to platform, then switch `macro_factset` to platform. Observe one scheduled run and one weekly review, or execute the approved operator-triggered equivalent (FactSet import followed by Macro and Sector review) before the next Saturday window. Roll back the consumer flag if the Macro regression gate fails; keep source collection enabled and record the drill.
 6. Implement chart adapters and annotate all applicable sector cells in the `082826` report. Require 100% accepted-cell agreement, exact 11-sector completeness, and zero unresolved label mapping before promoting `sector_core`.
-7. Add the Sector top-down overlay behind `sector_factset=shadow`, run consumer smoke/regression tests, then promote it independently after one successful scheduled refresh.
-8. After both consumers complete the observation window, remove direct download/PDF parsing from Macro and retire the external Obsidian folder as a runtime dependency. Preserve a documented artifact import command for operator-controlled backfill.
+7. Add the bounded analysis packet and first-class Macro earnings-cycle assessment; rerun `082826` with all 25 observations and cited narrative evidence before accepting Macro analysis quality.
+8. Wire Macro memory and the Sector top-down overlay only into the final layered Sector synthesis, run shadow smoke/regression and `082826` report review, then promote `sector_factset` independently after one successful scheduled refresh.
+9. After both consumers complete the quality and observation windows, remove direct download/PDF parsing from Macro and retire the external Obsidian folder as a runtime dependency. Preserve a documented artifact import command for operator-controlled backfill.
 
 Rollback changes only consumer/source release modes: set the affected consumer to legacy/off and leave artifacts, documents, candidates, observations, and vintages intact. Schema rollback is not required for incident response; additive tables/columns remain dormant. The legacy parser is removed only after the observation window, so an earlier rollback remains possible until that final step.

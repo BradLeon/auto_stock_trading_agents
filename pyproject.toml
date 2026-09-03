@@ -10,6 +10,7 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-anthropic>=0.3.0",
     "langchain-openai>=0.2",       # default LLM path: OpenRouter (OpenAI-compatible)
+    "socksio>=1.0.0",              # httpx SOCKS transport when an LLM proxy is configured
     # data contracts / config
     "pydantic>=2.7",
     "pydantic-settings>=2.3",

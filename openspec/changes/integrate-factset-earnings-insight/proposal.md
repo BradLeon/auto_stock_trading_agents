@@ -10,6 +10,8 @@ FactSet Earnings Insight 已被 `macro.yaml` 和 Macro Agent 以本地 PDF 下�
 - 对 `082826` 的 Sector 图表新增本地半自动表格解码和可审阅标注包：系统预填候选值、单元格区域与证据，人工按图表确认或修正；发布前必须以该 golden dataset 逐格比较，不接受仅有非空标注的形式性验收。
 - `082826` 的 Sector 验收分为可审计的连续阶段：人工 golden cells、独立 PDF decoder、ChartTable 候选、逐格 comparator 与真实 PDF 验收报告。任何阶段性产物均不得被误报为 `sector_core` 已通过。
 - 新增稳定的 Earnings Insight DataProducts 快照接口，供 Macro 和 Sector Workflow 读取；Chief、Risk 与 PEAD 继续只消费 Macro/Sector 结论，避免同一来源被重复加权。
+- 在快照之上新增面向分析的证据包：向 Macro 暴露全部已发布指数指标、确定性派生诊断及最多六段带页码的正文证据；向 Sector 的最终跨层汇总暴露已发布 GICS 矩阵和最新 Macro 结论，而不污染单层公司证据判断。
+- 扩展 Macro/Sector 的输出契约、Skills 与报告，使增长质量、集中度、surprise、利润率、指引、估值、市场预期及 top-down/bottom-up 分歧均有明确结论和可核对来源；`--offline` 仅禁止网络访问，不得屏蔽本地已发布数据或 workflow memory。
 - 把周度调度改为先采集/发布 FactSet，再执行 Macro、Sector；采集失败时显式返回 stale/unavailable，不允许 Agent 隐式在线回退。
 - 以最新 2026-08-28（`082826`）报告建立上线验收与人工标注集；指数指标先切换，行业图表指标仅在该期逐单元格通过发布门后切换。历史 PDF 可保留作受控重处理输入，但不构成当前发布标准或历史消费结论依据。
 - 迁移完成并经过观察期后，移除 Macro Agent 内部的直接下载、本地文件夹和 PDF 解析路径。
@@ -29,6 +31,6 @@ FactSet Earnings Insight 已被 `macro.yaml` 和 Macro Agent 以本地 PDF 下�
 - 数据配置：统一 catalog 的 unstructured/structured source、dataset、31 个 V1 metric（包括行业盈利修正广度）、entity、feature flag、release 与 schedule 意图。
 - 数据实现：FactSet 获取与 PDF 文档适配、文本/图表候选抽取、structured ingestion、evidence link 与质量报告。
 - 公共消费面：新增 typed Earnings Insight DataProducts product；现有 `EarningsBackdrop` 变为兼容 DTO。
-- Workflow：Macro 和 Sector 改为 platform-only 数据读取，周度作业增加显式数据准备阶段；下游 Chief/Risk/PEAD 的既有注入边界保持不变。
+- Workflow：Macro 和 Sector 改为 platform-only 数据读取，周度作业增加显式数据准备阶段；Macro 使用分析证据包，Sector 仅在八层判断完成后的跨层汇总中读取 FactSet 与 Macro memory；下游 Chief/Risk/PEAD 的既有注入边界保持不变。
 - 运维与测试：增加当前报告的 source acceptance、release-check、as-of/vintage/lineage、consumer smoke 和 rollback drill；历史 backfill 是可选运维能力，不是上线门槛。
 - 依赖：正文继续使用现有 PDF 文本栈；图表数值需要受控的图像结构化抽取能力，但不得把 OCR/LLM 置信度当作唯一准入依据。

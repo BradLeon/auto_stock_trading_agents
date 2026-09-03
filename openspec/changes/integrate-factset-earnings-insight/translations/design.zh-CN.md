@@ -189,6 +189,24 @@ Macro 只接收指数分区，用于盈利广度、增长、利润率、guidance
 - 查询 latest、`as_of` 和全部 vintages；
 - 使用新的 extractor 版本重新处理 artifact，而不重新下载。
 
+### 10. 分析消费者读取有界证据包，而不是兼容 DTO 或整篇正文
+
+`EarningsInsightSnapshot` 继续作为同一期一致数据的唯一真源。在其上构造有类型的分析证据包：按决策主题组织全部已发布指数观测，计算带输入 observation ID 的确定性诊断，并从 `data_document_pages` 中选择最多六段正文。正文按已注册章节/标题锚点覆盖集中度、会计口径、行业驱动、利润率、估值和评级；每段保留版本、页码和字符偏移。遗留 `EarningsBackdrop` 只保留为兼容 adapter。
+
+没有选择发送前十六页全文，因为这会增加 token、授权正文暴露、噪声和提示注入风险。也没有继续让兼容 DTO 充当主要 prompt，因为它会丢失多数已验收观测和全部解释证据。
+
+### 11. Macro 形成独立的盈利周期判断
+
+Macro 无论是否禁止网络访问，都读取完整证据包。持久化输出和报告新增结构化 FactSet 判断，覆盖增长质量、广度/集中度、surprise 质量、利润率/指引、估值/市场预期、冲突/限制、市场含义和实际引用的 observation/页码。确定性表格展示全部适用观测和诊断；模型负责解释，但不能修改数值。
+
+`--offline` 表示“不进行现场网络采集”，不表示“丢弃本地受治理产品”。正式在线评审仍将证据包与利率、通胀、就业、信用和市场定价结合。
+
+### 12. Macro 与 FactSet 只在八层结论固定后进入 Sector
+
+分层 Sector 流程先产出全部八层结论，再一次性读取最新正式 Macro review 和 FactSet 行业背景。最终汇总可以用它们解释一致、分歧及跨层加减建议，但不能修改任何层的配置、信心或个股判断。持久化 Sector review 和报告必须展示当时可用的 top-down 背景、实际采用内容，以及因 unavailable/shadow/stale 而省略的原因。
+
+没有把 top-down 内容传给每层，因为 GICS 行业不是 AI 硬件层，而且 Macro 已在 Chief 影响组合风险。也没有继续把它从最终汇总完全排除，因为这会向读者隐藏具有经济意义的矛盾。
+
 ## 风险 / 权衡
 
 - **[FactSet 改变 PDF 布局或保护方式]** → 通过锚点和 extractor 版本识别模板；隔离未知模板，同时保留原始文档并提醒操作人员。
@@ -199,6 +217,8 @@ Macro 只接收指数分区，用于盈利广度、增长、利润率、guidance
 - **[授权图表泄漏到输出中]** → 将原图/裁剪图保留在内部 artifact 访问边界内，优先依据已发布 observations 重绘，并在内部视图包含来源/授权元数据。
 - **[新 OCR 系统增加原生依赖]** → 将其设计为可选图表 adapter；没有 OCR 时指数文字仍可发布，启动/来源验收报告依赖可用性。
 - **[更多结构化字段造成虚假精确性]** → V1 仅覆盖重复出现且有决策价值的指标族；保留原始措辞及状态/期间语义，长尾公司表格继续作为文档证据。
+- **[正文证据选择过拟合单期模板]** → 使用已注册主题加章节锚点选择、限制段数、保留页码；缺失主题显式报告，不扩大到整篇正文。
+- **[Macro 被重复计权]** → 只允许 Macro 进入 Sector 最终汇总，禁止修改单层结论，并在报告中明确它对跨层建议的实际影响。
 
 ## 迁移计划
 
@@ -208,7 +228,8 @@ Macro 只接收指数分区，用于盈利广度、增长、利润率、guidance
 4. 增加 DataProducts 和 `EarningsBackdrop` 兼容 mapper。对当前报告执行 Macro 双读比较；对比数值、期间/状态标签、新鲜度以及渲染后的评审文字。
 5. 将指数来源提升到 platform，再把 `macro_factset` 切换到 platform。观察一次定时运行和一次周度评审；在下一个周六窗口前，可执行获批准的等价操作：FactSet import 后直接运行 Macro 与 Sector review。若 Macro 回归门禁失败，回滚 consumer flag，但保持来源采集开启并记录演练。
 6. 实现图表 adapter，并标注 `082826` 中所有适用的行业单元格。在提升 `sector_core` 前，要求已验收单元格 100% 一致、恰好包含 11 个行业、且没有未解决的标签映射。
-7. 在 `sector_factset=shadow` 后增加 Sector top-down overlay，运行消费者 smoke/regression 测试，再在一次成功定时刷新后独立提升它。
-8. 两个消费者都完成观察期后，从 Macro 移除直接下载/PDF 解析，并取消外部 Obsidian 文件夹的运行时依赖。保留有文档说明的 artifact 导入命令，用于由操作人员控制的回填。
+7. 增加有界分析证据包和 Macro 独立盈利周期判断；以全部 25 条观测和带页码正文证据重新运行 `082826`，通过 Macro 分析质量验收。
+8. 只在最终 layered Sector 汇总中接入 Macro memory 与 Sector top-down overlay，运行 shadow smoke/regression 和 `082826` 报告审阅，再在一次成功调度刷新后独立提升 `sector_factset`。
+9. 两个消费者都完成质量和观察期后，从 Macro 移除直接下载/PDF 解析，并取消外部 Obsidian 文件夹的运行时依赖。保留有文档说明的 artifact 导入命令，用于由操作人员控制的回填。
 
 回滚只改变 consumer/source release mode：将受影响消费者设为 legacy/off，保留 artifact、document、candidate、observation 和 vintage。事故响应不需要回滚 schema；新增表/列保持闲置即可。只有在观察期结束后才移除遗留解析器，因此在最终步骤之前仍可回滚到旧路径。

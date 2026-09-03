@@ -68,6 +68,19 @@
 - [x] 7.3 Add the GICS sector matrix to Sector assembly behind `sector_factset` and label it explicitly as top-down market context distinct from AI-hardware layers and company evidence.
 - [x] 7.4 Add consumer tests proving Chief, Risk, PEAD, Technical, and company evidence workflows do not directly query or independently weight the FactSet product.
 - [x] 7.5 Add degradation tests proving unavailable FactSet data omits the corresponding conclusions without failing weekly review, while stale data is surfaced with its original report date.
+- [x] 7.6 Complete the analysis-ready FactSet packet only after 7.6a–7.6c pass.
+- [x] 7.6a Expose all 25 applicable released SP500 observations in eight named groups with report date, freshness, quality warnings, period/state, evidence anchors, and lineage; do not reduce them to the legacy `EarningsBackdrop` subset.
+- [x] 7.6b Deterministically calculate EPS-minus-revenue growth, EPS-minus-revenue surprise, positive/negative guidance ratio and net count, and forward/trailing P/E deviations from five- and ten-year averages; retain every input observation ID.
+- [x] 7.6c Select at most six bounded excerpts from governed page text for concentration, excluding major companies, GAAP/Non-GAAP, sector contribution, margin drivers, and valuation/ratings; retain version, page and character range and never send the full report body.
+- [x] 7.7 Complete Macro quality integration only after 7.7a–7.7c pass.
+- [x] 7.7a Supply the complete packet to Macro while retaining the compatibility backdrop; redefine offline as no network acquisition while still reading local DataProducts, regional data, and prior formal Macro memory.
+- [x] 7.7b Persist a separate eight-part FactSet earnings-cycle assessment for growth quality, concentration, surprise drivers, guidance/margin consistency, valuation, analyst expectations, conflicts/limitations, and market/sector implications; reject metric IDs and page numbers absent from the supplied packet.
+- [x] 7.7c Update the Macro Skill and report so facts and model interpretation are visibly separate, all 25 supplied observations and deterministic diagnostics are shown, every required question is answered, and important prose claims cite validated pages.
+- [x] 7.8 Complete layered Sector quality integration only after 7.8a–7.8c pass.
+- [x] 7.8a Finish all eight company-evidence layer verdicts first, then read the latest formal Macro review and the eleven-sector FactSet GICS context once for final synthesis; never pass either input into a layer analyst.
+- [x] 7.8b Persist and render normal-Chinese answers for Macro background, FactSet background, agreements, divergences, and impact on cross-layer increase/decrease recommendations, including explicit not-released, shadow, stale, or missing reasons.
+- [x] 7.8c Prove top-down context cannot mutate any existing layer verdict, company call, confidence, or evidence chain and that standard GICS sectors are never treated as AI-hardware supply-chain layers.
+- [x] 7.9 Add focused automated tests for the `082826` packet values/excerpts, Macro prompt/persistence/report and citation filtering, offline local reads, Sector final-only comparison, unavailability reasons, and layer-result immutability.
 
 ## 8. Scheduling, operations, and observability
 
@@ -80,8 +93,9 @@
 ## 9. Cutover, rollback, and retirement
 
 - [x] 9.1 Apply additive migrations and import current report `082826` into an isolated environment with all source and consumer modes non-platform; archive acceptance and quality reports. Historical PDFs may be imported separately for operator-controlled reprocessing.
-- [ ] 9.2 Promote `index_core`, switch `macro_factset` after dual-read gates pass, and observe one successful scheduled refresh plus one weekly review; before the next Saturday window, an approved operator-triggered equivalent MAY satisfy this observation by running the registered FactSet import pipeline followed directly by Macro and Sector reviews under their effective production modes. Record run identifiers, selected report version, effective modes, results, and a consumer-flag rollback drill. Keep `sector_factset` shadow; its promotion remains 9.3.
-- [ ] 9.3 Promote `sector_core` only after the 100% cell gate, switch `sector_factset` after Sector smoke/regression tests, and observe one successful scheduled refresh plus Sector review.
+- [x] 9.2 Promote `index_core`, switch `macro_factset` after dual-read gates pass, and observe one successful scheduled refresh plus one weekly review; before the next Saturday window, an approved operator-triggered equivalent MAY satisfy this observation by running the registered FactSet import pipeline followed directly by Macro and Sector reviews under their effective production modes. Record run identifiers, selected report version, effective modes, results, and a consumer-flag rollback drill. Keep `sector_factset` shadow; its promotion remains 9.3.
+- [x] 9.2a Regenerate and review the `2026-09-03` Macro and Sector reports against the analysis-quality checklist: all 25 index observations available, required diagnostics correct, concentration evidence page-cited, Macro covers every required lens, Sector records Macro/FactSet alignment or explicit unavailability, and layer verdicts remain unchanged by top-down context. Archive the acceptance result before 9.3 or 9.5.
+- [ ] 9.3 Promote `sector_core` only after the 100% cell gate and 9.2a analysis-quality acceptance, switch `sector_factset` after Sector smoke/regression tests, and observe one successful scheduled refresh plus Sector review.
 - [x] 9.4 Verify rollback changes routing only and preserves PDF artifacts, document versions, candidates, evidence links, structured observations, and vintages.
-- [ ] 9.5 After the observation window, delete Macro’s direct FactSet download/parser invocation, remove the runtime dependency on `config/macro.yaml` FactSet folder settings, and retain only the governed import/ingest route.
+- [ ] 9.5 After the observation window and 9.2a analysis-quality acceptance, delete Macro’s direct FactSet download/parser invocation, remove the runtime dependency on `config/macro.yaml` FactSet folder settings, and retain only the governed import/ingest route.
 - [ ] 9.6 Update data-layer architecture, source inventory, operator runbook, copyright/internal-use guidance, metric dictionary, and consumer ownership documentation; run the focused and full test suites before declaring migration complete.

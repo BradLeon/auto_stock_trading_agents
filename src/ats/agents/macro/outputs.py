@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator
 
 from ..coerce import _as_objlist, _as_strlist
+from ...schemas.macro_strategy import FactSetEarningsAssessment
 
 
 class ThemeAssessView(BaseModel):
@@ -34,6 +35,10 @@ class MacroReviewLLMView(BaseModel):
     asset_implications: str = Field(default="", description="股/债/美元/黄金/原油含义")
     themes: list[ThemeAssessView] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
+    factset_earnings_assessment: FactSetEarningsAssessment | None = Field(
+        default=None,
+        description=("FactSet 盈利周期的八项判断。每项必须给出结论、实际使用的 metric_id、"
+                     "正文页码及必要的谨慎说明；数据不可用时可为 null。"))
 
     # Observed live 2026-07-31: sonnet returned `themes` as a JSON *string*, the
     # whole review failed validation, and run() fell back to the PRIOR week's

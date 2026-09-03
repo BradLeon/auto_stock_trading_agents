@@ -23,6 +23,7 @@ class MacroContext:
     earnings_block: str = ""          # FactSet Earnings Insight (S&P500 盈利/估值 backdrop)
     earnings_source: str = ""
     earnings_backdrop: object | None = None
+    earnings_packet: object | None = None
     regional_block: str = ""
 
     def as_context(self) -> str:
@@ -33,7 +34,7 @@ class MacroContext:
         ]
         if self.earnings_block:
             parts.append(
-                f"## S&P500 盈利/估值 backdrop（FactSet Earnings Insight，{self.earnings_source}）\n"
+                f"## S&P500 FactSet 完整分析材料（{self.earnings_source}）\n"
                 + self.earnings_block)
         if self.regional_block:
             parts.append("## 区域半导体需求（持久化月度序列）\n" + self.regional_block)
@@ -57,21 +58,26 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
 
     mc = MacroContext(cfg=cfg)
     data = macro_src.fetch() if live_data else None
-    mc.quant_block = data.to_context() if data else "(offline — 定量数据跳过)"
-    if live_data:
-        from ...data import regional
-        try:
-            mc.regional_block = regional.fetch(consumer="macro_agent").render()
-        except Exception as exc:  # regional evidence is additive, never blocks regime review
-            log.warning("macro regional snapshot unavailable: %s", exc)
-            mc.regional_block = "(区域月度数据不可用)"
+    mc.quant_block = (data.to_context() if data else
+                      "(offline 离线运行：不访问互联网；本地未持久化的实时宏观行情不可用。"
+                      "FactSet、本地区域数据和历史正式评审仍会读取。)")
+    # Regional data is a governed local product, so offline only disables its
+    # acquisition, not this read.  A saved monthly snapshot remains valid input.
+    from ...data import regional
+    try:
+        mc.regional_block = regional.fetch(consumer="macro_agent").render()
+    except Exception as exc:  # regional evidence is additive, never blocks regime review
+        log.warning("macro regional snapshot unavailable: %s", exc)
+        mc.regional_block = "(区域月度数据不可用)"
 
-    # FactSet Earnings Insight — S&P500 盈利/估值 backdrop.
-    if live_data and cfg.factset.get("enabled", True):
+    # FactSet is a released local DataProducts snapshot, not a FRED/yfinance/
+    # Tavily runtime fetch.  `--offline` therefore still includes it so an
+    # operator can validate the governed Macro cutover without external calls.
+    if cfg.factset.get("enabled", True):
         from ...data import factset
 
-        (mc.earnings_block, mc.earnings_source,
-         mc.earnings_backdrop) = factset.fetch_macro_context(cfg.factset)
+        (mc.earnings_block, mc.earnings_source, mc.earnings_backdrop,
+         mc.earnings_packet) = factset.fetch_macro_material(cfg.factset)
 
     field_vals = _field_map(data)
     search_cfg = cfg.search

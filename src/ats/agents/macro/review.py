@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from ...schemas.macro_strategy import (
     SIGNALS,
     STANCES,
+    FactSetDiagnosticSummary,
+    FactSetMaterialSummary,
+    FactSetObservationSummary,
     MacroConfig,
     MacroReview,
     SectorTilt,
@@ -19,6 +22,43 @@ from . import assemble, indicators, regime
 from .outputs import MacroReviewLLMView
 
 log = logging.getLogger("ats.agents.macro.review")
+
+_FACTSET_JUDGMENT_METRICS = {
+    "growth_quality": {
+        "earnings.eps.yoy_growth", "earnings.revenue.yoy_growth"},
+    "concentration": {
+        "earnings.eps.yoy_growth", "earnings.reporting.coverage"},
+    "surprise_drivers": {
+        "earnings.eps.surprise_pct", "earnings.revenue.surprise_pct",
+        "earnings.net_profit_margin"},
+    "guidance_margin_consistency": {
+        "earnings.guidance.positive_count", "earnings.guidance.negative_count",
+        "earnings.net_profit_margin", "earnings.revision.improved_sector_count"},
+    "valuation": {
+        "valuation.forward_pe", "valuation.forward_pe.average_5y",
+        "valuation.forward_pe.average_10y", "valuation.trailing_pe",
+        "valuation.trailing_pe.average_5y", "valuation.trailing_pe.average_10y"},
+    "analyst_expectations": {
+        "consensus.rating.buy_share", "consensus.rating.hold_share",
+        "consensus.rating.sell_share", "consensus.target.upside"},
+    "conflicts_and_limitations": {
+        "earnings.eps.yoy_growth", "earnings.revenue.yoy_growth",
+        "earnings.net_profit_margin"},
+    "market_and_sector_implications": {
+        "earnings.eps.yoy_growth", "earnings.revision.improved_sector_count",
+        "earnings.guidance.positive_count", "valuation.forward_pe"},
+}
+
+_FACTSET_JUDGMENT_TOPICS = {
+    "concentration": {"earnings_concentration", "excluding_major_companies"},
+    "surprise_drivers": {"gaap_non_gaap", "margin_drivers"},
+    "guidance_margin_consistency": {"margin_drivers"},
+    "valuation": {"valuation_and_sentiment"},
+    "analyst_expectations": {"valuation_and_sentiment"},
+    "conflicts_and_limitations": {
+        "earnings_concentration", "excluding_major_companies", "gaap_non_gaap"},
+    "market_and_sector_implications": {"sector_contribution"},
+}
 
 
 def _now() -> datetime:
@@ -87,6 +127,35 @@ def _earnings_backdrop(mc):
     if bd.degraded:
         log.warning("factset key-metrics degraded (%s) — prose only", bd.notes)
     return bd
+
+
+def _factset_material(mc) -> FactSetMaterialSummary | None:
+    """Persist a compact manifest of exactly what the model received."""
+    packet = getattr(mc, "earnings_packet", None)
+    if packet is None or not packet.report.version_id:
+        return None
+    observations = []
+    for items in packet.observation_groups.values():
+        for item in items:
+            observations.append(FactSetObservationSummary(
+                observation_id=item.observation_id, metric_id=item.metric_id,
+                period=item.period, value=item.value, unit=item.unit,
+                estimate_state=item.estimate_state,
+                page_numbers=sorted({anchor.page_number for anchor in item.evidence
+                                     if anchor.page_number})))
+    observations.sort(key=lambda item: (item.metric_id, item.period))
+    pages: dict[str, list[int]] = {}
+    for item in packet.narrative_evidence:
+        pages.setdefault(item.topic, []).append(item.page_number)
+    return FactSetMaterialSummary(
+        report_date=packet.report.report_date, version_id=packet.report.version_id,
+        freshness=packet.status.freshness, warnings=list(packet.status.warnings),
+        observations=observations,
+        diagnostics=[FactSetDiagnosticSummary(
+            diagnostic_id=item.diagnostic_id, label=item.label, value=item.value,
+            unit=item.unit, input_observation_ids=item.input_observation_ids)
+            for item in packet.diagnostics],
+        narrative_pages={key: sorted(set(value)) for key, value in pages.items()})
 
 
 def _det_block(det: dict) -> str:
@@ -234,6 +303,9 @@ def run(name: str = "macro", *, use_llm: bool = True, live_data: bool = True) ->
     backdrop = _earnings_backdrop(mc)
     if backdrop is not None:
         det["earnings_backdrop"] = backdrop
+    material = _factset_material(mc)
+    if material is not None:
+        det["factset_material"] = material
     log.info("macro %s: context %s | quadrant %s", name, mc.stats(),
              det.get("quadrant", "n/a"))
 
@@ -269,13 +341,15 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
                det: dict | None = None, *, prior: MacroReview | None = None,
                as_of: datetime | None = None) -> MacroReview:
     valid = {t.key: t.label for t in cfg.themes}
+    label_to_key = {t.label: t.key for t in cfg.themes}
     themes = []
     for tv in view.themes:
-        if tv.key not in valid:
+        key = tv.key if tv.key in valid else label_to_key.get(tv.key, "")
+        if not key:
             log.warning("macro %s: dropped unknown theme key %r", name, tv.key)
             continue
         themes.append(ThemeAssess(
-            key=tv.key, label=valid[tv.key], direction=tv.direction,
+            key=key, label=valid[key], direction=tv.direction,
             transmission=tv.transmission,
             signal=tv.signal if tv.signal in SIGNALS else "neutral", note=tv.note))
 
@@ -283,6 +357,33 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
                         stance=tv.stance if tv.stance in STANCES else "中性",
                         rationale=tv.rationale)
              for tv in view.sector_tilts if tv.sector.strip()]
+
+    assessment = view.factset_earnings_assessment
+    material = (det or {}).get("factset_material")
+    if assessment is not None and material is not None:
+        valid_metrics = {item.metric_id for item in material.observations}
+        valid_pages = {page for pages in material.narrative_pages.values() for page in pages}
+        updates = {}
+        for field_name, judgment in assessment:
+            required_metrics = _FACTSET_JUDGMENT_METRICS.get(field_name, set())
+            metric_ids = [
+                metric for metric in judgment.metric_ids if metric in valid_metrics]
+            metric_ids += sorted(
+                metric for metric in required_metrics
+                if metric in valid_metrics and metric not in metric_ids)
+            page_numbers = [
+                page for page in judgment.page_numbers if page in valid_pages]
+            for topic in _FACTSET_JUDGMENT_TOPICS.get(field_name, set()):
+                page_numbers += [
+                    page for page in material.narrative_pages.get(topic, [])
+                    if page not in page_numbers]
+            updates[field_name] = judgment.model_copy(update={
+                "metric_ids": metric_ids,
+                "page_numbers": sorted(page_numbers),
+            })
+        assessment = assessment.model_copy(update=updates)
+    elif material is None:
+        assessment = None
 
     # `**det` last is deliberate: the deterministic fields are code-owned and must
     # win outright if a future view ever grows a same-named field.
@@ -292,4 +393,5 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
                           _fallback_conclusion_delta(prior, view.regime, det or {})),
         rate_path=view.rate_path, sector_tilts=tilts,
         asset_implications=view.asset_implications, themes=themes,
-        top_risks=view.top_risks, falsifier=view.falsifier, **(det or {}))
+        top_risks=view.top_risks, falsifier=view.falsifier,
+        factset_earnings_assessment=assessment, **(det or {}))

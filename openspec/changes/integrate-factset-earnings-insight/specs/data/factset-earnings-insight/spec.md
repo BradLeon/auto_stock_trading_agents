@@ -122,6 +122,31 @@
 - **THEN** Macro 和 Sector SHALL 得到 unavailable/registered-no-data 状态并省略对应结论
 - **AND** 整个周度评审 SHALL NOT 因 FactSet 缺失而崩溃
 
+### Requirement: Consumers receive analysis-ready FactSet evidence
+系统 SHALL 在同一期已发布快照上构造面向分析的材料，而不是仅把快照压缩为遗留摘要。Macro 材料 SHALL 包含全部适用且已发布的指数观测、按主题分组的确定性诊断，以及至多六段从受治理逐页正文中确定性选择的证据。每段正文证据 SHALL 保留报告版本、页码和字符范围；系统 SHALL NOT 把整份 PDF 正文默认发送给模型。
+
+#### Scenario: Macro analyzes the current report
+- **WHEN** `082826` 的 25 条适用指数观测已经发布
+- **THEN** Macro SHALL 收到全部 25 条观测，而不是只收到遗留 `EarningsBackdrop` 的字段子集
+- **AND** 系统 SHALL 确定性计算 EPS/营收增长差、EPS/营收 surprise 差、正负指引比例及净差、forward/trailing P/E 相对 5 年和 10 年均值的偏离
+- **AND** Macro 报告 SHALL 分别分析增长质量、集中度、surprise、利润率与指引、估值与市场预期、来源冲突/限制及板块含义，并列出实际使用的 observation ID 和正文页码
+
+#### Scenario: Narrative evidence is selected
+- **WHEN** 已发布报告包含集中度、GAAP/Non-GAAP、行业贡献、利润率或估值评级说明
+- **THEN** 系统 SHALL 按已注册主题和页面章节选择最多六段有界证据
+- **AND** 选择过程 SHALL 是确定性的、可测试的，不得依赖模型现场检索或读取未发布文档
+
+#### Scenario: Layered Sector review completes its eight layer verdicts
+- **WHEN** Sector 已独立完成八个基于公司/产业证据的单层判断
+- **THEN** 最终跨层汇总 SHALL 读取最新正式 Macro review 及有效 release mode 允许的 FactSet GICS 背景
+- **AND** SHALL 明确报告二者与八层结论的一致、分歧及对跨层加减建议的影响
+- **AND** Macro 或 GICS 背景 SHALL NOT 回写、替换或重新计算任何单层配置或个股判断
+
+#### Scenario: Offline review uses local governed context
+- **WHEN** 操作人员使用 offline 模式运行 Macro 或 Sector review
+- **THEN** 系统 SHALL 禁止现场网络抓取，但仍读取本地已发布 DataProducts 和已持久化 workflow memory
+- **AND** 报告 SHALL 明确区分网络数据缺失与本地 FactSet/Macro 上下文的 release、stale 或 unavailable 状态
+
 ### Requirement: Source charts remain internal evidence rather than redistributable output
 原始 PDF 和 FactSet 图表 SHALL 按内部研究资产保存并保留版权、来源和官方 URL。Agent 正式数值输入 SHALL 优先使用结构化观测；系统生成的新图表 SHALL 由已发布观测重绘。除显式内部报告外，默认输出 SHALL NOT 复制或对外发布 FactSet 原图。
 

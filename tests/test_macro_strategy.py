@@ -13,7 +13,16 @@ from ats.agents.macro.outputs import (
 )
 from ats.memory import get_store
 from ats.schemas.macro import MacroData
-from ats.schemas.macro_strategy import MacroConfig, MacroReview, SectorTilt
+from ats.schemas.macro_strategy import (
+    FactSetDiagnosticSummary,
+    FactSetEarningsAssessment,
+    FactSetJudgment,
+    FactSetMaterialSummary,
+    FactSetObservationSummary,
+    MacroConfig,
+    MacroReview,
+    SectorTilt,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -69,7 +78,9 @@ def test_assemble_offline_and_live(monkeypatch):
     monkeypatch.setattr("ats.data.websearch.search_news",
                         lambda q, **k: [{"title": "Iran headline", "url": "u",
                                          "content": "conflict escalates", "published": "2026-07-01"}])
-    monkeypatch.setattr("ats.data.factset.fetch_earnings_insight", lambda _cfg: ("", "disabled"))
+    monkeypatch.setattr(
+        "ats.data.factset.fetch_macro_material",
+        lambda _cfg: ("", "disabled", None, None))
     consumers = []
 
     class Snapshot:
@@ -92,6 +103,7 @@ def test_assemble_offline_and_live(monkeypatch):
 
     mc2 = assemble.build(CFG, live_data=False)
     assert "offline" in mc2.as_context()                            # no network
+    assert consumers == ["macro_agent", "macro_agent"]             # local product still read
 
 
 def test_assemble_keeps_macro_workflow_available_when_regional_product_fails(monkeypatch):
@@ -138,13 +150,54 @@ def test_assemble_includes_factset(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63)
     monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
     monkeypatch.setattr("ats.data.websearch.search_news", lambda q, **k: [])
-    monkeypatch.setattr("ats.data.factset.fetch_earnings_insight",
-                        lambda cfg: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4", "factset:x.pdf"))
+    monkeypatch.setattr(
+        "ats.data.factset.fetch_macro_material",
+        lambda cfg: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4",
+                     "factset:x.pdf", None, None))
     cfg = CFG.model_copy(update={"factset": {"enabled": True}})
     mc = assemble.build(cfg, live_data=True)
     ctx = mc.as_context()
-    assert "盈利/估值 backdrop" in ctx and "前瞻 P/E 20.4" in ctx
+    assert "FactSet 完整分析材料" in ctx and "前瞻 P/E 20.4" in ctx
     assert mc.stats()["earnings_source"] == "factset:x.pdf"
+
+
+def test_factset_assessment_filters_citations_and_report_separates_facts():
+    material = FactSetMaterialSummary(
+        report_date=datetime(2026, 8, 28).date(), version_id="factset@082826",
+        freshness="fresh",
+        observations=[FactSetObservationSummary(
+            observation_id="obs-growth", metric_id="earnings.eps.yoy_growth",
+            period="2026Q2", value=0.52, unit="ratio", estimate_state="blended",
+            page_numbers=[1])],
+        diagnostics=[FactSetDiagnosticSummary(
+            diagnostic_id="eps_minus_revenue_growth",
+            label="盈利增长减营收增长", value=36.5, unit="percentage_point",
+            input_observation_ids=["obs-growth", "obs-revenue"])],
+        narrative_pages={"earnings_concentration": [3]})
+    assessment = FactSetEarningsAssessment(
+        growth_quality=FactSetJudgment(
+            conclusion="盈利增长强，但明显快于营收。",
+            metric_ids=["earnings.eps.yoy_growth", "invented.metric"],
+            page_numbers=[3, 99]))
+    view = MacroReviewLLMView(
+        regime="risk-on", factset_earnings_assessment=assessment)
+
+    review = macro_review._to_review(
+        "macro", CFG, view, {"factset_material": material}, as_of=NOW)
+
+    judgment = review.factset_earnings_assessment.growth_quality
+    assert judgment.metric_ids == ["earnings.eps.yoy_growth"]
+    assert judgment.page_numbers == [3]
+    markdown = report.render(review, CFG)
+    assert "FactSet 盈利周期判断" in markdown
+    assert "数据事实（程序读取，非模型解释）" in markdown
+    assert "earnings.eps.yoy_growth" in markdown and "52.0%" in markdown
+    assert "盈利增长强，但明显快于营收" in markdown
+    assert "第 3 页" in markdown and "invented.metric" not in markdown
+    get_store().save_macro_review(review)
+    loaded = get_store().latest_macro_review("macro")
+    assert loaded.factset_material.version_id == "factset@082826"
+    assert loaded.factset_earnings_assessment.growth_quality.page_numbers == [3]
 
 
 def test_review_clamps_and_persists(monkeypatch):
@@ -157,6 +210,19 @@ def test_review_clamps_and_persists(monkeypatch):
     assert {t.sector for t in r.sector_tilts} == {"半导体", "公用事业"}  # empty dropped
     assert r.sector_tilts[0].stance == "低配"
     assert get_store().latest_macro_review("macro").regime == r.regime
+
+
+def test_review_accepts_an_exact_configured_theme_label_but_not_unknown_text():
+    view = MacroReviewLLMView(
+        regime="neutral",
+        themes=[
+            ThemeAssessView(key="货币政策", direction="维持"),
+            ThemeAssessView(key="geopolitics", direction="紧张"),
+            ThemeAssessView(key="不是配置主题", direction="未知"),
+        ])
+    review = macro_review._to_review("macro", CFG, view)
+
+    assert [item.key for item in review.themes] == ["fed_policy", "geopolitics"]
 
 
 def test_review_llm_failure_keeps_prior(monkeypatch):
@@ -195,6 +261,7 @@ def test_report_render_and_write(tmp_path):
                     top_risks=["信用事件"])
     md = report.render(r, CFG)
     assert "半导体" in md and "低配" in md and "risk-off" in md and "黄金受益" in md
+    assert "本次模型未返回可识别的逐主题结构化条目" in md
     cfg2 = CFG.model_copy(update={"output_dir": str(tmp_path)})
     path = report.write(r, cfg2)
     assert path is not None and "宏观分析-宏观" in path.name

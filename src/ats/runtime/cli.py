@@ -1536,6 +1536,15 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
     from ..data.products import get_platform_data_products
 
     products = get_platform_data_products()
+    # FactSet import is an operator-triggered ingestion command, not a consumer
+    # query.  The normal products surface deliberately opens unstructured data
+    # read-only, so replace only that repository with the governed writer before
+    # this command reaches the shared document/structured pipeline.
+    if action in {"factset-import", "factset-reprocess"}:
+        from ..data.stores.unstructured import get_platform_unstructured_store
+
+        products.unstructured.close()
+        products._unstructured_repository = get_platform_unstructured_store()
     if db_path and action not in {
             "validate-source", "ingest", "release-check", "publish", "rollback"}:
         from ..data.products import DataProducts
@@ -1544,7 +1553,7 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
         isolated.bootstrap_catalog()
         products = DataProducts(store=products.store, structured_repository=isolated)
-    if action in {"validate-source", "ingest", "release-check", "publish"}:
+    if action in {"validate-source", "ingest", "release-check", "publish", "rollback"}:
         from ..data.structured import (
             ReleaseManager,
             SQLiteStructuredRepository,
@@ -1564,6 +1573,8 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
             repository.bootstrap_catalog(catalog)
             close_repository = True
         target_source = source or value
+        manager = ReleaseManager(
+            repository, catalog=catalog, path=release_file or None)
         try:
             if action == "validate-source":
                 if not target_source:
@@ -1579,13 +1590,19 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                     repository, target_source,
                     entities=[entity] if entity else [], periods=periods or [],
                     query_scope=scope, catalog=catalog, force=force)
+            elif action == "rollback":
+                if not target_source:
+                    raise ValueError("rollback requires --source or VALUE")
+                result = manager.rollback(
+                    kind=kind if kind in {"source", "consumer"} else "consumer",
+                    target_id=target_source, actor="cli")
             else:
-                manager = ReleaseManager(
-                    repository, catalog=catalog, path=release_file or None)
                 target_id = target_source
                 if not target_id:
                     raise ValueError(f"{action} requires --source or VALUE")
-                check = manager.check_source(target_id, mode=mode)
+                check = (manager.check_consumer(target_id, mode=mode)
+                         if kind == "consumer"
+                         else manager.check_source(target_id, mode=mode))
                 result = manager.apply(check) if action == "publish" and apply else {
                     **check, "applied": False,
                     "operation": "publish_preview" if action == "publish"
@@ -1771,7 +1788,7 @@ def main(argv: list[str] | None = None) -> int:
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument("action", choices=[
         "catalog", "config", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "describe", "availability", "examples", "releases",
-        "validate-source", "ingest", "release-check", "publish",
+        "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
         "derive", "cross-section", "earnings-insight", "factset-status",
         "factset-import", "factset-reprocess",
@@ -1799,7 +1816,7 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--format", dest="output_format", choices=["json", "markdown"],
                       default="json", help="quality/catalog/describe 等输出格式")
     data.add_argument("--vintages", action="store_true", help="series: 包含所有修订版本")
-    data.add_argument("--kind", choices=["source", "dataset", "metric"], default="",
+    data.add_argument("--kind", choices=["source", "consumer", "dataset", "metric"], default="",
                       help="describe: 限定对象类型")
     data.add_argument("--periods", action="append", default=[],
                       help="ingest: 目标期间，可重复")

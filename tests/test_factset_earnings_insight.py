@@ -110,9 +110,9 @@ def test_factset_catalog_contract_and_independent_rollout(monkeypatch, tmp_path)
 
     assert source_mode("factset_earnings_insight_doc") == "shadow"
     assert source_mode("factset_earnings_insight_metrics") == "shadow"
-    assert source_mode("factset_earnings_insight_index") == "shadow"
+    assert source_mode("factset_earnings_insight_index") == "platform"
     assert source_mode("factset_earnings_insight_sector") == "shadow"
-    assert read_mode("macro_factset") == "shadow"
+    assert read_mode("macro_factset") == "platform"
     assert read_mode("sector_factset") == "shadow"
     monkeypatch.setenv("ATS_STRUCTURED_MACRO_FACTSET_MODE", "off")
     assert read_mode("macro_factset") == "off"
@@ -533,7 +533,7 @@ def test_duplicate_evidence_merges_but_distinct_source_values_conflict():
                for candidate in conflict.candidates)
 
 
-def test_index_pipeline_persists_vintage_evidence_and_shadow_manifest(
+def test_index_pipeline_persists_vintage_evidence_and_effective_manifest(
         tmp_path, projected_factset_pdf):
     first = (
         "EARNINGS INSIGHT FactSet August 28, 2026 Key Metrics Earnings Growth: For Q2 2026, "
@@ -566,7 +566,7 @@ def test_index_pipeline_persists_vintage_evidence_and_shadow_manifest(
         document, document_id="doc", version_id="doc@fixture",
         artifact_id=artifact.id, known_at=known_at)
 
-    assert first_run["release_status"] == "shadow"
+    assert first_run["release_status"] == "platform"
     assert first_run["quality"]["passed"] is True
     assert first_run["accepted"] == 2
     assert repeated["status"] == "no_change"
@@ -684,6 +684,118 @@ def test_typed_snapshot_as_of_vintages_lineage_staleness_and_compatibility(tmp_p
     assert "report_age_exceeds_10_days" in stale.status.warnings
 
 
+def test_analysis_packet_groups_all_25_metrics_and_keeps_page_cited_narrative(tmp_path):
+    repository = SQLiteStructuredRepository(
+        tmp_path / "structured.sqlite", artifact_root=tmp_path / "artifacts")
+    repository.bootstrap_catalog()
+    documents = PlatformUnstructuredRepository(tmp_path / "documents.sqlite", writable=True)
+    known_at = datetime(2026, 8, 29, tzinfo=timezone.utc)
+    report_date = "2026-08-28"
+    document_id = "factset:analysis"
+    version_id = "factset:analysis@hash"
+    artifact = repository.put_artifact(
+        b"%PDF analysis packet fixture",
+        ArtifactDescriptor(
+            source_id="factset_earnings_insight_metrics",
+            dataset_id="sp500_earnings_insight", fetched_at=known_at,
+            source_url="https://example.test/EarningsInsight_082826.pdf",
+            media_type="application/pdf", retention="licensed_internal_research"))
+    values = {
+        "earnings.reporting.coverage": (0.97, "ratio"),
+        "earnings.eps.above_estimate_share": (0.86, "ratio"),
+        "earnings.eps.inline_estimate_share": (0.03, "ratio"),
+        "earnings.eps.below_estimate_share": (0.10, "ratio"),
+        "earnings.revenue.above_estimate_share": (0.77, "ratio"),
+        "earnings.revenue.inline_estimate_share": (0.00, "ratio"),
+        "earnings.revenue.below_estimate_share": (0.23, "ratio"),
+        "earnings.eps.surprise_pct": (0.265, "ratio"),
+        "earnings.revenue.surprise_pct": (0.032, "ratio"),
+        "earnings.eps.yoy_growth": (0.52, "ratio"),
+        "earnings.revenue.yoy_growth": (0.155, "ratio"),
+        "earnings.net_profit_margin": (0.17, "ratio"),
+        "earnings.revision.improved_sector_count": (10, "count"),
+        "earnings.guidance.positive_count": (63, "count"),
+        "earnings.guidance.negative_count": (35, "count"),
+        "valuation.forward_pe": (19.6, "multiple"),
+        "valuation.forward_pe.average_5y": (19.9, "multiple"),
+        "valuation.forward_pe.average_10y": (19.0, "multiple"),
+        "valuation.trailing_pe": (26.4, "multiple"),
+        "valuation.trailing_pe.average_5y": (24.4, "multiple"),
+        "valuation.trailing_pe.average_10y": (23.5, "multiple"),
+        "consensus.rating.buy_share": (0.592, "ratio"),
+        "consensus.rating.hold_share": (0.359, "ratio"),
+        "consensus.rating.sell_share": (0.049, "ratio"),
+        "consensus.target.upside": (0.191, "ratio"),
+    }
+    observation_ids = []
+    for metric_id, (value, unit) in values.items():
+        period = ("2026Q3" if "guidance" in metric_id else
+                  report_date if metric_id.startswith(("valuation", "consensus")) else
+                  "2026Q2")
+        dimensions = {"estimate_state": "blended"}
+        if metric_id == "earnings.revision.improved_sector_count":
+            dimensions.update({
+                "comparison_date": "2026-08-28", "revision_direction": "upward",
+                "sector_total": 11})
+        saved = repository.save_observation(ObservationInput(
+            series=SeriesIdentity(
+                source_id="factset_earnings_insight_metrics",
+                dataset_id="sp500_earnings_insight", entity_id="SP500",
+                metric_id=metric_id, unit=unit,
+                period_basis="snapshot" if period == report_date else "target_quarter",
+                dimensions=dimensions),
+            period=period, value=value,
+            event_time=datetime(2026, 8, 28, tzinfo=timezone.utc),
+            known_at=known_at, fetched_at=known_at, artifact_id=artifact.id,
+            quality_status=QualityStatus.ACCEPTED,
+            raw={"document_id": document_id, "version_id": version_id}))
+        observation_ids.append(saved.id)
+    repository.save_release_manifest(
+        source_id="factset_earnings_insight_metrics",
+        dataset_id="sp500_earnings_insight", partition="index_core",
+        report_date=report_date, document_id=document_id, version_id=version_id,
+        artifact_id=artifact.id, known_at=known_at, extractor_version="fixture-v1",
+        status="platform", passed=True, quality={"passed": True},
+        observation_ids=observation_ids)
+    page_texts = (
+        "Excluding Alphabet and Amazon, the earnings growth rate would be 33.8%, rather than 52.0%.",
+        "The report compares GAAP earnings with Non-GAAP earnings and explains the difference.",
+        "Information Technology was the largest contributor to the increase in blended revenues.",
+        "The net profit margin increased because of lower costs and stronger pricing.",
+        "The forward 12-month P/E is near its five-year average. Buy ratings and target price imply optimism.",
+    )
+    pages = []
+    cursor = 0
+    for number, text in enumerate(page_texts, start=3):
+        pages.append(PDFPage(number, text, cursor, cursor + len(text), "Fixture"))
+        cursor += len(text) + 2
+    documents.save_document_pages(version_id, pages)
+
+    packet = DataProducts(
+        structured_repository=repository,
+        unstructured_repository=documents).earnings_insight_analysis_packet(
+            as_of=datetime(2026, 9, 3, tzinfo=timezone.utc))
+
+    assert packet.observation_count == 25
+    assert set(packet.observation_groups) == {
+        "reporting_progress", "earnings_revenue_surprises",
+        "earnings_revenue_growth", "profit_margin", "company_guidance",
+        "estimate_revision_breadth", "valuation", "ratings_and_target_price"}
+    diagnostics = {item.diagnostic_id: item for item in packet.diagnostics}
+    assert diagnostics["eps_minus_revenue_growth"].value == pytest.approx(36.5)
+    assert diagnostics["eps_minus_revenue_surprise"].value == pytest.approx(23.3)
+    assert diagnostics["positive_negative_guidance_ratio"].value == pytest.approx(1.8)
+    assert diagnostics["positive_minus_negative_guidance"].value == 28
+    assert diagnostics["forward_pe_vs_5y_average"].value == pytest.approx(-1.5075)
+    assert diagnostics["trailing_pe_vs_10y_average"].value == pytest.approx(12.3404)
+    assert 1 <= len(packet.narrative_evidence) <= 6
+    assert {item.topic for item in packet.narrative_evidence} >= {
+        "earnings_concentration", "gaap_non_gaap", "sector_contribution",
+        "margin_drivers", "valuation_and_sentiment"}
+    assert all(item.page_number >= 3 and item.char_end > item.char_start
+               for item in packet.narrative_evidence)
+
+
 def test_snapshot_returns_registered_no_data_instead_of_none(tmp_path):
     repository = SQLiteStructuredRepository(
         tmp_path / "structured.sqlite", artifact_root=tmp_path / "artifacts")
@@ -774,6 +886,30 @@ def test_sector_matrix_is_explicitly_top_down_and_degrades_to_omission():
     assert "不是 AI Hardware L1-L8、个股基本面或 Chain 独立证据" in rendered
     assert "GICS_45" in rendered and "21.8 multiple" in rendered
     assert factset._render_sector_snapshot(EarningsInsightSnapshot()) == ""
+
+
+def test_sector_material_explains_shadow_instead_of_silently_omitting(monkeypatch):
+    from ats.data import factset
+
+    observation = EarningsInsightObservation(
+        observation_id="sector", entity_id="GICS_45",
+        metric_id="earnings.eps.yoy_growth", period="2026Q2",
+        period_basis="target_quarter", value=0.25, unit="ratio",
+        known_at=datetime(2026, 8, 29, tzinfo=timezone.utc))
+    snapshot = EarningsInsightSnapshot(
+        report=EarningsInsightReport(
+            report_date=date(2026, 8, 28), version_id="doc@sector"),
+        sectors={"GICS_45": {"2026Q2": {observation.metric_id: observation}}},
+        status=EarningsInsightStatus(state="platform", freshness="fresh"))
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FACTSET_MODE", "shadow")
+    monkeypatch.setattr(factset, "_platform_snapshot", lambda products=None: snapshot)
+
+    material = factset.fetch_sector_material()
+
+    assert material["text"] == ""
+    assert material["state"] == "shadow"
+    assert material["report_date"] == "2026-08-28"
+    assert "影子验证阶段" in material["reason"]
 
 
 def test_macro_shadow_comparison_records_two_vintages(monkeypatch):

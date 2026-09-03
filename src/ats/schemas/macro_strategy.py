@@ -219,6 +219,62 @@ class EarningsBackdrop(BaseModel):
         return "".join(bits)
 
 
+class FactSetObservationSummary(BaseModel):
+    """One report value persisted so the generated report remains auditable."""
+
+    observation_id: str
+    metric_id: str
+    period: str
+    value: float
+    unit: str
+    estimate_state: str = "not_applicable"
+    page_numbers: list[int] = Field(default_factory=list)
+
+
+class FactSetDiagnosticSummary(BaseModel):
+    diagnostic_id: str
+    label: str
+    value: float
+    unit: str
+    input_observation_ids: list[str] = Field(default_factory=list)
+
+
+class FactSetMaterialSummary(BaseModel):
+    """Code-owned manifest of the FactSet material supplied to the model."""
+
+    report_date: date | None = None
+    version_id: str = ""
+    freshness: str = "unavailable"
+    warnings: list[str] = Field(default_factory=list)
+    observations: list[FactSetObservationSummary] = Field(default_factory=list)
+    diagnostics: list[FactSetDiagnosticSummary] = Field(default_factory=list)
+    narrative_pages: dict[str, list[int]] = Field(default_factory=dict)
+
+
+class FactSetJudgment(BaseModel):
+    """Model interpretation kept separate from code-owned FactSet facts."""
+
+    conclusion: str = ""
+    metric_ids: list[str] = Field(
+        default_factory=list,
+        description="支撑本项结论的真实 FactSet metric_id；有结构化材料时不得留空")
+    page_numbers: list[int] = Field(
+        default_factory=list,
+        description="实际引用的正文页码；使用正文观点时不得留空")
+    caution: str = ""
+
+
+class FactSetEarningsAssessment(BaseModel):
+    growth_quality: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    concentration: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    surprise_drivers: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    guidance_margin_consistency: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    valuation: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    analyst_expectations: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    conflicts_and_limitations: FactSetJudgment = Field(default_factory=FactSetJudgment)
+    market_and_sector_implications: FactSetJudgment = Field(default_factory=FactSetJudgment)
+
+
 class RateDecomposition(BaseModel):
     """名义 10y = 实际 10y + 通胀补偿，逐项拆开。
 
@@ -267,6 +323,7 @@ class MacroReview(BaseModel):
     data_deltas: list[MacroDataDelta] = Field(default_factory=list)
     decomposition: RateDecomposition | None = None
     earnings_backdrop: EarningsBackdrop | None = None   # 总量盈利周期（优先级 8）
+    factset_material: FactSetMaterialSummary | None = None
     shock_vs_trend: list[str] = Field(default_factory=list)
     alerts: list[str] = Field(default_factory=list)
     focus_keys: list[str] = Field(default_factory=list)   # 当期该重点看的指标（象限决定）
@@ -281,6 +338,7 @@ class MacroReview(BaseModel):
     themes: list[ThemeAssess] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
     falsifier: str = ""                # 什么观察会推翻这次判断（必须具体可观测）
+    factset_earnings_assessment: FactSetEarningsAssessment | None = None
 
     def quadrant_brief(self) -> str:
         """Shortest useful form, for callers on a tight character budget.

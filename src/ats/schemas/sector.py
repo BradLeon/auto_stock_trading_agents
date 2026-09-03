@@ -269,6 +269,20 @@ class LayerVerdict(BaseModel):
         return self.allocation in ALLOCATIONS
 
 
+class TopDownComparison(BaseModel):
+    """Macro/FactSet interpretation added only after layer verdicts are fixed."""
+
+    macro_background: str = ""
+    factset_background: str = ""
+    agreements: list[str] = Field(default_factory=list)
+    divergences: list[str] = Field(default_factory=list)
+    recommendation_impact: str = ""
+    availability_notes: list[str] = Field(default_factory=list)
+    macro_review_date: str = ""
+    factset_report_date: str = ""
+    factset_version_id: str = ""
+
+
 class SectorReview(BaseModel):
     sector: str
     as_of: datetime
@@ -280,6 +294,7 @@ class SectorReview(BaseModel):
     top_risks: list[str] = Field(default_factory=list)
     baskets: list[LayerBasket] = Field(default_factory=list)   # cross-sectional sizing per layer
     layer_verdicts: list[LayerVerdict] = Field(default_factory=list)  # per-layer allocation calls
+    top_down_comparison: TopDownComparison | None = None
 
     def call_for(self, symbol: str) -> CompanyCall | None:
         for c in self.company_calls:

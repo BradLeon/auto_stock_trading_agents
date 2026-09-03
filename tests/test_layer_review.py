@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ats.agents.sector import layer_review
-from ats.agents.sector.outputs import LayerVerdictView
+from ats.agents.sector.outputs import LayerRotationView, LayerVerdictView
 from ats.schemas.sector import LayerBasket, BasketRow, LayerVerdict, SectorConfig, SectorLayer
 
 NOW = datetime(2026, 8, 20, tzinfo=timezone.utc)
@@ -365,3 +365,93 @@ def test_layered_run_consumes_the_basket_from_run_layers_tuple(monkeypatch):
     sector_review._run_layered("ai_hardware", one, get_store(),
                                use_llm=False, live_data=True)
     assert seen["basket"] is basket        # 拿到的是 basket 本身，不是元组
+
+
+def test_top_down_context_is_loaded_only_after_every_layer_verdict(monkeypatch):
+    from ats.agents.sector import review as sector_review
+    from ats.agents.sector import rotation
+    from ats.config import load_sector_config
+
+    cfg = load_sector_config("ai_hardware")
+    events = []
+
+    class _Store:
+        def latest_sector_review(self, name):
+            return None
+
+        def save_claim_assessment(self, assessment):
+            pass
+
+        def save_sector_review(self, review):
+            pass
+
+    monkeypatch.setattr("ats.agents.sector.assemble.layer_assessments",
+                        lambda cfg, layer, as_of=None, **kwargs: [])
+
+    def layer_call(cfg_, layer, **kwargs):
+        events.append(layer.key)
+        verdict = layer_review._fallback(layer, None, True, True)
+        return verdict.model_copy(update={"allocation": "标配"}), True
+
+    monkeypatch.setattr(layer_review, "run", layer_call)
+
+    def load_top_down(store):
+        events.append("top_down")
+        return {
+            "macro_text": "宏观正式结论", "macro_date": "2026-09-03", "macro_note": "",
+            "factset": {"text": "十一行业正式数据", "reason": "", "state": "platform",
+                        "report_date": "2026-08-28", "version_id": "factset@082826"}}
+
+    monkeypatch.setattr(sector_review, "_load_top_down_context", load_top_down)
+
+    def rotate(cfg_, verdicts, **kwargs):
+        events.append("rotation")
+        assert kwargs["macro_context"] == "宏观正式结论"
+        assert kwargs["factset_material"]["text"] == "十一行业正式数据"
+        return LayerRotationView(
+            regime="产业链中性", macro_background="利率背景",
+            factset_background="信息技术行业背景",
+            agreements=["云资本开支与公司证据一致"],
+            divergences=["工业行业总量与设备层偏弱冲突"],
+            recommendation_impact="不修改单层结论，跨层建议维持。")
+
+    monkeypatch.setattr(rotation, "run", rotate)
+    review = sector_review._run_layered(
+        "ai_hardware", cfg, _Store(), use_llm=True, live_data=False,
+        write_reports=False)
+
+    assert events[:len(cfg.layers)] == [layer.key for layer in cfg.layers]
+    assert events[-2:] == ["top_down", "rotation"]
+    assert len(review.layer_verdicts) == len(cfg.layers)
+    assert all(item.allocation == "标配" for item in review.layer_verdicts)
+    comparison = review.top_down_comparison
+    assert comparison.macro_review_date == "2026-09-03"
+    assert comparison.factset_report_date == "2026-08-28"
+    assert comparison.agreements and comparison.divergences
+
+
+def test_rotation_context_keeps_gics_and_macro_out_of_layer_verdicts():
+    from ats.agents.sector import rotation
+
+    cfg = _cfg(_layer())
+    verdict = LayerVerdict(
+        layer_key="L6_memory", as_of=NOW, allocation="超配",
+        confidence=0.7, rationale="HBM 公司证据")
+    context = rotation.build_context(
+        cfg, [verdict], macro_context="宏观报告：实际利率偏高",
+        factset_material={"text": "GICS_45 信息技术盈利增长强", "reason": ""})
+
+    assert context.index("HBM 公司证据") < context.index("宏观报告")
+    assert "先前八层结论和逐票判断已经固定" in context
+    assert "GICS 标准行业也不是 AI 硬件产业链环节" in context
+    assert verdict.allocation == "超配" and verdict.rationale == "HBM 公司证据"
+
+
+def test_sector_skill_limits_macro_and_factset_to_final_comparison():
+    from pathlib import Path
+
+    text = Path("src/ats/skills/sector-analyst/SKILL.md").read_text(encoding="utf-8")
+    assert "只会出现在八层结论之后" in text
+    assert "不能回头修改某层的配置、信心、逐票判断或证据链" in text
+    assert "GICS 行业直接当成" in text
+    assert "未正式发布" in text and "shadow" in text and "过期" in text

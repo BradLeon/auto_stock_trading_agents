@@ -41,6 +41,12 @@ class DataProducts:
 
         return load_snapshot(self, as_of=as_of)
 
+    def earnings_insight_analysis_packet(self, *, as_of: datetime | None = None):
+        """Return the bounded, page-cited FactSet material used by analyses."""
+        from .earnings_insight import load_analysis_packet
+
+        return load_analysis_packet(self, as_of=as_of)
+
     def earnings_insight_vintages(self, *, as_of: datetime | None = None,
                                   limit: int = 500):
         """Return immutable released weekly snapshots, newest first."""

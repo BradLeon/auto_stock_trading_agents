@@ -64,6 +64,19 @@
 - [x] 7.3 在 `sector_factset` 控制下将 GICS 行业矩阵加入 Sector assembly，并明确标记为 top-down 市场背景，区别于 AI-hardware layers 和公司证据。
 - [x] 7.4 增加消费者测试，证明 Chief、Risk、PEAD、Technical 和公司证据 workflow 不会直接查询或独立加权 FactSet 产品。
 - [x] 7.5 增加降级测试，证明 FactSet unavailable 时省略相应结论但不导致周度评审失败，而 stale 数据会连同原始报告日期一起暴露。
+- [x] 7.6 只有 7.6a–7.6c 全部通过后，才算完成面向分析的 FactSet 材料包。
+- [x] 7.6a 将已发布的 25 项适用 SP500 数据按八个具名主题完整提供，并包含报告日期、新鲜程度、质量警告、期间/口径、证据位置和来源记录；不得再压缩成旧 `EarningsBackdrop` 的少数字段。
+- [x] 7.6b 由程序计算盈利增长减营收增长、盈利超预期减营收超预期、正负指引比例及净差、前瞻/过去十二个月市盈率相对五年和十年均值的偏离；每个结果保留全部输入数据编号。
+- [x] 7.6c 从受治理的逐页正文中，为盈利集中度、剔除主要公司、GAAP/Non-GAAP、行业贡献、利润率驱动、估值/评级最多选择六段有界文本；保留版本、页码和字符范围，绝不发送整篇正文。
+- [x] 7.7 只有 7.7a–7.7c 全部通过后，才算完成 Macro 分析质量改造。
+- [x] 7.7a 将完整材料包提供给 Macro，同时保留旧兼容摘要；offline 只禁止网络采集，仍读取本地 DataProducts、区域数据和上一份正式 Macro 记忆。
+- [x] 7.7b 持久化独立的八部分 FactSet 盈利周期判断，分别回答增长质量、集中度、超预期驱动、指引/利润率是否互证、估值、分析师预期、矛盾/限制、市场/板块含义；过滤材料包中不存在的指标编号和页码。
+- [x] 7.7c 更新 Macro Skill 和报告，明显区分数据事实与模型解释，展示全部 25 项已提供数据及程序计算结果，逐项回答必需问题，并让重要正文判断引用经校验的页码。
+- [x] 7.8 只有 7.8a–7.8c 全部通过后，才算完成分层 Sector 分析质量改造。
+- [x] 7.8a 先完成全部八个基于公司证据的产业链环节判断，然后只在最终汇总时读取一次最新正式 Macro 报告和 FactSet 十一行业背景；不得把二者传给单层分析。
+- [x] 7.8b 持久化并用正常中文展示宏观背景、FactSet 背景、一致之处、分歧之处及其对产业链加减建议的影响；未正式发布、shadow、过期或缺失时必须说明原因。
+- [x] 7.8c 证明宏观与 FactSet 背景无法修改任何已形成的单层结论、个股判断、信心或证据链，并且标准 GICS 行业不会被当作 AI 硬件产业链环节。
+- [x] 7.9 增加聚焦自动化测试，覆盖 `082826` 材料包数值/正文、Macro 提示材料/持久化/报告/引用过滤、offline 本地读取、Sector 只在最终阶段对照、不可用原因和单层结果不可变。
 
 ## 8. 调度、运维和可观察性
 
@@ -76,8 +89,9 @@
 ## 9. 切换、回滚和退役
 
 - [x] 9.1 应用增量迁移，在所有 source/consumer mode 均非 platform 的情况下，将当前报告 `082826` 导入隔离环境；归档 acceptance 和 quality 报告。历史 PDF 可由操作人员单独受控重处理。
-- [ ] 9.2 提升 `index_core`，在双读门禁通过后切换 `macro_factset`，并观察一次成功定时刷新和一次周度评审；在下一个周六窗口前，获批准的操作人员等价演练可改为按有效生产 mode 运行已注册 FactSet import pipeline，并紧接着运行 Macro 与 Sector review。记录 run ID、选中报告版本、effective mode、结果及 consumer-flag 回滚演练。`sector_factset` 保持 shadow，其提升仍属于 9.3。
-- [ ] 9.3 只有通过 100% 单元格门禁后才提升 `sector_core`；Sector smoke/regression 测试通过后切换 `sector_factset`，并观察一次成功定时刷新和 Sector 评审。
+- [x] 9.2 提升 `index_core`，在双读门禁通过后切换 `macro_factset`，并观察一次成功定时刷新和一次周度评审；在下一个周六窗口前，获批准的操作人员等价演练可改为按有效生产 mode 运行已注册 FactSet import pipeline，并紧接着运行 Macro 与 Sector review。记录 run ID、选中报告版本、effective mode、结果及 consumer-flag 回滚演练。`sector_factset` 保持 shadow，其提升仍属于 9.3。
+- [x] 9.2a 按分析质量清单重新生成并审阅 `2026-09-03` Macro 与 Sector 报告：25 条指数观测全部可用、必需诊断正确、集中度证据带页码、Macro 覆盖全部必需分析角度、Sector 记录 Macro/FactSet 的一致或明确不可用原因，并且单层结论不被 top-down 背景修改。在 9.3 或 9.5 前归档验收结果。
+- [ ] 9.3 只有通过 100% 单元格门禁和 9.2a 分析质量验收后才提升 `sector_core`；Sector smoke/regression 测试通过后切换 `sector_factset`，并观察一次成功定时刷新和 Sector 评审。
 - [x] 9.4 验证回滚只改变路由，并保留 PDF artifact、document version、candidate、evidence link、structured observation 和 vintage。
-- [ ] 9.5 观察期结束后，删除 Macro 对 FactSet 的直接下载/解析器调用，移除对 `config/macro.yaml` FactSet 文件夹设置的运行时依赖，只保留受治理的 import/ingest 路径。
+- [ ] 9.5 观察期结束且 9.2a 分析质量验收通过后，删除 Macro 对 FactSet 的直接下载/解析器调用，移除对 `config/macro.yaml` FactSet 文件夹设置的运行时依赖，只保留受治理的 import/ingest 路径。
 - [ ] 9.6 更新数据层架构、来源 inventory、操作 runbook、版权/内部使用指南、metric dictionary 和消费者 ownership 文档；在宣布迁移完成前运行聚焦测试和完整测试套件。

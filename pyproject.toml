@@ -29,9 +29,10 @@ data = [
     "fredapi>=0.5",
     "praw>=7.7",
     "pandas>=2.2",
-    "pandas-ta>=0.3.14b",
+    "pandas-ta-classic>=0.6.52",
     "feedparser>=6.0",
     "pypdf>=4.0",
+    "Pillow>=10.0",    # raster chart crops and local OCR input for FactSet Sector extraction
     "pysocks>=1.7",      # IMAP via local proxy (imaplib ignores proxy env vars)
     "duckdb>=1.0",       # remote parquet reads for the transcript dataset (data/defeatbeta.py)
 ]

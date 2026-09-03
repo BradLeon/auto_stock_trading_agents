@@ -193,7 +193,8 @@ class IngestionPipeline:
             IngestionStatus.NO_CHANGE, IngestionStatus.ZERO_MATCH,
             IngestionStatus.NOT_YET_PUBLISHED, IngestionStatus.NO_COVERAGE,
             IngestionStatus.STALE, IngestionStatus.UNREACHABLE,
-            IngestionStatus.UNAUTHORIZED, IngestionStatus.PARSE_FAILED,
+            IngestionStatus.UNAUTHORIZED, IngestionStatus.NOT_PDF,
+            IngestionStatus.PARSE_FAILED,
             IngestionStatus.VALIDATION_FAILED,
         }
         if batch.status in terminal_without_records and not batch.records:

@@ -114,6 +114,10 @@ feature_flags:
     # Private-company events are intentionally deferred and therefore do not
     # enter the persistent layer until a later, separately approved scope.
     accepted_document_evidence: legacy
+    factset_earnings_insight_doc: shadow
+    factset_earnings_insight_metrics: shadow
+    factset_earnings_insight_index: shadow
+    factset_earnings_insight_sector: shadow
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -161,6 +165,8 @@ feature_flags:
     # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
     runtime_scheduler: shadow
     chief_graph: shadow
+    macro_factset: shadow
+    sector_factset: shadow
   consumer_sources: {}
 
 # Terminal statuses have distinct operational meaning. In particular,
@@ -174,6 +180,7 @@ allowed_ingestion_statuses:
   - stale
   - unreachable
   - unauthorized
+  - not_pdf
   - parse_failed
   - validation_failed
   - partial
@@ -181,6 +188,71 @@ allowed_ingestion_statuses:
 # Stable economic entities that do not naturally live in the listed-security registry.
 # Do not create a fake ticker for a private company.
 entities:
+  FACTSET:
+    kind: research_provider
+    canonical_name: FactSet Research Systems
+    aliases: [FactSet, FactSet Earnings Insight]
+    securities: []
+  SP500:
+    kind: equity_index
+    canonical_name: S&P 500
+    aliases: [S&P 500, S&P500, SPX]
+    securities: []
+  GICS_10:
+    kind: gics_sector
+    canonical_name: Energy
+    aliases: [Energy]
+    securities: []
+  GICS_15:
+    kind: gics_sector
+    canonical_name: Materials
+    aliases: [Materials]
+    securities: []
+  GICS_20:
+    kind: gics_sector
+    canonical_name: Industrials
+    aliases: [Industrials]
+    securities: []
+  GICS_25:
+    kind: gics_sector
+    canonical_name: Consumer Discretionary
+    aliases: [Consumer Discretionary]
+    securities: []
+  GICS_30:
+    kind: gics_sector
+    canonical_name: Consumer Staples
+    aliases: [Consumer Staples]
+    securities: []
+  GICS_35:
+    kind: gics_sector
+    canonical_name: Health Care
+    aliases: [Health Care, Healthcare]
+    securities: []
+  GICS_40:
+    kind: gics_sector
+    canonical_name: Financials
+    aliases: [Financials]
+    securities: []
+  GICS_45:
+    kind: gics_sector
+    canonical_name: Information Technology
+    aliases: [Information Technology, Technology]
+    securities: []
+  GICS_50:
+    kind: gics_sector
+    canonical_name: Communication Services
+    aliases: [Communication Services]
+    securities: []
+  GICS_55:
+    kind: gics_sector
+    canonical_name: Utilities
+    aliases: [Utilities]
+    securities: []
+  GICS_60:
+    kind: gics_sector
+    canonical_name: Real Estate
+    aliases: [Real Estate]
+    securities: []
   OPENAI:
     kind: private_company
     canonical_name: OpenAI
@@ -284,6 +356,18 @@ sources:
     cadence: event
     retention: evidence_link_only
     internal_request_budget: {concurrency: 1}
+  factset_earnings_insight_metrics:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: FactSet Earnings Insight
+    adapter: factset_earnings_insight
+    datasets: [sp500_earnings_insight]
+    cadence: weekly
+    retention: licensed_internal_research
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 1
+      timeout_seconds: 60
 
   # Deliberate non-datasets. These entries must never be scheduled, backfilled or
   # written to the structured repository/artifact store. They have no datasets and
@@ -320,6 +404,60 @@ sources:
 # Business datasets. Source references must be reciprocal with `sources.*.datasets`.
 # `quality` values are release gates; do not loosen them merely to make a run pass.
 datasets:
+  sp500_earnings_insight:
+    catalog_status: current_partial
+    entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
+               GICS_35, GICS_40, GICS_45, GICS_50, GICS_55, GICS_60]
+    expected_cadence: weekly
+    primary_sources: [factset_earnings_insight_metrics]
+    fallback_sources: []
+    core_metrics:
+      - earnings.reporting.coverage
+      - earnings.eps.above_estimate_share
+      - earnings.eps.inline_estimate_share
+      - earnings.eps.below_estimate_share
+      - earnings.revenue.above_estimate_share
+      - earnings.revenue.inline_estimate_share
+      - earnings.revenue.below_estimate_share
+      - earnings.eps.surprise_pct
+      - earnings.revenue.surprise_pct
+      - earnings.eps.yoy_growth
+      - earnings.revenue.yoy_growth
+      - earnings.net_profit_margin
+      - earnings.margin.increase_share
+      - earnings.margin.unchanged_share
+      - earnings.margin.decrease_share
+      - earnings.guidance.positive_count
+      - earnings.guidance.negative_count
+      - earnings.revision.improved_sector_count
+      - earnings.bottom_up_eps
+      - valuation.forward_pe
+      - valuation.trailing_pe
+      - valuation.forward_pe.average_5y
+      - valuation.forward_pe.average_10y
+      - valuation.trailing_pe.average_5y
+      - valuation.trailing_pe.average_10y
+      - revenue.geographic.us_share
+      - revenue.geographic.international_share
+      - consensus.rating.buy_share
+      - consensus.rating.hold_share
+      - consensus.rating.sell_share
+      - consensus.target.upside
+    quality:
+      freshness_hours_max: 240
+      composition_abs_tolerance: 0.01
+      index_core_required_evidence_ratio: 1.0
+      sector_core_expected_entities: 11
+      sector_core_annotated_cell_accuracy_min: 1.0
+      require_concrete_target_period: true
+      require_estimate_state: true
+      require_unit: true
+      required_dimensions_by_metric:
+        earnings.revision.improved_sector_count:
+          [comparison_date, revision_direction, sector_total]
+    acceptance_samples: [SP500, GICS_10, GICS_35, GICS_45]
+    rollback_on: [unknown_template, evidence_incomplete, source_conflict,
+                  sector_table_incomplete, future_leakage, stale]
   regional_tw_exports:
     catalog_status: current_partial
     entities: [TW_IC_EXPORT]
@@ -451,6 +589,44 @@ datasets:
 # Semantically different GAAP/non-GAAP, point-in-time/period, or raw/derived values
 # require separate definitions rather than an ambiguous mapping.
 metric_definitions:
+  earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.below_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.below_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.revenue.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.net_profit_margin: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.margin.increase_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.margin.unchanged_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.margin.decrease_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.guidance.positive_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
+  earnings.guidance.negative_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
+  earnings.revision.improved_sector_count:
+    value_type: integer
+    unit_family: count
+    cadence: weekly
+    period_basis: target_quarter
+    entity_scope: [SP500]
+    required_dimensions: [comparison_date, revision_direction, sector_total]
+    description: Number of GICS sectors with improved earnings growth versus the explicit comparison date.
+  earnings.bottom_up_eps: {value_type: number, unit_family: currency_per_share, cadence: weekly, period_basis: [target_quarter, target_year]}
+  valuation.forward_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.trailing_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.forward_pe.average_5y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.forward_pe.average_10y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.trailing_pe.average_5y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.trailing_pe.average_10y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  revenue.geographic.us_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  revenue.geographic.international_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.rating.buy_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.rating.hold_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.rating.sell_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.target.upside: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
   regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
   regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
   industry.dram_contract_price: {value_type: number, unit_family: currency_per_item, cadence: monthly}
@@ -503,6 +679,38 @@ metric_definitions:
 # Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
 # must remain pending under `unmapped_policy`; never guess a convenient metric.
 provider_mappings:
+  factset_earnings_insight_metrics:
+    reporting_coverage: earnings.reporting.coverage
+    eps_above_estimate_share: earnings.eps.above_estimate_share
+    eps_inline_estimate_share: earnings.eps.inline_estimate_share
+    eps_below_estimate_share: earnings.eps.below_estimate_share
+    revenue_above_estimate_share: earnings.revenue.above_estimate_share
+    revenue_inline_estimate_share: earnings.revenue.inline_estimate_share
+    revenue_below_estimate_share: earnings.revenue.below_estimate_share
+    eps_surprise_pct: earnings.eps.surprise_pct
+    revenue_surprise_pct: earnings.revenue.surprise_pct
+    eps_yoy_growth: earnings.eps.yoy_growth
+    revenue_yoy_growth: earnings.revenue.yoy_growth
+    net_profit_margin: earnings.net_profit_margin
+    margin_increase_share: earnings.margin.increase_share
+    margin_unchanged_share: earnings.margin.unchanged_share
+    margin_decrease_share: earnings.margin.decrease_share
+    guidance_positive_count: earnings.guidance.positive_count
+    guidance_negative_count: earnings.guidance.negative_count
+    revision_improved_sector_count: earnings.revision.improved_sector_count
+    bottom_up_eps: earnings.bottom_up_eps
+    forward_pe: valuation.forward_pe
+    trailing_pe: valuation.trailing_pe
+    forward_pe_average_5y: valuation.forward_pe.average_5y
+    forward_pe_average_10y: valuation.forward_pe.average_10y
+    trailing_pe_average_5y: valuation.trailing_pe.average_5y
+    trailing_pe_average_10y: valuation.trailing_pe.average_10y
+    us_revenue_share: revenue.geographic.us_share
+    international_revenue_share: revenue.geographic.international_share
+    rating_buy_share: consensus.rating.buy_share
+    rating_hold_share: consensus.rating.hold_share
+    rating_sell_share: consensus.rating.sell_share
+    target_upside: consensus.target.upside
   company_disclosures:
     tsmc_release:net_sales: financial.revenue.gaap
     tsmc_release:gross_profit: financial.gross_profit.gaap
@@ -640,6 +848,16 @@ unmapped_policy:
 # Documentation of consumer contracts and the persistent/runtime boundary. Runtime
 # price/options inputs remain outside this structured persistent platform.
 migration_consumers:
+  macro_factset:
+    current_contracts: [EarningsBackdrop]
+    persistent_datasets: [sp500_earnings_insight]
+    runtime_inputs: []
+    initial_mode: shadow
+  sector_factset:
+    current_contracts: [EarningsInsightSnapshot]
+    persistent_datasets: [sp500_earnings_insight]
+    runtime_inputs: []
+    initial_mode: shadow
   pead:
     current_contracts: [FundamentalData, consensus_dict]
     persistent_datasets: [company_financials, market_consensus]

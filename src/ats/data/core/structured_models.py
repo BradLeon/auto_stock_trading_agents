@@ -57,6 +57,7 @@ class IngestionStatus(str, Enum):
     STALE = "stale"
     UNREACHABLE = "unreachable"
     UNAUTHORIZED = "unauthorized"
+    NOT_PDF = "not_pdf"
     PARSE_FAILED = "parse_failed"
     VALIDATION_FAILED = "validation_failed"
     PARTIAL = "partial"
@@ -112,6 +113,8 @@ class MetricDefinition(BaseModel):
     derived: bool = False
     description: str = ""
     version: str = "v1"
+    entity_scope: list[str] = Field(default_factory=list)
+    required_dimensions: list[str] = Field(default_factory=list)
 
 
 class ProviderMapping(BaseModel):
@@ -355,8 +358,12 @@ class EvidenceLink(BaseModel):
     candidate_id: str = ""
     document_id: str
     version_id: str
-    char_start: int = Field(ge=0)
-    char_end: int = Field(gt=0)
+    anchor_kind: str = "text_span"
+    page_number: int | None = Field(default=None, ge=1)
+    char_start: int = Field(default=0, ge=0)
+    char_end: int = Field(default=0, ge=0)
+    chart_id: str = ""
+    region: tuple[float, float, float, float] | None = None
     extraction_method: str
     source_tier: str
     verification_status: VerificationStatus = VerificationStatus.NEEDS_EVIDENCE
@@ -367,8 +374,16 @@ class EvidenceLink(BaseModel):
 
     @model_validator(mode="after")
     def valid_span_and_target(self):
-        if self.char_end <= self.char_start:
-            raise ValueError("char_end must be greater than char_start")
+        if self.anchor_kind not in {"text_span", "image_region"}:
+            raise ValueError("anchor_kind must be text_span or image_region")
+        if self.anchor_kind == "text_span" and self.char_end <= self.char_start:
+            raise ValueError("text_span char_end must be greater than char_start")
+        if self.anchor_kind == "image_region":
+            if self.page_number is None or self.region is None:
+                raise ValueError("image_region requires page_number and region")
+            x0, y0, x1, y1 = self.region
+            if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+                raise ValueError("image region must be normalized [x0,y0,x1,y1]")
         if not (self.observation_id or self.candidate_id):
             raise ValueError("evidence must target an observation or candidate")
         return self

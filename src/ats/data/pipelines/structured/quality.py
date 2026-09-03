@@ -177,7 +177,9 @@ def consensus_quality(rows: list[dict], *, now: datetime | None = None,
         "entities": 0, "snapshots": 0, "estimate_ranges": 0,
         "target_bindings": 0, "freshness": 0,
     }
-    if latest_ingestion_status in {"unreachable", "unauthorized", "parse_failed"}:
+    if latest_ingestion_status in {
+        "unreachable", "unauthorized", "not_pdf", "parse_failed",
+    }:
         issues.append({"code": "source_unavailable", "status": latest_ingestion_status})
 
     by_entity: dict[str, list[dict]] = defaultdict(list)

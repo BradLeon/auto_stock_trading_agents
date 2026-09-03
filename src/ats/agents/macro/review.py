@@ -71,6 +71,9 @@ def _earnings_backdrop(mc):
     flagged `degraded`; no PDF at all yields nothing. Never raises — a format
     change at FactSet must not take the weekly review down with it.
     """
+    governed = getattr(mc, "earnings_backdrop", None)
+    if governed is not None:
+        return governed
     text = getattr(mc, "earnings_block", "") or ""
     if not text.strip():
         return None

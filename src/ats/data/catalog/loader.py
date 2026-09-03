@@ -204,6 +204,22 @@ class DataCatalog:
                                      reason_codes=reasons or ["legacy_config_missing"])
         source_rows = structured.raw.get("sources", {}) or {}
         dataset_rows = structured.raw.get("datasets", {}) or {}
+        metric_rows = structured.raw.get("metric_definitions", {}) or {}
+        entity_rows = structured.raw.get("entities", {}) or {}
+        allowed_unit_families = {
+            "categorical", "count", "currency", "currency_per_item",
+            "currency_per_share", "index", "multiple", "ratio",
+        }
+        for metric_id, row in metric_rows.items():
+            check(f"metric:{metric_id}:unit_family",
+                  str((row or {}).get("unit_family", "")) in allowed_unit_families,
+                  "invalid_metric_unit_family")
+        for entity_id, row in entity_rows.items():
+            aliases = list((row or {}).get("aliases") or [])
+            normalized = [str(alias).strip().casefold() for alias in aliases if str(alias).strip()]
+            check(f"entity:{entity_id}:aliases", bool(normalized), "entity_aliases_missing")
+            check(f"entity:{entity_id}:aliases_unique",
+                  len(normalized) == len(set(normalized)), "duplicate_entity_alias")
         for source_id, row in source_rows.items():
             datasets = list(row.get("datasets") or [])
             runtime = row.get("catalog_status") == "runtime_excluded"
@@ -221,6 +237,9 @@ class DataCatalog:
                     check(f"dataset:{dataset_id}:source:{source_id}:reciprocal",
                           source_id in refs, "dataset_source_reference_missing")
         for dataset_id, row in dataset_rows.items():
+            for metric_id in row.get("core_metrics") or []:
+                check(f"dataset:{dataset_id}:metric:{metric_id}:exists",
+                      metric_id in metric_rows, "metric_not_configured")
             for source_id in [*(row.get("primary_sources") or []),
                               *(row.get("fallback_sources") or [])]:
                 check(f"dataset:{dataset_id}:source:{source_id}:exists",

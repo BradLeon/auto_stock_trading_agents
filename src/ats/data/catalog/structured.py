@@ -11,6 +11,24 @@ from ..core.structured_models import (CatalogStatus, MetricDefinition, Persisten
                                       StructuredDataset, StructuredSource)
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Reject duplicate catalog identifiers instead of silently overwriting them."""
+
+
+def _unique_mapping(loader: _UniqueKeyLoader, node, deep: bool = False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"duplicate structured catalog key: {key}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping)
+
+
 class StructuredCatalog:
     def __init__(self, raw: dict[str, Any], *, path: Path):
         self.raw = raw
@@ -26,7 +44,8 @@ class StructuredCatalog:
 
             path = REPO_ROOT / "config" / "data" / "structured.yaml"
         resolved = Path(path)
-        return cls(yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}, path=resolved)
+        return cls(yaml.load(resolved.read_text(encoding="utf-8"),
+                             Loader=_UniqueKeyLoader) or {}, path=resolved)
 
     def sources(self) -> list[StructuredSource]:
         out = []

@@ -1652,6 +1652,63 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 source_id=source or None, series=series or None, entity=entity or None,
                 since=since or None, as_of=cutoff, include_vintages=vintages,
             )
+    elif action == "earnings-insight":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        value = (products.earnings_insight_vintages(as_of=cutoff, limit=limit)
+                 if vintages else products.earnings_insight_snapshot(as_of=cutoff))
+        if isinstance(value, list):
+            result = [item.model_dump(mode="json") for item in value]
+        else:
+            result = value.model_dump(mode="json")
+    elif action == "factset-status":
+        from urllib.parse import urlsplit, urlunsplit
+
+        def safe_url(raw):
+            parts = urlsplit(str(raw or ""))
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+        report_rows = []
+        for row in products.structured.artifacts_for(
+                dataset_id="sp500_earnings_insight", limit=limit):
+            metadata = json.loads(row.get("metadata_json") or "{}")
+            report_rows.append({
+                "artifact_id": row.get("artifact_id"),
+                "content_hash": row.get("content_hash"),
+                "bytes": row.get("bytes"), "fetched_at": row.get("fetched_at"),
+                "media_type": row.get("media_type"),
+                "report_date": metadata.get("report_date"),
+                "source_url": safe_url(row.get("source_url")),
+            })
+        result = {
+            **products.earnings_insight_status(limit=limit),
+            "source_health": [row for row in products.structured.source_health()
+                              if row.get("source_id") in {
+                                  "factset_earnings_insight_metrics",
+                                  "factset_earnings_insight_doc"}],
+            "reports": report_rows,
+            "partition_history": {
+                partition: products.structured.release_manifests(
+                    dataset_id="sp500_earnings_insight", partition=partition,
+                    passed_only=False, limit=limit)
+                for partition in ("index_core", "sector_core")},
+            "attempts": products.structured.ingestion_history(
+                source_id="factset_earnings_insight_metrics",
+                dataset_id="sp500_earnings_insight", limit=limit),
+        }
+    elif action in {"factset-import", "factset-reprocess"}:
+        if not report_path:
+            raise ValueError(f"{action} requires --report-path")
+        if action == "factset-reprocess" and not value:
+            raise ValueError("factset-reprocess requires VALUE as extractor version")
+        from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
+
+        version = value or "factset-text-v1"
+        result = FactSetWeeklyPipeline(
+            products.structured, products.unstructured).run(
+                local_pdf=report_path,
+                document_processor_version=f"factset-document-{version}",
+                index_extractor_version=version,
+                sector_extractor_version=version)
     elif action == "derive":
         if not metric or not entity or not operation:
             raise ValueError("derive requires --metric, --entity and --operation")
@@ -1716,7 +1773,8 @@ def main(argv: list[str] | None = None) -> int:
         "catalog", "config", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
-        "derive", "cross-section",
+        "derive", "cross-section", "earnings-insight", "factset-status",
+        "factset-import", "factset-reprocess",
         "search", "company", "claim", "lineage", "conflicts", "pending-mappings",
         "ingestion-history", "artifacts"])
     data.add_argument("value", nargs="?", default="",

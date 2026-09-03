@@ -122,6 +122,26 @@ sources:
 # 类型** —— 那正是 supports_when 当初被删掉的同一类错误（见 schemas/chain.py::Concept）。
 
 article_sources:
+  factset_earnings_insight_doc:
+    label: FactSet Earnings Insight 周报
+    adapter: factset_earnings_insight
+    entity: FACTSET
+    stance: regulator
+    doc_type: research_article
+    cadence: weekly
+    pages: 1
+    max_per_run: 1
+    min_body_chars: 1000
+    params:
+      stable_url: https://www.factset.com/earningsinsight
+      timeout_seconds: 60
+      max_attempts: 3
+      expected_mime: application/pdf
+      freshness_days: 10
+      artifact_retention: licensed_internal_research
+      usage: internal_only
+    match: []
+
   trendforce_news:
     label: TrendForce 新闻
     adapter: trendforce

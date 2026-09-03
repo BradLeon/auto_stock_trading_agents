@@ -103,7 +103,9 @@ CREATE TABLE IF NOT EXISTS structured_derivations (
 CREATE TABLE IF NOT EXISTS structured_evidence_links (
     link_id TEXT PRIMARY KEY, observation_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
     document_id TEXT NOT NULL, version_id TEXT NOT NULL, char_start INTEGER NOT NULL,
-    char_end INTEGER NOT NULL, extraction_method TEXT NOT NULL, source_tier TEXT NOT NULL,
+    char_end INTEGER NOT NULL, anchor_kind TEXT NOT NULL DEFAULT 'text_span',
+    page_number INTEGER, chart_id TEXT NOT NULL DEFAULT '', region_json TEXT NOT NULL DEFAULT '',
+    extraction_method TEXT NOT NULL, source_tier TEXT NOT NULL,
     verification_status TEXT NOT NULL, reviewer TEXT NOT NULL, reviewed_at TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -150,6 +152,18 @@ CREATE TABLE IF NOT EXISTS structured_snapshot_items (
     derivation_id TEXT NOT NULL, derivation_version TEXT NOT NULL,
     PRIMARY KEY (snapshot_id, ordinal)
 );
+CREATE TABLE IF NOT EXISTS structured_release_manifests (
+    release_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+    partition_name TEXT NOT NULL, report_date TEXT NOT NULL,
+    document_id TEXT NOT NULL, version_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
+    known_at TEXT NOT NULL, extractor_version TEXT NOT NULL,
+    status TEXT NOT NULL, passed INTEGER NOT NULL,
+    quality_json TEXT NOT NULL, observation_ids_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(dataset_id,partition_name,version_id,extractor_version)
+);
+CREATE INDEX IF NOT EXISTS idx_structured_release_lookup
+    ON structured_release_manifests(dataset_id,partition_name,known_at);
 CREATE TABLE IF NOT EXISTS structured_legacy_audits (
     audit_id TEXT PRIMARY KEY, audited_at TEXT NOT NULL, series_count INTEGER NOT NULL,
     point_count INTEGER NOT NULL, missing_published_at INTEGER NOT NULL,
@@ -267,6 +281,17 @@ class SQLiteStructuredRepository:
 
     def _record_migration(self) -> None:
         with self.conn:
+            columns = {row[1] for row in self.conn.execute(
+                "PRAGMA table_info(structured_evidence_links)").fetchall()}
+            for ddl in (
+                "anchor_kind TEXT NOT NULL DEFAULT 'text_span'",
+                "page_number INTEGER",
+                "chart_id TEXT NOT NULL DEFAULT ''",
+                "region_json TEXT NOT NULL DEFAULT ''",
+            ):
+                if ddl.split()[0] not in columns:
+                    self.conn.execute(
+                        f"ALTER TABLE structured_evidence_links ADD COLUMN {ddl}")
             self.conn.execute(
                 "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
                 "VALUES ('structured_foundation_v1',?,'additive governed structured tables')",
@@ -500,6 +525,24 @@ class SQLiteStructuredRepository:
             "by_source": rows,
         }
 
+    def artifacts_for(self, *, source_id: str | None = None,
+                      dataset_id: str | None = None,
+                      content_hash: str | None = None,
+                      limit: int = 500) -> list[dict]:
+        sql = ("SELECT a.*,b.content_hash,b.relative_path,b.bytes "
+               "FROM structured_artifacts a JOIN structured_artifact_blobs b "
+               "ON b.blob_id=a.blob_id WHERE 1=1")
+        args: list = []
+        for column, value in (("a.source_id", source_id),
+                              ("a.dataset_id", dataset_id),
+                              ("b.content_hash", content_hash)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        sql += " ORDER BY a.fetched_at DESC,a.artifact_id LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
     def source_health(self) -> list[dict]:
         """Return one explicit health row for every registered source."""
         sql = """
@@ -663,11 +706,17 @@ class SQLiteStructuredRepository:
         link_id = hashlib.sha256(_json(body).encode()).hexdigest()[:24]
         with self._lock, self.conn:
             self.conn.execute(
-                "INSERT OR REPLACE INTO structured_evidence_links VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO structured_evidence_links "
+                "(link_id,observation_id,candidate_id,document_id,version_id,char_start,"
+                "char_end,anchor_kind,page_number,chart_id,region_json,extraction_method,"
+                "source_tier,verification_status,reviewer,reviewed_at,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (link_id, link.observation_id, link.candidate_id, link.document_id,
-                 link.version_id, link.char_start, link.char_end, link.extraction_method,
-                 link.source_tier, link.verification_status.value, link.reviewer,
+                 link.version_id, link.char_start, link.char_end, link.anchor_kind,
+                 link.page_number, link.chart_id,
+                 _json(link.region) if link.region is not None else "",
+                 link.extraction_method, link.source_tier,
+                 link.verification_status.value, link.reviewer,
                  _stamp(link.reviewed_at) if link.reviewed_at else "", _stamp()))
         return link_id
 
@@ -715,6 +764,62 @@ class SQLiteStructuredRepository:
         return [dict(row) for row in self.conn.execute(
             "SELECT * FROM structured_evidence_reviews WHERE candidate_id=? "
             "ORDER BY rowid", (candidate_id,)).fetchall()]
+
+    def save_release_manifest(self, *, source_id: str, dataset_id: str,
+                              partition: str, report_date: str,
+                              document_id: str, version_id: str,
+                              artifact_id: str, known_at: datetime,
+                              extractor_version: str, status: str, passed: bool,
+                              quality: dict, observation_ids: list[str]) -> str:
+        identity = f"{dataset_id}|{partition}|{version_id}|{extractor_version}"
+        release_id = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO structured_release_manifests VALUES "
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(dataset_id,partition_name,version_id,extractor_version) "
+                "DO UPDATE SET status=excluded.status,passed=excluded.passed,"
+                "quality_json=excluded.quality_json,"
+                "observation_ids_json=excluded.observation_ids_json",
+                (release_id, source_id, dataset_id, partition, report_date,
+                 document_id, version_id, artifact_id, _stamp(known_at),
+                 extractor_version, status, int(passed), _json(quality),
+                 _json(observation_ids), _stamp()))
+        return release_id
+
+    def release_manifests(self, *, dataset_id: str | None = None,
+                          partition: str | None = None,
+                          as_of: datetime | None = None,
+                          passed_only: bool = False,
+                          limit: int = 500) -> list[dict]:
+        sql, args = "SELECT * FROM structured_release_manifests WHERE 1=1", []
+        for column, value in (("dataset_id", dataset_id),
+                              ("partition_name", partition)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        if as_of:
+            sql += " AND known_at<=?"
+            args.append(_stamp(as_of))
+        if passed_only:
+            sql += " AND passed=1"
+        sql += " ORDER BY known_at DESC,created_at DESC LIMIT ?"
+        args.append(limit)
+        rows = [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+        for row in rows:
+            row["quality"] = json.loads(row.pop("quality_json") or "{}")
+            row["observation_ids"] = json.loads(
+                row.pop("observation_ids_json") or "[]")
+            row["passed"] = bool(row["passed"])
+        return rows
+
+    def latest_release(self, *, dataset_id: str, partition: str,
+                       as_of: datetime | None = None,
+                       passed_only: bool = True) -> dict | None:
+        rows = self.release_manifests(
+            dataset_id=dataset_id, partition=partition, as_of=as_of,
+            passed_only=passed_only, limit=1)
+        return rows[0] if rows else None
 
     def comparable_observations(self, *, dataset_id: str, entity_id: str,
                                 metric_id: str, period: str) -> list[dict]:

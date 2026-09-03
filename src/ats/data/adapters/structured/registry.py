@@ -66,6 +66,12 @@ def _trendforce():
     return TrendForceDRAMAdapter()
 
 
+def _factset_earnings_insight():
+    from ...sources.factset_earnings_insight import FactSetEarningsInsightAdapter
+
+    return FactSetEarningsInsightAdapter()
+
+
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "tw_mof": RuntimeSourceSpec("tw_mof", _tw_mof),
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
@@ -79,6 +85,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         "yfinance_financials", _yfinance_financials, requires_entities=True),
     "consensus": RuntimeSourceSpec("consensus", _consensus, requires_entities=True),
     "trendforce": RuntimeSourceSpec("trendforce", _trendforce),
+    "factset_earnings_insight": RuntimeSourceSpec(
+        "factset_earnings_insight", _factset_earnings_insight),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),

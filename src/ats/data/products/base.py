@@ -35,6 +35,25 @@ class DataProducts:
             self._structured_repository = get_platform_structured_repository()
         return self._structured_repository
 
+    def earnings_insight_snapshot(self, *, as_of: datetime | None = None):
+        """Return one report-consistent governed FactSet snapshot."""
+        from .earnings_insight import load_snapshot
+
+        return load_snapshot(self, as_of=as_of)
+
+    def earnings_insight_vintages(self, *, as_of: datetime | None = None,
+                                  limit: int = 500):
+        """Return immutable released weekly snapshots, newest first."""
+        from .earnings_insight import available_vintages
+
+        return available_vintages(self, as_of=as_of, limit=limit)
+
+    def earnings_insight_status(self, *, as_of: datetime | None = None,
+                                limit: int = 20):
+        from .earnings_insight import operational_status
+
+        return operational_status(self, as_of=as_of, limit=limit)
+
     def indicator_series(self, *, source_id: str | None = None,
                          series: str | None = None, entity: str | None = None,
                          since: str | None = None, as_of: datetime | None = None,
@@ -64,7 +83,8 @@ class DataProducts:
             state = history[0]["status"]
             if state in {
                 "zero_match", "not_yet_published", "no_coverage", "stale",
-                "unreachable", "unauthorized", "parse_failed", "validation_failed",
+                "unreachable", "unauthorized", "not_pdf", "parse_failed",
+                "validation_failed",
             }:
                 return {"status": state, "reason": "latest_ingestion_state"}
         return {"status": "no_coverage", "reason": "no_accepted_observation"}
@@ -687,7 +707,17 @@ class DataProducts:
 
     def lineage(self, identifier: str) -> dict | None:
         structured = self.structured.lineage(identifier)
-        return structured if structured is not None else self.unstructured.projection_lineage(identifier)
+        if structured is not None:
+            return structured
+
+        projection_lineage = getattr(self.unstructured, "projection_lineage", None)
+        if callable(projection_lineage):
+            return projection_lineage(identifier)
+
+        # Preserve the lightweight legacy-store contract used by older callers
+        # that do not provide an unstructured projection repository.
+        legacy_lineage = getattr(self.store, "projection_lineage", None)
+        return legacy_lineage(identifier) if callable(legacy_lineage) else None
 
 
 def get_data_products() -> DataProducts:

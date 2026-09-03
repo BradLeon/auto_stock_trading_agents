@@ -27,6 +27,7 @@ class SectorContext:
     event_lines: list[str] = field(default_factory=list)
     macro_block: str = ""
     regional_block: str = ""
+    factset_block: str = ""
     kb_criteria: str = ""
     evidence_block: str = ""
 
@@ -42,6 +43,8 @@ class SectorContext:
                          + self.macro_block)
         if self.regional_block:
             parts.append("## 区域半导体需求（持久化月度序列）\n" + self.regional_block)
+        if self.factset_block:
+            parts.append(self.factset_block)
         if self.kb_criteria:
             # BEFORE the evidence on purpose, mirroring structure.assess and
             # graph/pead.py: the criteria say how to weigh a reading, the ledger says
@@ -75,6 +78,7 @@ class SectorContext:
             "events": len(self.event_lines),
             "static_chars": len(self.static_notes),
             "regional_chars": len(self.regional_block),
+            "factset_chars": len(self.factset_block),
             "kb_chars": len(self.kb_criteria),
             "total_chars": len(self.as_context()),
         }
@@ -120,6 +124,12 @@ def build(cfg: SectorConfig, *, live_data: bool = True,
         except Exception as exc:  # legacy regional sources must not stop the review
             log.warning("sector regional snapshot unavailable: %s", exc)
             sc.regional_block = "(区域月度数据不可用)"
+        from ...data import factset
+        try:
+            sc.factset_block = factset.fetch_sector_context()
+        except Exception as exc:  # optional top-down context never stops the review
+            log.warning("sector FactSet snapshot unavailable: %s", exc)
+            sc.factset_block = ""
 
     # ⚠️ 宏观**不再注入行业链路**（2026-08-20，design D16）。
     # 它在 Chief 已经有落点（chief/assemble.py 读宏观评审的 sector_tilts），行业这边再吃

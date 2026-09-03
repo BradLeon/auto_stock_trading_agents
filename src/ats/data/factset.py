@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..schemas.macro_strategy import EarningsBackdrop
@@ -44,6 +44,153 @@ def fetch_earnings_insight(cfg: dict) -> tuple[str, str]:
     text = safe_fetch(lambda: _extract(path, int(cfg.get("max_pages", 16))),
                       source=f"factset:read:{path.name}", attempts=1) or ""
     return text[:int(cfg.get("max_chars", 14000))], f"factset:{path.name}"
+
+
+def _platform_snapshot(products=None):
+    owned = products is None
+    if products is None:
+        from .products import get_platform_data_products
+
+        products = get_platform_data_products()
+    try:
+        return products.earnings_insight_snapshot()
+    finally:
+        if owned:
+            for repository in (getattr(products, "_structured_repository", None),
+                               getattr(products, "_unstructured_repository", None)):
+                close = getattr(repository, "close", None)
+                if close:
+                    close()
+
+
+def _snapshot_signature(snapshot) -> dict:
+    from .products import to_earnings_backdrop
+
+    backdrop = to_earnings_backdrop(snapshot)
+    return {
+        "report_date": str(snapshot.report.report_date or ""),
+        "version_id": snapshot.report.version_id,
+        "state": snapshot.status.state,
+        "freshness": snapshot.status.freshness,
+        "warnings": list(snapshot.status.warnings),
+        "quarter": backdrop.quarter,
+        "growth_pct": backdrop.growth_pct,
+        "growth_basis": backdrop.growth_basis,
+        "sectors_higher": backdrop.sectors_higher,
+        "fwd_pe": backdrop.fwd_pe,
+        "rendered_review_text": backdrop.to_context(),
+    }
+
+
+def _record_factset_shadow(*, legacy: EarningsBackdrop, platform_snapshot) -> None:
+    """Persist value/period/state/freshness/render comparisons without source text."""
+    try:
+        from .cutover import record_consumer_comparison
+        from .runtime import platform_data_db_path
+
+        legacy_signature = {
+            "report_date": str(legacy.report_date or ""),
+            "quarter": legacy.quarter, "growth_pct": legacy.growth_pct,
+            "growth_basis": legacy.growth_basis,
+            "sectors_higher": legacy.sectors_higher, "fwd_pe": legacy.fwd_pe,
+            "rendered_review_text": legacy.to_context(),
+        }
+        platform_signature = _snapshot_signature(platform_snapshot)
+        comparable = {key: platform_signature.get(key) for key in legacy_signature}
+        matched = legacy_signature == comparable
+        record_consumer_comparison(
+            consumer="macro_factset", entity="SP500",
+            data_db=platform_data_db_path(),
+            status="reconciled" if matched else "mismatch",
+            details={"input": "factset_earnings_insight",
+                     "reason": "identical_snapshot" if matched else "snapshot_mismatch",
+                     "legacy": legacy_signature, "platform": platform_signature})
+    except Exception as exc:  # comparison telemetry must not stop weekly review
+        log.warning("factset: failed to record macro shadow comparison: %s", exc)
+
+
+def _platform_macro(snapshot) -> tuple[str, str, EarningsBackdrop]:
+    from .products import to_earnings_backdrop
+
+    backdrop = to_earnings_backdrop(snapshot)
+    if backdrop.degraded:
+        return "", f"factset:{snapshot.status.state}", backdrop
+    lines = [backdrop.to_context()]
+    if snapshot.report.report_date:
+        lines.append(f"报告日期: {snapshot.report.report_date.isoformat()}")
+    lines.append(
+        f"数据状态: {snapshot.status.state}; freshness={snapshot.status.freshness}; "
+        f"estimate_state={backdrop.growth_basis or 'n/a'}")
+    if snapshot.status.warnings:
+        lines.append("质量警告: " + "; ".join(snapshot.status.warnings))
+    return "\n".join(lines), f"factset:{snapshot.report.version_id}", backdrop
+
+
+def fetch_macro_context(cfg: dict, *, products=None) -> tuple[str, str, EarningsBackdrop | None]:
+    """Resolve the independently controlled Macro consumer without hidden refresh."""
+    from .rollout_modes import read_mode
+
+    mode = read_mode("macro_factset")
+    if mode == "off":
+        return "", "disabled", None
+    if mode in {"platform", "fallback", "shadow"}:
+        try:
+            snapshot = _platform_snapshot(products)
+            platform = _platform_macro(snapshot)
+        except Exception as exc:  # governed read failure degrades explicitly
+            log.warning("factset: platform Macro product unavailable: %s", exc)
+            snapshot, platform = None, ("", "factset:unavailable", None)
+        if mode == "platform":
+            return platform
+        if mode == "fallback" and platform[0]:
+            return platform
+    text, source = fetch_earnings_insight(cfg)
+    legacy = parse_key_metrics(text, source=source) if text else None
+    if mode == "shadow" and snapshot is not None and legacy is not None:
+        _record_factset_shadow(legacy=legacy, platform_snapshot=snapshot)
+    return text, source, legacy
+
+
+def _render_sector_snapshot(snapshot) -> str:
+    if not snapshot.sectors:
+        return ""
+    lines = [
+        "## FactSet GICS 行业矩阵（top-down 市场背景）",
+        "> 仅用于行业盈利/估值背景；不是 AI Hardware L1-L8、个股基本面或 Chain 独立证据。",
+        f"> 报告日期 {snapshot.report.report_date}; 状态 {snapshot.status.state}; "
+        f"freshness={snapshot.status.freshness}",
+    ]
+    if snapshot.status.warnings:
+        lines.append("> 质量警告: " + "; ".join(snapshot.status.warnings))
+    for entity, periods in sorted(snapshot.sectors.items()):
+        readings = []
+        for period, metrics in sorted(periods.items()):
+            for metric, observation in sorted(metrics.items()):
+                readings.append(
+                    f"{period}/{metric}={observation.value:g} {observation.unit}"
+                    f"[{observation.estimate_state}]")
+        lines.append(f"- {entity}: " + "; ".join(readings))
+    return "\n".join(lines)
+
+
+def fetch_sector_context(*, products=None) -> str:
+    """Return a released GICS overlay only; never acquire or parse a PDF."""
+    from .rollout_modes import read_mode
+
+    mode = read_mode("sector_factset")
+    if mode in {"off", "legacy"}:
+        return ""
+    try:
+        snapshot = _platform_snapshot(products)
+        rendered = _render_sector_snapshot(snapshot)
+    except Exception as exc:
+        log.warning("factset: platform Sector product unavailable: %s", exc)
+        return ""
+    if mode == "shadow":
+        log.info("factset Sector shadow: version=%s sectors=%d status=%s",
+                 snapshot.report.version_id, len(snapshot.sectors), snapshot.status.state)
+        return ""
+    return rendered
 
 
 def _download(url: str, folder: Path) -> Path:

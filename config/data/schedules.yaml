@@ -5,6 +5,13 @@ structured:
   trigger: external_scheduler
   command: ats data ingest
   default_timezone: UTC
+  jobs:
+    factset_weekly_ingest:
+      source: factset_earnings_insight_metrics
+      schedule: saturday
+      at: "08:10"
+      timezone: Asia/Shanghai
+      precedes: weekly_review
 unstructured:
   trigger: external_scheduler
   command: ats data ingest

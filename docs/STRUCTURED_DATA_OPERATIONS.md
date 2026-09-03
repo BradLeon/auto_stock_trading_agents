@@ -724,3 +724,20 @@ TrendForce DRAM 的采集、期间标准化与发布应以本手册的 source he
 - [结构化数据层使用手册](STRUCTURED_DATA_USER_GUIDE.md)
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
+
+## FactSet Earnings Insight 运维（实施中）
+
+```bash
+# 当前 release、质量 partition、最近失败、报告 hash/version（URL 已脱敏）
+ats data factset-status
+
+# 最新 snapshot；--as-of 只返回当时真实可见的数据；--vintages 列出历史报告版本
+ats data earnings-insight --as-of 2026-08-29T00:00:00+00:00
+ats data earnings-insight --vintages
+
+# 受控本地导入或指定 extractor 版本重处理（不再读取 macro.yaml 的 Obsidian 文件夹）
+ats data factset-import --report-path /absolute/path/EarningsInsight_082826.pdf
+ats data factset-reprocess factset-text-v2 --report-path /absolute/path/EarningsInsight_082826.pdf
+```
+
+周六 `factset_weekly_ingest` 必须先于 Macro→Sector 周评。默认保持 source 和 consumer 为 `shadow`；只有 `index_core` 按报告阶段达到完整正文门禁才可提升 Macro，只有当前 `082826` 报告的 231 个适用行业单元格经人工确认并与独立 decoder 100% 一致时才可提升 `sector_core`。遇到 `unreachable`、`not_pdf` 或 `parse_failed` 时，产品保留上一期并标记 `stale`；没有上一期则返回 `unavailable`，不得以零值代替。

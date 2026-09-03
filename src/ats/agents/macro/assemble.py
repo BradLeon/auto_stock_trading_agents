@@ -22,6 +22,7 @@ class MacroContext:
     theme_blocks: list[str] = field(default_factory=list)
     earnings_block: str = ""          # FactSet Earnings Insight (S&P500 盈利/估值 backdrop)
     earnings_source: str = ""
+    earnings_backdrop: object | None = None
     regional_block: str = ""
 
     def as_context(self) -> str:
@@ -69,7 +70,8 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
     if live_data and cfg.factset.get("enabled", True):
         from ...data import factset
 
-        mc.earnings_block, mc.earnings_source = factset.fetch_earnings_insight(cfg.factset)
+        (mc.earnings_block, mc.earnings_source,
+         mc.earnings_backdrop) = factset.fetch_macro_context(cfg.factset)
 
     field_vals = _field_map(data)
     search_cfg = cfg.search

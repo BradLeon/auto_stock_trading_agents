@@ -91,6 +91,29 @@ schedule:
   # 就会出问题（例如北京周六 08:50，纽约那一刻还是周五晚上），所以直接用操作者的时区。
   weekly_review_at: "08:50"
   weekly_review_tz: Asia/Shanghai
+  factset_refresh_at: "08:10"
+  factset_refresh_tz: Asia/Shanghai
+  # 例行作业可逐项暂停、验证输入/输出后再恢复。未列出的旧配置默认全部开启，
+  # 以保证升级兼容；此处是当前生产运行策略。
+  daily_stages:
+    pead_event_triggers: true
+    macro_sector_event_triggers: false
+    news_backfill: false
+    pead_daily: true
+    technical_daily: false
+    intel_digest: false
+    performance_snapshot: false
+    perf_risk_digest: false
+    journal_marks: false
+    chief_daily: false
+  jobs:
+    factset_weekly_ingest: true
+    weekly_review: false
+    journal_reconcile: false
+    pead_score_bmo: true
+    pead_score_amc: true
+    # 仅影响排程内的自动抽取；手动 evidence observe 仍然可用。
+    pead_observe_window: false
   # 这台机器会睡眠。触发时刻若在睡眠中，任务只有在唤醒后、且仍在本宽限窗口内才补跑。
   # 实测 2026-07-27：旧值 1 小时导致 daemon 存活 2.5 天、CPU 仅 0.45 秒 —— 每一次触发
   # 都被静默丢弃。最糟的是盘后 20:00 ET 窗口，它落在本地 09:00（清晨）。

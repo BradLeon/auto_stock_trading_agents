@@ -9,7 +9,8 @@ from typing import Any
 
 
 _FAILURE_STATES = {
-    "stale", "unreachable", "unauthorized", "parse_failed", "validation_failed",
+    "stale", "unreachable", "unauthorized", "not_pdf", "parse_failed",
+    "validation_failed",
 }
 
 

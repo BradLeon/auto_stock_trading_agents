@@ -46,9 +46,9 @@ def test_empty_database_bootstraps_catalog_without_workflow_tables(tmp_path):
     assert "structured_observations" in tables
     assert "structured_artifacts" in tables
     assert "cycles" not in tables
-    assert repo.conn.execute("SELECT count(*) FROM structured_sources").fetchone()[0] == 13
-    assert repo.conn.execute("SELECT count(*) FROM structured_datasets").fetchone()[0] == 6
-    assert repo.conn.execute("SELECT count(*) FROM structured_metrics").fetchone()[0] == 45
+    assert repo.conn.execute("SELECT count(*) FROM structured_sources").fetchone()[0] == 14
+    assert repo.conn.execute("SELECT count(*) FROM structured_datasets").fetchone()[0] == 7
+    assert repo.conn.execute("SELECT count(*) FROM structured_metrics").fetchone()[0] == 76
 
 
 def test_repository_uses_separate_path_when_configured(monkeypatch, tmp_path):

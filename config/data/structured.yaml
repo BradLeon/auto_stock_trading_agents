@@ -119,7 +119,9 @@ feature_flags:
     # 082826 index acceptance and Macro dual-read are complete; this partition is
     # now the formal governed source for the Macro consumer.
     factset_earnings_insight_index: platform
-    factset_earnings_insight_sector: shadow
+    # 082826 的八张行业表已经通过独立原图 decoder 与 231/231 golden-cell
+    # 比较；consumer 仍须在真实 Sector review 成功后另行切换。
+    factset_earnings_insight_sector: platform
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -167,10 +169,11 @@ feature_flags:
     # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
     runtime_scheduler: shadow
     chief_graph: shadow
-    # 9.2 cutover: Macro reads the released index partition only.  Sector remains
-    # shadow until its independent 9.3 production promotion.
+    # Macro reads the released index partition.
     macro_factset: platform
-    sector_factset: shadow
+    # 9.3: the 082826 sector partition passed the independent 231-cell gate and
+    # completed its release; Sector may use it only in final top-down synthesis.
+    sector_factset: platform
   consumer_sources: {}
 
 # Terminal statuses have distinct operational meaning. In particular,

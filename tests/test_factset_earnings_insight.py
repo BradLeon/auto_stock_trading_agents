@@ -111,12 +111,12 @@ def test_factset_catalog_contract_and_independent_rollout(monkeypatch, tmp_path)
     assert source_mode("factset_earnings_insight_doc") == "shadow"
     assert source_mode("factset_earnings_insight_metrics") == "shadow"
     assert source_mode("factset_earnings_insight_index") == "platform"
-    assert source_mode("factset_earnings_insight_sector") == "shadow"
+    assert source_mode("factset_earnings_insight_sector") == "platform"
     assert read_mode("macro_factset") == "platform"
-    assert read_mode("sector_factset") == "shadow"
+    assert read_mode("sector_factset") == "platform"
     monkeypatch.setenv("ATS_STRUCTURED_MACRO_FACTSET_MODE", "off")
     assert read_mode("macro_factset") == "off"
-    assert read_mode("sector_factset") == "shadow"
+    assert read_mode("sector_factset") == "platform"
 
 
 def test_structured_catalog_rejects_duplicate_ids(tmp_path):
@@ -971,16 +971,21 @@ def test_weekly_pipeline_has_one_entrypoint_and_unchanged_report_is_idempotent(
     monkeypatch.setattr(
         pipeline_module, "inspect_pdf", lambda _source: projected_factset_pdf)
     known_at = datetime(2026, 9, 2, 1, 23, tzinfo=timezone.utc)
+    retry_at = datetime(2026, 9, 3, 1, 23, tzinfo=timezone.utc)
     structured = SQLiteStructuredRepository(
         tmp_path / "structured.sqlite", artifact_root=tmp_path / "artifacts")
     documents = PlatformUnstructuredRepository(tmp_path / "documents.sqlite", writable=True)
     pipeline = FactSetWeeklyPipeline(
-        structured, documents, clock=lambda: known_at)
+        structured, documents, clock=lambda: next(iteration))
+    iteration = iter((known_at, retry_at))
 
     first = pipeline.run(local_pdf=local_pdf)
+    first_observation_count = len(structured.observations(
+        dataset_id="sp500_earnings_insight", latest_only=False))
     repeated = pipeline.run(local_pdf=local_pdf)
     assert first["document"]["status"] == "succeeded"
     assert repeated["document"]["status"] == "no_change"
+    assert repeated["document"]["known_at"] == known_at.isoformat()
     assert repeated["index_core"]["status"] in {"no_change", "zero_match"}
     assert first["sector_core"]["release_status"] == "shadow"
     assert first["sector_core"]["quality"]["annotated_cells_ok"] is False
@@ -991,6 +996,9 @@ def test_weekly_pipeline_has_one_entrypoint_and_unchanged_report_is_idempotent(
     assert "?" not in first["provenance"]["final_url"]
     assert len(structured.release_manifests(
         dataset_id="sp500_earnings_insight", partition="index_core")) == 1
+    observations = structured.observations(
+        dataset_id="sp500_earnings_insight", latest_only=False)
+    assert len(observations) == first_observation_count
 
 
 def test_failed_refresh_with_previous_release_marks_snapshot_stale(tmp_path):
@@ -1221,6 +1229,19 @@ def test_missing_local_ocr_is_an_explicit_non_throwing_status(monkeypatch):
     assert "unavailable" in result.reason
 
 
+def test_local_ocr_discovers_explicit_binary_outside_path(monkeypatch, tmp_path):
+    import ats.data.sources.factset_earnings_charts as chart_module
+
+    binary = tmp_path / "tesseract"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("ATS_TESSERACT_PATH", str(binary))
+    monkeypatch.setattr(chart_module.shutil, "which", lambda _name: None)
+
+    assert chart_module._tesseract_command() == str(binary)
+    assert LocalOCRAdapter.discover().available is True
+
+
 def _chart_run():
     return FactSetExtractionRun(
         run_id="chart-run", document_id="doc", version_id="doc@chart",
@@ -1404,7 +1425,7 @@ def test_sector_core_releases_independently_only_after_full_table_gate(
         version_id="doc@sector-pass", artifact_id=artifact.id, known_at=now,
         annotated_cells_ok=True)
     assert released["quality"]["passed"] is True
-    assert released["release_status"] == "shadow"
+    assert released["release_status"] == "platform"
     assert released["accepted"] == 11
     evidence = repository.evidence_links(
         observation_id=released["observation_ids"][0])

@@ -91,7 +91,7 @@
 - [x] 9.1 应用增量迁移，在所有 source/consumer mode 均非 platform 的情况下，将当前报告 `082826` 导入隔离环境；归档 acceptance 和 quality 报告。历史 PDF 可由操作人员单独受控重处理。
 - [x] 9.2 提升 `index_core`，在双读门禁通过后切换 `macro_factset`，并观察一次成功定时刷新和一次周度评审；在下一个周六窗口前，获批准的操作人员等价演练可改为按有效生产 mode 运行已注册 FactSet import pipeline，并紧接着运行 Macro 与 Sector review。记录 run ID、选中报告版本、effective mode、结果及 consumer-flag 回滚演练。`sector_factset` 保持 shadow，其提升仍属于 9.3。
 - [x] 9.2a 按分析质量清单重新生成并审阅 `2026-09-03` Macro 与 Sector 报告：25 条指数观测全部可用、必需诊断正确、集中度证据带页码、Macro 覆盖全部必需分析角度、Sector 记录 Macro/FactSet 的一致或明确不可用原因，并且单层结论不被 top-down 背景修改。在 9.3 或 9.5 前归档验收结果。
-- [ ] 9.3 只有通过 100% 单元格门禁和 9.2a 分析质量验收后才提升 `sector_core`；Sector smoke/regression 测试通过后切换 `sector_factset`，并观察一次成功定时刷新和 Sector 评审。
+- [x] 9.3 只有通过 100% 单元格门禁和 9.2a 分析质量验收后才提升 `sector_core`；Sector smoke/regression 测试通过后切换 `sector_factset`，并观察一次成功定时刷新和 Sector 评审。
 - [x] 9.4 验证回滚只改变路由，并保留 PDF artifact、document version、candidate、evidence link、structured observation 和 vintage。
 - [ ] 9.5 观察期结束且 9.2a 分析质量验收通过后，删除 Macro 对 FactSet 的直接下载/解析器调用，移除对 `config/macro.yaml` FactSet 文件夹设置的运行时依赖，只保留受治理的 import/ingest 路径。
 - [ ] 9.6 更新数据层架构、来源 inventory、操作 runbook、版权/内部使用指南、metric dictionary 和消费者 ownership 文档；在宣布迁移完成前运行聚焦测试和完整测试套件。

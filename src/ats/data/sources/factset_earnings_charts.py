@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import csv
 from enum import StrEnum
 from io import BytesIO, StringIO
+import os
 from pathlib import Path
 import re
 import shutil
@@ -189,13 +190,33 @@ class OCRDependencyStatus:
     missing: tuple[str, ...]
 
 
+def _tesseract_command() -> str | None:
+    """Locate the local OCR binary in interactive and scheduled environments.
+
+    macOS launchd/desktop subprocesses often omit Homebrew from ``PATH``.  An
+    explicit path wins for managed deployments; the two standard Homebrew
+    locations are then checked without introducing a cloud OCR fallback.
+    """
+    candidates = [
+        os.environ.get("ATS_TESSERACT_PATH", ""),
+        shutil.which("tesseract") or "",
+        "/opt/homebrew/bin/tesseract",
+        "/usr/local/bin/tesseract",
+    ]
+    for candidate in candidates:
+        path = Path(candidate) if candidate else None
+        if path is not None and path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
 class LocalOCRAdapter:
     """Optional local-only OCR; dependency failure is data, not an exception."""
 
     @staticmethod
     def discover() -> OCRDependencyStatus:
         missing: list[str] = []
-        if shutil.which("tesseract") is None:
+        if _tesseract_command() is None:
             missing.append("tesseract")
         try:
             import PIL  # noqa: F401
@@ -237,7 +258,7 @@ class LocalOCRAdapter:
                         raster.save(path, format="PNG")
                     width, height = raster.size
                 process = subprocess.run(
-                    ["tesseract", str(path), "stdout", "--psm", "6", "tsv"],
+                    [_tesseract_command() or "tesseract", str(path), "stdout", "--psm", "6", "tsv"],
                     check=False, capture_output=True, text=True, timeout=60)
             if process.returncode != 0:
                 return OCRResult(
@@ -552,7 +573,7 @@ def _numeric_token_from_crop(image: bytes, region: tuple[float, float, float, fl
         output = BytesIO()
         crop.save(output, format="PNG")
     process = subprocess.run(
-        ["tesseract", "stdin", "stdout", "--psm", psm,
+        [_tesseract_command() or "tesseract", "stdin", "stdout", "--psm", psm,
          "-c", "tessedit_char_whitelist=0123456789.-%"],
         input=output.getvalue(), check=False, capture_output=True, timeout=20)
     if process.returncode:

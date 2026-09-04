@@ -207,6 +207,9 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Local runtime evidence; licensed and research-run artifacts are not repository inputs.
+/evidence/
+
 # PyPI configuration file
 .pypirc
 

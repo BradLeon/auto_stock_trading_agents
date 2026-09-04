@@ -187,12 +187,16 @@ class FactSetDocumentPipeline:
             doc.document_id, "factset_document", processor_version,
             at=fetched_at.isoformat())
         if claimed is None:
+            # The artifact/document version already established when this PDF
+            # became known.  A same-hash retry or sector-only reprocessing must
+            # retain that decision-time boundary rather than mint new vintages.
+            original_known_at = version.get("fetched_at") or fetched_at.isoformat()
             return {
                 "status": "no_change", "document_id": doc.document_id,
                 "document_version_id": version_id, "artifact_id": pdf_artifact.id,
                 "pdf_sha256": source.content_hash,
                 "report_date": document.report_date.isoformat(),
-                "known_at": fetched_at.isoformat(), "page_count": document.page_count,
+                "known_at": original_known_at, "page_count": document.page_count,
                 "image_count": len(document.images), "processor_version": processor_version,
             }
         self.documents.finish_document_processing(

@@ -893,8 +893,8 @@ defeatbeta 数据集页面当前声明 ODC-BY，底层数据来自 Yahoo Finance
 > Agent 投影记录“不同角色如何解释这些事实”；  
 > 决策记忆记录“系统最终做出了什么判断和行动”。
 
-## FactSet Earnings Insight（实施中）
+## FactSet Earnings Insight（已上线）
 
 FactSet 周报遵循“一个授权 PDF，两个独立 release partition”的边界：原始 PDF、全页文字、嵌入图像进入受治理 artifact/document 层；指数正文指标进入 `index_core`，GICS 行业图表进入 `sector_core`。二者分别有 evidence、质量 manifest 和 release 状态，行业 OCR/人工单元格校验失败不能阻断已验证的指数正文。
 
-消费者只能通过 `DataProducts.earnings_insight_snapshot(as_of=...)` 读取同一报告版本的指数、行业、状态与血缘。Macro 消费指数上下文，Sector 仅将 GICS 矩阵作为 top-down 市场背景；Chief、Risk、PEAD、Technical 不直接读取该产品。PDF/图表仅限内部研究用途，不作为默认对外输出。
+消费者只能通过 `DataProducts.earnings_insight_snapshot(as_of=...)` 读取同一报告版本的指数、行业、状态与血缘。Macro 消费指数上下文，Sector 仅将 GICS 矩阵作为 top-down 市场背景；Chief、Risk、PEAD、Technical 不直接读取该产品。2026-08-28 报告的 231 个适用行业单元格已通过独立原图 decoder 验收，`index_core`、`sector_core`、`macro_factset` 与 `sector_factset` 均为 platform。PDF/图表仅限内部研究用途，不作为默认对外输出；运行方式、指标和版权边界见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。

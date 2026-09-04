@@ -98,4 +98,4 @@
 - [x] 9.3 Promote `sector_core` only after the 100% cell gate and 9.2a analysis-quality acceptance, switch `sector_factset` after Sector smoke/regression tests, and observe one successful scheduled refresh plus Sector review.
 - [x] 9.4 Verify rollback changes routing only and preserves PDF artifacts, document versions, candidates, evidence links, structured observations, and vintages.
 - [x] 9.5 After the observation window and 9.2a analysis-quality acceptance, delete Macro’s direct FactSet download/parser invocation, remove the runtime dependency on `config/macro.yaml` FactSet folder settings, and retain only the governed import/ingest route.
-- [ ] 9.6 Update data-layer architecture, source inventory, operator runbook, copyright/internal-use guidance, metric dictionary, and consumer ownership documentation; run the focused and full test suites before declaring migration complete.
+- [x] 9.6 Update data-layer architecture, source inventory, operator runbook, copyright/internal-use guidance, metric dictionary, and consumer ownership documentation; run the focused and full test suites before declaring migration complete.

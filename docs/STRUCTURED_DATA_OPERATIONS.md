@@ -622,6 +622,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `defeatbeta_stock_statement` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_financials` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_consensus` | `current_partial` | `persistent` | `market_consensus` |
+| `factset_earnings_insight_metrics` | `current_partial` | `persistent` | `sp500_earnings_insight` |
 | `accepted_document_evidence` | `deferred` | `persistent` | `private_company_events` |
 | `ibkr_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_market` | `runtime_excluded` | `runtime` | — |
@@ -635,6 +636,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `industry_dram_contract_price` | `current_partial` |
 | `company_financials` | `current_partial` |
 | `market_consensus` | `current_partial` |
+| `sp500_earnings_insight` | `current_partial` |
 | `private_company_events` | `deferred` |
 
 ### 10.2 请求预算与 checked-in mode
@@ -649,6 +651,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `defeatbeta_stock_statement` | `company_financials` | `current_partial` | `shadow` | snapshot | 每实体一个 query slice；60s |
 | `yfinance_financials` | `company_financials` | `current_partial` | `shadow` | event | 仅季度/年度三表 fallback；不请求或保存股价、OHLCV、期权或 quote metadata；concurrency 1；间隔至少 1s；30s |
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |
+| `factset_earnings_insight_metrics` | `sp500_earnings_insight` | `current_partial` | `platform` | weekly | concurrency 1；每周 1 次受控 URL 解析；60s；仅限许可的内部研究使用 |
 | `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
 
 外部 Provider 没有可验证 QPS 时一律写 `unknown`；表中的数字是内部保护预算，不是 Provider 承诺。SEC 还必须遵守其当前 fair-access 政策并发送描述性 User-Agent。
@@ -725,7 +728,7 @@ TrendForce DRAM 的采集、期间标准化与发布应以本手册的 source he
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
 
-## FactSet Earnings Insight 运维（实施中）
+## FactSet Earnings Insight 运维（已上线）
 
 ```bash
 # 当前 release、质量 partition、最近失败、报告 hash/version（URL 已脱敏）
@@ -740,4 +743,4 @@ ats data factset-import --report-path /absolute/path/EarningsInsight_082826.pdf
 ats data factset-reprocess factset-text-v2 --report-path /absolute/path/EarningsInsight_082826.pdf
 ```
 
-周六 `factset_weekly_ingest` 必须先于 Macro→Sector 周评。默认保持 source 和 consumer 为 `shadow`；只有 `index_core` 按报告阶段达到完整正文门禁才可提升 Macro，只有当前 `082826` 报告的 231 个适用行业单元格经人工确认并与独立 decoder 100% 一致时才可提升 `sector_core`。遇到 `unreachable`、`not_pdf` 或 `parse_failed` 时，产品保留上一期并标记 `stale`；没有上一期则返回 `unavailable`，不得以零值代替。
+周六 `factset_weekly_ingest` 必须先于 Macro→Sector 周评。当前 `index_core`、`sector_core`、`macro_factset` 和 `sector_factset` 都已是 `platform`：`082826` 的 231 个适用行业单元格已由人工 golden cells 与独立原图 decoder 逐格验证。日常运行不再读取 `macro.yaml` 的本地文件夹，也不得让 Macro 或 Sector 现场下载/解析 PDF。遇到 `unreachable`、`not_pdf` 或 `parse_failed` 时，产品保留上一期并标记 `stale`；没有上一期则返回 `unavailable`，不得以零值代替。完整运行顺序、版权和回滚规则见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。

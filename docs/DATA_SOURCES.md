@@ -18,7 +18,7 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data pead-official-disclosure
 ```
 
 命令在标准输出返回机器可读 JSON（完整 roster、每家公司事件和三种角色的状态），同时写入 Markdown 报告。退出码 `0` 表示所有三件套均已通过；`2` 表示至少一个角色仍为 `missing`、`not_yet_available`、`unreachable` 或 `quarantined`，需要查看报告中的原因码。隔离目录应使用新的空目录，便于人工复核本轮下载内容。
-最后更新：2026-08-23（+ 非结构化准入、真实回填与质量发布闸）。
+最后更新：2026-09-04（+ FactSet Earnings Insight 正式上线）。
 
 ## 如何测试
 
@@ -54,7 +54,7 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 | **transcript** 电话会纪要 | 人工/官方覆盖 → defeatbeta 结构化主源 → FMP 等结构化回退 → Tavily 候选 | 精确 symbol + fiscal period；保留 speaker/paragraph 顺序和数据集快照延迟 | 校验通过 → `earnings_transcript` 共享资产 → PEAD/Evidence 共用；失败 → quarantine | 不再允许“期间未知则放行”；网页候选需通过正文结构和噪声检查 |
 | **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**、SEC/手工公告、10-K/10-Q/6-K、**投资者 PPT** | 共享文档资产 → score / Evidence | 文件夹 `信息源/<SYM>/` 有则优先；按财报期复用，不重复访问 SEC/Tavily |
 | **industry** 行业知识 | 本地 Obsidian 笔记（`industry_notes.root`，策选白名单 md） | 稳定的**行业/产业链背景**（AI 硬件供应链分层框架、利润分布、周期护城河、AI Capex、L4-L6 估值）——判断标的**定位/护城河/周期/议价权** | → **prep 建 thesis** 时注入 narrative，经 `prior_narrative` 闭环传播到 monitor/score | 文件夹直读（复用 documents `_read_doc`）；每篇截断 12k；root 缺失静默跳过。**结构性背景**非实时报价，动态景气仍靠 news/research |
-| **FactSet Earnings Insight** | FactSet stable URL → 授权 PDF | S&P 500 盈利、估值、指引与 GICS 行业背景 | 受治理 PDF/document + `sp500_earnings_insight` | 内部研究用途；`index_core` 与 `sector_core` 独立 shadow/release，行业图表需完整 OCR/人工单元格门禁 |
+| **FactSet Earnings Insight** | FactSet stable URL → 授权 PDF | S&P 500 盈利、估值、指引与 GICS 行业背景 | 受治理 PDF/document + `sp500_earnings_insight` | 内部研究用途；`index_core`、`sector_core`、Macro 与 Sector 消费均已 platform，行业上线门禁为 231/231 独立图像单元格一致；详见 [运行手册](FACTSET_EARNINGS_INSIGHT.md) |
 
 **已验证（COHR 实测 2026-07-03）**：market(251 bar)、fundamentals(P/E 159 + 三表/CapEx/FCF/margins + 5 filings)、macro(F&G=32 / VIX 16 / UST10Y 4.48)、earnings(2026-08-11 amc, epsEst 1.65)、consensus(EPS 1.62 / PT 230~384~465 / 评级 4/13/4/0/0 / 升降级 8 条)、runup(vsSMH -13%)、options(yfinance 兜底 EM 31%/IV 107%；ThetaData 终端未开)、news(51 条)、**triage(51→保留15/丢弃36)**、**insights(SemiAnalysis EMIB-T 一文→5 条 per-ticker insight，经 `ATS_TEST_SENDER` 实测)**、transcript(Tavily 69K字)、documents(SEC 34K + deck 15K)、**industry(5 篇/53K字，prep 叙事已用上"L3 分层/InP 垂直整合护城河"等合集概念)**。research 数据层链路已通、待真实自动转发邮件。
 

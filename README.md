@@ -10,6 +10,53 @@
 
 ---
 
+## 部署与环境安装（先看这里）
+
+项目统一使用 [uv](https://docs.astral.sh/uv/) 管理根目录的 `.venv` 和 `uv.lock`。**不要在部署机上使用 `pip install` 临时补包**；拉取代码后，只运行对应角色的 `uv sync`，这样所有机器会按锁文件得到相同版本。
+
+```bash
+# 首次部署：macOS 系统依赖（FactSet 行业图表的本地 OCR）
+brew bundle --file=Brewfile
+
+# 进入仓库；uv 会按指定 Python 创建或更新 .venv
+cd /absolute/path/to/auto_stock_trading_agents
+
+# 开发机 / CI：当前已使用的全部功能与测试工具
+# memory（chromadb）尚未接入，故意不安装
+uv sync --python 3.12 \
+  --extra data --extra broker --extra schedule --extra memory-persist \
+  --extra channel --extra dev
+
+# 研究生产机：数据、周度调度、持久化审批；按需加入 broker/channel
+uv sync --python 3.12 \
+  --extra data --extra schedule --extra memory-persist
+uv sync --python 3.12 \
+  --extra data --extra schedule --extra memory-persist \
+  --extra broker --extra channel       # 需要 IBKR 下单或飞书 webhook 时
+```
+
+同步完成后的日常命令保持使用 `.venv`，不需要改成系统 Python：
+
+```bash
+source .venv/bin/activate              # 可选；之后可直接使用 ats
+ats macro review macro
+
+# 不激活环境也可以，适合 cron、launchd 和脚本
+./.venv/bin/ats data factset-status
+./.venv/bin/python -m pytest -q
+```
+
+检查环境是否完整：
+
+```bash
+./.venv/bin/python -c "import ib_async, apscheduler, pandas_market_calendars, langgraph.checkpoint.sqlite; print('environment ready')"
+tesseract --version
+```
+
+`tesseract` 是系统程序，由 Brewfile 管理；其余 Python 包由 `pyproject.toml` 和 `uv.lock` 管理。当前 `memory` extra 的 `chromadb` 尚未接入，不是部署必需项；只有未来启用向量记忆时才加 `--extra memory`。更新依赖时修改 `pyproject.toml` 后执行 `uv lock`，提交更新后的 `uv.lock`，其他机器再执行相同的 `uv sync`。完整的 FactSet 数据产品和运行手册见 [docs/FACTSET_EARNINGS_INSIGHT.md](docs/FACTSET_EARNINGS_INSIGHT.md)。
+
+---
+
 ## 设计思想
 
 这套系统的每一个结构性决定，背后都是在回答同一个问题：**一个人怎么用 AI 帮自己
@@ -277,8 +324,9 @@ source /Users/liuchao/Code/trading/auto_stock_trading_agents/.venv/bin/activate
 ```
 
 激活之后才能直接用下面的 `ats <命令>`；如果不想激活（比如只是临时跑一条），
-用 `PYTHONPATH=src .venv/bin/python -m ats.runtime.cli <命令>` 代替 `ats <命令>`
-效果完全一样——但这条也要在能找到 `.venv` 的目录下跑（同样两种解法）。
+用 `.venv/bin/ats <命令>` 代替 `ats <命令>`。旧的
+`PYTHONPATH=src .venv/bin/python -m ats.runtime.cli <命令>` 写法仍兼容，但已不再是推荐入口。
+这两种相对路径写法都要在能找到 `.venv` 的目录下运行（同样两种解法）。
 
 ```bash
 # 周度研究（默认真实数据 + LLM；只更新研究存档，不会下单）

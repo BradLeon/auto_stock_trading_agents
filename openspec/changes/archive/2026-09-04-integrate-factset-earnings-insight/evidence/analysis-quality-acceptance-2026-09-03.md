@@ -75,4 +75,4 @@ The following remain deliberately out of scope and incomplete:
 
 - 9.3: promote `sector_core`/`sector_factset` only after its separate cell-quality and rollout gates pass.
 - 9.5: delete the old direct Macro reader only after its observation-window condition is met.
-- 9.6: finish architecture/operator documentation and run the full repository test suite before migration completion.
+- 9.6: completed on 2026-09-04. Documentation now covers architecture, source/dataset inventory, runbook, licensed internal-use policy, metric dictionary and consumer ownership. The rebuilt Python 3.12 environment passed the FactSet-focused suite (`194 passed in 18.33s`). The full suite was also run: `1159 passed, 145 failed` in `247.42s`; its remaining failures are outside this change (pre-existing database-fixture/schema, removed legacy-module/API expectations, and unrelated workflow integrations). The two FactSet inventory/documentation consistency checks initially exposed by that run were corrected and then passed.

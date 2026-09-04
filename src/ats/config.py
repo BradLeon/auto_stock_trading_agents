@@ -659,12 +659,4 @@ def load_macro_config(name: str = "macro"):
     # agents/macro/regime.DEFAULTS key-by-key at merge time. Duplicating them in
     # a third place is exactly how a code default silently stops taking effect.
     raw.setdefault("regime", {})
-    raw.setdefault("factset", {})
-    fs = raw["factset"]
-    fs.setdefault("enabled", True)
-    fs.setdefault("url", "https://www.factset.com/earningsinsight")
-    fs.setdefault("folder", "")
-    fs.setdefault("download", True)
-    fs.setdefault("max_pages", 16)
-    fs.setdefault("max_chars", 14000)
     return MacroConfig.model_validate(raw)

@@ -855,11 +855,7 @@ def test_macro_and_sector_platform_consumers_use_products_without_legacy_io(
         structured_repository=repository, unstructured_repository=documents)
     monkeypatch.setenv("ATS_STRUCTURED_MACRO_FACTSET_MODE", "platform")
     monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FACTSET_MODE", "platform")
-    monkeypatch.setattr(
-        factset, "fetch_earnings_insight",
-        lambda _cfg: (_ for _ in ()).throw(AssertionError("legacy I/O called")))
-
-    block, source, backdrop = factset.fetch_macro_context({}, products=products)
+    block, source, backdrop = factset.fetch_macro_context(products=products)
     assert "数据状态:" in block
     assert source == "factset:factset:consumer@hash"
     assert backdrop.growth_basis == "blended"
@@ -910,45 +906,6 @@ def test_sector_material_explains_shadow_instead_of_silently_omitting(monkeypatc
     assert material["state"] == "shadow"
     assert material["report_date"] == "2026-08-28"
     assert "影子验证阶段" in material["reason"]
-
-
-def test_macro_shadow_comparison_records_two_vintages(monkeypatch):
-    import sys
-    from types import SimpleNamespace
-
-    from ats.data import factset
-    from ats.schemas.macro_strategy import EarningsBackdrop
-
-    recorded = []
-    monkeypatch.setitem(sys.modules, "ats.data.cutover", SimpleNamespace(
-        record_consumer_comparison=lambda **payload: recorded.append(payload)))
-    monkeypatch.setattr("ats.data.runtime.platform_data_db_path", lambda: ":memory:")
-    for day, growth, state in ((24, 7.5, "blended"), (31, 7.7, "actual")):
-        observation = EarningsInsightObservation(
-            observation_id=f"growth-{day}", entity_id="SP500",
-            metric_id="earnings.eps.yoy_growth", period="2026Q2",
-            period_basis="target_quarter", estimate_state=state,
-            value=growth / 100, unit="ratio",
-            known_at=(datetime(2026, 7, 25, tzinfo=timezone.utc)
-                      if day == 24 else datetime(2026, 8, 1, tzinfo=timezone.utc)))
-        snapshot = EarningsInsightSnapshot(
-            report=EarningsInsightReport(
-                report_date=date(2026, 7, day), version_id=f"doc@{day}"),
-            index={"2026Q2": {observation.metric_id: observation}},
-            status=EarningsInsightStatus(state="shadow", freshness="fresh"))
-        factset._record_factset_shadow(
-            legacy=EarningsBackdrop(
-                report_date=date(2026, 7, day), quarter="Q2 2026",
-                growth_pct=growth, growth_basis=state),
-            platform_snapshot=snapshot)
-    assert len(recorded) == 2
-    assert [row["details"]["platform"]["report_date"] for row in recorded] == [
-        "2026-07-24", "2026-07-31"]
-    assert [row["details"]["platform"]["growth_basis"] for row in recorded] == [
-        "blended", "actual"]
-    assert all("freshness" in row["details"]["platform"] for row in recorded)
-    assert all("rendered_review_text" in row["details"]["platform"]
-               for row in recorded)
 
 
 def test_non_owner_agents_do_not_directly_consume_factset_product():

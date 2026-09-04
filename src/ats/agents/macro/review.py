@@ -104,29 +104,13 @@ def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
 
 
 def _earnings_backdrop(mc):
-    """Structured S&P 500 aggregates from the FactSet text, or None.
+    """Return the governed compatibility DTO, if the product supplied one.
 
-    Three-level degradation (docs/MACRO_ANALYST.md §9.3): a clean parse yields
-    typed numbers; a failed parse still leaves the prose in the prompt and is
-    flagged `degraded`; no PDF at all yields nothing. Never raises — a format
-    change at FactSet must not take the weekly review down with it.
+    The former fallback parsed a downloaded PDF during Macro review.  That
+    parser has been retired: a missing or unreleased DataProducts snapshot is
+    represented as unavailable rather than reconstructed from local files.
     """
-    governed = getattr(mc, "earnings_backdrop", None)
-    if governed is not None:
-        return governed
-    text = getattr(mc, "earnings_block", "") or ""
-    if not text.strip():
-        return None
-    try:
-        from ...data.factset import parse_key_metrics
-
-        bd = parse_key_metrics(text, source=getattr(mc, "earnings_source", ""))
-    except Exception as exc:  # noqa: BLE001
-        log.warning("factset key-metrics parse failed: %s", exc)
-        return None
-    if bd.degraded:
-        log.warning("factset key-metrics degraded (%s) — prose only", bd.notes)
-    return bd
+    return getattr(mc, "earnings_backdrop", None)
 
 
 def _factset_material(mc) -> FactSetMaterialSummary | None:

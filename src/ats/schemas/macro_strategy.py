@@ -60,7 +60,6 @@ class MacroConfig(BaseModel):
     themes: list[MacroTheme] = Field(default_factory=list)
     search: dict = Field(default_factory=dict)
     review: dict = Field(default_factory=dict)
-    factset: dict = Field(default_factory=dict)
     regime: dict = Field(default_factory=dict)   # 四象限阈值覆盖，见 agents/macro/regime.py
 
     def theme_keys(self) -> set[str]:

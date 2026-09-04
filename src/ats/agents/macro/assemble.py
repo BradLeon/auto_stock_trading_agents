@@ -71,13 +71,13 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
         mc.regional_block = "(区域月度数据不可用)"
 
     # FactSet is a released local DataProducts snapshot, not a FRED/yfinance/
-    # Tavily runtime fetch.  `--offline` therefore still includes it so an
-    # operator can validate the governed Macro cutover without external calls.
-    if cfg.factset.get("enabled", True):
-        from ...data import factset
+    # Tavily runtime fetch.  `--offline` therefore still includes it.  The
+    # weekly ingest pipeline is the only acquisition route; Macro never reads
+    # a PDF, a user folder, or the source URL at review time.
+    from ...data import factset
 
-        (mc.earnings_block, mc.earnings_source, mc.earnings_backdrop,
-         mc.earnings_packet) = factset.fetch_macro_material(cfg.factset)
+    (mc.earnings_block, mc.earnings_source, mc.earnings_backdrop,
+     mc.earnings_packet) = factset.fetch_macro_material()
 
     field_vals = _field_map(data)
     search_cfg = cfg.search

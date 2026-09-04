@@ -72,6 +72,21 @@ def test_load_macro_config_missing_raises(monkeypatch, tmp_path):
         load_macro_config("nope")
 
 
+def test_macro_runtime_config_has_no_factset_download_or_folder_settings():
+    """FactSet acquisition belongs only to the registered ingest pipeline."""
+    from pathlib import Path
+
+    from ats.config import load_macro_config
+    from ats.data import factset
+
+    config_text = (Path(__file__).resolve().parents[1] / "config" / "macro.yaml").read_text(
+        encoding="utf-8")
+    assert "factset:" not in config_text
+    assert "factset" not in type(load_macro_config("macro")).model_fields
+    assert not hasattr(factset, "fetch_earnings_insight")
+    assert not hasattr(factset, "parse_key_metrics")
+
+
 def test_assemble_offline_and_live(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63, ust_10y=4.48, hy_oas=2.75, ig_oas=0.75)
     monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
@@ -80,7 +95,7 @@ def test_assemble_offline_and_live(monkeypatch):
                                          "content": "conflict escalates", "published": "2026-07-01"}])
     monkeypatch.setattr(
         "ats.data.factset.fetch_macro_material",
-        lambda _cfg: ("", "disabled", None, None))
+        lambda: ("", "disabled", None, None))
     consumers = []
 
     class Snapshot:
@@ -112,38 +127,10 @@ def test_assemble_keeps_macro_workflow_available_when_regional_product_fails(mon
     monkeypatch.setattr("ats.data.websearch.search_news", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("ats.data.regional.fetch",
                         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unavailable")))
-    cfg = CFG.model_copy(update={"factset": {"enabled": False}})
-
-    context = assemble.build(cfg, live_data=True)
+    context = assemble.build(CFG, live_data=True)
 
     assert context.regional_block == "(区域月度数据不可用)"
     assert context.quant_block
-
-
-def test_factset_download_and_local_fallback(monkeypatch, tmp_path):
-    from ats.data import factset
-
-    # A tiny valid PDF written by pypdf so _extract works.
-    from pypdf import PdfWriter
-    w = PdfWriter()
-    w.add_blank_page(width=200, height=200)
-    local = tmp_path / "EarningsInsight_010126.pdf"
-    with open(local, "wb") as fh:
-        w.write(fh)
-
-    cfg = {"enabled": True, "url": "http://x", "folder": str(tmp_path),
-           "download": True, "max_pages": 16, "max_chars": 500}
-
-    # Download fails -> newest local PDF used.
-    monkeypatch.setattr(factset, "_download", lambda url, folder: (_ for _ in ()).throw(RuntimeError("net")))
-    _, src = factset.fetch_earnings_insight(cfg)
-    assert src == "factset:EarningsInsight_010126.pdf"
-
-    # Disabled -> skipped.
-    assert factset.fetch_earnings_insight({"enabled": False})[1] == "disabled"
-    # No folder, download off -> none.
-    assert factset.fetch_earnings_insight(
-        {"enabled": True, "download": False, "folder": "/no/such"})[1] == "none"
 
 
 def test_assemble_includes_factset(monkeypatch):
@@ -152,10 +139,9 @@ def test_assemble_includes_factset(monkeypatch):
     monkeypatch.setattr("ats.data.websearch.search_news", lambda q, **k: [])
     monkeypatch.setattr(
         "ats.data.factset.fetch_macro_material",
-        lambda cfg: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4",
+        lambda: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4",
                      "factset:x.pdf", None, None))
-    cfg = CFG.model_copy(update={"factset": {"enabled": True}})
-    mc = assemble.build(cfg, live_data=True)
+    mc = assemble.build(CFG, live_data=True)
     ctx = mc.as_context()
     assert "FactSet 完整分析材料" in ctx and "前瞻 P/E 20.4" in ctx
     assert mc.stats()["earnings_source"] == "factset:x.pdf"

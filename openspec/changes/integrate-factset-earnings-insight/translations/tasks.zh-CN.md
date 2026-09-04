@@ -93,5 +93,5 @@
 - [x] 9.2a 按分析质量清单重新生成并审阅 `2026-09-03` Macro 与 Sector 报告：25 条指数观测全部可用、必需诊断正确、集中度证据带页码、Macro 覆盖全部必需分析角度、Sector 记录 Macro/FactSet 的一致或明确不可用原因，并且单层结论不被 top-down 背景修改。在 9.3 或 9.5 前归档验收结果。
 - [x] 9.3 只有通过 100% 单元格门禁和 9.2a 分析质量验收后才提升 `sector_core`；Sector smoke/regression 测试通过后切换 `sector_factset`，并观察一次成功定时刷新和 Sector 评审。
 - [x] 9.4 验证回滚只改变路由，并保留 PDF artifact、document version、candidate、evidence link、structured observation 和 vintage。
-- [ ] 9.5 观察期结束且 9.2a 分析质量验收通过后，删除 Macro 对 FactSet 的直接下载/解析器调用，移除对 `config/macro.yaml` FactSet 文件夹设置的运行时依赖，只保留受治理的 import/ingest 路径。
+- [x] 9.5 观察期结束且 9.2a 分析质量验收通过后，删除 Macro 对 FactSet 的直接下载/解析器调用，移除对 `config/macro.yaml` FactSet 文件夹设置的运行时依赖，只保留受治理的 import/ingest 路径。
 - [ ] 9.6 更新数据层架构、来源 inventory、操作 runbook、版权/内部使用指南、metric dictionary 和消费者 ownership 文档；在宣布迁移完成前运行聚焦测试和完整测试套件。

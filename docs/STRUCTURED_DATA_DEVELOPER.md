@@ -113,6 +113,24 @@ PYTHONPATH=src .venv/bin/python -c \
 
 ## 3. 设计哲学
 
+### 3.0 Anthropic Economic Index job adoption adapter（CURRENT）
+
+`anthropic_economic_index` 是 `ai_work_adoption` 的公开、无鉴权来源。适配器只读取官方
+Hugging Face repository 的 metadata API 和 commit-pinned 文件；Job Explorer 网页 UI 不是采集
+接口。它为每个 Claude.ai、1P API、SOC taxonomy、O*NET taxonomy 和 research snapshot 建立独立
+`artifact_key`，并将 `NativeRecord.slice_key` 精确绑定到对应 artifact。多文件 batch 不允许回退到
+“第一个 artifact”。
+
+职业实体使用 `SOC:<code>`，任务使用 `ONET_TASK:<task_id>`。关系是有版本的
+`contains_occupation` 与 `has_task`，通过 stable ID 连接，支持 `as_of` 和 tombstone；不要用展示名
+作为关联键。adapter 只保留 `GLOBAL × (SOC level 0/1 | O*NET level 0)`，并把 Claude.ai 与 1P API
+放在不同 `source_product` series，禁止默认混合或补值。
+
+`pct` 的平台指标名是 `ai.work_adoption.usage_share`，含义是该 Claude 产品总使用量的份额，**不是**
+职业从业者采用率。`observed_exposure` 和 `task_penetration` 都是 `research_snapshot`、`ratio_0_1`，
+不能并入月度趋势或计算环比。新增此类 provider 时，adapter 必须返回 reference entities、relations、
+独立 artifacts 和可复现的过滤后 JSON Lines，而不是直接写 repository。
+
 ### 3.1 可治理的观测，而不是裸数值
 
 平台的最小事实单元是 observation，而不是 `float`。同一个 `100`，可能分别表示 100 美元、100 百万美元、100%、单季收入或年初至今累计收入。失去语义后无法安全计算，也无法跨来源对账。

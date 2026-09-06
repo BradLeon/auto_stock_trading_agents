@@ -85,6 +85,31 @@ export ATS_STRUCTURED_RELEASE_FILE="/absolute/path/to/releases.yaml"
 
 ## 4. 配置文件完整说明
 
+### Anthropic Economic Index：每周检查、按 release 更新
+
+此来源没有承诺固定发布日期，因此建议由 cron、launchd 或部署平台每周运行一次；没有新 commit 或
+完整 release 时应记录 `no_change` / `not_yet_published`，不是 stale。首次或回填必须先写隔离库：
+
+```bash
+ats_cli data validate-source --source anthropic_economic_index
+ats_cli data ingest --source anthropic_economic_index --force \
+  --db /absolute/path/aei.sqlite --artifact-root /absolute/path/aei-artifacts \
+  --periods 2026-04 --periods 2026-05
+ats_cli data quality --dataset ai_work_adoption
+ats_cli data ai-adoption --product claude_ai --period 2026-05
+ats_cli data ai-job 15-2031.00 --product 1p_api --period 2026-05
+```
+
+若运维者已经下载并独立校验两个官方大文件，可在隔离验收时设置
+`ATS_AEI_CLAUDE_AI_FILE` 和 `ATS_AEI_1P_API_FILE` 指向本地 CSV。该 override 只替代传输：
+discovery 仍读取官方 metadata，文件仍计算完整 SHA-256，持久化 lineage 仍使用 commit-pinned 官方 URL。
+
+下载器限制单并发、每文件 300 秒和 350 MiB，完整上游文件只以 commit-pinned pointer 与 SHA-256
+追溯；持久保存的是 Global query slice。质量门拒绝非 Global、范围越界、百分比和不成立、schema drift
+以及不能解释的重复 cell；隐私过滤或未发布 task cell 必须显示为
+`not_published_or_privacy_filtered`，绝不能写为零。查看 `data health` 时应同时核对最新检查、upstream
+commit、ingested release、available period 和 Claude.ai / 1P API 的独立状态。
+
 统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它索引结构化、非结构化和 runtime 配置；详细内容分别位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。
 
 配置职责边界：

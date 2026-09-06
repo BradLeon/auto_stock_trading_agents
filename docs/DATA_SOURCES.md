@@ -20,6 +20,16 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data pead-official-disclosure
 命令在标准输出返回机器可读 JSON（完整 roster、每家公司事件和三种角色的状态），同时写入 Markdown 报告。退出码 `0` 表示所有三件套均已通过；`2` 表示至少一个角色仍为 `missing`、`not_yet_available`、`unreachable` 或 `quarantined`，需要查看报告中的原因码。隔离目录应使用新的空目录，便于人工复核本轮下载内容。
 最后更新：2026-09-04（+ FactSet Earnings Insight 正式上线）。
 
+## Anthropic Economic Index（L1 研究观察，CURRENT_PARTIAL）
+
+公开、无需鉴权的 `Anthropic/EconomicIndex` Hugging Face repository 已接入受治理的
+`ai_work_adoption` 数据集。采集按 commit 固定官方 CSV，只保存 Global 的 SOC 职业大类/职业与
+O*NET task 切片，Claude.ai 与 1P API 独立保存；目前仅对 L1 Evidence Observer 和研究查询开放，
+不进入 PEAD、Chain、Macro、Sector、Chief 或交易决策。每周检查一次 release；`Usage Share` 是 Claude
+使用份额而非员工采用率，`Observed Exposure` 为研究快照而非月度序列。详见
+[结构化数据运维指南](STRUCTURED_DATA_OPERATIONS.md) 和
+[结构化数据使用手册](STRUCTURED_DATA_USER_GUIDE.md)。
+
 ## 如何测试
 
 ```bash

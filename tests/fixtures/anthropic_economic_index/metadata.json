@@ -1,0 +1,13 @@
+{
+  "sha": "caa39af",
+  "lastModified": "2026-06-26T12:00:00.000Z",
+  "siblings": [
+    {"rfilename": "release_2026_06_26/data_documentation.md"},
+    {"rfilename": "release_2026_06_26/data/aei_claude_ai_2026-06-26.csv"},
+    {"rfilename": "release_2026_06_26/data/aei_1p_api_2026-06-26.csv"},
+    {"rfilename": "onet_task_statements.csv"},
+    {"rfilename": "soc_structure.csv"},
+    {"rfilename": "labor_market_impacts/job_exposure.csv"},
+    {"rfilename": "labor_market_impacts/task_penetration.csv"}
+  ]
+}

@@ -60,6 +60,40 @@ class DataProducts:
 
         return operational_status(self, as_of=as_of, limit=limit)
 
+    def ai_work_adoption_snapshot(self, *, source_product: str, period: str = "",
+                                  as_of: datetime | None = None,
+                                  snapshot_consumer: str = "",
+                                  snapshot_purpose: str = "") -> dict:
+        """Governed Claude job/task usage snapshot; never a worker-adoption estimate."""
+        from .ai_work_adoption import snapshot
+
+        return snapshot(self, source_product=source_product, period=period, as_of=as_of,
+                        snapshot_consumer=snapshot_consumer, snapshot_purpose=snapshot_purpose)
+
+    def ai_job_profile(self, occupation: str, *, source_product: str, period: str,
+                       as_of: datetime | None = None) -> dict:
+        """Occupation drill-down with versioned O*NET relations and research snapshot."""
+        from .ai_work_adoption import job_profile
+
+        return job_profile(self, occupation=occupation, source_product=source_product,
+                           period=period, as_of=as_of)
+
+    def ai_work_adoption_series(self, *, entity_id: str, metric_id: str,
+                                source_product: str, as_of: datetime | None = None,
+                                as_frame: bool = False):
+        from .ai_work_adoption import metric_series
+
+        return metric_series(self, entity_id=entity_id, metric_id=metric_id,
+                             source_product=source_product, as_of=as_of, as_frame=as_frame)
+
+    def ai_work_adoption_cross_section(self, *, metric_id: str, source_product: str,
+                                       period: str, hierarchy_level: int = 0,
+                                       as_of: datetime | None = None) -> dict:
+        from .ai_work_adoption import cross_section
+
+        return cross_section(self, metric_id=metric_id, source_product=source_product,
+                             period=period, hierarchy_level=hierarchy_level, as_of=as_of)
+
     def indicator_series(self, *, source_id: str | None = None,
                          series: str | None = None, entity: str | None = None,
                          since: str | None = None, as_of: datetime | None = None,

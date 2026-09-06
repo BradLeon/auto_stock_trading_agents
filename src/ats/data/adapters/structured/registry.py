@@ -72,6 +72,22 @@ def _factset_earnings_insight():
     return FactSetEarningsInsightAdapter()
 
 
+def _anthropic_economic_index():
+    import os
+    from pathlib import Path
+
+    from ...sources.anthropic_economic_index import AnthropicEconomicIndexAdapter
+
+    overrides = {}
+    for environment_name, filename in (
+        ("ATS_AEI_CLAUDE_AI_FILE", "aei_claude_ai_2026-06-26.csv"),
+        ("ATS_AEI_1P_API_FILE", "aei_1p_api_2026-06-26.csv"),
+    ):
+        if value := os.environ.get(environment_name):
+            overrides[filename] = Path(value)
+    return AnthropicEconomicIndexAdapter(local_file_overrides=overrides)
+
+
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "tw_mof": RuntimeSourceSpec("tw_mof", _tw_mof),
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
@@ -87,6 +103,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "trendforce": RuntimeSourceSpec("trendforce", _trendforce),
     "factset_earnings_insight": RuntimeSourceSpec(
         "factset_earnings_insight", _factset_earnings_insight),
+    "anthropic_economic_index": RuntimeSourceSpec(
+        "anthropic_economic_index", _anthropic_economic_index),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),

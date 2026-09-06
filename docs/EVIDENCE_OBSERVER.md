@@ -3,6 +3,29 @@
 把**我们不持有的公司**的财报，变成可核对的事实观测，供产业链证据系统使用。
 它是全系统权限最小的 agent：不判方向、不给建议、不碰 broker，只抽事实。
 
+## Claude 职业使用观测（L1）
+
+当观察对象是 Claude 的职业/任务扩散时，Observer 只能调用
+`DataProducts.ai_work_adoption_snapshot()` 和 `DataProducts.ai_job_profile()`；不得直接读取
+Hugging Face、SQLite 或 Job Explorer 网页。报告必须保存 snapshot manifest，并把 `source_product`（Claude.ai
+或 1P API）、期间、methodology 和 lineage 一并呈现。事实陈述仅限 Claude 使用份额、自动化/增强结构与
+公开 task-cell 覆盖；禁止推断员工采用率、企业席位渗透率、岗位替代数量或 SOC 所属的公司行业。
+
+代码入口：
+
+```python
+from ats.agents.evidence import observe_work_adoption
+
+packet = observe_work_adoption(
+    source_product="claude_ai",
+    period="2026-05",
+    occupation="15-2031.00",  # 可选 drill-down
+)
+```
+
+返回 packet 包含确定性事实陈述、完整 snapshot、可选 job profile、语义 guardrails 和可离线重放的
+manifest。该入口只依赖 DataProducts；不得向它注入 repository、SQL 或 Provider client。
+
 配套阅读：[`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)（这些观测最终如何变成可证伪的命题结论）。
 
 ---

@@ -3,3 +3,7 @@
 Read-only by construction: this package never imports the broker and never produces
 a TradeDecision. See docs/CHAIN_EVIDENCE.md.
 """
+
+from .work_adoption import observe_work_adoption
+
+__all__ = ["observe_work_adoption"]

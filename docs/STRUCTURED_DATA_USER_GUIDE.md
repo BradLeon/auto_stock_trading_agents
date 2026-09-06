@@ -633,3 +633,15 @@ HuggingFace 是 defeatbeta 数据集的托管/传输渠道；业务 provenance �
 - [结构化数据层运维指南](STRUCTURED_DATA_OPERATIONS.md)
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
+# Claude 职业使用与任务结构
+
+`ai_work_adoption` 只服务研究查询和 L1 Evidence Observer。使用 `data ai-adoption --product
+claude_ai --period YYYY-MM` 查看 SOC 职业大类与详细职业的 Usage/Automation 截面；使用 `data ai-job
+<SOC> --product 1p_api --period YYYY-MM` 追踪职业、关联 O*NET tasks、未观察任务和 Observed Exposure。
+`--product` 与 `--period` 都是强制参数，避免把 Claude.ai 的互动使用与 1P API 的生产部署混在一起。
+
+可陈述的事实是“Claude 使用量在职业间的分布”“某职业任务中自动化交互的比例”“公开 task cell 的可见
+覆盖”。不可将 Usage Share 表述为员工/企业采用率，SOC major group 也不是公司 NAICS/GICS 行业；Observed
+Exposure 是单独研究快照，不得作为月度趋势点。结果内包含 observation、relation、artifact 和 derivation
+lineage；需要固定报告时，请通过 `DataProducts.ai_work_adoption_snapshot(..., snapshot_consumer=...)`
+创建可离线重放的 snapshot manifest。

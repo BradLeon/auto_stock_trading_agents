@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 __all__ = [
     "AdapterArtifact", "AdapterBatch", "AdapterFailure", "AdmissionResult",
     "ArtifactDescriptor", "CatalogStatus", "DataSnapshot", "DerivationDefinition",
-    "EvidenceCandidateInput", "EvidenceLink", "FetchRequest", "IngestionStatus",
+    "EntityRelationInput", "EvidenceCandidateInput", "EvidenceLink", "FetchRequest", "IngestionStatus",
     "MetricDefinition", "NativeRecord", "ObservationInput", "ObservationVintage",
     "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "SeriesIdentity",
-    "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
+    "ReferenceEntityInput", "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
     "VerificationStatus",
 ]
 
@@ -249,6 +249,9 @@ class NativeRecord(BaseModel):
 
 
 class AdapterArtifact(BaseModel):
+    # Empty is retained only for legacy single-artifact adapters.  New multi-slice
+    # adapters must provide a unique key and records/relations must reference it.
+    artifact_key: str = ""
     payload: bytes | str | dict | list | None = None
     query_scope: dict[str, Any] = Field(default_factory=dict)
     source_url: str = ""
@@ -258,6 +261,56 @@ class AdapterArtifact(BaseModel):
     storage_mode: str = "full"
     pointer: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReferenceEntityInput(BaseModel):
+    """A provider reference entity that can be admitted before observations."""
+
+    entity_id: str
+    kind: str
+    canonical_name: str
+    aliases: list[str] = Field(default_factory=list)
+    securities: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("entity_id")
+    @classmethod
+    def reference_entity_upper(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError("entity_id is required")
+        return value
+
+
+class EntityRelationInput(BaseModel):
+    """Versioned, source-owned parent/child taxonomy relation."""
+
+    parent_entity_id: str
+    child_entity_id: str
+    relation_type: str
+    source_version: str
+    known_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    slice_key: str = ""
+    active: bool = True
+
+    _relation_known_aware = field_validator("known_at")(_aware)
+
+    @field_validator("parent_entity_id", "child_entity_id")
+    @classmethod
+    def relation_entity_upper(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError("relation entity id is required")
+        return value
+
+    @field_validator("relation_type", "source_version")
+    @classmethod
+    def relation_required(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("relation type and source version are required")
+        return value
 
 
 class AdapterFailure(BaseModel):
@@ -281,6 +334,8 @@ class AdapterBatch(BaseModel):
     fetched_at: datetime
     records: list[NativeRecord] = Field(default_factory=list)
     artifacts: list[AdapterArtifact] = Field(default_factory=list)
+    entities: list[ReferenceEntityInput] = Field(default_factory=list)
+    relations: list[EntityRelationInput] = Field(default_factory=list)
     failures: list[AdapterFailure] = Field(default_factory=list)
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -291,8 +346,11 @@ class AdapterBatch(BaseModel):
         if self.status == IngestionStatus.RUNNING:
             raise ValueError("adapter batches must have a terminal provider status")
         if self.status in {IngestionStatus.SUCCEEDED, IngestionStatus.PARTIAL} \
-                and not (self.records or self.failures):
-            raise ValueError("successful/partial batch must contain records or failures")
+                and not (self.records or self.relations or self.failures):
+            raise ValueError("successful/partial batch must contain records, relations or failures")
+        keys = [item.artifact_key for item in self.artifacts if item.artifact_key]
+        if len(keys) != len(set(keys)):
+            raise ValueError("adapter artifact keys must be unique")
         return self
 
 

@@ -113,7 +113,27 @@ CREATE INDEX IF NOT EXISTS idx_structured_evidence_target
     ON structured_evidence_links(candidate_id, observation_id, verification_status);
 CREATE TABLE IF NOT EXISTS structured_entities (
     entity_id TEXT PRIMARY KEY, kind TEXT NOT NULL, canonical_name TEXT NOT NULL,
-    aliases_json TEXT NOT NULL, securities_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    aliases_json TEXT NOT NULL, securities_json TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS structured_entity_relations (
+    relation_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, source_id TEXT NOT NULL,
+    parent_entity_id TEXT NOT NULL, child_entity_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL, source_version TEXT NOT NULL, known_at TEXT NOT NULL,
+    artifact_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL,
+    UNIQUE(dataset_id,source_id,parent_entity_id,child_entity_id,relation_type,source_version,active,metadata_json)
+);
+CREATE INDEX IF NOT EXISTS idx_structured_entity_relation_parent
+    ON structured_entity_relations(dataset_id,source_id,parent_entity_id,relation_type,known_at);
+CREATE INDEX IF NOT EXISTS idx_structured_entity_relation_child
+    ON structured_entity_relations(dataset_id,source_id,child_entity_id,relation_type,known_at);
+CREATE TABLE IF NOT EXISTS structured_relation_candidates (
+    candidate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, source_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL, parent_entity_id TEXT NOT NULL, child_entity_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL, source_version TEXT NOT NULL, status TEXT NOT NULL,
+    reason_codes_json TEXT NOT NULL, artifact_id TEXT NOT NULL, raw_payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS structured_events (
     event_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -292,9 +312,18 @@ class SQLiteStructuredRepository:
                 if ddl.split()[0] not in columns:
                     self.conn.execute(
                         f"ALTER TABLE structured_evidence_links ADD COLUMN {ddl}")
+            entity_columns = {row[1] for row in self.conn.execute(
+                "PRAGMA table_info(structured_entities)").fetchall()}
+            if "metadata_json" not in entity_columns:
+                self.conn.execute(
+                    "ALTER TABLE structured_entities ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
             self.conn.execute(
                 "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
                 "VALUES ('structured_foundation_v1',?,'additive governed structured tables')",
+                (_stamp(),))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
+                "VALUES ('structured_entity_relations_v1',?,'versioned entity relations and metadata')",
                 (_stamp(),))
 
     def close(self) -> None:
@@ -373,22 +402,125 @@ class SQLiteStructuredRepository:
 
     def register_entity(self, *, entity_id: str, kind: str, canonical_name: str,
                         aliases: list[str] | None = None,
-                        securities: list[dict] | None = None) -> None:
+                        securities: list[dict] | None = None,
+                        metadata: dict | None = None) -> None:
         with self._lock, self.conn:
             self.conn.execute(
-                "INSERT INTO structured_entities VALUES (?,?,?,?,?,?) "
+                "INSERT INTO structured_entities "
+                "(entity_id,kind,canonical_name,aliases_json,securities_json,metadata_json,updated_at) "
+                "VALUES (?,?,?,?,?,?,?) "
                 "ON CONFLICT(entity_id) DO UPDATE SET kind=excluded.kind,"
                 "canonical_name=excluded.canonical_name,aliases_json=excluded.aliases_json,"
-                "securities_json=excluded.securities_json,updated_at=excluded.updated_at",
+                "securities_json=excluded.securities_json,metadata_json=excluded.metadata_json,"
+                "updated_at=excluded.updated_at",
                 (entity_id.upper(), kind, canonical_name, _json(aliases or []),
-                 _json(securities or []), _stamp()))
+                 _json(securities or []), _json(metadata or {}), _stamp()))
+
+    def save_entity_relation(self, *, dataset_id: str, source_id: str,
+                             parent_entity_id: str, child_entity_id: str,
+                             relation_type: str, source_version: str,
+                             known_at: datetime, artifact_id: str,
+                             metadata: dict | None = None, active: bool = True) -> tuple[str, bool]:
+        """Append one immutable relationship version and return (id, created)."""
+        body = {
+            "dataset_id": dataset_id, "source_id": source_id,
+            "parent_entity_id": parent_entity_id.upper(),
+            "child_entity_id": child_entity_id.upper(),
+            "relation_type": relation_type, "source_version": source_version,
+            "metadata": metadata or {}, "active": bool(active),
+        }
+        relation_id = hashlib.sha256(_json(body).encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO structured_entity_relations "
+                "(relation_id,dataset_id,source_id,parent_entity_id,child_entity_id,relation_type,"
+                "source_version,known_at,artifact_id,active,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (relation_id, dataset_id, source_id, body["parent_entity_id"],
+                 body["child_entity_id"], relation_type, source_version, _stamp(known_at),
+                 artifact_id, int(active), _json(metadata or {})))
+        return relation_id, cur.rowcount > 0
+
+    def entity_relations(self, *, dataset_id: str | None = None,
+                         source_id: str | None = None,
+                         parent_entity_id: str | None = None,
+                         child_entity_id: str | None = None,
+                         relation_type: str | None = None,
+                         as_of: datetime | None = None,
+                         active_only: bool = True, limit: int = 5000) -> list[dict]:
+        sql = "SELECT * FROM structured_entity_relations WHERE 1=1"
+        args: list = []
+        for column, value in (("dataset_id", dataset_id), ("source_id", source_id),
+                              ("parent_entity_id", parent_entity_id.upper() if parent_entity_id else None),
+                              ("child_entity_id", child_entity_id.upper() if child_entity_id else None),
+                              ("relation_type", relation_type)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        cutoff = _stamp(as_of or datetime.now(timezone.utc))
+        sql += " AND known_at<=?"
+        args.append(cutoff)
+        sql += (" AND NOT EXISTS (SELECT 1 FROM structured_entity_relations newer "
+                "WHERE newer.dataset_id=structured_entity_relations.dataset_id "
+                "AND newer.source_id=structured_entity_relations.source_id "
+                "AND newer.parent_entity_id=structured_entity_relations.parent_entity_id "
+                "AND newer.child_entity_id=structured_entity_relations.child_entity_id "
+                "AND newer.relation_type=structured_entity_relations.relation_type "
+                "AND newer.known_at>structured_entity_relations.known_at "
+                "AND newer.known_at<=?)")
+        args.append(cutoff)
+        if active_only:
+            sql += " AND active=1"
+        sql += " ORDER BY parent_entity_id,child_entity_id,relation_type,known_at LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def entity_relation(self, relation_id: str) -> dict | None:
+        """Return one immutable taxonomy relation for snapshot replay/audit."""
+        row = self.conn.execute(
+            "SELECT * FROM structured_entity_relations WHERE relation_id=?", (relation_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_relation_candidate(self, *, run_id: str, source_id: str, dataset_id: str,
+                                parent_entity_id: str, child_entity_id: str,
+                                relation_type: str, source_version: str,
+                                reason_codes: list[str], artifact_id: str = "",
+                                raw: dict | None = None, at: datetime | None = None) -> str:
+        identity = "|".join((run_id, parent_entity_id, child_entity_id, relation_type, source_version,
+                             _json(reason_codes)))
+        candidate_id = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO structured_relation_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (candidate_id, run_id, source_id, dataset_id, parent_entity_id.upper(),
+                 child_entity_id.upper(), relation_type, source_version, "quarantined",
+                 _json(reason_codes), artifact_id, _json(raw or {}), _stamp(at)))
+        return candidate_id
+
+    def relation_candidates(self, *, run_id: str | None = None,
+                            limit: int = 1000) -> list[dict]:
+        sql = "SELECT * FROM structured_relation_candidates WHERE 1=1"
+        args: list = []
+        if run_id:
+            sql += " AND run_id=?"
+            args.append(run_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
 
     def entities(self) -> list[dict]:
         return [dict(row) for row in self.conn.execute(
             "SELECT * FROM structured_entities ORDER BY entity_id").fetchall()]
 
     def resolve_entity(self, value: str) -> str | None:
-        target = value.strip().casefold()
+        stripped = value.strip()
+        direct = self.conn.execute(
+            "SELECT entity_id FROM structured_entities WHERE entity_id=? COLLATE NOCASE",
+            (stripped,),
+        ).fetchone()
+        if direct:
+            return direct["entity_id"]
+        target = stripped.casefold()
         for row in self.entities():
             aliases = json.loads(row["aliases_json"] or "[]")
             if target in {row["entity_id"].casefold(), row["canonical_name"].casefold(),
@@ -543,6 +675,14 @@ class SQLiteStructuredRepository:
         args.append(limit)
         return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
 
+    def artifact(self, artifact_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT a.*,b.content_hash AS artifact_content_hash,b.relative_path,b.bytes "
+            "FROM structured_artifacts a JOIN structured_artifact_blobs b "
+            "ON b.blob_id=a.blob_id WHERE a.artifact_id=?", (artifact_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
     def source_health(self) -> list[dict]:
         """Return one explicit health row for every registered source."""
         sql = """
@@ -556,7 +696,34 @@ class SQLiteStructuredRepository:
             WHERE r2.source_id=s.source_id ORDER BY r2.started_at DESC LIMIT 1)
         ORDER BY s.source_id
         """
-        return [dict(row) for row in self.conn.execute(sql).fetchall()]
+        rows = [dict(row) for row in self.conn.execute(sql).fetchall()]
+        for row in rows:
+            if row["source_id"] != "anthropic_economic_index":
+                continue
+            history = self.ingestion_history(source_id=row["source_id"], limit=1)
+            latest = history[0] if history else {}
+            artifacts = self.artifacts_for(source_id=row["source_id"], limit=1000)
+            metadata = [json.loads(item.get("metadata_json") or "{}") for item in artifacts]
+            observations = self.observations(source_id=row["source_id"], latest_only=True,
+                                             accepted_only=True, limit=1_000_000)
+            products = {}
+            for product in ("claude_ai", "1p_api"):
+                product_rows = [item for item in observations
+                                if json.loads(item.get("dimensions_json") or "{}").get("source_product") == product]
+                products[product] = {
+                    "status": "ingested" if product_rows else "not_published_or_privacy_filtered",
+                    "latest_available_period": max((item["period"] for item in product_rows), default=None),
+                }
+            row.update({
+                "last_checked_at": latest.get("started_at"),
+                "latest_upstream_commit": next((item.get("repository_commit") for item in metadata
+                                                 if item.get("repository_commit")), None),
+                "latest_ingested_release": next((item.get("release") for item in metadata if item.get("release")), None),
+                "latest_available_period": max((item["period"] for item in observations
+                                                if item.get("period_basis") == "calendar_month"), default=None),
+                "source_products": products,
+            })
+        return rows
 
     def begin_ingestion(self, *, source_id: str, dataset_id: str,
                         query_scope: dict, at: datetime | None = None) -> str:
@@ -1112,7 +1279,15 @@ class SQLiteStructuredRepository:
                 definition = self.derivation(*key)
                 if definition:
                     derivations[key] = definition
-        return {**manifest, "rows": rows, "derivations": list(derivations.values())}
+        relation_ids = manifest.get("metadata", {}).get("relation_ids", [])
+        relations = [relation for relation_id in relation_ids
+                     if (relation := self.entity_relation(relation_id)) is not None]
+        artifact_ids = sorted({row["artifact_id"] for row in rows} |
+                              {row["artifact_id"] for row in relations if row.get("artifact_id")})
+        artifacts = [artifact for artifact_id in artifact_ids
+                     if (artifact := self.artifact(artifact_id)) is not None]
+        return {**manifest, "rows": rows, "relations": relations, "artifacts": artifacts,
+                "derivations": list(derivations.values())}
 
     def open_read_only(self) -> sqlite3.Connection:
         if self.path == ":memory:":

@@ -1350,6 +1350,7 @@ def _setup_logging() -> None:
 def run_data(action: str, value: str = "", *, source: str = "", series: str = "",
              entity: str = "", provider: list[str] | None = None, since: str = "", as_of: str = "", limit: int = 20,
              vintages: bool = False, dataset: str = "", metric: str = "",
+             product: str = "",
              status: str = "", output_format: str = "json",
              periods: list[str] | None = None, query_scope: str = "",
              db_path: str = "", artifact_root: str = "", force: bool = False,
@@ -1669,6 +1670,18 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 source_id=source or None, series=series or None, entity=entity or None,
                 since=since or None, as_of=cutoff, include_vintages=vintages,
             )
+    elif action == "ai-adoption":
+        if not product or not period:
+            raise ValueError("ai-adoption requires --product and --period")
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.ai_work_adoption_snapshot(
+            source_product=product, period=period, as_of=cutoff)
+    elif action == "ai-job":
+        if not value or not product or not period:
+            raise ValueError("ai-job requires OCCUPATION plus --product and --period")
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.ai_job_profile(
+            value, source_product=product, period=period, as_of=cutoff)
     elif action == "earnings-insight":
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         value = (products.earnings_insight_vintages(as_of=cutoff, limit=limit)
@@ -1790,6 +1803,7 @@ def main(argv: list[str] | None = None) -> int:
         "catalog", "config", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "describe", "availability", "examples", "releases",
         "validate-source", "ingest", "release-check", "publish", "rollback",
         "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
+        "ai-adoption", "ai-job",
         "derive", "cross-section", "earnings-insight", "factset-status",
         "factset-import", "factset-reprocess",
         "search", "company", "claim", "lineage", "conflicts", "pending-mappings",
@@ -1807,6 +1821,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="source-acceptance/source-publish: 明确确认已人工审阅标题/URL 清单")
     data.add_argument("--series", default="", help="series: 指标名称")
     data.add_argument("--metric", default="", help="series: 统一结构化 metric ID")
+    data.add_argument("--product", choices=["claude_ai", "1p_api"], default="",
+                      help="ai-adoption/ai-job: Claude source product（不可省略）")
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
     data.add_argument("--entity", default="", help="实体过滤")
     data.add_argument("--since", default="", help="最早期间或发布日期")
@@ -1975,6 +1991,7 @@ def main(argv: list[str] | None = None) -> int:
                         entity=args.entity, provider=args.provider, since=args.since, as_of=args.as_of,
                         limit=args.limit, vintages=args.vintages, dataset=args.dataset,
                         metric=args.metric, status=args.status,
+                        product=args.product,
                         output_format=args.output_format, periods=args.periods,
                         query_scope=args.query_scope, db_path=args.db_path,
                         artifact_root=args.artifact_root, force=args.force,

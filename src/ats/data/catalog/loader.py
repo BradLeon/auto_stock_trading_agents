@@ -208,7 +208,7 @@ class DataCatalog:
         entity_rows = structured.raw.get("entities", {}) or {}
         allowed_unit_families = {
             "categorical", "count", "currency", "currency_per_item",
-            "currency_per_share", "index", "multiple", "ratio",
+            "currency_per_share", "index", "multiple", "percent", "ratio", "scale_1_5",
         }
         for metric_id, row in metric_rows.items():
             check(f"metric:{metric_id}:unit_family",

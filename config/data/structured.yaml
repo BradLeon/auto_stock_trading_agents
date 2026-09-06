@@ -122,6 +122,9 @@ feature_flags:
     # 082826 的八张行业表已经通过独立原图 decoder 与 231/231 golden-cell
     # 比较；consumer 仍须在真实 Sector review 成功后另行切换。
     factset_earnings_insight_sector: platform
+    # Economic Index starts as an isolated governed source.  It must pass its
+    # own release check before a later explicit platform promotion.
+    anthropic_economic_index: legacy
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -274,6 +277,21 @@ entities:
 # Provider sources. `adapter` must match a controlled runtime adapter key.
 # `internal_request_budget` is our conservative limit, not a Provider SLA/QPS claim.
 sources:
+  anthropic_economic_index:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Anthropic Economic Index
+    upstream: Anthropic/EconomicIndex Hugging Face repository
+    adapter: anthropic_economic_index
+    datasets: [ai_work_adoption]
+    cadence: release_event
+    retention: query_slice
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 8
+      timeout_seconds: 300
+      max_file_bytes: 367001600
+      retry_attempts: 3
   tw_mof_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -411,6 +429,26 @@ sources:
 # Business datasets. Source references must be reciprocal with `sources.*.datasets`.
 # `quality` values are release gates; do not loosen them merely to make a run pass.
 datasets:
+  ai_work_adoption:
+    catalog_status: current_partial
+    # Entity membership is dynamic taxonomy data rather than a static list.
+    entity_types: [soc_major_group, soc_occupation, onet_task]
+    expected_cadence: release_event
+    primary_sources: [anthropic_economic_index]
+    fallback_sources: []
+    core_metrics:
+      - ai.work_adoption.usage_share
+      - ai.work_adoption.automation_share
+      - ai.work_adoption.augmentation_share
+      - ai.work_adoption.observed_exposure
+      - ai.work_adoption.task_penetration
+    quality:
+      global_only: true
+      eligible_row_reconciliation_ratio_min: 1.0
+      task_relation_coverage_min: 0.99
+      percentage_sum_tolerance_pp: 0.15
+      privacy_filtered_missing_status: not_published_or_privacy_filtered
+    acceptance_samples: [SOC:15-2031.00, SOC:15-0000, ONET_TASK:7382]
   sp500_earnings_insight:
     catalog_status: current_partial
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
@@ -596,6 +634,23 @@ datasets:
 # Semantically different GAAP/non-GAAP, point-in-time/period, or raw/derived values
 # require separate definitions rather than an ambiguous mapping.
 metric_definitions:
+  ai.work_adoption.usage_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [soc_major_group, soc_occupation, onet_task],
+     required_dimensions: [source_product, classification, hierarchy_level],
+     description: Share of the corresponding Claude source product's usage, not worker adoption.}
+  ai.work_adoption.automation_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.augmentation_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.directive_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.feedback_loop_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.task_iteration_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.validation_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.learning_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.none_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.work_use_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.autonomy_mean: {value_type: number, unit_family: scale_1_5, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.observed_exposure: {value_type: number, unit_family: ratio, cadence: research_snapshot, period_basis: research_snapshot}
+  ai.work_adoption.task_penetration: {value_type: number, unit_family: ratio, cadence: research_snapshot, period_basis: research_snapshot}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -686,6 +741,20 @@ metric_definitions:
 # Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
 # must remain pending under `unmapped_policy`; never guess a convenient metric.
 provider_mappings:
+  anthropic_economic_index:
+    pct: ai.work_adoption.usage_share
+    collaboration_bucket_automation_pct: ai.work_adoption.automation_share
+    collaboration_bucket_augmentation_pct: ai.work_adoption.augmentation_share
+    collaboration_directive_pct: ai.work_adoption.collaboration.directive_share
+    collaboration_feedback_loop_pct: ai.work_adoption.collaboration.feedback_loop_share
+    collaboration_task_iteration_pct: ai.work_adoption.collaboration.task_iteration_share
+    collaboration_validation_pct: ai.work_adoption.collaboration.validation_share
+    collaboration_learning_pct: ai.work_adoption.collaboration.learning_share
+    collaboration_none_pct: ai.work_adoption.collaboration.none_share
+    use_case_work_pct: ai.work_adoption.work_use_share
+    ai_autonomy_mean: ai.work_adoption.autonomy_mean
+    observed_exposure: ai.work_adoption.observed_exposure
+    penetration: ai.work_adoption.task_penetration
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share

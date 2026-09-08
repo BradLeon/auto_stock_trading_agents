@@ -645,3 +645,5 @@ claude_ai --period YYYY-MM` 查看 SOC 职业大类与详细职业的 Usage/Auto
 Exposure 是单独研究快照，不得作为月度趋势点。结果内包含 observation、relation、artifact 和 derivation
 lineage；需要固定报告时，请通过 `DataProducts.ai_work_adoption_snapshot(..., snapshot_consumer=...)`
 创建可离线重放的 snapshot manifest。
+
+`data ai-production` 是其严格的 1P API 生产化代理 consumer：它拒绝 Claude.ai，按职业和任务分别返回可见单元生产化率与生产化流量份额；职业内任务覆盖及 CCDF 是 taxonomy-dependent 下限，不能当作员工采用率。完整公式、方法卡、图表 sidecar、`as_of` 重放与当前仅两个月的趋势限制见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。

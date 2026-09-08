@@ -19,11 +19,25 @@ ALLOCATIONS = ("超配", "标配", "低配", "清仓")
 class LayerTicker(BaseModel):
     symbol: str
     note: str = ""
-    subgroup: str = ""                # e.g. 光互联/铜连接/衬底/电力冷却 — cross-section label
+    subgroup: str = ""  # e.g. 光互联/铜连接/衬底/电力冷却 — cross-section label
+
+
+class EvidenceObserverRef(BaseModel):
+    """A read-only governed data Observer registered on one sector layer.
+
+    This is deliberately distinct from ``claims``: Chain claims are human-maintained
+    company-witness propositions, while these refs only select a governed data
+    consumer for an independently runnable Evidence layer.
+    """
+
+    claim_id: str
+    runner: str
+    label: str = ""
+    enabled: bool = True
 
 
 class SectorLayer(BaseModel):
-    key: str                          # e.g. L4_interconnect — echoed verbatim by the LLM
+    key: str  # e.g. L4_interconnect — echoed verbatim by the LLM
     label: str
     question: str = ""
     # Layer keys this layer inherits history from. A rename declares its old key here;
@@ -32,7 +46,7 @@ class SectorLayer(BaseModel):
     # judged under the merged foundry+memory lens, and relabelling it `L6_memory` would
     # claim a separation that did not exist when the call was made.
     legacy_keys: list[str] = Field(default_factory=list)
-    weight_cap: float | None = None   # risk: per-chain-layer portfolio weight ceiling
+    weight_cap: float | None = None  # risk: per-chain-layer portfolio weight ceiling
     weight_cap_hard: float | None = None  # dynamic-cap hard backstop (never exceeded)
     tickers: list[LayerTicker] = Field(default_factory=list)
     # symbols ranked ALONGSIDE this layer in the cross-section but whose risk-layer
@@ -41,7 +55,7 @@ class SectorLayer(BaseModel):
     # subgroup -> curated KB note path (repo-relative or absolute) for the structure
     # analyst (v2 qualitative overlay). e.g. {光互联: config/knowledge/光互联.md}
     structure_notes: dict[str, str] = Field(default_factory=dict)
-    private: list[str] = Field(default_factory=list)   # non-listed players, LLM reference
+    private: list[str] = Field(default_factory=list)  # non-listed players, LLM reference
     # Who may bear witness on this layer's theme, by role (peer / upstream / downstream /
     # reference / private). Human-maintained: this is a governance choice, not something
     # the engine may widen on its own. Symbols are canonical entity ids — aliases fold in
@@ -51,6 +65,9 @@ class SectorLayer(BaseModel):
     # Falsifiable propositions this layer is being tested on (docs/CHAIN_EVIDENCE.md).
     # Human-maintained: agents may PROPOSE one, only a person adds it here.
     claims: list[ClaimDef] = Field(default_factory=list)
+    # Governed, read-only data Observers available through ``ats evidence layer``.
+    # These do not create Chain claims, witnesses, corroboration, or trade inputs.
+    evidence_observers: list[EvidenceObserverRef] = Field(default_factory=list)
 
     def roster(self, *roles: str) -> list[str]:
         """Canonical entities in the named roles (all witness roles if none given)."""
@@ -72,6 +89,7 @@ class LayerGroup(BaseModel):
     pre-split value declared here. Member caps summing above the group cap is intended —
     it lets the mix tilt between them while the total stays put.
     """
+
     key: str
     label: str = ""
     layers: list[str] = Field(default_factory=list)
@@ -139,16 +157,16 @@ class SectorConfig(BaseModel):
         if len(candidates) < 2:
             return next(iter(candidates), None)
         wanted = {str(s).upper() for s in symbols}
-        best = max(candidates,
-                   key=lambda ly: len(wanted & {t.symbol.upper() for t in ly.tickers}))
+        best = max(candidates, key=lambda ly: len(wanted & {t.symbol.upper() for t in ly.tickers}))
         overlap = wanted & {t.symbol.upper() for t in best.tickers}
         return best if overlap else candidates[0]
 
     def is_legacy_key(self, key: str) -> bool:
         """True when `key` is only reachable through `legacy_keys` — such rows describe a
         pre-split lens and must be labelled as such wherever history is displayed."""
-        return (not any(ly.key == key for ly in self.layers)
-                and any(key in ly.legacy_keys for ly in self.layers))
+        return not any(ly.key == key for ly in self.layers) and any(
+            key in ly.legacy_keys for ly in self.layers
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -157,28 +175,29 @@ class SectorConfig(BaseModel):
 class LayerAssessment(BaseModel):
     key: str
     label: str = ""
-    boom_score: float = Field(50.0, ge=0, le=100)   # 景气度
-    supply_demand: str = ""                          # 紧张/平衡/过剩 + 依据
-    pricing_power: str = ""       # 谁在瓶颈环节；见 SKILL.md 的证据优先纪律
+    boom_score: float = Field(50.0, ge=0, le=100)  # 景气度
+    supply_demand: str = ""  # 紧张/平衡/过剩 + 依据
+    pricing_power: str = ""  # 谁在瓶颈环节；见 SKILL.md 的证据优先纪律
     capital_flow: str = ""
     cycle_position: str = ""
-    signal: str = "neutral"                          # bullish | neutral | bearish
+    signal: str = "neutral"  # bullish | neutral | bearish
     note: str = ""
 
 
 class CompanyCall(BaseModel):
     symbol: str
     layer: str = ""
-    stance: str = "持有"                             # 增持 | 持有 | 减持
+    stance: str = "持有"  # 增持 | 持有 | 减持
     conviction: float = Field(0.0, ge=0, le=1)
     rationale: str = ""
 
 
 class LayerNameCall(BaseModel):
     """The layer analyst's take on one name: which way, and on what evidence."""
+
     symbol: str
     subgroup: str = ""
-    stance: str = "持有"                              # 增持 | 持有 | 减持
+    stance: str = "持有"  # 增持 | 持有 | 减持
     rationale: str = ""
     # True when the reasoning leans on a reading only that company itself made.
     self_reported_only: bool = False
@@ -186,26 +205,28 @@ class LayerNameCall(BaseModel):
 
 class BasketRow(BaseModel):
     """One name's cross-sectional standing within a layer cohort."""
+
     symbol: str
     subgroup: str = ""
-    composite: float = 0.0                            # weighted sum of factor z-scores
-    rank: int = 0                                     # blended rank (structural, if run)
-    quant_rank: int = 0                               # pure-quant rank (pre-blend, for contrast)
-    weight: float = 0.0                               # suggested weight as fraction of NAV
-    data_ok: bool = True                              # False -> insufficient data, excluded
-    tech_tenor: float | None = None                   # -2..+2 技术时间朝向（光进铜退等 secular 位置）
-    moat_pricing: float | None = None                 # -2..+2 护城河/份额/定价权/客户集中
-    rationale: str = ""                               # structure analyst's per-name note
-    factors: dict = Field(default_factory=dict)       # z-score per factor
-    metrics: dict = Field(default_factory=dict)       # raw factor values (display)
+    composite: float = 0.0  # weighted sum of factor z-scores
+    rank: int = 0  # blended rank (structural, if run)
+    quant_rank: int = 0  # pure-quant rank (pre-blend, for contrast)
+    weight: float = 0.0  # suggested weight as fraction of NAV
+    data_ok: bool = True  # False -> insufficient data, excluded
+    tech_tenor: float | None = None  # -2..+2 技术时间朝向（光进铜退等 secular 位置）
+    moat_pricing: float | None = None  # -2..+2 护城河/份额/定价权/客户集中
+    rationale: str = ""  # structure analyst's per-name note
+    factors: dict = Field(default_factory=dict)  # z-score per factor
+    metrics: dict = Field(default_factory=dict)  # raw factor values (display)
 
 
 class LayerBasket(BaseModel):
     """Cross-sectional selection + sizing for one chain layer (WHO / HOW MUCH)."""
+
     layer_key: str
     as_of: datetime
-    layer_cap: float = 0.0                            # fraction of NAV the basket sums to
-    structural: bool = False                          # True if the KB structure overlay ran
+    layer_cap: float = 0.0  # fraction of NAV the basket sums to
+    structural: bool = False  # True if the KB structure overlay ran
     # False when the cohort was too small to standardise: `_zscores` returns all-zero
     # below two samples, so every rank is an artefact of config order, not a finding.
     # The budget still lands (a lone name takes the layer's share) — what is suppressed
@@ -226,10 +247,11 @@ class CandidateClaim(BaseModel):
     `witnesses` and `falsifier` are required in spirit: a candidate that cannot say who
     would testify or what reading would kill it is not a proposition, it is a mood.
     """
+
     statement: str
-    witnesses: list[str] = Field(default_factory=list)   # who could speak to it
-    falsifier: str = ""                                  # what reading would refute it
-    why_now: str = ""                                    # what in this round raised it
+    witnesses: list[str] = Field(default_factory=list)  # who could speak to it
+    falsifier: str = ""  # what reading would refute it
+    why_now: str = ""  # what in this round raised it
 
     def is_usable(self) -> bool:
         return bool(self.statement and self.witnesses and self.falsifier)
@@ -247,9 +269,9 @@ class LayerVerdict(BaseModel):
 
     layer_key: str
     as_of: datetime
-    allocation: str = "标配"                          # 超配 | 标配 | 低配 | 清仓
+    allocation: str = "标配"  # 超配 | 标配 | 低配 | 清仓
     confidence: float = Field(0.0, ge=0, le=1)
-    cycle_position: str = ""                          # 早/中/晚周期 — from INDUSTRY evidence
+    cycle_position: str = ""  # 早/中/晚周期 — from INDUSTRY evidence
     # One line per common claim: its verdict and what it means for this layer's sizing.
     claim_attributions: list[str] = Field(default_factory=list)
     # Falsifiable observations that would flip this call; checked off next round.
@@ -286,13 +308,13 @@ class TopDownComparison(BaseModel):
 class SectorReview(BaseModel):
     sector: str
     as_of: datetime
-    regime: str = ""                  # one self-contained line (injected into PEAD)
+    regime: str = ""  # one self-contained line (injected into PEAD)
     summary: str = ""
     layers: list[LayerAssessment] = Field(default_factory=list)
     company_calls: list[CompanyCall] = Field(default_factory=list)
     rotation_advice: str = ""
     top_risks: list[str] = Field(default_factory=list)
-    baskets: list[LayerBasket] = Field(default_factory=list)   # cross-sectional sizing per layer
+    baskets: list[LayerBasket] = Field(default_factory=list)  # cross-sectional sizing per layer
     layer_verdicts: list[LayerVerdict] = Field(default_factory=list)  # per-layer allocation calls
     top_down_comparison: TopDownComparison | None = None
 

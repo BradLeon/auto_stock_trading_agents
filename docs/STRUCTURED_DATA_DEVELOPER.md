@@ -620,3 +620,7 @@ manifest = products.snapshot_manifest(
 - [结构化数据使用手册](STRUCTURED_DATA_USER_GUIDE.md)
 - [数据源说明](DATA_SOURCES.md)
 - [开发与测试约定](DEVELOPMENT.md)
+
+## AI 生产化渗透派生 consumer
+
+`DataProducts.ai_production_penetration(...)` 从受治理 observation 和 `as_of` taxonomy relation 进行查询时派生；不得将结果写回 Provider observation，也不得让 Observer 导入 adapter 或物理 repository。核心公式、固定 JSON/DataFrame 合约、threshold/derivation version、失败关闭语义、snapshot manifest 和图表 data hash 见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。方法卡仅由 `ats.agents.evidence.work_adoption` 构建；禁止改通用 Observer base/protocol 来要求其他领域返回它。

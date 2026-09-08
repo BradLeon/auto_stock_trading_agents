@@ -107,6 +107,10 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 - **尚未迁移的原始源**：行情/基本面/宏观/期权/consensus 仍每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。这是当前迁移边界，不再作为长期数据原则。
 - 查存储：`ats data health`、`ats data quality`、`ats data search "inference demand" --entity AMD`、`ats data series --source <source_id>`、`ats data company AMD`、`ats data claim <concept>`、`ats data lineage <projection_id>`。
 
+### Anthropic Economic Index：AI 工作生产化代理
+
+`anthropic_economic_index / ai_work_adoption` 的 GLOBAL `1p_api` slice 是 L1 AI 应用层生产化 Observer 的唯一输入。它提供职业/任务 Usage Share、Work Use、Automation、Directive 等公开指标；不是从业者采用率，也不覆盖 Claude.ai、国家/州差异或持续工作流确认。`observed_exposure` 是单独研究 snapshot，不能并入月度趋势。消费与约束见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
+
 ## 非结构化数据运维闸
 
 1. `ats data health`：确认每个来源是成功、零匹配、陈旧、不可达还是未授权，并查看 accepted/quarantined/reason-code。

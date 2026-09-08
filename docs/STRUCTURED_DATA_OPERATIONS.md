@@ -769,3 +769,7 @@ ats data factset-reprocess factset-text-v2 --report-path /absolute/path/Earnings
 ```
 
 周六 `factset_weekly_ingest` 必须先于 Macro→Sector 周评。当前 `index_core`、`sector_core`、`macro_factset` 和 `sector_factset` 都已是 `platform`：`082826` 的 231 个适用行业单元格已由人工 golden cells 与独立原图 decoder 逐格验证。日常运行不再读取 `macro.yaml` 的本地文件夹，也不得让 Macro 或 Sector 现场下载/解析 PDF。遇到 `unreachable`、`not_pdf` 或 `parse_failed` 时，产品保留上一期并标记 `stale`；没有上一期则返回 `unavailable`，不得以零值代替。完整运行顺序、版权和回滚规则见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。
+
+## AI 生产化 Observer 运维
+
+以 `ats data ai-production --snapshot` 做只读验收；需要视觉产物时增加 `--chart-dir`。保留 JSON、snapshot manifest、PNG sidecar 和对应 artifact/relation lineage，才能在上游 vintage 更新后使用相同 `as_of` 重放。图表失败只记录 warning，不应替换或删除表格输出。回滚是停止该 consumer/不注入其 Chain 只读附录；无需迁移或删除原始 observations、taxonomy relations 和历史 manifests。详见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。

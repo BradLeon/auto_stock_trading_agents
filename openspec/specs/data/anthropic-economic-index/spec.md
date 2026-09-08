@@ -194,3 +194,41 @@ Evidence Observer SHALL 只通过受治理的数据产品读取本来源，不�
 - **WHEN** 使用固定的 2026-06-26 metadata 和数据 fixtures 执行隔离验收
 - **THEN** 系统 SHALL 发现 commit-pinned release 并分别入库 2026-04、2026-05 两个产品的数据
 - **AND** SQL、DataFrame、snapshot 和 job profile 对相同 observation 集合 SHALL 一致
+
+### Requirement: 数据产品提供固定的 1P API 生产化代理
+
+系统 SHALL 提供 `core_production_workflow_proxy_v1`，仅对同产品、同期间、同 methodology 的
+`source_product=1p_api` detailed occupation 与 O*NET task cell 判定资格。cell 必须同时满足
+`Usage Share > 0`、`Work Use Share >= 80%`、`Automation Share >= 80%` 与 `Directive Share >= 50%`；
+结果 SHALL 返回输入 observation IDs、阈值比较、失败原因与版本。它是分析代理，SHALL NOT 被称为已确认
+生产环境、持续工作流或员工采用；Claude.ai SHALL NOT 进入该代理。
+
+#### Scenario: 一个 task 满足固定代理
+- **WHEN** 1P API task cell 的四项输入为 `1.25%`、`90%`、`95%` 与 `70%`
+- **THEN** 系统 SHALL 返回 `qualified` 和 `core_production_workflow_proxy_v1`
+- **AND** SHALL NOT 以四舍五入、插补、跨产品或跨 methodology 输入替代不达标值
+
+### Requirement: 数据产品按职业和任务提供生产化广度与深度
+
+系统 SHALL 分别按 occupation 和 task grain 返回可见单元生产化率（qualified 公开 Usage cell 数 / 公开
+Usage cell 数）与生产化流量份额（qualified cell 的 Provider Usage Share 之和）。结果 SHALL 包含
+qualified/visible 计数、公开与 qualified Usage Share、period、methodology、threshold、质量、lineage，
+以及只在连续自然月且版本一致时产生的比较；两种 grain SHALL 独立解释且不得相加或平均。
+
+#### Scenario: 隐私过滤与方法变化
+- **WHEN** taxonomy 单元没有公开 Usage cell，或相邻月 methodology/threshold 不同
+- **THEN** 系统 SHALL 将缺失保留为覆盖诊断且不当作零，并返回不可比较原因
+- **AND** SHALL NOT 将该变化表述为连续趋势
+
+### Requirement: 数据产品提供可复算的职业任务组合覆盖与 TOPN
+
+系统 SHALL 基于稳定 taxonomy relation 为职业返回“任务组合已确认生产化覆盖”：分子为已映射且 qualified
+task 数，分母为该职业去重 O*NET tasks；未公开或未映射任务保留在分母。系统 SHALL 返回 taxonomy/mapping
+诊断、observation/relation lineage、确定性 CCDF 与 10/25/50/75/100 landmarks，并将此作为不改变四条
+核心序列的补充证据。系统 SHALL 同时为 qualified occupation/task cell 按 Usage Share 和稳定 ID 生成 TOPN，
+提供四项输入与可用的月度变化。
+
+#### Scenario: 覆盖和 TOPN 的受限解释
+- **WHEN** consumer 请求职业覆盖分布或 production TOPN
+- **THEN** 结果 SHALL 可由 SQL、结构化记录和 DataFrame 对同一 observations 重算
+- **AND** SHALL NOT 将 coverage 或排名解释为员工采用率、职业自动化率或真实任务渗透的无偏估计

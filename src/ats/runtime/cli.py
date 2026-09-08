@@ -12,6 +12,7 @@ BossChannel for a verdict, then resumes with Command(resume=...). Async channels
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def run_decision_graph(state, *, channel="cli") -> dict:
     resumed later by `ats serve` via resume_cycle(). `channel` is a kind
     string or an already-built BossChannel.
     """
-    from ..channel import get_channel as _get_channel   # late bind (tests patch it)
+    from ..channel import get_channel as _get_channel  # late bind (tests patch it)
     from ..graph.chief import build_chief_graph
 
     ch = _get_channel(channel) if isinstance(channel, str) else channel
@@ -48,24 +49,40 @@ def run_decision_graph(state, *, channel="cli") -> dict:
     if is_async:
         req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
         ch.send_approval_request(req, thread_id=state.cycle_id)
-        print(f"⏸ {state.cycle_id} awaiting Boss approval via "
-              f"{getattr(ch, 'kind', 'async channel')}. Run `ats serve` to handle the callback.")
+        print(
+            f"⏸ {state.cycle_id} awaiting Boss approval via "
+            f"{getattr(ch, 'kind', 'async channel')}. Run `ats serve` to handle the callback."
+        )
         return result
 
     # Sync (CLI): drive interrupts to completion in-process.
     while "__interrupt__" in result:
         req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
         if hasattr(ch, "push"):
-            ch.push(Notification(kind="approval_request", title="Decisions pending review",
-                                 body=f"{len(req.decisions)} proposed trade(s)"))
+            ch.push(
+                Notification(
+                    kind="approval_request",
+                    title="Decisions pending review",
+                    body=f"{len(req.decisions)} proposed trade(s)",
+                )
+            )
         approval = ch.request_approval(req)
         result = app.invoke(Command(resume=approval.model_dump(mode="json")), config=cfg_run)
     return result
 
 
-def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = False,
-             offline: bool = False, use_llm: bool = True, transcript: str | None = None,
-             channel: str = "cli", chief: bool = False) -> dict:
+def run_pead(
+    symbol: str,
+    phase: str,
+    *,
+    dry_run: bool = True,
+    auto: bool = False,
+    offline: bool = False,
+    use_llm: bool = True,
+    transcript: str | None = None,
+    channel: str = "cli",
+    chief: bool = False,
+) -> dict:
     """Run one PEAD phase (prep | score). v0.2: score produces a RECOMMENDATION
     persisted in the dossier (no interrupt) — the Chief makes the trade call.
     Pass chief=True to run the Chief immediately after a score completes."""
@@ -75,8 +92,16 @@ def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = Fals
     sym = symbol.upper()
     app = build_pead_graph(checkpointer=get_checkpointer(persist=False))
     now = datetime.now(timezone.utc)
-    state = PeadState(symbol=sym, phase=phase, as_of=now, dry_run=dry_run, use_llm=use_llm,
-                      use_broker=not offline, live_data=not offline, transcript_source=transcript)
+    state = PeadState(
+        symbol=sym,
+        phase=phase,
+        as_of=now,
+        dry_run=dry_run,
+        use_llm=use_llm,
+        use_broker=not offline,
+        live_data=not offline,
+        transcript_source=transcript,
+    )
     cfg_run = {"configurable": {"thread_id": f"pead-{sym}-{phase}-{now:%Y%m%d%H%M%S}"}}
     print(f"▶ PEAD {phase} {sym}")
 
@@ -84,8 +109,9 @@ def run_pead(symbol: str, phase: str, *, dry_run: bool = True, auto: bool = Fals
     _pead_report(sym, phase, result)
     if phase == "score":
         if chief:
-            run_chief(dry_run=dry_run, channel=channel, auto=auto, offline=offline,
-                      source="pead-chief")
+            run_chief(
+                dry_run=dry_run, channel=channel, auto=auto, offline=offline, source="pead-chief"
+            )
         else:
             print("→ 建议已入档；运行 `ats chief run` 收口交易决策")
     return result
@@ -101,18 +127,24 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
             print(f"Narrative: {es.narrative[:240]}")
             if es.focus_ranking:
                 print("Focus: " + " > ".join(es.focus_ranking[:5]))
-            print(f"Expectations rows: {len(es.expectations)}  | consensus EPS={es.consensus_eps} "
-                  f"Rev={es.consensus_revenue}")
+            print(
+                f"Expectations rows: {len(es.expectations)}  | consensus EPS={es.consensus_eps} "
+                f"Rev={es.consensus_revenue}"
+            )
         if ms:
-            print(f"Setup: run-up vs sector {ms.run_up_vs_sector_pct}% · EM {ms.expected_move_pct}% "
-                  f"· ATM IV {ms.atm_iv}% · dist-to-high {ms.dist_to_ath_pct}%")
+            print(
+                f"Setup: run-up vs sector {ms.run_up_vs_sector_pct}% · EM {ms.expected_move_pct}% "
+                f"· ATM IV {ms.atm_iv}% · dist-to-high {ms.dist_to_ath_pct}%"
+            )
         print(f"Signal chain: {len(result.get('signal_chain', []))} names")
     else:
         sc = result.get("scorecard")
         recs = result.get("decisions", [])
         if sc:
-            print(f"PEAD SCORE COMPLETE — {symbol}  Scorecard {sc.total:+.2f} "
-                  f"(门槛 {sc.threshold:+.1f}) — {sc.band}")
+            print(
+                f"PEAD SCORE COMPLETE — {symbol}  Scorecard {sc.total:+.2f} "
+                f"(门槛 {sc.threshold:+.1f}) — {sc.band}"
+            )
         print(f"决策情景: {result.get('decision_band', '—')} · 建议 {len(recs)} 条")
         for d in recs:
             # PEAD persists a recommendation, not an executable TradeDecision.
@@ -131,23 +163,30 @@ def run_pead_monitor(symbol: str, *, use_llm: bool = True) -> dict:
     from ..config import load_pead_global
 
     g = load_pead_global()
-    update = monitor.run(symbol.upper(), use_llm=use_llm,
-                         lookback_days=g["monitor"]["lookback_days"])
-    print(f"📡 monitor {symbol.upper()} — materiality {update.materiality:.2f} · "
-          f"{update.event_summary}")
+    update = monitor.run(
+        symbol.upper(), use_llm=use_llm, lookback_days=g["monitor"]["lookback_days"]
+    )
+    print(
+        f"📡 monitor {symbol.upper()} — materiality {update.materiality:.2f} · "
+        f"{update.event_summary}"
+    )
     if update.narrative_delta:
         print(f"   Δ thesis: {update.narrative_delta}")
     for ec in update.expectation_changes:
         print(f"   Δ {ec.dim_key}: {ec.change}")
 
     mon = g["monitor"]
-    if (mon.get("push_context_updates") and update.materiality >= mon["materiality_threshold"]):
+    if mon.get("push_context_updates") and update.materiality >= mon["materiality_threshold"]:
         try:
-            get_channel("feishu").push(Notification(
-                kind="info", title=f"PEAD context update — {symbol.upper()} "
-                f"(materiality {update.materiality:.2f})",
-                body=update.event_summary + ("\nΔ " + update.narrative_delta
-                                             if update.narrative_delta else "")))
+            get_channel("feishu").push(
+                Notification(
+                    kind="info",
+                    title=f"PEAD context update — {symbol.upper()} "
+                    f"(materiality {update.materiality:.2f})",
+                    body=update.event_summary
+                    + ("\nΔ " + update.narrative_delta if update.narrative_delta else ""),
+                )
+            )
             print("   → pushed Feishu info card")
         except Exception as exc:  # noqa: BLE001 - push is best-effort
             print(f"   (Feishu push skipped: {exc})")
@@ -183,17 +222,31 @@ def events_list(*, days: int | None = None) -> int:
     return 0
 
 
-def run_chief(*, execute: bool = True, dry_run: bool = True, channel: str = "cli",
-              use_llm: bool = True, auto: bool = False, offline: bool = False,
-              source: str = "chief") -> int:
+def run_chief(
+    *,
+    execute: bool = True,
+    dry_run: bool = True,
+    channel: str = "cli",
+    use_llm: bool = True,
+    auto: bool = False,
+    offline: bool = False,
+    source: str = "chief",
+) -> int:
     """One Chief decision run through the decision graph: assemble all artifacts
     -> decide -> risk gate -> persist -> Boss approval -> trade -> persist."""
     from ..graph.chief_state import ChiefDecisionState
 
     now = datetime.now(timezone.utc)
-    state = ChiefDecisionState(cycle_id=f"chief-{now:%Y%m%d-%H%M%S}", as_of=now,
-                               source=source, dry_run=dry_run, use_llm=use_llm,
-                               use_broker=not offline, auto_approve=auto, execute=execute)
+    state = ChiefDecisionState(
+        cycle_id=f"chief-{now:%Y%m%d-%H%M%S}",
+        as_of=now,
+        source=source,
+        dry_run=dry_run,
+        use_llm=use_llm,
+        use_broker=not offline,
+        auto_approve=auto,
+        execute=execute,
+    )
     run_decision_graph(state, channel=channel)
     return 0
 
@@ -207,8 +260,10 @@ def chief_show() -> int:
         return 0
     print(f"=== chief {run['cycle_id']} @ {run['as_of'][:16]} ===\n{run['manager_summary']}")
     for d in run["decisions"]:
-        print(f"  {d['action']} {d['symbol']} ${d.get('notional_usd') or 0:,.0f} — "
-              f"{(d.get('rationale') or '')[:70]}")
+        print(
+            f"  {d['action']} {d['symbol']} ${d.get('notional_usd') or 0:,.0f} — "
+            f"{(d.get('rationale') or '')[:70]}"
+        )
     return 0
 
 
@@ -231,19 +286,24 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
         if stored is None:
             print("❌ No stored risk review found — run once with TWS connected.")
             return 1
-        age = (stored.as_of.replace(tzinfo=None) if stored.as_of.tzinfo
-               else stored.as_of)
+        age = stored.as_of.replace(tzinfo=None) if stored.as_of.tzinfo else stored.as_of
         from datetime import datetime, timezone
+
         age_days = (datetime.now(timezone.utc) - stored.as_of).days
-        print(f"⚠️  offline mode — showing stored review ({age_days}d old, as of {stored.as_of:%Y-%m-%d})")
+        print(
+            f"⚠️  offline mode — showing stored review ({age_days}d old, as of {stored.as_of:%Y-%m-%d})"
+        )
         print(risk_report_mod.render(stored))
         return 0
 
     pf = tport.snapshot()
     if pf is None:
         from ..config import get_config
+
         _port = get_config().app.broker.port or get_config().secrets.ibkr_port
-        print(f"❌ IBKR unavailable — start TWS with API enabled (port {_port}). Use --offline to show stored review.")
+        print(
+            f"❌ IBKR unavailable — start TWS with API enabled (port {_port}). Use --offline to show stored review."
+        )
         return 1
     risk_assess.enrich_beta(pf)
     risk_assess.enrich_options(pf)
@@ -252,6 +312,7 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
     print(risk_report_mod.render(review))
     if write_report:
         from ..config import load_macro_config
+
         try:
             out_dir = load_macro_config().output_dir
         except Exception:  # noqa: BLE001
@@ -269,11 +330,13 @@ def risk_memo() -> int:
     memo = memo_review.run()
     if memo is None:
         from ..config import get_config
+
         _port = get_config().app.broker.port or get_config().secrets.ibkr_port
         print(f"❌ IBKR unavailable — start TWS with API enabled (port {_port}).")
         return 1
     print(memo_report.render(memo))
     from ..config import load_macro_config
+
     try:
         out_dir = load_macro_config().output_dir
     except Exception:  # noqa: BLE001
@@ -299,10 +362,15 @@ def risk_check(symbol: str | None = None) -> int:
         if r["symbol"] in seen:
             continue
         seen.add(r["symbol"])
-        decisions.append(TradeDecision(symbol=r["symbol"], action=r["action"],
-                                       notional_usd=r.get("notional_usd"),
-                                       limit_price=r.get("limit_price"),
-                                       rationale=r.get("rationale") or ""))
+        decisions.append(
+            TradeDecision(
+                symbol=r["symbol"],
+                action=r["action"],
+                notional_usd=r.get("notional_usd"),
+                limit_price=r.get("limit_price"),
+                rationale=r.get("rationale") or "",
+            )
+        )
     pf = tport.snapshot()
     approved, notes, _ = risk_checks.pre_trade(decisions, pf)
     print(f"=== Risk check: {len(decisions)} decisions → {len(approved)} pass ===")
@@ -320,29 +388,41 @@ def trader_portfolio(*, offline: bool = False) -> int:
             # Fall back to most recent stored performance snapshot for display
             from ..memory import get_store
             from datetime import datetime, timezone
+
             ph = get_store().performance_history(limit=1)
             if ph:
                 r = ph[0]
                 age_days = (datetime.now(timezone.utc) - r.as_of).days
-                print(f"⚠️  offline mode — showing stored snapshot ({age_days}d old, as of {r.as_of:%Y-%m-%d})")
+                print(
+                    f"⚠️  offline mode — showing stored snapshot ({age_days}d old, as of {r.as_of:%Y-%m-%d})"
+                )
                 print(f"=== Portfolio {r.account_id} @ {r.as_of:%Y-%m-%d} (stored) ===")
-                print(f"NetLiq ${r.net_liquidation:,.0f} · dailyP&L ${r.daily_pnl:,.0f} "
-                      f"· cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}")
+                print(
+                    f"NetLiq ${r.net_liquidation:,.0f} · dailyP&L ${r.daily_pnl:,.0f} "
+                    f"· cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}"
+                )
                 return 0
             print("❌ No stored snapshot found — connect TWS and run `ats trader snapshot`.")
             return 1
         from ..config import get_config
+
         _port = get_config().app.broker.port or get_config().secrets.ibkr_port
-        print(f"❌ IBKR unavailable — start TWS/Gateway with API enabled (port {_port}). Use --offline for stored data.")
+        print(
+            f"❌ IBKR unavailable — start TWS/Gateway with API enabled (port {_port}). Use --offline for stored data."
+        )
         return 1
     print(f"=== Portfolio {pf.account_id} @ {pf.as_of:%Y-%m-%d %H:%M} ===")
-    print(f"NetLiq ${pf.net_liquidation:,.0f} · cash ${pf.cash:,.0f} · leverage {pf.leverage:.2f}x "
-          f"· dailyP&L ${pf.daily_pnl:,.0f} · realized ${pf.realized_pnl:,.0f}")
+    print(
+        f"NetLiq ${pf.net_liquidation:,.0f} · cash ${pf.cash:,.0f} · leverage {pf.leverage:.2f}x "
+        f"· dailyP&L ${pf.daily_pnl:,.0f} · realized ${pf.realized_pnl:,.0f}"
+    )
     if not pf.positions:
         print("(no open positions)")
     for p in pf.positions:
-        print(f"  {p.symbol:6} {p.qty:+.0f} @ {p.avg_cost:.2f}  mv=${p.market_value:,.0f} "
-              f"w={p.weight*100:.1f}% uPnL=${p.unrealized_pnl:,.0f}")
+        print(
+            f"  {p.symbol:6} {p.qty:+.0f} @ {p.avg_cost:.2f}  mv=${p.market_value:,.0f} "
+            f"w={p.weight * 100:.1f}% uPnL=${p.unrealized_pnl:,.0f}"
+        )
     return 0
 
 
@@ -353,8 +433,10 @@ def trader_snapshot() -> int:
     if r is None:
         print("❌ IBKR unavailable — snapshot skipped.")
         return 1
-    print(f"📸 snapshot {r.as_of:%Y-%m-%d} · NetLiq ${r.net_liquidation:,.0f} · "
-          f"dayP&L ${r.daily_pnl:,.0f} · cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}")
+    print(
+        f"📸 snapshot {r.as_of:%Y-%m-%d} · NetLiq ${r.net_liquidation:,.0f} · "
+        f"dayP&L ${r.daily_pnl:,.0f} · cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}"
+    )
     return 0
 
 
@@ -364,10 +446,14 @@ def trader_perf(days: int = 30, *, write_report: bool = False) -> int:
     rep = tperf.report(days)
     a = rep["analytics"]
     print(f"=== Performance (last {a['window_days']} snapshots) ===")
-    print(f"NetLiq ${a['start_nav'] or 0:,.0f} → ${a['end_nav'] or 0:,.0f} · "
-          f"return {a['total_return_pct']}% · cumP&L ${a['cumulative_pnl'] or 0:,.0f}")
-    print(f"maxDD {a['max_drawdown_pct']}% · winRate {a['win_rate']} · "
-          f"profitFactor {a['profit_factor']} · closedTrades {a['closed_trades']}")
+    print(
+        f"NetLiq ${a['start_nav'] or 0:,.0f} → ${a['end_nav'] or 0:,.0f} · "
+        f"return {a['total_return_pct']}% · cumP&L ${a['cumulative_pnl'] or 0:,.0f}"
+    )
+    print(
+        f"maxDD {a['max_drawdown_pct']}% · winRate {a['win_rate']} · "
+        f"profitFactor {a['profit_factor']} · closedTrades {a['closed_trades']}"
+    )
     for name, b in a["benchmarks"].items():
         print(f"  vs {name}: {b['return_pct']}% (alpha {b['alpha_pct']}%)")
     if write_report:
@@ -389,11 +475,14 @@ def _write_perf_report(rep: dict) -> None:
     from pathlib import Path
 
     a = rep["analytics"]
-    lines = [f"# 🤖 组合绩效 — {datetime.now(timezone.utc):%Y-%m-%d}", "",
-             f"- NetLiq: ${a['start_nav'] or 0:,.0f} → ${a['end_nav'] or 0:,.0f}",
-             f"- 收益率: {a['total_return_pct']}% · 累计P&L: ${a['cumulative_pnl'] or 0:,.0f}",
-             f"- 最大回撤: {a['max_drawdown_pct']}%",
-             f"- 胜率: {a['win_rate']} · 盈亏比: {a['profit_factor']} · 平仓交易: {a['closed_trades']}"]
+    lines = [
+        f"# 🤖 组合绩效 — {datetime.now(timezone.utc):%Y-%m-%d}",
+        "",
+        f"- NetLiq: ${a['start_nav'] or 0:,.0f} → ${a['end_nav'] or 0:,.0f}",
+        f"- 收益率: {a['total_return_pct']}% · 累计P&L: ${a['cumulative_pnl'] or 0:,.0f}",
+        f"- 最大回撤: {a['max_drawdown_pct']}%",
+        f"- 胜率: {a['win_rate']} · 盈亏比: {a['profit_factor']} · 平仓交易: {a['closed_trades']}",
+    ]
     for name, b in a["benchmarks"].items():
         lines.append(f"- vs {name}: {b['return_pct']}% (alpha {b['alpha_pct']}%)")
     p = Path(out_dir) / f"组合绩效-{datetime.now(timezone.utc):%Y-%m-%d}.md"
@@ -414,7 +503,9 @@ def trader_orders() -> int:
         return 0
     print("=== Open orders ===")
     for o in oo:
-        print(f"  #{o['order_id']} {o['action']} {o['symbol']} x{o['qty']:.0f} {o['type']} [{o['status']}]")
+        print(
+            f"  #{o['order_id']} {o['action']} {o['symbol']} x{o['qty']:.0f} {o['type']} [{o['status']}]"
+        )
     return 0
 
 
@@ -426,7 +517,11 @@ def trader_cancel(symbol: str | None = None) -> int:
     except IBKRUnavailable as exc:
         print(f"❌ IBKR unavailable: {exc}")
         return 1
-    print(f"cancelled {len(cancelled)} order(s): {cancelled}" if cancelled else "(no open orders to cancel)")
+    print(
+        f"cancelled {len(cancelled)} order(s): {cancelled}"
+        if cancelled
+        else "(no open orders to cancel)"
+    )
     return 0
 
 
@@ -440,11 +535,15 @@ def trader_fills(symbol: str | None = None) -> int:
     print(f"=== Fills{' ' + symbol if symbol else ''} ===")
     for f in rows:
         rp = f"realized ${f['realized_pnl']:,.0f}" if f.get("realized_pnl") is not None else ""
-        print(f"  {f['time'][:16]} {f['side']} {f['symbol']} {f['shares']:.0f}@{f['price']:.2f} {rp}")
+        print(
+            f"  {f['time'][:16]} {f['side']} {f['symbol']} {f['shares']:.0f}@{f['price']:.2f} {rp}"
+        )
     return 0
 
 
-def trader_execute(symbol: str | None = None, *, channel: str = "cli", dry_run: bool = False) -> int:
+def trader_execute(
+    symbol: str | None = None, *, channel: str = "cli", dry_run: bool = False
+) -> int:
     from ..memory import get_store
     from ..schemas.decision import TradeDecision
     from ..trader import execute as texec
@@ -454,24 +553,44 @@ def trader_execute(symbol: str | None = None, *, channel: str = "cli", dry_run: 
         print("(no stored decisions to execute — use `ats trader buy/sell` for manual orders)")
         return 0
     seen, decisions = set(), []
-    for r in rows:                     # newest first; one per symbol
+    for r in rows:  # newest first; one per symbol
         if r["symbol"] in seen:
             continue
         seen.add(r["symbol"])
-        decisions.append(TradeDecision(
-            symbol=r["symbol"], action=r["action"], notional_usd=r.get("notional_usd"),
-            limit_price=r.get("limit_price"), conviction=r.get("conviction") or 0.0,
-            rationale=r.get("rationale") or ""))
+        decisions.append(
+            TradeDecision(
+                symbol=r["symbol"],
+                action=r["action"],
+                notional_usd=r.get("notional_usd"),
+                limit_price=r.get("limit_price"),
+                conviction=r.get("conviction") or 0.0,
+                rationale=r.get("rationale") or "",
+            )
+        )
     texec.execute(decisions, source="stored-decisions", channel=channel, dry_run=dry_run)
     return 0
 
 
-def trader_manual(action: str, symbol: str, qty: float, *, limit: float | None = None,
-                  channel: str = "cli", dry_run: bool = False) -> int:
+def trader_manual(
+    action: str,
+    symbol: str,
+    qty: float,
+    *,
+    limit: float | None = None,
+    channel: str = "cli",
+    dry_run: bool = False,
+) -> int:
     from ..trader import execute as texec
 
-    texec.manual(symbol, action, qty, order_type="limit" if limit else "market",
-                 limit_price=limit, channel=channel, dry_run=dry_run)
+    texec.manual(
+        symbol,
+        action,
+        qty,
+        order_type="limit" if limit else "market",
+        limit_price=limit,
+        channel=channel,
+        dry_run=dry_run,
+    )
     return 0
 
 
@@ -487,9 +606,11 @@ def _print_quadrant(review) -> None:
         print(f"      · {a.label or a.key}: {val} (判据 {a.threshold}) → {a.score:+.2f}")
     dec = review.decomposition
     if dec is not None and dec.d_real_bp is not None:
-        print(f"      · 利率分解 {dec.window_days}d: Δ名义 {dec.d_nominal_bp:+.0f}bp"
-              f" = Δ实际 {dec.d_real_bp:+.0f} + Δ通胀补偿 {dec.d_breakeven_bp:+.0f}"
-              f" → {dec.classification}")
+        print(
+            f"      · 利率分解 {dec.window_days}d: Δ名义 {dec.d_nominal_bp:+.0f}bp"
+            f" = Δ实际 {dec.d_real_bp:+.0f} + Δ通胀补偿 {dec.d_breakeven_bp:+.0f}"
+            f" → {dec.classification}"
+        )
         if dec.real_yield_cause:
             print(f"      · 成因: {dec.real_yield_cause}")
     for s in review.shock_vs_trend:
@@ -499,8 +620,9 @@ def _print_quadrant(review) -> None:
         print(f"      · ⚠️ 数据过旧/缺失: {', '.join(stale)}")
 
 
-def run_technical_review(name: str = "technical", *, live_data: bool = True,
-                        write_report: bool = True) -> int:
+def run_technical_review(
+    name: str = "technical", *, live_data: bool = True, write_report: bool = True
+) -> int:
     """Deterministic technical readings (no LLM). Advisory input to the Chief."""
     from ..agents.technical import review as tech_review
 
@@ -539,8 +661,10 @@ def technical_probe(name: str = "technical", *, live_data: bool = True) -> int:
     from ..agents.technical import review as tech_review
 
     r = tech_review.run(name, live_data=live_data, persist=False, write_report=False)
-    print(f"=== technical probe: {len(r.readings)} readings, "
-          f"strategy={r.strategy}, fingerprint={r.fingerprint} ===")
+    print(
+        f"=== technical probe: {len(r.readings)} readings, "
+        f"strategy={r.strategy}, fingerprint={r.fingerprint} ==="
+    )
     for note in r.notes:
         print(f"  note: {note}")
     print()
@@ -548,8 +672,9 @@ def technical_probe(name: str = "technical", *, live_data: bool = True) -> int:
     return 0
 
 
-def run_macro_review(name: str = "macro", *, use_llm: bool = True,
-                     live_data: bool = True, write_report: bool = True):
+def run_macro_review(
+    name: str = "macro", *, use_llm: bool = True, live_data: bool = True, write_report: bool = True
+):
     """One weekly macro strategist review: regime + rate path + sector tilts."""
     from ..agents.macro import report, review as macro_review
     from ..config import load_macro_config
@@ -563,8 +688,10 @@ def run_macro_review(name: str = "macro", *, use_llm: bool = True,
     # for it would overwrite that older day's file under its own date.
     stale = use_llm and review.as_of < started
     if stale:
-        print(f"⚠️  macro {name}: LLM 失败，以下为 {review.as_of:%Y-%m-%d %H:%M} 的旧评审"
-              f"（未写报告、未更新存档）")
+        print(
+            f"⚠️  macro {name}: LLM 失败，以下为 {review.as_of:%Y-%m-%d %H:%M} 的旧评审"
+            f"（未写报告、未更新存档）"
+        )
     print(f"🌐 macro {name} — {review.regime}")
     _print_quadrant(review)
     if review.rate_path:
@@ -611,8 +738,13 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
     return 0
 
 
-def run_cross_section(name: str = "ai_hardware", layer: str = "all",
-                      *, structure: bool = False, write_report: bool = False) -> int:
+def run_cross_section(
+    name: str = "ai_hardware",
+    layer: str = "all",
+    *,
+    structure: bool = False,
+    write_report: bool = False,
+) -> int:
     """Cross-sectional selection + sizing within a chain layer (WHO / HOW MUCH).
 
     **Prints only — never writes a file.** The layer report produced by the weekly review
@@ -638,8 +770,13 @@ def run_cross_section(name: str = "ai_hardware", layer: str = "all",
     return 0
 
 
-def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
-                     use_llm: bool = True, live_data: bool = True) -> int:
+def run_layer_review(
+    name: str = "ai_hardware",
+    layer_key: str = "all",
+    *,
+    use_llm: bool = True,
+    live_data: bool = True,
+) -> int:
     """层级评审：一层或全部层的配置结论（超配/标配/低配/清仓）+ 层内选股。"""
     from ..agents.sector import cross_section, layer_review
     from ..config import load_sector_config
@@ -653,13 +790,20 @@ def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
     prior = get_store().latest_sector_review(name)
 
     for layer in layers:
-        prior_v = next((prior.verdict_for(k) for k in [layer.key, *layer.legacy_keys]
-                        if prior and prior.verdict_for(k)), None)
+        prior_v = next(
+            (
+                prior.verdict_for(k)
+                for k in [layer.key, *layer.legacy_keys]
+                if prior and prior.verdict_for(k)
+            ),
+            None,
+        )
         basket = None
         if live_data:
             try:
-                _, basket = cross_section.run_layer(name, layer.key, persist=False,
-                                                    structure=use_llm)
+                _, basket = cross_section.run_layer(
+                    name, layer.key, persist=False, structure=use_llm
+                )
             except Exception as exc:  # noqa: BLE001
                 print(f"  （{layer.key} 截面取数失败：{exc}）")
         v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)
@@ -674,12 +818,15 @@ def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
         if not ok:
             flags.append("本轮未产出，下为沿用/占位")
         print(f"\n=== {layer.label}  [{layer.key}] ===")
-        print(f"  配置 {v.allocation} · 信心 {v.confidence:.2f} · 预算 {budget:.1%} NAV"
-              f" · 周期 {v.cycle_position or '—'}"
-              + (f"\n  ⚠️ {'；'.join(flags)}" if flags else ""))
+        print(
+            f"  配置 {v.allocation} · 信心 {v.confidence:.2f} · 预算 {budget:.1%} NAV"
+            f" · 周期 {v.cycle_position or '—'}" + (f"\n  ⚠️ {'；'.join(flags)}" if flags else "")
+        )
         if group:
-            print(f"  （本层属跨层组 {group.key}（上限 {group.weight_cap:.0%}，成员 "
-                  f"{'+'.join(group.layers)}）—— 整轮评审时预算可能被组上限按比例压低）")
+            print(
+                f"  （本层属跨层组 {group.key}（上限 {group.weight_cap:.0%}，成员 "
+                f"{'+'.join(group.layers)}）—— 整轮评审时预算可能被组上限按比例压低）"
+            )
         for a in v.claim_attributions:
             print(f"    · {a}")
         for trg in v.reversal_triggers:
@@ -690,8 +837,13 @@ def run_layer_review(name: str = "ai_hardware", layer_key: str = "all", *,
     return 0
 
 
-def run_sector_review(name: str = "ai_hardware", *, use_llm: bool = True,
-                      live_data: bool = True, write_report: bool = True):
+def run_sector_review(
+    name: str = "ai_hardware",
+    *,
+    use_llm: bool = True,
+    live_data: bool = True,
+    write_report: bool = True,
+):
     """One weekly sector review: L1-L6 assessment + company calls."""
     from ..agents.sector import report, review as sector_review
     from ..config import load_sector_config
@@ -733,8 +885,10 @@ def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
                 review = r
                 break
         if review is None:
-            print(f"（{name} 在 {date} 没有存档的 sector review —— "
-                  f"`ats sector review {name}` 跑过的日子才有）")
+            print(
+                f"（{name} 在 {date} 没有存档的 sector review —— "
+                f"`ats sector review {name}` 跑过的日子才有）"
+            )
             return 1
     else:
         review = store.latest_sector_review(name)
@@ -784,8 +938,13 @@ def _evidence_sources(store, *, entity: str = "") -> int:
                 meta = entity_meta(sym)
                 if docs:
                     newest = max(docs, key=lambda d: d.fetched_at or "")
-                    mark, detail = "✅", (f"{len(docs)} 份 · 最新 {newest.period or '期间未知'}"
-                                         f" · {len(newest.text)//1000}k 字符")
+                    mark, detail = (
+                        "✅",
+                        (
+                            f"{len(docs)} 份 · 最新 {newest.period or '期间未知'}"
+                            f" · {len(newest.text) // 1000}k 字符"
+                        ),
+                    )
                 elif bad:
                     mark, detail = "⚠️ ", f"抓到过但被闸拦下：{bad[0]['note']}"
                 else:
@@ -829,13 +988,126 @@ def _evidence_probe(symbol: str, runs: int = 5) -> int:
     return 0
 
 
-def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
-                 entity: str = "", limit: int = 30, accept: bool = False,
-                 reviewer: str = "", note: str = "") -> int:
+def run_evidence(
+    action: str,
+    symbol: str | None = None,
+    *,
+    file: str = "",
+    entity: str = "",
+    limit: int = 30,
+    accept: bool = False,
+    reviewer: str = "",
+    note: str = "",
+    sector: str = "",
+    layer: str = "",
+    periods: list[str] | None = None,
+    as_of: str = "",
+    output_format: str = "markdown",
+    chart_dir: str = "",
+    output: str = "",
+) -> int:
     """Chain evidence: observe one company's latest print, or inspect what's stored.
 
     Read-only with respect to trading — this path can never place an order.
     """
+    if action in {"layer", "ai-production"}:
+        if not sector or not layer:
+            print(
+                json.dumps(
+                    {
+                        "status": "invalid_scope",
+                        "requested_scope": {"sector": sector or None, "layer": layer or None},
+                        "reason": "按层 Evidence 运行必须显式提供 --sector 和 --layer。",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 2
+        from ..agents.evidence import (
+            PRODUCTION_CLAIM_ID,
+            run_registered_layer_observers,
+            write_layer_evidence_markdown,
+        )
+        from ..config import load_sector_config
+
+        try:
+            cfg = load_sector_config(sector)
+        except FileNotFoundError as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "invalid_sector",
+                        "requested_scope": {"sector": sector, "layer": layer},
+                        "reason": str(exc),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 2
+        layer_cfg = cfg.layer_by_key(layer)
+        if layer_cfg is None:
+            print(
+                json.dumps(
+                    {
+                        "status": "invalid_layer",
+                        "requested_scope": {"sector": sector, "layer": layer},
+                        "reason": "The requested layer is not present in the sector configuration.",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 2
+        cutoff = datetime.fromisoformat(as_of) if as_of else None
+        output_path: Path | None = None
+        resolved_chart_dir = chart_dir
+        if output_format == "markdown":
+            if output:
+                output_path = Path(output)
+            elif cfg.output_dir:
+                stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                output_path = (
+                    Path(cfg.output_dir) / f"Evidence-{cfg.name}-{layer_cfg.key}-{stamp}.md"
+                )
+            else:
+                print(
+                    json.dumps(
+                        {
+                            "status": "output_path_required",
+                            "requested_scope": {"sector": sector, "layer": layer},
+                            "reason": "sector 配置未定义 output_dir；请用 --output 指定 Markdown 路径。",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return 2
+            if not resolved_chart_dir:
+                resolved_chart_dir = str(output_path.parent / f"{output_path.stem}-assets")
+        claim_ids = [PRODUCTION_CLAIM_ID] if action == "ai-production" else None
+        result = run_registered_layer_observers(
+            sector=cfg.name,
+            sector_label=cfg.label,
+            layer=layer_cfg.key,
+            layer_label=layer_cfg.label,
+            observer_refs=layer_cfg.evidence_observers,
+            periods=periods or None,
+            as_of=cutoff,
+            chart_dir=resolved_chart_dir,
+            claim_ids=claim_ids,
+        )
+        if output_format == "markdown":
+            assert output_path is not None
+            written = write_layer_evidence_markdown(result, output_path)
+            print(f"📝 已写入层级 Evidence 审阅文档：{written}")
+            if resolved_chart_dir and result.get("status") == "ok":
+                print(f"📊 图表与 sidecar 目录：{resolved_chart_dir}")
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.get("status") in {"ok", "no_registered_observers"} else 1
+
     from ..agents.evidence import observer
     from ..memory import get_store
 
@@ -855,8 +1127,10 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         print(f"{'实体':<10}{'指标':<22}{'类型':<18}{'立场':<12}{'方向':<7}{'期间'}")
         print("-" * 84)
         for r in rows:
-            print(f"{r['entity']:<10}{r['metric']:<22}{r['observation_type']:<18}"
-                  f"{r['stance']:<12}{r['direction']:<7}{r['period'] or '—'}")
+            print(
+                f"{r['entity']:<10}{r['metric']:<22}{r['observation_type']:<18}"
+                f"{r['stance']:<12}{r['direction']:<7}{r['period'] or '—'}"
+            )
             print(f"    {r['evidence_span'][:76]}")
         fails = store.observation_failures(limit=5)
         if fails:
@@ -886,14 +1160,17 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
                 print("❌ 需要 proposal id：ats evidence review <id> --accept|--reject")
                 return 1
             status = "accepted" if accept else "rejected"
-            if not store.set_proposal_status(symbol, status, reviewer=reviewer or "boss",
-                                             rationale=note):
+            if not store.set_proposal_status(
+                symbol, status, reviewer=reviewer or "boss", rationale=note
+            ):
                 print(f"❌ 未找到 proposal {symbol}")
                 return 1
             print(f"{'✅ 已采纳' if accept else '🚫 已拒绝'} {symbol}")
             if accept:
-                print("提醒：命题仍需你手工写进 config/sectors/<name>.yaml 的 claims: —— "
-                      "坐标系只有人能扩。触发它的那批观测已冻结，不会用于印证它自己。")
+                print(
+                    "提醒：命题仍需你手工写进 config/sectors/<name>.yaml 的 claims: —— "
+                    "坐标系只有人能扩。触发它的那批观测已冻结，不会用于印证它自己。"
+                )
             return 0
 
         ind_cfg = load_pead_global().get("induction", {})
@@ -914,8 +1191,12 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
         from ..config import load_pead_global, load_sector_config
 
         cfg = load_sector_config(entity or "ai_hardware")
-        path = chain_report.write(cfg, store, as_of=datetime.now(timezone.utc),
-                                  ind_cfg=load_pead_global().get("induction", {}))
+        path = chain_report.write(
+            cfg,
+            store,
+            as_of=datetime.now(timezone.utc),
+            ind_cfg=load_pead_global().get("induction", {}),
+        )
         print(f"📝 {path}" if path else "(report dir unset — skipped)")
         return 0
 
@@ -960,8 +1241,10 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
             if st.unreachable:
                 print(f"  ⚠️  {sid:<24}取不到文章列表，已记成缺口而非沉默")
                 continue
-            print(f"  📰 {sid:<24}扫 {st.scanned} 篇 · 命中 {st.matched} 篇 · "
-                  f"新抽取 {st.ingested} 篇 / {st.observations} 条观测")
+            print(
+                f"  📰 {sid:<24}扫 {st.scanned} 篇 · 命中 {st.matched} 篇 · "
+                f"新抽取 {st.ingested} 篇 / {st.observations} 条观测"
+            )
             if st.unreadable:
                 # Never fold this into the headline: a widening paywall must not read
                 # as the publisher having gone quiet.
@@ -991,43 +1274,59 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
 
         ccfg = cfg.review.get("corroboration", {})
         any_claim = False
-        for layer in cfg.layers:
-            if not layer.claims:
+        for configured_layer in cfg.layers:
+            if not configured_layer.claims:
                 continue
             any_claim = True
-            print(f"\n=== {layer.label} ({layer.key}) ===")
+            print(f"\n=== {configured_layer.label} ({configured_layer.key}) ===")
             rows_by_entity = {}
-            for claim in layer.claims:
+            for claim in configured_layer.claims:
                 ents = {w.entity.upper() for w in claim.witnesses}
                 ents |= claim.expected_witnesses() | set(claim.entities)
                 ents |= _source_entities(claim)
                 for e in ents:
                     rows_by_entity.setdefault(e, store.observations(entity=e, limit=200))
-            for a in corr.assess_layer(layer, rows_by_entity, cfg=ccfg):
-                claim = next(c for c in layer.claims if c.id == a.claim_id)
+            for a in corr.assess_layer(configured_layer, rows_by_entity, cfg=ccfg):
+                claim = next(c for c in configured_layer.claims if c.id == a.claim_id)
                 # 「◐」 = one-sided AND too few independent filers -> unconfirmed,
                 # NOT conflicting. 「仅自述」 = it did resolve, on one vantage point.
-                mark = ("◐" if a.unresolved_reason == "single_stance"
-                        else {"supportive": "✅", "contradicted": "⛔", "mixed": "⚠️",
-                              "resolved": "📊", "unknown": "· "}.get(a.verdict, "· "))
+                mark = (
+                    "◐"
+                    if a.unresolved_reason == "single_stance"
+                    else {
+                        "supportive": "✅",
+                        "contradicted": "⛔",
+                        "mixed": "⚠️",
+                        "resolved": "📊",
+                        "unknown": "· ",
+                    }.get(a.verdict, "· ")
+                )
                 basis = "（仅自述）" if a.basis == "self_reported" else ""
-                print(f"{mark} {a.claim_id:20} {a.verdict:13}{basis} 覆盖 {a.coverage:6} "
-                      f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类")
+                print(
+                    f"{mark} {a.claim_id:20} {a.verdict:13}{basis} 覆盖 {a.coverage:6} "
+                    f"证据簇 {a.evidence_clusters} · 立场 {a.stance_classes} 类"
+                )
                 print(f"     {claim.statement}")
                 if a.entity_readings:
                     # A cross-section's answer IS the per-company table; there is no
                     # single support/refute count to print.
-                    stand = {"strong": "强", "neutral": "中", "weak": "弱",
-                             "unknown": "—"}
-                    basis = {"corroborated": "有交叉印证", "self_reported": "仅自述",
-                             "thin": "证据薄"}
+                    stand = {"strong": "强", "neutral": "中", "weak": "弱", "unknown": "—"}
+                    basis = {
+                        "corroborated": "有交叉印证",
+                        "self_reported": "仅自述",
+                        "thin": "证据薄",
+                    }
                     for r in a.entity_readings:
-                        print(f"       {r.entity:<12}{stand.get(r.standing, r.standing):<3}"
-                              f"{basis.get(r.basis, r.basis):<8}"
-                              f"{r.evidence_clusters} 簇/{r.stance_classes} 类  {r.reason}")
+                        print(
+                            f"       {r.entity:<12}{stand.get(r.standing, r.standing):<3}"
+                            f"{basis.get(r.basis, r.basis):<8}"
+                            f"{r.evidence_clusters} 簇/{r.stance_classes} 类  {r.reason}"
+                        )
                 else:
-                    print(f"     支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
-                          + (f" · 异议 {','.join(a.dissenters)}" if a.dissenters else ""))
+                    print(
+                        f"     支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}"
+                        + (f" · 异议 {','.join(a.dissenters)}" if a.dissenters else "")
+                    )
                 if a.silent_witnesses:
                     # Silence is a gap, not neutrality — name who did not speak.
                     print(f"     未发声：{','.join(a.silent_witnesses)}")
@@ -1065,8 +1364,7 @@ def run_evidence(action: str, symbol: str | None = None, *, file: str = "",
     # source a number came from.
     if not file:
         report_date = str(getattr(pr, "date", "") or "")
-        rtext, rsrc, rnote = observer.fetch_release(sym, report_date=report_date,
-                                                    store=store)
+        rtext, rsrc, rnote = observer.fetch_release(sym, report_date=report_date, store=store)
         if rnote:
             print(f"（财报稿：{rnote}）")
         if rtext.strip():
@@ -1104,8 +1402,10 @@ def sector_show(name: str = "ai_hardware") -> int:
                 flags.append("无命题")
             if not v.cross_section_applicable:
                 flags.append("截面不适用")
-            print(f"  {label}: {v.allocation} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
-                  + (f"  ⚠️ {'、'.join(flags)}" if flags else ""))
+            print(
+                f"  {label}: {v.allocation} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
+                + (f"  ⚠️ {'、'.join(flags)}" if flags else "")
+            )
     for a in latest.layers:
         print(f"  {a.label}: 景气 {a.boom_score:.0f} [{a.signal}]")
     print("\nHistory:")
@@ -1146,9 +1446,15 @@ def run_pead_research(*, use_llm: bool = True) -> list:
     return insights
 
 
-def run_pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True,
-                          as_of: str | None = None, chief: bool = True,
-                          plan_only: bool = False) -> int:
+def run_pead_score_window(
+    window: str,
+    *,
+    dry_run: bool = True,
+    use_llm: bool = True,
+    as_of: str | None = None,
+    chief: bool = True,
+    plan_only: bool = False,
+) -> int:
     """Run one PEAD score window by hand (the scheduler runs the same function).
 
     `--as-of` rewinds only the calendar/state layer, so a past print can be replayed;
@@ -1165,10 +1471,13 @@ def run_pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = 
             moment = moment.replace(tzinfo=ET)
 
     label = "计划" if plan_only else ("试运行" if dry_run else "实盘")
-    print(f"=== PEAD {window} 打分窗口（{label}"
-          f"{f'，as_of={moment:%Y-%m-%d %H:%M %Z}' if moment else ''}）===")
-    outcomes = pead_score_window(window, dry_run=dry_run, use_llm=use_llm, as_of=moment,
-                                 chief=chief, plan_only=plan_only)
+    print(
+        f"=== PEAD {window} 打分窗口（{label}"
+        f"{f'，as_of={moment:%Y-%m-%d %H:%M %Z}' if moment else ''}）==="
+    )
+    outcomes = pead_score_window(
+        window, dry_run=dry_run, use_llm=use_llm, as_of=moment, chief=chief, plan_only=plan_only
+    )
     if not outcomes:
         print("  （非交易日，或打分窗口被关闭）")
         return 0
@@ -1219,7 +1528,9 @@ def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) ->
             else:
                 status, wrong = f"❌ 错季 {got}", wrong + 1
             rows.append((sym, label, status, len(text), len(body), src[:64]))
-            print(f"  {sym:6} {label:10} {status:16} raw={len(text):7} body={len(body):7} {src[:64]}")
+            print(
+                f"  {sym:6} {label:10} {status:16} raw={len(text):7} body={len(body):7} {src[:64]}"
+            )
 
     print(f"\n=== transcript 检索审计：{len(rows)} 次查询 ===")
     print(f"  ✅ 正确 {len(rows) - wrong - missing}   ❌ 错季 {wrong}   —— 未找到 {missing}")
@@ -1244,34 +1555,45 @@ def pead_show(symbol: str) -> int:
         print(f"\n[Valuation] {d.expectation_set.valuation}")
     if d.market_setup:
         m = d.market_setup
-        print(f"\n[Setup] run-up vs sector {m.run_up_vs_sector_pct}% · EM {m.expected_move_pct}% "
-              f"· ATM IV {m.atm_iv}% · skew {m.iv_skew}")
+        print(
+            f"\n[Setup] run-up vs sector {m.run_up_vs_sector_pct}% · EM {m.expected_move_pct}% "
+            f"· ATM IV {m.atm_iv}% · skew {m.iv_skew}"
+        )
     if d.scorecard:
-        print(f"\n[Scorecard] 总分 {d.scorecard.total:+.2f} (门槛 {d.scorecard.threshold:+.1f}) — "
-              f"{d.scorecard.band}")
+        print(
+            f"\n[Scorecard] 总分 {d.scorecard.total:+.2f} (门槛 {d.scorecard.threshold:+.1f}) — "
+            f"{d.scorecard.band}"
+        )
         for ln in d.scorecard.lines:
-            print(f"  {ln.dim_key:14} score {ln.score:+.2f} × {ln.weight:.0%} = {ln.weighted:+.3f}  "
-                  f"{ln.note[:60]}")
+            print(
+                f"  {ln.dim_key:14} score {ln.score:+.2f} × {ln.weight:.0%} = {ln.weighted:+.3f}  "
+                f"{ln.note[:60]}"
+            )
     if d.decision_summary:
         print(f"\n[Decision] {d.decision_summary}")
 
     # Score-run ledger: which window produced it, whether it had a transcript, and how
     # far behind the print it was — the audit trail for the score windows.
     rows = store.conn.execute(
-        "SELECT * FROM pead_score_runs WHERE symbol = ? AND fiscal_label = ? "
-        "ORDER BY version", (symbol.upper(), d.fiscal_label)).fetchall()
+        "SELECT * FROM pead_score_runs WHERE symbol = ? AND fiscal_label = ? ORDER BY version",
+        (symbol.upper(), d.fiscal_label),
+    ).fetchall()
     if rows:
         print("\n[打分台账]")
         for r in rows:
             lat = f"{r['latency_hours']:.1f}h" if r["latency_hours"] is not None else "?"
-            print(f"  v{r['version']}  {r['scored_at'][:19]}  window={r['window'] or '-':4} "
-                  f"纪要={'✅' if r['has_transcript'] else '❌'} "
-                  f"终版={'✅' if r['final'] else '❌'} 距财报={lat} "
-                  f"总分={r['total'] if r['total'] is not None else '-'}")
+            print(
+                f"  v{r['version']}  {r['scored_at'][:19]}  window={r['window'] or '-':4} "
+                f"纪要={'✅' if r['has_transcript'] else '❌'} "
+                f"终版={'✅' if r['final'] else '❌'} 距财报={lat} "
+                f"总分={r['total'] if r['total'] is not None else '-'}"
+            )
         period = store.get_period(symbol.upper(), rows[-1]["earnings_date"])
         if period:
-            print(f"  财报: {period['earnings_date']} {period['session']}"
-                  f"（来源 {period['session_source']}）· label 来自 {period['label_source']}")
+            print(
+                f"  财报: {period['earnings_date']} {period['session']}"
+                f"（来源 {period['session_source']}）· label 来自 {period['label_source']}"
+            )
     return 0
 
 
@@ -1291,9 +1613,13 @@ def resume_cycle(thread_id: str, approval, channel=None) -> dict:
 
     if channel is not None:
         orders = result.get("order_results", [])
-        channel.push(Notification(
-            kind="fill_report", title=f"{thread_id}: {approval.status}",
-            body=f"{len(orders)} order(s) processed"))
+        channel.push(
+            Notification(
+                kind="fill_report",
+                title=f"{thread_id}: {approval.status}",
+                body=f"{len(orders)} order(s) processed",
+            )
+        )
     return result
 
 
@@ -1311,8 +1637,10 @@ def thetadata_probe(symbol: str) -> int:
     print(f"✅ ThetaData responded ({len(rows)} option-EOD rows).")
     # Confirm the parser end-to-end (Expected Move / IV / skew).
     setup = options.fetch(symbol.upper())
-    print(f"   setup: EM {setup.get('expected_move_pct')}% · ATM IV {setup.get('atm_iv')}% · "
-          f"skew {setup.get('iv_skew')} · exp {setup.get('expiration')} · src {setup.get('source')}")
+    print(
+        f"   setup: EM {setup.get('expected_move_pct')}% · ATM IV {setup.get('atm_iv')}% · "
+        f"skew {setup.get('iv_skew')} · exp {setup.get('expiration')} · src {setup.get('source')}"
+    )
     return 0
 
 
@@ -1328,39 +1656,68 @@ def ibkr_probe() -> int:
         print(f"❌ IBKR unavailable: {exc}")
         print("   Start TWS/IB Gateway, enable API (port 7497 paper), trust 127.0.0.1.")
         return 1
-    print(f"✅ Connected. account={pf.account_id or '?'}  "
-          f"NetLiq=${pf.net_liquidation:,.0f}  cash=${pf.cash:,.0f}  leverage={pf.leverage:.2f}x")
+    print(
+        f"✅ Connected. account={pf.account_id or '?'}  "
+        f"NetLiq=${pf.net_liquidation:,.0f}  cash=${pf.cash:,.0f}  leverage={pf.leverage:.2f}x"
+    )
     if not pf.positions:
         print("   (no open positions)")
     for p in pf.positions:
-        print(f"   {p.symbol:6} {p.qty:>8.0f} @ {p.avg_cost:>8.2f}  mv=${p.market_value:>12,.0f}  "
-              f"w={p.weight:.1%}  uPnL=${p.unrealized_pnl:,.0f}")
+        print(
+            f"   {p.symbol:6} {p.qty:>8.0f} @ {p.avg_cost:>8.2f}  mv=${p.market_value:>12,.0f}  "
+            f"w={p.weight:.1%}  uPnL=${p.unrealized_pnl:,.0f}"
+        )
     return 0
 
 
 def _setup_logging() -> None:
     import logging
 
-    logging.basicConfig(level=logging.WARNING,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-                        datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
 
 
-def run_data(action: str, value: str = "", *, source: str = "", series: str = "",
-             entity: str = "", provider: list[str] | None = None, since: str = "", as_of: str = "", limit: int = 20,
-             vintages: bool = False, dataset: str = "", metric: str = "",
-             product: str = "",
-             status: str = "", output_format: str = "json",
-             periods: list[str] | None = None, query_scope: str = "",
-             db_path: str = "", artifact_root: str = "", force: bool = False,
-             apply: bool = False, mode: str = "platform",
-             release_file: str = "", kind: str = "", operation: str = "",
-             window: int = 0, entities: str = "", period: str = "",
-             report_path: str = "", acquire: bool = False,
-             provider_lookup_attempts: int = 3,
-             provider_lookup_retry_seconds: float = 1.0,
-             approve_title_url_review: bool = False) -> int:
+def run_data(
+    action: str,
+    value: str = "",
+    *,
+    source: str = "",
+    series: str = "",
+    entity: str = "",
+    provider: list[str] | None = None,
+    since: str = "",
+    as_of: str = "",
+    limit: int = 20,
+    vintages: bool = False,
+    dataset: str = "",
+    metric: str = "",
+    product: str = "",
+    status: str = "",
+    output_format: str = "json",
+    periods: list[str] | None = None,
+    query_scope: str = "",
+    db_path: str = "",
+    artifact_root: str = "",
+    force: bool = False,
+    apply: bool = False,
+    mode: str = "platform",
+    release_file: str = "",
+    kind: str = "",
+    operation: str = "",
+    window: int = 0,
+    entities: str = "",
+    period: str = "",
+    report_path: str = "",
+    acquire: bool = False,
+    chart_dir: str = "",
+    provider_lookup_attempts: int = 3,
+    provider_lookup_retry_seconds: float = 1.0,
+    approve_title_url_review: bool = False,
+) -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
 
@@ -1377,7 +1734,8 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         if not db_path or not artifact_root:
             raise ValueError(
                 "pead-official-disclosure-coverage requires --db and --artifact-root "
-                "so acceptance cannot write production documents")
+                "so acceptance cannot write production documents"
+            )
         previous_root = os.environ.get("ATS_DOCS_ROOT")
         os.environ["ATS_DOCS_ROOT"] = artifact_root
         store = TradingMemory(db_path)
@@ -1385,15 +1743,19 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
             packages = collect_active_packages(store=store)
             report = write_acceptance_report(
                 report_path or Path(artifact_root) / "PEAD_OFFICIAL_DISCLOSURE_ACCEPTANCE.md",
-                packages)
+                packages,
+            )
             result = {
                 "scope": active_pead_targets(),
                 "packages": [package.as_dict() for package in packages],
                 "report": str(report),
                 "complete": all(package.complete for package in packages),
                 "side_effects": {
-                    "llm": 0, "pead_scoring": 0, "chief": 0,
-                    "broker_orders": 0, "trades": 0,
+                    "llm": 0,
+                    "pead_scoring": 0,
+                    "chief": 0,
+                    "broker_orders": 0,
+                    "trades": 0,
                 },
             }
         finally:
@@ -1409,9 +1771,11 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         from ..data.articles.ibkr_news import diagnose
 
         result = diagnose(
-            symbol=entity or value or "NVDA", providers=provider or None,
+            symbol=entity or value or "NVDA",
+            providers=provider or None,
             provider_lookup_attempts=provider_lookup_attempts,
-            provider_lookup_retry_seconds=provider_lookup_retry_seconds)
+            provider_lookup_retry_seconds=provider_lookup_retry_seconds,
+        )
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0
 
@@ -1425,8 +1789,14 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         )
 
         if action == "source-releases":
-            print(json.dumps(load_release_overlay(release_file or None), ensure_ascii=False,
-                             indent=2, default=str))
+            print(
+                json.dumps(
+                    load_release_overlay(release_file or None),
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                )
+            )
             return 0
         source_id = source or value
         if not source_id:
@@ -1438,7 +1808,9 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 if source_id != "semianalysis":
                     raise ValueError("--acquire is currently only supported for semianalysis")
                 if not db_path or not artifact_root:
-                    raise ValueError("source-acceptance --acquire requires --db and --artifact-root")
+                    raise ValueError(
+                        "source-acceptance --acquire requires --db and --artifact-root"
+                    )
                 # Mail/RSS acquisition is permitted only into explicitly supplied
                 # isolated storage.  The acceptance pass below then reads that same
                 # immutable asset catalog; no Chain/PEAD/Chief operation is invoked.
@@ -1447,7 +1819,9 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 from ..data import research as research_data
                 from ..memory import TradingMemory, reset_store_cache
 
-                previous_env = {name: os.environ.get(name) for name in ("ATS_DB_PATH", "ATS_DOCS_ROOT")}
+                previous_env = {
+                    name: os.environ.get(name) for name in ("ATS_DB_PATH", "ATS_DOCS_ROOT")
+                }
                 os.environ["ATS_DB_PATH"] = db_path
                 os.environ["ATS_DOCS_ROOT"] = artifact_root
                 reset_store_cache()
@@ -1456,21 +1830,30 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 acquired = list(batch.articles)
             else:
                 acquired = []
-            result = (assess_ibkr_news_with_fallback(
-                human_review_approved=approve_title_url_review)
-                if source_id == "ibkr_news" else assess_article_source(
-                    source_id, human_review_approved=approve_title_url_review))
-            result["acquisition"] = {"requested": acquire, "articles": len(acquired),
-                                     "isolated": bool(acquire),
-                                     "transport_status": batch.transport_status if acquire else {}}
+            result = (
+                assess_ibkr_news_with_fallback(human_review_approved=approve_title_url_review)
+                if source_id == "ibkr_news"
+                else assess_article_source(
+                    source_id, human_review_approved=approve_title_url_review
+                )
+            )
+            result["acquisition"] = {
+                "requested": acquire,
+                "articles": len(acquired),
+                "isolated": bool(acquire),
+                "transport_status": batch.transport_status if acquire else {},
+            }
             if acquire and not batch.complete:
                 result["outcome"] = "partial"
                 result["classification"] = "partial"
                 result["platform_eligible"] = False
-                result["checks"].append({
-                    "check": "acquisition_transport_completeness", "passed": False,
-                    "detail": batch.transport_status,
-                })
+                result["checks"].append(
+                    {
+                        "check": "acquisition_transport_completeness",
+                        "passed": False,
+                        "detail": batch.transport_status,
+                    }
+                )
         finally:
             if isolated_store is not None:
                 isolated_store.conn.close()
@@ -1489,11 +1872,13 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
             result["report"] = str(write_acceptance_report(result, report_path))
         if action == "source-publish":
             if apply:
-                result["release"] = publish_source(
-                    result, path=release_file or None, mode=mode)
+                result["release"] = publish_source(result, path=release_file or None, mode=mode)
             else:
-                result["release"] = {"applied": False, "mode": mode,
-                                     "reason": "pass --apply to mutate release overlay"}
+                result["release"] = {
+                    "applied": False,
+                    "mode": mode,
+                    "reason": "pass --apply to mutate release overlay",
+                }
         # A source report intentionally keeps the complete candidate ledger on disk.
         # Do not flood an operator's terminal with hundreds of deferred headlines.
         rendered = result
@@ -1525,7 +1910,8 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         repository = get_platform_structured_repository()
         try:
             result = company_financial_release_check(
-                repository, entities=[entity] if entity else None)
+                repository, entities=[entity] if entity else None
+            )
         finally:
             repository.close()
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -1547,7 +1933,12 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         products.unstructured.close()
         products._unstructured_repository = get_platform_unstructured_store()
     if db_path and action not in {
-            "validate-source", "ingest", "release-check", "publish", "rollback"}:
+        "validate-source",
+        "ingest",
+        "release-check",
+        "publish",
+        "rollback",
+    }:
         from ..data.products import DataProducts
         from ..data.structured import SQLiteStructuredRepository
 
@@ -1569,13 +1960,11 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         if db_path or artifact_root:
             if not db_path:
                 raise ValueError("--artifact-root requires --db for an isolated run")
-            repository = SQLiteStructuredRepository(
-                db_path, artifact_root=artifact_root or None)
+            repository = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
             repository.bootstrap_catalog(catalog)
             close_repository = True
         target_source = source or value
-        manager = ReleaseManager(
-            repository, catalog=catalog, path=release_file or None)
+        manager = ReleaseManager(repository, catalog=catalog, path=release_file or None)
         try:
             if action == "validate-source":
                 if not target_source:
@@ -1588,26 +1977,40 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
                 if since:
                     scope.setdefault("since", since)
                 result = ingest_source(
-                    repository, target_source,
-                    entities=[entity] if entity else [], periods=periods or [],
-                    query_scope=scope, catalog=catalog, force=force)
+                    repository,
+                    target_source,
+                    entities=[entity] if entity else [],
+                    periods=periods or [],
+                    query_scope=scope,
+                    catalog=catalog,
+                    force=force,
+                )
             elif action == "rollback":
                 if not target_source:
                     raise ValueError("rollback requires --source or VALUE")
                 result = manager.rollback(
                     kind=kind if kind in {"source", "consumer"} else "consumer",
-                    target_id=target_source, actor="cli")
+                    target_id=target_source,
+                    actor="cli",
+                )
             else:
                 target_id = target_source
                 if not target_id:
                     raise ValueError(f"{action} requires --source or VALUE")
-                check = (manager.check_consumer(target_id, mode=mode)
-                         if kind == "consumer"
-                         else manager.check_source(target_id, mode=mode))
-                result = manager.apply(check) if action == "publish" and apply else {
-                    **check, "applied": False,
-                    "operation": "publish_preview" if action == "publish"
-                    else "release_check"}
+                check = (
+                    manager.check_consumer(target_id, mode=mode)
+                    if kind == "consumer"
+                    else manager.check_source(target_id, mode=mode)
+                )
+                result = (
+                    manager.apply(check)
+                    if action == "publish" and apply
+                    else {
+                        **check,
+                        "applied": False,
+                        "operation": "publish_preview" if action == "publish" else "release_check",
+                    }
+                )
         finally:
             if close_repository:
                 repository.close()
@@ -1642,18 +2045,20 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
             return 0
         # Preserve the historical document-quality top-level contract while adding
         # the structured report under an explicit namespace.
-        result = structured if dataset else {
-            **products.quality(), "structured": structured}
+        result = structured if dataset else {**products.quality(), "structured": structured}
     elif action == "coverage":
         report = products.structured_quality_report(dataset=dataset or None)
         result = {
             "generated_at": report["generated_at"],
             "dataset_filter": report["dataset_filter"],
-            "datasets": [{
-                "dataset_id": row["dataset_id"],
-                "catalog_status": row["catalog_status"],
-                "coverage": row["dimensions"]["coverage"],
-            } for row in report["datasets"]],
+            "datasets": [
+                {
+                    "dataset_id": row["dataset_id"],
+                    "catalog_status": row["catalog_status"],
+                    "coverage": row["dimensions"]["coverage"],
+                }
+                for row in report["datasets"]
+            ],
         }
     elif action == "series":
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
@@ -1661,31 +2066,59 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
             if not entity:
                 raise ValueError("structured metric series requires --entity")
             result = products.metric_series(
-                metric=metric, entity=entity, dataset=dataset or None,
-                source_id=source or None, since=since or None, as_of=cutoff,
+                metric=metric,
+                entity=entity,
+                dataset=dataset or None,
+                source_id=source or None,
+                since=since or None,
+                as_of=cutoff,
                 include_vintages=vintages,
-                source_strategy="all" if source else "selected")
+                source_strategy="all" if source else "selected",
+            )
         else:
             result = products.indicator_series(
-                source_id=source or None, series=series or None, entity=entity or None,
-                since=since or None, as_of=cutoff, include_vintages=vintages,
+                source_id=source or None,
+                series=series or None,
+                entity=entity or None,
+                since=since or None,
+                as_of=cutoff,
+                include_vintages=vintages,
             )
     elif action == "ai-adoption":
         if not product or not period:
             raise ValueError("ai-adoption requires --product and --period")
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         result = products.ai_work_adoption_snapshot(
-            source_product=product, period=period, as_of=cutoff)
+            source_product=product, period=period, as_of=cutoff
+        )
     elif action == "ai-job":
         if not value or not product or not period:
             raise ValueError("ai-job requires OCCUPATION plus --product and --period")
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
-        result = products.ai_job_profile(
-            value, source_product=product, period=period, as_of=cutoff)
+        result = products.ai_job_profile(value, source_product=product, period=period, as_of=cutoff)
+    elif action == "ai-production":
+        if product and product != "1p_api":
+            raise ValueError(
+                "ai-production only supports governed 1p_api; Claude.ai cannot enter this proxy"
+            )
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        selected_periods = periods or ([period] if period else None)
+        from ..agents.evidence import observe_ai_production_penetration
+
+        result = observe_ai_production_penetration(
+            periods=selected_periods,
+            as_of=cutoff,
+            top_n=limit,
+            chart_dir=chart_dir,
+            products=products,
+        )
     elif action == "earnings-insight":
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
-        value = (products.earnings_insight_vintages(as_of=cutoff, limit=limit)
-                 if vintages else products.earnings_insight_snapshot(as_of=cutoff))
+        value = (
+            products.earnings_insight_vintages(as_of=cutoff, limit=limit)
+            if vintages
+            else products.earnings_insight_snapshot(as_of=cutoff)
+        )
         if isinstance(value, list):
             result = [item.model_dump(mode="json") for item in value]
         else:
@@ -1699,31 +2132,43 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
 
         report_rows = []
         for row in products.structured.artifacts_for(
-                dataset_id="sp500_earnings_insight", limit=limit):
+            dataset_id="sp500_earnings_insight", limit=limit
+        ):
             metadata = json.loads(row.get("metadata_json") or "{}")
-            report_rows.append({
-                "artifact_id": row.get("artifact_id"),
-                "content_hash": row.get("content_hash"),
-                "bytes": row.get("bytes"), "fetched_at": row.get("fetched_at"),
-                "media_type": row.get("media_type"),
-                "report_date": metadata.get("report_date"),
-                "source_url": safe_url(row.get("source_url")),
-            })
+            report_rows.append(
+                {
+                    "artifact_id": row.get("artifact_id"),
+                    "content_hash": row.get("content_hash"),
+                    "bytes": row.get("bytes"),
+                    "fetched_at": row.get("fetched_at"),
+                    "media_type": row.get("media_type"),
+                    "report_date": metadata.get("report_date"),
+                    "source_url": safe_url(row.get("source_url")),
+                }
+            )
         result = {
             **products.earnings_insight_status(limit=limit),
-            "source_health": [row for row in products.structured.source_health()
-                              if row.get("source_id") in {
-                                  "factset_earnings_insight_metrics",
-                                  "factset_earnings_insight_doc"}],
+            "source_health": [
+                row
+                for row in products.structured.source_health()
+                if row.get("source_id")
+                in {"factset_earnings_insight_metrics", "factset_earnings_insight_doc"}
+            ],
             "reports": report_rows,
             "partition_history": {
                 partition: products.structured.release_manifests(
-                    dataset_id="sp500_earnings_insight", partition=partition,
-                    passed_only=False, limit=limit)
-                for partition in ("index_core", "sector_core")},
+                    dataset_id="sp500_earnings_insight",
+                    partition=partition,
+                    passed_only=False,
+                    limit=limit,
+                )
+                for partition in ("index_core", "sector_core")
+            },
             "attempts": products.structured.ingestion_history(
                 source_id="factset_earnings_insight_metrics",
-                dataset_id="sp500_earnings_insight", limit=limit),
+                dataset_id="sp500_earnings_insight",
+                limit=limit,
+            ),
         }
     elif action in {"factset-import", "factset-reprocess"}:
         if not report_path:
@@ -1733,37 +2178,50 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
 
         version = value or "factset-text-v1"
-        result = FactSetWeeklyPipeline(
-            products.structured, products.unstructured).run(
-                local_pdf=report_path,
-                document_processor_version=f"factset-document-{version}",
-                index_extractor_version=version,
-                sector_extractor_version=version)
+        result = FactSetWeeklyPipeline(products.structured, products.unstructured).run(
+            local_pdf=report_path,
+            document_processor_version=f"factset-document-{version}",
+            index_extractor_version=version,
+            sector_extractor_version=version,
+        )
     elif action == "derive":
         if not metric or not entity or not operation:
             raise ValueError("derive requires --metric, --entity and --operation")
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         base = products.metric_series(
-            metric=metric, entity=entity, dataset=dataset or None,
-            since=since or None, as_of=cutoff, include_vintages=vintages,
-            quality="strict")
+            metric=metric,
+            entity=entity,
+            dataset=dataset or None,
+            since=since or None,
+            as_of=cutoff,
+            include_vintages=vintages,
+            quality="strict",
+        )
         result = products.derive(
-            operation=operation, query_result=base,
-            window=window or None, min_periods=window or None)
+            operation=operation,
+            query_result=base,
+            window=window or None,
+            min_periods=window or None,
+        )
     elif action == "cross-section":
-        selected_entities = [item.strip().upper() for item in entities.split(",")
-                             if item.strip()]
+        selected_entities = [item.strip().upper() for item in entities.split(",") if item.strip()]
         if not metric or not selected_entities or not period:
-            raise ValueError(
-                "cross-section requires --metric, --entities and --period")
+            raise ValueError("cross-section requires --metric, --entities and --period")
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         result = products.cross_section(
-            metric=metric, entities=selected_entities, period=period,
-            dataset=dataset or None, as_of=cutoff)
+            metric=metric,
+            entities=selected_entities,
+            period=period,
+            dataset=dataset or None,
+            as_of=cutoff,
+        )
     elif action == "search":
         result = products.search_documents(
-            value, entity=entity or None, source_contains=source or None,
-            published_since=since or None, limit=limit,
+            value,
+            entity=entity or None,
+            source_contains=source or None,
+            published_since=since or None,
+            limit=limit,
         )
     elif action == "company":
         result = products.company_research_package(value)
@@ -1773,19 +2231,28 @@ def run_data(action: str, value: str = "", *, source: str = "", series: str = ""
         result = products.lineage(value)
     elif action == "conflicts":
         result = products.structured_conflicts(
-            dataset_id=dataset or None, status=status or "open", limit=limit)
+            dataset_id=dataset or None, status=status or "open", limit=limit
+        )
     elif action == "pending-mappings":
-        result = products.structured_pending_mappings(
-            status=status or "pending", limit=limit)
+        result = products.structured_pending_mappings(status=status or "pending", limit=limit)
     elif action == "ingestion-history":
         result = products.structured_ingestion_history(
-            source_id=source or None, dataset_id=dataset or None, limit=limit)
+            source_id=source or None, dataset_id=dataset or None, limit=limit
+        )
     elif action == "artifacts":
         result = products.structured_artifact_usage(source=source or None)
     else:
         raise ValueError(f"unknown data action: {action}")
-    if output_format == "markdown" and action in {
-            "catalog", "describe", "availability", "examples"}:
+    if output_format == "markdown" and action == "ai-production":
+        from ..agents.evidence import render_ai_production_markdown
+
+        print(render_ai_production_markdown(result), end="")
+    elif output_format == "markdown" and action in {
+        "catalog",
+        "describe",
+        "availability",
+        "examples",
+    }:
         from ..data.structured import render_discovery_markdown
 
         print(render_discovery_markdown(result), end="")
@@ -1799,66 +2266,155 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
-    data.add_argument("action", choices=[
-        "catalog", "config", "financial-package-check", "pead-official-disclosure-coverage", "source-acceptance", "source-publish", "source-releases", "ibkr-news-diagnostics", "describe", "availability", "examples", "releases",
-        "validate-source", "ingest", "release-check", "publish", "rollback",
-        "sources", "datasets", "metrics", "health", "coverage", "quality", "series",
-        "ai-adoption", "ai-job",
-        "derive", "cross-section", "earnings-insight", "factset-status",
-        "factset-import", "factset-reprocess",
-        "search", "company", "claim", "lineage", "conflicts", "pending-mappings",
-        "ingestion-history", "artifacts"])
-    data.add_argument("value", nargs="?", default="",
-                      help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID")
+    data.add_argument(
+        "action",
+        choices=[
+            "catalog",
+            "config",
+            "financial-package-check",
+            "pead-official-disclosure-coverage",
+            "source-acceptance",
+            "source-publish",
+            "source-releases",
+            "ibkr-news-diagnostics",
+            "describe",
+            "availability",
+            "examples",
+            "releases",
+            "validate-source",
+            "ingest",
+            "release-check",
+            "publish",
+            "rollback",
+            "sources",
+            "datasets",
+            "metrics",
+            "health",
+            "coverage",
+            "quality",
+            "series",
+            "ai-adoption",
+            "ai-job",
+            "ai-production",
+            "derive",
+            "cross-section",
+            "earnings-insight",
+            "factset-status",
+            "factset-import",
+            "factset-reprocess",
+            "search",
+            "company",
+            "claim",
+            "lineage",
+            "conflicts",
+            "pending-mappings",
+            "ingestion-history",
+            "artifacts",
+        ],
+    )
+    data.add_argument(
+        "value",
+        nargs="?",
+        default="",
+        help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID",
+    )
     data.add_argument("--source", default="", help="series: source ID；search: 来源过滤")
-    data.add_argument("--provider", action="append", default=[],
-                      help="ibkr-news-diagnostics: 待探测的 provider code，可重复；默认探测全部可用项")
-    data.add_argument("--provider-lookup-attempts", type=int, default=3,
-                      help="ibkr-news-diagnostics: provider 枚举的最大尝试次数（默认 3）")
-    data.add_argument("--provider-lookup-retry-seconds", type=float, default=1.0,
-                      help="ibkr-news-diagnostics: provider 枚举重试间隔秒数（默认 1）")
-    data.add_argument("--approve-title-url-review", action="store_true",
-                      help="source-acceptance/source-publish: 明确确认已人工审阅标题/URL 清单")
+    data.add_argument(
+        "--provider",
+        action="append",
+        default=[],
+        help="ibkr-news-diagnostics: 待探测的 provider code，可重复；默认探测全部可用项",
+    )
+    data.add_argument(
+        "--provider-lookup-attempts",
+        type=int,
+        default=3,
+        help="ibkr-news-diagnostics: provider 枚举的最大尝试次数（默认 3）",
+    )
+    data.add_argument(
+        "--provider-lookup-retry-seconds",
+        type=float,
+        default=1.0,
+        help="ibkr-news-diagnostics: provider 枚举重试间隔秒数（默认 1）",
+    )
+    data.add_argument(
+        "--approve-title-url-review",
+        action="store_true",
+        help="source-acceptance/source-publish: 明确确认已人工审阅标题/URL 清单",
+    )
     data.add_argument("--series", default="", help="series: 指标名称")
     data.add_argument("--metric", default="", help="series: 统一结构化 metric ID")
-    data.add_argument("--product", choices=["claude_ai", "1p_api"], default="",
-                      help="ai-adoption/ai-job: Claude source product（不可省略）")
+    data.add_argument(
+        "--product",
+        choices=["claude_ai", "1p_api"],
+        default="",
+        help="ai-adoption/ai-job: Claude source product（不可省略）",
+    )
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
     data.add_argument("--entity", default="", help="实体过滤")
     data.add_argument("--since", default="", help="最早期间或发布日期")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
     data.add_argument("--limit", type=int, default=20, help="通用结果条数")
     data.add_argument("--status", default="", help="conflicts / pending-mappings 状态过滤")
-    data.add_argument("--format", dest="output_format", choices=["json", "markdown"],
-                      default="json", help="quality/catalog/describe 等输出格式")
+    data.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["json", "markdown"],
+        default="json",
+        help="quality/catalog/describe 等输出格式",
+    )
     data.add_argument("--vintages", action="store_true", help="series: 包含所有修订版本")
-    data.add_argument("--kind", choices=["source", "consumer", "dataset", "metric"], default="",
-                      help="describe: 限定对象类型")
-    data.add_argument("--periods", action="append", default=[],
-                      help="ingest: 目标期间，可重复")
-    data.add_argument("--query-scope", default="",
-                      help="ingest: Provider 查询范围 JSON")
-    data.add_argument("--db", dest="db_path", default="",
-                      help="ingest/release: 隔离或目标 SQLite 路径")
-    data.add_argument("--artifact-root", default="",
-                      help="ingest: 隔离 raw artifact 目录（需同时 --db）")
-    data.add_argument("--report-path", default="",
-                      help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径")
-    data.add_argument("--force", action="store_true",
-                      help="ingest: 仅用于隔离验收，跳过已发布 source 的重复保护")
-    data.add_argument("--acquire", action="store_true",
-                      help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库")
-    data.add_argument("--apply", action="store_true",
-                      help="publish/source-publish: 显式执行写操作")
-    data.add_argument("--mode", choices=["platform"], default="platform",
-                      help="publish: 唯一受支持的数据路径")
-    data.add_argument("--release-file", default="",
-                      help="发布覆盖层路径；structured 默认 var/structured_data，source-* 默认 var/data/unstructured")
-    data.add_argument("--operation", choices=["yoy", "mom", "rolling"], default="",
-                      help="derive: 派生运算")
+    data.add_argument(
+        "--kind",
+        choices=["source", "consumer", "dataset", "metric"],
+        default="",
+        help="describe: 限定对象类型",
+    )
+    data.add_argument(
+        "--periods", action="append", default=[], help="ingest/ai-production: 目标期间，可重复"
+    )
+    data.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="ai-production: 请求可重放 snapshot（该 Observer 默认始终附带 manifest）",
+    )
+    data.add_argument(
+        "--chart-dir", default="", help="ai-production: optional PNG/sidecar output directory"
+    )
+    data.add_argument("--query-scope", default="", help="ingest: Provider 查询范围 JSON")
+    data.add_argument(
+        "--db", dest="db_path", default="", help="ingest/release: 隔离或目标 SQLite 路径"
+    )
+    data.add_argument(
+        "--artifact-root", default="", help="ingest: 隔离 raw artifact 目录（需同时 --db）"
+    )
+    data.add_argument(
+        "--report-path",
+        default="",
+        help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径",
+    )
+    data.add_argument(
+        "--force", action="store_true", help="ingest: 仅用于隔离验收，跳过已发布 source 的重复保护"
+    )
+    data.add_argument(
+        "--acquire",
+        action="store_true",
+        help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库",
+    )
+    data.add_argument("--apply", action="store_true", help="publish/source-publish: 显式执行写操作")
+    data.add_argument(
+        "--mode", choices=["platform"], default="platform", help="publish: 唯一受支持的数据路径"
+    )
+    data.add_argument(
+        "--release-file",
+        default="",
+        help="发布覆盖层路径；structured 默认 var/structured_data，source-* 默认 var/data/unstructured",
+    )
+    data.add_argument(
+        "--operation", choices=["yoy", "mom", "rolling"], default="", help="derive: 派生运算"
+    )
     data.add_argument("--window", type=int, default=0, help="derive rolling 窗口")
-    data.add_argument("--entities", default="",
-                      help="cross-section: 逗号分隔实体")
+    data.add_argument("--entities", default="", help="cross-section: 逗号分隔实体")
     data.add_argument("--period", default="", help="cross-section: 比较期间")
     sub.add_parser("ibkr", help="probe IBKR paper connectivity (account + positions)")
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
@@ -1867,33 +2423,59 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
-    sch.add_argument("--no-llm", action="store_true",
-                     help="run the same schedule without external-model calls (useful for safe acceptance checks)")
-    sch.add_argument("--window", choices=["amc", "bmo"],
-                     help="run one PEAD score window immediately, then exit")
+    sch.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="run the same schedule without external-model calls (useful for safe acceptance checks)",
+    )
+    sch.add_argument(
+        "--window", choices=["amc", "bmo"], help="run one PEAD score window immediately, then exit"
+    )
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
-    se.add_argument("action",
-                    choices=["review", "show", "probe", "crosssection", "kbperturb", "layer",
-                             "html"])
+    se.add_argument(
+        "action", choices=["review", "show", "probe", "crosssection", "kbperturb", "layer", "html"]
+    )
     se.add_argument("name", nargs="?", default="ai_hardware")
-    se.add_argument("--layer", default="all",
-                    help="crosssection/layer: layer key (e.g. L4_interconnect) or 'all'")
-    se.add_argument("--date", default="",
-                    help="html: YYYY-MM-DD 的已存档 review（默认最新一次）")
-    se.add_argument("--structure", action="store_true", help="crosssection: blend KB structure analyst")
-    se.add_argument("--mode", default="poison", choices=["poison", "ablate", "control"],
-                    help="kbperturb: 倒序判据(poison) / 删掉判据(ablate) / "
-                         "同一份笔记跑两次测噪声底(control)")
+    se.add_argument(
+        "--layer",
+        default="all",
+        help="crosssection/layer: layer key (e.g. L4_interconnect) or 'all'",
+    )
+    se.add_argument("--date", default="", help="html: YYYY-MM-DD 的已存档 review（默认最新一次）")
+    se.add_argument(
+        "--structure", action="store_true", help="crosssection: blend KB structure analyst"
+    )
+    se.add_argument(
+        "--mode",
+        default="poison",
+        choices=["poison", "ablate", "control"],
+        help="kbperturb: 倒序判据(poison) / 删掉判据(ablate) / 同一份笔记跑两次测噪声底(control)",
+    )
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
-    evi.add_argument("action",
-                     choices=["observe", "show", "claims", "report", "sources",
-                              "probe", "propose", "proposals", "review", "kbreview",
-                              "collect", "articles"])
+    evi.add_argument(
+        "action",
+        choices=[
+            "observe",
+            "show",
+            "claims",
+            "report",
+            "sources",
+            "probe",
+            "propose",
+            "proposals",
+            "review",
+            "kbreview",
+            "collect",
+            "articles",
+            "layer",
+            "ai-production",
+        ],
+    )
     evi.add_argument("symbol", nargs="?", help="observe: 标的，如 MU")
     evi.add_argument("--file", default="", help="observe: 用本地文档而不是自动抓取")
     evi.add_argument("--entity", default="", help="show: 只看某实体 / claims: 行业名")
@@ -1901,6 +2483,29 @@ def main(argv: list[str] | None = None) -> int:
     evi.add_argument("--accept", action="store_true", help="review: 采纳（默认拒绝）")
     evi.add_argument("--reviewer", default="", help="review: 审阅人")
     evi.add_argument("--note", default="", help="review: 理由")
+    evi.add_argument(
+        "--sector",
+        default="",
+        help="layer/ai-production: 必填，sector 配置名",
+    )
+    evi.add_argument(
+        "--layer",
+        default="",
+        help="layer/ai-production: 必填，只运行该层已注册的 Observer",
+    )
+    evi.add_argument(
+        "--periods", action="append", default=[], help="layer/ai-production: 目标期间，可重复"
+    )
+    evi.add_argument("--as-of", default="", help="layer/ai-production: 历史可见时点（ISO 8601）")
+    evi.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["json", "markdown"],
+        default="markdown",
+        help="layer/ai-production: 输出格式（默认 Markdown 审阅文档）",
+    )
+    evi.add_argument("--output", default="", help="layer/ai-production: Markdown 审阅文档路径")
+    evi.add_argument("--chart-dir", default="", help="layer/ai-production: PNG/sidecar 输出目录")
     ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
     ev.add_argument("action", choices=["list", "upcoming"])
     ev.add_argument("--days", type=int, default=30, help="upcoming window")
@@ -1917,37 +2522,74 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
-    jr = sub.add_parser("journal",
-                        help="交易日志 (doctor / reconcile / episodes / mark / invalidate / review / "
-                             "calibrate / reflect / ledger / score)")
-    jr.add_argument("action", choices=["doctor", "reconcile", "episodes", "mark",
-                                       "invalidate", "review", "calibrate", "reflect",
-                                       "ledger", "score"])
-    jr.add_argument("--dry-run", action="store_true",
-                    help="reconcile: 只读，打印将要写入什么")
+    jr = sub.add_parser(
+        "journal",
+        help="交易日志 (doctor / reconcile / episodes / mark / invalidate / review / "
+        "calibrate / reflect / ledger / score)",
+    )
+    jr.add_argument(
+        "action",
+        choices=[
+            "doctor",
+            "reconcile",
+            "episodes",
+            "mark",
+            "invalidate",
+            "review",
+            "calibrate",
+            "reflect",
+            "ledger",
+            "score",
+        ],
+    )
+    jr.add_argument("--dry-run", action="store_true", help="reconcile: 只读，打印将要写入什么")
     jr.add_argument("--month", help="ledger: YYYY-MM（默认本月）")
-    jr.add_argument("--backfill", action="store_true",
-                    help="score: 先用已打分的 dossier 回填预测")
+    jr.add_argument("--backfill", action="store_true", help="score: 先用已打分的 dossier 回填预测")
     jr.add_argument("--symbol", help="episodes: 只看这个标的")
-    jr.add_argument("--no-llm", action="store_true",
-                    help="invalidate: 只算 horizon_overdue_days，不调 LLM 判定失效；"
-                        "reflect: 只出确定性证据+当前需要处理清单，不调 LLM 生成假设")
-    jr.add_argument("--quarterly", action="store_true",
-                    help="calibrate: 按季度出报告（默认按月）")
-    tr = sub.add_parser("trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell")
-    tr.add_argument("action", choices=["portfolio", "perf", "snapshot", "fills", "orders",
-                                       "cancel", "execute", "buy", "sell"])
+    jr.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="invalidate: 只算 horizon_overdue_days，不调 LLM 判定失效；"
+        "reflect: 只出确定性证据+当前需要处理清单，不调 LLM 生成假设",
+    )
+    jr.add_argument("--quarterly", action="store_true", help="calibrate: 按季度出报告（默认按月）")
+    tr = sub.add_parser(
+        "trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell"
+    )
+    tr.add_argument(
+        "action",
+        choices=[
+            "portfolio",
+            "perf",
+            "snapshot",
+            "fills",
+            "orders",
+            "cancel",
+            "execute",
+            "buy",
+            "sell",
+        ],
+    )
     tr.add_argument("symbol", nargs="?", help="ticker (execute/fills optional; buy/sell required)")
     tr.add_argument("qty", nargs="?", type=float, help="shares (buy/sell)")
     tr.add_argument("--limit", type=float, help="limit price (buy/sell); omit for market")
     tr.add_argument("--days", type=int, default=30, help="perf window (snapshots)")
     tr.add_argument("--report", action="store_true", help="perf: also write an Obsidian report")
-    tr.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli",
-                    help="approval channel for orders")
-    tr.add_argument("--offline", action="store_true", help="portfolio: show stored snapshot without IBKR")
-    tr.add_argument("--dry-run", action="store_true", help="go through approval but place no orders")
-    te = sub.add_parser("technical",
-                        help="technical analyst 技术面 (review / show / probe) — 确定性无 LLM")
+    tr.add_argument(
+        "--channel",
+        choices=["cli", "feishu", "feishu_bot"],
+        default="cli",
+        help="approval channel for orders",
+    )
+    tr.add_argument(
+        "--offline", action="store_true", help="portfolio: show stored snapshot without IBKR"
+    )
+    tr.add_argument(
+        "--dry-run", action="store_true", help="go through approval but place no orders"
+    )
+    te = sub.add_parser(
+        "technical", help="technical analyst 技术面 (review / show / probe) — 确定性无 LLM"
+    )
     te.add_argument("action", choices=["review", "show", "probe"])
     te.add_argument("name", nargs="?", default="technical")
     te.add_argument("--offline", action="store_true", help="skip broker + price fetch")
@@ -1958,51 +2600,102 @@ def main(argv: list[str] | None = None) -> int:
     ma.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     ma.add_argument("--offline", action="store_true", help="skip FRED/yfinance/Tavily")
     ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
-    pe = sub.add_parser("pead",
-                        help="PEAD earnings workflow (prep / score / show / monitor / watch / research)")
-    pe.add_argument("action", choices=["prep", "score", "show", "monitor", "watch", "research",
-                                       "transcriptprobe", "scorewindow"])
+    pe = sub.add_parser(
+        "pead", help="PEAD earnings workflow (prep / score / show / monitor / watch / research)"
+    )
+    pe.add_argument(
+        "action",
+        choices=[
+            "prep",
+            "score",
+            "show",
+            "monitor",
+            "watch",
+            "research",
+            "transcriptprobe",
+            "scorewindow",
+        ],
+    )
     pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch` / `research`)")
-    pe.add_argument("--quarters", type=int, default=4,
-                    help="transcriptprobe: how many recent quarters per target")
-    pe.add_argument("--window", choices=["amc", "bmo"],
-                    help="scorewindow: which window to run")
-    pe.add_argument("--as-of", dest="as_of",
-                    help="scorewindow: ISO datetime; rewinds the calendar/state layer only")
-    pe.add_argument("--plan-only", action="store_true",
-                    help="scorewindow: print the routing decision without scoring")
-    pe.add_argument("--no-chief", action="store_true",
-                    help="scorewindow: score but don't run the Chief / push approval")
+    pe.add_argument(
+        "--quarters",
+        type=int,
+        default=4,
+        help="transcriptprobe: how many recent quarters per target",
+    )
+    pe.add_argument("--window", choices=["amc", "bmo"], help="scorewindow: which window to run")
+    pe.add_argument(
+        "--as-of",
+        dest="as_of",
+        help="scorewindow: ISO datetime; rewinds the calendar/state layer only",
+    )
+    pe.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="scorewindow: print the routing decision without scoring",
+    )
+    pe.add_argument(
+        "--no-chief",
+        action="store_true",
+        help="scorewindow: score but don't run the Chief / push approval",
+    )
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     pe.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     pe.add_argument("--offline", action="store_true", help="skip live data + IBKR (local only)")
     pe.add_argument("--no-llm", action="store_true", help="skip LLM (stub agents)")
-    pe.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli",
-                    help="approval channel when --chief executes")
-    pe.add_argument("--chief", action="store_true",
-                    help="score: run the Chief immediately after the recommendation persists")
+    pe.add_argument(
+        "--channel",
+        choices=["cli", "feishu", "feishu_bot"],
+        default="cli",
+        help="approval channel when --chief executes",
+    )
+    pe.add_argument(
+        "--chief",
+        action="store_true",
+        help="score: run the Chief immediately after the recommendation persists",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "data":
         if args.action in {"search", "company", "claim", "lineage"} and not args.value:
             parser.error(f"data {args.action} requires VALUE")
-        return run_data(args.action, args.value, source=args.source, series=args.series,
-                        entity=args.entity, provider=args.provider, since=args.since, as_of=args.as_of,
-                        limit=args.limit, vintages=args.vintages, dataset=args.dataset,
-                        metric=args.metric, status=args.status,
-                        product=args.product,
-                        output_format=args.output_format, periods=args.periods,
-                        query_scope=args.query_scope, db_path=args.db_path,
-                        artifact_root=args.artifact_root, force=args.force,
-                        apply=args.apply, mode=args.mode,
-                        release_file=args.release_file, kind=args.kind,
-                        operation=args.operation, window=args.window,
-                        entities=args.entities, period=args.period,
-                        report_path=args.report_path, acquire=args.acquire,
-                        provider_lookup_attempts=args.provider_lookup_attempts,
-                        provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,
-                        approve_title_url_review=args.approve_title_url_review)
+        return run_data(
+            args.action,
+            args.value,
+            source=args.source,
+            series=args.series,
+            entity=args.entity,
+            provider=args.provider,
+            since=args.since,
+            as_of=args.as_of,
+            limit=args.limit,
+            vintages=args.vintages,
+            dataset=args.dataset,
+            metric=args.metric,
+            status=args.status,
+            product=args.product,
+            output_format=args.output_format,
+            periods=args.periods,
+            query_scope=args.query_scope,
+            db_path=args.db_path,
+            artifact_root=args.artifact_root,
+            force=args.force,
+            apply=args.apply,
+            mode=args.mode,
+            release_file=args.release_file,
+            kind=args.kind,
+            operation=args.operation,
+            window=args.window,
+            entities=args.entities,
+            period=args.period,
+            report_path=args.report_path,
+            acquire=args.acquire,
+            chart_dir=args.chart_dir,
+            provider_lookup_attempts=args.provider_lookup_attempts,
+            provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,
+            approve_title_url_review=args.approve_title_url_review,
+        )
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":
@@ -2013,8 +2706,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule":
         from .scheduler import start
 
-        start(dry_run=not args.live, run_once=args.now, window=args.window,
-              use_llm=not args.no_llm)
+        start(dry_run=not args.live, run_once=args.now, window=args.window, use_llm=not args.no_llm)
         return 0
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)
@@ -2040,17 +2732,36 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "crosssection":
             return run_cross_section(args.name, args.layer, structure=args.structure)
         if args.action == "layer":
-            return run_layer_review(args.name, args.layer, use_llm=not args.no_llm,
-                                    live_data=not args.offline)
+            return run_layer_review(
+                args.name, args.layer, use_llm=not args.no_llm, live_data=not args.offline
+            )
         if args.action == "html":
             return run_sector_html(args.name, date=args.date)
-        run_sector_review(args.name, use_llm=not args.no_llm,
-                          live_data=not args.offline, write_report=not args.no_report)
+        run_sector_review(
+            args.name,
+            use_llm=not args.no_llm,
+            live_data=not args.offline,
+            write_report=not args.no_report,
+        )
         return 0
     if args.command == "evidence":
-        return run_evidence(args.action, args.symbol, file=args.file,
-                            entity=args.entity, limit=args.limit, accept=args.accept,
-                            reviewer=args.reviewer, note=args.note)
+        return run_evidence(
+            args.action,
+            args.symbol,
+            file=args.file,
+            entity=args.entity,
+            limit=args.limit,
+            accept=args.accept,
+            reviewer=args.reviewer,
+            note=args.note,
+            sector=args.sector,
+            layer=args.layer,
+            periods=args.periods,
+            as_of=args.as_of,
+            output_format=args.output_format,
+            chart_dir=args.chart_dir,
+            output=args.output,
+        )
     if args.command == "events":
         return events_list(days=args.days if args.action == "upcoming" else None)
     if args.command == "chief":
@@ -2058,9 +2769,14 @@ def main(argv: list[str] | None = None) -> int:
             return chief_show()
         if args.action == "probe":
             return chief_probe(offline=args.offline)
-        return run_chief(execute=not args.no_execute, dry_run=not args.live,
-                         channel=args.channel, use_llm=not args.no_llm,
-                         auto=args.yes, offline=args.offline)
+        return run_chief(
+            execute=not args.no_execute,
+            dry_run=not args.live,
+            channel=args.channel,
+            use_llm=not args.no_llm,
+            auto=args.yes,
+            offline=args.offline,
+        )
     if args.command == "risk":
         if args.action == "report":
             return risk_report(write_report=args.report, offline=getattr(args, "offline", False))
@@ -2078,9 +2794,11 @@ def main(argv: list[str] | None = None) -> int:
 
             rc = episodes_mod.run()
             for ep in get_store().list_episodes(symbol=args.symbol or "", limit=50):
-                print(f"  {ep.symbol:6} {ep.direction:5} {ep.status:6} "
-                      f"origin={ep.origin:12} realized={ep.realized_pnl} "
-                      f"entry={ep.avg_entry} exit={ep.avg_exit}")
+                print(
+                    f"  {ep.symbol:6} {ep.direction:5} {ep.status:6} "
+                    f"origin={ep.origin:12} realized={ep.realized_pnl} "
+                    f"entry={ep.avg_entry} exit={ep.avg_exit}"
+                )
             return rc
         if args.action == "mark":
             from ..journal import marks
@@ -2131,22 +2849,33 @@ def main(argv: list[str] | None = None) -> int:
         # buy / sell — manual order (symbol + qty required)
         if not args.symbol or args.qty is None:
             parser.error(f"trader {args.action} requires SYMBOL and QTY")
-        return trader_manual(args.action, args.symbol, args.qty, limit=args.limit,
-                             channel=args.channel, dry_run=args.dry_run)
+        return trader_manual(
+            args.action,
+            args.symbol,
+            args.qty,
+            limit=args.limit,
+            channel=args.channel,
+            dry_run=args.dry_run,
+        )
     if args.command == "technical":
         if args.action == "show":
             return technical_show(args.name)
         if args.action == "probe":
             return technical_probe(args.name, live_data=not args.offline)
-        return run_technical_review(args.name, live_data=not args.offline,
-                                    write_report=not args.no_report)
+        return run_technical_review(
+            args.name, live_data=not args.offline, write_report=not args.no_report
+        )
     if args.command == "macro":
         if args.action == "show":
             return macro_show(args.name)
         if args.action == "probe":
             return macro_probe(args.name, live_data=not args.offline)
-        run_macro_review(args.name, use_llm=not args.no_llm,
-                         live_data=not args.offline, write_report=not args.no_report)
+        run_macro_review(
+            args.name,
+            use_llm=not args.no_llm,
+            live_data=not args.offline,
+            write_report=not args.no_report,
+        )
         return 0
     if args.command == "pead":
         if args.action == "watch":
@@ -2156,14 +2885,20 @@ def main(argv: list[str] | None = None) -> int:
             run_pead_research(use_llm=not args.no_llm)
             return 0
         if args.action == "transcriptprobe":
-            return run_transcript_probe([args.symbol] if args.symbol else None,
-                                        quarters=args.quarters)
+            return run_transcript_probe(
+                [args.symbol] if args.symbol else None, quarters=args.quarters
+            )
         if args.action == "scorewindow":
             if not args.window:
                 parser.error("pead scorewindow requires --window amc|bmo")
-            return run_pead_score_window(args.window, dry_run=not args.live,
-                                         use_llm=not args.no_llm, as_of=args.as_of,
-                                         chief=not args.no_chief, plan_only=args.plan_only)
+            return run_pead_score_window(
+                args.window,
+                dry_run=not args.live,
+                use_llm=not args.no_llm,
+                as_of=args.as_of,
+                chief=not args.no_chief,
+                plan_only=args.plan_only,
+            )
         if not args.symbol:
             parser.error("pead %s requires a symbol" % args.action)
         if args.action == "show":
@@ -2171,9 +2906,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "monitor":
             run_pead_monitor(args.symbol, use_llm=not args.no_llm)
             return 0
-        run_pead(args.symbol, args.action, dry_run=not args.live, auto=args.yes,
-                 offline=args.offline, use_llm=not args.no_llm, transcript=args.transcript,
-                 channel=args.channel, chief=getattr(args, "chief", False))
+        run_pead(
+            args.symbol,
+            args.action,
+            dry_run=not args.live,
+            auto=args.yes,
+            offline=args.offline,
+            use_llm=not args.no_llm,
+            transcript=args.transcript,
+            channel=args.channel,
+            chief=getattr(args, "chief", False),
+        )
         return 0
     return 1
 

@@ -43,6 +43,13 @@ layers:
   - key: L1_app
     label: L1 AI应用层（Token经济）
     question: 谁在消耗算力？Token 需求是否仍在加速？
+    # 受治理数据的只读 Evidence 命题；与下方（当前仍为草案）的 Chain claims 完全分离。
+    # 它不进入公司证人、corroboration、评分或交易工作流。
+    evidence_observers:
+      - claim_id: ai_core_production_workflow_penetration
+        runner: ai_production_penetration
+        label: AI 生产化与应用扩散
+        enabled: true
     tickers:
       - {symbol: GOOG, note: Gemini（兼属L2）—— A/C 类已在 entities.yaml 归一到 GOOG}
     # xAI 已于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市并出财报，

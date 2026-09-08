@@ -179,6 +179,28 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show --entity MU --limit 50
 ```
 
+### 按产业层单独运行
+
+`evidence layer` 用于运行某个 sector 的一个明确 layer 的 `evidence_observers` 中已启用的只读 Observer。它不会因为
+同一产业的其他层也存在，就顺带执行 L1–L8 的所有命题；这允许各层按照各自数据和事实更新节奏
+分别形成审阅结论。若该 layer 已配置但尚无 Observer，命令返回 `no_registered_observers`，不会拿
+其他层的结论替代。
+
+```bash
+# 默认把 Markdown 审阅文档和图表写到 config/sectors/<sector>.yaml 的 output_dir，并打印路径
+ats evidence layer --sector ai_hardware --layer L1_app
+
+# 显式控制一个层级审阅包的落盘位置；JSON 仍可用于机器读取
+ats evidence layer --sector ai_hardware --layer L1_app \
+  --output /absolute/path/L1_app_evidence.md --chart-dir /absolute/path/L1_app_assets
+ats evidence layer --sector ai_hardware --layer L1_app --format json
+```
+
+这些声明与 layer 的 `claims` 分离：前者只选择受治理的数据 Observer，后者仍服务公司证人、归因与
+Chain workflow。某个 claim 也可以保留专用快捷入口，但它必须经过相同的配置声明和范围校验。例如
+`ats evidence ai-production --sector ai_hardware --layer L1_app` 与以上 L1 运行使用同一条
+受治理路径；它不意味着其他 layer 也只能运行 AI 生产化命题。
+
 输出示例：
 
 ```
@@ -230,3 +252,7 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
   表述即可。用 `ats evidence show` 看"模型原名 → 归属维度"的对照。
 - 某条 claim 证据簇数偏少 → 先看 `ats evidence claims` 的"未发声"名单：多半是声明的
   证人本期确实没披露该维度，这是**真实的证据缺口**，不是 bug。
+
+## AI 应用层生产化 Observer（专属命题）
+
+`ai_core_production_workflow_penetration` 是 L1 AI 应用层的独立、只读 Observer，不改变本文件其他财报/产业链 Observer 的协议。它以 Anthropic Economic Index 的 GLOBAL 1P API 公开 cell 为输入，使用 Work ≥80%、Automation ≥80%、Directive ≥50%、Usage >0 的代理，分别报告职业/任务的可见单元生产化率和生产化流量份额。其专属方法卡、Figure 4 式职业覆盖分布、不能推断的事项、两个月历史限制和重放方式见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。

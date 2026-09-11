@@ -199,6 +199,24 @@ CREATE TABLE IF NOT EXISTS structured_ingestion_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_structured_run_source
     ON structured_ingestion_runs(source_id, dataset_id, started_at);
+CREATE TABLE IF NOT EXISTS structured_source_checks (
+    check_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+    checked_at TEXT NOT NULL, status TEXT NOT NULL,
+    latest_upstream_identity TEXT NOT NULL DEFAULT '',
+    latest_ingested_identity TEXT NOT NULL DEFAULT '',
+    latest_available_period TEXT NOT NULL DEFAULT '',
+    candidate_identities_json TEXT NOT NULL DEFAULT '[]',
+    request_identity_json TEXT NOT NULL DEFAULT '{}',
+    diagnostics_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(source_id, dataset_id, checked_at, latest_upstream_identity, status)
+);
+CREATE INDEX IF NOT EXISTS idx_structured_source_check_latest
+    ON structured_source_checks(source_id, dataset_id, checked_at DESC);
+CREATE TABLE IF NOT EXISTS structured_discovery_claims (
+    source_id TEXT NOT NULL, candidate_identity TEXT NOT NULL,
+    claimed_at TEXT NOT NULL, owner_id TEXT NOT NULL,
+    PRIMARY KEY(source_id, candidate_identity)
+);
 CREATE TABLE IF NOT EXISTS structured_candidates (
     candidate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, source_id TEXT NOT NULL,
     dataset_id TEXT NOT NULL, entity_id TEXT NOT NULL, provider_field TEXT NOT NULL,
@@ -324,6 +342,10 @@ class SQLiteStructuredRepository:
             self.conn.execute(
                 "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
                 "VALUES ('structured_entity_relations_v1',?,'versioned entity relations and metadata')",
+                (_stamp(),))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
+                "VALUES ('structured_source_checks_v1',?,'auditable source discovery checks')",
                 (_stamp(),))
 
     def close(self) -> None:
@@ -698,6 +720,17 @@ class SQLiteStructuredRepository:
         """
         rows = [dict(row) for row in self.conn.execute(sql).fetchall()]
         for row in rows:
+            check = self.source_checks(source_id=row["source_id"], limit=1)
+            if check:
+                latest_check = check[0]
+                row.update({
+                    "last_checked_at": latest_check["checked_at"],
+                    "latest_upstream_identity": latest_check["latest_upstream_identity"],
+                    "latest_ingested_identity": latest_check["latest_ingested_identity"],
+                    "latest_available_period": latest_check["latest_available_period"],
+                    "last_check_status": latest_check["status"],
+                    "last_check_diagnostics": json.loads(latest_check["diagnostics_json"] or "{}"),
+                })
             if row["source_id"] != "anthropic_economic_index":
                 continue
             history = self.ingestion_history(source_id=row["source_id"], limit=1)
@@ -715,7 +748,7 @@ class SQLiteStructuredRepository:
                     "latest_available_period": max((item["period"] for item in product_rows), default=None),
                 }
             row.update({
-                "last_checked_at": latest.get("started_at"),
+                "last_checked_at": row.get("last_checked_at") or latest.get("started_at"),
                 "latest_upstream_commit": next((item.get("repository_commit") for item in metadata
                                                  if item.get("repository_commit")), None),
                 "latest_ingested_release": next((item.get("release") for item in metadata if item.get("release")), None),
@@ -724,6 +757,49 @@ class SQLiteStructuredRepository:
                 "source_products": products,
             })
         return rows
+
+    def save_source_check(self, *, source_id: str, dataset_id: str, status: str,
+                          latest_upstream_identity: str = "",
+                          latest_ingested_identity: str = "",
+                          latest_available_period: str = "",
+                          candidates: list[dict] | None = None,
+                          request_identity: dict | None = None,
+                          diagnostics: dict | None = None,
+                          at: datetime | None = None) -> str:
+        checked_at = _stamp(at)
+        check_id = hashlib.sha256("|".join((source_id, dataset_id, checked_at, status,
+                                             latest_upstream_identity)).encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_source_checks VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (check_id, source_id, dataset_id, checked_at, status,
+                 latest_upstream_identity, latest_ingested_identity, latest_available_period,
+                 _json(candidates or []), _json(request_identity or {}), _json(diagnostics or {})))
+        return check_id
+
+    def source_checks(self, *, source_id: str | None = None,
+                      dataset_id: str | None = None, limit: int = 100) -> list[dict]:
+        sql = "SELECT * FROM structured_source_checks WHERE 1=1"
+        args: list = []
+        if source_id:
+            sql += " AND source_id=?"
+            args.append(source_id)
+        if dataset_id:
+            sql += " AND dataset_id=?"
+            args.append(dataset_id)
+        sql += " ORDER BY checked_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def claim_discovery_candidate(self, *, source_id: str, candidate_identity: str,
+                                  owner_id: str) -> bool:
+        """Atomically claim one immutable release for discovery/ingestion."""
+        with self._lock, self.conn:
+            cursor = self.conn.execute(
+                "INSERT OR IGNORE INTO structured_discovery_claims "
+                "(source_id,candidate_identity,claimed_at,owner_id) VALUES (?,?,?,?)",
+                (source_id, candidate_identity, _stamp(), owner_id))
+        return cursor.rowcount == 1
 
     def begin_ingestion(self, *, source_id: str, dataset_id: str,
                         query_scope: dict, at: datetime | None = None) -> str:
@@ -1360,8 +1436,11 @@ def default_db_path() -> str:
     from ....config import REPO_ROOT
 
     return os.environ.get(
-        "ATS_STRUCTURED_DB_PATH",
-        os.environ.get("ATS_DB_PATH", str(REPO_ROOT / "var" / "ats.sqlite")),
+        "ATS_DATA_DB_PATH",
+        os.environ.get(
+            "ATS_STRUCTURED_DB_PATH",
+            str(REPO_ROOT / "var" / "data.sqlite"),
+        ),
     )
 
 

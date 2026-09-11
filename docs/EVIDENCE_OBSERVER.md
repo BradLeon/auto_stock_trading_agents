@@ -255,4 +255,4 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
 
 ## AI 应用层生产化 Observer（专属命题）
 
-`ai_core_production_workflow_penetration` 是 L1 AI 应用层的独立、只读 Observer，不改变本文件其他财报/产业链 Observer 的协议。它以 Anthropic Economic Index 的 GLOBAL 1P API 公开 cell 为输入，使用 Work ≥80%、Automation ≥80%、Directive ≥50%、Usage >0 的代理，分别报告职业/任务的可见单元生产化率和生产化流量份额。其专属方法卡、Figure 4 式职业覆盖分布、不能推断的事项、两个月历史限制和重放方式见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
+`ai_core_production_workflow_penetration` 是 L1 AI 应用层的独立、只读 Observer，不改变本文件其他财报/产业链 Observer 的协议。`claim_definition_version=v2` 只消费受治理的四轴 bundle：BTOS 企业采用广度、RPS 员工持续使用、ONS 英国组织嵌入补充和 Anthropic 任务生产化。四源保留各自分母与期间，禁止合成统一渗透率；Anthropic 子轴继续使用 Work ≥80%、Automation ≥80%、Directive ≥50%、Usage >0 的代理。其专属方法卡、Figure 4 式职业覆盖分布、不能推断事项和重放方式见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。

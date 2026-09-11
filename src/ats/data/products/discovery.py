@@ -40,6 +40,13 @@ class DataDiscovery:
                 "datasets": source.datasets, "accepted_observations": len(rows),
                 "last_ingestion_status": last.get("last_status") or "no_run",
                 "last_completed_at": last.get("last_completed_at") or None,
+                "last_checked_at": last.get("last_checked_at"),
+                "latest_upstream_identity": last.get("latest_upstream_identity"),
+                "latest_ingested_identity": last.get("latest_ingested_identity"),
+                "latest_available_period": last.get("latest_available_period"),
+                "last_check_status": last.get("last_check_status") or "not_checked",
+                "last_check_diagnostics": last.get("last_check_diagnostics") or {},
+                "source_native_cadence": source.cadence,
                 "availability": "runtime_excluded" if source.catalog_status.value == "runtime_excluded"
                 else ("queryable" if rows else "registered_no_data"),
             })
@@ -152,6 +159,8 @@ class DataDiscovery:
                 "period_start": periods[0] if periods else None,
                 "period_end": periods[-1] if periods else None,
                 "latest_known_at": max((row["known_at"] for row in current), default=None),
+                "source_health": [health for health in self.repository.source_health()
+                                  if health["source_id"] in item.primary_sources],
             })
         return {"entity_filter": entity.upper() if entity else None,
                 "dataset_filter": dataset or None, "datasets": output}

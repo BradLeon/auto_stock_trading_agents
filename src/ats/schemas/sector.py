@@ -31,6 +31,7 @@ class EvidenceObserverRef(BaseModel):
     """
 
     claim_id: str
+    claim_definition_version: str = ""
     runner: str
     label: str = ""
     enabled: bool = True

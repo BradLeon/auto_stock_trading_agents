@@ -23,3 +23,18 @@ def test_platform_repository_uses_data_database_and_artifact_root(monkeypatch, t
         assert repository.artifacts.root == artifacts
     finally:
         repository.close()
+
+
+def test_compatibility_repository_resolves_to_same_platform_store(monkeypatch, tmp_path):
+    from ats.data.stores.structured.artifacts import default_artifact_root
+    from ats.data.stores.structured.repository import default_db_path
+
+    database = tmp_path / "one-data.sqlite"
+    artifacts = tmp_path / "one-artifact-root"
+    monkeypatch.setenv("ATS_DATA_DB_PATH", str(database))
+    monkeypatch.setenv("ATS_DATA_ARTIFACT_ROOT", str(artifacts))
+    monkeypatch.setenv("ATS_STRUCTURED_DB_PATH", str(tmp_path / "must-not-win.sqlite"))
+    monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "must-not-win-artifacts"))
+
+    assert default_db_path() == str(database)
+    assert default_artifact_root() == artifacts

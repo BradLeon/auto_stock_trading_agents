@@ -23,6 +23,7 @@ from ..structured import (
     AdapterArtifact, AdapterBatch, AdapterFailure, EntityRelationInput,
     FetchRequest, IngestionStatus, NativeRecord, ReferenceEntityInput,
 )
+from ..core.structured_models import DiscoveryResult, DiscoveryStatus, ReleaseCandidate
 
 
 REPOSITORY = "Anthropic/EconomicIndex"
@@ -476,6 +477,38 @@ class AnthropicEconomicIndexAdapter:
         destination.unlink(missing_ok=True)
         raise last_error
 
+    def discover(self, request: FetchRequest) -> DiscoveryResult:
+        """Discover the newest complete commit-pinned release without downloading CSVs."""
+        import httpx
+
+        checked_at = self.clock().astimezone(timezone.utc)
+        client = self.client or httpx.Client(follow_redirects=True)
+        close_client = self.client is None
+        try:
+            response = client.get(HF_API, headers={"User-Agent": USER_AGENT}, timeout=60)
+            response.raise_for_status()
+            metadata = response.json()
+            releases = discover_releases(metadata)
+            if not releases:
+                return DiscoveryResult(source_id=request.source_id, dataset_id=request.dataset_id,
+                                       checked_at=checked_at, status=DiscoveryStatus.NOT_YET_PUBLISHED,
+                                       diagnostics={"repository": REPOSITORY, "complete_release": False})
+            release = releases[0]
+            identity = f"{release['commit']}:{release['directory']}"
+            return DiscoveryResult(
+                source_id=request.source_id, dataset_id=request.dataset_id, checked_at=checked_at,
+                status=DiscoveryStatus.NEW_RELEASE, latest_upstream_identity=identity,
+                latest_available_period=release["release"].replace("_", "-"),
+                candidates=[ReleaseCandidate(identity=identity, period=release["release"].replace("_", "-"),
+                                             urls=[_resolve_url(release["commit"], release["claude_path"]),
+                                                   _resolve_url(release["commit"], release["api_path"])],
+                                             methodology_fingerprint=f"release_{release['release']}",
+                                             metadata=release)],
+                diagnostics={"repository": REPOSITORY, "last_modified": metadata.get("lastModified", "")})
+        finally:
+            if close_client:
+                client.close()
+
     def fetch(self, request: FetchRequest) -> AdapterBatch:
         import httpx
 
@@ -491,7 +524,10 @@ class AnthropicEconomicIndexAdapter:
             if not releases:
                 return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id,
                                     status=IngestionStatus.NOT_YET_PUBLISHED, fetched_at=fetched_at)
-            release = releases[0]
+            requested = (request.query_scope.get("discovery_candidates") or [])
+            requested_identity = str(requested[0].get("identity", "")) if requested else ""
+            release = next((item for item in releases
+                            if f"{item['commit']}:{item['directory']}" == requested_identity), releases[0])
             commit = release["commit"]
             release_id = release["release"]
             published_at = _iso_datetime(metadata.get("lastModified"))

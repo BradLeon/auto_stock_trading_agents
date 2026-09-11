@@ -1686,6 +1686,8 @@ def run_data(
     value: str = "",
     *,
     source: str = "",
+    group: str = "",
+    ingest_new: bool = False,
     series: str = "",
     entity: str = "",
     provider: list[str] | None = None,
@@ -1703,6 +1705,7 @@ def run_data(
     db_path: str = "",
     artifact_root: str = "",
     force: bool = False,
+    force_check: bool = False,
     apply: bool = False,
     mode: str = "platform",
     release_file: str = "",
@@ -1984,6 +1987,13 @@ def run_data(
                     query_scope=scope,
                     catalog=catalog,
                     force=force,
+                )
+            elif action == "release-check":
+                from ..data.pipelines.structured.discovery import release_check
+
+                result = release_check(
+                    repository, group=group, source_ids=[target_source] if target_source else None,
+                    ingest_new=ingest_new, force=(force or force_check), dataset_id=dataset, catalog=catalog,
                 )
             elif action == "rollback":
                 if not target_source:
@@ -2319,6 +2329,9 @@ def main(argv: list[str] | None = None) -> int:
         help="search 查询词 / company 实体 / claim 命题 / lineage 投影 ID",
     )
     data.add_argument("--source", default="", help="series: source ID；search: 来源过滤")
+    data.add_argument("--group", default="", help="release-check: 注册的 discovery source group，例如 ai_adoption")
+    data.add_argument("--ingest-new", action="store_true", help="release-check: 对发现的新版本执行受治理采集")
+    data.add_argument("--force-check", action="store_true", help="release-check: 忽略来源 due-check 窗口，仅重新检查 metadata")
     data.add_argument(
         "--provider",
         action="append",
@@ -2664,6 +2677,8 @@ def main(argv: list[str] | None = None) -> int:
             args.action,
             args.value,
             source=args.source,
+            group=args.group,
+            ingest_new=args.ingest_new,
             series=args.series,
             entity=args.entity,
             provider=args.provider,
@@ -2681,6 +2696,7 @@ def main(argv: list[str] | None = None) -> int:
             db_path=args.db_path,
             artifact_root=args.artifact_root,
             force=args.force,
+            force_check=args.force_check,
             apply=args.apply,
             mode=args.mode,
             release_file=args.release_file,

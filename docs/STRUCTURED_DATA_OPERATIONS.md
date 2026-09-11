@@ -83,6 +83,29 @@ export ATS_STRUCTURED_RELEASE_FILE="/absolute/path/to/releases.yaml"
 
 未设置 `ATS_STRUCTURED_DB_PATH` 时会沿用 `ATS_DB_PATH`。未设置 artifact 根目录时使用仓库下 `var/structured_artifacts`。自动任务不能依赖不确定的工作目录。
 
+## AI 应用扩散四来源：每周主动发现
+
+部署平台每周执行一次以下命令；`config/data/schedules.yaml` 只记录调度意图，不会自行创建
+cron/launchd 任务：
+
+```bash
+ats data release-check --group ai_adoption --ingest-new
+```
+
+该 group 包含 Anthropic Economic Index、Census BTOS Core、RPS/FRED 和 ONS BICS AI。
+四个来源单并发、失败隔离；建议失败后按 60/300/900 秒退避重试。没有新 release 是
+`no_change`，ONS 当期没问 AI 是 `question_not_fielded`，两者都不是零值或 stale。运维监控应检查
+`last_checked_at`、`latest_upstream_identity`、`latest_ingested_release`、
+`latest_available_period` 和最近错误诊断。
+
+范围边界：BTOS 只接收 2025-11-17 后“任一业务职能”新口径；BTOS AI Supplement 因一次性
+专题波次排除，Eurostat 因年度频率排除；RPS 是员工自报工作使用，不代表企业批准部署；ONS 是
+不定期条件模块和英国补充证据。跨来源禁止相减、平均或合成统一渗透指数。
+
+平台 DataProduct、结构化采集 CLI、主动发现和 Evidence 统一使用 `ATS_DATA_DB_PATH` / `ATS_DATA_ARTIFACT_ROOT`，默认分别为 `var/data.sqlite` 与 `var/data_artifacts`。`ATS_STRUCTURED_DB_PATH` / `ATS_STRUCTURED_ARTIFACT_ROOT` 只用于显式兼容或隔离测试，并且不能覆盖已设置的正式变量；`ATS_DB_PATH` 是 workflow/context 库，不再作为结构化数据的隐式回退。正式发布禁止通过在临时库、`ats.sqlite` 与 `data.sqlite` 之间复制表完成。采集命令的显式
+`--db` / `--artifact-root` 用于隔离验收。不要把兼容层的 `ATS_STRUCTURED_*` 变量误当作
+Evidence 平台读取变量。
+
 ## 4. 配置文件完整说明
 
 ### Anthropic Economic Index：每周检查、按 release 更新

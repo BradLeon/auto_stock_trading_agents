@@ -26,6 +26,7 @@ from ats.data.stores.structured.artifacts import ArtifactStore, default_artifact
 from ats.data.pipelines.structured.ingestion import (
     CentralAdmission, IngestionPipeline, StructuredAdapter,
 )
+from ats.data.pipelines.structured.discovery import discover_source, release_check
 from ats.data.stores.unstructured.workbench import EvidenceWorkbench
 from ats.data.products.selection import SourceSelector
 from ats.data.rollout_modes import READ_MODES, read_mode, source_mode
@@ -46,4 +47,6 @@ __all__ = list(dict.fromkeys([
     "default_db_path",
     "get_repository",
     "reset_repository_cache",
+    "discover_source",
+    "release_check",
 ]))

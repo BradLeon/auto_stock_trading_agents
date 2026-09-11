@@ -8,6 +8,7 @@ from ats.agents.evidence.layer_runner import run_registered_layer_observers
 from ats.config import load_sector_config
 from ats.runtime.cli import run_evidence
 from ats.schemas.sector import EvidenceObserverRef
+from ats.agents.evidence.work_adoption import observe_ai_production_penetration, render_ai_production_markdown
 
 
 class _Layer:
@@ -132,6 +133,7 @@ def test_ai_hardware_l1_declares_data_observer_outside_chain_claims():
     assert [(item.claim_id, item.runner) for item in l1.evidence_observers] == [
         ("ai_core_production_workflow_penetration", "ai_production_penetration")
     ]
+    assert l1.evidence_observers[0].claim_definition_version == "v2"
     assert "ai_core_production_workflow_penetration" not in {claim.id for claim in l1.claims}
 
 
@@ -185,3 +187,144 @@ def test_layer_workflow_fails_for_invalid_scope_and_keeps_json_machine_interface
     output = json.loads(capsys.readouterr().out)
     assert rc == 2
     assert output["status"] == "invalid_scope"
+
+
+def test_l1_v2_consumes_only_bundle_and_renders_three_axes(tmp_path):
+    class Products:
+        def ai_adoption_evidence_bundle(self, **kwargs):
+            axes = {}
+            for key, label, value in (("enterprise_breadth", "企业采用广度", 10),
+                                      ("worker_persistence", "员工持续使用", 20),
+                                      ("task_production", "任务生产化", 40)):
+                axes[key] = {"axis_id": key, "label": label, "source_id": key,
+                    "period": f"p-{key}", "headline": {"value": value, "unit": "percent"},
+                    "trend": {"status": "expanding", "input_observation_ids": [f"o-{key}"]},
+                    "statistical_unit": key, "denominator": f"denominator-{key}",
+                    "geography": "independent", "technology_scope": key,
+                    "reference_period": key, "frequency": key, "methodology_regimes": ["r1"],
+                    "source_status": "available", "detail": {}}
+            return {"status": "ok", "bundle_version": "v1", "axes": axes,
+                    "overall": {"status": "broadening_and_deepening", "steps": ["three axes"]},
+                    "comparability": {"pairs": []}, "periods_are_asynchronous": True,
+                    "manifest": {"snapshot_id": "manifest-v2"}, "content_hash": "hash"}
+
+        def ai_production_penetration(self, **kwargs):
+            raise AssertionError("v2 observer must not bypass the governed bundle")
+
+    packet = observe_ai_production_penetration(
+        products=Products(), workflow_scope={"sector": "ai_hardware", "layer": "L1_app"})
+    assert packet["claim_definition_version"] == "v2"
+    assert packet["overall_status"] == "broadening_and_deepening"
+    assert packet["context"]["budget_status"] == "ok"
+    assert packet["manifest"]["snapshot_id"] == "manifest-v2"
+    report = render_ai_production_markdown(packet)
+    assert report.index("三轴总览") < report.index("TOP10 生产化职业")
+    assert "ONS" not in report and "判断轨迹" not in report
+    assert "BTOS 美国企业 AI 采用广度" in report and "不计算跨来源综合分数" in report
+
+
+def test_v2_renderer_writes_tables_charts_and_complete_sidecars(tmp_path):
+    from ats.agents.evidence.adoption_visualization import render_ai_adoption_charts
+    history = [{"period": "100", "period_end": "2026-01-11", "value": 12.0,
+                "observation_id": "o1", "input_observation_ids": ["o1"]}]
+    rows = [{"axis_id": "enterprise_breadth", "axis_label": "企业采用广度",
+             "period": "100", "headline_value": 12.0, "trend_status": "expanding",
+             "input_observation_ids": ["o1"]}]
+    packet = {"axis_overview": rows, "manifest": {"snapshot_id": "m1"},
+              "axes": {"enterprise_breadth": {"detail": {"history": history}}},
+              "top_occupations": [], "top_tasks": []}
+    result = render_ai_adoption_charts(packet=packet, output_dir=tmp_path)
+    assert result.get("visualization_warning") is None
+    assert result["descriptors"] and result["tables"]
+    assert not (tmp_path / "four_axis_status_period_matrix.json").exists()
+    sidecar = json.loads((tmp_path / "btos_enterprise_breadth.json").read_text())
+    assert sidecar["title"] == "BTOS 美国企业 AI 采用广度"
+    assert sidecar["manifest_id"] == "m1" and sidecar["observation_ids"] == ["o1"]
+    assert sidecar["rows_hash"] == result["descriptors"][0]["rows_hash"]
+
+
+def test_btos_chart_sorts_numeric_waves_and_report_embeds_chart(tmp_path):
+    from ats.agents.evidence.adoption_visualization import render_ai_adoption_charts
+    history = [{"period": period, "period_end": end, "value": value, "observation_id": f"o-{period}",
+                "input_observation_ids": [f"o-{period}"]}
+               for period, end, value in (("100", "2026-01-04", 20.0), ("107", "2026-04-12", 22.0),
+                                           ("88", "2025-07-20", 17.0), ("99", "2025-12-21", 19.0))]
+    packet = {"status": "ok", "claim_definition_version": "v2", "claim_text": "claim",
+              "overall_status": "expanding", "axis_overview": [], "manifest": {"snapshot_id": "m1"},
+              "axes": {"enterprise_breadth": {"detail": {"history": history}}},
+              "top_occupations": [], "top_tasks": [], "warnings": []}
+    rendered = render_ai_adoption_charts(packet=packet, output_dir=tmp_path)
+    descriptor = next(item for item in rendered["descriptors"] if item["title"].startswith("BTOS"))
+    assert descriptor["periods"] == ["88", "99", "100", "107"]
+    from ats.agents.evidence.adoption_visualization import _period_label
+    assert _period_label(history[0]) == "2026-01-04"
+    assert "W" not in _period_label(history[0])
+    packet["visualization_descriptors"] = rendered["descriptors"]
+    packet["table_descriptors"] = rendered["tables"]
+    report = render_ai_production_markdown(packet)
+    assert "![BTOS 美国企业 AI 采用广度]" in report
+    assert "[CSV](" in report and "[sidecar](" in report
+
+
+def test_anthropic_four_metrics_and_coverage_are_rendered_and_embedded(tmp_path):
+    from ats.agents.evidence.adoption_visualization import render_ai_adoption_charts
+    summary = []
+    for period, occupation_rate, task_rate, occupation_traffic, task_traffic in (
+        ("2026-04", 44.95, 32.08, 68.77, 59.40),
+        ("2026-05", 46.67, 31.72, 75.36, 68.66),
+    ):
+        for grain, rate, traffic in (("occupation", occupation_rate, occupation_traffic),
+                                     ("task", task_rate, task_traffic)):
+            summary.append({"period": period, "grain": grain,
+                            "visible_production_rate_pct": rate,
+                            "production_traffic_share_pct": traffic,
+                            "visible_production_rate_change_pp": (None if period == "2026-04" else
+                                (1.72 if grain == "occupation" else -0.36)),
+                            "production_traffic_share_change_pp": (None if period == "2026-04" else
+                                (6.59 if grain == "occupation" else 9.26)),
+                            "lineage": {"input_observation_ids": [f"o-{period}-{grain}"]}})
+    coverage = {"points": [
+        {"minimum_coverage_pct": 0.0, "occupation_share_pct": 100.0,
+         "eligible_occupation_count": 974, "period": "2026-05"},
+        {"minimum_coverage_pct": 50.0, "occupation_share_pct": 0.31,
+         "eligible_occupation_count": 974, "period": "2026-05"}],
+        "landmarks": []}
+    detail = {"period_rows": summary, "occupation_coverage_distribution": coverage,
+              "occupation_task_coverage": [{"period": "2026-05",
+                  "lineage": {"input_observation_ids": ["coverage-o1"]}}]}
+    packet = {"status": "ok", "claim_definition_version": "v2", "claim_text": "claim",
+              "overall_status": "insufficient_history", "axis_overview": [],
+              "manifest": {"snapshot_id": "m-anthropic"},
+              "axes": {"task_production": {"detail": detail}},
+              "summary_table": summary, "occupation_coverage_distribution": coverage,
+              "top_occupations": [], "top_tasks": [], "warnings": []}
+    rendered = render_ai_adoption_charts(packet=packet, output_dir=tmp_path)
+    titles = {item["title"] for item in rendered["descriptors"]}
+    assert "Anthropic 职业/任务可见单元生产化率与生产化流量份额" in titles
+    assert "Anthropic 职业内已确认生产化任务覆盖分布" in titles
+    assert (tmp_path / "anthropic_production_four_metrics.png").exists()
+    assert (tmp_path / "anthropic_occupation_task_coverage_ccdf.png").exists()
+    coverage_sidecar = json.loads(
+        (tmp_path / "anthropic_occupation_task_coverage_ccdf.json").read_text())
+    assert coverage_sidecar["observation_ids"] == ["coverage-o1"]
+    packet["visualization_descriptors"] = rendered["descriptors"]
+    packet["table_descriptors"] = rendered["tables"]
+    report = render_ai_production_markdown(packet)
+    assert "四项核心指标月度比较（2026-04 → 2026-05）" in report
+    assert "|职业可见单元生产化率|44.95%|46.67%|+1.72pp|" in report
+    assert "|任务生产化流量份额|59.40%|68.66%|+9.26pp|" in report
+    assert report.index("Anthropic 职业内已确认生产化任务覆盖分布") < report.index("TOP10 生产化职业")
+
+
+def test_config_rollback_to_v1_does_not_delete_v2_data(monkeypatch):
+    calls = []
+    def observer(**kwargs):
+        calls.append(kwargs["claim_definition_version"])
+        return {"status": "ok", "claim_id": "ai_core_production_workflow_penetration"}
+    monkeypatch.setattr("ats.agents.evidence.layer_runner.OBSERVER_RUNNERS",
+                        {"ai_production_penetration": ("ai_core_production_workflow_penetration", observer)})
+    ref = EvidenceObserverRef(claim_id="ai_core_production_workflow_penetration",
+                              claim_definition_version="v1", runner="ai_production_penetration")
+    result = run_registered_layer_observers(sector="ai_hardware", sector_label="AI硬件",
+        layer="L1_app", layer_label="L1", observer_refs=[ref])
+    assert result["status"] == "ok" and calls == ["v1"]

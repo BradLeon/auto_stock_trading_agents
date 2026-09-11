@@ -2,7 +2,9 @@
 
 ## 它回答什么
 
-固定命题 `ai_core_production_workflow_penetration` 只观察 Anthropic Economic Index 的 GLOBAL 1P API 数据：满足严格代理条件的职业和任务，是否在公开可见单元中扩大，以及这些单元承载的 API Usage Share 是否提高。它服务 L1 AI 应用层研究，不是员工采用率、企业席位渗透率、持续运行工作流的确认，也不进入 PEAD、Chief、组合、风险或执行。
+固定命题 `ai_core_production_workflow_penetration` 的 `claim_definition_version=v2` 观察三个互不融合的轴：美国企业采用广度（BTOS Core）、美国员工持续工作使用（RPS/FRED）和 Anthropic GLOBAL 1P API 的任务生产化。它回答这些证据是否同步扩大、是否从局部试验走向可重复生产工作流。它不生成统一渗透率，也不进入 PEAD、Chief、组合、风险或执行。ONS BICS 的既有数据与独立 DataProduct 只保留作历史审计，不进入本命题、主动更新组、Agent context 或人类报告。
+
+旧 v1 快照仍可重放，但 `ai_hardware/L1_app` 默认使用 v2。三轴 bundle 以至少三个来源原生可比期间判定 `expanding/stable/contracting/mixed`；期间不足或方法口径变化返回 `insufficient_history`。来源不可达时可展示库内最近成功值及 freshness，但不前向填充、不插值、不伪造共同期间。
 
 `Usage Share` 是某职业或任务占 **1P API 全部公开产品流量** 的份额；不是该职业有多少人在使用 AI。官网所谓 Industry 是 SOC occupational major group，也不是 NAICS/GICS 行业。
 
@@ -83,6 +85,12 @@ packet = observe_ai_production_penetration(
 ## 方法卡、血缘与重放
 
 方法卡列出 provider/product/GLOBAL 范围、期间、可见/qualified 样本、taxonomy mapped/unmapped、阈值、methodology/derivation version、质量状态、限制和 manifest ID。`lineage` 是数值回溯到 observation、artifact 和 taxonomy relation 的链路；`snapshot manifest` 是一次查询所冻结的输入清单；`derivation version` 是公式实现的版本。它们共同保证以后上游 vintage 出现时仍可按当时的 `as_of` 重放。
+
+三轴 v2 的趋势是描述性中期方向，不要求逐期单调。系统按来源原生期间排序，联合使用起点到终点净变化、最小二乘线性斜率、相邻实质变化的方向一致率和 0.5 个百分点容差；一次不改变端点与斜率方向的小幅回撤不会机械地产生 `mixed`。算法明细留在结构化 packet 供审计，不在面向读者的报告中展开。`mixed` 只表示端点与线性方向冲突或实质上涨/下跌均占较大比例，不代表统计显著性。BTOS 同时披露 standard error，但当前规则仍不声称完成显著性检验。
+
+BTOS 的 `period` 是调查波次编号。历史必须按整数波次或真实 reference window 排序，不能按字符串把 100–107 放在 88–99 之前；图表横轴显示参考期结束日，并以 `Wxx` 辅助标注波次。
+
+v2 主结论 manifest 只固定各轴 headline/trend 所需的可比历史。Anthropic 数千个职业/任务叶子 cell 通过版本化派生的输入数量、IDs hash、artifact IDs 和可展开 lineage pointer 引用；明细 CSV/JSON、TOPN 与图表 sidecar 保留自己的 rows hash。这样 Agent context 不会平铺数万条 ID，审计者仍可按需展开复算。
 
 PNG 旁的 JSON sidecar 保存有序图表数据、data hash、renderer/threshold/derivation version、period range 和 manifest ID。图表不可用只产生 `visualization_warning`，不会阻塞表格、事实或 manifest。
 

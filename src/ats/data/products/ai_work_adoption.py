@@ -724,8 +724,18 @@ def ai_production_penetration(
     latest_cells = [cell for cell in cells if cell["period"] == latest_period and cell["qualified"]]
     top_results = {}
     for grain, output_key in (("occupation", "top_occupations"), ("task", "top_tasks")):
+        def eligible_for_examples(cell: dict[str, Any]) -> bool:
+            if grain != "occupation":
+                return True
+            entity = entities.get(cell["entity_id"])
+            if not entity:
+                return False
+            name = str(entity.get("canonical_name") or "").strip()
+            return bool(name and not re.fullmatch(r"(?:SOC:)?\d{2}-\d{4}(?:\.\d{2})?", name))
+
         ranked = sorted(
-            (cell for cell in latest_cells if cell["grain"] == grain),
+            (cell for cell in latest_cells
+             if cell["grain"] == grain and eligible_for_examples(cell)),
             key=lambda cell: (-(_cell_value(cell, "usage_share") or 0.0), cell["entity_id"]),
         )[:top_n]
         items = []

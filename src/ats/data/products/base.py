@@ -79,6 +79,52 @@ class DataProducts:
             snapshot_purpose=snapshot_purpose,
         )
 
+    def census_btos_ai_snapshot(
+        self, *, period: str = "", as_of: datetime | None = None, entity_id: str = "",
+        include_vintages: bool = False,
+    ) -> dict:
+        """US employer-business AI adoption under the post-2025-11 Core wording."""
+        from .census_btos import snapshot
+
+        return snapshot(self.structured, period=period, as_of=as_of, entity_id=entity_id,
+                        include_vintages=include_vintages)
+
+    def rps_genai_adoption_snapshot(
+        self, *, period: str = "", as_of: datetime | None = None,
+        include_vintages: bool = False,
+    ) -> dict:
+        """US employed-adult work GenAI adoption and persistence proxies."""
+        from .rps_genai_adoption import snapshot
+
+        return snapshot(self.structured, period=period, as_of=as_of,
+                        include_vintages=include_vintages)
+
+    def ons_bics_ai_snapshot(
+        self, *, wave: str = "", as_of: datetime | None = None,
+        include_vintages: bool = False,
+    ) -> dict:
+        """UK supplemental business AI adoption and embedding snapshot."""
+        from .ons_bics_ai import snapshot
+
+        return snapshot(self.structured, wave=wave, as_of=as_of,
+                        include_vintages=include_vintages)
+
+    def ai_adoption_evidence_bundle(
+        self, *, as_of: datetime | None = None, snapshot_consumer: str = "",
+        snapshot_purpose: str = "",
+    ) -> dict:
+        """Four independent adoption axes; never a synthetic penetration score."""
+        from .ai_adoption_bundle import build
+
+        return build(self, as_of=as_of, snapshot_consumer=snapshot_consumer,
+                     snapshot_purpose=snapshot_purpose)
+
+    def replay_ai_adoption_evidence_bundle(self, snapshot_id: str) -> dict | None:
+        """Reconstruct the persisted four-axis evidence selection without network access."""
+        from .ai_adoption_bundle import replay
+
+        return replay(self, snapshot_id)
+
     def ai_job_profile(
         self, occupation: str, *, source_product: str, period: str, as_of: datetime | None = None
     ) -> dict:
@@ -809,14 +855,22 @@ class DataProducts:
         return self.structured.pending_mappings(**filters)
 
     def structured_ingestion_history(self, **filters) -> list[dict]:
-        return self.structured.ingestion_history(**filters)
+        runs = self.structured.ingestion_history(**filters)
+        source_id = filters.get("source_id")
+        if source_id:
+            checks = self.structured.source_checks(source_id=source_id, limit=filters.get("limit", 100))
+            return [{"record_type": "ingestion_run", **item} for item in runs] + [
+                {"record_type": "source_check", **item} for item in checks]
+        return runs
 
     def structured_quality_report(
         self, *, dataset: str | None = None, now: datetime | None = None
     ) -> dict:
         from .reporting import build_quality_report
 
-        return build_quality_report(self.structured, dataset_id=dataset, now=now)
+        report = build_quality_report(self.structured, dataset_id=dataset, now=now)
+        report["source_health"] = self.structured.source_health()
+        return report
 
     def structured_artifact_usage(self, *, source: str | None = None) -> dict:
         return self.structured.artifact_usage(source_id=source)

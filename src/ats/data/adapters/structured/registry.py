@@ -15,6 +15,7 @@ class RuntimeSourceSpec:
     factory: Callable[[], object] | None
     requires_entities: bool = False
     ingest_supported: bool = True
+    discovery_group: str = ""
     note: str = ""
 
 
@@ -88,6 +89,21 @@ def _anthropic_economic_index():
     return AnthropicEconomicIndexAdapter(local_file_overrides=overrides)
 
 
+def _census_btos():
+    from ...sources.census_btos import CensusBTOSAdapter
+    return CensusBTOSAdapter()
+
+
+def _rps_genai_adoption():
+    from ...sources.rps_genai_adoption import RPSGenAIAdoptionAdapter
+    return RPSGenAIAdoptionAdapter()
+
+
+def _ons_bics_ai():
+    from ...sources.ons_bics_ai import ONSBICSAIAdapter
+    return ONSBICSAIAdapter()
+
+
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "tw_mof": RuntimeSourceSpec("tw_mof", _tw_mof),
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
@@ -104,7 +120,12 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "factset_earnings_insight": RuntimeSourceSpec(
         "factset_earnings_insight", _factset_earnings_insight),
     "anthropic_economic_index": RuntimeSourceSpec(
-        "anthropic_economic_index", _anthropic_economic_index),
+        "anthropic_economic_index", _anthropic_economic_index, discovery_group="ai_adoption"),
+    "census_btos": RuntimeSourceSpec("census_btos", _census_btos, discovery_group="ai_adoption"),
+    "rps_genai_adoption": RuntimeSourceSpec("rps_genai_adoption", _rps_genai_adoption, discovery_group="ai_adoption"),
+    # Retained as an independent historical/audit source; intentionally excluded
+    # from the active L1 AI adoption discovery group.
+    "ons_bics_ai": RuntimeSourceSpec("ons_bics_ai", _ons_bics_ai),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),

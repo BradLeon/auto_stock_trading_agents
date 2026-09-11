@@ -125,6 +125,16 @@ def test_release_discovery_and_global_filtering_are_commit_pinned(tmp_path):
     assert b'"geo_id":"GLOBAL"' in payload
 
 
+def test_anthropic_discovery_returns_commit_pinned_candidate():
+    adapter = AnthropicEconomicIndexAdapter(
+        client=_Client(), clock=lambda: datetime(2026, 7, 1, tzinfo=timezone.utc))
+    result = adapter.discover(
+        FetchRequest(source_id="anthropic_economic_index", dataset_id="ai_work_adoption"))
+    assert result.status.value == "new_release"
+    assert result.candidates[0].identity == result.latest_upstream_identity
+    assert all("resolve/" in url for url in result.candidates[0].urls)
+
+
 def test_runtime_factory_accepts_transport_only_local_file_overrides(monkeypatch, tmp_path):
     from ats.data.adapters.structured.registry import runtime_spec
 
@@ -155,6 +165,18 @@ def test_release_discovery_skips_incomplete_release_and_repeated_content_is_no_c
     repeated = IngestionPipeline(repo).run(adapter, request)
     assert repeated["status"] == "no_change"
     assert repeated["unchanged"] > 0
+
+
+def test_fetch_accepts_discovery_candidate_identity_for_pinned_release(tmp_path):
+    adapter = AnthropicEconomicIndexAdapter(
+        client=_Client(), clock=lambda: datetime(2026, 6, 27, tzinfo=timezone.utc))
+    discovered = adapter.discover(FetchRequest(
+        source_id="anthropic_economic_index", dataset_id="ai_work_adoption"))
+    batch = adapter.fetch(FetchRequest(
+        source_id="anthropic_economic_index", dataset_id="ai_work_adoption",
+        query_scope={"discovery_candidates": [discovered.candidates[0].model_dump(mode="json")]}))
+    assert batch.status in {IngestionStatus.SUCCEEDED, IngestionStatus.PARTIAL}
+    assert {artifact.artifact_key.split(":")[0] for artifact in batch.artifacts} >= {"claude_ai", "1p_api"}
 
 
 def test_parser_schema_drift_and_unknown_metric_are_explicit(tmp_path):

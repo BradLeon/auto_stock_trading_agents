@@ -16,7 +16,7 @@ __all__ = [
     "MetricDefinition", "NativeRecord", "ObservationInput", "ObservationVintage",
     "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "SeriesIdentity",
     "ReferenceEntityInput", "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
-    "VerificationStatus",
+    "VerificationStatus", "DiscoveryResult", "ReleaseCandidate", "DiscoveryStatus",
 ]
 
 
@@ -61,6 +61,19 @@ class IngestionStatus(str, Enum):
     PARSE_FAILED = "parse_failed"
     VALIDATION_FAILED = "validation_failed"
     PARTIAL = "partial"
+
+
+class DiscoveryStatus(str, Enum):
+    """Outcome of a source metadata check, separate from an ingestion run."""
+
+    NEW_RELEASE = "new_release"
+    NO_CHANGE = "no_change"
+    NOT_YET_PUBLISHED = "not_yet_published"
+    QUESTION_NOT_FIELDED = "question_not_fielded"
+    METHODOLOGY_BREAK = "methodology_break"
+    UNREACHABLE = "unreachable"
+    VALIDATION_FAILED = "validation_failed"
+    SUCCEEDED = "succeeded"
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -220,6 +233,31 @@ class FetchRequest(BaseModel):
     @classmethod
     def entities_upper(cls, values: list[str]) -> list[str]:
         return [value.upper() for value in values]
+
+
+class ReleaseCandidate(BaseModel):
+    """An immutable upstream release identity found during read-only discovery."""
+
+    identity: str
+    period: str = ""
+    urls: list[str] = Field(default_factory=list)
+    methodology_fingerprint: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DiscoveryResult(BaseModel):
+    """Auditable result of checking a source without necessarily downloading it."""
+
+    source_id: str
+    dataset_id: str
+    checked_at: datetime
+    status: DiscoveryStatus
+    latest_upstream_identity: str = ""
+    latest_available_period: str = ""
+    candidates: list[ReleaseCandidate] = Field(default_factory=list)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+
+    _checked_aware = field_validator("checked_at")(_aware)
 
 
 class NativeRecord(BaseModel):

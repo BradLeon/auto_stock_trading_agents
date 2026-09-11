@@ -107,9 +107,21 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 - **尚未迁移的原始源**：行情/基本面/宏观/期权/consensus 仍每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。这是当前迁移边界，不再作为长期数据原则。
 - 查存储：`ats data health`、`ats data quality`、`ats data search "inference demand" --entity AMD`、`ats data series --source <source_id>`、`ats data company AMD`、`ats data claim <concept>`、`ats data lineage <projection_id>`。
 
+### AI 企业采用、员工使用与任务生产化四轴证据
+
+L1 `ai_core_production_workflow_penetration` v2 通过受治理的
+`DataProducts.ai_adoption_evidence_bundle()` 独立读取四个观察轴：Census BTOS Core 的美国企业
+采用广度、RPS/FRED 的美国员工持续使用，以及 Anthropic
+Economic Index 1P API 的职业/任务生产化。各轴保留自己的统计主体、分母、地区、期间和方法
+regime；只允许方向性相互印证，不生成统一 AI 渗透率。
+
+主动发现统一由 `ats data release-check --group ai_adoption --ingest-new` 触发。纳入 BTOS Core
+新口径、RPS/FRED 和 Anthropic；明确排除一次性 BTOS AI Supplement 与年度 Eurostat。ONS BICS
+既有数据与独立查询只保留作历史审计，不再进入 L1 主动更新组或 Observer。
+
 ### Anthropic Economic Index：AI 工作生产化代理
 
-`anthropic_economic_index / ai_work_adoption` 的 GLOBAL `1p_api` slice 是 L1 AI 应用层生产化 Observer 的唯一输入。它提供职业/任务 Usage Share、Work Use、Automation、Directive 等公开指标；不是从业者采用率，也不覆盖 Claude.ai、国家/州差异或持续工作流确认。`observed_exposure` 是单独研究 snapshot，不能并入月度趋势。消费与约束见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
+`anthropic_economic_index / ai_work_adoption` 的 GLOBAL `1p_api` slice 是任务生产化轴的输入。它提供职业/任务 Usage Share、Work Use、Automation、Directive 等公开指标；不是从业者采用率，也不覆盖 Claude.ai、国家/州差异或持续工作流确认。`observed_exposure` 是单独研究 snapshot，不能并入月度趋势。消费与约束见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
 
 ## 非结构化数据运维闸
 

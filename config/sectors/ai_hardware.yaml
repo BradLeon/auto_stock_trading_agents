@@ -47,6 +47,7 @@ layers:
     # 它不进入公司证人、corroboration、评分或交易工作流。
     evidence_observers:
       - claim_id: ai_core_production_workflow_penetration
+        claim_definition_version: v2
         runner: ai_production_penetration
         label: AI 生产化与应用扩散
         enabled: true

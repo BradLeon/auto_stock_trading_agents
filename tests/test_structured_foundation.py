@@ -46,23 +46,28 @@ def test_empty_database_bootstraps_catalog_without_workflow_tables(tmp_path):
     assert "structured_observations" in tables
     assert "structured_artifacts" in tables
     assert "cycles" not in tables
-    assert repo.conn.execute("SELECT count(*) FROM structured_sources").fetchone()[0] == 14
-    assert repo.conn.execute("SELECT count(*) FROM structured_datasets").fetchone()[0] == 7
-    assert repo.conn.execute("SELECT count(*) FROM structured_metrics").fetchone()[0] == 76
+    assert repo.conn.execute("SELECT count(*) FROM structured_sources").fetchone()[0] == 18
+    assert repo.conn.execute("SELECT count(*) FROM structured_datasets").fetchone()[0] == 11
+    assert repo.conn.execute("SELECT count(*) FROM structured_metrics").fetchone()[0] == 106
 
 
-def test_repository_uses_separate_path_when_configured(monkeypatch, tmp_path):
-    from ats.data.structured.repository import default_db_path
+def test_repository_defaults_to_platform_path_and_allows_explicit_compat_override(monkeypatch, tmp_path):
+    from ats.data.stores.structured.repository import default_db_path
 
     legacy = tmp_path / "legacy.sqlite"
     structured = tmp_path / "only-structured.sqlite"
+    platform = tmp_path / "data.sqlite"
     monkeypatch.setenv("ATS_DB_PATH", str(legacy))
     monkeypatch.delenv("ATS_STRUCTURED_DB_PATH", raising=False)
-    assert default_db_path() == str(legacy)  # default: colocated with the workflow DB
+    monkeypatch.delenv("ATS_DATA_DB_PATH", raising=False)
+    assert default_db_path().endswith("/var/data.sqlite")  # workflow DB never becomes data DB
+    monkeypatch.setenv("ATS_DATA_DB_PATH", str(platform))
+    assert default_db_path() == str(platform)
 
     monkeypatch.setenv("ATS_STRUCTURED_DB_PATH", str(structured))
-
-    assert default_db_path() == str(structured)
+    assert default_db_path() == str(platform)  # canonical platform route wins
+    monkeypatch.delenv("ATS_DATA_DB_PATH")
+    assert default_db_path() == str(structured)  # explicit compatibility/test route
     repo = SQLiteStructuredRepository(default_db_path(), artifact_root=tmp_path / "a")
     assert structured.exists()
     assert not legacy.exists()
@@ -176,7 +181,7 @@ def test_reopen_preserves_vintages_and_is_idempotent(tmp_path):
     assert reopened.observations()[0]["observation_id"] == saved.id
     assert reopened.save_observation(_observation()).created is False
     assert reopened.conn.execute(
-        "SELECT count(*) FROM structured_migrations").fetchone()[0] == 1
+        "SELECT count(*) FROM structured_migrations").fetchone()[0] == 3
 
 
 def test_old_measurements_remain_readable_and_audit_does_not_rewrite(tmp_path):

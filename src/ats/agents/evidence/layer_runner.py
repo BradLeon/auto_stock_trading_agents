@@ -60,7 +60,10 @@ def _configured_observers(
                 "expected_claim_id": expected_claim_id,
                 "reason": "claim_id 必须与 runner 的固定受治理命题一致。",
             }
-        resolved[claim_id] = observer
+        definition_version = str(getattr(ref, "claim_definition_version", "") or "v2")
+        def configured_observer(*, _observer=observer, _version=definition_version, **kwargs):
+            return _observer(claim_definition_version=_version, **kwargs)
+        resolved[claim_id] = configured_observer
     return resolved, None
 
 

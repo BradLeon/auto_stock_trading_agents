@@ -125,6 +125,9 @@ feature_flags:
     # Economic Index starts as an isolated governed source.  It must pass its
     # own release check before a later explicit platform promotion.
     anthropic_economic_index: legacy
+    us_census_btos: legacy
+    rps_genai_adoption: legacy
+    ons_bics_ai: legacy
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -286,12 +289,45 @@ sources:
     datasets: [ai_work_adoption]
     cadence: release_event
     retention: query_slice
+    discovery_group: ai_adoption
     internal_request_budget:
       concurrency: 1
       requests_per_run: 8
       timeout_seconds: 300
       max_file_bytes: 367001600
       retry_attempts: 3
+  us_census_btos:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: US Census Bureau Business Trends and Outlook Survey
+    upstream: Census BTOS Core API and historical downloads
+    adapter: census_btos
+    datasets: [ai_enterprise_adoption_us]
+    cadence: biweekly
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget: {concurrency: 1, requests_per_run: 12, timeout_seconds: 60, max_file_bytes: 52428800, retry_attempts: 3}
+  rps_genai_adoption:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Real-Time Population Survey via Federal Reserve Economic Data
+    upstream: FRED RPS GenAI Adoption Tracker series
+    adapter: rps_genai_adoption
+    datasets: [ai_worker_adoption_us]
+    cadence: quarterly
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget: {concurrency: 1, requests_per_run: 10, timeout_seconds: 60, max_file_bytes: 10485760, retry_attempts: 3}
+  ons_bics_ai:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: UK Office for National Statistics Business Insights and Conditions Survey
+    upstream: ONS BICS workbooks and questionnaires
+    adapter: ons_bics_ai
+    datasets: [ai_enterprise_adoption_uk]
+    cadence: conditional_wave
+    retention: query_slice
+    internal_request_budget: {concurrency: 1, requests_per_run: 8, timeout_seconds: 90, max_file_bytes: 104857600, retry_attempts: 3}
   tw_mof_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -449,6 +485,44 @@ datasets:
       percentage_sum_tolerance_pp: 0.15
       privacy_filtered_missing_status: not_published_or_privacy_filtered
     acceptance_samples: [SOC:15-2031.00, SOC:15-0000, ONET_TASK:7382]
+  ai_enterprise_adoption_us:
+    catalog_status: current_partial
+    entities: [BUSINESS_POP:US:ALL]
+    expected_cadence: biweekly
+    primary_sources: [us_census_btos]
+    fallback_sources: []
+    core_metrics: [ai.enterprise_adoption.current_use_share, ai.enterprise_adoption.expected_use_share]
+    quality:
+      question_regime_start: '2025-11-17'
+      answer_sum_tolerance_pp: 0.15
+      standard_error_nonnegative: true
+      exclude_geographies: [state, msa]
+    acceptance_samples: [BUSINESS_POP:US:ALL, BUSINESS_POP:US:NAICS:51, BUSINESS_POP:US:EMP:250_PLUS]
+  ai_worker_adoption_us:
+    catalog_status: current_partial
+    entities: [WORKER_POP:US:EMPLOYED_18_64]
+    expected_cadence: quarterly
+    primary_sources: [rps_genai_adoption]
+    fallback_sources: []
+    core_metrics: [ai.worker_adoption.work_use_share, ai.worker_adoption.last_week_work_use_share,
+                   ai.worker_adoption.daily_work_use_share, ai.worker_adoption.assisted_work_hours,
+                   ai.worker_adoption.time_saved_hours]
+    quality:
+      work_only_series: true
+      daily_lte_last_week_lte_adoption: true
+    acceptance_samples: [WORKER_POP:US:EMPLOYED_18_64]
+  ai_enterprise_adoption_uk:
+    catalog_status: current_partial
+    entities: [BUSINESS_POP:UK:ALL]
+    expected_cadence: conditional_wave
+    primary_sources: [ons_bics_ai]
+    fallback_sources: []
+    core_metrics: [ai.uk_enterprise_adoption.use_share, ai.uk_enterprise_adoption.extensive_use_share]
+    quality:
+      question_fingerprint_required: true
+      conditional_denominator_required: true
+      uk_supplement_only: true
+    acceptance_samples: [BUSINESS_POP:UK:ALL]
   sp500_earnings_insight:
     catalog_status: current_partial
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
@@ -651,6 +725,23 @@ metric_definitions:
   ai.work_adoption.autonomy_mean: {value_type: number, unit_family: scale_1_5, cadence: monthly, period_basis: calendar_month}
   ai.work_adoption.observed_exposure: {value_type: number, unit_family: ratio, cadence: research_snapshot, period_basis: research_snapshot}
   ai.work_adoption.task_penetration: {value_type: number, unit_family: ratio, cadence: research_snapshot, period_basis: research_snapshot}
+  ai.enterprise_adoption.current_use_share: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window, description: Census BTOS Core Yes share for businesses using AI in any business function.}
+  ai.enterprise_adoption.response_share: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window, description: Census BTOS Core response share; answer is carried in dimensions.}
+  ai.enterprise_adoption.expected_use_share: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window, description: Census BTOS Core Yes share expecting AI use in any business function in six months.}
+  ai.enterprise_adoption.current_use_standard_error: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window}
+  ai.enterprise_adoption.expected_use_standard_error: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window}
+  ai.worker_adoption.work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Self-reported work GenAI use among US employed adults aged 18-64.}
+  ai.worker_adoption.last_week_work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter}
+  ai.worker_adoption.daily_work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter}
+  ai.worker_adoption.assisted_work_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Estimated share of all work hours assisted by GenAI.}
+  ai.worker_adoption.time_saved_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Self-reported counterfactual time savings as a share of work hours.}
+  ai.uk_enterprise_adoption.use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
+  ai.uk_enterprise_adoption.average_technologies: {value_type: number, unit_family: count, cadence: conditional_wave, period_basis: survey_wave}
+  ai.uk_enterprise_adoption.extensive_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
+  ai.uk_enterprise_adoption.limited_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
+  ai.uk_enterprise_adoption.pilot_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
+  ai.uk_enterprise_adoption.employee_daily_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
+  ai.uk_enterprise_adoption.response_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave, description: ONS BICS approved AI question response share; question, answer and conditional universe are dimensions.}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -755,6 +846,26 @@ provider_mappings:
     ai_autonomy_mean: ai.work_adoption.autonomy_mean
     observed_exposure: ai.work_adoption.observed_exposure
     penetration: ai.work_adoption.task_penetration
+  us_census_btos:
+    btos_response_share: ai.enterprise_adoption.response_share
+    current_ai_yes_pct: ai.enterprise_adoption.current_use_share
+    expected_ai_yes_pct: ai.enterprise_adoption.expected_use_share
+    current_ai_yes_se: ai.enterprise_adoption.current_use_standard_error
+    expected_ai_yes_se: ai.enterprise_adoption.expected_use_standard_error
+  rps_genai_adoption:
+    RPSGENAIUSAGESHAREWORK: ai.worker_adoption.work_use_share
+    RPSGENAIUSAGESHARELWWORK: ai.worker_adoption.last_week_work_use_share
+    RPSGENAIUSAGESHAREEDLWWOR: ai.worker_adoption.daily_work_use_share
+    RPSGENAIASSISTWRKHRSALL: ai.worker_adoption.assisted_work_hours
+    RPSGENAITSALL: ai.worker_adoption.time_saved_hours
+  ons_bics_ai:
+    ai_use_pct: ai.uk_enterprise_adoption.use_share
+    ai_technologies_mean: ai.uk_enterprise_adoption.average_technologies
+    extensive_use_pct: ai.uk_enterprise_adoption.extensive_use_share
+    limited_use_pct: ai.uk_enterprise_adoption.limited_use_share
+    pilot_use_pct: ai.uk_enterprise_adoption.pilot_use_share
+    employee_daily_use_pct: ai.uk_enterprise_adoption.employee_daily_use_share
+    ons_response_share: ai.uk_enterprise_adoption.response_share
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share

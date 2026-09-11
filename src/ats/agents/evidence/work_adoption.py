@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from itertools import pairwise
+import json
 from typing import Any
 
 CONSUMER = "evidence_observer"
 PRODUCTION_CLAIM_ID = "ai_core_production_workflow_penetration"
-PRODUCTION_CLAIM_TEXT = "以 Anthropic 1P API 作为前沿 AI 生产部署的代理，满足核心生产流程标准的职业和任务是否持续扩大，且这些单元所承载的 API 使用量是否持续提高？"
+PRODUCTION_CLAIM_DEFINITION_VERSION = "v2"
+PRODUCTION_CLAIM_TEXT = "AI 的企业采用广度、员工持续使用和任务生产化深度是否同步扩大，从局部试验走向可重复的生产工作流？"
 SEMANTIC_GUARDRAILS = {
     "usage_share": "职业或任务占对应 Claude 产品总使用量的份额，不是从业者采用率。",
     "industry": "官网 Industry 是 SOC occupational major group，不是企业所属行业。",
@@ -207,6 +209,7 @@ def observe_ai_production_penetration(
     top_n: int = 10,
     chart_dir: str = "",
     workflow_scope: dict[str, str] | None = None,
+    claim_definition_version: str = "v2",
     products=None,
 ) -> dict[str, Any]:
     """Dedicated, read-only L1 packet for the production-workflow proxy.
@@ -218,6 +221,12 @@ def observe_ai_production_penetration(
         from ...data.products import get_platform_data_products
 
         products = get_platform_data_products()
+    # v2 is the governed multi-source path.  The compatibility branch below remains
+    # temporarily available to replay legacy v1 fixtures and snapshots.
+    if claim_definition_version == "v2" and hasattr(products, "ai_adoption_evidence_bundle"):
+        return _observe_ai_production_diffusion_v2(
+            as_of=as_of, top_n=top_n, chart_dir=chart_dir,
+            workflow_scope=workflow_scope, products=products)
     scope_suffix = ""
     if workflow_scope:
         scope_suffix = ":" + ":".join(
@@ -436,6 +445,116 @@ def observe_ai_production_penetration(
     return packet
 
 
+def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
+                                        workflow_scope: dict[str, str] | None,
+                                        products) -> dict[str, Any]:
+    scope = workflow_scope or {}
+    bundle = products.ai_adoption_evidence_bundle(
+        as_of=as_of, snapshot_consumer=CONSUMER,
+        snapshot_purpose=f"{PRODUCTION_CLAIM_ID}:v2:{scope.get('sector','')}:{scope.get('layer','')}")
+    axes = bundle.get("axes", {})
+    task_detail = axes.get("task_production", {}).get("detail", {})
+    manifest = bundle.get("manifest")
+    axis_rows = []
+    facts, warnings = [], []
+    for axis_id, axis in axes.items():
+        headline = axis.get("headline") or {}
+        value = headline.get("value")
+        if value is None and axis_id == "task_production":
+            value = headline.get("production_traffic_share_pct")
+        row = {"axis_id": axis_id, "axis_label": axis.get("label"),
+               "source_id": axis.get("source_id"), "period": axis.get("period"),
+               "headline_value": value, "headline_unit": headline.get("unit", "percent"),
+               "trend_status": axis.get("trend", {}).get("status"),
+               "statistical_unit": axis.get("statistical_unit"),
+               "denominator": axis.get("denominator"), "geography": axis.get("geography"),
+               "input_observation_ids": axis.get("trend", {}).get("input_observation_ids", []),
+               "trend_explanation": axis.get("trend", {}).get("steps", []),
+               "trend_net_change_pp": axis.get("trend", {}).get("net_change_pp"),
+               "trend_slope_pp_per_period": axis.get("trend", {}).get("linear_slope_pp_per_period"),
+               "comparable_period_count": len(axis.get("trend", {}).get("periods", []))}
+        axis_rows.append(row)
+        facts.append({"kind": "axis_status", "axis_id": axis_id, "period": axis.get("period"),
+                      "statement": f"{axis.get('label')}：{row['trend_status']}（{axis.get('period') or '无可用期间'}）。",
+                      "input_observation_ids": row["input_observation_ids"]})
+        if axis.get("source_status") == "unavailable":
+            warnings.append(f"{axis.get('label')}当前不可用；其他轴未用旧值补齐该轴。")
+    conflicts = []
+    statuses = {row["axis_id"]: row["trend_status"] for row in axis_rows}
+    directional = {key: value for key, value in statuses.items()
+                   if value in {"expanding", "contracting"}}
+    if len(set(directional.values())) > 1:
+        conflicts.append({"type": "directional_conflict", "axes": directional,
+                          "interpretation": "来源方向不一致；保留分歧，不合成统一指标。"})
+    if bundle.get("periods_are_asynchronous"):
+        warnings.append("三个来源期间不同步；报告保留各自最新期间，不前向填充或插值。")
+    warnings.append("不同来源的统计主体和分母不同，只用于方向性相互印证，不合并为统一渗透率。")
+    methodology_card = {
+        "title": "L1 AI 应用层生产化与扩散：固定方法卡", "claim_definition_version": "v2",
+        "sources": [{key: axis.get(key) for key in (
+            "axis_id", "label", "source_id", "statistical_unit", "denominator", "geography",
+            "technology_scope", "reference_period", "frequency", "methodology_regimes",
+            "period", "published_at", "known_at", "age_days")} | {
+                "lineage_summary": bundle.get("detail_lineage", {}).get(axis.get("axis_id"), {})
+            } for axis in axes.values()],
+        "anthropic_threshold": task_detail.get("proxy", {}),
+        "quality_and_missingness": ["抑制、隐私过滤或未发布 cell 均按缺失处理，不按零处理。",
+                                    "方法口径变化会中断趋势，不跨 regime 计算变化。"],
+        "prohibited_inferences": ["不能推断统一全球采用率、员工替代数、生产率、ROI 或交易信号。"],
+        "lineage": {"manifest_id": (manifest or {}).get("snapshot_id"),
+                    "bundle_version": bundle.get("bundle_version")},
+    }
+    packet = {
+        "status": bundle.get("status"), "consumer": CONSUMER, "source_access": "data_products_only",
+        "claim_id": PRODUCTION_CLAIM_ID, "claim_definition_version": "v2",
+        "claim_text": PRODUCTION_CLAIM_TEXT, "overall_status": bundle.get("overall", {}).get("status"),
+        "overall_interpretation": bundle.get("overall", {}).get("interpretation"),
+        "overall_reasoning": bundle.get("overall", {}).get("steps", []), "axis_overview": axis_rows,
+        "axes": axes, "corroboration_and_conflicts": conflicts, "comparability": bundle.get("comparability"),
+        "periods": {row["axis_id"]: row["period"] for row in axis_rows},
+        "methodology_card": methodology_card, "facts": facts, "warnings": warnings,
+        "summary_table": task_detail.get("period_rows", []),
+        "occupation_task_coverage": task_detail.get("occupation_task_coverage", []),
+        "occupation_coverage_distribution": task_detail.get("occupation_coverage_distribution", {}),
+        "top_occupations": task_detail.get("top_occupations", [])[:top_n],
+        "top_tasks": task_detail.get("top_tasks", [])[:top_n],
+        "snapshot_manifest": manifest, "manifest": manifest,
+        "bundle_content_hash": bundle.get("content_hash"), "visualization_descriptors": [],
+        "detail_lineage": bundle.get("detail_lineage", {}),
+    }
+    if scope:
+        packet["workflow_scope"] = dict(scope)
+    if chart_dir:
+        from .adoption_visualization import render_ai_adoption_charts
+        rendered = render_ai_adoption_charts(packet=packet, output_dir=chart_dir)
+        packet["visualization_descriptors"] = rendered.get("descriptors", [])
+        packet["table_descriptors"] = rendered.get("tables", [])
+        if rendered.get("visualization_warning"):
+            packet["warnings"].append(rendered["visualization_warning"])
+            packet["visualization_warning"] = rendered["visualization_warning"]
+    packet["context"] = _build_v2_context(packet)
+    return packet
+
+
+def _build_v2_context(packet: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic bounded contexts; essential evidence is never tail-truncated."""
+    essential = {key: packet.get(key) for key in (
+        "claim_id", "claim_definition_version", "claim_text", "overall_status",
+        "overall_interpretation", "axis_overview",
+        "corroboration_and_conflicts", "warnings")}
+    essential["manifest_id"] = (packet.get("manifest") or {}).get("snapshot_id")
+    compact = json.dumps(essential, ensure_ascii=False, sort_keys=True, default=str)
+    review_model = {**essential, "methodology_card": packet.get("methodology_card"),
+                    "summary_table": packet.get("summary_table"),
+                    "occupation_coverage_distribution": packet.get("occupation_coverage_distribution"),
+                    "top_occupations": packet.get("top_occupations"), "top_tasks": packet.get("top_tasks")}
+    review = json.dumps(review_model, ensure_ascii=False, sort_keys=True, default=str)
+    return {"schema_version": "ai_adoption_observer_context/v2", "compact": compact,
+            "compact_char_count": len(compact), "compact_budget": 12000,
+            "review": review, "review_char_count": len(review), "review_budget": 120000,
+            "budget_status": "ok" if len(compact) <= 12000 and len(review) <= 120000 else "exceeded"}
+
+
 def _pct(value: Any, digits: int = 2) -> str:
     """Format nullable percentage values without changing the governed value."""
     return "—" if value is None else f"{float(value):.{digits}f}%"
@@ -444,6 +563,11 @@ def _pct(value: Any, digits: int = 2) -> str:
 def _pp(value: Any, digits: int = 2) -> str:
     """Format a percentage-point change; this is not itself a percent sign."""
     return "—" if value is None else f"{float(value):.{digits}f}"
+
+
+def _signed_pp(value: Any, digits: int = 2) -> str:
+    """Format a nullable percentage-point change with an explicit direction."""
+    return "—" if value is None else f"{float(value):+.{digits}f}pp"
 
 
 def _occupation_label(row: dict[str, Any]) -> str:
@@ -459,6 +583,8 @@ def render_ai_production_markdown(packet: dict[str, Any]) -> str:
     The reader-facing order deliberately separates the four core series from the
     taxonomy-dependent occupational task-combination evidence.
     """
+    if packet.get("claim_definition_version") == "v2":
+        return _render_ai_production_diffusion_v2(packet)
     if packet.get("status") != "ok":
         reason = "; ".join(str(item) for item in packet.get("warnings", []))
         return f"# AI 应用层：生产化与应用扩散\n\n状态：{packet.get('status', 'unavailable')}\n\n{reason}\n"
@@ -602,3 +728,166 @@ def render_ai_production_markdown(packet: dict[str, Any]) -> str:
         f"- {warning}" for warning in packet.get("warnings", []) if isinstance(warning, str)
     )
     return "\n".join(lines) + "\n"
+
+
+def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
+    """Render v2 in review order from the packet only; never query or recalculate."""
+    if packet.get("status") != "ok":
+        return f"# AI 应用层：生产化与应用扩散\n\n状态：{packet.get('status', 'unavailable')}\n"
+    scope = packet.get("workflow_scope", {})
+    descriptors = packet.get("visualization_descriptors", [])
+    rendered_paths: set[str] = set()
+
+    def chart_lines(*prefixes: str) -> list[str]:
+        selected = [item for item in descriptors
+                    if any(str(item.get("title", "")).startswith(prefix) for prefix in prefixes)
+                    and item.get("png_path") not in rendered_paths]
+        output: list[str] = []
+        for item in selected:
+            rendered_paths.add(item["png_path"])
+            output += ["", f"![{item.get('title')}]({item.get('png_path')})", "",
+                       f"数据与复现：[sidecar]({item.get('sidecar_path')})"]
+        return output
+
+    status_cn = {
+        "expanding": "中期扩大", "contracting": "中期收缩", "stable": "基本稳定",
+        "mixed": "方向混合", "insufficient_history": "历史不足", "unavailable": "不可用",
+        "broadening_and_deepening": "广度和深度同步扩大",
+        "breadth_without_confirmed_depth": "广度扩大、深度尚未确认",
+        "provider_telemetry_only": "仅供应商遥测扩大", "mixed_evidence": "证据方向不一致",
+    }
+    overall = packet.get("overall_status")
+    lines = ["# AI 应用层：生产化与应用扩散", "",
+             f"- 命题版本：`{packet.get('claim_definition_version')}`",
+             f"- 命题：{packet.get('claim_text')}",
+             f"- 判断：{packet.get('overall_interpretation') or status_cn.get(overall, '历史尚不足以形成完整三轴判断')}（机器状态：`{overall}`；不计算跨来源综合分数）"]
+    if scope:
+        lines.append(f"- 运行范围：{scope.get('sector')} / {scope.get('layer')}")
+    lines += ["", "## 三轴总览", "",
+              "|观察轴|最新期间|标题值|趋势状态|统计主体|分母|", "|---|---|---:|---|---|---|"]
+    for row in packet.get("axis_overview", []):
+        value = "—" if row.get("headline_value") is None else f"{float(row['headline_value']):.2f}%"
+        lines.append(f"|{row.get('axis_label')}|{row.get('period') or '—'}|{value}|"
+                     f"{row.get('trend_status')}|{row.get('statistical_unit')}|{row.get('denominator')}|")
+    lines += ["", "## 相互印证与冲突", ""]
+    conflicts = packet.get("corroboration_and_conflicts", [])
+    lines += ([f"- {item.get('interpretation')} {item.get('axes')}" for item in conflicts]
+              if conflicts else ["- 当前没有可判定的方向冲突；历史不足的轴不视作支持证据。"])
+    lines += ["", "### 本报告使用的变量", "",
+              "|来源|变量|物理含义|在判断中的作用|", "|---|---|---|---|",
+              "|BTOS|`current_use_share`|过去两周在任一业务职能使用 AI 的美国雇主企业占比|企业采用广度 headline|",
+              "|RPS|`last_week_work_use_share`|过去一周至少一次为工作使用 GenAI 的美国就业人口占比|员工持续使用 headline|",
+              "|RPS|`work_use_share` / `daily_work_use_share`|曾为工作使用、以及每个工作日使用 GenAI 的就业人口占比|持续性边界与辅助诊断|",
+              "|RPS|`assisted_work_hours` / `time_saved_hours`|受访者估计的 AI 辅助工时及节省工时占总工时比例|使用强度诊断，不直接决定本轴状态|",
+              "|Anthropic|任务生产化流量份额|满足 Work≥80%、Automation≥80%、Directive≥50% 的任务 Usage Share 之和|任务生产化 headline|",]
+    axes = packet.get("axes", {})
+    for key, title, chart_prefix in (("enterprise_breadth", "BTOS 美国企业 AI 采用广度", "BTOS "),
+                       ("worker_persistence", "RPS 美国员工工作使用持续性", "RPS ")):
+        axis = axes.get(key, {})
+        trend = axis.get("trend", {})
+        detail = axis.get("detail", {})
+        if key == "enterprise_breadth":
+            strata = detail.get("strata", {})
+            counts = "、".join(
+                f"{name} {len({row.get('entity_id') for row in rows if row.get('entity_id')})} 个统计单元/{len(rows)} 个发布 cells"
+                for name, rows in strata.items()
+            )
+            source_line = "[美国人口普查局 BTOS](https://www.census.gov/hfp/btos/data)；双周发布。"
+            definition = "过去两周在任一业务职能使用 AI 的美国雇主企业占比；按企业计数权重估计。"
+            formula = "回答 Yes 的加权企业数 ÷ 该统计层全部在范围企业的加权企业数 × 100%。"
+            scope_line = f"最新期按全国、行业、企业规模、行业×规模分层；参与 {counts or '0 cells'}；趋势含 {len(trend.get('periods', []))} 个全国期间。"
+        else:
+            histories = detail.get("history", {})
+            counts = "、".join(f"{name} {len(rows)} 期" for name, rows in histories.items())
+            source_line = "[FRED / Real-Time Population Survey](https://fred.stlouisfed.org/categories/33509)；季度发布。"
+            definition = "过去一周至少一次为工作使用 GenAI 的美国 18–64 岁就业人口占比；来自受访者自报。"
+            formula = "报告过去一周为工作使用 GenAI 的就业成年人 ÷ 目标就业人口 × 100%。"
+            scope_line = f"全国就业人口；5 条工作用途序列，参与 {counts or '0 期'}；headline 趋势含 {len(trend.get('periods', []))} 期。"
+        lines += ["", f"## {title}", "",
+                  f"- 指标说明：{definition}", f"- 计算公式：{formula}",
+                  f"- 数据发布来源：{source_line}",
+                  f"- 统计范围与数量：{scope_line}",
+                  f"- 最新期间与结论：{axis.get('period') or '无'}；{status_cn.get(trend.get('status'), trend.get('status'))}（`{trend.get('status')}`）。",
+                  f"- 统计主体：{axis.get('statistical_unit')}；分母：{axis.get('denominator')}。"]
+        if key == "enterprise_breadth" and trend.get("standard_errors"):
+            latest_se = trend["standard_errors"][-1]
+            lines.append(f"- 最新 standard error：{latest_se.get('standard_error')} 个百分点；当前只作描述性判断，未做显著性检验。")
+        lines += chart_lines(chart_prefix)
+    lines += ["", "## Anthropic：任务生产化分布与四项指标", "",
+              "- 数据发布来源：[Anthropic Economic Index](https://huggingface.co/datasets/Anthropic/EconomicIndex)，本报告使用 GLOBAL 1P API 数据。",
+              "- 统计维度：SOC 详细职业与 O*NET task；职业和任务是同一产品流量的两种分类视角，不能相加。",
+              "- 生产化代理：Usage Share > 0、Work Use Share ≥ 80%、Automation Share ≥ 80%、Directive Share ≥ 50%。",
+              "- Usage Share 的分母：相应月份 Claude 1P API 的全部使用流量；不是某职业中使用 AI 的员工比例。", "",
+              "|期间|维度|可见数|达标数|可见单元生产化率|生产化流量份额|已发布流量份额|条件生产化流量份额|",
+              "|---|---|---:|---:|---:|---:|---:|---:|"]
+    for row in packet.get("summary_table", []):
+        lines.append(f"|{row.get('period')}|{row.get('grain')}|{row.get('visible_count')}|{row.get('qualified_count')}|{_pct(row.get('visible_production_rate_pct'))}|"
+                     f"{_pct(row.get('production_traffic_share_pct'))}|{_pct(row.get('published_usage_share_pct'))}|"
+                     f"{_pct(row.get('conditional_production_traffic_share_pct'))}|")
+    summary_rows = packet.get("summary_table", [])
+    periods = sorted({str(row.get("period")) for row in summary_rows if row.get("period")})
+    if len(periods) >= 2:
+        previous_period, latest_period = periods[-2], periods[-1]
+        indexed = {(row.get("period"), row.get("grain")): row for row in summary_rows}
+        lines += ["", f"### 四项核心指标月度比较（{previous_period} → {latest_period}）", "",
+                  f"|指标|{previous_period}|{latest_period}|变化|", "|---|---:|---:|---:|"]
+        comparison_rows = []
+        for grain, label, field, change_field in (
+            ("occupation", "职业可见单元生产化率", "visible_production_rate_pct", "visible_production_rate_change_pp"),
+            ("task", "任务可见单元生产化率", "visible_production_rate_pct", "visible_production_rate_change_pp"),
+            ("occupation", "职业生产化流量份额", "production_traffic_share_pct", "production_traffic_share_change_pp"),
+            ("task", "任务生产化流量份额", "production_traffic_share_pct", "production_traffic_share_change_pp"),
+        ):
+            previous = indexed.get((previous_period, grain), {})
+            latest = indexed.get((latest_period, grain), {})
+            comparison_rows.append(
+                f"|{label}|{_pct(previous.get(field))}|{_pct(latest.get(field))}|"
+                f"{_signed_pp(latest.get(change_field))}|"
+            )
+        lines += comparison_rows
+    lines += chart_lines("Anthropic 职业/任务可见单元生产化率")
+    lines += ["", "### 职业内已确认生产化任务覆盖分布", ""]
+    for item in packet.get("occupation_coverage_distribution", {}).get("landmarks", []):
+        lines.append(f"- 覆盖至少 {item.get('minimum_coverage_pct'):g}%：{item.get('occupation_count')} 个职业，"
+                     f"占有可映射任务职业的 {_pct(item.get('occupation_share_pct'))}。")
+    lines += chart_lines("Anthropic 职业内已确认生产化任务覆盖分布")
+    for title, rows in (("TOP10 生产化职业", packet.get("top_occupations", [])),
+                        ("TOP10 生产化任务", packet.get("top_tasks", []))):
+        lines += ["", f"## {title}", ""]
+        lines += ["|排名|名称|Usage Share|Work Use Share|Automation Share|Directive Share|",
+                  "|---:|---|---:|---:|---:|---:|"]
+        lines += [f"|{item.get('rank')}|{item.get('entity_name')}|{_pct(item.get('usage_share_pct'))}|"
+                  f"{_pct(item.get('work_use_share_pct'))}|{_pct(item.get('automation_share_pct'))}|"
+                  f"{_pct(item.get('directive_share_pct'))}|" for item in rows]
+        lines += chart_lines(f"Anthropic {title}")
+    lines += ["", "## 指标公式、限制与来源", "",
+              "### Census BTOS", "",
+              "- 当前采用广度 = 过去两周回答在任一业务职能使用 AI 的加权企业数 ÷ 在范围雇主企业加权总数 × 100%。来源为美国人口普查局 BTOS Core；只使用 2025-11-17 后新口径。",
+              "- 四期移动平均 = 最近四个连续可比 BTOS period 的当前采用广度简单平均；standard error 单独披露，本文不作统计显著性推断。",
+              "- 企业占比不是员工使用率、付费席位率或任务自动化率。", "",
+              "### RPS / FRED", "",
+              "- 上周工作使用率 = 过去一周至少一次为工作使用 GenAI 的就业成年人 ÷ 美国 18–64 岁目标就业人口 × 100%。",
+              "- 每周持续使用代理 = 上周工作使用率 ÷ 曾为工作使用率；每日持续使用代理 = 每日工作使用率 ÷ 曾为工作使用率。两者是总体比例之比，不是 cohort 留存率。",
+              "- AI 辅助工时和节省工时均为受访者自报；不能证明企业批准或正式部署。", "",
+              "### Anthropic Economic Index", "",
+              "- 职业/任务可见单元生产化率 = 达到生产化标准且公开的单元数 ÷ 有公开记录的单元数。",
+              "- 职业/任务生产化流量份额 = 达标单元的 Usage Share 之和；分母是相应 1P API 总流量。",
+              "- 已发布流量份额 = 所有公开单元 Usage Share 之和；隐私过滤或未发布单元不按零处理。",
+              "- 条件生产化流量份额 = 达标单元 Usage Share ÷ 已发布单元 Usage Share。",
+              "- Anthropic 达标标准：Work Use Share ≥80%、Automation Share ≥80%、Directive Share ≥50%，且 Usage Share >0。",
+              "- BTOS、RPS 和 Anthropic 的主体、分母、地区与频率不同，只作方向性印证。"]
+    remaining = [item for item in descriptors if item.get("png_path") not in rendered_paths]
+    if remaining:
+        lines += ["", "## 其他受治理图表", ""]
+        for item in remaining:
+            lines += chart_lines(str(item.get("title", "")))
+    tables = packet.get("table_descriptors", [])
+    if tables:
+        lines += ["", "## 可复算数据表", ""]
+        for item in tables:
+            lines.append(f"- {item.get('table_name')}（{item.get('row_count')} 行）："
+                         f"[CSV]({item.get('csv_path')}) · [JSON]({item.get('json_path')}) · "
+                         f"rows hash `{item.get('rows_hash')}`")
+    lines += ["", "### 数据警告", ""] + [f"- {warning}" for warning in packet.get("warnings", [])]
+    lines += ["", f"Snapshot manifest：`{(packet.get('manifest') or {}).get('snapshot_id', '未生成')}`", ""]
+    return "\n".join(lines)

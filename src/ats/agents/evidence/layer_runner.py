@@ -61,7 +61,18 @@ def _configured_observers(
                 "reason": "claim_id 必须与 runner 的固定受治理命题一致。",
             }
         definition_version = str(getattr(ref, "claim_definition_version", "") or "v2")
-        def configured_observer(*, _observer=observer, _version=definition_version, **kwargs):
+        supplemental_sources = tuple(getattr(ref, "supplemental_sources", ()) or ())
+        supplemental_claims = tuple(getattr(ref, "supplemental_claims", ()) or ())
+        def configured_observer(*, _observer=observer, _version=definition_version,
+                                _supplemental_sources=supplemental_sources,
+                                _supplemental_claims=supplemental_claims, **kwargs):
+            if _supplemental_sources or _supplemental_claims:
+                scope = dict(kwargs.get("workflow_scope") or {})
+                if _supplemental_sources:
+                    scope["supplemental_sources"] = list(_supplemental_sources)
+                if _supplemental_claims:
+                    scope["supplemental_claims"] = [dict(item) for item in _supplemental_claims]
+                kwargs["workflow_scope"] = scope
             return _observer(claim_definition_version=_version, **kwargs)
         resolved[claim_id] = configured_observer
     return resolved, None

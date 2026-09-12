@@ -104,6 +104,20 @@ def _ons_bics_ai():
     return ONSBICSAIAdapter()
 
 
+def _ramp_ai_index():
+    import os
+
+    from ...sources.ramp_ai_index import RampAIIndexAdapter
+
+    # Optional headless ingress populated by the desktop browser runner.  No
+    # API key or network fallback is activated; absent files still fail closed.
+    export_dir = os.environ.get("ATS_RAMP_OFFICIAL_EXPORT_DIR", "")
+    if not export_dir:
+        from ....config import REPO_ROOT
+        export_dir = str(REPO_ROOT / "var" / "data" / "ramp_exports")
+    return RampAIIndexAdapter(export_dir=export_dir)
+
+
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "tw_mof": RuntimeSourceSpec("tw_mof", _tw_mof),
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
@@ -126,6 +140,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     # Retained as an independent historical/audit source; intentionally excluded
     # from the active L1 AI adoption discovery group.
     "ons_bics_ai": RuntimeSourceSpec("ons_bics_ai", _ons_bics_ai),
+    "ramp_ai_index": RuntimeSourceSpec("ramp_ai_index", _ramp_ai_index,
+                                       discovery_group="ai_adoption"),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),
@@ -226,11 +242,20 @@ def build_ingestion(source_id: str, *, entities: list[str] | None = None,
     normalized_entities = [item.upper() for item in (entities or []) if item]
     if spec.requires_entities and not normalized_entities:
         raise ValueError(f"source {source_id} requires at least one --entity")
-    if len(source.datasets) != 1:
-        raise ValueError(
-            f"source {source_id} must declare exactly one dataset for unified ingestion")
+    requested_dataset = str((query_scope or {}).get("dataset_id", "")).strip()
+    if requested_dataset:
+        if requested_dataset not in source.datasets:
+            raise ValueError(f"source {source_id} does not declare dataset {requested_dataset}")
+        dataset_id = requested_dataset
+    elif len(source.datasets) == 1:
+        dataset_id = source.datasets[0]
+    else:
+        # Multi-dataset providers are run as independent jobs.  Keep a stable
+        # default for release-check discovery while allowing callers to select
+        # the spend slice explicitly through query_scope.dataset_id.
+        dataset_id = source.datasets[0]
     return spec.factory(), FetchRequest(
-        source_id=source_id, dataset_id=source.datasets[0],
+        source_id=source_id, dataset_id=dataset_id,
         entities=normalized_entities, periods=periods or [],
         query_scope=query_scope or {})
 

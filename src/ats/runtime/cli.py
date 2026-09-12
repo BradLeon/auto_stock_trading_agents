@@ -1714,6 +1714,7 @@ def run_data(
     window: int = 0,
     entities: str = "",
     period: str = "",
+    scope: str = "",
     report_path: str = "",
     acquire: bool = False,
     chart_dir: str = "",
@@ -2122,6 +2123,26 @@ def run_data(
             chart_dir=chart_dir,
             products=products,
         )
+    elif action == "ramp-adoption":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.ramp_paid_adoption_snapshot(
+            scope=scope or (period if period in {"adoption_overall", "adoption_overall_models", "adoption_sector"} else "adoption_overall"),
+            period=period if period not in {"adoption_overall", "adoption_overall_models", "adoption_sector"} else "",
+            periods=periods or None,
+            as_of=cutoff, include_vintages=vintages,
+        )
+    elif action == "ramp-spend":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.ramp_spend_per_employee_series(
+            scope=scope or "spend_per_employee_overall", period=since or (period if period not in {"spend_per_employee_overall"} else ""),
+            as_of=cutoff, include_vintages=vintages,
+        )
+    elif action == "ramp-model-share":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        result = products.ramp_model_market_share_series(
+            scope=scope or "model_market_share_overall", period=since or (period if period not in {"model_market_share_overall"} else ""),
+            provider=entity, as_of=cutoff, include_vintages=vintages,
+        )
     elif action == "earnings-insight":
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         value = (
@@ -2306,6 +2327,9 @@ def main(argv: list[str] | None = None) -> int:
             "ai-adoption",
             "ai-job",
             "ai-production",
+            "ramp-adoption",
+            "ramp-spend",
+            "ramp-model-share",
             "derive",
             "cross-section",
             "earnings-insight",
@@ -2364,6 +2388,7 @@ def main(argv: list[str] | None = None) -> int:
         help="ai-adoption/ai-job: Claude source product（不可省略）",
     )
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
+    data.add_argument("--scope", default="", help="Ramp 图表 scope（adoption_overall 等）")
     data.add_argument("--entity", default="", help="实体过滤")
     data.add_argument("--since", default="", help="最早期间或发布日期")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
@@ -2705,6 +2730,7 @@ def main(argv: list[str] | None = None) -> int:
             window=args.window,
             entities=args.entities,
             period=args.period,
+            scope=args.scope,
             report_path=args.report_path,
             acquire=args.acquire,
             chart_dir=args.chart_dir,

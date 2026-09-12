@@ -128,6 +128,9 @@ feature_flags:
     us_census_btos: legacy
     rps_genai_adoption: legacy
     ons_bics_ai: legacy
+    # Ramp starts in shadow until the web-export fixtures and slice-level
+    # release gate have passed isolated acceptance.
+    ramp_ai_index: shadow
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -318,6 +321,22 @@ sources:
     retention: query_slice
     discovery_group: ai_adoption
     internal_request_budget: {concurrency: 1, requests_per_run: 10, timeout_seconds: 60, max_file_bytes: 10485760, retry_attempts: 3}
+  ramp_ai_index:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Ramp AI Index
+    upstream: Ramp AI Index public chart exports (Get the data)
+    adapter: ramp_ai_index
+    datasets: [ramp_ai_adoption, ramp_ai_spend]
+    cadence: monthly
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 5
+      timeout_seconds: 30
+      max_file_bytes: 52428800
+      retry_attempts: 0
   ons_bics_ai:
     catalog_status: current_partial
     persistence: persistent
@@ -523,6 +542,32 @@ datasets:
       conditional_denominator_required: true
       uk_supplement_only: true
     acceptance_samples: [BUSINESS_POP:UK:ALL]
+  ramp_ai_adoption:
+    catalog_status: current_partial
+    entities: [RAMP_OVERALL, RAMP_VENDOR, NAICS_GROUP]
+    expected_cadence: monthly
+    primary_sources: [ramp_ai_index]
+    fallback_sources: []
+    core_metrics: [ai.ramp.paid_business_adoption_share, ai.ramp.vendor_adoption_share]
+    quality:
+      scopes: [adoption_overall, adoption_overall_models, adoption_sector]
+      percentage_range: [0, 100]
+      vendor_shares_may_overlap: true
+      exclude_scopes: [business_size, geographies]
+    acceptance_samples: [RAMP_OVERALL, RAMP_VENDOR:ANTHROPIC, NAICS:TECHNOLOGY_AND_MEDIA]
+  ramp_ai_spend:
+    catalog_status: current_partial
+    entities: [RAMP_QUANTILE, RAMP_MODEL]
+    expected_cadence: monthly
+    primary_sources: [ramp_ai_index]
+    fallback_sources: []
+    core_metrics: [ai.ramp.ai_spend_per_employee, ai.ramp.api_spend_share]
+    quality:
+      scopes: [spend_per_employee_overall, model_market_share_overall]
+      percentage_range: [0, 100]
+      spend_nonnegative: true
+      quantile_order: [median, top10, top1]
+    acceptance_samples: [QUANTILE:MEDIAN, QUANTILE:TOP10, MODEL:OPENAI]
   sp500_earnings_insight:
     catalog_status: current_partial
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
@@ -742,6 +787,27 @@ metric_definitions:
   ai.uk_enterprise_adoption.pilot_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
   ai.uk_enterprise_adoption.employee_daily_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
   ai.uk_enterprise_adoption.response_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave, description: ONS BICS approved AI question response share; question, answer and conditional universe are dimensions.}
+  ai.ramp.paid_business_adoption_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_overall, ramp_vendor, naics_group],
+     required_dimensions: [scope, statistical_unit, denominator_scope, technology_scope, segment],
+     description: Share of the relevant Ramp business cohort with a positive AI transaction in the month; not employee adoption.}
+  ai.ramp.vendor_adoption_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_vendor], required_dimensions: [scope, statistical_unit, denominator_scope, technology_scope, segment],
+     description: Share of the relevant Ramp business cohort with a positive payment to a vendor; vendor shares may overlap.}
+  ai.ramp.provider_monthly_change_pp:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month, derived: false}
+  ai.ramp.provider_yearly_change_pp:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month, derived: false}
+  ai.ramp.ai_spend_per_employee:
+    {value_type: number, unit_family: currency, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_quantile], required_dimensions: [scope, quantile, statistical_unit, denominator_scope, technology_scope],
+     description: AI spend per employee per month for the named Ramp cohort and quantile.}
+  ai.ramp.api_spend_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_model], required_dimensions: [scope, provider, model, spend_type, cohort, technology_scope],
+     description: Model-attributed API spend share among Token Spend Management connected businesses.}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -866,6 +932,13 @@ provider_mappings:
     pilot_use_pct: ai.uk_enterprise_adoption.pilot_use_share
     employee_daily_use_pct: ai.uk_enterprise_adoption.employee_daily_use_share
     ons_response_share: ai.uk_enterprise_adoption.response_share
+  ramp_ai_index:
+    adoption_rate_pct: ai.ramp.paid_business_adoption_share
+    vendor_adoption_pct: ai.ramp.vendor_adoption_share
+    monthly_change_pp: ai.ramp.provider_monthly_change_pp
+    yearly_change_pp: ai.ramp.provider_yearly_change_pp
+    ai_spend_per_employee: ai.ramp.ai_spend_per_employee
+    api_spend_share_pct: ai.ramp.api_spend_share
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share

@@ -2,7 +2,7 @@
 
 ## 它回答什么
 
-固定命题 `ai_core_production_workflow_penetration` 的 `claim_definition_version=v2` 观察三个互不融合的轴：美国企业采用广度（BTOS Core）、美国员工持续工作使用（RPS/FRED）和 Anthropic GLOBAL 1P API 的任务生产化。它回答这些证据是否同步扩大、是否从局部试验走向可重复生产工作流。它不生成统一渗透率，也不进入 PEAD、Chief、组合、风险或执行。ONS BICS 的既有数据与独立 DataProduct 只保留作历史审计，不进入本命题、主动更新组、Agent context 或人类报告。
+固定命题 `ai_core_production_workflow_penetration` 的 `claim_definition_version=v2` 观察三个互不融合的主轴：美国企业采用广度（BTOS Core）、美国员工持续工作使用（RPS/FRED）和 Anthropic GLOBAL 1P API 的任务生产化。L1 另有第四个独立补充命题 `ai_paid_business_adoption_diffusion`：**AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？** 该命题由 Ramp AI Index 的五个固定 scope 提供付费采购、支出强度和模型分布证据；它有独立状态和图表，不进入前三轴的统一 judgement。它不生成统一渗透率，也不进入 PEAD、Chief、组合、风险或执行。ONS BICS 的既有数据与独立 DataProduct 只保留作历史审计，不进入本命题、主动更新组、Agent context 或人类报告。
 
 旧 v1 快照仍可重放，但 `ai_hardware/L1_app` 默认使用 v2。三轴 bundle 以至少三个来源原生可比期间判定 `expanding/stable/contracting/mixed`；期间不足或方法口径变化返回 `insufficient_history`。来源不可达时可展示库内最近成功值及 freshness，但不前向填充、不插值、不伪造共同期间。
 

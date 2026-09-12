@@ -109,6 +109,48 @@ class DataProducts:
         return snapshot(self.structured, wave=wave, as_of=as_of,
                         include_vintages=include_vintages)
 
+    def ramp_paid_adoption_snapshot(
+        self, *, scope: str = "adoption_overall", period: str = "",
+        periods: list[str] | None = None, as_of: datetime | None = None,
+        include_vintages: bool = False, as_frame: bool = False,
+    ) -> dict:
+        """Ramp paid-business adoption, kept separate from survey and traffic axes."""
+        from .ramp_ai_index import ramp_paid_adoption_snapshot
+
+        return ramp_paid_adoption_snapshot(self, scope=scope, period=period,
+                                           periods=periods, as_of=as_of,
+                                           include_vintages=include_vintages,
+                                           as_frame=as_frame)
+
+    def ramp_spend_per_employee_series(
+        self, *, scope: str = "spend_per_employee_overall", quantiles: list[str] | None = None,
+        period: str = "", as_of: datetime | None = None, include_vintages: bool = False,
+        as_frame: bool = False,
+    ) -> dict:
+        from .ramp_ai_index import ramp_spend_per_employee_series
+
+        return ramp_spend_per_employee_series(self, scope=scope, quantiles=quantiles,
+                                              period=period, as_of=as_of,
+                                              include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def ramp_model_market_share_series(
+        self, *, scope: str = "model_market_share_overall", period: str = "",
+        provider: str = "", model: str = "", as_of: datetime | None = None,
+        include_vintages: bool = False, as_frame: bool = False,
+    ) -> dict:
+        from .ramp_ai_index import ramp_model_market_share_series
+
+        return ramp_model_market_share_series(self, scope=scope, period=period,
+                                              provider=provider, model=model, as_of=as_of,
+                                              include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def ramp_comparability(self, *, as_of: datetime | None = None) -> dict:
+        from .ramp_ai_index import ramp_comparability
+
+        return ramp_comparability(self, as_of=as_of)
+
     def ai_adoption_evidence_bundle(
         self, *, as_of: datetime | None = None, snapshot_consumer: str = "",
         snapshot_purpose: str = "",

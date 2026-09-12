@@ -17,6 +17,18 @@ structured:
         attempts: 3
         backoff_seconds: [60, 300, 900]
       semantics: conditional sources may return no_change or question_not_fielded
+    ramp_ai_index_p10d_probe:
+      source: ramp_ai_index
+      schedule: every_10_days
+      interval_days: 10
+      at: "07:30"
+      timezone: UTC
+      command: ats data release-check --source ramp_ai_index --ingest-new --force-check
+      concurrency: 1
+      retry:
+        attempts: 3
+        backoff_seconds: [60, 300, 900]
+      semantics: compare reference_period/methodology_fingerprint/payload_sha256; append new periods or revisions, never overwrite
     factset_weekly_ingest:
       source: factset_earnings_insight_metrics
       schedule: saturday

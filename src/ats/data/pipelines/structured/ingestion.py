@@ -200,6 +200,8 @@ class IngestionPipeline:
             IngestionStatus.UNAUTHORIZED, IngestionStatus.NOT_PDF,
             IngestionStatus.PARSE_FAILED,
             IngestionStatus.VALIDATION_FAILED,
+            IngestionStatus.EXPORT_UNREADABLE, IngestionStatus.ACCESS_REQUIRED,
+            IngestionStatus.METHODOLOGY_DRIFT, IngestionStatus.SOURCE_CONFLICT,
         }
         if batch.status in terminal_without_records and not batch.records:
             reasons = Counter(failure.status.value for failure in batch.failures)

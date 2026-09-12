@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import uuid
 from typing import Protocol
 
@@ -29,6 +30,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _candidate_methodology_by_scope(row: dict) -> dict[str, str]:
+    """Read the prior immutable candidate metadata without trusting its status."""
+    try:
+        candidates = json.loads(row.get("candidate_identities_json") or "[]")
+    except (TypeError, ValueError):
+        return {}
+    return {
+        str(item.get("metadata", {}).get("scope")): str(item.get("methodology_fingerprint") or "")
+        for item in candidates
+        if isinstance(item, dict) and item.get("metadata", {}).get("scope")
+        and item.get("methodology_fingerprint")
+    }
+
+
 def _is_due(repository, source_id: str, dataset_id: str, *, force: bool) -> bool:
     if force:
         return True
@@ -42,10 +57,12 @@ def _is_due(repository, source_id: str, dataset_id: str, *, force: bool) -> bool
 
 
 def discover_source(repository, source_id: str, *, catalog: StructuredCatalog | None = None,
-                    force: bool = False) -> dict:
+                    force: bool = False, dataset_id: str = "") -> dict:
     """Check one governed source and persist the outcome even when nothing is new."""
     catalog = catalog or StructuredCatalog.load()
-    adapter, request = build_ingestion(source_id, catalog=catalog)
+    adapter, request = build_ingestion(
+        source_id, catalog=catalog,
+        query_scope={"dataset_id": dataset_id} if dataset_id else None)
     if not _is_due(repository, source_id, request.dataset_id, force=force):
         return {"source_id": source_id, "dataset_id": request.dataset_id, "status": "not_due"}
     if not hasattr(adapter, "discover"):
@@ -60,12 +77,32 @@ def discover_source(repository, source_id: str, *, catalog: StructuredCatalog | 
         except Exception as exc:  # discovery schema errors must be explicit and isolated
             result = _failure_result(source_id=source_id, dataset_id=request.dataset_id, exc=exc)
     previous = repository.source_checks(source_id=source_id, dataset_id=request.dataset_id, limit=1)
+    if result.candidates and previous:
+        previous_methodology = _candidate_methodology_by_scope(previous[0])
+        current_methodology = {
+            str(item.metadata.get("scope")): item.methodology_fingerprint
+            for item in result.candidates
+            if item.metadata.get("scope") and item.methodology_fingerprint
+        }
+        drift = {
+            scope: {"previous": previous_methodology[scope], "current": fingerprint}
+            for scope, fingerprint in current_methodology.items()
+            if scope in previous_methodology and previous_methodology[scope] != fingerprint
+        }
+        if drift:
+            result = result.model_copy(update={
+                "status": DiscoveryStatus.METHODOLOGY_DRIFT,
+                "diagnostics": {**result.diagnostics, "methodology_drift": drift},
+            })
     # A release which was merely discovered is not necessarily ingested. Only
     # suppress it when that immutable identity has completed ingestion.
     if (result.status == DiscoveryStatus.NEW_RELEASE and previous
             and result.latest_upstream_identity
             and result.latest_upstream_identity == previous[0]["latest_ingested_identity"]):
-        result = result.model_copy(update={"status": DiscoveryStatus.NO_CHANGE, "candidates": []})
+        # Retain the latest candidate metadata even when content is unchanged.
+        # It is needed on the next probe to detect a schema/methodology drift;
+        # dropping it would make a no_change check blind to a later revision.
+        result = result.model_copy(update={"status": DiscoveryStatus.NO_CHANGE})
     repository.save_source_check(
         source_id=source_id, dataset_id=request.dataset_id, status=result.status.value,
         latest_upstream_identity=result.latest_upstream_identity,
@@ -74,11 +111,16 @@ def discover_source(repository, source_id: str, *, catalog: StructuredCatalog | 
         candidates=[item.model_dump(mode="json") for item in result.candidates],
         request_identity={"adapter": type(adapter).__name__}, diagnostics=result.diagnostics,
         at=result.checked_at)
+    transient_payloads = getattr(adapter, "discovered_payloads", {}) or {}
     return {"source_id": source_id, "dataset_id": request.dataset_id,
             "status": result.status.value, "candidates": [item.model_dump(mode="json") for item in result.candidates],
             "latest_upstream_identity": result.latest_upstream_identity,
             "latest_available_period": result.latest_available_period,
-            "diagnostics": result.diagnostics}
+            "diagnostics": result.diagnostics,
+            # Runtime-only handoff from the probe to ingest_new.  This is not
+            # persisted in source_checks or returned in the final CLI packet;
+            # the corresponding raw export is retained by the artifact store.
+            "_runtime_payloads": transient_payloads}
 
 
 def release_check(repository, *, group: str = "", source_ids: list[str] | None = None,
@@ -92,9 +134,21 @@ def release_check(repository, *, group: str = "", source_ids: list[str] | None =
                               and (not dataset_id or dataset_id in (row.get("datasets") or []))]
     outcomes: list[dict] = []
     for source_id in selected:
-        try:
-            outcome = discover_source(repository, source_id, catalog=catalog, force=force)
-            if ingest_new and outcome["status"] == DiscoveryStatus.NEW_RELEASE.value:
+        source_row = rows.get(source_id) or {}
+        dataset_jobs = [dataset_id] if dataset_id else list(source_row.get("datasets") or [""])
+        for selected_dataset in dataset_jobs:
+          try:
+            outcome = discover_source(repository, source_id, catalog=catalog, force=force,
+                                      dataset_id=selected_dataset)
+            runtime_payloads = outcome.pop("_runtime_payloads", {})
+            # A partial discovery still has valid candidates for the scopes
+            # that parsed successfully.  Ingest those scopes independently;
+            # the failed scope remains diagnosed and does not erase its last
+            # accepted vintage.
+            ingestible = outcome["status"] in {
+                DiscoveryStatus.NEW_RELEASE.value, DiscoveryStatus.PARTIAL.value,
+            } and bool(outcome.get("candidates"))
+            if ingest_new and ingestible:
                 identity = outcome.get("latest_upstream_identity", "")
                 owner = str(uuid.uuid4())
                 if identity and not repository.claim_discovery_candidate(
@@ -104,13 +158,20 @@ def release_check(repository, *, group: str = "", source_ids: list[str] | None =
                     outcomes.append(outcome)
                     continue
                 ingested = ingest_source(repository, source_id, catalog=catalog, force=True,
-                                         query_scope={"discovery_candidates": outcome["candidates"]})
+                                         query_scope={"dataset_id": outcome["dataset_id"],
+                                                      "discovery_candidates": outcome["candidates"],
+                                                      "payloads": runtime_payloads})
                 outcome["ingestion"] = ingested
                 if ingested.get("status") in {"succeeded", "no_change", "partial"}:
+                    persisted_status = (
+                        DiscoveryStatus.PARTIAL.value
+                        if outcome["status"] == DiscoveryStatus.PARTIAL.value
+                        else ("succeeded" if ingested.get("status") == "succeeded"
+                              else ingested["status"])
+                    )
                     repository.save_source_check(
                         source_id=source_id, dataset_id=outcome["dataset_id"],
-                        status=("succeeded" if ingested.get("status") == "succeeded"
-                                else ingested["status"]),
+                        status=persisted_status,
                         latest_upstream_identity=outcome.get("latest_upstream_identity", ""),
                         latest_ingested_identity=outcome.get("latest_upstream_identity", ""),
                         latest_available_period=outcome.get("latest_available_period", ""),
@@ -120,12 +181,16 @@ def release_check(repository, *, group: str = "", source_ids: list[str] | None =
                                      "ingestion_status": ingested.get("status", "")},
                     )
             outcomes.append(outcome)
-        except Exception as exc:  # registration errors are source-local too
-            outcomes.append({"source_id": source_id, "status": "validation_failed",
+          except Exception as exc:  # registration errors are source-local too
+            outcomes.append({"source_id": source_id, "dataset_id": selected_dataset,
+                             "status": "validation_failed",
                              "diagnostics": {"error": f"{type(exc).__name__}:{exc}"}})
     failed = [item for item in outcomes if item["status"] in {
-        "unreachable", "validation_failed", "methodology_break"}]
+        "unreachable", "validation_failed", "methodology_break", "methodology_drift",
+        "export_unreadable", "access_required", "source_conflict"}]
+    partial = [item for item in outcomes if item["status"] == DiscoveryStatus.PARTIAL.value
+               or (item.get("ingestion") or {}).get("status") == "partial"]
     updated = [item for item in outcomes if item["status"] == "new_release"]
-    return {"status": "partial" if failed and len(failed) != len(outcomes)
+    return {"status": "partial" if partial or (failed and len(failed) != len(outcomes))
             else ("validation_failed" if failed else ("succeeded" if updated else "no_change")),
             "sources": outcomes}

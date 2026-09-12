@@ -61,6 +61,10 @@ class IngestionStatus(str, Enum):
     PARSE_FAILED = "parse_failed"
     VALIDATION_FAILED = "validation_failed"
     PARTIAL = "partial"
+    EXPORT_UNREADABLE = "export_unreadable"
+    ACCESS_REQUIRED = "access_required"
+    METHODOLOGY_DRIFT = "methodology_drift"
+    SOURCE_CONFLICT = "source_conflict"
 
 
 class DiscoveryStatus(str, Enum):
@@ -74,6 +78,11 @@ class DiscoveryStatus(str, Enum):
     UNREACHABLE = "unreachable"
     VALIDATION_FAILED = "validation_failed"
     SUCCEEDED = "succeeded"
+    EXPORT_UNREADABLE = "export_unreadable"
+    ACCESS_REQUIRED = "access_required"
+    METHODOLOGY_DRIFT = "methodology_drift"
+    SOURCE_CONFLICT = "source_conflict"
+    PARTIAL = "partial"
 
 
 def _aware(value: datetime | None) -> datetime | None:

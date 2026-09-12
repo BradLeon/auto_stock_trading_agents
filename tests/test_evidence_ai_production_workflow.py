@@ -134,6 +134,7 @@ def test_ai_hardware_l1_declares_data_observer_outside_chain_claims():
         ("ai_core_production_workflow_penetration", "ai_production_penetration")
     ]
     assert l1.evidence_observers[0].claim_definition_version == "v2"
+    assert l1.evidence_observers[0].supplemental_sources == ["ramp_ai_index"]
     assert "ai_core_production_workflow_penetration" not in {claim.id for claim in l1.claims}
 
 
@@ -223,6 +224,53 @@ def test_l1_v2_consumes_only_bundle_and_renders_three_axes(tmp_path):
     assert "BTOS 美国企业 AI 采用广度" in report and "不计算跨来源综合分数" in report
 
 
+def test_l1_v2_adds_ramp_as_supplement_without_changing_three_axis_state(tmp_path):
+    class Products:
+        def ai_adoption_evidence_bundle(self, **kwargs):
+            axes = {}
+            for key, label, value in (("enterprise_breadth", "企业采用广度", 10),
+                                      ("worker_persistence", "员工持续使用", 20),
+                                      ("task_production", "任务生产化", 40)):
+                axes[key] = {"axis_id": key, "label": label, "source_id": key,
+                    "period": "2026-08", "headline": {"value": value, "unit": "percent"},
+                    "trend": {"status": "expanding", "input_observation_ids": [f"o-{key}"]},
+                    "statistical_unit": key, "denominator": f"denominator-{key}",
+                    "geography": "independent", "technology_scope": key,
+                    "reference_period": key, "frequency": key, "methodology_regimes": ["r1"],
+                    "source_status": "available", "detail": {}}
+            return {"status": "ok", "bundle_version": "v1", "axes": axes,
+                    "overall": {"status": "broadening_and_deepening", "interpretation": "three axes"},
+                    "comparability": {"pairs": []}, "periods_are_asynchronous": False,
+                    "manifest": {"snapshot_id": "manifest-v2"}, "content_hash": "hash"}
+
+        def ramp_paid_adoption_snapshot(self, *, scope, **kwargs):
+            return {"status": "ok", "scope": scope, "period": "2026-08-01", "periods": ["2026-08"],
+                    "rows": [{"observation_id": f"r-{scope}", "artifact_id": f"a-{scope}",
+                              "period": "2026-08-01", "entity_id": "RAMP_OVERALL",
+                              "entity_name": "Ramp Overall", "metric_id": "ai.ramp.paid_business_adoption_share",
+                              "value": 56.13, "unit": "percent", "provider_monthly_change_pp": 1.2,
+                              "provider_yearly_change_pp": 8.5, "statistical_unit": "Ramp businesses",
+                              "denominator_scope": "positive AI transaction", "quality_status": "accepted"}],
+                    "quality": {"status": "accepted"}, "freshness": {},
+                    "lineage": {"input_observation_ids": [f"r-{scope}"], "artifact_ids": [f"a-{scope}"]},
+                    "manifest": {"snapshot_id": f"m-{scope}"}}
+
+        def ramp_spend_per_employee_series(self, **kwargs):
+            return {"status": "no_coverage", "scope": "spend_per_employee_overall", "rows": []}
+
+        def ramp_model_market_share_series(self, **kwargs):
+            return {"status": "no_coverage", "scope": "model_market_share_overall", "rows": []}
+
+    packet = observe_ai_production_penetration(
+        products=Products(), workflow_scope={"sector": "ai_hardware", "layer": "L1_app"})
+    assert packet["overall_status"] == "broadening_and_deepening"
+    ramp = packet["supplemental_signals"]["ramp_paid_adoption"]
+    assert ramp["status"] == "partial" and ramp["slices"]["adoption_overall"]["rows"][0]["value"] == 56.13
+    assert "Ramp 付费企业采用与 AI 支出补充证据" in render_ai_production_markdown(packet)
+    compact_context = json.loads(packet["context"]["compact"])
+    assert compact_context["ramp_paid_adoption"]["slices"]["adoption_overall"]["rows"]
+
+
 def test_v2_renderer_writes_tables_charts_and_complete_sidecars(tmp_path):
     from ats.agents.evidence.adoption_visualization import render_ai_adoption_charts
     history = [{"period": "100", "period_end": "2026-01-11", "value": 12.0,
@@ -241,6 +289,24 @@ def test_v2_renderer_writes_tables_charts_and_complete_sidecars(tmp_path):
     assert sidecar["title"] == "BTOS 美国企业 AI 采用广度"
     assert sidecar["manifest_id"] == "m1" and sidecar["observation_ids"] == ["o1"]
     assert sidecar["rows_hash"] == result["descriptors"][0]["rows_hash"]
+
+
+def test_ramp_renderer_uses_same_rows_hash_for_tables_png_and_sidecar(tmp_path):
+    from ats.agents.evidence.ramp_visualization import render_ramp_charts
+    row = {"observation_id": "r1", "artifact_id": "a1", "period": "2026-08-01",
+           "entity_id": "RAMP_OVERALL", "entity_name": "Ramp Overall", "value": 56.13,
+           "unit": "percent", "scope": "adoption_overall"}
+    packet = {"supplemental_signals": {"ramp_paid_adoption": {"status": "ok", "slices": {
+        "adoption_overall": {"rows": [row], "manifest": {"snapshot_id": "m-ramp"}},
+    }}}}
+    result = render_ramp_charts(packet=packet, output_dir=tmp_path)
+    assert result["descriptors"] and result["tables"]
+    descriptor = result["descriptors"][0]
+    table = result["tables"][0]
+    assert descriptor["rows_hash"] == table["rows_hash"]
+    assert descriptor["manifest_id"] == "m-ramp"
+    assert descriptor["chart_slug"] == "ramp_adoption_overall"
+    assert (tmp_path / "ramp_adoption_overall.png").exists()
 
 
 def test_btos_chart_sorts_numeric_waves_and_report_embeds_chart(tmp_path):

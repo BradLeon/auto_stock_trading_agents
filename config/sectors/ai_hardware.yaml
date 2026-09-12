@@ -51,6 +51,12 @@ layers:
         runner: ai_production_penetration
         label: AI 生产化与应用扩散
         enabled: true
+        supplemental_sources:
+          - ramp_ai_index
+        supplemental_claims:
+          - claim_id: ai_paid_business_adoption_diffusion
+            statement: AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？
+            role: L1 第四个补充证据轴；不改变三轴主命题状态
     tickers:
       - {symbol: GOOG, note: Gemini（兼属L2）—— A/C 类已在 entities.yaml 归一到 GOOG}
     # xAI 已于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市并出财报，

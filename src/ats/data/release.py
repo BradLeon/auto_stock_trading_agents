@@ -15,7 +15,10 @@ from .adapters.structured.registry import validate_source_registration
 
 
 SAFE_INGESTION_STATES = {"succeeded", "no_change"}
-SOURCE_RELEASE_MODES = {"platform"}
+# A source can be explicitly routed back to any governed read mode.  Publishing
+# uses ``platform``; rollback must also support the checked-in baseline modes
+# (legacy/shadow/fallback/off) without deleting persisted artifacts or vintages.
+SOURCE_RELEASE_MODES = {"legacy", "shadow", "platform", "fallback", "off"}
 CONSUMER_MODES = {"legacy", "shadow", "platform", "fallback", "off"}
 
 

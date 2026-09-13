@@ -130,11 +130,19 @@ def test_disabled_configured_observer_is_not_registered(monkeypatch):
 def test_ai_hardware_l1_declares_data_observer_outside_chain_claims():
     l1 = load_sector_config("ai_hardware").layer_by_key("L1_app")
     assert l1 is not None
-    assert [(item.claim_id, item.runner) for item in l1.evidence_observers] == [
-        ("ai_core_production_workflow_penetration", "ai_production_penetration")
-    ]
-    assert l1.evidence_observers[0].claim_definition_version == "v2"
-    assert l1.evidence_observers[0].supplemental_sources == ["ramp_ai_index"]
+    by_claim = {item.claim_id: item for item in l1.evidence_observers}
+    # The production observer is still the only one tied to BTOS/RPS/Ramp and
+    # must keep its v2 / supplemental declarations intact.
+    assert by_claim["ai_core_production_workflow_penetration"].runner == \
+        "ai_production_penetration"
+    assert by_claim["ai_core_production_workflow_penetration"].claim_definition_version == "v2"
+    assert by_claim["ai_core_production_workflow_penetration"].supplemental_sources == \
+        ["ramp_ai_index"]
+    # A second, independent commercialization observer was added in v1.  It must
+    # not piggyback on the production runner, supplemental sources, or claim id.
+    assert by_claim["ai_frontier_labs_commercialization"].runner == "ai_commercialization"
+    assert by_claim["ai_frontier_labs_commercialization"].claim_definition_version == "v1"
+    assert "ramp_ai_index" not in by_claim["ai_frontier_labs_commercialization"].supplemental_sources
     assert "ai_core_production_workflow_penetration" not in {claim.id for claim in l1.claims}
 
 

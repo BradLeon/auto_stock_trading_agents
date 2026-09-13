@@ -1010,7 +1010,7 @@ def run_evidence(
 
     Read-only with respect to trading — this path can never place an order.
     """
-    if action in {"layer", "ai-production"}:
+    if action in {"layer", "ai-production", "ai-commercialization"}:
         if not sector or not layer:
             print(
                 json.dumps(
@@ -1025,9 +1025,10 @@ def run_evidence(
             )
             return 2
         from ..agents.evidence import (
+            COMMERCIALIZATION_CLAIM_ID,
             PRODUCTION_CLAIM_ID,
             run_registered_layer_observers,
-            write_layer_evidence_markdown,
+            write_layer_evidence_outputs,
         )
         from ..config import load_sector_config
 
@@ -1100,8 +1101,10 @@ def run_evidence(
         )
         if output_format == "markdown":
             assert output_path is not None
-            written = write_layer_evidence_markdown(result, output_path)
-            print(f"📝 已写入层级 Evidence 审阅文档：{written}")
+            written_paths = write_layer_evidence_outputs(result, output_path)
+            print(f"📝 已写入层级 Evidence 审阅文档：{written_paths[0]}")
+            for path in written_paths[1:]:
+                print(f"📝 已写入独立 Observer 报告：{path}")
             if resolved_chart_dir and result.get("status") == "ok":
                 print(f"📊 图表与 sidecar 目录：{resolved_chart_dir}")
         else:

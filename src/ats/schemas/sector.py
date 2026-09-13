@@ -42,6 +42,11 @@ class EvidenceObserverRef(BaseModel):
     # Domain-specific supplemental propositions (for example Ramp's paid-
     # procurement axis) are rendered by the Observer but are not Chain claims.
     supplemental_claims: list[dict[str, str]] = Field(default_factory=list)
+    # Sections of a broad capability claim that already have governed evidence.
+    # A section listed here may report a status; every other section of the same
+    # claim stays explicitly not-yet-observed. This is how the commercialization
+    # observer ships only its revenue part without overstating the claim.
+    evidence_sections: list[str] = Field(default_factory=list)
 
 
 class SectorLayer(BaseModel):

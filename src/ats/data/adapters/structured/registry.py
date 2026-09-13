@@ -61,6 +61,18 @@ def _consensus():
     return YFinanceConsensusAdapter()
 
 
+def _sacra_frontier_labs_revenue():
+    from ...sources.frontier_ai_labs_revenue import SacraPublicCompanyProfilesAdapter
+
+    return SacraPublicCompanyProfilesAdapter()
+
+
+def _tickertrends_frontier_labs_revenue():
+    from ...sources.frontier_ai_labs_revenue import TickerTrendsPublicResearchAdapter
+
+    return TickerTrendsPublicResearchAdapter()
+
+
 def _trendforce():
     from ...sources.trendforce import TrendForceDRAMAdapter
 
@@ -142,6 +154,14 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "ons_bics_ai": RuntimeSourceSpec("ons_bics_ai", _ons_bics_ai),
     "ramp_ai_index": RuntimeSourceSpec("ramp_ai_index", _ramp_ai_index,
                                        discovery_group="ai_adoption"),
+    # Periodic discovery over two registered Sacra public pages.  TickerTrends is
+    # a frozen one-time 2026H1 seed and is intentionally left out of every
+    # discovery group so it can never re-baseline the main sequence.
+    "sacra_frontier_labs_revenue": RuntimeSourceSpec(
+        "sacra_frontier_labs_revenue", _sacra_frontier_labs_revenue,
+        discovery_group="frontier_ai_labs_revenue"),
+    "tickertrends_frontier_labs_revenue": RuntimeSourceSpec(
+        "tickertrends_frontier_labs_revenue", _tickertrends_frontier_labs_revenue),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),

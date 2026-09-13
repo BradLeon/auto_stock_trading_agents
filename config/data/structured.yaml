@@ -131,6 +131,12 @@ feature_flags:
     # Ramp starts in shadow until the web-export fixtures and slice-level
     # release gate have passed isolated acceptance.
     ramp_ai_index: shadow
+    # Frontier AI Labs revenue is released straight to platform once its own
+    # isolated end-to-end acceptance (7.1-7.5) passes; until then it only runs
+    # under --force in an isolated SQLite/artifact root. There is deliberately
+    # no shadow/experimental promotion step after acceptance.
+    sacra_public_company_profiles: platform
+    tickertrends_public_research: platform
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -480,10 +486,103 @@ sources:
     adapter: options
     datasets: []
     excludes: [option_chain, greeks, implied_volatility]
+  # Frontier AI Labs revenue. Both sources read only unauthenticated public
+  # pages and are stored as constrained snapshots; no paid API, MCP connector,
+  # licensed export or login-gated table is ever contacted. Paywalled cells are
+  # server-side redacted upstream, so their absence is a documented coverage
+  # gap — never a zero revenue observation.
+  sacra_public_company_profiles:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Sacra
+    upstream: Sacra public company profiles (OpenAI, Anthropic)
+    adapter: sacra_frontier_labs_revenue
+    datasets: [frontier_ai_labs_revenue]
+    cadence: every_7_days
+    retention: constrained_snapshot
+    discovery_group: frontier_ai_labs_revenue
+    constraints:
+      paid_api_allowed: false
+      mcp_allowed: false
+      authentication_required: false
+      max_pages_per_run: 2
+      max_browser_snapshots_per_run: 2
+      public_pages_only: true
+      notes: 只采集无需登录的公开公司页面；付费下载、API 与 MCP 一律不接入。
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 2
+      timeout_seconds: 45
+      max_file_bytes: 52428800
+      retry_attempts: 1
+  tickertrends_public_research:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: TickerTrends
+    upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking)
+    adapter: tickertrends_frontier_labs_revenue
+    datasets: [frontier_ai_labs_revenue]
+    cadence: frozen_seed
+    retention: constrained_snapshot
+    constraints:
+      paid_api_allowed: false
+      mcp_allowed: false
+      scheduled_discovery: false
+      accepted_reference_period: 2026-01-01..2026-06-30
+      chart_derived_values_allowed: false
+      notes: 仅冻结一次性 2026H1 历史回填；不进入周期发现，避免估算模型漂移污染主序列。
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 1
+      timeout_seconds: 45
+      max_file_bytes: 5242880
+      retry_attempts: 0
 
 # Business datasets. Source references must be reciprocal with `sources.*.datasets`.
 # `quality` values are release gates; do not loosen them merely to make a run pass.
 datasets:
+  frontier_ai_labs_revenue:
+    catalog_status: current_partial
+    entities: [OPENAI, ANTHROPIC]
+    expected_cadence: every_7_days
+    primary_sources: [sacra_public_company_profiles]
+    fallback_sources: [tickertrends_public_research]
+    core_metrics: [ai.frontier_lab.reported_arr, ai.frontier_lab.annualized_revenue_run_rate,
+                   ai.frontier_lab.trailing_revenue, ai.frontier_lab.forward_revenue_projection]
+    quality:
+      positive_value_required: true
+      currency_required: true
+      reference_period_required: true
+      metric_identity_required: true
+      observation_identity_required: true
+      citation_chain_required: true
+      # A headline is chosen by (metric identity, observation identity) first and
+      # only then by this source ranking. Priority never deletes a lower-ranked
+      # candidate and never turns an estimate into a reported figure.
+      headline_source_priority: [company_reported, media_reported, third_party_estimate]
+      # Two readable same-cell values are a visible conflict, not something to
+      # average away. 0.10 = 10% relative tolerance from the trend design.
+      source_conflict_relative_tolerance: 0.10
+      # Different metric identities are `not_comparable`; no difference is computed.
+      comparison_requires_same_metric_identity: true
+      comparison_requires_same_observation_identity: true
+      comparison_requires_same_methodology_regime: true
+      # A trend cell needs >= 3 comparable points spanning >= 60 days.
+      minimum_comparable_points: 3
+      minimum_history_days: 60
+      direction_net_change_threshold: 0.10
+      # Values are stored as absolute USD; billions conversion is a derivation.
+      display_scale_divisor: 1000000000
+      display_unit_label: USD bn
+      reconciliation_relative_tolerance: 1e-9
+      core_metric_coverage_ratio_min: 0.5
+      coverage_ratio_min: 0.5
+      freshness_hours_max: 336
+      quarantine_on_missing_period_or_identity: true
+      forbid_cross_entity_aggregation: true
+      forbid_projection_in_historical_actual: true
+      forbid_company_plus_product_summing: true
+    acceptance_samples: [OPENAI, ANTHROPIC]
   ai_work_adoption:
     catalog_status: current_partial
     # Entity membership is dynamic taxonomy data rather than a static list.
@@ -890,6 +989,26 @@ metric_definitions:
   consensus.rating.strong_sell_count: {value_type: integer, unit_family: count, period_basis: snapshot}
   consensus.rating.change: {value_type: record, unit_family: categorical, period_basis: event}
   event.funding.amount: {value_type: number, unit_family: currency, period_basis: event}
+  ai.frontier_lab.reported_arr:
+    {value_type: number, unit_family: currency, period_basis: [calendar_month, point_in_time],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: Contract/subscription ARR explicitly announced by the lab itself. Not an annualization of partial-period revenue.}
+  ai.frontier_lab.annualized_revenue_run_rate:
+    {value_type: number, unit_family: currency, period_basis: [calendar_month, point_in_time],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: One period's revenue extrapolated to a full year by whoever published it. It is not audited revenue and not necessarily contractual ARR.}
+  ai.frontier_lab.trailing_revenue:
+    {value_type: number, unit_family: currency, period_basis: [quarter, annual],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: Revenue actually recorded over the named closed period. Compared with run rate it is smaller and is not annualized.}
+  ai.frontier_lab.forward_revenue_projection:
+    {value_type: number, unit_family: currency, period_basis: [annual, target_year],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: Forward expectation or target for a future year. Never mixed into the historical actual sequence.}
   event.valuation.pre_money: {value_type: number, unit_family: currency, period_basis: event}
   event.valuation.post_money: {value_type: number, unit_family: currency, period_basis: event}
   event.valuation.reported: {value_type: number, unit_family: currency, period_basis: event}
@@ -932,6 +1051,16 @@ provider_mappings:
     pilot_use_pct: ai.uk_enterprise_adoption.pilot_use_share
     employee_daily_use_pct: ai.uk_enterprise_adoption.employee_daily_use_share
     ons_response_share: ai.uk_enterprise_adoption.response_share
+  sacra_public_company_profiles:
+    reported_arr: ai.frontier_lab.reported_arr
+    annualized_revenue_run_rate: ai.frontier_lab.annualized_revenue_run_rate
+    trailing_revenue: ai.frontier_lab.trailing_revenue
+    forward_revenue_projection: ai.frontier_lab.forward_revenue_projection
+  tickertrends_public_research:
+    reported_arr: ai.frontier_lab.reported_arr
+    annualized_revenue_run_rate: ai.frontier_lab.annualized_revenue_run_rate
+    trailing_revenue: ai.frontier_lab.trailing_revenue
+    forward_revenue_projection: ai.frontier_lab.forward_revenue_projection
   ramp_ai_index:
     adoption_rate_pct: ai.ramp.paid_business_adoption_share
     vendor_adoption_pct: ai.ramp.vendor_adoption_share

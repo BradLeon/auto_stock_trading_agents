@@ -167,6 +167,35 @@ class DataProducts:
 
         return replay(self, snapshot_id)
 
+    def frontier_labs_revenue_series(
+        self, *, company: str = "", metric: str = "", observation_identity: str = "",
+        source_id: str = "", methodology_regime: str = "",
+        periods: list[str] | None = None, as_of: datetime | None = None,
+        include_vintages: bool = False, as_frame: bool = False,
+    ) -> dict:
+        """Frontier AI Labs revenue observations, one measurement identity at a time."""
+        from .frontier_ai_labs_revenue import frontier_labs_revenue_series
+
+        return frontier_labs_revenue_series(
+            self, company=company, metric=metric, observation_identity=observation_identity,
+            source_id=source_id, methodology_regime=methodology_regime, periods=periods,
+            as_of=as_of, include_vintages=include_vintages, as_frame=as_frame)
+
+    def frontier_labs_revenue_evidence_bundle(
+        self, *, companies: list[str] | None = None, as_of: datetime | None = None,
+        snapshot_consumer: str = "", snapshot_purpose: str = "",
+    ) -> dict:
+        """L1 commercialization revenue evidence: never an economics or retention claim."""
+        from .frontier_ai_labs_revenue import frontier_labs_revenue_evidence_bundle
+
+        return frontier_labs_revenue_evidence_bundle(
+            self, companies=companies, as_of=as_of, snapshot_consumer=snapshot_consumer,
+            snapshot_purpose=snapshot_purpose)
+
+    def replay_frontier_labs_revenue_bundle(self, snapshot_id: str) -> dict | None:
+        """Replay the persisted revenue evidence selection without network access."""
+        return self.replay_snapshot(snapshot_id)
+
     def ai_job_profile(
         self, occupation: str, *, source_product: str, period: str, as_of: datetime | None = None
     ) -> dict:

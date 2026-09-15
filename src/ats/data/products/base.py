@@ -196,6 +196,67 @@ class DataProducts:
         """Replay the persisted revenue evidence selection without network access."""
         return self.replay_snapshot(snapshot_id)
 
+    def openrouter_token_volume_series(self, *, start_date: str = "", end_date: str = "",
+                                       as_of: datetime | None = None,
+                                       include_vintages: bool = False,
+                                       as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_token_volume_series
+
+        return openrouter_token_volume_series(self, start_date=start_date, end_date=end_date,
+                                              as_of=as_of, include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def openrouter_author_share_series(self, *, start_date: str = "", end_date: str = "",
+                                       as_of: datetime | None = None,
+                                       include_vintages: bool = False,
+                                       as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_author_share_series
+
+        return openrouter_author_share_series(self, start_date=start_date, end_date=end_date,
+                                              as_of=as_of, include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def openrouter_model_leaderboard(self, *, period: str = "", top_n: int = 10,
+                                     as_of: datetime | None = None,
+                                     include_vintages: bool = False,
+                                     as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_model_leaderboard
+
+        return openrouter_model_leaderboard(self, period=period, top_n=top_n,
+                                            as_of=as_of, include_vintages=include_vintages,
+                                            as_frame=as_frame)
+
+    def openrouter_model_ranking_series(self, *, top_n: int = 10,
+                                        start_date: str = "2026-01-01", end_date: str = "",
+                                        as_of: datetime | None = None,
+                                        include_vintages: bool = False,
+                                        as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_model_ranking_series
+
+        return openrouter_model_ranking_series(self, top_n=top_n, start_date=start_date,
+                                               end_date=end_date, as_of=as_of,
+                                               include_vintages=include_vintages,
+                                               as_frame=as_frame)
+
+    def openrouter_concentration_series(self, *, start_date: str = "", end_date: str = "",
+                                        as_of: datetime | None = None,
+                                        include_vintages: bool = False,
+                                        as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_concentration_series
+
+        return openrouter_concentration_series(self, start_date=start_date, end_date=end_date,
+                                               as_of=as_of, include_vintages=include_vintages,
+                                               as_frame=as_frame)
+
+    def openrouter_token_evidence_bundle(self, *, as_of: datetime | None = None,
+                                         snapshot_consumer: str = "",
+                                         snapshot_purpose: str = "") -> dict:
+        from .openrouter_rankings import openrouter_token_evidence_bundle
+
+        return openrouter_token_evidence_bundle(self, as_of=as_of,
+                                                snapshot_consumer=snapshot_consumer,
+                                                snapshot_purpose=snapshot_purpose)
+
     def ai_job_profile(
         self, occupation: str, *, source_product: str, period: str, as_of: datetime | None = None
     ) -> dict:

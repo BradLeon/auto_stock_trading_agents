@@ -131,6 +131,9 @@ feature_flags:
     # Ramp starts in shadow until the web-export fixtures and slice-level
     # release gate have passed isolated acceptance.
     ramp_ai_index: shadow
+    # OpenRouter Rankings Data API passed fixture/live smoke, offline replay,
+    # visualization and L1 report acceptance; publish the source directly.
+    openrouter_rankings: platform
     # Frontier AI Labs revenue is released straight to platform once its own
     # isolated end-to-end acceptance (7.1-7.5) passes; until then it only runs
     # under --force in an isolated SQLite/artifact root. There is deliberately
@@ -343,6 +346,37 @@ sources:
       timeout_seconds: 30
       max_file_bytes: 52428800
       retry_attempts: 0
+  openrouter_rankings:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: OpenRouter Rankings Data API
+    upstream: OpenRouter public routed token rankings
+    adapter: openrouter_rankings
+    datasets: [openrouter_rankings_daily]
+    cadence: daily_utc
+    retention: query_slice
+    discovery_group: ai_commercialization
+    constraints:
+      endpoint: https://openrouter.ai/api/v1/datasets/rankings-daily
+      authentication: bearer_api_key
+      api_key_env: OPENROUTER_API_KEY
+      period: day
+      timezone: UTC
+      overlap_days: 14
+      historical_start_date: 2025-01-01
+      max_days_per_request: 30
+      provider_limit_per_minute: 30
+      provider_limit_per_day: 500
+      public_private_scope: public_routed_only
+      license: CC BY 4.0
+      request_share: unavailable
+      revenue_conversion: forbidden
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 14
+      timeout_seconds: 30
+      max_file_bytes: 52428800
+      retry_attempts: 2
   ons_bics_ai:
     catalog_status: current_partial
     persistence: persistent
@@ -667,6 +701,26 @@ datasets:
       spend_nonnegative: true
       quantile_order: [median, top10, top1]
     acceptance_samples: [QUANTILE:MEDIAN, QUANTILE:TOP10, MODEL:OPENAI]
+  openrouter_rankings_daily:
+    catalog_status: current_partial
+    entities: [OPENROUTER_MODEL, OPENROUTER_AUTHOR, OPENROUTER_OTHER]
+    expected_cadence: daily_utc
+    primary_sources: [openrouter_rankings]
+    fallback_sources: []
+    core_metrics: [ai.openrouter.total_tokens]
+    quality:
+      token_nonnegative_integer: true
+      daily_model_identity_unique: true
+      top_n_plus_other: true
+      top_n: 50
+      author_share_includes_unknown_and_other: true
+      derived_metrics: [model_tokens, author_tokens, token_share, concentration_top_n, concentration_hhi]
+      complete_week_required_for_trend: true
+      public_routed_scope_only: true
+      request_share_not_observed: true
+      revenue_conversion_forbidden: true
+      methodology_regime: openrouter_public_routed_tokens/v1
+    acceptance_samples: [OPENROUTER_MODEL:OPENAI_GPT_4O, OPENROUTER_OTHER]
   sp500_earnings_insight:
     catalog_status: current_partial
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
@@ -907,6 +961,25 @@ metric_definitions:
     {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
      entity_scope: [ramp_model], required_dimensions: [scope, provider, model, spend_type, cohort, technology_scope],
      description: Model-attributed API spend share among Token Spend Management connected businesses.}
+  ai.openrouter.total_tokens:
+    {value_type: integer, unit_family: count, cadence: daily, period_basis: utc_day,
+     entity_scope: [openrouter_model], required_dimensions: [model_permaslug, author, is_other, is_free_route, reference_date, methodology_regime],
+     description: OpenRouter public routed prompt plus completion tokens for the model and UTC date; not global volume or revenue.}
+  ai.openrouter.model_tokens:
+    {value_type: integer, unit_family: count, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Sum of accepted daily model tokens over a complete UTC week.}
+  ai.openrouter.author_tokens:
+    {value_type: integer, unit_family: count, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Sum of model tokens by canonical author; unknown and unattributed Other remain explicit.}
+  ai.openrouter.token_share:
+    {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Author or model tokens divided by complete-week total tokens.}
+  ai.openrouter.concentration_top_n:
+    {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Top-3 or Top-5 named/unknown author token share.}
+  ai.openrouter.concentration_hhi:
+    {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Sum of squared named/unknown author shares; unattributed Other excluded from numerator.}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -1068,6 +1141,8 @@ provider_mappings:
     yearly_change_pp: ai.ramp.provider_yearly_change_pp
     ai_spend_per_employee: ai.ramp.ai_spend_per_employee
     api_spend_share_pct: ai.ramp.api_spend_share
+  openrouter_rankings:
+    total_tokens: ai.openrouter.total_tokens
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share

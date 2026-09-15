@@ -29,6 +29,24 @@ structured:
         attempts: 3
         backoff_seconds: [60, 300, 900]
       semantics: compare reference_period/methodology_fingerprint/payload_sha256; append new periods or revisions, never overwrite
+    openrouter_rankings_daily_ingest:
+      source: openrouter_rankings
+      schedule: daily
+      at: "08:00"
+      timezone: UTC
+      command: ats data ingest --source openrouter_rankings --dataset openrouter_rankings_daily
+      concurrency: 1
+      retry:
+        attempts: 2
+        backoff_seconds: [60, 300]
+      scope:
+        overlap_days: 14
+        period: day
+        start_date: previous_14_complete_utc_days
+        initial_history_start_date: 2025-01-01
+        api_key_env: OPENROUTER_API_KEY
+      freshness_slo_days: 3
+      semantics: append immutable artifacts and revision vintages; incomplete UTC weeks remain queryable daily but are excluded from trend products
     frontier_ai_labs_revenue_p7d_probe:
       source: sacra_public_company_profiles
       source_group: frontier_ai_labs_revenue

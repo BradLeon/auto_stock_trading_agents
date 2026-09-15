@@ -5,6 +5,7 @@ the production claim — separate run, separate report, separate failure.
 """
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from ats.data.pipelines.structured.ingestion import IngestionPipeline
 from ats.data.products import DataProducts
 from ats.data.sources.frontier_ai_labs_revenue import (
     SacraPublicCompanyProfilesAdapter, TickerTrendsPublicResearchAdapter)
+from ats.data.sources.openrouter_rankings import OpenRouterRankingsAdapter
 from ats.data.stores.structured.repository import SQLiteStructuredRepository
 from ats.schemas.sector import EvidenceObserverRef, SectorConfig
 
@@ -105,6 +107,40 @@ def test_packet_says_monetization_direction_only_not_sustainability(seeded_produ
     assert "留存" in text and "单位经济" in text
     assert "不代表" in text  # Labs are not the whole L1 application layer
     assert packet["overall_interpretation"]
+
+
+def test_openrouter_is_an_independent_commercialization_evidence_section(seeded_products):
+    """The route-usage signal is additive and never replaces lab revenue."""
+    rows = []
+    start = datetime(2026, 9, 1, tzinfo=timezone.utc).date()
+    from datetime import timedelta
+    for offset in range(14):
+        day = start + timedelta(days=offset)
+        rows.extend([
+            {"date": day.isoformat(), "model_permaslug": "openai/gpt-4o", "total_tokens": str(100 + offset)},
+            {"date": day.isoformat(), "model_permaslug": "anthropic/claude-3", "total_tokens": str(50 + offset)},
+            {"date": day.isoformat(), "model_permaslug": "other", "total_tokens": "20"},
+        ])
+    payload = json.dumps({"data": rows, "meta": {"version": "v1"}}).encode()
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return payload
+
+    IngestionPipeline(seeded_products.structured).run(
+        OpenRouterRankingsAdapter(api_key="fixture", opener=lambda _request, timeout=30: Response(),
+                                  clock=lambda: datetime(2026, 9, 16, tzinfo=timezone.utc)),
+        FetchRequest(source_id="openrouter_rankings", dataset_id="openrouter_rankings_daily",
+                     query_scope={"start_date": "2026-09-01", "end_date": "2026-09-14"}))
+    scope = {**_scope(), "supplemental_claims": [{"claim_id": "openrouter_routed_usage_and_competition"}]}
+    packet = observe_ai_commercialization(products=seeded_products, workflow_scope=scope, as_of=NOW)
+    assert packet["status"] == "ok"
+    assert [item["section_id"] for item in packet["evidence_sections"]] == [
+        REVENUE_SECTION_ID, "openrouter_routed_usage_and_competition"]
+    assert packet["openrouter"]["status"] in {"ok", "insufficient_history", "unavailable"}
+    assert "token" in render_ai_commercialization_markdown(packet)
+    assert "金额-token" not in packet["context"]["compact"]
 
 
 def test_section_not_enabled_is_reported_not_faked(seeded_products):

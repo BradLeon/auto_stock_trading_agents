@@ -130,6 +130,12 @@ def _ramp_ai_index():
     return RampAIIndexAdapter(export_dir=export_dir)
 
 
+def _openrouter_rankings():
+    from ...sources.openrouter_rankings import OpenRouterRankingsAdapter
+
+    return OpenRouterRankingsAdapter()
+
+
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "tw_mof": RuntimeSourceSpec("tw_mof", _tw_mof),
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
@@ -154,6 +160,9 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "ons_bics_ai": RuntimeSourceSpec("ons_bics_ai", _ons_bics_ai),
     "ramp_ai_index": RuntimeSourceSpec("ramp_ai_index", _ramp_ai_index,
                                        discovery_group="ai_adoption"),
+    "openrouter_rankings": RuntimeSourceSpec(
+        "openrouter_rankings", _openrouter_rankings,
+        discovery_group="ai_commercialization"),
     # Periodic discovery over two registered Sacra public pages.  TickerTrends is
     # a frozen one-time 2026H1 seed and is intentionally left out of every
     # discovery group so it can never re-baseline the main sequence.

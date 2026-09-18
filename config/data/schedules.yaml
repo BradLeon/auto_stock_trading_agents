@@ -47,6 +47,68 @@ structured:
         api_key_env: OPENROUTER_API_KEY
       freshness_slo_days: 3
       semantics: append immutable artifacts and revision vintages; incomplete UTC weeks remain queryable daily but are excluded from trend products
+    frontier_ai_capability_model_discovery_p1d:
+      source: frontier_ai_capability
+      schedule: daily
+      at: "07:20"
+      timezone: UTC
+      command: ats data release-check --source frontier_ai_capability --force-check
+      concurrency: 1
+      retry:
+        attempts: 2
+        backoff_seconds: [120, 600]
+      scope:
+        public_routes: [livebench_git, terminal_bench_git, terminal_bench_science_json, osworld_json, automationbench_aa_public_page, scicode_aa_public_page, critpt_aa_public_page, mmmu_pro_aa_public_page, toolathlon_verified_html, spreadsheetbench_project, hle_aa_public_page]
+        bulk_requests_per_run: 11
+        conditional_requests: [etag, last_modified, git_sha, payload_sha256]
+        hot_observation_days: 30
+        public_structured_page_policy_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
+        public_terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+        fail_closed_on_policy_or_parser_drift: true
+      semantics: discover model/benchmark revisions once per cycle; no_change never duplicates a vintage; paid AA API is optional only; events are retained separately from uniform matrix
+    frontier_ai_capability_benchmark_probe_p1d:
+      source: frontier_ai_capability
+      schedule: daily
+      at: "07:25"
+      timezone: UTC
+      command: ats data ingest --source frontier_ai_capability --dataset frontier_ai_capability_benchmarks
+      concurrency: 1
+      retry:
+        attempts: 2
+        backoff_seconds: [120, 600]
+      scope:
+        hot_days_0_30: daily
+        hot_days_31_90: every_3_days
+        mature: weekly
+        public_routes_only: true
+        event_ledger: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
+      semantics: append score additions/revisions and preserve explicit NA states; do not mix comparability groups
+    frontier_ai_capability_official_release_probe_p1d:
+      source: frontier_ai_capability_official_lab
+      schedule: daily
+      at: "07:27"
+      timezone: UTC
+      command: ats data ingest --source frontier_ai_capability_official_lab --dataset frontier_ai_capability_benchmarks
+      concurrency: 1
+      retry:
+        attempts: 2
+        backoff_seconds: [120, 600]
+      scope:
+        public_only: true
+        source_type: lab_self_reported
+        fallback_source_type: competitor_reported
+      semantics: discover official release/model-card identities and self-reported scores; never overwrite third-party observations
+    frontier_ai_capability_full_audit_p7d:
+      source: frontier_ai_capability
+      schedule: weekly
+      at: "07:35"
+      timezone: UTC
+      command: ats data frontier-capability-audit
+      concurrency: 1
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: audit all Labs, benchmark methods and methodology fingerprints; surface stale warnings
     frontier_ai_labs_revenue_p7d_probe:
       source: sacra_public_company_profiles
       source_group: frontier_ai_labs_revenue

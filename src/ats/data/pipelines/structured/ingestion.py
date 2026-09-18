@@ -48,6 +48,20 @@ class CentralAdmission:
             reasons.append(artifact_mapping_reason)
         source = self.repository.source(batch.source_id)
         dataset = self.repository.dataset(batch.dataset_id)
+        # Frontier capability cohorts must have one active flagship per Lab.
+        # The adapter keeps the raw directory and reports duplicate Labs in
+        # provider metadata; quarantine affected scores rather than silently
+        # letting the deterministic selector pick one.
+        duplicate_flagships = set(batch.provider_metadata.get("duplicate_active_flagships") or [])
+        if batch.dataset_id == "frontier_ai_capability_benchmarks":
+            if bool(batch.provider_metadata.get("test_only")) and not bool((request.query_scope or {}).get("test_only")):
+                reasons.append("test_fixture_not_platform_data")
+            try:
+                record_lab = str((record.dimensions or {}).get("lab_id") or "")
+            except AttributeError:
+                record_lab = ""
+            if record_lab in duplicate_flagships:
+                reasons.append("duplicate_active_flagship")
         if source is None:
             reasons.append("source_unregistered")
         elif source["catalog_status"] == "runtime_excluded":
@@ -242,6 +256,20 @@ class IngestionPipeline:
             self.repository.register_entity(
                 entity_id=entity.entity_id, kind=entity.kind, canonical_name=entity.canonical_name,
                 aliases=entity.aliases, securities=entity.securities, metadata=entity.metadata)
+        if request.dataset_id == "frontier_ai_capability_benchmarks" and hasattr(self.repository, "save_frontier_capability_metadata"):
+            metadata_rows = [dict(record.dimensions or {}) for record in batch.records]
+            observed_keys = {(str(item.get("lab_id") or ""), str(item.get("model_id") or ""),
+                              str(item.get("benchmark_id") or "")) for item in metadata_rows}
+            # Coverage hints are persisted independently from numeric
+            # observations.  Never let a default NA hint overwrite an observed
+            # score in the same run.
+            for hint in list(batch.provider_metadata.get("coverage_hints") or []):
+                key = (str(hint.get("lab_id") or ""), str(hint.get("model_id") or ""),
+                       str(hint.get("benchmark_id") or ""))
+                if key not in observed_keys:
+                    metadata_rows.append(dict(hint))
+            self.repository.save_frontier_capability_metadata(
+                records=metadata_rows, source_id=batch.source_id, known_at=batch.fetched_at)
 
         relation_created = 0
         relation_quarantined = 0

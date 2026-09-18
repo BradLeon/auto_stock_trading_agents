@@ -70,6 +70,15 @@ layers:
           - claim_id: openrouter_routed_usage_and_competition
             statement: OpenRouter 公共路由 token 用量是否持续扩大，并在模型厂商之间扩散或集中？
             role: L1 商业化第二证据轴；只做路由用量和竞争格局方向性观察，不转换为收入。
+      # Raw capability is a third independent L1 evidence axis. It tracks the
+      # frontier of model capability, not production adoption or monetization.
+      - claim_id: ai_frontier_raw_capability
+        claim_definition_version: v1
+        runner: ai_raw_capability
+        label: AI 原始能力前沿
+        enabled: true
+        evidence_sections:
+          - raw_capability
     tickers:
       - {symbol: GOOG, note: Gemini（兼属L2）—— A/C 类已在 entities.yaml 归一到 GOOG}
     # xAI 已于 2026-02 并入 SpaceX，后者 2026-05-20 递 S-1、以 SPCX 上市并出财报，

@@ -2126,6 +2126,52 @@ def run_data(
             chart_dir=chart_dir,
             products=products,
         )
+    elif action == "ai-raw-capability":
+        cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
+        from ..agents.evidence import observe_ai_raw_capability
+
+        result = observe_ai_raw_capability(
+            periods=periods or ([period] if period else None),
+            as_of=cutoff, chart_dir=chart_dir, products=products,
+        )
+    elif action == "frontier-capability-health":
+        capability_sources = {"frontier_ai_capability", "frontier_ai_capability_official_lab"}
+        recent_ingestion = []
+        for source_id in sorted(capability_sources):
+            recent_ingestion.extend(
+                products.structured.ingestion_history(
+                    source_id=source_id, dataset_id="frontier_ai_capability_benchmarks", limit=20
+                )
+            )
+        result = {
+            "source_id": "frontier_ai_capability",
+            "dataset_id": "frontier_ai_capability_benchmarks",
+            "source_health": [row for row in products.structured.source_health()
+                              if row.get("source_id") in capability_sources],
+            "coverage": products.frontier_ai_capability_matrix().get("coverage", {}),
+            "recent_ingestion": recent_ingestion,
+        }
+    elif action == "frontier-capability-discover":
+        from ..data.pipelines.structured.discovery import release_check
+
+        result = release_check(
+            products.structured, source_ids=["frontier_ai_capability"],
+            group="", ingest_new=False, force=True, catalog=None,
+        )
+    elif action == "frontier-capability-probe":
+        from ..data.structured import ingest_source
+
+        result = ingest_source(
+            products.structured, "frontier_ai_capability", catalog=None,
+            query_scope=json.loads(query_scope) if query_scope else {}, force=True,
+        )
+    elif action == "frontier-capability-audit":
+        from ..data.pipelines.structured.discovery import release_check
+
+        result = release_check(
+            products.structured, source_ids=["frontier_ai_capability"],
+            group="", ingest_new=True, force=True, catalog=None,
+        )
     elif action == "ramp-adoption":
         cutoff = datetime.fromisoformat(as_of.replace("Z", "+00:00")) if as_of else None
         result = products.ramp_paid_adoption_snapshot(
@@ -2281,6 +2327,15 @@ def run_data(
         from ..agents.evidence import render_ai_production_markdown
 
         print(render_ai_production_markdown(result), end="")
+    elif output_format == "markdown" and action == "ai-raw-capability":
+        from ..agents.evidence import render_ai_raw_capability_markdown
+
+        rendered = render_ai_raw_capability_markdown(result)
+        if report_path:
+            target = Path(report_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(rendered, encoding="utf-8")
+        print(rendered, end="")
     elif output_format == "markdown" and action in {
         "catalog",
         "describe",
@@ -2330,6 +2385,11 @@ def main(argv: list[str] | None = None) -> int:
             "ai-adoption",
             "ai-job",
             "ai-production",
+            "ai-raw-capability",
+            "frontier-capability-health",
+            "frontier-capability-discover",
+            "frontier-capability-probe",
+            "frontier-capability-audit",
             "ramp-adoption",
             "ramp-spend",
             "ramp-model-share",
@@ -2432,7 +2492,7 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument(
         "--report-path",
         default="",
-        help="pead-official-disclosure-coverage/source-acceptance: Markdown 验收报告输出路径",
+        help="pead-official-disclosure-coverage/source-acceptance/ai-raw-capability: Markdown 验收报告输出路径",
     )
     data.add_argument(
         "--force", action="store_true", help="ingest: 仅用于隔离验收，跳过已发布 source 的重复保护"

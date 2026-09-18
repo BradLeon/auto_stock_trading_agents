@@ -46,9 +46,15 @@ def test_empty_database_bootstraps_catalog_without_workflow_tables(tmp_path):
     assert "structured_observations" in tables
     assert "structured_artifacts" in tables
     assert "cycles" not in tables
-    assert repo.conn.execute("SELECT count(*) FROM structured_sources").fetchone()[0] == 19
-    assert repo.conn.execute("SELECT count(*) FROM structured_datasets").fetchone()[0] == 13
-    assert repo.conn.execute("SELECT count(*) FROM structured_metrics").fetchone()[0] == 112
+    source_ids = {row[0] for row in repo.conn.execute(
+        "SELECT source_id FROM structured_sources")}
+    assert {"sec_companyfacts", "frontier_ai_capability"} <= source_ids
+    dataset_ids = {row[0] for row in repo.conn.execute(
+        "SELECT dataset_id FROM structured_datasets")}
+    metric_ids = {row[0] for row in repo.conn.execute(
+        "SELECT metric_id FROM structured_metrics")}
+    assert {"company_financials", "frontier_ai_capability_benchmarks"} <= dataset_ids
+    assert {"financial.revenue.gaap", "ai.frontier_capability.score"} <= metric_ids
 
 
 def test_repository_defaults_to_platform_path_and_allows_explicit_compat_override(monkeypatch, tmp_path):

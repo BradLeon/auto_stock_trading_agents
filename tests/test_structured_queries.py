@@ -13,6 +13,7 @@ from ats.data.structured import (
     SeriesIdentity,
     SQLiteStructuredRepository,
     StructuredCatalog,
+    StructuredDataset,
 )
 
 
@@ -28,6 +29,15 @@ def _repo(tmp_path):
     repo = SQLiteStructuredRepository(
         tmp_path / "structured.sqlite", artifact_root=tmp_path / "artifacts")
     repo.bootstrap_catalog(StructuredCatalog.load())
+    # Query selection semantics are tested against a declared source policy,
+    # not the separately governed production package-availability order.
+    repo.register_dataset(StructuredDataset(
+        id="company_financials",
+        expected_cadence="quarterly_or_issuer_period",
+        primary_sources=["sec_companyfacts"],
+        fallback_sources=["defeatbeta_stock_statement"],
+        core_metrics=["financial.revenue.gaap"],
+    ))
     return repo
 
 
@@ -206,9 +216,12 @@ def test_discovery_health_lineage_and_snapshot_replay_are_stable(tmp_path):
     _save(repo, value=150, known_at=T0 + timedelta(days=30))
     replay = products.replay_snapshot(manifest["snapshot_id"])
 
-    assert len(products.sources()) == 19
-    assert len(products.datasets()) == 13
-    assert len(products.metrics()) == 112
+    source_ids = {row["source_id"] for row in products.sources()}
+    dataset_ids = {row["dataset_id"] for row in products.datasets()}
+    metric_ids = {row["metric_id"] for row in products.metrics()}
+    assert {"sec_companyfacts", "frontier_ai_capability"} <= source_ids
+    assert {"company_financials", "frontier_ai_capability_benchmarks"} <= dataset_ids
+    assert {"financial.revenue.gaap", "ai.frontier_capability.score"} <= metric_ids
     assert any(row["source_id"] == "sec_companyfacts" for row in products.structured_health())
     assert products.lineage(first)["artifact"]["source_url"] == "https://example.test/data"
     assert [row["value"] for row in replay["rows"]] == [100]

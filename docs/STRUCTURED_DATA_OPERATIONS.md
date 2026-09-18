@@ -662,6 +662,14 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 
 | source ID | catalog status | persistence | datasets |
 |---|---|---|---|
+| `anthropic_economic_index` | `current_partial` | `persistent` | `ai_work_adoption` |
+| `us_census_btos` | `current_partial` | `persistent` | `ai_enterprise_adoption_us` |
+| `rps_genai_adoption` | `current_partial` | `persistent` | `ai_worker_adoption_us` |
+| `ramp_ai_index` | `current_partial` | `persistent` | `ramp_ai_adoption, ramp_ai_spend` |
+| `openrouter_rankings` | `current_partial` | `persistent` | `openrouter_rankings_daily` |
+| `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
+| `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
+| `ons_bics_ai` | `current_partial` | `persistent` | `ai_enterprise_adoption_uk` |
 | `tw_mof_exports` | `current_partial` | `persistent` | `regional_tw_exports` |
 | `kr_ecos_exports` | `current_partial` | `persistent` | `regional_kr_exports` |
 | `trendforce_dram` | `current_partial` | `persistent` | `industry_dram_contract_price` |
@@ -676,9 +684,21 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `yfinance_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_options` | `runtime_excluded` | `runtime` | — |
 | `thetadata_options` | `runtime_excluded` | `runtime` | — |
+| `sacra_public_company_profiles` | `current_partial` | `persistent` | `frontier_ai_labs_revenue` |
+| `tickertrends_public_research` | `current_partial` | `persistent` | `frontier_ai_labs_revenue` |
 
 | dataset ID | catalog status |
 |---|---|
+| `frontier_ai_labs_revenue` | `current_partial` |
+| `ai_work_adoption` | `current_partial` |
+| `ai_enterprise_adoption_us` | `current_partial` |
+| `ai_worker_adoption_us` | `current_partial` |
+| `ai_enterprise_adoption_uk` | `current_partial` |
+| `ramp_ai_adoption` | `current_partial` |
+| `ramp_ai_spend` | `current_partial` |
+| `openrouter_rankings_daily` | `current_partial` |
+| `frontier_ai_capability_benchmarks` | `current_partial` |
+| `sp500_earnings_insight` | `current_partial` |
 | `regional_tw_exports` | `current_partial` |
 | `regional_kr_exports` | `current_partial` |
 | `industry_dram_contract_price` | `current_partial` |
@@ -691,6 +711,14 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 
 | source ID | 数据集 | catalog status | checked-in mode | 业务节奏 | 内部预算摘要 |
 |---|---|---|---|---|---|
+| `anthropic_economic_index` | `ai_work_adoption` | `current_partial` | `platform` | weekly | concurrency 1；按 release/commit 检查；300s/350MiB 文件上限 |
+| `us_census_btos` | `ai_enterprise_adoption_us` | `current_partial` | `platform` | monthly/quarterly | concurrency 1；批量下载；请求预算见 source config |
+| `rps_genai_adoption` | `ai_worker_adoption_us` | `current_partial` | `platform` | biweekly | concurrency 1；按波次批量获取 |
+| `ramp_ai_index` | `ramp_ai_adoption, ramp_ai_spend` | `current_partial` | `platform` | weekly | concurrency 1；每次批量切片；页面/API 预算按 source config |
+| `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | daily/weekly | concurrency 1；每日 token 快照；按 API 预算退避 |
+| `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | daily + weekly audit | 每周期优先一次 bulk fetch；模型热观察 D0–30 每日、D31–90 每 3 日、成熟后每周 |
+| `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | daily + weekly audit | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
+| `ons_bics_ai` | `ai_enterprise_adoption_uk` | `current_partial` | `platform` | event/wave | concurrency 1；条件模块未发布时记录 no_coverage |
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |
 | `kr_ecos_exports` | `regional_kr_exports` | `current_partial` | `platform` | monthly | concurrency 1；分页 10；30s |
 | `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `shadow` | monthly | concurrency 1；每次 1 请求；30s；页面半月 session 与发布日期均需验收 |
@@ -701,6 +729,8 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |
 | `factset_earnings_insight_metrics` | `sp500_earnings_insight` | `current_partial` | `platform` | weekly | concurrency 1；每周 1 次受控 URL 解析；60s；仅限许可的内部研究使用 |
 | `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
+| `sacra_public_company_profiles` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | weekly | concurrency 1；公开页面探测；保留最小证据切片 |
+| `tickertrends_public_research` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | one-time historical | 仅冻结公开文章历史补充；不接入付费 API |
 
 外部 Provider 没有可验证 QPS 时一律写 `unknown`；表中的数字是内部保护预算，不是 Provider 承诺。SEC 还必须遵守其当前 fair-access 政策并发送描述性 User-Agent。
 

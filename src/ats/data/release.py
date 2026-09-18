@@ -116,15 +116,20 @@ class ReleaseManager:
         """Validate a reversible consumer-routing change without touching data."""
         if mode not in CONSUMER_MODES:
             raise ValueError(f"invalid consumer mode: {mode}")
-        from .rollout_modes import _feature_flags
-
-        registered = consumer in (_feature_flags().get("consumers") or {})
-        checks = [{"check": "consumer_registration", "passed": registered,
-                   "detail": "registered" if registered else "unknown_consumer"}]
+        flags = dict((self.catalog.raw or {}).get("feature_flags") or {})
+        registered = consumer in (flags.get("consumers") or {})
+        approved = registered and str((flags.get("consumers") or {}).get(consumer)) == mode
+        checks = [
+            {"check": "consumer_registration", "passed": registered,
+             "detail": "registered" if registered else "unknown_consumer"},
+            {"check": "consumer_platform_approval", "passed": approved,
+             "detail": ("consumer_approved_for_platform_in_checked_config" if approved
+                        else "consumer_not_approved_for_platform_in_checked_config")},
+        ]
         return {
             "kind": "consumer", "target_id": consumer, "requested_mode": mode,
             "current_overlay_mode": overlay_mode("consumer", consumer, path=self.path),
-            "ready": registered, "checks": checks,
+            "ready": all(row["passed"] for row in checks), "checks": checks,
         }
 
     def apply(self, check: dict, *, actor: str = "cli") -> dict:

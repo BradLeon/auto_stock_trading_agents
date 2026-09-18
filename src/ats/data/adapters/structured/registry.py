@@ -136,6 +136,18 @@ def _openrouter_rankings():
     return OpenRouterRankingsAdapter()
 
 
+def _frontier_ai_capability():
+    from ...sources.frontier_ai_capability import PublicBenchmarkAdapter
+
+    return PublicBenchmarkAdapter()
+
+
+def _frontier_ai_capability_official_lab():
+    from ...sources.frontier_ai_capability import OfficialLabReleaseAdapter
+
+    return OfficialLabReleaseAdapter()
+
+
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "tw_mof": RuntimeSourceSpec("tw_mof", _tw_mof),
     "kr_ecos": RuntimeSourceSpec("kr_ecos", _kr_ecos),
@@ -163,6 +175,12 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "openrouter_rankings": RuntimeSourceSpec(
         "openrouter_rankings", _openrouter_rankings,
         discovery_group="ai_commercialization"),
+    "frontier_ai_capability": RuntimeSourceSpec(
+        "frontier_ai_capability", _frontier_ai_capability,
+        discovery_group="frontier_ai_capability"),
+    "frontier_ai_capability_official_lab": RuntimeSourceSpec(
+        "frontier_ai_capability_official_lab", _frontier_ai_capability_official_lab,
+        discovery_group="frontier_ai_capability"),
     # Periodic discovery over two registered Sacra public pages.  TickerTrends is
     # a frozen one-time 2026H1 seed and is intentionally left out of every
     # discovery group so it can never re-baseline the main sequence.

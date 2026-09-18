@@ -93,6 +93,39 @@
 
 version: 1
 
+# Governed raw-capability panel.  Model names are discovered dynamically; these
+# entries define the eligible Lab universe and benchmark semantics only.
+frontier_ai_capability_registry:
+  cohort_version: frontier_ai_flagship_cohort/v1
+  labs:
+    OPENAI: {label: OpenAI, flagship_rule: general_frontier}
+    ANTHROPIC: {label: Anthropic, flagship_rule: general_frontier}
+    GOOGLE: {label: Google / Google DeepMind, flagship_rule: general_frontier}
+    XAI: {label: xAI, flagship_rule: general_frontier}
+    DEEPSEEK: {label: DeepSeek, flagship_rule: general_frontier}
+    MOONSHOT: {label: Moonshot / Kimi, flagship_rule: general_frontier}
+    TENCENT: {label: Tencent, flagship_rule: general_frontier}
+    ZAI: {label: Z.ai / GLM, flagship_rule: general_frontier}
+    ALIBABA: {label: Alibaba / Qwen, flagship_rule: general_frontier}
+  benchmarks:
+    livebench: {method_version: v1, b_eligible: false}
+    automationbench_aa: {label: AutomationBench-AA, method_version: aa-v1, b_eligible: false, event_ledger: true}
+    terminal_bench_4: {method_version: 4.0, b_eligible: true}
+    terminal_bench_science_01: {method_version: 0.1, b_eligible: true}
+    scicode: {method_version: v1, b_eligible: true}
+    critpt: {method_version: v1, b_eligible: true}
+    osworld_2: {method_version: 2.0-partial, b_eligible: false}
+    mmmu_pro: {method_version: v1, b_eligible: true}
+    toolathlon_verified: {label: Toolathlon Verified, method_version: verified-v1, b_eligible: true, event_ledger: true}
+    spreadsheetbench_2: {label: SpreadsheetBench 2, method_version: 2, b_eligible: true, event_ledger: true}
+    humanitys_last_exam: {label: Humanity's Last Exam, method_version: v1, b_eligible: true}
+  excluded_benchmarks:
+    enterpriseops_gym_aa: {reason: replaced_by_toolathlon_verified, historical_only: true}
+    frontiermath_erdos: {reason: low_current_discrimination, default_panel: false}
+    frontierscience_research: {reason: single_lab_coverage, default_panel: false}
+    collective_intelligence: {reason: not_yet_governed, default_panel: false}
+    safety_alignment: {reason: not_yet_governed, default_panel: false}
+
 # Checked-in baseline only. Runtime resolution order is:
 # environment override -> release overlay -> this section -> default_mode.
 # `sources` controls governed data availability and data-layer release. `consumers`
@@ -140,6 +173,14 @@ feature_flags:
     # no shadow/experimental promotion step after acceptance.
     sacra_public_company_profiles: platform
     tickertrends_public_research: platform
+    # Raw capability uses benchmark-maintainer Git/CSV/JSON/HTML routes plus
+    # low-frequency policy-gated public structured pages. Paid AA API is never
+    # required; policy-blocked or parser-drift slices fail closed. Keep the
+    # Real-source acceptance and the full L1 regression gate passed on
+    # 2026-09-18. Public benchmark data and the fail-closed official-release
+    # supplement are therefore formal platform inputs.
+    frontier_ai_capability: platform
+    frontier_ai_capability_official_lab: platform
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -377,6 +418,46 @@ sources:
       timeout_seconds: 30
       max_file_bytes: 52428800
       retry_attempts: 2
+  frontier_ai_capability:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Official benchmark-maintainer public results + independent pages + Lab releases
+    upstream: LiveBench, Terminal-Bench, Terminal-Bench-Science, OSWorld, AutomationBench, SciCode, CritPt, MMMU-Pro, Toolathlon Verified, SpreadsheetBench 2 and Humanity's Last Exam public artifacts
+    adapter: frontier_ai_capability
+    datasets: [frontier_ai_capability_benchmarks]
+    cadence: daily_utc
+    retention: query_slice
+    discovery_group: frontier_ai_capability
+    constraints:
+      public_routes: [git_csv, git_json, public_json, public_html_structured, official_html, official_html_event, readme_table]
+      authentication: none_for_registered_public_routes
+      optional_api_env: ARTIFICIAL_ANALYSIS_API_KEY
+      bulk_requests_per_run: 11
+      conditional_requests: [etag, last_modified, git_sha, payload_sha256]
+      policy_gate_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
+      terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+      fail_closed_on_policy_or_parser_drift: true
+      event_ledger_benchmarks: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
+      browser_visual_scraping: forbidden
+      direct_platform_after_acceptance: true
+      license: provider_terms_or_public_page_citation
+    internal_request_budget: {concurrency: 1, requests_per_run: 64, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
+  frontier_ai_capability_official_lab:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Frontier Lab official releases and model cards
+    upstream: OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, Tencent, Z.ai and Alibaba public releases
+    adapter: frontier_ai_capability_official_lab
+    datasets: [frontier_ai_capability_benchmarks]
+    cadence: daily_utc
+    retention: query_slice
+    discovery_group: frontier_ai_capability
+    constraints:
+      public_only: true
+      source_type: lab_self_reported
+      direct_platform_after_acceptance: true
+      license: public_page_citation
+    internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
   ons_bics_ai:
     catalog_status: current_partial
     persistence: persistent
@@ -719,8 +800,32 @@ datasets:
       public_routed_scope_only: true
       request_share_not_observed: true
       revenue_conversion_forbidden: true
-      methodology_regime: openrouter_public_routed_tokens/v1
+      methodology_regime: frontier_public_benchmark_results/v2
     acceptance_samples: [OPENROUTER_MODEL:OPENAI_GPT_4O, OPENROUTER_OTHER]
+  frontier_ai_capability_benchmarks:
+    catalog_status: current_partial
+    entities: [FRONTIER_MODEL]
+    expected_cadence: daily_utc
+    primary_sources: [frontier_ai_capability]
+    fallback_sources: [frontier_ai_capability_official_lab]
+    core_metrics: [ai.frontier_capability.score]
+    quality:
+      labs: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
+      benchmarks: [livebench, automationbench_aa, terminal_bench_4, terminal_bench_science_01, scicode, critpt, osworld_2, mmmu_pro, toolathlon_verified, spreadsheetbench_2, humanitys_last_exam]
+      score_range: [0, 100]
+      score_unit: percent
+      coverage_states: [not_evaluated, pending_publication, not_self_reported, not_applicable, non_comparable, source_unavailable, withdrawn]
+      public_maintainer_preferred: true
+      source_priority: [benchmark_maintainer_or_independent_third_party, competitor_reported, lab_self_reported]
+      public_structured_page_policy_gate: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
+      paid_api_required: false
+      event_ledger_benchmarks: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
+      measurement_scopes: [model_capability_proxy, model_agent_stack_capability]
+      b_default_threshold_pct: 50
+      a_delta_min_pp: 2
+      a_historical_sd_multiplier: 0.2
+      direct_platform_after_acceptance: true
+    acceptance_samples: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
   sp500_earnings_insight:
     catalog_status: current_partial
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
@@ -980,6 +1085,11 @@ metric_definitions:
   ai.openrouter.concentration_hhi:
     {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
      description: Sum of squared named/unknown author shares; unattributed Other excluded from numerator.}
+  ai.frontier_capability.score:
+    {value_type: number, unit_family: percent, cadence: daily, period_basis: benchmark_score_as_of,
+     entity_scope: [frontier_model], required_dimensions: [lab_id, model_id, benchmark_id, method_version,
+     comparability_group, harness, grader, inference_config, reasoning_effort, source_type, coverage_state],
+     description: Raw capability benchmark score on a provider-declared 0-100 percent scale; not a composite intelligence ranking.}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -1143,6 +1253,8 @@ provider_mappings:
     api_spend_share_pct: ai.ramp.api_spend_share
   openrouter_rankings:
     total_tokens: ai.openrouter.total_tokens
+  frontier_ai_capability:
+    benchmark_score: ai.frontier_capability.score
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share

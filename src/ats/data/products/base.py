@@ -196,6 +196,62 @@ class DataProducts:
         """Replay the persisted revenue evidence selection without network access."""
         return self.replay_snapshot(snapshot_id)
 
+    def frontier_ai_capability_matrix(self, *, as_of: datetime | None = None,
+                                      include_vintages: bool = False) -> dict:
+        """Current nine-Lab by eleven-benchmark raw capability matrix."""
+        from .frontier_ai_capability import frontier_ai_capability_matrix
+
+        return frontier_ai_capability_matrix(self, as_of=as_of,
+                                             include_vintages=include_vintages)
+
+    def frontier_ai_capability_evidence_bundle(self, *, as_of: datetime | None = None,
+                                               previous_matrix: dict | None = None,
+                                               snapshot_consumer: str = "",
+                                               snapshot_purpose: str = "") -> dict:
+        """A/B raw-capability evidence bundle for the independent L1 Observer."""
+        from .frontier_ai_capability import frontier_ai_capability_evidence_bundle
+
+        return frontier_ai_capability_evidence_bundle(
+            self, as_of=as_of, previous_matrix=previous_matrix,
+            snapshot_consumer=snapshot_consumer, snapshot_purpose=snapshot_purpose)
+
+    def replay_frontier_ai_capability_snapshot(self, snapshot_id: str) -> dict | None:
+        """Replay the immutable raw-capability packet inputs without network access."""
+        from .frontier_ai_capability import replay_frontier_ai_capability_snapshot
+
+        return replay_frontier_ai_capability_snapshot(self, snapshot_id)
+
+    def recompute_frontier_ai_capability_for_events(self, events, **kwargs) -> dict:
+        from .frontier_ai_capability import recompute_frontier_ai_capability_for_events
+
+        return recompute_frontier_ai_capability_for_events(self, events, **kwargs)
+
+    def frontier_ai_capability_scores(self, *, lab_id: str = "", model_id: str = "",
+                                      benchmark_id: str = "", method_version: str = "",
+                                      source_type: str = "", as_of: datetime | None = None,
+                                      comparability_group: str = "", harness: str = "",
+                                      grader: str = "", inference_config: str = "",
+                                      reasoning_effort: str = "",
+                                      measurement_scope: str = "",
+                                      include_vintages: bool = True) -> list[dict]:
+        from .frontier_ai_capability import frontier_ai_capability_scores
+
+        return frontier_ai_capability_scores(self, lab_id=lab_id, model_id=model_id,
+                                             benchmark_id=benchmark_id, method_version=method_version,
+                                             source_type=source_type, as_of=as_of,
+                                             comparability_group=comparability_group, harness=harness,
+                                             grader=grader, inference_config=inference_config,
+                                             reasoning_effort=reasoning_effort,
+                                             measurement_scope=measurement_scope,
+                                             include_vintages=include_vintages)
+
+    def frontier_ai_capability_event_ledger(self, *, benchmark_id: str = "", model_id: str = "",
+                                            lab_id: str = "", as_of: datetime | None = None,
+                                            include_vintages: bool = True) -> list[dict]:
+        from .frontier_ai_capability import event_ledger
+        return event_ledger(self, benchmark_id=benchmark_id, model_id=model_id,
+                            lab_id=lab_id, as_of=as_of, include_vintages=include_vintages)
+
     def openrouter_token_volume_series(self, *, start_date: str = "", end_date: str = "",
                                        as_of: datetime | None = None,
                                        include_vintages: bool = False,

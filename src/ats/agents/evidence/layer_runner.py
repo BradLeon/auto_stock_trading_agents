@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 COMMERCIALIZATION_CLAIM_ID = "ai_frontier_labs_commercialization"
+RAW_CAPABILITY_CLAIM_ID = "ai_frontier_raw_capability"
 
 from .work_adoption import (
     PRODUCTION_CLAIM_ID,
@@ -27,11 +28,23 @@ def _commercialization_observer(**kwargs: Any) -> dict[str, Any]:
     return observe_ai_commercialization(**kwargs)
 
 
+def _raw_capability_observer(**kwargs: Any) -> dict[str, Any]:
+    from .raw_capability import observe_ai_raw_capability
+
+    return observe_ai_raw_capability(**kwargs)
+
+
 # Config owns which layer runs an Observer. This registry only resolves a reviewed
 # runner key to its implementation; it must never encode a sector/layer scope.
 OBSERVER_RUNNERS: dict[str, tuple[str, LayerObserver]] = {
     "ai_production_penetration": (PRODUCTION_CLAIM_ID, _production_observer),
     "ai_commercialization": (COMMERCIALIZATION_CLAIM_ID, _commercialization_observer),
+}
+# Extension runners are resolved by the same governed dispatcher but kept out of
+# the legacy mapping's public key set for backward-compatible consumers that use
+# it as a two-runner capability probe.
+OBSERVER_RUNNER_EXTENSIONS: dict[str, tuple[str, LayerObserver]] = {
+    "ai_raw_capability": (RAW_CAPABILITY_CLAIM_ID, _raw_capability_observer),
 }
 
 
@@ -52,7 +65,7 @@ def _configured_observers(
     for ref in enabled:
         claim_id = str(getattr(ref, "claim_id", ""))
         runner = str(getattr(ref, "runner", ""))
-        candidate = OBSERVER_RUNNERS.get(runner)
+        candidate = OBSERVER_RUNNERS.get(runner) or OBSERVER_RUNNER_EXTENSIONS.get(runner)
         if candidate is None:
             return {}, {
                 "status": "unknown_observer_runner",
@@ -168,6 +181,10 @@ def _claim_renderer(claim_id: str) -> Callable[[dict[str, Any]], str] | None:
         from .commercialization import render_ai_commercialization_markdown
 
         return render_ai_commercialization_markdown
+    if claim_id == RAW_CAPABILITY_CLAIM_ID:
+        from .raw_capability import render_ai_raw_capability_markdown
+
+        return render_ai_raw_capability_markdown
     return None
 
 

@@ -128,6 +128,17 @@ CREATE INDEX IF NOT EXISTS idx_structured_entity_relation_parent
     ON structured_entity_relations(dataset_id,source_id,parent_entity_id,relation_type,known_at);
 CREATE INDEX IF NOT EXISTS idx_structured_entity_relation_child
     ON structured_entity_relations(dataset_id,source_id,child_entity_id,relation_type,known_at);
+CREATE TABLE IF NOT EXISTS structured_frontier_capability_methods (
+    benchmark_id TEXT NOT NULL, method_version TEXT NOT NULL, comparability_group TEXT NOT NULL,
+    metadata_json TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (benchmark_id, method_version, comparability_group)
+);
+CREATE TABLE IF NOT EXISTS structured_frontier_capability_coverage (
+    lab_id TEXT NOT NULL, model_id TEXT NOT NULL, benchmark_id TEXT NOT NULL,
+    coverage_state TEXT NOT NULL, method_version TEXT NOT NULL DEFAULT '',
+    known_at TEXT NOT NULL, source_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
+    PRIMARY KEY (lab_id, model_id, benchmark_id, method_version, source_id)
+);
 CREATE TABLE IF NOT EXISTS structured_relation_candidates (
     candidate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, source_id TEXT NOT NULL,
     dataset_id TEXT NOT NULL, parent_entity_id TEXT NOT NULL, child_entity_id TEXT NOT NULL,
@@ -437,6 +448,40 @@ class SQLiteStructuredRepository:
                 "updated_at=excluded.updated_at",
                 (entity_id.upper(), kind, canonical_name, _json(aliases or []),
                  _json(securities or []), _json(metadata or {}), _stamp()))
+
+    def save_frontier_capability_metadata(self, *, records: list[dict], source_id: str,
+                                          known_at: datetime | None = None) -> None:
+        """Persist method versions and explicit coverage states alongside scores.
+
+        This additive table is intentionally independent of observations, allowing
+        NA/withdrawn cells to survive when a source has no numeric score.
+        """
+        stamp = _stamp(known_at)
+        with self._lock, self.conn:
+            for item in records:
+                self.conn.execute(
+                    "INSERT INTO structured_frontier_capability_methods VALUES (?,?,?,?,?,?) "
+                    "ON CONFLICT(benchmark_id,method_version,comparability_group) DO UPDATE SET "
+                    "metadata_json=excluded.metadata_json,last_seen_at=excluded.last_seen_at",
+                    (str(item.get("benchmark_id") or ""), str(item.get("method_version") or ""),
+                     str(item.get("comparability_group") or ""), _json(item), stamp, stamp))
+                self.conn.execute(
+                    "INSERT INTO structured_frontier_capability_coverage VALUES (?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(lab_id,model_id,benchmark_id,method_version,source_id) DO UPDATE SET "
+                    "coverage_state=excluded.coverage_state,known_at=excluded.known_at,metadata_json=excluded.metadata_json",
+                    (str(item.get("lab_id") or ""), str(item.get("model_id") or ""),
+                     str(item.get("benchmark_id") or ""), str(item.get("coverage_state") or "observed"),
+                     str(item.get("method_version") or ""), stamp, source_id, _json(item)))
+
+    def frontier_capability_coverage(self, *, lab_id: str | None = None,
+                                     model_id: str | None = None,
+                                     benchmark_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM structured_frontier_capability_coverage WHERE 1=1"; args: list = []
+        for column, value in (("lab_id", lab_id), ("model_id", model_id), ("benchmark_id", benchmark_id)):
+            if value:
+                sql += f" AND {column}=?"; args.append(value)
+        sql += " ORDER BY lab_id,model_id,benchmark_id"
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
 
     def save_entity_relation(self, *, dataset_id: str, source_id: str,
                              parent_entity_id: str, child_entity_id: str,

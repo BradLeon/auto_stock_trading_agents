@@ -1,0 +1,29 @@
+{
+  "meta": {"as_of": "2026-09-15T03:43:00Z", "version": "v1", "fixture": true},
+  "models": [
+    {"lab_id": "OPENAI", "model_id": "gpt-6-astra", "display_name": "GPT-6 Astra", "available": true, "flagship": true},
+    {"lab_id": "ANTHROPIC", "model_id": "claude-fable-5.1", "display_name": "Claude Fable 5.1", "available": true, "flagship": true},
+    {"lab_id": "GOOGLE", "model_id": "gemini-3.8-flash", "display_name": "Gemini 3.8 Flash", "available": true, "flagship": true},
+    {"lab_id": "XAI", "model_id": "grok-4.6", "display_name": "Grok 4.6", "available": true, "flagship": true},
+    {"lab_id": "DEEPSEEK", "model_id": "deepseek-v4.1-flash", "display_name": "DeepSeek V4.1 Flash", "available": true, "flagship": true},
+    {"lab_id": "MOONSHOT", "model_id": "kimi-k3", "display_name": "Kimi K3", "available": true, "flagship": true},
+    {"lab_id": "TENCENT", "model_id": "hy4", "display_name": "Hy4", "available": true, "flagship": true},
+    {"lab_id": "ZAI", "model_id": "glm-5.3", "display_name": "GLM 5.3", "available": true, "flagship": true},
+    {"lab_id": "ALIBABA", "model_id": "qwen3.8-max", "display_name": "Qwen 3.8 Max", "available": true, "flagship": true}
+  ],
+  "methods": [],
+  "scores": [
+    {"lab_id": "OPENAI", "model_id": "gpt-6-astra", "benchmark_id": "terminal_bench_4", "score": 61.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "ANTHROPIC", "model_id": "claude-fable-5.1", "benchmark_id": "scicode", "score": 58.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "GOOGLE", "model_id": "gemini-3.8-flash", "benchmark_id": "mmmu_pro", "score": 55.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "XAI", "model_id": "grok-4.6", "benchmark_id": "livebench", "score": 52.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "DEEPSEEK", "model_id": "deepseek-v4.1-flash", "benchmark_id": "automationbench_aa", "score": 49.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "MOONSHOT", "model_id": "kimi-k3", "benchmark_id": "toolathlon_verified", "score": 47.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "TENCENT", "model_id": "hy4", "benchmark_id": "critpt", "score": 44.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "ZAI", "model_id": "glm-5.3", "benchmark_id": "osworld_2", "score": 41.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "ALIBABA", "model_id": "qwen3.8-max", "benchmark_id": "terminal_bench_science_01", "score": 57.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "OPENAI", "model_id": "gpt-6-astra", "benchmark_id": "spreadsheetbench_2", "score": 54.0, "score_as_of": "2026-09-15", "source_type": "third_party_evaluation"},
+    {"lab_id": "ANTHROPIC", "model_id": "claude-fable-5.1", "benchmark_id": "humanitys_last_exam", "score": 32.0, "score_as_of": "2026-09-15", "source_type": "lab_self_reported"},
+    {"lab_id": "DEEPSEEK", "model_id": "deepseek-v4.1-flash", "benchmark_id": "automationbench_aa", "score": 51.0, "score_as_of": "2026-09-14", "source_type": "competitor_reported", "event_only": true, "uniform_matrix": false, "harness": "alternate-agent-harness", "task_set": "automationbench-public-event"}
+  ]
+}

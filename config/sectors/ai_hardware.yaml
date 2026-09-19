@@ -47,16 +47,16 @@ layers:
     # 它不进入公司证人、corroboration、评分或交易工作流。
     evidence_observers:
       - claim_id: ai_core_production_workflow_penetration
-        claim_definition_version: v2
+        claim_definition_version: v3
         runner: ai_production_penetration
         label: AI 生产化与应用扩散
         enabled: true
-        supplemental_sources:
+        primary_sources:
           - ramp_ai_index
-        supplemental_claims:
+        primary_claims:
           - claim_id: ai_paid_business_adoption_diffusion
             statement: AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？
-            role: L1 第四个补充证据轴；不改变三轴主命题状态
+            role: L1 第四个主证据轴；与 BTOS、RPS、Anthropic Economic Index 同等呈现，但不跨源数值合成
       # 第二个独立商业化 Observer。它与生产化 Observer 分开运行、分开出报告、分开失败；
       # 不把 BTOS、RPS、Ramp、Anthropic Economic Index 重新归类为商业化收入证据。
       - claim_id: ai_frontier_labs_commercialization

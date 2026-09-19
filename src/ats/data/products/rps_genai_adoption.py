@@ -78,7 +78,8 @@ def snapshot(repository, *, as_of=None, period: str = "", include_vintages: bool
     derivations["quarter_change_pp"] = changes
     derivations["year_over_year_change_pp"] = yoy
 
-    health = next((row for row in repository.source_health() if row["source_id"] == SOURCE_ID), {})
+    checks = repository.source_checks(source_id=SOURCE_ID, limit=1)
+    health = checks[0] if checks else {}
     observation_ids = sorted({row["observation_id"] for row in rows})
     notes = sorted({json.loads(row.get("dimensions_json") or "{}").get("notes", "") for row in rows} - {""})
     aligned = len({value for value in latest_periods.values() if value}) <= 1 and all(latest_periods.values())
@@ -94,7 +95,7 @@ def snapshot(repository, *, as_of=None, period: str = "", include_vintages: bool
         "quality": {"status": "accepted" if ordered else "warning",
                     "daily_lte_last_week_lte_adoption": bool(ordered),
                     "persistence_derivations_available": bool(ordered)},
-        "freshness": {"last_checked_at": health.get("last_checked_at"),
+        "freshness": {"last_checked_at": health.get("checked_at"),
                       "latest_available_period": health.get("latest_available_period"),
                       "source_native_cadence": "quarterly"},
         "lineage": {"input_observation_ids": observation_ids,

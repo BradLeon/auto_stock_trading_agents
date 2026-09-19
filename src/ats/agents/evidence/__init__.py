@@ -21,6 +21,13 @@ from .layer_runner import (
     write_layer_evidence_markdown,
     write_layer_evidence_outputs,
 )
+from .analyst_context import (
+    analyst_context_paths,
+    build_layer_analyst_context,
+    load_layer_analyst_context,
+    render_analyst_llm_input,
+    write_layer_analyst_context,
+)
 from .work_adoption import (
     PRODUCTION_CLAIM_ID,
     observe_ai_production_penetration,
@@ -43,4 +50,9 @@ __all__ = [
     "run_registered_layer_observers",
     "write_layer_evidence_markdown",
     "write_layer_evidence_outputs",
+    "analyst_context_paths",
+    "build_layer_analyst_context",
+    "load_layer_analyst_context",
+    "render_analyst_llm_input",
+    "write_layer_analyst_context",
 ]

@@ -35,12 +35,16 @@ class EvidenceObserverRef(BaseModel):
     runner: str
     label: str = ""
     enabled: bool = True
+    # Primary evidence sources/propositions are part of this Observer's claim
+    # spine even when their native denominators remain non-combinable.
+    primary_sources: list[str] = Field(default_factory=list)
+    primary_claims: list[dict[str, str]] = Field(default_factory=list)
     # Source declarations are governance metadata for the independently runnable
     # observer. They do not widen the observer's claim or permit direct provider
     # access; the runner still reads only through DataProducts.
     supplemental_sources: list[str] = Field(default_factory=list)
-    # Domain-specific supplemental propositions (for example Ramp's paid-
-    # procurement axis) are rendered by the Observer but are not Chain claims.
+    # Domain-specific supplemental propositions are rendered by the Observer
+    # but are not Chain claims.
     supplemental_claims: list[dict[str, str]] = Field(default_factory=list)
     # Sections of a broad capability claim that already have governed evidence.
     # A section listed here may report a status; every other section of the same

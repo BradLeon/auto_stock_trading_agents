@@ -68,6 +68,9 @@ OVERALL_INTERPRETATION = {
     "revenue_history_insufficient_and_economics_unverified":
         "可比历史点数不足或跨度不足，暂不判断收入方向；留存与单位经济亦未被观察。",
     "unavailable": "没有通过质量门的收入观察；商业化总命题暂不可判断，不做缺失即零的推断。",
+    "revenue_unavailable_token_proxy_observed":
+        "Frontier Labs 可比收入序列尚未通过质量门；但 OpenRouter 公共路由 token 已提供真实的使用规模和模型竞争代理。"
+        "该代理不等于收入，也不支持 token-to-revenue 换算。",
 }
 
 METHODOLOGY_LIMITS = [
@@ -342,6 +345,8 @@ def _build_packet(bundle: dict[str, Any], *, openrouter_bundle: dict[str, Any] |
         }
 
     openrouter_status = str((openrouter_bundle or {}).get("status") or "unavailable")
+    if section_status == "unavailable" and openrouter_status in {"ok", "insufficient_history"}:
+        overall_status = "revenue_unavailable_token_proxy_observed"
     packet: dict[str, Any] = {
         # The two evidence sections are independently publishable.  A live
         # OpenRouter bundle must therefore produce a reviewable report even
@@ -512,6 +517,7 @@ def _build_context(packet: dict[str, Any]) -> dict[str, Any]:
 def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
     """Render the scoped commercialization report from the packet only."""
     lines: list[str] = []
+    top_author_lines: list[str] = []
     if packet.get("status") not in {"ok"}:
         lines.extend([
             "# AI 应用层：商业化能力", "",
@@ -621,10 +627,9 @@ def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
                       "取值范围为 0–1。平方会放大大份额：10 个作者完全均分时 HHI=0.10，单一作者占 100% 时 HHI=1.00，"
                       "所以数值越高表示 token 越集中。这里官方 `Other` 保留为未归属桶、不反向分配给任何作者，"
                       "但仍留在总分母中；因此该 HHI 是已纳入作者桶（`unknown_author` 也作为独立桶保留）集中度的保守下界，"
-                      "且在 `Other` 占比变化时不宜与标准全量 HHI 直接比较。",
-                      "", "头部作者（按绝对 token）："])
+                      "且在 `Other` 占比变化时不宜与标准全量 HHI 直接比较。"])
         for item in (facts_open.get("top_authors") or [])[:10]:
-            lines.append(f"- `{item.get('author')}`：{_fmt_tokens(item.get('tokens'))} tokens（{_fmt_share(item.get('share'))}）")
+            top_author_lines.append(f"- `{item.get('author')}`：{_fmt_tokens(item.get('tokens'))} tokens（{_fmt_share(item.get('share'))}）")
         lines.append("")
         if packet.get("cross_evidence"):
             lines.append(f"- 收入 × 路由方向性矩阵：`{packet['cross_evidence'].get('status')}`；"
@@ -713,6 +718,11 @@ def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
     ])
 
     tables = packet.get("table_descriptors") or []
+    if top_author_lines:
+        lines.extend(["## 附录：OpenRouter Top-10 作者明细", "",
+                      "以下为诊断明细；主干只保留 Top-3、Top-5 与 HHI。", ""])
+        lines.extend(top_author_lines)
+        lines.append("")
     if tables:
         lines.extend(["## 可复算数据表", ""])
         for item in tables:

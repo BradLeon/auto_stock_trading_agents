@@ -31,6 +31,15 @@ DELTA_MIN_PP = 2.0
 HISTORICAL_SD_MULTIPLIER = 0.2
 NA_STATES = ("not_evaluated", "pending_publication", "not_self_reported", "not_applicable",
              "non_comparable", "source_unavailable", "withdrawn")
+# These leaderboards are useful but systematically lag model releases.  The
+# review matrix therefore keeps exact-release observations as the first choice
+# and, only for these named benchmarks, exposes the most recently evaluated
+# release from the same Lab as an explicitly labelled fallback.  The fallback
+# is evidence about the Lab's latest *evaluated* frontier; it is never relabelled
+# as a score for the current flagship release.
+LATEST_EVALUATED_FALLBACK_BENCHMARKS = {
+    "osworld_2", "toolathlon_verified", "spreadsheetbench_2",
+}
 
 
 def _dims(row: dict[str, Any]) -> dict[str, Any]:
@@ -281,6 +290,32 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
                                   item["score"], item["score_as_of"], item["known_at"], item["model_id"]),
                 default=None,
             )
+            release_match = "exact_current_flagship"
+            if record is None and benchmark in LATEST_EVALUATED_FALLBACK_BENCHMARKS:
+                # Include governed event-only rows here as display fallbacks.
+                # They remain explicitly labelled and never enter global
+                # frontier A/B calculations, which still require
+                # ``uniform_matrix=True``.
+                lagged_candidates = [item for item in rows
+                                     if item["lab_id"] == lab_id
+                                     and item["benchmark_id"] == benchmark
+                                     and item.get("score") is not None]
+                if lagged_candidates:
+                    # First choose the latest published score date.  Inside
+                    # that vintage, preserve the governed source priority and
+                    # select the strongest published configuration for the
+                    # selected release, just as the exact-release path does.
+                    latest_score_as_of = max(str(item.get("score_as_of") or "")
+                                             for item in lagged_candidates)
+                    latest_candidates = [item for item in lagged_candidates
+                                         if str(item.get("score_as_of") or "") == latest_score_as_of]
+                    record = max(
+                        latest_candidates,
+                        key=lambda item: (priority.get(item.get("source_type", ""), 0),
+                                          item["score"], item["known_at"], item["model_id"]),
+                    )
+                    release_match = ("latest_evaluated_lab_fallback" if record.get("uniform_matrix", True)
+                                     else "latest_evaluated_event_fallback")
             if record is None:
                 metadata = coverage_meta.get((lab_id, current["model_id"], benchmark), {}) if current else {}
                 state = str(metadata.get("coverage_state") or "not_evaluated")
@@ -293,7 +328,16 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
                               "comparability_group": str(metadata.get("comparability_group") or "")})
             else:
                 cells.append({**record, "display": round(record["score"], 2),
+                              "panel_model_release_id": active_release_id,
+                              "panel_model_name": current["model_name"],
+                              "release_match": release_match,
                               "selection_reason": "highest_observed_configuration_for_exact_release;" + {
+                                  "third_party_evaluation": "maintainer_or_independent_third_party_preferred",
+                                  "competitor_reported": "competitor_reported_fallback",
+                                  "lab_self_reported": "lab_self_reported_fallback",
+                              }.get(record.get("source_type"), "source_priority_fallback")
+                              if release_match == "exact_current_flagship" else
+                              "latest_evaluated_release_for_lagged_benchmark;" + {
                                   "third_party_evaluation": "maintainer_or_independent_third_party_preferred",
                                   "competitor_reported": "competitor_reported_fallback",
                                   "lab_self_reported": "lab_self_reported_fallback",

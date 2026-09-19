@@ -13,8 +13,8 @@ from typing import Any
 
 CONSUMER = "evidence_observer"
 PRODUCTION_CLAIM_ID = "ai_core_production_workflow_penetration"
-PRODUCTION_CLAIM_DEFINITION_VERSION = "v2"
-PRODUCTION_CLAIM_TEXT = "AI 的企业采用广度、员工持续使用和任务生产化深度是否同步扩大，从局部试验走向可重复的生产工作流？"
+PRODUCTION_CLAIM_DEFINITION_VERSION = "v3"
+PRODUCTION_CLAIM_TEXT = "AI 的企业自报采用、员工近期工作使用、企业付费采购和任务生产化是否共同扩大，从局部试验走向可重复的生产工作流？"
 RAMP_CLAIM_ID = "ai_paid_business_adoption_diffusion"
 RAMP_CLAIM_TEXT = "AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？"
 SEMANTIC_GUARDRAILS = {
@@ -211,7 +211,7 @@ def observe_ai_production_penetration(
     top_n: int = 10,
     chart_dir: str = "",
     workflow_scope: dict[str, str] | None = None,
-    claim_definition_version: str = "v2",
+    claim_definition_version: str = PRODUCTION_CLAIM_DEFINITION_VERSION,
     products=None,
 ) -> dict[str, Any]:
     """Dedicated, read-only L1 packet for the production-workflow proxy.
@@ -223,12 +223,13 @@ def observe_ai_production_penetration(
         from ...data.products import get_platform_data_products
 
         products = get_platform_data_products()
-    # v2 is the governed multi-source path.  The compatibility branch below remains
+    # v2/v3 are the governed multi-source path.  The compatibility branch below remains
     # temporarily available to replay legacy v1 fixtures and snapshots.
-    if claim_definition_version == "v2" and hasattr(products, "ai_adoption_evidence_bundle"):
+    if claim_definition_version in {"v2", "v3"} and hasattr(products, "ai_adoption_evidence_bundle"):
         return _observe_ai_production_diffusion_v2(
             as_of=as_of, top_n=top_n, chart_dir=chart_dir,
-            workflow_scope=workflow_scope, products=products)
+            workflow_scope=workflow_scope, products=products,
+            claim_definition_version=claim_definition_version)
     scope_suffix = ""
     if workflow_scope:
         scope_suffix = ":" + ":".join(
@@ -449,7 +450,7 @@ def observe_ai_production_penetration(
 
 def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
                                         workflow_scope: dict[str, str] | None,
-                                        products) -> dict[str, Any]:
+                                        products, claim_definition_version: str = "v2") -> dict[str, Any]:
     scope = workflow_scope or {}
     bundle = products.ai_adoption_evidence_bundle(
         as_of=as_of, snapshot_consumer=CONSUMER,
@@ -475,6 +476,11 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
                "trend_net_change_pp": axis.get("trend", {}).get("net_change_pp"),
                "trend_slope_pp_per_period": axis.get("trend", {}).get("linear_slope_pp_per_period"),
                "comparable_period_count": len(axis.get("trend", {}).get("periods", []))}
+        if axis_id == "worker_persistence":
+            row["axis_label"] = "员工近期工作使用率（群体）"
+        elif axis_id == "task_production":
+            row["statistical_unit"] = "published Claude 1P API task cell"
+            row["denominator"] = "当月 Claude 1P API 全部使用流量"
         axis_rows.append(row)
         facts.append({"kind": "axis_status", "axis_id": axis_id, "period": axis.get("period"),
                       "statement": f"{axis.get('label')}：{row['trend_status']}（{axis.get('period') or '无可用期间'}）。",
@@ -492,7 +498,7 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
         warnings.append("三个来源期间不同步；报告保留各自最新期间，不前向填充或插值。")
     warnings.append("不同来源的统计主体和分母不同，只用于方向性相互印证，不合并为统一渗透率。")
     methodology_card = {
-        "title": "L1 AI 应用层生产化与扩散：固定方法卡", "claim_definition_version": "v2",
+        "title": "L1 AI 应用层生产化与扩散：固定方法卡", "claim_definition_version": claim_definition_version,
         "sources": [{key: axis.get(key) for key in (
             "axis_id", "label", "source_id", "statistical_unit", "denominator", "geography",
             "technology_scope", "reference_period", "frequency", "methodology_regimes",
@@ -508,7 +514,7 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
     }
     packet = {
         "status": bundle.get("status"), "consumer": CONSUMER, "source_access": "data_products_only",
-        "claim_id": PRODUCTION_CLAIM_ID, "claim_definition_version": "v2",
+        "claim_id": PRODUCTION_CLAIM_ID, "claim_definition_version": claim_definition_version,
         "claim_text": PRODUCTION_CLAIM_TEXT, "overall_status": bundle.get("overall", {}).get("status"),
         "overall_interpretation": bundle.get("overall", {}).get("interpretation"),
         "overall_reasoning": bundle.get("overall", {}).get("steps", []), "axis_overview": axis_rows,
@@ -524,21 +530,70 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
         "bundle_content_hash": bundle.get("content_hash"), "visualization_descriptors": [],
         "detail_lineage": bundle.get("detail_lineage", {}),
     }
-    # Ramp is a supplemental paid-business / spend signal.  It is deliberately
-    # loaded after the three governed axes and never enters ``overall`` or any
-    # of the trend-status calculations above.  A missing/failed slice is kept as
-    # an explicit warning rather than treated as zero adoption.
+    # Ramp is the fourth primary evidence axis in v3.  It retains its own
+    # source-native denominator and is never numerically averaged with survey
+    # or telemetry axes.  ``supplemental_signals`` remains as a replay alias for
+    # older snapshots and visualization code.
     ramp_signal = _ramp_supplement(products, as_of=as_of)
-    packet["supplemental_signals"] = {"ramp_paid_adoption": ramp_signal}
-    packet["supplemental_claims"] = [ramp_signal.get("claim", {
+    overall_ramp = _ramp_series_summary(ramp_signal, "adoption_overall")
+    ramp_rows = _ramp_level_rows((ramp_signal.get("slices") or {}).get("adoption_overall") or {})
+    ramp_rows = sorted(ramp_rows, key=lambda row: str(row.get("period", "")))
+    ramp_trend = "insufficient_history"
+    ramp_net_change = None
+    if len({str(row.get("period", ""))[:7] for row in ramp_rows}) >= 3 and ramp_rows:
+        ramp_net_change = float(ramp_rows[-1]["value"]) - float(ramp_rows[0]["value"])
+        ramp_trend = ("expanding" if ramp_net_change > 0.1 else
+                      "contracting" if ramp_net_change < -0.1 else "stable")
+    ramp_axis = {
+        "axis_id": "paid_procurement", "axis_label": "企业付费采购与支出",
+        "source_id": "ramp_ai_index", "period": overall_ramp.get("latest_period"),
+        "headline_value": overall_ramp.get("latest_value"), "headline_unit": "percent",
+        "trend_status": ramp_trend, "statistical_unit": "Ramp 网络中相关付款企业 cohort",
+        "denominator": "Ramp 相关企业 cohort；不是全美企业、员工或席位总数",
+        "geography": "Ramp customer network",
+        "input_observation_ids": sorted({str(row.get("observation_id")) for row in ramp_rows
+                                         if row.get("observation_id")}),
+        "trend_explanation": ["只在 Ramp adoption_overall 的 source-native 月度序列内判断方向。"],
+        "trend_net_change_pp": ramp_net_change, "trend_slope_pp_per_period": None,
+        "comparable_period_count": overall_ramp.get("period_count", 0),
+        "role": "primary_evidence_axis",
+    }
+    packet["axis_overview"].append(ramp_axis)
+    packet["axes"]["paid_procurement"] = {**ramp_axis, "source_status": ramp_signal.get("status"),
+                                              "detail": ramp_signal}
+    packet["periods"]["paid_procurement"] = ramp_axis["period"]
+    packet["evidence_axis_count"] = 4
+    packet["evidence_axis_ids"] = ["enterprise_breadth", "worker_persistence",
+                                    "paid_procurement", "task_production"]
+    packet["overall_scope"] = "four_primary_evidence_axes"
+    status_by_axis = {row["axis_id"]: row.get("trend_status") for row in packet["axis_overview"]}
+    labelled_axes = (("enterprise_breadth", "企业自报采用"),
+                     ("worker_persistence", "员工近期工作使用率"),
+                     ("paid_procurement", "企业付费采购"),
+                     ("task_production", "任务生产化"))
+    expanding_labels = [label for axis_id, label in labelled_axes
+                        if status_by_axis.get(axis_id) == "expanding"]
+    unresolved_labels = [label for axis_id, label in labelled_axes
+                         if status_by_axis.get(axis_id) in {None, "unavailable", "insufficient_history"}]
+    interpretation_parts = []
+    if expanding_labels:
+        interpretation_parts.append("、".join(expanding_labels) + "呈中期扩大")
+    if unresolved_labels:
+        interpretation_parts.append("、".join(unresolved_labels) + "历史不足或尚未确认")
+    interpretation_parts.append("四轴主体与分母不同，不做数值合成")
+    packet["overall_interpretation"] = "；".join(interpretation_parts) + "。"
+    packet["primary_signals"] = {"ramp_paid_adoption": ramp_signal}
+    packet["primary_claims"] = [ramp_signal.get("claim", {
         "claim_id": RAMP_CLAIM_ID, "claim_text": RAMP_CLAIM_TEXT,
-        "role": "L1 第四个补充证据轴；不改变三轴主命题状态",
+        "role": "L1 第四个主证据轴；与 BTOS、RPS、Anthropic Economic Index 同等呈现，但不跨源数值合成",
     })]
+    # Deprecated replay alias for older fixtures/renderers.
+    packet["supplemental_signals"] = {"ramp_paid_adoption": ramp_signal}
     packet["methodology_card"]["ramp"] = {
         "claim_id": RAMP_CLAIM_ID,
         "claim_text": RAMP_CLAIM_TEXT,
-        "role": "第四个补充证据轴（付费企业采购），不进入三轴 overall_status",
-        "title": "Ramp 付费企业采用与 AI 支出（L1 补充）",
+        "role": "第四个主证据轴（付费企业采购）；不与其他三轴跨源平均",
+        "title": "Ramp 付费企业采用与 AI 支出",
         "statistical_unit": "Ramp 网络中相关付款企业 cohort",
         "adoption_definition": "当月通过 Ramp corporate card、invoice 或 ACH 等渠道，对 AI 产品/服务发生正向交易的企业占比。",
         "denominator": "Ramp 相关企业 cohort；不是全美企业、员工或席位总数。",
@@ -549,11 +604,11 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
         "coverage_bias": ["免费工具/个人账户、非 Ramp 付款不会被观察，可能低估。",
                           "Ramp 客户偏向使用企业支付平台的成长型/技术型公司，存在选择偏差。"],
         "out_of_scope": ["business_size", "geographies"],
-        "interpretation_boundary": "Ramp 只作为付费企业采用与支出补充证据，不改变 BTOS/RPS/Anthropic 三轴状态，也不跨源平均、相减或补值。",
+        "interpretation_boundary": "Ramp 与 BTOS/RPS/Anthropic 同为主证据轴，但因主体与分母不同，不跨源平均、相减或补值。",
         "lineage_pointer": "supplemental_signals.ramp_paid_adoption.slices.<scope>.lineage",
     }
     if ramp_signal.get("status") not in {"ok", "partial"}:
-        packet["warnings"].append("ramp_unavailable: Ramp 补充信号未通过网页/API访问或质量门；不影响三轴判断。")
+        packet["warnings"].append("ramp_unavailable: Ramp 主证据轴未通过网页/API访问或质量门；其余三轴仍独立报告。")
     elif ramp_signal.get("warnings"):
         packet["warnings"].extend(ramp_signal["warnings"])
     if scope:
@@ -619,7 +674,7 @@ def _ramp_supplement(products, *, as_of) -> dict[str, Any]:
     return {
         "status": status, "provider": "Ramp AI Index", "source_id": "ramp_ai_index",
         "claim": {"claim_id": RAMP_CLAIM_ID, "claim_text": RAMP_CLAIM_TEXT,
-                   "role": "L1 第四个补充证据轴；不改变三轴主命题状态"},
+                   "role": "L1 第四个主证据轴；与 BTOS、RPS、Anthropic Economic Index 同等呈现"},
         "slices": slices, "scope_count": len(slices), "available_scope_count": len(available),
         "warnings": warnings,
         "limitations": [
@@ -634,10 +689,10 @@ def _build_v2_context(packet: dict[str, Any]) -> dict[str, Any]:
     """Deterministic bounded contexts; essential evidence is never tail-truncated."""
     essential = {key: packet.get(key) for key in (
         "claim_id", "claim_definition_version", "claim_text", "overall_status",
-        "overall_interpretation", "axis_overview", "supplemental_claims",
+        "overall_interpretation", "axis_overview", "primary_claims",
         "corroboration_and_conflicts", "warnings")}
     essential["manifest_id"] = (packet.get("manifest") or {}).get("snapshot_id")
-    ramp = packet.get("supplemental_signals", {}).get("ramp_paid_adoption", {})
+    ramp = (packet.get("primary_signals") or packet.get("supplemental_signals") or {}).get("ramp_paid_adoption", {})
     essential["ramp_paid_adoption"] = _ramp_context(ramp, compact=True)
     compact = json.dumps(essential, ensure_ascii=False, sort_keys=True, default=str)
     review_model = {**essential, "methodology_card": packet.get("methodology_card"),
@@ -737,7 +792,7 @@ def render_ai_production_markdown(packet: dict[str, Any]) -> str:
     The reader-facing order deliberately separates the four core series from the
     taxonomy-dependent occupational task-combination evidence.
     """
-    if packet.get("claim_definition_version") == "v2":
+    if packet.get("claim_definition_version") in {"v2", "v3"}:
         return _render_ai_production_diffusion_v2(packet)
     if packet.get("status") != "ok":
         reason = "; ".join(str(item) for item in packet.get("warnings", []))
@@ -917,7 +972,7 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
              f"- 判断：{packet.get('overall_interpretation') or status_cn.get(overall, '历史尚不足以形成完整三轴判断')}（机器状态：`{overall}`；不计算跨来源综合分数）"]
     if scope:
         lines.append(f"- 运行范围：{scope.get('sector')} / {scope.get('layer')}")
-    lines += ["", "## 三轴总览", "",
+    lines += ["", "## 四证据轴总览", "",
               "|观察轴|最新期间|标题值|趋势状态|统计主体|分母|", "|---|---|---:|---|---|---|"]
     for row in packet.get("axis_overview", []):
         value = "—" if row.get("headline_value") is None else f"{float(row['headline_value']):.2f}%"
@@ -930,13 +985,14 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
     lines += ["", "### 本报告使用的变量", "",
               "|来源|变量|物理含义|在判断中的作用|", "|---|---|---|---|",
               "|BTOS|`current_use_share`|过去两周在任一业务职能使用 AI 的美国雇主企业占比|企业采用广度 headline|",
-              "|RPS|`last_week_work_use_share`|过去一周至少一次为工作使用 GenAI 的美国就业人口占比|员工持续使用 headline|",
+              "|RPS|`last_week_work_use_share`|过去一周至少一次为工作使用 GenAI 的美国就业人口占比|员工近期工作使用率 headline（不是 cohort 留存）|",
               "|RPS|`work_use_share` / `daily_work_use_share`|曾为工作使用、以及每个工作日使用 GenAI 的就业人口占比|持续性边界与辅助诊断|",
               "|RPS|`assisted_work_hours` / `time_saved_hours`|受访者估计的 AI 辅助工时及节省工时占总工时比例|使用强度诊断，不直接决定本轴状态|",
+              "|Ramp|`adoption_overall` / `spend_per_employee_overall`|Ramp 网络企业真实 AI 付款广度与支出强度|企业付费采购 headline 与强度诊断|",
               "|Anthropic|任务生产化流量份额|满足 Work≥80%、Automation≥80%、Directive≥50% 的任务 Usage Share 之和|任务生产化 headline|",]
     axes = packet.get("axes", {})
     for key, title, chart_prefix in (("enterprise_breadth", "BTOS 美国企业 AI 采用广度", "BTOS "),
-                       ("worker_persistence", "RPS 美国员工工作使用持续性", "RPS ")):
+                       ("worker_persistence", "RPS 美国员工近期工作使用率（群体）", "RPS ")):
         axis = axes.get(key, {})
         trend = axis.get("trend", {})
         detail = axis.get("detail", {})
@@ -1014,16 +1070,11 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
                   f"{_pct(item.get('work_use_share_pct'))}|{_pct(item.get('automation_share_pct'))}|"
                   f"{_pct(item.get('directive_share_pct'))}|" for item in rows]
         lines += chart_lines(f"Anthropic {title}")
-    ramp = packet.get("supplemental_signals", {}).get("ramp_paid_adoption", {})
-    lines += ["", "## Ramp 付费企业采用与 AI 支出补充证据", "",
-              "### 第四个补充追踪命题", "",
+    ramp = (packet.get("primary_signals") or packet.get("supplemental_signals") or {}).get("ramp_paid_adoption", {})
+    lines += ["", "## Ramp：企业付费采购与 AI 支出", "",
+              "### 第四个主证据轴", "",
               f"> {RAMP_CLAIM_TEXT}", "",
-              "Ramp 是 L1 的第四个证据位置：它观察企业是否已经发生真实 AI 付款，而不是企业自报、员工自报或 Claude 任务流量。该命题有自己的状态和图表，但不改写 BTOS/RPS/Anthropic 三轴的 `overall_status`。", "",
-              "Ramp 不进入上面的三轴整体判断。它观察的是 Ramp 支付网络中发生 AI 正向交易的企业 cohort，与 BTOS（调查企业）、RPS（就业成年人）和 Anthropic（Claude 流量）的主体、分母和技术范围不同，因此只作方向性印证。", "",
-              "### Ramp 方法卡", "",
-              "- 采用判定：企业当月通过 Ramp corporate card、invoice 或 ACH 等渠道对 AI 产品/服务发生正向付款；分母为 Ramp 相关企业 cohort。",
-              "- 报告保留五个 source-native scope 的独立结果；各 scope 的指标定义、统计数量和数据注释统一放在文末，不在方法卡中重复展开。",
-              "- 未纳入首版：企业规模和地理下钻。免费工具、个人账户、非 Ramp 付款及 Ramp 客户选择偏差会造成覆盖偏差。", "",
+              "Ramp 与 BTOS、RPS、Anthropic Economic Index 同为生产化与应用扩散命题的主证据。它观察企业是否已经发生真实 AI 付款；四个来源主体、分母和技术范围不同，因此同等呈现、分别判断，但不做平均或统一渗透率。", "",
               f"- 当前状态：`{ramp.get('status', 'unavailable')}`；可用 scope {ramp.get('available_scope_count', 0)}/{ramp.get('scope_count', 5)}。"
               ]
     ramp_summaries = [_ramp_series_summary(ramp, scope_name) for scope_name in (
@@ -1048,14 +1099,14 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
     sector_latest.sort(key=lambda row: float(row.get("value") or 0), reverse=True)
     if sector_latest:
         leaders = "、".join(f"{row.get('segment', '—')} {_pct(row.get('value'))}" for row in sector_latest[:3])
-        lines.append(f"- 行业扩散并不均匀：最新期采用率最高的三个 NAICS 行业为 {leaders}；这表示商业化先在部分行业集中，再向其他行业扩散。")
+        lines.append(f"- 行业分布并不均匀：最新期采用率最高的三个 NAICS 行业为 {leaders}；该截面能证明行业差异，但不能单独证明已向其他行业扩散。")
     vendor_rows = (ramp_slices.get("adoption_overall_models") or {}).get("rows") or []
     vendor_period = (ramp_slices.get("adoption_overall_models") or {}).get("period") or ""
     vendor_latest = [row for row in vendor_rows if str(row.get("period", ""))[:7] == str(vendor_period)[:7]]
     vendor_latest.sort(key=lambda row: float(row.get("value") or 0), reverse=True)
     if vendor_latest:
         vendor_text = "、".join(f"{row.get('segment', '—')} {_pct(row.get('value'))}" for row in vendor_latest[:3])
-        lines.append(f"- 供应商扩散也可见：最新期采用率靠前的 vendor 为 {vendor_text}；vendor 之间可重叠，不能相加为市场份额。")
+        lines.append(f"- 供应商采用呈多家并存：最新期采用率靠前的 vendor 为 {vendor_text}；vendor 之间可重叠，不能相加为市场份额，扩散趋势须结合历史曲线判断。")
     spend_rows = (ramp_slices.get("spend_per_employee_overall") or {}).get("rows") or []
     spend_period = (ramp_slices.get("spend_per_employee_overall") or {}).get("period") or ""
     spend_latest = {str(row.get("quantile", "")).casefold(): row for row in spend_rows

@@ -1027,6 +1027,7 @@ def run_evidence(
         from ..agents.evidence import (
             COMMERCIALIZATION_CLAIM_ID,
             PRODUCTION_CLAIM_ID,
+            analyst_context_paths,
             run_registered_layer_observers,
             write_layer_evidence_outputs,
         )
@@ -1105,6 +1106,9 @@ def run_evidence(
             print(f"📝 已写入层级 Evidence 审阅文档：{written_paths[0]}")
             for path in written_paths[1:]:
                 print(f"📝 已写入独立 Observer 报告：{path}")
+            json_context, yaml_context = analyst_context_paths(output_path)
+            print(f"🤖 已写入 Analyst LLM 主输入：{json_context}")
+            print(f"🤖 已写入等价 YAML context：{yaml_context}")
             if resolved_chart_dir and result.get("status") == "ok":
                 print(f"📊 图表与 sidecar 目录：{resolved_chart_dir}")
         else:

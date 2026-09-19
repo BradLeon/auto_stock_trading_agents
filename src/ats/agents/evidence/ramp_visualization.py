@@ -1,6 +1,7 @@
 """Deterministic Ramp charts for the L1 review packet.
 
-The renderer consumes only ``packet['supplemental_signals']``.  Every PNG, table
+The renderer consumes the governed Ramp primary signal (with a legacy replay
+fallback to ``supplemental_signals``).  Every PNG, table
 and sidecar is generated from the exact same rows and carries the slice manifest
 and rows hash, so a reader can reproduce the figure without querying Ramp.
 """
@@ -288,7 +289,8 @@ def _plot_market_share(rows: list[dict[str, Any]], *, path: Path, manifest, scop
 
 def render_ramp_charts(*, packet: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
     """Render Ramp figures and tables; factual packet survives renderer failure."""
-    signal = packet.get("supplemental_signals", {}).get("ramp_paid_adoption", {})
+    signal = (packet.get("primary_signals") or packet.get("supplemental_signals") or {}).get(
+        "ramp_paid_adoption", {})
     slices = signal.get("slices") or {}
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)

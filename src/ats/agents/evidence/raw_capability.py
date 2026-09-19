@@ -139,10 +139,27 @@ def render_ai_raw_capability_markdown(packet: dict[str, Any]) -> str:
                 vals.append("NA")
             else:
                 value = f"{float(cell['score']):.1f}%"
+                if cell.get("release_match") == "latest_evaluated_lab_fallback":
+                    value += "†"
+                elif cell.get("release_match") == "latest_evaluated_event_fallback":
+                    value += "‡"
                 vals.append(f"**{value}**" if float(cell["score"]) == row_max else value)
         lines.append("| %s | %s |" % (method.get("label"), " | ".join(vals)))
-    lines += ["", "- 矩阵列为本期各实验室当前旗舰模型；行名使用 benchmark 全称。`NA` 表示该精确模型版本没有通过质量门的公开结果，不等于零分。来源选择遵循维护者/独立第三方 > 竞对报告 > 实验室自报。",
+    lines += ["", "- 矩阵列为本期各实验室当前旗舰模型；行名使用 benchmark 全称。无标记数值是当前旗舰精确 release 的成绩；`†` 表示同一可比组内该 Lab 最近一次可接受评测；`‡` 表示最近一次事件型评测（task set/harness 口径须单独核对）。两者都保留实际被评模型身份，绝不冒充当前旗舰。`NA` 表示连同 Lab 回退也没有可接受公开结果，不等于零分。来源选择遵循维护者/独立第三方 > 竞对报告 > 实验室自报。",
               "- **同一模型版本的配置归并：** `Max`、`High`、`xhigh` 等 reasoning effort 或 harness 配置不各占一列。在同一精确 release、同一 benchmark 和同一来源优先级内，矩阵展示公开观测到的最高分；被选中的原始配置、effort、harness 与来源仍保留在单元格 sidecar/JSON 中，可审计且不取平均。不同产品变体（例如 `GLM-5.3` 与 `GLM-5.3-Flash`）不做模糊合并。", ""]
+    fallback_cells = [cell for lab in panel for cell in (lab.get("cells") or [])
+                      if cell.get("release_match") in {"latest_evaluated_lab_fallback",
+                                                       "latest_evaluated_event_fallback"}]
+    if fallback_cells:
+        lines += ["## 附录：`†/‡` 最近被评测模型明细", "",
+                  "该表防止把旧 release 的分数冒充当前旗舰；主矩阵只为减少 NA 而显示其同 Lab 证据。", "",
+                  "| 标记 | Benchmark | Lab | 当前旗舰 | 实际被评模型 | score-as-of |",
+                  "|---|---|---|---|---|---|"]
+        for cell in fallback_cells:
+            marker = "‡" if cell.get("release_match") == "latest_evaluated_event_fallback" else "†"
+            lines.append(f"| {marker} | {cell.get('benchmark')} | {cell.get('lab')} | {cell.get('panel_model_name')} | "
+                         f"{_release_label(cell)} | {cell.get('score_as_of') or 'NA'} |")
+        lines.append("")
     event_rows = list(matrix.get("event_observations") or [])
     if event_rows:
         lines += ["## 事件型评测证据账本", "",

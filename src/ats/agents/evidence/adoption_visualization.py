@@ -82,7 +82,7 @@ def render_ai_adoption_charts(*, packet: dict[str, Any], output_dir: str | Path)
     rps_all = sorted([dict(row, series=name) for name, values in rps.get("history", {}).items()
                       for row in values], key=lambda row: (row.get("series", ""), _period_key(row.get("period", ""))))
     tables = [
-        _write_table(output, "three_axis_overview", axis_rows),
+        _write_table(output, "four_axis_overview", axis_rows),
         _write_table(output, "btos_national_history", btos.get("history", [])),
         _write_table(output, "btos_latest_industry_size", btos_cross_section),
         _write_table(output, "rps_work_use_and_hours", rps_all),
@@ -111,7 +111,7 @@ def render_ai_adoption_charts(*, packet: dict[str, Any], output_dir: str | Path)
         panels = []
         panels.append(("BTOS 美国企业 AI 采用广度", btos.get("history", []), "value",
                        "企业占比（%）", "US Census BTOS"))
-        panels.append(("RPS 美国员工工作使用持续性", rps.get("history", {}).get("last_week", []),
+        panels.append(("RPS 美国员工近期工作使用率（群体）", rps.get("history", {}).get("last_week", []),
                        "value", "员工占比（%）", "RPS / FRED"))
         panels.append(("RPS AI 辅助工时占比", rps.get("history", {}).get("assisted_hours", []),
                        "value", "总工作工时占比（%）", "RPS / FRED"))

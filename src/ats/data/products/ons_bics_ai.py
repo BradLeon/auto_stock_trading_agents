@@ -46,7 +46,8 @@ def snapshot(repository, *, wave: str = "", as_of=None, include_vintages: bool =
                            and len({json.loads(row.get("dimensions_json") or "{}").get("question_regime", "")
                                     for row in history}) == 1 else "insufficient_history")
                     for name, history in histories.items()}
-    health = next((row for row in repository.source_health() if row["source_id"] == SOURCE_ID), {})
+    checks = repository.source_checks(source_id=SOURCE_ID, limit=1)
+    health = checks[0] if checks else {}
     return {
         "status": "ok" if selected else "no_coverage", "source_id": SOURCE_ID, "dataset_id": DATASET_ID,
         "wave": chosen or None, "available_waves": periods, "latest": latest, "history": histories,
@@ -63,7 +64,7 @@ def snapshot(repository, *, wave: str = "", as_of=None, include_vintages: bool =
         "quality": {"status": "accepted" if selected else "no_coverage",
                     "conditional_denominators_explicit": all(item.get("denominator_scope") for item in dims),
                     "official_statistics_in_development": True},
-        "freshness": {"last_checked_at": health.get("last_checked_at"),
+        "freshness": {"last_checked_at": health.get("checked_at"),
                       "latest_available_period": health.get("latest_available_period"),
                       "source_native_cadence": "conditional_wave"},
         "lineage": {"input_observation_ids": sorted({row["observation_id"] for row in selected}),

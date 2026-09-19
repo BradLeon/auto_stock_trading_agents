@@ -15,8 +15,9 @@ from ats.agents.evidence.commercialization import (
     COMMERCIALIZATION_CLAIM_ID, REVENUE_SECTION_ID, observe_ai_commercialization,
     render_ai_commercialization_markdown)
 from ats.agents.evidence.layer_runner import (
-    OBSERVER_RUNNERS, _configured_observers, render_layer_evidence_markdown,
-    run_registered_layer_observers, write_layer_evidence_outputs)
+    OBSERVER_RUNNERS, _configured_observers, _rewrite_report_asset_links,
+    render_layer_evidence_markdown, run_registered_layer_observers,
+    write_layer_evidence_outputs)
 from ats.data.catalog.structured import StructuredCatalog
 from ats.data.core.structured_models import FetchRequest
 from ats.data.pipelines.structured.ingestion import IngestionPipeline
@@ -143,6 +144,35 @@ def test_openrouter_is_an_independent_commercialization_evidence_section(seeded_
     assert "金额-token" not in packet["context"]["compact"]
 
 
+def test_unavailable_revenue_with_live_route_data_is_a_token_proxy_only():
+    """A live route bundle keeps the report publishable, but never as revenue."""
+    revenue_bundle = {"status": "unavailable", "companies": [], "limitations": [],
+                      "section": {"status": "unavailable", "reason": "尚未加载收入 vintage"}}
+    route_bundle = {"status": "ok", "directional_status": "expanding", "facts": {},
+                    "warnings": [], "weeks": []}
+
+    class Stub:
+        def frontier_labs_revenue_evidence_bundle(self, **_kwargs):
+            return revenue_bundle
+
+        def openrouter_token_evidence_bundle(self, **_kwargs):
+            return route_bundle
+
+    scope = {**_scope(),
+             "supplemental_claims": [{"claim_id": "openrouter_routed_usage_and_competition"}]}
+    packet = observe_ai_commercialization(products=Stub(), workflow_scope=scope, as_of=NOW)
+
+    assert packet["status"] == "ok"
+    assert packet["section_status"] == "unavailable"
+    assert packet["overall_status"] == "revenue_unavailable_token_proxy_observed"
+    assert "不等于收入" in packet["overall_interpretation"]
+    assert packet["cross_evidence"]["status"] == "openrouter_only"
+
+    text = render_ai_commercialization_markdown(packet)
+    assert "revenue_unavailable_token_proxy_observed" in text
+    assert "不代表收入" in text
+
+
 def test_section_not_enabled_is_reported_not_faked(seeded_products):
     packet = observe_ai_commercialization(
         products=seeded_products, as_of=NOW,
@@ -220,6 +250,16 @@ def test_report_and_charts_share_one_rows_hash(seeded_products, tmp_path):
         assert heading in markdown
 
 
+def test_report_asset_links_are_relative_to_the_report(tmp_path):
+    asset = tmp_path / "assets" / "chart.png"
+    asset.parent.mkdir()
+    asset.write_bytes(b"png")
+    report = tmp_path / "report.md"
+    result = {"packets": [{"visualization_descriptors": [{"png_path": str(asset)}]}]}
+    normalized = _rewrite_report_asset_links(f"![chart]({asset})", result, report)
+    assert normalized == "![chart](assets/chart.png)"
+
+
 def test_rendered_markdown_lists_every_observation_id_it_used(seeded_products):
     packet = observe_ai_commercialization(products=seeded_products,
                                           workflow_scope=_scope(), as_of=NOW)
@@ -239,12 +279,12 @@ def test_sector_config_declares_two_independent_observers():
     refs = [EvidenceObserverRef(**item) for item in layer["evidence_observers"]]
     by_claim = {ref.claim_id: ref for ref in refs}
     assert by_claim[PRODUCTION_CLAIM_ID].runner == "ai_production_penetration"
-    assert by_claim[PRODUCTION_CLAIM_ID].claim_definition_version == "v2"
+    assert by_claim[PRODUCTION_CLAIM_ID].claim_definition_version == "v3"
     assert by_claim[COMMERCIALIZATION_CLAIM_ID].runner == "ai_commercialization"
     assert by_claim[COMMERCIALIZATION_CLAIM_ID].evidence_sections == \
         [REVENUE_SECTION_ID]
-    # The production declaration keeps its supplemental sources untouched.
-    assert by_claim[PRODUCTION_CLAIM_ID].supplemental_sources == ["ramp_ai_index"]
+    # The production declaration governs Ramp as a primary evidence source.
+    assert by_claim[PRODUCTION_CLAIM_ID].primary_sources == ["ramp_ai_index"]
 
 
 def test_registry_resolves_both_runners_with_their_fixed_claims():

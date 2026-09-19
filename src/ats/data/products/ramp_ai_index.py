@@ -85,10 +85,18 @@ def _lineage(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _freshness(repository, *, latest_period: str = "") -> dict[str, Any]:
-    health = next((item for item in repository.source_health() if item.get("source_id") == SOURCE_ID), {})
-    return {"last_checked_at": health.get("last_checked_at"),
-            "latest_available_period": health.get("latest_available_period") or latest_period,
-            "latest_status": health.get("last_status"), "source_native_cadence": "monthly"}
+    # ``source_health()`` intentionally builds diagnostics for every source and
+    # performs an expensive Anthropic product scan.  Ramp only needs its own
+    # latest probe metadata, so query the governed source-check/run records
+    # directly.  This keeps report generation bounded on large production DBs.
+    checks = repository.source_checks(source_id=SOURCE_ID, limit=1)
+    runs = repository.ingestion_history(source_id=SOURCE_ID, limit=1)
+    check = checks[0] if checks else {}
+    run = runs[0] if runs else {}
+    return {"last_checked_at": check.get("checked_at") or run.get("started_at"),
+            "latest_available_period": check.get("latest_available_period") or latest_period,
+            "latest_status": check.get("status") or run.get("status"),
+            "source_native_cadence": "monthly"}
 
 
 def _manifest(products, rows: list[dict[str, Any]], *, purpose: str, as_of: datetime | None,

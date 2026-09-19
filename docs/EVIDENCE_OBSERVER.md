@@ -187,7 +187,7 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show --entity MU --l
 其他层的结论替代。
 
 ```bash
-# 默认把 Markdown 审阅文档和图表写到 config/sectors/<sector>.yaml 的 output_dir，并打印路径
+# 默认同时写人类 Markdown、Analyst JSON/YAML context 和图表，并打印路径
 ats evidence layer --sector ai_hardware --layer L1_app
 
 # 显式控制一个层级审阅包的落盘位置；JSON 仍可用于机器读取
@@ -195,6 +195,13 @@ ats evidence layer --sector ai_hardware --layer L1_app \
   --output /absolute/path/L1_app_evidence.md --chart-dir /absolute/path/L1_app_assets
 ats evidence layer --sector ai_hardware --layer L1_app --format json
 ```
+
+Markdown 是人类审阅和图表阅读载体；同次 Markdown 发布会在旁边生成
+`*_CONTEXT.json`（Analyst LLM 主输入）与语义等价的 `*_CONTEXT.yaml`。context 使用
+`l1_analyst_context/v1` 契约，按 Observer 保留最新数值、趋势、`supports`、
+`does_not_support`、缺失原因、不确定性及 lineage。它明确禁止跨 Observer 数值聚合，
+也禁止把生产化四轴或不同 benchmark 平均成统一分数。`--format json` 则仍是完整运行 packet，
+主要用于诊断，不替代紧凑 context。
 
 这些声明与 layer 的 `claims` 分离：前者只选择受治理的数据 Observer，后者仍服务公司证人、归因与
 Chain workflow。某个 claim 也可以保留专用快捷入口，但它必须经过相同的配置声明和范围校验。例如

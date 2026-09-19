@@ -63,7 +63,8 @@ def snapshot(repository, *, period: str = "", as_of=None, entity_id: str = "",
                                          "input_observation_ids": current_ids}
                                        if four_consecutive else None),
     }
-    health = next((row for row in repository.source_health() if row["source_id"] == SOURCE_ID), {})
+    checks = repository.source_checks(source_id=SOURCE_ID, limit=1)
+    health = checks[0] if checks else {}
     strata = {"national": [], "industry": [], "employment_size": [], "sector_by_size": []}
     for row in selected:
         dims = json.loads(row.get("dimensions_json") or "{}")
@@ -82,7 +83,7 @@ def snapshot(repository, *, period: str = "", as_of=None, entity_id: str = "",
             "vintages": vintage_rows,
             "quality": {"status": "accepted" if selected else "no_coverage",
                         "suppressed_cells_are_missing_not_zero": True},
-            "freshness": {"last_checked_at": health.get("last_checked_at"),
+            "freshness": {"last_checked_at": health.get("checked_at"),
                           "latest_available_period": health.get("latest_available_period")},
             "lineage": {"input_observation_ids": observation_ids,
                         "artifact_ids": sorted({row["artifact_id"] for row in selected})},

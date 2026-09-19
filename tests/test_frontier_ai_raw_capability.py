@@ -334,6 +334,36 @@ def test_nearby_variant_without_flagship_identity_leaves_configured_column_na():
     assert cell["coverage_state"] == "not_evaluated"
 
 
+def test_lagged_benchmark_uses_labelled_latest_evaluated_lab_fallback():
+    from types import SimpleNamespace
+    payload = {
+        "models": [{"lab_id": "OPENAI", "model_id": "gpt-5.6-sol", "display_name": "GPT-5.6 Sol"}],
+        "scores": [{"lab_id": "OPENAI", "model_id": "gpt-5.6-sol",
+                    "benchmark_id": "osworld_2", "score": 62.72,
+                    "score_as_of": "2026-09-17"}],
+    }
+    records, _, _ = normalize_payload(payload, fetched_at=NOW)
+    rows = [{"observation_id": "o-os", "artifact_id": "a-os", "period": "2026-09-17",
+             "known_at": "2026-09-18", "value": records[0].value,
+             "dimensions": records[0].dimensions}]
+    structured = SimpleNamespace(observations=lambda **kwargs: rows, entities=lambda: [],
+                                 frontier_capability_coverage=lambda: [])
+    from ats.data.products.frontier_ai_capability import capability_matrix
+    matrix = capability_matrix(SimpleNamespace(structured=structured))
+    cell = next(item for item in matrix["matrix"]
+                if item["lab_id"] == "OPENAI" and item["benchmark_id"] == "osworld_2")
+    assert cell["score"] == 62.72
+    assert cell["model_release_id"] == "gpt-5.6-sol"
+    assert cell["panel_model_release_id"] == "gpt-6-astra"
+    assert cell["release_match"] == "latest_evaluated_lab_fallback"
+
+
+def test_latest_evaluated_fallback_is_not_used_for_non_lagged_benchmark():
+    # The fallback is intentionally narrow: it must not silently fill every
+    # missing current-flagship cell with a historic model score.
+    test_nearby_variant_without_flagship_identity_leaves_configured_column_na()
+
+
 def test_source_priority_prefers_independent_result_without_averaging():
     from types import SimpleNamespace
 

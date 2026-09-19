@@ -131,15 +131,14 @@ def test_ai_hardware_l1_declares_data_observer_outside_chain_claims():
     l1 = load_sector_config("ai_hardware").layer_by_key("L1_app")
     assert l1 is not None
     by_claim = {item.claim_id: item for item in l1.evidence_observers}
-    # The production observer is still the only one tied to BTOS/RPS/Ramp and
-    # must keep its v2 / supplemental declarations intact.
+    # Ramp is the governed fourth primary evidence axis of production/adoption.
     assert by_claim["ai_core_production_workflow_penetration"].runner == \
         "ai_production_penetration"
-    assert by_claim["ai_core_production_workflow_penetration"].claim_definition_version == "v2"
-    assert by_claim["ai_core_production_workflow_penetration"].supplemental_sources == \
+    assert by_claim["ai_core_production_workflow_penetration"].claim_definition_version == "v3"
+    assert by_claim["ai_core_production_workflow_penetration"].primary_sources == \
         ["ramp_ai_index"]
     # A second, independent commercialization observer was added in v1.  It must
-    # not piggyback on the production runner, supplemental sources, or claim id.
+    # not piggyback on the production runner, primary sources, or claim id.
     assert by_claim["ai_frontier_labs_commercialization"].runner == "ai_commercialization"
     assert by_claim["ai_frontier_labs_commercialization"].claim_definition_version == "v1"
     assert "ramp_ai_index" not in by_claim["ai_frontier_labs_commercialization"].supplemental_sources
@@ -222,17 +221,17 @@ def test_l1_v2_consumes_only_bundle_and_renders_three_axes(tmp_path):
 
     packet = observe_ai_production_penetration(
         products=Products(), workflow_scope={"sector": "ai_hardware", "layer": "L1_app"})
-    assert packet["claim_definition_version"] == "v2"
+    assert packet["claim_definition_version"] == "v3"
     assert packet["overall_status"] == "broadening_and_deepening"
     assert packet["context"]["budget_status"] == "ok"
     assert packet["manifest"]["snapshot_id"] == "manifest-v2"
     report = render_ai_production_markdown(packet)
-    assert report.index("三轴总览") < report.index("TOP10 生产化职业")
+    assert report.index("四证据轴总览") < report.index("TOP10 生产化职业")
     assert "ONS" not in report and "判断轨迹" not in report
     assert "BTOS 美国企业 AI 采用广度" in report and "不计算跨来源综合分数" in report
 
 
-def test_l1_v2_adds_ramp_as_supplement_without_changing_three_axis_state(tmp_path):
+def test_l1_v3_promotes_ramp_to_fourth_primary_axis_without_cross_source_averaging(tmp_path):
     class Products:
         def ai_adoption_evidence_bundle(self, **kwargs):
             axes = {}
@@ -272,9 +271,12 @@ def test_l1_v2_adds_ramp_as_supplement_without_changing_three_axis_state(tmp_pat
     packet = observe_ai_production_penetration(
         products=Products(), workflow_scope={"sector": "ai_hardware", "layer": "L1_app"})
     assert packet["overall_status"] == "broadening_and_deepening"
+    assert packet["evidence_axis_count"] == 4
+    assert packet["axis_overview"][-1]["axis_id"] == "paid_procurement"
+    assert packet["axis_overview"][-1]["role"] == "primary_evidence_axis"
     ramp = packet["supplemental_signals"]["ramp_paid_adoption"]
     assert ramp["status"] == "partial" and ramp["slices"]["adoption_overall"]["rows"][0]["value"] == 56.13
-    assert "Ramp 付费企业采用与 AI 支出补充证据" in render_ai_production_markdown(packet)
+    assert "Ramp：企业付费采购与 AI 支出" in render_ai_production_markdown(packet)
     compact_context = json.loads(packet["context"]["compact"])
     assert compact_context["ramp_paid_adoption"]["slices"]["adoption_overall"]["rows"]
 
@@ -292,7 +294,7 @@ def test_v2_renderer_writes_tables_charts_and_complete_sidecars(tmp_path):
     result = render_ai_adoption_charts(packet=packet, output_dir=tmp_path)
     assert result.get("visualization_warning") is None
     assert result["descriptors"] and result["tables"]
-    assert not (tmp_path / "four_axis_status_period_matrix.json").exists()
+    assert (tmp_path / "four_axis_overview.json").exists()
     sidecar = json.loads((tmp_path / "btos_enterprise_breadth.json").read_text())
     assert sidecar["title"] == "BTOS 美国企业 AI 采用广度"
     assert sidecar["manifest_id"] == "m1" and sidecar["observation_ids"] == ["o1"]

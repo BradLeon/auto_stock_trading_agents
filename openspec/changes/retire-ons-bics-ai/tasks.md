@@ -56,4 +56,4 @@
 
 - [x] 9.1 运行 `openspec validate retire-ons-bics-ai` 与 `openspec status --change retire-ons-bics-ai`，确认全部构件 done。验证：validate 输出 `is valid`。
 - [x] 9.2 更新 `.workbuddy/memory/`：当日日志追加退役执行记录，`MEMORY.md` 更新 `ons_bics_ai` 条目为「已于 2026-09-19 正式退役、数据已 purge」并写入 `retired_sources` 墓碑约定。验证：两份记忆文件含退役结论。
-- [ ] 9.3 按 Why / How / What 三段中文结构提交并推送 `codex/new_data_source`。验证：`git log -1` 显示三段式 commit message 且 `git status` 干净。
+- [x] 9.3 按 Why / How / What 三段中文结构提交并推送 `codex/new_data_source`。验证：`git log -1` 显示三段式 commit message 且 `git status` 干净。

@@ -111,11 +111,6 @@ def _rps_genai_adoption():
     return RPSGenAIAdoptionAdapter()
 
 
-def _ons_bics_ai():
-    from ...sources.ons_bics_ai import ONSBICSAIAdapter
-    return ONSBICSAIAdapter()
-
-
 def _ramp_ai_index():
     import os
 
@@ -167,9 +162,6 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         "anthropic_economic_index", _anthropic_economic_index, discovery_group="ai_adoption"),
     "census_btos": RuntimeSourceSpec("census_btos", _census_btos, discovery_group="ai_adoption"),
     "rps_genai_adoption": RuntimeSourceSpec("rps_genai_adoption", _rps_genai_adoption, discovery_group="ai_adoption"),
-    # Retained as an independent historical/audit source; intentionally excluded
-    # from the active L1 AI adoption discovery group.
-    "ons_bics_ai": RuntimeSourceSpec("ons_bics_ai", _ons_bics_ai),
     "ramp_ai_index": RuntimeSourceSpec("ramp_ai_index", _ramp_ai_index,
                                        discovery_group="ai_adoption"),
     "openrouter_rankings": RuntimeSourceSpec(
@@ -218,6 +210,21 @@ def validate_source_registration(source_id: str, *,
     def check(name: str, passed: bool, reason: str = "") -> None:
         checks.append({"check": name, "passed": bool(passed),
                        "reason": "" if passed else reason})
+
+    # A retired source id is checked *before* the active registry, otherwise it
+    # would report `source_not_configured` and hide the real reason.  This is the
+    # single fail-closed point shared by `ats data validate-source` and the
+    # ReleaseManager publication gate, so neither can be bypassed by re-adding
+    # the id to `sources` alone.
+    tombstone = catalog.retired_source(source_id)
+    if tombstone is not None:
+        check("source_retired", False, "source_retired")
+        return {"source_id": source_id, "valid": False, "checks": checks,
+                "reason_codes": ["source_retired"],
+                "retired_at": tombstone.retired_at.isoformat(),
+                "reason": tombstone.reason,
+                "disposition": tombstone.disposition.value,
+                "successor": tombstone.successor}
 
     check("source_configured", row is not None, "source_not_configured")
     if row is None:

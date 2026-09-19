@@ -61,7 +61,7 @@ openspec validate integrate-ramp-ai-index-commercialization-signal --type change
 ## 周期探测与平台发布验收（task 8）
 
 - 已在 `config/data/schedules.yaml` 登记 `ramp_ai_index_p10d_probe`：外部 scheduler 每 10 天
-  只运行 `ramp_ai_index`，不会改变 BTOS/RPS/Anthropic/ONS 的频率。
+  只运行 `ramp_ai_index`，不会改变 BTOS/RPS/Anthropic 的频率。
 - 无头执行时，浏览器 runner 将五个官方导出放入 `var/data/ramp_exports/<scope>.tsv`；同一轮
   discovery 的 payload 在内存中直接交给 ingest，避免重复打开浏览器。报告只读取统一库。
 - 当前受控探测使用 2026-08 官方五个 TSV：两个 dataset 的质量门均为 `passed`，五个 scope

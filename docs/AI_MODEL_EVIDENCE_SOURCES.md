@@ -121,7 +121,6 @@
 | [ ] | 美国企业采用率、行业和规模 | [美国 Census BTOS](https://www.census.gov/hfp/btos/data)及[历史下载](https://www.census.gov/hfp/btos/data_downloads) | 免费；双周；历史文件和方法文档 | 2025-11 问题措辞变化，前后需要断点处理 |
 | [ ] | 企业职能、任务和自动化方式 | Census BTOS AI Supplement | 免费；专题波次 | 部分问题并非永久核心题目 |
 | [ ] | 欧洲企业 AI 采用 | Eurostat `isoc_eb_ai` 与[公开 SDMX API](https://ec.europa.eu/eurostat/web/user-guides/data-browser/api-data-access/api-getting-started/sdmx3.0) | 免费；年度 | 频率较低；需自行保存 vintage |
-| [ ] | 英国企业采用和使用深度 | [ONS BICS AI 数据](https://www.ons.gov.uk/businessindustryandtrade/business/businessservices/articles/artificialintelligenceinukbusinesses/2023to2026) | 免费；BICS 双周，AI 专题不定期；CSV/XLS | 自愿调查且部分行业不在覆盖范围内 |
 | [ ] | 员工每日/每周使用率 | [FRED/RPS GenAI Adoption Tracker](https://fred.stlouisfed.org/data/RPSGENAIUSAGESHAREEDLWALL) | 免费；季度；网页/CSV无需鉴权 | 自报使用，不能直接证明企业正式部署 |
 | [ ] | 员工使用任务、频率和时间节省 | 美国 Census HTOPS | 免费；约双月专题 | 新数据源，历史较短 |
 | [ ] | ChatGPT 工作/非工作、行业、职能、Agent 使用 | [OpenAI Signals](https://openai.com/signals/data-download/) | 免费；CSV；CC BY 4.0；持续更新 | 只覆盖 OpenAI 产品，分类方法由供应商掌握 |
@@ -255,7 +254,7 @@
 | 每日 | 官方发布、模型目录、价格、退役、公司经营事件；保存网页快照和内容哈希 |
 | 每周 | LM Arena、Artificial Analysis、OpenRouter、主要 Agent 榜单 |
 | 每月 | Ramp、SWE-rebench、OpenAI/Anthropic 使用数据；如来源本月未发布则标记 stale |
-| 双周 | Census BTOS、ONS BICS |
+| 双周 | Census BTOS |
 | 季度 | RPS、上市合作方财报、经营指标汇总 |
 | 年度 | Eurostat、跨国采用比较 |
 

@@ -1713,6 +1713,9 @@ def run_data(
     artifact_root: str = "",
     force: bool = False,
     force_check: bool = False,
+    confirm: bool = False,
+    exported: bool = False,
+    purge_note: str = "",
     apply: bool = False,
     mode: str = "platform",
     release_file: str = "",
@@ -1949,6 +1952,7 @@ def run_data(
         "release-check",
         "publish",
         "rollback",
+        "purge-source",
     }:
         from ..data.products import DataProducts
         from ..data.structured import SQLiteStructuredRepository
@@ -1956,7 +1960,8 @@ def run_data(
         isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
         isolated.bootstrap_catalog()
         products = DataProducts(store=products.store, structured_repository=isolated)
-    if action in {"validate-source", "ingest", "release-check", "publish", "rollback"}:
+    if action in {"validate-source", "ingest", "release-check", "publish", "rollback",
+                  "purge-source"}:
         from ..data.structured import (
             ReleaseManager,
             SQLiteStructuredRepository,
@@ -2002,6 +2007,22 @@ def run_data(
                 result = release_check(
                     repository, group=group, source_ids=[target_source] if target_source else None,
                     ingest_new=ingest_new, force=(force or force_check), dataset_id=dataset, catalog=catalog,
+                )
+            elif action == "purge-source":
+                # Physically deletes a retired source's data.  This is the only
+                # irreversible action on the structured surface, so it is opt-in
+                # twice: the caller must name the source and pass --confirm, and
+                # the repository refuses any source without a retirement
+                # tombstone.  Nothing else in the CLI reaches this path.
+                if not target_source:
+                    raise ValueError("purge-source requires --source or VALUE")
+                result = repository.purge_source(
+                    target_source,
+                    confirm=confirm,
+                    catalog=catalog,
+                    actor="cli",
+                    exported=exported,
+                    note=purge_note,
                 )
             elif action == "rollback":
                 if not target_source:
@@ -2379,6 +2400,7 @@ def main(argv: list[str] | None = None) -> int:
             "release-check",
             "publish",
             "rollback",
+            "purge-source",
             "sources",
             "datasets",
             "metrics",
@@ -2506,6 +2528,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="source-acceptance: 仅 SemiAnalysis，先采集到 --db/--artifact-root 指定的隔离资产库",
     )
+    data.add_argument(
+        "--confirm",
+        action="store_true",
+        help="purge-source: 显式确认执行物理删除；缺省只做只读干跑",
+    )
+    data.add_argument(
+        "--exported",
+        action="store_true",
+        help="purge-source: 声明数据已在别处留存，写入清除记录供审计",
+    )
+    data.add_argument("--purge-note", default="", help="purge-source: 写入清除记录的备注")
     data.add_argument("--apply", action="store_true", help="publish/source-publish: 显式执行写操作")
     data.add_argument(
         "--mode", choices=["platform"], default="platform", help="publish: 唯一受支持的数据路径"
@@ -2789,6 +2822,9 @@ def main(argv: list[str] | None = None) -> int:
             artifact_root=args.artifact_root,
             force=args.force,
             force_check=args.force_check,
+            confirm=args.confirm,
+            exported=args.exported,
+            purge_note=args.purge_note,
             apply=args.apply,
             mode=args.mode,
             release_file=args.release_file,

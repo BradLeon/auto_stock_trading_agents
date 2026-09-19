@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -14,7 +14,8 @@ __all__ = [
     "ArtifactDescriptor", "CatalogStatus", "DataSnapshot", "DerivationDefinition",
     "EntityRelationInput", "EvidenceCandidateInput", "EvidenceLink", "FetchRequest", "IngestionStatus",
     "MetricDefinition", "NativeRecord", "ObservationInput", "ObservationVintage",
-    "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "SeriesIdentity",
+    "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "RetiredSource",
+    "RetirementDisposition", "SeriesIdentity",
     "ReferenceEntityInput", "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
     "VerificationStatus", "DiscoveryResult", "ReleaseCandidate", "DiscoveryStatus",
 ]
@@ -111,6 +112,34 @@ class StructuredSource(BaseModel):
             if self.persistence != Persistence.RUNTIME or self.datasets:
                 raise ValueError("runtime/excluded sources must be runtime with no datasets")
         return self
+
+
+class RetirementDisposition(str, Enum):
+    """What happened to a retired source's stored data."""
+
+    PURGED = "purged"                  # rows and exclusive blobs physically deleted
+    RETAINED_ORPHAN = "retained_orphan"  # rows intentionally kept, sourced from nothing
+
+
+class RetiredSource(BaseModel):
+    """Machine-readable tombstone for a source id that has been retired.
+
+    A tombstone is not an active source configuration: it carries no adapter,
+    dataset or rollout mode, and no collection, publication or query path reads
+    it as a live source.  It exists so a retired id cannot be silently
+    re-registered, so the stored-data decision is auditable, and so any orphan
+    rows left in the database have an explanation.
+    """
+
+    id: str
+    retired_at: date
+    reason: str
+    disposition: RetirementDisposition
+    prior_catalog_status: str = ""
+    prior_rollout_mode: str = ""
+    disposition_at: date | None = None
+    successor: str = ""
+    spec_removed: bool = False
 
 
 class StructuredDataset(BaseModel):

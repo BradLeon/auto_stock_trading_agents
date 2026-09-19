@@ -7,8 +7,6 @@ from ats.data.sources.census_btos import CensusBTOSAdapter, NEW_REGIME_START, _c
 from ats.data.products.census_btos import snapshot as btos_snapshot
 from ats.data.sources.rps_genai_adoption import RPSGenAIAdoptionAdapter, SERIES, parse_fred_csv
 from ats.data.products.rps_genai_adoption import snapshot as rps_snapshot
-from ats.data.sources.ons_bics_ai import _normalized_workbook_rows, parse_ons_rows
-from ats.data.products.ons_bics_ai import snapshot as ons_snapshot
 from ats.data.stores.structured.repository import SQLiteStructuredRepository
 from ats.data.products.discovery import DataDiscovery
 from ats.data.catalog.structured import StructuredCatalog
@@ -260,59 +258,6 @@ def test_rps_single_series_revision_is_vintaged_and_replayable(tmp_path):
     assert rps_snapshot(repository)["latest"]["adoption"]["value"] == 41
 
 
-def test_ons_wide_workbook_parser_preserves_universe_suppression_and_headlines():
-    import io
-    import openpyxl
-    book = openpyxl.Workbook()
-    current = book.active
-    current.title = "AI Current Usage TS (WTD)"
-    current.append(["Question: Which of the following artificial intelligence technologies, if any, does your business currently use?"])
-    current.append(["As a percentage of businesses not permanently stopped trading, broken down by industry and size band, weighted by count, UK"])
-    current.append([]); current.append([]); current.append([])
-    current.append(["Dates", "Wave", "Industry/Size Band", "Text generation using Large Language Models", "Not sure",
-                    "Business does not currently use artificial intelligence technologies"])
-    current.append(["15 June 2026 to 28 June 2026", "Wave 159", "10 - 49", 0.20, 0.10, 0.60])
-    current.append(["15 June 2026 to 28 June 2026", "Wave 159", "Manufacturing", "[c]", 0.10, 0.70])
-    extent = book.create_sheet("AI Extent Use TS (WTD)")
-    extent.append(["Question: To what extent does your business use artificial intelligence technologies in its business operations?"])
-    extent.append(["As a percentage of businesses using some form of artificial intelligence"])
-    extent.append([]); extent.append([]); extent.append([])
-    extent.append(["Dates", "Wave", "Industry/Size Band", "Used extensively", "Used on a limited basis",
-                   "Used only for artificial intelligence technology testing or pilots"])
-    extent.append(["15 June 2026 to 28 June 2026", "Wave 159", "10 - 49", 0.10, 0.60, 0.30])
-    stream = io.BytesIO(); book.save(stream)
-    rows = _normalized_workbook_rows(stream.getvalue(), target_wave="159")
-    assert any(row["answer_text"].startswith("Use at least") and row["estimate"] == 30 for row in rows)
-    assert any(row.get("suppression_code") == "[c]" for row in rows)
-    candidate = ReleaseCandidate(identity="ONS:159:x", period="wave-159", methodology_fingerprint="regime",
-                                 metadata={"wave": "159", "questionnaire": "https://ons.test/questions"})
-    records, _, unknown = parse_ons_rows(rows=rows, candidate=candidate, fetched_at=NOW)
-    assert not unknown
-    assert {record.provider_field for record in records} >= {"ai_use_pct", "extensive_use_pct",
-                                                             "limited_use_pct", "pilot_use_pct",
-                                                             "ons_response_share"}
-    assert any(record.entity_id == "BUSINESS_POP:UK:EMP:10 - 49" for record in records)
-    assert all(record.dimensions["denominator_scope"] for record in records)
-
-
-def test_ons_dataproduct_keeps_uk_snapshot_and_conditional_denominators_separate():
-    rows = [{"observation_id": "o1", "artifact_id": "a1", "source_id": "ons_bics_ai",
-             "dataset_id": "ai_enterprise_adoption_uk", "entity_id": "BUSINESS_POP:UK:ALL",
-             "metric_id": "ai.uk_enterprise_adoption.extensive_use_share", "period": "wave-159",
-             "value": 10.0, "dimensions_json": '{"question_regime":"r1","denominator_scope":"AI-using businesses","questionnaire_url":"https://ons.test/q"}'}]
-    class Repo:
-        def observations(self, **kwargs): return list(rows)
-        def source_checks(self, **kwargs):
-            return []
-        def source_health(self): return [{"source_id": "ons_bics_ai", "last_checked_at": NOW.isoformat(),
-                                          "latest_available_period": "wave-159"}]
-    result = ons_snapshot(Repo())
-    assert result["geography_role"] == "UK_supplement"
-    assert result["trend_status"]["extensive"] == "insufficient_history"
-    assert result["quality"]["conditional_denominators_explicit"]
-    assert result["questionnaire_references"] == ["https://ons.test/q"]
-
-
 def test_discovery_candidate_identity_has_one_atomic_claim(tmp_path):
     repository = SQLiteStructuredRepository(tmp_path / "claims.sqlite", artifact_root=tmp_path / "artifacts")
     assert repository.claim_discovery_candidate(source_id="us_census_btos", candidate_identity="BTOS:99:abc", owner_id="scheduled")
@@ -347,15 +292,20 @@ def test_discovery_transport_and_schema_failures_have_distinct_statuses():
     DiscoveryStatus.VALIDATION_FAILED, DiscoveryStatus.NEW_RELEASE,
 ])
 def test_discovery_state_machine_statuses_are_persisted_without_ingestion(tmp_path, status):
+    """Every terminal state must survive a round trip without creating data.
+
+    The carrier source is deliberately an in-service one: this is generic
+    discovery bookkeeping, not a property of any particular upstream.
+    """
     repository = SQLiteStructuredRepository(tmp_path / "states.sqlite", artifact_root=tmp_path / "artifacts")
-    result = DiscoveryResult(source_id="ons_bics_ai", dataset_id="ai_enterprise_adoption_uk",
+    result = DiscoveryResult(source_id="rps_genai_adoption", dataset_id="ai_worker_adoption_us",
                              checked_at=NOW, status=status, latest_upstream_identity="wave:1",
                              diagnostics={"fixture": status.value})
     repository.save_source_check(source_id=result.source_id, dataset_id=result.dataset_id,
                                  status=result.status.value,
                                  latest_upstream_identity=result.latest_upstream_identity,
                                  diagnostics=result.diagnostics, at=result.checked_at)
-    row = repository.source_checks(source_id="ons_bics_ai", limit=1)[0]
+    row = repository.source_checks(source_id="rps_genai_adoption", limit=1)[0]
     assert row["status"] == status.value
     assert row["latest_upstream_identity"] == "wave:1"
-    assert repository.observations(source_id="ons_bics_ai") == []
+    assert repository.observations(source_id="rps_genai_adoption") == []

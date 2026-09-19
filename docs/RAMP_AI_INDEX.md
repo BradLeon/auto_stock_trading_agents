@@ -9,7 +9,7 @@
 - 默认入口是 [Ramp AI Index](https://ramp.com/data/ai-index#adoption#overall) 的可见
   `Get the data` 按钮。按钮复制官方 TSV 后才进入解析；不使用截图、OCR 或猜测隐藏 URL。
 - Ramp 单独由外部 scheduler 每 10 天执行一次 `data release-check --source ramp_ai_index
-  --ingest-new --force-check`；不把 BTOS/RPS/Anthropic/ONS 的发现频率改成 10 天。页面导出可用时无需账户。
+  --ingest-new --force-check`；不把 BTOS/RPS/Anthropic 的发现频率改成 10 天。页面导出可用时无需账户。
 - 一次探测应在同一受控采集会话中处理五个白名单 scope；审阅报告只读结构化库，不因报告运行重复打开浏览器。
 - 无头调度时，桌面浏览器 runner 将五个导出按固定文件名写入
   `var/data/ramp_exports/<scope>.tsv`（也可用 `ATS_RAMP_OFFICIAL_EXPORT_DIR` 指定受管目录），再执行

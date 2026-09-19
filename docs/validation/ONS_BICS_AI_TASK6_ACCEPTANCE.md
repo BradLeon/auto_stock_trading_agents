@@ -1,4 +1,10 @@
 # ONS BICS AI 条件模块验收（OpenSpec Tasks 6）
+
+> **本文件为历史验收记录，已于 2026-09-19 随 `retire-ons-bics-ai` 退役（`retire-ons-bics-ai`）。**
+> 该来源的库内 5,081 条观测 / 5,081 条 series / 3 个 artifact / 2 条 source check 已按显式 purge
+> 清除，且**不导出**。下文记录的验收结论只说明当时该来源曾通过验收，**不代表当前接入状态**；
+> 不得据此认为该来源仍在役或可查询。
+
 验收日期：2026-09-09。来源为 ONS BICS 官方 dataset/workbook、workbook 内 questionnaire 链接，以及 ONS《Artificial intelligence in UK businesses: 2023 to 2026》官方 chart CSV。
 
 ## 主动发现

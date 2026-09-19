@@ -223,6 +223,17 @@ CREATE TABLE IF NOT EXISTS structured_source_checks (
 );
 CREATE INDEX IF NOT EXISTS idx_structured_source_check_latest
     ON structured_source_checks(source_id, dataset_id, checked_at DESC);
+CREATE TABLE IF NOT EXISTS structured_source_purges (
+    purge_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, dataset_ids_json TEXT NOT NULL,
+    purged_at TEXT NOT NULL, actor TEXT NOT NULL,
+    observations INTEGER NOT NULL, series INTEGER NOT NULL, artifacts INTEGER NOT NULL,
+    source_checks INTEGER NOT NULL, blobs INTEGER NOT NULL, freed_bytes INTEGER NOT NULL,
+    sources INTEGER NOT NULL DEFAULT 0, datasets INTEGER NOT NULL DEFAULT 0,
+    exported INTEGER NOT NULL DEFAULT 0, residuals_json TEXT NOT NULL DEFAULT '[]',
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_structured_source_purge_lookup
+    ON structured_source_purges(source_id, purged_at DESC);
 CREATE TABLE IF NOT EXISTS structured_discovery_claims (
     source_id TEXT NOT NULL, candidate_identity TEXT NOT NULL,
     claimed_at TEXT NOT NULL, owner_id TEXT NOT NULL,
@@ -295,6 +306,23 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _decode_json(value, fallback):
+    """Decode a stored JSON column, tolerating already-decoded and legacy shapes."""
+    if isinstance(value, (list, dict)):
+        return value
+    if not value:
+        return fallback
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+    return decoded if isinstance(decoded, type(fallback)) else fallback
+
+
+def _decode_list(value) -> list:
+    return list(_decode_json(value, []))
+
+
 def _stamp(value: datetime | None = None) -> str:
     return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(
         timespec="microseconds")
@@ -357,6 +385,10 @@ class SQLiteStructuredRepository:
             self.conn.execute(
                 "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
                 "VALUES ('structured_source_checks_v1',?,'auditable source discovery checks')",
+                (_stamp(),))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
+                "VALUES ('structured_source_purges_v1',?,'explicit confirmed source data purges')",
                 (_stamp(),))
 
     def close(self) -> None:
@@ -835,6 +867,208 @@ class SQLiteStructuredRepository:
         sql += " ORDER BY checked_at DESC LIMIT ?"
         args.append(limit)
         return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    # ------------------------------------------------------------------ purge
+    # Physical removal of a retired source's data.  This is deliberately the only
+    # place that deletes governed rows: collection, publication, rollback and
+    # catalog sync must never reach it, because those paths are routine and this
+    # one is irreversible.
+
+    def _exclusive_blobs(self, source_id: str, blob_ids: list[str]) -> list[str]:
+        """Blobs that no ``structured_artifacts`` row outside this source references.
+
+        The condition is per *artifact row*, not per *other source*: content
+        deduplication happens inside a source too, so a blob may back several of
+        this source's own artifacts.  Once those rows are gone the blob is
+        unreferenced and safe to drop.
+        """
+        if not blob_ids:
+            return []
+        placeholders = ",".join("?" * len(blob_ids))
+        shared = {row[0] for row in self.conn.execute(
+            f"SELECT DISTINCT blob_id FROM structured_artifacts "
+            f"WHERE blob_id IN ({placeholders}) AND source_id<>?",
+            [*blob_ids, source_id]).fetchall()}
+        return [blob_id for blob_id in blob_ids if blob_id not in shared]
+
+    def purge_plan(self, source_id: str) -> dict:
+        """Read-only inventory of what purging ``source_id`` would remove."""
+        source_row = self.source(source_id) or {}
+        dataset_ids = _decode_list(source_row.get("datasets_json"))
+        observations = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_observations o "
+            "JOIN structured_series s ON s.series_id=o.series_id "
+            "WHERE s.source_id=?", (source_id,)).fetchone()[0])
+        series = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_series WHERE source_id=?",
+            (source_id,)).fetchone()[0])
+        artifacts = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_artifacts WHERE source_id=?",
+            (source_id,)).fetchone()[0])
+        blob_ids = [row[0] for row in self.conn.execute(
+            "SELECT DISTINCT blob_id FROM structured_artifacts WHERE source_id=?",
+            (source_id,)).fetchall()]
+        exclusive = self._exclusive_blobs(source_id, blob_ids)
+        bytes_freed = 0
+        blob_paths: list[str] = []
+        if exclusive:
+            placeholders = ",".join("?" * len(exclusive))
+            bytes_freed = int(self.conn.execute(
+                "SELECT COALESCE(SUM(bytes),0) FROM structured_artifact_blobs "
+                f"WHERE blob_id IN ({placeholders})", exclusive).fetchone()[0])
+            blob_paths = [row[0] for row in self.conn.execute(
+                "SELECT relative_path FROM structured_artifact_blobs "
+                f"WHERE blob_id IN ({placeholders})", exclusive).fetchall()]
+        source_checks = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_source_checks WHERE source_id=?",
+            (source_id,)).fetchone()[0])
+        return {
+            "row_counts": {
+                "observations": observations,
+                "series": series,
+                "artifacts": artifacts,
+                "source_checks": source_checks,
+                "registered_sources": 1 if source_row else 0,
+                "registered_datasets": sum(
+                    1 for dataset_id in dataset_ids if self.dataset(dataset_id)),
+            },
+            "dataset_ids": dataset_ids,
+            "blobs": len(exclusive),
+            "blobs_total": len(blob_ids),
+            "bytes_freed": bytes_freed,
+            "exclusive_blobs": sorted(exclusive),
+            "blob_paths": blob_paths,
+            # Tables holding rows of this source that the purge intentionally
+            # leaves behind because they are operational history, not data: the
+            # ingestion ledger is the audit trail that the source ran and was
+            # then retired.  Surfaced explicitly so the residue is never silent.
+            "residual_tables": {
+                "structured_ingestion_runs": int(self.conn.execute(
+                    "SELECT COUNT(*) FROM structured_ingestion_runs WHERE source_id=?",
+                    (source_id,)).fetchone()[0]),
+            },
+        }
+
+    def purge_source(self, source_id: str, *, confirm: bool = False,
+                     catalog: StructuredCatalog | None = None,
+                     actor: str = "cli", exported: bool = False,
+                     note: str = "") -> dict:
+        """Dry-run or execute the physical deletion of a retired source's data.
+
+        Without ``confirm`` this only reads.  With ``confirm`` it requires a
+        retirement tombstone, deletes every row in a single transaction, and only
+        then unlinks the blobs those artifacts exclusively owned: a database
+        transaction cannot roll back the filesystem, so removing files first
+        would risk leaving rows that point at nothing, whereas running second at
+        worst leaves an unreferenced file that the next health check reports.
+        """
+        catalog = catalog or StructuredCatalog.load()
+        tombstone = catalog.retired_source(source_id)
+        plan = self.purge_plan(source_id)
+        head = {
+            "source_id": source_id,
+            "tombstoned": tombstone is not None,
+            "retired_at": tombstone.retired_at.isoformat() if tombstone else "",
+            "retirement_reason": tombstone.reason if tombstone else "",
+            "disposition": tombstone.disposition.value if tombstone else "",
+        }
+        if not confirm:
+            return {"mode": "dry_run", **head, **plan,
+                    "previous_purges": self.purge_records(source_id=source_id)}
+        if tombstone is None:
+            raise ValueError(
+                f"source {source_id} has no retirement tombstone; refusing to purge a "
+                "source that is not retired. Retire it through a change first so the "
+                "id is recorded and cannot be silently reused.")
+
+        purged_at = _stamp()
+        purge_id = hashlib.sha1(
+            f"{source_id}|{purged_at}|{actor}".encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            removed = {
+                "observations": self.conn.execute(
+                    "DELETE FROM structured_observations WHERE series_id IN "
+                    "(SELECT series_id FROM structured_series WHERE source_id=?)",
+                    (source_id,)).rowcount,
+                "series": self.conn.execute(
+                    "DELETE FROM structured_series WHERE source_id=?",
+                    (source_id,)).rowcount,
+                "artifacts": self.conn.execute(
+                    "DELETE FROM structured_artifacts WHERE source_id=?",
+                    (source_id,)).rowcount,
+                "source_checks": self.conn.execute(
+                    "DELETE FROM structured_source_checks WHERE source_id=?",
+                    (source_id,)).rowcount,
+            }
+            exclusive = plan["exclusive_blobs"]
+            removed["blobs"] = 0
+            if exclusive:
+                removed["blobs"] = self.conn.execute(
+                    "DELETE FROM structured_artifact_blobs "
+                    f"WHERE blob_id IN ({','.join('?' * len(exclusive))})",
+                    exclusive).rowcount
+            removed["registered_sources"] = self.conn.execute(
+                "DELETE FROM structured_sources WHERE source_id=?", (source_id,)).rowcount
+            removed["registered_datasets"] = 0
+            for dataset_id in plan["dataset_ids"]:
+                # A dataset is shared when any surviving source still declares it;
+                # only unregistered when this source was its last declared owner.
+                still_used = any(
+                    dataset_id in _decode_list(row[0])
+                    for row in self.conn.execute(
+                        "SELECT datasets_json FROM structured_sources WHERE source_id<>?",
+                        (source_id,)).fetchall())
+                if not still_used:
+                    removed["registered_datasets"] += self.conn.execute(
+                        "DELETE FROM structured_datasets WHERE dataset_id=?",
+                        (dataset_id,)).rowcount
+            self.conn.execute(
+                "INSERT INTO structured_source_purges(purge_id,source_id,dataset_ids_json,"
+                "purged_at,actor,observations,series,artifacts,source_checks,blobs,"
+                "freed_bytes,sources,datasets,exported,residuals_json,note) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (purge_id, source_id, _json(plan["dataset_ids"]), purged_at, actor,
+                 removed["observations"], removed["series"], removed["artifacts"],
+                 removed["source_checks"], removed["blobs"], plan["bytes_freed"],
+                 removed["registered_sources"], removed["registered_datasets"],
+                 int(bool(exported)), _json(plan["residual_tables"]), note))
+
+        # Only now, after the transaction committed, unlink the blob files.
+        files_removed = 0
+        for relative_path in plan["blob_paths"]:
+            target = self.artifacts.root / relative_path
+            try:
+                target.unlink()
+                files_removed += 1
+            except FileNotFoundError:
+                continue
+        return {
+            "mode": "purged", **head, "purge_id": purge_id, "purged_at": purged_at,
+            "actor": actor, "exported": bool(exported),
+            "deleted": removed, "bytes_freed": plan["bytes_freed"],
+            "blob_files_removed": files_removed,
+            "dataset_ids": plan["dataset_ids"],
+            "residual_tables": plan["residual_tables"],
+        }
+
+    def purge_records(self, *, source_id: str | None = None,
+                      limit: int = 100) -> list[dict]:
+        """Return the audit record written by each completed purge."""
+        sql = "SELECT * FROM structured_source_purges WHERE 1=1"
+        args: list = []
+        if source_id:
+            sql += " AND source_id=?"
+            args.append(source_id)
+        sql += " ORDER BY purged_at DESC LIMIT ?"
+        args.append(limit)
+        records = []
+        for row in self.conn.execute(sql, args).fetchall():
+            record = dict(row)
+            record["dataset_ids"] = _decode_list(record.pop("dataset_ids_json", "[]"))
+            record["residuals"] = _decode_json(record.pop("residuals_json", "{}"), {})
+            record["exported"] = bool(record["exported"])
+            records.append(record)
+        return records
 
     def claim_discovery_candidate(self, *, source_id: str, candidate_identity: str,
                                   owner_id: str) -> bool:

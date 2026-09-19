@@ -99,16 +99,6 @@ class DataProducts:
         return snapshot(self.structured, period=period, as_of=as_of,
                         include_vintages=include_vintages)
 
-    def ons_bics_ai_snapshot(
-        self, *, wave: str = "", as_of: datetime | None = None,
-        include_vintages: bool = False,
-    ) -> dict:
-        """UK supplemental business AI adoption and embedding snapshot."""
-        from .ons_bics_ai import snapshot
-
-        return snapshot(self.structured, wave=wave, as_of=as_of,
-                        include_vintages=include_vintages)
-
     def ramp_paid_adoption_snapshot(
         self, *, scope: str = "adoption_overall", period: str = "",
         periods: list[str] | None = None, as_of: datetime | None = None,

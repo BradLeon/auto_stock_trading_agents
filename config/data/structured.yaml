@@ -18,9 +18,15 @@
 #    register its adapter key in src/ats/structured/runtime_registry.py, and start its
 #    checked-in source mode at `legacy`.
 # 2. A source that has written ingestion runs, artifacts, observations, or snapshots
-#    must not be hard-deleted or renamed. Stop it by rolling its source mode back to
-#    `legacy` and remove it from future primary/fallback selection while retaining the
-#    source identity for historical lineage.
+#    must not be hard-deleted or renamed in place. There are two sanctioned exits:
+#    a. Deactivate: roll its source mode back to `legacy` and remove it from future
+#       primary/fallback selection while retaining the source identity for lineage.
+#    b. Retire: move the id out of `sources` into the top-level `retired_sources`
+#       tombstone registry (see that section), which keeps the id machine-readably
+#       marked as gone so it cannot be silently reused, and then clear the stored
+#       rows through the explicit, separately confirmed `ats data purge-source`
+#       action if the data is being discarded. Never delete the `sources` entry on
+#       its own -- that leaves unexplained orphans and a reusable id.
 # 3. Secrets belong in `.env` or the deployment environment, never in this file.
 # 4. `cadence` is descriptive metadata used by quality/operations. It is NOT cron.
 #    Automated collection currently requires an external scheduler to invoke
@@ -37,6 +43,7 @@
 # allowed_ingestion_statuses Legal terminal states emitted by ingestion runs.
 # entities                   Stable non-security entities maintained in this catalog.
 # sources                    Provider/runtime source registry and request budgets.
+# retired_sources            Tombstones for source ids that have been retired.
 # datasets                   Business datasets, source priority, quality, acceptance.
 # metric_definitions         Provider-neutral metric semantics.
 # provider_mappings          Provider-native field -> metric id mappings.
@@ -167,8 +174,6 @@ feature_flags:
     # entry that was never written for these two.
     us_census_btos: platform
     rps_genai_adoption: platform
-    # Audit-only source: registered and ingesting, but no L1 claim consumes it.
-    ons_bics_ai: legacy
     # Ramp starts in shadow until the web-export fixtures and slice-level
     # release gate have passed isolated acceptance.
     ramp_ai_index: shadow
@@ -466,16 +471,6 @@ sources:
       direct_platform_after_acceptance: true
       license: public_page_citation
     internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
-  ons_bics_ai:
-    catalog_status: current_partial
-    persistence: persistent
-    provider: UK Office for National Statistics Business Insights and Conditions Survey
-    upstream: ONS BICS workbooks and questionnaires
-    adapter: ons_bics_ai
-    datasets: [ai_enterprise_adoption_uk]
-    cadence: conditional_wave
-    retention: query_slice
-    internal_request_budget: {concurrency: 1, requests_per_run: 8, timeout_seconds: 90, max_file_bytes: 104857600, retry_attempts: 3}
   tw_mof_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -667,6 +662,41 @@ sources:
       max_file_bytes: 5242880
       retry_attempts: 2
 
+# Retired source registry. A retired source id lives here and *only* here: it must
+# not reappear under `sources`, because that section is what the registration
+# validator, the catalog bootstrap, the release-check source enumeration and the
+# source health table all read. A tombstone is not an active configuration -- it
+# carries no adapter, budget, dataset or rollout mode, and nothing collects,
+# publishes or queries it. Its only jobs are: (1) explain why the id is gone and
+# whether its data was cleared or left as an orphan, (2) make `validate-source`
+# fail closed so a retired id can never be silently re-registered, and (3) leave an
+# audit trail instead of letting the id be quietly reused later.
+#
+# Re-enabling a retired source requires explicitly rewriting its tombstone and a
+# separate change; restoring the `sources` entry alone is a configuration error.
+# `disposition` records what was done with the stored data. Physical deletion is
+# never performed by this file -- it is an explicit, separately confirmed
+# `ats data purge-source` action, and the resulting purge record is written to the
+# database, not back here.
+retired_sources:
+  ons_bics_ai:
+    retired_at: 2026-09-19
+    prior_catalog_status: current_partial
+    prior_rollout_mode: legacy
+    reason: >-
+      UK ONS BICS AI conditional module. Retired for insufficient information
+      content and staleness: the AI question appeared in only 12 waves / 5,081
+      cells / 21 UK business-population entities, and the depth question
+      (extensive/limited/pilot) was fielded in wave 159 alone, so no repeatable
+      same-definition series exists and the product layer could only ever return
+      insufficient_history. The most recent probe (wave 163) returned
+      question_not_fielded, i.e. the upstream stopped asking. The source was never
+      an input to any L1 Observer, report or chart, so its consumer count is zero.
+    disposition: purged
+    disposition_at: 2026-09-19
+    successor: ""
+    spec_removed: true
+
 # Business datasets. Source references must be reciprocal with `sources.*.datasets`.
 # `quality` values are release gates; do not loosen them merely to make a run pass.
 datasets:
@@ -758,18 +788,6 @@ datasets:
       work_only_series: true
       daily_lte_last_week_lte_adoption: true
     acceptance_samples: [WORKER_POP:US:EMPLOYED_18_64]
-  ai_enterprise_adoption_uk:
-    catalog_status: current_partial
-    entities: [BUSINESS_POP:UK:ALL]
-    expected_cadence: conditional_wave
-    primary_sources: [ons_bics_ai]
-    fallback_sources: []
-    core_metrics: [ai.uk_enterprise_adoption.use_share, ai.uk_enterprise_adoption.extensive_use_share]
-    quality:
-      question_fingerprint_required: true
-      conditional_denominator_required: true
-      uk_supplement_only: true
-    acceptance_samples: [BUSINESS_POP:UK:ALL]
   ramp_ai_adoption:
     catalog_status: current_partial
     entities: [RAMP_OVERALL, RAMP_VENDOR, NAICS_GROUP]
@@ -1052,13 +1070,6 @@ metric_definitions:
   ai.worker_adoption.daily_work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter}
   ai.worker_adoption.assisted_work_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Estimated share of all work hours assisted by GenAI.}
   ai.worker_adoption.time_saved_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Self-reported counterfactual time savings as a share of work hours.}
-  ai.uk_enterprise_adoption.use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
-  ai.uk_enterprise_adoption.average_technologies: {value_type: number, unit_family: count, cadence: conditional_wave, period_basis: survey_wave}
-  ai.uk_enterprise_adoption.extensive_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
-  ai.uk_enterprise_adoption.limited_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
-  ai.uk_enterprise_adoption.pilot_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
-  ai.uk_enterprise_adoption.employee_daily_use_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave}
-  ai.uk_enterprise_adoption.response_share: {value_type: number, unit_family: percent, cadence: conditional_wave, period_basis: survey_wave, description: ONS BICS approved AI question response share; question, answer and conditional universe are dimensions.}
   ai.ramp.paid_business_adoption_share:
     {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
      entity_scope: [ramp_overall, ramp_vendor, naics_group],
@@ -1240,14 +1251,6 @@ provider_mappings:
     RPSGENAIUSAGESHAREEDLWWOR: ai.worker_adoption.daily_work_use_share
     RPSGENAIASSISTWRKHRSALL: ai.worker_adoption.assisted_work_hours
     RPSGENAITSALL: ai.worker_adoption.time_saved_hours
-  ons_bics_ai:
-    ai_use_pct: ai.uk_enterprise_adoption.use_share
-    ai_technologies_mean: ai.uk_enterprise_adoption.average_technologies
-    extensive_use_pct: ai.uk_enterprise_adoption.extensive_use_share
-    limited_use_pct: ai.uk_enterprise_adoption.limited_use_share
-    pilot_use_pct: ai.uk_enterprise_adoption.pilot_use_share
-    employee_daily_use_pct: ai.uk_enterprise_adoption.employee_daily_use_share
-    ons_response_share: ai.uk_enterprise_adoption.response_share
   sacra_public_company_profiles:
     reported_arr: ai.frontier_lab.reported_arr
     annualized_revenue_run_rate: ai.frontier_lab.annualized_revenue_run_rate

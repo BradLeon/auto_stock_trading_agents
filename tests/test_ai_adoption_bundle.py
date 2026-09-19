@@ -45,9 +45,6 @@ class _Products:
                 "latest": {"last_week": rows[-1]}, "history": {"last_week": rows},
                 "derivations": {}, "freshness": {}}
 
-    def ons_bics_ai_snapshot(self, **kwargs):
-        raise AssertionError("ONS must not be called by the L1 three-axis bundle")
-
     def ai_production_penetration(self, **kwargs):
         summaries = [{"period": row["period"], "grain": "task", "methodology_version": "r1",
                       "production_traffic_share_pct": row["value"],
@@ -67,11 +64,28 @@ def test_bundle_keeps_periods_independent_and_never_scores_sources():
     assert {axis["trend"]["status"] for axis in result["axes"].values()} == {"expanding"}
 
 
-def test_bundle_handles_missing_source_without_calling_archived_ons_axis():
+def test_bundle_handles_missing_source_without_adding_a_substitute_axis():
     result = build(_Products({"btos": "missing"}), as_of=NOW)
     assert result["axes"]["enterprise_breadth"]["trend"]["status"] == "unavailable"
-    assert "organizational_embedding" not in result["axes"]
+    # A missing or retired source must not be papered over with a stand-in axis.
+    assert set(result["axes"]) == {"enterprise_breadth", "worker_persistence",
+                                   "task_production"}
     assert result["overall"]["status"] == "insufficient_history"
+
+
+def test_bundle_inputs_are_all_in_service_sources():
+    """Every axis names a registered source, and none names a retired one."""
+    from ats.data.catalog.structured import StructuredCatalog
+
+    catalog = StructuredCatalog.load()
+    active = {source.id for source in catalog.sources()}
+    retired = {row.id for row in catalog.retired_sources()}
+    assert retired, "the checked-in catalog must still carry the ONS tombstone"
+
+    result = build(_Products(), as_of=NOW)
+    used = {axis["source_id"] for axis in result["axes"].values()}
+    assert used <= active
+    assert used & retired == set()
 
 
 def test_bundle_reports_directional_conflict_without_numeric_fusion():

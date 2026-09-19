@@ -99,8 +99,9 @@ ats data release-check --group ai_adoption --ingest-new
 `latest_available_period` 和最近错误诊断。
 
 范围边界：BTOS 只接收 2025-11-17 后“任一业务职能”新口径；BTOS AI Supplement 因一次性
-专题波次排除，Eurostat 因年度频率排除；RPS 是员工自报工作使用，不代表企业批准部署；ONS 是
-不定期条件模块和英国补充证据。跨来源禁止相减、平均或合成统一渗透指数。
+专题波次排除，Eurostat 因年度频率排除；RPS 是员工自报工作使用，不代表企业批准部署。
+英国 ONS BICS AI 条件模块已于 2026-09-19 正式退役（`retire-ons-bics-ai`），其观测不导出
+即清除，因此当前不存在非美国的企业采用来源。跨来源禁止相减、平均或合成统一渗透指数。
 
 平台 DataProduct、结构化采集 CLI、主动发现和 Evidence 统一使用 `ATS_DATA_DB_PATH` / `ATS_DATA_ARTIFACT_ROOT`，默认分别为 `var/data.sqlite` 与 `var/data_artifacts`。`ATS_STRUCTURED_DB_PATH` / `ATS_STRUCTURED_ARTIFACT_ROOT` 只用于显式兼容或隔离测试，并且不能覆盖已设置的正式变量；`ATS_DB_PATH` 是 workflow/context 库，不再作为结构化数据的隐式回退。正式发布禁止通过在临时库、`ats.sqlite` 与 `data.sqlite` 之间复制表完成。采集命令的显式
 `--db` / `--artifact-root` 用于隔离验收。不要把兼容层的 `ATS_STRUCTURED_*` 变量误当作
@@ -669,7 +670,6 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `openrouter_rankings` | `current_partial` | `persistent` | `openrouter_rankings_daily` |
 | `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
 | `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
-| `ons_bics_ai` | `current_partial` | `persistent` | `ai_enterprise_adoption_uk` |
 | `tw_mof_exports` | `current_partial` | `persistent` | `regional_tw_exports` |
 | `kr_ecos_exports` | `current_partial` | `persistent` | `regional_kr_exports` |
 | `trendforce_dram` | `current_partial` | `persistent` | `industry_dram_contract_price` |
@@ -693,7 +693,6 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `ai_work_adoption` | `current_partial` |
 | `ai_enterprise_adoption_us` | `current_partial` |
 | `ai_worker_adoption_us` | `current_partial` |
-| `ai_enterprise_adoption_uk` | `current_partial` |
 | `ramp_ai_adoption` | `current_partial` |
 | `ramp_ai_spend` | `current_partial` |
 | `openrouter_rankings_daily` | `current_partial` |
@@ -718,7 +717,6 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | 上游日更；**我方每 7 天** | concurrency 1；每 7 天抓取 14 天重叠窗口；`freshness_slo_days: 10`；按 API 预算退避 |
 | `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起，取消热度分级） | 每周期优先一次 bulk fetch；4 个 job 07:20/07:25/07:27/07:35 UTC |
 | `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起） | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
-| `ons_bics_ai` | `ai_enterprise_adoption_uk` | `current_partial` | `platform` | event/wave | concurrency 1；条件模块未发布时记录 no_coverage |
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |
 | `kr_ecos_exports` | `regional_kr_exports` | `current_partial` | `platform` | monthly | concurrency 1；分页 10；30s |
 | `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `shadow` | monthly | concurrency 1；每次 1 请求；30s；页面半月 session 与发布日期均需验收 |
@@ -730,7 +728,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `factset_earnings_insight_metrics` | `sp500_earnings_insight` | `current_partial` | `platform` | weekly | concurrency 1；每周 1 次受控 URL 解析；60s；仅限许可的内部研究使用 |
 | `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
 | `sacra_public_company_profiles` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | weekly | concurrency 1；公开页面探测；保留最小证据切片 |
-| `tickertrends_public_research` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | one-time historical | 仅冻结公开文章历史补充；不接入付费 API |
+| `tickertrends_public_research` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | **每 7 天**（与 Sacra 同一研究对象的第二信息源，共用发现组） | concurrency 1；每周期 1 次公开 Substack post API；不接入付费 API；语义指纹未变即 `no_change` |
 
 外部 Provider 没有可验证 QPS 时一律写 `unknown`；表中的数字是内部保护预算，不是 Provider 承诺。SEC 还必须遵守其当前 fair-access 政策并发送描述性 User-Agent。
 

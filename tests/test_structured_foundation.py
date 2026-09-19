@@ -187,7 +187,7 @@ def test_reopen_preserves_vintages_and_is_idempotent(tmp_path):
     assert reopened.observations()[0]["observation_id"] == saved.id
     assert reopened.save_observation(_observation()).created is False
     assert reopened.conn.execute(
-        "SELECT count(*) FROM structured_migrations").fetchone()[0] == 3
+        "SELECT count(*) FROM structured_migrations").fetchone()[0] == 4
 
 
 def test_old_measurements_remain_readable_and_audit_does_not_rewrite(tmp_path):

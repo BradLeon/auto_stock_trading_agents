@@ -285,12 +285,17 @@ L1 主结论 snapshot SHALL 只平铺固定三轴 headline 与趋势判断直接
 - **AND** 明细导出仍 SHALL 能按需展开全部叶子输入并离线复算
 
 ### Requirement: AI adoption evidence bundle 保持三条证据轴独立
-系统 SHALL 提供受治理的 AI adoption evidence bundle，分别返回企业采用广度、员工持续使用和任务生产化结构。每条轴 SHALL 保留自己的来源、统计主体、分母、地区、技术范围、period、methodology、质量和 lineage；系统 SHALL NOT 对不同轴加权、平均或生成统一 penetration score。ONS BICS SHALL NOT 进入本 bundle，但既有历史数据 MAY 保留供独立审计。
+系统 SHALL 提供受治理的 AI adoption evidence bundle，分别返回企业采用广度、员工持续使用和任务生产化结构。每条轴 SHALL 保留自己的来源、统计主体、分母、地区、技术范围、period、methodology、质量和 lineage；系统 SHALL NOT 对不同轴加权、平均或生成统一 penetration score。bundle SHALL 只消费已注册且未退役的来源；已登记退役墓碑的来源 SHALL NOT 出现在任何证据轴、comparability matrix、coverage 统计或 lineage 中。
 
 #### Scenario: 三条轴同时存在
 - **WHEN** 消费者请求最新 L1 AI adoption evidence bundle
 - **THEN** 系统 SHALL 返回三条独立 axis results 及各自 status
 - **AND** SHALL NOT 将企业百分比、就业人口百分比和 Claude 流量份额转换成同一数值
+
+#### Scenario: 来源退役后 bundle 不出现空轴或残影
+- **WHEN** 某个曾注册的企业采用来源退役，且其数据已按显式清除入口删除
+- **THEN** bundle SHALL 仍返回三条轴及其在役来源的 status，SHALL NOT 为退役来源生成空轴、占位行或 `unavailable` 条目
+- **AND** 任何轴的 lineage 与 comparability matrix SHALL NOT 引用退役来源的 observation identity、artifact 或 dataset
 
 ### Requirement: 跨来源印证通过可比性矩阵而非数值融合
 bundle SHALL 为任意并列来源返回 comparability matrix，至少说明 statistical unit、denominator、geography、technology scope、reference period、frequency 和 methodology regime 是否相容。不同主体或地区的值 MAY 用于方向性印证，但只有全部声明维度兼容时才可计算差值、相关性或共同趋势。

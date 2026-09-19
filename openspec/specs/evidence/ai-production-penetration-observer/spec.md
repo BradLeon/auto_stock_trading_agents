@@ -7,7 +7,7 @@
 ## Requirements
 
 ### Requirement: Observer 使用固定且隔离的生产化命题
-Observer SHALL 保留稳定 claim identity，并以 `claim_definition_version=v2` 使用命题：“AI 的企业采用广度、员工持续使用和任务生产化深度是否同步扩大，从局部试验走向可重复的生产工作流？”它 SHALL 只消费受治理的 AI adoption evidence bundle，分别读取 BTOS 企业广度、RPS 员工持续使用和 Anthropic 1P API 任务生产化，输出 snapshot manifest 与 lineage；不得直接读取 Provider、物理表或自行拼接跨源数值。ONS BICS SHALL NOT 进入该 Observer。
+Observer SHALL 保留稳定 claim identity，并以 `claim_definition_version=v2` 使用命题：“AI 的企业采用广度、员工持续使用和任务生产化深度是否同步扩大，从局部试验走向可重复的生产工作流？”它 SHALL 只消费受治理的 AI adoption evidence bundle，分别读取 BTOS 企业广度、RPS 员工持续使用和 Anthropic 1P API 任务生产化，输出 snapshot manifest 与 lineage；不得直接读取 Provider、物理表或自行拼接跨源数值。该 Observer SHALL 只消费已注册且未退役的来源，已登记退役墓碑的来源 SHALL NOT 出现在输入清单、方法卡、manifest 或 lineage 中。
 
 #### Scenario: 运行固定命题
 - **WHEN** L1 AI 应用层运行该 Observer
@@ -18,6 +18,11 @@ Observer SHALL 保留稳定 claim identity，并以 `claim_definition_version=v2
 - **WHEN** L1 AI 应用层运行该 Observer
 - **THEN** 输出 SHALL 具有 v2 命题、三条证据轴及可重放的受治理输入清单
 - **AND** SHALL NOT 将企业比例、就业人口比例或 Claude Usage Share 互相改写或融合
+
+#### Scenario: 来源退役不改变 Observer 输出
+- **WHEN** 一个从未进入本 Observer 的来源正式退役并清除其数据
+- **THEN** Observer 的命题、claim version、三轴输入、状态判定、manifest 与图表 SHALL 与退役前完全一致
+- **AND** SHALL NOT 因该来源退役而引入新的轴、新的覆盖率扣减或新的 `insufficient_history` 标记
 
 ### Requirement: Observer 保留四项透明指标与审慎趋势状态
 Observer SHALL 在任务生产化轴继续分别陈述 occupation/task 可见单元生产化率与生产化流量份额，同时分别陈述企业采用广度、员工持续使用和组织嵌入深度的原始及透明派生指标；不得以不透明综合分数替代。每条轴 SHALL 按其自身 cadence、连续期间和 methodology regime 判定趋势，整体判断 SHALL 基于方向性印证和冲突矩阵，不要求跨源具有同一期间，也不得将低频快照插值。历史不足时 SHALL 返回 `insufficient_history`，可展示可比期间差异但不得称为持续、加速或放缓。

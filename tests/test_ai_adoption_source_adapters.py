@@ -106,6 +106,8 @@ def test_btos_dataproduct_returns_strata_derivations_vintages_and_lineage():
             if kwargs.get("entity_id"):
                 selected = [row for row in selected if row["entity_id"] == kwargs["entity_id"]]
             return list(selected)
+        def source_checks(self, **kwargs):
+            return []
         def source_health(self):
             return [{"source_id": "us_census_btos", "last_checked_at": NOW.isoformat(),
                      "latest_available_period": "2026-08-23"}]
@@ -198,6 +200,8 @@ def test_rps_dataproduct_derives_proxies_changes_yoy_and_alignment():
                          "dimensions_json": '{"notes":"official work-only note"}'})
     class Repo:
         def observations(self, **kwargs): return list(rows)
+        def source_checks(self, **kwargs):
+            return []
         def source_health(self): return [{"source_id": "rps_genai_adoption",
                                           "last_checked_at": NOW.isoformat(),
                                           "latest_available_period": "2026-Q2"}]
@@ -298,6 +302,8 @@ def test_ons_dataproduct_keeps_uk_snapshot_and_conditional_denominators_separate
              "value": 10.0, "dimensions_json": '{"question_regime":"r1","denominator_scope":"AI-using businesses","questionnaire_url":"https://ons.test/q"}'}]
     class Repo:
         def observations(self, **kwargs): return list(rows)
+        def source_checks(self, **kwargs):
+            return []
         def source_health(self): return [{"source_id": "ons_bics_ai", "last_checked_at": NOW.isoformat(),
                                           "latest_available_period": "wave-159"}]
     result = ons_snapshot(Repo())

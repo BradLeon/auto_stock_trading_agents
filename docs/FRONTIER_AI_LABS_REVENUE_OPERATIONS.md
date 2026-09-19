@@ -17,11 +17,14 @@
 ## 2. 运行入口
 
 ```bash
-# P7D 探测（cron/launchd 调用）
-ats_cli data ingest --source sacra_public_company_profiles \
-                    --dataset frontier_ai_labs_revenue \
-                    --db /var/lib/ats/structured.sqlite \
-                    --artifact-root /var/lib/ats/artifacts
+# P7D 探测（cron/launchd 调用；一次覆盖两个来源）
+ats_cli data release-check --group frontier_ai_labs_revenue \
+                           --ingest-new --force-check
+
+# 只复核单个来源
+ats_cli data release-check --source tickertrends_public_research \
+                           --ingest-new --force-check
+```
 
 # L1 商业化 Observer（与生产化 Observer 同时跑）
 ats_cli evidence layer --sector ai_hardware --layer L1_app \
@@ -45,9 +48,11 @@ ats_cli evidence ai-commercialization --sector ai_hardware --layer L1_app \
 
 | 现象 | 触发条件 | 处置 |
 |---|---|---|
-| `no_change` | Sacra 页面内容 hash 与 `discovered_payloads` 一致 | 正常情况；下一次探测 |
+| `no_change` | 任一来源的**语义指纹**与已入库身份一致：Sacra 为页面 `content_sha256`，TickerTrends 为准入数值指纹（`body_html` 被上游重新序列化不算变更） | 正常情况；下一次探测 |
 | Revision vintage | 同一 (entity, metric, observation_identity, period) 的值变化 | 旧版本保留，`latest_only=False` 可查；趋势 cell 仍使用最新观察 |
 | `methodology_drift` | Sacra 页面 semantic fingerprint 变化（heading/table 列/付费墙标记） | 暂停 Observer；先做 fixture 验证再恢复 |
+| TickerTrends 文章转为付费墙 / 非公开 audience | 公开 post API 返回 `free_unlock_required: true` 或 `audience != everyone` | **fail-closed** 报 `tickertrends_article_paywalled` / `..._not_public`，保留上次 vintage，绝不降级成猜测值 |
+| TickerTrends post API 返回非 JSON | 上游维护页或路由变更 | 报 `tickertrends_post_api_not_json`，保留上次 vintage |
 | Quality gate quarantined | 引用链/币种/单位缺失 | 写入 `rejected_candidates` 与 `failures`，**不**覆盖最近有效数据 |
 | Sacra 静态 HTML 缺 Revenue 段 | 单次受控 `browser.snapshot()` 回退，每页每运行最多一次 | 仍写入 artifact；如浏览器连续失败则降级为 `no_admissible_revenue` failure |
 | TickerTrends 7 月以后点 | `outside_accepted_reference_window` | 写入诊断；不会污染 2026H1 序列 |

@@ -92,9 +92,9 @@ cron/launchd 任务：
 ats data release-check --group ai_adoption --ingest-new
 ```
 
-该 group 包含 Anthropic Economic Index、Census BTOS Core、RPS/FRED 和 ONS BICS AI。
+该 group 包含 Anthropic Economic Index、Census BTOS Core、RPS/FRED 和 Ramp AI Index。
 四个来源单并发、失败隔离；建议失败后按 60/300/900 秒退避重试。没有新 release 是
-`no_change`，ONS 当期没问 AI 是 `question_not_fielded`，两者都不是零值或 stale。运维监控应检查
+`no_change`（不是零值，也不是 stale）。运维监控应检查
 `last_checked_at`、`latest_upstream_identity`、`latest_ingested_release`、
 `latest_available_period` 和最近错误诊断。
 
@@ -715,9 +715,9 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `us_census_btos` | `ai_enterprise_adoption_us` | `current_partial` | `platform` | monthly/quarterly | concurrency 1；批量下载；请求预算见 source config |
 | `rps_genai_adoption` | `ai_worker_adoption_us` | `current_partial` | `platform` | biweekly | concurrency 1；按波次批量获取 |
 | `ramp_ai_index` | `ramp_ai_adoption, ramp_ai_spend` | `current_partial` | `platform` | weekly | concurrency 1；每次批量切片；页面/API 预算按 source config |
-| `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | daily/weekly | concurrency 1；每日 token 快照；按 API 预算退避 |
-| `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | daily + weekly audit | 每周期优先一次 bulk fetch；模型热观察 D0–30 每日、D31–90 每 3 日、成熟后每周 |
-| `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | daily + weekly audit | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
+| `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | 上游日更；**我方每 7 天** | concurrency 1；每 7 天抓取 14 天重叠窗口；`freshness_slo_days: 10`；按 API 预算退避 |
+| `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起，取消热度分级） | 每周期优先一次 bulk fetch；4 个 job 07:20/07:25/07:27/07:35 UTC |
+| `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起） | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
 | `ons_bics_ai` | `ai_enterprise_adoption_uk` | `current_partial` | `platform` | event/wave | concurrency 1；条件模块未发布时记录 no_coverage |
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |
 | `kr_ecos_exports` | `regional_kr_exports` | `current_partial` | `platform` | monthly | concurrency 1；分页 10；30s |

@@ -116,8 +116,7 @@ Economic Index 1P API 的职业/任务生产化。各轴保留自己的统计主
 regime；只允许方向性相互印证，不生成统一 AI 渗透率。
 
 主动发现统一由 `ats data release-check --group ai_adoption --ingest-new` 触发。纳入 BTOS Core
-新口径、RPS/FRED 和 Anthropic；明确排除一次性 BTOS AI Supplement 与年度 Eurostat。ONS BICS
-既有数据与独立查询只保留作历史审计，不再进入 L1 主动更新组或 Observer。
+新口径、RPS/FRED、Anthropic 和 Ramp AI Index；明确排除一次性 BTOS AI Supplement 与年度 Eurostat。
 
 ### Anthropic Economic Index：AI 工作生产化代理
 

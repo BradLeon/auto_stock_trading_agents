@@ -6,9 +6,13 @@ Two governed public sources feed one dataset:
   Sacra public company pages.  One probe touches each page exactly once and the
   raw HTML is persisted as a constrained snapshot artifact; parsing, ingestion
   and reporting then reuse that artifact offline.
-* ``tickertrends_public_research`` — a frozen one-time history seed for 2026H1.
-  It is deliberately excluded from recurring discovery so the essay author's
-  choice of model cannot keep re-baselining the main sequence.
+* ``tickertrends_public_research`` — the same research object seen from a second
+  angle: one public Substack research essay, re-checked on the same 7-day beat
+  as the Sacra profiles.  The probe fingerprints the numeric claims it admits,
+  not the page bytes, because Substack re-serialises ``body_html`` between
+  fetches; the steady state is therefore ``no_change`` and markup churn can
+  never re-baseline the main sequence.  The versioned JSON seed stays as the
+  offline route used by tests and by governed replay.
 
 Neither source contacts a paid API, an MCP connector or any authenticated
 export.  Paywalled cells are server-side redacted upstream (``—``), so their
@@ -79,6 +83,16 @@ METRIC_FORWARD_PROJECTION = "ai.frontier_lab.forward_revenue_projection"
 
 TICKERTRENDS_ACCEPTED_WINDOW = ("2026-01-01", "2026-06-30")
 TICKERTRENDS_ARTICLE_SLUG = "anthropic-vs-openai-arr-tracking"
+# The essay is hosted on Substack, whose public post API returns the same
+# ``body_html`` the rendered page embeds.  It is unauthenticated, costs nothing
+# and is the only route this source is allowed to use.
+TICKERTRENDS_POST_API_TEMPLATE = "https://blog.tickertrends.io/api/v1/posts/{slug}"
+TICKERTRENDS_POST_API_URL = TICKERTRENDS_POST_API_TEMPLATE.format(
+    slug=TICKERTRENDS_ARTICLE_SLUG)
+# Provenance label for where a probe's bytes came from.  It is recorded next to
+# the parsed report so a live probe and an offline replay are distinguishable.
+TICKERTRENDS_ORIGIN_LIVE = "live_post_api"
+TICKERTRENDS_ORIGIN_SEED = "frozen_seed"
 # Sacra writes its own estimate in prose; the citation chain still has to name it
 # rather than leaving the paragraph unattributed.
 SACRA_PUBLISHER = "Sacra"
@@ -793,6 +807,7 @@ def parse_tickertrends_article(*, body_html: str, url: str, published_at: dateti
     summary = {
         "slice_key": slice_key, "url": url,
         "content_sha256": _sha256(body_html),
+        "semantic_fingerprint": tickertrends_semantic_fingerprint(candidates),
         "accepted_window": list(accepted_window),
         "candidate_count": len(candidates),
         "accepted_count": sum(1 for item in candidates if item.accepted),
@@ -800,6 +815,33 @@ def parse_tickertrends_article(*, body_html: str, url: str, published_at: dateti
         "chart_reading_note": CHART_READING_PROHIBITED,
     }
     return candidates, {"per_page": [summary], "diagnostics": []}
+
+
+def tickertrends_semantic_fingerprint(candidates: Iterable[RevenueCandidate]) -> str:
+    """Fingerprint the admitted numeric claims, never the surrounding markup.
+
+    Substack re-serialises ``body_html`` between fetches — whitespace, image
+    proxy hosts and embed wrappers all drift while the numbers stay identical.
+    Hashing raw bytes would therefore report a new release on every probe and
+    re-baseline the main sequence for no reason.  This covers exactly what the
+    parser admits: entity, reference period, value, observation identity, metric
+    family and the raw label the author used.
+    """
+    admitted = [
+        {
+            "entity_id": item.entity_id,
+            "period": item.period,
+            "value": repr(item.value),
+            "observation_identity": item.observation_identity,
+            "metric_id": item.metric_id,
+            "raw_metric_label": item.raw_metric_label,
+        }
+        for item in candidates
+        if item.accepted
+    ]
+    admitted.sort(key=lambda row: (row["entity_id"], row["period"],
+                                   row["metric_id"], row["value"]))
+    return _sha256(_stable_json(admitted))
 
 
 def load_frozen_article(path: str | Path) -> dict[str, Any]:
@@ -1028,30 +1070,160 @@ class SacraPublicCompanyProfilesAdapter:
 
 
 class TickerTrendsPublicResearchAdapter:
-    """Frozen one-time 2026H1 history seed; never part of recurring discovery."""
+    """7-day re-check of one public Substack research essay.
+
+    Two routes feed the same governed dataset:
+
+    * the live public post API (production) — fetched once per probe, held in
+      memory for the discovery -> ingest handoff, and fingerprinted semantically
+      so an unchanged essay reports ``no_change``;
+    * the versioned JSON seed — an explicitly pinned ``seed_path`` used by tests
+      and by governed offline replay.
+
+    The probe never guesses.  A paywalled or non-public article, a missing
+    explicit seed and an unreachable host are all reported as explicit failures
+    and the last accepted vintage is preserved untouched.
+    """
 
     source_id = TICKERTRENDS_SOURCE_ID
     dataset_id = DATASET_ID
     parser_version = TICKERTRENDS_PARSER_VERSION
 
     def __init__(self, *, seed_path: str | Path | None = None,
-                 clock: Callable[[], datetime] | None = None):
-        self.seed_path = Path(seed_path) if seed_path else _default_seed_path()
+                 client: Any | None = None,
+                 clock: Callable[[], datetime] | None = None,
+                 request_timeout: float = 45.0):
+        # An explicit seed_path pins the offline route; leaving it unset means
+        # the adapter probes the live public post API.
+        self.seed_path = Path(seed_path) if seed_path else None
+        self.client = client
         self.clock = clock or _now
+        self.request_timeout = request_timeout
+        self.article_url = TICKERTRENDS_POST_API_URL
+        # Raw JSON text stays in memory only for the discovery -> ingest handoff;
+        # the artifact store persists the constrained snapshot inside fetch().
+        self.discovered_payloads: dict[str, str] = {}
+        self.payload_origin = ""
 
-    def _article(self) -> dict[str, Any]:
-        if not self.seed_path or not Path(self.seed_path).exists():
+    # -- transport ---------------------------------------------------------- #
+
+    def _static_get(self, url: str) -> str:
+        if self.client is not None:
+            response = self.client.get(url, timeout=self.request_timeout,
+                                       follow_redirects=True)
+            if hasattr(response, "raise_for_status"):
+                response.raise_for_status()
+            return response.text
+        import httpx  # imported lazily: no network dependency at import time
+
+        response = httpx.get(url, headers={"User-Agent": _UA},
+                             timeout=self.request_timeout, follow_redirects=True)
+        response.raise_for_status()
+        return response.text
+
+    def _seed_article(self) -> dict[str, Any]:
+        """The pinned offline artifact.  An explicit but missing path is fatal."""
+        if self.seed_path is None:
+            return {}
+        if not Path(self.seed_path).exists():
             raise FileNotFoundError(
                 f"tickertrends_seed_missing:{self.seed_path}; the history seed is a "
-                "version-controlled frozen artifact, not a live fetch")
+                "version-controlled frozen artifact, not a live fetch. Drop the "
+                "explicit seed_path to use the live public post API, or point it at "
+                f"default_seed_path() = {default_seed_path()}")
         return load_frozen_article(self.seed_path)
+
+    def _live_article(self) -> dict[str, Any]:
+        body = self._static_get(self.article_url)
+        try:
+            article = json.loads(body)
+        except ValueError as exc:
+            raise ConnectionError(
+                f"tickertrends_post_api_not_json:{self.article_url}") from exc
+        if not isinstance(article, dict):
+            raise ConnectionError(
+                f"tickertrends_post_api_unexpected:{self.article_url}")
+        # Fail closed if the essay ever stops being publicly readable: a genuine
+        # paywall must surface as unreachable, never as a plausible number set.
+        if bool(article.get("free_unlock_required")):
+            raise ConnectionError(
+                f"tickertrends_article_paywalled:{self.article_url}")
+        audience = str(article.get("audience") or "")
+        if audience and audience != "everyone":
+            raise ConnectionError(
+                f"tickertrends_article_not_public:{audience}")
+        self.payload_origin = TICKERTRENDS_ORIGIN_LIVE
+        self.discovered_payloads[TICKERTRENDS_ARTICLE_SLUG] = body
+        return article
+
+    def _article(self, request: FetchRequest | None = None) -> dict[str, Any]:
+        supplied = ((request.query_scope or {}).get("payloads") or {}) if request else {}
+        if isinstance(supplied, dict) and supplied.get(TICKERTRENDS_ARTICLE_SLUG):
+            self.payload_origin = self.payload_origin or TICKERTRENDS_ORIGIN_LIVE
+            return json.loads(str(supplied[TICKERTRENDS_ARTICLE_SLUG]))
+        if TICKERTRENDS_ARTICLE_SLUG in self.discovered_payloads:
+            return json.loads(self.discovered_payloads[TICKERTRENDS_ARTICLE_SLUG])
+        article = self._seed_article()
+        if article:
+            self.payload_origin = TICKERTRENDS_ORIGIN_SEED
+            return article
+        return self._live_article()
+
+    # -- discovery ---------------------------------------------------------- #
+
+    def discover(self, request: FetchRequest) -> DiscoveryResult:
+        """One probe, fingerprinted by admitted claims so churn is not a release."""
+        checked_at = self.clock()
+        article = self._article(request)
+        published_at = _parse_iso(article.get("post_date", ""))
+        url = str(article.get("canonical_url") or self.article_url)
+        candidates, report = parse_tickertrends_article(
+            body_html=str(article.get("body_html") or ""), url=url,
+            published_at=published_at)
+        summary = next(iter(report.get("per_page") or []), {})
+        periods = [item.period for item in candidates if item.accepted and item.period]
+        latest_period = max(periods, default="")
+        fingerprint = str(summary.get("semantic_fingerprint", ""))
+        identity = (f"tickertrends:{TICKERTRENDS_ARTICLE_SLUG}:"
+                    f"{latest_period}:{fingerprint}")
+        failures: list[AdapterFailure] = []
+        if not candidates:
+            failures.append(AdapterFailure(
+                status=IngestionStatus.PARSE_FAILED,
+                message="revenue_observations_missing:tickertrends",
+                slice_key=f"tickertrends:{TICKERTRENDS_ARTICLE_SLUG}"))
+        return DiscoveryResult(
+            source_id=request.source_id, dataset_id=request.dataset_id,
+            checked_at=checked_at,
+            status=(DiscoveryStatus.PARTIAL if failures
+                    else DiscoveryStatus.NEW_RELEASE),
+            latest_upstream_identity=(f"TICKERTRENDS:"
+                                      f"{_sha256(identity)[:24]}"),
+            latest_available_period=latest_period,
+            candidates=[ReleaseCandidate(
+                identity=identity, period=latest_period, urls=[url],
+                methodology_fingerprint=methodology_fingerprint(
+                    fingerprint, latest_period, self.parser_version),
+                metadata={"scope": TICKERTRENDS_ARTICLE_SLUG,
+                          "payload_sha256": summary.get("content_sha256", ""),
+                          "semantic_fingerprint": fingerprint,
+                          "latest_period": latest_period,
+                          "candidate_count": summary.get("candidate_count", 0),
+                          "accepted_count": summary.get("accepted_count", 0),
+                          "payload_origin": self.payload_origin,
+                          "parser_version": self.parser_version,
+                          "methodology_regime": METHODOLOGY_REGIME_THIRD_PARTY_ESTIMATE})],
+            diagnostics={"per_page": [summary],
+                         "payload_origin": self.payload_origin,
+                         "scheduled_discovery": True,
+                         "chart_reading_note": CHART_READING_PROHIBITED})
 
     def fetch(self, request: FetchRequest) -> AdapterBatch:
         fetched_at = self.clock()
-        article = self._article()
+        article = self._article(request)
         published_at = _parse_iso(article.get("post_date", ""))
         body_html = str(article.get("body_html") or "")
-        url = str(article.get("canonical_url") or "")
+        url = str(article.get("canonical_url") or self.article_url)
         candidates, report = parse_tickertrends_article(
             body_html=body_html, url=url, published_at=published_at)
         summary = next(iter(report.get("per_page") or []), {})
@@ -1091,6 +1263,7 @@ class TickerTrendsPublicResearchAdapter:
                 source_url=url, source_version=str(summary.get("content_sha256", ""))[:16],
                 media_type="application/json", retention="constrained_snapshot",
                 metadata={**summary, "published_at": published_at.isoformat(),
+                          "payload_origin": self.payload_origin,
                           "excluded_candidates": rejected})],
             provider_metadata={
                 "parser_version": self.parser_version,
@@ -1098,10 +1271,16 @@ class TickerTrendsPublicResearchAdapter:
                 "accepted_reference_period": list(TICKERTRENDS_ACCEPTED_WINDOW),
                 "rejected_candidates": rejected,
                 "chart_reading_note": CHART_READING_PROHIBITED,
-                "scheduled_discovery": False})
+                "payload_origin": self.payload_origin,
+                "scheduled_discovery": True})
 
 
-def _default_seed_path() -> Path:
+def default_seed_path() -> Path:
+    """Location of the version-controlled TickerTrends offline artifact.
+
+    The live route is the production path; this seed exists so tests and
+    governed offline replays can pin the 2026H1 history without a network read.
+    """
     from ...config import REPO_ROOT
 
     return (REPO_ROOT / "tests" / "fixtures" / "frontier_ai_labs_revenue"

@@ -158,8 +158,16 @@ feature_flags:
     # Economic Index starts as an isolated governed source.  It must pass its
     # own release check before a later explicit platform promotion.
     anthropic_economic_index: legacy
-    us_census_btos: legacy
-    rps_genai_adoption: legacy
+    # The two US adoption sources are the load-bearing axes of the L1 production
+    # Observer and have been ingesting on schedule since 2026-09.  Their mode was
+    # left at ``legacy`` while only the Anthropic index was promoted through the
+    # runtime overlay, which made the checked-in baseline disagree with both the
+    # observer it feeds and section 10.2 of STRUCTURED_DATA_OPERATIONS.  Promote
+    # the baseline itself so the effective mode no longer depends on an overlay
+    # entry that was never written for these two.
+    us_census_btos: platform
+    rps_genai_adoption: platform
+    # Audit-only source: registered and ingesting, but no L1 claim consumes it.
     ons_bics_ai: legacy
     # Ramp starts in shadow until the web-export fixtures and slice-level
     # release gate have passed isolated acceptance.
@@ -637,21 +645,27 @@ sources:
     upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking)
     adapter: tickertrends_frontier_labs_revenue
     datasets: [frontier_ai_labs_revenue]
-    cadence: frozen_seed
+    # The same research object seen from a second angle, so it shares the Sacra
+    # profiles' 7-day beat and their discovery group.  The probe fingerprints the
+    # numeric claims it admits rather than the page bytes, because Substack
+    # re-serialises body_html between fetches; an unchanged essay therefore stays
+    # no_change and markup churn can never re-baseline the main sequence.
+    cadence: every_7_days
     retention: constrained_snapshot
+    discovery_group: frontier_ai_labs_revenue
     constraints:
       paid_api_allowed: false
       mcp_allowed: false
-      scheduled_discovery: false
+      public_post_api_only: true
       accepted_reference_period: 2026-01-01..2026-06-30
       chart_derived_values_allowed: false
-      notes: 仅冻结一次性 2026H1 历史回填；不进入周期发现，避免估算模型漂移污染主序列。
+      notes: 与 Sacra 同一研究对象的第二信息源；每 7 天复核公开 Substack post API，语义指纹未变即 no_change，不重新基准主序列。
     internal_request_budget:
       concurrency: 1
       requests_per_run: 1
       timeout_seconds: 45
       max_file_bytes: 5242880
-      retry_attempts: 0
+      retry_attempts: 2
 
 # Business datasets. Source references must be reciprocal with `sources.*.datasets`.
 # `quality` values are release gates; do not loosen them merely to make a run pass.

@@ -1,7 +1,9 @@
 """Sacra / TickerTrends parsing, discovery and quality-gate tests.
 
-Covers tasks 2.2-2.4, 3.1-3.4, 3.6 and 4.3: frozen fixtures only, never a live
-fetch, and every refusal must be visible as a reason code or a diagnostic.
+Covers tasks 2.2-2.4, 3.1-3.4, 3.6 and 4.3: the offline routes use frozen
+fixtures only, every refusal must be visible as a reason code or a diagnostic,
+and the TickerTrends live route is exercised through an injected client so no
+test ever depends on the network.
 """
 
 from datetime import datetime, timezone
@@ -9,19 +11,27 @@ from pathlib import Path
 
 import pytest
 
-from ats.data.core.structured_models import FetchRequest, IngestionStatus
+from ats.data.core.structured_models import (
+    DiscoveryStatus,
+    FetchRequest,
+    IngestionStatus,
+)
 from ats.data.sources.frontier_ai_labs_revenue import (
     MINIMUM_COMPANY_REVENUE_USD,
     SACRA_PAGES,
     METRIC_ANNUALIZED_RUN_RATE,
     METRIC_FORWARD_PROJECTION,
     METRIC_TRAILING_REVENUE,
+    TICKERTRENDS_ORIGIN_LIVE,
+    TICKERTRENDS_ORIGIN_SEED,
+    TICKERTRENDS_POST_API_URL,
     SacraPublicCompanyProfilesAdapter,
     TickerTrendsPublicResearchAdapter,
     load_frozen_article,
     parse_sacra_page,
     parse_tickertrends_article,
     semantic_fingerprint,
+    tickertrends_semantic_fingerprint,
     validate_frontier_labs_revenue_records,
 )
 
@@ -315,7 +325,10 @@ def test_tickertrends_adapter_reads_the_versioned_seed_offline():
     batch = adapter.fetch(FetchRequest(source_id="tickertrends_public_research",
                                        dataset_id="frontier_ai_labs_revenue"))
     assert batch.status is IngestionStatus.SUCCEEDED
-    assert batch.provider_metadata["scheduled_discovery"] is False
+    # The seed is now the offline route of a scheduled source, not a one-off
+    # backfill that opted out of the recurring beat.
+    assert batch.provider_metadata["scheduled_discovery"] is True
+    assert batch.provider_metadata["payload_origin"] == TICKERTRENDS_ORIGIN_SEED
     assert batch.provider_metadata["accepted_reference_period"] == \
         ["2026-01-01", "2026-06-30"]
     assert {record.entity_id for record in batch.records} == {"OPENAI", "ANTHROPIC"}
@@ -327,6 +340,118 @@ def test_tickertrends_adapter_refuses_to_guess_without_its_seed(tmp_path):
     with pytest.raises(FileNotFoundError, match="tickertrends_seed_missing"):
         adapter.fetch(FetchRequest(source_id="tickertrends_public_research",
                                    dataset_id="frontier_ai_labs_revenue"))
+
+
+# --------------------------------------------------------------------------- #
+# TickerTrends live 7-day route
+# --------------------------------------------------------------------------- #
+
+class _FakeResponse:
+    def __init__(self, text: str):
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeClient:
+    """Stands in for httpx so the live route is tested without the network."""
+
+    def __init__(self, text: str):
+        self._text = text
+        self.calls: list[str] = []
+
+    def get(self, url: str, **kwargs) -> _FakeResponse:
+        self.calls.append(url)
+        return _FakeResponse(self._text)
+
+
+def _live_body(**overrides) -> str:
+    import json
+
+    article = load_frozen_article(
+        FIXTURES / "tickertrends_anthropic_vs_openai_arr_tracking.json")
+    article.pop("body_html_sha256", None)
+    article["audience"] = "everyone"
+    article["free_unlock_required"] = False
+    article.update(overrides)
+    return json.dumps(article)
+
+
+def _live_request() -> FetchRequest:
+    return FetchRequest(source_id="tickertrends_public_research",
+                        dataset_id="frontier_ai_labs_revenue")
+
+
+def test_tickertrends_live_route_probes_the_public_post_api():
+    client = _FakeClient(_live_body())
+    adapter = TickerTrendsPublicResearchAdapter(client=client, clock=lambda: NOW)
+    result = adapter.discover(_live_request())
+    assert client.calls == [TICKERTRENDS_POST_API_URL]
+    assert result.status is DiscoveryStatus.NEW_RELEASE
+    assert result.diagnostics["payload_origin"] == TICKERTRENDS_ORIGIN_LIVE
+    assert result.latest_available_period == "2026-06"
+    metadata = result.candidates[0].metadata
+    assert metadata["scope"] == "anthropic-vs-openai-arr-tracking"
+    assert metadata["accepted_count"] == 5
+    assert metadata["methodology_regime"] == "third_party_annualized_run_rate/v1"
+
+
+def test_tickertrends_probe_identity_survives_markup_churn():
+    """Substack re-serialises the body between fetches; the numbers do not move.
+
+    A byte hash would report a fresh release on every probe and re-baseline the
+    main sequence for no reason, so identity must come from the admitted claims.
+    """
+    seed_identity = TickerTrendsPublicResearchAdapter(
+        seed_path=FIXTURES / "tickertrends_anthropic_vs_openai_arr_tracking.json",
+        clock=lambda: NOW).discover(_live_request()).latest_upstream_identity
+
+    article = load_frozen_article(
+        FIXTURES / "tickertrends_anthropic_vs_openai_arr_tracking.json")
+    churned = str(article["body_html"]).replace("</p>", "</p>\n<!-- reserialised -->")
+    assert churned != str(article["body_html"]), "the churn must actually change bytes"
+    adapter = TickerTrendsPublicResearchAdapter(
+        client=_FakeClient(_live_body(body_html=churned)), clock=lambda: NOW)
+    live_identity = adapter.discover(_live_request()).latest_upstream_identity
+
+    assert live_identity == seed_identity
+
+
+def test_tickertrends_probe_identity_moves_when_an_admitted_number_moves():
+    candidates, _ = _tickertrends()
+    admitted = [item for item in candidates if item.accepted]
+    baseline = tickertrends_semantic_fingerprint(candidates)
+
+    moved = list(admitted)
+    moved[0] = type(admitted[0])(**{**admitted[0].__dict__,
+                                    "value": admitted[0].value + 1_000_000_000.0})
+    assert tickertrends_semantic_fingerprint(moved) != baseline
+    # Rejected candidates are noise: they must not be able to move the identity.
+    only_rejected = [item for item in candidates if not item.accepted]
+    assert tickertrends_semantic_fingerprint(only_rejected) != baseline
+
+
+def test_tickertrends_live_route_fails_closed_on_a_paywall():
+    adapter = TickerTrendsPublicResearchAdapter(
+        client=_FakeClient(_live_body(free_unlock_required=True)),
+        clock=lambda: NOW)
+    with pytest.raises(ConnectionError, match="tickertrends_article_paywalled"):
+        adapter.discover(_live_request())
+
+
+def test_tickertrends_live_route_fails_closed_on_a_non_public_audience():
+    adapter = TickerTrendsPublicResearchAdapter(
+        client=_FakeClient(_live_body(audience="only_paid")), clock=lambda: NOW)
+    with pytest.raises(ConnectionError, match="tickertrends_article_not_public"):
+        adapter.discover(_live_request())
+
+
+def test_tickertrends_live_route_rejects_a_non_json_response():
+    adapter = TickerTrendsPublicResearchAdapter(
+        client=_FakeClient("<html>maintenance</html>"), clock=lambda: NOW)
+    with pytest.raises(ConnectionError, match="tickertrends_post_api_not_json"):
+        adapter.discover(_live_request())
 
 
 # --------------------------------------------------------------------------- #

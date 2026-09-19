@@ -144,6 +144,61 @@ def test_reingesting_the_identical_artifact_is_a_no_change(tmp_path):
     assert before == after
 
 
+def test_tickertrends_live_probe_is_interchangeable_with_its_seed(tmp_path):
+    """The 7-day live probe must not re-baseline what the seed already landed.
+
+    Probing the essay again on the next 7-day beat has to reproduce exactly the
+    same governed rows and then settle into ``no_change`` — otherwise making the
+    source periodic would append phantom vintages or duplicate cells.
+    """
+    import json
+
+    repository = _store(tmp_path)
+    _seed_history(repository)
+    seeded = sorted(
+        (row["entity_id"], row["period"], row["value"], row["source_id"])
+        for row in repository.observations(dataset_id="frontier_ai_labs_revenue",
+                                           accepted_only=True, latest_only=True))
+
+    article = json.loads(
+        (FIXTURES / "tickertrends_anthropic_vs_openai_arr_tracking.json"
+         ).read_text(encoding="utf-8"))
+    article.pop("body_html_sha256", None)
+    article["audience"] = "everyone"
+    article["free_unlock_required"] = False
+    # Substack re-serialises the body between fetches: the bytes move, the
+    # numbers do not.  The probe has to stay a no_change anyway.
+    article["body_html"] = str(article["body_html"]).replace(
+        "</p>", "</p>\n<!-- reserialised by the host -->")
+
+    class _Response:
+        text = json.dumps(article)
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def get(self, url, **kwargs):
+            return _Response()
+
+    live = TickerTrendsPublicResearchAdapter(client=_Client(), clock=lambda: NOW)
+    first = IngestionPipeline(repository).run(live, _tt_request())
+    second = IngestionPipeline(repository).run(
+        TickerTrendsPublicResearchAdapter(client=_Client(), clock=lambda: NOW),
+        _tt_request())
+
+    after = sorted(
+        (row["entity_id"], row["period"], row["value"], row["source_id"])
+        for row in repository.observations(dataset_id="frontier_ai_labs_revenue",
+                                           accepted_only=True, latest_only=True))
+    assert after == seeded, "the live probe must not add or move a single cell"
+    # The seeded history already holds the same claims, so even the *first* live
+    # probe is a no_change — the strongest possible statement that switching the
+    # source onto the 7-day beat cannot re-baseline the main sequence.
+    assert first["status"] == "no_change"
+    assert second["status"] == "no_change"
+
+
 def test_same_period_revision_keeps_the_previous_vintage(tmp_path):
     repository = _store(tmp_path)
     _seed_history(repository)

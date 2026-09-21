@@ -10,6 +10,7 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-anthropic>=0.3.0",
     "langchain-openai>=0.2",       # default LLM path: OpenRouter (OpenAI-compatible)
+    "socksio>=1.0.0",              # httpx SOCKS transport when an LLM proxy is configured
     # data contracts / config
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -29,9 +30,13 @@ data = [
     "fredapi>=0.5",
     "praw>=7.7",
     "pandas>=2.2",
-    "pandas-ta>=0.3.14b",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "pandas-ta-classic>=0.6.52",
     "feedparser>=6.0",
     "pypdf>=4.0",
+    "openpyxl>=3.1",   # official Census/ONS public XLSX releases
+    "Pillow>=10.0",    # raster chart crops and local OCR input for FactSet Sector extraction
     "pysocks>=1.7",      # IMAP via local proxy (imaplib ignores proxy env vars)
     "duckdb>=1.0",       # remote parquet reads for the transcript dataset (data/defeatbeta.py)
 ]

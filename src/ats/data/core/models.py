@@ -53,6 +53,7 @@ class IngestionRunStatus(str, Enum):
     STALE = "stale"
     UNREACHABLE = "unreachable"
     UNAUTHORIZED = "unauthorized"
+    NOT_PDF = "not_pdf"
     PARSE_FAILED = "parse_failed"
     VALIDATION_FAILED = "validation_failed"
 

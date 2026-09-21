@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "report_id": "082826",
+  "report_date": "2026-08-28",
+  "source_pdf_sha256": "ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381",
+  "decoder": {
+    "name": "decode_082826_sector_tables",
+    "input": "original_pdf_embedded_rasters",
+    "golden_manifest_input": false,
+    "table_count": 8,
+    "candidate_cells": 231
+  },
+  "golden_comparison": {
+    "expected_cells": 231,
+    "actual_cells": 231,
+    "missing_cells": 0,
+    "extra_cells": 0,
+    "duplicate_cells": 0,
+    "mismatched_cells": 0,
+    "unresolved_cells": 0,
+    "passed": true
+  },
+  "sector_core_release": "shadow",
+  "note": "Acceptance evidence only. Consumer/source promotion remains a separate rollout task."
+}

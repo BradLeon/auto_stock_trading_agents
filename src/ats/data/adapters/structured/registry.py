@@ -15,6 +15,7 @@ class RuntimeSourceSpec:
     factory: Callable[[], object] | None
     requires_entities: bool = False
     ingest_supported: bool = True
+    discovery_group: str = ""
     note: str = ""
 
 
@@ -60,10 +61,86 @@ def _consensus():
     return YFinanceConsensusAdapter()
 
 
+def _sacra_frontier_labs_revenue():
+    from ...sources.frontier_ai_labs_revenue import SacraPublicCompanyProfilesAdapter
+
+    return SacraPublicCompanyProfilesAdapter()
+
+
+def _tickertrends_frontier_labs_revenue():
+    from ...sources.frontier_ai_labs_revenue import TickerTrendsPublicResearchAdapter
+
+    return TickerTrendsPublicResearchAdapter()
+
+
 def _trendforce():
     from ...sources.trendforce import TrendForceDRAMAdapter
 
     return TrendForceDRAMAdapter()
+
+
+def _factset_earnings_insight():
+    from ...sources.factset_earnings_insight import FactSetEarningsInsightAdapter
+
+    return FactSetEarningsInsightAdapter()
+
+
+def _anthropic_economic_index():
+    import os
+    from pathlib import Path
+
+    from ...sources.anthropic_economic_index import AnthropicEconomicIndexAdapter
+
+    overrides = {}
+    for environment_name, filename in (
+        ("ATS_AEI_CLAUDE_AI_FILE", "aei_claude_ai_2026-06-26.csv"),
+        ("ATS_AEI_1P_API_FILE", "aei_1p_api_2026-06-26.csv"),
+    ):
+        if value := os.environ.get(environment_name):
+            overrides[filename] = Path(value)
+    return AnthropicEconomicIndexAdapter(local_file_overrides=overrides)
+
+
+def _census_btos():
+    from ...sources.census_btos import CensusBTOSAdapter
+    return CensusBTOSAdapter()
+
+
+def _rps_genai_adoption():
+    from ...sources.rps_genai_adoption import RPSGenAIAdoptionAdapter
+    return RPSGenAIAdoptionAdapter()
+
+
+def _ramp_ai_index():
+    import os
+
+    from ...sources.ramp_ai_index import RampAIIndexAdapter
+
+    # Optional headless ingress populated by the desktop browser runner.  No
+    # API key or network fallback is activated; absent files still fail closed.
+    export_dir = os.environ.get("ATS_RAMP_OFFICIAL_EXPORT_DIR", "")
+    if not export_dir:
+        from ....config import REPO_ROOT
+        export_dir = str(REPO_ROOT / "var" / "data" / "ramp_exports")
+    return RampAIIndexAdapter(export_dir=export_dir)
+
+
+def _openrouter_rankings():
+    from ...sources.openrouter_rankings import OpenRouterRankingsAdapter
+
+    return OpenRouterRankingsAdapter()
+
+
+def _frontier_ai_capability():
+    from ...sources.frontier_ai_capability import PublicBenchmarkAdapter
+
+    return PublicBenchmarkAdapter()
+
+
+def _frontier_ai_capability_official_lab():
+    from ...sources.frontier_ai_capability import OfficialLabReleaseAdapter
+
+    return OfficialLabReleaseAdapter()
 
 
 _RUNTIMES: dict[str, RuntimeSourceSpec] = {
@@ -79,6 +156,31 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         "yfinance_financials", _yfinance_financials, requires_entities=True),
     "consensus": RuntimeSourceSpec("consensus", _consensus, requires_entities=True),
     "trendforce": RuntimeSourceSpec("trendforce", _trendforce),
+    "factset_earnings_insight": RuntimeSourceSpec(
+        "factset_earnings_insight", _factset_earnings_insight),
+    "anthropic_economic_index": RuntimeSourceSpec(
+        "anthropic_economic_index", _anthropic_economic_index, discovery_group="ai_adoption"),
+    "census_btos": RuntimeSourceSpec("census_btos", _census_btos, discovery_group="ai_adoption"),
+    "rps_genai_adoption": RuntimeSourceSpec("rps_genai_adoption", _rps_genai_adoption, discovery_group="ai_adoption"),
+    "ramp_ai_index": RuntimeSourceSpec("ramp_ai_index", _ramp_ai_index,
+                                       discovery_group="ai_adoption"),
+    "openrouter_rankings": RuntimeSourceSpec(
+        "openrouter_rankings", _openrouter_rankings,
+        discovery_group="ai_commercialization"),
+    "frontier_ai_capability": RuntimeSourceSpec(
+        "frontier_ai_capability", _frontier_ai_capability,
+        discovery_group="frontier_ai_capability"),
+    "frontier_ai_capability_official_lab": RuntimeSourceSpec(
+        "frontier_ai_capability_official_lab", _frontier_ai_capability_official_lab,
+        discovery_group="frontier_ai_capability"),
+    # Periodic discovery over two registered Sacra public pages.  TickerTrends is
+    # a frozen one-time 2026H1 seed and is intentionally left out of every
+    # discovery group so it can never re-baseline the main sequence.
+    "sacra_frontier_labs_revenue": RuntimeSourceSpec(
+        "sacra_frontier_labs_revenue", _sacra_frontier_labs_revenue,
+        discovery_group="frontier_ai_labs_revenue"),
+    "tickertrends_frontier_labs_revenue": RuntimeSourceSpec(
+        "tickertrends_frontier_labs_revenue", _tickertrends_frontier_labs_revenue),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),
@@ -108,6 +210,21 @@ def validate_source_registration(source_id: str, *,
     def check(name: str, passed: bool, reason: str = "") -> None:
         checks.append({"check": name, "passed": bool(passed),
                        "reason": "" if passed else reason})
+
+    # A retired source id is checked *before* the active registry, otherwise it
+    # would report `source_not_configured` and hide the real reason.  This is the
+    # single fail-closed point shared by `ats data validate-source` and the
+    # ReleaseManager publication gate, so neither can be bypassed by re-adding
+    # the id to `sources` alone.
+    tombstone = catalog.retired_source(source_id)
+    if tombstone is not None:
+        check("source_retired", False, "source_retired")
+        return {"source_id": source_id, "valid": False, "checks": checks,
+                "reason_codes": ["source_retired"],
+                "retired_at": tombstone.retired_at.isoformat(),
+                "reason": tombstone.reason,
+                "disposition": tombstone.disposition.value,
+                "successor": tombstone.successor}
 
     check("source_configured", row is not None, "source_not_configured")
     if row is None:
@@ -179,11 +296,20 @@ def build_ingestion(source_id: str, *, entities: list[str] | None = None,
     normalized_entities = [item.upper() for item in (entities or []) if item]
     if spec.requires_entities and not normalized_entities:
         raise ValueError(f"source {source_id} requires at least one --entity")
-    if len(source.datasets) != 1:
-        raise ValueError(
-            f"source {source_id} must declare exactly one dataset for unified ingestion")
+    requested_dataset = str((query_scope or {}).get("dataset_id", "")).strip()
+    if requested_dataset:
+        if requested_dataset not in source.datasets:
+            raise ValueError(f"source {source_id} does not declare dataset {requested_dataset}")
+        dataset_id = requested_dataset
+    elif len(source.datasets) == 1:
+        dataset_id = source.datasets[0]
+    else:
+        # Multi-dataset providers are run as independent jobs.  Keep a stable
+        # default for release-check discovery while allowing callers to select
+        # the spend slice explicitly through query_scope.dataset_id.
+        dataset_id = source.datasets[0]
     return spec.factory(), FetchRequest(
-        source_id=source_id, dataset_id=source.datasets[0],
+        source_id=source_id, dataset_id=dataset_id,
         entities=normalized_entities, periods=periods or [],
         query_scope=query_scope or {})
 

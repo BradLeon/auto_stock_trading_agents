@@ -6,7 +6,8 @@ class UnstructuredReadRouter:
     """Route immutable reads only to the released platform repository."""
 
     _READ_METHODS = {
-        "documents", "latest_document_version", "search_document_chunks",
+        "documents", "latest_document_version", "document_pages",
+        "search_document_chunks",
         "documents_by_id", "observations", "observations_by_id",
         "observation_failures", "facts", "fact_projections",
         "document_processing",

@@ -16,6 +16,7 @@ from ...core.structured_models import (
     FetchRequest,
     IngestionStatus,
     NativeRecord,
+    EntityRelationInput,
     ObservationInput,
     QualityStatus,
     SeriesIdentity,
@@ -40,10 +41,27 @@ class CentralAdmission:
         return hashlib.sha1(payload.encode()).hexdigest()[:24]
 
     def admit(self, *, batch: AdapterBatch, request: FetchRequest,
-              record: NativeRecord, artifact_id: str, run_id: str) -> AdmissionResult:
+              record: NativeRecord, artifact_id: str, run_id: str,
+              artifact_mapping_reason: str = "") -> AdmissionResult:
         reasons: list[str] = []
+        if artifact_mapping_reason:
+            reasons.append(artifact_mapping_reason)
         source = self.repository.source(batch.source_id)
         dataset = self.repository.dataset(batch.dataset_id)
+        # Frontier capability cohorts must have one active flagship per Lab.
+        # The adapter keeps the raw directory and reports duplicate Labs in
+        # provider metadata; quarantine affected scores rather than silently
+        # letting the deterministic selector pick one.
+        duplicate_flagships = set(batch.provider_metadata.get("duplicate_active_flagships") or [])
+        if batch.dataset_id == "frontier_ai_capability_benchmarks":
+            if bool(batch.provider_metadata.get("test_only")) and not bool((request.query_scope or {}).get("test_only")):
+                reasons.append("test_fixture_not_platform_data")
+            try:
+                record_lab = str((record.dimensions or {}).get("lab_id") or "")
+            except AttributeError:
+                record_lab = ""
+            if record_lab in duplicate_flagships:
+                reasons.append("duplicate_active_flagship")
         if source is None:
             reasons.append("source_unregistered")
         elif source["catalog_status"] == "runtime_excluded":
@@ -193,8 +211,11 @@ class IngestionPipeline:
             IngestionStatus.NO_CHANGE, IngestionStatus.ZERO_MATCH,
             IngestionStatus.NOT_YET_PUBLISHED, IngestionStatus.NO_COVERAGE,
             IngestionStatus.STALE, IngestionStatus.UNREACHABLE,
-            IngestionStatus.UNAUTHORIZED, IngestionStatus.PARSE_FAILED,
+            IngestionStatus.UNAUTHORIZED, IngestionStatus.NOT_PDF,
+            IngestionStatus.PARSE_FAILED,
             IngestionStatus.VALIDATION_FAILED,
+            IngestionStatus.EXPORT_UNREADABLE, IngestionStatus.ACCESS_REQUIRED,
+            IngestionStatus.METHODOLOGY_DRIFT, IngestionStatus.SOURCE_CONFLICT,
         }
         if batch.status in terminal_without_records and not batch.records:
             reasons = Counter(failure.status.value for failure in batch.failures)
@@ -204,9 +225,11 @@ class IngestionPipeline:
             return {"run_id": run_id, "status": batch.status.value,
                     "accepted": 0, "quarantined": 0, "unchanged": 0}
 
-        artifacts = []
+        artifacts: dict[str, object] = {}
+        legacy_single_artifact = len(batch.artifacts) == 1 and not batch.artifacts[0].artifact_key
         for item in batch.artifacts:
-            artifacts.append(self.repository.put_artifact(
+            key = item.artifact_key or "__legacy_default__"
+            artifacts[key] = self.repository.put_artifact(
                 item.payload,
                 ArtifactDescriptor(
                     source_id=batch.source_id, dataset_id=batch.dataset_id,
@@ -215,9 +238,10 @@ class IngestionPipeline:
                     source_url=item.source_url, source_version=item.source_version,
                     media_type=item.media_type, retention=item.retention,
                     storage_mode=item.storage_mode, pointer=item.pointer,
-                    metadata=item.metadata)))
+                    metadata={**item.metadata, "artifact_key": key}))
         if not artifacts and batch.records:
-            artifacts.append(self.repository.put_artifact(
+            key = "__implicit_default__"
+            artifacts[key] = self.repository.put_artifact(
                 [record.model_dump(mode="json") for record in batch.records],
                 ArtifactDescriptor(
                     source_id=batch.source_id, dataset_id=batch.dataset_id,
@@ -226,32 +250,104 @@ class IngestionPipeline:
                         "entities": request.entities, "periods": request.periods},
                     source_version=str(batch.provider_metadata.get("source_version", "")),
                     media_type="application/json", retention="query_slice",
-                    metadata=batch.provider_metadata)))
-        artifact_id = artifacts[0].id if artifacts else ""
+                    metadata={**batch.provider_metadata, "artifact_key": key}))
+
+        for entity in batch.entities:
+            self.repository.register_entity(
+                entity_id=entity.entity_id, kind=entity.kind, canonical_name=entity.canonical_name,
+                aliases=entity.aliases, securities=entity.securities, metadata=entity.metadata)
+        if request.dataset_id == "frontier_ai_capability_benchmarks" and hasattr(self.repository, "save_frontier_capability_metadata"):
+            metadata_rows = [dict(record.dimensions or {}) for record in batch.records]
+            observed_keys = {(str(item.get("lab_id") or ""), str(item.get("model_id") or ""),
+                              str(item.get("benchmark_id") or "")) for item in metadata_rows}
+            # Coverage hints are persisted independently from numeric
+            # observations.  Never let a default NA hint overwrite an observed
+            # score in the same run.
+            for hint in list(batch.provider_metadata.get("coverage_hints") or []):
+                key = (str(hint.get("lab_id") or ""), str(hint.get("model_id") or ""),
+                       str(hint.get("benchmark_id") or ""))
+                if key not in observed_keys:
+                    metadata_rows.append(dict(hint))
+            self.repository.save_frontier_capability_metadata(
+                records=metadata_rows, source_id=batch.source_id, known_at=batch.fetched_at)
+
+        relation_created = 0
+        relation_quarantined = 0
+        # Relation inputs are governed stable entity IDs. Resolve them against
+        # one snapshot instead of invoking the name/alias fallback scan for
+        # every edge (especially costly for large O*NET taxonomies).
+        registered_entity_ids = {
+            row["entity_id"].casefold() for row in self.repository.entities()
+        }
+        for relation in batch.relations:
+            relation_key = relation.slice_key
+            artifact = artifacts.get(relation_key)
+            if artifact is None and legacy_single_artifact and not relation_key:
+                artifact = artifacts.get("__legacy_default__")
+            reasons: list[str] = []
+            if artifact is None:
+                reasons.append("missing_artifact_mapping")
+            if relation.parent_entity_id.casefold() not in registered_entity_ids:
+                reasons.append("parent_entity_unresolved")
+            if relation.child_entity_id.casefold() not in registered_entity_ids:
+                reasons.append("child_entity_unresolved")
+            if reasons:
+                relation_quarantined += 1
+                self.repository.save_relation_candidate(
+                    run_id=run_id, source_id=batch.source_id, dataset_id=batch.dataset_id,
+                    parent_entity_id=relation.parent_entity_id, child_entity_id=relation.child_entity_id,
+                    relation_type=relation.relation_type, source_version=relation.source_version,
+                    reason_codes=reasons, artifact_id=getattr(artifact, "id", ""),
+                    raw=relation.model_dump(mode="json"), at=batch.fetched_at)
+                continue
+            _, created = self.repository.save_entity_relation(
+                dataset_id=batch.dataset_id, source_id=batch.source_id,
+                parent_entity_id=relation.parent_entity_id, child_entity_id=relation.child_entity_id,
+                relation_type=relation.relation_type, source_version=relation.source_version,
+                known_at=relation.known_at or batch.fetched_at,
+                artifact_id=artifact.id, metadata=relation.metadata, active=relation.active)
+            relation_created += int(created)
+
+        record_inputs: list[tuple[NativeRecord, str, str]] = []
+        for record in batch.records:
+            artifact = artifacts.get(record.slice_key)
+            mapping_reason = ""
+            if artifact is None and legacy_single_artifact and not record.slice_key:
+                artifact = artifacts.get("__legacy_default__")
+            elif artifact is None and not batch.artifacts:
+                artifact = artifacts.get("__implicit_default__")
+            if artifact is None:
+                mapping_reason = "missing_artifact_mapping"
+            record_inputs.append((record, getattr(artifact, "id", ""), mapping_reason))
         results = [self.admission.admit(
-            batch=batch, request=request, record=record,
-            artifact_id=artifact_id, run_id=run_id) for record in batch.records]
+            batch=batch, request=request, record=record, artifact_id=artifact_id,
+            artifact_mapping_reason=mapping_reason, run_id=run_id)
+            for record, artifact_id, mapping_reason in record_inputs]
         accepted = sum(result.status == "accepted" and result.created for result in results)
         unchanged = sum(result.status == "accepted" and not result.created for result in results)
-        quarantined = sum(result.status == "quarantined" for result in results)
+        quarantined = sum(result.status == "quarantined" for result in results) + relation_quarantined
         reasons = Counter(code for result in results for code in result.reason_codes)
         reasons.update(failure.status.value for failure in batch.failures)
-        if batch.failures or (accepted + unchanged > 0 and quarantined > 0):
+        warnings = list(batch.provider_metadata.get("warnings") or [])
+        reasons.update(warnings)
+        if batch.failures or (accepted + unchanged + relation_created > 0 and quarantined > 0):
             status = IngestionStatus.PARTIAL
         elif quarantined and not (accepted or unchanged):
             status = IngestionStatus.VALIDATION_FAILED
-        elif accepted:
+        elif accepted or relation_created:
             status = IngestionStatus.SUCCEEDED
         elif unchanged:
             status = IngestionStatus.NO_CHANGE
         else:
             status = IngestionStatus.ZERO_MATCH
         self.repository.finish_ingestion(
-            run_id, status=status.value, discovered=len(batch.records), accepted=accepted,
+            run_id, status=status.value, discovered=len(batch.records) + len(batch.relations), accepted=accepted,
             quarantined=quarantined, unchanged=unchanged, reason_codes=dict(reasons),
             note="; ".join(f.message for f in batch.failures))
         return {"run_id": run_id, "status": status.value, "accepted": accepted,
                 "quarantined": quarantined, "unchanged": unchanged,
+                "relations_created": relation_created, "relations_quarantined": relation_quarantined,
+                "warnings": warnings,
                 "results": [result.model_dump(mode="json") for result in results]}
 
     def run_many(self, jobs: list[tuple[StructuredAdapter, FetchRequest]]) -> list[dict]:

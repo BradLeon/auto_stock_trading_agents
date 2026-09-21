@@ -9,7 +9,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from ...schemas.sector import STANCES, CompanyCall, LayerAssessment, SectorConfig, SectorReview
+from ...schemas.sector import (
+    STANCES,
+    CompanyCall,
+    LayerAssessment,
+    SectorConfig,
+    SectorReview,
+    TopDownComparison,
+)
 from ..base import run_structured
 from . import assemble
 from .outputs import SectorReviewLLMView
@@ -136,8 +143,19 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     budgets = cross_section.budgets_for(cfg, allocations)
     baskets = [_rescaled(b, budgets.get(ly.key, b.layer_cap)) for ly, b in raw_baskets]
 
-    view = rotation.run(cfg, verdicts, use_llm=use_llm) if verdicts else None
-    review = _assemble_review(name, cfg, verdicts, baskets, view, failed)
+    # Only now—after all layer verdicts and budgets are fixed—may top-down
+    # context enter. It is loaded once and supplied only to the final comparison.
+    top_down = _load_top_down_context(store)
+    verdict_fingerprint = [item.model_dump_json() for item in verdicts]
+    view = (rotation.run(
+        cfg, verdicts, use_llm=use_llm,
+        macro_context=top_down["macro_text"],
+        factset_material=top_down["factset"])
+        if verdicts else None)
+    if verdict_fingerprint != [item.model_dump_json() for item in verdicts]:
+        raise RuntimeError("final top-down synthesis mutated a layer verdict")
+    review = _assemble_review(
+        name, cfg, verdicts, baskets, view, failed, top_down=top_down)
 
     # 一层一份报告，且只在这里写 —— `sector crosssection` 不再写文件，否则同一层会出现
     # 两份互相不同步的文档（其中一份的 layer_cap 还是没经过配置结论的半成品）。
@@ -204,7 +222,38 @@ def _rescaled(basket, target: float):
     return basket.model_copy(update={"layer_cap": target, "rows": rows})
 
 
-def _assemble_review(name, cfg, verdicts, baskets, view, failed) -> SectorReview:
+def _load_top_down_context(store) -> dict:
+    from ...data import factset
+
+    try:
+        loader = getattr(store, "latest_macro_review", None)
+        macro_review = loader("macro") if loader else None
+    except Exception as exc:  # noqa: BLE001 - comparison degrades, layers remain valid
+        log.warning("latest Macro review unavailable for Sector comparison: %s", exc)
+        macro_review = None
+    macro_text = ""
+    macro_date = ""
+    macro_note = ""
+    if macro_review is None or macro_review.regime.startswith("("):
+        macro_note = "没有可用的最新正式宏观报告。"
+    else:
+        macro_text = macro_review.regime_block(max_chars=4000)
+        macro_date = macro_review.as_of.date().isoformat()
+    try:
+        factset_material = factset.fetch_sector_material()
+    except Exception as exc:  # noqa: BLE001 - final comparison must degrade explicitly
+        factset_material = {
+            "text": "", "state": "unavailable", "mode": "unknown",
+            "reason": f"读取 FactSet 十一行业背景失败：{exc}",
+            "report_date": "", "version_id": "", "freshness": "unavailable"}
+    return {
+        "macro_text": macro_text, "macro_date": macro_date, "macro_note": macro_note,
+        "factset": factset_material,
+    }
+
+
+def _assemble_review(name, cfg, verdicts, baskets, view, failed, *,
+                     top_down=None) -> SectorReview:
     labels = {ly.key: ly.label for ly in cfg.layers}
     calls = [CompanyCall(symbol=c.symbol, layer=v.layer_key, stance=c.stance,
                          conviction=v.confidence, rationale=c.rationale)
@@ -214,11 +263,31 @@ def _assemble_review(name, cfg, verdicts, baskets, view, failed) -> SectorReview
     if failed:
         note = "本轮未产出结论的层：" + "、".join(labels.get(k, k) for k in failed)
         summary = f"{summary}\n⚠️ {note}".strip()
+    top_down = top_down or {"macro_text": "", "macro_date": "", "macro_note": "",
+                            "factset": {}}
+    factset = top_down.get("factset") or {}
+    availability_notes = [
+        note for note in (top_down.get("macro_note", ""), factset.get("reason", ""))
+        if note]
+    comparison = TopDownComparison(
+        macro_background=(view.macro_background if view and top_down.get("macro_text")
+                          else top_down.get("macro_note", "")),
+        factset_background=(view.factset_background if view and factset.get("text")
+                            else factset.get("reason", "")),
+        agreements=list(view.agreements) if view else [],
+        divergences=list(view.divergences) if view else [],
+        recommendation_impact=(view.recommendation_impact if view else ""),
+        availability_notes=availability_notes,
+        macro_review_date=top_down.get("macro_date", ""),
+        factset_report_date=str(factset.get("report_date") or ""),
+        factset_version_id=str(factset.get("version_id") or ""),
+    )
     return SectorReview(
         sector=name, as_of=_now(), regime=regime, summary=summary,
         layers=[], company_calls=calls, baskets=baskets, layer_verdicts=verdicts,
         rotation_advice=(view.rotation_advice if view else ""),
-        top_risks=(list(view.top_risks) if view else []))
+        top_risks=(list(view.top_risks) if view else []),
+        top_down_comparison=comparison)
 
 
 def _to_review(name: str, cfg: SectorConfig, view: SectorReviewLLMView) -> SectorReview:

@@ -154,8 +154,19 @@ class LayerRotationView(BaseModel):
     missing_layers: list[str] = Field(default_factory=list, description=(
         "结论缺失的层键；涉及它们的加减建议必须标注证据不足"))
     top_risks: list[str] = Field(default_factory=list)
+    macro_background: str = Field(
+        default="", description="最新正式宏观报告提供的背景；未提供时说明不可用")
+    factset_background: str = Field(
+        default="", description="FactSet 十一行业数据提供的背景；未提供时说明不可用")
+    agreements: list[str] = Field(
+        default_factory=list, description="宏观/FactSet 与八层公司证据一致之处")
+    divergences: list[str] = Field(
+        default_factory=list, description="宏观/FactSet 与八层公司证据冲突之处，不得掩盖")
+    recommendation_impact: str = Field(
+        default="", description="这些背景是否改变跨层加减建议；不能修改已形成的单层结论")
 
-    @field_validator("conflicts", "missing_layers", "top_risks", mode="before")
+    @field_validator("conflicts", "missing_layers", "top_risks",
+                     "agreements", "divergences", mode="before")
     @classmethod
     def _coerce_strlists(cls, v):
         return _as_strlist(v)

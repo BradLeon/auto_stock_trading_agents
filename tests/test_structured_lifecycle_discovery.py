@@ -109,7 +109,7 @@ def test_source_lifecycle_validates_ingests_publishes_and_rolls_back(tmp_path, m
     assert load_release_overlay(release_file)["sources"]["fake_source"] == "platform"
 
     monkeypatch.setenv("ATS_STRUCTURED_RELEASE_FILE", str(release_file))
-    from ats.data.structured.flags import source_mode
+    from ats.data.rollout_modes import source_mode
 
     assert source_mode("fake_source") == "platform"
     manager.rollback(kind="source", target_id="fake_source", actor="pytest")

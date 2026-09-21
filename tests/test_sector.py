@@ -12,7 +12,13 @@ from ats.agents.sector.outputs import (
     SectorReviewLLMView,
 )
 from ats.memory import get_store
-from ats.schemas.sector import CompanyCall, LayerAssessment, SectorConfig, SectorReview
+from ats.schemas.sector import (
+    CompanyCall,
+    LayerAssessment,
+    SectorConfig,
+    SectorReview,
+    TopDownComparison,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -269,8 +275,14 @@ def test_store_roundtrip_and_history():
     store = get_store()
     store.save_sector_review(SectorReview(sector="s", as_of=datetime(2026, 1, 1), regime="old"))
     store.save_sector_review(SectorReview(sector="s", as_of=datetime(2026, 2, 1), regime="new"))
-    store.save_sector_review(SectorReview(sector="s", as_of=datetime(2026, 2, 1), regime="new2"))
+    store.save_sector_review(SectorReview(
+        sector="s", as_of=datetime(2026, 2, 1), regime="new2",
+        top_down_comparison=TopDownComparison(
+            macro_background="宏观背景", agreements=["一致"],
+            recommendation_impact="不改变单层结论")))
     assert store.latest_sector_review("s").regime == "new2"       # replace same as_of
+    assert store.latest_sector_review(
+        "s").top_down_comparison.macro_background == "宏观背景"
     assert len(store.recent_sector_reviews("s")) == 2
 
 

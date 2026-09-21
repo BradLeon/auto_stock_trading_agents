@@ -83,7 +83,56 @@ export ATS_STRUCTURED_RELEASE_FILE="/absolute/path/to/releases.yaml"
 
 未设置 `ATS_STRUCTURED_DB_PATH` 时会沿用 `ATS_DB_PATH`。未设置 artifact 根目录时使用仓库下 `var/structured_artifacts`。自动任务不能依赖不确定的工作目录。
 
+## AI 应用扩散四来源：每周主动发现
+
+部署平台每周执行一次以下命令；`config/data/schedules.yaml` 只记录调度意图，不会自行创建
+cron/launchd 任务：
+
+```bash
+ats data release-check --group ai_adoption --ingest-new
+```
+
+该 group 包含 Anthropic Economic Index、Census BTOS Core、RPS/FRED 和 Ramp AI Index。
+四个来源单并发、失败隔离；建议失败后按 60/300/900 秒退避重试。没有新 release 是
+`no_change`（不是零值，也不是 stale）。运维监控应检查
+`last_checked_at`、`latest_upstream_identity`、`latest_ingested_release`、
+`latest_available_period` 和最近错误诊断。
+
+范围边界：BTOS 只接收 2025-11-17 后“任一业务职能”新口径；BTOS AI Supplement 因一次性
+专题波次排除，Eurostat 因年度频率排除；RPS 是员工自报工作使用，不代表企业批准部署。
+英国 ONS BICS AI 条件模块已于 2026-09-19 正式退役（`retire-ons-bics-ai`），其观测不导出
+即清除，因此当前不存在非美国的企业采用来源。跨来源禁止相减、平均或合成统一渗透指数。
+
+平台 DataProduct、结构化采集 CLI、主动发现和 Evidence 统一使用 `ATS_DATA_DB_PATH` / `ATS_DATA_ARTIFACT_ROOT`，默认分别为 `var/data.sqlite` 与 `var/data_artifacts`。`ATS_STRUCTURED_DB_PATH` / `ATS_STRUCTURED_ARTIFACT_ROOT` 只用于显式兼容或隔离测试，并且不能覆盖已设置的正式变量；`ATS_DB_PATH` 是 workflow/context 库，不再作为结构化数据的隐式回退。正式发布禁止通过在临时库、`ats.sqlite` 与 `data.sqlite` 之间复制表完成。采集命令的显式
+`--db` / `--artifact-root` 用于隔离验收。不要把兼容层的 `ATS_STRUCTURED_*` 变量误当作
+Evidence 平台读取变量。
+
 ## 4. 配置文件完整说明
+
+### Anthropic Economic Index：每周检查、按 release 更新
+
+此来源没有承诺固定发布日期，因此建议由 cron、launchd 或部署平台每周运行一次；没有新 commit 或
+完整 release 时应记录 `no_change` / `not_yet_published`，不是 stale。首次或回填必须先写隔离库：
+
+```bash
+ats_cli data validate-source --source anthropic_economic_index
+ats_cli data ingest --source anthropic_economic_index --force \
+  --db /absolute/path/aei.sqlite --artifact-root /absolute/path/aei-artifacts \
+  --periods 2026-04 --periods 2026-05
+ats_cli data quality --dataset ai_work_adoption
+ats_cli data ai-adoption --product claude_ai --period 2026-05
+ats_cli data ai-job 15-2031.00 --product 1p_api --period 2026-05
+```
+
+若运维者已经下载并独立校验两个官方大文件，可在隔离验收时设置
+`ATS_AEI_CLAUDE_AI_FILE` 和 `ATS_AEI_1P_API_FILE` 指向本地 CSV。该 override 只替代传输：
+discovery 仍读取官方 metadata，文件仍计算完整 SHA-256，持久化 lineage 仍使用 commit-pinned 官方 URL。
+
+下载器限制单并发、每文件 300 秒和 350 MiB，完整上游文件只以 commit-pinned pointer 与 SHA-256
+追溯；持久保存的是 Global query slice。质量门拒绝非 Global、范围越界、百分比和不成立、schema drift
+以及不能解释的重复 cell；隐私过滤或未发布 task cell 必须显示为
+`not_published_or_privacy_filtered`，绝不能写为零。查看 `data health` 时应同时核对最新检查、upstream
+commit、ingested release、available period 和 Claude.ai / 1P API 的独立状态。
 
 统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它索引结构化、非结构化和 runtime 配置；详细内容分别位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。
 
@@ -614,6 +663,13 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 
 | source ID | catalog status | persistence | datasets |
 |---|---|---|---|
+| `anthropic_economic_index` | `current_partial` | `persistent` | `ai_work_adoption` |
+| `us_census_btos` | `current_partial` | `persistent` | `ai_enterprise_adoption_us` |
+| `rps_genai_adoption` | `current_partial` | `persistent` | `ai_worker_adoption_us` |
+| `ramp_ai_index` | `current_partial` | `persistent` | `ramp_ai_adoption, ramp_ai_spend` |
+| `openrouter_rankings` | `current_partial` | `persistent` | `openrouter_rankings_daily` |
+| `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
+| `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
 | `tw_mof_exports` | `current_partial` | `persistent` | `regional_tw_exports` |
 | `kr_ecos_exports` | `current_partial` | `persistent` | `regional_kr_exports` |
 | `trendforce_dram` | `current_partial` | `persistent` | `industry_dram_contract_price` |
@@ -622,25 +678,45 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `defeatbeta_stock_statement` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_financials` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_consensus` | `current_partial` | `persistent` | `market_consensus` |
+| `factset_earnings_insight_metrics` | `current_partial` | `persistent` | `sp500_earnings_insight` |
 | `accepted_document_evidence` | `deferred` | `persistent` | `private_company_events` |
 | `ibkr_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_options` | `runtime_excluded` | `runtime` | — |
 | `thetadata_options` | `runtime_excluded` | `runtime` | — |
+| `sacra_public_company_profiles` | `current_partial` | `persistent` | `frontier_ai_labs_revenue` |
+| `tickertrends_public_research` | `current_partial` | `persistent` | `frontier_ai_labs_revenue` |
 
 | dataset ID | catalog status |
 |---|---|
+| `frontier_ai_labs_revenue` | `current_partial` |
+| `ai_work_adoption` | `current_partial` |
+| `ai_enterprise_adoption_us` | `current_partial` |
+| `ai_worker_adoption_us` | `current_partial` |
+| `ramp_ai_adoption` | `current_partial` |
+| `ramp_ai_spend` | `current_partial` |
+| `openrouter_rankings_daily` | `current_partial` |
+| `frontier_ai_capability_benchmarks` | `current_partial` |
+| `sp500_earnings_insight` | `current_partial` |
 | `regional_tw_exports` | `current_partial` |
 | `regional_kr_exports` | `current_partial` |
 | `industry_dram_contract_price` | `current_partial` |
 | `company_financials` | `current_partial` |
 | `market_consensus` | `current_partial` |
+| `sp500_earnings_insight` | `current_partial` |
 | `private_company_events` | `deferred` |
 
 ### 10.2 请求预算与 checked-in mode
 
 | source ID | 数据集 | catalog status | checked-in mode | 业务节奏 | 内部预算摘要 |
 |---|---|---|---|---|---|
+| `anthropic_economic_index` | `ai_work_adoption` | `current_partial` | `platform` | weekly | concurrency 1；按 release/commit 检查；300s/350MiB 文件上限 |
+| `us_census_btos` | `ai_enterprise_adoption_us` | `current_partial` | `platform` | monthly/quarterly | concurrency 1；批量下载；请求预算见 source config |
+| `rps_genai_adoption` | `ai_worker_adoption_us` | `current_partial` | `platform` | biweekly | concurrency 1；按波次批量获取 |
+| `ramp_ai_index` | `ramp_ai_adoption, ramp_ai_spend` | `current_partial` | `platform` | weekly | concurrency 1；每次批量切片；页面/API 预算按 source config |
+| `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | 上游日更；**我方每 7 天** | concurrency 1；每 7 天抓取 14 天重叠窗口；`freshness_slo_days: 10`；按 API 预算退避 |
+| `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起，取消热度分级） | 每周期优先一次 bulk fetch；4 个 job 07:20/07:25/07:27/07:35 UTC |
+| `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起） | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |
 | `kr_ecos_exports` | `regional_kr_exports` | `current_partial` | `platform` | monthly | concurrency 1；分页 10；30s |
 | `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `shadow` | monthly | concurrency 1；每次 1 请求；30s；页面半月 session 与发布日期均需验收 |
@@ -649,7 +725,10 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `defeatbeta_stock_statement` | `company_financials` | `current_partial` | `shadow` | snapshot | 每实体一个 query slice；60s |
 | `yfinance_financials` | `company_financials` | `current_partial` | `shadow` | event | 仅季度/年度三表 fallback；不请求或保存股价、OHLCV、期权或 quote metadata；concurrency 1；间隔至少 1s；30s |
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |
+| `factset_earnings_insight_metrics` | `sp500_earnings_insight` | `current_partial` | `platform` | weekly | concurrency 1；每周 1 次受控 URL 解析；60s；仅限许可的内部研究使用 |
 | `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
+| `sacra_public_company_profiles` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | weekly | concurrency 1；公开页面探测；保留最小证据切片 |
+| `tickertrends_public_research` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | **每 7 天**（与 Sacra 同一研究对象的第二信息源，共用发现组） | concurrency 1；每周期 1 次公开 Substack post API；不接入付费 API；语义指纹未变即 `no_change` |
 
 外部 Provider 没有可验证 QPS 时一律写 `unknown`；表中的数字是内部保护预算，不是 Provider 承诺。SEC 还必须遵守其当前 fair-access 政策并发送描述性 User-Agent。
 
@@ -724,3 +803,24 @@ TrendForce DRAM 的采集、期间标准化与发布应以本手册的 source he
 - [结构化数据层使用手册](STRUCTURED_DATA_USER_GUIDE.md)
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
+
+## FactSet Earnings Insight 运维（已上线）
+
+```bash
+# 当前 release、质量 partition、最近失败、报告 hash/version（URL 已脱敏）
+ats data factset-status
+
+# 最新 snapshot；--as-of 只返回当时真实可见的数据；--vintages 列出历史报告版本
+ats data earnings-insight --as-of 2026-08-29T00:00:00+00:00
+ats data earnings-insight --vintages
+
+# 受控本地导入或指定 extractor 版本重处理（不再读取 macro.yaml 的 Obsidian 文件夹）
+ats data factset-import --report-path /absolute/path/EarningsInsight_082826.pdf
+ats data factset-reprocess factset-text-v2 --report-path /absolute/path/EarningsInsight_082826.pdf
+```
+
+周六 `factset_weekly_ingest` 必须先于 Macro→Sector 周评。当前 `index_core`、`sector_core`、`macro_factset` 和 `sector_factset` 都已是 `platform`：`082826` 的 231 个适用行业单元格已由人工 golden cells 与独立原图 decoder 逐格验证。日常运行不再读取 `macro.yaml` 的本地文件夹，也不得让 Macro 或 Sector 现场下载/解析 PDF。遇到 `unreachable`、`not_pdf` 或 `parse_failed` 时，产品保留上一期并标记 `stale`；没有上一期则返回 `unavailable`，不得以零值代替。完整运行顺序、版权和回滚规则见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。
+
+## AI 生产化 Observer 运维
+
+以 `ats data ai-production --snapshot` 做只读验收；需要视觉产物时增加 `--chart-dir`。保留 JSON、snapshot manifest、PNG sidecar 和对应 artifact/relation lineage，才能在上游 vintage 更新后使用相同 `as_of` 重放。图表失败只记录 warning，不应替换或删除表格输出。回滚是停止该 consumer/不注入其 Chain 只读附录；无需迁移或删除原始 observations、taxonomy relations 和历史 manifests。详见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。

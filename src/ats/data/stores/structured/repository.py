@@ -103,7 +103,9 @@ CREATE TABLE IF NOT EXISTS structured_derivations (
 CREATE TABLE IF NOT EXISTS structured_evidence_links (
     link_id TEXT PRIMARY KEY, observation_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
     document_id TEXT NOT NULL, version_id TEXT NOT NULL, char_start INTEGER NOT NULL,
-    char_end INTEGER NOT NULL, extraction_method TEXT NOT NULL, source_tier TEXT NOT NULL,
+    char_end INTEGER NOT NULL, anchor_kind TEXT NOT NULL DEFAULT 'text_span',
+    page_number INTEGER, chart_id TEXT NOT NULL DEFAULT '', region_json TEXT NOT NULL DEFAULT '',
+    extraction_method TEXT NOT NULL, source_tier TEXT NOT NULL,
     verification_status TEXT NOT NULL, reviewer TEXT NOT NULL, reviewed_at TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -111,7 +113,38 @@ CREATE INDEX IF NOT EXISTS idx_structured_evidence_target
     ON structured_evidence_links(candidate_id, observation_id, verification_status);
 CREATE TABLE IF NOT EXISTS structured_entities (
     entity_id TEXT PRIMARY KEY, kind TEXT NOT NULL, canonical_name TEXT NOT NULL,
-    aliases_json TEXT NOT NULL, securities_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    aliases_json TEXT NOT NULL, securities_json TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS structured_entity_relations (
+    relation_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, source_id TEXT NOT NULL,
+    parent_entity_id TEXT NOT NULL, child_entity_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL, source_version TEXT NOT NULL, known_at TEXT NOT NULL,
+    artifact_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL,
+    UNIQUE(dataset_id,source_id,parent_entity_id,child_entity_id,relation_type,source_version,active,metadata_json)
+);
+CREATE INDEX IF NOT EXISTS idx_structured_entity_relation_parent
+    ON structured_entity_relations(dataset_id,source_id,parent_entity_id,relation_type,known_at);
+CREATE INDEX IF NOT EXISTS idx_structured_entity_relation_child
+    ON structured_entity_relations(dataset_id,source_id,child_entity_id,relation_type,known_at);
+CREATE TABLE IF NOT EXISTS structured_frontier_capability_methods (
+    benchmark_id TEXT NOT NULL, method_version TEXT NOT NULL, comparability_group TEXT NOT NULL,
+    metadata_json TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (benchmark_id, method_version, comparability_group)
+);
+CREATE TABLE IF NOT EXISTS structured_frontier_capability_coverage (
+    lab_id TEXT NOT NULL, model_id TEXT NOT NULL, benchmark_id TEXT NOT NULL,
+    coverage_state TEXT NOT NULL, method_version TEXT NOT NULL DEFAULT '',
+    known_at TEXT NOT NULL, source_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
+    PRIMARY KEY (lab_id, model_id, benchmark_id, method_version, source_id)
+);
+CREATE TABLE IF NOT EXISTS structured_relation_candidates (
+    candidate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, source_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL, parent_entity_id TEXT NOT NULL, child_entity_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL, source_version TEXT NOT NULL, status TEXT NOT NULL,
+    reason_codes_json TEXT NOT NULL, artifact_id TEXT NOT NULL, raw_payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS structured_events (
     event_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -150,6 +183,18 @@ CREATE TABLE IF NOT EXISTS structured_snapshot_items (
     derivation_id TEXT NOT NULL, derivation_version TEXT NOT NULL,
     PRIMARY KEY (snapshot_id, ordinal)
 );
+CREATE TABLE IF NOT EXISTS structured_release_manifests (
+    release_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+    partition_name TEXT NOT NULL, report_date TEXT NOT NULL,
+    document_id TEXT NOT NULL, version_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
+    known_at TEXT NOT NULL, extractor_version TEXT NOT NULL,
+    status TEXT NOT NULL, passed INTEGER NOT NULL,
+    quality_json TEXT NOT NULL, observation_ids_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(dataset_id,partition_name,version_id,extractor_version)
+);
+CREATE INDEX IF NOT EXISTS idx_structured_release_lookup
+    ON structured_release_manifests(dataset_id,partition_name,known_at);
 CREATE TABLE IF NOT EXISTS structured_legacy_audits (
     audit_id TEXT PRIMARY KEY, audited_at TEXT NOT NULL, series_count INTEGER NOT NULL,
     point_count INTEGER NOT NULL, missing_published_at INTEGER NOT NULL,
@@ -165,6 +210,35 @@ CREATE TABLE IF NOT EXISTS structured_ingestion_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_structured_run_source
     ON structured_ingestion_runs(source_id, dataset_id, started_at);
+CREATE TABLE IF NOT EXISTS structured_source_checks (
+    check_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+    checked_at TEXT NOT NULL, status TEXT NOT NULL,
+    latest_upstream_identity TEXT NOT NULL DEFAULT '',
+    latest_ingested_identity TEXT NOT NULL DEFAULT '',
+    latest_available_period TEXT NOT NULL DEFAULT '',
+    candidate_identities_json TEXT NOT NULL DEFAULT '[]',
+    request_identity_json TEXT NOT NULL DEFAULT '{}',
+    diagnostics_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(source_id, dataset_id, checked_at, latest_upstream_identity, status)
+);
+CREATE INDEX IF NOT EXISTS idx_structured_source_check_latest
+    ON structured_source_checks(source_id, dataset_id, checked_at DESC);
+CREATE TABLE IF NOT EXISTS structured_source_purges (
+    purge_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, dataset_ids_json TEXT NOT NULL,
+    purged_at TEXT NOT NULL, actor TEXT NOT NULL,
+    observations INTEGER NOT NULL, series INTEGER NOT NULL, artifacts INTEGER NOT NULL,
+    source_checks INTEGER NOT NULL, blobs INTEGER NOT NULL, freed_bytes INTEGER NOT NULL,
+    sources INTEGER NOT NULL DEFAULT 0, datasets INTEGER NOT NULL DEFAULT 0,
+    exported INTEGER NOT NULL DEFAULT 0, residuals_json TEXT NOT NULL DEFAULT '[]',
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_structured_source_purge_lookup
+    ON structured_source_purges(source_id, purged_at DESC);
+CREATE TABLE IF NOT EXISTS structured_discovery_claims (
+    source_id TEXT NOT NULL, candidate_identity TEXT NOT NULL,
+    claimed_at TEXT NOT NULL, owner_id TEXT NOT NULL,
+    PRIMARY KEY(source_id, candidate_identity)
+);
 CREATE TABLE IF NOT EXISTS structured_candidates (
     candidate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, source_id TEXT NOT NULL,
     dataset_id TEXT NOT NULL, entity_id TEXT NOT NULL, provider_field TEXT NOT NULL,
@@ -232,6 +306,23 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _decode_json(value, fallback):
+    """Decode a stored JSON column, tolerating already-decoded and legacy shapes."""
+    if isinstance(value, (list, dict)):
+        return value
+    if not value:
+        return fallback
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+    return decoded if isinstance(decoded, type(fallback)) else fallback
+
+
+def _decode_list(value) -> list:
+    return list(_decode_json(value, []))
+
+
 def _stamp(value: datetime | None = None) -> str:
     return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(
         timespec="microseconds")
@@ -267,9 +358,37 @@ class SQLiteStructuredRepository:
 
     def _record_migration(self) -> None:
         with self.conn:
+            columns = {row[1] for row in self.conn.execute(
+                "PRAGMA table_info(structured_evidence_links)").fetchall()}
+            for ddl in (
+                "anchor_kind TEXT NOT NULL DEFAULT 'text_span'",
+                "page_number INTEGER",
+                "chart_id TEXT NOT NULL DEFAULT ''",
+                "region_json TEXT NOT NULL DEFAULT ''",
+            ):
+                if ddl.split()[0] not in columns:
+                    self.conn.execute(
+                        f"ALTER TABLE structured_evidence_links ADD COLUMN {ddl}")
+            entity_columns = {row[1] for row in self.conn.execute(
+                "PRAGMA table_info(structured_entities)").fetchall()}
+            if "metadata_json" not in entity_columns:
+                self.conn.execute(
+                    "ALTER TABLE structured_entities ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
             self.conn.execute(
                 "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
                 "VALUES ('structured_foundation_v1',?,'additive governed structured tables')",
+                (_stamp(),))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
+                "VALUES ('structured_entity_relations_v1',?,'versioned entity relations and metadata')",
+                (_stamp(),))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
+                "VALUES ('structured_source_checks_v1',?,'auditable source discovery checks')",
+                (_stamp(),))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_migrations(key,applied_at,note) "
+                "VALUES ('structured_source_purges_v1',?,'explicit confirmed source data purges')",
                 (_stamp(),))
 
     def close(self) -> None:
@@ -348,22 +467,159 @@ class SQLiteStructuredRepository:
 
     def register_entity(self, *, entity_id: str, kind: str, canonical_name: str,
                         aliases: list[str] | None = None,
-                        securities: list[dict] | None = None) -> None:
+                        securities: list[dict] | None = None,
+                        metadata: dict | None = None) -> None:
         with self._lock, self.conn:
             self.conn.execute(
-                "INSERT INTO structured_entities VALUES (?,?,?,?,?,?) "
+                "INSERT INTO structured_entities "
+                "(entity_id,kind,canonical_name,aliases_json,securities_json,metadata_json,updated_at) "
+                "VALUES (?,?,?,?,?,?,?) "
                 "ON CONFLICT(entity_id) DO UPDATE SET kind=excluded.kind,"
                 "canonical_name=excluded.canonical_name,aliases_json=excluded.aliases_json,"
-                "securities_json=excluded.securities_json,updated_at=excluded.updated_at",
+                "securities_json=excluded.securities_json,metadata_json=excluded.metadata_json,"
+                "updated_at=excluded.updated_at",
                 (entity_id.upper(), kind, canonical_name, _json(aliases or []),
-                 _json(securities or []), _stamp()))
+                 _json(securities or []), _json(metadata or {}), _stamp()))
+
+    def save_frontier_capability_metadata(self, *, records: list[dict], source_id: str,
+                                          known_at: datetime | None = None) -> None:
+        """Persist method versions and explicit coverage states alongside scores.
+
+        This additive table is intentionally independent of observations, allowing
+        NA/withdrawn cells to survive when a source has no numeric score.
+        """
+        stamp = _stamp(known_at)
+        with self._lock, self.conn:
+            for item in records:
+                self.conn.execute(
+                    "INSERT INTO structured_frontier_capability_methods VALUES (?,?,?,?,?,?) "
+                    "ON CONFLICT(benchmark_id,method_version,comparability_group) DO UPDATE SET "
+                    "metadata_json=excluded.metadata_json,last_seen_at=excluded.last_seen_at",
+                    (str(item.get("benchmark_id") or ""), str(item.get("method_version") or ""),
+                     str(item.get("comparability_group") or ""), _json(item), stamp, stamp))
+                self.conn.execute(
+                    "INSERT INTO structured_frontier_capability_coverage VALUES (?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(lab_id,model_id,benchmark_id,method_version,source_id) DO UPDATE SET "
+                    "coverage_state=excluded.coverage_state,known_at=excluded.known_at,metadata_json=excluded.metadata_json",
+                    (str(item.get("lab_id") or ""), str(item.get("model_id") or ""),
+                     str(item.get("benchmark_id") or ""), str(item.get("coverage_state") or "observed"),
+                     str(item.get("method_version") or ""), stamp, source_id, _json(item)))
+
+    def frontier_capability_coverage(self, *, lab_id: str | None = None,
+                                     model_id: str | None = None,
+                                     benchmark_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM structured_frontier_capability_coverage WHERE 1=1"; args: list = []
+        for column, value in (("lab_id", lab_id), ("model_id", model_id), ("benchmark_id", benchmark_id)):
+            if value:
+                sql += f" AND {column}=?"; args.append(value)
+        sql += " ORDER BY lab_id,model_id,benchmark_id"
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def save_entity_relation(self, *, dataset_id: str, source_id: str,
+                             parent_entity_id: str, child_entity_id: str,
+                             relation_type: str, source_version: str,
+                             known_at: datetime, artifact_id: str,
+                             metadata: dict | None = None, active: bool = True) -> tuple[str, bool]:
+        """Append one immutable relationship version and return (id, created)."""
+        body = {
+            "dataset_id": dataset_id, "source_id": source_id,
+            "parent_entity_id": parent_entity_id.upper(),
+            "child_entity_id": child_entity_id.upper(),
+            "relation_type": relation_type, "source_version": source_version,
+            "metadata": metadata or {}, "active": bool(active),
+        }
+        relation_id = hashlib.sha256(_json(body).encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO structured_entity_relations "
+                "(relation_id,dataset_id,source_id,parent_entity_id,child_entity_id,relation_type,"
+                "source_version,known_at,artifact_id,active,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (relation_id, dataset_id, source_id, body["parent_entity_id"],
+                 body["child_entity_id"], relation_type, source_version, _stamp(known_at),
+                 artifact_id, int(active), _json(metadata or {})))
+        return relation_id, cur.rowcount > 0
+
+    def entity_relations(self, *, dataset_id: str | None = None,
+                         source_id: str | None = None,
+                         parent_entity_id: str | None = None,
+                         child_entity_id: str | None = None,
+                         relation_type: str | None = None,
+                         as_of: datetime | None = None,
+                         active_only: bool = True, limit: int = 5000) -> list[dict]:
+        sql = "SELECT * FROM structured_entity_relations WHERE 1=1"
+        args: list = []
+        for column, value in (("dataset_id", dataset_id), ("source_id", source_id),
+                              ("parent_entity_id", parent_entity_id.upper() if parent_entity_id else None),
+                              ("child_entity_id", child_entity_id.upper() if child_entity_id else None),
+                              ("relation_type", relation_type)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        cutoff = _stamp(as_of or datetime.now(timezone.utc))
+        sql += " AND known_at<=?"
+        args.append(cutoff)
+        sql += (" AND NOT EXISTS (SELECT 1 FROM structured_entity_relations newer "
+                "WHERE newer.dataset_id=structured_entity_relations.dataset_id "
+                "AND newer.source_id=structured_entity_relations.source_id "
+                "AND newer.parent_entity_id=structured_entity_relations.parent_entity_id "
+                "AND newer.child_entity_id=structured_entity_relations.child_entity_id "
+                "AND newer.relation_type=structured_entity_relations.relation_type "
+                "AND newer.known_at>structured_entity_relations.known_at "
+                "AND newer.known_at<=?)")
+        args.append(cutoff)
+        if active_only:
+            sql += " AND active=1"
+        sql += " ORDER BY parent_entity_id,child_entity_id,relation_type,known_at LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def entity_relation(self, relation_id: str) -> dict | None:
+        """Return one immutable taxonomy relation for snapshot replay/audit."""
+        row = self.conn.execute(
+            "SELECT * FROM structured_entity_relations WHERE relation_id=?", (relation_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_relation_candidate(self, *, run_id: str, source_id: str, dataset_id: str,
+                                parent_entity_id: str, child_entity_id: str,
+                                relation_type: str, source_version: str,
+                                reason_codes: list[str], artifact_id: str = "",
+                                raw: dict | None = None, at: datetime | None = None) -> str:
+        identity = "|".join((run_id, parent_entity_id, child_entity_id, relation_type, source_version,
+                             _json(reason_codes)))
+        candidate_id = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO structured_relation_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (candidate_id, run_id, source_id, dataset_id, parent_entity_id.upper(),
+                 child_entity_id.upper(), relation_type, source_version, "quarantined",
+                 _json(reason_codes), artifact_id, _json(raw or {}), _stamp(at)))
+        return candidate_id
+
+    def relation_candidates(self, *, run_id: str | None = None,
+                            limit: int = 1000) -> list[dict]:
+        sql = "SELECT * FROM structured_relation_candidates WHERE 1=1"
+        args: list = []
+        if run_id:
+            sql += " AND run_id=?"
+            args.append(run_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
 
     def entities(self) -> list[dict]:
         return [dict(row) for row in self.conn.execute(
             "SELECT * FROM structured_entities ORDER BY entity_id").fetchall()]
 
     def resolve_entity(self, value: str) -> str | None:
-        target = value.strip().casefold()
+        stripped = value.strip()
+        direct = self.conn.execute(
+            "SELECT entity_id FROM structured_entities WHERE entity_id=? COLLATE NOCASE",
+            (stripped,),
+        ).fetchone()
+        if direct:
+            return direct["entity_id"]
+        target = stripped.casefold()
         for row in self.entities():
             aliases = json.loads(row["aliases_json"] or "[]")
             if target in {row["entity_id"].casefold(), row["canonical_name"].casefold(),
@@ -500,6 +756,32 @@ class SQLiteStructuredRepository:
             "by_source": rows,
         }
 
+    def artifacts_for(self, *, source_id: str | None = None,
+                      dataset_id: str | None = None,
+                      content_hash: str | None = None,
+                      limit: int = 500) -> list[dict]:
+        sql = ("SELECT a.*,b.content_hash,b.relative_path,b.bytes "
+               "FROM structured_artifacts a JOIN structured_artifact_blobs b "
+               "ON b.blob_id=a.blob_id WHERE 1=1")
+        args: list = []
+        for column, value in (("a.source_id", source_id),
+                              ("a.dataset_id", dataset_id),
+                              ("b.content_hash", content_hash)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        sql += " ORDER BY a.fetched_at DESC,a.artifact_id LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    def artifact(self, artifact_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT a.*,b.content_hash AS artifact_content_hash,b.relative_path,b.bytes "
+            "FROM structured_artifacts a JOIN structured_artifact_blobs b "
+            "ON b.blob_id=a.blob_id WHERE a.artifact_id=?", (artifact_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
     def source_health(self) -> list[dict]:
         """Return one explicit health row for every registered source."""
         sql = """
@@ -513,7 +795,290 @@ class SQLiteStructuredRepository:
             WHERE r2.source_id=s.source_id ORDER BY r2.started_at DESC LIMIT 1)
         ORDER BY s.source_id
         """
-        return [dict(row) for row in self.conn.execute(sql).fetchall()]
+        rows = [dict(row) for row in self.conn.execute(sql).fetchall()]
+        for row in rows:
+            check = self.source_checks(source_id=row["source_id"], limit=1)
+            if check:
+                latest_check = check[0]
+                row.update({
+                    "last_checked_at": latest_check["checked_at"],
+                    "latest_upstream_identity": latest_check["latest_upstream_identity"],
+                    "latest_ingested_identity": latest_check["latest_ingested_identity"],
+                    "latest_available_period": latest_check["latest_available_period"],
+                    "last_check_status": latest_check["status"],
+                    "last_check_diagnostics": json.loads(latest_check["diagnostics_json"] or "{}"),
+                })
+            if row["source_id"] != "anthropic_economic_index":
+                continue
+            history = self.ingestion_history(source_id=row["source_id"], limit=1)
+            latest = history[0] if history else {}
+            artifacts = self.artifacts_for(source_id=row["source_id"], limit=1000)
+            metadata = [json.loads(item.get("metadata_json") or "{}") for item in artifacts]
+            observations = self.observations(source_id=row["source_id"], latest_only=True,
+                                             accepted_only=True, limit=1_000_000)
+            products = {}
+            for product in ("claude_ai", "1p_api"):
+                product_rows = [item for item in observations
+                                if json.loads(item.get("dimensions_json") or "{}").get("source_product") == product]
+                products[product] = {
+                    "status": "ingested" if product_rows else "not_published_or_privacy_filtered",
+                    "latest_available_period": max((item["period"] for item in product_rows), default=None),
+                }
+            row.update({
+                "last_checked_at": row.get("last_checked_at") or latest.get("started_at"),
+                "latest_upstream_commit": next((item.get("repository_commit") for item in metadata
+                                                 if item.get("repository_commit")), None),
+                "latest_ingested_release": next((item.get("release") for item in metadata if item.get("release")), None),
+                "latest_available_period": max((item["period"] for item in observations
+                                                if item.get("period_basis") == "calendar_month"), default=None),
+                "source_products": products,
+            })
+        return rows
+
+    def save_source_check(self, *, source_id: str, dataset_id: str, status: str,
+                          latest_upstream_identity: str = "",
+                          latest_ingested_identity: str = "",
+                          latest_available_period: str = "",
+                          candidates: list[dict] | None = None,
+                          request_identity: dict | None = None,
+                          diagnostics: dict | None = None,
+                          at: datetime | None = None) -> str:
+        checked_at = _stamp(at)
+        check_id = hashlib.sha256("|".join((source_id, dataset_id, checked_at, status,
+                                             latest_upstream_identity)).encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO structured_source_checks VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (check_id, source_id, dataset_id, checked_at, status,
+                 latest_upstream_identity, latest_ingested_identity, latest_available_period,
+                 _json(candidates or []), _json(request_identity or {}), _json(diagnostics or {})))
+        return check_id
+
+    def source_checks(self, *, source_id: str | None = None,
+                      dataset_id: str | None = None, limit: int = 100) -> list[dict]:
+        sql = "SELECT * FROM structured_source_checks WHERE 1=1"
+        args: list = []
+        if source_id:
+            sql += " AND source_id=?"
+            args.append(source_id)
+        if dataset_id:
+            sql += " AND dataset_id=?"
+            args.append(dataset_id)
+        sql += " ORDER BY checked_at DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+
+    # ------------------------------------------------------------------ purge
+    # Physical removal of a retired source's data.  This is deliberately the only
+    # place that deletes governed rows: collection, publication, rollback and
+    # catalog sync must never reach it, because those paths are routine and this
+    # one is irreversible.
+
+    def _exclusive_blobs(self, source_id: str, blob_ids: list[str]) -> list[str]:
+        """Blobs that no ``structured_artifacts`` row outside this source references.
+
+        The condition is per *artifact row*, not per *other source*: content
+        deduplication happens inside a source too, so a blob may back several of
+        this source's own artifacts.  Once those rows are gone the blob is
+        unreferenced and safe to drop.
+        """
+        if not blob_ids:
+            return []
+        placeholders = ",".join("?" * len(blob_ids))
+        shared = {row[0] for row in self.conn.execute(
+            f"SELECT DISTINCT blob_id FROM structured_artifacts "
+            f"WHERE blob_id IN ({placeholders}) AND source_id<>?",
+            [*blob_ids, source_id]).fetchall()}
+        return [blob_id for blob_id in blob_ids if blob_id not in shared]
+
+    def purge_plan(self, source_id: str) -> dict:
+        """Read-only inventory of what purging ``source_id`` would remove."""
+        source_row = self.source(source_id) or {}
+        dataset_ids = _decode_list(source_row.get("datasets_json"))
+        observations = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_observations o "
+            "JOIN structured_series s ON s.series_id=o.series_id "
+            "WHERE s.source_id=?", (source_id,)).fetchone()[0])
+        series = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_series WHERE source_id=?",
+            (source_id,)).fetchone()[0])
+        artifacts = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_artifacts WHERE source_id=?",
+            (source_id,)).fetchone()[0])
+        blob_ids = [row[0] for row in self.conn.execute(
+            "SELECT DISTINCT blob_id FROM structured_artifacts WHERE source_id=?",
+            (source_id,)).fetchall()]
+        exclusive = self._exclusive_blobs(source_id, blob_ids)
+        bytes_freed = 0
+        blob_paths: list[str] = []
+        if exclusive:
+            placeholders = ",".join("?" * len(exclusive))
+            bytes_freed = int(self.conn.execute(
+                "SELECT COALESCE(SUM(bytes),0) FROM structured_artifact_blobs "
+                f"WHERE blob_id IN ({placeholders})", exclusive).fetchone()[0])
+            blob_paths = [row[0] for row in self.conn.execute(
+                "SELECT relative_path FROM structured_artifact_blobs "
+                f"WHERE blob_id IN ({placeholders})", exclusive).fetchall()]
+        source_checks = int(self.conn.execute(
+            "SELECT COUNT(*) FROM structured_source_checks WHERE source_id=?",
+            (source_id,)).fetchone()[0])
+        return {
+            "row_counts": {
+                "observations": observations,
+                "series": series,
+                "artifacts": artifacts,
+                "source_checks": source_checks,
+                "registered_sources": 1 if source_row else 0,
+                "registered_datasets": sum(
+                    1 for dataset_id in dataset_ids if self.dataset(dataset_id)),
+            },
+            "dataset_ids": dataset_ids,
+            "blobs": len(exclusive),
+            "blobs_total": len(blob_ids),
+            "bytes_freed": bytes_freed,
+            "exclusive_blobs": sorted(exclusive),
+            "blob_paths": blob_paths,
+            # Tables holding rows of this source that the purge intentionally
+            # leaves behind because they are operational history, not data: the
+            # ingestion ledger is the audit trail that the source ran and was
+            # then retired.  Surfaced explicitly so the residue is never silent.
+            "residual_tables": {
+                "structured_ingestion_runs": int(self.conn.execute(
+                    "SELECT COUNT(*) FROM structured_ingestion_runs WHERE source_id=?",
+                    (source_id,)).fetchone()[0]),
+            },
+        }
+
+    def purge_source(self, source_id: str, *, confirm: bool = False,
+                     catalog: StructuredCatalog | None = None,
+                     actor: str = "cli", exported: bool = False,
+                     note: str = "") -> dict:
+        """Dry-run or execute the physical deletion of a retired source's data.
+
+        Without ``confirm`` this only reads.  With ``confirm`` it requires a
+        retirement tombstone, deletes every row in a single transaction, and only
+        then unlinks the blobs those artifacts exclusively owned: a database
+        transaction cannot roll back the filesystem, so removing files first
+        would risk leaving rows that point at nothing, whereas running second at
+        worst leaves an unreferenced file that the next health check reports.
+        """
+        catalog = catalog or StructuredCatalog.load()
+        tombstone = catalog.retired_source(source_id)
+        plan = self.purge_plan(source_id)
+        head = {
+            "source_id": source_id,
+            "tombstoned": tombstone is not None,
+            "retired_at": tombstone.retired_at.isoformat() if tombstone else "",
+            "retirement_reason": tombstone.reason if tombstone else "",
+            "disposition": tombstone.disposition.value if tombstone else "",
+        }
+        if not confirm:
+            return {"mode": "dry_run", **head, **plan,
+                    "previous_purges": self.purge_records(source_id=source_id)}
+        if tombstone is None:
+            raise ValueError(
+                f"source {source_id} has no retirement tombstone; refusing to purge a "
+                "source that is not retired. Retire it through a change first so the "
+                "id is recorded and cannot be silently reused.")
+
+        purged_at = _stamp()
+        purge_id = hashlib.sha1(
+            f"{source_id}|{purged_at}|{actor}".encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            removed = {
+                "observations": self.conn.execute(
+                    "DELETE FROM structured_observations WHERE series_id IN "
+                    "(SELECT series_id FROM structured_series WHERE source_id=?)",
+                    (source_id,)).rowcount,
+                "series": self.conn.execute(
+                    "DELETE FROM structured_series WHERE source_id=?",
+                    (source_id,)).rowcount,
+                "artifacts": self.conn.execute(
+                    "DELETE FROM structured_artifacts WHERE source_id=?",
+                    (source_id,)).rowcount,
+                "source_checks": self.conn.execute(
+                    "DELETE FROM structured_source_checks WHERE source_id=?",
+                    (source_id,)).rowcount,
+            }
+            exclusive = plan["exclusive_blobs"]
+            removed["blobs"] = 0
+            if exclusive:
+                removed["blobs"] = self.conn.execute(
+                    "DELETE FROM structured_artifact_blobs "
+                    f"WHERE blob_id IN ({','.join('?' * len(exclusive))})",
+                    exclusive).rowcount
+            removed["registered_sources"] = self.conn.execute(
+                "DELETE FROM structured_sources WHERE source_id=?", (source_id,)).rowcount
+            removed["registered_datasets"] = 0
+            for dataset_id in plan["dataset_ids"]:
+                # A dataset is shared when any surviving source still declares it;
+                # only unregistered when this source was its last declared owner.
+                still_used = any(
+                    dataset_id in _decode_list(row[0])
+                    for row in self.conn.execute(
+                        "SELECT datasets_json FROM structured_sources WHERE source_id<>?",
+                        (source_id,)).fetchall())
+                if not still_used:
+                    removed["registered_datasets"] += self.conn.execute(
+                        "DELETE FROM structured_datasets WHERE dataset_id=?",
+                        (dataset_id,)).rowcount
+            self.conn.execute(
+                "INSERT INTO structured_source_purges(purge_id,source_id,dataset_ids_json,"
+                "purged_at,actor,observations,series,artifacts,source_checks,blobs,"
+                "freed_bytes,sources,datasets,exported,residuals_json,note) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (purge_id, source_id, _json(plan["dataset_ids"]), purged_at, actor,
+                 removed["observations"], removed["series"], removed["artifacts"],
+                 removed["source_checks"], removed["blobs"], plan["bytes_freed"],
+                 removed["registered_sources"], removed["registered_datasets"],
+                 int(bool(exported)), _json(plan["residual_tables"]), note))
+
+        # Only now, after the transaction committed, unlink the blob files.
+        files_removed = 0
+        for relative_path in plan["blob_paths"]:
+            target = self.artifacts.root / relative_path
+            try:
+                target.unlink()
+                files_removed += 1
+            except FileNotFoundError:
+                continue
+        return {
+            "mode": "purged", **head, "purge_id": purge_id, "purged_at": purged_at,
+            "actor": actor, "exported": bool(exported),
+            "deleted": removed, "bytes_freed": plan["bytes_freed"],
+            "blob_files_removed": files_removed,
+            "dataset_ids": plan["dataset_ids"],
+            "residual_tables": plan["residual_tables"],
+        }
+
+    def purge_records(self, *, source_id: str | None = None,
+                      limit: int = 100) -> list[dict]:
+        """Return the audit record written by each completed purge."""
+        sql = "SELECT * FROM structured_source_purges WHERE 1=1"
+        args: list = []
+        if source_id:
+            sql += " AND source_id=?"
+            args.append(source_id)
+        sql += " ORDER BY purged_at DESC LIMIT ?"
+        args.append(limit)
+        records = []
+        for row in self.conn.execute(sql, args).fetchall():
+            record = dict(row)
+            record["dataset_ids"] = _decode_list(record.pop("dataset_ids_json", "[]"))
+            record["residuals"] = _decode_json(record.pop("residuals_json", "{}"), {})
+            record["exported"] = bool(record["exported"])
+            records.append(record)
+        return records
+
+    def claim_discovery_candidate(self, *, source_id: str, candidate_identity: str,
+                                  owner_id: str) -> bool:
+        """Atomically claim one immutable release for discovery/ingestion."""
+        with self._lock, self.conn:
+            cursor = self.conn.execute(
+                "INSERT OR IGNORE INTO structured_discovery_claims "
+                "(source_id,candidate_identity,claimed_at,owner_id) VALUES (?,?,?,?)",
+                (source_id, candidate_identity, _stamp(), owner_id))
+        return cursor.rowcount == 1
 
     def begin_ingestion(self, *, source_id: str, dataset_id: str,
                         query_scope: dict, at: datetime | None = None) -> str:
@@ -663,11 +1228,17 @@ class SQLiteStructuredRepository:
         link_id = hashlib.sha256(_json(body).encode()).hexdigest()[:24]
         with self._lock, self.conn:
             self.conn.execute(
-                "INSERT OR REPLACE INTO structured_evidence_links VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO structured_evidence_links "
+                "(link_id,observation_id,candidate_id,document_id,version_id,char_start,"
+                "char_end,anchor_kind,page_number,chart_id,region_json,extraction_method,"
+                "source_tier,verification_status,reviewer,reviewed_at,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (link_id, link.observation_id, link.candidate_id, link.document_id,
-                 link.version_id, link.char_start, link.char_end, link.extraction_method,
-                 link.source_tier, link.verification_status.value, link.reviewer,
+                 link.version_id, link.char_start, link.char_end, link.anchor_kind,
+                 link.page_number, link.chart_id,
+                 _json(link.region) if link.region is not None else "",
+                 link.extraction_method, link.source_tier,
+                 link.verification_status.value, link.reviewer,
                  _stamp(link.reviewed_at) if link.reviewed_at else "", _stamp()))
         return link_id
 
@@ -715,6 +1286,62 @@ class SQLiteStructuredRepository:
         return [dict(row) for row in self.conn.execute(
             "SELECT * FROM structured_evidence_reviews WHERE candidate_id=? "
             "ORDER BY rowid", (candidate_id,)).fetchall()]
+
+    def save_release_manifest(self, *, source_id: str, dataset_id: str,
+                              partition: str, report_date: str,
+                              document_id: str, version_id: str,
+                              artifact_id: str, known_at: datetime,
+                              extractor_version: str, status: str, passed: bool,
+                              quality: dict, observation_ids: list[str]) -> str:
+        identity = f"{dataset_id}|{partition}|{version_id}|{extractor_version}"
+        release_id = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO structured_release_manifests VALUES "
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(dataset_id,partition_name,version_id,extractor_version) "
+                "DO UPDATE SET status=excluded.status,passed=excluded.passed,"
+                "quality_json=excluded.quality_json,"
+                "observation_ids_json=excluded.observation_ids_json",
+                (release_id, source_id, dataset_id, partition, report_date,
+                 document_id, version_id, artifact_id, _stamp(known_at),
+                 extractor_version, status, int(passed), _json(quality),
+                 _json(observation_ids), _stamp()))
+        return release_id
+
+    def release_manifests(self, *, dataset_id: str | None = None,
+                          partition: str | None = None,
+                          as_of: datetime | None = None,
+                          passed_only: bool = False,
+                          limit: int = 500) -> list[dict]:
+        sql, args = "SELECT * FROM structured_release_manifests WHERE 1=1", []
+        for column, value in (("dataset_id", dataset_id),
+                              ("partition_name", partition)):
+            if value:
+                sql += f" AND {column}=?"
+                args.append(value)
+        if as_of:
+            sql += " AND known_at<=?"
+            args.append(_stamp(as_of))
+        if passed_only:
+            sql += " AND passed=1"
+        sql += " ORDER BY known_at DESC,created_at DESC LIMIT ?"
+        args.append(limit)
+        rows = [dict(row) for row in self.conn.execute(sql, args).fetchall()]
+        for row in rows:
+            row["quality"] = json.loads(row.pop("quality_json") or "{}")
+            row["observation_ids"] = json.loads(
+                row.pop("observation_ids_json") or "[]")
+            row["passed"] = bool(row["passed"])
+        return rows
+
+    def latest_release(self, *, dataset_id: str, partition: str,
+                       as_of: datetime | None = None,
+                       passed_only: bool = True) -> dict | None:
+        rows = self.release_manifests(
+            dataset_id=dataset_id, partition=partition, as_of=as_of,
+            passed_only=passed_only, limit=1)
+        return rows[0] if rows else None
 
     def comparable_observations(self, *, dataset_id: str, entity_id: str,
                                 metric_id: str, period: str) -> list[dict]:
@@ -1007,7 +1634,15 @@ class SQLiteStructuredRepository:
                 definition = self.derivation(*key)
                 if definition:
                     derivations[key] = definition
-        return {**manifest, "rows": rows, "derivations": list(derivations.values())}
+        relation_ids = manifest.get("metadata", {}).get("relation_ids", [])
+        relations = [relation for relation_id in relation_ids
+                     if (relation := self.entity_relation(relation_id)) is not None]
+        artifact_ids = sorted({row["artifact_id"] for row in rows} |
+                              {row["artifact_id"] for row in relations if row.get("artifact_id")})
+        artifacts = [artifact for artifact_id in artifact_ids
+                     if (artifact := self.artifact(artifact_id)) is not None]
+        return {**manifest, "rows": rows, "relations": relations, "artifacts": artifacts,
+                "derivations": list(derivations.values())}
 
     def open_read_only(self) -> sqlite3.Connection:
         if self.path == ":memory:":
@@ -1080,8 +1715,11 @@ def default_db_path() -> str:
     from ....config import REPO_ROOT
 
     return os.environ.get(
-        "ATS_STRUCTURED_DB_PATH",
-        os.environ.get("ATS_DB_PATH", str(REPO_ROOT / "var" / "ats.sqlite")),
+        "ATS_DATA_DB_PATH",
+        os.environ.get(
+            "ATS_STRUCTURED_DB_PATH",
+            str(REPO_ROOT / "var" / "data.sqlite"),
+        ),
     )
 
 

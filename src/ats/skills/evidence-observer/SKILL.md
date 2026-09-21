@@ -14,6 +14,14 @@
 方向判断（up/flat/down）只描述**该指标本身**的变化，不是对股价或投资价值的判断。
 "产能上升" 是 up，不管这对谁是利好。
 
+## Claude 职业与任务观测
+
+当输入来自 Anthropic Economic Index 时，只能通过 Evidence Observer 的
+`observe_work_adoption` 入口消费 DataProducts snapshot/profile，禁止访问 Hugging Face、
+SQLite 或结构化数据物理表。`Usage Share` 只能表述为对应 Claude 产品总使用量中的职业/任务
+份额；`Industry` 只能表述为 SOC 职业大类；Observed Exposure 只能表述为研究快照。
+禁止把这些数据改写成员工采用率、企业席位渗透率、岗位替代数量或交易信号。
+
 ## 每条观测必须带原文片段
 
 `evidence_span` 是从文档里**逐字摘录**的最短必要片段（不要改写、不要翻译、不要摘要）。

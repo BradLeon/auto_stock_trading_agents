@@ -43,12 +43,48 @@ def render(review: SectorReview, cfg: SectorConfig) -> str:
             lines.append(f"| {label} | {sym} | {c.stance} | {c.conviction:.2f} | {c.rationale} |")
 
     lines += ["", "## 跨层轮动", "", review.rotation_advice or "（本轮未产出）",
-              "", "## 主要风险", ""]
+              ""]
+    lines += _top_down_section(review)
+    lines += ["## 主要风险", ""]
     lines += [f"- {r}" for r in review.top_risks]
     lines += ["", "---",
               f"*universe {len(cfg.all_symbols())} 家（**加粗** = PEAD 活体档案标的）；"
               f"数据截至 {review.as_of:%Y-%m-%d %H:%M} UTC*", ""]
     return "\n".join(lines)
+
+
+def _top_down_section(review: SectorReview) -> list[str]:
+    comparison = review.top_down_comparison
+    lines = ["## 宏观与 FactSet 对照", ""]
+    if comparison is None:
+        return lines + ["（这份旧报告没有保存最终对照结果。）", ""]
+    lines += [
+        "### 宏观报告提供的背景", "",
+        comparison.macro_background or "（没有可用的最新正式宏观报告。）",
+    ]
+    if comparison.macro_review_date:
+        lines.append(f"- 使用的宏观报告日期：{comparison.macro_review_date}")
+    lines += ["", "### FactSet 行业数据提供的背景", "",
+              comparison.factset_background or "（没有可用的正式 FactSet 十一行业数据。）"]
+    if comparison.factset_report_date:
+        lines.append(f"- 使用的 FactSet 报告日期：{comparison.factset_report_date}")
+    if comparison.factset_version_id:
+        lines.append(f"- 数据版本：`{comparison.factset_version_id}`")
+    lines += ["", "### 与八个产业链环节一致的地方", ""]
+    lines += ([f"- {item}" for item in comparison.agreements]
+              or ["- 没有形成有证据的一致性判断。"])
+    lines += ["", "### 与八个产业链环节存在分歧的地方", ""]
+    lines += ([f"- {item}" for item in comparison.divergences]
+              or ["- 没有识别出明确分歧，或可用背景不足。"])
+    lines += ["", "### 是否改变本周产业链配置建议", "",
+              comparison.recommendation_impact or
+              "没有足够的正式背景改变跨层建议；八个单层结论保持不变。"]
+    if comparison.availability_notes:
+        lines += ["", "### 未采用数据及原因", ""]
+        lines += [f"- {item}" for item in comparison.availability_notes]
+    lines += ["", "> 宏观和 FactSet 仅参与上述最终对照；没有回写或修改任何单层结论、"
+              "逐票判断、信心或证据链。", ""]
+    return lines
 
 
 def _layer_verdict_section(review: SectorReview, cfg: SectorConfig, pead: set) -> list[str]:

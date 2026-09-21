@@ -1,0 +1,123 @@
+schema_version: 1
+report_id: "082826"
+report_date: "2026-08-28"
+pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+text_sha256: 111e4bf657fee2b94e80532f368207275f66b254f674c41d1807f96cb99ae429
+page_count: 37
+expected_phase: substantially_complete
+revision_breadth:
+  applicable: true
+  count: 10
+  sector_total: 11
+  comparison_date: "2026-06-30"
+  direction: upward
+  wording_anchor: "Ten of eleven sectors are reporting higher earnings"
+  pages: [1, 10]
+chart_pages:
+  earnings_revenue_scorecard: [17]
+  earnings_revenue_surprise: [18, 19, 20]
+  earnings_revenue_growth: [21, 22]
+  net_profit_margin: [23]
+  eps_guidance: [24]
+  geographic_revenue_exposure: [30]
+  forward_pe: [33]
+  target_ratings: [36]
+sector_annotation_status: complete
+review_provenance:
+  method: operator_visual_review
+  recorded_at: "2026-09-03"
+  source_pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+  release_rule: "Any unreadable, unresolved, missing, or corrected-but-unverified cell keeps sector_core shadow."
+  corrections:
+    - {chart_id: earnings_revenue_scorecard, page_number: 17, image_number: 2, sector_label: Industrials, column: eps_inline, previous_value: 0.02, corrected_value: 0.03, source_token: "3%", decision: accepted}
+    - {chart_id: earnings_revenue_scorecard, page_number: 17, image_number: 2, sector_label: Financials, column: eps_below, previous_value: 0.14, corrected_value: 0.13, source_token: "13%", decision: accepted}
+  decisions:
+    - {chart_id: earnings_revenue_scorecard, pages: [17], image_numbers: [2, 3], decision: accepted, confirmed_cells: 66}
+    - {chart_id: earnings_revenue_surprise, pages: [18], image_numbers: [2], decision: accepted, confirmed_cells: 11, not_applicable_columns: [revenue_surprise]}
+    - {chart_id: earnings_revenue_growth, pages: [21], image_numbers: [2], decision: accepted, confirmed_cells: 11, comparison_date: "2026-08-28", not_applicable_columns: [revenue_growth]}
+    - {chart_id: net_profit_margin, pages: [23], image_numbers: [2, 3], decision: accepted, confirmed_cells: 44}
+    - {chart_id: eps_guidance, pages: [24], image_numbers: [2], decision: accepted, confirmed_cells: 22}
+    - {chart_id: geographic_revenue_exposure, pages: [30], image_numbers: [3], decision: accepted, confirmed_cells: 22}
+    - {chart_id: forward_pe, pages: [33], image_numbers: [2], decision: accepted, confirmed_cells: 11}
+    - {chart_id: target_ratings, pages: [36], image_numbers: [2, 3], decision: accepted, confirmed_cells: 44}
+# Confirmed by operator review in eight chart batches. Values are normalized:
+# ratios are decimals; counts/multiples/percentages retain their native values.
+sector_golden_tables:
+  - chart_id: earnings_revenue_scorecard
+    page_number: 17
+    period: "2026Q2"
+    period_basis: target_quarter
+    estimate_state: actual
+    unit: ratio
+    columns:
+      eps_above: {Health Care: 0.96, Information Technology: 0.93, Industrials: 0.90, Financials: 0.85, Materials: 0.85, Consumer Staples: 0.84, Real Estate: 0.84, Consumer Discretionary: 0.83, Communication Services: 0.82, Energy: 0.81, Utilities: 0.68}
+      eps_inline: {Health Care: 0.04, Information Technology: 0.01, Industrials: 0.03, Financials: 0.01, Materials: 0.00, Consumer Staples: 0.03, Real Estate: 0.06, Consumer Discretionary: 0.04, Communication Services: 0.00, Energy: 0.05, Utilities: 0.10}
+      eps_below: {Health Care: 0.00, Information Technology: 0.06, Industrials: 0.08, Financials: 0.13, Materials: 0.15, Consumer Staples: 0.13, Real Estate: 0.10, Consumer Discretionary: 0.13, Communication Services: 0.18, Energy: 0.14, Utilities: 0.23}
+      revenue_above: {Health Care: 0.95, Information Technology: 0.88, Industrials: 0.82, Consumer Staples: 0.81, Energy: 0.76, Real Estate: 0.74, Consumer Discretionary: 0.72, Financials: 0.71, Materials: 0.65, Communication Services: 0.64, Utilities: 0.48}
+      revenue_inline: {Health Care: 0.00, Information Technology: 0.00, Industrials: 0.00, Consumer Staples: 0.00, Energy: 0.00, Real Estate: 0.00, Consumer Discretionary: 0.00, Financials: 0.00, Materials: 0.00, Communication Services: 0.00, Utilities: 0.00}
+      revenue_below: {Health Care: 0.05, Information Technology: 0.12, Industrials: 0.18, Consumer Staples: 0.19, Energy: 0.24, Real Estate: 0.26, Consumer Discretionary: 0.28, Financials: 0.29, Materials: 0.35, Communication Services: 0.36, Utilities: 0.52}
+  - chart_id: earnings_revenue_surprise
+    page_number: 18
+    period: "2026Q2"
+    period_basis: target_quarter
+    estimate_state: actual
+    unit: percent
+    not_applicable_columns: [revenue_surprise]
+    columns:
+      eps_surprise: {Communication Services: 102.3, Consumer Discretionary: 82.3, Health Care: 18.1, Financials: 14.7, Information Technology: 10.7, Energy: 9.8, Consumer Staples: 8.2, Industrials: 6.8, Materials: 5.7, Utilities: 4.6, Real Estate: 2.4}
+  - chart_id: earnings_revenue_growth
+    page_number: 21
+    period: "2026Q2"
+    period_basis: target_quarter
+    estimate_state: actual
+    unit: percent
+    comparison_date: "2026-08-28"
+    not_applicable_columns: [revenue_growth]
+    columns:
+      eps_growth: {Energy: 146.3, Communication Services: 116.9, Consumer Discretionary: 92.4, Information Technology: 75.3, Materials: 41.7, Financials: 22.0, Industrials: 16.7, Utilities: 13.7, Consumer Staples: 13.5, Real Estate: 8.6, Health Care: -6.5}
+  - chart_id: net_profit_margin
+    page_number: 23
+    period: "2026Q2"
+    period_basis: target_quarter
+    estimate_state: actual
+    columns:
+      net_margin: {unit: percent, values: {Real Estate: 34.1, Information Technology: 32.3, Communication Services: 28.6, Financials: 21.3, Consumer Discretionary: 16.5, Utilities: 13.8, Materials: 13.5, Energy: 13.2, Industrials: 10.9, Health Care: 7.1, Consumer Staples: 6.9}}
+      increase_share: {unit: ratio, values: {Information Technology: 0.81, Energy: 0.76, Materials: 0.62, Industrials: 0.60, Consumer Staples: 0.59, Financials: 0.57, Communication Services: 0.57, Utilities: 0.55, Health Care: 0.54, Consumer Discretionary: 0.43, Real Estate: 0.39}}
+      unchanged_share: {unit: ratio, values: {Information Technology: 0.00, Energy: 0.00, Materials: 0.00, Industrials: 0.02, Consumer Staples: 0.00, Financials: 0.00, Communication Services: 0.04, Utilities: 0.00, Health Care: 0.00, Consumer Discretionary: 0.00, Real Estate: 0.00}}
+      decrease_share: {unit: ratio, values: {Information Technology: 0.19, Energy: 0.24, Materials: 0.38, Industrials: 0.37, Consumer Staples: 0.41, Financials: 0.43, Communication Services: 0.39, Utilities: 0.45, Health Care: 0.46, Consumer Discretionary: 0.57, Real Estate: 0.61}}
+  - chart_id: eps_guidance
+    page_number: 24
+    period: "2026Q3"
+    period_basis: target_quarter
+    estimate_state: estimated
+    unit: count
+    columns:
+      negative_count: {Consumer Discretionary: 9, Information Technology: 6, Industrials: 6, Health Care: 6, Consumer Staples: 3, Real Estate: 2, Materials: 1, Financials: 1, Communication Services: 1, Utilities: 0, Energy: 0}
+      positive_count: {Consumer Discretionary: 2, Information Technology: 39, Industrials: 9, Health Care: 5, Consumer Staples: 0, Real Estate: 2, Materials: 2, Financials: 2, Communication Services: 1, Utilities: 1, Energy: 0}
+  - chart_id: geographic_revenue_exposure
+    page_number: 30
+    period: "2026-08-28"
+    period_basis: snapshot
+    estimate_state: not_applicable
+    unit: ratio
+    columns:
+      us_share: {Utilities: 0.98, Real Estate: 0.79, Financials: 0.71, Health Care: 0.68, Consumer Discretionary: 0.66, Industrials: 0.65, Energy: 0.64, Consumer Staples: 0.61, Communication Services: 0.51, Materials: 0.49, Information Technology: 0.47}
+      international_share: {Utilities: 0.02, Real Estate: 0.21, Financials: 0.29, Health Care: 0.32, Consumer Discretionary: 0.34, Industrials: 0.35, Energy: 0.36, Consumer Staples: 0.39, Communication Services: 0.49, Materials: 0.51, Information Technology: 0.53}
+  - chart_id: forward_pe
+    page_number: 33
+    period: "2026-08-28"
+    period_basis: snapshot
+    estimate_state: not_applicable
+    unit: multiple
+    columns:
+      forward_pe: {Industrials: 24.1, Consumer Discretionary: 23.6, Information Technology: 21.8, Consumer Staples: 21.5, Health Care: 19.0, Real Estate: 18.4, Materials: 18.3, Communication Services: 17.7, Utilities: 17.0, Financials: 15.4, Energy: 13.6}
+  - chart_id: target_ratings
+    page_number: 36
+    period: "2026-08-28"
+    period_basis: snapshot
+    estimate_state: not_applicable
+    columns:
+      buy_share: {unit: ratio, values: {Information Technology: 0.69, Communication Services: 0.67, Energy: 0.64, Materials: 0.63, Health Care: 0.62, Consumer Discretionary: 0.57, Industrials: 0.57, Real Estate: 0.55, Financials: 0.53, Utilities: 0.51, Consumer Staples: 0.44}}
+      hold_share: {unit: ratio, values: {Information Technology: 0.27, Communication Services: 0.28, Energy: 0.32, Materials: 0.34, Health Care: 0.34, Consumer Discretionary: 0.38, Industrials: 0.37, Real Estate: 0.42, Financials: 0.40, Utilities: 0.44, Consumer Staples: 0.49}}
+      sell_share: {unit: ratio, values: {Information Technology: 0.04, Communication Services: 0.05, Energy: 0.04, Materials: 0.04, Health Care: 0.03, Consumer Discretionary: 0.05, Industrials: 0.05, Real Estate: 0.03, Financials: 0.07, Utilities: 0.05, Consumer Staples: 0.08}}
+      target_upside: {unit: percent, values: {Information Technology: 24.3, Communication Services: 25.0, Energy: 9.5, Materials: 13.0, Health Care: 10.2, Consumer Discretionary: 21.1, Industrials: 18.6, Real Estate: 13.5, Financials: 10.1, Utilities: 18.3, Consumer Staples: 13.5}}

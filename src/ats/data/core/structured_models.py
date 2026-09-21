@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -12,11 +12,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 __all__ = [
     "AdapterArtifact", "AdapterBatch", "AdapterFailure", "AdmissionResult",
     "ArtifactDescriptor", "CatalogStatus", "DataSnapshot", "DerivationDefinition",
-    "EvidenceCandidateInput", "EvidenceLink", "FetchRequest", "IngestionStatus",
+    "EntityRelationInput", "EvidenceCandidateInput", "EvidenceLink", "FetchRequest", "IngestionStatus",
     "MetricDefinition", "NativeRecord", "ObservationInput", "ObservationVintage",
-    "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "SeriesIdentity",
-    "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
-    "VerificationStatus",
+    "Persistence", "ProviderMapping", "QualityStatus", "RawArtifact", "RetiredSource",
+    "RetirementDisposition", "SeriesIdentity",
+    "ReferenceEntityInput", "SnapshotItem", "SourceSelection", "StructuredDataset", "StructuredSource",
+    "VerificationStatus", "DiscoveryResult", "ReleaseCandidate", "DiscoveryStatus",
 ]
 
 
@@ -57,8 +58,31 @@ class IngestionStatus(str, Enum):
     STALE = "stale"
     UNREACHABLE = "unreachable"
     UNAUTHORIZED = "unauthorized"
+    NOT_PDF = "not_pdf"
     PARSE_FAILED = "parse_failed"
     VALIDATION_FAILED = "validation_failed"
+    PARTIAL = "partial"
+    EXPORT_UNREADABLE = "export_unreadable"
+    ACCESS_REQUIRED = "access_required"
+    METHODOLOGY_DRIFT = "methodology_drift"
+    SOURCE_CONFLICT = "source_conflict"
+
+
+class DiscoveryStatus(str, Enum):
+    """Outcome of a source metadata check, separate from an ingestion run."""
+
+    NEW_RELEASE = "new_release"
+    NO_CHANGE = "no_change"
+    NOT_YET_PUBLISHED = "not_yet_published"
+    QUESTION_NOT_FIELDED = "question_not_fielded"
+    METHODOLOGY_BREAK = "methodology_break"
+    UNREACHABLE = "unreachable"
+    VALIDATION_FAILED = "validation_failed"
+    SUCCEEDED = "succeeded"
+    EXPORT_UNREADABLE = "export_unreadable"
+    ACCESS_REQUIRED = "access_required"
+    METHODOLOGY_DRIFT = "methodology_drift"
+    SOURCE_CONFLICT = "source_conflict"
     PARTIAL = "partial"
 
 
@@ -90,6 +114,34 @@ class StructuredSource(BaseModel):
         return self
 
 
+class RetirementDisposition(str, Enum):
+    """What happened to a retired source's stored data."""
+
+    PURGED = "purged"                  # rows and exclusive blobs physically deleted
+    RETAINED_ORPHAN = "retained_orphan"  # rows intentionally kept, sourced from nothing
+
+
+class RetiredSource(BaseModel):
+    """Machine-readable tombstone for a source id that has been retired.
+
+    A tombstone is not an active source configuration: it carries no adapter,
+    dataset or rollout mode, and no collection, publication or query path reads
+    it as a live source.  It exists so a retired id cannot be silently
+    re-registered, so the stored-data decision is auditable, and so any orphan
+    rows left in the database have an explanation.
+    """
+
+    id: str
+    retired_at: date
+    reason: str
+    disposition: RetirementDisposition
+    prior_catalog_status: str = ""
+    prior_rollout_mode: str = ""
+    disposition_at: date | None = None
+    successor: str = ""
+    spec_removed: bool = False
+
+
 class StructuredDataset(BaseModel):
     id: str
     catalog_status: CatalogStatus = CatalogStatus.PLANNED
@@ -112,6 +164,8 @@ class MetricDefinition(BaseModel):
     derived: bool = False
     description: str = ""
     version: str = "v1"
+    entity_scope: list[str] = Field(default_factory=list)
+    required_dimensions: list[str] = Field(default_factory=list)
 
 
 class ProviderMapping(BaseModel):
@@ -219,6 +273,31 @@ class FetchRequest(BaseModel):
         return [value.upper() for value in values]
 
 
+class ReleaseCandidate(BaseModel):
+    """An immutable upstream release identity found during read-only discovery."""
+
+    identity: str
+    period: str = ""
+    urls: list[str] = Field(default_factory=list)
+    methodology_fingerprint: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DiscoveryResult(BaseModel):
+    """Auditable result of checking a source without necessarily downloading it."""
+
+    source_id: str
+    dataset_id: str
+    checked_at: datetime
+    status: DiscoveryStatus
+    latest_upstream_identity: str = ""
+    latest_available_period: str = ""
+    candidates: list[ReleaseCandidate] = Field(default_factory=list)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+
+    _checked_aware = field_validator("checked_at")(_aware)
+
+
 class NativeRecord(BaseModel):
     entity_id: str
     provider_field: str
@@ -246,6 +325,9 @@ class NativeRecord(BaseModel):
 
 
 class AdapterArtifact(BaseModel):
+    # Empty is retained only for legacy single-artifact adapters.  New multi-slice
+    # adapters must provide a unique key and records/relations must reference it.
+    artifact_key: str = ""
     payload: bytes | str | dict | list | None = None
     query_scope: dict[str, Any] = Field(default_factory=dict)
     source_url: str = ""
@@ -255,6 +337,56 @@ class AdapterArtifact(BaseModel):
     storage_mode: str = "full"
     pointer: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReferenceEntityInput(BaseModel):
+    """A provider reference entity that can be admitted before observations."""
+
+    entity_id: str
+    kind: str
+    canonical_name: str
+    aliases: list[str] = Field(default_factory=list)
+    securities: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("entity_id")
+    @classmethod
+    def reference_entity_upper(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError("entity_id is required")
+        return value
+
+
+class EntityRelationInput(BaseModel):
+    """Versioned, source-owned parent/child taxonomy relation."""
+
+    parent_entity_id: str
+    child_entity_id: str
+    relation_type: str
+    source_version: str
+    known_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    slice_key: str = ""
+    active: bool = True
+
+    _relation_known_aware = field_validator("known_at")(_aware)
+
+    @field_validator("parent_entity_id", "child_entity_id")
+    @classmethod
+    def relation_entity_upper(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError("relation entity id is required")
+        return value
+
+    @field_validator("relation_type", "source_version")
+    @classmethod
+    def relation_required(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("relation type and source version are required")
+        return value
 
 
 class AdapterFailure(BaseModel):
@@ -278,6 +410,8 @@ class AdapterBatch(BaseModel):
     fetched_at: datetime
     records: list[NativeRecord] = Field(default_factory=list)
     artifacts: list[AdapterArtifact] = Field(default_factory=list)
+    entities: list[ReferenceEntityInput] = Field(default_factory=list)
+    relations: list[EntityRelationInput] = Field(default_factory=list)
     failures: list[AdapterFailure] = Field(default_factory=list)
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -288,8 +422,11 @@ class AdapterBatch(BaseModel):
         if self.status == IngestionStatus.RUNNING:
             raise ValueError("adapter batches must have a terminal provider status")
         if self.status in {IngestionStatus.SUCCEEDED, IngestionStatus.PARTIAL} \
-                and not (self.records or self.failures):
-            raise ValueError("successful/partial batch must contain records or failures")
+                and not (self.records or self.relations or self.failures):
+            raise ValueError("successful/partial batch must contain records, relations or failures")
+        keys = [item.artifact_key for item in self.artifacts if item.artifact_key]
+        if len(keys) != len(set(keys)):
+            raise ValueError("adapter artifact keys must be unique")
         return self
 
 
@@ -355,8 +492,12 @@ class EvidenceLink(BaseModel):
     candidate_id: str = ""
     document_id: str
     version_id: str
-    char_start: int = Field(ge=0)
-    char_end: int = Field(gt=0)
+    anchor_kind: str = "text_span"
+    page_number: int | None = Field(default=None, ge=1)
+    char_start: int = Field(default=0, ge=0)
+    char_end: int = Field(default=0, ge=0)
+    chart_id: str = ""
+    region: tuple[float, float, float, float] | None = None
     extraction_method: str
     source_tier: str
     verification_status: VerificationStatus = VerificationStatus.NEEDS_EVIDENCE
@@ -367,8 +508,16 @@ class EvidenceLink(BaseModel):
 
     @model_validator(mode="after")
     def valid_span_and_target(self):
-        if self.char_end <= self.char_start:
-            raise ValueError("char_end must be greater than char_start")
+        if self.anchor_kind not in {"text_span", "image_region"}:
+            raise ValueError("anchor_kind must be text_span or image_region")
+        if self.anchor_kind == "text_span" and self.char_end <= self.char_start:
+            raise ValueError("text_span char_end must be greater than char_start")
+        if self.anchor_kind == "image_region":
+            if self.page_number is None or self.region is None:
+                raise ValueError("image_region requires page_number and region")
+            x0, y0, x1, y1 = self.region
+            if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+                raise ValueError("image region must be normalized [x0,y0,x1,y1]")
         if not (self.observation_id or self.candidate_id):
             raise ValueError("evidence must target an observation or candidate")
         return self

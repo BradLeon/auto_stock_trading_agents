@@ -207,6 +207,15 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Local runtime evidence; licensed and research-run artifacts are not repository inputs.
+/evidence/
+
+# Local agent working memory and scratch run artifacts. These live on disk only;
+# nothing here is a repository input (acceptance run outputs, pytest basetemp,
+# intermediate PDF/PNG extractions, agent memory notes).
+/.workbuddy/
+/tmp/
+
 # PyPI configuration file
 .pypirc
 

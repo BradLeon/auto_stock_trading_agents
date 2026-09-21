@@ -70,4 +70,6 @@ def default_artifact_root() -> Path:
     from ....config import REPO_ROOT
 
     return Path(os.environ.get(
-        "ATS_STRUCTURED_ARTIFACT_ROOT", REPO_ROOT / "var" / "structured_artifacts"))
+        "ATS_DATA_ARTIFACT_ROOT",
+        os.environ.get(
+            "ATS_STRUCTURED_ARTIFACT_ROOT", REPO_ROOT / "var" / "data_artifacts")))

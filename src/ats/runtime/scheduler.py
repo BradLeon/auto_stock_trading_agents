@@ -217,7 +217,7 @@ def pead_daily(*, dry_run: bool = True, use_llm: bool = True) -> dict:
 
 def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True,
                       as_of: datetime | None = None, chief: bool = True,
-                      plan_only: bool = False) -> dict:
+                      plan_only: bool = False, observe: bool = True) -> dict:
     """Score every target whose print has landed but hasn't been scored yet.
 
     Runs twice a day (see config/pead.yaml schedule.score_windows): the `amc` window
@@ -311,7 +311,7 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     # into the targets loop above: these names must not enter `scored`, must not
     # trigger a Chief cycle, and must never reach the order path. They only leave
     # chain observations behind (docs/CHAIN_EVIDENCE.md).
-    if not plan_only:
+    if observe and not plan_only:
         # Evidence covers EVERY name a claim can call as a witness — targets included.
         # Restricting it to `observe` left the two most important witnesses uncollected:
         # SKHY (the subject we hold) and NVDA (the customer whose testimony is the only
@@ -320,6 +320,8 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
         # act on — leaving it permanently unknown.
         _observe_window(window, today, sched, outcomes,
                         list(g.get("targets", [])) + list(g.get("observe", [])))
+    elif not observe:
+        log.info("PEAD-score[%s]: scheduled observation extraction paused", window)
 
     # One Chief cycle for the whole window, not one per symbol — a single approval
     # card. The Chief consumes the score, so the regular daily cascade then correctly
@@ -423,19 +425,26 @@ def _daily(*, dry_run: bool, use_llm: bool = True) -> None:
     # or the final dry-run Chief pass.  Individual helpers also catch their own
     # fine-grained failures; this outer boundary covers configuration/import and
     # batch-level failures before those helpers can establish their own isolation.
+    enabled = get_config().app.schedule.daily_stages
     stages = (
-        ("event triggers", lambda: _event_triggers(use_llm=use_llm)),
-        ("news backfill", _news_backfill_daily),
-        ("PEAD daily", lambda: pead_daily(dry_run=dry_run)),
-        ("technical daily", _technical_daily),
-        ("intel digest", lambda: _intel_digest(use_llm=use_llm)),
-        ("performance snapshot", _perf_snapshot),
-        ("performance/risk digest", _perf_risk_digest),
-        ("journal marks", _journal_marks),
+        ("event triggers", enabled.pead_event_triggers or enabled.macro_sector_event_triggers,
+         lambda: _event_triggers(use_llm=use_llm, pead=enabled.pead_event_triggers,
+                                 macro_sector=enabled.macro_sector_event_triggers)),
+        ("news backfill", enabled.news_backfill, _news_backfill_daily),
+        ("PEAD daily", enabled.pead_daily, lambda: pead_daily(dry_run=dry_run, use_llm=use_llm)),
+        ("technical daily", enabled.technical_daily, _technical_daily),
+        ("intel digest", enabled.intel_digest, lambda: _intel_digest(use_llm=use_llm)),
+        ("performance snapshot", enabled.performance_snapshot, _perf_snapshot),
+        ("performance/risk digest", enabled.perf_risk_digest, _perf_risk_digest),
+        ("journal marks", enabled.journal_marks, _journal_marks),
         # LAST: the Chief reads every successfully refreshed upstream artifact.
-        ("chief daily", lambda: _chief_daily(dry_run=dry_run, use_llm=use_llm)),
+        ("chief daily", enabled.chief_daily,
+         lambda: _chief_daily(dry_run=dry_run, use_llm=use_llm)),
     )
-    for stage, run in stages:
+    for stage, is_enabled, run in stages:
+        if not is_enabled:
+            log.info("daily stage %s paused by schedule.daily_stages", stage)
+            continue
         try:
             run()
         except Exception as exc:  # noqa: BLE001 - one scheduled stage must not stop the cycle
@@ -543,11 +552,12 @@ def _push_risk_alert(review) -> None:
         log.info("risk alert push skipped: %s", exc)
 
 
-def _event_triggers(*, use_llm: bool = True) -> list[str]:
+def _event_triggers(*, use_llm: bool = True, pead: bool = True,
+                    macro_sector: bool = True) -> list[str]:
     """Fire analyst refreshes for today's calendar events (config/events.yaml).
     Returns the fired event labels (testable)."""
     from ..config import load_events, load_pead_global
-    from .cli import run_macro_review, run_pead_monitor, run_sector_review
+    from .cli import run_pead_monitor
 
     fired: list[str] = []
     today = _today()
@@ -558,13 +568,28 @@ def _event_triggers(*, use_llm: bool = True) -> list[str]:
         for trig in ev.triggers:
             try:
                 if trig == "macro":
+                    if not macro_sector:
+                        log.info("event trigger %s -> macro paused", ev.label)
+                        continue
+                    from .cli import run_macro_review
                     run_macro_review(load_pead_global()["macro_review"]["name"], use_llm=use_llm)
                 elif trig == "sector":
+                    if not macro_sector:
+                        log.info("event trigger %s -> sector paused", ev.label)
+                        continue
+                    from .cli import run_sector_review
                     for name in load_pead_global()["sector_review"]["sectors"]:
                         run_sector_review(name, use_llm=use_llm)
                 elif trig.startswith("sector:"):
+                    if not macro_sector:
+                        log.info("event trigger %s -> %s paused", ev.label, trig)
+                        continue
+                    from .cli import run_sector_review
                     run_sector_review(trig.split(":", 1)[1], use_llm=use_llm)
                 elif trig.startswith("pead:"):
+                    if not pead:
+                        log.info("event trigger %s -> %s paused", ev.label, trig)
+                        continue
                     run_pead_monitor(trig.split(":", 1)[1], use_llm=use_llm)
                 else:
                     log.warning("unknown event trigger %r on %s", trig, ev.label)
@@ -741,6 +766,30 @@ def _weekly_review() -> None:
     _sector_weekly()
 
 
+def _factset_weekly_ingest() -> None:
+    """Prepare the governed weekly snapshot; consumer jobs only read releases."""
+    from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
+    from ..data.runtime import get_platform_structured_repository
+    from ..data.stores.unstructured import get_platform_unstructured_repository
+
+    structured = get_platform_structured_repository()
+    documents = get_platform_unstructured_repository()
+    try:
+        result = FactSetWeeklyPipeline(structured, documents).run()
+        provenance = result.get("provenance") or {}
+        log.info(
+            "factset weekly ingest: status=%s report=%s hash=%s index=%s sector=%s "
+            "elapsed=%ss",
+            result.get("status"), provenance.get("report_date", ""),
+            provenance.get("artifact_hash", "")[:12],
+            (result.get("index_core") or {}).get("release_status", "unavailable"),
+            (result.get("sector_core") or {}).get("release_status", "unavailable"),
+            result.get("elapsed_seconds", 0))
+    finally:
+        structured.close()
+        documents.close()
+
+
 def _attach_job_logging(scheduler) -> None:
     """Log every fire, miss and error.
 
@@ -775,17 +824,40 @@ def _attach_job_logging(scheduler) -> None:
                            EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
 
 
+def _validate_factset_schedule(cfg) -> None:
+    """Fail fast when the data-preparation job cannot precede weekly review."""
+    if cfg.factset_refresh_tz != cfg.weekly_review_tz:
+        raise ValueError(
+            "factset_refresh_tz must match weekly_review_tz for deterministic ordering")
+    try:
+        refresh = tuple(int(part) for part in cfg.factset_refresh_at.split(":"))
+        review = tuple(int(part) for part in cfg.weekly_review_at.split(":"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("FactSet refresh and weekly review times must use HH:MM") from exc
+    if len(refresh) != 2 or len(review) != 2 or not all(
+            0 <= hour < 24 and 0 <= minute < 60
+            for hour, minute in (refresh, review)):
+        raise ValueError("FactSet refresh and weekly review times must use valid HH:MM")
+    if refresh >= review:
+        raise ValueError("factset_refresh_at must precede weekly_review_at")
+
+
 def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None,
           use_llm: bool = True) -> None:
     from ..config import load_pead_global
 
     cfg = get_config().app.schedule
     if window:
+        # `ats schedule --window` is an explicit operator action. The pause switch
+        # only narrows the resident scheduler; manual observation work stays intact.
         pead_score_window(window, dry_run=dry_run)
         return
     if run_once:
         _daily(dry_run=dry_run, use_llm=use_llm)
         return
+
+    if cfg.jobs.factset_weekly_ingest:
+        _validate_factset_schedule(cfg)
 
     from apscheduler.executors.pool import ThreadPoolExecutor
     from apscheduler.schedulers.blocking import BlockingScheduler
@@ -807,27 +879,46 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
     scheduler = BlockingScheduler(timezone=cfg.timezone,
                                   executors={"default": ThreadPoolExecutor(1)})
     _attach_job_logging(scheduler)
-    scheduler.add_job(
-        lambda: _daily(dry_run=dry_run, use_llm=use_llm),
-        CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
-        id="daily_cycle", misfire_grace_time=grace,
-    )
+    if any(cfg.daily_stages.model_dump().values()):
+        scheduler.add_job(
+            lambda: _daily(dry_run=dry_run, use_llm=use_llm),
+            CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
+            id="daily_cycle", misfire_grace_time=grace,
+        )
     # Macro/sector weekly review: own job, own time/timezone (schedule.weekly_review_at/
     # _tz) — it never trades and doesn't need a NYSE session, so there's no reason to
     # tie it to the daily cascade's ET clock. See _today_weekly() for why the day-gate
     # inside _macro_weekly/_sector_weekly must track this same timezone, not ET.
     w_hour, w_minute = (int(x) for x in cfg.weekly_review_at.split(":"))
-    scheduler.add_job(
-        lambda: _weekly_review(),
-        CronTrigger(day_of_week="sat", hour=w_hour, minute=w_minute,
-                    timezone=cfg.weekly_review_tz),
-        id="weekly_review", misfire_grace_time=grace,
-    )
+    f_hour, f_minute = (int(x) for x in cfg.factset_refresh_at.split(":"))
+    factset_grace = min(grace, 6 * 3600)
+    if cfg.jobs.factset_weekly_ingest:
+        scheduler.add_job(
+            _factset_weekly_ingest,
+            CronTrigger(day_of_week="sat", hour=f_hour, minute=f_minute,
+                        timezone=cfg.factset_refresh_tz),
+            id="factset_weekly_ingest", misfire_grace_time=factset_grace,
+            coalesce=True, max_instances=1,
+        )
+    if cfg.jobs.weekly_review:
+        scheduler.add_job(
+            lambda: _weekly_review(),
+            CronTrigger(day_of_week="sat", hour=w_hour, minute=w_minute,
+                        timezone=cfg.weekly_review_tz),
+            id="weekly_review", misfire_grace_time=grace,
+            coalesce=True, max_instances=1,
+        )
 
     # PEAD score windows — triggered by an observed print, so their job is to check
     # cheaply and usually do nothing. See config/pead.yaml schedule.score_windows.
     windows = load_pead_global().get("schedule", {}).get("score_windows", {}) or {}
+    active_windows: list[tuple[str, object]] = []
     for name, hhmm in sorted(windows.items()):
+        enabled = {"bmo": cfg.jobs.pead_score_bmo,
+                   "amc": cfg.jobs.pead_score_amc}.get(name, True)
+        if not enabled:
+            log.info("PEAD score window %s paused by schedule.jobs", name)
+            continue
         try:
             w_hour, w_minute = (int(x) for x in str(hhmm).split(":"))
         except ValueError:
@@ -836,17 +927,19 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         scheduler.add_job(
             # `name=name` binds the loop variable per job — a bare closure would give
             # every job the last window's name.
-            lambda name=name: pead_score_window(name, dry_run=dry_run),
+            lambda name=name: pead_score_window(
+                name, dry_run=dry_run, observe=cfg.jobs.pead_observe_window),
             CronTrigger(day_of_week="mon-fri", hour=w_hour, minute=w_minute,
                         timezone=cfg.timezone),
             id=f"pead_score_{name}", misfire_grace_time=grace,
         )
+        active_windows.append((name, hhmm))
 
     # Post-close reconciliation. Its own job on purpose: reqExecutions only returns
     # the CURRENT day's executions, so a session it misses is lost for good — it must
     # not be able to fail just because an LLM step earlier in the cascade did.
     jcfg = get_config().app.journal
-    if jcfg.enabled:
+    if jcfg.enabled and cfg.jobs.journal_reconcile:
         r_hour, r_minute = (int(x) for x in jcfg.reconcile_at.split(":"))
         scheduler.add_job(
             lambda: _journal_reconcile(),
@@ -859,11 +952,15 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             id="journal_reconcile", misfire_grace_time=grace,
         )
 
-    win_desc = ", ".join(f"{n}@{h}" for n, h in sorted(windows.items())) or "none"
-    log.info("scheduler started: daily %s %s; PEAD score windows %s "
-             "(mon-fri, NYSE sessions only)", cfg.run_at, cfg.timezone, win_desc)
-    print(f"⏰ daily cycle at {cfg.run_at} {cfg.timezone}; PEAD score windows: {win_desc} "
-          f"(NYSE sessions{'' if not dry_run else ', dry-run'}). Ctrl-C to stop.")
+    win_desc = ", ".join(f"{n}@{h}" for n, h in active_windows) or "none"
+    active_daily = [name for name, is_enabled in cfg.daily_stages.model_dump().items()
+                    if is_enabled]
+    active_jobs = [job.id for job in scheduler.get_jobs()]
+    log.info("scheduler started: daily stages=%s; PEAD score windows %s; jobs=%s",
+             ",".join(active_daily) or "none", win_desc, ",".join(active_jobs) or "none")
+    print(f"⏰ daily stages: {', '.join(active_daily) or 'none'}; PEAD score windows: {win_desc}; "
+          f"jobs: {', '.join(active_jobs) or 'none'}"
+          f" ({'live' if not dry_run else 'dry-run'}). Ctrl-C to stop.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

@@ -25,6 +25,11 @@ class FakeScheduler:
     def add_listener(self, fn, mask):
         self.listeners.append((fn, mask))
 
+    def get_jobs(self):
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(id=job["id"]) for job in self.jobs]
+
     def start(self):
         self.started = True
         raise SystemExit          # don't block the test
@@ -33,8 +38,18 @@ class FakeScheduler:
 @pytest.fixture
 def registered(monkeypatch):
     import apscheduler.schedulers.blocking as blocking
+    from ats.config import DailyStageConfig, ScheduledJobConfig
 
     holder = {}
+
+    # The checked-in production config intentionally pauses most stages. These
+    # registration tests also cover the backwards-compatible all-on defaults.
+    real = scheduler.get_config()
+    full_schedule = real.app.schedule.model_copy(update={
+        "daily_stages": DailyStageConfig(), "jobs": ScheduledJobConfig()})
+    full_config = real.model_copy(update={
+        "app": real.app.model_copy(update={"schedule": full_schedule})})
+    monkeypatch.setattr(scheduler, "get_config", lambda: full_config)
 
     def factory(*a, **kw):
         holder["sched"] = FakeScheduler(*a, **kw)
@@ -47,8 +62,31 @@ def registered(monkeypatch):
 
 def test_registers_daily_cycle_score_windows_and_reconcile(registered):
     ids = [j["id"] for j in registered.jobs]
-    assert ids == ["daily_cycle", "weekly_review", "pead_score_amc", "pead_score_bmo",
-                   "journal_reconcile"]
+    assert ids == ["daily_cycle", "factset_weekly_ingest", "weekly_review",
+                   "pead_score_amc", "pead_score_bmo", "journal_reconcile"]
+
+
+def test_checked_in_pause_policy_keeps_only_pead_and_factset(monkeypatch):
+    """Production policy is intentionally narrower than the compatibility default."""
+    import apscheduler.schedulers.blocking as blocking
+
+    holder = {}
+    monkeypatch.setattr(blocking, "BlockingScheduler",
+                        lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
+
+    scheduler.start(dry_run=True)
+
+    jobs = holder["s"].jobs
+    assert [job["id"] for job in jobs] == [
+        "daily_cycle", "factset_weekly_ingest", "pead_score_amc", "pead_score_bmo"]
+
+    called = []
+    monkeypatch.setattr(scheduler, "pead_score_window",
+                        lambda name, **kwargs: called.append((name, kwargs["observe"])))
+    for job in jobs:
+        if job["id"].startswith("pead_score_"):
+            job["fn"]()
+    assert sorted(called) == [("amc", False), ("bmo", False)]
 
 
 def test_weekly_review_has_its_own_saturday_time_and_timezone(registered):
@@ -81,7 +119,7 @@ def test_windows_fire_at_the_configured_times(registered):
     assert (fields["pead_score_amc"]["hour"], fields["pead_score_amc"]["minute"]) == ("20", "0")
     assert (fields["pead_score_bmo"]["hour"], fields["pead_score_bmo"]["minute"]) == ("11", "0")
     for i in by_id:
-        if i == "weekly_review":       # the one Saturday-only job — see its own test
+        if i in {"weekly_review", "factset_weekly_ingest"}:
             continue
         assert fields[i]["day_of_week"] == "mon-fri"
 
@@ -136,7 +174,7 @@ def test_bad_window_time_is_skipped_not_fatal(monkeypatch):
                         lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
     scheduler.start(dry_run=True)
     assert [j["id"] for j in holder["s"].jobs] == [
-        "daily_cycle", "weekly_review", "pead_score_bmo", "journal_reconcile"]
+        "daily_cycle", "factset_weekly_ingest", "pead_score_bmo"]
 
 
 # --------------------------------------------------------------------------- #

@@ -96,12 +96,13 @@ boss_review(interrupt) → trader → persist → END
 
 ## 5. 触发路由（`runtime/scheduler.py`）
 
-共四个 cron job，全部串行（单 worker executor——它们共用同一个 sqlite 连接）。日级
+共五个 cron job，全部串行（单 worker executor——它们共用同一个 sqlite 连接）。日级
 与财报窗口仅在周一至周五且通过 NYSE session 过滤；周度研究不依赖交易日：
 
 | job | 时点（ET） | 内容 |
 |---|---|---|
 | `daily_cycle` | `settings.yaml` `schedule.run_at`（10:30） | 下方级联 |
+| `factset_weekly_ingest` | 周六 08:10（`Asia/Shanghai`） | 导入、校验并独立发布 FactSet 指数/行业分区；不运行 Agent |
 | `weekly_review` | 周六 `settings.yaml` `schedule.weekly_review_at`（08:50，`weekly_review_tz=Asia/Shanghai`） | 宏观 → 行业 → 截面重排；不碰 broker |
 | `pead_score_amc` | `pead.yaml` `score_windows.amc`（20:00） | 当晚盘后财报的打分 |
 | `pead_score_bmo` | `pead.yaml` `score_windows.bmo`（11:00） | 当日盘前财报的打分 |

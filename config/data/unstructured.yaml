@@ -13,6 +13,7 @@ document_types:
   - article
   - news
   - deck
+  - research_article
 admission:
   require_source_url: true
   quarantine_on_short_body: true
@@ -22,6 +23,28 @@ retention:
 # sources.yaml 与 news_sources.yaml 持有。status 仅是初始安全模式，
 # 实际是否可发布必须由 source-acceptance 的数据质量报告决定。
 sources:
+  factset_earnings_insight_doc:
+    domain: unstructured
+    provider: FactSet
+    adapter: factset_earnings_insight
+    status: registered
+    cadence: weekly
+    request_budget:
+      max_requests_per_run: 1
+      timeout_seconds: 60
+      max_attempts: 3
+    policy:
+      registry: sources.yaml#article_sources.factset_earnings_insight_doc
+      stable_url: https://www.factset.com/earningsinsight
+      expected_mime: application/pdf
+      freshness_days: 10
+      usage: internal_only
+      artifact_retention: licensed_internal_research
+      preserve_final_url: true
+      preserve_http_validators: [etag, last_modified]
+      dedup_keys: [pdf_sha256]
+      release_partitions: [document]
+
   trendforce_news:
     domain: unstructured
     provider: TrendForce

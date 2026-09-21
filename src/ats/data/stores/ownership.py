@@ -3,6 +3,7 @@
 DATA_LAYER_TABLES = frozenset({
     "source_documents", "document_candidates", "document_versions",
     "document_entities", "document_source_aliases", "document_chunks",
+    "data_document_artifacts", "data_document_pages",
     "document_processing_runs", "data_sources", "ingestion_runs",
     "measurement_series", "measurement_points", "evidence_observations",
     "evidence_failures", "evidence_facts", "evidence_fact_projections",

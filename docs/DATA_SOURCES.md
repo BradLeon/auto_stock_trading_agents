@@ -18,7 +18,17 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli data pead-official-disclosure
 ```
 
 命令在标准输出返回机器可读 JSON（完整 roster、每家公司事件和三种角色的状态），同时写入 Markdown 报告。退出码 `0` 表示所有三件套均已通过；`2` 表示至少一个角色仍为 `missing`、`not_yet_available`、`unreachable` 或 `quarantined`，需要查看报告中的原因码。隔离目录应使用新的空目录，便于人工复核本轮下载内容。
-最后更新：2026-08-23（+ 非结构化准入、真实回填与质量发布闸）。
+最后更新：2026-09-04（+ FactSet Earnings Insight 正式上线）。
+
+## Anthropic Economic Index（L1 研究观察，CURRENT_PARTIAL）
+
+公开、无需鉴权的 `Anthropic/EconomicIndex` Hugging Face repository 已接入受治理的
+`ai_work_adoption` 数据集。采集按 commit 固定官方 CSV，只保存 Global 的 SOC 职业大类/职业与
+O*NET task 切片，Claude.ai 与 1P API 独立保存；目前仅对 L1 Evidence Observer 和研究查询开放，
+不进入 PEAD、Chain、Macro、Sector、Chief 或交易决策。每周检查一次 release；`Usage Share` 是 Claude
+使用份额而非员工采用率，`Observed Exposure` 为研究快照而非月度序列。详见
+[结构化数据运维指南](STRUCTURED_DATA_OPERATIONS.md) 和
+[结构化数据使用手册](STRUCTURED_DATA_USER_GUIDE.md)。
 
 ## 如何测试
 
@@ -54,6 +64,7 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 | **transcript** 电话会纪要 | 人工/官方覆盖 → defeatbeta 结构化主源 → FMP 等结构化回退 → Tavily 候选 | 精确 symbol + fiscal period；保留 speaker/paragraph 顺序和数据集快照延迟 | 校验通过 → `earnings_transcript` 共享资产 → PEAD/Evidence 共用；失败 → quarantine | 不再允许“期间未知则放行”；网页候选需通过正文结构和噪声检查 |
 | **documents** 官方文档 | SEC 8-K Ex99.1 + Tavily + 本地文件夹 | **财报新闻稿**、SEC/手工公告、10-K/10-Q/6-K、**投资者 PPT** | 共享文档资产 → score / Evidence | 文件夹 `信息源/<SYM>/` 有则优先；按财报期复用，不重复访问 SEC/Tavily |
 | **industry** 行业知识 | 本地 Obsidian 笔记（`industry_notes.root`，策选白名单 md） | 稳定的**行业/产业链背景**（AI 硬件供应链分层框架、利润分布、周期护城河、AI Capex、L4-L6 估值）——判断标的**定位/护城河/周期/议价权** | → **prep 建 thesis** 时注入 narrative，经 `prior_narrative` 闭环传播到 monitor/score | 文件夹直读（复用 documents `_read_doc`）；每篇截断 12k；root 缺失静默跳过。**结构性背景**非实时报价，动态景气仍靠 news/research |
+| **FactSet Earnings Insight** | FactSet stable URL → 授权 PDF | S&P 500 盈利、估值、指引与 GICS 行业背景 | 受治理 PDF/document + `sp500_earnings_insight` | 内部研究用途；`index_core`、`sector_core`、Macro 与 Sector 消费均已 platform，行业上线门禁为 231/231 独立图像单元格一致；详见 [运行手册](FACTSET_EARNINGS_INSIGHT.md) |
 
 **已验证（COHR 实测 2026-07-03）**：market(251 bar)、fundamentals(P/E 159 + 三表/CapEx/FCF/margins + 5 filings)、macro(F&G=32 / VIX 16 / UST10Y 4.48)、earnings(2026-08-11 amc, epsEst 1.65)、consensus(EPS 1.62 / PT 230~384~465 / 评级 4/13/4/0/0 / 升降级 8 条)、runup(vsSMH -13%)、options(yfinance 兜底 EM 31%/IV 107%；ThetaData 终端未开)、news(51 条)、**triage(51→保留15/丢弃36)**、**insights(SemiAnalysis EMIB-T 一文→5 条 per-ticker insight，经 `ATS_TEST_SENDER` 实测)**、transcript(Tavily 69K字)、documents(SEC 34K + deck 15K)、**industry(5 篇/53K字，prep 叙事已用上"L3 分层/InP 垂直整合护城河"等合集概念)**。research 数据层链路已通、待真实自动转发邮件。
 
@@ -95,6 +106,21 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 - **`var/transcripts/<SYM>_<fiscal>.txt`**：手动落档纪要；**`信息源/<SYM>/`**（`docs_root`）：官方 PDF；**`半导体产业研究合集/`**（`industry_notes.root`）：行业知识 md（prep 注入，不落库）。
 - **尚未迁移的原始源**：行情/基本面/宏观/期权/consensus 仍每次 run 现取，分析产出落 dossier；`var/data_dumps/` 仅供人工查验。这是当前迁移边界，不再作为长期数据原则。
 - 查存储：`ats data health`、`ats data quality`、`ats data search "inference demand" --entity AMD`、`ats data series --source <source_id>`、`ats data company AMD`、`ats data claim <concept>`、`ats data lineage <projection_id>`。
+
+### AI 企业采用、员工使用与任务生产化四轴证据
+
+L1 `ai_core_production_workflow_penetration` v2 通过受治理的
+`DataProducts.ai_adoption_evidence_bundle()` 独立读取四个观察轴：Census BTOS Core 的美国企业
+采用广度、RPS/FRED 的美国员工持续使用，以及 Anthropic
+Economic Index 1P API 的职业/任务生产化。各轴保留自己的统计主体、分母、地区、期间和方法
+regime；只允许方向性相互印证，不生成统一 AI 渗透率。
+
+主动发现统一由 `ats data release-check --group ai_adoption --ingest-new` 触发。纳入 BTOS Core
+新口径、RPS/FRED、Anthropic 和 Ramp AI Index；明确排除一次性 BTOS AI Supplement 与年度 Eurostat。
+
+### Anthropic Economic Index：AI 工作生产化代理
+
+`anthropic_economic_index / ai_work_adoption` 的 GLOBAL `1p_api` slice 是任务生产化轴的输入。它提供职业/任务 Usage Share、Work Use、Automation、Directive 等公开指标；不是从业者采用率，也不覆盖 Claude.ai、国家/州差异或持续工作流确认。`observed_exposure` 是单独研究 snapshot，不能并入月度趋势。消费与约束见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
 
 ## 非结构化数据运维闸
 

@@ -187,3 +187,246 @@
 - **THEN** 文档 SHALL 提供数据发现、CLI、Python、SQL、Pandas、最新值、历史 `as_of`、横截面、派生计算、分类和血缘查询示例
 - **AND** 文档 SHALL 说明 Agent/Workflow 如何消费数据产品，以及何时改用 IBKR/yfinance 运行时查询股价或期权
 - **AND** 文档 SHALL 提供动态目录、对象说明、可用性和示例命令，使读者能从当前环境确认实际数据而非只阅读概念说明
+
+### Requirement: 查询支持版本化实体层级与 taxonomy as-of 语义
+
+结构化查询 SHALL 支持按 dataset、source、关系类型、父实体、子实体和 `as_of` 遍历版本化实体关系。`as_of` 查询 SHALL 仅使用当时已经可见的 taxonomy version；结果 SHALL 返回关系来源版本、known time、artifact 和质量状态。
+
+#### Scenario: 查询职业的全部任务
+- **WHEN** 消费者以 occupation 和 `as_of` 请求其 child tasks
+- **THEN** 系统 SHALL 返回该时点已知的有效 `has_task` 关系及 task entities
+- **AND** SHALL 为每条关系提供 taxonomy lineage
+
+#### Scenario: taxonomy 后续改变任务归属
+- **WHEN** 当前 taxonomy 与历史 `as_of` 时点对同一 task 的归属不同
+- **THEN** 最新查询 SHALL 使用当前已知关系，历史查询 SHALL 使用当时已知关系
+- **AND** SHALL NOT 用新关系重写旧分析快照
+
+### Requirement: source product 是不可省略的系列与比较边界
+
+当一个数据集包含多个 source products 时，series identity SHALL 包含 source product。领域 snapshot、profile、排名和变化查询 SHALL 要求明确 source product；系统 SHALL NOT 默认跨产品合并、补值、排名或计算变化。跨产品比较只有在消费者显式选择并接受口径说明时才可返回并列结果。
+
+#### Scenario: 未指定 source product
+- **WHEN** 消费者对多产品数据集请求职业排名但未指定 source product
+- **THEN** 查询 SHALL 返回 ambiguous-dimension failure 或要求显式选择
+- **AND** SHALL NOT 混合 Claude.ai 与 1P API 生成单一排名
+
+#### Scenario: 显式跨产品比较
+- **WHEN** 消费者显式请求同一职业、月份的 Claude.ai 与 1P API 并列比较
+- **THEN** 系统 SHALL 保留两个独立值、单位、methodology 和 lineage
+- **AND** SHALL 标记该比较不代表同一总体的可直接加总序列
+
+### Requirement: 领域派生结果公开公式版本和完整输入身份
+
+领域派生指标 SHALL 在查询时或数据产品层计算，返回 derivation id/version、公式、所有输入 observation IDs、输入 taxonomy relation IDs、适用口径和缺失原因。派生值 SHALL NOT 被保存或展示为 Provider 原始发布值，且不同 methodology regime、source product 或非连续期间 SHALL NOT 被静默连接。
+
+#### Scenario: 计算自动化使用贡献
+- **WHEN** 同产品、同期间、同职业同时具有 Usage Share 和 Automation Share
+- **THEN** `automated_usage_share` SHALL 按 `usage_share × automation_share / 100` 计算
+- **AND** 结果 SHALL 返回两个输入 observation IDs 和 derivation version
+
+#### Scenario: 计算职业环比变化
+- **WHEN** 同产品、同 methodology 的两个 observation 位于连续自然月
+- **THEN** Usage、Automation 或 collaboration change MAY 按百分点差计算
+- **AND** 若月份不连续或跨 methodology regime，结果 SHALL 返回不可计算原因
+
+#### Scenario: 历史不足以计算同比
+- **WHEN** 数据集尚无足够去年同期历史
+- **THEN** 同比派生 SHALL 返回 `insufficient_history`
+- **AND** SHALL NOT 以零或抽样周数据代替缺失历史
+
+### Requirement: 职业任务覆盖派生保留缺失与隐私过滤语义
+
+系统 SHALL 以指定 taxonomy version 的任务总数作为职业任务覆盖分母，并区分有公开 AEI cell、无公开 cell、automation 大于 augmentation、augmentation 大于 automation及两者相等的任务。缺失 cell SHALL 计入 unobserved proxy，SHALL NOT 被解释为零使用或确定未使用。
+
+#### Scenario: 计算 observed task coverage
+- **WHEN** occupation 在指定 taxonomy 中有十个任务且六个具有合格 AEI observation
+- **THEN** `observed_task_coverage` SHALL 为 `6/10`
+- **AND** 结果 SHALL 标注该值是公开可见任务覆盖代理而非员工采用率
+
+#### Scenario: automation 与 augmentation 相等
+- **WHEN** 某 task 的 Automation Share 与 Augmentation Share 相等
+- **THEN** 该 task SHALL 进入 balanced bucket
+- **AND** SHALL NOT 被强行归入 mostly automated 或 mostly augmented
+
+### Requirement: SOC 大类指标优先使用 Provider 原始 level 1 值
+
+职业大类 Usage Share 和 Automation Share SHALL 使用对应产品、期间的 Provider SOC level 1 observation。系统 SHALL NOT 以隐私过滤后的可见详细职业求和或简单平均替代官方大类值；job share of major group 的派生结果 SHALL 显示分子分母和不完全加总提示。
+
+#### Scenario: 详细职业加总不等于大类值
+- **WHEN** 可见 level 0 jobs 的 Usage Share 合计与 Provider level 1 值不同
+- **THEN** 大类展示 SHALL 返回 Provider level 1 observation
+- **AND** 结果 SHALL 说明差异可能包含未发布或隐私过滤 cells
+
+### Requirement: 领域 DataProducts 与通用查询返回同一受治理 observation 集合
+
+Work-adoption snapshot、job profile、metric series、cross section、只读 SQL 和 DataFrame 在相同过滤、quality、source product、period、taxonomy version 与 `as_of` 条件下 SHALL 基于同一 observation 集合。默认查询 SHALL 包含 accepted/warning，quarantined 记录仅可由显式审计入口读取。
+
+#### Scenario: 多入口对账
+- **WHEN** 测试以相同条件通过 snapshot、job profile、SQL 和 DataFrame 查询同一职业指标
+- **THEN** 返回的 observation IDs、值、期间和来源选择 SHALL 一致
+- **AND** 差异 SHALL 触发验收失败
+
+### Requirement: 分析快照固定观测、关系与派生版本
+
+一次消费者运行的 snapshot manifest SHALL 固定 dataset/source、source product、查询参数、`as_of`、observation IDs、taxonomy relation IDs、artifact IDs、derivation versions、质量状态和生成时间。重放 SHALL 不访问外部来源，且 SHALL 不因后续 observation vintage、taxonomy 或默认规则变化而改变。
+
+#### Scenario: 重放 L1 月度观察
+- **WHEN** 后续 release 修订历史 observation 或 taxonomy，但用户以旧 manifest 重放
+- **THEN** 系统 SHALL 返回 manifest 固定的 observation、relation 和 derivation versions
+- **AND** SHALL NOT 自动替换为当前最新版本
+
+### Requirement: Snapshot 与 Agent context 按消费目的收窄血缘
+L1 主结论 snapshot SHALL 只平铺固定三轴 headline 与趋势判断直接依赖的 observations。明细表、TOPN 和图表 SHALL 以独立 derivation/rows hash 和 lineage pointer 引用其精确输入；compact/review context SHALL 返回输入数量、版本、hash 和可查询指针，不得把未参与相应结论的全部来源 observations 平铺为上下文。
+
+#### Scenario: Anthropic 明细包含数千任务 cell
+- **WHEN** 任务生产化聚合由数千个叶子 observations 计算
+- **THEN** 主结论 context SHALL 引用聚合 derivation、输入计数和可审计 lineage pointer
+- **AND** 明细导出仍 SHALL 能按需展开全部叶子输入并离线复算
+
+### Requirement: AI adoption evidence bundle 保持三条证据轴独立
+系统 SHALL 提供受治理的 AI adoption evidence bundle，分别返回企业采用广度、员工持续使用和任务生产化结构。每条轴 SHALL 保留自己的来源、统计主体、分母、地区、技术范围、period、methodology、质量和 lineage；系统 SHALL NOT 对不同轴加权、平均或生成统一 penetration score。bundle SHALL 只消费已注册且未退役的来源；已登记退役墓碑的来源 SHALL NOT 出现在任何证据轴、comparability matrix、coverage 统计或 lineage 中。
+
+#### Scenario: 三条轴同时存在
+- **WHEN** 消费者请求最新 L1 AI adoption evidence bundle
+- **THEN** 系统 SHALL 返回三条独立 axis results 及各自 status
+- **AND** SHALL NOT 将企业百分比、就业人口百分比和 Claude 流量份额转换成同一数值
+
+#### Scenario: 来源退役后 bundle 不出现空轴或残影
+- **WHEN** 某个曾注册的企业采用来源退役，且其数据已按显式清除入口删除
+- **THEN** bundle SHALL 仍返回三条轴及其在役来源的 status，SHALL NOT 为退役来源生成空轴、占位行或 `unavailable` 条目
+- **AND** 任何轴的 lineage 与 comparability matrix SHALL NOT 引用退役来源的 observation identity、artifact 或 dataset
+
+### Requirement: 跨来源印证通过可比性矩阵而非数值融合
+bundle SHALL 为任意并列来源返回 comparability matrix，至少说明 statistical unit、denominator、geography、technology scope、reference period、frequency 和 methodology regime 是否相容。不同主体或地区的值 MAY 用于方向性印证，但只有全部声明维度兼容时才可计算差值、相关性或共同趋势。
+
+#### Scenario: BTOS 与 RPS 同时上升
+- **WHEN** 美国企业采用率与美国就业者工作使用率在各自可比序列中上升
+- **THEN** bundle MAY 标记 `directionally_corroborating`
+- **AND** SHALL NOT 计算两者差值或声称员工率解释了企业率变化
+
+#### Scenario: BTOS 与 ONS 并列
+- **WHEN** 消费者查看美国和英国企业采用证据
+- **THEN** 系统 SHALL 展示两者不同的企业规模、行业覆盖、AI 定义和参考期
+- **AND** 默认 comparability SHALL 为 contextual-only 而非 level-comparable
+
+### Requirement: 异构 cadence 使用每来源最新时点并显式表达时间错位
+最新 bundle SHALL 选择每个来源在查询 `as_of` 前已经可见的最新合格 observation 或 snapshot，并返回各自 data period、published/known time 和 age。系统 SHALL NOT 为获得共同日期而前向填充、插值或伪造同周期值；整体 history status SHALL 展示各轴时间错位和历史充足性。
+
+#### Scenario: BTOS 已到八月而 RPS 只有二季度
+- **WHEN** 同一次查询的 BTOS 最新 period 晚于 RPS 最新 quarter
+- **THEN** bundle SHALL 返回两个真实期间和 `asynchronous_periods` 诊断
+- **AND** SHALL NOT 把 RPS 二季度值标为八月值或视为缺失零
+
+### Requirement: Agent context packet 在紧凑性和证据完整性之间可控
+系统 SHALL 为 L1 Agent 提供 `compact` 和 `review` 两档 context packet。compact SHALL 包含 claim、三轴 latest status、可证伪事实、主要矛盾、方法/缺失警告、来源引用和 manifest ID，并通过确定性行数或字符预算避免注入全部原始表；review SHALL 额外提供历史表、关键行业/规模/职业/任务切片和 visualization descriptors。两档 SHALL 指向同一 observations 和 derivations。
+
+#### Scenario: Agent 请求 compact context
+- **WHEN** L1 workflow 请求 compact bundle
+- **THEN** 系统 SHALL 返回足以形成事实判断的结构化摘要和可追溯 IDs
+- **AND** SHALL NOT 省略分母、期间、质量或将截断内容伪装为完整覆盖
+
+### Requirement: 人类表格和图表与结构化结果同源可复算
+bundle SHALL 提供稳定的 table rows 和 visualization descriptors，使 Markdown、Pandas/Seaborn 或等价 renderer 从同一有序数据生成图表。每张图 SHALL 保存中文标题、指标定义、单位、来源、期间、观察值、data hash、manifest ID 和 renderer version；图表数据 SHALL 与表格及 Agent packet 的 observation IDs 对账。
+
+#### Scenario: 图表渲染失败
+- **WHEN** 受治理数据和表格已成功生成但 renderer 不可用
+- **THEN** bundle SHALL 继续返回结构化表格、facts 和 manifest，并标记 `visualization_warning`
+- **AND** SHALL NOT 将数据判断整体标记为失败
+
+### Requirement: 多来源 snapshot manifest 支持离线重放
+一次 bundle SHALL 固定所有来源的 observation IDs、artifact IDs、source release identities、query parameters、methodology/derivation versions、comparability results、selected periods 和生成时间。按 manifest 重放 SHALL 不访问外部来源，也不因后来某一来源发布新值而改变其他轴或整体判断。
+
+#### Scenario: ONS 后续发布新 AI wave
+- **WHEN** 用户重放在新 wave 发布前生成的 manifest
+- **THEN** 系统 SHALL 继续返回旧 manifest 固定的 ONS snapshot 和其他来源 versions
+- **AND** SHALL NOT 自动混入新 wave 或重算原结论
+
+### Requirement: 查询层支持 Ramp source scope 与非融合比较
+结构化查询 SHALL 暴露 Ramp adoption、spend 和 model market share 的 source scope、统计主体、分母、技术范围、期间和 methodology regime。默认跨源查询 SHALL 仅返回并列事实与 comparability diagnostics；不得将 Ramp、BTOS、RPS 或 Anthropic 的比例加权、求平均、相减或补值。
+
+#### Scenario: 请求 Ramp 和 BTOS 并列
+- **WHEN** 消费者显式请求同一期间 Ramp adoption 与 BTOS adoption
+- **THEN** 查询 SHALL 返回两个独立 series、各自分母和 source scope
+- **AND** SHALL 标记为 directional/contextual comparison，而非 level-comparable
+
+#### Scenario: 未指定 Ramp scope
+- **WHEN** 消费者请求“Ramp AI adoption”但未指定 `adoption_overall`、`adoption_overall_models` 或 `adoption_sector`
+- **THEN** 查询 SHALL 返回 ambiguous-dimension failure 或要求选择 scope
+- **AND** SHALL 不从多个 chart slice 自动拼接结果
+
+### Requirement: Ramp 网页导出结果可形成离线快照与图表输入
+查询结果 SHALL 能固定网页导出 payload 的 artifact ID、observation IDs、chart slug、rows hash、period、as_of 和 derivation version。图表与 Agent context SHALL 使用该快照，不在渲染或推理时再次访问 Ramp 页面。
+
+#### Scenario: 重放 Ramp 月度报告
+- **WHEN** 后续网页更新了 historical table 或模型说明
+- **THEN** 以旧 manifest 重放 SHALL 返回旧 payload 和旧派生结果
+- **AND** SHALL 不重新点击网页或使用当前最新值
+
+### Requirement: 查询必须按收入语义返回可比 Frontier AI Labs 序列
+结构化查询 SHALL 支持按实验室、可选产品、计量口径、观察身份、来源、参考期间、known-at/as-of 和质量状态筛选收入 observations。返回结果 SHALL 包含币种、值、period、披露日、source citation、observation/artifact IDs、revision、methodology regime、comparability status 和 lineage；默认不得将不同收入口径聚合到同一序列。
+
+#### Scenario: 查询 OpenAI 与 Anthropic 可比曲线
+- **WHEN** 消费者请求两家公司相同 metric identity 与 observation identity 的历史序列
+- **THEN** 查询 SHALL 返回按真实参考期间排序的离散观察和 period gaps
+- **AND** SHALL NOT 自动插值、换算计量口径或使用较晚披露回填更早 as-of
+
+### Requirement: 收入聚合必须保留来源与观察身份
+收入 DataProduct MAY 计算同一可比序列的最新值、绝对变化、百分比变化和年化运行率趋势，但每个派生结果 SHALL 绑定底层 observation IDs、来源组合、公式和 derivation version。若来源或口径冲突使派生不成立，查询 SHALL 返回 `not_comparable` 及原因，而不是选择一个无披露的合成值。
+
+#### Scenario: 计算收入变化
+- **WHEN** 同一公司至少有两个可比、通过质量门的离散期间
+- **THEN** DataProduct SHALL 返回变化值、公式和底层 observation IDs
+- **AND** 报告、CSV/JSON 与图表 SHALL 能复用同一派生结果
+
+### Requirement: 查询返回测量范围与来源载体
+能力查询结果 SHALL 返回 `measurement_scope`、source transport、source URL/仓库、commit 或 HTTP validators、artifact hash 和 coverage state。查询层 SHALL 能按 `model_capability_proxy` 与 `model_agent_stack_capability` 过滤，默认不得跨范围聚合。
+
+#### Scenario: 读取公开 benchmark 结果
+- **WHEN** 消费者查询 LiveBench 或 Terminal-Bench
+- **THEN** 结果 SHALL 显示对应的 proxy/agent-stack scope 与真实来源 lineage
+- **AND** 不得将来源缺失或未授权 API 解释成数值零
+
+### Requirement: 查询支持版本化模型与 benchmark 能力矩阵
+结构化查询 SHALL 支持按 Lab、模型/旗舰 effective period、benchmark/version、harness、grader、推理配置、comparability group、来源策略和历史 `as_of` 返回能力成绩矩阵。结果 SHALL 包含数值或覆盖状态、单位/值域、方法版本、来源身份、新鲜度、质量状态和 observation lineage；查询 SHALL 能要求每家 Lab 在指定时点只返回一个 active flagship。
+
+#### Scenario: 查询当前十一乘九矩阵
+- **WHEN** 消费者请求当前九家 Labs 与十一项 benchmark 的旗舰能力矩阵
+- **THEN** 查询 SHALL 返回固定行列集合并为缺失单元返回具体 coverage state
+- **AND** SHALL NOT 因某模型没有成绩而删除其整列
+
+#### Scenario: 查询事件型 benchmark 证据
+- **WHEN** 消费者查询 AutomationBench 或 OSWorld 的证据
+- **THEN** 查询 SHALL 分别返回默认统一矩阵候选与按 comparability group 分组的事件账本
+- **AND** SHALL NOT 把不同 harness、metric 或 task set 的事件折叠成单一模型分数
+
+#### Scenario: 重放历史 cohort
+- **WHEN** 消费者以旧日期作为 `as_of` 查询能力矩阵
+- **THEN** 查询 SHALL 使用当时有效的旗舰和当时已经 known 的成绩 vintage
+- **AND** SHALL NOT 使用后来发布的新模型或修订分数
+
+### Requirement: 查询层强制执行 benchmark 可比性边界
+横截面、时间序列、frontier 和增量查询 SHALL 默认只在同一 comparability group 内排序、聚合或计算变化。消费者显式请求跨组数据时 SHALL 获得分组结果和 non-comparable 标记；只有注册 bridge 后才能请求桥接派生值，且结果 SHALL 返回 bridge version 和不确定性。
+
+#### Scenario: 查询跨版本趋势
+- **WHEN** 用户请求 Terminal-Bench 2.1 与 4.0 的完整历史
+- **THEN** 查询 SHALL 返回两个独立系列及版本断点
+- **AND** SHALL NOT 默认计算从 2.1 末值到 4.0 首值的增长率
+
+#### Scenario: 使用注册桥接关系
+- **WHEN** 用户显式请求已存在有效 bridge 的跨版本比较
+- **THEN** 查询 SHALL 返回原始两条系列与单独的桥接派生结果
+- **AND** 派生结果 SHALL 显示 bridge 方法、版本和适用范围
+
+### Requirement: 查询可以复算 global frontier 与门槛输入
+能力数据产品 SHALL 提供按 benchmark、comparability group 和 `as_of` 选择 current/previous global frontier 的受治理查询，并返回计算门槛所需的点估计、样本数、置信区间或缺失原因。查询 SHALL 保留全部候选值和选择理由，SHALL NOT 只返回最终最大值而隐藏来源冲突、配置差异或覆盖缺口。
+
+#### Scenario: 同一模型存在第三方与自报告结果
+- **WHEN** current frontier 候选包含第三方统一评测和 Lab 自报告
+- **THEN** 查询 SHALL 按声明来源策略返回 selected frontier 并列出未选候选与原因
+- **AND** SHALL NOT 对候选成绩取平均
+
+#### Scenario: 无法计算置信区间
+- **WHEN** selected frontier 只有点估计而没有样本级统计
+- **THEN** 查询 SHALL 返回点估计和 `confidence_unavailable`
+- **AND** 下游 SHALL 能据此区分 provisional 与 confirmed 判定

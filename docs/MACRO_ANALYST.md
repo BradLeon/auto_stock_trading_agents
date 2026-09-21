@@ -435,7 +435,7 @@ MOVE 就能参与 z-score 判定）。
 |---|---|---|---|
 | **Stage 1** 确定性指标层 | 不丢弃 FRED 历史；算 Δ/z-score/百分位；§5 分解；§5.3 趋势/冲击；§6 象限判定与迟滞；§6.5 告警；schema 扩展 | 合成序列单测覆盖象限边界与迟滞；再对真实 FRED 数据逐个核对数字 | ✅ 已完成 |
 | **Stage 2** 叙事层 | 重写 SKILL.md（§8）；报告新增确定性章节（象限/依据表/分解/告警/指标附录/证伪条件）；5 个下游注入点全部带上象限 | 单测覆盖 5 个注入点、stub 保护、报告降级、SKILL 关键条款 | ✅ 已完成 |
-| **Stage 3** 盈利数据 | FactSet Key Metrics 正则抽取（**不需要表格/视觉抽取**，见 §9.3）+ 逐字段降级 + 合理性校验 | 3 份历史 PDF 全部跑通；故意喂坏版式与坏数字验证降级 | ✅ 已完成 |
+| **Stage 3** 盈利数据 | 受治理 FactSet PDF 导入、正文/图表候选、证据与独立 release；Macro 只读 DataProducts 分析包 | `082826` 指数 25 项和 231 个行业单元格通过验收；Macro/Sector 已完成真实报告观察 | ✅ 已完成 |
 
 ### Stage 1 实跑发现（保留作为教训）
 
@@ -473,7 +473,7 @@ stub 保护（`agents/macro/context.py` 拦截以 `(` 开头的 regime），所�
 ### 命令行与补跑
 
 ```bash
-# 生产补跑：拉取 FRED / 市场 / 新闻及 FactSet 材料，落库并写周报
+# 生产补跑：拉取 FRED / 市场 / 新闻；读取已经发布的本地 FactSet 材料，落库并写周报
 ats macro review macro
 
 # 查看最近结果或检查输入；--no-llm 会写 stub，不应用于生产库验证
@@ -481,7 +481,7 @@ ats macro show macro
 ats macro probe macro
 ```
 
-正常调度由 `weekly_review` 在周六 08:50（`Asia/Shanghai`）执行，顺序为宏观后行业。
+正常调度先由 `factset_weekly_ingest` 在周六 08:10（`Asia/Shanghai`）准备 FactSet 数据，随后 `weekly_review` 在 08:50 执行宏观后行业。Macro 不下载 PDF、不读取 Obsidian 文件夹；详情见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。
 FOMC/CPI/NFP 等 `config/events.yaml` 事件也会在交易日的 `daily_cycle` 中触发额外宏观
 评审，以获得发布日时效性；这条即时路径予以保留，但不是数据入库的唯一入口。
 

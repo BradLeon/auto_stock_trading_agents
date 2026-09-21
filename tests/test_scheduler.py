@@ -79,6 +79,13 @@ def test_chief_daily_runs_with_scheduled_source(monkeypatch):
 
 def test_daily_no_llm_mode_reaches_event_pead_and_chief(monkeypatch):
     """The safe scheduler acceptance mode must propagate to every LLM-capable stage."""
+    from ats.config import DailyStageConfig
+
+    real = scheduler.get_config()
+    full_schedule = real.app.schedule.model_copy(update={"daily_stages": DailyStageConfig()})
+    full_cfg = real.model_copy(update={"app": real.app.model_copy(update={"schedule": full_schedule})})
+    monkeypatch.setattr(scheduler, "get_config", lambda: full_cfg)
+
     seen = {}
     monkeypatch.setattr(scheduler, "_news_backfill_daily", lambda: None)
     monkeypatch.setattr(scheduler, "_technical_daily", lambda: None)
@@ -98,6 +105,41 @@ def test_daily_no_llm_mode_reaches_event_pead_and_chief(monkeypatch):
     scheduler._daily(dry_run=True, use_llm=False)
 
     assert seen == {"events": False, "pead": False, "intel": False, "chief": False}
+
+
+def test_daily_honours_independent_stage_switches(monkeypatch):
+    """Paused stages must not be imported or executed as a side effect of PEAD."""
+    from ats.config import DailyStageConfig
+
+    real = scheduler.get_config()
+    pead_only = real.app.schedule.model_copy(update={
+        "daily_stages": DailyStageConfig(
+            pead_event_triggers=True,
+            macro_sector_event_triggers=False,
+            news_backfill=False,
+            pead_daily=True,
+            technical_daily=False,
+            intel_digest=False,
+            performance_snapshot=False,
+            perf_risk_digest=False,
+            journal_marks=False,
+            chief_daily=False,
+        )})
+    cfg = real.model_copy(update={"app": real.app.model_copy(update={"schedule": pead_only})})
+    monkeypatch.setattr(scheduler, "get_config", lambda: cfg)
+
+    seen = []
+    monkeypatch.setattr(scheduler, "_event_triggers",
+                        lambda **kw: seen.append(("events", kw["pead"], kw["macro_sector"])))
+    monkeypatch.setattr(scheduler, "pead_daily", lambda **kw: seen.append(("pead", kw["use_llm"])))
+    for name in ("_news_backfill_daily", "_technical_daily", "_intel_digest", "_perf_snapshot",
+                 "_perf_risk_digest", "_journal_marks", "_chief_daily"):
+        monkeypatch.setattr(scheduler, name,
+                            lambda *a, _name=name, **kw: pytest.fail(f"paused stage ran: {_name}"))
+
+    scheduler._daily(dry_run=True, use_llm=False)
+
+    assert seen == [("events", True, False), ("pead", False)]
 
 
 def test_schedule_cli_exposes_safe_no_llm_run_once(monkeypatch):

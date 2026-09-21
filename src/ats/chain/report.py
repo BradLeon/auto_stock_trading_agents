@@ -18,9 +18,14 @@ from pathlib import Path
 
 log = logging.getLogger("ats.chain.report")
 
-VERDICT_MARK = {"supportive": "✅ 印证", "contradicted": "⛔ 反证",
-                "falsified": "⛔ 已证伪", "mixed": "⚠️ 分歧", "unknown": "· 未定",
-                "resolved": "📊 已比较"}
+VERDICT_MARK = {
+    "supportive": "✅ 印证",
+    "contradicted": "⛔ 反证",
+    "falsified": "⛔ 已证伪",
+    "mixed": "⚠️ 分歧",
+    "unknown": "· 未定",
+    "resolved": "📊 已比较",
+}
 # `mixed` now means exactly one thing: the evidence conflicts. Evidence that is
 # one-sided but single-vantage no longer lands here — it either resolves with
 # `basis=self_reported`, or (too few independent filers) becomes `unknown` carrying
@@ -39,16 +44,29 @@ def verdict_mark(a) -> str:
     if reason and a.verdict in ("mixed", "unknown"):
         return UNRESOLVED_MARK.get(reason, VERDICT_MARK.get(a.verdict, a.verdict))
     mark = VERDICT_MARK.get(a.verdict, a.verdict)
-    if getattr(a, "basis", "") == "self_reported" and a.verdict in ("supportive",
-                                                                   "contradicted"):
+    if getattr(a, "basis", "") == "self_reported" and a.verdict in ("supportive", "contradicted"):
         mark += "（仅自述）"
     return mark
+
+
 STANDING_MARK = {"strong": "强", "neutral": "中", "weak": "弱", "unknown": "—"}
 BASIS_CN = {"corroborated": "有交叉印证", "self_reported": "仅自述", "thin": "证据薄"}
-TYPE_CN = {"reported_actual": "已实现", "guidance": "指引", "counterparty": "对手方",
-           "regulatory": "监管", "research": "研究", "media": "媒体", "market": "市场"}
-STANCE_CN = {"customer": "客户", "supplier": "供应商", "competitor": "竞对",
-            "incumbent": "当事方", "regulator": "监管/统计机构"}
+TYPE_CN = {
+    "reported_actual": "已实现",
+    "guidance": "指引",
+    "counterparty": "对手方",
+    "regulatory": "监管",
+    "research": "研究",
+    "media": "媒体",
+    "market": "市场",
+}
+STANCE_CN = {
+    "customer": "客户",
+    "supplier": "供应商",
+    "competitor": "竞对",
+    "incumbent": "当事方",
+    "regulator": "监管/统计机构",
+}
 
 
 def _no_llm_judge(_claim, clusters):
@@ -56,22 +74,39 @@ def _no_llm_judge(_claim, clusters):
     from ..schemas.chain import ClusterJudgement, EntityReading
 
     if isinstance(clusters, dict):
-        return [EntityReading(entity=str(entity).upper(), standing="unknown",
-                              reason="未运行 LLM 判读（no-LLM 验收）")
-                for entity in clusters]
-    return [ClusterJudgement(
-        cluster_key=cluster.key, polarity="neutral", reason="未运行 LLM 判读（no-LLM 验收）",
-        speaker=cluster.speaker, concept=cluster.concept, stance=cluster.stance,
-        primary=cluster.primary, observation_ids=cluster.observation_ids)
-        for cluster in clusters]
+        return [
+            EntityReading(
+                entity=str(entity).upper(),
+                standing="unknown",
+                reason="未运行 LLM 判读（no-LLM 验收）",
+            )
+            for entity in clusters
+        ]
+    return [
+        ClusterJudgement(
+            cluster_key=cluster.key,
+            polarity="neutral",
+            reason="未运行 LLM 判读（no-LLM 验收）",
+            speaker=cluster.speaker,
+            concept=cluster.concept,
+            stance=cluster.stance,
+            primary=cluster.primary,
+            observation_ids=cluster.observation_ids,
+        )
+        for cluster in clusters
+    ]
 
 
 def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
-    lines = ["## 命题印证", "",
-             "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条判读都附理由，"
-             "**结论应当对着理由争论，而不是对着数字**。\n"
-             "> **竞争者扩产不等于我方失份额**——扩产不是 direct 维度，进不了截面比较。"
-             "截面命题不断言真假，只回答「这个位置在同业之间怎么分布」。", ""]
+    lines = [
+        "## 命题印证",
+        "",
+        "> 证据的筛选、去重、立场统计与记分由确定性引擎完成；每条判读都附理由，"
+        "**结论应当对着理由争论，而不是对着数字**。\n"
+        "> **竞争者扩产不等于我方失份额**——扩产不是 direct 维度，进不了截面比较。"
+        "截面命题不断言真假，只回答「这个位置在同业之间怎么分布」。",
+        "",
+    ]
     any_claim = False
     for layer in cfg.layers:
         assessments = assessments_by_layer.get(layer.key) or []
@@ -82,8 +117,7 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
         for a in assessments:
             claim = next((c for c in layer.claims if c.id == a.claim_id), None)
             kind = "截面比较" if (claim and claim.kind == "relative") else "共同需求"
-            subj = (f" · 比较 {', '.join(claim.entities)}"
-                    if claim and claim.entities else "")
+            subj = f" · 比较 {', '.join(claim.entities)}" if claim and claim.entities else ""
             lines += [
                 f"**{verdict_mark(a)}｜{claim.statement if claim else a.claim_id}**",
                 "",
@@ -97,10 +131,12 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
                 # challenge: "every hyperscaler but Microsoft" is the finding, and
                 # burying Microsoft under 「异议方」 invites the reader to skip the one
                 # row that carries the most information.
-                exc = (f" · 具名例外 {', '.join(a.dissenters)}（反向读数见下方逐簇判读）"
-                       if a.dissenters else "")
-                lines.append(
-                    f"- 支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}{exc}")
+                exc = (
+                    f" · 具名例外 {', '.join(a.dissenters)}（反向读数见下方逐簇判读）"
+                    if a.dissenters
+                    else ""
+                )
+                lines.append(f"- 支持 {a.support_score:.0f} / 反驳 {a.refute_score:.0f}{exc}")
             if a.silent_witnesses:
                 # Silence is a gap, not neutrality: a witness who said nothing is the
                 # difference between "checked and fine" and "never checked".
@@ -112,14 +148,18 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
             if a.entity_readings:
                 # A cross-section's answer IS this table. Basis travels with each row:
                 # a self-reported "strong" must not read like a corroborated one.
-                lines += ["", "  | 公司 | 位置 | 依据强度 | 证据 | 说话人 | 理由 |",
-                          "  |---|---|---|---|---|---|"]
+                lines += [
+                    "",
+                    "  | 公司 | 位置 | 依据强度 | 证据 | 说话人 | 理由 |",
+                    "  |---|---|---|---|---|---|",
+                ]
                 for r in a.entity_readings:
                     lines.append(
                         f"  | **{r.entity}** | {STANDING_MARK.get(r.standing, r.standing)} "
                         f"| {BASIS_CN.get(r.basis, r.basis)} | {r.evidence_clusters} 簇/"
                         f"{r.stance_classes} 类 | {', '.join(r.speakers) or '—'} "
-                        f"| {r.reason or '—'} |")
+                        f"| {r.reason or '—'} |"
+                    )
             if a.judgements:
                 # Every polarity call with its reason. This is the section a reader
                 # actually argues with: the verdict is arithmetic over these, so
@@ -127,12 +167,17 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
                 mark = {"support": "＋支持", "refute": "－反驳", "neutral": "・中性"}
                 lines += ["", "  | 判读 | 说话人 | 维度 | 理由 |", "  |---|---|---|---|"]
                 for j in a.judgements:
-                    lines.append(f"  | {mark.get(j.polarity, j.polarity)} | {j.speaker} | "
-                                 f"{j.concept or '—'} | {j.reason or '—'} |")
+                    lines.append(
+                        f"  | {mark.get(j.polarity, j.polarity)} | {j.speaker} | "
+                        f"{j.concept or '—'} | {j.reason or '—'} |"
+                    )
             spans = [rows_by_id[i] for i in a.observation_ids if i in rows_by_id][:6]
             if spans:
-                lines += ["", "  | 说话人 | 关于 | 维度 | 方向 | 类型 | 原文 |",
-                          "  |---|---|---|---|---|---|"]
+                lines += [
+                    "",
+                    "  | 说话人 | 关于 | 维度 | 方向 | 类型 | 原文 |",
+                    "  |---|---|---|---|---|---|",
+                ]
                 for r in spans:
                     who = r.get("source_entity") or r.get("entity") or ""
                     about = r.get("entity") or ""
@@ -140,7 +185,8 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
                         f"  | {who} | {about} | {r.get('concept') or '—'} | "
                         f"{r.get('direction') or '—'} | "
                         f"{TYPE_CN.get(r.get('observation_type'), r.get('observation_type') or '—')} | "
-                        f"{(r.get('evidence_span') or '')[:90]} |")
+                        f"{(r.get('evidence_span') or '')[:90]} |"
+                    )
             lines.append("")
     if not any_claim:
         lines += ["（该行业配置里还没有 claims —— 见 docs/CHAIN_EVIDENCE.md）", ""]
@@ -152,16 +198,23 @@ def _pool_section(store, ind_cfg: dict) -> list[str]:
 
     pool = store.unmapped_observations(limit=500)
     fire, reason = should_induce(pool, ind_cfg)
-    lines = ["## 未映射池（涌现命题的原料）", "",
-             "> 归不到任何已声明维度的观测。**留空是合法结果**——不硬套，"
-             "攒够分量才触发一次归纳（无 cron，纯时间流逝不触发）。", "",
-             f"- 当前 {len(pool)} 条 · 触发判定：{reason}", ""]
+    lines = [
+        "## 未映射池（涌现命题的原料）",
+        "",
+        "> 归不到任何已声明维度的观测。**留空是合法结果**——不硬套，"
+        "攒够分量才触发一次归纳（无 cron，纯时间流逝不触发）。",
+        "",
+        f"- 当前 {len(pool)} 条 · 触发判定：{reason}",
+        "",
+    ]
     if pool:
         lines += ["| 说话人 | 指标 | 方向 | 原文 |", "|---|---|---|---|"]
         for r in pool[:12]:
             who = r.get("source_entity") or r.get("entity") or ""
-            lines.append(f"| {who} | {r.get('metric') or '—'} | {r.get('direction') or '—'} "
-                         f"| {(r.get('evidence_span') or '')[:90]} |")
+            lines.append(
+                f"| {who} | {r.get('metric') or '—'} | {r.get('direction') or '—'} "
+                f"| {(r.get('evidence_span') or '')[:90]} |"
+            )
         lines.append("")
     return lines
 
@@ -172,15 +225,22 @@ def _proposal_section(store) -> list[str]:
     if not pending:
         lines += ["（无）", ""]
         return lines
-    lines += ["> 系统提议，**只有你能把它写进配置**——坐标系只有人能扩，"
-              "否则模型今天发明一个维度、明天换一个，截面因子的历史就不再可比。", ""]
+    lines += [
+        "> 系统提议，**只有你能把它写进配置**——坐标系只有人能扩，"
+        "否则模型今天发明一个维度、明天换一个，截面因子的历史就不再可比。",
+        "",
+    ]
     for p in pending:
-        lines += [f"**{p['statement']}**", "",
-                  f"- id `{p['id']}` · 类型 {p['kind']}"
-                  + (f" · 涉及层 {p['layer_hint']}" if p.get("layer_hint") else ""),
-                  f"- 采纳：`ats evidence review {p['id']} --accept`"
-                  f" · 拒绝：`ats evidence review {p['id']} --note \"理由\"`",
-                  "- 触发它的观测已冻结，采纳后不得用于印证它自己", ""]
+        lines += [
+            f"**{p['statement']}**",
+            "",
+            f"- id `{p['id']}` · 类型 {p['kind']}"
+            + (f" · 涉及层 {p['layer_hint']}" if p.get("layer_hint") else ""),
+            f"- 采纳：`ats evidence review {p['id']} --accept`"
+            f' · 拒绝：`ats evidence review {p["id"]} --note "理由"`',
+            "- 触发它的观测已冻结，采纳后不得用于印证它自己",
+            "",
+        ]
     return lines
 
 
@@ -204,11 +264,15 @@ def _sources_section(store) -> list[str]:
     declared = chain_sources.load_sources()
     if not declared:
         return []
-    lines = ["## 第三方数据源", "",
-             "> 非自述、独立于任何一家公司的读数——这是部分命题唯一能拿到跨立场佐证的"
-             "来源。取不到数据记成缺口，不会悄悄变成沉默（`ats evidence collect` / "
-             "`chain/sources.py`）。下面是**台账里已存的**读数，不是现抓的——"
-             "本报告不发网络请求，且上面的判读正是对着这批存量数据算出来的。", ""]
+    lines = [
+        "## 第三方数据源",
+        "",
+        "> 非自述、独立于任何一家公司的读数——这是部分命题唯一能拿到跨立场佐证的"
+        "来源。取不到数据记成缺口，不会悄悄变成沉默（`ats evidence collect` / "
+        "`chain/sources.py`）。下面是**台账里已存的**读数，不是现抓的——"
+        "本报告不发网络请求，且上面的判读正是对着这批存量数据算出来的。",
+        "",
+    ]
     for s in declared:
         lines += [f"### {s.label or s.id}（`{s.id}`）", ""]
         # Pulled from the adapter's own module docstring so this rationale can never
@@ -223,10 +287,13 @@ def _sources_section(store) -> list[str]:
             rationale = ""
         if rationale:
             lines += [rationale, ""]
-        lines += [f"- 适配器 `{s.adapter}` · 立场 **{STANCE_CN.get(s.stance, s.stance)}** "
-                  f"· 类型 {TYPE_CN.get(s.observation_type, s.observation_type)} "
-                  f"· 更新频率 {s.cadence}",
-                  f"- 绑定维度：{', '.join(f'`{c}`' for c in s.concepts) or '（无）'}", ""]
+        lines += [
+            f"- 适配器 `{s.adapter}` · 立场 **{STANCE_CN.get(s.stance, s.stance)}** "
+            f"· 类型 {TYPE_CN.get(s.observation_type, s.observation_type)} "
+            f"· 更新频率 {s.cadence}",
+            f"- 绑定维度：{', '.join(f'`{c}`' for c in s.concepts) or '（无）'}",
+            "",
+        ]
 
         # collect() saves one physical row PER declared concept — the same print filed
         # under `supply_tightness` and again under `hbm_demand` is two DB rows so both
@@ -250,16 +317,25 @@ def _sources_section(store) -> list[str]:
         attempts = store.documents(entity=s.entity, ok_only=False, limit=1)
         last_fail = attempts[0] if attempts else None
         if not rows:
-            note = f"（最近一次尝试 {last_fail['fetched_at']}：{last_fail['note']}）" if last_fail else ""
+            note = (
+                f"（最近一次尝试 {last_fail['fetched_at']}：{last_fail['note']}）"
+                if last_fail
+                else ""
+            )
             lines += [f"⚠️ 台账里还没有这个源的观测{note}", ""]
             continue
         if last_fail and last_fail["fetched_at"] > raw[0]["observed_at"]:
-            lines += [f"⚠️ 最近一次抓取失败（{last_fail['fetched_at']}：{last_fail['note']}）"
-                      f"——以下是上一次成功抓到的读数", ""]
+            lines += [
+                f"⚠️ 最近一次抓取失败（{last_fail['fetched_at']}：{last_fail['note']}）"
+                f"——以下是上一次成功抓到的读数",
+                "",
+            ]
         lines += ["| 期间 | 读数 | 方向 | 原文 |", "|---|---|---|---|"]
         for r in rows:
-            lines.append(f"| {r.get('period') or '—'} | {r.get('metric') or '—'} "
-                         f"| {r.get('direction') or '—'} | {(r.get('evidence_span') or '')[:110]} |")
+            lines.append(
+                f"| {r.get('period') or '—'} | {r.get('metric') or '—'} "
+                f"| {r.get('direction') or '—'} | {(r.get('evidence_span') or '')[:110]} |"
+            )
         lines.append("")
     lines += _article_sources_section(store)
     return lines
@@ -278,10 +354,14 @@ def _article_sources_section(store) -> list[str]:
     declared = chain_articles.load_article_sources()
     if not declared:
         return []
-    lines = ["### 文章类第三方源", "",
-             "> 与上面的数列源同为非自述读数，区别只在形态：数列靠公式变成观测，"
-             "文章要被读。**取不到正文的文章单列**——付费墙扩大与「这家最近没什么可说的」"
-             "在只报成功的清单里长得一模一样，但该做的应对正好相反。", ""]
+    lines = [
+        "### 文章类第三方源",
+        "",
+        "> 与上面的数列源同为非自述读数，区别只在形态：数列靠公式变成观测，"
+        "文章要被读。**取不到正文的文章单列**——付费墙扩大与「这家最近没什么可说的」"
+        "在只报成功的清单里长得一模一样，但该做的应对正好相反。",
+        "",
+    ]
     for s in declared:
         lines += [f"#### {s.label or s.id}（`{s.id}`）", ""]
         try:
@@ -294,8 +374,11 @@ def _article_sources_section(store) -> list[str]:
             rationale = ""
         if rationale:
             lines += [rationale, ""]
-        lines += [f"- 适配器 `{s.adapter}` · 立场 **{STANCE_CN.get(s.stance, s.stance)}** "
-                  f"· 更新频率 {s.cadence}", ""]
+        lines += [
+            f"- 适配器 `{s.adapter}` · 立场 **{STANCE_CN.get(s.stance, s.stance)}** "
+            f"· 更新频率 {s.cadence}",
+            "",
+        ]
 
         docs = store.documents(entity=s.entity, ok_only=False, limit=200)
         ok = [d for d in docs if d.get("ok") and d.get("doc_type") == s.doc_type]
@@ -306,9 +389,11 @@ def _article_sources_section(store) -> list[str]:
         if ok:
             lines += ["| 抓取时间 | 文章 | 原文 |", "|---|---|---|"]
             for d in ok[:12]:
-                lines.append(f"| {(d.get('fetched_at') or '')[:10]} "
-                             f"| {(d.get('period') or '—')[:76]} "
-                             f"| [链接]({d.get('source_url') or ''}) |")
+                lines.append(
+                    f"| {(d.get('fetched_at') or '')[:10]} "
+                    f"| {(d.get('period') or '—')[:76]} "
+                    f"| [链接]({d.get('source_url') or ''}) |"
+                )
             lines.append("")
         if bad:
             lines += [f"🚫 **{len(bad)} 篇取不到正文**（付费或模板变更）——记成缺口，不是沉默：", ""]
@@ -353,28 +438,114 @@ def _failure_section(store) -> list[str]:
     fails = store.observation_failures(limit=8)
     if not fails:
         return []
-    return (["## 抽取失败（保留而非记成「零观测」）", "",
-             "> 「读不到」和「没说」是两种状态，只有后者可以当作证据缺失。", "",
-             "| 实体 | 文档 | 原因 |", "|---|---|---|"]
-            + [f"| {f['entity']} | {f['document_id']} | {f['reason']} |" for f in fails]
-            + [""])
+    return (
+        [
+            "## 抽取失败（保留而非记成「零观测」）",
+            "",
+            "> 「读不到」和「没说」是两种状态，只有后者可以当作证据缺失。",
+            "",
+            "| 实体 | 文档 | 原因 |",
+            "|---|---|---|",
+        ]
+        + [f"| {f['entity']} | {f['document_id']} | {f['reason']} |" for f in fails]
+        + [""]
+    )
 
 
-def render(cfg, store, *, as_of, ind_cfg: dict | None = None,
-           allow_llm: bool = True) -> str:
+def _ai_production_penetration_section(packet: dict | None) -> list[str]:
+    """Render the opt-in L1 AI production proxy as a read-only report appendix.
+
+    Chain evidence has its own corroboration and scoring model.  This appendix is
+    deliberately *not* a Chain claim: callers must pass the dedicated Observer
+    packet explicitly, and the function only formats that immutable result.  It
+    neither opens DataProducts nor feeds a value back into assessment, PEAD, Chief,
+    portfolio, risk, or execution paths.
+    """
+    if not packet or packet.get("claim_id") != "ai_core_production_workflow_penetration":
+        return []
+    if packet.get("status") != "ok":
+        return [
+            "## AI 应用层：生产化与应用扩散（只读）",
+            "",
+            f"⚠️ 专属 Observer 当前不可用：{'; '.join(packet.get('warnings', [])) or '未知原因'}",
+            "",
+        ]
+
+    card = packet.get("methodology_card") or {}
+    lines = [
+        "## AI 应用层：生产化与应用扩散（只读）",
+        "",
+        "> 这是通过显式 claim ID 注入的 L1 专属 Observer packet；它不参与产业链命题印证、"
+        "评分、PEAD、Chief、组合、风险或执行。",
+        "",
+        f"**{packet.get('claim_text', '')}**",
+        "",
+        f"- 总体状态：`{packet.get('overall_status', 'unknown')}` · 历史：`{packet.get('history_status', 'unknown')}`",
+        f"- 数据范围：Anthropic Economic Index / 1P API / GLOBAL · 期间：{', '.join(packet.get('period_range', [])) or '—'}",
+        f"- 生产化代理：Work ≥ 80% · Automation ≥ 80% · Directive ≥ 50% · Usage > 0"
+        f"（`{card.get('threshold_version', '—')}`）",
+        "",
+        "| 期间 | 粒度 | 可见单元生产化率 | 生产化流量份额 |",
+        "|---|---|---:|---:|",
+    ]
+    for row in packet.get("summary_table", []):
+        lines.append(
+            f"| {row.get('period', '—')} | {row.get('grain', '—')} | "
+            f"{row.get('visible_production_rate_pct', 0):.2f}% | "
+            f"{row.get('production_traffic_share_pct', 0):.2f}% |"
+        )
+    comparison = packet.get("monthly_comparison") or {}
+    if comparison:
+        lines += [
+            "",
+            f"- 月度比较（{comparison.get('from_period')} → {comparison.get('to_period')}）："
+            f"广度 `{comparison.get('breadth')}`，深度 `{comparison.get('depth')}`。",
+        ]
+    lines += [
+        "",
+        "- 限制：Usage Share 是产品流量份额；以上阈值是生产化代理，不能推断员工采用率、"
+        "持续工作流、岗位替代、生产率、ROI 或交易结论。",
+        f"- 可重放 manifest：`{card.get('manifest_id') or '—'}`",
+        "",
+    ]
+    return lines
+
+
+def render(
+    cfg,
+    store,
+    *,
+    as_of,
+    ind_cfg: dict | None = None,
+    allow_llm: bool = True,
+    ai_production_packet: dict | None = None,
+) -> str:
     """Build the markdown with an independently reversible evidence-data read path."""
     from ..data.products import get_unstructured_read_router
 
-    reader = get_unstructured_read_router(
-        consumer="evidence_chain", legacy_repository=store)
+    reader = get_unstructured_read_router(consumer="evidence_chain", legacy_repository=store)
     try:
-        return _render(cfg, reader, as_of=as_of, ind_cfg=ind_cfg, allow_llm=allow_llm)
+        return _render(
+            cfg,
+            reader,
+            as_of=as_of,
+            ind_cfg=ind_cfg,
+            allow_llm=allow_llm,
+            ai_production_packet=ai_production_packet,
+        )
     finally:
         reader.close()
 
 
-def _render(cfg, store, *, as_of, ind_cfg: dict | None = None,
-            allow_llm: bool = True) -> str:
+def _render(
+    cfg,
+    store,
+    *,
+    as_of,
+    ind_cfg: dict | None = None,
+    allow_llm: bool = True,
+    ai_production_packet: dict | None = None,
+) -> str:
     """Render with immutable document/evidence reads routed through ``store``.
 
     The router delegates claim-assessment and other Workflow-memory operations to the
@@ -400,8 +571,8 @@ def _render(cfg, store, *, as_of, ind_cfg: dict | None = None,
         # re-rendering the same report writes a second row instead of replacing
         # one, and the history reads as change when nothing changed.
         assessments = assess_layer(
-            layer, rows_by_entity, cfg=ccfg, as_of=as_of,
-            judge=None if allow_llm else _no_llm_judge)
+            layer, rows_by_entity, cfg=ccfg, as_of=as_of, judge=None if allow_llm else _no_llm_judge
+        )
         assessments_by_layer[layer.key] = assessments
         # Snapshot the verdicts. Versioned by (claim_id, as_of) so the table answers
         # "when did this turn from mixed to contradicted" — the only question a verdict
@@ -425,6 +596,7 @@ def _render(cfg, store, *, as_of, ind_cfg: dict | None = None,
         "",
     ]
     lines += _claim_section(cfg, store, assessments_by_layer, rows_by_id)
+    lines += _ai_production_penetration_section(ai_production_packet)
     lines += _sources_section(store)
     lines += _pool_section(store, ind_cfg or {})
     lines += _proposal_section(store)
@@ -432,13 +604,23 @@ def _render(cfg, store, *, as_of, ind_cfg: dict | None = None,
     lines += _kb_audit_section(cfg, store)
     lines += _failure_section(store)
     total = len(store.observations(limit=1000))
-    lines += ["---", f"*观测总数 {total} · 命题 "
-              f"{sum(len(v) for v in assessments_by_layer.values())} 条*", ""]
+    lines += [
+        "---",
+        f"*观测总数 {total} · 命题 {sum(len(v) for v in assessments_by_layer.values())} 条*",
+        "",
+    ]
     return "\n".join(lines)
 
 
-def write(cfg, store, *, as_of, ind_cfg: dict | None = None,
-          allow_llm: bool = True) -> Path | None:
+def write(
+    cfg,
+    store,
+    *,
+    as_of,
+    ind_cfg: dict | None = None,
+    allow_llm: bool = True,
+    ai_production_packet: dict | None = None,
+) -> Path | None:
     if not cfg.output_dir:
         log.info("chain evidence report: output_dir unset — skipped")
         return None
@@ -447,6 +629,15 @@ def write(cfg, store, *, as_of, ind_cfg: dict | None = None,
         log.warning("chain evidence report: output_dir missing — skipped: %s", folder)
         return None
     path = folder / f"产业链证据-{cfg.label}-{as_of:%Y-%m-%d}.md"
-    path.write_text(render(cfg, store, as_of=as_of, ind_cfg=ind_cfg,
-                          allow_llm=allow_llm), encoding="utf-8")
+    path.write_text(
+        render(
+            cfg,
+            store,
+            as_of=as_of,
+            ind_cfg=ind_cfg,
+            allow_llm=allow_llm,
+            ai_production_packet=ai_production_packet,
+        ),
+        encoding="utf-8",
+    )
     return path

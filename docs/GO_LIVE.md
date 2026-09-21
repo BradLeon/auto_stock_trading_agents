@@ -8,16 +8,16 @@
 
 ## 0. 前置准备
 
-- [ ] Python 3.11+，已装 [uv](https://docs.astral.sh/uv/)
+- [ ] Python 3.12，已装 [uv](https://docs.astral.sh/uv/)；macOS 已执行 `brew bundle --file=Brewfile`（FactSet 本地 OCR 需要 tesseract）
 - [ ] 克隆仓库并建虚拟环境 + 装依赖：
 
 ```bash
 cd auto_stock_trading_agents
-uv venv --python 3.11 .venv
-uv pip install --python .venv -e ".[data,broker,memory_persist,channel,schedule,dev]"
-# 若本机走 SOCKS 代理（出现 "Using SOCKS proxy" 报错时）：
-uv pip install --python .venv socksio
+uv sync --python 3.12 \
+  --extra data --extra broker --extra memory-persist --extra channel --extra schedule --extra dev
 ```
+
+`socksio` 已是基础依赖，不需要再单独安装。部署机依赖须由 `pyproject.toml` 和 `uv.lock` 管理，不要使用 `pip install` 临时补包。
 
 - [ ] 拷贝环境文件：`cp .env.example .env`
 - [ ] 验证：`PYTHONPATH=src .venv/bin/python -m pytest -q` → **全绿**
@@ -203,7 +203,7 @@ uv pip install --python .venv socksio
 |---|---|
 | `IBKR unavailable ... 7497` | TWS 没开 / 没启用 API / 端口错 / 当天登出了 → 重开并 `ats ibkr` |
 | LLM `400 credit balance too low` | OpenRouter 余额不足 → 充值 |
-| `Using SOCKS proxy` 报错 | `uv pip install socksio` |
+| `Using SOCKS proxy` 报错 | 运行 `uv sync --python 3.12 --extra data --extra broker --extra memory-persist --extra channel --extra schedule --extra dev`；`socksio` 是基础依赖，成功同步后不应缺失 |
 | 飞书收不到卡片 | App 权限未发布 / `FEISHU_CHAT_ID` 错 / 机器人没在群里 |
 | 点了按钮没反应 | 隧道断了 / 回调网址错 / serve 没起 / `FEISHU_VERIFICATION_TOKEN` 不匹配 |
 | 宏观全是 n/a | `FRED_API_KEY` 没填（其它字段不受影响） |

@@ -18,9 +18,15 @@
 #    register its adapter key in src/ats/structured/runtime_registry.py, and start its
 #    checked-in source mode at `legacy`.
 # 2. A source that has written ingestion runs, artifacts, observations, or snapshots
-#    must not be hard-deleted or renamed. Stop it by rolling its source mode back to
-#    `legacy` and remove it from future primary/fallback selection while retaining the
-#    source identity for historical lineage.
+#    must not be hard-deleted or renamed in place. There are two sanctioned exits:
+#    a. Deactivate: roll its source mode back to `legacy` and remove it from future
+#       primary/fallback selection while retaining the source identity for lineage.
+#    b. Retire: move the id out of `sources` into the top-level `retired_sources`
+#       tombstone registry (see that section), which keeps the id machine-readably
+#       marked as gone so it cannot be silently reused, and then clear the stored
+#       rows through the explicit, separately confirmed `ats data purge-source`
+#       action if the data is being discarded. Never delete the `sources` entry on
+#       its own -- that leaves unexplained orphans and a reusable id.
 # 3. Secrets belong in `.env` or the deployment environment, never in this file.
 # 4. `cadence` is descriptive metadata used by quality/operations. It is NOT cron.
 #    Automated collection currently requires an external scheduler to invoke
@@ -37,6 +43,7 @@
 # allowed_ingestion_statuses Legal terminal states emitted by ingestion runs.
 # entities                   Stable non-security entities maintained in this catalog.
 # sources                    Provider/runtime source registry and request budgets.
+# retired_sources            Tombstones for source ids that have been retired.
 # datasets                   Business datasets, source priority, quality, acceptance.
 # metric_definitions         Provider-neutral metric semantics.
 # provider_mappings          Provider-native field -> metric id mappings.
@@ -93,6 +100,39 @@
 
 version: 1
 
+# Governed raw-capability panel.  Model names are discovered dynamically; these
+# entries define the eligible Lab universe and benchmark semantics only.
+frontier_ai_capability_registry:
+  cohort_version: frontier_ai_flagship_cohort/v1
+  labs:
+    OPENAI: {label: OpenAI, flagship_rule: general_frontier}
+    ANTHROPIC: {label: Anthropic, flagship_rule: general_frontier}
+    GOOGLE: {label: Google / Google DeepMind, flagship_rule: general_frontier}
+    XAI: {label: xAI, flagship_rule: general_frontier}
+    DEEPSEEK: {label: DeepSeek, flagship_rule: general_frontier}
+    MOONSHOT: {label: Moonshot / Kimi, flagship_rule: general_frontier}
+    TENCENT: {label: Tencent, flagship_rule: general_frontier}
+    ZAI: {label: Z.ai / GLM, flagship_rule: general_frontier}
+    ALIBABA: {label: Alibaba / Qwen, flagship_rule: general_frontier}
+  benchmarks:
+    livebench: {method_version: v1, b_eligible: false}
+    automationbench_aa: {label: AutomationBench-AA, method_version: aa-v1, b_eligible: false, event_ledger: true}
+    terminal_bench_4: {method_version: 4.0, b_eligible: true}
+    terminal_bench_science_01: {method_version: 0.1, b_eligible: true}
+    scicode: {method_version: v1, b_eligible: true}
+    critpt: {method_version: v1, b_eligible: true}
+    osworld_2: {method_version: 2.0-partial, b_eligible: false}
+    mmmu_pro: {method_version: v1, b_eligible: true}
+    toolathlon_verified: {label: Toolathlon Verified, method_version: verified-v1, b_eligible: true, event_ledger: true}
+    spreadsheetbench_2: {label: SpreadsheetBench 2, method_version: 2, b_eligible: true, event_ledger: true}
+    humanitys_last_exam: {label: Humanity's Last Exam, method_version: v1, b_eligible: true}
+  excluded_benchmarks:
+    enterpriseops_gym_aa: {reason: replaced_by_toolathlon_verified, historical_only: true}
+    frontiermath_erdos: {reason: low_current_discrimination, default_panel: false}
+    frontierscience_research: {reason: single_lab_coverage, default_panel: false}
+    collective_intelligence: {reason: not_yet_governed, default_panel: false}
+    safety_alignment: {reason: not_yet_governed, default_panel: false}
+
 # Checked-in baseline only. Runtime resolution order is:
 # environment override -> release overlay -> this section -> default_mode.
 # `sources` controls governed data availability and data-layer release. `consumers`
@@ -114,6 +154,46 @@ feature_flags:
     # Private-company events are intentionally deferred and therefore do not
     # enter the persistent layer until a later, separately approved scope.
     accepted_document_evidence: legacy
+    factset_earnings_insight_doc: shadow
+    factset_earnings_insight_metrics: shadow
+    # 082826 index acceptance and Macro dual-read are complete; this partition is
+    # now the formal governed source for the Macro consumer.
+    factset_earnings_insight_index: platform
+    # 082826 的八张行业表已经通过独立原图 decoder 与 231/231 golden-cell
+    # 比较；consumer 仍须在真实 Sector review 成功后另行切换。
+    factset_earnings_insight_sector: platform
+    # Economic Index starts as an isolated governed source.  It must pass its
+    # own release check before a later explicit platform promotion.
+    anthropic_economic_index: legacy
+    # The two US adoption sources are the load-bearing axes of the L1 production
+    # Observer and have been ingesting on schedule since 2026-09.  Their mode was
+    # left at ``legacy`` while only the Anthropic index was promoted through the
+    # runtime overlay, which made the checked-in baseline disagree with both the
+    # observer it feeds and section 10.2 of STRUCTURED_DATA_OPERATIONS.  Promote
+    # the baseline itself so the effective mode no longer depends on an overlay
+    # entry that was never written for these two.
+    us_census_btos: platform
+    rps_genai_adoption: platform
+    # Ramp starts in shadow until the web-export fixtures and slice-level
+    # release gate have passed isolated acceptance.
+    ramp_ai_index: shadow
+    # OpenRouter Rankings Data API passed fixture/live smoke, offline replay,
+    # visualization and L1 report acceptance; publish the source directly.
+    openrouter_rankings: platform
+    # Frontier AI Labs revenue is released straight to platform once its own
+    # isolated end-to-end acceptance (7.1-7.5) passes; until then it only runs
+    # under --force in an isolated SQLite/artifact root. There is deliberately
+    # no shadow/experimental promotion step after acceptance.
+    sacra_public_company_profiles: platform
+    tickertrends_public_research: platform
+    # Raw capability uses benchmark-maintainer Git/CSV/JSON/HTML routes plus
+    # low-frequency policy-gated public structured pages. Paid AA API is never
+    # required; policy-blocked or parser-drift slices fail closed. Keep the
+    # Real-source acceptance and the full L1 regression gate passed on
+    # 2026-09-18. Public benchmark data and the fail-closed official-release
+    # supplement are therefore formal platform inputs.
+    frontier_ai_capability: platform
+    frontier_ai_capability_official_lab: platform
   consumers:
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
@@ -161,6 +241,11 @@ feature_flags:
     # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
     runtime_scheduler: shadow
     chief_graph: shadow
+    # Macro reads the released index partition.
+    macro_factset: platform
+    # 9.3: the 082826 sector partition passed the independent 231-cell gate and
+    # completed its release; Sector may use it only in final top-down synthesis.
+    sector_factset: platform
   consumer_sources: {}
 
 # Terminal statuses have distinct operational meaning. In particular,
@@ -174,6 +259,7 @@ allowed_ingestion_statuses:
   - stale
   - unreachable
   - unauthorized
+  - not_pdf
   - parse_failed
   - validation_failed
   - partial
@@ -181,6 +267,71 @@ allowed_ingestion_statuses:
 # Stable economic entities that do not naturally live in the listed-security registry.
 # Do not create a fake ticker for a private company.
 entities:
+  FACTSET:
+    kind: research_provider
+    canonical_name: FactSet Research Systems
+    aliases: [FactSet, FactSet Earnings Insight]
+    securities: []
+  SP500:
+    kind: equity_index
+    canonical_name: S&P 500
+    aliases: [S&P 500, S&P500, SPX]
+    securities: []
+  GICS_10:
+    kind: gics_sector
+    canonical_name: Energy
+    aliases: [Energy]
+    securities: []
+  GICS_15:
+    kind: gics_sector
+    canonical_name: Materials
+    aliases: [Materials]
+    securities: []
+  GICS_20:
+    kind: gics_sector
+    canonical_name: Industrials
+    aliases: [Industrials]
+    securities: []
+  GICS_25:
+    kind: gics_sector
+    canonical_name: Consumer Discretionary
+    aliases: [Consumer Discretionary]
+    securities: []
+  GICS_30:
+    kind: gics_sector
+    canonical_name: Consumer Staples
+    aliases: [Consumer Staples]
+    securities: []
+  GICS_35:
+    kind: gics_sector
+    canonical_name: Health Care
+    aliases: [Health Care, Healthcare]
+    securities: []
+  GICS_40:
+    kind: gics_sector
+    canonical_name: Financials
+    aliases: [Financials]
+    securities: []
+  GICS_45:
+    kind: gics_sector
+    canonical_name: Information Technology
+    aliases: [Information Technology, Technology]
+    securities: []
+  GICS_50:
+    kind: gics_sector
+    canonical_name: Communication Services
+    aliases: [Communication Services]
+    securities: []
+  GICS_55:
+    kind: gics_sector
+    canonical_name: Utilities
+    aliases: [Utilities]
+    securities: []
+  GICS_60:
+    kind: gics_sector
+    canonical_name: Real Estate
+    aliases: [Real Estate]
+    securities: []
   OPENAI:
     kind: private_company
     canonical_name: OpenAI
@@ -195,6 +346,131 @@ entities:
 # Provider sources. `adapter` must match a controlled runtime adapter key.
 # `internal_request_budget` is our conservative limit, not a Provider SLA/QPS claim.
 sources:
+  anthropic_economic_index:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Anthropic Economic Index
+    upstream: Anthropic/EconomicIndex Hugging Face repository
+    adapter: anthropic_economic_index
+    datasets: [ai_work_adoption]
+    cadence: release_event
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 8
+      timeout_seconds: 300
+      max_file_bytes: 367001600
+      retry_attempts: 3
+  us_census_btos:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: US Census Bureau Business Trends and Outlook Survey
+    upstream: Census BTOS Core API and historical downloads
+    adapter: census_btos
+    datasets: [ai_enterprise_adoption_us]
+    cadence: biweekly
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget: {concurrency: 1, requests_per_run: 12, timeout_seconds: 60, max_file_bytes: 52428800, retry_attempts: 3}
+  rps_genai_adoption:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Real-Time Population Survey via Federal Reserve Economic Data
+    upstream: FRED RPS GenAI Adoption Tracker series
+    adapter: rps_genai_adoption
+    datasets: [ai_worker_adoption_us]
+    cadence: quarterly
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget: {concurrency: 1, requests_per_run: 10, timeout_seconds: 60, max_file_bytes: 10485760, retry_attempts: 3}
+  ramp_ai_index:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Ramp AI Index
+    upstream: Ramp AI Index public chart exports (Get the data)
+    adapter: ramp_ai_index
+    datasets: [ramp_ai_adoption, ramp_ai_spend]
+    cadence: monthly
+    retention: query_slice
+    discovery_group: ai_adoption
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 5
+      timeout_seconds: 30
+      max_file_bytes: 52428800
+      retry_attempts: 0
+  openrouter_rankings:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: OpenRouter Rankings Data API
+    upstream: OpenRouter public routed token rankings
+    adapter: openrouter_rankings
+    datasets: [openrouter_rankings_daily]
+    cadence: daily_utc
+    retention: query_slice
+    discovery_group: ai_commercialization
+    constraints:
+      endpoint: https://openrouter.ai/api/v1/datasets/rankings-daily
+      authentication: bearer_api_key
+      api_key_env: OPENROUTER_API_KEY
+      period: day
+      timezone: UTC
+      overlap_days: 14
+      historical_start_date: 2025-01-01
+      max_days_per_request: 30
+      provider_limit_per_minute: 30
+      provider_limit_per_day: 500
+      public_private_scope: public_routed_only
+      license: CC BY 4.0
+      request_share: unavailable
+      revenue_conversion: forbidden
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 14
+      timeout_seconds: 30
+      max_file_bytes: 52428800
+      retry_attempts: 2
+  frontier_ai_capability:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Official benchmark-maintainer public results + independent pages + Lab releases
+    upstream: LiveBench, Terminal-Bench, Terminal-Bench-Science, OSWorld, AutomationBench, SciCode, CritPt, MMMU-Pro, Toolathlon Verified, SpreadsheetBench 2 and Humanity's Last Exam public artifacts
+    adapter: frontier_ai_capability
+    datasets: [frontier_ai_capability_benchmarks]
+    cadence: daily_utc
+    retention: query_slice
+    discovery_group: frontier_ai_capability
+    constraints:
+      public_routes: [git_csv, git_json, public_json, public_html_structured, official_html, official_html_event, readme_table]
+      authentication: none_for_registered_public_routes
+      optional_api_env: ARTIFICIAL_ANALYSIS_API_KEY
+      bulk_requests_per_run: 11
+      conditional_requests: [etag, last_modified, git_sha, payload_sha256]
+      policy_gate_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
+      terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+      fail_closed_on_policy_or_parser_drift: true
+      event_ledger_benchmarks: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
+      browser_visual_scraping: forbidden
+      direct_platform_after_acceptance: true
+      license: provider_terms_or_public_page_citation
+    internal_request_budget: {concurrency: 1, requests_per_run: 64, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
+  frontier_ai_capability_official_lab:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Frontier Lab official releases and model cards
+    upstream: OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, Tencent, Z.ai and Alibaba public releases
+    adapter: frontier_ai_capability_official_lab
+    datasets: [frontier_ai_capability_benchmarks]
+    cadence: daily_utc
+    retention: query_slice
+    discovery_group: frontier_ai_capability
+    constraints:
+      public_only: true
+      source_type: lab_self_reported
+      direct_platform_after_acceptance: true
+      license: public_page_citation
+    internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
   tw_mof_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -284,6 +560,18 @@ sources:
     cadence: event
     retention: evidence_link_only
     internal_request_budget: {concurrency: 1}
+  factset_earnings_insight_metrics:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: FactSet Earnings Insight
+    adapter: factset_earnings_insight
+    datasets: [sp500_earnings_insight]
+    cadence: weekly
+    retention: licensed_internal_research
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 1
+      timeout_seconds: 60
 
   # Deliberate non-datasets. These entries must never be scheduled, backfilled or
   # written to the structured repository/artifact store. They have no datasets and
@@ -316,10 +604,314 @@ sources:
     adapter: options
     datasets: []
     excludes: [option_chain, greeks, implied_volatility]
+  # Frontier AI Labs revenue. Both sources read only unauthenticated public
+  # pages and are stored as constrained snapshots; no paid API, MCP connector,
+  # licensed export or login-gated table is ever contacted. Paywalled cells are
+  # server-side redacted upstream, so their absence is a documented coverage
+  # gap — never a zero revenue observation.
+  sacra_public_company_profiles:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Sacra
+    upstream: Sacra public company profiles (OpenAI, Anthropic)
+    adapter: sacra_frontier_labs_revenue
+    datasets: [frontier_ai_labs_revenue]
+    cadence: every_7_days
+    retention: constrained_snapshot
+    discovery_group: frontier_ai_labs_revenue
+    constraints:
+      paid_api_allowed: false
+      mcp_allowed: false
+      authentication_required: false
+      max_pages_per_run: 2
+      max_browser_snapshots_per_run: 2
+      public_pages_only: true
+      notes: 只采集无需登录的公开公司页面；付费下载、API 与 MCP 一律不接入。
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 2
+      timeout_seconds: 45
+      max_file_bytes: 52428800
+      retry_attempts: 1
+  tickertrends_public_research:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: TickerTrends
+    upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking)
+    adapter: tickertrends_frontier_labs_revenue
+    datasets: [frontier_ai_labs_revenue]
+    # The same research object seen from a second angle, so it shares the Sacra
+    # profiles' 7-day beat and their discovery group.  The probe fingerprints the
+    # numeric claims it admits rather than the page bytes, because Substack
+    # re-serialises body_html between fetches; an unchanged essay therefore stays
+    # no_change and markup churn can never re-baseline the main sequence.
+    cadence: every_7_days
+    retention: constrained_snapshot
+    discovery_group: frontier_ai_labs_revenue
+    constraints:
+      paid_api_allowed: false
+      mcp_allowed: false
+      public_post_api_only: true
+      accepted_reference_period: 2026-01-01..2026-06-30
+      chart_derived_values_allowed: false
+      notes: 与 Sacra 同一研究对象的第二信息源；每 7 天复核公开 Substack post API，语义指纹未变即 no_change，不重新基准主序列。
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 1
+      timeout_seconds: 45
+      max_file_bytes: 5242880
+      retry_attempts: 2
+
+# Retired source registry. A retired source id lives here and *only* here: it must
+# not reappear under `sources`, because that section is what the registration
+# validator, the catalog bootstrap, the release-check source enumeration and the
+# source health table all read. A tombstone is not an active configuration -- it
+# carries no adapter, budget, dataset or rollout mode, and nothing collects,
+# publishes or queries it. Its only jobs are: (1) explain why the id is gone and
+# whether its data was cleared or left as an orphan, (2) make `validate-source`
+# fail closed so a retired id can never be silently re-registered, and (3) leave an
+# audit trail instead of letting the id be quietly reused later.
+#
+# Re-enabling a retired source requires explicitly rewriting its tombstone and a
+# separate change; restoring the `sources` entry alone is a configuration error.
+# `disposition` records what was done with the stored data. Physical deletion is
+# never performed by this file -- it is an explicit, separately confirmed
+# `ats data purge-source` action, and the resulting purge record is written to the
+# database, not back here.
+retired_sources:
+  ons_bics_ai:
+    retired_at: 2026-09-19
+    prior_catalog_status: current_partial
+    prior_rollout_mode: legacy
+    reason: >-
+      UK ONS BICS AI conditional module. Retired for insufficient information
+      content and staleness: the AI question appeared in only 12 waves / 5,081
+      cells / 21 UK business-population entities, and the depth question
+      (extensive/limited/pilot) was fielded in wave 159 alone, so no repeatable
+      same-definition series exists and the product layer could only ever return
+      insufficient_history. The most recent probe (wave 163) returned
+      question_not_fielded, i.e. the upstream stopped asking. The source was never
+      an input to any L1 Observer, report or chart, so its consumer count is zero.
+    disposition: purged
+    disposition_at: 2026-09-19
+    successor: ""
+    spec_removed: true
 
 # Business datasets. Source references must be reciprocal with `sources.*.datasets`.
 # `quality` values are release gates; do not loosen them merely to make a run pass.
 datasets:
+  frontier_ai_labs_revenue:
+    catalog_status: current_partial
+    entities: [OPENAI, ANTHROPIC]
+    expected_cadence: every_7_days
+    primary_sources: [sacra_public_company_profiles]
+    fallback_sources: [tickertrends_public_research]
+    core_metrics: [ai.frontier_lab.reported_arr, ai.frontier_lab.annualized_revenue_run_rate,
+                   ai.frontier_lab.trailing_revenue, ai.frontier_lab.forward_revenue_projection]
+    quality:
+      positive_value_required: true
+      currency_required: true
+      reference_period_required: true
+      metric_identity_required: true
+      observation_identity_required: true
+      citation_chain_required: true
+      # A headline is chosen by (metric identity, observation identity) first and
+      # only then by this source ranking. Priority never deletes a lower-ranked
+      # candidate and never turns an estimate into a reported figure.
+      headline_source_priority: [company_reported, media_reported, third_party_estimate]
+      # Two readable same-cell values are a visible conflict, not something to
+      # average away. 0.10 = 10% relative tolerance from the trend design.
+      source_conflict_relative_tolerance: 0.10
+      # Different metric identities are `not_comparable`; no difference is computed.
+      comparison_requires_same_metric_identity: true
+      comparison_requires_same_observation_identity: true
+      comparison_requires_same_methodology_regime: true
+      # A trend cell needs >= 3 comparable points spanning >= 60 days.
+      minimum_comparable_points: 3
+      minimum_history_days: 60
+      direction_net_change_threshold: 0.10
+      # Values are stored as absolute USD; billions conversion is a derivation.
+      display_scale_divisor: 1000000000
+      display_unit_label: USD bn
+      reconciliation_relative_tolerance: 1e-9
+      core_metric_coverage_ratio_min: 0.5
+      coverage_ratio_min: 0.5
+      freshness_hours_max: 336
+      quarantine_on_missing_period_or_identity: true
+      forbid_cross_entity_aggregation: true
+      forbid_projection_in_historical_actual: true
+      forbid_company_plus_product_summing: true
+    acceptance_samples: [OPENAI, ANTHROPIC]
+  ai_work_adoption:
+    catalog_status: current_partial
+    # Entity membership is dynamic taxonomy data rather than a static list.
+    entity_types: [soc_major_group, soc_occupation, onet_task]
+    expected_cadence: release_event
+    primary_sources: [anthropic_economic_index]
+    fallback_sources: []
+    core_metrics:
+      - ai.work_adoption.usage_share
+      - ai.work_adoption.automation_share
+      - ai.work_adoption.augmentation_share
+      - ai.work_adoption.observed_exposure
+      - ai.work_adoption.task_penetration
+    quality:
+      global_only: true
+      eligible_row_reconciliation_ratio_min: 1.0
+      task_relation_coverage_min: 0.99
+      percentage_sum_tolerance_pp: 0.15
+      privacy_filtered_missing_status: not_published_or_privacy_filtered
+    acceptance_samples: [SOC:15-2031.00, SOC:15-0000, ONET_TASK:7382]
+  ai_enterprise_adoption_us:
+    catalog_status: current_partial
+    entities: [BUSINESS_POP:US:ALL]
+    expected_cadence: biweekly
+    primary_sources: [us_census_btos]
+    fallback_sources: []
+    core_metrics: [ai.enterprise_adoption.current_use_share, ai.enterprise_adoption.expected_use_share]
+    quality:
+      question_regime_start: '2025-11-17'
+      answer_sum_tolerance_pp: 0.15
+      standard_error_nonnegative: true
+      exclude_geographies: [state, msa]
+    acceptance_samples: [BUSINESS_POP:US:ALL, BUSINESS_POP:US:NAICS:51, BUSINESS_POP:US:EMP:250_PLUS]
+  ai_worker_adoption_us:
+    catalog_status: current_partial
+    entities: [WORKER_POP:US:EMPLOYED_18_64]
+    expected_cadence: quarterly
+    primary_sources: [rps_genai_adoption]
+    fallback_sources: []
+    core_metrics: [ai.worker_adoption.work_use_share, ai.worker_adoption.last_week_work_use_share,
+                   ai.worker_adoption.daily_work_use_share, ai.worker_adoption.assisted_work_hours,
+                   ai.worker_adoption.time_saved_hours]
+    quality:
+      work_only_series: true
+      daily_lte_last_week_lte_adoption: true
+    acceptance_samples: [WORKER_POP:US:EMPLOYED_18_64]
+  ramp_ai_adoption:
+    catalog_status: current_partial
+    entities: [RAMP_OVERALL, RAMP_VENDOR, NAICS_GROUP]
+    expected_cadence: monthly
+    primary_sources: [ramp_ai_index]
+    fallback_sources: []
+    core_metrics: [ai.ramp.paid_business_adoption_share, ai.ramp.vendor_adoption_share]
+    quality:
+      scopes: [adoption_overall, adoption_overall_models, adoption_sector]
+      percentage_range: [0, 100]
+      vendor_shares_may_overlap: true
+      exclude_scopes: [business_size, geographies]
+    acceptance_samples: [RAMP_OVERALL, RAMP_VENDOR:ANTHROPIC, NAICS:TECHNOLOGY_AND_MEDIA]
+  ramp_ai_spend:
+    catalog_status: current_partial
+    entities: [RAMP_QUANTILE, RAMP_MODEL]
+    expected_cadence: monthly
+    primary_sources: [ramp_ai_index]
+    fallback_sources: []
+    core_metrics: [ai.ramp.ai_spend_per_employee, ai.ramp.api_spend_share]
+    quality:
+      scopes: [spend_per_employee_overall, model_market_share_overall]
+      percentage_range: [0, 100]
+      spend_nonnegative: true
+      quantile_order: [median, top10, top1]
+    acceptance_samples: [QUANTILE:MEDIAN, QUANTILE:TOP10, MODEL:OPENAI]
+  openrouter_rankings_daily:
+    catalog_status: current_partial
+    entities: [OPENROUTER_MODEL, OPENROUTER_AUTHOR, OPENROUTER_OTHER]
+    expected_cadence: daily_utc
+    primary_sources: [openrouter_rankings]
+    fallback_sources: []
+    core_metrics: [ai.openrouter.total_tokens]
+    quality:
+      token_nonnegative_integer: true
+      daily_model_identity_unique: true
+      top_n_plus_other: true
+      top_n: 50
+      author_share_includes_unknown_and_other: true
+      derived_metrics: [model_tokens, author_tokens, token_share, concentration_top_n, concentration_hhi]
+      complete_week_required_for_trend: true
+      public_routed_scope_only: true
+      request_share_not_observed: true
+      revenue_conversion_forbidden: true
+      methodology_regime: frontier_public_benchmark_results/v2
+    acceptance_samples: [OPENROUTER_MODEL:OPENAI_GPT_4O, OPENROUTER_OTHER]
+  frontier_ai_capability_benchmarks:
+    catalog_status: current_partial
+    entities: [FRONTIER_MODEL]
+    expected_cadence: daily_utc
+    primary_sources: [frontier_ai_capability]
+    fallback_sources: [frontier_ai_capability_official_lab]
+    core_metrics: [ai.frontier_capability.score]
+    quality:
+      labs: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
+      benchmarks: [livebench, automationbench_aa, terminal_bench_4, terminal_bench_science_01, scicode, critpt, osworld_2, mmmu_pro, toolathlon_verified, spreadsheetbench_2, humanitys_last_exam]
+      score_range: [0, 100]
+      score_unit: percent
+      coverage_states: [not_evaluated, pending_publication, not_self_reported, not_applicable, non_comparable, source_unavailable, withdrawn]
+      public_maintainer_preferred: true
+      source_priority: [benchmark_maintainer_or_independent_third_party, competitor_reported, lab_self_reported]
+      public_structured_page_policy_gate: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
+      paid_api_required: false
+      event_ledger_benchmarks: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
+      measurement_scopes: [model_capability_proxy, model_agent_stack_capability]
+      b_default_threshold_pct: 50
+      a_delta_min_pp: 2
+      a_historical_sd_multiplier: 0.2
+      direct_platform_after_acceptance: true
+    acceptance_samples: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
+  sp500_earnings_insight:
+    catalog_status: current_partial
+    entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
+               GICS_35, GICS_40, GICS_45, GICS_50, GICS_55, GICS_60]
+    expected_cadence: weekly
+    primary_sources: [factset_earnings_insight_metrics]
+    fallback_sources: []
+    core_metrics:
+      - earnings.reporting.coverage
+      - earnings.eps.above_estimate_share
+      - earnings.eps.inline_estimate_share
+      - earnings.eps.below_estimate_share
+      - earnings.revenue.above_estimate_share
+      - earnings.revenue.inline_estimate_share
+      - earnings.revenue.below_estimate_share
+      - earnings.eps.surprise_pct
+      - earnings.revenue.surprise_pct
+      - earnings.eps.yoy_growth
+      - earnings.revenue.yoy_growth
+      - earnings.net_profit_margin
+      - earnings.margin.increase_share
+      - earnings.margin.unchanged_share
+      - earnings.margin.decrease_share
+      - earnings.guidance.positive_count
+      - earnings.guidance.negative_count
+      - earnings.revision.improved_sector_count
+      - earnings.bottom_up_eps
+      - valuation.forward_pe
+      - valuation.trailing_pe
+      - valuation.forward_pe.average_5y
+      - valuation.forward_pe.average_10y
+      - valuation.trailing_pe.average_5y
+      - valuation.trailing_pe.average_10y
+      - revenue.geographic.us_share
+      - revenue.geographic.international_share
+      - consensus.rating.buy_share
+      - consensus.rating.hold_share
+      - consensus.rating.sell_share
+      - consensus.target.upside
+    quality:
+      freshness_hours_max: 240
+      composition_abs_tolerance: 0.01
+      index_core_required_evidence_ratio: 1.0
+      sector_core_expected_entities: 11
+      sector_core_annotated_cell_accuracy_min: 1.0
+      require_concrete_target_period: true
+      require_estimate_state: true
+      require_unit: true
+      required_dimensions_by_metric:
+        earnings.revision.improved_sector_count:
+          [comparison_date, revision_direction, sector_total]
+    acceptance_samples: [SP500, GICS_10, GICS_35, GICS_45]
+    rollback_on: [unknown_template, evidence_incomplete, source_conflict,
+                  sector_table_incomplete, future_leakage, stale]
   regional_tw_exports:
     catalog_status: current_partial
     entities: [TW_IC_EXPORT]
@@ -451,6 +1043,116 @@ datasets:
 # Semantically different GAAP/non-GAAP, point-in-time/period, or raw/derived values
 # require separate definitions rather than an ambiguous mapping.
 metric_definitions:
+  ai.work_adoption.usage_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [soc_major_group, soc_occupation, onet_task],
+     required_dimensions: [source_product, classification, hierarchy_level],
+     description: Share of the corresponding Claude source product's usage, not worker adoption.}
+  ai.work_adoption.automation_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.augmentation_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.directive_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.feedback_loop_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.task_iteration_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.validation_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.learning_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.collaboration.none_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.work_use_share: {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.autonomy_mean: {value_type: number, unit_family: scale_1_5, cadence: monthly, period_basis: calendar_month}
+  ai.work_adoption.observed_exposure: {value_type: number, unit_family: ratio, cadence: research_snapshot, period_basis: research_snapshot}
+  ai.work_adoption.task_penetration: {value_type: number, unit_family: ratio, cadence: research_snapshot, period_basis: research_snapshot}
+  ai.enterprise_adoption.current_use_share: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window, description: Census BTOS Core Yes share for businesses using AI in any business function.}
+  ai.enterprise_adoption.response_share: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window, description: Census BTOS Core response share; answer is carried in dimensions.}
+  ai.enterprise_adoption.expected_use_share: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window, description: Census BTOS Core Yes share expecting AI use in any business function in six months.}
+  ai.enterprise_adoption.current_use_standard_error: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window}
+  ai.enterprise_adoption.expected_use_standard_error: {value_type: number, unit_family: percent, cadence: biweekly, period_basis: survey_reference_window}
+  ai.worker_adoption.work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Self-reported work GenAI use among US employed adults aged 18-64.}
+  ai.worker_adoption.last_week_work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter}
+  ai.worker_adoption.daily_work_use_share: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter}
+  ai.worker_adoption.assisted_work_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Estimated share of all work hours assisted by GenAI.}
+  ai.worker_adoption.time_saved_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Self-reported counterfactual time savings as a share of work hours.}
+  ai.ramp.paid_business_adoption_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_overall, ramp_vendor, naics_group],
+     required_dimensions: [scope, statistical_unit, denominator_scope, technology_scope, segment],
+     description: Share of the relevant Ramp business cohort with a positive AI transaction in the month; not employee adoption.}
+  ai.ramp.vendor_adoption_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_vendor], required_dimensions: [scope, statistical_unit, denominator_scope, technology_scope, segment],
+     description: Share of the relevant Ramp business cohort with a positive payment to a vendor; vendor shares may overlap.}
+  ai.ramp.provider_monthly_change_pp:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month, derived: false}
+  ai.ramp.provider_yearly_change_pp:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month, derived: false}
+  ai.ramp.ai_spend_per_employee:
+    {value_type: number, unit_family: currency, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_quantile], required_dimensions: [scope, quantile, statistical_unit, denominator_scope, technology_scope],
+     description: AI spend per employee per month for the named Ramp cohort and quantile.}
+  ai.ramp.api_spend_share:
+    {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
+     entity_scope: [ramp_model], required_dimensions: [scope, provider, model, spend_type, cohort, technology_scope],
+     description: Model-attributed API spend share among Token Spend Management connected businesses.}
+  ai.openrouter.total_tokens:
+    {value_type: integer, unit_family: count, cadence: daily, period_basis: utc_day,
+     entity_scope: [openrouter_model], required_dimensions: [model_permaslug, author, is_other, is_free_route, reference_date, methodology_regime],
+     description: OpenRouter public routed prompt plus completion tokens for the model and UTC date; not global volume or revenue.}
+  ai.openrouter.model_tokens:
+    {value_type: integer, unit_family: count, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Sum of accepted daily model tokens over a complete UTC week.}
+  ai.openrouter.author_tokens:
+    {value_type: integer, unit_family: count, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Sum of model tokens by canonical author; unknown and unattributed Other remain explicit.}
+  ai.openrouter.token_share:
+    {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Author or model tokens divided by complete-week total tokens.}
+  ai.openrouter.concentration_top_n:
+    {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Top-3 or Top-5 named/unknown author token share.}
+  ai.openrouter.concentration_hhi:
+    {value_type: number, unit_family: ratio, cadence: weekly, period_basis: complete_utc_week, derived: true,
+     description: Sum of squared named/unknown author shares; unattributed Other excluded from numerator.}
+  ai.frontier_capability.score:
+    {value_type: number, unit_family: percent, cadence: daily, period_basis: benchmark_score_as_of,
+     entity_scope: [frontier_model], required_dimensions: [lab_id, model_id, benchmark_id, method_version,
+     comparability_group, harness, grader, inference_config, reasoning_effort, source_type, coverage_state],
+     description: Raw capability benchmark score on a provider-declared 0-100 percent scale; not a composite intelligence ranking.}
+  earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.below_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.below_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.revenue.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.eps.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.revenue.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.net_profit_margin: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.margin.increase_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.margin.unchanged_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.margin.decrease_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
+  earnings.guidance.positive_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
+  earnings.guidance.negative_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
+  earnings.revision.improved_sector_count:
+    value_type: integer
+    unit_family: count
+    cadence: weekly
+    period_basis: target_quarter
+    entity_scope: [SP500]
+    required_dimensions: [comparison_date, revision_direction, sector_total]
+    description: Number of GICS sectors with improved earnings growth versus the explicit comparison date.
+  earnings.bottom_up_eps: {value_type: number, unit_family: currency_per_share, cadence: weekly, period_basis: [target_quarter, target_year]}
+  valuation.forward_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.trailing_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.forward_pe.average_5y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.forward_pe.average_10y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.trailing_pe.average_5y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  valuation.trailing_pe.average_10y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
+  revenue.geographic.us_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  revenue.geographic.international_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.rating.buy_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.rating.hold_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.rating.sell_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
+  consensus.target.upside: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
   regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
   regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
   industry.dram_contract_price: {value_type: number, unit_family: currency_per_item, cadence: monthly}
@@ -495,6 +1197,26 @@ metric_definitions:
   consensus.rating.strong_sell_count: {value_type: integer, unit_family: count, period_basis: snapshot}
   consensus.rating.change: {value_type: record, unit_family: categorical, period_basis: event}
   event.funding.amount: {value_type: number, unit_family: currency, period_basis: event}
+  ai.frontier_lab.reported_arr:
+    {value_type: number, unit_family: currency, period_basis: [calendar_month, point_in_time],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: Contract/subscription ARR explicitly announced by the lab itself. Not an annualization of partial-period revenue.}
+  ai.frontier_lab.annualized_revenue_run_rate:
+    {value_type: number, unit_family: currency, period_basis: [calendar_month, point_in_time],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: One period's revenue extrapolated to a full year by whoever published it. It is not audited revenue and not necessarily contractual ARR.}
+  ai.frontier_lab.trailing_revenue:
+    {value_type: number, unit_family: currency, period_basis: [quarter, annual],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: Revenue actually recorded over the named closed period. Compared with run rate it is smaller and is not annualized.}
+  ai.frontier_lab.forward_revenue_projection:
+    {value_type: number, unit_family: currency, period_basis: [annual, target_year],
+     entity_scope: [private_company],
+     required_dimensions: [observation_identity, raw_metric_label, methodology_regime],
+     description: Forward expectation or target for a future year. Never mixed into the historical actual sequence.}
   event.valuation.pre_money: {value_type: number, unit_family: currency, period_basis: event}
   event.valuation.post_money: {value_type: number, unit_family: currency, period_basis: event}
   event.valuation.reported: {value_type: number, unit_family: currency, period_basis: event}
@@ -503,6 +1225,85 @@ metric_definitions:
 # Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
 # must remain pending under `unmapped_policy`; never guess a convenient metric.
 provider_mappings:
+  anthropic_economic_index:
+    pct: ai.work_adoption.usage_share
+    collaboration_bucket_automation_pct: ai.work_adoption.automation_share
+    collaboration_bucket_augmentation_pct: ai.work_adoption.augmentation_share
+    collaboration_directive_pct: ai.work_adoption.collaboration.directive_share
+    collaboration_feedback_loop_pct: ai.work_adoption.collaboration.feedback_loop_share
+    collaboration_task_iteration_pct: ai.work_adoption.collaboration.task_iteration_share
+    collaboration_validation_pct: ai.work_adoption.collaboration.validation_share
+    collaboration_learning_pct: ai.work_adoption.collaboration.learning_share
+    collaboration_none_pct: ai.work_adoption.collaboration.none_share
+    use_case_work_pct: ai.work_adoption.work_use_share
+    ai_autonomy_mean: ai.work_adoption.autonomy_mean
+    observed_exposure: ai.work_adoption.observed_exposure
+    penetration: ai.work_adoption.task_penetration
+  us_census_btos:
+    btos_response_share: ai.enterprise_adoption.response_share
+    current_ai_yes_pct: ai.enterprise_adoption.current_use_share
+    expected_ai_yes_pct: ai.enterprise_adoption.expected_use_share
+    current_ai_yes_se: ai.enterprise_adoption.current_use_standard_error
+    expected_ai_yes_se: ai.enterprise_adoption.expected_use_standard_error
+  rps_genai_adoption:
+    RPSGENAIUSAGESHAREWORK: ai.worker_adoption.work_use_share
+    RPSGENAIUSAGESHARELWWORK: ai.worker_adoption.last_week_work_use_share
+    RPSGENAIUSAGESHAREEDLWWOR: ai.worker_adoption.daily_work_use_share
+    RPSGENAIASSISTWRKHRSALL: ai.worker_adoption.assisted_work_hours
+    RPSGENAITSALL: ai.worker_adoption.time_saved_hours
+  sacra_public_company_profiles:
+    reported_arr: ai.frontier_lab.reported_arr
+    annualized_revenue_run_rate: ai.frontier_lab.annualized_revenue_run_rate
+    trailing_revenue: ai.frontier_lab.trailing_revenue
+    forward_revenue_projection: ai.frontier_lab.forward_revenue_projection
+  tickertrends_public_research:
+    reported_arr: ai.frontier_lab.reported_arr
+    annualized_revenue_run_rate: ai.frontier_lab.annualized_revenue_run_rate
+    trailing_revenue: ai.frontier_lab.trailing_revenue
+    forward_revenue_projection: ai.frontier_lab.forward_revenue_projection
+  ramp_ai_index:
+    adoption_rate_pct: ai.ramp.paid_business_adoption_share
+    vendor_adoption_pct: ai.ramp.vendor_adoption_share
+    monthly_change_pp: ai.ramp.provider_monthly_change_pp
+    yearly_change_pp: ai.ramp.provider_yearly_change_pp
+    ai_spend_per_employee: ai.ramp.ai_spend_per_employee
+    api_spend_share_pct: ai.ramp.api_spend_share
+  openrouter_rankings:
+    total_tokens: ai.openrouter.total_tokens
+  frontier_ai_capability:
+    benchmark_score: ai.frontier_capability.score
+  factset_earnings_insight_metrics:
+    reporting_coverage: earnings.reporting.coverage
+    eps_above_estimate_share: earnings.eps.above_estimate_share
+    eps_inline_estimate_share: earnings.eps.inline_estimate_share
+    eps_below_estimate_share: earnings.eps.below_estimate_share
+    revenue_above_estimate_share: earnings.revenue.above_estimate_share
+    revenue_inline_estimate_share: earnings.revenue.inline_estimate_share
+    revenue_below_estimate_share: earnings.revenue.below_estimate_share
+    eps_surprise_pct: earnings.eps.surprise_pct
+    revenue_surprise_pct: earnings.revenue.surprise_pct
+    eps_yoy_growth: earnings.eps.yoy_growth
+    revenue_yoy_growth: earnings.revenue.yoy_growth
+    net_profit_margin: earnings.net_profit_margin
+    margin_increase_share: earnings.margin.increase_share
+    margin_unchanged_share: earnings.margin.unchanged_share
+    margin_decrease_share: earnings.margin.decrease_share
+    guidance_positive_count: earnings.guidance.positive_count
+    guidance_negative_count: earnings.guidance.negative_count
+    revision_improved_sector_count: earnings.revision.improved_sector_count
+    bottom_up_eps: earnings.bottom_up_eps
+    forward_pe: valuation.forward_pe
+    trailing_pe: valuation.trailing_pe
+    forward_pe_average_5y: valuation.forward_pe.average_5y
+    forward_pe_average_10y: valuation.forward_pe.average_10y
+    trailing_pe_average_5y: valuation.trailing_pe.average_5y
+    trailing_pe_average_10y: valuation.trailing_pe.average_10y
+    us_revenue_share: revenue.geographic.us_share
+    international_revenue_share: revenue.geographic.international_share
+    rating_buy_share: consensus.rating.buy_share
+    rating_hold_share: consensus.rating.hold_share
+    rating_sell_share: consensus.rating.sell_share
+    target_upside: consensus.target.upside
   company_disclosures:
     tsmc_release:net_sales: financial.revenue.gaap
     tsmc_release:gross_profit: financial.gross_profit.gaap
@@ -640,6 +1441,16 @@ unmapped_policy:
 # Documentation of consumer contracts and the persistent/runtime boundary. Runtime
 # price/options inputs remain outside this structured persistent platform.
 migration_consumers:
+  macro_factset:
+    current_contracts: [EarningsBackdrop]
+    persistent_datasets: [sp500_earnings_insight]
+    runtime_inputs: []
+    initial_mode: shadow
+  sector_factset:
+    current_contracts: [EarningsInsightSnapshot]
+    persistent_datasets: [sp500_earnings_insight]
+    runtime_inputs: []
+    initial_mode: shadow
   pead:
     current_contracts: [FundamentalData, consensus_dict]
     persistent_datasets: [company_financials, market_consensus]

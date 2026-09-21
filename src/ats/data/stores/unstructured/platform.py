@@ -29,9 +29,21 @@ class PlatformUnstructuredRepository:
 
     def _bootstrap_writer_schema(self) -> None:
         self.conn.executescript("""
+        CREATE TABLE IF NOT EXISTS data_documents (document_id TEXT PRIMARY KEY,entity TEXT NOT NULL,period TEXT NOT NULL,doc_type TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,local_path TEXT NOT NULL,sha256 TEXT NOT NULL,chars INTEGER NOT NULL,ok INTEGER NOT NULL DEFAULT 1,note TEXT NOT NULL DEFAULT '',fetched_at TEXT NOT NULL,external_id TEXT NOT NULL DEFAULT '',title TEXT NOT NULL DEFAULT '',published_at TEXT NOT NULL DEFAULT '',completeness TEXT NOT NULL DEFAULT 'full',truncation_reason TEXT NOT NULL DEFAULT '',carrier_format TEXT NOT NULL DEFAULT '',mime_source TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS data_document_versions (version_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,content_hash TEXT NOT NULL,local_path TEXT NOT NULL,chars INTEGER NOT NULL,source_url TEXT NOT NULL,fetched_at TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(document_id,content_hash));
+        CREATE INDEX IF NOT EXISTS idx_data_document_version_document ON data_document_versions(document_id,fetched_at);
+        CREATE TABLE IF NOT EXISTS data_document_entities (document_id TEXT NOT NULL,entity TEXT NOT NULL,relation TEXT NOT NULL DEFAULT 'mentioned',PRIMARY KEY(document_id,entity,relation));
+        CREATE TABLE IF NOT EXISTS data_document_aliases (alias_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,external_id TEXT NOT NULL,title TEXT NOT NULL,published_at TEXT NOT NULL,metadata_json TEXT NOT NULL,created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS data_document_chunks (chunk_id TEXT PRIMARY KEY,version_id TEXT NOT NULL,ordinal INTEGER NOT NULL,char_start INTEGER NOT NULL,char_end INTEGER NOT NULL,text TEXT NOT NULL,content_hash TEXT NOT NULL,UNIQUE(version_id,ordinal));
+        CREATE TABLE IF NOT EXISTS data_document_candidates (candidate_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,status TEXT NOT NULL,expected_entity TEXT NOT NULL,claimed_entity TEXT NOT NULL,target_period TEXT NOT NULL,claimed_period TEXT NOT NULL,expected_semantic TEXT NOT NULL,claimed_semantic TEXT NOT NULL,carrier_format TEXT NOT NULL,completeness TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,external_id TEXT NOT NULL,title TEXT NOT NULL,published_at TEXT NOT NULL,discovered_at TEXT NOT NULL,content_hash TEXT NOT NULL,chars INTEGER NOT NULL,raw_path TEXT NOT NULL,reason_codes TEXT NOT NULL,validation_json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS data_sources (source_id TEXT PRIMARY KEY,kind TEXT NOT NULL,label TEXT NOT NULL,adapter TEXT NOT NULL,cadence TEXT NOT NULL,entity TEXT NOT NULL,updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS data_ingestion_runs (run_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,kind TEXT NOT NULL,started_at TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,discovered INTEGER NOT NULL DEFAULT 0,accepted INTEGER NOT NULL DEFAULT 0,quarantined INTEGER NOT NULL DEFAULT 0,reason_codes TEXT NOT NULL DEFAULT '{}',snapshot_updated_at TEXT NOT NULL DEFAULT '',snapshot_lag_hours REAL,note TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS data_newsletter_cursors (mailbox TEXT NOT NULL,folder TEXT NOT NULL,sender TEXT NOT NULL,uidvalidity TEXT NOT NULL,last_uid INTEGER NOT NULL,last_message_id TEXT NOT NULL,watermark TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(mailbox,folder,sender));
+        CREATE TABLE IF NOT EXISTS data_document_artifacts (document_version_id TEXT NOT NULL,artifact_id TEXT NOT NULL,role TEXT NOT NULL,page_number INTEGER NOT NULL DEFAULT 0,region_json TEXT NOT NULL DEFAULT '',media_type TEXT NOT NULL,content_hash TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(document_version_id,artifact_id,role,page_number,region_json));
+        CREATE INDEX IF NOT EXISTS idx_data_document_artifact_version ON data_document_artifacts(document_version_id,role,page_number);
+        CREATE TABLE IF NOT EXISTS data_document_pages (document_version_id TEXT NOT NULL,page_number INTEGER NOT NULL,char_start INTEGER NOT NULL,char_end INTEGER NOT NULL,section_title TEXT NOT NULL DEFAULT '',text TEXT NOT NULL,content_hash TEXT NOT NULL,PRIMARY KEY(document_version_id,page_number));
+        CREATE INDEX IF NOT EXISTS idx_data_document_page_version ON data_document_pages(document_version_id,page_number);
+        CREATE TABLE IF NOT EXISTS data_document_processing_runs (version_id TEXT NOT NULL,consumer TEXT NOT NULL,processor_version TEXT NOT NULL,status TEXT NOT NULL,started_at TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '',outputs INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',PRIMARY KEY(version_id,consumer,processor_version));
         """)
         self.conn.commit()
 
@@ -157,6 +169,80 @@ class PlatformUnstructuredRepository:
         return self._rows(
             "SELECT * FROM data_document_versions WHERE document_id=? "
             "ORDER BY fetched_at DESC,created_at DESC", [document_id])
+
+    def link_document_artifact(self, document_version_id: str, artifact_id: str, *,
+                               role: str, media_type: str, content_hash: str,
+                               page_number: int | None = None,
+                               region: tuple[float, float, float, float] | None = None) -> bool:
+        if role not in {"source_pdf", "page_image", "chart_crop"}:
+            raise ValueError(f"invalid document artifact role: {role}")
+        if page_number is not None and page_number < 1:
+            raise ValueError("page_number must be one-based")
+        if region is not None:
+            x0, y0, x1, y1 = region
+            if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+                raise ValueError("region must be normalized [x0,y0,x1,y1]")
+        before = self.conn.total_changes
+        self._write(
+            "INSERT OR IGNORE INTO data_document_artifacts "
+            "(document_version_id,artifact_id,role,page_number,region_json,media_type,"
+            "content_hash,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (document_version_id, artifact_id, role, page_number or 0,
+             json.dumps(region or (), separators=(",", ":")), media_type, content_hash,
+             datetime.now().astimezone().isoformat(timespec="seconds")))
+        return self.conn.total_changes > before
+
+    def document_artifacts(self, document_version_id: str, *,
+                           role: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM data_document_artifacts WHERE document_version_id=?"
+        args: list = [document_version_id]
+        if role:
+            sql += " AND role=?"
+            args.append(role)
+        return self._rows(sql + " ORDER BY role,page_number,artifact_id", args)
+
+    def save_document_pages(self, document_version_id: str, pages) -> int:
+        before = self.conn.total_changes
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO data_document_pages "
+            "(document_version_id,page_number,char_start,char_end,section_title,text,"
+            "content_hash) VALUES (?,?,?,?,?,?,?)",
+            [(document_version_id, int(page.page_number), int(page.char_start),
+              int(page.char_end), str(page.section_title), str(page.text),
+              hashlib.sha256(str(page.text).encode("utf-8")).hexdigest())
+             for page in pages])
+        self.conn.commit()
+        return self.conn.total_changes - before
+
+    def document_pages(self, document_version_id: str) -> list[dict]:
+        return self._rows(
+            "SELECT * FROM data_document_pages WHERE document_version_id=? "
+            "ORDER BY page_number", [document_version_id])
+
+    def begin_document_processing(self, document_id: str, consumer: str,
+                                  processor_version: str = "v1", *,
+                                  at: str | None = None) -> str | None:
+        latest = self.latest_document_version(document_id)
+        if latest is None:
+            return None
+        stamp = at or datetime.now().astimezone().isoformat(timespec="seconds")
+        cur = self._write(
+            "INSERT OR IGNORE INTO data_document_processing_runs "
+            "(version_id,consumer,processor_version,status,started_at,outputs,note) "
+            "VALUES (?,?,?,'running',?,0,'')",
+            (latest["version_id"], consumer, processor_version, stamp))
+        return latest["version_id"] if cur.rowcount else None
+
+    def finish_document_processing(self, version_id: str, consumer: str,
+                                   processor_version: str = "v1", *, ok: bool,
+                                   outputs: int = 0, note: str = "",
+                                   at: str | None = None) -> None:
+        stamp = at or datetime.now().astimezone().isoformat(timespec="seconds")
+        self._write(
+            "UPDATE data_document_processing_runs SET status=?,completed_at=?,outputs=?,"
+            "note=? WHERE version_id=? AND consumer=? AND processor_version=?",
+            ("succeeded" if ok else "failed", stamp, outputs, note,
+             version_id, consumer, processor_version))
 
     def documents_by_alias_source(self, source_contains: str, *,
                                   entity: str | None = None,

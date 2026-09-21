@@ -3,6 +3,29 @@
 把**我们不持有的公司**的财报，变成可核对的事实观测，供产业链证据系统使用。
 它是全系统权限最小的 agent：不判方向、不给建议、不碰 broker，只抽事实。
 
+## Claude 职业使用观测（L1）
+
+当观察对象是 Claude 的职业/任务扩散时，Observer 只能调用
+`DataProducts.ai_work_adoption_snapshot()` 和 `DataProducts.ai_job_profile()`；不得直接读取
+Hugging Face、SQLite 或 Job Explorer 网页。报告必须保存 snapshot manifest，并把 `source_product`（Claude.ai
+或 1P API）、期间、methodology 和 lineage 一并呈现。事实陈述仅限 Claude 使用份额、自动化/增强结构与
+公开 task-cell 覆盖；禁止推断员工采用率、企业席位渗透率、岗位替代数量或 SOC 所属的公司行业。
+
+代码入口：
+
+```python
+from ats.agents.evidence import observe_work_adoption
+
+packet = observe_work_adoption(
+    source_product="claude_ai",
+    period="2026-05",
+    occupation="15-2031.00",  # 可选 drill-down
+)
+```
+
+返回 packet 包含确定性事实陈述、完整 snapshot、可选 job profile、语义 guardrails 和可离线重放的
+manifest。该入口只依赖 DataProducts；不得向它注入 repository、SQL 或 Provider client。
+
 配套阅读：[`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)（这些观测最终如何变成可证伪的命题结论）。
 
 ---
@@ -156,6 +179,35 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show
 PYTHONPATH=src .venv/bin/python -m ats.runtime.cli evidence show --entity MU --limit 50
 ```
 
+### 按产业层单独运行
+
+`evidence layer` 用于运行某个 sector 的一个明确 layer 的 `evidence_observers` 中已启用的只读 Observer。它不会因为
+同一产业的其他层也存在，就顺带执行 L1–L8 的所有命题；这允许各层按照各自数据和事实更新节奏
+分别形成审阅结论。若该 layer 已配置但尚无 Observer，命令返回 `no_registered_observers`，不会拿
+其他层的结论替代。
+
+```bash
+# 默认同时写人类 Markdown、Analyst JSON/YAML context 和图表，并打印路径
+ats evidence layer --sector ai_hardware --layer L1_app
+
+# 显式控制一个层级审阅包的落盘位置；JSON 仍可用于机器读取
+ats evidence layer --sector ai_hardware --layer L1_app \
+  --output /absolute/path/L1_app_evidence.md --chart-dir /absolute/path/L1_app_assets
+ats evidence layer --sector ai_hardware --layer L1_app --format json
+```
+
+Markdown 是人类审阅和图表阅读载体；同次 Markdown 发布会在旁边生成
+`*_CONTEXT.json`（Analyst LLM 主输入）与语义等价的 `*_CONTEXT.yaml`。context 使用
+`l1_analyst_context/v1` 契约，按 Observer 保留最新数值、趋势、`supports`、
+`does_not_support`、缺失原因、不确定性及 lineage。它明确禁止跨 Observer 数值聚合，
+也禁止把生产化四轴或不同 benchmark 平均成统一分数。`--format json` 则仍是完整运行 packet，
+主要用于诊断，不替代紧凑 context。
+
+这些声明与 layer 的 `claims` 分离：前者只选择受治理的数据 Observer，后者仍服务公司证人、归因与
+Chain workflow。某个 claim 也可以保留专用快捷入口，但它必须经过相同的配置声明和范围校验。例如
+`ats evidence ai-production --sector ai_hardware --layer L1_app` 与以上 L1 运行使用同一条
+受治理路径；它不意味着其他 layer 也只能运行 AI 生产化命题。
+
 输出示例：
 
 ```
@@ -207,3 +259,15 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
   表述即可。用 `ats evidence show` 看"模型原名 → 归属维度"的对照。
 - 某条 claim 证据簇数偏少 → 先看 `ats evidence claims` 的"未发声"名单：多半是声明的
   证人本期确实没披露该维度，这是**真实的证据缺口**，不是 bug。
+
+## AI 应用层生产化 Observer（专属命题）
+
+`ai_core_production_workflow_penetration` 是 L1 AI 应用层的独立、只读 Observer，不改变本文件其他财报/产业链 Observer 的协议。`claim_definition_version=v2` 消费三条主轴：BTOS 企业采用广度、RPS 员工持续使用、Anthropic 任务生产化；Ramp 是独立的第四个补充商业化命题：**AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？** 四源保留各自分母与期间，禁止合成统一渗透率；Anthropic 子轴继续使用 Work ≥80%、Automation ≥80%、Directive ≥50%、Usage >0 的代理。Ramp 的五个固定 scope、独立状态和图表不改变前三轴 `overall_status`；企业规模首版未发布时标记 `not_published`。其专属方法卡、Figure 4 式职业覆盖分布、不能推断事项和重放方式见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
+
+## L1 商业化能力 Observer（独立命题）
+
+`ai_frontier_labs_commercialization`（`claim_definition_version=v1`）是 L1 第二条独立只读 Observer，与生产化 Observer 共享同一层注册表但分开运行、分开出报告、分开失败。它不消费 BTOS / RPS / Ramp / Anthropic Economic Index，**只**消费 `sacra_public_company_profiles` 与 `tickertrends_public_research` 两个 Source 的 `frontier_ai_labs_revenue` dataset。首版只实现 `frontier_labs_revenue_scale_and_trend` 一节；结论固定表达"收入兑现方向已观察、留存与单位经济尚未验证"，禁止仅凭收入增长宣称商业模式可持续或单位经济成立。整体判断 `revenue_monetization_expanding_but_economics_unverified` 表示 OpenAI / Anthropic 的可比收入序列方向一致地扩大，但留存、毛利、客户集中度与商业模式可持续性均未被观察。运行、回滚、P7D 探测与 `no_change` / 修订 / methodology drift 行为见 [Frontier AI Labs 收入数据运维手册](FRONTIER_AI_LABS_REVENUE_OPERATIONS.md)。
+
+## L1 原始能力前沿 Observer（独立命题）
+
+`ai_frontier_raw_capability`（`claim_definition_version=v1`）是 L1 第三条独立只读 Observer。它把 benchmark 当作能力边界的量化 proxy，而不是综合排行榜：A 在同一 `comparability_group` 内比较 current/previous global frontier；B 仅对 strict success、binary reward 或可解释 accuracy benchmark 按“多数任务解锁（95% 置信下界 > 50%）→人类基准→经济可用”三级递进判断，后两级只有预先定义且可观察时才展示。无置信区间的提升或跨越只能标记为 provisional；换版、缺失和来源故障都保留明确 NA 状态，不写成零分。固定面板为九家 Labs（OpenAI、Anthropic、Google、xAI、DeepSeek、Moonshot/Kimi、Tencent、Z.ai/GLM、Alibaba/Qwen）× 十一项 benchmark（LiveBench、AutomationBench-AA、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、SciCode、CritPt、OSWorld 2.0、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam），报告始终输出完整 11×9 表格、事件账本、方法卡与覆盖/门槛图表。数据源默认使用 benchmark 维护方/独立第三方免费公开的 Git/CSV/JSON/README/结构化 HTML 结果；Terminal-Bench 4.0 以 Harbor Hub 匿名 leaderboard JSON 为主源并保留官方 GitHub submission JSON 作审计回退。Artificial Analysis 仅在显式授权或合规公开结构化页面许可门禁通过时作为可选增强源，不能作为首版必需依赖。没有公开结果时写 coverage/NA，不制造分数。运维、调度、回放和故障隔离见 [Frontier AI 原始能力 Observer 运维说明](FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md)。

@@ -2,7 +2,7 @@
 
 > 读者：研究者、Agent / Workflow 使用者、临时分析脚本作者
 > 目标：知道当前有什么数据，并正确地查询、计算和追溯
-> 当前状态：统一数据层迁移期，2026-08-26
+> 当前状态：统一数据层持续演进，2026-09-04
 
 ## 1. 这本手册负责什么
 
@@ -39,9 +39,12 @@
 | `regional_tw_exports` | 台湾 IC/电子零组件月度出口 | 官方水平值及平台派生 yoy/mom |
 | `regional_kr_exports` | 韩国半导体出口月度序列 | 官方水平/指数及平台派生 yoy/mom |
 | `industry_dram_contract_price` | TrendForce 公开页面的 DRAM 半月合约价 session | 合约价格、页面发布日期、原始 session 与版本 |
+| `sp500_earnings_insight` | FactSet 周度 Earnings Insight 的已发布内部研究快照 | S&P 500 盈利/营收、利润率、指引、估值、评级，以及 11 个 GICS 行业背景 |
 | `private_company_events` | 经证据核验的私营公司事件（本轮暂不采集） | 融资、估值、ARR；当前应为 `no_coverage` |
 
 这张表表示“系统注册了这些能力”，不表示当前数据库已经有数据。实际覆盖必须通过 `catalog` 和 `availability` 查询。
+
+FactSet 的专用快照入口是 `DataProducts.earnings_insight_snapshot(as_of=...)`；它保证指数和行业数据来自同一报告版本。Macro 读取指数材料，Sector 只在八层公司证据结论完成后读取 GICS 背景，其他 Agent 不直接读取。指标字典、时效解释和证据边界见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。
 
 下图以公司财务与 Consensus 为例，标出可复用的结构化数据、使用它们的独立 Workflow，以及后续形成的运行记忆。点击图片可打开交互版。
 
@@ -630,3 +633,17 @@ HuggingFace 是 defeatbeta 数据集的托管/传输渠道；业务 provenance �
 - [结构化数据层运维指南](STRUCTURED_DATA_OPERATIONS.md)
 - [结构化数据开发者指南](STRUCTURED_DATA_DEVELOPER.md)
 - [总体数据架构](DATA_ARCHITECTURE.md)
+# Claude 职业使用与任务结构
+
+`ai_work_adoption` 只服务研究查询和 L1 Evidence Observer。使用 `data ai-adoption --product
+claude_ai --period YYYY-MM` 查看 SOC 职业大类与详细职业的 Usage/Automation 截面；使用 `data ai-job
+<SOC> --product 1p_api --period YYYY-MM` 追踪职业、关联 O*NET tasks、未观察任务和 Observed Exposure。
+`--product` 与 `--period` 都是强制参数，避免把 Claude.ai 的互动使用与 1P API 的生产部署混在一起。
+
+可陈述的事实是“Claude 使用量在职业间的分布”“某职业任务中自动化交互的比例”“公开 task cell 的可见
+覆盖”。不可将 Usage Share 表述为员工/企业采用率，SOC major group 也不是公司 NAICS/GICS 行业；Observed
+Exposure 是单独研究快照，不得作为月度趋势点。结果内包含 observation、relation、artifact 和 derivation
+lineage；需要固定报告时，请通过 `DataProducts.ai_work_adoption_snapshot(..., snapshot_consumer=...)`
+创建可离线重放的 snapshot manifest。
+
+`data ai-production` 是其严格的 1P API 生产化代理 consumer：它拒绝 Claude.ai，按职业和任务分别返回可见单元生产化率与生产化流量份额；职业内任务覆盖及 CCDF 是 taxonomy-dependent 下限，不能当作员工采用率。完整公式、方法卡、图表 sidecar、`as_of` 重放与当前仅两个月的趋势限制见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。

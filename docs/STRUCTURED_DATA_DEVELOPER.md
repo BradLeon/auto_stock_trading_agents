@@ -113,6 +113,24 @@ PYTHONPATH=src .venv/bin/python -c \
 
 ## 3. 设计哲学
 
+### 3.0 Anthropic Economic Index job adoption adapter（CURRENT）
+
+`anthropic_economic_index` 是 `ai_work_adoption` 的公开、无鉴权来源。适配器只读取官方
+Hugging Face repository 的 metadata API 和 commit-pinned 文件；Job Explorer 网页 UI 不是采集
+接口。它为每个 Claude.ai、1P API、SOC taxonomy、O*NET taxonomy 和 research snapshot 建立独立
+`artifact_key`，并将 `NativeRecord.slice_key` 精确绑定到对应 artifact。多文件 batch 不允许回退到
+“第一个 artifact”。
+
+职业实体使用 `SOC:<code>`，任务使用 `ONET_TASK:<task_id>`。关系是有版本的
+`contains_occupation` 与 `has_task`，通过 stable ID 连接，支持 `as_of` 和 tombstone；不要用展示名
+作为关联键。adapter 只保留 `GLOBAL × (SOC level 0/1 | O*NET level 0)`，并把 Claude.ai 与 1P API
+放在不同 `source_product` series，禁止默认混合或补值。
+
+`pct` 的平台指标名是 `ai.work_adoption.usage_share`，含义是该 Claude 产品总使用量的份额，**不是**
+职业从业者采用率。`observed_exposure` 和 `task_penetration` 都是 `research_snapshot`、`ratio_0_1`，
+不能并入月度趋势或计算环比。新增此类 provider 时，adapter 必须返回 reference entities、relations、
+独立 artifacts 和可复现的过滤后 JSON Lines，而不是直接写 repository。
+
 ### 3.1 可治理的观测，而不是裸数值
 
 平台的最小事实单元是 observation，而不是 `float`。同一个 `100`，可能分别表示 100 美元、100 百万美元、100%、单季收入或年初至今累计收入。失去语义后无法安全计算，也无法跨来源对账。
@@ -602,3 +620,7 @@ manifest = products.snapshot_manifest(
 - [结构化数据使用手册](STRUCTURED_DATA_USER_GUIDE.md)
 - [数据源说明](DATA_SOURCES.md)
 - [开发与测试约定](DEVELOPMENT.md)
+
+## AI 生产化渗透派生 consumer
+
+`DataProducts.ai_production_penetration(...)` 从受治理 observation 和 `as_of` taxonomy relation 进行查询时派生；不得将结果写回 Provider observation，也不得让 Observer 导入 adapter 或物理 repository。核心公式、固定 JSON/DataFrame 合约、threshold/derivation version、失败关闭语义、snapshot manifest 和图表 data hash 见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。方法卡仅由 `ats.agents.evidence.work_adoption` 构建；禁止改通用 Observer base/protocol 来要求其他领域返回它。

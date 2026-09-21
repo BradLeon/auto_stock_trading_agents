@@ -14,6 +14,9 @@ _DATA_METHODS = {
     "document_versions", "document_candidates", "data_source_health",
     "document_source_health", "document_candidate_health",
     "document_quality_inventory",
+    "link_document_artifact", "document_artifacts",
+    "save_document_pages", "document_pages", "begin_document_processing",
+    "finish_document_processing", "document_processing",
 }
 
 

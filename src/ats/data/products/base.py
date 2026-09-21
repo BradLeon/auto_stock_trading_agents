@@ -35,13 +35,369 @@ class DataProducts:
             self._structured_repository = get_platform_structured_repository()
         return self._structured_repository
 
-    def indicator_series(self, *, source_id: str | None = None,
-                         series: str | None = None, entity: str | None = None,
-                         since: str | None = None, as_of: datetime | None = None,
-                         include_vintages: bool = False, as_frame: bool = False):
+    def earnings_insight_snapshot(self, *, as_of: datetime | None = None):
+        """Return one report-consistent governed FactSet snapshot."""
+        from .earnings_insight import load_snapshot
+
+        return load_snapshot(self, as_of=as_of)
+
+    def earnings_insight_analysis_packet(self, *, as_of: datetime | None = None):
+        """Return the bounded, page-cited FactSet material used by analyses."""
+        from .earnings_insight import load_analysis_packet
+
+        return load_analysis_packet(self, as_of=as_of)
+
+    def earnings_insight_vintages(self, *, as_of: datetime | None = None, limit: int = 500):
+        """Return immutable released weekly snapshots, newest first."""
+        from .earnings_insight import available_vintages
+
+        return available_vintages(self, as_of=as_of, limit=limit)
+
+    def earnings_insight_status(self, *, as_of: datetime | None = None, limit: int = 20):
+        from .earnings_insight import operational_status
+
+        return operational_status(self, as_of=as_of, limit=limit)
+
+    def ai_work_adoption_snapshot(
+        self,
+        *,
+        source_product: str,
+        period: str = "",
+        as_of: datetime | None = None,
+        snapshot_consumer: str = "",
+        snapshot_purpose: str = "",
+    ) -> dict:
+        """Governed Claude job/task usage snapshot; never a worker-adoption estimate."""
+        from .ai_work_adoption import snapshot
+
+        return snapshot(
+            self,
+            source_product=source_product,
+            period=period,
+            as_of=as_of,
+            snapshot_consumer=snapshot_consumer,
+            snapshot_purpose=snapshot_purpose,
+        )
+
+    def census_btos_ai_snapshot(
+        self, *, period: str = "", as_of: datetime | None = None, entity_id: str = "",
+        include_vintages: bool = False,
+    ) -> dict:
+        """US employer-business AI adoption under the post-2025-11 Core wording."""
+        from .census_btos import snapshot
+
+        return snapshot(self.structured, period=period, as_of=as_of, entity_id=entity_id,
+                        include_vintages=include_vintages)
+
+    def rps_genai_adoption_snapshot(
+        self, *, period: str = "", as_of: datetime | None = None,
+        include_vintages: bool = False,
+    ) -> dict:
+        """US employed-adult work GenAI adoption and persistence proxies."""
+        from .rps_genai_adoption import snapshot
+
+        return snapshot(self.structured, period=period, as_of=as_of,
+                        include_vintages=include_vintages)
+
+    def ramp_paid_adoption_snapshot(
+        self, *, scope: str = "adoption_overall", period: str = "",
+        periods: list[str] | None = None, as_of: datetime | None = None,
+        include_vintages: bool = False, as_frame: bool = False,
+    ) -> dict:
+        """Ramp paid-business adoption, kept separate from survey and traffic axes."""
+        from .ramp_ai_index import ramp_paid_adoption_snapshot
+
+        return ramp_paid_adoption_snapshot(self, scope=scope, period=period,
+                                           periods=periods, as_of=as_of,
+                                           include_vintages=include_vintages,
+                                           as_frame=as_frame)
+
+    def ramp_spend_per_employee_series(
+        self, *, scope: str = "spend_per_employee_overall", quantiles: list[str] | None = None,
+        period: str = "", as_of: datetime | None = None, include_vintages: bool = False,
+        as_frame: bool = False,
+    ) -> dict:
+        from .ramp_ai_index import ramp_spend_per_employee_series
+
+        return ramp_spend_per_employee_series(self, scope=scope, quantiles=quantiles,
+                                              period=period, as_of=as_of,
+                                              include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def ramp_model_market_share_series(
+        self, *, scope: str = "model_market_share_overall", period: str = "",
+        provider: str = "", model: str = "", as_of: datetime | None = None,
+        include_vintages: bool = False, as_frame: bool = False,
+    ) -> dict:
+        from .ramp_ai_index import ramp_model_market_share_series
+
+        return ramp_model_market_share_series(self, scope=scope, period=period,
+                                              provider=provider, model=model, as_of=as_of,
+                                              include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def ramp_comparability(self, *, as_of: datetime | None = None) -> dict:
+        from .ramp_ai_index import ramp_comparability
+
+        return ramp_comparability(self, as_of=as_of)
+
+    def ai_adoption_evidence_bundle(
+        self, *, as_of: datetime | None = None, snapshot_consumer: str = "",
+        snapshot_purpose: str = "",
+    ) -> dict:
+        """Four independent adoption axes; never a synthetic penetration score."""
+        from .ai_adoption_bundle import build
+
+        return build(self, as_of=as_of, snapshot_consumer=snapshot_consumer,
+                     snapshot_purpose=snapshot_purpose)
+
+    def replay_ai_adoption_evidence_bundle(self, snapshot_id: str) -> dict | None:
+        """Reconstruct the persisted four-axis evidence selection without network access."""
+        from .ai_adoption_bundle import replay
+
+        return replay(self, snapshot_id)
+
+    def frontier_labs_revenue_series(
+        self, *, company: str = "", metric: str = "", observation_identity: str = "",
+        source_id: str = "", methodology_regime: str = "",
+        periods: list[str] | None = None, as_of: datetime | None = None,
+        include_vintages: bool = False, as_frame: bool = False,
+    ) -> dict:
+        """Frontier AI Labs revenue observations, one measurement identity at a time."""
+        from .frontier_ai_labs_revenue import frontier_labs_revenue_series
+
+        return frontier_labs_revenue_series(
+            self, company=company, metric=metric, observation_identity=observation_identity,
+            source_id=source_id, methodology_regime=methodology_regime, periods=periods,
+            as_of=as_of, include_vintages=include_vintages, as_frame=as_frame)
+
+    def frontier_labs_revenue_evidence_bundle(
+        self, *, companies: list[str] | None = None, as_of: datetime | None = None,
+        snapshot_consumer: str = "", snapshot_purpose: str = "",
+    ) -> dict:
+        """L1 commercialization revenue evidence: never an economics or retention claim."""
+        from .frontier_ai_labs_revenue import frontier_labs_revenue_evidence_bundle
+
+        return frontier_labs_revenue_evidence_bundle(
+            self, companies=companies, as_of=as_of, snapshot_consumer=snapshot_consumer,
+            snapshot_purpose=snapshot_purpose)
+
+    def replay_frontier_labs_revenue_bundle(self, snapshot_id: str) -> dict | None:
+        """Replay the persisted revenue evidence selection without network access."""
+        return self.replay_snapshot(snapshot_id)
+
+    def frontier_ai_capability_matrix(self, *, as_of: datetime | None = None,
+                                      include_vintages: bool = False) -> dict:
+        """Current nine-Lab by eleven-benchmark raw capability matrix."""
+        from .frontier_ai_capability import frontier_ai_capability_matrix
+
+        return frontier_ai_capability_matrix(self, as_of=as_of,
+                                             include_vintages=include_vintages)
+
+    def frontier_ai_capability_evidence_bundle(self, *, as_of: datetime | None = None,
+                                               previous_matrix: dict | None = None,
+                                               snapshot_consumer: str = "",
+                                               snapshot_purpose: str = "") -> dict:
+        """A/B raw-capability evidence bundle for the independent L1 Observer."""
+        from .frontier_ai_capability import frontier_ai_capability_evidence_bundle
+
+        return frontier_ai_capability_evidence_bundle(
+            self, as_of=as_of, previous_matrix=previous_matrix,
+            snapshot_consumer=snapshot_consumer, snapshot_purpose=snapshot_purpose)
+
+    def replay_frontier_ai_capability_snapshot(self, snapshot_id: str) -> dict | None:
+        """Replay the immutable raw-capability packet inputs without network access."""
+        from .frontier_ai_capability import replay_frontier_ai_capability_snapshot
+
+        return replay_frontier_ai_capability_snapshot(self, snapshot_id)
+
+    def recompute_frontier_ai_capability_for_events(self, events, **kwargs) -> dict:
+        from .frontier_ai_capability import recompute_frontier_ai_capability_for_events
+
+        return recompute_frontier_ai_capability_for_events(self, events, **kwargs)
+
+    def frontier_ai_capability_scores(self, *, lab_id: str = "", model_id: str = "",
+                                      benchmark_id: str = "", method_version: str = "",
+                                      source_type: str = "", as_of: datetime | None = None,
+                                      comparability_group: str = "", harness: str = "",
+                                      grader: str = "", inference_config: str = "",
+                                      reasoning_effort: str = "",
+                                      measurement_scope: str = "",
+                                      include_vintages: bool = True) -> list[dict]:
+        from .frontier_ai_capability import frontier_ai_capability_scores
+
+        return frontier_ai_capability_scores(self, lab_id=lab_id, model_id=model_id,
+                                             benchmark_id=benchmark_id, method_version=method_version,
+                                             source_type=source_type, as_of=as_of,
+                                             comparability_group=comparability_group, harness=harness,
+                                             grader=grader, inference_config=inference_config,
+                                             reasoning_effort=reasoning_effort,
+                                             measurement_scope=measurement_scope,
+                                             include_vintages=include_vintages)
+
+    def frontier_ai_capability_event_ledger(self, *, benchmark_id: str = "", model_id: str = "",
+                                            lab_id: str = "", as_of: datetime | None = None,
+                                            include_vintages: bool = True) -> list[dict]:
+        from .frontier_ai_capability import event_ledger
+        return event_ledger(self, benchmark_id=benchmark_id, model_id=model_id,
+                            lab_id=lab_id, as_of=as_of, include_vintages=include_vintages)
+
+    def openrouter_token_volume_series(self, *, start_date: str = "", end_date: str = "",
+                                       as_of: datetime | None = None,
+                                       include_vintages: bool = False,
+                                       as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_token_volume_series
+
+        return openrouter_token_volume_series(self, start_date=start_date, end_date=end_date,
+                                              as_of=as_of, include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def openrouter_author_share_series(self, *, start_date: str = "", end_date: str = "",
+                                       as_of: datetime | None = None,
+                                       include_vintages: bool = False,
+                                       as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_author_share_series
+
+        return openrouter_author_share_series(self, start_date=start_date, end_date=end_date,
+                                              as_of=as_of, include_vintages=include_vintages,
+                                              as_frame=as_frame)
+
+    def openrouter_model_leaderboard(self, *, period: str = "", top_n: int = 10,
+                                     as_of: datetime | None = None,
+                                     include_vintages: bool = False,
+                                     as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_model_leaderboard
+
+        return openrouter_model_leaderboard(self, period=period, top_n=top_n,
+                                            as_of=as_of, include_vintages=include_vintages,
+                                            as_frame=as_frame)
+
+    def openrouter_model_ranking_series(self, *, top_n: int = 10,
+                                        start_date: str = "2026-01-01", end_date: str = "",
+                                        as_of: datetime | None = None,
+                                        include_vintages: bool = False,
+                                        as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_model_ranking_series
+
+        return openrouter_model_ranking_series(self, top_n=top_n, start_date=start_date,
+                                               end_date=end_date, as_of=as_of,
+                                               include_vintages=include_vintages,
+                                               as_frame=as_frame)
+
+    def openrouter_concentration_series(self, *, start_date: str = "", end_date: str = "",
+                                        as_of: datetime | None = None,
+                                        include_vintages: bool = False,
+                                        as_frame: bool = False) -> dict:
+        from .openrouter_rankings import openrouter_concentration_series
+
+        return openrouter_concentration_series(self, start_date=start_date, end_date=end_date,
+                                               as_of=as_of, include_vintages=include_vintages,
+                                               as_frame=as_frame)
+
+    def openrouter_token_evidence_bundle(self, *, as_of: datetime | None = None,
+                                         snapshot_consumer: str = "",
+                                         snapshot_purpose: str = "") -> dict:
+        from .openrouter_rankings import openrouter_token_evidence_bundle
+
+        return openrouter_token_evidence_bundle(self, as_of=as_of,
+                                                snapshot_consumer=snapshot_consumer,
+                                                snapshot_purpose=snapshot_purpose)
+
+    def ai_job_profile(
+        self, occupation: str, *, source_product: str, period: str, as_of: datetime | None = None
+    ) -> dict:
+        """Occupation drill-down with versioned O*NET relations and research snapshot."""
+        from .ai_work_adoption import job_profile
+
+        return job_profile(
+            self, occupation=occupation, source_product=source_product, period=period, as_of=as_of
+        )
+
+    def ai_work_adoption_series(
+        self,
+        *,
+        entity_id: str,
+        metric_id: str,
+        source_product: str,
+        as_of: datetime | None = None,
+        as_frame: bool = False,
+    ):
+        from .ai_work_adoption import metric_series
+
+        return metric_series(
+            self,
+            entity_id=entity_id,
+            metric_id=metric_id,
+            source_product=source_product,
+            as_of=as_of,
+            as_frame=as_frame,
+        )
+
+    def ai_work_adoption_cross_section(
+        self,
+        *,
+        metric_id: str,
+        source_product: str,
+        period: str,
+        hierarchy_level: int = 0,
+        as_of: datetime | None = None,
+    ) -> dict:
+        from .ai_work_adoption import cross_section
+
+        return cross_section(
+            self,
+            metric_id=metric_id,
+            source_product=source_product,
+            period=period,
+            hierarchy_level=hierarchy_level,
+            as_of=as_of,
+        )
+
+    def ai_production_penetration(
+        self,
+        *,
+        periods: list[str] | tuple[str, ...] | None = None,
+        as_of: datetime | None = None,
+        top_n: int = 10,
+        as_frame: bool = False,
+        source_product: str = "1p_api",
+        snapshot_consumer: str = "",
+        snapshot_purpose: str = "",
+    ) -> dict:
+        """Read-only 1P API production-workflow proxy; it is not an adoption estimate."""
+        from .ai_work_adoption import ai_production_penetration
+
+        return ai_production_penetration(
+            self,
+            periods=periods,
+            as_of=as_of,
+            top_n=top_n,
+            as_frame=as_frame,
+            source_product=source_product,
+            snapshot_consumer=snapshot_consumer,
+            snapshot_purpose=snapshot_purpose,
+        )
+
+    def indicator_series(
+        self,
+        *,
+        source_id: str | None = None,
+        series: str | None = None,
+        entity: str | None = None,
+        since: str | None = None,
+        as_of: datetime | None = None,
+        include_vintages: bool = False,
+        as_frame: bool = False,
+    ):
         rows = self.structured.observations(
-            source_id=source_id, metric_id=series, entity_id=entity, since=since,
-            as_of=as_of, latest_only=not include_vintages, accepted_only=True)
+            source_id=source_id,
+            metric_id=series,
+            entity_id=entity,
+            since=since,
+            as_of=as_of,
+            latest_only=not include_vintages,
+            accepted_only=True,
+        )
         if not as_frame:
             return rows
         try:
@@ -50,21 +406,41 @@ class DataProducts:
             raise RuntimeError("pandas is required for as_frame=True") from exc
         return pd.DataFrame(rows)
 
-    def _gap_status(self, *, dataset_id: str | None, source_id: str | None,
-                    entity_id: str, metric_id: str,
-                    as_of: datetime | None) -> dict:
+    def _gap_status(
+        self,
+        *,
+        dataset_id: str | None,
+        source_id: str | None,
+        entity_id: str,
+        metric_id: str,
+        as_of: datetime | None,
+    ) -> dict:
         unbounded = self.structured.observations(
-            dataset_id=dataset_id, source_id=source_id, entity_id=entity_id,
-            metric_id=metric_id, latest_only=True, accepted_only=False, limit=1)
+            dataset_id=dataset_id,
+            source_id=source_id,
+            entity_id=entity_id,
+            metric_id=metric_id,
+            latest_only=True,
+            accepted_only=False,
+            limit=1,
+        )
         if as_of and unbounded:
             return {"status": "not_yet_known", "reason": "no_visible_vintage_at_as_of"}
         history = self.structured.ingestion_history(
-            source_id=source_id, dataset_id=dataset_id, limit=1)
+            source_id=source_id, dataset_id=dataset_id, limit=1
+        )
         if history:
             state = history[0]["status"]
             if state in {
-                "zero_match", "not_yet_published", "no_coverage", "stale",
-                "unreachable", "unauthorized", "parse_failed", "validation_failed",
+                "zero_match",
+                "not_yet_published",
+                "no_coverage",
+                "stale",
+                "unreachable",
+                "unauthorized",
+                "not_pdf",
+                "parse_failed",
+                "validation_failed",
             }:
                 return {"status": state, "reason": "latest_ingestion_state"}
         return {"status": "no_coverage", "reason": "no_accepted_observation"}
@@ -81,23 +457,38 @@ class DataProducts:
         }
         return frame
 
-    def metric_series(self, *, metric: str, entity: str,
-                      dataset: str | None = None, source_id: str | None = None,
-                      since: str | None = None, as_of: datetime | None = None,
-                      include_vintages: bool = False,
-                      source_strategy: str = "selected", quality: str = "strict",
-                      max_age_hours: float | None = None,
-                      snapshot_consumer: str = "", snapshot_purpose: str = "",
-                      as_frame: bool = False):
+    def metric_series(
+        self,
+        *,
+        metric: str,
+        entity: str,
+        dataset: str | None = None,
+        source_id: str | None = None,
+        since: str | None = None,
+        as_of: datetime | None = None,
+        include_vintages: bool = False,
+        source_strategy: str = "selected",
+        quality: str = "strict",
+        max_age_hours: float | None = None,
+        snapshot_consumer: str = "",
+        snapshot_purpose: str = "",
+        as_frame: bool = False,
+    ):
         """Query a governed metric with explicit source, quality and gap semantics."""
         if source_strategy not in {"selected", "all"}:
             raise ValueError("source_strategy must be selected or all")
         if quality not in {"strict", "loose"}:
             raise ValueError("quality must be strict or loose")
         rows = self.structured.observations(
-            dataset_id=dataset, metric_id=metric, entity_id=entity,
-            source_id=source_id, since=since, as_of=as_of,
-            latest_only=not include_vintages, accepted_only=True)
+            dataset_id=dataset,
+            metric_id=metric,
+            entity_id=entity,
+            source_id=source_id,
+            since=since,
+            as_of=as_of,
+            latest_only=not include_vintages,
+            accepted_only=True,
+        )
         selected: list[dict] = []
         rejected: list[dict] = []
         conflicts: list[dict] = []
@@ -105,9 +496,16 @@ class DataProducts:
 
         if source_id or source_strategy == "all" or not rows:
             for row in rows:
-                selected.append(dict(row, selected_source=row["source_id"],
-                                     selection_reason="explicit_source" if source_id
-                                     else "all_sources_requested", conflict=False))
+                selected.append(
+                    dict(
+                        row,
+                        selected_source=row["source_id"],
+                        selection_reason="explicit_source"
+                        if source_id
+                        else "all_sources_requested",
+                        conflict=False,
+                    )
+                )
         else:
             selector = SourceSelector(self.structured)
             group_fields = ("period", "period_basis", "adjustment", "unit", "currency")
@@ -128,15 +526,19 @@ class DataProducts:
             for row in rows:
                 for key, value in dimensions(row).items():
                     values_by_source_key.setdefault((row["source_id"], key), set()).add(
-                        json.dumps(value, sort_keys=True))
-            discriminating_keys = sorted({key for (_source, key), values
-                                         in values_by_source_key.items() if len(values) > 1})
+                        json.dumps(value, sort_keys=True)
+                    )
+            discriminating_keys = sorted(
+                {key for (_source, key), values in values_by_source_key.items() if len(values) > 1}
+            )
 
             def group_key(row: dict) -> tuple:
                 return (
                     *(row.get(field, "") for field in group_fields),
-                    *(json.dumps(dimensions(row).get(key), sort_keys=True)
-                      for key in discriminating_keys),
+                    *(
+                        json.dumps(dimensions(row).get(key), sort_keys=True)
+                        for key in discriminating_keys
+                    ),
                 )
 
             groups = sorted({group_key(row) for row in rows})
@@ -146,32 +548,46 @@ class DataProducts:
                 for row in period_rows:
                     current = latest_by_source.get(row["source_id"])
                     if current is None or (row["known_at"], row["fetched_at"]) > (
-                            current["known_at"], current["fetched_at"]):
+                        current["known_at"],
+                        current["fetched_at"],
+                    ):
                         latest_by_source[row["source_id"]] = row
-                choice = selector.select(dataset or period_rows[0]["dataset_id"],
-                                         list(latest_by_source.values()))
+                choice = selector.select(
+                    dataset or period_rows[0]["dataset_id"], list(latest_by_source.values())
+                )
                 if choice.selected is None:
                     continue
-                chosen_rows = ([choice.selected] if not include_vintages else [
-                    row for row in period_rows
-                    if row["source_id"] == choice.selected_source])
+                chosen_rows = (
+                    [choice.selected]
+                    if not include_vintages
+                    else [row for row in period_rows if row["source_id"] == choice.selected_source]
+                )
                 for row in chosen_rows:
-                    selected.append(dict(
-                        row, selected_source=choice.selected_source,
-                        selection_reason=choice.selection_reason,
-                        conflict=choice.conflict,
-                        alternative_sources=[item["source_id"]
-                                             for item in choice.alternatives]))
+                    selected.append(
+                        dict(
+                            row,
+                            selected_source=choice.selected_source,
+                            selection_reason=choice.selection_reason,
+                            conflict=choice.conflict,
+                            alternative_sources=[item["source_id"] for item in choice.alternatives],
+                        )
+                    )
                 if choice.conflict:
-                    conflicts.append({
-                        "period": group[0], "period_basis": group[1],
-                        "dimensions": {key: json.loads(group[index + len(group_fields)])
-                                       for index, key in enumerate(discriminating_keys)},
-                        "selected_source": choice.selected_source,
-                        "sources": sorted(latest_by_source),
-                        "values": {key: value["value"]
-                                   for key, value in latest_by_source.items()},
-                    })
+                    conflicts.append(
+                        {
+                            "period": group[0],
+                            "period_basis": group[1],
+                            "dimensions": {
+                                key: json.loads(group[index + len(group_fields)])
+                                for index, key in enumerate(discriminating_keys)
+                            },
+                            "selected_source": choice.selected_source,
+                            "sources": sorted(latest_by_source),
+                            "values": {
+                                key: value["value"] for key, value in latest_by_source.items()
+                            },
+                        }
+                    )
 
         reference = as_of or datetime.now(timezone.utc)
         usable = []
@@ -197,13 +613,20 @@ class DataProducts:
         gap = None
         if not usable:
             if rejected:
-                status = "stale" if all("stale" in row["strict_reasons"]
-                                        for row in rejected) else "quality_rejected"
+                status = (
+                    "stale"
+                    if all("stale" in row["strict_reasons"] for row in rejected)
+                    else "quality_rejected"
+                )
                 gap = {"status": status, "reason": "strict_quality_gate"}
             else:
                 gap = self._gap_status(
-                    dataset_id=dataset, source_id=source_id,
-                    entity_id=entity.upper(), metric_id=metric, as_of=as_of)
+                    dataset_id=dataset,
+                    source_id=source_id,
+                    entity_id=entity.upper(),
+                    metric_id=metric,
+                    as_of=as_of,
+                )
         result = {
             "status": "ok" if usable else gap["status"],
             "metric_id": metric,
@@ -222,54 +645,90 @@ class DataProducts:
             result["snapshot"] = self.snapshot_manifest(
                 consumer=snapshot_consumer,
                 purpose=snapshot_purpose or f"metric_series:{metric}",
-                as_of=reference, rows=usable,
-                metadata={"metric_id": metric, "entity_id": entity.upper(),
-                          "dataset_id": result["dataset_id"]})
+                as_of=reference,
+                rows=usable,
+                metadata={
+                    "metric_id": metric,
+                    "entity_id": entity.upper(),
+                    "dataset_id": result["dataset_id"],
+                },
+            )
         return self._as_frame(result) if as_frame else result
 
-    def cross_section(self, *, metric: str, entities: list[str], period: str,
-                      dataset: str | None = None, as_of: datetime | None = None,
-                      quality: str = "strict", as_frame: bool = False):
+    def cross_section(
+        self,
+        *,
+        metric: str,
+        entities: list[str],
+        period: str,
+        dataset: str | None = None,
+        as_of: datetime | None = None,
+        quality: str = "strict",
+        as_frame: bool = False,
+    ):
         """Return partial coverage and mark, rather than hide, incomparable rows."""
         rows: list[dict] = []
         missing: list[dict] = []
         for entity in entities:
             result = self.metric_series(
-                metric=metric, entity=entity, dataset=dataset, as_of=as_of,
-                quality=quality)
+                metric=metric, entity=entity, dataset=dataset, as_of=as_of, quality=quality
+            )
             matches = [row for row in result["rows"] if row["period"] == period]
             if not matches:
-                missing.append({
-                    "entity_id": entity.upper(),
-                    "status": (result["missing"] or {}).get("status", "period_missing"),
-                    "reason": (result["missing"] or {}).get(
-                        "reason", f"no_observation_for_{period}"),
-                })
+                missing.append(
+                    {
+                        "entity_id": entity.upper(),
+                        "status": (result["missing"] or {}).get("status", "period_missing"),
+                        "reason": (result["missing"] or {}).get(
+                            "reason", f"no_observation_for_{period}"
+                        ),
+                    }
+                )
                 continue
             rows.append(matches[-1])
         baseline = rows[0] if rows else None
         comparable_fields = (
-            "period_start", "period_end", "unit", "currency", "period_basis", "adjustment")
+            "period_start",
+            "period_end",
+            "unit",
+            "currency",
+            "period_basis",
+            "adjustment",
+        )
         for row in rows:
-            differences = [field for field in comparable_fields
-                           if baseline and row.get(field) != baseline.get(field)]
+            differences = [
+                field
+                for field in comparable_fields
+                if baseline and row.get(field) != baseline.get(field)
+            ]
             row["comparability"] = "comparable" if not differences else "incomparable"
             row["comparability_reasons"] = [f"{field}_differs" for field in differences]
         result = {
             "status": "ok" if rows else "no_coverage",
-            "metric_id": metric, "period": period,
-            "rows": rows, "missing": missing,
-            "all_comparable": bool(rows) and all(
-                row["comparability"] == "comparable" for row in rows),
+            "metric_id": metric,
+            "period": period,
+            "rows": rows,
+            "missing": missing,
+            "all_comparable": bool(rows)
+            and all(row["comparability"] == "comparable" for row in rows),
         }
         return self._as_frame({**result, "rejected": []}) if as_frame else result
 
-    def derive(self, *, operation: str, query_result: dict,
-               version: str = "v1", output_metric: str = "",
-               window: int | None = None, min_periods: int | None = None,
-               statistic: str = "mean", fx_result: dict | None = None,
-               right_result: dict | None = None,
-               target_currency: str = "", convention: str = "multiply") -> dict:
+    def derive(
+        self,
+        *,
+        operation: str,
+        query_result: dict,
+        version: str = "v1",
+        output_metric: str = "",
+        window: int | None = None,
+        min_periods: int | None = None,
+        statistic: str = "mean",
+        fx_result: dict | None = None,
+        right_result: dict | None = None,
+        target_currency: str = "",
+        convention: str = "multiply",
+    ) -> dict:
         from ..core.structured_models import DerivationDefinition
         from ..pipelines.structured.derivations import calculate
 
@@ -288,45 +747,72 @@ class DataProducts:
             input_metrics.append(right_result["metric_id"])
         derivation_id = f"{operation}:{input_metric}:{output_metric or input_metric}"
         definition = DerivationDefinition(
-            id=derivation_id, version=version, operation=operation,
-            inputs=input_metrics, parameters=parameters,
-            output_metric_id=output_metric or input_metric)
+            id=derivation_id,
+            version=version,
+            operation=operation,
+            inputs=input_metrics,
+            parameters=parameters,
+            output_metric_id=output_metric or input_metric,
+        )
         self.structured.register_derivation(definition)
         rows = calculate(
-            query_result.get("rows", []), definition,
-            fx_rows=(fx_result or {}).get("rows"), target_currency=target_currency,
-            right_rows=(right_result or {}).get("rows"), convention=convention)
+            query_result.get("rows", []),
+            definition,
+            fx_rows=(fx_result or {}).get("rows"),
+            target_currency=target_currency,
+            right_rows=(right_result or {}).get("rows"),
+            convention=convention,
+        )
         return {
-            "status": "ok" if any(row["derivation_status"] == "ok" for row in rows)
+            "status": "ok"
+            if any(row["derivation_status"] == "ok" for row in rows)
             else "insufficient_inputs",
             "derivation": definition.model_dump(mode="json"),
             "rows": rows,
         }
 
-    def financial_derived(self, *, metric: str, entity: str,
-                          dataset: str = "company_financials",
-                          as_of: datetime | None = None,
-                          quality: str = "strict") -> dict:
+    def financial_derived(
+        self,
+        *,
+        metric: str,
+        entity: str,
+        dataset: str = "company_financials",
+        as_of: datetime | None = None,
+        quality: str = "strict",
+    ) -> dict:
         formulas = {
             "financial.free_cash_flow": (
-                "subtract", "financial.cash_from_operations.gaap", "financial.capex.gaap"),
+                "subtract",
+                "financial.cash_from_operations.gaap",
+                "financial.capex.gaap",
+            ),
             "financial.gross_margin.gaap": (
-                "divide", "financial.gross_profit.gaap", "financial.revenue.gaap"),
+                "divide",
+                "financial.gross_profit.gaap",
+                "financial.revenue.gaap",
+            ),
             "financial.operating_margin.gaap": (
-                "divide", "financial.operating_income.gaap", "financial.revenue.gaap"),
+                "divide",
+                "financial.operating_income.gaap",
+                "financial.revenue.gaap",
+            ),
         }
         if metric not in formulas:
             raise ValueError(f"no registered financial formula for {metric}")
         operation, left_metric, right_metric = formulas[metric]
         left = self.metric_series(
-            metric=left_metric, entity=entity, dataset=dataset,
-            as_of=as_of, quality=quality)
+            metric=left_metric, entity=entity, dataset=dataset, as_of=as_of, quality=quality
+        )
         right = self.metric_series(
-            metric=right_metric, entity=entity, dataset=dataset,
-            as_of=as_of, quality=quality)
+            metric=right_metric, entity=entity, dataset=dataset, as_of=as_of, quality=quality
+        )
         return self.derive(
-            operation=operation, query_result=left, right_result=right,
-            output_metric=metric, version="v1")
+            operation=operation,
+            query_result=left,
+            right_result=right,
+            output_metric=metric,
+            version="v1",
+        )
 
     def structured_sources(self) -> list[dict]:
         return self.structured.sources()
@@ -383,54 +869,87 @@ class DataProducts:
     def structured_health(self) -> list[dict]:
         return self.structured.source_health()
 
-    def financial_quality(self, *, entity: str | None = None,
-                          as_of: datetime | None = None) -> dict:
+    def financial_quality(
+        self, *, entity: str | None = None, as_of: datetime | None = None
+    ) -> dict:
         from ..pipelines.structured.quality import financial_quality
 
         rows = self.structured.observations(
-            dataset_id="company_financials", entity_id=entity, as_of=as_of,
-            latest_only=True, accepted_only=True, limit=100_000)
+            dataset_id="company_financials",
+            entity_id=entity,
+            as_of=as_of,
+            latest_only=True,
+            accepted_only=True,
+            limit=100_000,
+        )
         return financial_quality(rows)
 
-    def consensus_snapshot(self, *, entity: str,
-                           as_of: datetime | None = None) -> dict:
+    def consensus_snapshot(self, *, entity: str, as_of: datetime | None = None) -> dict:
         """Return the newest whole consensus snapshot visible at ``as_of``."""
         rows = self.structured.observations(
-            dataset_id="market_consensus", source_id="yfinance_consensus",
-            entity_id=entity, as_of=as_of, latest_only=False,
-            accepted_only=True, limit=100_000)
+            dataset_id="market_consensus",
+            source_id="yfinance_consensus",
+            entity_id=entity,
+            as_of=as_of,
+            latest_only=False,
+            accepted_only=True,
+            limit=100_000,
+        )
         if not rows:
             gap = self._gap_status(
-                dataset_id="market_consensus", source_id="yfinance_consensus",
-                entity_id=entity.upper(), metric_id="consensus.eps.mean", as_of=as_of)
-            return {"status": gap["status"], "entity_id": entity.upper(),
-                    "known_at": None, "rows": [], "missing": gap}
+                dataset_id="market_consensus",
+                source_id="yfinance_consensus",
+                entity_id=entity.upper(),
+                metric_id="consensus.eps.mean",
+                as_of=as_of,
+            )
+            return {
+                "status": gap["status"],
+                "entity_id": entity.upper(),
+                "known_at": None,
+                "rows": [],
+                "missing": gap,
+            }
         known_at = max(row["known_at"] for row in rows)
         snapshot_rows = [row for row in rows if row["known_at"] == known_at]
         return {
-            "status": "ok", "entity_id": entity.upper(), "known_at": known_at,
-            "rows": snapshot_rows, "missing": None,
-            "target_periods": sorted({row["period"] for row in snapshot_rows
-                                      if row["period_basis"] == "target_quarter"}),
+            "status": "ok",
+            "entity_id": entity.upper(),
+            "known_at": known_at,
+            "rows": snapshot_rows,
+            "missing": None,
+            "target_periods": sorted(
+                {row["period"] for row in snapshot_rows if row["period_basis"] == "target_quarter"}
+            ),
         }
 
-    def consensus_legacy_dict(self, *, entity: str,
-                              as_of: datetime | None = None) -> dict:
+    def consensus_legacy_dict(self, *, entity: str, as_of: datetime | None = None) -> dict:
         """Assemble the historical ``consensus.fetch`` dict from one governed vintage."""
         scalar_defaults = {
-            "eps": None, "revenue": None, "eps_low": None, "eps_high": None,
-            "revenue_low": None, "revenue_high": None,
-            "target_mean": None, "target_median": None, "target_low": None,
-            "target_high": None, "target_current": None,
-            "rating_strong_buy": None, "rating_buy": None, "rating_hold": None,
-            "rating_sell": None, "rating_strong_sell": None,
+            "eps": None,
+            "revenue": None,
+            "eps_low": None,
+            "eps_high": None,
+            "revenue_low": None,
+            "revenue_high": None,
+            "target_mean": None,
+            "target_median": None,
+            "target_low": None,
+            "target_high": None,
+            "target_current": None,
+            "rating_strong_buy": None,
+            "rating_buy": None,
+            "rating_hold": None,
+            "rating_sell": None,
+            "rating_strong_sell": None,
         }
         output = {**scalar_defaults, "rating_trend": [], "upgrades_downgrades": []}
         snapshot = self.consensus_snapshot(entity=entity, as_of=as_of)
         if snapshot["status"] != "ok":
             return output
         metric_to_key = {
-            "consensus.eps.mean": "eps", "consensus.eps.low": "eps_low",
+            "consensus.eps.mean": "eps",
+            "consensus.eps.low": "eps_low",
             "consensus.eps.high": "eps_high",
             "consensus.revenue.mean": "revenue",
             "consensus.revenue.low": "revenue_low",
@@ -457,38 +976,55 @@ class DataProducts:
                 if relative == "0m":
                     output[f"rating_{metric_to_key[metric]}"] = int(row["value"])
             elif metric == "consensus.rating.change":
-                actions.append({
-                    "date": row["period"], "firm": dimensions.get("firm") or None,
-                    "to_grade": dimensions.get("to_grade") or None,
-                    "from_grade": dimensions.get("from_grade") or None,
-                    "action": dimensions.get("action") or None,
-                })
+                actions.append(
+                    {
+                        "date": row["period"],
+                        "firm": dimensions.get("firm") or None,
+                        "to_grade": dimensions.get("to_grade") or None,
+                        "from_grade": dimensions.get("from_grade") or None,
+                        "action": dimensions.get("action") or None,
+                    }
+                )
             elif metric in metric_to_key:
                 output[metric_to_key[metric]] = row["value"]
         order = lambda item: int(str(item[0]).removesuffix("m") or 0)
-        output["rating_trend"] = [item for _, item in sorted(rating.items(), key=order,
-                                                              reverse=True)]
+        output["rating_trend"] = [
+            item for _, item in sorted(rating.items(), key=order, reverse=True)
+        ]
         output["upgrades_downgrades"] = sorted(
-            actions, key=lambda item: item["date"], reverse=True)[:8]
+            actions, key=lambda item: item["date"], reverse=True
+        )[:8]
         return output
 
-    def consensus_quality(self, *, entity: str | None = None,
-                          as_of: datetime | None = None,
-                          now: datetime | None = None) -> dict:
+    def consensus_quality(
+        self,
+        *,
+        entity: str | None = None,
+        as_of: datetime | None = None,
+        now: datetime | None = None,
+    ) -> dict:
         from ..pipelines.structured.quality import consensus_quality
 
         rows = self.structured.observations(
-            dataset_id="market_consensus", source_id="yfinance_consensus",
-            entity_id=entity, as_of=as_of, latest_only=False,
-            accepted_only=True, limit=100_000)
+            dataset_id="market_consensus",
+            source_id="yfinance_consensus",
+            entity_id=entity,
+            as_of=as_of,
+            latest_only=False,
+            accepted_only=True,
+            limit=100_000,
+        )
         history = self.structured.ingestion_history(
-            source_id="yfinance_consensus", dataset_id="market_consensus", limit=1)
+            source_id="yfinance_consensus", dataset_id="market_consensus", limit=1
+        )
         dataset = self.structured.dataset("market_consensus") or {}
         settings = json.loads(dataset.get("quality_json") or "{}")
         return consensus_quality(
-            rows, now=now,
+            rows,
+            now=now,
             freshness_hours_max=float(settings.get("freshness_hours_max", 168)),
-            latest_ingestion_status=history[0]["status"] if history else "")
+            latest_ingestion_status=history[0]["status"] if history else "",
+        )
 
     def structured_conflicts(self, **filters) -> list[dict]:
         return self.structured.conflicts(**filters)
@@ -497,13 +1033,22 @@ class DataProducts:
         return self.structured.pending_mappings(**filters)
 
     def structured_ingestion_history(self, **filters) -> list[dict]:
-        return self.structured.ingestion_history(**filters)
+        runs = self.structured.ingestion_history(**filters)
+        source_id = filters.get("source_id")
+        if source_id:
+            checks = self.structured.source_checks(source_id=source_id, limit=filters.get("limit", 100))
+            return [{"record_type": "ingestion_run", **item} for item in runs] + [
+                {"record_type": "source_check", **item} for item in checks]
+        return runs
 
-    def structured_quality_report(self, *, dataset: str | None = None,
-                                  now: datetime | None = None) -> dict:
+    def structured_quality_report(
+        self, *, dataset: str | None = None, now: datetime | None = None
+    ) -> dict:
         from .reporting import build_quality_report
 
-        return build_quality_report(self.structured, dataset_id=dataset, now=now)
+        report = build_quality_report(self.structured, dataset_id=dataset, now=now)
+        report["source_health"] = self.structured.source_health()
+        return report
 
     def structured_artifact_usage(self, *, source: str | None = None) -> dict:
         return self.structured.artifact_usage(source_id=source)
@@ -511,25 +1056,32 @@ class DataProducts:
     def read_only_sql(self):
         return self.structured.open_read_only()
 
-    def snapshot_manifest(self, *, consumer: str, purpose: str,
-                          as_of: datetime, rows: list[dict],
-                          metadata: dict | None = None) -> dict:
+    def snapshot_manifest(
+        self,
+        *,
+        consumer: str,
+        purpose: str,
+        as_of: datetime,
+        rows: list[dict],
+        metadata: dict | None = None,
+    ) -> dict:
         items = []
         for row in rows:
-            lineage_ids = row.get("lineage_observation_ids") or [
-                row.get("observation_id", "")]
+            lineage_ids = row.get("lineage_observation_ids") or [row.get("observation_id", "")]
             for observation_id in lineage_ids:
-                items.append({
-                    "observation_id": observation_id,
-                    "selected_source": row.get("selected_source") or row.get("source_id", ""),
-                    "selection_reason": row.get("selection_reason", "explicit_input"),
-                    "derivation_id": row.get("derivation_id", ""),
-                    "derivation_version": row.get("derivation_version", ""),
-                    "input_mode": row.get("input_mode", "persistent"),
-                })
+                items.append(
+                    {
+                        "observation_id": observation_id,
+                        "selected_source": row.get("selected_source") or row.get("source_id", ""),
+                        "selection_reason": row.get("selection_reason", "explicit_input"),
+                        "derivation_id": row.get("derivation_id", ""),
+                        "derivation_version": row.get("derivation_version", ""),
+                        "input_mode": row.get("input_mode", "persistent"),
+                    }
+                )
         return self.structured.create_snapshot(
-            consumer=consumer, purpose=purpose, as_of=as_of,
-            items=items, metadata=metadata)
+            consumer=consumer, purpose=purpose, as_of=as_of, items=items, metadata=metadata
+        )
 
     def replay_snapshot(self, snapshot_id: str) -> dict | None:
         return self.structured.replay_snapshot(snapshot_id)
@@ -546,14 +1098,14 @@ class DataProducts:
             "runtime_replayable": False,
         }
 
-    def company_research_package(self, entity: str, *,
-                                 since: datetime | None = None) -> dict:
+    def company_research_package(self, entity: str, *, since: datetime | None = None) -> dict:
         """Shared facts plus task-specific views for one economic entity."""
         key = entity.upper()
         return {
             "entity": key,
             "documents": self.unstructured.documents(
-                entity=key, published_since=since.isoformat() if since else None, limit=1000),
+                entity=key, published_since=since.isoformat() if since else None, limit=1000
+            ),
             "measurements": self.structured.observations(entity_id=key, limit=2000),
             "facts": self.unstructured.facts(entity=key, since=since, limit=1000),
             # Workflow projections are deliberately memory outputs, not data products.
@@ -563,21 +1115,33 @@ class DataProducts:
     def claim_evidence_package(self, concept: str, *, limit: int = 500) -> dict:
         projections = self.unstructured.fact_projections(concept=concept, limit=limit)
         fact_ids = {p["fact_id"] for p in projections}
-        facts = {f["fact_id"]: f for f in self.unstructured.facts(
-            include_superseded=False, limit=max(limit * 4, 500)) if f["fact_id"] in fact_ids}
+        facts = {
+            f["fact_id"]: f
+            for f in self.unstructured.facts(include_superseded=False, limit=max(limit * 4, 500))
+            if f["fact_id"] in fact_ids
+        }
         return {
             "concept": concept,
             "evidence": [dict(p, fact=facts.get(p["fact_id"])) for p in projections],
             "missing_facts": sorted(fact_ids - set(facts)),
         }
 
-    def search_documents(self, query: str, *, entity: str | None = None,
-                         source_contains: str | None = None,
-                         published_since: str | None = None,
-                         limit: int = 20) -> list[dict]:
+    def search_documents(
+        self,
+        query: str,
+        *,
+        entity: str | None = None,
+        source_contains: str | None = None,
+        published_since: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
         return self.unstructured.search_document_chunks(
-            query, entity=entity, source_contains=source_contains,
-            published_since=published_since, limit=limit)
+            query,
+            entity=entity,
+            source_contains=source_contains,
+            published_since=published_since,
+            limit=limit,
+        )
 
     def health(self) -> dict:
         processing = self.unstructured.document_processing(limit=5000)
@@ -626,8 +1190,9 @@ class DataProducts:
 
         inventory = self.unstructured.document_quality_inventory()
         total_docs = sum(int(row["documents"] or 0) for row in inventory)
-        full_docs = sum(int(row["documents"] or 0) for row in inventory
-                        if row["completeness"] == "full")
+        full_docs = sum(
+            int(row["documents"] or 0) for row in inventory if row["completeness"] == "full"
+        )
         docs = self.unstructured.documents(limit=100_000)
         consistency_issues: list[dict] = []
         checked = 0
@@ -635,17 +1200,18 @@ class DataProducts:
             checked += 1
             version = self.unstructured.latest_document_version(row["document_id"])
             if version is None:
-                consistency_issues.append({
-                    "document_id": row["document_id"], "reason": "version_missing"})
+                consistency_issues.append(
+                    {"document_id": row["document_id"], "reason": "version_missing"}
+                )
                 continue
             body = document_assets.read_document(row["document_id"], store=self.unstructured)
             if not body:
-                consistency_issues.append({
-                    "document_id": row["document_id"], "reason": "read_mismatch"})
+                consistency_issues.append(
+                    {"document_id": row["document_id"], "reason": "read_mismatch"}
+                )
 
         accepted_candidates = sum(row.get("status") == "accepted" for row in candidates)
-        quarantined_candidates = sum(row.get("status") == "quarantined"
-                                     for row in candidates)
+        quarantined_candidates = sum(row.get("status") == "quarantined" for row in candidates)
 
         def ratio(passed: int, denominator: int) -> float | None:
             return round(passed / denominator, 6) if denominator else None
@@ -667,17 +1233,22 @@ class DataProducts:
                 for name, counts in candidate_check_counts.items()
             },
             "completeness": {
-                "documents": total_docs, "full": full_docs,
+                "documents": total_docs,
+                "full": full_docs,
                 "rate": ratio(full_docs, total_docs),
             },
             "source_lag": [
-                {"source_id": row["source_id"], "status": row.get("status"),
-                 "snapshot_updated_at": row.get("snapshot_updated_at"),
-                 "snapshot_lag_hours": row.get("snapshot_lag_hours")}
+                {
+                    "source_id": row["source_id"],
+                    "status": row.get("status"),
+                    "snapshot_updated_at": row.get("snapshot_updated_at"),
+                    "snapshot_lag_hours": row.get("snapshot_lag_hours"),
+                }
                 for row in self.unstructured.data_source_health()
             ],
             "read_consistency": {
-                "checked": checked, "passed": checked - len(consistency_issues),
+                "checked": checked,
+                "passed": checked - len(consistency_issues),
                 "rate": ratio(checked - len(consistency_issues), checked),
                 "issues": consistency_issues,
             },
@@ -687,7 +1258,17 @@ class DataProducts:
 
     def lineage(self, identifier: str) -> dict | None:
         structured = self.structured.lineage(identifier)
-        return structured if structured is not None else self.unstructured.projection_lineage(identifier)
+        if structured is not None:
+            return structured
+
+        projection_lineage = getattr(self.unstructured, "projection_lineage", None)
+        if callable(projection_lineage):
+            return projection_lineage(identifier)
+
+        # Preserve the lightweight legacy-store contract used by older callers
+        # that do not provide an unstructured projection repository.
+        legacy_lineage = getattr(self.store, "projection_lineage", None)
+        return legacy_lineage(identifier) if callable(legacy_lineage) else None
 
 
 def get_data_products() -> DataProducts:

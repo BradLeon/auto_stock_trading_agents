@@ -15,6 +15,7 @@ from ats.data.structured import (
     SQLiteStructuredRepository,
     SourceSelector,
     StructuredCatalog,
+    StructuredDataset,
 )
 
 
@@ -38,6 +39,16 @@ def _repo(tmp_path):
     repo = SQLiteStructuredRepository(
         tmp_path / "structured.sqlite", artifact_root=tmp_path / "artifacts")
     repo.bootstrap_catalog(StructuredCatalog.load())
+    # Keep source-selection tests independent from the production financial
+    # package availability order. These tests exercise the generic
+    # primary/fallback contract explicitly.
+    repo.register_dataset(StructuredDataset(
+        id="company_financials",
+        expected_cadence="quarterly_or_issuer_period",
+        primary_sources=["sec_companyfacts"],
+        fallback_sources=["defeatbeta_stock_statement"],
+        core_metrics=["financial.revenue.gaap"],
+    ))
     for source in ("sec_companyfacts", "defeatbeta_stock_statement"):
         repo.register_mapping(ProviderMapping(
             provider=source, provider_field="Revenue",

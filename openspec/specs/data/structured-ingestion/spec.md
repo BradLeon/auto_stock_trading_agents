@@ -64,6 +64,62 @@
 - **WHEN** 运维者对 IBKR 或 yfinance 行情类 runtime/excluded 来源执行隔离采集或发布
 - **THEN** 系统 SHALL 拒绝该操作并说明其不属于持久结构化数据集
 
+### Requirement: 退役来源以机器可读墓碑登记且不可被静默复活
+
+系统 SHALL 在机器配置中维护 `retired_sources` 注册表。每条墓碑 SHALL 记录 `source_id`、退役时间、退役原因、原定级、数据处置结果（明确区分「已清除」与「保留为孤儿」）与替代来源建议。注册校验 SHALL 对已退役 `source_id` fail-closed：它 SHALL NOT 被重新注册为活跃来源、SHALL NOT 出现在任何 discovery group、SHALL NOT 被默认全来源检查或统一采集入口选中；重新启用 SHALL 需要显式改写墓碑并走独立变更流程。墓碑 SHALL NOT 被当作活跃来源配置读取，也 SHALL NOT 因墓碑存在而使已清除数据重新出现在默认查询或可用来源统计中。
+
+#### Scenario: 尝试把已退役来源重新注册为活跃来源
+
+- **WHEN** 开发者把已有墓碑的 `source_id` 重新写入来源配置
+- **THEN** 注册校验 SHALL 失败并指出该 id 的退役时间、退役原因与数据处置结果
+- **AND** SHALL 提示必须显式改写墓碑并提交独立变更，而不是直接恢复注册
+
+#### Scenario: 全来源检查跳过退役来源
+
+- **WHEN** 运维者运行不带 source 过滤的统一 release check 或目录总览
+- **THEN** 输出 SHALL NOT 包含任何退役来源的 due、状态或可用覆盖行
+- **AND** 墓碑 SHALL 能独立查询并返回退役原因与数据处置结果
+
+#### Scenario: 墓碑解释库内仍有该来源的数据
+
+- **WHEN** 某退役来源的数据处置结果为「保留为孤儿」，而审计在库中仍查到该 `source_id` 的观测
+- **THEN** 目录与审计视图 SHALL 把该来源标注为已退役且数据未清除
+- **AND** SHALL NOT 把该来源计入活跃覆盖、可用数据集或可查询来源
+
+#### Scenario: 退役来源不参与 Observer 与报告
+
+- **WHEN** 任意 Evidence Observer、DataProduct 或人类报告枚举受治理输入
+- **THEN** 退役来源 SHALL NOT 出现在输入清单、方法卡或 coverage 统计中
+- **AND** 退役 SHALL NOT 改变任何在役来源的命题、状态或数值
+
+### Requirement: 来源数据清除必须显式确认且不隐式触发
+
+系统 SHALL 提供独立的来源数据清除入口，用于已退役来源的观测、序列、artifact 与来源检查记录的物理删除。该入口 SHALL 默认只读运行并报告待删除的行数、artifact 数量与字节数；只有同时提供目标 `source_id` 与显式确认参数时才执行删除。清除 SHALL 要求目标来源已登记退役墓碑，SHALL NOT 在采集、发布、回滚、目录同步或生命周期校验路径中被隐式触发。执行 SHALL 形成可查询的清除记录，至少包含 `source_id`、执行时间、操作者、各表删除行数、释放字节数、artifact 数量与是否已导出留存。清除 SHALL 同时移除该来源独占的 artifact blob 文件，与在役来源共享同一内容身份的 blob SHALL 保留。回滚与清除 SHALL 为不同语义：回滚保留 artifact、观测 vintage 与失败记录，清除则使其不可恢复。
+
+#### Scenario: 不提供确认参数时只做干跑
+
+- **WHEN** 运维者对一个已退役来源调用清除入口但不提供显式确认参数
+- **THEN** 系统 SHALL 只读返回待删除的观测数、序列数、artifact 数、artifact 字节数与来源检查记录数
+- **AND** SHALL NOT 修改任何行、任何 blob 或任何发布状态
+
+#### Scenario: 没有退役墓碑的来源不能被清除
+
+- **WHEN** 运维者对仍在役的来源调用清除入口并提供了确认参数
+- **THEN** 系统 SHALL 拒绝执行并说明该来源没有退役墓碑
+- **AND** SHALL NOT 删除该来源的任何行或 artifact
+
+#### Scenario: 显式确认后完成清除并留下审计记录
+
+- **WHEN** 运维者对已登记墓碑的来源提供显式确认参数
+- **THEN** 系统 SHALL 删除该来源的观测、序列、artifact 与来源检查记录，并移除其独占的 artifact blob
+- **AND** SHALL 写入包含各表删除行数、释放字节数与 artifact 数量的清除记录，供后续审计
+
+#### Scenario: 常规运行路径不隐式清除数据
+
+- **WHEN** 统一采集、发布、回滚、并发探测或目录同步路径遇到一个已退役来源
+- **THEN** 这些路径 SHALL 只跳过或拒绝该来源并记录可解释状态
+- **AND** SHALL NOT 删除其任何已保存的观测、artifact 或来源检查记录
+
 ### Requirement: 原始来源版本在标准化之前被不可变保留
 
 系统 SHALL 在标准化前保存原始响应、来源原生切片或足以复现该次查询的不可变快照，并记录内容身份、来源快照版本和获取时间。相同内容可去重，修订内容 SHALL 形成新版本；若授权条款不允许保存完整响应，系统 SHALL 保存允许范围内的来源指针、查询条件、内容摘要和可复现元数据，并显式标记保存限制。
@@ -221,3 +277,218 @@
 - **WHEN** 某来源切换后连续违反质量阈值
 - **THEN** 系统 SHALL 能将该来源或消费者恢复到上一读取路径
 - **AND** 新平台中已获取的版本和失败记录 SHALL 继续用于审计
+
+### Requirement: 同一采集批次中的记录精确绑定命名 artifact slice
+
+结构化适配器 SHALL 为每个 artifact 提供批次内唯一、稳定的 artifact key，并为每条 observation input 和 relation input 提供对应 slice key。Pipeline SHALL 仅把记录绑定到 key 精确匹配的 artifact；slice key 缺失、重复或不存在时，相关记录 SHALL 被隔离并产生校验失败，SHALL NOT 回退到批次中的第一个 artifact。
+
+#### Scenario: 两个产品位于同一批次
+- **WHEN** 一个适配器批次同时返回 Claude.ai 与 1P API artifacts 和 observations
+- **THEN** 每条 observation SHALL 绑定其 source product 对应 artifact
+- **AND** 任一产品的 observation SHALL NOT 指向另一个产品 artifact
+
+#### Scenario: observation 引用未知 slice key
+- **WHEN** observation input 的 slice key 在批次 artifact keys 中不存在
+- **THEN** 该 observation SHALL 被隔离并记录 missing artifact mapping
+- **AND** Pipeline SHALL NOT 自动使用首个或任意其他 artifact
+
+#### Scenario: artifact key 重复
+- **WHEN** 同一批次返回两个相同 artifact key
+- **THEN** 批次 SHALL 在发布前失败 key 唯一性校验
+- **AND** 受影响记录 SHALL NOT 被赋予不确定血缘
+
+### Requirement: 适配器可以返回 reference entities 和 versioned relations
+
+结构化采集契约 SHALL 允许适配器除 observations 与 artifacts 外返回 reference entities 和 entity relations。每条 relation SHALL 明确 dataset、source、parent entity、child entity、relation type、source version、known time、artifact key 和可选 metadata，并在实体准入成功后才能发布。
+
+#### Scenario: 同批次发布 SOC 与 task 层级
+- **WHEN** taxonomy slice 返回 major group、occupation、task entities 及父子关系
+- **THEN** Pipeline SHALL 先准入或确认全部引用实体，再发布有效 relations
+- **AND** 每条 relation SHALL 绑定产生该关系的 taxonomy artifact
+
+#### Scenario: relation 引用未知实体
+- **WHEN** relation 的 parent 或 child entity 无法从已存实体或本批次 reference entities 解析
+- **THEN** 该 relation SHALL 被隔离并显示 entity resolution failure
+- **AND** SHALL NOT 创建悬空关系或静默丢弃失败信息
+
+### Requirement: 实体关系按来源版本追加且保持幂等
+
+系统 SHALL 以 dataset、source、父实体、子实体、关系类型和来源版本的内容身份保存关系。完全相同的关系重跑 SHALL 幂等去重；来源版本、关系目标或 metadata 发生有效变化时 SHALL 追加新关系版本而不覆盖旧版本，并保留 known time 和准确 artifact 血缘。
+
+#### Scenario: taxonomy 重跑无变化
+- **WHEN** 相同 taxonomy 版本产生完全相同的实体关系集合
+- **THEN** 系统 SHALL 不新增重复 relation rows
+- **AND** 运行结果 SHALL 可报告 `no_change`
+
+#### Scenario: taxonomy 发布新版本
+- **WHEN** 新来源版本改变某 task 的 occupation 归属
+- **THEN** 系统 SHALL 追加新版本关系并保留旧关系
+- **AND** SHALL 能按 known time 区分两个版本
+
+### Requirement: 多 slice 运行支持独立准入与部分成功
+
+一个数据源运行包含多个相互独立的命名 slices 时，系统 SHALL 分别保存下载、解析、质量和发布状态。单一 slice 失败 SHALL NOT 阻止不依赖该 slice 且已通过全部质量门的其他 slice；总体运行 SHALL 清楚表达 partial，而非完全成功或完全失败。
+
+#### Scenario: observation slice 通过但 taxonomy slice 失败
+- **WHEN** 月度 observation slice 本身有效，但其必需 taxonomy 依赖未达到关系准入门槛
+- **THEN** 依赖该 taxonomy 的 observation SHALL 不得发布为完整可查询结果
+- **AND** 不依赖该失败 taxonomy 的独立 slice MAY 按声明的依赖图继续发布
+
+#### Scenario: 一个 source product schema 漂移
+- **WHEN** 多产品批次中只有一个产品违反 schema 契约
+- **THEN** 该产品 slice SHALL 为 `validation_failed`，通过的产品 SHALL 可发布
+- **AND** 总体运行 SHALL 为 `partial` 并保留逐 slice 状态
+
+### Requirement: 正式结构化数据只使用一个物理 repository
+结构化采集 CLI、主动发现协调器、DataProducts 和 Evidence Observer SHALL 通过同一 repository factory 使用 `ATS_DATA_DB_PATH` 与 `ATS_DATA_ARTIFACT_ROOT`；默认正式路径 SHALL 为 `var/data.sqlite` 与 `var/data_artifacts`。隔离测试 MAY 显式传入临时路径，但生产发布 SHALL NOT 通过在 `ats.sqlite`、临时库与正式库之间复制表完成。旧变量只可作为显式兼容入口，且不得覆盖已经设置的正式变量。
+
+#### Scenario: 同一命令采集后立即运行 Observer
+- **WHEN** 操作者未指定测试 repository，依次运行 release-check/ingest 和 L1 Evidence
+- **THEN** 两者 SHALL 写入并读取同一个正式 SQLite 与 artifact root
+- **AND** SHALL NOT 产生第二份结构化 observations 或要求跨库复制
+
+### Requirement: 来源注册驱动主动发现与增量更新
+结构化数据平台 SHALL 允许来源声明 discovery adapter、检查频率、业务 cadence、release identity、可变 metadata 指针、不可变 artifact 身份和条件模块规则。统一调度入口 SHALL 对到期来源执行发现，只有在新 release、new period 或历史修订出现时才拉取与准入内容；同一机制 SHALL 覆盖全部已注册的活跃来源，包括 Anthropic Economic Index、Census BTOS、RPS/FRED 等分属不同 cadence 的来源，并 SHALL 完全跳过已退役来源。
+
+#### Scenario: 多来源按各自 cadence 到期
+- **WHEN** 每周统一 discovery 运行，而 Anthropic 为 release-event、BTOS 为双周、RPS 为季度、frontier capability 为每 7 天
+- **THEN** 系统 SHALL 分别执行各来源的 due-check 和 source-native discovery
+- **AND** SHALL NOT 将低频或未承诺发布日期的来源仅因没有新数据标记为 stale
+
+#### Scenario: 退役来源不被统一发现选中
+- **WHEN** 统一 discovery 按 due-check 枚举到期来源
+- **THEN** 已登记墓碑的来源 SHALL NOT 进入候选集合，也 SHALL NOT 产生新的 artifact、观测或 vintage
+- **AND** 其余活跃来源的发现结果 SHALL NOT 受该跳过影响
+
+### Requirement: 主动发现保存可审计的检查状态
+每次来源检查 SHALL 保存 `last_checked_at`、候选 release identity、latest upstream identity、latest ingested identity、latest available period、检查结果、请求/文件内容身份和错误上下文。`no_change`、`not_yet_published`、`question_not_fielded`、`methodology_break`、`unreachable`、`validation_failed` 和 `succeeded` SHALL 为不同状态。
+
+#### Scenario: ONS 新 wave 没有 AI 模块
+- **WHEN** ONS BICS 发布新 workbook 但受支持 AI 问题未出现
+- **THEN** discovery SHALL 记录 `question_not_fielded` 并更新 last checked 状态
+- **AND** SHALL NOT 创建空 observations、零值或虚假的 stale 告警
+
+### Requirement: 发现和采集按来源及 slice 隔离失败
+统一更新 SHALL 为每个 source 和 source-native slice 保持独立状态、artifact 和发布边界。一个来源不可达、一个 series 修订失败或一个条件模块漂移 SHALL NOT 阻止其他来源的有效更新；整体运行 SHALL 返回逐来源结果和可解释的 partial 状态。
+
+#### Scenario: BTOS 成功而 FRED 暂时不可达
+- **WHEN** 同一更新批次发现 BTOS 新 period 并成功入库，但 FRED 请求失败
+- **THEN** BTOS observations SHALL 可独立发布，FRED SHALL 保留最近成功版本
+- **AND** 总体 SHALL 返回 partial 及两个来源各自状态
+
+### Requirement: 并发检查保持幂等且不重复发布
+相同 source/release identity 的并发或重复 discovery SHALL 通过来源级互斥和内容身份收敛为一个有效采集结果。完全相同内容 SHALL 记录 `no_change`，历史值变化 SHALL 追加 vintage；任何路径 SHALL NOT 覆盖旧 artifact 或生成重复 observation。
+
+#### Scenario: 调度与人工更新同时发现同一 BTOS period
+- **WHEN** 两个运行同时处理同一官方 period 和响应内容
+- **THEN** 系统 SHALL 最多发布一组内容相同的 observations
+- **AND** 两次运行记录 SHALL 可审计地指向同一 artifact 或一个成功、一个 no-change 结果
+
+### Requirement: 统一 release check 可独立运行和按来源过滤
+运维者 SHALL 能通过同一 discovery/release-check 入口检查全部已启用来源或只检查指定 source/dataset，并能选择仅发现或发现后采集。只读检查 SHALL NOT 改变发布状态；自动采集 SHALL 仍执行来源 schema、质量和 lineage 门。
+
+#### Scenario: 只检查 AI adoption 来源
+- **WHEN** 运维者请求仅检查 `ai_adoption` group 的来源
+- **THEN** 系统 SHALL 返回该 group 中全部已注册活跃来源（当前为 Anthropic Economic Index、Census BTOS、RPS/FRED、Ramp AI Index）的 due、latest upstream、latest ingested 和可操作状态
+- **AND** 已退役来源 SHALL NOT 出现在任何 group 检查结果、默认全来源检查或可操作状态列表中
+- **AND** SHALL NOT 运行或改变无关财务、行情或其他 Observer 来源
+
+### Requirement: 结构化适配器支持官方网页图表导出作为可治理输入
+结构化来源适配器 SHALL 能把可见官方图表的机器可读导出（包括剪贴板 TSV）作为 source-native artifact，保存导出方法、页面 URL、图表/查询身份、原始 payload 哈希和读取权限状态。网页渲染成功但导出不可读 SHALL 是独立的 `export_unreadable`，SHALL NOT 通过截图或 OCR 绕过结构化准入。
+
+#### Scenario: 剪贴板 TSV 进入共享层
+- **WHEN** 浏览器从官方 `Get the data` 控件读取 TSV
+- **THEN** 适配器 SHALL 以字节级 payload 建立 artifact identity 并交给统一 pipeline
+- **AND** SHALL 保留页面控件与图表 slug 作为 provenance
+
+#### Scenario: 导出权限失败
+- **WHEN** 页面可见但浏览器无权读取剪贴板，且本地没有已经保存的官方 fixture
+- **THEN** 对应 slice SHALL 进入明确的 `export_unreadable` 状态
+- **AND** SHALL 不把旧值复制成新 release 或伪造 no_change
+
+### Requirement: 结构化运行支持同一来源的多 chart slice 独立发布
+一个来源运行中不同 chart/dataset slice SHALL 拥有独立 artifact key、quality result 和 publish status。某一图表失败 SHALL 不阻止不依赖它的 slice 发布；跨 slice 派生 SHALL 只有在显式声明相同统计主体、分母和 methodology regime 后才允许。
+
+#### Scenario: Spend slice 失败而 adoption 成功
+- **WHEN** spend per employee 导出损坏但 Overall adoption 导出质量通过
+- **THEN** adoption SHALL 可发布，运行总状态 SHALL 为 `partial`
+- **AND** spend SHALL 保留失败 artifact/diagnostic 而不被空值替换
+
+### Requirement: 结构化采集必须支持事件驱动网页指标的定期发现
+结构化数据平台 SHALL 支持对没有固定 release 文件、但会在公开公司页面更新的低频指标执行配置化周期探测。探测 SHALL 比较 source-native 参考期间、内容指纹、解析 schema 和方法文本；无变化 SHALL 记录 `no_change`，新期间 SHALL 增量追加，同期间变更 SHALL 保存 revision vintage，方法漂移 SHALL 阻止新版本自动进入正式数据。
+
+#### Scenario: 定期检查未发现新收入数据
+- **WHEN** Sacra 页面收入观察、引用和内容指纹与最近成功探测一致
+- **THEN** 运行 SHALL 返回 `no_change` 且不新增 artifact 或 observation
+- **AND** 已发布数据和报告重放 SHALL 保持不变
+
+### Requirement: 首次正式发布可以由完整验收直接完成
+对于配置为 `publish_after_acceptance` 的新结构化来源，平台 SHALL 在首次端到端采集、质量、查询、lineage 与 replay 验收全部通过后直接将通过质量门的数据发布为 `platform`，而不要求预先存在 shadow 数据集。后续失败或方法漂移 SHALL 只隔离候选 revision，并保留最近有效 platform vintage。
+
+#### Scenario: 新收入数据集完成验收
+- **WHEN** Frontier AI Labs 收入数据的规定验收全部通过
+- **THEN** source 与 dataset SHALL 可直接成为 platform 可查询数据
+- **AND** 后续报告 SHALL 只读统一存储而不在渲染时重新采集
+
+### Requirement: 不同公开来源使用不同的增量更新检测
+结构化采集 SHALL 按来源载体选择条件更新策略：Git 来源比较 remote HEAD、commit/blob SHA 与文件 hash；公开 JSON 比较 ETag/Last-Modified 与规范化 payload hash；README/Markdown 表格比较 commit、解析区间和表格 hash；公开 HTML/服务端结构化载荷比较 URL、结构/schema 指纹与规范化内容 hash；论文、release 和 model card 事件比较文档版本与引用切片 hash。一次运行 SHALL 先获取来源批次再本地解析，避免按模型逐一请求。
+
+#### Scenario: 免费公开来源替代付费 API
+- **WHEN** Artificial Analysis API 未授权或返回 entitlement failure
+- **THEN** 采集 SHALL 继续探测已注册的官方 Git/JSON/README 来源
+- **AND** 只有真实公开结果可解析时才写入 observation，否则写 coverage state
+
+#### Scenario: 公开结构化页面低频探测
+- **WHEN** 来源没有免费 API 但公开页面提供无需登录的结构化数据载荷，且许可门禁允许自动访问
+- **THEN** 采集 SHALL 使用低频条件探测、请求预算和 parser drift 检查保存原始 artifact
+- **AND** 若许可或结构检查失败 SHALL fail closed，保留最近有效值并创建来源状态，不得绕过访问控制
+
+### Requirement: 事件型评测结果独立于统一矩阵增量入库
+对于 AutomationBench、OSWorld、SpreadsheetBench 2 等由 release、model card、论文或不同公开设置零散披露的结果，结构化采集 SHALL 追加带完整评测指纹的事件 observation，并将其与统一第三方矩阵分开。新事件 SHALL 触发受影响 benchmark 的重算，但 SHALL NOT 改写其他 comparability group 的当前值。
+
+#### Scenario: 厂商发布新的不同 harness 分数
+- **WHEN** Lab release 披露一个真实分数但其 harness 与默认第三方横截面不一致
+- **THEN** 系统 SHALL 追加 `lab_self_reported` 事件及独立 comparability group
+- **AND** 默认统一矩阵 SHALL 保持原值或 NA，并在报告事件账本中展示该证据
+
+### Requirement: 夹具只能用于解析测试
+带有 `fixture=true`、测试路径或 synthetic 标记的 artifact SHALL 被标记为 test-only，不得进入 platform 默认数据集、正式报告或 frontier 选择。正式入库必须具有可访问的公开来源 URL/仓库身份与内容 hash。
+
+#### Scenario: 测试夹具通过解析
+- **WHEN** 测试用 fixture 能够完整解析十一乘九矩阵
+- **THEN** 测试 SHALL 验证 contract、NA 和方法校验
+- **AND** platform release SHALL 拒绝该 fixture 作为正式数据
+
+### Requirement: 不规则发布的数据源支持发现、热观察和兜底审计
+结构化采集 SHALL 允许数据集分别声明实体发现频率、数据更新频率、发现后热观察窗口、降频窗口、全量审计频率和新鲜度阈值。发现任务与数据任务 SHALL 独立记录状态；新实体或新版本出现时 SHALL 能动态提高相关切片的探测频率，并在热观察期结束后按声明规则降频。
+
+#### Scenario: 新模型触发热观察
+- **WHEN** 每日模型发现任务确认一个新的 eligible flagship
+- **THEN** 结构化调度 SHALL 为该模型创建热观察窗口并按窗口频率检查关联 benchmark
+- **AND** 其他历史模型 SHALL 保持其正常探测频率
+
+#### Scenario: 周度全量审计发现漏过的变化
+- **WHEN** 增量探测没有产生事件但周度全量快照与上次内容 hash 不同
+- **THEN** 系统 SHALL 生成差异事件并进入正常解析、校验和 vintage 流程
+- **AND** SHALL 记录增量路径的 coverage miss 供运维修复
+
+### Requirement: 方法论变化必须与数值变化分别检测
+对声明为方法敏感的数据集，采集 SHALL 同时保存并比较方法论文档、任务集、harness、grader、评分语义和版本信息。无法判定影响范围的方法论变化 SHALL 在新数据发布前触发隔离或人工审阅；数值未变 SHALL NOT 使方法论变化被忽略。
+
+#### Scenario: 分数不变但 grader 被替换
+- **WHEN** 来源方法论显示 grader model 已更换而页面分数暂时相同
+- **THEN** 系统 SHALL 保存新的方法论 artifact 并产生 method-changed event
+- **AND** 受影响成绩 SHALL NOT 继续被默认视为同一可比系列，除非兼容规则明确允许
+
+### Requirement: 预期观测可以保存语义化覆盖状态
+对于预先知道应当存在的实体×指标或实体×benchmark 单元，平台 SHALL 能在没有数值时保存带来源、原因、首次观察时间、最后检查时间和下一次检查计划的 coverage state。缺失状态 SHALL 与 observation 数值分离并可随来源变化追加历史，不得以零值模拟缺失。
+
+#### Scenario: 预期成绩仍未发布
+- **WHEN** 数据产品预期某模型应有一项评测但当前来源没有结果
+- **THEN** 系统 SHALL 保存 `pending_publication` 或 `not_evaluated` coverage state
+- **AND** 默认数值查询 SHALL 返回无值及该原因
+
+#### Scenario: 撤回已发布成绩
+- **WHEN** 来源删除或明确撤回先前的 benchmark 成绩
+- **THEN** 系统 SHALL 追加 `withdrawn` coverage state 并保留原 observation vintage
+- **AND** 最新默认视图 SHALL 不再把已撤回值作为有效当前成绩

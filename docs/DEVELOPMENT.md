@@ -12,10 +12,13 @@
 
 ```bash
 cd /Users/liuchao/Code/trading/auto_stock_trading_agents
-uv venv                                    # 创建 .venv/（就在仓库根目录下）
-source .venv/bin/activate                  # 激活
-uv pip install -e ".[data,broker,memory,schedule,memory_persist,channel,dev]"
+uv sync --python 3.12 \
+  --extra data --extra broker --extra schedule --extra memory-persist \
+  --extra channel --extra dev                # 创建/同步根目录 .venv，并遵循 uv.lock
+source .venv/bin/activate                   # 可选：之后可直接使用 ats / pytest
 ```
+
+不要以 `uv pip install -e ...` 或 `pip install ...` 替代 `uv sync`；它们可能让本机环境偏离锁文件。`memory` extra 的 `chromadb` 尚未接入，不应使用 `--all-extras` 作为当前默认命令。若只部署研究任务而不运行完整开发/CI 套件，可用 `uv sync --python 3.12 --extra data --extra schedule --extra memory-persist`，并按需加 `--extra broker`、`--extra channel`。
 
 `.venv` 的位置就是 `<仓库根>/.venv`——不会在别的地方，`source .venv/bin/activate`
 必须在仓库根目录下执行。

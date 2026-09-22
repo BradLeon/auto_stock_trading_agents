@@ -42,15 +42,18 @@ def _legacy_database(path):
 
 
 def test_legacy_documents_and_observations_upgrade_without_data_loss(tmp_path):
+    """Legacy rows must survive the upgrade — in the data layer, where they now live.
+
+    Workflow memory drops `evidence_observations` and `source_documents` as part of the
+    boundary decision, so the legacy content is only preserved because the migration
+    promotes it across the boundary into `data_evidence_*` / `data_document_*`. Reading
+    the local tables here would assert against rows that are gone by design.
+    """
     path = tmp_path / "legacy.sqlite"
     body_hash = _legacy_database(path)
 
     store = TradingMemory(path)
 
-    legacy = store.conn.execute(
-        "SELECT * FROM evidence_observations WHERE id='legacy-observation'"
-    ).fetchone()
-    assert legacy is not None and legacy["evidence_span"] == "inference demand increased"
     version = store.latest_document_version("AMD:2026Q2:transcript")
     assert version is not None and version["content_hash"] == body_hash
     runs = store.document_processing("AMD:2026Q2:transcript")
@@ -59,6 +62,7 @@ def test_legacy_documents_and_observations_upgrade_without_data_loss(tmp_path):
     facts = store.facts(entity="AMD")
     projections = store.fact_projections(profile="legacy-evidence")
     assert len(facts) == len(projections) == 1
+    assert facts[0]["evidence_span"] == "inference demand increased"
     assert facts[0]["document_version_id"] == version["version_id"]
     assert projections[0]["legacy_observation_id"] == "legacy-observation"
     assert {r["key"] for r in store.conn.execute("SELECT key FROM data_migrations")} >= {
@@ -78,17 +82,31 @@ def test_later_documents_are_not_mislabelled_as_legacy_chain_work(tmp_path):
     path = tmp_path / "legacy.sqlite"
     _legacy_database(path)
     store = TradingMemory(path)
-    store.conn.execute(
-        "INSERT INTO source_documents "
-        "(document_id,entity,period,doc_type,source,source_url,local_path,sha256,chars,ok,"
-        " note,fetched_at,external_id,title,published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("SEMIANALYSIS:new:article", "SEMIANALYSIS", "new", "article", "newsletter",
-         "https://example.test/new", "/tmp/new.txt", hashlib.sha256(b"new").hexdigest(),
-         3, 1, "", "2026-08-19T00:00:00+00:00", "new", "New", "2026-08-19"),
-    )
-    store.conn.commit()
+    _add_document_after_the_backfill(store)
     store.conn.close()
 
     reopened = TradingMemory(path)
     assert reopened.latest_document_version("SEMIANALYSIS:new:article") is not None
     assert reopened.document_processing("SEMIANALYSIS:new:article") == []
+
+
+def _add_document_after_the_backfill(store) -> None:
+    """Acquire a document the way a later run would — through the data layer."""
+    data = store.data_store()
+    stamp = "2026-08-19T00:00:00+00:00"
+    body_hash = hashlib.sha256(b"new").hexdigest()
+    data.conn.execute(
+        "INSERT OR REPLACE INTO data_documents "
+        "(document_id,entity,period,doc_type,source,source_url,local_path,sha256,chars,"
+        " ok,note,fetched_at,external_id,title,published_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("SEMIANALYSIS:new:article", "SEMIANALYSIS", "new", "article", "newsletter",
+         "https://example.test/new", "/tmp/new.txt", body_hash, 3, 1, "", stamp,
+         "new", "New", "2026-08-19"))
+    data.conn.execute(
+        "INSERT OR IGNORE INTO data_document_versions "
+        "(version_id,document_id,content_hash,local_path,chars,source_url,fetched_at,"
+        " created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (f"SEMIANALYSIS:new:article@{body_hash[:16]}", "SEMIANALYSIS:new:article",
+         body_hash, "/tmp/new.txt", 3, "https://example.test/new", stamp, stamp))
+    data.conn.commit()

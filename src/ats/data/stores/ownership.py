@@ -14,6 +14,11 @@ DATA_LAYER_TABLES = frozenset({
 WORKFLOW_MEMORY_TABLES = frozenset({
     "cycles", "decisions", "trades", "performance", "pead_dossier", "pead_events",
     "research_articles", "research_insights", "task_projections", "claim_proposals",
+    # The unified agent-output envelope is Workflow memory, not a data product:
+    # it carries opinions (role, model and prompt versions, scope, as_of) rather than
+    # neutral evidence, so it sits here next to `task_projections` — which it will
+    # eventually replace.
+    "task_projection_envelopes",
     "claim_assessments", "sector_reviews", "macro_reviews",
     "technical_reviews", "fills", "risk_reviews", "score_consumption", "pead_periods",
     "pead_score_runs", "journal_entries", "journal_meta", "predictions",

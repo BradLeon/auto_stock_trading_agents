@@ -953,6 +953,11 @@ CPython 3.12.12。
 （缺少 APScheduler、pandas-market-calendars 与 LangGraph SQLite checkpointer）方向正确，
 但修复方式是使用项目既有的 `uv` 完整依赖入口，而不是新增一套安装方式。
 
+**入口与测量纪律**：唯一入口为 `./scripts/run_tests.sh`（`uv sync --all-extras` +
+`uv run pytest`）。测量条件（命令、依赖范围、执行环境限制与影响范围）与「环境性失败 vs 业务回归」
+的判据记在 [`docs/TEST_BASELINE.md`](TEST_BASELINE.md)——引用本节的任何基线数字时，必须连同
+那里的测量条件一起读。
+
 ### 15.2 Chief—Risk—Boss—Trader
 
 - 首轮风控通过、一次驳回后通过、多次驳回后通过、全部驳回和超过 3 轮。

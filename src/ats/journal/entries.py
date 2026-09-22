@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import logging
 
+from ..schemas.decision import action_direction
+
 log = logging.getLogger("ats.journal")
 
 # Fallback risk units, used when the Chief declares no stop. Recorded in
@@ -196,6 +198,7 @@ def _slippage_bps(entry) -> float | None:
     if not (entry.avg_fill_price and entry.limit_price):
         return None
     diff = entry.avg_fill_price - entry.limit_price
-    if entry.action in ("sell", "trim"):
+    # 减仓方向由统一词表判定：未知取值抛错，不会被当成加仓记进统计。
+    if action_direction(entry.action, where="journal._slippage_bps") < 0:
         diff = -diff                     # paying up is negative for a sell too
     return round(diff / entry.limit_price * 10_000, 1)

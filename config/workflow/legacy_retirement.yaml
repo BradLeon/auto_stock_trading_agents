@@ -1,0 +1,142 @@
+# 旧实现退役登记处（workflow/legacy-retirement）
+#
+# 退出旧实现的唯一合法路径：墓碑登记 → fail-closed 读取门 → 两段式清除。
+# `active` 是当前在用清册；`retired` 是墓碑。同一标识若在 `retired` 中状态为
+# `retired` 且仍出现在 `active` 里，加载即失败（两处并存不允许静默取胜）。
+#
+# 本阶段（Phase A）只登记；除标注 `status: retired` 者外不执行任何删除，
+# 且本阶段不执行任何物理清除（审计记录为空）。
+
+active:
+  - task_projections
+  - evidence_fact_projections.legacy_observation_id
+  - scheduler.hardcoded_serial_run
+  - pead_dossier
+  - sector_reviews
+  - macro_reviews
+  - technical_reviews
+
+retired:
+  # ── 本阶段退出 ────────────────────────────────────────────────────────────
+  - identifier: workflow_memory.evidence_observations
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_observations
+    target_phase: A
+    status: retired
+    exit_condition: >-
+      写侧 cutover 完成：四条调用路径（调度观察、chain/sources、chain/articles、命令行）
+      全部经 TradingMemory.data_store() 改指数据层，且数据层读入口能按同一标识与血缘读回。
+    consumers:
+      - scheduler.observe
+      - chain.sources
+      - chain.articles
+      - runtime.cli
+    consumer_zero_criterion: >-
+      四条路径均无旁路写入；src 内除 _SCHEMA / _retire_data_tables / _migrate /
+      _migrate_shared_facts 与 ownership.py 边界登记表外不再出现该表名。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  - identifier: workflow_memory.evidence_facts
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_facts
+    target_phase: A
+    status: retired
+    exit_condition: 写侧 cutover 完成，事实写入经 save_evidence_observation 落到数据层。
+    consumers:
+      - chain.evidence
+      - scheduler.observe
+    consumer_zero_criterion: 无代码再引用该表名（同 evidence_observations 的扫描判据）。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  - identifier: workflow_memory.evidence_fact_projections
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_projections
+    target_phase: A
+    status: retired
+    exit_condition: 写侧 cutover 完成，投影与事实在同一事务写入数据层。
+    consumers:
+      - chain.evidence
+      - memory.store.projection_lineage
+    consumer_zero_criterion: 血缘解析改由数据层解析两族投影。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  - identifier: workflow_memory.evidence_failures
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_failures
+    target_phase: A
+    status: retired
+    exit_condition: save_observation_failure 改指数据层。
+    consumers:
+      - chain.sources
+      - chain.articles
+    consumer_zero_criterion: 无代码再引用该表名。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  # ── 待退（条件未满足，本阶段只登记） ──────────────────────────────────────
+  - identifier: task_projections.legacy_columns
+    capability_domain: agent/task-projection
+    replaced_by: task_projection_envelopes
+    target_phase: D
+    status: pending
+    exit_condition: 读取方全部切换到 task_projection_envelopes，且旧表在新写路径中零写入。
+    missing_condition: >-
+      旧列的读取方（store.projection_lineage 同时解析两个投影族、tests/test_fact_projections.py）
+      尚未切换；本阶段只登记，不删除任何旧列。
+    consumers:
+      - memory.store.projection_lineage
+      - tests/test_fact_projections
+    consumer_zero_criterion: 上述读取方全部改为读 task_projection_envelopes，且旧表零写入。
+    location: src/ats/memory/store.py:337-343
+
+  - identifier: evidence_fact_projections.legacy_observation_id
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_projections
+    target_phase: D
+    status: pending
+    exit_condition: 历史观测标识不再被任何读取方引用。
+    missing_condition: 迁移期兼容读仍按 legacy_observation_id 回溯旧观测，消费方未清零。
+    consumers:
+      - memory.store.fact_projections
+      - tests/test_data_migrations
+    consumer_zero_criterion: 无读取方再按该列查询。
+    location: 数据层 data_evidence_projections
+
+  - identifier: scheduler.hardcoded_serial_run
+    capability_domain: workflow/run-contracts
+    replaced_by: workflow.run_contracts.TaskRegistry + Dispatcher
+    target_phase: E
+    status: pending
+    exit_condition: 任务注册表与依赖解析上线并通过验收，Dispatcher 接管阶段编排。
+    missing_condition: >-
+      Dispatcher 运行时属 Phase E，本阶段只定义契约与注册表结构，未接线任何调度执行路径。
+    consumers:
+      - runtime.scheduler
+      - tests/test_scheduler_jobs
+    consumer_zero_criterion: 调度入口不再以硬编码顺序表达阶段依赖。
+    location: src/ats/runtime/scheduler.py
+
+  - identifier: legacy_read_models
+    capability_domain: agent/task-projection
+    replaced_by: task_projection_envelopes + 角色专用 payload
+    target_phase: D
+    status: pending
+    exit_condition: 新写路径稳定，且旧报表与 CLI 消费方迁移完成。
+    missing_condition: >-
+      pead_dossier / sector_reviews / macro_reviews / technical_reviews 仍是活动兼容读模型，
+      报表与 CLI 消费方尚未迁移到 envelope。
+    consumers:
+      - runtime.cli
+      - channel.context
+    consumer_zero_criterion: 旧报表与 CLI 全部改为读 envelope，兼容写入登记退役条件后清零。
+    location: Workflow memory
+
+# 干跑用的清除影响范围声明（未确认时只报告，不执行）
+purge_scope:
+  - identifier: task_projections.legacy_columns
+    scope:
+      - task_projections.profile
+      - task_projections.profile_version
+      - task_projections.input_kind
+      - task_projections.input_ref
+      - task_projections.target_type
+      - task_projections.target_id

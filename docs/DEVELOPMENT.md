@@ -18,7 +18,14 @@ uv sync --python 3.12 \
 source .venv/bin/activate                   # 可选：之后可直接使用 ats / pytest
 ```
 
-不要以 `uv pip install -e ...` 或 `pip install ...` 替代 `uv sync`；它们可能让本机环境偏离锁文件。`memory` extra 的 `chromadb` 尚未接入，不应使用 `--all-extras` 作为当前默认命令。若只部署研究任务而不运行完整开发/CI 套件，可用 `uv sync --python 3.12 --extra data --extra schedule --extra memory-persist`，并按需加 `--extra broker`、`--extra channel`。
+不要以 `uv pip install -e ...` 或 `pip install ...` 替代 `uv sync`；它们可能让本机环境偏离锁文件。
+
+**测试/CI 的依赖范围与部署的依赖范围是两件事**：运行测试与取得基线数字时，请用唯一入口
+`./scripts/run_tests.sh`（内部执行 `uv sync --all-extras` + `uv run pytest`），它会一次装入**全部**
+可选分组——包括 `memory`（chromadb）。测试基线数字只有在「命令 + 依赖范围 + 执行环境条件」三者
+固定时才可复核。部署机则继续按角色挑选分组：`uv sync --python 3.12 --extra data --extra schedule
+--extra memory-persist`，并按需加 `--extra broker`、`--extra channel`；`memory` 的 chromadb 仍未接入
+运行时，装它只是为了让测试面完整，不代表部署依赖。
 
 `.venv` 的位置就是 `<仓库根>/.venv`——不会在别的地方，`source .venv/bin/activate`
 必须在仓库根目录下执行。
@@ -218,7 +225,16 @@ claims:
 - 测试文件命名 `test_<module>.py`，与被测模块一一对应；新模块加测试时先看
   同目录有没有已存在的 fixture 可以复用（尤其 `journal/` 下几个测试文件共享
   了大量构造 `JournalEntry`/`TradeEpisode` 的 helper）。
-- 全量跑：`PYTHONPATH=src .venv/bin/python -m pytest tests/ -q`（当前 500+ 个）。
+- **全量跑的唯一入口：`./scripts/run_tests.sh`**（等价于 `uv sync --all-extras` +
+  `uv run pytest`，pytest 参数原样透传）。不要用
+  `PYTHONPATH=src .venv/bin/python -m pytest`——后者不保证可选分组已装入，缺分组时
+  失败会伪装成业务断言失败，基线数字也不可复核。基线数字与测量条件记在
+  `docs/TEST_BASELINE.md`。
+
+  脚本默认把 `--basetemp` 指到仓库内 `tmp/pytest-basetemp/`：部分执行环境（CI 沙箱、
+  受限终端）会拒绝创建 pytest 默认临时根（`/T/pytest-of-*`）或对删除临时目录设配额，
+  两者都会让整库跑在半途崩成一片 error。受限环境下改用
+  `./scripts/run_tests.sh --batched 8` 分批取证（结果只用于枚举失败，**不能**替代全量基线）。
 
 ## 7. Git 与提交约定
 
@@ -331,7 +347,10 @@ score/prep 还能手动重跑）。如果因为改代码/重启导致某天错�
 ## 12. 验证命令
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest tests/ -q          # 全量
+./scripts/run_tests.sh                       # 全量（uv sync --all-extras + uv run pytest）
+./scripts/run_tests.sh --check                # 只装依赖并校验各可选分组均可导入
+./scripts/run_tests.sh --batched 8            # 受限环境下的分批取证（不能替代全量基线）
+./scripts/run_tests.sh tests/test_risk.py -k survival   # pytest 参数原样透传
 
 # 单角色 probe（多数支持 --offline / --no-llm 跳过外部依赖）
 ats macro review / ats sector review ai_hardware / ats pead prep|score COHR

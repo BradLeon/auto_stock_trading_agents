@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from ..config import get_config
-from ..schemas.decision import TradeDecision
+from ..schemas.decision import TradeDecision, broker_side
 from ..schemas.memory import TradeLogEntry
 from ..schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
 
@@ -333,7 +333,12 @@ class IBKRBroker:
             return entry
 
         try:
-            side = "BUY" if decision.action in ("buy", "add") else "SELL"
+            side = broker_side(decision.action, where=f"IBKRBroker.place({decision.symbol})")
+            if side is None:      # `hold` places no order at all
+                entry.status = "rejected"
+                entry.error = f"action {decision.action!r} places no order"
+                self._last_trades.append(None)
+                return entry
             contract = Stock(decision.symbol, "SMART", "USD")
             if not ib.qualifyContracts(contract):
                 # Never send an order on an unverified contract. Error 200 on a

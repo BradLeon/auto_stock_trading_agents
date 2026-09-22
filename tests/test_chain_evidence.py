@@ -603,6 +603,13 @@ def test_unpublished_quarter_is_a_visible_gap_not_a_previous_quarter(monkeypatch
     monkeypatch.setattr("ats.data.period.resolve_fiscal_label",
                         lambda *a, **k: ("Q2 FY2027", ""))
     monkeypatch.setattr("ats.data.documents.gather", lambda *a, **k: [])
+    # The tier-5/6 fallbacks (web search, news scrape) reach the live network, which
+    # makes "Q2 FY2027 is not published yet" a claim about the calendar rather than
+    # about the code: once the call actually happens — it has, since 2026-08 — the
+    # fallback finds a genuine transcript and this gap assertion silently stops
+    # testing anything. Closing them is what makes the gap deterministic.
+    for tier in ("_from_search", "_from_news", "_fmp"):
+        monkeypatch.setattr(f"ats.data.transcript.{tier}", lambda *a, **k: ("", ""))
 
     text, src, note = obs.fetch_document("NVDA")
     assert asked == [(2027, 2)]             # no unlabelled latest fallback

@@ -221,11 +221,15 @@ def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float
 
     horizons = sorted(set(policy.expiry_horizons_days))
     max_days = max((a.days_to_expiry for a in assignments), default=0)
-    if max_days and (not horizons or max_days > horizons[-1]):
-        horizons.append(max_days)
+    # Buckets are half-open: `through_days` is an exclusive upper bound, so the widest
+    # configured horizon must strictly exceed the furthest expiry or that expiry would
+    # fall through every bucket. `max_days + 1` is the smallest bound that still says
+    # "up to and including the furthest expiry" without reintroducing a closed interval.
+    if max_days and (not horizons or max_days >= horizons[-1]):
+        horizons.append(max_days + 1)
     buckets: list[ExpiryFundingBucket] = []
     for horizon in horizons:
-        active = [a for a in assignments if a.days_to_expiry <= horizon]
+        active = [a for a in assignments if a.days_to_expiry < horizon]
         full = sum(a.full_assignment_notional for a in active)
         expected = sum(a.probability_weighted_notional for a in active)
         variance = sum(
@@ -235,7 +239,7 @@ def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float
         p99 = full if any(a.assignment_probability is None for a in active) else min(
             full, expected + policy.p99_z_score * math.sqrt(variance))
         buckets.append(ExpiryFundingBucket(
-            label=f"≤{horizon}天", through_days=horizon,
+            label=f"<{horizon}天", through_days=horizon,
             expiries=sorted({a.expiry for a in active}), full_notional=round(full, 2),
             expected_notional=round(expected, 2), p99_notional=round(p99, 2)))
     p99_total = max((b.p99_notional for b in buckets), default=0.0)

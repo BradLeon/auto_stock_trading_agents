@@ -43,8 +43,12 @@ ats macro review macro
 
 # 不激活环境也可以，适合 cron、launchd 和脚本
 ./.venv/bin/ats data factset-status
-./.venv/bin/python -m pytest -q
 ```
+
+跑测试请用**唯一入口** `./scripts/run_tests.sh`（内部 `uv sync --all-extras` + `uv run pytest`，
+pytest 参数原样透传）——它会一次装入全部可选分组，这样基线数字才可复核：
+`./scripts/run_tests.sh --check` 只装依赖并校验各分组可导入。基线数字、测量条件与
+「环境性失败 vs 业务回归」的判据见 [`docs/TEST_BASELINE.md`](docs/TEST_BASELINE.md)。
 
 检查环境是否完整：
 

@@ -20,6 +20,12 @@ def _isolate_db(tmp_path, monkeypatch):
     monkeypatch.delenv("ATS_STRUCTURED_DB_PATH", raising=False)
     monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "structured_artifacts"))
     monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
+    # The data-layer database is where neutral evidence facts, documents, candidates
+    # and cursors now live (Workflow memory retires those tables), so it must be
+    # throwaway too — otherwise a test would write into the real `var/data.sqlite`
+    # and its outcome would depend on production data.
+    monkeypatch.setenv("ATS_DATA_DB_PATH", str(tmp_path / "data.sqlite"))
+    monkeypatch.setenv("ATS_DATA_ARTIFACT_ROOT", str(tmp_path / "data_artifacts"))
     from ats.memory import reset_store_cache
     from ats.data.structured import reset_repository_cache
 

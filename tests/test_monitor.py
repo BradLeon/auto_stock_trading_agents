@@ -19,7 +19,7 @@ def _news(symbol):
 
 
 def test_monitor_no_llm_stores_events(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     upd = monitor.run("COHR", use_llm=False)
     assert upd.materiality == 0.0
     assert get_store().count_events("COHR") == 2
@@ -28,14 +28,14 @@ def test_monitor_no_llm_stores_events(monkeypatch):
 
 
 def test_monitor_dedups_on_second_run(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monitor.run("COHR", use_llm=False)
     monitor.run("COHR", use_llm=False)          # same events again
     assert get_store().count_events("COHR") == 2  # not 4
 
 
 def test_monitor_llm_material_update_appends_to_narrative(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", lambda *a, **k: {})  # triage miss -> pass-through
     view = ContextUpdateView(materiality=0.8, event_summary="hyperscaler capex up",
                              narrative_delta="upstream CapEx raised → optical demand up",
@@ -49,7 +49,7 @@ def test_monitor_llm_material_update_appends_to_narrative(monkeypatch):
 
 
 def test_monitor_no_fresh_events_is_zero_materiality(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: [])
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": [])
     upd = monitor.run("COHR", use_llm=True)       # no events -> short-circuits before LLM
     assert upd.materiality == 0.0
 
@@ -57,7 +57,7 @@ def test_monitor_no_fresh_events_is_zero_materiality(monkeypatch):
 def test_monitor_persists_expectation_changes_into_narrative(monkeypatch):
     from ats.agents.pead.outputs import ContextUpdateView, ExpectationChangeView
 
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", lambda *a, **k: {})
     view = ContextUpdateView(
         materiality=0.8, event_summary="capex divergence",

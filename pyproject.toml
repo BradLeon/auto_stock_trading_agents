@@ -61,6 +61,9 @@ packages = ["src/ats"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Reports a missing optional dependency (module + extras group) instead of letting it
+# surface as an unrelated business failure further down the stack.
+addopts = "-p ats.workflow.pytest_optional_deps_plugin"
 
 [tool.ruff]
 line-length = 100

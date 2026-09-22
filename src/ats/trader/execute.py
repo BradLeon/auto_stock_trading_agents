@@ -15,7 +15,7 @@ import math
 from datetime import datetime, timezone
 
 from ..broker import IBKRBroker, IBKRUnavailable
-from ..schemas.decision import BossApproval, TradeDecision
+from ..schemas.decision import BossApproval, TradeDecision, action_direction
 from ..schemas.memory import TradeLogEntry
 
 log = logging.getLogger("ats.trader.execute")
@@ -87,7 +87,11 @@ def as_overnight_limits(decisions: list[TradeDecision],
             out.append(d)
             notes.append(f"{d.symbol}: 取不到参考价，保持市价单（隔夜单请人工确认）")
             continue
-        mult = 1 + slippage_pct / 100 if d.action.lower() == "buy" else 1 - slippage_pct / 100
+        # Buying needs a worse price to fill; selling needs a better one. `hold` never
+        # reaches here (no order), and an unknown action raises instead of defaulting.
+        mult = (1 + slippage_pct / 100 if action_direction(
+            d.action, where="execute._to_limit_orders") > 0
+            else 1 - slippage_pct / 100)
         limit = round(ref * mult, 2)
         out.append(d.model_copy(update={"order_type": "limit", "limit_price": limit}))
         notes.append(f"{d.symbol}: 隔夜单改限价 {limit}（参考 {ref:.2f} {mult:+.2%}）")

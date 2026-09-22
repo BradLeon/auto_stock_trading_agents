@@ -198,8 +198,11 @@ def test_entity_association_backfill_covers_pre_platform_documents(tmp_path):
     doc = source_cache.store("AMD", "2026Q2", "release", _body("legacy"), source="sec")
     assert doc is not None
     first.save_document(doc)
-    first.conn.execute("DELETE FROM document_entities")
-    first.conn.commit()
+    # Entity association lives in the data layer now (Workflow memory retires
+    # `document_entities`), so the backfill this test exercises is a data-layer row.
+    data = first.data_store().conn
+    data.execute("DELETE FROM data_document_entities")
+    data.commit()
     first.conn.close()
 
     reopened = TradingMemory(path)

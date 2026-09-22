@@ -153,7 +153,10 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
             notional = getattr(d, "notional_hint", None)
             quantity = getattr(d, "qty_hint", None)
             size = f"${notional:,.0f}" if notional else (f"{quantity:.0f}股" if quantity else "")
-            print(f"  • 建议 {d.action} {d.symbol} {size}")
+            # Display text is derived from the canonical value — never the reverse.
+            from ..schemas.decision import display_action
+
+            print(f"  • 建议 {display_action(d.action)} {d.symbol} {size}")
     print("=" * 70)
 
 

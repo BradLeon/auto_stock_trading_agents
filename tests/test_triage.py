@@ -29,7 +29,7 @@ def _scores(**kw):
 
 
 def test_triage_scores_persisted_and_noise_filtered(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", _scores(
         hot=(0.9, "guidance"), meh=(0.5, "analyst"), noise=(0.1, "noise")))
     monkeypatch.setattr(triage, "enrich", lambda items, **k: [])
@@ -56,7 +56,7 @@ def test_triage_scores_persisted_and_noise_filtered(monkeypatch):
 
 
 def test_triage_all_noise_skips_manager_llm(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", _scores(
         hot=(0.1, "noise"), meh=(0.1, "noise"), noise=(0.0, "noise")))
 
@@ -70,7 +70,7 @@ def test_triage_all_noise_skips_manager_llm(monkeypatch):
 
 
 def test_triage_failure_degrades_to_passthrough(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", lambda *a, **k: {})   # LLM failed
 
     captured = {}
@@ -87,7 +87,7 @@ def test_triage_failure_degrades_to_passthrough(monkeypatch):
 
 
 def test_fulltext_bodies_reach_llm_context(monkeypatch):
-    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None: _news(sym))
+    monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", _scores(
         hot=(0.9, "guidance"), meh=(0.4, "analyst"), noise=(0.1, "noise")))
     import ats.data.web as web

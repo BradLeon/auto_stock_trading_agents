@@ -8,16 +8,24 @@ JSON schema; conviction is clamped to [0,1] in code.
 
 from __future__ import annotations
 
-from typing import Literal
+from pydantic import BaseModel, Field, field_validator
 
-from pydantic import BaseModel, Field
+from ...schemas.decision import Action, normalize_action
 
 
 class DecisionView(BaseModel):
     """One actionable trade the Chief proposes."""
 
     symbol: str
-    action: Literal["buy", "add", "hold", "trim", "sell"]
+    # Same declaration as the decision layer — never a second copy of the value list.
+    action: Action
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _canonical_action(cls, v: object) -> object:
+        # The LLM-facing view is the entry point: fold the case here, once, so the
+        # domain object downstream only ever sees a canonical value.
+        return normalize_action(v, where="DecisionView.action") if isinstance(v, str) else v
     target_weight: float | None = Field(None, description="desired portfolio weight 0..1; optional")
     notional_usd: float | None = Field(None, description="order size in USD; optional")
     order_type: Literal["market", "limit"] = "limit"

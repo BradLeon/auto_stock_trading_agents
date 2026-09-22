@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from ..schemas.decision import TradeDecision
+from ..schemas.decision import (
+    TradeDecision,
+    UnknownActionError,
+    is_increasing_action,
+    normalize_action,
+)
 from ..schemas.instruments import normalize_symbol
 from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.risk import RiskDirective, RiskReview
@@ -49,6 +54,13 @@ def pre_trade(decisions: list[TradeDecision], portfolio: PortfolioSnapshot | Non
 
     approved: list[TradeDecision] = []
     for decision in candidates:
+        # An action outside the vocabulary must be blocked, never read as "no risk to
+        # check" — that reading is how an unrecognised action would reach the broker.
+        try:
+            normalize_action(decision.action, where="risk.pre_trade")
+        except UnknownActionError as exc:
+            notes.append(f"BLOCK {decision.symbol}: {exc}")
+            continue
         decision = _clip_event_notional(
             decision, current_pf, rc, event_data or {}, notes)
         post_pf = marginal.project_trade(current_pf, decision)
@@ -113,7 +125,10 @@ def _clip_event_notional(decision, portfolio, rc, event_data, notes):
     meta = load_instrument_risk_registry().resolve(decision.symbol)
     em = (event_data.get(decision.symbol, {}).get("expected_move_pct")
           or event_data.get(meta.risk_symbol, {}).get("expected_move_pct"))
-    if not em or decision.action not in ("buy", "add") or not portfolio.net_liquidation:
+    # An action outside the vocabulary must fail the check, not fall through as
+    # "nothing to clip" — that is how an unknown action would reach the broker.
+    if not em or not is_increasing_action(decision.action, where="risk._clip_event_notional") \
+            or not portfolio.net_liquidation:
         return decision
     max_notional = (
         rc.max_event_loss_pct * 100.0 / (em * meta.exposure_multiplier)

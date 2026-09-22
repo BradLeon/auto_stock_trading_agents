@@ -11,6 +11,83 @@ from pydantic import BaseModel, Field, field_validator
 Action = Literal["buy", "add", "hold", "trim", "sell"]
 OrderType = Literal["market", "limit"]
 TimeInForce = Literal["DAY", "GTC"]
+
+# --- The action vocabulary is declared once, here ---------------------------- #
+# Every other module — analyst recommendations, trade decisions, risk checks,
+# broker mapping, journal entries — must reference these helpers rather than
+# inlining its own tuple of values. A second copy drifts (PEAD's list used to be
+# missing `add`) and the drift only shows up as a silently wrong order.
+ACTIONS: tuple[Action, ...] = ("buy", "add", "hold", "trim", "sell")
+
+# Direction of exposure change: +1 increases, -1 reduces, 0 no change.
+ACTION_DIRECTION: dict[Action, int] = {
+    "buy": 1, "add": 1, "hold": 0, "trim": -1, "sell": -1,
+}
+
+# Broker-side representation, derived from the canonical value by explicit mapping.
+# `hold` produces no order — it is still listed so the mapping covers every value and
+# an unknown value is an error rather than a default direction.
+BROKER_SIDE_BY_ACTION: dict[Action, str | None] = {
+    "buy": "BUY", "add": "BUY", "trim": "SELL", "sell": "SELL", "hold": None,
+}
+
+
+class UnknownActionError(ValueError):
+    """An action value outside the declared vocabulary.
+
+    Raised instead of silently treating the value as `hold`: an unknown action must be
+    rejected and reported with its original value, never degraded into a neutral one.
+    """
+
+    def __init__(self, value: object, where: str = "") -> None:
+        self.value = value
+        self.where = where
+        suffix = f" (at {where})" if where else ""
+        super().__init__(
+            f"unknown action {value!r}{suffix}; expected one of {', '.join(ACTIONS)}"
+        )
+
+
+def normalize_action(value: str, *, where: str = "") -> Action:
+    """Fold an upstream value into the canonical lowercase form.
+
+    This is the single normalization point: it runs once, before the value enters a
+    domain object, so no layer downstream has to guess the case again.
+    """
+    if not isinstance(value, str):
+        raise UnknownActionError(value, where)
+    normalized = value.strip().lower()
+    if normalized not in ACTIONS:
+        raise UnknownActionError(value, where)
+    return normalized  # type: ignore[return-value]
+
+
+def action_direction(action: str, *, where: str = "") -> int:
+    """+1 increases exposure, -1 reduces it, 0 leaves it unchanged."""
+    return ACTION_DIRECTION[normalize_action(action, where=where)]
+
+
+def is_increasing_action(action: str, *, where: str = "") -> bool:
+    return action_direction(action, where=where) > 0
+
+
+# Human-facing rendering, derived from the canonical value by explicit mapping.
+# Display text is a one-way street: it must never be written back as an internal value
+# nor used to validate one.
+ACTION_DISPLAY: dict[Action, str] = {action: action.upper() for action in ACTIONS}
+
+
+def display_action(action: str, *, where: str = "") -> str:
+    """Render `action` for humans (reports, approval cards, CLI)."""
+    return ACTION_DISPLAY[normalize_action(action, where=where)]
+
+
+def broker_side(action: str, *, where: str = "") -> str | None:
+    """Broker-side side for `action`; `None` when the action places no order.
+
+    Unknown values raise — the mapper must never fall back to a default direction.
+    """
+    return BROKER_SIDE_BY_ACTION[normalize_action(action, where=where)]
 # What kind of trade this is. Expectancy-per-setup is the single most useful thing a
 # journal can aggregate, and inferring it later by regexing Chinese free-text rationale
 # would be wrong often enough to poison the statistic — so the Chief states it.
@@ -31,6 +108,13 @@ class TradeDecision(BaseModel):
     def _broker_native_symbol(cls, v: str) -> str:
         return _CLASS_SHARE_RE.sub(r"\1 \2", v.strip().upper())
     action: Action
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _canonical_action(cls, v: object) -> object:
+        # The single normalization point: case and stray whitespace are folded here,
+        # and anything outside the vocabulary is rejected rather than defaulted.
+        return normalize_action(v, where="TradeDecision.action") if isinstance(v, str) else v
     target_weight: float | None = Field(None, ge=0, le=1, description="desired portfolio weight")
     qty: float | None = Field(None, description="absolute share delta; sign implied by action")
     notional_usd: float | None = Field(None, ge=0)

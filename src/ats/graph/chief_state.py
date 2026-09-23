@@ -62,6 +62,8 @@ class ChiefDecisionState(BaseModel):
     approved_decisions: list[TradeDecision] = Field(default_factory=list)
     portfolio_snapshot_id: str = ""                         # review binding (§10.2)
     authorization: dict[str, Any] | None = None             # execution gate (Group 7)
+    gate_outcome: str = ""                                  # placed | stale | refused
+    gate_rejections: list[str] = Field(default_factory=list)
     cycle_status: str = ""                                  # mirrors decision_cycles.status
 
     # boss_review / trader / persist

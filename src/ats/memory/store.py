@@ -903,14 +903,18 @@ class TradingMemory:
                    "error", "realized_pnl", "source", "context", "perm_id", "order_ref")
 
     @staticmethod
-    def client_order_id(cycle_id: str, symbol: str, action: str) -> str:
+    def client_order_id(cycle_id: str, revision_no: int, seq: int,
+                        symbol: str, action: str) -> str:
         """Deterministic idempotency key: one INTENT, one row.
 
-        A cycle proposes at most one order per (symbol, action); repeated rows for the
-        same triple are retries of the same intent, not new intents. Without this key
-        the 2026-07-23 IBKR outage wrote the same GOOG/ASML/KLAC trim five times each.
+        Task 7.7: the id is derived from cycle + revision + the order's sequence
+        WITHIN the revision (+ symbol/action for readability), so two revisions
+        of the same cycle can carry same-symbol same-direction orders without
+        colliding. Repeated rows for the same id are retries of the same intent,
+        not new intents. Without this key the 2026-07-23 IBKR outage wrote the
+        same GOOG/ASML/KLAC trim five times each.
         """
-        return f"{cycle_id}:{symbol.upper()}:{action}"
+        return f"{cycle_id}:r{revision_no}:{seq}:{symbol.upper()}:{action}"
 
     def _insert_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
         """Upsert one row per intent, counting attempts instead of duplicating rows.
@@ -920,7 +924,9 @@ class TradingMemory:
         original submit time, while advancing status/error and bumping `attempt`.
         """
         for t in entries:
-            coid = self.client_order_id(cycle_id, t.symbol, t.action)
+            coid = self.client_order_id(cycle_id, getattr(t, "revision_no", 0),
+                                        getattr(t, "order_seq", 0),
+                                        t.symbol, t.action)
             submitted = t.submitted_at.isoformat() if t.submitted_at else None
             filled = t.filled_at.isoformat() if t.filled_at else None
             prior = self.conn.execute(

@@ -150,6 +150,9 @@ class RiskConfig(BaseModel):
     # 现金等价物：symbol -> haircut（0=纯现金信用；1=完全当风险敞口）。美债 ETF/BRK-B 等
     # 按现金信用计入有效现金，不占单票/杠杆/beta/集中度限额。见 risk/assess.py。
     cash_equivalents: dict[str, float] = Field(default_factory=dict)
+    # 执行授权网关（Phase B 7.4）：组合快照超过该秒数即视为过期，真实下单被拒绝
+    # 并回到风险审查。配置缺键时回落默认 60。
+    max_snapshot_age_seconds: float = 60.0
 
 
 class AccountConfig(BaseModel):

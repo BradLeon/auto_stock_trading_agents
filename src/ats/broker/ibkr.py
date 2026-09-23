@@ -280,13 +280,18 @@ class IBKRBroker:
 
     # --- writes ---------------------------------------------------------- #
     def place_orders(self, items: list[tuple[TradeDecision, float]], cycle_id: str,
-                     wait: float = 3.0) -> list[TradeLogEntry]:
-        """Submit a batch of orders in a single session; one log entry each."""
+                     wait: float = 3.0, revision_no: int = 0) -> list[TradeLogEntry]:
+        """Submit a batch of orders in a single session; one log entry each.
+
+        `revision_no` participates in the per-order identity (task 7.7): orders
+        are sequenced by their position within the revision's order list.
+        """
         if not items:
             return []
         with self.session() as ib:
             self._last_trades = []
-            entries = [self._submit(ib, d, qty, cycle_id) for d, qty in items]
+            entries = [self._submit(ib, d, qty, cycle_id, revision_no, seq)
+                       for seq, (d, qty) in enumerate(items)]
             ib.sleep(wait)  # let the paper engine ack/fill
             for e, (_, _), trade in zip(entries, items, self._last_trades):
                 if trade is None:
@@ -319,13 +324,15 @@ class IBKRBroker:
                 ib.sleep(1.5)
             return cancelled
 
-    def _submit(self, ib, decision: TradeDecision, qty: float, cycle_id: str) -> TradeLogEntry:
+    def _submit(self, ib, decision: TradeDecision, qty: float, cycle_id: str,
+                revision_no: int = 0, seq: int = 0) -> TradeLogEntry:
         from ib_async import LimitOrder, MarketOrder, Stock
 
         entry = TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=decision.symbol,
                               action=decision.action, qty=qty, order_type=decision.order_type,
                               limit_price=decision.limit_price, status="submitted",
-                              submitted_at=_now(), rationale=decision.rationale)
+                              submitted_at=_now(), rationale=decision.rationale,
+                              revision_no=revision_no, order_seq=seq)
         if qty <= 0:
             entry.status = "rejected"
             entry.error = "non-positive quantity"
@@ -358,7 +365,7 @@ class IBKRBroker:
             # without a tag the only link is orderId, which TWS resets on restart and
             # therefore cannot be joined on across days. IBKR echoes orderRef back on
             # every execution. Capped at 60 chars — IBKR silently truncates long refs.
-            order.orderRef = order_ref(cycle_id, decision.symbol)[:60]
+            order.orderRef = order_ref(cycle_id, revision_no, seq, decision.symbol)
             trade = ib.placeOrder(contract, order)
             entry.order_ref = order.orderRef
             self._last_trades.append(trade)
@@ -370,13 +377,16 @@ class IBKRBroker:
         return entry
 
 
-def order_ref(cycle_id: str, symbol: str) -> str:
-    """Our tag on an outgoing order: `ats:<cycle_id>:<SYMBOL>`.
+def order_ref(cycle_id: str, revision_no: int, seq: int, symbol: str) -> str:
+    """Our tag on an outgoing order: `ats:<cycle_id>:r<rev>:<seq>:<SYMBOL>`.
 
     The `ats:` prefix is what distinguishes a system order from a manual TWS trade in
-    the account-wide execution feed.
+    the account-wide execution feed. Task 7.7: the tag is derived from cycle +
+    revision + sequence within the revision, so two revisions of one cycle with a
+    same-symbol same-direction order get DIFFERENT identities. IBKR silently
+    truncates long orderRefs — callers keep the result <= 60 chars.
     """
-    return f"ats:{cycle_id}:{symbol.upper()}"
+    return f"ats:{cycle_id}:r{revision_no}:{seq}:{symbol.upper()}"[:60]
 
 
 def _fnum(v) -> float | None:

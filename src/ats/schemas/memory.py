@@ -30,6 +30,10 @@ class TradeLogEntry(BaseModel):
     # resets, so it cannot be joined on across sessions; these can.
     perm_id: str = ""
     order_ref: str = ""
+    # Order identity derivation (task 7.7): cycle + revision + sequence within
+    # the revision. Both default to 0 for legacy callers.
+    revision_no: int = 0
+    order_seq: int = 0
 
 
 class Fill(BaseModel):

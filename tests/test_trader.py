@@ -65,11 +65,13 @@ class FakeBroker:
     def __init__(self, *a, **k):
         pass
 
-    def place_orders(self, items, cycle_id, wait=3.0):
+    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0):
         FakeBroker.placed = list(items)
         return [TradeLogEntry(order_id="1", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
                               qty=q, status="filled", submitted_at=NOW, filled_at=NOW,
-                              avg_fill_price=100.0, rationale=d.rationale) for d, q in items]
+                              avg_fill_price=100.0, rationale=d.rationale,
+                              revision_no=revision_no, order_seq=i)
+                for i, (d, q) in enumerate(items)]
 
     def get_fills(self):
         return [{"exec_id": "e1", "symbol": "AAPL", "side": "BOT", "shares": 1, "price": 100,
@@ -80,8 +82,20 @@ def _patch(monkeypatch, approval_status="approved"):
     FakeBroker.placed = []
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
-    # execute() now runs the decision graph; keep its risk gate off live TWS.
-    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: None)
+    # execute() now runs the decision graph; give it a FRESH paper portfolio so
+    # the whole-revision review and the execution authorization gate (7.5) pass.
+    from ats.schemas.portfolio import ExposureBreakdown, PortfolioSnapshot
+    from ats.schemas.risk import RiskReview
+
+    now = datetime.now(timezone.utc)
+    pf = PortfolioSnapshot(as_of=now, net_liquidation=1_000_000.0, cash=900_000.0,
+                           gross_exposure=100_000.0, daily_pnl=0.0, positions=[],
+                           exposure=ExposureBreakdown())
+    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: pf)
+    monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.enrich_options", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.assess",
+                        lambda p, **k: RiskReview(as_of=now, risk_state="normal"))
 
     class Ch:
         def request_approval(self, req):

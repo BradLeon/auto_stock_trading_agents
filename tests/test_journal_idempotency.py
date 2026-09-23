@@ -102,9 +102,9 @@ def test_first_submitted_at_is_preserved(store):
 
 
 def test_client_order_id_is_deterministic_and_case_normalised(store):
-    a = store.client_order_id("c1", "goog", "trim")
-    b = store.client_order_id("c1", "GOOG", "trim")
-    assert a == b == "c1:GOOG:trim"
+    a = store.client_order_id("c1", 1, 0, "goog", "trim")
+    b = store.client_order_id("c1", 1, 0, "GOOG", "trim")
+    assert a == b == "c1:r1:0:GOOG:trim"
 
 
 def test_legacy_rows_without_the_key_coexist(store):

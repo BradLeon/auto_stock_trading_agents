@@ -241,8 +241,11 @@ def persist_decision(state: ChiefDecisionState) -> dict:
         parent_revision_no=state.parent_revision_no, revision_source="chief",
         created_at=state.as_of.isoformat())
     if state.risk_review is not None:
+        # Review ids are round-scoped: a stale-snapshot re-review (task 7.5)
+        # re-examines the SAME revision under a NEW snapshot and must land as a
+        # new review row, not be swallowed by idempotent re-insert.
         repo.record_review(
-            review_id=f"{state.cycle_id}:r{rev['revision_no']}:review",
+            review_id=f"{state.cycle_id}:r{rev['revision_no']}:review:r{state.risk_round}",
             cycle_id=state.cycle_id, revision_no=rev["revision_no"],
             decision_hash=rev["decision_hash"], ruleset_version=_ruleset_version(),
             portfolio_snapshot_id=state.portfolio_snapshot_id or "unset",
@@ -381,22 +384,54 @@ def narrow_approval(approval: BossApproval) -> BossApproval:
         "status": "rejected", "comment": "；".join(n for n in notes if n)})
 
 
+def _record_approval(state: ChiefDecisionState, approval: BossApproval) -> None:
+    """Persist the verdict (tasks 6.5/7.6) BEFORE the trader runs, so the
+    execution gate can derive its authorization. Round-scoped: a fresh approval
+    after a stale-snapshot re-review is a new fact, never swallowed by the
+    round-1 row. Legacy `cycles.approval_status` + journal keep their writes."""
+    if not (state.revision_no and state.revision_hash):
+        return
+    try:
+        from ..decision.repository import approval_idempotency_key
+
+        repo = _decision_repo()
+        round_no = state.risk_round
+        repo.record_approval(
+            approval_id=f"{state.cycle_id}:r{state.revision_no}:approval:r{round_no}",
+            cycle_id=state.cycle_id, revision_no=state.revision_no,
+            decision_hash=state.revision_hash,
+            decision=("approved" if approval.status == "approved"
+                      else "rejected"),
+            reviewer=approval.reviewer, comment=approval.comment,
+            channel=approval.channel,
+            idempotency_key=approval_idempotency_key(
+                state.cycle_id, state.revision_no, state.revision_hash,
+                approval.channel, round_no),
+            created_at=approval.reviewed_at.isoformat()
+            if approval.reviewed_at else None)
+    except Exception as exc:  # noqa: BLE001 - audit write must not block the graph
+        log.warning("boss_approvals write failed for %s: %s", state.cycle_id, exc)
+
+
 def boss_review(state: ChiefDecisionState) -> dict:
     # The card shows EXACTLY the revision the review approved (§10.3): the
     # boss binds to this revision via its hash, never to a free-form edit.
     if state.auto_approve:
-        return {"approval": BossApproval(status="approved", reviewer="auto",
-                                         reviewed_at=_now(), channel="auto")}
-    request = ApprovalRequest(cycle_id=state.cycle_id, as_of=state.as_of,
-                              decisions=state.approved_decisions,
-                              context_summary=state.approval_summary,
-                              revision_no=state.revision_no,
-                              decision_hash=state.revision_hash)
-    verdict = interrupt(request.model_dump(mode="json"))
-    approval = BossApproval.model_validate(verdict)
-    if approval.reviewed_at is None:
-        approval.reviewed_at = _now()
-    return {"approval": narrow_approval(approval)}
+        approval = BossApproval(status="approved", reviewer="auto",
+                                reviewed_at=_now(), channel="auto")
+    else:
+        request = ApprovalRequest(cycle_id=state.cycle_id, as_of=state.as_of,
+                                  decisions=state.approved_decisions,
+                                  context_summary=state.approval_summary,
+                                  revision_no=state.revision_no,
+                                  decision_hash=state.revision_hash)
+        verdict = interrupt(request.model_dump(mode="json"))
+        approval = BossApproval.model_validate(verdict)
+        if approval.reviewed_at is None:
+            approval.reviewed_at = _now()
+    approval = narrow_approval(approval)
+    _record_approval(state, approval)
+    return {"approval": approval}
 
 
 def trader(state: ChiefDecisionState) -> dict:
@@ -422,11 +457,73 @@ def trader(state: ChiefDecisionState) -> dict:
         q = state.qty_by_symbol.get(d.symbol) or 0.0
         if q > 0:
             to_place.append((d, q))
-    entries, fills = texec.place_orders(to_place, state.cycle_id)
+
+    # --- execution authorization gate (tasks 7.2/7.3/7.5) --------------------- #
+    from ..config import get_config
+    from ..decision.state import CycleStatus as _CS
+    from ..execution.authorization import (AuthorizationError,
+                                           RECOVERABLE,
+                                           build_authorization,
+                                           validate_authorization)
+
+    repo = _decision_repo()
+    now = _now()
+    pf = state.portfolio
+    max_age = get_config().app.risk.max_snapshot_age_seconds
+    rejections: list[str] = []
+    auth = None
+    try:
+        auth = build_authorization(repo, state.cycle_id)
+        rejections = validate_authorization(
+            repo, auth, snapshot_as_of=pf.as_of if pf else None,
+            max_snapshot_age_seconds=max_age, now=now)
+    except AuthorizationError as exc:
+        rejections = [str(exc)]
+
+    recoverable = bool(auth) and rejections and all(
+        r.split(":")[0] in RECOVERABLE for r in rejections)
+    if recoverable and state.risk_round < state.max_risk_rounds:
+        # 7.5/7.6: the snapshot the review projected on went stale. The approval
+        # is void — go back to the risk gate for a fresh review + fresh approval.
+        # The human re-approval is what bounds this loop.
+        print(f"⏫ 授权失效（{'; '.join(rejections)}）— 回到风险审查重新评估")
+        repo.transition(state.cycle_id, to_status=_CS.PENDING_RISK, actor="execution_gate",
+                        payload={"rejections": rejections},
+                        idempotency_key=_transition_key(
+                            state.cycle_id, "pending_risk", auth.revision_no,
+                            state.risk_round),
+                        created_at=now.isoformat())
+        return {"gate_outcome": "stale", "gate_rejections": rejections,
+                "authorization": None}
+    if rejections:
+        # Hard refusal: never partial-execute, never degrade to simulation.
+        from ..schemas.memory import TradeLogEntry
+
+        print(f"🚫 执行授权被拒绝：{'; '.join(rejections)}")
+        entries = [TradeLogEntry(order_id="", cycle_id=state.cycle_id, symbol=d.symbol,
+                                 action=d.action, qty=q, status="rejected",
+                                 submitted_at=now, rationale=d.rationale,
+                                 error=f"authorization rejected: {'; '.join(rejections)}")
+                   for d, q in to_place]
+        return {"order_results": entries, "gate_outcome": "refused",
+                "gate_rejections": rejections, "authorization": None}
+
+    entries, fills = texec.place_orders(to_place, state.cycle_id,
+                                        revision_no=auth.revision_no,
+                                        authorization=auth.model_dump())
     for e in entries:
         print(f"   {e.action} {e.symbol} x{e.qty:.0f} [{e.status}]"
               + (f" @ {e.avg_fill_price}" if e.avg_fill_price else ""))
-    return {"order_results": entries, "fills": fills}
+    return {"order_results": entries, "fills": fills, "gate_outcome": "placed",
+            "authorization": auth.model_dump()}
+
+
+def route_after_trader(state: ChiefDecisionState) -> str:
+    """Conditional edge after the trader node (task 7.5): a stale snapshot sends
+    the cycle back to the risk gate for a fresh review + fresh approval."""
+    if state.gate_outcome == "stale":
+        return "risk_gate"
+    return "persist"
 
 
 def persist(state: ChiefDecisionState) -> dict:
@@ -439,31 +536,9 @@ def persist(state: ChiefDecisionState) -> dict:
     # it wrote approval_status = None and nothing ever came back to fill it in.
     if state.approval is not None:
         store.set_cycle_approval(state.cycle_id, state.approval.status)
-        # Task 6.5: the full approval record lands in `boss_approvals` bound to
-        # the revision it decided on, idempotent on the D3 key. Legacy
-        # `cycles.approval_status` above and the journal column keep serving.
-        if state.revision_no and state.revision_hash:
-            try:
-                from ..decision.repository import approval_idempotency_key
-
-                repo0 = _decision_repo()
-                appr = state.approval
-                repo0.record_approval(
-                    approval_id=f"{state.cycle_id}:r{state.revision_no}:approval",
-                    cycle_id=state.cycle_id, revision_no=state.revision_no,
-                    decision_hash=state.revision_hash,
-                    decision=("approved" if appr.status == "approved"
-                              else "rejected"),
-                    reviewer=appr.reviewer, comment=appr.comment,
-                    channel=appr.channel,
-                    idempotency_key=approval_idempotency_key(
-                        state.cycle_id, state.revision_no, state.revision_hash,
-                        appr.channel),
-                    created_at=appr.reviewed_at.isoformat()
-                    if appr.reviewed_at else None)
-            except Exception as exc:  # noqa: BLE001 - audit write must not block persist
-                log.warning("boss_approvals write failed for %s: %s",
-                            state.cycle_id, exc)
+        # The full approval record is written in boss_review (before the
+        # execution gate can derive its authorization); this legacy column and
+        # the journal approval column keep their writes (task 6.5).
 
     by_symbol = {d.symbol: d for d in state.approved_decisions or state.decisions}
     for entry in state.order_results:
@@ -529,7 +604,8 @@ def build_chief_graph(checkpointer=None):
     g.add_edge("chief_revise", "risk_gate")     # bounded by max_risk_rounds
     g.add_edge("manual_review", END)
     g.add_edge("boss_review", "trader")
-    g.add_edge("trader", "persist")
+    g.add_conditional_edges("trader", route_after_trader,
+                            {"risk_gate": "risk_gate", "persist": "persist"})
     g.add_edge("persist", END)
 
     return g.compile(checkpointer=checkpointer)

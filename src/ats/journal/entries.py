@@ -119,9 +119,10 @@ def record_intents(state, *, store=None) -> list[str]:
     marks = {p.symbol: p.market_price for p in getattr(state.portfolio, "positions", [])
              or [] if p.market_price}
 
-    for d in state.decisions:
+    for i, d in enumerate(state.decisions):
         try:
-            entry_id = store.client_order_id(state.cycle_id, d.symbol, d.action)
+            entry_id = store.client_order_id(state.cycle_id, state.revision_no,
+                                             i, d.symbol, d.action)
             em = (event_data.get(d.symbol) or {}).get("expected_move_pct")
             try:
                 label = load_pead_config(d.symbol).fiscal_label
@@ -171,7 +172,10 @@ def record_outcome(state, *, store=None) -> None:
     approval = state.approval
     for entry in state.order_results or []:
         try:
-            entry_id = store.client_order_id(state.cycle_id, entry.symbol, entry.action)
+            entry_id = store.client_order_id(state.cycle_id,
+                                             getattr(entry, "revision_no", 0),
+                                             getattr(entry, "order_seq", 0),
+                                             entry.symbol, entry.action)
             store.update_journal_outcome(entry_id, {
                 "terminal_status": entry.status,
                 "filled_qty": entry.qty if entry.status == "filled" else None,

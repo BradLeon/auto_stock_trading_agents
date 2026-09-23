@@ -238,7 +238,10 @@ def test_resume_twice_does_not_duplicate_approvals_or_orders(broker, async_chann
         "SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = 'trader-20260101000000'"
     ).fetchone()[0]
     assert approvals <= 1
-    assert len(_revisions("trader-20260101000000")) == 1
+    # Fresh-portfolio fixture: the 50k seed order is cap-rejected (r1), the
+    # chief adopts the 25k boundary (r2), and THAT revision is what executes.
+    revs = _revisions("trader-20260101000000")
+    assert [r["revision_no"] for r in revs] == [1, 2]
     assert second is not None
 
 

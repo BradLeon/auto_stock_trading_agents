@@ -182,12 +182,14 @@ class FakeBroker:
     def __init__(self, *a, **k):
         pass
 
-    def place_orders(self, items, cycle_id, wait=3.0):
+    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0):
         now = datetime.now(timezone.utc)
         FakeBroker.placed = list(items)
         return [TradeLogEntry(order_id="1", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
                               qty=q, status="filled", submitted_at=now, filled_at=now,
-                              avg_fill_price=100.0, rationale=d.rationale) for d, q in items]
+                              avg_fill_price=100.0, rationale=d.rationale,
+                              revision_no=revision_no, order_seq=i)
+                for i, (d, q) in enumerate(items)]
 
     def get_fills(self):
         return [{"exec_id": "e1", "symbol": "NVDA", "side": "BOT", "shares": 5, "price": 100,
@@ -195,16 +197,32 @@ class FakeBroker:
                  "commission": 1.0, "order_id": "1"}]
 
 
+def _fresh_portfolio() -> "PortfolioSnapshot":
+    from ats.schemas.portfolio import ExposureBreakdown, PortfolioSnapshot
+
+    now = datetime.now(timezone.utc)
+    return PortfolioSnapshot(as_of=now, net_liquidation=1_000_000.0, cash=900_000.0,
+                             gross_exposure=100_000.0, daily_pnl=0.0,
+                             positions=[], exposure=ExposureBreakdown())
+
+
 @pytest.fixture
 def broker(monkeypatch):
-    """Hermetic broker stack: FakeBroker, $100 last price, no live portfolio
-    (the risk gate degrades to 'risk checks skipped')."""
+    """Hermetic broker stack: FakeBroker, $100 last price, and a FRESH paper
+    portfolio so the execution authorization gate (7.5) passes — a real order
+    without a current snapshot is refused."""
     from ats.trader import execute as texec
+    from ats.schemas.risk import RiskReview
 
     FakeBroker.placed = []
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
-    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: None)
+    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: _fresh_portfolio())
+    monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.enrich_options", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.assess",
+                        lambda p, **k: RiskReview(as_of=datetime.now(timezone.utc),
+                                                  risk_state="normal"))
     return FakeBroker
 
 

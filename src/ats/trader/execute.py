@@ -141,20 +141,70 @@ def cancelled_entries(sized: list[tuple[TradeDecision, float]], cycle_id: str,
             for d, q in sized]
 
 
-def place_orders(to_place: list[tuple[TradeDecision, float]],
-                 cycle_id: str) -> tuple[list[TradeLogEntry], list[dict]]:
-    """Submit via IBKR; degrade to error entries (never raises) if TWS is down."""
-    try:
-        broker = IBKRBroker()
-        entries = broker.place_orders(to_place, cycle_id)
-        fills = broker.get_fills()
-        return entries, fills
-    except IBKRUnavailable as exc:
-        print(f"❌ IBKR unavailable: {exc}")
+def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
+                 *, revision_no: int = 0,
+                 authorization: dict | None = None
+                 ) -> tuple[list[TradeLogEntry], list[dict]]:
+    """Submit via IBKR; degrade to error entries (never raises) if TWS is down.
+
+    Execution authorization gate (tasks 7.2/7.9): a batch may only be submitted
+    against a complete ExecutionAuthorization (dict form, §10.4). Bare
+    instructions — no authorization — are rejected before the broker is touched.
+
+    Retry idempotency (task 7.8): before submitting, each order's local record
+    is checked. One that is already submitted/filled locally is NOT re-submitted
+    (the outcome is uncertain — it stays for reconciliation); only confirmed
+    unsubmitted intents proceed.
+    """
+    if not authorization:
         entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
-                                 action=d.action, qty=q, status="error", submitted_at=_now(),
-                                 rationale=d.rationale, error=str(exc)) for d, q in to_place]
+                                 action=d.action, qty=q, revision_no=revision_no,
+                                 order_seq=i, status="rejected", submitted_at=_now(),
+                                 rationale=d.rationale,
+                                 error="missing execution authorization")
+                   for i, (d, q) in enumerate(to_place)]
+        print("🚫 执行被拒绝：缺少完整执行授权（审查+审批+修订绑定）")
         return entries, []
+
+    from ..memory import get_store
+
+    store = get_store()
+    held: list[tuple[int, TradeLogEntry]] = []
+    fresh: list[tuple[int, TradeDecision, float]] = []
+    for i, (d, q) in enumerate(to_place):
+        coid = store.client_order_id(cycle_id, revision_no, i, d.symbol, d.action)
+        prior = store.conn.execute(
+            "SELECT status FROM trades WHERE client_order_id = ?", (coid,)).fetchone()
+        if prior is not None and prior["status"] in ("submitted", "filled", "pending"):
+            # Uncertain outcome: the first attempt may have reached the broker.
+            # Never produce a second logical order — leave it to reconciliation.
+            held.append((i, TradeLogEntry(
+                order_id="", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
+                qty=q, revision_no=revision_no, order_seq=i,
+                status=prior["status"], submitted_at=_now(), rationale=d.rationale,
+                error="retry skipped: prior attempt outcome uncertain "
+                      "(pending reconciliation)")))
+        else:
+            fresh.append((i, d, q))
+
+    entries: list[TradeLogEntry] = [e for _, e in held]
+    fills: list[dict] = []
+    if fresh:
+        try:
+            broker = IBKRBroker()
+            ordered = [(d, q) for _, d, q in fresh]
+            submitted = broker.place_orders(ordered, cycle_id,
+                                            revision_no=revision_no)
+            fills = broker.get_fills()
+            entries.extend(submitted)
+        except IBKRUnavailable as exc:
+            print(f"❌ IBKR unavailable: {exc}")
+            entries.extend([TradeLogEntry(
+                order_id="", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
+                qty=q, revision_no=revision_no, order_seq=i, status="error",
+                submitted_at=_now(), rationale=d.rationale, error=str(exc))
+                for i, d, q in fresh])
+    return entries, fills
 
 
 def approval_divergence(approval: BossApproval | None,

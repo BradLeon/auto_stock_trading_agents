@@ -199,4 +199,4 @@ def test_graph_run_records_full_approval_row(broker, approve_all, monkeypatch):
     assert row["revision_no"] == chain["revisions"][-1]["revision_no"]
     assert row["decision_hash"] == chain["revisions"][-1]["decision_hash"]
     assert row["idempotency_key"]                    # persistent dedup key present
-    assert row["approval_id"] == "chief-g6-appr:r1:approval"
+    assert row["approval_id"] == "chief-g6-appr:r1:approval:r1"

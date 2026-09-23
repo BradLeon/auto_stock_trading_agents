@@ -49,12 +49,24 @@ class InvalidRiskReviewError(DecisionAuditError):
 
 
 def approval_idempotency_key(cycle_id: str, revision_no: int, decision_hash: str,
-                             channel: str) -> str:
+                             channel: str, round_no: int = 0) -> str:
     """Design D3: the callback dedup key is derived from the process, revision,
     hash and approval channel — never from the request moment — so a replayed
-    callback across processes/restarts derives the SAME key."""
-    body = f"approval|{cycle_id}|r{revision_no}|{decision_hash}|{channel}"
+    callback across processes/restarts derives the SAME key. `round_no` is the
+    review round the approval answers (task 7.6): a fresh approval after a
+    stale-snapshot re-review is a NEW fact, not a replay of the old one.
+    """
+    body = (f"approval|{cycle_id}|r{revision_no}|{decision_hash}|{channel}"
+            + (f"|r{round_no}" if round_no else ""))
     return hashlib.sha1(body.encode()).hexdigest()[:32]
+
+
+def review_round_of(review_id: str) -> int:
+    """Parse the round suffix of a round-scoped review id (`...:review:r3`)."""
+    try:
+        return int(review_id.rsplit(":r", 1)[-1])
+    except (ValueError, IndexError):
+        return 0
 
 
 def _now() -> str:
@@ -199,22 +211,26 @@ class DecisionAuditRepository:
 
     def effective_review(self, cycle_id: str, revision_no: int,
                          decision_hash: str) -> sqlite3.Row | None:
-        """The review ONLY if it binds exactly this revision (task 6.2).
+        """The LATEST review binding exactly this revision (task 6.2).
 
         Any substantive field change after the review produces a NEW revision
         with a new hash — the old review no longer binds and is invalid for it.
+        A re-review of the same revision (stale-snapshot recovery, task 7.5)
+        lands as a second round-scoped row; the latest one is effective.
         """
         return self.conn.execute(
             "SELECT * FROM decision_risk_reviews WHERE cycle_id = ? AND "
-            "revision_no = ? AND decision_hash = ?",
+            "revision_no = ? AND decision_hash = ? "
+            "ORDER BY created_at DESC, review_id DESC LIMIT 1",
             (cycle_id, revision_no, decision_hash)).fetchone()
 
     def effective_approval(self, cycle_id: str, revision_no: int,
                            decision_hash: str) -> sqlite3.Row | None:
-        """The approval ONLY if it is an approval bound to exactly this revision."""
+        """The LATEST approval bound to exactly this revision."""
         return self.conn.execute(
             "SELECT * FROM boss_approvals WHERE cycle_id = ? AND revision_no = ? "
-            "AND decision_hash = ? AND decision = 'approved'",
+            "AND decision_hash = ? AND decision = 'approved' "
+            "ORDER BY created_at DESC, approval_id DESC LIMIT 1",
             (cycle_id, revision_no, decision_hash)).fetchone()
 
     def validate_callback(self, cycle_id: str, *, revision_no: int | None = None,
@@ -241,16 +257,18 @@ class DecisionAuditRepository:
         rev = self.latest_revision(cycle_id)
         if rev is None:
             return True, "no revision yet", False
+        review = self.effective_review(cycle_id, rev["revision_no"],
+                                       rev["decision_hash"])
+        round_no = review_round_of(review["review_id"]) if review else 0
         key = approval_idempotency_key(cycle_id, rev["revision_no"],
-                                       rev["decision_hash"], channel)
+                                       rev["decision_hash"], channel, round_no)
         if self.has_approval(key) is not None:
             return False, "already handled", True
         if decision_hash and decision_hash != rev["decision_hash"]:
             return False, "callback targets a superseded revision", False
         if revision_no is not None and revision_no != rev["revision_no"]:
             return False, "callback targets a superseded revision", False
-        if self.effective_review(cycle_id, rev["revision_no"],
-                                 rev["decision_hash"]) is None:
+        if review is None or review["verdict"] != "approved":
             has_any = self.conn.execute(
                 "SELECT 1 FROM decision_risk_reviews WHERE cycle_id = ? LIMIT 1",
                 (cycle_id,)).fetchone()

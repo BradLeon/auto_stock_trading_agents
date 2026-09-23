@@ -21,14 +21,20 @@ NOW = datetime.now(timezone.utc)
 
 
 def test_order_ref_format_and_prefix():
-    ref = order_ref("chief-20260728-200500", "klac")
-    assert ref == "ats:chief-20260728-200500:KLAC"
+    ref = order_ref("chief-20260728-200500", 1, 0, "klac")
+    assert ref == "ats:chief-20260728-200500:r1:0:KLAC"
     assert ref.startswith("ats:")          # the system-vs-manual discriminator
+
+
+def test_order_ref_distinguishes_revisions():
+    """Task 7.7: two revisions of one cycle with a same-symbol same-direction
+    order must get different identities."""
+    assert order_ref("chief-a", 1, 0, "GOOG") != order_ref("chief-a", 2, 0, "GOOG")
 
 
 def test_order_ref_fits_ibkr_field():
     """IBKR silently truncates a long orderRef; the submit path caps at 60."""
-    ref = order_ref("chief-20260728-200500", "GOOG")
+    ref = order_ref("chief-20260728-200500", 11, 3, "GOOG")
     assert len(ref) <= 60
 
 

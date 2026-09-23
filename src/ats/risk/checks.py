@@ -157,6 +157,18 @@ def review_revision(
 
         # Cap boundaries: report, never rewrite. The binding rule is whichever
         # boundary is tighter.
+        if decision.notional_usd is None and decision.qty:
+            # qty-only orders (manual entries): price them off the limit or the
+            # market so the whole-revision review can project the post-trade
+            # position instead of blocking them as underivable.
+            px = decision.limit_price
+            if not px:
+                from ..trader.execute import _last_price
+
+                px = _last_price(sym)
+            if px:
+                decision = decision.model_copy(
+                    update={"notional_usd": abs(decision.qty) * float(px)})
         cap = _order_cap_boundary(rc, decision) if apply_caps else None
         event_cap = _event_notional_boundary(decision, working_pf, rc, event_data)
         binding = [c for c in (cap, event_cap) if c is not None]

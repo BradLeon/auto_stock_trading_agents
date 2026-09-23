@@ -213,6 +213,10 @@ class TradeEpisode(BaseModel):
     # ── 未平仓专属：这两位产出的是**可行动**的结论，不只是教训 ──
     invalidation_triggered: bool | None = None   # 论点已失效但仓位还在 → 该退未退（每周判定）
     horizon_overdue_days: int | None = None      # 超过计划持有期多少天（drift 的实时形态）
+    # §11.2（任务 7.1）：LLM 产生的标注必须携带来源与判定时点——与确定性
+    # 计算结果在数据上可区分。写入口由 execution.llm_boundary 白名单强制。
+    invalidation_source: str = ""                # "llm" / ""（确定性或未判定）
+    invalidation_checked_at: datetime | None = None   # 最近一次 LLM 判定时刻
 
     @property
     def decision_gradeable(self) -> bool:

@@ -665,6 +665,13 @@ class TradingMemory:
         for ddl in ("filled_qty REAL", "terminal_basis TEXT"):
             if ddl.split()[0] not in tcols:
                 self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
+        # §11.2 (task 7.1): LLM annotations carry provenance — additive on the
+        # episodes table so old rows simply read as "no LLM judgement yet".
+        ecols = {r["name"] for r in self.conn.execute(
+            "PRAGMA table_info(trade_episodes)")}
+        for ddl in ("invalidation_source TEXT", "invalidation_checked_at TEXT"):
+            if ecols and ddl.split()[0] not in ecols:
+                self.conn.execute(f"ALTER TABLE trade_episodes ADD COLUMN {ddl}")
         # Decision-audit linkage (§12.3, Phase B). Nullable on purpose: forcing
         # them non-null on every new order is Phase C's cutover, after all new
         # orders flow through the authorization gate. `trades.cycle_id` already
@@ -1293,7 +1300,8 @@ class TradingMemory:
         "commission", "basis_source", "holding_days", "r_multiple", "r_multiple_mtm",
         "risk_unit_source", "mae_pct", "mfe_pct", "mae_source", "excess_vs_sector_pct",
         "setup", "primary_entry_id", "exit_reason", "exit_as_planned",
-        "invalidation_triggered", "horizon_overdue_days")
+        "invalidation_triggered", "horizon_overdue_days",
+        "invalidation_source", "invalidation_checked_at")
 
     def save_episode(self, episode) -> None:
         """Upsert by episode_id — the reducer re-derives episodes from fills each run,

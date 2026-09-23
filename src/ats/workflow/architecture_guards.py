@@ -31,8 +31,10 @@ AGENT_ROOT = REPO_ROOT / "src" / "ats" / "agents"
 ROLE_BY_PATH_PREFIX: tuple[tuple[str, str], ...] = (
     ("src/ats/agents/sector/layer_analyst", "layer_analyst"),
     ("src/ats/agents/sector/layer_review", "layer_analyst"),
+    ("src/ats/agents/layer", "layer_analyst"),
     ("src/ats/agents/sector", "sector_analyst"),
-    ("src/ats/agents/evidence", "information_analyst"),
+    ("src/ats/agents/information", "information_analyst"),
+    ("src/ats/agents/evidence", "evidence_observer"),
     ("src/ats/agents/pead", "fundamental_analyst"),
     ("src/ats/agents/macro", "macro_analyst"),
     ("src/ats/agents/technical", "technical_analyst"),

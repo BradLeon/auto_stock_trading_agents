@@ -109,6 +109,32 @@ class TriggerContext(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Decision-required categories (Phase D task 1.4)
+# --------------------------------------------------------------------------- #
+
+# The six decision-required analysis categories (docs/TARGET_WORKFLOW_DATAFLOW.md
+# §10.1). Requirement satisfaction is judged per CATEGORY, not per task_id: the
+# fundamental analyst runs in exactly one of two modes per cycle, so demanding
+# both task ids would leave every cycle permanently incomplete. A category is
+# satisfied when ANY task whose agent_role is listed here delivered.
+DECISION_CATEGORY_ROLES: dict[str, frozenset[str]] = {
+    "layer_analysis": frozenset({"layer_analysis"}),
+    "information_brief": frozenset({"information_brief"}),
+    "sector_allocation": frozenset({"sector_allocation"}),
+    "fundamental_analysis": frozenset({
+        "fundamental_expectation_update", "fundamental_event_review"}),
+    "macro_review": frozenset({"macro_review"}),
+    "technical_review": frozenset({"technical_review"}),
+}
+
+ROLE_TO_CATEGORY: dict[str, str] = {
+    role: category
+    for category, roles in DECISION_CATEGORY_ROLES.items()
+    for role in roles
+}
+
+
+# --------------------------------------------------------------------------- #
 # Task registry
 # --------------------------------------------------------------------------- #
 
@@ -236,6 +262,32 @@ class TaskRegistry:
 
     def allowed_for(self, task_id: str, trigger: TriggerContext) -> bool:
         return trigger.kind in self.spec(task_id).trigger_modes
+
+    # --- decision-required categories (Phase D tasks 1.4/1.5) --------------- #
+
+    def satisfying_task_ids(self, category: str) -> tuple[str, ...]:
+        """Registered decision-required task ids that can satisfy `category`.
+
+        The mapping is the declared "role → task ids" structure: fundamental is
+        satisfied by either mode's task, everything else is one-to-one. A task
+        counts only when the registry marks it `required_for_decision` — an
+        optional task can never fill a required category.
+        """
+        roles = DECISION_CATEGORY_ROLES.get(category)
+        if not roles:
+            return ()
+        return tuple(task_id for task_id, spec in self._specs.items()
+                     if spec.required_for_decision and spec.agent_role in roles)
+
+    def required_categories(self) -> tuple[str, ...]:
+        """Decision categories this registry can (partially) satisfy.
+
+        Categories whose roles are not registered at all are omitted — the
+        snapshot builder also folds an unmapped required role into its own
+        category, so an ad-hoc registry never silently drops a requirement.
+        """
+        return tuple(category for category in DECISION_CATEGORY_ROLES
+                     if self.satisfying_task_ids(category))
 
 
 # --------------------------------------------------------------------------- #
@@ -432,5 +484,5 @@ def default_registry() -> TaskRegistry:
                          freshness_seconds=3_600, timeout_seconds=600),
         WorkflowTaskSpec(task_id="technical_review", agent_role="technical_review",
                          output_schema="TechnicalReview", freshness_seconds=3_600,
-                         timeout_seconds=300, required_for_decision=False),
+                         timeout_seconds=300, required_for_decision=True),
     ])

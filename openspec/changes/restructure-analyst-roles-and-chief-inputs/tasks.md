@@ -1,13 +1,13 @@
 ## 1. 地基：投影 payload、守卫角色映射、六类判定
 
-- [ ] 1.1 在 `src/ats/agent/task_projection.py` 为 `InformationBriefPayload` 增补可选字段 `fact_changes` / `impact_candidates` / `entities` / `confidence` / `freshness` / `unverified`，保持 `schema_version` 为 `v1` 且旧 payload 仍可校验通过。验证：新增测试用仅含旧字段的 payload 调用 `validate_payload("information_brief", ...)` 仍通过，含新字段亦通过。
-- [ ] 1.2 为 `FundamentalEventReviewPayload` 增补可选字段 `scorecard` / `guidance` / `narrative` / `confidence` / `falsifiable_conditions`，同样保持向后兼容。验证：同上，两类 payload 的旧形态与新形态均通过校验。
-- [ ] 1.3 在 `src/ats/workflow/architecture_guards.py` 的 `ROLE_BY_PATH_PREFIX` 中，把 `src/ats/agents/evidence` 的角色映射由 `information_analyst` 改为 `evidence_observer`，并新增 `src/ats/agents/information` → `information_analyst`。验证：`tests/test_architecture_guards.py` 仍全绿，且新映射可被 `scan_agents()` 命中。
-- [ ] 1.4 在 `src/ats/workflow/run_contracts.py` 把必需性判定由 task_id 改为角色：新增「角色 → 可满足它的 task_id 集合」结构，基本面由 `fundamental_expectation_update` 或 `fundamental_event_review` 任一命中即满足。验证：新增测试断言只提供事件评审时基本面判定为满足，并把命中的 task_id 记录到结果里。
-- [ ] 1.5 把 `technical_review` 的 `required_for_decision` 置为 `True`，使必需类别为六类。验证：新增测试断言 `default_registry()` 解析出的必需角色集合恰为六类。
-- [ ] 1.6 为快照消费方暴露「按角色取可用投影」的读取函数（读 `task_projection_envelopes`，按 `agent_role` + 作用域 + 有效期过滤并返回最新一条）。验证：新增测试构造两类投影，断言按角色取回的是各自最新且未过期的一条。
-- [ ] 1.7 为 `InformationBriefPayload` 增补可选字段 `event_time` / `published_at` / `extracted_at` / `cluster_key` / `source_count` / `independent_sources`，保持 `schema_version` 为 `v1` 且旧 payload 仍可校验通过。验证：新增测试断言旧形态与含三类时间、聚类字段的新形态均通过校验。
-- [ ] 1.8 在 `validate_payload("fundamental_event_review", ...)` 增加越界字段断言：payload 出现 action 词表取值（`buy|add|hold|trim|sell`）或 `qty` / `notional` / `weight` 类字段即判不合法。验证：新增测试断言含这些字段的 payload 被拒，`direction` 取 `-1|0|1` 的正常 payload 通过。
+- [x] 1.1 在 `src/ats/agent/task_projection.py` 为 `InformationBriefPayload` 增补可选字段 `fact_changes` / `impact_candidates` / `entities` / `confidence` / `freshness` / `unverified`，保持 `schema_version` 为 `v1` 且旧 payload 仍可校验通过。验证：新增测试用仅含旧字段的 payload 调用 `validate_payload("information_brief", ...)` 仍通过，含新字段亦通过。
+- [x] 1.2 为 `FundamentalEventReviewPayload` 增补可选字段 `scorecard` / `guidance` / `narrative` / `confidence` / `falsifiable_conditions`，同样保持向后兼容。验证：同上，两类 payload 的旧形态与新形态均通过校验。
+- [x] 1.3 在 `src/ats/workflow/architecture_guards.py` 的 `ROLE_BY_PATH_PREFIX` 中，把 `src/ats/agents/evidence` 的角色映射由 `information_analyst` 改为 `evidence_observer`，并新增 `src/ats/agents/information` → `information_analyst`。验证：`tests/test_architecture_guards.py` 仍全绿，且新映射可被 `scan_agents()` 命中。
+- [x] 1.4 在 `src/ats/workflow/run_contracts.py` 把必需性判定由 task_id 改为角色：新增「角色 → 可满足它的 task_id 集合」结构，基本面由 `fundamental_expectation_update` 或 `fundamental_event_review` 任一命中即满足。验证：新增测试断言只提供事件评审时基本面判定为满足，并把命中的 task_id 记录到结果里。
+- [x] 1.5 把 `technical_review` 的 `required_for_decision` 置为 `True`，使必需类别为六类。验证：新增测试断言 `default_registry()` 解析出的必需角色集合恰为六类。
+- [x] 1.6 为快照消费方暴露「按角色取可用投影」的读取函数（读 `task_projection_envelopes`，按 `agent_role` + 作用域 + 有效期过滤并返回最新一条）。验证：新增测试构造两类投影，断言按角色取回的是各自最新且未过期的一条。
+- [x] 1.7 为 `InformationBriefPayload` 增补可选字段 `event_time` / `published_at` / `extracted_at` / `cluster_key` / `source_count` / `independent_sources`，保持 `schema_version` 为 `v1` 且旧 payload 仍可校验通过。验证：新增测试断言旧形态与含三类时间、聚类字段的新形态均通过校验。
+- [x] 1.8 在 `validate_payload("fundamental_event_review", ...)` 增加越界字段断言：payload 出现 action 词表取值（`buy|add|hold|trim|sell`）或 `qty` / `notional` / `weight` 类字段即判不合法。验证：新增测试断言含这些字段的 payload 被拒，`direction` 取 `-1|0|1` 的正常 payload 通过。
 
 ## 2. 层级分析师：撤销配置权，改出状态判断与投影
 

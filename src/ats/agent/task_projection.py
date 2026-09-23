@@ -28,7 +28,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 # --------------------------------------------------------------------------- #
 # Roles and their payload schemas
@@ -93,7 +93,16 @@ class LayerAnalysisPayload(_Payload):
 
 
 class InformationBriefPayload(_Payload):
-    """A single piece of information, assessed for one target."""
+    """A single piece of information, assessed for one target.
+
+    The six evidence elements (facts, impact candidates, entities, confidence,
+    freshness, unverified items) plus the three clocks and the source-cluster
+    fields are all optional at the schema level — they are additive in v1 so
+    pre-existing payloads keep validating. The information analyst's own
+    publication path treats the six elements as REQUIRED (a brief missing any
+    of them is a failed run), which is the `agent/information-analyst`
+    contract; the schema only refuses to make old payloads illegal.
+    """
 
     schema_name: str = "InformationBrief"
     entity: str = Field(min_length=1)
@@ -101,8 +110,23 @@ class InformationBriefPayload(_Payload):
     summary: str = Field(min_length=1)
     relevance: Literal["low", "medium", "high"]
     sources: list[str] = Field(min_length=1)
+    # --- six evidence elements (Phase D, additive) ---
+    fact_changes: list[str] = Field(default_factory=list)
+    impact_candidates: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    freshness: str = ""
+    unverified: list[str] = Field(default_factory=list)
+    # --- three clocks and source clustering (Phase D, additive) ---
+    event_time: str = ""       # 事件时间：事情发生的时刻
+    published_at: str = ""     # 发布时间：文档对外可见的时刻
+    extracted_at: str = ""     # 抽取时间：系统入库并抽取的时刻
+    cluster_key: str = ""
+    source_count: int | None = Field(default=None, ge=0)
+    independent_sources: int | None = Field(default=None, ge=0)
 
-    @field_validator("sources", mode="before")
+    @field_validator("sources", "fact_changes", "impact_candidates", "entities",
+                     "unverified", mode="before")
     @classmethod
     def _non_empty_sources(cls, value: object) -> object:
         return _as_list(value)
@@ -146,8 +170,27 @@ class FundamentalExpectationUpdatePayload(_Payload):
         return _as_float(value)
 
 
+# The action vocabulary of `agent/action-vocabulary`. An event review expresses a
+# direction (-1|0|1), never an action — a direction that shows up carrying a verb
+# from this set is a second action pipeline in disguise, and the schema refuses it.
+EVENT_REVIEW_ACTION_VOCAB: frozenset[str] = frozenset(
+    {"buy", "add", "hold", "trim", "sell"})
+
+# Sizing fields under any spelling: an event review must not carry quantities.
+_SIZING_FIELD_NAMES: frozenset[str] = frozenset({
+    "action", "qty", "quantity", "target_qty", "notional", "target_notional",
+    "notional_hint", "qty_hint", "weight", "target_weight", "position_size",
+})
+
+
 class FundamentalEventReviewPayload(_Payload):
-    """What a discrete corporate event means for the expectation."""
+    """What a discrete corporate event means for the expectation.
+
+    Carries the non-executable investment view only: direction (expectation-gap
+    direction, -1|0|1), magnitude, confidence, reasoning and falsifiable
+    conditions. Action vocabulary and sizing fields are rejected outright —
+    tradability belongs to the chief and the risk officer (Phase D decision 12).
+    """
 
     schema_name: str = "FundamentalEventReview"
     entity: str = Field(min_length=1)
@@ -156,6 +199,12 @@ class FundamentalEventReviewPayload(_Payload):
     direction: Literal[-1, 0, 1]
     magnitude: float = Field(ge=0.0)
     notes: str = ""
+    # --- non-executable view, additive in v1 ---
+    scorecard: list[dict[str, Any]] = Field(default_factory=list)
+    guidance: str = ""
+    narrative: str = ""
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    falsifiable_conditions: list[str] = Field(default_factory=list)
 
     @field_validator("magnitude", mode="before")
     @classmethod
@@ -166,6 +215,30 @@ class FundamentalEventReviewPayload(_Payload):
     @classmethod
     def _direction_from_string(cls, value: object) -> object:
         return _as_int(value)
+
+    @field_validator("falsifiable_conditions", mode="before")
+    @classmethod
+    def _conditions_as_list(cls, value: object) -> object:
+        return _as_list(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_sizing_fields(cls, data: object) -> object:
+        if isinstance(data, Mapping):
+            present = sorted(_SIZING_FIELD_NAMES & set(data))
+            if present:
+                raise ValueError(
+                    f"event review must not carry sizing/action fields: {', '.join(present)}")
+        return data
+
+    @model_validator(mode="after")
+    def _reject_action_values(self) -> "FundamentalEventReviewPayload":
+        for name, value in self.__dict__.items():
+            if isinstance(value, str) and value.strip().lower() in EVENT_REVIEW_ACTION_VOCAB:
+                raise ValueError(
+                    f"field {name!r} carries an action-vocabulary value {value!r}; "
+                    "an event review expresses a direction, not an action")
+        return self
 
 
 class MacroReviewPayload(_Payload):
@@ -512,3 +585,41 @@ def reuse_decision(envelope: TaskProjectionEnvelope, *, scope: ProjectionScope,
 
 def is_reusable(envelope: TaskProjectionEnvelope, **kwargs: Any) -> bool:
     return reuse_decision(envelope, **kwargs)[0]
+
+
+# --------------------------------------------------------------------------- #
+# Reads for downstream consumers (Phase D task 1.6)
+# --------------------------------------------------------------------------- #
+
+def available_projection(store: Any, *, role: AgentRole, scope: ProjectionScope,
+                         **reuse_kwargs: Any) -> TaskProjectionEnvelope | None:
+    """Latest still-usable envelope for one role, or `None`.
+
+    Duck-typed over the store on purpose: the contract (role + scope + validity
+    + reuse vocabulary) lives here, the storage stays in `memory.store`. This is
+    the sanctioned read path for snapshot consumers — direct table reads are the
+    thing the `decision/research-snapshot` capability forbids.
+    """
+    return store.reusable_task_projection(agent_role=role, scope=scope, **reuse_kwargs)
+
+
+def available_projections_by_role(
+    store: Any, *, roles: Sequence[AgentRole], scope: ProjectionScope | None = None,
+    scope_by_role: Mapping[AgentRole, ProjectionScope] | None = None,
+    **reuse_kwargs: Any,
+) -> dict[AgentRole, TaskProjectionEnvelope | None]:
+    """Per-role latest usable envelope, `None` where a role has none.
+
+    Snapshot consumers call this once per decision attempt instead of querying
+    tables role by role; the returned mapping plugs straight into
+    `decision.snapshot.build_research_snapshot`.
+    """
+    per_role = scope_by_role or {}
+    out: dict[AgentRole, TaskProjectionEnvelope | None] = {}
+    for role in roles:
+        role_scope = per_role.get(role, scope)
+        if role_scope is None:
+            raise ValueError(f"no scope given for role {role!r}")
+        out[role] = available_projection(store, role=role, scope=role_scope,
+                                         **reuse_kwargs)
+    return out

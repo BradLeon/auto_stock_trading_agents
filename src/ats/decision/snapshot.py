@@ -25,7 +25,6 @@ from ..workflow.run_contracts import TaskRegistry
 from .repository import DecisionAuditRepository
 from .state import CycleStatus
 
-
 class IncompleteResearchSnapshotError(Exception):
     """A required projection is missing or stale; the cycle must not open."""
 
@@ -39,10 +38,17 @@ class IncompleteResearchSnapshotError(Exception):
 
 @dataclass
 class SnapshotItem:
-    """One required task's projection state inside the snapshot."""
+    """One decision-required category's projection state inside the snapshot.
+
+    Satisfaction is judged per CATEGORY, not per task id (Phase D task 1.4):
+    `task_id` names the task whose envelope satisfied the category — for a
+    category no task satisfied, it names the representative task id (or the
+    category itself when several tasks could have satisfied it).
+    """
 
     task_id: str
     agent_role: AgentRole | None
+    category: str = ""
     projection_id: str = ""
     content_hash: str = ""
     as_of: str = ""
@@ -81,6 +87,36 @@ class ResearchSnapshot:
         }
 
 
+def _category_task_ids(registry: TaskRegistry) -> list[tuple[str, list[str], list[str]]]:
+    """(category, satisfying task ids, unmapped fallback roles) for one build.
+
+    Categories come from `DECISION_CATEGORY_ROLES`; a registry-required task
+    whose role is not mapped anywhere forms its own ad-hoc category so an
+    unexpected role can never silently escape the gate.
+    """
+    from ..workflow.run_contracts import ROLE_TO_CATEGORY
+
+    mapped: dict[str, list[str]] = {}
+    unmapped: dict[str, list[str]] = {}
+    for task_id in registry.task_ids():
+        spec = registry.spec(task_id)
+        if not spec.required_for_decision or spec.agent_role is None:
+            continue
+        category = ROLE_TO_CATEGORY.get(spec.agent_role)
+        if category is None:
+            unmapped.setdefault(spec.agent_role, []).append(task_id)
+        else:
+            mapped.setdefault(category, []).append(task_id)
+    out: list[tuple[str, list[str], list[str]]] = []
+    for category in mapped:
+        out.append((category, mapped[category], []))
+    for role, task_ids in unmapped.items():
+        out.append((role, [], task_ids))
+    # Stable, registry-order-independent: sort by category name.
+    out.sort(key=lambda entry: entry[0])
+    return out
+
+
 def build_research_snapshot(
     *,
     registry: TaskRegistry,
@@ -91,36 +127,56 @@ def build_research_snapshot(
     data_vintage_refs: Any = None,
     at: datetime | None = None,
 ) -> ResearchSnapshot:
-    """Snapshot every decision-required task's projection state (task 3.1).
+    """Snapshot every decision-required category's projection state (task 3.1).
 
     Each item is traceable back to a concrete envelope: `projection_id` and
     `content_hash` are copied from it, and reuse is judged by Phase A's
-    `reuse_decision` so the reason vocabulary never forks. `required_scopes`
-    names, per task, the scope the task was ASKED about — a decision cycle
-    reads projections of many scopes (a layer brief, a name review), so a
-    blanket portfolio query would misjudge every one of them; a task without
-    an entry is only checked for freshness and publication.
+    `reuse_decision` so the reason vocabulary never forks. Satisfaction is per
+    category: the fundamental category is satisfied by EITHER mode's task, and
+    the hit's task id is what the item records (Phase D task 1.4).
+
+    `required_scopes` names, per task, the scope the task was ASKED about — a
+    decision cycle reads projections of many scopes (a layer brief, a name
+    review), so a blanket portfolio query would misjudge every one of them; a
+    task without an entry is only checked for freshness and publication.
     """
     wanted = required_scopes or {}
     stamp = (at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
     items: list[SnapshotItem] = []
-    for task_id in registry.task_ids():
-        spec = registry.spec(task_id)
-        if not spec.required_for_decision or spec.agent_role is None:
+
+    for category, task_ids, fallback_task_ids in _category_task_ids(registry):
+        # A category no registered task can satisfy (unmapped role) is a gap
+        # right away — there is nothing that could ever fill it.
+        candidates: list[str] = task_ids or fallback_task_ids
+        if not candidates:
             continue
-        envelope = projections.get(task_id)
-        if envelope is None:
-            items.append(SnapshotItem(task_id=task_id,
-                                      agent_role=spec.agent_role))
-            continue
-        reusable, reason = reuse_decision(
-            envelope, scope=wanted.get(task_id, envelope.scope),
-            input_refs=input_refs, data_vintage_refs=data_vintage_refs, at=at)
-        items.append(SnapshotItem(
-            task_id=task_id, agent_role=spec.agent_role,
-            projection_id=envelope.projection_id,
-            content_hash=envelope.content_hash, as_of=envelope.as_of,
-            reusable=reusable, reason=reason))
+        best: SnapshotItem | None = None
+        for task_id in candidates:
+            spec = registry.spec(task_id)
+            envelope = projections.get(task_id)
+            if envelope is None:
+                item = SnapshotItem(task_id=task_id, agent_role=spec.agent_role,
+                                    category=category)
+            else:
+                reusable, reason = reuse_decision(
+                    envelope, scope=wanted.get(task_id, envelope.scope),
+                    input_refs=input_refs, data_vintage_refs=data_vintage_refs,
+                    at=at)
+                item = SnapshotItem(
+                    task_id=task_id, agent_role=spec.agent_role, category=category,
+                    projection_id=envelope.projection_id,
+                    content_hash=envelope.content_hash, as_of=envelope.as_of,
+                    reusable=reusable, reason=reason)
+            if item.reusable:
+                best = item
+                break
+            # Prefer the most informative failure: an envelope that failed reuse
+            # (stale/scope) beats "we never got one".
+            if best is None or (best.projection_id == "" and item.projection_id):
+                best = item
+        if best is not None:
+            items.append(best)
+
     return ResearchSnapshot(scope=scope, built_at=stamp, items=items)
 
 

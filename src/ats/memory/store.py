@@ -462,11 +462,62 @@ CREATE INDEX IF NOT EXISTS idx_cycle_events_cycle
     ON cycle_events(cycle_id, created_at);
 """
 
-_SCHEMA = _BASE_SCHEMA + _DECISION_AUDIT_DDL
+_CLERK_LEDGER_DDL = """
+-- Phase C (§11): the Clerk/ledger tables. Every column except the primary key
+-- is nullable BY RULING (design D3): history rows, manual orders and
+-- unattributable fills have no decision chain to fill, and a NOT NULL would
+-- force fabricated values. Enforcement lives in write paths, not the schema.
+CREATE TABLE IF NOT EXISTS ledger_exceptions (
+    exception_id TEXT PRIMARY KEY,        -- deterministic: kind + subject + window
+    kind TEXT,                            -- unattributed_fill / broken_link /
+                                          -- reconciliation_gap / position_cash_discrepancy /
+                                          -- attempt_count_mismatch
+    subject_key TEXT,                     -- what the exception is about (fill id, window, symbol)
+    cycle_id TEXT, symbol TEXT,
+    window_start TEXT, window_end TEXT, as_of TEXT,
+    basis TEXT,                           -- evidence / reasoning behind the exception
+    detail_json TEXT,                     -- both sides' values, broker identities, etc.
+    status TEXT,                          -- open / resolved
+    first_seen_at TEXT, last_seen_at TEXT, resolved_at TEXT,
+    created_at TEXT, updated_at TEXT
+);
+-- Same exception rediscovered is an update of last_seen, not a second row.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_exceptions_subject
+    ON ledger_exceptions(kind, subject_key);
+CREATE INDEX IF NOT EXISTS idx_ledger_exceptions_kind
+    ON ledger_exceptions(kind, status);
+CREATE TABLE IF NOT EXISTS clerk_runs (
+    run_id TEXT PRIMARY KEY,              -- idempotency key: kind+window+as_of, no request moment
+    kind TEXT,                            -- reconcile / marks / episodes / predictions / performance / full
+    window_start TEXT, window_end TEXT, as_of TEXT,
+    status TEXT,                          -- running / completed / failed
+    counts_json TEXT, error TEXT,
+    started_at TEXT, finished_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clerk_runs_window
+    ON clerk_runs(kind, window_start, window_end, as_of);
+CREATE TABLE IF NOT EXISTS ledger_read_models (
+    model_id TEXT PRIMARY KEY,            -- kind + period + method_version
+    kind TEXT,                            -- performance / attribution
+    period TEXT, as_of TEXT,
+    method_version TEXT, source_facts_hash TEXT,
+    payload TEXT, rebuilt_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_read_models_key
+    ON ledger_read_models(kind, period, method_version);
+CREATE INDEX IF NOT EXISTS idx_ledger_read_models_asof
+    ON ledger_read_models(kind, as_of);
+"""
+
+_SCHEMA = _BASE_SCHEMA + _DECISION_AUDIT_DDL + _CLERK_LEDGER_DDL
 
 _DECISION_AUDIT_TABLES = frozenset({
     "decision_cycles", "decision_revisions", "decision_risk_reviews",
     "boss_approvals", "cycle_events",
+})
+
+_CLERK_LEDGER_TABLES = frozenset({
+    "ledger_exceptions", "clerk_runs", "ledger_read_models",
 })
 
 
@@ -703,6 +754,7 @@ class TradingMemory:
         self._migrate_shared_facts()
         self._migrate_pead_events_pk()
         self._migrate_decision_audit_tables()
+        self._migrate_clerk_ledger_tables()
         self._migrate_legacy_decisions()
         self.conn.commit()
 
@@ -798,6 +850,18 @@ class TradingMemory:
             "SELECT name FROM sqlite_master WHERE type='table'")}
         if not _DECISION_AUDIT_TABLES <= present:
             self.conn.executescript(_DECISION_AUDIT_DDL)
+
+    def _migrate_clerk_ledger_tables(self) -> None:
+        """Additive completion of the §11 Clerk/ledger tables (Phase C).
+
+        Same pattern as `_migrate_decision_audit_tables`: a pre-Phase-C database
+        re-applies the `_CLERK_LEDGER_DDL` fragment; CREATE IF NOT EXISTS keeps
+        it idempotent and no legacy column or table is touched.
+        """
+        present = {r["name"] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not _CLERK_LEDGER_TABLES <= present:
+            self.conn.executescript(_CLERK_LEDGER_DDL)
 
     def _migrate_legacy_decisions(self) -> None:
         """One-time §12.3 backfill: legacy `decisions` rows become revisions.

@@ -24,6 +24,10 @@ WORKFLOW_MEMORY_TABLES = frozenset({
     # layer's neutral facts.
     "decision_cycles", "decision_revisions", "decision_risk_reviews",
     "boss_approvals", "cycle_events",
+    # Clerk / trade ledger (§11, Phase C). Exceptions, run trails and derived
+    # read models all carry trade consequences and opinions about them, so they
+    # are Workflow memory too.
+    "ledger_exceptions", "clerk_runs", "ledger_read_models",
     "claim_assessments", "sector_reviews", "macro_reviews",
     "technical_reviews", "fills", "risk_reviews", "score_consumption", "pead_periods",
     "pead_score_runs", "journal_entries", "journal_meta", "predictions",

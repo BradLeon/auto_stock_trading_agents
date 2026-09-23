@@ -1,10 +1,10 @@
 ## 1. 存储与归属登记（additive，不改行为）
 
-- [ ] 1.1 新增 `ledger_exceptions` 审计异常表（断链、无法归因成交、漏跑窗口、持仓资金差异），含类型/标的范围/两侧数值/依据/时点字段，并在 `src/ats/data/stores/ownership.py` 登记为 Workflow memory —— 验证：迁移后表与索引存在，`tests/test_legacy_retirement.py` 与归属守卫测试通过
-- [ ] 1.2 新增 `clerk_runs` 运行留痕表（运行种类、对账窗口、as-of、幂等键、起止与状态、汇总计数）—— 验证：同窗口重复运行只产生一条留痕，表已登记归属
-- [ ] 1.3 新增 `ledger_read_models` 派生读模型表（kind ∈ performance|attribution、period、as_of、method_version、source_facts_hash、payload、rebuilt_at）—— 验证：表与唯一约束存在，已登记归属
-- [ ] 1.4 编写只读历史盘点脚本（统计断链订单行、无依据 `manual` 成交行、未对账会话窗口）—— 验证：以 `mode=ro` 打开真实库副本输出分类计数，脚本不产生任何写入
-- [ ] 1.5 新增与修改的列除主键外一律可空，不引入 `NOT NULL` 或条件 `CHECK` 约束（强关联由写路径校验承担，裁决 A）—— 验证：断言相关列的非空约束为空，且历史行、人工单、无法归因单均能正常写入
+- [x] 1.1 新增 `ledger_exceptions` 审计异常表（断链、无法归因成交、漏跑窗口、持仓资金差异），含类型/标的范围/两侧数值/依据/时点字段，并在 `src/ats/data/stores/ownership.py` 登记为 Workflow memory —— 验证：迁移后表与索引存在，`tests/test_legacy_retirement.py` 与归属守卫测试通过
+- [x] 1.2 新增 `clerk_runs` 运行留痕表（运行种类、对账窗口、as-of、幂等键、起止与状态、汇总计数）—— 验证：同窗口重复运行只产生一条留痕，表已登记归属
+- [x] 1.3 新增 `ledger_read_models` 派生读模型表（kind ∈ performance|attribution、period、as_of、method_version、source_facts_hash、payload、rebuilt_at）—— 验证：表与唯一约束存在，已登记归属
+- [x] 1.4 编写只读历史盘点脚本（统计断链订单行、无依据 `manual` 成交行、未对账会话窗口）—— 验证：以 `mode=ro` 打开真实库副本输出分类计数，脚本不产生任何写入
+- [x] 1.5 新增与修改的列除主键外一律可空，不引入 `NOT NULL` 或条件 `CHECK` 约束（强关联由写路径校验承担，裁决 A）—— 验证：断言相关列的非空约束为空，且历史行、人工单、无法归因单均能正常写入
 
 ## 2. 强关联与归属三类化
 

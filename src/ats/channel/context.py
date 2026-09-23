@@ -14,13 +14,21 @@ def build_report_bundle(query: str) -> ReportBundle:
         return ReportBundle(query=query, summary="usage: report <SYMBOL>")
 
     store = get_store()
+    # Task 6.6: trade history comes via the Internal State API now — the
+    # completeness marker qualifies what the Boss sees (gaps are visible).
+    from ..execution import state_api
+
+    _comp = state_api.completeness(store)
     # The per-cycle `reports` table was superseded by the PEAD dossier and has not been
     # written since; reading it rendered an empty "Reports:" block every time. Read the
     # artifact that actually holds a name's current thesis.
     dossiers = store.recent_dossiers(symbol, limit=3)
-    trades = store.recent_trades(symbol, limit=8)
+    trades = state_api.recent_trades(store, symbol, limit=8)
 
-    lines = [f"History for {symbol}:"]
+    lines = [f"History for {symbol}:", f"  Ledger: {_comp.status}"
+             + (f"（无法归因 {_comp.unattributed_fills} / 断链 {_comp.broken_links}"
+                f" / 未对账窗口 {_comp.unreconciled_windows}）"
+                if _comp.status == "degraded" else "")]
     if dossiers:
         lines.append("  Dossiers:")
         for meta in dossiers:

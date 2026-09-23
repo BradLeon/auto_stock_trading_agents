@@ -210,7 +210,12 @@ def _recent_actions_block() -> str:
     inflight, proposed = [], []
     for sym, d in latest.items():
         cid = d.get("cycle_id") or ""
-        trades = [t for t in store.recent_trades(sym, limit=8) if (t.get("cycle_id") or "") == cid]
+        # Task 6.4: trade history now comes via the Internal State API —
+        # same rows, plus as-of/completeness qualification at the boundary.
+        from ...execution import state_api
+
+        trades = [t for t in state_api.recent_trades(store, sym, limit=8)
+                  if (t.get("cycle_id") or "") == cid]
         line = f"- {sym}: [{_cycle_day(cid)}] {d['action']} ${d.get('notional_usd') or 0:,.0f}"
         if any((t.get("status") or "") == "filled" for t in trades):
             inflight.append(line + " → 已成交（仓位已变，勿重复）")
@@ -346,7 +351,10 @@ def _track_record_block() -> str:
     for d in store.recent_decisions(limit=8):
         lines.append(f"  近期决策: {d['action']} {d['symbol']} "
                      f"${d.get('notional_usd') or 0:,.0f} — {(d.get('rationale') or '')[:50]}")
-    for f in store.recent_fills(limit=5):
+    # Task 6.4: fills also come via the Internal State API now.
+    from ...execution import state_api
+
+    for f in state_api.recent_fills(store, limit=5):
         rp = f" realized ${f['realized_pnl']:,.0f}" if f.get("realized_pnl") is not None else ""
         lines.append(f"  近期成交: {f['side']} {f['symbol']} {f['shares']:.0f}@{f['price']:.2f}{rp}")
     return "\n".join(lines)

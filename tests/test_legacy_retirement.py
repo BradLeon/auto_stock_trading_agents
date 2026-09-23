@@ -150,6 +150,8 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "evidence_fact_projections.legacy_observation_id",
         "scheduler.hardcoded_serial_run",
         "legacy_read_models",
+        # ── Phase C（任务 6.7：旧直读点先行登记；其余五项随任务 8.1 批次追加）──
+        "store.direct_trade_reads",
         # ── Phase B ──
         "risk.checks.in_place_clipping",
         "agents.risk_validator.apply_guardrails",

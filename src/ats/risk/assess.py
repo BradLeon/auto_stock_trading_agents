@@ -572,8 +572,20 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     _assess_option_stops(r, option_positions, rc)
 
     # L4 — drawdown / daily loss (scoped to THIS account — never mix paper vs live)
-    hist = [h for h in get_store().performance_history(limit=250)
+    # Task 6.5: the performance history now flows through the Internal State
+    # API; when the ledger is degraded (unreconciled windows / unattributed
+    # fills / broken links) the review carries an explicit degradation note
+    # instead of silently treating the numbers as complete.
+    from ..execution import state_api
+
+    _comp = state_api.completeness(get_store())
+    hist = [h for h in state_api.performance_history(get_store(), limit=250)
             if h.account_id == portfolio.account_id]
+    if _comp.status == "degraded":
+        r.notes = (r.notes + "\n" if r.notes else "") + (
+            f"内部状态完整性降级（degraded）：未对账窗口 {_comp.unreconciled_windows}、"
+            f"无法归因成交 {_comp.unattributed_fills}、断链 {_comp.broken_links} —— "
+            f"绩效与回撤数值按不完整账本计算")
     if hist:
         from ..trader import analytics
         dd = analytics.max_drawdown_pct(hist + [_perf_stub(net_liq, portfolio.account_id)])

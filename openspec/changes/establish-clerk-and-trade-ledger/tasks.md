@@ -46,13 +46,13 @@
 
 ## 6. Internal State API 与消费方迁移
 
-- [ ] 6.1 新建 `src/ats/execution/state_api.py` 发布 `InternalState`（as-of、交易历史、绩效、归因、组合口径、审计异常） —— 验证：单测断言各段字段与 as-of 齐全
-- [ ] 6.2 `completeness` 含未对账窗口、无法归因成交与历史断链的计数及 complete / degraded 状态 —— 验证：单测断言三类缺口分别正确计入
-- [ ] 6.3 存在缺口时完整性标记为不完整，不得呈现为已完整对账 —— 验证：单测断言缺口存在时状态为 degraded 且缺口范围可见
-- [ ] 6.4 Chief 的**交易历史读取段**迁移到 Internal State（`agents/chief/assemble.py` 的 `recent_trades` / `recent_fills`），先双读比对再切换；assembler 整体重构属 Phase D，本阶段不在同一文件内做结构改动（裁决 C）—— 验证：单测断言切换后 Chief 上下文含 as-of 与完整性标记
-- [ ] 6.5 Risk 的**绩效读取段**迁移到 Internal State（`risk/assess.py` 的 `performance_history`），完整性不足时显式降级或阻断（裁决 C）—— 验证：单测断言 degraded 状态下不会视为完整数据
-- [ ] 6.6 `channel/context.py` 的交易读取迁移 —— 验证：单测断言展示内容来自读模型且保留完整性标记
-- [ ] 6.7 旧直读点登记为待退项（退出条件：消费方全部切换且直读调用清零） —— 验证：登记条目可通过注册表校验
+- [x] 6.1 新建 `src/ats/execution/state_api.py` 发布 `InternalState`（as-of、交易历史、绩效、归因、组合口径、审计异常） —— 验证：单测断言各段字段与 as-of 齐全
+- [x] 6.2 `completeness` 含未对账窗口、无法归因成交与历史断链的计数及 complete / degraded 状态 —— 验证：单测断言三类缺口分别正确计入
+- [x] 6.3 存在缺口时完整性标记为不完整，不得呈现为已完整对账 —— 验证：单测断言缺口存在时状态为 degraded 且缺口范围可见
+- [x] 6.4 Chief 的**交易历史读取段**迁移到 Internal State（`agents/chief/assemble.py` 的 `recent_trades` / `recent_fills`），先双读比对再切换；assembler 整体重构属 Phase D，本阶段不在同一文件内做结构改动（裁决 C）—— 验证：单测断言切换后 Chief 上下文含 as-of 与完整性标记
+- [x] 6.5 Risk 的**绩效读取段**迁移到 Internal State（`risk/assess.py` 的 `performance_history`），完整性不足时显式降级或阻断（裁决 C）—— 验证：单测断言 degraded 状态下不会视为完整数据
+- [x] 6.6 `channel/context.py` 的交易读取迁移 —— 验证：单测断言展示内容来自读模型且保留完整性标记
+- [x] 6.7 旧直读点登记为待退项（退出条件：消费方全部切换且直读调用清零） —— 验证：登记条目可通过注册表校验
 
 ## 7. LLM 边界与架构守卫
 

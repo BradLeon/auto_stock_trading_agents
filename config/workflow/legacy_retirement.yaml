@@ -129,6 +129,20 @@ retired:
       - channel.context
     consumer_zero_criterion: 旧报表与 CLI 全部改为读 envelope，兼容写入登记退役条件后清零。
     location: Workflow memory
+  - identifier: store.direct_trade_reads
+    capability_domain: execution/internal-state-api
+    replaced_by: execution.state_api（as-of + 完整性标记的内部状态读模型）
+    target_phase: C
+    status: pending
+    exit_condition: Chief（assemble.py）、Risk（risk/assess.py）与 channel/context 的交易历史与绩效读取全部改经 Internal State API。
+    missing_condition: >-
+      上述消费方仍在直读 trades/fills/performance 原始表；双读比对确认一致后逐个切换。
+    consumers:
+      - agents.chief.assemble
+      - risk.assess
+      - channel.context
+    consumer_zero_criterion: 消费方全部切换且直读调用清零（grep 校验）。
+    location: Workflow memory
 
   # ── Phase B（决策审计与交易安全）──────────────────────────────────────────
   - identifier: risk.checks.in_place_clipping

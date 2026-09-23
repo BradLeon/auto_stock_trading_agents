@@ -791,6 +791,10 @@ Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent�
 `approval_id` 关联字段。现有用于组合快照的 `risk_reviews` 保留，不与新的
 `decision_risk_reviews` 混用。
 
+> **实现注记（Phase B）**：本仓库以 `trades` 表承担上述「订单」职责（`orders` 仅为
+> 设计层称谓），故关联字段落在 `trades` 与 `fills` 两表上；订单标识由
+> `cycle + revision + 订单序号` 派生（`client_order_id` / `order_ref`）。
+
 ### 12.4 迁移原则
 
 - 所有 schema 变更首先使用 additive migration，不删除旧表或旧列。
@@ -870,6 +874,23 @@ event_id + event_version + workflow_id
 - 将 Boss 入口限定为批准/拒绝，绑定 revision hash。
 - 在 Trader 入口强制校验 ExecutionAuthorization 和新鲜度。
 - 所有手动和自动交易指令进入同一审批链。
+
+**实施状态（2026-09-23，change `establish-decision-audit-and-trade-safety` 已实施）**：
+
+- 审计存储五表（`decision_cycles` / `decision_revisions` / `decision_risk_reviews` /
+  `boss_approvals` / `cycle_events`）落地；修订不可变、内容哈希幂等、转移 CAS 留痕；
+  历史决策诚实迁移（`legacy_unknown` 不伪造哈希）。
+- 风控改为以整条修订为评估单元的只读审查（`risk/checks.py::review_revision`，
+  含跨单规则与交易前后指标），`pre_trade()` 退化为回滚适配层。
+- Chief—Risk 有界 Loop（默认 ≤3 轮）接线至图：approve → 审批、reject → `chief_revise`
+  采纳边界、exhausted/修订被驳空 → `manual_review`；No Action 为带理由的正式终态。
+- Boss 审批收窄为对精确 revision hash 的批准/拒绝，修改意见只作拒绝备注；
+  审批回调幂等键持久化（过程+修订+哈希+渠道+轮次），跨进程/重启去重。
+- 执行授权网关（`execution/authorization.py`）：真实下单须持完整授权并逐项复验；
+  组合快照过期（`max_snapshot_age_seconds: 60`）即回退重新风控并强制重新审批；
+  订单标识改由 cycle + revision + 序号派生；不确定结局的重试不重提。
+- 待退登记六项见 `config/workflow/legacy_retirement.yaml`（Phase B 段）；
+  验收与保真性对照记录见 change 目录 `verification.md`。
 
 ### 14.3 阶段 C：Clerk 和交易账本
 

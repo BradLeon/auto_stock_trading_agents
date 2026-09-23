@@ -2392,6 +2392,60 @@ class TradingMemory:
         return None
 
     # --- research (newsletters) ------------------------------------------ #
+    def admitted_research_articles(self, since, *, limit: int = 500,
+                                   allow_incomplete: bool = True) -> list:
+        """Admitted research articles via the data-product read router (Phase D).
+
+        The information analyst reads admitted documents through this bridge —
+        it never imports `ats.data.*` provider modules directly, so the
+        `agent/information-analyst` guard (no provider imports) can pass while
+        the read-router and consumer-policy selection stay in the data layer.
+        Applies the research-article consumer policy (full texts, or partial
+        previews from sources that publish them intentionally).
+        """
+        from ..data.research import is_pead_research_article, stored_articles
+
+        # `store=self` matches the pre-Phase-D caller pattern: stored_articles
+        # treats this Workflow-Memory instance as the legacy repository and the
+        # router decides platform vs legacy by the consumer's release mode.
+        candidates = stored_articles(since, store=self,
+                                     allow_incomplete=allow_incomplete,
+                                     consumer="information_analyst")
+        return [a for a in candidates if is_pead_research_article(a)]
+
+    def admitted_document_body(self, external_id: str, *, min_chars: int = 800) -> str:
+        """Already-admitted article body, or "" — never a network fetch.
+
+        Phase D: the information analyst's full-text path is read-only over
+        admitted document assets. An item whose body was never ingested is
+        simply unavailable (its metadata still makes it into the brief); the
+        pre-Phase-D behavior of fetching the URL on the fly from an agent is
+        retired with the provider-direct-connection cleanup.
+        """
+        from ..data import document_assets
+
+        row, cached = document_assets.read_external(external_id,
+                                                    store=self.data_store())
+        if row and len(cached) >= min_chars:
+            return cached
+        return ""
+
+    def admitted_news_body(self, item, *, min_chars: int = 800) -> str:
+        """Already-admitted news article body by cross-provider identity (Phase D).
+
+        Read-only bridge over admitted document assets — the caller (information
+        analyst) never imports the news provider module and never fetches. An
+        item whose body was never ingested returns "".
+        """
+        from ..data import document_assets
+        from ..data.news import external_id
+
+        row, cached = document_assets.read_external(external_id(item),
+                                                    store=self.data_store())
+        if row and len(cached) >= min_chars:
+            return cached
+        return ""
+
     def article_seen(self, article_id: str) -> bool:
         return self.conn.execute("SELECT 1 FROM research_articles WHERE id = ?",
                                  (article_id,)).fetchone() is not None

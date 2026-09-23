@@ -231,6 +231,17 @@ def intel_digest(lookback_hours: int = 24, *, use_llm: bool = True) -> Path | No
         log.info("intel digest: nothing material in the last %dh", lookback_hours)
         return None
 
+    # Phase D 4.5：摘要的标的综合同时发布为 InformationBrief 投影——
+    # digest 输出成为可查回的工作流状态，而不只是渲染一份报告。
+    try:
+        from ..agents.information.digest import publish_digest_briefs
+
+        publish_digest_briefs(store, per,
+                              cutoff=datetime.fromisoformat(cutoff),
+                              min_triage=min_triage)
+    except Exception as exc:  # noqa: BLE001 - publication must not break the digest
+        log.warning("digest brief publication skipped: %s", exc)
+
     briefs = _brief(per) if use_llm else {}
 
     def _rank(sym: str) -> float:

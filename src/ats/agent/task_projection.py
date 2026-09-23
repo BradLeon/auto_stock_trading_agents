@@ -583,6 +583,16 @@ def reuse_decision(envelope: TaskProjectionEnvelope, *, scope: ProjectionScope,
     return True, "reusable"
 
 
+class EnvelopeValidationError(ValueError):
+    """A payload fails the ROLE-LEVEL publication contract (not the schema).
+
+    Distinct from pydantic's ValidationError: the schema stays additive so old
+    payloads keep parsing, while a role's own publish path may demand more
+    (e.g. the information analyst requires all six evidence elements). Raising
+    here means the run FAILED — callers must not fall back to a degraded write.
+    """
+
+
 def is_reusable(envelope: TaskProjectionEnvelope, **kwargs: Any) -> bool:
     return reuse_decision(envelope, **kwargs)[0]
 

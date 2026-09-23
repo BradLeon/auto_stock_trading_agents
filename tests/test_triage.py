@@ -40,7 +40,7 @@ def test_triage_scores_persisted_and_noise_filtered(monkeypatch):
         captured["ctx"] = ctx
         return ContextUpdateView(materiality=0.7, event_summary="guidance up")
 
-    monkeypatch.setattr(monitor, "run_structured", fake_llm)
+    monkeypatch.setattr("ats.agents.information.documents.run_structured", fake_llm)
     upd = monitor.run("COHR", use_llm=True)
 
     assert upd.materiality == 0.7
@@ -63,7 +63,7 @@ def test_triage_all_noise_skips_manager_llm(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("manager LLM must not be called when all noise")
 
-    monkeypatch.setattr(monitor, "run_structured", boom)
+    monkeypatch.setattr("ats.agents.information.documents.run_structured", boom)
     upd = monitor.run("COHR", use_llm=True)
     assert upd.materiality == 0.0
     assert "all triaged as noise" in upd.event_summary
@@ -79,7 +79,7 @@ def test_triage_failure_degrades_to_passthrough(monkeypatch):
         captured["ctx"] = ctx
         return ContextUpdateView(materiality=0.2, event_summary="routine")
 
-    monkeypatch.setattr(monitor, "run_structured", fake_llm)
+    monkeypatch.setattr("ats.agents.information.documents.run_structured", fake_llm)
     upd = monitor.run("COHR", use_llm=True)
     assert upd.materiality == 0.2
     # No scores -> everything passes through (current behavior).
@@ -90,9 +90,15 @@ def test_fulltext_bodies_reach_llm_context(monkeypatch):
     monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
     monkeypatch.setattr(triage, "score_items", _scores(
         hot=(0.9, "guidance"), meh=(0.4, "analyst"), noise=(0.1, "noise")))
+    # Phase D: full texts are ADMITTED BODIES ONLY — no agent-side URL fetch.
     import ats.data.web as web
+
     monkeypatch.setattr(web, "fetch_article_text",
-                        lambda url, **k: "FULL BODY TEXT of the guidance article")
+                        lambda url, **k: (_ for _ in ()).throw(
+                            AssertionError("agent must not fetch article urls")))
+    monkeypatch.setattr("ats.data.document_assets.read_external",
+                        lambda ext_id, store=None: ({"document_id": "d1"},
+                                                    "FULL BODY TEXT of the guidance article. " * 40))
 
     captured = {}
 
@@ -100,7 +106,7 @@ def test_fulltext_bodies_reach_llm_context(monkeypatch):
         captured["ctx"] = ctx
         return ContextUpdateView(materiality=0.8, event_summary="x")
 
-    monkeypatch.setattr(monitor, "run_structured", fake_llm)
+    monkeypatch.setattr("ats.agents.information.documents.run_structured", fake_llm)
     monitor.run("COHR", use_llm=True)
     assert "FULL BODY TEXT of the guidance article" in captured["ctx"]
 
@@ -113,7 +119,7 @@ def test_score_items_batches_and_maps_idx(monkeypatch):
         TriageItemView(idx=2, materiality=0.1, category="noise"),
         TriageItemView(idx=99, materiality=1.0, category="bogus"),   # out of range -> dropped
     ])
-    monkeypatch.setattr(triage, "run_structured", lambda *a, **k: view)
+    monkeypatch.setattr("ats.agents.information.triage.run_structured", lambda *a, **k: view)
     scores = triage.score_items("COHR", "thesis", items)
     assert scores == {"i0": (0.8, "capex"), "i2": (0.1, "noise")}
 

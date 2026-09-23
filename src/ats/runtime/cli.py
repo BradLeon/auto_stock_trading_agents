@@ -1467,6 +1467,32 @@ def run_pead_research(*, use_llm: bool = True) -> list:
     return insights
 
 
+def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) -> int:
+    """信息分析师独立入口（Phase D）：一轮信息简报，独立终结。
+
+    只消费已准入文档与中性证据、发布 InformationBrief 投影；不读取其他
+    分析师观点，不触发基本面流程或主理人决策。
+    """
+    from ..agents.information import entry
+
+    if ingest_research:
+        # 数据层采集属于 runtime 侧动作：agent 包内不发起取回（4.1 契约）
+        from ..data import research as research_data
+        from ..data.stores.unstructured import get_data_ingestion_store
+
+        data_store = get_data_ingestion_store()
+        try:
+            research_data.ingest_configured(store=data_store)
+        finally:
+            data_store.close()
+    summary = entry.run_information_pass(use_llm=use_llm,
+                                         ingest_research=ingest_research)
+    print("🛰️  information — 每轮信息简报")
+    print(f"   文章 {summary['articles']} 篇 · 目标 {len(summary['targets'])} 个"
+          f" · 简报投影 {summary['briefs']} 条")
+    return 0
+
+
 def run_pead_score_window(
     window: str,
     *,
@@ -2761,6 +2787,14 @@ def main(argv: list[str] | None = None) -> int:
     ma.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     ma.add_argument("--offline", action="store_true", help="skip FRED/yfinance/Tavily")
     ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    an = sub.add_parser(
+        "analyst", help="分析师独立入口 (information) — 独立终结，不触发决策链"
+    )
+    an.add_argument("action", choices=["information"],
+                    help="information: 信息分析师一轮简报（4.9 独立入口）")
+    an.add_argument("--no-ingest", action="store_true",
+                    help="跳过数据层研究文章采集，只处理已准入文档")
+    an.add_argument("--no-llm", action="store_true", help="无 LLM：只做识别与投影，不抽取")
     pe = sub.add_parser(
         "pead", help="PEAD earnings workflow (prep / score / show / monitor / watch / research)"
     )
@@ -3087,6 +3121,11 @@ def main(argv: list[str] | None = None) -> int:
             write_report=not args.no_report,
         )
         return 0
+    if args.command == "analyst":
+        if args.action == "information":
+            return run_information_pass(use_llm=not args.no_llm,
+                                        ingest_research=not args.no_ingest)
+        return 1
     if args.command == "pead":
         if args.action == "watch":
             run_pead_watch(use_llm=not args.no_llm)

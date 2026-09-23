@@ -1,11 +1,11 @@
-"""Newsletter research — ingestion dedup, insight extraction, event injection
-(no network)."""
+"""Newsletter research — ingestion dedup, insight extraction, brief publication
+(no network). Phase D: extraction belongs to the information analyst; products
+are InformationBrief projections, and synthetic pead_event injection is gone."""
 
 from datetime import datetime, timezone
 
 import ats.data.research as research_src
-from ats.agents.pead import research
-from ats.agents.pead.outputs import InsightBatchView, InsightItemView
+from ats.agents.information import extract as info_extract
 from ats.memory import get_store
 from ats.schemas.research import Article
 
@@ -43,37 +43,36 @@ def _view():
     ])
 
 
-def test_research_extracts_filters_and_injects(monkeypatch):
+def test_research_extracts_filters_and_publishes_briefs(monkeypatch):
     _pin_universe(monkeypatch)
     monkeypatch.setattr(research_src, "fetch_batch", lambda since, **k: _batch(ARTICLE))
-    monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
+    monkeypatch.setattr(info_extract, "run_structured", lambda *a, **k: _view())
     research_src.ingest(NOW, store=get_store())
 
-    insights = research.run(use_llm=True)
+    insights = info_extract.run(use_llm=True)
 
     # ZZZZ (not in universe) dropped; TSM + LITE kept.
     assert {i.ticker for i in insights} == {"TSM", "LITE"}
     stored = get_store().recent_insights()
     assert {r["ticker"] for r in stored} == {"TSM", "LITE"}
 
-    # TSM (conf 0.9 >= 0.6, upstream of COHR) -> synthetic event under COHR with
-    # pre-seeded triage score; LITE insight (conf 0.3) injects nothing.
-    events = {r["id"]: r for r in get_store().recent_events("COHR", limit=10)}
-    key = "insight:imap:msg1:TSM"
-    assert key in events
-    assert events[key]["triage_score"] == 0.9
-    assert events[key]["triage_category"] == "research"
-    assert "[bearish/supply_chain] TSM" in events[key]["headline"]
-    assert not any("LITE" in r["id"] for r in events.values())
+    # Phase D: no synthetic pead_events with pre-seeded triage — the extraction
+    # product is the InformationBrief projection.
+    assert get_store().recent_events("COHR", limit=10) == []
+    briefs = get_store().task_projection_envelopes(agent_role="information_brief")
+    assert len(briefs) == 1
+    payload = briefs[0]["payload"]
+    assert set(payload["entities"]) == {"TSM", "LITE"}
+    assert payload["fact_changes"] and payload["unverified"]
 
 
 def test_research_dedups_articles_on_second_run(monkeypatch):
     _pin_universe(monkeypatch)
     monkeypatch.setattr(research_src, "fetch_batch", lambda since, **k: _batch(ARTICLE))
-    monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
+    monkeypatch.setattr(info_extract, "run_structured", lambda *a, **k: _view())
     research_src.ingest(NOW, store=get_store())
-    research.run(use_llm=True)
-    assert research.run(use_llm=True) == []          # article already seen
+    info_extract.run(use_llm=True)
+    assert info_extract.run(use_llm=True) == []          # article already seen
     assert len(get_store().recent_insights()) == 2   # not 4
 
 
@@ -84,8 +83,8 @@ def test_research_llm_failure_still_marks_article_seen(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("LLM down")
 
-    monkeypatch.setattr(research, "run_structured", boom)
-    assert research.run(use_llm=True) == []
+    monkeypatch.setattr(info_extract, "run_structured", boom)
+    assert info_extract.run(use_llm=True) == []
     assert get_store().article_seen("imap:msg1")
 
 
@@ -163,7 +162,7 @@ def test_research_uses_stable_document_id_for_pre_metadata_article(monkeypatch):
     _pin_universe(monkeypatch)
     migrated = ARTICLE.model_copy(update={"id": "SEMIANALYSIS:imap-123:research_article"})
     monkeypatch.setattr(research_src, "stored_articles", lambda *_args, **_kwargs: [migrated])
-    monkeypatch.setattr(research, "run_structured", lambda *a, **k: _view())
+    monkeypatch.setattr(info_extract, "run_structured", lambda *a, **k: _view())
     store = get_store()
     from ats.data import document_assets
 
@@ -173,11 +172,11 @@ def test_research_uses_stable_document_id_for_pre_metadata_article(monkeypatch):
         external_id="", title=migrated.title, published_at=migrated.published_at.isoformat(),
         min_chars=1, store=store)
 
-    research.run(use_llm=True, since=NOW)
+    info_extract.run(use_llm=True, since=NOW)
 
     assert store.document_processing(
-        document_id="SEMIANALYSIS:imap-123:research_article", consumer="pead",
-        processor_version=research.PROCESSOR_VERSION)
+        document_id="SEMIANALYSIS:imap-123:research_article", consumer="information",
+        processor_version=info_extract.PROCESSOR_VERSION)
 
 
 def test_stored_articles_recovers_pre_metadata_migration_records(monkeypatch, tmp_path):
@@ -244,7 +243,9 @@ def test_rss_failure_is_reported_as_a_transport_gap(monkeypatch):
 
 
 def test_build_universe_maps_chain_members():
-    card, mapping = research._build_universe(["COHR"])
+    from ats.agents.information.assemble import signal_chain_universe
+
+    card, mapping = signal_chain_universe(["COHR"])
     assert "COHR (target)" in card
     assert "TSM (upstream of COHR)" in card
     assert mapping["COHR"] == ["COHR"]

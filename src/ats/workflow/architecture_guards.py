@@ -49,6 +49,18 @@ ALLOWED_CROSS_ROLE_READS: dict[str, tuple[str, ...]] = {
     "fundamental_analyst": ("information_analyst",),  # 基本面分析师读信息分析师
 }
 
+# Projection roles each agent role OWNS — reading your own projections is not a
+# cross-role read (the projection role name differs from the agent role name,
+# e.g. `information_analyst` publishes/reads `information_brief`).
+OWNED_PROJECTION_ROLES: dict[str, tuple[str, ...]] = {
+    "information_analyst": ("information_brief",),
+    "layer_analyst": ("layer_analysis",),
+    "sector_analyst": ("sector_allocation",),
+    "fundamental_analyst": ("fundamental_expectation_update", "fundamental_event_review"),
+    "macro_analyst": ("macro_review",),
+    "technical_analyst": ("technical_review",),
+}
+
 # Projection readers: calls through which one role can consume another's output.
 PROJECTION_READ_CALLS = frozenset({
     "task_projection_envelopes", "reusable_task_projection", "reuse_decision",
@@ -303,7 +315,8 @@ def scan_module(path: Path, *, root: Path | None = None,
             name = _call_name(node)
             if name in PROJECTION_READ_CALLS and role is not None:
                 read_role = _role_literal(node)
-                if read_role and read_role != role:
+                owned = OWNED_PROJECTION_ROLES.get(role, ())
+                if (read_role and read_role != role and read_role not in owned):
                     allowed = ALLOWED_CROSS_ROLE_READS.get(role, ())
                     if read_role not in allowed:
                         found.append(Violation(

@@ -1,6 +1,6 @@
 ## 1. 决策审计存储（additive 落地）
 
-- [ ] 1.1 在 `src/ats/memory/store.py` 的 `_SCHEMA` 新增五张表 DDL（`decision_cycles`、`decision_revisions`、`decision_risk_reviews`、`boss_approvals`、`cycle_events`），列按 §12.3 与 design D1/D4 展开（含 `cycle_id`、`revision_no`、`decision_hash`、`parent_revision`、`ruleset_version`、`portfolio_snapshot_id`、`market_as_of`、`idempotency_key`、`created_at`）。验证：新建库后逐表 `PRAGMA table_info` 返回预期列，既有 store 测试全部通过
+- [ ] 1.1 在 `src/ats/memory/store.py` 的 `_SCHEMA` 新增五张表 DDL（`decision_cycles`、`decision_revisions`、`decision_risk_reviews`、`boss_approvals`、`cycle_events`），列按 §12.3 与 design D1/D4 展开（含 `cycle_id`、`revision_no`、`decision_hash`、`parent_revision`、`ruleset_version`、`portfolio_snapshot_id`、`market_as_of`、`before_metrics_json`、`after_metrics_json`、`idempotency_key`、`created_at`）。验证：新建库后逐表 `PRAGMA table_info` 返回预期列，既有 store 测试全部通过
 - [ ] 1.2 在 `src/ats/data/stores/ownership.py` 的 `WORKFLOW_MEMORY_TABLES` 登记五张表。验证：`tests/test_legacy_sqlite_tables_have_explicit_data_or_memory_ownership` 通过
 - [ ] 1.3 在 `_migrate()` 中按 `PRAGMA table_info` 探测式补齐五表，兼容 Phase A 之前创建的既有库，不删任何旧列。验证：对旧库副本执行初始化后五表可用，既有表列集合逐列不变
 - [ ] 1.4 为 `trades` 与 `fills` 增加可空关联列 `cycle_id`、`revision_no`、`decision_hash`、`approval_id` 与关联索引（可空，强制非空属 Phase C）。验证：更新 `tests/test_trader.py::test_trades_migration_columns` 并扩展断言，旧行四列全为 NULL 且读取不报错
@@ -29,7 +29,7 @@
 
 ## 4. 确定性风险审查改造
 
-- [ ] 4.1 新增不修改提案的只读审查入口：对一条修订返回逐单判定、结构化 `violations`（`rule_id` / `limit` / `actual` / `severity`）与 `allowed_boundary`（`max_additional_notional` / `blocked_actions`）。验证：单测断言传入的修订对象逐字段未被改动
+- [ ] 4.1 新增不修改提案的只读审查入口：以**整条修订**为评估单元，返回合并后的逐单判定、结构化 `violations`（`rule_id` / `limit` / `actual` / `severity`）、`allowed_boundary`（`max_additional_notional` / `blocked_actions`）与执行前后的风险指标。验证：单测断言传入的修订对象逐字段未被改动，且判定基于该修订全部指令的合并后果而非逐笔独立判定
 - [ ] 4.2 审查结果写入 `decision_risk_reviews`，绑定 revision hash、ruleset version、portfolio snapshot id 与 market as-of。验证：四字段任一缺失即视为无效审查的单测通过
 - [ ] 4.3 把 `_apply_order_caps()` 的裁剪改为反向建议，不再改写名义金额与目标权重。验证：改写 `tests/test_risk.py` 中裁剪相关断言为「提案金额不变 + 边界给出」并通过
 - [ ] 4.4 把 `_clip_event_notional()` 的裁剪改为反向建议。验证：`tests/test_risk.py::test_pre_trade_event_clip`（96-103）改断言原金额不变且给出可接受上限后通过
@@ -38,6 +38,8 @@
 - [ ] 4.7 将 `pre_trade()` 退化为 deprecated 适配层（内部由新审查结果生成旧式输出），供未改造调用点在切换期运行。验证：`runtime/scheduler.py` 与 `runtime/cli.py` 的调用点仍可运行，适配层单测通过
 - [ ] 4.8 保持决策级审查与组合级 `risk_reviews` 的隔离。验证：同一 as-of 下多次决策审查各自留痕互不覆盖，组合级读取内容不受影响
 - [ ] 4.9 使未接线的 `src/ats/agents/risk_validator.py` 静默改写路径在默认流程不可达，并处置 `tests/test_risk_validator.py`。验证：默认路径无引用、架构守卫与全量相关测试通过
+- [ ] 4.10 跨单规则整体判定：同一修订内同属一个行业层、同一相关簇或依赖组合状态方可判定的多笔订单必须合并评估，不得逐笔独立放行。验证：构造行业层合计超限、相关簇集中度超限两类用例，断言以整条修订为对象驳回并给出该层/簇的规则标识、上限值与可接受的最大增量
+- [ ] 4.11 交易前后风险指标落库并可复核：由确定性计算产出执行前后指标，随修订内容变化、同一修订重复审查保持稳定。验证：单测断言 `before_metrics_json` / `after_metrics_json` 齐备、同修订重复审查指标一致、修订变化后指标不同，且仅凭审查记录即可说明该修订通过或驳回时的风险变化幅度
 
 ## 5. Chief—Risk 多轮 Loop 状态机
 

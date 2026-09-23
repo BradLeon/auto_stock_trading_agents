@@ -13,18 +13,24 @@ pulls executions + completed orders, and backfills the outcome onto `trades`.
 Attribution is the second job. `reqExecutions` returns the ACCOUNT's executions, so
 it also carries orders placed by hand in TWS. Each fill is tagged `origin`:
 
-  order_ref starts with "ats:"          -> system, exact      (needs Stage 1d)
-  perm_id matches a known order          -> system, exact      (needs Stage 1d)
-  order_id + same symbol + same session  -> system, inferred   (legacy rows)
-  otherwise                              -> manual
+  matches a local order (order_ref / perm_id / order_id+date)
+                                         -> system  (confidence = match method)
+  non-`ats:` order_ref set in TWS        -> manual  (a deliberate human order)
+  otherwise                              -> unattributed + audit exception
 
-The session-date scoping on the last rule is not optional: IBKR's orderId is a
-per-client sequence reset by a TWS restart, so an unscoped join will eventually
-match a completely unrelated order from another day.
+The third class is the §11.1 ruling (task 2.4): "unattributable" is NOT the
+same as "manual", and collapsing the two — the old behaviour — disguised
+unknown fills as deliberate human trades. An unattributed fill stays in the
+ledger with an explicit exception row; it never enters system performance.
+
+The session-date scoping on the order_id rule is not optional: IBKR's orderId
+is a per-client sequence reset by a TWS restart, so an unscoped join will
+eventually match a completely unrelated order from another day.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -77,6 +83,7 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
 
     store = store or get_store()
     summary = {"fills_seen": 0, "fills_new": 0, "linked": 0, "manual": 0,
+               "unattributed": 0,
                "pnl_backfilled": 0, "status_resolved": 0, "errors": []}
 
     if broker is None:
@@ -109,7 +116,15 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
     fill_px: dict[int, tuple[float, str]] = {}
     for f in fills:
         row, how = _match(f, trades)
-        origin = "system" if row else "manual"
+        if row is not None:
+            origin = "system"
+        elif (f.get("order_ref") or "").strip() and \
+                not (f.get("order_ref") or "").startswith("ats:"):
+            # A human typed their own orderRef in TWS — a deliberate manual
+            # order with evidence, not an unknown (task 2.4).
+            origin = "manual"
+        else:
+            origin = "unattributed"
         entry_id = row.get("client_order_id") if row else None
         if row:
             summary["linked"] += 1
@@ -118,14 +133,42 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
                 pnl_by_rid[row["rid"]] = pnl_by_rid.get(row["rid"], 0.0) + float(rp)
             if f.get("price"):
                 fill_px[row["rid"]] = (float(f["price"]), f.get("time") or "")
-        else:
+        elif origin == "manual":
             summary["manual"] += 1
+        else:
+            # §11.1: an unattributable fill is recorded AND flagged, never
+            # silently absorbed into either class (task 2.4).
+            summary["unattributed"] += 1
+            if not dry_run:
+                store.record_ledger_exception(
+                    kind="unattributed_fill", subject_key=f"fill:{f.get('exec_id')}",
+                    symbol=f.get("symbol"),
+                    basis="no order_ref/perm_id/order_id+date evidence links this "
+                          "fill to a local order, and no human orderRef is present",
+                    detail_json=json.dumps(
+                        {"exec_id": f.get("exec_id"), "symbol": f.get("symbol"),
+                         "side": f.get("side"), "shares": f.get("shares"),
+                         "price": f.get("price"), "time": f.get("time"),
+                         "order_ref": f.get("order_ref") or "",
+                         "perm_id": f.get("perm_id") or ""},
+                        ensure_ascii=False))
         if not dry_run:
             # entry_id is how the episode reducer later joins a fill back to the
             # pre-registered plan (JournalEntry) that proposed it.
-            store.conn.execute(
-                "UPDATE fills SET origin = ?, link_confidence = ?, entry_id = ? "
-                "WHERE exec_id = ?", (origin, how, entry_id, f.get("exec_id")))
+            if row is not None:
+                # Task 2.2: a matched fill inherits its order's FULL decision
+                # chain — the fill becomes as traceable as the order it fills.
+                store.conn.execute(
+                    "UPDATE fills SET origin = ?, link_confidence = ?, entry_id = ?, "
+                    "cycle_id = ?, revision_no = ?, decision_hash = ?, approval_id = ? "
+                    "WHERE exec_id = ?",
+                    (origin, how, entry_id, row.get("cycle_id"),
+                     row.get("revision_no"), row.get("decision_hash") or "",
+                     row.get("approval_id") or "", f.get("exec_id")))
+            else:
+                store.conn.execute(
+                    "UPDATE fills SET origin = ?, link_confidence = ?, entry_id = ? "
+                    "WHERE exec_id = ?", (origin, how, entry_id, f.get("exec_id")))
 
     for rid, pnl in pnl_by_rid.items():
         if not dry_run:
@@ -179,6 +222,7 @@ def render(summary: dict) -> str:
     lines.append(f"  券商返回成交      {summary['fills_seen']}（新增 {summary['fills_new']}）")
     lines.append(f"  归属系统单        {summary['linked']}")
     lines.append(f"  归属手工单        {summary['manual']}")
+    lines.append(f"  无法归因          {summary.get('unattributed', 0)}（已登记异常）")
     lines.append(f"  回填盈亏的订单     {summary['pnl_backfilled']}")
     lines.append(f"  解决在途状态       {summary['status_resolved']}")
     for e in summary["errors"]:

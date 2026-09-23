@@ -286,7 +286,7 @@ def test_single_real_order_submission_path():
         if "def place_orders" in code or "place_orders(" not in code:
             continue
         callers.add(path)                      # line-number robust
-    assert callers == {"src//ats/graph/chief.py"}, callers
+    assert callers == {"src/ats/graph/chief.py"}, callers
 
 
 # --- chief_revise unit behaviour --------------------------------------------------- #

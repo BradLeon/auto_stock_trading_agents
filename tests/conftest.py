@@ -182,13 +182,18 @@ class FakeBroker:
     def __init__(self, *a, **k):
         pass
 
-    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0):
+    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0, chain=None):
+        # Task 2.1: a real broker submission echoes the authorization chain
+        # onto every entry, exactly like IBKRBroker._submit does.
+        chain = chain or {}
         now = datetime.now(timezone.utc)
         FakeBroker.placed = list(items)
         return [TradeLogEntry(order_id="1", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
                               qty=q, status="filled", submitted_at=now, filled_at=now,
                               avg_fill_price=100.0, rationale=d.rationale,
-                              revision_no=revision_no, order_seq=i)
+                              revision_no=revision_no, order_seq=i,
+                              decision_hash=chain.get("decision_hash", ""),
+                              approval_id=chain.get("approval_id", ""))
                 for i, (d, q) in enumerate(items)]
 
     def get_fills(self):

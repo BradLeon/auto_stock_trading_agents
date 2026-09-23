@@ -12,6 +12,7 @@ long-term responsibility of :mod:`ats.memory`.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -20,6 +21,15 @@ from pathlib import Path
 from ..schemas.memory import PerformanceRecord
 
 log = logging.getLogger("ats.memory.store")
+
+
+class MissingDecisionChainError(Exception):
+    """A SYSTEM order submission lacks its decision chain (§11, task 2.1).
+
+    Raised by `save_trades` AFTER the gap has been registered in
+    `ledger_exceptions`; the write itself is refused — a half-linked order
+    that looks attributable but cannot be verified is worse than no row.
+    """
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS cycles (
@@ -638,7 +648,8 @@ class TradingMemory:
         # SQLite column drops require a full table rebuild for zero benefit on an
         # already-deployed table. Use client_order_id, not this column.
         for ddl in ("client_order_id TEXT", "perm_id TEXT", "order_ref TEXT",
-                    "attempt INTEGER DEFAULT 1", "entry_id TEXT", "first_submitted_at TEXT"):
+                    "attempt INTEGER DEFAULT 1", "entry_id TEXT", "first_submitted_at TEXT",
+                    "order_seq INTEGER"):
             if ddl.split()[0] not in tcols:
                 self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
         fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fills)")}
@@ -755,6 +766,7 @@ class TradingMemory:
         self._migrate_pead_events_pk()
         self._migrate_decision_audit_tables()
         self._migrate_clerk_ledger_tables()
+        self._register_legacy_link_gaps()
         self._migrate_legacy_decisions()
         self.conn.commit()
 
@@ -863,6 +875,81 @@ class TradingMemory:
         if not _CLERK_LEDGER_TABLES <= present:
             self.conn.executescript(_CLERK_LEDGER_DDL)
 
+    def _register_legacy_link_gaps(self) -> None:
+        """One-time §11 backfill (task 2.3): pre-Phase-C system orders whose
+        decision chain cannot be recovered become explicit `broken_link`
+        exceptions. Linkage columns stay empty — fabricating a chain is worse
+        than an honest gap (design D3). Manual/standalone rows are NOT gaps:
+        they never had a chain by nature.
+        """
+        key = "ledger_legacy_gaps_v1"
+        if self.conn.execute(
+                "SELECT 1 FROM data_migrations WHERE key=?", (key,)).fetchone():
+            return
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(trades)")}
+        needed = {"source", "cycle_id", "revision_no", "decision_hash", "approval_id"}
+        if needed <= cols:
+            rows = self.conn.execute(
+                "SELECT client_order_id, symbol, action, status, source, "
+                "COALESCE(client_order_id, '') coid FROM trades "
+                "WHERE COALESCE(source,'') IN ('chief','trader') "
+                "AND (COALESCE(cycle_id,'') = '' OR COALESCE(revision_no,0) = 0 "
+                "     OR COALESCE(decision_hash,'') = '' "
+                "     OR COALESCE(approval_id,'') = '')").fetchall()
+            now = datetime.now(timezone.utc).isoformat()
+            for r in rows:
+                self.record_ledger_exception(
+                    kind="broken_link",
+                    subject_key=f"trade:{r['coid'] or r['symbol']}",
+                    symbol=r["symbol"],
+                    basis="pre-Phase-C system order without a recoverable "
+                          "decision chain",
+                    detail_json=json.dumps({
+                        "source": r["source"], "status": r["status"],
+                        "action": r["action"]}, ensure_ascii=False),
+                    created_at=now)
+        self.conn.execute(
+            "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
+            (key, now if needed <= cols else datetime.now(timezone.utc).isoformat(),
+             "legacy system orders without decision chains registered as gaps"))
+        self.conn.commit()
+
+    def record_ledger_exception(
+            self, *, kind: str, subject_key: str, cycle_id: str | None = None,
+            symbol: str | None = None, window_start: str | None = None,
+            window_end: str | None = None, as_of: str | None = None,
+            basis: str = "", detail_json: str = "",
+            created_at: str | None = None) -> str:
+        """Idempotently register (or refresh) a ledger audit exception.
+
+        Same (kind, subject_key) rediscovered updates `last_seen_at` and the
+        detail — it is the same fact seen again, not a second fact (§11:
+        unattributable does not mean ignorable, but it must not duplicate).
+        """
+        from ..execution.ids import exception_id
+
+        now = created_at or datetime.now(timezone.utc).isoformat()
+        exc_id = exception_id(kind, subject_key)
+        existing = self.conn.execute(
+            "SELECT exception_id FROM ledger_exceptions WHERE exception_id = ?",
+            (exc_id,)).fetchone()
+        if existing is None:
+            self.conn.execute(
+                "INSERT INTO ledger_exceptions (exception_id, kind, subject_key, "
+                "cycle_id, symbol, window_start, window_end, as_of, basis, "
+                "detail_json, status, first_seen_at, last_seen_at, created_at, "
+                "updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (exc_id, kind, subject_key, cycle_id, symbol, window_start,
+                 window_end, as_of, basis, detail_json, "open", now, now,
+                 now, now))
+        else:
+            self.conn.execute(
+                "UPDATE ledger_exceptions SET last_seen_at = ?, detail_json = ?, "
+                "updated_at = ? WHERE exception_id = ?",
+                (now, detail_json, now, exc_id))
+        self.conn.commit()
+        return exc_id
+
     def _migrate_legacy_decisions(self) -> None:
         """One-time §12.3 backfill: legacy `decisions` rows become revisions.
 
@@ -964,7 +1051,8 @@ class TradingMemory:
     # --- writes ---------------------------------------------------------- #
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
                    "avg_fill_price", "submitted_at", "rationale", "limit_price", "filled_at",
-                   "error", "realized_pnl", "source", "context", "perm_id", "order_ref")
+                   "error", "realized_pnl", "source", "context", "perm_id", "order_ref",
+                   "decision_hash", "approval_id")
 
     @staticmethod
     def client_order_id(cycle_id: str, revision_no: int, seq: int,
@@ -988,6 +1076,7 @@ class TradingMemory:
         original submit time, while advancing status/error and bumping `attempt`.
         """
         for t in entries:
+            self._enforce_decision_chain(t, source=source)
             coid = self.client_order_id(cycle_id, getattr(t, "revision_no", 0),
                                         getattr(t, "order_seq", 0),
                                         t.symbol, t.action)
@@ -999,13 +1088,16 @@ class TradingMemory:
             if prior is None:
                 self.conn.execute(
                     f"INSERT INTO trades ({','.join(self._TRADE_COLS)}, client_order_id, "
-                    f"attempt, first_submitted_at) VALUES "
-                    f"({','.join('?' * len(self._TRADE_COLS))},?,?,?)",
+                    f"revision_no, order_seq, attempt, first_submitted_at) VALUES "
+                    f"({','.join('?' * len(self._TRADE_COLS))},?,?,?,?,?)",
                     (t.order_id, cycle_id, t.symbol, t.action, t.qty, t.order_type, t.status,
                      t.avg_fill_price, submitted, t.rationale, t.limit_price, filled,
                      t.error, None, source, context,
                      getattr(t, "perm_id", "") or None, getattr(t, "order_ref", "") or None,
-                     coid, 1, submitted))
+                     getattr(t, "decision_hash", "") or None,
+                     getattr(t, "approval_id", "") or None,
+                     coid, getattr(t, "revision_no", 0) or None,
+                     getattr(t, "order_seq", 0) or None, 1, submitted))
                 continue
             had_fill = prior["avg_fill_price"] is not None
             self.conn.execute(
@@ -1020,6 +1112,47 @@ class TradingMemory:
                  t.qty, t.limit_price, context, submitted,
                  getattr(t, "perm_id", "") or None, getattr(t, "order_ref", "") or None,
                  coid))
+
+    # Chain-less statuses: these never reach (or try to reach) the broker, so
+    # there is nothing for the decision chain to authorize. Everything else
+    # written by a system source MUST carry the full chain (§11, task 2.1).
+    CHAIN_EXEMPT_STATUSES = frozenset({"cancelled", "rejected"})
+    SYSTEM_TRADE_SOURCES = frozenset({"chief", "trader"})
+
+    def _enforce_decision_chain(self, entry, *, source: str) -> None:
+        """Refuse chain-less SYSTEM submissions and register the gap (task 2.1).
+
+        A real order — submitted, filled, errored, retried — must be traceable
+        to its cycle, revision, hash and approval. Missing any of them here
+        means a caller bypassed the authorization gate; we record an explicit
+        exception and refuse the write rather than filing a half-linked order
+        that looks attributable but cannot be verified.
+        """
+        if source not in self.SYSTEM_TRADE_SOURCES:
+            return
+        if entry.status in self.CHAIN_EXEMPT_STATUSES:
+            return
+        missing = []
+        if not entry.cycle_id:
+            missing.append("cycle_id")
+        if not getattr(entry, "revision_no", 0):
+            missing.append("revision_no")
+        if not getattr(entry, "decision_hash", ""):
+            missing.append("decision_hash")
+        if not getattr(entry, "approval_id", ""):
+            missing.append("approval_id")
+        if not missing:
+            return
+        subject = f"order:{entry.cycle_id}:{entry.symbol}:{entry.action}"
+        self.record_ledger_exception(
+            kind="broken_link", subject_key=subject, cycle_id=entry.cycle_id,
+            symbol=entry.symbol,
+            basis="system submission rejected: decision chain incomplete",
+            detail_json=json.dumps({"missing": missing, "status": entry.status,
+                                    "source": source}, ensure_ascii=False))
+        raise MissingDecisionChainError(
+            f"system order for {entry.symbol} {entry.action} is missing "
+            f"decision-chain fields: {', '.join(missing)}")
 
     def save_trades(self, entries, *, cycle_id: str, source: str, context: str = "") -> None:
         """Persist trade-log entries with their full context (trader path, standalone)."""

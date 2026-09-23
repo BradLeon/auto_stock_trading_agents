@@ -21,10 +21,15 @@ CYCLE = "chief-20260723-140649"
 
 def _entry(*, symbol="GOOG", action="trim", status="error", order_id="",
            avg_fill_price=None, error="", qty=13.0):
+    # Phase C (task 2.1): system-source writes now REQUIRE the full decision
+    # chain, so the fixture carries one. The idempotency behaviour under test
+    # is unchanged — only the (now mandatory) linkage fields were added.
     return TradeLogEntry(order_id=order_id, cycle_id=CYCLE, symbol=symbol, action=action,
                          qty=qty, order_type="limit", status=status,
                          avg_fill_price=avg_fill_price, submitted_at=NOW,
-                         rationale="trim per scorecard", error=error)
+                         rationale="trim per scorecard", error=error,
+                         revision_no=1, decision_hash="a" * 32,
+                         approval_id=f"{CYCLE}:r1:approval")
 
 
 @pytest.fixture

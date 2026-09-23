@@ -34,6 +34,12 @@ class TradeLogEntry(BaseModel):
     # the revision. Both default to 0 for legacy callers.
     revision_no: int = 0
     order_seq: int = 0
+    # Decision-chain completion (§11, task 2.1). A REAL system submission (any
+    # status that reached or tried to reach the broker) must carry the full
+    # chain; `store.save_trades` enforces this and refuses chain-less rows.
+    # Cancelled/rejected entries never reach the broker and are exempt.
+    decision_hash: str = ""
+    approval_id: str = ""
 
 
 class Fill(BaseModel):

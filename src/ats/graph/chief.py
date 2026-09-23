@@ -502,6 +502,8 @@ def trader(state: ChiefDecisionState) -> dict:
         print(f"🚫 执行授权被拒绝：{'; '.join(rejections)}")
         entries = [TradeLogEntry(order_id="", cycle_id=state.cycle_id, symbol=d.symbol,
                                  action=d.action, qty=q, status="rejected",
+                                 revision_no=state.revision_no or 0,
+                                 decision_hash=state.revision_hash or "",
                                  submitted_at=now, rationale=d.rationale,
                                  error=f"authorization rejected: {'; '.join(rejections)}")
                    for d, q in to_place]

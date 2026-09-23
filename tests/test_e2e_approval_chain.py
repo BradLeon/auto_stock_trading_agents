@@ -254,12 +254,14 @@ def test_uncertain_broker_outcome_is_not_resubmitted(broker, approve_all, review
     a retry of the same intent must not produce a second logical order."""
     from ats.trader import execute as texec
 
-    def uncertain_place_orders(self, items, cycle_id, wait=3.0, revision_no=0):
+    def uncertain_place_orders(self, items, cycle_id, wait=3.0, revision_no=0,
+                               chain=None):
         return [TradeLogEntry(order_id="7", cycle_id=cycle_id, symbol=d.symbol,
                               action=d.action, qty=q, status="submitted",
                               submitted_at=datetime.now(timezone.utc),
                               rationale=d.rationale, revision_no=revision_no,
-                              order_seq=i)
+                              order_seq=i, decision_hash=(chain or {}).get("decision_hash", ""),
+                              approval_id=(chain or {}).get("approval_id", ""))
                 for i, (d, q) in enumerate(items)]
 
     monkeypatch.setattr(broker, "place_orders", uncertain_place_orders)

@@ -65,12 +65,15 @@ class FakeBroker:
     def __init__(self, *a, **k):
         pass
 
-    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0):
+    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0, chain=None):
+        chain = chain or {}
         FakeBroker.placed = list(items)
         return [TradeLogEntry(order_id="1", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
                               qty=q, status="filled", submitted_at=NOW, filled_at=NOW,
                               avg_fill_price=100.0, rationale=d.rationale,
-                              revision_no=revision_no, order_seq=i)
+                              revision_no=revision_no, order_seq=i,
+                              decision_hash=chain.get("decision_hash", ""),
+                              approval_id=chain.get("approval_id", ""))
                 for i, (d, q) in enumerate(items)]
 
     def get_fills(self):

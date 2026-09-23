@@ -40,9 +40,11 @@ def test_order_ref_fits_ibkr_field():
 
 def test_entry_carries_the_identities_to_the_store():
     store = get_store()
+    # Phase C (task 2.1): system-source writes require the decision chain.
     e = TradeLogEntry(order_id="12", cycle_id="c1", symbol="GOOG", action="trim",
                       qty=13.0, status="submitted", submitted_at=NOW,
-                      perm_id="998877", order_ref="ats:c1:GOOG")
+                      perm_id="998877", order_ref="ats:c1:GOOG",
+                      revision_no=1, decision_hash="a" * 32, approval_id="c1:r1:approval")
     store.save_trades([e], cycle_id="c1", source="chief")
     row = store.conn.execute("SELECT perm_id, order_ref FROM trades").fetchone()
     assert row["perm_id"] == "998877"
@@ -52,12 +54,14 @@ def test_entry_carries_the_identities_to_the_store():
 def test_a_retry_does_not_lose_the_identities():
     """The first attempt may be the only one that reached IBKR and got a permId."""
     store = get_store()
+    # Phase C (task 2.1): chained fixture — see test_entry_carries_the_identities.
+    chain = dict(revision_no=1, decision_hash="a" * 32, approval_id="c1:r1:approval")
     tagged = TradeLogEntry(order_id="12", cycle_id="c1", symbol="GOOG", action="trim",
                            qty=13.0, status="submitted", submitted_at=NOW,
-                           perm_id="998877", order_ref="ats:c1:GOOG")
+                           perm_id="998877", order_ref="ats:c1:GOOG", **chain)
     untagged = TradeLogEntry(order_id="", cycle_id="c1", symbol="GOOG", action="trim",
                              qty=13.0, status="error", submitted_at=NOW,
-                             error="IBKR unavailable")
+                             error="IBKR unavailable", **chain)
     store.save_trades([tagged], cycle_id="c1", source="chief")
     store.save_trades([untagged], cycle_id="c1", source="chief")
     row = store.conn.execute("SELECT perm_id, order_ref, attempt FROM trades").fetchone()
@@ -106,8 +110,12 @@ def test_tagged_fill_links_without_any_date_heuristic():
 
 
 def test_untagged_manual_fill_is_still_rejected():
-    """A fill with no ats: tag and no matching order stays manual."""
+    """A fill with no ats: tag and no matching order is UNATTRIBUTED (Phase C
+    task 2.4: unknown is not manual) and leaves an audit exception."""
     store = get_store()
     rec.reconcile(FakeBroker([_fill(exec_id="m", symbol="SPCX", order_id="34",
                                     order_ref="", perm_id="")]), store=store)
-    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "manual"
+    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "unattributed"
+    assert store.conn.execute(
+        "SELECT COUNT(*) n FROM ledger_exceptions "
+        "WHERE kind='unattributed_fill'").fetchone()["n"] == 1

@@ -166,6 +166,11 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
         print("🚫 执行被拒绝：缺少完整执行授权（审查+审批+修订绑定）")
         return entries, []
 
+    # Task 2.1: every entry that reaches for the broker carries the full
+    # decision chain, taken from the verified authorization — never rebuilt.
+    chain = {"decision_hash": authorization.get("decision_hash", ""),
+             "approval_id": authorization.get("approval_id", "")}
+
     from ..memory import get_store
 
     store = get_store()
@@ -183,7 +188,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
                 qty=q, revision_no=revision_no, order_seq=i,
                 status=prior["status"], submitted_at=_now(), rationale=d.rationale,
                 error="retry skipped: prior attempt outcome uncertain "
-                      "(pending reconciliation)")))
+                      "(pending reconciliation)", **chain)))
         else:
             fresh.append((i, d, q))
 
@@ -194,7 +199,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
             broker = IBKRBroker()
             ordered = [(d, q) for _, d, q in fresh]
             submitted = broker.place_orders(ordered, cycle_id,
-                                            revision_no=revision_no)
+                                            revision_no=revision_no, chain=chain)
             fills = broker.get_fills()
             entries.extend(submitted)
         except IBKRUnavailable as exc:
@@ -202,7 +207,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
             entries.extend([TradeLogEntry(
                 order_id="", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
                 qty=q, revision_no=revision_no, order_seq=i, status="error",
-                submitted_at=_now(), rationale=d.rationale, error=str(exc))
+                submitted_at=_now(), rationale=d.rationale, error=str(exc), **chain)
                 for i, d, q in fresh])
     return entries, fills
 

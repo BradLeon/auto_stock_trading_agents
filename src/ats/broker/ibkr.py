@@ -280,17 +280,21 @@ class IBKRBroker:
 
     # --- writes ---------------------------------------------------------- #
     def place_orders(self, items: list[tuple[TradeDecision, float]], cycle_id: str,
-                     wait: float = 3.0, revision_no: int = 0) -> list[TradeLogEntry]:
+                     wait: float = 3.0, revision_no: int = 0,
+                     chain: dict | None = None) -> list[TradeLogEntry]:
         """Submit a batch of orders in a single session; one log entry each.
 
         `revision_no` participates in the per-order identity (task 7.7): orders
         are sequenced by their position within the revision's order list.
+        `chain` (task 2.1) carries decision_hash/approval_id from the verified
+        authorization onto every submitted entry.
         """
         if not items:
             return []
+        chain = chain or {}
         with self.session() as ib:
             self._last_trades = []
-            entries = [self._submit(ib, d, qty, cycle_id, revision_no, seq)
+            entries = [self._submit(ib, d, qty, cycle_id, revision_no, seq, chain)
                        for seq, (d, qty) in enumerate(items)]
             ib.sleep(wait)  # let the paper engine ack/fill
             for e, (_, _), trade in zip(entries, items, self._last_trades):
@@ -325,14 +329,18 @@ class IBKRBroker:
             return cancelled
 
     def _submit(self, ib, decision: TradeDecision, qty: float, cycle_id: str,
-                revision_no: int = 0, seq: int = 0) -> TradeLogEntry:
+                revision_no: int = 0, seq: int = 0,
+                chain: dict | None = None) -> TradeLogEntry:
         from ib_async import LimitOrder, MarketOrder, Stock
 
+        chain = chain or {}
         entry = TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=decision.symbol,
                               action=decision.action, qty=qty, order_type=decision.order_type,
                               limit_price=decision.limit_price, status="submitted",
                               submitted_at=_now(), rationale=decision.rationale,
-                              revision_no=revision_no, order_seq=seq)
+                              revision_no=revision_no, order_seq=seq,
+                              decision_hash=chain.get("decision_hash", ""),
+                              approval_id=chain.get("approval_id", ""))
         if qty <= 0:
             entry.status = "rejected"
             entry.error = "non-positive quantity"

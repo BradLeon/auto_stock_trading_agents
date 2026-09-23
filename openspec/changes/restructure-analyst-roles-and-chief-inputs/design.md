@@ -93,7 +93,39 @@
 
 暴露两个显式入口（`ats analyst information`、`ats analyst fundamental --mode event`）并让现有 scheduler 的 pead 任务调用新入口；财报窗口的自动发现与 `event_id + event_version + workflow_id` 幂等触发留 Phase E。
 
-理由（用户裁决）：避免本阶段为了触发而先造一个残缺的日历。
+理由（用户裁决）：避免本阶段为了触发而先造一个残缺的日历。信息分析师同样只暴露入口与触发契约（手动 / 定时 / 文档准入事件），并保证它可以不依赖其他角色独立终结。
+
+### 9. 跨标的信号链：按载体形态设禁，不按标的范围一刀切
+
+信号链（上下游 / 同业）是基本面最有效的领先信号来源，予以保留；但界线画在**取数入口**上而非字段语义上：经 `ats.data.*` 数据产品（`fundamentals` / `consensus` / 产业链数据包）或 `information_brief` 角色投影读取的为中性事实，经其他标的 dossier 或 `fundamental_*` 角色投影读取的为观点。
+
+现状 `graph/pead.py:180-206` 的 `_peer_report()` 读另一个标的的 scored dossier，取 `guidance`（LLM 摘录）、`band`（LLM 逐维打分后代码分档）与 `decision_summary`（纯结论）。改造后只保留可溯源的事实字段（已报实际值、指引区间、财报日期、是否已报），定性信号（如上游产能表述）改由该标的的 `InformationBrief` 承载。
+
+理由：文档 §7.2 把「产业链事实」列为基本面的合法输入，数据流图 :307 明确 `HIER_DATA --> FUND`；旧规划 design 决策 10 也只要求 peer read-through 以「中性共享事实或 Data Product」形态进入。按入口判的好处是它与架构守卫已有的 `PROVIDER_MODULES` / `ALLOWED_CROSS_ROLE_READS` 机制同构，不需要新增判别逻辑。
+
+备选：① 一刀切禁止跨标的读取 —— 放弃，信号链会退化为 20 日价格动量（`price_chg_pct` 就是现在的 fallback）。② 在守卫许可表新增「fundamental → fundamental 跨标的」—— 放弃，会引入 A↔B 循环依赖与结论沿链放大。
+
+### 10. 简报携带三类时间并做同源聚类
+
+每条事实变化落 `event_time`（事件发生）/ `published_at`（文档对外可见）/ `extracted_at`（入库抽取）三个时间，时效与 cutoff 判定以事件时间或发布时间为准；同一事件的多份文档归入同一 `cluster_key`，记录文档数与独立信源数。
+
+理由：现有载体只有 `published_at`（`data/news.py:84,144`、`data/admission.py:32`）。只靠入库时间会让"凌晨入库的盘后材料"被误判成次日新材料，直接破坏事件模式 cutoff 与迟到材料识别（任务 5.5）；缺聚类则同一事实被多篇同源报道重复计入，置信度被虚假放大。
+
+备选：只补时间字段、把聚类留到后续阶段 —— 放弃，因为"独立信源数"直接影响置信度语义，晚做会让已发布的简报置信度口径前后不一致。
+
+### 11. 层级分析师独立成包
+
+`layer_review.py` 从 `src/ats/agents/sector/` 迁到新建的 `src/ats/agents/layer/`，守卫前缀同步改为 `src/ats/agents/layer`。
+
+理由：不拆包时守卫只能按文件名前缀区分角色，新增 Layer 模块若落进 `agents/sector/` 会被判成 `sector_analyst`，反而获得"读 layer 投影"的许可（自读）。目录自解释比文件名约定更稳。
+
+代价可控：src 侧引用 4 处（`sector/review.py:74,126`、`cli.py:784,812`），测试侧 5 个文件约 47 处引用，且迁移与本次职责改造同批提交。
+
+### 12. 事件模式保留方向判断，但不携带动作与数量
+
+保留 `direction(-1/0/1)`、幅度、信心、理由与可证伪条件；删除 `action`、`qty` / `notional` 提示与风控调用；并额外约束 payload 不得出现 action 词表取值，主理人不得把 `direction` 直接映射为交易动作。
+
+理由（用户裁决）：判断现实与预期的偏离属于基本面职责，动作与数量的产生属于主理人综合判断 + 风控审查。`direction` 是预期差方向而非动作，两者必须分开表达，否则会出现事实上的"第二个动作出口"。
 
 ## Risks / Trade-offs
 
@@ -103,16 +135,19 @@
 - **[守卫角色映射改动牵连既有测试]** → `tests/test_architecture_guards.py:148` 断言当前树通过。缓解：映射调整与例外清退同批提交，例外清单只减不增。
 - **[缺口阻断过早生效]** → 六类必齐会让当前大量既有运行进不去决策周期。缓解：先接线快照与阻断但保留「显式声明必需类别」的能力，默认六类；验收用完整 fixture 构造六类齐备场景。
 - **[payload 可选字段被留空]** → 新写路径可能长期不填新字段。缓解：`agent/information-analyst` 与 `agent/fundamental-pead` 的校验把关键字段列为必需，缺字段即判该次产出失败。
+- **[跨标的信号改走中性事实后定性信号减弱]** → 数据产品（一致预期 / 财务）不提供管理层在电话会里的产能表述这类定性内容。缓解：定性部分改由该标的的 `InformationBrief` 承载（Information→Fundamental 本就是许可读取）；上游简报未覆盖时退化为「已报财务事实 + 价格动量」，并在输出中标注该退化为证据不足，而非静默沿用旧口径。
+- **[同源聚类引入判定复杂度]** → 聚类键取错会把不同事件误并或漏并。缓解：聚类键限定为「同一实体集合 + 事件时间窗 + 内容指纹」三要素，误并的代价高于漏并，故阈值取保守；簇内仍保留逐文档来源，可人工拆分。
+- **[层级拆包与职责改造同批提交]** → 移动文件叠加语义改动会放大 review 面。缓解：拆包放在同组最后一项（2.10），先完成语义改造与测试转绿，再做纯移动；移动后守卫前缀与测试导入同批改。
 
 ## Migration Plan
 
 1. **地基**：payload 扩展（additive）+ 守卫角色映射调整 + 六类判定改为按角色。
-2. **层级**：`agent/layer-analyst` 产出状态判断与投影；`allocation` 字段退役登记。
-3. **行业**：`agent/sector-allocation` 承接配置权、预算与护栏；移除宏观与 PEAD 读取。
-4. **信息**：新建 `agents/information/`，迁移 research / triage / digest，移除 dossier 直写副作用。
-5. **基本面**：双模式拆分，剥离 sizing 与内部风控，移除 Sector / Macro 注入。
+2. **层级**：`agent/layer-analyst` 产出状态判断与投影；`allocation` 字段退役登记；层级模块迁出 `agents/sector/` 独立成包（本组最后一步，纯移动）。
+3. **行业**：`agent/sector-allocation` 承接配置权、预算与护栏；移除宏观与 PEAD 读取；补证据冲突展示与 schema 不兼容判定。
+4. **信息**：新建 `agents/information/`，迁移 research / triage / digest，移除 dossier 直写副作用；暴露独立入口；落三类时间与同源聚类。
+5. **基本面**：双模式拆分，剥离 sizing 与内部风控，移除 Sector / Macro 注入；跨标的信号链改走中性事实与信息简报。
 6. **风控**：移除 memo 的宏观读取。
-7. **主理人**：接线 `build_research_snapshot` + `open_decision_cycle`，新增投影双读，缺口阻断。
+7. **主理人**：接线 `build_research_snapshot` + `open_decision_cycle`，新增投影双读，缺口阻断；基本面方向只作研究输入，不映射为动作。
 8. **边界收敛**：采集侧迁出 `agents/`，分析师读取改经数据产品，清退 27 条例外。
 9. **登记与验收**：`config/workflow/legacy_retirement.yaml` Phase D 段、文档同步、保真性对照。
 

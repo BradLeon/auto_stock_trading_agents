@@ -6,6 +6,8 @@
 - [ ] 1.4 在 `src/ats/workflow/run_contracts.py` 把必需性判定由 task_id 改为角色：新增「角色 → 可满足它的 task_id 集合」结构，基本面由 `fundamental_expectation_update` 或 `fundamental_event_review` 任一命中即满足。验证：新增测试断言只提供事件评审时基本面判定为满足，并把命中的 task_id 记录到结果里。
 - [ ] 1.5 把 `technical_review` 的 `required_for_decision` 置为 `True`，使必需类别为六类。验证：新增测试断言 `default_registry()` 解析出的必需角色集合恰为六类。
 - [ ] 1.6 为快照消费方暴露「按角色取可用投影」的读取函数（读 `task_projection_envelopes`，按 `agent_role` + 作用域 + 有效期过滤并返回最新一条）。验证：新增测试构造两类投影，断言按角色取回的是各自最新且未过期的一条。
+- [ ] 1.7 为 `InformationBriefPayload` 增补可选字段 `event_time` / `published_at` / `extracted_at` / `cluster_key` / `source_count` / `independent_sources`，保持 `schema_version` 为 `v1` 且旧 payload 仍可校验通过。验证：新增测试断言旧形态与含三类时间、聚类字段的新形态均通过校验。
+- [ ] 1.8 在 `validate_payload("fundamental_event_review", ...)` 增加越界字段断言：payload 出现 action 词表取值（`buy|add|hold|trim|sell`）或 `qty` / `notional` / `weight` 类字段即判不合法。验证：新增测试断言含这些字段的 payload 被拒，`direction` 取 `-1|0|1` 的正常 payload 通过。
 
 ## 2. 层级分析师：撤销配置权，改出状态判断与投影
 
@@ -18,6 +20,7 @@
 - [ ] 2.7 层级评审失败时登记该层缺失且不写入投影，不因单层失败中止其余层，也不用上次结论冒充本期判断。验证：新增测试让其中一层抛错，断言其余层仍有投影且失败层无投影、有留痕。
 - [ ] 2.8 层报告首节改为「状态判断 + 逐票相对排序」，预算与权重章节改由行业报告承载；保持每层一份、结论先行。验证：`tests/test_layer_report.py` 断言首节含状态判断且不含预算使用率明细。
 - [ ] 2.9 在 `config/workflow/legacy_retirement.yaml` 登记 `layer_verdict.allocation` 为待退项（替代实现、退出条件、消费方清零判据）。验证：`tests/test_legacy_retirement.py` 断言该项存在且字段完整。
+- [ ] 2.10 把 `src/ats/agents/sector/layer_review.py` 迁到新建的 `src/ats/agents/layer/` 包（层级分析师独立成包），同步更新 `agents/sector/review.py:74,126`、`runtime/cli.py:784,812` 与测试侧的导入，并把 `architecture_guards.py:33` 的 `ROLE_BY_PATH_PREFIX` 前缀改为 `src/ats/agents/layer`。验证：`tests/test_architecture_guards.py` 仍全绿且新前缀可被 `scan_agents()` 命中，`tests/test_layer_review.py` 全绿。
 
 ## 3. 行业分析师：承接三级配置权、预算与护栏
 
@@ -29,6 +32,8 @@
 - [ ] 3.6 跨层轮动只回答利润池迁移方向，发现相邻层矛盾时标注待人工裁决而不改写层级状态。验证：新增测试构造矛盾层级投影，断言输出含待裁决标注且层级投影未被改动。
 - [ ] 3.7 行业配置以 `SectorAllocation` 投影发布，`input_refs` 含本轮消费的全部层级投影标识。验证：新增测试断言可沿输入引用取回层级投影的内容哈希与 as-of。
 - [ ] 3.8 在架构守卫中确认 `sector_analyst → layer_analyst` 是唯一允许的跨角色读取，并断言行业模块内无其他跨角色投影读取。验证：`tests/test_architecture_guards.py` 新增断言行业目录只命中这一条许可。
+- [ ] 3.9 行业配置输出保留证据冲突：层级判断与标的层面证据相反时分列两条依据，标的多条事实矛盾时标注待人工裁决，不通过加权平均消解。验证：新增测试构造冲突输入，断言输出含两条依据与待裁决标注且未合并为单一分数。
+- [ ] 3.10 层级投影 `schema_version` 或 payload 结构不兼容时按缺失处理并留痕，禁止字段兜底或猜测映射。验证：新增测试用旧 `schema_version` 的层级投影驱动行业评审，断言该层被标注为不可用且配置取保守默认。
 
 ## 4. 信息分析师：新建角色与能力迁移
 
@@ -40,6 +45,9 @@
 - [ ] 4.6 实现简报的六类要素校验：缺事实变化或待核验项即判该次产出失败，不以自由文本降级写入。验证：新增测试断言缺字段时抛 `EnvelopeValidationError` 且库内无残缺投影。
 - [ ] 4.7 实现「买卖 / 仓位 / 组合建议」拦截：抽取结果出现方向性交易建议时判为不合法并拒绝写入。验证：新增测试用含「增持 / 目标仓位」的模型输出，断言被拒且不落库。
 - [ ] 4.8 实现按「来源文档版本 + 抽取逻辑版本」的幂等，重复处理同一文档版本复用既有简报；文档出新版本则产出新投影并引用前一版本。验证：新增测试断言重复处理不新增投影、新版本产生第二条且旧投影保留。
+- [ ] 4.9 暴露信息分析师的独立入口（手动 `ats analyst information`、定时任务的显式调用、文档准入事件触发）并保证其独立终结：运行不依赖其他分析师投影，且不触发基本面或主理人流程。验证：新增测试断言单独运行信息分析可正常终结且未产生基本面或决策记录。
+- [ ] 4.10 为每条事实变化落三类时间（事件时间 / 发布时间 / 抽取时间），并把时效与 cutoff 判定改为以事件时间或发布时间为准。验证：新增测试断言一份「早发布、晚入库」的文档按发布时间判时效，且不因抽取时间新而被判为本期新增。
+- [ ] 4.11 实现同源聚类：同一事件的多份文档归入同一 `cluster_key`，简报记录文档数与独立信源数，置信度不因簇内文档数量上调。验证：新增测试用四份同源报道，断言归为一簇、独立信源数为 1 且置信度未上调。
 
 ## 5. 基本面：例行与事件双模式，剥离内部风控
 
@@ -52,6 +60,8 @@
 - [ ] 5.7 移除 `agents/pead/score.py:189-231` 依据 `portfolio` / `net_liquidation` 推导数量的分支，改为只输出方向、幅度、信心、理由与可证伪条件。验证：新增测试断言输出无目标股数 / 金额 / 权重字段。
 - [ ] 5.8 移除 `agents/pead/monitor.py:85-95` 的 sector / macro 提示注入与 `graph/pead.py:125-144` 的 sector / macro 准备块注入（含移除对应注入开关，而非保留为可开启选项）。验证：新增测试断言配置中的 `inject_prep` 开关已不存在，且上下文无行业 / 宏观内容。
 - [ ] 5.9 双模式产出分别写为 `FundamentalExpectationUpdate` 与 `FundamentalEventReview` 投影，同一报告期两类投影各自保留。验证：新增测试断言两类投影可分别按角色查回且互不覆盖。
+- [ ] 5.10 改造 `graph/pead.py:180-206` 的 `_peer_report()`：跨标的信号只取中性事实（上游已报实际值、指引区间、财报日期，取自 `data/fundamentals.py` / `data/consensus.py` 等数据产品或该标的的 `InformationBrief`），丢弃 `decision_summary`、`scorecard.band` 与 `guidance` 自由文本。验证：新增测试断言信号链上下文不含上游评审结论与分档字段，且仍能取到已报实际值。
+- [ ] 5.11 在架构守卫中断言基本面模块不得读取 `agent_role` 为 `fundamental_analyst` 且作用域非本标的的投影。验证：`tests/test_architecture_guards.py` 新增断言此类读取被判为违规。
 
 ## 6. 风控输入收口
 
@@ -70,6 +80,7 @@
 - [ ] 7.6 修订轮次内复用同一份快照，不重跑分析师、不偷换研究输入。验证：新增测试断言多轮循环后快照标识不变。
 - [ ] 7.7 快照失效（关键数据 vintage 变化或投影被撤销）时把 cycle 转为 `superseded` 或人工处理。验证：新增测试断言两类情形下 cycle 状态转为失效且未沿用原 revision。
 - [ ] 7.8 实现缺口报告产出：列出缺失 / 过期 / 失败的类别与原因，且该报告不作为可决策输入进入主理人。验证：新增测试断言报告内容完整且不出现在决策上下文中。
+- [ ] 7.9 主理人上下文把基本面 `direction` 作为研究输入呈现，不提供把该取值直接映射为交易动作的路径。验证：新增测试断言决策上下文中存在方向字段但提案生成不以其为唯一依据，且代码中无 `direction → action` 的映射表。
 
 ## 8. 边界收敛：采集侧迁出与 Provider 直连清退
 

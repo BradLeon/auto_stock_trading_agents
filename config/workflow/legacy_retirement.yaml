@@ -130,6 +130,92 @@ retired:
     consumer_zero_criterion: 旧报表与 CLI 全部改为读 envelope，兼容写入登记退役条件后清零。
     location: Workflow memory
 
+  # ── Phase B（决策审计与交易安全）──────────────────────────────────────────
+  - identifier: risk.checks.in_place_clipping
+    capability_domain: risk/deterministic-review
+    replaced_by: risk.checks.review_revision（整条修订只读审查 + counterproposal）
+    target_phase: B
+    status: retired
+    exit_condition: >-
+      图风控节点改调 review_revision；旧就地裁剪函数（_apply_order_caps /
+      _clip_event_notional 及裁剪式返回值）从 src 移除，pre_trade() 适配层除外。
+    consumers:
+      - graph.chief.risk_gate
+      - graph.pead
+    consumer_zero_criterion: src 内无任何调用方再取得「被裁剪后的订单」作为风控输出。
+    location: src/ats/risk/checks.py
+
+  - identifier: agents.risk_validator.apply_guardrails
+    capability_domain: risk/deterministic-review
+    replaced_by: agents.risk_validator.review_guardrails（只读边界，不改写提案）
+    target_phase: B
+    status: retired
+    exit_condition: 默认流程改调 review_guardrails，apply_guardrails 无引用。
+    consumers:
+      - graph.pead
+    consumer_zero_criterion: src 内 grep apply_guardrails 仅剩定义与其自身测试（已改造）。
+    location: src/ats/agents/risk_validator.py
+
+  - identifier: runtime.server.in_process_resume_dedup
+    capability_domain: decision/approval-lifecycle
+    replaced_by: decision.repository.validate_callback（持久幂等键 + 终态/修订/审查判定）
+    target_phase: B
+    status: retired
+    exit_condition: server 移除进程内 _RESUMED，去重改查 boss_approvals 与 decision_cycles。
+    consumers:
+      - runtime.server.handle_callback
+      - runtime.server.handle_approve
+    consumer_zero_criterion: src 内不再存在任何进程内回调去重集合。
+    location: src/ats/runtime/server.py
+
+  - identifier: memory.store.legacy_decision_write_path
+    capability_domain: decision/decision-audit-store
+    replaced_by: decision_revisions + mirror_revision_to_legacy（D2 双写过渡）
+    target_phase: B
+    status: pending
+    exit_condition: cycles/decisions 旧决策写路径的全部读取方切换到审计表后，镜像写移除。
+    missing_condition: >-
+      D2 过渡期：决策审计表是权威，但 last_chief_run / recent_decisions 等旧读入口
+      仍由镜像双写供数，不能立即停写。
+    consumers:
+      - decision.repository.mirror_revision_to_legacy
+      - memory.store.last_chief_run
+      - memory.store.recent_decisions
+    consumer_zero_criterion: 上述读取方全部改读 decision_revisions，镜像写调用清零。
+    location: src/ats/decision/repository.py
+
+  - identifier: trades.client_order_id.legacy_derivation
+    capability_domain: execution/authorization-gate
+    replaced_by: client_order_id = cycle + revision_no + order_seq 派生式
+    target_phase: B
+    status: pending
+    exit_condition: 旧式（cycle:symbol:action）行全部被退役/对账清理，新派生式覆盖全部写入。
+    missing_condition: >-
+      新写入已全量切换到新派生式；历史 trades 行仍携带旧式标识，重试幂等查询需与其共存。
+    consumers:
+      - memory.store.save_trades
+      - trader.execute.place_orders
+      - trader.reconcile
+    consumer_zero_criterion: trades 表中不再有旧式 client_order_id 行，且代码中旧派生式无引用。
+    location: src/ats/memory/store.py
+
+  - identifier: risk.checks.pre_trade_adapter
+    capability_domain: risk/deterministic-review
+    replaced_by: risk.checks.review_revision
+    target_phase: B
+    status: pending
+    exit_condition: >-
+      唯一遗留调用点（runtime/scheduler.py、runtime/cli.py 的组合级巡检语义）确认迁移
+      或声明退役后，适配层删除；该开关仅用于风控回滚，不用于生产放行。
+    missing_condition: >-
+      pre_trade() 已退化为 deprecated 适配层（由新审查结果生成旧式输出），
+      保留作为回滚通道。
+    consumers:
+      - runtime.scheduler
+      - runtime.cli
+    consumer_zero_criterion: src 内 pre_trade 引用清零（调用方迁至 review_revision）。
+    location: src/ats/risk/checks.py
+
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）
 purge_scope:
   - identifier: task_projections.legacy_columns

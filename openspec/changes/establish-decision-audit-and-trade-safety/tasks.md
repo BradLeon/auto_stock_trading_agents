@@ -75,8 +75,8 @@
 
 ## 8. 待退旧实现登记
 
-- [ ] 8.1 在 `config/workflow/legacy_retirement.yaml` 追加本阶段待退项：`risk/checks.py` 的就地裁剪路径、`agents/risk_validator.py::apply_guardrails`、`runtime/server.py` 的进程内回调去重、`cycles`/`decisions` 旧决策写路径、`trades.client_order_id` 旧派生式、`pre_trade()` 适配层；每项填写 `replaced_by`、`target_phase: B`、`exit_condition`、`consumers`、`consumer_zero_criterion`、`location`。验证：`RetirementRegistry` 加载无冲突且 `tests/test_legacy_retirement.py` 通过
-- [ ] 8.2 确认登记只登记不清除。验证：`purge()` 默认干跑的单测通过，且仓库内不存在确认式清除调用
+- [x] 8.1 在 `config/workflow/legacy_retirement.yaml` 追加本阶段待退项：`risk/checks.py` 的就地裁剪路径、`agents/risk_validator.py::apply_guardrails`、`runtime/server.py` 的进程内回调去重、`cycles`/`decisions` 旧决策写路径、`trades.client_order_id` 旧派生式、`pre_trade()` 适配层；每项填写 `replaced_by`、`target_phase: B`、`exit_condition`、`consumers`、`consumer_zero_criterion`、`location`。验证：`RetirementRegistry` 加载无冲突且 `tests/test_legacy_retirement.py` 通过
+- [x] 8.2 确认登记只登记不清除。验证：`purge()` 默认干跑的单测通过，且仓库内不存在确认式清除调用
 
 ## 9. 门禁与验收
 

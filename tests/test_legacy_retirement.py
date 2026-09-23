@@ -136,7 +136,8 @@ def test_the_retention_declaration_is_recorded_not_inferred() -> None:
 # --- 7.5 first batch -------------------------------------------------------- #
 
 def test_the_registered_batch_covers_every_documented_item() -> None:
-    """design.md 的待退项登记表共 5 行；此处逐项核对，不允许多登记也不允许漏登记。"""
+    """design.md 的待退项登记表逐项核对，不允许多登记也不允许漏登记。
+    Phase A 8 项 + Phase B 6 项（任务 8.1）。"""
     from ats.workflow import legacy_retirement as mod
 
     registry = mod.load_registry()
@@ -149,6 +150,13 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "evidence_fact_projections.legacy_observation_id",
         "scheduler.hardcoded_serial_run",
         "legacy_read_models",
+        # ── Phase B ──
+        "risk.checks.in_place_clipping",
+        "agents.risk_validator.apply_guardrails",
+        "runtime.server.in_process_resume_dedup",
+        "memory.store.legacy_decision_write_path",
+        "trades.client_order_id.legacy_derivation",
+        "risk.checks.pre_trade_adapter",
     }
     assert set(registry.identifiers()) == expected
     for stone in registry.tombstones():

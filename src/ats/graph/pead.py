@@ -482,11 +482,13 @@ def score_decision(state: PeadState) -> dict:
         state.config, state.scorecard, run_up, state.portfolio, _net_liq(state),
         size_factor=size_factor, as_of=state.as_of)
 
-    # apply_guardrails/pre_trade are the same risk-clipping machinery the Chief's own
-    # decision graph uses, and they're strongly typed to TradeDecision. PEAD borrows
-    # them here as a sanity-check on its RECOMMENDATION (does it already blow a risk
-    # cap?) — the conversion is transient, scoped to this function; agents/pead/score.py
-    # itself never touches TradeDecision.
+    # review_guardrails/pre_trade are the same risk machinery the Chief's own
+    # decision graph uses, and they're strongly typed to TradeDecision. PEAD
+    # borrows them here as a sanity-check on its RECOMMENDATION (does it already
+    # blow a risk cap?) — the conversion is transient, scoped to this function;
+    # agents/pead/score.py itself never touches TradeDecision. Phase B (D7):
+    # guardrails are a read-only review — boundaries are reported, the
+    # recommendation is never silently rewritten.
     decisions = [_rec_to_decision(r) for r in recs]
     guardrails = risk_agent.assess(as_of=state.as_of, risk_cfg=get_config().app.risk,
                                    portfolio=state.portfolio,
@@ -495,21 +497,25 @@ def score_decision(state: PeadState) -> dict:
     # target only — don't rebalance unrelated holdings inside a per-ticker decision.
     guardrails.forced_trim = [s for s in guardrails.forced_trim if s == state.symbol]
     guardrails.no_add_list = [s for s in guardrails.no_add_list if s == state.symbol]
-    clipped, adjustments = risk_validator.apply_guardrails(
+    decisions, adjustments = risk_validator.review_guardrails(
         decisions, guardrails, sector_by_symbol={state.symbol: "optical"},
         net_liquidation=_net_liq(state), portfolio=state.portfolio)
 
-    # 6-layer risk gate (event-risk clip / de-risk / beta / cluster) on top of the
+    # 6-layer risk gate (event-risk cap / de-risk / beta / cluster) on top of the
     # scoped L1-2 above. Event data from the options-derived Expected Move.
+    # Phase B: pre_trade() is the deprecated adapter — it reviews without
+    # rewriting; rejected recommendations simply drop out of the approved set.
     if state.portfolio is not None:
         from ..risk import checks as risk_checks
 
         em = state.market_setup.expected_move_pct if state.market_setup else None
         event_data = {state.symbol: {"expected_move_pct": em}} if em else None
-        clipped, notes, _ = risk_checks.pre_trade(
-            clipped, state.portfolio, event_data=event_data, apply_base=False)
+        approved, notes, _ = risk_checks.pre_trade(
+            decisions, state.portfolio, event_data=event_data, apply_base=False)
         adjustments = list(adjustments) + notes
-    clipped_recs = [_decision_to_rec(d, state.as_of) for d in clipped]
+    else:
+        approved = decisions
+    clipped_recs = [_decision_to_rec(d, state.as_of) for d in approved]
     return {"decisions": clipped_recs, "decision_band": band, "risk_adjustments": adjustments}
 
 

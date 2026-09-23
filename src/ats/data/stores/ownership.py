@@ -19,6 +19,11 @@ WORKFLOW_MEMORY_TABLES = frozenset({
     # neutral evidence, so it sits here next to `task_projections` — which it will
     # eventually replace.
     "task_projection_envelopes",
+    # Decision audit (§12.3, Phase B). Decisions carry opinions (who proposed
+    # what, why, who approved), so they are Workflow memory, never the data
+    # layer's neutral facts.
+    "decision_cycles", "decision_revisions", "decision_risk_reviews",
+    "boss_approvals", "cycle_events",
     "claim_assessments", "sector_reviews", "macro_reviews",
     "technical_reviews", "fills", "risk_reviews", "score_consumption", "pead_periods",
     "pead_score_runs", "journal_entries", "journal_meta", "predictions",

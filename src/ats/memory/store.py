@@ -21,7 +21,7 @@ from ..schemas.memory import PerformanceRecord
 
 log = logging.getLogger("ats.memory.store")
 
-_SCHEMA = """
+_BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS cycles (
     cycle_id TEXT PRIMARY KEY, as_of TEXT, approval_status TEXT, manager_summary TEXT
 );
@@ -381,6 +381,94 @@ CREATE TABLE IF NOT EXISTS claim_assessments (
 );
 """
 
+# ---------------------------------------------------------------------------
+# Decision audit (docs/TARGET_WORKFLOW_DATAFLOW.md §12.3, Phase B).
+# Five additive tables; no legacy table or column is touched. Kept as a separate
+# module constant so `_migrate` can re-apply exactly this fragment on databases
+# created before Phase B. Notes on the shape:
+# - `decision_risk_reviews` is deliberately NOT the portfolio-level `risk_reviews`
+#   (whose `as_of` primary key keeps its original semantics); decision-level
+#   reviews are keyed to one revision hash.
+# - `revision_source` marks how a revision came to exist: `chief` (produced by
+#   the loop), `legacy_revision` (migrated, content fully recoverable) or
+#   `legacy_unknown` (migrated with gaps — such a revision must never obtain
+#   execution authorization).
+# - `boss_approvals.idempotency_key` and `cycle_events.idempotency_key` are
+#   UNIQUE: a replayed callback or a retried transition must land on the record
+#   it already produced, never a second one. Keys exclude the request moment
+#   (same principle as `TriggerContext.idempotency_key`).
+# ---------------------------------------------------------------------------
+_DECISION_AUDIT_DDL = """
+CREATE TABLE IF NOT EXISTS decision_cycles (
+    cycle_id TEXT PRIMARY KEY,
+    trigger_source TEXT, trigger_id TEXT,
+    research_snapshot TEXT,
+    status TEXT,
+    current_revision_no INTEGER,
+    final_outcome TEXT,
+    superseded_reason TEXT,
+    created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS decision_revisions (
+    cycle_id TEXT, revision_no INTEGER,
+    decision_hash TEXT,
+    parent_revision_no INTEGER,
+    orders_json TEXT,
+    rationale TEXT,
+    input_refs TEXT,
+    model_version TEXT, prompt_version TEXT,
+    revision_source TEXT,
+    legacy_ref TEXT,
+    created_at TEXT,
+    PRIMARY KEY (cycle_id, revision_no)
+);
+-- Same content resubmitted within one cycle is a no-op, not a new revision.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_decision_revision_hash
+    ON decision_revisions(cycle_id, decision_hash);
+CREATE INDEX IF NOT EXISTS idx_decision_revision_cycle
+    ON decision_revisions(cycle_id, revision_no);
+CREATE TABLE IF NOT EXISTS decision_risk_reviews (
+    review_id TEXT PRIMARY KEY,
+    cycle_id TEXT, revision_no INTEGER, decision_hash TEXT,
+    ruleset_version TEXT,
+    portfolio_snapshot_id TEXT, market_as_of TEXT,
+    verdict TEXT,
+    violations_json TEXT, allowed_boundary_json TEXT,
+    before_metrics_json TEXT, after_metrics_json TEXT,
+    notes TEXT, created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_decision_review_revision
+    ON decision_risk_reviews(cycle_id, revision_no);
+CREATE TABLE IF NOT EXISTS boss_approvals (
+    approval_id TEXT PRIMARY KEY,
+    cycle_id TEXT, revision_no INTEGER, decision_hash TEXT,
+    decision TEXT, reviewer TEXT, comment TEXT, channel TEXT,
+    idempotency_key TEXT NOT NULL,
+    created_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_boss_approvals_idempotency
+    ON boss_approvals(idempotency_key);
+CREATE TABLE IF NOT EXISTS cycle_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id TEXT, event_type TEXT, actor TEXT,
+    from_status TEXT, to_status TEXT,
+    idempotency_key TEXT NOT NULL,
+    payload TEXT, error TEXT,
+    created_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cycle_events_idempotency
+    ON cycle_events(cycle_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_cycle_events_cycle
+    ON cycle_events(cycle_id, created_at);
+"""
+
+_SCHEMA = _BASE_SCHEMA + _DECISION_AUDIT_DDL
+
+_DECISION_AUDIT_TABLES = frozenset({
+    "decision_cycles", "decision_revisions", "decision_risk_reviews",
+    "boss_approvals", "cycle_events",
+})
+
 
 class TradingMemory:
     def __init__(self, db_path: str | Path):
@@ -508,6 +596,21 @@ class TradingMemory:
                     "entry_id TEXT", "episode_id TEXT"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
+        # Decision-audit linkage (§12.3, Phase B). Nullable on purpose: forcing
+        # them non-null on every new order is Phase C's cutover, after all new
+        # orders flow through the authorization gate. `trades.cycle_id` already
+        # exists (original column); `fills` gets the full quadruple.
+        for ddl in ("revision_no INTEGER", "decision_hash TEXT", "approval_id TEXT"):
+            if ddl.split()[0] not in tcols:
+                self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
+        for ddl in ("cycle_id TEXT", "revision_no INTEGER", "decision_hash TEXT",
+                    "approval_id TEXT"):
+            if ddl.split()[0] not in fcols:
+                self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_decision "
+                          "ON trades(cycle_id, revision_no)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_fills_decision "
+                          "ON fills(cycle_id, revision_no)")
         # Any column added to a table that already exists in the wild needs an ALTER —
         # CREATE TABLE IF NOT EXISTS in _SCHEMA is a no-op on an existing table.
         pcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(predictions)")}
@@ -599,6 +702,8 @@ class TradingMemory:
                 (migration, stamp, "legacy source_documents were chain seen-set"))
         self._migrate_shared_facts()
         self._migrate_pead_events_pk()
+        self._migrate_decision_audit_tables()
+        self._migrate_legacy_decisions()
         self.conn.commit()
 
     def _migrate_shared_facts(self) -> None:
@@ -680,6 +785,117 @@ class TradingMemory:
             ALTER TABLE pead_events__new RENAME TO pead_events;
             CREATE INDEX IF NOT EXISTS idx_pead_events ON pead_events(symbol, published_at);
         """)
+
+    def _migrate_decision_audit_tables(self) -> None:
+        """Additive completion of the §12.3 decision-audit tables.
+
+        A fresh database already gets them from `_SCHEMA`; a database created
+        before Phase B ran an older script, so the migration re-applies exactly
+        the `_DECISION_AUDIT_DDL` fragment. CREATE IF NOT EXISTS keeps it
+        idempotent and no legacy column or table is touched.
+        """
+        present = {r["name"] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not _DECISION_AUDIT_TABLES <= present:
+            self.conn.executescript(_DECISION_AUDIT_DDL)
+
+    def _migrate_legacy_decisions(self) -> None:
+        """One-time §12.3 backfill: legacy `decisions` rows become revisions.
+
+        Mappable rows (content fully recoverable — see
+        :mod:`ats.decision.legacy` for the shared classification) become one
+        `legacy_revision` per cycle, with a real content hash over the recovered
+        orders and rationales. Rows with gaps become a separate `legacy_unknown`
+        revision that keeps the original identifiers (`legacy_ref`) but gets NO
+        hash, NO input refs and NO snapshot/approval linkage — and is
+        structurally barred from execution authorization
+        (`ats.decision.state.revision_authorization_blockers`).
+
+        Guarded by the `data_migrations` ledger, like every other one-time
+        backfill; the classification must stay identical to
+        `scripts/audit_legacy_decisions.py`, which is why both call the same
+        function instead of duplicating the rule.
+        """
+        from ..decision import hashing
+        from ..decision.legacy import classify_legacy_decisions as legacy_inventory
+        from ..decision.state import (REVISION_SOURCE_LEGACY,
+                                      REVISION_SOURCE_LEGACY_UNKNOWN)
+        from ..schemas.decision import normalize_action as _normalize_action
+
+        key = "decision_audit_legacy_v1"
+        if self.conn.execute(
+                "SELECT 1 FROM data_migrations WHERE key=?", (key,)).fetchone():
+            return
+        names = {r["name"] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"cycles", "decisions"} <= names:
+            return                                    # nothing legacy to migrate
+        inventory = legacy_inventory(self.conn)
+        if not inventory.rows:
+            return
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        from ..agent.task_projection import canonical_json
+
+        def _next_revision_no(cycle_id: str) -> int:
+            row = self.conn.execute(
+                "SELECT MAX(revision_no) FROM decision_revisions WHERE cycle_id=?",
+                (cycle_id,)).fetchone()
+            return (row[0] or 0) + 1
+
+        # Mappable rows: one legacy_revision per cycle, orders sorted by symbol
+        # for a deterministic hash.
+        by_cycle: dict[str, list] = {}
+        for row in inventory.mappable:
+            by_cycle.setdefault(row.cycle_id, []).append(row)
+        for cycle_id, rows in sorted(by_cycle.items()):
+            orders = []
+            rationales: dict[str, str] = {}
+            for row in sorted(rows, key=lambda r: (r.symbol or "", r.rowid)):
+                order = {"symbol": (row.symbol or "").upper(),
+                         "action": _normalize_action(
+                             row.action or "", where=f"decisions.rowid={row.rowid}"),
+                         "notional_usd": float(row.notional_usd)}
+                if row.limit_price is not None:
+                    order["limit_price"] = float(row.limit_price)
+                if row.conviction is not None:
+                    order["conviction"] = float(row.conviction)
+                if row.rationale:
+                    order["rationale"] = row.rationale
+                    rationales[order["symbol"]] = row.rationale
+                orders.append(order)
+            self.conn.execute(
+                "INSERT INTO decision_revisions (cycle_id, revision_no, decision_hash, "
+                "parent_revision_no, orders_json, rationale, input_refs, model_version, "
+                "prompt_version, revision_source, legacy_ref, created_at) "
+                "VALUES (?,?,?,NULL,?,?,NULL,NULL,NULL,?,?,?)",
+                (cycle_id, _next_revision_no(cycle_id),
+                 hashing.decision_hash(orders=orders, rationale=rationales),
+                 canonical_json(orders),
+                 canonical_json(rationales) if rationales else "",
+                 REVISION_SOURCE_LEGACY,
+                 f"decisions:{cycle_id}", stamp))
+        # Unmapped rows: keep original identifiers, fabricate nothing.
+        unknown_by_cycle: dict[str, list] = {}
+        for row in inventory.unmappable:
+            unknown_by_cycle.setdefault(row.cycle_id or "<no-cycle-id>", []).append(row)
+        for cycle_id, rows in sorted(unknown_by_cycle.items()):
+            legacy_ref = canonical_json([
+                {"decisions.rowid": row.rowid, "cycle_id": row.cycle_id,
+                 "symbol": row.symbol, "action": row.action,
+                 "reason": row.reason} for row in
+                sorted(rows, key=lambda r: r.rowid)])
+            self.conn.execute(
+                "INSERT INTO decision_revisions (cycle_id, revision_no, decision_hash, "
+                "parent_revision_no, orders_json, rationale, input_refs, model_version, "
+                "prompt_version, revision_source, legacy_ref, created_at) "
+                "VALUES (?,?,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?,?,?)",
+                (cycle_id, _next_revision_no(cycle_id), REVISION_SOURCE_LEGACY_UNKNOWN,
+                 legacy_ref, stamp))
+        self.conn.execute(
+            "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
+            (key, stamp,
+             f"migrated {len(inventory.mappable)} mappable / "
+             f"{len(inventory.unmappable)} legacy_unknown legacy decisions"))
 
     # --- writes ---------------------------------------------------------- #
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",

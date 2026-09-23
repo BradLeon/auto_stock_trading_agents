@@ -153,3 +153,5 @@ def test_order_status_mapping():
 def test_trades_migration_columns():
     cols = {r["name"] for r in get_store().conn.execute("PRAGMA table_info(trades)")}
     assert {"limit_price", "filled_at", "error", "realized_pnl", "source", "context"} <= cols
+    # Phase B linkage (§12.3): nullable until Phase C makes them mandatory.
+    assert {"cycle_id", "revision_no", "decision_hash", "approval_id"} <= cols

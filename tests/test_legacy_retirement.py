@@ -152,6 +152,11 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "legacy_read_models",
         # ── Phase C（任务 6.7：旧直读点先行登记；其余五项随任务 8.1 批次追加）──
         "store.direct_trade_reads",
+        "reconcile.origin_manual_fallback",
+        "reconcile.partial_fill_as_filled",
+        "scheduler.adhoc_journal_jobs",
+        "performance.legacy_snapshot",
+        "journal.report.render_ledger",
         # ── Phase B ──
         "risk.checks.in_place_clipping",
         "agents.risk_validator.apply_guardrails",

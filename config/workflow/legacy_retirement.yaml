@@ -230,6 +230,76 @@ retired:
     consumer_zero_criterion: src 内 pre_trade 引用清零（调用方迁至 review_revision）。
     location: src/ats/risk/checks.py
 
+  # ── Phase C（Clerk 与账本）────────────────────────────────────────────────
+  # 本阶段已退出（retired）——旧行为已被替换，代码路径已不存在。
+  - identifier: reconcile.origin_manual_fallback
+    capability_domain: execution/clerk-ledger
+    replaced_by: reconcile 三类归属（匹配→system / 人工 orderRef→manual /
+      其余→unattributed + 审计异常）
+    target_phase: C
+    status: retired
+    exit_condition: 匹配失败的成交不再静默归为 manual，而是归为 unattributed 并登记异常。
+    consumer_zero_criterion: reconcile 内「匹配不到即 manual」分支清零（已达成）。
+    location: src/ats/trader/reconcile.py
+
+  - identifier: reconcile.partial_fill_as_filled
+    capability_domain: execution/clerk-ledger
+    replaced_by: 累计式成交核算（filled_qty 累计 + 成交量加权均价，满量才收口）
+    target_phase: C
+    status: retired
+    exit_condition: 见价即置 filled 的行为消失，部分成交以 partial 终态留痕。
+    consumer_zero_criterion: 「见价即 filled」写入路径清零（已达成）。
+    location: src/ats/trader/reconcile.py
+
+  # 待退（pending）——双轨期内旧入口仍在用，Phase E 收口。
+  - identifier: scheduler.adhoc_journal_jobs
+    capability_domain: execution/clerk-ledger
+    replaced_by: execution.clerk.clerk_run（窗口幂等的确定性编排入口）
+    target_phase: C
+    status: pending
+    exit_condition: 生产触发（cron/launchd/人工）全部经 ats clerk run，
+      reconcile / mark / episodes / predictions / performance 的独立直调入口
+      仅保留为单步调试。
+    missing_condition: >-
+      `ats journal reconcile` 等独立 CLI 入口仍可绕过 Clerk 编排直接写账本，
+      双轨期靠窗口幂等键防重复；Phase E 收口时切断直调触发。
+    consumers:
+      - runtime.cli
+    consumer_zero_criterion: 生产触发路径不再直调单步 journal 动作。
+    location: src/ats/runtime/cli.py（journal 子命令）
+
+  - identifier: performance.legacy_snapshot
+    capability_domain: execution/clerk-ledger
+    replaced_by: execution.clerk 编排内的 performance 步骤（+ rebuild 派生读模型）
+    target_phase: C
+    status: pending
+    exit_condition: 「ats trader snapshot」与 scheduler 的直调
+      record_snapshot 改经 clerk run 编排（编排内同一步骤幂等）。
+    missing_condition: >-
+      trader/performance.record_snapshot 仍被 runtime/cli.py:435 与
+      runtime/scheduler.py:514 绕过 Clerk 直接调用；clerk_run 内部调用同一
+      确定性函数，无重复事实风险，但编排留痕缺失。
+    consumers:
+      - runtime.cli
+      - runtime.scheduler
+    consumer_zero_criterion: record_snapshot 的调用方仅剩 execution.clerk。
+    location: src/ats/trader/performance.py
+
+  - identifier: journal.report.render_ledger
+    capability_domain: execution/internal-state-api
+    replaced_by: Internal State / ledger_read_models（派生读模型供报告消费）
+    target_phase: C
+    status: pending
+    exit_condition: 报告（journal ledger 月度台账）改读派生读模型或经
+      Internal State API 取数；该报告只展示、从不回读系统，风险低。
+    missing_condition: >-
+      journal/report.py 仍直接读 trades 原始表渲染 Obsidian 台账；
+      SQLite 仍是权威、报告输出从不回流，故仅登记不急退。
+    consumers:
+      - runtime.cli
+    consumer_zero_criterion: report.py 不再直读 trades/fills 原始表。
+    location: src/ats/journal/report.py
+
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）
 purge_scope:
   - identifier: task_projections.legacy_columns

@@ -63,9 +63,9 @@
 
 ## 8. 待退旧实现登记
 
-- [ ] 8.1 在 `config/workflow/legacy_retirement.yaml` 追加 Phase C 六项（`reconcile.origin_manual_fallback`、`reconcile.partial_fill_as_filled`、`scheduler.adhoc_journal_jobs`、`store.direct_trade_reads`、`journal.report.render_ledger`、`performance.legacy_snapshot`），逐项填写 replaced_by / exit_condition / consumers / consumer_zero_criterion / location —— 验证：`tests/test_legacy_retirement.py` 通过
-- [ ] 8.2 同步更新 `tests/test_legacy_retirement.py` 中登记表的期望集合（登记表被机器校验，增项须同批改） —— 验证：该测试通过且新旧条目一一对应
-- [ ] 8.3 确认 `purge()` 仍为默认干跑且仓库内无确认式清除调用 —— 验证：检索确认无 confirm=True 的清除调用
+- [x] 8.1 在 `config/workflow/legacy_retirement.yaml` 追加 Phase C 六项（`reconcile.origin_manual_fallback`、`reconcile.partial_fill_as_filled`、`scheduler.adhoc_journal_jobs`、`store.direct_trade_reads`、`journal.report.render_ledger`、`performance.legacy_snapshot`），逐项填写 replaced_by / exit_condition / consumers / consumer_zero_criterion / location —— 验证：`tests/test_legacy_retirement.py` 通过
+- [x] 8.2 同步更新 `tests/test_legacy_retirement.py` 中登记表的期望集合（登记表被机器校验，增项须同批改） —— 验证：该测试通过且新旧条目一一对应
+- [x] 8.3 确认 `purge()` 仍为默认干跑且仓库内无确认式清除调用 —— 验证：检索确认无 confirm=True 的清除调用
 
 ## 9. 门禁与验收
 

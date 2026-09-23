@@ -55,11 +55,11 @@
 
 ## 6. Boss 审批收窄与持久化幂等
 
-- [ ] 6.1 审批输入面收窄为对 exact revision hash 的批准/拒绝，修改意见只作拒绝备注。验证：提交不同数量的用例被记录为拒绝且执行环节未收到指令
-- [ ] 6.2 审查通过后任一实质字段变化即令审查失效并需重新审查与重新批准。验证：字段变化后原审批不再有效的单测通过
-- [ ] 6.3 `boss_approvals` 持久化幂等键，`runtime/server.py` 去重改为查存储并移除进程内 `_RESUMED`。验证：改写 `tests/test_server.py::test_duplicate_callback_executes_once`（40-63）为跨进程/重启可复现，并新增「重启后重复回调不产生第二次执行」
-- [ ] 6.4 拒绝针对非当前修订、已终结 cycle、已失效审查的回调。验证：三类回调各自单测返回拒绝且不产生新授权
-- [ ] 6.5 审批记录完整写入 `boss_approvals`，并与既有 `cycles.approval_status`、journal 审批列写入保持一致。验证：既有审批回填与 divergence 测试通过，且新表记录字段齐备
+- [x] 6.1 审批输入面收窄为对 exact revision hash 的批准/拒绝，修改意见只作拒绝备注。验证：提交不同数量的用例被记录为拒绝且执行环节未收到指令
+- [x] 6.2 审查通过后任一实质字段变化即令审查失效并需重新审查与重新批准。验证：字段变化后原审批不再有效的单测通过
+- [x] 6.3 `boss_approvals` 持久化幂等键，`runtime/server.py` 去重改为查存储并移除进程内 `_RESUMED`。验证：改写 `tests/test_server.py::test_duplicate_callback_executes_once`（40-63）为跨进程/重启可复现，并新增「重启后重复回调不产生第二次执行」
+- [x] 6.4 拒绝针对非当前修订、已终结 cycle、已失效审查的回调。验证：三类回调各自单测返回拒绝且不产生新授权
+- [x] 6.5 审批记录完整写入 `boss_approvals`，并与既有 `cycles.approval_status`、journal 审批列写入保持一致。验证：既有审批回填与 divergence 测试通过，且新表记录字段齐备
 
 ## 7. 执行授权网关
 

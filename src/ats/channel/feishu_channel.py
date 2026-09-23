@@ -111,9 +111,11 @@ def _decision_line(d: TradeDecision) -> str:
 
 
 def build_approval_card(req: ApprovalRequest, thread_id: str) -> dict:
-    """Feishu interactive card with Approve / Reject buttons carrying the thread_id."""
+    """Feishu interactive card with Approve / Reject buttons carrying the thread_id
+    AND the exact revision binding (§10.3) the verdict applies to."""
     body = req.context_summary or ""
     decisions_md = "\n\n".join(_decision_line(d) for d in req.decisions) or "_No trades proposed._"
+    binding = {"revision_no": req.revision_no, "revision_hash": req.decision_hash}
     return {
         "config": {"wide_screen_mode": True},
         "header": {"template": "blue",
@@ -125,10 +127,10 @@ def build_approval_card(req: ApprovalRequest, thread_id: str) -> dict:
             {"tag": "action", "actions": [
                 {"tag": "button", "text": {"tag": "plain_text", "content": "✅ Approve"},
                  "type": "primary",
-                 "value": {"action": "approve", "thread_id": thread_id}},
+                 "value": {"action": "approve", "thread_id": thread_id, **binding}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "❌ Reject"},
                  "type": "danger",
-                 "value": {"action": "reject", "thread_id": thread_id}},
+                 "value": {"action": "reject", "thread_id": thread_id, **binding}},
             ]},
         ],
     }
@@ -169,8 +171,11 @@ def parse_callback(payload: dict) -> dict:
             status="approved" if verdict == "approve" else "rejected",
             reviewer=operator,
             reviewed_at=None,  # stamped on resume
+            channel="feishu-card",
         )
-        return {"kind": "approval", "thread_id": thread_id, "approval": approval}
+        return {"kind": "approval", "thread_id": thread_id, "approval": approval,
+                "revision_no": value.get("revision_no"),
+                "decision_hash": value.get("revision_hash")}
 
     return {"kind": "ignore"}
 

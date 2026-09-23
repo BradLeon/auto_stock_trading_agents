@@ -39,10 +39,11 @@ def test_card_action_resumes_and_executes(async_channel, broker):
 
 def test_duplicate_callback_executes_once(async_channel, broker):
     """Feishu prefetches approval links / users double-tap → the same cycle can hit
-    the handler concurrently. It must execute AT MOST ONCE (else double orders)."""
+    the handler concurrently. Dedup is PERSISTENT (task 6.3): the store, not an
+    in-process map, decides — so it survives process restarts."""
     from ats.runtime import server
 
-    server._RESUMED.clear()
+    assert not hasattr(server, "_RESUMED")   # in-process dedup is gone
     state = ChiefDecisionState(
         cycle_id="chief-idem-test", as_of=NOW, source="chief", decide=False, dry_run=False,
         seed_decisions=[TradeDecision(symbol=s, action="buy", qty=1, rationale="r")
@@ -61,3 +62,40 @@ def test_duplicate_callback_executes_once(async_channel, broker):
     from ats.memory import get_store
     trades = get_store().recent_trades(limit=20)
     assert len(trades) == 2              # 2 orders from ONE execution, not 4
+
+
+def test_duplicate_callback_after_restart_still_deduped(async_channel, broker):
+    """Task 6.3: a callback replayed after a serve-process restart (fresh module
+    state, empty in-process caches) must still not execute twice — the decision
+    audit store is the only dedup authority."""
+    from ats.memory import get_store
+
+    state = ChiefDecisionState(
+        cycle_id="chief-restart-test", as_of=NOW, source="chief", decide=False,
+        dry_run=False,
+        seed_decisions=[TradeDecision(symbol="NVDA", action="buy", qty=1, rationale="r")])
+    run_decision_graph(state, channel=async_channel)
+    thread_id = async_channel.thread_id
+    cb = {"event": {"operator": {"open_id": "ou_boss"},
+                    "action": {"value": {"action": "approve", "thread_id": thread_id}}}}
+
+    first = handle_callback(cb)
+    assert first["toast"]["type"] == "success"
+    trades_after_first = len(get_store().recent_trades(limit=20))
+
+    # Simulate the restart: reimport the server module (its module-level state,
+    # if any survived, would be reset) and replay the same callback.
+    import importlib
+
+    from ats.runtime import server
+    importlib.reload(server)
+    second = server.handle_callback(cb)
+
+    assert "已处理" in second["toast"]["content"]
+    assert len(get_store().recent_trades(limit=20)) == trades_after_first  # no re-execution
+    # The approval is recorded exactly once, bound to the revision.
+    repo = get_store()
+    approvals = repo.conn.execute(
+        "SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = 'chief-restart-test'"
+    ).fetchone()[0]
+    assert approvals == 1

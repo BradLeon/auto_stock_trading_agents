@@ -144,6 +144,9 @@ class BossApproval(BaseModel):
     reviewer: str = ""
     reviewed_at: datetime | None = None
     comment: str = ""
+    # Which entry point delivered this verdict (feishu-card / feishu-bot / auto /
+    # cli / test). Part of the persistent approval idempotency key (design D3).
+    channel: str = ""
     # Symbols the Boss approved / rejected; empty `approved` with status=approved means all.
     approved_symbols: list[str] = Field(default_factory=list)
     rejected_symbols: list[str] = Field(default_factory=list)

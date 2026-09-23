@@ -48,6 +48,15 @@ class InvalidRiskReviewError(DecisionAuditError):
     """A review without its binding quad (revision hash, ruleset, snapshots)."""
 
 
+def approval_idempotency_key(cycle_id: str, revision_no: int, decision_hash: str,
+                             channel: str) -> str:
+    """Design D3: the callback dedup key is derived from the process, revision,
+    hash and approval channel — never from the request moment — so a replayed
+    callback across processes/restarts derives the SAME key."""
+    body = f"approval|{cycle_id}|r{revision_no}|{decision_hash}|{channel}"
+    return hashlib.sha1(body.encode()).hexdigest()[:32]
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -182,6 +191,73 @@ class DecisionAuditRepository:
             "SELECT * FROM decision_revisions WHERE cycle_id = ? ORDER BY revision_no",
             (cycle_id,)).fetchall()
 
+    def latest_revision(self, cycle_id: str) -> sqlite3.Row | None:
+        """The revision a callback/authorization must currently bind to."""
+        return self.conn.execute(
+            "SELECT * FROM decision_revisions WHERE cycle_id = ? "
+            "ORDER BY revision_no DESC LIMIT 1", (cycle_id,)).fetchone()
+
+    def effective_review(self, cycle_id: str, revision_no: int,
+                         decision_hash: str) -> sqlite3.Row | None:
+        """The review ONLY if it binds exactly this revision (task 6.2).
+
+        Any substantive field change after the review produces a NEW revision
+        with a new hash — the old review no longer binds and is invalid for it.
+        """
+        return self.conn.execute(
+            "SELECT * FROM decision_risk_reviews WHERE cycle_id = ? AND "
+            "revision_no = ? AND decision_hash = ?",
+            (cycle_id, revision_no, decision_hash)).fetchone()
+
+    def effective_approval(self, cycle_id: str, revision_no: int,
+                           decision_hash: str) -> sqlite3.Row | None:
+        """The approval ONLY if it is an approval bound to exactly this revision."""
+        return self.conn.execute(
+            "SELECT * FROM boss_approvals WHERE cycle_id = ? AND revision_no = ? "
+            "AND decision_hash = ? AND decision = 'approved'",
+            (cycle_id, revision_no, decision_hash)).fetchone()
+
+    def validate_callback(self, cycle_id: str, *, revision_no: int | None = None,
+                          decision_hash: str | None = None,
+                          channel: str = "") -> tuple[bool, str, bool]:
+        """Callback admission guard (task 6.4). Returns `(ok, reason, deduped)`.
+
+        - terminal cycle → reject;
+        - callback binding a superseded revision → reject;
+        - review no longer effective for the current revision → reject
+          (only enforced when the cycle has reviews at all — the degraded
+          no-portfolio path has none and relies on the execution gate);
+        - approval already recorded for (revision, hash, channel) → dedup,
+          i.e. the original result is the answer, not an error.
+        Cycles without an audit row (legacy) are allowed through unchanged.
+        """
+        cycle = self.get_cycle(cycle_id)
+        if cycle is None:
+            return True, "no audit row (legacy cycle)", False
+        if is_terminal(cycle["status"]):
+            # A late/duplicate callback on a finished cycle: the original
+            # result stands — reported as dedup, not as an error.
+            return False, f"cycle already terminal ({cycle['status']})", True
+        rev = self.latest_revision(cycle_id)
+        if rev is None:
+            return True, "no revision yet", False
+        key = approval_idempotency_key(cycle_id, rev["revision_no"],
+                                       rev["decision_hash"], channel)
+        if self.has_approval(key) is not None:
+            return False, "already handled", True
+        if decision_hash and decision_hash != rev["decision_hash"]:
+            return False, "callback targets a superseded revision", False
+        if revision_no is not None and revision_no != rev["revision_no"]:
+            return False, "callback targets a superseded revision", False
+        if self.effective_review(cycle_id, rev["revision_no"],
+                                 rev["decision_hash"]) is None:
+            has_any = self.conn.execute(
+                "SELECT 1 FROM decision_risk_reviews WHERE cycle_id = ? LIMIT 1",
+                (cycle_id,)).fetchone()
+            if has_any is not None:
+                return False, "risk review no longer effective", False
+        return True, "ok", False
+
     def update_revision(self, *args: Any, **kwargs: Any) -> None:
         """Explicit refusal: persisted revisions are never rewritten (2.4).
 
@@ -315,7 +391,8 @@ class DecisionAuditRepository:
             "SELECT * FROM boss_approvals WHERE idempotency_key = ?",
             (idempotency_key,)).fetchone()           # type: ignore[return-value]
 
-    # --- chain read (2.6) ---------------------------------------------------- #    def read_chain(self, cycle_id: str) -> dict[str, Any]:
+    # --- chain read (2.6) ----------------------------------------------------- #
+    def read_chain(self, cycle_id: str) -> dict[str, Any]:
         """The complete causal chain of one cycle, from storage alone.
 
         Answers "which revision was approved and which was executed" without

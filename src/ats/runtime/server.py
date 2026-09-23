@@ -12,31 +12,47 @@ import threading
 
 log = logging.getLogger("ats.server")
 
-# Serialize + dedupe cycle resumes. Feishu PREFETCHES approval links (link preview)
-# and users may double-tap, so one approval can hit /feishu/approve several times
+# Serialize cycle resumes. Feishu PREFETCHES approval links (link preview) and
+# users may double-tap, so one approval can hit /feishu/approve several times
 # concurrently. Without this, N concurrent resume_cycle calls (a) collide on the
-# serve process's IBKR client_id (→ 326/1100, dropped orders) and (b) — worse — if
-# the id ever became unique, would place the orders N times. The lock makes each
-# cycle execute at most once and serializes executions within the serve process.
-# Fail-closed: a failed resume is marked done (not auto-retried via the link) to
-# avoid double orders after a partial fill — re-run chief for a fresh cycle instead.
+# serve process's IBKR client_id (→ 326/1100, dropped orders) and (b) — worse —
+# if the id ever became unique, would place the orders N times. The lock makes
+# each cycle execute at most once per process and serializes executions.
+#
+# DEDUP IS PERSISTENT (task 6.3, design D3): the in-process `_RESUMED` map is
+# gone. Dedup asks the decision audit store — terminal cycle / already-recorded
+# approval for (revision, hash, channel) — so a duplicate callback after a
+# process restart is still recognized. Replay safety for a crash mid-resume is
+# carried by the graph itself: revisions dedup on content hash, approvals on
+# their persistent idempotency key, and terminal transitions are journaled.
 _RESUME_LOCK = threading.Lock()
-_RESUMED: dict[str, str] = {}
 
 
-def _resume_once(thread_id: str, approval, channel, verdict: str) -> tuple[bool, str]:
+def _resume_once(thread_id: str, approval, channel, verdict: str,
+                 revision_no: int | None = None,
+                 decision_hash: str | None = None) -> tuple[bool, str]:
+    from ..decision.repository import DecisionAuditRepository
+    from ..memory import get_store
     from .cli import resume_cycle
 
     with _RESUME_LOCK:
-        if thread_id in _RESUMED:
-            return True, f"{thread_id}: 已处理（{_RESUMED[thread_id]}）— 忽略重复请求"
+        try:
+            repo = DecisionAuditRepository(get_store())
+            ok, reason, deduped = repo.validate_callback(
+                thread_id, revision_no=revision_no, decision_hash=decision_hash,
+                channel=approval.channel)
+        except Exception as exc:  # noqa: BLE001 - guard failure must not brick the card
+            log.warning("callback guard failed for %s: %s", thread_id, exc)
+            ok, reason, deduped = True, "", False
+        if not ok:
+            if deduped:
+                return True, f"{thread_id}: 已处理 — 忽略重复请求"
+            return False, f"{thread_id}: 回调被拒绝 — {reason}"
         try:
             resume_cycle(thread_id, approval, channel=channel)
         except Exception as exc:  # noqa: BLE001 - never 500 back to Feishu
-            _RESUMED[thread_id] = "failed"
             log.exception("resume failed for %s: %s", thread_id, exc)
             return False, f"resume failed: {exc}"
-        _RESUMED[thread_id] = approval.status
     return (True, f"{thread_id}: {approval.status} — executing") if verdict == "approve" \
         else (True, f"{thread_id}: rejected")
 
@@ -61,7 +77,9 @@ def handle_callback(payload: dict) -> dict:
         thread_id, approval = parsed["thread_id"], parsed["approval"]
         log.info("resuming %s -> %s by %s", thread_id, approval.status, approval.reviewer)
         verdict = "approve" if approval.status == "approved" else "reject"
-        ok, msg = _resume_once(thread_id, approval, FeishuChannel(), verdict)
+        ok, msg = _resume_once(thread_id, approval, FeishuChannel(), verdict,
+                               revision_no=parsed.get("revision_no"),
+                               decision_hash=parsed.get("decision_hash"))
         return {"toast": {"type": "success" if ok else "error", "content": msg}}
 
     return {"code": 0}
@@ -79,7 +97,8 @@ def handle_approve(thread_id: str, verdict: str, sig: str) -> tuple[bool, str]:
     if not verify_approval(thread_id, verdict, sig):
         return False, "invalid signature"
     approval = BossApproval(status="approved" if verdict == "approve" else "rejected",
-                            reviewer="feishu-bot", reviewed_at=datetime.now(timezone.utc))
+                            reviewer="feishu-bot", reviewed_at=datetime.now(timezone.utc),
+                            channel="feishu-bot")
     return _resume_once(thread_id, approval, FeishuBotChannel(), verdict)
 
 

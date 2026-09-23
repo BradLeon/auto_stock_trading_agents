@@ -121,8 +121,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                  "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else ""}
     if not approved:
         print("(所有决策被风控硬约束拦下 — 无单可下，等待修订或人工复核)")
-        return out
-    # The PEAD after-close window raises orders at 20:00 ET for approval overnight;
+        return out    # The PEAD after-close window raises orders at 20:00 ET for approval overnight;
     # reprice them as limits BEFORE the approval card is built, so the Boss approves
     # the same prices that get submitted. (Operational repricing by the chief —
     # not a risk rewrite; the review binds notionals, not limit prices.)
@@ -258,8 +257,8 @@ def persist_decision(state: ChiefDecisionState) -> dict:
     from ..decision.state import CycleStatus
 
     to_status = (CycleStatus.PENDING_APPROVAL
-                 if state.risk_review is not None
-                 and state.risk_review.verdict == "approved"
+                 if state.risk_review is None      # degraded: routed to approval
+                 or state.risk_review.verdict == "approved"
                  else CycleStatus.RISK_REJECTED)
     repo.transition(state.cycle_id, to_status=to_status, actor="risk_gate",
                     revision_no=rev["revision_no"],
@@ -360,24 +359,55 @@ def manual_review(state: ChiefDecisionState) -> dict:
     return {"cycle_status": CycleStatus.MANUAL_REVIEW.value}
 
 
+def narrow_approval(approval: BossApproval) -> BossApproval:
+    """Approval input narrowing (task 6.1, §10.3): the verdict is approve or
+    reject of the EXACT revision shown on the card. Any modification attempt —
+    edited quantities, symbol filters, direct instructions, `modified` status —
+    is recorded as a rejection whose comment carries the modification note; the
+    executor never receives instructions derived from it."""
+    has_modifications = bool(approval.overrides or approval.direct_instructions
+                             or approval.approved_symbols
+                             or approval.rejected_symbols)
+    if approval.status == "approved" and not has_modifications:
+        return approval
+    if approval.status == "rejected":
+        return approval
+    notes = [approval.comment] if approval.comment else []
+    if approval.overrides or approval.direct_instructions:
+        notes.append("提交了修改/指令（审批只能批准或拒绝该版修订）")
+    if approval.approved_symbols or approval.rejected_symbols:
+        notes.append("提交了按标的筛选（不支持部分批准，请拒绝后由主理人修订）")
+    return approval.model_copy(update={
+        "status": "rejected", "comment": "；".join(n for n in notes if n)})
+
+
 def boss_review(state: ChiefDecisionState) -> dict:
     # The card shows EXACTLY the revision the review approved (§10.3): the
     # boss binds to this revision via its hash, never to a free-form edit.
     if state.auto_approve:
         return {"approval": BossApproval(status="approved", reviewer="auto",
-                                         reviewed_at=_now())}
+                                         reviewed_at=_now(), channel="auto")}
     request = ApprovalRequest(cycle_id=state.cycle_id, as_of=state.as_of,
                               decisions=state.approved_decisions,
-                              context_summary=state.approval_summary)
+                              context_summary=state.approval_summary,
+                              revision_no=state.revision_no,
+                              decision_hash=state.revision_hash)
     verdict = interrupt(request.model_dump(mode="json"))
-    return {"approval": BossApproval.model_validate(verdict)}
+    approval = BossApproval.model_validate(verdict)
+    if approval.reviewed_at is None:
+        approval.reviewed_at = _now()
+    return {"approval": narrow_approval(approval)}
 
 
 def trader(state: ChiefDecisionState) -> dict:
     from ..trader import execute as texec
 
     approval = state.approval
-    approved = approval.effective_decisions(state.approved_decisions)
+    # Execution receives ONLY what the risk review approved (task 6.1): the
+    # Boss's verdict is approve/reject of the bound revision — modifications
+    # were already narrowed to rejections in boss_review.
+    approved = list(state.approved_decisions) if (
+        approval is not None and approval.status == "approved") else []
     sized_all = [(d, state.qty_by_symbol.get(d.symbol, 0.0))
                  for d in state.approved_decisions]
 
@@ -386,10 +416,10 @@ def trader(state: ChiefDecisionState) -> dict:
         return {"order_results": texec.cancelled_entries(sized_all, state.cycle_id,
                                                          approval.status)}
 
-    # Boss overrides / direct instructions may add symbols the gate never sized.
+    # Only symbols the risk gate sized may execute — no approval-time additions.
     to_place = []
     for d in approved:
-        q = state.qty_by_symbol.get(d.symbol) or texec._size(d)
+        q = state.qty_by_symbol.get(d.symbol) or 0.0
         if q > 0:
             to_place.append((d, q))
     entries, fills = texec.place_orders(to_place, state.cycle_id)
@@ -409,6 +439,31 @@ def persist(state: ChiefDecisionState) -> dict:
     # it wrote approval_status = None and nothing ever came back to fill it in.
     if state.approval is not None:
         store.set_cycle_approval(state.cycle_id, state.approval.status)
+        # Task 6.5: the full approval record lands in `boss_approvals` bound to
+        # the revision it decided on, idempotent on the D3 key. Legacy
+        # `cycles.approval_status` above and the journal column keep serving.
+        if state.revision_no and state.revision_hash:
+            try:
+                from ..decision.repository import approval_idempotency_key
+
+                repo0 = _decision_repo()
+                appr = state.approval
+                repo0.record_approval(
+                    approval_id=f"{state.cycle_id}:r{state.revision_no}:approval",
+                    cycle_id=state.cycle_id, revision_no=state.revision_no,
+                    decision_hash=state.revision_hash,
+                    decision=("approved" if appr.status == "approved"
+                              else "rejected"),
+                    reviewer=appr.reviewer, comment=appr.comment,
+                    channel=appr.channel,
+                    idempotency_key=approval_idempotency_key(
+                        state.cycle_id, state.revision_no, state.revision_hash,
+                        appr.channel),
+                    created_at=appr.reviewed_at.isoformat()
+                    if appr.reviewed_at else None)
+            except Exception as exc:  # noqa: BLE001 - audit write must not block persist
+                log.warning("boss_approvals write failed for %s: %s",
+                            state.cycle_id, exc)
 
     by_symbol = {d.symbol: d for d in state.approved_decisions or state.decisions}
     for entry in state.order_results:

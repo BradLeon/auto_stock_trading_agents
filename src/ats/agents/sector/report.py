@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ...schemas.sector import SectorConfig, SectorReview
+from ...schemas.sector import (SectorConfig, SectorReview,
+                               allocation_for_status)
+from ..layer.layer_review import STATUS_CN
 
 log = logging.getLogger("ats.agents.sector.report")
 
@@ -115,7 +117,8 @@ def _layer_verdict_section(review: SectorReview, cfg: SectorConfig, pead: set) -
         budget = basket_by_key[key].layer_cap if key in basket_by_key else budgets.get(key)
         gist = (v.claim_attributions[0] if v.claim_attributions
                 else (v.rationale.splitlines()[0] if v.rationale else "—"))
-        lines.append(f"| {label} | **{v.allocation}** | {v.confidence:.2f} | "
+        call = v.allocation or allocation_for_status(v.layer_status)
+        lines.append(f"| {label} | **{call}** | {v.confidence:.2f} | "
                      f"{budget:.1%} | {v.cycle_position.split('：')[0][:12] or '—'} | "
                      f"{gist[:70]} | {'；'.join(flags) or '—'} |")
     lines.append("")
@@ -168,16 +171,19 @@ def render_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=
 
 
 def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
-    budget = basket.layer_cap if basket is not None else None
-    cap = layer.weight_cap or 0.0
+    """The layer report's first section — STATUS + relative ranking, no budget.
+
+    Phase D: the layer analyst no longer owns an allocation call, so the budget and
+    weight columns moved to the SECTOR report (the cross-layer index carries them).
+    What stands here is what the layer actually judged: its state, the evidence, and
+    who inside the layer is being validated.
+    """
     head = [f"## 一、本层结论", "",
-            f"### {verdict.allocation}　（信心 {verdict.confidence:.2f}）", ""]
-    # 算式写出来，而不是只给结果：读的人要能自己验一遍这个数怎么来的，
-    # 也要能一眼看出 confidence **不参与**它 —— 那是两条独立的线。
-    head += [f"- **本层预算**：{_budget_derivation(verdict, cap, budget)}",
-             f"- **周期位置**：{verdict.cycle_position or '—'}",
-             f"- **信心 {verdict.confidence:.2f}**：这是对**结论本身**的把握程度，"
-             f"**不参与预算计算**（预算只看配置档位）"]
+            f"### 层级状态：{STATUS_CN.get(verdict.layer_status, verdict.layer_status)}"
+            f"　（信心 {verdict.confidence:.2f}）", "",
+            f"- **周期位置**：{verdict.cycle_position or '—'}",
+            f"- **信心 {verdict.confidence:.2f}**：这是对**状态判断本身**的把握程度；"
+            f"资金分配由行业分析师依据本层投影另行给出，不在此报告内"]
     flags = []
     if not verdict.has_claims:
         flags.append("**本层无命题**（配置缺口，不是本季没人发声）")
@@ -188,8 +194,8 @@ def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
     head.append("")
 
     if verdict.name_calls or (basket is not None and basket.rows):
-        head += ["### 层内配置", "",
-                 "| 代码 | 子层 | 观点 | 建议权重 | 排名 |", "|---|---|---|---|---|"]
+        head += ["### 层内相对排序", "",
+                 "| 代码 | 子层 | 观点 | 排名 |", "|---|---|---|---|"]
         weights = {r.symbol: r for r in (basket.rows if basket is not None else [])}
         called = {c.symbol: c for c in verdict.name_calls}
         for sym in list(called) + [s for s in weights if s not in called]:
@@ -198,9 +204,8 @@ def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
             mark = " ⚠️仅自述" if (c and c.self_reported_only) else ""
             stance = f"{c.stance}{mark}" if c else "—"
             sub = (c.subgroup if c and c.subgroup else (r.subgroup if r else "")) or "—"
-            wt = f"{r.weight:.1%}" if r else "—"
             rank = (str(r.rank) if r and verdict.cross_section_applicable else "—")
-            head.append(f"| {name} | {sub} | {stance} | {wt} | {rank} |")
+            head.append(f"| {name} | {sub} | {stance} | {rank} |")
         head.append("")
 
     if verdict.reversal_triggers:
@@ -213,13 +218,15 @@ def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
 
 def _budget_derivation(verdict, cap: float, budget: float | None) -> str:
     """`层上限 × 使用率` 的算式。压低时说明是被什么压的 —— 只给一个结果数字，
-    读的人无从判断它是「本该如此」还是「哪里出了问题」。"""
+    读的人无从判断它是「本该如此」还是「哪里出了问题」。（行业报告仍用它；层报告
+    自 Phase D 起不再承载预算章节。）"""
     from .cross_section import utilization_for
 
+    call = verdict.allocation or allocation_for_status(verdict.layer_status)
     if budget is None:
         return f"—　（层上限 {cap:.0%}；本轮无截面预算）"
-    util = utilization_for(verdict.allocation)
-    base = f"**{budget:.1%} NAV**　＝ 层上限 {cap:.0%} × 使用率 {util:.0%}（{verdict.allocation}）"
+    util = utilization_for(call)
+    base = f"**{budget:.1%} NAV**　＝ 层上限 {cap:.0%} × 使用率 {util:.0%}（{call}）"
     expected = cap * util
     if budget < expected * 0.999:
         # 层上限之外还有别的东西在收敛它 —— 目前唯一会这么做的是跨层组上限。

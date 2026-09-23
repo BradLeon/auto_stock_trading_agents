@@ -104,7 +104,8 @@ def _no_live_layer_analyst(monkeypatch):
             f"test reached the live model for role {role!r} — patch "
             f"`layer_review.run_structured` / `rotation.run_structured` in this test")
 
-    from ats.agents.sector import layer_review, rotation
+    from ats.agents.layer import layer_review
+    from ats.agents.sector import rotation
 
     monkeypatch.setattr(layer_review, "run_structured", _blocked)
     monkeypatch.setattr(rotation, "run_structured", _blocked)

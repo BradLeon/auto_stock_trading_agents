@@ -16,6 +16,7 @@ from ...schemas.sector import (
     SectorConfig,
     SectorReview,
     TopDownComparison,
+    allocation_for_status,
 )
 from ..base import run_structured
 from . import assemble
@@ -71,7 +72,8 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
 
 def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
                  write_reports: bool = True) -> SectorReview:
-    from . import assemble as sector_assemble, cross_section, layer_review, rotation
+    from ..layer import layer_review
+    from . import assemble as sector_assemble, cross_section, rotation
 
     prior = store.latest_sector_review(name)
     bind = _bind_layer_budget()
@@ -124,7 +126,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
                 log.warning("claim assessment persist skipped for %s: %s", a.claim_id, exc)
 
         verdict, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v,
-                                       use_llm=use_llm, assessments=assessments)
+                                       use_llm=use_llm, assessments=assessments,
+                                       store=store)
         if not ok:
             failed.append(layer.key)
         else:
@@ -132,7 +135,12 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
 
         if basket is not None:
             raw_baskets.append((layer, basket))
-        allocations[layer.key] = verdict.allocation if (ok and bind) else None
+        # Phase D: the layer verdict no longer carries an allocation. The SECTOR path
+        # owns the call now — default translation from the layer's status; group 3
+        # replaces this with consumption of the LayerAnalysis projection + an explicit
+        # sector allocation step. The risk.yaml utilization mapping is unchanged.
+        allocations[layer.key] = (allocation_for_status(verdict.layer_status)
+                                  if (ok and bind) else None)
         if ok:
             pending_reports.append((layer, verdict, assessments, rows))
 

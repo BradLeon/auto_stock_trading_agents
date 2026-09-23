@@ -32,7 +32,9 @@ def _cfg(claims=(COMMON, RELATIVE)):
 def _verdict(**kw):
     kw.setdefault("layer_key", "L6_memory")
     kw.setdefault("as_of", NOW)
-    kw.setdefault("allocation", "超配")
+    # Phase D: 新写路径不再写 allocation；层报告只承载状态判断
+    kw.setdefault("layer_status", "expanding")
+    kw.setdefault("allocation", "")
     kw.setdefault("confidence", 0.8)
     return LayerVerdict(**kw)
 
@@ -68,13 +70,22 @@ def test_conclusion_comes_before_the_evidence():
 
 
 def test_first_section_is_enough_to_act_on():
-    # 配置、预算、以及层内怎么分 —— 三样都要在第一节里。
+    # Phase D：第一节 = 状态判断 + 周期位置 + 层内相对排序；预算与权重由行业报告承载。
     v = _verdict(cycle_position="中周期",
                  name_calls=[LayerNameCall(symbol="MU", subgroup="HBM", stance="增持")])
     md = report.render_layer(v, _cfg().layers[0], _cfg(), basket=_basket())
     first = md.split("## 二、")[0]
-    assert "超配" in first and "16.7% NAV" in first and "中周期" in first
-    assert "MU" in first and "增持" in first and "10.0%" in first     # 逐票权重也在第一节
+    assert "层级状态：扩张" in first and "中周期" in first
+    assert "MU" in first and "增持" in first and "1" in first        # 相对排序在第一节
+    assert "行业分析师" in first and "不在此报告内" in first          # 资金分配的去向说得清楚
+    assert "NAV" not in first and "建议权重" not in first            # 预算/权重章节已移出
+
+
+def test_layer_report_no_longer_carries_the_budget_section():
+    """Phase D：层级分析师不拥有配置权 —— 层报告不得出现预算算式或配置结论。"""
+    md = report.render_layer(_verdict(), _cfg().layers[0], _cfg(), basket=_basket())
+    assert "本层预算" not in md and "使用率" not in md
+    assert "超配" not in md.split("## 二、")[0]
 
 
 def test_reversal_triggers_render_as_a_checklist():
@@ -203,10 +214,10 @@ def test_one_file_per_layer_named_after_the_current_layer(tmp_path):
 
 def test_rerunning_the_same_day_overwrites(tmp_path):
     cfg = _cfg().model_copy(update={"output_dir": str(tmp_path)})
-    report.write_layer(_verdict(allocation="低配"), cfg.layers[0], cfg)
-    report.write_layer(_verdict(allocation="超配"), cfg.layers[0], cfg)
+    report.write_layer(_verdict(layer_status="contracting"), cfg.layers[0], cfg)
+    report.write_layer(_verdict(layer_status="expanding"), cfg.layers[0], cfg)
     assert len(list(tmp_path.glob("*.md"))) == 1
-    assert "超配" in list(tmp_path.glob("*.md"))[0].read_text(encoding="utf-8")
+    assert "扩张" in list(tmp_path.glob("*.md"))[0].read_text(encoding="utf-8")
 
 
 def test_aggregate_report_is_an_index_not_a_copy():
@@ -279,24 +290,25 @@ def test_legend_shows_structure_columns_only_when_they_exist():
 
 
 def test_budget_shows_its_arithmetic_not_just_the_number():
-    """只给一个结果数字，读的人无从判断它是「本该如此」还是「哪里出了问题」。"""
-    cfg = _cfg()                                   # L6_memory weight_cap = 0.25
-    md = report.render_layer(_verdict(allocation="超配"), cfg.layers[0], cfg,
-                             basket=_basket(layer_cap=0.25))
-    first = md.split("## 二、")[0]
-    assert "25.0% NAV" in first and "层上限 25%" in first and "使用率 100%" in first
+    """只给一个结果数字，读的人无从判断它是「本该如此」还是「哪里出了问题」。
+
+    Phase D：预算算式由行业侧承载 —— 层报告不再渲染它，但推导函数仍在
+    （viz 与行业索引共用），这里直接锁它的算式可见性。
+    """
+    derivation = report._budget_derivation(
+        _verdict(layer_status="expanding"), 0.25, 0.25)
+    assert "25.0% NAV" in derivation and "层上限 25%" in derivation and "使用率 100%" in derivation
 
 
 def test_a_compressed_budget_says_what_compressed_it():
     # 层上限 25% × 超配 100% = 25%，但实得 16.7% —— 差额必须有交代。
-    md = report.render_layer(_verdict(allocation="超配"), _cfg().layers[0], _cfg(),
-                             basket=_basket(layer_cap=0.167))
-    assert "被跨层组上限按比例压到" in md and "25.0%" in md
+    derivation = report._budget_derivation(
+        _verdict(layer_status="expanding"), 0.25, 0.167)
+    assert "被跨层组上限按比例压到" in derivation and "25.0%" in derivation
 
 
 def test_confidence_is_stated_as_not_feeding_the_budget():
-    """confidence 与预算是两条独立的线 —— 报告必须说清楚，否则 0.78 和 15.0%
-    并排出现时，读的人会以为前者算出了后者。"""
+    """confidence 与资金分配是两条独立的线 —— 层报告必须说清分配去向在行业侧。"""
     md = report.render_layer(_verdict(confidence=0.78), _cfg().layers[0], _cfg(),
                              basket=_basket())
-    assert "不参与预算计算" in md
+    assert "不在此报告内" in md and "行业分析师" in md

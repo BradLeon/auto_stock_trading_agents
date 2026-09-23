@@ -781,9 +781,11 @@ def run_layer_review(
     live_data: bool = True,
 ) -> int:
     """层级评审：一层或全部层的配置结论（超配/标配/低配/清仓）+ 层内选股。"""
-    from ..agents.sector import cross_section, layer_review
+    from ..agents.layer import layer_review
+    from ..agents.sector import cross_section
     from ..config import load_sector_config
     from ..memory import get_store
+    from ..schemas.sector import allocation_for_status
 
     cfg = load_sector_config(name)
     layers = cfg.layers if layer_key in ("", "all") else cfg.layers_by_key(layer_key)
@@ -810,19 +812,26 @@ def run_layer_review(
             except Exception as exc:  # noqa: BLE001
                 print(f"  （{layer.key} 截面取数失败：{exc}）")
         v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)
+        if v is None:
+            # Phase D: a failed layer is a registered gap — nothing is carried forward
+            # or defaulted into a fake verdict.
+            print(f"\n=== {layer.label}  [{layer.key}] ===")
+            print("  ⚠️ 本轮评审失败：该层登记为缺失，未产出状态判断与投影")
+            continue
         # 单层视图给的是**未经组上限约束**的数：组上限要等同组其余层都评完才算得出来。
-        budget = cross_section.budget_for(layer, v.allocation if ok else None)
+        budget = cross_section.budget_for(
+            layer, v.allocation or allocation_for_status(v.layer_status) if ok else None)
         group = next((g for g in cfg.layer_groups if layer.key in g.layers), None)
         flags = []
         if not v.has_claims:
             flags.append("无命题(配置缺口)")
         if not v.cross_section_applicable:
             flags.append("截面不适用")
-        if not ok:
-            flags.append("本轮未产出，下为沿用/占位")
         print(f"\n=== {layer.label}  [{layer.key}] ===")
+        call = v.allocation or allocation_for_status(v.layer_status)
         print(
-            f"  配置 {v.allocation} · 信心 {v.confidence:.2f} · 预算 {budget:.1%} NAV"
+            f"  状态 {v.layer_status}（行业侧映射 {call}）· 信心 {v.confidence:.2f}"
+            f" · 预算 {budget:.1%} NAV"
             f" · 周期 {v.cycle_position or '—'}" + (f"\n  ⚠️ {'；'.join(flags)}" if flags else "")
         )
         if group:
@@ -1400,20 +1409,22 @@ def sector_show(name: str = "ai_hardware") -> int:
     if latest.layer_verdicts:
         from ..agents.sector import cross_section
         from ..config import load_sector_config
+        from ..schemas.sector import allocation_for_status
 
         cfg = load_sector_config(name)
         order = {ly.key: i for i, ly in enumerate(cfg.layers)}
         for v in sorted(latest.layer_verdicts, key=lambda x: order.get(x.layer_key, 99)):
             layer = cfg.layer_by_key(v.layer_key)
             label = layer.label if layer else v.layer_key
-            budget = cross_section.budget_for(layer, v.allocation) if layer else 0.0
+            call = v.allocation or allocation_for_status(v.layer_status)
+            budget = cross_section.budget_for(layer, call) if layer else 0.0
             flags = []
             if not v.has_claims:
                 flags.append("无命题")
             if not v.cross_section_applicable:
                 flags.append("截面不适用")
             print(
-                f"  {label}: {v.allocation} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
+                f"  {label}: {call} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
                 + (f"  ⚠️ {'、'.join(flags)}" if flags else "")
             )
     for a in latest.layers:

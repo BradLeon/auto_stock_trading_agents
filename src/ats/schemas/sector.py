@@ -10,7 +10,28 @@ from .chain import ClaimDef
 
 STANCES = ("增持", "持有", "减持")
 # Layer-level allocation calls. Ordered strong -> flat: index doubles as a severity rank.
+# RETIRED as a layer-analyst output (Phase D): the allocation call now belongs to the
+# SECTOR analyst, who derives it from a LayerAnalysis projection. The vocabulary stays
+# here because historical `sector_reviews` rows carry it and the sector path still
+# persists allocation-typed conclusions.
 ALLOCATIONS = ("超配", "标配", "低配", "清仓")
+
+# Layer STATUS vocabulary — the layer analyst's own output (Phase D): what the layer
+# IS doing, never how much money it should get.
+LAYER_STATUSES = ("expanding", "steady", "contracting", "unclear")
+
+# The sector analyst's default translation from layer status to an allocation call.
+# Governance unchanged (risk.yaml `layer_utilization` still maps 超配→1.0, 标配→0.6,
+# 低配→0.3, 清仓→0.0); only who produces the call moved. `unclear` maps flat, never
+# down: "we could not read the layer" is not a conviction short.
+STATUS_ALLOCATION_DEFAULTS = {
+    "expanding": "超配", "steady": "标配", "contracting": "低配", "unclear": "标配",
+}
+
+
+def allocation_for_status(status: str) -> str:
+    """Default sector-side allocation for a layer status (Phase D migration helper)."""
+    return STATUS_ALLOCATION_DEFAULTS.get(status, "标配")
 
 
 # --------------------------------------------------------------------------- #
@@ -275,21 +296,26 @@ class CandidateClaim(BaseModel):
 
 
 class LayerVerdict(BaseModel):
-    """One layer's allocation call — HOW MUCH of this layer, and WHY.
+    """One layer's STATUS call — what this layer IS doing, and WHY.
 
-    The weekly review used to answer only "is this layer hot" (`boom_score` +
-    bullish/neutral/bearish), which carries no position meaning: the budget path
-    (`weight_cap` x cross-section rank) ran regardless of where in the cycle the layer
-    sat. This is the missing verdict, and `allocation` is what drives the layer's budget
-    utilisation — downward only, never above `weight_cap` (see risk.yaml).
+    Phase D: the layer analyst no longer owns an allocation call. `allocation` is
+    RETIRED on the write path — the field stays only so historical rows read back
+    (and so old reports render); new rows leave it at the retired default and no
+    consumer may drive a budget from it (see `agent/layer-analyst` and the
+    `layer_verdict.allocation` pending-retirement entry). The layer's own output is
+    `layer_status`, and the SECTOR analyst translates status + evidence into the
+    three-level allocation.
     """
 
     layer_key: str
     as_of: datetime
-    allocation: str = "标配"  # 超配 | 标配 | 低配 | 清仓
+    # --- retired on the write path (Phase D); historical rows keep their value ---
+    allocation: str = ""
+    # The layer analyst's own judgement: expanding | steady | contracting | unclear.
+    layer_status: str = "steady"
     confidence: float = Field(0.0, ge=0, le=1)
     cycle_position: str = ""  # 早/中/晚周期 — from INDUSTRY evidence
-    # One line per common claim: its verdict and what it means for this layer's sizing.
+    # One line per common claim: its verdict and what it means for this layer's state.
     claim_attributions: list[str] = Field(default_factory=list)
     # Falsifiable observations that would flip this call; checked off next round.
     reversal_triggers: list[str] = Field(default_factory=list)
@@ -305,7 +331,7 @@ class LayerVerdict(BaseModel):
     candidate_claims: list[CandidateClaim] = Field(default_factory=list)
 
     def is_valid(self) -> bool:
-        return self.allocation in ALLOCATIONS
+        return self.layer_status in LAYER_STATUSES
 
 
 class TopDownComparison(BaseModel):

@@ -169,7 +169,7 @@ FIRST_BATCH_EXCEPTIONS: tuple[ExceptionEntry, ...] = (
         module="src/ats/agents/sector/kb_perturb.py", target="ats.data.industry",
         reason="知识库扰动只用行业分类枚举，不取数；Phase D 归入数据产品工具层。"),
     ExceptionEntry(
-        module="src/ats/agents/sector/layer_review.py", target="ats.data.industry",
+        module="src/ats/agents/layer/layer_review.py", target="ats.data.industry",
         reason="同上；Phase D 收敛。"),
     ExceptionEntry(
         module="src/ats/agents/sector/structure.py", target="ats.data.industry",

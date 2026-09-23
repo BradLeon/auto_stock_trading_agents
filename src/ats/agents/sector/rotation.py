@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from ...schemas.sector import LayerVerdict, SectorConfig
+from ...schemas.sector import LayerVerdict, SectorConfig, allocation_for_status
 from ..base import run_structured
 from .outputs import LayerRotationView
 
@@ -38,7 +38,8 @@ def build_context(cfg: SectorConfig, verdicts: list[LayerVerdict], *,
             continue
         block = [
             f"## {layer.label}  [layer key = {layer.key}]",
-            f"配置：**{v.allocation}**（confidence {v.confidence:.2f}）"
+            f"配置：**{v.allocation or allocation_for_status(v.layer_status)}**"
+            f"（confidence {v.confidence:.2f}）"
             f" · 周期：{v.cycle_position or '—'}",
         ]
         if not v.has_claims:

@@ -157,6 +157,8 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "scheduler.adhoc_journal_jobs",
         "performance.legacy_snapshot",
         "journal.report.render_ledger",
+        # ── Phase D（任务 2.9：层级配置字段退役）──
+        "layer_verdict.allocation",
         # ── Phase B ──
         "risk.checks.in_place_clipping",
         "agents.risk_validator.apply_guardrails",

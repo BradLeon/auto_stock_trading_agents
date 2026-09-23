@@ -300,6 +300,32 @@ retired:
     consumer_zero_criterion: report.py 不再直读 trades/fills 原始表。
     location: src/ats/journal/report.py
 
+  # ── Phase D（任务 2.9：层级配置字段退役，写路径已停写、列保留）──
+  - identifier: layer_verdict.allocation
+    capability_domain: agent/layer-analyst
+    replaced_by: >-
+      层级分析师产出 layer_status（expanding|steady|contracting|unclear）经
+      LayerAnalysis 投影发布；行业分析师消费投影自行产出三级配置结论
+      （agent/sector-allocation），经 allocation_for_status 映射与
+      risk.yaml layer_utilization 的关系不变。
+    target_phase: D
+    status: pending
+    exit_condition: >-
+      任何消费方不再从 LayerVerdict.allocation 读取预算或配置语义；
+      层报告不再出现预算章节（行业报告承载）。
+    missing_condition: >-
+      过渡期内 viz / cli / 行业索引仍以 `allocation or allocation_for_status(layer_status)`
+      兼容读历史行；新写路径已不写 allocation（默认空串）。
+    consumers:
+      - agents.sector.report
+      - agents.sector.viz
+      - runtime.cli
+      - agents.sector.review
+    consumer_zero_criterion: >-
+      src 内除 schemas/sector.py 的字段定义与「历史行兼容读」外，无任何代码以
+      verdict.allocation 为非空语义做预算决策（统一走 allocation_for_status）。
+    location: src/ats/schemas/sector.py（字段保留，历史行可读回）
+
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）
 purge_scope:
   - identifier: task_projections.legacy_columns

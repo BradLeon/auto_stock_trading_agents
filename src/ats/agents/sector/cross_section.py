@@ -325,6 +325,7 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
     try:
         from ...config import load_sector_config
         from ...memory import get_store
+        from ...schemas.sector import allocation_for_status
 
         review = get_store().latest_sector_review(sector_name)
         if review is None:
@@ -338,7 +339,8 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
         if verdict is not None:
             trig = "；".join(verdict.reversal_triggers[:3])
             return (f"⚠️ 以下是**上一轮**（{verdict.as_of:%Y-%m-%d}）的结论，不是本期结论\n"
-                    f"配置：{verdict.allocation}（confidence {verdict.confidence:.2f}）\n"
+                    f"配置：{verdict.allocation or allocation_for_status(verdict.layer_status)}"
+                    f"（confidence {verdict.confidence:.2f}）\n"
                     f"周期：{verdict.cycle_position or '—'}\n"
                     + (f"当时的反转触发条件：{trig}" if trig else ""))
 

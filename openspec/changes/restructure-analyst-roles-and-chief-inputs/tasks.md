@@ -11,16 +11,16 @@
 
 ## 2. 层级分析师：撤销配置权，改出状态判断与投影
 
-- [ ] 2.1 在 `src/ats/schemas/sector.py` 为层级结论新增 `layer_status: expanding|steady|contracting|unclear` 字段，并把 `allocation` 标记为退役（保留列、新写路径不再写入）。验证：新增测试断言新构造的 `LayerVerdict` 无 `allocation` 语义参与，且历史行的 `allocation` 列仍可读回。
-- [ ] 2.2 改造 `src/ats/agents/sector/layer_review.py`：输出由配置结论改为层级状态判断，保留 confidence、周期位置与逐条议题归因。验证：`tests/test_layer_review.py` 中「结论必须锚定议题结论」「证据不足时的默认」「本层没有命题」「议题冲突」四个场景改用 `layer_status` 断言并全绿。
-- [ ] 2.3 把证据不足与本层无命题的默认改为 `steady` 且 confidence ≤ 0.3，并保留「证据缺失」与「本层无命题」两种不同标注。验证：新增测试断言两种情形的标注文本与状态取值不同。
-- [ ] 2.4 确保层级上下文不含宏观判断，且相对命题读数只进入结构因子与排序理由、不进入层级状态依据。验证：新增测试断言上下文中无宏观字段，且仅由相对命题驱动时状态判断不产生方向性结论。
-- [ ] 2.5 实现层级评审的投影发布：评审成功后调用 `build_envelope()` 写入 `agent_role=layer_analysis`、作用域为该层的投影，并记录输入引用与数据 vintage。验证：新增测试断言写入后的投影可取回、字段完整且内容哈希稳定。
-- [ ] 2.6 实现同一层同内容的幂等：重复评审产出相同 payload 时不新增第二条投影。验证：新增测试连续两次发布，断言投影数量不变且返回既有标识。
-- [ ] 2.7 层级评审失败时登记该层缺失且不写入投影，不因单层失败中止其余层，也不用上次结论冒充本期判断。验证：新增测试让其中一层抛错，断言其余层仍有投影且失败层无投影、有留痕。
-- [ ] 2.8 层报告首节改为「状态判断 + 逐票相对排序」，预算与权重章节改由行业报告承载；保持每层一份、结论先行。验证：`tests/test_layer_report.py` 断言首节含状态判断且不含预算使用率明细。
-- [ ] 2.9 在 `config/workflow/legacy_retirement.yaml` 登记 `layer_verdict.allocation` 为待退项（替代实现、退出条件、消费方清零判据）。验证：`tests/test_legacy_retirement.py` 断言该项存在且字段完整。
-- [ ] 2.10 把 `src/ats/agents/sector/layer_review.py` 迁到新建的 `src/ats/agents/layer/` 包（层级分析师独立成包），同步更新 `agents/sector/review.py:74,126`、`runtime/cli.py:784,812` 与测试侧的导入，并把 `architecture_guards.py:33` 的 `ROLE_BY_PATH_PREFIX` 前缀改为 `src/ats/agents/layer`。验证：`tests/test_architecture_guards.py` 仍全绿且新前缀可被 `scan_agents()` 命中，`tests/test_layer_review.py` 全绿。
+- [x] 2.1 在 `src/ats/schemas/sector.py` 为层级结论新增 `layer_status: expanding|steady|contracting|unclear` 字段，并把 `allocation` 标记为退役（保留列、新写路径不再写入）。验证：新增测试断言新构造的 `LayerVerdict` 无 `allocation` 语义参与，且历史行的 `allocation` 列仍可读回。
+- [x] 2.2 改造 `src/ats/agents/sector/layer_review.py`：输出由配置结论改为层级状态判断，保留 confidence、周期位置与逐条议题归因。验证：`tests/test_layer_review.py` 中「结论必须锚定议题结论」「证据不足时的默认」「本层没有命题」「议题冲突」四个场景改用 `layer_status` 断言并全绿。
+- [x] 2.3 把证据不足与本层无命题的默认改为 `steady` 且 confidence ≤ 0.3，并保留「证据缺失」与「本层无命题」两种不同标注。验证：新增测试断言两种情形的标注文本与状态取值不同。
+- [x] 2.4 确保层级上下文不含宏观判断，且相对命题读数只进入结构因子与排序理由、不进入层级状态依据。验证：新增测试断言上下文中无宏观字段，且仅由相对命题驱动时状态判断不产生方向性结论。
+- [x] 2.5 实现层级评审的投影发布：评审成功后调用 `build_envelope()` 写入 `agent_role=layer_analysis`、作用域为该层的投影，并记录输入引用与数据 vintage。验证：新增测试断言写入后的投影可取回、字段完整且内容哈希稳定。
+- [x] 2.6 实现同一层同内容的幂等：重复评审产出相同 payload 时不新增第二条投影。验证：新增测试连续两次发布，断言投影数量不变且返回既有标识。
+- [x] 2.7 层级评审失败时登记该层缺失且不写入投影，不因单层失败中止其余层，也不用上次结论冒充本期判断。验证：新增测试让其中一层抛错，断言其余层仍有投影且失败层无投影、有留痕。
+- [x] 2.8 层报告首节改为「状态判断 + 逐票相对排序」，预算与权重章节改由行业报告承载；保持每层一份、结论先行。验证：`tests/test_layer_report.py` 断言首节含状态判断且不含预算使用率明细。
+- [x] 2.9 在 `config/workflow/legacy_retirement.yaml` 登记 `layer_verdict.allocation` 为待退项（替代实现、退出条件、消费方清零判据）。验证：`tests/test_legacy_retirement.py` 断言该项存在且字段完整。
+- [x] 2.10 把 `src/ats/agents/sector/layer_review.py` 迁到新建的 `src/ats/agents/layer/` 包（层级分析师独立成包），同步更新 `agents/sector/review.py:74,126`、`runtime/cli.py:784,812` 与测试侧的导入，并把 `architecture_guards.py:33` 的 `ROLE_BY_PATH_PREFIX` 前缀改为 `src/ats/agents/layer`。验证：`tests/test_architecture_guards.py` 仍全绿且新前缀可被 `scan_agents()` 命中，`tests/test_layer_review.py` 全绿。
 
 ## 3. 行业分析师：承接三级配置权、预算与护栏
 

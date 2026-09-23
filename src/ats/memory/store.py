@@ -655,9 +655,16 @@ class TradingMemory:
         fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fills)")}
         for ddl in ("perm_id TEXT", "order_ref TEXT", "origin TEXT",
                     "link_confidence TEXT", "captured_at TEXT",
-                    "entry_id TEXT", "episode_id TEXT"):
+                    "entry_id TEXT", "episode_id TEXT",
+                    "late_backfill INTEGER"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
+        # Phase C compensation semantics (§11, tasks 3.1/3.4): filled_qty backs
+        # the cumulative partial-fill accounting; terminal_basis separates a
+        # broker-reported terminal state from an inferred one.
+        for ddl in ("filled_qty REAL", "terminal_basis TEXT"):
+            if ddl.split()[0] not in tcols:
+                self.conn.execute(f"ALTER TABLE trades ADD COLUMN {ddl}")
         # Decision-audit linkage (§12.3, Phase B). Nullable on purpose: forcing
         # them non-null on every new order is Phase C's cutover, after all new
         # orders flow through the authorization gate. `trades.cycle_id` already

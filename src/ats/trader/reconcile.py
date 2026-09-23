@@ -74,6 +74,39 @@ def _match(fill: dict, trades: list[dict]) -> tuple[dict | None, str]:
     return None, "none"
 
 
+def _is_late(fill: dict, trade: dict) -> bool:
+    """Task 3.2: the fill's session is AFTER the order's submit day."""
+    fdate = _as_date(fill.get("time"))
+    tdate = _as_date(trade.get("first_submitted_at") or trade.get("submitted_at"))
+    return bool(fdate and tdate and fdate > tdate)
+
+
+def _apply_cumulative_fills(store, trades: list[dict], rid: int,
+                            execs: list[dict]) -> None:
+    """Task 3.1: roll a set of executions onto their order, cumulatively.
+
+    Partial fills keep the order in `partial` (never 'filled' by price-sight
+    alone); only accumulated shares >= ordered qty closes it as filled. Every
+    fill IS broker evidence, so the status basis is 'broker' — this also lets
+    a late fill CORRECT an earlier inferred-expired order (task 3.4).
+    """
+    row = next(t for t in trades if t["rid"] == rid)
+    total_shares = sum(float(e.get("shares") or 0) for e in execs)
+    if total_shares <= 0:
+        return
+    priced = [(float(e["price"]), float(e.get("shares") or 0)) for e in execs
+              if e.get("price")]
+    avg_px = (sum(p * s for p, s in priced) / sum(s for _, s in priced)) if priced else None
+    filled_at = max((e.get("time") or "" for e in execs), default="")
+    qty = float(row.get("qty") or 0)
+    status = "filled" if (qty and total_shares >= qty) else "partial"
+    store.conn.execute(
+        "UPDATE trades SET avg_fill_price = COALESCE(avg_fill_price, ?), "
+        "filled_at = COALESCE(filled_at, ?), filled_qty = ?, status = ?, "
+        "terminal_basis = 'broker' WHERE rowid = ?",
+        (avg_px, filled_at, total_shares, status, rid))
+
+
 def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
     """Backfill execution outcomes onto `trades`. Idempotent. Never raises upward.
 
@@ -112,8 +145,12 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
         "SELECT rowid AS rid, * FROM trades ORDER BY rowid").fetchall()]
 
     # --- 1. attribute fills, and roll their P&L up onto the owning order --------
+    # Cumulative per-order execution accounting (task 3.1): multiple partial
+    # fills SUM onto one order — total shares, volume-weighted average price
+    # and summed P&L — instead of the old "saw a price → status='filled'"
+    # overwrite that made partial fills disappear from the ledger.
     pnl_by_rid: dict[int, float] = {}
-    fill_px: dict[int, tuple[float, str]] = {}
+    exec_by_rid: dict[int, list[dict]] = {}
     for f in fills:
         row, how = _match(f, trades)
         if row is not None:
@@ -131,8 +168,7 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
             rp = f.get("realized_pnl")
             if isinstance(rp, (int, float)):
                 pnl_by_rid[row["rid"]] = pnl_by_rid.get(row["rid"], 0.0) + float(rp)
-            if f.get("price"):
-                fill_px[row["rid"]] = (float(f["price"]), f.get("time") or "")
+            exec_by_rid.setdefault(row["rid"], []).append(f)
         elif origin == "manual":
             summary["manual"] += 1
         else:
@@ -158,35 +194,41 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
             if row is not None:
                 # Task 2.2: a matched fill inherits its order's FULL decision
                 # chain — the fill becomes as traceable as the order it fills.
+                late = _is_late(f, row)
                 store.conn.execute(
                     "UPDATE fills SET origin = ?, link_confidence = ?, entry_id = ?, "
-                    "cycle_id = ?, revision_no = ?, decision_hash = ?, approval_id = ? "
+                    "cycle_id = ?, revision_no = ?, decision_hash = ?, approval_id = ?, "
+                    "late_backfill = ? "
                     "WHERE exec_id = ?",
                     (origin, how, entry_id, row.get("cycle_id"),
                      row.get("revision_no"), row.get("decision_hash") or "",
-                     row.get("approval_id") or "", f.get("exec_id")))
+                     row.get("approval_id") or "",
+                     1 if late else None, f.get("exec_id")))
+                if late:
+                    summary.setdefault("late_backfilled", 0)
+                    summary["late_backfilled"] += 1
             else:
                 store.conn.execute(
                     "UPDATE fills SET origin = ?, link_confidence = ?, entry_id = ? "
                     "WHERE exec_id = ?", (origin, how, entry_id, f.get("exec_id")))
 
+    if not dry_run:
+        for rid, execs in exec_by_rid.items():
+            _apply_cumulative_fills(store, trades, rid, execs)
     for rid, pnl in pnl_by_rid.items():
         if not dry_run:
             store.conn.execute("UPDATE trades SET realized_pnl = ? WHERE rowid = ?", (pnl, rid))
         summary["pnl_backfilled"] += 1
-    for rid, (px, when) in fill_px.items():
-        if not dry_run:
-            store.conn.execute(
-                "UPDATE trades SET avg_fill_price = COALESCE(avg_fill_price, ?), "
-                "filled_at = COALESCE(filled_at, ?), status = 'filled' WHERE rowid = ?",
-                (px, when, rid))
 
     # --- 2. resolve orders still stuck mid-flight -------------------------------
+    # A broker-reported terminal state (cancelled/rejected/filled/...) is the
+    # AUTHORITATIVE basis (task 3.3): it also applies to partially-filled
+    # orders, and it overrides any earlier inference.
     by_perm = {c["perm_id"]: c for c in completed if c.get("perm_id")}
     by_ref = {c["order_ref"]: c for c in completed if c.get("order_ref")}
     by_oid = {c["order_id"]: c for c in completed if c.get("order_id")}
     for t in trades:
-        if t["status"] not in _OPEN_STATES:
+        if t["status"] not in (*_OPEN_STATES, "partial"):
             continue
         c = (by_ref.get(t["order_ref"] or "") or by_perm.get(t["perm_id"] or "")
              or by_oid.get(t["order_id"] or ""))
@@ -194,11 +236,15 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
             continue
         if not dry_run:
             store.conn.execute(
-                "UPDATE trades SET status = ?, avg_fill_price = COALESCE(avg_fill_price, ?) "
+                "UPDATE trades SET status = ?, avg_fill_price = COALESCE(avg_fill_price, ?), "
+                "terminal_basis = 'broker' "
                 "WHERE rowid = ?", (c["status"], c.get("avg_fill_price"), t["rid"]))
         summary["status_resolved"] += 1
 
     # --- 3. a DAY order nobody ever resolved is expired, not in-flight ----------
+    # Task 3.4: this is an INFERENCE, not broker evidence — it carries an
+    # explicit basis so downstream consumers can distinguish it, and a later
+    # broker fill (section 1) will correct it back to partial/filled.
     cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
     stale = [t for t in trades
              if t["status"] in _OPEN_STATES
@@ -206,12 +252,18 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
     for t in stale:
         if not dry_run:
             store.conn.execute(
-                "UPDATE trades SET status = 'expired', error = COALESCE(NULLIF(error,''), ?) "
+                "UPDATE trades SET status = 'expired', terminal_basis = 'inferred', "
+                "error = COALESCE(NULLIF(error,''), ?) "
                 "WHERE rowid = ?",
                 ("未在当日成交，DAY 单已失效（对账推定）", t["rid"]))
         summary["status_resolved"] += 1
 
     if not dry_run:
+        from ..execution.ledger import verify_attempt_counts
+
+        # Task 3.9: every replay re-checks the attempt sequence against the
+        # attributed broker history — retries must stay explainable.
+        verify_attempt_counts(store)
         store.conn.commit()
         store.set_meta("last_reconcile_at", datetime.now(timezone.utc).isoformat())
     return summary

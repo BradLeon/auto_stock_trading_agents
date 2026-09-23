@@ -2694,6 +2694,12 @@ def main(argv: list[str] | None = None) -> int:
         "reflect: 只出确定性证据+当前需要处理清单，不调 LLM 生成假设",
     )
     jr.add_argument("--quarterly", action="store_true", help="calibrate: 按季度出报告（默认按月）")
+    ck = sub.add_parser(
+        "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
+    ck.add_argument("action", choices=["run"], help="run: 幂等执行一个对账窗口")
+    ck.add_argument("--dry-run", action="store_true", help="只读演练，不写入")
+    ck.add_argument("--window-start", help="对账窗口起点 YYYY-MM-DD（默认今天）")
+    ck.add_argument("--window-end", help="对账窗口终点 YYYY-MM-DD（默认今天）")
     tr = sub.add_parser(
         "trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell"
     )
@@ -2931,6 +2937,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "memo":
             return risk_memo()
         return risk_check(args.symbol)
+    if args.command == "clerk":
+        if args.action == "run":
+            from ..execution import clerk
+
+            out = clerk.clerk_run(dry_run=args.dry_run,
+                                  window_start=args.window_start,
+                                  window_end=args.window_end)
+            print(f"Clerk run {out['run_id']} [{out['status']}]"
+                  + ("（复用已有窗口结果）" if out.get("reused") else ""))
+            for step, r in out.get("steps", {}).items():
+                print(f"  {step}: {r}")
+            for e in out.get("errors", []):
+                print(f"  ⚠️ {e}")
+            if out.get("gaps_registered"):
+                print(f"  登记对账缺口 {out['gaps_registered']} 个")
+            return 1 if out["status"] == "failed" else 0
     if args.command == "journal":
         if args.action == "reconcile":
             from ..trader import reconcile

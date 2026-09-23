@@ -69,9 +69,9 @@
 
 ## 9. 门禁与验收
 
-- [ ] 9.1 新增专项测试并全部通过：Clerk 编排幂等、强关联拒绝与断链异常、归属三类（unattributed 唯一归宿）、补偿重放（部分 / 迟到 / 撤单 / 拒单 / 重启 / 漏跑 / 重试 attempt 序列）、重建确定性、Internal State 完整性 —— 验证：新测试文件全绿
-- [ ] 9.2 端到端验收：paper 模式一次真实下单链路 → 成交 → 对账 → 补偿 → 读模型 → 下一轮 Chief 读到带完整性标记的状态 —— 验证：端到端测试通过，全程无真实下单
-- [ ] 9.3 保真性对照：以 `git worktree` 对本阶段触及的测试文件做基线与当前同条件运行，结果写入 change 目录 `verification.md` —— 验证：无未归因失败，且只用权威基线口径（不使用受限环境计数）
-- [ ] 9.4 确认真实下单仍为 paper / dry-run 默认且可执行真实交易的入口唯一 —— 验证：架构守卫与既有测试通过
-- [ ] 9.5 文档同步：在 `docs/TARGET_WORKFLOW_DATAFLOW.md` §11 与 §14.3 写入 Phase C 实施状态，表名与实现保持一致 —— 验证：文档与实现逐项核对
-- [ ] 9.6 收口校验 —— 验证：`openspec validate establish-clerk-and-trade-ledger --strict` 输出 valid
+- [x] 9.1 新增专项测试并全部通过：Clerk 编排幂等、强关联拒绝与断链异常、归属三类（unattributed 唯一归宿）、补偿重放（部分 / 迟到 / 撤单 / 拒单 / 重启 / 漏跑 / 重试 attempt 序列）、重建确定性、Internal State 完整性 —— 验证：新测试文件全绿
+- [x] 9.2 端到端验收：paper 模式一次真实下单链路 → 成交 → 对账 → 补偿 → 读模型 → 下一轮 Chief 读到带完整性标记的状态 —— 验证：端到端测试通过，全程无真实下单
+- [x] 9.3 保真性对照：以 `git worktree` 对本阶段触及的测试文件做基线与当前同条件运行，结果写入 change 目录 `verification.md` —— 验证：无未归因失败，且只用权威基线口径（不使用受限环境计数）
+- [x] 9.4 确认真实下单仍为 paper / dry-run 默认且可执行真实交易的入口唯一 —— 验证：架构守卫与既有测试通过
+- [x] 9.5 文档同步：在 `docs/TARGET_WORKFLOW_DATAFLOW.md` §11 与 §14.3 写入 Phase C 实施状态，表名与实现保持一致 —— 验证：文档与实现逐项核对
+- [x] 9.6 收口校验 —— 验证：`openspec validate establish-clerk-and-trade-ledger --strict` 输出 valid

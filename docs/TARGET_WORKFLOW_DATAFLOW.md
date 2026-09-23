@@ -743,6 +743,13 @@ Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent�
 - 对迟到成交、部分成交和漏跑日期进行可重放补偿。
 - 将交易历史、绩效和归因发布为 Internal State API，供下一轮 Chief、Risk 和 Clerk 读取。
 
+> **实施载体（Phase C，2026-09-23）**：编排入口 `execution/clerk.py`；审计异常 /
+> 运行留痕 / 派生读模型分别为 `ledger_exceptions` / `clerk_runs` /
+> `ledger_read_models` 三表（Workflow memory 归属）；归属三类与决策链字段落在
+> `trades` / `fills`（`origin`、`link_confidence`、`revision_no`、`decision_hash`、
+> `approval_id` 等，可空）；重建与发布见 `execution/rebuild.py` 与
+> `execution/state_api.py`；LLM 白名单见 `execution/llm_boundary.py`。
+
 ### 11.2 LLM 边界
 
 现有 critic 可用于低频复盘叙事，但它的输出是附加分析，不是 order、fill、position、PnL
@@ -897,6 +904,41 @@ event_id + event_version + workflow_id
 - 建立 Clerk 编排层，整合现有 reconcile、journal、marks、performance 和 attribution。
 - 实现订单/成交与 cycle/revision/approval 的强关联。
 - 增加迟到成交、部分成交、人工订单和漏跑补偿。
+
+**实施状态（2026-09-23，change `establish-clerk-and-trade-ledger` 已实施）**：
+
+- Clerk 确定性编排入口（`execution/clerk.py::clerk_run`）：以「kind+window+as_of」
+  派生 run_id（不含请求时刻），同窗口重放幂等复用；串联 reconcile / marks /
+  episodes / predictions / performance 五步，单步失败不毒化其余并在 `clerk_runs`
+  留痕；每步消费的领域事实投影（`trades` 关键列）在编排前后逐字节不变。
+- 强关联落地为「写路径强制 + 列保持可空」（除主键外字段一律可空，用户裁决）：
+  系统源真实提交（非 cancelled/rejected）缺 `revision_no`/`decision_hash`/
+  `approval_id` 任一即拒写并登记 `broken_link` 异常；匹配成功的 fill 继承订单
+  完整决策链；存量断链经一次性迁移登记为 legacy 缺口，不伪造链。
+- 归属三类化：匹配→`system` / 人工 orderRef→`manual` / 其余→`unattributed` +
+  审计异常（用户裁决：无二义性）；仅显式 `system` 进入系统绩效与归因。
+- 补偿语义：累计式成交核算（`filled_qty` 累计 + 成交量加权均价，满量才收口，
+  `terminal_basis=broker|inferred`）；迟到成交跨会话日判定并以 `late_backfill`
+  标记修正推定终态；漏跑且券商无法返回的会话日登记 `reconciliation_gap`（只
+  登记不导入，用户裁决）；重放末尾核对本地 attempt 计数与券商 distinct
+  order_id 数（`attempt_count_mismatch`）。
+- 绩效/归因重建（`execution/rebuild.py`）：按 (kind, period, method_version)
+  写 `ledger_read_models`，带重建时点与 `source_facts_hash`，同指纹命中即跳过，
+  失败不回写原始事实。
+- Internal State API（`execution/state_api.py`）：portfolio/trades/fills/
+  performance/attribution/completeness（缺口统计，任一未清偿异常即 degraded）；
+  Chief（assemble 交易历史与成交段）、Risk（assess 绩效段）、channel/context
+  已迁移，双读比对后切换。
+- LLM 边界机器强制（`execution/llm_boundary.py`）：标注字段白名单 + 伴生
+  provenance（`invalidation_source`/`invalidation_checked_at`）强制；架构守卫
+  测试扫描全部 LLM 模块，断言零账本写路径与零账本表裸 SQL。
+- 存储：新增 `ledger_exceptions` / `clerk_runs` / `ledger_read_models` 三表
+  （登记于 `WORKFLOW_MEMORY_TABLES`）；`trades` 增补 `filled_qty`/`terminal_basis`/
+  `order_seq` 列，`fills` 增补 `late_backfill` 列，`trade_episodes` 增补
+  `invalidation_source`/`invalidation_checked_at` 列（全部 additive、可空）。
+- 待退登记六项见 `config/workflow/legacy_retirement.yaml`（Phase C 段：2 retired
+  + 4 pending，Phase E 收口直调入口）；验收与保真性对照记录见 change 目录
+  `verification.md`。
 
 ### 14.4 阶段 D：分析师职责重构
 

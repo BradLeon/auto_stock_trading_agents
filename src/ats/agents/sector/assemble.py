@@ -113,7 +113,10 @@ def build(cfg: SectorConfig, *, live_data: bool = True,
             lines.append(f"- 非上市玩家: {', '.join(layer.private)}")
         sc.layer_blocks.append("\n".join(x for x in lines if x))
 
-    _pead_conclusions(sc, pead_syms)
+    # Phase D（agent/sector-allocation）：行业分析师不再读取 PEAD dossier 的结论、
+    # 叙事与 Scorecard——那是基本面分析师的观点。上下游信号只以共享事实或数据产品
+    # 形式进入；`pead_blocks` 字段保留为空，让「谁在喂它」在 diff 里看得见。
+    # _insights_and_events 仍读 store 的 insight/事件行（共享事实），非分析师观点。
     _insights_and_events(sc, symbols, pead_syms)
     _chain_evidence(sc, cfg, allow_llm=allow_llm_evidence)
 
@@ -254,29 +257,8 @@ def _cap(v: float) -> str:
 # --------------------------------------------------------------------------- #
 # PEAD conclusions + insights/events (store reads, no network)
 # --------------------------------------------------------------------------- #
-def _pead_conclusions(sc: SectorContext, pead_syms: list[str]) -> None:
-    from ...config import load_pead_config
-    from ...memory import get_store
-
-    store = get_store()
-    cap = int(sc.cfg.review["dossier_excerpt_chars"])
-    for sym in pead_syms:
-        try:
-            pc = load_pead_config(sym)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("sector: pead config failed for %s: %s", sym, exc)
-            continue
-        d = store.get_dossier(sym, pc.fiscal_label)
-        if d and d.expectation_set and d.expectation_set.narrative:
-            # Tail = freshest (monitor appends [update ...] blocks at the end).
-            excerpt = d.expectation_set.narrative[-cap:]
-            block = f"### {sym} ({pc.fiscal_label}, phase={d.phase})\n…{excerpt}"
-            if d.scorecard:
-                block += (f"\nScorecard: {d.scorecard.total:+.2f} "
-                          f"(门槛 {d.scorecard.threshold:+.1f}) — {d.scorecard.band}")
-        else:
-            block = f"### {sym} ({pc.fiscal_label})\n(seed) {pc.narrative_seed[:200]}"
-        sc.pead_blocks.append(block)
+# Phase D: `_pead_conclusions` 已移除——行业分析师不得消费 PEAD dossier 的
+# 结论摘要、叙事与 Scorecard（基本面观点）。insights/events 保留（共享事实）。
 
 
 def _insights_and_events(sc: SectorContext, symbols: list[str], pead_syms: list[str]) -> None:

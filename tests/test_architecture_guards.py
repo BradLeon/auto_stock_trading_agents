@@ -195,3 +195,12 @@ def test_a_declared_exception_stops_that_violation_only(tmp_path):
                               target="ats.data.factset", reason="declared for the test"),)
     found = scan_module(module, root=root, exceptions=allowed)
     assert [v.target for v in found] == ["ats.data.websearch"]
+
+
+def test_sector_may_only_read_layer_projections():
+    """Phase D 3.8：行业分析师唯一的跨角色读取许可是 layer_analyst。"""
+    assert guards.ALLOWED_CROSS_ROLE_READS.get("sector_analyst") == ("layer_analyst",)
+    found = [v for v in guards.scan_agents()
+             if v.kind == "cross_role_read"
+             and v.module.startswith("src/ats/agents/sector")]
+    assert found == []

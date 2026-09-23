@@ -78,7 +78,6 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     prior = store.latest_sector_review(name)
     bind = _bind_layer_budget()
     verdicts, raw_baskets, failed = [], [], []
-    allocations: dict[str, str | None] = {}
     pending_reports: list = []
     # Every layer's assessments, keyed by layer — the viz bundle's live-path input
     # (mirrors what the offline CLI reconstructs via store.claim_assessments_on()).
@@ -132,17 +131,16 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
             failed.append(layer.key)
         else:
             verdicts.append(verdict)
+            pending_reports.append((layer, verdict, assessments, rows))
 
         if basket is not None:
             raw_baskets.append((layer, basket))
-        # Phase D: the layer verdict no longer carries an allocation. The SECTOR path
-        # owns the call now — default translation from the layer's status; group 3
-        # replaces this with consumption of the LayerAnalysis projection + an explicit
-        # sector allocation step. The risk.yaml utilization mapping is unchanged.
-        allocations[layer.key] = (allocation_for_status(verdict.layer_status)
-                                  if (ok and bind) else None)
-        if ok:
-            pending_reports.append((layer, verdict, assessments, rows))
+
+    # Phase D（agent/sector-allocation）：三级配置的唯一依据是 LayerAnalysis 投影。
+    # 行业评审经 task_projection_envelopes 读取各层最新可用投影（这是守卫显式允许的
+    # 唯一跨角色读取）；缺投影 / 过期 / schema 不兼容的层按缺失保守处理并显式留痕。
+    allocations, projection_refs, projection_missing = (
+        _sector_allocations_from_projections(store, cfg, bind))
 
     # Group ceilings can only be applied once EVERY member's ask is known — two 超配
     # halves of a split layer add up past the pre-split envelope, and neither half can
@@ -163,7 +161,20 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     if verdict_fingerprint != [item.model_dump_json() for item in verdicts]:
         raise RuntimeError("final top-down synthesis mutated a layer verdict")
     review = _assemble_review(
-        name, cfg, verdicts, baskets, view, failed, top_down=top_down)
+        name, cfg, verdicts, baskets, view, failed, top_down=top_down,
+        missing_projections=projection_missing)
+
+    # 3.9：证据冲突必须分列保留——层级状态与标的观点相反时逐条标注待人工裁决，
+    # 不通过加权或总分消解。
+    conflicts = _evidence_conflicts(cfg, verdicts)
+    # 3.6：轮动发现的相邻层矛盾原样带入评审输出，统一加「待人工裁决」标记；
+    # 层级判断本身不被轮动改写（上方指纹校验保证）。
+    for c in (view.conflicts if view else []):
+        text = c.strip()
+        conflicts.append(text if "待人工裁决" in text else f"[待人工裁决] {text}")
+    if conflicts:
+        review.summary = f"{review.summary}\n" + "\n".join(conflicts) if review.summary \
+            else "\n".join(conflicts)
 
     # 一层一份报告，且只在这里写 —— `sector crosssection` 不再写文件，否则同一层会出现
     # 两份互相不同步的文档（其中一份的 layer_cap 还是没经过配置结论的半成品）。
@@ -188,6 +199,10 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
         return prior or review
     store.save_sector_review(review)
 
+    # 3.7：配置结论以 SectorAllocation 投影发布，input_refs 记录本轮消费的全部
+    # 层级投影标识，使配置可追溯到具体的层级判断。
+    _publish_allocation_projection(store, name, review, budgets, projection_refs)
+
     if write_reports:
         try:
             from . import viz
@@ -208,6 +223,106 @@ def _bind_layer_budget() -> bool:
         return bool(load_pead_global()["sector_review"].get("bind_layer_budget", True))
     except Exception:  # noqa: BLE001 - a missing switch must not stop the run
         return True
+
+
+def _sector_allocations_from_projections(store, cfg, bind: bool):
+    """行业评审的三级配置依据：各层最新可用的 LayerAnalysis 投影（3.2/3.5/3.10）。
+
+    Returns `(allocations, projection_refs, missing)`：
+
+    * `allocations` — {layer key: 配置结论 | None}。None 只在预算绑定关闭时出现
+      （语义是「不缩预算」，不是「标配」）。
+    * `projection_refs` — {layer key: projection_id}，本轮真实消费的层级投影。
+    * `missing` — [(layer key, reason)]。评审失败、投影缺失、过期与 schema 不兼容
+      一律按缺失处理：退回「标配」的保守使用率并显式留痕，SHALL NOT 标注为景气中性，
+      也 SHALL NOT 字段兜底或猜测映射。
+    """
+    from ...agent.task_projection import ProjectionScope
+    from ...schemas.sector import LAYER_STATUSES
+
+    allocations: dict[str, str | None] = {}
+    refs: dict[str, str] = {}
+    missing: list[tuple[str, str]] = []
+    read = getattr(store, "reusable_task_projection", None)
+    for layer in cfg.layers:
+        env = None
+        if read is not None:
+            try:
+                # 不带 schema_version 过滤地取最新可用投影：版本不匹配的投影要
+                # 显式判为 schema_incompatible（3.10），而不是被读取端静默筛掉、
+                # 与「投影缺失」混为一谈。
+                env = read(agent_role="layer_analysis",
+                           scope=ProjectionScope(kind="layer", id=layer.key),
+                           schema_name="LayerAnalysis")
+            except Exception as exc:  # noqa: BLE001 - 读投影失败按缺失处理
+                log.warning("layer projection read failed for %s: %s", layer.key, exc)
+        if env is None:
+            allocations[layer.key] = "标配" if bind else None
+            missing.append((layer.key, "missing_or_unusable"))
+            continue
+        if env.schema_version != "v1":
+            # schema/payload 不兼容：与缺失同等保守处理，但原因分列留痕，禁止兜底解析
+            allocations[layer.key] = "标配" if bind else None
+            missing.append((layer.key, "schema_incompatible"))
+            continue
+        status = (env.payload or {}).get("status")
+        if status not in LAYER_STATUSES:
+            # schema/payload 不兼容：与缺失同等处理，禁止兜底解析（3.10）
+            allocations[layer.key] = "标配" if bind else None
+            missing.append((layer.key, "schema_incompatible"))
+            continue
+        allocations[layer.key] = allocation_for_status(status)
+        refs[layer.key] = env.projection_id
+    return allocations, refs, missing
+
+
+def _evidence_conflicts(cfg, verdicts) -> list[str]:
+    """层级状态与标的层面证据相反的冲突清单（3.9）。两侧依据分列，不合并为单一分数。"""
+    out: list[str] = []
+    labels = {ly.key: ly.label for ly in cfg.layers}
+    for v in verdicts:
+        if v.layer_status == "contracting":
+            for c in v.name_calls:
+                if c.stance == "增持":
+                    out.append(f"⚠️ [待人工裁决] {labels.get(v.layer_key, v.layer_key)}："
+                               f"层级状态=收缩，但标的 {c.symbol} 观点=增持"
+                               f"（两侧依据分列保留，未合并）")
+        elif v.layer_status == "expanding":
+            for c in v.name_calls:
+                if c.stance == "减持":
+                    out.append(f"⚠️ [待人工裁决] {labels.get(v.layer_key, v.layer_key)}："
+                               f"层级状态=扩张，但标的 {c.symbol} 观点=减持"
+                               f"（两侧依据分列保留，未合并）")
+    return out
+
+
+def _publish_allocation_projection(store, name, review, budgets, projection_refs) -> str | None:
+    """把本轮配置结论发布为 `sector_allocation` 投影（3.7）。Best-effort。"""
+    from ...agent.task_projection import ProjectionScope, build_envelope
+
+    save = getattr(store, "save_task_projection_envelope", None)
+    if save is None:
+        return None
+    drivers = [f"{v.layer_key}: {v.layer_status}" for v in review.layer_verdicts]
+    overweight = sum(1 for v in review.layer_verdicts if v.layer_status == "expanding")
+    underweight = sum(1 for v in review.layer_verdicts if v.layer_status == "contracting")
+    stance = ("overweight" if overweight > underweight
+              else "underweight" if underweight > overweight else "neutral")
+    target_weight = max(0.0, min(1.0, sum(budgets.values())))
+    rationale = (review.summary or review.regime or "").strip().splitlines()[0][:300] \
+        if (review.summary or review.regime) else "sector allocation from layer projections"
+    try:
+        envelope = build_envelope(
+            role="sector_allocation",
+            payload={"sector": name, "stance": stance, "target_weight": target_weight,
+                     "rationale": rationale, "drivers": drivers},
+            scope=ProjectionScope(kind="sector", id=name),
+            as_of=review.as_of.isoformat(timespec="seconds"),
+            input_refs=sorted(projection_refs.values()))
+        return save(envelope)
+    except Exception as exc:  # noqa: BLE001 - 发布失败留痕，不影响评审落库
+        log.warning("sector %s: allocation projection publish failed: %s", name, exc)
+        return None
 
 
 def _prior_verdict(cfg, prior, layer):
@@ -231,22 +346,15 @@ def _rescaled(basket, target: float):
 
 
 def _load_top_down_context(store) -> dict:
+    """Final-comparison material for the cross-layer pass.
+
+    Phase D（agent/sector-allocation）：行业分析师不再读取宏观评审——轮动上下文
+    与配置结论都不得含宏观 regime；宏观视角只能经主理人的汇总进入提案。本函数
+    现在只装载 FactSet 行业数据（共享数据产品），并显式记录宏观不可用。
+    """
     from ...data import factset
 
-    try:
-        loader = getattr(store, "latest_macro_review", None)
-        macro_review = loader("macro") if loader else None
-    except Exception as exc:  # noqa: BLE001 - comparison degrades, layers remain valid
-        log.warning("latest Macro review unavailable for Sector comparison: %s", exc)
-        macro_review = None
-    macro_text = ""
-    macro_date = ""
-    macro_note = ""
-    if macro_review is None or macro_review.regime.startswith("("):
-        macro_note = "没有可用的最新正式宏观报告。"
-    else:
-        macro_text = macro_review.regime_block(max_chars=4000)
-        macro_date = macro_review.as_of.date().isoformat()
+    macro_note = "没有可用的最新正式宏观报告。"
     try:
         factset_material = factset.fetch_sector_material()
     except Exception as exc:  # noqa: BLE001 - final comparison must degrade explicitly
@@ -255,13 +363,13 @@ def _load_top_down_context(store) -> dict:
             "reason": f"读取 FactSet 十一行业背景失败：{exc}",
             "report_date": "", "version_id": "", "freshness": "unavailable"}
     return {
-        "macro_text": macro_text, "macro_date": macro_date, "macro_note": macro_note,
+        "macro_text": "", "macro_date": "", "macro_note": macro_note,
         "factset": factset_material,
     }
 
 
 def _assemble_review(name, cfg, verdicts, baskets, view, failed, *,
-                     top_down=None) -> SectorReview:
+                     top_down=None, missing_projections=None) -> SectorReview:
     labels = {ly.key: ly.label for ly in cfg.layers}
     calls = [CompanyCall(symbol=c.symbol, layer=v.layer_key, stance=c.stance,
                          conviction=v.confidence, rationale=c.rationale)
@@ -271,6 +379,13 @@ def _assemble_review(name, cfg, verdicts, baskets, view, failed, *,
     if failed:
         note = "本轮未产出结论的层：" + "、".join(labels.get(k, k) for k in failed)
         summary = f"{summary}\n⚠️ {note}".strip()
+    for key, reason in (missing_projections or []):
+        if key in failed and reason == "missing_or_unusable":
+            continue  # 失败层已列过，避免同一层两条重复标注
+        why = ("层级投影缺失或不可用" if reason == "missing_or_unusable"
+               else "层级投影 schema 不兼容（禁止字段兜底）")
+        summary = (f"{summary}\n⚠️ {labels.get(key, key)}：{why}，"
+                   "配置按标配保守处理（这是缺口留痕，不是景气中性）").strip()
     top_down = top_down or {"macro_text": "", "macro_date": "", "macro_note": "",
                             "factset": {}}
     factset = top_down.get("factset") or {}

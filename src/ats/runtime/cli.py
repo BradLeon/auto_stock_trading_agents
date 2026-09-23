@@ -2696,10 +2696,13 @@ def main(argv: list[str] | None = None) -> int:
     jr.add_argument("--quarterly", action="store_true", help="calibrate: 按季度出报告（默认按月）")
     ck = sub.add_parser(
         "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
-    ck.add_argument("action", choices=["run"], help="run: 幂等执行一个对账窗口")
+    ck.add_argument("action", choices=["run", "rebuild", "gaps"],
+                    help="run: 幂等执行一个对账窗口；rebuild: 重建绩效/归因读模型"
+                         "（只写派生读模型）；gaps: 查看未清偿审计异常")
     ck.add_argument("--dry-run", action="store_true", help="只读演练，不写入")
     ck.add_argument("--window-start", help="对账窗口起点 YYYY-MM-DD（默认今天）")
     ck.add_argument("--window-end", help="对账窗口终点 YYYY-MM-DD（默认今天）")
+    ck.add_argument("--period", help="rebuild: 期间 YYYY-MM（默认当月）")
     tr = sub.add_parser(
         "trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell"
     )
@@ -2953,6 +2956,32 @@ def main(argv: list[str] | None = None) -> int:
             if out.get("gaps_registered"):
                 print(f"  登记对账缺口 {out['gaps_registered']} 个")
             return 1 if out["status"] == "failed" else 0
+        if args.action == "rebuild":
+            from ..execution import rebuild
+            from ..memory import get_store
+
+            period = args.period or datetime.now(timezone.utc).strftime("%Y-%m")
+            for kind_fn in (rebuild.rebuild_performance, rebuild.rebuild_attribution):
+                out = kind_fn(get_store(), period=period)
+                print(f"  {kind_fn.__name__}: {out['status']}"
+                      f"（method={out.get('method_version', 'clerk-v1')}, "
+                      f"facts={out.get('source_facts_hash', '-')[:12]}）")
+            return 0
+        if args.action == "gaps":
+            from ..execution import rebuild
+            from ..memory import get_store
+
+            rows = rebuild.list_open_exceptions(get_store())
+            if not rows:
+                print("无未清偿审计异常 ✅")
+                return 0
+            by_kind: dict[str, int] = {}
+            for r in rows:
+                by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
+            print(f"未清偿审计异常 {len(rows)} 项：")
+            for kind, n in sorted(by_kind.items()):
+                print(f"  {kind}: {n}")
+            return 1
     if args.command == "journal":
         if args.action == "reconcile":
             from ..trader import reconcile

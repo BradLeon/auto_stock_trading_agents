@@ -24,7 +24,7 @@
 - [x] 3.1 实现 research snapshot builder：按任务注册表取被要求角色的投影，复用 `TaskProjectionEnvelope` 与 `reuse_decision()` 的理由枚举，逐项记录投影标识、内容哈希、as-of 与新鲜度状态。验证：单测断言快照每项可回指到具体 envelope
 - [x] 3.2 输入不完整时拒绝创建 cycle 并阻断自动交易。验证：必需投影缺失或过期时创建被拒，且无 revision / review / order 写入
 - [x] 3.3 快照失效时 cycle 转 `superseded` 并记录原因，不替换原过程的输入。验证：循环中令快照过期的用例断言状态与原因，新输入只能开启新 cycle
-- [ ] 3.4 No Action 作为带理由的正式终态，不调用风险审查、人工审批与执行。验证：图级单测断言三处均未被调用
+- [x] 3.4 No Action 作为带理由的正式终态，不调用风险审查、人工审批与执行。验证：图级单测断言三处均未被调用
 - [x] 3.5 实现 cycle 与旧 `cycles` / `decisions` 表的双写适配（design D2），确认旧读入口结果不变。验证：双写后旧读入口返回内容与改造前一致，新路径只读修订表
 
 ## 4. 确定性风险审查改造
@@ -43,15 +43,15 @@
 
 ## 5. Chief—Risk 多轮 Loop 状态机
 
-- [ ] 5.1 扩展 `graph/chief_state.py` 的 `ChiefDecisionState`：research snapshot、revision no/hash、risk round 与 review、portfolio snapshot id、max rounds、authorization、cycle status。验证：新字段单测通过且既有图测试不破
-- [ ] 5.2 把 `persist_decision` 拆为「按轮持久化不可变修订」与「持久化风险审查」，转移前完成幂等持久化。验证：每轮各产生一条修订与一条审查，重复执行不产生重复行
-- [ ] 5.3 新增 `chief_revise` 节点与 `risk_gate` 后的条件边（approve → `boss_review`、reject → `chief_revise`、exhausted → `manual_review`）。验证：三条路径各有单测可达
-- [ ] 5.4 有界自动修订：默认 3 轮后进入 `manual_review`，不进入审批与执行。验证：三轮驳回用例断言终态且未调用审批与执行节点
-- [ ] 5.5 Chief 接受反向建议时生成引用父修订的新修订并重新审查。验证：父修订逐字段不变、新修订哈希不同
-- [ ] 5.6 终态副作用只在进入终态时执行一次（PEAD 信号消费、终态报告生成）。验证：多轮修订后副作用计数为 1，中间轮次不重复消费上游信号
-- [ ] 5.7 崩溃恢复：在各节点前后模拟进程崩溃，恢复后不重复写修订、审查、审批与订单。验证：按 §15.2 的注入用例全绿
-- [ ] 5.8 保护审批恢复通道：`Command(resume=...)` 与 `interrupt` 位置稳定。验证：`tests/test_chief_graph.py::test_trader_thread_resumes_on_chief_graph` 在每次节点改动后重跑通过
-- [ ] 5.9 移除或改造旧直通执行路径，使唯一可下真单入口在图中。验证：全仓库扫描断言只有一条提交真实订单的路径
+- [x] 5.1 扩展 `graph/chief_state.py` 的 `ChiefDecisionState`：research snapshot、revision no/hash、risk round 与 review、portfolio snapshot id、max rounds、authorization、cycle status。验证：新字段单测通过且既有图测试不破
+- [x] 5.2 把 `persist_decision` 拆为「按轮持久化不可变修订」与「持久化风险审查」，转移前完成幂等持久化。验证：每轮各产生一条修订与一条审查，重复执行不产生重复行
+- [x] 5.3 新增 `chief_revise` 节点与 `risk_gate` 后的条件边（approve → `boss_review`、reject → `chief_revise`、exhausted → `manual_review`）。验证：三条路径各有单测可达
+- [x] 5.4 有界自动修订：默认 3 轮后进入 `manual_review`，不进入审批与执行。验证：三轮驳回用例断言终态且未调用审批与执行节点
+- [x] 5.5 Chief 接受反向建议时生成引用父修订的新修订并重新审查。验证：父修订逐字段不变、新修订哈希不同
+- [x] 5.6 终态副作用只在进入终态时执行一次（PEAD 信号消费、终态报告生成）。验证：多轮修订后副作用计数为 1，中间轮次不重复消费上游信号
+- [x] 5.7 崩溃恢复：在各节点前后模拟进程崩溃，恢复后不重复写修订、审查、审批与订单。验证：按 §15.2 的注入用例全绿
+- [x] 5.8 保护审批恢复通道：`Command(resume=...)` 与 `interrupt` 位置稳定。验证：`tests/test_chief_graph.py::test_trader_thread_resumes_on_chief_graph` 在每次节点改动后重跑通过
+- [x] 5.9 移除或改造旧直通执行路径，使唯一可下真单入口在图中。验证：全仓库扫描断言只有一条提交真实订单的路径
 
 ## 6. Boss 审批收窄与持久化幂等
 

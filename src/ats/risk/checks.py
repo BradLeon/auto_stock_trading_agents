@@ -191,6 +191,7 @@ def review_revision(
             post_pf, sector=sector, event_data=event_data)
         verdict = marginal.compare(sym, working_review, post_review, rc, policy)
         if not verdict.allowed:
+            violation_count_before = len(violations)
             for delta in verdict.deltas:
                 if delta.new_breach:
                     violations.append(RiskViolation(
@@ -230,6 +231,13 @@ def review_revision(
                     if bound is not None:
                         per_symbol_max[sym] = (
                             min(per_symbol_max.get(sym, bound), bound))
+            if len(violations) == violation_count_before:
+                # Rejected by the marginal policy without a metric delta (e.g.
+                # "repair mode must improve a breached metric") — still a hard
+                # violation: a rejection with no record would look like a pass.
+                violations.append(RiskViolation(
+                    rule_id="marginal_policy", entity=sym, severity="hard",
+                    detail="; ".join(verdict.reasons)))
             _reject(sym, action, list(verdict.reasons),
                     max_allowed=per_symbol_max.get(sym))
             continue

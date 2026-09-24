@@ -78,28 +78,55 @@ cd /tmp/ats-based && PYTHONPATH=/tmp/ats-based/src \
 均为任务书要求的有意语义变更（配置权迁移、宏观脱敏、快照阻断等），并在各
 组专项测试中正向断言。
 
-## 5. 受限环境计数不作判据
+## 5. 全量基线（本机环境实测，2026-09-24）
 
-本记录的数字均取自主仓库环境。按 §15.1 的既定结论：对文件删除设配额的受限
-环境中，同命令会因 pytest 临时目录清理触发守卫 `SystemExit` 而产生大量
-error——**受限环境的计数不得用作验收判据**。环境性判定必须包含「JUnit
-`<error>` = setup 未完成」的确认。
+**权威全量数字在本机环境取得**（用户放开沙箱限制后，同机直跑）：
 
-本次全量运行（`./scripts/run_tests.sh tests`，2026-09-24）实测两次：
+```bash
+CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 ./scripts/run_tests.sh tests
+# 当前树（Group 9 后 + kb 修复 d641e45）：
+# → 33 failed / 1921 passed / 0 errors（365–379s，两次复跑失败集合稳定）
+```
 
-- 第一次：**10 failed / 902 passed / 1042 errors**（178s）。error 从运行中段
-  起整段出现（fixture setup 未完成），属既定的「单次运行过长 → 删除配额 →
-  守卫 `SystemExit` 打断」环境性失败模式，与代码回归无关。
-- 紧接的第二次：**35 passed / 1919 errors**（16.6s，自 3% 起整墙 error）——
-  配额耗尽使环境性失败随复跑恶化，进一步印证计数不可比。
+执行环境对单轮文件删除总量设有守卫阈值（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`，
+pytest 的 tmp 目录清理天然超限），会在运行中段以 `SystemExit` 打断 fixture
+setup——表现为整墙 error 且随复跑恶化。此前沙箱内测得的
+`1042/1919 errors` 即该机制所致，**不是代码问题**；本机对测试命令单独提高
+阈值后 error 全部消失。测试命令作用域内对仓库 `tmp/`（gitignored）提高阈值，
+不影响其他操作的删除防护。
 
-其中可见的 10 例失败（`test_chief_temporal` 1、`test_data_catalog` 2、
-`test_data_products` 2 等）经 `git stash` 对照在改动前 HEAD 同样失败——
-全部是 2026-09-22 基线既有失败簇，非本 change 回归。
+### 5.1 归因：33 例失败全部为既有，Group 8/9 零新增回归
 
-验收因此以 §3 的分面测试（全部绿）与 §4 的 worktree 对照为准；
-全量基线（目标 135 failed / 1398 passed / error=0）须在不受配额约束的
-环境中取得，方法与既有结论见 `docs/TARGET_WORKFLOW_DATAFLOW.md` §15.1。
+以 Group 8 前最后提交 `e552c9c` 建 worktree 跑同一全量命令：
+
+```bash
+git worktree add /tmp/ats-g7 e552c9c && cd /tmp/ats-g7
+CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 .venv/bin/python -m pytest \
+  --tb=no -q -rA -p no:cacheprovider --basetemp=/tmp/ats-g7-tmp4 tests
+# → 44 failed / 1884 passed / 1 skipped
+```
+
+- **新增回归 = 0**：当前树 33 例失败与基线 44 例求差，当前侧独有集合为空。
+- **净修复 11 例**：基线独有而当前通过的 11 例，系 Group 8 投影发布补齐
+  （macro/technical 发布点使快照门可满足）与采集迁移的副产收益。
+- 33 例均为 2026-09-22 权威基线（135 failed）的遗留簇：news / research /
+  kb_audit 消费面、PEAD v1/v2 旧 sizing 断言（Group 5 有意删除的行为，
+  断言未随任务改写）、structured_* 一致性、scheduler weekly-job 接线断言等。
+  其中 `test_chief_loop::test_over_cap_order_is_revised_to_boundary_then_executed`
+  为顺序依赖的偶发（全量中失败、单文件/子集通过，基线全量同样失败）。
+
+### 5.2 过程中发现并修复的唯一回归
+
+`test_kb_validation` 5 例 AttributeError：Group 8 将 `kb_perturb` 切到
+`products.sector_inputs` 时调用点仍用旧属性名 `criteria_spans`（入口转发名
+为 `industry_criteria_spans`）。修复于 `d641e45`，15/15 通过。
+
+### 5.3 受限环境计数不作判据（保留原结论）
+
+对文件删除设配额的环境（含未放开阈值时的本会话沙箱）中，同命令会产生大量
+error——**该环境的计数不得用作验收判据**；环境性判定必须包含
+「JUnit `<error>` = setup 未完成」的确认（`src/ats/workflow/test_baseline.py`
+已内建此判定）。
 
 ## 6. 未尽事项与移交
 

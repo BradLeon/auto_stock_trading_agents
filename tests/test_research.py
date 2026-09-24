@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import ats.data.research as research_src
 from ats.agents.information import extract as info_extract
+from ats.agents.pead.outputs import InsightBatchView, InsightItemView
 from ats.memory import get_store
 from ats.schemas.research import Article
 

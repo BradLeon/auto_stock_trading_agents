@@ -208,7 +208,13 @@ def stored_articles(since: datetime, *, source_match: str = "", store=None,
         # Some migrated carrier-oriented records predate ``published_at`` metadata.
         # Query the bounded catalog first, then apply the effective publication-time
         # filter below after combining catalog, frontmatter, and fetch provenance.
-        rows = reader.documents(doc_type="article", source_contains=source_match or None,
+        # The legacy carrier name ``article`` and the semantic ``research_article``
+        # coexist in the catalog; a literal doc_type= match silently hides one of
+        # them, so resolve the equivalence the same way every other caller does.
+        from .document_types import compatible_type_values
+
+        rows = reader.documents(doc_type_in=compatible_type_values("article"),
+                                source_contains=source_match or None,
                                 limit=limit)
     finally:
         reader.close()

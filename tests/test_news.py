@@ -13,21 +13,48 @@ def _item(id_, when=NOW):
     return NewsItem(id=id_, source="finnhub", headline="h", published_at=when)
 
 
-def test_fetch_news_dedups_and_orders(monkeypatch):
-    older = NOW - timedelta(days=1)
-    monkeypatch.setattr(news, "_finnhub", lambda *a: [_item("a", NOW), _item("a", NOW)])  # dup id
-    monkeypatch.setattr(news, "_rss", lambda *a: [_item("b", older)])
-    monkeypatch.setattr(news, "_x", lambda *a: [])
-    out = news.fetch_news("COHR", SINCE)
-    assert [i.id for i in out] == ["a", "b"]      # deduped, newest first
+def _forbid_legacy_providers(monkeypatch):
+    """fetch_news 是平台只读消费路径：legacy provider 必须不可达。"""
+
+    def _legacy(*_a):
+        raise AssertionError("consumer must not touch legacy providers")
+
+    monkeypatch.setattr(news, "_finnhub", _legacy)
+    monkeypatch.setattr(news, "_rss", _legacy)
+    monkeypatch.setattr(news, "_x", _legacy)
 
 
-def test_finnhub_failure_degrades_to_other_sources(monkeypatch):
-    monkeypatch.setattr(news, "_finnhub", lambda *a: (_ for _ in ()).throw(RuntimeError("429")))
-    monkeypatch.setattr(news, "_rss", lambda *a: [_item("r1")])
-    monkeypatch.setattr(news, "_x", lambda *a: [])
-    out = news.fetch_news("COHR", SINCE)
-    assert [i.id for i in out] == ["r1"]          # finnhub died, rss survived
+def _seed_platform_news(key: str, published, *, entity="AMD", tickers=("AMD",)):
+    from ats.data import document_assets
+
+    return document_assets.ingest(
+        entity=entity, key=key, doc_type="news_item",
+        text=f"{key} body for {entity}",
+        source="ibkr_news", source_url=f"https://news.example.test/{key}",
+        external_id=f"https://news.example.test/{key}", title=key,
+        published_at=published.isoformat(), min_chars=1,
+        related_entities=tuple(tickers))
+
+
+def test_fetch_news_reads_released_platform_items_newest_first(monkeypatch):
+    """Provider 聚合/去重已上收到 ingestion（yahoo/ibkr adapters）；消费路径的
+    契约是：只读已发布平台资产、按最新在前排序、窗口过滤。"""
+    _forbid_legacy_providers(monkeypatch)
+
+    fresh = _seed_platform_news("story-new", NOW - timedelta(days=1))
+    old = _seed_platform_news("story-old", NOW - timedelta(days=3))
+    _seed_platform_news("story-outside", SINCE - timedelta(days=3))  # 窗口外
+
+    out = news.fetch_news("AMD", SINCE)
+    assert [i.id for i in out] == [fresh.document_id, old.document_id]
+    assert all(i.source.startswith("platform:") for i in out)
+
+
+def test_platform_miss_is_a_gap_not_a_provider_fallback(monkeypatch):
+    """平台无发布即缺口——消费方不得回落到临时 provider 请求（那会绕过
+    实体准入、去重与 ingestion 记录的 lineage）。"""
+    _forbid_legacy_providers(monkeypatch)
+    assert news.fetch_news("COHR", SINCE) == []
 
 
 def test_platform_news_does_not_call_legacy_providers(monkeypatch):
@@ -69,7 +96,8 @@ def test_clean_strips_html():
     assert news._clean("<p>hello <b>world</b></p>") == "hello world"
 
 
-def test_every_discovered_news_item_enters_shared_catalog(monkeypatch):
+def test_every_discovered_news_item_enters_shared_catalog():
+    """Ingestion 把每个发现的条目按 canonical URL 收进共享目录，且关联全部提及实体。"""
     from ats.memory import get_store
 
     item = NewsItem(
@@ -78,11 +106,8 @@ def test_every_discovered_news_item_enters_shared_catalog(monkeypatch):
         url="https://news.example.test/story?utm_source=feed", published_at=NOW,
         tickers=["AMD", "TSM"],
     )
-    monkeypatch.setattr(news, "_finnhub", lambda *a: [item])
-    monkeypatch.setattr(news, "_rss", lambda *a: [])
-    monkeypatch.setattr(news, "_x", lambda *a: [])
+    news._catalog([item], store=get_store())
 
-    assert news.fetch_news("AMD", SINCE) == [item]
     store = get_store()
     assert len(store.documents(entity="AMD", doc_type="news")) == 1
     assert len(store.documents(entity="TSM", doc_type="news")) == 1

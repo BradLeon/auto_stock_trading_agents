@@ -77,7 +77,19 @@ def test_scheduler_daily_uses_its_boundary_before_workflow_side_effects(monkeypa
 
 def test_scheduler_isolates_a_failed_stage_and_runs_later_stages(monkeypatch, caplog):
     """A source/batch failure must not suppress the rest of the daily cascade."""
+    from types import SimpleNamespace
+
     stages: list[str] = []
+    # The cascade honours schedule.daily_stages; deployment config pauses most
+    # stages, so the isolation test forces the all-on behaviour explicitly.
+    all_on = SimpleNamespace(
+        pead_event_triggers=True, macro_sector_event_triggers=True,
+        news_backfill=True, pead_daily=True, technical_daily=True,
+        intel_digest=True, performance_snapshot=True, perf_risk_digest=True,
+        journal_marks=True, chief_daily=True)
+    monkeypatch.setattr(
+        scheduler, "get_config",
+        lambda: SimpleNamespace(app=SimpleNamespace(schedule=SimpleNamespace(daily_stages=all_on))))
     monkeypatch.setattr(scheduler, "_event_triggers", lambda **_kwargs: stages.append("events"))
 
     def fail_news():

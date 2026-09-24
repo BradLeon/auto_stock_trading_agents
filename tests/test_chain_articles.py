@@ -255,14 +255,16 @@ def test_an_extraction_failure_still_counts_as_paid_for(wire):
 def test_collect_articles_is_wired_into_the_weekly_job():
     """A configured source nobody fetches is worse than none: it looks live in the config
     and is frozen in the ledger. It must also run BEFORE the report renders, or the
-    report shows last week's articles beside this week's filings."""
+    report shows last week's articles beside this week's filings. After the platform
+    cutover the acquisition stage is the shared ingestion pipeline, not the legacy
+    chain collector."""
     import inspect
 
     from ats.runtime import scheduler
 
     src = inspect.getsource(scheduler._cross_section_weekly)
-    assert "collect_articles" in src
-    assert src.index("collect_articles(") < src.index("chain_report.write")
+    assert "research_pipeline.ingest_configured" in src
+    assert src.index("ingest_configured(") < src.index("chain_report.write")
 
 
 def test_an_article_source_outage_does_not_break_the_weekly_job():
@@ -273,7 +275,7 @@ def test_an_article_source_outage_does_not_break_the_weekly_job():
     from ats.runtime import scheduler
 
     src = inspect.getsource(scheduler._cross_section_weekly)
-    after = src[src.index("chain_articles.collect_articles("):]
+    after = src[src.index("research_pipeline.ingest_configured("):]
     assert "except Exception" in after.split("chain_report")[0]
 
 

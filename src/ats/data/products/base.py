@@ -1261,9 +1261,11 @@ class DataProducts:
         if structured is not None:
             return structured
 
-        projection_lineage = getattr(self.unstructured, "projection_lineage", None)
-        if callable(projection_lineage):
-            return projection_lineage(identifier)
+        if self._unstructured_repository is not None:
+            projection_lineage = getattr(
+                self._unstructured_repository, "projection_lineage", None)
+            if callable(projection_lineage):
+                return projection_lineage(identifier)
 
         # Preserve the lightweight legacy-store contract used by older callers
         # that do not provide an unstructured projection repository.

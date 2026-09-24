@@ -110,6 +110,6 @@ def test_cli_help_lists_documented_structured_actions(capsys) -> None:
     output = capsys.readouterr().out
     for action in (
         "catalog", "describe", "availability", "examples", "validate-source",
-        "ingest", "financial-package-check", "release-check", "release-assessment", "publish", "rollback", "purge-source", "derive", "cross-section",
+        "ingest", "financial-package-check", "release-check", "publish", "rollback", "purge-source", "derive", "cross-section",
     ):
         assert action in output

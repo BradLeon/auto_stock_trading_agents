@@ -128,32 +128,32 @@ def test_a_series_does_not_inflate_the_cluster_count():
     assert len(clusters[0].rows) == 6            # members kept, one voice
 
 
-def test_collect_is_wired_into_the_weekly_job(monkeypatch):
-    """A configured source that nobody ever fetches is worse than none — it looks
-    live in the config and is frozen in the ledger. `collect()` had no production
-    caller at all: the only invocation in the repo was this test file, so the three
-    declared series only ever refreshed when someone ran it from a REPL.
-
-    The weekly job must refresh BEFORE rendering, or the report shows last month's
-    customs print beside this week's filings.
-    """
+def test_series_refresh_has_moved_to_the_structured_ingest_cli():
+    """`sources.collect()` used to have no production caller at all — the only
+    invocation in the repo was this test file, so the declared series only ever
+    refreshed from a REPL. Wiring it into the weekly job fixed that; the platform
+    cutover then moved it again: third-party structured sources are now scheduled by
+    `ats data ingest` and write directly to the platform repository, and Chain has no
+    parallel legacy ledger. The weekly job must NOT call the legacy collector — a
+    second write path behind the platform's back would resurrect exactly the
+    frozen-source failure this gate was built for."""
     import inspect
 
     from ats.runtime import scheduler
 
     src = inspect.getsource(scheduler._cross_section_weekly)
-    assert "sources.collect" in src or "chain_sources.collect" in src
-    # ...and it must come before the report is written, not after.
-    assert src.index("collect(") < src.index("chain_report.write")
+    assert "sources.collect" not in src and "chain_sources" not in src
 
 
-def test_a_source_outage_does_not_break_the_weekly_job():
-    """An agency being down is a recorded gap, never an exception that costs the whole
-    sector job its report — the same rule the adapters follow one level down."""
+def test_an_ingest_or_report_failure_does_not_break_the_weekly_job():
+    """Every stage left in the weekly job is independently best-effort: the ingestion
+    stage and the report each carry their own except guard, so a publisher outage or a
+    rendering failure can never cost the job its later stages — the same rule the
+    adapters follow one level down."""
     import inspect
 
     from ats.runtime import scheduler
 
     src = inspect.getsource(scheduler._cross_section_weekly)
-    after_call = src[src.index("chain_sources.collect("):]
-    assert "except Exception" in after_call.split("chain_report")[0]
+    body = src.split('"""')[-1]
+    assert body.count("except Exception") >= 2

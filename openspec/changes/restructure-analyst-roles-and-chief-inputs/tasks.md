@@ -84,14 +84,14 @@
 
 ## 8. 边界收敛：采集侧迁出与 Provider 直连清退
 
-- [ ] 8.1 把 `agents/evidence/observer.py` 的采集侧取数与原始资产写入迁出 `agents/` 目录至数据层取数入口。验证：新增测试断言 `src/ats/agents/` 下不再存在这些取数调用，且迁移后功能用例全绿。
-- [ ] 8.2 把 `agents/macro/assemble.py` 的 factset / regional / websearch 取数改经数据产品入口。验证：新增测试断言该模块无 provider 导入且取数结果不变。
-- [ ] 8.3 把 `agents/sector/assemble.py` 与 `agents/sector/` 其余模块的 factset / consensus / fundamentals / industry / regional 取数改经数据产品入口。验证：新增测试断言这些模块无 provider 导入。
-- [ ] 8.4 把 `agents/pead/` 的 news 取数、财年标签解析与研究文章取数改经数据产品入口或工具层。验证：新增测试断言 `agents/pead/` 无 provider 导入。
-- [ ] 8.5 把 `agents/technical/` 的行情取数改经数据产品入口。验证：新增测试断言该模块无 provider 导入。
-- [ ] 8.6 清退 `FIRST_BATCH_EXCEPTIONS` 中全部标注「Phase D」的条目（预期 27 条），使清单只减不增。验证：新增测试断言任一例外的 reason 中不再出现「Phase D」，且守卫在当前树上运行零违规。
-- [ ] 8.7 为守卫新增「例外必须声明收敛阶段」的机器校验：无阶段或阶段已过期即判失败。验证：新增测试构造一条无阶段例外，断言守卫报错。
-- [ ] 8.8 全量重跑架构守卫测试与既有分析师测试，确认迁移未改变分析输出语义。验证：`./scripts/run_tests.sh tests/test_architecture_guards.py tests/test_sector.py tests/test_layer_review.py tests/test_pead_graph.py` 全绿。
+- [x] 8.1 把 `agents/evidence/observer.py` 的采集侧取数与原始资产写入迁出 `agents/` 目录至数据层取数入口。验证：新增测试断言 `src/ats/agents/` 下不再存在这些取数调用，且迁移后功能用例全绿。
+- [x] 8.2 把 `agents/macro/assemble.py` 的 factset / regional / websearch 取数改经数据产品入口。验证：新增测试断言该模块无 provider 导入且取数结果不变。
+- [x] 8.3 把 `agents/sector/assemble.py` 与 `agents/sector/` 其余模块的 factset / consensus / fundamentals / industry / regional 取数改经数据产品入口。验证：新增测试断言这些模块无 provider 导入。
+- [x] 8.4 把 `agents/pead/` 的 news 取数、财年标签解析与研究文章取数改经数据产品入口或工具层。验证：新增测试断言 `agents/pead/` 无 provider 导入。
+- [x] 8.5 把 `agents/technical/` 的行情取数改经数据产品入口。验证：新增测试断言该模块无 provider 导入。
+- [x] 8.6 清退 `FIRST_BATCH_EXCEPTIONS` 中全部标注「Phase D」的条目（预期 27 条），使清单只减不增。验证：新增测试断言任一例外的 reason 中不再出现「Phase D」，且守卫在当前树上运行零违规。
+- [x] 8.7 为守卫新增「例外必须声明收敛阶段」的机器校验：无阶段或阶段已过期即判失败。验证：新增测试构造一条无阶段例外，断言守卫报错。
+- [x] 8.8 全量重跑架构守卫测试与既有分析师测试，确认迁移未改变分析输出语义。验证：`./scripts/run_tests.sh tests/test_architecture_guards.py tests/test_sector.py tests/test_layer_review.py tests/test_pead_graph.py` 全绿。
 
 ## 9. 登记、文档同步与保真性验收
 

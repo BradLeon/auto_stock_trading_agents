@@ -135,102 +135,70 @@ class Violation:
 
 @dataclass(frozen=True)
 class ExceptionEntry:
-    """A declared, reasoned exception. Module-level, never a pattern."""
+    """A declared, reasoned exception. Module-level, never a pattern.
+
+    `phase` names the phase that will REMOVE the exception — an exception without
+    one, or whose removal phase has already passed, fails the guard (Phase D 8.7).
+    """
 
     module: str
     target: str
     reason: str
+    phase: str = ""
 
 
 # --- first batch ------------------------------------------------------------ #
 # These are current-state violations, each declared with the reason it still exists and
 # the phase that will remove it. They are NOT a tolerance list: adding a new violation
 # fails the guard until it is declared here in the same change.
-FIRST_BATCH_EXCEPTIONS: tuple[ExceptionEntry, ...] = (
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.defeatbeta",
-        reason="证据观察器是采集侧确定性组件，直接取结构化纪要源；Phase D 把采集移出 "
-               "agents/ 后改由数据产品入口读取。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.transcript",
-        reason="同上：transcript 取数是采集路径而非观点输入，Phase D 随采集侧一并迁出。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.source_cache",
-        reason="本地语料缓存用于保证前后两次取数可比（重取不幂等），Phase D 随采集侧迁出。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.documents",
-        reason="公开文档聚合属采集阶段，Phase D 随采集侧迁出。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.document_assets",
-        reason="写入的是取回的原始文档资产，不是分析结论；Phase D 改由采集侧写入后收紧。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.sec",
-        reason="SEC 披露是原始来源而非观点，Phase D 随采集侧迁出。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ats.data.fiscal",
-        reason="财年标签解析是纯函数工具，不访问 Provider；Phase D 归入数据产品工具层。"),
-    ExceptionEntry(
-        module="src/ats/agents/evidence/observer.py", target="ingest",
-        reason="写入的是取回的原始文档资产（未含任何观点），不是把结论写成中性事实；"
-               "Phase D 采集侧迁出 agents/ 后本例外撤销。"),
-    ExceptionEntry(
-        module="src/ats/agents/macro/assemble.py", target="ats.data.factset",
-        reason="宏观指标取数尚未收敛到数据产品入口；Phase D 改为经 products 读取。"),
-    ExceptionEntry(
-        module="src/ats/agents/macro/assemble.py", target="ats.data.regional",
-        reason="同上：区域口径属取数侧，Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/macro/assemble.py", target="ats.data.websearch",
-        reason="宏观事件检索尚直连检索 Provider；Phase D 改为经数据产品入口。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/assemble.py", target="ats.data.factset",
-        reason="产业链行情取数未收敛；Phase D 改为经 products 读取。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/assemble.py", target="ats.data.consensus",
-        reason="一致预期属共享数据而非观点，但取数入口未收敛；Phase D 改经 products。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/assemble.py", target="ats.data.fundamentals",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/assemble.py", target="ats.data.industry",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/assemble.py", target="ats.data.regional",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/cross_section.py", target="ats.data.consensus",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/cross_section.py", target="ats.data.fundamentals",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/kb_perturb.py", target="ats.data.industry",
-        reason="知识库扰动只用行业分类枚举，不取数；Phase D 归入数据产品工具层。"),
-    ExceptionEntry(
-        module="src/ats/agents/layer/layer_review.py", target="ats.data.industry",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/structure.py", target="ats.data.industry",
-        reason="产业链结构只取行业分类枚举，不取数；Phase D 归入数据产品工具层。"),
-    ExceptionEntry(
-        module="src/ats/agents/sector/review.py", target="ats.data.factset",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/pead/monitor.py", target="ats.data.news",
-        reason="PEAD 监控的新闻取数未收敛；Phase D 改为经数据产品入口。"),
-    ExceptionEntry(
-        module="src/ats/agents/pead/triage.py", target="ats.data.news",
-        reason="同上；Phase D 收敛。"),
-    ExceptionEntry(
-        module="src/ats/agents/pead/research.py", target="ats.data.research",
-        reason="研究文章取数未收敛；Phase D 改为经数据产品入口。"),
-    ExceptionEntry(
-        module="src/ats/agents/pead/report.py", target="ats.data.fiscal",
-        reason="财年标签解析是纯函数工具，不访问 Provider；Phase D 归入工具层。"),
-    ExceptionEntry(
-        module="src/ats/agents/technical/review.py", target="ats.data.base",
-        reason="技术面读取的是行情基类接口而非特定 Provider；Phase D 改为经 products。"),
-)
+#
+# Phase D 8.6: the first batch — every entry flagged "Phase D" — has been retired by
+# moving acquisition into `ats.data.collection` and analyst reads behind the
+# `ats.data.products` entries. The list is now empty BY CONSTRUCTION and stays
+# that way: a new violation must be declared here with a concrete removal phase
+# (a future one), never silently tolerated.
+FIRST_BATCH_EXCEPTIONS: tuple[ExceptionEntry, ...] = ()
+
+# --- exception lifecycle (Phase D 8.7) --------------------------------------- #
+# An exception is a debt with a due date. The phase vocabulary is fixed so a typo
+# cannot silently widen the calendar, and `ACTIVE_PHASE` advances one step per phase
+# change: when it passes a declared removal phase, that exception expires and the
+# guard starts failing until the violation is actually gone.
+PHASES: tuple[str, ...] = ("Phase A", "Phase B", "Phase C", "Phase D", "Phase E", "Phase F")
+ACTIVE_PHASE = "Phase D"
+
+
+class ExceptionPhaseError(RuntimeError):
+    """A declared exception lacks a removal phase, or its removal phase expired."""
+
+
+def validate_exceptions(exceptions: Iterable[ExceptionEntry] | None = None,
+                        *, active_phase: str = ACTIVE_PHASE) -> None:
+    """Fail loudly when an exception is undated or overdue.
+
+    A removal phase must be strictly FUTURE relative to the active phase: declaring
+    "Phase D" while Phase D is the phase being executed is how an exception pretends
+    it will remove itself. Unknown phase strings are rejected outright. `exceptions`
+    defaults to the module-level list read at call time, so tests and callers always
+    validate what is actually declared.
+    """
+    if exceptions is None:
+        exceptions = FIRST_BATCH_EXCEPTIONS
+    if active_phase not in PHASES:
+        raise ExceptionPhaseError(f"unknown active phase {active_phase!r}")
+    active_index = PHASES.index(active_phase)
+    errors: list[str] = []
+    for entry in exceptions:
+        where = f"{entry.module} -> {entry.target}"
+        if not entry.phase:
+            errors.append(f"{where}: exception declares no removal phase")
+        elif entry.phase not in PHASES:
+            errors.append(f"{where}: unknown removal phase {entry.phase!r}")
+        elif PHASES.index(entry.phase) <= active_index:
+            errors.append(f"{where}: removal phase {entry.phase} already expired "
+                          f"(active: {active_phase}) — remove the violation or the entry")
+    if errors:
+        raise ExceptionPhaseError("; ".join(errors))
 
 
 def declared_exception(module: str, target: str,
@@ -367,7 +335,12 @@ def scan_module(path: Path, *, root: Path | None = None,
 
 
 def scan_agents(base: Path | None = None, *, root: Path | None = None) -> list[Violation]:
-    """Scan every agent module. `root` is only overridden by tests using a temp tree."""
+    """Scan every agent module. `root` is only overridden by tests using a temp tree.
+
+    Declared exceptions are validated first (Phase D 8.7): an undated or overdue
+    exception is itself a failure — it never gets the chance to suppress anything.
+    """
+    validate_exceptions()
     start = base or AGENT_ROOT
     out: list[Violation] = []
     for path in sorted(start.rglob("*.py")):

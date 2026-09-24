@@ -87,7 +87,7 @@ class SectorContext:
 def build(cfg: SectorConfig, *, live_data: bool = True,
           allow_llm_evidence: bool = True) -> SectorContext:
     from ...config import is_pead_covered
-    from ...data import industry
+    from ...data.products import sector_inputs as inputs
 
     sc = SectorContext(cfg=cfg)
     symbols = cfg.all_symbols()
@@ -121,15 +121,13 @@ def build(cfg: SectorConfig, *, live_data: bool = True,
     _chain_evidence(sc, cfg, allow_llm=allow_llm_evidence)
 
     if live_data:
-        from ...data import regional
         try:
-            sc.regional_block = regional.fetch(consumer="sector_agent").render()
+            sc.regional_block = inputs.regional_monthly("sector_agent").render()
         except Exception as exc:  # legacy regional sources must not stop the review
             log.warning("sector regional snapshot unavailable: %s", exc)
             sc.regional_block = "(区域月度数据不可用)"
-        from ...data import factset
         try:
-            sc.factset_block = factset.fetch_sector_context()
+            sc.factset_block = inputs.factset_sector_context()
         except Exception as exc:  # optional top-down context never stops the review
             log.warning("sector FactSet snapshot unavailable: %s", exc)
             sc.factset_block = ""
@@ -144,8 +142,8 @@ def build(cfg: SectorConfig, *, live_data: bool = True,
 
     _kb_criteria(sc, cfg)
 
-    notes = industry.fetch_notes()
-    sc.static_notes = industry.as_context(notes)[:int(cfg.review["static_notes_chars"])]
+    notes = inputs.industry_notes()
+    sc.static_notes = inputs.industry_context(notes)[:int(cfg.review["static_notes_chars"])]
     return sc
 
 
@@ -158,7 +156,7 @@ def _kb_criteria(sc: SectorContext, cfg: SectorConfig) -> None:
     moat in this sub-layer, and which readings are commonly misread. Giving it the
     criteria does not tell it the answer — the notes deliberately contain no ranking.
     """
-    from ...data import industry
+    from ...data.products import sector_inputs as inputs
 
     paths: list[str] = []
     for layer in cfg.layers:
@@ -167,14 +165,14 @@ def _kb_criteria(sc: SectorContext, cfg: SectorConfig) -> None:
                 paths.append(path)
     if not paths:
         return
-    kb = industry.fetch_named(paths)
+    kb = inputs.industry_named(paths)
     if kb:
         # 默认值的真源是 config.py 的 setdefault（那里保证这个键一定存在），这里的
         # 兜底只是防御性的——但两处必须一致，否则改了一处会以为改全了。
         cap = int(cfg.review.get("kb_criteria_chars", 32000))
         # 截断是静默的，且切的是拼接顺序最后一份笔记的尾部。真被切到时要留下痕迹，
         # 否则下游看到的是一份看起来完整、实则缺了结尾的知识库。
-        joined = industry.as_context(kb)
+        joined = inputs.industry_context(kb)
         if len(joined) > cap:
             log.warning("kb criteria truncated: %d chars > cap %d — 末尾笔记的结尾已被切掉，"
                         "考虑调高 review.kb_criteria_chars", len(joined), cap)
@@ -185,28 +183,28 @@ def _kb_criteria(sc: SectorContext, cfg: SectorConfig) -> None:
 # Per-ticker light snapshots (rate-limit aware)
 # --------------------------------------------------------------------------- #
 def _snapshots(cfg: SectorConfig, symbols: list[str], pead_syms: list[str]) -> dict[str, str]:
-    from ...data import consensus as consensus_src, fundamentals, sector_snapshot
+    from ...data.products import sector_inputs as inputs
 
     days = cfg.snapshot["momentum_days"]
     sleep_s = float(cfg.snapshot["sleep_between_tickers"])
     consensus_for = cfg.snapshot["consensus_for"]
 
-    prices = sector_snapshot.fetch_prices(symbols + [cfg.sector_etf])
-    etf_mom = sector_snapshot.momentum(prices.get(cfg.sector_etf, []), days[0])
+    prices = inputs.sector_prices(symbols + [cfg.sector_etf])
+    etf_mom = inputs.price_momentum(prices.get(cfg.sector_etf, []), days[0])
 
     out: dict[str, str] = {}
     for sym in symbols:
         closes = prices.get(sym, [])
-        m1 = sector_snapshot.momentum(closes, days[0])
-        m2 = sector_snapshot.momentum(closes, days[1]) if len(days) > 1 else None
-        dh = sector_snapshot.dist_to_high(closes)
+        m1 = inputs.price_momentum(closes, days[0])
+        m2 = inputs.price_momentum(closes, days[1]) if len(days) > 1 else None
+        dh = inputs.distance_to_high(closes)
 
-        f = fundamentals.fetch_constituent_financials(sym)
+        f = inputs.constituent_financials(sym)
         time.sleep(sleep_s)
 
         cons_txt = ""
         if consensus_for == "all" or (consensus_for == "pead_targets" and sym in pead_syms):
-            c = consensus_src.fetch(sym, consumer="sector_consensus")
+            c = inputs.consensus_for(sym, consumer="sector_consensus")
             if c.get("target_mean") is not None:
                 cons_txt = (f" | PT {_fmt(c.get('target_mean'))} vs px {_fmt(c.get('target_current'))}, "
                             f"SB{c.get('rating_strong_buy')}/B{c.get('rating_buy')}/"

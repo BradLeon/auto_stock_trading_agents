@@ -72,7 +72,7 @@ def resolve_universe(cfg, *, live_broker: bool = True) -> tuple[list[str], list[
     # Collapse tickers that are the same instrument once normalised. HY9H (the
     # Frankfurt ADR) and SKHY both resolve to SKHY; without this, fetch_prices'
     # reverse map keeps only one and the other silently reports "no price data".
-    from ...data.base import yf_symbol
+    from ...data.products.market_inputs import yf_symbol
 
     canonical: dict[str, str] = {}
     aliases: list[str] = []
@@ -142,16 +142,16 @@ def compute_readings(closes_by_symbol: dict[str, list[float]], *, vix: float | N
 def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float | None,
                                                    float | None, list[str]]:
     """One batched download for the basket, plus VIX/VIX3M. Never raises."""
-    from ...data import sector_snapshot
+    from ...data.products import sector_inputs as inputs
 
     notes: list[str] = []
     period = f"{max(2, days // 365 + 1)}y"
-    closes = sector_snapshot.fetch_prices(symbols, period=period) or {}
+    closes = inputs.sector_prices(symbols, period=period) or {}
     missing = sorted(set(symbols) - set(closes))
     if missing:
         notes.append(f"无价格数据: {', '.join(missing)}")
 
-    vol = sector_snapshot.fetch_prices(["^VIX", "^VIX3M"], period="1y") or {}
+    vol = inputs.sector_prices(["^VIX", "^VIX3M"], period="1y") or {}
     vix = vol.get("^VIX", [None])[-1] if vol.get("^VIX") else None
     v3 = vol.get("^VIX3M", [None])[-1] if vol.get("^VIX3M") else None
     if vix is None:
@@ -161,6 +161,46 @@ def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float
         # inverted term structure exactly when the signal matters most.
         notes.append("VIX3M 不可用：本次不评估 Tier1 恐慌（不做前向填充）")
     return closes, vix, v3, notes
+
+
+def _publish_projection(store, review: TechnicalReview) -> int:
+    """Publish each usable reading as a `technical_review` projection (entity scope).
+
+    全部由确定性代码产出：signal 是 7 点动量评分的三档化（≥5 bullish、≤2 bearish、
+    其余 neutral），不接 LLM。stale 读数没有评分依据——宁缺勿造，直接跳过（下游
+    把缺失投影当缺口，好过把无依据的信号当输入）。A failed publish is a gap, not
+    a crash: the review row already holds the truth.
+    """
+    from ...agent.task_projection import ProjectionScope, build_envelope
+
+    published = 0
+    for r in review.readings:
+        if r.stale:
+            continue
+        if r.score >= 5:
+            signal = "bullish"
+        elif r.score <= 2:
+            signal = "bearish"
+        else:
+            signal = "neutral"
+        levels = {key: value for key, value in (
+            ("close", r.close), ("sma20", r.sma20),
+            ("sma50", r.sma50), ("sma200", r.sma200)) if value is not None}
+        try:
+            envelope = build_envelope(
+                role="technical_review",
+                payload={"entity": r.symbol, "signal": signal,
+                         "summary": r.one_line(), "levels": levels},
+                scope=ProjectionScope(kind="entity", id=r.symbol),
+                as_of=review.as_of.isoformat(timespec="seconds"),
+                model_version=f"deterministic:{review.strategy}@{review.fingerprint}",
+                workflow_run_id="")
+            store.save_task_projection_envelope(envelope)
+            published += 1
+        except Exception as exc:  # noqa: BLE001 - 发布失败留痕，不影响读数落库
+            log.warning("technical %s: projection publish failed for %s: %s",
+                        review.name, r.symbol, exc)
+    return published
 
 
 def run(name: str = "technical", *, live_data: bool = True, persist: bool = True,
@@ -202,6 +242,7 @@ def run(name: str = "technical", *, live_data: bool = True, persist: bool = True
 
     if persist:
         store.save_technical_review(review)
+        _publish_projection(store, review)
     if write_report:
         from . import report as tech_report
 

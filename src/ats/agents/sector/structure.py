@@ -44,10 +44,10 @@ def assess(rows, structure_notes: dict[str, str],
     what was just concluded about the layer is the part of "sequential" that was
     missing: the two stages shared a storage row and nothing else.
     """
-    from ...data import industry
+    from ...data.products import sector_inputs as inputs
 
     note_paths = list(dict.fromkeys(structure_notes.values()))   # dedupe, keep order
-    kb = industry.fetch_named(note_paths) if note_paths else []
+    kb = inputs.industry_named(note_paths) if note_paths else []
     if not kb and not moat_context:
         log.info("structure: no KB notes and no chain evidence — skipping overlay")
         return {}, {}
@@ -68,7 +68,7 @@ def assess(rows, structure_notes: dict[str, str],
         ctx_parts.append("## 本层的行业评审结论（同一周度作业刚刚产出，作为背景）\n"
                          + layer_view)
     if kb:
-        ctx_parts += ["## 知识库（策展产业笔记 — 事实来源）", industry.as_context(kb)]
+        ctx_parts += ["## 知识库（策展产业笔记 — 事实来源）", inputs.industry_context(kb)]
     if moat_context:
         # After the KB on purpose: when they disagree the event-level evidence wins,
         # and the later block is the one still in view as the model writes its scores.

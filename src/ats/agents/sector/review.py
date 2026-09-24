@@ -352,11 +352,11 @@ def _load_top_down_context(store) -> dict:
     与配置结论都不得含宏观 regime；宏观视角只能经主理人的汇总进入提案。本函数
     现在只装载 FactSet 行业数据（共享数据产品），并显式记录宏观不可用。
     """
-    from ...data import factset
+    from ...data.products import sector_inputs
 
     macro_note = "没有可用的最新正式宏观报告。"
     try:
-        factset_material = factset.fetch_sector_material()
+        factset_material = sector_inputs.factset_sector_material()
     except Exception as exc:  # noqa: BLE001 - final comparison must degrade explicitly
         factset_material = {
             "text": "", "state": "unavailable", "mode": "unknown",

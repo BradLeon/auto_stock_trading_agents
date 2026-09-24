@@ -63,9 +63,9 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
                       "FactSet、本地区域数据和历史正式评审仍会读取。)")
     # Regional data is a governed local product, so offline only disables its
     # acquisition, not this read.  A saved monthly snapshot remains valid input.
-    from ...data import regional
+    from ...data.products import macro_inputs
     try:
-        mc.regional_block = regional.fetch(consumer="macro_agent").render()
+        mc.regional_block = macro_inputs.regional_monthly("macro_agent").render()
     except Exception as exc:  # regional evidence is additive, never blocks regime review
         log.warning("macro regional snapshot unavailable: %s", exc)
         mc.regional_block = "(区域月度数据不可用)"
@@ -74,10 +74,8 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
     # Tavily runtime fetch.  `--offline` therefore still includes it.  The
     # weekly ingest pipeline is the only acquisition route; Macro never reads
     # a PDF, a user folder, or the source URL at review time.
-    from ...data import factset
-
     (mc.earnings_block, mc.earnings_source, mc.earnings_backdrop,
-     mc.earnings_packet) = factset.fetch_macro_material()
+     mc.earnings_packet) = macro_inputs.factset_macro_material()
 
     field_vals = _field_map(data)
     search_cfg = cfg.search
@@ -111,11 +109,11 @@ def _field_map(data) -> dict:
 
 
 def _search_block(theme, search_cfg: dict) -> str:
-    from ...data import websearch
+    from ...data.products import macro_inputs
 
     hits = []
     for q in theme.queries:
-        hits += websearch.search_news(
+        hits += macro_inputs.search_news(
             q, max_results=int(search_cfg.get("max_results_per_query", 4)),
             days=int(search_cfg.get("recency_days", 21)),
             max_chars=int(search_cfg.get("max_chars_per_result", 1800)))

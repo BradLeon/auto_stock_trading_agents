@@ -396,7 +396,7 @@ def test_identity_guard_rejects_another_companys_transcript():
     not resolve it never runs at all. An observation carrying another company's numbers
     is worse than none — once in the table it is indistinguishable from a real one.
     """
-    from ats.agents.evidence.observer import _mentions_company as mentions
+    from ats.data.collection.evidence import _mentions_company as mentions
 
     assert mentions("SK hynix Inc. Q2 2026 earnings call", "SKHY", "SK Hynix")
     assert not mentions("The Sherwin-Williams Company Q2 2026 paint results",
@@ -409,7 +409,7 @@ def test_identity_guard_rejects_another_companys_transcript():
 
 def test_identity_guard_ignores_generic_corporate_suffixes():
     """"Inc"/"Technologies" must not make every filing look like a match."""
-    from ats.agents.evidence.observer import _mentions_company as mentions
+    from ats.data.collection.evidence import _mentions_company as mentions
 
     assert not mentions("Some Other Technologies Inc. reported results",
                         "MU", "Micron Technology")
@@ -421,7 +421,7 @@ def test_identity_guard_ignores_generic_corporate_suffixes():
 def test_identity_guard_accepts_short_real_names():
     """Real names are this short. Requiring >3 chars rejected a genuine KLA
     transcript (config company_name is "KLA", and the call never writes "KLAC")."""
-    from ats.agents.evidence.observer import _mentions_company as mentions
+    from ats.data.collection.evidence import _mentions_company as mentions
 
     assert mentions("KLA Corporation reported Q4 2026 results", "KLAC", "KLA")
     assert mentions("ASML Holding N.V. Q2 2026 earnings call", "ASML", "ASML")
@@ -643,7 +643,7 @@ def test_identity_guard_rejects_a_different_companys_filing():
     """Both halves of a real false PASS, found on 2026-08-06 with live documents:
     an Apple earnings call was accepted as AMD's (8 Apple facts entered the ledger as
     AMD's) and a 2020 Newmont gold deck was accepted as Samsung's (13 more)."""
-    from ats.agents.evidence.observer import _mentions_company as mentions
+    from ats.data.collection.evidence import _mentions_company as mentions
 
     # "Advanced Micro Devices" contributes the token "micro", which occurs inside
     # unrelated words; and a related-story link slug supplies a bare "amd".
@@ -665,7 +665,7 @@ def test_identity_guard_looks_past_a_wall_of_links():
     """Scraped transcript pages open with a block of related-story links. Slicing the
     head before stripping them left the company's own name outside the window and
     rejected four legitimate filings."""
-    from ats.agents.evidence.observer import _mentions_company as mentions
+    from ats.data.collection.evidence import _mentions_company as mentions
 
     page = ("".join(f"[video {i}](https://www.investing.com/news/transcripts/x-{i})\n"
                     for i in range(400))

@@ -30,7 +30,7 @@ def _now() -> datetime:
 def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> ContextUpdate:
     """Ingest new events, triage, then delegate the brief pass to information."""
     from ...config import load_pead_config, load_pead_global
-    from ...data import news as news_src
+    from ...data.products import news_inputs
     from ...memory import get_store
     from ..information import documents
 
@@ -39,11 +39,11 @@ def run(symbol: str, *, use_llm: bool = True, lookback_days: int = 7) -> Context
     store = get_store()
     since = _now() - timedelta(days=lookback_days)
 
-    # Ingestion seam (stays here until the provider-direct cleanup): fetch and
-    # dedupe into the shared event store.
-    collected: list = list(news_src.fetch_news(symbol, since, consumer="pead_monitor"))
+    # Ingestion seam: fetch (via the data-product entry) and dedupe into the
+    # shared event store.
+    collected: list = list(news_inputs.monitor_news(symbol, since, consumer="pead_monitor"))
     for sc in cfg.signal_chain:
-        collected += news_src.fetch_news(sc.symbol, since, consumer="pead_monitor")
+        collected += news_inputs.monitor_news(sc.symbol, since, consumer="pead_monitor")
     fresh = store.append_events(symbol, collected)
     log.info("monitor %s: %d fetched, %d new", symbol, len(collected), len(fresh))
 

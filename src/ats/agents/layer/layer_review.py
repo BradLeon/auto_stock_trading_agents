@@ -51,7 +51,7 @@ def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict 
                   snapshot_block: str = "", assessments=None) -> str:
     """Assemble ONE layer's context. Never includes another layer's material, and never
     includes macro."""
-    from ...data import industry
+    from ...data.products import sector_inputs as industry
 
     from ..sector import assemble
 

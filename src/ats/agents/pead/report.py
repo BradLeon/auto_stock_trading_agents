@@ -351,7 +351,7 @@ def write_report(dossier) -> Path | None:
     if not folder.is_dir():
         log.warning("pead report: output_dir missing — skipped: %s", folder)
         return None
-    from ...data.fiscal import canonical_tag
+    from ...data.products.fiscal_tools import canonical_tag
 
     # Canonical tag surfaces the exact fiscal quarter ('2026Q2') so each company's
     # documents sort/browse by quarter; falls back to the sanitized label.

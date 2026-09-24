@@ -115,21 +115,21 @@ def _rating_delta(rating_trend: list[dict]) -> float | None:
 
 
 def fetch_factors(symbols: list[str], subgroups: dict[str, str] | None = None) -> list[FactorRow]:
-    from ...data import consensus as consensus_src, fundamentals, sector_snapshot
+    from ...data.products import sector_inputs as inputs
 
     subgroups = subgroups or {}
-    prices = sector_snapshot.fetch_prices(symbols, period="1y")
+    prices = inputs.sector_prices(symbols, period="1y")
     rows: list[FactorRow] = []
     for s in symbols:
-        lt = fundamentals.fetch_constituent_financials(s)
+        lt = inputs.constituent_financials(s)
         closes = prices.get(s) or []
-        cons = consensus_src.fetch(s, consumer="sector_consensus")
+        cons = inputs.consensus_for(s, consumer="sector_consensus")
         rows.append(FactorRow(
             symbol=s, subgroup=subgroups.get(s, ""),
             market_cap=lt.get("market_cap"), beta=lt.get("beta"),
             rev_growth=lt.get("rev_growth"), gross_margin=lt.get("gross_margin"),
             op_margin=lt.get("op_margin"), fwd_pe=lt.get("fwd_pe"),
-            mom_60d=sector_snapshot.momentum(closes, 60) if closes else None,
+            mom_60d=inputs.price_momentum(closes, 60) if closes else None,
             rating_delta=_rating_delta(cons.get("rating_trend", []))))
     return rows
 

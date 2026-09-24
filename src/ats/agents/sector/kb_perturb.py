@@ -33,7 +33,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...data import industry
+from ...data.products import sector_inputs as industry  # 数据产品入口（Phase D 8.3）
 
 log = logging.getLogger("ats.agents.sector.kb_perturb")
 

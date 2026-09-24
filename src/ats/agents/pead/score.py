@@ -1,8 +1,9 @@
-"""Post-earnings PEAD agents: actuals extraction, Surprise Scorecard, decision.
+"""Post-earnings PEAD agents: actuals extraction and Surprise Scorecard.
 
 Division of labor (same philosophy as risk_validator): the LLM judges semantics
 (actual vs expected per dimension), but the WEIGHTING, THRESHOLD BANDS, and the
-DECISION TREE are deterministic code — auditable and not left to the model.
+event-view derivation are deterministic code — auditable and not left to the
+model. Phase D: no sizing, no actions, no portfolio reads (task 5.7).
 """
 
 from __future__ import annotations
@@ -15,11 +16,9 @@ from ...schemas.pead import (
     Actuals,
     ExpectationSet,
     PeadConfig,
-    PeadRecommendation,
     Scorecard,
     ScorecardLine,
 )
-from ...schemas.portfolio import PortfolioSnapshot
 from ..base import run_structured
 from .outputs import ActualsView, ScoresView
 
@@ -184,69 +183,53 @@ def _band(total: float, threshold: float) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Decision tree (pure, deterministic) — mirrors the doc's scenario table
+# Event view (deterministic) — direction / magnitude / confidence / rationale /
+# falsifiable conditions. The old `decide()` sizing tree (portfolio positions,
+# net-liquidation notional, trim fractions) was removed in Phase D (task 5.7):
+# the fundamental analyst judges the expectation gap, it does not size trades.
 # --------------------------------------------------------------------------- #
-def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | None,
-           portfolio: PortfolioSnapshot | None, net_liquidation: float,
-           small_long_pct: float = 0.03, trim_fraction: float = 0.30,
-           size_factor: float = 1.0, as_of: datetime | None = None,
-          ) -> tuple[list[PeadRecommendation], str, str]:
-    """Return (recommendations, scenario_band, rationale). Action is fully deterministic.
+def event_view(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | None,
+              *, confidence_floor: float = 0.3,
+             ) -> dict:
+    """Non-executable investment view derived from the surprise scorecard.
 
-    `size_factor` scales the OPENING size only (a transcript-less score passes 0.5).
-    De-risking is never scaled down: if the evidence says trim, thin evidence is not a
-    reason to trim less.
-
-    Returns `PeadRecommendation`, NOT `TradeDecision` — PEAD is an analyst, not the
-    Manager. `qty_hint`/`notional_hint` are computed from the live `portfolio` snapshot
-    passed in, but only Chief may turn a recommendation into an executable decision.
+    Returns {direction, magnitude, confidence, rationale, falsifiable_conditions}.
+    `direction` is the EXPECTATION-GAP direction (-1|0|1), never an action verb.
+    Magnitude is a fundamental-basis read (the scorecard gap itself), not a
+    position size.
     """
     total = scorecard.total
     thr = config.long_threshold
-    held_qty = _held_qty(portfolio, config.symbol)
-    holding = held_qty > 0
-    run_up = run_up_vs_sector
-    thin = size_factor != 1.0
-    thin_note = "（v1 缺纪要，仓位按 %.0f%% 计，纪要到位后重评）" % (size_factor * 100) if thin else ""
 
-    # Cleared the (ticker-specific) long bar.
     if total >= thr:
-        if run_up is not None and run_up > config.run_up_warn_pct:
-            return ([], "做多门槛达成但抢跑透支→观望",
-                    f"总分 {total:+.2f} ≥ 门槛 {thr:+.1f}，但财报前 20 日相对 {config.sector_etf} "
-                    f"抢跑 +{run_up:.1f}%（>{config.run_up_warn_pct:.0f}% 警戒），透支风险高，观望。")
-        notional = round(small_long_pct * net_liquidation * size_factor, 0)
-        d = PeadRecommendation(symbol=config.symbol, action="buy", notional_hint=notional,
-                               conviction=min(1.0, total / max(thr, 0.5)),
-                               rationale=f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，抢跑可控；"
-                                         f"小仓位试探做多。{thin_note}",
-                               portfolio_as_of=as_of)
-        return ([d], "达成门槛→小仓位做多", d.rationale)
-
-    # Below the long bar.
-    if holding and total < thr:
-        # Beat-but-not-enough / weak: de-risk per the doc's "分步减仓".
-        qty = round(held_qty * trim_fraction)
-        if qty >= 1:
-            d = PeadRecommendation(symbol=config.symbol, action="trim", qty_hint=float(qty),
-                                   conviction=0.5,
-                                   rationale=f"Scorecard {total:+.2f} 未达门槛 {thr:+.1f}，已持仓 → "
-                                             f"减仓 {trim_fraction:.0%} 锁定，保留核心仓位。",
-                                   portfolio_as_of=as_of)
-            return ([d], "未达门槛+持仓→分步减仓", d.rationale)
-
+        if run_up_vs_sector is not None and run_up_vs_sector > config.run_up_warn_pct:
+            return {
+                "direction": 0,
+                "magnitude": round(abs(total), 2),
+                "confidence": confidence_floor,
+                "rationale": f"总分 {total:+.2f} ≥ 门槛 {thr:+.1f}，但财报前 20 日相对 "
+                             f"{config.sector_etf} 抢跑 +{run_up_vs_sector:.1f}% "
+                             f"（>{config.run_up_warn_pct:.0f}% 警戒），预期差或已被定价，"
+                             f"方向判中性、待实际读数确认。",
+            }
+        return {
+            "direction": 1,
+            "magnitude": round(total, 2),
+            "confidence": min(1.0, total / max(thr, 0.5)),
+            "rationale": f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，实际值系统性超出"
+                         f"中性预期，预期差为正。",
+        }
     if total <= -0.5:
-        return ([], "负面但不做空(订单簿支撑)",
-                f"总分 {total:+.2f} 偏负，但长期订单/预订支撑下行，不做空。")
-
-    return ([], scorecard.band,
-            f"总分 {total:+.2f} 未达门槛 {thr:+.1f}，无明确 edge，观望。")
-
-
-def _held_qty(portfolio: PortfolioSnapshot | None, symbol: str) -> float:
-    if not portfolio:
-        return 0.0
-    for p in portfolio.positions:
-        if p.symbol == symbol:
-            return p.qty
-    return 0.0
+        return {
+            "direction": -1,
+            "magnitude": round(abs(total), 2),
+            "confidence": min(1.0, abs(total) / max(thr, 0.5)),
+            "rationale": f"总分 {total:+.2f} 明显为负，实际值低于预期，预期差为负"
+                         f"（不做空判断属于决策链，非本评审）。",
+        }
+    return {
+        "direction": 0,
+        "magnitude": round(abs(total), 2),
+        "confidence": confidence_floor,
+        "rationale": f"总分 {total:+.2f} 未达门槛 {thr:+.1f}，预期差中性。",
+    }

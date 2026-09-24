@@ -51,17 +51,17 @@
 
 ## 5. 基本面：例行与事件双模式，剥离内部风控
 
-- [ ] 5.1 定义双模式的触发契约与显式入口（命令行 `ats analyst fundamental --mode routine|event` 与显式运行请求），例行由信息简报或预期数据变化触发，事件由财报 / 公司事件触发。验证：新增测试断言两种入口分别产出对应模式的运行请求且互不混淆。
-- [ ] 5.2 例行模式：读取上一有效基线，把新信息分为确认 / 否定 / 新增 / 待验证，更新市场隐含预期、叙事、关键 KPI 与可证伪条件，产出 `FundamentalExpectationUpdate`。验证：新增测试断言四类归类随投影留痕且输出不含交易动作。
-- [ ] 5.3 事件模式：在 cutoff 冻结基线与其引用，并只使用报告期间正确且通过准入的 actuals、财报稿、指引与电话会。验证：新增测试断言 cutoff 后到达的信息不改写基线，期间不符材料被排除并留痕。
-- [ ] 5.4 事件模式分别计算对冻结基线、Consensus 与市场隐含预期的差异并产出 Surprise Scorecard、指引评估与叙事更新，三者方向不一致时保留分歧。验证：新增测试构造三者方向不一致，断言输出保留三项且未取平均。
-- [ ] 5.5 电话会迟到时生成事件评审新版本，早期版本保留不被覆盖。验证：新增测试断言同一报告期存在两条事件评审投影且早期版本可查回。
-- [ ] 5.6 移除 `graph/pead.py:473-519` 中 `risk_agent.assess` / `review_guardrails` / `pre_trade` 的调用与 `PeadRecommendation → TradeDecision` 的转换。验证：新增测试断言事件模式全流程不触碰风控模块，且 `tests/test_pead_graph.py` 相应场景更新后全绿。
-- [ ] 5.7 移除 `agents/pead/score.py:189-231` 依据 `portfolio` / `net_liquidation` 推导数量的分支，改为只输出方向、幅度、信心、理由与可证伪条件。验证：新增测试断言输出无目标股数 / 金额 / 权重字段。
-- [ ] 5.8 移除 `agents/pead/monitor.py:85-95` 的 sector / macro 提示注入与 `graph/pead.py:125-144` 的 sector / macro 准备块注入（含移除对应注入开关，而非保留为可开启选项）。验证：新增测试断言配置中的 `inject_prep` 开关已不存在，且上下文无行业 / 宏观内容。
-- [ ] 5.9 双模式产出分别写为 `FundamentalExpectationUpdate` 与 `FundamentalEventReview` 投影，同一报告期两类投影各自保留。验证：新增测试断言两类投影可分别按角色查回且互不覆盖。
-- [ ] 5.10 改造 `graph/pead.py:180-206` 的 `_peer_report()`：跨标的信号只取中性事实（上游已报实际值、指引区间、财报日期，取自 `data/fundamentals.py` / `data/consensus.py` 等数据产品或该标的的 `InformationBrief`），丢弃 `decision_summary`、`scorecard.band` 与 `guidance` 自由文本。验证：新增测试断言信号链上下文不含上游评审结论与分档字段，且仍能取到已报实际值。
-- [ ] 5.11 在架构守卫中断言基本面模块不得读取 `agent_role` 为 `fundamental_analyst` 且作用域非本标的的投影。验证：`tests/test_architecture_guards.py` 新增断言此类读取被判为违规。
+- [x] 5.1 定义双模式的触发契约与显式入口（命令行 `ats analyst fundamental --mode routine|event` 与显式运行请求），例行由信息简报或预期数据变化触发，事件由财报 / 公司事件触发。验证：新增测试断言两种入口分别产出对应模式的运行请求且互不混淆。
+- [x] 5.2 例行模式：读取上一有效基线，把新信息分为确认 / 否定 / 新增 / 待验证，更新市场隐含预期、叙事、关键 KPI 与可证伪条件，产出 `FundamentalExpectationUpdate`。验证：新增测试断言四类归类随投影留痕且输出不含交易动作。
+- [x] 5.3 事件模式：在 cutoff 冻结基线与其引用，并只使用报告期间正确且通过准入的 actuals、财报稿、指引与电话会。验证：新增测试断言 cutoff 后到达的信息不改写基线，期间不符材料被排除并留痕。
+- [x] 5.4 事件模式分别计算对冻结基线、Consensus 与市场隐含预期的差异并产出 Surprise Scorecard、指引评估与叙事更新，三者方向不一致时保留分歧。验证：新增测试构造三者方向不一致，断言输出保留三项且未取平均。
+- [x] 5.5 电话会迟到时生成事件评审新版本，早期版本保留不被覆盖。验证：新增测试断言同一报告期存在两条事件评审投影且早期版本可查回。
+- [x] 5.6 移除 `graph/pead.py:473-519` 中 `risk_agent.assess` / `review_guardrails` / `pre_trade` 的调用与 `PeadRecommendation → TradeDecision` 的转换。验证：新增测试断言事件模式全流程不触碰风控模块，且 `tests/test_pead_graph.py` 相应场景更新后全绿。
+- [x] 5.7 移除 `agents/pead/score.py:189-231` 依据 `portfolio` / `net_liquidation` 推导数量的分支，改为只输出方向、幅度、信心、理由与可证伪条件。验证：新增测试断言输出无目标股数 / 金额 / 权重字段。
+- [x] 5.8 移除 `agents/pead/monitor.py:85-95` 的 sector / macro 提示注入与 `graph/pead.py:125-144` 的 sector / macro 准备块注入（含移除对应注入开关，而非保留为可开启选项）。验证：新增测试断言配置中的 `inject_prep` 开关已不存在，且上下文无行业 / 宏观内容。
+- [x] 5.9 双模式产出分别写为 `FundamentalExpectationUpdate` 与 `FundamentalEventReview` 投影，同一报告期两类投影各自保留。验证：新增测试断言两类投影可分别按角色查回且互不覆盖。
+- [x] 5.10 改造 `graph/pead.py:180-206` 的 `_peer_report()`：跨标的信号只取中性事实（上游已报实际值、指引区间、财报日期，取自 `data/fundamentals.py` / `data/consensus.py` 等数据产品或该标的的 `InformationBrief`），丢弃 `decision_summary`、`scorecard.band` 与 `guidance` 自由文本。验证：新增测试断言信号链上下文不含上游评审结论与分档字段，且仍能取到已报实际值。
+- [x] 5.11 在架构守卫中断言基本面模块不得读取 `agent_role` 为 `fundamental_analyst` 且作用域非本标的的投影。验证：`tests/test_architecture_guards.py` 新增断言此类读取被判为违规。
 
 ## 6. 风控输入收口
 

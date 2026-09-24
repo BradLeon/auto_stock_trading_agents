@@ -1,11 +1,14 @@
-"""PEAD earnings-event workflow (LangGraph).
+"""PEAD earnings-event workflow (LangGraph) — 基本面事件模式 (Phase D).
 
     START → load → ┬ prep:  fetch → framework → narrative → expectations → signal_chain → persist_prep → END
-                   └ score: fetch → actuals → scorecard → decision(建议) → persist_score → END
+                   └ score: fetch → actuals → scorecard → review → persist_score → END
 
-v0.2: the score branch produces a risk-aware trade RECOMMENDATION persisted in the
-dossier — the Chief (agents/chief) is the only decision maker and executes via the
-trader's single approval gate. No interrupt/trader nodes here anymore.
+Phase D (agent/fundamental-pead): the score branch produces a NON-EXECUTABLE
+event review — direction / magnitude / confidence / rationale / falsifiable
+conditions, published as a `FundamentalEventReview` projection. No risk engine,
+no guardrails, no pre-trade checks, no quantities, no portfolio reads: the
+action-and-size decision belongs to the chief and the risk officer inside the
+approval chain.
 """
 
 from __future__ import annotations
@@ -15,11 +18,8 @@ from datetime import datetime, timezone
 
 from langgraph.graph import END, START, StateGraph
 
-from ..agents import risk_manager as risk_agent, risk_validator
 from ..agents.pead import prep as prep_agents, score as score_agents
-from ..broker import IBKRBroker, IBKRUnavailable
-from ..config import get_config, load_pead_config
-from ..schemas.decision import TradeDecision
+from ..config import load_pead_config
 from ..schemas.market import Ticker
 from ..schemas.pead import (
     Actuals,
@@ -27,7 +27,6 @@ from ..schemas.pead import (
     FundamentalBackground,
     MarketSetup,
     PeadDossier,
-    PeadRecommendation,
     Scorecard,
     ScorecardLine,
 )
@@ -38,12 +37,6 @@ log = logging.getLogger("ats.graph.pead")
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _net_liq(state: PeadState) -> float:
-    if state.portfolio and state.portfolio.net_liquidation > 0:
-        return state.portfolio.net_liquidation
-    return get_config().app.account.net_liquidation_usd
 
 
 def _published_event_date(package) -> str:
@@ -74,13 +67,8 @@ def load(state: PeadState) -> dict:
     fiscal = state.fiscal_label or cfg.fiscal_label
     out: dict = {"config": cfg, "fiscal_label": fiscal}
 
-    portfolio = None
-    if state.use_broker:
-        try:
-            portfolio = IBKRBroker(sector_by_symbol={state.symbol: "optical"}).get_portfolio()
-        except IBKRUnavailable as exc:
-            log.warning("portfolio read skipped: %s", exc)
-    out["portfolio"] = portfolio
+    # Phase D: no portfolio read here. The event review never sizes positions,
+    # so there is nothing a portfolio snapshot could be used for in this graph.
 
     if state.phase in ("score", "prep"):
         from ..memory import get_store
@@ -120,28 +108,10 @@ def prep_fetch(state: PeadState) -> dict:
     fd = fund_src.fetch(state.symbol)
     out["fundamentals_text"] = fd.to_context()
     out["consensus"] = consensus_src.fetch(state.symbol)
+    # Phase D (5.8): the sector-review / macro-review prep-block injection is GONE,
+    # along with its `inject_prep` switches. Analysts' conclusions never enter the
+    # fundamental context — only the static chain notes (shared facts) below.
     out["industry_context"] = industry.as_context(industry.fetch_notes())
-    # Freshest weekly sector review rides along with the static notes.
-    from ..config import load_pead_global
-
-    g = load_pead_global()
-    sr = g["sector_review"]
-    if sr["inject_prep"]:
-        from ..agents.sector import context as sector_context
-
-        block = sector_context.prep_block(sr["sectors"][0], state.symbol)
-        if block:
-            out["industry_context"] += (
-                "\n\n### 最新行业评审（每周更新，比上面的静态笔记更新鲜；分歧时以此为准）\n"
-                + block)
-    mr = g["macro_review"]
-    if mr["inject_prep"]:
-        from ..agents.macro import context as macro_context
-
-        mblock = macro_context.prep_block(state.symbol, mr["name"])
-        if mblock:
-            out["industry_context"] += (
-                "\n\n### 最新宏观评审（自上而下：利率/风险偏好/板块倾斜的大背景）\n" + mblock)
 
     ru = runup_src.compute(state.symbol, cfg.sector_etf, cfg.benchmark)
     # Pass the earnings date so options picks the post-earnings expiration (the one
@@ -178,33 +148,50 @@ def prep_fetch(state: PeadState) -> dict:
 
 
 def _peer_report(symbol: str) -> dict:
-    """Freshest SCORED dossier read-through for a signal-chain peer.
+    """Neutral-fact read-through for a signal-chain peer (Phase D task 5.10).
 
-    Returns {} when the peer has no scored dossier yet (leaves reported=False).
-    Otherwise flags reported=True and attaches the peer's forward guidance /
-    capacity commentary + scorecard band + decision so the target's signal-chain
-    LLM can reason on real upstream fundamentals, not just the 20d price move.
+    跨标的信号只以中性事实进入：已报实际值取自 fundamentals 数据产品，近期事实
+    变化取自该标的的 InformationBrief 投影。评审结论（decision_summary）、
+    Scorecard 分档（band）与自由文本指引一律不读——那是另一个标的的基本面观点，
+    而判断界线按取数入口执行：数据产品与 information_brief 投影 = 中性事实；
+    dossier / fundamental_* 投影 = 观点。
+
+    Returns {} fields when the peer has nothing reportable yet (leaves reported=False).
     """
-    from ..memory import get_store
+    out: dict = {"reported": False}
 
-    store = get_store()
-    for meta in store.recent_dossiers(symbol, limit=6):
-        if meta.get("phase") != "score":
-            continue
-        dossier = store.get_dossier(symbol, meta["fiscal_label"])
-        if not dossier:
-            continue
-        guidance = ((dossier.actuals.guidance if dossier.actuals else "") or "").strip()
-        band = ((dossier.scorecard.band if dossier.scorecard else "") or "").strip()
-        decision = (dossier.decision_summary or "").strip()
-        return {
-            "reported": True,
-            "peer_fiscal": meta["fiscal_label"],
-            "peer_band": band,
-            "peer_guidance": guidance[:600],
-            "peer_decision": decision[:400],
-        }
-    return {}
+    # 已报实际值：fundamentals 数据产品（结构化口径，非模型产出）。
+    try:
+        from ..data import fundamentals as fund_src
+
+        fd = fund_src.fetch(symbol, consumer="pead_peer_report")
+    except Exception as exc:  # noqa: BLE001 - 数据产品不可得时按未报处理
+        log.info("peer report fundamentals unavailable for %s: %s", symbol, exc)
+        fd = None
+    if fd is not None and fd.statements and fd.statements.lines:
+        out["reported"] = True
+        out["peer_fiscal"] = fd.statements.period
+        for line in fd.statements.lines:
+            if line.label == "Diluted EPS" and line.value is not None:
+                out["peer_reported_eps"] = line.value
+                out["peer_reported_eps_yoy"] = line.yoy
+            elif line.label == "Revenue" and line.value is not None:
+                out["peer_reported_revenue"] = line.value
+                out["peer_reported_revenue_yoy"] = line.yoy
+
+    # 近期事实变化：该标的自己的 InformationBrief 投影（information_brief 角色，
+    # 允许的跨角色读取）。只取事实列表，不取任何评审结论。
+    try:
+        from ..memory import get_store
+
+        rows = get_store().task_projection_envelopes(
+            agent_role="information_brief", scope_kind="entity", scope_id=symbol, limit=1)
+        if rows:
+            out["peer_brief_facts"] = list(
+                (rows[0].get("payload") or {}).get("fact_changes") or [])[:5]
+    except Exception as exc:  # noqa: BLE001 - 无简报时信号链照常输出价格与日期
+        log.info("peer brief unavailable for %s: %s", symbol, exc)
+    return out
 
 
 def prep_framework(state: PeadState) -> dict:
@@ -396,8 +383,8 @@ def score_fetch(state: PeadState) -> dict:
     out["transcript_text"] = text
     out["transcript_resolved_source"] = src
     if not text:
-        log.info("%s: 无纪要，按 v1（仅财报稿/8-K）打分，权重将重新归一且仓位减半",
-                 state.symbol)
+        log.info("%s: 无纪要，按 v1（仅财报稿/8-K）打分，权重将重新归一，"
+                 "评审置信度下调", state.symbol)
 
     # Legacy/shadow still use the compatibility collector.  Platform/fallback already
     # has the selected immutable release/filing versions above.
@@ -458,82 +445,53 @@ def score_scorecard(state: PeadState) -> dict:
         has_transcript=bool((state.transcript_text or "").strip()))}
 
 
-def _rec_to_decision(r: PeadRecommendation) -> TradeDecision:
-    return TradeDecision(symbol=r.symbol, action=r.action, qty=r.qty_hint,
-                         notional_usd=r.notional_hint, conviction=r.conviction,
-                         rationale=r.rationale)
+def score_review(state: PeadState) -> dict:
+    """Event review, NOT a decision (Phase D tasks 5.6/5.7).
 
-
-def _decision_to_rec(d: TradeDecision, as_of: datetime) -> PeadRecommendation:
-    return PeadRecommendation(symbol=d.symbol, action=d.action, qty_hint=d.qty,
-                              notional_hint=d.notional_usd, conviction=d.conviction,
-                              rationale=d.rationale, portfolio_as_of=as_of)
-
-
-def score_decision(state: PeadState) -> dict:
-    from ..config import load_pead_global
+    The score branch no longer touches the risk engine, guardrail review or the
+    pre-trade gate, and no longer converts recommendations into trade decisions.
+    The fundamental event review is a non-executable view (direction, magnitude,
+    confidence, rationale, falsifiable conditions). Risk conclusions live only
+    in the risk officer's deterministic review inside the approval chain.
+    """
+    from ..agents.fundamental import event as fundamental_event
 
     run_up = state.market_setup.run_up_vs_sector_pct if state.market_setup else None
-    # A transcript-less score opens at reduced size: guidance and management tone are
-    # missing, so the read is genuinely thinner. Re-evaluated when the transcript lands.
-    thin = not (state.transcript_text or "").strip()
-    size_factor = load_pead_global().get("score", {}).get("v1_size_factor", 0.5) if thin else 1.0
-    recs, band, rationale = score_agents.decide(
-        state.config, state.scorecard, run_up, state.portfolio, _net_liq(state),
-        size_factor=size_factor, as_of=state.as_of)
+    view = score_agents.event_view(state.config, state.scorecard, run_up)
+    # 三类差异：对冻结基线（以 prep 产出的 expectation_set 为当期基线）、
+    # Consensus 与市场隐含预期分别计算，分列保留、不取平均。
+    from ..memory import get_store
 
-    # review_guardrails/pre_trade are the same risk machinery the Chief's own
-    # decision graph uses, and they're strongly typed to TradeDecision. PEAD
-    # borrows them here as a sanity-check on its RECOMMENDATION (does it already
-    # blow a risk cap?) — the conversion is transient, scoped to this function;
-    # agents/pead/score.py itself never touches TradeDecision. Phase B (D7):
-    # guardrails are a read-only review — boundaries are reported, the
-    # recommendation is never silently rewritten.
-    decisions = [_rec_to_decision(r) for r in recs]
-    guardrails = risk_agent.assess(as_of=state.as_of, risk_cfg=get_config().app.risk,
-                                   portfolio=state.portfolio,
-                                   sector_by_symbol={state.symbol: "optical"})
-    # Single-name PEAD: scope portfolio-wide forced-trims / do-not-adds to the
-    # target only — don't rebalance unrelated holdings inside a per-ticker decision.
-    guardrails.forced_trim = [s for s in guardrails.forced_trim if s == state.symbol]
-    guardrails.no_add_list = [s for s in guardrails.no_add_list if s == state.symbol]
-    decisions, adjustments = risk_validator.review_guardrails(
-        decisions, guardrails, sector_by_symbol={state.symbol: "optical"},
-        net_liquidation=_net_liq(state), portfolio=state.portfolio)
-
-    # 6-layer risk gate (event-risk cap / de-risk / beta / cluster) on top of the
-    # scoped L1-2 above. Event data from the options-derived Expected Move.
-    # Phase B: pre_trade() is the deprecated adapter — it reviews without
-    # rewriting; rejected recommendations simply drop out of the approved set.
-    if state.portfolio is not None:
-        from ..risk import checks as risk_checks
-
-        em = state.market_setup.expected_move_pct if state.market_setup else None
-        event_data = {state.symbol: {"expected_move_pct": em}} if em else None
-        approved, notes, _ = risk_checks.pre_trade(
-            decisions, state.portfolio, event_data=event_data, apply_base=False)
-        adjustments = list(adjustments) + notes
-    else:
-        approved = decisions
-    clipped_recs = [_decision_to_rec(d, state.as_of) for d in approved]
-    return {"decisions": clipped_recs, "decision_band": band, "risk_adjustments": adjustments}
+    frozen = fundamental_event.load_frozen_baseline(
+        get_store(), symbol=state.symbol, fiscal_label=state.fiscal_label)
+    tri = fundamental_event.compute_tri_diffs(
+        frozen_baseline=frozen, expectation_set=state.expectation_set,
+        actuals=state.actuals, market_setup=state.market_setup)
+    return {"event_view": view, "tri_diffs": tri,
+            "decision_band": state.scorecard.band if state.scorecard else ""}
 
 
 def score_persist(state: PeadState) -> dict:
-    """Persist the dossier with the decision RECOMMENDATION (the Chief makes the trade call)."""
+    """Persist the dossier + publish the FundamentalEventReview projection (5.9)."""
+    from ..agents.fundamental import event as fundamental_event
     from ..agents.pead import report as pead_report
     from ..memory import get_store
 
-    recs = "; ".join(
-        f"{d.action} {d.symbol}" +
-        (f" 约${d.notional_hint:,.0f}" if d.notional_hint else
-         (f" 约{d.qty_hint:.0f}股（参考）" if d.qty_hint else ""))
-        for d in state.decisions) or "观望"
-    summary = f"{state.decision_band} | PEAD 建议（非可执行，Chief 会用当时真实持仓重新计算）: {recs}"
-    if state.decisions and state.decisions[0].portfolio_as_of:
-        summary += f"（参考持仓快照: {state.decisions[0].portfolio_as_of:%Y-%m-%d %H:%M}）"
-    if state.risk_adjustments:
-        summary += " | guardrail: " + "; ".join(state.risk_adjustments)
+    view = state.event_view or {}
+    direction = int(view.get("direction", 0))
+    summary_parts = [
+        f"{state.decision_band}",
+        "事件评审（非可执行，方向供 Chief 综合裁决）: "
+        f"{fundamental_event.direction_word(direction)}",
+    ]
+    if view.get("magnitude") is not None:
+        summary_parts.append(f"幅度 {view.get('magnitude'):+.2f}")
+    if view.get("confidence") is not None:
+        summary_parts.append(f"信心 {view.get('confidence'):.2f}")
+    tri = state.tri_diffs or {}
+    if tri.get("note"):
+        summary_parts.append(tri["note"])
+    summary = " | ".join(p for p in summary_parts if p)
     dossier = PeadDossier(
         symbol=state.symbol, fiscal_label=state.fiscal_label, phase="score", updated_at=_now(),
         earnings_date=state.earnings_date,
@@ -549,6 +507,19 @@ def score_persist(state: PeadState) -> dict:
         decision_summary=summary)
     store = get_store()
     store.save_dossier(dossier)
+
+    # Publish the non-executable event review as a projection. Late materials
+    # (e.g. a transcript arriving days later) produce a NEW version; earlier
+    # versions stay queryable (5.5).
+    try:
+        payload = fundamental_event.build_event_review_payload(
+            symbol=state.symbol, period=state.fiscal_label, event="earnings",
+            scorecard=state.scorecard, event_view=view, tri_diffs=tri,
+            actuals=state.actuals,
+            narrative=state.expectation_set.narrative if state.expectation_set else "")
+        fundamental_event.publish_event_review(store, payload)
+    except Exception as exc:  # noqa: BLE001 - dossier 已落库，投影失败显式留痕
+        log.warning("event review projection failed for %s: %s", state.symbol, exc)
 
     # Ledger the run. This — not dossier.updated_at, which the daily monitor bumps —
     # is what tells the score windows "already done", so a print whose session is
@@ -566,7 +537,13 @@ def score_persist(state: PeadState) -> dict:
         log.warning("score-run ledger write failed for %s: %s", state.symbol, exc)
 
     pead_report.write_report(dossier)
-    return {}
+    return {"event_summary": {
+        "direction": direction,
+        "magnitude": view.get("magnitude"),
+        "confidence": view.get("confidence"),
+        "band": state.decision_band,
+        "directions_agree": tri.get("directions_agree"),
+    }}
 
 
 # --------------------------------------------------------------------------- #
@@ -581,7 +558,7 @@ def build_pead_graph(checkpointer=None):
         ("prep_expectations", prep_expectations), ("prep_signal_chain", prep_signal_chain),
         ("prep_persist", prep_persist),
         ("score_fetch", score_fetch), ("score_actuals", score_actuals),
-        ("score_scorecard", score_scorecard), ("score_decision", score_decision),
+        ("score_scorecard", score_scorecard), ("score_review", score_review),
         ("score_persist", score_persist),
     ]:
         g.add_node(name, fn)
@@ -598,8 +575,8 @@ def build_pead_graph(checkpointer=None):
 
     g.add_edge("score_fetch", "score_actuals")
     g.add_edge("score_actuals", "score_scorecard")
-    g.add_edge("score_scorecard", "score_decision")
-    g.add_edge("score_decision", "score_persist")
+    g.add_edge("score_scorecard", "score_review")
+    g.add_edge("score_review", "score_persist")
     g.add_edge("score_persist", END)
 
     return g.compile(checkpointer=checkpointer)

@@ -61,6 +61,9 @@ class PeadState(BaseModel):
     decisions: list[PeadRecommendation] = Field(default_factory=list)
     decision_band: str = ""
     risk_adjustments: list[str] = Field(default_factory=list)
+    # Phase D event review (non-executable view published as a projection)
+    event_view: dict = Field(default_factory=dict)
+    tri_diffs: dict = Field(default_factory=dict)
     # legacy (pre-chief score execution path) — kept for checkpoint compatibility
     approval: BossApproval | None = None
     order_results: list[TradeLogEntry] = Field(default_factory=list)

@@ -1,7 +1,9 @@
-"""PEAD scorecard weighting + decision tree (deterministic, no network).
+"""PEAD scorecard weighting + event view (deterministic, no network).
 
 Includes the COHR Q3FY26 replay: feeding the doc's per-dimension scores through
 the weighting must reproduce ~+0.96 and the "below special +1.5 bar → no entry".
+Phase D: the decision tree is GONE — `event_view()` returns the non-executable
+view (direction / magnitude / confidence / rationale) and nothing sizes trades.
 """
 
 from datetime import datetime, timezone
@@ -10,7 +12,6 @@ from ats.agents.pead import score as score_mod
 from ats.agents.pead.outputs import ScoreItemView, ScoresView
 from ats.config import load_pead_config
 from ats.schemas.pead import Actuals, Scorecard, ScorecardLine
-from ats.schemas.portfolio import Position, PortfolioSnapshot
 
 NOW = datetime.now(timezone.utc)
 
@@ -33,53 +34,56 @@ def test_cohr_replay_scorecard_total_and_band(monkeypatch):
     assert "未达门槛" in sc.band      # below the COHR special +1.5 bar
 
 
-def test_cohr_replay_decision_is_no_entry():
+def test_cohr_replay_event_view_is_neutral():
     cfg = load_pead_config("COHR")
     sc = Scorecard(symbol="COHR", as_of=NOW, total=0.96, threshold=1.5,
                    lines=[], band="温和正面但未达门槛")
-    decisions, band, _ = score_mod.decide(cfg, sc, run_up_vs_sector=-12.0,
-                                           portfolio=None, net_liquidation=100000)
-    assert decisions == []             # no entry — matches the doc's 决策
+    view = score_mod.event_view(cfg, sc, run_up_vs_sector=-12.0)
+    assert view["direction"] == 0      # no entry — matches the doc's 决策，以方向表达
 
 
-def test_decision_long_when_clears_bar_and_runup_ok():
+def test_event_view_positive_when_clears_bar_and_runup_ok():
     cfg = load_pead_config("COHR")
     sc = Scorecard(symbol="COHR", as_of=NOW, total=1.8, threshold=1.5, lines=[])
-    decisions, band, _ = score_mod.decide(cfg, sc, run_up_vs_sector=2.0,
-                                           portfolio=None, net_liquidation=100000)
-    assert len(decisions) == 1 and decisions[0].action == "buy"
+    view = score_mod.event_view(cfg, sc, run_up_vs_sector=2.0)
+    assert view["direction"] == 1
+    assert view["magnitude"] == 1.8    # 基本面口径：预期差幅度=scorecard 缺口
+    assert 0.0 < view["confidence"] <= 1.0
 
 
-def test_decision_observe_when_runup_overheated():
+def test_event_view_neutral_when_runup_overheated():
     cfg = load_pead_config("COHR")
     sc = Scorecard(symbol="COHR", as_of=NOW, total=1.8, threshold=1.5, lines=[])
-    decisions, band, _ = score_mod.decide(cfg, sc, run_up_vs_sector=9.0,
-                                           portfolio=None, net_liquidation=100000)
-    assert decisions == [] and "抢跑" in band
+    view = score_mod.event_view(cfg, sc, run_up_vs_sector=9.0)
+    assert view["direction"] == 0
+    assert "抢跑" in view["rationale"]
 
 
-def test_decision_trims_when_holding_and_below_bar():
+def test_event_view_negative_below_bar_and_no_quantity_ever():
     cfg = load_pead_config("COHR")
-    sc = Scorecard(symbol="COHR", as_of=NOW, total=0.9, threshold=1.5, lines=[])
-    pf = PortfolioSnapshot(as_of=NOW, net_liquidation=100000, positions=[
-        Position(symbol="COHR", qty=100, avg_cost=300, market_price=326, market_value=32600)])
-    decisions, band, _ = score_mod.decide(cfg, sc, run_up_vs_sector=-12.0,
-                                           portfolio=pf, net_liquidation=100000)
-    assert len(decisions) == 1 and decisions[0].action == "trim"
-    assert decisions[0].qty_hint == 30      # 30% of 100
+    sc = Scorecard(symbol="COHR", as_of=NOW, total=-1.2, threshold=1.5, lines=[])
+    view = score_mod.event_view(cfg, sc, run_up_vs_sector=-12.0)
+    assert view["direction"] == -1
+    assert view["magnitude"] == 1.2
+    # 数值/动作字段在任何情形下都不出现（5.7）。
+    assert {"action", "qty", "qty_hint", "notional", "notional_hint",
+            "weight", "target_weight"}.isdisjoint(view)
 
 
 def test_score_module_never_imports_or_constructs_trade_decision():
     # Structural guarantee, not just a naming convention: PEAD is an analyst, not the
     # Manager — only Chief may produce an executable TradeDecision (docs/DESIGN.md
-    # §4/§7). decide() returns PeadRecommendation instead. A docstring may still
-    # *mention* TradeDecision (to explain the distinction), so check the two patterns
-    # that would actually reintroduce it: an import line and a constructor call.
+    # §4/§7). Phase D: no recommendations either — event_view() returns a direction.
+    # A docstring may still *mention* TradeDecision (to explain the distinction), so
+    # check the two patterns that would actually reintroduce it: an import line and
+    # a constructor call.
     import inspect
 
     src = inspect.getsource(score_mod)
     assert "import TradeDecision" not in src
     assert "TradeDecision(" not in src
+    assert "PeadRecommendation" not in src
+    assert "PortfolioSnapshot" not in src
 
 
 def test_band_thresholds():

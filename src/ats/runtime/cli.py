@@ -139,24 +139,27 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
         print(f"Signal chain: {len(result.get('signal_chain', []))} names")
     else:
         sc = result.get("scorecard")
-        recs = result.get("decisions", [])
+        view = result.get("event_view") or {}
         if sc:
             print(
                 f"PEAD SCORE COMPLETE — {symbol}  Scorecard {sc.total:+.2f} "
                 f"(门槛 {sc.threshold:+.1f}) — {sc.band}"
             )
-        print(f"决策情景: {result.get('decision_band', '—')} · 建议 {len(recs)} 条")
-        for d in recs:
-            # PEAD persists a recommendation, not an executable TradeDecision.
-            # Keep the CLI presentation on its public ``*_hint`` contract so a
-            # completed graph cannot be reported as a command failure.
-            notional = getattr(d, "notional_hint", None)
-            quantity = getattr(d, "qty_hint", None)
-            size = f"${notional:,.0f}" if notional else (f"{quantity:.0f}股" if quantity else "")
-            # Display text is derived from the canonical value — never the reverse.
-            from ..schemas.decision import display_action
+        # Phase D: the score branch publishes a non-executable event review —
+        # direction / magnitude / confidence — never recommendations.
+        from ..agents.fundamental.event import direction_word
 
-            print(f"  • 建议 {display_action(d.action)} {d.symbol} {size}")
+        direction = int(view.get("direction", 0))
+        line = f"事件评审（非可执行）: {direction_word(direction)}"
+        if view.get("magnitude") is not None:
+            line += f" · 幅度 {view.get('magnitude'):+.2f}"
+        if view.get("confidence") is not None:
+            line += f" · 信心 {view.get('confidence'):.2f}"
+        tri = result.get("tri_diffs") or {}
+        if tri.get("note"):
+            line += f" · {tri['note']}"
+        print(f"情景: {result.get('decision_band', '—')}")
+        print(line)
     print("=" * 70)
 
 
@@ -1493,6 +1496,33 @@ def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) 
     return 0
 
 
+def _run_analyst_fundamental(args) -> int:
+    """基本面双模式独立入口（Phase D 5.1）：ats analyst fundamental --mode routine|event."""
+    from ..agents.fundamental.entry import build_run_request, run_fundamental_pass
+
+    if not args.symbol:
+        raise SystemExit("analyst fundamental 需要 --symbol")
+    default_trigger = ("information_brief_update" if args.mode == "routine"
+                       else "earnings_release")
+    request = build_run_request(
+        args.mode, args.symbol,
+        trigger=args.trigger or default_trigger,
+        use_llm=not args.no_llm,
+        fiscal_label=args.fiscal_label,
+        cutoff=args.cutoff)
+    summary = run_fundamental_pass(request)
+    if summary.get("mode") == "routine":
+        print("📈 fundamental (routine) — 例行预期更新")
+        print(f"   标的 {summary.get('symbol')} · 归类 {summary.get('summary', {})}"
+              f" · 投影 {len(summary.get('published', []))} 条")
+    else:
+        print(f"📈 fundamental (event) — 事件评审 {summary.get('symbol')}"
+              f" {summary.get('fiscal_label', '')}")
+        frozen = summary.get("frozen_at") or "(no frozen baseline)"
+        print(f"   冻结基线 {frozen} · 评审 {summary.get('event_review_summary', {})}")
+    return 0
+
+
 def run_pead_score_window(
     window: str,
     *,
@@ -2788,10 +2818,21 @@ def main(argv: list[str] | None = None) -> int:
     ma.add_argument("--offline", action="store_true", help="skip FRED/yfinance/Tavily")
     ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     an = sub.add_parser(
-        "analyst", help="分析师独立入口 (information) — 独立终结，不触发决策链"
+        "analyst", help="分析师独立入口 (information / fundamental) — 独立终结，不触发决策链"
     )
-    an.add_argument("action", choices=["information"],
-                    help="information: 信息分析师一轮简报（4.9 独立入口）")
+    an.add_argument("action", choices=["information", "fundamental"],
+                    help="information: 信息分析师一轮简报（4.9 独立入口）；"
+                         "fundamental: 基本面双模式运行（5.1 独立入口）")
+    an.add_argument("--mode", choices=["routine", "event"], default="routine",
+                    help="fundamental 运行模式：routine 例行（简报/预期数据触发）、"
+                         "event 事件（财报/公司事件触发）")
+    an.add_argument("--symbol", help="fundamental 目标的标的")
+    an.add_argument("--trigger", default="",
+                    help="触发类型（routine: information_brief_update|expectation_data_change；"
+                         "event: earnings_release|company_event）；缺省按模式取默认")
+    an.add_argument("--fiscal-label", dest="fiscal_label", default="",
+                    help="event 模式的目标报告期（如 Q3 FY2026）")
+    an.add_argument("--cutoff", default="", help="event 模式的基线冻结时刻（ISO）")
     an.add_argument("--no-ingest", action="store_true",
                     help="跳过数据层研究文章采集，只处理已准入文档")
     an.add_argument("--no-llm", action="store_true", help="无 LLM：只做识别与投影，不抽取")
@@ -3125,6 +3166,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "information":
             return run_information_pass(use_llm=not args.no_llm,
                                         ingest_research=not args.no_ingest)
+        if args.action == "fundamental":
+            return _run_analyst_fundamental(args)
         return 1
     if args.command == "pead":
         if args.action == "watch":

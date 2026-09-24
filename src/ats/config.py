@@ -424,8 +424,8 @@ def load_pead_global() -> dict:
     sr.setdefault("sectors", ["ai_hardware"])
     sr.setdefault("weekday", 5)          # 5 = Saturday (weekly scheduled run; own cron job,
                                           # decoupled from the mon-fri trading-day cascade)
-    sr.setdefault("inject_prep", True)
-    sr.setdefault("inject_monitor", True)
+    # Phase D (5.8): inject_prep / inject_monitor switches REMOVED, not defaulted —
+    # sector conclusions never enter the PEAD prep/monitor context again.
     # Cross-section + chain evidence -> moat_pricing -> Chief. The kill switch for the
     # whole stage-3 path: off = the system behaves exactly as it did before.
     sr.setdefault("cross_section", True)
@@ -443,8 +443,6 @@ def load_pead_global() -> dict:
     mr.setdefault("enabled", True)
     mr.setdefault("name", "macro")
     mr.setdefault("weekday", 5)          # runs BEFORE sector on Saturdays (cascade)
-    mr.setdefault("inject_prep", True)
-    mr.setdefault("inject_monitor", True)
     mr.setdefault("feed_sector", True)   # prepend macro regime into sector review context
     return cfg
 

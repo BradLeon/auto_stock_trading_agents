@@ -157,15 +157,22 @@ def expectations(config: PeadConfig, narrative_view: NarrativeView,
 
 
 def _peer_line(r: dict) -> str:
-    """One signal-chain peer row for the LLM. When the peer has a scored dossier
-    (reported=True), append its fundamental read-through — guidance/capacity +
-    band + decision — so upstream fundamentals drive the analysis, not just price."""
+    """One signal-chain peer row for the LLM (Phase D 5.10: neutral facts only).
+
+    已报实际值、财报日期与该标的简报事实是可溯源的中性事实；评审结论摘要
+    （peer_decision）、Scorecard 分档（peer_band）与自由文本指引不再进入
+    上下文——那些是上游的基本面观点，不属于信号链。
+    """
     base = (f"  - {r['symbol']} ({r['role']}): 20d move {r.get('price_chg_pct')}%, "
             f"earnings {r.get('earnings_date')}, reported={r.get('reported')}")
-    if r.get("reported") and (r.get("peer_guidance") or r.get("peer_decision")):
-        base += (f"\n      【已发布财报 {r.get('peer_fiscal', '')} · band={r.get('peer_band') or '—'}】"
-                 f"\n      指引/产能: {r.get('peer_guidance') or '—'}"
-                 f"\n      结论: {r.get('peer_decision') or '—'}")
+    if r.get("reported"):
+        base += f"\n      【已发布财报 {r.get('peer_fiscal', '')}】"
+        if r.get("peer_reported_eps") is not None:
+            base += f"\n      已报 EPS: {r.get('peer_reported_eps')} (YoY {r.get('peer_reported_eps_yoy')}%)"
+        if r.get("peer_reported_revenue") is not None:
+            base += f"\n      已报营收: {r.get('peer_reported_revenue')} (YoY {r.get('peer_reported_revenue_yoy')}%)"
+    for fact in (r.get("peer_brief_facts") or []):
+        base += f"\n      简报事实: {fact}"
     return base
 
 
@@ -181,9 +188,9 @@ def signal_chain(config: PeadConfig,
         f"{config.symbol} sits in this AI-hardware signal chain. Upstream foundry/lithography "
         f"capacity + hyperscaler CapEx are LEADING signals; peers are read-throughs.\n{lines}\n\n"
         "For each name give a one-line implication for the target. 对于标注【已发布财报】的上游/同业，"
-        "优先解读其指引/产能读数对本标的的直接含义——例如上游产能松动=本标的供给上限抬升/出货上修，"
-        "上游指引下修=需求或供给预警。Then a one-paragraph summary of whether the chain is net "
-        "supportive or cautionary heading into the print."
+        "只依据其中性事实（已报实际值、简报里的指引区间/产能读数）解读对本标的的直接含义——例如上游产能松动="
+        "本标的供给上限抬升/出货上修，上游指引下修=需求或供给预警。Then a one-paragraph summary of whether "
+        "the chain is net supportive or cautionary heading into the print."
     )
     items_by_symbol = {r["symbol"]: r for r in peer_rows}
     try:

@@ -198,8 +198,14 @@ def test_a_declared_exception_stops_that_violation_only(tmp_path):
 
 
 def test_sector_may_only_read_layer_projections():
-    """Phase D 3.8：行业分析师唯一的跨角色读取许可是 layer_analyst。"""
-    assert guards.ALLOWED_CROSS_ROLE_READS.get("sector_analyst") == ("layer_analyst",)
+    """Phase D 3.8：行业分析师唯一的跨角色读取许可是 layer_analyst。
+
+    许可表同时收录分析师角色名与投影角色名两种拼法（读取调用携带的是投影角色），
+    断言两种拼法都只指向 layer。
+    """
+    allowed = guards.ALLOWED_CROSS_ROLE_READS.get("sector_analyst") or ()
+    assert set(allowed) <= {"layer_analyst", "layer_analysis"}
+    assert "layer_analyst" in allowed
     found = [v for v in guards.scan_agents()
              if v.kind == "cross_role_read"
              and v.module.startswith("src/ats/agents/sector")]

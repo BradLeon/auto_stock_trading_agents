@@ -1,6 +1,7 @@
 """PEAD graph wiring — prep + score phases end-to-end (offline, no-llm, hermetic)."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ats.graph.checkpoint import get_checkpointer
 from ats.graph.pead import build_pead_graph
@@ -52,9 +53,14 @@ def test_prep_continues_accumulated_monitor_narrative():
     assert result["expectation_set"].narrative != cfg.narrative_seed
 
 
-def test_score_decision_does_not_trim_unrelated_holdings():
-    # A single-name PEAD decision must not force-trim other portfolio names that
-    # happen to be over the position cap (e.g. a cash-parked SHV).
+def test_score_review_produces_non_executable_view_without_risk():
+    """Phase D 5.6/5.7: the score branch is a review, not a decision.
+
+    No risk engine, no guardrails, no pre-trade gate, no portfolio sizing — the
+    output is a non-executable event view (direction/magnitude/confidence).
+    """
+    import pytest
+
     from ats.config import load_pead_config
     from ats.graph import pead
     from ats.graph.pead_state import PeadState
@@ -66,10 +72,18 @@ def test_score_decision_does_not_trim_unrelated_holdings():
                  market_value=99000, weight=0.99)])  # 99% in SHV -> over cap
     state = PeadState(symbol="COHR", phase="score", as_of=NOW, use_broker=False,
                       config=load_pead_config("COHR"), portfolio=pf,
-                      scorecard=Scorecard(symbol="COHR", as_of=NOW, total=0.33, threshold=1.5,
-                                          lines=[], band="中性观望"))
-    out = pead.score_decision(state)
-    assert all(d.symbol != "SHV" for d in out["decisions"])   # no leaked SHV trim
+                      scorecard=Scorecard(symbol="COHR", as_of=NOW, total=2.0, threshold=1.5,
+                                          lines=[], band="达到做多门槛 (≥+1.5)"))
+    out = pead.score_review(state)
+    view = out["event_view"]
+    assert view["direction"] in (-1, 0, 1)
+    assert {"action", "qty", "notional"}.isdisjoint(view.keys())
+    # The risk machinery must not be reachable from the graph anymore.
+    source = Path("src/ats/graph/pead.py").read_text(encoding="utf-8")
+    assert "risk_agent.assess" not in source
+    assert "review_guardrails" not in source
+    assert "pre_trade" not in source
+    assert "TradeDecision" not in source
 
 
 def test_prep_after_score_does_not_discard_the_score():
@@ -152,13 +166,16 @@ def test_platform_score_reads_event_bound_documents_without_legacy_fetch(monkeyp
     assert out["earnings_date"] == "2026-08-26"
 
 
-def test_cli_score_report_uses_recommendation_hint_fields(capsys):
+def test_cli_score_report_renders_event_review(capsys):
     from ats.runtime.cli import _pead_report
-    from ats.schemas.pead import PeadRecommendation
 
     _pead_report("NVDA", "score", {
-        "decisions": [PeadRecommendation(symbol="NVDA", action="BUY", notional_hint=12_000)],
-        "decision_band": "test",
+        "event_view": {"direction": 1, "magnitude": 2.0, "confidence": 0.9},
+        "decision_band": "达到做多门槛 (≥+1.5)",
+        "tri_diffs": {"note": "三类方向不一致，分歧保留、未取平均"},
     })
 
-    assert "建议 BUY NVDA $12,000" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "非可执行" in out
+    assert "预期差为正" in out
+    assert "分歧保留" in out

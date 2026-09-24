@@ -35,6 +35,7 @@ ROLE_BY_PATH_PREFIX: tuple[tuple[str, str], ...] = (
     ("src/ats/agents/sector", "sector_analyst"),
     ("src/ats/agents/information", "information_analyst"),
     ("src/ats/agents/evidence", "evidence_observer"),
+    ("src/ats/agents/fundamental", "fundamental_analyst"),
     ("src/ats/agents/pead", "fundamental_analyst"),
     ("src/ats/agents/macro", "macro_analyst"),
     ("src/ats/agents/technical", "technical_analyst"),
@@ -43,10 +44,13 @@ ROLE_BY_PATH_PREFIX: tuple[tuple[str, str], ...] = (
 )
 
 # The two dependencies the design explicitly permits. Everything else is a violation.
-# Key = the reader, value = the roles it may read.
+# Key = the reader, value = the roles it may read. Both spellings are listed because
+# the read call carries the PROJECTION role (e.g. `information_brief`), while the
+# dependency is usually named after the analyst role — the guard compares literals,
+# so missing a spelling would silently reintroduce a forbidden channel.
 ALLOWED_CROSS_ROLE_READS: dict[str, tuple[str, ...]] = {
-    "sector_analyst": ("layer_analyst",),      # 行业分析师读层次分析师
-    "fundamental_analyst": ("information_analyst",),  # 基本面分析师读信息分析师
+    "sector_analyst": ("layer_analyst", "layer_analysis"),      # 行业分析师读层次分析师
+    "fundamental_analyst": ("information_analyst", "information_brief"),  # 基本面读信息简报
 }
 
 # Projection roles each agent role OWNS — reading your own projections is not a
@@ -66,6 +70,28 @@ PROJECTION_READ_CALLS = frozenset({
     "task_projection_envelopes", "reusable_task_projection", "reuse_decision",
     "task_projections",
 })
+
+# Phase D 5.11: a fundamental module may read fundamental-family projections ONLY
+# scoped to the ticker under review. An unscoped read (no scope_id kwarg at all)
+# can silently surface OTHER tickers' event reviews — exactly the cross-ticker
+# opinion channel the spec closes. Statically checkable, so it is.
+FUNDAMENTAL_ROLE = "fundamental_analyst"
+
+
+class CrossScopeReadError(RuntimeError):
+    """A fundamental module read a fundamental-family projection scoped to a
+    different ticker than the one under review."""
+
+
+def assert_fundamental_scope(read_role: str, scope_id: str, *, own_symbol: str) -> None:
+    """Runtime backstop for 5.11: cross-ticker fundamental reads are refused."""
+    if read_role not in OWNED_PROJECTION_ROLES.get(FUNDAMENTAL_ROLE, ()):
+        return
+    if str(scope_id).upper() != str(own_symbol).upper():
+        raise CrossScopeReadError(
+            f"fundamental module read {read_role} projection scoped to {scope_id!r} "
+            f"while reviewing {own_symbol!r}: cross-ticker fundamental conclusions "
+            f"are not a sanctioned input")
 
 # --- providers -------------------------------------------------------------- #
 PROVIDER_PREFIXES: tuple[str, ...] = ("ats.data.adapters",)
@@ -322,6 +348,13 @@ def scan_module(path: Path, *, root: Path | None = None,
                         found.append(Violation(
                             "cross_role_read", relative, read_role, node.lineno,
                             f"{role} reads {read_role}'s projection"))
+                elif (read_role and read_role in owned and role == FUNDAMENTAL_ROLE
+                        and "scope_id" not in {kw.arg for kw in node.keywords}):
+                    found.append(Violation(
+                        "unscoped_projection_read", relative, read_role, node.lineno,
+                        "fundamental module reads fundamental-family projections without "
+                        "a scope_id; an unscoped read can surface other tickers' "
+                        "conclusions (5.11)"))
             if name in SHARED_FACT_WRITE_CALLS and role is not None:
                 owner = _write_owner(node)
                 if owner in WRITE_OWNER_HINTS:

@@ -128,6 +128,25 @@ error——**该环境的计数不得用作验收判据**；环境性判定必�
 「JUnit `<error>` = setup 未完成」的确认（`src/ats/workflow/test_baseline.py`
 已内建此判定）。
 
+### 5.4 归档前清理：33 例遗留失败全部清零（2026-09-24）
+
+按用户决策，归档前将 §5.1 的 33 例既有失败逐簇清完。分三批提交：
+
+| 批 | 内容 | 提交 |
+|---|---|---|
+| 1 | `stored_articles` 漏用 `compatible_type_values` 的真 bug（研究文章对消费方整体不可见）+ news/PEAD/量化面 5 个测试文件改写到当前契约 + `test_research` 补回缺失导入 | 见 git log（consumers 簇） |
+| 2 | envelope 校验双类遮蔽（富校验类被裸类覆盖）| 见 git log |
+| 3 | `DataProducts.lineage` 回退被惰性平台仓库遮蔽（真 bug，纯查询路径意外打开平台 DB）+ chain/cutover scheduler 接线断言与 structured rollout/CLI 清单对齐 | `80027a7` |
+
+**最终全量**（同命令）：**1 failed / 1954 passed / 0 errors**。唯一失败
+`test_chief_loop::test_over_cap_order_is_revised_to_boundary_then_executed`
+为顺序依赖偶发（单文件 10/10 通过），非代码失败。
+
+对照权威基线（2026-09-22：135 failed / 1398 passed）：**真实失败 135 → 0**，
+通过数 +556。修复分两类：8 个真生产 bug（research 文档类型等价、envelope
+校验类遮蔽、lineage 回退遮蔽、kb_perturb 属性名等），其余为测试断言未随
+有意的行为变更（投影契约、平台切换、sizing 树删除）改写。
+
 ## 6. 未尽事项与移交
 
 - 双读期保留：Chief 旧表直读、`sector_reviews` / `pead_dossier` 旧读模型、

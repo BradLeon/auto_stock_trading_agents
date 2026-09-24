@@ -11,6 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 log = logging.getLogger("ats.agents.chief.assemble")
 
@@ -428,13 +429,22 @@ def _envelope_from_row(row: dict, scope) -> Any:
         supersedes_projection_id=row.get("supersedes_projection_id") or "")
 
 
-def _latest_row(store, *, role: str, scope) -> dict | None:
+def _latest_row(store, *, role: str, scope, projection_id: str = "",
+                content_hash: str = "") -> dict | None:
+    if projection_id:
+        row = store.get_task_projection(projection_id)
+        if (row is None or row.get("agent_role") != role
+                or row.get("scope_kind") != scope.kind or row.get("scope_id") != scope.id
+                or (content_hash and row.get("content_hash") != content_hash)):
+            return None
+        return row
     rows = store.task_projection_envelopes(
         agent_role=role, scope_kind=scope.kind, scope_id=scope.id, limit=1)
     return rows[0] if rows else None
 
 
-def scan_projection_scopes(store, *, at=None) -> list[dict]:
+def scan_projection_scopes(store, *, at=None,
+                           projection_manifest: list[dict] | None = None) -> list[dict]:
     """Per (task, scope) projection state — the fine-grained gap detail.
 
     `status` speaks the snapshot vocabulary: `fresh` (usable), `missing`,
@@ -443,14 +453,26 @@ def scan_projection_scopes(store, *, at=None) -> list[dict]:
     """
     from ...agent.task_projection import reuse_decision
 
+    manifest = None
+    if projection_manifest is not None:
+        manifest = {(item["role"], item["scope_kind"], item["scope_id"]): item
+                    for item in projection_manifest}
     detail: list[dict] = []
     for task_id, plan in projection_query_plan().items():
         for scope in plan["scopes"]:
-            row = _latest_row(store, role=plan["role"], scope=scope)
+            selected = (manifest.get((plan["role"], scope.kind, scope.id))
+                        if manifest is not None else None)
+            projection_id = str(selected.get("projection_id", "")) if selected else ""
+            row = (_latest_row(store, role=plan["role"], scope=scope,
+                               projection_id=projection_id,
+                               content_hash=str(selected.get("content_hash", "")
+                                                if selected else ""))
+                   if manifest is None or selected else None)
             if row is None:
                 detail.append({"task_id": task_id, "role": plan["role"],
                                "scope": scope.key, "status": "missing",
-                               "projection_id": "", "as_of": "", "reason": "missing"})
+                               "projection_id": "", "content_hash": "",
+                               "as_of": "", "reason": "missing"})
                 continue
             envelope = _envelope_from_row(row, scope)
             reusable, reason = reuse_decision(envelope, scope=scope, at=at)
@@ -464,7 +486,8 @@ def scan_projection_scopes(store, *, at=None) -> list[dict]:
     return detail
 
 
-def build_chief_snapshot(store, *, at=None) -> tuple[Any, list[dict]]:
+def build_chief_snapshot(store, *, at=None,
+                         projection_manifest: list[dict] | None = None) -> tuple[Any, list[dict]]:
     """The chief's research snapshot (7.1) plus its per-scope detail.
 
     Multi-scope categories are satisfied only when every scope is fresh; the
@@ -482,7 +505,8 @@ def build_chief_snapshot(store, *, at=None) -> tuple[Any, list[dict]]:
         return ProjectionScope(kind=kind, id=ident)
 
     plan = projection_query_plan()
-    detail = scan_projection_scopes(store, at=at)
+    detail = scan_projection_scopes(store, at=at,
+                                    projection_manifest=projection_manifest)
     envelopes: dict[str, Any] = {}
     required_scopes: dict[str, ProjectionScope] = {}
 
@@ -494,7 +518,9 @@ def build_chief_snapshot(store, *, at=None) -> tuple[Any, list[dict]]:
             return None, None
         best = max(fresh, key=lambda d: d["as_of"])
         scope = scope_from_key(best["scope"])
-        row = _latest_row(store, role=plan[task_id]["role"], scope=scope)
+        row = _latest_row(store, role=plan[task_id]["role"], scope=scope,
+                          projection_id=best["projection_id"],
+                          content_hash=best["content_hash"])
         return (best, scope) if row is not None else (None, None)
 
     # Fundamental: per target, EITHER mode may cover the target; a category is
@@ -517,7 +543,9 @@ def build_chief_snapshot(store, *, at=None) -> tuple[Any, list[dict]]:
         if winners and len(winners) == entity_count:
             best_key, best_entry = max(winners, key=lambda pair: pair[1][1]["as_of"])
             scope = scope_from_key(best_key)
-            row = _latest_row(store, role=plan[task_id]["role"], scope=scope)
+            row = _latest_row(store, role=plan[task_id]["role"], scope=scope,
+                              projection_id=best_entry[1]["projection_id"],
+                              content_hash=best_entry[1]["content_hash"])
             if row is not None:
                 envelopes[task_id] = _envelope_from_row(row, scope)
                 required_scopes[task_id] = scope
@@ -526,7 +554,9 @@ def build_chief_snapshot(store, *, at=None) -> tuple[Any, list[dict]]:
                     "macro_review", "technical_review"):
         best, scope = category_covered(task_id)
         if best is not None and scope is not None:
-            row = _latest_row(store, role=plan[task_id]["role"], scope=scope)
+            row = _latest_row(store, role=plan[task_id]["role"], scope=scope,
+                              projection_id=best["projection_id"],
+                              content_hash=best["content_hash"])
             envelopes[task_id] = _envelope_from_row(row, scope)
             required_scopes[task_id] = scope
 

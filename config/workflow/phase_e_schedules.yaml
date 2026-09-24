@@ -1,0 +1,30 @@
+version: "1"
+
+# Opt-in schedule definitions consumed only when the corresponding owner is
+# shadow/dispatcher. Data ingestion and Clerk jobs stay with their existing owners.
+workflows:
+  information-brief:
+    enabled: false
+    task_ids: [information-brief]
+    scope: {kind: portfolio, id: pead-targets}
+    cron: {day_of_week: "mon-fri", hour: 8, minute: 0, timezone: America/New_York}
+  fundamental-routine:
+    enabled: false
+    task_ids: [fundamental-routine]
+    scope: {kind: portfolio, id: pead-targets}
+    cron: {day_of_week: "mon-fri", hour: 9, minute: 0, timezone: America/New_York}
+  technical-review:
+    enabled: false
+    task_ids: [technical-review]
+    scope: {kind: portfolio, id: portfolio}
+    cron: {day_of_week: "mon-fri", hour: 10, minute: 0, timezone: America/New_York}
+  macro-review:
+    enabled: false
+    task_ids: [macro-review]
+    scope: {kind: portfolio, id: portfolio}
+    cron: {day_of_week: sat, hour: 9, minute: 0, timezone: Asia/Taipei}
+  sector-review:
+    enabled: false
+    task_ids: [sector-review]
+    scope: {kind: sector, id: ai_hardware}
+    cron: {day_of_week: sat, hour: 9, minute: 30, timezone: Asia/Taipei}

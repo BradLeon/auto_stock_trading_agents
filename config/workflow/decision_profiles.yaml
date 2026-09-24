@@ -1,0 +1,30 @@
+# Versioned decision completeness profiles. Scope resolver names are implemented by
+# the workflow runtime; this file fixes the required categories independently of the
+# set of tasks registered by a process.
+schema_version: 1
+
+profiles:
+  ai_hardware:
+    version: "1"
+    scope: {kind: sector, id: ai_hardware}
+    required_categories:
+      - layer_analysis
+      - information_brief
+      - sector_allocation
+      - fundamental_analysis
+      - macro_review
+      - technical_review
+    fundamental_modes: [routine, event]
+    scope_resolvers:
+      layer_analysis: sector_nonempty_layers
+      information_brief: pead_target_entities
+      sector_allocation: configured_sector
+      fundamental_analysis: pead_target_entities
+      macro_review: configured_macro_portfolio
+      technical_review: frozen_technical_universe
+    source_configs:
+      layer_analysis: config/sectors/ai_hardware.yaml
+      information_brief: config/pead.yaml
+      fundamental_analysis: config/pead.yaml
+      sector_allocation: config/sectors/ai_hardware.yaml
+  technical_review: config/technical.yaml

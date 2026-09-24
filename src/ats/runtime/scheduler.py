@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ..config import get_config
@@ -843,8 +844,14 @@ def _validate_factset_schedule(cfg) -> None:
 
 
 def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None,
-          use_llm: bool = True) -> None:
+          use_llm: bool = True, phase_e: bool = False) -> None:
     from ..config import load_pead_global
+
+    if phase_e:
+        if window:
+            raise ValueError("--phase-e cannot use the legacy PEAD --window route")
+        _start_phase_e(run_once=run_once)
+        return
 
     cfg = get_config().app.schedule
     if window:
@@ -965,3 +972,150 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         log.info("scheduler stopped")
+
+
+def _start_phase_e(*, run_once: bool = False) -> None:
+    """Opt-in Phase E wake-ups; all workflow ownership is checked per ID."""
+    from ..workflow.ownership import phase_e_schedule_entries, run_owned_workflow
+    from ..workflow.run_contracts import TriggerContext
+    from ..workflow.triggers import load_trigger_policies, reconcile_schedule, trigger_key
+
+    entries = phase_e_schedule_entries()
+    policies = load_trigger_policies()
+
+    def dispatch_tick(workflow_id: str, entry: dict, planned: datetime) -> None:
+        context = TriggerContext(kind="schedule", workflow_id=workflow_id,
+                                 schedule_id=workflow_id,
+                                 scheduled_for=planned.isoformat())
+        try:
+            result = run_owned_workflow(
+                workflow_id, scope=entry["scope"], trigger=context,
+                request={"requested_tasks": list(entry["task_ids"]),
+                         "task_inputs": {"schedule_id": workflow_id}}, now=_now_et())
+            log.info("Phase E workflow %s -> %s", workflow_id, result.get("status"))
+        except Exception:  # noqa: BLE001
+            log.exception("Phase E workflow %s failed", workflow_id)
+
+    if run_once:
+        now = datetime.now(timezone.utc)
+        for workflow_id, entry in entries.items():
+            dispatch_tick(workflow_id, entry, now)
+        if not entries:
+            print("Phase E 当前没有启用的 shadow/dispatcher workflow。")
+        return
+
+    from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
+    from apscheduler.executors.pool import ThreadPoolExecutor
+    from apscheduler.schedulers.blocking import BlockingScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    scheduler = BlockingScheduler(timezone="UTC", executors={"default": ThreadPoolExecutor(1)})
+    job_to_workflow = {}
+
+    def on_wake(event) -> None:
+        workflow_id = job_to_workflow.get(event.job_id)
+        if not workflow_id or workflow_id not in entries:
+            return
+        planned = event.scheduled_run_time
+        if planned is None:
+            return
+        if event.code == EVENT_JOB_MISSED:
+            log.warning("Phase E wake %s misfired at %s; Trigger Ledger will catch up or skip",
+                        workflow_id, planned)
+        dispatch_tick(workflow_id, entries[workflow_id], planned)
+
+    scheduler.add_listener(on_wake, EVENT_JOB_EXECUTED | EVENT_JOB_MISSED)
+    # The in-memory cron engine forgets ticks across process restarts. Enumerate only
+    # the configured bounded lookback, compare with the durable ledger, and dispatch
+    # eligible gaps using their original planned instants.
+    from datetime import timedelta
+    from ..workflow.ownership import workflow_store_for_owner
+
+    startup_now = datetime.now(timezone.utc)
+    for workflow_id, entry in entries.items():
+        cron = entry["cron"]
+        job_id = f"phase_e:{workflow_id}"
+        job_to_workflow[job_id] = workflow_id
+        trigger = CronTrigger(
+            day_of_week=cron.get("day_of_week", "*"), hour=int(cron["hour"]),
+            minute=int(cron["minute"]), timezone=cron["timezone"])
+        policy = policies.get(workflow_id, policies["default"])
+        start_at = startup_now - timedelta(seconds=max(
+            policy.max_lookback_seconds, policy.misfire_grace_seconds, 1))
+        ticks = []
+        planned = trigger.get_next_fire_time(None, start_at)
+        while planned is not None and planned <= startup_now:
+            context = TriggerContext(kind="schedule", workflow_id=workflow_id,
+                                     schedule_id=workflow_id, scheduled_for=planned.isoformat())
+            frozen_request = {
+                "requested_tasks": list(entry["task_ids"]),
+                "scope": entry["scope"].model_dump(mode="json"),
+                "task_inputs": {"schedule_id": workflow_id},
+                "profile_id": "", "enter_decision_cycle": False,
+            }
+            ticks.append((context, frozen_request))
+            planned = trigger.get_next_fire_time(planned, planned)
+        decisions = reconcile_schedule(workflow_store_for_owner(workflow_id),
+                                       expected=ticks, now=startup_now, policy=policy)
+        for decision in decisions:
+            if decision["status"] == "planned":
+                key = decision["trigger_key"]
+                item = next((ctx for ctx, _ in ticks if trigger_key(ctx) == key), None)
+                if item is not None:
+                    dispatch_tick(workflow_id, entry, datetime.fromisoformat(item.scheduled_for))
+        scheduler.add_job(lambda: None, trigger, id=job_id, coalesce=False,
+                          max_instances=1, misfire_grace_time=None)
+
+    from ..config import REPO_ROOT
+    import os
+    import yaml
+
+    cfg_root = Path(os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
+    calendar_cfg = yaml.safe_load((cfg_root / "data" / "schedule_calendar.yaml").read_text(
+        encoding="utf-8")) or {}
+    refresh_schedule = (calendar_cfg.get("refresh", {}) or {}).get("schedule", {}) or {}
+    if refresh_schedule.get("enabled", False):
+        def refresh_calendar() -> None:
+            from ..data.calendar_refresh import refresh_schedule_calendar
+            from ..workflow.ownership import (dispatch_planned_calendar_events,
+                                               dispatch_released_calendar_events,
+                                               reconcile_calendar_trigger_versions,
+                                               record_due_calendar_material_waits)
+
+            result = refresh_schedule_calendar()
+            log.info("schedule calendar refresh -> %s", result)
+            try:
+                stale = reconcile_calendar_trigger_versions()
+                log.info("calendar event-version reconciliation -> %s", stale)
+            except Exception:
+                log.exception("calendar event-version reconciliation failed")
+            try:
+                planned = dispatch_planned_calendar_events()
+                log.info("planned calendar preparation -> %s", planned)
+            except Exception:
+                log.exception("planned calendar preparation dispatch failed")
+            try:
+                waiting = record_due_calendar_material_waits()
+                log.info("calendar releases awaiting admitted materials -> %s", waiting)
+            except Exception:
+                log.exception("calendar missing-material wait recording failed")
+            try:
+                dispatched = dispatch_released_calendar_events()
+                log.info("released calendar events -> %s", dispatched)
+            except Exception:
+                log.exception("released calendar event dispatch failed")
+
+        cron = CronTrigger(day_of_week="*", hour=refresh_schedule.get("hour", 6),
+                           minute=int(refresh_schedule.get("minute", 10)),
+                           timezone=refresh_schedule.get("timezone", "UTC"))
+        scheduler.add_job(refresh_calendar, cron, id="calendar_refresh", coalesce=True,
+                          max_instances=1, misfire_grace_time=None)
+
+    log.info("Phase E scheduler started: workflows=%s; calendar_refresh=%s",
+             ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)))
+    print(f"⏰ Phase E dispatcher workflows: {', '.join(entries) or 'none'}; "
+          f"calendar refresh: {'enabled' if refresh_schedule.get('enabled', False) else 'disabled'}")
+    try:
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        log.info("Phase E scheduler stopped")

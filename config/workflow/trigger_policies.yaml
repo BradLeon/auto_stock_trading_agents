@@ -1,0 +1,23 @@
+version: "1"
+
+# Wake-up policy only. It does not authorize Chief, Boss, or Trader work.
+default:
+  misfire_action: catch_up
+  misfire_grace_seconds: 21600
+  max_lookback_seconds: 172800
+  compensation_budget: 2
+  require_trading_session: false
+  lease_seconds: 300
+
+workflows:
+  layer-review: {misfire_grace_seconds: 172800, max_lookback_seconds: 604800}
+  information-brief: {misfire_grace_seconds: 43200, max_lookback_seconds: 172800}
+  sector-review: {misfire_grace_seconds: 172800, max_lookback_seconds: 604800}
+  fundamental-routine: {misfire_grace_seconds: 43200, max_lookback_seconds: 172800}
+  fundamental-event: {misfire_grace_seconds: 43200, max_lookback_seconds: 345600}
+  macro-review: {misfire_grace_seconds: 172800, max_lookback_seconds: 604800}
+  technical-review:
+    misfire_grace_seconds: 1800
+    max_lookback_seconds: 86400
+    compensation_budget: 1
+    require_trading_session: true

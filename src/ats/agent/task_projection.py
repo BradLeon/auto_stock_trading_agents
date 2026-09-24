@@ -25,10 +25,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+_PROJECTION_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "ats_projection_context", default=None)
+
+
+@contextmanager
+def projection_context(*, workflow_run_id: str, agent_run_id: str,
+                       input_refs: Any = None, data_vintage_refs: Any = None):
+    """Attach dispatcher provenance to every projection built in this task scope."""
+    token = _PROJECTION_CONTEXT.set({
+        "workflow_run_id": workflow_run_id, "agent_run_id": agent_run_id,
+        "input_refs": normalize_refs(input_refs),
+        "data_vintage_refs": normalize_refs(data_vintage_refs),
+    })
+    try:
+        yield
+    finally:
+        _PROJECTION_CONTEXT.reset(token)
 
 # --------------------------------------------------------------------------- #
 # Roles and their payload schemas
@@ -302,6 +322,10 @@ class EnvelopeValidationError(ValueError):
 
     The message names the offending fields rather than echoing the whole payload: the
     caller needs to know what to fix, not to re-read what it just sent.
+
+    NOTE: this class is re-defined later in this module (role-level publication
+    contract) with a polymorphic constructor that also accepts a plain message;
+    the later definition wins and keeps both call shapes working.
     """
 
     def __init__(self, role: str, errors: Sequence[str]) -> None:
@@ -529,6 +553,12 @@ def build_envelope(*, role: AgentRole, payload: Any, scope: ProjectionScope,
                    prompt_version: str = "", created_at: str | None = None,
                    supersedes_projection_id: str = "") -> TaskProjectionEnvelope:
     """Validate a payload and wrap it — the only sanctioned way to publish output."""
+    context = _PROJECTION_CONTEXT.get() or {}
+    workflow_run_id = workflow_run_id or context.get("workflow_run_id", "")
+    agent_run_id = agent_run_id or context.get("agent_run_id", "")
+    input_refs = [*normalize_refs(context.get("input_refs")), *normalize_refs(input_refs)]
+    data_vintage_refs = [*normalize_refs(context.get("data_vintage_refs")),
+                         *normalize_refs(data_vintage_refs)]
     validated = validate_payload(role, payload)
     body = json.loads(validated.payload_json())
     stamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -584,13 +614,32 @@ def reuse_decision(envelope: TaskProjectionEnvelope, *, scope: ProjectionScope,
 
 
 class EnvelopeValidationError(ValueError):
-    """A payload fails the ROLE-LEVEL publication contract (not the schema).
+    """A payload fails a validation contract — schema-level OR role-level.
 
-    Distinct from pydantic's ValidationError: the schema stays additive so old
-    payloads keep parsing, while a role's own publish path may demand more
-    (e.g. the information analyst requires all six evidence elements). Raising
-    here means the run FAILED — callers must not fall back to a degraded write.
+    Two construction shapes share this one class so callers (and tests) can catch
+    either failure mode generically:
+
+    * schema rejection — ``EnvelopeValidationError(role, [field errors...])``:
+      pydantic rejected the payload; ``.role``/``.errors`` name what to fix.
+    * role-level publication contract (NOT the schema) —
+      ``EnvelopeValidationError(message)``: the schema stays additive so old
+      payloads keep parsing, while a role's own publish path may demand more
+      (e.g. the information analyst requires all six evidence elements).
+      Raising here means the run FAILED — callers must not fall back to a
+      degraded write. ``.role`` is None in this shape.
     """
+
+    def __init__(self, role_or_message: str,
+                 errors: Sequence[str] | None = None) -> None:
+        if errors is None:
+            super().__init__(role_or_message)
+            self.role = None
+            self.errors: list[str] = []
+            return
+        self.role = role_or_message
+        self.errors = list(errors)
+        detail = "; ".join(self.errors) if self.errors else "unspecified schema violation"
+        super().__init__(f"{role_or_message} payload rejected by its schema: {detail}")
 
 
 def is_reusable(envelope: TaskProjectionEnvelope, **kwargs: Any) -> bool:

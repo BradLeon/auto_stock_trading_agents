@@ -1,0 +1,69 @@
+# Allow-listed routing from normalized calendar metadata to registered task IDs.
+# Calendar data never contains a callable, shell command, or arbitrary workflow name.
+schema_version: 1
+
+manual:
+  allowed_task_ids:
+    - layer-review
+    - information-brief
+    - sector-review
+    - fundamental-routine
+    - fundamental-event
+    - macro-review
+    - technical-review
+
+scheduled:
+  pead-daily:
+    workflow_ids: [information-brief, fundamental-routine]
+    decision_profile: ""
+    enter_decision_cycle: false
+  technical-daily:
+    workflow_ids: [technical-review]
+    decision_profile: ""
+    enter_decision_cycle: false
+  macro-weekly:
+    workflow_ids: [macro-review]
+    decision_profile: ""
+    enter_decision_cycle: false
+  sector-weekly:
+    workflow_ids: [layer-review, sector-review]
+    decision_profile: ""
+    enter_decision_cycle: false
+
+events:
+  - event_type: earnings
+    event_subtype: plan
+    required_event_state: planned
+    workflow_ids: [information-brief, fundamental-routine]
+    scope_resolver: event_entity
+    allowed_windows: [pre_earnings]
+    lead_days_before: 14
+    window_timezone: America/New_York
+    enter_decision_cycle: false
+  - event_type: earnings
+    event_subtype: release
+    required_event_state: released
+    required_admitted_material: true
+    workflow_ids: [information-brief, fundamental-event]
+    scope_resolver: event_entity
+    allowed_windows: [post_release]
+    minimum_material_kinds_any: [filing, company_release]
+    enter_decision_cycle: false
+  - event_type: fomc
+    event_subtype: release
+    required_event_state: released
+    required_admitted_material: true
+    workflow_ids: [macro-review]
+    scope_resolver: portfolio
+    allowed_windows: [post_release]
+    required_material_kinds: [fomc_statement]
+    enter_decision_cycle: false
+  - event_type: [cpi, pce, nfp, gdp]
+    event_subtype: release
+    required_event_state: released
+    required_admitted_material: true
+    workflow_ids: [macro-review]
+    scope_resolver: portfolio
+    allowed_windows: [post_release]
+    required_material_kinds: [official_release]
+    enter_decision_cycle: false

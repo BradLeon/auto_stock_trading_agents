@@ -1,0 +1,87 @@
+version: 1
+freshness_slo_hours: 48
+refresh:
+  default_cadence: 12h
+  max_concurrent_requests: 1
+  preserve_last_good_on_failure: true
+  budget_per_run:
+    http_requests: 60
+    earnings_symbols: 20
+    response_bytes: 10000000
+  schedule:
+    enabled: true
+    hour: "6,18"
+    minute: 10
+    timezone: UTC
+
+# Calendar-only sources: adapters may persist release dates/times and source lineage,
+# never actual financial values. Terms/keys are deployment obligations, not implied
+# permissions granted by this repository.
+sources:
+  finnhub_earnings_calendar:
+    label: Finnhub earnings calendar
+    adapter: finnhub_earnings
+    url: https://finnhub.io/api/v1/calendar/earnings
+    cadence: 12h
+    budget: {requests_per_run: 20, symbols_per_run: 20}
+    license: provider_account_terms_required
+    credentials: FINNHUB_API_KEY
+    quality:
+      identity: entity_plus_fiscal_year_and_quarter
+      session: use_provider_value_or_unknown
+      conflict: quarantine_disagreement_until_adjudicated
+    retention: persistent_calendar_metadata_only
+  yahoo_earnings_calendar:
+    label: Yahoo Finance earnings dates
+    adapter: yfinance_earnings
+    url: https://finance.yahoo.com/
+    cadence: 12h
+    budget: {symbols_per_run: 20}
+    license: provider_terms_review_required
+    quality:
+      identity: match_finnhub_fiscal_period_or_quarantine
+      session: infer_only_from_timestamp_else_unknown
+      conflict: never_silently_choose_between_dates
+    retention: persistent_calendar_metadata_only
+  federal_reserve_fomc:
+    label: Federal Reserve FOMC meeting calendar
+    adapter: federal_reserve_fomc_html
+    url: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+    cadence: 24h
+    budget: {requests_per_run: 1}
+    license: us_government_public_information
+    quality:
+      identity: meeting_year_month_plus_statement
+      date_only: true
+      parser_drift: fail_closed
+    retention: public_schedule_metadata
+  bls_release_calendar:
+    label: U.S. Bureau of Labor Statistics release calendar
+    adapter: bls_ics
+    url: https://www.bls.gov/schedule/news_release/bls.ics
+    cadence: 24h
+    budget: {requests_per_run: 1}
+    license: us_government_public_information
+    quality:
+      identity: series_plus_reference_period_plus_initial_release
+      require_timezone: true
+      parser_drift: fail_closed
+    retention: public_schedule_metadata
+  bea_release_schedule:
+    label: U.S. Bureau of Economic Analysis release schedule
+    adapter: bea_schedule_html
+    url: https://www.bea.gov/news/schedule
+    cadence: 24h
+    budget: {requests_per_run: 1}
+    license: us_government_public_information
+    quality:
+      identity: series_plus_reference_period_plus_estimate_stage
+      require_timezone: true
+      parser_drift: fail_closed
+    retention: public_schedule_metadata
+
+manual_overlay:
+  path: config/events.yaml
+  semantics: explicit_operator_overlay
+  identity_required: true
+  never_treated_as_refresh_success: true

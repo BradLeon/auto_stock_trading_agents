@@ -204,7 +204,7 @@ def _publish_projection(store, review: TechnicalReview) -> int:
 
 
 def run(name: str = "technical", *, live_data: bool = True, persist: bool = True,
-        write_report: bool = True) -> TechnicalReview:
+        write_report: bool = True, symbols: list[str] | None = None) -> TechnicalReview:
     from ...config import load_technical_config
     from ...memory import get_store
 
@@ -212,7 +212,12 @@ def run(name: str = "technical", *, live_data: bool = True, persist: bool = True
     now = datetime.now(timezone.utc)
     store = get_store()
 
-    symbols, notes = resolve_universe(cfg, live_broker=live_data)
+    if symbols is None:
+        symbols, notes = resolve_universe(cfg, live_broker=live_data)
+    else:
+        excluded = {str(s).upper() for s in cfg.universe.get("exclude", [])} | _CASHLIKE
+        symbols = sorted({str(s).upper() for s in symbols} - excluded)
+        notes = ["Dispatcher：按运行计划冻结的标的范围"]
     review = TechnicalReview(
         name=cfg.name, as_of=now, strategy=cfg.strategy,
         fingerprint=st.params_fingerprint(cfg.strategy, st.LADDER,

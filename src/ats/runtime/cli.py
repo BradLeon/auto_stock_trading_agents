@@ -208,24 +208,228 @@ def run_pead_watch(*, use_llm: bool = True) -> None:
 
 def events_list(*, days: int | None = None) -> int:
     from datetime import date, timedelta
+    from zoneinfo import ZoneInfo
 
     from ..config import load_events
 
+    from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    stored = ScheduleCalendarStore().latest_events(limit=10_000)
+    if stored:
+        end = today + timedelta(days=days) if days is not None else None
+        events = [e for e in stored if (days is None or
+                  today <= date.fromisoformat(e["event_date"]) <= end)]
+        for event in events:
+            print(f"  {event['event_date']} [{event['event_type']:13}] {event['label']} "
+                  f"v{event['event_version']} · {event['quality_status']} · "
+                  f"{event['time_precision']} {event['local_time']} {event['timezone']}")
+        if not events:
+            print("(持久化日历中没有匹配事件；可运行 `ats events refresh` 更新日历)")
+        return 0
+
+    # Compatibility fallback until the first persisted calendar refresh.
     events = load_events()
     if days is not None:
-        today = date.today()
         events = [e for e in events if today <= e.date <= today + timedelta(days=days)]
-        if not events:
-            print(f"(未来 {days} 天无日历事件 — 检查 config/events.yaml 是否需要补充下季度日期)")
-            return 0
     if not events:
-        print("(config/events.yaml 为空)")
+        print("(持久化日历为空，config/events.yaml 也没有匹配事件)")
         return 0
     for e in sorted(events, key=lambda e: e.date):
         print(f"  {e.date} [{e.kind:13}] {e.label} -> {', '.join(e.triggers)}")
-    if days is None and all(e.date < date.today() for e in events):
-        print("⚠️ 日历中全部事件已过期 — 请补充下季度 FOMC/BLS 日期")
     return 0
+
+
+def events_calendar_command(args, *, parser) -> int:
+    from ..data.products.calendar import ScheduleCalendarProduct
+    from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+    store = ScheduleCalendarStore()
+    if args.action == "refresh":
+        from ..data.calendar_refresh import refresh_schedule_calendar
+
+        result = refresh_schedule_calendar(source_ids=args.source or None, store=store)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        failed_sources = any(item["status"] == "failed" for item in result["sources"])
+        failed_release_check = result.get("release_reconciliation", {}).get("status") == "failed"
+        return 0 if not failed_sources and not failed_release_check else 1
+    if args.action == "status":
+        print(json.dumps(ScheduleCalendarProduct(store).snapshot(), ensure_ascii=False,
+                         indent=2, default=str))
+        return 0
+    if args.action == "candidates":
+        rows = store.candidates(event_id=args.event_id, review_status=args.status,
+                                limit=args.limit)
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "override":
+        if not args.event_id or not args.actor or not args.reason:
+            parser.error("events override requires --event-id, --actor and --reason")
+        if not args.date:
+            parser.error("events override currently requires --date")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        event = store.override_event(args.event_id,
+                                     patch={"event_date": args.date, "local_time": "",
+                                            "timezone": "", "utc_at": "",
+                                            "time_precision": "date", "market_session": "unknown"},
+                                     actor=args.actor, reason=args.reason, evidence=evidence)
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "cancel":
+        if not args.event_id or not args.actor or not args.reason:
+            parser.error("events cancel requires --event-id, --actor and --reason")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        event = store.override_event(args.event_id, patch={"status": "cancelled"},
+                                     actor=args.actor, reason=args.reason, evidence=evidence)
+        from ..workflow.ownership import reconcile_calendar_trigger_versions
+
+        event["trigger_reconciliation"] = reconcile_calendar_trigger_versions(
+            calendar_store=store)
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "withdraw":
+        if not args.event_id or not args.actor or not args.reason:
+            parser.error("events withdraw requires --event-id, --actor and --reason")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        event = store.withdraw_override(args.event_id, actor=args.actor,
+                                        reason=args.reason, evidence=evidence)
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
+    return events_list(days=args.days if args.action == "upcoming" else None)
+
+
+def workflow_command(args, *, parser) -> int:
+    """Phase E task execution and read-only run/trigger ledger inspection."""
+    from ..workflow.store import WorkflowStore
+
+    store = WorkflowStore()
+    workflow_id = args.workflow_id
+    if args.action == "run" and not workflow_id:
+        requested = tuple(dict.fromkeys(args.task))
+        workflow_id = requested[0] if len(requested) == 1 else "analysis-bundle"
+    if workflow_id and workflow_id != "analysis-bundle":
+        from ..workflow.ownership import load_workflow_owners, workflow_store_for_owner
+
+        if workflow_id not in load_workflow_owners().get("workflows", {}):
+            parser.error(f"workflow ID {workflow_id!r} has no declared owner")
+        store = workflow_store_for_owner(workflow_id)
+    if args.action == "triggers":
+        rows = store.list_triggers(workflow_id=args.workflow_id, event_id=args.event_id,
+                                   schedule_id=args.schedule_id,
+                                   scheduled_from=args.scheduled_from,
+                                   scheduled_to=args.scheduled_to,
+                                   status=args.status, limit=args.limit)
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "runs":
+        print(json.dumps(store.list_runs(status=args.status, limit=args.limit),
+                         ensure_ascii=False, indent=2))
+        return 0
+    if args.action in {"retry", "history"}:
+        if not args.trigger_key:
+            parser.error(f"workflow {args.action} requires --trigger-key")
+        row = next((item for item in store.list_triggers(limit=10_000)
+                    if item["trigger_key"] == args.trigger_key), None)
+        if row is None:
+            parser.error(f"trigger {args.trigger_key!r} was not found")
+        if args.action == "history":
+            run = store.get_run(row.get("run_id", "")) if row.get("run_id") else None
+            print(json.dumps({"trigger": row,
+                              "trigger_history": store.trigger_history(args.trigger_key),
+                              "workflow_run": run,
+                              "workflow_run_history": store.run_history(row["run_id"])
+                              if row.get("run_id") else []},
+                             ensure_ascii=False, indent=2, default=str))
+            return 0
+        if not args.actor or not args.reason:
+            parser.error("workflow retry requires --actor and --reason")
+        if not store.compensate_trigger(args.trigger_key, actor=args.actor, reason=args.reason):
+            parser.error("only a failed/incomplete trigger can be explicitly compensated")
+        from ..agent.task_projection import ProjectionScope
+        from ..workflow.dispatcher import Dispatcher
+        from ..workflow.phase_e import build_plan
+        from ..workflow.run_contracts import TriggerContext
+        from ..workflow.triggers import TriggerService
+
+        stored_request = row.get("request", {})
+        frozen_context = TriggerContext.model_validate(stored_request.get("trigger", {}))
+        frozen_context.requested_at = row["created_at"]
+        body = stored_request.get("request", {})
+        run_id = row.get("run_id", "")
+        scope = ProjectionScope.model_validate(body["scope"])
+
+        def plan_factory(context, request, fixed_run_id):
+            return build_plan(
+                requested_tasks=request["requested_tasks"], scope=scope,
+                trigger=context, as_of=request.get("as_of", row["created_at"]),
+                run_id=fixed_run_id, profile_id=request.get("profile_id", ""),
+                enter_decision_cycle=bool(request.get("enter_decision_cycle", False)),
+                task_inputs=request.get("task_inputs", {}),
+                namespace=(store.get_run(run_id) or {}).get("plan", {}).get("tasks", [{}])[0]
+                .get("instance_key", "dispatcher").split(":", 1)[0])
+
+        result = TriggerService(store).dispatch(
+            frozen_context, request=body, plan_factory=plan_factory,
+            dispatcher=Dispatcher(workflow_store=store))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.get("status") in {"complete", "incomplete"} else 1
+    if not args.task:
+        parser.error("workflow run requires at least one --task")
+    try:
+        task_inputs = json.loads(args.inputs_json or "{}")
+    except json.JSONDecodeError as exc:
+        parser.error(f"--inputs-json is invalid JSON: {exc}")
+    if not isinstance(task_inputs, dict):
+        parser.error("--inputs-json must be a JSON object")
+
+    from ..agent.task_projection import ProjectionScope
+    from ..workflow.dispatcher import Dispatcher
+    from ..workflow.phase_e import build_plan
+    from ..workflow.run_contracts import TriggerContext
+    from ..workflow.triggers import TriggerService, load_trigger_policies
+
+    task_ids = tuple(dict.fromkeys(args.task))
+    workflow_id = workflow_id or (task_ids[0] if len(task_ids) == 1 else "analysis-bundle")
+    trigger = TriggerContext(
+        kind=args.trigger_kind, workflow_id=workflow_id, trigger_id=args.trigger_id,
+        schedule_id=args.schedule_id, scheduled_for=args.scheduled_for,
+        event_id=args.event_id, event_version=args.event_version)
+    trigger.validate_for_use()
+    request = {
+        "requested_tasks": list(task_ids),
+        "scope": {"kind": args.scope_kind, "id": args.scope_id},
+        "profile_id": args.decision_profile,
+        "enter_decision_cycle": args.decision_cycle,
+        "task_inputs": task_inputs,
+    }
+    if args.as_of:
+        request["as_of"] = args.as_of
+
+    def plan_factory(ctx, frozen_request, run_id):
+        scope = ProjectionScope.model_validate(frozen_request["scope"])
+        return build_plan(
+            requested_tasks=frozen_request["requested_tasks"], scope=scope,
+            trigger=ctx, as_of=frozen_request.get("as_of", ctx.requested_at),
+            run_id=run_id, profile_id=frozen_request.get("profile_id", ""),
+            enter_decision_cycle=bool(frozen_request.get("enter_decision_cycle", False)),
+            task_inputs=frozen_request.get("task_inputs", {}))
+
+    policy_map = load_trigger_policies()
+    service = TriggerService(store, policy=policy_map.get(workflow_id,
+                                                           policy_map["default"]))
+    result = service.dispatch(trigger, request=request, plan_factory=plan_factory,
+                              dispatcher=Dispatcher(workflow_store=store))
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0 if result.get("status") in {"complete", "incomplete", "running", "planned"} else 1
 
 
 def run_chief(
@@ -2631,11 +2835,36 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
     sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
     sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    sch.add_argument("--phase-e", action="store_true",
+                     help="use opt-in Phase E workflow owners + Trigger Ledger; no legacy cascade")
     sch.add_argument(
         "--no-llm",
         action="store_true",
         help="run the same schedule without external-model calls (useful for safe acceptance checks)",
     )
+    wf = sub.add_parser("workflow", help="Phase E 工作流运行及 Trigger Ledger 运维")
+    wf.add_argument("action", choices=["run", "runs", "triggers", "retry", "history"])
+    wf.add_argument("--task", action="append", default=[], help="run: Phase E task ID，可重复")
+    wf.add_argument("--scope-kind", default="portfolio")
+    wf.add_argument("--scope-id", default="portfolio")
+    wf.add_argument("--trigger-kind", choices=["manual", "schedule", "event"], default="manual")
+    wf.add_argument("--trigger-id", default="", help="manual: 重放时必须复用此 ID")
+    wf.add_argument("--schedule-id", default="", help="run or triggers: schedule ID")
+    wf.add_argument("--scheduled-for", default="", help="schedule: 原计划时刻，需含时区")
+    wf.add_argument("--event-id", default="", help="event: 稳定事件 ID")
+    wf.add_argument("--event-version", default="", help="event: 日历事件版本")
+    wf.add_argument("--workflow-id", default="", help="trigger policy/ledger workflow ID")
+    wf.add_argument("--trigger-key", default="", help="retry/history: stable Trigger Ledger key")
+    wf.add_argument("--scheduled-from", default="", help="triggers: 计划时刻起点（含时区）")
+    wf.add_argument("--scheduled-to", default="", help="triggers: 计划时刻终点（含时区）")
+    wf.add_argument("--actor", default="", help="retry: operator identity")
+    wf.add_argument("--reason", default="", help="retry: audited compensation reason")
+    wf.add_argument("--decision-profile", default="")
+    wf.add_argument("--decision-cycle", action="store_true")
+    wf.add_argument("--inputs-json", default="{}")
+    wf.add_argument("--as-of", default="", help="显式冻结的 ISO 8601 as-of 时点")
+    wf.add_argument("--status", default="")
+    wf.add_argument("--limit", type=int, default=100)
     sch.add_argument(
         "--window", choices=["amc", "bmo"], help="run one PEAD score window immediately, then exit"
     )
@@ -2714,9 +2943,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     evi.add_argument("--output", default="", help="layer/ai-production: Markdown 审阅文档路径")
     evi.add_argument("--chart-dir", default="", help="layer/ai-production: PNG/sidecar 输出目录")
-    ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
-    ev.add_argument("action", choices=["list", "upcoming"])
+    ev = sub.add_parser("events", help="事件日历 (list / upcoming / refresh / status / candidates)")
+    ev.add_argument("action", choices=["list", "upcoming", "refresh", "status",
+                                       "candidates", "override", "cancel", "withdraw"])
     ev.add_argument("--days", type=int, default=30, help="upcoming window")
+    ev.add_argument("--source", action="append", default=[], help="refresh: source ID，可重复")
+    ev.add_argument("--event-id", default="")
+    ev.add_argument("--date", default="", help="override: 新日期 YYYY-MM-DD")
+    ev.add_argument("--actor", default="")
+    ev.add_argument("--reason", default="")
+    ev.add_argument("--evidence-json", default="{}")
+    ev.add_argument("--status", default="")
+    ev.add_argument("--limit", type=int, default=100)
     ch = sub.add_parser("chief", help="chief 首席统一决策 (run / show / probe)")
     ch.add_argument("action", choices=["run", "show", "probe"])
     ch.add_argument("--live", action="store_true", help="execute for real (default dry-run)")
@@ -2949,8 +3187,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule":
         from .scheduler import start
 
-        start(dry_run=not args.live, run_once=args.now, window=args.window, use_llm=not args.no_llm)
+        schedule_options = {"dry_run": not args.live, "run_once": args.now,
+                            "window": args.window, "use_llm": not args.no_llm}
+        if args.phase_e:
+            schedule_options["phase_e"] = True
+        start(**schedule_options)
         return 0
+    if args.command == "workflow":
+        return workflow_command(args, parser=parser)
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)
     if args.command == "sector":
@@ -3006,7 +3250,7 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output,
         )
     if args.command == "events":
-        return events_list(days=args.days if args.action == "upcoming" else None)
+        return events_calendar_command(args, parser=parser)
     if args.command == "chief":
         if args.action == "show":
             return chief_show()

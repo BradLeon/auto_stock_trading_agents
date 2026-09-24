@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Mapping
 
 from ...schemas.sector import (
     STANCES,
     CompanyCall,
     LayerAssessment,
+    LayerVerdict,
     SectorConfig,
     SectorReview,
     TopDownComparison,
@@ -30,7 +32,8 @@ def _now() -> datetime:
 
 
 def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = True,
-        layers: bool = True, write_reports: bool = True) -> SectorReview:
+        layers: bool = True, write_reports: bool = True,
+        upstream_layer_projections: Mapping[str, object] | None = None) -> SectorReview:
     """Weekly review. `layers=False` falls back to the pre-2026-08-20 single synthesis.
 
     New order (design D8), per layer: quant cross-section -> structure analyst ->
@@ -44,9 +47,32 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
     cfg = load_sector_config(name)
     store = get_store()
 
+    if upstream_layer_projections is not None:
+        expected = {layer.key for layer in cfg.layers}
+        actual = set(upstream_layer_projections)
+        if actual != expected:
+            raise ValueError(
+                "Dispatcher sector review requires the exact configured LayerAnalysis set; "
+                f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")
+        for key, envelope in upstream_layer_projections.items():
+            if (getattr(envelope, "agent_role", None) != "layer_analysis"
+                    or getattr(envelope, "schema_name", None) != "LayerAnalysis"
+                    or getattr(envelope, "schema_version", None) != "v1"
+                    or getattr(getattr(envelope, "scope", None), "key", None)
+                    != f"layer:{key}"):
+                raise ValueError(f"invalid or incompatible LayerAnalysis projection for {key}")
+            from ...agent.task_projection import ProjectionScope, reuse_decision
+
+            reusable, reason = reuse_decision(
+                envelope, scope=ProjectionScope(kind="layer", id=key),
+                schema_name="LayerAnalysis", schema_version="v1")
+            if not reusable:
+                raise ValueError(f"LayerAnalysis projection for {key} is unusable: {reason}")
+
     if layers:
         return _run_layered(name, cfg, store, use_llm=use_llm, live_data=live_data,
-                            write_reports=write_reports)
+                            write_reports=write_reports,
+                            upstream_layer_projections=upstream_layer_projections)
 
     sc = assemble.build(cfg, live_data=live_data, allow_llm_evidence=use_llm)
     log.info("sector %s: context %s", name, sc.stats())
@@ -71,7 +97,8 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
 
 
 def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
-                 write_reports: bool = True) -> SectorReview:
+                 write_reports: bool = True,
+                 upstream_layer_projections: Mapping[str, object] | None = None) -> SectorReview:
     from ..layer import layer_review
     from . import assemble as sector_assemble, cross_section, rotation
 
@@ -124,9 +151,22 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
             except Exception as exc:  # noqa: BLE001
                 log.warning("claim assessment persist skipped for %s: %s", a.claim_id, exc)
 
-        verdict, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v,
-                                       use_llm=use_llm, assessments=assessments,
-                                       store=store)
+        if upstream_layer_projections is not None:
+            envelope = upstream_layer_projections[layer.key]
+            payload = envelope.payload
+            verdict = LayerVerdict(
+                layer_key=layer.key,
+                as_of=datetime.fromisoformat(envelope.as_of.replace("Z", "+00:00")),
+                layer_status=payload["status"], confidence=payload["confidence"],
+                claim_attributions=list(payload["findings"]),
+                rationale=payload["summary"], has_claims=bool(layer.claims),
+                cross_section_applicable=bool(basket is not None
+                                               and basket.cross_section_applicable))
+            ok = True
+        else:
+            verdict, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v,
+                                           use_llm=use_llm, assessments=assessments,
+                                           store=store)
         if not ok:
             failed.append(layer.key)
         else:
@@ -140,7 +180,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     # 行业评审经 task_projection_envelopes 读取各层最新可用投影（这是守卫显式允许的
     # 唯一跨角色读取）；缺投影 / 过期 / schema 不兼容的层按缺失保守处理并显式留痕。
     allocations, projection_refs, projection_missing = (
-        _sector_allocations_from_projections(store, cfg, bind))
+        _sector_allocations_from_projections(
+            store, cfg, bind, projection_overrides=upstream_layer_projections))
 
     # Group ceilings can only be applied once EVERY member's ask is known — two 超配
     # halves of a split layer add up past the pre-split envelope, and neither half can
@@ -225,7 +266,8 @@ def _bind_layer_budget() -> bool:
         return True
 
 
-def _sector_allocations_from_projections(store, cfg, bind: bool):
+def _sector_allocations_from_projections(store, cfg, bind: bool, *,
+                                         projection_overrides: Mapping[str, object] | None = None):
     """行业评审的三级配置依据：各层最新可用的 LayerAnalysis 投影（3.2/3.5/3.10）。
 
     Returns `(allocations, projection_refs, missing)`：
@@ -246,7 +288,9 @@ def _sector_allocations_from_projections(store, cfg, bind: bool):
     read = getattr(store, "reusable_task_projection", None)
     for layer in cfg.layers:
         env = None
-        if read is not None:
+        if projection_overrides is not None:
+            env = projection_overrides.get(layer.key)
+        elif read is not None:
             try:
                 # 不带 schema_version 过滤地取最新可用投影：版本不匹配的投影要
                 # 显式判为 schema_incompatible（3.10），而不是被读取端静默筛掉、

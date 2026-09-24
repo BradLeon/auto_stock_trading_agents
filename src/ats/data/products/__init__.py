@@ -27,6 +27,7 @@ from .earnings_insight import (
     to_earnings_backdrop,
 )
 from .workflows import WorkflowDataBoundary, workflow_data_boundary
+from .calendar import ScheduleCalendarProduct, schedule_calendar_snapshot
 
 
 def get_platform_data_products() -> DataProducts:
@@ -66,4 +67,6 @@ __all__ = [
     "to_earnings_backdrop",
     "WorkflowDataBoundary",
     "workflow_data_boundary",
+    "ScheduleCalendarProduct",
+    "schedule_calendar_snapshot",
 ]

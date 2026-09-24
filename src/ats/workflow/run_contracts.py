@@ -193,7 +193,35 @@ class TaskRegistry:
             self.register(spec)
 
     def register(self, spec: WorkflowTaskSpec) -> None:
+        if spec.task_id in self._specs:
+            raise ContractError(f"duplicate workflow task id: {spec.task_id!r}")
         self._specs[spec.task_id] = spec
+
+    def validate(self) -> None:
+        """Validate the declared graph before any request can execute it."""
+        for spec in self._specs.values():
+            missing = set(spec.depends_on) - self._specs.keys()
+            if missing:
+                raise UnregisteredTaskError(
+                    f"task {spec.task_id!r} depends on unregistered tasks: "
+                    f"{', '.join(sorted(missing))}")
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(task_id: str, path: tuple[str, ...] = ()) -> None:
+            if task_id in visiting:
+                cycle = " -> ".join((*path, task_id))
+                raise ContractError(f"workflow task dependency cycle: {cycle}")
+            if task_id in visited:
+                return
+            visiting.add(task_id)
+            for dependency in self.spec(task_id).depends_on:
+                visit(dependency, (*path, task_id))
+            visiting.remove(task_id)
+            visited.add(task_id)
+
+        for task_id in self._specs:
+            visit(task_id)
 
     def spec(self, task_id: str) -> WorkflowTaskSpec:
         try:
@@ -216,17 +244,19 @@ class TaskRegistry:
         declared is a registration bug, and silently scheduling around it would hide the
         fact that the graph is incomplete.
         """
+        self.validate()
         ordered: list[str] = []
         seen: set[str] = set()
-        stack = [task_id]
-        while stack:
-            current = stack.pop()
+
+        def visit(current: str) -> None:
             for parent in self.spec(current).depends_on:
                 if parent in seen:
                     continue
+                visit(parent)
                 seen.add(parent)
                 ordered.append(parent)
-                stack.append(parent)
+
+        visit(task_id)
         return tuple(ordered)
 
     def resolve_order(self, requested: Sequence[str]) -> tuple[str, ...]:

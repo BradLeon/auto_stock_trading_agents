@@ -29,7 +29,7 @@ def run_information_pass(*, use_llm: bool = True, symbols: list[str] | None = No
     g = load_pead_global()
     summary: dict = {"briefs": 0, "targets": [], "articles": 0}
 
-    from . import documents, extract
+    from . import extract
 
     insights = extract.run(use_llm=use_llm)
     summary["articles"] = len({i.article_id for i in insights})
@@ -38,14 +38,38 @@ def run_information_pass(*, use_llm: bool = True, symbols: list[str] | None = No
     targets = [s.upper() for s in (symbols or g.get("targets", []))]
     for sym in targets:
         try:
-            cfg = _pead_cfg(sym)
-            documents.run_document_pass(store, sym, cfg=cfg, fresh=[],
-                                        use_llm=use_llm)
+            run_information_target(sym, store=store, use_llm=use_llm,
+                                   run_extraction=False)
             summary["targets"].append(sym)
         except Exception as exc:  # noqa: BLE001 - one target must not stop the pass
             log.warning("information pass failed for %s: %s", sym, exc)
     summary["briefs"] = _brief_count(store)
     return summary
+
+
+def run_information_target(symbol: str, *, store=None, use_llm: bool = True,
+                           run_extraction: bool = True, run_once=None) -> dict:
+    """Run the information extraction pre-pass once, then publish one target brief.
+
+    Dispatcher fan-out calls this per entity and supplies ``run_once`` so the
+    corpus-wide research extraction is shared across instances instead of being
+    repeated once per ticker. All per-target documents remain admitted-data reads.
+    """
+    from ...memory import get_store
+    from . import documents, extract
+
+    store = get_store() if store is None else store
+    if run_extraction:
+        work = lambda: extract.run(use_llm=use_llm)
+        if run_once is not None:
+            run_once("information-research-extraction", work)
+        else:
+            work()
+    sym = symbol.upper()
+    cfg = _pead_cfg(sym)
+    update = documents.run_document_pass(store, sym, cfg=cfg, fresh=[], use_llm=use_llm)
+    return {"symbol": sym, "materiality": update.materiality,
+            "event_summary": update.event_summary}
 
 
 def _pead_cfg(sym: str) -> dict:

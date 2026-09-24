@@ -532,21 +532,33 @@ _CLERK_LEDGER_TABLES = frozenset({
 
 
 class TradingMemory:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, initialize: bool = True):
         self.path = str(db_path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False: the store singleton is created on one thread but
-        # read/written from uvicorn worker threads in `ats serve` (approval callback
-        # → resume → persist). Without this, serve crashes mid-execution with
-        # "SQLite objects created in a thread can only be used in that same thread"
-        # and records bogus errors. timeout lets concurrent writers wait out a lock.
-        self.conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
+        # Cached CLI/server instances retain their historic cross-thread behavior.
+        # Dispatcher workers use ``initialize=False`` and receive one connection per
+        # task, created and consumed on that task's thread.
+        self.conn = sqlite3.connect(self.path, check_same_thread=not initialize, timeout=30)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA busy_timeout=30000")
+        if self.path != ":memory:":
+            self.conn.execute("PRAGMA journal_mode=WAL")
         # Set before any migration runs: `_migrate` reaches into the data layer (to
         # resolve document versions for the legacy backfill), and the delegation
         # helpers read this cache.
         self._data: object | None = None
+        self._closed = False
+        self._task_scoped = not initialize
+        if initialize:
+            self.initialize()
+
+    def initialize(self) -> None:
+        """Run the legacy schema bootstrap and migrations explicitly.
+
+        This includes a deliberate retirement of data-owned tables, so it must run
+        at process/bootstrap time only, never when a task-local connection opens.
+        """
         self.conn.executescript(_SCHEMA)
         self._migrate()
         self._retire_data_tables()
@@ -2284,6 +2296,18 @@ class TradingMemory:
         """
         import json
 
+        # Timed-out/retried Dispatcher attempts may finish after their caller has
+        # moved on. Do not allow such a late worker to publish into the durable
+        # projection set after its attempt has been cancelled or superseded.
+        if self._task_scoped and envelope.agent_run_id:
+            attempt = self.conn.execute(
+                "SELECT status FROM agent_runs WHERE agent_run_id=? AND run_id=?",
+                (envelope.agent_run_id, envelope.workflow_run_id)).fetchone()
+            if attempt is None or attempt["status"] != "running":
+                raise RuntimeError(
+                    f"projection publish fenced: agent attempt {envelope.agent_run_id!r} "
+                    "is not the active attempt for this run")
+
         scope = envelope.scope
         self.conn.execute(
             "INSERT OR REPLACE INTO task_projection_envelopes "
@@ -2681,4 +2705,9 @@ class TradingMemory:
         return [dict(r) for r in rows]
 
     def close(self) -> None:
+        if self._closed:
+            return
         self.conn.close()
+        if self._data is not None and hasattr(self._data, "close"):
+            self._data.close()
+        self._closed = True

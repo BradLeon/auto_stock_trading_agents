@@ -41,6 +41,12 @@ class DataProducts:
 
         return load_snapshot(self, as_of=as_of)
 
+    def schedule_calendar_snapshot(self, **kwargs):
+        """As-of event calendar with source lineage and freshness diagnostics."""
+        from .calendar import ScheduleCalendarProduct
+
+        return ScheduleCalendarProduct().snapshot(**kwargs)
+
     def earnings_insight_analysis_packet(self, *, as_of: datetime | None = None):
         """Return the bounded, page-cited FactSet material used by analyses."""
         from .earnings_insight import load_analysis_packet

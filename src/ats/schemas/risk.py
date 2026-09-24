@@ -436,6 +436,26 @@ class AllowedBoundary(BaseModel):
     per_symbol_max_notional: dict[str, float] = Field(default_factory=dict)
 
 
+class ReviewBasis(BaseModel):
+    """What the review was computed ON (Phase D task 6.4, additive).
+
+    A risk review is only as valid as the inputs it binds: the portfolio
+    snapshot it projected the post-trade state on, the market as-of it priced
+    event risk at, and the ruleset version whose limits it applied. Any of the
+    three missing = the review is NOT usable to release an order
+    (`risk.checks.usable_for_release`).
+    """
+    portfolio_snapshot_id: str = ""
+    market_as_of: str = ""
+    ruleset_version: str = ""
+
+    def missing_bindings(self) -> list[str]:
+        return [name for name, value in (
+            ("portfolio_snapshot_id", self.portfolio_snapshot_id),
+            ("market_as_of", self.market_as_of),
+            ("ruleset_version", self.ruleset_version)) if not value]
+
+
 class DecisionRiskReview(BaseModel):
     """The read-only review of ONE revision (evaluation unit: the whole revision).
 
@@ -455,3 +475,6 @@ class DecisionRiskReview(BaseModel):
     post_state: str = "NORMAL"
     notes: list[str] = Field(default_factory=list)
     llm_comment: str = ""       # recorded, never decisive (§5.2 第 4 条)
+    # Phase D 6.4: the input binding — proposals + portfolio snapshot + market
+    # as-of + ruleset, and NOTHING else (no macro opinion enters risk review).
+    basis: ReviewBasis | None = None

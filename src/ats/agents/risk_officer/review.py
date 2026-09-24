@@ -17,7 +17,6 @@ log = logging.getLogger("ats.agents.risk_officer.review")
 
 def _context(review: RiskReview) -> str:
     from ...config import get_config
-    from ...memory import get_store
 
     rc = get_config().app.risk
     limits = (
@@ -26,20 +25,12 @@ def _context(review: RiskReview) -> str:
         f"相关簇≤{rc.cluster_weight_cap:.0%} · 回撤≤-{rc.max_drawdown_pct:.0%} · "
         f"日亏≤-{rc.daily_loss_limit_pct:.0%} · 压测≤-{rc.max_stress_loss_pct:.0%} · "
         f"事件≤{rc.max_event_loss_pct:.0%}")
-    macro = ""
-    try:
-        mr = get_store().latest_macro_review()
-        if mr is not None:
-            macro = f"\n宏观 regime（参考）: {mr.regime}"
-            # Deterministic quadrant + alerts belong here too: a widening credit
-            # spread or a "worst combination" read is a risk input, not colour.
-            if mr.quadrant_brief():
-                macro += f"\n宏观象限（代码判定，参考）: {mr.quadrant_line()}"
-    except Exception:  # noqa: BLE001
-        pass
+    # Phase D (6.1): the macro-regime / quadrant injection is GONE. The risk
+    # officer's inputs are the deterministic 6-layer read and the ruleset only —
+    # macro opinions belong to the chief's own synthesis, not to risk review.
     return (
         "以下是本组合的确定性 6 层风控读数（数值为准，勿改）：\n\n"
-        f"{review.as_memo_context()}\n\n{limits}{macro}\n\n"
+        f"{review.as_memo_context()}\n\n{limits}\n\n"
         "请据此产出风控官评估：总评、现金等价物真实可用弹药解读、逐层结论、距限额余量、"
         "可操作建议、最值得盯的风险点。全部用中文。")
 

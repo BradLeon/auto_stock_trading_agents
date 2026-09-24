@@ -248,3 +248,139 @@ def test_metrics_quantify_rejected_revision_risk_change(demo):
     result = risk_checks.review_revision(orders, pf, sector="demo")
     assert result.verdict == "rejected"
     assert result.after_metrics.get("layer:LA", 0) > result.before_metrics.get("layer:LA", 0)
+
+
+# --- Phase D Group 6: 风控输入收口（6.1–6.4） ---------------------------------------- #
+
+def test_review_records_complete_basis(demo):
+    """6.4: 审查记录其依据的组合快照标识、市场 as-of 与规则集版本。"""
+    pf = _pf([_pos("MU", 0.10)])
+    result = risk_checks.review_revision([_buy("MU", 80_000)], pf, sector="demo")
+    assert result.basis is not None
+    assert result.basis.portfolio_snapshot_id == risk_checks.portfolio_snapshot_id(pf)
+    assert result.basis.market_as_of
+    assert result.basis.ruleset_version.startswith("risk-")
+    ok, why = risk_checks.usable_for_release(result)
+    assert ok and why == "ok"
+
+
+def test_review_basis_missing_binding_is_not_usable(demo):
+    """6.4: 三者缺一即判该审查不可用于放行。"""
+    from ats.schemas.risk import ReviewBasis
+
+    pf = _pf([_pos("MU", 0.10)])
+    result = risk_checks.review_revision([_buy("MU", 80_000)], pf, sector="demo")
+
+    broken = result.model_copy(update={"basis": ReviewBasis(
+        portfolio_snapshot_id="pf:x", market_as_of="", ruleset_version="risk-1")})
+    ok, why = risk_checks.usable_for_release(broken)
+    assert not ok and "market_as_of" in why
+
+    no_basis = result.model_copy(update={"basis": None})
+    ok2, why2 = risk_checks.usable_for_release(no_basis)
+    assert not ok2 and why2 == "no_basis_recorded"
+
+    rejected = result.model_copy(update={"verdict": "rejected"})
+    ok3, why3 = risk_checks.usable_for_release(rejected)
+    assert not ok3 and why3 == "verdict_not_approved"
+
+
+def test_review_inputs_are_a_closed_set_without_macro(demo):
+    """6.2: 确定性审查输入只含提案、组合快照、市场快照与规则包，
+    审查结果不引用任何宏观观点。"""
+    import pathlib
+
+    pf = _pf([_pos("MU", 0.10)])
+    result = risk_checks.review_revision([_buy("MU", 80_000)], pf, sector="demo")
+    blob = " ".join(result.notes
+                    + [v.detail or "" for v in result.violations]
+                    + [result.llm_comment])
+    assert "宏观" not in blob and "regime" not in blob.lower()
+    assert set(risk_checks.REVIEW_INPUT_KINDS) == {
+        "orders", "portfolio_snapshot", "market_snapshot", "ruleset"}
+    for py in pathlib.Path("src/ats/risk").rglob("*.py"):
+        text = py.read_text(encoding="utf-8")
+        assert "latest_macro_review" not in text, py
+        assert "agents.macro" not in text, py
+
+
+def test_ruleset_version_is_shared_between_chief_and_review(demo):
+    """6.4: 审查 basis 与 chief 审计行使用同一规则集版本函数，永不互相矛盾。"""
+    from ats.graph.chief import _ruleset_version
+
+    assert _ruleset_version() == risk_checks.ruleset_version()
+
+
+def test_risk_officer_memo_context_has_no_macro(demo):
+    """6.1: 风控 memo 上下文不再有宏观 regime / 象限注入。"""
+    import pathlib
+
+    from ats.agents.risk_officer import review as risk_review
+
+    pf = _pf([_pos("MU", 0.10)])
+    r = risk_assess.assess(pf, sector="demo")
+    ctx = risk_review._context(r)
+    assert "宏观" not in ctx and "象限" not in ctx and "regime" not in ctx.lower()
+    src = pathlib.Path("src/ats/agents/risk_officer/review.py").read_text(encoding="utf-8")
+    assert "latest_macro_review" not in src
+
+
+def test_guard_risk_officer_has_zero_cross_role_reads():
+    """6.3: risk_officer 无任何被允许的跨角色读取，模块内无投影读取调用。"""
+    import ast
+    import pathlib
+
+    from ats.workflow import architecture_guards as guards
+
+    assert guards.ALLOWED_CROSS_ROLE_READS.get("risk_officer") is None
+    assert "risk_officer" not in guards.OWNED_PROJECTION_ROLES
+    hits = [v for v in guards.scan_agents()
+            if v.module.startswith("src/ats/agents/risk")]
+    assert hits == []
+    for py in pathlib.Path("src/ats/agents/risk").rglob("*.py"):
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                assert name not in guards.PROJECTION_READ_CALLS, f"{py}:{node.lineno}"
+
+
+def test_authorization_refuses_review_missing_basis_bindings(tmp_path):
+    """6.4: 授权门对缺依据绑定的审查行 fail closed。
+
+    record_review 本身已拒绝缺绑定的行（Phase B §5.3）；这里再验证授权门对
+    绕过写入路径的残缺行同样拒绝（纵深防御）。
+    """
+    from ats.decision.repository import DecisionAuditRepository
+    from ats.execution.authorization import AuthorizationError, build_authorization
+
+    repo = DecisionAuditRepository(TradingMemory(tmp_path / "auth.sqlite"))
+    repo.create_cycle(cycle_id="c1", trigger_source="test", created_at=NOW.isoformat())
+    repo.append_revision(cycle_id="c1", orders=[{"symbol": "MU", "action": "buy"}],
+                         rationale="", model_version="", created_at=NOW.isoformat())
+    rev = repo.latest_revision("c1")
+    base = dict(cycle_id="c1", revision_no=rev["revision_no"],
+                decision_hash=rev["decision_hash"])
+    repo.record_review(review_id="c1:r1:review:r1", verdict="approved",
+                       ruleset_version="risk-1", portfolio_snapshot_id="pf:1",
+                       market_as_of=NOW.isoformat(), **base)
+    repo.record_approval(approval_id="c1:r1:approval:r3", **base,
+                         decision="approved", reviewer="boss",
+                         idempotency_key="k1", created_at=NOW.isoformat())
+    auth = build_authorization(repo, "c1")            # 完整绑定 → 可授权
+    assert auth.ruleset_version == "risk-1"
+
+    # 绕过 record_review 的残缺行（created_at 更晚 → 成为 effective review）。
+    repo.conn.execute(
+        "INSERT INTO decision_risk_reviews (review_id, cycle_id, revision_no, "
+        "decision_hash, ruleset_version, portfolio_snapshot_id, market_as_of, "
+        "verdict, created_at) VALUES (?,?,?,?,?,?,?,?,'2099-01-01')",
+        ("c1:r1:review:r2", "c1", rev["revision_no"], rev["decision_hash"],
+         "", "pf:1", NOW.isoformat(), "approved"))
+    repo.conn.commit()
+    try:
+        build_authorization(repo, "c1")
+        raise AssertionError("expected AuthorizationError")
+    except AuthorizationError as exc:
+        assert "basis bindings" in str(exc)

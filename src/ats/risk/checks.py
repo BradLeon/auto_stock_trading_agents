@@ -23,10 +23,61 @@ from ..schemas.decision import (
 from ..schemas.instruments import normalize_symbol
 from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.risk import (DecisionRiskReview, OrderRiskVerdict,
-                            AllowedBoundary, RiskDirective, RiskReview,
-                            RiskViolation)
+                            AllowedBoundary, ReviewBasis, RiskDirective,
+                            RiskReview, RiskViolation)
 from . import assess as risk_assess
 from . import marginal
+
+
+# --------------------------------------------------------------------------- #
+# Input binding (Phase D tasks 6.2/6.4)
+# --------------------------------------------------------------------------- #
+# The deterministic review consumes EXACTLY four kinds of input: the proposals,
+# the portfolio snapshot, the market snapshot (event data), and the ruleset
+# package. Macro opinions are not among them — a review citing macro views is
+# not this function's output.
+REVIEW_INPUT_KINDS: tuple[str, ...] = (
+    "orders", "portfolio_snapshot", "market_snapshot", "ruleset")
+
+
+def ruleset_version() -> str:
+    """Content hash of the ruleset the review enforces (risk config + policy).
+
+    Shared by the risk review and the chief's audit rows so a review's basis
+    and the row recorded against it can never name different rulesets.
+    """
+    import hashlib
+
+    from ..config import get_config, load_risk_policy
+
+    rc = get_config().app.risk
+    policy = load_risk_policy()
+    body = rc.model_dump_json() + "\n" + policy.model_dump_json()
+    return "risk-" + hashlib.sha1(body.encode()).hexdigest()[:12]
+
+
+def portfolio_snapshot_id(portfolio: PortfolioSnapshot) -> str:
+    """The snapshot identifier a review binds to (same spelling as the chief's)."""
+    return f"pf:{portfolio.as_of.isoformat()}"
+
+
+def usable_for_release(review: DecisionRiskReview) -> tuple[bool, str]:
+    """Is this review usable to release an order? (6.4)
+
+    All three bindings — portfolio snapshot id, market as-of, ruleset version —
+    must be present, and the verdict must be approved. Any missing binding
+    means the review cannot be traced to the world it judged: refuse, never
+    fill gaps in.
+    """
+    if review.verdict != "approved":
+        return False, "verdict_not_approved"
+    basis = review.basis
+    if basis is None:
+        return False, "no_basis_recorded"
+    missing = basis.missing_bindings()
+    if missing:
+        return False, "basis_incomplete: " + ", ".join(missing)
+    return True, "ok"
 
 
 # --------------------------------------------------------------------------- #
@@ -123,7 +174,9 @@ def review_revision(
         return DecisionRiskReview(
             verdict="rejected", order_verdicts=order_verdicts,
             violations=violations,
-            allowed_boundary=AllowedBoundary(), notes=notes)
+            allowed_boundary=AllowedBoundary(), notes=notes,
+            basis=ReviewBasis(portfolio_snapshot_id="", market_as_of="",
+                              ruleset_version=ruleset_version()))
 
     rc = get_config().app.risk
     policy = load_risk_policy()
@@ -282,7 +335,11 @@ def review_revision(
         before_metrics=before_metrics, after_metrics=after_metrics,
         pre_state=effective_state,
         post_state=_supplied_state(working_review) if order_verdicts else effective_state,
-        notes=notes, llm_comment=llm_comment or "")
+        notes=notes, llm_comment=llm_comment or "",
+        basis=ReviewBasis(
+            portfolio_snapshot_id=portfolio_snapshot_id(portfolio),
+            market_as_of=working_review.as_of.isoformat(),
+            ruleset_version=ruleset_version()))
 
 
 # --------------------------------------------------------------------------- #

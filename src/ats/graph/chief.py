@@ -163,12 +163,11 @@ def _orders_payload(decisions) -> list[dict]:
 
 
 def _ruleset_version() -> str:
-    import hashlib
+    # Phase D 6.4: one shared computation — a review's basis and the audit row
+    # recorded against it must never name different rulesets.
+    from ..risk import checks as risk_checks
 
-    from ..config import get_config
-
-    body = get_config().app.risk.model_dump_json()
-    return "risk-" + hashlib.sha1(body.encode()).hexdigest()[:12]
+    return risk_checks.ruleset_version()
 
 
 def _consume_scores(state: ChiefDecisionState) -> None:

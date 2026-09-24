@@ -77,6 +77,13 @@ def build_authorization(repo: "DecisionAuditRepository",
                                    rev["decision_hash"])
     if review is None or review["verdict"] != "approved":
         missing.append("passed risk review bound to the current revision")
+    elif not all((review["ruleset_version"], review["portfolio_snapshot_id"],
+                  review["market_as_of"])):
+        # Phase D 6.4: a review without its three bindings (portfolio snapshot
+        # id, market as-of, ruleset version) cannot be traced to the world it
+        # judged — it is NOT usable to release an order, fail closed.
+        missing.append("risk review missing basis bindings "
+                       "(ruleset_version / portfolio_snapshot_id / market_as_of)")
     approval = repo.effective_approval(cycle_id, rev["revision_no"],
                                        rev["decision_hash"])
     if approval is None:

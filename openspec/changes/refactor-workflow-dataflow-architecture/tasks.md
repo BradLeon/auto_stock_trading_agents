@@ -115,23 +115,33 @@
 - [ ] 9.9 新增 Calendar/Trigger 测试：重复源、修订、人工覆盖、取消、时区、休市、misfire 和进程重启
 - [ ] 9.10 执行 Phase E 门禁，确认每个已迁移 workflow 只有一个调度所有者且 Dispatcher/Calendar 恢复测试通过
 
-## 10. Phase F — 影子运行、切流与回滚
+## 10. 横向 Dataflow 专项 — 整图验收与缺口补齐（Phase F 读取切流前）
 
-- [ ] 10.1 新增 projection read、analyst output、Dispatcher schedule、approval lifecycle、Clerk publication 和 live Trader 的独立功能开关
-- [ ] 10.2 实现功能开关与配置校验，保证旧/新 live Trader 路径互斥，冲突配置启动时 fail closed
-- [ ] 10.3 新增影子运行模式，在相同 data vintages 下运行新旧分析/风控但从进程能力上禁止新路径 broker write
-- [ ] 10.4 实现影子差异报告，比较输入快照、投影、调度遗漏、风控 verdict/counterproposal、审批链和归因
-- [ ] 10.5 为 read path 切换和回滚建立 runbook，验证新 projection 读取及旧读模型兼容
-- [ ] 10.6 为 schedule path 切换和回滚建立 runbook，验证无尚未完成 trigger 被双重所有
-- [ ] 10.7 为 live trade path 切换和回滚建立 runbook，强制先关闭当前 live route、确认无 in-flight authorization，再开启另一 route
-- [ ] 10.8 执行旧实现消费者清零、数据对账、回滚窗口和墓碑登记检查，只将满足全部条件的项标记已退役
-- [ ] 10.9 演练 read/schedule/trade 三个边界的独立回滚，保留影子、审批和账本记录
+- [ ] 10.1 建立独立 OpenSpec change `complete-target-dataflow` 的 proposal、design、delta specs 和 tasks；以 Target §3–4、§12 为范围，明确不重复 Phase A 证据写侧、Phase C Clerk、Phase D Agent 职责和 Phase E Calendar 的已验收实现
+- [ ] 10.2 逐项建立目标节点/关键连线到代码、配置、数据 owner、消费者、退役入口、证据和 `verified | needs_refactor | missing | blocked` 状态的 Dataflow 差距矩阵；旧 change 归档不得单独作为通过证据
+- [ ] 10.3 核验 Source Catalog、Refresh Controller、结构化/非结构化适配器及采集准入、quarantine、共享事实、Data Products、Runtime Data Gateway 与 Internal State API 的现有契约；记录可复现测试和来源/消费者覆盖范围
+- [ ] 10.4 在专项 change 中为矩阵中的 `needs_refactor` 与 `missing` 项安排最小修复、owner、依赖、兼容迁移和回滚任务；`verified` 项不重建，`blocked` 项保留原因及对下游的影响
+- [ ] 10.5 对每个数据域验证正常、来源失败、陈旧、准入拒绝、修订/as-of、血缘读回、观点回写隔离和旧新差异归因；不得让 Agent 以直连 Provider 弥补产品缺口
+- [ ] 10.6 为结构化、非结构化、runtime 和内部状态的直接消费者分别记录唯一 writer 或查询 owner、读取契约、切流开关、回滚演练和待退旧路径
+- [ ] 10.7 执行 Dataflow 专项门禁：仅将写入、发布、读取、血缘、完整性及回滚证据齐备的数据域/消费者标记可进入 Phase F 读取切流；未通过项保持稳定旧路由并登记缺口
 
-## 11. 最终验收与文档同步
+## 11. Phase F — 影子运行、切流与回滚
 
-- [ ] 11.1 运行全量 `uv run pytest` 和所有 Phase 专项测试，对比 Phase A 权威基线并对任何剩余失败给出根因和处置
-- [ ] 11.2 运行 OpenSpec strict validation、架构守卫、schema migration/reopen 和 SQLite 并发压力测试
-- [ ] 11.3 验证每笔新系统影子/实际订单都可追溯到 research snapshot、decision revision、risk review 和 Boss approval
-- [ ] 11.4 验证完整流程在任一必需分析缺失/失败/过期时只产生 incomplete 报告且无法下单
-- [ ] 11.5 更新 `TARGET_WORKFLOW_DATAFLOW.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar 和单 live route 规则一致
-- [ ] 11.6 审阅每个 Phase 的待退清单，为未满足项保留具体缺口，不在本 change 中执行未经确认的物理清除
+- [ ] 11.1 新增 projection read、analyst output、Dispatcher schedule、approval lifecycle、Clerk publication 和 live Trader 的独立功能开关
+- [ ] 11.2 实现功能开关与配置校验，保证旧/新 live Trader 路径互斥，冲突配置启动时 fail closed
+- [ ] 11.3 新增影子运行模式，在相同 data vintages 下运行新旧分析/风控但从进程能力上禁止新路径 broker write
+- [ ] 11.4 实现影子差异报告，比较输入快照、投影、调度遗漏、风控 verdict/counterproposal、审批链和归因
+- [ ] 11.5 为已通过 Dataflow 专项门禁的 read path 切换和回滚建立 runbook，验证新 projection 读取及旧读模型兼容；未通过的数据域/消费者不得随整体开关切换
+- [ ] 11.6 为 schedule path 切换和回滚建立 runbook，验证无尚未完成 trigger 被双重所有
+- [ ] 11.7 为 live trade path 切换和回滚建立 runbook，强制先关闭当前 live route、确认无 in-flight authorization，再开启另一 route
+- [ ] 11.8 执行旧实现消费者清零、数据对账、回滚窗口和墓碑登记检查，只将满足全部条件的项标记已退役
+- [ ] 11.9 演练 read/schedule/trade 三个边界的独立回滚，保留影子、审批和账本记录
+
+## 12. 最终验收与文档同步
+
+- [ ] 12.1 运行全量 `uv run pytest` 和所有 Phase/Dataflow 专项测试，对比 Phase A 权威基线并对任何剩余失败给出根因和处置
+- [ ] 12.2 运行 OpenSpec strict validation、架构守卫、schema migration/reopen 和 SQLite 并发压力测试
+- [ ] 12.3 验证每笔新系统影子/实际订单都可追溯到 research snapshot、decision revision、risk review 和 Boss approval
+- [ ] 12.4 验证完整流程在任一必需分析缺失/失败/过期时只产生 incomplete 报告且无法下单
+- [ ] 12.5 更新 `TARGET_WORKFLOW_DATAFLOW.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar、Dataflow 专项验收范围和单 live route 规则一致
+- [ ] 12.6 审阅每个 Phase 与横向 Dataflow 专项的待退清单，为未满足项保留具体缺口，不在本 change 中执行未经确认的物理清除

@@ -1,6 +1,6 @@
 ## Context（背景）
 
-动机和范围见 `proposal.md`。权威目标文档是 `docs/TARGET_WORKFLOW_DATAFLOW.md`；本设计将其中 Phase A–F 的架构落到适合当前代码库的实现形态。
+动机和范围见 `proposal.md`。权威目标文档是 `docs/TARGET_WORKFLOW_DATAFLOW.md`；本设计将其中 Phase A–F 的架构落到适合当前代码库的实现形态，并为横跨各阶段的目标 Dataflow 设置独立专项和 Phase F 前置门禁。
 
 当前系统已经具备以下基础：
 
@@ -33,19 +33,20 @@
 - Agent 输出存储与数据存储是两个有意区分的所有权域。
 - 现有领域表和 CLI 仍有消费者，不能在一次部署中全部删除。
 
-本 change 自包含，不把其他 OpenSpec change 作为实施依赖，也不要求先应用其他 change。实施时如果代码库已经存在兼容类型、工具或部分实现，应先验证其满足本 change 的 specs，再决定复用或补齐。
+本 change 的目标契约自包含，不靠其他 OpenSpec change 的名称或归档状态证明完成；各专项 change 可作为实施与验收载体，其实际行为和证据必须回到本 change 的门禁核验。实施时如果代码库已经存在兼容类型、工具或部分实现，应先验证其满足本 change 的 specs，再决定复用或补齐。
 
 ## Goals / Non-Goals（目标与非目标）
 
 **目标：**
 
-- 通过带门禁的 Phase A–F 迁移交付完整 Target 架构。
+- 通过带门禁的 Phase A–F 迁移和独立 Dataflow 专项交付完整 Target 架构。
 - 使工作流依赖、投影新鲜度、幂等性和完整性可被机器验证。
 - 保留并复用现有风险计算、券商集成、journal、PEAD 证据控制和受治理数据存储。
 - 建立从研究输入到决策 revision、审批、订单、成交和绩效的持久审计链。
 - 支持单分析师独立运行、依赖子流程、全量并行分析、定时任务和事件触发任务。
 - 允许在读取、调度和交易切换边界回滚，但不恢复已经退役的数据所有权。
 - 对已有数据层实现执行验收式接收：已经完成且通过契约的部分不重做，遗留写路径、迁移错误和旁路访问必须收口。
+- 对 Target Dataflow 图逐节点、逐关键连线核验自动写入/更新与按需读取，使数据平台已有能力和仍待补齐的能力有明确 owner、证据与切流状态。
 
 **非目标：**
 
@@ -60,9 +61,11 @@
 
 ## Decisions（设计决策）
 
-### 1. 一个 change，六个带门禁的交付阶段
+### 1. 总 change 固定六个阶段，Dataflow 单设横向专项
 
-实施 SHALL 将 Phase A–F 保持在同一 change 和同一任务图中，但每个阶段都有明确质量门禁和回滚点。后续阶段代码可以放在默认关闭的开关之后提前开发，但其前序不变量满足前，不得成为生产活动路径。
+总 change SHALL 保留 Phase A–F 的目标契约、质量门禁和回滚点；各阶段允许由独立的实施 change 承载，但不能因某个 change 归档而跳过总体验收。后续阶段代码可以放在默认关闭的开关之后提前开发，但其前序不变量满足前，不得成为生产活动路径。
+
+Dataflow 不强行挤入 Phase E：另立独立的专项 OpenSpec change（拟名 `complete-target-dataflow`），以 Target §3–4、§12 和现有数据平台规范为输入，做端到端盘点、缺口补齐与验收。它可以与 Phase B–E 并行推进；Phase A 的证据写侧必须先满足数据所有权约束，Phase C 的 Internal State、Phase D 的 Agent 消费边界、Phase E 的 Calendar 则分别保留本阶段 owner。专项 change 不重做这些已通过测试的实现，其验收结果汇入总 change；Phase F 只能切换已通过专项验证的数据域与消费者读取路径。
 
 这样既保持目标一致，又避免一次性切换。拒绝不分阶段的整体实施，因为审计 schema、角色边界、scheduler 并发和实盘执行会同时变化，无法可靠隔离故障。
 
@@ -393,9 +396,23 @@ resource group 限制会写入同一逻辑 aggregate 的并发工作。decision-
 
 数据层收口的验收以“唯一 writer、所有调用路径、旧库迁移、读回血缘、幂等和失败语义”组成。当前未提交实现只有全部通过这些条件后，才可标记为已完成；不能以“新 repository 已经有写方法”替代验收。
 
+### 18A. Dataflow 专项按目标节点和关键连线验收，不重建既有平台
+
+专项首先生成版本化差距矩阵，每行固定 Target 图的节点或关键连线、现有代码与配置载体、数据 owner、状态（`verified` / `needs_refactor` / `missing` / `blocked`）、契约测试、真实来源或 fixture 证据、下游消费者、待退旧路径和回滚点。`verified` 必须有可复现证据；历史 OpenSpec change 的归档状态只能作为线索，不能代替验证。
+
+核查范围按数据流顺序组织：
+
+1. **发现与刷新：** Source Catalog、适配器注册、预算/权限/保留策略、cadence/freshness、事件发现和 cache miss；采集与更新由 Data Platform 隐式驱动，不要求 Agent 显式运行取数流程。
+2. **持久化准入：** 结构化原始响应和非结构化文档的不可变版本、实体/期间/单位/时点与正文完整性质量门、隔离及 reason code、修订和 as-of 血缘；分别验证已发布事实与候选/失败不会混淆。
+3. **共享事实与读取：** 结构化观测、文档资产、中性证据、人工策展知识通过 Data Products 发布；Runtime Data Gateway 只提供实时行情/期权等即时输入，默认不把它们写成持久化事实；Workflow Memory 的观点不得反向进入共享事实。
+4. **内部状态：** Clerk/券商来源的订单、成交、持仓、资金和绩效经 Internal State API 以 as-of、来源、完整性与缺口状态提供给授权消费者，不与外部研究事实混成同一数据集。
+5. **切流与退役：** 对每个数据域和直接消费者验证唯一 writer、可回溯 source/vintage、旧新读数分类、失败降级、独立回滚及墓碑登记；只在消费方清零后退役旧入口。
+
+Phase E 的 Calendar 是 Data Platform 发布的特定数据产品，但事件发现/版本和触发已由 Phase E 专项负责；Dataflow 专项只验收其与通用来源治理、准入和只读产品边界的接口，不重复实现 Schedule Calendar。Phase C 的 Clerk 事实计算和 Phase D 的分析角色逻辑同理。专项 proposal/design/specs/tasks 应据矩阵将 `needs_refactor` 与 `missing` 拆为可实施任务，明确每项 owner、测试和逐域切流门禁；不在未盘点前宣称所有 Dataflow 组件需要重做。
+
 ### 19. 影子执行可以比较决策，但不能实盘下单
 
-Phase F 为 projection read、Dispatcher scheduling、approval lifecycle、Clerk publication 和 live Trader routing 分别设置 feature switch。影子运行可以经过 Risk 并生成合成执行结果，但所有门禁通过前，新路径没有券商写权限。
+Phase F 为 projection read、Dispatcher scheduling、approval lifecycle、Clerk publication 和 live Trader routing 分别设置 feature switch。每个数据域和消费者的读取开关必须先取得 Dataflow 专项的 `verified` 证据与回滚演练记录；未通过者继续使用其现有稳定路径，不得以日历或 Dispatcher 已通过为由整体切流。影子运行可以经过 Risk 并生成合成执行结果，但所有门禁通过前，新路径没有券商写权限。
 
 切流顺序：
 
@@ -413,6 +430,7 @@ Phase F 为 projection read、Dispatcher scheduling、approval lifecycle、Clerk
 - **[变更面很大]** 六个阶段覆盖多数 runtime 领域。→ 每阶段独立门禁，后续路径默认关闭，激活前必须通过阶段专项测试。
 - **[现有基线非全绿]** 已知失败可能掩盖新回归。→ Phase A 固定标准环境、聚类现有失败，并在行为切换前清除系统性数据写入/action/资金桶缺陷。
 - **[把架构完成误当成 cutover 完成]** `data_frame_rebuild` 已完成平台主体，但合并版本明确保留部分 legacy 写路径；当前后续修复也仍有迁移测试失败。→ Phase A 对每条 writer、consumer 和旧库迁移路径逐项验收，按测试接收既有实现，不按 change 名称或代码存在判断完成度。
+- **[目标 Dataflow 没有整图验收]** Phase A 只聚焦已知证据写侧，Phase E 只覆盖 Calendar，不能证明自动刷新、准入、共享事实、Runtime/内部状态读取的全部连线正确。→ 独立专项维护逐节点/连线矩阵和可复现证据，按数据域设置 Phase F 读取切流门禁。
 - **[SQLite writer 争用]** 并行分析师和 append-only 审计事件会增加锁争用。→ 使用 WAL、每操作连接、短事务、有界 writer resource group、busy timeout 和基于唯一键的重试；记录未来数据库迁移阈值。
 - **[崩溃后重复副作用]** graph 或 scheduler 重放可能重复审批或券商提交。→ 所有领域写入和外部提交使用稳定键幂等；重试不确定券商结果前先对账。
 - **[兼容双写漂移]** 新 envelope 与旧领域表可能在迁移期不一致。→ 新路径以 envelope/audit store 为规范事实，通过单一 adapter 生成兼容读取并比较输出，所有兼容 writer 都登记退役。
@@ -478,12 +496,22 @@ Phase F 为 projection read、Dispatcher scheduling、approval lifecycle、Clerk
 
 回滚：停止受影响 workflow ID 的 Dispatcher claim；确认没有在途 trigger 持有它们后，才能重新启用对应旧任务。
 
+### 横向 Dataflow 专项——目标数据流核验与缺口补齐
+
+1. 在独立 OpenSpec change 中以 Target §3–4、§12 为验收边界，交付 proposal、design、delta specs 和 tasks；不将其视为 Phase E 的子任务。
+2. 对结构化、非结构化、runtime 和内部状态四类数据路径建立目标—实现—证据—owner—缺口矩阵；标出已由 Phase A/C/D/E 承担的能力，禁止重复建设。
+3. 先验证已有 Source Catalog/Refresh Controller、原始资产、质量门、共享事实、Data Products、Runtime Data Gateway 与 Internal State API；对失败/缺失项另列最小修复、迁移和回滚任务。
+4. 对每个数据域执行正常、陈旧、来源失败、准入拒绝、修订/as-of、旧新差异和 Agent 越界写入测试；记录已验证范围及尚未覆盖的来源/消费者。
+5. 门禁：只有相应数据域和消费者的写侧、发布、读取、血缘、隔离与回滚证据齐备，Phase F 才可切换该读取路径；未通过项保持旧稳定路径并标明缺口。
+
+回滚：按数据域/消费者撤回新读取路由，保留已发布的不可变原始资产、版本与审计记录；不恢复已退役的 Workflow Memory 事实表，也不让 Agent 直接调用 Provider。
+
 ### Phase F——影子运行与切流
 
 1. 在相同快照上运行新旧研究和调度路径。
 2. 在关闭券商写入时运行新审批/Clerk 路径。
 3. 比较投影、漏任务、风险结果、审计关联和绩效归因。
-4. 按顺序切换 read、schedule 和 trade 开关；验证单一 live path 不变量。
+4. 对 Dataflow 专项已验收的数据域和消费者按顺序切换 read、schedule 和 trade 开关；验证单一 live path 不变量。
 5. 演练回滚，完成 consumer-zero 检查，并把满足条件的 legacy path 标记为 retired。
 
 回滚：先关闭新 live Trader，确认无在途授权，再恢复旧 live route。保留全部审计和影子记录。

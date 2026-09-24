@@ -95,9 +95,9 @@
 
 ## 9. 登记、文档同步与保真性验收
 
-- [ ] 9.1 在 `config/workflow/legacy_retirement.yaml` 新增 Phase D 段，登记待退项：层级 `allocation` 字段、PEAD 内部风控与 sizing 路径、Chief 旧表直读入口、旧 `sector_reviews` / `pead_dossier` 读模型（每项写明替代实现、退出条件与消费方清零判据）。验证：`tests/test_legacy_retirement.py` 断言各项存在且字段完整。
-- [ ] 9.2 同步 `docs/TARGET_WORKFLOW_DATAFLOW.md` §14.4 的实施状态，并补记 §7.2 契约的落地载体。验证：文档中 §14.4 不再描述为未实施，且引用的模块路径与代码一致。
-- [ ] 9.3 编写 `verification.md`：记录本 change 的验收结果、与基线（`git worktree` 对照）的保真性比对、以及受限环境计数不可作判据的说明。验证：文件中含对照组命令与结果数字。
-- [ ] 9.4 端到端验收：用完整 fixture 构造六类齐备场景，跑通「分析 → 快照 → 主理人 → 风控 → Boss → Trader」并断言每笔订单可追溯到快照条目。验证：新增 `tests/test_phase_d_e2e.py` 全绿。
-- [ ] 9.5 端到端反向验收：构造缺一类分析的场景，断言运行判为不完整、缺口报告产出、且不进入决策周期与下单。验证：同一测试文件中反向场景断言通过。
-- [ ] 9.6 全量测试与校验：执行 `./scripts/run_tests.sh` 全量（受限环境计数不作判据），并确认 `openspec validate restructure-analyst-roles-and-chief-inputs --changes --strict` 通过。验证：两项命令输出均无失败项。
+- [x] 9.1 在 `config/workflow/legacy_retirement.yaml` 新增 Phase D 段，登记待退项：层级 `allocation` 字段、PEAD 内部风控与 sizing 路径、Chief 旧表直读入口、旧 `sector_reviews` / `pead_dossier` 读模型（每项写明替代实现、退出条件与消费方清零判据）。验证：`tests/test_legacy_retirement.py` 断言各项存在且字段完整。
+- [x] 9.2 同步 `docs/TARGET_WORKFLOW_DATAFLOW.md` §14.4 的实施状态，并补记 §7.2 契约的落地载体。验证：文档中 §14.4 不再描述为未实施，且引用的模块路径与代码一致。
+- [x] 9.3 编写 `verification.md`：记录本 change 的验收结果、与基线（`git worktree` 对照）的保真性比对、以及受限环境计数不可作判据的说明。验证：文件中含对照组命令与结果数字。
+- [x] 9.4 端到端验收：用完整 fixture 构造六类齐备场景，跑通「分析 → 快照 → 主理人 → 风控 → Boss → Trader」并断言每笔订单可追溯到快照条目。验证：新增 `tests/test_phase_d_e2e.py` 全绿。
+- [x] 9.5 端到端反向验收：构造缺一类分析的场景，断言运行判为不完整、缺口报告产出、且不进入决策周期与下单。验证：同一测试文件中反向场景断言通过。
+- [x] 9.6 全量测试与校验：执行 `./scripts/run_tests.sh` 全量（受限环境计数不作判据），并确认 `openspec validate restructure-analyst-roles-and-chief-inputs --changes --strict` 通过。验证：两项命令输出均无失败项。

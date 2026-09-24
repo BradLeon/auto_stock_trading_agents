@@ -326,6 +326,82 @@ retired:
       verdict.allocation 为非空语义做预算决策（统一走 allocation_for_status）。
     location: src/ats/schemas/sector.py（字段保留，历史行可读回）
 
+  # ── Phase D（Group 5：PEAD 内部风控与 sizing 路径退出）──
+  - identifier: graph.pead.internal_risk_and_sizing
+    capability_domain: agent/fundamental-pead
+    replaced_by: >-
+      基本面事件评审只产出非可执行视图（direction / magnitude / 信心 / 理由 /
+      可证伪条件，FundamentalEventReview 投影）；可执行性与风控结论只能在
+      主理人提案 + 风控审查的审批链内产生。
+    target_phase: D
+    status: retired
+    exit_condition: >-
+      src 内不再存在从基本面输出构造 TradeDecision 或调用风控的代码路径：
+      graph/pead.py 的 risk_agent.assess / review_guardrails / pre_trade 调用与
+      PeadRecommendation→TradeDecision 转换已删，score.py 的 sizing 树已改为
+      event_view()（direction 不映射动作，9.2 契约落地载体）。
+    consumers:
+      - graph.pead
+      - agents.pead.score
+    consumer_zero_criterion: >-
+      src 内 agents/pead 与 graph/pead 对 risk_agent.assess / pre_trade /
+      TradeDecision 的引用清零（已达成；tests/test_pead_graph.py 断言）。
+    location: src/ats/graph/pead.py、src/ats/agents/pead/score.py
+
+  # ── Phase D（Group 7：Chief 旧表直读入口，双读期登记）──
+  - identifier: chief.legacy_table_direct_reads
+    capability_domain: decision/research-snapshot
+    replaced_by: >-
+      task_projection_envelopes 固定研究快照（build_chief_snapshot：六类投影齐备
+      才进决策周期，真实快照随 create_cycle 落库；修订轮次重验失效即 superseded）。
+    target_phase: D
+    status: pending
+    exit_condition: 主理人上下文渲染全部改读投影/快照，旧表直读入口移除。
+    missing_condition: >-
+      双读期：assemble.py 仍从旧读模型（sector_reviews / macro_reviews /
+      technical_reviews / pead dossier / technical context）直读渲染上下文，
+      投影路径只负责齐备性校验、快照与缺口阻断；上下文切流属 Phase F。
+    consumers:
+      - agents.chief.assemble
+    consumer_zero_criterion: assemble.py 直读旧表的渲染路径清零，dual_read_diffs 下线。
+    location: src/ats/agents/chief/assemble.py
+
+  # ── Phase D（任务 9.1：旧读模型逐项登记，替代 legacy_read_models 的分组条目）──
+  - identifier: pead_dossier
+    capability_domain: agent/fundamental-pead
+    replaced_by: >-
+      fundamental_expectation_update / fundamental_event_review 投影
+      （task_projection_envelopes，按标的 entity 作用域）
+    target_phase: D
+    status: pending
+    exit_condition: >-
+      dossier 的全部消费方改读基本面投影或数据产品；monitor 不再写 dossier
+      （Phase D 已达成），dossier 只剩历史只读报表渲染。
+    missing_condition: >-
+      dossier 报告与 CLI 仍渲染历史 dossier；基本面例行/事件模式已发布投影，
+      但报表消费方尚未迁移到 envelope。
+    consumers:
+      - runtime.cli
+      - agents.pead.report
+    consumer_zero_criterion: 除历史报表只读渲染外，无任何链路读/写 dossier 表。
+    location: Workflow memory
+
+  - identifier: sector_reviews
+    capability_domain: agent/sector-allocation
+    replaced_by: sector_allocation 投影（+ layer_analysis 投影，task_projection_envelopes）
+    target_phase: D
+    status: pending
+    exit_condition: >-
+      行业配置的全部消费方改读投影，sector_reviews 行只作历史报表数据源。
+    missing_condition: >-
+      Chief 双读仍从 sector_reviews 取行业结论；行业报告渲染仍走旧读模型行；
+      两处切流均属 Phase F。
+    consumers:
+      - agents.chief.assemble
+      - runtime.cli
+    consumer_zero_criterion: Chief 与 CLI 的 sector_reviews 读取清零（切流后）。
+    location: Workflow memory
+
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）
 purge_scope:
   - identifier: task_projections.legacy_columns

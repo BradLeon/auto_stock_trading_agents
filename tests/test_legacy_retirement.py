@@ -137,7 +137,7 @@ def test_the_retention_declaration_is_recorded_not_inferred() -> None:
 
 def test_the_registered_batch_covers_every_documented_item() -> None:
     """design.md 的待退项登记表逐项核对，不允许多登记也不允许漏登记。
-    Phase A 8 项 + Phase B 6 项（任务 8.1）。"""
+    Phase A 8 项 + Phase B 6 项（任务 8.1）+ Phase C 6 项 + Phase D 5 项（任务 9.1）。"""
     from ats.workflow import legacy_retirement as mod
 
     registry = mod.load_registry()
@@ -157,8 +157,12 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "scheduler.adhoc_journal_jobs",
         "performance.legacy_snapshot",
         "journal.report.render_ledger",
-        # ── Phase D（任务 2.9：层级配置字段退役）──
+        # ── Phase D（任务 2.9 + 任务 9.1）──
         "layer_verdict.allocation",
+        "graph.pead.internal_risk_and_sizing",
+        "chief.legacy_table_direct_reads",
+        "pead_dossier",
+        "sector_reviews",
         # ── Phase B ──
         "risk.checks.in_place_clipping",
         "agents.risk_validator.apply_guardrails",
@@ -172,6 +176,34 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         assert stone.replaced_by and stone.exit_condition
         if stone.status == "pending":
             assert stone.missing_condition
+
+
+def test_phase_d_items_are_registered_with_complete_fields() -> None:
+    """任务 9.1：Phase D 四项新增待退（层级 allocation 已随 2.9 登记）逐项核对，
+    每项写明替代实现、退出条件与消费方清零判据。"""
+    from ats.workflow import legacy_retirement as mod
+
+    registry = mod.load_registry()
+    pending = {
+        "layer_verdict.allocation": "pending",
+        "chief.legacy_table_direct_reads": "pending",
+        "pead_dossier": "pending",
+        "sector_reviews": "pending",
+    }
+    for identifier, status in pending.items():
+        stone = registry.tombstone(identifier)
+        assert stone is not None, identifier
+        assert stone.target_phase == "D", identifier
+        assert stone.status == status, identifier
+        assert stone.replaced_by, identifier
+        assert stone.exit_condition, identifier
+        assert stone.consumer_zero_criterion, identifier
+        assert stone.consumers, identifier
+    retired = registry.tombstone("graph.pead.internal_risk_and_sizing")
+    assert retired is not None
+    assert retired.target_phase == "D" and retired.status == "retired"
+    assert retired.replaced_by and retired.exit_condition
+    assert retired.consumer_zero_criterion
 
 
 def test_every_registered_item_names_its_consumer_zero_criterion() -> None:

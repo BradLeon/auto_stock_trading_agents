@@ -942,12 +942,48 @@ event_id + event_version + workflow_id
 
 ### 14.4 阶段 D：分析师职责重构
 
+> **实施状态（2026-09-24）**：本阶段已实施完成（OpenSpec change
+> `restructure-analyst-roles-and-chief-inputs`，9 组任务全部落地）。下表给出各条目的
+> 落地载体；实施细节与验收见
+> `openspec/changes/restructure-analyst-roles-and-chief-inputs/verification.md`。
+
 - 从 Sector 拆出 Layer，将配置权收口到 Sector。
+  — 落地：`agents/layer/layer_review.py`（层级状态判断 + `LayerAnalysis` 投影）、
+  `agents/sector/{review,rotation,cross_section}.py`（三级配置结论、预算与护栏，
+  `SectorAllocation` 投影）；`LayerVerdict.allocation` 写路径停写、列保留，
+  登记 `layer_verdict.allocation` 待退（`config/workflow/legacy_retirement.yaml`）。
 - 建立 Information Analyst，迁移现有抽取、triage 和 digest 能力。
+  — 落地：`agents/information/`（entry/documents/extract/triage/digest/briefs，
+  `InformationBrief` 投影，携带三类时间与同源聚类）。
 - 将 Fundamental 拆成例行和事件模式，删除越界依赖和内部交易风控。
+  — 落地：`agents/fundamental/`（routine/event 双模式入口）、
+  `graph/pead.py` + `agents/pead/score.py`（内部风控调用与 sizing 树删除，
+  `score_decision` → `event_view`，direction 不映射动作）。
 - 移除 Sector 对 Macro、PEAD 和研究观点的依赖。
+  — 落地：`agents/sector/review.py` 的 `_load_top_down_context` 只装载 FactSet
+  行业数据；`agents/sector/assemble.py` 不再读取 PEAD dossier 结论。
 - 移除 Risk Officer 对 Macro 观点的依赖。
+  — 落地：`agents/risk_officer/review.py` 删除宏观 regime 注入；
+  `ReviewBasis`（portfolio_snapshot_id / market_as_of / ruleset_version）绑定
+  风控依据三要素，授权门 fail-closed。
 - 扩展 Chief 以读取六类分析投影和固定 research snapshot。
+  — 落地：`agents/chief/assemble.py`（`build_chief_snapshot`：六类齐备才进周期，
+  缺口报告 + 阻断；与旧表直读双读比对）、`decision/snapshot.py`
+  （`frozen_snapshot_*`）、`graph/chief.py`（快照随 `create_cycle` 落库，
+  修订轮次重验失效即 superseded）。
+- 采集侧与 Provider 直连清退（边界收敛）。
+  — 落地：`data/collection/evidence.py`（采集取数与原始资产写入迁出 agents/）、
+  `data/products/{macro_inputs,sector_inputs,news_inputs,market_inputs,fiscal_tools}`
+  （分析师取数统一走数据产品入口）；守卫例外表清零，并新增「例外必须声明
+  未来收敛阶段」机器校验（`workflow/architecture_guards.py::validate_exceptions`）。
+- 投影发布点（§7.2 契约的落地载体）：七类投影全部经 `agent/task_projection.py`
+  的 `build_envelope` + `store.save_task_projection_envelope` 发布——
+  `layer_analysis`（`agents/layer/layer_review.py`）、`information_brief`
+  （`agents/information/briefs.py`）、`sector_allocation`
+  （`agents/sector/review.py`）、`fundamental_expectation_update` /
+  `fundamental_event_review`（`agents/fundamental/{routine,event}.py`）、
+  `macro_review`（`agents/macro/review.py`，portfolio 作用域）、
+  `technical_review`（`agents/technical/review.py`，逐标的 entity 作用域）。
 
 ### 14.5 阶段 E：Dispatcher 与事件日历
 

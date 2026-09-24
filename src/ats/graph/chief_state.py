@@ -53,6 +53,7 @@ class ChiefDecisionState(BaseModel):
     # proposal; `approved_decisions` is what the review let through and what the
     # approval card / trader see.
     research_snapshot: dict = Field(default_factory=dict)   # §10.1 frozen inputs
+    gap_report: str = ""                                    # 7.8: incomplete-snapshot report (never a decision input)
     revision_no: int = 0                                    # current revision (per cycle)
     revision_hash: str = ""                                 # content hash of that revision
     parent_revision_no: int | None = None                   # revised from (chief_revise)

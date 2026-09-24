@@ -1,7 +1,9 @@
 """Chief 统一决策 — context assembly, no-llm stub, store round-trip, execute wiring
 (hermetic; no network/LLM/TWS)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+import ats.config as _config
 
 from ats.agents.chief import assemble, decide
 from ats.memory import get_store
@@ -144,9 +146,59 @@ def test_chief_run_store_roundtrip():
 
 
 def test_run_chief_cli_executes_when_decisions(monkeypatch):
-    """run_chief -> decision graph: chief run persisted + dry-run trade log with source=chief."""
+    """run_chief -> decision graph: chief run persisted + dry-run trade log with source=chief.
+
+    Phase D: the decide path requires a complete six-category research snapshot,
+    so the test seeds one projection per category/scope first (same shape as
+    tests/test_chief_snapshot.py).
+    """
     from ats.agents.chief.decide import ChiefResult
+    from ats.agent.task_projection import ProjectionScope, build_envelope
     from ats.runtime import cli
+    real_global = _config.load_pead_global
+
+    def pinned_global():
+        g = dict(real_global())
+        g["targets"] = ["COHR"]
+        g["sector_review"] = {**g.get("sector_review", {}), "sectors": ["ai_hardware"]}
+        return g
+
+    monkeypatch.setattr(_config, "load_pead_global", pinned_global)
+    now = datetime.now(timezone.utc)
+    valid = (now + timedelta(hours=48)).isoformat(timespec="seconds")
+
+    def publish(role, payload, scope):
+        get_store().save_task_projection_envelope(build_envelope(
+            role=role, payload=payload, scope=scope,
+            as_of=now.isoformat(timespec="seconds"), valid_until=valid))
+
+    sector_cfg = _config.load_sector_config("ai_hardware")
+    for layer in sector_cfg.layers:
+        publish("layer_analysis",
+                {"layer": layer.key, "status": "steady", "summary": "持平",
+                 "findings": ["读数平稳"], "confidence": 0.5},
+                ProjectionScope(kind="layer", id=layer.key))
+    publish("information_brief",
+            {"entity": "COHR", "headline": "无重大变化", "summary": "例行简报",
+             "relevance": "medium", "sources": ["rss:test"],
+             "fact_changes": ["无"], "impact_candidates": ["none"],
+             "entities": ["COHR"], "confidence": 0.4, "freshness": "today",
+             "unverified": []},
+            ProjectionScope(kind="entity", id="COHR"))
+    publish("fundamental_expectation_update",
+            {"entity": "COHR", "metric": "gross_margin", "period": "Q3 FY2026",
+             "previous_value": 0.25, "new_value": 0.26, "driver": "例行读数"},
+            ProjectionScope(kind="entity", id="COHR"))
+    publish("sector_allocation",
+            {"sector": "ai_hardware", "stance": "neutral", "target_weight": 0.3,
+             "rationale": "标配", "drivers": []},
+            ProjectionScope(kind="sector", id="ai_hardware"))
+    publish("macro_review",
+            {"regime": "transition", "summary": "利率维持", "indicators": ["10Y"]},
+            ProjectionScope(kind="portfolio"))
+    publish("technical_review",
+            {"entity": "COHR", "signal": "neutral", "summary": "区间", "levels": {}},
+            ProjectionScope(kind="entity", id="COHR"))
 
     monkeypatch.setattr(
         "ats.agents.chief.decide.from_context",

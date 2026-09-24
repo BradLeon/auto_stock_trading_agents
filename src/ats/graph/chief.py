@@ -48,14 +48,45 @@ def assemble_context(state: ChiefDecisionState) -> dict:
         out["event_data"] = texec.pead_event_data()
     if not state.decide:
         return out
+    from ..memory import get_store
+
     from ..agents.chief import assemble
 
+    store = get_store()
     ctx = assemble.build(live_broker=state.use_broker)
     log.info("chief context: %s", ctx.stats())
-    out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
+    # Phase D 7.1: fix the research snapshot BEFORE any decision context is
+    # used — per-category projection ids, content hashes, as-of and freshness.
+    snapshot, detail = assemble.build_chief_snapshot(store, at=state.as_of)
+    out["research_snapshot"] = snapshot.to_payload()
+    if not snapshot.complete:
+        # 7.2/7.5/7.8: an incomplete snapshot blocks the cycle BEFORE any write
+        # and before any context is assembled. The gap report is stored on the
+        # state only — it is never a decision input.
+        report = assemble.gap_report(snapshot, detail)
+        print(f"🚧 研究快照不完整 — 决策周期阻断（不创建周期、不产出决策）\n{report}")
+        out.update(gap_report=report, context_text="", context_stats={},
+                   net_liquidation=ctx.net_liquidation, actionable_scores=[])
+        return out
+    # 7.4: the projection read path rides along with the legacy blocks and the
+    # per-category presence disagreement is recorded (never used to gate).
+    ctx.blocks["研究快照（六类投影）"] = assemble.projection_context_block(detail)
+    diffs = assemble.dual_read_diffs(ctx, detail)
+    if any(diffs.values()):
+        log.info("chief dual-read diffs: %s", diffs)
+    out.update(context_text=ctx.as_context(),
+               context_stats={**ctx.stats(), "dual_read_diffs": diffs},
                net_liquidation=ctx.net_liquidation,
                actionable_scores=[list(x) for x in ctx.actionable_scores])
     return out
+
+
+def route_after_assemble(state: ChiefDecisionState) -> str:
+    """7.2: an incomplete snapshot never reaches chief_decide — the refusal
+    happens before the decision cycle is written, so no empty cycle exists."""
+    if state.gap_report:
+        return "end"
+    return "decide"
 
 
 def chief_decide(state: ChiefDecisionState) -> dict:
@@ -210,6 +241,31 @@ def persist_decision(state: ChiefDecisionState) -> dict:
     they run only when the cycle enters a terminal state (D12).
     """
     repo = _decision_repo()
+    # 7.7: mid-cycle invalidation — on every round after the first, re-verify
+    # the frozen snapshot against the store. A withdrawn/replaced projection,
+    # or a vintage change, supersedes the cycle instead of letting the loop
+    # continue on swapped inputs; new inputs can only open a NEW cycle.
+    if state.research_snapshot and (state.revision_no or state.risk_round > 1):
+        from ..decision.snapshot import frozen_snapshot_stale_reasons, supersede_cycle
+
+        stale = frozen_snapshot_stale_reasons(repo.store, state.research_snapshot,
+                                              at=state.as_of)
+        if stale:
+            reason = "; ".join(stale)
+            print(f"⏸️  研究快照已失效 — 周期转 superseded：{reason}")
+            supersede_cycle(repo, state.cycle_id, reason=reason, actor="chief",
+                            created_at=state.as_of.isoformat())
+            return {"cycle_status": "superseded", "decisions": [],
+                    "approved_decisions": []}
+    # 7.2 (belt and braces): a decide-path cycle is never written from an
+    # incomplete frozen snapshot — the refusal happens BEFORE create_cycle.
+    if state.decide:
+        from ..decision.snapshot import frozen_snapshot_complete
+
+        if not frozen_snapshot_complete(state.research_snapshot):
+            raise ValueError(
+                "decide-path persist without a complete research snapshot; "
+                "decision cycle blocked before any write")
     repo.create_cycle(cycle_id=state.cycle_id, trigger_source=state.source,
                       research_snapshot=state.research_snapshot or None,
                       created_at=state.as_of.isoformat())
@@ -292,6 +348,8 @@ def _transition_key(cycle_id: str, to_status: str, revision_no: int, round_no: i
 
 def route_after_persist(state: ChiefDecisionState) -> str:
     """Conditional edge after per-round persistence (task 5.3)."""
+    if state.cycle_status == "superseded":
+        return "end"                        # 7.7: inputs invalidated mid-cycle
     if not state.decisions:
         if state.parent_revision_no is not None or state.risk_round > 1:
             return "manual_review"          # revision emptied after a rejection
@@ -596,7 +654,8 @@ def build_chief_graph(checkpointer=None):
         g.add_node(name, fn)
 
     g.add_edge(START, "assemble_context")
-    g.add_edge("assemble_context", "chief_decide")
+    g.add_conditional_edges("assemble_context", route_after_assemble,
+                            {"decide": "chief_decide", "end": END})
     g.add_edge("chief_decide", "risk_gate")
     g.add_edge("risk_gate", "persist_decision")
     g.add_conditional_edges("persist_decision", route_after_persist,

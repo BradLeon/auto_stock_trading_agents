@@ -2303,6 +2303,28 @@ class TradingMemory:
         self.conn.commit()
         return envelope.projection_id
 
+    def get_task_projection(self, projection_id: str) -> dict | None:
+        """One envelope row by id (refs/payload decoded), regardless of status.
+
+        Snapshot consumers use this to re-verify that the projection a frozen
+        research snapshot cites still exists, is still published, and still
+        hashes to the same content (decision/research-snapshot, task 7.7).
+        """
+        import json
+
+        row = self.conn.execute(
+            "SELECT * FROM task_projection_envelopes WHERE projection_id=?",
+            (projection_id,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        for column in ("input_refs", "data_vintage_refs", "payload"):
+            try:
+                item[column] = json.loads(item[column] or "")
+            except json.JSONDecodeError:
+                item[column] = {}
+        return item
+
     def task_projection_envelopes(self, *, agent_role: str | None = None,
                                   scope_kind: str | None = None,
                                   scope_id: str | None = None,

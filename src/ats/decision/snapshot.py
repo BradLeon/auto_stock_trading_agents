@@ -54,6 +54,8 @@ class SnapshotItem:
     as_of: str = ""
     reusable: bool = False
     reason: str = "missing"
+    scope_kind: str = ""
+    scope_id: str = ""
 
     @property
     def freshness(self) -> str:
@@ -158,15 +160,17 @@ def build_research_snapshot(
                 item = SnapshotItem(task_id=task_id, agent_role=spec.agent_role,
                                     category=category)
             else:
+                query_scope = wanted.get(task_id, envelope.scope)
                 reusable, reason = reuse_decision(
-                    envelope, scope=wanted.get(task_id, envelope.scope),
+                    envelope, scope=query_scope,
                     input_refs=input_refs, data_vintage_refs=data_vintage_refs,
                     at=at)
                 item = SnapshotItem(
                     task_id=task_id, agent_role=spec.agent_role, category=category,
                     projection_id=envelope.projection_id,
                     content_hash=envelope.content_hash, as_of=envelope.as_of,
-                    reusable=reusable, reason=reason)
+                    reusable=reusable, reason=reason,
+                    scope_kind=query_scope.kind, scope_id=query_scope.id)
             if item.reusable:
                 best = item
                 break
@@ -245,3 +249,88 @@ def record_no_action(repo: DecisionAuditRepository, cycle_id: str, *,
             (reason, created_at or event["created_at"], cycle_id))
         repo.conn.commit()
     return changed
+
+
+# --------------------------------------------------------------------------- #
+# Frozen snapshots on the graph state (Phase D Group 7, tasks 7.2/7.3/7.7)
+# --------------------------------------------------------------------------- #
+
+def frozen_snapshot_items(payload: Mapping[str, Any] | None) -> list[SnapshotItem]:
+    """Re-hydrate the SnapshotItems stored on `decision_cycles.research_snapshot`."""
+    if not payload:
+        return []
+    out: list[SnapshotItem] = []
+    for raw in payload.get("items", []):
+        out.append(SnapshotItem(
+            task_id=str(raw.get("task_id", "")),
+            agent_role=raw.get("agent_role"),
+            category=str(raw.get("category", "")),
+            projection_id=str(raw.get("projection_id", "")),
+            content_hash=str(raw.get("content_hash", "")),
+            as_of=str(raw.get("as_of", "")),
+            reusable=bool(raw.get("reusable")),
+            reason=str(raw.get("reason", "missing")),
+            scope_kind=str(raw.get("scope_kind", "")),
+            scope_id=str(raw.get("scope_id", ""))))
+    return out
+
+
+def frozen_snapshot_complete(payload: Mapping[str, Any] | None) -> bool:
+    """True only when the frozen payload lists items and every one is reusable.
+
+    An EMPTY payload is never complete — a decide-path cycle must never be
+    written from a state that never built a snapshot (task 7.2, fail closed).
+    """
+    items = frozen_snapshot_items(payload)
+    return bool(items) and all(item.reusable for item in items)
+
+
+def frozen_snapshot_stale_reasons(store: Any, payload: Mapping[str, Any] | None,
+                                  *, at: datetime | None = None) -> list[str]:
+    """Mid-cycle invalidation checks for a frozen snapshot (task 7.7).
+
+    Three ways a cited input can stop being the input it was, each reported
+    separately so the supersede reason names the actual failure:
+
+    * the cited projection row is gone or no longer published (撤销/失败);
+    * the cited row's content hash changed in place (被替换);
+    * a NEWER published projection for the same role+scope exists — the
+      analysis moved on, and if its data vintages differ the inputs are stale
+      by vintage change, otherwise by plain supersession.
+    """
+    from ..agent.task_projection import normalize_refs
+
+    stamp = at or datetime.now(timezone.utc)
+    reasons: list[str] = []
+    for item in frozen_snapshot_items(payload):
+        if not item.reusable or not item.projection_id:
+            continue
+        where = f"{item.category}[{item.scope_kind}:{item.scope_id}]"
+        row = store.get_task_projection(item.projection_id)
+        if row is None or row.get("status") != "published":
+            reasons.append(f"{where}: 快照引用的投影已撤销或失败 ({item.projection_id})")
+            continue
+        if row.get("content_hash") != item.content_hash:
+            reasons.append(f"{where}: 投影内容与快照不一致（content_hash 漂移）")
+            continue
+        valid_until = str(row.get("valid_until") or "")
+        if valid_until:
+            try:
+                expiry = datetime.fromisoformat(valid_until)
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                if expiry <= stamp:
+                    reasons.append(f"{where}: 快照引用的投影已过期 ({valid_until})")
+                    continue
+            except ValueError:
+                pass
+        newer = store.task_projection_envelopes(
+            agent_role=row.get("agent_role"), scope_kind=item.scope_kind,
+            scope_id=item.scope_id, limit=1)
+        if newer and newer[0].get("projection_id") != item.projection_id:
+            if (normalize_refs(newer[0].get("data_vintage_refs"))
+                    != normalize_refs(row.get("data_vintage_refs"))):
+                reasons.append(f"{where}: 关键数据 vintage 变化，已出现新版本分析")
+            else:
+                reasons.append(f"{where}: 投影被新版本替换 ({newer[0]['projection_id']})")
+    return reasons

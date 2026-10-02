@@ -31,12 +31,13 @@ from ..sources.factset_earnings_insight import (
 from ..sources.factset_earnings_text import (
     CandidateStatus,
     EXTRACTOR_VERSION,
-    FactSetExtractionRun,
-    MetricGroup,
     ReportPhase,
+    bounded_narrative_evidence,
     extract_index_text,
+    extract_index_text_semantic,
     merge_candidate_evidence,
     new_extraction_run,
+    series_dimensions,
     validate_index_candidates,
 )
 from ..sources.factset_earnings_charts import (
@@ -51,6 +52,20 @@ from ..sources.factset_earnings_charts import (
 SOURCE_ID = "factset_earnings_insight_metrics"
 DOCUMENT_SOURCE_ID = "factset_earnings_insight_doc"
 DATASET_ID = "sp500_earnings_insight"
+
+
+def _require_managed_write(repository) -> None:
+    """Guard every independently callable FactSet stage on the production DB."""
+    from ..runtime.repository import platform_data_db_path
+
+    repository_path = getattr(repository, "path", None)
+    if repository_path is not None and Path(repository_path).expanduser().resolve() == \
+            platform_data_db_path().expanduser().resolve():
+        from ..persistent_queue import require_queue_worker
+
+        # The document source owns the combined PDF + derived metrics refresh;
+        # its queue scope explicitly includes SOURCE_ID for the structured part.
+        require_queue_worker(DOCUMENT_SOURCE_ID)
 
 
 def _now() -> datetime:
@@ -94,6 +109,7 @@ class FactSetDocumentPipeline:
             processor_version: str = "factset-document-v1",
             url: str = STABLE_URL, source: FactSetFetch | None = None,
             document: FactSetPDF | None = None) -> dict:
+        _require_managed_write(self.structured)
         source = source or (self._local_source(local_pdf) if local_pdf else fetch_report(
             url=url, client=self.client, clock=self.clock))
         document = document or inspect_pdf(source)
@@ -294,16 +310,33 @@ class FactSetIndexPipeline:
 
     def run(self, document, *, document_id: str, version_id: str,
             artifact_id: str, known_at: datetime,
-            extractor_version: str = EXTRACTOR_VERSION) -> dict:
+            extractor_version: str = EXTRACTOR_VERSION,
+            include_chart_candidates: bool = False,
+            chart_inventory=None, index_review_id: str = '',
+            review_as_of: datetime | None = None,
+            auto_admit: bool = False) -> dict:
+        _require_managed_write(self.structured)
         self.structured.bootstrap_catalog()
         ingestion_id = self.structured.begin_ingestion(
             source_id=SOURCE_ID, dataset_id=DATASET_ID,
             query_scope={"document_version_id": version_id,
                          "partition": "index_core",
                          "extractor_version": extractor_version})
-        extracted = extract_index_text(
-            document, document_id=document_id, version_id=version_id,
-            known_at=known_at, extractor_version=extractor_version)
+        if extractor_version.startswith("factset-text-semantic-v2"):
+            extracted = extract_index_text_semantic(
+                document, document_id=document_id, version_id=version_id,
+                known_at=known_at, extractor_version=extractor_version)
+        else:
+            extracted = extract_index_text(
+                document, document_id=document_id, version_id=version_id,
+                known_at=known_at, extractor_version=extractor_version)
+        if include_chart_candidates:
+            if not extractor_version.startswith("factset-text-semantic-v2"):
+                raise ValueError("aggregate_chart_candidates_require_semantic_index")
+            from ..sources.factset_index_charts import extract_index_chart_candidates
+
+            extracted.candidates.extend(extract_index_chart_candidates(
+                document, extracted, chart_inventory=chart_inventory))
         merged = merge_candidate_evidence(extracted.candidates)
         extracted.candidates = merged.candidates
         validated = validate_index_candidates(extracted)
@@ -332,9 +365,7 @@ class FactSetIndexPipeline:
                         period_basis=candidate.period.basis,
                         dimensions={
                             "estimate_state": candidate.estimate_state.value,
-                            **{key: value for key, value in candidate.dimensions.items()
-                               if not key.startswith("raw_") and
-                               key != "supporting_raw_tokens"},
+                            **series_dimensions(candidate),
                         }),
                     period=candidate.period.value, value=float(candidate.value),
                     event_time=datetime.combine(
@@ -375,16 +406,153 @@ class FactSetIndexPipeline:
 
         required = set(self.required_metrics.get(extracted.phase, set()))
         quality = self._quality(validated.candidates, required, validated.missing)
+        semantic = extractor_version.startswith('factset-text-semantic-v2')
+        review_context = None
+        approval = None
+        review_reasons = []
+        if semantic:
+            from ..sources.factset_contracts import digest
+            from ..sources.factset_report_layout import load_layout_policy, policy_hash
+            from ..stores.structured.factset_reviews import FactSetReviews
+            from ...config import _config_dir
+            import yaml
+
+            policy = load_layout_policy()
+            registered_index_metrics = yaml.safe_load(
+                (_config_dir() / 'data' / 'structured.yaml').read_text(encoding='utf-8')
+            )['datasets']['sp500_earnings_insight']['core_metrics']
+            cells = sorted(({
+                'metric_id': candidate.metric_id,
+                'period': candidate.period.value,
+                'period_basis': candidate.period.basis,
+                'value': candidate.value,
+                'unit': candidate.unit,
+                'estimate_state': candidate.estimate_state.value,
+                'raw_token': candidate.raw_token,
+                'status': candidate.status.value,
+                'evidence_hash': digest([anchor.model_dump(mode='json')
+                                         for anchor in candidate.evidence])
+                if candidate.evidence else '',
+            } for candidate in validated.candidates),
+                key=lambda item: (item['metric_id'], item['period'], item['period_basis'],
+                                  item['status'], str(item['value'])))
+            review_context = {
+                'pdf_hash': document.pdf_hash,
+                'document_version': version_id,
+                'policy_hash': policy_hash(policy),
+                'extractor_version': extractor_version,
+                'scope_id': 'index',
+                'scope_version': policy['scope_policy']['version'],
+                'metric_group': 'index_core',
+                'entity_ids': ['SP500'],
+                'registered_metric_ids': sorted(registered_index_metrics),
+                'candidate_set_hash': digest(cells),
+                'cells': cells,
+            }
+            quality['bounded_narrative_evidence'] = bounded_narrative_evidence(document)
+            quality['index_review_context'] = review_context
+            quality['legacy_text_passed'] = quality['passed']
+            quality['value_checks_passed'] = bool(
+                validated.candidates and not validated.quarantined
+                and all(candidate.status == CandidateStatus.ACCEPTED
+                        for candidate in validated.candidates))
+            if auto_admit and not index_review_id and quality['value_checks_passed']:
+                from collections import Counter
+
+                # The registered metric list is independent of extraction.
+                # Any absent/extra metric, conflicting cell, or missing source
+                # anchor takes the report to exception review instead.
+                observed = {row['metric_id'] for row in cells}
+                missing = set(registered_index_metrics) - observed
+                auto_rule = policy.get('auto_admission', {})
+                optional = set(auto_rule.get('optional_index_metrics', ()))
+                counts = Counter(row['metric_id'] for row in cells)
+                minimums = auto_rule.get('min_index_period_counts', {})
+                multiplicity_ok = all(
+                    counts[metric] >= int(minimums.get(metric, 0 if metric in optional else 1))
+                    for metric in registered_index_metrics)
+                reporting_quarters = sorted({period for chart in (chart_inventory or ())
+                    for period in chart.periods
+                    if chart.period_basis == 'target_quarter'})
+                keys = {(row['metric_id'], row['period'], row['period_basis'])
+                        for row in cells}
+                if (not (observed - set(registered_index_metrics))
+                        and missing <= optional
+                        and multiplicity_ok
+                        and (not missing or reporting_quarters)
+                        and len(keys) == len(cells)
+                        and all(row['evidence_hash'] for row in cells)):
+                    reviews = FactSetReviews(self.structured)
+                    expected_cells = [dict(metric_id=row['metric_id'],
+                                           period=row['period'],
+                                           period_basis=row['period_basis'])
+                                      for row in cells]
+                    not_disclosed = [dict(metric_id=metric_id,
+                                          period=reporting_quarters[-1],
+                                          period_basis='target_quarter')
+                                     for metric_id in sorted(missing)]
+                    source_refs = ['pdf:' + document.pdf_hash]
+                    package_hash = reviews.register_index(
+                        review_context, expected_cells=expected_cells,
+                        not_disclosed=not_disclosed, evidence_refs=source_refs,
+                        at=review_as_of or datetime.now(timezone.utc))
+                    if not reviews.index_package_reasons(reviews.index_package(package_hash)):
+                        latest = reviews.latest_index_decision(package_hash)
+                        if latest is not None:
+                            if latest[1] == 'approve':
+                                index_review_id = latest[0]
+                        else:
+                            index_review_id = reviews.decide_index(
+                                package_hash, decision='approve', reviewer='factset-policy-v1',
+                                evidence_refs=source_refs,
+                                note='Registered metrics, unique periods, source anchors and candidate validation passed',
+                                at=review_as_of or datetime.now(timezone.utc))
+            if index_review_id:
+                try:
+                    approval = FactSetReviews(self.structured).require_index_approval(
+                        review_context, index_review_id,
+                        as_of=review_as_of or datetime.now(timezone.utc))
+                except ValueError as exc:
+                    review_reasons.append(str(exc))
+            else:
+                review_reasons.append('independent_index_review_required')
+            quality['review_id'] = index_review_id
+            quality['review_package_hash'] = approval['package_hash'] if approval else ''
+            quality['review_reasons'] = review_reasons
+            quality['passed'] = bool(quality['value_checks_passed'] and approval)
         if extracted.phase == ReportPhase.UNKNOWN_TEMPLATE:
             quality["passed"] = False
             quality["template_reasons"] = extracted.reason_codes
         mode = source_mode("factset_earnings_insight_index")
-        release_status = "platform" if quality["passed"] and mode == "platform" else "shadow"
+        # Semantic data is publishable only with an exact, current inventory
+        # approval. A passing legacy text gate cannot authorize it.
+        release_status = (
+            "platform" if quality["passed"] and mode == "platform"
+            else "shadow"
+        )
+        release_version = extractor_version
+        release_known_at = known_at
+        if semantic:
+            from ..sources.factset_contracts import digest
+            if review_as_of is not None:
+                if review_as_of.tzinfo is None:
+                    raise ValueError('review_as_of_must_be_aware')
+                release_known_at = max(release_known_at, review_as_of)
+            release_version += ':release:' + digest({
+                'candidate_set_hash': review_context['candidate_set_hash'],
+                'review_id': index_review_id,
+                'review_package_hash': quality['review_package_hash'],
+                'review_reasons': review_reasons,
+                'status': release_status,
+            })[:24]
+            if approval:
+                release_known_at = max(
+                    release_known_at, datetime.fromisoformat(approval['reviewed_at']))
         release_id = self.structured.save_release_manifest(
             source_id=SOURCE_ID, dataset_id=DATASET_ID, partition="index_core",
             report_date=document.report_date.isoformat(), document_id=document_id,
-            version_id=version_id, artifact_id=artifact_id, known_at=known_at,
-            extractor_version=extractor_version, status=release_status,
+            version_id=version_id, artifact_id=artifact_id, known_at=release_known_at,
+            extractor_version=release_version, status=release_status,
             passed=bool(quality["passed"]), quality=quality,
             observation_ids=list(dict.fromkeys(observation_ids)))
         if conflicts or quarantined:
@@ -409,6 +577,7 @@ class FactSetIndexPipeline:
             "quarantined": quarantined, "conflicts": conflicts,
             "merged_duplicates": merged.merged_duplicates,
             "observation_ids": list(dict.fromkeys(observation_ids)),
+            "review_context": review_context,
         }
 
 
@@ -433,6 +602,7 @@ class FactSetSectorPipeline:
             version_id: str, artifact_id: str, known_at: datetime,
             extractor_version: str = "factset-chart-v1",
             annotated_cells_ok: bool = False) -> dict:
+        _require_managed_write(self.structured)
         self.structured.bootstrap_catalog()
         ingestion_id = self.structured.begin_ingestion(
             source_id=SOURCE_ID, dataset_id=DATASET_ID,
@@ -597,6 +767,304 @@ class FactSetWeeklyPipeline:
         self.clock = clock
         self.client = client
 
+    def run_semantic(self, *, expected_groups=None, review_ids: dict[str, str] | None = None,
+                     index_review_id: str = '',
+                     auto_admit: bool = False,
+                     report_month: str = '',
+                     local_pdf: str | Path | None = None, url: str = STABLE_URL,
+                     document_processor_version: str = "factset-document-v1") -> dict:
+        """Stage one report with semantic Index/sector candidates only.
+
+        An independent inventory must be supplied or registered before extraction. Missing
+        reviews leave individual sector groups shadow; Index requires its own
+        independently declared, hash-bound inventory review.
+        The dated decoder and boolean sector approval are never called here.
+        """
+        _require_managed_write(self.structured)
+        if expected_groups is not None and not expected_groups:
+            raise ValueError("independent_factset_group_inventory_required")
+        if source_mode("factset_earnings_insight_doc") == "off":
+            return {"status": "off", "core_acceptance": "blocked"}
+        review_ids = review_ids or {}
+        from ..sources.factset_semantic import extract_sector_packages
+        from ..sources.factset_report_layout import (
+            discover_charts, load_layout_policy, policy_hash,
+        )
+        from .factset_groups import FactSetGroupPipeline
+
+        document_pipeline = FactSetDocumentPipeline(
+            self.structured, self.documents, clock=self.clock, client=self.client
+        )
+        source = (document_pipeline._local_source(local_pdf)
+                  if local_pdf else fetch_report(
+                      url=url, client=self.client, clock=self.clock))
+        document = inspect_pdf(source)
+        if report_month:
+            import re
+
+            if not re.fullmatch(r'20\d{2}-(?:0[1-9]|1[0-2])', report_month):
+                raise ValueError('factset_report_month_invalid')
+            if document.report_date.strftime('%Y-%m') != report_month:
+                raise ValueError(
+                    'factset_latest_pdf_outside_target_month:'
+                    + document.report_date.isoformat() + ':' + report_month
+                )
+        projection = document_pipeline.run(
+            local_pdf=local_pdf, processor_version=document_processor_version,
+              source=source, document=document)
+        known_at = datetime.fromisoformat(projection["known_at"])
+        policy = load_layout_policy()
+        try:
+            chart_inventory = discover_charts(document, policy=policy)
+        except Exception as exc:
+            failure = f"chart_discovery_exception:{type(exc).__name__}"
+            release_id = self.structured.save_release_manifest(
+                source_id=SOURCE_ID, dataset_id=DATASET_ID,
+                partition="semantic_discovery",
+                report_date=projection["report_date"],
+                document_id=projection["document_id"],
+                version_id=projection["document_version_id"],
+                artifact_id=projection["artifact_id"], known_at=known_at,
+                extractor_version=("factset-semantic-discovery-v1:"
+                                   + policy_hash(policy) + ":failed:"
+                                   + hashlib.sha256(failure.encode()).hexdigest()[:12]),
+                status="shadow", passed=False,
+                quality={"stage": "chart_discovery", "reason_codes": [failure],
+                         "policy_hash": policy_hash(policy), "charts": []},
+                observation_ids=[],
+            )
+            return {
+                "status": "partial", "core_acceptance": "blocked",
+                "report_coverage": "partial", "document": projection,
+                "chart_discovery_release_id": release_id,
+                "index_core": {"status": "not_attempted"}, "sector_groups": {},
+                "reason_codes": [failure],
+            }
+        discovered_charts = [chart.summary() for chart in chart_inventory]
+        if expected_groups is None:
+            from ..sources.factset_report_layout import (
+                declared_report_groups, discovered_core_groups,
+            )
+            try:
+                expected_groups = declared_report_groups(document.report_date, policy=policy)
+            except ValueError as exc:
+                if not auto_admit:
+                    return {
+                        'status': 'partial', 'core_acceptance': 'blocked',
+                        'report_coverage': 'partial', 'document': projection,
+                        'index_core': {'status': 'not_attempted'},
+                        'sector_groups': {}, 'reason_codes': [str(exc)],
+                    }
+                try:
+                    expected_groups = discovered_core_groups(
+                        document.report_date, chart_inventory, policy=policy)
+                except ValueError as inventory_exc:
+                    return {
+                        'status': 'partial', 'core_acceptance': 'blocked',
+                        'report_coverage': 'partial', 'document': projection,
+                        'index_core': {'status': 'not_attempted'},
+                        'sector_groups': {}, 'reason_codes': [str(inventory_exc)],
+                    }
+        discovery_release_id = self.structured.save_release_manifest(
+            source_id=SOURCE_ID, dataset_id=DATASET_ID,
+            partition="semantic_discovery",
+            report_date=projection["report_date"],
+            document_id=projection["document_id"],
+            version_id=projection["document_version_id"],
+            artifact_id=projection["artifact_id"], known_at=known_at,
+            extractor_version="factset-semantic-discovery-v1:" + policy_hash(policy),
+            status="shadow", passed=False,
+            quality={"stage": "chart_discovery", "policy_hash": policy_hash(policy),
+                     "charts": discovered_charts,
+                     "failed_charts": [chart for chart in discovered_charts
+                                       if chart["status"] in {"pending_review", "extraction_failed"}]},
+            observation_ids=[],
+        )
+        try:
+            index = FactSetIndexPipeline(self.structured).run(
+                document, document_id=projection["document_id"],
+                version_id=projection["document_version_id"],
+                artifact_id=projection["artifact_id"], known_at=known_at,
+                extractor_version="factset-text-semantic-v2:" + policy_hash(policy),
+                include_chart_candidates=True, chart_inventory=chart_inventory,
+                index_review_id=index_review_id, review_as_of=self.clock(),
+                auto_admit=auto_admit)
+        except Exception as exc:
+            failure = f"index_extraction_exception:{type(exc).__name__}"
+            release_id = self.structured.save_release_manifest(
+                source_id=SOURCE_ID, dataset_id=DATASET_ID,
+                partition="semantic_index_stage_error",
+                report_date=projection["report_date"],
+                document_id=projection["document_id"],
+                version_id=projection["document_version_id"],
+                artifact_id=projection["artifact_id"], known_at=known_at,
+                extractor_version="factset-text-semantic-v2:" + policy_hash(policy),
+                status="shadow", passed=False,
+                quality={"stage": "index_extraction", "reason_codes": [failure]},
+                observation_ids=[],
+            )
+            index = {"status": "failed", "release_id": release_id,
+                     "reason_codes": [failure]}
+        # Scope is part of group identity and admission, not a property of
+        # the PDF. Stage each declared scope independently from the same
+        # chart inventory so a P2 all-sector failure cannot erase P0 output.
+        by_scope = {}
+        for group in expected_groups:
+            by_scope.setdefault(group.scope_id, []).append(group)
+        packages = []
+        for scope_id, scoped_groups in by_scope.items():
+            try:
+                scoped_packages, _ = extract_sector_packages(
+                    document, document_version=projection["document_version_id"],
+                    expected_groups=scoped_groups, scope_id=scope_id, policy=policy,
+                    chart_inventory=chart_inventory)
+            except Exception as exc:
+                from ..sources.factset_contracts import GroupPackage
+                from ..sources.factset_semantic import EXTRACTOR_VERSION as SECTOR_VERSION
+
+                failure = f"sector_extraction_exception:{type(exc).__name__}"
+                scoped_packages = tuple(GroupPackage(
+                    pdf_hash=document.pdf_hash,
+                    document_version=projection["document_version_id"],
+                    report_date=document.report_date,
+                    extractor_version=SECTOR_VERSION,
+                    policy_hash=policy_hash(policy), group=group,
+                    candidates=(), stage_errors=(failure,),
+                ) for group in scoped_groups)
+            packages.extend(scoped_packages)
+        group_pipeline = FactSetGroupPipeline(self.structured, clock=self.clock)
+        groups = {}
+        for package in packages:
+            review_id = review_ids.get(package.group.key, "")
+            if auto_admit and not review_id and package.group.scope_id == 'technology':
+                from ..sources.factset_contracts import validate_group
+                from ..stores.structured.factset_reviews import FactSetReviews
+
+                if not validate_group(package, policy):
+                    reviews = FactSetReviews(self.structured)
+                    reviews.register(package, at=self.clock())
+                    refs = ['pdf:' + package.pdf_hash,
+                            f'chart:{package.group.chart_id}:{package.group.period}']
+                    latest = reviews.latest_group_decision(package.package_hash)
+                    if latest is not None:
+                        if latest[1] == 'approve':
+                            review_id = latest[0]
+                    else:
+                        review_id = reviews.decide(
+                            package.package_hash, decision='approve',
+                            reviewer='factset-policy-v1', evidence_refs=refs,
+                            note='Declared chart/period inventory, complete source-backed cells and structural rules passed',
+                            policy=policy, at=self.clock())
+            groups[package.group.key] = group_pipeline.run(
+                package, artifact_id=projection["artifact_id"],
+                document_id=projection["document_id"],
+                review_id=review_id)
+        technology = [group for group in expected_groups if group.scope_id == 'technology']
+        required_chart_ids = {
+            'earnings_revenue_scorecard', 'earnings_revenue_surprise',
+            'earnings_revenue_growth', 'net_profit_margin', 'eps_guidance',
+            'geographic_revenue_exposure', 'forward_pe', 'target_ratings',
+        }
+        expected_technology_charts = {group.chart_id for group in technology}
+        missing_technology_charts = sorted(required_chart_ids - expected_technology_charts)
+        discovered_periods = {
+            (chart.groups[0], chart.periods[0], chart.period_basis)
+            for chart in chart_inventory
+            if len(chart.groups) == 1 and len(chart.periods) == 1
+            and chart.groups[0] in required_chart_ids
+        }
+        declared_periods = {
+            (group.chart_id, group.period, group.period_basis)
+            for group in technology
+        }
+        missing_technology_periods = sorted(discovered_periods - declared_periods)
+        technology_passed = bool(technology and not missing_technology_charts
+            and not missing_technology_periods and all(
+            groups[group.key]['passed']
+            and groups[group.key].get('release_status') == 'platform'
+            for group in technology))
+        index_passed = bool(index.get('quality', {}).get('passed')
+                            and index.get('release_status') == 'platform')
+        core_passed = index_passed and technology_passed
+        all_sector_groups = [group for group in expected_groups
+                             if group.scope_id == 'all_sectors']
+        declared_all_sector_periods = {
+            (group.chart_id, group.period, group.period_basis)
+            for group in all_sector_groups
+        }
+        missing_all_sector_periods = sorted(
+            discovered_periods - declared_all_sector_periods)
+        full_sectors = bool(all_sector_groups and all(
+            groups[group.key]['passed']
+            and groups[group.key].get('release_status') == 'platform'
+            for group in all_sector_groups)
+            and {group.chart_id for group in all_sector_groups} >= required_chart_ids
+            and not missing_all_sector_periods)
+        report_coverage = ('complete' if core_passed and full_sectors
+                           and not any(chart['status'] in {'pending_review', 'extraction_failed'}
+                                       for chart in discovered_charts)
+                           else 'partial')
+        from ..sources.factset_contracts import digest
+        summary = {
+            'scope_id': 'all_sectors' if full_sectors else 'technology',
+            'scope_version': policy['scope_policy']['version'],
+            'state': 'partial' if not full_sectors else 'complete',
+            'core_acceptance': 'passed' if core_passed else 'blocked',
+            'report_coverage': report_coverage,
+            'index_release_id': index.get('release_id', ''),
+            'technology_group_release_ids': sorted(
+                groups[group.key]['release_id'] for group in technology),
+            'missing_technology_chart_ids': missing_technology_charts,
+            'missing_technology_periods': missing_technology_periods,
+            'missing_all_sector_periods': missing_all_sector_periods,
+            'all_sector_groups_expected': len(all_sector_groups),
+            'all_sector_groups_published': sum(
+                groups[group.key]['passed']
+                and groups[group.key].get('release_status') == 'platform'
+                for group in all_sector_groups),
+            'warning': '' if full_sectors else 'technology_only_is_not_full_sector_coverage',
+        }
+        summary_revision = 'factset-sector-core-summary-v1:' + digest(summary)[:24]
+        summary_release_id = self.structured.save_release_manifest(
+            source_id=SOURCE_ID, dataset_id=DATASET_ID, partition='sector_core',
+            report_date=projection['report_date'], document_id=projection['document_id'],
+            version_id=projection['document_version_id'],
+            artifact_id=projection['artifact_id'], known_at=self.clock(),
+            extractor_version=summary_revision,
+            status='platform' if full_sectors and core_passed else 'shadow',
+            passed=bool(full_sectors and core_passed), quality=summary,
+            observation_ids=list(dict.fromkeys(
+                observation_id for group in (all_sector_groups if full_sectors else technology)
+                for observation_id in groups[group.key]['observation_ids'])))
+        reasons = []
+        if not index_passed:
+            reasons.append('index_core_not_published')
+        if missing_technology_charts or missing_technology_periods:
+            reasons.append('technology_inventory_incomplete')
+        if not technology_passed:
+            reasons.append('technology_groups_not_published')
+        if report_coverage == 'partial':
+            reasons.append('supplemental_report_coverage_partial')
+        return {
+            "status": "succeeded" if core_passed else "partial",
+            "core_acceptance": "passed" if core_passed else "blocked",
+            "report_coverage": report_coverage,
+            "provenance": {
+                "stable_url": _sanitized_url(source.stable_url),
+                "final_url": _sanitized_url(source.final_url),
+                "response_status": source.status_code,
+                "pdf_sha256": projection["pdf_sha256"],
+                "report_date": projection["report_date"],
+            },
+            "document": projection, "index_core": index,
+            "sector_groups": groups,
+            "sector_core": {"release_id": summary_release_id, "quality": summary,
+                            "status": "platform" if full_sectors and core_passed else "shadow"},
+            "chart_discovery_release_id": discovery_release_id,
+            "chart_discovery": discovered_charts,
+            "reason_codes": reasons,
+        }
+
     def run(self, *, local_pdf: str | Path | None = None,
             document_processor_version: str = "factset-document-v1",
             index_extractor_version: str = EXTRACTOR_VERSION,
@@ -604,6 +1072,10 @@ class FactSetWeeklyPipeline:
             sector_tables: list[ChartTable] | None = None,
             annotated_cells_ok: bool = False,
             url: str = STABLE_URL) -> dict:
+        # Keep the producer boundary at the pipeline entry, before the first
+        # network request.  CLI gating alone is insufficient because callers
+        # can instantiate this pipeline directly.
+        _require_managed_write(self.structured)
         started = monotonic()
         document_pipeline = FactSetDocumentPipeline(
             self.structured, self.documents, clock=self.clock, client=self.client)

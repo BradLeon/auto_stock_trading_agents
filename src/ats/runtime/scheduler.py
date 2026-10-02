@@ -12,7 +12,9 @@ scheduled run would block on terminal input, so a warning is emitted.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+import hashlib
+import os
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -768,27 +770,56 @@ def _weekly_review() -> None:
 
 
 def _factset_weekly_ingest() -> None:
-    """Prepare the governed weekly snapshot; consumer jobs only read releases."""
-    from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
-    from ..data.runtime import get_platform_structured_repository
-    from ..data.stores.unstructured import get_platform_unstructured_repository
+    """Submit the legacy weekly or semantic month-end report through one queue."""
+    from ..data.persistent_queue import PersistentIngestionQueue
 
-    structured = get_platform_structured_repository()
-    documents = get_platform_unstructured_repository()
-    try:
-        result = FactSetWeeklyPipeline(structured, documents).run()
-        provenance = result.get("provenance") or {}
-        log.info(
-            "factset weekly ingest: status=%s report=%s hash=%s index=%s sector=%s "
-            "elapsed=%ss",
-            result.get("status"), provenance.get("report_date", ""),
-            provenance.get("artifact_hash", "")[:12],
-            (result.get("index_core") or {}).get("release_status", "unavailable"),
-            (result.get("sector_core") or {}).get("release_status", "unavailable"),
-            result.get("elapsed_seconds", 0))
-    finally:
-        structured.close()
-        documents.close()
+    now = datetime.now(timezone.utc)
+    iso = now.isocalendar()
+    structured_registry = Path(__file__).resolve().parents[3] / "config/data/structured.yaml"
+    semantic = os.environ.get('ATS_FACTSET_SCHEDULE_SEMANTIC', '') == '1'
+    if semantic:
+        cfg = get_config().app.schedule
+        local = now.astimezone(ZoneInfo(cfg.factset_month_end_tz))
+        # A sleep/misfire may run on one of the first days of the next month.
+        target = local - timedelta(days=local.day) if local.day <= 4 else local
+        report_month = target.strftime('%Y-%m')
+        trigger_ref = f'factset-month-end:{report_month}'
+    else:
+        report_month = ''
+        trigger_ref = f"factset-weekly:{iso.year}-W{iso.week:02d}"
+    command = 'factset-semantic-refresh' if semantic else 'factset-refresh'
+    policy_fingerprint = hashlib.sha256(
+        structured_registry.read_bytes() + command.encode()).hexdigest()
+    queue = PersistentIngestionQueue()
+    task_id, created = queue.enqueue(
+        source_id="factset_earnings_insight_doc",
+        scope={"dataset": "sp500_earnings_insight",
+               "sources": ["factset_earnings_insight_doc",
+                           "factset_earnings_insight_metrics"]},
+        trigger_kind="scheduled", trigger_ref=trigger_ref,
+        command=(["ats", "data", command, "--source",
+                  "factset_earnings_insight_doc"]
+                 + (["--query-scope", '{"auto_admit":true,"report_month":"'
+                     + report_month + '"}'] if semantic else [])),
+        policy_fingerprint=policy_fingerprint,
+        requested_as_of=now.isoformat(), priority=30, max_attempts=3,
+    )
+    result = queue.run_one(task_id=task_id)
+    if result is None:
+        current = queue.get(task_id) or {}
+        log.info("factset %s queue task %s (created=%s): %s",
+                 'month-end' if semantic else 'weekly', task_id, created,
+                 current.get("status", "queued"))
+        return
+    payload = result.get("stdout") or {}
+    provenance = payload.get("provenance") or {}
+    log.info(
+        "factset %s queue task=%s status=%s report=%s hash=%s index=%s sector=%s",
+        'month-end' if semantic else 'weekly', task_id, result.get("status"),
+        provenance.get("report_date", ""),
+        provenance.get("artifact_hash", "")[:12],
+        (payload.get("index_core") or {}).get("release_status", "unavailable"),
+        (payload.get("sector_core") or {}).get("release_status", "unavailable"))
 
 
 def _attach_job_logging(scheduler) -> None:
@@ -825,8 +856,17 @@ def _attach_job_logging(scheduler) -> None:
                            EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
 
 
-def _validate_factset_schedule(cfg) -> None:
-    """Fail fast when the data-preparation job cannot precede weekly review."""
+def _validate_factset_schedule(cfg, *, semantic: bool = False) -> None:
+    """Validate legacy weekly ordering or semantic month-end timing."""
+    if semantic:
+        try:
+            ZoneInfo(cfg.factset_month_end_tz)
+            hour, minute = (int(part) for part in cfg.factset_month_end_at.split(':'))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError('FactSet month-end time and timezone invalid') from exc
+        if not 0 <= hour < 24 or not 0 <= minute < 60:
+            raise ValueError('FactSet month-end time invalid')
+        return
     if cfg.factset_refresh_tz != cfg.weekly_review_tz:
         raise ValueError(
             "factset_refresh_tz must match weekly_review_tz for deterministic ordering")
@@ -863,8 +903,9 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         _daily(dry_run=dry_run, use_llm=use_llm)
         return
 
+    factset_semantic = os.environ.get('ATS_FACTSET_SCHEDULE_SEMANTIC', '') == '1'
     if cfg.jobs.factset_weekly_ingest:
-        _validate_factset_schedule(cfg)
+        _validate_factset_schedule(cfg, semantic=factset_semantic)
 
     from apscheduler.executors.pool import ThreadPoolExecutor
     from apscheduler.schedulers.blocking import BlockingScheduler
@@ -898,13 +939,22 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
     # inside _macro_weekly/_sector_weekly must track this same timezone, not ET.
     w_hour, w_minute = (int(x) for x in cfg.weekly_review_at.split(":"))
     f_hour, f_minute = (int(x) for x in cfg.factset_refresh_at.split(":"))
-    factset_grace = min(grace, 6 * 3600)
+    factset_grace = 72 * 3600 if factset_semantic else min(grace, 6 * 3600)
     if cfg.jobs.factset_weekly_ingest:
+        if factset_semantic:
+            m_hour, m_minute = (int(x) for x in cfg.factset_month_end_at.split(':'))
+            factset_trigger = CronTrigger(
+                day='last', hour=m_hour, minute=m_minute,
+                timezone=cfg.factset_month_end_tz)
+        else:
+            factset_trigger = CronTrigger(
+                day_of_week="sat", hour=f_hour, minute=f_minute,
+                timezone=cfg.factset_refresh_tz)
         scheduler.add_job(
             _factset_weekly_ingest,
-            CronTrigger(day_of_week="sat", hour=f_hour, minute=f_minute,
-                        timezone=cfg.factset_refresh_tz),
-            id="factset_weekly_ingest", misfire_grace_time=factset_grace,
+            factset_trigger,
+            id="factset_monthly_ingest" if factset_semantic else "factset_weekly_ingest",
+            misfire_grace_time=factset_grace,
             coalesce=True, max_instances=1,
         )
     if cfg.jobs.weekly_review:

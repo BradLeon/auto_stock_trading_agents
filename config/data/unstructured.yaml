@@ -28,7 +28,7 @@ sources:
     provider: FactSet
     adapter: factset_earnings_insight
     status: registered
-    cadence: weekly
+    cadence: monthly_final_report
     request_budget:
       max_requests_per_run: 1
       timeout_seconds: 60

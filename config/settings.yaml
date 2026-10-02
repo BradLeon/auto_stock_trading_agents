@@ -93,6 +93,8 @@ schedule:
   weekly_review_tz: Asia/Shanghai
   factset_refresh_at: "08:10"
   factset_refresh_tz: Asia/Shanghai
+  factset_month_end_at: "23:30"
+  factset_month_end_tz: America/New_York
   # 例行作业可逐项暂停、验证输入/输出后再恢复。未列出的旧配置默认全部开启，
   # 以保证升级兼容；此处是当前生产运行策略。
   daily_stages:

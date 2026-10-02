@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timezone
 import json
 import re
 from typing import Any
@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 DATASET_ID = "sp500_earnings_insight"
 SOURCE_ID = "factset_earnings_insight_metrics"
-FRESHNESS_DAYS = 10
 _FAILURE_STATES = {
     "unreachable", "unauthorized", "not_pdf", "parse_failed",
     "validation_failed",
@@ -242,11 +241,14 @@ def _observation(products, observation_id: str) -> EarningsInsightObservation | 
     )
 
 
-def _latest_failure(repository, release: dict | None) -> str:
+def _latest_failure(repository, release: dict | None,
+                    *, as_of: datetime) -> str:
     history = repository.ingestion_history(
         source_id=SOURCE_ID, dataset_id=DATASET_ID, limit=20)
     cutoff = str((release or {}).get("known_at") or "")
     for attempt in history:
+        if str(attempt.get('started_at') or '') > as_of.astimezone(timezone.utc).isoformat():
+            continue
         if cutoff and str(attempt.get("started_at") or "") <= cutoff:
             break
         status = str(attempt.get("status") or "")
@@ -256,39 +258,79 @@ def _latest_failure(repository, release: dict | None) -> str:
 
 
 def _empty_snapshot(products, *, as_of: datetime | None) -> EarningsInsightSnapshot:
+    reference = as_of or datetime.now(timezone.utc)
     history = products.structured.ingestion_history(
-        source_id=SOURCE_ID, dataset_id=DATASET_ID, limit=1)
-    failure = (str(history[0].get("status") or "")
-               if history and history[0].get("status") in _FAILURE_STATES else "")
+        source_id=SOURCE_ID, dataset_id=DATASET_ID, limit=20)
+    visible = next((row for row in history
+                    if str(row.get('started_at') or '') <= reference.astimezone(timezone.utc).isoformat()), None)
+    failure = (str(visible.get('status') or '')
+               if visible and visible.get('status') in _FAILURE_STATES else '')
+    attempts = products.structured.release_manifests(
+        dataset_id=DATASET_ID, partition='index_core', as_of=reference,
+        passed_only=False, limit=20)
+    latest = attempts[0] if attempts else None
     registered = any(row.get("dataset_id") == DATASET_ID
                      for row in products.structured.datasets())
-    state = "unavailable" if failure or not registered else "registered_no_data"
+    if failure:
+        state = 'unavailable'
+    elif latest is not None:
+        reasons = latest.get('quality', {}).get('review_reasons', [])
+        state = ('pending_review' if any('review' in reason for reason in reasons)
+                 else 'shadow' if latest['status'] == 'shadow' else 'blocked')
+    else:
+        state = "registered_no_data" if registered else "unavailable"
     warning = [f"latest_refresh_failure:{failure}"] if failure else []
+    if latest is not None:
+        warning.append(f"latest_unpublished_report:{latest['report_date']}")
     return EarningsInsightSnapshot(status=EarningsInsightStatus(
         state=state, freshness="unavailable", latest_refresh_failure=failure,
         warnings=warning,
-        index_release=EarningsInsightPartitionStatus(state=state),
+        index_release=_partition(latest, absent_state=state),
         sector_release=EarningsInsightPartitionStatus(state=state)))
 
 
 def load_snapshot(products, *, as_of: datetime | None = None,
                   version_id: str = "") -> EarningsInsightSnapshot:
     """Read one released report without fetching or opening physical tables."""
+    if not version_id:
+        from ..release import pinned_product_version
+
+        version_id = pinned_product_version('factset_earnings_insight')
     reference = as_of or datetime.now(timezone.utc)
     if reference.tzinfo is None:
         raise ValueError("FactSet snapshot as_of must be timezone-aware")
     manifests = products.structured.release_manifests(
-        dataset_id=DATASET_ID, partition="index_core", as_of=as_of,
-        passed_only=True, limit=500)
-    index_release = next((item for item in manifests
-                          if not version_id or item["version_id"] == version_id), None)
+        dataset_id=DATASET_ID, partition="index_core", as_of=reference,
+        passed_only=False, limit=1000)
+    latest_by_version = {}
+    for item in manifests:
+        latest_by_version.setdefault(item['version_id'], item)
+
+    def usable(item):
+        if not item['passed'] or item['status'] != 'platform':
+            return False
+        if not item['extractor_version'].startswith('factset-text-semantic-v2:'):
+            return True  # immutable historical pre-semantic release
+        from ..stores.structured.factset_reviews import FactSetReviews
+        quality = item['quality']
+        try:
+            FactSetReviews(products.structured).require_index_approval(
+                quality['index_review_context'], quality['review_id'], as_of=reference)
+        except (KeyError, ValueError):
+            return False
+        return True
+
+    index_release = next((item for item in latest_by_version.values()
+                          if (not version_id or item['version_id'] == version_id)
+                          and usable(item)), None)
     if index_release is None:
         return _empty_snapshot(products, as_of=as_of)
 
     sector_release = next((item for item in products.structured.release_manifests(
         dataset_id=DATASET_ID, partition="sector_core", as_of=as_of,
         passed_only=True, limit=500)
-        if item["version_id"] == index_release["version_id"]), None)
+        if item["version_id"] == index_release["version_id"]
+        and item['status'] == 'platform'), None)
     selected_ids = list(index_release.get("observation_ids") or [])
     if sector_release:
         selected_ids.extend(sector_release.get("observation_ids") or [])
@@ -310,16 +352,18 @@ def load_snapshot(products, *, as_of: datetime | None = None,
 
     report_date = date.fromisoformat(index_release["report_date"])
     age_days = max(0, (reference.astimezone(timezone.utc).date() - report_date).days)
-    failure = _latest_failure(products.structured, index_release)
-    freshness = "stale" if age_days > FRESHNESS_DAYS or failure else "fresh"
-    state = "stale" if freshness == "stale" else str(index_release["status"])
+    failure = _latest_failure(products.structured, index_release, as_of=reference)
+    latest_attempt = manifests[0] if manifests else None
+    newer_unpublished = bool(latest_attempt and
+        latest_attempt['report_date'] > index_release['report_date'] and
+        latest_attempt['status'] != 'platform')
+    # Earnings Insight is released on the upstream report's cadence. Elapsed
+    # calendar days alone do not make its latest published month unusable.
+    freshness = "latest_released" if not newer_unpublished else "newer_unpublished"
+    state = str(index_release["status"])
     warnings: list[str] = []
-    if age_days > FRESHNESS_DAYS:
-        warnings.append(f"report_age_exceeds_{FRESHNESS_DAYS}_days")
-    if failure:
-        warnings.append(f"latest_refresh_failure:{failure}")
-    if sector_release is None:
-        warnings.append("sector_partition_unavailable_for_selected_report")
+    # Operational refresh failures and an unpublished newer report remain in
+    # dedicated status fields; they are not age-based consumer warnings.
 
     official_url = ""
     artifacts = products.structured.artifacts_for(
@@ -356,17 +400,14 @@ def load_snapshot(products, *, as_of: datetime | None = None,
             }))
 
 
-def _latest_index_observations(
+def _all_index_observations(
         snapshot: EarningsInsightSnapshot) -> list[EarningsInsightObservation]:
-    """Select one released value per index metric without inventing missing data."""
-    by_metric: dict[str, EarningsInsightObservation] = {}
-    for period_metrics in snapshot.index.values():
-        for item in period_metrics.values():
-            current = by_metric.get(item.metric_id)
-            if current is None or (item.known_at, item.period) > (
-                    current.known_at, current.period):
-                by_metric[item.metric_id] = item
-    return sorted(by_metric.values(), key=lambda item: (item.metric_id, item.period))
+    """Keep every released period; a consumer must not silently lose FY/CY data."""
+    return sorted(
+        (item for period_metrics in snapshot.index.values()
+         for item in period_metrics.values()),
+        key=lambda item: (item.metric_id, item.period_basis, item.period),
+    )
 
 
 def _group_observations(
@@ -390,7 +431,12 @@ def _group_observations(
 
 def _diagnostics(
         observations: list[EarningsInsightObservation]) -> list[EarningsInsightDiagnostic]:
-    by_metric = {item.metric_id: item for item in observations}
+    by_metric: dict[str, EarningsInsightObservation] = {}
+    for item in observations:
+        current = by_metric.get(item.metric_id)
+        if current is None or (item.known_at, item.period) > (
+                current.known_at, current.period):
+            by_metric[item.metric_id] = item
     results: list[EarningsInsightDiagnostic] = []
 
     def difference(diagnostic_id: str, label: str, left: str, right: str,
@@ -474,7 +520,7 @@ def _bounded_excerpt(text: str, match: re.Match[str], *, limit: int = 900) -> tu
 
 def _select_narrative_evidence(
         products, snapshot: EarningsInsightSnapshot,
-        *, limit: int = 6) -> list[EarningsInsightNarrativeEvidence]:
+        *, limit: int = 10) -> list[EarningsInsightNarrativeEvidence]:
     if not snapshot.report.version_id:
         return []
     pages = products.unstructured.document_pages(snapshot.report.version_id)
@@ -517,6 +563,28 @@ def _select_narrative_evidence(
             version_id=snapshot.report.version_id))
         if len(selected) >= limit:
             break
+    topics = {
+        'ai': 'AI 原文提及',
+        'semiconductors': '半导体原文提及',
+        'consumer_electronics': '消费电子原文提及',
+        'hardware': '硬件原文提及',
+    }
+    for item in snapshot.status.index_release.quality.get('bounded_narrative_evidence', []):
+        if len(selected) >= limit:
+            break
+        if item.get('status') != 'source_mention_not_inference' \
+                or item.get('theme') not in topics:
+            continue
+        span_key = (int(item['page_number']), int(item['char_start']),
+                    int(item['char_end']))
+        if span_key in used_spans or not str(item.get('text') or '').strip():
+            continue
+        used_spans.add(span_key)
+        selected.append(EarningsInsightNarrativeEvidence(
+            topic=item['theme'], topic_label=topics[item['theme']],
+            page_number=span_key[0], char_start=span_key[1], char_end=span_key[2],
+            text=item['text'], document_id=snapshot.report.document_id,
+            version_id=snapshot.report.version_id))
     return selected
 
 
@@ -525,7 +593,7 @@ def load_analysis_packet(products, *, as_of: datetime | None = None,
     """Build the bounded, traceable FactSet input shared by analysis workflows."""
     snapshot = load_snapshot(products, as_of=as_of, version_id=version_id)
     warnings = list(snapshot.status.warnings)
-    observations = _latest_index_observations(snapshot)
+    observations = _all_index_observations(snapshot)
     groups = _group_observations(observations, warnings)
     expected = set().union(*_ANALYSIS_GROUPS.values())
     present = {item.metric_id for item in observations}
@@ -544,9 +612,11 @@ def available_vintages(products, *, as_of: datetime | None = None,
                        limit: int = 500) -> list[EarningsInsightSnapshot]:
     manifests = products.structured.release_manifests(
         dataset_id=DATASET_ID, partition="index_core", as_of=as_of,
-        passed_only=True, limit=limit)
-    return [load_snapshot(products, as_of=as_of, version_id=row["version_id"])
-            for row in manifests]
+        passed_only=False, limit=limit)
+    versions = list(dict.fromkeys(row['version_id'] for row in manifests))
+    snapshots = [load_snapshot(products, as_of=as_of, version_id=version)
+                 for version in versions]
+    return [snapshot for snapshot in snapshots if snapshot.report.version_id]
 
 
 def operational_status(products, *, as_of: datetime | None = None,

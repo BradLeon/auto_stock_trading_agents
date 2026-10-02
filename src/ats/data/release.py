@@ -33,12 +33,14 @@ def default_release_path() -> Path:
 def load_release_overlay(path: str | Path | None = None) -> dict:
     target = Path(path) if path else default_release_path()
     if not target.exists():
-        return {"version": 1, "sources": {}, "consumers": {}, "history": []}
+        return {"version": 1, "sources": {}, "consumers": {},
+                "product_pins": {}, "history": []}
     raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
     if int(raw.get("version", 1)) != 1:
         raise ValueError(f"unsupported structured release overlay: {target}")
     return {"version": 1, "sources": dict(raw.get("sources") or {}),
             "consumers": dict(raw.get("consumers") or {}),
+            "product_pins": dict(raw.get("product_pins") or {}),
             "history": list(raw.get("history") or [])}
 
 
@@ -46,6 +48,11 @@ def overlay_mode(kind: str, target_id: str, *, path: str | Path | None = None) -
     plural = "sources" if kind == "source" else "consumers"
     value = load_release_overlay(path).get(plural, {}).get(target_id, "")
     return str(value).lower() if value else ""
+
+
+def pinned_product_version(product_id: str, *, path: str | Path | None = None) -> str:
+    """Return an explicit historical read pin, never an inferred fallback."""
+    return str(load_release_overlay(path)['product_pins'].get(product_id) or '')
 
 
 def _write_overlay(raw: dict, path: str | Path) -> None:
@@ -172,3 +179,39 @@ class ReleaseManager:
         return {"kind": kind, "target_id": target_id, "mode": mode,
                 "previous_mode": previous, "applied": True,
                 "release_file": str(self.path)}
+
+    def pin_factset_product(self, version_id: str, *, actor: str = "cli") -> dict:
+        """Pin a released Index version; consumer checks still fail closed."""
+        if not version_id.strip():
+            raise ValueError('factset_product_version_required')
+        releases = self.repository.release_manifests(
+            dataset_id='sp500_earnings_insight', partition='index_core',
+            passed_only=False, limit=10000)
+        selected = next((row for row in releases if row['version_id'] == version_id), None)
+        if selected is None or not selected['passed'] or selected['status'] != 'platform':
+            raise ValueError('factset_product_version_not_published')
+        raw = load_release_overlay(self.path)
+        previous = raw['product_pins'].get('factset_earnings_insight', '')
+        raw['product_pins']['factset_earnings_insight'] = version_id
+        raw['history'].append({
+            'at': datetime.now(timezone.utc).isoformat(), 'actor': actor,
+            'kind': 'product', 'target_id': 'factset_earnings_insight',
+            'previous_version': previous, 'version_id': version_id,
+            'action': 'pin',
+        })
+        _write_overlay(raw, self.path)
+        return {'product': 'factset_earnings_insight', 'version_id': version_id,
+                'previous_version': previous, 'release_file': str(self.path)}
+
+    def clear_factset_product_pin(self, *, actor: str = "cli") -> dict:
+        raw = load_release_overlay(self.path)
+        previous = raw['product_pins'].pop('factset_earnings_insight', '')
+        raw['history'].append({
+            'at': datetime.now(timezone.utc).isoformat(), 'actor': actor,
+            'kind': 'product', 'target_id': 'factset_earnings_insight',
+            'previous_version': previous, 'version_id': '',
+            'action': 'unpin',
+        })
+        _write_overlay(raw, self.path)
+        return {'product': 'factset_earnings_insight', 'version_id': '',
+                'previous_version': previous, 'release_file': str(self.path)}

@@ -105,7 +105,7 @@ def render_macro_analysis_packet(packet) -> str:
             lines.append(
                 f"- `{item.diagnostic_id}` {item.label} = {item.value:g}{unit}；"
                 f"输入数据编号 {', '.join(f'`{value}`' for value in item.input_observation_ids)}")
-    lines += ["", "### 报告正文证据（最多六段；仅作分析素材）"]
+    lines += ["", "### 报告正文证据（最多十段；仅作分析素材）"]
     if not packet.narrative_evidence:
         lines.append("- 未找到符合预设分析问题的正文段落；不得自行补充。")
     else:
@@ -214,8 +214,5 @@ def fetch_sector_material(*, products=None) -> dict:
                   if not snapshot.sectors else "FactSet 十一行业材料为空。")
         return {**base, "text": "", "state": snapshot.status.sector_release.state,
                 "reason": reason}
-    reason = ""
-    if snapshot.status.freshness == "stale":
-        reason = f"FactSet 行业报告已过期，原报告日期为 {snapshot.report.report_date}。"
     return {**base, "text": rendered, "state": snapshot.status.sector_release.state,
-            "reason": reason}
+            "reason": ""}

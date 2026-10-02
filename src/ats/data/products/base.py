@@ -41,6 +41,13 @@ class DataProducts:
 
         return load_snapshot(self, as_of=as_of)
 
+    def earnings_insight_groups(self, *, version_id, report_date, expected_groups, as_of=None):
+        """Read current group coverage and explicitly separate historical values."""
+        from .factset_groups import load_groups
+
+        return load_groups(self, version_id=version_id, report_date=report_date,
+                           expected_groups=expected_groups, as_of=as_of)
+
     def schedule_calendar_snapshot(self, **kwargs):
         """As-of event calendar with source lineage and freshness diagnostics."""
         from .calendar import ScheduleCalendarProduct

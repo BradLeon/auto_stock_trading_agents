@@ -12,9 +12,12 @@ BossChannel for a verdict, then resumes with Command(resume=...). Async channels
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
+import os
 from pathlib import Path
+import sys
 
 from langgraph.types import Command
 
@@ -2215,7 +2218,8 @@ def run_data(
     # query.  The normal products surface deliberately opens unstructured data
     # read-only, so replace only that repository with the governed writer before
     # this command reaches the shared document/structured pipeline.
-    if action in {"factset-import", "factset-reprocess"}:
+    if action in {"factset-import", "factset-reprocess", "factset-refresh",
+                  "factset-semantic-refresh"} and not db_path:
         from ..data.stores.unstructured import get_platform_unstructured_store
 
         products.unstructured.close()
@@ -2227,15 +2231,26 @@ def run_data(
         "publish",
         "rollback",
         "purge-source",
+        "factset-product-pin",
+        "factset-product-unpin",
     }:
         from ..data.products import DataProducts
         from ..data.structured import SQLiteStructuredRepository
 
         isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
         isolated.bootstrap_catalog()
-        products = DataProducts(store=products.store, structured_repository=isolated)
+        if action == "factset-semantic-refresh":
+            from ..data.stores.unstructured.platform import PlatformUnstructuredRepository
+
+            products.structured.close()
+            products.unstructured.close()
+            isolated_documents = PlatformUnstructuredRepository(db_path, writable=True)
+            products = DataProducts(store=products.store, structured_repository=isolated,
+                                    unstructured_repository=isolated_documents)
+        else:
+            products = DataProducts(store=products.store, structured_repository=isolated)
     if action in {"validate-source", "ingest", "release-check", "publish", "rollback",
-                  "purge-source"}:
+                  "purge-source", "factset-product-pin", "factset-product-unpin"}:
         from ..data.structured import (
             ReleaseManager,
             SQLiteStructuredRepository,
@@ -2298,6 +2313,14 @@ def run_data(
                     exported=exported,
                     note=purge_note,
                 )
+            elif action == "factset-product-pin":
+                if not target_source or not confirm:
+                    raise ValueError("factset-product-pin requires version VALUE and --confirm")
+                result = manager.pin_factset_product(target_source)
+            elif action == "factset-product-unpin":
+                if not confirm:
+                    raise ValueError("factset-product-unpin requires --confirm")
+                result = manager.clear_factset_product_pin()
             elif action == "rollback":
                 if not target_source:
                     raise ValueError("rollback requires --source or VALUE")
@@ -2549,6 +2572,95 @@ def run_data(
                 limit=limit,
             ),
         }
+    elif action in {"factset-review-packages", "factset-review", "factset-review-correct",
+                    "factset-index-inventory", "factset-index-review",
+                    "factset-index-review-packages"}:
+        from ..data.stores.structured.factset_reviews import FactSetReviews
+        from ..data.sources.factset_report_layout import load_layout_policy
+
+        reviews = FactSetReviews(products.structured)
+        if action == "factset-index-review-packages":
+            result = reviews.list_index_packages(limit=limit)
+        elif action == "factset-index-inventory":
+            if not value or not confirm:
+                raise ValueError("factset-index-inventory requires release id VALUE and --confirm")
+            declaration = json.loads(query_scope or "{}")
+            if set(declaration) != {"expected_cells", "not_disclosed", "evidence_refs"}:
+                raise ValueError("index inventory requires expected_cells, not_disclosed and evidence_refs")
+            releases = products.structured.release_manifests(
+                dataset_id="sp500_earnings_insight", partition="index_core", limit=10000)
+            release = next((row for row in releases if row["release_id"] == value), None)
+            if (release is None or not release["extractor_version"].startswith(
+                    "factset-text-semantic-v2:")):
+                raise ValueError("semantic_index_release_not_found")
+            context = release["quality"].get("index_review_context")
+            if not context:
+                raise ValueError("index_review_context_missing")
+            package_hash = reviews.register_index(context, **declaration)
+            result = {"package_hash": package_hash, "release_id": value,
+                      "approved": False, "published": False}
+        elif action == "factset-index-review":
+            if not value or not confirm:
+                raise ValueError("factset-index-review requires package hash VALUE and --confirm")
+            review = json.loads(query_scope or "{}")
+            if set(review) != {"decision", "reviewer", "evidence_refs", "note"}:
+                raise ValueError("review requires decision, reviewer, evidence_refs and note")
+            review_id = reviews.decide_index(value, **review)
+            result = {"review_id": review_id, "package_hash": value,
+                      "decision": review["decision"], "published": False}
+        elif action == "factset-review-packages":
+            result = reviews.list_packages(limit=limit)
+        elif action == "factset-review-correct":
+            if not value or not confirm:
+                raise ValueError("factset-review-correct requires package hash VALUE and --confirm")
+            review = json.loads(query_scope or "{}")
+            if set(review) != {"corrections", "reviewer", "note"}:
+                raise ValueError("correction requires corrections, reviewer and note")
+            corrected = reviews.correct(value, **review)
+            result = {"package_hash": corrected, "parent_hash": value,
+                      "approved": False, "published": False}
+        else:
+            if not value or not confirm:
+                raise ValueError("factset-review requires package hash VALUE and --confirm")
+            review = json.loads(query_scope or "{}")
+            if set(review) != {"decision", "reviewer", "evidence_refs", "note"}:
+                raise ValueError("review requires decision, reviewer, evidence_refs and note")
+            review_id = reviews.decide(value, policy=load_layout_policy(), **review)
+            result = {"review_id": review_id, "package_hash": value,
+                      "decision": review["decision"], "published": False}
+    elif action == "factset-refresh":
+        from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
+        from ..data.sources.factset_earnings_insight import report_refresh_url
+
+        url = report_refresh_url(json.loads(query_scope) if query_scope else {})
+        result = FactSetWeeklyPipeline(products.structured, products.unstructured).run(url=url)
+    elif action == "factset-semantic-refresh":
+        from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
+        from ..data.sources.factset_earnings_insight import report_refresh_url
+
+        scope = json.loads(query_scope) if query_scope else {}
+        if not isinstance(scope, dict) or set(scope) - {
+                'url', 'index_review_id', 'review_ids', 'auto_admit', 'report_month'}:
+            raise ValueError('semantic FactSet scope accepts only url, bound reviews, auto_admit and report_month')
+        review_ids = scope.get('review_ids') or {}
+        if not isinstance(review_ids, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in review_ids.items()):
+            raise ValueError('factset_review_ids_invalid')
+        index_review_id = scope.get('index_review_id', '')
+        if not isinstance(index_review_id, str):
+            raise ValueError('factset_index_review_id_invalid')
+        auto_admit = scope.get('auto_admit', False)
+        if not isinstance(auto_admit, bool):
+            raise ValueError('factset_auto_admit_invalid')
+        report_month = scope.get('report_month', '')
+        if not isinstance(report_month, str):
+            raise ValueError('factset_report_month_invalid')
+        result = FactSetWeeklyPipeline(products.structured, products.unstructured).run_semantic(
+            local_pdf=report_path or None,
+            url=report_refresh_url({'url': scope['url']} if 'url' in scope else {}),
+            index_review_id=index_review_id, review_ids=review_ids,
+            auto_admit=auto_admit, report_month=report_month)
     elif action in {"factset-import", "factset-reprocess"}:
         if not report_path:
             raise ValueError(f"{action} requires --report-path")
@@ -2697,8 +2809,18 @@ def main(argv: list[str] | None = None) -> int:
             "cross-section",
             "earnings-insight",
             "factset-status",
+            "factset-review-packages",
+            "factset-review",
+            "factset-review-correct",
+            "factset-index-inventory",
+            "factset-index-review",
+            "factset-index-review-packages",
             "factset-import",
             "factset-reprocess",
+            "factset-refresh",
+            "factset-semantic-refresh",
+            "factset-product-pin",
+            "factset-product-unpin",
             "search",
             "company",
             "claim",
@@ -3132,6 +3254,62 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "data":
+        persistent_write = args.action in {
+            "ingest", "article-ingest", "document-ingest", "fixed-ingest", "factset-import", "factset-reprocess",
+            "factset-refresh", "factset-semantic-refresh", "calendar-refresh", "calendar-finalize",
+        } or (args.action == "release-check" and args.ingest_new)
+        persistent_write = persistent_write or args.action == "chain-source-collect"
+        worker_task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
+        if persistent_write:
+            from ..data.persistent_queue import PersistentIngestionQueue
+
+            queue = PersistentIngestionQueue()
+            if worker_task_id:
+                worker_id = os.environ.get("ATS_PERSISTENT_QUEUE_LEASE_OWNER", "")
+                worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+                if not queue.valid_lease(worker_task_id, worker_id, worker_source):
+                    parser.error("persistent data writes require a valid queue worker lease")
+            else:
+                # Only explicitly isolated acceptance runs may write directly to a
+                # disposable database; every operational/persistent write is queued.
+                isolated_replay = bool(args.force and args.db_path and args.artifact_root)
+                if not isolated_replay:
+                    raw_args = list(argv) if argv is not None else sys.argv[1:]
+                    trigger_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+                    source_id = args.source or args.value or args.group or args.dataset
+                    if not source_id:
+                        parser.error("persistent ingestion requires --source, VALUE, --group or --dataset")
+                    registry_bytes = b"".join(
+                        (Path("config/data") / name).read_bytes()
+                        for name in ("structured.yaml", "unstructured.yaml", "schedules.yaml")
+                    )
+                    policy = hashlib.sha256(registry_bytes + " ".join(raw_args).encode()).hexdigest()
+                    task_scope = {"source": args.source or args.value, "group": args.group,
+                                  "dataset": args.dataset, "entity": args.entity,
+                                  "periods": args.periods, "query_scope": args.query_scope}
+                    if args.action.startswith("factset-"):
+                        task_scope["sources"] = [
+                            "factset_earnings_insight_doc",
+                            "factset_earnings_insight_metrics",
+                        ]
+                    task_id, created = queue.enqueue(
+                        source_id=source_id,
+                        scope=task_scope,
+                        trigger_kind="manual", trigger_ref=trigger_at.isoformat(),
+                        command=["ats", *raw_args], policy_fingerprint=policy,
+                        requested_as_of=trigger_at.isoformat(), priority=20,
+                    )
+                    result = queue.run_one(task_id=task_id)
+                    if result is None:
+                        existing = queue.get(task_id) or {}
+                        print(json.dumps({"task_id": task_id, "created": created,
+                                          "status": existing.get("status", "queued")},
+                                         ensure_ascii=False))
+                        return 0
+                    print(json.dumps({"task_id": task_id, "status": result["status"],
+                                      "ingestion_result": result.get("stdout", {})},
+                                     ensure_ascii=False, indent=2, default=str))
+                    return 0 if result["status"] in {"succeeded", "no_change", "quarantined", "partial"} else 1
         if args.action in {"search", "company", "claim", "lineage"} and not args.value:
             parser.error(f"data {args.action} requires VALUE")
         return run_data(

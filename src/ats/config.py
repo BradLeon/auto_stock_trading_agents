@@ -43,6 +43,7 @@ class Secrets(BaseSettings):
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    openrouter_api_key: str = ""
     openai_base_url: str = ""
     # DeepSeek's own API, used directly rather than through OpenRouter. Added because
     # identical requests through the relay returned wildly different results — the same
@@ -229,6 +230,11 @@ class ScheduleConfig(BaseModel):
     # FactSet 的独立数据准备任务；必须早于同一时区的周度评审。
     factset_refresh_at: str = "08:10"
     factset_refresh_tz: str = "America/New_York"
+    # Semantic release uses the final report dated within each calendar month.
+    # Run after US close on month-end; the weekly legacy schedule remains a
+    # rollback path while ATS_FACTSET_SCHEDULE_SEMANTIC is off.
+    factset_month_end_at: str = "23:30"
+    factset_month_end_tz: str = "America/New_York"
     # This host sleeps. A job whose trigger fires while the Mac is asleep only runs on
     # wake, and only if it is still inside this window — with the old 1 hour, every
     # overnight trigger was silently dropped. See scheduler.start().

@@ -860,9 +860,185 @@ datasets:
     acceptance_samples: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
   sp500_earnings_insight:
     catalog_status: current_partial
+    extraction_policy:
+      version: factset-semantic-v2
+      estimate_state_policy:
+        version: explicit-actual-else-estimated-v1
+        default: estimated
+        actual_labels: [actual, actual earnings, actual revenue, actual revenues, actual results, actual performance]
+        preserve_source_wording: true
+      target_period_scope: all_disclosed
+      comparison_date_policy: latest_occurrence_on_or_before_report
+      historical_231_cells: regression_subset_only
+      scope_policy:
+        version: factset-investment-focus-v1
+        core_index: {entity: SP500, metrics: registered_applicable, narrative: bounded_macro}
+        related_topics: [ai_hardware, semiconductors, consumer_electronics, supply_chain]
+        scopes:
+          technology: {priority: P0, entities: [GICS_45], required_for_core: true}
+          all_sectors:
+            priority: P2
+            entities: [GICS_10, GICS_15, GICS_20, GICS_25, GICS_30, GICS_35, GICS_40, GICS_45, GICS_50, GICS_55, GICS_60]
+            required_for_core: false
+        effort:
+          P0: {dedicated_vision: true, stop_after_generic_failure: false}
+          P1: {dedicated_vision: false, stop_after_generic_failure: true}
+          P2: {dedicated_vision: false, stop_after_generic_failure: true}
+      auto_admission:
+        # Report coverage is not printed in every edition. Absence is an
+        # explicitly allowed source omission, not a parser-created zero.
+        optional_index_metrics: [earnings.reporting.coverage]
+        # Independently declared minimum period multiplicity for metrics that
+        # span more than one period. Other registered metrics require one cell.
+        min_index_period_counts:
+          earnings.bottom_up_eps: 3
+          earnings.eps.yoy_growth: 4
+          earnings.revenue.yoy_growth: 4
+          earnings.guidance.positive_share: 2
+          earnings.guidance.negative_share: 2
+      # Independent period/scope declarations for the two reviewed reports.
+      # Values and evidence goldens stay outside production configuration.
+      # An unseen report has no implicit inventory or publication approval.
+      report_inventories:
+        version: factset-reviewed-periods-v1
+        reports:
+          '2026-08-28':
+            technology:
+              earnings_revenue_scorecard: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_surprise: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_growth:
+                - {period: 2026Q2, basis: target_quarter}
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: '2026', basis: calendar_year}
+                - {period: '2027', basis: calendar_year}
+              net_profit_margin: [{period: 2026Q2, basis: target_quarter}]
+              eps_guidance:
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: 2026/2027, basis: mixed_fiscal_years}
+              geographic_revenue_exposure: [{period: '2026-08-28', basis: snapshot}]
+              forward_pe: [{period: '2026-08-28', basis: snapshot}]
+              target_ratings: [{period: '2026-08-28', basis: snapshot}]
+          '2026-09-18':
+            technology:
+              earnings_revenue_scorecard: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_surprise: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_growth:
+                - {period: 2026Q2, basis: target_quarter}
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: '2026', basis: calendar_year}
+                - {period: '2027', basis: calendar_year}
+              net_profit_margin: [{period: 2026Q2, basis: target_quarter}]
+              eps_guidance:
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: 2026/2027, basis: mixed_fiscal_years}
+              geographic_revenue_exposure: [{period: '2026-09-18', basis: snapshot}]
+              forward_pe: [{period: '2026-09-18', basis: snapshot}]
+              target_ratings: [{period: '2026-09-18', basis: snapshot}]
+      vision:
+        enabled: true
+        authorization: user_2026_09_27_factset_chart_crops
+        model: openai/gpt-5.6-terra
+        prompt_version: factset-cell-transcription-v1
+        max_requests: 32
+        max_crops_per_request: 12
+        max_image_bytes: 2000000
+        max_tokens: 4096
+        timeout_seconds: 60
+        provider_data_collection: deny
+        zero_data_retention: true
+        automatic_publication: false
+      sector_aliases:
+        GICS_10: [Energy]
+        GICS_15: [Materials]
+        GICS_20: [Industrials]
+        GICS_25: [Consumer Discretionary, Consumer Disc.]
+        GICS_30: [Consumer Staples]
+        GICS_35: [Health Care, Healthcare]
+        GICS_40: [Financials]
+        GICS_45: [Information Technology, Information Tech., Info. Technology, Info. Tech.]
+        GICS_50: [Communication Services, Comm. Services]
+        GICS_55: [Utilities]
+        GICS_60: [Real Estate]
+      aggregate_aliases: [S&P 500, SP500]
+      ocr:
+        scale: 3
+        cell_scale: 4
+        timeout_seconds: 30
+        max_images: 160
+      admission:
+        required_evidence: [entity_label, numeric_token, unit, target_period, estimate_state]
+        expected_sector_count: 11
+        allow_model_confidence_only: false
+        allow_bar_geometry_as_value: false
+        unresolved_period: pending_review
+        independent_review_required: true
+        composition_tolerance: 0.01
+      groups:
+        earnings_revenue_scorecard:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:earnings|revenues?) above.*below estimates']
+          units: [ratio]
+          columns: [eps_above, eps_inline, eps_below, revenue_above, revenue_inline, revenue_below]
+          column_units: {eps_above: ratio, eps_inline: ratio, eps_below: ratio, revenue_above: ratio, revenue_inline: ratio, revenue_below: ratio}
+          sum_to_one: [[eps_above, eps_inline, eps_below], [revenue_above, revenue_inline, revenue_below]]
+        earnings_revenue_surprise:
+          estimate_states: [estimated, actual]
+          title_patterns: ['sector level (?:earnings|revenue) surprise']
+          units: [percent]
+          columns: [eps_surprise, revenue_surprise]
+          column_units: {eps_surprise: percent, revenue_surprise: percent}
+        earnings_revenue_growth:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:earnings|revenue) growth y y']
+          title_exclusions: ['\bcontributors?\b']
+          units: [percent]
+          columns: [eps_growth, revenue_growth]
+          column_units: {eps_growth: percent, revenue_growth: percent}
+        net_profit_margin:
+          estimate_states: [estimated, actual]
+          title_patterns: ['net profit margins?', 'profit margin.*(?:increase|decrease)']
+          units: [percent, ratio]
+          columns: [net_margin, increase_share, unchanged_share, decrease_share]
+          column_units: {net_margin: percent, increase_share: ratio, unchanged_share: ratio, decrease_share: ratio}
+          sum_to_one: [[increase_share, unchanged_share, decrease_share]]
+        eps_guidance:
+          estimate_states: [estimated, actual]
+          count_legend: {negative: red, positive: green}
+          title_patterns: ['positive.*negative.*(?:eps )?guidance', 'eps guidance.*(?:positive|negative)']
+          units: [count, ratio]
+          columns: [positive_count, negative_count, positive_share, negative_share]
+          column_units: {positive_count: count, negative_count: count, positive_share: ratio, negative_share: ratio}
+          sum_to_one: [[positive_share, negative_share]]
+          allow_zero_sum: true
+        geographic_revenue_exposure:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:geographic|geographical).*revenue', 'revenue.*(?:geographic|geographical)', 'revenue.*(?:u s.*international|international.*u s)']
+          units: [ratio]
+          columns: [us_share, international_share]
+          column_units: {us_share: ratio, international_share: ratio}
+          sum_to_one: [[us_share, international_share]]
+        forward_pe:
+          estimate_states: [estimated, actual]
+          title_patterns: ['forward 12 (?:month|m) p e ratio']
+          units: [multiple]
+          columns: [forward_pe]
+          column_units: {forward_pe: multiple}
+        bottom_up_eps:
+          estimate_states: [estimated, actual]
+          title_patterns: ['bottom.up eps']
+          units: [currency_per_share]
+          columns: [bottom_up_eps]
+          column_units: {bottom_up_eps: currency_per_share}
+        target_ratings:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:analyst|analysts).*ratings', 'ratings.*(?:buy|hold|sell)', '(?:buy|hold|sell).*ratings', 'target.*(?:upside|price)', 'bottom up.*price']
+          units: [ratio, percent]
+          columns: [buy_share, hold_share, sell_share, target_upside]
+          column_units: {buy_share: ratio, hold_share: ratio, sell_share: ratio, target_upside: percent}
+          sum_to_one: [[buy_share, hold_share, sell_share]]
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
                GICS_35, GICS_40, GICS_45, GICS_50, GICS_55, GICS_60]
-    expected_cadence: weekly
+    expected_cadence: monthly_final_report
     primary_sources: [factset_earnings_insight_metrics]
     fallback_sources: []
     core_metrics:
@@ -883,6 +1059,8 @@ datasets:
       - earnings.margin.decrease_share
       - earnings.guidance.positive_count
       - earnings.guidance.negative_count
+      - earnings.guidance.positive_share
+      - earnings.guidance.negative_share
       - earnings.revision.improved_sector_count
       - earnings.bottom_up_eps
       - valuation.forward_pe
@@ -898,7 +1076,8 @@ datasets:
       - consensus.rating.sell_share
       - consensus.target.upside
     quality:
-      freshness_hours_max: 240
+      # A monthly report is current until its next upstream edition; elapsed
+      # wall-clock hours do not downgrade an otherwise latest release.
       composition_abs_tolerance: 0.01
       index_core_required_evidence_ratio: 1.0
       sector_core_expected_entities: 11
@@ -1124,14 +1303,16 @@ metric_definitions:
   earnings.revenue.below_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.revenue.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
-  earnings.eps.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
-  earnings.revenue.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.eps.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year, calendar_year, fiscal_year]}
+  earnings.revenue.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year, calendar_year, fiscal_year]}
   earnings.net_profit_margin: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.margin.increase_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.margin.unchanged_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.margin.decrease_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
-  earnings.guidance.positive_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
-  earnings.guidance.negative_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
+  earnings.guidance.positive_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: [target_quarter, mixed_fiscal_years]}
+  earnings.guidance.negative_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: [target_quarter, mixed_fiscal_years]}
+  earnings.guidance.positive_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, fiscal_year, mixed_fiscal_years]}
+  earnings.guidance.negative_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, fiscal_year, mixed_fiscal_years]}
   earnings.revision.improved_sector_count:
     value_type: integer
     unit_family: count
@@ -1140,7 +1321,7 @@ metric_definitions:
     entity_scope: [SP500]
     required_dimensions: [comparison_date, revision_direction, sector_total]
     description: Number of GICS sectors with improved earnings growth versus the explicit comparison date.
-  earnings.bottom_up_eps: {value_type: number, unit_family: currency_per_share, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.bottom_up_eps: {value_type: number, unit_family: currency_per_share, cadence: weekly, period_basis: [target_quarter, target_year, calendar_year]}
   valuation.forward_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
   valuation.trailing_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
   valuation.forward_pe.average_5y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}

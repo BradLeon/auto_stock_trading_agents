@@ -2057,6 +2057,18 @@ def run_data(
         require_queue_worker(worker_source)
         result = refresh_schedule_calendar(
             source_ids={source_id}, store=ScheduleCalendarStore())
+        task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
+        if task_id:
+            from ..data.persistent_queue import PersistentIngestionQueue
+
+            PersistentIngestionQueue().record_lineage(task_id, {
+                "runs": [row["source_run_id"] for row in result["sources"]],
+                "raw": [row.get("raw_artifact_id", "") for row in result["sources"]],
+                "admission": [ref for row in result["sources"]
+                              for ref in row.get("candidate_ids", [])],
+                "published": [ref for row in result["sources"]
+                              for ref in row.get("published_refs", [])],
+            })
         failed = any(row["status"] == "failed" for row in result["sources"])
         partial = any(row["status"] == "partial" for row in result["sources"])
         result["status"] = "failed" if failed else "partial" if partial else "succeeded"
@@ -2158,8 +2170,6 @@ def run_data(
         return 0
 
     if action == "pead-official-disclosure-coverage":
-        import os
-
         from ..data.pead_official_disclosures import (
             active_pead_targets,
             collect_active_packages,
@@ -2250,8 +2260,6 @@ def run_data(
                 # Mail/RSS acquisition is permitted only into explicitly supplied
                 # isolated storage.  The acceptance pass below then reads that same
                 # immutable asset catalog; no Chain/PEAD/Chief operation is invoked.
-                import os
-
                 from ..data import research as research_data
                 from ..memory import TradingMemory, reset_store_cache
 
@@ -2294,8 +2302,6 @@ def run_data(
             if isolated_store is not None:
                 isolated_store.conn.close()
             if previous_env:
-                import os
-
                 from ..memory import reset_store_cache
 
                 for name, previous in previous_env.items():

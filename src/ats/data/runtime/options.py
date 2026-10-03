@@ -32,12 +32,40 @@ def fetch(symbol: str, earnings_date: date | None = None) -> dict:
                     attempts=1)
     if td:
         td["source"] = "thetadata"
-        return td
+        return {key: td.get(key) for key in _EMPTY}
     yf = safe_fetch(lambda: _yfinance(symbol, earnings_date), source=f"yf-options:{symbol}")
     if yf:
         yf["source"] = "yfinance"
-        return yf
+        return {key: yf.get(key) for key in _EMPTY}
     return dict(_EMPTY)
+
+
+def fetch_runtime(symbol: str, earnings_date: date | None = None) -> dict:
+    """Ephemeral setup with honest source-time, independently of query-time.
+
+    Keep ``fetch``'s compatibility shape. Yahoo has no quote-time contract;
+    its last-trade timestamp must not masquerade as a quote timestamp.
+    """
+    queried_at = datetime.now(timezone.utc)
+    result = safe_fetch(lambda: _thetadata(symbol, earnings_date),
+                        source=f"thetadata:{symbol}", attempts=1)
+    source = "thetadata" if result else ""
+    if not result:
+        result = safe_fetch(lambda: _yfinance(symbol, earnings_date),
+                            source=f"yf-options:{symbol}")
+        source = "yfinance" if result else ""
+    payload = {**_EMPTY, **{key: value for key, value in (result or {}).items() if key in _EMPTY}}
+    payload["source"] = source or None
+    source_as_of = (result or {}).get("_source_as_of")
+    available = any(payload[key] is not None for key in ("expected_move_pct", "atm_iv", "iv_skew"))
+    complete = available and source_as_of is not None and all(
+        payload[key] is not None for key in ("expected_move_pct", "atm_iv", "iv_skew"))
+    return {"schema_version": "runtime-options-v1", "owner": "ats.data.runtime",
+            "input_mode": "runtime", "symbol": symbol, "queried_at": queried_at.isoformat(),
+            "source_as_of": source_as_of, "timestamp_precision": "date" if source_as_of else "unknown",
+            "status": "complete" if complete else "partial" if available else "unavailable",
+            "reason": "" if complete else "source_timestamp_or_metrics_missing" if available else "provider_unavailable",
+            "payload": payload}
 
 
 # --------------------------------------------------------------------------- #
@@ -74,7 +102,9 @@ def _stock_eod(symbol: str) -> tuple[float, str]:
     if not rows:
         raise ValueError("thetadata: no stock EOD")
     last = rows[-1]
-    qdate = (last.get("created") or "")[:10].replace("-", "") or today.strftime("%Y%m%d")
+    qdate = (last.get("created") or "")[:10].replace("-", "")
+    if not qdate:
+        raise ValueError("thetadata: missing stock EOD timestamp")
     return float(last["close"]), qdate
 
 
@@ -118,7 +148,8 @@ def _thetadata(symbol: str, earnings_date: date | None) -> dict:
 
     return {"expected_move_pct": round(em, 2) if em else None,
             "atm_iv": round(atm_iv, 1) if atm_iv else None,
-            "iv_skew": round(skew, 2) if skew is not None else None, "expiration": chosen}
+            "iv_skew": round(skew, 2) if skew is not None else None, "expiration": chosen,
+            "_source_as_of": datetime.strptime(qdate, "%Y%m%d").date().isoformat()}
 
 
 def _mid_csv(row: dict) -> float | None:
@@ -213,6 +244,7 @@ def _pick_expiration(expirations: tuple[str, ...], earnings_date: date | None) -
 
 def _yfinance(symbol: str, earnings_date: date | None) -> dict:
     import yfinance as yf
+
     from ..base import yf_symbol
 
     t = yf.Ticker(yf_symbol(symbol))

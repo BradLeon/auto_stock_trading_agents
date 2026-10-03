@@ -6,12 +6,12 @@ results store and it never overwrites a previously visible event version.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
 import hashlib
 import json
-from pathlib import Path
 import re
 import sqlite3
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Literal, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -145,6 +145,11 @@ CREATE TABLE IF NOT EXISTS schedule_event_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_candidates_event
     ON schedule_event_candidates(event_id,review_status,fetched_at);
+CREATE TABLE IF NOT EXISTS schedule_candidate_review_history (
+    review_id INTEGER PRIMARY KEY AUTOINCREMENT, candidate_id TEXT NOT NULL,
+    review_status TEXT NOT NULL, review_reason TEXT NOT NULL, recorded_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_schedule_review_history
+    ON schedule_candidate_review_history(candidate_id,recorded_at,review_id);
 CREATE TABLE IF NOT EXISTS schedule_events (
     event_id TEXT NOT NULL, event_version INTEGER NOT NULL, event_type TEXT NOT NULL,
     reference_period TEXT NOT NULL DEFAULT '', label TEXT NOT NULL DEFAULT '',
@@ -189,6 +194,15 @@ CREATE TABLE IF NOT EXISTS schedule_calendar_source_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_source_runs
     ON schedule_calendar_source_runs(source_id,started_at);
+CREATE TABLE IF NOT EXISTS schedule_event_candidate_observations (
+    source_run_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
+    raw_artifact_id TEXT NOT NULL DEFAULT '', observed_at TEXT NOT NULL,
+    PRIMARY KEY(source_run_id,candidate_id),
+    FOREIGN KEY(source_run_id) REFERENCES schedule_calendar_source_runs(source_run_id),
+    FOREIGN KEY(candidate_id) REFERENCES schedule_event_candidates(candidate_id)
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_candidate_observations_candidate
+    ON schedule_event_candidate_observations(candidate_id,observed_at);
 """
 
 
@@ -268,6 +282,21 @@ class ScheduleCalendarStore:
             if cur.rowcount != 1:
                 raise ValueError(f"calendar source run {source_run_id!r} is not running")
 
+    def update_source_run_provenance(self, source_run_id: str,
+                                    provenance: Mapping[str, Any]) -> None:
+        """Append fetch lineage to a running calendar source run."""
+        with self._tx() as conn:
+            row = conn.execute("SELECT provenance_json,status FROM schedule_calendar_source_runs "
+                               "WHERE source_run_id=?", (source_run_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"unknown calendar source run {source_run_id!r}")
+            if row["status"] != "running":
+                raise ValueError(f"calendar source run {source_run_id!r} is not running")
+            current = json.loads(row["provenance_json"] or "{}")
+            current.update(dict(provenance))
+            conn.execute("UPDATE schedule_calendar_source_runs SET provenance_json=? "
+                         "WHERE source_run_id=?", (_json(current), source_run_id))
+
     def submit_candidate(self, candidate: ScheduleEventCandidate, *,
                          at: datetime | None = None) -> dict[str, Any]:
         candidate_id, event_id = candidate.candidate_id, candidate.event_id
@@ -300,11 +329,57 @@ class ScheduleCalendarStore:
                           review_status, reason, fetched))
             row = conn.execute("SELECT * FROM schedule_event_candidates WHERE candidate_id=?",
                                (candidate_id,)).fetchone()
+            self._record_reviews(conn, event_id, fetched, candidate_id=candidate_id)
             return self._candidate_dict(row, duplicate=False)
+
+    @staticmethod
+    def _record_reviews(conn, event_id: str, at: str, *, candidate_id: str = "") -> None:
+        sql = "SELECT * FROM schedule_event_candidates WHERE "
+        sql += "candidate_id=?" if candidate_id else "event_id=?"
+        for row in conn.execute(sql, (candidate_id or event_id,)).fetchall():
+            previous = conn.execute(
+                "SELECT review_status,review_reason FROM schedule_candidate_review_history "
+                "WHERE candidate_id=? ORDER BY review_id DESC LIMIT 1", (row["candidate_id"],)).fetchone()
+            state = (row["review_status"], row["review_reason"])
+            if previous is not None and tuple(previous) == state:
+                continue
+            conn.execute("INSERT INTO schedule_candidate_review_history "
+                         "(candidate_id,review_status,review_reason,recorded_at) VALUES (?,?,?,?)",
+                         (row["candidate_id"], *state, at))
+
+    def record_candidate_observation(self, *, source_run_id: str, candidate_id: str,
+                                    raw_artifact_id: str = "",
+                                    observed_at: datetime | None = None) -> None:
+        with self._tx() as conn:
+            conn.execute("INSERT OR IGNORE INTO schedule_event_candidate_observations "
+                         "(source_run_id,candidate_id,raw_artifact_id,observed_at) "
+                         "VALUES(?,?,?,?)", (source_run_id, candidate_id, raw_artifact_id,
+                                             _stamp(observed_at)))
+
+    def candidate_observations(self, *, candidate_id: str = "",
+                               source_run_id: str = "") -> list[dict[str, Any]]:
+        clauses, values = [], []
+        if candidate_id:
+            clauses.append("candidate_id=?")
+            values.append(candidate_id)
+        if source_run_id:
+            clauses.append("source_run_id=?")
+            values.append(source_run_id)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM schedule_event_candidate_observations" + where +
+                                " ORDER BY observed_at", values).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
 
     @staticmethod
     def _candidate_dict(row, *, duplicate: bool = False) -> dict[str, Any]:
         result = dict(row)
+        if "asof_review_status" in result:
+            result["review_status"] = result.pop("asof_review_status")
+            result["review_reason"] = result.pop("asof_review_reason")
         result["payload"] = json.loads(result.pop("payload_json"))
         result["signature"] = json.loads(result.pop("signature_json"))
         result["duplicate"] = duplicate
@@ -365,6 +440,7 @@ class ScheduleCalendarStore:
                 conn.execute("UPDATE schedule_event_candidates SET review_status='admitted',"
                              "review_reason='resolved_by_operator' WHERE event_id=? AND "
                              "review_status='conflict'", (event_id,))
+            self._record_reviews(conn, event_id, now)
             event = conn.execute("SELECT * FROM schedule_events WHERE event_id=? AND event_version=?",
                                  (event_id, event_version)).fetchone()
             return self._event_dict(conn, event)
@@ -497,6 +573,7 @@ class ScheduleCalendarStore:
             conn.execute("UPDATE schedule_event_candidates SET review_status='admitted',"
                          "review_reason='resolved_by_operator_override' WHERE event_id=? "
                          "AND review_status='conflict'", (event_id,))
+            self._record_reviews(conn, event_id, _stamp(now))
             override_id = hashlib.sha256(
                 f"{event_id}|{event['event_version']}|{actor}".encode()).hexdigest()[:32]
             conn.execute("INSERT INTO schedule_event_overrides(override_id,event_id,actor,reason,"
@@ -526,6 +603,7 @@ class ScheduleCalendarStore:
             conn.execute("UPDATE schedule_event_candidates SET review_status='conflict',"
                          "review_reason='operator_adjudication_withdrawn' WHERE event_id=? "
                          "AND review_reason='resolved_by_operator_override'", (event_id,))
+            self._record_reviews(conn, event_id, _stamp(now))
             override_id = hashlib.sha256(
                 f"{event_id}|withdraw|{event['event_version']}|{actor}".encode()).hexdigest()[:32]
             conn.execute("INSERT INTO schedule_event_overrides(override_id,event_id,actor,reason,"
@@ -538,28 +616,47 @@ class ScheduleCalendarStore:
             return self._event_dict(conn, row)
 
     @staticmethod
-    def _event_dict(conn, row) -> dict[str, Any]:
+    def _event_dict(conn, row, *, as_of: datetime | None = None) -> dict[str, Any]:
         result = dict(row)
         result["payload"] = json.loads(result.pop("payload_json"))
         result["sources"] = [dict(source) for source in conn.execute(
             "SELECT s.source_id,s.source_url,s.candidate_id,c.fetched_at FROM schedule_event_sources s "
             "JOIN schedule_event_candidates c ON c.candidate_id=s.candidate_id "
-            "WHERE s.event_id=? AND s.event_version=? ORDER BY s.linked_at",
-            (result["event_id"], result["event_version"]))]
+            "WHERE s.event_id=? AND s.event_version=? AND s.linked_at<=? AND c.fetched_at<=? "
+            "ORDER BY s.linked_at",
+            (result["event_id"], result["event_version"], _stamp(as_of), _stamp(as_of)))]
         result["overrides"] = [dict(item) for item in conn.execute(
-            "SELECT actor,reason,evidence_json,action,active,created_at FROM schedule_event_overrides "
-            "WHERE event_id=? AND event_version=? ORDER BY created_at",
-            (result["event_id"], result["event_version"]))]
+            "SELECT override_id,actor,reason,evidence_json,action,active,created_at FROM schedule_event_overrides "
+            "WHERE event_id=? AND event_version=? AND created_at<=? ORDER BY created_at",
+            (result["event_id"], result["event_version"], _stamp(as_of) if as_of else "9999"))]
+        latest_override = conn.execute(
+            "SELECT override_id,action FROM schedule_event_overrides WHERE event_id=? AND created_at<=? "
+            "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+            (result["event_id"], _stamp(as_of) if as_of else "9999")).fetchone()
         for item in result["overrides"]:
             item["evidence"] = json.loads(item.pop("evidence_json"))
+            if as_of is not None:
+                item["active"] = int(bool(latest_override and latest_override["action"] == "apply"
+                                          and latest_override["override_id"] == item["override_id"]))
         result["release_confirmations"] = [dict(item) for item in conn.execute(
             "SELECT source_id,materials_json,confirmed_at FROM schedule_event_release_confirmations "
-            "WHERE event_id=? AND event_version=?", (result["event_id"], result["event_version"]))]
+            "WHERE event_id=? AND event_version=? AND confirmed_at<=?",
+            (result["event_id"], result["event_version"], _stamp(as_of) if as_of else "9999"))]
         for item in result["release_confirmations"]:
             item["materials"] = json.loads(item.pop("materials_json"))
-        result["quality_status"] = "conflict" if conn.execute(
-            "SELECT 1 FROM schedule_event_candidates WHERE event_id=? AND review_status='conflict' "
-            "LIMIT 1", (result["event_id"],)).fetchone() else "ok"
+        if as_of is None:
+            reviews = conn.execute("SELECT review_status FROM schedule_event_candidates WHERE event_id=?",
+                                   (result["event_id"],)).fetchall()
+        else:
+            reviews = conn.execute(
+                "SELECT COALESCE((SELECT h.review_status FROM schedule_candidate_review_history h "
+                "WHERE h.candidate_id=c.candidate_id AND h.recorded_at<=? "
+                "ORDER BY h.recorded_at DESC,h.review_id DESC LIMIT 1),'history_unavailable') review_status "
+                "FROM schedule_event_candidates c WHERE c.event_id=? AND c.fetched_at<=?",
+                (_stamp(as_of), result["event_id"], _stamp(as_of))).fetchall()
+        statuses = {row["review_status"] for row in reviews}
+        result["quality_status"] = ("conflict" if "conflict" in statuses else
+                                    "unknown" if "history_unavailable" in statuses else "ok")
         return result
 
     def events(self, *, as_of: datetime | None = None, start: date | None = None,
@@ -584,7 +681,7 @@ class ScheduleCalendarStore:
         try:
             rows = conn.execute("SELECT * FROM schedule_events WHERE " + " AND ".join(where)
                                 + " ORDER BY event_date,event_type,event_id LIMIT ?", params).fetchall()
-            return [self._event_dict(conn, row) for row in rows]
+            return [self._event_dict(conn, row, as_of=as_of) for row in rows]
         finally:
             conn.close()
 
@@ -602,15 +699,27 @@ class ScheduleCalendarStore:
             conn.close()
 
     def candidates(self, *, event_id: str = "", review_status: str = "",
-                   limit: int = 200) -> list[dict[str, Any]]:
+                   as_of: datetime | None = None, limit: int = 200) -> list[dict[str, Any]]:
         where, params = [], []
+        if as_of is not None:
+            where.append("fetched_at<=?")
+            params.append(_stamp(as_of))
         if event_id:
             where.append("event_id=?")
             params.append(event_id)
         if review_status:
-            where.append("review_status=?")
+            where.append("asof_review_status=?" if as_of is not None else "review_status=?")
             params.append(review_status)
         sql = "SELECT * FROM schedule_event_candidates"
+        if as_of is not None:
+            sql = ("SELECT c.*,COALESCE((SELECT h.review_status FROM schedule_candidate_review_history h "
+                   "WHERE h.candidate_id=c.candidate_id AND h.recorded_at<=? "
+                   "ORDER BY h.recorded_at DESC,h.review_id DESC LIMIT 1),'history_unavailable') asof_review_status,"
+                   "COALESCE((SELECT h.review_reason FROM schedule_candidate_review_history h "
+                   "WHERE h.candidate_id=c.candidate_id AND h.recorded_at<=? "
+                   "ORDER BY h.recorded_at DESC,h.review_id DESC LIMIT 1),'') asof_review_reason "
+                   "FROM schedule_event_candidates c")
+            params = [_stamp(as_of), _stamp(as_of), *params]
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY fetched_at DESC LIMIT ?"
@@ -621,15 +730,23 @@ class ScheduleCalendarStore:
         finally:
             conn.close()
 
-    def source_runs(self, *, source_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    def source_runs(self, *, source_id: str = "", as_of: datetime | None = None,
+                    limit: int = 100) -> list[dict[str, Any]]:
+        where, params = [], []
+        if source_id:
+            where.append("source_id=?")
+            params.append(source_id)
+        if as_of is not None:
+            where.append("started_at<=? AND finished_at!='' AND finished_at<=?")
+            params.extend([_stamp(as_of), _stamp(as_of)])
+        sql = "SELECT * FROM schedule_calendar_source_runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
         conn = self._connect()
         try:
-            if source_id:
-                rows = conn.execute("SELECT * FROM schedule_calendar_source_runs WHERE source_id=? "
-                                    "ORDER BY started_at DESC LIMIT ?", (source_id, limit)).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM schedule_calendar_source_runs "
-                                    "ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = conn.execute(sql, params).fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()

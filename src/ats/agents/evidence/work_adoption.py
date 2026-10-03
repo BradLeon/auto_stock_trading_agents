@@ -11,7 +11,7 @@ from itertools import pairwise
 import json
 from typing import Any
 
-CONSUMER = "evidence_observer"
+CONSUMER = "layer"
 PRODUCTION_CLAIM_ID = "ai_core_production_workflow_penetration"
 PRODUCTION_CLAIM_DEFINITION_VERSION = "v3"
 PRODUCTION_CLAIM_TEXT = "AI 的企业自报采用、员工近期工作使用、企业付费采购和任务生产化是否共同扩大，从局部试验走向可重复的生产工作流？"

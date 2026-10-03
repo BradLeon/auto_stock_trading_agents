@@ -39,6 +39,10 @@ class InternalState(BaseModel):
     """The §11.1 internal state published to the next round."""
 
     as_of: datetime
+    schema_version: str = "internal-state-v1"
+    owner: str = "ats.execution.state_api"
+    section_as_of: dict[str, str | None] = Field(default_factory=dict)
+    section_status: dict[str, str] = Field(default_factory=dict)
     portfolio: dict = Field(default_factory=dict)
     trades: list[dict] = Field(default_factory=list)
     fills: list[dict] = Field(default_factory=list)
@@ -110,9 +114,23 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     if row is not None:
         attribution = json.loads(row["payload"])
 
-    return InternalState(as_of=datetime.now(timezone.utc), portfolio=portfolio,
+    queried_at = datetime.now(timezone.utc)
+    portfolio_stamp = (getattr(perf_row, "as_of", None) if perf_row else None)
+    portfolio_stamp = (portfolio_stamp.isoformat() if isinstance(portfolio_stamp, datetime)
+                       else str(portfolio_stamp) if portfolio_stamp else None)
+    performance_stamp = store.conn.execute("SELECT MAX(as_of) stamp FROM performance").fetchone()["stamp"]
+    return InternalState(as_of=queried_at, portfolio=portfolio,
                          trades=trades, fills=fills, performance=performance,
-                         attribution=attribution, completeness=comp)
+                         attribution=attribution, completeness=comp,
+                         section_as_of={"portfolio": portfolio_stamp,
+                                        "performance": performance_stamp,
+                                        "trades": comp.last_reconcile_at,
+                                        "fills": comp.last_reconcile_at},
+                         section_status={"portfolio": "complete" if portfolio_stamp else "unavailable",
+                                         "performance": "complete" if performance_stamp else "unavailable",
+                                         "trades": comp.status if comp.last_reconcile_at else "unreconciled",
+                                         "fills": comp.status if comp.last_reconcile_at else "unreconciled",
+                                         "attribution": "complete" if attribution is not None else "no_coverage"})
 
 
 # --------------------------------------------------------------------------- #

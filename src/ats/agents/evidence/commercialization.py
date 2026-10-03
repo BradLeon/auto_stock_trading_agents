@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-CONSUMER = "evidence_observer"
+CONSUMER = "layer"
 COMMERCIALIZATION_CLAIM_ID = "ai_frontier_labs_commercialization"
 COMMERCIALIZATION_CLAIM_DEFINITION_VERSION = "v1"
 COMMERCIALIZATION_CLAIM_TEXT = (

@@ -34,10 +34,11 @@ class CentralAdmission:
 
     @staticmethod
     def _candidate_id(batch: AdapterBatch, record: NativeRecord) -> str:
-        payload = (
-            f"{batch.source_id}|{batch.dataset_id}|{record.entity_id}|"
-            f"{record.provider_field}|{record.period}|{record.value}|{record.raw}"
-        )
+        # Unit/currency/basis/dimensions are part of the gate's input. A malformed
+        # reinterpretation of identical raw bytes must not overwrite a previously
+        # accepted candidate with the same entity/metric/value.
+        payload = f"{batch.source_id}|{batch.dataset_id}|" + json.dumps(
+            record.model_dump(mode="python"), sort_keys=True, default=str)
         return hashlib.sha1(payload.encode()).hexdigest()[:24]
 
     def admit(self, *, batch: AdapterBatch, request: FetchRequest,

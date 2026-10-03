@@ -2,6 +2,107 @@
 # A row becomes verified only through a reproducible assurance run.
 schema_version: 1
 target: docs/TARGET_WORKFLOW_DATAFLOW.md
+data_input_contracts:
+  HIER_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.data.products
+    input_mode: persistent
+    allowed_consumers: [layer, sector, fundamental]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.data.products.base.DataProducts.metric_series + ats.data.products.base.DataProducts.neutral_evidence
+  DOC_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.data.products
+    input_mode: persistent
+    allowed_consumers: [layer, information]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.data.products.unstructured.admitted_documents
+  COMPANY_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.data.products
+    input_mode: persistent
+    allowed_consumers: [fundamental]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.data.products.base.DataProducts.metric_series + ats.data.products.unstructured.admitted_documents
+  MACRO_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.data.products
+    input_mode: persistent
+    allowed_consumers: [macro]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.data.products.base.DataProducts.metric_series
+  MARKET_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.data.runtime
+    input_mode: runtime
+    allowed_consumers: [technical, risk]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.data.runtime.market_data.fetch_close_history_many + ats.data.runtime.options.fetch_runtime
+  PORTFOLIO_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.execution.state_api
+    input_mode: internal
+    allowed_consumers: [chief, risk]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.execution.state_api.get_internal_state
+  HISTORY_DATA:
+    schema_version: target-consumer-input-v1
+    owner: ats.execution.state_api
+    input_mode: internal
+    allowed_consumers: [chief]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.execution.state_api.get_internal_state
+  RISK_RULES:
+    schema_version: target-consumer-input-v1
+    owner: ats.config
+    input_mode: configuration
+    allowed_consumers: [risk]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.config.get_config
+  APPROVED_EXECUTION_AUTHORIZATION:
+    schema_version: target-consumer-input-v1
+    owner: ats.execution.authorization
+    input_mode: authorization
+    allowed_consumers: [trader]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.execution.authorization.build_authorization + ats.execution.authorization.validate_authorization
+  BROKER_STATE:
+    schema_version: target-consumer-input-v1
+    owner: ats.data.runtime
+    input_mode: runtime
+    allowed_consumers: [clerk]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.data.runtime.broker.portfolio_snapshot
+  DECISION_APPROVAL_CONTEXT:
+    schema_version: target-consumer-input-v1
+    owner: ats.decision.repository
+    input_mode: internal
+    allowed_consumers: [clerk]
+    read_api: ats.data.consumer_api.read_input
+    native_api: ats.decision.repository.DecisionAuditRepository.read_chain
+retired_consumers:
+  evidence_observer:
+    status: retired
+    replaced_by: layer
+    policy_version: observer-to-layer-v1
+    preserve_historical_lineage: true
+    standalone_role: forbidden
+    dispositions:
+      - datasets: [ai_work_adoption, ai_enterprise_adoption_us, ai_worker_adoption_us, ramp_ai_adoption, ramp_ai_spend]
+        target_product: HIER_DATA
+        reason: AI 使用与投入证据支持 L1 产业层级命题。
+      - datasets: [frontier_ai_labs_revenue, openrouter_rankings_daily, frontier_ai_capability_benchmarks, frontier_ai_public_model_cards]
+        target_product: HIER_DATA
+        reason: Frontier 公司商业化、用量与能力证据支持 L1 命题。
+      - datasets: [company_financials, market_consensus, regional_tw_exports, regional_kr_exports, industry_dram_contract_price]
+        target_product: HIER_DATA
+        reason: 财务截面及上下游信号供 Layer 使用，保留通用共享产品和其他消费者。
+      - datasets: [sec_filing_documents, earnings_transcripts, ai_hardware_knowledge]
+        target_product: DOC_DATA
+        reason: 已准入文档保留原 source/version/hash，供 Layer 按实体和命题读取。
+      - datasets: [sp500_earnings_insight, private_company_events]
+        target_product: general_data_product
+        reason: 保留 Macro/Fundamental 等现有消费者，不创建 Observer 角色。
 nodes:
   - id: RUNTIME_SRC
     domain: runtime
@@ -317,13 +418,14 @@ consumers:
     evidence_ttl_days: 90
     required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
     products: [HIER_DATA, DOC_DATA]
-    read_api: ats.data.products.sector_inputs.curated_knowledge_packet + ats.data.products.unstructured_read_router.observations + ats.data.products.sector_inputs.constituent_financials + ats.data.products.sector_inputs.consensus_for + ats.data.runtime.market_data
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.data.products.sector_inputs + ats.data.products.routing.UnstructuredReadRouter + ats.data.runtime.market_data
     owner: ats.data.products
-    vintage: document_version_hash_and_observation_observed_at; accounting_report_period; runtime_market_as_of
-    completeness: missing_notes_and_no_coverage_are_explicit; persisted_evidence_as_of_cutoff_unverified
+    vintage: document_publication_and_immutable_version; fact_observed_at_and_supersession; structured_known_at_and_report_period
+    completeness: missing_notes_and_no_coverage_are_explicit; native_packet_filters_fact_and_document_vintage; legacy_metadata_history_is_not_fabricated
     source_flag: none
     consumer_flag: none
-    fallback: no_provider_fallback_for_persisted_evidence; runtime_market_gateway_failure_is_explicit
+    fallback: no_provider_fallback_for_persisted_evidence; missing_or_unverifiable_lineage_is_explicit
     legacy: direct_knowledge_reads
     verify: layer_read_contract
     allowed_projection_inputs: []
@@ -333,7 +435,8 @@ consumers:
     evidence_ttl_days: 30
     required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
     products: [DOC_DATA]
-    read_api: ats.data.products.unstructured.admitted_documents
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.data.products.unstructured.admitted_documents
     owner: ats.data.products
     vintage: document_published_at_and_version
     completeness: partial_preview_labeled
@@ -349,7 +452,8 @@ consumers:
     evidence_ttl_days: 90
     required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
     products: [HIER_DATA]
-    read_api: ats.data.products.sector_inputs
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.data.products.sector_inputs
     owner: ats.data.products
     vintage: mixed_structured_known_at_and_document_version
     completeness: per_input_missing_status
@@ -365,7 +469,8 @@ consumers:
     evidence_ttl_days: 30
     required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
     products: [COMPANY_DATA, HIER_DATA]
-    read_api: ats.data.fundamentals.fetch
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.data.products.base.DataProducts.company_research_package
     owner: ats.data.products
     vintage: company_report_period_known_at_and_document_version
     completeness: financial_package_and_document_scoreable
@@ -381,7 +486,8 @@ consumers:
     evidence_ttl_days: 30
     required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
     products: [MACRO_DATA]
-    read_api: ats.data.products.macro_inputs.regional_monthly
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.data.products.macro_inputs.regional_monthly
     owner: ats.data.products
     vintage: regional_known_at_and_factset_release
     completeness: missing_regional_is_explicit
@@ -397,7 +503,8 @@ consumers:
     evidence_ttl_days: 1
     required_evidence: [runtime_query, timestamp, failure_semantics, no_persistence, fallback]
     products: [MARKET_DATA]
-    read_api: ats.data.runtime.market_data.fetch_close_history_many
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.data.runtime.market_data.fetch_close_history_many
     owner: ats.data.runtime
     vintage: runtime_query_timestamp_and_last_market_date
     completeness: missing_prices_note
@@ -413,7 +520,8 @@ consumers:
     evidence_ttl_days: 7
     required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback]
     products: [PORTFOLIO_DATA, HISTORY_DATA]
-    read_api: ats.execution.state_api.recent_trades
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.execution.state_api.get_internal_state
     owner: ats.execution.state_api
     vintage: state_as_of_available_via_get_internal_state
     completeness: state_completeness_available_via_get_internal_state
@@ -429,7 +537,8 @@ consumers:
     evidence_ttl_days: 7
     required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback]
     products: [PORTFOLIO_DATA, MARKET_DATA, RISK_RULES]
-    read_api: ats.execution.state_api.get_internal_state
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.execution.state_api.get_internal_state
     owner: ats.execution.state_api
     vintage: state_as_of
     completeness: state_completeness
@@ -445,7 +554,8 @@ consumers:
     evidence_ttl_days: 1
     required_evidence: [authorization, revision_hash, broker_submit_boundary, idempotency]
     products: [APPROVED_EXECUTION_AUTHORIZATION]
-    read_api: ats.execution.approval.require_authorized_revision
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.execution.authorization.build_authorization + ats.execution.authorization.validate_authorization
     owner: ats.trader
     vintage: decision_revision_hash_and_approval_time
     completeness: exact_revision_and_broker_account_scope_required
@@ -461,7 +571,8 @@ consumers:
     evidence_ttl_days: 1
     required_evidence: [broker_read, reconciliation, partial_fill, idempotency, fallback]
     products: [BROKER_STATE, DECISION_APPROVAL_CONTEXT]
-    read_api: ats.execution.clerk.reconcile_and_ledger
+    read_api: ats.data.consumer_api.read_input
+    legacy_read_api: ats.execution.clerk.clerk_run
     owner: ats.execution.clerk
     vintage: broker_report_time_and_reconcile_time
     completeness: reconciliation_gap_counts

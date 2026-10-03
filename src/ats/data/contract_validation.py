@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import ast
+from importlib.util import resolve_name
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from ..config import REPO_ROOT
-
 
 EXPECTED_PRODUCTS = {
     "layer": {"HIER_DATA", "DOC_DATA"},
@@ -29,6 +29,13 @@ EXPECTED_PROJECTIONS = {
     "chief": {"layer", "information", "sector", "fundamental", "macro", "technical"},
     "risk": set(), "trader": set(),
     "clerk": {"chief_decision_revision", "risk_review", "boss_approval"},
+}
+EXPECTED_INPUT_MODES = {
+    "HIER_DATA": "persistent", "DOC_DATA": "persistent", "COMPANY_DATA": "persistent",
+    "MACRO_DATA": "persistent", "MARKET_DATA": "runtime", "PORTFOLIO_DATA": "internal",
+    "HISTORY_DATA": "internal", "RISK_RULES": "configuration",
+    "APPROVED_EXECUTION_AUTHORIZATION": "authorization", "BROKER_STATE": "runtime",
+    "DECISION_APPROVAL_CONTEXT": "internal",
 }
 FORBIDDEN_AGENT_IMPORTS = (
     "ats.data.pipelines.structured.ingestion",
@@ -56,8 +63,17 @@ def _agent_import_violations(root: Path) -> list[str]:
                 modules: list[str] = []
                 if isinstance(node, ast.Import):
                     modules.extend(alias.name for alias in node.names)
-                elif isinstance(node, ast.ImportFrom) and node.module:
-                    modules.append(node.module)
+                elif isinstance(node, ast.ImportFrom):
+                    package = ".".join(path.relative_to(root / "src").parent.parts)
+                    module = node.module or ""
+                    if node.level:
+                        try:
+                            module = resolve_name("." * node.level + module, package)
+                        except (ImportError, ValueError):
+                            violations.append(f"invalid_relative_import:{path.relative_to(root)}:{node.lineno}")
+                            continue
+                    modules.append(module)
+                    modules.extend(f"{module}.{alias.name}" for alias in node.names)
                 for module in modules:
                     if any(module == forbidden or module.startswith(forbidden + ".")
                            for forbidden in FORBIDDEN_AGENT_IMPORTS):
@@ -71,6 +87,38 @@ def validate_target_contract(path: str | Path | None = None) -> dict[str, Any]:
     raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     errors: list[str] = _agent_import_violations(REPO_ROOT)
     consumers = {str(row.get("id")): row for row in raw.get("consumers", [])}
+    input_contracts = raw.get("data_input_contracts") or {}
+    expected_input_ids = set().union(*EXPECTED_PRODUCTS.values())
+    if set(input_contracts) != expected_input_ids:
+        errors.append("data_input_contracts_must_cover_all_target_products")
+    for product in sorted(expected_input_ids):
+        edge = input_contracts.get(product) or {}
+        if edge.get("input_mode") != EXPECTED_INPUT_MODES[product]:
+            errors.append(f"{product}:input_mode_mismatch")
+        if edge.get("schema_version") != "target-consumer-input-v1":
+            errors.append(f"{product}:schema_version_mismatch")
+        allowed = {role for role, products in EXPECTED_PRODUCTS.items() if product in products}
+        if set(edge.get("allowed_consumers") or []) != allowed:
+            errors.append(f"{product}:allowed_consumers_mismatch")
+        if any(not edge.get(field) for field in
+               ("schema_version", "owner", "input_mode", "read_api", "native_api")):
+            errors.append(f"{product}:incomplete_edge_contract")
+        for api in str(edge.get("read_api", "") + " + " + edge.get("native_api", "")).split("+"):
+            if api.strip() and not _api_exists(api.strip(), REPO_ROOT):
+                errors.append(f"{product}:nonexistent_read_api:{api.strip()}")
+    retirement = (raw.get("retired_consumers") or {}).get("evidence_observer") or {}
+    if (retirement.get("status") != "retired" or retirement.get("replaced_by") != "layer"
+            or retirement.get("standalone_role") != "forbidden"
+            or retirement.get("preserve_historical_lineage") is not True):
+        errors.append("observer_retirement_contract_missing_or_invalid")
+    registry_datasets: set[str] = set()
+    for name in ("structured.yaml", "unstructured.yaml"):
+        registry = yaml.safe_load((REPO_ROOT / "config/data" / name).read_text(encoding="utf-8")) or {}
+        registry_datasets.update(registry.get("datasets") or {})
+    for disposition in retirement.get("dispositions") or []:
+        for dataset in disposition.get("datasets") or []:
+            if dataset not in registry_datasets:
+                errors.append(f"observer_retirement_unknown_dataset:{dataset}")
     if set(consumers) != set(EXPECTED_PRODUCTS):
         errors.append("consumer_roles_must_match_target_ten_roles")
     for consumer_id, required in EXPECTED_PRODUCTS.items():
@@ -108,6 +156,34 @@ def validate_target_contract(path: str | Path | None = None) -> dict[str, Any]:
         errors.append("analysis_projection_edges_must_be_layer_sector_and_information_fundamental")
     return {"valid": not errors, "manifest": str(manifest_path), "errors": errors,
             "consumer_count": len(consumers), "projection_edges": sorted(projection_edges)}
+
+
+def _api_exists(api: str, root: Path) -> bool:
+    """Resolve declarations statically: do not import modules or connect providers."""
+    parts = api.split(".")
+    for cut in range(len(parts), 0, -1):
+        base = root / "src" / Path(*parts[:cut])
+        path = base.with_suffix(".py")
+        if not path.is_file():
+            path = base / "__init__.py"
+        if not path.is_file():
+            continue
+        if cut == len(parts):
+            return True
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        body = tree.body
+        for name in parts[cut:]:
+            matched = next((node for node in body if
+                            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                            and node.name == name), None)
+            if matched is None:
+                # Re-exported public APIs are bindings, not runtime introspection.
+                return any(isinstance(node, (ast.ImportFrom, ast.Import)) and
+                           any((alias.asname or alias.name) == name for alias in node.names)
+                           for node in body) and name == parts[-1]
+            body = matched.body
+        return True
+    return False
 
 
 def main() -> int:

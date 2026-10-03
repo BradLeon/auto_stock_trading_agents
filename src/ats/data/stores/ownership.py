@@ -4,11 +4,16 @@ DATA_LAYER_TABLES = frozenset({
     "source_documents", "document_candidates", "document_versions",
     "document_entities", "document_source_aliases", "document_chunks",
     "data_document_artifacts", "data_document_pages",
+    "data_document_publications",
     "document_processing_runs", "data_sources", "ingestion_runs",
     "measurement_series", "measurement_points", "evidence_observations",
     "evidence_failures", "evidence_facts", "evidence_fact_projections",
     "earnings_events",
     "newsletter_cursors", "data_migrations",
+    "schedule_calendar_source_runs", "schedule_event_candidates", "schedule_events",
+    "schedule_event_sources", "schedule_event_overrides",
+    "schedule_event_release_confirmations", "schedule_event_candidate_observations",
+    "schedule_candidate_review_history",
 })
 
 WORKFLOW_MEMORY_TABLES = frozenset({

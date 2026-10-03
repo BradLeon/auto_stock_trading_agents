@@ -1,5 +1,7 @@
 # Target Dataflow 初始差距矩阵（2026-09-24）
 
+**后续验收（2026-10-03）**：Tasks 3.1–3.8 已按零网络缓存重放完成，当前结果与边界以 [专项验收报告](TARGET_DATAFLOW_TASK3_ACCEPTANCE.md) 和 [版本化结果](TARGET_DATAFLOW_TASK3_REPLAY.json) 为准。下列 blocked/needs_refactor 是当时基线，不应继续作为新 Data API 未完成的判断；5880 条旧缺血缘 facts 仅分类登记，不修旧路径。Tasks 4 的回滚与最终 qualification 仍未由 Tasks 3 代替。
+
 此表是 `config/data/target_dataflow_coverage.yaml` 的首次取证记录，不是 Phase F 切流资格。覆盖清单的每个节点/连线/消费者引用一个 `verify` 键；下表逐键给出状态。因此代码存在、历史 change 归档和人工文档声明均不自动变成 `verified`。`blocked` 表示当前证据不足或外部条件缺失，当前读路由不因此改变。
 
 **当前状态更新（2026-10-02）**：后续真实 launchd 验收已完成，逐源事实以 [UNSTRUCTURED_REFRESH_INVENTORY.md 的本机 launchd 逐源验收](UNSTRUCTURED_REFRESH_INVENTORY.md#本机-launchd-逐源验收2026-10-02覆盖-229) 为准：17 个 `com.ats.data-refresh` jobs 已逐项定性，三项月度结构化来源通过真实触发及受管队列运行；可通过来源启用，IBKR/TWS 失败及未授权的 Frontier/SEC 正文仍关闭并明确未通过/非阻塞例外。FactSet 月报由单独 `com.ats.schedule` owner 运行，见 FactSet 月报手册。OpenSpec 2.2.11 已按用户确认完成；财务数据 22 个 `no_coverage` 是预期返回状态，不构成其验收缺口。下文原始矩阵与 9 月运行描述保留为历史快照，不能覆盖本更新，也不代表 Phase F 完成。
@@ -167,3 +169,27 @@ FactSet schedule callback 已改为周度稳定任务入队；FactSet 总管线�
 FactSet live owner 交接后续：经用户授权，在 `com.ats.schedule` 无 job 执行且下一计划窗口未到时，将旧 `/Users/liuchao/Library/LaunchAgents/com.ats.schedule.plist` 备份为 `/private/tmp/com.ats.schedule.pre-uv.plist`，以仓库 `deploy/launchd/com.ats.schedule.plist` 安装并重启。新 `launchctl` 进程 PID 85818 使用 `uv run --offline --no-sync python -m ats.runtime.cli schedule --live`，启动日志确认 FactSet 周更 job 已注册。受控调用同周回调生成唯一 `factset-weekly:2026-W39` 队列任务 `c5ed535a-221c-5100-afd3-99cc1a639a72`，事件为 `enqueued → leased → finished`，13:39:13–13:39:43 UTC，`succeeded`/attempt=1；lease 中再次调用回调仍只保留同一任务。原 plist 和新 plist 均通过 `plutil -lint`，未发现正在执行的 Workflow job 被中断。此证据完成 Task 2.2.6 的 live 入队交接；自然周六任务、PDF 与结构化指标准入质量/产品读取尚未签收，不作为 Task 2.2.9/3.2 通过。
 
 受控运行的下游读回补充（2026-09-25 历史快照，Layer 输入签收后续于 2026-10-02 更新）：FactSet 文档版本 `SP500:2026-09-18:research_article@0c432377ecc3bcd2` 链接 33 页、1,062,946 bytes 的 PDF 原件，磁盘 SHA-256 与 `source_pdf` 关联 hash `f679661e1aaf…` 一致；Macro Data Product 返回 15 个观测，Sector 分区则为 `registered_no_data`，不得合并宣称已发布完整行业材料。固定来源 US 全集真实受管重试中，SEC 索引得到 116 行、29/30 个 Layer 标的；transcript 111 行、109 新文档、2 no-change，连同此前 NVDA 发布共 113 个完整文档由 `admitted_documents` 读回、29 实体、无空正文/缺版本。当前数据集卡片只列 `data/US/`，韩股 `005930.KS` 明确未覆盖。新路径现将缺失标的列入 `coverage_missing_entities` 并使运行保持 `partial`，而非把 29/30 当作全覆盖；两文件快照约 80.8h 超过 3d SLO。SEC 官方正文重试仍 `ConnectError`，0 发布。隔离重放另覆盖 transcript 与官方正文同一身份下的 append-only 修订与重复 no-change；目标定向集合现为 **53 passed**，Catalog 509 checks、刷新计划 17 jobs、OpenSpec strict、`git diff --check` 均通过。该段仅记载当时结果，不代表当前 2.2.9/2.2.12；2.2.11 的 2026-10-02 结果见本文件及 `UNSTRUCTURED_REFRESH_INVENTORY.md`。
+
+#### Task 3.1 结构化数据链增量（2026-10-03，未完成）
+
+本次结构化/区域/共识/宏观/日历定向回归为 **186 passed**。3 个旧 Chain regional 测试仍因无受管 queue lease 被拒绝；它们是旧调用路径，只登记、不修改。政府事件日历此前只在 source-run 中记录来源 URL 和计数，没有保存抓取原文；现已将 FOMC/BLS/BEA 文本原件写入共享内容寻址 ArtifactStore，source-run provenance 保存 hash/path/fetch 时间，并新增 source-run→candidate→raw artifact observation 关系。解析失败会保留已抓取 raw，但不生成已发布事件。日历 CLI 局部 `import os` 引发的 `UnboundLocalError` 也已移除并有入口回归测试。
+
+早先的隔离受管队列真实运行中，FOMC 40 个候选与 BEA 6 项发布；BLS 的普通 urllib 请求返回 `HTTP 403`。这是历史运行记录，不代表当前结论。经授权外网只读重试已成功，见下节；每个结构化域完整的异常/as-of 到 consumer 链尚未全部签收，因此 Task 3.1 仍不勾选。
+
+#### Tasks 3 新路径修复与实跑（2026-10-03 08:05 UTC）
+
+可版本化入口：`UV_CACHE_DIR=/private/tmp/uv-cache uv run --offline --no-sync python scripts/verify_target_calendar.py`。该脚本使用新建临时 DB/queue/artifacts，经真实 worker lease 执行，仅读取政府公开日历，不写生产数据库、不修改 launchd 或交易。此次隔离根为 `/var/folders/n1/5cnt70z50cg4_pk9fcd707mm0000gn/T/ats-target-calendar-ojpt7_8l`。
+
+| 来源 | Queue task | Source run | 发布 | Raw SHA-256 |
+|---|---|---|---:|---|
+| BEA | `3e4ad198-d46b-5279-9c99-b89b6778a88b` | `a3d680ce7e8890c013a19b5ee08ea9d1` | 6 | `68ee1f10218c2690c6d38f5e32fd01317186f633470e9a041b43122c8745bfc7` |
+| BLS | `1199e44e-50f9-5545-8d46-c7a1d94b8ed5` | `434ee70865789a25e99a52cae0c1712e` | 48 | `92a350111ace106deaab5584e4084366bd367b594a0d0bad116008d82d63e501` |
+| FOMC | `3e001b8e-fced-5d78-b1ee-d6504c2996ee` | `f4a464fe25239182f6e4ee80eb45e76e` | 38 | `5173ff1a156105ab5b0651c265c730dcfbfab8feb0629255929b137284dc22f2` |
+
+三任务均 `succeeded`、source run 均 `complete`，0 conflict/0 quarantine；队列分别保存 6/48/38 条准入与发布引用，每源一个 raw 和 run；产品读回 92 项，质量 `ok`。BLS 原件与用户浏览器下载的 80,672 字节文件 hash 一致。浏览器控制工具启动失败，未声称成功操作浏览器；公开地址使用项目既有 curl_cffi 浏览器兼容 TLS、无 cookies/登录会话即可获取。真实文件的 `US-Eastern` 及无统计月份标题现已适配，未提供 reference period 时明确未知、用官方 UID 定义身份，不猜测月份。
+
+真实 FOMC 页面暴露下一年度 footer Note 被误归入当前年度的问题；现限制解析至会议正文，2027 段末的 2028 Note 不发布为 2027 修订。同批同身份矛盾会在发布前拒绝。此前有错误候选的隔离 DB 未覆盖或删除，本次从新 DB 验收。另修复未来 source-run/conflict 影响历史 as-of、历史失败永久导致 degraded、单源刚更新掩盖另源过期，以及未来 source link 泄漏至历史 lineage 的问题。人工裁决后的历史 conflict 状态完全重放仍待专项核验，不据此宣称 Task 3.1 全完成。
+
+Observer 退役：覆盖清单按 dataset 登记 Layer HIER/DOC 和一般共享产品去向；`agent.evidence_observer` 墓碑与 consumer alias 已建立。新快照以 Layer 保存并携带旧身份/策略版本，source、observation、原版本不改写；现有三个 Layer evidence helper 归属 Layer，旧中性提取工具及模型 key 仅为兼容组件，不新增可调度 Observer。合同检查拒绝重复角色和无效 dataset。Task 3.9 已完成，不等于其余角色数据边已验收。
+
+本轮 `uv run --offline --no-sync pytest -q` 验证 consumer identity、architecture guards、calendar refresh/product/store、Internal State、Clerk e2e、Runtime boundary 共 **59 passed**；三个 warning 均为既有 sector 可视化字符串转义，未修改该旧路径。`openspec validate complete-target-dataflow --strict` 通过。架构守卫本身的临时路径识别及相对 import 解析已修复，不修改旧数据 caller。消费者清单中的四个不存在/不适合的 API 名称已纠正，但完整逐边数据包契约和对账仍属 Task 3.7，不能仅凭声明通过即勾选。

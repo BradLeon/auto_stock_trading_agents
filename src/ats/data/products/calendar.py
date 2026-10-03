@@ -8,8 +8,8 @@ from typing import Any
 
 import yaml
 
-from ..stores.schedule_calendar import ScheduleCalendarStore
 from ...config import REPO_ROOT
+from ..stores.schedule_calendar import ScheduleCalendarStore
 
 
 class ScheduleCalendarProduct:
@@ -25,9 +25,12 @@ class ScheduleCalendarProduct:
         events = self.store.events(as_of=point, start=start, end=end,
                                    event_types=event_types,
                                    include_cancelled=include_cancelled, limit=limit)
-        source_runs = self.store.source_runs(limit=100)
-        conflicts = self.store.candidates(review_status="conflict", limit=10_000)
-        pending = self.store.candidates(review_status="pending_identity", limit=10_000)
+        source_runs = self.store.source_runs(as_of=point, limit=10_000)
+        conflicts = self.store.candidates(review_status="conflict", as_of=point, limit=10_000)
+        pending = self.store.candidates(review_status="pending_identity", as_of=point, limit=10_000)
+        latest_by_source = {}
+        for run in source_runs:
+            latest_by_source.setdefault(run["source_id"], run)
         completed = [run for run in source_runs if run["status"] in {"complete", "partial"}]
         latest = max(completed, key=lambda item: item["finished_at"], default=None)
         now = point.astimezone(timezone.utc)
@@ -35,12 +38,27 @@ class ScheduleCalendarProduct:
         age = None
         if latest and latest.get("finished_at"):
             age = max(0.0, (now - datetime.fromisoformat(latest["finished_at"])).total_seconds())
+        latest_success_by_source = {}
+        for run in completed:
+            latest_success_by_source.setdefault(run["source_id"], run)
+        source_freshness = {}
+        for source_id in latest_by_source:
+            success = latest_success_by_source.get(source_id)
+            source_age = (max(0.0, (now - datetime.fromisoformat(success["finished_at"])).total_seconds())
+                          if success and success.get("finished_at") else None)
+            source_freshness[source_id] = {
+                "refresh_age_seconds": source_age,
+                "status": "stale" if source_age is None or source_age > threshold else "ok",
+            }
         quality = "ok"
         if conflicts or any(event["quality_status"] == "conflict" for event in events):
             quality = "conflict"
-        elif latest is None or age is None or age > threshold:
+        elif latest is None or any(item["status"] == "stale" for item in source_freshness.values()):
             quality = "stale"
-        elif latest["status"] == "partial" or any(run["status"] == "failed" for run in source_runs):
+        elif any(run["status"] in {"partial", "failed"}
+                 for run in latest_by_source.values()):
+            quality = "degraded"
+        elif any(event["quality_status"] == "unknown" for event in events):
             quality = "degraded"
         return {
             "product": "schedule_calendar",
@@ -53,6 +71,8 @@ class ScheduleCalendarProduct:
                 "freshness_slo_seconds": threshold,
                 "latest_successful_refresh": latest,
                 "refresh_age_seconds": age,
+                "latest_by_source": latest_by_source,
+                "source_freshness": source_freshness,
             },
             "lineage": {
                 "source_runs": source_runs,

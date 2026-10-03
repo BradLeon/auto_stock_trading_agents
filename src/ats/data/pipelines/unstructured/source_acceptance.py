@@ -9,21 +9,20 @@ side effects.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
 import hashlib
 import importlib
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
 from ....schemas.chain import ArticleRef, ArticleSourceDef
-
 
 READ_MODES = {"legacy", "shadow", "platform", "fallback"}
 _SUCCESS = {"succeeded", "no_change"}
@@ -48,11 +47,9 @@ def default_release_path() -> Path:
 
 def _load_article_sources() -> dict[str, ArticleSourceDef]:
     """Read the unified registry without importing the Chain consumer."""
-    from ....config import _config_dir, _load_yaml
+    from .article_ingest import _article_sources
 
-    raw = _load_yaml(_config_dir() / "data" / "sources.yaml").get("article_sources", {}) or {}
-    return {source_id: ArticleSourceDef(id=source_id, **(body or {}))
-            for source_id, body in raw.items()}
+    return _article_sources()
 
 
 def load_policy(source_id: str, *, path: str | Path | None = None) -> dict[str, Any]:
@@ -234,8 +231,11 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
             continue
         body = ""
         errors: list[str] = []
-        body_requests += 1
         for attempt in range(1, max_body_attempts + 1):
+            if body_requests >= max_body_requests:
+                row["reason"] = "body_request_budget_exhausted"
+                break
+            body_requests += 1
             try:
                 body = adapter.fetch_body(ref.url)
                 row["body_attempts"] = attempt

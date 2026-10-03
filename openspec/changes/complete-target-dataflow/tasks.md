@@ -40,19 +40,24 @@ FactSet 关联子专项：`generalize-factset-report-ingestion` 独立处理跨�
 
 2026-09-26 SEC/财务/电话会专项进展：拆除混装的 fixed_sources.py，采用 document_ingest.py、sec.py、transcripts.py 与 sources/defeatbeta.py；SEC 复用旧正文/EX-99/submission 提取器，新路径独立约束 transport。财务生产文件改为 US 分区、绑定 revision，NVDA/AMD/TSM 受管真实采集成功；电话会全注册 US 范围 111 条成功处理，29 实体 Data Product 读回。51 项定向测试通过。SEC 官方站点代理与直连仍 TLS EOF，真实正文未发布，2.2.9/2.2.11/2.2.12 及全域验收任务均不提前勾选。详细 task/run ID、范围与旧失败登记见 `docs/validation/SEC_FINANCIAL_TRANSCRIPT_ACCEPTANCE.md`。
 
-- [ ] 3.1 对公司财务、宏观/行业数值和事件日历等结构化域分别重放 source→raw→gate/quarantine→vintage→product→consumer 的正常、失败、陈旧、拒绝与修订/as-of 用例。
-  - 进展（未完成）：定向结构化 ingestion/lifecycle/company/regional/query/products/macro/calendar 集合 117 passed、1 failed。失败为旧 Chain regional feature-flag 直调且无 queue lease，仅记录不修；通过项仍未逐域覆盖全部 raw→consumer 异常和修订/as-of 语义。结果及范围见 `docs/validation/TARGET_DATAFLOW_BASELINE.md`。
-- [ ] 3.2 对公告、财报稿、电话会、新闻、研报等非结构化域分别重放文档身份、不可变版本、质量门、事实提取、产品读取、失败和修订用例；对 2.2.3–2.2.6 及新增 2.2.12 的每个固定来源分别保存正常、重复、正文不足/付费墙、权限/来源故障、partial/人工待审、预算耗尽、来源修订和 as-of 的结果，不以一个样本代表全部来源。IBKR→Yahoo fallback、SemiAnalysis 全文/预览、FactSet PDF/派生数据、SEC accession→官方原文、DefeatBeta transcript 财季匹配各有独立检查；搜索结果不得作为持久化来源准入通过的证据。
-  - 进展（未完成）：文档/admission/official-source/FactSet 子集 102 passed、22 failed；失败均来自旧 `admission`/`document_assets`/`documents.gather`/DefeatBeta helper 直接写 platform store 且没有 queue lease，仅登记不修。新 `article-ingest` 与五个 target registry source 的独立受管路径由前述 99 项定向集合验证；SEC 固定链、逐源许可/修订/as-of 与全量消费者读回仍待完成。详见 `TARGET_DATAFLOW_BASELINE.md` 与 `UNSTRUCTURED_REFRESH_INVENTORY.md`。
-- [ ] 3.3 验证 Runtime Data Gateway 的行情/期权与券商即时查询 owner、时间戳和失败语义，以及 Internal State API 的账户、订单、绩效 as-of/完整性；确认两者没有伪装为持久化研究观测。
-  - 进展（未完成）：Runtime market、Internal State 与数据边界选定测试 55 passed；Task 2.7 已覆盖行情/期权不入持久队列。券商/Clerk 订单、绩效完整性/as-of 和端到端失败语义尚未全覆盖。
-- [ ] 3.4 验证数据层中性事实与 Workflow Memory 观点隔离，Agent 无 Provider 直连或观点回写路径；对边界违规给出具体调用链与修复。
-  - 进展（未完成）：store ownership、数据架构、consumer routing、Memory/LLM 边界选定测试 55 passed，manifest contract guard 通过；旧 PEAD Evidence Observer transcript/search 调用链已登记，仅按用户要求不修。仍需覆盖中性事实 lineage 分类与所有 Agent/Workflow 实际写路径。
-- [ ] 3.5 对每个直接消费者固定实体、范围、vintage/as-of 做旧新读取对账；区分预期语义变化、覆盖差异和错误，保留无法解释差异为阻断项。
-- [ ] 3.6 对矩阵中确认为 `needs_refactor` 或 `missing` 的路径逐项实施最小兼容修复，重跑对应路径和受影响消费者验收；不重建已验证模块。
-- [ ] 3.7 为目标 §4 的十个角色落实数据包契约和 Data API：Layer=`HIER_DATA+DOC_DATA`，Information=`DOC_DATA`，Sector=`HIER_DATA`，Fundamental=`COMPANY_DATA+HIER_DATA`，Macro=`MACRO_DATA`，Technical=`MARKET_DATA`，Chief=`PORTFOLIO_DATA+HISTORY_DATA`，Risk=`PORTFOLIO_DATA+MARKET_DATA+RISK_RULES`，Trader=approved authorization，Clerk=broker state+decision/approval context。每条边验证 owner、schema/version、as-of/vintage、完整性、允许消费者、fallback 和旧入口。
-- [ ] 3.8 增加 Data-Agent 架构守卫和负例：持久化材料不得经 Provider、底层表或 Workflow Memory 读取；runtime/internal state 不得混入研究事实；分析师 Task Projection 只允许 Layer→Sector 与 Information→Fundamental；Chief 是唯一可汇总六类分析观点者。该守卫只验证数据/依赖边界，不重写 Phase D Agent 推理逻辑。
-- [ ] 3.9 退役 Evidence Observer 角色和独立 consumer：为旧身份建立 tombstone/alias，逐源判断迁入 Layer `HIER_DATA`/`DOC_DATA`、保留为一般数据产品或按零消费者退役；迁移前后保留 lineage，架构检查禁止 Observer 与 Layer 同时作为活跃分析角色。
+- [x] 3.1 对公司财务、宏观/行业数值和事件日历等结构化域分别重放 source→raw→gate/quarantine→vintage→product→consumer 的正常、失败、陈旧、拒绝与修订/as-of 用例。
+  - 完成证据（2026-10-03）：零网络执行器逐域重放六个数据集的真实已接受 observation/raw，正常/重复/故障/权限/stale/拒绝/修订/as-of 通过；三份政府日历原文缓存重新解析为38/48/6个事件，失败保留 last-good、改期与历史 conflict 检查通过。保留 FactSet manifest fence，不以隔离 observation 子集审批代表完整报告。来源采集复用既有记录，旧 Chain 缺 lease 只登记。见 `docs/validation/TARGET_DATAFLOW_TASK3_ACCEPTANCE.md` 与同目录 `TARGET_DATAFLOW_TASK3_REPLAY.json`。
+- [x] 3.2 对公告、财报稿、电话会、新闻、研报等非结构化域分别重放文档身份、不可变版本、质量门、事实提取、产品读取、失败和修订用例；对 2.2.3–2.2.6 及新增 2.2.12 的每个固定来源分别保存正常、重复、正文不足/付费墙、权限/来源故障、partial/人工待审、预算耗尽、来源修订和 as-of 的结果，不以一个样本代表全部来源。IBKR→Yahoo fallback、SemiAnalysis 全文/预览、FactSet PDF/派生数据、SEC accession→官方原文、DefeatBeta transcript 财季匹配各有独立检查；搜索结果不得作为持久化来源准入通过的证据。
+  - 完成证据（2026-10-03）：九个 target 来源逐源签收矩阵；七个正文来源各自验证 hash/版本/重复/修订/as-of/损坏拒绝与事实引用。两条 DefeatBeta pinned raw parser 链独立运行；三条 fixed publication gate 验证 short/partial/source issue；文章源按实际 policy 验证许可、partial/人工审核、预算和 IBKR→Yahoo fallback。索引不冒充官方原文，Yahoo 质量探针不冒充生产审批；无网页/正文的来源相应检查明确 N/A。SEC extractor、FactSet 双 PDF 与派生发布复用原生检查/已归档证据，不重跑采集或视觉模型；新门禁坏材料明确为合成故障探针，模型推理质量不在本任务重做。详见上述版本化报告；旧无 lease 调用只登记。
+- [x] 3.3 验证 Runtime Data Gateway 的行情/期权与券商即时查询 owner、时间戳和失败语义，以及 Internal State API 的账户、订单、绩效 as-of/完整性；确认两者没有伪装为持久化研究观测。
+  - 完成证据：runtime options/broker 独立 schema、query/source timestamp、异常/None/正常空列表区分；Internal State 分区源时间与 reconcile/gap 包装；拒绝把当前状态冒充历史 as-of。综合 Runtime/Internal/授权/Clerk 集合及零网络 edge replay 通过，未提交订单。
+- [x] 3.4 验证数据层中性事实与 Workflow Memory 观点隔离，Agent 无 Provider 直连或观点回写路径；目标新路径上的边界违规须修复并回归验证，旧路径违规只记录调用链、owner 与影响，不在本 change 修复。
+  - 完成证据：修复 Information 经 Memory 查询文档身份；中性 fact 追加 vintage，观点字段留在 profile/Memory；5880条历史缺版本事实分类为5783文档、68搜索、29缺 vintage link 数值，只登记，不补造血缘。新 API 不签收无法核验的旧事实。当前 Agent 树与实际 import/write/projection 调用守卫通过；不声明完成任意 Python 沙箱或完整 Workflow 集成。
+- [x] 3.5 对每个直接消费者固定实体、范围、vintage/as-of 做旧新读取对账；区分预期语义变化、覆盖差异和错误，保留无法解释差异为阻断项。
+  - 完成证据：十个角色固定现有 native/facade 样本与新 packet 的值、正文、vintage/authorization/context 对账；新增字段、canonical 来源过滤、历史语义、无 reconcile/时间戳降级及已接受 no_coverage 明确归类。没有未解释值差异；旧采集器/Agent 推理不重跑，回滚/eligible 仍归 Tasks4。
+- [x] 3.6 仅对目标新路径中确认为 `needs_refactor` 或 `missing` 且属于本 change 范围的项实施最小修复，并重跑受影响消费者验收；旧路径问题只登记 owner、调用链、影响及后续建议，不修复、不迁移，也不作为新路径验收阻塞；不重建已验证模块。
+  - 完成证据：补历史 publication/fact、body hash、财季匹配/版本排序、native read packet、真实请求预算、固定 partial 拒绝与守卫；复用 parser，不修旧调用者。最终综合181 passed，Information/文档选定52 passed，最后受影响36 passed；旧测试的时钟/stale/不完整自定义 fixture 单独记录，不据此放宽新门禁。
+- [x] 3.7 为目标 §4 的十个角色落实数据包契约和 Data API：Layer=`HIER_DATA+DOC_DATA`，Information=`DOC_DATA`，Sector=`HIER_DATA`，Fundamental=`COMPANY_DATA+HIER_DATA`，Macro=`MACRO_DATA`，Technical=`MARKET_DATA`，Chief=`PORTFOLIO_DATA+HISTORY_DATA`，Risk=`PORTFOLIO_DATA+MARKET_DATA+RISK_RULES`，Trader=approved authorization，Clerk=broker state+decision/approval context。每条边验证 owner、schema/version、as-of/vintage、完整性、允许消费者、fallback 和旧入口。
+  - 完成证据：`ats.data.consumer_api.read_input`、`target-consumer-input-v1` 与16条边的注册契约；每条边保存 owner/mode/schema/fallback/legacy，角色/product 越权在读取前拒绝，当前状态不冒充历史。完整 Workflow 实际时序/推理接线按既有交接矩阵留给独立集成验收；不授予 PhaseF 资格。
+- [x] 3.8 增加 Data-Agent 架构守卫和负例：持久化材料不得经 Provider、底层表或 Workflow Memory 读取；runtime/internal state 不得混入研究事实；分析师 Task Projection 只允许 Layer→Sector 与 Information→Fundamental；Chief 是唯一可汇总六类分析观点者。该守卫只验证数据/依赖边界，不重写 Phase D Agent 推理逻辑。
+  - 完成证据：相对/动态 Provider import、底层表、Memory/别名、投影非法/别名/动态输入、事实回写等10个版本化负例通过；当前 Agent 树、十角色契约、研究包混入 runtime/internal/opinion 的拒绝检查通过。
+- [x] 3.9 退役 Evidence Observer 角色和独立 consumer：为旧身份建立 tombstone/alias，逐源判断迁入 Layer `HIER_DATA`/`DOC_DATA`、保留为一般数据产品或按零消费者退役；迁移前后保留 lineage，架构检查禁止 Observer 与 Layer 同时作为活跃分析角色。
+  - 完成证据（2026-10-03）：`consumer_identity.py` 将历史 Observer consumer 映射至 Layer，新 snapshot 保留 `legacy_consumer`、策略版本和原 observation/source 引用，不更新历史行；三个 Layer evidence helper 使用 Layer 身份。覆盖清单逐数据集登记 HIER/DOC/一般产品去向，validator 校验 dataset 均在权威 registry 中，并拒绝重复活跃角色及缺失退役合同；workflow 墓碑登记 `agent.evidence_observer`。旧 `observer.py`/模型配置仅保留为兼容提取组件，旧调用路径仍只登记、不修、不物理清除。59 项定向回归通过，详细范围见 `TARGET_DATAFLOW_BASELINE.md`；不代表其他 Tasks 3 或 Phase F 切流已完成。
 
 ## 4. 切流资格与回滚证据
 

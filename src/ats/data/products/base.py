@@ -6,9 +6,9 @@ or index currently serves them. Storage can evolve without changing agent contra
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import datetime, timezone
-import json
 
 
 class DataProducts:
@@ -40,6 +40,25 @@ class DataProducts:
         from .earnings_insight import load_snapshot
 
         return load_snapshot(self, as_of=as_of)
+
+    def neutral_evidence(self, *, entity: str, as_of: datetime, limit: int = 500) -> dict:
+        """Point-in-time neutral extracted facts; never profile/Agent opinions.
+
+        A fact is usable only with a published, hash-valid cited document version.
+        Unknown historical metadata is a gap, not an invented publication.
+        """
+        from .unstructured import admitted_documents
+
+        documents = admitted_documents(repository=self.unstructured, as_of=as_of, limit=10_000)
+        versions = {(doc.document_id, doc.version_id) for doc in documents}
+        usable, rejected = [], []
+        for row in self.unstructured.facts(entity=entity, as_of=as_of, limit=limit):
+            if (row["document_id"], row["document_version_id"]) not in versions:
+                rejected.append({"fact_id": row["fact_id"], "reason": "cited_version_not_visible_or_invalid"})
+            else:
+                usable.append(row)
+        return {"entity": entity.upper(), "as_of": as_of.isoformat(), "rows": usable,
+                "rejected": rejected, "status": "ok" if usable else "no_coverage"}
 
     def earnings_insight_groups(self, *, version_id, report_date, expected_groups, as_of=None):
         """Read current group coverage and explicitly separate historical values."""
@@ -1078,6 +1097,13 @@ class DataProducts:
         rows: list[dict],
         metadata: dict | None = None,
     ) -> dict:
+        from ..consumer_identity import canonical_consumer
+
+        requested_consumer = consumer
+        consumer = canonical_consumer(consumer)
+        if consumer != requested_consumer:
+            metadata = {**(metadata or {}), "legacy_consumer": requested_consumer,
+                        "consumer_identity_policy": "observer-to-layer-v1"}
         items = []
         for row in rows:
             lineage_ids = row.get("lineage_observation_ids") or [row.get("observation_id", "")]

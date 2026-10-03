@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+from importlib.util import resolve_name
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -34,7 +35,9 @@ ROLE_BY_PATH_PREFIX: tuple[tuple[str, str], ...] = (
     ("src/ats/agents/layer", "layer_analyst"),
     ("src/ats/agents/sector", "sector_analyst"),
     ("src/ats/agents/information", "information_analyst"),
-    ("src/ats/agents/evidence", "evidence_observer"),
+    ("src/ats/agents/evidence/commercialization", "layer_analyst"),
+    ("src/ats/agents/evidence/raw_capability", "layer_analyst"),
+    ("src/ats/agents/evidence/work_adoption", "layer_analyst"),
     ("src/ats/agents/fundamental", "fundamental_analyst"),
     ("src/ats/agents/pead", "fundamental_analyst"),
     ("src/ats/agents/macro", "macro_analyst"),
@@ -51,6 +54,9 @@ ROLE_BY_PATH_PREFIX: tuple[tuple[str, str], ...] = (
 ALLOWED_CROSS_ROLE_READS: dict[str, tuple[str, ...]] = {
     "sector_analyst": ("layer_analyst", "layer_analysis"),      # 行业分析师读层次分析师
     "fundamental_analyst": ("information_analyst", "information_brief"),  # 基本面读信息简报
+    "chief": ("layer_analysis", "information_brief", "sector_allocation",
+              "fundamental_expectation_update", "fundamental_event_review",
+              "macro_review", "technical_review"),
 }
 
 # Projection roles each agent role OWNS — reading your own projections is not a
@@ -67,8 +73,9 @@ OWNED_PROJECTION_ROLES: dict[str, tuple[str, ...]] = {
 
 # Projection readers: calls through which one role can consume another's output.
 PROJECTION_READ_CALLS = frozenset({
-    "task_projection_envelopes", "reusable_task_projection", "reuse_decision",
+    "task_projection_envelopes", "reusable_task_projection",
     "task_projections",
+    "get_task_projection",
 })
 
 # Phase D 5.11: a fundamental module may read fundamental-family projections ONLY
@@ -94,7 +101,10 @@ def assert_fundamental_scope(read_role: str, scope_id: str, *, own_symbol: str) 
             f"are not a sanctioned input")
 
 # --- providers -------------------------------------------------------------- #
-PROVIDER_PREFIXES: tuple[str, ...] = ("ats.data.adapters",)
+PROVIDER_PREFIXES: tuple[str, ...] = (
+    "ats.data.adapters", "ats.data.sources", "ats.data.pipelines", "ats.data.stores",
+    "yfinance", "requests", "httpx", "urllib.request", "sqlite3",
+)
 
 PROVIDER_MODULES: frozenset[str] = frozenset({
     "ats.data.defeatbeta", "ats.data.factset", "ats.data.news", "ats.data.websearch",
@@ -217,20 +227,30 @@ def role_for(relative_path: str) -> str | None:
 
 
 def _relative(path: Path, root: Path | None = None) -> str:
-    return path.relative_to(root or REPO_ROOT).as_posix()
+    resolved = path.resolve()
+    if root is not None:
+        return resolved.relative_to(root.resolve()).as_posix()
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        # Standalone guard fixtures may live outside the checkout. Only accept
+        # a recognisable package tree, never infer a role from arbitrary names.
+        for parent in resolved.parents:
+            if parent.name == "src" and (parent / "ats").is_dir():
+                return resolved.relative_to(parent.parent).as_posix()
+        raise
 
 
-def _imported_modules(node: ast.ImportFrom) -> list[str]:
+def _imported_modules(node: ast.ImportFrom, *, package: str) -> list[str]:
     """Absolute modules an `ImportFrom` actually binds, relative levels resolved.
 
     `from ...data import defeatbeta` binds `ats.data.defeatbeta`, not `ats.data` —
     resolving only the module part would let every provider import through the package's
     front door.
     """
-    if not node.module:
-        return []
-    base = (node.module if node.level == 0
-            else ("ats." + node.module) if node.level >= 3 else node.module)
+    base = node.module or ""
+    if node.level:
+        base = resolve_name("." * node.level + base, package)
     out = [base]
     out.extend(f"{base}.{alias.name}" for alias in node.names)
     return out
@@ -278,18 +298,40 @@ def _write_owner(node: ast.Call) -> str:
 def scan_module(path: Path, *, root: Path | None = None,
                 exceptions: Sequence[ExceptionEntry] = ()) -> list[Violation]:
     """All architecture violations in one module, after declared exceptions."""
-    relative = _relative(path, root or REPO_ROOT)
+    relative = _relative(path, root)
+    package = ".".join(Path(relative).parent.parts[1:])
     role = role_for(relative)
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     found: list[Violation] = []
+    reader_aliases = {}
+    alias_owners = {}
+    for assignment in ast.walk(tree):
+        if not isinstance(assignment, ast.Assign):
+            continue
+        if isinstance(assignment.value, ast.Attribute):
+            for target in assignment.targets:
+                if isinstance(target, ast.Name):
+                    reader_aliases[target.id] = assignment.value.attr
+                    if isinstance(assignment.value.value, ast.Name):
+                        alias_owners[target.id] = assignment.value.value.id
+            continue
+        if not isinstance(assignment.value, ast.Call):
+            continue
+        value = assignment.value
+        if (isinstance(value.func, ast.Name) and value.func.id == "getattr" and len(value.args) >= 2
+                and isinstance(value.args[1], ast.Constant)
+                and value.args[1].value in PROJECTION_READ_CALLS):
+            for target in assignment.targets:
+                if isinstance(target, ast.Name):
+                    reader_aliases[target.id] = value.args[1].value
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             # Report one violation per import statement, naming the shortest matching
             # target: `from ats.data.adapters.x import y` matches on both the module and
             # the module+name form, and duplicating it would inflate the count.
-            hits = [m for m in _imported_modules(node) if _is_provider(m)
+            hits = [m for m in _imported_modules(node, package=package) if _is_provider(m)
                     and not declared_exception(relative, m, exceptions)]
             if hits:
                 found.append(Violation(
@@ -297,8 +339,6 @@ def scan_module(path: Path, *, root: Path | None = None,
                     "agent module imports a source adapter or provider"))
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if not alias.name.startswith("ats."):
-                    continue
                 if not _is_provider(alias.name):
                     continue
                 if declared_exception(relative, alias.name, exceptions):
@@ -307,8 +347,20 @@ def scan_module(path: Path, *, root: Path | None = None,
                                        node.lineno, "direct provider import"))
         elif isinstance(node, ast.Call):
             name = _call_name(node)
+            name = reader_aliases.get(name, name)
+            call_owner = (alias_owners.get(node.func.id, "") if isinstance(node.func, ast.Name)
+                          else _write_owner(node))
+            if name in {"import_module", "__import__"} and node.args:
+                target = node.args[0]
+                if isinstance(target, ast.Constant) and isinstance(target.value, str) and _is_provider(target.value):
+                    found.append(Violation("provider_import", relative, target.value, node.lineno,
+                                           "dynamic provider import bypasses the governed API"))
             if name in PROJECTION_READ_CALLS and role is not None:
                 read_role = _role_literal(node)
+                if read_role is None and role != "chief":
+                    found.append(Violation(
+                        "dynamic_projection_read", relative, name, node.lineno,
+                        "analyst projection input must declare an allowed role"))
                 owned = OWNED_PROJECTION_ROLES.get(role, ())
                 if (read_role and read_role != role and read_role not in owned):
                     allowed = ALLOWED_CROSS_ROLE_READS.get(role, ())
@@ -325,12 +377,20 @@ def scan_module(path: Path, *, root: Path | None = None,
                         "conclusions (5.11)"))
             if name in SHARED_FACT_WRITE_CALLS and role is not None:
                 owner = _write_owner(node)
-                if owner in WRITE_OWNER_HINTS:
-                    if declared_exception(relative, name, exceptions):
-                        continue
-                    found.append(Violation(
-                        "opinion_writeback", relative, name, node.lineno,
-                        f"{role} writes a shared-fact record via {owner}"))
+                if declared_exception(relative, name, exceptions):
+                    continue
+                found.append(Violation(
+                    "opinion_writeback", relative, name, node.lineno,
+                    f"{role} writes a shared-fact record via {owner or 'aliased_writer'}"))
+            if name == "execute" and role is not None and isinstance(node.func, ast.Attribute):
+                owner = _write_owner(node)
+                if owner in {"conn", "connection", "store", "memory", "repo", "repository"}:
+                    found.append(Violation("direct_table_read", relative, name, node.lineno,
+                                           "analyst bypasses the governed data API"))
+            if (name in {"documents", "facts", "observations", "latest_document_version"}
+                    and role is not None and call_owner in {"store", "memory"}):
+                found.append(Violation("memory_research_read", relative, name, node.lineno,
+                                       "external research material must be read through Data Products"))
     return found
 
 

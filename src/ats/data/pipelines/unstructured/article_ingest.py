@@ -8,20 +8,22 @@ first half of the path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
 from ....schemas.chain import ArticleRef
 from ...admission import ValidationIssue, ValidationResult
-from ...document_assets import ingest as ingest_document, stable_key
+from ...document_assets import ingest as ingest_document
+from ...document_assets import stable_key
+from ...document_types import semantic_type
 from ...source_cache import root as source_cache_root
 from ...stores.unstructured import get_platform_unstructured_store
-from ...document_types import semantic_type
 from .source_acceptance import load_policy
 
 
@@ -220,6 +222,7 @@ def _materials_from_adapter(source: Any, policy: dict[str, Any], *,
         "max_body_requests") or source.max_per_run)
     max_attempts = max(1, int((policy.get("policy") or {}).get("max_body_attempts") or 1))
     materials: list[Material] = []
+    body_requests = 0
     seen: set[str] = set()
     for ref in refs:
         ref = ref if isinstance(ref, ArticleRef) else ArticleRef.model_validate(ref)
@@ -232,13 +235,17 @@ def _materials_from_adapter(source: Any, policy: dict[str, Any], *,
         if identity in seen:
             continue
         seen.add(identity)
-        if len(materials) >= body_budget:
+        if body_requests >= body_budget:
             materials.append(Material(ref, "", provenance, "budget_deferred",
                                       "body_request_budget_exhausted"))
             continue
         body = ""
         failure = ""
         for _attempt in range(max_attempts):
+            if body_requests >= body_budget:
+                failure = "body_request_budget_exhausted"
+                break
+            body_requests += 1
             try:
                 body = str(adapter.fetch_body(ref.url) or "")
                 if body.strip():
@@ -249,6 +256,8 @@ def _materials_from_adapter(source: Any, policy: dict[str, Any], *,
         materials.append(Material(ref, body, provenance,
                                   "fetched" if body.strip() else "body_unavailable",
                                   "" if body.strip() else failure))
+    status["body_requests"] = body_requests
+    status["body_request_budget"] = body_budget
     return materials, status, bool(refs)
 
 

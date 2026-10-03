@@ -6,20 +6,26 @@ network failures are recorded per source and never delete the last accepted vers
 
 from __future__ import annotations
 
+import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
-import os
 from pathlib import Path
-import re
 from typing import Any, Iterable
-from urllib.request import Request, urlopen
+from urllib.request import Request, getproxies, urlopen
 from zoneinfo import ZoneInfo
 
 import yaml
 
 from ..config import REPO_ROOT, load_pead_global
-from .stores.schedule_calendar import (ScheduleCalendarStore, ScheduleEventCandidate,
-                                       earnings_identity, fomc_identity, macro_identity)
+from .stores.schedule_calendar import (
+    ScheduleCalendarStore,
+    ScheduleEventCandidate,
+    earnings_identity,
+    fomc_identity,
+    macro_identity,
+)
+from .stores.structured.artifacts import ArtifactStore, default_artifact_root
 
 ET = ZoneInfo("America/New_York")
 MONTHS = {name.lower(): index for index, name in enumerate((
@@ -76,6 +82,9 @@ def parse_fomc_html(html: str, *, years: Iterable[int]) -> list[ScheduleEventCan
             continue
         following = re.search(r"\b20\d{2}\s+FOMC Meetings\b", normalized[marker.end():], re.I)
         section = normalized[marker.end():marker.end() + following.start()] if following else normalized[marker.end():]
+        # The footer describes a tentative January meeting in the following
+        # year. It is prose, not a row belonging to this year's calendar.
+        section = re.split(r"\bNote\s*:", section, maxsplit=1, flags=re.I)[0]
         meetings = list(re.finditer(
             r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+"
             r"(\d{1,2})\s*[-–]\s*(\d{1,2})\b", section, re.I))
@@ -130,7 +139,10 @@ def _ics_datetime(line: str) -> tuple[date, str, str, str, str]:
     if value.endswith("Z"):
         aware = parsed.replace(tzinfo=timezone.utc).astimezone(ET)
     elif tzid:
-        aware = parsed.replace(tzinfo=ZoneInfo(tzid)).astimezone(ET)
+        # BLS names its US DST-aware VTIMEZONE "US-Eastern", whereas the
+        # timezone database uses America/New_York (or US/Eastern).
+        zone = ET if tzid == "US-Eastern" else ZoneInfo(tzid)
+        aware = parsed.replace(tzinfo=zone).astimezone(ET)
     else:
         raise ValueError("ICS event has a clock time but no timezone")
     return aware.date(), aware.strftime("%H:%M"), "America/New_York", aware.isoformat(), "minute"
@@ -161,25 +173,30 @@ def parse_bls_ics(text: str) -> list[ScheduleEventCandidate]:
             continue
         reference = re.search(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b",
                               title, re.I)
-        if not reference:
-            continue
-        period = f"{int(reference.group(2)):04d}-{MONTHS[reference.group(1).lower()]:02d}"
+        period = (f"{int(reference.group(2)):04d}-{MONTHS[reference.group(1).lower()]:02d}"
+                  if reference else "")
         start_key = next((line for line in item if line.startswith("DTSTART")), "")
         if not start_key:
             continue
         start_line = f"{start_key}:{item[start_key]}"
         event_date, local_time, zone, utc_at, precision = _ics_datetime(start_line)
         phase = "initial"
-        identity = macro_identity(series, period, phase)
+        # The official ICS usually supplies only a release title and a stable
+        # UID, not its reference month. Preserve that identity across reschedules
+        # without guessing the previous month from the publication date.
+        uid = item.get("UID", "").strip()
+        identity = (macro_identity(series, period, phase) if period
+                    else f"bls:{series}:{uid}" if uid else "")
         status = "cancelled" if item.get("STATUS") == "CANCELLED" else "planned"
         candidates.append(ScheduleEventCandidate(
             source_id="bls_release_calendar", source_url="https://www.bls.gov/schedule/news_release/bls.ics",
             source_event_ref=item.get("UID", identity), event_type=event_type,
-            stable_identity=identity, label=title, reference_period=period,
+            stable_identity=identity or "", label=title, reference_period=period,
             event_date=event_date, local_time=local_time, timezone=zone, utc_at=utc_at,
             time_precision=precision, market_session="intraday" if precision == "minute" else "unknown",
             status=status, announced_at=item.get("DTSTAMP", ""),
-            metadata={"calendar_uid": item.get("UID", "")}))
+            metadata={"calendar_uid": uid, "calendar_sequence": item.get("SEQUENCE", ""),
+                      "reference_period_status": "provided" if period else "not_provided"}))
     if not candidates:
         raise ValueError("BLS ICS parser found no CPI or Employment Situation events")
     return candidates
@@ -237,14 +254,52 @@ def parse_bea_schedule_html(html: str, *, year: int | None = None) -> list[Sched
 
 
 def _fetch_text(url: str, *, timeout: int = 20) -> str:
+    if url == "https://www.bls.gov/schedule/news_release/bls.ics":
+        # This public endpoint rejects urllib's TLS client even when the same
+        # IP can download the file in a browser. Reuse the project's existing
+        # browser-compatible transport; no cookies or browser session required.
+        from curl_cffi import requests
+
+        with requests.Session(trust_env=False, impersonate="chrome") as session:
+            response = session.get(url, proxy=getproxies().get("https"),
+                                   timeout=timeout, stream=True, allow_redirects=False)
+            response.raise_for_status()
+            if response.status_code != 200:
+                raise ValueError("BLS calendar did not return an HTTP 200 document")
+            payload = bytearray()
+            for chunk in response.iter_content():
+                payload.extend(chunk)
+                if len(payload) > 10_000_000:
+                    raise ValueError("calendar response exceeds 10 MB budget")
+            return payload.decode("utf-8-sig", errors="replace")
     request = Request(url, headers={"User-Agent": "auto-stock-trading-agents schedule calendar/1.0"})
     with urlopen(request, timeout=timeout) as response:
-        return response.read(10_000_001).decode("utf-8", errors="replace")
+        payload = response.read(10_000_001)
+        if len(payload) > 10_000_000:
+            raise ValueError("calendar response exceeds 10 MB budget")
+        return payload.decode("utf-8-sig", errors="replace")
 
 
 def _load_source_config(config_dir: Path) -> dict[str, Any]:
     path = config_dir / "data" / "schedule_calendar.yaml"
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _persist_calendar_raw(repository: ScheduleCalendarStore, artifacts: ArtifactStore,
+                          source_run_id: str, raw_text: str, *,
+                          fetched_at: datetime) -> str:
+    blob = artifacts.put(raw_text, suffix=".txt")
+    repository.update_source_run_provenance(source_run_id, {
+        "raw_artifact": {
+            "blob_id": blob.blob_id,
+            "content_hash": blob.content_hash,
+            "relative_path": blob.relative_path,
+            "bytes": blob.bytes,
+            "media_type": "text/plain; charset=utf-8",
+        },
+        "fetched_at": fetched_at.isoformat(),
+    })
+    return blob.blob_id
 
 
 def _session(value: str) -> str:
@@ -254,7 +309,8 @@ def _session(value: str) -> str:
 
 def _earnings_candidates(source_id: str, *, now: datetime, symbols: list[str]
                          ) -> tuple[list[ScheduleEventCandidate], list[str]]:
-    from .earnings_calendar import ET as EARNINGS_ET, _finnhub_window, _session_from_clock, _yf_prints
+    from .earnings_calendar import ET as EARNINGS_ET
+    from .earnings_calendar import _finnhub_window, _session_from_clock, _yf_prints
 
     start, end = now.astimezone(EARNINGS_ET).date() - timedelta(days=14), now.astimezone(EARNINGS_ET).date() + timedelta(days=180)
     finnhub: dict[str, list[dict[str, Any]]] = {}
@@ -420,6 +476,7 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                               now: datetime | None = None,
                               config_dir: str | Path | None = None,
                               store: ScheduleCalendarStore | None = None,
+                              artifact_store: ArtifactStore | None = None,
                               finalize_only: bool = False) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
@@ -430,6 +487,7 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
     if unknown:
         raise ValueError(f"unknown schedule calendar sources: {sorted(unknown)}")
     repository = store or ScheduleCalendarStore()
+    artifacts = artifact_store or ArtifactStore(default_artifact_root())
     from .runtime.repository import platform_data_db_path
 
     if Path(repository.path).expanduser().resolve() == \
@@ -446,9 +504,15 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
         source = source_cfg[source_id]
         run_id = repository.record_source_run(source_id, at=now,
                                               provenance={"adapter": source.get("adapter"),
-                                                          "url": source.get("url", "")})
+                                                          "url": source.get("url", ""),
+                                                          "transport": source.get("transport", "urllib"),
+                                                          "queue_task_id": os.environ.get(
+                                                              "ATS_PERSISTENT_QUEUE_TASK_ID", "")})
         discovered = published = conflicts = quarantined = 0
         source_errors: list[str] = []
+        raw_artifact_id = ""
+        candidate_ids: list[str] = []
+        published_refs: list[str] = []
         try:
             adapter = source["adapter"]
             if adapter in {"finnhub_earnings", "yfinance_earnings"}:
@@ -458,16 +522,38 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                     adapter, now=now, symbols=targets[:cap])
             elif adapter == "federal_reserve_fomc_html":
                 years = range(now.year, now.year + 2)
-                candidates = parse_fomc_html(_fetch_text(source["url"]), years=years)
+                raw_text = _fetch_text(source["url"])
+                raw_artifact_id = _persist_calendar_raw(
+                    repository, artifacts, run_id, raw_text, fetched_at=now)
+                candidates = parse_fomc_html(raw_text, years=years)
             elif adapter == "bls_ics":
-                candidates = parse_bls_ics(_fetch_text(source["url"]))
+                raw_text = _fetch_text(source["url"])
+                raw_artifact_id = _persist_calendar_raw(
+                    repository, artifacts, run_id, raw_text, fetched_at=now)
+                candidates = parse_bls_ics(raw_text)
             elif adapter == "bea_schedule_html":
-                candidates = parse_bea_schedule_html(_fetch_text(source["url"]), year=now.year)
+                raw_text = _fetch_text(source["url"])
+                raw_artifact_id = _persist_calendar_raw(
+                    repository, artifacts, run_id, raw_text, fetched_at=now)
+                candidates = parse_bea_schedule_html(raw_text, year=now.year)
             else:
                 raise ValueError(f"unregistered schedule calendar adapter {adapter!r}")
             discovered = len(candidates)
+            signatures: dict[str, tuple[str, ...]] = {}
+            for candidate in candidates:
+                if not candidate.event_id:
+                    continue
+                signature = candidate.trigger_signature()
+                previous = signatures.setdefault(candidate.event_id, signature)
+                if previous != signature:
+                    raise ValueError(
+                        "conflicting_calendar_candidates_in_source_batch:" + candidate.event_id)
             for candidate in candidates:
                 saved = repository.submit_candidate(candidate, at=now)
+                candidate_ids.append(saved["candidate_id"])
+                repository.record_candidate_observation(
+                    source_run_id=run_id, candidate_id=saved["candidate_id"],
+                    raw_artifact_id=raw_artifact_id, observed_at=now)
                 if saved["duplicate"]:
                     continue
                 if saved["review_status"] == "conflict":
@@ -475,7 +561,8 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                 elif saved["review_status"] == "pending_identity":
                     quarantined += 1
                 else:
-                    repository.publish_candidate(saved["candidate_id"], at=now)
+                    event = repository.publish_candidate(saved["candidate_id"], at=now)
+                    published_refs.append(f"{event['event_id']}@{event['event_version']}")
                     published += 1
             status = "complete" if not conflicts and not quarantined and not source_errors else "partial"
             repository.finish_source_run(run_id, status=status, discovered=discovered,
@@ -483,15 +570,20 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                                          quarantined=quarantined,
                                          error_code="partial_sources" if source_errors else "",
                                          error_detail="; ".join(source_errors), at=now)
-            results.append({"source_id": source_id, "status": status,
+            results.append({"source_id": source_id, "source_run_id": run_id, "status": status,
                             "discovered": discovered, "published": published,
-                            "conflicts": conflicts, "quarantined": quarantined})
+                            "conflicts": conflicts, "quarantined": quarantined,
+                            "raw_artifact_id": raw_artifact_id,
+                            "candidate_ids": candidate_ids, "published_refs": published_refs})
         except Exception as exc:
             repository.finish_source_run(run_id, status="failed", discovered=discovered,
                                          published=published, conflicts=conflicts,
                                          quarantined=quarantined,
                                          error_code=type(exc).__name__, error_detail=str(exc), at=now)
-            results.append({"source_id": source_id, "status": "failed",
+            results.append({"source_id": source_id, "source_run_id": run_id,
+                            "status": "failed",
+                            "raw_artifact_id": raw_artifact_id,
+                            "candidate_ids": candidate_ids, "published_refs": published_refs,
                             "error_code": type(exc).__name__, "error": str(exc)[:300]})
     overlay_results = []
     if finalize_only or not source_ids or "manual_events_yaml" in selected:

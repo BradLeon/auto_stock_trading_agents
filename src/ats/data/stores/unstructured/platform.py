@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 class PlatformUnstructuredRepository:
@@ -33,6 +33,11 @@ class PlatformUnstructuredRepository:
         CREATE TABLE IF NOT EXISTS data_documents (document_id TEXT PRIMARY KEY,entity TEXT NOT NULL,period TEXT NOT NULL,doc_type TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,local_path TEXT NOT NULL,sha256 TEXT NOT NULL,chars INTEGER NOT NULL,ok INTEGER NOT NULL DEFAULT 1,note TEXT NOT NULL DEFAULT '',fetched_at TEXT NOT NULL,external_id TEXT NOT NULL DEFAULT '',title TEXT NOT NULL DEFAULT '',published_at TEXT NOT NULL DEFAULT '',completeness TEXT NOT NULL DEFAULT 'full',truncation_reason TEXT NOT NULL DEFAULT '',carrier_format TEXT NOT NULL DEFAULT '',mime_source TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS data_document_versions (version_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,content_hash TEXT NOT NULL,local_path TEXT NOT NULL,chars INTEGER NOT NULL,source_url TEXT NOT NULL,fetched_at TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(document_id,content_hash));
         CREATE INDEX IF NOT EXISTS idx_data_document_version_document ON data_document_versions(document_id,fetched_at);
+        CREATE TABLE IF NOT EXISTS data_document_publications (
+            publication_id TEXT PRIMARY KEY, document_id TEXT NOT NULL,
+            version_id TEXT NOT NULL, known_at TEXT NOT NULL, metadata_json TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_data_document_publication_asof
+            ON data_document_publications(document_id,known_at);
         CREATE TABLE IF NOT EXISTS data_document_entities (document_id TEXT NOT NULL,entity TEXT NOT NULL,relation TEXT NOT NULL DEFAULT 'mentioned',PRIMARY KEY(document_id,entity,relation));
         CREATE TABLE IF NOT EXISTS data_document_aliases (alias_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,external_id TEXT NOT NULL,title TEXT NOT NULL,published_at TEXT NOT NULL,metadata_json TEXT NOT NULL,created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS data_document_chunks (chunk_id TEXT PRIMARY KEY,version_id TEXT NOT NULL,ordinal INTEGER NOT NULL,char_start INTEGER NOT NULL,char_end INTEGER NOT NULL,text TEXT NOT NULL,content_hash TEXT NOT NULL,UNIQUE(version_id,ordinal));
@@ -110,9 +115,17 @@ class PlatformUnstructuredRepository:
 
     def facts(self, *, entity: str | None = None, document_id: str | None = None,
               since: datetime | None = None, include_superseded: bool = False,
-              limit: int = 500) -> list[dict]:
+              limit: int = 500, as_of: datetime | None = None) -> list[dict]:
         sql, args = "SELECT * FROM data_evidence_facts WHERE 1=1", []
-        if not include_superseded:
+        if as_of is not None:
+            if as_of.tzinfo is None:
+                raise ValueError("evidence as_of must be timezone-aware")
+            sql += " AND julianday(observed_at)<=julianday(?)"
+            args.append(as_of.isoformat())
+            if not include_superseded:
+                sql += " AND (superseded_at IS NULL OR julianday(superseded_at)>=julianday(?))"
+                args.append(as_of.isoformat())
+        elif not include_superseded:
             sql += " AND superseded_at IS NULL"
         for column, value in (("entity", entity.upper() if entity else None),
                               ("document_id", document_id)):
@@ -120,7 +133,22 @@ class PlatformUnstructuredRepository:
                 sql += f" AND {column}=?"; args.append(value)
         if since:
             sql += " AND observed_at>=?"; args.append(since.isoformat())
-        return self._rows(sql + " ORDER BY observed_at DESC LIMIT ?", [*args, limit])
+        rows = self._rows(sql + " ORDER BY observed_at DESC LIMIT ?", [*args, limit])
+        if as_of is None:
+            return rows
+        visible = []
+        for row in rows:
+            try:
+                observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+                superseded = (datetime.fromisoformat(row["superseded_at"].replace("Z", "+00:00"))
+                              if row["superseded_at"] else None)
+                if observed.tzinfo is None or (superseded and superseded.tzinfo is None):
+                    continue
+                if observed <= as_of and (include_superseded or superseded is None or superseded > as_of):
+                    visible.append(row)
+            except (TypeError, ValueError):
+                continue
+        return visible
 
     def fact_projections(self, *, fact_id: str | None = None,
                          profile: str | None = None, concept: str | None = None,
@@ -200,6 +228,57 @@ class PlatformUnstructuredRepository:
         return self._rows(
             "SELECT * FROM data_document_versions WHERE document_id=? "
             "ORDER BY fetched_at DESC,created_at DESC", [document_id])
+
+    def document_materials_at(self, *, as_of: datetime, limit: int = 1000) -> list[dict]:
+        """Published bodies and metadata as known then, not today's mutable index.
+
+        Old stores have no publication metadata history. Their current index is
+        usable only when it was already known at the cutoff; never backdate it.
+        """
+        if as_of.tzinfo is None:
+            raise ValueError("document as_of must be timezone-aware")
+        point = as_of.astimezone(timezone.utc).isoformat()
+        has_history = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_document_publications'"
+        ).fetchone()
+        selected = {}
+        if has_history:
+            rows = self.conn.execute(
+                "SELECT p.publication_id,p.metadata_json,p.known_at,v.* FROM data_document_publications p "
+                "JOIN data_document_versions v ON v.version_id=p.version_id "
+                "WHERE julianday(p.known_at)<=julianday(?) "
+                "ORDER BY julianday(p.known_at) DESC,p.publication_id DESC", (point,))
+            rows = sorted(rows, key=lambda item: (
+                datetime.fromisoformat(item["known_at"].replace("Z", "+00:00")),
+                item["publication_id"]), reverse=True)
+            for row in rows:
+                version = dict(row)
+                if datetime.fromisoformat(version["known_at"].replace("Z", "+00:00")) > as_of:
+                    continue
+                metadata = json.loads(version.pop("metadata_json"))
+                if version["document_id"] not in selected:
+                    selected[version["document_id"]] = {
+                        **metadata, "version": version,
+                        "metadata_history": "publication_snapshot"}
+        for row in self.documents(ok_only=True, limit=10_000):
+            if row["document_id"] in selected:
+                continue
+            # A failed/newer index must not mutate an older publication's metadata.
+            stamp = str(row.get("fetched_at") or "")
+            try:
+                fetched = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                fetched = fetched.replace(tzinfo=timezone.utc) if fetched.tzinfo is None else fetched
+            except ValueError:
+                continue
+            if fetched > as_of:
+                continue
+            version = self.latest_document_version(row["document_id"])
+            if not version or version["content_hash"] != row.get("sha256"):
+                continue
+            selected[row["document_id"]] = {
+                **row, "version": version, "metadata_history": "legacy_current_only"}
+        return sorted(selected.values(), key=lambda row: row["version"]["fetched_at"],
+                      reverse=True)[:max(1, min(int(limit), 10_000))]
 
     def link_document_artifact(self, document_version_id: str, artifact_id: str, *,
                                role: str, media_type: str, content_hash: str,
@@ -498,14 +577,32 @@ class PlatformUnstructuredRepository:
             "SELECT discovery_evidence FROM data_evidence_observations WHERE id=?",
             (obs.id,)).fetchone()
         frozen = 1 if (getattr(obs, "discovery_evidence", 0) or (existing and existing[0])) else 0
-        fact_id = self.observation_fact_id(obs)
+        document_version = self.latest_document_version(obs.document_id)
+        if not document_version:
+            raise ValueError("neutral_fact_requires_published_document_version")
+        if datetime.fromisoformat(document_version["fetched_at"].replace("Z", "+00:00")) > obs.observed_at:
+            raise ValueError("neutral_fact_cannot_cite_future_document_version")
+        # Append factual extraction vintages. The old compatibility observation
+        # ID/profile may remain stable; it must not overwrite historical facts.
+        neutral_payload = {"document_version_id": document_version["version_id"],
+                           "source_entity": (obs.source_entity or obs.entity).upper(),
+                           "observation_type": obs.observation_type, "value": obs.value,
+                           "unit": obs.unit, "evidence_span": obs.evidence_span,
+                           "extraction_confidence": obs.extraction_confidence}
+        fact_id = hashlib.sha1((self.observation_fact_id(obs) + "|" +
+                               json.dumps(neutral_payload, sort_keys=True)).encode()).hexdigest()[:20]
         prior_fact = self.conn.execute(
             "SELECT discovery_evidence FROM data_evidence_facts WHERE fact_id=?",
             (fact_id,)).fetchone()
         fact_frozen = 1 if (frozen or (prior_fact and prior_fact[0])) else 0
-        document_version = self.latest_document_version(obs.document_id)
+        stamp = obs.observed_at.isoformat()
+        self._write("UPDATE data_evidence_facts SET superseded_at=? "
+                    "WHERE document_id=? AND entity=? AND metric=? AND period=? AND source_entity=? "
+                    "AND fact_id!=? AND superseded_at IS NULL AND julianday(observed_at)<=julianday(?)",
+                    (stamp, obs.document_id, obs.entity.upper(), obs.metric, obs.period,
+                     (obs.source_entity or obs.entity).upper(), fact_id, stamp))
         self._write(
-            "INSERT OR REPLACE INTO data_evidence_facts "
+            "INSERT OR IGNORE INTO data_evidence_facts "
             "(fact_id,document_id,document_version_id,source_url,entity,source_entity,metric,"
             " period,observation_type,value,unit,evidence_span,observed_at,"
             " extraction_confidence,discovery_evidence,superseded_at) "
@@ -516,6 +613,8 @@ class PlatformUnstructuredRepository:
              (obs.source_entity or obs.entity).upper(), obs.metric, obs.period,
              obs.observation_type, obs.value, obs.unit, obs.evidence_span,
              obs.observed_at.isoformat(), obs.extraction_confidence, fact_frozen))
+        if fact_frozen:
+            self._write("UPDATE data_evidence_facts SET discovery_evidence=1 WHERE fact_id=?", (fact_id,))
         projection_id = self.observation_projection_id(
             obs, projection_profile, projection_version)
         self._write(
@@ -735,6 +834,15 @@ class PlatformUnstructuredRepository:
         if ok and doc.sha256:
             version_id = self.document_version_id(doc.document_id, doc.sha256)
             self._write("INSERT OR IGNORE INTO data_document_versions (version_id,document_id,content_hash,local_path,chars,source_url,fetched_at,created_at) VALUES (?,?,?,?,?,?,?,?)", (version_id,doc.document_id,doc.sha256,str(getattr(doc,"version_path",None) or doc.path or ""),len(doc.text or ""),doc.source_url,stamp,stamp))
+            metadata = dict(self.conn.execute(
+                "SELECT * FROM data_documents WHERE document_id=?", (doc.document_id,)).fetchone())
+            metadata["related_entities"] = sorted({doc.symbol.upper(), *(
+                e.upper() for e in getattr(doc, "related_entities", ()) if e)})
+            encoded = json.dumps(metadata, sort_keys=True, ensure_ascii=False)
+            publication_id = hashlib.sha256(f"{version_id}|{stamp}|{encoded}".encode()).hexdigest()
+            self._write("INSERT OR IGNORE INTO data_document_publications "
+                        "(publication_id,document_id,version_id,known_at,metadata_json) VALUES (?,?,?,?,?)",
+                        (publication_id, doc.document_id, version_id, stamp, encoded))
             for ordinal, start in enumerate(range(0, len(doc.text or ""), 2400)):
                 text = (doc.text or "")[start:start + 2400]
                 digest = hashlib.sha256(text.encode()).hexdigest()

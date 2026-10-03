@@ -127,6 +127,8 @@ def _publish_document(store: Any, candidate: admission.CandidateDocument,
         issues = tuple(source_issues or [])
         if len(candidate.text.strip()) < candidate.min_chars:
             issues += (admission.ValidationIssue("quality", "body_too_short"),)
+        if candidate.completeness != "full":
+            issues += (admission.ValidationIssue("quality", "fixed_body_not_full"),)
         result = admission.ValidationResult(
             "quarantined" if issues else "accepted", issues,
             {"official_source": not issues})

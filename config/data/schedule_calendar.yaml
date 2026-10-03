@@ -58,12 +58,14 @@ sources:
   bls_release_calendar:
     label: U.S. Bureau of Labor Statistics release calendar
     adapter: bls_ics
+    transport: curl_cffi_browser_tls
     url: https://www.bls.gov/schedule/news_release/bls.ics
     cadence: 24h
     budget: {requests_per_run: 1}
     license: us_government_public_information
     quality:
-      identity: series_plus_reference_period_plus_initial_release
+      identity: series_plus_reference_period_or_official_uid
+      missing_reference_period: preserve_unknown_never_infer_from_release_date
       require_timezone: true
       parser_drift: fail_closed
     retention: public_schedule_metadata

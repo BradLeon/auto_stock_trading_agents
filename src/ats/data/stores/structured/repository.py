@@ -342,8 +342,19 @@ class StructuredRepository(Protocol):
 
 
 class SQLiteStructuredRepository:
-    def __init__(self, path: str | Path, *, artifact_root: str | Path | None = None):
+    def __init__(self, path: str | Path, *, artifact_root: str | Path | None = None,
+                 readonly: bool = False):
         self.path = str(path)
+        self._lock = RLock()
+        if readonly:
+            if self.path == ":memory:":
+                raise ValueError("readonly_repository_requires_existing_database")
+            self.conn = sqlite3.connect(Path(self.path).resolve().as_uri() + "?mode=ro",
+                                        uri=True, check_same_thread=False, timeout=30)
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA query_only=ON")
+            self.artifacts = ArtifactStore(artifact_root or default_artifact_root(), readonly=True)
+            return
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
@@ -352,7 +363,6 @@ class SQLiteStructuredRepository:
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
-        self._lock = RLock()
         self.artifacts = ArtifactStore(artifact_root or default_artifact_root())
         self._record_migration()
 

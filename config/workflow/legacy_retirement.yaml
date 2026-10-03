@@ -17,6 +17,16 @@ active:
   - technical_reviews
 
 retired:
+  - identifier: agent.evidence_observer
+    capability_domain: data/target-dataflow-assurance
+    replaced_by: agent.layer_analyst
+    target_phase: complete-target-dataflow
+    status: retired
+    exit_condition: 目标任务注册表不注册 Observer；所有新研究快照以 Layer 为消费者。
+    consumers: []
+    consumer_zero_criterion: Observer 不得作为独立可调度角色；历史 extractor/model key 仅为兼容组件。
+    location: src/ats/data/consumer_identity.py
+
   # ── 本阶段退出 ────────────────────────────────────────────────────────────
   - identifier: workflow_memory.evidence_observations
     capability_domain: data/data-layer-architecture

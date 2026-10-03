@@ -37,8 +37,8 @@ PROCESSOR_VERSION = assemble.PROCESSOR_VERSION
 def run(*, use_llm: bool = True, since: datetime | None = None) -> list[Insight]:
     """One research pass over admitted articles: extract insights, publish briefs.
 
-    Returns the extracted insights (raw extraction product, persisted to the
-    insights table as a neutral data product); the CONTRACT output is the set
+    Returns extracted directional insights (Workflow Memory intermediates, not
+    neutral shared research facts); the CONTRACT output is the set
     of InformationBrief projections written alongside them.
     """
     from ...config import load_pead_global
@@ -59,12 +59,9 @@ def run(*, use_llm: bool = True, since: datetime | None = None) -> list[Insight]
     all_insights: list[Insight] = []
     claimed = 0
     for art in candidates:
-        entity = _publisher_entity(art.source)
-        catalog = store.document_by_external_id(art.id)
-        legacy_document = store.latest_document_version(art.id)
-        doc_id = ((catalog or {}).get("document_id") or
-                  (art.id if legacy_document else "") or
-                  f"{entity}:{_article_slug(art.id)}:research_article")
+        # admitted_articles already exposes the canonical published document ID.
+        # Memory must not resolve external document identity via a legacy bridge.
+        doc_id = art.id
 
         # Preserve the deployed seen-set without re-spending on the first
         # migration run (same policy the PEAD research path used).

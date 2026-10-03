@@ -487,8 +487,10 @@ class ArticleSourceDef(BaseModel):
     read. Folding the two together would quietly cost `sources.py` the property its own
     docstring sells, that its numbers never passed through a model's judgement.
 
-    Declared in config/data/sources.yaml under `article_sources:`; see that file for the
-    field-by-field rationale.
+    Governed ingestion contracts are declared under `sources.*.ingestion` in
+    config/data/unstructured.yaml. Legacy Chain collection retains its historical
+    config/data/sources.yaml registry during migration; new data-only ingestion does not
+    load that legacy registry.
     """
 
     id: str

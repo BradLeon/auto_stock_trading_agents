@@ -1,0 +1,473 @@
+# Target §3-4, §12 coverage declaration. This is NOT verification evidence.
+# A row becomes verified only through a reproducible assurance run.
+schema_version: 1
+target: docs/TARGET_WORKFLOW_DATAFLOW.md
+nodes:
+  - id: RUNTIME_SRC
+    domain: runtime
+    owner: external_market_providers
+    implementation: src/ats/data/runtime
+    config: config/data/structured.yaml
+    legacy: direct_market_provider_calls
+    verify: runtime_timestamp_failure_no_persistence
+  - id: STRUCT_SRC
+    domain: structured
+    owner: external_structured_providers
+    implementation: src/ats/data/adapters/structured
+    config: config/data/structured.yaml
+    legacy: direct_financial_provider_calls
+    verify: source_identity_and_policy
+  - id: UNSTRUCT_SRC
+    domain: unstructured
+    owner: external_document_providers
+    implementation: src/ats/data/sources
+    config: config/data/unstructured.yaml
+    legacy: direct_news_provider_calls
+    verify: source_identity_and_policy
+  - id: BROKER_EXT
+    domain: broker
+    owner: broker_adapter
+    implementation: src/ats/broker
+    config: config/settings.yaml
+    legacy: direct_ibkr_calls
+    verify: broker_query_and_execution_boundary
+  - id: SOURCE_REGISTRY
+    domain: persistent
+    owner: ats.data.catalog
+    implementation: src/ats/data/catalog/loader.py
+    config: config/data/catalog.yaml
+    legacy: config/data/sources.yaml+news_sources.yaml
+    verify: catalog_validation
+  - id: REFRESH
+    domain: persistent
+    owner: ats.data.refresh
+    implementation: src/ats/data/refresh.py
+    config: config/data/schedules.yaml
+    legacy: external_scheduler_unverified
+    verify: refresh_binding_and_run
+  - id: S_ADAPTER
+    domain: structured
+    owner: ats.data.adapters.structured
+    implementation: src/ats/data/adapters/structured/registry.py
+    config: config/data/structured.yaml
+    legacy: ats.structured
+    verify: structured_ingest
+  - id: U_ADAPTER
+    domain: unstructured
+    owner: ats.data.sources
+    implementation: src/ats/data/sources
+    config: config/data/unstructured.yaml
+    legacy: ats.data.news
+    verify: unstructured_ingest
+  - id: RAW_S
+    domain: structured
+    owner: ats.data.stores.structured
+    implementation: src/ats/data/stores/structured/artifacts.py
+    config: config/data/catalog.yaml
+    legacy: structured_artifacts
+    verify: raw_lineage_readback
+  - id: RAW_U
+    domain: unstructured
+    owner: ats.data.stores.unstructured
+    implementation: src/ats/data/stores/unstructured/documents.py
+    config: config/data/unstructured.yaml
+    legacy: source_documents
+    verify: document_version_readback
+  - id: S_GATE
+    domain: structured
+    owner: ats.data.pipelines.structured
+    implementation: src/ats/data/pipelines/structured/quality.py
+    config: config/data/structured.yaml
+    legacy: structured_quality
+    verify: structured_admission_and_rejection
+  - id: U_GATE
+    domain: unstructured
+    owner: ats.data.admission
+    implementation: src/ats/data/admission.py
+    config: config/data/unstructured.yaml
+    legacy: news_triage
+    verify: document_admission_and_rejection
+  - id: QUARANTINE
+    domain: persistent
+    owner: ats.data.stores
+    implementation: src/ats/data/stores
+    config: config/data/catalog.yaml
+    legacy: candidate_failures
+    verify: rejection_raw_and_reason_readback
+  - id: OBS
+    domain: structured
+    owner: ats.data.stores.structured
+    implementation: src/ats/data/stores/structured/repository.py
+    config: config/data/structured.yaml
+    legacy: measurement_series_and_points
+    verify: observation_vintage_asof
+  - id: DOCS
+    domain: unstructured
+    owner: ats.data.stores.unstructured
+    implementation: src/ats/data/stores/unstructured/platform.py
+    config: config/data/unstructured.yaml
+    legacy: memory_document_reads
+    verify: immutable_document_versions
+  - id: FACTS
+    domain: unstructured
+    owner: ats.data.stores.unstructured
+    implementation: src/ats/data/stores/unstructured/evidence.py
+    config: config/data/unstructured.yaml
+    legacy: memory_evidence_reads
+    verify: neutral_fact_lineage
+  - id: KB
+    domain: curated
+    owner: ats.data.products
+    implementation: src/ats/data/products/sector_inputs.py
+    config: config/sectors/ai_hardware.yaml
+    curated_corpus: config/knowledge
+    legacy: sector_knowledge_files
+    verify: curated_version_and_readback
+  - id: PRODUCTS
+    domain: persistent
+    owner: ats.data.products
+    implementation: src/ats/data/products
+    config: config/data/structured.yaml
+    legacy: direct_repository_reads
+    verify: product_to_consumer_contract
+  - id: RUNTIME_API
+    domain: runtime
+    owner: ats.data.runtime
+    implementation: src/ats/data/runtime
+    config: config/data/structured.yaml
+    legacy: ats.data.market_data
+    verify: runtime_timestamp_failure_no_persistence
+  - id: EVENT_CAL
+    domain: calendar
+    owner: ats.data.calendar_refresh
+    implementation: src/ats/data/calendar_refresh.py
+    config: config/data/schedule_calendar.yaml
+    legacy: config/events.yaml
+    verify: calendar_version_and_trigger_boundary
+  - id: INTERNAL_API
+    domain: internal
+    owner: ats.execution.state_api
+    implementation: src/ats/execution/state_api.py
+    config: null
+    legacy: direct_memory_trade_reads
+    verify: internal_asof_completeness
+  - id: AGENT_LAYER
+    domain: agent_consumer
+    owner: ats.data.products
+    implementation: src/ats/data/products/sector_inputs.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.layer
+    legacy: direct_knowledge_reads
+    verify: layer_read_contract
+  - id: AGENT_INFORMATION
+    domain: agent_consumer
+    owner: ats.data.products
+    implementation: src/ats/data/products/unstructured.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.information
+    legacy: memory_document_reads
+    verify: information_read_contract
+  - id: AGENT_SECTOR
+    domain: agent_consumer
+    owner: ats.data.products
+    implementation: src/ats/data/products/sector_inputs.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.sector
+    legacy: sector_context
+    verify: sector_read_contract
+  - id: AGENT_FUNDAMENTAL
+    domain: agent_consumer
+    owner: ats.data.products
+    implementation: src/ats/data/products/earnings.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.fundamental
+    legacy: pead_direct_reads
+    verify: fundamental_read_contract
+  - id: AGENT_MACRO
+    domain: agent_consumer
+    owner: ats.data.products
+    implementation: src/ats/data/products/macro_inputs.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.macro
+    legacy: macro_direct_reads
+    verify: macro_read_contract
+  - id: AGENT_TECHNICAL
+    domain: agent_consumer
+    owner: ats.data.runtime
+    implementation: src/ats/data/runtime/market_data.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.technical
+    legacy: market_data
+    verify: technical_read_contract
+  - id: AGENT_CHIEF
+    domain: agent_consumer
+    owner: ats.execution.state_api
+    implementation: src/ats/execution/state_api.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.chief
+    legacy: direct_ledger_reads
+    verify: chief_read_contract
+  - id: AGENT_RISK
+    domain: agent_consumer
+    owner: ats.execution.state_api
+    implementation: src/ats/execution/state_api.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.risk
+    legacy: direct_ledger_reads
+    verify: risk_read_contract
+  - id: AGENT_TRADER
+    domain: execution
+    owner: ats.trader
+    implementation: src/ats/trader
+    config: config/data/target_dataflow_coverage.yaml#consumers.trader
+    legacy: direct_broker_submission
+    verify: authorized_order_boundary
+  - id: AGENT_CLERK
+    domain: internal
+    owner: ats.execution.clerk
+    implementation: src/ats/execution/clerk.py
+    config: config/data/target_dataflow_coverage.yaml#consumers.clerk
+    legacy: journal_and_reconcile
+    verify: clerk_read_contract
+  - id: MEMORY
+    domain: workflow
+    owner: ats.memory
+    implementation: src/ats/memory
+    config: null
+    legacy: legacy_evidence_tables_retired
+    verify: opinion_isolation
+  - id: TRADER
+    domain: execution
+    owner: ats.trader
+    implementation: src/ats/trader
+    config: null
+    legacy: direct_broker_submission
+    verify: authorized_order_boundary
+  - id: CLERK
+    domain: internal
+    owner: ats.execution.clerk
+    implementation: src/ats/execution/clerk.py
+    config: null
+    legacy: journal_and_reconcile
+    verify: ledger_readback
+  - id: TRADE_LOG
+    domain: internal
+    owner: ats.execution.clerk
+    implementation: src/ats/execution/rebuild.py
+    config: null
+    legacy: journal_tables
+    verify: deterministic_rebuild
+  - id: GOVERNANCE
+    domain: cross_cutting
+    owner: ats.data
+    implementation: src/ats/data/stores/ownership.py
+    config: config/data/catalog.yaml
+    legacy: scattered_source_policy
+    verify: source_quality_cost_lineage
+  - id: ISOLATION
+    domain: cross_cutting
+    owner: ats.data.stores.ownership
+    implementation: src/ats/data/stores/ownership.py
+    config: null
+    legacy: memory_shared_evidence_writes
+    verify: opinion_write_rejection
+edges:
+  - {id: external_structured, from: STRUCT_SRC, to: S_ADAPTER, owner: ats.data.adapters.structured, verify: source_identity_and_policy}
+  - {id: external_unstructured, from: UNSTRUCT_SRC, to: U_ADAPTER, owner: ats.data.sources, verify: source_identity_and_policy}
+  - {id: external_market, from: RUNTIME_SRC, to: RUNTIME_API, owner: ats.data.runtime, verify: runtime_timestamp_failure_no_persistence}
+  - {id: broker_runtime, from: BROKER_EXT, to: RUNTIME_API, owner: ats.data.runtime, verify: broker_query_and_execution_boundary}
+  - {id: catalog_to_adapters, from: SOURCE_REGISTRY, to: S_ADAPTER, owner: ats.data.catalog, verify: source_adapter_resolution}
+  - {id: catalog_to_unstructured, from: SOURCE_REGISTRY, to: U_ADAPTER, owner: ats.data.catalog, verify: source_adapter_resolution}
+  - {id: refresh_to_structured, from: REFRESH, to: S_ADAPTER, owner: ats.data.refresh, verify: refresh_binding_and_run}
+  - {id: refresh_to_unstructured, from: REFRESH, to: U_ADAPTER, owner: ats.data.refresh, verify: refresh_binding_and_run}
+  - {id: structured_raw, from: S_ADAPTER, to: RAW_S, owner: ats.data.pipelines.structured, verify: raw_lineage_readback}
+  - {id: unstructured_raw, from: U_ADAPTER, to: RAW_U, owner: ats.data.pipelines.unstructured, verify: document_version_readback}
+  - {id: structured_gate, from: RAW_S, to: S_GATE, owner: ats.data.pipelines.structured, verify: structured_admission_and_rejection}
+  - {id: unstructured_gate, from: RAW_U, to: U_GATE, owner: ats.data.pipelines.unstructured, verify: document_admission_and_rejection}
+  - {id: structured_reject, from: S_GATE, to: QUARANTINE, owner: ats.data.pipelines.structured, verify: rejection_raw_and_reason_readback}
+  - {id: unstructured_reject, from: U_GATE, to: QUARANTINE, owner: ats.data.pipelines.unstructured, verify: rejection_raw_and_reason_readback}
+  - {id: structured_publish, from: S_GATE, to: OBS, owner: ats.data.stores.structured, verify: observation_vintage_asof}
+  - {id: unstructured_publish, from: U_GATE, to: DOCS, owner: ats.data.stores.unstructured, verify: immutable_document_versions}
+  - {id: document_facts, from: DOCS, to: FACTS, owner: ats.data.stores.unstructured, verify: neutral_fact_lineage}
+  - {id: observations_product, from: OBS, to: PRODUCTS, owner: ats.data.products, verify: product_to_consumer_contract}
+  - {id: observations_calendar, from: OBS, to: EVENT_CAL, owner: ats.data.calendar_refresh, verify: calendar_version_and_trigger_boundary}
+  - {id: documents_product, from: DOCS, to: PRODUCTS, owner: ats.data.products, verify: product_to_consumer_contract}
+  - {id: facts_product, from: FACTS, to: PRODUCTS, owner: ats.data.products, verify: product_to_consumer_contract}
+  - {id: curated_product, from: KB, to: PRODUCTS, owner: ats.data.products, verify: curated_version_and_readback}
+  - {id: product_to_layer, from: PRODUCTS, to: AGENT_LAYER, owner: ats.data.products, verify: layer_read_contract}
+  - {id: product_to_information, from: PRODUCTS, to: AGENT_INFORMATION, owner: ats.data.products, verify: information_read_contract}
+  - {id: product_to_sector, from: PRODUCTS, to: AGENT_SECTOR, owner: ats.data.products, verify: sector_read_contract}
+  - {id: product_to_fundamental, from: PRODUCTS, to: AGENT_FUNDAMENTAL, owner: ats.data.products, verify: fundamental_read_contract}
+  - {id: product_to_macro, from: PRODUCTS, to: AGENT_MACRO, owner: ats.data.products, verify: macro_read_contract}
+  - {id: runtime_to_technical, from: RUNTIME_API, to: AGENT_TECHNICAL, owner: ats.data.runtime, verify: technical_read_contract}
+  - {id: state_to_chief, from: INTERNAL_API, to: AGENT_CHIEF, owner: ats.execution.state_api, verify: chief_read_contract}
+  - {id: state_to_risk, from: INTERNAL_API, to: AGENT_RISK, owner: ats.execution.state_api, verify: risk_read_contract}
+  - {id: calendar_trigger, from: EVENT_CAL, to: AGENT_CHIEF, owner: ats.data.calendar_refresh, verify: calendar_version_and_trigger_boundary}
+  - {id: agent_memory_write, from: AGENT_CHIEF, to: MEMORY, owner: ats.memory, verify: opinion_isolation}
+  - {id: analysis_projection_layer_sector, from: AGENT_LAYER, to: AGENT_SECTOR, owner: ats.workflow, verify: declared_projection_dependency}
+  - {id: analysis_projection_information_fundamental, from: AGENT_INFORMATION, to: AGENT_FUNDAMENTAL, owner: ats.workflow, verify: declared_projection_dependency}
+  - {id: approval_execution, from: MEMORY, to: TRADER, owner: ats.trader, verify: authorized_order_boundary}
+  - {id: trader_broker, from: TRADER, to: BROKER_EXT, owner: ats.trader, verify: authorized_order_boundary}
+  - {id: broker_clerk_read, from: BROKER_EXT, to: CLERK, owner: ats.execution.clerk, verify: ledger_readback}
+  - {id: broker_state, from: BROKER_EXT, to: INTERNAL_API, owner: ats.execution.state_api, verify: internal_asof_completeness}
+  - {id: clerk_ledger, from: CLERK, to: TRADE_LOG, owner: ats.execution.clerk, verify: deterministic_rebuild}
+  - {id: ledger_state, from: TRADE_LOG, to: INTERNAL_API, owner: ats.execution.state_api, verify: internal_asof_completeness}
+  - {id: memory_state, from: MEMORY, to: INTERNAL_API, owner: ats.execution.state_api, verify: internal_asof_completeness}
+  - {id: memory_clerk, from: MEMORY, to: CLERK, owner: ats.execution.clerk, verify: ledger_readback}
+  - {id: state_feedback, from: INTERNAL_API, to: AGENT_CHIEF, owner: ats.execution.state_api, verify: internal_asof_completeness}
+  - {id: opinion_boundary, from: MEMORY, to: ISOLATION, owner: ats.data.stores.ownership, verify: opinion_write_rejection}
+  - {id: governance_structured, from: GOVERNANCE, to: OBS, owner: ats.data, verify: source_quality_cost_lineage}
+  - {id: governance_unstructured, from: GOVERNANCE, to: DOCS, owner: ats.data, verify: source_quality_cost_lineage}
+consumers:
+  - id: layer
+    domain: hierarchy
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 90
+    required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
+    products: [HIER_DATA, DOC_DATA]
+    read_api: ats.data.products.sector_inputs.curated_knowledge_packet + ats.data.products.unstructured_read_router.observations + ats.data.products.sector_inputs.constituent_financials + ats.data.products.sector_inputs.consensus_for + ats.data.runtime.market_data
+    owner: ats.data.products
+    vintage: document_version_hash_and_observation_observed_at; accounting_report_period; runtime_market_as_of
+    completeness: missing_notes_and_no_coverage_are_explicit; persisted_evidence_as_of_cutoff_unverified
+    source_flag: none
+    consumer_flag: none
+    fallback: no_provider_fallback_for_persisted_evidence; runtime_market_gateway_failure_is_explicit
+    legacy: direct_knowledge_reads
+    verify: layer_read_contract
+    allowed_projection_inputs: []
+  - id: information
+    domain: documents
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 30
+    required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
+    products: [DOC_DATA]
+    read_api: ats.data.products.unstructured.admitted_documents
+    owner: ats.data.products
+    vintage: document_published_at_and_version
+    completeness: partial_preview_labeled
+    source_flag: data_source_release
+    consumer_flag: none_verified
+    fallback: none_verified
+    legacy: news_digest
+    verify: information_read_contract
+    allowed_projection_inputs: []
+  - id: sector
+    domain: hierarchy
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 90
+    required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
+    products: [HIER_DATA]
+    read_api: ats.data.products.sector_inputs
+    owner: ats.data.products
+    vintage: mixed_structured_known_at_and_document_version
+    completeness: per_input_missing_status
+    source_flag: config/data/structured.yaml#feature_flags.sources
+    consumer_flag: config/data/structured.yaml#feature_flags.consumers.sector_agent
+    fallback: none_verified_for_unstructured_router
+    legacy: sector_context
+    verify: sector_read_contract
+    allowed_projection_inputs: [layer]
+  - id: fundamental
+    domain: company
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 30
+    required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
+    products: [COMPANY_DATA, HIER_DATA]
+    read_api: ats.data.fundamentals.fetch
+    owner: ats.data.products
+    vintage: company_report_period_known_at_and_document_version
+    completeness: financial_package_and_document_scoreable
+    source_flag: config/data/structured.yaml#feature_flags.sources
+    consumer_flag: config/data/structured.yaml#feature_flags.consumers.pead_fundamentals
+    fallback: requires_individual_release_ledger_check
+    legacy: pead_direct_reads
+    verify: fundamental_read_contract
+    allowed_projection_inputs: [information]
+  - id: macro
+    domain: macro
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 30
+    required_evidence: [write, admission, read, lineage, completeness, reconciliation, rollback]
+    products: [MACRO_DATA]
+    read_api: ats.data.products.macro_inputs.regional_monthly
+    owner: ats.data.products
+    vintage: regional_known_at_and_factset_release
+    completeness: missing_regional_is_explicit
+    source_flag: config/data/structured.yaml#feature_flags.sources
+    consumer_flag: config/data/structured.yaml#feature_flags.consumers.macro_agent
+    fallback: requires_individual_release_ledger_check
+    legacy: macro_direct_reads
+    verify: macro_read_contract
+    allowed_projection_inputs: []
+  - id: technical
+    domain: runtime_market
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 1
+    required_evidence: [runtime_query, timestamp, failure_semantics, no_persistence, fallback]
+    products: [MARKET_DATA]
+    read_api: ats.data.runtime.market_data.fetch_close_history_many
+    owner: ats.data.runtime
+    vintage: runtime_query_timestamp_and_last_market_date
+    completeness: missing_prices_note
+    source_flag: not_applicable
+    consumer_flag: none
+    fallback: targets_only_on_broker_failure
+    legacy: market_data
+    verify: technical_read_contract
+    allowed_projection_inputs: []
+  - id: chief
+    domain: internal_state
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 7
+    required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback]
+    products: [PORTFOLIO_DATA, HISTORY_DATA]
+    read_api: ats.execution.state_api.recent_trades
+    owner: ats.execution.state_api
+    vintage: state_as_of_available_via_get_internal_state
+    completeness: state_completeness_available_via_get_internal_state
+    source_flag: not_applicable
+    consumer_flag: none
+    fallback: none_verified
+    legacy: direct_ledger_reads
+    verify: chief_read_contract
+    allowed_projection_inputs: [layer, information, sector, fundamental, macro, technical]
+  - id: risk
+    domain: internal_state
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 7
+    required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback]
+    products: [PORTFOLIO_DATA, MARKET_DATA, RISK_RULES]
+    read_api: ats.execution.state_api.get_internal_state
+    owner: ats.execution.state_api
+    vintage: state_as_of
+    completeness: state_completeness
+    source_flag: not_applicable
+    consumer_flag: none
+    fallback: none_verified
+    legacy: direct_ledger_reads
+    verify: risk_read_contract
+    allowed_projection_inputs: []
+  - id: trader
+    domain: execution_authorization
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 1
+    required_evidence: [authorization, revision_hash, broker_submit_boundary, idempotency]
+    products: [APPROVED_EXECUTION_AUTHORIZATION]
+    read_api: ats.execution.approval.require_authorized_revision
+    owner: ats.trader
+    vintage: decision_revision_hash_and_approval_time
+    completeness: exact_revision_and_broker_account_scope_required
+    source_flag: not_applicable
+    consumer_flag: not_applicable
+    fallback: reject_without_valid_authorization
+    legacy: direct_broker_submission
+    verify: authorized_order_boundary
+    allowed_projection_inputs: []
+  - id: clerk
+    domain: broker_state
+    contract_version: target-dataflow-v1
+    evidence_ttl_days: 1
+    required_evidence: [broker_read, reconciliation, partial_fill, idempotency, fallback]
+    products: [BROKER_STATE, DECISION_APPROVAL_CONTEXT]
+    read_api: ats.execution.clerk.reconcile_and_ledger
+    owner: ats.execution.clerk
+    vintage: broker_report_time_and_reconcile_time
+    completeness: reconciliation_gap_counts
+    source_flag: not_applicable
+    consumer_flag: none
+    fallback: deterministic_ledger_replay
+    legacy: direct_broker_reads
+    verify: clerk_read_contract
+    allowed_projection_inputs: [chief_decision_revision, risk_review, boss_approval]

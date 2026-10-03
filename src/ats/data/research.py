@@ -141,6 +141,15 @@ def ingest_batch(since: datetime, *, store=None) -> AcquisitionBatch:
     """
     from .stores.unstructured import get_data_ingestion_store
     from . import document_assets
+    from .runtime.repository import platform_data_db_path
+    from pathlib import Path
+
+    store_path = getattr(store, "path", None) or getattr(getattr(store, "data", None), "path", None)
+    if store is None or (store_path and
+            Path(str(store_path)).expanduser().resolve() == platform_data_db_path().resolve()):
+        from .persistent_queue import require_queue_worker
+
+        require_queue_worker("semianalysis")
 
     store = store or get_data_ingestion_store()
     batch = fetch_batch(since, store=store)
@@ -268,12 +277,15 @@ def stored_articles(since: datetime, *, source_match: str = "", store=None,
     return out
 
 
-def fetch_batch(since: datetime, *, store=None) -> AcquisitionBatch:
+def fetch_batch(since: datetime, *, store=None,
+                source_config: dict | None = None) -> AcquisitionBatch:
     """Acquire every new asset; downstream processing limits do not apply here."""
-    """All newsletter articles since `since`, deduped by id, newest first."""
-    from ..config import load_news_sources
+    if source_config is None:
+        from ..config import load_news_sources
 
-    cfg = (load_news_sources() or {}).get("newsletters", {}) or {}
+        cfg = (load_news_sources() or {}).get("newsletters", {}) or {}
+    else:
+        cfg = source_config
     imap_batch = safe_fetch(
         lambda: _imap_batch(since, cfg.get("imap", {}) or {}, store=store),
         source="research:imap",
@@ -286,7 +298,8 @@ def fetch_batch(since: datetime, *, store=None) -> AcquisitionBatch:
 
     out, duplicates = deduplicate_articles(items)
     transport_status = {
-        "imap": {"status": "succeeded" if imap_batch.complete else "partial"},
+        "imap": (imap_batch.transport_status.get("imap") or
+                 {"status": "succeeded" if imap_batch.complete else "partial"}),
         "rss": rss_status,
     }
     complete = imap_batch.complete and rss_status["status"] == "succeeded"
@@ -361,7 +374,8 @@ def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
         senders.append({"name": "test-override", "email": test_sender})
     if not (secrets.gmail_address and secrets.gmail_app_password and senders):
         log.info("research imap: no creds or senders configured — skipping")
-        return AcquisitionBatch(())
+        return AcquisitionBatch((), complete=False,
+                               transport_status={"imap": {"status": "credentials_missing"}})
 
     # IMAP SINCE is date-only (server internal date): search one extra day back
     # and re-filter on the Date header client-side.

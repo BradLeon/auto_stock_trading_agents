@@ -146,12 +146,28 @@ def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float
 
     notes: list[str] = []
     period = f"{max(2, days // 365 + 1)}y"
-    closes = inputs.sector_prices(symbols, period=period) or {}
+    price_rows = inputs.sector_price_history(symbols, period=period) or {}
+    closes = {
+        symbol: list(row.closes)
+        for symbol, row in price_rows.items()
+        if row.status == "succeeded" and row.closes
+    }
     missing = sorted(set(symbols) - set(closes))
     if missing:
         notes.append(f"无价格数据: {', '.join(missing)}")
+    dated = sorted(
+        f"{symbol}={row.bar_as_of.isoformat()}"
+        for symbol, row in price_rows.items()
+        if row.bar_as_of is not None and row.status == "succeeded")
+    if dated:
+        notes.append("价格最后交易日: " + ", ".join(dated))
 
-    vol = inputs.sector_prices(["^VIX", "^VIX3M"], period="1y") or {}
+    vol_rows = inputs.sector_price_history(["^VIX", "^VIX3M"], period="1y") or {}
+    vol = {
+        symbol: list(row.closes)
+        for symbol, row in vol_rows.items()
+        if row.status == "succeeded" and row.closes
+    }
     vix = vol.get("^VIX", [None])[-1] if vol.get("^VIX") else None
     v3 = vol.get("^VIX3M", [None])[-1] if vol.get("^VIX3M") else None
     if vix is None:

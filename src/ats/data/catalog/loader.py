@@ -124,24 +124,47 @@ class DataCatalog:
     def unstructured_news(self) -> dict[str, Any]:
         return self._load_registry("news_sources", "news_sources.yaml")
 
-    def unstructured_sources(self) -> list[CatalogSource]:
-        configured_path = self.path.parent / ((self.raw.get("domains") or {}).get(
-            "unstructured") or "unstructured.yaml")
-        configured = yaml.safe_load(configured_path.read_text(encoding="utf-8")) or {}
+    def target_unstructured_sources(self) -> list[CatalogSource]:
+        """Return only sources explicitly registered in the target registry.
+
+        This is the source set for new governed paths (notably scheduling and
+        refresh validation). Legacy registry rows are intentionally excluded:
+        their presence is useful for inventory and compatibility, but is not
+        evidence that they satisfy the target registration contract.
+        """
+        configured_path = self._domain_path("unstructured", "unstructured.yaml")
+        configured = yaml.load(configured_path.read_text(encoding="utf-8"),
+                               Loader=_UniqueKeyLoader) or {}
         explicit = configured.get("sources") or {}
-        out: list[CatalogSource] = [
+        return [
             CatalogSource(id=source_id, **(row or {}))
             for source_id, row in explicit.items()
         ]
+
+    def unstructured_sources(self) -> list[CatalogSource]:
+        """Return a compatibility view combining target and legacy sources.
+
+        Callers implementing a new governed path must use
+        :meth:`target_unstructured_sources`; this method remains for existing
+        inventory/report consumers until those callers are migrated.
+        """
+        out = self.target_unstructured_sources()
         explicit_ids = {item.id for item in out}
         raw = self.unstructured_registry()
         for source_id, row in (raw.get("sources") or {}).items():
             if source_id in explicit_ids:
                 continue
+            row = row or {}
+            domain = str(row.get("domain") or "unstructured")
+            canonical_source_id = str(row.get("canonical_source_id") or "")
             out.append(CatalogSource(
-                id=source_id, domain="unstructured", provider=row.get("label", ""),
+                id=source_id, domain=domain, provider=row.get("label", ""),
                 adapter=row.get("adapter", ""), status="registered",
-                cadence=row.get("cadence", ""), policy={"registry": "sources"},
+                cadence=row.get("cadence", ""),
+                datasets=[str(row["dataset_id"])] if row.get("dataset_id") else [],
+                policy={"registry": "sources",
+                        **({"canonical_source_id": canonical_source_id}
+                           if canonical_source_id else {})},
             ))
         for source_id, row in (raw.get("article_sources") or {}).items():
             if source_id in explicit_ids:
@@ -191,11 +214,17 @@ class DataCatalog:
         check("catalog_version", self.version == 1, "unsupported_catalog_version")
         for key, default in {
             "structured": "structured.yaml",
-            "sources": "sources.yaml",
-            "news_sources": "news_sources.yaml",
+            "unstructured": "unstructured.yaml",
         }.items():
             check(f"domain:{key}:exists", self._domain_path(key, default).exists(),
                   f"domain_config_missing:{key}")
+        domains = self.raw.get("domains") or {}
+        check("catalog:domains:authoritative_only",
+              set(domains) == {"structured", "unstructured"},
+              "catalog_must_only_assemble_domain_registries")
+        check("catalog:source_definitions:domain_owned",
+              not (self.raw.get("sources") or {}) and not (self.raw.get("datasets") or {}),
+              "catalog_must_not_define_sources_or_datasets")
         try:
             structured = self.structured_catalog()
         except FileNotFoundError:
@@ -244,6 +273,120 @@ class DataCatalog:
                               *(row.get("fallback_sources") or [])]:
                 check(f"dataset:{dataset_id}:source:{source_id}:exists",
                       source_id in source_rows, "source_not_configured")
+
+        unstructured_path = self._domain_path("unstructured", "unstructured.yaml")
+        try:
+            unstructured = yaml.load(unstructured_path.read_text(encoding="utf-8"),
+                                     Loader=_UniqueKeyLoader) or {}
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            check("unstructured_registry:parse", False,
+                  f"unstructured_registry_invalid:{type(exc).__name__}")
+            unstructured = {}
+        target_unstructured_rows = unstructured.get("sources") or {}
+        target_unstructured_datasets = unstructured.get("datasets") or {}
+        duplicate_ids = set(source_rows).intersection(target_unstructured_rows)
+        check("source_identity:unique_across_domains", not duplicate_ids,
+              "source_id_defined_in_multiple_domain_registries")
+        for source_id, row in target_unstructured_rows.items():
+            row = row or {}
+            status = str(row.get("status") or "registered")
+            kind = str(row.get("source_kind") or "")
+            check(f"unstructured:{source_id}:stable_identity",
+                  bool(source_id) and all(char.islower() or char.isdigit() or char == "_"
+                                          for char in str(source_id)),
+                  "dynamic_or_invalid_source_identity")
+            check(f"unstructured:{source_id}:adapter",
+                  bool(row.get("adapter")), "adapter_missing")
+            check(f"unstructured:{source_id}:source_kind",
+                  kind in {"article", "fixed_index", "official_body",
+                           "fixed_transcript", "repository_corpus"},
+                  "source_kind_invalid")
+            check(f"unstructured:{source_id}:no_symbol_template",
+                  not any(marker in str(source_id) for marker in (":", "{", "}", "/")),
+                  "dynamic_source_identity")
+            for dataset_id in row.get("datasets") or []:
+                dataset = target_unstructured_datasets.get(dataset_id)
+                check(f"unstructured:{source_id}:dataset:{dataset_id}",
+                      dataset is not None, "dataset_not_configured")
+                if dataset is not None:
+                    check(f"unstructured:{source_id}:dataset:{dataset_id}:reciprocal",
+                          source_id in (dataset.get("sources") or []),
+                          "dataset_source_reference_missing")
+            if status == "registered":
+                check(f"unstructured:{source_id}:budget",
+                      bool(row.get("request_budget")), "request_budget_missing")
+                policy = row.get("policy") or {}
+                check(f"unstructured:{source_id}:governance",
+                      bool(policy.get("permission")) and bool(policy.get("usage")) and
+                      bool(policy.get("retention")) and
+                      ("fallback" in policy or "fallback_mode" in policy),
+                      "permission_usage_retention_or_fallback_missing")
+                if row.get("adapter") == "semianalysis":
+                    transport = row.get("transport") or {}
+                    check(f"unstructured:{source_id}:transport",
+                          isinstance(transport, dict) and
+                          bool((transport.get("imap") or {}).get("senders")) and
+                          bool(transport.get("research_feeds")),
+                          "semianalysis_transport_contract_missing")
+                if kind == "article":
+                    check(f"unstructured:{source_id}:ingestion_contract",
+                          isinstance(row.get("ingestion"), dict),
+                          "governed_ingestion_contract_missing")
+                    ingestion = row.get("ingestion") or {}
+                    for required in ("entity", "doc_type", "pages", "max_per_run",
+                                     "min_body_chars", "match"):
+                        check(f"unstructured:{source_id}:ingestion:{required}",
+                              required in ingestion, "governed_ingestion_field_missing")
+                else:
+                    check(f"unstructured:{source_id}:fixed_policy",
+                          bool(policy.get("fallback") == "none") and
+                          bool(policy.get("retention")) and bool(policy.get("usage")),
+                          "fixed_source_policy_missing")
+                    if kind in {"fixed_index", "fixed_transcript"}:
+                        check(f"unstructured:{source_id}:immutable_revision",
+                              bool(policy.get("immutable_revision_required")) and
+                              bool(policy.get("repo")) and bool(policy.get("file")) and
+                              bool(policy.get("spec")),
+                              "fixed_revision_contract_missing")
+                    if kind == "repository_corpus":
+                        members = policy.get("members") or []
+                        check(f"unstructured:{source_id}:members",
+                              bool(members) and len(members) == len(set(members)) and
+                              all((self.path.parent.parent.parent / member).is_file()
+                                  for member in members),
+                              "curated_corpus_members_missing")
+        for dataset_id, row in target_unstructured_datasets.items():
+            row = row or {}
+            doc_types = row.get("document_types") or []
+            record_types = row.get("record_types") or []
+            check(f"unstructured_dataset:{dataset_id}:types",
+                  bool(doc_types or record_types) and all(
+                      doc_type in (unstructured.get("document_types") or [])
+                      for doc_type in doc_types) and all(
+                      record_type in (unstructured.get("record_types") or [])
+                      for record_type in record_types),
+                  "document_or_record_type_unregistered")
+            for source_id in row.get("sources") or []:
+                source = target_unstructured_rows.get(source_id)
+                check(f"unstructured_dataset:{dataset_id}:source:{source_id}",
+                      source is not None and dataset_id in (source.get("datasets") or []),
+                      "source_dataset_reference_missing")
+        schedule_path = self.path.parent / "schedules.yaml"
+        if schedule_path.is_file():
+            schedule = yaml.load(schedule_path.read_text(encoding="utf-8"),
+                                 Loader=_UniqueKeyLoader) or {}
+            for job_id, job in (((schedule.get("unstructured") or {}).get("jobs")) or {}).items():
+                job = job or {}
+                job_sources = job.get("sources") or ([job["source"]] if job.get("source") else [])
+                for source_id in job_sources:
+                    check(f"unstructured_job:{job_id}:source:{source_id}",
+                          source_id in target_unstructured_rows,
+                          "legacy_only_unstructured_job_source")
+                    source = target_unstructured_rows.get(source_id) or {}
+                    for dataset_id in job.get("datasets") or []:
+                        check(f"unstructured_job:{job_id}:dataset:{dataset_id}",
+                              dataset_id in (source.get("datasets") or []),
+                              "unstructured_job_dataset_mismatch")
 
         # The controlled structured registry is the authority for numeric adapter keys.
         from ..adapters.structured.registry import _RUNTIMES

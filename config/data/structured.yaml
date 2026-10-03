@@ -449,6 +449,7 @@ sources:
       conditional_requests: [etag, last_modified, git_sha, payload_sha256]
       policy_gate_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
       terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+      public_html_route_allowlist_env: ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS
       fail_closed_on_policy_or_parser_drift: true
       event_ledger_benchmarks: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
       browser_visual_scraping: forbidden
@@ -458,19 +459,21 @@ sources:
   frontier_ai_capability_official_lab:
     catalog_status: current_partial
     persistence: persistent
-    provider: Frontier Lab official releases and model cards
-    upstream: OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, Tencent, Z.ai and Alibaba public releases
+    provider: Hugging Face Hub public model-card API, restricted to exact Lab-owned namespaces
+    upstream: OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, Tencent, Z.ai and Qwen public organization model cards; closed-model releases without public cards remain uncovered
     adapter: frontier_ai_capability_official_lab
-    datasets: [frontier_ai_capability_benchmarks]
+    datasets: [frontier_ai_capability_benchmarks, frontier_ai_public_model_cards]
     cadence: daily_utc
     retention: query_slice
     discovery_group: frontier_ai_capability
     constraints:
       public_only: true
+      publisher_namespace_allowlist: [openai, Anthropic, google, xai-org, deepseek-ai, moonshotai, tencent, zai-org, Qwen]
       source_type: lab_self_reported
       direct_platform_after_acceptance: true
       license: public_page_citation
-    internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
+      data_limits: model_identity_only; does not infer release dates, flagship status, or self-reported scores from repository metadata
+    internal_request_budget: {concurrency: 1, requests_per_run: 9, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
   tw_mof_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -488,7 +491,7 @@ sources:
     datasets: [regional_kr_exports]
     cadence: monthly
     retention: query_slice
-    internal_request_budget: {concurrency: 1, page_size: 10, timeout_seconds: 30}
+    internal_request_budget: {concurrency: 1, requests_per_run: 1, page_size: 10, timeout_seconds: 30}
   trendforce_dram:
     catalog_status: current_partial
     persistence: persistent
@@ -858,6 +861,21 @@ datasets:
       a_historical_sd_multiplier: 0.2
       direct_platform_after_acceptance: true
     acceptance_samples: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
+  frontier_ai_public_model_cards:
+    catalog_status: current_partial
+    entities: [FRONTIER_MODEL]
+    expected_cadence: weekly
+    primary_sources: [frontier_ai_capability_official_lab]
+    fallback_sources: []
+    core_metrics: [ai.frontier_capability.public_model_card]
+    quality:
+      publisher_namespace_allowlist: [openai, Anthropic, google, xai-org, deepseek-ai, moonshotai, tencent, zai-org, Qwen]
+      public_only: true
+      model_card_presence_only: true
+      inferred_release_dates: false
+      inferred_benchmark_scores: false
+      closed_model_release_coverage: unavailable
+    acceptance_samples: [OPENAI, DEEPSEEK, MOONSHOT, ALIBABA]
   sp500_earnings_insight:
     catalog_status: current_partial
     extraction_policy:
@@ -1177,6 +1195,14 @@ datasets:
     coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
     expected_cadence: event_snapshot
     primary_sources: [yfinance_consensus]
+    # A consumer may request a managed refresh when its published snapshot is
+    # absent or older than this limit. Reads never execute the provider inline.
+    cache_miss_policy:
+      enabled: true
+      max_age_hours: 168
+      dedupe_window_hours: 24
+      priority: 80
+      max_attempts: 3
     core_metrics:
       - consensus.eps.reported_actual
       - consensus.eps.mean
@@ -1294,6 +1320,10 @@ metric_definitions:
      entity_scope: [frontier_model], required_dimensions: [lab_id, model_id, benchmark_id, method_version,
      comparability_group, harness, grader, inference_config, reasoning_effort, source_type, coverage_state],
      description: Raw capability benchmark score on a provider-declared 0-100 percent scale; not a composite intelligence ranking.}
+  ai.frontier_capability.public_model_card:
+    {value_type: integer, unit_family: count, cadence: weekly, period_basis: public_model_card_observed,
+     entity_scope: [frontier_model], required_dimensions: [lab_id, model_id, model_release_id, identity_state, source_type, source_url],
+     description: Indicator (1) that an allowlisted Lab-owned public model card was present in the official publisher namespace; not a model release date, flagship designation, or benchmark score.}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -1453,6 +1483,8 @@ provider_mappings:
     total_tokens: ai.openrouter.total_tokens
   frontier_ai_capability:
     benchmark_score: ai.frontier_capability.score
+  frontier_ai_capability_official_lab:
+    public_model_card: ai.frontier_capability.public_model_card
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share

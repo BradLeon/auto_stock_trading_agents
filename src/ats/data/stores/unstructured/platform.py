@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 
@@ -232,6 +233,9 @@ class PlatformUnstructuredRepository:
         return self._rows(sql + " ORDER BY role,page_number,artifact_id", args)
 
     def save_document_pages(self, document_version_id: str, pages) -> int:
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
         before = self.conn.total_changes
         self.conn.executemany(
             "INSERT OR REPLACE INTO data_document_pages "
@@ -395,6 +399,9 @@ class PlatformUnstructuredRepository:
 
     def save_document_chunks(self, version_id: str, chunks) -> int:
         """Persist pre-computed chunks (used when chunking is done outside save_document)."""
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
         before = self.conn.total_changes
         self.conn.executemany(
             "INSERT OR IGNORE INTO data_document_chunks "
@@ -708,9 +715,19 @@ class PlatformUnstructuredRepository:
     def _write(self, sql: str, args=()) -> sqlite3.Cursor:
         if not self.writable:
             raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
         cur = self.conn.execute(sql, args)
         self.conn.commit()
         return cur
+
+    def _require_managed_writer(self) -> None:
+        """Require a valid managed task for writes to the production document store."""
+        from ...runtime.repository import platform_data_db_path
+
+        if self.path == platform_data_db_path().resolve():
+            from ...persistent_queue import require_queue_worker
+
+            require_queue_worker(os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", ""))
 
     def save_document(self, doc, *, ok: bool = True, note: str = "") -> None:
         stamp = doc.fetched_at or datetime.now().astimezone().isoformat(timespec="seconds")
@@ -749,6 +766,9 @@ class PlatformUnstructuredRepository:
         return None
 
     def link_document_entities(self, document_id: str, entities, *, relation: str = "mentioned") -> int:
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
         # Accepts either a flat iterable of entity symbols or (entity, relation) pairs,
         # so the document writer can mark the document's own symbol as `primary` in one
         # call — exactly as Workflow memory did before the cutover.

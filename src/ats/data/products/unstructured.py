@@ -142,6 +142,75 @@ def earnings_document_package(repository, *, entity: str,
     )
 
 
+@dataclass(frozen=True)
+class AdmittedDocument:
+    """A published immutable document version exposed through Data Products."""
+
+    document_id: str
+    version_id: str
+    source: str
+    source_url: str
+    document_type: str
+    entity: str
+    title: str
+    published_at: str
+    fetched_at: str
+    completeness: str
+    content_hash: str
+    text: str
+
+
+def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
+                       document_types: tuple[str, ...] | list[str] | None = None,
+                       published_since: str | None = None,
+                       limit: int = 200) -> list[AdmittedDocument]:
+    """Read only accepted, versioned document material; never triggers collection.
+
+    Missing/stale data is represented by an empty result.  Each returned row carries
+    an exact immutable version and completeness marker so consumers cannot confuse
+    a subscriber preview with a full transcript or article.
+    """
+    from ats.data.stores.unstructured import get_platform_unstructured_repository
+
+    repo = get_platform_unstructured_repository()
+    try:
+        rows: dict[str, dict[str, Any]] = {}
+        entity_filter = tuple(str(item).upper() for item in (entities or ()))
+        type_filter = set(str(item).lower() for item in (document_types or ()))
+        for entity in entity_filter or (None,):
+            for row in repo.documents(
+                entity=entity, ok_only=True,
+                doc_type_in=tuple(type_filter) if type_filter else None,
+                published_since=published_since, limit=max(1, min(int(limit), 1000)),
+            ):
+                rows[str(row["document_id"])] = row
+        result: list[AdmittedDocument] = []
+        for row in rows.values():
+            version = repo.latest_document_version(str(row["document_id"]))
+            if not version:
+                continue
+            text = _read_version_text(version)
+            if not text.strip():
+                continue
+            result.append(AdmittedDocument(
+                document_id=str(row["document_id"]),
+                version_id=str(version.get("version_id") or ""),
+                source=str(row.get("source") or ""),
+                source_url=str(version.get("source_url") or row.get("source_url") or ""),
+                document_type=str(row.get("doc_type") or ""),
+                entity=str(row.get("entity") or ""),
+                title=str(row.get("title") or ""),
+                published_at=str(row.get("published_at") or ""),
+                fetched_at=str(version.get("fetched_at") or row.get("fetched_at") or ""),
+                completeness=str(row.get("completeness") or "full"),
+                content_hash=str(version.get("content_hash") or ""),
+                text=text,
+            ))
+        return sorted(result, key=lambda item: (item.published_at, item.fetched_at), reverse=True)
+    finally:
+        repo.close()
+
+
 def platform_earnings_document_package(*, entity: str,
                                        period: str) -> EarningsDocumentPackage:
     """Read the migrated platform database and its immutable asset references."""
@@ -205,7 +274,7 @@ def get_unstructured_products() -> UnstructuredDataProducts:
 
 
 __all__ = [
-    "EarningsDocument", "EarningsDocumentPackage", "UnstructuredDataProducts",
+    "AdmittedDocument", "EarningsDocument", "EarningsDocumentPackage", "UnstructuredDataProducts",
     "earnings_document_package", "get_unstructured_products",
-    "platform_earnings_document_package", "platform_news_items",
+    "platform_earnings_document_package", "platform_news_items", "admitted_documents",
 ]

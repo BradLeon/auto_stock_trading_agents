@@ -51,8 +51,8 @@ Ramp 只写入 `supplemental_signals.ramp_paid_adoption` 和中文方法卡；�
 ## 执行命令
 
 ```bash
-.venv/bin/pytest -q tests/test_ramp_ai_index.py
-.venv/bin/pytest -q tests/test_evidence_ai_production_workflow.py tests/test_ai_production_penetration.py
+UV_CACHE_DIR=/private/tmp/ats-uv-cache uv run --offline pytest -q tests/test_ramp_ai_index.py
+UV_CACHE_DIR=/private/tmp/ats-uv-cache uv run --offline pytest -q tests/test_evidence_ai_production_workflow.py tests/test_ai_production_penetration.py
 openspec validate integrate-ramp-ai-index-commercialization-signal --type change --strict --no-interactive
 ```
 

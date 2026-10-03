@@ -11,7 +11,7 @@ Returns a dict, None/[] for anything unavailable. Never raises.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from .base import safe_fetch
@@ -214,26 +214,48 @@ def _record_shadow_comparison(*, consumer: str, symbol: str, legacy: dict,
 def _platform_fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
     from ..data.products import DataProducts
     from ..data.runtime import get_platform_structured_repository
-    from .structured import FetchRequest, IngestionPipeline
-    from .sources.market_consensus import YFinanceConsensusAdapter
+    from ..data.persistent_queue import cache_miss_policy, enqueue_cache_miss
 
     repository = get_platform_structured_repository()
     try:
-        request = FetchRequest(
-            source_id="yfinance_consensus", dataset_id="market_consensus",
-            entities=[symbol], query_scope={})
-        result = IngestionPipeline(repository).run(YFinanceConsensusAdapter(), request)
-        if result["status"] not in {"succeeded", "partial", "no_change"}:
-            return {"eps": None, "revenue": None, "eps_low": None, "eps_high": None,
-                    "revenue_low": None, "revenue_high": None, **_ANALYST_DEFAULTS}
         products = DataProducts(structured_repository=repository)
         snapshot = products.consensus_snapshot(entity=symbol)
+        policy = cache_miss_policy(
+            source_id="yfinance_consensus", dataset_id="market_consensus")
+        is_fresh = False
+        if snapshot["known_at"]:
+            known_at = datetime.fromisoformat(snapshot["known_at"].replace("Z", "+00:00"))
+            if known_at.tzinfo is None:
+                known_at = known_at.replace(tzinfo=timezone.utc)
+            max_age_hours = int((policy or {}).get("max_age_hours", 168))
+            age_seconds = (datetime.now(timezone.utc) - known_at).total_seconds()
+            is_fresh = 0 <= age_seconds <= max_age_hours * 3600
+        if policy and not is_fresh:
+            task = enqueue_cache_miss(
+                source_id="yfinance_consensus", dataset_id="market_consensus",
+                entity=symbol,
+                command=["ats", "data", "ingest", "--source", "yfinance_consensus",
+                         "--entity", symbol],
+            )
+            log.info(
+                "consensus: %s snapshot is %s; managed refresh %s",
+                symbol,
+                "missing" if not snapshot["rows"] else "stale",
+                task["task_id"] if task else "not queued by policy",
+            )
         if snapshot["rows"]:
             products.snapshot_manifest(
                 consumer=consumer, purpose=f"consensus:{symbol.upper()}",
                 as_of=datetime.fromisoformat(snapshot["known_at"]), rows=snapshot["rows"],
-                metadata={"symbol": symbol.upper(), "runtime_inputs_included": False})
-        return products.consensus_legacy_dict(entity=symbol)
+                metadata={"symbol": symbol.upper(), "runtime_inputs_included": False,
+                          "freshness": "fresh" if is_fresh else "stale"})
+        result = products.consensus_legacy_dict(entity=symbol)
+        result["_data_status"] = (
+            "fresh" if is_fresh else "stale" if snapshot["rows"]
+            else str(snapshot.get("status") or "unavailable")
+        )
+        result["_data_as_of"] = snapshot["known_at"]
+        return result
     finally:
         repository.close()
 

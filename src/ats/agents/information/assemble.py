@@ -35,14 +35,39 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
 
 
 def admitted_articles(store, *, since: datetime, limit: int = 500) -> list:
-    """Admitted research articles via the Workflow-Memory store bridge.
+    """Read admitted document versions through the public Data Products API.
 
-    The article-level consumer policy (full texts, or intentional partial
-    previews) lives in the data layer behind the bridge — this assembly only
-    adds the time window and never imports a provider module.
+    Workflow Memory remains the owner of processing leases and analyst outputs,
+    but is no longer an external-document read API. Partial source material keeps
+    its explicit completeness label when converted to the extraction contract.
     """
-    return store.admitted_research_articles(since, limit=limit,
-                                            allow_incomplete=True)
+    from ...data.products.unstructured import admitted_documents
+    from ...schemas.research import Article
+
+    documents = admitted_documents(
+        document_types=("article", "research", "research_article", "news", "newsletter"),
+        published_since=since.astimezone(timezone.utc).isoformat(),
+        limit=limit,
+    )
+    out = []
+    for document in documents:
+        try:
+            published = datetime.fromisoformat(
+                (document.published_at or document.fetched_at).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        out.append(Article(
+            id=document.document_id,
+            source=document.source,
+            title=document.title or document.document_id,
+            url=document.source_url,
+            body=document.text,
+            published_at=published,
+            completeness=document.completeness,
+        ))
+    return out
 
 
 def default_cutoff(lookback_days: int) -> datetime:

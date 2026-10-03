@@ -20,7 +20,7 @@ from ..structured import (
 COMPANYFACTS = "https://data.sec.gov/api/xbrl/companyfacts"
 DEFEATBETA_STATEMENTS = (
     "https://huggingface.co/datasets/defeatbeta/yahoo-finance-data/resolve/main/data/"
-    "stock_statement.parquet")
+    "US/stock_statement.parquet")
 
 # Ordered aliases: the first available concept wins per metric/period. This avoids
 # publishing multiple semantically equivalent XBRL concepts as competing source rows.
@@ -672,7 +672,17 @@ class DefeatBetaStatementAdapter:
         entities = [entity.upper() for entity in request.entities]
         if not entities:
             raise ValueError("defeatbeta statement adapter requires at least one entity")
-        connection = ((self.connection_factory or defeatbeta._connect)(self.uri))
+        # Keep the existing financial mappings/units, but bind production reads
+        # to the same immutable manifest as SEC discovery and transcripts.
+        uri = self.uri
+        manifest = None
+        if uri == DEFEATBETA_STATEMENTS and self.connection_factory is None:
+            from .defeatbeta import snapshot as dataset_manifest
+            manifest = dataset_manifest({
+                "repo": "defeatbeta/yahoo-finance-data",
+                "file": "data/US/stock_statement.parquet"})
+            uri = manifest["source_url"]
+        connection = ((self.connection_factory or defeatbeta._connect)(uri))
         placeholders = ",".join("?" for _ in entities)
         where = [f"symbol IN ({placeholders})"]
         where.append("lower(period_type) IN ('annual','quarterly')")
@@ -688,9 +698,13 @@ class DefeatBetaStatementAdapter:
             args.extend(request.periods)
         sql = (
             "SELECT symbol,report_date,item_name,item_value,finance_type,period_type "
-            f"FROM read_parquet('{self.uri.replace(chr(39), chr(39) * 2)}') "
+            f"FROM read_parquet('{uri.replace(chr(39), chr(39) * 2)}') "
             f"WHERE {' AND '.join(where)} ORDER BY symbol,report_date,item_name")
-        rows = connection.execute(sql, args).fetchall()
+        try:
+            rows = connection.execute(sql, args).fetchall()
+        finally:
+            if self.connection_factory is None:
+                connection.close()
         columns = ("symbol", "report_date", "item_name", "item_value",
                    "finance_type", "period_type")
         slice_rows = [{key: (float(value) if isinstance(value, Decimal) else value)
@@ -753,10 +767,14 @@ class DefeatBetaStatementAdapter:
                             "share_basis": "adr" if provider_field.startswith("tsm_") else ""},
                 raw={**row, "provider_field": provider_field,
                      "source_item_name": item_name}))
-        loader = self.snapshot_loader or defeatbeta.dataset_snapshot
-        snapshot = loader(
-            now=fetched_at, dataset_file="stock_statement.parquet")
-        version = getattr(snapshot, "updated_at", "") or fetched_at.isoformat()
+        if manifest:
+            from types import SimpleNamespace
+            snapshot = SimpleNamespace(updated_at=manifest["file_updated_at"], lag_hours=None)
+            version = manifest["revision"]
+        else:
+            loader = self.snapshot_loader or defeatbeta.dataset_snapshot
+            snapshot = loader(now=fetched_at, dataset_file="stock_statement.parquet")
+            version = getattr(snapshot, "updated_at", "") or fetched_at.isoformat()
         coverage = {
             "entities": entities,
             "first_period": min((record.period for record in records), default=""),
@@ -774,10 +792,11 @@ class DefeatBetaStatementAdapter:
                 payload=slice_rows,
                 query_scope={**request.query_scope, "entities": entities,
                              "periods": request.periods},
-                source_url=self.uri, source_version=version,
+                source_url=uri, source_version=version,
                 media_type="application/json", retention="query_slice",
                 metadata={
                     "coverage": coverage, "host": "huggingface",
+                    "manifest": manifest or {},
                     "dataset": "defeatbeta/yahoo-finance-data",
                     "upstream_claim": "Yahoo Finance structured statement data",
                     "unmapped_rows_excluded": 0 if include_unmapped else len(unknown_rows),

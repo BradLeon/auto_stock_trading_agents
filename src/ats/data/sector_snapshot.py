@@ -1,56 +1,31 @@
-"""Batched price snapshot for a whole sector universe — ONE yf.download call.
+"""Compatibility helpers backed by the Runtime Data Gateway.
 
-Momentum / distance-to-high for ~25 names comes from a single HTTP request,
-the key rate-limit mitigation for the weekly sector review. Never raises.
+Persistent sector products may still use ``fetch_prices``' legacy mapping shape;
+new runtime consumers should use ``fetch_close_history`` to preserve per-symbol
+status and market-bar timestamps.
 """
 
 from __future__ import annotations
 
-import logging
-
-from .base import safe_fetch
-
-log = logging.getLogger("ats.data.sector_snapshot")
+from .runtime.market_data import RuntimeCloseHistory, fetch_close_history_many
 
 name = "sector_snapshot"
 
 
 def fetch_prices(symbols: list[str], period: str = "1y") -> dict[str, list[float]]:
-    """Daily closes per symbol via one batched download. Missing names -> absent key.
-    Input symbols may be raw IBKR broker tickers; they are normalized to yfinance
-    conventions before the download, and results are keyed back to IBKR symbols."""
-    if not symbols:
-        return {}
-    from .base import yf_symbol
-
-    # Build IBKR→yf and yf→IBKR maps (one-to-one; collisions keep last)
-    ibkr_to_yf = {s: yf_symbol(s) for s in symbols}
-    yf_to_ibkr = {v: k for k, v in ibkr_to_yf.items()}
-    yf_syms = list(ibkr_to_yf.values())
-
-    raw = safe_fetch(lambda: _download(yf_syms, period), source="sector-prices")
-    if not raw:
-        return {}
-    # Remap yfinance keys → original IBKR keys
-    return {yf_to_ibkr.get(k, k): v for k, v in raw.items()}
+    """Compatibility projection of runtime close history to the legacy shape."""
+    return {
+        symbol: list(row.closes)
+        for symbol, row in fetch_close_history(symbols, period=period).items()
+        if row.status == "succeeded" and row.closes
+    }
 
 
-def _download(symbols: list[str], period: str) -> dict[str, list[float]]:
-    import yfinance as yf
-
-    df = yf.download(symbols, period=period, progress=False, auto_adjust=True,
-                     group_by="column")["Close"]
-    out: dict[str, list[float]] = {}
-    if hasattr(df, "columns"):           # multi-symbol frame
-        for sym in df.columns:
-            closes = [float(v) for v in df[sym].dropna().tolist()]
-            if closes:
-                out[str(sym)] = closes
-    else:                                # single symbol -> Series
-        closes = [float(v) for v in df.dropna().tolist()]
-        if closes:
-            out[symbols[0]] = closes
-    return out
+def fetch_close_history(
+    symbols: list[str], *, period: str = "1y"
+) -> dict[str, RuntimeCloseHistory]:
+    """Runtime-only close histories with explicit status and last-bar date."""
+    return fetch_close_history_many(symbols, period=period)
 
 
 def momentum(closes: list[float], days: int) -> float | None:

@@ -66,10 +66,11 @@ class CachedDoc:
     truncation_reason: str = ""
     carrier_format: str = "plain_text"
     mime_source: str = ""
+    document_key: str = ""
 
     @property
     def document_id(self) -> str:
-        return f"{self.symbol}:{self.period or 'unknown'}:{self.doc_type}"
+        return f"{self.symbol}:{self.document_key or self.period or 'unknown'}:{self.doc_type}"
 
 
 # --------------------------------------------------------------------------- #
@@ -89,12 +90,13 @@ def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", (value or "").strip()).strip("-")
 
 
-def path_for(symbol: str, period: str, doc_type: str) -> Path | None:
+def path_for(symbol: str, period: str, doc_type: str, *, document_key: str = "") -> Path | None:
     base = root()
     if base is None:
         return None
     sym = _slug(symbol.upper())
-    return base / sym / f"{sym}-{_slug(period) or 'unknown'}-{_slug(doc_type)}.md"
+    identity = document_key or period
+    return base / sym / f"{sym}-{_slug(identity) or 'unknown'}-{_slug(doc_type)}.md"
 
 
 def _version_path(path: Path, digest: str) -> Path:
@@ -142,7 +144,8 @@ def load(symbol: str, period: str, doc_type: str, *, min_chars: int = MIN_CHARS)
                      completeness=meta.get("completeness", "full") or "full",
                      truncation_reason=meta.get("truncation_reason", ""),
                      carrier_format=meta.get("carrier_format", "plain_text") or "plain_text",
-                     mime_source=meta.get("mime_source", ""))
+                     mime_source=meta.get("mime_source", ""),
+                     document_key=meta.get("document_key", ""))
 
 
 def _split_frontmatter(raw: str) -> tuple[dict, str]:
@@ -200,6 +203,7 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
           completeness: str = "full", truncation_reason: str = "",
           carrier_format: str = "plain_text",
           mime_source: str = "",
+          document_key: str = "",
           min_chars: int = MIN_CHARS) -> CachedDoc | None:
     """Write a document to the cache. Callers must have run the guards first."""
     from ..config import canonical_entity
@@ -210,7 +214,7 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
         log.info("source_cache: refusing to cache %s %s — only %d chars",
                  sym, doc_type, len(body))
         return None
-    p = path_for(sym, period, doc_type)
+    p = path_for(sym, period, doc_type, document_key=document_key)
     if p is None:
         return None
     stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
@@ -219,6 +223,7 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
 
     metadata = {
         "symbol": sym, "period": period or "", "doc_type": doc_type,
+        "document_key": document_key,
         "source": source, "source_url": source_url, "fetched_at": stamp,
         "sha256": digest, "chars": len(body), "external_id": external_id,
         "title": title, "published_at": published_at,
@@ -245,7 +250,8 @@ def store(symbol: str, period: str, doc_type: str, text: str, *, source: str = "
                      external_id=external_id, title=title, published_at=published_at,
                      related_entities=tuple(sorted(set(related_entities))),
                      completeness=completeness, truncation_reason=truncation_reason,
-                     carrier_format=carrier_format, mime_source=mime_source)
+                     carrier_format=carrier_format, mime_source=mime_source,
+                     document_key=document_key)
 
 
 # --------------------------------------------------------------------------- #
@@ -289,5 +295,6 @@ def inventory(symbol: str) -> list[CachedDoc]:
                              source_url=meta.get("source_url", ""),
                              fetched_at=meta.get("fetched_at", ""),
                              sha256=digest, from_cache=True,
-                             version_path=version_path if version_path.is_file() else p))
+                             version_path=version_path if version_path.is_file() else p,
+                             document_key=meta.get("document_key", "")))
     return out

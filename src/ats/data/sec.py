@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 log = logging.getLogger("ats.data.sec")
@@ -27,6 +29,21 @@ ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
 SUBMISSIONS = "https://data.sec.gov/submissions"
 COMPANY_TICKERS = "https://www.sec.gov/files/company_tickers.json"
 MIN_CHARS = 800
+_transport = ContextVar("sec_document_transport", default=None)
+
+
+@contextmanager
+def document_transport(fetch):
+    """Inject a task-local bounded transport without changing legacy callers.
+
+    Parsing/EX-99 selection stays shared; the managed worker owns request policy.
+    ContextVar avoids process-global monkeypatches and is restored on exceptions.
+    """
+    token = _transport.set(fetch)
+    try:
+        yield
+    finally:
+        _transport.reset(token)
 
 
 @dataclass(frozen=True)
@@ -83,6 +100,9 @@ def _headers() -> dict:
 
 def _request_text(url: str, *, stage: str, attempts: int = 3) -> tuple[str, tuple[SecFetchFailure, ...]]:
     """GET text with a small bounded retry budget; never collapses failure to empty."""
+    managed = _transport.get()
+    if managed is not None:
+        return managed(url, stage=stage, attempts=attempts)
     import httpx
 
     failures: list[SecFetchFailure] = []

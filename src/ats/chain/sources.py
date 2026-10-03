@@ -126,6 +126,9 @@ def fetch(source: SourceDef, *, lookback_months: int = 6) -> list[SeriesPoint]:
     A source we cannot reach is a gap, and the caller records it as one. It must not
     become "the series says nothing", which is a statement about the world.
     """
+    from ..data.persistent_queue import require_queue_worker
+
+    require_queue_worker(source.id)
     import importlib
 
     try:
@@ -236,6 +239,7 @@ def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPo
 
 
 def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None,
+            source_ids: set[str] | None = None,
             now: datetime | None = None) -> dict[str, int]:
     """Fetch every declared source and persist its observations. Returns {id: saved}.
 
@@ -259,8 +263,13 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
     now = now or datetime.now(timezone.utc)
     out: dict[str, int] = {}
     for source in load_sources():
+        if source_ids and source.id not in source_ids:
+            continue
         if concepts and not (set(source.concepts) & concepts):
             continue
+        from ..data.persistent_queue import require_queue_worker
+
+        require_queue_worker(source.id)
         store.register_data_source(source, kind="structured", at=now)
         run_id = store.begin_ingestion(source.id, kind="structured", at=now)
         points = fetch(source, lookback_months=lookback_months)

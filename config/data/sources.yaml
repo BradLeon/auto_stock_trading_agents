@@ -37,6 +37,12 @@
 
 sources:
   kr_semiconductor_exports:
+    # Compatibility alias for the governed numeric series. Although this legacy
+    # registry retains it next to prose sources, collection belongs to the
+    # structured catalog and must not create a second text-ingestion job.
+    domain: structured
+    canonical_source_id: kr_ecos_exports
+    dataset_id: regional_kr_exports
     label: 韩国半导体出口指数（月度）
     adapter: kr_ecos
     params: {stat: "403Y001", item: "3091AA"}      # 수출금액지수 / 반도체
@@ -52,6 +58,9 @@ sources:
     # 与台湾那条的区别正是"机制"而不是"统计口径"：台湾出口是代工与封装，不是存储。
 
   tw_ic_exports:
+    domain: structured
+    canonical_source_id: tw_mof_exports
+    dataset_id: regional_tw_exports
     label: 台湾积体电路出口（月度）
     adapter: tw_mof
     params: {hs_prefix: "8542", metric: export_value_usd}
@@ -70,6 +79,9 @@ sources:
     # 入选标准始终是"能否给出区分性读数"，不是"是不是官方数据"。
 
   dram_contract_price:
+    domain: structured
+    canonical_source_id: trendforce_dram
+    dataset_id: industry_dram_contract_price
     label: DRAM 合约价
     adapter: trendforce
     params:
@@ -123,12 +135,12 @@ sources:
 
 article_sources:
   factset_earnings_insight_doc:
-    label: FactSet Earnings Insight 周报
+    label: FactSet Earnings Insight 月末最终版
     adapter: factset_earnings_insight
     entity: FACTSET
     stance: regulator
     doc_type: research_article
-    cadence: weekly
+    cadence: monthly_final_report
     pages: 1
     max_per_run: 1
     min_body_chars: 1000

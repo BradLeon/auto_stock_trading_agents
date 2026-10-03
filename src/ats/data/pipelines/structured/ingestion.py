@@ -174,6 +174,16 @@ class IngestionPipeline:
         self.admission = CentralAdmission(repository)
 
     def run(self, adapter: StructuredAdapter, request: FetchRequest) -> dict:
+        from pathlib import Path
+
+        from ...runtime.repository import platform_data_db_path
+
+        repository_path = getattr(self.repository, "path", ":memory:")
+        if repository_path != ":memory:" and Path(str(repository_path)).resolve() == \
+                platform_data_db_path().resolve():
+            from ...persistent_queue import require_queue_worker
+
+            require_queue_worker(request.source_id)
         source = self.repository.source(request.source_id)
         if source and source["catalog_status"] == "runtime_excluded":
             return {"run_id": "", "status": "runtime_excluded",

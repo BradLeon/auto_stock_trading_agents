@@ -249,13 +249,26 @@ def events_calendar_command(args, *, parser) -> int:
 
     store = ScheduleCalendarStore()
     if args.action == "refresh":
-        from ..data.calendar_refresh import refresh_schedule_calendar
+        from ..data.calendar_refresh import enqueue_schedule_calendar_refresh
+        from ..data.persistent_queue import PersistentIngestionQueue
 
-        result = refresh_schedule_calendar(source_ids=args.source or None, store=store)
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        failed_sources = any(item["status"] == "failed" for item in result["sources"])
-        failed_release_check = result.get("release_reconciliation", {}).get("status") == "failed"
-        return 0 if not failed_sources and not failed_release_check else 1
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        queue = PersistentIngestionQueue()
+        submitted = enqueue_schedule_calendar_refresh(
+            source_ids=args.source or None, trigger_kind="manual",
+            trigger_ref=f"events-refresh:{now.isoformat()}", now=now)
+        outcomes = []
+        for task in submitted:
+            result = queue.run_one(task_id=task["task_id"])
+            current = queue.get(task["task_id"]) or {}
+            outcomes.append({**task,
+                             "status": (result or {}).get("status") or
+                                       current.get("status", "queued"),
+                             "result": (result or {}).get("stdout", {})})
+        print(json.dumps({"sources": outcomes, "refresh_owner": "persistent_queue"},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0 if all(row["status"] in {"succeeded", "no_change", "partial"}
+                        for row in outcomes) else 1
     if args.action == "status":
         print(json.dumps(ScheduleCalendarProduct(store).snapshot(), ensure_ascii=False,
                          indent=2, default=str))
@@ -1452,35 +1465,14 @@ def run_evidence(
         return 0
 
     if action == "articles":
-        # The prose half of `collect`. Separate command because it costs a model call
-        # per article and takes minutes, while `collect` is arithmetic over a series.
-        from ..chain import articles as chain_articles
-        from ..data import research as research_data
-
-        # Newsletter acquisition is a source-stage operation shared by every consumer.
-        # The SemiAnalysis adapter below only discovers already-stored assets.
-        if not entity or entity == "semianalysis":
-            research_data.ingest_configured(store=store)
-
-        stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
-        if not stats:
-            print("（config/data/sources.yaml 里没有配置 article_sources）")
-            return 0
-        for sid, st in sorted(stats.items()):
-            if st.unreachable:
-                print(f"  ⚠️  {sid:<24}取不到文章列表，已记成缺口而非沉默")
-                continue
-            print(
-                f"  📰 {sid:<24}扫 {st.scanned} 篇 · 命中 {st.matched} 篇 · "
-                f"新抽取 {st.ingested} 篇 / {st.observations} 条观测"
-            )
-            if st.unreadable:
-                # Never fold this into the headline: a widening paywall must not read
-                # as the publisher having gone quiet.
-                print(f"     🚫 {st.unreadable} 篇取不到正文（付费或模板变更），已记成缺口")
-            for t in st.titles:
-                print(f"     · {t[:88]}")
-        return 0
+        outcomes = _run_managed_article_ingestion(
+            source_ids={entity} if entity else None, trigger_kind="manual")
+        print(json.dumps({"status": "succeeded" if all(
+            row["status"] in {"succeeded", "no_change", "quarantined", "partial"}
+            for row in outcomes) else "partial", "tasks": outcomes},
+            ensure_ascii=False, indent=2, default=str))
+        return 0 if all(row["status"] in {
+            "succeeded", "no_change", "quarantined", "partial"} for row in outcomes) else 1
 
     if action == "kbreview":
         # The same six detectors the weekly report runs, on demand. Worth its own
@@ -1659,14 +1651,8 @@ def sector_probe(name: str = "ai_hardware", *, live_data: bool = True) -> int:
 def run_pead_research(*, use_llm: bool = True) -> list:
     """One research pass: ingest newsletters, extract per-ticker insights."""
     from ..agents.pead import research
-    from ..data import research as research_data
-    from ..data.stores.unstructured import get_data_ingestion_store
 
-    data_store = get_data_ingestion_store()
-    try:
-        research_data.ingest_configured(store=data_store)
-    finally:
-        data_store.close()
+    _run_managed_article_ingestion(source_ids={"semianalysis"}, trigger_kind="manual")
     insights = research.run(use_llm=use_llm)
     if not insights:
         print("📰 research — no new articles / no insights")
@@ -1686,15 +1672,9 @@ def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) 
     from ..agents.information import entry
 
     if ingest_research:
-        # 数据层采集属于 runtime 侧动作：agent 包内不发起取回（4.1 契约）
-        from ..data import research as research_data
-        from ..data.stores.unstructured import get_data_ingestion_store
-
-        data_store = get_data_ingestion_store()
-        try:
-            research_data.ingest_configured(store=data_store)
-        finally:
-            data_store.close()
+        # Runtime submits an explicit data task; the Information Agent only reads
+        # the published document product after the managed writer finishes.
+        _run_managed_article_ingestion(source_ids={"semianalysis"}, trigger_kind="manual")
     summary = entry.run_information_pass(use_llm=use_llm,
                                          ingest_research=ingest_research)
     print("🛰️  information — 每轮信息简报")
@@ -1965,6 +1945,46 @@ def _setup_logging() -> None:
     logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
 
 
+def _run_managed_article_ingestion(*, source_ids: set[str] | None = None,
+                                  trigger_kind: str = "manual",
+                                  trigger_ref: str = "") -> list[dict]:
+    """Submit article refreshes to the persistent-data worker and return outcomes."""
+    from ..data.pipelines.unstructured.article_ingest import _article_sources
+    from ..data.persistent_queue import PersistentIngestionQueue
+
+    registered = _article_sources()
+    selected = sorted(source_ids or (set(registered) - {"yfinance_live_news"}))
+    unknown = sorted(set(selected) - set(registered))
+    if unknown:
+        raise ValueError(f"unregistered article source(s): {', '.join(unknown)}")
+    queue = PersistentIngestionQueue()
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if not trigger_ref:
+        trigger_ref = f"{trigger_kind}:{now.isoformat()}"
+    registry_paths = [Path("config/data") / name for name in
+                      ("structured.yaml", "unstructured.yaml", "schedules.yaml")]
+    policy_fingerprint = hashlib.sha256(b"".join(path.read_bytes()
+                                                   for path in registry_paths)).hexdigest()
+    outcomes: list[dict] = []
+    for source_id in selected:
+        task_id, created = queue.enqueue(
+            source_id=source_id,
+            scope={"source": source_id},
+            trigger_kind=trigger_kind,
+            trigger_ref=f"{trigger_ref}:{source_id}",
+            command=["ats", "data", "article-ingest", "--source", source_id],
+            policy_fingerprint=policy_fingerprint,
+            requested_as_of=now.isoformat(), priority=30 if trigger_kind == "scheduled" else 20,
+        )
+        result = queue.run_one(task_id=task_id)
+        current = queue.get(task_id) or {}
+        outcomes.append({"source_id": source_id, "task_id": task_id,
+                         "created": created,
+                         "status": (result or {}).get("status") or current.get("status", "queued"),
+                         "result": (result or {}).get("stdout", {})})
+    return outcomes
+
+
 def run_data(
     action: str,
     value: str = "",
@@ -2008,9 +2028,134 @@ def run_data(
     provider_lookup_attempts: int = 3,
     provider_lookup_retry_seconds: float = 1.0,
     approve_title_url_review: bool = False,
+    assurance_consumer: str = "",
+    assurance_domain: str = "",
+    assurance_contract_version: str = "",
+    evidence_type: str = "",
+    evidence_outcome: str = "",
+    evidence_scope_json: str = "{}",
+    evidence_summary: str = "",
+    evidence_command_summary: str = "",
+    evidence_environment_names: list[str] | None = None,
+    evidence_prerequisites: list[str] | None = None,
+    evidence_fingerprint_paths: list[str] | None = None,
+    evidence_reason: str = "",
+    evidence_event_id: str = "",
 ) -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
+
+    if action == "calendar-refresh":
+        source_id = source or value
+        if not source_id:
+            raise ValueError("calendar-refresh requires --source")
+        from ..data.calendar_refresh import refresh_schedule_calendar
+        from ..data.persistent_queue import require_queue_worker
+        from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+        worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+        require_queue_worker(worker_source)
+        result = refresh_schedule_calendar(
+            source_ids={source_id}, store=ScheduleCalendarStore())
+        failed = any(row["status"] == "failed" for row in result["sources"])
+        partial = any(row["status"] == "partial" for row in result["sources"])
+        result["status"] = "failed" if failed else "partial" if partial else "succeeded"
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 1 if failed else 0
+
+    if action == "calendar-finalize":
+        from ..data.calendar_refresh import refresh_schedule_calendar
+        from ..data.persistent_queue import require_queue_worker
+        from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+        worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+        require_queue_worker(worker_source)
+        result = refresh_schedule_calendar(
+            store=ScheduleCalendarStore(), finalize_only=True)
+        result["status"] = ("failed" if result["release_reconciliation"]["status"] == "failed"
+                            else "succeeded")
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["release_reconciliation"]["status"] != "failed" else 1
+
+    if action == "article-ingest":
+        source_id = source or value
+        if not source_id:
+            raise ValueError("article-ingest requires --source")
+        from ..data.pipelines.unstructured.article_ingest import ingest_article_source
+
+        result = ingest_article_source(
+            source_id, human_review_approved=approve_title_url_review)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action in {"document-ingest", "fixed-ingest"}:
+        source_id = source or value
+        if not source_id:
+            raise ValueError("document-ingest requires --source")
+        from ..data.pipelines.unstructured.document_ingest import ingest_documents
+
+        try:
+            result = ingest_documents(source_id, entity=entity)
+        except Exception as exc:
+            result = {"status": "failed", "source_id": source_id,
+                      "reason_code": type(exc).__name__}
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["status"] in {"succeeded", "no_change", "partial",
+                                         "quarantined"} else 1
+
+    if action == "chain-source-collect":
+        source_id = source or value
+        if not source_id:
+            raise ValueError("chain-source-collect requires --source")
+        from ..chain import sources as chain_sources
+        from ..data.persistent_queue import require_queue_worker
+        from ..memory import get_store
+
+        worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+        require_queue_worker(worker_source)
+        saved = chain_sources.collect(get_store(), source_ids={source_id})
+        print(json.dumps({"status": "succeeded" if saved.get(source_id, -1) >= 0 else "partial",
+                          "source_id": source_id, "saved": saved.get(source_id, -1)},
+                         ensure_ascii=False))
+        return 0 if saved.get(source_id, -1) >= 0 else 1
+
+    if action == "assurance":
+        import json
+        from ..data import assurance
+
+        scope = json.loads(evidence_scope_json or "{}")
+        if value == "query":
+            result = assurance.qualification(
+                domain_id=assurance_domain, consumer_id=assurance_consumer,
+                contract_version=assurance_contract_version, scope=scope,
+                db_path=db_path or None)
+        elif value == "history":
+            result = assurance.evidence_history(
+                domain_id=assurance_domain, consumer_id=assurance_consumer,
+                scope=scope if scope else None, db_path=db_path or None, limit=limit)
+        elif value == "record":
+            if not as_of:
+                raise ValueError("data assurance record requires --as-of")
+            result = {"event_id": assurance.record_evidence(
+                domain_id=assurance_domain, consumer_id=assurance_consumer,
+                evidence_type=evidence_type, outcome=evidence_outcome, scope=scope,
+                as_of=datetime.fromisoformat(as_of.replace("Z", "+00:00")),
+                command_summary=evidence_command_summary,
+                result_summary=evidence_summary,
+                environment_names=evidence_environment_names,
+                prerequisite_event_ids=evidence_prerequisites,
+                dependency_paths=evidence_fingerprint_paths,
+                db_path=db_path or None)}
+        elif value == "revoke":
+            if not evidence_reason:
+                raise ValueError("data assurance revoke requires --reason")
+            result = {"event_id": assurance.revoke_evidence(
+                reason=evidence_reason, event_id=evidence_event_id,
+                db_path=db_path or None)}
+        else:
+            raise ValueError("data assurance action must be query, record, or revoke")
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
 
     if action == "pead-official-disclosure-coverage":
         import os
@@ -2279,6 +2424,11 @@ def run_data(
                 if not target_source:
                     raise ValueError("ingest requires --source or VALUE")
                 scope = json.loads(query_scope) if query_scope else {}
+                # `--dataset` is a first-class selection, not merely a display
+                # filter. Multi-dataset sources otherwise silently ingest the
+                # first catalog dataset even when the scheduler names another.
+                if dataset:
+                    scope.setdefault("dataset_id", dataset)
                 if since:
                     scope.setdefault("since", since)
                 result = ingest_source(
@@ -2776,6 +2926,13 @@ def main(argv: list[str] | None = None) -> int:
             "source-acceptance",
             "source-publish",
             "source-releases",
+            "article-ingest",
+            "document-ingest",
+            "fixed-ingest",
+            "chain-source-collect",
+            "calendar-refresh",
+            "calendar-finalize",
+            "assurance",
             "ibkr-news-diagnostics",
             "describe",
             "availability",
@@ -2935,6 +3092,31 @@ def main(argv: list[str] | None = None) -> int:
         help="purge-source: 声明数据已在别处留存，写入清除记录供审计",
     )
     data.add_argument("--purge-note", default="", help="purge-source: 写入清除记录的备注")
+    data.add_argument("--consumer", dest="assurance_consumer", default="",
+                      help="assurance: target coverage consumer ID")
+    data.add_argument("--domain", dest="assurance_domain", default="",
+                      help="assurance: consumer data domain")
+    data.add_argument("--contract-version", dest="assurance_contract_version", default="",
+                      help="assurance: pinned consumer contract version")
+    data.add_argument("--evidence-type", default="", help="assurance record: required evidence kind")
+    data.add_argument("--outcome", dest="evidence_outcome", choices=["passed", "failed"], default="",
+                      help="assurance record: evidence outcome")
+    data.add_argument("--scope-json", dest="evidence_scope_json", default="{}",
+                      help="assurance: exact JSON scope shared by all evidence")
+    data.add_argument("--summary", dest="evidence_summary", default="",
+                      help="assurance record: sanitized result summary")
+    data.add_argument("--command-summary", dest="evidence_command_summary", default="",
+                      help="assurance record: sanitized command description (no secrets)")
+    data.add_argument("--environment-name", dest="evidence_environment_names", action="append", default=[],
+                      help="assurance record: environment variable name only; never its value")
+    data.add_argument("--prerequisite-event", dest="evidence_prerequisites", action="append", default=[],
+                      help="assurance record: prerequisite evidence ID; repeatable")
+    data.add_argument("--fingerprint-path", dest="evidence_fingerprint_paths", action="append", default=[],
+                      help="assurance record: dependency file to hash; repeatable")
+    data.add_argument("--reason", dest="evidence_reason", default="",
+                      help="assurance revoke: reason")
+    data.add_argument("--event-id", dest="evidence_event_id", default="",
+                      help="assurance revoke: evidence event to invalidate")
     data.add_argument("--apply", action="store_true", help="publish/source-publish: 显式执行写操作")
     data.add_argument(
         "--mode", choices=["platform"], default="platform", help="publish: 唯一受支持的数据路径"
@@ -3354,7 +3536,56 @@ def main(argv: list[str] | None = None) -> int:
             provider_lookup_attempts=args.provider_lookup_attempts,
             provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,
             approve_title_url_review=args.approve_title_url_review,
+            assurance_consumer=args.assurance_consumer,
+            assurance_domain=args.assurance_domain,
+            assurance_contract_version=args.assurance_contract_version,
+            evidence_type=args.evidence_type,
+            evidence_outcome=args.evidence_outcome,
+            evidence_scope_json=args.evidence_scope_json,
+            evidence_summary=args.evidence_summary,
+            evidence_command_summary=args.evidence_command_summary,
+            evidence_environment_names=args.evidence_environment_names,
+            evidence_prerequisites=args.evidence_prerequisites,
+            evidence_fingerprint_paths=args.evidence_fingerprint_paths,
+            evidence_reason=args.evidence_reason,
+            evidence_event_id=args.evidence_event_id,
         )
+    if args.command == "evidence" and args.action == "collect":
+        from ..chain.sources import load_sources
+        from ..data.catalog.loader import DataCatalog
+        from ..data.persistent_queue import PersistentIngestionQueue
+
+        queue = PersistentIngestionQueue()
+        source_registry = DataCatalog.load().unstructured_registry().get("sources", {})
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        policy = hashlib.sha256(
+            Path("config/data/sources.yaml").read_bytes()
+            + Path("config/data/structured.yaml").read_bytes()
+        ).hexdigest()
+        outcomes = []
+        for source_def in load_sources():
+            registered = source_registry.get(source_def.id) or {}
+            canonical_source = str(registered.get("canonical_source_id") or source_def.id)
+            dataset_id = str(registered.get("dataset_id") or "")
+            task_id, created = queue.enqueue(
+                source_id=source_def.id,
+                scope={"source_alias": source_def.id, "canonical_source": canonical_source,
+                       "dataset": dataset_id,
+                       "sources": [source_def.id, canonical_source]},
+                trigger_kind="manual",
+                trigger_ref=f"evidence-collect:{source_def.id}:{now.isoformat()}",
+                command=["ats", "data", "chain-source-collect", "--source", source_def.id],
+                policy_fingerprint=policy,
+                requested_as_of=now.isoformat(), priority=40,
+            )
+            result = queue.run_one(task_id=task_id)
+            status = (result or {}).get("status") or (queue.get(task_id) or {}).get("status", "queued")
+            outcomes.append({"source_id": source_def.id, "task_id": task_id,
+                             "created": created, "status": status})
+        print(json.dumps({"status": "succeeded" if all(
+            row["status"] in {"succeeded", "no_change"} for row in outcomes) else "partial",
+            "tasks": outcomes}, ensure_ascii=False, indent=2))
+        return 0 if all(row["status"] in {"succeeded", "no_change"} for row in outcomes) else 1
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":

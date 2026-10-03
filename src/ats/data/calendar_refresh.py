@@ -419,16 +419,28 @@ def reconcile_earnings_release_materials(*, store: ScheduleCalendarStore | None 
 def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                               now: datetime | None = None,
                               config_dir: str | Path | None = None,
-                              store: ScheduleCalendarStore | None = None) -> dict[str, Any]:
+                              store: ScheduleCalendarStore | None = None,
+                              finalize_only: bool = False) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
     config = _load_source_config(root)
     source_cfg = config.get("sources", {})
-    selected = set(source_ids or source_cfg)
+    selected = set() if finalize_only else set(source_ids or source_cfg)
     unknown = selected - set(source_cfg)
     if unknown:
         raise ValueError(f"unknown schedule calendar sources: {sorted(unknown)}")
     repository = store or ScheduleCalendarStore()
+    from .runtime.repository import platform_data_db_path
+
+    if Path(repository.path).expanduser().resolve() == \
+            platform_data_db_path().expanduser().resolve():
+        from .persistent_queue import require_queue_worker
+
+        # Fail before loading an adapter or making a network request.
+        for source_id in sorted(selected):
+            require_queue_worker(source_id)
+        if finalize_only:
+            require_queue_worker("calendar_maintenance")
     results = []
     for source_id in sorted(selected):
         source = source_cfg[source_id]
@@ -482,7 +494,7 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
             results.append({"source_id": source_id, "status": "failed",
                             "error_code": type(exc).__name__, "error": str(exc)[:300]})
     overlay_results = []
-    if not source_ids or "manual_events_yaml" in selected:
+    if finalize_only or not source_ids or "manual_events_yaml" in selected:
         for candidate in _manual_overlay_candidates(root):
             saved = repository.submit_candidate(candidate, at=now)
             if saved["duplicate"]:
@@ -508,7 +520,7 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                 overlay_results.append({"event_id": candidate.event_id, "status": "published"})
     release_materials = []
     release_reconciliation = {"status": "not_requested", "error": ""}
-    if source_ids is None:
+    if source_ids is None or finalize_only:
         try:
             release_materials = reconcile_earnings_release_materials(store=repository, now=now)
             release_reconciliation["status"] = "complete"
@@ -526,6 +538,58 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
             "as_of": now.astimezone(timezone.utc).isoformat()}
 
 
+def enqueue_schedule_calendar_refresh(*, source_ids: Iterable[str] | None = None,
+                                      trigger_kind: str = "manual",
+                                      trigger_ref: str = "",
+                                      now: datetime | None = None) -> list[dict[str, Any]]:
+    """Create durable per-source refresh tasks; callers decide when workers run."""
+    import hashlib
+
+    from .persistent_queue import PersistentIngestionQueue
+
+    now = now or datetime.now(timezone.utc)
+    root = Path(os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
+    config = _load_source_config(root)
+    sources = config.get("sources", {}) or {}
+    selected = sorted(set(source_ids or sources))
+    unknown = sorted(set(selected) - set(sources))
+    if unknown:
+        raise ValueError(f"unknown schedule calendar sources: {unknown}")
+    policy_fingerprint = hashlib.sha256(
+        (root / "data" / "schedule_calendar.yaml").read_bytes()
+        + (root / "data" / "schedules.yaml").read_bytes()).hexdigest()
+    bucket = trigger_ref or now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    queue = PersistentIngestionQueue()
+    results = []
+    for source_id in selected:
+        task_id, created = queue.enqueue(
+            source_id=source_id,
+            scope={"source": source_id, "dataset": "schedule_calendar"},
+            trigger_kind=trigger_kind,
+            trigger_ref=f"calendar-refresh:{bucket}:{source_id}",
+            command=["ats", "data", "calendar-refresh", "--source", source_id],
+            policy_fingerprint=policy_fingerprint,
+            requested_as_of=now.isoformat(),
+            priority=25 if trigger_kind == "scheduled" else 20,
+        )
+        results.append({"source_id": source_id, "task_id": task_id,
+                        "created": created, "status": "queued"})
+    if source_ids is None:
+        task_id, created = queue.enqueue(
+            source_id="calendar_maintenance",
+            scope={"sources": ["calendar_maintenance"],
+                   "dataset": "schedule_calendar"},
+            trigger_kind=trigger_kind,
+            trigger_ref=f"calendar-finalize:{bucket}",
+            command=["ats", "data", "calendar-finalize"],
+            policy_fingerprint=policy_fingerprint,
+            requested_as_of=now.isoformat(), priority=25,
+        )
+        results.append({"source_id": "calendar_maintenance", "task_id": task_id,
+                        "created": created, "status": "queued"})
+    return results
+
+
 __all__ = ["parse_bea_schedule_html", "parse_bls_ics", "parse_fomc_html",
            "reconcile_earnings_release_materials",
-           "refresh_schedule_calendar"]
+           "refresh_schedule_calendar", "enqueue_schedule_calendar_refresh"]

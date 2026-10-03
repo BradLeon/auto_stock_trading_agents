@@ -730,20 +730,16 @@ def _cross_section_weekly(name: str) -> None:
     # month's customs print next to this week's filings. `collect()` had no production
     # caller at all — the configured sources only ever ran when someone invoked it from
     # a REPL, so they were silently frozen while looking configured.
-    # Articles first, series second: both land in the ledger the report then reads, and
-    # article ingestion is the slower, more failure-prone half (one model call per piece
-    # against a site whose template can move), so it gets its own guard.
+    # Persistent article acquisition is a managed, data-only queue task. Extraction and
+    # analysis remain separate consumer work; a source outage must not abort the report.
     try:
-        from ..data.pipelines.unstructured import research as research_pipeline
-        from ..data.stores.unstructured import get_data_ingestion_store
+        from .cli import _run_managed_article_ingestion
 
-        # One acquisition stage feeds both PEAD and chain consumers. The adapter for
-        # subscribed research reads the shared catalog and never reconnects to IMAP.
-        data_store = get_data_ingestion_store()
-        try:
-            research_pipeline.ingest_configured(store=data_store)
-        finally:
-            data_store.close()
+        now = datetime.now(timezone.utc)
+        iso = now.isocalendar()
+        _run_managed_article_ingestion(
+            source_ids={"semianalysis"}, trigger_kind="scheduled",
+            trigger_ref=f"semianalysis-weekly:{iso.year}-W{iso.week:02d}")
     except Exception as exc:  # noqa: BLE001 - a publisher outage must not break the job
         log.warning("article source collection failed: %s", exc)
 
@@ -1126,13 +1122,28 @@ def _start_phase_e(*, run_once: bool = False) -> None:
     refresh_schedule = (calendar_cfg.get("refresh", {}) or {}).get("schedule", {}) or {}
     if refresh_schedule.get("enabled", False):
         def refresh_calendar() -> None:
-            from ..data.calendar_refresh import refresh_schedule_calendar
+            from ..data.calendar_refresh import enqueue_schedule_calendar_refresh
+            from ..data.persistent_queue import PersistentIngestionQueue
             from ..workflow.ownership import (dispatch_planned_calendar_events,
                                                dispatch_released_calendar_events,
                                                reconcile_calendar_trigger_versions,
                                                record_due_calendar_material_waits)
 
-            result = refresh_schedule_calendar()
+            now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            queue = PersistentIngestionQueue()
+            submitted = enqueue_schedule_calendar_refresh(
+                trigger_kind="scheduled", trigger_ref=f"calendar-tick:{now.isoformat()}",
+                now=now)
+            refreshed = []
+            for task in submitted:
+                worker_result = queue.run_one(task_id=task["task_id"])
+                current = queue.get(task["task_id"]) or {}
+                payload = (worker_result or {}).get("stdout", {})
+                status = (worker_result or {}).get("status") or current.get("status", "queued")
+                refreshed.extend(payload.get("sources", []))
+                if status not in {"succeeded", "no_change", "partial"}:
+                    refreshed.append({"source_id": task["source_id"], "status": status})
+            result = {"sources": refreshed, "refresh_owner": "persistent_queue"}
             log.info("schedule calendar refresh -> %s", result)
             try:
                 stale = reconcile_calendar_trigger_versions()

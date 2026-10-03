@@ -23,7 +23,8 @@ import os
 import re
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
@@ -817,6 +818,141 @@ def _embedded_json_documents(payload: bytes) -> list[Any]:
     return documents
 
 
+_AA_RSC_SCORE_FIELDS = {
+    "automationbench_aa": "automationBenchPartialScore",
+    "scicode": "scicode",
+    "critpt": "critpt",
+    "mmmu_pro": "mmmuPro",
+    "humanitys_last_exam": "hle",
+}
+
+
+def _approved_public_html_benchmarks() -> frozenset[str]:
+    """Return the exact public HTML benchmark routes approved for collection.
+
+    A global opt-in is not sufficient: each HTML route must also be present in
+    the operator-maintained, comma-separated route allowlist. This keeps a
+    LaunchAgent approval for a few public pages from implicitly authorizing
+    every future HTML route added to the catalog.
+    """
+    return frozenset(
+        item.strip() for item in
+        os.environ.get("ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS", "").split(",")
+        if item.strip()
+    )
+
+
+def _next_flight_chunks(payload: bytes) -> str:
+    """Decode JSON strings from the public Next.js Flight stream.
+
+    Artificial Analysis currently server-serializes its public chart model
+    collection as ``self.__next_f.push([1, <JSON string>])``.  Treat this as a
+    narrow structured transport: do not execute JavaScript, inspect rendered
+    pixels, or infer values from narrative summaries.
+    """
+    text = payload.decode("utf-8", errors="replace")
+    marker = "self.__next_f.push([1,"
+    decoder = json.JSONDecoder()
+    chunks: list[str] = []
+    offset = 0
+    while True:
+        found = text.find(marker, offset)
+        if found < 0:
+            break
+        start = found + len(marker)
+        while start < len(text) and text[start].isspace():
+            start += 1
+        if start >= len(text) or text[start] != '"':
+            offset = start + 1
+            continue
+        try:
+            chunk, consumed = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            offset = start + 1
+            continue
+        if isinstance(chunk, str):
+            chunks.append(chunk)
+        offset = start + consumed
+    return "".join(chunks)
+
+
+def _parse_aa_flight_models(payload: bytes, *, source_url: str, fetched_date: str,
+                            benchmark_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read benchmark scores from the page's explicit serialized model array."""
+    score_field = _AA_RSC_SCORE_FIELDS.get(benchmark_id)
+    if not score_field:
+        return [], {"record_count": 0, "parser_drift": True,
+                    "representation": "next_flight_initial_models"}
+    stream = _next_flight_chunks(payload)
+    marker = '"initialModels":'
+    start = stream.find(marker)
+    models: Any = []
+    if start >= 0:
+        try:
+            models, _consumed = json.JSONDecoder().raw_decode(stream[start + len(marker):])
+        except json.JSONDecodeError:
+            models = []
+    if not isinstance(models, list):
+        models = []
+
+    rows: list[dict[str, Any]] = []
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        model_name = model.get("name") or model.get("shortName") or model.get("slug")
+        creator = model.get("creator") if isinstance(model.get("creator"), dict) else {}
+        lab = _infer_lab_id(model_name, creator.get("name") or creator.get("slug"))
+        raw_score = model.get(score_field)
+        if not model_name or not lab or raw_score is None:
+            continue
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            continue
+        # The page's score fields use fractions in [0, 1], not percentage
+        # points. Reject unexpected units rather than silently rescaling them.
+        if not 0 <= score <= 1:
+            continue
+        model_id = _clean_model_id(model.get("slug") or model_name)
+        rows.append({
+            "lab_id": lab,
+            "model_id": model_id,
+            "model_release_id": _registered_model_release_id(
+                lab, model_id=model_id, model_name=model_name,
+                details_url=f"/models/{model_id}"),
+            "model_name": _display_model(model_name),
+            "benchmark_id": benchmark_id,
+            "score": round(score * 100.0, 6),
+            "score_as_of": fetched_date,
+            "source_type": "third_party_evaluation",
+            "measurement_scope": str(BENCHMARK_METHODS[benchmark_id].get(
+                "measurement_scope") or "model_capability_proxy"),
+            "source_transport": "public_html_next_flight",
+            "source_url": source_url,
+            "sample_size": None,
+            "confidence_low": None,
+            "confidence_high": None,
+            "method_version": BENCHMARK_METHODS[benchmark_id]["method_version"],
+            "task_set": BENCHMARK_METHODS[benchmark_id]["label"],
+            "metric_semantic": BENCHMARK_METHODS[benchmark_id]["score_semantics"],
+            "details_url": f"/models/{model_id}",
+            "reasoning_effort": _reasoning_effort_from_label(model_name),
+            "event_only": False,
+            "uniform_matrix": True,
+        })
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        unique[(row["lab_id"], row["model_id"])] = row
+    return list(unique.values()), {
+        "record_count": len(unique),
+        "parser_drift": not bool(unique),
+        "representation": "next_flight_initial_models",
+        "initial_model_count": len(models),
+        "score_field": score_field,
+        "structured_only": True,
+    }
+
+
 def _parse_structured_html_scores(payload: bytes, *, source_url: str, fetched_date: str,
                                   benchmark_id: str, measurement_scope: str,
                                   source_type: str = "third_party_evaluation",
@@ -842,6 +978,11 @@ def _parse_structured_html_scores(payload: bytes, *, source_url: str, fetched_da
         event_only=event_only,
     )
     rows.extend(aa_rows)
+    flight_rows, flight_meta = _parse_aa_flight_models(
+        payload, source_url=source_url, fetched_date=fetched_date,
+        benchmark_id=benchmark_id,
+    )
+    rows.extend(flight_rows)
     unique: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for row in rows:
         key = (row["lab_id"], row["model_id"], row["benchmark_id"], row["score_as_of"])
@@ -852,6 +993,12 @@ def _parse_structured_html_scores(payload: bytes, *, source_url: str, fetched_da
         "structured_only": True,
         "parser_drift": not bool(unique),
         "score_dataset_count": aa_meta.get("score_dataset_count", 0),
+        "flight_record_count": flight_meta.get("record_count", 0),
+        "flight_initial_model_count": flight_meta.get("initial_model_count", 0),
+        "flight_score_field": flight_meta.get("score_field", ""),
+        "flight_parser_drift": flight_meta.get("parser_drift", True),
+        "representation": ("jsonld_dataset" if aa_rows else
+                           flight_meta.get("representation", "")),
     }
 
 
@@ -1282,25 +1429,36 @@ class FrontierAICapabilityAdapter:
                 raise FrontierCapabilityError("invalid_public_routes_json") from exc
         return route
 
-    def _load_public(self, fetched_at: datetime) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
+    def _load_public(self, fetched_at: datetime, *,
+                     benchmarks: Sequence[str] | None = None
+                     ) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
         """Fetch registered public routes and normalize only observed scores."""
         self._public_request_count = 0
+        selected_benchmarks = tuple(dict.fromkeys(benchmarks or BENCHMARKS))
+        unknown_benchmarks = set(selected_benchmarks) - set(BENCHMARKS)
+        if unknown_benchmarks:
+            raise FrontierCapabilityError(
+                "unknown_public_benchmark_routes:" + ",".join(sorted(unknown_benchmarks)))
+        if not selected_benchmarks:
+            raise FrontierCapabilityError("empty_public_benchmark_route_scope")
         fetched_date = fetched_at.date().isoformat()
         models: dict[tuple[str, str], dict[str, Any]] = {}
         scores: list[dict[str, Any]] = []
         score_keys: set[tuple[str, str, str, str]] = set()
         sources: list[dict[str, Any]] = []
         route_errors: list[str] = []
-        for benchmark in BENCHMARKS:
+        for benchmark in selected_benchmarks:
             route = self._public_route(benchmark)
             url = str(route["url"])
             transport = str(route.get("transport") or "public_json")
             try:
                 if transport in {"public_html_structured", "official_html", "official_html_event"}:
-                    if os.environ.get("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "1").strip().casefold() in {"0", "false", "no"}:
+                    if os.environ.get("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "").strip().casefold() not in {"1", "true", "yes"}:
                         raise PermissionError(f"source_policy_blocked:{benchmark}")
-                    if os.environ.get("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "1").strip().casefold() in {"0", "false", "no"}:
+                    if os.environ.get("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "").strip().casefold() not in {"1", "true", "yes"}:
                         raise PermissionError(f"terms_or_robots_not_approved:{benchmark}")
+                    if benchmark not in _approved_public_html_benchmarks():
+                        raise PermissionError(f"public_html_route_not_authorized:{benchmark}")
                 if transport == "harbor_leaderboard_api":
                     request_body = json.dumps(route.get("body") or {}).encode("utf-8")
                     payload, headers = self._read_url(
@@ -1507,6 +1665,7 @@ class FrontierAICapabilityAdapter:
                     item["flagship_source"] = chosen_source
         payload = {"meta": {"version": PUBLIC_SOURCE_VERSION, "source": "official_public_benchmark_routes",
                              "as_of": fetched_at.isoformat(), "source_type": "third_party_evaluation",
+                             "benchmarks_checked": list(selected_benchmarks),
                              "sources": sources, "route_errors": route_errors},
                    "models": list(models.values()), "methods": [], "scores": scores}
         access_path = "public_routes" if sources else "public_routes_unavailable"
@@ -1516,14 +1675,16 @@ class FrontierAICapabilityAdapter:
                                                                         "request_count": self._public_request_count,
                                                                         "request_budget": PUBLIC_REQUEST_BUDGET}
 
-    def _load(self) -> tuple[bytes | dict[str, Any], str, str]:
+    def _load(self, *, benchmarks: Sequence[str] | None = None
+              ) -> tuple[bytes | dict[str, Any], str, str]:
         if self.fixture_path:
             return self.fixture_path.read_bytes(), str(self.fixture_path), "fixture"
         # Only the explicit value ``1`` opts into Artificial Analysis.  Values
         # such as ``0``/``false`` must not accidentally disable the free public
         # route because environment variables are strings.
         if self.public and os.environ.get("ATS_FRONTIER_AI_USE_AA", "").strip() != "1":
-            payload, source_url, access_path, _meta = self._load_public(self.clock().astimezone(timezone.utc))
+            payload, source_url, access_path, _meta = self._load_public(
+                self.clock().astimezone(timezone.utc), benchmarks=benchmarks)
             return payload, source_url, access_path
         if not self.api_key:
             return _default_payload(), AA_METHODOLOGY_URL, "aa_not_entitled_or_disabled"
@@ -1549,7 +1710,12 @@ class FrontierAICapabilityAdapter:
     def fetch(self, request: FetchRequest) -> AdapterBatch:
         fetched = self.clock().astimezone(timezone.utc)
         try:
-            payload, source_url, access_path = self._load()
+            requested_benchmarks = request.query_scope.get("benchmarks")
+            if requested_benchmarks is not None and (
+                    not isinstance(requested_benchmarks, list) or
+                    any(not isinstance(item, str) for item in requested_benchmarks)):
+                raise FrontierCapabilityError("benchmarks_scope_must_be_string_list")
+            payload, source_url, access_path = self._load(benchmarks=requested_benchmarks)
             records, entities, diagnostics = normalize_payload(payload, fetched_at=fetched, source_url=source_url)
             if not records and not entities:
                 return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id,
@@ -1622,12 +1788,20 @@ class PublicBenchmarkAdapter(FrontierAICapabilityAdapter):
 
 
 class OfficialLabReleaseAdapter(FrontierAICapabilityAdapter):
-    """Parse an allowed Lab release/model-card slice with identical semantics.
+    """Discover public model cards under exact, allowlisted Lab namespaces.
 
-    This adapter is intentionally opt-in (``ATS_FRONTIER_AI_CAPABILITY_LAB_FIXTURE``)
-    and never replaces a third-party score.  Its dimensions retain
-    ``source_type=lab_self_reported`` so source priority remains auditable.
+    The Hub is used only as a machine-readable index for repositories owned by
+    the named publisher organizations. Repository creation time is not treated
+    as a model release date, and model-card identity never becomes a benchmark
+    score. Fixtures remain supported for parser and replay tests.
     """
+
+    OFFICIAL_HUB_ORGS = (
+        ("OPENAI", "openai"), ("ANTHROPIC", "Anthropic"),
+        ("GOOGLE", "google"), ("XAI", "xai-org"),
+        ("DEEPSEEK", "deepseek-ai"), ("MOONSHOT", "moonshotai"),
+        ("TENCENT", "tencent"), ("ZAI", "zai-org"), ("ALIBABA", "Qwen"),
+    )
 
     def __init__(self, *, fixture_path: str | Path | None = None, **kwargs: Any):
         resolved_fixture = fixture_path or os.environ.get("ATS_FRONTIER_AI_CAPABILITY_LAB_FIXTURE")
@@ -1639,19 +1813,60 @@ class OfficialLabReleaseAdapter(FrontierAICapabilityAdapter):
             kwargs.setdefault("api_key", "")
         super().__init__(fixture_path=resolved_fixture, **kwargs)
 
-    def _load(self) -> tuple[bytes | dict[str, Any], str, str]:
-        """Convert release/model-card rows into the shared model/score contract.
-
-        Official fixtures intentionally contain identity-only rows (aliases,
-        withdrawals and missing self-reports). They still become model entities;
-        only rows with a numeric benchmark score become observations.
-        """
+    def _load(self, *, benchmarks: Sequence[str] | None = None
+              ) -> tuple[bytes | dict[str, Any], str, str]:
+        """Fetch allowlisted public Lab model-card identities, or parse a fixture."""
         if self.fixture_path is None:
-            return ({"meta": {"version": "v1", "source": "official_lab_public_release_unavailable",
-                               "source_type": "lab_self_reported"},
-                     "models": [], "scores": []},
-                    "public://frontier-lab-releases", "official_lab_no_coverage")
-        payload, source_url, access_path = super()._load()
+            models: list[dict[str, Any]] = []
+            source_checks: list[dict[str, Any]] = []
+            errors: list[str] = []
+            for lab_id, org in self.OFFICIAL_HUB_ORGS:
+                query = urlencode({"author": org, "sort": "createdAt", "direction": "-1", "limit": "100"})
+                url = f"https://huggingface.co/api/models?{query}"
+                try:
+                    body, headers = self._read_url(url, headers={"Accept": "application/json"})
+                    rows = json.loads(body.decode("utf-8"))
+                    if not isinstance(rows, list):
+                        raise FrontierCapabilityError(f"official_hub_schema_drift:{org}")
+                    accepted = 0
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        repo_id = str(row.get("id") or "").strip()
+                        if not repo_id or repo_id.split("/", 1)[0].casefold() != org.casefold():
+                            continue
+                        if bool(row.get("gated")) or bool(row.get("private")) or bool(row.get("disabled")):
+                            continue
+                        model_name = repo_id.split("/", 1)[-1]
+                        models.append({
+                            "lab_id": lab_id, "model_id": repo_id,
+                            "display_name": model_name, "available": True,
+                            "flagship": False,
+                            "flagship_source": "official_publisher_model_card",
+                            "identity_state": "public_official_model_card",
+                            "model_release_id": str(row.get("sha") or repo_id),
+                            "lineage": repo_id,
+                            "source_url": f"https://huggingface.co/{repo_id}",
+                        })
+                        accepted += 1
+                    source_checks.append({"lab_id": lab_id, "organization": org,
+                                          "url": url, "status": "ok", "public_models": accepted,
+                                          "etag": headers.get("etag")})
+                except PermissionError as exc:
+                    errors.append(f"{lab_id}:{exc}")
+                    source_checks.append({"lab_id": lab_id, "organization": org,
+                                          "url": url, "status": "access_required", "error": str(exc)})
+                except (ConnectionError, RuntimeError, FrontierCapabilityError, json.JSONDecodeError) as exc:
+                    errors.append(f"{lab_id}:{exc}")
+                    source_checks.append({"lab_id": lab_id, "organization": org,
+                                          "url": url, "status": "unavailable", "error": str(exc)})
+            payload = {"meta": {"version": "official_hub_model_cards/v1",
+                                "source": "official_lab_hub_namespaces",
+                                "source_type": "lab_self_reported",
+                                "sources": source_checks, "route_errors": errors},
+                       "models": models, "scores": []}
+            return payload, "https://huggingface.co/api/models", "official_hub_model_cards"
+        payload, source_url, access_path = super()._load(benchmarks=benchmarks)
         if isinstance(payload, bytes):
             try:
                 decoded = json.loads(payload.decode("utf-8"))
@@ -1706,3 +1921,86 @@ class OfficialLabReleaseAdapter(FrontierAICapabilityAdapter):
         return {"meta": {"source": "official_lab_release", "source_type": "lab_self_reported",
                           "as_of": decoded.get("as_of")},
                 "models": models, "scores": scores}, source_url, "official_lab_release"
+
+    def fetch(self, request: FetchRequest) -> AdapterBatch:
+        # Fixture mode retains the historical benchmark-score parser. The live
+        # model-card index writes a separate catalog indicator, never synthetic
+        # benchmark scores into frontier_ai_capability_benchmarks.
+        if self.fixture_path is not None:
+            return super().fetch(request)
+        fetched = self.clock().astimezone(timezone.utc)
+        if request.dataset_id != "frontier_ai_public_model_cards":
+            return AdapterBatch(
+                source_id=request.source_id, dataset_id=request.dataset_id,
+                status=IngestionStatus.METHODOLOGY_DRIFT, fetched_at=fetched,
+                failures=[AdapterFailure(
+                    status=IngestionStatus.METHODOLOGY_DRIFT,
+                    message="official_model_card_dataset_mismatch: expected frontier_ai_public_model_cards",
+                )],
+            )
+        try:
+            payload, source_url, access_path = self._load()
+            models = payload.get("models") or []
+            if not models:
+                return AdapterBatch(
+                    source_id=request.source_id, dataset_id=request.dataset_id,
+                    status=IngestionStatus.NO_COVERAGE, fetched_at=fetched,
+                    failures=[AdapterFailure(status=IngestionStatus.NO_COVERAGE,
+                                             message="no_public_official_model_cards")],
+                    provider_metadata={**payload.get("meta", {}), "access_path": access_path,
+                                       "source_url": source_url},
+                )
+            entities: list[ReferenceEntityInput] = []
+            records: list[NativeRecord] = []
+            for model in models:
+                lab = _lab_id(model.get("lab_id"))
+                model_id = str(model.get("model_id") or "").strip()
+                if not model_id:
+                    continue
+                entity_id = f"FRONTIER_MODEL:{lab}:{model_id}".upper()
+                entities.append(ReferenceEntityInput(
+                    entity_id=entity_id, kind="frontier_model",
+                    canonical_name=str(model.get("display_name") or model_id), aliases=[],
+                    metadata={**model, "source_type": "lab_self_reported"},
+                ))
+                records.append(NativeRecord(
+                    entity_id=entity_id, provider_field="public_model_card",
+                    period=fetched.date().isoformat(), value=1, unit="count",
+                    period_basis="public_model_card_observed",
+                    dimensions={"lab_id": lab, "model_id": model_id,
+                                "model_release_id": str(model.get("model_release_id") or model_id),
+                                "identity_state": "public_official_model_card", "flagship": False,
+                                "source_type": "lab_self_reported",
+                                "source_url": str(model.get("source_url") or "")},
+                    raw={"model_card": model, "source_url": model.get("source_url") or ""},
+                ))
+            if not records:
+                raise FrontierCapabilityError("official_model_cards_missing_identity")
+            digest = _digest(payload)
+            artifact_key = f"frontier-lab-cards:{digest[:16]}"
+            records = [record.model_copy(update={"slice_key": artifact_key}) for record in records]
+            artifact = AdapterArtifact(
+                artifact_key=artifact_key, payload=payload, source_url=source_url,
+                source_version=f"v1:{digest}", retention="query_slice", storage_mode="full",
+                pointer=source_url, metadata={"access_path": access_path,
+                                              "request_count": len(self.OFFICIAL_HUB_ORGS),
+                                              "route_errors": payload.get("meta", {}).get("route_errors", [])},
+            )
+            return AdapterBatch(
+                source_id=request.source_id, dataset_id=request.dataset_id,
+                status=IngestionStatus.SUCCEEDED, fetched_at=fetched, records=records,
+                artifacts=[artifact], entities=entities,
+                provider_metadata={**payload.get("meta", {}), "access_path": access_path,
+                                   "source_url": source_url, "model_count": len(records),
+                                   "request_count": len(self.OFFICIAL_HUB_ORGS),
+                                   "request_budget": {"requests_per_run": len(self.OFFICIAL_HUB_ORGS)},
+                                   "release_date_inferred": False, "benchmark_scores_inferred": False},
+            )
+        except PermissionError as exc:
+            return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id,
+                                status=IngestionStatus.UNAUTHORIZED, fetched_at=fetched,
+                                failures=[AdapterFailure(status=IngestionStatus.UNAUTHORIZED, message=str(exc))])
+        except (ConnectionError, FrontierCapabilityError) as exc:
+            return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id,
+                                status=IngestionStatus.PARSE_FAILED, fetched_at=fetched,
+                                failures=[AdapterFailure(status=IngestionStatus.PARSE_FAILED, message=str(exc))])

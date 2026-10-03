@@ -1,6 +1,6 @@
-# Unstructured-domain extensions to the unified catalog.
-# Detailed third-party and news registries are in ``sources.yaml`` and
-# ``news_sources.yaml`` in this directory.
+# Unstructured-domain persistent source registry. This is the authoritative
+# configuration for new governed ingestion paths. Legacy source files remain
+# compatibility references only and are not loaded by the governed article path.
 version: 1
 legacy_registries:
   evidence: sources.yaml
@@ -14,17 +14,43 @@ document_types:
   - news
   - deck
   - research_article
+  - regulatory_filing
+  - earnings_transcript
+  - company_release
+  - news_item
+record_types:
+  - sec_filing_metadata
 admission:
   require_source_url: true
   quarantine_on_short_body: true
 retention:
   default: source_policy
-# 这些条目是来源级发布的配置索引；详细的抓取参数由同目录的
-# sources.yaml 与 news_sources.yaml 持有。status 仅是初始安全模式，
-# 实际是否可发布必须由 source-acceptance 的数据质量报告决定。
+datasets:
+  shared_documents:
+    document_types: [research_article, news_item]
+    sources: [factset_earnings_insight_doc, trendforce_news, semianalysis,
+              ibkr_news, yfinance_live_news]
+  sec_filing_index:
+    record_types: [sec_filing_metadata]
+    sources: [defeatbeta_sec_filing_index]
+  sec_filing_documents:
+    document_types: [regulatory_filing, company_release]
+    sources: [sec_edgar_filing_body]
+  earnings_transcripts:
+    document_types: [earnings_transcript]
+    sources: [defeatbeta_earnings_transcript]
+  ai_hardware_knowledge:
+    document_types: [research_article]
+    sources: [ai_hardware_knowledge_corpus]
+# `ingestion` holds the stable article-adapter contract previously read from
+# sources.yaml. Legacy files remain unchanged for legacy callers; governed
+# ingestion resolves only this registry. Status is configuration, not proof of
+# current permission, freshness, or release eligibility.
 sources:
   factset_earnings_insight_doc:
     domain: unstructured
+    source_kind: article
+    datasets: [shared_documents]
     provider: FactSet
     adapter: factset_earnings_insight
     status: registered
@@ -34,19 +60,37 @@ sources:
       timeout_seconds: 60
       max_attempts: 3
     policy:
-      registry: sources.yaml#article_sources.factset_earnings_insight_doc
       stable_url: https://www.factset.com/earningsinsight
+      permission: licensed_internal_research
+      retention: immutable_licensed_internal_pdf
+      fallback: {}
       expected_mime: application/pdf
-      freshness_days: 10
       usage: internal_only
       artifact_retention: licensed_internal_research
       preserve_final_url: true
       preserve_http_validators: [etag, last_modified]
       dedup_keys: [pdf_sha256]
       release_partitions: [document]
+    ingestion:
+      entity: FACTSET
+      stance: regulator
+      doc_type: research_article
+      pages: 1
+      max_per_run: 1
+      min_body_chars: 1000
+      match: []
+      params:
+        stable_url: https://www.factset.com/earningsinsight
+        timeout_seconds: 60
+        max_attempts: 3
+        expected_mime: application/pdf
+        artifact_retention: licensed_internal_research
+        usage: internal_only
 
   trendforce_news:
     domain: unstructured
+    source_kind: article
+    datasets: [shared_documents]
     provider: TrendForce
     adapter: trendforce
     status: registered
@@ -55,24 +99,59 @@ sources:
       max_pages: 5
       max_body_requests: 16
     policy:
-      registry: sources.yaml#article_sources.trendforce_news
       scope: article_index
+      permission: public_full_body_only
+      usage: internal_research
+      retention: immutable_article_versions
+      fallback: {}
+      freshness_days: 10
       minimum_body_chars: 800
       max_body_attempts: 2
       lookback_days: 14
-      fallback_mode: legacy
+      fallback_mode: none
       separate_dataset: industry_dram_contract_price
+    ingestion:
+      entity: TRENDFORCE
+      stance: regulator
+      doc_type: article
+      pages: 5
+      max_per_run: 16
+      min_body_chars: 800
+      match: [cowos, copos, emib, packaging, hbm, dram, nand, memory, foundry,
+              tsmc, wafer, samsung, sk-hynix, hynix, micron, intel, nvidia,
+              nanometer, 2nm, 3nm, advanced, osat, ase, capacity, yield,
+              optical, optics, transceiver, laser, photonic, photonics, cpo,
+              co-packaged, npo, dsp, retimer, aec, interconnect, 800g, 1.6t, 3.2t,
+              eml, vcsel, inp, lumentum, coherent, credo, marvell, broadcom,
+              gpu, asic, xpu, accelerator, amd, instinct, blackwell, rubin,
+              tpu, trainium, inference, hyperscaler]
+      params: {}
   semianalysis:
     domain: unstructured
+    source_kind: article
+    datasets: [shared_documents]
+    legacy_aliases: [SemiAnalysis]
     provider: SemiAnalysis
     adapter: semianalysis
     status: registered
     cadence: weekly
     request_budget:
-      max_items_per_run: 4
+      max_items_per_run: 32
+    transport:
+      imap:
+        folder: INBOX
+        overlap_uids: 20
+        senders:
+          - {name: SemiAnalysis, email: semianalysis@substack.com}
+      research_feeds:
+        - {name: SemiAnalysis, url: https://semianalysis.com/feed/}
     policy:
-      registry: sources.yaml#article_sources.semianalysis
       acquisition: research_imap_and_rss
+      permission: subscriber_email_or_public_preview
+      usage: internal_research
+      retention: immutable_newsletter_versions
+      fallback: {}
+      freshness_days: 10
       minimum_body_chars: 2000
       lookback_days: 30
       dedup_keys: [message_id_or_uid, canonical_url, content_hash]
@@ -81,9 +160,20 @@ sources:
       # 标签的研究输入发布；它不能被后续产品误读为全文，也不能覆盖未来取得的完整版本。
       allow_partial_bodies: true
       partial_body_disclosure: subscriber_preview_or_paywall_boundary
-      fallback_mode: legacy
+      fallback_mode: none
+    ingestion:
+      entity: SEMIANALYSIS
+      stance: regulator
+      doc_type: research_article
+      pages: 1
+      max_per_run: 4
+      min_body_chars: 2000
+      match: []
+      params: {}
   ibkr_news:
     domain: unstructured
+    source_kind: article
+    datasets: [shared_documents]
     provider: IBKR News
     adapter: ibkr_news
     status: registered
@@ -93,8 +183,11 @@ sources:
       slice_days: 3
       max_body_requests: 10
     policy:
-      registry: sources.yaml#article_sources.ibkr_news
       access: tws_read_only
+      permission: tws_news_entitlement
+      usage: internal_research
+      retention: immutable_broker_news_versions
+      freshness_policy: latest_verified_upstream_revision
       minimum_body_chars: 600
       lookback_days: 7
       symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
@@ -113,8 +206,27 @@ sources:
         activate_on: [unreachable, tws_unreachable, unauthorized, provider_unavailable,
                       rate_limited, request_rejected]
       fallback_mode: yfinance_live_news
+    ingestion:
+      entity: DOWJONES
+      stance: regulator
+      doc_type: article
+      pages: 3
+      max_per_run: 10
+      min_body_chars: 600
+      match: [financing, finance, guarantee, backstop, prepay, prepayment, stake,
+              equity, invest, investment, vehicle, spv, lending, loan, debt,
+              apollo, blackstone, blackrock, brookfield, kkr, "goldman sachs",
+              supply, agreement, deal, pact, partnership, commitment, order,
+              capacity, gpu, asic, xpu, accelerator, chip, hbm, foundry, capex]
+      params:
+        lookback_days: 7
+        provider_lookup_attempts: 3
+        provider_lookup_retry_seconds: 1
+        symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
   yfinance_live_news:
     domain: unstructured
+    source_kind: article
+    datasets: [shared_documents]
     provider: Yahoo Finance via yfinance
     adapter: yfinance_live_news
     status: registered
@@ -123,8 +235,12 @@ sources:
       max_items_per_entity: 10
       max_body_requests: 24
     policy:
-      registry: sources.yaml#article_sources.yfinance_live_news
       acquisition: yfinance_ticker_news
+      permission: public_pending_human_review
+      usage: internal_research_after_review
+      retention: candidate_until_review_then_immutable
+      fallback: {}
+      freshness_policy: event_driven_official_disclosure
       entities: dynamic_pead_targets
       minimum_body_chars: 800
       lookback_days: 2
@@ -137,3 +253,104 @@ sources:
       fallback_for: ibkr_news
       fallback_mode: none
       release_requires_human_title_url_review: true
+    ingestion:
+      entity: YAHOO_FINANCE
+      stance: regulator
+      doc_type: news
+      pages: 1
+      max_per_run: 24
+      min_body_chars: 800
+      match: []
+      params: {}
+  defeatbeta_sec_filing_index:
+    domain: unstructured
+    source_kind: fixed_index
+    datasets: [sec_filing_index]
+    provider: defeatbeta/yahoo-finance-data
+    adapter: defeatbeta_sec_index
+    status: registered
+    cadence: daily
+    request_budget: {max_rows_per_run: 160, max_rows_per_symbol: 4, max_requests_per_run: 3, timeout_seconds: 30}
+    policy:
+      repo: defeatbeta/yahoo-finance-data
+      market: US
+      excluded_entities: [005930.KS]
+      permission: odc_by_research_subject_to_upstream_terms
+      file: data/US/stock_sec_filing.parquet
+      spec: spec.json
+      immutable_revision_required: true
+      source_role: discovery_metadata_only
+      forms: [10-K, 10-Q, 8-K, 20-F, 6-K]
+      allowed_filing_host: www.sec.gov
+      fallback: none
+      usage: internal_research_subject_to_upstream_terms
+      retention: immutable_metadata_snapshot
+      freshness_policy: latest_verified_upstream_revision
+  sec_edgar_filing_body:
+    domain: unstructured
+    source_kind: official_body
+    datasets: [sec_filing_documents]
+    provider: SEC EDGAR
+    adapter: sec_official_by_accession
+    status: registered
+    cadence: event_from_index
+    request_budget: {max_documents_per_run: 20, max_requests_per_run: 20, timeout_seconds: 30}
+    policy:
+      discovery_source: defeatbeta_sec_filing_index
+      permission: public_official_disclosure
+      require_accession: true
+      require_official_url: true
+      allowed_hosts: [www.sec.gov, www.sec.gov:443]
+      fallback: none
+      usage: public_official_disclosure
+      retention: immutable_official_body
+      freshness_days: 3
+  defeatbeta_earnings_transcript:
+    domain: unstructured
+    source_kind: fixed_transcript
+    datasets: [earnings_transcripts]
+    provider: defeatbeta/yahoo-finance-data
+    adapter: defeatbeta_transcript
+    status: registered
+    cadence: daily
+    request_budget: {max_rows_per_run: 160, max_rows_per_symbol: 4, max_requests_per_run: 3, timeout_seconds: 30}
+    policy:
+      repo: defeatbeta/yahoo-finance-data
+      market: US
+      excluded_entities: [005930.KS]
+      permission: odc_by_research_subject_to_upstream_terms
+      file: data/US/stock_earning_call_transcripts.parquet
+      spec: spec.json
+      immutable_revision_required: true
+      required_keys: [symbol, fiscal_year, fiscal_quarter, report_date, transcripts]
+      require_speaker_segments: true
+      fallback: none
+      usage: internal_research_subject_to_upstream_terms
+      retention: immutable_transcript_snapshot
+      freshness_days: 3
+  ai_hardware_knowledge_corpus:
+    domain: unstructured
+    source_kind: repository_corpus
+    datasets: [ai_hardware_knowledge]
+    provider: repository
+    adapter: versioned_knowledge_files
+    status: registered
+    cadence: on_repository_revision
+    request_budget: {max_files_per_run: 10, max_external_requests_per_run: 0}
+    policy:
+      manifest: config/sectors/ai_hardware.yaml
+      permission: repository_owned
+      members:
+        - config/knowledge/Token经济.md
+        - config/knowledge/云服务.md
+        - config/knowledge/电力冷却.md
+        - config/knowledge/光互联.md
+        - config/knowledge/铜连接.md
+        - config/knowledge/芯片设计.md
+        - config/knowledge/HBM存储.md
+        - config/knowledge/先进封装代工.md
+        - config/knowledge/半导体设备.md
+        - config/knowledge/资本开支链.md
+      fallback: none
+      usage: repository_curated
+      retention: git_history_and_content_hash

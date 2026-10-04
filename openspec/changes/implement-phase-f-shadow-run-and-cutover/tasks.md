@@ -17,8 +17,8 @@
 - [x] 1.3 将 `scripts/verify_dataflow_qualification.py` 的机制探针移植为 pytest：追加式写入与 `UPDATE`/`DELETE` 拒绝、只读连接拒写、`max_age_days` 过期、manifest 与 dependency 指纹漂移、scope 精确等值隔离、跨消费者撤销隔离、SEC optional 非阻塞例外与「例外不掩盖其他阻塞」，验证 `tests/test_dataflow_assurance.py` 覆盖全部 reason code 分支
 - [x] 1.4 补 `ats.data.assurance` 与脚本的行为一致性测试（同 fixture 下逐项比对资格结论与缺失清单），验证不一致时以 specs 为准并定位差异
 - [x] 1.5 枚举受指纹约束的完整文件面并落成机器可读清单（含 manifest 自身摘要），验证「切流动作改动受约束文件」与「修改消费者契约清单」两例各判失败并列出受影响消费者
-- [ ] 1.6 在 `ats.workflow.architecture_guards` 增加切流不变量扫描：绕过切流控制直接改路由、绕过下单仲裁直接提交真实订单、以总开关覆盖未通过消费者，验证各有一例判失败与一例放行
-- [ ] 1.7 为守卫的切流类豁免接入既有「例外须声明未来收敛阶段」校验，验证未声明阶段的豁免被判失败
+- [x] 1.6 新增 `ats.workflow.cutover_guards` 切流不变量扫描（独立模块而非并入 architecture_guards：切流路由分布在 data/execution/workflow/runtime，非 agent 域，且豁免词汇表需含 Phase F 之后的阶段）：绕过切流控制直接改路由、绕过下单仲裁直接提交真实订单、以总开关覆盖未通过消费者，验证各有一例判失败与一例放行
+- [x] 1.7 为守卫的切流类豁免接入「例外须声明未来收敛阶段」校验（`validate_cutover_exceptions`，豁免默认空集、Phase F 为活动阶段、词汇表延展至 Phase G 供后续声明），验证未声明阶段或已在活动阶段的豁免均被判失败
 - [ ] 1.8 在 `docs/validation/` 记录本阶段基线：全量测试计数、守卫例外数量、受指纹文件清单与本组新增能力，验证文档数字与实测一致
 
 ## 2. 交易路由代次、下单能力仲裁与授权生命周期（代码冻结点 A）

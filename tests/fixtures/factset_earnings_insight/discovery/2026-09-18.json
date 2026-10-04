@@ -1,0 +1,1646 @@
+{
+  "pdf_hash": "f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08",
+  "policy_hash": "a70d4f6613e43556320ed05a7598ccae40498b6af002a3acf579ed32afa42d29",
+  "report_date": "2026-09-18",
+  "discovery_only": true,
+  "images": [
+    {
+      "page_number": 1,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 1,
+      "image_number": 2,
+      "image_hash": "53c9383e7ec583ffcb1dee5ce69d8d7419517af35865e85be3f26518259f0631",
+      "title": "S&P 500 Change in Forward 12-Month EPS vs. Change in Price: 10 Yrs.",
+      "title_region": [
+        0.10586080586080586,
+        0.022188603126575897,
+        0.8934065934065935,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 2,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 3,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 3,
+      "image_number": 2,
+      "image_hash": "54dbe8cf9130f23e40f4e2a8392cacf58ed592b557052ef044930dcd5c0e3476",
+      "title": "# of S&P 500 Earnings Calls Citing Al: 10-Year",
+      "title_region": [
+        0.2326007326007326,
+        0.022188603126575897,
+        0.7666666666666667,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 4,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 4,
+      "image_number": 2,
+      "image_hash": "ecc0af68e061e9a11722d088521ae157699011fc3141b4d866ecaa30f58e3c1b",
+      "title": "# of S&P 500 Earnings Calls Citing Al: Q226",
+      "title_region": [
+        0.24578754578754577,
+        0.0226928895612708,
+        0.7531135531135531,
+        0.05143721633888049
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q226",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 4,
+      "image_number": 3,
+      "image_hash": "bf61bbcfbfd14d53cc1a9b024ca20432d01ee8daf5bf33db6dbce80c2e16762c",
+      "title": "% of S&P 500 Earnings Calls Citing Al: Q226",
+      "title_region": [
+        0.24175824175824176,
+        0.0226928895612708,
+        0.7564102564102564,
+        0.05143721633888049
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q226",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 5,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 5,
+      "image_number": 2,
+      "image_hash": "8d965fa4ca0bc2c8e8aa3a1ed3a92e51294b646c803f63a7ecadd14e2a4c681b",
+      "title": "S&P 500 Cos. Citing “Al\" on Q226 Earnings Calls: Average Price",
+      "title_region": [
+        0.1443223443223443,
+        0.0226928895612708,
+        0.8553113553113553,
+        0.05143721633888049
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q226",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 6,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 7,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 8,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 9,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 10,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 11,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 12,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 13,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 13,
+      "image_number": 2,
+      "image_hash": "8a37815ccbaf036bcee9dc48eacebf38359349fe2dfd6667ee7b7293f15df010",
+      "title": "S&P 500 Earnings Above, In-Line, Below Estimates: Q2 2026",
+      "title_region": [
+        0.16483516483516483,
+        0.0226928895612708,
+        0.8344322344322345,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_scorecard"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 13,
+      "image_number": 3,
+      "image_hash": "684d8d141a950fd4fa5f7e788d889ae03a358fde6445d7a39c25fec0c0300a24",
+      "title": "S&P 500 Revenues Above, In-Line, Below Estimates: Q2 2026",
+      "title_region": [
+        0.15934065934065933,
+        0.0226928895612708,
+        0.8395604395604396,
+        0.049924357034795766
+      ],
+      "groups": [
+        "earnings_revenue_scorecard"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 14,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 14,
+      "image_number": 2,
+      "image_hash": "f05c3fa58c4027375892a4df150413ec2de420d8fdf8da641619d7b935bf7443",
+      "title": "S&P 500 Sector-Level Earnings Surprise %: Q2 2026",
+      "title_region": [
+        0.20915750915750916,
+        0.0226928895612708,
+        0.7893772893772893,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_surprise"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 14,
+      "image_number": 3,
+      "image_hash": "4c981e9736ed96075f27e64dacfa7b1ca5a04cfab959163c72e5d767a7856a6e",
+      "title": "S&P 500 Sector-Level Revenue Surprise %: Q2 2026",
+      "title_region": [
+        0.21025641025641026,
+        0.0226928895612708,
+        0.7882783882783883,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_surprise"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 15,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 15,
+      "image_number": 2,
+      "image_hash": "ed0d53f06d28a05bff5831a2a371e952bbe6ca661dcba31199849e963e08ae8c",
+      "title": "S&P 500 EPS Surprise % vs. Price %: Q2 2026",
+      "title_region": [
+        0.24432234432234431,
+        0.022188603126575897,
+        0.7542124542124542,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 15,
+      "image_number": 3,
+      "image_hash": "ca5b8e3ae8c7341ce22a059e42adf05b0d8945cb80dfbecffa9f08683e1241dc",
+      "title": "S&P 500 EPS Surprise vs. Avg. Price Change %",
+      "title_region": [
+        0.23772893772893772,
+        0.022188603126575897,
+        0.7604395604395604,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 16,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 16,
+      "image_number": 2,
+      "image_hash": "63dd566b12f1538b7651efcecc496e96e6fd4319b2bb1df2d40fb1f7b3e0a915",
+      "title": "S&P 500 Actual EPS Surprise %: Top 10 Q2 Actual EPS Surprises",
+      "title_region": [
+        0.13882783882783883,
+        0.022188603126575897,
+        0.8608058608058609,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 16,
+      "image_number": 3,
+      "image_hash": "c0fb97e60781510133f369804f5ca9d94b54087981150c62217d4e6f6b9986bb",
+      "title": "S&P 500 Actual EPS Surprise %: Bottom 10 Q2 Actual EPS Surprises",
+      "title_region": [
+        0.11794871794871795,
+        0.0226928895612708,
+        0.8805860805860806,
+        0.05143721633888049
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 17,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 17,
+      "image_number": 2,
+      "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+      "title": "S&P 500 Earnings Growth (Y/Y): Q2 2026",
+      "title_region": [
+        0.27289377289377287,
+        0.0226928895612708,
+        0.7256410256410256,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 17,
+      "image_number": 3,
+      "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+      "title": "S&P 500 Revenue Growth (Y/Y): Q2 2026",
+      "title_region": [
+        0.2750915750915751,
+        0.0226928895612708,
+        0.7245421245421245,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 18,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 18,
+      "image_number": 2,
+      "image_hash": "6f90067b7feb38265dcf11b1a9f61918a5a9b3fd5e22546d2ea771ab467e91d3",
+      "title": "S&P 500 Earnings Growth (Y/Y): Q2 2026",
+      "title_region": [
+        0.27362637362637365,
+        0.0226928895612708,
+        0.7256410256410256,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 18,
+      "image_number": 3,
+      "image_hash": "81634273c895b764345ef784fc2dc4ac054dc953db227cad72b319f17f01fd19",
+      "title": "S&P 500 Revenue Growth (Y/Y): Q2 2026",
+      "title_region": [
+        0.27582417582417584,
+        0.0226928895612708,
+        0.7245421245421245,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q2 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 19,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 19,
+      "image_number": 2,
+      "image_hash": "9253669a35d3ef6fe330f15f3cdfeef42fb7bd1162f1fac8a796594ba3624583",
+      "title": "S&P 500 Net Profit Margins: Q226 vs. Q225",
+      "title_region": [
+        0.2619047619047619,
+        0.0226928895612708,
+        0.736996336996337,
+        0.05143721633888049
+      ],
+      "groups": [
+        "net_profit_margin"
+      ],
+      "periods": [
+        "2026Q2"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q226",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 19,
+      "image_number": 3,
+      "image_hash": "d3a0c6e271dc69ad7898f7147cd04fd14ba3f096034119630fa465d742315836",
+      "title": "S&P 500: % of Cos. With Increase or Decrease in Net Profit Margin",
+      "title_region": [
+        0.12967032967032968,
+        0.0226928895612708,
+        0.8626373626373627,
+        0.05143721633888049
+      ],
+      "groups": [
+        "net_profit_margin"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 20,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 20,
+      "image_number": 2,
+      "image_hash": "cd137172f2f0641fa303cdb56817e7be5277cb5b9cf29b29fef0b76ff5621a44",
+      "title": "Number (#) of S&P 500 Cos. with Q3 Positive & Negative Guidance",
+      "title_region": [
+        0.13186813186813187,
+        0.0226928895612708,
+        0.8673992673992674,
+        0.05143721633888049
+      ],
+      "groups": [
+        "eps_guidance"
+      ],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q3 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 20,
+      "image_number": 3,
+      "image_hash": "d2cdcfddf6b97832c75b97fb38b414c8fb5006a96eff8c5955c4375cc7fc7647",
+      "title": "Percentage (%) of S&P 500 Cos. with Q3 Positive & Negative Guidance",
+      "title_region": [
+        0.11062271062271062,
+        0.0226928895612708,
+        0.8904761904761904,
+        0.05143721633888049
+      ],
+      "groups": [
+        "eps_guidance"
+      ],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q3 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 21,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 21,
+      "image_number": 2,
+      "image_hash": "637fb0520489bc17e8bc01294a4d0d5c2b855d511bb5c8aa7db4471a8645dffd",
+      "title": "Upward Change in Q3 EPS (Trailing 4 Weeks): Top 10 S&P 500 Cos.",
+      "title_region": [
+        0.12747252747252746,
+        0.022188603126575897,
+        0.8725274725274725,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q3 2026",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 21,
+      "image_number": 3,
+      "image_hash": "ec42d90dcb1abb15014f8e9366801e66b5f02f9a739025aa92475fd2681d83ae",
+      "title": "Downward Change in Q3 EPS (Trailing 4-Weeks): Top 10 S&P 500 Cos.",
+      "title_region": [
+        0.1043956043956044,
+        0.017650025214321734,
+        0.8838827838827839,
+        0.04740292486132123
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q3 2026",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 22,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 22,
+      "image_number": 2,
+      "image_hash": "a679bf4dfeb5fe4c4772f8087e57cb659e3511ca5895a9c7e08e9be9433f2146",
+      "title": "S&P 500 Earnings Growth (Y/Y): Q3 2026",
+      "title_region": [
+        0.27289377289377287,
+        0.022188603126575897,
+        0.7256410256410256,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q3 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 22,
+      "image_number": 3,
+      "image_hash": "92d457a639380b7ba3419b6da14163d8020c916813310c568f5f4ec6d5fd9800",
+      "title": "S&P 500 Revenue Growth (Y/Y): Q3 2026",
+      "title_region": [
+        0.2750915750915751,
+        0.022188603126575897,
+        0.7245421245421245,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q3 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 23,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 23,
+      "image_number": 2,
+      "image_hash": "290011ee123803f604bcc06e5d126e38320f073d3c169eb92a60eb43b5116fdf",
+      "title": "Number (#) of S&P 500 Cos. with FY Positive & Negative Guidance",
+      "title_region": [
+        0.13296703296703297,
+        0.0226928895612708,
+        0.8663003663003663,
+        0.05143721633888049
+      ],
+      "groups": [
+        "eps_guidance"
+      ],
+      "periods": [
+        "2026",
+        "2027"
+      ],
+      "period_basis": "mixed_fiscal_years",
+      "period_evidence": "FY 2026 / 2027",
+      "status": "located",
+      "reasons": [
+        "mixed_fiscal_cohort_not_separable"
+      ]
+    },
+    {
+      "page_number": 23,
+      "image_number": 3,
+      "image_hash": "d31811385b2fbbcda2fa1bfcec721944e2ac84799d49f35e0a0aec37f1d05703",
+      "title": "Percentage (%) of S&P 500 Cos. with FY Positive & Negative Guidance",
+      "title_region": [
+        0.11062271062271062,
+        0.0226928895612708,
+        0.8893772893772893,
+        0.05143721633888049
+      ],
+      "groups": [
+        "eps_guidance"
+      ],
+      "periods": [
+        "2026",
+        "2027"
+      ],
+      "period_basis": "mixed_fiscal_years",
+      "period_evidence": "FY 2026 / 2027",
+      "status": "located",
+      "reasons": [
+        "mixed_fiscal_cohort_not_separable"
+      ]
+    },
+    {
+      "page_number": 24,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 24,
+      "image_number": 2,
+      "image_hash": "965683b6281fa6761049c1a76255df4c05c8a4bc7ffaacf7edc0926bbd5cb69b",
+      "title": "S&P 500 Earnings Growth (Y/Y): CY 2026",
+      "title_region": [
+        0.27289377289377287,
+        0.0226928895612708,
+        0.7267399267399267,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026"
+      ],
+      "period_basis": "calendar_year",
+      "period_evidence": "CY 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 24,
+      "image_number": 3,
+      "image_hash": "ec71934c9b0a4589e7a53fa013669fc2717f944a5ea7710ff3750b7694f511a9",
+      "title": "S&P 500 Revenue Growth (Y/Y): CY 2026",
+      "title_region": [
+        0.273992673992674,
+        0.0226928895612708,
+        0.7245421245421245,
+        0.05143721633888049
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2026"
+      ],
+      "period_basis": "calendar_year",
+      "period_evidence": "CY 2026",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 25,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 25,
+      "image_number": 2,
+      "image_hash": "846c912eb8dda661e6bf3311ca2e4703cffa61142ae1f43aecdf65264adba659",
+      "title": "S&P 500 Earnings Growth (Y/Y): CY 2027",
+      "title_region": [
+        0.27289377289377287,
+        0.022188603126575897,
+        0.7267399267399267,
+        0.05194150277357539
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2027"
+      ],
+      "period_basis": "calendar_year",
+      "period_evidence": "CY 2027",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 25,
+      "image_number": 3,
+      "image_hash": "66659fb6b2da96b1e12b581e2ff981cc554fb670e56e03de46a60791b93bd215",
+      "title": "S&P 500 Revenue Growth (Y/Y): CY 2027",
+      "title_region": [
+        0.273992673992674,
+        0.022188603126575897,
+        0.7245421245421245,
+        0.05194150277357539
+      ],
+      "groups": [
+        "earnings_revenue_growth"
+      ],
+      "periods": [
+        "2027"
+      ],
+      "period_basis": "calendar_year",
+      "period_evidence": "CY 2027",
+      "status": "located",
+      "reasons": []
+    },
+    {
+      "page_number": 26,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 26,
+      "image_number": 2,
+      "image_hash": "2bdbc9e8e4b550f01b47279626942180856b1f1048fe3abdf81a6c82c2753d98",
+      "title": "S&P 500: Aggregate Geographic Revenue Exposure (%)",
+      "title_region": [
+        0.1915750915750916,
+        0.0226928895612708,
+        0.8076923076923077,
+        0.05143721633888049
+      ],
+      "groups": [
+        "geographic_revenue_exposure"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 26,
+      "image_number": 3,
+      "image_hash": "2529051e3bad7998bc36fff5943138475f9a578a1c2f7a0608d02559c12cb8e2",
+      "title": "S&P 500: Aggregate Sector Geographic Revenue Exposure (%)",
+      "title_region": [
+        0.15164835164835164,
+        0.0226928895612708,
+        0.8472527472527472,
+        0.05143721633888049
+      ],
+      "groups": [
+        "geographic_revenue_exposure"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 27,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 27,
+      "image_number": 2,
+      "image_hash": "8885642330579994559c039724f296868eea43c9ae742677a83384620361e6e7",
+      "title": "S&P 500 CY 2026 & CY 2027 Bottom-Up EPS: 1-Year",
+      "title_region": [
+        0.21245421245421245,
+        0.022188603126575897,
+        0.7882783882783883,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [
+        "2026"
+      ],
+      "period_basis": "calendar_year",
+      "period_evidence": "CY 2026",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 27,
+      "image_number": 3,
+      "image_hash": "753d09ec1599f78584704d77c562ab078e46556757e5e19cb4cb1a53e38ec609",
+      "title": "S&P 500 Q326 Bottom-Up EPS: 1-Year",
+      "title_region": [
+        0.2893772893772894,
+        0.022188603126575897,
+        0.7113553113553114,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [
+        "2026Q3"
+      ],
+      "period_basis": "target_quarter",
+      "period_evidence": "Q326",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 28,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 28,
+      "image_number": 2,
+      "image_hash": "0752bec7e0e75a31a507ef3b678d5e81cdc118b3d5a0ac84feb733de4daec96d",
+      "title": "S&P 500 Calendar Yea eee als & Estimates",
+      "title_region": [
+        0.1663003663003663,
+        0.020675743822491176,
+        0.8322344322344323,
+        0.0832072617246596
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 28,
+      "image_number": 3,
+      "image_hash": "980f83b3b77e64e99a4ab2da98f94a22b196664a9ed55cd54f5c86c56a7d59d4",
+      "title": "S&P 500 Quarterly Bottom-Up EPS Actuals & Estimates",
+      "title_region": [
+        0.19267399267399268,
+        0.0226928895612708,
+        0.806959706959707,
+        0.05143721633888049
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 29,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 29,
+      "image_number": 2,
+      "image_hash": "a0c45574c8d5319902985df20ea17474319a73871065ccfbce5163a2abac1443",
+      "title": "S&P 500 Sector-Level Forward 12-Month P/E Ratios",
+      "title_region": [
+        0.21465201465201464,
+        0.0226928895612708,
+        0.784981684981685,
+        0.0453857791225416
+      ],
+      "groups": [
+        "forward_pe"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 29,
+      "image_number": 3,
+      "image_hash": "cc28105e0ae8a091f788ea0f1fba556b1e238865c769ba34ac0ea4fd88d6a55e",
+      "title": "Sector-Level Change in Fwd. 12-Month EPS vs. Price: Since Jun 30",
+      "title_region": [
+        0.12783882783882783,
+        0.022222222222222223,
+        0.8721611721611722,
+        0.05202020202020202
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 30,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 30,
+      "image_number": 2,
+      "image_hash": "53c9383e7ec583ffcb1dee5ce69d8d7419517af35865e85be3f26518259f0631",
+      "title": "S&P 500 Change in Forward 12-Month EPS vs. Change in Price: 10 Yrs.",
+      "title_region": [
+        0.10586080586080586,
+        0.022188603126575897,
+        0.8934065934065935,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 30,
+      "image_number": 3,
+      "image_hash": "2b6ea43db1970fbfadb0a3ea3f510d193f4801a8f13d19d7c0875201fea12879",
+      "title": "S&P 500 Forward 12-Month P/E Ratio: 10 Years",
+      "title_region": [
+        0.23992673992673993,
+        0.022188603126575897,
+        0.7597069597069597,
+        0.04589006555723651
+      ],
+      "groups": [
+        "forward_pe"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 31,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 31,
+      "image_number": 2,
+      "image_hash": "e88afafb2acfeac1cd4eb88887fc4c25a31d916db4cf0504a0c268ce33576f0b",
+      "title": "S&P 500 Change in Trailing 12-Month EPS vs. Change in Price: 10",
+      "title_region": [
+        0.13443223443223443,
+        0.022188603126575897,
+        0.8641025641025641,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 31,
+      "image_number": 3,
+      "image_hash": "da280291eb43579d2bcbf94fb1c765f7c556117ee44145a23d8e190c18d173f6",
+      "title": "S&P 500 Trailing 12-Month P/E Ratio: 10 Years",
+      "title_region": [
+        0.24432234432234431,
+        0.022188603126575897,
+        0.7542124542124542,
+        0.05194150277357539
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 32,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    },
+    {
+      "page_number": 32,
+      "image_number": 2,
+      "image_hash": "4606dd48da984bb1d2919afe2c4c277dbdc4835b553abf043e065fb0d08c09a9",
+      "title": "S&P 500: Percentage of Buy, Hold, and Sell Ratings",
+      "title_region": [
+        0.2153846153846154,
+        0.0226928895612708,
+        0.784981684981685,
+        0.05143721633888049
+      ],
+      "groups": [
+        "target_ratings"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 32,
+      "image_number": 3,
+      "image_hash": "894c091a4bc159dbdee649db1c6ce893925e64404d7b65a55c4dec2e2a4ae78d",
+      "title": "S&P 500 Sector-Level Bottom-Up Target Price vs. Closing Price",
+      "title_region": [
+        0.14871794871794872,
+        0.0226928895612708,
+        0.8498168498168498,
+        0.05143721633888049
+      ],
+      "groups": [
+        "target_ratings"
+      ],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "located",
+      "reasons": [
+        "target_period_unresolved"
+      ]
+    },
+    {
+      "page_number": 33,
+      "image_number": 1,
+      "image_hash": "27071c4417d7b34ab9c1eadbadbbc597e2460682873c5b1ee285f5816b024133",
+      "title": "FACTSET.",
+      "title_region": [
+        0.043859649122807015,
+        0.15625,
+        0.956140350877193,
+        0.78125
+      ],
+      "groups": [],
+      "periods": [],
+      "period_basis": "",
+      "period_evidence": "",
+      "status": "unclassified",
+      "reasons": [
+        "title_not_matched"
+      ]
+    }
+  ]
+}

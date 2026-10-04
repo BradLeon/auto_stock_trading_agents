@@ -1,0 +1,179 @@
+{
+  "response": {
+    "request_hash": "31eb5f77ca2abce46ef63d76df6eb617f7e54116da85102e092277cb2f4886f9",
+    "refs": [
+      {
+        "id": "sep-24-2",
+        "image_hash": "965683b6281fa6761049c1a76255df4c05c8a4bc7ffaacf7edc0926bbd5cb69b",
+        "region": [
+          0.8340659340659341,
+          0.9349470499243571,
+          0.9076923076923077,
+          0.9606656580937972
+        ],
+        "crop_hash": "2bc05a40f2f026e32b0dc0375a256c86e59fa8adc9498a232c0f4307515d5d12"
+      },
+      {
+        "id": "sep-25-2",
+        "image_hash": "846c912eb8dda661e6bf3311ca2e4703cffa61142ae1f43aecdf65264adba659",
+        "region": [
+          0.15824175824175823,
+          0.9349470499243571,
+          0.23296703296703297,
+          0.9606656580937972
+        ],
+        "crop_hash": "129f4df0b0a7bfdc0066fe450e974f12e501e70550cf295bce4f84080e263ac0"
+      },
+      {
+        "id": "sep-22-3",
+        "image_hash": "92d457a639380b7ba3419b6da14163d8020c916813310c568f5f4ec6d5fd9800",
+        "region": [
+          0.6835164835164835,
+          0.9349470499243571,
+          0.7582417582417582,
+          0.9606656580937972
+        ],
+        "crop_hash": "d9133ff979496935725daa9b6201cb66293fc1e5fb446561bd4beb336b1ba2b6"
+      },
+      {
+        "id": "aug-26-3",
+        "image_hash": "3ac0aee8cebdf219553c0b5d375d3a466417ca532d42cd6dc605ec5c5459a0f1",
+        "region": [
+          0.6838638858397366,
+          0.9349470499243571,
+          0.7574094401756312,
+          0.9606656580937972
+        ],
+        "crop_hash": "2bc05a40f2f026e32b0dc0375a256c86e59fa8adc9498a232c0f4307515d5d12"
+      }
+    ],
+    "policy": {
+      "enabled": true,
+      "authorization": "user_2026_09_27_factset_chart_crops",
+      "model": "openai/gpt-5.6-terra",
+      "prompt_version": "factset-cell-transcription-v1",
+      "max_requests": 4,
+      "max_crops_per_request": 12,
+      "max_image_bytes": 2000000,
+      "max_tokens": 4096,
+      "timeout_seconds": 60,
+      "provider_data_collection": "deny",
+      "zero_data_retention": true,
+      "automatic_publication": false
+    },
+    "prompt_hash": "c6a3791a150b332ca2da11ca47441b0c5b1d7ffc859da870b2fe81628a32ab81",
+    "requested_at": "2026-09-26T22:18:34.346672+00:00",
+    "status": "pending_review",
+    "approved": false,
+    "response_id": "gen-1790461047-lo54GWX82Od1mAkbhYYj",
+    "model": "openai/gpt-5.6-terra",
+    "usage": {
+      "prompt_tokens": 287,
+      "completion_tokens": 72,
+      "total_tokens": 359,
+      "cost": 0.00142362,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.001438,
+        "upstream_inference_prompt_cost": 0.000574,
+        "upstream_inference_completions_cost": 0.000864
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 0,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    },
+    "raw_content": "{\"cells\":[{\"id\":\"sep-24-2\",\"token\":\"7.4%\"},{\"id\":\"sep-25-2\",\"token\":\"22.1%\"},{\"id\":\"sep-22-3\",\"token\":\"7.4%\"},{\"id\":\"aug-26-3\",\"token\":\"7.4%\"}]}",
+    "cells": [
+      {
+        "id": "sep-24-2",
+        "token": "7.4%"
+      },
+      {
+        "id": "sep-25-2",
+        "token": "22.1%"
+      },
+      {
+        "id": "sep-22-3",
+        "token": "7.4%"
+      },
+      {
+        "id": "aug-26-3",
+        "token": "7.4%"
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "crop_id": "sep-24-2",
+      "ocr_token": "74%",
+      "vision_token": "7.4%",
+      "ocr_value": [
+        "74",
+        "percent"
+      ],
+      "vision_value": [
+        "7.4",
+        "percent"
+      ],
+      "status": "pending_review",
+      "reason": "ocr_vision_conflict_or_unreadable",
+      "approved": false
+    },
+    {
+      "crop_id": "sep-25-2",
+      "ocr_token": "22. 1%",
+      "vision_token": "22.1%",
+      "ocr_value": [
+        null,
+        ""
+      ],
+      "vision_value": [
+        "22.1",
+        "percent"
+      ],
+      "status": "pending_review",
+      "reason": "ocr_vision_conflict_or_unreadable",
+      "approved": false
+    },
+    {
+      "crop_id": "sep-22-3",
+      "ocr_token": "74%",
+      "vision_token": "7.4%",
+      "ocr_value": [
+        "74",
+        "percent"
+      ],
+      "vision_value": [
+        "7.4",
+        "percent"
+      ],
+      "status": "pending_review",
+      "reason": "ocr_vision_conflict_or_unreadable",
+      "approved": false
+    },
+    {
+      "crop_id": "aug-26-3",
+      "ocr_token": "74%",
+      "vision_token": "7.4%",
+      "ocr_value": [
+        "74",
+        "percent"
+      ],
+      "vision_value": [
+        "7.4",
+        "percent"
+      ],
+      "status": "pending_review",
+      "reason": "ocr_vision_conflict_or_unreadable",
+      "approved": false
+    }
+  ]
+}

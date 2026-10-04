@@ -1,0 +1,308 @@
+{
+  "response": {
+    "request_hash": "ed33c52eed9622582363a7e66a2afd57346c3c804b68501244e88409ffc32a08",
+    "refs": [
+      {
+        "id": "aug-21-3-0-2",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.15806805708013172,
+          0.8880484114977307,
+          0.2327113062568606,
+          0.9334341906202723
+        ],
+        "crop_hash": "b2df52b36e35912c688fe2a62ac5d4c59b5e0ccf3fbf3872ae280440301171e6"
+      },
+      {
+        "id": "aug-21-3-1-2",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.15806805708013172,
+          0.9349470499243571,
+          0.2327113062568606,
+          0.9606656580937972
+        ],
+        "crop_hash": "0de8684cba694f96fb844156ad3d0cc6aff6c0c0c23cff4435b0879a4f6a21cb"
+      },
+      {
+        "id": "aug-21-3-0-4",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.3084522502744237,
+          0.8880484114977307,
+          0.38199780461031835,
+          0.9334341906202723
+        ],
+        "crop_hash": "49437d3f116d8cebd6833490039790390cf99a071431fcc5184c1c39c70fbcdd"
+      },
+      {
+        "id": "aug-21-3-1-4",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.3084522502744237,
+          0.9349470499243571,
+          0.38199780461031835,
+          0.9606656580937972
+        ],
+        "crop_hash": "7398a674fbca692d7bc17de29c9beb6aeff0ac2eb8f72d5ca781017906606450"
+      },
+      {
+        "id": "aug-21-3-0-5",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.38309549945115257,
+          0.8880484114977307,
+          0.45773874862788144,
+          0.9334341906202723
+        ],
+        "crop_hash": "559978a4aab1150dd66e80720cfa7a49d66a257c29ad7325f6e32a33a42ddd69"
+      },
+      {
+        "id": "aug-21-3-1-5",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.38309549945115257,
+          0.9349470499243571,
+          0.45773874862788144,
+          0.9606656580937972
+        ],
+        "crop_hash": "125a8c0804b487eae35b06f14e704498db7fda4379a7257a16dd95075d98200f"
+      },
+      {
+        "id": "aug-21-3-0-6",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.4588364434687157,
+          0.8880484114977307,
+          0.5323819978046103,
+          0.9334341906202723
+        ],
+        "crop_hash": "9b842b4ab15eb5186e0da4049a81da484ba9c8c0cb3cca1a18b74b624ae2e761"
+      },
+      {
+        "id": "aug-21-3-1-6",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.4588364434687157,
+          0.9349470499243571,
+          0.5323819978046103,
+          0.9606656580937972
+        ],
+        "crop_hash": "b60ce7215f0dcefbf814bc334fb3a6bc5ed08ddaac95e8794de7e87ae4f02589"
+      },
+      {
+        "id": "aug-21-3-0-7",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.5334796926454446,
+          0.8880484114977307,
+          0.6070252469813392,
+          0.9334341906202723
+        ],
+        "crop_hash": "f3b96c7215bd7d458a9ab30d6679417dee6f3e1d83edc358141a1cfdaaf79259"
+      },
+      {
+        "id": "aug-21-3-1-7",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.5334796926454446,
+          0.9349470499243571,
+          0.6070252469813392,
+          0.9606656580937972
+        ],
+        "crop_hash": "7b4db13721ea0a2aecace7d17c99f0a7f5454c67901b53ede6a367dded25186d"
+      },
+      {
+        "id": "aug-21-3-0-8",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.6081229418221734,
+          0.8880484114977307,
+          0.6827661909989023,
+          0.9334341906202723
+        ],
+        "crop_hash": "5ba4f2aa4115ef902f883235dd22b5b8b3c143d47f7406ce87520d323fffd244"
+      },
+      {
+        "id": "aug-21-3-1-8",
+        "image_hash": "7bcf6072c8d9febd37e12264bf9620375edf9bd58ddaffbf06753171edff9f8c",
+        "region": [
+          0.6081229418221734,
+          0.9349470499243571,
+          0.6827661909989023,
+          0.9606656580937972
+        ],
+        "crop_hash": "cc9b6a572a5163a749c67a49d4efd778b358eca5b15c885e061444b3fad2da92"
+      }
+    ],
+    "policy": {
+      "enabled": true,
+      "authorization": "user_2026_09_27_factset_chart_crops",
+      "model": "openai/gpt-5.6-terra",
+      "prompt_version": "factset-cell-transcription-v1",
+      "max_requests": 32,
+      "max_crops_per_request": 12,
+      "max_image_bytes": 2000000,
+      "max_tokens": 4096,
+      "timeout_seconds": 60,
+      "provider_data_collection": "deny",
+      "zero_data_retention": true,
+      "automatic_publication": false
+    },
+    "prompt_hash": "c6a3791a150b332ca2da11ca47441b0c5b1d7ffc859da870b2fe81628a32ab81",
+    "requested_at": "2026-09-26T22:21:01.779347+00:00",
+    "status": "pending_review",
+    "approved": false,
+    "response_id": "gen-1790461194-w5qNrs0SgxcQdpV0n80m",
+    "model": "openai/gpt-5.6-terra",
+    "usage": {
+      "prompt_tokens": 721,
+      "completion_tokens": 342,
+      "total_tokens": 1063,
+      "cost": 0.00549054,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.005546,
+        "upstream_inference_prompt_cost": 0.001442,
+        "upstream_inference_completions_cost": 0.004104
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 109,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    },
+    "raw_content": "{\"cells\":[{\"id\":\"aug-21-3-0-2\",\"token\":\"Info. Technology\"},{\"id\":\"aug-21-3-1-2\",\"token\":\"37.1%\"},{\"id\":\"aug-21-3-0-4\",\"token\":\"Comm. Services\"},{\"id\":\"aug-21-3-1-4\",\"token\":\"15.3%\"},{\"id\":\"aug-21-3-0-5\",\"token\":\"Financials\"},{\"id\":\"aug-21-3-1-5\",\"token\":\"14.2%\"},{\"id\":\"aug-21-3-0-6\",\"token\":\"Real Estate\"},{\"id\":\"aug-21-3-1-6\",\"token\":\"11.3%\"},{\"id\":\"aug-21-3-0-7\",\"token\":\"Industrials\"},{\"id\":\"aug-21-3-1-7\",\"token\":\"9.8%\"},{\"id\":\"aug-21-3-0-8\",\"token\":\"Consumer Disc.\"},{\"id\":\"aug-21-3-1-8\",\"token\":\"9.5%\"}]}",
+    "cells": [
+      {
+        "id": "aug-21-3-0-2",
+        "token": "Info. Technology"
+      },
+      {
+        "id": "aug-21-3-1-2",
+        "token": "37.1%"
+      },
+      {
+        "id": "aug-21-3-0-4",
+        "token": "Comm. Services"
+      },
+      {
+        "id": "aug-21-3-1-4",
+        "token": "15.3%"
+      },
+      {
+        "id": "aug-21-3-0-5",
+        "token": "Financials"
+      },
+      {
+        "id": "aug-21-3-1-5",
+        "token": "14.2%"
+      },
+      {
+        "id": "aug-21-3-0-6",
+        "token": "Real Estate"
+      },
+      {
+        "id": "aug-21-3-1-6",
+        "token": "11.3%"
+      },
+      {
+        "id": "aug-21-3-0-7",
+        "token": "Industrials"
+      },
+      {
+        "id": "aug-21-3-1-7",
+        "token": "9.8%"
+      },
+      {
+        "id": "aug-21-3-0-8",
+        "token": "Consumer Disc."
+      },
+      {
+        "id": "aug-21-3-1-8",
+        "token": "9.5%"
+      }
+    ]
+  },
+  "sources": {
+    "aug-21-3-0-2": {
+      "chart": "aug-21-3",
+      "kind": "label",
+      "entity": "GICS_45",
+      "ocr_token": "Info. Technology"
+    },
+    "aug-21-3-1-2": {
+      "chart": "aug-21-3",
+      "kind": "value",
+      "entity": "GICS_45",
+      "ocr_token": "37.1%"
+    },
+    "aug-21-3-0-4": {
+      "chart": "aug-21-3",
+      "kind": "label",
+      "entity": "GICS_50",
+      "ocr_token": "Comm. Services"
+    },
+    "aug-21-3-1-4": {
+      "chart": "aug-21-3",
+      "kind": "value",
+      "entity": "GICS_50",
+      "ocr_token": "15.3%"
+    },
+    "aug-21-3-0-5": {
+      "chart": "aug-21-3",
+      "kind": "label",
+      "entity": "GICS_40",
+      "ocr_token": "Financials"
+    },
+    "aug-21-3-1-5": {
+      "chart": "aug-21-3",
+      "kind": "value",
+      "entity": "GICS_40",
+      "ocr_token": "14.2%"
+    },
+    "aug-21-3-0-6": {
+      "chart": "aug-21-3",
+      "kind": "label",
+      "entity": "GICS_60",
+      "ocr_token": "Real Estate"
+    },
+    "aug-21-3-1-6": {
+      "chart": "aug-21-3",
+      "kind": "value",
+      "entity": "GICS_60",
+      "ocr_token": "11.3%"
+    },
+    "aug-21-3-0-7": {
+      "chart": "aug-21-3",
+      "kind": "label",
+      "entity": "GICS_20",
+      "ocr_token": "Industrials"
+    },
+    "aug-21-3-1-7": {
+      "chart": "aug-21-3",
+      "kind": "value",
+      "entity": "GICS_20",
+      "ocr_token": "9.8%"
+    },
+    "aug-21-3-0-8": {
+      "chart": "aug-21-3",
+      "kind": "label",
+      "entity": "GICS_25",
+      "ocr_token": "Consumer Disc."
+    },
+    "aug-21-3-1-8": {
+      "chart": "aug-21-3",
+      "kind": "value",
+      "entity": "GICS_25",
+      "ocr_token": "9.5%"
+    }
+  },
+  "policy_hash": "1aeeedd772c1685e6ab16b23de54ec5dc238e91ccc3f65f56471ab20f91eda5e"
+}

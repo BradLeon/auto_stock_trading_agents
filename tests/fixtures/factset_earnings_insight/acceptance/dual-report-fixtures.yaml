@@ -1,0 +1,43 @@
+schema_version: 1
+production_review_approval: false
+purpose: same_semantic_extractor_cross_report_local_regression
+source_domain: advantage.factset.com
+golden_is_independent_of_parser: true
+reports:
+  '2026-08-28':
+    pdf_path: var/data_artifacts/ae/ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381.bin
+    pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    pages: 37
+    first_known_at: '2026-09-03T09:14:18.193371+00:00'
+    sector_inventory: core-inventory.yaml
+    sector_visual_golden:
+      - cross-report-visual-partial.yaml
+      - scorecard-visual.yaml
+      - surprise-visual.yaml
+      - margin-visual.yaml
+      - guidance-visual.yaml
+      - valuation-ratings-visual.yaml
+    index_inventory: index-core-inventory.yaml
+    index_partial_golden: index-key-metrics-partial.yaml
+    index_numeric_golden: index-core-golden.yaml
+    index_numeric_golden_status: independent_source_review_complete
+  '2026-09-18':
+    pdf_path: var/data_artifacts/f6/f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08.bin
+    pdf_sha256: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    pages: 33
+    first_known_at: '2026-09-25T13:39:18.714950+00:00'
+    sector_inventory: core-inventory.yaml
+    sector_visual_golden:
+      - cross-report-visual-partial.yaml
+      - scorecard-visual.yaml
+      - surprise-visual.yaml
+      - margin-visual.yaml
+      - guidance-visual.yaml
+      - valuation-ratings-visual.yaml
+    index_inventory: index-core-inventory.yaml
+    index_partial_golden: index-key-metrics-partial.yaml
+    index_numeric_golden: index-core-golden.yaml
+    index_numeric_golden_status: independent_source_review_complete
+non_core:
+  P1: retain_explicit_ai_hardware_semiconductor_consumer_electronics_evidence_only
+  P2: reuse_generic_extractor_and_record_deferral_without_dedicated_tuning

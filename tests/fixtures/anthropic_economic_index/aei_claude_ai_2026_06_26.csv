@@ -1,0 +1,17 @@
+date_start,date_end,geo_id,geo_level,category_name,hierarchy_level,metric_id,value,node_name,node_external_id
+2026-04-01,2026-05-01,GLOBAL,global,soc_occupation,0,pct,0.30,Operations Research Analysts,15-2031.00
+2026-04-01,2026-05-01,GLOBAL,global,soc_occupation,0,collaboration_bucket_automation_pct,50.00,Operations Research Analysts,15-2031.00
+2026-04-01,2026-05-01,GLOBAL,global,soc_occupation,0,collaboration_bucket_augmentation_pct,50.00,Operations Research Analysts,15-2031.00
+2026-04-01,2026-05-01,GLOBAL,global,soc_occupation,1,pct,3.00,Computer and Mathematical Occupations,15-0000
+2026-04-01,2026-05-01,GLOBAL,global,onet,0,pct,0.10,Define data requirements,7382
+2026-04-01,2026-05-01,GLOBAL,global,onet,0,collaboration_bucket_automation_pct,55.00,Define data requirements,7382
+2026-04-01,2026-05-01,GLOBAL,global,onet,0,collaboration_bucket_augmentation_pct,45.00,Define data requirements,7382
+2026-05-01,2026-06-01,GLOBAL,global,soc_occupation,0,pct,0.34,Operations Research Analysts,15-2031.00
+2026-05-01,2026-06-01,GLOBAL,global,soc_occupation,0,collaboration_bucket_automation_pct,52.00,Operations Research Analysts,15-2031.00
+2026-05-01,2026-06-01,GLOBAL,global,soc_occupation,0,collaboration_bucket_augmentation_pct,48.00,Operations Research Analysts,15-2031.00
+2026-05-01,2026-06-01,GLOBAL,global,soc_occupation,1,pct,4.00,Computer and Mathematical Occupations,15-0000
+2026-05-01,2026-06-01,GLOBAL,global,onet,0,pct,0.12,Define data requirements,7382
+2026-05-01,2026-06-01,GLOBAL,global,onet,0,collaboration_bucket_automation_pct,60.00,Define data requirements,7382
+2026-05-01,2026-06-01,GLOBAL,global,onet,0,collaboration_bucket_augmentation_pct,40.00,Define data requirements,7382
+2026-05-01,2026-06-01,USA,country,soc_occupation,0,pct,99.00,Operations Research Analysts,15-2031.00
+2026-05-01,2026-06-01,GLOBAL,global,request,0,pct,99.00,Excluded request,x

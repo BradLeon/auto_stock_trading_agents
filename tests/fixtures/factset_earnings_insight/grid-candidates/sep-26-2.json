@@ -1,0 +1,27 @@
+{
+  "candidate_only": true,
+  "policy_hash": "674ae04fbbd920be58b6adec7f7a18e4fb2194f639a8800fc29fd19cd2bd4c46",
+  "chart": {
+    "page_number": 26,
+    "image_number": 2,
+    "image_hash": "2bdbc9e8e4b550f01b47279626942180856b1f1048fe3abdf81a6c82c2753d98",
+    "title": "S&P 500: Aggregate Geographic Revenue Exposure (%)",
+    "title_region": [
+      0.1915750915750916,
+      0.0226928895612708,
+      0.8076923076923077,
+      0.05143721633888049
+    ],
+    "groups": [
+      "geographic_revenue_exposure"
+    ],
+    "periods": [],
+    "period_basis": "",
+    "period_evidence": "",
+    "status": "located",
+    "reasons": [
+      "target_period_unresolved"
+    ]
+  },
+  "grids": []
+}

@@ -1,0 +1,19 @@
+schema_version: 1
+report_id: "072426"
+report_date: "2026-07-24"
+pdf_sha256: 89b7790e366c6abf7eca07f16a4dd99763c1b453491efd2bfa4b1d39e8c182f7
+text_sha256: 22dd172ec43334d1f9eedb31a84097744d4132a048d60b59b98c69b9b454d3d3
+page_count: 38
+expected_phase: in_progress
+revision_breadth: {applicable: false}
+chart_pages:
+  earnings_revenue_scorecard: [18]
+  earnings_revenue_surprise: [19, 20, 21]
+  earnings_revenue_growth: [22, 23]
+  net_profit_margin: [24]
+  eps_guidance: [25]
+  geographic_revenue_exposure: [31]
+  forward_pe: [34]
+  target_ratings: [37]
+sector_annotation_status: pending
+expected_sector_cells: []

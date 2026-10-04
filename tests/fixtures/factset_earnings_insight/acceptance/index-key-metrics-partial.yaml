@@ -1,0 +1,34 @@
+schema_version: 1
+source: independent_read_of_original_pdf_page_1
+production_review_approval: false
+completeness: partial_key_metrics_only
+unit_policy: percentages_normalized_to_ratio
+reports:
+  '2026-08-28':
+    pdf_hash: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    page_number: 1
+    values:
+      - {metric: earnings.reporting.coverage, period: 2026Q2, unit: ratio, value: 0.97, anchor: 'with 97% of S&P 500 companies reporting actual results'}
+      - {metric: earnings.eps.above_estimate_share, period: 2026Q2, unit: ratio, value: 0.86, anchor: '86% of S&P 500 companies have reported a positive EPS surprise'}
+      - {metric: earnings.revenue.above_estimate_share, period: 2026Q2, unit: ratio, value: 0.77, anchor: '77% of S&P 500 companies has reported a positive revenue surprise'}
+      - {metric: earnings.eps.yoy_growth, period: 2026Q2, unit: ratio, value: 0.52, anchor: 'blended (year-over-year) earnings growth rate for the S&P 500 is 52.0%'}
+      - {metric: earnings.revision.improved_sector_count, period: 2026Q2, unit: count, value: 10, anchor: 'Ten of eleven sectors are reporting (or have reported) higher earnings'}
+      - {metric: earnings.guidance.negative_count, period: 2026Q3, unit: count, value: 35, anchor: '35 S&P 500 companies have issued negative EPS guidance'}
+      - {metric: earnings.guidance.positive_count, period: 2026Q3, unit: count, value: 63, anchor: '63 S&P 500 companies have issued positive EPS guidance'}
+      - {metric: valuation.forward_pe, period: '2026-08-28', unit: multiple, value: 19.6, anchor: 'forward 12 -month P/E ratio for the S&P 500 is 19.6'}
+      - {metric: valuation.forward_pe.average_5y, period: '2026-08-28', unit: multiple, value: 19.9, anchor: 'below the 5-year average (19.9)'}
+      - {metric: valuation.forward_pe.average_10y, period: '2026-08-28', unit: multiple, value: 19.0, anchor: 'above the 10-year average (19.0)'}
+  '2026-09-18':
+    pdf_hash: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    page_number: 1
+    values:
+      - {metric: earnings.eps.yoy_growth, period: 2026Q3, unit: ratio, value: 0.289, anchor: 'estimated (year-over-year) earnings growth rate for the S&P 500 is 28.9%'}
+      - {metric: earnings.revision.improved_sector_count, period: 2026Q3, unit: count, value: 4, anchor: 'Four sectors are expected to report higher earnings today'}
+      - {metric: earnings.guidance.negative_count, period: 2026Q3, unit: count, value: 43, anchor: '43 S&P 500 companies have issued negative EPS guidance'}
+      - {metric: earnings.guidance.positive_count, period: 2026Q3, unit: count, value: 72, anchor: '72 S&P 500 companies have issued positive EPS guidance'}
+      - {metric: valuation.forward_pe, period: '2026-09-18', unit: multiple, value: 19.1, anchor: 'forward 12 -month P/E ratio for the S&P 500 is 19.1'}
+      - {metric: valuation.forward_pe.average_5y, period: '2026-09-18', unit: multiple, value: 19.8, anchor: 'below the 5-year average (19.8)'}
+      - {metric: valuation.forward_pe.average_10y, period: '2026-09-18', unit: multiple, value: 19.0, anchor: 'above the 10-year average (19.0)'}
+not_disclosed_as_ratio:
+  '2026-09-18':
+    - {metric: earnings.reporting.coverage, anchor: 'with 3 S&P 500 companies reporting actual results', note: report_gives_count_not_denominator_ratio}

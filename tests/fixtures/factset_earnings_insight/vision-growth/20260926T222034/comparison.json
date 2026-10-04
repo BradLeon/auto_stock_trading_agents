@@ -1,0 +1,12 @@
+{
+  "scope": "growth_current_values_and_labels_only",
+  "full_report_accepted": false,
+  "checked_values": 176,
+  "checked_labels": 176,
+  "returned_crops": 352,
+  "policy_hashes": [
+    "1aeeedd772c1685e6ab16b23de54ec5dc238e91ccc3f65f56471ab20f91eda5e"
+  ],
+  "errors": [],
+  "cost_usd": 0.13596660000000002
+}

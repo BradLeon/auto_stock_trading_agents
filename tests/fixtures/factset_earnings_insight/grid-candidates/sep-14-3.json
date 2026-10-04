@@ -1,0 +1,27 @@
+{
+  "candidate_only": true,
+  "policy_hash": "674ae04fbbd920be58b6adec7f7a18e4fb2194f639a8800fc29fd19cd2bd4c46",
+  "chart": {
+    "page_number": 14,
+    "image_number": 3,
+    "image_hash": "4c981e9736ed96075f27e64dacfa7b1ca5a04cfab959163c72e5d767a7856a6e",
+    "title": "S&P 500 Sector-Level Revenue Surprise %: Q2 2026",
+    "title_region": [
+      0.21025641025641026,
+      0.0226928895612708,
+      0.7882783882783883,
+      0.05143721633888049
+    ],
+    "groups": [
+      "earnings_revenue_surprise"
+    ],
+    "periods": [
+      "2026Q2"
+    ],
+    "period_basis": "target_quarter",
+    "period_evidence": "Q2 2026",
+    "status": "located",
+    "reasons": []
+  },
+  "grids": []
+}

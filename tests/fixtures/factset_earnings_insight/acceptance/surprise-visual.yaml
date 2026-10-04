@@ -1,0 +1,56 @@
+schema_version: 1
+method: assistant_visual_read_of_original_embedded_png
+production_review_approval: false
+status: partial_pending_cell_anchor_validation
+source_unit: percent
+target_period: 2026Q2
+# August revenue is in cross-report-visual-partial.yaml, independently read earlier.
+charts:
+  - report_date: '2026-08-28'
+    page: 18
+    image: 2
+    columns: [eps_surprise]
+    rows:
+      Comm. Services: [102.3]
+      Consumer Disc.: [82.3]
+      Health Care: [18.1]
+      Financials: [14.7]
+      Info. Technology: [10.7]
+      Energy: [9.8]
+      Consumer Staples: [8.2]
+      Industrials: [6.8]
+      Materials: [5.7]
+      Utilities: [4.6]
+      Real Estate: [2.4]
+  - report_date: '2026-09-18'
+    page: 14
+    image: 2
+    columns: [eps_surprise]
+    rows:
+      Comm. Services: [102.3]
+      Consumer Disc.: [82.2]
+      Health Care: [17.7]
+      Financials: [14.7]
+      Info. Technology: [10.5]
+      Energy: [9.8]
+      Consumer Staples: [8.1]
+      Industrials: [6.7]
+      Materials: [5.7]
+      Utilities: [4.6]
+      Real Estate: [2.4]
+  - report_date: '2026-09-18'
+    page: 14
+    image: 3
+    columns: [revenue_surprise]
+    rows:
+      Energy: [11.7]
+      Financials: [4.9]
+      Info. Technology: [3.2]
+      Industrials: [3.0]
+      Health Care: [2.7]
+      Real Estate: [2.1]
+      Comm. Services: [1.5]
+      Consumer Disc.: [1.4]
+      Consumer Staples: [1.0]
+      Materials: [0.8]
+      Utilities: [-1.6]

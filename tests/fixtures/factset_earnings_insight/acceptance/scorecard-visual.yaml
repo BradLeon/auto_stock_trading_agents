@@ -1,0 +1,71 @@
+schema_version: 1
+method: assistant_visual_read_of_original_embedded_png
+production_review_approval: false
+status: partial_pending_cell_anchor_validation
+source_unit: percent
+target_period: 2026Q2
+charts:
+  - report_date: '2026-08-28'
+    page: 17
+    image: 2
+    columns: [eps_below, eps_inline, eps_above]
+    rows:
+      Health Care: [0, 4, 96]
+      Info. Technology: [6, 1, 93]
+      Industrials: [8, 3, 90]
+      Financials: [13, 1, 85]
+      Materials: [15, 0, 85]
+      Consumer Staples: [13, 3, 84]
+      Real Estate: [10, 6, 84]
+      Consumer Disc.: [13, 4, 83]
+      Comm. Services: [18, 0, 82]
+      Energy: [14, 5, 81]
+      Utilities: [23, 10, 68]
+  - report_date: '2026-08-28'
+    page: 17
+    image: 3
+    columns: [revenue_below, revenue_inline, revenue_above]
+    rows:
+      Health Care: [5, 0, 95]
+      Info. Technology: [12, 0, 88]
+      Industrials: [18, 0, 82]
+      Consumer Staples: [19, 0, 81]
+      Energy: [24, 0, 76]
+      Real Estate: [26, 0, 74]
+      Consumer Disc.: [28, 0, 72]
+      Financials: [29, 0, 71]
+      Materials: [35, 0, 65]
+      Comm. Services: [36, 0, 64]
+      Utilities: [52, 0, 48]
+  - report_date: '2026-09-18'
+    page: 13
+    image: 2
+    columns: [eps_below, eps_inline, eps_above]
+    rows:
+      Health Care: [0, 3, 97]
+      Info. Technology: [5, 1, 93]
+      Industrials: [9, 3, 89]
+      Financials: [13, 1, 85]
+      Consumer Staples: [12, 3, 85]
+      Materials: [15, 0, 85]
+      Real Estate: [10, 6, 84]
+      Consumer Disc.: [13, 4, 83]
+      Comm. Services: [18, 0, 82]
+      Energy: [14, 5, 81]
+      Utilities: [23, 10, 68]
+  - report_date: '2026-09-18'
+    page: 13
+    image: 3
+    columns: [revenue_below, revenue_inline, revenue_above]
+    rows:
+      Health Care: [7, 0, 93]
+      Info. Technology: [11, 0, 89]
+      Industrials: [18, 0, 82]
+      Consumer Staples: [24, 0, 76]
+      Energy: [24, 0, 76]
+      Real Estate: [26, 0, 74]
+      Financials: [29, 0, 71]
+      Consumer Disc.: [30, 0, 70]
+      Materials: [35, 0, 65]
+      Comm. Services: [36, 0, 64]
+      Utilities: [52, 0, 48]

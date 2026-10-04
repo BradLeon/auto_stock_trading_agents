@@ -1,0 +1,308 @@
+{
+  "response": {
+    "request_hash": "e66d1637eba08066dbf64771eda55303293a302551ed2731d01bbe640a9a001e",
+    "refs": [
+      {
+        "id": "sep-17-2-0-10",
+        "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+        "region": [
+          0.7593406593406593,
+          0.8880484114977307,
+          0.832967032967033,
+          0.9334341906202723
+        ],
+        "crop_hash": "a5fc7471602e71260634c93ceeb0e09a7d715672e88efc99d1a9608fcdb09473"
+      },
+      {
+        "id": "sep-17-2-1-10",
+        "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+        "region": [
+          0.7593406593406593,
+          0.9349470499243571,
+          0.832967032967033,
+          0.9606656580937972
+        ],
+        "crop_hash": "60d81c22529f59df74209895cabd8417e2632c71d4b1b523cb66066d9cff46be"
+      },
+      {
+        "id": "sep-17-2-0-11",
+        "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+        "region": [
+          0.8340659340659341,
+          0.8880484114977307,
+          0.9076923076923077,
+          0.9334341906202723
+        ],
+        "crop_hash": "bef7b9622afbfe968308c0d8c7995f76a950f2f34bc477f99587da0f41967f79"
+      },
+      {
+        "id": "sep-17-2-1-11",
+        "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+        "region": [
+          0.8340659340659341,
+          0.9349470499243571,
+          0.9076923076923077,
+          0.9606656580937972
+        ],
+        "crop_hash": "1415a85360c6bf65e72b5b7369553a7045de5bec9a5d2abcba47430b10203fdf"
+      },
+      {
+        "id": "sep-17-2-0-12",
+        "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+        "region": [
+          0.9087912087912088,
+          0.8880484114977307,
+          0.9835164835164835,
+          0.9334341906202723
+        ],
+        "crop_hash": "655c4197487258b7ce2f574ea124ec907e4ddfadcf9ddbd0f230881fd67051af"
+      },
+      {
+        "id": "sep-17-2-1-12",
+        "image_hash": "584bb5868ba3f38e4e196e5c9c2d1967954a954fcfdbc51f9fa49c147013bc80",
+        "region": [
+          0.9087912087912088,
+          0.9349470499243571,
+          0.9835164835164835,
+          0.9606656580937972
+        ],
+        "crop_hash": "8602e7295523a453f72c39492580147d847ef2ecbb4c6548e9122dd9bd6a2d7b"
+      },
+      {
+        "id": "sep-17-3-0-1",
+        "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+        "region": [
+          0.08351648351648351,
+          0.8880484114977307,
+          0.15714285714285714,
+          0.9334341906202723
+        ],
+        "crop_hash": "ded0fd4bd288616a8b18996fefb878e8e5700e2393d606e5b2b39423430db49c"
+      },
+      {
+        "id": "sep-17-3-1-1",
+        "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+        "region": [
+          0.08351648351648351,
+          0.9349470499243571,
+          0.15714285714285714,
+          0.9606656580937972
+        ],
+        "crop_hash": "b362a2975fba1768c7bc361a075ce3edab6459511d37ee0e3403814fde30a84f"
+      },
+      {
+        "id": "sep-17-3-0-2",
+        "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+        "region": [
+          0.15824175824175823,
+          0.8880484114977307,
+          0.23296703296703297,
+          0.9334341906202723
+        ],
+        "crop_hash": "b2df52b36e35912c688fe2a62ac5d4c59b5e0ccf3fbf3872ae280440301171e6"
+      },
+      {
+        "id": "sep-17-3-1-2",
+        "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+        "region": [
+          0.15824175824175823,
+          0.9349470499243571,
+          0.23296703296703297,
+          0.9606656580937972
+        ],
+        "crop_hash": "4a86c2b85afda25d30442ec3f4e496a6b57b814ab6c763ebe6adc1670ed18a0f"
+      },
+      {
+        "id": "sep-17-3-0-4",
+        "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+        "region": [
+          0.3087912087912088,
+          0.8880484114977307,
+          0.3824175824175824,
+          0.9334341906202723
+        ],
+        "crop_hash": "49437d3f116d8cebd6833490039790390cf99a071431fcc5184c1c39c70fbcdd"
+      },
+      {
+        "id": "sep-17-3-1-4",
+        "image_hash": "11c707bd36ede342f0d394b947df2733e1ca72ef13e7df67200d663e625030d0",
+        "region": [
+          0.3087912087912088,
+          0.9349470499243571,
+          0.3824175824175824,
+          0.9606656580937972
+        ],
+        "crop_hash": "7398a674fbca692d7bc17de29c9beb6aeff0ac2eb8f72d5ca781017906606450"
+      }
+    ],
+    "policy": {
+      "enabled": true,
+      "authorization": "user_2026_09_27_factset_chart_crops",
+      "model": "openai/gpt-5.6-terra",
+      "prompt_version": "factset-cell-transcription-v1",
+      "max_requests": 32,
+      "max_crops_per_request": 12,
+      "max_image_bytes": 2000000,
+      "max_tokens": 4096,
+      "timeout_seconds": 60,
+      "provider_data_collection": "deny",
+      "zero_data_retention": true,
+      "automatic_publication": false
+    },
+    "prompt_hash": "c6a3791a150b332ca2da11ca47441b0c5b1d7ffc859da870b2fe81628a32ab81",
+    "requested_at": "2026-09-26T22:22:07.279227+00:00",
+    "status": "pending_review",
+    "approved": false,
+    "response_id": "gen-1790461260-KHccT4ErEo9frKn2Gpc7",
+    "model": "openai/gpt-5.6-terra",
+    "usage": {
+      "prompt_tokens": 721,
+      "completion_tokens": 327,
+      "total_tokens": 1048,
+      "cost": 0.00531234,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.005366,
+        "upstream_inference_prompt_cost": 0.001442,
+        "upstream_inference_completions_cost": 0.003924
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 90,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    },
+    "raw_content": "{\"cells\":[{\"id\":\"sep-17-2-0-10\",\"token\":\"Consumer\\nStaples\"},{\"id\":\"sep-17-2-1-10\",\"token\":\"13.6%\"},{\"id\":\"sep-17-2-0-11\",\"token\":\"Real Estate\"},{\"id\":\"sep-17-2-1-11\",\"token\":\"8.6%\"},{\"id\":\"sep-17-2-0-12\",\"token\":\"Health\\nCare\"},{\"id\":\"sep-17-2-1-12\",\"token\":\"-6.4%\"},{\"id\":\"sep-17-3-0-1\",\"token\":\"Energy\"},{\"id\":\"sep-17-3-1-1\",\"token\":\"42.4%\"},{\"id\":\"sep-17-3-0-2\",\"token\":\"Info.\\nTechnology\"},{\"id\":\"sep-17-3-1-2\",\"token\":\"37.7%\"},{\"id\":\"sep-17-3-0-4\",\"token\":\"Comm.\\nServices\"},{\"id\":\"sep-17-3-1-4\",\"token\":\"15.3%\"}]}",
+    "cells": [
+      {
+        "id": "sep-17-2-0-10",
+        "token": "Consumer\nStaples"
+      },
+      {
+        "id": "sep-17-2-1-10",
+        "token": "13.6%"
+      },
+      {
+        "id": "sep-17-2-0-11",
+        "token": "Real Estate"
+      },
+      {
+        "id": "sep-17-2-1-11",
+        "token": "8.6%"
+      },
+      {
+        "id": "sep-17-2-0-12",
+        "token": "Health\nCare"
+      },
+      {
+        "id": "sep-17-2-1-12",
+        "token": "-6.4%"
+      },
+      {
+        "id": "sep-17-3-0-1",
+        "token": "Energy"
+      },
+      {
+        "id": "sep-17-3-1-1",
+        "token": "42.4%"
+      },
+      {
+        "id": "sep-17-3-0-2",
+        "token": "Info.\nTechnology"
+      },
+      {
+        "id": "sep-17-3-1-2",
+        "token": "37.7%"
+      },
+      {
+        "id": "sep-17-3-0-4",
+        "token": "Comm.\nServices"
+      },
+      {
+        "id": "sep-17-3-1-4",
+        "token": "15.3%"
+      }
+    ]
+  },
+  "sources": {
+    "sep-17-2-0-10": {
+      "chart": "sep-17-2",
+      "kind": "label",
+      "entity": "GICS_30",
+      "ocr_token": "Consumer Staples"
+    },
+    "sep-17-2-1-10": {
+      "chart": "sep-17-2",
+      "kind": "value",
+      "entity": "GICS_30",
+      "ocr_token": "13.6%"
+    },
+    "sep-17-2-0-11": {
+      "chart": "sep-17-2",
+      "kind": "label",
+      "entity": "GICS_60",
+      "ocr_token": "Real Estate"
+    },
+    "sep-17-2-1-11": {
+      "chart": "sep-17-2",
+      "kind": "value",
+      "entity": "GICS_60",
+      "ocr_token": "8.6%"
+    },
+    "sep-17-2-0-12": {
+      "chart": "sep-17-2",
+      "kind": "label",
+      "entity": "GICS_35",
+      "ocr_token": "Health Care"
+    },
+    "sep-17-2-1-12": {
+      "chart": "sep-17-2",
+      "kind": "value",
+      "entity": "GICS_35",
+      "ocr_token": "-6.4%"
+    },
+    "sep-17-3-0-1": {
+      "chart": "sep-17-3",
+      "kind": "label",
+      "entity": "GICS_10",
+      "ocr_token": "Energy"
+    },
+    "sep-17-3-1-1": {
+      "chart": "sep-17-3",
+      "kind": "value",
+      "entity": "GICS_10",
+      "ocr_token": "42.4%"
+    },
+    "sep-17-3-0-2": {
+      "chart": "sep-17-3",
+      "kind": "label",
+      "entity": "GICS_45",
+      "ocr_token": "Info. Technology"
+    },
+    "sep-17-3-1-2": {
+      "chart": "sep-17-3",
+      "kind": "value",
+      "entity": "GICS_45",
+      "ocr_token": "37.7%"
+    },
+    "sep-17-3-0-4": {
+      "chart": "sep-17-3",
+      "kind": "label",
+      "entity": "GICS_50",
+      "ocr_token": "Comm. Services"
+    },
+    "sep-17-3-1-4": {
+      "chart": "sep-17-3",
+      "kind": "value",
+      "entity": "GICS_50",
+      "ocr_token": "15.3%"
+    }
+  },
+  "policy_hash": "1aeeedd772c1685e6ab16b23de54ec5dc238e91ccc3f65f56471ab20f91eda5e"
+}

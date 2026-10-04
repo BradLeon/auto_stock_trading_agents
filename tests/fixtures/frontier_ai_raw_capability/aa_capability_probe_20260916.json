@@ -1,0 +1,25 @@
+{
+  "probe_date": "2026-09-16",
+  "endpoint": "https://artificialanalysis.ai/api/v2/language/models",
+  "method": "GET",
+  "credentials_persisted": false,
+  "unauthenticated_response": {
+    "http_status": 401,
+    "body": {"error": "API key is required"}
+  },
+  "documented_capabilities": {
+    "bulk_model_endpoint": "/api/v2/language/models",
+    "model_identity": true,
+    "benchmark_scores": true,
+    "methodology_versions": true,
+    "updated_continuously": true
+  },
+  "documented_rate_limits": {
+    "free_daily_requests": 100,
+    "pro_daily_requests": 500,
+    "commercial_base_daily_requests": 1000,
+    "commercial_limit": "custom"
+  },
+  "selected_path": "public_page_fallback_until_api_key_and_entitlement_are_configured",
+  "selection_reason": "The endpoint requires a key in this environment; the implementation keeps one bulk API adapter and a public no-login evidence-slice fallback with the same normalized contract."
+}

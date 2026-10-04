@@ -1,0 +1,142 @@
+schema_version: 1
+method: assistant_visual_read_of_original_embedded_png
+production_review_approval: false
+status: partial_pending_cell_anchor_and_period_validation
+# Counts use printed numeric labels, not measured bar heights or inferred ratios.
+charts:
+  - report_date: '2026-08-28'
+    page: 24
+    image: 2
+    period_label: Q3
+    columns: [negative_count, positive_count]
+    rows:
+      Consumer Disc.: [9, 2]
+      Info. Technology: [6, 39]
+      Industrials: [6, 9]
+      Health Care: [6, 5]
+      Consumer Staples: [3, 0]
+      Real Estate: [2, 2]
+      Materials: [1, 2]
+      Financials: [1, 2]
+      Comm. Services: [1, 1]
+      Utilities: [0, 1]
+      Energy: [0, 0]
+  - report_date: '2026-08-28'
+    page: 24
+    image: 3
+    period_label: Q3
+    columns: [positive_share, negative_share]
+    rows:
+      Consumer Staples: [0, 100]
+      Consumer Disc.: [18, 82]
+      Health Care: [45, 55]
+      Real Estate: [50, 50]
+      Comm. Services: [50, 50]
+      Industrials: [60, 40]
+      Materials: [67, 33]
+      Financials: [67, 33]
+      Info. Technology: [87, 13]
+      Utilities: [100, 0]
+      Energy: [0, 0]
+  - report_date: '2026-08-28'
+    page: 27
+    image: 2
+    period_label: FY
+    columns: [negative_count, positive_count]
+    rows:
+      Utilities: [23, 6]
+      Industrials: [15, 41]
+      Health Care: [14, 36]
+      Consumer Disc.: [12, 10]
+      Consumer Staples: [11, 14]
+      Financials: [8, 7]
+      Info. Technology: [4, 29]
+      Real Estate: [4, 18]
+      Materials: [4, 4]
+      Comm. Services: [3, 1]
+      Energy: [2, 1]
+  - report_date: '2026-08-28'
+    page: 27
+    image: 3
+    period_label: FY
+    columns: [positive_share, negative_share]
+    rows:
+      Utilities: [21, 79]
+      Comm. Services: [25, 75]
+      Energy: [33, 67]
+      Consumer Disc.: [45, 55]
+      Financials: [47, 53]
+      Materials: [50, 50]
+      Consumer Staples: [56, 44]
+      Health Care: [72, 28]
+      Industrials: [73, 27]
+      Real Estate: [82, 18]
+      Info. Technology: [88, 12]
+  - report_date: '2026-09-18'
+    page: 20
+    image: 2
+    period_label: Q3
+    columns: [negative_count, positive_count]
+    rows:
+      Consumer Disc.: [11, 3]
+      Health Care: [10, 5]
+      Industrials: [7, 10]
+      Info. Technology: [6, 44]
+      Consumer Staples: [3, 1]
+      Real Estate: [2, 2]
+      Materials: [2, 2]
+      Financials: [1, 2]
+      Comm. Services: [1, 1]
+      Utilities: [0, 2]
+      Energy: [0, 0]
+  - report_date: '2026-09-18'
+    page: 20
+    image: 3
+    period_label: Q3
+    columns: [positive_share, negative_share]
+    rows:
+      Consumer Disc.: [21, 79]
+      Consumer Staples: [25, 75]
+      Health Care: [33, 67]
+      Real Estate: [50, 50]
+      Materials: [50, 50]
+      Comm. Services: [50, 50]
+      Industrials: [59, 41]
+      Financials: [67, 33]
+      Info. Technology: [88, 12]
+      Utilities: [100, 0]
+      Energy: [0, 0]
+  - report_date: '2026-09-18'
+    page: 23
+    image: 2
+    period_label: FY
+    columns: [negative_count, positive_count]
+    rows:
+      Utilities: [25, 4]
+      Industrials: [15, 41]
+      Health Care: [14, 37]
+      Consumer Staples: [11, 14]
+      Consumer Disc.: [11, 11]
+      Financials: [8, 7]
+      Info. Technology: [4, 29]
+      Real Estate: [4, 18]
+      Materials: [4, 4]
+      Comm. Services: [3, 1]
+      Energy: [2, 1]
+  - report_date: '2026-09-18'
+    page: 23
+    image: 3
+    period_label: FY
+    columns: [positive_share, negative_share]
+    rows:
+      Utilities: [14, 86]
+      Comm. Services: [25, 75]
+      Energy: [33, 67]
+      Financials: [47, 53]
+      Consumer Disc.: [50, 50]
+      Materials: [50, 50]
+      Consumer Staples: [56, 44]
+      Health Care: [73, 27]
+      Industrials: [73, 27]
+      Real Estate: [82, 18]
+      Info. Technology: [88, 12]

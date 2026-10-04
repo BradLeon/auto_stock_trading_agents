@@ -1,5 +1,6 @@
+import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,194 @@ sys.path.insert(0, str(ROOT / "src"))
 from ats.schemas.channel import ApprovalRequest, Notification, ReportBundle  # noqa: E402
 from ats.schemas.decision import BossApproval  # noqa: E402
 from ats.schemas.memory import TradeLogEntry  # noqa: E402
+
+# --- managed-queue lease for tests -------------------------------------------
+#
+# Persistent writes are gated: `persistent_queue.require_queue_worker(source_id)`
+# rejects any write unless the process holds a live managed-queue lease, and the
+# production shape of that is `run_worker` claiming a task, injecting four env
+# vars, and spawning `python -m ats.runtime.cli` to do the write. Tests are not
+# that worker, so every test that writes through the data layer needs a lease of
+# its own — without this the suite fails with `PermissionError: persistent
+# ingestion for <source> requires an active managed-queue lease` in 158 places.
+#
+# Two things make the lease honest rather than a blanket bypass:
+#
+# 1. The lease is a REAL queue task in a throwaway database. `valid_source_lease`
+#    still checks status, owner and expiry; the test is genuinely a leased
+#    worker, so a test that corrupts the lease still fails the gate.
+# 2. Its scope is an explicit list, not a wildcard. A write to an uncovered
+#    source still raises, which is what makes a new source id visible instead of
+#    silently tolerated.
+TEST_ONLY_PERSISTENT_SOURCES: frozenset[str] = frozenset({
+    # Identifiers the test suite passes to the collection helpers. They are NOT
+    # catalog sources, so the lease has to name them. A new one surfaces as a
+    # PermissionError in the test that uses it — add it here, do not widen the
+    # check.
+    "tf", "tw_ic_exports", "kr", "ibkr", "model_price",
+})
+
+
+def _grant_write_lease(tmp_path, monkeypatch) -> None:
+    """Isolate the queue database and lease it to this test.
+
+    The lease source id is exported as `ATS_PERSISTENT_QUEUE_SOURCE_ID` because
+    that is how the platform repository resolves the source for its own write
+    path (`platform.py` reads the env var, not the data). Exporting it makes the
+    repository's write match the lease, exactly as `run_worker` does in
+    production, rather than requiring a scope entry for an empty string.
+
+    The lease lives in its OWN database, never in the queue file a test is
+    inspecting. Tests that assert on queue contents (`list() == []`, task counts,
+    dedup behaviour) point `ATS_PERSISTENT_QUEUE_PATH` at their own file and would
+    otherwise see this fixture's lease sitting in it — which is both a false
+    failure and a false signal about the queue.
+    """
+    from ats.data.catalog.structured import StructuredCatalog
+    from ats.data.persistent_queue import PersistentIngestionQueue
+
+    queue_path = tmp_path / "write-lease.sqlite"
+    monkeypatch.setenv("ATS_PERSISTENT_QUEUE_PATH", str(queue_path))
+
+    catalog = StructuredCatalog.load().raw or {}
+    persistent = sorted(
+        source_id for source_id, source in (catalog.get("sources") or {}).items()
+        if (source or {}).get("persistence") == "persistent")
+    scope_sources = sorted({*persistent, *TEST_ONLY_PERSISTENT_SOURCES, ""})
+
+    queue = PersistentIngestionQueue(queue_path)
+    task_id, _created = queue.enqueue(
+        source_id="test-lease",
+        scope={"sources": scope_sources},
+        trigger_kind="manual",
+        trigger_ref="conftest",
+        # Must be an allowlisted ingestion command: the queue rejects anything
+        # else at enqueue time, which is the point of the allowlist.
+        command=["ats", "data", "ingest"],
+        policy_fingerprint="test-lease",
+    )
+    worker_id = "test-worker"
+    assert queue.claim(worker_id, task_id=task_id), "test lease must be claimable"
+
+    monkeypatch.setenv("ATS_PERSISTENT_QUEUE_TASK_ID", task_id)
+    monkeypatch.setenv("ATS_PERSISTENT_QUEUE_LEASE_OWNER", worker_id)
+    monkeypatch.setenv("ATS_PERSISTENT_QUEUE_SOURCE_ID", "test-lease")
+
+
+class _PublishedDocument:
+    """Minimal duck type for `save_document`, which reads these attributes only.
+
+    The data layer accepts a document object rather than keyword arguments, and
+    the only field that matters for versioning is `sha256` — without it no version
+    row is written, which is the usual reason a "published" document turns out not
+    to be one.
+    """
+
+    def __init__(self, *, document_id: str, symbol: str, period: str,
+                 doc_type: str, source: str, text: str, fetched_at: str,
+                 source_url: str = "", title: str = "") -> None:
+        import hashlib
+
+        self.document_id = document_id
+        self.symbol = symbol
+        self.period = period
+        self.doc_type = doc_type
+        self.source = source
+        self.source_url = source_url
+        self.title = title
+        self.text = text
+        self.fetched_at = fetched_at
+        self.sha256 = hashlib.sha256(text.encode()).hexdigest()
+        self.path = None
+        self.version_path = None
+        self.external_id = ""
+        self.published_at = ""
+        self.completeness = "full"
+        self.truncation_reason = ""
+        self.carrier_format = ""
+        self.mime_source = ""
+
+
+@pytest.fixture
+def publish_document():
+    """Publish a document version so neutral facts may cite it.
+
+    `platform.save_evidence_observation` refuses a fact whose document has no
+    published version (`neutral_fact_requires_published_document_version`), and
+    refuses one that cites a version published AFTER the fact was observed
+    (`neutral_fact_cannot_cite_future_document_version`) — a fact may not be
+    supported by material that did not exist when it was seen. A test that writes
+    observations therefore has to publish the document it cites, at a time no later
+    than the observation, which is what this does rather than loosening either gate.
+    """
+    def _publish(store, document_id: str, *, symbol: str = "MU",
+                 period: str = "FY26Q3", doc_type: str = "transcript",
+                 source: str = "test", text: str | None = None,
+                 fetched_at: str = "") -> str:
+        # Default to a time safely BEFORE any observation the test will write:
+        # `NOW`-style stamps are taken at test-body time, which is after the
+        # document was published here, and citing a later version is the failure
+        # this default avoids.
+        stamp = fetched_at or (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        body = text if text is not None else f"published body for {document_id}"
+        store.save_document(_PublishedDocument(
+            document_id=document_id, symbol=symbol, period=period,
+            doc_type=doc_type, source=source, text=body, fetched_at=stamp))
+        return stamp
+
+    return _publish
+
+
+@pytest.fixture(autouse=True)
+def _publish_documents_cited_by_facts(monkeypatch):
+    """Publish the document a neutral fact cites, at write time, inside tests only.
+
+    Why this exists: `save_evidence_observation` requires a fact's document to have
+    a published version, and requires that version to predate the fact. Roughly 60
+    tests write facts directly against a `document_id` they never published — they
+    are testing the FACT behaviour (idempotence, retirement, discovery freeze), not
+    the citation gate, and each would otherwise have to restate the same setup.
+
+    This wraps the single write entry point (`TradingMemory.save_observation`) and,
+    only when the cited document has no version yet, publishes a minimal one dated
+    BEFORE the fact. Both gates therefore still run and still reject anything a
+    test asserts about them — see the tests below that assert the rejections.
+
+    It is deliberately NOT a product change: no production code path gains a
+    bypass, and `publish_document` remains available for tests that want to be
+    explicit about what they published.
+
+    Disable it with `ATS_TEST_NO_AUTO_PUBLISH=1` — required by any test that
+    asserts the citation gates REJECT something, since the hook would otherwise
+    publish the missing document and turn an expected failure into a pass.
+    """
+    from ats.memory.store import TradingMemory
+
+    original = TradingMemory.save_observation
+
+    def save_observation(self, obs, **kwargs):
+        # Checked per call, not at install time: a test sets the env var with
+        # `monkeypatch.setenv` AFTER this fixture has already patched the class, so
+        # an install-time check would enable a hook the test just disabled.
+        if os.environ.get("ATS_TEST_NO_AUTO_PUBLISH") == "1":
+            return original(self, obs, **kwargs)
+        document_id = str(getattr(obs, "document_id", "") or "")
+        if document_id and self.data_store().latest_document_version(document_id) is None:
+            observed_at = getattr(obs, "observed_at", None)
+            stamp = (observed_at - timedelta(minutes=1)).isoformat() if observed_at else ""
+            _publish_cited_document(self, document_id, stamp)
+        return original(self, obs, **kwargs)
+
+    monkeypatch.setattr(TradingMemory, "save_observation", save_observation)
+    yield
+
+
+def _publish_cited_document(store, document_id: str, fetched_at: str) -> None:
+    """Write a minimal published version for `document_id`."""
+    stamp = fetched_at or (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    store.save_document(_PublishedDocument(
+        document_id=document_id, symbol="MU", period="", doc_type="test",
+        source="test", text=f"published body for {document_id}", fetched_at=stamp))
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +215,9 @@ def _isolate_db(tmp_path, monkeypatch):
     # and its outcome would depend on production data.
     monkeypatch.setenv("ATS_DATA_DB_PATH", str(tmp_path / "data.sqlite"))
     monkeypatch.setenv("ATS_DATA_ARTIFACT_ROOT", str(tmp_path / "data_artifacts"))
+    # The managed queue is a persistence surface like the others, and a test
+    # without a lease cannot write at all.
+    _grant_write_lease(tmp_path, monkeypatch)
     from ats.memory import reset_store_cache
     from ats.data.structured import reset_repository_cache
 

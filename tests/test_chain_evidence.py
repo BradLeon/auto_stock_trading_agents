@@ -52,10 +52,11 @@ def _row(**kw):
 
 
 # --- persistence ---------------------------------------------------------- #
-def test_observation_id_is_deterministic_and_idempotent():
+def test_observation_id_is_deterministic_and_idempotent(publish_document):
     """Re-running the observer over the same transcript must not inflate evidence —
     duplicate rows would manufacture corroboration that does not exist."""
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     a, b = _obs(), _obs()
     assert a.id == b.id
     assert store.save_observation(a) is True
@@ -63,14 +64,15 @@ def test_observation_id_is_deterministic_and_idempotent():
     assert len(store.observations(entity="MU")) == 1
 
 
-def test_different_period_is_a_different_observation():
+def test_different_period_is_a_different_observation(publish_document):
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     store.save_observation(_obs(period="FY26Q3"))
     store.save_observation(_obs(period="FY26Q4"))
     assert len(store.observations(entity="MU")) == 2
 
 
-def test_reextraction_retires_the_previous_reading_of_the_same_document():
+def test_reextraction_retires_the_previous_reading_of_the_same_document(publish_document):
     """The id is deterministic over (document, entity, metric, period) — and the model
     rarely reproduces the exact same `metric` label twice. So a re-run mostly writes NEW
     rows beside the old ones, and both readings of the same sentence count as evidence.
@@ -82,6 +84,7 @@ def test_reextraction_retires_the_previous_reading_of_the_same_document():
     re-extraction had already corrected.
     """
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     old = _obs(metric="consolidated_gross_margin", concept="xpu_margin_retention")
     store.save_observation(old)
 
@@ -92,11 +95,12 @@ def test_reextraction_retires_the_previous_reading_of_the_same_document():
     assert len(store.observations(entity="MU", include_superseded=True)) == 1  # not deleted
 
 
-def test_an_observation_the_new_run_reproduces_comes_back_to_life():
+def test_an_observation_the_new_run_reproduces_comes_back_to_life(publish_document):
     """Superseding runs BEFORE the insert, and `save_observation` uses INSERT OR REPLACE
     (drop + re-insert), so `superseded_at` resets to NULL for anything the new extraction
     still produces. What stays retired is exactly what it no longer sees."""
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     store.save_observation(_obs(metric="kept"))
     store.save_observation(_obs(metric="dropped"))
 
@@ -108,11 +112,12 @@ def test_an_observation_the_new_run_reproduces_comes_back_to_life():
     assert len(store.observations(entity="MU", include_superseded=True)) == 2
 
 
-def test_a_failed_reextraction_must_not_retire_good_evidence(monkeypatch):
+def test_a_failed_reextraction_must_not_retire_good_evidence(monkeypatch, publish_document):
     """Superseding is only safe on success. If a re-run errors or returns nothing and we
     had already retired the previous rows, one bad model call would silently empty a
     claim's evidence — and "no evidence" reads as `unknown`, not as an error."""
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     store.save_observation(_obs())
     monkeypatch.setattr(observer, "extract", lambda *a, **k: ([], "模型调用失败"))
 
@@ -288,10 +293,11 @@ def test_observe_document_persists_failure(monkeypatch):
     assert any(f["document_id"] == "doc-9" and "实体歧义" in f["reason"] for f in failures)
 
 
-def test_freeze_as_discovery_marks_rows():
+def test_freeze_as_discovery_marks_rows(publish_document):
     """Material that MADE us notice a proposition may explain 'why look' but must
     never also count as 'it is true' (docs/CHAIN_EVIDENCE.md §6.5)."""
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     o = _obs()
     store.save_observation(o)
     assert store.freeze_as_discovery([o.id]) == 1
@@ -299,7 +305,7 @@ def test_freeze_as_discovery_marks_rows():
     assert row["discovery_evidence"] == 1
 
 
-def test_discovery_freeze_survives_reprocessing():
+def test_discovery_freeze_survives_reprocessing(publish_document):
     """The freeze must be sticky.
 
     freeze_as_discovery is set by the induction step; the observer may later re-read
@@ -308,6 +314,7 @@ def test_discovery_freeze_survives_reprocessing():
     guard would fail silently, which is the worst way for it to fail.
     """
     store = get_store()
+    publish_document(store, "mu-fy26q3")
     o = _obs()
     store.save_observation(o)
     store.freeze_as_discovery([o.id])
@@ -358,7 +365,7 @@ def test_evidence_covers_targets_not_only_the_observe_list(monkeypatch):
     assert set(seen) == {"SKHY", "MU"}, "a target's filing is evidence too"
 
 
-def test_already_extracted_document_is_not_fetched_again(monkeypatch):
+def test_already_extracted_document_is_not_fetched_again(monkeypatch, publish_document):
     """Document-level idempotence: both windows attempt an unknown-session print and
     the lookback spans days, so re-reading would burn a fetch and an LLM call each time."""
     from ats import config
@@ -377,6 +384,7 @@ def test_already_extracted_document_is_not_fetched_again(monkeypatch):
 
     monkeypatch.setattr("ats.data.earnings_calendar.last_print", lambda *a, **k: _Print())
     # Pre-seed an observation from that exact filing.
+    publish_document(get_store(), "MU:20260805")
     get_store().save_observation(_obs(document_id="MU:20260805"))
 
     monkeypatch.setattr("ats.data.transcript.fetch",

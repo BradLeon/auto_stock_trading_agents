@@ -242,6 +242,13 @@ def test_manual_structured_ingest_cli_only_enqueues(monkeypatch, capsys):
             return {"status": "queued"}
 
     monkeypatch.setattr("ats.data.persistent_queue.PersistentIngestionQueue", Queue)
+    # The subject is "a manual CLI ingest ENQUEUES rather than writing", so this
+    # must run as an operator would: no managed-queue lease. The suite's own lease
+    # is cleared here, because leaving it set makes the CLI take the worker branch
+    # (which asks the queue for a lease) instead of the enqueue branch under test.
+    for name in ("ATS_PERSISTENT_QUEUE_TASK_ID", "ATS_PERSISTENT_QUEUE_LEASE_OWNER",
+                 "ATS_PERSISTENT_QUEUE_SOURCE_ID"):
+        monkeypatch.delenv(name, raising=False)
     code = cli.main(["data", "ingest", "--source", "yfinance_consensus", "--entity", "MSFT"])
 
     assert code == 0

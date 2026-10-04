@@ -263,8 +263,13 @@ def test_collect_articles_is_wired_into_the_weekly_job():
     from ats.runtime import scheduler
 
     src = inspect.getsource(scheduler._cross_section_weekly)
-    assert "research_pipeline.ingest_configured" in src
-    assert src.index("ingest_configured(") < src.index("chain_report.write")
+    # Acquisition is a managed, data-only queue task now: the weekly job enqueues
+    # it rather than collecting in-process, because the queue is the single writer
+    # for persistent sources.
+    assert "_run_managed_article_ingestion" in src
+    # It must still run BEFORE the report renders, or the report shows last week's
+    # articles beside this week's filings.
+    assert src.index("_run_managed_article_ingestion(") < src.index("chain_report.write")
 
 
 def test_an_article_source_outage_does_not_break_the_weekly_job():
@@ -275,7 +280,7 @@ def test_an_article_source_outage_does_not_break_the_weekly_job():
     from ats.runtime import scheduler
 
     src = inspect.getsource(scheduler._cross_section_weekly)
-    after = src[src.index("research_pipeline.ingest_configured("):]
+    after = src[src.index("_run_managed_article_ingestion("):]
     assert "except Exception" in after.split("chain_report")[0]
 
 

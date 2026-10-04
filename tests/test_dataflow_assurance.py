@@ -359,17 +359,30 @@ def test_incomplete_fingerprint_registry_is_rejected(recorder, required_inputs,
 
 
 def test_dependency_content_change_invalidates_the_evidence(recorder, required_inputs,
-                                                            sec_failure, rollback_proof,
-                                                            tmp_path):
+                                                            sec_failure, rollback_proof):
     """The fingerprint is over content, not over the file's existence."""
-    recorder.qualify_all(inputs=required_inputs, sec=sec_failure, proofs=rollback_proof)
-    dependency = tmp_path / "proof.txt"
-    dependency.write_text("v1", encoding="utf-8")
-    recorder.record("read", dependencies=recorder.paths + [str(dependency)])
-    assert recorder.query()["status"] == "eligible"
+    import shutil
+    import uuid
 
-    dependency.write_text("v2", encoding="utf-8")
-    assert recorder.query()["status"] == "ineligible"
+    recorder.qualify_all(inputs=required_inputs, sec=sec_failure, proofs=rollback_proof)
+    # `assurance._dependencies` requires every fingerprint path to resolve INSIDE
+    # the repository, so the probe file cannot live in pytest's basetemp: that
+    # directory is inside the repo for the default run and outside it for a
+    # worktree run, which made this test pass or fail depending on where the
+    # suite was invoked. The acceptance script places it under var/ for the same
+    # reason.
+    scratch = REPO_ROOT / "var" / f"pytest-fingerprint-{uuid.uuid4().hex[:8]}"
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        dependency = scratch / "proof.txt"
+        dependency.write_text("v1", encoding="utf-8")
+        recorder.record("read", dependencies=recorder.paths + [str(dependency)])
+        assert recorder.query()["status"] == "eligible"
+
+        dependency.write_text("v2", encoding="utf-8")
+        assert recorder.query()["status"] == "ineligible"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_evidence_expires_on_its_own_ttl_not_on_report_age(recorder, required_inputs,

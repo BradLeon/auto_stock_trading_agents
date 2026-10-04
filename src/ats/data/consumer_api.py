@@ -166,6 +166,8 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             stamps = [stamp] if stamp else []
             if state.completeness.status != "complete":
                 status = "partial"
+                gaps.append("ledger_degraded:" + state.completeness.model_dump_json())
+            refs = [f"internal-snapshot:{product}:{stamp}"] if stamp else []
             if not stamp:
                 gaps.append("source_timestamp_or_reconciliation_missing")
         elif product == "MARKET_DATA":
@@ -185,30 +187,24 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 status = "complete" if good and len(good) == len(payload) else "partial" if good else "unavailable"
         elif product == "RISK_RULES":
             from ..config import get_config
-            cfg = risk_config if risk_config is not None else get_config().risk
+            cfg = risk_config if risk_config is not None else get_config().app.risk
             payload = _json(cfg)
             import json
             refs = ["ruleset:" + sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()]
             status = "complete"
         elif product == "BROKER_STATE":
-            from .runtime.broker import portfolio_snapshot
-            payload = portfolio_snapshot(broker)
+            from .runtime.broker import broker_state
+            payload = broker_state(broker)
             status = payload["status"]
             stamps = [payload["source_as_of"]] if payload["source_as_of"] else []
-            # Preserve separate failure states for orders and fills.
-            for key, method in (("orders", "completed_orders"), ("fills", "get_fills")):
-                try:
-                    payload[key] = _json(getattr(broker, method)())
-                    if not isinstance(payload[key], list):
-                        raise ValueError("broker_query_not_a_collection")
-                except Exception as exc:
-                    payload[key] = None
-                    status = "partial" if payload["payload"] is not None else "unavailable"
-                    gaps.append(f"broker_{key}_failed:{type(exc).__name__}")
+            refs = [f"broker-snapshot:{payload['source_as_of']}"] if stamps else []
+            if payload["reason"]:
+                gaps.append(payload["reason"])
         elif product == "DECISION_APPROVAL_CONTEXT":
             if audit is None:
                 raise ValueError("decision_audit_required")
-            payload = audit.read_chain(scope["cycle_id"])
+            payload = (audit.read_chain(scope["cycle_id"]) if audit.get_cycle(scope["cycle_id"])
+                       else {"cycle": None})
             status = "complete" if payload["cycle"] else "no_coverage"
             refs = [scope["cycle_id"]] if payload["cycle"] else []
             stamps = [str(payload["cycle"]["updated_at"])] if payload["cycle"] else []
@@ -217,7 +213,12 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             if audit is None:
                 raise ValueError("decision_audit_required")
             auth = build_authorization(audit, scope["cycle_id"])
-            reasons = validate_authorization(audit, auth, snapshot_as_of=scope.get("snapshot_as_of"),
+            snapshot_as_of = scope.get("snapshot_as_of")
+            if isinstance(snapshot_as_of, str):
+                snapshot_as_of = datetime.fromisoformat(snapshot_as_of.replace("Z", "+00:00"))
+            if snapshot_as_of is not None and snapshot_as_of.tzinfo is None:
+                raise ValueError("snapshot_as_of must be timezone-aware")
+            reasons = validate_authorization(audit, auth, snapshot_as_of=snapshot_as_of,
                                              now=queried_at)
             if reasons:
                 gaps.extend(reasons)

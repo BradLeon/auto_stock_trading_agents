@@ -1,0 +1,230 @@
+{
+  "schema_version": "task4-runtime-roles-v1",
+  "checked_at": "2026-10-04T00:50:50.954755+00:00",
+  "production_qualification_granted": false,
+  "orders_submitted": 0,
+  "production_routes_changed": false,
+  "runtime_persisted": false,
+  "proofs": [
+    {
+      "role": "technical",
+      "product": "MARKET_DATA",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "3e11820d91451cb116731374fc45f183fe81b8f2673c409c7586c9b13876a317",
+      "scope_hash": "48d5e0b82056901ee829034ba06e540148cf8104df7cc3eab26008720dc363d0",
+      "source_as_of": [
+        "2026-10-02"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "risk",
+      "product": "MARKET_DATA",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "3e11820d91451cb116731374fc45f183fe81b8f2673c409c7586c9b13876a317",
+      "scope_hash": "48d5e0b82056901ee829034ba06e540148cf8104df7cc3eab26008720dc363d0",
+      "source_as_of": [
+        "2026-10-02"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "chief",
+      "product": "PORTFOLIO_DATA",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "22cca0629217835fd3db6f889cf0bb514723f3c657a028f9906578e6f8aea1da",
+      "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "source_as_of": [
+        "2026-10-04T00:51:02.673001+00:00"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "chief",
+      "product": "HISTORY_DATA",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "02ab9b72bb12010eb3a2108fbda4cfb30623cf0a110e6d93d23a98e77174456d",
+      "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "source_as_of": [
+        "2026-10-04T00:51:02.673001+00:00"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "risk",
+      "product": "PORTFOLIO_DATA",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "22cca0629217835fd3db6f889cf0bb514723f3c657a028f9906578e6f8aea1da",
+      "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "source_as_of": [
+        "2026-10-04T00:51:02.673001+00:00"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "risk",
+      "product": "RISK_RULES",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "4c98ad5247b43f8e0b2e05c48351a4561c8c5371823e1faa2b5bb2bc67ee208b",
+      "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "source_as_of": [],
+      "read_only": true
+    },
+    {
+      "role": "trader",
+      "product": "APPROVED_EXECUTION_AUTHORIZATION",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "235753898b10f4b440b8e38ca84457d86b5f2e05128d092d1ce46abe55a8168f",
+      "scope_hash": "1a06f88fe371d8a6c756d3f7f0802824788eeb9f81fe5904e8397a27e4d91b40",
+      "source_as_of": [
+        "2026-10-04T00:51:02+00:00",
+        "2026-10-04T00:51:02.673001+00:00"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "clerk",
+      "product": "DECISION_APPROVAL_CONTEXT",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "81abd86657091ab0c9f611b14bdbe0c76bdc0f7c445e6655f02bb2d947acb259",
+      "scope_hash": "2626875b4cb1dad54b547ca6160bb170f987c7339c23409200c50c845d5948c6",
+      "source_as_of": [
+        "2026-10-04T00:51:02+00:00"
+      ],
+      "read_only": true
+    },
+    {
+      "role": "clerk",
+      "product": "BROKER_STATE",
+      "status": "passed",
+      "positive": "complete",
+      "fault": "unavailable",
+      "fallback_equal": true,
+      "restored_equal": true,
+      "payload_hash": "09c7ce685de19cfc9b1f67cde41b5b2f2fed762c9ce2d770b5d6d372d62629d9",
+      "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "source_as_of": [
+        "2026-10-04T00:50:59.549091Z"
+      ],
+      "read_only": true
+    }
+  ],
+  "live": {
+    "broker": {
+      "status": "complete",
+      "source_as_of": "2026-10-04T00:50:59.549091Z",
+      "orders_count": 0,
+      "fills_count": 0
+    },
+    "market": {
+      "NVDA": {
+        "status": "succeeded",
+        "bar_as_of": "2026-10-02",
+        "count": 251
+      }
+    },
+    "options": {
+      "status": "partial",
+      "source_as_of": null,
+      "reason": "source_timestamp_or_metrics_missing"
+    }
+  },
+  "production_internal": {
+    "chief:PORTFOLIO_DATA": {
+      "status": "partial",
+      "source_as_of": [
+        "2026-08-31T15:18:10.473960+00:00"
+      ],
+      "completeness": {
+        "status": "degraded",
+        "unreconciled_windows": 0,
+        "unattributed_fills": 0,
+        "broken_links": 9,
+        "last_reconcile_at": "2026-08-31T20:10:04.868631+00:00"
+      },
+      "payload_hash": "0a6702911ee9414b8199e06d08d58a8e60cfe94d31684651c21e4feaef28597d"
+    },
+    "chief:HISTORY_DATA": {
+      "status": "partial",
+      "source_as_of": [
+        "2026-08-31T20:10:04.868631+00:00"
+      ],
+      "completeness": {
+        "status": "degraded",
+        "unreconciled_windows": 0,
+        "unattributed_fills": 0,
+        "broken_links": 9,
+        "last_reconcile_at": "2026-08-31T20:10:04.868631+00:00"
+      },
+      "payload_hash": "17f3fd9dd38d298a16bbdc199eea46517c0b0cff21b1d7ab9a048d75b12aeef7"
+    },
+    "risk:PORTFOLIO_DATA": {
+      "status": "partial",
+      "source_as_of": [
+        "2026-08-31T15:18:10.473960+00:00"
+      ],
+      "completeness": {
+        "status": "degraded",
+        "unreconciled_windows": 0,
+        "unattributed_fills": 0,
+        "broken_links": 9,
+        "last_reconcile_at": "2026-08-31T20:10:04.868631+00:00"
+      },
+      "payload_hash": "0a6702911ee9414b8199e06d08d58a8e60cfe94d31684651c21e4feaef28597d"
+    },
+    "cycles_count": 0
+  },
+  "checks": [
+    "options_status_payload_fault_verified",
+    "readonly_reopen_approval_context_account_preserved",
+    "missing_cycle_explicit",
+    "broker_failed_orders_partial",
+    "healthy_empty_orders_fills_complete",
+    "stale_authorization_rejected",
+    "broken_ledger_remains_partial",
+    "legacy_metadata_null_projection_readable",
+    "invalid_account_value_rejected",
+    "superseded_revision_not_authorized"
+  ],
+  "passed": true,
+  "code_config_fingerprints": {
+    "src/ats/data/consumer_api.py": "cf732809bfaff74ec80ad45831d70da23cb1f48c2eef3d53dbb1435879e233a8",
+    "src/ats/data/runtime/broker.py": "be835947b8b985c4ca23a24b9a1fb9467b52030d135d8a2cc5285dd3bf53a598",
+    "src/ats/execution/state_api.py": "a49d299614e3e23f1e0d480214e6a970d5b5886a801d4cc8e24aa84dcb014772",
+    "config/data/target_dataflow_coverage.yaml": "91d24e83d70f0f4674f896dd47db5f5b500c5aa6133477bd3d6ba8b564c22875",
+    "scripts/verify_dataflow_runtime_roles.py": "1b83f1553030a22054f86eea889dafd5d9ef0f96441fdafa59cf6937a7384663"
+  },
+  "isolated_audit_not_production_approval": true
+}

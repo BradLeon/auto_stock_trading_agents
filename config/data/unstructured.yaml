@@ -296,6 +296,9 @@ sources:
     cadence: event_from_index
     request_budget: {max_documents_per_run: 20, max_requests_per_run: 20, timeout_seconds: 30}
     policy:
+      input_optional: true
+      cutover_blocking: false
+      optional_policy_version: sec-body-optional-v1
       discovery_source: defeatbeta_sec_filing_index
       permission: public_official_disclosure
       require_accession: true

@@ -2034,6 +2034,7 @@ def run_data(
     evidence_type: str = "",
     evidence_outcome: str = "",
     evidence_scope_json: str = "{}",
+    evidence_details_json: str = "{}",
     evidence_summary: str = "",
     evidence_command_summary: str = "",
     evidence_environment_names: list[str] | None = None,
@@ -2156,6 +2157,7 @@ def run_data(
                 result_summary=evidence_summary,
                 environment_names=evidence_environment_names,
                 prerequisite_event_ids=evidence_prerequisites,
+                details=json.loads(evidence_details_json),
                 dependency_paths=evidence_fingerprint_paths,
                 db_path=db_path or None)}
         elif value == "revoke":
@@ -3109,6 +3111,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="assurance record: evidence outcome")
     data.add_argument("--scope-json", dest="evidence_scope_json", default="{}",
                       help="assurance: exact JSON scope shared by all evidence")
+    data.add_argument("--evidence-details-json", default="{}",
+                      help="assurance record: source statuses and per-product rollback proof; no raw text")
     data.add_argument("--summary", dest="evidence_summary", default="",
                       help="assurance record: sanitized result summary")
     data.add_argument("--command-summary", dest="evidence_command_summary", default="",
@@ -3545,6 +3549,7 @@ def main(argv: list[str] | None = None) -> int:
             assurance_consumer=args.assurance_consumer,
             assurance_domain=args.assurance_domain,
             assurance_contract_version=args.assurance_contract_version,
+            evidence_details_json=args.evidence_details_json,
             evidence_type=args.evidence_type,
             evidence_outcome=args.evidence_outcome,
             evidence_scope_json=args.evidence_scope_json,

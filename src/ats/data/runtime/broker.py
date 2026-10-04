@@ -3,6 +3,25 @@
 from datetime import datetime, timezone
 
 
+def broker_state(broker) -> dict:
+    """Read account, completed orders and executions, without ledger writes."""
+    envelope = portfolio_snapshot(broker)
+    errors = [envelope["reason"]] if envelope["reason"] else []
+    for key, method in (("orders", "completed_orders"), ("fills", "get_fills")):
+        try:
+            values = getattr(broker, method)()
+            if not isinstance(values, list):
+                raise ValueError("broker_query_not_a_collection")
+            envelope[key] = [v.model_dump(mode="json") if hasattr(v, "model_dump") else v
+                             for v in values]
+        except Exception as exc:
+            envelope[key] = None
+            envelope["status"] = "partial" if envelope["payload"] is not None else "unavailable"
+            errors.append(f"broker_{key}_failed:{type(exc).__name__}")
+    envelope["reason"] = ";".join(errors)
+    return envelope
+
+
 def portfolio_snapshot(broker) -> dict:
     queried_at = datetime.now(timezone.utc)
     envelope = {"schema_version": "runtime-broker-v1", "owner": "ats.data.runtime",

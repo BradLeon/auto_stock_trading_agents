@@ -86,6 +86,30 @@ def validate_target_contract(path: str | Path | None = None) -> dict[str, Any]:
     manifest_path = Path(path) if path else REPO_ROOT / "config/data/target_dataflow_coverage.yaml"
     raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     errors: list[str] = _agent_import_violations(REPO_ROOT)
+    policy = raw.get("qualification_policy") or {}
+    optional = policy.get("optional_inputs") or {}
+    if set(optional) != {"sec_edgar_filing_body"}:
+        errors.append("qualification_only_sec_body_may_be_optional")
+    sec = optional.get("sec_edgar_filing_body") or {}
+    registry = yaml.safe_load((REPO_ROOT / "config/data/unstructured.yaml").read_text())
+    source_policy = registry["sources"]["sec_edgar_filing_body"]["policy"]
+    if (sec.get("dataset") != "sec_filing_documents" or sec.get("optional") is not True
+            or sec.get("blocking") is not False or not sec.get("policy_version")
+            or source_policy.get("input_optional") is not True
+            or source_policy.get("cutover_blocking") is not False
+            or source_policy.get("optional_policy_version") != sec.get("policy_version")):
+        errors.append("sec_optional_registry_and_qualification_policy_mismatch")
+    if set(sec.get("required_checks", [])) != {
+            "empty_input_safe", "error_visible", "no_risk_inference", "invalid_material_rejected"}:
+        errors.append("sec_optional_input_checks_must_not_be_waived")
+    if set(policy.get("required_inputs", {}).get("fundamental", [])) != {
+            "company_financials", "defeatbeta_sec_filing_index", "defeatbeta_earnings_transcript"}:
+        errors.append("fundamental_required_sources_must_not_be_waived")
+    if set(policy.get("rollback_routes", {})) != set(EXPECTED_INPUT_MODES):
+        errors.append("rollback_routes_must_cover_all_products")
+    for api in policy.get("rollback_routes", {}).values():
+        if not _api_exists(api, REPO_ROOT):
+            errors.append(f"nonexistent_rollback_api:{api}")
     consumers = {str(row.get("id")): row for row in raw.get("consumers", [])}
     input_contracts = raw.get("data_input_contracts") or {}
     expected_input_ids = set().union(*EXPECTED_PRODUCTS.values())

@@ -61,12 +61,17 @@ FactSet 关联子专项：`generalize-factset-report-ingestion` 独立处理跨�
 
 ## 4. 切流资格与回滚证据
 
-- [ ] 4.6 落实已确认的 SEC 原文可选输入例外：在覆盖配置和资格计算中区分 source status 与 optional/non-blocking 属性；保留失败原因、时间及 task/run 引用。验证“仅 SEC 原文为空，其余证据齐备 → eligible 且带缺口”“财务报表/电话会或其他必需证据失败 → 仍 ineligible”“错误材料不得发布”“空值不冒充无风险/已审阅”。不要求 SEC 真实抓取成功才能通过该例外的降级验收，不自动启用 SEC job 或执行切流。
+2026-10-03 完成复核：4.1–4.3 补齐并验证前置证据递归检查、逐产品 scope/回退证明、角色指纹及失效隔离；4.4 逐十角色演练真实缓存原生回退，五个研究角色样本可读，其余行情/旧账本/当前批准链/只读 broker 回退缺口保持 ineligible，不恢复 Memory 事实表或修复旧路径；4.5 四类 CLI 在隔离账本实跑并更新 runbook；4.6 SEC 状态与 optional/non-blocking 分离，独立验证空值、错误可见性及坏材料拒绝，财务/电话会/SEC 索引不豁免。24 个资格状态/故障检查和52项定向回归通过，Tasks3缓存回放再次通过；无重复采集、无生产资格签发或切流。证据、逐角色拒绝原因及旧测试问题见 `docs/validation/TARGET_DATAFLOW_TASK4_ACCEPTANCE.md` / `TARGET_DATAFLOW_TASK4_REPLAY.json`；可重放入口为 `scripts/verify_dataflow_qualification.py`。任务完成不代表所有消费者 eligible。
+
+- [x] 4.6 落实已确认的 SEC 原文可选输入例外：在覆盖配置和资格计算中区分 source status 与 optional/non-blocking 属性；保留失败原因、时间及 task/run 引用。验证“仅 SEC 原文为空，其余证据齐备 → eligible 且带缺口”“财务报表/电话会或其他必需证据失败 → 仍 ineligible”“错误材料不得发布”“空值不冒充无风险/已审阅”。不要求 SEC 真实抓取成功才能通过该例外的降级验收，不自动启用 SEC job 或执行切流。
 
 - [x] 4.1 实现或复用追加式验证记录，包含清单版本、代码/config 指纹、范围、as-of、命令/环境摘要、前置证据、结果和时间；生成可版本化的脱敏摘要。已新增 `ats.data.assurance.record_evidence`，仅在 Data DB 追加脱敏事件；fingerprint path 必须在仓库内，环境仅存变量名。
 - [x] 4.2 为 `domain_id + consumer_id + contract_version` 建立只读资格查询，只有写入、准入/发布、读取、血缘、完整性、旧新对账及回滚证据齐备才返回 `eligible`。`config/data/target_dataflow_coverage.yaml` 为每个 consumer 声明版本和必需证据，`ats.data.assurance.qualification` 按 exact scope 独立计算资格；隔离账本重放验证缺证据 fail-closed 与完整证据通过。
 - [x] 4.3 实现证据过期、依赖指纹变化、缺口或撤销时的 fail-closed 行为；验证单个消费者失效不错误影响其他已独立验收的消费者。资格查询逐证据检查 TTL、manifest hash、依赖文件 hash 和追加式撤销记录；不同 consumer/scope 独立查询，隔离重放覆盖过期、撤销与缺证据。
-- [ ] 4.4 对每个候选消费者演练回到已知稳定路由并确认数据可读；无真实回退路径者标记 `ineligible`，不得恢复已退役 Workflow Memory 事实表。
+- [x] 4.4 对每个候选消费者演练回到已知稳定路由并确认数据可读；无真实回退路径者标记 `ineligible`，不得恢复已退役 Workflow Memory 事实表。
+  - 2026-10-04 用户复核后重开：此前把未执行查询、旧账本读取失败和预期拒绝统称为完成，证据不足。补验剩余五个角色的正向输入、实际查询/隔离审批链、故障及只读回退；在完成前不勾选。
+  - 2026-10-04 补验：Technical/Chief/Risk/Trader/Clerk 的 9 条输入边均实际跑过正向、故障、原生回退和恢复；实时日线及只读 TWS 成功，授权/内部完整账本为隔离样本，另验 10 项负向/恢复检查。新 API 修正只读 broker 回退、ISO 审批时间转换、账户/绩效事实投影及无 cycle 明确 no_coverage。实际账本 9 条断链仍 partial，Yahoo 期权来源时间缺失仍 partial；因此本任务保持未完成，不把隔离正向结果视为生产完整性通过。证据见 `TARGET_DATAFLOW_TASK4_ACCEPTANCE.md` 新增补验节及 `TARGET_DATAFLOW_TASK4_RUNTIME_ROLES.json`。扩展回归 55 passed/1 旧日期窗口测试失败，未修旧路径；没有生产批准、切流或下单。
+  - 2026-10-04 补验后确认完成：用户确认可以标记通过。完成范围为十角色的只读回退/恢复验证，包括新增五角色的 9 条输入边；上条“保持未完成”为确认前的历史状态。期权来源时间缺失、旧账本 9 条断链和生产无 cycle 仍如实记录，受影响输入保持 partial/ineligible，不提升为生产完整性通过，不签发生产授权或切流资格。后续 Tasks 5 按逐域/消费者汇总这些缺口与门禁结果。
 - [x] 4.5 提供 Phase F 可调用的资格检查接口和运维 runbook，但保持当前读取模式不变，不在本 change 切换 schedule 或 live Trader。只读 Python API 与 `ats data assurance query/record/revoke` CLI 已提供；未改当前 consumer routing、Scheduler 或 Trader。操作说明见 `docs/validation/DATAFLOW_ASSURANCE_RUNBOOK.md`。
 
 ## 5. 专项门禁与交付

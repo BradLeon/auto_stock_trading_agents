@@ -80,7 +80,21 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     from ..trader import analytics
 
     comp = completeness(store)
-    perf_row = store.last_performance()
+    # Project only account fields. Legacy decision metadata (e.g. a null
+    # invalidation_source) is not part of this read contract. Never rewrite
+    # historical records or suppress their reconciliation gaps.
+    from pydantic import AwareDatetime, FiniteFloat
+
+    class AccountSnapshot(BaseModel):
+        as_of: AwareDatetime
+        net_liquidation: FiniteFloat
+        daily_pnl: FiniteFloat
+        cumulative_pnl: FiniteFloat
+        account_id: str | None = None
+
+    row = store.conn.execute(
+        "SELECT payload FROM performance ORDER BY rowid DESC LIMIT 1").fetchone()
+    perf_row = AccountSnapshot.model_validate_json(row["payload"]) if row else None
     portfolio = {}
     if perf_row is not None:
         portfolio = {"net_liquidation": perf_row.net_liquidation,
@@ -103,7 +117,14 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
                for r in store.conn.execute(
                    "SELECT net_liquidation, cumulative_pnl FROM performance "
                    "ORDER BY as_of").fetchall()]
-    episodes = store.list_episodes(limit=10_000)
+    class EpisodePerformance(BaseModel):
+        status: Literal["open", "closed"]
+        realized_pnl: FiniteFloat | None = None
+
+    # Analytics consumes these two factual columns only, not the legacy
+    # episode decision/invalidation metadata. Invalid factual values still fail.
+    episodes = [EpisodePerformance.model_validate(dict(r)) for r in store.conn.execute(
+        "SELECT status, realized_pnl FROM trade_episodes ORDER BY opened_at DESC LIMIT 10000")]
     performance = analytics.summarize(history, episodes)
 
     attribution = None

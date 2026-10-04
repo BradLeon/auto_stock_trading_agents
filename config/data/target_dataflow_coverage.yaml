@@ -411,6 +411,43 @@ edges:
   - {id: opinion_boundary, from: MEMORY, to: ISOLATION, owner: ats.data.stores.ownership, verify: opinion_write_rejection}
   - {id: governance_structured, from: GOVERNANCE, to: OBS, owner: ats.data, verify: source_quality_cost_lineage}
   - {id: governance_unstructured, from: GOVERNANCE, to: DOCS, owner: ats.data, verify: source_quality_cost_lineage}
+qualification_policy:
+  version: target-qualification-v2
+  required_fingerprint_paths:
+    - src/ats/data/assurance.py
+    - src/ats/data/consumer_api.py
+    - config/data/structured.yaml
+    - config/data/unstructured.yaml
+  consumer_fingerprint_paths:
+    risk: [config/risk.yaml, src/ats/execution/state_api.py]
+    chief: [src/ats/execution/state_api.py]
+    trader: [src/ats/execution/authorization.py, src/ats/decision/repository.py]
+    clerk: [src/ats/execution/clerk.py, src/ats/decision/repository.py]
+  optional_inputs:
+    sec_edgar_filing_body:
+      dataset: sec_filing_documents
+      optional: true
+      blocking: false
+      policy_version: sec-body-optional-v1
+      required_checks: [empty_input_safe, error_visible, no_risk_inference, invalid_material_rejected]
+  required_inputs:
+    fundamental: [company_financials, defeatbeta_sec_filing_index, defeatbeta_earnings_transcript]
+  required_status_inputs:
+    fundamental: [sec_edgar_filing_body]
+  # Stable native APIs below are fallback candidates, NOT assertions of qualification.
+  # Every product must be exercised; unavailable/incomplete routes remain ineligible.
+  rollback_routes:
+    HIER_DATA: ats.data.products.base.DataProducts.metric_series
+    DOC_DATA: ats.data.products.unstructured.admitted_documents
+    COMPANY_DATA: ats.data.products.base.DataProducts.metric_series
+    MACRO_DATA: ats.data.products.base.DataProducts.metric_series
+    MARKET_DATA: ats.data.runtime.market_data.fetch_close_history_many
+    PORTFOLIO_DATA: ats.execution.state_api.get_internal_state
+    HISTORY_DATA: ats.execution.state_api.get_internal_state
+    RISK_RULES: ats.config.get_config
+    APPROVED_EXECUTION_AUTHORIZATION: ats.execution.authorization.validate_authorization
+    BROKER_STATE: ats.data.runtime.broker.broker_state
+    DECISION_APPROVAL_CONTEXT: ats.decision.repository.DecisionAuditRepository.read_chain
 consumers:
   - id: layer
     domain: hierarchy
@@ -552,7 +589,7 @@ consumers:
     domain: execution_authorization
     contract_version: target-dataflow-v1
     evidence_ttl_days: 1
-    required_evidence: [authorization, revision_hash, broker_submit_boundary, idempotency]
+    required_evidence: [authorization, revision_hash, broker_submit_boundary, idempotency, fallback]
     products: [APPROVED_EXECUTION_AUTHORIZATION]
     read_api: ats.data.consumer_api.read_input
     legacy_read_api: ats.execution.authorization.build_authorization + ats.execution.authorization.validate_authorization
@@ -572,7 +609,7 @@ consumers:
     required_evidence: [broker_read, reconciliation, partial_fill, idempotency, fallback]
     products: [BROKER_STATE, DECISION_APPROVAL_CONTEXT]
     read_api: ats.data.consumer_api.read_input
-    legacy_read_api: ats.execution.clerk.clerk_run
+    legacy_read_api: ats.data.runtime.broker.broker_state + ats.decision.repository.DecisionAuditRepository.read_chain
     owner: ats.execution.clerk
     vintage: broker_report_time_and_reconcile_time
     completeness: reconciliation_gap_counts

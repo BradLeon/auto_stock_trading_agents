@@ -143,8 +143,15 @@ def test_calendar_refresh_cli_branch_uses_module_os_without_local_import_error(
     from ats.runtime import cli
 
     monkeypatch.setattr("ats.data.persistent_queue.require_queue_worker", lambda _: None)
+    # The stub returns exactly the fields the CLI reads back. `source_run_id` is
+    # one of them: the CLI records lineage against the task whenever
+    # ATS_PERSISTENT_QUEUE_TASK_ID is set, and the suite's own write lease sets it,
+    # so a stub missing that key fails with a KeyError that has nothing to do with
+    # what this test is about (the `os` import shadowing).
     monkeypatch.setattr("ats.data.calendar_refresh.refresh_schedule_calendar", lambda **_: {
-        "sources": [{"source_id": "federal_reserve_fomc", "status": "complete"}],
+        "sources": [{"source_id": "federal_reserve_fomc", "status": "complete",
+                     "source_run_id": "run-fomc", "raw_artifact_id": "raw-fomc",
+                     "candidate_ids": []}],
         "manual_overlay": [], "release_reconciliation": {"status": "not_requested"},
         "release_ready_events": [], "as_of": "2026-09-24T12:00:00+00:00",
     })

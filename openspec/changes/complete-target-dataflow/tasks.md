@@ -76,8 +76,8 @@ FactSet 关联子专项：`generalize-factset-report-ingestion` 独立处理跨�
 
 ## 5. 专项门禁与交付
 
-- [ ] 5.1 执行可重放的正常、来源故障、陈旧、准入拒绝、修订/as-of、血缘读回、观点隔离、重复刷新和预算限制检查；保存命令、结果与缺口摘要，不能只引用 mock 成功。
-- [ ] 5.2 逐域/消费者发布通过或拒绝的门禁清单，未通过项保持稳定旧路由并注明 owner、阻塞原因和后续处理；不以专项整体完成代替逐路径资格。
-- [ ] 5.3 更新 Dataflow 架构与运维文档，明确单一 catalog 加载入口、两份权威领域 registry、Layer A/B/C 来源差异、Evidence Observer 退役映射、持久化采集队列、真实刷新 owner、逐角色消费者契约和 Phase F 读取资格用法；登记待退 legacy registry/采集入口，不执行物理清除。
-- [ ] 5.4 运行 OpenSpec strict validation、相关数据/架构守卫与回滚验证，记录环境及结果；本地 `tests/` 可用于验证但不得作为唯一或需推送的验收产物。
+- [x] 5.1 执行可重放的正常、来源故障、陈旧、准入拒绝、修订/as-of、血缘读回、观点隔离、重复刷新和预算限制检查；保存命令、结果与缺口摘要，不能只引用 mock 成功。复用 Tasks 2/3/4 的逐源真实运行与缓存回放，新增只读汇总执行器核验六个结构化来源状态、固定文档与日历回放、队列/预算既有验证、16 条 consumer 边、24 项资格故障检查及本轮九条运行时回退证明；未重复抓取上游数据。命令及矩阵见 `docs/validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md`，机器结果见 `TARGET_DATAFLOW_TASK5_RECONCILIATION.json`。
+- [x] 5.2 逐域/消费者发布通过或拒绝的门禁清单，未通过项保持稳定旧路由并注明 owner、阻塞原因和后续处理；不以专项整体完成代替逐路径资格。逐角色对实际资格账本作只读 exact-scope 查询；10/10 ineligible，分别列缺少的 required evidence 与合同登记的旧入口。无证据项不签发资格，部分运行时/账本缺口保留 partial；详见 Task 5 报告及机器 JSON。未改变 source/consumer 开关。
+- [x] 5.3 更新 Dataflow 架构与运维文档，明确单一 catalog 加载入口、两份权威领域 registry、Layer A/B/C 来源差异、Evidence Observer 退役映射、持久化采集队列、真实刷新 owner、逐角色消费者契约和 Phase F 读取资格用法；登记待退 legacy registry/采集入口，不执行物理清除。已更新 `docs/DATA_ARCHITECTURE.md`、`docs/STRUCTURED_DATA_OPERATIONS.md` 和 `docs/DATA_SOURCES.md`，逐源旧新状态仍由 `UNSTRUCTURED_REFRESH_INVENTORY.md` 管理。
+- [x] 5.4 运行 OpenSpec strict validation、相关数据/架构守卫与回滚验证，记录环境及结果；本地 `tests/` 可用于验证但不得作为唯一或需推送的验收产物。OpenSpec strict、diff check、Task5 只读合同/catalog/资格重放、架构组55项与 managed queue/calendar/FactSet schedule 26项回归通过；内部状态/授权窄组27项通过。扩展 Clerk 组55 passed/1 个旧日期窗口断言失败，精确原因与处置记入 Task5 报告；未修改旧路径，验收入口与 JSON 证据已版本化。
 - [x] 5.5 为 Workflow、Agent、Dataflow 全部实现后的独立集成验收 change 准备交接矩阵，列出本 change 已保证的数据接口/禁止边和仍需在完整 Workflow 中验证的时序、Task Projection 内容、恢复及跨进程行为；后续 change 不得重新定义或放宽本 change 的数据契约。矩阵见 `docs/validation/WORKFLOW_DATAFLOW_HANDOFF.md`，逐角色标明代码级边界与未验收项，并冻结禁止边及后续集成验收用例；未将其写成 Phase F 资格或生产通过声明。

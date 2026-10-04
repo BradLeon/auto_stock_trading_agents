@@ -10,7 +10,7 @@
 
 ### 1.0 按角色阅读
 
-本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)；结构化旧配置 [`config/data/structured.yaml`](../config/data/structured.yaml)、证据源和新闻源配置在兼容期内由 catalog overlay 加载。
+本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)；持久化来源的两个权威领域注册表是 [`config/data/structured.yaml`](../config/data/structured.yaml) 与 [`config/data/unstructured.yaml`](../config/data/unstructured.yaml)。旧 `sources.yaml`、`news_sources.yaml` 只作为兼容/迁移来源，不是新来源定义的唯一依据。
 
 | 读者 | 首选文档 | 主要回答 |
 |---|---|---|
@@ -53,6 +53,20 @@ src/ats/data/
 ```
 
 `ats.data.structured` 和 `ats.data.products` 是当前公开的数据层入口；`memory.store` 只保存 Workflow 状态。历史迁移与验收快照由 Git 历史保存，不作为运行手册的一部分。
+
+### 1.0.2 目标 Dataflow、采集治理与 Agent 对接（2026-10）
+
+持久化配置采用“一入口、两领域注册表”：`catalog.yaml` 只装配并校验；结构化与非结构化来源分别登记于 `structured.yaml`、`unstructured.yaml`。股价、期权和券商状态等即时查询只走 Runtime Data Gateway，不进入持久化注册表或采集队列。账户、历史账本、决策和审批通过 Internal State API / 决策执行契约读取。
+
+持久化更新统一走受管队列：手动、定时、事件发现及策略允许的 cache miss 都提交幂等任务；仅持有有效 lease 的 worker 调用 adapter，并依次记录 raw、准入或 quarantine、发布版本及血缘。队列与 `com.ats.data-refresh` launchd 是数据刷新路径；`com.ats.schedule` 负责 FactSet 月报和 Workflow 事件调度，不得因日历触发而绕开数据队列。即时行情、期权和券商查询不排队、不保存为研究事实。
+
+Layer Analyst 的持久化输入按来源逐项验收，清单以 A/B/C 记录旧流程是否有实际入口、目标 registry 是否登记及目前运行/发布证据。Evidence Observer 已作为目标角色退役并由 Layer Analyst 承接；历史 alias 与 lineage 保留，旧提取组件可在兼容期作为工具，不构成第二个消费者。
+
+十个角色的正式输入边及允许观点依赖见 [目标覆盖合同](../config/data/target_dataflow_coverage.yaml)：仅 Layer→Sector、Information→Fundamental 可读取对方的分析投影。持久化研究只经 Data Products；运行行情只经 Runtime Data Gateway；内部状态只经 Internal State/审批接口。Agent 观点留在 Workflow Memory，不回写共享事实。
+
+Phase F 的读取资格按 `domain + consumer + contract_version + scope` 单独计算，写入、准入、读取、血缘、完整性、对账和回退证据缺任一项均 fail closed。当前十个 consumer 均未签发生产资格；逐角色原因和回退证据见 [Tasks 4 验收资料](validation/TARGET_DATAFLOW_TASK4_ACCEPTANCE.md)。资格查询本身不切换读取路由、不启用调度或交易。
+
+可复现门禁汇总、逐角色 ineligible 原因、保持的稳定路由及历史差异记录见 [Tasks 5 验收报告](validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)；机器结果由 `scripts/verify_dataflow_tasks5.py` 只读生成。来源采集失败、旧路径和无证据状态按事实记录，不因代码/配置存在而推断通过。
 
 本次重构的目的，不是简单地把数据分成“结构化数据库”和“向量数据库”，而是把当前由各个 Agent 自行取数、加工、保存的模式，升级为一套共享的研究数据基础设施。
 

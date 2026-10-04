@@ -1,0 +1,539 @@
+{
+  "schema_version": "target-dataflow-task5-reconciliation-v1",
+  "generated_at": "2026-10-04T01:13:18.779209+00:00",
+  "read_only": true,
+  "network_calls": 0,
+  "production_writes": 0,
+  "production_qualification_granted": false,
+  "checks": {
+    "target_contract_valid": true,
+    "catalog_valid": true,
+    "task3_cached_replay_passed": true,
+    "six_structured_replay_cases_match_expected_states": true,
+    "qualification_gate_cases_present": true,
+    "source_budget_and_duplicate_refresh_cases_documented": true,
+    "task4_cached_replay_passed": true,
+    "task4_runtime_roles_passed": true,
+    "task4_no_trade_or_cutover": true,
+    "all_roles_queried_against_ledger": true,
+    "all_roles_fail_closed_without_evidence": true
+  },
+  "catalog": {
+    "valid": true,
+    "checks": 518,
+    "failed_checks": 0
+  },
+  "authoritative_registry_hashes": {
+    "structured": "6c051ecd466425e1fda949791c7e09332b45464ffc469fe75628648260fea62a",
+    "unstructured": "71e5aaf1b46f2d651197771b1eee9cda31197f8ceada157f62c3ae2fdba6906e"
+  },
+  "task3_evidence": {
+    "structured_dataset_count": 6,
+    "structured_replay_checks": {
+      "normal": "succeeded",
+      "duplicate": "no_change",
+      "transport_fault": "unreachable",
+      "permission": "unauthorized",
+      "stale": "stale",
+      "quality_rejection": "validation_failed",
+      "revision": "succeeded",
+      "historical_asof_and_packet_equal": true
+    },
+    "calendar_sources": 3,
+    "consumer_edges": 16,
+    "architecture_negative_cases": 10,
+    "document_sources": 7,
+    "fixed_source_parser_chains": 2,
+    "fixed_publication_gates": 3,
+    "queue_budget_and_revision_gate_names": [
+      "missing_ledger_fail_closed",
+      "sec_only_gap_eligible_with_original_failure_refs",
+      "company_financials_failure_not_waived",
+      "defeatbeta_earnings_transcript_failure_not_waived",
+      "defeatbeta_sec_filing_index_failure_not_waived",
+      "unsafe_empty_sec_input_blocks_qualification",
+      "missing_sec_status_not_hidden",
+      "passed_label_without_real_rollback_proof_rejected",
+      "one_product_does_not_qualify_whole_role",
+      "wrong_product_scope_cannot_reuse_rollback_evidence",
+      "superseded_prerequisite_revocation_checked_recursively",
+      "latest_failed_evidence_overrides_prior_pass",
+      "incomplete_code_registry_fingerprints_rejected",
+      "evidence_ttl_not_report_age",
+      "exact_scope_isolation",
+      "manifest_drift_fail_closed",
+      "dependency_drift_fail_closed",
+      "update_delete_rejected",
+      "readonly_query_connection",
+      "unknown_cross_scope_prerequisites_rejected",
+      "invalid_ttl_environment_values_and_raw_payload_rejected",
+      "legacy_ledger_additive_migration_without_qualification_upgrade",
+      "revocation_does_not_contaminate_other_consumer",
+      "unverified_fallback_consumers_remain_ineligible"
+    ]
+  },
+  "task4_evidence": {
+    "cached_consumer_drills": 10,
+    "mechanism_checks": 24,
+    "runtime_role_edges": 9,
+    "runtime_edge_results": [
+      {
+        "role": "technical",
+        "product": "MARKET_DATA",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "3e11820d91451cb116731374fc45f183fe81b8f2673c409c7586c9b13876a317",
+        "scope_hash": "48d5e0b82056901ee829034ba06e540148cf8104df7cc3eab26008720dc363d0",
+        "source_as_of": [
+          "2026-10-02"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "risk",
+        "product": "MARKET_DATA",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "3e11820d91451cb116731374fc45f183fe81b8f2673c409c7586c9b13876a317",
+        "scope_hash": "48d5e0b82056901ee829034ba06e540148cf8104df7cc3eab26008720dc363d0",
+        "source_as_of": [
+          "2026-10-02"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "chief",
+        "product": "PORTFOLIO_DATA",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "22cca0629217835fd3db6f889cf0bb514723f3c657a028f9906578e6f8aea1da",
+        "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "source_as_of": [
+          "2026-10-04T00:51:02.673001+00:00"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "chief",
+        "product": "HISTORY_DATA",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "02ab9b72bb12010eb3a2108fbda4cfb30623cf0a110e6d93d23a98e77174456d",
+        "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "source_as_of": [
+          "2026-10-04T00:51:02.673001+00:00"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "risk",
+        "product": "PORTFOLIO_DATA",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "22cca0629217835fd3db6f889cf0bb514723f3c657a028f9906578e6f8aea1da",
+        "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "source_as_of": [
+          "2026-10-04T00:51:02.673001+00:00"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "risk",
+        "product": "RISK_RULES",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "4c98ad5247b43f8e0b2e05c48351a4561c8c5371823e1faa2b5bb2bc67ee208b",
+        "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "source_as_of": [],
+        "read_only": true
+      },
+      {
+        "role": "trader",
+        "product": "APPROVED_EXECUTION_AUTHORIZATION",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "235753898b10f4b440b8e38ca84457d86b5f2e05128d092d1ce46abe55a8168f",
+        "scope_hash": "1a06f88fe371d8a6c756d3f7f0802824788eeb9f81fe5904e8397a27e4d91b40",
+        "source_as_of": [
+          "2026-10-04T00:51:02+00:00",
+          "2026-10-04T00:51:02.673001+00:00"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "clerk",
+        "product": "DECISION_APPROVAL_CONTEXT",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "81abd86657091ab0c9f611b14bdbe0c76bdc0f7c445e6655f02bb2d947acb259",
+        "scope_hash": "2626875b4cb1dad54b547ca6160bb170f987c7339c23409200c50c845d5948c6",
+        "source_as_of": [
+          "2026-10-04T00:51:02+00:00"
+        ],
+        "read_only": true
+      },
+      {
+        "role": "clerk",
+        "product": "BROKER_STATE",
+        "status": "passed",
+        "positive": "complete",
+        "fault": "unavailable",
+        "fallback_equal": true,
+        "restored_equal": true,
+        "payload_hash": "09c7ce685de19cfc9b1f67cde41b5b2f2fed762c9ce2d770b5d6d372d62629d9",
+        "scope_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "source_as_of": [
+          "2026-10-04T00:50:59.549091Z"
+        ],
+        "read_only": true
+      }
+    ],
+    "runtime_negative_recovery_checks": [
+      "options_status_payload_fault_verified",
+      "readonly_reopen_approval_context_account_preserved",
+      "missing_cycle_explicit",
+      "broker_failed_orders_partial",
+      "healthy_empty_orders_fills_complete",
+      "stale_authorization_rejected",
+      "broken_ledger_remains_partial",
+      "legacy_metadata_null_projection_readable",
+      "invalid_account_value_rejected",
+      "superseded_revision_not_authorized"
+    ],
+    "live_status_only": {
+      "broker": {
+        "status": "complete",
+        "source_as_of": "2026-10-04T00:50:59.549091Z",
+        "orders_count": 0,
+        "fills_count": 0
+      },
+      "market": {
+        "NVDA": {
+          "status": "succeeded",
+          "bar_as_of": "2026-10-02",
+          "count": 251
+        }
+      },
+      "options": {
+        "status": "partial",
+        "source_as_of": null,
+        "reason": "source_timestamp_or_metrics_missing"
+      }
+    },
+    "actual_internal_ledger": {
+      "chief:PORTFOLIO_DATA": {
+        "status": "partial",
+        "source_as_of": [
+          "2026-08-31T15:18:10.473960+00:00"
+        ],
+        "completeness": {
+          "status": "degraded",
+          "unreconciled_windows": 0,
+          "unattributed_fills": 0,
+          "broken_links": 9,
+          "last_reconcile_at": "2026-08-31T20:10:04.868631+00:00"
+        },
+        "payload_hash": "0a6702911ee9414b8199e06d08d58a8e60cfe94d31684651c21e4feaef28597d"
+      },
+      "chief:HISTORY_DATA": {
+        "status": "partial",
+        "source_as_of": [
+          "2026-08-31T20:10:04.868631+00:00"
+        ],
+        "completeness": {
+          "status": "degraded",
+          "unreconciled_windows": 0,
+          "unattributed_fills": 0,
+          "broken_links": 9,
+          "last_reconcile_at": "2026-08-31T20:10:04.868631+00:00"
+        },
+        "payload_hash": "17f3fd9dd38d298a16bbdc199eea46517c0b0cff21b1d7ab9a048d75b12aeef7"
+      },
+      "risk:PORTFOLIO_DATA": {
+        "status": "partial",
+        "source_as_of": [
+          "2026-08-31T15:18:10.473960+00:00"
+        ],
+        "completeness": {
+          "status": "degraded",
+          "unreconciled_windows": 0,
+          "unattributed_fills": 0,
+          "broken_links": 9,
+          "last_reconcile_at": "2026-08-31T20:10:04.868631+00:00"
+        },
+        "payload_hash": "0a6702911ee9414b8199e06d08d58a8e60cfe94d31684651c21e4feaef28597d"
+      },
+      "cycles_count": 0
+    }
+  },
+  "consumer_gates": {
+    "layer": {
+      "domain": "hierarchy",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "HIER_DATA",
+        "DOC_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "write",
+        "admission",
+        "read",
+        "lineage",
+        "completeness",
+        "reconciliation",
+        "rollback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "direct_knowledge_reads",
+      "current_routing_changed": false
+    },
+    "information": {
+      "domain": "documents",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "DOC_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "write",
+        "admission",
+        "read",
+        "lineage",
+        "completeness",
+        "reconciliation",
+        "rollback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "news_digest",
+      "current_routing_changed": false
+    },
+    "sector": {
+      "domain": "hierarchy",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "HIER_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "write",
+        "admission",
+        "read",
+        "lineage",
+        "completeness",
+        "reconciliation",
+        "rollback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "sector_context",
+      "current_routing_changed": false
+    },
+    "fundamental": {
+      "domain": "company",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "COMPANY_DATA",
+        "HIER_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "write",
+        "admission",
+        "read",
+        "lineage",
+        "completeness",
+        "reconciliation",
+        "rollback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "pead_direct_reads",
+      "current_routing_changed": false
+    },
+    "macro": {
+      "domain": "macro",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "MACRO_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "write",
+        "admission",
+        "read",
+        "lineage",
+        "completeness",
+        "reconciliation",
+        "rollback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "macro_direct_reads",
+      "current_routing_changed": false
+    },
+    "technical": {
+      "domain": "runtime_market",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "MARKET_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "runtime_query",
+        "timestamp",
+        "failure_semantics",
+        "no_persistence",
+        "fallback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "market_data",
+      "current_routing_changed": false
+    },
+    "chief": {
+      "domain": "internal_state",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "PORTFOLIO_DATA",
+        "HISTORY_DATA"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "internal_read",
+        "as_of",
+        "completeness",
+        "opinion_isolation",
+        "fallback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "direct_ledger_reads",
+      "current_routing_changed": false
+    },
+    "risk": {
+      "domain": "internal_state",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "PORTFOLIO_DATA",
+        "MARKET_DATA",
+        "RISK_RULES"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "internal_read",
+        "as_of",
+        "completeness",
+        "opinion_isolation",
+        "fallback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "direct_ledger_reads",
+      "current_routing_changed": false
+    },
+    "trader": {
+      "domain": "execution_authorization",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "APPROVED_EXECUTION_AUTHORIZATION"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "authorization",
+        "revision_hash",
+        "broker_submit_boundary",
+        "idempotency",
+        "fallback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "direct_broker_submission",
+      "current_routing_changed": false
+    },
+    "clerk": {
+      "domain": "broker_state",
+      "contract_version": "target-dataflow-v1",
+      "products": [
+        "BROKER_STATE",
+        "DECISION_APPROVAL_CONTEXT"
+      ],
+      "status": "ineligible",
+      "missing_evidence": [
+        "broker_read",
+        "reconciliation",
+        "partial_fill",
+        "idempotency",
+        "fallback"
+      ],
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "evidence_history_count": 0,
+      "stable_route": "direct_broker_reads",
+      "current_routing_changed": false
+    }
+  },
+  "summary": {
+    "eligible_consumers": [],
+    "ineligible_consumers": [
+      "chief",
+      "clerk",
+      "fundamental",
+      "information",
+      "layer",
+      "macro",
+      "risk",
+      "sector",
+      "technical",
+      "trader"
+    ],
+    "all_current_roles_ineligible": true,
+    "interpretation": "qualification queries are exact-scope read-only checks; no evidence was written"
+  },
+  "passed": true
+}

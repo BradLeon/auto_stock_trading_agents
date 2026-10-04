@@ -1,6 +1,6 @@
 # 数据源状态（Data Sources）
 
-PEAD 基本面分析 + 交易 Agent 的数据源清单：已接入并测试通过 vs 待接入。
+本文保留早期 PEAD 接入快照和专属官方披露验收说明，不再作为全系统来源注册表或当前刷新状态的唯一依据。当前持久化 source/dataset 的权威定义在 [`structured.yaml`](../config/data/structured.yaml) 与 [`unstructured.yaml`](../config/data/unstructured.yaml)，由 [`catalog.yaml`](../config/data/catalog.yaml) 唯一装配；逐源实际 owner、launchd 运行及差异对照见 [来源库存](validation/UNSTRUCTURED_REFRESH_INVENTORY.md)。本文中早期命令、`.venv` 示例和“已接入”表格属于历史用法，操作前应以当前 Runbook 和版本化验收报告为准。
 
 ## PEAD 官方披露验收（当前持仓范围）
 

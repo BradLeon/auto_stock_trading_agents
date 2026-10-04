@@ -2,18 +2,26 @@
 
 > 读者：数据源运维者、发布负责人、故障处理者
 > 适用范围：持久化结构化研究数据；不包含 IBKR/yfinance 股价和期权行情
-> 当前状态：统一数据层迁移期，2026-08-26
+> 当前流程基线：2026-10。分源实际状态以 [`UNSTRUCTURED_REFRESH_INVENTORY.md`](validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 Dataflow 验收清单为准；本文件部分较早章节仍说明 legacy `data ingest` 直调路径，按下方迁移说明使用。
 
 ## 1. 先回答六个最常见的运维问题
 
 | 问题 | 答案 |
 |---|---|
-| 在哪里新增或修改数据源？ | 首先修改 [`config/data/catalog.yaml`](../config/data/catalog.yaml) 及对应 `config/data/structured.yaml`、`config/data/unstructured.yaml`；Provider 请求约束放在 `config/data/providers/`。兼容期的结构化详细字段仍映射到 [`config/data/structured.yaml`](../config/data/structured.yaml)。同时必须更新对应 dataset 引用、Adapter 和运行注册。 |
+| 在哪里新增或修改数据源？ | 修改 `config/data/structured.yaml` 或 `config/data/unstructured.yaml` 中对应的规范来源/数据集；`catalog.yaml` 只装配和校验两个注册表，不重复定义 source/dataset。Provider 请求约束放在 `config/data/providers/`；旧 `sources.yaml` 与 `news_sources.yaml` 仅用于兼容和迁移对照。 |
 | 在哪里停用数据源？ | 先通过 release overlay 把 source mode 回滚到 `legacy`；不要直接删除 YAML。默认文件是 `var/structured_data/releases.yaml`。 |
 | 在哪里删除数据源？ | 已产生采集历史、artifact 或 observation 的来源不做硬删除，而是停止采集并退出主源/回退源选择，保留目录项供历史血缘解析。只有从未产生持久数据且没有任何引用的来源才可删除配置和代码注册。 |
 | 手动采集怎么触发？ | `ats_cli data ingest --source <source_id> ...`。首次真实源测试必须同时指定隔离 `--db` 和 `--artifact-root`，并使用 `--force`。 |
 | 自动采集怎么触发？ | 当前没有内建的 structured ingestion scheduler。`ats schedule` 是交易/研究 Workflow 调度器，不会自动执行 `ats data ingest`。自动采集需由 cron、launchd 或部署平台按计划调用同一个 `data ingest` 命令。 |
 | 哪个文件决定“当前是否运行”？ | checked-in 基线在 `feature_flags.sources`；临时生产覆盖在 `var/structured_data/releases.yaml`。解析优先级为环境变量 → release overlay → checked-in config → `legacy`。 |
+
+### 1.1 当前受管持久化刷新路径（2026-10）
+
+目标持久化刷新必须经 `PersistentIngestionQueue`。生产手动、定时、事件和允许的 cache miss 最终都提交队列；只有持有有效 lease 的 worker 才能调用采集 adapter。使用 `uv run python -m ats.data.persistent_queue status` 查看队列，使用 `uv run python -m ats.data.persistent_queue worker --once` 处理已入队任务；每个写入 CLI 由外层调用自动入队，不能加 `--force` 或隔离数据库参数绕开队列。只读验收中显式隔离数据库加 `--force` 是临时测试例外。
+
+本机 `com.ats.data-refresh` launchd 唤醒 Refresh Controller，状态以其 heartbeat 和逐源运行账本判断。`com.ats.schedule` 是 Workflow / FactSet 月报 owner，不替代逐源刷新 controller。完整来源范围、当前 job 启用状态及最近真实结果见逐源库存；cadence、注册或 job 存在本身都不证明自动采集已成功。
+
+目标 registry、逐角色读契约、资格及回退状态见 [Dataflow 验收 Runbook](validation/DATAFLOW_ASSURANCE_RUNBOOK.md)；十角色当前资格判定和拒绝原因见 [Tasks 5 门禁表](validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)。
 
 统一配置只读校验：
 
@@ -134,15 +142,15 @@ discovery 仍读取官方 metadata，文件仍计算完整 SHA-256，持久化 l
 `not_published_or_privacy_filtered`，绝不能写为零。查看 `data health` 时应同时核对最新检查、upstream
 commit、ingested release、available period 和 Claude.ai / 1P API 的独立状态。
 
-统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它索引结构化、非结构化和 runtime 配置；详细内容分别位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。
+统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它装配结构化、非结构化两个权威持久化注册表，并引用刷新策略；详细内容位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。runtime-only 行情、期权和券商即时查询不属于持久化来源注册表。
 
 配置职责边界：
 
 | 路径 | 运维职责 | 是否保存密钥 |
 |---|---|---:|
-| `config/data/catalog.yaml` | 数据源、数据集、领域与状态总目录 | 否 |
-| `config/data/structured.yaml` | 指标、映射、结构化质量门 | 否 |
-| `config/data/unstructured.yaml` | 文档类型、正文策略、准入和保留规则 | 否 |
+| `config/data/catalog.yaml` | 唯一加载入口；装配和校验来源/数据集注册表，不另行定义来源 | 否 |
+| `config/data/structured.yaml` | 结构化持久化来源、数据集、指标和质量策略 | 否 |
+| `config/data/unstructured.yaml` | 非结构化持久化来源、文档类型、正文策略、准入和保留规则 | 否 |
 | `config/data/providers/*.yaml` | Provider endpoint、预算、所需环境变量名 | 否 |
 | `config/data/schedules.yaml` | 触发意图和预算；不直接创建 scheduler job | 否 |
 | `config/pead.yaml`、`config/sectors/` | Workflow 消费者配置 | 视现有约定 |
@@ -402,22 +410,19 @@ ats_cli data ingest \
 
 ### 6.2 自动触发：当前真实状态
 
-当前实现没有读取 `cadence` 并自动创建 structured ingestion job：
+数据刷新 controller 使用本机 launchd `com.ats.data-refresh`，将 due work 提交持久化队列。它不因 cadence 配置就默认启用来源；实际启用和成功状态按逐源清单及最近 run 记录判定。新闻、固定文档、宏观日历等非结构化和事件化入口同样由队列和 worker 执行。
 
 | 配置/命令 | 当前作用 |
 |---|---|
-| `sources.<id>.cadence` | 描述来源业务节奏，供目录、质量和运维参考；不是调度表达式 |
-| `ats schedule` | 运行现有交易/研究 Workflow 调度器；不会自动调用 `ats data ingest` |
-| cron / launchd / 部署平台 scheduler | 当前自动采集的实际触发器；调用统一 `data ingest` 命令 |
+| `structured.yaml` / `unstructured.yaml` | 持久化来源的权威定义；分别描述来源、数据集/文档、策略和允许状态 |
+| `catalog.yaml` | 唯一机器加载入口，只装配并校验两个领域 registry |
+| `com.ats.data-refresh` | launchd 唤醒 Refresh Controller；controller 将 due work 入队 |
+| `uv run python -m ats.data.persistent_queue status` | 查看持久化采集队列状态 |
+| `uv run python -m ats.data.persistent_queue worker --once` | 由受管运行环境处理已入队任务；生产 worker 不应另设第二个 schedule owner |
+| `com.ats.schedule` | FactSet 月报和 Workflow 任务调度；不是通用数据源刷新 owner |
+| `ats data ingest ...` | 操作命令会先入队；worker 持有效 lease 后才执行目标持久化写入 |
 
-示例 crontab（路径和时间仅为模板）：
-
-```cron
-# 工作日 10:15 运行 MSFT SEC 补漏；凭证由任务运行环境注入
-15 10 * * 1-5 cd /absolute/path/to/auto_stock_trading_agents && PYTHONPATH=/absolute/path/to/auto_stock_trading_agents/src ATS_STRUCTURED_DB_PATH=/absolute/path/to/structured.sqlite ATS_STRUCTURED_ARTIFACT_ROOT=/absolute/path/to/structured_artifacts /absolute/path/to/auto_stock_trading_agents/.venv/bin/python -m ats.runtime.cli data ingest --source sec_companyfacts --entity MSFT
-```
-
-自动任务必须：使用绝对路径；显式注入凭证；不带 `--force`；按实体/切片隔离；保存 stdout/stderr/退出码；任务后检查 ingestion history 和 quality；禁止调度 runtime/excluded 来源。
+部署模板和当前真实逐源状态见 `deploy/launchd/`、[来源库存](validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 [Dataflow 验收/回退 Runbook](validation/DATAFLOW_ASSURANCE_RUNBOOK.md)。runtime 行情、期权和券商查询走即时读取接口，不得调度为持久化刷新任务。
 
 建议频率以 Provider 发布时间和 dataset freshness 门为准：月度官方序列在发布窗口触发；SEC 围绕 filing/earnings event 并保留低频补漏；Consensus 按研究事件建立真实 snapshot；不要用高频轮询弥补未知发布时间。
 

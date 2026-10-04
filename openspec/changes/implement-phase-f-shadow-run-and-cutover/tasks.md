@@ -12,10 +12,10 @@
 
 ## 1. 进程禁写、资格机制回归与切流不变量守卫（无路由变更，最先建立）
 
-- [ ] 1.1 实现进程级 broker write 禁令并置于券商提交层：影子与隔离模式下全部下单出口被拒绝，禁令不依赖调用方传参，验证「新路径在影子期到达下单调用点被拒且不判定影子运行失败」「缺禁令能力时影子任务与接入核验均拒绝启动」
-- [ ] 1.2 建立隔离运行环境（独立账本与券商模拟），验证隔离进程无法写入生产 `trades`、不产生审批结论与生产路由变更
-- [ ] 1.3 将 `scripts/verify_dataflow_qualification.py` 的机制探针移植为 pytest：追加式写入与 `UPDATE`/`DELETE` 拒绝、只读连接拒写、`max_age_days` 过期、manifest 与 dependency 指纹漂移、scope 精确等值隔离、跨消费者撤销隔离、SEC optional 非阻塞例外与「例外不掩盖其他阻塞」，验证 `tests/test_dataflow_assurance.py` 覆盖全部 reason code 分支
-- [ ] 1.4 补 `ats.data.assurance` 与脚本的行为一致性测试（同 fixture 下逐项比对资格结论与缺失清单），验证不一致时以 specs 为准并定位差异
+- [x] 1.1 实现进程级 broker write 禁令并置于券商提交层：影子与隔离模式下全部下单出口被拒绝，禁令不依赖调用方传参，验证「新路径在影子期到达下单调用点被拒且不判定影子运行失败」「缺禁令能力时影子任务与接入核验均拒绝启动」
+- [x] 1.2 建立隔离运行环境（独立账本与券商模拟），验证隔离进程无法写入生产 `trades`、不产生审批结论与生产路由变更
+- [x] 1.3 将 `scripts/verify_dataflow_qualification.py` 的机制探针移植为 pytest：追加式写入与 `UPDATE`/`DELETE` 拒绝、只读连接拒写、`max_age_days` 过期、manifest 与 dependency 指纹漂移、scope 精确等值隔离、跨消费者撤销隔离、SEC optional 非阻塞例外与「例外不掩盖其他阻塞」，验证 `tests/test_dataflow_assurance.py` 覆盖全部 reason code 分支
+- [x] 1.4 补 `ats.data.assurance` 与脚本的行为一致性测试（同 fixture 下逐项比对资格结论与缺失清单），验证不一致时以 specs 为准并定位差异
 - [ ] 1.5 枚举受指纹约束的完整文件面并落成机器可读清单（含 manifest 自身摘要），验证「切流动作改动受约束文件」与「修改消费者契约清单」两例各判失败并列出受影响消费者
 - [ ] 1.6 在 `ats.workflow.architecture_guards` 增加切流不变量扫描：绕过切流控制直接改路由、绕过下单仲裁直接提交真实订单、以总开关覆盖未通过消费者，验证各有一例判失败与一例放行
 - [ ] 1.7 为守卫的切流类豁免接入既有「例外须声明未来收敛阶段」校验，验证未声明阶段的豁免被判失败

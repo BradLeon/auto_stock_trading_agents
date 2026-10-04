@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from ..config import get_config
+from ..execution.broker_write_guard import check_broker_write
 from ..schemas.decision import TradeDecision, broker_side
 from ..schemas.memory import TradeLogEntry
 from ..schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
@@ -288,9 +289,18 @@ class IBKRBroker:
         are sequenced by their position within the revision's order list.
         `chain` (task 2.1) carries decision_hash/approval_id from the verified
         authorization onto every submitted entry.
+
+        Phase F 1.1: the batch is checked against the PROCESS prohibition before
+        any order is built, so a shadow or isolated run cannot write even if the
+        caller omitted `dry_run`. The check is per-batch rather than per-order so
+        one refusal covers the whole intent — a partial submission would leave
+        the evidence ambiguous.
         """
         if not items:
             return []
+        check_broker_write(operation="place_orders", caller="IBKRBroker.place_orders",
+                           detail=f"cycle_id={cycle_id} revision_no={revision_no} "
+                                  f"orders={len(items)}")
         chain = chain or {}
         with self.session() as ib:
             self._last_trades = []

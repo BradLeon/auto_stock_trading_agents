@@ -12,7 +12,7 @@
 - **Phase D——分析师职责重构：** 将 Layer Analyst 收窄为层级、截面和证据研究；将行业/层级/标的配置权转移给 Sector Analyst；新增 Information Analyst；把 Fundamental/PEAD 拆为例行与事件模式；移除未授权的分析师观点依赖；由 Chief 独占跨分析师汇总权。
 - **Phase E——Dispatcher 与日历：** 引入依赖感知异步调度，支持手动、定时、事件触发、局部和完整运行；增加投影复用与完整性门禁；用受治理、可版本化的 Schedule Calendar 和 Trigger Ledger 替换静态事件列表。
 - **独立 Dataflow 专项——横向验收与缺口补齐：** 另立专项 OpenSpec change，以 Target Dataflow 图和 Data—Agent 对接图为逐项验收清单，核查自动刷新、来源目录、结构化/非结构化采集与准入、共享事实、Data Products、Runtime Data Gateway、Internal State API、血缘和退役切流。对已验证能力直接接收，只重构或新建有证据支持的缺口；Phase A 的证据写侧、Phase C 的内部账本、Phase D 的消费者边界、Phase E 的日历各保留原阶段所有权，不在专项中重复实施。
-- **Phase F——影子运行与切流：** 在不开放新路径实盘下单的前提下并行运行新旧路径，对比输出和审计关联；分别切换读取、调度和交易路径；验证回滚；确保任一时刻只有一条实盘下单路径生效。
+- **Phase F——前置接收、影子运行与切流：** 先复核 A–E/Dataflow 的已有实现与真实证据，按产品、消费者和范围受控落账并查询资格，验证十角色实际运行入口的数据接入、缺口处理和跨进程恢复；不重建已验收能力、不重复全量采集。随后建立逐批 owner/开关/回退清单，在不开放新路径实盘下单的前提下对比输出和审计关联；仅已取得资格且实际接入通过的路径可在明确部署授权后分别切换读取和调度。实盘开放另需明确授权，确保任一时刻只有一条实盘下单路径生效。
 - **BREAKING：** Layer Analyst 不再拥有配置或预算使用决策权；Boss 不再能修改已经风控批准的订单；Fundamental 不再读取 Sector/Macro 观点或执行最终组合风控；未声明的跨分析师读取和 Agent 直连 Provider 将 fail closed。
 - 在 additive 迁移期间保留现有领域审查表、CLI 和读模型，直到登记的退出条件满足。无法恢复提案、快照或 hash 的历史记录标记为 `legacy_unknown`，不得伪造审计数据。
 

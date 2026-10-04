@@ -83,3 +83,51 @@ Workflow Memory SHALL 保存 Agent 投影、决策、审批和运行状态，并
 - **WHEN** 一个已切换的数据域或消费者出现可复现的平台回归
 - **THEN** 系统 SHALL 支持将该范围的读取路由恢复到登记的稳定路径并保留新路径审计证据
 - **AND** SHALL NOT 通过重建已退役的 Workflow Memory 共享事实表或让 Agent 直连 Provider 来回滚
+
+### Requirement: Phase F 必须受控接收并登记适用的资格证据
+
+Phase F SHALL 使用既有 Dataflow evidence API 与只读 qualification，按 `domain_id + consumer_id + contract_version + scope` 核验原始证据、产品覆盖、前置引用、代码/配置指纹、有效性与真实回退证明，追加登记可追溯 actor 和 evidence refs。系统 SHALL 复用仍适用的真实采集及缓存验收证据，仅补验缺失或失效范围；SHALL NOT 以任务完成、汇总 passed 或隔离样本替代生产状态证明。登记 SHALL NOT 自动切换路由或生成交易批准。
+
+#### Scenario: 有真实验收记录但生产资格证据尚未落账
+
+- **WHEN** 专项已有可追溯记录而该消费者的精确范围证据缺失
+- **THEN** Phase F SHALL 核验适用性后通过追加式接口受控登记，重新查询资格并保留原记录引用
+- **AND** 无证据项 SHALL 保持 ineligible，不得凭专项完成声明放行
+
+#### Scenario: 原验证的版本与当前版本不一致
+
+- **WHEN** 产品范围、依赖指纹或有效性检查使旧证据不再适用
+- **THEN** Phase F SHALL 仅对受影响范围安排补验并拒绝其切流
+- **AND** SHALL NOT 为补验默认重新抓取全部上游数据
+
+### Requirement: Phase F 必须验证十角色的实际运行接入
+
+Phase F SHALL 经实际 CLI、Dispatcher 或 Workflow 入口验证十角色的数据/API 输入、版本血缘、投影引用、缺口处理、禁止旁路及跨进程恢复，不得仅以 facade 可读认定消费者已迁移。仅 Layer→Sector、Information→Fundamental 可作为跨分析师观点依赖，Chief SHALL 是唯一汇总者。交易链验证 SHALL 默认无真实 broker 写能力；隔离审批/成交证明 SHALL 与生产完整性状态区分，不要求制造真实交易以验收。
+
+#### Scenario: 产品接口可读但实际 Agent 仍读取底层表
+
+- **WHEN** 产品单项测试成功但实际消费者调用绕过目标读取边界
+- **THEN** 该消费者接入 SHALL 保持未通过，记录调用位置和所属阶段依赖
+- **AND** SHALL NOT 获得生产读取切换许可
+
+#### Scenario: 生产尚无交易周期
+
+- **WHEN** 当前生产没有 cycle 或部分成交，审批与 Clerk 恢复需验收
+- **THEN** Phase F SHALL 在隔离 shadow/paper 路径验证 revision、授权幂等和模拟部分/迟到成交
+- **AND** SHALL NOT 为验收发真实订单或伪造生产批准，实际账本缺口仍 SHALL 如实记录
+
+### Requirement: Phase F 必须按范围准备和授权分批切流
+
+系统 SHALL 为采集发布、研究读取、调度、内部状态/审批和实盘执行分别登记实际 owner、当前/目标路由、切流开关、精确范围资格、接入证据、观察窗口、成功/停止条件及已验证回退。已运行的目标采集路径 SHALL 核验接收而非重复切换。稳定回退 SHALL 有实际可读证明；无回退者不得放行。必要输入失败 SHALL 阻断完整交易，但已接受的 SEC 正文 optional、Layer no_coverage 与 FactSet 最新月度数据政策 SHALL NOT 被重新定义为额外阻塞。生产切换 SHALL 需要明确部署授权，实盘开放 SHALL 另需明确实盘授权。
+
+#### Scenario: 研究读取批次通过而交易输入仍 partial
+
+- **WHEN** 一个研究消费者已取得资格且实际接入通过，交易消费者尚有未解决的必需输入缺口
+- **THEN** 系统 SHALL 可在部署授权后独立切换该研究批次，交易路径 SHALL 保持禁止切换
+- **AND** 研究资格 SHALL NOT 开启 live Trader 权限
+
+#### Scenario: 切换前资格失效或登记回退不可用
+
+- **WHEN** 精确范围资格被撤销/漂移或回退路由实际不可读
+- **THEN** 系统 SHALL 阻断该批切换并记录原因；已切换范围 SHALL 按演练策略停止或回退
+- **AND** SHALL NOT 自动启用已知故障旧入口、恢复退役 Memory 事实表或让 Agent 直连 Provider

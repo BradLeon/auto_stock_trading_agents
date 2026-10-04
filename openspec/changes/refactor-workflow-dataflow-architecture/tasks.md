@@ -127,13 +127,27 @@
 
 ## 11. Phase F — 影子运行、切流与回滚
 
+### Phase F 前置任务：证据接收、实际接入与切流准备
+
+以下任务由 Phase F 承接实施，复用 `complete-target-dataflow` 的接口、资格机制和真实验收记录，不重建数据平台。现有专项任务完成不等于生产消费者 eligible；2026-10-04 Tasks 5 记录十角色均未取得生产资格。前置核验可以先开始，实际接入按所依赖的 A–E 能力逐项推进；不得因父 change 的未勾选状态重做已验收实现，也不得因子 change 已完成而跳过行为核验。
+
+- [ ] F.0.1 建立版本化前置接收矩阵：逐项核验 A–E 专项及 Dataflow 的实现、命令和证据，记录已接收能力、缺口、owner 与依赖；检查真实部署入口和当前路由，不以静态清单中的旧入口名称推定它仍可稳定运行。复用 Tasks 2/3/4/5 的真实材料和缓存，不重复全量采集。
+- [ ] F.0.2 核验并受控登记已有资格证据：逐 `domain_id + consumer_id + contract_version + scope` 校验原始记录、产品覆盖、代码/配置指纹、前置证据、时间有效性与回退证明，通过现有追加式 evidence API 落账并查询资格；记录 actor、证据引用和登记结果。汇总报告的 passed、任务勾选或隔离成功不得转换为未经验证的生产证明；缺项保留 ineligible 并列最小补验。此步骤不改变路由，不生成 Risk/Boss 交易批准。
+- [ ] F.0.3 验证 Layer、Information、Sector、Fundamental、Macro、Technical 的实际 CLI/Dispatcher/Workflow 接入：保留 run ID、实际调用路径、产品/文档/vintage refs、投影 hash 和缺口；只允许 Layer→Sector、Information→Fundamental 两条观点依赖，拒绝 Provider/底层表旁路、候选材料冒充发布数据和观点回写事实。覆盖单角色、依赖子流程、完整分析流程、必要输入失败阻断及跨进程重启引用可解析；尚未实现的消费者先登记对应 A–E 依赖，不伪造接入成功。
+- [ ] F.0.4 在无券商写权限的 shadow/paper 环境验证 Chief、Risk、Trader、Clerk 的实际接入及恢复：绑定研究快照、内部状态、revision、审批和订单/成交回报，覆盖多轮风控、重复恢复、部分/迟到成交与绩效重建。可复用隔离账本及券商模拟；真实 TWS 仅只读核验。不要求制造生产 cycle、真实下单或真实部分成交以完成测试，也不把隔离证明冒充当前生产账本完整性。
+- [ ] F.0.5 对实际缺口形成逐消费者处置：已接受 SEC 正文 optional 与 Layer no_coverage 保持原政策；FactSet 使用最新月度最终版，不新增按报告年龄的 stale 降级；期权时间缺失、历史账本断链等继续显式 partial，并验证新路径隔离和交易阻断。旧路径问题仅登记不修复；历史不完整不得自动放行，也不得阻断与其无关的已验收研究路径。
+- [ ] F.0.6 建立逐批切流清单和 dry-run：区分采集发布、研究读取、调度、内部状态/审批、live Trader；每批登记实际 owner、旧/新路由、开关、exact-scope 资格、观察窗口、成功/停止条件及已演练的稳定回退。已在生产运行的新采集路径直接核验接收，不重复切换；无可用回退者保持 ineligible，不静默转回已知故障旧入口。资格漂移/撤销时验证停止或回退行为；读取资格不得开启交易权限。
+- [ ] F.0.7 执行前置门禁并交付逐批 eligible/ineligible 报告：关联证据账本、实际接入运行和回退记录；仅证据及接入验收均通过的范围可进入 11.5/11.6 等实际切换。缺项只阻断受影响范围，完整自动交易仍须全部必需输入及审批链满足。生产路由变更须获得明确部署授权，live Trader 开放另须明确实盘授权；规划批准与前置通过均不构成该授权。
+
+### Phase F 实施：影子运行及逐边界切换
+
 - [ ] 11.1 新增 projection read、analyst output、Dispatcher schedule、approval lifecycle、Clerk publication 和 live Trader 的独立功能开关
 - [ ] 11.2 实现功能开关与配置校验，保证旧/新 live Trader 路径互斥，冲突配置启动时 fail closed
 - [ ] 11.3 新增影子运行模式，在相同 data vintages 下运行新旧分析/风控但从进程能力上禁止新路径 broker write
 - [ ] 11.4 实现影子差异报告，比较输入快照、投影、调度遗漏、风控 verdict/counterproposal、审批链和归因
-- [ ] 11.5 为已通过 Dataflow 专项门禁的 read path 切换和回滚建立 runbook，验证新 projection 读取及旧读模型兼容；未通过的数据域/消费者不得随整体开关切换
-- [ ] 11.6 为 schedule path 切换和回滚建立 runbook，验证无尚未完成 trigger 被双重所有
-- [ ] 11.7 为 live trade path 切换和回滚建立 runbook，强制先关闭当前 live route、确认无 in-flight authorization，再开启另一 route
+- [ ] 11.5 按 F.0 接收矩阵与 exact-scope 资格，为 read path 建立 runbook 并在明确部署授权后分批执行切换、观察和回退验收，记录切换前后路由、运行引用及结果；验证新 projection 读取及旧读模型兼容，未通过的数据域/消费者不得随整体开关切换
+- [ ] 11.6 为 schedule path 切换和回滚建立 runbook，在明确部署授权后分批执行，验证无尚未完成 trigger 被双重所有；沿用已接收的生产采集 owner，不把 Workflow 调度切换误作所有数据源重启
+- [ ] 11.7 为 live trade path 切换和回滚建立 runbook，强制先关闭当前 live route、确认无 in-flight authorization，再开启另一 route；演练默认使用隔离/paper 模式，只有全部交易门禁通过且取得明确实盘授权后才执行真实 live route 切换
 - [ ] 11.8 执行旧实现消费者清零、数据对账、回滚窗口和墓碑登记检查，只将满足全部条件的项标记已退役
 - [ ] 11.9 演练 read/schedule/trade 三个边界的独立回滚，保留影子、审批和账本记录
 

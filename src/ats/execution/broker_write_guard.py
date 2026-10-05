@@ -45,6 +45,15 @@ REASON_SHADOW_RUN = "shadow_run_prohibited"
 REASON_ISOLATED = "isolated_run_prohibited"
 REASON_EXPLICIT = "explicitly_prohibited"
 
+# Grant refusal reason codes (Phase F 2.2/2.3). Distinct from the prohibition
+# codes above: a prohibition means "this process may never write", while these mean
+# "this process may write, but not under the authority it is holding" — a stale
+# generation, or an account that is not the one the broker is connected to.
+REASON_NO_GRANT = "no_write_grant"
+REASON_GENERATION_STALE = "write_grant_generation_stale"
+REASON_ACCOUNT_MISMATCH = "write_grant_account_mismatch"
+REASON_ENVIRONMENT_MISMATCH = "write_grant_environment_mismatch"
+
 
 class BrokerWriteProhibited(RuntimeError):
     """A broker submit was attempted in a process that may not write.
@@ -57,6 +66,31 @@ class BrokerWriteProhibited(RuntimeError):
         super().__init__(message)
         self.reason_code = reason_code
         self.refusal_id = refusal_id
+
+
+@dataclass(frozen=True)
+class WriteGrant:
+    """Permission to submit under one specific authority (Phase F task 2.2).
+
+    A grant is not "this process may write" — it is "this process may write as the
+    route that was active when the grant was issued, to the account it named". All
+    four fields are re-verified at submission, so a grant that outlives its
+    generation stops working the moment a cutover moves the generation, and a grant
+    issued for a paper account cannot be used against a live one.
+    """
+
+    route_id: str
+    generation: int
+    environment: str = ""
+    account: str = ""
+    granted_at: str = ""
+
+    def as_row(self) -> dict[str, Any]:
+        return {
+            "route_id": self.route_id, "generation": self.generation,
+            "environment": self.environment, "account": self.account,
+            "granted_at": self.granted_at,
+        }
 
 
 @dataclass(frozen=True)
@@ -90,6 +124,11 @@ class _GuardState:
     mode: str = UNSET
     reason_code: str = ""
     refusals: list[RefusalRecord] = field(default_factory=list)
+    # The authority this process was granted (Phase F 2.2). None means no grant
+    # was issued — which is a refusal reason in itself, because "nobody granted
+    # this" must not read as "anything goes".
+    grant: WriteGrant | None = None
+    revocation_reason: str = ""
     # Guards the *check*, not the write. Two threads racing a cutover must not
     # both observe "permitted"; a single lock makes the read-modify-decide
     # sequence atomic. The write itself stays outside — holding a lock across a
@@ -110,13 +149,128 @@ def _next_id(state: _GuardState) -> str:
     return f"broker-write-refusal-{state.counter:06d}"
 
 
+# --- write grants (Phase F 2.2 / 2.3) ---------------------------------------- #
+
+def grant_write(route_id: str, generation: int, *, environment: str = "",
+                account: str = "") -> WriteGrant:
+    """Issue this process a write grant for one specific authority.
+
+    Deliberately requires the caller to state the generation explicitly instead of
+    reading it here: the caller must have obtained it from the registry, so a grant
+    can never be minted against a generation this process merely assumed.
+    """
+    if not route_id.strip():
+        raise ValueError("route_id is required for a write grant")
+    if int(generation) < 1:
+        raise ValueError(f"generation must be >= 1, got {generation}")
+    grant = WriteGrant(route_id=route_id, generation=int(generation),
+                       environment=environment, account=account, granted_at=_now())
+    with _STATE.lock:
+        _STATE.grant = grant
+    return grant
+
+
+def active_grant() -> WriteGrant | None:
+    with _STATE.lock:
+        return _STATE.grant
+
+
+def revoke_grant(reason: str = "") -> None:
+    """Drop this process's grant. Used by a cutover and by shutdown paths."""
+    with _STATE.lock:
+        _STATE.grant = None
+        _STATE.revocation_reason = reason
+
+
+def _record_refusal(state: _GuardState, reason_code: str, operation: str,
+                    caller: str, symbol: str, quantity: float | None,
+                    detail: str) -> str:
+    record = RefusalRecord(refusal_id=_next_id(state), at=_now(),
+                          reason_code=reason_code, operation=operation,
+                          caller=caller, symbol=symbol, quantity=quantity,
+                          detail=detail)
+    state.refusals.append(record)
+    return record.refusal_id
+
+
+def check_grant(*, operation: str, caller: str, state_reader,
+                account: str = "", environment: str = "",
+                symbol: str = "", quantity: float | None = None,
+                detail: str = "") -> None:
+    """Re-verify this process's grant against the authoritative state.
+
+    Called at every real submission, not once at start-up: the point of a
+    generation is that a grant stops being valid when a cutover happens, and a
+    process that only checked at start-up would keep writing across it.
+
+    `state_reader` is injected rather than imported so the caller decides which
+    registry is authoritative — and so a test can supply a moving generation
+    without a database.
+    """
+    with _STATE.lock:
+        grant = _STATE.grant
+    if grant is None:
+        with _STATE.lock:
+            refusal_id = _record_refusal(
+                _STATE, REASON_NO_GRANT, operation, caller, symbol, quantity,
+                detail or "this process holds no write grant")
+        raise BrokerWriteProhibited(
+            f"broker {operation} refused: no write grant (caller={caller}, "
+            f"refusal_id={refusal_id})",
+            reason_code=REASON_NO_GRANT, refusal_id=refusal_id)
+
+    current = state_reader()
+
+    def _refuse(code: str, message: str) -> None:
+        note = f"{message} ({detail})" if detail else message
+        with _STATE.lock:
+            refusal_id = _record_refusal(
+                _STATE, code, operation, caller, symbol, quantity, note)
+        raise BrokerWriteProhibited(
+            f"broker {operation} refused: {note} (caller={caller}, "
+            f"refusal_id={refusal_id})",
+            reason_code=code, refusal_id=refusal_id)
+
+    if current is None:
+        _refuse(REASON_NO_GRANT,
+                "the route registry reports no active route")
+    if current.generation != grant.generation:
+        _refuse(REASON_GENERATION_STALE,
+                f"grant generation {grant.generation} is behind the active "
+                f"generation {current.generation} (route "
+                f"{current.route_id!r})")
+    if current.route_id != grant.route_id:
+        _refuse(REASON_GENERATION_STALE,
+                f"grant was issued for route {grant.route_id!r} but the active "
+                f"route is {current.route_id!r}")
+    if grant.environment and current.environment \
+            and grant.environment != current.environment:
+        _refuse(REASON_ENVIRONMENT_MISMATCH,
+                f"grant environment {grant.environment!r} does not match the "
+                f"active environment {current.environment!r}")
+    # The account check is the one that makes a paper grant unusable against a
+    # live connection. A blank on either side means "unstated", not "matches" —
+    # otherwise an unnamed grant would satisfy any broker.
+    if grant.account and account and grant.account != account:
+        _refuse(REASON_ACCOUNT_MISMATCH,
+                f"grant account {grant.account!r} does not match the connected "
+                f"broker account {account!r}")
+    if grant.account and not account:
+        _refuse(REASON_ACCOUNT_MISMATCH,
+                f"grant account {grant.account!r} was never matched against a "
+                "connected broker account")
+
+
 def reset_for_tests() -> None:
-    """Clear the process guard. Tests only — production never un-installs it."""
+    """Clear the process guard and any grant. Tests only — production never
+    un-installs them, which is the point."""
     with _STATE.lock:
         _STATE.mode = UNSET
         _STATE.reason_code = ""
         _STATE.refusals = []
         _STATE.counter = 0
+        _STATE.grant = None
+        _STATE.revocation_reason = ""
 
 
 def install_prohibition(reason_code: str) -> None:

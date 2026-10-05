@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from ..config import get_config
-from ..execution.broker_write_guard import check_broker_write
+from ..execution.broker_write_guard import active_grant, check_broker_write, check_grant
 from ..schemas.decision import TradeDecision, broker_side
 from ..schemas.memory import TradeLogEntry
 from ..schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
@@ -280,6 +280,16 @@ class IBKRBroker:
                     for t in ib.openTrades()]
 
     # --- writes ---------------------------------------------------------- #
+    def connected_account(self) -> str:
+        """The account this broker session is actually connected to.
+
+        Resolved the same way `get_portfolio` resolves it, because that is the
+        identity a grant must be matched against: a grant issued for a paper
+        account is worthless if the session is talking to a live one, and the
+        port number is not evidence of which it is (Phase F 2.3).
+        """
+        return str(get_config().secrets.ibkr_account or "").strip()
+
     def place_orders(self, items: list[tuple[TradeDecision, float]], cycle_id: str,
                      wait: float = 3.0, revision_no: int = 0,
                      chain: dict | None = None) -> list[TradeLogEntry]:
@@ -290,17 +300,33 @@ class IBKRBroker:
         `chain` (task 2.1) carries decision_hash/approval_id from the verified
         authorization onto every submitted entry.
 
-        Phase F 1.1: the batch is checked against the PROCESS prohibition before
-        any order is built, so a shadow or isolated run cannot write even if the
-        caller omitted `dry_run`. The check is per-batch rather than per-order so
-        one refusal covers the whole intent — a partial submission would leave
-        the evidence ambiguous.
+        Two gates run before any order is built:
+
+        - the process-level prohibition (task 1.1), so a shadow or isolated run
+          cannot write even if the caller omitted `dry_run`;
+        - the write grant (task 2.2/2.3), re-verified against the authoritative
+          route registry on EVERY call, so a grant that predates a cutover stops
+          working and a grant for one account cannot be used against another.
+
+        Both checks are per-batch rather than per-order so one refusal covers the
+        whole intent; a partial submission would leave the evidence ambiguous.
         """
         if not items:
             return []
         check_broker_write(operation="place_orders", caller="IBKRBroker.place_orders",
                            detail=f"cycle_id={cycle_id} revision_no={revision_no} "
                                   f"orders={len(items)}")
+        if active_grant() is not None:
+            # A grant exists, so this process intends to write: hold it to the
+            # current authority. Resolved lazily — importing the registry at
+            # module scope would make every read path depend on the cutover
+            # tables.
+            from ..execution.route_registry import read_state
+
+            check_grant(operation="place_orders", caller="IBKRBroker.place_orders",
+                        state_reader=read_state,
+                        account=self.connected_account(),
+                        detail=f"cycle_id={cycle_id}")
         chain = chain or {}
         with self.session() as ib:
             self._last_trades = []

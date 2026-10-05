@@ -48,6 +48,8 @@ PERSISTENCE_ENV_VARS: tuple[str, ...] = (
     "ATS_PERSISTENT_QUEUE_PATH",      # persistent ingestion queue
     "ATS_CHECKPOINT_DB",              # LangGraph checkpoints
     "ATS_SHADOW_DB_PATH",             # Phase E shadow workflow/trigger store
+    "ATS_SHADOW_REPORT_DB",           # Phase F shadow comparison reports
+    "ATS_SHADOW_ORDER_DB",            # Phase F shadow order intents
     "ATS_ROUTE_REGISTRY_PATH",        # Phase F active trade route + generation
     "ATS_DOCS_ROOT",                  # document assets
 )
@@ -75,6 +77,11 @@ _SURFACE_FILES: dict[str, str] = {
     "ATS_PERSISTENT_QUEUE_PATH": "ingestion_queue.sqlite",
     "ATS_CHECKPOINT_DB": "checkpoints.sqlite",
     "ATS_SHADOW_DB_PATH": "workflow.sqlite",
+    # Shadow surfaces are separate FILES, not relabelled uses of an existing one:
+    # a shadow report must not be able to read a production report, and a shadow
+    # order intent must not appear in a production ledger.
+    "ATS_SHADOW_REPORT_DB": "shadow_reports.sqlite",
+    "ATS_SHADOW_ORDER_DB": "shadow_orders.sqlite",
     "ATS_ROUTE_REGISTRY_PATH": "phase_f_routes.sqlite",
     "ATS_DOCS_ROOT": "docs",
 }

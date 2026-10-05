@@ -323,6 +323,126 @@ def events_calendar_command(args, *, parser) -> int:
     return events_list(days=args.days if args.action == "upcoming" else None)
 
 
+def shadow_command(args, *, parser) -> int:
+    """Phase F shadow comparison reports, dispositions and the shadow ledger.
+
+    Kept separate from `workflow` rather than added as an action there: these are
+    different artefacts with different rules, and one command whose actions span
+    both makes the read-only ones look like they can also mutate.
+    """
+    from ..workflow import shadow_compare as compare
+    from ..workflow import shadow_ledger as ledger
+    from ..workflow import shadow_matrix as matrix
+    from ..workflow import shadow_reports as reports
+
+    db = args.db or None
+    order_db = args.order_db or None
+    action = args.action
+
+    def _json_arg(name: str, default):
+        try:
+            return json.loads(getattr(args, name))
+        except json.JSONDecodeError as exc:
+            parser.error(f"--{name.replace('_', '-')} is not valid JSON: {exc}")
+            return default
+
+    def _need(value: str, flag: str) -> str:
+        if not value:
+            parser.error(f"shadow {action} requires {flag}")
+        return value
+
+    if action == "compare":
+        report_id = _need(args.report_id, "--report-id")
+        result = compare.compare_all(
+            run_id=args.run_id or report_id,
+            left=_json_arg("left_json", {}),
+            right=_json_arg("right_json", {}),
+            expected_triggers=_json_arg("expected_triggers_json", None) or None,
+        )
+        reports.record_comparison(
+            report_id=report_id, run_id=args.run_id or report_id,
+            consumer_id=args.consumer_id,
+            batch_class=args.batch_class or matrix.DECISION,
+            scope=_json_arg("scope_json", {}), packet_hash=args.packet_hash,
+            result=result, actor=args.actor, path=db)
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2,
+                           default=str))
+        return 0
+
+    if action in {"report", "events", "acceptances"}:
+        report_id = _need(args.report_id, "--report-id")
+        try:
+            if action == "report":
+                payload = reports.read_state(report_id, path=db).as_row()
+            elif action == "events":
+                payload = reports.events(report_id, path=db)[-args.limit:]
+            else:
+                payload = reports.acceptances(report_id, path=db)
+        except reports.ShadowReportError as exc:
+            # A mistyped ID must be an error, not an empty result: "no events"
+            # and "no such report" are different answers to the same question.
+            print(json.dumps({"error": str(exc), "report_id": report_id},
+                             ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if action in {"signoff", "reject", "revoke"}:
+        report_id = _need(args.report_id, "--report-id")
+        reason = _need(args.reason, "--reason")
+        actor = _need(args.actor, "--actor")
+        if action == "signoff":
+            reports.record_signoff(report_id=report_id, actor=actor, reason=reason,
+                                   required_surfaces=args.required_surface or None,
+                                   path=db)
+        elif action == "reject":
+            reports.record_rejection(report_id=report_id, actor=actor,
+                                     reason=reason, path=db)
+        else:
+            reports.record_revocation(report_id=report_id, actor=actor,
+                                      reason=reason, path=db)
+        print(json.dumps(reports.read_state(report_id, path=db).as_row(),
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "accept":
+        report_id = _need(args.report_id, "--report-id")
+        acceptance_id = reports.accept_divergence(
+            report_id=report_id, surface=_need(args.surface, "--surface"),
+            actor=_need(args.actor, "--actor"),
+            authority=_need(args.authority, "--authority"),
+            reason=_need(args.reason, "--reason"), path=db)
+        print(json.dumps({"acceptance_id": acceptance_id, "report_id": report_id,
+                          "surface": args.surface}, ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "check":
+        report_id = _need(args.report_id, "--report-id")
+        ok, problems = reports.check_citable(
+            report_id=report_id, scope=_json_arg("scope_json", {}),
+            required_surfaces=args.required_surface or None, path=db)
+        print(json.dumps({"report_id": report_id, "citable": ok,
+                          "problems": problems}, ensure_ascii=False, indent=2))
+        # Exit non-zero so a runbook script or gate cannot pass on a citation it
+        # just proved is invalid.
+        return 0 if ok else 1
+
+    if action == "intents":
+        cycle_id = _need(args.cycle_id, "--cycle-id")
+        print(json.dumps(ledger.rebuild_attribution(cycle_id, path=order_db),
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "attest":
+        run_id = _need(args.run_id, "--run-id")
+        print(json.dumps(ledger.shadow_attestation(run_id=run_id, path=order_db),
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    parser.error(f"unhandled shadow action {action!r}")
+    return 2
+
+
 def workflow_command(args, *, parser) -> int:
     """Phase E task execution and read-only run/trigger ledger inspection."""
     from ..workflow.store import WorkflowStore
@@ -3156,6 +3276,32 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run the same schedule without external-model calls (useful for safe acceptance checks)",
     )
+    sh = sub.add_parser("shadow", help="Phase F 影子比较报告、差异处置与影子账本运维")
+    sh.add_argument("action", choices=[
+        "report", "events", "acceptances", "compare", "signoff", "reject",
+        "revoke", "accept", "check", "intents", "attest"])
+    sh.add_argument("--report-id", default="", help="report ID")
+    sh.add_argument("--run-id", default="", help="compare/attest: shadow run ID")
+    sh.add_argument("--consumer-id", default="", help="compare: consumer")
+    sh.add_argument("--batch-class", default="",
+                    choices=["", "research_read", "decision", "trading"])
+    sh.add_argument("--scope-json", default="{}", help="compare/check: scope")
+    sh.add_argument("--packet-hash", default="", help="compare: 输入包 hash")
+    sh.add_argument("--expected-triggers-json", default="[]",
+                    help="compare: 独立预期触发集合（不可由两轮并集推导）")
+    sh.add_argument("--left-json", default="{}", help="compare: 旧路径各面数据")
+    sh.add_argument("--right-json", default="{}", help="compare: 新路径各面数据")
+    sh.add_argument("--surface", default="", help="accept: 面名")
+    sh.add_argument("--authority", default="", help="accept: 权限方")
+    sh.add_argument("--required-surface", action="append", default=[],
+                    help="check: 必需面，可重复")
+    sh.add_argument("--actor", default="", help="operator identity")
+    sh.add_argument("--reason", default="", help="审计理由")
+    sh.add_argument("--cycle-id", default="", help="intents/attest: 决策周期")
+    sh.add_argument("--db", default="", help="覆盖影子报告库路径")
+    sh.add_argument("--order-db", default="", help="覆盖影子订单账本路径")
+    sh.add_argument("--limit", type=int, default=100)
+
     wf = sub.add_parser("workflow", help="Phase E 工作流运行及 Trigger Ledger 运维")
     wf.add_argument("action", choices=["run", "runs", "triggers", "retry", "history"])
     wf.add_argument("--task", action="append", default=[], help="run: Phase E task ID，可重复")
@@ -3613,6 +3759,8 @@ def main(argv: list[str] | None = None) -> int:
             schedule_options["phase_e"] = True
         start(**schedule_options)
         return 0
+    if args.command == "shadow":
+        return shadow_command(args, parser=parser)
     if args.command == "workflow":
         return workflow_command(args, parser=parser)
     if args.command == "thetadata":

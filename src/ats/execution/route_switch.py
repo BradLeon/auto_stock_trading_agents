@@ -40,6 +40,7 @@ from typing import Any
 
 from . import route_registry
 from .authorization_lifecycle import AuthorizationLifecycle
+from .order_disposition import PENDING_RECONCILIATION, disposition_report
 from .route_registry import RouteRegistryError, RouteState
 
 
@@ -182,6 +183,19 @@ def _drain_reasons(freeze: route_registry.FreezeState,
             reasons.append(
                 f"order {order['order_id'] or '(no id)'} is "
                 f"{order['status'] or '(no status)'} ({order['lifecycle']})")
+
+    # Task 2.7: an order the lifecycle calls unfinished may still be CONFIRMABLE
+    # once a read-only reconciliation pass runs (notably `expired`, which is an
+    # inference from silence). Those do not block with the orders above — they are
+    # routed through `disposition_report`, which decides per status and names the
+    # reconciliation each one needs.
+    if lifecycle is not None:
+        for row in disposition_report(lifecycle)["orders"]:
+            if row["disposition"] == PENDING_RECONCILIATION:
+                reasons.append(
+                    f"order {row['order_id'] or '(no id)'} is {row['status']} by "
+                    f"inference only; run read-only reconciliation before the switch "
+                    f"({row['reason']})")
     return reasons
 
 

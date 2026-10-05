@@ -223,16 +223,43 @@ def test_an_environment_mismatch_is_refused(store):
 
 
 def test_an_unreadable_registry_is_a_refusal_not_a_pass(store):
-    """Fail closed: if the authority cannot be read, submission stops."""
+    """Fail closed: if the authority cannot be read, submission stops.
+
+    Phase F 2.8 turned this from "the raw error escapes" into "the gate refuses
+    with a reason code". Both stop the write, but only the second one records the
+    refusal in the ledger — and an unreadable authority is exactly the case where
+    the ledger matters most, because the operator needs to see that submissions
+    were refused rather than silently skipped.
+    """
     _install(store)
     guard.grant_write("A", 1, account="DU1")
 
     def reader():
         raise registry.RouteRegistryError("database is locked")
 
-    with pytest.raises(registry.RouteRegistryError):
+    with pytest.raises(guard.BrokerWriteProhibited) as excinfo:
         guard.check_grant(operation="place_orders", caller="t", state_reader=reader,
                           account="DU1")
+
+    assert excinfo.value.reason_code == guard.REASON_AUTHORITY_UNREADABLE
+    assert "database is locked" in str(excinfo.value)
+    assert guard.refusals()[-1].reason_code == guard.REASON_AUTHORITY_UNREADABLE
+
+
+def test_an_unreadable_freeze_is_also_a_refusal(store):
+    """The freeze is part of the authority, so it fails the same way."""
+    _install(store)
+    guard.grant_write("A", 1, account="DU1")
+
+    def frozen_reader():
+        raise registry.RouteRegistryError("freeze table is locked")
+
+    with pytest.raises(guard.BrokerWriteProhibited) as excinfo:
+        guard.check_grant(operation="place_orders", caller="t",
+                          state_reader=lambda: registry.RouteState("A", 1),
+                          freeze_reader=frozen_reader, account="DU1")
+
+    assert excinfo.value.reason_code == guard.REASON_AUTHORITY_UNREADABLE
 
 
 # --- the submit layer enforces it --------------------------------------------- #

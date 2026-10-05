@@ -79,6 +79,7 @@ class SwitchReport:
 
 
 def perform_switch(new_route: str, *, actor: str = "", reason: str = "",
+                   expected_generation: int | None = None,
                    lifecycle: AuthorizationLifecycle | None = None,
                    environment: str = "", account: str = "",
                    path: str | Path | None = None) -> SwitchReport:
@@ -89,6 +90,14 @@ def perform_switch(new_route: str, *, actor: str = "", reason: str = "",
     cycles, and a caller that has already enumerated them should not have them
     re-derived from a different source here — that divergence is exactly what
     makes a drain check untrustworthy.
+
+    `expected_generation` is the caller's claim about which generation it believes
+    is current, and it is required for a real cutover. Without it the freeze would
+    supply the base value instead, which silently voids the compare-and-set: the
+    second of two concurrent operators would freeze *after* the first committed,
+    read the already-bumped generation, and succeed — so both would believe they
+    performed the switch, and the generation would have advanced twice. Passing it
+    explicitly makes the second operator fail on its stale claim instead.
     """
     target = path or route_registry.default_registry_path()
     report = SwitchReport()
@@ -97,6 +106,16 @@ def perform_switch(new_route: str, *, actor: str = "", reason: str = "",
     current = route_registry.read_state(target)
     report.from_route, report.from_generation = current.route_id, current.generation
     report.to_route = new_route
+
+    if expected_generation is not None and int(expected_generation) != current.generation:
+        # Refuse BEFORE freezing: a stale claim must not be able to close
+        # submissions on a route it did not intend to switch.
+        report.aborted_at = "freeze"
+        report.reasons.append(
+            f"caller believes the current generation is {expected_generation}, but "
+            f"it is {current.generation} (route {current.route_id!r}); another "
+            f"operator moved it, so this attempt is stale")
+        return report
 
     freeze = route_registry.freeze_submissions(
         actor=actor, reason=reason or f"switch to {new_route}", path=target)

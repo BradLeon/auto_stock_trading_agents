@@ -59,6 +59,10 @@ REASON_ENVIRONMENT_MISMATCH = "write_grant_environment_mismatch"
 # moved yet at this point. Conflating the three would make a frozen cutover
 # indistinguishable from a revoked capability in the refusal ledger.
 REASON_FROZEN = "write_grant_submissions_frozen"
+# Phase F 2.8: the authority itself could not be read (locked, corrupt, deleted).
+# Its own code because "I could not check" and "the check failed" are different
+# operational problems with different fixes — one is a retry, one is a cutover.
+REASON_AUTHORITY_UNREADABLE = "route_authority_unreadable"
 
 
 class BrokerWriteProhibited(RuntimeError):
@@ -227,7 +231,17 @@ def check_grant(*, operation: str, caller: str, state_reader,
             f"refusal_id={refusal_id})",
             reason_code=REASON_NO_GRANT, refusal_id=refusal_id)
 
-    current = state_reader()
+    current = None
+    authority_error = ""
+    try:
+        current = state_reader()
+    except Exception as exc:  # noqa: BLE001 - any failure to read is a refusal
+        # A locked, corrupt or deleted registry must refuse like any other gate,
+        # and must land in the refusal ledger. Letting the raw error escape would
+        # both skip the audit record and leave the caller to decide whether an
+        # unreadable authority is fatal — which is the decision this gate exists
+        # to make.
+        authority_error = f"{type(exc).__name__}: {exc}"
 
     def _refuse(code: str, message: str) -> None:
         note = f"{message} ({detail})" if detail else message
@@ -239,6 +253,9 @@ def check_grant(*, operation: str, caller: str, state_reader,
             f"refusal_id={refusal_id})",
             reason_code=code, refusal_id=refusal_id)
 
+    if authority_error:
+        _refuse(REASON_AUTHORITY_UNREADABLE,
+                f"the route authority could not be read: {authority_error}")
     if current is None:
         _refuse(REASON_NO_GRANT,
                 "the route registry reports no active route")
@@ -248,13 +265,19 @@ def check_grant(*, operation: str, caller: str, state_reader,
     # progress. Freezing first is what makes "drain" a real interval rather than
     # a check that only takes effect once the generation has already moved.
     if freeze_reader is not None:
-        freeze = freeze_reader()
-        if freeze is not None and getattr(freeze, "frozen", False):
-            _refuse(REASON_FROZEN,
-                    f"submissions are frozen for route switch "
-                    f"{getattr(freeze, 'switch_token', '')!r} "
-                    f"(from route {getattr(freeze, 'from_route', '')!r} "
-                    f"generation {getattr(freeze, 'from_generation', '')})")
+        try:
+            freeze = freeze_reader()
+        except Exception as exc:  # noqa: BLE001 - an unreadable freeze is also fatal
+            _refuse(REASON_AUTHORITY_UNREADABLE,
+                    f"the switch freeze could not be read: "
+                    f"{type(exc).__name__}: {exc}")
+        else:
+            if freeze is not None and getattr(freeze, "frozen", False):
+                _refuse(REASON_FROZEN,
+                        f"submissions are frozen for route switch "
+                        f"{getattr(freeze, 'switch_token', '')!r} "
+                        f"(from route {getattr(freeze, 'from_route', '')!r} "
+                        f"generation {getattr(freeze, 'from_generation', '')})")
     if current.generation != grant.generation:
         _refuse(REASON_GENERATION_STALE,
                 f"grant generation {grant.generation} is behind the active "

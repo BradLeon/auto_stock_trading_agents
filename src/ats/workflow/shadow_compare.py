@@ -217,6 +217,11 @@ def compare_schedule_omission(*, expected: Iterable[str], old_run: Iterable[str]
     old_set = {str(item) for item in old_run or ()}
     new_set = {str(item) for item in new_run or ()}
 
+    if old_run is None and new_run is None:
+        return _not_compared(
+            SCHEDULE_OMISSION,
+            "neither path reported which triggers it ran; agreement between two "
+            "absent lists is not evidence anything ran")
     if not expected_set:
         return _not_compared(
             SCHEDULE_OMISSION,
@@ -454,10 +459,13 @@ def compare_all(*, run_id: str,
             SCHEDULE_OMISSION,
             "no independent expected trigger set was supplied")
     else:
+        # `.get` with no default: a missing key means "this path did not report",
+        # which is different from "this path ran nothing". Collapsing the two is
+        # how two paths that reported nothing come out agreeing.
         result.surfaces[SCHEDULE_OMISSION] = compare_schedule_omission(
             expected=expected_triggers,
-            old_run=left.get(SCHEDULE_OMISSION, ()),
-            new_run=right.get(SCHEDULE_OMISSION, ()))
+            old_run=left.get(SCHEDULE_OMISSION),
+            new_run=right.get(SCHEDULE_OMISSION))
 
     result.surfaces[ANALYST_OUTPUT] = compare_analyst_output(
         left.get(ANALYST_OUTPUT), right.get(ANALYST_OUTPUT),

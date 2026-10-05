@@ -1,6 +1,8 @@
 """Trader agent — analytics math, approval-gated execution, store round-trips
 (hermetic; a FakeBroker replaces IBKR, no live TWS)."""
 
+import pytest
+
 from datetime import datetime, timezone
 
 from ats.memory import get_store
@@ -26,6 +28,24 @@ def _episode(pnl, status="closed", i=0):
 # --------------------------------------------------------------------------- #
 # analytics
 # --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _an_active_trade_route(monkeypatch, tmp_path):
+    """Install the trade route this test's orders execute against.
+
+    Phase F 2.5 requires an authorization to name the route and generation it was
+    issued under, so the graph refuses with `route_unbound` without one. These tests
+    exist to prove the path DOES place orders, so they need a route to place them
+    on; the refusal path is covered by the authorization unit tests.
+    """
+    from ats.execution.route_registry import install_route
+
+    path = tmp_path / "routes.sqlite"
+    install_route("A", generation=1, environment="paper", account="DU1",
+                  actor="test", reason="fixture", path=str(path))
+    monkeypatch.setenv("ATS_ROUTE_REGISTRY_PATH", str(path))
+    yield
+
+
 def test_total_return_and_drawdown():
     hist = [_perf(100000, 0, 0), _perf(110000, 10000, 1), _perf(99000, -1000, 2),
             _perf(104500, 4500, 3)]

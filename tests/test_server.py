@@ -1,5 +1,7 @@
 """Webhook callback handler — challenge + end-to-end resume on the chief graph."""
 
+import pytest
+
 from datetime import datetime, timezone
 
 from ats.graph.chief_state import ChiefDecisionState
@@ -8,6 +10,24 @@ from ats.runtime.server import handle_callback
 from ats.schemas.decision import TradeDecision
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _an_active_trade_route(monkeypatch, tmp_path):
+    """Install the trade route this test's orders execute against.
+
+    Phase F 2.5 requires an authorization to name the route and generation it was
+    issued under, so the graph refuses with `route_unbound` without one. These tests
+    exist to prove the path DOES place orders, so they need a route to place them
+    on; the refusal path is covered by the authorization unit tests.
+    """
+    from ats.execution.route_registry import install_route
+
+    path = tmp_path / "routes.sqlite"
+    install_route("A", generation=1, environment="paper", account="DU1",
+                  actor="test", reason="fixture", path=str(path))
+    monkeypatch.setenv("ATS_ROUTE_REGISTRY_PATH", str(path))
+    yield
 
 
 def test_url_verification_challenge():

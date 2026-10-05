@@ -28,6 +28,24 @@ from ats.schemas.risk import RiskReview
 NOW = datetime.now(timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _an_active_trade_route(monkeypatch, tmp_path):
+    """Install the trade route these end-to-end runs execute against.
+
+    Phase F 2.5 requires an authorization to name the route and generation it was
+    issued under; without one the gate refuses with `route_unbound`. These tests
+    exist to prove the chain EXECUTES, so they need a route to execute on — the
+    refusal itself is covered by the authorization unit tests.
+    """
+    from ats.execution.route_registry import install_route
+
+    path = tmp_path / "routes.sqlite"
+    install_route("A", generation=1, environment="paper", account="DU1",
+                  actor="test", reason="e2e fixture", path=str(path))
+    monkeypatch.setenv("ATS_ROUTE_REGISTRY_PATH", str(path))
+    yield
+
+
 def _pf(fresh: bool = True, net_liq: float = 1_000_000.0) -> PortfolioSnapshot:
     as_of = datetime.now(timezone.utc) - (
         timedelta(seconds=300) if not fresh else timedelta(seconds=0))

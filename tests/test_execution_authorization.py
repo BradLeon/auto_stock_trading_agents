@@ -22,6 +22,7 @@ from ats.execution.authorization import (AuthorizationError,
                                          ExecutionAuthorization,
                                          build_authorization,
                                          validate_authorization)
+from ats.execution.route_registry import install_route
 from ats.graph.chief_state import ChiefDecisionState
 from ats.memory.store import TradingMemory
 from ats.runtime.cli import run_decision_graph
@@ -29,6 +30,24 @@ from ats.schemas.decision import TradeDecision
 from ats.schemas.memory import TradeLogEntry
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _an_active_route(monkeypatch, tmp_path):
+    """Install a trade route for the authorization to be bound to.
+
+    Phase F 2.5 made route binding mandatory: an authorization that does not name
+    the route and generation it was issued under is rejected. Tests that assert
+    "this authorization is otherwise valid" therefore need a route in place — the
+    binding is the point, not an extra hurdle in their assertions.
+    """
+    from ats.execution import route_registry
+
+    path = tmp_path / "routes.sqlite"
+    install_route("A", generation=1, environment="paper", account="DU1",
+                  actor="test", reason="fixture", path=str(path))
+    monkeypatch.setenv("ATS_ROUTE_REGISTRY_PATH", str(path))
+    yield
 
 
 def _repo(tmp_path) -> DecisionAuditRepository:
@@ -141,7 +160,7 @@ def test_validate_rejects_missing_portfolio_snapshot(tmp_path):
 
 def test_validate_rejects_stale_snapshot(tmp_path):
     repo = _authorized_cycle(tmp_path)
-    auth = build_authorization(repo, "c1")
+    auth = build_authorization(repo, "c1").bound_to_route("A", 1)
     stale = NOW - timedelta(seconds=120)
     reasons = validate_authorization(repo, auth, snapshot_as_of=stale,
                                      max_snapshot_age_seconds=60, now=NOW)

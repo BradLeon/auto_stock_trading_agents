@@ -56,6 +56,28 @@ class ExecutionAuthorization(BaseModel):
     portfolio_snapshot_id: str
     market_as_of: str
 
+    # Phase F 2.5: the trade route and generation this authorization was issued
+    # under. Deliberately NOT part of `FIELDS`: that tuple is the §10.4 contract
+    # and other code asserts its length, so widening it here would change a
+    # published contract rather than extend this one. These two are validated
+    # separately, and their absence is a rejection reason rather than a default —
+    # an authorization that does not say which authority issued it cannot be
+    # checked against one.
+    route_id: str = ""
+    route_generation: int = 0
+
+    def bound_to_route(self, route_id: str, generation: int) -> "ExecutionAuthorization":
+        """A copy bound to a route. Returns self when already bound to it.
+
+        The comparison uses BOTH fields, so after an A→B→A round trip an
+        authorization from the first A is distinguishable from one issued by the
+        second A — which is the entire reason the generation exists.
+        """
+        if self.route_id == route_id and int(self.route_generation) == int(generation):
+            return self
+        return self.model_copy(update={"route_id": route_id,
+                                       "route_generation": int(generation)})
+
 
 def build_authorization(repo: "DecisionAuditRepository",
                         cycle_id: str) -> ExecutionAuthorization:
@@ -110,12 +132,19 @@ def build_authorization(repo: "DecisionAuditRepository",
 def validate_authorization(repo: "DecisionAuditRepository", auth: ExecutionAuthorization,
                            *, snapshot_as_of: datetime | None = None,
                            max_snapshot_age_seconds: float = 60.0,
-                           now: datetime | None = None) -> list[str]:
+                           now: datetime | None = None,
+                           route_state: Any = None) -> list[str]:
     """Pre-submission re-verification (task 7.3). Returns rejection reasons.
 
     Checks, in order: completeness of all ten fields, hash + revision match
-    against the CURRENT revision, review and approval still effective, and
-    (7.5) the portfolio snapshot the review was projected on is still fresh.
+    against the CURRENT revision, review and approval still effective, the
+    portfolio snapshot still fresh (7.5), and — Phase F 2.5 — that the
+    authorization is bound to the currently active route generation.
+
+    `route_state` is the `RouteState` to check against; pass None to skip only the
+    route check, which is what a caller with no registry should NOT do. Omitting it
+    leaves an unbound authorization rejected via `route_unbound`, so the
+    fail-closed default does not depend on the caller passing anything.
     Empty list = the authorization may proceed.
     """
     reasons: list[str] = []
@@ -147,4 +176,45 @@ def validate_authorization(repo: "DecisionAuditRepository", auth: ExecutionAutho
         if age > max_snapshot_age_seconds:
             reasons.append(f"snapshot_stale: portfolio snapshot is {age:.0f}s old "
                            f"(limit {max_snapshot_age_seconds:.0f}s)")
+    # Phase F 2.5: the authorization must name the route it was issued under, and
+    # that generation must still be active. Checked last so a complete-but-stale
+    # authorization reports the substantive problem (hash, review, approval) first.
+    if not auth.route_id or not int(auth.route_generation or 0):
+        reasons.append("route_unbound: authorization does not record the trade "
+                       "route and generation it was issued under")
+    elif route_state is not None:
+        if auth.route_id != getattr(route_state, "route_id", ""):
+            reasons.append(f"route_mismatch: issued for route {auth.route_id!r}, "
+                           f"active route is {getattr(route_state, 'route_id', '')!r}")
+        elif int(auth.route_generation) != int(getattr(route_state, "generation", 0)):
+            reasons.append(f"route_generation_stale: issued at generation "
+                           f"{auth.route_generation}, active generation is "
+                           f"{getattr(route_state, 'generation', 0)}")
     return reasons
+
+
+# --- route binding helpers (Phase F 2.5) -------------------------------------- #
+
+def active_route_state() -> Any:
+    """The active `RouteState`, or None when the registry has no route.
+
+    None is the fail-closed input: `validate_authorization` then reports
+    `route_unbound` on an authorization that never got bound, rather than the
+    caller having to remember to check.
+    """
+    from .route_registry import try_read_state
+
+    return try_read_state()
+
+
+def bind_to_active_route(auth: ExecutionAuthorization) -> ExecutionAuthorization:
+    """Bind `auth` to the currently active route and generation.
+
+    Returns the authorization unchanged when no route is registered, which leaves
+    it unbound — and unbound is a rejection, so an installation that has not
+    installed a route yet cannot execute orders.
+    """
+    state = active_route_state()
+    if state is None:
+        return auth
+    return auth.bound_to_route(state.route_id, state.generation)

@@ -48,6 +48,7 @@ PERSISTENCE_ENV_VARS: tuple[str, ...] = (
     "ATS_PERSISTENT_QUEUE_PATH",      # persistent ingestion queue
     "ATS_CHECKPOINT_DB",              # LangGraph checkpoints
     "ATS_SHADOW_DB_PATH",             # Phase E shadow workflow/trigger store
+    "ATS_ROUTE_REGISTRY_PATH",        # Phase F active trade route + generation
     "ATS_DOCS_ROOT",                  # document assets
 )
 
@@ -74,6 +75,7 @@ _SURFACE_FILES: dict[str, str] = {
     "ATS_PERSISTENT_QUEUE_PATH": "ingestion_queue.sqlite",
     "ATS_CHECKPOINT_DB": "checkpoints.sqlite",
     "ATS_SHADOW_DB_PATH": "workflow.sqlite",
+    "ATS_ROUTE_REGISTRY_PATH": "phase_f_routes.sqlite",
     "ATS_DOCS_ROOT": "docs",
 }
 

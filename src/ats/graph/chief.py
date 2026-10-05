@@ -520,6 +520,8 @@ def trader(state: ChiefDecisionState) -> dict:
     from ..decision.state import CycleStatus as _CS
     from ..execution.authorization import (AuthorizationError,
                                            RECOVERABLE,
+                                           active_route_state,
+                                           bind_to_active_route,
                                            build_authorization,
                                            validate_authorization)
 
@@ -531,9 +533,16 @@ def trader(state: ChiefDecisionState) -> dict:
     auth = None
     try:
         auth = build_authorization(repo, state.cycle_id)
+        # Phase F 2.5: bind the authorization to the route that is actually
+        # active, then verify that binding at submission time. Binding here (where
+        # the order is about to be placed) rather than inside build_authorization
+        # keeps the registry out of the audit-derivation path, so a missing
+        # registry degrades to "cannot authorize" instead of a construction error.
+        auth = bind_to_active_route(auth)
         rejections = validate_authorization(
             repo, auth, snapshot_as_of=pf.as_of if pf else None,
-            max_snapshot_age_seconds=max_age, now=now)
+            max_snapshot_age_seconds=max_age, now=now,
+            route_state=active_route_state())
     except AuthorizationError as exc:
         rejections = [str(exc)]
 

@@ -321,10 +321,10 @@ class IBKRBroker:
             # current authority. Resolved lazily — importing the registry at
             # module scope would make every read path depend on the cutover
             # tables.
-            from ..execution.route_registry import read_state
+            from ..execution.route_registry import read_freeze, read_state
 
             check_grant(operation="place_orders", caller="IBKRBroker.place_orders",
-                        state_reader=read_state,
+                        state_reader=read_state, freeze_reader=read_freeze,
                         account=self.connected_account(),
                         detail=f"cycle_id={cycle_id}")
         chain = chain or {}

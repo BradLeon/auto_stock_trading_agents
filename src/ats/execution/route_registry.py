@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ..config import REPO_ROOT
 
@@ -62,6 +63,32 @@ CREATE TABLE IF NOT EXISTS trade_route_history (
     to_generation INTEGER NOT NULL,
     actor TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT ''
+);
+-- Freeze is a separate table, not columns on the state row: it is written BEFORE
+-- the generation bump and read by processes that must refuse submissions while a
+-- cutover is in flight, including processes that never saw the pre-cutover state.
+CREATE TABLE IF NOT EXISTS trade_route_freeze (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    frozen INTEGER NOT NULL DEFAULT 0,
+    frozen_at TEXT NOT NULL DEFAULT '',
+    frozen_by TEXT NOT NULL DEFAULT '',
+    freeze_reason TEXT NOT NULL DEFAULT '',
+    -- The issuance counter at the moment of freezing. A switch is void if the
+    -- counter moved past this, because an authorization minted after the freeze
+    -- was not part of what the drain check inspected.
+    issuance_at_freeze INTEGER NOT NULL DEFAULT 0,
+    from_generation INTEGER NOT NULL DEFAULT 0,
+    from_route TEXT NOT NULL DEFAULT '',
+    switch_token TEXT NOT NULL DEFAULT ''
+);
+-- Monotonic counter of authorization issuance, bumped by `record_issuance`.
+-- Exists so "was anything signed after we froze?" is answerable without
+-- re-reading every authorization, and so it survives a process restart.
+CREATE TABLE IF NOT EXISTS trade_route_issuance (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    counter INTEGER NOT NULL DEFAULT 0,
+    last_at TEXT NOT NULL DEFAULT '',
+    last_authorization_id TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -256,3 +283,218 @@ def history(path: str | Path | None = None, *, limit: int = 50) -> list[dict[str
             "SELECT * FROM trade_route_history ORDER BY event_id DESC LIMIT ?",
             (int(limit),)).fetchall()
     return [dict(row) for row in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Freeze (task 2.6, step 1 and step 4)
+# --------------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class FreezeState:
+    """Whether submissions are currently closed, and to which switch attempt."""
+
+    frozen: bool
+    issuance_at_freeze: int = 0
+    from_generation: int = 0
+    from_route: str = ""
+    switch_token: str = ""
+    frozen_at: str = ""
+    frozen_by: str = ""
+    freeze_reason: str = ""
+
+    def as_row(self) -> dict[str, Any]:
+        return {
+            "frozen": self.frozen,
+            "issuance_at_freeze": self.issuance_at_freeze,
+            "from_generation": self.from_generation,
+            "from_route": self.from_route,
+            "switch_token": self.switch_token,
+            "frozen_at": self.frozen_at,
+            "frozen_by": self.frozen_by,
+            "freeze_reason": self.freeze_reason,
+        }
+
+
+def _empty_freeze() -> FreezeState:
+    return FreezeState(frozen=False)
+
+
+def read_freeze(path: str | Path | None = None) -> FreezeState:
+    """The current freeze state. Absence of the row means "not frozen"."""
+    return read_freeze_with_counter(path)[0]
+
+
+def read_freeze_with_counter(path: str | Path | None = None) -> tuple[FreezeState, int]:
+    """`read_freeze` plus the live issuance counter, read in one transaction.
+
+    The two must be read together: reading the freeze and then the counter
+    separately leaves a window in which an issuance can land between them and the
+    caller concludes "nothing was signed after the freeze" when something was.
+    """
+    target = path or default_registry_path()
+    with _connect(target) as conn:
+        row = conn.execute(
+            "SELECT * FROM trade_route_freeze WHERE singleton=1").fetchone()
+        counter_row = conn.execute(
+            "SELECT counter FROM trade_route_issuance WHERE singleton=1").fetchone()
+        counter = int(counter_row["counter"]) if counter_row is not None else 0
+        if row is None:
+            return _empty_freeze(), counter
+        return FreezeState(
+            frozen=bool(row["frozen"]),
+            issuance_at_freeze=int(row["issuance_at_freeze"]),
+            from_generation=int(row["from_generation"]),
+            from_route=row["from_route"],
+            switch_token=row["switch_token"],
+            frozen_at=row["frozen_at"],
+            frozen_by=row["frozen_by"],
+            freeze_reason=row["freeze_reason"],
+        ), counter
+
+
+def issuance_counter(path: str | Path | None = None) -> int:
+    """How many authorizations have been signed on this installation."""
+    target = path or default_registry_path()
+    with _connect(target) as conn:
+        row = conn.execute(
+            "SELECT counter FROM trade_route_issuance WHERE singleton=1").fetchone()
+    return int(row["counter"]) if row is not None else 0
+
+
+def record_issuance(authorization_id: str, path: str | Path | None = None) -> int:
+    """Count one authorization issuance and return the new counter.
+
+    Called by the signer, before it hands the authorization out. Cheap on purpose:
+    it is one upsert, because the alternative — scanning authorizations to answer
+    "was anything signed after the freeze" — cannot be made atomic with the freeze.
+
+    Idempotent on `authorization_id`: re-binding the same authorization (a resumed
+    loop re-validates it) must not inflate the counter, or a cutover would be voided
+    by bookkeeping rather than by a real issuance.
+    """
+    target = path or default_registry_path()
+    with _connect(target) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO trade_route_issuance"
+                " (singleton, counter, last_at, last_authorization_id)"
+                " VALUES (1, 0, '', '')")
+            last = conn.execute(
+                "SELECT counter, last_authorization_id FROM trade_route_issuance"
+                " WHERE singleton=1").fetchone()
+            if last["last_authorization_id"] != authorization_id:
+                conn.execute(
+                    "UPDATE trade_route_issuance SET counter=counter+1, last_at=?,"
+                    " last_authorization_id=? WHERE singleton=1",
+                    (_now(), authorization_id))
+            counter = int(conn.execute(
+                "SELECT counter FROM trade_route_issuance WHERE singleton=1"
+            ).fetchone()["counter"])
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
+    return int(counter)
+
+
+def freeze_submissions(*, actor: str = "", reason: str = "",
+                       path: str | Path | None = None) -> FreezeState:
+    """Close submissions and return the freeze state (step 1 of the protocol).
+
+    Records the issuance counter at the moment of freezing, which is what makes
+    step 2's check meaningful: if the counter has moved by the time the drain
+    completes, an authorization exists that the drain never inspected.
+    """
+    target = path or default_registry_path()
+    with _BUMP_LOCK:
+        with _connect(target) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                state = conn.execute(
+                    "SELECT * FROM trade_route_state WHERE singleton=1").fetchone()
+                if state is None:
+                    raise RouteRegistryError(
+                        "no active trade route is registered; nothing to freeze")
+                existing = conn.execute(
+                    "SELECT * FROM trade_route_freeze WHERE singleton=1").fetchone()
+                if existing is not None and existing["frozen"]:
+                    raise RouteRegistryError(
+                        f"submissions are already frozen by "
+                        f"{existing['frozen_by']!r} for switch "
+                        f"{existing['switch_token']!r}; finish or abort it first")
+                conn.execute("INSERT OR IGNORE INTO trade_route_issuance"
+                             " (singleton, counter) VALUES (1, 0)")
+                counter = int(conn.execute(
+                    "SELECT counter FROM trade_route_issuance WHERE singleton=1"
+                ).fetchone()["counter"])
+                stamp = _now()
+                token = uuid4().hex
+                conn.execute(
+                    "INSERT INTO trade_route_freeze (singleton, frozen, frozen_at,"
+                    " frozen_by, freeze_reason, issuance_at_freeze, from_generation,"
+                    " from_route, switch_token)"
+                    " VALUES (1,1,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(singleton) DO UPDATE SET frozen=1, frozen_at=excluded.frozen_at,"
+                    " frozen_by=excluded.frozen_by, freeze_reason=excluded.freeze_reason,"
+                    " issuance_at_freeze=excluded.issuance_at_freeze,"
+                    " from_generation=excluded.from_generation,"
+                    " from_route=excluded.from_route,"
+                    " switch_token=excluded.switch_token",
+                    (stamp, actor, reason, counter, int(state["generation"]),
+                     state["route_id"], token))
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
+    return FreezeState(
+        frozen=True, issuance_at_freeze=counter, from_generation=int(state["generation"]),
+        from_route=state["route_id"], switch_token=token, frozen_at=stamp,
+        frozen_by=actor, freeze_reason=reason)
+
+
+def open_submissions(switch_token: str, *, path: str | Path | None = None) -> FreezeState:
+    """Reopen submissions for the switch identified by `switch_token` (step 4).
+
+    Token-checked: a process that froze, lost the token, and later reopened
+    something it no longer owns must not be able to reopen the *current* attempt.
+    An unknown token is an error rather than a silent success.
+    """
+    target = path or default_registry_path()
+    with _BUMP_LOCK:
+        with _connect(target) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT * FROM trade_route_freeze WHERE singleton=1").fetchone()
+                if row is None or not row["frozen"]:
+                    raise RouteRegistryError("submissions are not frozen")
+                if row["switch_token"] != switch_token:
+                    raise RouteRegistryError(
+                        f"switch token mismatch: this attempt is "
+                        f"{row['switch_token']!r}, not {switch_token!r}")
+                conn.execute(
+                    "UPDATE trade_route_freeze SET frozen=0, switch_token=''"
+                    " WHERE singleton=1")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
+    return FreezeState(frozen=False)
+
+
+def abort_freeze(switch_token: str, *, actor: str = "", reason: str = "",
+                 path: str | Path | None = None) -> FreezeState:
+    """Void the attempt and reopen under the SAME generation (steps 2/3 failure).
+
+    Deliberately does not bump the generation: an aborted attempt changed nothing,
+    so authorizations signed before it remain valid and no re-approval is needed.
+    That is the difference between "aborted" and "rolled back".
+    """
+    state = open_submissions(switch_token, path=path)
+    target = path or default_registry_path()
+    with _connect(target) as conn:
+        conn.execute(
+            "UPDATE trade_route_freeze SET frozen_by=?, freeze_reason=? "
+            "WHERE singleton=1", (actor, f"aborted: {reason}" if reason else "aborted"))
+    return state

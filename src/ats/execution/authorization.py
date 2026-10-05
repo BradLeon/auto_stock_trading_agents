@@ -213,8 +213,23 @@ def bind_to_active_route(auth: ExecutionAuthorization) -> ExecutionAuthorization
     Returns the authorization unchanged when no route is registered, which leaves
     it unbound — and unbound is a rejection, so an installation that has not
     installed a route yet cannot execute orders.
+
+    Phase F 2.6 step 1: binding IS issuance (it is the moment an authorization
+    becomes executable), so it refuses while submissions are frozen and counts
+    itself otherwise. Counting here rather than in the signer is deliberate — this
+    is the single point every path reaches, including a resumed loop.
     """
+    from .route_registry import read_freeze, record_issuance
+
+    freeze = read_freeze()
+    if freeze.frozen:
+        raise AuthorizationError(
+            f"cannot bind an authorization while submissions are frozen for route "
+            f"switch {freeze.switch_token!r}; the freeze exists precisely so that "
+            f"nothing new becomes executable during a cutover")
     state = active_route_state()
     if state is None:
         return auth
-    return auth.bound_to_route(state.route_id, state.generation)
+    bound = auth.bound_to_route(state.route_id, state.generation)
+    record_issuance(bound.approval_id or bound.cycle_id or bound.decision_hash)
+    return bound

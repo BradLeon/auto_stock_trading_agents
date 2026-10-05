@@ -53,6 +53,12 @@ REASON_NO_GRANT = "no_write_grant"
 REASON_GENERATION_STALE = "write_grant_generation_stale"
 REASON_ACCOUNT_MISMATCH = "write_grant_account_mismatch"
 REASON_ENVIRONMENT_MISMATCH = "write_grant_environment_mismatch"
+# Phase F 2.6: submissions are closed while a route switch is between its first
+# and last step. Distinct from a prohibition — the process may write, just not
+# right now — and distinct from a stale generation, because the generation has not
+# moved yet at this point. Conflating the three would make a frozen cutover
+# indistinguishable from a revoked capability in the refusal ledger.
+REASON_FROZEN = "write_grant_submissions_frozen"
 
 
 class BrokerWriteProhibited(RuntimeError):
@@ -196,6 +202,7 @@ def _record_refusal(state: _GuardState, reason_code: str, operation: str,
 def check_grant(*, operation: str, caller: str, state_reader,
                 account: str = "", environment: str = "",
                 symbol: str = "", quantity: float | None = None,
+                freeze_reader=None,
                 detail: str = "") -> None:
     """Re-verify this process's grant against the authoritative state.
 
@@ -205,7 +212,8 @@ def check_grant(*, operation: str, caller: str, state_reader,
 
     `state_reader` is injected rather than imported so the caller decides which
     registry is authoritative — and so a test can supply a moving generation
-    without a database.
+    without a database. `freeze_reader` is the same arrangement for the switch
+    freeze (task 2.6 step 1).
     """
     with _STATE.lock:
         grant = _STATE.grant
@@ -234,6 +242,19 @@ def check_grant(*, operation: str, caller: str, state_reader,
     if current is None:
         _refuse(REASON_NO_GRANT,
                 "the route registry reports no active route")
+    # Freeze is checked BEFORE the generation comparison on purpose: during step 2
+    # of a switch the generation is still the old one, so a grant that is still
+    # valid by generation would otherwise sail through a cutover that is in
+    # progress. Freezing first is what makes "drain" a real interval rather than
+    # a check that only takes effect once the generation has already moved.
+    if freeze_reader is not None:
+        freeze = freeze_reader()
+        if freeze is not None and getattr(freeze, "frozen", False):
+            _refuse(REASON_FROZEN,
+                    f"submissions are frozen for route switch "
+                    f"{getattr(freeze, 'switch_token', '')!r} "
+                    f"(from route {getattr(freeze, 'from_route', '')!r} "
+                    f"generation {getattr(freeze, 'from_generation', '')})")
     if current.generation != grant.generation:
         _refuse(REASON_GENERATION_STALE,
                 f"grant generation {grant.generation} is behind the active "

@@ -357,3 +357,70 @@ def test_the_declared_wiring_and_the_cli_agree(capsys, db):
     """The runbook's switch names and the CLI's must be the module's."""
     _, payload = _run(capsys, ["cutover", "wiring", "--db", db])
     assert set(payload) == set(cw.DECLARED_BOUNDARY_WIRING)
+
+
+# --------------------------------------------------------------------------- #
+# 5.13 — the runbook names switches that exist
+# --------------------------------------------------------------------------- #
+
+def _runbook() -> str:
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    path = repo / "docs" / "validation" / "PHASE_F_CUTOVER_RUNBOOK.md"
+    assert path.exists(), "the control-plane runbook is part of the deliverable"
+    return path.read_text(encoding="utf-8")
+
+
+def test_the_runbook_names_every_cli_action_it_documents():
+    """A runbook naming an action the CLI lacks sends an operator to a dead end."""
+    import re
+
+    text = _runbook()
+    documented = set(re.findall(r"ats cutover ([a-z-]+)", text))
+    implemented = {a for a in _ACTION_NAMES if a != "bootstrap"}
+    assert documented, "the runbook documents no CLI action at all"
+    missing = documented - implemented - {"preflight"}
+    assert not missing, f"runbook documents actions the CLI lacks: {sorted(missing)}"
+
+
+def test_the_runbook_names_every_boundary_exactly_as_the_code_does():
+    """The switch names are the contract; a renamed boundary is a silent no-op."""
+    text = _runbook()
+    for boundary in co.SIX_BOUNDARIES:
+        assert f"`{boundary}`" in text, f"{boundary} is not named in the runbook"
+
+
+def test_the_runbook_states_the_current_live_trader_state():
+    """An operator must be able to read that real trading is not enabled."""
+    text = _runbook()
+    assert "`live_trader`" in text
+    assert "disabled" in text
+    assert "影子期无下单" in text
+
+
+def test_the_runbook_documents_both_authorization_kinds():
+    """Deployment-route authorisation and live authorisation are not the same, and
+    the runbook is where an operator would look for that distinction."""
+    text = _runbook()
+    assert "实盘授权" in text
+    assert "两个不同授权" in text or "不蕴含后者" in text
+
+
+def test_the_runbook_documents_the_required_pairs():
+    """The pairs are the reason a cutover cannot be one boundary at a time."""
+    text = _runbook()
+    for left, right in ((co.PROJECTION_READ, co.DISPATCHER_SCHEDULE),
+                        (co.ANALYST_OUTPUT, co.APPROVAL_LIFECYCLE),
+                        (co.APPROVAL_LIFECYCLE, co.CLERK_PUBLICATION)):
+        assert f"`{left}`" in text and f"`{right}`" in text
+
+
+def test_the_runbook_names_the_three_fallback_verdicts():
+    text = _runbook()
+    for verdict in ("ok", "blocked", "unavailable"):
+        assert f"`{verdict}`" in text
+
+
+_ACTION_NAMES = ["state", "wiring", "preflight", "set-route", "activate",
+                 "release", "active", "history", "fallback", "reverify"]

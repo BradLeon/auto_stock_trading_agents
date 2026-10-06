@@ -54,6 +54,10 @@ PERSISTENCE_ENV_VARS: tuple[str, ...] = (
     # may execute, so an isolated run that reused the production file would be
     # governed by — and would write into — the production dispatch ledger.
     "ATS_DISPATCH_STATE_PATH",
+    # Phase F cutover control plane. Boundary routes and activations live here, so
+    # an isolated run that reused the production file would be governed by — and
+    # would write into — the production routing state.
+    "ATS_CUTOVER_DB",
     "ATS_ROUTE_REGISTRY_PATH",        # Phase F active trade route + generation
     "ATS_DOCS_ROOT",                  # document assets
 )
@@ -87,6 +91,7 @@ _SURFACE_FILES: dict[str, str] = {
     "ATS_SHADOW_REPORT_DB": "shadow_reports.sqlite",
     "ATS_SHADOW_ORDER_DB": "shadow_orders.sqlite",
     "ATS_DISPATCH_STATE_PATH": "dispatch.sqlite",
+    "ATS_CUTOVER_DB": "cutover.sqlite",
     "ATS_ROUTE_REGISTRY_PATH": "phase_f_routes.sqlite",
     "ATS_DOCS_ROOT": "docs",
 }

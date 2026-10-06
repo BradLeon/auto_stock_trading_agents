@@ -323,6 +323,172 @@ def events_calendar_command(args, *, parser) -> int:
     return events_list(days=args.days if args.action == "upcoming" else None)
 
 
+def _cutover_boundary_names() -> list[str]:
+    """The six boundary names, read from the module rather than duplicated here.
+
+    A CLI list that drifts from the code's list makes `--boundary` accept values the
+    plane rejects, which reads as a bug in the plane rather than in the CLI.
+    """
+    from ..workflow.cutover import SIX_BOUNDARIES
+
+    return list(SIX_BOUNDARIES)
+
+
+def cutover_command(args, *, parser) -> int:
+    """Phase F cutover control plane: inspect, pre-check, register, verify.
+
+    Every action is read-only except `set-route`, `activate` and `release`, all of
+    which require `--reason`. The pre-flight changes nothing, so it can be run
+    repeatedly before deciding.
+    """
+    from ..workflow import cutover as plane
+    from ..workflow import cutover_routing as routing
+    from ..workflow import cutover_wiring as wiring
+    from ..workflow import shadow_reports as reports
+
+    db = args.db or None
+    action = args.action
+
+    def _need(value: str, flag: str) -> str:
+        if not value:
+            parser.error(f"cutover {action} requires {flag}")
+        return value
+
+    def _scope() -> dict:
+        try:
+            parsed = json.loads(args.scope_json)
+        except json.JSONDecodeError as exc:
+            parser.error(f"--scope-json is not valid JSON: {exc}")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _flag(name: str):
+        value = getattr(args, name, "")
+        if value == "":
+            return None
+        return value == "yes"
+
+    if args.bootstrap and action == "state":
+        wiring.bootstrap_wired(actor=args.actor, path=db)
+
+    if action == "state":
+        print(json.dumps({b: s.as_row() for b, s in
+                          plane.all_boundaries(db).items()},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "wiring":
+        print(json.dumps({b: [w.as_row() for w in plane.wiring_of(b, db)]
+                          for b in plane.SIX_BOUNDARIES},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "history":
+        print(json.dumps(plane.boundary_history(
+            _need(args.boundary, "--boundary"), db),
+            ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "preflight":
+        request = None
+        if args.boundary and args.consumer_id:
+            request = plane.ActivationRequest(
+                boundary=args.boundary, scope=_scope(),
+                consumer_id=args.consumer_id, report_id=args.report_id,
+                actor=args.actor)
+        result = plane.preflight(boundary=args.boundary or None, request=request,
+                                 path=db)
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2,
+                         default=str))
+        return 0 if result.ok else 1
+
+    if action == "set-route":
+        boundary = _need(args.boundary, "--boundary")
+        plane.assert_wired(boundary, db)
+        state = plane.set_route(boundary, _need(args.route, "--route"),
+                                actor=args.actor,
+                                reason=_need(args.reason, "--reason"), path=db)
+        # Compatibility is checked AFTER the move so the refusal names both sides.
+        # Reported as JSON plus a non-zero exit rather than a traceback: a runbook
+        # script has to be able to read WHICH combination conflicted.
+        try:
+            plane.assert_compatible(path=db)
+        except plane.CutoverError as exc:
+            print(json.dumps({"changed": True, "compatible": False,
+                              "problem": str(exc)},
+                             ensure_ascii=False, indent=2, default=str))
+            return 1
+        print(json.dumps(state.as_row(), ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "activate":
+        boundary = _need(args.boundary, "--boundary")
+        request = plane.ActivationRequest(
+            boundary=boundary, scope=_scope(),
+            consumer_id=_need(args.consumer_id, "--consumer-id"),
+            report_id=args.report_id, actor=_need(args.actor, "--actor"))
+        if args.report_id:
+            try:
+                ok, problems = reports.check_citable(
+                    report_id=args.report_id, scope=request.scope,
+                    path=args.report_db or None)
+            except reports.ShadowReportError as exc:
+                # An unknown report is a citation problem, not a crash: the operator
+                # needs to read "no such report" alongside the other findings.
+                ok, problems = False, [str(exc)]
+            if not ok:
+                print(json.dumps({"activated": False, "problems": problems},
+                                 ensure_ascii=False, indent=2))
+                return 1
+        result = plane.preflight(boundary=boundary, request=request, path=db)
+        if not result.ok:
+            print(json.dumps({"activated": False, "problems": result.problems,
+                              "warnings": result.warnings},
+                             ensure_ascii=False, indent=2, default=str))
+            return 1
+        record = plane.record_activation(request=request, path=db)
+        print(json.dumps({**record, "warnings": result.warnings},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "release":
+        from ..workflow.cutover import _scope_hash
+
+        released = plane.release_activation(
+            boundary=_need(args.boundary, "--boundary"),
+            scope_hash=_scope_hash(_scope()),
+            actor=_need(args.actor, "--actor"),
+            reason=_need(args.reason, "--reason"), path=db)
+        print(json.dumps({"released": released}, ensure_ascii=False, indent=2))
+        return 0 if released else 1
+
+    if action == "active":
+        print(json.dumps(plane.active_scopes(
+            _need(args.boundary, "--boundary"), db),
+            ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "fallback":
+        verdict = routing.assess_fallback(
+            _need(args.route, "--route"), consumer_id=args.consumer_id,
+            proof_valid=(True if args.fallback_proof == "valid"
+                         else False if args.fallback_proof == "missing" else None),
+            retired=_flag("fallback_retired"),
+            available=_flag("fallback_available"), path=db)
+        print(json.dumps(verdict, ensure_ascii=False, indent=2, default=str))
+        return 0 if verdict["verdict"] == routing.FALLBACK_OK else 1
+
+    if action == "reverify":
+        result = routing.reverify_downstream(
+            consumer_id=_need(args.consumer_id, "--consumer-id"),
+            scope=_scope(), snapshot_as_of=args.snapshot_as_of, path=db)
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2))
+        return 0 if result.approved else 1
+
+    parser.error(f"unhandled cutover action {action!r}")
+    return 2
+
+
 def shadow_command(args, *, parser) -> int:
     """Phase F shadow comparison reports, dispositions and the shadow ledger.
 
@@ -3276,6 +3442,27 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run the same schedule without external-model calls (useful for safe acceptance checks)",
     )
+    ct = sub.add_parser("cutover", help="Phase F 切流控制平面：边界查询、预检、批次登记与报告校验")
+    ct.add_argument("action", choices=[
+        "state", "wiring", "preflight", "set-route", "activate", "release",
+        "active", "history", "fallback", "reverify"])
+    ct.add_argument("--boundary", default="",
+                    choices=[""] + _cutover_boundary_names())
+    ct.add_argument("--route", default="", help="set-route/fallback: target | legacy | disabled")
+    ct.add_argument("--scope-json", default="{}", help="activate/release: scope")
+    ct.add_argument("--consumer-id", default="", help="activate/fallback/reverify: consumer")
+    ct.add_argument("--report-id", default="", help="activate: 引用的影子报告 ID")
+    ct.add_argument("--report-db", default="", help="影子报告库路径")
+    ct.add_argument("--snapshot-as-of", default="", help="reverify: 快照时点")
+    ct.add_argument("--actor", default="", help="operator identity")
+    ct.add_argument("--reason", default="", help="变更理由（set-route/release 必填）")
+    ct.add_argument("--fallback-proof", default="", choices=["", "valid", "missing"])
+    ct.add_argument("--fallback-retired", default="", choices=["", "yes", "no"])
+    ct.add_argument("--fallback-available", default="", choices=["", "yes", "no"])
+    ct.add_argument("--db", default="", help="覆盖切流控制库路径")
+    ct.add_argument("--bootstrap", action="store_true",
+                    help="初始化六条边界并声明本仓库接线")
+
     sh = sub.add_parser("shadow", help="Phase F 影子比较报告、差异处置与影子账本运维")
     sh.add_argument("action", choices=[
         "report", "events", "acceptances", "compare", "signoff", "reject",
@@ -3759,6 +3946,8 @@ def main(argv: list[str] | None = None) -> int:
             schedule_options["phase_e"] = True
         start(**schedule_options)
         return 0
+    if args.command == "cutover":
+        return cutover_command(args, parser=parser)
     if args.command == "shadow":
         return shadow_command(args, parser=parser)
     if args.command == "workflow":

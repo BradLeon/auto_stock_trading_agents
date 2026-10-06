@@ -50,6 +50,10 @@ PERSISTENCE_ENV_VARS: tuple[str, ...] = (
     "ATS_SHADOW_DB_PATH",             # Phase E shadow workflow/trigger store
     "ATS_SHADOW_REPORT_DB",           # Phase F shadow comparison reports
     "ATS_SHADOW_ORDER_DB",            # Phase F shadow order intents
+    # Phase F dispatch claims. Shared owner state and per-trigger claims decide who
+    # may execute, so an isolated run that reused the production file would be
+    # governed by — and would write into — the production dispatch ledger.
+    "ATS_DISPATCH_STATE_PATH",
     "ATS_ROUTE_REGISTRY_PATH",        # Phase F active trade route + generation
     "ATS_DOCS_ROOT",                  # document assets
 )
@@ -82,6 +86,7 @@ _SURFACE_FILES: dict[str, str] = {
     # order intent must not appear in a production ledger.
     "ATS_SHADOW_REPORT_DB": "shadow_reports.sqlite",
     "ATS_SHADOW_ORDER_DB": "shadow_orders.sqlite",
+    "ATS_DISPATCH_STATE_PATH": "dispatch.sqlite",
     "ATS_ROUTE_REGISTRY_PATH": "phase_f_routes.sqlite",
     "ATS_DOCS_ROOT": "docs",
 }

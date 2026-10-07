@@ -38,14 +38,27 @@ RETIRED_EVIDENCE = re.compile(
     r"\b(evidence_observations|evidence_facts|evidence_fact_projections|evidence_failures)\b")
 
 # Where a retired evidence table name may still appear: the legacy DDL that an old
-# database is migrated FROM, the retirement list itself, and the one-time migrations
-# that read those legacy rows. Anywhere else means a write path was left behind.
+# database is migrated FROM, the retirement list itself, the one-time migrations
+# that read those legacy rows, and registries that NAME tables in order to police
+# them. Anywhere else means a write path was left behind.
+#
+# The two registry entries are the same case and the distinction matters: a module
+# that lists `evidence_facts` so it can *detect* a write to it is doing the
+# opposite of leaving a write path behind. Reading the guard as "the string must
+# not appear" would make a detector that finds retired-table writes itself a
+# violation — and the fix would be to weaken the detector, which is the opposite
+# of the intent. Each entry therefore names a place where the string is a
+# classification label, not a SQL target.
 SANCTIONED = {
     ("ats/memory/store.py", "<module>"),           # _SCHEMA: legacy DDL
     ("ats/memory/store.py", "_retire_data_tables"),
     ("ats/memory/store.py", "_migrate"),
     ("ats/memory/store.py", "_migrate_shared_facts"),
     ("ats/data/stores/ownership.py", "<module>"),  # the boundary registry
+    # Phase F intake verification: NEUTRAL_FACT_TABLES / PROJECTION_TABLES name
+    # tables so 7.3 can flag an analysis role writing an opinion as a shared
+    # fact. Nothing there executes SQL against them.
+    ("ats/workflow/intake_verification.py", "<module>"),
 }
 
 

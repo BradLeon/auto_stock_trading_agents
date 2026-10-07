@@ -58,6 +58,10 @@ PERSISTENCE_ENV_VARS: tuple[str, ...] = (
     # an isolated run that reused the production file would be governed by — and
     # would write into — the production routing state.
     "ATS_CUTOVER_DB",
+    # Phase F batch manifest (F.0.6). The dry-run ledger is the record of which
+    # batches were judged ready and which were blocked; a verification run that
+    # appended into the production one would forge that history.
+    "ATS_CUTOVER_BATCH_DB",
     "ATS_ROUTE_REGISTRY_PATH",        # Phase F active trade route + generation
     "ATS_DOCS_ROOT",                  # document assets
 )
@@ -92,6 +96,7 @@ _SURFACE_FILES: dict[str, str] = {
     "ATS_SHADOW_ORDER_DB": "shadow_orders.sqlite",
     "ATS_DISPATCH_STATE_PATH": "dispatch.sqlite",
     "ATS_CUTOVER_DB": "cutover.sqlite",
+    "ATS_CUTOVER_BATCH_DB": "cutover_batches.sqlite",
     "ATS_ROUTE_REGISTRY_PATH": "phase_f_routes.sqlite",
     "ATS_DOCS_ROOT": "docs",
 }

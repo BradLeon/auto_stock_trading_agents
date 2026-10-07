@@ -109,7 +109,13 @@ def test_submit_rejects_unqualified_contract():
 
 def test_size_survives_nan_close(monkeypatch):
     """Pre-open, yfinance appends today's bar with close=NaN — sizing must skip
-    it (use the last real close), never crash on round(NaN). Seen live 2026-07-15."""
+    it (use the last real close), never crash on round(NaN). Seen live 2026-07-15.
+
+    Retargeted by task 7.9: `_last_price` no longer reads a price at all (auto
+    execution is disabled), so this exercises `_last_price_enabled` — the retained
+    implementation the plan-A restore will use. Its NaN handling still has to be
+    correct, because plan A revives this code rather than rewriting it.
+    """
     from ats.trader import execute as texec
     from ats.schemas.decision import TradeDecision
 
@@ -121,11 +127,23 @@ def test_size_survives_nan_close(monkeypatch):
         history = [Bar(217.53), Bar(float("nan"))]
 
     monkeypatch.setattr("ats.data.market_data.fetch_snapshot", lambda t: Snap())
-    d = TradeDecision(symbol="MRVL", action="trim", notional_usd=6000)
-    assert texec._size(d) == 28.0
+    assert texec._last_price_enabled("MRVL") == 217.53
 
     class AllNan:
         history = [Bar(float("nan"))]
 
     monkeypatch.setattr("ats.data.market_data.fetch_snapshot", lambda t: AllNan())
+    assert texec._last_price_enabled("MRVL") is None
+
+
+def test_sizing_returns_zero_while_auto_execution_is_disabled():
+    """The visible consequence of stopping the read: an amount-only decision sizes
+    to zero. It is not silent — `place_orders` refuses the batch with a recorded
+    reason (see `test_overnight_limits.py`) — but it does mean no order is sized.
+    """
+    from ats.trader import execute as texec
+    from ats.schemas.decision import TradeDecision
+
+    assert texec.AUTO_EXECUTION_ENABLED is False
+    d = TradeDecision(symbol="MRVL", action="trim", notional_usd=6000)
     assert texec._size(d) == 0.0

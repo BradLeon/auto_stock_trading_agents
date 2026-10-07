@@ -412,6 +412,43 @@ retired:
     consumer_zero_criterion: Chief 与 CLI 的 sector_reviews 读取清零（切流后）。
     location: Workflow memory
 
+  # ── Phase F（任务 7.10：第 7 组实测缺口此前无归属者，在此取得归属）──
+  #
+  # 上面两条已覆盖 chief 与 sector。**risk / trader / clerk / fundamental 四个角色
+  # 实测同样「未触达受治理读取面」，而登记表无任何条目覆盖它们**——核验结论若只存在
+  # 于 change 内而登记表不知道，就成了「只有本 change 知道的缺口」。此处补登记，使
+  # 它们有主；**本条不含任何修复动作**，修复另由F.0.3–F.0.5 的核验结论驱动。
+  #
+  # `target_phase: F` 表示**本条登记于 Phase F**，与上方几条的 `D` 同义——该字段记的
+  # 是登记阶段，不是「谁必须完成」。故不改写既有条目的阶段号。
+  - identifier: decision_roles.unwired_to_governed_read_api
+    capability_domain: data/target-dataflow-assurance
+    replaced_by: >-
+      ats.data.consumer_api.read_input（各角色 target read_api）；读取资格须先按
+      F.0.2 逐项登记证据，缺项保持 ineligible。
+    target_phase: F
+    status: pending
+    exit_condition: >-
+      risk / trader / clerk / fundamental 四个角色经受治理读取面取数，不再由自有
+      模块直连底层或内部模块。
+    missing_condition: >-
+      实测（第 7 组 F.0.3–F.0.5）：risk 读 ats.memory + risk.assess + trader.portfolio；
+      trader 读 ats.memory，且直连行情 provider；clerk 读 ats.memory；fundamental 经
+      graph.pead 与 ats.memory——四者均未触达 consumer_api 或 data.products。
+      chief 已由 chief.legacy_table_direct_reads 覆盖、sector 由 sector_reviews 覆盖，
+      故不重复登记。**trader 的行情读取另有契约冲突（行情产品未授权给 trader），
+      由任务 7.9 裁决，明确不在本条范围内。**
+    consumers:
+      - agents.risk_officer.review
+      - trader.execute
+      - execution.clerk
+      - agents.fundamental
+    consumer_zero_criterion: >-
+      四个角色的自有模块均触达 consumer_api 或 data/products；AST 扫描
+      （ats.workflow.intake_verification.scan_consumer_access）报告
+      governed_read_surface_not_reached 为零。
+    location: src/ats/agents/risk_officer/review.py, src/ats/trader/execute.py, src/ats/execution/clerk.py, src/ats/agents/fundamental/
+
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）
 purge_scope:
   - identifier: task_projections.legacy_columns

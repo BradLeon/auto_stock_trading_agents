@@ -33,6 +33,45 @@
 
 ### 2.1 权威测量（验收判据）
 
+#### 2026-10-07（Phase F task 13.6，本机 uv 环境）
+
+| 项 | 值 |
+|---|---|
+| 命令 | `./scripts/run_tests.sh -p no:randomly --junitxml=… --deselect tests/test_factset_index_semantic_local.py::test_semantic_core_passes_with_exact_index_and_technology_reviews` |
+| 依赖范围 | `uv sync --all-extras`（探针 6 个可选模块全部就绪） |
+| 执行环境条件 | 本机执行、**删除配额阈值提至 100000**、`--basetemp` 在仓库内 `tmp/13.6/`；`uv` 0.12.15 托管 CPython 3.12.12（`.venv/pyvenv.cfg` 内 `uv = 0.9.25`） |
+| 结果 | **45 failed / 3072 passed / 0 errors / 2 deselected（2533.42s ≈ 42 分钟）** |
+| 归因后 | **0 例本 change 引入的回归**（详见下表） |
+
+**为什么带 `--deselect`**：首次全量在 36% 处停在
+`test_factset_index_semantic_local::test_semantic_core_passes_with_exact_index_and_technology_reviews`
+（已登记的预存在 hang，`e80671a` 引入，语义 PDF 管线）。该 hang 使全量无法跑完，
+故重跑时**只排除这一条**——被排除的是 1 个测试项（参数化 2 例），不是一批测试。
+两次运行的读数分别存档，不把「跑到 36% 的部分」与「跑完全量的部分」混为一谈。
+
+**45 例的四类归属**（`scripts/attribute_test_failures.py` + `git worktree` HEAD 对照）：
+
+| 类 | 例数 | 判据 |
+|---|---:|---|
+| **A 既有失败** | 27 | 在 `git worktree add /tmp/ats-base HEAD` 的干净基线上**同样失败**（逐条 id 对照，非文件级） |
+| **B 停用下单所致** | 16 | 用户 2026-10-06 裁决的 C3 决定（`AUTO_EXECUTION_ENABLED = False`，见任务 7.9）。**有意为之，不是回归**；恢复条件已记录在 `PHASE_F_GROUP_PROGRESS.md` 的 `PF-7-03` |
+| **C 退役表守卫命中** | 1 | `test_data_layer_write_cutover` 命中本 change 新增的 `intake_verification.py`。**已在本轮修复**（见下） |
+| **D 顺序依赖** | 1 | `test_write_lease`，隔离运行通过；全量中受前序测试影响 |
+
+**C 类的处置**：`intake_verification.py` 的 `NEUTRAL_FACT_TABLES` / `PROJECTION_TABLES`
+只是**分类标签**（让 7.3 能判定「分析角色把观点写进中立事实表」），不执行 SQL。
+守卫按字面量匹配退役表名，因此命中。已把该模块加入守卫的 `SANCTIONED`——
+与既有的 `ownership.py` 同属「**为管制而列出表名**」这一类，注释里写明了理由。
+
+**加白名单后必须证明守卫没被削弱**（否则「加白名单」就是消音器）：
+向该模块的**函数体内**注入一条真实的 `INSERT INTO evidence_facts`，守卫仍判失败
+（`_probe_write` 被点名）——因为白名单只放了 `<module>` 作用域，函数体不在其中。
+读侧的三处 `execute` 亦已逐一核对：两处参数化，一处 f-string 但只从硬编码的
+6 元组 `_PRODUCTION_WATCH_TABLES` 取值、以 `mode=ro` 连接，且列的是**新表**
+`data_evidence_facts` 而非退役表。
+
+#### 历史权威测量
+
 | 项 | 值 |
 |---|---|
 | 命令 | `uv run pytest`（全量） |
@@ -129,6 +168,31 @@ print(render_summary(summarize(parse_junit_xml(Path('tmp/baseline.xml').read_tex
 # 4. 受限环境：分批取证
 uv run python scripts/run_tests_batched.py --batch-size 6
 ```
+
+## 6. 逐例归因（13.6 用法）
+
+`test_baseline` 给的是**簇**的摘要；13.6 要求对**每一例**给出根因与处置，因此需要逐例
+对照。判定必须以**测试 id** 为单位，不能以文件为单位——同一个文件里可能既有既有失败
+也有本轮新增。
+
+```bash
+# 4a. 逐例归因：按文件分组、按消息签名归并，并与已登记清单对照
+uv run python scripts/attribute_test_failures.py tmp/baseline.xml \
+  --registered tmp/13.6/registered-preexisting.txt
+
+# 4b. 对「未登记」的失败，在干净基线上复跑同一批 id —— 这是判定「既有」的唯一硬证据
+git worktree add /tmp/ats-base HEAD
+PYTHONPATH=/tmp/ats-base/src uv run python -m pytest <同一批 id> -q --tb=no \
+  --basetemp=/tmp/ats-base-tmp
+git worktree remove /tmp/ats-base --force
+```
+
+**为什么必须在干净 worktree 上对照，而不是凭印象改判**：「看起来眼熟」不是判据。
+本次 45 例里，若只按「印象」判，会把 16 例**用户明确裁决的停用下单**当成新回归去「修」——
+而修它的正确动作是补授权（方案 A），不是改测试。
+
+**顺序依赖与真回归的区分**：全量失败但在**隔离**运行下通过的，是顺序依赖
+（`test_write_lease` 即此类），不是回归。反之隔离运行仍失败的才是真问题。
 
 ## 与 Phase A 验收的关系
 

@@ -334,6 +334,910 @@ def _cutover_boundary_names() -> list[str]:
     return list(SIX_BOUNDARIES)
 
 
+def _batch_class_names() -> list[str]:
+    """The five batch classes, read from the module rather than duplicated here."""
+    from ..workflow.batch_manifest import BATCH_CLASSES
+
+    return list(BATCH_CLASSES)
+
+
+def _require(value: str, flag: str, parser) -> str:
+    """Refuse a missing required flag instead of proceeding with an empty value.
+
+    Shared rather than redefined per command: four of them grew a private copy,
+    and a copy that forgets the check is a command that runs with `""`.
+    """
+    if not value:
+        parser.error(f"{flag} is required")
+    return value
+
+
+def batch_command(args, *, parser) -> int:
+    """Phase F 8.1–8.5: the per-batch manifest and its dry-run.
+
+    Separate from `cutover` because this one CANNOT change a route — that is its
+    defining property, and putting it next to the mutating commands would invite an
+    operator to assume otherwise. `dry-run` in particular is meant to be run in a
+    loop before deciding.
+    """
+    from ..workflow import batch_manifest as bm
+
+    manifest = args.db or None
+    cutover = args.cutover_db or None
+    action = args.action
+
+    def _reader(consumer_id, scope):
+        """Read live qualification for one consumer. Absent reader -> ineligible."""
+        from ..workflow.intake import _consumer_scope
+        from ..data.assurance import qualification as _qualification
+        from ..workflow.cutover_routing import _consumer_contract
+
+        try:
+            contract = _consumer_contract(consumer_id)
+        except Exception as exc:  # noqa: BLE001 - reported as ineligible
+            return {"status": "ineligible",
+                    "reasons": [f"consumer contract unreadable: {exc}"]}
+        return _qualification(
+            domain_id=contract["domain_id"], consumer_id=consumer_id,
+            contract_version=contract["contract_version"],
+            scope=scope or _consumer_scope(consumer_id, {
+                "id": consumer_id, "domain": contract["domain_id"],
+                "contract_version": contract["contract_version"],
+                "products": list(contract["scope"].get("products", ())),
+            }))
+
+    if action == "list":
+        batches = bm.list_batches(batch_class=args.batch_class or None,
+                                  path=manifest)
+        if args.json:
+            print(json.dumps([b.as_row() for b in batches], ensure_ascii=False,
+                             indent=2, default=str))
+        else:
+            print(bm.render_manifest(batches))
+        return 0
+
+    if action == "declare":
+        scope = {}
+        if args.scope_json:
+            try:
+                scope = json.loads(args.scope_json)
+            except json.JSONDecodeError as exc:
+                parser.error(f"--scope-json is not valid JSON: {exc}")
+        try:
+            record = bm.declare_batch(bm.CutoverBatch(
+                batch_id=_require(args.batch_id, "--batch-id", parser),
+                batch_class=_require(args.batch_class, "--batch-class", parser),
+                owner=args.owner, old_route=args.old_route, new_route=args.new_route,
+                scope=scope,
+                observation_window=args.observation_window,
+                success_criteria=args.success_criteria,
+                stop_conditions=args.stop_reason,
+                fallback_route=args.fallback_route,
+                fallback_proof=args.fallback_proof,
+                fallback_retired=args.fallback_retired,
+                fallback_available=args.fallback_available,
+                fallback_drill_ref=args.fallback_drill,
+                shadow_report_id=args.report_id,
+                direct_verification=args.direct_verification,
+                declared_by=args.actor), path=manifest)
+        except bm.BatchError as exc:
+            # A refusal the operator asked for, reported as one. Letting it raise
+            # would print a traceback for a plain "you left a field blank", which
+            # is how an operator learns to ignore the output.
+            print(json.dumps({"declared": False, "error": str(exc)},
+                             ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(record.as_row(), ensure_ascii=False, indent=2,
+                         default=str))
+        return 0
+
+    if action == "show":
+        batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
+                              path=manifest)
+        result = bm.dry_run_batch(batch, qualification_reader=_reader,
+                                  path=manifest, cutover_path=cutover)
+        print(json.dumps({"batch": batch.as_row(), "dry_run": result.as_row()},
+                         ensure_ascii=False, indent=2, default=str))
+        # Non-zero unless switchable, so a gate script cannot pass on a blocked batch.
+        return 0 if result.switchable else 1
+
+    if action == "dry-run":
+        results = bm.dry_run(qualification_reader=_reader, path=manifest,
+                             cutover_path=cutover)
+        if args.json:
+            print(json.dumps([r.as_row() for r in results], ensure_ascii=False,
+                             indent=2, default=str))
+        else:
+            print(bm.render_report(results,
+                                   batches=bm.list_batches(path=manifest)))
+        return 0 if all(r.switchable for r in results) else 1
+
+    if action == "drift":
+        batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
+                              path=manifest)
+        response = bm.respond_to_drift(
+            batch, qualification_status=args.qualification_status or "(unstated)",
+            serving_traffic=(True if args.serving == "yes"
+                             else False if args.serving == "no" else None))
+        print(json.dumps(response.as_row(), ensure_ascii=False, indent=2))
+        return 0 if response.action == bm.HOLD else 1
+
+    parser.error(f"unhandled batch action {action!r}")
+    return 2
+
+
+def intake_verification_command(args, *, parser) -> int:
+    """Phase F 7.1–7.7: isolated intake verification and per-consumer disposition.
+
+    Kept separate from `cutover` and `shadow` because this command's defining
+    property is that it does NOT change anything: it runs the ten roles' access
+    checks under the isolation environment and reports what it found. An operator
+    who sees it next to the mutating commands would reasonably assume some of its
+    actions write, so it carries its own name.
+    """
+    from ..workflow import consumer_disposition as disposition
+    from ..workflow import intake_verification as iv
+
+    action = args.action
+
+    if action in {"verify", "report"}:
+        consumers = ([args.consumer_id] if args.consumer_id
+                     else list(iv.TEN_CONSUMERS))
+        try:
+            records = []
+            for consumer_id in consumers:
+                if consumer_id not in iv.TEN_CONSUMERS:
+                    parser.error(f"unknown consumer {consumer_id!r}; expected one of "
+                                 + ", ".join(iv.TEN_CONSUMERS))
+                records.append(iv.scan_consumer_access(
+                    consumer_id,
+                    opinion_inputs=args.opinion_input or ()))
+        except iv.IntakeVerificationError as exc:
+            # A verification that could not run is not a clean result. Reported
+            # as JSON with a non-zero exit so a script cannot read "the check
+            # failed" as "nothing is wrong".
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+
+        if action == "verify":
+            payload = [record.as_row() for record in records]
+            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        else:
+            print(iv.render_report(records))
+        # Non-zero when anything is non-compliant, so a gate script fails on it.
+        return 0 if all(r.compliant for r in records) else 1
+
+    if action == "digest":
+        records = [iv.scan_consumer_access(c) for c in iv.TEN_CONSUMERS]
+        print(json.dumps({"digest": iv.verification_digest(records),
+                          "evidence_id": f"intake-verification:{iv.verification_digest(records)[:16]}",
+                          "consumers": len(records),
+                          "compliant": sum(1 for r in records if r.compliant)},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "not-tradable":
+        # The refusal, exposed as a command so the rule is checkable without
+        # writing a test: an isolated acceptance is not a trading authorisation.
+        try:
+            iv.assert_isolated_result_not_tradable(
+                iv.IsolationAttestation(run_id=args.run_id or "(none)",
+                                        isolation_root="", broker_write_prohibited=True,
+                                        surfaces_redirected=()),
+                consumer_id=args.consumer_id or "")
+        except iv.IntakeVerificationError as exc:
+            print(json.dumps({"tradable": False, "reason": str(exc)},
+                             ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps({"tradable": True}, ensure_ascii=False))
+        return 0
+
+    if action == "disposition":
+        try:
+            reports = disposition.consumer_dispositions(
+                stale_by_report_age=args.stale_input or (),
+                optional_inputs=args.optional_input or ())
+        except disposition.DispositionError as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+        print(disposition.render_dispositions(reports))
+        return 0
+
+    if action == "evidence-index":
+        # The index task 7.8's runbook chapter is checked against. Every evidence
+        # id the runbook cites must be derivable from here, or the runbook is
+        # citing something that does not exist.
+        records = [iv.scan_consumer_access(c) for c in iv.TEN_CONSUMERS]
+        digest = iv.verification_digest(records)
+        index = {record.consumer_id: {
+            "evidence_id": f"intake-verification:{digest[:16]}:{record.consumer_id}",
+            "entry_point": record.entry_point,
+            "reached_entry_point": record.reached_entry_point,
+            "compliant": record.compliant,
+            "violations": [v.as_row() for v in record.violations],
+            "gaps": list(record.gaps),
+        } for record in records}
+        print(json.dumps({"digest": digest, "consumers": index},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    parser.error(f"unhandled intake action {action!r}")
+    return 2
+
+
+def retirement_command(args, *, parser) -> int:
+    """Phase F 12.1–12.6: consumer zero, reconciliation, tombstone consistency.
+
+    Read-only by construction. It produces verdicts and, for entries whose
+    criteria now hold, the wording that would mark them retired — applying that
+    wording is a separate deliberate step, because a registry edit that quietly
+    promotes an entry on partial evidence is the failure 12.6 exists to prevent.
+    """
+    from ..workflow import intake_verification as iv
+    from ..workflow import legacy_retirement as retirement
+    from ..workflow import retirement_clearance as rc
+
+    action = args.action
+    registry = retirement.load_registry()
+    live_uses = tuple(x for x in (args.uses or "").split(",") if x.strip())
+
+    def _entries():
+        wanted = {i.strip() for i in (args.identifier or "").split(",") if i.strip()}
+        rows = []
+        for tomb in registry.tombstones():
+            if wanted and tomb.identifier not in wanted:
+                continue
+            rows.append(tomb)
+        return rows
+
+    if action == "zero":
+        rows = _entries()
+        if not rows:
+            print("no matching retirement entries")
+            return 1
+        verdicts = []
+        for tomb in rows:
+            verdicts += rc.verify_consumer_zero(
+                tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+        print(rc.render_report([], verdicts))
+        return 0 if all(not v.blocks_exit for v in verdicts) else 2
+
+    if action == "reconcile":
+        tomb = registry.tombstone(_require(args.identifier, "--identifier", parser))
+        if tomb is None:
+            print(f"no such retirement entry: {args.identifier!r}")
+            return 1
+        if not live_uses:
+            parser.error("--uses is required: reconciliation over an unnamed set of "
+                         "uses proves nothing")
+        uses = {u: {"agrees": False, "detail": "not supplied by this run"} for u in live_uses}
+        verdict = rc.reconcile(tomb.identifier, uses, required_uses=live_uses)
+        print(json.dumps(verdict.as_row(), ensure_ascii=False, indent=2))
+        return 0 if verdict.complete else 2
+
+    if action == "tombstone":
+        tomb = registry.tombstone(_require(args.identifier, "--identifier", parser))
+        if tomb is None:
+            print(f"no such retirement entry: {args.identifier!r}")
+            return 1
+        verdict = rc.check_tombstone_behaviour(
+            tomb.identifier, tomb.status,
+            readable_by=[c for c in (args.readable or "").split(",") if c.strip()])
+        print(json.dumps(verdict.as_row(), ensure_ascii=False, indent=2))
+        return 0 if verdict.verdict == rc.CONSISTENT else 2
+
+    if action == "fallback-precheck":
+        def _retired(identifier: str) -> bool:
+            # No `is_retired` helper on the registry; a tombstone's own status is
+            # the authority, read from the tombstone rather than inferred from
+            # whether an entry happens to exist.
+            tomb = registry.tombstone(identifier)
+            return tomb is not None and tomb.may_exit
+
+        ok, reason = rc.precheck_fallback_target(
+            _require(args.target, "--target", parser),
+            is_retired=_retired,
+            is_available=(None if not args.check_available
+                          else (lambda r: not _retired(r))))
+        print(json.dumps({"target": args.target, "ok": ok, "reason": reason},
+                         ensure_ascii=False, indent=2))
+        return 0 if ok else 2
+
+    if action == "decide":
+        rows = _entries()
+        if not rows:
+            print("no matching retirement entries")
+            return 1
+        decisions = []
+        for tomb in rows:
+            zero = rc.verify_consumer_zero(
+                tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+            decisions.append(rc.decide_entry(
+                tomb.identifier, zero_verdicts=zero,
+                window=rc.verify_rollback_window(
+                    drilled=bool(args.drill_reference),
+                    drill_reference=args.drill_reference or ""),
+                tombstone=rc.check_tombstone_behaviour(tomb.identifier, tomb.status)))
+        print(rc.render_report(decisions))
+        return 0 if all(d.may_exit for d in decisions) else 2
+
+    parser.error(f"unknown action {action!r}")
+
+
+def live_command(args, *, parser) -> int:
+    """Phase F 11.1–11.3: the live-trading gate and route drills.
+
+    Separate from `read` and `dispatch` because those change routes and this one
+    is the only command whose subject is **real money**. The gate is consulted
+    here; the live switch itself is not performed here — keeping the two apart is
+    what means a test can exercise the gate fully without any path existing by
+    which it could move a real route.
+    """
+    from ..execution import live_authorisation as live
+    from ..execution import route_drill as drill
+
+    db = args.db or None
+    action = args.action
+
+    if action == "authorize":
+        auth = live.LiveAuthorisation(
+            reference=_require(args.reference, "--reference", parser),
+            issuer=args.issuer,
+            authorised_by=_require(args.authorised_by, "--authorised-by", parser),
+            issued_by=_require(args.issued_by, "--issued-by", parser),
+            scope=tuple(s.strip() for s in (args.scope or "").split(",") if s.strip()),
+            environment=_require(args.environment, "--environment", parser),
+            account=_require(args.account, "--account", parser),
+            valid_until=_require(args.valid_until, "--valid-until", parser),
+            note=args.note or "")
+        try:
+            live.record_authorisation(auth, actor=args.actor, path=db)
+        except live.LiveAuthorisationError as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "show-auth":
+        auth = live.read_authorisation(args.reference or "", path=db)
+        if auth is None:
+            print(f"no such live authorisation: {args.reference!r}")
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "gate":
+        decision = live.evaluate_live_switch(
+            authorisation_ref=args.reference or "",
+            consumer_id=args.consumer_id or "",
+            environment=args.environment or "",
+            account=args.account or "", path=db)
+        print(json.dumps(decision.as_row(), ensure_ascii=False, indent=2))
+        return 0 if decision.opened else 2
+
+    if action in {"drill", "rollback-drill"}:
+        if action == "drill":
+            result = drill.run_switch_drill(
+                drill_id=_require(args.drill_id, "--drill-id", parser),
+                actor=args.actor, environment=args.environment or "paper",
+                account=args.account or "", base_path=args.base,
+                live_authorisation_ref=args.reference or "")
+        else:
+            result = drill.run_rollback_drill(
+                drill_id=_require(args.drill_id, "--drill-id", parser),
+                actor=args.actor, environment=args.environment or "paper",
+                account=args.account or "", base_path=args.base,
+                fallback_available=not args.fallback_unavailable,
+                live_authorisation_ref=args.reference or "")
+        print(drill.render_drill_report(result))
+        return 0 if result.outcome == "completed" else 2
+
+    if action == "drill-history":
+        rows = drill.drill_history(args.drill_id or "",
+                                   path=drill.drill_path(args.base,
+                                                         args.drill_id or ""))
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    parser.error(f"unknown action {action!r}")
+
+
+def schedule_cutover_command(args, *, parser) -> int:
+    """Phase F 10.1–10.4: schedule ownership and rollback.
+
+    Reads group 4's real claim ledger rather than reimplementing the identity
+    mapping — `trigger_key` is the whole point of that module, and a second
+    derivation would be a second opinion about which triggers are the same one.
+    """
+    from ..workflow import dispatch_claims as claims
+    from ..workflow import schedule_cutover as sc
+
+    state_path = args.state or None
+    switch_db = args.switch_db or None
+    action = args.action
+
+    def _ledger() -> list[dict]:
+        return list(claims.claims(path=state_path))
+
+    def _expected() -> list[str]:
+        """The triggers that *should* be in the ledger.
+
+        Group 4's 4.6 exports an expected-trigger set as the comparison baseline
+        for exactly this reason: deriving the set from the ledger alone would make
+        an empty ledger look clean. Declared here as the legacy job set, because
+        the ledger is keyed by hashed trigger and the job list is the readable
+        source of "which triggers exist at all".
+        """
+        return sorted(claims.LEGACY_JOBS)
+
+    def _triggers():
+        if args.trigger:
+            return [args.trigger]
+        return _expected()
+
+    # One snapshot for the whole sweep. Reading the ledger per trigger would let
+    # a claim taken mid-sweep make the same sweep report one trigger as sole and
+    # another as conflicted, which is not a finding about anything.
+    snapshot = {str(row["trigger_key"]): [dict(row)]
+                for row in _ledger()} if not args.trigger else {}
+
+    def _holders_reader():
+        def reader(trigger):
+            if trigger in snapshot:
+                return snapshot[trigger]
+            if not args.trigger:
+                # The ledger has never heard of this key. Raising KeyError is the
+                # module's "not verified" signal — returning [] here would read
+                # as "known and unclaimed", which is a different and wrong claim.
+                raise KeyError(trigger)
+            return [dict(row) for row in _ledger()
+                    if str(row["trigger_key"]) == trigger]
+        return reader
+
+    def _owner() -> str:
+        state = claims.read_owner(path=state_path)
+        return state.owner if state else ""
+
+    ownership = sc.assert_sole_ownership(
+        _triggers(), holders_reader=_holders_reader(), owner_reader=_owner)
+
+    if action == "ownership":
+        print(ownership.summary())
+        return 0 if ownership.clean else 2
+
+    if action == "ledger":
+        print(json.dumps(_ledger(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "executed":
+        for trigger, refs in sorted(sc.executed_triggers(switch_db).items()):
+            print(f"{trigger:44} {', '.join(refs)}")
+        return 0
+
+    if action == "record-execution":
+        if not args.trigger or not args.execution_ref:
+            parser.error("--trigger and --execution-ref are both required")
+        sc.record_execution(args.trigger, execution_ref=args.execution_ref,
+                            actor=args.actor, path=switch_db)
+        print(f"recorded {args.trigger} → {args.execution_ref}")
+        return 0
+
+    if action == "rollback-plan":
+        plan = sc.plan_rollback(_triggers(),
+                                executed=sc.executed_triggers(switch_db))
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0 if plan["dedup_sound"] else 2
+
+    if action == "rollback-history":
+        rows = sc.rollback_history(path=switch_db)
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    parser.error(f"unknown action {action!r}")
+
+
+def boundary_drill_command(args, *, parser) -> int:
+    """Phase F 13.1–13.5: independent boundary rollbacks and shadow acceptance.
+
+    Read-only with respect to production by construction: every drill derives its
+    own store from the surface it would move, and the trade drill consults the
+    live gate rather than opening it. There is no `--apply` here on purpose —
+    a rollback drill that could be pointed at production is a rollback that
+    eventually will be.
+    """
+    from ..workflow import boundary_drill as bd
+
+    action = args.action
+    actor = args.actor or ""
+
+    def _drill_id(suffix: str) -> str:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        return args.drill_id or f"{suffix}-{stamp}"
+
+    def _counters(raw: str):
+        """Record counts for 13.1's preservation check.
+
+        Read from the REAL stores rather than taken from the operator, because a
+        caller-supplied count is a claim about the evidence rather than a reading
+        of it — and the whole check is whether the evidence survived.
+        """
+        if raw:
+            def declared() -> dict[str, int]:
+                return {str(k): int(v) for k, v in json.loads(raw).items()}
+            return declared
+
+        def read_real() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            try:
+                from ..workflow import shadow_ledger as sl
+
+                counts["shadow_intents"] = len(sl.intents())
+                counts["shadow_submit_attempts"] = len(sl.submit_attempts())
+            except Exception:  # noqa: BLE001 - reported as unread, not as zero
+                counts["shadow_intents"] = -1
+            try:
+                from ..workflow import shadow_reports as sr
+
+                counts["shadow_reports"] = len(sr.events(
+                    args.report_id) if args.report_id else [])
+            except Exception:  # noqa: BLE001
+                counts["shadow_reports"] = -1
+            try:
+                from ..memory import get_store
+
+                store = get_store()
+                counts["approvals"] = int(store.conn.execute(
+                    "SELECT COUNT(*) FROM boss_approvals").fetchone()[0])
+                counts["revisions"] = int(store.conn.execute(
+                    "SELECT COUNT(*) FROM decision_revisions").fetchone()[0])
+            except Exception:  # noqa: BLE001
+                counts["approvals"] = -1
+                counts["revisions"] = -1
+            return counts
+        return read_real
+
+    def _read_rollback(drill_id: str) -> bd.BoundaryDrillResult:
+        from ..workflow import batch_manifest as bm
+
+        if not args.batch_id:
+            parser.error("--batch-id is required: a rollback drill with no batch "
+                         "has nothing to roll back")
+        # The manifest and the control plane are DIFFERENT files. Reading the
+        # batch out of the control plane reports every batch as absent and blocks
+        # the drill for a reason that lives in the wrong database.
+        batch = bm.read_batch(args.batch_id, path=args.batch_db or None)
+        return bd.run_read_boundary_drill(
+            drill_id=drill_id, batch=batch,
+            fallback_retired=bool(args.fallback_retired),
+            fallback_available=not args.fallback_unavailable,
+            evidence_counters=_counters(args.counts_json), actor=actor,
+            production_cutover_db=args.cutover_db or None)
+
+    def _schedule_rollback(drill_id: str) -> bd.BoundaryDrillResult:
+        from ..workflow import read_cutover as rc
+
+        triggers = list(args.trigger)
+        if not triggers:
+            from ..workflow import dispatch_claims as claims
+
+            triggers = sorted(claims.LEGACY_JOBS)
+        try:
+            executed = {str(k): [str(x) for x in v]
+                        for k, v in json.loads(args.executed_json or "{}").items()}
+        except ValueError as exc:
+            parser.error(f"--executed-json is not valid JSON: {exc}")
+            executed = {}
+        auth = None
+        if args.authorisation:
+            # Deployment authorisations live in the batch/authorisation file, not
+            # the switch-record file. Reading them from the switch DB reports every
+            # reference as absent, which would refuse the rollback for a reason
+            # that lives in the wrong database.
+            auth = rc.read_authorisation(
+                args.authorisation, path=args.batch_db or None)
+            if auth is None:
+                print(f"no such deployment authorisation: {args.authorisation!r}")
+                return 1
+        return bd.run_schedule_boundary_drill(
+            drill_id=drill_id, triggers=triggers, executed=executed,
+            authorisation=auth, unconfirmed=list(args.unconfirmed), actor=actor,
+            production_dispatch_db=args.dispatch_db or None,
+            production_switch_db=args.switch_db or None)
+
+    def _trade_rollback(drill_id: str) -> bd.BoundaryDrillResult:
+        return bd.run_trade_boundary_drill(
+            drill_id=drill_id, environment=args.environment or "paper",
+            account=args.account or "",
+            fallback_available=not args.fallback_unavailable,
+            live_authorisation_ref=args.live_reference or "", actor=actor,
+            production_route_db=args.route_db or None)
+
+    def _traceability():
+        from ..decision.repository import DecisionAuditRepository
+        from ..memory import get_store
+        from ..workflow import cutover_acceptance as ca
+        from ..workflow import shadow_ledger as sl
+
+        try:
+            intents = sl.intents(run_id=args.run_id or None,
+                                 cycle_id=args.cycle_id or None,
+                                 path=args.order_db or None)
+        except Exception as exc:  # noqa: BLE001
+            print(f"the shadow order ledger could not be read: {exc}")
+            return 1
+        repo = DecisionAuditRepository(get_store())
+        report = ca.verify_traceability(
+            chain_reader=repo.read_chain, intents=intents,
+            scope=args.cycle_id or args.run_id or "")
+        return report
+
+    def _unapproved():
+        from ..workflow import cutover_acceptance as ca
+        from ..workflow import shadow_ledger as sl
+        from ..execution import broker_write_guard as guard
+
+        order_db = args.order_db or None
+        try:
+            attempts = sl.submit_attempts(path=order_db)
+        except Exception as exc:  # noqa: BLE001
+            print(f"the shadow submit-attempt ledger could not be read: {exc}")
+            return None, 1
+        real_ledger = None
+        try:
+            from ..memory import get_store
+
+            real_ledger = get_store()
+        except Exception:  # noqa: BLE001 - absence is a stop condition, not a pass
+            real_ledger = None
+        return ca.verify_no_unapproved_orders(
+            run_id=args.run_id or "", attempts=attempts,
+            refusals=guard.refusal_rows(),
+            capability_checks=[], simulated_receipts=[], real_ledger=real_ledger), 0
+
+    if action == "history":
+        if not args.drill_id and not args.cutover_db:
+            parser.error("--cutover-db or --drill-id is required so the history "
+                         "store is named explicitly")
+        path = (bd.drill_db(args.cutover_db, args.drill_id)
+                if args.cutover_db else None)
+        rows = bd.drill_history(drill_id=args.drill_id or "", path=path)
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action in {"read-rollback", "schedule-rollback", "trade-rollback"}:
+        suffix = {"read-rollback": "read", "schedule-rollback": "sched",
+                  "trade-rollback": "trade"}[action]
+        result = {"read-rollback": _read_rollback,
+                  "schedule-rollback": _schedule_rollback,
+                  "trade-rollback": _trade_rollback}[action](_drill_id(suffix))
+        print(bd.render_drill_report([result]))
+        return 0 if result.outcome in {bd.COMPLETED, bd.HELD, bd.REFUSED} else 2
+
+    if action == "all-rollbacks":
+        results = [_read_rollback(_drill_id("read")),
+                   _schedule_rollback(_drill_id("sched")),
+                   _trade_rollback(_drill_id("trade"))]
+        print(bd.render_drill_report(results))
+        return 0 if all(r.outcome != bd.FAILED for r in results) else 2
+
+    if action == "traceability":
+        report = _traceability()
+        if args.json:
+            print(json.dumps(report.as_row(), ensure_ascii=False, indent=2,
+                             default=str))
+        else:
+            from ..workflow import cutover_acceptance as ca
+
+            print(ca.render_traceability_report(report))
+        return 0 if report.compliant_switch else 2
+
+    if action == "unapproved-orders":
+        report, code = _unapproved()
+        if report is None:
+            return code
+        if args.json:
+            print(json.dumps(report.as_row(), ensure_ascii=False, indent=2,
+                             default=str))
+        else:
+            from ..workflow import cutover_acceptance as ca
+
+            print(ca.render_unapproved_report(report))
+        return 0 if report.clean else 2
+
+    if action == "acceptance":
+        trace = _traceability()
+        report, code = _unapproved()
+        if report is None:
+            return code
+        from ..workflow import cutover_acceptance as ca
+
+        if args.json:
+            print(json.dumps({"traceability": trace.as_row(),
+                              "unapproved_orders": report.as_row()},
+                             ensure_ascii=False, indent=2, default=str))
+        else:
+            print(ca.render_acceptance_report(trace, report))
+        return 0 if (trace.compliant_switch and report.clean) else 2
+
+    parser.error(f"unknown action {action!r}")
+
+
+def read_cutover_command(args, *, parser) -> int:
+    """Phase F 9.1–9.5: read-path batch switching.
+
+    Separate from `batch` because this one CAN move a route. That is why every
+    action here requires an explicit `--authorisation` reference, and why the
+    deciding mode (`switch` without `--apply`) is the default: 9.1's runbook has
+    an operator re-run this in a loop before deciding.
+    """
+    from ..workflow import read_cutover as rc
+
+    manifest = args.db or None
+    cutover = args.cutover_db or None
+    action = args.action
+
+    def _reader(consumer_id, scope):
+        """Live qualification for one consumer.
+
+        Two things are load-bearing here.
+
+        The scope is DERIVED from the manifest, never taken from the caller: a
+        caller-chosen scope is how a narrow pass gets registered as a broad one,
+        so the same helper the evidence was registered under is the one that must
+        query it.
+
+        And a gate that raises is reported as `unreadable`, not as `ineligible` —
+        those are different findings. Conflating them means "I looked it up wrong"
+        gets reported as "it does not qualify", which is a claim about the
+        consumer rather than about the query.
+        """
+        from ..data.assurance import qualification as _qualification
+        from ..workflow.cutover_routing import _consumer_contract
+        from ..workflow.intake import _consumer_scope
+
+        try:
+            contract = _consumer_contract(consumer_id)
+            return _qualification(
+                domain_id=contract["domain_id"], consumer_id=consumer_id,
+                contract_version=contract["contract_version"],
+                scope=_consumer_scope(consumer_id, contract))
+        except Exception as exc:  # noqa: BLE001 - a gate that crashes is not a pass
+            return {"status": "unreadable", "reason": f"{type(exc).__name__}: {exc}"}
+
+    def _report_ok(batch):
+        """Delegates to the shadow report's own applicability check (3.6).
+
+        Returns the `(usable, problems)` shape the executor expects rather than
+        re-deriving any of the four checks here — a second implementation would
+        eventually disagree with the one 3.6 already tests.
+        """
+        from ..workflow import shadow_reports as reports
+
+        if not batch.shadow_report_id:
+            return True, []
+        try:
+            usable, problems = reports.check_citable(
+                report_id=batch.shadow_report_id, scope=dict(batch.scope),
+                required_surfaces=batch.required_surfaces or None)
+        except Exception as exc:  # noqa: BLE001
+            return False, [f"the cited report could not be read: {exc}"]
+        return bool(usable), list(problems or [])
+
+    if action == "authorize":
+        auth = rc.DeploymentAuthorization(
+            reference=_require(args.authorisation, "--authorisation", parser),
+            authorised_by=_require(args.authorised_by, "--authorised-by", parser),
+            issued_by=_require(args.issued_by, "--issued-by", parser),
+            scope=tuple(s.strip() for s in (args.scope or "").split(",")
+                        if s.strip()),
+            valid_until=_require(args.valid_until, "--valid-until", parser),
+            note=args.note or "")
+        try:
+            rc.write_authorisation(auth, path=manifest, actor=args.actor)
+        except rc.DeploymentAuthorizationError as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "show-auth":
+        auth = rc.read_authorisation(args.authorisation or "", path=manifest)
+        if auth is None:
+            print(f"no such authorisation: {args.authorisation!r}")
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "plan":
+        auth = rc.read_authorisation(args.authorisation or "", path=manifest)
+        if auth is None and args.authorisation:
+            print(f"no such authorisation: {args.authorisation!r}. Record it with "
+                  "`read authorize` first — an authorisation passed only on the "
+                  "command line would not be readable by whoever asks who allowed it")
+            return 1
+        if not args.batch_id:
+            print(rc.render_report([rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok,
+                authorisation=auth, actor=args.actor, path=manifest,
+                cutover_path=cutover) for batch in _all_batches(manifest)]))
+        else:
+            batch = bm_read(args.batch_id, parser, manifest)
+            print(rc.render_report([rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok,
+                authorisation=auth, actor=args.actor, path=manifest,
+                cutover_path=cutover)]))
+        return 0
+
+    if action == "switch":
+        if not args.authorisation:
+            # Still runs the executor, so the refusal is recorded. Shortcutting
+            # here would leave nothing in the history, and "we looked and could
+            # not" is the reading an operator needs when the authorisation later
+            # arrives (8.2 makes the same promise for the dry-run).
+            batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
+                            manifest)
+            result = rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok,
+                authorisation=None, actor=args.actor or "cli", path=manifest,
+                cutover_path=cutover, apply=args.apply)
+            print(rc.render_report([result]))
+            print("refusing: --authorisation is required. Passing the gates is not "
+                  "permission to cut over; the authorisation is a separate artifact "
+                  "on purpose")
+            return 1
+        auth = rc.read_authorisation(args.authorisation, path=manifest)
+        if auth is None:
+            # Same reasoning: an unrecorded reference is still an attempt worth
+            # recording, and it is the attempt most likely to be queried later.
+            batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
+                            manifest)
+            result = rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok,
+                authorisation=None, actor=args.actor or "cli", path=manifest,
+                cutover_path=cutover, apply=args.apply)
+            print(rc.render_report([result]))
+            print(f"refusing: no recorded authorisation {args.authorisation!r}. "
+                  "An authorisation that cannot be read back cannot be audited")
+            return 1
+        batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser, manifest)
+        result = rc.execute_batch(
+            batch, qualification_reader=_reader, report_checker=_report_ok,
+            authorisation=auth, actor=args.actor or "cli", path=manifest,
+            cutover_path=cutover, apply=args.apply)
+        print(rc.render_report([result]))
+        # Exit non-zero unless everything switched: a partial switch is not the
+        # requested outcome and must not read as success in a script.
+        return 0 if result.outcome == rc.BATCH_SWITCHED else 2
+
+    if action == "history":
+        rows = rc.run_history(args.batch_id or "", path=manifest)
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        else:
+            for row in rows:
+                print(f"{row['recorded_at']}  {row['batch_id']:24} "
+                      f"{row['outcome']:22} changed={row['changed']} "
+                      f"actor={row['actor'] or '-'}")
+        return 0
+
+    parser.error(f"unknown action {action!r}")
+
+
+def _all_batches(manifest):
+    from ..workflow import batch_manifest as bm
+
+    return list(bm.list_batches(path=manifest))
+
+
+def bm_read(batch_id, parser, manifest):
+    from ..workflow import batch_manifest as bm
+
+    try:
+        return bm.read_batch(batch_id, path=manifest)
+    except bm.BatchError as exc:
+        parser.error(str(exc))
+
+
 def cutover_command(args, *, parser) -> int:
     """Phase F cutover control plane: inspect, pre-check, register, verify.
 
@@ -3489,6 +4393,173 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--order-db", default="", help="覆盖影子订单账本路径")
     sh.add_argument("--limit", type=int, default=100)
 
+    iv = sub.add_parser(
+        "intake",
+        help="Phase F 接入核验与逐消费者处置（只读，不改路由、不落生产证据）")
+    iv.add_argument("action", choices=[
+        "verify", "report", "digest", "not-tradable", "disposition",
+        "evidence-index"])
+    iv.add_argument("--consumer-id", default="",
+                    help="verify/not-tradable: 单一消费者；缺省为全部十个")
+    iv.add_argument("--run-id", default="", help="not-tradable: 隔离运行 ID")
+    iv.add_argument("--opinion-input", action="append", default=[],
+                    help="verify: 该角色实际读取的观点来源，可重复")
+    iv.add_argument("--optional-input", action="append", default=[],
+                    help="disposition: 缺失的可选输入，可重复")
+    iv.add_argument("--stale-input", action="append", default=[],
+                    help="disposition: 按报告年龄被判 stale 的来源，可重复")
+
+    # Named `dispatch`, not `schedule`: `schedule` is Phase E's "run the daily
+    # cycle" command, and a cutover reader sharing its name would be one
+    # mistyped flag away from firing a real cycle.
+    rt = sub.add_parser(
+        "retirement",
+        help="Phase F 消费者清零、数据对账与墓碑一致性（**只读，不改登记表**）")
+    rt.add_argument("action", choices=[
+        "zero", "reconcile", "tombstone", "fallback-precheck", "decide"])
+    rt.add_argument("--identifier", default="",
+                    help="逗号分隔的登记条目 id（reconcile/tombstone 用单个）")
+    rt.add_argument("--uses", default="",
+                    help="reconcile: 旧实现所涉的全部数据用途（逗号分隔）")
+    rt.add_argument("--readable", default="",
+                    help="tombstone: 仍可读取该条目的消费方（逗号分隔）")
+    rt.add_argument("--target", default="", help="fallback-precheck: 回退目标")
+    rt.add_argument("--check-available", action="store_true",
+                    help="fallback-precheck: 同时核验目标可用性")
+    rt.add_argument("--drill-reference", default="",
+                    help="decide: 已演练回退的引用")
+
+    lv = sub.add_parser(
+        "live",
+        help="Phase F 实盘授权门与交易路径演练（**本命令不会执行真实切换**）")
+    lv.add_argument("action", choices=[
+        "authorize", "show-auth", "gate", "drill", "rollback-drill",
+        "drill-history"])
+    lv.add_argument("--reference", default="", help="实盘授权引用（须以 LIVE- 开头）")
+    lv.add_argument("--issuer", default="human", help="authorize: 签发主体（仅 human）")
+    lv.add_argument("--authorised-by", default="", help="authorize: 授权人")
+    lv.add_argument("--issued-by", default="", help="authorize: 签发人")
+    lv.add_argument("--scope", default="", help="authorize: 逗号分隔的消费者范围")
+    lv.add_argument("--environment", default="", help="environment（live/paper）")
+    lv.add_argument("--account", default="", help="account")
+    lv.add_argument("--valid-until", default="", help="authorize: 有效期")
+    lv.add_argument("--note", default="", help="authorize: 备注")
+    lv.add_argument("--consumer-id", default="", help="gate: 被切换的消费者")
+    lv.add_argument("--drill-id", default="", help="drill/rollback-drill: 演练标识")
+    lv.add_argument("--base", default="", help="演练：真实路由库路径（演练库由它派生）")
+    lv.add_argument("--fallback-unavailable", action="store_true",
+                    help="rollback-drill: 声明回退目标不可用（验证保持现状）")
+    lv.add_argument("--db", default="", help="实盘授权与门禁决定库")
+    lv.add_argument("--actor", default="", help="执行人")
+
+    sp = sub.add_parser(
+        "dispatch",
+        help="Phase F 调度所有权核验与回滚去重（**读账本，不改 owner**）")
+    sp.add_argument("action", choices=[
+        "ownership", "ledger", "executed", "record-execution",
+        "rollback-plan", "rollback-history"])
+    sp.add_argument("--trigger", default="", help="限定单一逻辑触发")
+    sp.add_argument("--execution-ref", default="", help="record-execution: 执行引用")
+    sp.add_argument("--state", default="", help="第4组的 dispatch 状态库")
+    sp.add_argument("--switch-db", default="", help="执行记录与回滚记录库")
+    sp.add_argument("--actor", default="", help="执行人")
+
+    rc_parser = sub.add_parser(
+        "read",
+        help="Phase F 读路径分批切换（**会改路由**，须提供 --authorisation）")
+    rc_parser.add_argument("action", choices=[
+        "plan", "switch", "authorize", "show-auth", "history"])
+    rc_parser.add_argument("--batch-id", default="", help="switch: 批次 ID")
+    rc_parser.add_argument("--db", default="", help="批次清单与运行记录库")
+    rc_parser.add_argument("--cutover-db", default="", help="切流控制状态库")
+    rc_parser.add_argument("--authorisation", default="",
+                           help="已登记的部署授权引用；switch 必填")
+    rc_parser.add_argument("--authorised-by", default="", help="authorize: 授权人")
+    rc_parser.add_argument("--issued-by", default="", help="authorize: 签发人")
+    rc_parser.add_argument("--scope", default="", help="authorize: 逗号分隔的消费者范围")
+    rc_parser.add_argument("--valid-until", default="", help="authorize: 授权有效期")
+    rc_parser.add_argument("--note", default="", help="authorize: 备注")
+    rc_parser.add_argument("--actor", default="", help="执行人")
+    rc_parser.add_argument("--apply", action="store_true",
+                           help="switch: 真正改路由；缺省只决定不改动")
+    rc_parser.add_argument("--json", action="store_true", help="history: JSON 输出")
+
+    bt = sub.add_parser(
+        "batch",
+        help="Phase F 逐批切流清单与 dry-run（**不改任何路由**）")
+    bt.add_argument("action", choices=[
+        "list", "declare", "show", "dry-run", "drift"])
+    bt.add_argument("--batch-id", default="", help="declare/show/drift: 批次 ID")
+    bt.add_argument("--batch-class", default="", choices=[""] + _batch_class_names())
+    bt.add_argument("--owner", default="", help="declare: 责任方")
+    bt.add_argument("--old-route", default="", help="declare: 旧路由")
+    bt.add_argument("--new-route", default="", help="declare: 新路由")
+    bt.add_argument("--scope-json", default="{}", help="declare: 批次范围")
+    bt.add_argument("--observation-window", default="", help="declare: 观察窗口")
+    bt.add_argument("--success-criteria", default="", help="declare: 成功判据")
+    bt.add_argument("--stop-reason", default="", help="declare: 停止条件")
+    bt.add_argument("--fallback-route", default="", help="declare: 回退目标")
+    bt.add_argument("--fallback-proof", default="",
+                    choices=["", "valid", "missing"])
+    bt.add_argument("--fallback-retired", default="",
+                    choices=["", "yes", "no"])
+    bt.add_argument("--fallback-available", default="",
+                    choices=["", "yes", "no"])
+    bt.add_argument("--fallback-drill", default="", help="declare: 已演练回退的引用")
+    bt.add_argument("--report-id", default="", help="declare: 引用的影子报告 ID")
+    bt.add_argument("--direct-verification", action="store_true",
+                    help="declare: 已在生产运行、直接核验接收（不重复切换）")
+    bt.add_argument("--qualification-status", default="",
+                    help="drift: 当前资格状态")
+    bt.add_argument("--serving", default="", choices=["", "yes", "no"],
+                    help="drift: 该批次是否正在承载流量")
+    bt.add_argument("--actor", default="", help="declare: operator identity")
+    bt.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
+    bt.add_argument("--db", default="", help="覆盖批次清单库路径")
+    bt.add_argument("--cutover-db", default="", help="覆盖切流控制库路径")
+
+    # Named `drill`, not `rollback`: the actions cover the shadow-period
+    # acceptance checks as well as the three boundary rollbacks, and a command
+    # named `rollback` that also verifies traceability would be misread.
+    dr = sub.add_parser(
+        "drill",
+        help="Phase F 三边界独立回滚演练与影子期验收（**不切实盘、不改生产路由**）")
+    dr.add_argument("action", choices=[
+        "read-rollback", "schedule-rollback", "trade-rollback", "all-rollbacks",
+        "history", "traceability", "unapproved-orders", "acceptance"])
+    dr.add_argument("--drill-id", default="", help="演练标识（缺省按 action 派生）")
+    dr.add_argument("--batch-id", default="", help="read-rollback: 批次 ID")
+    dr.add_argument("--trigger", action="append", default=[],
+                    help="schedule-rollback: 逻辑触发，可重复")
+    dr.add_argument("--executed-json", default="{}",
+                    help="schedule-rollback: 已执行触发映射 {trigger: [refs]}")
+    dr.add_argument("--unconfirmed", action="append", default=[],
+                    help="schedule-rollback: 无执行记录的触发，可重复")
+    dr.add_argument("--authorisation", default="", help="schedule-rollback: 部署授权引用")
+    dr.add_argument("--fallback-retired", action="store_true",
+                    help="read-rollback: 声明回退目标已退役（验证保持现状）")
+    dr.add_argument("--fallback-unavailable", action="store_true",
+                    help="read-rollback/trade-rollback: 声明回退目标不可用")
+    dr.add_argument("--environment", default="paper", help="trade-rollback: environment")
+    dr.add_argument("--account", default="", help="trade-rollback: account")
+    dr.add_argument("--live-reference", default="",
+                    help="trade-rollback: 实盘授权引用（缺省即被正确拒绝）")
+    dr.add_argument("--run-id", default="", help="traceability/unapproved-orders: 影子运行 ID")
+    dr.add_argument("--cycle-id", default="", help="traceability: 决策周期")
+    dr.add_argument("--counts-json", default="",
+                    help="read-rollback: 影子/审批/账本记录计数 {name: int}")
+    dr.add_argument("--order-db", default="", help="覆盖影子订单账本路径")
+    dr.add_argument("--report-db", default="", help="覆盖影子报告库路径")
+    dr.add_argument("--cutover-db", default="", help="覆盖切流控制库路径")
+    dr.add_argument("--batch-db", default="",
+                    help="read-rollback/schedule-rollback: 覆盖批次清单与部署授权库"
+                         "（与控制平面、切换记录是不同文件）")
+    dr.add_argument("--dispatch-db", default="", help="覆盖调度状态库路径")
+    dr.add_argument("--switch-db", default="", help="覆盖调度切换记录库路径")
+    dr.add_argument("--route-db", default="", help="覆盖交易路由库路径")
+    dr.add_argument("--actor", default="", help="执行人")
+    dr.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
+
     wf = sub.add_parser("workflow", help="Phase E 工作流运行及 Trigger Ledger 运维")
     wf.add_argument("action", choices=["run", "runs", "triggers", "retry", "history"])
     wf.add_argument("--task", action="append", default=[], help="run: Phase E task ID，可重复")
@@ -3948,6 +5019,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "cutover":
         return cutover_command(args, parser=parser)
+    if args.command == "intake":
+        return intake_verification_command(args, parser=parser)
+    if args.command == "retirement":
+        return retirement_command(args, parser=parser)
+
+    if args.command == "live":
+        return live_command(args, parser=parser)
+
+    if args.command == "dispatch":
+        return schedule_cutover_command(args, parser=parser)
+
+    if args.command == "drill":
+        return boundary_drill_command(args, parser=parser)
+
+    if args.command == "read":
+        return read_cutover_command(args, parser=parser)
+
+    if args.command == "batch":
+        return batch_command(args, parser=parser)
     if args.command == "shadow":
         return shadow_command(args, parser=parser)
     if args.command == "workflow":

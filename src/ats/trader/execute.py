@@ -141,6 +141,29 @@ def cancelled_entries(sized: list[tuple[TradeDecision, float]], cycle_id: str,
             for d, q in sized]
 
 
+# ── 自动下单停用（Phase F 任务 7.9 裁决，2026-10-06）────────────────────────
+#
+# 停用原因：下单前需要「参考价」把按金额的决策换算成股数、并给市价单算滑点保护，
+# 但行情数据**未授权给 trader**（`MARKET_DATA` 的 allowed_consumers 只有 technical/risk，
+# 而 trader 的 products 只有 `APPROVED_EXECUTION_AUTHORIZATION`，且授权链十项字段里
+# 只有行情**时点**、没有价格）。这是契约与现实不符，不是可以顺手改的越权读取。
+#
+# 为何不直接去掉取价：`_size`（:288）用同一个价做金额→股数换算，砍掉它会让
+# 「只给金额、未给股数」的决策算出 0 股而**静默不下单**——那是丢弃而非市价下单。
+# 故按下单开关整体停用，让每次不成交都有一个可见且有据的原因。
+#
+# 为何不用「改授权」那条路：授权清单是受证据指纹约束的文件，改它会作废全部已登记
+# 证据。运行期间以人工在券商下单规避，是用户 2026-10-06 的决定。
+#
+# TODO(方案 A，补授权后单独开发)：给 trader's products 补声明行情数据，让参考价
+# 取自受治理读取面；届时恢复本开关与 `_to_limit_orders` / `_size` 的取价。
+# 该改动须在**任何资格证据登记之前**完成（design 决策 9），否则作废全部已登记证据。
+AUTO_EXECUTION_ENABLED = False
+AUTO_EXECUTION_DISABLED_REASON = (
+    "自动下单已停用：参考价所需的行情数据未授权给 trader（契约冲突，见任务 7.9）。"
+    "当前以人工在券商下单替代；恢复须按方案 A 补授权后单独开发。")
+
+
 def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
                  *, revision_no: int = 0,
                  authorization: dict | None = None
@@ -155,7 +178,22 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     is checked. One that is already submitted/filled locally is NOT re-submitted
     (the outcome is uncertain — it stays for reconciliation); only confirmed
     unsubmitted intents proceed.
+
+    自动下单开关（任务 7.9）：停用时**在触碰券商之前**拒绝，理由入账。
+    刻意与上面的授权拒绝同形——「不成交」必须有可见且有据的原因，
+    而不是一个数字为 0 的静默丢弃。
     """
+    if not AUTO_EXECUTION_ENABLED:
+        entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
+                                 action=d.action, qty=q, revision_no=revision_no,
+                                 order_seq=i, status="rejected", submitted_at=_now(),
+                                 rationale=d.rationale,
+                                 error=f"auto execution disabled: {AUTO_EXECUTION_DISABLED_REASON}")
+                   for i, (d, q) in enumerate(to_place)]
+        print(f"🚫 自动下单已停用（{len(entries)} 笔未提交）："
+              f"{AUTO_EXECUTION_DISABLED_REASON}")
+        return entries, []
+
     if not authorization:
         entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
                                  action=d.action, qty=q, revision_no=revision_no,
@@ -292,6 +330,30 @@ def _size(d: TradeDecision) -> float:
 
 
 def _last_price(symbol: str) -> float | None:
+    """Reference price for sizing and slippage caps. **Currently disabled.**
+
+    Kept as a named function rather than deleted so the future plan-A work has one
+    obvious place to change, and so the reason travels with the code. Reading a
+    price is an unauthorized read while `MARKET_DATA` is not declared for trader
+    (task 7.9), and the auto-execution gate refuses the batch before any sizing
+    needs it — so the provider is never reached.
+
+    TODO(方案 A，补授权后恢复): return the governed read instead of None.
+    """
+    return None
+
+
+def _last_price_enabled(symbol: str) -> float | None:
+    """DISABLED — retained for the plan-A restore, called by nothing.
+
+    TODO(方案 A，补授权后恢复): this becomes the governed read.
+
+    Deliberately a SEPARATE function rather than a `return None` followed by
+    unreachable code: dead code after an unconditional return reads as live to
+    the next reader, and "is this still called?" is exactly the question task
+    7.9 turns on. The intake scan treats a `TODO` + `DISABLED` docstring on an
+    uncalled function as a retained path rather than a live bypass.
+    """
     try:
         from ..data import market_data
         from ..schemas.market import Ticker

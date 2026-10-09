@@ -342,11 +342,20 @@ def _out_dir() -> str:
         return ""
 
 
+from ...workflow.schedule_runtime import publication_write
+
+
+@publication_write
 def write_report(dossier) -> Path | None:
     """Write (or re-write, at score time) the single lifecycle document."""
     out_dir = _out_dir()
     if not out_dir:
         return None
+    from ...workflow.isolation import verified_isolation_root
+    root = verified_isolation_root()
+    if root is not None:
+        out_dir = str(root / "reports")
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
     folder = Path(out_dir)
     if not folder.is_dir():
         log.warning("pead report: output_dir missing — skipped: %s", folder)

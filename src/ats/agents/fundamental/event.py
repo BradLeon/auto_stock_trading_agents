@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import json
 from datetime import datetime, timezone
 
@@ -24,7 +26,7 @@ _DIRECTION_WORDS = {1: "预期差为正", 0: "预期差中性", -1: "预期差�
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return evaluation_now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _meta_key(symbol: str, fiscal_label: str) -> str:
@@ -268,6 +270,10 @@ def direction_word(direction: int) -> str:
 # --------------------------------------------------------------------------- #
 # 显式入口（5.1 的事件分支）
 # --------------------------------------------------------------------------- #
+from ...workflow.runtime_reads import scoped_read  # noqa: E402
+
+
+@scoped_read("fundamental")
 def run_event_pass(request) -> dict:
     """事件模式一轮：冻结基线 → 跑 PEAD score 图 → 发布事件评审投影。
 
@@ -282,8 +288,8 @@ def run_event_pass(request) -> dict:
     from ...graph.pead import build_pead_graph
     from ...graph.pead_state import PeadState
 
-    now = datetime.now(timezone.utc)
-    state = PeadState(symbol=request.symbol, phase="score", as_of=now,
+    now = evaluation_now(timezone.utc)
+    state = PeadState(symbol=request.symbol, fiscal_label=request.fiscal_label, phase="score", as_of=now,
                       use_llm=request.use_llm,
                       use_broker=False, live_data=bool(request.extra.get("live_data", False)),
                       dry_run=True, transcript_source=request.extra.get("transcript_source"))

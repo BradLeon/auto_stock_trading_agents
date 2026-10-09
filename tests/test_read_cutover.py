@@ -33,7 +33,14 @@ PAST = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
 
 
 @pytest.fixture
-def plane_db(tmp_path) -> str:
+def plane_db(tmp_path, monkeypatch) -> str:
+    # Unit decision logic only; this is not a business-entry wiring proof.
+    monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
+    original = rc.execute_batch
+    def execute(*args, **kwargs):
+        kwargs.setdefault("report_checker", lambda batch: (True, []))
+        return original(*args, **kwargs)
+    monkeypatch.setattr(rc, "execute_batch", execute)
     path = str(tmp_path / "cutover.sqlite")
     wiring.bootstrap_wired(actor="test", path=path)
     return path
@@ -46,6 +53,7 @@ def manifest_db(tmp_path) -> str:
 
 def _batch(manifest_db, **overrides):
     fields = dict(
+        shadow_report_id="unit-report-adapter",
         batch_id="b-research",
         batch_class=bm.RESEARCH_READ,
         owner="ats.data.products",
@@ -307,19 +315,19 @@ def test_the_switch_chain_is_derived_from_the_control_plane_not_restated():
 
 
 def test_a_paired_boundary_moves_with_its_partner(manifest_db, plane_db):
-    """Switching one alone passes through the half-migrated state the control
-    plane exists to reject."""
-    result = rc.execute_batch(
-        _batch(manifest_db), qualification_reader=_eligible(),
-        authorisation=_auth("layer", "sector", "macro"), apply=True,
-        path=manifest_db, cutover_path=plane_db)
+    """The obsolete sequential global apply cannot expose a half migration.
+
+    Explicit scope/SQL owner coordination is tested in test_phase_f_joint_cutover.
+    """
+    with pytest.raises(rc.ReadCutoverError,match="joint coordinator"):
+        rc.execute_batch(
+            _batch(manifest_db), qualification_reader=_eligible(),
+            authorisation=_auth("layer", "sector", "macro"), apply=True,
+            path=manifest_db, cutover_path=plane_db)
 
     states = plane.all_boundaries(plane_db)
     for boundary in rc._switch_chain(plane.PROJECTION_READ):
-        assert states[boundary].route == "target", boundary
-    assert result.changed is True
-    assert set(result.checks["switched_boundaries"]) == set(
-        rc._switch_chain(plane.PROJECTION_READ))
+        assert states[boundary].route == "legacy", boundary
 
 
 def test_rerunning_after_a_successful_switch_reports_already_not_a_conflict(

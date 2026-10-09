@@ -188,6 +188,38 @@ def test_unknown_revision_cannot_be_authorized_after_reopen(tmp_path):
     assert revision_authorization_blockers(again)  # still barred
 
 
+@pytest.mark.parametrize("mixed", [False, True])
+def test_empty_first_open_and_mixed_history_never_reimport_native_mirrors(tmp_path,mixed):
+    from ats.decision.repository import DecisionAuditRepository
+    path = tmp_path / "reopen.sqlite"
+    first = TradingMemory(path)
+    assert first.conn.execute("SELECT 1 FROM data_migrations WHERE key='decision_audit_legacy_v1'").fetchone()
+    repo = DecisionAuditRepository(first)
+    repo.create_cycle(cycle_id="native",trigger_source="manual")
+    native = repo.append_revision(cycle_id="native",orders=[{"symbol":"AMD","action":"buy","notional_usd":1000,
+                                                           "qty":10,"order_type":"limit","limit_price":100}])
+    first.conn.execute("INSERT INTO cycles(cycle_id,as_of,approval_status,manager_summary) VALUES ('native','2026-10-09','approved','mirror')")
+    first.conn.execute("INSERT INTO decisions(cycle_id,symbol,action,notional_usd,rationale) VALUES ('native','AMD','buy',1000,'mirror')")
+    if mixed:
+        # Emulate an existing mixed database whose pre-fix empty migration had
+        # no marker; genuine old history must still be imported once.
+        first.conn.execute("DELETE FROM data_migrations WHERE key='decision_audit_legacy_v1'")
+        first.conn.execute("INSERT INTO cycles(cycle_id,as_of,approval_status,manager_summary) VALUES ('old','2026-01-01','pending','history')")
+        first.conn.execute("INSERT INTO decisions(cycle_id,symbol,action,notional_usd,rationale) VALUES ('old','NVDA','buy',2000,'recoverable')")
+        first.conn.execute("INSERT INTO decisions(cycle_id,symbol,action,notional_usd,rationale) VALUES ('lost',NULL,'buy',2000,'unknown')")
+    first.conn.commit()
+    first.close()
+    for _ in range(3):
+        reopened = TradingMemory(path)
+        revisions = [dict(r) for r in reopened.conn.execute("SELECT * FROM decision_revisions WHERE cycle_id='native'")]
+        assert revisions == [dict(native)]
+        if mixed:
+            assert reopened.conn.execute("SELECT COUNT(*) FROM decision_revisions WHERE cycle_id='old'").fetchone()[0] == 1
+            assert reopened.conn.execute("SELECT revision_source FROM decision_revisions WHERE cycle_id='lost'").fetchone()[0] == REVISION_SOURCE_LEGACY_UNKNOWN
+        assert reopened.conn.execute("SELECT COUNT(*) FROM decisions WHERE cycle_id='native'").fetchone()[0] == 1
+        reopened.close()
+
+
 def test_trades_and_fills_linkage_columns_nullable(tmp_path):
     """1.4: the linkage quadruple exists, is nullable, and legacy rows read NULL."""
     store = TradingMemory(tmp_path / "fresh.sqlite")

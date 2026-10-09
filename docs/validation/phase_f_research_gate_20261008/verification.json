@@ -1,0 +1,39 @@
+{
+  "production_inventory_unchanged": true,
+  "tasks_complete": 62,
+  "tasks_total": 116,
+  "fingerprint_paths": 61,
+  "source_paths": 418,
+  "tests": {
+    "research-entries.junit.xml": {
+      "tests": 38,
+      "failed": 0,
+      "errors": 0
+    },
+    "research-final.junit.xml": {
+      "tests": 190,
+      "failed": 1,
+      "errors": 0
+    },
+    "gate-final.junit.xml": {
+      "tests": 46,
+      "failed": 0,
+      "errors": 0
+    },
+    "selected-contracts.junit.xml": {
+      "tests": 117,
+      "failed": 0,
+      "errors": 0
+    },
+    "related-regression.junit.xml": {
+      "tests": 218,
+      "failed": 1,
+      "errors": 0
+    },
+    "record-guards-final.junit.xml": {
+      "tests": 67,
+      "failed": 0,
+      "errors": 0
+    }
+  }
+}

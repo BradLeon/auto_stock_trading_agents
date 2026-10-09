@@ -29,6 +29,13 @@ def db(tmp_path, capsys):
     return path
 
 
+@pytest.fixture
+def simulated_enforcement(monkeypatch):
+    """Unit CLI serialization/history checks, not real wiring acceptance."""
+    monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
+    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (True, []))
+
+
 def _run(capsys, argv):
     code = cli.main(argv)
     out = capsys.readouterr().out
@@ -98,10 +105,10 @@ def test_preflight_changes_no_route(capsys, db):
     assert after == before
 
 
-def test_preflight_with_an_activation_request_checks_the_boundary(capsys, db):
+def test_preflight_with_an_activation_request_checks_the_boundary(capsys, db, simulated_enforcement):
     code, payload = _run(capsys, [
         "cutover", "preflight", "--boundary", co.PROJECTION_READ,
-        "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
+        "--report-id", "unit-report-adapter", "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
         "--db", db])
     assert code == 0
     assert "activation_request" in payload["checked"]
@@ -155,17 +162,17 @@ def _move(capsys, db, boundary, reason="qualified", actor="alice"):
     partners = [b for b in group if b != boundary]
     for other in partners:
         _run(capsys, ["cutover", "set-route", "--boundary", other,
-                      "--route", co.ROUTE_TARGET, "--actor", actor,
+                      "--report-id", "unit-report-adapter", "--route", co.ROUTE_TARGET, "--actor", actor,
                       "--reason", reason, "--db", db])
     code, payload = _run(capsys, [
         "cutover", "set-route", "--boundary", boundary,
-        "--route", co.ROUTE_TARGET, "--actor", actor, "--reason", reason,
+        "--report-id", "unit-report-adapter", "--route", co.ROUTE_TARGET, "--actor", actor, "--reason", reason,
         "--db", db])
     assert code == 0, payload
     return code, payload
 
 
-def test_set_route_moves_one_boundary_and_records_the_reason(capsys, db):
+def test_set_route_moves_one_boundary_and_records_the_reason(capsys, db, simulated_enforcement):
     code, payload = _move(capsys, db, co.ANALYST_OUTPUT,
                           reason="qualified for macro")
     assert code == 0
@@ -183,7 +190,7 @@ def test_set_route_requires_a_reason(capsys, db):
                   "--route", co.ROUTE_TARGET, "--db", db])
 
 
-def test_set_route_refuses_an_incompatible_combination(capsys, db):
+def test_set_route_refuses_an_incompatible_combination(capsys, db, simulated_enforcement):
     """The move happens, then compatibility is checked so the refusal names both.
 
     Reported as JSON plus a non-zero exit rather than a traceback: a runbook script
@@ -191,7 +198,7 @@ def test_set_route_refuses_an_incompatible_combination(capsys, db):
     """
     code, payload = _run(capsys, [
         "cutover", "set-route", "--boundary", co.PROJECTION_READ,
-        "--route", co.ROUTE_TARGET, "--actor", "op", "--reason", "reads",
+        "--report-id", "unit-report-adapter", "--route", co.ROUTE_TARGET, "--actor", "op", "--reason", "reads",
         "--db", db])
     assert code == 1
     assert payload["compatible"] is False
@@ -205,7 +212,7 @@ def test_an_unknown_boundary_is_rejected_by_the_parser(capsys, db):
     """The CLI's boundary list is read from the module, so it cannot drift."""
     with pytest.raises(SystemExit):
         cli.main(["cutover", "set-route", "--boundary", "not_a_boundary",
-                  "--route", co.ROUTE_TARGET, "--actor", "op", "--reason", "x",
+                  "--report-id", "unit-report-adapter", "--route", co.ROUTE_TARGET, "--actor", "op", "--reason", "x",
                   "--db", db])
 
 
@@ -213,7 +220,7 @@ def test_an_unknown_boundary_is_rejected_by_the_parser(capsys, db):
 # activation
 # --------------------------------------------------------------------------- #
 
-def test_activate_registers_a_scope(capsys, db):
+def test_activate_registers_a_scope(capsys, db, simulated_enforcement):
     co.set_route(co.PROJECTION_READ, co.ROUTE_TARGET, actor="op",
                  reason="migrated with the schedule", path=db)
     co.set_route(co.DISPATCHER_SCHEDULE, co.ROUTE_TARGET, actor="op",
@@ -221,7 +228,7 @@ def test_activate_registers_a_scope(capsys, db):
 
     code, payload = _run(capsys, [
         "cutover", "activate", "--boundary", co.PROJECTION_READ,
-        "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
+        "--report-id", "unit-report-adapter", "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
         "--actor", "op", "--db", db])
     assert code == 0
     assert payload["activation_id"]
@@ -231,15 +238,15 @@ def test_activate_registers_a_scope(capsys, db):
     assert len(active) == 1
 
 
-def test_activate_refuses_while_the_combination_is_incompatible(capsys, db):
+def test_activate_refuses_while_the_combination_is_incompatible(capsys, db, simulated_enforcement):
     """A half-migrated pair blocks activation as well as `set-route`."""
     _run(capsys, ["cutover", "set-route", "--boundary", co.PROJECTION_READ,
-                  "--route", co.ROUTE_TARGET, "--actor", "op", "--reason", "reads",
+                  "--report-id", "unit-report-adapter", "--route", co.ROUTE_TARGET, "--actor", "op", "--reason", "reads",
                   "--db", db])
 
     code, payload = _run(capsys, [
         "cutover", "activate", "--boundary", co.PROJECTION_READ,
-        "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
+        "--report-id", "unit-report-adapter", "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
         "--actor", "op", "--db", db])
     assert code == 1
     assert payload["activated"] is False
@@ -256,7 +263,7 @@ def test_activate_refuses_a_report_that_is_not_citable(capsys, db, tmp_path):
     report_db = str(tmp_path / "reports.sqlite")
     code, payload = _run(capsys, [
         "cutover", "activate", "--boundary", co.PROJECTION_READ,
-        "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
+        "--report-id", "unit-report-adapter", "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
         "--actor", "op", "--report-id", "typo", "--report-db", report_db,
         "--db", db])
     assert code == 1
@@ -264,13 +271,13 @@ def test_activate_refuses_a_report_that_is_not_citable(capsys, db, tmp_path):
     assert any("typo" in problem for problem in payload["problems"])
 
 
-def test_release_records_a_reason_and_drops_it_from_active(capsys, db):
+def test_release_records_a_reason_and_drops_it_from_active(capsys, db, simulated_enforcement):
     co.set_route(co.PROJECTION_READ, co.ROUTE_TARGET, actor="op", reason="x",
                  path=db)
     co.set_route(co.DISPATCHER_SCHEDULE, co.ROUTE_TARGET, actor="op", reason="x",
                  path=db)
     _run(capsys, ["cutover", "activate", "--boundary", co.PROJECTION_READ,
-                  "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
+                  "--report-id", "unit-report-adapter", "--consumer-id", "macro", "--scope-json", '{"consumer": "macro"}',
                   "--actor", "op", "--db", db])
 
     code, payload = _run(capsys, [

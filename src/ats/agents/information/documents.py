@@ -14,6 +14,8 @@ feeds the shared admitted-events table that this pass reads.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
@@ -21,8 +23,7 @@ from ...schemas.news import ContextUpdate
 from ..base import run_structured
 from ..pead.outputs import ContextUpdateView
 from . import assemble
-from .briefs import (cluster_key, cluster_summary, clocks_for,
-                     publish_information_brief)
+from .briefs import clocks_for, cluster_key, cluster_summary, publish_information_brief
 
 log = logging.getLogger("ats.agents.information.documents")
 
@@ -30,7 +31,7 @@ MAX_EVENTS_IN_CONTEXT = 25
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def run_document_pass(store, symbol: str, *, cfg, fresh: list, use_llm: bool = True,
@@ -150,7 +151,9 @@ def _publish_target_brief(store, symbol: str, update: ContextUpdate,
         return publish_information_brief(
             store, payload,
             scope=ProjectionScope(kind="entity", id=symbol),
-            as_of=clocks["extracted_at"], input_refs=[])
+            as_of=clocks["extracted_at"],
+            input_refs=[ref for row in material for ref in (
+                row.get("input_ref") or row.get("id"), row.get("publication_id")) if ref])
     except Exception as exc:  # noqa: BLE001 - contract violations must fail loudly in logs
         log.warning("information target brief failed for %s: %s", symbol, exc)
         return None

@@ -1,0 +1,58 @@
+{
+  "total": 116,
+  "complete": 76,
+  "remaining": 40,
+  "dependency_cycles": false,
+  "unknown_dependencies": [],
+  "selected_tasks": {
+    "7.8": {
+      "complete": true,
+      "dependencies": {
+        "7.7": true,
+        "3.10": true
+      }
+    },
+    "13.4": {
+      "complete": true,
+      "dependencies": {
+        "3.10": true,
+        "7.5": true
+      }
+    },
+    "13.5": {
+      "complete": true,
+      "dependencies": {
+        "3.10": true,
+        "11.2": true,
+        "13.4": true
+      }
+    }
+  },
+  "implementation_closure_unchanged": true,
+  "implementation_paths": 464,
+  "production_rows_unchanged": true,
+  "production_snapshot_hash": "55e843daf13554a495f1996df31f4f816f46de29e78292f1ea4d10ba6f4bc3aa",
+  "test_results": {
+    "integration.xml": {
+      "tests": 53,
+      "failures_or_errors": 0,
+      "seconds": "169.756"
+    },
+    "auditor_final.xml": {
+      "tests": 18,
+      "failures_or_errors": 0,
+      "seconds": "32.776"
+    },
+    "registry_negative.xml": {
+      "tests": 4,
+      "failures_or_errors": 0,
+      "seconds": "3.121"
+    },
+    "records.xml": {
+      "tests": 20,
+      "failures_or_errors": 0,
+      "seconds": "2.721"
+    }
+  },
+  "unique_passing_tests": 78
+}

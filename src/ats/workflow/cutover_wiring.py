@@ -1,31 +1,17 @@
-"""Boundary enforcement at the actual write points (task 5.3).
+"""Actual publication guards, declarations and migration responsibility.
 
-Declaring a boundary is only half of 5.2; the other half is a check at the place
-the thing actually happens. Without it, `approval_lifecycle` can be pointed at the
-target route while `record_approval` keeps writing wherever it always wrote — the
-config says Phase F is live and the code says otherwise.
-
-Three write points, and they are enforcement points rather than wrappers around
-everything:
-
-- `guard_approval_write` — consulted by `DecisionAuditRepository.record_approval`
-  and `record_review`. When the approval boundary is off the target route, the
-  write is REFUSED rather than redirected. Same reasoning as the shadow ledger: a
-  silent redirect makes the mistake look like it worked.
-- `guard_clerk_publication` — consulted by `execution.clerk.clerk_run`. Bypassing
-  the Clerk boundary is refused: publishing straight to the ledger from another
-  path is exactly what the boundary exists to prevent.
-- `guard_analyst_output` — consulted where an analyst's output is recorded.
-
-None of these edit the modules they guard. The checks are injected as callables the
-callers make, and the wiring is what the boundary's `declared wiring` names — so a
-boundary whose guard was never called reports as unwired rather than as passing.
+The guards execute in analyst projection publishers, review/approval storage and
+Clerk orchestration. Declaration inventory remains separate from exact-scope
+execution evidence; integration alone does not confer production qualification.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any
 
 from . import cutover as cutover_module
 
@@ -60,7 +46,65 @@ class WriteDecision:
 def _route_of(boundary: str, reader: Callable[[str], Any] | None) -> str:
     if reader is not None:
         return str(reader(boundary))
-    return cutover_module.read_boundary(boundary).route
+    import sqlite3
+    from contextlib import closing
+
+    target = Path(cutover_module.default_cutover_db_path()).resolve()
+    try:
+        with closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True)) as conn:
+            row = conn.execute("SELECT route FROM cutover_boundary_state WHERE boundary=?",
+                               (boundary,)).fetchone()
+        if row is None or row[0] not in cutover_module.VALID_ROUTES:
+            raise ValueError("missing or invalid boundary state")
+        return row[0]
+    except (sqlite3.Error, ValueError) as exc:
+        raise BoundaryWriteRefused(boundary, f"boundary authority unreadable: {exc}",
+                                   reason_code="boundary_authority_unreadable") from exc
+
+
+def assert_write_destination(store, boundary: str) -> None:
+    """Check the actual connection, including handles opened before isolation."""
+    import os
+
+    from .isolation import active_isolation_root, build_environment
+    from .runtime_reads import current_read_context
+
+    context = current_read_context()
+    mode = context.mode if context else os.environ.get("ATS_RUN_MODE", "production")
+    if os.environ.get("ATS_RUN_MODE") == "isolated":
+        mode = "isolated"
+    if mode not in {"isolated", "shadow"}:
+        return
+    from ..execution.broker_write_guard import assert_broker_writes_prohibited
+
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+    filename = next((row[2] for row in store.conn.execute("PRAGMA database_list")
+                     if row[1] == "main"), "")
+    if not filename:  # A genuinely in-memory connection cannot reach production.
+        return
+    destination = Path(filename).resolve()
+    allowed = {Path(os.environ[name]).resolve() for name in ("ATS_DB_PATH", "ATS_SHADOW_DB_PATH")
+               if os.environ.get(name)}
+    if context and context.publication_path:
+        allowed.add(Path(context.publication_path).resolve())
+    production = (cutover_module.REPO_ROOT / "var/ats.sqlite").resolve()
+    root = active_isolation_root()
+    if mode == "isolated" and root is None:
+        # Child processes inherit the complete redirection, not the parent ContextVar.
+        root = Path(os.environ.get("ATS_DB_PATH", "")).resolve().parent
+        expected = build_environment(root)
+        if any(os.environ.get(name) != filename for name, filename in expected.surfaces.items()):
+            raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+                                       reason_code="publication_destination_not_isolated")
+    if (destination == production or destination not in allowed
+            or (mode == "isolated" and root is not None and not destination.is_relative_to(root.resolve()))
+            or (mode == "shadow" and (not context or not context.publication_path
+                                     or destination != Path(context.publication_path).resolve()
+                                     or destination == Path(os.environ.get("ATS_DB_PATH", production)).resolve()
+                                     or (os.environ.get("ATS_SHADOW_DB_PATH") and destination !=
+                                         Path(os.environ["ATS_SHADOW_DB_PATH"]).resolve())))):
+        raise BoundaryWriteRefused(boundary, "isolated/shadow write destination is not owned by this run",
+                                   reason_code="publication_destination_not_isolated")
 
 
 def guard_write(boundary: str, *, what: str,
@@ -78,6 +122,24 @@ def guard_write(boundary: str, *, what: str,
     a boundary still on the legacy route must keep working, or a cutover would break
     the system before it starts.
     """
+    from .read_recovery import ReadStopped, current_policy
+    from .runtime_reads import current_read_context
+
+    context = current_read_context()
+    from .joint_cutover import assert_scope_open, assert_boundary_open, epoch
+    if route_reader is None:
+        if context:
+            assert_scope_open(context.identity,boundary=boundary)
+            if epoch(context.identity)!=context.joint_epoch:
+                raise BoundaryWriteRefused(boundary,"joint authority changed after worker binding",reason_code="joint_worker_stale")
+        else:
+            assert_boundary_open(boundary)
+    if context:
+        policy = current_policy(context.identity)
+        if policy and policy["stopped"]:
+            raise ReadStopped("stopped read scope cannot publish or authorize dependent work")
+        if (policy["event_id"] if policy else 0) != context.recovery_generation:
+            raise ReadStopped("recovery strategy changed; old bound worker cannot publish")
     route = _route_of(boundary, route_reader)
     if route == cutover_module.ROUTE_DISABLED:
         return WriteDecision(
@@ -88,6 +150,7 @@ def guard_write(boundary: str, *, what: str,
 
 
 def guard_approval_write(*, what: str = "an approval record",
+                         store=None,
                          route_reader: Callable[[str], Any] | None = None
                          ) -> WriteDecision:
     """Guard for the approval-lifecycle write point.
@@ -97,6 +160,8 @@ def guard_approval_write(*, what: str = "an approval record",
     approval can be live on the legacy chain while the Clerk still publishes to the
     legacy ledger, but not half of each.
     """
+    if store is not None:
+        assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
     decision = guard_write(cutover_module.APPROVAL_LIFECYCLE, what=what,
                            route_reader=route_reader)
     if not decision.allowed:
@@ -108,6 +173,7 @@ def guard_approval_write(*, what: str = "an approval record",
 
 
 def guard_clerk_publication(*, what: str = "a ledger publication",
+                            store=None,
                             route_reader: Callable[[str], Any] | None = None
                             ) -> WriteDecision:
     """Guard for the Clerk publication boundary.
@@ -117,6 +183,8 @@ def guard_clerk_publication(*, what: str = "a ledger publication",
     reconciliation pass will ever look at, which is the failure mode the Clerk
     exists to prevent.
     """
+    if store is not None:
+        assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
     decision = guard_write(cutover_module.CLERK_PUBLICATION, what=what,
                            route_reader=route_reader)
     if not decision.allowed:
@@ -128,9 +196,12 @@ def guard_clerk_publication(*, what: str = "a ledger publication",
 
 
 def guard_analyst_output(*, what: str = "an analyst output",
+                         store=None,
                          route_reader: Callable[[str], Any] | None = None
                          ) -> WriteDecision:
     """Guard for the analyst-output boundary."""
+    if store is not None:
+        assert_write_destination(store, cutover_module.ANALYST_OUTPUT)
     decision = guard_write(cutover_module.ANALYST_OUTPUT, what=what,
                            route_reader=route_reader)
     if not decision.allowed:
@@ -171,18 +242,16 @@ class OwnerBoundary:
 OWNER_BOUNDARIES: tuple[OwnerBoundary, ...] = (
     OwnerBoundary(
         slice_name="chief_projection_rendering",
-        current_owner="ats.agents.chief.assemble",
-        target_owner="ats.data.products (target projection)",
-        migration_task="F.6.2 — Chief 投影渲染迁移",
-        done_when="Chief assembles its context exclusively from the target projection "
-                  "and the legacy context assembler has no callers left"),
+        current_owner="ats.graph.chief.assemble_context",
+        target_owner="ats.agents.chief.assemble.projection_context_block",
+        migration_task="9.3",
+        done_when="Chief 实际投影读取/渲染及旧读兼容；缺投影安全回退或停止，重启引用可解析"),
     OwnerBoundary(
         slice_name="sector_cli_legacy_read",
-        current_owner="ats.runtime.cli sector",
-        target_owner="ats.data.products (target projection)",
-        migration_task="F.6.3 — Sector CLI 旧读模型迁移",
-        done_when="the Sector CLI reads through the target product API and the "
-                  "legacy read model has no remaining consumer"),
+        current_owner="ats.runtime.cli.run_sector_html",
+        target_owner="ats.workflow.cutover_routing.read_route",
+        migration_task="9.6",
+        done_when="Sector 实际 CLI 治理投影及兼容读；当次 scope 门禁、缺输入失败、跨进程引用"),
 )
 
 
@@ -197,11 +266,32 @@ def unowned_slices(declared: dict[str, str] | None = None) -> list[str]:
     out = []
     for boundary in OWNER_BOUNDARIES:
         owner = str(claimed.get(boundary.slice_name, "")).strip()
-        if not owner:
-            out.append(boundary.slice_name)
-        elif not boundary.migration_task.strip():
+        if not owner or not valid_owner_mapping(boundary):
             out.append(boundary.slice_name)
     return out
+
+
+def valid_owner_mapping(boundary: OwnerBoundary, *, tasks_path=None) -> bool:
+    """Validate an actual task and its responsibility, not a nonempty label."""
+    import re
+
+    from ..config import REPO_ROOT
+    from .boundary_evidence import resolve_site
+
+    expected = {"chief_projection_rendering": ("9.3", ("Chief", "投影", "旧读兼容")),
+                "sector_cli_legacy_read": ("9.6", ("Sector", "CLI", "治理投影"))}
+    task, required = expected.get(boundary.slice_name, ("", ()))
+    if boundary.migration_task != task or not task:
+        return False
+    path = Path(tasks_path or REPO_ROOT / "openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md")
+    try:
+        matches = re.findall(r"^- \[[ x]\] " + re.escape(task) + r"\s+(.+)$",
+                             path.read_text(), re.MULTILINE)
+        resolve_site(boundary.current_owner)
+        resolve_site(boundary.target_owner)
+    except (OSError, ValueError):
+        return False
+    return len(matches) == 1 and all(token in matches[0] for token in required)
 
 
 def assert_no_unowned_slice(declared: dict[str, str] | None = None) -> None:
@@ -273,12 +363,10 @@ DECLARED_BOUNDARY_WIRING: dict[str, tuple[tuple[str, str, str], ...]] = {
 }
 
 
-def declare_repository_wiring(path: str | Path | None = None) -> list[Wiring]:
+def declare_repository_wiring(path: str | Path | None = None) -> list[cutover_module.Wiring]:
     """Declare this repository's wiring for all six boundaries.
 
-    Called by bootstrap so a fresh installation is wired rather than reporting every
-    boundary as unwired — which would make the pre-check fail for a reason that has
-    nothing to do with the operator's decision.
+    Called by bootstrap to record intent. Helpers are not caller enforcement.
     """
     declared = []
     for boundary, sites in DECLARED_BOUNDARY_WIRING.items():
@@ -286,15 +374,25 @@ def declare_repository_wiring(path: str | Path | None = None) -> list[Wiring]:
             declared.append(cutover_module.declare_wiring(
                 boundary=boundary, call_site=call_site, authority=authority,
                 semantics=semantics, path=path))
+    from .boundary_evidence import CALL_POINTS, MODE_SEMANTICS
+
+    for boundary, points in CALL_POINTS.items():
+        for point in points:
+            declared.append(cutover_module.declare_wiring(
+                boundary=boundary, call_site=point.site, authority=point.writer,
+                semantics=json.dumps({"scope": point.scope, "modes": {
+                    mode: MODE_SEMANTICS[mode] for mode in point.modes},
+                    "guard": point.guard, "implementation_task": point.implementation_task,
+                    "consumers": point.consumers,
+                    "status": "declared"}), path=path))
     return declared
 
 
 def bootstrap_wired(*, actor: str = "", path: str | Path | None = None) -> None:
     """Bootstrap the plane AND declare this repository's wiring.
 
-    The two belong together: an unwired plane is the correct state for a codebase
-    that has not implemented a boundary, and an incorrect one for this codebase,
-    which has implemented all six.
+    Historical API name retained. This declares intent only; it cannot establish
+    enforcement. See boundary_evidence for code-bound business-entry proofs.
     """
     cutover_module.bootstrap(actor=actor, path=path)
     declare_repository_wiring(path=path)

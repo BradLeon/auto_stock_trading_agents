@@ -1,0 +1,519 @@
+{
+  "date": "2026-10-07",
+  "git_commit": "02c81f260718ee0ecdb78a63f2ef96d133a1e7d7",
+  "git_branch": "feat/rebuild_workflow_dataflow",
+  "production_reads": {
+    "var/phase_f_cutover.sqlite": {
+      "exists": true,
+      "table_count": 5,
+      "selected_counts": {
+        "cutover_activations": 0,
+        "cutover_boundary_history": 6,
+        "cutover_boundary_state": 6,
+        "cutover_boundary_wiring": 10
+      },
+      "has_assurance_table": false,
+      "boundaries": [
+        {
+          "boundary": "projection_read",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "analyst_output",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "dispatcher_schedule",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "approval_lifecycle",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "clerk_publication",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "live_trader",
+          "route": "disabled",
+          "wired": 1
+        }
+      ]
+    },
+    "var/phase_f_batches.sqlite": {
+      "exists": true,
+      "table_count": 5,
+      "selected_counts": {
+        "cutover_batch_dryruns": 28,
+        "cutover_batches": 5,
+        "read_cutover_authorizations": 1,
+        "read_cutover_runs": 12
+      },
+      "has_assurance_table": false,
+      "batches": [
+        {
+          "batch_id": "batch-collection",
+          "batch_class": "collection_publish",
+          "fallback_drill_ref": "",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_id": "batch-research-read",
+          "batch_class": "research_read",
+          "fallback_drill_ref": "F13-READ-20261007",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_id": "batch-schedule",
+          "batch_class": "schedule",
+          "fallback_drill_ref": "F13-READ-20261007;F13-SCHED-20261007",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_id": "batch-internal-approval",
+          "batch_class": "internal_state_approval",
+          "fallback_drill_ref": "",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_id": "batch-live-trader",
+          "batch_class": "live_trader",
+          "fallback_drill_ref": "F13-TRADE-20261007",
+          "shadow_report_id": ""
+        }
+      ],
+      "deployment_authorizations": [
+        {
+          "reference": "DEP-2026-10-06-A",
+          "scope": "layer,information,sector,fundamental,macro,technical",
+          "valid_until": "2026-12-31T23:59:59+08:00"
+        }
+      ]
+    },
+    "var/phase_f_dispatch.sqlite": {
+      "exists": true,
+      "table_count": 4,
+      "selected_counts": {
+        "dispatch_claims": 0,
+        "dispatch_expected_triggers": 0,
+        "dispatch_freeze": 0,
+        "dispatch_owner_state": 0
+      },
+      "has_assurance_table": false
+    },
+    "var/phase_f_routes.sqlite": {
+      "exists": true,
+      "table_count": 5,
+      "selected_counts": {
+        "trade_route_freeze": 0,
+        "trade_route_history": 0,
+        "trade_route_issuance": 0,
+        "trade_route_state": 0
+      },
+      "has_assurance_table": false
+    },
+    "var/phase_f_schedule_switch.sqlite": {
+      "exists": true,
+      "table_count": 0,
+      "selected_counts": {},
+      "has_assurance_table": false
+    },
+    "var/phase_f_live_authorizations.sqlite": {
+      "exists": true,
+      "table_count": 1,
+      "selected_counts": {
+        "live_authorizations": 1
+      },
+      "has_assurance_table": false,
+      "live_authorizations_redacted": [
+        {
+          "reference": "LIVE-X",
+          "issuer": "human",
+          "scope": "trader",
+          "environment": "live",
+          "valid_until": "2099-01-01T00:00:00+00:00",
+          "note": ""
+        }
+      ]
+    },
+    "var/shadow/orders.sqlite": {
+      "exists": true,
+      "table_count": 3,
+      "selected_counts": {
+        "shadow_order_intents": 0,
+        "shadow_submit_attempts": 0
+      },
+      "has_assurance_table": false
+    },
+    "var/shadow/reports.sqlite": {
+      "exists": false
+    },
+    "var/data.sqlite": {
+      "exists": true,
+      "table_count": 69,
+      "selected_counts": {},
+      "has_assurance_table": false
+    },
+    "var/data_platform.sqlite": {
+      "exists": true,
+      "table_count": 0,
+      "selected_counts": {},
+      "has_assurance_table": false
+    },
+    "var/ats.sqlite": {
+      "exists": true,
+      "table_count": 37,
+      "selected_counts": {},
+      "has_assurance_table": false
+    }
+  },
+  "isolated_probes": {
+    "broker_no_grant": {
+      "session_reached": true,
+      "grant": null,
+      "network_opened": false
+    },
+    "approval_disabled": {
+      "boundary_route": "disabled",
+      "actual_repository_write_succeeded": true
+    },
+    "missing_shadow_and_projection_checks": {
+      "shadow_report_id": "",
+      "projection_checker_supplied": false,
+      "report_checker_supplied": false,
+      "changed": true,
+      "outcome": "switched",
+      "routes": {
+        "projection_read": "target",
+        "analyst_output": "legacy",
+        "dispatcher_schedule": "target",
+        "approval_lifecycle": "disabled",
+        "clerk_publication": "legacy",
+        "live_trader": "disabled"
+      }
+    },
+    "partial_global_switch": {
+      "changed": true,
+      "outcome": "partially_switched",
+      "consumer_outcomes": {
+        "layer": "switched",
+        "sector": "not_qualified"
+      },
+      "global_projection_route": "target"
+    },
+    "paired_switch_crash": {
+      "exception": "simulated crash between boundary writes",
+      "write_calls": [
+        "projection_read",
+        "dispatcher_schedule"
+      ],
+      "routes": {
+        "projection_read": "target",
+        "dispatcher_schedule": "legacy"
+      },
+      "compatible_after_crash": false
+    }
+  },
+  "qualification_reports": [
+    {
+      "consumer_id": "layer",
+      "domain_id": "hierarchy",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "admission",
+        "completeness",
+        "lineage",
+        "read",
+        "reconciliation",
+        "rollback",
+        "write"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "information",
+      "domain_id": "documents",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "admission",
+        "completeness",
+        "lineage",
+        "read",
+        "reconciliation",
+        "rollback",
+        "write"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "sector",
+      "domain_id": "hierarchy",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "admission",
+        "completeness",
+        "lineage",
+        "read",
+        "reconciliation",
+        "rollback",
+        "write"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "fundamental",
+      "domain_id": "company",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "admission",
+        "completeness",
+        "lineage",
+        "read",
+        "reconciliation",
+        "rollback",
+        "write"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "macro",
+      "domain_id": "macro",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "admission",
+        "completeness",
+        "lineage",
+        "read",
+        "reconciliation",
+        "rollback",
+        "write"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "technical",
+      "domain_id": "runtime_market",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "failure_semantics",
+        "fallback",
+        "no_persistence",
+        "runtime_query",
+        "timestamp"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "chief",
+      "domain_id": "internal_state",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "as_of",
+        "completeness",
+        "fallback",
+        "internal_read",
+        "opinion_isolation"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "risk",
+      "domain_id": "internal_state",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "as_of",
+        "completeness",
+        "fallback",
+        "internal_read",
+        "opinion_isolation"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "trader",
+      "domain_id": "execution_authorization",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "authorization",
+        "broker_submit_boundary",
+        "fallback",
+        "idempotency",
+        "revision_hash"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    },
+    {
+      "consumer_id": "clerk",
+      "domain_id": "broker_state",
+      "status": "ineligible",
+      "reasons": [
+        "assurance_ledger_missing"
+      ],
+      "missing_evidence": [
+        "broker_read",
+        "fallback",
+        "idempotency",
+        "partial_fill",
+        "reconciliation"
+      ],
+      "event_ids": [],
+      "matrix_row": ""
+    }
+  ],
+  "source_scan": [
+    {
+      "consumer_id": "layer",
+      "compliant": true,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": []
+    },
+    {
+      "consumer_id": "information",
+      "compliant": true,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": []
+    },
+    {
+      "consumer_id": "sector",
+      "compliant": true,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": []
+    },
+    {
+      "consumer_id": "fundamental",
+      "compliant": false,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": [
+        "governed_read_surface_not_reached"
+      ]
+    },
+    {
+      "consumer_id": "macro",
+      "compliant": true,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": []
+    },
+    {
+      "consumer_id": "technical",
+      "compliant": true,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": []
+    },
+    {
+      "consumer_id": "chief",
+      "compliant": false,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": [
+        "governed_read_surface_not_reached"
+      ]
+    },
+    {
+      "consumer_id": "risk",
+      "compliant": false,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": [
+        "governed_read_surface_not_reached"
+      ]
+    },
+    {
+      "consumer_id": "trader",
+      "compliant": false,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": [
+        "disabled_bypass",
+        "disabled_bypass",
+        "governed_read_surface_not_reached"
+      ]
+    },
+    {
+      "consumer_id": "clerk",
+      "compliant": false,
+      "product_ref_count": 0,
+      "document_ref_count": 0,
+      "vintage_ref_count": 0,
+      "projection_hash": "",
+      "violation_kinds": [
+        "governed_read_surface_not_reached"
+      ]
+    }
+  ],
+  "named_call_sites": {
+    "guard_analyst_output": [],
+    "claim": [
+      "src/ats/data/persistent_queue.py:342",
+      "src/ats/data/refresh.py:547"
+    ],
+    "guard_approval_write": [],
+    "guard_clerk_publication": [],
+    "read_route": []
+  }
+}

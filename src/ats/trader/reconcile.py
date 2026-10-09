@@ -101,8 +101,8 @@ def _apply_cumulative_fills(store, trades: list[dict], rid: int,
     qty = float(row.get("qty") or 0)
     status = "filled" if (qty and total_shares >= qty) else "partial"
     store.conn.execute(
-        "UPDATE trades SET avg_fill_price = COALESCE(avg_fill_price, ?), "
-        "filled_at = COALESCE(filled_at, ?), filled_qty = ?, status = ?, "
+        "UPDATE trades SET avg_fill_price = COALESCE(?, avg_fill_price), "
+        "filled_at = ?, filled_qty = ?, status = ?, "
         "terminal_basis = 'broker' WHERE rowid = ?",
         (avg_px, filled_at, total_shares, status, rid))
 

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="4.200" timestamp="2026-10-09T11:29:27.867626+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_paired_business" name="test_actual_technical_pair_uses_frozen_price_history_and_clock" time="1.595"><failure message="ValueError: business entry did not publish required projection: dispatcher:technical-review:entity:COHR:713d8ff21846">business_inputs = &lt;generator object business_inputs at 0x10de9c310&gt;
+isolated = &lt;ats.memory.store.TradingMemory object at 0x10e5e78f0&gt;
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x1040274d0&gt;
+record_property = &lt;function record_property.&lt;locals&gt;.append_property at 0x10e488a40&gt;
+
+    def test_actual_technical_pair_uses_frozen_price_history_and_clock(business_inputs, isolated, monkeypatch, record_property):
+        root=verified_isolation_root();store=root/'inputs.sqlite'
+&gt;       captured=paired.capture(request=request(), input_store=store, work_root=root/'capture', run_id='capture-technical')
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_phase_f_paired_business.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ats/workflow/paired_business.py:265: in capture
+    entry(read_input=None, logical_time=point, value=provisional, root=Path(work_root)/side,
+src/ats/workflow/paired_business.py:235: in legacy_business
+    return _business(legacy=True, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+legacy = True, read_input = None
+logical_time = datetime.datetime(2026, 10, 9, 3, 29, 30, tzinfo=datetime.timezone.utc)
+value = &lt;ats.workflow.paired_business.capture.&lt;locals&gt;.Value object at 0x10e4cbfb0&gt;
+root = PosixPath('/private/tmp/phase-f-paired-entries/test_actual_technical_pair_use0/iso/capture/capture-legacy')
+business_run_id = 'capture-technical:capture-legacy'
+tape = &lt;ats.workflow.business_replay_inputs.Tape object at 0x10e4cb0e0&gt;
+
+    def _business(*, legacy, read_input, logical_time, value, root, business_run_id, tape):
+        run_id = business_run_id
+        from ..memory import get_store
+        from .consumer_reads import trace_reads
+        def recipe(surface, key):
+            content = value.contents[surface]
+            rows = content if isinstance(content, list) else [content]
+            return next(row[key] for row in rows if key in row)
+        request = recipe(si.RULESET_VERSION, 'request')
+        seed = recipe(si.HISTORY_STATE, 'seed')
+        if request['scope'] != value.packet.scope:
+            raise ValueError('business request scope differs from frozen packet')
+        with _side(seed, root, run_id), at(logical_time), bind_tape(tape), trace_reads() as trace:
+            # Bind consumer-level ReplayReads via Tape; the passed adapter is the same
+            # ReplayReads instance's method, not an independent source lookup.
+            before = {r['projection_id'] for r in get_store().task_projection_envelopes(limit=100000)}
+            plan = _plan(request, run_id, logical_time)
+            result = _legacy(plan) if legacy else _dispatcher(plan)
+            projections = [row for row in get_store().task_projection_envelopes(limit=100000)
+                           if row['projection_id'] not in before]
+            from .phase_e import TASK_ROLE
+            for task in plan.tasks:
+                if not any(row['agent_role'] == TASK_ROLE[task.task_id]
+                           and row['scope_kind'] == task.scope.kind and row['scope_id'] == task.scope.id for row in projections):
+&gt;                   raise ValueError('business entry did not publish required projection: ' + task.instance_key)
+E                   ValueError: business entry did not publish required projection: dispatcher:technical-review:entity:COHR:713d8ff21846
+
+src/ats/workflow/paired_business.py:224: ValueError</failure></testcase></testsuite></testsuites>

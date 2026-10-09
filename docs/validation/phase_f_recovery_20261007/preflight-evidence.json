@@ -1,0 +1,805 @@
+{
+  "generated_at": "2026-10-07T14:52:17.108054+00:00",
+  "git": {
+    "branch": "feat/rebuild_workflow_dataflow",
+    "head": "02c81f260718ee0ecdb78a63f2ef96d133a1e7d7",
+    "pre_phase_f_commit": "6b72d05b79774b9369d324da94da15dd56b56fa0",
+    "pre_phase_f_subject": "归档目标数据流专项并补齐 Phase F 前置计划",
+    "pre_phase_f_tests_tracked": 0,
+    "first_tracked_test_commit": "374bcf1184941142d9a0089bfcd00718c3e73118",
+    "pre_phase_f_has_broker_guard": false,
+    "baseline_caveat": "Pre-Phase-F tests were untracked. Historical test corpus cannot be reconstructed from that tree. Task 13.6 must identify its fixed compatible baseline test corpus and newly added tests separately."
+  },
+  "environment": {
+    "python": "3.12.12",
+    "platform": "macOS-14.3.1-arm64-arm-64bit",
+    "uv": "uv 0.12.15 (d35f1f270 2026-09-15 aarch64-apple-darwin)",
+    "packages": {
+      "APScheduler": "3.11.3",
+      "Jinja2": "3.1.6",
+      "MarkupSafe": "3.0.3",
+      "PyPika": "0.51.1",
+      "PySocks": "1.7.1",
+      "PyYAML": "6.0.3",
+      "Pygments": "2.21.0",
+      "RapidFuzz": "3.14.6",
+      "Unidecode": "1.4.0",
+      "aeventkit": "2.1.0",
+      "aiofiles": "25.1.0",
+      "aiohappyeyeballs": "2.7.1",
+      "aiohttp": "3.14.3",
+      "aiosignal": "1.4.0",
+      "aiosqlite": "0.22.1",
+      "annotated-doc": "0.0.5",
+      "annotated-types": "0.8.0",
+      "anthropic": "1.3.0",
+      "anyio": "4.15.0",
+      "ats": "0.1.0",
+      "attrs": "26.1.0",
+      "bcrypt": "5.0.0",
+      "beautifulsoup4": "4.15.0",
+      "boto3": "1.43.87",
+      "botocore": "1.43.87",
+      "build": "1.6.0",
+      "certifi": "2026.7.22",
+      "cffi": "2.1.1",
+      "charset-normalizer": "3.5.1",
+      "chromadb": "1.5.9",
+      "click": "8.5.0",
+      "contourpy": "1.3.3",
+      "curl_cffi": "0.16.3",
+      "cycler": "0.12.1",
+      "defusedxml": "0.7.1",
+      "discord.py": "2.7.1",
+      "distro": "1.9.0",
+      "docstring_parser": "0.18.0",
+      "duckdb": "1.5.5",
+      "durationpy": "0.11",
+      "edgartools": "5.56.0",
+      "et_xmlfile": "2.0.0",
+      "exchange_calendars": "4.13.2",
+      "fastapi": "0.141.1",
+      "fastuuid": "0.14.0",
+      "feedparser": "6.0.14",
+      "feedparser-sgmllib": "2.1.0",
+      "filelock": "3.32.5",
+      "flatbuffers": "25.12.19",
+      "fonttools": "4.64.0",
+      "fredapi": "0.5.2",
+      "frozenlist": "1.8.0",
+      "fsspec": "2026.7.0",
+      "googleapis-common-protos": "1.75.2",
+      "grpcio": "1.83.1",
+      "h11": "0.16.0",
+      "hf-xet": "1.6.0",
+      "httpcore": "1.0.9",
+      "httpcore2": "2.12.0",
+      "httptools": "0.8.0",
+      "httpx": "0.28.1",
+      "httpx2": "2.12.0",
+      "httpxthrottlecache": "0.6.1",
+      "huggingface_hub": "1.29.0",
+      "humanize": "4.16.0",
+      "ib_async": "2.1.0",
+      "idna": "3.19",
+      "importlib_metadata": "8.9.0",
+      "importlib_resources": "7.1.0",
+      "iniconfig": "2.3.0",
+      "jiter": "0.16.0",
+      "jmespath": "1.1.0",
+      "jsonpatch": "1.33",
+      "jsonpointer": "3.1.1",
+      "jsonschema": "4.26.0",
+      "jsonschema-specifications": "2025.9.1",
+      "kiwisolver": "1.5.1",
+      "korean_lunar_calendar": "0.4.0",
+      "kubernetes": "36.0.3",
+      "langchain-anthropic": "1.7.0",
+      "langchain-core": "1.6.1",
+      "langchain-openai": "1.6.0",
+      "langchain-protocol": "0.0.19",
+      "langgraph": "1.2.11",
+      "langgraph-checkpoint": "4.2.0",
+      "langgraph-checkpoint-sqlite": "3.1.1",
+      "langgraph-prebuilt": "1.1.0",
+      "langgraph-sdk": "0.4.4",
+      "langsmith": "0.12.1",
+      "litellm": "1.99.0",
+      "lxml": "6.1.3",
+      "markdown-it-py": "4.2.0",
+      "matplotlib": "3.11.1",
+      "mdurl": "0.1.2",
+      "mmh3": "5.3.0",
+      "multidict": "6.7.1",
+      "multitasking": "0.0.13",
+      "nest-asyncio": "1.6.0",
+      "numpy": "2.5.2",
+      "oauthlib": "3.3.1",
+      "onnxruntime": "1.29.0",
+      "openai": "2.54.0",
+      "openpyxl": "3.1.5",
+      "opentelemetry-api": "1.44.0",
+      "opentelemetry-exporter-otlp-proto-common": "1.44.0",
+      "opentelemetry-exporter-otlp-proto-grpc": "1.44.0",
+      "opentelemetry-proto": "1.44.0",
+      "opentelemetry-sdk": "1.44.0",
+      "opentelemetry-semantic-conventions": "0.65b0",
+      "orjson": "3.12.0",
+      "ormsgpack": "1.12.2",
+      "overrides": "7.7.0",
+      "packaging": "26.3",
+      "pandas": "3.0.5",
+      "pandas-ta-classic": "0.6.52",
+      "pandas_market_calendars": "5.4.0",
+      "peewee": "4.4.0",
+      "pillow": "12.3.0",
+      "platformdirs": "4.11.7",
+      "pluggy": "1.6.0",
+      "praw": "8.0.3",
+      "prawcore": "4.0.0",
+      "propcache": "0.5.2",
+      "protobuf": "7.36.1",
+      "pyarrow": "25.0.1",
+      "pybase64": "1.5.0",
+      "pycparser": "3.0",
+      "pydantic": "2.13.5",
+      "pydantic-settings": "2.15.0",
+      "pydantic_core": "2.46.5",
+      "pyluach": "2.3.0",
+      "pyparsing": "3.3.2",
+      "pypdf": "6.16.2",
+      "pyproject_hooks": "1.2.0",
+      "pyrate-limiter": "4.5.0",
+      "pytest": "9.1.1",
+      "pytest-asyncio": "1.4.0",
+      "python-dateutil": "2.9.0.post0",
+      "python-dotenv": "1.2.3",
+      "pytz": "2026.3.post1",
+      "rank-bm25": "0.2.2",
+      "referencing": "0.37.0",
+      "regex": "2026.9.3",
+      "requests": "2.34.2",
+      "requests-oauthlib": "2.0.0",
+      "requests-toolbelt": "1.0.0",
+      "rich": "15.0.0",
+      "rpds-py": "2026.6.3",
+      "ruff": "0.16.5",
+      "s3transfer": "0.19.2",
+      "seaborn": "0.13.2",
+      "shellingham": "1.5.4",
+      "six": "1.17.0",
+      "sniffio": "1.3.1",
+      "socksio": "1.0.0",
+      "soupsieve": "2.9.2",
+      "sqlite-vec": "0.1.9",
+      "stamina": "26.1.0",
+      "starlette": "1.6.0",
+      "tabulate": "0.10.0",
+      "tenacity": "9.1.4",
+      "textdistance": "4.6.3",
+      "tiktoken": "0.14.0",
+      "tokenizers": "0.23.1",
+      "toolz": "1.1.0",
+      "tqdm": "4.70.0",
+      "truststore": "0.10.4",
+      "typer": "0.27.2",
+      "typing-inspection": "0.4.4",
+      "typing_extensions": "4.16.0",
+      "tzdata": "2025.3",
+      "tzlocal": "5.4.4",
+      "update_checker": "1.0.0",
+      "urllib3": "2.7.0",
+      "uuid_utils": "0.17.0",
+      "uvicorn": "0.52.4",
+      "uvloop": "0.22.1",
+      "watchfiles": "1.2.0",
+      "websocket-client": "1.9.2",
+      "websockets": "16.1.1",
+      "xxhash": "4.0.1",
+      "yarl": "1.24.5",
+      "yfinance": "1.7.0",
+      "zipp": "4.1.0",
+      "zstandard": "0.25.0"
+    }
+  },
+  "protected_surface": [
+    {
+      "path": "config/data/structured.yaml",
+      "scope": "required",
+      "invalidates": "chief,clerk,fundamental,information,layer,macro,risk,sector,technical,trader"
+    },
+    {
+      "path": "config/data/target_dataflow_coverage.yaml",
+      "scope": "all_evidence",
+      "invalidates": "every recorded evidence row"
+    },
+    {
+      "path": "config/data/unstructured.yaml",
+      "scope": "required",
+      "invalidates": "chief,clerk,fundamental,information,layer,macro,risk,sector,technical,trader"
+    },
+    {
+      "path": "config/risk.yaml",
+      "scope": "risk",
+      "invalidates": "risk"
+    },
+    {
+      "path": "src/ats/data/assurance.py",
+      "scope": "required",
+      "invalidates": "chief,clerk,fundamental,information,layer,macro,risk,sector,technical,trader"
+    },
+    {
+      "path": "src/ats/data/consumer_api.py",
+      "scope": "required",
+      "invalidates": "chief,clerk,fundamental,information,layer,macro,risk,sector,technical,trader"
+    },
+    {
+      "path": "src/ats/decision/repository.py",
+      "scope": "clerk",
+      "invalidates": "clerk"
+    },
+    {
+      "path": "src/ats/decision/repository.py",
+      "scope": "trader",
+      "invalidates": "trader"
+    },
+    {
+      "path": "src/ats/execution/authorization.py",
+      "scope": "trader",
+      "invalidates": "trader"
+    },
+    {
+      "path": "src/ats/execution/clerk.py",
+      "scope": "clerk",
+      "invalidates": "clerk"
+    },
+    {
+      "path": "src/ats/execution/state_api.py",
+      "scope": "chief",
+      "invalidates": "chief"
+    },
+    {
+      "path": "src/ats/execution/state_api.py",
+      "scope": "risk",
+      "invalidates": "risk"
+    }
+  ],
+  "baseline_hashes": {
+    "config/data/structured.yaml": "6c051ecd466425e1fda949791c7e09332b45464ffc469fe75628648260fea62a",
+    "config/data/target_dataflow_coverage.yaml": "91d24e83d70f0f4674f896dd47db5f5b500c5aa6133477bd3d6ba8b564c22875",
+    "config/data/unstructured.yaml": "71e5aaf1b46f2d651197771b1eee9cda31197f8ceada157f62c3ae2fdba6906e",
+    "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+    "config/settings.yaml": "5989a185f9043d8df41a486e821ca6a2b32fe94026268f52b8d3da066ad9c418",
+    "config/workflow/legacy_retirement.yaml": "3fcc1773543eee5b644582825e2f62604eb97ba30ff4215fd7963b5c1bc6db37",
+    "config/workflow/phase_e_schedules.yaml": "51eee5ac86641985fc2d4f0ea3b6d6710dab529cf65501537183ff0d2e916bb4",
+    "config/workflow/workflow_owners.yaml": "c353688802f52a9ea53c48ae809087c68d73299b48152439f9d38ef0421055da",
+    "pyproject.toml": "15c767c39499848f4a162dbc387e45bf432c6ab40738248bfd7c4419482a4e07",
+    "src/ats/data/assurance.py": "80fa2dc447d0de6028ac62b7051f98c614098651e311dc9befc8666844e9c951",
+    "src/ats/data/consumer_api.py": "cf732809bfaff74ec80ad45831d70da23cb1f48c2eef3d53dbb1435879e233a8",
+    "src/ats/decision/repository.py": "b44c4e0ef19b4612c4c5d35e8947c3c694cc9d4ee0fd34737c38c5d14d3b0e68",
+    "src/ats/execution/authorization.py": "f06cfa4e0b78eec338b8b3745879307797c58b96f11267cc3b8d923afdaaa7af",
+    "src/ats/execution/clerk.py": "3cb23e09353617e716e9757c1e2d78d147fba589c34d492b2e8feb17efbcb9be",
+    "src/ats/execution/state_api.py": "a49d299614e3e23f1e0d480214e6a970d5b5886a801d4cc8e24aa84dcb014772",
+    "uv.lock": "242eb4935b16ef9d8c20d66dc01f0504dd549a5028b314e2ef3c71586c26ab13"
+  },
+  "pre_phase_f_lock_hash": "242eb4935b16ef9d8c20d66dc01f0504dd549a5028b314e2ef3c71586c26ab13",
+  "phase_e_owners": {
+    "version": "1",
+    "shadow_database": "var/shadow/phase-e.sqlite",
+    "workflows": {
+      "layer-review": {
+        "mode": "legacy",
+        "task_ids": [
+          "layer-review"
+        ]
+      },
+      "information-brief": {
+        "mode": "legacy",
+        "task_ids": [
+          "information-brief"
+        ]
+      },
+      "sector-review": {
+        "mode": "legacy",
+        "task_ids": [
+          "sector-review"
+        ]
+      },
+      "fundamental-routine": {
+        "mode": "legacy",
+        "task_ids": [
+          "fundamental-routine"
+        ]
+      },
+      "fundamental-event": {
+        "mode": "legacy",
+        "task_ids": [
+          "fundamental-event"
+        ]
+      },
+      "macro-review": {
+        "mode": "legacy",
+        "task_ids": [
+          "macro-review"
+        ]
+      },
+      "technical-review": {
+        "mode": "legacy",
+        "task_ids": [
+          "technical-review"
+        ]
+      }
+    }
+  },
+  "phase_e_schedules": {
+    "version": "1",
+    "workflows": {
+      "information-brief": {
+        "enabled": false,
+        "task_ids": [
+          "information-brief"
+        ],
+        "scope": {
+          "kind": "portfolio",
+          "id": "pead-targets"
+        },
+        "cron": {
+          "day_of_week": "mon-fri",
+          "hour": 8,
+          "minute": 0,
+          "timezone": "America/New_York"
+        }
+      },
+      "fundamental-routine": {
+        "enabled": false,
+        "task_ids": [
+          "fundamental-routine"
+        ],
+        "scope": {
+          "kind": "portfolio",
+          "id": "pead-targets"
+        },
+        "cron": {
+          "day_of_week": "mon-fri",
+          "hour": 9,
+          "minute": 0,
+          "timezone": "America/New_York"
+        }
+      },
+      "technical-review": {
+        "enabled": false,
+        "task_ids": [
+          "technical-review"
+        ],
+        "scope": {
+          "kind": "portfolio",
+          "id": "portfolio"
+        },
+        "cron": {
+          "day_of_week": "mon-fri",
+          "hour": 10,
+          "minute": 0,
+          "timezone": "America/New_York"
+        }
+      },
+      "macro-review": {
+        "enabled": false,
+        "task_ids": [
+          "macro-review"
+        ],
+        "scope": {
+          "kind": "portfolio",
+          "id": "portfolio"
+        },
+        "cron": {
+          "day_of_week": "sat",
+          "hour": 9,
+          "minute": 0,
+          "timezone": "Asia/Taipei"
+        }
+      },
+      "sector-review": {
+        "enabled": false,
+        "task_ids": [
+          "sector-review"
+        ],
+        "scope": {
+          "kind": "sector",
+          "id": "ai_hardware"
+        },
+        "cron": {
+          "day_of_week": "sat",
+          "hour": 9,
+          "minute": 30,
+          "timezone": "Asia/Taipei"
+        }
+      }
+    }
+  },
+  "production_readonly": {
+    "var/phase_f_cutover.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_activations": 0,
+        "cutover_boundary_history": 6,
+        "cutover_boundary_state": 6,
+        "cutover_boundary_wiring": 10
+      },
+      "authorization_inventory": {},
+      "boundaries": [
+        {
+          "boundary": "analyst_output",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "approval_lifecycle",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "clerk_publication",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "dispatcher_schedule",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "live_trader",
+          "route": "disabled",
+          "wired": 1
+        },
+        {
+          "boundary": "projection_read",
+          "route": "legacy",
+          "wired": 1
+        }
+      ]
+    },
+    "var/phase_f_batches.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_batch_dryruns": 28,
+        "cutover_batches": 5,
+        "read_cutover_authorizations": 1,
+        "read_cutover_runs": 12
+      },
+      "authorization_inventory": {
+        "read_cutover_authorizations": [
+          {
+            "reference": "DEP-2026-10-06-A",
+            "scope": "layer,information,sector,fundamental,macro,technical",
+            "valid_until": "2026-12-31T23:59:59+08:00",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "f458e5c2b65e4f2591c30f8381bfd02eb15cd8d3e8e5ca09feb5a99b13fc7b71",
+            "issued_by_present": true,
+            "issued_by_sha256": "fa732bfd3b63eaf9b6b16fe424dd1ef2f14ddd202d6cb802c69722cb915ba5da",
+            "note_present": true,
+            "note_sha256": "94f4843b4f312f83d1445b07284b894d729bdf91952381084551017ef0264a7d",
+            "record_sha256": "fdf50cc55c3af34cf7743b0a8041aa344f062da947f0c0a73d7ccecf9f1b2dbc",
+            "provenance_verified": false
+          }
+        ]
+      },
+      "batches": [
+        {
+          "batch_class": "collection_publish",
+          "batch_id": "batch-collection",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "internal_state_approval",
+          "batch_id": "batch-internal-approval",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "live_trader",
+          "batch_id": "batch-live-trader",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "research_read",
+          "batch_id": "batch-research-read",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "schedule",
+          "batch_id": "batch-schedule",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        }
+      ]
+    },
+    "var/phase_f_dispatch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "dispatch_claims": 0,
+        "dispatch_expected_triggers": 0,
+        "dispatch_freeze": 0,
+        "dispatch_owner_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_routes.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "trade_route_freeze": 0,
+        "trade_route_history": 0,
+        "trade_route_issuance": 0,
+        "trade_route_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_schedule_switch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    },
+    "var/phase_f_live_authorizations.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "live_authorizations": 1
+      },
+      "authorization_inventory": {
+        "live_authorizations": [
+          {
+            "reference": "LIVE-X",
+            "scope": "trader",
+            "environment": "live",
+            "valid_until": "2099-01-01T00:00:00+00:00",
+            "issuer": "human",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "65c74c15a686187bb6bbf9958f494fc6b80068034a659a9ad44991b08c58f2d2",
+            "issued_by_present": true,
+            "issued_by_sha256": "de7d1b721a1e0632b7cf04edf5032c8ecffa9f9a08492152b926f1a5a7e765d7",
+            "note_present": false,
+            "note_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "account_present": true,
+            "account_sha256": "316ca0efda6296d8f2c11d1e20890d220cec4266a0c16fbbef324c004688468a",
+            "record_sha256": "b8617e1a4dba464bd90292aa0f1abb34a99580b6987fbbd9fdaf874ab9d19407",
+            "provenance_verified": false
+          }
+        ]
+      }
+    },
+    "var/shadow/orders.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "shadow_order_intents": 0,
+        "shadow_submit_attempts": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/shadow/reports.sqlite": {
+      "exists": false
+    },
+    "var/data.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    }
+  },
+  "completeness_probes": {
+    "logical_probes_only": true,
+    "registry": {
+      "layer-review": {
+        "task_id": "layer-review",
+        "agent_role": "layer_analysis",
+        "depends_on": [],
+        "trigger_modes": [
+          "manual",
+          "schedule",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "LayerAnalysis",
+        "freshness_seconds": 604800,
+        "timeout_seconds": 900,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "llm",
+        "required_for_decision": true
+      },
+      "information-brief": {
+        "task_id": "information-brief",
+        "agent_role": "information_brief",
+        "depends_on": [],
+        "trigger_modes": [
+          "manual",
+          "schedule",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "InformationBrief",
+        "freshness_seconds": 3600,
+        "timeout_seconds": 900,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "information",
+        "required_for_decision": true
+      },
+      "sector-review": {
+        "task_id": "sector-review",
+        "agent_role": "sector_allocation",
+        "depends_on": [
+          "layer-review"
+        ],
+        "trigger_modes": [
+          "manual",
+          "schedule",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "SectorAllocation",
+        "freshness_seconds": 604800,
+        "timeout_seconds": 1200,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "llm",
+        "required_for_decision": true
+      },
+      "fundamental-routine": {
+        "task_id": "fundamental-routine",
+        "agent_role": "fundamental_expectation_update",
+        "depends_on": [
+          "information-brief"
+        ],
+        "trigger_modes": [
+          "manual",
+          "schedule",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "FundamentalExpectationUpdate",
+        "freshness_seconds": 3600,
+        "timeout_seconds": 900,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "llm",
+        "required_for_decision": true
+      },
+      "fundamental-event": {
+        "task_id": "fundamental-event",
+        "agent_role": "fundamental_event_review",
+        "depends_on": [
+          "information-brief"
+        ],
+        "trigger_modes": [
+          "manual",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "FundamentalEventReview",
+        "freshness_seconds": 345600,
+        "timeout_seconds": 1200,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "pead",
+        "required_for_decision": true
+      },
+      "macro-review": {
+        "task_id": "macro-review",
+        "agent_role": "macro_review",
+        "depends_on": [],
+        "trigger_modes": [
+          "manual",
+          "schedule",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "MacroReview",
+        "freshness_seconds": 604800,
+        "timeout_seconds": 900,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "llm",
+        "required_for_decision": true
+      },
+      "technical-review": {
+        "task_id": "technical-review",
+        "agent_role": "technical_review",
+        "depends_on": [],
+        "trigger_modes": [
+          "manual",
+          "schedule",
+          "event"
+        ],
+        "input_contract": "frozen scope + admitted data",
+        "output_schema": "TechnicalReview",
+        "freshness_seconds": 3600,
+        "timeout_seconds": 600,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 1.0,
+          "retry_on": [
+            "timeout",
+            "transient"
+          ]
+        },
+        "resource_group": "market-data",
+        "required_for_decision": true
+      }
+    },
+    "cases": {
+      "all_registered_modes": {
+        "snapshot_complete": true,
+        "run_complete": false,
+        "run_allows_cycle": false,
+        "missing_tasks": [
+          "fundamental-event"
+        ]
+      },
+      "selected_routine_only": {
+        "snapshot_complete": true,
+        "run_complete": true,
+        "run_allows_cycle": true,
+        "missing_tasks": []
+      },
+      "selected_event_but_only_routine_available": {
+        "snapshot_complete": true,
+        "run_complete": false,
+        "run_allows_cycle": false,
+        "missing_tasks": [
+          "fundamental-event"
+        ]
+      }
+    }
+  },
+  "actions": {
+    "broker_network": false,
+    "production_workflow_run": false,
+    "production_evidence_written": false,
+    "authorization_modified": false
+  }
+}

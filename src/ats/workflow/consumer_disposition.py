@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
+from pathlib import Path
+import hashlib
 
 from . import intake_verification as iv
 
@@ -78,6 +80,9 @@ class ConsumerDisposition:
     blocks_cutover: bool = False
     auto_released: bool = False
     blocks_unrelated: tuple[str, ...] = ()
+    scope: dict[str, Any] = field(default_factory=dict)
+    evidence: list[dict[str, str]] = field(default_factory=list)
+    production_qualification_granted: bool = False
 
     def as_row(self) -> dict[str, Any]:
         return {
@@ -89,7 +94,48 @@ class ConsumerDisposition:
             "blocks_cutover": self.blocks_cutover,
             "auto_released": self.auto_released,
             "blocks_unrelated": list(self.blocks_unrelated),
+            "scope": self.scope,
+            "evidence": self.evidence,
+            "production_qualification_granted": self.production_qualification_granted,
         }
+
+
+def dispose_recorded_scope(*, consumer_id: str, scope: dict[str, Any],
+                           evidence: Sequence[dict[str, str]],
+                           engineering_gaps: Sequence[str] = (),
+                           **findings) -> ConsumerDisposition:
+    """Bind a disposition to preserved artifacts; this never issues qualification.
+
+    Findings describe this scope only. A hash validates the referenced bytes,
+    not their business outcome: callers must retain the locator and review the
+    actual records. Missing records cannot be reported as a verified clean scope.
+    """
+    import json
+
+    if not scope or not scope.get("kind") or "id" not in scope or (
+            not scope["id"] and scope["kind"] != "portfolio"):
+        raise DispositionError("recorded disposition requires an explicit scope")
+    report = dispose_consumer(consumer_id=consumer_id, **findings)
+    report.scope = json.loads(json.dumps(scope))
+    for reference in evidence:
+        path = Path(reference["path"])
+        if not reference.get("locator") or not path.is_file():
+            raise DispositionError("evidence requires an existing artifact and locator")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != reference.get("sha256"):
+            raise DispositionError("evidence artifact drift")
+        report.evidence.append(dict(reference))
+    if not report.evidence:
+        report.disposition = DISPOSITION_PENDING
+        report.blocks_cutover = True
+        report.reasons.append("actual scoped records missing; verification remains pending")
+    if engineering_gaps:
+        report.disposition = DISPOSITION_PARTIAL
+        report.blocks_cutover = True
+        report.partial_ranges.extend(engineering_gaps)
+        report.reasons.append("cutover adaptation remains required in groups 4/5; "
+                              "engineering gaps cannot be waived as legacy business defects")
+    assert_no_auto_release(report)
+    return report
 
 
 def dispose_consumer(*, consumer_id: str,
@@ -186,8 +232,8 @@ def dispose_consumer(*, consumer_id: str,
                                or coverage_gaps or optional_inputs):
         if disposition.disposition == DISPOSITION_OK:
             reasons.append(
-                "the new path is verified as isolated from the registered legacy "
-                "defect, so the defect is not a reason to hold this scope")
+                "the legacy defect alone does not hold this scope; isolation "
+                "must be established separately by actual scoped evidence")
 
     disposition.blocks_unrelated = ()
     return disposition
@@ -281,6 +327,7 @@ def render_dispositions(reports: Sequence[ConsumerDisposition]) -> str:
                 lines.append(f"- {reason}")
 
     lines += ["",
+              "处置是范围内的政策结论；不代表运行验证、生产资格或切流许可。",
               "**缺项只阻断受影响范围**：不得据此放行其他消费者，也不得为使其可切而"
               "降低证据标准。**历史不完整不自动放行**——「大部分历史是好的」不是资格。"]
     return "\n".join(lines)

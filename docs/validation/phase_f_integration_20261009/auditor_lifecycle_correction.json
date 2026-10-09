@@ -1,0 +1,20 @@
+{
+  "initial_diagnostic": "actual arbitration receipts differ from execution; stop batch",
+  "observed_difference": {
+    "routine": {
+      "status": [
+        "submitted",
+        "filled"
+      ]
+    },
+    "event": {
+      "status": [
+        "submitted",
+        "filled"
+      ]
+    }
+  },
+  "immutable_field_differences": [],
+  "correction": "Only status progression supported by actual trade/fills is accepted. All immutable receipt fields remain equal.",
+  "original_databases_modified": false
+}

@@ -132,6 +132,7 @@ def build_environment(root: str | Path) -> IsolatedEnvironment:
     base = Path(root).expanduser()
     if not base.is_absolute():
         base = REPO_ROOT / base
+    base = base.resolve()
     surfaces = {var: str(base / rel) for var, rel in _SURFACE_FILES.items()}
     return IsolatedEnvironment(root=base, surfaces=surfaces)
 
@@ -169,6 +170,17 @@ def active_isolation_root() -> Path | None:
     return _ACTIVE_ROOT
 
 
+def verified_isolation_root() -> Path | None:
+    """Verify the whole redirection in parents and inherited child environments."""
+    if not broker_write_guard.is_prohibited() or not os.environ.get("ATS_DB_PATH"):
+        return None
+    root = (_ACTIVE_ROOT or Path(os.environ["ATS_DB_PATH"]).resolve().parent).resolve()
+    expected = build_environment(root)
+    if any(os.environ.get(name) != filename for name, filename in expected.surfaces.items()):
+        return None
+    return root
+
+
 def isolation_active(env: dict[str, str] | None = None) -> bool:
     """True only when every surface is redirected AND writes are prohibited.
 
@@ -187,6 +199,62 @@ def isolation_active(env: dict[str, str] | None = None) -> bool:
                for var in PERSISTENCE_ENV_VARS)
 
 
+def _assert_distinct_destinations(environment):
+    """Reject a root that aliases production before creating any store."""
+    if verified_isolation_root() is not None:
+        return  # Nested verified environments already own their destinations.
+    defaults = build_environment(REPO_ROOT / "var").surfaces
+    defaults["ATS_DB_PATH"] = str(REPO_ROOT / "var/ats.sqlite")
+    defaults["ATS_DOCS_ROOT"] = str(REPO_ROOT / "docs")
+    directories = {"ATS_DOCS_ROOT", "ATS_DATA_ARTIFACT_ROOT", "ATS_STRUCTURED_ARTIFACT_ROOT"}
+    for name, destination in environment.surfaces.items():
+        target = Path(destination).resolve()
+        for original in (os.environ.get(name), defaults.get(name)):
+            if not original:
+                continue
+            source = Path(original).resolve()
+            if (source == target or (source.exists() and target.exists() and source.samefile(target))
+                    or (name in directories and (source.is_relative_to(target) or target.is_relative_to(source)))):
+                raise PermissionError(f"isolation_destination_aliases_production:{name}")
+
+
+@contextmanager
+def inspect_isolated_records(root):
+    """Bind an existing evidence side for readonly SQL assertions only.
+
+    Unlike isolated_run, this does not bootstrap, create directories, open a
+    TradingMemory, or initialize authority. The report verifier owns its readonly
+    connections. Keep the broker prohibition even during inspection and restore
+    the caller's environment/capability on every exit.
+    """
+    environment = build_environment(root)
+    _assert_distinct_destinations(environment)
+    if not environment.root.is_dir():
+        raise ValueError("isolated evidence root missing")
+    previous = {name: os.environ.get(name) for name in (*PERSISTENCE_ENV_VARS,
+                "ATS_RUN_MODE", "ATS_BROKER_WRITE_PROHIBITION")}
+    state = broker_write_guard._STATE
+    grant, mode, reason = state.grant, state.mode, state.reason_code
+    global _ACTIVE_ROOT
+    active = _ACTIVE_ROOT
+    try:
+        for name,path in environment.surfaces.items():
+            os.environ[name] = path
+        os.environ["ATS_RUN_MODE"] = "isolated"
+        os.environ["ATS_BROKER_WRITE_PROHIBITION"] = "1"
+        broker_write_guard.prohibit_broker_writes(reason_code=broker_write_guard.REASON_ISOLATED)
+        _ACTIVE_ROOT = environment.root
+        yield environment
+    finally:
+        for name,value in previous.items():
+            if value is None:
+                os.environ.pop(name,None)
+            else:
+                os.environ[name] = value
+        state.grant, state.mode, state.reason_code = grant, mode, reason
+        _ACTIVE_ROOT = active
+
+
 @contextmanager
 def isolated_run(run_id: str, *, root: str | Path | None = None,
                  reason_code: str = broker_write_guard.REASON_ISOLATED,
@@ -198,11 +266,15 @@ def isolated_run(run_id: str, *, root: str | Path | None = None,
     invisible until something much later wrote to the wrong database.
     """
     environment = build_environment(root or default_isolation_root(run_id))
+    _assert_distinct_destinations(environment)
     environment.root.mkdir(parents=True, exist_ok=True)
     for path in environment.surfaces.values():
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     previous_env = {var: os.environ.get(var) for var in PERSISTENCE_ENV_VARS}
+    previous_run_mode = os.environ.get("ATS_RUN_MODE")
+    previous_prohibition = os.environ.get("ATS_BROKER_WRITE_PROHIBITION")
+    previous_grant = broker_write_guard._STATE.grant
     previous_mode = broker_write_guard._STATE.mode
     previous_reason = broker_write_guard._STATE.reason_code
     global _ACTIVE_ROOT
@@ -211,6 +283,7 @@ def isolated_run(run_id: str, *, root: str | Path | None = None,
         for var, path in environment.surfaces.items():
             os.environ[var] = path
         os.environ["ATS_RUN_MODE"] = "isolated"
+        os.environ["ATS_BROKER_WRITE_PROHIBITION"] = "1"
         broker_write_guard.prohibit_broker_writes(reason_code=reason_code)
         _reset_caches()
         # Prove the capability rather than assume it: a run that started without
@@ -218,6 +291,14 @@ def isolated_run(run_id: str, *, root: str | Path | None = None,
         broker_write_guard.assert_broker_writes_prohibited(
             operation="isolated_run", caller=run_id)
         _ACTIVE_ROOT = environment.root
+        # A fresh isolated authority may start at the safe legacy/disabled
+        # defaults. This never initializes the production control database.
+        from .cutover import bootstrap
+
+        bootstrap(actor=run_id, path=environment.path_for("ATS_CUTOVER_DB"))
+        from .schedule_runtime import initialize
+
+        initialize()
         yield environment
     finally:
         for var, value in previous_env.items():
@@ -225,7 +306,13 @@ def isolated_run(run_id: str, *, root: str | Path | None = None,
                 os.environ.pop(var, None)
             else:
                 os.environ[var] = value
-        os.environ.pop("ATS_RUN_MODE", None)
+        for var, value in (("ATS_RUN_MODE", previous_run_mode),
+                           ("ATS_BROKER_WRITE_PROHIBITION", previous_prohibition)):
+            if value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = value
+        broker_write_guard._STATE.grant = previous_grant
         broker_write_guard._STATE.mode = previous_mode
         broker_write_guard._STATE.reason_code = previous_reason
         _ACTIVE_ROOT = previous_root

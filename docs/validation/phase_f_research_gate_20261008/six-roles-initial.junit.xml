@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="1.639" timestamp="2026-10-08T20:12:22.907374+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_research_gate" name="test_six_roles_actual_dispatcher_publish_with_provenance" file="tests/test_phase_f_research_gate.py" line="248" time="0.500"><error message="failed on setup with &quot;PermissionError: persistent ingestion for test-lease requires an active managed-queue lease&quot;">isolated = &lt;ats.memory.store.TradingMemory object at 0x121821070&gt;
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x12162fe00&gt;
+tmp_path = PosixPath('/private/var/folders/n1/5cnt70z50cg4_pk9fcd707mm0000gn/T/pytest-of-liuchao/pytest-408/test_six_roles_actual_dispatch0')
+company_products = datetime.datetime(2026, 10, 8, 12, 12, 24, 217711, tzinfo=datetime.timezone.utc)
+
+    @pytest.fixture
+    def business_inputs(isolated, monkeypatch, tmp_path, company_products):
+        import shutil
+        import yaml
+        import pandas as pd
+        from ats.config import REPO_ROOT, reset_config_cache
+        from ats.data import document_assets, macro
+        from ats.data.products import get_platform_data_products
+        from ats.data.stores.unstructured import get_platform_unstructured_store
+        from ats.agents.layer import layer_review
+        from ats.agents.sector import rotation, structure
+        from ats.agents.information import documents
+        from ats.agents.macro import review as macro_review
+        from ats.agents import base
+        from ats.agents.fundamental.outputs import ClassificationView
+        from ats.agents.sector.outputs import LayerVerdictView, LayerRotationView, StructureView
+        from ats.agents.macro.outputs import MacroReviewLLMView
+        from ats.agents.pead.outputs import ContextUpdateView
+        from types import SimpleNamespace
+    
+        root = tmp_path / "config"
+        shutil.copytree(REPO_ROOT/"config", root)
+        sector_file=root/"sectors/ai_hardware.yaml"
+        cfg=yaml.safe_load(sector_file.read_text())
+        cfg["layers"]=[next(layer for layer in cfg["layers"] if layer["key"]=="L4_interconnect")]
+        cfg["output_dir"]=""
+        sector_file.write_text(yaml.safe_dump(cfg,allow_unicode=True))
+        pead_file=root/"pead.yaml";g=yaml.safe_load(pead_file.read_text());g["targets"]=["COHR"]
+        pead_file.write_text(yaml.safe_dump(g,allow_unicode=True))
+        macro_file=root/"macro.yaml";mc=yaml.safe_load(macro_file.read_text());mc["themes"]=[]
+        macro_file.write_text(yaml.safe_dump(mc,allow_unicode=True))
+        monkeypatch.setenv("ATS_CONFIG_DIR",str(root));reset_config_cache()
+        repository=get_platform_unstructured_store()
+        at=datetime.now(UTC)-timedelta(seconds=3)
+&gt;       document=document_assets.ingest(entity="COHR",key="fixture-news",doc_type="article",
+            text="Revenue guidance increased to 120. New factory adds ten production lines. "*30,
+            source="ibkr_news",source_url="fixture:accepted-news",title="新增产线 revenue 120",
+            published_at=at.isoformat(),now=at,min_chars=1,store=repository)
+
+tests/test_phase_f_research_gate.py:202: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ats/data/document_assets.py:52: in ingest
+    store.save_document(doc, note=note)
+src/ats/data/stores/unstructured/platform.py:833: in save_document
+    self._write("INSERT OR REPLACE INTO data_documents (document_id,entity,period,doc_type,source,source_url,local_path,sha256,chars,ok,note,fetched_at,external_id,title,published_at,completeness,truncation_reason,carrier_format,mime_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (doc.document_id,doc.symbol.upper(),doc.period,doc.doc_type,doc.source,doc.source_url,str(doc.path) if doc.path else "",doc.sha256,len(doc.text or ""),int(ok),note,stamp,getattr(doc,"external_id",""),getattr(doc,"title",""),getattr(doc,"published_at",""),getattr(doc,"completeness","full"),getattr(doc,"truncation_reason",""),getattr(doc,"carrier_format",""),getattr(doc,"mime_source","")))
+src/ats/data/stores/unstructured/platform.py:817: in _write
+    self._require_managed_writer()
+src/ats/data/stores/unstructured/platform.py:829: in _require_managed_writer
+    require_queue_worker(os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", ""))
+src/ats/data/persistent_queue.py:414: in require_queue_worker
+    PersistentIngestionQueue.require_worker_lease(source_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+source_id = 'test-lease'
+
+    @staticmethod
+    def require_worker_lease(source_id: str) -&gt; None:
+        """Reject a production persistence write without a valid worker lease."""
+        task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
+        worker_id = os.environ.get("ATS_PERSISTENT_QUEUE_LEASE_OWNER", "")
+        if not task_id or not worker_id or not PersistentIngestionQueue().valid_source_lease(
+                task_id, worker_id, source_id):
+&gt;           raise PermissionError(
+                f"persistent ingestion for {source_id} requires an active managed-queue lease")
+E           PermissionError: persistent ingestion for test-lease requires an active managed-queue lease
+
+src/ats/data/persistent_queue.py:255: PermissionError</error></testcase></testsuite></testsuites>

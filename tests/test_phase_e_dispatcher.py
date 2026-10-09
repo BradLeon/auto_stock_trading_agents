@@ -21,7 +21,7 @@ def _config(tmp_path, targets=("AAA", "BBB")):
     (root / "workflow" / "decision_profiles.yaml").write_text(
         "schema_version: 1\nprofiles: {}\n", encoding="utf-8")
     (root / "sectors" / "custom.yaml").write_text(
-        "name: custom\nlayers:\n  - key: L1\n    claims: []\n", encoding="utf-8")
+        "name: custom\nlayers:\n  - key: L1\n    claims: []\n    tickers: [{symbol: AAA}]\n", encoding="utf-8")
     (root / "risk.yaml").write_text("sector_layer_caps: {}\n", encoding="utf-8")
     (root / "pead.yaml").write_text(
         "targets: [" + ", ".join(targets) + "]\n", encoding="utf-8")
@@ -33,6 +33,14 @@ def _config(tmp_path, targets=("AAA", "BBB")):
 def db_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "workflow.sqlite"))
     monkeypatch.setenv("ATS_DATA_DB_PATH", str(tmp_path / "data.sqlite"))
+    from ats.workflow.schedule_runtime import initialize
+    import yaml
+
+    control = tmp_path / "control-config" / "workflow"
+    control.mkdir(parents=True)
+    (control / "workflow_owners.yaml").write_text(yaml.safe_dump({"workflows": {task: {"mode": "dispatcher"} for task in TASK_ROLE}}))
+    monkeypatch.setenv("ATS_DISPATCH_STATE_PATH", str(tmp_path / "unit-dispatch.sqlite"))
+    initialize(config_dir=control.parent)
     reset_store_cache()
     yield tmp_path / "workflow.sqlite"
     try:
@@ -139,7 +147,7 @@ def test_projection_reuse_requires_exact_inputs_and_data_vintage(tmp_path, db_pa
 
     def make_plan(run_id, vintage):
         return build_plan(requested_tasks=("macro-review",),
-                          scope=ProjectionScope(kind="portfolio"), trigger=_trigger(),
+                          scope=ProjectionScope(kind="portfolio"), trigger=_trigger().model_copy(update={"scheduled_for": f"2026-09-24T00:0{run_id[-1]}:00+00:00"}),
                           as_of="2026-09-24T00:00:00+00:00", run_id=run_id,
                           config_dir=config,
                           task_inputs={"data_vintage_refs": [vintage]})

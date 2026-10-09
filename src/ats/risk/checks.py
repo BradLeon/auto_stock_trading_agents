@@ -139,6 +139,7 @@ def review_revision(
     sector: str = "ai_hardware", event_data: dict[str, dict] | None = None,
     review: RiskReview | None = None, apply_caps: bool = True,
     llm_comment: str | None = None,
+    cycle_id: str = "",
 ) -> DecisionRiskReview:
     """Review one revision without modifying it. Deterministic fields decide.
 
@@ -193,10 +194,27 @@ def review_revision(
                 marginal.risk_utilizations(r, rc, policy).items()}
 
     before_metrics = _metrics(working_review)
+    quote_stamps = []
 
     for decision in orders:
         sym = decision.symbol
         action = str(decision.action)
+        if decision.execution_basis:
+            from ..data.execution_prices import price_request, read_price, quote_ref
+
+            try:
+                with price_request("risk", orders, cycle_id=cycle_id or portfolio_snapshot_id(portfolio),
+                                   purpose="preapproval_normalization", currency=portfolio.base_currency):
+                    q = read_price("risk", decision, overnight=bool(
+                        decision.execution_basis.get("defer_to_regular_session")))
+                if quote_ref(q) != decision.execution_basis.get("quote_ref"):
+                    raise ValueError("review_quote_hash_mismatch")
+                quote_stamps.append(q.source_as_of)
+            except (ValueError, PermissionError, RuntimeError) as exc:
+                violations.append(RiskViolation(rule_id="execution_price_invalid", entity=sym,
+                                                detail=str(exc), severity="hard"))
+                _reject(sym, action, [f"governed_reference_price_unavailable:{exc}"])
+                continue
         # An action outside the vocabulary must be blocked, never read as "no
         # risk to check" — that reading is how an unknown action reaches the broker.
         try:
@@ -216,9 +234,18 @@ def review_revision(
             # position instead of blocking them as underivable.
             px = decision.limit_price
             if not px:
-                from ..trader.execute import _last_price
+                from ..data.execution_prices import price_request, read_price, directional_price
 
-                px = _last_price(sym)
+                try:
+                    with price_request("risk", orders, cycle_id=portfolio_snapshot_id(portfolio),
+                                       purpose="preapproval_normalization",
+                                       currency=portfolio.base_currency):
+                        px = directional_price(read_price("risk", decision), decision.action)
+                except (ValueError, PermissionError, RuntimeError) as exc:
+                    violations.append(RiskViolation(rule_id="execution_price_invalid", entity=sym,
+                                                    detail=str(exc), severity="hard"))
+                    _reject(sym, action, [f"governed_reference_price_unavailable:{exc}"])
+                    continue
             if px:
                 decision = decision.model_copy(
                     update={"notional_usd": abs(decision.qty) * float(px)})
@@ -338,7 +365,8 @@ def review_revision(
         notes=notes, llm_comment=llm_comment or "",
         basis=ReviewBasis(
             portfolio_snapshot_id=portfolio_snapshot_id(portfolio),
-            market_as_of=working_review.as_of.isoformat(),
+            market_as_of=(min(quote_stamps).isoformat() if quote_stamps else
+                          working_review.as_of.isoformat()),
             ruleset_version=ruleset_version()))
 
 

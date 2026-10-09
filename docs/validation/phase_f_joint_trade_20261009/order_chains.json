@@ -1,0 +1,2188 @@
+{
+  "status": "passed",
+  "executions": [
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[routine]",
+      "run_id": "new",
+      "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/iso/new/memory.sqlite",
+      "input_hash": "624965d79746688fc7153d800915782ef6864183a279c38f7bfbac80999b97c2",
+      "status": "passed",
+      "refs": [
+        "020124990bbec2f851c15189dd2ddbb4",
+        "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+        "356b69089e67cb8d13a4fa47215880da",
+        "524d9abdd29a802b042b0321f367ef0a",
+        "5705ac3d19dfd473341c9c9357bfc2a1",
+        "70536273e8c063b00378a983e420422d",
+        "929196eac6052ddbbaf1e625fc3f8561",
+        "a3eeeaa93e394bff37791513ab9b5100",
+        "independent-chain:r1:approval:r1",
+        "independent-chain:r1:review:r1",
+        "sim-1",
+        "sim-1-fill-1"
+      ],
+      "chains": [
+        {
+          "research_snapshot": {
+            "built_at": "2026-10-09T12:24:23+00:00",
+            "items": [
+              {
+                "agent_role": "layer_analysis",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "layer_analysis",
+                "content_hash": "356b69089e67cb8d13a4fa47215880da57b2ea9642995ee0ff23ee4fc3e04795",
+                "projection_id": "356b69089e67cb8d13a4fa47215880da",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "L4_interconnect",
+                "scope_kind": "layer",
+                "task_id": "layer_analysis"
+              },
+              {
+                "agent_role": "sector_allocation",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "sector_allocation",
+                "content_hash": "524d9abdd29a802b042b0321f367ef0a1c3f1c03707e2bddf4cc9a00d1f97a10",
+                "projection_id": "524d9abdd29a802b042b0321f367ef0a",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "ai_hardware",
+                "scope_kind": "sector",
+                "task_id": "sector_allocation"
+              },
+              {
+                "agent_role": "information_brief",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "information_brief",
+                "content_hash": "929196eac6052ddbbaf1e625fc3f8561d753b4a806e7e60dce40422632a4480a",
+                "projection_id": "929196eac6052ddbbaf1e625fc3f8561",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "information_brief"
+              },
+              {
+                "agent_role": "fundamental_expectation_update",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "fundamental_analysis",
+                "content_hash": "020124990bbec2f851c15189dd2ddbb44dfcbb5d6c84b6a9ca1c0f5af99c2a31",
+                "projection_id": "020124990bbec2f851c15189dd2ddbb4",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "fundamental_expectation_update"
+              },
+              {
+                "agent_role": "macro_review",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "macro_review",
+                "content_hash": "70536273e8c063b00378a983e420422d26602befb235a4ab08ec648cb78a6565",
+                "projection_id": "70536273e8c063b00378a983e420422d",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "",
+                "scope_kind": "portfolio",
+                "task_id": "macro_review"
+              },
+              {
+                "agent_role": "technical_review",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "technical_review",
+                "content_hash": "a3eeeaa93e394bff37791513ab9b5100d9d8c1f88198ce46defb6db5aeb7f923",
+                "projection_id": "a3eeeaa93e394bff37791513ab9b5100",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "technical_review"
+              }
+            ],
+            "requirements": {
+              "manifest": [
+                {
+                  "content_hash": "356b69089e67cb8d13a4fa47215880da57b2ea9642995ee0ff23ee4fc3e04795",
+                  "projection_id": "356b69089e67cb8d13a4fa47215880da",
+                  "role": "layer_analysis",
+                  "scope_id": "L4_interconnect",
+                  "scope_kind": "layer"
+                },
+                {
+                  "content_hash": "524d9abdd29a802b042b0321f367ef0a1c3f1c03707e2bddf4cc9a00d1f97a10",
+                  "projection_id": "524d9abdd29a802b042b0321f367ef0a",
+                  "role": "sector_allocation",
+                  "scope_id": "ai_hardware",
+                  "scope_kind": "sector"
+                },
+                {
+                  "content_hash": "929196eac6052ddbbaf1e625fc3f8561d753b4a806e7e60dce40422632a4480a",
+                  "projection_id": "929196eac6052ddbbaf1e625fc3f8561",
+                  "role": "information_brief",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "020124990bbec2f851c15189dd2ddbb44dfcbb5d6c84b6a9ca1c0f5af99c2a31",
+                  "projection_id": "020124990bbec2f851c15189dd2ddbb4",
+                  "role": "fundamental_expectation_update",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "70536273e8c063b00378a983e420422d26602befb235a4ab08ec648cb78a6565",
+                  "projection_id": "70536273e8c063b00378a983e420422d",
+                  "role": "macro_review",
+                  "scope_id": "",
+                  "scope_kind": "portfolio"
+                },
+                {
+                  "content_hash": "a3eeeaa93e394bff37791513ab9b5100d9d8c1f88198ce46defb6db5aeb7f923",
+                  "projection_id": "a3eeeaa93e394bff37791513ab9b5100",
+                  "role": "technical_review",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                }
+              ],
+              "outcomes": [
+                {
+                  "attempts": 1,
+                  "detail": "layer=L4_interconnect",
+                  "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                  "projection_refs": [
+                    "356b69089e67cb8d13a4fa47215880da"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "L4_interconnect",
+                    "kind": "layer"
+                  },
+                  "status": "succeeded",
+                  "task_id": "layer-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "sector=ai_hardware",
+                  "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                  "projection_refs": [
+                    "524d9abdd29a802b042b0321f367ef0a"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "ai_hardware",
+                    "kind": "sector"
+                  },
+                  "status": "succeeded",
+                  "task_id": "sector-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "Revenue guidance and capacity changed.",
+                  "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "929196eac6052ddbbaf1e625fc3f8561"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "information-brief"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "{'新增': 1}",
+                  "instance_key": "dispatcher:fundamental-routine:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "020124990bbec2f851c15189dd2ddbb4"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "fundamental-routine"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "regime=neutral",
+                  "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                  "projection_refs": [
+                    "70536273e8c063b00378a983e420422d"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "",
+                    "kind": "portfolio"
+                  },
+                  "status": "succeeded",
+                  "task_id": "macro-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "symbol=COHR",
+                  "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "a3eeeaa93e394bff37791513ab9b5100"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "technical-review"
+                }
+              ],
+              "plan": {
+                "as_of": "2026-10-09T12:24:14.381872+00:00",
+                "config_root": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/config",
+                "edges": [
+                  [
+                    "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c"
+                  ],
+                  [
+                    "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "dispatcher:fundamental-routine:entity:COHR:eb72a24d786c"
+                  ]
+                ],
+                "enter_decision_cycle": true,
+                "plan_id": "9e6992d6880542aa1ea97e008cf828b5",
+                "profile_hash": "45d7f4f653ab4e2d294ede76d6eb069c94847895cef9d87a87767fba3d3c09f7",
+                "profile_id": "ai_hardware",
+                "profile_version": "1",
+                "registry_version": "phase-e-v1",
+                "request_scope": {
+                  "id": "ai_hardware",
+                  "kind": "sector"
+                },
+                "requested_tasks": [
+                  "sector-review",
+                  "fundamental-routine",
+                  "macro-review",
+                  "technical-review"
+                ],
+                "run_id": "new",
+                "source_config_hashes": {
+                  "config/macro.yaml": "902fa173404f2a8433962307e5d24e989d2117dc9830731450d47e5b55b45ad3",
+                  "config/pead.yaml": "9f38619f1424924307135b526e1f4807793866567125013f4f6ca732e48582fd",
+                  "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+                  "config/sectors/ai_hardware.yaml": "9c1d36404d06b5700aa349c987b95ce529a088fc8e901e0f875c5e1fcf9b683d",
+                  "config/technical.yaml": "f52a922aaaf28687a32ae0ea11ae3f5326897030c62d6e1300a95e9e38638f9f"
+                },
+                "task_inputs": {
+                  "fundamental-routine": {
+                    "use_llm": false
+                  }
+                },
+                "tasks": [
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "output_schema": "LayerAnalysis",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "L4_interconnect",
+                      "kind": "layer"
+                    },
+                    "task_id": "layer-review"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                    "output_schema": "SectorAllocation",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "ai_hardware",
+                      "kind": "sector"
+                    },
+                    "task_id": "sector-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "output_schema": "InformationBrief",
+                    "required_for_decision": true,
+                    "resource_group": "information",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "information-brief"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:information-brief:entity:COHR:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:fundamental-routine:entity:COHR:eb72a24d786c",
+                    "output_schema": "FundamentalExpectationUpdate",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "fundamental-routine"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                    "output_schema": "MacroReview",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "",
+                      "kind": "portfolio"
+                    },
+                    "task_id": "macro-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                    "output_schema": "TechnicalReview",
+                    "required_for_decision": true,
+                    "resource_group": "market-data",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "technical-review"
+                  }
+                ],
+                "trigger": {
+                  "event_id": "",
+                  "event_version": "",
+                  "kind": "manual",
+                  "schedule_id": "",
+                  "scheduled_for": "",
+                  "trigger_id": "independent-routine",
+                  "workflow_id": ""
+                }
+              },
+              "plan_hash": "82afb62ad624a89f92e9bfa0ce90dc23dea370c4d3f3aec64e4e221fef6f2edb",
+              "requirements_hash": "2f115a6baf781253539a5fb6f17c5065456b244ebcc1cd8bea01539d519ecbf7",
+              "version": "decision-requirements-v1",
+              "workflow_store_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/iso/new/memory.sqlite"
+            },
+            "scope": "portfolio"
+          },
+          "cycle_id": "independent-chain",
+          "revision_no": 1,
+          "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+          "order": {
+            "action": "buy",
+            "conviction": 0.5,
+            "execution_basis": {
+              "currency": "USD",
+              "defer_to_regular_session": false,
+              "max_deviation": 0.01,
+              "max_notional": 905.4,
+              "policy_version": "phase-f-execution-price-v1",
+              "quote": {
+                "adjusted": false,
+                "ask": 100.1,
+                "bid": 100.0,
+                "close": null,
+                "currency": "USD",
+                "market_data_mode": "live",
+                "min_size": 1.0,
+                "min_tick": 0.01,
+                "price_kind": "bid_ask",
+                "queried_at": "2026-10-09T12:24:28.214742Z",
+                "schema_version": "runtime-execution-price-v1",
+                "session": "regular",
+                "size_increment": 1.0,
+                "source": "synthetic:bid_ask",
+                "source_as_of": "2026-10-09T12:24:28.214742Z",
+                "source_precision": "tick",
+                "symbol": "COHR"
+              },
+              "quote_ref": "execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31",
+              "reference_price": 100.1,
+              "requested_order": {
+                "action": "buy",
+                "conviction": 0.5,
+                "execution_basis": {},
+                "invalidation": "",
+                "limit_price": null,
+                "notional_usd": 1000.0,
+                "order_type": "limit",
+                "planned_horizon_days": null,
+                "qty": null,
+                "rationale": "Actual requirements",
+                "references": [],
+                "setup": "unknown",
+                "stop_price": null,
+                "symbol": "COHR",
+                "target_price": null,
+                "target_weight": null,
+                "time_in_force": "DAY"
+              }
+            },
+            "invalidation": "",
+            "limit_price": 100.6,
+            "notional_usd": 905.4,
+            "order_type": "limit",
+            "planned_horizon_days": null,
+            "qty": 9.0,
+            "rationale": "Actual requirements",
+            "references": [],
+            "setup": "unknown",
+            "stop_price": null,
+            "symbol": "COHR",
+            "target_price": null,
+            "target_weight": null,
+            "time_in_force": "DAY"
+          },
+          "review": {
+            "review_id": "independent-chain:r1:review:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+            "ruleset_version": "risk-af175377e1d1",
+            "portfolio_snapshot_id": "pf:2026-10-09T12:24:14.380166+00:00",
+            "market_as_of": "2026-10-09T12:24:28.214742+00:00",
+            "verdict": "approved",
+            "violations_json": "[]",
+            "allowed_boundary_json": "{\"blocked_actions\":[],\"max_additional_notional\":null,\"per_symbol_max_notional\":{}}",
+            "before_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.1,\"daily_loss\":0.0,\"drawdown\":0.0,\"excess_liquidity\":0.1,\"gross_leverage\":0.0,\"margin_util\":0.0,\"stress_loss\":0.0}",
+            "after_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.100090622,\"daily_loss\":0.0,\"drawdown\":0.0,\"entity:COHR\":0.0036,\"excess_liquidity\":0.100050025,\"gross_leverage\":0.0,\"layer:L4_interconnect\":0.006,\"margin_util\":0.001,\"portfolio_beta\":0.0,\"stress_loss\":0.0008}",
+            "notes": "ALLOW COHR: marginal=worsening",
+            "created_at": "2026-10-09T12:24:23.552135+00:00"
+          },
+          "approval": {
+            "approval_id": "independent-chain:r1:approval:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+            "decision": "approved",
+            "reviewer": "fixture-human",
+            "comment": "",
+            "channel": "fixture-only",
+            "idempotency_key": "b0815b10861ba2fe952fcfc9eb632388",
+            "created_at": "2026-10-09T12:24:30.506890+00:00"
+          },
+          "receipt": {
+            "account": "DU1",
+            "attempted_at": "2026-10-09T12:24:46.642851+00:00",
+            "broker_order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "environment": "paper",
+            "generation": 1,
+            "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "payload_hash": "2d932e81c1b111ae39fbbe5b62f6ec6d8658bea68c3c5a835193a65b6ea7d6df",
+            "pid": 27921,
+            "revision_no": 1,
+            "route_id": "simulation",
+            "sequence": 0,
+            "status": "submitted"
+          },
+          "trade": {
+            "order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "symbol": "COHR",
+            "action": "buy",
+            "qty": 9.0,
+            "order_type": "limit",
+            "status": "filled",
+            "avg_fill_price": 100.1,
+            "submitted_at": "2026-10-09T12:24:31.031370+00:00",
+            "rationale": "Actual requirements",
+            "limit_price": 100.6,
+            "filled_at": "2026-10-09T12:24:32.031370+00:00",
+            "error": "",
+            "realized_pnl": null,
+            "source": "chief",
+            "context": "{\"source\": \"chief\", \"approval\": {\"status\": \"approved\", \"reviewer\": \"fixture-human\", \"reviewed_at\": \"2026-10-09T12:24:30.506890+00:00\", \"comment\": \"\", \"proposed_symbols\": [\"COHR\"], \"effective_symbols\": [\"COHR\"], \"dropped_symbols\": [], \"added_symbols\": [], \"rejected_symbols\": [], \"overrides\": [], \"direct_instructions\": [], \"diverged\": false}, \"risk_notes\": [\"ALLOW COHR: marginal=worsening\", \"COHR: 9 股；bid_ask 参考 100.1 USD，来源 2026-10-09T12:24:28.214742+00:00；execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31\"], \"decisions\": [{\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": 9.0, \"notional_usd\": 905.4, \"execution_basis\": {\"policy_version\": \"phase-f-execution-price-v1\", \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:24:28.214742Z\", \"queried_at\": \"2026-10-09T12:24:28.214742Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"requested_order\": {\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": null, \"notional_usd\": 1000.0, \"execution_basis\": {}, \"order_type\": \"limit\", \"limit_price\": null, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}, \"quote_ref\": \"execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31\", \"reference_price\": 100.1, \"max_deviation\": 0.01, \"max_notional\": 905.4, \"currency\": \"USD\", \"defer_to_regular_session\": false}, \"order_type\": \"limit\", \"limit_price\": 100.6, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}], \"execution_price_audit\": [{\"order_seq\": 0, \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:24:31.024859Z\", \"queried_at\": \"2026-10-09T12:24:31.024859Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"approval_quote_ref\": \"execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31\", \"policy_version\": \"phase-f-execution-price-v1\", \"execution_quote_ref\": \"execution-quote:8c2113623eb02b8e03262dcc72c9845c136c3fd2bbd8c94ed86d74327b6483d9\"}]}",
+            "client_order_id": "independent-chain:r1:0:COHR:buy",
+            "perm_id": "sim-1",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "attempt": 1,
+            "entry_id": null,
+            "first_submitted_at": "2026-10-09T12:24:31.031370+00:00",
+            "order_seq": null,
+            "filled_qty": 9.0,
+            "terminal_basis": "broker",
+            "revision_no": 1,
+            "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+            "approval_id": "independent-chain:r1:approval:r1"
+          },
+          "fills": [
+            {
+              "exec_id": "sim-1-fill-1",
+              "symbol": "COHR",
+              "side": "BOT",
+              "shares": 9.0,
+              "price": 100.1,
+              "time": "2026-10-09T12:24:32.031370+00:00",
+              "realized_pnl": null,
+              "commission": 0.0,
+              "order_id": "sim-1",
+              "perm_id": "sim-1",
+              "order_ref": "ats:independent-chain:r1:0:COHR",
+              "origin": "system",
+              "link_confidence": "order_ref",
+              "captured_at": "2026-10-09T12:24:34.031370+00:00",
+              "entry_id": "independent-chain:r1:0:COHR:buy",
+              "episode_id": "COHR:sim-1-fill-1",
+              "late_backfill": null,
+              "cycle_id": "independent-chain",
+              "revision_no": 1,
+              "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+              "approval_id": "independent-chain:r1:approval:r1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[routine]",
+      "run_id": "replayed",
+      "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/iso/replayed/memory.sqlite",
+      "input_hash": "624965d79746688fc7153d800915782ef6864183a279c38f7bfbac80999b97c2",
+      "status": "passed",
+      "refs": [
+        "020124990bbec2f851c15189dd2ddbb4",
+        "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+        "356b69089e67cb8d13a4fa47215880da",
+        "524d9abdd29a802b042b0321f367ef0a",
+        "5705ac3d19dfd473341c9c9357bfc2a1",
+        "70536273e8c063b00378a983e420422d",
+        "929196eac6052ddbbaf1e625fc3f8561",
+        "a3eeeaa93e394bff37791513ab9b5100",
+        "independent-chain:r1:approval:r1",
+        "independent-chain:r1:review:r1",
+        "sim-1",
+        "sim-1-fill-1"
+      ],
+      "chains": [
+        {
+          "research_snapshot": {
+            "built_at": "2026-10-09T12:24:23+00:00",
+            "items": [
+              {
+                "agent_role": "layer_analysis",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "layer_analysis",
+                "content_hash": "356b69089e67cb8d13a4fa47215880da57b2ea9642995ee0ff23ee4fc3e04795",
+                "projection_id": "356b69089e67cb8d13a4fa47215880da",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "L4_interconnect",
+                "scope_kind": "layer",
+                "task_id": "layer_analysis"
+              },
+              {
+                "agent_role": "sector_allocation",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "sector_allocation",
+                "content_hash": "524d9abdd29a802b042b0321f367ef0a1c3f1c03707e2bddf4cc9a00d1f97a10",
+                "projection_id": "524d9abdd29a802b042b0321f367ef0a",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "ai_hardware",
+                "scope_kind": "sector",
+                "task_id": "sector_allocation"
+              },
+              {
+                "agent_role": "information_brief",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "information_brief",
+                "content_hash": "929196eac6052ddbbaf1e625fc3f8561d753b4a806e7e60dce40422632a4480a",
+                "projection_id": "929196eac6052ddbbaf1e625fc3f8561",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "information_brief"
+              },
+              {
+                "agent_role": "fundamental_expectation_update",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "fundamental_analysis",
+                "content_hash": "020124990bbec2f851c15189dd2ddbb44dfcbb5d6c84b6a9ca1c0f5af99c2a31",
+                "projection_id": "020124990bbec2f851c15189dd2ddbb4",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "fundamental_expectation_update"
+              },
+              {
+                "agent_role": "macro_review",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "macro_review",
+                "content_hash": "70536273e8c063b00378a983e420422d26602befb235a4ab08ec648cb78a6565",
+                "projection_id": "70536273e8c063b00378a983e420422d",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "",
+                "scope_kind": "portfolio",
+                "task_id": "macro_review"
+              },
+              {
+                "agent_role": "technical_review",
+                "as_of": "2026-10-09T12:24:14+00:00",
+                "category": "technical_review",
+                "content_hash": "a3eeeaa93e394bff37791513ab9b5100d9d8c1f88198ce46defb6db5aeb7f923",
+                "projection_id": "a3eeeaa93e394bff37791513ab9b5100",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "technical_review"
+              }
+            ],
+            "requirements": {
+              "manifest": [
+                {
+                  "content_hash": "356b69089e67cb8d13a4fa47215880da57b2ea9642995ee0ff23ee4fc3e04795",
+                  "projection_id": "356b69089e67cb8d13a4fa47215880da",
+                  "role": "layer_analysis",
+                  "scope_id": "L4_interconnect",
+                  "scope_kind": "layer"
+                },
+                {
+                  "content_hash": "524d9abdd29a802b042b0321f367ef0a1c3f1c03707e2bddf4cc9a00d1f97a10",
+                  "projection_id": "524d9abdd29a802b042b0321f367ef0a",
+                  "role": "sector_allocation",
+                  "scope_id": "ai_hardware",
+                  "scope_kind": "sector"
+                },
+                {
+                  "content_hash": "929196eac6052ddbbaf1e625fc3f8561d753b4a806e7e60dce40422632a4480a",
+                  "projection_id": "929196eac6052ddbbaf1e625fc3f8561",
+                  "role": "information_brief",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "020124990bbec2f851c15189dd2ddbb44dfcbb5d6c84b6a9ca1c0f5af99c2a31",
+                  "projection_id": "020124990bbec2f851c15189dd2ddbb4",
+                  "role": "fundamental_expectation_update",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "70536273e8c063b00378a983e420422d26602befb235a4ab08ec648cb78a6565",
+                  "projection_id": "70536273e8c063b00378a983e420422d",
+                  "role": "macro_review",
+                  "scope_id": "",
+                  "scope_kind": "portfolio"
+                },
+                {
+                  "content_hash": "a3eeeaa93e394bff37791513ab9b5100d9d8c1f88198ce46defb6db5aeb7f923",
+                  "projection_id": "a3eeeaa93e394bff37791513ab9b5100",
+                  "role": "technical_review",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                }
+              ],
+              "outcomes": [
+                {
+                  "attempts": 1,
+                  "detail": "layer=L4_interconnect",
+                  "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                  "projection_refs": [
+                    "356b69089e67cb8d13a4fa47215880da"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "L4_interconnect",
+                    "kind": "layer"
+                  },
+                  "status": "succeeded",
+                  "task_id": "layer-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "sector=ai_hardware",
+                  "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                  "projection_refs": [
+                    "524d9abdd29a802b042b0321f367ef0a"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "ai_hardware",
+                    "kind": "sector"
+                  },
+                  "status": "succeeded",
+                  "task_id": "sector-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "Revenue guidance and capacity changed.",
+                  "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "929196eac6052ddbbaf1e625fc3f8561"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "information-brief"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "{'新增': 1}",
+                  "instance_key": "dispatcher:fundamental-routine:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "020124990bbec2f851c15189dd2ddbb4"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "fundamental-routine"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "regime=neutral",
+                  "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                  "projection_refs": [
+                    "70536273e8c063b00378a983e420422d"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "",
+                    "kind": "portfolio"
+                  },
+                  "status": "succeeded",
+                  "task_id": "macro-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "symbol=COHR",
+                  "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "a3eeeaa93e394bff37791513ab9b5100"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "technical-review"
+                }
+              ],
+              "plan": {
+                "as_of": "2026-10-09T12:24:14.381872+00:00",
+                "config_root": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/config",
+                "edges": [
+                  [
+                    "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c"
+                  ],
+                  [
+                    "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "dispatcher:fundamental-routine:entity:COHR:eb72a24d786c"
+                  ]
+                ],
+                "enter_decision_cycle": true,
+                "plan_id": "bb63c651f3d3dcb947dbcf1ea08c5e90",
+                "profile_hash": "45d7f4f653ab4e2d294ede76d6eb069c94847895cef9d87a87767fba3d3c09f7",
+                "profile_id": "ai_hardware",
+                "profile_version": "1",
+                "registry_version": "phase-e-v1",
+                "request_scope": {
+                  "id": "ai_hardware",
+                  "kind": "sector"
+                },
+                "requested_tasks": [
+                  "sector-review",
+                  "fundamental-routine",
+                  "macro-review",
+                  "technical-review"
+                ],
+                "run_id": "replayed",
+                "source_config_hashes": {
+                  "config/macro.yaml": "902fa173404f2a8433962307e5d24e989d2117dc9830731450d47e5b55b45ad3",
+                  "config/pead.yaml": "9f38619f1424924307135b526e1f4807793866567125013f4f6ca732e48582fd",
+                  "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+                  "config/sectors/ai_hardware.yaml": "9c1d36404d06b5700aa349c987b95ce529a088fc8e901e0f875c5e1fcf9b683d",
+                  "config/technical.yaml": "f52a922aaaf28687a32ae0ea11ae3f5326897030c62d6e1300a95e9e38638f9f"
+                },
+                "task_inputs": {
+                  "fundamental-routine": {
+                    "use_llm": false
+                  }
+                },
+                "tasks": [
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "output_schema": "LayerAnalysis",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "L4_interconnect",
+                      "kind": "layer"
+                    },
+                    "task_id": "layer-review"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                    "output_schema": "SectorAllocation",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "ai_hardware",
+                      "kind": "sector"
+                    },
+                    "task_id": "sector-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "output_schema": "InformationBrief",
+                    "required_for_decision": true,
+                    "resource_group": "information",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "information-brief"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:information-brief:entity:COHR:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:fundamental-routine:entity:COHR:eb72a24d786c",
+                    "output_schema": "FundamentalExpectationUpdate",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "fundamental-routine"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                    "output_schema": "MacroReview",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "",
+                      "kind": "portfolio"
+                    },
+                    "task_id": "macro-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                    "output_schema": "TechnicalReview",
+                    "required_for_decision": true,
+                    "resource_group": "market-data",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "technical-review"
+                  }
+                ],
+                "trigger": {
+                  "event_id": "",
+                  "event_version": "",
+                  "kind": "manual",
+                  "schedule_id": "",
+                  "scheduled_for": "",
+                  "trigger_id": "independent-routine",
+                  "workflow_id": ""
+                }
+              },
+              "plan_hash": "4ce870e7b8ec65e82e45370930e70ceff2a1bedcb978df23e8f6618e97e0be1c",
+              "requirements_hash": "3e8ddbc179bf9ccae43884047efa36450a15b4a8c126e8a5ba3ae83fa1e6ac57",
+              "version": "decision-requirements-v1",
+              "workflow_store_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/iso/replayed/memory.sqlite"
+            },
+            "scope": "portfolio"
+          },
+          "cycle_id": "independent-chain",
+          "revision_no": 1,
+          "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+          "order": {
+            "action": "buy",
+            "conviction": 0.5,
+            "execution_basis": {
+              "currency": "USD",
+              "defer_to_regular_session": false,
+              "max_deviation": 0.01,
+              "max_notional": 905.4,
+              "policy_version": "phase-f-execution-price-v1",
+              "quote": {
+                "adjusted": false,
+                "ask": 100.1,
+                "bid": 100.0,
+                "close": null,
+                "currency": "USD",
+                "market_data_mode": "live",
+                "min_size": 1.0,
+                "min_tick": 0.01,
+                "price_kind": "bid_ask",
+                "queried_at": "2026-10-09T12:24:28.214742Z",
+                "schema_version": "runtime-execution-price-v1",
+                "session": "regular",
+                "size_increment": 1.0,
+                "source": "synthetic:bid_ask",
+                "source_as_of": "2026-10-09T12:24:28.214742Z",
+                "source_precision": "tick",
+                "symbol": "COHR"
+              },
+              "quote_ref": "execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31",
+              "reference_price": 100.1,
+              "requested_order": {
+                "action": "buy",
+                "conviction": 0.5,
+                "execution_basis": {},
+                "invalidation": "",
+                "limit_price": null,
+                "notional_usd": 1000.0,
+                "order_type": "limit",
+                "planned_horizon_days": null,
+                "qty": null,
+                "rationale": "Actual requirements",
+                "references": [],
+                "setup": "unknown",
+                "stop_price": null,
+                "symbol": "COHR",
+                "target_price": null,
+                "target_weight": null,
+                "time_in_force": "DAY"
+              }
+            },
+            "invalidation": "",
+            "limit_price": 100.6,
+            "notional_usd": 905.4,
+            "order_type": "limit",
+            "planned_horizon_days": null,
+            "qty": 9.0,
+            "rationale": "Actual requirements",
+            "references": [],
+            "setup": "unknown",
+            "stop_price": null,
+            "symbol": "COHR",
+            "target_price": null,
+            "target_weight": null,
+            "time_in_force": "DAY"
+          },
+          "review": {
+            "review_id": "independent-chain:r1:review:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+            "ruleset_version": "risk-af175377e1d1",
+            "portfolio_snapshot_id": "pf:2026-10-09T12:24:14.380166+00:00",
+            "market_as_of": "2026-10-09T12:24:28.214742+00:00",
+            "verdict": "approved",
+            "violations_json": "[]",
+            "allowed_boundary_json": "{\"blocked_actions\":[],\"max_additional_notional\":null,\"per_symbol_max_notional\":{}}",
+            "before_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.1,\"daily_loss\":0.0,\"drawdown\":0.0,\"excess_liquidity\":0.1,\"gross_leverage\":0.0,\"margin_util\":0.0,\"stress_loss\":0.0}",
+            "after_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.100090622,\"daily_loss\":0.0,\"drawdown\":0.0,\"entity:COHR\":0.0036,\"excess_liquidity\":0.100050025,\"gross_leverage\":0.0,\"layer:L4_interconnect\":0.006,\"margin_util\":0.001,\"portfolio_beta\":0.0,\"stress_loss\":0.0008}",
+            "notes": "ALLOW COHR: marginal=worsening",
+            "created_at": "2026-10-09T12:24:23.552135+00:00"
+          },
+          "approval": {
+            "approval_id": "independent-chain:r1:approval:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+            "decision": "approved",
+            "reviewer": "fixture-human",
+            "comment": "",
+            "channel": "fixture-only",
+            "idempotency_key": "b0815b10861ba2fe952fcfc9eb632388",
+            "created_at": "2026-10-09T12:24:30.506890+00:00"
+          },
+          "receipt": {
+            "account": "DU1",
+            "attempted_at": "2026-10-09T12:25:01.188602+00:00",
+            "broker_order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "environment": "paper",
+            "generation": 1,
+            "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "payload_hash": "2d932e81c1b111ae39fbbe5b62f6ec6d8658bea68c3c5a835193a65b6ea7d6df",
+            "pid": 28032,
+            "revision_no": 1,
+            "route_id": "simulation",
+            "sequence": 0,
+            "status": "submitted"
+          },
+          "trade": {
+            "order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "symbol": "COHR",
+            "action": "buy",
+            "qty": 9.0,
+            "order_type": "limit",
+            "status": "filled",
+            "avg_fill_price": 100.1,
+            "submitted_at": "2026-10-09T12:24:31.031370+00:00",
+            "rationale": "Actual requirements",
+            "limit_price": 100.6,
+            "filled_at": "2026-10-09T12:24:32.031370+00:00",
+            "error": "",
+            "realized_pnl": null,
+            "source": "chief",
+            "context": "{\"source\": \"chief\", \"approval\": {\"status\": \"approved\", \"reviewer\": \"fixture-human\", \"reviewed_at\": \"2026-10-09T12:24:30.506890+00:00\", \"comment\": \"\", \"proposed_symbols\": [\"COHR\"], \"effective_symbols\": [\"COHR\"], \"dropped_symbols\": [], \"added_symbols\": [], \"rejected_symbols\": [], \"overrides\": [], \"direct_instructions\": [], \"diverged\": false}, \"risk_notes\": [\"ALLOW COHR: marginal=worsening\", \"COHR: 9 股；bid_ask 参考 100.1 USD，来源 2026-10-09T12:24:28.214742+00:00；execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31\"], \"decisions\": [{\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": 9.0, \"notional_usd\": 905.4, \"execution_basis\": {\"policy_version\": \"phase-f-execution-price-v1\", \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:24:28.214742Z\", \"queried_at\": \"2026-10-09T12:24:28.214742Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"requested_order\": {\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": null, \"notional_usd\": 1000.0, \"execution_basis\": {}, \"order_type\": \"limit\", \"limit_price\": null, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}, \"quote_ref\": \"execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31\", \"reference_price\": 100.1, \"max_deviation\": 0.01, \"max_notional\": 905.4, \"currency\": \"USD\", \"defer_to_regular_session\": false}, \"order_type\": \"limit\", \"limit_price\": 100.6, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}], \"execution_price_audit\": [{\"order_seq\": 0, \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:24:31.024859Z\", \"queried_at\": \"2026-10-09T12:24:31.024859Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"approval_quote_ref\": \"execution-quote:454c3653d64ceb8a04ad9cdacc0681f06dd29385b696770afd57d863dc9a4a31\", \"policy_version\": \"phase-f-execution-price-v1\", \"execution_quote_ref\": \"execution-quote:8c2113623eb02b8e03262dcc72c9845c136c3fd2bbd8c94ed86d74327b6483d9\"}]}",
+            "client_order_id": "independent-chain:r1:0:COHR:buy",
+            "perm_id": "sim-1",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "attempt": 1,
+            "entry_id": null,
+            "first_submitted_at": "2026-10-09T12:24:31.031370+00:00",
+            "order_seq": null,
+            "filled_qty": 9.0,
+            "terminal_basis": "broker",
+            "revision_no": 1,
+            "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+            "approval_id": "independent-chain:r1:approval:r1"
+          },
+          "fills": [
+            {
+              "exec_id": "sim-1-fill-1",
+              "symbol": "COHR",
+              "side": "BOT",
+              "shares": 9.0,
+              "price": 100.1,
+              "time": "2026-10-09T12:24:32.031370+00:00",
+              "realized_pnl": null,
+              "commission": 0.0,
+              "order_id": "sim-1",
+              "perm_id": "sim-1",
+              "order_ref": "ats:independent-chain:r1:0:COHR",
+              "origin": "system",
+              "link_confidence": "order_ref",
+              "captured_at": "2026-10-09T12:24:34.031370+00:00",
+              "entry_id": "independent-chain:r1:0:COHR:buy",
+              "episode_id": "COHR:sim-1-fill-1",
+              "late_backfill": null,
+              "cycle_id": "independent-chain",
+              "revision_no": 1,
+              "decision_hash": "5705ac3d19dfd473341c9c9357bfc2a1",
+              "approval_id": "independent-chain:r1:approval:r1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[event]",
+      "run_id": "new",
+      "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/iso/new/memory.sqlite",
+      "input_hash": "5c3cedc5ecfd0cfdc78736e729fccaa81262cb18a3699a360b9dbaa60695e06a",
+      "status": "passed",
+      "refs": [
+        "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+        "488f9256d8c46510048f8c7052d07d56",
+        "53bdf1f9292cca27c573a2da98086d28",
+        "7f594b9624dd6a8e10d91c6806bab314",
+        "afea5f74b4e0013430474830af30ab94",
+        "c83c552499290b9e403fcb0bab14194f",
+        "d9a4aa894e1b87174b3865927420f386",
+        "f618dbf816fdfecd64259bb68339b303",
+        "independent-chain:r1:approval:r1",
+        "independent-chain:r1:review:r1",
+        "sim-1",
+        "sim-1-fill-1"
+      ],
+      "chains": [
+        {
+          "research_snapshot": {
+            "built_at": "2026-10-09T12:25:13+00:00",
+            "items": [
+              {
+                "agent_role": "layer_analysis",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "layer_analysis",
+                "content_hash": "53bdf1f9292cca27c573a2da98086d28016cc83bacb65c30cdee5a0675e867b1",
+                "projection_id": "53bdf1f9292cca27c573a2da98086d28",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "L4_interconnect",
+                "scope_kind": "layer",
+                "task_id": "layer_analysis"
+              },
+              {
+                "agent_role": "sector_allocation",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "sector_allocation",
+                "content_hash": "488f9256d8c46510048f8c7052d07d5667663235e763e6884b5898884c16951e",
+                "projection_id": "488f9256d8c46510048f8c7052d07d56",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "ai_hardware",
+                "scope_kind": "sector",
+                "task_id": "sector_allocation"
+              },
+              {
+                "agent_role": "information_brief",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "information_brief",
+                "content_hash": "f618dbf816fdfecd64259bb68339b30384f8ec4581567478d24823c0d56f58aa",
+                "projection_id": "f618dbf816fdfecd64259bb68339b303",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "information_brief"
+              },
+              {
+                "agent_role": "fundamental_event_review",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "fundamental_analysis",
+                "content_hash": "c83c552499290b9e403fcb0bab14194f19ac59abda03815e2921215d50d8fb16",
+                "projection_id": "c83c552499290b9e403fcb0bab14194f",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "fundamental_event_review"
+              },
+              {
+                "agent_role": "macro_review",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "macro_review",
+                "content_hash": "d9a4aa894e1b87174b3865927420f3860b7aa32bc3668c1d1b07fc1cb20a2027",
+                "projection_id": "d9a4aa894e1b87174b3865927420f386",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "",
+                "scope_kind": "portfolio",
+                "task_id": "macro_review"
+              },
+              {
+                "agent_role": "technical_review",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "technical_review",
+                "content_hash": "7f594b9624dd6a8e10d91c6806bab3140480284d152461a8c44847902191b9a9",
+                "projection_id": "7f594b9624dd6a8e10d91c6806bab314",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "technical_review"
+              }
+            ],
+            "requirements": {
+              "manifest": [
+                {
+                  "content_hash": "53bdf1f9292cca27c573a2da98086d28016cc83bacb65c30cdee5a0675e867b1",
+                  "projection_id": "53bdf1f9292cca27c573a2da98086d28",
+                  "role": "layer_analysis",
+                  "scope_id": "L4_interconnect",
+                  "scope_kind": "layer"
+                },
+                {
+                  "content_hash": "488f9256d8c46510048f8c7052d07d5667663235e763e6884b5898884c16951e",
+                  "projection_id": "488f9256d8c46510048f8c7052d07d56",
+                  "role": "sector_allocation",
+                  "scope_id": "ai_hardware",
+                  "scope_kind": "sector"
+                },
+                {
+                  "content_hash": "f618dbf816fdfecd64259bb68339b30384f8ec4581567478d24823c0d56f58aa",
+                  "projection_id": "f618dbf816fdfecd64259bb68339b303",
+                  "role": "information_brief",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "c83c552499290b9e403fcb0bab14194f19ac59abda03815e2921215d50d8fb16",
+                  "projection_id": "c83c552499290b9e403fcb0bab14194f",
+                  "role": "fundamental_event_review",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "d9a4aa894e1b87174b3865927420f3860b7aa32bc3668c1d1b07fc1cb20a2027",
+                  "projection_id": "d9a4aa894e1b87174b3865927420f386",
+                  "role": "macro_review",
+                  "scope_id": "",
+                  "scope_kind": "portfolio"
+                },
+                {
+                  "content_hash": "7f594b9624dd6a8e10d91c6806bab3140480284d152461a8c44847902191b9a9",
+                  "projection_id": "7f594b9624dd6a8e10d91c6806bab314",
+                  "role": "technical_review",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                }
+              ],
+              "outcomes": [
+                {
+                  "attempts": 1,
+                  "detail": "layer=L4_interconnect",
+                  "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                  "projection_refs": [
+                    "53bdf1f9292cca27c573a2da98086d28"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "L4_interconnect",
+                    "kind": "layer"
+                  },
+                  "status": "succeeded",
+                  "task_id": "layer-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "sector=ai_hardware",
+                  "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                  "projection_refs": [
+                    "488f9256d8c46510048f8c7052d07d56"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "ai_hardware",
+                    "kind": "sector"
+                  },
+                  "status": "succeeded",
+                  "task_id": "sector-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "Revenue guidance and capacity changed.",
+                  "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "f618dbf816fdfecd64259bb68339b303"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "information-brief"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "event review completed",
+                  "instance_key": "dispatcher:fundamental-event:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "c83c552499290b9e403fcb0bab14194f"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "fundamental-event"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "regime=neutral",
+                  "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                  "projection_refs": [
+                    "d9a4aa894e1b87174b3865927420f386"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "",
+                    "kind": "portfolio"
+                  },
+                  "status": "succeeded",
+                  "task_id": "macro-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "symbol=COHR",
+                  "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "7f594b9624dd6a8e10d91c6806bab314"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "technical-review"
+                }
+              ],
+              "plan": {
+                "as_of": "2026-10-09T12:25:04.868586+00:00",
+                "config_root": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/config",
+                "edges": [
+                  [
+                    "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c"
+                  ],
+                  [
+                    "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "dispatcher:fundamental-event:entity:COHR:eb72a24d786c"
+                  ]
+                ],
+                "enter_decision_cycle": true,
+                "plan_id": "41446f21119b595d38942267e812f66f",
+                "profile_hash": "45d7f4f653ab4e2d294ede76d6eb069c94847895cef9d87a87767fba3d3c09f7",
+                "profile_id": "ai_hardware",
+                "profile_version": "1",
+                "registry_version": "phase-e-v1",
+                "request_scope": {
+                  "id": "ai_hardware",
+                  "kind": "sector"
+                },
+                "requested_tasks": [
+                  "sector-review",
+                  "fundamental-event",
+                  "macro-review",
+                  "technical-review"
+                ],
+                "run_id": "new",
+                "source_config_hashes": {
+                  "config/macro.yaml": "902fa173404f2a8433962307e5d24e989d2117dc9830731450d47e5b55b45ad3",
+                  "config/pead.yaml": "9f38619f1424924307135b526e1f4807793866567125013f4f6ca732e48582fd",
+                  "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+                  "config/sectors/ai_hardware.yaml": "9c1d36404d06b5700aa349c987b95ce529a088fc8e901e0f875c5e1fcf9b683d",
+                  "config/technical.yaml": "f52a922aaaf28687a32ae0ea11ae3f5326897030c62d6e1300a95e9e38638f9f"
+                },
+                "task_inputs": {
+                  "fundamental-event": {
+                    "admitted_material_refs": [
+                      "COHR:independent-release:company_release"
+                    ],
+                    "fiscal_label": "Q3 FY2026",
+                    "material_state": "admitted",
+                    "trigger": "earnings_release",
+                    "use_llm": false
+                  }
+                },
+                "tasks": [
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "output_schema": "LayerAnalysis",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "L4_interconnect",
+                      "kind": "layer"
+                    },
+                    "task_id": "layer-review"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                    "output_schema": "SectorAllocation",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "ai_hardware",
+                      "kind": "sector"
+                    },
+                    "task_id": "sector-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "output_schema": "InformationBrief",
+                    "required_for_decision": true,
+                    "resource_group": "information",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "information-brief"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:information-brief:entity:COHR:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:fundamental-event:entity:COHR:eb72a24d786c",
+                    "output_schema": "FundamentalEventReview",
+                    "required_for_decision": true,
+                    "resource_group": "pead",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "fundamental-event"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                    "output_schema": "MacroReview",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "",
+                      "kind": "portfolio"
+                    },
+                    "task_id": "macro-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                    "output_schema": "TechnicalReview",
+                    "required_for_decision": true,
+                    "resource_group": "market-data",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "technical-review"
+                  }
+                ],
+                "trigger": {
+                  "event_id": "",
+                  "event_version": "",
+                  "kind": "manual",
+                  "schedule_id": "",
+                  "scheduled_for": "",
+                  "trigger_id": "independent-event",
+                  "workflow_id": ""
+                }
+              },
+              "plan_hash": "5b7f45f5c06e23e08b3e5de18555915f15fd1a9be30bbc272875e9ad0ef0d613",
+              "requirements_hash": "79de90da2e1353457400f18d5c15eae8e57d80514b5429d07b037fc1ccaba416",
+              "version": "decision-requirements-v1",
+              "workflow_store_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/iso/new/memory.sqlite"
+            },
+            "scope": "portfolio"
+          },
+          "cycle_id": "independent-chain",
+          "revision_no": 1,
+          "decision_hash": "afea5f74b4e0013430474830af30ab94",
+          "order": {
+            "action": "buy",
+            "conviction": 0.5,
+            "execution_basis": {
+              "currency": "USD",
+              "defer_to_regular_session": false,
+              "max_deviation": 0.01,
+              "max_notional": 905.4,
+              "policy_version": "phase-f-execution-price-v1",
+              "quote": {
+                "adjusted": false,
+                "ask": 100.1,
+                "bid": 100.0,
+                "close": null,
+                "currency": "USD",
+                "market_data_mode": "live",
+                "min_size": 1.0,
+                "min_tick": 0.01,
+                "price_kind": "bid_ask",
+                "queried_at": "2026-10-09T12:25:18.156771Z",
+                "schema_version": "runtime-execution-price-v1",
+                "session": "regular",
+                "size_increment": 1.0,
+                "source": "synthetic:bid_ask",
+                "source_as_of": "2026-10-09T12:25:18.156771Z",
+                "source_precision": "tick",
+                "symbol": "COHR"
+              },
+              "quote_ref": "execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6",
+              "reference_price": 100.1,
+              "requested_order": {
+                "action": "buy",
+                "conviction": 0.5,
+                "execution_basis": {},
+                "invalidation": "",
+                "limit_price": null,
+                "notional_usd": 1000.0,
+                "order_type": "limit",
+                "planned_horizon_days": null,
+                "qty": null,
+                "rationale": "Actual requirements",
+                "references": [],
+                "setup": "unknown",
+                "stop_price": null,
+                "symbol": "COHR",
+                "target_price": null,
+                "target_weight": null,
+                "time_in_force": "DAY"
+              }
+            },
+            "invalidation": "",
+            "limit_price": 100.6,
+            "notional_usd": 905.4,
+            "order_type": "limit",
+            "planned_horizon_days": null,
+            "qty": 9.0,
+            "rationale": "Actual requirements",
+            "references": [],
+            "setup": "unknown",
+            "stop_price": null,
+            "symbol": "COHR",
+            "target_price": null,
+            "target_weight": null,
+            "time_in_force": "DAY"
+          },
+          "review": {
+            "review_id": "independent-chain:r1:review:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "afea5f74b4e0013430474830af30ab94",
+            "ruleset_version": "risk-af175377e1d1",
+            "portfolio_snapshot_id": "pf:2026-10-09T12:25:04.863599+00:00",
+            "market_as_of": "2026-10-09T12:25:18.156771+00:00",
+            "verdict": "approved",
+            "violations_json": "[]",
+            "allowed_boundary_json": "{\"blocked_actions\":[],\"max_additional_notional\":null,\"per_symbol_max_notional\":{}}",
+            "before_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.1,\"daily_loss\":0.0,\"drawdown\":0.0,\"excess_liquidity\":0.1,\"gross_leverage\":0.0,\"margin_util\":0.0,\"stress_loss\":0.0}",
+            "after_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.100090622,\"daily_loss\":0.0,\"drawdown\":0.0,\"entity:COHR\":0.0036,\"excess_liquidity\":0.100050025,\"gross_leverage\":0.0,\"layer:L4_interconnect\":0.006,\"margin_util\":0.001,\"portfolio_beta\":0.0,\"stress_loss\":0.0008}",
+            "notes": "ALLOW COHR: marginal=worsening",
+            "created_at": "2026-10-09T12:25:13.135035+00:00"
+          },
+          "approval": {
+            "approval_id": "independent-chain:r1:approval:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "afea5f74b4e0013430474830af30ab94",
+            "decision": "approved",
+            "reviewer": "fixture-human",
+            "comment": "",
+            "channel": "fixture-only",
+            "idempotency_key": "e1b417837ed60ce038c79165c5770c50",
+            "created_at": "2026-10-09T12:25:20.108258+00:00"
+          },
+          "receipt": {
+            "account": "DU1",
+            "attempted_at": "2026-10-09T12:25:35.743526+00:00",
+            "broker_order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "environment": "paper",
+            "generation": 1,
+            "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "payload_hash": "ef5cc5fcba06b6a4bfba2cf5ba121340213abac57843db778762a0c05632ce09",
+            "pid": 27921,
+            "revision_no": 1,
+            "route_id": "simulation",
+            "sequence": 0,
+            "status": "submitted"
+          },
+          "trade": {
+            "order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "symbol": "COHR",
+            "action": "buy",
+            "qty": 9.0,
+            "order_type": "limit",
+            "status": "filled",
+            "avg_fill_price": 100.1,
+            "submitted_at": "2026-10-09T12:25:20.538674+00:00",
+            "rationale": "Actual requirements",
+            "limit_price": 100.6,
+            "filled_at": "2026-10-09T12:25:21.538674+00:00",
+            "error": "",
+            "realized_pnl": null,
+            "source": "chief",
+            "context": "{\"source\": \"chief\", \"approval\": {\"status\": \"approved\", \"reviewer\": \"fixture-human\", \"reviewed_at\": \"2026-10-09T12:25:20.108258+00:00\", \"comment\": \"\", \"proposed_symbols\": [\"COHR\"], \"effective_symbols\": [\"COHR\"], \"dropped_symbols\": [], \"added_symbols\": [], \"rejected_symbols\": [], \"overrides\": [], \"direct_instructions\": [], \"diverged\": false}, \"risk_notes\": [\"ALLOW COHR: marginal=worsening\", \"COHR: 9 股；bid_ask 参考 100.1 USD，来源 2026-10-09T12:25:18.156771+00:00；execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6\"], \"decisions\": [{\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": 9.0, \"notional_usd\": 905.4, \"execution_basis\": {\"policy_version\": \"phase-f-execution-price-v1\", \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:25:18.156771Z\", \"queried_at\": \"2026-10-09T12:25:18.156771Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"requested_order\": {\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": null, \"notional_usd\": 1000.0, \"execution_basis\": {}, \"order_type\": \"limit\", \"limit_price\": null, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}, \"quote_ref\": \"execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6\", \"reference_price\": 100.1, \"max_deviation\": 0.01, \"max_notional\": 905.4, \"currency\": \"USD\", \"defer_to_regular_session\": false}, \"order_type\": \"limit\", \"limit_price\": 100.6, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}], \"execution_price_audit\": [{\"order_seq\": 0, \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:25:20.532902Z\", \"queried_at\": \"2026-10-09T12:25:20.532902Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"approval_quote_ref\": \"execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6\", \"policy_version\": \"phase-f-execution-price-v1\", \"execution_quote_ref\": \"execution-quote:71d89aed837e23f596cbac6b11ac8d0f8f7269d7e93c9a89518b85eb44947b28\"}]}",
+            "client_order_id": "independent-chain:r1:0:COHR:buy",
+            "perm_id": "sim-1",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "attempt": 1,
+            "entry_id": null,
+            "first_submitted_at": "2026-10-09T12:25:20.538674+00:00",
+            "order_seq": null,
+            "filled_qty": 9.0,
+            "terminal_basis": "broker",
+            "revision_no": 1,
+            "decision_hash": "afea5f74b4e0013430474830af30ab94",
+            "approval_id": "independent-chain:r1:approval:r1"
+          },
+          "fills": [
+            {
+              "exec_id": "sim-1-fill-1",
+              "symbol": "COHR",
+              "side": "BOT",
+              "shares": 9.0,
+              "price": 100.1,
+              "time": "2026-10-09T12:25:21.538674+00:00",
+              "realized_pnl": null,
+              "commission": 0.0,
+              "order_id": "sim-1",
+              "perm_id": "sim-1",
+              "order_ref": "ats:independent-chain:r1:0:COHR",
+              "origin": "system",
+              "link_confidence": "order_ref",
+              "captured_at": "2026-10-09T12:25:23.538674+00:00",
+              "entry_id": "independent-chain:r1:0:COHR:buy",
+              "episode_id": "COHR:sim-1-fill-1",
+              "late_backfill": null,
+              "cycle_id": "independent-chain",
+              "revision_no": 1,
+              "decision_hash": "afea5f74b4e0013430474830af30ab94",
+              "approval_id": "independent-chain:r1:approval:r1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[event]",
+      "run_id": "replayed",
+      "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/iso/replayed/memory.sqlite",
+      "input_hash": "5c3cedc5ecfd0cfdc78736e729fccaa81262cb18a3699a360b9dbaa60695e06a",
+      "status": "passed",
+      "refs": [
+        "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+        "488f9256d8c46510048f8c7052d07d56",
+        "53bdf1f9292cca27c573a2da98086d28",
+        "7f594b9624dd6a8e10d91c6806bab314",
+        "afea5f74b4e0013430474830af30ab94",
+        "c83c552499290b9e403fcb0bab14194f",
+        "d9a4aa894e1b87174b3865927420f386",
+        "f618dbf816fdfecd64259bb68339b303",
+        "independent-chain:r1:approval:r1",
+        "independent-chain:r1:review:r1",
+        "sim-1",
+        "sim-1-fill-1"
+      ],
+      "chains": [
+        {
+          "research_snapshot": {
+            "built_at": "2026-10-09T12:25:13+00:00",
+            "items": [
+              {
+                "agent_role": "layer_analysis",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "layer_analysis",
+                "content_hash": "53bdf1f9292cca27c573a2da98086d28016cc83bacb65c30cdee5a0675e867b1",
+                "projection_id": "53bdf1f9292cca27c573a2da98086d28",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "L4_interconnect",
+                "scope_kind": "layer",
+                "task_id": "layer_analysis"
+              },
+              {
+                "agent_role": "sector_allocation",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "sector_allocation",
+                "content_hash": "488f9256d8c46510048f8c7052d07d5667663235e763e6884b5898884c16951e",
+                "projection_id": "488f9256d8c46510048f8c7052d07d56",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "ai_hardware",
+                "scope_kind": "sector",
+                "task_id": "sector_allocation"
+              },
+              {
+                "agent_role": "information_brief",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "information_brief",
+                "content_hash": "f618dbf816fdfecd64259bb68339b30384f8ec4581567478d24823c0d56f58aa",
+                "projection_id": "f618dbf816fdfecd64259bb68339b303",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "information_brief"
+              },
+              {
+                "agent_role": "fundamental_event_review",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "fundamental_analysis",
+                "content_hash": "c83c552499290b9e403fcb0bab14194f19ac59abda03815e2921215d50d8fb16",
+                "projection_id": "c83c552499290b9e403fcb0bab14194f",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "fundamental_event_review"
+              },
+              {
+                "agent_role": "macro_review",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "macro_review",
+                "content_hash": "d9a4aa894e1b87174b3865927420f3860b7aa32bc3668c1d1b07fc1cb20a2027",
+                "projection_id": "d9a4aa894e1b87174b3865927420f386",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "",
+                "scope_kind": "portfolio",
+                "task_id": "macro_review"
+              },
+              {
+                "agent_role": "technical_review",
+                "as_of": "2026-10-09T12:25:04+00:00",
+                "category": "technical_review",
+                "content_hash": "7f594b9624dd6a8e10d91c6806bab3140480284d152461a8c44847902191b9a9",
+                "projection_id": "7f594b9624dd6a8e10d91c6806bab314",
+                "reason": "reusable",
+                "reusable": true,
+                "scope_id": "COHR",
+                "scope_kind": "entity",
+                "task_id": "technical_review"
+              }
+            ],
+            "requirements": {
+              "manifest": [
+                {
+                  "content_hash": "53bdf1f9292cca27c573a2da98086d28016cc83bacb65c30cdee5a0675e867b1",
+                  "projection_id": "53bdf1f9292cca27c573a2da98086d28",
+                  "role": "layer_analysis",
+                  "scope_id": "L4_interconnect",
+                  "scope_kind": "layer"
+                },
+                {
+                  "content_hash": "488f9256d8c46510048f8c7052d07d5667663235e763e6884b5898884c16951e",
+                  "projection_id": "488f9256d8c46510048f8c7052d07d56",
+                  "role": "sector_allocation",
+                  "scope_id": "ai_hardware",
+                  "scope_kind": "sector"
+                },
+                {
+                  "content_hash": "f618dbf816fdfecd64259bb68339b30384f8ec4581567478d24823c0d56f58aa",
+                  "projection_id": "f618dbf816fdfecd64259bb68339b303",
+                  "role": "information_brief",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "c83c552499290b9e403fcb0bab14194f19ac59abda03815e2921215d50d8fb16",
+                  "projection_id": "c83c552499290b9e403fcb0bab14194f",
+                  "role": "fundamental_event_review",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                },
+                {
+                  "content_hash": "d9a4aa894e1b87174b3865927420f3860b7aa32bc3668c1d1b07fc1cb20a2027",
+                  "projection_id": "d9a4aa894e1b87174b3865927420f386",
+                  "role": "macro_review",
+                  "scope_id": "",
+                  "scope_kind": "portfolio"
+                },
+                {
+                  "content_hash": "7f594b9624dd6a8e10d91c6806bab3140480284d152461a8c44847902191b9a9",
+                  "projection_id": "7f594b9624dd6a8e10d91c6806bab314",
+                  "role": "technical_review",
+                  "scope_id": "COHR",
+                  "scope_kind": "entity"
+                }
+              ],
+              "outcomes": [
+                {
+                  "attempts": 1,
+                  "detail": "layer=L4_interconnect",
+                  "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                  "projection_refs": [
+                    "53bdf1f9292cca27c573a2da98086d28"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "L4_interconnect",
+                    "kind": "layer"
+                  },
+                  "status": "succeeded",
+                  "task_id": "layer-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "sector=ai_hardware",
+                  "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                  "projection_refs": [
+                    "488f9256d8c46510048f8c7052d07d56"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "ai_hardware",
+                    "kind": "sector"
+                  },
+                  "status": "succeeded",
+                  "task_id": "sector-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "Revenue guidance and capacity changed.",
+                  "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "f618dbf816fdfecd64259bb68339b303"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "information-brief"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "event review completed",
+                  "instance_key": "dispatcher:fundamental-event:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "c83c552499290b9e403fcb0bab14194f"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "fundamental-event"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "regime=neutral",
+                  "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                  "projection_refs": [
+                    "d9a4aa894e1b87174b3865927420f386"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "",
+                    "kind": "portfolio"
+                  },
+                  "status": "succeeded",
+                  "task_id": "macro-review"
+                },
+                {
+                  "attempts": 1,
+                  "detail": "symbol=COHR",
+                  "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                  "projection_refs": [
+                    "7f594b9624dd6a8e10d91c6806bab314"
+                  ],
+                  "reused": false,
+                  "scope": {
+                    "id": "COHR",
+                    "kind": "entity"
+                  },
+                  "status": "succeeded",
+                  "task_id": "technical-review"
+                }
+              ],
+              "plan": {
+                "as_of": "2026-10-09T12:25:04.868586+00:00",
+                "config_root": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/config",
+                "edges": [
+                  [
+                    "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c"
+                  ],
+                  [
+                    "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "dispatcher:fundamental-event:entity:COHR:eb72a24d786c"
+                  ]
+                ],
+                "enter_decision_cycle": true,
+                "plan_id": "4c74c47a90dd95219baa418b7a63f57d",
+                "profile_hash": "45d7f4f653ab4e2d294ede76d6eb069c94847895cef9d87a87767fba3d3c09f7",
+                "profile_id": "ai_hardware",
+                "profile_version": "1",
+                "registry_version": "phase-e-v1",
+                "request_scope": {
+                  "id": "ai_hardware",
+                  "kind": "sector"
+                },
+                "requested_tasks": [
+                  "sector-review",
+                  "fundamental-event",
+                  "macro-review",
+                  "technical-review"
+                ],
+                "run_id": "replayed",
+                "source_config_hashes": {
+                  "config/macro.yaml": "902fa173404f2a8433962307e5d24e989d2117dc9830731450d47e5b55b45ad3",
+                  "config/pead.yaml": "9f38619f1424924307135b526e1f4807793866567125013f4f6ca732e48582fd",
+                  "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+                  "config/sectors/ai_hardware.yaml": "9c1d36404d06b5700aa349c987b95ce529a088fc8e901e0f875c5e1fcf9b683d",
+                  "config/technical.yaml": "f52a922aaaf28687a32ae0ea11ae3f5326897030c62d6e1300a95e9e38638f9f"
+                },
+                "task_inputs": {
+                  "fundamental-event": {
+                    "admitted_material_refs": [
+                      "COHR:independent-release:company_release"
+                    ],
+                    "fiscal_label": "Q3 FY2026",
+                    "material_state": "admitted",
+                    "trigger": "earnings_release",
+                    "use_llm": false
+                  }
+                },
+                "tasks": [
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c",
+                    "output_schema": "LayerAnalysis",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "L4_interconnect",
+                      "kind": "layer"
+                    },
+                    "task_id": "layer-review"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:layer-review:layer:L4_interconnect:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:sector-review:sector:ai_hardware:eb72a24d786c",
+                    "output_schema": "SectorAllocation",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "ai_hardware",
+                      "kind": "sector"
+                    },
+                    "task_id": "sector-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:information-brief:entity:COHR:eb72a24d786c",
+                    "output_schema": "InformationBrief",
+                    "required_for_decision": true,
+                    "resource_group": "information",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "information-brief"
+                  },
+                  {
+                    "dependencies": [
+                      "dispatcher:information-brief:entity:COHR:eb72a24d786c"
+                    ],
+                    "instance_key": "dispatcher:fundamental-event:entity:COHR:eb72a24d786c",
+                    "output_schema": "FundamentalEventReview",
+                    "required_for_decision": true,
+                    "resource_group": "pead",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "fundamental-event"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:macro-review:portfolio:eb72a24d786c",
+                    "output_schema": "MacroReview",
+                    "required_for_decision": true,
+                    "resource_group": "llm",
+                    "scope": {
+                      "id": "",
+                      "kind": "portfolio"
+                    },
+                    "task_id": "macro-review"
+                  },
+                  {
+                    "dependencies": [],
+                    "instance_key": "dispatcher:technical-review:entity:COHR:eb72a24d786c",
+                    "output_schema": "TechnicalReview",
+                    "required_for_decision": true,
+                    "resource_group": "market-data",
+                    "scope": {
+                      "id": "COHR",
+                      "kind": "entity"
+                    },
+                    "task_id": "technical-review"
+                  }
+                ],
+                "trigger": {
+                  "event_id": "",
+                  "event_version": "",
+                  "kind": "manual",
+                  "schedule_id": "",
+                  "scheduled_for": "",
+                  "trigger_id": "independent-event",
+                  "workflow_id": ""
+                }
+              },
+              "plan_hash": "5a93e5a6e8311f8ffcbd73b95eeae9a05f0e3fdc3653e1233c44ebcfba1f6720",
+              "requirements_hash": "0e6aca419ce68a1bbf0770a6cd8a373e278f632ea27bc77687ff7176d33a0d7c",
+              "version": "decision-requirements-v1",
+              "workflow_store_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/iso/replayed/memory.sqlite"
+            },
+            "scope": "portfolio"
+          },
+          "cycle_id": "independent-chain",
+          "revision_no": 1,
+          "decision_hash": "afea5f74b4e0013430474830af30ab94",
+          "order": {
+            "action": "buy",
+            "conviction": 0.5,
+            "execution_basis": {
+              "currency": "USD",
+              "defer_to_regular_session": false,
+              "max_deviation": 0.01,
+              "max_notional": 905.4,
+              "policy_version": "phase-f-execution-price-v1",
+              "quote": {
+                "adjusted": false,
+                "ask": 100.1,
+                "bid": 100.0,
+                "close": null,
+                "currency": "USD",
+                "market_data_mode": "live",
+                "min_size": 1.0,
+                "min_tick": 0.01,
+                "price_kind": "bid_ask",
+                "queried_at": "2026-10-09T12:25:18.156771Z",
+                "schema_version": "runtime-execution-price-v1",
+                "session": "regular",
+                "size_increment": 1.0,
+                "source": "synthetic:bid_ask",
+                "source_as_of": "2026-10-09T12:25:18.156771Z",
+                "source_precision": "tick",
+                "symbol": "COHR"
+              },
+              "quote_ref": "execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6",
+              "reference_price": 100.1,
+              "requested_order": {
+                "action": "buy",
+                "conviction": 0.5,
+                "execution_basis": {},
+                "invalidation": "",
+                "limit_price": null,
+                "notional_usd": 1000.0,
+                "order_type": "limit",
+                "planned_horizon_days": null,
+                "qty": null,
+                "rationale": "Actual requirements",
+                "references": [],
+                "setup": "unknown",
+                "stop_price": null,
+                "symbol": "COHR",
+                "target_price": null,
+                "target_weight": null,
+                "time_in_force": "DAY"
+              }
+            },
+            "invalidation": "",
+            "limit_price": 100.6,
+            "notional_usd": 905.4,
+            "order_type": "limit",
+            "planned_horizon_days": null,
+            "qty": 9.0,
+            "rationale": "Actual requirements",
+            "references": [],
+            "setup": "unknown",
+            "stop_price": null,
+            "symbol": "COHR",
+            "target_price": null,
+            "target_weight": null,
+            "time_in_force": "DAY"
+          },
+          "review": {
+            "review_id": "independent-chain:r1:review:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "afea5f74b4e0013430474830af30ab94",
+            "ruleset_version": "risk-af175377e1d1",
+            "portfolio_snapshot_id": "pf:2026-10-09T12:25:04.863599+00:00",
+            "market_as_of": "2026-10-09T12:25:18.156771+00:00",
+            "verdict": "approved",
+            "violations_json": "[]",
+            "allowed_boundary_json": "{\"blocked_actions\":[],\"max_additional_notional\":null,\"per_symbol_max_notional\":{}}",
+            "before_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.1,\"daily_loss\":0.0,\"drawdown\":0.0,\"excess_liquidity\":0.1,\"gross_leverage\":0.0,\"margin_util\":0.0,\"stress_loss\":0.0}",
+            "after_metrics_json": "{\"assignment_expected\":0.0,\"assignment_expiry_peak\":0.0,\"assignment_full\":0.0,\"assignment_p99\":0.0,\"cash_floor\":0.100090622,\"daily_loss\":0.0,\"drawdown\":0.0,\"entity:COHR\":0.0036,\"excess_liquidity\":0.100050025,\"gross_leverage\":0.0,\"layer:L4_interconnect\":0.006,\"margin_util\":0.001,\"portfolio_beta\":0.0,\"stress_loss\":0.0008}",
+            "notes": "ALLOW COHR: marginal=worsening",
+            "created_at": "2026-10-09T12:25:13.135035+00:00"
+          },
+          "approval": {
+            "approval_id": "independent-chain:r1:approval:r1",
+            "cycle_id": "independent-chain",
+            "revision_no": 1,
+            "decision_hash": "afea5f74b4e0013430474830af30ab94",
+            "decision": "approved",
+            "reviewer": "fixture-human",
+            "comment": "",
+            "channel": "fixture-only",
+            "idempotency_key": "e1b417837ed60ce038c79165c5770c50",
+            "created_at": "2026-10-09T12:25:20.108258+00:00"
+          },
+          "receipt": {
+            "account": "DU1",
+            "attempted_at": "2026-10-09T12:25:50.447422+00:00",
+            "broker_order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "environment": "paper",
+            "generation": 1,
+            "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "payload_hash": "ef5cc5fcba06b6a4bfba2cf5ba121340213abac57843db778762a0c05632ce09",
+            "pid": 28171,
+            "revision_no": 1,
+            "route_id": "simulation",
+            "sequence": 0,
+            "status": "submitted"
+          },
+          "trade": {
+            "order_id": "sim-1",
+            "cycle_id": "independent-chain",
+            "symbol": "COHR",
+            "action": "buy",
+            "qty": 9.0,
+            "order_type": "limit",
+            "status": "filled",
+            "avg_fill_price": 100.1,
+            "submitted_at": "2026-10-09T12:25:20.538674+00:00",
+            "rationale": "Actual requirements",
+            "limit_price": 100.6,
+            "filled_at": "2026-10-09T12:25:21.538674+00:00",
+            "error": "",
+            "realized_pnl": null,
+            "source": "chief",
+            "context": "{\"source\": \"chief\", \"approval\": {\"status\": \"approved\", \"reviewer\": \"fixture-human\", \"reviewed_at\": \"2026-10-09T12:25:20.108258+00:00\", \"comment\": \"\", \"proposed_symbols\": [\"COHR\"], \"effective_symbols\": [\"COHR\"], \"dropped_symbols\": [], \"added_symbols\": [], \"rejected_symbols\": [], \"overrides\": [], \"direct_instructions\": [], \"diverged\": false}, \"risk_notes\": [\"ALLOW COHR: marginal=worsening\", \"COHR: 9 股；bid_ask 参考 100.1 USD，来源 2026-10-09T12:25:18.156771+00:00；execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6\"], \"decisions\": [{\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": 9.0, \"notional_usd\": 905.4, \"execution_basis\": {\"policy_version\": \"phase-f-execution-price-v1\", \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:25:18.156771Z\", \"queried_at\": \"2026-10-09T12:25:18.156771Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"requested_order\": {\"symbol\": \"COHR\", \"action\": \"buy\", \"target_weight\": null, \"qty\": null, \"notional_usd\": 1000.0, \"execution_basis\": {}, \"order_type\": \"limit\", \"limit_price\": null, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}, \"quote_ref\": \"execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6\", \"reference_price\": 100.1, \"max_deviation\": 0.01, \"max_notional\": 905.4, \"currency\": \"USD\", \"defer_to_regular_session\": false}, \"order_type\": \"limit\", \"limit_price\": 100.6, \"time_in_force\": \"DAY\", \"conviction\": 0.5, \"rationale\": \"Actual requirements\", \"references\": [], \"setup\": \"unknown\", \"stop_price\": null, \"target_price\": null, \"planned_horizon_days\": null, \"invalidation\": \"\"}], \"execution_price_audit\": [{\"order_seq\": 0, \"quote\": {\"schema_version\": \"runtime-execution-price-v1\", \"symbol\": \"COHR\", \"currency\": \"USD\", \"source\": \"synthetic:bid_ask\", \"source_as_of\": \"2026-10-09T12:25:20.532902Z\", \"queried_at\": \"2026-10-09T12:25:20.532902Z\", \"price_kind\": \"bid_ask\", \"bid\": 100.0, \"ask\": 100.1, \"close\": null, \"session\": \"regular\", \"market_data_mode\": \"live\", \"adjusted\": false, \"min_size\": 1.0, \"size_increment\": 1.0, \"min_tick\": 0.01, \"source_precision\": \"tick\"}, \"approval_quote_ref\": \"execution-quote:006a9f355e8aecfcc16e66d5eeda49c0fcb990ebd07af89c41196ae0e8e20ff6\", \"policy_version\": \"phase-f-execution-price-v1\", \"execution_quote_ref\": \"execution-quote:71d89aed837e23f596cbac6b11ac8d0f8f7269d7e93c9a89518b85eb44947b28\"}]}",
+            "client_order_id": "independent-chain:r1:0:COHR:buy",
+            "perm_id": "sim-1",
+            "order_ref": "ats:independent-chain:r1:0:COHR",
+            "attempt": 1,
+            "entry_id": null,
+            "first_submitted_at": "2026-10-09T12:25:20.538674+00:00",
+            "order_seq": null,
+            "filled_qty": 9.0,
+            "terminal_basis": "broker",
+            "revision_no": 1,
+            "decision_hash": "afea5f74b4e0013430474830af30ab94",
+            "approval_id": "independent-chain:r1:approval:r1"
+          },
+          "fills": [
+            {
+              "exec_id": "sim-1-fill-1",
+              "symbol": "COHR",
+              "side": "BOT",
+              "shares": 9.0,
+              "price": 100.1,
+              "time": "2026-10-09T12:25:21.538674+00:00",
+              "realized_pnl": null,
+              "commission": 0.0,
+              "order_id": "sim-1",
+              "perm_id": "sim-1",
+              "order_ref": "ats:independent-chain:r1:0:COHR",
+              "origin": "system",
+              "link_confidence": "order_ref",
+              "captured_at": "2026-10-09T12:25:23.538674+00:00",
+              "entry_id": "independent-chain:r1:0:COHR:buy",
+              "episode_id": "COHR:sim-1-fill-1",
+              "late_backfill": null,
+              "cycle_id": "independent-chain",
+              "revision_no": 1,
+              "decision_hash": "afea5f74b4e0013430474830af30ab94",
+              "approval_id": "independent-chain:r1:approval:r1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "stage": "trace",
+  "recorded_at": "2026-10-09T12:29:51.750977+00:00",
+  "auditor_hash": "00cea21bc62e13cabe6d4b2717dd8ae11375120caf38b9a66dcfe757ce018f5d"
+}

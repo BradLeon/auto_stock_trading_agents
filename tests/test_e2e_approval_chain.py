@@ -21,7 +21,6 @@ from ats.memory import get_store
 from ats.memory.store import TradingMemory
 from ats.runtime.cli import run_decision_graph
 from ats.schemas.decision import BossApproval, TradeDecision
-from ats.schemas.memory import TradeLogEntry
 from ats.schemas.portfolio import ExposureBreakdown, PortfolioSnapshot
 from ats.schemas.risk import RiskReview
 
@@ -152,7 +151,8 @@ def test_one_rejection_then_passes_at_the_boundary(broker, approve_all, reviewed
         (1, "rejected"), (2, "approved")]
     assert chain["cycle"]["status"] == "executed"
     # executed at the boundary, not the original size
-    assert result["order_results"][0].qty == pytest.approx(250)
+    order = result["order_results"][0]
+    assert order.qty == 248 and order.qty * order.limit_price <= 25_000
 
 
 # --- 多次驳回后通过（两条订单同轮各被驳回，修订后同轮通过）----------------------- #
@@ -272,31 +272,29 @@ def test_uncertain_broker_outcome_is_not_resubmitted(broker, approve_all, review
     a retry of the same intent must not produce a second logical order."""
     from ats.trader import execute as texec
 
-    def uncertain_place_orders(self, items, cycle_id, wait=3.0, revision_no=0,
-                               chain=None):
-        return [TradeLogEntry(order_id="7", cycle_id=cycle_id, symbol=d.symbol,
-                              action=d.action, qty=q, status="submitted",
-                              submitted_at=datetime.now(timezone.utc),
-                              rationale=d.rationale, revision_no=revision_no,
-                              order_seq=i, decision_hash=(chain or {}).get("decision_hash", ""),
-                              approval_id=(chain or {}).get("approval_id", ""))
-                for i, (d, q) in enumerate(items)]
-
-    monkeypatch.setattr(broker, "place_orders", uncertain_place_orders)
+    # Actual simulated acceptance runs every gate; withhold its fill report.
+    monkeypatch.setattr(broker, "simulate_fill", lambda *a, **kw: None)
     result = run_decision_graph(_state(cycle_id="e2e-uncertain", seed_decisions=[_buy(10_000)]),
                                 channel=approve_all)
     assert [o.status for o in result["order_results"]] == ["submitted"]
 
     # retry the same intent (same cycle/revision/seq): locally already submitted
     d = result["order_results"][0]
-    decision = TradeDecision(symbol=d.symbol, action=d.action, qty=d.qty, rationale="r")
+    import json
+
+    from ats.execution.authorization import bind_to_active_route, build_authorization
+
+    decision = TradeDecision.model_validate(json.loads(
+        _repo().latest_revision("e2e-uncertain")["orders_json"])[0])
+    auth = bind_to_active_route(build_authorization(_repo(), "e2e-uncertain"))
     entries, _ = texec.place_orders([(decision, d.qty)], "e2e-uncertain",
-                                    revision_no=1, authorization={"cycle_id": "e2e-uncertain"})
+                                    revision_no=1, authorization=auth.model_dump())
     assert entries[0].status == "submitted"          # unchanged, pending reconciliation
     assert "reconciliation" in entries[0].error
     rows = get_store().conn.execute(
         "SELECT COUNT(*) FROM trades WHERE cycle_id = 'e2e-uncertain'").fetchone()[0]
     assert rows == 1                                 # ONE logical order
+    assert len(broker.accepted) == 1
 
 
 # --- 9.3 默认 paper / dry-run：默认状态不触碰券商 ----------------------------------- #

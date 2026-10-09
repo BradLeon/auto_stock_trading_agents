@@ -26,11 +26,16 @@ FUTURE = "2099-01-01T00:00:00+00:00"
 
 
 @pytest.fixture
-def dbs(tmp_path):
+def dbs(tmp_path, monkeypatch):
+    # Unit decision logic only; this is not a business-entry wiring proof.
+    monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
+    # Explicit checker adapter for CLI decision/serialization tests only.
+    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (True, []))
     manifest = str(tmp_path / "batches.sqlite")
     cutover = str(tmp_path / "cutover.sqlite")
     wiring.bootstrap_wired(actor="test", path=cutover)
     bm.declare_batch(bm.CutoverBatch(
+        shadow_report_id="unit-report-adapter",
         batch_id="b-research", batch_class=bm.RESEARCH_READ, owner="o",
         scope={"consumers": ["layer", "sector"]}, old_route="legacy",
         new_route="target", observation_window="w", success_criteria="s",

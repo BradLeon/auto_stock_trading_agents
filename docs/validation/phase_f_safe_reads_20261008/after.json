@@ -1,0 +1,311 @@
+{
+  "production_inventory_unchanged": true,
+  "production_inventory": {
+    "var/phase_f_cutover.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_activations": 0,
+        "cutover_boundary_history": 6,
+        "cutover_boundary_state": 6,
+        "cutover_boundary_wiring": 10
+      },
+      "authorization_inventory": {},
+      "boundaries": [
+        {
+          "boundary": "analyst_output",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "approval_lifecycle",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "clerk_publication",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "dispatcher_schedule",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "live_trader",
+          "route": "disabled",
+          "wired": 1
+        },
+        {
+          "boundary": "projection_read",
+          "route": "legacy",
+          "wired": 1
+        }
+      ]
+    },
+    "var/phase_f_batches.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_batch_dryruns": 28,
+        "cutover_batches": 5,
+        "read_cutover_authorizations": 1,
+        "read_cutover_runs": 12
+      },
+      "authorization_inventory": {
+        "read_cutover_authorizations": [
+          {
+            "reference": "DEP-2026-10-06-A",
+            "scope": "layer,information,sector,fundamental,macro,technical",
+            "valid_until": "2026-12-31T23:59:59+08:00",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "f458e5c2b65e4f2591c30f8381bfd02eb15cd8d3e8e5ca09feb5a99b13fc7b71",
+            "issued_by_present": true,
+            "issued_by_sha256": "fa732bfd3b63eaf9b6b16fe424dd1ef2f14ddd202d6cb802c69722cb915ba5da",
+            "note_present": true,
+            "note_sha256": "94f4843b4f312f83d1445b07284b894d729bdf91952381084551017ef0264a7d",
+            "record_sha256": "fdf50cc55c3af34cf7743b0a8041aa344f062da947f0c0a73d7ccecf9f1b2dbc",
+            "provenance_verified": false
+          }
+        ]
+      },
+      "batches": [
+        {
+          "batch_class": "collection_publish",
+          "batch_id": "batch-collection",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "internal_state_approval",
+          "batch_id": "batch-internal-approval",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "live_trader",
+          "batch_id": "batch-live-trader",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "research_read",
+          "batch_id": "batch-research-read",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "schedule",
+          "batch_id": "batch-schedule",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        }
+      ]
+    },
+    "var/phase_f_dispatch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "dispatch_claims": 0,
+        "dispatch_expected_triggers": 0,
+        "dispatch_freeze": 0,
+        "dispatch_owner_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_routes.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "trade_route_freeze": 0,
+        "trade_route_history": 0,
+        "trade_route_issuance": 0,
+        "trade_route_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_schedule_switch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    },
+    "var/phase_f_live_authorizations.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "live_authorizations": 1
+      },
+      "authorization_inventory": {
+        "live_authorizations": [
+          {
+            "reference": "LIVE-X",
+            "scope": "trader",
+            "environment": "live",
+            "valid_until": "2099-01-01T00:00:00+00:00",
+            "issuer": "human",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "65c74c15a686187bb6bbf9958f494fc6b80068034a659a9ad44991b08c58f2d2",
+            "issued_by_present": true,
+            "issued_by_sha256": "de7d1b721a1e0632b7cf04edf5032c8ecffa9f9a08492152b926f1a5a7e765d7",
+            "note_present": false,
+            "note_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "account_present": true,
+            "account_sha256": "316ca0efda6296d8f2c11d1e20890d220cec4266a0c16fbbef324c004688468a",
+            "record_sha256": "b8617e1a4dba464bd90292aa0f1abb34a99580b6987fbbd9fdaf874ab9d19407",
+            "provenance_verified": false
+          }
+        ]
+      }
+    },
+    "var/shadow/orders.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "shadow_order_intents": 0,
+        "shadow_submit_attempts": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/shadow/reports.sqlite": {
+      "exists": false
+    },
+    "var/data.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    }
+  },
+  "fingerprint_paths": {
+    "config/data/structured.yaml": "6c051ecd466425e1fda949791c7e09332b45464ffc469fe75628648260fea62a",
+    "config/data/target_dataflow_coverage.yaml": "11d018d679c321fa823a10b3e23ff84081882224ac20b2d0910e69fab64b133f",
+    "config/data/unstructured.yaml": "71e5aaf1b46f2d651197771b1eee9cda31197f8ceada157f62c3ae2fdba6906e",
+    "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+    "config/workflow/legacy_retirement.yaml": "3fcc1773543eee5b644582825e2f62604eb97ba30ff4215fd7963b5c1bc6db37",
+    "src/ats/agents/chief/assemble.py": "777462158b962a190791d1b7afb719861f139928c4c5c295ceb1b3cef77c2dda",
+    "src/ats/agents/fundamental/entry.py": "e9dbaded8bc53dd2fd511f033f6a900e891621ca4d8c61fda1c194eb70ab2f30",
+    "src/ats/agents/fundamental/event.py": "e5a09c26907fa63be36fbb61a95582ca06d71d61ceaeac38704849467caa7b37",
+    "src/ats/agents/fundamental/inputs.py": "b2f26d5a33a61612c86ccc98fe2e99a9f39ac1a9888a04e7e5356cce127a1096",
+    "src/ats/agents/fundamental/routine.py": "eefbe00a66b24814cee8ecdc6ce9548572d83a61b705f1e66dcc50e08f915f32",
+    "src/ats/agents/risk_officer/review.py": "c9900de889828e7b9c66bfa36759364a40990eff96feb8ae31705af909a55b3c",
+    "src/ats/broker/ibkr.py": "3e259c32cf749d80d1c7a1e16af7e8ceeb3b927cbc594b20b28d55c8abd4e6d5",
+    "src/ats/data/assurance.py": "80fa2dc447d0de6028ac62b7051f98c614098651e311dc9befc8666844e9c951",
+    "src/ats/data/consumer_api.py": "e2db5c83b254ab8c4bfbdab92bff02bce68ca01f7438721eeb0a2bbe7c89c8c7",
+    "src/ats/data/contract_validation.py": "f97ced5baf42bd218be4d29ad524d6712edca74366a5a1355059ce81dd21cdeb",
+    "src/ats/data/execution_prices.py": "f3a5321cca227558febabc2b8309f9ddaa94ce3c940d2371f89483783eeea859",
+    "src/ats/data/products/base.py": "5b7802be0ef30aed737f236abf40f657e7def2e1c25b9324fc8840188dc75842",
+    "src/ats/data/products/unstructured.py": "4d2993989238348aef0df419490310c5aa6c40947123eb324476eecdb6ab811c",
+    "src/ats/data/runtime/broker.py": "be835947b8b985c4ca23a24b9a1fb9467b52030d135d8a2cc5285dd3bf53a598",
+    "src/ats/data/runtime/clerk_reads.py": "06347835d22159951514e7272c172892fd98a435720cb39c2eb6ad1a76fdb199",
+    "src/ats/data/runtime/execution_prices.py": "9f77f3ff499b7ea799e2ac0f9452ee951ac8ffa9b6328af0913ed0ac42ea6944",
+    "src/ats/data/runtime/market_data.py": "82e069d4d05096b236836892312e56652ed26a1667e95826e73d1d8e4508201a",
+    "src/ats/decision/repository.py": "2e82afa70724c219c66535a3a33881f53b43d311e048c17ca855d9e8939fc2f6",
+    "src/ats/execution/authorization.py": "f06cfa4e0b78eec338b8b3745879307797c58b96f11267cc3b8d923afdaaa7af",
+    "src/ats/execution/clerk.py": "1cfca3980a4ee3f8ab3004f118bba60e9ca31f0f9c5d703767852641cba49371",
+    "src/ats/execution/simulation.py": "3b43ae9d46b63597df80978deabc17e090de12eb2f9cfe3c81e64b1339bffb88",
+    "src/ats/execution/state_api.py": "a49d299614e3e23f1e0d480214e6a970d5b5886a801d4cc8e24aa84dcb014772",
+    "src/ats/graph/chief.py": "e16aa4d8fcfcc9b647812e756b5dc4bccff3c181977ce800630e95b2c682c170",
+    "src/ats/graph/chief_state.py": "1793ded379eaf5da321ded8edb5a97d6434f23cd27d9c2544fe6eb08874febe4",
+    "src/ats/graph/pead.py": "5bca6908441b1ca0b1e399a320ef96268419df1adb7d3505f8438f8d5a2c0072",
+    "src/ats/graph/pead_state.py": "662d32fbb8535a754399d4475bcf43593a04884139030937a67ad2d36ecace3c",
+    "src/ats/risk/assess.py": "4cc4178d1bb3bd796af5bb88df7f5152d9a3ffa6d479932f5d4b0ba652181263",
+    "src/ats/risk/checks.py": "0ebe5cb3b80fd24d6e79f2d70c7902d9029fbc0912ad9b382c91c13c6fc2d89d",
+    "src/ats/schemas/decision.py": "1ed9a0f81ca514af1045c694c072d77d0f26c9ebb96a542608a1c512f8fb6274",
+    "src/ats/schemas/memory.py": "ec011749753bc031662253ac78fcbed7db4405de714fb3c2bcfadb70c6bcf7d2",
+    "src/ats/trader/execute.py": "40a839ffada37d2e5d330b68f5148880977522359fd5dabf89668f6cb4ab296c",
+    "src/ats/trader/performance.py": "c51effd7da32b6522f4cc159099e51b81c95f51a5d17af9615858bae9416dfaf",
+    "src/ats/trader/portfolio.py": "987b62f66eb7538eb5a3860964fbdac77397dd867fdbe7c3b82723b38e0b1c47",
+    "src/ats/workflow/consumer_reads.py": "c48d65d77984cdc62e35d206761d1d13b32e360b3b5575be582acaa673f07626",
+    "src/ats/workflow/cutover_routing.py": "029dc00c2a98f26ec6e321b8a4208de883687e9ad32cee951ecc011350d5b34c",
+    "src/ats/workflow/legacy_retirement.py": "72f9b945868ade5be9e98ba36a1dd26aca93f560700a6ae4dbb1c672f6c0c36a",
+    "src/ats/workflow/runtime_reads.py": "7fb14fceb99e2831cfffef2b859d44c557ea921d410a8c334b9d064544a1a626",
+    "src/ats/workflow/scoped_routes.py": "d75a1c9db3b42c55d262a8c290fc50c61264feb2bfc45b524b40f1d8bee7b906",
+    "uv.lock": "242eb4935b16ef9d8c20d66dc01f0504dd549a5028b314e2ef3c71586c26ab13"
+  },
+  "changed_preexisting_files": {
+    "src/ats/trader/execute.py": {
+      "before": "a0c202fee38971400a8d6215a4cc88b8031abde485d58546f5e1508550ed22bb",
+      "after": "40a839ffada37d2e5d330b68f5148880977522359fd5dabf89668f6cb4ab296c"
+    },
+    "src/ats/trader/performance.py": {
+      "before": "5b39447e04a95c9872d14e2dc1e547d652183063e9a1198924e63fb08f093866",
+      "after": "c51effd7da32b6522f4cc159099e51b81c95f51a5d17af9615858bae9416dfaf"
+    },
+    "src/ats/trader/portfolio.py": {
+      "before": "70223677e0bdca16495721c4e6e51b2178154f2ca6ea37e2401501e7fce193e2",
+      "after": "987b62f66eb7538eb5a3860964fbdac77397dd867fdbe7c3b82723b38e0b1c47"
+    },
+    "src/ats/graph/pead_state.py": {
+      "before": "fc00cb8fc93efac1ec03ac1794f92af22f7f878909b7636042a3ef502dfcdc61",
+      "after": "662d32fbb8535a754399d4475bcf43593a04884139030937a67ad2d36ecace3c"
+    },
+    "src/ats/graph/chief.py": {
+      "before": "27c407e8a5027bc4299af8116fba12c1bd16d88fba96db05fb18c5b0fdce25ee",
+      "after": "e16aa4d8fcfcc9b647812e756b5dc4bccff3c181977ce800630e95b2c682c170"
+    },
+    "src/ats/graph/pead.py": {
+      "before": "1e91514f9f94b88b7d56100a3485d2ea117cea927303d79821aea7ee9222a7a3",
+      "after": "5bca6908441b1ca0b1e399a320ef96268419df1adb7d3505f8438f8d5a2c0072"
+    },
+    "src/ats/execution/clerk.py": {
+      "before": "c53ce1f8ca2a40b371f19afb2e8c255fdc27858d48a049e3f926c3adba61a199",
+      "after": "1cfca3980a4ee3f8ab3004f118bba60e9ca31f0f9c5d703767852641cba49371"
+    },
+    "src/ats/workflow/isolated_entry.py": {
+      "before": "e50c918aacd003982056296b8fee3f205642c3e528007a193be0db23897b05b3",
+      "after": "832ae586c25cffbeaeb3c55d18044dec82f78c3ecb6d42559842848800820ce9"
+    },
+    "src/ats/workflow/runtime_reads.py": {
+      "before": "bd76f514bfb8ee5c5b88ea5022bf7811ca57d850bb10dd69c2b4f700072ed6f6",
+      "after": "7fb14fceb99e2831cfffef2b859d44c557ea921d410a8c334b9d064544a1a626"
+    },
+    "src/ats/workflow/cutover_routing.py": {
+      "before": "1dbd7adfffe495f1512c940f4c03dd641801da1f13ad2d42f0fd7d6a8027d3d9",
+      "after": "029dc00c2a98f26ec6e321b8a4208de883687e9ad32cee951ecc011350d5b34c"
+    },
+    "src/ats/workflow/intake_verification.py": {
+      "before": "9750e6ff723e8a48aaccb115d459e6ecf6d4d79d630b451cea49263103a50874",
+      "after": "7604818707b06801f195bab432f2cdd826c874b8b57587e2f19580798554b525"
+    },
+    "src/ats/data/consumer_api.py": {
+      "before": "b0dce7ff28b4ff696cc554ebbcfa859c32d98135e04d70b33b26f22523d72928",
+      "after": "e2db5c83b254ab8c4bfbdab92bff02bce68ca01f7438721eeb0a2bbe7c89c8c7"
+    },
+    "src/ats/risk/assess.py": {
+      "before": "86a1e1549bf52d7c52357093fb9ad9af142ef0b4435e24283dd800aad320e165",
+      "after": "4cc4178d1bb3bd796af5bb88df7f5152d9a3ffa6d479932f5d4b0ba652181263"
+    },
+    "src/ats/agents/risk_officer/review.py": {
+      "before": "b18e97e463fce05de0a624056b1abfc7d4e4cb54aede407fcd91b35f6a6dbe47",
+      "after": "c9900de889828e7b9c66bfa36759364a40990eff96feb8ae31705af909a55b3c"
+    },
+    "src/ats/agents/chief/assemble.py": {
+      "before": "fe8dfc11668014e8f7df68abc2f145ae3483bd5dea693afc8f8ceb07f75a44bd",
+      "after": "777462158b962a190791d1b7afb719861f139928c4c5c295ceb1b3cef77c2dda"
+    },
+    "src/ats/agents/fundamental/event.py": {
+      "before": "8f70069aae3a771e3da85fc077ecc9761380801c48090be5ff458d99a1ce0b2f",
+      "after": "e5a09c26907fa63be36fbb61a95582ca06d71d61ceaeac38704849467caa7b37"
+    },
+    "src/ats/agents/fundamental/routine.py": {
+      "before": "91bbb880fd36b86ae89068effb91e4ceef7350567323e1debcfe73fcc0812b6e",
+      "after": "eefbe00a66b24814cee8ecdc6ce9548572d83a61b705f1e66dcc50e08f915f32"
+    },
+    "src/ats/agents/fundamental/entry.py": {
+      "before": "d91ee38ade615c911e859c532e6ee5a443303e09e1d3ea4e8a9d4228b5f4c451",
+      "after": "e9dbaded8bc53dd2fd511f033f6a900e891621ca4d8c61fda1c194eb70ab2f30"
+    },
+    "src/ats/data/products/base.py": {
+      "before": "9be1f441ea0b58b8cfddc841785585f6479fef80c6e13cd168e2cc9838755dfb",
+      "after": "5b7802be0ef30aed737f236abf40f657e7def2e1c25b9324fc8840188dc75842"
+    },
+    "config/data/target_dataflow_coverage.yaml": {
+      "before": "72c1a37abb8d6bc3d66535d7a040abdc952f5814b455be10ac0cdf5d93b86226",
+      "after": "11d018d679c321fa823a10b3e23ff84081882224ac20b2d0910e69fab64b133f"
+    }
+  },
+  "baseline_archive_verified": true,
+  "limits": "Global inventory compares control/data counts and authorization inventory only. Actual isolated entries separately check protected production row digests; this is not production qualification."
+}

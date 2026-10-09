@@ -13,12 +13,15 @@ approval chain.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
 from langgraph.graph import END, START, StateGraph
 
-from ..agents.pead import prep as prep_agents, score as score_agents
+from ..agents.pead import prep as prep_agents
+from ..agents.pead import score as score_agents
 from ..config import load_pead_config
 from ..schemas.market import Ticker
 from ..schemas.pead import (
@@ -36,7 +39,7 @@ log = logging.getLogger("ats.graph.pead")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def _published_event_date(package) -> str:
@@ -102,8 +105,22 @@ def prep_fetch(state: PeadState) -> dict:
     if not state.live_data:
         return {"fundamentals_text": "(offline)", "consensus": {}, "peer_rows": []}
 
-    from ..data import consensus as consensus_src, earnings_calendar, fundamentals as fund_src
-    from ..data import industry, market_data, options as opt_src, runup as runup_src
+    from ..agents.fundamental.inputs import governed_company_inputs
+
+    governed = governed_company_inputs(state.symbol)
+    if governed is not None:
+        # Runtime price/options are not declared Fundamental inputs. Candidate
+        # research consumes the persistent packet, never a hidden provider fetch.
+        return {"fundamentals_text": governed["fundamentals_text"],
+                "consensus": governed["consensus"], "peer_rows": [],
+                "industry_context": governed["industry_context"],
+                "input_refs": governed["input_refs"]}
+
+    from ..data import consensus as consensus_src
+    from ..data import earnings_calendar, industry, market_data
+    from ..data import fundamentals as fund_src
+    from ..data import options as opt_src
+    from ..data import runup as runup_src
 
     fd = fund_src.fetch(state.symbol)
     out["fundamentals_text"] = fd.to_context()
@@ -311,9 +328,19 @@ def prep_persist(state: PeadState) -> dict:
 # --------------------------------------------------------------------------- #
 def score_fetch(state: PeadState) -> dict:
     out: dict = {}
-    from ..data import fundamentals as fund_src, transcript as transcript_src
+    from ..agents.fundamental.inputs import governed_company_inputs
+    from ..data import fundamentals as fund_src
+    from ..data import transcript as transcript_src
 
-    out["fundamentals_text"] = (fund_src.fetch(state.symbol).to_context()
+    governed = governed_company_inputs(state.symbol) if state.live_data else None
+    if governed:
+        out["input_refs"] = governed["input_refs"]
+        if state.transcript_source:
+            from ..workflow.cutover_routing import RouteUnavailable
+
+            raise RouteUnavailable("governed event input requires an admitted document version")
+    out["fundamentals_text"] = (governed["fundamentals_text"] if governed else
+                                fund_src.fetch(state.symbol).to_context()
                                 if state.live_data else "(offline)")
     # An explicit operator-supplied transcript remains authoritative.  Otherwise
     # platform/fallback modes read the event-bound immutable package first; they do
@@ -325,12 +352,18 @@ def score_fetch(state: PeadState) -> dict:
     if state.live_data and not state.transcript_source:
         from ..data.structured import read_mode
 
-        package_mode = read_mode("pead_graph")
+        package_mode = "platform" if governed else read_mode("pead_graph")
         if package_mode in {"platform", "fallback", "shadow"}:
             from ..data.products.unstructured import platform_earnings_document_package
 
             package = platform_earnings_document_package(
-                entity=state.symbol, period=state.fiscal_label)
+                entity=state.symbol, period=state.fiscal_label,
+                **({"as_of": governed["as_of"]} if governed else {}))
+
+    if governed and not state.transcript_source and (package is None or not package.scoreable):
+        from ..workflow.cutover_routing import RouteUnavailable
+
+        raise RouteUnavailable("governed earnings documents unavailable; provider fallback forbidden")
 
     use_package = bool(package and package.scoreable and package_mode in {"platform", "fallback"})
     if use_package:
@@ -340,6 +373,12 @@ def score_fetch(state: PeadState) -> dict:
                if transcript else "platform:no_transcript")
         out["documents_text"] = package.official_text()
         out["document_lineage"] = [item.lineage for item in package.documents]
+        if governed:
+            from ..workflow.consumer_reads import record_read
+
+            doc_refs = [f"{item.document_id}@{item.version_id}" for item in package.documents]
+            out["input_refs"] = out.get("input_refs", []) + doc_refs
+            record_read("fundamental", "platform_earnings_document_package", refs=doc_refs)
         if event_date := _published_event_date(package):
             out["earnings_date"] = event_date
     elif state.transcript_source or state.live_data:
@@ -406,7 +445,7 @@ def score_fetch(state: PeadState) -> dict:
             f" 待纪要或 8-K 就位后重试（下一个打分窗口会自动重试）。")
 
     # Need run-up for the decision; recompute if the prep dossier lacked it.
-    if state.market_setup is None and state.live_data:
+    if state.market_setup is None and state.live_data and governed is None:
         from ..data import runup as runup_src
 
         ru = runup_src.compute(state.symbol, state.config.sector_etf, state.config.benchmark)
@@ -517,7 +556,7 @@ def score_persist(state: PeadState) -> dict:
             scorecard=state.scorecard, event_view=view, tri_diffs=tri,
             actuals=state.actuals,
             narrative=state.expectation_set.narrative if state.expectation_set else "")
-        fundamental_event.publish_event_review(store, payload)
+        fundamental_event.publish_event_review(store, payload, input_refs=state.input_refs)
     except Exception as exc:  # noqa: BLE001 - dossier 已落库，投影失败显式留痕
         log.warning("event review projection failed for %s: %s", state.symbol, exc)
 

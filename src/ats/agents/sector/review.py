@@ -6,6 +6,8 @@ LLM failure never overwrites the stored latest review — it returns the prior o
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 from typing import Mapping
@@ -28,7 +30,7 @@ log = logging.getLogger("ats.agents.sector.review")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = True,
@@ -43,8 +45,11 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
     """
     from ...config import load_sector_config
     from ...memory import get_store
+    from .read_model import governed, layer_inputs
 
     cfg = load_sector_config(name)
+    if governed():
+        upstream_layer_projections = layer_inputs(get_store(), cfg, upstream_layer_projections)
     store = get_store()
 
     if upstream_layer_projections is not None:
@@ -100,7 +105,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
                  write_reports: bool = True,
                  upstream_layer_projections: Mapping[str, object] | None = None) -> SectorReview:
     from ..layer import layer_review
-    from . import assemble as sector_assemble, cross_section, rotation
+    from . import assemble as sector_assemble
+    from . import cross_section, rotation
 
     prior = store.latest_sector_review(name)
     bind = _bind_layer_budget()

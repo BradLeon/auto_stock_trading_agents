@@ -20,7 +20,7 @@ EXPECTED_PRODUCTS = {
     "technical": {"MARKET_DATA"},
     "chief": {"PORTFOLIO_DATA", "HISTORY_DATA"},
     "risk": {"PORTFOLIO_DATA", "MARKET_DATA", "RISK_RULES"},
-    "trader": {"APPROVED_EXECUTION_AUTHORIZATION"},
+    "trader": {"APPROVED_EXECUTION_AUTHORIZATION", "MARKET_DATA"},
     "clerk": {"BROKER_STATE", "DECISION_APPROVAL_CONTEXT"},
 }
 EXPECTED_PROJECTIONS = {
@@ -150,6 +150,17 @@ def validate_target_contract(path: str | Path | None = None) -> dict[str, Any]:
         if row is None:
             continue
         products = set(row.get("products") or [])
+        if consumer_id in {"risk", "trader"}:
+            if (row.get("execution_price_policy") != "phase-f-execution-price-v1"
+                    or set(row.get("execution_price_purposes") or []) != {
+                        "preapproval_normalization", "approved_execution_check"}
+                    or row.get("execution_price_currency") != "USD"):
+                errors.append(f"{consumer_id}:execution_price_policy_mismatch")
+            if row.get("contract_version") != "target-dataflow-v2":
+                errors.append(f"{consumer_id}:execution_price_contract_version_mismatch")
+            if not {"runtime_query", "timestamp", "failure_semantics", "no_persistence"} <= set(
+                    row.get("required_evidence") or []):
+                errors.append(f"{consumer_id}:execution_price_evidence_missing")
         if products != required:
             errors.append(f"{consumer_id}:product_contract_mismatch")
         if set(row.get("allowed_projection_inputs") or []) != EXPECTED_PROJECTIONS[consumer_id]:
@@ -162,6 +173,12 @@ def validate_target_contract(path: str | Path | None = None) -> dict[str, Any]:
             errors.append(f"{consumer_id}:incomplete_read_contract")
 
     nodes = {str(row.get("id")): row for row in raw.get("nodes", [])}
+    price_edges = {edge.get("id"): (edge.get("from"), edge.get("to"))
+                   for edge in raw.get("edges", [])}
+    for edge_id, destination in (("runtime_to_trader_price", "TRADER"),
+                                 ("runtime_to_risk_price", "AGENT_RISK")):
+        if price_edges.get(edge_id) != ("RUNTIME_API", destination):
+            errors.append(f"{edge_id}:execution_price_edge_missing")
     for obsolete in ("WORKFLOW", "EVIDENCE_OBSERVER", "evidence_observer"):
         if obsolete in nodes:
             errors.append(f"obsolete_or_generic_node:{obsolete}")

@@ -12,13 +12,18 @@ probe (`ats ibkr`) before a live run is wise.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import re
+import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from ..config import get_config
-from ..execution.broker_write_guard import active_grant, check_broker_write, check_grant
+from ..execution import broker_write_guard as guard
+from ..execution.broker_write_guard import check_broker_write, check_grant
 from ..schemas.decision import TradeDecision, broker_side
 from ..schemas.memory import TradeLogEntry
 from ..schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
@@ -53,6 +58,7 @@ class IBKRBroker:
         self.client_id = client_id if client_id is not None else base + (os.getpid() % 80) + 1
         self.sector_by_symbol = sector_by_symbol or {}
         self._ib = None
+        self._expected_account = str(s.ibkr_account or "").strip()
 
     # --- connection ------------------------------------------------------ #
     @contextmanager
@@ -78,6 +84,53 @@ class IBKRBroker:
             self._ib = None
 
     # --- reads ----------------------------------------------------------- #
+    def get_stock_execution_metadata(self, symbol: str, *, currency: str) -> dict:
+        """Confirmed instrument identity and lot/tick precision, without defaults."""
+        from ib_async import Stock
+
+        with self.session() as ib:
+            contracts = ib.qualifyContracts(Stock(symbol, "SMART", currency))
+            if len(contracts) != 1:
+                raise IBKRUnavailable("execution_instrument_ambiguous")
+            contract = contracts[0]
+            details = ib.reqContractDetails(contract)
+            if len(details) != 1 or contract.symbol != symbol or contract.secType != "STK":
+                raise IBKRUnavailable("execution_instrument_mismatch")
+            detail = details[0]
+            return {"symbol": contract.symbol, "currency": contract.currency,
+                    "min_size": float(detail.minSize),
+                    "size_increment": float(detail.sizeIncrement),
+                    "min_tick": float(detail.minTick)}
+
+    def get_execution_quote(self, symbol: str, *, currency: str, metadata: dict) -> dict:
+        """BidAsk ticks carry SERVER time; ticker.time is only local receipt time."""
+        from ib_async import Stock
+
+        with self.session() as ib:
+            contracts = ib.qualifyContracts(Stock(symbol, "SMART", currency))
+            if len(contracts) != 1 or contracts[0].symbol != symbol \
+                    or contracts[0].currency != currency:
+                raise IBKRUnavailable("execution_instrument_mismatch")
+            contract = contracts[0]
+            ticker = ib.reqTickByTickData(contract, "BidAsk", 0, False)
+            tick = None
+            try:
+                for _ in range(20):
+                    ib.sleep(0.1)
+                    if ticker.tickByTicks:
+                        tick = ticker.tickByTicks[-1]
+                        break
+                if tick is None or not hasattr(tick, "bidPrice"):
+                    raise IBKRUnavailable("execution_quote_source_timestamp_missing")
+                return {**metadata, "source": "ibkr:tick_by_tick_bid_ask",
+                        "source_as_of": tick.time, "queried_at": _now(),
+                        "price_kind": "bid_ask", "bid": tick.bidPrice, "ask": tick.askPrice,
+                        "session": "regular", "market_data_mode": (
+                            "live" if ticker.marketDataType == 1 else "delayed_or_unknown"),
+                        "adjusted": False, "source_precision": "tick"}
+            finally:
+                ib.cancelTickByTickData(contract, "BidAsk")
+
     def get_portfolio(self) -> PortfolioSnapshot:
         with self.session() as ib:
             account_values = list(ib.accountSummary())
@@ -280,19 +333,63 @@ class IBKRBroker:
                     for t in ib.openTrades()]
 
     # --- writes ---------------------------------------------------------- #
-    def connected_account(self) -> str:
-        """The account this broker session is actually connected to.
+    def connected_account(self, ib=None) -> str:
+        """Select an explicitly expected account from broker-reported accounts."""
+        session = ib if ib is not None else self._ib
+        try:
+            accounts = [str(a).strip() for a in session.managedAccounts()]
+        except Exception as exc:  # noqa: BLE001 - unconfirmed session identity must refuse
+            guard.refuse(guard.REASON_ACCOUNT_MISMATCH, operation="placeOrder",
+                         caller="IBKRBroker.connected_account",
+                         detail=f"actual session accounts unavailable: {type(exc).__name__}")
+        expected = getattr(self, "_expected_account", "")
+        if not accounts or any(not a for a in accounts) or \
+                (expected and expected not in accounts) or \
+                (not expected and len(set(accounts)) != 1):
+            guard.refuse(guard.REASON_ACCOUNT_MISMATCH, operation="placeOrder",
+                         caller="IBKRBroker.connected_account",
+                         detail="expected account absent or actual session account ambiguous")
+        return expected or accounts[0]
 
-        Resolved the same way `get_portfolio` resolves it, because that is the
-        identity a grant must be matched against: a grant issued for a paper
-        account is worthless if the session is talking to a live one, and the
-        port number is not evidence of which it is (Phase F 2.3).
-        """
-        return str(get_config().secrets.ibkr_account or "").strip()
+    @contextmanager
+    def _submission_gate(self, ib, *, operation: str, detail: str):
+        """Hold route and local capability stable through the broker write."""
+        from ..execution import route_registry as rr
+        from ..execution.route_arbitration import authority_lock
+
+        target = rr.default_registry_path()
+        entered = False
+        try:
+            with authority_lock(target), guard._STATE.lock:
+                check_broker_write(operation=operation, caller="IBKRBroker", detail=detail)
+                # Do not recreate an absent/corrupt authority on the submit path.
+                if not os.path.isfile(target):
+                    raise rr.RouteRegistryError("route authority file is absent")
+                state = rr.read_state(target)
+                account = self.connected_account(ib)
+                # Supported individual-account identities only; unknown formats
+                # are never inferred from the connection port or configuration.
+                environment = ("paper" if re.fullmatch(r"DU[0-9]+", account) else
+                               "live" if re.fullmatch(r"U[0-9]+", account) else "")
+                check_grant(operation=operation, caller="IBKRBroker._submit",
+                            state_reader=lambda: state,
+                            freeze_reader=lambda: rr.read_freeze(target),
+                            account=account, environment=environment,
+                            require_binding=True, detail=f"pid={os.getpid()} {detail}")
+                entered = True
+                yield state
+        except (OSError, sqlite3.Error, rr.RouteRegistryError) as exc:
+            if entered and isinstance(exc, OSError):
+                # A network timeout after handoff is a broker uncertainty, not
+                # an unreadable route. Its durable receipt must stay unknown.
+                raise
+            guard.refuse(guard.REASON_AUTHORITY_UNREADABLE, operation=operation,
+                         caller="IBKRBroker._submit", detail=f"{type(exc).__name__}: {exc}")
 
     def place_orders(self, items: list[tuple[TradeDecision, float]], cycle_id: str,
                      wait: float = 3.0, revision_no: int = 0,
-                     chain: dict | None = None) -> list[TradeLogEntry]:
+                     chain: dict | None = None, execution_check=None,
+                     order_sequences=None) -> list[TradeLogEntry]:
         """Submit a batch of orders in a single session; one log entry each.
 
         `revision_no` participates in the per-order identity (task 7.7): orders
@@ -308,30 +405,30 @@ class IBKRBroker:
           route registry on EVERY call, so a grant that predates a cutover stops
           working and a grant for one account cannot be used against another.
 
-        Both checks are per-batch rather than per-order so one refusal covers the
-        whole intent; a partial submission would leave the evidence ambiguous.
+        Early batch checks avoid connecting without authority. Every individual
+        write also rechecks under the shared mutex; a batch may stop partway if
+        frozen, with earlier intents durably recorded for reconciliation.
         """
         if not items:
             return []
         check_broker_write(operation="place_orders", caller="IBKRBroker.place_orders",
                            detail=f"cycle_id={cycle_id} revision_no={revision_no} "
                                   f"orders={len(items)}")
-        if active_grant() is not None:
-            # A grant exists, so this process intends to write: hold it to the
-            # current authority. Resolved lazily — importing the registry at
-            # module scope would make every read path depend on the cutover
-            # tables.
-            from ..execution.route_registry import read_freeze, read_state
+        from ..execution.route_registry import read_freeze, read_state
 
-            check_grant(operation="place_orders", caller="IBKRBroker.place_orders",
-                        state_reader=read_state, freeze_reader=read_freeze,
-                        account=self.connected_account(),
-                        detail=f"cycle_id={cycle_id}")
+        grant = guard.active_grant()
+        check_grant(operation="place_orders", caller="IBKRBroker.place_orders",
+                    state_reader=read_state, freeze_reader=read_freeze,
+                    account=grant.account if grant else "",
+                    detail=f"pid={os.getpid()} cycle_id={cycle_id}")
         chain = chain or {}
         with self.session() as ib:
             self._last_trades = []
-            entries = [self._submit(ib, d, qty, cycle_id, revision_no, seq, chain)
-                       for seq, (d, qty) in enumerate(items)]
+            with self._submission_gate(ib, operation="place_orders", detail=cycle_id):
+                pass
+            entries = [self._submit(ib, d, qty, cycle_id, revision_no, seq, chain,
+                                    execution_check=execution_check)
+                       for seq, (d, qty) in zip(order_sequences or range(len(items)), items)]
             ib.sleep(wait)  # let the paper engine ack/fill
             for e, (_, _), trade in zip(entries, items, self._last_trades):
                 if trade is None:
@@ -345,6 +442,9 @@ class IBKRBroker:
                 if st.filled and st.avgFillPrice:
                     e.avg_fill_price = float(st.avgFillPrice)
                     e.filled_at = _now()
+                from ..execution import route_registry as rr
+                rr.record_submission_result(
+                    self._intent_id(cycle_id, revision_no, e.order_seq), e.status, e.order_id)
             return entries
 
     def place_order(self, decision: TradeDecision, qty: float, cycle_id: str,
@@ -353,12 +453,17 @@ class IBKRBroker:
 
     def cancel_all(self, symbol: str | None = None) -> list[str]:
         """Cancel open orders (optionally filtered by symbol). Returns cancelled ids."""
+        check_broker_write(operation="cancel_all", caller="IBKRBroker.cancel_all")
         with self.session() as ib:
             cancelled = []
             for t in ib.openTrades():
                 if symbol and t.contract.symbol != symbol.upper():
                     continue
-                ib.cancelOrder(t.order)
+                with self._submission_gate(ib, operation="cancelOrder", detail=str(t.order.orderId)) as state:
+                    if t.order.account != state.account:
+                        guard.refuse(guard.REASON_ACCOUNT_MISMATCH, operation="cancelOrder",
+                                     caller="IBKRBroker.cancel_all", detail="order account differs")
+                    ib.cancelOrder(t.order)
                 cancelled.append(str(t.order.orderId))
             if cancelled:
                 ib.sleep(1.5)
@@ -366,8 +471,11 @@ class IBKRBroker:
 
     def _submit(self, ib, decision: TradeDecision, qty: float, cycle_id: str,
                 revision_no: int = 0, seq: int = 0,
-                chain: dict | None = None) -> TradeLogEntry:
+                chain: dict | None = None, *, execution_check=None) -> TradeLogEntry:
         from ib_async import LimitOrder, MarketOrder, Stock
+
+        check_broker_write(operation="placeOrder", caller="IBKRBroker._submit",
+                           symbol=decision.symbol, quantity=qty)
 
         chain = chain or {}
         entry = TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=decision.symbol,
@@ -410,15 +518,51 @@ class IBKRBroker:
             # therefore cannot be joined on across days. IBKR echoes orderRef back on
             # every execution. Capped at 60 chars — IBKR silently truncates long refs.
             order.orderRef = order_ref(cycle_id, revision_no, seq, decision.symbol)
-            trade = ib.placeOrder(contract, order)
+            from ..execution import route_registry as rr
+
+            with self._submission_gate(ib, operation="placeOrder",
+                                       detail=f"cycle_id={cycle_id} revision={revision_no} seq={seq}") as state:
+                if decision.execution_basis:
+                    if execution_check is None:
+                        raise ValueError("normalized_order_execution_check_required")
+                    execution_check(decision, qty)
+                order.account = state.account
+                intent_id = self._intent_id(cycle_id, revision_no, seq)
+                payload = {"decision": decision.model_dump(mode="json"), "qty": qty,
+                           "account": order.account, "chain": chain}
+                payload_hash = hashlib.sha256(json.dumps(
+                    payload, sort_keys=True, allow_nan=False).encode()).hexdigest()
+                rr.reserve_submission(intent_id, payload_hash, state,
+                                      order_ref=order.orderRef, cycle_id=cycle_id,
+                                      revision_no=revision_no, sequence=seq)
+                trade = ib.placeOrder(contract, order)
+                # Even an immediate response may not be terminal. Leave unknown
+                # if the call raises or the process dies before observation.
+                if getattr(trade.order, "account", "") != state.account:
+                    guard.refuse(guard.REASON_ACCOUNT_MISMATCH, operation="placeOrder",
+                                 caller="IBKRBroker._submit", detail="broker echoed a different order account")
+                rr.record_submission_result(intent_id, _map_status(trade.orderStatus.status),
+                                             str(trade.order.orderId))
             entry.order_ref = order.orderRef
             self._last_trades.append(trade)
+        except guard.BrokerWriteProhibited:
+            raise
         except Exception as exc:  # noqa: BLE001 - bad symbol / rejected contract must not escape
             log.warning("order submit failed for %s: %s", decision.symbol, exc)
             entry.status = "error"
             entry.error = str(exc)
             self._last_trades.append(None)
         return entry
+
+    @staticmethod
+    def _intent_id(cycle_id: str, revision_no: int, seq: int) -> str:
+        # Full identity, not the broker's truncated orderRef. Deliberately omit
+        # route/generation/account/symbol so none permits a replay or mutation.
+        if not cycle_id.strip():
+            guard.refuse("order_identity_missing", operation="placeOrder",
+                         caller="IBKRBroker._submit", detail="cycle_id is required")
+        return hashlib.sha256(json.dumps(
+            [cycle_id, revision_no, seq]).encode()).hexdigest()
 
 
 def order_ref(cycle_id: str, revision_no: int, seq: int, symbol: str) -> str:

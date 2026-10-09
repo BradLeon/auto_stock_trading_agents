@@ -70,7 +70,7 @@ Workflow Memory SHALL 保存 Agent 投影、决策、审批和运行状态，并
 
 ### Requirement: 数据读取切流必须按数据域和消费者独立设门禁
 
-系统 SHALL 在每个数据域和直接消费者的新读取路径启用前，验证持久化域的唯一规范 writer 或 runtime 域的查询 owner、来源与 vintage 血缘（适用时）、发布质量或即时完整性、旧新读数差异归因、故障行为和可演练回滚。未通过的域或消费者 SHALL 保持其现有稳定路由，不得因 Dispatcher、Calendar 或其他数据域已切换而整体放行。
+系统 SHALL 在每个数据域和直接消费者的新读取路径启用前，验证持久化域的唯一规范 writer 或 runtime 域的查询 owner、来源与 vintage 血缘（适用时）、发布质量或即时完整性、新需求读取断言、故障行为和可演练的安全停止或已验收版本恢复。旧新读数对比 SHALL 仅作可选诊断，旧业务错误、旧侧不可用或输出差异 SHALL NOT 阻塞符合新需求的范围。未通过的域或消费者 SHALL 保持安全停止或已验证稳定路由，不得因 Dispatcher、Calendar 或其他数据域已切换而整体放行。
 
 #### Scenario: Calendar 已验收而公司文档产品仍有缺口
 
@@ -81,7 +81,7 @@ Workflow Memory SHALL 保存 Agent 投影、决策、审批和运行状态，并
 #### Scenario: 新读取路径回滚
 
 - **WHEN** 一个已切换的数据域或消费者出现可复现的平台回归
-- **THEN** 系统 SHALL 支持将该范围的读取路由恢复到登记的稳定路径并保留新路径审计证据
+- **THEN** 系统 SHALL 支持安全停止该范围及依赖交易，或将读取路由恢复到登记的已验收版本，并保留新路径审计证据
 - **AND** SHALL NOT 通过重建已退役的 Workflow Memory 共享事实表或让 Agent 直连 Provider 来回滚
 
 ### Requirement: Phase F 必须受控接收并登记适用的资格证据
@@ -118,7 +118,13 @@ Phase F SHALL 经实际 CLI、Dispatcher 或 Workflow 入口验证十角色的�
 
 ### Requirement: Phase F 必须按范围准备和授权分批切流
 
-系统 SHALL 为采集发布、研究读取、调度、内部状态/审批和实盘执行分别登记实际 owner、当前/目标路由、切流开关、精确范围资格、接入证据、观察窗口、成功/停止条件及已验证回退。已运行的目标采集路径 SHALL 核验接收而非重复切换。稳定回退 SHALL 有实际可读证明；无回退者不得放行。必要输入失败 SHALL 阻断完整交易，但已接受的 SEC 正文 optional、Layer no_coverage 与 FactSet 最新月度数据政策 SHALL NOT 被重新定义为额外阻塞。生产切换 SHALL 需要明确部署授权，实盘开放 SHALL 另需明确实盘授权。
+系统 SHALL 为采集发布、研究读取、调度、内部状态/审批和实盘执行分别登记实际 owner、当前/目标路由、切流开关、精确范围资格、接入证据、观察窗口、成功/停止条件及已验证恢复策略。已运行的目标采集路径 SHALL 核验接收而非重复切换。恢复策略 SHALL 有实际安全停止或已验收版本可用的证明；两者均无证明者不得放行，SHALL NOT 强制恢复未完备的旧业务。旧入口 SHALL 证明关停或失权，防重复触发/发布、越权提交及状态污染。必要输入失败 SHALL 阻断完整交易，但已接受的 SEC 正文 optional、Layer no_coverage 与 FactSet 最新月度数据政策 SHALL NOT 被重新定义为额外阻塞。生产切换 SHALL 需要明确部署授权，实盘开放 SHALL 另需明确实盘授权。
+
+#### Scenario: 旧业务不可用但安全停止已验收
+
+- **WHEN** 新入口需求及精确范围门禁通过，旧业务不能正常运行，而安全停止已证明封住实际入口和写点并处置在途工作
+- **THEN** 系统 SHALL 允许该范围采用安全停止作为恢复策略，保留历史引用和审计证据
+- **AND** SHALL NOT 以旧业务未成功或旧新输出不一致阻塞该范围；新需求、共享依赖、必需历史和权限失败仍 SHALL 阻塞
 
 #### Scenario: 研究读取批次通过而交易输入仍 partial
 

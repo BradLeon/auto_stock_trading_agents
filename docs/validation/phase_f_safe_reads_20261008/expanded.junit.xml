@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="5" skipped="0" tests="82" time="25.248" timestamp="2026-10-08T16:52:37.278453+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_intake_verification" name="test_verification_starts_without_production_qualification" time="0.601" /><testcase classname="tests.test_intake_verification" name="test_the_entry_point_does_not_ask_assurance" time="0.507" /><testcase classname="tests.test_intake_verification" name="test_verification_runs_under_the_process_write_prohibition" time="0.481" /><testcase classname="tests.test_intake_verification" name="test_every_persistence_surface_is_redirected_during_verification" time="0.442" /><testcase classname="tests.test_intake_verification" name="test_verification_refuses_to_start_without_the_capability" time="0.406" /><testcase classname="tests.test_intake_verification" name="test_a_production_side_effect_invalidates_the_run" time="0.252" /><testcase classname="tests.test_intake_verification" name="test_no_production_approval_is_produced_by_a_verification" time="0.464" /><testcase classname="tests.test_intake_verification" name="test_clearing_a_side_effect_requires_explicit_confirmation" time="0.183" /><testcase classname="tests.test_intake_verification" name="test_a_confirmed_clear_reports_the_target_without_deleting" time="0.222" /><testcase classname="tests.test_intake_verification" name="test_an_isolated_result_cannot_authorise_a_trade" time="0.461" /><testcase classname="tests.test_intake_verification" name="test_the_attestation_states_what_it_does_not_prove" time="0.484" /><testcase classname="tests.test_intake_verification" name="test_every_consumer_has_a_declared_entry_point" time="0.158" /><testcase classname="tests.test_intake_verification" name="test_every_declared_entry_point_resolves_to_a_real_module" time="0.193" /><testcase classname="tests.test_intake_verification" name="test_all_ten_roles_are_reached_by_the_scan" time="2.214" /><testcase classname="tests.test_intake_verification" name="test_a_role_that_never_reaches_the_governed_surface_is_registered_not_passed" time="0.625" /><testcase classname="tests.test_intake_verification" name="test_the_ten_analysis_and_decision_roles_are_the_declared_ten" time="0.154" /><testcase classname="tests.test_intake_verification" name="test_the_reference_price_read_is_not_live_but_is_still_reported" time="0.169" /><testcase classname="tests.test_intake_verification" name="test_the_live_bypass_check_now_covers_all_ten_roles" time="0.341" /><testcase classname="tests.test_intake_verification" name="test_the_real_scan_reports_the_stopped_read_as_disabled_not_live" time="0.172" /><testcase classname="tests.test_intake_verification" name="test_only_trader_carries_a_provider_read_at_all" time="0.291" /><testcase classname="tests.test_intake_verification" name="test_a_disabled_path_is_reported_without_claiming_a_live_read" time="0.172" /><testcase classname="tests.test_intake_verification" name="test_a_called_helper_is_treated_as_live_even_if_marked_disabled" time="0.218" /><testcase classname="tests.test_intake_verification" name="test_a_violation_names_a_location_a_reader_can_act_on" time="0.251"><failure message="AssertionError: assert 'ats.agents.chief.decide' == 'ats.agents.chief.assemble'&#10;  &#10;  - ats.agents.chief.assemble&#10;  ?                  ^^^ ^^^&#10;  + ats.agents.chief.decide&#10;  ?                  ^ ^^^">def test_a_violation_names_a_location_a_reader_can_act_on():
+        """'Non-compliant' without a location cannot be fixed.
+    
+        A read violation names a line, because that is what someone has to edit. A
+        wiring gap names its module, which is the right granularity for "this role was
+        never pointed at the governed API" — there is no line to fix there.
+        """
+        record = iv.scan_consumer_access("trader")
+        by_kind = {v.kind: v for v in record.violations}
+    
+        read = by_kind["disabled_bypass"]
+        assert read.location.startswith("ats.trader.execute:")
+        assert read.detail
+    
+        unwired = next(v for v in iv.scan_consumer_access("chief").violations
+                       if v.kind == "governed_read_surface_not_reached")
+&gt;       assert unwired.location == "ats.agents.chief.assemble"
+E       AssertionError: assert 'ats.agents.chief.decide' == 'ats.agents.chief.assemble'
+E         
+E         - ats.agents.chief.assemble
+E         ?                  ^^^ ^^^
+E         + ats.agents.chief.decide
+E         ?                  ^ ^^^
+
+tests/test_intake_verification.py:383: AssertionError</failure></testcase><testcase classname="tests.test_intake_verification" name="test_a_provider_module_is_flagged_with_its_reason" time="0.156" /><testcase classname="tests.test_intake_verification" name="test_a_base_table_read_is_flagged_separately_from_a_provider" time="0.158" /><testcase classname="tests.test_intake_verification" name="test_a_third_party_client_is_flagged" time="0.155" /><testcase classname="tests.test_intake_verification" name="test_workflow_memory_is_not_a_data_plane_bypass" time="0.169" /><testcase classname="tests.test_intake_verification" name="test_the_product_layer_is_not_treated_as_a_bypass" time="0.182" /><testcase classname="tests.test_intake_verification" name="test_an_undeclared_consumer_is_refused_rather_than_reported_clean" time="0.207" /><testcase classname="tests.test_intake_verification" name="test_an_entry_point_that_does_not_resolve_is_a_violation" time="0.160" /><testcase classname="tests.test_intake_verification" name="test_a_role_whose_only_entry_point_is_missing_is_not_reached" time="0.158" /><testcase classname="tests.test_intake_verification" name="test_the_two_declared_opinion_edges_are_allowed[information-fundamental]" time="0.191" /><testcase classname="tests.test_intake_verification" name="test_the_two_declared_opinion_edges_are_allowed[layer-sector]" time="0.176" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[layer-macro]" time="0.155" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[layer-technical]" time="0.199" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[sector-fundamental]" time="0.153" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[macro-layer]" time="0.155" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[technical-information]" time="0.157" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[fundamental-layer]" time="0.167" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[information-sector]" time="0.177" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[sector-chief]" time="0.233" /><testcase classname="tests.test_intake_verification" name="test_every_other_opinion_edge_is_leakage[layer-chief]" time="0.191" /><testcase classname="tests.test_intake_verification" name="test_chief_is_the_declared_aggregator_and_is_exempt" time="0.220" /><testcase classname="tests.test_intake_verification" name="test_a_role_reading_its_own_opinion_is_not_leakage" time="0.186" /><testcase classname="tests.test_intake_verification" name="test_an_admitted_document_is_not_a_candidate" time="0.158" /><testcase classname="tests.test_intake_verification" name="test_a_candidate_presented_as_published_is_flagged" time="0.157" /><testcase classname="tests.test_intake_verification" name="test_an_opinion_written_as_a_shared_fact_is_flagged" time="0.258" /><testcase classname="tests.test_intake_verification" name="test_writing_a_projection_is_not_writeback" time="0.177" /><testcase classname="tests.test_intake_verification" name="test_every_neutral_fact_table_named_in_the_project_exists_as_a_table_name" time="0.179" /><testcase classname="tests.test_intake_verification" name="test_a_complete_run_may_enter_the_decision_cycle" time="0.197"><failure message="assert False is True">def test_a_complete_run_may_enter_the_decision_cycle():
+        from ats.workflow.run_contracts import default_registry
+    
+        registry = default_registry()
+        result = iv.verify_required_input_blocking(
+            registry=registry, projections=_complete_projections(registry),
+            scope={"kind": "portfolio"})
+&gt;       assert result["complete"] is True
+E       assert False is True
+
+tests/test_intake_verification.py:664: AssertionError</failure></testcase><testcase classname="tests.test_intake_verification" name="test_a_missing_required_analysis_blocks_the_cycle" time="0.159" /><testcase classname="tests.test_intake_verification" name="test_an_empty_projection_set_blocks_and_names_every_category" time="0.162" /><testcase classname="tests.test_intake_verification" name="test_a_missing_analysis_is_reported_by_name_not_as_a_count" time="0.223" /><testcase classname="tests.test_intake_verification" name="test_a_disagreement_between_the_two_contracts_is_reported_not_hidden" time="0.196"><failure message="assert False is True">def test_a_disagreement_between_the_two_contracts_is_reported_not_hidden():
+        """The snapshot judges per CATEGORY; `build_run_result` judges per TASK.
+    
+        Production's `open_decision_cycle` gates on the snapshot alone, so with one
+        fundamental mode missing the cycle WOULD open — while the run contract says
+        incomplete. Adopting either verdict silently would hide a real conflict
+        between two contracts that both claim to govern entry, so it is reported and
+        the run is not marked verified.
+        """
+        from ats.workflow.run_contracts import default_registry
+    
+        registry = default_registry()
+        projections = _complete_projections(registry)
+        projections["fundamental_event_review"] = None
+    
+        outcome = iv.verify_required_input_blocking(
+            registry=registry, projections=projections, scope={"kind": "portfolio"})
+    
+&gt;       assert outcome["complete"] is True
+E       assert False is True
+
+tests/test_intake_verification.py:743: AssertionError</failure></testcase><testcase classname="tests.test_intake_verification" name="test_a_fully_consistent_run_reports_no_disagreement" time="0.168"><failure message="assert False is True">def test_a_fully_consistent_run_reports_no_disagreement():
+        from ats.workflow.run_contracts import default_registry
+    
+        registry = default_registry()
+        outcome = iv.verify_required_input_blocking(
+            registry=registry, projections=_complete_projections(registry),
+            scope={"kind": "portfolio"})
+        assert outcome["contract_disagreements"] == []
+&gt;       assert outcome["verified"] is True
+E       assert False is True
+
+tests/test_intake_verification.py:760: AssertionError</failure></testcase><testcase classname="tests.test_intake_verification" name="test_a_projection_resolves_in_a_fresh_store" time="0.247" /><testcase classname="tests.test_intake_verification" name="test_an_unresolvable_projection_fails_rather_than_defaulting" time="0.254" /><testcase classname="tests.test_intake_verification" name="test_a_projection_whose_content_hash_moved_is_not_the_same_projection" time="0.294" /><testcase classname="tests.test_intake_verification" name="test_an_unopenable_store_is_unresolvable_not_an_error" time="0.163" /><testcase classname="tests.test_intake_verification" name="test_an_unpublished_projection_is_not_resolvable" time="0.259" /><testcase classname="tests.test_intake_verification" name="test_every_chain_link_is_reported_individually" time="0.244" /><testcase classname="tests.test_intake_verification" name="test_the_chain_is_complete_when_every_link_is_bound" time="0.245" /><testcase classname="tests.test_intake_verification" name="test_more_than_one_review_round_is_detected" time="0.281" /><testcase classname="tests.test_intake_verification" name="test_an_unbound_chain_reports_the_missing_link_rather_than_a_boolean" time="0.298" /><testcase classname="tests.test_intake_verification" name="test_a_broker_write_attempt_is_recorded_as_a_refusal" time="0.512" /><testcase classname="tests.test_intake_verification" name="test_repeated_recovery_must_not_duplicate_the_ledger" time="0.160" /><testcase classname="tests.test_intake_verification" name="test_an_idempotent_recovery_is_reported_as_such" time="0.354" /><testcase classname="tests.test_intake_verification" name="test_a_late_fill_stops_a_switch" time="0.272" /><testcase classname="tests.test_intake_verification" name="test_performance_rebuild_is_verified_when_a_period_is_supplied" time="0.293" /><testcase classname="tests.test_intake_verification" name="test_performance_rebuild_is_skipped_without_a_period" time="0.335" /><testcase classname="tests.test_intake_verification" name="test_the_report_counts_per_consumer_rather_than_saying_ok" time="0.331" /><testcase classname="tests.test_intake_verification" name="test_the_report_states_that_isolation_is_not_ledger_integrity" time="0.446" /><testcase classname="tests.test_intake_verification" name="test_the_digest_is_stable_across_identical_runs" time="0.490" /><testcase classname="tests.test_intake_verification" name="test_the_digest_changes_when_a_finding_appears" time="0.223" /><testcase classname="tests.test_intake_verification" name="test_a_role_the_scan_never_reached_is_called_out_in_the_report" time="0.166" /><testcase classname="tests.test_workflow_data_cutover" name="test_workflow_boundaries_keep_memory_outputs_out_of_data_products" time="0.676" /><testcase classname="tests.test_workflow_data_cutover" name="test_chief_uses_boundary_metadata_without_routing_memory_through_data" time="0.297" /><testcase classname="tests.test_workflow_data_cutover" name="test_scheduler_daily_uses_its_boundary_before_workflow_side_effects" time="0.185" /><testcase classname="tests.test_workflow_data_cutover" name="test_scheduler_isolates_a_failed_stage_and_runs_later_stages" time="0.351" /><testcase classname="tests.test_workflow_data_cutover" name="test_scheduler_data_accesses_use_unified_runtime_products_and_pipelines" time="0.212"><failure message="assert 'from ..data.pipelines.unstructured import research as research_pipeline' in '&quot;&quot;&quot;Daily scheduler: trigger a trading cycle on NYSE sessions only.\n\nPairs with an async channel (Feishu): at the co...       scheduler.start()\n    except (KeyboardInterrupt, SystemExit):\n        log.info(&quot;Phase E scheduler stopped&quot;)\n'">def test_scheduler_data_accesses_use_unified_runtime_products_and_pipelines():
+        source = (Path(__file__).resolve().parents[1] / "src/ats/runtime/scheduler.py").read_text(
+            encoding="utf-8")
+    
+        for legacy_import in (
+            "from ..data import documents",
+            "from ..data import earnings_calendar, period",
+            "from ..data import research as research_data",
+            "from ..data import yahoo_news",
+        ):
+            assert legacy_import not in source
+        for unified_import in (
+            "from ..data.runtime import earnings as earnings_calendar",
+            "from ..data.products import earnings",
+            "from ..data.pipelines.unstructured import news as news_pipeline",
+            "from ..data.pipelines.unstructured import research as research_pipeline",
+        ):
+&gt;           assert unified_import in source
+E           assert 'from ..data.pipelines.unstructured import research as research_pipeline' in '"""Daily scheduler: trigger a trading cycle on NYSE sessions only.\n\nPairs with an async channel (Feishu): at the co...       scheduler.start()\n    except (KeyboardInterrupt, SystemExit):\n        log.info("Phase E scheduler stopped")\n'
+
+tests/test_workflow_data_cutover.py:136: AssertionError</failure></testcase><testcase classname="tests.test_workflow_data_cutover" name="test_release_confirmation_product_keeps_event_date_guard" time="0.188" /><testcase classname="tests.test_workflow_data_cutover" name="test_shadow_release_and_rollback_are_isolated_per_orchestration_consumer" time="0.604" /></testsuite></testsuites>

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
@@ -62,7 +64,7 @@ _FACTSET_JUDGMENT_TOPICS = {
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,

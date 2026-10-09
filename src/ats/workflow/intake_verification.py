@@ -277,45 +277,54 @@ def isolated_verification(run_id: str, *, root: str | Path | None = None,
         qualification_required=False,
         started_at=datetime.now(timezone.utc).isoformat())
 
-    with isolation.isolated_run(run_id, root=root, reason_code=reason_code) as env:
-        # Refuse to run unless the prohibition is actually in force. Checking
-        # `guard_installed` rather than trusting the context manager is what
-        # turns "the capability is missing" into a start-up failure instead of a
-        # surprise at the first order.
-        broker_write_guard.assert_broker_writes_prohibited(
-            operation="isolated_verification", caller=run_id)
-        attestation.surfaces_redirected = tuple(sorted(env.surfaces))
-        attestation.broker_write_prohibited = True
-        yield attestation
+    try:
+        with isolation.isolated_run(run_id, root=root, reason_code=reason_code) as env:
+            from ..memory import TradingMemory, bound_store
 
-    after = _production_fingerprint()
-    leaked = _production_delta(before, after)
-    attestation.production_side_effects = tuple(leaked)
-    attestation.finished_at = datetime.now(timezone.utc).isoformat()
-    if leaked:
-        raise ProductionSideEffect(run_id, leaked)
+            broker_write_guard.assert_broker_writes_prohibited(
+                operation="isolated_verification", caller=run_id)
+            attestation.isolation_root = str(env.root.resolve())
+            attestation.surfaces_redirected = tuple(sorted(env.surfaces))
+            attestation.broker_write_prohibited = True
+            # Override a task-local connection inherited from an outer business
+            # invocation, not merely the process connection cache.
+            filename = env.path_for("ATS_DB_PATH")
+            fresh = not filename.exists() or filename.stat().st_size == 0
+            store = TradingMemory(filename, initialize=fresh)
+            try:
+                required = {"decision_cycles", "decision_revisions", "decision_risk_reviews",
+                            "boss_approvals", "trades", "fills", "clerk_runs"}
+                tables = {row[0] for row in store.conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                if not required <= tables:
+                    raise IntakeVerificationError("isolated store schema incomplete; explicit migration required")
+                with bound_store(store):
+                    yield attestation
+            finally:
+                store.close()
+    finally:
+        after = _production_fingerprint()
+        leaked = _production_delta(before, after)
+        attestation.production_side_effects = tuple(leaked)
+        attestation.finished_at = datetime.now(timezone.utc).isoformat()
+        if leaked:
+            raise ProductionSideEffect(run_id, leaked)
 
 
-def _production_delta(before: dict[str, int], after: dict[str, int]) -> list[str]:
-    """Tables whose production row count grew across an isolated run.
+def _production_delta(before: dict, after: dict) -> list[str]:
+    """Refuse additions, deletions, same-count updates and unreadable state.
 
-    Compares the COUNTS, not the key sets. `set(after) - set(before)` is always
-    empty — both dicts carry the same tables — so a leaked row would pass
-    unnoticed, which is the exact failure this function exists to catch.
-
-    A SHRINK is not reported: an isolated run has no legitimate reason to remove a
-    production row, but deletion is not something it can do through a redirected
-    connection either, and reporting it would blur the signal. An unreadable
-    table (-1) is reported on either side, because "I could not check" must not
-    pass as "nothing changed".
+    Concurrent production changes conservatively invalidate acceptance; they
+    are not attributed to this run or automatically reverted.
     """
-    return sorted(key for key, count in after.items()
-                  if count != before.get(key, 0))
+    return sorted(key for key in before.keys() | after.keys()
+                  if before.get(key, 0) != after.get(key, 0)
+                  or before.get(key) == -1 or after.get(key) == -1)
 
 
-# Production state that an isolated verification must not change. Counted, not
-# hashed: a hash would flag a concurrent legitimate write as this run's
-# side effect, and the point is to attribute the effect to the run.
+# Production state an isolated verification must leave unchanged. Counts and
+# complete row digests catch same-count updates; concurrent changes invalidate
+# acceptance conservatively without attributing or reverting the write.
 _PRODUCTION_WATCH_TABLES: tuple[tuple[str, str], ...] = (
     ("ats.sqlite", "trades"),
     ("ats.sqlite", "boss_approvals"),
@@ -323,6 +332,14 @@ _PRODUCTION_WATCH_TABLES: tuple[tuple[str, str], ...] = (
     ("ats.sqlite", "decision_revisions"),
     ("ats.sqlite", "decision_risk_reviews"),
     ("data.sqlite", "data_evidence_facts"),
+    ("ats.sqlite", "dataflow_assurance_events"),
+    ("data.sqlite", "dataflow_assurance_events"),
+    ("phase_f_cutover.sqlite", "cutover_boundary_state"),
+    ("phase_f_cutover.sqlite", "cutover_activations"),
+    ("phase_f_cutover.sqlite", "fallback_revocations"),
+    ("phase_f_routes.sqlite", "trade_route_state"),
+    ("phase_f_routes.sqlite", "trade_route_freeze"),
+    ("phase_f_routes.sqlite", "trade_submit_receipts"),
 )
 
 
@@ -330,14 +347,14 @@ def _production_db_path(name: str) -> Path:
     return REPO_ROOT / "var" / name
 
 
-def _production_fingerprint() -> dict[str, int]:
-    """Row counts for the tables a verification must leave alone.
+def _production_fingerprint() -> dict[str, int | str]:
+    """Read-only counts and row digests of protected production tables.
 
-    Read-only and best-effort: a missing database is a count of zero, not an
+    Read-only and fail-closed: a missing database is a count of zero, not an
     error, because the first thing a verification run ever does is run against a
     repository where some of these may not exist yet.
     """
-    counts: dict[str, int] = {}
+    counts: dict[str, int | str] = {}
     for filename, table in _PRODUCTION_WATCH_TABLES:
         path = _production_db_path(filename)
         key = f"{filename}:{table}"
@@ -353,6 +370,9 @@ def _production_fingerprint() -> dict[str, int]:
                     (table,)).fetchone()
                 counts[key] = int(conn.execute(
                     f"SELECT COUNT(*) FROM {table}").fetchone()[0]) if present else 0
+                if present:
+                    rows = sorted(canonical(tuple(row)) for row in conn.execute(f"SELECT * FROM {table}"))
+                    counts[key + ":content"] = hashlib.sha256(canonical(rows).encode()).hexdigest()
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -922,95 +942,53 @@ def verify_restart_resolvability(store_factory: Callable[[], Any],
 
 
 def verify_required_input_blocking(*, registry: Any, projections: dict[str, Any],
-                                   scope: Any, required_scopes: dict[str, Any] | None = None,
+                                   scope: Any, required_scopes=None,
                                    enter_decision_cycle: bool = True,
-                                   ) -> dict[str, Any]:
-    """`7.4`: a missing required analysis must block the decision cycle.
+                                   fundamental_mode: str = "routine", requested_tasks=None,
+                                   at: datetime | None = None) -> dict[str, Any]:
+    """Evaluate snapshot and run against the same selected dependency closure."""
+    from ..agent.task_projection import ProjectionScope, reuse_decision
+    from ..decision.snapshot import (
+        IncompleteResearchSnapshotError,
+        build_research_snapshot,
+        selected_decision_tasks,
+    )
+    from .run_contracts import (
+        TaskResult,
+        TriggerContext,
+        WorkflowRunRequest,
+        build_run_result,
+        should_enter_decision_cycle,
+    )
 
-    Delegates to the Phase D contracts rather than re-deriving them: the snapshot
-    builder and `should_enter_decision_cycle` already own "incomplete" and "may
-    proceed", and a second implementation would be free to disagree with the gate
-    that actually runs in production. The verification here is that the refusal
-    HAPPENS and names the missing analysis — not that a gap report exists.
-    """
-    from ..decision.snapshot import IncompleteResearchSnapshotError, build_research_snapshot
-    from ..workflow.run_contracts import (WorkflowRunRequest, build_run_result,
-                                         should_enter_decision_cycle)
-    from ..workflow.run_contracts import TriggerContext
-    from ..agent.task_projection import ProjectionScope
-
+    selected = selected_decision_tasks(registry, fundamental_mode=fundamental_mode,
+                                       requested_tasks=requested_tasks)
     snapshot_scope = scope if isinstance(scope, ProjectionScope) else ProjectionScope(
-        kind=str((scope or {}).get("kind", "portfolio")),
-        id=str((scope or {}).get("id", "")))
-
-    snapshot = build_research_snapshot(
-        registry=registry, projections=projections, scope=snapshot_scope,
-        required_scopes=required_scopes)
-    gaps = [{"category": item.category, "task_id": item.task_id, "reason": item.reason}
-            for item in snapshot.gaps()]
-
-    request = WorkflowRunRequest(
-        run_id="intake-verification", trigger=TriggerContext(kind="manual"),
-        tasks=tuple(registry.task_ids()), scope=snapshot_scope,
+        kind=str((scope or {}).get("kind", "portfolio")), id=str((scope or {}).get("id", "")))
+    snapshot = build_research_snapshot(registry=registry, projections=projections,
+        scope=snapshot_scope, required_scopes=required_scopes, selected_tasks=selected, at=at)
+    gaps = [{"category": i.category, "task_id": i.task_id, "reason": i.reason}
+            for i in snapshot.gaps()]
+    request = WorkflowRunRequest(run_id="intake-verification",
+        trigger=TriggerContext(kind="manual"), tasks=selected, scope=snapshot_scope,
         as_of=snapshot.built_at, enter_decision_cycle=enter_decision_cycle)
-    outcomes = {task_id: _task_outcome(projections, task_id, registry)
-                for task_id in registry.task_ids()}
+    outcomes = {}
+    for task_id in selected:
+        env = projections.get(task_id)
+        usable, reason = (reuse_decision(env, scope=(required_scopes or {}).get(task_id, env.scope), at=at)
+                          if env else (False, "missing"))
+        outcomes[task_id] = TaskResult(task_id=task_id,
+            status="succeeded" if usable else "missing" if env is None else "stale",
+            projection_refs=(env.projection_id,) if env else (), detail=reason)
     result = build_run_result(request, registry, outcomes)
     allowed, reason = should_enter_decision_cycle(request, result)
-
-    blocked = bool(gaps) or not allowed
-    refusal = ""
-    if gaps:
-        try:
-            raise IncompleteResearchSnapshotError(snapshot)
-        except IncompleteResearchSnapshotError as exc:
-            refusal = str(exc)
-
-    # The snapshot is what production gates on — `open_decision_cycle` refuses on
-    # `snapshot.complete` and nothing else. `build_run_result` is a SECOND
-    # contract, and it judges per TASK rather than per category, so the two
-    # disagree whenever one mode of a two-mode category is absent.
-    #
-    # Rather than quietly adopting one, the disagreement is reported. A
-    # verification that hides a contract conflict is the thing this module exists
-    # to prevent, and an operator reading "complete" needs to know that a second
-    # gate would have said otherwise.
-    disagreements: list[str] = []
-    if snapshot.complete and not allowed:
-        missing_tasks = sorted(task_id for task_id, outcome in outcomes.items()
-                               if not outcome.usable)
-        disagreements.append(
-            f"the research snapshot is complete but the run contract is not "
-            f"({reason}); disagreeing tasks: {', '.join(missing_tasks)}. "
-            "Production gates on the snapshot, so the cycle opens — but the two "
-            "contracts do not agree, which is worth resolving before this "
-            "evidence is registered.")
-
-    return {
-        "complete": snapshot.complete,
-        "gaps": gaps,
-        "decision_cycle_entered": bool(result.decision_cycle_entered and allowed),
-        "block_reason": reason if not allowed else "",
-        "refusal_message": refusal,
-        "run_contract_complete": bool(allowed),
-        "contract_disagreements": disagreements,
-        # True only when the inputs were complete AND the cycle was allowed to
-        # open. A complete run that stayed out of the cycle for another reason
-        # must not read as a pass — and neither must one whose contracts disagree.
-        "verified": snapshot.complete and allowed and not disagreements,
-    }
-
-
-def _task_outcome(projections: dict[str, Any], task_id: str, registry: Any) -> Any:
-    from ..workflow.run_contracts import TaskResult
-
-    envelope = projections.get(task_id)
-    if envelope is None:
-        return TaskResult(task_id=task_id, status="missing",
-                          detail="no projection was published for this task")
-    return TaskResult(task_id=task_id, status="succeeded",
-                      projection_refs=(envelope.projection_id,),
-                      as_of=getattr(envelope, "as_of", ""))
+    refusal = str(IncompleteResearchSnapshotError(snapshot)) if gaps else ""
+    return {"complete": snapshot.complete, "gaps": gaps,
+        "decision_cycle_entered": bool(snapshot.complete and allowed),
+        "block_reason": reason if not allowed else "incomplete_research_snapshot" if gaps else "",
+        "refusal_message": refusal, "run_contract_complete": result.terminal == "complete",
+        "contract_disagreements": [], "selected_tasks": list(selected),
+        "verified": bool(snapshot.complete and allowed)}
 
 
 # --------------------------------------------------------------------------- #
@@ -1177,7 +1155,6 @@ def verify_decision_chain(*, repo: Any, cycle_id: str, snapshot: Any,
     verification.partial_fill_handled = all(
         not d.blocks_switch or d.status != "partial" for d in dispositions)
     if dispositions:
-        sample = dispositions[0]
         late = order_disposition.late_fill_disposition(
             unsettled[0], {"exec_id": "probe", "symbol": unsettled[0].get("symbol", ""),
                            "side": "BOT", "shares": 1, "price": 1.0,

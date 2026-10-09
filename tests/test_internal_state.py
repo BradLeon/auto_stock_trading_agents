@@ -112,7 +112,7 @@ def test_chief_assembler_reads_via_state_api(store):
 
     src = open(assemble.__file__).read()
     assert "state_api.recent_trades" in src
-    assert "state_api.recent_fills" in src
+    assert "read_internal" in src and "state.fills" in src
 
 
 def test_context_reader_reads_via_state_api(store):

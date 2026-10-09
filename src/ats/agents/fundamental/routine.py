@@ -12,11 +12,12 @@
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import re
 from datetime import datetime, timezone
 
-from ...agent.task_projection import (EnvelopeValidationError, ProjectionScope,
-                                      build_envelope)
+from ...agent.task_projection import ProjectionScope, build_envelope
 from ..information.briefs import assert_no_advice
 
 log = __import__("logging").getLogger("ats.agents.fundamental.routine")
@@ -34,7 +35,7 @@ _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return evaluation_now(timezone.utc).isoformat(timespec="seconds")
 
 
 def load_baseline(store, symbol: str) -> dict:
@@ -214,15 +215,21 @@ def publish_expectation_update(store, payload: dict, *, as_of: str = "",
     return envelope.projection_id
 
 
+from ...workflow.runtime_reads import scoped_read  # noqa: E402
+
+
+@scoped_read("fundamental")
 def run_routine_pass(request) -> dict:
     """例行模式一轮：归类 → 发布预期更新投影。独立终结。"""
     from ...memory import get_store
 
     store = get_store()
     baseline = load_baseline(store, request.symbol)
-    briefs = store.task_projection_envelopes(
-        agent_role="information_brief", scope_kind="entity",
-        scope_id=request.symbol, limit=1)
+    from ...workflow.consumer_reads import read_projection
+
+    brief = read_projection(store, consumer="fundamental", role="information_brief",
+                            scope=ProjectionScope(kind="entity", id=request.symbol))
+    briefs = [brief] if brief else []
     if not briefs:
         return {"mode": "routine", "symbol": request.symbol,
                 "classified": [], "published": [],

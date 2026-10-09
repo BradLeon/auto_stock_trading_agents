@@ -1,0 +1,18 @@
+{
+  "python": "3.12.12",
+  "git_head": "02c81f260718ee0ecdb78a63f2ef96d133a1e7d7",
+  "source_hashes": {
+    "src/ats/workflow/acceptance_matrix.py": "b7c7d25d1055cd6de504263db7d85a70271634f9864a864642c9cfc73fe39516",
+    "src/ats/workflow/read_recovery.py": "f51d72eae8f201969e841c6e80c9863a8f39cbdf6d7229214945d4e5fac8dd1a",
+    "src/ats/workflow/consumer_reads.py": "e31cdcf6064802c8e6e659c30607f01ccbf1424f0cea65665493151217d01dc3",
+    "src/ats/workflow/runtime_reads.py": "46246864148a8e8e71b7f3eac82a4ae8fb3ba4d14c81f6cee8605b2b3f5e66aa",
+    "src/ats/workflow/cutover_routing.py": "ccdd843b325bf969820d363e588468eab850378d75f6aa93a7c52c6efc0826da",
+    "src/ats/workflow/cutover_wiring.py": "1df362cee9ee914ef3a3c3bd15eced45202239aa81a84c0150b3cfac13dda6a2",
+    "tests/test_phase_f_acceptance_matrix.py": "fb5dd62080f3b6fdee01aa590135b326f9a1d96a9ec6b547ce83b71097c3447d",
+    "tests/test_phase_f_read_recovery.py": "1d4282a5271b88c85ac629e79c29bd1272027e1d6b2e5a0a5c98f144107269cf",
+    "tests/test_cutover.py": "c241b288f851d1c877af0bcea0061f09eab80476487dafbdb3c9c98d154283d1",
+    "config/data/target_dataflow_coverage.yaml": "2b65ecaed833c2df02e4c39f5a96b22a0f9725aea74da405f6511e67cc58ff74",
+    "uv.lock": "242eb4935b16ef9d8c20d66dc01f0504dd549a5028b314e2ef3c71586c26ab13"
+  },
+  "note": "Dirty shared workspace; current task source hashes, not a production qualification or replacement of frozen historical snapshots."
+}

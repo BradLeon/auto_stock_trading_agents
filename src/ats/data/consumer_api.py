@@ -6,6 +6,8 @@ current-only, never pretending they can reconstruct a historical live quote.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -83,15 +85,34 @@ def assert_research_payload(payload) -> None:
 
 
 def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | None = None,
-               products=None, store=None, broker=None, audit=None, risk_config=None) -> ConsumerInput:
+               products=None, store=None, broker=None, audit=None, risk_config=None,
+               business_scope=None) -> ConsumerInput:
     """Load one declared edge from its governed API, without hidden refresh.
 
     Execution dependencies must be supplied explicitly. No broker connection,
     order submission, decision revision, model call or scheduler action occurs.
     """
     contract = input_contract(consumer, product)
-    queried_at = datetime.now(timezone.utc)
+    if product == "MARKET_DATA" and (consumer == "trader" or scope.get("kind") == "execution_price"):
+        from .execution_prices import assert_price_scope
+
+        assert_price_scope(consumer, scope)  # Authority failures must not degrade into empty data.
+    from ..workflow.runtime_reads import current_read_context, guard_input
+
+    guard_input(consumer, scope, as_of=as_of, business_scope=business_scope)
+    from ..workflow.business_replay_inputs import governed_read, capture_governed
+    frozen = governed_read(consumer, product, scope, as_of=as_of)
+    if frozen is not None:
+        from ..workflow.consumer_reads import record_read
+        record_read(consumer, "ats.data.consumer_api.read_input", refs=frozen.input_refs,
+                    status=frozen.status, product=product, source_as_of=frozen.source_as_of,
+                    scope=_json(scope))
+        return frozen
+    queried_at = evaluation_now(timezone.utc)
     point = as_of or queried_at
+    context = current_read_context()
+    if as_of is None and contract["input_mode"] == "persistent" and context is not None:
+        point = context.cutoff
     if point.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
     payload, refs, stamps, gaps = None, [], [], []
@@ -109,7 +130,13 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             else:
                 owned_products = False
             try:
-                if product != "DOC_DATA" and scope.get("kind") == "evidence":
+                if product == "COMPANY_DATA" and scope.get("kind") == "financials":
+                    payload = products.company_financial_snapshot(entity=scope["entity"], as_of=point)
+                    rows = payload["rows"]
+                    refs = [row["observation_id"] for row in rows]
+                    stamps = [row["known_at"] for row in rows]
+                    status = "complete" if rows else "no_coverage"
+                elif product != "DOC_DATA" and scope.get("kind") == "evidence":
                     payload = products.neutral_evidence(entity=scope["entity"], as_of=point,
                                                         limit=scope.get("limit", 500))
                     rows = payload["rows"]
@@ -171,7 +198,18 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             if not stamp:
                 gaps.append("source_timestamp_or_reconciliation_missing")
         elif product == "MARKET_DATA":
-            if scope.get("kind") == "options":
+            if scope.get("kind") == "execution_price":
+                from .execution_prices import quote_ref, runtime_quote, validate_quote
+
+                overnight = bool(scope.get("overnight"))
+                if overnight and scope["purpose"] != "preapproval_normalization":
+                    raise ValueError("historical_close_for_execution_refused")
+                quote = validate_quote(runtime_quote(scope),
+                    symbol=scope["entity"], currency=scope["currency"], overnight=overnight)
+                payload, status = quote, "complete"
+                refs = [quote_ref(quote)]
+                stamps = [quote.source_as_of.isoformat()]
+            elif scope.get("kind") == "options":
                 from .runtime.options import fetch_runtime
                 result = fetch_runtime(scope["entity"], scope.get("earnings_date"))
                 payload, status = result["payload"], result["status"]
@@ -209,10 +247,14 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             refs = [scope["cycle_id"]] if payload["cycle"] else []
             stamps = [str(payload["cycle"]["updated_at"])] if payload["cycle"] else []
         elif product == "APPROVED_EXECUTION_AUTHORIZATION":
-            from ..execution.authorization import build_authorization, validate_authorization
+            from ..execution.authorization import (
+                bind_to_active_route,
+                build_authorization,
+                validate_authorization,
+            )
             if audit is None:
                 raise ValueError("decision_audit_required")
-            auth = build_authorization(audit, scope["cycle_id"])
+            auth = bind_to_active_route(build_authorization(audit, scope["cycle_id"]))
             snapshot_as_of = scope.get("snapshot_as_of")
             if isinstance(snapshot_as_of, str):
                 snapshot_as_of = datetime.fromisoformat(snapshot_as_of.replace("Z", "+00:00"))
@@ -233,9 +275,13 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
         gaps.append(f"input_unavailable:{type(exc).__name__}:{exc}")
     if status not in {"complete"} and not gaps:
         gaps.append("missing_or_partial_input")
-    return ConsumerInput(consumer=consumer, product=product, owner=contract["owner"],
+    from ..workflow.consumer_reads import record_read
+
+    record_read(consumer, "ats.data.consumer_api.read_input", refs=refs, status=status,
+                product=product, source_as_of=stamps, scope=_json(scope))
+    return capture_governed(ConsumerInput(consumer=consumer, product=product, owner=contract["owner"],
                          contract_version=contract["contract_version"], input_mode=mode,
                          scope=_json(scope), as_of=point, queried_at=queried_at,
                          source_as_of=sorted(set(stamps)), status=status,
                          completeness=status, input_refs=refs, fallback=contract["fallback"],
-                         gaps=gaps, payload=_json(payload))
+                         gaps=gaps, payload=_json(payload)))

@@ -103,6 +103,7 @@ class WorkflowPlan:
     edges: tuple[tuple[str, str], ...]
     as_of: str
     enter_decision_cycle: bool
+    config_root: str = ""
 
     @property
     def plan_hash(self) -> str:
@@ -117,6 +118,7 @@ class WorkflowPlan:
             "profile_version": self.profile_version,
             "profile_hash": self.profile_hash,
             "source_config_hashes": self.source_config_hashes,
+            "config_root": self.config_root,
             "requested_tasks": list(self.requested_tasks),
             "request_scope": self.request_scope.model_dump(mode="json"),
             "trigger": self.trigger,
@@ -357,7 +359,7 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         source_config_hashes=source_hashes, requested_tasks=requested,
         request_scope=scope, trigger=trigger_json, task_inputs=inputs_json,
         tasks=tuple(all_instances), edges=tuple(edges), as_of=as_of,
-        enter_decision_cycle=enter_decision_cycle)
+        enter_decision_cycle=enter_decision_cycle, config_root=str(root.resolve()))
 
 
 __all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "TASK_ROLE", "TaskInstance", "WorkflowPlan",

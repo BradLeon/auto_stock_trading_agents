@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS shadow_order_intents (
     submit_refusal_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS shadow_intent_provenance (
+    intent_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS provenance_no_update BEFORE UPDATE ON shadow_intent_provenance
+BEGIN SELECT RAISE(ABORT, 'shadow provenance is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS provenance_no_delete BEFORE DELETE ON shadow_intent_provenance
+BEGIN SELECT RAISE(ABORT, 'shadow provenance is append-only'); END;
 CREATE INDEX IF NOT EXISTS idx_shadow_intents_run
     ON shadow_order_intents(run_id, cycle_id);
 
@@ -65,6 +72,13 @@ CREATE TABLE IF NOT EXISTS shadow_submit_attempts (
     refusal_id TEXT NOT NULL DEFAULT '',
     detail_json TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE TRIGGER IF NOT EXISTS shadow_attempts_no_update
+BEFORE UPDATE ON shadow_submit_attempts
+BEGIN SELECT RAISE(ABORT, 'shadow submit attempts are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS shadow_attempts_no_delete
+BEFORE DELETE ON shadow_submit_attempts
+BEGIN SELECT RAISE(ABORT, 'shadow submit attempts are append-only'); END;
 
 CREATE TRIGGER IF NOT EXISTS shadow_intents_no_update
 BEFORE UPDATE ON shadow_order_intents
@@ -96,8 +110,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _connect(path: str | Path | None = None) -> sqlite3.Connection:
+def _connect(path: str | Path | None = None, *, writable=True) -> sqlite3.Connection:
     target = Path(path or default_shadow_ledger_path())
+    if not writable:
+        conn = sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=ON")
+        return conn
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target, timeout=30.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -191,14 +210,18 @@ def intents(*, run_id: str | None = None, cycle_id: str | None = None,
         clauses.append("cycle_id=?")
         params.append(cycle_id)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    with _connect(path) as conn:
+    if not Path(path or default_shadow_ledger_path()).exists():
+        return []
+    with _connect(path, writable=False) as conn:
         return [dict(row) for row in conn.execute(
             f"SELECT * FROM shadow_order_intents{where}"
             f" ORDER BY cycle_id, revision_no, sequence", params).fetchall()]
 
 
 def submit_attempts(path: str | Path | None = None) -> list[dict[str, Any]]:
-    with _connect(path) as conn:
+    if not Path(path or default_shadow_ledger_path()).exists():
+        return []
+    with _connect(path, writable=False) as conn:
         return [dict(row) for row in conn.execute(
             "SELECT * FROM shadow_submit_attempts ORDER BY attempt_id").fetchall()]
 
@@ -231,6 +254,8 @@ def rebuild_attribution(cycle_id: str, path: str | Path | None = None
             "reached_broker": any(a["accepted"] for a in related),
             "refusal_codes": sorted({a["refusal_code"] for a in related
                                      if a["refusal_code"]}),
+            "provenance": business_provenance(row["intent_id"], path=path),
+            "attempts": [{**a, "detail": json.loads(a["detail_json"])} for a in related],
         })
 
     return {
@@ -320,3 +345,41 @@ def shadow_attestation(*, run_id: str, store: Any = None,
         attestation["real_ledger"] = assert_real_ledger_not_written(
             store, run_id=run_id, path=path)
     return attestation
+
+
+def record_business_intent(intent: ShadowIntent, *, provenance: dict, path=None):
+    """Append an exact business intent once; changed retries cannot overwrite it."""
+    from contextlib import closing
+
+    payload = json.dumps(provenance, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    with closing(_connect(path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            prior = conn.execute("SELECT * FROM shadow_order_intents WHERE intent_id=?",
+                                 (intent.intent_id,)).fetchone()
+            if prior:
+                saved = conn.execute("SELECT payload_json FROM shadow_intent_provenance WHERE intent_id=?",
+                                     (intent.intent_id,)).fetchone()
+                if any(prior[k] != v for k, v in intent.as_row().items()) or not saved or saved[0] != payload:
+                    raise ShadowLedgerWriteRefused("shadow intent identity/provenance changed on retry")
+            else:
+                fields = intent.as_row()
+                conn.execute(f"INSERT INTO shadow_order_intents ({','.join(fields)}, created_at) "
+                             f"VALUES ({','.join('?' for _ in fields)},?)", (*fields.values(), _now()))
+                conn.execute("INSERT INTO shadow_intent_provenance VALUES (?,?)", (intent.intent_id, payload))
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    return intent.intent_id
+
+
+def business_provenance(intent_id, *, path=None):
+    from contextlib import closing
+
+    with closing(_connect(path, writable=False)) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='shadow_intent_provenance'").fetchone():
+            return {}
+        row = conn.execute("SELECT payload_json FROM shadow_intent_provenance WHERE intent_id=?",
+                           (intent_id,)).fetchone()
+        return json.loads(row[0]) if row else {}

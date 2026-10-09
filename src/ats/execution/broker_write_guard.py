@@ -115,6 +115,7 @@ class RefusalRecord:
     symbol: str = ""
     quantity: float | None = None
     detail: str = ""
+    pid: int = field(default_factory=os.getpid)
 
     def as_row(self) -> dict[str, Any]:
         return {
@@ -126,6 +127,7 @@ class RefusalRecord:
             "symbol": self.symbol,
             "quantity": self.quantity,
             "detail": self.detail,
+            "pid": self.pid,
         }
 
 
@@ -139,11 +141,10 @@ class _GuardState:
     # this" must not read as "anything goes".
     grant: WriteGrant | None = None
     revocation_reason: str = ""
-    # Guards the *check*, not the write. Two threads racing a cutover must not
-    # both observe "permitted"; a single lock makes the read-modify-decide
-    # sequence atomic. The write itself stays outside — holding a lock across a
-    # broker round trip would serialise independent order submissions.
-    lock: threading.Lock = field(default_factory=threading.Lock)
+    # Held through the broker's irreversible call as well as the check. The
+    # shared route mutex handles other processes; this lock prevents a local
+    # revocation/prohibition from racing the same call. Polling stays outside.
+    lock: threading.RLock = field(default_factory=threading.RLock)
     counter: int = 0
 
 
@@ -177,6 +178,8 @@ def grant_write(route_id: str, generation: int, *, environment: str = "",
                        environment=environment, account=account, granted_at=_now())
     with _STATE.lock:
         _STATE.grant = grant
+        if _STATE.mode == UNSET:
+            _STATE.mode = "granted"
     return grant
 
 
@@ -207,7 +210,7 @@ def check_grant(*, operation: str, caller: str, state_reader,
                 account: str = "", environment: str = "",
                 symbol: str = "", quantity: float | None = None,
                 freeze_reader=None,
-                detail: str = "") -> None:
+                detail: str = "", require_binding: bool = False) -> None:
     """Re-verify this process's grant against the authoritative state.
 
     Called at every real submission, not once at start-up: the point of a
@@ -287,6 +290,15 @@ def check_grant(*, operation: str, caller: str, state_reader,
         _refuse(REASON_GENERATION_STALE,
                 f"grant was issued for route {grant.route_id!r} but the active "
                 f"route is {current.route_id!r}")
+    if require_binding:
+        if not grant.account or not current.account or not account \
+                or len({grant.account, current.account, account}) != 1:
+            _refuse(REASON_ACCOUNT_MISMATCH,
+                    "grant, authority and actual session/order account must all match")
+        if grant.environment not in {"paper", "live"} \
+                or len({grant.environment, current.environment, environment}) != 1:
+            _refuse(REASON_ENVIRONMENT_MISMATCH,
+                    "grant, authority and actual account environment must all match")
     if grant.environment and current.environment \
             and grant.environment != current.environment:
         _refuse(REASON_ENVIRONMENT_MISMATCH,
@@ -327,7 +339,7 @@ def install_prohibition(reason_code: str) -> None:
     if reason_code not in {REASON_SHADOW_RUN, REASON_ISOLATED, REASON_EXPLICIT}:
         raise ValueError(f"unknown broker write prohibition reason: {reason_code!r}")
     with _STATE.lock:
-        if _STATE.mode == UNSET:
+        if _STATE.mode != "prohibited":
             _STATE.mode = "prohibited"
             _STATE.reason_code = reason_code
 
@@ -384,10 +396,11 @@ def check_broker_write(*, operation: str, caller: str, symbol: str = "",
     Called from the broker's own submit path, not from a caller, so a new call
     site inherits the prohibition by construction.
     """
+    install_from_environment()
     with _STATE.lock:
-        if _STATE.mode != "prohibited":
+        if _STATE.mode == "granted" and _STATE.grant is not None:
             return
-        reason = _STATE.reason_code
+        reason = _STATE.reason_code if _STATE.mode == "prohibited" else REASON_NO_GRANT
         record = RefusalRecord(
             refusal_id=_next_id(_STATE),
             at=_now(),
@@ -438,10 +451,30 @@ def install_from_environment() -> bool:
     Returns whether a prohibition is now in force, so a caller can refuse to
     continue when the environment was ambiguous.
     """
-    if prohibited_from_environment():
+    run_mode = os.environ.get("ATS_RUN_MODE", "").strip().lower()
+    if prohibited_from_environment() or run_mode in {"shadow", "isolated"}:
         install_prohibition(
             REASON_ISOLATED
             if os.environ.get("ATS_RUN_MODE", "").strip().lower() == "isolated"
             else REASON_SHADOW_RUN)
         return True
     return is_prohibited()
+
+
+def startup(*, caller: str, mode: str = "") -> None:
+    """Arm and prove the prohibition before a shadow/isolated entry executes."""
+    install_from_environment()
+    requested = mode or os.environ.get("ATS_RUN_MODE", "").strip().lower()
+    if requested in {"shadow", "isolated"}:
+        prohibit_broker_writes(reason_code=(REASON_ISOLATED if requested == "isolated"
+                                            else REASON_SHADOW_RUN))
+    if requested in {"shadow", "isolated"} or prohibited_from_environment():
+        assert_broker_writes_prohibited(operation="startup", caller=caller)
+
+
+def refuse(reason_code: str, *, operation: str, caller: str, detail: str) -> None:
+    """Record failures at the actual session/authority/submit boundary."""
+    with _STATE.lock:
+        refusal_id = _record_refusal(_STATE, reason_code, operation, caller, "", None,
+                                    f"pid={os.getpid()} {detail}")
+    raise BrokerWriteProhibited(detail, reason_code=reason_code, refusal_id=refusal_id)

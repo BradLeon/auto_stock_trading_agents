@@ -66,6 +66,8 @@ Layer Analyst 的持久化输入按来源逐项验收，清单以 A/B/C 记录�
 
 Phase F 的读取资格按 `domain + consumer + contract_version + scope` 单独计算，写入、准入、读取、血缘、完整性、对账和回退证据缺任一项均 fail closed。当前十个 consumer 均未签发生产资格；逐角色原因和回退证据见 [Tasks 4 验收资料](validation/TARGET_DATAFLOW_TASK4_ACCEPTANCE.md)。资格查询本身不切换读取路由、不启用调度或交易。
 
+Phase F 的原生 `ats.data.consumer_api.read_input` 区分产品查询 `scope` 与读取资格 `business_scope`：后者包含 kind/id、显式实体与有时区的时间窗，并按实际调用的 domain/consumer/contract 绑定。可从已绑定的 CLI/Workflow/Dispatcher 上下文继承，独立调用必须显式提供；缺范围、跨实体/消费者/冻结 cutoff 都拒绝。持久化输入未传 as_of 时继承上下文的冻结时点；current_only 输入保持实际查询/来源时点且不接受历史 as_of。原生 API 不提供 legacy 实现，生产只允许已启用且合格的 exact-scope target，完整隔离候选可为后续资格形成本地证据。接口/CLI scope 格式与当前验证界限见 [业务接线报告](validation/PHASE_F_BUSINESS_WIRING_2026-10-08.md)。
+
 可复现门禁汇总、逐角色 ineligible 原因、保持的稳定路由及历史差异记录见 [Tasks 5 验收报告](validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)；机器结果由 `scripts/verify_dataflow_tasks5.py` 只读生成。来源采集失败、旧路径和无证据状态按事实记录，不因代码/配置存在而推断通过。
 
 本次重构的目的，不是简单地把数据分成“结构化数据库”和“向量数据库”，而是把当前由各个 Agent 自行取数、加工、保存的模式，升级为一套共享的研究数据基础设施。
@@ -906,6 +908,22 @@ defeatbeta 数据集页面当前声明 ODC-BY，底层数据来自 Yahoo Finance
 > 数据平台记录“当时外部世界发布了什么”；  
 > Agent 投影记录“不同角色如何解释这些事实”；  
 > 决策记忆记录“系统最终做出了什么判断和行动”。
+
+## Phase F 方案 A：执行行情的受限 runtime 消费（2026-10-08）
+
+Trader 在版本化 `target-dataflow-v2` 契约中同时消费批准授权与 MARKET_DATA；Risk 同步升级。
+二者经 consumer_api 和同一 execution_prices 服务读取，角色模块不直接连接 Provider。
+订单查询绑定 cycle/实体/业务 scope/用途/币种，Trader 不因此获得研究历史或期权读取权限；
+生产读取继续核验当次 exact-scope，完整隔离环境仅可形成候选证据。
+
+报价携带真实 source_as_of、queried_at、来源、Bid/Ask 或上一完整交易日 Close、USD、
+常规时段/历史状态、原始价格标记及确认的下单精度。行情缺失、错币种、非有限/非正、
+延迟或过期均显式拒绝；审批前规范化冻结完整订单，审批后只复核，不重新定量或改限价。
+审批报价与执行报价进入决策/交易审计，不进入共享事实或历史产品缓存。
+
+新资格必须含 runtime_query/timestamp/failure_semantics/no_persistence；授权证明不能替代行情证明。
+清单及共享 API 漂移影响十角色，旧证据保留，最终冻结后按新指纹追加补验，不全量重采。
+协议、阈值与隔离 FakeBroker 范围见 [Trader 入口](TARGET_WORKFLOW_DATAFLOW.md#104-trader-入口)。
 
 ## FactSet Earnings Insight（已上线）
 

@@ -27,7 +27,7 @@ def _document(store):
     doc = source_cache.store(
         "AMD", "2026Q2", "transcript", text, source="company:earnings",
         source_url="https://example.test/amd-q2", external_id="call-2026-q2",
-        title="AMD 2026 Q2 earnings call", published_at=NOW.isoformat(), min_chars=1,
+        title="AMD 2026 Q2 earnings call", published_at=NOW.isoformat(), now=NOW, min_chars=1,
     )
     assert doc is not None
     store.save_document(doc)

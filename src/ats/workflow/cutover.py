@@ -145,6 +145,7 @@ class BoundaryState:
     updated_by: str = ""
     reason: str = ""
     wired: bool = False
+    declared: bool = False
 
     @property
     def is_target(self) -> bool:
@@ -153,7 +154,8 @@ class BoundaryState:
     def as_row(self) -> dict[str, Any]:
         return {"boundary": self.boundary, "route": self.route,
                 "updated_at": self.updated_at, "updated_by": self.updated_by,
-                "reason": self.reason, "wired": self.wired}
+                "reason": self.reason, "wired": self.wired,
+                "declared": self.declared, "enforced": False}
 
 
 # --------------------------------------------------------------------------- #
@@ -207,13 +209,16 @@ def read_boundary(boundary: str, path: str | Path | None = None) -> BoundaryStat
         row = conn.execute(
             "SELECT * FROM cutover_boundary_state WHERE boundary=?",
             (boundary,)).fetchone()
+        declared = conn.execute(
+            "SELECT 1 FROM cutover_boundary_wiring WHERE boundary=? LIMIT 1",
+            (boundary,)).fetchone() is not None
     if row is None:
         raise CutoverError(
             f"boundary {boundary!r} has no state; run bootstrap() first — an absent "
             f"boundary must not read as 'legacy'")
     return BoundaryState(boundary=boundary, route=row["route"],
                          updated_at=row["updated_at"], updated_by=row["updated_by"],
-                         reason=row["reason"], wired=bool(row["wired"]))
+                         reason=row["reason"], wired=False, declared=declared)
 
 
 def all_boundaries(path: str | Path | None = None) -> dict[str, BoundaryState]:
@@ -285,7 +290,8 @@ class Wiring:
 
     def as_row(self) -> dict[str, Any]:
         return {"boundary": self.boundary, "call_site": self.call_site,
-                "authority": self.authority, "semantics": self.semantics}
+                "authority": self.authority, "semantics": self.semantics,
+                "declared": True, "enforced": False}
 
 
 def declare_wiring(*, boundary: str, call_site: str, authority: str,
@@ -315,8 +321,10 @@ def declare_wiring(*, boundary: str, call_site: str, authority: str,
                     " ON CONFLICT(boundary, call_site) DO UPDATE SET"
                     " authority=excluded.authority, semantics=excluded.semantics",
                     (boundary, call_site, authority, semantics, _now()))
+                # A declaration cannot establish enforcement, including when an
+                # older bootstrap left the compatibility column set to one.
                 conn.execute(
-                    "UPDATE cutover_boundary_state SET wired=1 WHERE boundary=?",
+                    "UPDATE cutover_boundary_state SET wired=0 WHERE boundary=?",
                     (boundary,))
             except Exception:
                 conn.execute("ROLLBACK")
@@ -344,7 +352,8 @@ def unwired_boundaries(path: str | Path | None = None) -> list[str]:
     return [b for b in SIX_BOUNDARIES if not wiring_of(b, path)]
 
 
-def assert_wired(boundary: str, path: str | Path | None = None) -> list[Wiring]:
+def assert_wired(boundary: str, path: str | Path | None = None, *,
+                 identity=None, mode: str = "production") -> list[Wiring]:
     """Refuse to rely on an unwired boundary.
 
     Used by activation and by the CLI pre-check. The message says what to do rather
@@ -356,6 +365,9 @@ def assert_wired(boundary: str, path: str | Path | None = None) -> list[Wiring]:
             f"boundary {boundary!r} has no declared wiring; declare at least one call "
             f"site (see PHASE_F_CUTOVER_RUNBOOK) — an unwired boundary cannot "
             f"justify a cutover because nothing reads it")
+    from .boundary_evidence import assert_enforced
+
+    assert_enforced(boundary, identity=identity, mode=mode, path=path)
     return sites
 
 
@@ -482,6 +494,7 @@ def _scope_hash(scope: dict[str, Any]) -> str:
 
 def preflight(*, boundary: str | None = None,
               request: ActivationRequest | None = None,
+              report_checker=None,
               path: str | Path | None = None) -> PreFlight:
     """Check everything a cutover needs, changing nothing.
 
@@ -525,6 +538,14 @@ def preflight(*, boundary: str | None = None,
     result.checked.append("wiring_declared")
 
     if request is not None:
+        from .shadow_reports import activation_batch, require_batch_report
+
+        if request.boundary in SIX_BOUNDARIES:
+            citable, problems = require_batch_report(activation_batch(request), report_checker)
+            result.checked.append("shadow_report_citable")
+            if not citable:
+                result.ok = False
+                result.problems.extend(problems)
         if request.boundary not in SIX_BOUNDARIES:
             result.ok = False
             result.problems.append(f"unknown boundary {request.boundary!r}")
@@ -567,6 +588,7 @@ def read_activation(boundary: str, scope_hash: str,
 
 
 def record_activation(*, request: ActivationRequest, route: str = ROUTE_TARGET,
+                      report_checker=None,
                       path: str | Path | None = None) -> dict[str, Any]:
     """Record an activation. The caller must have run the gate first.
 
@@ -581,6 +603,11 @@ def record_activation(*, request: ActivationRequest, route: str = ROUTE_TARGET,
             f"boundary state, not an activation")
     target = path or default_cutover_db_path()
     assert_wired(request.boundary, target)
+    from .shadow_reports import activation_batch, require_batch_report
+
+    citable, problems = require_batch_report(activation_batch(request), report_checker)
+    if not citable:
+        raise CutoverError("; ".join(problems))
     activation_id = f"activation-{uuid4().hex[:32]}"
     with _LOCK:
         with _connect(target) as conn:

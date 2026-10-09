@@ -141,7 +141,9 @@ def test_jobs_are_serialized_by_a_single_worker(registered):
     """The jobs share one sqlite connection, so they must not run concurrently."""
     executor = registered.init_kwargs.get("executors", {}).get("default")
     assert executor is not None
-    assert executor.__class__.__name__ == "ThreadPoolExecutor"
+    from ats.workflow.schedule_executor import PlannedThreadPoolExecutor
+
+    assert isinstance(executor, PlannedThreadPoolExecutor)
     assert executor._pool._max_workers == 1
 
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="44.059" timestamp="2026-10-08T22:29:43.996874+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_opinion_execution" name="test_actual_opinion_edges_and_published_lineage" time="42.997"><failure message="AssertionError: assert set() == {('informatio...r', 'sector')}&#10;  &#10;  Extra items in the right set:&#10;  ('layer', 'sector')&#10;  ('information', 'fundamental')&#10;  Use -v to get more diff">tests/test_phase_f_opinion_execution.py:31: in test_actual_opinion_edges_and_published_lineage
+    assert {(r["producer"],r["consumer"]) for r in edges}==allowed
+E   AssertionError: assert set() == {('informatio...r', 'sector')}
+E     
+E     Extra items in the right set:
+E     ('layer', 'sector')
+E     ('information', 'fundamental')
+E     Use -v to get more diff</failure></testcase></testsuite></testsuites>

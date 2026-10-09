@@ -86,6 +86,13 @@ def build_run_request(mode: str, symbol: str, *, trigger: str,
     raise ValueError(f"unknown fundamental run mode {mode!r}")
 
 
+from ...workflow.runtime_reads import scoped_read  # noqa: E402
+from ...workflow.schedule_runtime import scheduled_cli
+
+
+@scoped_read("fundamental")
+@scheduled_cli(lambda args: "fundamental-" + args["request"].mode,
+               kind="entity", argument=lambda args: args["request"].symbol)
 def run_fundamental_pass(request: FundamentalRunRequest) -> dict:
     """执行一次基本面运行。独立终结：不触发主理人、风控或执行链。"""
     if request.mode == MODE_ROUTINE:

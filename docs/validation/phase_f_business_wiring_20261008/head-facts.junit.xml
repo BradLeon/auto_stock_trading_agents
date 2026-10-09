@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="4" time="2.638" timestamp="2026-10-08T11:13:50.807181+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_fact_projections" name="test_multiple_task_links_share_one_neutral_fact" time="0.303" /><testcase classname="tests.test_fact_projections" name="test_reprocessing_retires_old_fact_views_but_keeps_history" time="0.252"><failure message="AssertionError: assert 0 == 1&#10; +  where 0 = len([])&#10; +    where [] = facts(entity='AMD')&#10; +      where facts = &lt;ats.memory.store.TradingMemory object at 0x109e48380&gt;.facts">def test_reprocessing_retires_old_fact_views_but_keeps_history():
+        store = get_store()
+        obs = _observation(row_id="obs-a", concept="customer_mix")
+        store.save_observation(obs)
+        assert store.supersede_document_observations(obs.document_id, "SEMIANALYSIS", at=NOW) == 1
+        assert store.facts(entity="AMD") == []
+        assert store.fact_projections(profile="evidence_observer") == []
+    
+        store.save_observation(obs)
+&gt;       assert len(store.facts(entity="AMD")) == 1
+E       AssertionError: assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = facts(entity='AMD')
+E        +      where facts = &lt;ats.memory.store.TradingMemory object at 0x109e48380&gt;.facts
+
+tests/test_fact_projections.py:50: AssertionError</failure></testcase><testcase classname="tests.test_fact_projections" name="test_pead_insight_is_a_projection_of_the_exact_document_version" time="0.271" /><testcase classname="tests.test_fact_projections" name="test_projection_versions_coexist_without_overwrite" time="0.223" /></testsuite></testsuites>

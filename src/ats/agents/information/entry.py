@@ -9,6 +9,7 @@ triggering the fundamental analyst, the chief, or any decision flow.
 from __future__ import annotations
 
 import logging
+from ...workflow.schedule_runtime import scheduled_cli
 
 log = logging.getLogger("ats.agents.information.entry")
 
@@ -47,6 +48,7 @@ def run_information_pass(*, use_llm: bool = True, symbols: list[str] | None = No
     return summary
 
 
+@scheduled_cli("information-brief", kind="entity", argument="symbol")
 def run_information_target(symbol: str, *, store=None, use_llm: bool = True,
                            run_extraction: bool = True, run_once=None) -> dict:
     """Run the information extraction pre-pass once, then publish one target brief.

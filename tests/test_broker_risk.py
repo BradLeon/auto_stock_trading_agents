@@ -86,6 +86,10 @@ def test_submit_rejects_unqualified_contract():
     """qualifyContracts returning [] (Error 200 / TWS offline) must NOT place an
     order — observed live 2026-07-15 during the IBKR maintenance window."""
     from ats.schemas.decision import TradeDecision
+    from ats.execution import broker_write_guard as guard
+
+    guard.reset_for_tests()
+    guard.grant_write("test", 1, environment="paper", account="DU1")
 
     class FakeIB:
         placed = False
@@ -105,6 +109,7 @@ def test_submit_rejects_unqualified_contract():
     assert "not qualified" in entry.error
     assert ib.placed is False
     assert broker._last_trades == [None]
+    guard.reset_for_tests()
 
 
 def test_size_survives_nan_close(monkeypatch):
@@ -146,4 +151,5 @@ def test_sizing_returns_zero_while_auto_execution_is_disabled():
 
     assert texec.AUTO_EXECUTION_ENABLED is False
     d = TradeDecision(symbol="MRVL", action="trim", notional_usd=6000)
-    assert texec._size(d) == 0.0
+    with pytest.raises(PermissionError, match="binding_required"):
+        texec._size(d)

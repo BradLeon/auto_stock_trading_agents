@@ -1,0 +1,1115 @@
+{
+  "generated_at": "2026-10-08T03:26:37.172976+00:00",
+  "head": "02c81f260718ee0ecdb78a63f2ef96d133a1e7d7",
+  "completed_this_run": [
+    "5.3",
+    "5.6"
+  ],
+  "total": 116,
+  "completed": 48,
+  "pending": 68,
+  "dependency_graph_acyclic": true,
+  "selected_dependencies_complete": true,
+  "regression": {
+    "tests": 561,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed_cases": [],
+    "sha256": "c8792fe513bc64f4af3d6ac4323bc6066051bef2e0ed597a894be232fa785285"
+  },
+  "record_guards": {
+    "tests": 20,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed_cases": [],
+    "sha256": "c85b9a8741e2113df9faf8f5964926e6bffc795f21b02bf66cce79f46cedd858"
+  },
+  "strict": [
+    {
+      "items": [
+        {
+          "id": "implement-phase-f-shadow-run-and-cutover",
+          "type": "change",
+          "valid": true,
+          "issues": [],
+          "durationMs": 45
+        }
+      ],
+      "summary": {
+        "totals": {
+          "items": 1,
+          "passed": 1,
+          "failed": 0
+        },
+        "byType": {
+          "change": {
+            "items": 1,
+            "passed": 1,
+            "failed": 0
+          }
+        }
+      },
+      "version": "1.0",
+      "root": {
+        "path": "/Users/liuchao/Code/trading/auto_stock_trading_agents",
+        "source": "nearest"
+      }
+    },
+    {
+      "items": [
+        {
+          "id": "refactor-workflow-dataflow-architecture",
+          "type": "change",
+          "valid": true,
+          "issues": [
+            {
+              "level": "INFO",
+              "path": "sector/layer-analyst/spec.md",
+              "message": "Archive would refuse this delta: sector/layer-analyst: target spec does not exist; only ADDED requirements are allowed for new specs. MODIFIED and RENAMED operations require an existing spec."
+            }
+          ],
+          "durationMs": 43
+        }
+      ],
+      "summary": {
+        "totals": {
+          "items": 1,
+          "passed": 1,
+          "failed": 0
+        },
+        "byType": {
+          "change": {
+            "items": 1,
+            "passed": 1,
+            "failed": 0
+          }
+        }
+      },
+      "version": "1.0",
+      "root": {
+        "path": "/Users/liuchao/Code/trading/auto_stock_trading_agents",
+        "source": "nearest"
+      }
+    }
+  ],
+  "limited_head_chief_comparison": {
+    "head": {
+      "tests": 8,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 0,
+      "failed_cases": [
+        "test_approved_places_and_persists",
+        "test_auto_approve_runs_without_interrupt",
+        "test_trader_thread_resumes_on_chief_graph"
+      ],
+      "sha256": "9bd22ee11c70027b1afa6ad54260fd582d6324ba2ab2d1915717236f329a034f"
+    },
+    "current": {
+      "tests": 8,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 0,
+      "failed_cases": [
+        "test_approved_places_and_persists",
+        "test_auto_approve_runs_without_interrupt",
+        "test_trader_thread_resumes_on_chief_graph"
+      ],
+      "sha256": "c9aa20a7ceca3976491ba903232fe4705fd5ae35acbc59392871d9ef5dd277a6"
+    }
+  },
+  "limited_head_store_comparison": {
+    "head": {
+      "tests": 4,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "failed_cases": [
+        "test_reprocessing_retires_old_fact_views_but_keeps_history"
+      ],
+      "sha256": "e688cf069e0af5b61df12c9ef2e26c603b0f99106ee0a4d1c5df7df25f335776"
+    },
+    "expanded_current": {
+      "tests": 561,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "failed_cases": [
+        "test_reprocessing_retires_old_fact_views_but_keeps_history"
+      ],
+      "sha256": "3b6f1e97abf5918fcd382691dc7c9508d4a851e8b5ff4ead710e2f65896eaffe"
+    }
+  },
+  "baseline_limit": "Only named HEAD modules are restored in subprocesses; other current code/tests remain. Not a full or pre-Phase-F baseline.",
+  "protected_drift": {
+    "src/ats/data/consumer_api.py": {
+      "before": "cf732809bfaff74ec80ad45831d70da23cb1f48c2eef3d53dbb1435879e233a8",
+      "after": "2cbce212f6d766514e241a80268a50f69ee6d7e8519bf692fa03bc06951fc1b0"
+    },
+    "src/ats/decision/repository.py": {
+      "before": "b44c4e0ef19b4612c4c5d35e8947c3c694cc9d4ee0fd34737c38c5d14d3b0e68",
+      "after": "2e82afa70724c219c66535a3a33881f53b43d311e048c17ca855d9e8939fc2f6"
+    },
+    "src/ats/execution/clerk.py": {
+      "before": "3cb23e09353617e716e9757c1e2d78d147fba589c34d492b2e8feb17efbcb9be",
+      "after": "40e2334dbb681e56bf8a2605ebbdba5bb64007ee07a4b81c97c38e75001eb325"
+    }
+  },
+  "affected_consumers": {
+    "src/ats/data/consumer_api.py": [
+      "chief",
+      "clerk",
+      "fundamental",
+      "information",
+      "layer",
+      "macro",
+      "risk",
+      "sector",
+      "technical",
+      "trader"
+    ],
+    "src/ats/decision/repository.py": [
+      "clerk",
+      "trader"
+    ],
+    "src/ats/execution/clerk.py": [
+      "clerk"
+    ]
+  },
+  "old_evidence_retained": true,
+  "qualification_registered": false,
+  "production_readonly_unchanged": true,
+  "production_inventory": {
+    "var/phase_f_cutover.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_activations": 0,
+        "cutover_boundary_history": 6,
+        "cutover_boundary_state": 6,
+        "cutover_boundary_wiring": 10
+      },
+      "authorization_inventory": {},
+      "boundaries": [
+        {
+          "boundary": "analyst_output",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "approval_lifecycle",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "clerk_publication",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "dispatcher_schedule",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "live_trader",
+          "route": "disabled",
+          "wired": 1
+        },
+        {
+          "boundary": "projection_read",
+          "route": "legacy",
+          "wired": 1
+        }
+      ]
+    },
+    "var/phase_f_batches.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_batch_dryruns": 28,
+        "cutover_batches": 5,
+        "read_cutover_authorizations": 1,
+        "read_cutover_runs": 12
+      },
+      "authorization_inventory": {
+        "read_cutover_authorizations": [
+          {
+            "reference": "DEP-2026-10-06-A",
+            "scope": "layer,information,sector,fundamental,macro,technical",
+            "valid_until": "2026-12-31T23:59:59+08:00",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "f458e5c2b65e4f2591c30f8381bfd02eb15cd8d3e8e5ca09feb5a99b13fc7b71",
+            "issued_by_present": true,
+            "issued_by_sha256": "fa732bfd3b63eaf9b6b16fe424dd1ef2f14ddd202d6cb802c69722cb915ba5da",
+            "note_present": true,
+            "note_sha256": "94f4843b4f312f83d1445b07284b894d729bdf91952381084551017ef0264a7d",
+            "record_sha256": "fdf50cc55c3af34cf7743b0a8041aa344f062da947f0c0a73d7ccecf9f1b2dbc",
+            "provenance_verified": false
+          }
+        ]
+      },
+      "batches": [
+        {
+          "batch_class": "collection_publish",
+          "batch_id": "batch-collection",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "internal_state_approval",
+          "batch_id": "batch-internal-approval",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "live_trader",
+          "batch_id": "batch-live-trader",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "research_read",
+          "batch_id": "batch-research-read",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "schedule",
+          "batch_id": "batch-schedule",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        }
+      ]
+    },
+    "var/phase_f_dispatch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "dispatch_claims": 0,
+        "dispatch_expected_triggers": 0,
+        "dispatch_freeze": 0,
+        "dispatch_owner_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_routes.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "trade_route_freeze": 0,
+        "trade_route_history": 0,
+        "trade_route_issuance": 0,
+        "trade_route_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_schedule_switch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    },
+    "var/phase_f_live_authorizations.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "live_authorizations": 1
+      },
+      "authorization_inventory": {
+        "live_authorizations": [
+          {
+            "reference": "LIVE-X",
+            "scope": "trader",
+            "environment": "live",
+            "valid_until": "2099-01-01T00:00:00+00:00",
+            "issuer": "human",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "65c74c15a686187bb6bbf9958f494fc6b80068034a659a9ad44991b08c58f2d2",
+            "issued_by_present": true,
+            "issued_by_sha256": "de7d1b721a1e0632b7cf04edf5032c8ecffa9f9a08492152b926f1a5a7e765d7",
+            "note_present": false,
+            "note_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "account_present": true,
+            "account_sha256": "316ca0efda6296d8f2c11d1e20890d220cec4266a0c16fbbef324c004688468a",
+            "record_sha256": "b8617e1a4dba464bd90292aa0f1abb34a99580b6987fbbd9fdaf874ab9d19407",
+            "provenance_verified": false
+          }
+        ]
+      }
+    },
+    "var/shadow/orders.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "shadow_order_intents": 0,
+        "shadow_submit_attempts": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/shadow/reports.sqlite": {
+      "exists": false
+    },
+    "var/data.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    }
+  },
+  "production_schema_absent": {
+    "var/phase_f_cutover.sqlite": [
+      "scoped_cutover_routes",
+      "scoped_cutover_history",
+      "boundary_enforcement_evidence"
+    ],
+    "var/phase_f_routes.sqlite": [
+      "trade_submit_receipts"
+    ]
+  },
+  "C3_enabled": false,
+  "boundary_inventory": {
+    "projection_read": [
+      {
+        "site": "ats.runtime.cli.run_chief",
+        "guard": "scoped_read",
+        "writer": "Chief",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "portfolio/entities/time + requested category/task snapshot",
+        "implementation_task": "9.3",
+        "consumers": [
+          "chief"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_sector_html",
+        "guard": "scoped_read",
+        "writer": "Sector CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "sector/layers/entities/time",
+        "implementation_task": "9.6",
+        "consumers": [
+          "sector"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.workflow.dispatcher.Dispatcher.dispatch",
+        "guard": "check_plan_reads",
+        "writer": "Dispatcher",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "task kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_layer_review",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "layer"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_information_pass",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "information"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_sector_review",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "sector"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_macro_review",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "macro"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_technical_review",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "technical"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli.run_pead",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "fundamental"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.cli._run_analyst_fundamental",
+        "guard": "scoped_read",
+        "writer": "Analyst CLI",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "consumer kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "fundamental"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.graph.chief.assemble_context",
+        "guard": "scoped_read",
+        "writer": "Chief graph",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "portfolio/entities/time",
+        "implementation_task": "5.6",
+        "consumers": [
+          "chief"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.workflow.dispatcher.Dispatcher._chief_snapshot_gate",
+        "guard": "bind_read",
+        "writer": "Chief snapshot",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "portfolio/entities/time",
+        "implementation_task": "5.6",
+        "consumers": [
+          "chief"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.data.consumer_api.read_input",
+        "guard": "guard_input",
+        "writer": "Governed native input",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "bound kind/id/entities/time",
+        "implementation_task": "5.6",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.workflow.ownership.run_owned_workflow",
+        "guard": "check_plan_reads",
+        "writer": "Workflow owner",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "task kind/id/entities/time/event version",
+        "implementation_task": "5.6",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      }
+    ],
+    "analyst_output": [
+      {
+        "site": "ats.memory.store.TradingMemory.save_task_projection_envelope",
+        "guard": "guard_analyst_output",
+        "writer": "Analyst publisher",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "task projection + claim owner/generation",
+        "implementation_task": "5.3",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.memory.store.TradingMemory.save_task_projection",
+        "guard": "guard_analyst_output",
+        "writer": "Legacy analyst publisher",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "legacy task projection + claim owner/generation",
+        "implementation_task": "5.3",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      }
+    ],
+    "dispatcher_schedule": [
+      {
+        "site": "ats.workflow.ownership.run_owned_workflow",
+        "guard": "claim",
+        "writer": "Workflow owner",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._daily",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production"
+        ],
+        "scope": "workflow/scope/planned instant",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._technical_daily",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._macro_weekly",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._sector_weekly",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._weekly_review",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._chief_daily",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler.pead_daily",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler.pead_score_window",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.runtime.scheduler._event_triggers",
+        "guard": "claim",
+        "writer": "Legacy scheduler",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "workflow/scope/planned instant or event/version",
+        "implementation_task": "4.2",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": false,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      }
+    ],
+    "approval_lifecycle": [
+      {
+        "site": "ats.decision.repository.DecisionAuditRepository.record_review",
+        "guard": "guard_approval_write",
+        "writer": "DecisionAuditRepository",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "cycle/revision/snapshot/approval/account",
+        "implementation_task": "5.3",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.decision.repository.DecisionAuditRepository.record_approval",
+        "guard": "guard_approval_write",
+        "writer": "DecisionAuditRepository",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "cycle/revision/snapshot/approval/account",
+        "implementation_task": "5.3",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      }
+    ],
+    "clerk_publication": [
+      {
+        "site": "ats.execution.clerk.clerk_run",
+        "guard": "guard_clerk_publication",
+        "writer": "Clerk",
+        "modes": [
+          "production",
+          "isolated"
+        ],
+        "scope": "ledger/reconciliation window/account",
+        "implementation_task": "5.3",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      }
+    ],
+    "live_trader": [
+      {
+        "site": "ats.broker.ibkr.IBKRBroker._submit",
+        "guard": "_submission_gate",
+        "writer": "IBKRBroker",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "intent/route/generation/account/environment",
+        "implementation_task": "2.2/2.3/2.8",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      },
+      {
+        "site": "ats.broker.ibkr.IBKRBroker.cancel_all",
+        "guard": "_submission_gate",
+        "writer": "IBKRBroker",
+        "modes": [
+          "production",
+          "shadow",
+          "isolated"
+        ],
+        "scope": "order/route/generation/account/environment",
+        "implementation_task": "2.2/2.3/2.8",
+        "consumers": [
+          "*"
+        ],
+        "mode_semantics": {
+          "production": "authoritative exact-scope route; disabled refuses; target requires qualified evidence",
+          "shadow": "isolated publication and execution records; broker writes prohibited",
+          "isolated": "isolated state and fake transport; production authority and broker writes prohibited"
+        },
+        "declared": true,
+        "guard_present": true,
+        "enforced": false,
+        "reason": "requires exact-scope business-entry execution evidence"
+      }
+    ]
+  },
+  "source_sha256": {
+    "src/ats/workflow/runtime_reads.py": "87912e2c8af2494b15ae9984f568edf7394f24ad06fcf407758261d8bfcaace7",
+    "src/ats/workflow/cutover_wiring.py": "c72be73e79740707e6dae482ebe416915f3f89f625cc0342975d16fe21c5d15a",
+    "src/ats/workflow/boundary_evidence.py": "bfb76c37c27a836d18449b8dec95eb81cc982fc6ea2c378a0206b88baf115454",
+    "src/ats/workflow/cutover_routing.py": "1dbd7adfffe495f1512c940f4c03dd641801da1f13ad2d42f0fd7d6a8027d3d9",
+    "src/ats/workflow/dispatcher.py": "b3d773bb1ae8120e7ac46beb16ef15e5425f984cefbc405c12bf91f0ca1ecea9",
+    "src/ats/workflow/phase_e.py": "e8538303135f4eda956a1e9fe235ec847d0a34a7fa4d4283826ad27ef1cc756e",
+    "src/ats/workflow/ownership.py": "1bfea72129490e46fa0560f2c67adb8533a52771b830342bf9477ae4ef5f7aa7",
+    "src/ats/workflow/isolation.py": "d73b8493de8a8718c16eaca3a18659606b411aa2cdc61fcab5c1a249cdcc65b7",
+    "src/ats/runtime/cli.py": "6eb1a39fa07a614b81d8fb911e76ddaf87e242b8940f1a35a803c9577b680ed8",
+    "src/ats/memory/store.py": "58ec5bdb30658b19e02d668ee159cad6fa00f9a7eb2f9d1949fbd9840ffb8bd4",
+    "src/ats/memory/__init__.py": "55fd76054a71ccb3feef58432c4f371ca526ec9b513f64e89d933f8be79eb1b1",
+    "src/ats/graph/chief.py": "b066ed0ed354e1ec8a3025283dc34c94125cf6b91783c9c3729f43e22db4451c",
+    "src/ats/data/consumer_api.py": "2cbce212f6d766514e241a80268a50f69ee6d7e8519bf692fa03bc06951fc1b0",
+    "src/ats/decision/repository.py": "2e82afa70724c219c66535a3a33881f53b43d311e048c17ca855d9e8939fc2f6",
+    "src/ats/execution/clerk.py": "40e2334dbb681e56bf8a2605ebbdba5bb64007ee07a4b81c97c38e75001eb325",
+    "tests/test_phase_f_business_wiring.py": "6baaa17cefcb947d89de80786f528ab2e51e9edc7986f671469ca5b336823b27"
+  },
+  "followup": [
+    "5.7",
+    "5.8",
+    "5.4",
+    "5.15",
+    "7.11",
+    "7.14",
+    "7.17",
+    "6.1",
+    "6.4",
+    "9.3",
+    "9.6",
+    "13.6"
+  ]
+}

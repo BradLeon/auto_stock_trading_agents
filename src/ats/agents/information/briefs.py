@@ -12,6 +12,8 @@ rule set is checkable in one place:
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import hashlib
 import re
 from datetime import datetime, timezone
@@ -114,11 +116,11 @@ def clocks_for(record: dict, *, extracted_at: datetime | None = None) -> dict:
     published = _parse(record.get("published_at"))
     event = _parse(record.get("event_time")) or published
     return {
-        "event_time": (event or extracted_at or datetime.now(timezone.utc)
+        "event_time": (event or extracted_at or evaluation_now(timezone.utc)
                        ).isoformat(timespec="seconds"),
-        "published_at": (published or extracted_at or datetime.now(timezone.utc)
+        "published_at": (published or extracted_at or evaluation_now(timezone.utc)
                          ).isoformat(timespec="seconds"),
-        "extracted_at": (extracted_at or datetime.now(timezone.utc)
+        "extracted_at": (extracted_at or evaluation_now(timezone.utc)
                          ).isoformat(timespec="seconds"),
     }
 

@@ -118,6 +118,8 @@ class TradeDecision(BaseModel):
     target_weight: float | None = Field(None, ge=0, le=1, description="desired portfolio weight")
     qty: float | None = Field(None, description="absolute share delta; sign implied by action")
     notional_usd: float | None = Field(None, ge=0)
+    execution_basis: dict = Field(default_factory=dict,
+                                   description="Frozen approval quote, policy and execution constraints")
     order_type: OrderType = "limit"
     limit_price: float | None = None
     time_in_force: TimeInForce = "DAY"

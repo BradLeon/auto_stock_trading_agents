@@ -1,5 +1,165 @@
 # 切流控制平面运行手册（Phase F）
 
+2026-10-09 本轮 **13.3 完成**，当前 **80/116 完成**。实际交易安全停止与已验收模拟目标恢复见 [验证记录](PHASE_F_TRADE_SAFE_STOP_2026-10-09.md)。新报告 unsigned，生产路由/C3 不变；本段覆盖下文旧时点“13.3 待实施”的口径。
+
+## 交易停止与隔离恢复（13.3）
+
+安全停止使用实际 `route_registry.freeze_submissions(actor, reason, expected_generation)`，保留 SQL token 与在途历史。停止期间新签发及真实仲裁出口均拒绝，Clerk 只读承接可继续，但不能解除冻结；未知/部分回执或未终结周期阻断恢复。应记录全部在途及处置，不用单周期/空 lifecycle 声称系统已排空。
+
+`route_switch.restore_stopped_simulation(token, expected_generation=..., lifecycle=..., target_check=..., actor=..., reason=...)` **仅用于完整物理隔离的无网络模拟恢复**。目标证明应关联实际验收、账户/环境、隔离文件和当前完整实现指纹；在排空前、换代前及开放前重验。恢复查询实际账本全周期/意图回执，在同一跨进程锁下换代再开放，不发 grant。目标失效、在途未处置或开放失败均保留原停止，不自动 abort。
+
+换代后开放失败，可用原 token、当前代次和新鲜目标证明明确重试；不再换代，不复活旧代授权。生产停止/恢复、部署或 IBKR Paper/live 写权限不能由此模拟入口取得；生产 C3 继续停用，完整交易运行手册仍由 11.4 收口。
+
+2026-10-09 当前 **79/116 完成**，新增 11.3、5.15；本节覆盖下文旧“联合待实施”的时点口径。见 [联合与交易恢复验证](PHASE_F_JOINT_AND_TRADE_RECOVERY_2026-10-09.md)。闭包 465，新报告 unsigned；生产资格/切流、TWS 未测，C3 保留。
+
+## 联合冻结恢复操作边界（5.15）
+
+`ats.workflow.joint_cutover.execute(request, gates=..., actor=..., reason=...)` 是 exact-scope 协调 API，正式 CLI 的完整适配由 9.2 承接。请求列明 batch/workflow、完整 RouteIdentity、每个边界/目标/预期代次，及 SQL-owner 的 scope/from/to/预期代次/在途 disposition；不接受隐式扩范围或 live_trader。
+
+`inspect(batch_id)` 只读查询 journal。prepared/门禁失败时保持冻结；按**原请求**和新鲜门禁重试 execute，不删除 journal、不改 batch ID 冒充恢复，不直接 cancel_freeze 或手改 owner。调度库路径、原代次、冻结 token 来源不符时继续停止。已完成回退采用新的显式批次和预期代次，执行同一协议。
+
+生产操作须先有 `record_authorization` 记录的可审计明确部署决定，绑定整个请求及有效期；执行器不代签。`revoke_authorization` 留追加记录，提交期间撤销会阻断开放。此记录不是 IBKR 写 grant，不能复用旧消费者级部署记录扩大 scope。isolated 模式要求全持久化面重定向与进程禁写，gate fixture 不可用于生产。
+
+scope 控制状态由 ATS_CUTOVER_DB 生效，调度 owner/generation 由 ATS_DISPATCH_STATE_PATH 生效；YAML 是模板，release overlay 本协议保持不变。先持久化冻结，分别提交两库，再重验开放；跨库间隙不得称原子。缺身份发布保守拒绝，旧 epoch worker 解除后仍失权。当前生产调度库仍未安装实际 runtime schema，须等待 10.2/10.3 受控安装核验。
+
+5.4 前置已补齐：gates 必须提供 authorization/qualification/report/fallback/**compatibility**。compatibility 接收 workflow、完整身份与候选 routes，返回同 workflow/identity、valid/reference 及 edges；每条依赖列 boundaries、mixed_compatible 与实际证明 reference。没有兼容证明时拒绝独立动作；证明混合版本兼容时只改声明边界。9.2 必须将这些适配接入实际受治理证据，fixture 返回值不构成生产证明；production 的单 scope transition_route 不再允许绕过协调器。
+
+交易换代 open 失败时，代次已变或权威不可读必须保持冻结。只读 `recover_interrupted_switch` 核验阶段，再显式 `open_after_recovery`；保留未终结订单阻断及原始审计，不为恢复重开生产 C3。完整演练与条件由 11.4/13.3 后续收口。
+
+2026-10-09 当前动态索引已由 7.8 更新，11.2/3.10 已完成；13.4/13.5 集成追溯与提交安全验收也已完成，当前 76/116 完成。以 [动态索引及复验命令](PHASE_F_INTEGRATION_2026-10-09.md) 定位真实 report/input/run/store/refs；三个通过报告仍 unsigned，缺行情失败报告保留，TWS 只读及生产资格/切流未测。下文旧时点段落是历史，不以“3.10 待完成”覆盖当前状态。
+
+本轮 **3.4–3.6 完成**：空库/混合历史/重复重开保留 native revision，实际跨进程 Clerk 批准与归因恢复；新入口/重放报告追加保存，独立签核，必需失败/未测和撤销/漂移拒绝；无旧侧真实 Technical 与新进程 CLI 已通过专项验证。见 [新入口报告与恢复验证](PHASE_F_ACCEPTANCE_REPORTS_2026-10-09.md)。完整交易的阶段输入报告仍由 3.10 承接，不是生产资格或全范围完成。
+
+2026-10-09 当前状态：新入口按需求独立验收，旧侧仅诊断及退出安全。本轮 **3.4 → 3.5 → 3.6 已完成**：修复兼容迁移重开污染、追加式需求报告/签核及实际记录 checker；当前 **71/116 完成**，45 项待办，第 3 组 9/10。旧报告保留历史类型，旧签核不转换；3.10 仍须独立 capture、选定全 workflow 窗口与完整交易重放，完整交易还依赖 11.2。保护并集 **100 个路径**，当前完整源码/提示闭包 **463**，历史 458/461 证据保留。生产资格、授权、owner、路由及 C3 未改变。下文历史时点结果保留，当前任务和本段优先。
+
+
+本轮 **3.2、5.7 完成**：运行前固定新需求版本、实际计划及 task/read scope、所选模式、必需断言与输入程度；实际读消费支持逐 scope 安全停止、已验收版本恢复和明确选择的旧目标，核对版本/证明/资格/退役/真实 refs，拒绝撤销、漂移及旧 worker 发布。133 项相关回归通过，含实际 Chief 入口、state API、历史工具回归；新需求断言执行及完整报告/runner 仍待后续。见 [新需求矩阵与恢复验证](PHASE_F_NEW_REQUIREMENTS_AND_RECOVERY_2026-10-09.md)。
+
+## 新入口验收报告命令（3.5/3.6）
+
+以下操作只组织隔离证据，不切生产路由；矩阵与输入须先固定，完整 capture/交易窗口仍由 3.10 实施。
+
+```sh
+uv run --offline --no-sync ats shadow acceptance-run --isolation-root <隔离根> --input-store <固定输入库> --packet-hash <input_hash> --matrix-file <新运行矩阵.json> --run-id <新入口执行ID>
+uv run --offline --no-sync ats shadow acceptance-run --isolation-root <隔离根> --input-store <固定输入库> --packet-hash <input_hash> --matrix-file <重放运行矩阵.json> --run-id <独立重放ID>
+uv run --offline --no-sync ats shadow acceptance-record --db <报告库> --report-id <新报告ID> --packet-hash <input_hash> --proof-file <proof.json> --actor <操作者>
+uv run --offline --no-sync ats shadow acceptance-report --db <报告库> --report-id <新报告ID>
+uv run --offline --no-sync ats shadow acceptance-signoff --db <报告库> --report-id <新报告ID> --actor <审阅者> --authority <权限方> --reason <理由>
+uv run --offline --no-sync ats shadow acceptance-check --db <报告库> --report-id <新报告ID> --batch-class research_read --scope-json '<固定exact-scope JSON>'
+```
+
+`proof.json` 必须指向持久化实际执行记录：`{"input_store":"<固定输入库>","new_run_id":"<新入口执行ID>","replay_run_id":"<独立重放ID>"}`。两个运行/side 必须独立且使用同一固定输入与等价需求，各自矩阵保留真实 run ID/plan hash。补验使用新运行与新报告、`acceptance-record --supersedes <旧报告ID>`，重新审阅签核；旧报告、驳回和撤销不覆盖。`acceptance-reject`/`acceptance-revoke` 同样必须给 actor/authority/reason。
+
+正式 batch dry-run/切流命令继续使用其 `--report-db` 与新报告 ID，中央 checker 会检查全部 requested consumers/必需面；单个 Technical 报告不能替代多消费者或审批/Clerk 批次。内部审批/Clerk 批次须完整风险/审批/归因，研究或 risk-only 不能降级。历史 `compare/signoff/check/capture-business/run-pair` 仅是旧诊断工具，不生成可替代的新验收证明。
+
+## 2026-10-09 新入口验收标准与任务调整
+
+| 验收对象 | 必需标准 | 不作为阻塞条件 |
+|---|---|---|
+| 六分析与 Chief | 所选 Event/Routine、其他必需类别/任务 scope、治理输入/投影/血缘/时效与实际成功记录 | 旧分析输出不同、旧侧失败、未选模式没运行 |
+| Risk/审批/Trader/Clerk | 审查/完整批准修订、A 两阶段报价、非空订单与无网络 FakeBroker、幂等及部分/迟到成交恢复 | 旧算法不同、旧 Clerk 业务红项 |
+| 新调度 | 固定需求/配置/事件的独立预期集合，实际触发覆盖、去重与发布权 | 旧调度是否成功、新旧触发并集 |
+| 报告与重放 | 新入口与新进程实际 run/refs、固定输入/版本、六面需求断言，必需项全部 passed，有效签核 | legacy run ID、左右结果相等、旧差异接受 |
+| 故障安全/退出 | 经真实入口验证安全停止或已验收版本恢复，旧入口失权，在途处置、历史保留 | 必须恢复旧业务、补齐废弃旧用途 |
+
+旧错误若仍影响新入口、共享事实、必需历史状态或写权限，按对应新需求失败处理，不能排除。未测如实列 untested；not-applicable 仅用于事先固定的无关面，optional/no_coverage/partial 原政策不变。全仓测试仍跑并逐失败归因；废弃旧业务经可达性/隔离证据排除后不阻塞新范围，不能凭“既有失败”排除新需求错误。
+
+实施缺口：旧 capture-business/run-pair 仅保留历史诊断用途；新报告/checker 和独立 Dispatcher 重放入口已交付，独立 capture/全选定范围及完整交易窗口仍待 3.10。原八项重开中的 3.2–3.6、5.7 已按任务粒度完成，12.2/12.3 仍待办；原证据不删，旧报告不能代替新报告，不表示新契约整体已通过。
+
+依赖顺序：**3.2、3.3 与 5.7 已完成**，下一步 **3.4 → 3.5 → 3.6**；完整交易验收补 **11.2 → 3.10**。3.10 不再以 3.9 双跑为前置；6.1 加入新报告链/3.10 的最终实现，再由 6.4 追加资格。12.3 在 13.1–13.3/13.10 安全恢复实测后核验观察窗口。无关研究子范围按 0.3 独立推进，生产/实盘授权不扩大。
+
+
+## 3.9 实际业务双运行入口（2026-10-09）
+
+前置：已准备完整隔离根中的已接收研究数据/历史和业务配置，全部数据库路径仍在该根下；Information 处理已有文档需有效的现有 queue worker lease。不会由此命令启动采集或补造 lease。下面 `/private/tmp/phase-f-business-seeded` 指已准备的隔离种子，不是空目录或生产目录；首次采集输入可以查询已声明只读数据/模型接口，重放只用冻结响应。可先用报告中的 pytest 命令复现受控种子场景。
+
+请求文件 `/private/tmp/phase-f-business-request.json` 示例（逻辑时间应与种子 as-of 配套，必须带时区）：
+
+```json
+{
+  "tasks": ["technical-review"],
+  "scope": {"kind": "entity", "id": "COHR"},
+  "trigger": {"kind": "manual", "trigger_id": "paired-cohr-technical"},
+  "logical_time": "2026-10-09T03:00:00+00:00",
+  "task_inputs": {}
+}
+```
+
+```sh
+UV_CACHE_DIR=/private/tmp/phase-f-audit-uv-cache uv run --offline --no-sync ats shadow capture-business --isolation-root /private/tmp/phase-f-business-seeded --input-store /private/tmp/phase-f-business-seeded/inputs.sqlite --request-file /private/tmp/phase-f-business-request.json --run-id capture-cohr-technical
+UV_CACHE_DIR=/private/tmp/phase-f-audit-uv-cache uv run --offline --no-sync ats shadow run-pair --isolation-root /private/tmp/phase-f-business-seeded --input-store /private/tmp/phase-f-business-seeded/inputs.sqlite --packet-hash CAPTURE_RETURNED_INPUT_HASH --pair-id pair-cohr-technical-001
+```
+
+第二条的 packet hash 必须取第一条 JSON 的 `input_hash`；返回 `proof` 包含同一 input_store 与 distinct legacy/dispatcher run IDs，左右结果由真实调用生成。命令不接受导入左右业务 JSON。run-pair 在新进程也可执行；依赖指纹变化需新 capture，缺输入不会在线刷新。两个 side 的业务库/报告及追加运行/失败 receipt 保留，失败后用新 pair ID/目录，不能删除旧认领再假装完成。
+
+Routine 六角色示例把 tasks 设为 `sector-review,fundamental-routine,macro-review,technical-review` 数组，并选择 sector scope、profile_id 与真实配置匹配；实际闭包由 build_plan 生成，不以少数投影代替完整类别。Event 用 `fundamental-event`，task_inputs 中提供 admitted 的 material_state、admitted_material_refs、fiscal_label（及适用 cutoff）；必须使用当前真实已接收材料。风控可加 `risk` 对象（cycle_id、非空 orders、可选 sector/event_data），已有只读账户快照缺失时拒绝。无需开启 Chief/审批或真实提交。
+
+此入口用于 3.9 运行证据，尚不构成 3.10 的新入口独立需求验收/报告签核。生产 C3、IBKR Paper/live 和生产资格/路由不因此开放。详见 [报告](PHASE_F_PAIRED_BUSINESS_2026-10-09.md)。
+
+
+
+本轮 **7.7、7.17 完成**：实际 scope/产物绑定逐消费者处置，保留 optional/no_coverage/FactSet/partial；旧 Clerk 缺陷只登记，切流适配仍按 4/5 组完成。完整指纹闭包与十角色漂移/旧契约回归、最终隔离交易恢复通过。当前 **66/116 完成，50 项待办**。详见 [逐消费者处置与 A 回归报告](PHASE_F_CONSUMER_DISPOSITION_AND_A_REGRESSION_2026-10-08.md)。7.8 仍待 3.10，6.1/6.4 仍待最终冻结前置；生产资格/切流及 C3 不改变。
+
+本轮 **7.3、7.5 完成**：实际观点输入/发布 lineage 与旁路拒绝通过；真实六角色研究 → Chief/Risk/审批/Trader/FakeBroker → Clerk 的非空订单、多轮审查、价格变化重批、部分/迟到成交、绩效重建及跨进程恢复通过。当前 **66/116 完成，50 项待办**。新增验收 13 passed，核心回归 96 passed；扩大检查两条既有失败保留并在本轮前源码复现。详见 [观点与完整执行恢复报告](PHASE_F_OPINION_AND_EXECUTION_2026-10-08.md)。生产资格/切流与 C3 不改变。
+
+本轮按 **9.3、9.6 → 7.2 → 7.4** 完成研究读模型、六角色实际入口及所选模式完整性门禁。当前 **66/116 完成**，50 项待办。Event/Routine 两条实际 Chief No Action 与跨进程校验通过；隔离完整链已由 7.5 补齐；生产资格、切流仍未达成。结果/fixture 范围/保留失败见 [研究读模型与门禁报告](PHASE_F_RESEARCH_GATE_2026-10-08.md)。
+
+旧口径下 **5.7、7.11 完成**（5.7 本次已重开）：实际读入口核验 scope 回退证明、退役状态与真实可读性；五角色消费治理产品/投影、state API、受限行情/批准授权与执行回报，保留真实 refs。进度 **66/116**，50 项待办。验证与剩余边界见 [安全读与消费边界报告](PHASE_F_SAFE_READS_2026-10-08.md)。
+
+本轮 **7.1 → 3.7 完成**，实际隔离入口及影子意图/提交拒绝/发布防污染见 [验证报告](PHASE_F_SHADOW_LEDGER_2026-10-08.md)。进度 **66/116**；十角色动态验收与实际业务双跑仍待后续任务。
+
+旧口径下 3.1/3.6 完成（3.6 本次已重开）：见 [输入与报告门禁报告](PHASE_F_SHADOW_FOUNDATION_2026-10-08.md)。进度 **66/116**，50 项待办；完整输入恢复与强制报告校验已实现，3.9/3.10 的实际业务影子验收仍未完成。
+
+## 当前执行入口：2026-10-08 裁决后恢复
+
+进度：**71/116 完成**，不是可切流证明。当前实施顺序和具体范围以 [tasks](../../openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md) 与 [前置报告](PHASE_F_RECOVERY_PREFLIGHT_2026-10-07.md) 为准；旧命令仍是历史工具用法，不证明实际入口接线或授权范围已通过。
+
+1. 第 0 组：文件/证据影响、完整性双层规则裁决、scope/六边界兼容矩阵、Git/uv/配置与授权来源、A 价格政策。2026-10-08 已明确裁决：Event/Routine 所选模式必须满足，另一模式不能替代，其他必需类别仍齐全；第 0 组已收尾，7.4 实际接线已完成。
+2. 在禁写/隔离保护下修实际 broker/审批/Clerk/角色/读/旧调度入口。read/schedule/analyst/approval/clerk 的独立或联合取决于具体 workflow/scope 和兼容证明；旧全局三配对规则待 5.4/5.15 修复，5.14 持久范围协议已完成，不能据此自动扩大动作。
+3. A 核心按 7.14 → 7.15 → 7.12 → 7.16 已接线，完整隔离链已由 7.5 验收；补验继续由 7.17 承接。Trader/Risk 共用受限治理报价，审批前冻结完整订单，审批后只校验，超约束重审重批。隔离测试须完整重定向、进程禁写、显式无网络 FakeBroker，并保留全部账户/grant/代次/审批/幂等门禁；不得预写订单冒充链路。生产 C3 保持停用，IBKR Paper/live 写入均需另行明确授权。详见 [方案 A 报告](PHASE_F_TRADER_A_2026-10-08.md)。
+4. 实际同输入双跑、跨进程重放、非空提交拒绝/意图链、切前业务回退先完成；最终依赖闭包冻结后才登记资格。影子有行情读权限也不能重新取变化中的报价。短 TTL 最小刷新不夹带受保护面修改，不全量重采。
+5. 最终 exact-scope 资格、适用签核报告、actual enforced、可用回退、观察/停止阈值与对应部署授权齐备才执行读/调度生产动作。消费者为空、空报告、缺 checker、无联合回退协议均拒绝；没有安全回退则停止范围。
+6. DEP-2026-10-06-A 是已存在的六分析部署记录，需核对原始动作范围；不能推断审批/Clerk 或联合动作授权。LIVE-X 来源未核实，不认定实盘授权；本 change 不执行真实 live 切换。
+
+本轮只读核验（旧前置记录冻结，不覆盖原证据）：
+
+```sh
+UV_CACHE_DIR=/private/tmp/phase-f-audit-uv-cache uv run --offline --no-sync python docs/validation/phase_f_trader_a_20261008/verify.py
+```
+
+该命令只读 production SQLite、核对本轮 JUnit/依赖和已登记的必要漂移，仅首次生成本轮 validation JSON；再次运行核对源码/JUnit 与冻结记录一致，不覆盖记录；不 bootstrap 生产状态、不签发授权、不运行生产 workflow、不连接券商。其成功不是生产资格证明。后续命令统一经 uv，本轮不运行以下历史 `--apply/authorize/bootstrap` 示例。
+
+
+1.1/2.2/2.3/2.8 已完成，启动/逐笔 broker 保护、跨进程重复意图及崩溃窗口验证见 [恢复报告](PHASE_F_BROKER_ENFORCEMENT_2026-10-08.md)。回执 unknown/submitted/partial 须只读对账，不能清除回执或盲重试；shadow 进程禁写不随命令返回解除。此局部结果不构成可切流证明。
+
+
+上轮 5.2/5.5/5.14 的机制验收及 324 passed 结果仍见 [scope 恢复报告](PHASE_F_SCOPED_ROUTING_2026-10-08.md)，该报告保持原时点。
+
+新增完成 **5.3/5.6**：Analyst 新旧投影、审查/审批和 Clerk 已接入真实发布控制，隔离/影子检查实际 SQLite 连接与 Clerk 子步骤落库。CLI/Workflow/Dispatcher、Chief graph/快照及 native API 按当次实体/时间/事件 scope 查询资格，历史复用重查、不同范围不借资格、混合任务独立阻断。相关回归 **562 passed**，新增 40 场景通过；另四条既有失败在有限 HEAD 模块对照中复现并保留，不宣称全量全绿。共享 consumer_api 漂移影响十角色，旧证据保留，最终冻结补验继续由 7.17/6.1/6.4 承接。上述报告时点尚缺的 5.7/7.11 已由本轮补齐；完整读模型验收 9.3/9.6 已完成；联合提交 5.15 仍待实施。生产资格/授权/路由及 C3 未改变。详见 [业务接线报告](PHASE_F_BUSINESS_WIRING_2026-10-08.md)。
+
+当前静态工具索引（只证明扫描结果，不是动态接入或生产资格）：
+
+| 消费者 | 当前工具证据 ID |
+|---|---|
+| `chief` | `intake-verification:c4a86809cb74197f:chief` |
+| `clerk` | `intake-verification:c4a86809cb74197f:clerk` |
+| `fundamental` | `intake-verification:c4a86809cb74197f:fundamental` |
+| `information` | `intake-verification:c4a86809cb74197f:information` |
+| `layer` | `intake-verification:c4a86809cb74197f:layer` |
+| `macro` | `intake-verification:c4a86809cb74197f:macro` |
+| `risk` | `intake-verification:c4a86809cb74197f:risk` |
+| `sector` | `intake-verification:c4a86809cb74197f:sector` |
+| `technical` | `intake-verification:c4a86809cb74197f:technical` |
+| `trader` | `intake-verification:c4a86809cb74197f:trader` |
+
+原始输出见 [current-static-index.json](phase_f_research_gate_20261008/current-static-index.json)。实际订单/拒绝证据以本轮报告为准；历史章节的旧 digest 保留但不能当作当前证明。
+
+研究验收通过 uv 运行 `tests/test_phase_f_research_gate.py`；独立 Chief 用 `--fundamental-mode routine|event --decision-profile ai_hardware` 选择固定需求。旧库存缺引用/缺依赖/配置漂移时停止，不能据本轮 fixture 解除生产 C3。
+
+## 历史手册（原工具与演练用法，不能直接当作当前切流流程）
+
+原命令、B/C3 裁决与验证时点保留；当前已改选 A，当前缺口不只是授权/TTL，须先按上述顺序补实现和实际证明。
+
 > 权威声明：本手册中的每个开关名、命令与判据都由 `tests/test_cutover_cli.py`
 > 与 `tests/test_cutover.py` 逐条校验。**手册与代码不一致时以代码为准，并请修本手册**——
 > 手册里的开关名如果代码没有，它会被信任而不会生效。
@@ -785,3 +945,20 @@ ats drill history --cutover-db var/phase_f_cutover.sqlite --drill-id <id>
 
 每条结果都带 `limits` 字段，写明本次演练**未**证明什么：消费者是否真读到旧数据、
 券商侧行为、实盘或部署授权是否会被批准。**演练通过不等于切流获准。**
+
+
+## 2026-10-09 实际调度入口与隔离交接补充
+
+当前真实业务控制命令为 `ats dispatch runtime-*`；此前 ownership/ledger/record-execution/rollback-plan 是兼容模块工具，不能证明实际入口已经认领。控制状态位置为 ATS_DISPATCH_STATE_PATH；runtime 命令不使用旧 helper 的 --state。生产必须先部署带栅栏版本并受控重启旧研究进程，再显式安装/核验权威状态；启动不隐式创建生产控制库。这里仅列隔离演练，生产操作等待 10.2/10.3/10.4 及授权、资格检查，联合批次等待 5.15。
+
+```sh
+UV_CACHE_DIR=/private/tmp/phase-f-audit-uv-cache uv run --offline --no-sync ats dispatch runtime-prepare --isolation-root /private/tmp/phase-f-runtime-drill --workflow technical-review --business-scope '{"kind":"entity","id":"COHR"}' --owner legacy
+UV_CACHE_DIR=/private/tmp/phase-f-audit-uv-cache uv run --offline --no-sync ats dispatch runtime-state --isolation-root /private/tmp/phase-f-runtime-drill
+UV_CACHE_DIR=/private/tmp/phase-f-audit-uv-cache uv run --offline --no-sync ats dispatch runtime-freeze --isolation-root /private/tmp/phase-f-runtime-drill --workflow technical-review --business-scope '{"kind":"entity","id":"COHR"}' --actor operator --reason isolated-handover
+```
+
+从 freeze 输出读取 token，先 runtime-inventory --token，再按返回的每个 key 提供 --dispositions JSON：`{"key":{"kind":"carry_over","reason":"unpublished task"}}` 或 void。runtime-handover 需 --token、--owner、--actor、--reason；空清单仅当事务中确实无未完成任务时允许。实际 worker 已完成的任务有 refs，不由 operator 伪造 already_run。部分发布任务不得 carry_over，需实际完成或显式 void；缺处置保持冻结。取消演练用 runtime-cancel-freeze --token --actor --reason，保留原代次及历史。回退同样冻结、清点、处置并提升代次，不恢复旧数据库快照。
+
+runtime-expected 与 runtime-compare 使用 --from-time/--to-time 带时区窗口，且指定同一 --isolation-root；前者独立列出配置预期工作及 wake，后者检查双路径 arrival、已完成 refs、共同遗漏与 misfire。相同 tick 手动调用不能重复发布，新的输入应使用新的逻辑触发。研究重载 runtime-reload 核对 SQL 权威，仅登记 YAML wake 摘要，不改变 owner，也不运行采集。已发布财报版本是 PEAD window 的前置；缺失时通过原 managed data 流程补齐，不能在研究交接中偷跑采集。
+
+原始验证与只读校验：[本轮报告](PHASE_F_SCHEDULE_RUNTIME_2026-10-09.md)。完整控制平面 runbook 任务 5.13 尚依赖 5.10，不能由本补充提前勾选。

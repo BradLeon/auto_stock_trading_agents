@@ -1,0 +1,367 @@
+{
+  "root": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3",
+  "reports": [
+    {
+      "label": "routine",
+      "report_id": "independent",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o0/iso/report.sqlite",
+      "status": "unsigned",
+      "eligible_for_explicit_signoff": true,
+      "problems": [],
+      "class": "trading",
+      "scope": {
+        "entities": [
+          "COHR"
+        ],
+        "id": "ai_hardware",
+        "kind": "sector",
+        "time_range": {
+          "end": "2026-10-09T08:45:25.642677+00:00",
+          "start": "2026-10-09T08:45:25.642677+00:00"
+        }
+      },
+      "input_hash": "fa90e33a2d825db4944b62d68c53c9ce8d1fb78ee8cf22c801fd1656b17176b9",
+      "proof": {
+        "input_store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o0/iso/fixed.sqlite",
+        "new_run_id": "new",
+        "replay_run_id": "replayed"
+      },
+      "executions": [
+        {
+          "run_id": "new",
+          "workflow_run_id": "new",
+          "input_hash": "fa90e33a2d825db4944b62d68c53c9ce8d1fb78ee8cf22c801fd1656b17176b9",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 126,
+          "expected_triggers": 6,
+          "measured_triggers": 7,
+          "all_required_passed": true,
+          "output_refs": [
+            "011ae925228512ad90c98241fbe2ef58",
+            "084208f77e9d4d64aab7cf4738e4599c",
+            "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "56ace0d799d77f013dc4d47e69ea569e",
+            "56e3292945709cf6091156f79dc8f72a",
+            "614caca245cf42418244760af182315b",
+            "6e4536772ac15b2b4858e8e074d672a7",
+            "9f82e8000fa744f6f5c3b58ea6a21056",
+            "ab10c93594ea4f6a847674e3b5fa46ea",
+            "af2a868f87195ecba19b56be28b7fb7d",
+            "b020f5e754bc7acef52c072e5b317ff8",
+            "cd3d4b0cc8aa4dfab3ab806860710819",
+            "ce4ecfa52516478a8e66e00ab80967ae",
+            "e9e64e2550ec4e919ff54b646a374d9d",
+            "independent-chain:r1:approval:r1",
+            "independent-chain:r1:review:r1",
+            "input:fa90e33a2d825db4944b62d68c53c9ce8d1fb78ee8cf22c801fd1656b17176b9",
+            "sim-1",
+            "sim-1-fill-1"
+          ],
+          "broker_refusal": {
+            "cycle_id": "independent-chain",
+            "destination": "IBKR",
+            "reason_code": "isolated_run_prohibited",
+            "refusal_id": "broker-write-refusal-000002"
+          },
+          "simulated_acceptances": 1,
+          "receipt_count": 1,
+          "retry_unchanged": true,
+          "clerk_status": "completed",
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o0/iso/new/memory.sqlite"
+        },
+        {
+          "run_id": "replayed",
+          "workflow_run_id": "replayed",
+          "input_hash": "fa90e33a2d825db4944b62d68c53c9ce8d1fb78ee8cf22c801fd1656b17176b9",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 126,
+          "expected_triggers": 6,
+          "measured_triggers": 7,
+          "all_required_passed": true,
+          "output_refs": [
+            "011ae925228512ad90c98241fbe2ef58",
+            "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "2ba99e3e94e84e8c8cf8d6d9de7556b6",
+            "56ace0d799d77f013dc4d47e69ea569e",
+            "56e3292945709cf6091156f79dc8f72a",
+            "637535b99876405da40d9599f7326d58",
+            "6e4536772ac15b2b4858e8e074d672a7",
+            "9f82e8000fa744f6f5c3b58ea6a21056",
+            "af2a868f87195ecba19b56be28b7fb7d",
+            "b020f5e754bc7acef52c072e5b317ff8",
+            "b7fe7945523045d79b967a5c105e372d",
+            "d9fd80161bba47d2a5e86e8417f8aedf",
+            "e859a25ef66f4c6f8a1b5c0c21c29faf",
+            "f225eef7cd784cf3835864c4a2a3c572",
+            "independent-chain:r1:approval:r1",
+            "independent-chain:r1:review:r1",
+            "input:fa90e33a2d825db4944b62d68c53c9ce8d1fb78ee8cf22c801fd1656b17176b9",
+            "sim-1",
+            "sim-1-fill-1"
+          ],
+          "broker_refusal": {
+            "cycle_id": "independent-chain",
+            "destination": "IBKR",
+            "reason_code": "isolated_run_prohibited",
+            "refusal_id": "broker-write-refusal-000001"
+          },
+          "simulated_acceptances": 1,
+          "receipt_count": 1,
+          "retry_unchanged": true,
+          "clerk_status": "completed",
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o0/iso/replayed/memory.sqlite"
+        }
+      ]
+    },
+    {
+      "label": "event",
+      "report_id": "independent",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o1/iso/report.sqlite",
+      "status": "unsigned",
+      "eligible_for_explicit_signoff": true,
+      "problems": [],
+      "class": "trading",
+      "scope": {
+        "entities": [
+          "COHR"
+        ],
+        "id": "ai_hardware",
+        "kind": "sector",
+        "time_range": {
+          "end": "2026-10-09T08:46:20.716221+00:00",
+          "start": "2026-10-09T08:46:20.716221+00:00"
+        }
+      },
+      "input_hash": "086e37075bbacffb5e202269870b0abf7115ad1c83d73ed3a07c65d64d13d55a",
+      "proof": {
+        "input_store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o1/iso/fixed.sqlite",
+        "new_run_id": "new",
+        "replay_run_id": "replayed"
+      },
+      "executions": [
+        {
+          "run_id": "new",
+          "workflow_run_id": "new",
+          "input_hash": "086e37075bbacffb5e202269870b0abf7115ad1c83d73ed3a07c65d64d13d55a",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 130,
+          "expected_triggers": 6,
+          "measured_triggers": 7,
+          "all_required_passed": true,
+          "output_refs": [
+            "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "1664a17b6f12267986a3c557067d5919",
+            "16d81f27ba0192376432c37de9476988",
+            "24043e3c75c93f48e6f37be3ad93cadb",
+            "4fcb790cee704ac3a6b2467f842ecdc9",
+            "6bd154693becd812c6c40d26d797a654",
+            "804168a15e3c42b6a67d47347b666fd7",
+            "8ecd092faa6ad3983aa4f9a03d1b5327",
+            "8fa21c4607eb44c29b8c2586c2a968e7",
+            "960ff86b5718481265e9c35b499a8587",
+            "c856d797fae24901894efb28a187cf8e",
+            "e6edd3564fe195c7a135d1f856346463",
+            "e974866307d34ae19066f3780b363bbc",
+            "eb5ad25555164506b96978972dabf153",
+            "independent-chain:r1:approval:r1",
+            "independent-chain:r1:review:r1",
+            "input:086e37075bbacffb5e202269870b0abf7115ad1c83d73ed3a07c65d64d13d55a",
+            "sim-1",
+            "sim-1-fill-1"
+          ],
+          "broker_refusal": {
+            "cycle_id": "independent-chain",
+            "destination": "IBKR",
+            "reason_code": "isolated_run_prohibited",
+            "refusal_id": "broker-write-refusal-000002"
+          },
+          "simulated_acceptances": 1,
+          "receipt_count": 1,
+          "retry_unchanged": true,
+          "clerk_status": "completed",
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o1/iso/new/memory.sqlite"
+        },
+        {
+          "run_id": "replayed",
+          "workflow_run_id": "replayed",
+          "input_hash": "086e37075bbacffb5e202269870b0abf7115ad1c83d73ed3a07c65d64d13d55a",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 130,
+          "expected_triggers": 6,
+          "measured_triggers": 7,
+          "all_required_passed": true,
+          "output_refs": [
+            "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+            "1664a17b6f12267986a3c557067d5919",
+            "16d81f27ba0192376432c37de9476988",
+            "24043e3c75c93f48e6f37be3ad93cadb",
+            "5954554988144c588e331b27f18413cc",
+            "6bd154693becd812c6c40d26d797a654",
+            "6e2e018078c543119571fa5d157e1566",
+            "729e0247024649b68baa0b06f7fe17e7",
+            "82138f9d3d504c7592611b9118b8bbd5",
+            "8ecd092faa6ad3983aa4f9a03d1b5327",
+            "9344eac74bfe4f0c923e53a39f649b82",
+            "960ff86b5718481265e9c35b499a8587",
+            "afa501b8aa064d80859dab9a29bc2b2a",
+            "e6edd3564fe195c7a135d1f856346463",
+            "independent-chain:r1:approval:r1",
+            "independent-chain:r1:review:r1",
+            "input:086e37075bbacffb5e202269870b0abf7115ad1c83d73ed3a07c65d64d13d55a",
+            "sim-1",
+            "sim-1-fill-1"
+          ],
+          "broker_refusal": {
+            "cycle_id": "independent-chain",
+            "destination": "IBKR",
+            "reason_code": "isolated_run_prohibited",
+            "refusal_id": "broker-write-refusal-000001"
+          },
+          "simulated_acceptances": 1,
+          "receipt_count": 1,
+          "retry_unchanged": true,
+          "clerk_status": "completed",
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_actual_full_capture_and_o1/iso/replayed/memory.sqlite"
+        }
+      ]
+    },
+    {
+      "label": "research_available",
+      "report_id": "research",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis0/iso/report.sqlite",
+      "status": "unsigned",
+      "eligible_for_explicit_signoff": true,
+      "problems": [],
+      "class": "research_read",
+      "scope": {
+        "entities": [
+          "COHR"
+        ],
+        "id": "ai_hardware",
+        "kind": "sector",
+        "time_range": {
+          "end": "2026-10-09T08:47:14.870116+00:00",
+          "start": "2026-10-09T08:47:14.870116+00:00"
+        }
+      },
+      "input_hash": "7b50c6303bb3f7595f844ee9d0e8b38383d92f6fefa577fb06204570ef8ed685",
+      "proof": {
+        "input_store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis0/iso/research.sqlite",
+        "new_run_id": "new",
+        "replay_run_id": "replayed"
+      },
+      "executions": [
+        {
+          "run_id": "new",
+          "workflow_run_id": "new",
+          "input_hash": "7b50c6303bb3f7595f844ee9d0e8b38383d92f6fefa577fb06204570ef8ed685",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 5,
+          "expected_triggers": 1,
+          "measured_triggers": 1,
+          "all_required_passed": true,
+          "output_refs": [
+            "0919a554d2ba476b8a2b4e00774031a7",
+            "f5b90568cd8d168fc0936d7c800edf59",
+            "input:7b50c6303bb3f7595f844ee9d0e8b38383d92f6fefa577fb06204570ef8ed685"
+          ],
+          "broker_refusal": null,
+          "simulated_acceptances": 0,
+          "receipt_count": 0,
+          "retry_unchanged": true,
+          "clerk_status": null,
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis0/iso/new/memory.sqlite"
+        },
+        {
+          "run_id": "replayed",
+          "workflow_run_id": "replayed",
+          "input_hash": "7b50c6303bb3f7595f844ee9d0e8b38383d92f6fefa577fb06204570ef8ed685",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 5,
+          "expected_triggers": 1,
+          "measured_triggers": 1,
+          "all_required_passed": true,
+          "output_refs": [
+            "3789866d203240c2ba69a98e45fbb7cb",
+            "f5b90568cd8d168fc0936d7c800edf59",
+            "input:7b50c6303bb3f7595f844ee9d0e8b38383d92f6fefa577fb06204570ef8ed685"
+          ],
+          "broker_refusal": null,
+          "simulated_acceptances": 0,
+          "receipt_count": 0,
+          "retry_unchanged": true,
+          "clerk_status": null,
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis0/iso/replayed/memory.sqlite"
+        }
+      ]
+    },
+    {
+      "label": "research_missing",
+      "report_id": "research",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis1/iso/report.sqlite",
+      "status": "unsigned",
+      "eligible_for_explicit_signoff": false,
+      "problems": [
+        "required assertions failed or untested; repair/measure and create a new report"
+      ],
+      "class": "research_read",
+      "scope": {
+        "entities": [
+          "COHR"
+        ],
+        "id": "ai_hardware",
+        "kind": "sector",
+        "time_range": {
+          "end": "2026-10-09T08:47:18.980821+00:00",
+          "start": "2026-10-09T08:47:18.980821+00:00"
+        }
+      },
+      "input_hash": "66c3a91404fd6343b8a68c9c9a56ec5dcf2a58ca8312724ca564c32c7b0b1a8e",
+      "proof": {
+        "input_store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis1/iso/research.sqlite",
+        "new_run_id": "new",
+        "replay_run_id": "replayed"
+      },
+      "executions": [
+        {
+          "run_id": "new",
+          "workflow_run_id": "new",
+          "input_hash": "66c3a91404fd6343b8a68c9c9a56ec5dcf2a58ca8312724ca564c32c7b0b1a8e",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 4,
+          "expected_triggers": 1,
+          "measured_triggers": 1,
+          "all_required_passed": false,
+          "output_refs": [
+            "input:66c3a91404fd6343b8a68c9c9a56ec5dcf2a58ca8312724ca564c32c7b0b1a8e"
+          ],
+          "broker_refusal": null,
+          "simulated_acceptances": 0,
+          "receipt_count": 0,
+          "retry_unchanged": true,
+          "clerk_status": null,
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis1/iso/new/memory.sqlite"
+        },
+        {
+          "run_id": "replayed",
+          "workflow_run_id": "replayed",
+          "input_hash": "66c3a91404fd6343b8a68c9c9a56ec5dcf2a58ca8312724ca564c32c7b0b1a8e",
+          "entry": "ats.workflow.acceptance_reports.dispatch_entry",
+          "actual_reads": 4,
+          "expected_triggers": 1,
+          "measured_triggers": 1,
+          "all_required_passed": false,
+          "output_refs": [
+            "input:66c3a91404fd6343b8a68c9c9a56ec5dcf2a58ca8312724ca564c32c7b0b1a8e"
+          ],
+          "broker_refusal": null,
+          "simulated_acceptances": 0,
+          "receipt_count": 0,
+          "retry_unchanged": true,
+          "clerk_status": null,
+          "store": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_independent_runner_20261009_v3/test_research_only_capture_mis1/iso/replayed/memory.sqlite"
+        }
+      ]
+    }
+  ]
+}

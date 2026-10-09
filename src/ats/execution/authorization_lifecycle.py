@@ -45,8 +45,10 @@ LIVE_ORDER_STATUSES: frozenset[str] = frozenset({"pending", "submitted", "partia
 
 # Cycle states that mean the cycle can no longer produce an order. A cycle that is
 # still live may yet submit, which is what a route switch has to be sure about.
-TERMINAL_CYCLE_STATUSES: frozenset[str] = frozenset({
-    "executed", "rejected", "cancelled", "failed", "superseded",
+from ..decision.state import TERMINAL_STATUSES
+
+TERMINAL_CYCLE_STATUSES: frozenset[str] = frozenset(s.value for s in TERMINAL_STATUSES) | frozenset({
+    "rejected", "cancelled", "failed",  # recoverable historic vocabulary
 })
 
 

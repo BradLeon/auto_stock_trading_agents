@@ -249,18 +249,19 @@ def test_the_script_and_the_suite_agree_on_the_policy_fingerprint_surface():
     counts as the contract."""
     manifest = yaml.safe_load(COVERAGE.read_text(encoding="utf-8"))
     policy_paths = list(manifest["qualification_policy"]["required_fingerprint_paths"])
-    source = SCRIPT.read_text(encoding="utf-8")
+    import runpy
+    from ats.workflow.assurance_surface import load_surface
 
-    for path in policy_paths:
-        assert path in source, f"script does not fingerprint policy path {path}"
-
-    tree = ast.parse(source)
-    scripted = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value.startswith(("src/ats/", "config/", "scripts/")):
-                scripted.add(node.value)
-    assert set(policy_paths) <= scripted
+    script = runpy.run_path(str(SCRIPT))
+    paths = script["fingerprint_paths"]()
+    surface = load_surface()
+    assert set(surface.all_paths()) <= set(paths)
+    assert set(policy_paths) <= set(paths)
+    for role in surface.consumers:
+        assert set(surface.paths_for(role)) <= set(script["fingerprint_paths"](role))
+    hashes = assurance._dependencies(paths)
+    assert set(hashes) == set(paths)
+    assert all(len(value) == 64 for value in hashes.values())
 
 
 def test_neither_side_asserts_a_production_qualification():

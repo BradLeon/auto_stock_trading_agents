@@ -20,15 +20,13 @@ time rather than only in a report. Three tasks, one chain:
   changes. Logging the drift and proceeding is the specific failure: the log says
   the evidence moved, and the trade goes through anyway.
 
-The one thing none of these do is modify `consumer_api.py` or `assurance.py`. Both
-are on the qualification fingerprint surface, so editing either would invalidate
-every recorded evidence row — including the evidence this module depends on. The
-wrapping happens here.
+Actual business entries use runtime_reads; native consumer_api now requires that
+same business scope. The resulting shared fingerprint drift is recorded before
+final qualification. Historical helper comparisons do not prove integration.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,41 +90,71 @@ class RouteDecision:
         }
 
 
-def read_route(*, consumer_id: str, target_boundary_active: bool,
+def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
+               identity=None,
                fallback_route: str = cutover_module.ROUTE_LEGACY,
                fallback_check: Callable[[], dict[str, Any]] | None = None,
                path: str | Path | None = None) -> RouteDecision:
     """Resolve the read route for one consumer scope, gated on qualification.
 
-    `target_boundary_active` says whether the projection-read boundary is pointed at
-    the target. When it is not, this returns immediately: a consumer that nobody
-    asked to move must not be qualification-checked, because that would make an
-    unrelated revocation block ordinary legacy reads.
+    `identity` resolves the persisted business scope. A global target flag cannot
+    select a route. The old `target_boundary_active=False` form remains a legacy
+    read only, pending migration of the real callers in 5.6/9.3/9.6.
 
     `fallback_check` returns the three-part verdict from `assess_fallback`. It is a
     parameter so the fallback policy is one function rather than something each call
     site re-derives — and so a test can make the target unavailable without
     breaking the repository.
     """
-    if not target_boundary_active:
+    from .scoped_routes import resolve_route
+
+    if fallback_route != cutover_module.ROUTE_LEGACY:
+        raise RouteUnavailable("fallback must name the legacy route")
+    if identity is None and target_boundary_active is not False:
+        raise RouteUnavailable("exact business identity required; global target flag is not a route")
+    if identity is not None and identity.consumer_id != consumer_id:
+        raise RouteUnavailable("runtime route consumer identity mismatch")
+    if identity is not None:
+        from .joint_cutover import assert_scope_open
+        try:
+            assert_scope_open(identity,path=path)
+        except cutover_module.CutoverError as exc:
+            raise RouteUnavailable(str(exc)) from exc
+    route = (resolve_route(cutover_module.PROJECTION_READ, identity, path=path)["route"]
+             if identity is not None else fallback_route)
+    from .read_recovery import ReadStopped, current_policy
+
+    recovery = current_policy(identity, path=path) if identity is not None else None
+    if recovery and recovery["stopped"]:
+        raise ReadStopped("business scope remains stopped; explicit recovery registration required")
+    if route == cutover_module.ROUTE_DISABLED:
+        raise RouteUnavailable("projection_read boundary disabled")
+    if route != cutover_module.ROUTE_TARGET:
         return RouteDecision(
-            consumer_id=consumer_id, domain_id="", contract_version="",
-            scope={}, route=fallback_route,
+            consumer_id=consumer_id, domain_id=identity.domain_id if identity else "",
+            contract_version=identity.contract_version if identity else "",
+            scope=identity.scope if identity else {}, route=route,
             fallback=FALLBACK_OK,
             gap="")
 
     from ..data.assurance import qualification as _qualification
 
     contract = _consumer_contract(consumer_id)
+    if (identity.domain_id != contract["domain_id"]
+            or identity.contract_version != contract["contract_version"]):
+        raise RouteUnavailable("runtime route domain/contract mismatch")
+    from .boundary_evidence import assert_enforced
+
+    assert_enforced(cutover_module.PROJECTION_READ, identity=identity, path=path)
     decision = RouteDecision(
         consumer_id=consumer_id, domain_id=contract["domain_id"],
-        contract_version=contract["contract_version"], scope=contract["scope"],
+        contract_version=contract["contract_version"], scope=identity.scope,
         route=cutover_module.ROUTE_TARGET,
         target_route=cutover_module.ROUTE_TARGET)
 
     result = _qualification(
         domain_id=contract["domain_id"], consumer_id=consumer_id,
-        contract_version=contract["contract_version"], scope=contract["scope"])
+        contract_version=contract["contract_version"], scope=identity.scope)
     decision.qualification = {
         "status": result.get("status"),
         "reasons": list(result.get("reasons", [])),
@@ -137,13 +165,32 @@ def read_route(*, consumer_id: str, target_boundary_active: bool,
         return decision
 
     # 5.7: an ineligible consumer goes back only somewhere safe.
-    verdict = (fallback_check() if fallback_check
-               else assess_fallback(fallback_route, consumer_id=consumer_id,
-                                    path=path))
+    if recovery:
+        from .read_recovery import STOP, _proof, stop
+
+        try:
+            proof = _proof(identity, recovery, path=path)
+        except ReadStopped as exc:
+            stop(identity, recovery, str(exc), path=path)
+        if proof["strategy"] == STOP:
+            stop(identity, recovery, "registered safe stop after qualification failure", path=path)
+        if fallback_check is None:
+            raise FallbackUnsafe("registered version requires an actual consumption adapter",
+                                 reason_code="recovery_adapter_required")
+    verdict = (fallback_check() if fallback_check else {
+        **assess_fallback(fallback_route, consumer_id=consumer_id, path=path),
+        "identity": identity.as_row()})
+    if verdict.get("identity") != identity.as_row():
+        raise RouteUnavailable("fallback proof business scope mismatch")
     decision.fallback = verdict["verdict"]
     decision.fallback_reason_code = verdict.get("reason_code", "")
     decision.gap = verdict.get("reason", "")
 
+    if verdict.get("verdict") == FALLBACK_OK and not (
+            verdict.get("reference") and verdict.get("proof_valid") is True
+            and verdict.get("retired") is False and verdict.get("available") is True):
+        raise FallbackUnsafe("fallback lacks scope proof, retirement or actual readability",
+                             reason_code="fallback_checks_incomplete")
     if verdict["verdict"] != FALLBACK_OK:
         raise FallbackUnsafe(
             f"{consumer_id} is not qualified for the target route and cannot fall "
@@ -153,7 +200,11 @@ def read_route(*, consumer_id: str, target_boundary_active: bool,
                     "qualification_reasons": decision.qualification["reasons"],
                     "fallback_verdict": verdict})
 
-    decision.route = fallback_route
+    decision.route = verdict.get("recovery_route", fallback_route)
+    if decision.route not in {cutover_module.ROUTE_TARGET, cutover_module.ROUTE_LEGACY}:
+        raise RouteUnavailable("unknown recovery route")
+    if decision.route == cutover_module.ROUTE_TARGET:
+        decision.qualification = verdict["qualification"]
     return decision
 
 
@@ -227,6 +278,11 @@ def assess_fallback(target_route: str, *, consumer_id: str = "",
                           + "; an unproven fallback must not be used, because the "
                           "existing dual-read comparison only records presence "
                           "disagreements and never gated anything",
+                "target_route": target_route, "consumer_id": consumer_id}
+
+    if retired is not False or available is not True:
+        return {"verdict": FALLBACK_BLOCKED, "reason_code": "fallback_checks_incomplete",
+                "reason": "retirement and actual readability must be confirmed",
                 "target_route": target_route, "consumer_id": consumer_id}
 
     return {"verdict": FALLBACK_OK, "reason_code": "", "reason": "",

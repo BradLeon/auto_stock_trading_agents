@@ -8,6 +8,8 @@ ever initiates a retrieval — ingestion belongs to the data layer pipelines.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -24,6 +26,23 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
     published_at; the cutoff here is applied on the record's published time so
     late-arriving old material is excluded from "this window's new facts".
     """
+    from ...workflow.isolation import verified_isolation_root
+    from ...workflow.runtime_reads import current_read_context
+
+    context = current_read_context()
+    if context and (context.route == "target" or verified_isolation_root() is not None):
+        from ...data.consumer_api import read_input
+
+        packet = read_input(consumer="information", product="DOC_DATA",
+                            scope={"entity": symbol, "limit": limit})
+        if packet.status not in {"complete", "partial", "no_coverage"}:
+            from ...workflow.cutover_routing import RouteUnavailable
+
+            raise RouteUnavailable("Information admitted documents unavailable")
+        return [{**row, "id": row["document_id"], "headline": row["title"],
+                 "input_ref": f"{row['document_id']}@{row['version_id']}"}
+                for row in packet.payload or []
+                if row.get("published_at") and row["published_at"] >= cutoff.isoformat()]
     out = []
     for row in store.recent_events(symbol, limit=limit):
         record = dict(row)
@@ -71,7 +90,7 @@ def admitted_articles(store, *, since: datetime, limit: int = 500) -> list:
 
 
 def default_cutoff(lookback_days: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    return evaluation_now(timezone.utc) - timedelta(days=lookback_days)
 
 
 def signal_chain_universe(targets: list[str]) -> tuple[str, dict[str, list[str]]]:

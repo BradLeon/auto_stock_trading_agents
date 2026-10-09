@@ -117,8 +117,14 @@ def perform_switch(new_route: str, *, actor: str = "", reason: str = "",
             f"operator moved it, so this attempt is stale")
         return report
 
-    freeze = route_registry.freeze_submissions(
-        actor=actor, reason=reason or f"switch to {new_route}", path=target)
+    try:
+        freeze = route_registry.freeze_submissions(
+            actor=actor, reason=reason or f"switch to {new_route}", path=target,
+            expected_generation=current.generation)
+    except RouteRegistryError as exc:
+        report.aborted_at = "freeze"
+        report.reasons.append(str(exc))
+        return report  # never abort a competing operator's freeze
     report.switch_token = freeze.switch_token
     report.steps_completed.append("freeze")
 
@@ -147,18 +153,20 @@ def perform_switch(new_route: str, *, actor: str = "", reason: str = "",
         report.steps_completed.append("open")
         return report
 
-    except Exception as exc:  # noqa: BLE001 - every failure must release the freeze
+    except Exception as exc:  # noqa: BLE001 - post-bump failures must keep the freeze
         report.aborted_at = _current_step(report)
         report.reasons.append(str(exc))
         # Reopening under the SAME generation: nothing was applied, so nothing
         # needs re-approving. A rollback would be the wrong verb here.
-        try:
-            route_registry.abort_freeze(freeze.switch_token, actor=actor,
-                                        reason=str(exc), path=target)
-        except Exception:  # noqa: BLE001 - a wedged registry must still surface
-            report.reasons.append(
-                f"CRITICAL: the freeze could not be released; submissions stay "
-                f"closed until it is")
+        current = route_registry.try_read_state(target)
+        if current is None or current.generation != freeze.from_generation:
+            report.reasons.append("generation changed or authority unreadable; keep frozen for explicit recovery")
+        else:
+            try:
+                route_registry.abort_freeze(freeze.switch_token, actor=actor,
+                                            reason=str(exc), path=target)
+            except Exception:  # noqa: BLE001 - failure must preserve the closed state
+                report.reasons.append("CRITICAL: submissions stay closed until freeze recovery")
         return report
 
 
@@ -176,6 +184,11 @@ def _drain_reasons(freeze: route_registry.FreezeState,
       specific order ids so the operator can act, and retryable once settled.
     """
     reasons: list[str] = []
+    for receipt in route_registry.submission_receipts(path):
+        if receipt["status"] not in {"filled", "cancelled", "rejected"}:
+            reasons.append(f"broker intent {receipt['intent_id']} is {receipt['status']} "
+                           f"(pid={receipt['pid']}, generation={receipt['generation']}); "
+                           "read-only reconciliation is required")
     freeze_state, counter = route_registry.read_freeze_with_counter(path)
     if freeze_state.switch_token != freeze.switch_token:
         reasons.append(
@@ -253,8 +266,8 @@ def recover_interrupted_switch(path: str | Path | None = None) -> dict[str, Any]
         "stage": ("bump_completed_open_pending" if generation_moved
                   else "freeze_completed_drain_pending"),
         "can_submit": False,
-        "remedies": ["re-run the switch", "abort_freeze(...) to reopen on the "
-                     "same generation"],
+        "remedies": ["re-run the switch", ("abort_freeze(...) to reopen on the "
+                     "same generation")],
     }
 
 
@@ -275,3 +288,85 @@ def abort_after_recovery(switch_token: str, *, actor: str = "", reason: str = ""
     """Abort an interrupted switch, reopening on whatever generation is current."""
     route_registry.abort_freeze(switch_token, actor=actor, reason=reason, path=path)
     return route_registry.read_state(path)
+
+
+def restore_stopped_simulation(switch_token: str, *, expected_generation: int,
+                               lifecycle: AuthorizationLifecycle | None, target_check,
+                               actor: str, reason: str) -> SwitchReport:
+    """Recover a stopped, validated no-network transport; failures remain frozen.
+
+    This is an isolated rehearsal entry, not deployment/live authorization. The
+    target proof is re-read before bump and open and pinned to current business
+    code. No grant is issued, and old authorizations never regain their generation.
+    A post-bump retry may finish opening the same target without another bump.
+    """
+    from ..workflow.business_replay_inputs import implementation_hashes
+    from ..workflow.isolation import verified_isolation_root
+    from .route_arbitration import authority_lock
+    from .simulation import selected_simulation
+
+    root = verified_isolation_root()
+    target = Path(route_registry.default_registry_path()).resolve()
+    if root is None or not target.is_relative_to(root):
+        raise RouteSwitchBlocked("stop recovery requires verified physical isolation")
+    if not actor or not reason:
+        raise RouteSwitchBlocked("recovery actor/reason required")
+    report = SwitchReport(to_route="simulation", switch_token=switch_token)
+    with authority_lock(target):
+        try:
+            state = route_registry.read_state(target)
+            freeze = route_registry.read_freeze(target)
+            report.from_route, report.from_generation = freeze.from_route, freeze.from_generation
+            if not freeze.frozen or freeze.switch_token != switch_token:
+                raise RouteSwitchBlocked("owned durable freeze token required")
+            if state.generation != expected_generation:
+                raise RouteSwitchBlocked("recovery generation changed")
+            report.steps_completed.append("freeze")
+
+            def check_target():
+                broker = selected_simulation()
+                if broker is None:
+                    raise RouteSwitchBlocked("validated simulation target unavailable")
+                broker.assert_active()
+                proof = target_check() if callable(target_check) else {}
+                reference = Path(proof.get("reference", "")).resolve()
+                if (proof.get("valid") is not True or proof.get("route_id") != "simulation"
+                        or proof.get("environment") != "paper" or proof.get("account") != broker.account
+                        or not reference.is_file() or not reference.is_relative_to(root)
+                        or proof.get("implementation") != implementation_hashes()):
+                    raise RouteSwitchBlocked("current validated target proof missing or drifted")
+                return broker, proof
+
+            broker, proof = check_target()
+            drain = _drain_reasons(freeze, lifecycle, path=target)
+            # Do not let a single-cycle (or invented empty) view hide another
+            # approved authorization in this transport's actual isolated store.
+            from .authorization_lifecycle import lifecycle_for_cycle
+            for row in broker.store.conn.execute("SELECT cycle_id FROM decision_cycles"):
+                actual = lifecycle_for_cycle(row["cycle_id"],store=broker.store)
+                if actual.blocks_route_switch():
+                    drain.append("actual cycle still unfinished: " + row["cycle_id"])
+            report.drain = {"lifecycle": lifecycle.blocking_summary() if lifecycle else None,
+                            "target_reference": proof["reference"], "blockers": drain}
+            if drain:
+                raise RouteSwitchBlocked("stopped route drain blocked: " + ";".join(drain))
+            report.steps_completed.append("drain")
+            if state.generation == freeze.from_generation:
+                check_target()
+                report.state = route_registry.switch_route(
+                    state.generation, "simulation", environment="paper", account=broker.account,
+                    actor=actor, reason=reason, path=target)
+            elif (state.generation == freeze.from_generation + 1 and state.route_id == "simulation"
+                  and state.environment == "paper" and state.account == broker.account):
+                report.state = state
+            else:
+                raise RouteSwitchBlocked("unexpected post-stop authority; keep frozen")
+            report.to_generation = report.state.generation
+            report.steps_completed.append("bump")
+            check_target()
+            route_registry.open_submissions(switch_token, path=target)
+            report.steps_completed.append("open")
+        except Exception as exc:  # noqa: BLE001 - recovery must never abort the durable stop
+            report.aborted_at = _current_step(report)
+            report.reasons.append(str(exc))
+    return report

@@ -27,4 +27,4 @@ profiles:
       information_brief: config/pead.yaml
       fundamental_analysis: config/pead.yaml
       sector_allocation: config/sectors/ai_hardware.yaml
-  technical_review: config/technical.yaml
+      technical_review: config/technical.yaml

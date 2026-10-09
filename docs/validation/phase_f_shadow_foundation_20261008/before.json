@@ -1,0 +1,213 @@
+{
+  "files": {
+    "src/ats/workflow/shadow_inputs.py": "2e3e066685b14d7dab8030e2f7f9851bef4dac9bc2b8d377c0151fdaf8f70272",
+    "src/ats/workflow/shadow_reports.py": "55a2dfadb7470992fe2d11530f52ebdd8201ed25575e8d980ae3b83055029300",
+    "src/ats/workflow/batch_manifest.py": "0853738dc4f0486453374820478fb42b987aa93ea7f8bc50a6df3ea59bb809c2",
+    "src/ats/workflow/read_cutover.py": "7407a47b78d6913bd19516306dc112712ebf39b5632639c54446e0aaa70ffbc0",
+    "src/ats/runtime/cli.py": "6eb1a39fa07a614b81d8fb911e76ddaf87e242b8940f1a35a803c9577b680ed8",
+    "src/ats/workflow/isolation.py": "d73b8493de8a8718c16eaca3a18659606b411aa2cdc61fcab5c1a249cdcc65b7"
+  },
+  "protected": {
+    "config/data/target_dataflow_coverage.yaml": "72c1a37abb8d6bc3d66535d7a040abdc952f5814b455be10ac0cdf5d93b86226",
+    "src/ats/broker/ibkr.py": "3e259c32cf749d80d1c7a1e16af7e8ceeb3b927cbc594b20b28d55c8abd4e6d5",
+    "src/ats/data/consumer_api.py": "b0dce7ff28b4ff696cc554ebbcfa859c32d98135e04d70b33b26f22523d72928",
+    "src/ats/data/contract_validation.py": "f97ced5baf42bd218be4d29ad524d6712edca74366a5a1355059ce81dd21cdeb",
+    "src/ats/data/execution_prices.py": "f3a5321cca227558febabc2b8309f9ddaa94ce3c940d2371f89483783eeea859",
+    "src/ats/data/runtime/execution_prices.py": "9f77f3ff499b7ea799e2ac0f9452ee951ac8ffa9b6328af0913ed0ac42ea6944",
+    "src/ats/execution/simulation.py": "2bd35f328eb41819893d8aca015744c3089e073b0e1510b9d8cf3571cbc2e296",
+    "src/ats/graph/chief.py": "75e1e78158a8192c62d873ade5fa9c478025d72c7744e89c784132c6f35e43ea",
+    "src/ats/graph/chief_state.py": "1793ded379eaf5da321ded8edb5a97d6434f23cd27d9c2544fe6eb08874febe4",
+    "src/ats/risk/checks.py": "0ebe5cb3b80fd24d6e79f2d70c7902d9029fbc0912ad9b382c91c13c6fc2d89d",
+    "src/ats/schemas/decision.py": "1ed9a0f81ca514af1045c694c072d77d0f26c9ebb96a542608a1c512f8fb6274",
+    "src/ats/schemas/memory.py": "b6550e1b66dcbef2dfc68b5d6e79946ab4ec953cfd4fdbca5babc4a36c5cf768",
+    "src/ats/trader/execute.py": "41e749e6bdd648efeda312dcbdd75762ac0638fda934f03b4b23b02cb147f22e",
+    "tests/conftest.py": "856af40260992bad0129cc1b2c66f69ca25611c1d4204551b9f0bed44d5b9e7b",
+    "tests/phase_f_price_harness.py": "395f1328ef3d2c0cc042a1c97847a8bc10292893d2350fc0fa1a465b4afb1bcc",
+    "tests/test_broker_risk.py": "abb47db4bb4cd67a10a984ad5ab73121f447f2a1cf62a6727f80814bb2f12e08",
+    "tests/test_chief_loop.py": "9b4b9eec87e4200052a47ea99f1bb2632b3e335179c6561f8fb14a61fc5f4c87",
+    "tests/test_dataflow_assurance.py": "ad20b690697cf120aae943f440a36bf9e323ebf501c86d4edc7b119112aaf94d",
+    "tests/test_e2e_approval_chain.py": "50c7a99d5a5c5f4304f8c1af3ed7c53b8619f65f2ee95d083f550acc6b1082fe",
+    "tests/test_execution_authorization.py": "1e4b3528e3f1b442c83cbbbf7e90eaf56eb55a2dd944bbf67ed58ff0739e9647",
+    "tests/test_overnight_limits.py": "7b0bd81f63d26591fda1aa3c1eb40511c3343eb8856d8e34f74d3c5e9eaee556",
+    "tests/test_phase_f_trader_a.py": "a99621d2bda2c0fce785c59cf19d1ec9433a19cb704ab5201e38e5fbb6f7cda1",
+    "tests/test_trader.py": "94cf0bf0c668f32a7eea4af997e7b3af74bd1824a31d4d11f752eed2ab179fdc"
+  },
+  "production": {
+    "var/phase_f_cutover.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_activations": 0,
+        "cutover_boundary_history": 6,
+        "cutover_boundary_state": 6,
+        "cutover_boundary_wiring": 10
+      },
+      "authorization_inventory": {},
+      "boundaries": [
+        {
+          "boundary": "analyst_output",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "approval_lifecycle",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "clerk_publication",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "dispatcher_schedule",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "live_trader",
+          "route": "disabled",
+          "wired": 1
+        },
+        {
+          "boundary": "projection_read",
+          "route": "legacy",
+          "wired": 1
+        }
+      ]
+    },
+    "var/phase_f_batches.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_batch_dryruns": 28,
+        "cutover_batches": 5,
+        "read_cutover_authorizations": 1,
+        "read_cutover_runs": 12
+      },
+      "authorization_inventory": {
+        "read_cutover_authorizations": [
+          {
+            "reference": "DEP-2026-10-06-A",
+            "scope": "layer,information,sector,fundamental,macro,technical",
+            "valid_until": "2026-12-31T23:59:59+08:00",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "f458e5c2b65e4f2591c30f8381bfd02eb15cd8d3e8e5ca09feb5a99b13fc7b71",
+            "issued_by_present": true,
+            "issued_by_sha256": "fa732bfd3b63eaf9b6b16fe424dd1ef2f14ddd202d6cb802c69722cb915ba5da",
+            "note_present": true,
+            "note_sha256": "94f4843b4f312f83d1445b07284b894d729bdf91952381084551017ef0264a7d",
+            "record_sha256": "fdf50cc55c3af34cf7743b0a8041aa344f062da947f0c0a73d7ccecf9f1b2dbc",
+            "provenance_verified": false
+          }
+        ]
+      },
+      "batches": [
+        {
+          "batch_class": "collection_publish",
+          "batch_id": "batch-collection",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "internal_state_approval",
+          "batch_id": "batch-internal-approval",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "live_trader",
+          "batch_id": "batch-live-trader",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "research_read",
+          "batch_id": "batch-research-read",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "schedule",
+          "batch_id": "batch-schedule",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        }
+      ]
+    },
+    "var/phase_f_dispatch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "dispatch_claims": 0,
+        "dispatch_expected_triggers": 0,
+        "dispatch_freeze": 0,
+        "dispatch_owner_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_routes.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "trade_route_freeze": 0,
+        "trade_route_history": 0,
+        "trade_route_issuance": 0,
+        "trade_route_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_schedule_switch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    },
+    "var/phase_f_live_authorizations.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "live_authorizations": 1
+      },
+      "authorization_inventory": {
+        "live_authorizations": [
+          {
+            "reference": "LIVE-X",
+            "scope": "trader",
+            "environment": "live",
+            "valid_until": "2099-01-01T00:00:00+00:00",
+            "issuer": "human",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "65c74c15a686187bb6bbf9958f494fc6b80068034a659a9ad44991b08c58f2d2",
+            "issued_by_present": true,
+            "issued_by_sha256": "de7d1b721a1e0632b7cf04edf5032c8ecffa9f9a08492152b926f1a5a7e765d7",
+            "note_present": false,
+            "note_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "account_present": true,
+            "account_sha256": "316ca0efda6296d8f2c11d1e20890d220cec4266a0c16fbbef324c004688468a",
+            "record_sha256": "b8617e1a4dba464bd90292aa0f1abb34a99580b6987fbbd9fdaf874ab9d19407",
+            "provenance_verified": false
+          }
+        ]
+      }
+    },
+    "var/shadow/orders.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "shadow_order_intents": 0,
+        "shadow_submit_attempts": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/shadow/reports.sqlite": {
+      "exists": false
+    },
+    "var/data.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    }
+  }
+}

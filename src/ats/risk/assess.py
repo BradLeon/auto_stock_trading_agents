@@ -9,6 +9,8 @@ computed in `enrich_options`. See risk/options_math.py for the quant core.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 import math
 import time
@@ -16,20 +18,20 @@ from datetime import datetime, timezone
 
 from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.risk import (
-    Breach,
     AssignmentRisk,
+    Breach,
     CashEquivalent,
     Cluster,
     EconomicExposure,
-    ExpiryFundingBucket,
     EventRisk,
+    ExpiryFundingBucket,
     LayerExposure,
     MarginSummary,
     OptionRisk,
     OptionSurvivalSummary,
     PortfolioGreeks,
-    RiskReview,
     RiskDirective,
+    RiskReview,
     StressResult,
     SymbolLayer,
     UnderlyingExposure,
@@ -40,7 +42,7 @@ log = logging.getLogger("ats.risk.assess")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def _norm_sym(s: str) -> str:
@@ -180,7 +182,7 @@ def _days_to_expiry(expiry: str) -> int:
         ed = datetime.strptime(expiry.replace("-", "")[:8], "%Y%m%d").date()
     except (ValueError, TypeError):
         return 0
-    return max((ed - datetime.now(timezone.utc).date()).days, 0)
+    return max((ed - evaluation_now(timezone.utc).date()).days, 0)
 
 
 def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float) -> None:
@@ -349,6 +351,10 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     from ..memory import get_store
 
     rc = get_config().app.risk
+    from ..workflow.consumer_reads import record_read
+    from .checks import ruleset_version
+
+    record_read("risk", "ats.config.get_config", refs=["ruleset:" + ruleset_version()])
     registry = load_instrument_risk_registry()
     risk_policy = load_risk_policy()
     net_liq = portfolio.net_liquidation
@@ -579,6 +585,9 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     from ..execution import state_api
 
     _comp = state_api.completeness(get_store())
+    record_read("risk", "ats.execution.state_api.performance_history",
+                refs=[f"internal-history:{_comp.last_reconcile_at}"] if _comp.last_reconcile_at else [],
+                status=_comp.status)
     hist = [h for h in state_api.performance_history(get_store(), limit=250)
             if h.account_id == portfolio.account_id]
     if _comp.status == "degraded":

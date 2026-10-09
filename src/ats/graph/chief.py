@@ -15,6 +15,8 @@ checkpoint + thread_id (`ats serve`).
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
@@ -22,7 +24,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from ..schemas.channel import ApprovalRequest
-from ..schemas.decision import BossApproval
+from ..schemas.decision import BossApproval, TradeDecision
 from .chief_state import ChiefDecisionState
 
 log = logging.getLogger("ats.graph.chief")
@@ -34,12 +36,16 @@ CHIEF_SOURCES = ("chief", "scheduled", "pead-chief")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
+from ..workflow.runtime_reads import decision_read, scoped_read  # noqa: E402
+
+
+@scoped_read("chief")
 def assemble_context(state: ChiefDecisionState) -> dict:
-    from ..trader import execute as texec
     from ..data.products import workflow_data_boundary
+    from ..trader import execute as texec
 
     out: dict = {}
     boundary = workflow_data_boundary("chief_graph")
@@ -48,16 +54,22 @@ def assemble_context(state: ChiefDecisionState) -> dict:
         out["event_data"] = texec.pead_event_data()
     if not state.decide:
         return out
+    from ..agents.chief import assemble
     from ..memory import get_store
 
-    from ..agents.chief import assemble
-
     store = get_store()
-    ctx = assemble.build(live_broker=state.use_broker)
-    log.info("chief context: %s", ctx.stats())
+    from ..workflow import decision_requirements as dr
+
+    requirements = (state.decision_requirements or state.research_snapshot.get("requirements")
+                    or dr.standalone(state))
+    plan = dr.restore(requirements)
+    selected_plan = dr.query_plan(plan)
     # Phase D 7.1: fix the research snapshot BEFORE any decision context is
     # used — per-category projection ids, content hashes, as-of and freshness.
-    snapshot, detail = assemble.build_chief_snapshot(store, at=state.as_of)
+    snapshot, detail = assemble.build_chief_snapshot(
+        store, at=state.as_of, query_plan=selected_plan,
+        projection_manifest=requirements.get("manifest"))
+    dr.attach(snapshot, requirements, detail)
     out["research_snapshot"] = snapshot.to_payload()
     if not snapshot.complete:
         # 7.2/7.5/7.8: an incomplete snapshot blocks the cycle BEFORE any write
@@ -66,8 +78,12 @@ def assemble_context(state: ChiefDecisionState) -> dict:
         report = assemble.gap_report(snapshot, detail)
         print(f"🚧 研究快照不完整 — 决策周期阻断（不创建周期、不产出决策）\n{report}")
         out.update(gap_report=report, context_text="", context_stats={},
-                   net_liquidation=ctx.net_liquidation, actionable_scores=[])
+                   net_liquidation=0, actionable_scores=[])
         return out
+    dr.validate(store, snapshot.to_payload(), at=state.as_of)
+    ctx = assemble.build(live_broker=state.use_broker, query_plan=selected_plan,
+                         projection_manifest=snapshot.requirements["manifest"])
+    log.info("chief context: %s", ctx.stats())
     # 7.4: the projection read path rides along with the legacy blocks and the
     # per-category presence disagreement is recorded (never used to gate).
     ctx.blocks["研究快照（六类投影）"] = assemble.projection_context_block(detail)
@@ -93,6 +109,10 @@ def chief_decide(state: ChiefDecisionState) -> dict:
     if not state.decide:
         return {"decisions": list(state.seed_decisions)}
     from ..agents.chief import decide
+    from ..memory import get_store
+    from ..workflow.decision_requirements import validate_chief
+
+    validate_chief(get_store(), state.research_snapshot, at=_now())
 
     result = decide.from_context(state.context_text, cycle_id=state.cycle_id,
                                  as_of=state.as_of, use_llm=state.use_llm)
@@ -106,6 +126,7 @@ def chief_decide(state: ChiefDecisionState) -> dict:
     return {"summary": result.summary, "decisions": result.decisions}
 
 
+@decision_read("risk")
 def risk_gate(state: ChiefDecisionState) -> dict:
     """Hold-filter -> live portfolio -> whole-revision review -> size -> card body.
 
@@ -122,49 +143,90 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         return {"decisions": [], "approved_decisions": [],
                 "risk_round": state.risk_round + 1}
 
+    if state.decide and not state.revision_no:
+        from ..workflow.decision_requirements import validate_chief
+
+        validate_chief(_decision_repo().store, state.research_snapshot, at=_now())
+
     from ..risk import checks as risk_checks
     from ..trader import portfolio as tport
 
     pf = tport.snapshot() if state.use_broker else None
-    if pf is None:
-        # Degraded mode (paper / offline / broker account data unavailable):
-        # the review cannot project a post-trade state, so like the legacy
-        # gate it skips with a note. The whole-revision review itself fails
-        # closed (`review_revision`); the REAL backstop for this hole is the
-        # execution gate's snapshot-freshness check (task 7.5), which refuses
-        # any real order without a current portfolio snapshot.
-        note = "(no live portfolio — risk checks skipped)"
-        print(f"   [risk] {note}")
-        review = None
-        risk_notes = [note]
-        approved = decisions
-    else:
-        review = risk_checks.review_revision(decisions, pf,
-                                             event_data=state.event_data or None)
-        risk_notes = list(review.notes)
-        approved = [d for d, ov in zip(decisions, review.order_verdicts)
-                    if ov.verdict == "approved"]
+    from ..data.execution_prices import PriceUnavailable, normalize_orders, session_context
+    from ..workflow.cutover_routing import RouteUnavailable
+
+    normalization_notes, normalization_errors = [], []
+    try:
+        if pf is None:
+            raise PriceUnavailable("portfolio_snapshot_unavailable")
+        # Operational normalization precedes review: its result is the actual
+        # revision, card and order, rather than an unbound qty_by_symbol cache.
+        from ..config import load_pead_global
+        overnight = state.source == "pead-chief" and not session_context(_now())[0]
+        slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", .5)
+        decisions, normalization_notes = normalize_orders(
+            decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
+            overnight=overnight, slippage_pct=slip,
+            net_liquidation=pf.net_liquidation if pf else 0)
+    except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:
+        normalization_errors = [f"订单规范化拒绝，需重新审查：{exc}"]
+    if normalization_errors:
+        from ..schemas.risk import DecisionRiskReview, OrderRiskVerdict, RiskViolation
+
+        review = DecisionRiskReview(
+            verdict="rejected", notes=normalization_errors,
+            order_verdicts=[OrderRiskVerdict(symbol=d.symbol, action=d.action,
+                                           verdict="rejected", reasons=normalization_errors)
+                            for d in decisions],
+            violations=[RiskViolation(rule_id="execution_price_normalization",
+                                      detail=normalization_errors[0], severity="hard")])
+        return {"decisions": decisions, "approved_decisions": [], "portfolio": pf,
+                "risk_review": review, "risk_notes": normalization_errors,
+                "normalization_errors": normalization_errors, "qty_by_symbol": {},
+                "risk_round": state.risk_round + 1,
+                "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else "",
+                "approval_summary": "\n".join(normalization_errors)}
+    # Allocate the immutable revision before Risk consumes it. persist_decision
+    # later records the review against this same content hash, idempotently.
+    repo = _decision_repo()
+    if state.decide:
+        from ..decision.snapshot import frozen_snapshot_complete, frozen_snapshot_stale_reasons
+        from ..workflow.decision_requirements import validate_chief
+
+        if not frozen_snapshot_complete(state.research_snapshot):
+            raise ValueError("decision normalization requires complete research snapshot")
+        validate_chief(repo.store, state.research_snapshot, at=_now())
+        if state.revision_no and frozen_snapshot_stale_reasons(
+                repo.store, state.research_snapshot, at=state.as_of):
+            # Existing persistence path records supersession before any new revision.
+            return {"decisions": decisions, "approved_decisions": [],
+                    "risk_round": state.risk_round + 1}
+    repo.create_cycle(cycle_id=state.cycle_id, trigger_source=state.source,
+                      research_snapshot=state.research_snapshot or None,
+                      created_at=state.as_of.isoformat())
+    revision = repo.append_revision(
+        cycle_id=state.cycle_id, orders=_orders_payload(decisions),
+        rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
+        revision_source="chief", created_at=state.as_of.isoformat())
+    review = risk_checks.review_revision(decisions, pf,
+                                         event_data=state.event_data or None,
+                                         cycle_id=state.cycle_id)
+    risk_notes = list(review.notes)
+    approved = [d for d, ov in zip(decisions, review.order_verdicts)
+                if ov.verdict == "approved"]
     for n in risk_notes:
         print(f"   [risk] {n}")
     out: dict = {"decisions": decisions, "approved_decisions": approved,
+                 "revision_no": revision["revision_no"],
+                 "revision_hash": revision["decision_hash"], "normalization_errors": [],
                  "portfolio": pf, "risk_notes": risk_notes, "risk_review": review,
                  "risk_round": state.risk_round + 1,
                  "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else ""}
     if not approved:
         print("(所有决策被风控硬约束拦下 — 无单可下，等待修订或人工复核)")
-        return out    # The PEAD after-close window raises orders at 20:00 ET for approval overnight;
-    # reprice them as limits BEFORE the approval card is built, so the Boss approves
-    # the same prices that get submitted. (Operational repricing by the chief —
-    # not a risk rewrite; the review binds notionals, not limit prices.)
-    if state.source == "pead-chief":
-        from ..config import load_pead_global
-
-        slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", 0.5)
-        approved, limit_notes = texec.as_overnight_limits(approved, slip)
-        for n in limit_notes:
-            print(f"   [overnight] {n}")
-        risk_notes = list(risk_notes) + limit_notes
-
+        return out
+    # Normalization is already bound to the immutable revision reviewed above.
+    risk_notes = list(risk_notes) + normalization_notes
     sized = texec.size_decisions(approved)
     summary = texec.build_approval_summary(sized, risk_notes, state.source)
     out.update(risk_notes=risk_notes,
@@ -187,10 +249,8 @@ def _transition_error():
 
 
 def _orders_payload(decisions) -> list[dict]:
-    return [{"symbol": d.symbol, "action": d.action, "qty": d.qty,
-             "notional_usd": d.notional_usd, "limit_price": d.limit_price,
-             "conviction": d.conviction, "rationale": d.rationale}
-            for d in decisions]
+    # Type, TIF, quantity, limit and quote constraints all participate in the hash.
+    return [d.model_dump(mode="json") for d in decisions]
 
 
 def _ruleset_version() -> str:
@@ -261,11 +321,13 @@ def persist_decision(state: ChiefDecisionState) -> dict:
     # incomplete frozen snapshot — the refusal happens BEFORE create_cycle.
     if state.decide:
         from ..decision.snapshot import frozen_snapshot_complete
+        from ..workflow.decision_requirements import validate_chief
 
         if not frozen_snapshot_complete(state.research_snapshot):
             raise ValueError(
                 "decide-path persist without a complete research snapshot; "
                 "decision cycle blocked before any write")
+        validate_chief(repo.store, state.research_snapshot, at=_now())
     repo.create_cycle(cycle_id=state.cycle_id, trigger_source=state.source,
                       research_snapshot=state.research_snapshot or None,
                       created_at=state.as_of.isoformat())
@@ -295,7 +357,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
         rationale=state.summary or "", model_version="",
         parent_revision_no=state.parent_revision_no, revision_source="chief",
         created_at=state.as_of.isoformat())
-    if state.risk_review is not None:
+    if state.risk_review is not None and not state.normalization_errors:
         # Review ids are round-scoped: a stale-snapshot re-review (task 7.5)
         # re-examines the SAME revision under a NEW snapshot and must land as a
         # new review row, not be swallowed by idempotent re-insert.
@@ -304,7 +366,8 @@ def persist_decision(state: ChiefDecisionState) -> dict:
             cycle_id=state.cycle_id, revision_no=rev["revision_no"],
             decision_hash=rev["decision_hash"], ruleset_version=_ruleset_version(),
             portfolio_snapshot_id=state.portfolio_snapshot_id or "unset",
-            market_as_of=state.as_of.isoformat(),
+            market_as_of=(state.risk_review.basis.market_as_of
+                          if state.risk_review.basis else ""),
             verdict=state.risk_review.verdict,
             violations=[v.model_dump() for v in state.risk_review.violations],
             allowed_boundary=state.risk_review.allowed_boundary.model_dump(),
@@ -320,6 +383,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
                  else CycleStatus.RISK_REJECTED)
     repo.transition(state.cycle_id, to_status=to_status, actor="risk_gate",
                     revision_no=rev["revision_no"],
+                    payload={"normalization_errors": state.normalization_errors},
                     idempotency_key=_transition_key(
                         state.cycle_id, to_status.value, rev["revision_no"],
                         state.risk_round),
@@ -357,6 +421,8 @@ def route_after_persist(state: ChiefDecisionState) -> str:
     if not state.execute:
         return "end"
     review = state.risk_review
+    if state.normalization_errors:
+        return "manual_review"
     if review is None:
         # Degraded no-portfolio mode: legacy pass-through to approval (the
         # execution gate remains the real-order backstop).
@@ -390,6 +456,7 @@ def chief_revise(state: ChiefDecisionState) -> dict:
                 reason = ov.reasons[0] if ov.reasons else "risk boundary"
                 revised.append(d.model_copy(update={
                     "notional_usd": ov.max_allowed_notional,
+                    "qty": None, "execution_basis": {},
                     "rationale": f"[revise@r{state.risk_round}] 采纳边界 "
                                  f"${ov.max_allowed_notional:,.0f}: {reason}"}))
             else:
@@ -466,7 +533,11 @@ def _record_approval(state: ChiefDecisionState, approval: BossApproval) -> None:
                 approval.channel, round_no),
             created_at=approval.reviewed_at.isoformat()
             if approval.reviewed_at else None)
-    except Exception as exc:  # noqa: BLE001 - audit write must not block the graph
+    except Exception as exc:  # noqa: BLE001 - preserve ordinary audit error handling
+        from ..workflow.cutover_wiring import BoundaryWriteRefused
+
+        if isinstance(exc, BoundaryWriteRefused):
+            raise
         log.warning("boss_approvals write failed for %s: %s", state.cycle_id, exc)
 
 
@@ -491,6 +562,7 @@ def boss_review(state: ChiefDecisionState) -> dict:
     return {"approval": approval}
 
 
+@decision_read("trader")
 def trader(state: ChiefDecisionState) -> dict:
     from ..trader import execute as texec
 
@@ -500,30 +572,33 @@ def trader(state: ChiefDecisionState) -> dict:
     # were already narrowed to rejections in boss_review.
     approved = list(state.approved_decisions) if (
         approval is not None and approval.status == "approved") else []
-    sized_all = [(d, state.qty_by_symbol.get(d.symbol, 0.0))
+    sized_all = [(d, d.qty or 0.0)
                  for d in state.approved_decisions]
 
     if state.dry_run or not approved:
         print(f"→ {approval.status}: no orders placed (dry_run={state.dry_run})")
         return {"order_results": texec.cancelled_entries(sized_all, state.cycle_id,
-                                                         approval.status)}
+                                                         approval.status),
+                "gate_outcome": "cancelled", "gate_rejections": [], "authorization": None}
 
     # Only symbols the risk gate sized may execute — no approval-time additions.
     to_place = []
     for d in approved:
-        q = state.qty_by_symbol.get(d.symbol) or 0.0
+        q = d.qty or 0.0
         if q > 0:
             to_place.append((d, q))
 
     # --- execution authorization gate (tasks 7.2/7.3/7.5) --------------------- #
     from ..config import get_config
     from ..decision.state import CycleStatus as _CS
-    from ..execution.authorization import (AuthorizationError,
-                                           RECOVERABLE,
-                                           active_route_state,
-                                           bind_to_active_route,
-                                           build_authorization,
-                                           validate_authorization)
+    from ..execution.authorization import (
+        RECOVERABLE,
+        AuthorizationError,
+        active_route_state,
+        bind_to_active_route,
+        build_authorization,
+        validate_authorization,
+    )
 
     repo = _decision_repo()
     now = _now()
@@ -579,10 +654,33 @@ def trader(state: ChiefDecisionState) -> dict:
     entries, fills = texec.place_orders(to_place, state.cycle_id,
                                         revision_no=auth.revision_no,
                                         authorization=auth.model_dump())
+    if entries and all(e.status == "rejected" and e.error.startswith("price conditions rejected")
+                       for e in entries):
+        from ..memory import get_store
+
+        reasons = [e.error for e in entries]
+        from ..execution.shadow_execution import publish_shadow_results
+
+        shadow_published = publish_shadow_results(entries)
+        for entry in ([] if shadow_published else entries):
+            import json
+
+            get_store().save_trades([entry], cycle_id=state.cycle_id, source=state.source,
+                                   context=json.dumps({"execution_price_audit": entry.execution_price_audit}))
+        repo.transition(state.cycle_id, to_status=_CS.PENDING_RISK, actor="execution_gate",
+                        revision_no=state.revision_no, payload={"rejections": reasons},
+                        idempotency_key=_transition_key(
+                            state.cycle_id, "price_rejected", state.revision_no, state.risk_round))
+        return {"order_results": entries, "fills": [], "authorization": None,
+                "decisions": [TradeDecision.model_validate(d.execution_basis["requested_order"])
+                              for d in state.decisions],
+                "gate_outcome": "stale" if state.risk_round < state.max_risk_rounds else "manual_review",
+                "gate_rejections": reasons}
     for e in entries:
         print(f"   {e.action} {e.symbol} x{e.qty:.0f} [{e.status}]"
               + (f" @ {e.avg_fill_price}" if e.avg_fill_price else ""))
-    return {"order_results": entries, "fills": fills, "gate_outcome": "placed",
+    outcome = "shadow_refused" if entries and all(e.status == "rejected" and e.error.startswith("shadow broker write prohibited:") for e in entries) else "placed"
+    return {"order_results": entries, "fills": fills, "gate_outcome": outcome,
             "authorization": auth.model_dump()}
 
 
@@ -591,6 +689,8 @@ def route_after_trader(state: ChiefDecisionState) -> str:
     the cycle back to the risk gate for a fresh review + fresh approval."""
     if state.gate_outcome == "stale":
         return "risk_gate"
+    if state.gate_outcome == "manual_review":
+        return "manual_review"
     return "persist"
 
 
@@ -608,11 +708,19 @@ def persist(state: ChiefDecisionState) -> dict:
         # execution gate can derive its authorization); this legacy column and
         # the journal approval column keep their writes (task 6.5).
 
+    from ..execution.shadow_execution import publish_shadow_results
+
+    shadow_published = publish_shadow_results(state.order_results, state.fills)
     by_symbol = {d.symbol: d for d in state.approved_decisions or state.decisions}
-    for entry in state.order_results:
+    for entry in ([] if shadow_published else state.order_results):
         context = texec.trade_context_json(
             state.source, state.approval, state.approved_decisions or state.decisions,
             decision=by_symbol.get(entry.symbol), risk_notes=state.risk_notes)
+        if entry.execution_price_audit:
+            import json
+
+            context = json.dumps({**json.loads(context),
+                                  "execution_price_audit": entry.execution_price_audit}, ensure_ascii=False)
         store.save_trades([entry], cycle_id=state.cycle_id,
                           source=state.source, context=context)
     if state.fills:
@@ -626,10 +734,16 @@ def persist(state: ChiefDecisionState) -> dict:
     # Terminal transition (D12): side effects fire exactly once, on first entry.
     repo = _decision_repo()
     executed = any(e.status == "filled" for e in state.order_results)
-    status = CycleStatus.EXECUTED if (executed or (state.approval is not None
-                                                   and state.approval.status == "approved")) \
-        else CycleStatus.APPROVAL_REJECTED
-    outcome = ("dry_run" if state.dry_run else
+    submitted = any(e.status in {"submitted", "partial", "pending", "filled"} for e in state.order_results)
+    incomplete = any(e.status in {"rejected", "error"} for e in state.order_results)
+    status = (CycleStatus.MANUAL_REVIEW if submitted and incomplete else
+              CycleStatus.EXECUTED if submitted or (state.dry_run and state.approval
+              and state.approval.status == "approved") else
+              CycleStatus.MANUAL_REVIEW if state.approval and state.approval.status == "approved" else
+              CycleStatus.APPROVAL_REJECTED)
+    outcome = ("shadow_refused" if shadow_published and state.gate_outcome == "shadow_refused" else
+               "partial_execution_requires_reconciliation" if submitted and incomplete else
+               "dry_run" if state.dry_run else
                "executed" if executed else str(state.approval.status if state.approval else "unknown"))
     try:
         event, changed = repo.transition(
@@ -674,7 +788,7 @@ def build_chief_graph(checkpointer=None):
     g.add_edge("manual_review", END)
     g.add_edge("boss_review", "trader")
     g.add_conditional_edges("trader", route_after_trader,
-                            {"risk_gate": "risk_gate", "persist": "persist"})
+                            {"risk_gate": "risk_gate", "persist": "persist", "manual_review": "manual_review"})
     g.add_edge("persist", END)
 
     return g.compile(checkpointer=checkpointer)

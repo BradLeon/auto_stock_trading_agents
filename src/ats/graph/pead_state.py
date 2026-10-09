@@ -45,6 +45,8 @@ class PeadState(BaseModel):
     transcript_text: str = ""
     transcript_resolved_source: str = ""
     documents_text: str = ""        # official docs (SEC 8-K release + investor decks)
+    input_refs: list[str] = Field(default_factory=list)
+    document_lineage: list[dict] = Field(default_factory=list)
 
     # dossier sections
     prior_narrative: str = ""           # accumulated monitor thesis to continue in prep

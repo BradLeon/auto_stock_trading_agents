@@ -24,6 +24,39 @@ def plane(tmp_path):
     return path
 
 
+@pytest.fixture
+def simulated_enforcement(monkeypatch):
+    """Unit activation/history logic; no claim of actual integration."""
+    monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
+    for name in ("preflight", "record_activation"):
+        original = getattr(co, name)
+        def checked(*args, _original=original, **kwargs):
+            kwargs.setdefault("report_checker", lambda batch: (True, []))
+            return _original(*args, **kwargs)
+        monkeypatch.setattr(co, name, checked)
+
+
+def _target_read(monkeypatch, **kwargs):
+    """Exercise old fallback logic against an explicitly simulated target scope."""
+    from ats.workflow.scoped_routes import RouteIdentity
+    contract = cr._consumer_contract(kwargs['consumer_id'])
+    who = RouteIdentity(contract['domain_id'], kwargs['consumer_id'], contract['contract_version'],
+        {'kind': 'portfolio', 'id': 'test', 'entities': ['AMD'],
+         'time_range': {'start': '2026-10-07T00:00:00Z', 'end': '2026-10-08T00:00:00Z'}})
+    monkeypatch.setattr('ats.workflow.scoped_routes.resolve_route', lambda *a, **k: {'route': 'target'})
+    # This helper simulates authority without SQLite; real recovery authority is
+    # exercised by test_phase_f_read_recovery, including missing-file refusal.
+    monkeypatch.setattr('ats.workflow.read_recovery.current_policy', lambda *a, **k: None)
+    monkeypatch.setattr('ats.workflow.joint_cutover.assert_scope_open', lambda *a, **k: None)
+    monkeypatch.setattr('ats.workflow.boundary_evidence.assert_enforced', lambda *a, **k: None)
+    check = kwargs.get('fallback_check')
+    if check:
+        # Explicit unit adapter; actual proof/readability is covered by business tests.
+        kwargs['fallback_check'] = lambda: {'reference': 'synthetic-drill', 'proof_valid': True,
+            'retired': False, 'available': True, **check(), 'identity': who.as_row()}
+    return cr.read_route(identity=who, **kwargs)
+
+
 def _wire_all(path: str) -> None:
     for boundary in co.SIX_BOUNDARIES:
         co.declare_wiring(boundary=boundary,
@@ -132,7 +165,8 @@ def test_declaring_wiring_marks_the_boundary_wired(plane):
                       path=plane)
 
     state = co.read_boundary(co.PROJECTION_READ, plane)
-    assert state.wired is True
+    assert state.declared is True
+    assert state.wired is False
     assert co.unwired_boundaries(plane) == [
         b for b in co.SIX_BOUNDARIES if b != co.PROJECTION_READ]
 
@@ -273,10 +307,10 @@ def test_preflight_changes_nothing(plane):
     assert after == before
 
 
-def test_a_disabled_live_trader_does_not_block_a_research_activation(plane):
+def test_a_disabled_live_trader_does_not_block_a_research_activation(plane, simulated_enforcement):
     """5.9's second case: research services start with trading off."""
     _wire_all(plane)
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ,
+    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro", actor="op")
 
@@ -299,9 +333,9 @@ def test_the_activation_gate_does_not_retroactively_deny_the_legacy_route(plane)
     assert result.ok is True, result.problems
 
 
-def test_a_released_scope_warns_that_reactivation_needs_a_fresh_report(plane):
+def test_a_released_scope_warns_that_reactivation_needs_a_fresh_report(plane, simulated_enforcement):
     _wire_all(plane)
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ,
+    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro", actor="op")
     co.record_activation(request=request, path=plane)
@@ -314,7 +348,7 @@ def test_a_released_scope_warns_that_reactivation_needs_a_fresh_report(plane):
 
 
 def test_an_activation_requires_wiring(plane):
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ,
+    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro", actor="op")
     with pytest.raises(co.CutoverError, match="no declared wiring"):
@@ -324,16 +358,16 @@ def test_an_activation_requires_wiring(plane):
 def test_only_the_target_route_is_activated_through_this_path(plane):
     """`legacy` is a boundary state, not an activation."""
     _wire_all(plane)
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ,
+    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro")
     with pytest.raises(co.CutoverError, match="not an activation"):
         co.record_activation(request=request, route=co.ROUTE_LEGACY, path=plane)
 
 
-def test_active_scopes_excludes_released_ones(plane):
+def test_active_scopes_excludes_released_ones(plane, simulated_enforcement):
     _wire_all(plane)
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ,
+    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro")
     co.record_activation(request=request, path=plane)
@@ -423,7 +457,7 @@ def test_an_unqualified_consumer_falls_back_when_the_fallback_is_safe(monkeypatc
     monkeypatch.setattr("ats.data.assurance.qualification",
                         lambda **kwargs: {"status": "ineligible",
                                           "reasons": ["rollback_unverified:x"]})
-    decision = cr.read_route(
+    decision = _target_read(monkeypatch,
         consumer_id="macro", target_boundary_active=True,
         fallback_check=lambda: {"verdict": cr.FALLBACK_OK}, path="/nonexistent")
 
@@ -439,7 +473,7 @@ def test_an_unqualified_consumer_with_no_safe_fallback_stops(monkeypatch):
                         lambda **kwargs: {"status": "ineligible",
                                           "reasons": ["evidence_missing"]})
     with pytest.raises(cr.FallbackUnsafe) as excinfo:
-        cr.read_route(
+        _target_read(monkeypatch,
             consumer_id="macro", target_boundary_active=True,
             fallback_check=lambda: {"verdict": cr.FALLBACK_BLOCKED,
                                     "reason_code": "fallback_target_retired",
@@ -454,7 +488,7 @@ def test_a_revoked_qualification_is_reported_as_ineligible(monkeypatch):
     monkeypatch.setattr("ats.data.assurance.qualification",
                         lambda **kwargs: {"status": "ineligible",
                                           "reasons": ["evidence_revoked:macro"]})
-    decision = cr.read_route(
+    decision = _target_read(monkeypatch,
         consumer_id="macro", target_boundary_active=True,
         fallback_check=lambda: {"verdict": cr.FALLBACK_OK}, path="/nonexistent")
 
@@ -462,10 +496,10 @@ def test_a_revoked_qualification_is_reported_as_ineligible(monkeypatch):
     assert "revoked" in decision.qualification["reasons"][0]
 
 
-def test_an_undeclared_consumer_is_an_error():
+def test_an_undeclared_consumer_is_an_error(monkeypatch):
     """A reader cannot be qualified for a consumer that is not declared."""
     with pytest.raises(cr.RouteUnavailable, match="no contract"):
-        cr.read_route(consumer_id="not_a_consumer", target_boundary_active=True,
+        _target_read(monkeypatch, consumer_id="not_a_consumer", target_boundary_active=True,
                       fallback_check=lambda: {"verdict": cr.FALLBACK_OK})
 
 
@@ -474,7 +508,7 @@ def test_the_gate_summary_counts_per_route_and_lists_gaps(monkeypatch):
                         lambda **kwargs: {"status": "ineligible",
                                           "reasons": ["evidence_missing"]})
     decisions = [
-        cr.read_route(consumer_id="macro", target_boundary_active=True,
+        _target_read(monkeypatch, consumer_id="macro", target_boundary_active=True,
                       fallback_check=lambda: {"verdict": cr.FALLBACK_OK,
                                               "reason": "no proof"},
                       path="/nonexistent"),

@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="20.355" timestamp="2026-10-08T22:38:09.325223+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_opinion_execution" name="test_complete_business_execution_and_recovery[1000-False]" file="tests/test_phase_f_opinion_execution.py" line="113" time="19.297"><failure message="assert False">tests/test_phase_f_opinion_execution.py:231: in test_complete_business_execution_and_recovery
+    assert complete["steps"]["performance"]["recorded"]
+E   assert False</failure></testcase></testsuite></testsuites>

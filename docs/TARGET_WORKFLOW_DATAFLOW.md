@@ -729,6 +729,30 @@ ExecutionAuthorization
 
 Trader 的 client order ID 由 cycle、revision 和订单序号稳定生成。同一授权和订单序号不得重复提交。
 
+#### Phase F 方案 A：受治理执行报价（2026-10-08）
+
+Risk/Trader 使用 `target-dataflow-v2` 契约，经 `ats.data.consumer_api.read_input` 读取
+`MARKET_DATA(kind=execution_price)`；它不开放研究历史、期权或任意标的查询。
+`ats.data.execution_prices.price_request` 绑定本次 cycle、实体、业务 scope、USD 和用途；
+用途只有 `preapproval_normalization` 与 `approved_execution_check`，执行用途须与已批准修订逐字段一致。
+生产每次读取仍验证 exact-scope 资格；隔离候选读取不授予生产资格或券商写能力。
+
+规范化先完成股数、金额、限价、类型、TIF 与报价约束，再冻结完整 revision/hash，随后 Risk
+使用同一捕获报价独立通过自身读取门禁，Boss 批准同一修订。报价证据包含来源时点与查询时点、
+币种、交易时段、live/delayed 状态、价格类型、原始/复权标志及券商确认的股数/价格精度。
+日间只使用 30 秒内实时 Bid/Ask，价差不超过中点的 1%；隔夜可用上一个完整常规交易日的原始
+Close 生成待常规时段执行的限价，其精度明确为 session_date，不能冒充实时成交价。
+日历含假期和提前收盘；缺价、错币种、过期或无法确认精度时显式拒绝，不静默形成零股。
+
+执行前及逐笔券商交接前重新检查实时报价、批准的 1% 偏离上限、限价和资金上限；
+只做校验，不修改批准订单。报价失效或超限返回新一轮 Risk/Boss；审批报价与执行报价分别入审计，
+runtime 价格不写入共享事实。十字段授权、账户、grant、代次、冻结和幂等门禁继续生效。
+
+用户已允许完整隔离环境显式选择无网络 FakeBroker，通过实际 Trader 产生非空订单及因果成交回报，
+用于后续 Clerk 验收。生产 C3 保持禁写；IBKR（含 Paper）写入需单独明确授权。
+本次实现与局部回归不代表六分析角色、完整研究快照、Clerk 恢复和生产资格已经验收，见
+[Phase F 当前任务](../openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md)。
+
 ## 11. Clerk 与交易账本
 
 Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent。各业务服务在事件发生时

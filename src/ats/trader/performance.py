@@ -22,15 +22,18 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def record_snapshot(cycle_id: str = "") -> PerformanceRecord | None:
+def record_snapshot(cycle_id: str = "", *, broker=None) -> PerformanceRecord | None:
     """Read live portfolio + P&L + fills, compute the record (with drawdown/win-rate),
     persist. Returns None if TWS is unreachable."""
     from ..config import get_config
 
     store = get_store()
     try:
-        broker = IBKRBroker(sector_by_symbol={t.symbol: t.sector for t in get_config().app.tickers})
+        broker = broker or IBKRBroker(sector_by_symbol={t.symbol: t.sector for t in get_config().app.tickers})
         portfolio = broker.get_portfolio()
+        if portfolio is None:
+            log.warning("performance snapshot skipped: broker portfolio unavailable")
+            return None
         fills = broker.get_fills()
     except IBKRUnavailable as exc:
         log.warning("performance snapshot skipped: %s", exc)

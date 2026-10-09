@@ -1,0 +1,1212 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="99" skipped="0" tests="328" time="79.712" timestamp="2026-10-08T12:08:28.484032+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_trader_a" name="test_manifest_v2_permissions_evidence_and_nontrader_roles" time="0.893" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes0-price_invalid]" time="0.122" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes1-price_invalid]" time="0.086" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes2-price_invalid]" time="0.088" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes3-spread_invalid]" time="0.086" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes4-spread_invalid]" time="0.086" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes5-currency_mismatch]" time="0.082" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes6-symbol_mismatch]" time="0.117" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes7-not_current]" time="0.093" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes8-adjustment_invalid]" time="0.085" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes9-source_or]" time="0.091" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes10-precision_missing]" time="0.092" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes11-precision_missing]" time="0.086" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes12-precision_missing]" time="0.124" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes13-stale]" time="0.085" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes14-future]" time="0.087" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes15-timezone_missing]" time="0.087" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes16-not_current]" time="0.086" /><testcase classname="tests.test_phase_f_trader_a" name="test_quote_fail_closed[changes17-not_current]" time="0.085" /><testcase classname="tests.test_phase_f_trader_a" name="test_real_calendar_holiday_and_early_close" time="0.485" /><testcase classname="tests.test_phase_f_trader_a" name="test_trader_cannot_read_unbound_market_or_research" time="0.219" /><testcase classname="tests.test_phase_f_trader_a" name="test_order_bound_scope_cannot_escape[entity]" time="0.257" /><testcase classname="tests.test_phase_f_trader_a" name="test_order_bound_scope_cannot_escape[purpose]" time="0.225" /><testcase classname="tests.test_phase_f_trader_a" name="test_order_bound_scope_cannot_escape[currency]" time="0.226" /><testcase classname="tests.test_phase_f_trader_a" name="test_order_bound_scope_cannot_escape[cycle_id]" time="0.271" /><testcase classname="tests.test_phase_f_trader_a" name="test_normalization_review_revision_card_share_exact_orders" time="0.483" /><testcase classname="tests.test_phase_f_trader_a" name="test_actual_trader_simulates_submission_and_persists_audit" time="0.639" /><testcase classname="tests.test_phase_f_trader_a" name="test_actual_graph_through_human_approval_to_simulation" time="0.927" /><testcase classname="tests.test_phase_f_trader_a" name="test_submitted_order_must_equal_approved_revision[qty]" time="0.470" /><testcase classname="tests.test_phase_f_trader_a" name="test_submitted_order_must_equal_approved_revision[limit_price]" time="0.527" /><testcase classname="tests.test_phase_f_trader_a" name="test_submitted_order_must_equal_approved_revision[order_type]" time="0.517" /><testcase classname="tests.test_phase_f_trader_a" name="test_submitted_order_must_equal_approved_revision[time_in_force]" time="0.509" /><testcase classname="tests.test_phase_f_trader_a" name="test_submitted_order_must_equal_approved_revision[action]" time="0.470" /><testcase classname="tests.test_phase_f_trader_a" name="test_execution_changes_refuse_without_mutating[changes0-deviation]" time="0.644" /><testcase classname="tests.test_phase_f_trader_a" name="test_execution_changes_refuse_without_mutating[changes1-limit_not_marketable]" time="0.643" /><testcase classname="tests.test_phase_f_trader_a" name="test_execution_changes_refuse_without_mutating[changes2-funds_exceeded]" time="0.637" /><testcase classname="tests.test_phase_f_trader_a" name="test_missing_quote_rejects_amount_visibly_before_approval" time="0.258" /><testcase classname="tests.test_phase_f_trader_a" name="test_below_minimum_quantity_is_visible" time="0.314" /><testcase classname="tests.test_phase_f_trader_a" name="test_no_grant_simulation_refuses" time="0.594" /><testcase classname="tests.test_phase_f_trader_a" name="test_c3_still_blocks_without_explicit_simulation" time="0.130" /><testcase classname="tests.test_phase_f_trader_a" name="test_simulation_requires_complete_isolation" time="0.126" /><testcase classname="tests.test_phase_f_trader_a" name="test_real_ibkr_transport_stays_prohibited_in_simulation" time="0.134" /><testcase classname="tests.test_phase_f_trader_a" name="test_saved_fake_broker_cannot_escape_context" time="0.127" /><testcase classname="tests.test_phase_f_trader_a" name="test_read_only_bid_ask_adapter_preserves_server_timestamp" time="0.127" /><testcase classname="tests.test_phase_f_trader_a" name="test_execution_age_rechecked_at_actual_broker_handoff" time="0.510" /><testcase classname="tests.test_dataflow_assurance" name="test_missing_ledger_is_ineligible" time="0.151" /><testcase classname="tests.test_dataflow_assurance" name="test_all_required_evidence_yields_eligible" time="0.424" /><testcase classname="tests.test_dataflow_assurance" name="test_each_missing_evidence_type_blocks" time="2.932" /><testcase classname="tests.test_dataflow_assurance" name="test_sec_body_failure_is_a_nonblocking_gap_not_an_ineligibility" time="0.374" /><testcase classname="tests.test_dataflow_assurance" name="test_sec_exception_does_not_waive_a_required_input[company_financials]" time="0.408" /><testcase classname="tests.test_dataflow_assurance" name="test_sec_exception_does_not_waive_a_required_input[defeatbeta_earnings_transcript]" time="0.409" /><testcase classname="tests.test_dataflow_assurance" name="test_sec_exception_does_not_waive_a_required_input[defeatbeta_sec_filing_index]" time="0.366" /><testcase classname="tests.test_dataflow_assurance" name="test_sec_input_without_verified_checks_still_blocks" time="0.439" /><testcase classname="tests.test_dataflow_assurance" name="test_missing_sec_status_is_not_silently_treated_as_optional" time="0.378" /><testcase classname="tests.test_dataflow_assurance" name="test_passed_label_without_rollback_proof_is_rejected" time="0.441" /><testcase classname="tests.test_dataflow_assurance" name="test_one_product_drill_does_not_qualify_the_whole_role" time="0.443" /><testcase classname="tests.test_dataflow_assurance" name="test_rollback_for_the_wrong_scope_cannot_be_reused" time="0.448" /><testcase classname="tests.test_dataflow_assurance" name="test_latest_failed_evidence_overrides_an_earlier_pass" time="0.408" /><testcase classname="tests.test_dataflow_assurance" name="test_prerequisite_revocation_is_checked_recursively" time="0.493" /><testcase classname="tests.test_dataflow_assurance" name="test_revocation_does_not_contaminate_another_consumer" time="0.772" /><testcase classname="tests.test_dataflow_assurance" name="test_incomplete_fingerprint_registry_is_rejected" time="0.408" /><testcase classname="tests.test_dataflow_assurance" name="test_dependency_content_change_invalidates_the_evidence" time="0.581" /><testcase classname="tests.test_dataflow_assurance" name="test_evidence_expires_on_its_own_ttl_not_on_report_age" time="1.762" /><testcase classname="tests.test_dataflow_assurance" name="test_scope_must_match_exactly" time="0.874" /><testcase classname="tests.test_dataflow_assurance" name="test_manifest_drift_is_fail_closed" time="0.881" /><testcase classname="tests.test_dataflow_assurance" name="test_recorded_evidence_cannot_be_mutated[UPDATE dataflow_assurance_events SET outcome='passed']" time="0.128" /><testcase classname="tests.test_dataflow_assurance" name="test_recorded_evidence_cannot_be_mutated[DELETE FROM dataflow_assurance_events]" time="0.203" /><testcase classname="tests.test_dataflow_assurance" name="test_qualification_connection_is_read_only" time="0.093" /><testcase classname="tests.test_dataflow_assurance" name="test_unknown_prerequisite_is_rejected" time="0.496" /><testcase classname="tests.test_dataflow_assurance" name="test_cross_scope_prerequisite_is_rejected" time="0.720" /><testcase classname="tests.test_dataflow_assurance" name="test_invalid_audit_metadata_is_rejected[kwargs0]" time="0.130" /><testcase classname="tests.test_dataflow_assurance" name="test_invalid_audit_metadata_is_rejected[kwargs1]" time="0.120" /><testcase classname="tests.test_dataflow_assurance" name="test_invalid_audit_metadata_is_rejected[kwargs2]" time="0.129" /><testcase classname="tests.test_dataflow_assurance" name="test_legacy_ledger_gets_additive_migration_without_qualification_upgrade" time="0.285" /><testcase classname="tests.test_dataflow_assurance" name="test_unverified_fallback_evidence_cannot_qualify_a_consumer" time="0.341" /><testcase classname="tests.test_dataflow_assurance" name="test_the_five_unproven_consumers_all_remain_ineligible" time="1.635" /><testcase classname="tests.test_dataflow_assurance" name="test_pure_text_tool_environment_paths_stay_out_of_scope" time="0.086" /><testcase classname="tests.test_dataflow_assurance_parity" name="test_every_script_probe_has_a_pytest_counterpart" time="0.102" /><testcase classname="tests.test_dataflow_assurance_parity" name="test_the_mapping_has_no_stale_entries" time="0.136" /><testcase classname="tests.test_dataflow_assurance_parity" name="test_both_sides_agree_that_a_fully_evidenced_consumer_is_eligible" time="0.398" /><testcase classname="tests.test_dataflow_assurance_parity" name="test_both_sides_agree_that_dropping_one_evidence_type_blocks" time="0.482" /><testcase classname="tests.test_dataflow_assurance_parity" name="test_the_script_and_the_suite_agree_on_the_policy_fingerprint_surface" time="0.121" /><testcase classname="tests.test_dataflow_assurance_parity" name="test_neither_side_asserts_a_production_qualification" time="0.158" /><testcase classname="tests.test_assurance_surface" name="test_surface_is_derived_from_the_policy_not_hand_written" time="0.169" /><testcase classname="tests.test_assurance_surface" name="test_a_shared_path_names_every_consumer_it_would_retire" time="0.122" /><testcase classname="tests.test_assurance_surface" name="test_paths_for_unions_rather_than_replaces" time="0.086" /><testcase classname="tests.test_assurance_surface" name="test_the_authorization_gate_is_on_the_surface_and_that_is_a_constraint" time="0.085" /><testcase classname="tests.test_assurance_surface" name="test_every_declared_path_exists_and_is_inside_the_repository" time="0.129" /><testcase classname="tests.test_assurance_surface" name="test_drift_detects_a_changed_shared_file" time="0.092" /><testcase classname="tests.test_assurance_surface" name="test_drift_treats_a_removed_path_as_drift" time="0.093" /><testcase classname="tests.test_assurance_surface" name="test_the_manifest_change_is_reported_as_retiring_everything" time="0.085" /><testcase classname="tests.test_assurance_surface" name="test_affected_consumers_maps_each_path_to_its_consumers" time="0.084" /><testcase classname="tests.test_assurance_surface" name="test_a_cutover_action_that_touches_the_surface_is_refused" time="0.116" /><testcase classname="tests.test_assurance_surface" name="test_the_refusal_names_the_manifest_consequence_too" time="0.156" /><testcase classname="tests.test_assurance_surface" name="test_a_cutover_action_outside_the_surface_is_allowed" time="0.113" /><testcase classname="tests.test_assurance_surface" name="test_a_misspelled_path_is_rejected_rather_than_silently_passing" time="0.113" /><testcase classname="tests.test_assurance_surface" name="test_an_absolute_path_to_a_surfaced_file_is_still_refused" time="0.112" /><testcase classname="tests.test_assurance_surface" name="test_recorded_hashes_round_trips_from_an_evidence_row" time="0.526" /><testcase classname="tests.test_assurance_surface" name="test_inventory_is_exported_for_review" time="0.857" /><testcase classname="tests.test_target_consumer_identity" name="test_observer_alias_preserves_requested_identity_without_second_consumer" time="0.140" /><testcase classname="tests.test_target_consumer_identity" name="test_missing_retirement_and_duplicate_active_role_fail_closed" time="1.042" /><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_real_publisher_refuses_before_any_write[review-approval_lifecycle-decision_risk_reviews]" time="0.183"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_phase_f_business_wiring.py:70: in test_disabled_real_publisher_refuses_before_any_write
+    write(store, entry)
+tests/test_phase_f_business_wiring.py:38: in write
+    return DecisionAuditRepository(store).record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_real_publisher_refuses_before_any_write[approval-approval_lifecycle-boss_approvals]" time="0.111"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_phase_f_business_wiring.py:70: in test_disabled_real_publisher_refuses_before_any_write
+    write(store, entry)
+tests/test_phase_f_business_wiring.py:43: in write
+    return DecisionAuditRepository(store).record_approval(
+src/ats/decision/repository.py:406: in record_approval
+    guard_approval_write(store=self.store, what="a Boss approval")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_real_publisher_refuses_before_any_write[legacy-analyst_output-task_projections]" time="0.115"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_phase_f_business_wiring.py:70: in test_disabled_real_publisher_refuses_before_any_write
+    write(store, entry)
+tests/test_phase_f_business_wiring.py:47: in write
+    return store.save_task_projection(profile="test", profile_version="v1", input_kind="entity",
+src/ats/memory/store.py:2241: in save_task_projection
+    guard_analyst_output(store=self, what="a legacy task projection")
+src/ats/workflow/cutover_wiring.py:186: in guard_analyst_output
+    assert_write_destination(store, cutover_module.ANALYST_OUTPUT)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_real_publisher_refuses_before_any_write[envelope-analyst_output-task_projection_envelopes]" time="0.158"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_phase_f_business_wiring.py:70: in test_disabled_real_publisher_refuses_before_any_write
+    write(store, entry)
+tests/test_phase_f_business_wiring.py:50: in write
+    return store.save_task_projection_envelope(build_envelope(
+src/ats/memory/store.py:2305: in save_task_projection_envelope
+    guard_analyst_output(store=self, what="a task projection envelope")
+src/ats/workflow/cutover_wiring.py:186: in guard_analyst_output
+    assert_write_destination(store, cutover_module.ANALYST_OUTPUT)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_real_publisher_refuses_before_any_write[clerk-clerk_publication-clerk_runs]" time="0.109"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_phase_f_business_wiring.py:70: in test_disabled_real_publisher_refuses_before_any_write
+    write(store, entry)
+tests/test_phase_f_business_wiring.py:54: in write
+    return clerk_run(store=store, broker=object(), steps=())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_isolated_real_publisher_only_writes_its_database[review-approval_lifecycle-decision_risk_reviews]" time="0.231" /><testcase classname="tests.test_phase_f_business_wiring" name="test_isolated_real_publisher_only_writes_its_database[approval-approval_lifecycle-boss_approvals]" time="0.390" /><testcase classname="tests.test_phase_f_business_wiring" name="test_isolated_real_publisher_only_writes_its_database[legacy-analyst_output-task_projections]" time="0.218" /><testcase classname="tests.test_phase_f_business_wiring" name="test_isolated_real_publisher_only_writes_its_database[envelope-analyst_output-task_projection_envelopes]" time="0.171" /><testcase classname="tests.test_phase_f_business_wiring" name="test_isolated_real_publisher_only_writes_its_database[clerk-clerk_publication-clerk_runs]" time="0.176" /><testcase classname="tests.test_phase_f_business_wiring" name="test_clerk_rechecks_between_steps_and_never_swallows_boundary_refusal" time="0.118"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_phase_f_business_wiring.py:102: in test_clerk_rechecks_between_steps_and_never_swallows_boundary_refusal
+    clerk_run(store=store, broker=object(), steps=("first", "second"))
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_native_input_uses_exact_identity_and_rechecks_revocation" time="0.291"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:134: in test_native_input_uses_exact_identity_and_rechecks_revocation
+    packet = read_input("risk", "RISK_RULES", scope={}, risk_config={"max": 10}, business_scope=identity)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/data/consumer_api.py:100: in read_input
+    guard_input(consumer, scope, as_of=as_of, business_scope=business_scope)
+src/ats/workflow/runtime_reads.py:117: in guard_input
+    decision = gate_read(identity)
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_scope_changes_cannot_borrow_qualification[entity]" time="0.150"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:157: in test_scope_changes_cannot_borrow_qualification
+    assert rr.gate_read(first).qualified
+           ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_scope_changes_cannot_borrow_qualification[time]" time="0.162"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:157: in test_scope_changes_cannot_borrow_qualification
+    assert rr.gate_read(first).qualified
+           ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_scope_changes_cannot_borrow_qualification[consumer]" time="0.192"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:157: in test_scope_changes_cannot_borrow_qualification
+    assert rr.gate_read(first).qualified
+           ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_scope_changes_cannot_borrow_qualification[contract]" time="0.148"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:157: in test_scope_changes_cannot_borrow_qualification
+    assert rr.gate_read(first).qualified
+           ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_bound_native_input_refuses_entity_consumer_and_time_escape" time="0.116"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:171: in test_bound_native_input_refuses_entity_consumer_and_time_escape
+    with rr.bind_read(entity("risk")):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_pead-kwargs0]" time="0.159"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_chief-kwargs1]" time="0.119"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_layer_review-kwargs2]" time="0.186"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_sector_review-kwargs3]" time="0.229"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_sector_html-kwargs4]" time="0.184"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_information_pass-kwargs5]" time="0.124"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_technical_review-kwargs6]" time="0.119"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[run_macro_review-kwargs7]" time="0.159"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_disabled_actual_cli_entries_stop_before_provider[_run_analyst_fundamental-kwargs8]" time="0.116"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:191: in test_disabled_actual_cli_entries_stop_before_provider
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_actual_cli_checks_scoped_target_before_provider_and_clears_context" time="0.179"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:212: in test_actual_cli_checks_scoped_target_before_provider_and_clears_context
+    assert cli.run_technical_review(read_scope=scope) == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_actual_dispatcher_rechecks_before_saved_result_reuse" time="0.198"><failure message="AssertionError: assert 'incomplete' == 'complete'&#10;  &#10;  - complete&#10;  + incomplete&#10;  ? ++">tests/test_phase_f_business_wiring.py:243: in test_actual_dispatcher_rechecks_before_saved_result_reuse
+    assert dispatcher.dispatch(business_plan).status == "complete"
+E   AssertionError: assert 'incomplete' == 'complete'
+E     
+E     - complete
+E     + incomplete
+E     ? ++</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_actual_owned_workflow_gates_before_trigger_claim" time="0.163"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'disabled'&#10;  Actual message: 'isolated read environment is incomplete'">tests/test_phase_f_business_wiring.py:259: in test_actual_owned_workflow_gates_before_trigger_claim
+    with pytest.raises(RouteUnavailable, match="disabled"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'disabled'
+E     Actual message: 'isolated read environment is incomplete'</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_shadow_cannot_publish_through_original_memory_handle" time="0.160"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:274: in test_shadow_cannot_publish_through_original_memory_handle
+    with rr.bind_read(entity("risk"), mode="shadow", publication_path=shadow):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_clerk_children_use_the_bound_publication_connection" time="0.129" /><testcase classname="tests.test_phase_f_business_wiring" name="test_chief_does_not_swallow_disabled_approval_write" time="0.115"><failure message="Failed: DID NOT RAISE BoundaryWriteRefused">tests/test_phase_f_business_wiring.py:306: in test_chief_does_not_swallow_disabled_approval_write
+    with pytest.raises(BoundaryWriteRefused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE BoundaryWriteRefused</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_actual_analyst_cli_refuses_disabled_output_before_analysis" time="0.160" /><testcase classname="tests.test_phase_f_business_wiring" name="test_actual_dispatcher_mixed_entities_only_blocks_ineligible_scope" time="0.260"><failure message="AssertionError: assert ('incomplete' == 'incomplete'&#10;  &#10;    incomplete and [] == ['AMD']&#10;  &#10;  Right contains one more item: 'AMD'&#10;  Use -v to get more diff)">tests/test_phase_f_business_wiring.py:345: in test_actual_dispatcher_mixed_entities_only_blocks_ineligible_scope
+    assert result.status == "incomplete" and calls == ["AMD"]
+E   AssertionError: assert ('incomplete' == 'incomplete'
+E     
+E       incomplete and [] == ['AMD']
+E     
+E     Right contains one more item: 'AMD'
+E     Use -v to get more diff)</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_unknown_legacy_scope_is_queried_and_never_inherits_target" time="0.148"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:359: in test_unknown_legacy_scope_is_queried_and_never_inherits_target
+    assert rr.gate_read(first).route == "target"
+           ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_native_isolated_candidate_read_does_not_require_production_qualification" time="0.314" /><testcase classname="tests.test_phase_f_business_wiring" name="test_partial_isolation_cannot_read_production_or_claim_candidate_permission" time="0.115" /><testcase classname="tests.test_phase_f_business_wiring" name="test_configuration_drift_does_not_reinterpret_frozen_plan_scope" time="0.113" /><testcase classname="tests.test_phase_f_business_wiring" name="test_real_cli_json_scope_protocol_reaches_the_business_gate" time="0.133"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete">tests/test_phase_f_business_wiring.py:401: in test_real_cli_json_scope_protocol_reaches_the_business_gate
+    assert cli.main(["--read-scope-json", json.dumps({"technical": scope}), "technical", "review",
+src/ats/workflow/runtime_reads.py:288: in entry
+    return function(argv)
+           ^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:5270: in main
+    return run_technical_review(
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete</failure></testcase><testcase classname="tests.test_phase_f_business_wiring" name="test_native_persistent_read_inherits_frozen_cutoff_when_as_of_is_omitted" time="0.245" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_direct_broker_cannot_connect_without_initialised_capability[unset]" time="0.087"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'&#10;  &#10;  - no_write_grant&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:53: in test_direct_broker_cannot_connect_without_initialised_capability
+    assert exc.value.reason_code == guard.REASON_NO_GRANT
+E   AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'
+E     
+E     - no_write_grant
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_direct_broker_cannot_connect_without_initialised_capability[revoked]" time="0.085"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'&#10;  &#10;  - no_write_grant&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:53: in test_direct_broker_cannot_connect_without_initialised_capability
+    assert exc.value.reason_code == guard.REASON_NO_GRANT
+E   AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'
+E     
+E     - no_write_grant
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_direct_broker_cannot_connect_without_initialised_capability[grant_without_mode]" time="0.085"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'&#10;  &#10;  - no_write_grant&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:53: in test_direct_broker_cannot_connect_without_initialised_capability
+    assert exc.value.reason_code == guard.REASON_NO_GRANT
+E   AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'
+E     
+E     - no_write_grant
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_session_must_match_not_just_configuration[accounts0-DU1]" time="0.131" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_session_must_match_not_just_configuration[accounts1-DU1]" time="0.087" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_session_must_match_not_just_configuration[accounts2-]" time="0.089" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_session_must_match_not_just_configuration[accounts3-DU1]" time="0.095" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_session_must_match_not_just_configuration[accounts4-U1]" time="0.087" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_incomplete_or_inconsistent_four_way_binding_refuses[-DU1-paper-DU1-DU1]" time="0.088" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_incomplete_or_inconsistent_four_way_binding_refuses[paper--paper-DU1-DU1]" time="0.131" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_incomplete_or_inconsistent_four_way_binding_refuses[paper-DU1-live-DU1-DU1]" time="0.094" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_incomplete_or_inconsistent_four_way_binding_refuses[paper-DU1-paper-DU2-DU1]" time="0.087" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_incomplete_or_inconsistent_four_way_binding_refuses[paper-X1-paper-X1-X1]" time="0.088" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_valid_session_sets_explicit_order_account_and_preserves_reads" time="0.085"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: broker place_orders refused: isolated_run_prohibited (caller=IBKRBroker.place_orders, refusal_id=broker-write-refusal-000001)">tests/test_phase_f_broker_enforcement.py:88: in test_valid_session_sets_explicit_order_account_and_preserves_reads
+    entries = submit(ib)
+              ^^^^^^^^^^
+tests/test_phase_f_broker_enforcement.py:36: in submit
+    return broker_for(ib, expected=expected).place_orders(
+src/ats/broker/ibkr.py:414: in place_orders
+    check_broker_write(operation="place_orders", caller="IBKRBroker.place_orders",
+src/ats/execution/broker_write_guard.py:415: in check_broker_write
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: broker place_orders refused: isolated_run_prohibited (caller=IBKRBroker.place_orders, refusal_id=broker-write-refusal-000001)</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_freeze_between_batch_check_and_actual_write_is_rechecked" time="0.089"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'write_grant_...ssions_frozen'&#10;  &#10;  - write_grant_submissions_frozen&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:101: in test_freeze_between_batch_check_and_actual_write_is_rechecked
+    assert exc.value.reason_code == guard.REASON_FROZEN
+E   AssertionError: assert 'isolated_run_prohibited' == 'write_grant_...ssions_frozen'
+E     
+E     - write_grant_submissions_frozen
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_session_changed_during_contract_qualification_is_rechecked" time="0.134" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_authority_failure_is_audited_before_connect[missing]" time="0.094"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'&#10;  &#10;  - route_authority_unreadable&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:122: in test_actual_authority_failure_is_audited_before_connect
+    assert exc.value.reason_code == guard.REASON_AUTHORITY_UNREADABLE
+E   AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'
+E     
+E     - route_authority_unreadable
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_authority_failure_is_audited_before_connect[corrupt]" time="0.087"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'&#10;  &#10;  - route_authority_unreadable&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:122: in test_actual_authority_failure_is_audited_before_connect
+    assert exc.value.reason_code == guard.REASON_AUTHORITY_UNREADABLE
+E   AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'
+E     
+E     - route_authority_unreadable
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_duplicate_identity_refuses_even_if_payload_changes_or_generation_moves" time="0.085"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: broker place_orders refused: isolated_run_prohibited (caller=IBKRBroker.place_orders, refusal_id=broker-write-refusal-000001)">tests/test_phase_f_broker_enforcement.py:130: in test_duplicate_identity_refuses_even_if_payload_changes_or_generation_moves
+    submit(ib)
+tests/test_phase_f_broker_enforcement.py:36: in submit
+    return broker_for(ib, expected=expected).place_orders(
+src/ats/broker/ibkr.py:414: in place_orders
+    check_broker_write(operation="place_orders", caller="IBKRBroker.place_orders",
+src/ats/execution/broker_write_guard.py:415: in check_broker_write
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: broker place_orders refused: isolated_run_prohibited (caller=IBKRBroker.place_orders, refusal_id=broker-write-refusal-000001)</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_timeout_after_acceptance_remains_unknown_and_blocks_drain" time="0.086"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: broker place_orders refused: isolated_run_prohibited (caller=IBKRBroker.place_orders, refusal_id=broker-write-refusal-000001)">tests/test_phase_f_broker_enforcement.py:147: in test_timeout_after_acceptance_remains_unknown_and_blocks_drain
+    assert submit(ib)[0].status == "error"
+           ^^^^^^^^^^
+tests/test_phase_f_broker_enforcement.py:36: in submit
+    return broker_for(ib, expected=expected).place_orders(
+src/ats/broker/ibkr.py:414: in place_orders
+    check_broker_write(operation="place_orders", caller="IBKRBroker.place_orders",
+src/ats/execution/broker_write_guard.py:415: in check_broker_write
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: broker place_orders refused: isolated_run_prohibited (caller=IBKRBroker.place_orders, refusal_id=broker-write-refusal-000001)</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_two_processes_race_same_intent_only_one_transport_accepts" time="0.490"><failure message="assert [0, 0] == [0, 1]&#10;  &#10;  At index 1 diff: 0 != 1&#10;  Use -v to get more diff">tests/test_phase_f_broker_enforcement.py:233: in test_two_processes_race_same_intent_only_one_transport_accepts
+    assert sorted(r["accepted"] for r in results) == [0, 1]
+E   assert [0, 0] == [0, 1]
+E     
+E     At index 1 diff: 0 != 1
+E     Use -v to get more diff</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_live_old_process_delayed_until_after_cutover_cannot_submit" time="0.442"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'write_grant_generation_stale'&#10;  &#10;  - write_grant_generation_stale&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:247: in test_live_old_process_delayed_until_after_cutover_cannot_submit
+    assert result(old)["reason"] == guard.REASON_GENERATION_STALE
+E   AssertionError: assert 'isolated_run_prohibited' == 'write_grant_generation_stale'
+E     
+E     - write_grant_generation_stale
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_cross_process_freeze_waits_for_actual_write_mutex" time="0.378"><failure message="assert '{&quot;accepted&quot;:...id&quot;: 77235}]}' == 'AT_BROKER'&#10;  &#10;  - AT_BROKER&#10;  + {&quot;accepted&quot;: 0, &quot;reason&quot;: &quot;isolated_run_prohibited&quot;, &quot;audit&quot;: [{&quot;refusal_id&quot;: &quot;broker-write-refusal-000001&quot;, &quot;at&quot;: &quot;2026-10-08T04:10:21.613988+00:00&quot;, &quot;reason_code&quot;: &quot;isolated_run_prohibited&quot;, &quot;operation&quot;: &quot;place_orders&quot;, &quot;caller&quot;: &quot;IBKRBroker.place_orders&quot;, &quot;symbol&quot;: &quot;&quot;, &quot;quantity&quot;: null, &quot;detail&quot;: &quot;cycle_id=c revision_no=1 orders=1&quot;, &quot;pid&quot;: 77235}]}">tests/test_phase_f_broker_enforcement.py:257: in test_cross_process_freeze_waits_for_actual_write_mutex
+    assert writer.stdout.readline().strip() == "AT_BROKER"
+E   assert '{"accepted":...id": 77235}]}' == 'AT_BROKER'
+E     
+E     - AT_BROKER
+E     + {"accepted": 0, "reason": "isolated_run_prohibited", "audit": [{"refusal_id": "broker-write-refusal-000001", "at": "2026-10-08T04:10:21.613988+00:00", "reason_code": "isolated_run_prohibited", "operation": "place_orders", "caller": "IBKRBroker.place_orders", "symbol": "", "quantity": null, "detail": "cycle_id=c revision_no=1 orders=1", "pid": 77235}]}</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_dead_process_leaves_unknown_intent_no_retry_or_unsafe_switch" time="0.247"><failure message="AssertionError: assert 0 == 73&#10; +  where 0 = &lt;Popen: returncode: 0 args: ['/Users/liuchao/Code/trading/auto_stock_trading...&gt;.returncode">tests/test_phase_f_broker_enforcement.py:276: in test_dead_process_leaves_unknown_intent_no_retry_or_unsafe_switch
+    assert crashed.returncode == 73
+E   AssertionError: assert 0 == 73
+E    +  where 0 = &lt;Popen: returncode: 0 args: ['/Users/liuchao/Code/trading/auto_stock_trading...&gt;.returncode</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_two_current_processes_can_submit_different_intents" time="0.495"><failure message="assert 0 == 1">tests/test_phase_f_broker_enforcement.py:293: in test_two_current_processes_can_submit_different_intents
+    assert result(first)["accepted"] == result(second)["accepted"] == 1
+E   assert 0 == 1</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_resident_process_rechecks_actual_authority_after_fault[missing]" time="0.239"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'&#10;  &#10;  - route_authority_unreadable&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:306: in test_resident_process_rechecks_actual_authority_after_fault
+    assert out["reason"] == guard.REASON_AUTHORITY_UNREADABLE
+E   AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'
+E     
+E     - route_authority_unreadable
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_resident_process_rechecks_actual_authority_after_fault[corrupt]" time="0.243"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'&#10;  &#10;  - route_authority_unreadable&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:306: in test_resident_process_rechecks_actual_authority_after_fault
+    assert out["reason"] == guard.REASON_AUTHORITY_UNREADABLE
+E   AssertionError: assert 'isolated_run_prohibited' == 'route_authority_unreadable'
+E     
+E     - route_authority_unreadable
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_competing_switches_cannot_both_advance_from_same_prefreeze_snapshot" time="0.407" /><testcase classname="tests.test_phase_f_broker_enforcement" name="test_shadow_prohibition_also_covers_cancellation" time="0.087"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'shadow_run_prohibited'&#10;  &#10;  - shadow_run_prohibited&#10;  ?  ^  --&#10;  + isolated_run_prohibited&#10;  ? + ^^ ++">tests/test_phase_f_broker_enforcement.py:333: in test_shadow_prohibition_also_covers_cancellation
+    assert exc.value.reason_code == guard.REASON_SHADOW_RUN
+E   AssertionError: assert 'isolated_run_prohibited' == 'shadow_run_prohibited'
+E     
+E     - shadow_run_prohibited
+E     ?  ^  --
+E     + isolated_run_prohibited
+E     ? + ^^ ++</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_actual_broker_after_a_b_a_rejects_original_a_process" time="0.400"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'write_grant_generation_stale'&#10;  &#10;  - write_grant_generation_stale&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:347: in test_actual_broker_after_a_b_a_rejects_original_a_process
+    assert result(old)["reason"] == guard.REASON_GENERATION_STALE
+E   AssertionError: assert 'isolated_run_prohibited' == 'write_grant_generation_stale'
+E     
+E     - write_grant_generation_stale
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_echoed_order_account_mismatch_stays_unknown_and_blocks_switch" time="0.087"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'write_grant_account_mismatch'&#10;  &#10;  - write_grant_account_mismatch&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:362: in test_echoed_order_account_mismatch_stays_unknown_and_blocks_switch
+    assert exc.value.reason_code == guard.REASON_ACCOUNT_MISMATCH
+E   AssertionError: assert 'isolated_run_prohibited' == 'write_grant_account_mismatch'
+E     
+E     - write_grant_account_mismatch
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_phase_f_broker_enforcement" name="test_second_order_is_rechecked_after_first_order_and_freeze" time="0.085"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'write_grant_...ssions_frozen'&#10;  &#10;  - write_grant_submissions_frozen&#10;  + isolated_run_prohibited">tests/test_phase_f_broker_enforcement.py:381: in test_second_order_is_rechecked_after_first_order_and_freeze
+    assert exc.value.reason_code == guard.REASON_FROZEN
+E   AssertionError: assert 'isolated_run_prohibited' == 'write_grant_...ssions_frozen'
+E     
+E     - write_grant_submissions_frozen
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_broker_write_guard" name="test_uninstalled_guard_refuses_writes" time="0.137"><failure message="AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'&#10;  &#10;  - no_write_grant&#10;  + isolated_run_prohibited">tests/test_broker_write_guard.py:35: in test_uninstalled_guard_refuses_writes
+    assert exc.value.reason_code == guard.REASON_NO_GRANT
+E   AssertionError: assert 'isolated_run_prohibited' == 'no_write_grant'
+E     
+E     - no_write_grant
+E     + isolated_run_prohibited</failure></testcase><testcase classname="tests.test_broker_write_guard" name="test_installed_prohibition_refuses_every_submit" time="0.082" /><testcase classname="tests.test_broker_write_guard" name="test_refusal_is_an_auditable_record_not_a_silent_no_op" time="0.082" /><testcase classname="tests.test_broker_write_guard" name="test_broker_submit_layer_is_guarded_so_a_new_call_site_cannot_bypass_it" time="0.083" /><testcase classname="tests.test_broker_write_guard" name="test_empty_batch_is_not_a_refusal" time="0.086" /><testcase classname="tests.test_broker_write_guard" name="test_a_refused_order_does_not_fail_the_shadow_run" time="0.083" /><testcase classname="tests.test_broker_write_guard" name="test_runner_refuses_to_start_when_the_capability_is_missing" time="0.122" /><testcase classname="tests.test_broker_write_guard" name="test_runner_refuses_to_start_when_the_guard_does_not_prohibit" time="0.082" /><testcase classname="tests.test_broker_write_guard" name="test_runner_starts_once_the_capability_is_present" time="0.082" /><testcase classname="tests.test_broker_write_guard" name="test_first_prohibition_reason_wins_so_history_is_not_rewritten" time="0.083" /><testcase classname="tests.test_broker_write_guard" name="test_unknown_reason_code_is_rejected_at_installation" time="0.087" /><testcase classname="tests.test_broker_write_guard" name="test_environment_can_install_the_prohibition_for_a_resident_process" time="0.083" /><testcase classname="tests.test_broker_write_guard" name="test_environment_never_lifts_a_prohibition" time="0.121" /><testcase classname="tests.test_broker_write_guard" name="test_environment_reflects_the_isolated_reason" time="0.083" /><testcase classname="tests.test_execution_authorization" name="test_build_fails_without_review_or_approval" time="0.121" /><testcase classname="tests.test_execution_authorization" name="test_build_fails_on_rejected_review" time="0.125"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_execution_authorization.py:97: in test_build_fails_on_rejected_review
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_build_succeeds_with_all_prerequisites" time="0.125"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_execution_authorization.py:106: in test_build_succeeds_with_all_prerequisites
+    repo = _authorized_cycle(tmp_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_execution_authorization.py:67: in _authorized_cycle
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_place_orders_without_authorization_is_rejected" time="0.087"><failure message="AssertionError: assert 'authorization' in 'auto execution disabled: 生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，并通过完整行情、风控、审批、账户/代次及幂等门禁。'&#10; +  where 'auto execution disabled: 生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，并通过完整行情、风控、审批、账户/代次及幂等门禁。' = TradeLogEntry(order_id='', cycle_id='c1', symbol='NVDA', action='buy', qty=10.0, order_type='limit', limit_price=None,...门禁。', perm_id='', order_ref='', revision_no=1, order_seq=0, decision_hash='', approval_id='', execution_price_audit=[]).error">tests/test_execution_authorization.py:125: in test_place_orders_without_authorization_is_rejected
+    assert "authorization" in entries[0].error
+E   AssertionError: assert 'authorization' in 'auto execution disabled: 生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，并通过完整行情、风控、审批、账户/代次及幂等门禁。'
+E    +  where 'auto execution disabled: 生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，并通过完整行情、风控、审批、账户/代次及幂等门禁。' = TradeLogEntry(order_id='', cycle_id='c1', symbol='NVDA', action='buy', qty=10.0, order_type='limit', limit_price=None,...门禁。', perm_id='', order_ref='', revision_no=1, order_seq=0, decision_hash='', approval_id='', execution_price_audit=[]).error</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_validate_rejects_incomplete_authorization" time="0.168"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_execution_authorization.py:133: in test_validate_rejects_incomplete_authorization
+    repo = _authorized_cycle(tmp_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_execution_authorization.py:67: in _authorized_cycle
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_validate_rejects_hash_mismatch_stale_review_and_approval" time="0.123"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_execution_authorization.py:143: in test_validate_rejects_hash_mismatch_stale_review_and_approval
+    repo = _authorized_cycle(tmp_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_execution_authorization.py:67: in _authorized_cycle
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_validate_rejects_missing_portfolio_snapshot" time="0.129"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_execution_authorization.py:155: in test_validate_rejects_missing_portfolio_snapshot
+    repo = _authorized_cycle(tmp_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_execution_authorization.py:67: in _authorized_cycle
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_validate_rejects_stale_snapshot" time="0.129"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing">tests/test_execution_authorization.py:162: in test_validate_rejects_stale_snapshot
+    repo = _authorized_cycle(tmp_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_execution_authorization.py:67: in _authorized_cycle
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:80: in assert_write_destination
+    assert_broker_writes_prohibited(operation="publication", caller=boundary)
+src/ats/execution/broker_write_guard.py:376: in assert_broker_writes_prohibited
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: shadow/isolated run requires the broker write prohibition to be installed before it starts; the capability is missing</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_max_snapshot_age_seconds_loaded_with_default" time="0.085" /><testcase classname="tests.test_execution_authorization" name="test_stale_snapshot_re_reviews_and_reapproves_before_execution" time="0.194"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '20ee661e-c3a0-8b5b-2dac-5369cf51c610'">tests/test_execution_authorization.py:215: in test_stale_snapshot_re_reviews_and_reapproves_before_execution
+    run_decision_graph(state, channel=approve_all)
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '20ee661e-c3a0-8b5b-2dac-5369cf51c610'</failure></testcase><testcase classname="tests.test_execution_authorization" name="test_client_order_id_distinguishes_revisions" time="0.124" /><testcase classname="tests.test_execution_authorization" name="test_order_ref_format_fits_ibkr_field" time="0.089" /><testcase classname="tests.test_execution_authorization" name="test_retry_with_uncertain_outcome_does_not_resubmit" time="0.128"><failure message="AssertionError: assert 'rejected' == 'submitted'&#10;  &#10;  - submitted&#10;  + rejected">tests/test_execution_authorization.py:271: in test_retry_with_uncertain_outcome_does_not_resubmit
+    assert entries[0].status == "submitted"          # stays for reconciliation
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert 'rejected' == 'submitted'
+E     
+E     - submitted
+E     + rejected</failure></testcase><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_statuses_are_finished[cancelled]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_statuses_are_finished[error]" time="0.140" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_statuses_are_finished[filled]" time="0.084" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_statuses_are_finished[rejected]" time="0.085" /><testcase classname="tests.test_authorization_lifecycle" name="test_live_statuses_are_unfinished[partial]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_live_statuses_are_unfinished[pending]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_live_statuses_are_unfinished[submitted]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unrecognised_status_is_unknown_not_finished[]" time="0.122" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unrecognised_status_is_unknown_not_finished[None]" time="0.087" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unrecognised_status_is_unknown_not_finished[weird]" time="0.084" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unrecognised_status_is_unknown_not_finished[FILLED_x]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unrecognised_status_is_unknown_not_finished[3]" time="0.086" /><testcase classname="tests.test_authorization_lifecycle" name="test_status_matching_is_case_and_space_insensitive" time="0.084" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_submitted_order_is_unfinished" time="0.122" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_filled_order_is_finished_even_while_the_cycle_is_open" time="0.087" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_partially_filled_order_is_unfinished" time="0.086" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unknown_status_keeps_the_order_in_the_unfinished_set" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_and_live_orders_are_counted_separately" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_cycles_are_not_live[cancelled]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_cycles_are_not_live[executed]" time="0.132" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_cycles_are_not_live[failed]" time="0.084" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_cycles_are_not_live[rejected]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_terminal_cycles_are_not_live[superseded]" time="0.082" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_live_or_unknown_cycle_is_treated_as_live[executing]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_live_or_unknown_cycle_is_treated_as_live[pending_approval]" time="0.084" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_live_or_unknown_cycle_is_treated_as_live[risk_gate]" time="0.124" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_live_or_unknown_cycle_is_treated_as_live[]" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_live_or_unknown_cycle_is_treated_as_live[None]" time="0.082" /><testcase classname="tests.test_authorization_lifecycle" name="test_an_unreachable_audit_trail_blocks_the_switch" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_orders_are_filtered_to_the_cycle_in_question" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_cycle_whose_orders_are_all_finished_does_not_block_on_orders" time="0.083" /><testcase classname="tests.test_authorization_lifecycle" name="test_a_store_without_any_reader_yields_no_orders_and_still_blocks" time="0.124" /><testcase classname="tests.test_authorization_lifecycle" name="test_the_derived_view_is_the_same_one_reconciliation_reads" time="0.084" /><testcase classname="tests.test_decision_audit_store" name="test_decision_audit_tables_have_expected_columns" time="0.111" /><testcase classname="tests.test_decision_audit_store" name="test_decision_audit_idempotency_keys_are_unique" time="0.109" /><testcase classname="tests.test_decision_audit_store" name="test_legacy_database_upgrade_creates_decision_audit_tables" time="0.129" /><testcase classname="tests.test_decision_audit_store" name="test_legacy_decisions_migration_is_honest" time="0.132" /><testcase classname="tests.test_decision_audit_store" name="test_unknown_revision_cannot_be_authorized_after_reopen" time="0.178" /><testcase classname="tests.test_decision_audit_store" name="test_trades_and_fills_linkage_columns_nullable" time="0.132" /><testcase classname="tests.test_decision_audit_store" name="test_decision_audit_tables_survive_retirement_and_ownership" time="0.113" /><testcase classname="tests.test_decision_risk_review" name="test_review_does_not_modify_any_order_field" time="1.519" /><testcase classname="tests.test_decision_risk_review" name="test_single_order_cap_becomes_boundary_not_clip" time="0.167" /><testcase classname="tests.test_decision_risk_review" name="test_review_without_full_binding_is_invalid" time="0.127"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_decision_risk_review.py:122: in test_review_without_full_binding_is_invalid
+    repo.record_review(review_id="rv1", verdict="approved", **{**quad, "decision_hash": ""})
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_decision_risk_review" name="test_llm_comment_cannot_flip_a_rejection" time="1.323" /><testcase classname="tests.test_decision_risk_review" name="test_decision_reviews_do_not_touch_portfolio_risk_reviews" time="0.174"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_decision_risk_review.py:155: in test_decision_reviews_do_not_touch_portfolio_risk_reviews
+    repo.record_review(review_id=f"rv{i}", cycle_id="c1", revision_no=1,
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_decision_risk_review" name="test_risk_validator_has_no_live_references" time="0.316" /><testcase classname="tests.test_decision_risk_review" name="test_same_layer_orders_judged_together_not_independently" time="2.538" /><testcase classname="tests.test_decision_risk_review" name="test_cluster_concentration_judged_on_merged_consequence" time="1.362" /><testcase classname="tests.test_decision_risk_review" name="test_metrics_are_deterministic_and_move_with_the_revision" time="0.243" /><testcase classname="tests.test_decision_risk_review" name="test_metrics_quantify_rejected_revision_risk_change" time="1.343" /><testcase classname="tests.test_decision_risk_review" name="test_review_records_complete_basis" time="0.170" /><testcase classname="tests.test_decision_risk_review" name="test_review_basis_missing_binding_is_not_usable" time="0.139" /><testcase classname="tests.test_decision_risk_review" name="test_review_inputs_are_a_closed_set_without_macro" time="0.195" /><testcase classname="tests.test_decision_risk_review" name="test_ruleset_version_is_shared_between_chief_and_review" time="0.089" /><testcase classname="tests.test_decision_risk_review" name="test_risk_officer_memo_context_has_no_macro" time="0.135" /><testcase classname="tests.test_decision_risk_review" name="test_guard_risk_officer_has_zero_cross_role_reads" time="0.293" /><testcase classname="tests.test_decision_risk_review" name="test_authorization_refuses_review_missing_basis_bindings" time="0.125"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_decision_risk_review.py:365: in test_authorization_refuses_review_missing_basis_bindings
+    repo.record_review(review_id="c1:r1:review:r1", verdict="approved",
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_broker_risk" name="test_assess_without_portfolio_uses_config" time="0.083" /><testcase classname="tests.test_broker_risk" name="test_assess_flags_overweight_and_hot_sector" time="0.083" /><testcase classname="tests.test_broker_risk" name="test_place_orders_empty_does_not_connect" time="0.095" /><testcase classname="tests.test_broker_risk" name="test_status_mapping" time="0.082" /><testcase classname="tests.test_broker_risk" name="test_account_value_context_preserves_currency_and_fx" time="0.083" /><testcase classname="tests.test_broker_risk" name="test_position_weight_uses_base_currency_value" time="0.130" /><testcase classname="tests.test_broker_risk" name="test_missing_position_fx_fails_closed" time="0.084" /><testcase classname="tests.test_broker_risk" name="test_submit_rejects_unqualified_contract" time="0.085"><failure message="ats.execution.broker_write_guard.BrokerWriteProhibited: broker placeOrder refused: isolated_run_prohibited (caller=IBKRBroker._submit symbol=MRVL, refusal_id=broker-write-refusal-000001)">tests/test_broker_risk.py:107: in test_submit_rejects_unqualified_contract
+    entry = broker._submit(ib, TradeDecision(symbol="MRVL", action="trim"), 27, "cycle-x")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/broker/ibkr.py:477: in _submit
+    check_broker_write(operation="placeOrder", caller="IBKRBroker._submit",
+src/ats/execution/broker_write_guard.py:415: in check_broker_write
+    raise BrokerWriteProhibited(
+E   ats.execution.broker_write_guard.BrokerWriteProhibited: broker placeOrder refused: isolated_run_prohibited (caller=IBKRBroker._submit symbol=MRVL, refusal_id=broker-write-refusal-000001)</failure></testcase><testcase classname="tests.test_broker_risk" name="test_size_survives_nan_close" time="0.082" /><testcase classname="tests.test_broker_risk" name="test_sizing_returns_zero_while_auto_execution_is_disabled" time="0.083"><failure message="PermissionError: execution_price_order_binding_required">tests/test_broker_risk.py:154: in test_sizing_returns_zero_while_auto_execution_is_disabled
+    assert texec._size(d) == 0.0
+           ^^^^^^^^^^^^^^
+src/ats/trader/execute.py:389: in _size
+    px = _last_price(d.symbol)
+         ^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:409: in _last_price
+    quote = read_price("trader", decision)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/data/execution_prices.py:173: in read_price
+    raise PermissionError("execution_price_order_binding_required")
+E   PermissionError: execution_price_order_binding_required</failure></testcase><testcase classname="tests.test_clerk_e2e" name="test_full_ledger_chain_paper_mode" time="0.132"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_e2e.py:116: in test_full_ledger_chain_paper_mode
+    out = clerk_mod.clerk_run(store=store, broker=_StubBroker(),
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_clerk_orchestration" name="test_clerk_run_chains_all_steps_and_leaves_one_trail" time="0.177"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_orchestration.py:71: in test_clerk_run_chains_all_steps_and_leaves_one_trail
+    out = clerk.clerk_run(store=store, broker=_FakeBroker([_fill("f1")]))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_clerk_orchestration" name="test_same_window_rerun_is_reused_without_new_facts" time="0.121"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_orchestration.py:85: in test_same_window_rerun_is_reused_without_new_facts
+    out1 = clerk.clerk_run(store=store, broker=_FakeBroker([_fill("f1")]))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_clerk_orchestration" name="test_different_window_is_a_new_run" time="0.124"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_orchestration.py:97: in test_different_window_is_a_new_run
+    clerk.clerk_run(store=store, broker=_FakeBroker([_fill("f1")]))
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_clerk_orchestration" name="test_clerk_run_leaves_domain_facts_byte_identical" time="0.123"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_orchestration.py:117: in test_clerk_run_leaves_domain_facts_byte_identical
+    out = clerk.clerk_run(store=store, broker=_FakeBroker([_fill("f1")]))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_clerk_orchestration" name="test_broker_unavailable_registers_missed_window_gaps" time="0.126"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_orchestration.py:142: in test_broker_unavailable_registers_missed_window_gaps
+    out = clerk.clerk_run(store=store, broker=None,
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_clerk_orchestration" name="test_source_facts_hash_is_stable_and_read_model_hit_skips" time="0.200" /><testcase classname="tests.test_clerk_orchestration" name="test_failed_step_is_recorded_and_run_marked_failed" time="0.127"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_clerk_orchestration.py:185: in test_failed_step_is_recorded_and_run_marked_failed
+    out = clerk.clerk_run(store=store, broker=_FakeBroker([_fill("f1")]))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/execution/clerk.py:135: in clerk_run
+    guard_clerk_publication(store=store)
+src/ats/workflow/cutover_wiring.py:169: in guard_clerk_publication
+    assert_write_destination(store, cutover_module.CLERK_PUBLICATION)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_overnight_limits" name="test_auto_execution_is_off" time="0.083" /><testcase classname="tests.test_overnight_limits" name="test_the_disabled_reason_names_the_contract_conflict" time="0.083"><failure message="AssertionError: assert '未授权' in '生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，并通过完整行情、风控、审批、账户/代次及幂等门禁。'">tests/test_overnight_limits.py:49: in test_the_disabled_reason_names_the_contract_conflict
+    assert "未授权" in reason
+E   AssertionError: assert '未授权' in '生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，并通过完整行情、风控、审批、账户/代次及幂等门禁。'</failure></testcase><testcase classname="tests.test_overnight_limits" name="test_place_orders_refuses_and_records_why" time="0.083" /><testcase classname="tests.test_overnight_limits" name="test_refusal_happens_before_the_broker_is_touched" time="0.083" /><testcase classname="tests.test_overnight_limits" name="test_every_order_gets_its_own_recorded_refusal" time="0.132" /><testcase classname="tests.test_overnight_limits" name="test_order_sequence_is_preserved_so_the_refusal_is_reconcilable" time="0.085" /><testcase classname="tests.test_overnight_limits" name="test_the_reference_price_is_no_longer_fetched" time="0.085"><failure message="PermissionError: execution_price_order_binding_required">tests/test_overnight_limits.py:116: in test_the_reference_price_is_no_longer_fetched
+    assert texec._last_price("GOOG") is None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:409: in _last_price
+    quote = read_price("trader", decision)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/data/execution_prices.py:173: in read_price
+    raise PermissionError("execution_price_order_binding_required")
+E   PermissionError: execution_price_order_binding_required</failure></testcase><testcase classname="tests.test_overnight_limits" name="test_amount_only_decisions_size_to_zero_and_say_so" time="0.084"><failure message="PermissionError: execution_price_order_binding_required">tests/test_overnight_limits.py:125: in test_amount_only_decisions_size_to_zero_and_say_so
+    sized = texec.size_decisions([_d("buy")])
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:61: in size_decisions
+    return [(d, _size(d)) for d in decisions]
+                ^^^^^^^^
+src/ats/trader/execute.py:389: in _size
+    px = _last_price(d.symbol)
+         ^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:409: in _last_price
+    quote = read_price("trader", decision)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/data/execution_prices.py:173: in read_price
+    raise PermissionError("execution_price_order_binding_required")
+E   PermissionError: execution_price_order_binding_required</failure></testcase><testcase classname="tests.test_overnight_limits" name="test_an_explicit_share_count_still_sizes_normally" time="0.083" /><testcase classname="tests.test_overnight_limits" name="test_market_orders_stay_market_orders" time="0.083"><failure message="PermissionError: execution_price_order_binding_required">tests/test_overnight_limits.py:141: in test_market_orders_stay_market_orders
+    out, notes = texec.as_overnight_limits([_d("buy")], slippage_pct=0.5)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:85: in as_overnight_limits
+    ref = _last_price(d.symbol)
+          ^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:409: in _last_price
+    quote = read_price("trader", decision)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/data/execution_prices.py:173: in read_price
+    raise PermissionError("execution_price_order_binding_required")
+E   PermissionError: execution_price_order_binding_required</failure></testcase><testcase classname="tests.test_overnight_limits" name="test_an_explicit_limit_is_still_left_alone" time="0.126" /><testcase classname="tests.test_overnight_limits" name="test_the_approval_card_shows_a_market_order_not_a_price" time="0.086"><failure message="PermissionError: execution_price_order_binding_required">tests/test_overnight_limits.py:158: in test_the_approval_card_shows_a_market_order_not_a_price
+    out, _ = texec.as_overnight_limits([_d("buy")])
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:85: in as_overnight_limits
+    ref = _last_price(d.symbol)
+          ^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:409: in _last_price
+    quote = read_price("trader", decision)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/data/execution_prices.py:173: in read_price
+    raise PermissionError("execution_price_order_binding_required")
+E   PermissionError: execution_price_order_binding_required</failure></testcase><testcase classname="tests.test_overnight_limits" name="test_the_preserved_implementation_exists_for_plan_a" time="0.083" /><testcase classname="tests.test_overnight_limits" name="test_nothing_in_the_package_calls_the_preserved_implementation" time="0.165" /><testcase classname="tests.test_overnight_limits" name="test_the_refusal_carries_a_timestamp" time="0.085" /><testcase classname="tests.test_chief_graph" name="test_approved_places_and_persists" time="0.187"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id 'b932e8bb-8bac-5ce9-bdeb-d81ac13877eb'">tests/test_chief_graph.py:44: in test_approved_places_and_persists
+    result = run_decision_graph(_state(), channel=approve_all)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id 'b932e8bb-8bac-5ce9-bdeb-d81ac13877eb'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_rejected_places_nothing_but_logs" time="0.137"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '1f0c4e07-96d4-9788-e526-466745a45161'">tests/test_chief_graph.py:55: in test_rejected_places_nothing_but_logs
+    result = run_decision_graph(_state(), channel=reject_all)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '1f0c4e07-96d4-9788-e526-466745a45161'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_dry_run_approved_never_touches_broker" time="0.139"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id 'd78c2772-fd7e-621c-d95d-c5352bcd61fb'">tests/test_chief_graph.py:63: in test_dry_run_approved_never_touches_broker
+    result = run_decision_graph(_state(dry_run=True), channel=approve_all)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id 'd78c2772-fd7e-621c-d95d-c5352bcd61fb'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_auto_approve_runs_without_interrupt" time="0.182"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '9f7d4765-d0aa-8d5e-d632-f21889b4cc8c'">tests/test_chief_graph.py:74: in test_auto_approve_runs_without_interrupt
+    result = run_decision_graph(_state(auto_approve=True), channel=NeverAsk())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '9f7d4765-d0aa-8d5e-d632-f21889b4cc8c'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_hold_only_ends_before_review" time="0.139"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '54988e42-402e-868e-ded4-03de08c29e03'">tests/test_chief_graph.py:80: in test_hold_only_ends_before_review
+    result = run_decision_graph(
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '54988e42-402e-868e-ded4-03de08c29e03'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_no_execute_stops_after_persist_decision" time="0.142"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '7f00556a-616c-18be-e9ba-4a937460e0e4'">tests/test_chief_graph.py:89: in test_no_execute_stops_after_persist_decision
+    run_decision_graph(state, channel=approve_all)
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '7f00556a-616c-18be-e9ba-4a937460e0e4'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_derisk_blocks_buys_before_review" time="0.183"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '3e1370d5-8c4b-e631-d870-e3180f919db8'">tests/test_chief_graph.py:102: in test_derisk_blocks_buys_before_review
+    result = run_decision_graph(
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '3e1370d5-8c4b-e631-d870-e3180f919db8'</failure></testcase><testcase classname="tests.test_chief_graph" name="test_trader_thread_resumes_on_chief_graph" time="0.142"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '08061787-235b-15b2-25c4-53b1c88c17f5'">tests/test_chief_graph.py:111: in test_trader_thread_resumes_on_chief_graph
+    paused = run_decision_graph(_state(cycle_id="trader-20260101000000"), channel=async_channel)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '08061787-235b-15b2-25c4-53b1c88c17f5'</failure></testcase><testcase classname="tests.test_chief_loop" name="test_persist_decision_twice_writes_one_revision_and_review" time="0.167"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_chief_loop.py:99: in test_persist_decision_twice_writes_one_revision_and_review
+    _run_node(state, persist_decision)
+tests/test_chief_loop.py:78: in _run_node
+    for k, v in node(state).items():
+                ^^^^^^^^^^^
+src/ats/graph/chief.py:351: in persist_decision
+    repo.record_review(
+src/ats/decision/repository.py:368: in record_review
+    guard_approval_write(store=self.store, what="a risk review")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_chief_loop" name="test_routes_approve_revise_manual_review" time="0.086" /><testcase classname="tests.test_chief_loop" name="test_over_cap_order_is_revised_to_boundary_then_executed" time="0.186"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '504fcb77-0bb7-7d4e-d1c1-c3a7b8b0d4da'">tests/test_chief_loop.py:150: in test_over_cap_order_is_revised_to_boundary_then_executed
+    result = run_decision_graph(_state(), channel=approve_all)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '504fcb77-0bb7-7d4e-d1c1-c3a7b8b0d4da'</failure></testcase><testcase classname="tests.test_chief_loop" name="test_exhausted_rounds_end_in_manual_review_without_approval" time="0.138"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id 'ee2e4b6b-96c2-91d2-e252-47ba000d4afa'">tests/test_chief_loop.py:187: in test_exhausted_rounds_end_in_manual_review_without_approval
+    result = run_decision_graph(_state(), channel=approve_all)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id 'ee2e4b6b-96c2-91d2-e252-47ba000d4afa'</failure></testcase><testcase classname="tests.test_chief_loop" name="test_no_action_is_terminal_and_skips_review_approval_execution" time="0.138"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id 'a19fd4ab-e13b-f38e-7f22-20b7f8829aa5'">tests/test_chief_loop.py:205: in test_no_action_is_terminal_and_skips_review_approval_execution
+    result = run_decision_graph(
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id 'a19fd4ab-e13b-f38e-7f22-20b7f8829aa5'</failure></testcase><testcase classname="tests.test_chief_loop" name="test_scores_consumed_once_across_a_multi_round_run" time="0.184"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '0a77ddbc-0f4b-8454-5cbb-c018dc057dde'">tests/test_chief_loop.py:230: in test_scores_consumed_once_across_a_multi_round_run
+    run_decision_graph(_state(actionable_scores=[["NVDA", "2026Q2"]]),
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '0a77ddbc-0f4b-8454-5cbb-c018dc057dde'</failure></testcase><testcase classname="tests.test_chief_loop" name="test_resume_twice_does_not_duplicate_approvals_or_orders" time="0.142"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '34ebf4b4-7d3d-c650-6467-2dff90b5af56'">tests/test_chief_loop.py:241: in test_resume_twice_does_not_duplicate_approvals_or_orders
+    paused = run_decision_graph(_state(cycle_id="trader-20260101000000"),
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '34ebf4b4-7d3d-c650-6467-2dff90b5af56'</failure></testcase><testcase classname="tests.test_chief_loop" name="test_persist_decision_replay_keeps_approval_single" time="0.125"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_chief_loop.py:276: in test_persist_decision_replay_keeps_approval_single
+    a1 = repo.record_approval(approval_id="ap1", cycle_id="c1",
+src/ats/decision/repository.py:406: in record_approval
+    guard_approval_write(store=self.store, what="a Boss approval")
+src/ats/workflow/cutover_wiring.py:146: in guard_approval_write
+    assert_write_destination(store, cutover_module.APPROVAL_LIFECYCLE)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_chief_loop" name="test_single_real_order_submission_path" time="0.137"><failure message="AssertionError: {'src//ats/graph/chief.py'}&#10;assert {'src//ats/graph/chief.py'} == {'src/ats/graph/chief.py'}&#10;  &#10;  Extra items in the left set:&#10;  'src//ats/graph/chief.py'&#10;  Extra items in the right set:&#10;  'src/ats/graph/chief.py'&#10;  Use -v to get more diff">tests/test_chief_loop.py:307: in test_single_real_order_submission_path
+    assert callers == {"src/ats/graph/chief.py"}, callers
+E   AssertionError: {'src//ats/graph/chief.py'}
+E   assert {'src//ats/graph/chief.py'} == {'src/ats/graph/chief.py'}
+E     
+E     Extra items in the left set:
+E     'src//ats/graph/chief.py'
+E     Extra items in the right set:
+E     'src/ats/graph/chief.py'
+E     Use -v to get more diff</failure></testcase><testcase classname="tests.test_chief_loop" name="test_chief_revise_adopts_boundary_and_cites_parent" time="0.139" /><testcase classname="tests.test_chief" name="test_assemble_gathers_all_blocks" time="0.126"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_chief.py:50: in test_assemble_gathers_all_blocks
+    _seed_store()
+tests/test_chief.py:31: in _seed_store
+    store.save_sector_review(SectorReview(
+src/ats/memory/store.py:2572: in save_sector_review
+    self.save_task_projection(
+src/ats/memory/store.py:2241: in save_task_projection
+    guard_analyst_output(store=self, what="a legacy task projection")
+src/ats/workflow/cutover_wiring.py:186: in guard_analyst_output
+    assert_write_destination(store, cutover_module.ANALYST_OUTPUT)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_chief" name="test_sector_block_renders_layer_boom_scores" time="0.126"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_chief.py:69: in test_sector_block_renders_layer_boom_scores
+    get_store().save_sector_review(SectorReview(
+src/ats/memory/store.py:2572: in save_sector_review
+    self.save_task_projection(
+src/ats/memory/store.py:2241: in save_task_projection
+    guard_analyst_output(store=self, what="a legacy task projection")
+src/ats/workflow/cutover_wiring.py:186: in guard_analyst_output
+    assert_write_destination(store, cutover_module.ANALYST_OUTPUT)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_chief" name="test_pead_block_renders_signal_chain_summary" time="0.134" /><testcase classname="tests.test_chief" name="test_assemble_derisk_prepends_hard_instruction" time="0.163" /><testcase classname="tests.test_chief" name="test_assemble_exposes_compact_risk_directive" time="0.164" /><testcase classname="tests.test_chief" name="test_decide_no_llm_zero_decisions" time="0.225" /><testcase classname="tests.test_chief" name="test_decide_llm_failure_degrades" time="0.165" /><testcase classname="tests.test_chief" name="test_chief_run_store_roundtrip" time="0.123" /><testcase classname="tests.test_chief" name="test_run_chief_cli_executes_when_decisions" time="0.197"><failure message="ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection">tests/test_chief.py:177: in test_run_chief_cli_executes_when_decisions
+    publish("layer_analysis",
+tests/test_chief.py:171: in publish
+    get_store().save_task_projection_envelope(build_envelope(
+src/ats/memory/store.py:2305: in save_task_projection_envelope
+    guard_analyst_output(store=self, what="a task projection envelope")
+src/ats/workflow/cutover_wiring.py:186: in guard_analyst_output
+    assert_write_destination(store, cutover_module.ANALYST_OUTPUT)
+src/ats/workflow/cutover_wiring.py:97: in assert_write_destination
+    raise BoundaryWriteRefused(boundary, "incomplete isolated persistence redirection",
+E   ats.workflow.cutover_wiring.BoundaryWriteRefused: incomplete isolated persistence redirection</failure></testcase><testcase classname="tests.test_trader" name="test_total_return_and_drawdown" time="0.085" /><testcase classname="tests.test_trader" name="test_episode_stats" time="0.132" /><testcase classname="tests.test_trader" name="test_episode_stats_counts_a_scaled_out_position_once" time="0.087" /><testcase classname="tests.test_trader" name="test_benchmark_and_summary" time="0.085" /><testcase classname="tests.test_trader" name="test_execute_rejected_places_nothing_but_logs_context" time="0.137"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '1f27226e-0d14-ac3b-6614-7ae2ec935328'">tests/test_trader.py:133: in test_execute_rejected_places_nothing_but_logs_context
+    entries = texec.execute([d], source="manual")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:45: in execute
+    result = run_decision_graph(state, channel=channel)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '1f27226e-0d14-ac3b-6614-7ae2ec935328'</failure></testcase><testcase classname="tests.test_trader" name="test_execute_approved_places_and_persists" time="0.188"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id 'f9403fa7-93e0-b05d-8551-ab6b72148ae8'">tests/test_trader.py:143: in test_execute_approved_places_and_persists
+    entries = texec.execute([d], source="manual")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:45: in execute
+    result = run_decision_graph(state, channel=channel)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id 'f9403fa7-93e0-b05d-8551-ab6b72148ae8'</failure></testcase><testcase classname="tests.test_trader" name="test_execute_dry_run_no_order" time="0.138"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id 'efa7da79-0414-6d6d-6ff3-1623a474604c'">tests/test_trader.py:153: in test_execute_dry_run_no_order
+    texec.execute([d], source="manual", dry_run=True)
+src/ats/trader/execute.py:45: in execute
+    result = run_decision_graph(state, channel=channel)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id 'efa7da79-0414-6d6d-6ff3-1623a474604c'</failure></testcase><testcase classname="tests.test_trader" name="test_hold_filtered" time="0.137"><failure message="ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete&#10;During task with name 'assemble_context' and id '61f8ef52-dde4-779a-683b-c3fdf5cf9bcf'">tests/test_trader.py:158: in test_hold_filtered
+    out = texec.execute([TradeDecision(symbol="X", action="hold")], source="manual")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/trader/execute.py:45: in execute
+    result = run_decision_graph(state, channel=channel)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/runtime/cli.py:48: in run_decision_graph
+    result = app.invoke(state, config=cfg_run)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:265: in entry
+    with bind_read(identity, mode=current.mode if current else None,
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:137: in bind_read
+    decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
+               ^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/runtime_reads.py:77: in gate_read
+    raise RouteUnavailable("isolated read environment is incomplete")
+E   ats.workflow.cutover_routing.RouteUnavailable: isolated read environment is incomplete
+E   During task with name 'assemble_context' and id '61f8ef52-dde4-779a-683b-c3fdf5cf9bcf'</failure></testcase><testcase classname="tests.test_trader" name="test_fills_dedup_and_performance_snapshot" time="0.129" /><testcase classname="tests.test_trader" name="test_order_status_mapping" time="0.146" /><testcase classname="tests.test_trader" name="test_trades_migration_columns" time="0.133" /></testsuite></testsuites>

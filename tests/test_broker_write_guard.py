@@ -26,16 +26,13 @@ def _decision(symbol: str = "AMD") -> TradeDecision:
                          rationale="phase F guard test")
 
 
-def test_uninstalled_guard_allows_writes_so_production_is_unaffected():
-    """The guard is additive: with nothing installed the broker behaves as before.
-
-    Without this, installing the guard would break every existing paper-trading
-    path — and a safety mechanism that must be switched on before it protects
-    anything is a mechanism that gets forgotten.
-    """
+def test_uninstalled_guard_refuses_writes():
+    """An uninitialised process has no authority to submit."""
     assert guard.guard_installed() is False
     assert guard.is_prohibited() is False
-    guard.check_broker_write(operation="place_orders", caller="test")
+    with pytest.raises(guard.BrokerWriteProhibited) as exc:
+        guard.check_broker_write(operation="place_orders", caller="test")
+    assert exc.value.reason_code == guard.REASON_NO_GRANT
 
 
 def test_installed_prohibition_refuses_every_submit():

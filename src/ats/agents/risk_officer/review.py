@@ -35,6 +35,10 @@ def _context(review: RiskReview) -> str:
         "可操作建议、最值得盯的风险点。全部用中文。")
 
 
+from ...workflow.runtime_reads import scoped_read  # noqa: E402
+
+
+@scoped_read("risk")
 def run(*, use_llm: bool = True) -> RiskMemo | None:
     """Snapshot -> assess -> persist -> LLM memo. Returns None if IBKR is unavailable."""
     from ...memory import get_store

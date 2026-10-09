@@ -156,8 +156,8 @@ def test_a_legacy_defect_alone_does_not_hold_an_isolated_scope():
     report = cd.dispose_consumer(consumer_id="chief",
                                  legacy_defects=("legacy_table_direct_reads",))
     assert report.blocks_cutover is False
-    assert any("isolated from the registered legacy defect" in r
-               for r in report.reasons)
+    assert any("must be established separately" in r for r in report.reasons)
+    assert not any("verified as isolated" in r for r in report.reasons)
 
 
 def test_a_legacy_defect_does_not_launder_a_real_gap():

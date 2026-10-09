@@ -8,6 +8,8 @@ JSON schema; conviction is clamped to [0,1] in code.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from ...schemas.decision import Action, normalize_action

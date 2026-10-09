@@ -46,7 +46,7 @@ def test_verification_starts_without_production_qualification(tmp_path):
     evidence required that evidence, qualification would be unobtainable rather
     than merely un-obtained.
     """
-    with iv.isolated_verification("intake-no-qual", root=tmp_path) as attestation:
+    with iv.isolated_verification("intake-no-qual", root=tmp_path / "isolated") as attestation:
         assert attestation.qualification_required is False
         assert attestation.production_ledger_integrity_proven is False
 
@@ -63,13 +63,13 @@ def test_the_entry_point_does_not_ask_assurance(tmp_path, monkeypatch):
         raise AssertionError("intake verification must not gate on qualification")
 
     monkeypatch.setattr(assurance, "qualification", _refuse)
-    with iv.isolated_verification("intake-no-gate", root=tmp_path):
+    with iv.isolated_verification("intake-no-gate", root=tmp_path / "isolated"):
         pass
 
 
 def test_verification_runs_under_the_process_write_prohibition(tmp_path):
     """Redirecting ledgers does not stop a real order — the broker is not a DB."""
-    with iv.isolated_verification("intake-guard", root=tmp_path):
+    with iv.isolated_verification("intake-guard", root=tmp_path / "isolated"):
         assert guard.is_prohibited() is True
         with pytest.raises(guard.BrokerWriteProhibited):
             guard.check_broker_write(operation="place_orders", caller="intake")
@@ -79,7 +79,7 @@ def test_every_persistence_surface_is_redirected_during_verification(tmp_path):
     """A surface the verification can still write to is a surface it can corrupt."""
     from ats.workflow import isolation
 
-    with iv.isolated_verification("intake-surfaces", root=tmp_path) as attestation:
+    with iv.isolated_verification("intake-surfaces", root=tmp_path / "isolated") as attestation:
         for var in isolation.PERSISTENCE_ENV_VARS:
             import os
 
@@ -95,7 +95,7 @@ def test_verification_refuses_to_start_without_the_capability(tmp_path, monkeypa
         lambda **_kwargs: (_ for _ in ()).throw(guard.BrokerWriteProhibited(
             "capability missing", reason_code="guard_missing", refusal_id="")))
     with pytest.raises(guard.BrokerWriteProhibited):
-        with iv.isolated_verification("intake-noguard", root=tmp_path):
+        with iv.isolated_verification("intake-noguard", root=tmp_path / "isolated"):
             pytest.fail("the verification body must not execute")
 
 
@@ -111,7 +111,7 @@ def test_a_production_side_effect_invalidates_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(iv, "_production_fingerprint", lambda: next(reads))
 
     with pytest.raises(iv.ProductionSideEffect) as excinfo:
-        with iv.isolated_verification("intake-leak", root=tmp_path):
+        with iv.isolated_verification("intake-leak", root=tmp_path / "isolated"):
             pass
 
     assert "ats.sqlite:trades" in str(excinfo.value)
@@ -122,7 +122,7 @@ def test_no_production_approval_is_produced_by_a_verification(tmp_path):
     """An approval is the input to a real order; a verification must not mint one."""
     from ats.memory import get_store
 
-    with iv.isolated_verification("intake-approval", root=tmp_path):
+    with iv.isolated_verification("intake-approval", root=tmp_path / "isolated"):
         store = get_store()
         assert store.conn.execute(
             "SELECT COUNT(*) FROM boss_approvals").fetchone()[0] == 0
@@ -145,7 +145,7 @@ def test_a_confirmed_clear_reports_the_target_without_deleting():
 
 def test_an_isolated_result_cannot_authorise_a_trade(tmp_path):
     """`7.1` third case / `7.6`: the path working is not ledger integrity."""
-    with iv.isolated_verification("intake-not-tradable", root=tmp_path) as att:
+    with iv.isolated_verification("intake-not-tradable", root=tmp_path / "isolated") as att:
         with pytest.raises(iv.IntakeVerificationError) as excinfo:
             iv.assert_isolated_result_not_tradable(att, consumer_id="trader")
 
@@ -155,7 +155,7 @@ def test_an_isolated_result_cannot_authorise_a_trade(tmp_path):
 
 
 def test_the_attestation_states_what_it_does_not_prove(tmp_path):
-    with iv.isolated_verification("intake-attest", root=tmp_path) as att:
+    with iv.isolated_verification("intake-attest", root=tmp_path / "isolated") as att:
         pass
     row = att.as_row()
     assert row["production_ledger_integrity_proven"] is False
@@ -217,7 +217,9 @@ def test_a_role_that_never_reaches_the_governed_surface_is_registered_not_passed
 
     # Pinned so a future migration shows up as a change in THIS list rather than
     # as a silently passing suite.
-    assert set(unwired) == {"fundamental", "chief", "risk", "trader", "clerk"}
+    # Trader now directly consumes the governed authorization packet. The
+    # delegated product/state paths of other roles need dynamic evidence.
+    assert set(unwired) == {"fundamental", "chief", "risk", "clerk"}
 
 
 def test_the_ten_analysis_and_decision_roles_are_the_declared_ten():
@@ -376,8 +378,9 @@ def test_a_violation_names_a_location_a_reader_can_act_on():
     assert read.location.startswith("ats.trader.execute:")
     assert read.detail
 
-    unwired = by_kind["governed_read_surface_not_reached"]
-    assert unwired.location == "ats.trader.execute"
+    unwired = next(v for v in iv.scan_consumer_access("chief").violations
+                   if v.kind == "governed_read_surface_not_reached")
+    assert unwired.location in iv.CONSUMER_ENTRY_POINTS["chief"]
     assert unwired.detail
 
 
@@ -656,7 +659,7 @@ def test_a_complete_run_may_enter_the_decision_cycle():
 
     registry = default_registry()
     result = iv.verify_required_input_blocking(
-        registry=registry, projections=_complete_projections(registry),
+        at=NOW, registry=registry, projections=_complete_projections(registry),
         scope={"kind": "portfolio"})
     assert result["complete"] is True
     assert result["decision_cycle_entered"] is True
@@ -673,7 +676,7 @@ def test_a_missing_required_analysis_blocks_the_cycle():
     projections.pop("technical_review")
 
     result = iv.verify_required_input_blocking(
-        registry=registry, projections=projections, scope={"kind": "portfolio"})
+        at=NOW, registry=registry, projections=projections, scope={"kind": "portfolio"})
 
     assert result["complete"] is False
     assert result["decision_cycle_entered"] is False
@@ -687,7 +690,7 @@ def test_an_empty_projection_set_blocks_and_names_every_category():
 
     registry = default_registry()
     result = iv.verify_required_input_blocking(
-        registry=registry, projections={}, scope={"kind": "portfolio"})
+        at=NOW, registry=registry, projections={}, scope={"kind": "portfolio"})
     assert result["complete"] is False
     assert result["decision_cycle_entered"] is False
     assert {gap["category"] for gap in result["gaps"]} >= {
@@ -708,7 +711,7 @@ def test_a_missing_analysis_is_reported_by_name_not_as_a_count():
     projections["fundamental_event_review"] = None
 
     outcome = iv.verify_required_input_blocking(
-        registry=registry, projections=projections, scope={"kind": "portfolio"})
+        at=NOW, registry=registry, projections=projections, scope={"kind": "portfolio"})
 
     assert outcome["complete"] is False
     categories = {gap["category"] for gap in outcome["gaps"]}
@@ -719,31 +722,30 @@ def test_a_missing_analysis_is_reported_by_name_not_as_a_count():
     assert "fundamental_expectation_update" in outcome["refusal_message"]
 
 
-def test_a_disagreement_between_the_two_contracts_is_reported_not_hidden():
-    """The snapshot judges per CATEGORY; `build_run_result` judges per TASK.
-
-    Production's `open_decision_cycle` gates on the snapshot alone, so with one
-    fundamental mode missing the cycle WOULD open — while the run contract says
-    incomplete. Adopting either verdict silently would hide a real conflict
-    between two contracts that both claim to govern entry, so it is reported and
-    the run is not marked verified.
-    """
+@pytest.mark.parametrize("mode,missing",[("routine", "fundamental_expectation_update"),
+                                         ("event", "fundamental_event_review")])
+def test_selected_mode_failure_cannot_be_replaced_by_the_other(mode, missing):
     from ats.workflow.run_contracts import default_registry
+    registry = default_registry()
+    projections = _complete_projections(registry)
+    projections[missing] = None
+    outcome = iv.verify_required_input_blocking(at=NOW, registry=registry,
+        projections=projections, scope={"kind": "portfolio"}, fundamental_mode=mode)
+    assert not outcome["complete"] and not outcome["run_contract_complete"]
+    assert not outcome["decision_cycle_entered"] and not outcome["verified"]
+    assert outcome["contract_disagreements"] == []
+    assert missing in outcome["refusal_message"]
 
+
+def test_unselected_event_does_not_block_routine():
+    from ats.workflow.run_contracts import default_registry
     registry = default_registry()
     projections = _complete_projections(registry)
     projections["fundamental_event_review"] = None
-
-    outcome = iv.verify_required_input_blocking(
-        registry=registry, projections=projections, scope={"kind": "portfolio"})
-
-    assert outcome["complete"] is True
-    assert outcome["run_contract_complete"] is False
-    assert outcome["decision_cycle_entered"] is False
-    assert len(outcome["contract_disagreements"]) == 1
-    assert "fundamental_event_review" in outcome["contract_disagreements"][0]
-    assert outcome["verified"] is False, (
-        "a run whose two governing contracts disagree is not a verified run")
+    result = iv.verify_required_input_blocking(at=NOW, registry=registry,
+        projections=projections, scope={"kind":"portfolio"}, fundamental_mode="routine")
+    assert result["verified"] and result["run_contract_complete"]
+    assert "fundamental_event_review" not in result["selected_tasks"]
 
 
 def test_a_fully_consistent_run_reports_no_disagreement():
@@ -751,7 +753,7 @@ def test_a_fully_consistent_run_reports_no_disagreement():
 
     registry = default_registry()
     outcome = iv.verify_required_input_blocking(
-        registry=registry, projections=_complete_projections(registry),
+        at=NOW, registry=registry, projections=_complete_projections(registry),
         scope={"kind": "portfolio"})
     assert outcome["contract_disagreements"] == []
     assert outcome["verified"] is True
@@ -852,7 +854,7 @@ def chain_repo(tmp_path):
     registry = default_registry()
     projections = _complete_projections(registry)
     snapshot = build_research_snapshot(
-        registry=registry, projections=projections,
+        at=NOW, registry=registry, projections=projections,
         scope=ProjectionScope(kind="portfolio"))
 
     cycle_id = "chain-cycle"
@@ -932,7 +934,7 @@ def test_a_broker_write_attempt_is_recorded_as_a_refusal(tmp_path):
 
     store = TradingMemory(str(tmp_path / "refusal.sqlite"))
     repo = DecisionAuditRepository(store)
-    with iv.isolated_verification("chain-refusal", root=tmp_path):
+    with iv.isolated_verification("chain-refusal", root=tmp_path / "isolated"):
         with pytest.raises(guard.BrokerWriteProhibited):
             guard.check_broker_write(operation="place_orders", caller="chain")
         result = iv.verify_decision_chain(
@@ -1018,7 +1020,7 @@ def test_the_report_counts_per_consumer_rather_than_saying_ok():
 
 def test_the_report_states_that_isolation_is_not_ledger_integrity(tmp_path):
     records = [iv.scan_consumer_access("macro")]
-    with iv.isolated_verification("report-attest", root=tmp_path) as attestation:
+    with iv.isolated_verification("report-attest", root=tmp_path / "isolated") as attestation:
         pass
     report = iv.render_report(records, attestation=attestation)
     assert "隔离证明不是生产账本完整性证明" in report

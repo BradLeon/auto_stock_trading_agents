@@ -23,6 +23,8 @@ projections keyed by profile/target) and is deliberately left alone.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import hashlib
 import json
 from contextlib import contextmanager
@@ -536,7 +538,7 @@ class TaskProjectionEnvelope(BaseModel):
         """No `valid_until` means "until superseded", not "forever fresh by omission"."""
         if not self.valid_until:
             return False
-        now = at or datetime.now(timezone.utc)
+        now = at or evaluation_now(timezone.utc)
         try:
             until = datetime.fromisoformat(self.valid_until)
         except ValueError:
@@ -561,7 +563,7 @@ def build_envelope(*, role: AgentRole, payload: Any, scope: ProjectionScope,
                          *normalize_refs(data_vintage_refs)]
     validated = validate_payload(role, payload)
     body = json.loads(validated.payload_json())
-    stamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    stamp = created_at or evaluation_now(timezone.utc).isoformat(timespec="seconds")
     digest = content_hash(
         role=role, scope=scope, as_of=as_of,
         schema_name=validated.schema_name, schema_version=validated.schema_version,

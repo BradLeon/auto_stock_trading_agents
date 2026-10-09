@@ -6,16 +6,23 @@ dependency graph, task attempts, projection provenance, and the fail-closed Chie
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
+import logging
+from contextvars import copy_context
+import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-import logging
 from threading import Lock
-import time
 from typing import Any, Callable, Mapping
 
-from ..agent.task_projection import (PAYLOAD_SCHEMA_BY_ROLE, ProjectionScope,
-                                     TaskProjectionEnvelope, content_hash)
+from ..agent.task_projection import (
+    PAYLOAD_SCHEMA_BY_ROLE,
+    ProjectionScope,
+    TaskProjectionEnvelope,
+    content_hash,
+)
 from ..memory import task_store_scope
 from .phase_e import TASK_ROLE, TaskInstance, WorkflowPlan, phase_e_registry
 from .run_contracts import TriggerContext
@@ -160,6 +167,21 @@ class Dispatcher:
 
     def dispatch(self, plan: WorkflowPlan, *, trigger_key: str = "",
                  policy_version: str = "phase-e-v1") -> DispatchResult:
+        from ..execution.broker_write_guard import startup
+
+        startup(caller="Dispatcher.dispatch", mode=(
+            "shadow" if any(task.instance_key.startswith("shadow:")
+                            for task in plan.tasks) else ""))
+        from .cutover_routing import RouteUnavailable
+        from .runtime_reads import check_plan_reads
+        from . import schedule_runtime as scheduling
+
+        scheduling.startup()
+        for task in plan.tasks:
+            scheduling.check_owner(task.task_id, task.scope.model_dump(mode="json"),
+                "shadow" if task.instance_key.startswith("shadow:") else "dispatcher")
+
+        read_errors = check_plan_reads(plan, collect=True)
         request = {
             "run_id": plan.run_id, "trigger": plan.trigger,
             "requested_tasks": list(plan.requested_tasks),
@@ -172,6 +194,8 @@ class Dispatcher:
             trigger_key=trigger_key, profile_version=plan.profile_version,
             plan_hash=plan.plan_hash, status="planned")
         if existing["status"] in {"complete", "incomplete", "failed", "cancelled"}:
+            if read_errors:
+                raise RouteUnavailable(f"saved run scope no longer readable: {read_errors}")
             saved = existing.get("result") or {}
             if saved:
                 return self._result_from_saved(saved)
@@ -193,6 +217,12 @@ class Dispatcher:
         with task_store_scope(self.workflow_store.path) as memory:
             # Restore stable task identities before scheduling new attempts.
             for key, task in list(pending.items()):
+                if key in read_errors:
+                    outcomes[key] = self._finish_without_execution(
+                        task, plan, status="blocked", detail=read_errors[key],
+                        code="read_scope_unavailable", attempt_no=1)
+                    pending.pop(key)
+                    continue
                 previous = latest_by_instance.get(key)
                 restored = self._restore_task(memory, task, previous, plan.run_id)
                 if restored is not None:
@@ -287,6 +317,18 @@ class Dispatcher:
                                     for dep in dep_states
                                     for env in dep.projections}
                     input_refs, data_refs, task_inputs = self._task_inputs(plan, task, dependencies)
+                    from .cutover_routing import RouteUnavailable
+                    from .runtime_reads import gate_read, task_identity
+
+                    try:
+                        gate_read(task_identity(plan, task))
+                    except RouteUnavailable as exc:
+                        outcomes[key] = self._finish_without_execution(
+                            task, plan, status="blocked", detail=str(exc),
+                            code="read_scope_unavailable", attempt_no=attempt_counts.get(key, 0) + 1)
+                        pending.pop(key)
+                        made_progress = True
+                        continue
                     reusable, reuse_detail = self._select_reusable(
                         memory, task, input_refs, data_refs, plan.as_of)
                     attempt_no = attempt_counts.get(key, 0) + 1
@@ -296,24 +338,13 @@ class Dispatcher:
                         input_refs=input_refs, data_vintage_refs=data_refs,
                         reuse_decision=reuse_detail)
                     attempt_counts[key] = attempt_no
-                    if reusable:
-                        refs = (reusable.projection_id,)
-                        self.workflow_store.finish_attempt(attempt["agent_run_id"],
-                                                           status="succeeded",
-                                                           projection_refs=refs)
-                        outcomes[key] = TaskOutcome(
-                            key, task.task_id, task.scope, "succeeded", refs,
-                            (reusable,), detail="projection_reused", attempts=attempt_no,
-                            reused=True)
-                        pending.pop(key)
-                        made_progress = True
-                        continue
                     context = TaskContext(
                         plan=plan, task=task, trigger=trigger,
                         agent_run_id=attempt["agent_run_id"], store=memory,
                         dependencies=dependencies, input_refs=tuple(input_refs),
                         data_vintage_refs=tuple(data_refs), task_inputs=task_inputs,
                         run_once=run_once)
+                    context.reusable_projection = reusable
                     adapter = self.adapters.get(task.task_id)
                     if adapter is None:
                         self.workflow_store.finish_attempt(
@@ -325,7 +356,7 @@ class Dispatcher:
                         pending.pop(key)
                         made_progress = True
                         continue
-                    future = executor.submit(self._invoke_adapter, adapter, context)
+                    future = executor.submit(copy_context().run, self._invoke_adapter, adapter, context)
                     timeout = self.timeout_overrides.get(
                         task.task_id, registry.spec(task.task_id).timeout_seconds)
                     active[future] = {"task": task, "attempt": attempt,
@@ -381,7 +412,8 @@ class Dispatcher:
                             outcomes[state["task"].instance_key] = TaskOutcome(
                                 state["task"].instance_key, state["task"].task_id,
                                 state["task"].scope, "succeeded", refs, tuple(projections),
-                                detail=detail, attempts=state["attempt_no"])
+                                detail=detail, attempts=state["attempt_no"],
+                                reused=detail in {"projection_reused", "shared_trigger_reused"})
                             made_progress = True
                         except AdapterUnavailable as exc:
                             self.workflow_store.finish_attempt(
@@ -393,7 +425,7 @@ class Dispatcher:
                                             trigger_key=trigger_key,
                                             policy_version=policy_version)
                             made_progress = True
-                        except DependencyUnavailable as exc:
+                        except (DependencyUnavailable, RouteUnavailable) as exc:
                             self.workflow_store.finish_attempt(
                                 state["attempt"]["agent_run_id"], status="blocked",
                                 error_code="dependency_unavailable", error_detail=str(exc))
@@ -567,7 +599,7 @@ class Dispatcher:
                 return False, "projection_from_future"
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) - created > timedelta(seconds=freshness_seconds):
+            if evaluation_now(timezone.utc) - created > timedelta(seconds=freshness_seconds):
                 return False, "expired"
         except ValueError:
             return False, "invalid_timestamp"
@@ -578,9 +610,45 @@ class Dispatcher:
         return reusable, reason
 
     def _invoke_adapter(self, adapter, context):
-        from ..agent.task_projection import projection_context
+        from . import schedule_runtime as scheduling
 
-        with task_store_scope(self.workflow_store.path) as store:
+        owner = "shadow" if context.task.instance_key.startswith("shadow:") else "dispatcher"
+        result = scheduling.execute(context.task.task_id,
+            context.task.scope.model_dump(mode="json"), context.trigger,
+            lambda: self._claimed_or_reused(adapter, context), owner=owner,
+            actor=context.agent_run_id)
+        if isinstance(result, dict) and result.get("schedule_skipped"):
+            if result["status"] != "complete":
+                raise DependencyUnavailable("logical trigger held, incomplete or void; no automatic rerun")
+            with task_store_scope(self.workflow_store.path) as store:
+                rows = store.task_projection_envelopes(agent_role=TASK_ROLE[context.task.task_id],
+                    scope_kind=context.task.scope.kind, scope_id=context.task.scope.id, limit=100)
+                envelopes = [self._envelope(row) for row in rows if row["projection_id"] in result["result_refs"]]
+                if not envelopes:
+                    raise ProjectionMissing("shared completed trigger has no readable projection refs")
+                valid = [env for env in envelopes if self._projection_reuse_check(env, context.task, context.input_refs, context.data_vintage_refs, context.plan.as_of, phase_e_registry().spec(context.task.task_id).freshness_seconds, PAYLOAD_SCHEMA_BY_ROLE[TASK_ROLE[context.task.task_id]].role_schema_name())[0]]
+                if not valid:
+                    raise ProjectionMissing("shared trigger projections fail current reuse validation")
+                return tuple(valid), "shared_trigger_reused"
+        return result
+
+    def _claimed_or_reused(self, adapter, context):
+        from .schedule_runtime import record_reuse
+
+        envelope = getattr(context, "reusable_projection", None)
+        if envelope is not None:
+            record_reuse([envelope.projection_id])
+            return (envelope,), "projection_reused"
+        return self._invoke_claimed_adapter(adapter, context)
+
+    def _invoke_claimed_adapter(self, adapter, context):
+        from ..agent.task_projection import projection_context
+        from .runtime_reads import bind_read, task_identity
+
+        mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
+        with bind_read(task_identity(context.plan, context.task), mode=mode,
+                       publication_path=str(self.workflow_store.path)), \
+                task_store_scope(self.workflow_store.path) as store:
             context.store = store
             with projection_context(
                     workflow_run_id=context.run_id, agent_run_id=context.agent_run_id,
@@ -648,6 +716,25 @@ class Dispatcher:
         return expected_hash == envelope.content_hash
 
     def _chief_snapshot_gate(self, result: DispatchResult, plan, memory) -> DispatchResult:
+        from .cutover_routing import RouteUnavailable
+        from .runtime_reads import bind_read, business_identity, configured_entities
+
+        identity = business_identity(
+            "chief", kind="portfolio", scope_id="portfolio",
+            entities=configured_entities("portfolio", "portfolio", config_dir=plan.config_root or None),
+            as_of=plan.as_of, explicit=(plan.task_inputs.get("read_scopes", {}) or {}).get("chief:portfolio"))
+        mode = "shadow" if any(t.instance_key.startswith("shadow:") for t in plan.tasks) else None
+        try:
+            with bind_read(identity, mode=mode, publication_path=self.workflow_store.path):
+                return self._assemble_chief_snapshot(result, plan, memory)
+        except RouteUnavailable as exc:
+            return DispatchResult(
+                run_id=result.run_id, status=result.status, outcomes=result.outcomes,
+                missing_requirements=result.missing_requirements,
+                decision_cycle_ready=False, decision_cycle_entered=False,
+                decision_block_reason=f"chief_read_scope_unavailable:{exc}")
+
+    def _assemble_chief_snapshot(self, result: DispatchResult, plan, memory) -> DispatchResult:
         trigger = TriggerContext.model_validate(plan.trigger)
         if trigger.kind == "event":
             # Event research may finish after its source calendar entry was revised.
@@ -676,11 +763,17 @@ class Dispatcher:
              "content_hash": env.content_hash}
             for outcome in result.outcomes for env in outcome.projections]
         from ..agents.chief.assemble import build_chief_snapshot
+        from . import decision_requirements as dr
 
         snapshot, detail = build_chief_snapshot(
-            memory, at=datetime.now(timezone.utc), projection_manifest=manifest)
+            memory, at=evaluation_now(timezone.utc), projection_manifest=manifest,
+            query_plan=dr.query_plan(plan))
+        dr.attach(snapshot, dr.freeze(plan, outcomes=[o.as_dict() for o in result.outcomes],
+            manifest=manifest, workflow_store_path=self.workflow_store.path), detail)
         block_reason = "complete_snapshot" if snapshot.complete else "incomplete_research_snapshot"
         ready = snapshot.complete
+        if ready:
+            dr.validate(memory, snapshot.to_payload())
         entered, chief_payload = False, {}
         if ready and self.chief_runner is not None:
             try:
@@ -695,6 +788,7 @@ class Dispatcher:
             "complete": snapshot.complete,
             "items": [vars(item) for item in snapshot.items],
             "detail": detail, "manifest": manifest, "chief_result": chief_payload,
+            "requirements": snapshot.requirements,
         }
         snapshot_gaps = tuple(
             {"task_id": item.task_id, "scope": f"{item.scope_kind}:{item.scope_id}".rstrip(":"),

@@ -37,6 +37,7 @@ RECORD = REPO_ROOT / "docs" / "validation" / "PHASE_F_GROUP_PROGRESS.md"
 GROUP_HEADING = re.compile(r"^###\s*第\s*(\d+)\s*组", re.MULTILINE)
 TASKS_GROUP_HEADING = re.compile(r"^##\s*(\d+)\.\s", re.MULTILINE)
 CHECKED_TASK = re.compile(r"^- \[x\]\s*(\d+(?:\.\d+)+)", re.MULTILINE)
+HISTORICAL_REOPENED = "**记录状态：历史验证，任务已重开。**"
 
 # 每组必须自证的三件事。
 #
@@ -109,6 +110,50 @@ def _record_sections(record_text: str) -> dict[int, str]:
         end = marks[index + 1].start() if index + 1 < len(marks) else len(record_text)
         sections[int(mark.group(1))] = record_text[mark.end():end]
     return sections
+
+
+def _validation_index(record_text: str) -> dict[str, tuple[str, str]]:
+    """Explicit current-task evidence; historical mentions cannot fill the index."""
+    heading = "## 当前勾选任务验证索引"
+    if heading not in record_text:
+        return {}
+    section = record_text.split(heading, 1)[1].split("\n## ", 1)[0]
+    result = {}
+    for line in section.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not line.startswith("|") or len(cells) != 3:
+            continue
+        if not re.fullmatch(r"\d+\.\d+(?:,\s*\d+\.\d+)*", cells[0]):
+            continue
+        for task in re.findall(r"\d+\.\d+", cells[0]):
+            assert task not in result, f"任务 {task} 的当前验证索引重复"
+            result[task] = (cells[1], cells[2])
+    return result
+
+
+def _unexplained_historical_groups(tasks_text: str, record_text: str) -> list[int]:
+    checked = set(_groups_with_checked_tasks(tasks_text))
+    return sorted(group for group, body in _record_sections(record_text).items()
+                  if group not in checked and HISTORICAL_REOPENED not in body)
+
+
+def _evidence_problems(tasks_text: str, record_text: str) -> list[str]:
+    index = _validation_index(record_text)
+    checked = set(CHECKED_TASK.findall(tasks_text))
+    problems = [f"{task}: unrecorded" for task in sorted(checked - set(index))]
+    problems += [f"{task}: unchecked" for task in sorted(set(index) - checked)]
+    for task in sorted(checked & set(index)):
+        evidence, result = index[task]
+        links = re.findall(r"\]\(([^)]+)\)", evidence)
+        if not links:
+            problems.append(f"{task}: missing evidence link")
+        if not result.strip():
+            problems.append(f"{task}: missing scoped result")
+        for link in links:
+            target = (RECORD.parent / link.split("#", 1)[0]).resolve()
+            if not target.is_file():
+                problems.append(f"{task}: missing record {link}")
+    return problems
 
 
 def test_the_tasks_file_and_the_record_both_exist():
@@ -227,13 +272,45 @@ def test_a_group_underway_cannot_be_marked_done_without_its_section(record_text)
     Either direction of drift is a signal that the two documents stopped agreeing,
     and the reader cannot tell which one is telling the truth.
     """
-    checked = set(_groups_with_checked_tasks(TASKS.read_text(encoding="utf-8")))
-    recorded = set(_record_sections(record_text))
-
-    unstarted = sorted(recorded - checked)
+    unstarted = _unexplained_historical_groups(
+        TASKS.read_text(encoding="utf-8"), record_text)
     assert not unstarted, (
-        f"记录文档为这些组写了章节，但 tasks.md 里它们一项都没勾选：{unstarted}。"
-        "要么 tasks.md 漏勾，要么记录是提前写就的——两者都需要澄清")
+        f"这些组无当前勾选且未明确声明历史验证/任务重开：{unstarted}。"
+        "历史记录可以保留，但不能冒充当前完成状态")
+
+
+def test_each_current_checked_task_has_locatable_evidence_and_a_scoped_result(tasks_text, record_text):
+    assert not _evidence_problems(tasks_text, record_text)
+
+
+def test_reopened_group_requires_an_explicit_historical_marker():
+    tasks = "## 2. module\n- [ ] 2.1 reopened\n"
+    record = "### 第 2 组\n结论：历史通过\n"
+    assert _unexplained_historical_groups(tasks, record) == [2]
+    assert not _unexplained_historical_groups(tasks, record + HISTORICAL_REOPENED)
+
+
+def test_historical_record_does_not_supply_a_newly_checked_tasks_evidence():
+    tasks = "## 2. module\n- [x] 2.1 old\n- [x] 2.2 new\n"
+    record = ("## 当前勾选任务验证索引\n"
+              "| 2.1 | [record](PHASE_F_GROUP_PROGRESS.md) | old module |\n"
+              "## history\n### 第 2 组\n2.2 曾提到，但未验证\n")
+    assert _evidence_problems(tasks, record) == ["2.2: unrecorded"]
+
+
+def test_an_empty_result_or_missing_link_is_visible_in_the_index():
+    tasks = "## 2. module\n- [x] 2.1 checked\n"
+    record = "## 当前勾选任务验证索引\n| 2.1 | no link |  |\n"
+    assert _evidence_problems(tasks, record) == [
+        "2.1: missing evidence link", "2.1: missing scoped result"]
+
+
+def test_unchecked_tasks_and_deleted_records_are_rejected():
+    record = ("## 当前勾选任务验证索引\n"
+              "| 2.1 | [gone](PHASE_F_NONEXISTENT_RECORD.md) | passed |\n")
+    assert _evidence_problems("- [x] 2.1 task", record) == [
+        "2.1: missing record PHASE_F_NONEXISTENT_RECORD.md"]
+    assert _evidence_problems("- [ ] 2.1 task", record) == ["2.1: unchecked"]
 
 
 def test_the_record_states_the_current_progress_figures(tasks_text, record_text):

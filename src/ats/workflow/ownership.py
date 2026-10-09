@@ -38,12 +38,30 @@ def load_workflow_owners(config_dir: str | Path | None = None) -> dict[str, Any]
     return payload
 
 
-def owner_mode(workflow_id: str, *, config_dir: str | Path | None = None) -> str:
+def owner_mode(workflow_id: str, *, config_dir: str | Path | None = None,
+               scope: ProjectionScope | None = None) -> str:
     config = load_workflow_owners(config_dir)
     entry = (config.get("workflows", {}) or {}).get(workflow_id)
     if entry is None:
         raise OwnershipError(f"workflow {workflow_id!r} has no declared owner")
-    return str(entry.get("mode", "legacy"))
+    from .schedule_runtime import current_owner
+    from .phase_e import _scopes
+
+    if scope is None:
+        return current_owner(workflow_id, {"kind": "portfolio", "id": ""}, candidate=str(entry.get("mode", "legacy")))
+    root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
+    scopes = _scopes(tuple(entry["task_ids"])[0], scope, root)
+    modes = {current_owner(workflow_id, item.model_dump(mode="json"), candidate=str(entry.get("mode", "legacy"))) for item in scopes}
+    if len(modes) != 1:
+        raise OwnershipError("mixed SQL owners require exact-scope calls")
+    return modes.pop()
+
+
+def _calendar_scope(event):
+    entity = str((event.get("payload", {}) or {}).get("entity") or event.get("entity") or "")
+    if not entity and str(event.get("event_id", "")).startswith("earnings:"):
+        entity = str(event["event_id"]).split(":")[1]
+    return ProjectionScope(kind="entity", id=entity.upper()) if entity else ProjectionScope(kind="portfolio")
 
 
 def _database_path(mode: str, *, config_dir: str | Path | None = None) -> str | None:
@@ -76,13 +94,14 @@ def _request_body(entry: Mapping[str, Any], scope: ProjectionScope,
     }
 
 
-def workflow_store_for_owner(workflow_id: str, *, config_dir: str | Path | None = None
+def workflow_store_for_owner(workflow_id: str, *, config_dir: str | Path | None = None,
+                              scope: ProjectionScope | None = None
                               ) -> WorkflowStore:
     owners = load_workflow_owners(config_dir)
     entry = (owners.get("workflows", {}) or {}).get(workflow_id)
     if entry is None:
         raise OwnershipError(f"workflow {workflow_id!r} has no declared owner")
-    return WorkflowStore(_database_path(entry.get("mode", "legacy"), config_dir=config_dir))
+    return WorkflowStore(_database_path(owner_mode(workflow_id, config_dir=config_dir, scope=scope), config_dir=config_dir))
 
 
 def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
@@ -95,8 +114,22 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
     if entry is None:
         raise OwnershipError(f"workflow {workflow_id!r} has no declared owner")
     mode = entry.get("mode", "legacy")
+    from .schedule_runtime import current_owner, startup as schedule_startup
+    from .phase_e import _scopes
+
+    schedule_startup(config_dir=config_dir)
+    resolved = _scopes(tuple(entry["task_ids"])[0], scope,
+                       Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config")))
+    modes = {current_owner(tuple(entry["task_ids"])[0], target.model_dump(mode="json"), candidate=mode)
+             for target in resolved}
+    if len(modes) != 1:
+        raise OwnershipError("mixed SQL owners: dispatch exact scopes independently")
+    mode = modes.pop()
     if mode == "legacy":
         return {"workflow_id": workflow_id, "owner": mode, "status": "legacy"}
+    from ..execution.broker_write_guard import startup
+
+    startup(caller="run_owned_workflow", mode=mode)
     task_ids = tuple(entry.get("task_ids", ()))
     request_body = _request_body(entry, scope, request)
     requested = tuple(request_body["requested_tasks"])
@@ -119,6 +152,9 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
             config_dir=config_dir, namespace=mode,
             task_inputs=body.get("task_inputs", {}))
 
+    from .runtime_reads import check_plan_reads
+
+    check_plan_reads(plan_factory(ctx, request_body, "read-preflight"))
     result = TriggerService(store, policy=policy).dispatch(
         ctx, request=request_body, plan_factory=plan_factory,
         dispatcher=Dispatcher(workflow_store=store), now=now)
@@ -135,7 +171,12 @@ def phase_e_schedule_entries(*, config_dir: str | Path | None = None) -> dict[st
         owner = owners.get(workflow_id)
         if owner is None:
             raise OwnershipError(f"scheduled workflow {workflow_id!r} has no owner entry")
-        if owner.get("mode") not in {"shadow", "dispatcher"} or not value.get("enabled", False):
+        from .schedule_runtime import current_owner
+        from .phase_e import _scopes
+
+        resolved = _scopes(tuple(value.get("task_ids", ()))[0], ProjectionScope.model_validate(value["scope"]), root)
+        modes = {current_owner(workflow_id, item.model_dump(mode="json"), candidate=owner.get("mode")) for item in resolved}
+        if not modes.intersection({"shadow", "dispatcher"}) or not value.get("enabled", False):
             continue
         task_ids = tuple(value.get("task_ids", ()))
         if set(task_ids) - set(owner.get("task_ids", ())):
@@ -182,11 +223,11 @@ def dispatch_calendar_event(event: Mapping[str, Any], *,
     fiscal_label = str(payload.get("fiscal_label") or payload.get("reference_period") or "")
     outcomes = []
     for workflow_id in route.workflow_ids:
-        mode = owner_mode(workflow_id, config_dir=config_dir)
+        mode = owner_mode(workflow_id, config_dir=config_dir, scope=scope)
         if mode == "legacy":
             outcomes.append({"workflow_id": workflow_id, "owner": mode, "status": mode})
             continue
-        workflow_store_for_owner(workflow_id, config_dir=config_dir).supersede_event(
+        workflow_store_for_owner(workflow_id, config_dir=config_dir, scope=scope).supersede_event(
             event_id=route.event_id, current_version=route.event_version, at=now)
         task_inputs = {
             "event_id": route.event_id,
@@ -326,10 +367,11 @@ def record_due_calendar_material_waits(*, calendar_store=None, now: datetime | N
 
         waiting = []
         for workflow_id in route.workflow_ids:
-            mode = owner_mode(workflow_id, config_dir=config_dir)
+            scope = _calendar_scope(event)
+            mode = owner_mode(workflow_id, config_dir=config_dir, scope=scope)
             if mode == "legacy":
                 continue
-            store = workflow_store_for_owner(workflow_id, config_dir=config_dir)
+            store = workflow_store_for_owner(workflow_id, config_dir=config_dir, scope=scope)
             store.supersede_event(event_id=route.event_id,
                                   current_version=route.event_version, at=instant)
             context = TriggerContext(kind="event", workflow_id=workflow_id,
@@ -367,15 +409,17 @@ def reconcile_calendar_trigger_versions(*, calendar_store=None, now: datetime | 
     from .routing import _routes
 
     repository = calendar_store or ScheduleCalendarStore()
-    workflow_ids = sorted({str(workflow_id)
-                           for rule in _routes(config_dir)
-                           for workflow_id in rule.get("workflow_ids", ())})
+    rules = _routes(config_dir)
     outcomes = []
     for event in repository.latest_events(limit=10_000, include_cancelled=True):
+        scope = _calendar_scope(event)
+        workflow_ids = sorted({str(workflow_id) for rule in rules
+            if event["event_type"] in (rule["event_type"] if isinstance(rule["event_type"], list) else [rule["event_type"]])
+            for workflow_id in rule.get("workflow_ids", ())})
         for workflow_id in workflow_ids:
-            if owner_mode(workflow_id, config_dir=config_dir) == "legacy":
+            if owner_mode(workflow_id, config_dir=config_dir, scope=scope) == "legacy":
                 continue
-            changed = workflow_store_for_owner(workflow_id, config_dir=config_dir).supersede_event(
+            changed = workflow_store_for_owner(workflow_id, config_dir=config_dir, scope=scope).supersede_event(
                 event_id=event["event_id"], current_version=str(event["event_version"]), at=now)
             if changed:
                 outcomes.append({"event_id": event["event_id"],

@@ -1,0 +1,126 @@
+{
+  "digest": "c4a86809cb74197f38cbeb83320671673afd6400ec9cfc51fcfc796a498d3738",
+  "consumers": {
+    "layer": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:layer",
+      "entry_point": "ats.agents.layer.layer_review",
+      "reached_entry_point": true,
+      "compliant": true,
+      "violations": [],
+      "gaps": []
+    },
+    "information": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:information",
+      "entry_point": "ats.agents.information.entry",
+      "reached_entry_point": true,
+      "compliant": true,
+      "violations": [],
+      "gaps": []
+    },
+    "sector": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:sector",
+      "entry_point": "ats.agents.sector.review",
+      "reached_entry_point": true,
+      "compliant": true,
+      "violations": [],
+      "gaps": []
+    },
+    "fundamental": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:fundamental",
+      "entry_point": "ats.agents.fundamental.entry",
+      "reached_entry_point": true,
+      "compliant": false,
+      "violations": [
+        {
+          "kind": "governed_read_surface_not_reached",
+          "consumer_id": "fundamental",
+          "location": "ats.agents.fundamental.entry",
+          "detail": "reaches neither ats.data.consumer_api nor ats.data.products; the contract names the governed read API as this consumer's read path, so its actual access is unverified against the contract \u2014 register the dependency rather than recording this role as connected"
+        }
+      ],
+      "gaps": []
+    },
+    "macro": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:macro",
+      "entry_point": "ats.agents.macro.review",
+      "reached_entry_point": true,
+      "compliant": true,
+      "violations": [],
+      "gaps": []
+    },
+    "technical": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:technical",
+      "entry_point": "ats.agents.technical.review",
+      "reached_entry_point": true,
+      "compliant": true,
+      "violations": [],
+      "gaps": []
+    },
+    "chief": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:chief",
+      "entry_point": "ats.agents.chief.decide",
+      "reached_entry_point": true,
+      "compliant": false,
+      "violations": [
+        {
+          "kind": "governed_read_surface_not_reached",
+          "consumer_id": "chief",
+          "location": "ats.agents.chief.decide",
+          "detail": "reaches neither ats.data.consumer_api nor ats.data.products; the contract names the governed read API as this consumer's read path, so its actual access is unverified against the contract \u2014 register the dependency rather than recording this role as connected"
+        }
+      ],
+      "gaps": []
+    },
+    "risk": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:risk",
+      "entry_point": "ats.agents.risk_officer.review",
+      "reached_entry_point": true,
+      "compliant": false,
+      "violations": [
+        {
+          "kind": "governed_read_surface_not_reached",
+          "consumer_id": "risk",
+          "location": "ats.agents.risk_officer.review",
+          "detail": "reaches neither ats.data.consumer_api nor ats.data.products; the contract names the governed read API as this consumer's read path, so its actual access is unverified against the contract \u2014 register the dependency rather than recording this role as connected"
+        }
+      ],
+      "gaps": []
+    },
+    "trader": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:trader",
+      "entry_point": "ats.trader.execute",
+      "reached_entry_point": true,
+      "compliant": false,
+      "violations": [
+        {
+          "kind": "disabled_bypass",
+          "consumer_id": "trader",
+          "location": "ats.trader.execute:444",
+          "detail": "imports 'ats.data' inside a retained-but-disabled helper; the code is present for a future restore but is not currently reachable from live code. It still blocks until the retained implementation is removed or the read is authorised."
+        },
+        {
+          "kind": "disabled_bypass",
+          "consumer_id": "trader",
+          "location": "ats.trader.execute:445",
+          "detail": "imports 'ats.schemas.market' inside a retained-but-disabled helper; the code is present for a future restore but is not currently reachable from live code. It still blocks until the retained implementation is removed or the read is authorised."
+        }
+      ],
+      "gaps": []
+    },
+    "clerk": {
+      "evidence_id": "intake-verification:c4a86809cb74197f:clerk",
+      "entry_point": "ats.execution.clerk",
+      "reached_entry_point": true,
+      "compliant": false,
+      "violations": [
+        {
+          "kind": "governed_read_surface_not_reached",
+          "consumer_id": "clerk",
+          "location": "ats.execution.clerk",
+          "detail": "reaches neither ats.data.consumer_api nor ats.data.products; the contract names the governed read API as this consumer's read path, so its actual access is unverified against the contract \u2014 register the dependency rather than recording this role as connected"
+        }
+      ],
+      "gaps": []
+    }
+  }
+}

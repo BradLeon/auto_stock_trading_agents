@@ -25,6 +25,7 @@ import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
+from ats.workflow.evaluation_clock import now as evaluation_now
 from typing import Any, Mapping, Sequence
 
 from ..agent.task_projection import canonical_json
@@ -70,7 +71,7 @@ def review_round_of(review_id: str) -> int:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return evaluation_now(timezone.utc).isoformat(timespec="seconds")
 
 
 def transition_idempotency_key(cycle_id: str, from_status: str, to_status: str,
@@ -363,6 +364,9 @@ class DecisionAuditRepository:
                       before_metrics: Mapping[str, Any] | None = None,
                       after_metrics: Mapping[str, Any] | None = None,
                       notes: str = "", created_at: str | None = None) -> sqlite3.Row:
+        from ..workflow.cutover_wiring import guard_approval_write
+
+        guard_approval_write(store=self.store, what="a risk review")
         # §5.3/§10.2: a review binds ONE revision under ONE ruleset at ONE
         # snapshot instant. Any missing binding makes the row unverifiable, so
         # it is invalid by construction, not merely sparse.
@@ -398,6 +402,9 @@ class DecisionAuditRepository:
                         idempotency_key: str,
                         created_at: str | None = None) -> sqlite3.Row:
         """Idempotent on `idempotency_key`: a replayed callback gets the original."""
+        from ..workflow.cutover_wiring import guard_approval_write
+
+        guard_approval_write(store=self.store, what="a Boss approval")
         self.conn.execute(
             "INSERT OR IGNORE INTO boss_approvals (approval_id, cycle_id, "
             "revision_no, decision_hash, decision, reviewer, comment, channel, "

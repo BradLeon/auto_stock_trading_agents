@@ -12,6 +12,8 @@ long-term responsibility of :mod:`ats.memory`.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import json
 import logging
 import sqlite3
@@ -19,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..schemas.memory import PerformanceRecord
+from ..workflow.schedule_runtime import bind_publication, publication_write
 
 log = logging.getLogger("ats.memory.store")
 
@@ -32,6 +35,14 @@ class MissingDecisionChainError(Exception):
     """
 
 _BASE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS schedule_result_publications (
+    claim_key TEXT NOT NULL, reference TEXT NOT NULL, owner TEXT NOT NULL,
+    generation INTEGER NOT NULL, actor TEXT NOT NULL,
+    PRIMARY KEY(claim_key, reference));
+CREATE TRIGGER IF NOT EXISTS schedule_result_no_update BEFORE UPDATE ON schedule_result_publications
+BEGIN SELECT RAISE(ABORT,'schedule result bindings are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS schedule_result_no_delete BEFORE DELETE ON schedule_result_publications
+BEGIN SELECT RAISE(ABORT,'schedule result bindings are append-only'); END;
 CREATE TABLE IF NOT EXISTS cycles (
     cycle_id TEXT PRIMARY KEY, as_of TEXT, approval_status TEXT, manager_summary TEXT
 );
@@ -765,7 +776,7 @@ class TradingMemory:
         done = self.conn.execute(
             "SELECT 1 FROM data_migrations WHERE key = ?", (migration,)).fetchone()
         if not done:
-            stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            stamp = evaluation_now(timezone.utc).isoformat(timespec="seconds")
             # Scope the seen-set to THIS database's legacy inventory. The data layer is
             # shared, so a blanket backfill over every known version would mark other
             # workflows' documents as chain-seen too.
@@ -837,7 +848,7 @@ class TradingMemory:
                 (projection_id, fact_id, row["id"], row["concept"], row["stance"],
                  row["direction"], payload, row["observed_at"], row["superseded_at"]))
         data.conn.commit()
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        stamp = evaluation_now(timezone.utc).isoformat(timespec="seconds")
         self.conn.execute(
             "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
             (key, stamp, f"migrated {len(rows)} legacy observations"))
@@ -922,7 +933,7 @@ class TradingMemory:
                 "AND (COALESCE(cycle_id,'') = '' OR COALESCE(revision_no,0) = 0 "
                 "     OR COALESCE(decision_hash,'') = '' "
                 "     OR COALESCE(approval_id,'') = '')").fetchall()
-            now = datetime.now(timezone.utc).isoformat()
+            now = evaluation_now(timezone.utc).isoformat()
             for r in rows:
                 self.record_ledger_exception(
                     kind="broken_link",
@@ -936,7 +947,7 @@ class TradingMemory:
                     created_at=now)
         self.conn.execute(
             "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
-            (key, now if needed <= cols else datetime.now(timezone.utc).isoformat(),
+            (key, now if needed <= cols else evaluation_now(timezone.utc).isoformat(),
              "legacy system orders without decision chains registered as gaps"))
         self.conn.commit()
 
@@ -954,7 +965,7 @@ class TradingMemory:
         """
         from ..execution.ids import exception_id
 
-        now = created_at or datetime.now(timezone.utc).isoformat()
+        now = created_at or evaluation_now(timezone.utc).isoformat()
         exc_id = exception_id(kind, subject_key)
         existing = self.conn.execute(
             "SELECT exception_id FROM ledger_exceptions WHERE exception_id = ?",
@@ -1008,10 +1019,15 @@ class TradingMemory:
         if not {"cycles", "decisions"} <= names:
             return                                    # nothing legacy to migrate
         inventory = legacy_inventory(self.conn)
-        if not inventory.rows:
-            return
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        stamp = evaluation_now(timezone.utc).isoformat(timespec="seconds")
         from ..agent.task_projection import canonical_json
+
+        # Snapshot BEFORE importing: native writers mirror into the compatibility
+        # tables, which are not independent legacy history. Never promote those
+        # mirrors to a newer revision on reopen. Genuine legacy-only cycles still
+        # retain both recoverable and unknown rows below.
+        existing_cycles = {r[0] for r in self.conn.execute(
+            "SELECT DISTINCT cycle_id FROM decision_revisions")}
 
         def _next_revision_no(cycle_id: str) -> int:
             row = self.conn.execute(
@@ -1025,6 +1041,8 @@ class TradingMemory:
         for row in inventory.mappable:
             by_cycle.setdefault(row.cycle_id, []).append(row)
         for cycle_id, rows in sorted(by_cycle.items()):
+            if cycle_id in existing_cycles:
+                continue
             orders = []
             rationales: dict[str, str] = {}
             for row in sorted(rows, key=lambda r: (r.symbol or "", r.rowid)):
@@ -1056,6 +1074,8 @@ class TradingMemory:
         for row in inventory.unmappable:
             unknown_by_cycle.setdefault(row.cycle_id or "<no-cycle-id>", []).append(row)
         for cycle_id, rows in sorted(unknown_by_cycle.items()):
+            if cycle_id in existing_cycles:
+                continue
             legacy_ref = canonical_json([
                 {"decisions.rowid": row.rowid, "cycle_id": row.cycle_id,
                  "symbol": row.symbol, "action": row.action,
@@ -1072,7 +1092,9 @@ class TradingMemory:
             "INSERT INTO data_migrations (key,applied_at,note) VALUES (?,?,?)",
             (key, stamp,
              f"migrated {len(inventory.mappable)} mappable / "
-             f"{len(inventory.unmappable)} legacy_unknown legacy decisions"))
+             f"{len(inventory.unmappable)} legacy_unknown candidates; "
+             f"excluded {len(existing_cycles)} already revision-backed cycles; "
+             "empty inventory also completes migration"))
 
     # --- writes ---------------------------------------------------------- #
     _TRADE_COLS = ("order_id", "cycle_id", "symbol", "action", "qty", "order_type", "status",
@@ -1101,6 +1123,9 @@ class TradingMemory:
         errors must never erase a fill the first attempt achieved — and keep the
         original submit time, while advancing status/error and bumping `attempt`.
         """
+        from ..execution.shadow_execution import assert_trade_publication
+
+        assert_trade_publication(self, entries)
         for t in entries:
             self._enforce_decision_chain(t, source=source)
             coid = self.client_order_id(cycle_id, getattr(t, "revision_no", 0),
@@ -1191,6 +1216,9 @@ class TradingMemory:
         """Insert IBKR fills, deduped by exec_id (accumulates per-trade realized P&L)."""
         if not fills:
             return 0
+        from ..execution.shadow_execution import assert_trade_publication
+
+        assert_trade_publication(self, fills)
         before = self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"]
         # Column-explicit: `fills` gains journal columns over time, and a positional
         # INSERT silently breaks the moment one is added.
@@ -1201,7 +1229,7 @@ class TradingMemory:
             [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
               f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0),
               f.get("order_id", ""), f.get("perm_id"), f.get("order_ref"),
-              datetime.now(timezone.utc).isoformat())
+              evaluation_now(timezone.utc).isoformat())
              for f in fills])
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
@@ -1517,7 +1545,7 @@ class TradingMemory:
 
         self.conn.execute(
             "INSERT OR REPLACE INTO score_consumption VALUES (?,?,?,?)",
-            (symbol.upper(), fiscal_label, datetime.now(timezone.utc).isoformat(), cycle_id))
+            (symbol.upper(), fiscal_label, evaluation_now(timezone.utc).isoformat(), cycle_id))
         self.conn.commit()
 
     def is_score_consumed(self, symbol: str, fiscal_label: str) -> bool:
@@ -1542,7 +1570,7 @@ class TradingMemory:
             (p.symbol.upper(), p.date.isoformat(), fiscal_label, p.quarter, p.year,
              p.session, p.session_source, p.at.isoformat() if p.at else None,
              p.eps_actual, p.rev_actual, label_source,
-             datetime.now(timezone.utc).isoformat()))
+             evaluation_now(timezone.utc).isoformat()))
         self.conn.commit()
 
     def get_period(self, symbol: str, earnings_date) -> dict | None:
@@ -1553,6 +1581,7 @@ class TradingMemory:
         return dict(row) if row else None
 
     # --- Versioned score runs (idempotency + v1→v2 upgrade record) ------------ #
+    @publication_write
     def record_score_run(self, *, symbol: str, fiscal_label: str, version: int,
                          earnings_date, has_transcript: bool, transcript_source: str = "",
                          window: str = "", latency_hours: float | None = None,
@@ -1564,13 +1593,14 @@ class TradingMemory:
 
         self.conn.execute(
             "INSERT OR REPLACE INTO pead_score_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (symbol.upper(), fiscal_label, version, datetime.now(timezone.utc).isoformat(),
+            (symbol.upper(), fiscal_label, version, evaluation_now(timezone.utc).isoformat(),
              earnings_date.isoformat() if hasattr(earnings_date, "isoformat") else earnings_date,
              1 if has_transcript else 0, transcript_source, window, latency_hours,
              total, band, decision_summary,
              1 if (has_transcript if final is None else final) else 0))
         self.conn.commit()
 
+    @publication_write
     def stamp_score_run(self, symbol: str, fiscal_label: str, *, window: str,
                         latency_hours: float | None) -> None:
         """Attach which window produced the latest run and how long after the print.
@@ -1588,6 +1618,7 @@ class TradingMemory:
             (window, latency_hours, symbol.upper(), fiscal_label, last["version"]))
         self.conn.commit()
 
+    @publication_write
     def promote_score_run(self, symbol: str, fiscal_label: str) -> bool:
         """Mark the latest run final without re-scoring — used when the transcript
         never arrived and the v1 becomes the best available answer."""
@@ -1663,6 +1694,7 @@ class TradingMemory:
         return [dict(r) for r in rows]
 
     # --- PEAD dossier ---------------------------------------------------- #
+    @publication_write
     def save_dossier(self, dossier) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO pead_dossier VALUES (?,?,?,?,?)",
@@ -1792,6 +1824,7 @@ class TradingMemory:
         """
         return self.data_store().has_observations_for_document(document_id)
 
+    @publication_write
     def save_claim_assessment(self, assessment) -> None:
         """Snapshot a verdict, one row per claim per DAY.
 
@@ -2052,7 +2085,7 @@ class TradingMemory:
             "VALUES (?,?,?,?,?,?,?,?,?)",
             (event_id, entity, report_date, fiscal_year, fiscal_quarter, resolution.status,
              evidence_json, conflicts_json,
-             datetime.now(timezone.utc).isoformat(timespec="seconds")))
+             evaluation_now(timezone.utc).isoformat(timespec="seconds")))
         self.conn.commit()
         return event_id
 
@@ -2112,6 +2145,7 @@ class TradingMemory:
         """
         return self.data_store().unmapped_observations(limit=limit)
 
+    @publication_write
     def save_claim_proposal(self, proposal) -> None:
         import json
 
@@ -2145,7 +2179,7 @@ class TradingMemory:
 
     def set_proposal_status(self, proposal_id: str, status: str, *, reviewer: str = "",
                             rationale: str = "", at=None) -> bool:
-        at = at or datetime.now(timezone.utc)
+        at = at or evaluation_now(timezone.utc)
         cur = self.conn.execute(
             "UPDATE claim_proposals SET status = ?, reviewed_at = ?, reviewer = ?,"
             " rationale = ? WHERE id = ?",
@@ -2227,6 +2261,7 @@ class TradingMemory:
             source_id=source_id, series=series, since=since, entity=entity, as_of=as_of,
             latest_only=latest_only, limit=limit)
 
+    @publication_write
     def save_task_projection(self, *, profile: str, profile_version: str,
                              input_kind: str, input_ref: str,
                              target_type: str, target_id: str, payload,
@@ -2236,7 +2271,11 @@ class TradingMemory:
         import hashlib
         import json
 
-        stamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        from ..workflow.cutover_wiring import guard_analyst_output
+
+        guard_analyst_output(store=self, what="a legacy task projection")
+
+        stamp = created_at or evaluation_now(timezone.utc).isoformat(timespec="seconds")
         projection_id = hashlib.sha1(
             f"{profile}|{profile_version}|{input_kind}|{input_ref}|"
             f"{target_type}|{target_id}".encode()).hexdigest()[:20]
@@ -2245,6 +2284,7 @@ class TradingMemory:
         else:
             body = payload
         encoded = json.dumps(body, ensure_ascii=False, sort_keys=True)
+        bind_publication(self.conn, projection_id)
         self.conn.execute(
             "INSERT OR REPLACE INTO task_projections "
             "(projection_id,profile,profile_version,input_kind,input_ref,target_type,"
@@ -2284,6 +2324,7 @@ class TradingMemory:
             projection_id, task_projection=dict(task) if task else None)
 
     # --- unified agent-output envelopes ------------------------------------ #
+    @publication_write
     def save_task_projection_envelope(self, envelope) -> str:
         """Publish one validated agent output. Returns `projection_id`.
 
@@ -2295,6 +2336,10 @@ class TradingMemory:
         rewrites the same row instead of adding a twin.
         """
         import json
+
+        from ..workflow.cutover_wiring import guard_analyst_output
+
+        guard_analyst_output(store=self, what="a task projection envelope")
 
         # Timed-out/retried Dispatcher attempts may finish after their caller has
         # moved on. Do not allow such a late worker to publish into the durable
@@ -2308,6 +2353,7 @@ class TradingMemory:
                     f"projection publish fenced: agent attempt {envelope.agent_run_id!r} "
                     "is not the active attempt for this run")
 
+        bind_publication(self.conn, envelope.projection_id)
         scope = envelope.scope
         self.conn.execute(
             "INSERT OR REPLACE INTO task_projection_envelopes "
@@ -2503,7 +2549,7 @@ class TradingMemory:
         self.conn.execute(
             "INSERT OR IGNORE INTO research_articles VALUES (?,?,?,?,?,?,?)",
             (art.id, art.source, art.title, art.url, art.published_at.isoformat(),
-             datetime.now(timezone.utc).isoformat(), len(art.body)))
+             evaluation_now(timezone.utc).isoformat(), len(art.body)))
         self.conn.commit()
 
     def insight_count(self, article_id: str) -> int:
@@ -2512,20 +2558,37 @@ class TradingMemory:
             (article_id,)).fetchone()
         return int(row["n"] if row else 0)
 
+    @publication_write
     def save_insights(self, article_id: str, insights, *,
                       profile_version: str = "v1") -> None:
         from datetime import datetime, timezone
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = evaluation_now(timezone.utc).isoformat()
+        from ..workflow.runtime_reads import current_read_context
+        from ..workflow.isolation import verified_isolation_root
+
+        context = current_read_context()
+        if context and (context.route == "target" or verified_isolation_root() is not None):
+            # Target extraction already carries the canonical admitted document
+            # ID. Resolve its immutable version through the product boundary.
+            from ..data.products.unstructured import admitted_documents
+
+            admitted = admitted_documents(entities=context.identity.scope["entities"],
+                                          as_of=context.cutoff, limit=500)
+            selected = next((d for d in admitted if d.document_id == article_id), None)
+            version = {"version_id": selected.version_id} if selected else None
+            if not selected:
+                raise ValueError("insight_input_document_not_admitted")
+        else:
+            doc = self.document_by_external_id(article_id)
+            version = self.latest_document_version(doc["document_id"]) if doc else None
+        input_kind = "document_version" if version else "external_article"
+        input_ref = version["version_id"] if version else article_id
         self.conn.executemany(
             "INSERT INTO research_insights VALUES (?,?,?,?,?,?,?,?)",
             [(article_id, i.ticker, i.direction, i.impact_path, i.summary,
               i.evidence_quote, i.confidence, now) for i in insights])
         self.conn.commit()
-        doc = self.document_by_external_id(article_id)
-        version = self.latest_document_version(doc["document_id"]) if doc else None
-        input_kind = "document_version" if version else "external_article"
-        input_ref = version["version_id"] if version else article_id
         for insight in insights:
             self.save_task_projection(
                 profile="pead_research", profile_version=profile_version,
@@ -2555,6 +2618,7 @@ class TradingMemory:
             last_uid=int(last_uid), last_message_id=last_message_id, watermark=watermark)
 
     # --- sector reviews --------------------------------------------------- #
+    @publication_write
     def save_sector_review(self, review) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO sector_reviews VALUES (?,?,?,?,?)",
@@ -2629,6 +2693,7 @@ class TradingMemory:
         return [dict(r) for r in rows]
 
     # --- macro reviews ---------------------------------------------------- #
+    @publication_write
     def save_macro_review(self, review) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO macro_reviews VALUES (?,?,?,?,?)",
@@ -2669,6 +2734,7 @@ class TradingMemory:
     # --- technical reviews ------------------------------------------------ #
     # `as_of` is stored as a DATE, not a timestamp: the analyst runs once per
     # session, so a same-day rerun must overwrite rather than accumulate rows.
+    @publication_write
     def save_technical_review(self, review) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO technical_reviews VALUES (?,?,?,?)",

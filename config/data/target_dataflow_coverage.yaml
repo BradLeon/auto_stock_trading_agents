@@ -35,9 +35,9 @@ data_input_contracts:
     schema_version: target-consumer-input-v1
     owner: ats.data.runtime
     input_mode: runtime
-    allowed_consumers: [technical, risk]
+    allowed_consumers: [technical, risk, trader]
     read_api: ats.data.consumer_api.read_input
-    native_api: ats.data.runtime.market_data.fetch_close_history_many + ats.data.runtime.options.fetch_runtime
+    native_api: ats.data.runtime.market_data.fetch_close_history_many + ats.data.runtime.options.fetch_runtime + ats.data.runtime.execution_prices.fetch_execution_price
   PORTFOLIO_DATA:
     schema_version: target-consumer-input-v1
     owner: ats.execution.state_api
@@ -392,6 +392,8 @@ edges:
   - {id: product_to_sector, from: PRODUCTS, to: AGENT_SECTOR, owner: ats.data.products, verify: sector_read_contract}
   - {id: product_to_fundamental, from: PRODUCTS, to: AGENT_FUNDAMENTAL, owner: ats.data.products, verify: fundamental_read_contract}
   - {id: product_to_macro, from: PRODUCTS, to: AGENT_MACRO, owner: ats.data.products, verify: macro_read_contract}
+  - {id: runtime_to_trader_price, from: RUNTIME_API, to: TRADER, owner: ats.data.runtime, verify: governed_execution_price_boundary}
+  - {id: runtime_to_risk_price, from: RUNTIME_API, to: AGENT_RISK, owner: ats.data.runtime, verify: governed_execution_price_boundary}
   - {id: runtime_to_technical, from: RUNTIME_API, to: AGENT_TECHNICAL, owner: ats.data.runtime, verify: technical_read_contract}
   - {id: state_to_chief, from: INTERNAL_API, to: AGENT_CHIEF, owner: ats.execution.state_api, verify: chief_read_contract}
   - {id: state_to_risk, from: INTERNAL_API, to: AGENT_RISK, owner: ats.execution.state_api, verify: risk_read_contract}
@@ -414,15 +416,75 @@ edges:
 qualification_policy:
   version: target-qualification-v2
   required_fingerprint_paths:
+    - src/ats/agents/information/briefs.py
+    - src/ats/agents/macro/review.py
+    - src/ats/agents/pead/report.py
+    - src/ats/agents/sector/assemble.py
+    - src/ats/agents/sector/cross_section.py
+    - src/ats/workflow/business_replay_inputs.py
+    - src/ats/workflow/evaluation_clock.py
+    - src/ats/workflow/paired_business.py
+    - src/ats/workflow/shadow_replay.py
+    - config/settings.yaml
+    - config/watchlist.yaml
+    - config/entities.yaml
+    - src/ats/config.py
+    - src/ats/schemas/market.py
+    - src/ats/workflow/assurance_surface.py
+    - src/ats/workflow/cutover.py
+    - src/ats/data/products/unstructured.py
     - src/ats/data/assurance.py
     - src/ats/data/consumer_api.py
+    - src/ats/workflow/consumer_reads.py
+    - src/ats/memory/store.py
+    - src/ats/workflow/runtime_reads.py
+    - src/ats/workflow/decision_requirements.py
+    - src/ats/workflow/schedule_executor.py
+    - src/ats/workflow/schedule_runtime.py
+    - src/ats/workflow/isolation.py
+    - src/ats/workflow/ownership.py
+    - src/ats/agents/information/extract.py
+    - src/ats/agents/information/entry.py
+    - src/ats/agents/technical/report.py
+    - src/ats/agents/macro/report.py
+    - src/ats/agents/sector/report.py
+    - src/ats/agents/technical/review.py
+    - src/ats/agents/layer/layer_review.py
+    - config/events.yaml
+    - config/workflow/workflow_owners.yaml
+    - config/data/schedule_calendar.yaml
+    - config/workflow/trigger_policies.yaml
+    - config/workflow/phase_e_schedules.yaml
+    - config/workflow/event_routes.yaml
+    - src/ats/data/calendar_refresh.py
+    - src/ats/data/stores/schedule_calendar.py
+    - src/ats/workflow/dispatcher.py
+    - src/ats/workflow/phase_e.py
+    - src/ats/workflow/run_contracts.py
+    - src/ats/decision/snapshot.py
+    - src/ats/agent/task_projection.py
+    - config/workflow/decision_profiles.yaml
+    - config/pead.yaml
+    - config/technical.yaml
+    - config/macro.yaml
+    - config/sectors/ai_hardware.yaml
+    - src/ats/agents/information/assemble.py
+    - src/ats/agents/information/documents.py
+    - src/ats/workflow/cutover_routing.py
+    - src/ats/workflow/scoped_routes.py
+    - src/ats/workflow/legacy_retirement.py
+    - config/workflow/legacy_retirement.yaml
+    - src/ats/data/products/base.py
+    - src/ats/data/contract_validation.py
     - config/data/structured.yaml
     - config/data/unstructured.yaml
   consumer_fingerprint_paths:
-    risk: [config/risk.yaml, src/ats/execution/state_api.py]
-    chief: [src/ats/execution/state_api.py]
-    trader: [src/ats/execution/authorization.py, src/ats/decision/repository.py]
-    clerk: [src/ats/execution/clerk.py, src/ats/decision/repository.py]
+    risk: [src/ats/trader/portfolio.py, src/ats/data/runtime/broker.py, src/ats/risk/assess.py, src/ats/agents/risk_officer/review.py, config/risk.yaml, src/ats/execution/state_api.py, src/ats/data/execution_prices.py, src/ats/data/runtime/execution_prices.py, src/ats/data/runtime/market_data.py, src/ats/broker/ibkr.py, src/ats/schemas/decision.py, src/ats/graph/chief.py, src/ats/trader/execute.py, src/ats/risk/checks.py, src/ats/graph/chief_state.py, src/ats/workflow/runtime_reads.py, src/ats/schemas/memory.py, src/ats/execution/simulation.py, uv.lock]
+    sector: [src/ats/agents/sector/read_model.py, src/ats/agents/sector/review.py, src/ats/runtime/cli.py]
+    chief: [src/ats/runtime/cli.py, src/ats/runtime/scheduler.py, src/ats/execution/state_api.py, src/ats/agents/chief/assemble.py, src/ats/agents/chief/outputs.py, src/ats/agents/chief/decide.py, src/ats/graph/chief.py, src/ats/graph/chief_state.py]
+    fundamental: [src/ats/agents/fundamental/entry.py, src/ats/agents/fundamental/routine.py, src/ats/agents/fundamental/event.py, src/ats/agents/fundamental/inputs.py, src/ats/graph/pead.py, src/ats/graph/pead_state.py, src/ats/data/products/unstructured.py]
+    trader: [src/ats/execution/authorization.py, src/ats/decision/repository.py, src/ats/data/execution_prices.py, src/ats/data/runtime/execution_prices.py, src/ats/data/runtime/market_data.py, src/ats/broker/ibkr.py, src/ats/schemas/decision.py, src/ats/graph/chief.py, src/ats/trader/execute.py, src/ats/risk/checks.py, src/ats/graph/chief_state.py, src/ats/workflow/runtime_reads.py, src/ats/schemas/memory.py, src/ats/execution/simulation.py, uv.lock]
+    clerk: [src/ats/execution/clerk.py, src/ats/decision/repository.py, src/ats/data/runtime/clerk_reads.py, src/ats/data/runtime/broker.py, src/ats/trader/performance.py, src/ats/trader/reconcile.py]
   optional_inputs:
     sec_edgar_filing_body:
       dataset: sec_filing_documents
@@ -570,9 +632,9 @@ consumers:
     allowed_projection_inputs: [layer, information, sector, fundamental, macro, technical]
   - id: risk
     domain: internal_state
-    contract_version: target-dataflow-v1
+    contract_version: target-dataflow-v2
     evidence_ttl_days: 7
-    required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback]
+    required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback, runtime_query, timestamp, failure_semantics, no_persistence]
     products: [PORTFOLIO_DATA, MARKET_DATA, RISK_RULES]
     read_api: ats.data.consumer_api.read_input
     legacy_read_api: ats.execution.state_api.get_internal_state
@@ -584,23 +646,29 @@ consumers:
     fallback: none_verified
     legacy: direct_ledger_reads
     verify: risk_read_contract
+    execution_price_policy: phase-f-execution-price-v1
+    execution_price_purposes: [preapproval_normalization, approved_execution_check]
+    execution_price_currency: USD
     allowed_projection_inputs: []
   - id: trader
     domain: execution_authorization
-    contract_version: target-dataflow-v1
+    contract_version: target-dataflow-v2
     evidence_ttl_days: 1
-    required_evidence: [authorization, revision_hash, broker_submit_boundary, idempotency, fallback]
-    products: [APPROVED_EXECUTION_AUTHORIZATION]
+    required_evidence: [authorization, revision_hash, broker_submit_boundary, idempotency, fallback, runtime_query, timestamp, failure_semantics, no_persistence]
+    products: [APPROVED_EXECUTION_AUTHORIZATION, MARKET_DATA]
     read_api: ats.data.consumer_api.read_input
     legacy_read_api: ats.execution.authorization.build_authorization + ats.execution.authorization.validate_authorization
     owner: ats.trader
-    vintage: decision_revision_hash_and_approval_time
-    completeness: exact_revision_and_broker_account_scope_required
+    vintage: revision_hash_approval_time_and_actual_quote_source_time
+    completeness: exact_revision_account_scope_and_valid_execution_quote_required
     source_flag: not_applicable
     consumer_flag: not_applicable
     fallback: reject_without_valid_authorization
     legacy: direct_broker_submission
     verify: authorized_order_boundary
+    execution_price_policy: phase-f-execution-price-v1
+    execution_price_purposes: [preapproval_normalization, approved_execution_check]
+    execution_price_currency: USD
     allowed_projection_inputs: []
   - id: clerk
     domain: broker_state

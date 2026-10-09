@@ -127,31 +127,31 @@ def _patch(monkeypatch, approval_status="approved"):
     monkeypatch.setattr("ats.channel.get_channel", lambda kind=None: Ch())
 
 
-def test_execute_rejected_places_nothing_but_logs_context(monkeypatch):
+def test_execute_rejected_places_nothing_but_logs_context(monkeypatch, broker):
     _patch(monkeypatch, "rejected")
     d = TradeDecision(symbol="AAPL", action="buy", qty=10, rationale="test")
     entries = texec.execute([d], source="manual")
-    assert FakeBroker.placed == []                        # no order placed
+    assert broker.placed == []                        # no order placed
     assert all(e.status == "cancelled" for e in entries)
     rows = get_store().recent_trades("AAPL")
     assert rows and rows[0]["source"] == "manual" and "rejected" in (rows[0]["context"] or "")
 
 
-def test_execute_approved_places_and_persists(monkeypatch):
+def test_execute_approved_places_and_persists(monkeypatch, broker):
     _patch(monkeypatch, "approved")
     d = TradeDecision(symbol="AAPL", action="buy", qty=5, rationale="buy the dip")
     entries = texec.execute([d], source="manual")
-    assert len(FakeBroker.placed) == 1 and entries[0].status == "filled"
+    assert len(broker.placed) == 1 and entries[0].status == "filled"
     row = get_store().recent_trades("AAPL")[0]
     assert row["status"] == "filled" and "buy the dip" in (row["context"] or "")
     assert get_store().recent_fills("AAPL")                # fills persisted
 
 
-def test_execute_dry_run_no_order(monkeypatch):
+def test_execute_dry_run_no_order(monkeypatch, broker):
     _patch(monkeypatch, "approved")
     d = TradeDecision(symbol="MSFT", action="buy", qty=3)
     texec.execute([d], source="manual", dry_run=True)
-    assert FakeBroker.placed == []
+    assert broker.placed == []
 
 
 def test_hold_filtered():

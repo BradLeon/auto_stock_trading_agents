@@ -153,7 +153,17 @@ def code_fingerprint(paths: Iterable[str] | None = None) -> str:
 
     surface = load_surface()
     entries = []
-    for rel in sorted(paths if paths is not None else surface.all_paths()):
+    report_paths = (*surface.all_paths(), "src/ats/workflow/shadow_replay.py",
+                    "src/ats/workflow/shadow_inputs.py", "src/ats/workflow/shadow_reports.py",
+                    "src/ats/workflow/shadow_compare.py", "src/ats/workflow/shadow_matrix.py",
+                    "src/ats/workflow/batch_manifest.py", "src/ats/workflow/read_cutover.py",
+                    "src/ats/workflow/cutover.py", "src/ats/runtime/cli.py",
+                    "src/ats/workflow/isolated_entry.py", "src/ats/workflow/intake_verification.py",
+                    "src/ats/workflow/isolation.py", "src/ats/workflow/shadow_ledger.py",
+                    "src/ats/execution/shadow_execution.py")
+    report_paths += tuple(str(p.relative_to(REPO_ROOT)) for p in
+                          (REPO_ROOT / "config").rglob("*") if p.is_file())
+    for rel in sorted(set(paths if paths is not None else report_paths)):
         target = REPO_ROOT / rel
         try:
             entries.append((rel, _hash(target.read_bytes())))
@@ -162,8 +172,16 @@ def code_fingerprint(paths: Iterable[str] | None = None) -> str:
     return _hash(entries)
 
 
-def _connect(path: str | Path | None = None) -> sqlite3.Connection:
+def _connect(path: str | Path | None = None, *, writable=True) -> sqlite3.Connection:
     target = Path(path or default_shadow_db_path())
+    if not writable:
+        try:
+            conn = sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True, timeout=30.0)
+        except sqlite3.Error as exc:
+            raise ShadowReportError(f"no shadow report: store unreadable ({exc})") from exc
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=ON")
+        return conn
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target, timeout=30.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -191,6 +209,7 @@ class ReportState:
 
     def as_row(self) -> dict[str, Any]:
         return {
+            "report_type": "historical-comparison-v1",
             "report_id": self.report_id, "status": self.status,
             "run_id": self.run_id, "consumer_id": self.consumer_id,
             "batch_class": self.batch_class, "scope_hash": self.scope_hash,
@@ -205,6 +224,7 @@ def record_comparison(*, report_id: str, run_id: str, consumer_id: str,
                       batch_class: str, scope: dict[str, Any],
                       packet_hash: str, result: compare.ComparisonResult,
                       actor: str = "", code_hash: str | None = None,
+                      execution_evidence: dict | None = None,
                       event_type: str = "comparison",
                       path: str | Path | None = None) -> str:
     """Record one comparison event. Never overwrites an earlier one.
@@ -219,13 +239,14 @@ def record_comparison(*, report_id: str, run_id: str, consumer_id: str,
             "INSERT INTO shadow_report_events (report_id, event_type, run_id,"
             " consumer_id, batch_class, scope_hash, packet_hash,"
             " code_fingerprint, verdicts_json, surfaces_json, not_compared_json,"
-            " unaccepted_json, actor, authority, reason, recorded_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " unaccepted_json, actor, authority, reason, recorded_at, payload_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (report_id, event_type, run_id, consumer_id, batch_class,
              scope_fingerprint(scope), packet_hash,
              code_hash or code_fingerprint(), _dumps(result.as_row()["verdicts"]),
              _dumps(result.as_row()["surfaces"]), _dumps(result.not_compared),
-             _dumps(unaccepted), actor, "", f"{event_type} recorded", _now()))
+             _dumps(unaccepted), actor, "", f"{event_type} recorded", _now(),
+             _dumps({"execution_evidence": execution_evidence})))
     return report_id
 
 
@@ -234,6 +255,7 @@ def record_recomparison(*, report_id: str, run_id: str, consumer_id: str,
                        packet_hash: str, result: compare.ComparisonResult,
                        actor: str = "", reason: str = "",
                        code_hash: str | None = None,
+                       execution_evidence: dict | None = None,
                        path: str | Path | None = None) -> str:
     """Record a later comparison that filled in what the first pass could not.
 
@@ -244,7 +266,7 @@ def record_recomparison(*, report_id: str, run_id: str, consumer_id: str,
         report_id=report_id, run_id=run_id, consumer_id=consumer_id,
         batch_class=batch_class, scope=scope, packet_hash=packet_hash,
         result=result, actor=actor, code_hash=code_hash,
-        event_type="recomparison", path=path)
+        event_type="recomparison", execution_evidence=execution_evidence, path=path)
 
 
 def record_signoff(*, report_id: str, actor: str, reason: str,
@@ -387,7 +409,7 @@ def _active_acceptance_row(conn: sqlite3.Connection, report_id: str,
     """The newest acceptance for `surface` that has not been revoked."""
     revoked_ids = set()
     for row in conn.execute(
-            "SELECT payload_json FROM shadow_report_events"
+            "SELECT payload_json, surfaces_json FROM shadow_report_events"
             " WHERE report_id=? AND event_type='acceptance_revoked'",
             (report_id,)).fetchall():
         try:
@@ -416,7 +438,7 @@ def _active_acceptance_surfaces(conn: sqlite3.Connection,
     """
     revoked = set()
     for row in conn.execute(
-            "SELECT payload_json FROM shadow_report_events"
+            "SELECT payload_json, surfaces_json FROM shadow_report_events"
             " WHERE report_id=? AND event_type='acceptance_revoked'",
             (report_id,)).fetchall():
         try:
@@ -445,7 +467,11 @@ def read_state(report_id: str, path: str | Path | None = None) -> ReportState:
     Derived rather than stored, because a stored status needs a writer that
     always agrees with the log — and the log is the record an auditor reads.
     """
-    with _connect(path) as conn:
+    try:
+        conn = _connect(path, writable=False)
+    except ShadowReportError as exc:
+        raise ShadowReportError(f"no shadow report {report_id!r}: {exc}") from exc
+    with conn:
         rows = conn.execute(
             "SELECT * FROM shadow_report_events WHERE report_id=? ORDER BY event_id",
             (report_id,)).fetchall()
@@ -458,6 +484,7 @@ def read_state(report_id: str, path: str | Path | None = None) -> ReportState:
             event = row["event_type"]
             if event in ("comparison", "recomparison"):
                 latest_comparison = row
+                status = PENDING
             elif event == "signoff":
                 status = SIGNED_OFF
             elif event == "rejection":
@@ -522,7 +549,10 @@ def check_citable(*, report_id: str, scope: dict[str, Any],
     discoveries.
     """
     problems: list[str] = []
-    state = read_state(report_id, path=path)
+    try:
+        state = read_state(report_id, path=path)
+    except (sqlite3.Error, OSError) as exc:
+        raise ShadowReportError(f"no shadow report {report_id!r}: store unreadable ({exc})") from exc
 
     if state.status != SIGNED_OFF:
         detail = {
@@ -536,7 +566,7 @@ def check_citable(*, report_id: str, scope: dict[str, Any],
         problems.append(f"report {report_id} is not citable: {detail}")
 
     for surface in (required_surfaces or ()):
-        if surface in state.not_compared:
+        if surface in state.not_compared or surface not in state.surfaces:
             problems.append(
                 f"required surface {surface} is not-compared; it was never "
                 f"compared, so nothing is known about it")
@@ -559,6 +589,39 @@ def check_citable(*, report_id: str, scope: dict[str, Any],
             f"{current_code[:12]}); re-run the shadow comparison")
 
     return (not problems, problems)
+
+
+def check_batch_report(batch, *, path=None):
+    """Formal gate: historical comparisons remain diagnostic only."""
+    from .acceptance_reports import check_batch_report as check_new
+    return check_new(batch, path=path)
+
+
+def require_batch_report(batch, checker):
+    if not str(batch.shadow_report_id or "").strip():
+        return False, ["shadow report ID is required"]
+    if checker is None:
+        return False, ["shadow report checker is required"]
+    try:
+        ok, problems = checker(batch)
+        if not isinstance(ok, bool) or not isinstance(problems, (list, tuple)):
+            return False, ["invalid shadow report checker result"]
+        if not ok and not problems:
+            return False, ["shadow report checker refused"]
+        return ok and not problems, list(problems)
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"shadow report checker failed: {exc}"]
+
+
+def activation_batch(request):
+    from types import SimpleNamespace
+
+    classes = {"projection_read": "research_read", "analyst_output": "research_read",
+               "dispatcher_schedule": "schedule", "approval_lifecycle": "internal_state_approval",
+               "clerk_publication": "internal_state_approval", "live_trader": "live_trader"}
+    return SimpleNamespace(shadow_report_id=request.report_id, scope=request.scope,
+                           consumer_id=request.consumer_id,
+                           batch_class=classes[request.boundary], required_surfaces=())
 
 
 def assert_citable(*, report_id: str, scope: dict[str, Any],

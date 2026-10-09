@@ -16,6 +16,8 @@ auditable: weights and the composite are pure code; nothing here calls an LLM.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 import math
 from dataclasses import dataclass, field
@@ -296,7 +298,7 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
     from ...schemas.sector import BasketRow, LayerBasket
 
     return LayerBasket(
-        layer_key=layer_key, as_of=datetime.now(timezone.utc), layer_cap=layer_cap,
+        layer_key=layer_key, as_of=evaluation_now(timezone.utc), layer_cap=layer_cap,
         structural=structural, subgroup_notes=subgroup_notes or {},
         cross_section_applicable=cross_section_applies(rows),
         rows=[BasketRow(
@@ -495,7 +497,7 @@ def render_report(rows: list[FactorRow], layer_key: str, layer_label: str,
                   structural: bool = False, subgroup_notes: dict | None = None) -> str:
     from datetime import datetime, timezone
 
-    now = datetime.now(timezone.utc)
+    now = evaluation_now(timezone.utc)
     weights = BLENDED_WEIGHTS if structural else QUANT_WEIGHTS
     gen = ("**量化因子 + KB 结构层(LLM)复合**" if structural else "**确定性因子模型，无 LLM**")
     flag = " --structure" if structural else ""
@@ -579,7 +581,7 @@ def write_report(rows: list[FactorRow], basket, cfg) -> "object | None":
     layer_label = layer.label if layer else basket.layer_key
     text = render_report(rows, basket.layer_key, layer_label, basket.layer_cap, cfg.label,
                          cfg.name, structural=basket.structural, subgroup_notes=basket.subgroup_notes)
-    path = folder / f"截面选股-{cfg.label}-{basket.layer_key}-{datetime.now(timezone.utc):%Y-%m-%d}.md"
+    path = folder / f"截面选股-{cfg.label}-{basket.layer_key}-{evaluation_now(timezone.utc):%Y-%m-%d}.md"
     path.write_text(text, encoding="utf-8")
     return path
 

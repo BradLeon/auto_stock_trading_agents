@@ -1,8 +1,8 @@
-"""自动下单停用与参考价停取（Phase F 任务 7.9 裁决，2026-10-06）。
+"""生产 C3 与方案 A 的授权读取；历史 7.9 测试由 2026-10-08 新裁决更新。
 
 原`test_overnight_limits.py` 断言隔夜单会被改限价、且审批卡显示 `@ 价格`。
 任务 7.9 之后**这两条都不再成立**：参考价所需的行情数据未授权给 trader，
-自动下单整体停用、取价返回None。因此本文件记录**停用后的实际行为**，
+历史上自动下单整体停用、取价返回None；现在治理取价须绑定订单，生产 C3 保留。记录当前行为，
 而不是把旧断言删掉了事——删掉测试会让「行为变了」这件事无人知晓。
 
 保留文件名与 docstring 的历史说明，因为「为什么不再改限价」是这次停用的关键背景。
@@ -43,11 +43,9 @@ def test_auto_execution_is_off():
     assert texec.AUTO_EXECUTION_ENABLED is False
 
 
-def test_the_disabled_reason_names_the_contract_conflict():
-    """理由必须指向真实原因，否则读代码的人会以为这是临时开关。"""
+def test_the_disabled_reason_names_production_c3_and_simulation_policy():
     reason = texec.AUTO_EXECUTION_DISABLED_REASON
-    assert "未授权" in reason
-    assert "方案 A" in reason
+    assert "生产 C3" in reason and "FakeBroker" in reason
 
 
 # --------------------------------------------------------------------------- #
@@ -113,7 +111,8 @@ def test_the_reference_price_is_no_longer_fetched(monkeypatch):
     monkeypatch.setattr(
         texec, "_last_price_enabled",
         lambda s: pytest.fail(f"provider must not be reached: {s}"))
-    assert texec._last_price("GOOG") is None
+    with pytest.raises(PermissionError, match="binding_required"):
+        texec._last_price("GOOG")
 
 
 def test_amount_only_decisions_size_to_zero_and_say_so():
@@ -122,8 +121,8 @@ def test_amount_only_decisions_size_to_zero_and_say_so():
     这是**已知且被接受的**副作用，也是停用而非改造的理由：若保留取价则要
     越权读取，若砍掉取价则金额决策无法下单。停用把两者都变成可见状态。
     """
-    sized = texec.size_decisions([_d("buy")])
-    assert sized[0][1] == 0.0
+    with pytest.raises(PermissionError, match="binding_required"):
+        texec.size_decisions([_d("buy")])
 
 
 def test_an_explicit_share_count_still_sizes_normally():
@@ -136,12 +135,9 @@ def test_an_explicit_share_count_still_sizes_normally():
 # 隔夜限价改造：停用后不再改限价
 # --------------------------------------------------------------------------- #
 
-def test_market_orders_stay_market_orders():
-    """原本会把市价单改成限价；停用后保持市价——这是「默认使用市价交易」。"""
-    out, notes = texec.as_overnight_limits([_d("buy")], slippage_pct=0.5)
-    assert out[0].order_type == "market"
-    assert out[0].limit_price is None
-    assert "取不到参考价" in notes[0]
+def test_unbound_overnight_order_is_refused_instead_of_market_fallback():
+    with pytest.raises(PermissionError, match="binding_required"):
+        texec.as_overnight_limits([_d("buy")], slippage_pct=0.5)
 
 
 def test_an_explicit_limit_is_still_left_alone():
@@ -153,12 +149,9 @@ def test_an_explicit_limit_is_still_left_alone():
     assert notes == []
 
 
-def test_the_approval_card_shows_a_market_order_not_a_price():
-    """卡片不再显示 `@ 价格`——价格已不存在，显示它就是显示一个编造的数。"""
-    out, _ = texec.as_overnight_limits([_d("buy")])
-    summary = texec.build_approval_summary([(out[0], 15.0)], [], "pead-chief")
-    assert "(mkt)" in summary
-    assert "@ 201.0" not in summary
+def test_unbound_price_cannot_produce_a_fictitious_approval_card():
+    with pytest.raises(PermissionError, match="binding_required"):
+        texec.as_overnight_limits([_d("buy")])
 
 
 def test_the_preserved_implementation_exists_for_plan_a():

@@ -1137,6 +1137,12 @@ class DataProducts:
             "runtime_replayable": False,
         }
 
+    def company_financial_snapshot(self, *, entity: str, as_of: datetime) -> dict:
+        """Accepted company observations known at the cutoff; never refresh."""
+        rows = self.structured.observations(dataset_id="company_financials", entity_id=entity,
+                                            as_of=as_of, accepted_only=True, limit=100_000)
+        return {"entity": entity.upper(), "rows": rows, "as_of": as_of.isoformat()}
+
     def company_research_package(self, entity: str, *, since: datetime | None = None) -> dict:
         """Shared facts plus task-specific views for one economic entity."""
         key = entity.upper()

@@ -62,6 +62,16 @@ def task_store_scope(path: str | None = None) -> Iterator[TradingMemory]:
         task_store.close()
 
 
+@contextmanager
+def bound_store(store: TradingMemory) -> Iterator[TradingMemory]:
+    """Bind an existing publication connection without opening a different store."""
+    token = _TASK_STORE.set(store)
+    try:
+        yield store
+    finally:
+        _TASK_STORE.reset(token)
+
+
 def reset_store_cache() -> None:
     with _STORE_LOCK:
         _store.cache_clear()

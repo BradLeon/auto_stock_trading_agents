@@ -1,0 +1,315 @@
+{
+  "generated_at": "2026-10-08T02:02:55.298210+00:00",
+  "branch": "feat/rebuild_workflow_dataflow",
+  "head": "02c81f260718ee0ecdb78a63f2ef96d133a1e7d7",
+  "completed_this_run": [
+    "1.1",
+    "2.2",
+    "2.3",
+    "2.8"
+  ],
+  "total": 116,
+  "completed": 43,
+  "pending": 73,
+  "dependency_graph_acyclic": true,
+  "selected_dependencies_complete": true,
+  "regression": {
+    "tests": 294,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "record_guards": {
+    "tests": 20,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "strict": [
+    {
+      "items": [
+        {
+          "id": "implement-phase-f-shadow-run-and-cutover",
+          "type": "change",
+          "valid": true,
+          "issues": [],
+          "durationMs": 39
+        }
+      ],
+      "summary": {
+        "totals": {
+          "items": 1,
+          "passed": 1,
+          "failed": 0
+        },
+        "byType": {
+          "change": {
+            "items": 1,
+            "passed": 1,
+            "failed": 0
+          }
+        }
+      },
+      "version": "1.0",
+      "root": {
+        "path": "/Users/liuchao/Code/trading/auto_stock_trading_agents",
+        "source": "nearest"
+      }
+    },
+    {
+      "items": [
+        {
+          "id": "refactor-workflow-dataflow-architecture",
+          "type": "change",
+          "valid": true,
+          "issues": [
+            {
+              "level": "INFO",
+              "path": "sector/layer-analyst/spec.md",
+              "message": "Archive would refuse this delta: sector/layer-analyst: target spec does not exist; only ADDED requirements are allowed for new specs. MODIFIED and RENAMED operations require an existing spec."
+            }
+          ],
+          "durationMs": 51
+        }
+      ],
+      "summary": {
+        "totals": {
+          "items": 1,
+          "passed": 1,
+          "failed": 0
+        },
+        "byType": {
+          "change": {
+            "items": 1,
+            "passed": 1,
+            "failed": 0
+          }
+        }
+      },
+      "version": "1.0",
+      "root": {
+        "path": "/Users/liuchao/Code/trading/auto_stock_trading_agents",
+        "source": "nearest"
+      }
+    }
+  ],
+  "git_diff_check": "passed",
+  "new_files_ruff": "passed",
+  "baseline_hashes_unchanged": true,
+  "baseline_hashes": {
+    "config/data/structured.yaml": "6c051ecd466425e1fda949791c7e09332b45464ffc469fe75628648260fea62a",
+    "config/data/target_dataflow_coverage.yaml": "91d24e83d70f0f4674f896dd47db5f5b500c5aa6133477bd3d6ba8b564c22875",
+    "config/data/unstructured.yaml": "71e5aaf1b46f2d651197771b1eee9cda31197f8ceada157f62c3ae2fdba6906e",
+    "config/risk.yaml": "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+    "config/settings.yaml": "5989a185f9043d8df41a486e821ca6a2b32fe94026268f52b8d3da066ad9c418",
+    "config/workflow/legacy_retirement.yaml": "3fcc1773543eee5b644582825e2f62604eb97ba30ff4215fd7963b5c1bc6db37",
+    "config/workflow/phase_e_schedules.yaml": "51eee5ac86641985fc2d4f0ea3b6d6710dab529cf65501537183ff0d2e916bb4",
+    "config/workflow/workflow_owners.yaml": "c353688802f52a9ea53c48ae809087c68d73299b48152439f9d38ef0421055da",
+    "pyproject.toml": "15c767c39499848f4a162dbc387e45bf432c6ab40738248bfd7c4419482a4e07",
+    "src/ats/data/assurance.py": "80fa2dc447d0de6028ac62b7051f98c614098651e311dc9befc8666844e9c951",
+    "src/ats/data/consumer_api.py": "cf732809bfaff74ec80ad45831d70da23cb1f48c2eef3d53dbb1435879e233a8",
+    "src/ats/decision/repository.py": "b44c4e0ef19b4612c4c5d35e8947c3c694cc9d4ee0fd34737c38c5d14d3b0e68",
+    "src/ats/execution/authorization.py": "f06cfa4e0b78eec338b8b3745879307797c58b96f11267cc3b8d923afdaaa7af",
+    "src/ats/execution/clerk.py": "3cb23e09353617e716e9757c1e2d78d147fba589c34d492b2e8feb17efbcb9be",
+    "src/ats/execution/state_api.py": "a49d299614e3e23f1e0d480214e6a970d5b5886a801d4cc8e24aa84dcb014772",
+    "uv.lock": "242eb4935b16ef9d8c20d66dc01f0504dd549a5028b314e2ef3c71586c26ab13"
+  },
+  "production_inventory_unchanged": true,
+  "production_readonly": {
+    "var/phase_f_cutover.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_activations": 0,
+        "cutover_boundary_history": 6,
+        "cutover_boundary_state": 6,
+        "cutover_boundary_wiring": 10
+      },
+      "authorization_inventory": {},
+      "boundaries": [
+        {
+          "boundary": "analyst_output",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "approval_lifecycle",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "clerk_publication",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "dispatcher_schedule",
+          "route": "legacy",
+          "wired": 1
+        },
+        {
+          "boundary": "live_trader",
+          "route": "disabled",
+          "wired": 1
+        },
+        {
+          "boundary": "projection_read",
+          "route": "legacy",
+          "wired": 1
+        }
+      ]
+    },
+    "var/phase_f_batches.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "cutover_batch_dryruns": 28,
+        "cutover_batches": 5,
+        "read_cutover_authorizations": 1,
+        "read_cutover_runs": 12
+      },
+      "authorization_inventory": {
+        "read_cutover_authorizations": [
+          {
+            "reference": "DEP-2026-10-06-A",
+            "scope": "layer,information,sector,fundamental,macro,technical",
+            "valid_until": "2026-12-31T23:59:59+08:00",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "f458e5c2b65e4f2591c30f8381bfd02eb15cd8d3e8e5ca09feb5a99b13fc7b71",
+            "issued_by_present": true,
+            "issued_by_sha256": "fa732bfd3b63eaf9b6b16fe424dd1ef2f14ddd202d6cb802c69722cb915ba5da",
+            "note_present": true,
+            "note_sha256": "94f4843b4f312f83d1445b07284b894d729bdf91952381084551017ef0264a7d",
+            "record_sha256": "fdf50cc55c3af34cf7743b0a8041aa344f062da947f0c0a73d7ccecf9f1b2dbc",
+            "provenance_verified": false
+          }
+        ]
+      },
+      "batches": [
+        {
+          "batch_class": "collection_publish",
+          "batch_id": "batch-collection",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "internal_state_approval",
+          "batch_id": "batch-internal-approval",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "live_trader",
+          "batch_id": "batch-live-trader",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "research_read",
+          "batch_id": "batch-research-read",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        },
+        {
+          "batch_class": "schedule",
+          "batch_id": "batch-schedule",
+          "scope_json": "{}",
+          "shadow_report_id": ""
+        }
+      ]
+    },
+    "var/phase_f_dispatch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "dispatch_claims": 0,
+        "dispatch_expected_triggers": 0,
+        "dispatch_freeze": 0,
+        "dispatch_owner_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_routes.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "trade_route_freeze": 0,
+        "trade_route_history": 0,
+        "trade_route_issuance": 0,
+        "trade_route_state": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/phase_f_schedule_switch.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    },
+    "var/phase_f_live_authorizations.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "live_authorizations": 1
+      },
+      "authorization_inventory": {
+        "live_authorizations": [
+          {
+            "reference": "LIVE-X",
+            "scope": "trader",
+            "environment": "live",
+            "valid_until": "2099-01-01T00:00:00+00:00",
+            "issuer": "human",
+            "authorised_by_present": true,
+            "authorised_by_sha256": "65c74c15a686187bb6bbf9958f494fc6b80068034a659a9ad44991b08c58f2d2",
+            "issued_by_present": true,
+            "issued_by_sha256": "de7d1b721a1e0632b7cf04edf5032c8ecffa9f9a08492152b926f1a5a7e765d7",
+            "note_present": false,
+            "note_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "account_present": true,
+            "account_sha256": "316ca0efda6296d8f2c11d1e20890d220cec4266a0c16fbbef324c004688468a",
+            "record_sha256": "b8617e1a4dba464bd90292aa0f1abb34a99580b6987fbbd9fdaf874ab9d19407",
+            "provenance_verified": false
+          }
+        ]
+      }
+    },
+    "var/shadow/orders.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {
+        "shadow_order_intents": 0,
+        "shadow_submit_attempts": 0
+      },
+      "authorization_inventory": {}
+    },
+    "var/shadow/reports.sqlite": {
+      "exists": false
+    },
+    "var/data.sqlite": {
+      "exists": true,
+      "assurance_table_present": false,
+      "counts": {},
+      "authorization_inventory": {}
+    }
+  },
+  "production_submit_receipt_schema_absent": true,
+  "implementation_sha256": {
+    "src/ats/broker/ibkr.py": "6c02a1f9be97548a2eb0fdcdeafed55827195fa2eed723fda5732a864c638d6a",
+    "src/ats/execution/broker_write_guard.py": "af84f4c726ebfb5c669ea0fcea372a33578f2c886e281c982467952ae70c9a9a",
+    "src/ats/execution/route_arbitration.py": "19d88527f184057c78e9f00d6b2e233711922e9c84f3e174f23b896f601b3329",
+    "src/ats/execution/route_registry.py": "e1dfc887bed9a3aa264865bb81c17813ff219a7ea9a621b8f5895935732f6a2b",
+    "src/ats/execution/route_switch.py": "7f6db5a9901c41496a650855084fc3e88f90ee2a1f5aa8dd6530b87f1979312f",
+    "src/ats/runtime/cli.py": "011284ad64a486c60e4341e91cf8271909fd7159f92610cf07d63f56386bf157",
+    "src/ats/runtime/scheduler.py": "9691bb27f5cca55f88a4e8ac43ed195f14e66f2b772d66ee6e88ca8a9afc1eea",
+    "src/ats/workflow/dispatcher.py": "c36cb52d6799f81165d14286b266db4c27719dd4d5804f15fc1cd85cfaf4c44a",
+    "src/ats/workflow/ownership.py": "812b5b845eb123a5d1157375169e53b71d2117b27e548d30f916204c23ca7f5a",
+    "src/ats/workflow/isolation.py": "25d950a0ccb59dbb319c4e110b51477d3eaeda989304a5e48d07ef4a9fcf0472"
+  },
+  "full_suite_rerun": false,
+  "broker_transport": "FakeIB only",
+  "real_broker_network_writes": false,
+  "production_qualification_written": false,
+  "production_authorizations_or_routes_changed": false,
+  "C3_enabled": false
+}

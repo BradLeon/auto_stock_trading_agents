@@ -19,11 +19,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from ..agent.task_projection import (AgentRole, ProjectionScope,
-                                     TaskProjectionEnvelope, reuse_decision)
+from ..agent.task_projection import (
+    AgentRole,
+    ProjectionScope,
+    TaskProjectionEnvelope,
+    reuse_decision,
+)
 from ..workflow.run_contracts import TaskRegistry
 from .repository import DecisionAuditRepository
 from .state import CycleStatus
+
 
 class IncompleteResearchSnapshotError(Exception):
     """A required projection is missing or stale; the cycle must not open."""
@@ -72,13 +77,14 @@ class ResearchSnapshot:
     scope: ProjectionScope
     built_at: str
     items: list[SnapshotItem] = field(default_factory=list)
+    requirements: dict[str, Any] = field(default_factory=dict)
 
     def gaps(self) -> list[SnapshotItem]:
         return [item for item in self.items if not item.reusable]
 
     @property
     def complete(self) -> bool:
-        return not self.gaps()
+        return bool(self.items) and not self.gaps()
 
     def to_payload(self) -> dict[str, Any]:
         """JSON-serializable form stored on `decision_cycles.research_snapshot`."""
@@ -86,6 +92,7 @@ class ResearchSnapshot:
             "scope": self.scope.key,
             "built_at": self.built_at,
             "items": [vars(item) for item in self.items],
+            "requirements": self.requirements,
         }
 
 
@@ -119,6 +126,26 @@ def _category_task_ids(registry: TaskRegistry) -> list[tuple[str, list[str], lis
     return out
 
 
+def selected_decision_tasks(registry: TaskRegistry, *, fundamental_mode: str = "routine",
+                            requested_tasks=None) -> tuple[str, ...]:
+    """Select one Fundamental mode and its declared dependency closure."""
+    if fundamental_mode not in {"routine", "event"}:
+        raise ValueError("fundamental_mode must be routine or event")
+    if requested_tasks is not None:
+        selected = tuple(registry.resolve_order(requested_tasks))
+        roles = {registry.spec(t).agent_role for t in selected}
+        if {"fundamental_event_review", "fundamental_expectation_update"} <= roles:
+            raise ValueError("a decision must select exactly one Fundamental mode")
+        return selected
+    roles = {registry.spec(t).agent_role for t in registry.task_ids()}
+    excluded = ("fundamental_event_review" if fundamental_mode == "routine"
+                else "fundamental_expectation_update")
+    both = {"fundamental_event_review", "fundamental_expectation_update"} <= roles
+    return tuple(registry.resolve_order([t for t in registry.task_ids()
+        if registry.spec(t).required_for_decision and
+        not (both and registry.spec(t).agent_role == excluded)]))
+
+
 def build_research_snapshot(
     *,
     registry: TaskRegistry,
@@ -128,14 +155,15 @@ def build_research_snapshot(
     input_refs: Any = None,
     data_vintage_refs: Any = None,
     at: datetime | None = None,
+    selected_tasks: tuple[str, ...] | None = None,
 ) -> ResearchSnapshot:
     """Snapshot every decision-required category's projection state (task 3.1).
 
     Each item is traceable back to a concrete envelope: `projection_id` and
     `content_hash` are copied from it, and reuse is judged by Phase A's
     `reuse_decision` so the reason vocabulary never forks. Satisfaction is per
-    category: the fundamental category is satisfied by EITHER mode's task, and
-    the hit's task id is what the item records (Phase D task 1.4).
+    category among `selected_tasks`. Decision entry always fixes that selection;
+    omitting it retains the historical inventory comparison utility only.
 
     `required_scopes` names, per task, the scope the task was ASKED about — a
     decision cycle reads projections of many scopes (a layer brief, a name
@@ -150,6 +178,11 @@ def build_research_snapshot(
         # A category no registered task can satisfy (unmapped role) is a gap
         # right away — there is nothing that could ever fill it.
         candidates: list[str] = task_ids or fallback_task_ids
+        if selected_tasks is not None:
+            candidates = [t for t in candidates if t in selected_tasks]
+            if not candidates:
+                items.append(SnapshotItem(task_id=category, agent_role=None, category=category))
+                continue
         if not candidates:
             continue
         best: SnapshotItem | None = None
@@ -191,6 +224,7 @@ def open_decision_cycle(
     scope: ProjectionScope, required_scopes: Mapping[str, ProjectionScope] | None = None,
     input_refs: Any = None,
     data_vintage_refs: Any = None, created_at: str | None = None,
+    requested_tasks=None, fundamental_mode: str = "routine", at: datetime | None = None,
 ) -> tuple[Any, ResearchSnapshot]:
     """Build the snapshot, refuse if incomplete, else create the cycle (3.2).
 
@@ -198,11 +232,36 @@ def open_decision_cycle(
     before `create_cycle`, so no revision, review or order can exist for a
     cycle whose inputs were never complete.
     """
+    selected = selected_decision_tasks(registry, fundamental_mode=fundamental_mode,
+                                       requested_tasks=requested_tasks)
     snapshot = build_research_snapshot(
         registry=registry, projections=projections, scope=scope,
         required_scopes=required_scopes, input_refs=input_refs,
-        data_vintage_refs=data_vintage_refs)
+        data_vintage_refs=data_vintage_refs, selected_tasks=selected, at=at)
     if not snapshot.complete:
+        raise IncompleteResearchSnapshotError(snapshot)
+    from ..workflow.run_contracts import (
+        TaskResult,
+        TriggerContext,
+        WorkflowRunRequest,
+        build_run_result,
+    )
+
+    outcomes = {}
+    for task_id in selected:
+        env = projections.get(task_id)
+        usable, reason = (reuse_decision(env, scope=(required_scopes or {}).get(task_id, env.scope), at=at)
+                          if env else (False, "missing"))
+        outcomes[task_id] = TaskResult(task_id=task_id,
+            status="succeeded" if usable else "missing" if env is None else "stale",
+            projection_refs=(env.projection_id,) if env else (), detail=reason)
+    result = build_run_result(WorkflowRunRequest(run_id=cycle_id,
+        trigger=TriggerContext(kind="manual", trigger_id=trigger_id or cycle_id),
+        tasks=selected, scope=scope, as_of=snapshot.built_at, enter_decision_cycle=True), registry, outcomes)
+    if result.terminal != "complete":
+        for gap in result.missing_requirements:
+            snapshot.items.append(SnapshotItem(task_id=gap.task_id,
+                agent_role=registry.spec(gap.task_id).agent_role, category="dependency", reason=gap.kind))
         raise IncompleteResearchSnapshotError(snapshot)
     cycle = repo.create_cycle(
         cycle_id=cycle_id, trigger_source=trigger_source, trigger_id=trigger_id,

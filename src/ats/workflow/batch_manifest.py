@@ -501,25 +501,13 @@ def dry_run_batch(batch: CutoverBatch, *,
             "back. Record the drill reference before scheduling this batch.")
 
     # --- 2. the evidence this batch cites ----------------------------------
-    if batch.shadow_report_id:
-        if report_checker is not None:
-            citable, problems = report_checker(batch)
-        else:
-            from . import shadow_reports as reports
+    from .shadow_reports import require_batch_report
 
-            try:
-                citable, problems = reports.check_citable(
-                    report_id=batch.shadow_report_id, scope=batch.scope,
-                    required_surfaces=batch.required_surfaces or None, path=path)
-            except reports.ShadowReportError as exc:
-                citable, problems = False, [str(exc)]
-        result.report_citable = citable
-        result.checks["shadow_report_citable"] = citable
-        if not citable:
-            for problem in problems:
-                reasons.append(f"cited shadow report: {problem}")
-    else:
-        result.checks["shadow_report_citable"] = False
+    citable, problems = require_batch_report(batch, report_checker)
+    result.report_citable = citable
+    result.checks["shadow_report_citable"] = citable
+    if not citable:
+        reasons.extend(f"cited shadow report: {problem}" for problem in problems)
 
     # --- 3. live qualification (8.4: re-evaluated, never remembered) ---------
     if qualification_reader is not None and batch.consumers:

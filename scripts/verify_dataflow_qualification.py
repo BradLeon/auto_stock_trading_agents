@@ -32,8 +32,17 @@ from ats.data.stores.unstructured import PlatformUnstructuredRepository
 from ats.decision.repository import DecisionAuditRepository
 from ats.execution.state_api import get_internal_state
 from ats.memory.store import TradingMemory
+from ats.workflow.assurance_surface import load_surface
 
 COVERAGE = REPO_ROOT / "config/data/target_dataflow_coverage.yaml"
+
+
+def fingerprint_paths(consumer=None):
+    """Use the versioned policy, including every consumer's private closure."""
+    surface = load_surface(COVERAGE)
+    paths = surface.all_paths() if consumer is None else surface.paths_for(consumer)
+    return list(dict.fromkeys([*paths, surface.manifest,
+                              "scripts/verify_dataflow_qualification.py"]))
 
 
 def digest(payload):
@@ -296,10 +305,7 @@ def cached_fallback_drills(data_path, internal_path):
 def mechanism_probes(root, drills):
     """Synthetic fault probes ONLY in an isolated assurance ledger."""
     manifest = yaml.safe_load(COVERAGE.read_text())
-    paths = manifest["qualification_policy"]["required_fingerprint_paths"] + [
-        "src/ats/data/contract_validation.py",
-        "scripts/verify_dataflow_qualification.py",
-    ]
+    paths = fingerprint_paths("fundamental")
     db = root / "assurance.sqlite"
     start = datetime.now(timezone.utc)
     scope = {
@@ -780,23 +786,7 @@ def main():
         "sec_consumer_publication_checks": sec_probes,
         "cli": cli,
         "manifest_hash": hashlib.sha256(COVERAGE.read_bytes()).hexdigest(),
-        "code_config_fingerprints": assurance._dependencies(
-            [
-                "src/ats/data/assurance.py",
-                "src/ats/data/consumer_api.py",
-                "src/ats/data/contract_validation.py",
-                "src/ats/runtime/cli.py",
-                "scripts/verify_dataflow_qualification.py",
-                "config/data/structured.yaml",
-                "config/data/unstructured.yaml",
-                "config/data/target_dataflow_coverage.yaml",
-                "config/risk.yaml",
-                "src/ats/execution/state_api.py",
-                "src/ats/execution/authorization.py",
-                "src/ats/decision/repository.py",
-                "src/ats/execution/clerk.py",
-            ]
-        ),
+        "code_config_fingerprints": assurance._dependencies(fingerprint_paths()),
     }
     if args.output:
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")

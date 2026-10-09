@@ -81,7 +81,7 @@ def _step_predictions(store, *, broker, dry_run):
 def _step_performance(store, *, broker, dry_run):
     from ..trader import performance
 
-    rec = performance.record_snapshot(cycle_id="")
+    rec = performance.record_snapshot(cycle_id="", broker=broker)
     return {"recorded": rec is not None}
 
 
@@ -119,6 +119,10 @@ def _register_missed_windows(store, *, broker_available: bool,
             for r in rows]
 
 
+from ..workflow.runtime_reads import scoped_read  # noqa: E402
+
+
+@scoped_read("clerk")
 def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS,
               window_start: str | None = None, window_end: str | None = None,
               as_of: str | None = None, dry_run: bool = False) -> dict:
@@ -128,9 +132,24 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     moment — so the scheduler, a manual rerun and a crash recovery all derive
     the SAME id for the same window and cannot double-book.
     """
-    from ..memory import get_store
+    from ..memory import bound_store, get_store
+    from ..workflow.cutover_wiring import guard_clerk_publication
+    from ..workflow.runtime_reads import current_read_context, gate_read
 
     store = store or get_store()
+    guard_clerk_publication(store=store)
+    if steps:
+        from ..data.runtime.clerk_reads import ClerkBrokerReads, UnavailableBrokerReads
+
+        if broker is None:
+            try:
+                from ..trader.execute import IBKRBroker
+
+                broker = IBKRBroker()
+            except Exception as exc:
+                broker = UnavailableBrokerReads(str(exc))
+
+        broker = ClerkBrokerReads(broker, store)
     now = datetime.now(timezone.utc)
     as_of_day = as_of or now.date().isoformat()
     window_start = window_start or as_of_day
@@ -151,14 +170,25 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     results: dict = {}
     errors: list[str] = []
     for step in steps:
+        context = current_read_context()
+        if context:
+            gate_read(context.identity)
+        guard_clerk_publication(store=store, what=f"Clerk step {step}")
         impl = _STEPS.get(step)
         if impl is None:
             errors.append(f"{step}: unknown step")
             continue
         try:
-            results[step] = impl(store, broker=broker, dry_run=dry_run)
+            with bound_store(store):
+                results[step] = impl(store, broker=broker, dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001 - one failed step must not
-            # poison the others; the run trail records exactly what happened.
+            from ..workflow.cutover_routing import RouteUnavailable
+            from ..workflow.cutover_wiring import BoundaryWriteRefused
+            from ..workflow.shadow_ledger import ShadowLedgerWriteRefused
+
+            if isinstance(exc, (ShadowLedgerWriteRefused, BoundaryWriteRefused, RouteUnavailable)):
+                raise
+            # Ordinary unavailable steps remain recoverable; publication violations stop.
             log.exception("clerk step %s failed", step)
             errors.append(f"{step}: {exc}")
 
@@ -171,6 +201,10 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     all_errors = errors + [rec_errors]
     broker_available = not any(
         ("IBKR" in e) or ("broker unavailable" in e) for e in all_errors)
+    context = current_read_context()
+    if context:
+        gate_read(context.identity)
+    guard_clerk_publication(store=store, what="Clerk completion and gap publication")
     gaps = _register_missed_windows(store, broker_available=broker_available,
                                     window_end=window_end)
     status = "completed" if not errors else "failed"

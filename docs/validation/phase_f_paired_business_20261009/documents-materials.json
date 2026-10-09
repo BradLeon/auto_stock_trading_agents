@@ -1,0 +1,302 @@
+{
+  "test_a_group_underway_cannot_b0/cutover.sqlite": {
+    "sha256": "0656ae321a8322e67f2a14b9c88361a0e01e0f99df989104a8713f3de4c14341",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_a_group_underway_cannot_b0/dispatch.sqlite": {
+    "sha256": "6804b8018f0c25b632a21f3ed4079249447e91860da445d71fd8b3c1cff595f4",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_a_group_underway_cannot_b0/write-lease.sqlite": {
+    "sha256": "7f9c0dcf5868366785ea3a65da27baec5429611089f57b5af8af04313610e58a",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_an_empty_result_or_missin0/cutover.sqlite": {
+    "sha256": "9da05d4ddce937ab4d564eff71188ebf8e8013f3e5374f7cfdf21585d94a9a65",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_an_empty_result_or_missin0/dispatch.sqlite": {
+    "sha256": "f47c62fccc0eb04d9e280ca02d182666f320bd94c75ebb82663ff920d442e095",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_an_empty_result_or_missin0/write-lease.sqlite": {
+    "sha256": "1f5eab6757f1c941c3a30071b7edfaee035782ce9c04d50fe539e6f3334200da",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_at_least_one_group_is_che0/cutover.sqlite": {
+    "sha256": "c7743c50e9063f92eb73c312f8e59c032b8e99aa9b7d307e28c98fc9502354e7",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_at_least_one_group_is_che0/dispatch.sqlite": {
+    "sha256": "3563b2b1457fa40d77e0aabacf7efb2e536136c80bd1129b7bfd4636d418c0b6",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_at_least_one_group_is_che0/write-lease.sqlite": {
+    "sha256": "f2556b5e94cec0f5cf9d01e1423a8fc8415dd0d86dec4b88081c712d18660530",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_each_current_checked_task0/cutover.sqlite": {
+    "sha256": "4fae97fcbd80fb1b2d68ab6ed4ba97536b84dab9ae72dcdfb5f11a83ffdd2da5",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_each_current_checked_task0/dispatch.sqlite": {
+    "sha256": "278ebb63db07f6d2bb69a168d63f4c8690844ea03776ef9228140e023b92ad7d",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_each_current_checked_task0/write-lease.sqlite": {
+    "sha256": "65f048739b26fc3a697b8b2dcb10b1ec7f4752caf9a6ed0cd078a9e7f6cc5775",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_each_recorded_group_state0/cutover.sqlite": {
+    "sha256": "d3965a9a30e2c20fafa360f62009b2d2d5fb2d6d6ec672b98e4de09c2201aba7",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_each_recorded_group_state0/dispatch.sqlite": {
+    "sha256": "65215f1f1fbabaaebf0ac4cf079d77b86923a54b76fa7717038f393e1cfb8d61",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_each_recorded_group_state0/write-lease.sqlite": {
+    "sha256": "65b46ba313349456e6f39c99e57591b55ce2fca31cb5e25fa0c15c06a9bf4f9e",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_each_recorded_group_state1/cutover.sqlite": {
+    "sha256": "56b8a7c2a527f385f109212edb429d286f336ebcb984d04e63ab7d061eb7e50f",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_each_recorded_group_state1/dispatch.sqlite": {
+    "sha256": "6a4d33ca5d04f4efadfbf654eaa6547537eebec9892918e56749c6bf9abc2ab2",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_each_recorded_group_state1/write-lease.sqlite": {
+    "sha256": "99c2dd0ad3b37bb13632ae938bfd5d3fcb56761e147e11558f85d03f4d4ea35f",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_every_batch_outcome_in_th0/cutover.sqlite": {
+    "sha256": "e070f6f9eea84866ba7392273e5d355f93a2d364e16ef13b19337e094dbdea3e",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_every_batch_outcome_in_th0/dispatch.sqlite": {
+    "sha256": "9d4062603020eff61adc8b99ffd21e72f4c7adf9e8c5cceba9e2815a3355ca08",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_every_batch_outcome_in_th0/write-lease.sqlite": {
+    "sha256": "1f66378417312420295274a5f9990d110ff21f327cd062278bde694165e7a413",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_every_blocking_item_state0/cutover.sqlite": {
+    "sha256": "25bbb08169992faf24d6cb114b1d5567cf7b90d460fd43a3bfa789d7ee8eed01",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_every_blocking_item_state0/dispatch.sqlite": {
+    "sha256": "f2d58371e3538277cb4e1504c46c8f8f714ef4710c8541877fa167a934455c22",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_every_blocking_item_state0/write-lease.sqlite": {
+    "sha256": "ac95f36d6f1f222420a6ee381b81d5d4575a9239e5f120de1ab666cab7edc370",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_every_checked_group_has_a0/cutover.sqlite": {
+    "sha256": "43ce08b34e7c195950d5e5cd0b98c180fec1dc9402b6ed1aedb6494802fa5b4c",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_every_checked_group_has_a0/dispatch.sqlite": {
+    "sha256": "15d50df222d313c2a434773453ba0feee3ea9cac69da2aa6b274a77597647570",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_every_checked_group_has_a0/write-lease.sqlite": {
+    "sha256": "75665a75fecd1971739afa254ae491a86902c7f77d7a0aa03ea157cb45d1d316",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_historical_record_does_no0/cutover.sqlite": {
+    "sha256": "2cabe0f2bf808bd5f65c3d0923bdc30fc5a5d51cedc011438448a3993cb54106",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_historical_record_does_no0/dispatch.sqlite": {
+    "sha256": "2effc8d210ffc4657f63061b3f0cea04ed17312a5c700832fb3a8a840ea25b42",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_historical_record_does_no0/write-lease.sqlite": {
+    "sha256": "7988c9143c660f0acef42594480f6f5f0134e88bc962f1217dd3ee718959c7ba",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_reopened_group_requires_a0/cutover.sqlite": {
+    "sha256": "8a86acd0ff21a981a9cbca2ab0175a4b08e55a2326738f9e4674517e106a8ac4",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_reopened_group_requires_a0/dispatch.sqlite": {
+    "sha256": "454e0d49ff8727a06eefd1c72d30ab65e7517d8dc066e821b78d0bb3d7c7d792",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_reopened_group_requires_a0/write-lease.sqlite": {
+    "sha256": "63beb611e2ff6e0a7bfe31e993e64372ce5fbf0d1d69d5dce9506b0df69a510a",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_record_distinguishes_0/cutover.sqlite": {
+    "sha256": "bb466e4a547c19d60c04e4306bf578c0f3c330c89001fd7ea1ed775851bb84c3",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_record_distinguishes_0/dispatch.sqlite": {
+    "sha256": "05ea11d6d693de123f154519215edc1aa2db595c75812314dcebfb54deb30ced",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_record_distinguishes_0/write-lease.sqlite": {
+    "sha256": "03fff7288226a98ec986714d4b593fc97159d219f4b21093e6254d1474e0fee8",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_record_lists_every_bo0/cutover.sqlite": {
+    "sha256": "eb07b3bcc0338855e3f6a325432ad98ed8071542034f5bc8a39b51a56789f6e7",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_record_lists_every_bo0/dispatch.sqlite": {
+    "sha256": "fee7692c08af30dc683e68aa401817ae3c0de5b2ca952372a965d22c842e9a2b",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_record_lists_every_bo0/write-lease.sqlite": {
+    "sha256": "1428f2167d3af29e905196031f213a364f0b76d99baca5d8618ed14cc86f06b5",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_record_names_the_evid0/cutover.sqlite": {
+    "sha256": "4399c02c4a7bae0f9a0293dd8d4cc608b0d76832c2ab62ebc28290b4cee95f20",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_record_names_the_evid0/dispatch.sqlite": {
+    "sha256": "e847f4ee641d478e85ed6852b4362b5bdaa2dea6edae3ce5d4fcf85506eb2706",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_record_names_the_evid0/write-lease.sqlite": {
+    "sha256": "94b2310375d711b278db8fc47fc4ed286fc456e7153c2c0b8a2b9fe35380f516",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_record_points_at_ever0/cutover.sqlite": {
+    "sha256": "5d5d6192a14a82b8ece040a43f6937ce78b0418ba0ae124edbb44a4ad39d12a5",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_record_points_at_ever0/dispatch.sqlite": {
+    "sha256": "e27ae67582ad49dd285791b2f65889f02190be46d65129650ad331c8f5613643",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_record_points_at_ever0/write-lease.sqlite": {
+    "sha256": "a58c527142852d02d43f792f03ad6e3408515d004b73243b40e8e1d07d3616b6",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_record_states_the_cur0/cutover.sqlite": {
+    "sha256": "d07b260825c12e5f8629d51728483e65e9dcc0f0d8c7f190225383d82ec7925d",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_record_states_the_cur0/dispatch.sqlite": {
+    "sha256": "7aab02cae7beb00e3bc34a785fd9e70f38f785ae4cbe1b8727e3b1efe8f6de4e",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_record_states_the_cur0/write-lease.sqlite": {
+    "sha256": "6d5d107051dd8476d91e306d0ed4e99e7ad3ba30b379731da84dcd97937fe2d7",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_record_states_the_fin0/cutover.sqlite": {
+    "sha256": "ea97109fdc9a527d195cbe95521708853ceb1fb15fcb46d4791aba26dd53b45f",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_record_states_the_fin0/dispatch.sqlite": {
+    "sha256": "e75a9df66c2a5a8ad68220c3442829ec2448a91a6dd04458d13552dfa2a06b2b",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_record_states_the_fin0/write-lease.sqlite": {
+    "sha256": "a6e171d558f2a42e9ab41cf3d062ae5411726ffa1b5bffa6b424f1b8413b2ba6",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_tasks_file_and_the_re0/cutover.sqlite": {
+    "sha256": "cf688416a79b03ad3c3cba11889cfc7693176c654045ebe393a751a1b7474ef3",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_tasks_file_and_the_re0/dispatch.sqlite": {
+    "sha256": "ad5f91c86f85dc1e4ead94542eb4c403e764fc430f953787cd4a26e728718873",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_tasks_file_and_the_re0/write-lease.sqlite": {
+    "sha256": "620d1949a3cd60e96186dcb3ad8fef65f2993bf8ad09a36687bda03fdeb03347",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_the_why_is_not_optional_f0/cutover.sqlite": {
+    "sha256": "954b9b7856012349aa7ca36272202f19f924bacab1a04b5c0e8ef35feb1dcdee",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_the_why_is_not_optional_f0/dispatch.sqlite": {
+    "sha256": "e6cb5bf894d6b527f69145f398471229fd2bc2296fe4a34bc304236254e5aeeb",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_the_why_is_not_optional_f0/write-lease.sqlite": {
+    "sha256": "49a5fb7909e566e6741b7ced3508a535c0046d613c0217fd8211010c1117c0f3",
+    "bytes": 28672,
+    "sqlite": true
+  },
+  "test_unchecked_tasks_and_delet0/cutover.sqlite": {
+    "sha256": "9fd6c1ae14a6ebde1e7dc3c808c44e1f47af8c283262a7d5e4722b48662fa54d",
+    "bytes": 36864,
+    "sqlite": true
+  },
+  "test_unchecked_tasks_and_delet0/dispatch.sqlite": {
+    "sha256": "fcacbe17ee52b41ca5771491bf5aa17deaaf41cbe2cbf1940e29f3be9a54657a",
+    "bytes": 32768,
+    "sqlite": true
+  },
+  "test_unchecked_tasks_and_delet0/write-lease.sqlite": {
+    "sha256": "ff01efae80ec7a9a24df7556913e35d5b5f894004383c5c41c79cc123be8db1a",
+    "bytes": 28672,
+    "sqlite": true
+  }
+}

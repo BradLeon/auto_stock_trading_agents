@@ -42,10 +42,33 @@ class ChiefContext:
         return out
 
 
-def build(*, live_broker: bool = True) -> ChiefContext:
+def build(*, live_broker: bool = True, projection_manifest=None, query_plan=None) -> ChiefContext:
     from ...config import get_config
 
     ctx = ChiefContext(as_of=datetime.now(timezone.utc))
+    from ...workflow.isolation import verified_isolation_root
+    from ...workflow.runtime_reads import current_read_context
+
+    read = current_read_context()
+    if read and (read.route == "target" or verified_isolation_root() is not None):
+        # Candidate/target synthesis consumes actual published projections and
+        # ledger state. Old dossiers/review tables are not research substitutes.
+        from ...memory import get_store
+        from ...workflow.consumer_reads import read_internal
+
+        state = read_internal(get_store(), consumer="chief")
+        ctx.net_liquidation = state.portfolio.get("net_liquidation", 0)
+        ctx.blocks["组合账本状态"] = f"{state.portfolio} · {state.section_status} · {state.completeness}"
+        snapshot, detail = build_chief_snapshot(
+            get_store(), at=read.cutoff, projection_manifest=projection_manifest,
+            query_plan=query_plan)
+        if not snapshot.complete:
+            from ...workflow.cutover_routing import RouteUnavailable
+
+            raise RouteUnavailable("required Chief projections unavailable: " + gap_report(snapshot, detail))
+        ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail)
+        ctx.blocks["战绩反馈"] = _track_record_block()
+        return ctx
     ctx.blocks["组合现状 (trader)"] = _portfolio_block(ctx, live_broker)
     if not ctx.net_liquidation:
         ctx.net_liquidation = get_config().app.account.net_liquidation_usd
@@ -340,22 +363,28 @@ def _risk_block() -> str:
     return block
 
 
+from ...workflow.runtime_reads import scoped_read  # noqa: E402
+
+
+@scoped_read("chief")
 def _track_record_block() -> str:
     from ...memory import get_store
 
     store = get_store()
     lines = []
-    perf = store.last_performance()
+    from ...workflow.consumer_reads import read_internal
+
+    state = read_internal(store, consumer="chief")
+    perf = state.portfolio
     if perf:
-        lines.append(f"最新绩效: NetLiq ${perf.net_liquidation:,.0f} 日盈亏 ${perf.daily_pnl:,.0f} "
-                     f"累计 ${perf.cumulative_pnl:,.0f}")
+        lines.append(f"最新绩效: NetLiq ${perf['net_liquidation']:,.0f} 日盈亏 ${perf['daily_pnl']:,.0f} "
+                     f"累计 ${perf['cumulative_pnl']:,.0f}")
+    lines.append(f"内部状态: {state.completeness.status} · {state.section_as_of}")
     for d in store.recent_decisions(limit=8):
         lines.append(f"  近期决策: {d['action']} {d['symbol']} "
                      f"${d.get('notional_usd') or 0:,.0f} — {(d.get('rationale') or '')[:50]}")
     # Task 6.4: fills also come via the Internal State API now.
-    from ...execution import state_api
-
-    for f in state_api.recent_fills(store, limit=5):
+    for f in state.fills:
         rp = f" realized ${f['realized_pnl']:,.0f}" if f.get("realized_pnl") is not None else ""
         lines.append(f"  近期成交: {f['side']} {f['symbol']} {f['shares']:.0f}@{f['price']:.2f}{rp}")
     return "\n".join(lines)
@@ -372,7 +401,6 @@ def _track_record_block() -> str:
 # has a usable projection — a subset is a partial answer, not a complete one.
 def projection_query_plan() -> dict[str, dict]:
     """task_id -> {role, scopes} the snapshot builder must cover."""
-    from types import SimpleNamespace
 
     from ...agent.task_projection import ProjectionScope
     from ...config import load_pead_global, load_sector_config
@@ -431,20 +459,16 @@ def _envelope_from_row(row: dict, scope) -> Any:
 
 def _latest_row(store, *, role: str, scope, projection_id: str = "",
                 content_hash: str = "") -> dict | None:
-    if projection_id:
-        row = store.get_task_projection(projection_id)
-        if (row is None or row.get("agent_role") != role
-                or row.get("scope_kind") != scope.kind or row.get("scope_id") != scope.id
-                or (content_hash and row.get("content_hash") != content_hash)):
-            return None
-        return row
-    rows = store.task_projection_envelopes(
-        agent_role=role, scope_kind=scope.kind, scope_id=scope.id, limit=1)
-    return rows[0] if rows else None
+    from ...workflow.consumer_reads import read_projection
+
+    return read_projection(store, consumer="chief", role=role, scope=scope,
+                           projection_id=projection_id, content_hash=content_hash,
+                           require_usable=False)
 
 
 def scan_projection_scopes(store, *, at=None,
-                           projection_manifest: list[dict] | None = None) -> list[dict]:
+                           projection_manifest: list[dict] | None = None,
+                           query_plan=None) -> list[dict]:
     """Per (task, scope) projection state — the fine-grained gap detail.
 
     `status` speaks the snapshot vocabulary: `fresh` (usable), `missing`,
@@ -458,7 +482,7 @@ def scan_projection_scopes(store, *, at=None,
         manifest = {(item["role"], item["scope_kind"], item["scope_id"]): item
                     for item in projection_manifest}
     detail: list[dict] = []
-    for task_id, plan in projection_query_plan().items():
+    for task_id, plan in (query_plan if query_plan is not None else projection_query_plan()).items():
         for scope in plan["scopes"]:
             selected = (manifest.get((plan["role"], scope.kind, scope.id))
                         if manifest is not None else None)
@@ -487,7 +511,8 @@ def scan_projection_scopes(store, *, at=None,
 
 
 def build_chief_snapshot(store, *, at=None,
-                         projection_manifest: list[dict] | None = None) -> tuple[Any, list[dict]]:
+                         projection_manifest: list[dict] | None = None,
+                         query_plan=None) -> tuple[Any, list[dict]]:
     """The chief's research snapshot (7.1) plus its per-scope detail.
 
     Multi-scope categories are satisfied only when every scope is fresh; the
@@ -504,9 +529,9 @@ def build_chief_snapshot(store, *, at=None,
         kind, _, ident = key.partition(":")
         return ProjectionScope(kind=kind, id=ident)
 
-    plan = projection_query_plan()
+    plan = query_plan if query_plan is not None else projection_query_plan()
     detail = scan_projection_scopes(store, at=at,
-                                    projection_manifest=projection_manifest)
+                                    projection_manifest=projection_manifest, query_plan=plan)
     envelopes: dict[str, Any] = {}
     required_scopes: dict[str, ProjectionScope] = {}
 
@@ -525,7 +550,8 @@ def build_chief_snapshot(store, *, at=None,
 
     # Fundamental: per target, EITHER mode may cover the target; a category is
     # satisfied only when every target is covered by exactly one winner.
-    entity_count = len(plan["fundamental_expectation_update"]["scopes"])
+    entity_count = len(plan.get("fundamental_expectation_update", plan.get(
+        "fundamental_event_review", {"scopes": []}))["scopes"])
     fund_winners: dict[str, tuple[str, dict]] = {}
     for d in detail:
         if d["task_id"] not in ("fundamental_expectation_update",
@@ -565,6 +591,25 @@ def build_chief_snapshot(store, *, at=None,
         registry=registry, projections=envelopes,
         scope=ProjectionScope(kind="portfolio"),
         required_scopes=required_scopes or None, at=at)
+    # Keep every required scope in the frozen basis, not only a category's
+    # representative. Restart and mid-cycle checks must resolve all inputs.
+    from ...decision.snapshot import SnapshotItem
+    from ...workflow.run_contracts import ROLE_TO_CATEGORY
+
+    items = []
+    for d in detail:
+        if ROLE_TO_CATEGORY.get(d["role"]) == "fundamental_analysis":
+            winner = fund_winners.get(d["scope"])
+            if not winner or winner[1] is not d:
+                continue
+        kind, _, ident = d["scope"].partition(":")
+        items.append(SnapshotItem(
+            task_id=d["task_id"], agent_role=d["role"], category=ROLE_TO_CATEGORY[d["role"]],
+            projection_id=d["projection_id"], content_hash=d["content_hash"], as_of=d["as_of"],
+            reusable=d["status"] == "fresh", reason=d["reason"], scope_kind=kind, scope_id=ident))
+    covered = {item.category for item in items}
+    items.extend(item for item in snapshot.items if item.category not in covered)
+    snapshot.items = items
     return snapshot, detail
 
 
@@ -622,6 +667,14 @@ def projection_context_block(detail: list[dict]) -> str:
         line("macro_review", "宏观评审"),
         line("technical_review", "技术面评审"),
     ]
+    import json
+
+    # Render every consumed opinion with a fully resolvable ID and hash. The
+    # category summary alone loses scopes and the content that Chief must see.
+    lines.extend(
+        f"- {d['role']} [{d['scope']}] {d['status']} · {d['projection_id']} "
+        f"sha256={d['content_hash']} · " + json.dumps(d.get("payload") or {}, ensure_ascii=False)
+        for d in detail)
     return "\n".join(lines)
 
 

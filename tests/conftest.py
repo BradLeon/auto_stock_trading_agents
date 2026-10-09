@@ -206,6 +206,14 @@ def _publish_cited_document(store, document_id: str, fetched_at: str) -> None:
 def _isolate_db(tmp_path, monkeypatch):
     """Point Context Memory + checkpoints at throwaway DBs per test."""
     monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "mem.sqlite"))
+    monkeypatch.setenv("ATS_CUTOVER_DB", str(tmp_path / "cutover.sqlite"))
+    monkeypatch.setenv("ATS_DISPATCH_STATE_PATH", str(tmp_path / "dispatch.sqlite"))
+    from ats.workflow.schedule_runtime import initialize
+
+    initialize()
+    from ats.workflow.cutover import bootstrap
+
+    bootstrap(actor="test-fixture", path=tmp_path / "cutover.sqlite")
     monkeypatch.delenv("ATS_STRUCTURED_DB_PATH", raising=False)
     monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "structured_artifacts"))
     monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
@@ -244,6 +252,7 @@ def _isolate_report_dir(tmp_path, monkeypatch):
     """
     import ats.config as config
 
+    real_technical = config.load_technical_config
     real_macro = config.load_macro_config
     real_sector = config.load_sector_config
 
@@ -253,6 +262,7 @@ def _isolate_report_dir(tmp_path, monkeypatch):
     def _sector(name: str = "ai_hardware"):
         return real_sector(name).model_copy(update={"output_dir": str(tmp_path)})
 
+    monkeypatch.setattr(config, "load_technical_config", lambda name="technical": real_technical(name).model_copy(update={"output_dir": str(tmp_path)}))
     monkeypatch.setattr(config, "load_macro_config", _macro)
     monkeypatch.setattr(config, "load_sector_config", _sector)
     # Primary-source cache (data.source_cache) reads AND WRITES under docs_root, which
@@ -405,7 +415,7 @@ def _fresh_portfolio() -> "PortfolioSnapshot":
 
 
 @pytest.fixture
-def broker(monkeypatch):
+def broker(monkeypatch, tmp_path):
     """Hermetic broker stack: FakeBroker, $100 last price, and a FRESH paper
     portfolio so the execution authorization gate (7.5) passes — a real order
     without a current snapshot is refused."""
@@ -421,7 +431,10 @@ def broker(monkeypatch):
     monkeypatch.setattr("ats.risk.assess.assess",
                         lambda p, **k: RiskReview(as_of=datetime.now(timezone.utc),
                                                   risk_state="normal"))
-    return FakeBroker
+    from phase_f_price_harness import governed_price_run
+
+    with governed_price_run(monkeypatch, tmp_path) as simulated:
+        yield simulated
 
 
 class FakeAsyncChannel:

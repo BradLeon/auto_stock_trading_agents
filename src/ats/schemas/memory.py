@@ -40,6 +40,10 @@ class TradeLogEntry(BaseModel):
     # Cancelled/rejected entries never reach the broker and are exempt.
     decision_hash: str = ""
     approval_id: str = ""
+    execution_price_audit: list[dict] = Field(default_factory=list)
+    # Preserve isolated origin when returned results cross a process/context boundary.
+    isolation_root: str = ""
+    shadow_run_id: str = ""
 
 
 class Fill(BaseModel):

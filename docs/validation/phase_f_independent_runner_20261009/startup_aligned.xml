@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="11" time="2.948" timestamp="2026-10-09T16:49:47.419001+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_startup_enforcement" name="test_owner_to_real_dispatcher_to_broker_refuses_and_analysis_completes" time="0.774"><failure message="ats.workflow.schedule_runtime.ScheduleAuthorityError: production freeze requires authorized coordinator; isolated drill only">tests/test_phase_f_startup_enforcement.py:77: in test_owner_to_real_dispatcher_to_broker_refuses_and_analysis_completes
+    run = owner_setup(monkeypatch, tmp_path)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_phase_f_startup_enforcement.py:65: in owner_setup
+    shadow_owner()
+tests/test_phase_f_startup_enforcement.py:60: in shadow_owner
+    token=rt.freeze(task.task_id,scope,actor="startup-fixture",reason="actual SQL owner required")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/schedule_runtime.py:738: in freeze
+    raise ScheduleAuthorityError("production freeze requires authorized coordinator; isolated drill only")
+E   ats.workflow.schedule_runtime.ScheduleAuthorityError: production freeze requires authorized coordinator; isolated drill only</failure></testcase><testcase classname="tests.test_phase_f_startup_enforcement" name="test_direct_shadow_plan_dispatch_to_broker_refuses_and_completes" time="0.182"><failure message="ats.workflow.schedule_runtime.ScheduleAuthorityError: production freeze requires authorized coordinator; isolated drill only">tests/test_phase_f_startup_enforcement.py:84: in test_direct_shadow_plan_dispatch_to_broker_refuses_and_completes
+    shadow_owner()
+tests/test_phase_f_startup_enforcement.py:60: in shadow_owner
+    token=rt.freeze(task.task_id,scope,actor="startup-fixture",reason="actual SQL owner required")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/schedule_runtime.py:738: in freeze
+    raise ScheduleAuthorityError("production freeze requires authorized coordinator; isolated drill only")
+E   ats.workflow.schedule_runtime.ScheduleAuthorityError: production freeze requires authorized coordinator; isolated drill only</failure></testcase><testcase classname="tests.test_phase_f_startup_enforcement" name="test_cli_shadow_entry_arms_before_any_work" time="0.488" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_scheduler_environment_arms_before_daily_work" time="0.218" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_missing_prohibition_refuses_each_actual_startup[cli]" time="0.161" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_missing_prohibition_refuses_each_actual_startup[scheduler]" time="0.098" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_missing_prohibition_refuses_each_actual_startup[owner]" time="0.095"><failure message="ats.workflow.schedule_runtime.ScheduleAuthorityError: production freeze requires authorized coordinator; isolated drill only">tests/test_phase_f_startup_enforcement.py:120: in test_missing_prohibition_refuses_each_actual_startup
+    call = owner_setup(monkeypatch, tmp_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_phase_f_startup_enforcement.py:65: in owner_setup
+    shadow_owner()
+tests/test_phase_f_startup_enforcement.py:60: in shadow_owner
+    token=rt.freeze(task.task_id,scope,actor="startup-fixture",reason="actual SQL owner required")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ats/workflow/schedule_runtime.py:738: in freeze
+    raise ScheduleAuthorityError("production freeze requires authorized coordinator; isolated drill only")
+E   ats.workflow.schedule_runtime.ScheduleAuthorityError: production freeze requires authorized coordinator; isolated drill only</failure></testcase><testcase classname="tests.test_phase_f_startup_enforcement" name="test_missing_prohibition_refuses_each_actual_startup[dispatcher]" time="0.099" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_missing_prohibition_refuses_each_actual_startup[isolated]" time="0.109" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_isolation_prohibition_reaches_child_process_and_nested_env_restores" time="0.398" /><testcase classname="tests.test_phase_f_startup_enforcement" name="test_shadow_startup_revokes_effect_of_preexisting_grant" time="0.093" /></testsuite></testsuites>

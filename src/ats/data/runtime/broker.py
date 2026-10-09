@@ -1,6 +1,7 @@
 """Read-only broker gateway. No connection creation, writes or research storage."""
 
 from datetime import datetime, timezone
+from ats.workflow.evaluation_clock import now as evaluation_now
 
 
 def broker_state(broker) -> dict:
@@ -23,13 +24,17 @@ def broker_state(broker) -> dict:
 
 
 def portfolio_snapshot(broker) -> dict:
-    queried_at = datetime.now(timezone.utc)
+    queried_at = evaluation_now(timezone.utc)
     envelope = {"schema_version": "runtime-broker-v1", "owner": "ats.data.runtime",
                 "input_mode": "runtime", "queried_at": queried_at.isoformat(),
                 "source_as_of": None, "status": "unavailable", "payload": None,
                 "reason": "broker_unavailable"}
     try:
         portfolio = broker.get_portfolio()
+        # A snapshot may be created while the broker request is in flight.
+        # Compare its source clock with response receipt, not request start.
+        queried_at = evaluation_now(timezone.utc)
+        envelope["queried_at"] = queried_at.isoformat()
         if portfolio is None:
             return envelope
         payload = portfolio.model_dump(mode="json") if hasattr(portfolio, "model_dump") else dict(portfolio)

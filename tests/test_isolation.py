@@ -27,7 +27,7 @@ def _clean_guard():
 
 def test_every_persistence_surface_is_redirected(tmp_path):
     """A surface missing from the table is a surface the run can still write to."""
-    with isolation.isolated_run("iso-surfaces", root=tmp_path) as env:
+    with isolation.isolated_run("iso-surfaces", root=tmp_path / "isolated") as env:
         for var in isolation.PERSISTENCE_ENV_VARS:
             assert os.environ[var].startswith(str(tmp_path)), var
             assert Path(os.environ[var]).resolve() != Path(
@@ -38,7 +38,7 @@ def test_every_persistence_surface_is_redirected(tmp_path):
 
 def test_broker_writes_are_prohibited_inside_the_run(tmp_path):
     """Redirecting ledgers does not stop a real order — the broker is not a DB."""
-    with isolation.isolated_run("iso-broker", root=tmp_path):
+    with isolation.isolated_run("iso-broker", root=tmp_path / "isolated"):
         assert guard.is_prohibited() is True
         with pytest.raises(guard.BrokerWriteProhibited):
             guard.check_broker_write(operation="place_orders", caller="test")
@@ -47,11 +47,11 @@ def test_broker_writes_are_prohibited_inside_the_run(tmp_path):
 def test_isolation_is_only_reported_when_both_halves_hold(tmp_path):
     """Paths redirected but writes allowed is the dangerous half-state: a run
     that believes it is a shadow while the broker is live."""
-    with isolation.isolated_run("iso-both", root=tmp_path):
+    with isolation.isolated_run("iso-both", root=tmp_path / "isolated"):
         assert isolation.isolation_active() is True
 
     # Same paths, prohibition removed -> no longer isolated.
-    with isolation.isolated_run("iso-paths-only", root=tmp_path):
+    with isolation.isolated_run("iso-paths-only", root=tmp_path / "isolated"):
         guard._STATE.mode = "permitted"
         assert isolation.isolation_active() is False
 
@@ -68,7 +68,7 @@ def test_workflow_memory_reads_the_isolated_database(tmp_path):
     """
     from ats.memory import get_store
 
-    with isolation.isolated_run("iso-memory", root=tmp_path):
+    with isolation.isolated_run("iso-memory", root=tmp_path / "isolated"):
         store = get_store()
         assert str(Path(store.path).resolve()).startswith(str(tmp_path.resolve()))
 
@@ -76,7 +76,7 @@ def test_workflow_memory_reads_the_isolated_database(tmp_path):
 def test_data_layer_reads_the_isolated_database(tmp_path):
     from ats.data.runtime.repository import platform_data_db_path
 
-    with isolation.isolated_run("iso-data", root=tmp_path):
+    with isolation.isolated_run("iso-data", root=tmp_path / "isolated"):
         assert str(platform_data_db_path().resolve()).startswith(str(tmp_path.resolve()))
 
 
@@ -89,7 +89,7 @@ def test_an_isolated_run_cannot_write_production_trades(tmp_path):
     production = REPO_ROOT / "var" / "ats.sqlite"
     before = production.stat().st_size if production.exists() else None
 
-    with isolation.isolated_run("iso-trades", root=tmp_path):
+    with isolation.isolated_run("iso-trades", root=tmp_path / "isolated"):
         get_store().save_trades(
             [TradeLogEntry(order_id="iso-1", cycle_id="iso-cycle", symbol="AMD",
                            action="buy", qty=1, status="filled",
@@ -108,7 +108,7 @@ def test_no_production_approval_conclusion_is_produced(tmp_path):
     """
     from ats.memory import get_store
 
-    with isolation.isolated_run("iso-approval", root=tmp_path):
+    with isolation.isolated_run("iso-approval", root=tmp_path / "isolated"):
         approvals = get_store().conn.execute(
             "SELECT COUNT(*) FROM boss_approvals").fetchone()[0]
         revisions = get_store().conn.execute(
@@ -124,7 +124,7 @@ def test_environment_and_caches_are_restored_on_exit(tmp_path):
     original = {var: os.environ.get(var) for var in isolation.PERSISTENCE_ENV_VARS}
     was_prohibited = guard.is_prohibited()
 
-    with isolation.isolated_run("iso-restore", root=tmp_path):
+    with isolation.isolated_run("iso-restore", root=tmp_path / "isolated"):
         pass
 
     for var, value in original.items():
@@ -137,7 +137,7 @@ def test_environment_is_restored_even_when_the_run_raises(tmp_path):
     original = os.environ.get("ATS_DB_PATH")
 
     with pytest.raises(RuntimeError, match="boom"):
-        with isolation.isolated_run("iso-boom", root=tmp_path):
+        with isolation.isolated_run("iso-boom", root=tmp_path / "isolated"):
             raise RuntimeError("boom")
 
     assert os.environ.get("ATS_DB_PATH") == original
@@ -151,7 +151,7 @@ def test_the_run_refuses_to_start_without_the_capability(tmp_path, monkeypatch):
                                 "capability missing", reason_code="guard_missing",
                                 refusal_id="")))
     with pytest.raises(guard.BrokerWriteProhibited):
-        with isolation.isolated_run("iso-guard", root=tmp_path):
+        with isolation.isolated_run("iso-guard", root=tmp_path / "isolated"):
             pytest.fail("the run body must not execute")
 
 

@@ -1,0 +1,107 @@
+{
+  "status": "passed",
+  "executions": [
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[routine]",
+      "run_id": "new",
+      "status": "passed",
+      "simulated_acceptances": 1,
+      "refusal": {
+        "cycle_id": "independent-chain",
+        "destination": "IBKR",
+        "reason_code": "isolated_run_prohibited",
+        "refusal_id": "broker-write-refusal-000002"
+      },
+      "capabilities": [
+        {
+          "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+          "route_id": "simulation",
+          "generation": 1,
+          "account": "DU1",
+          "environment": "paper"
+        }
+      ]
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[routine]",
+      "run_id": "replayed",
+      "status": "passed",
+      "simulated_acceptances": 1,
+      "refusal": {
+        "cycle_id": "independent-chain",
+        "destination": "IBKR",
+        "reason_code": "isolated_run_prohibited",
+        "refusal_id": "broker-write-refusal-000001"
+      },
+      "capabilities": [
+        {
+          "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+          "route_id": "simulation",
+          "generation": 1,
+          "account": "DU1",
+          "environment": "paper"
+        }
+      ]
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[event]",
+      "run_id": "new",
+      "status": "passed",
+      "simulated_acceptances": 1,
+      "refusal": {
+        "cycle_id": "independent-chain",
+        "destination": "IBKR",
+        "reason_code": "isolated_run_prohibited",
+        "refusal_id": "broker-write-refusal-000002"
+      },
+      "capabilities": [
+        {
+          "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+          "route_id": "simulation",
+          "generation": 1,
+          "account": "DU1",
+          "environment": "paper"
+        }
+      ]
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[event]",
+      "run_id": "replayed",
+      "status": "passed",
+      "simulated_acceptances": 1,
+      "refusal": {
+        "cycle_id": "independent-chain",
+        "destination": "IBKR",
+        "reason_code": "isolated_run_prohibited",
+        "refusal_id": "broker-write-refusal-000001"
+      },
+      "capabilities": [
+        {
+          "intent_id": "0eee16560538da7c588cd094640065b4f37e4fe98122ab4760f2c4252cb4855b",
+          "route_id": "simulation",
+          "generation": 1,
+          "account": "DU1",
+          "environment": "paper"
+        }
+      ]
+    }
+  ],
+  "production": {
+    "status": "passed",
+    "production_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/ats.sqlite",
+    "snapshot_hash": "55e843daf13554a495f1996df31f4f816f46de29e78292f1ea4d10ba6f4bc3aa",
+    "rows_checked": {
+      "trades": 52,
+      "fills": 13
+    },
+    "leaked_rows": 0,
+    "unrelated_history": "retained; exact causal identities checked"
+  },
+  "production_unchanged_during_audit": true,
+  "historical_capture_window": "not-observed; no before snapshot existed for 3.10",
+  "tws_readonly": "untested",
+  "production_or_paper_submit": "not-authorized/not-tested",
+  "stage": "safety",
+  "recorded_at": "2026-10-09T12:29:56.717019+00:00",
+  "auditor_hash": "00cea21bc62e13cabe6d4b2717dd8ae11375120caf38b9a66dcfe757ce018f5d"
+}

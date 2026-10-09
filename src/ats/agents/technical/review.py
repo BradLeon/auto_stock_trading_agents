@@ -10,6 +10,8 @@ Never raises into the scheduler: every boundary degrades to a note.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
@@ -221,11 +223,52 @@ def _publish_projection(store, review: TechnicalReview) -> int:
 
 def run(name: str = "technical", *, live_data: bool = True, persist: bool = True,
         write_report: bool = True, symbols: list[str] | None = None) -> TechnicalReview:
+    from ...workflow import schedule_runtime as scheduling
+    from ...config import load_technical_config
+    from ...workflow.run_contracts import TriggerContext
+    from uuid import uuid4
+
+    active = scheduling._ACTIVE.get()
+    if (active and active.workflow == "technical-review") or not persist:
+        return _run(name, live_data=live_data, persist=persist, write_report=write_report, symbols=symbols)
+    targets = symbols
+    if targets is None:
+        targets, _ = resolve_universe(load_technical_config(name), live_broker=live_data)
+    trigger = scheduling._WAKE.get() or scheduling._LOGICAL.get() or TriggerContext(kind="manual", trigger_id="manual-" + uuid4().hex)
+    trigger = scheduling.adapt_wake("technical-review", trigger)
+    reviews = []
+    for symbol in sorted(set(str(item).upper() for item in targets)):
+        result = scheduling.execute("technical-review", {"kind": "entity", "id": symbol}, trigger,
+            lambda symbol=symbol: _run(name, live_data=live_data, persist=True,
+                write_report=write_report, symbols=[symbol]), actor="technical-" + uuid4().hex)
+        if isinstance(result, dict) and result.get("schedule_skipped"):
+            if result["status"] != "complete":
+                raise scheduling.ScheduleAuthorityError("technical trigger requires explicit disposition")
+            cached = result["result"]
+            if isinstance(cached, dict) and "readings" in cached:
+                result = TechnicalReview.model_validate(cached)
+            else:
+                from ...memory import get_store
+
+                result = get_store().latest_technical_review(name)
+                if result is None:
+                    raise scheduling.ScheduleAuthorityError("completed trigger has no readable technical review")
+        reviews.append(result)
+    if not reviews:
+        return _run(name, live_data=live_data, persist=False, write_report=False, symbols=[])
+    combined = reviews[0].model_copy(deep=True)
+    combined.readings = [reading for review in reviews for reading in review.readings]
+    combined.skipped = sorted({item for review in reviews for item in review.skipped})
+    return combined
+
+
+def _run(name: str = "technical", *, live_data: bool = True, persist: bool = True,
+        write_report: bool = True, symbols: list[str] | None = None) -> TechnicalReview:
     from ...config import load_technical_config
     from ...memory import get_store
 
     cfg = load_technical_config(name)
-    now = datetime.now(timezone.utc)
+    now = evaluation_now(timezone.utc)
     store = get_store()
 
     if symbols is None:

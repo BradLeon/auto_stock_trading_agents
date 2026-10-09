@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ...workflow.schedule_runtime import publication_report
+
 import logging
 from pathlib import Path
 
@@ -289,6 +291,7 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
     return "\n".join(lines)
 
 
+@publication_report
 def write(review: MacroReview, cfg: MacroConfig) -> Path | None:
     if not cfg.output_dir:
         log.info("macro report: output_dir unset — skipped")

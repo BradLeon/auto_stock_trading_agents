@@ -284,18 +284,29 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
             if not action or plan_only:
                 continue
 
+            from ..workflow import schedule_runtime as schedule_authority
+            context = schedule_authority.released_earnings_context(sym, label)
+            claim_scope = {"kind": "entity", "id": sym.upper()}
+
             if action == "promote":
-                if store.promote_score_run(sym, label):
+                promoted = schedule_authority.finalize_metadata("fundamental-event", claim_scope,
+                    context, lambda: store.promote_score_run(sym, label), reason="finalize existing v1 score")
+                if promoted:
                     scored.append(sym)      # now actionable -> let the Chief see it
                 continue
 
             # Pin the resolved label so the Chief reads the same key tomorrow.
-            earnings_calendar.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
-            run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, chief=False)
             # Stamp which window scored it and how far behind the print we were, so the
             # cost of fixed windows is measurable rather than assumed.
             latency = round((now - pr.at).total_seconds() / 3600, 2) if pr.at else None
-            store.stamp_score_run(sym, label, window=window, latency_hours=latency)
+            def score_work():
+                earnings_calendar.resolve_and_cache(sym, pr, config_label=cfg.fiscal_label, store=store)
+                with schedule_authority.wake(context):
+                    run_pead(sym, "score", dry_run=dry_run, use_llm=use_llm, chief=False)
+                store.stamp_score_run(sym, label, window=window, latency_hours=latency)
+
+            schedule_authority.execute("fundamental-event", claim_scope, context, score_work,
+                                       actor=f"score-window-{window}-{now.isoformat()}")
             # Only a FINAL score reaches the Chief. A transcript-less v1 is withheld
             # while we retry, so the Chief responds once, to the best evidence —
             # this is what keeps score_consumption's "act once per earnings" intact
@@ -332,7 +343,7 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     if scored and chief and not plan_only and sched.get("chief_after_score", True):
         try:
             run_chief(dry_run=dry_run, channel=get_config().app.channel.kind,
-                      source="pead-chief")
+                      source="pead-chief", fundamental_mode="event")
         except Exception as exc:  # noqa: BLE001 - chief must not break the window
             log.warning("PEAD-score[%s] chief run failed: %s", window, exc)
     elif scored:
@@ -568,38 +579,41 @@ def _event_triggers(*, use_llm: bool = True, pead: bool = True,
         if ev.date != today:
             continue
         log.info("event trigger: %s (%s) -> %s", ev.label, ev.kind, ev.triggers)
-        for trig in ev.triggers:
-            try:
-                if trig == "macro":
-                    if not macro_sector:
-                        log.info("event trigger %s -> macro paused", ev.label)
+        from ..workflow.schedule_runtime import wake, config_event_context
+
+        with wake(config_event_context(ev)):
+            for trig in ev.triggers:
+                try:
+                    if trig == "macro":
+                        if not macro_sector:
+                            log.info("event trigger %s -> macro paused", ev.label)
+                            continue
+                        from .cli import run_macro_review
+                        run_macro_review(load_pead_global()["macro_review"]["name"], use_llm=use_llm)
+                    elif trig == "sector":
+                        if not macro_sector:
+                            log.info("event trigger %s -> sector paused", ev.label)
+                            continue
+                        from .cli import run_sector_review
+                        for name in load_pead_global()["sector_review"]["sectors"]:
+                            run_sector_review(name, use_llm=use_llm)
+                    elif trig.startswith("sector:"):
+                        if not macro_sector:
+                            log.info("event trigger %s -> %s paused", ev.label, trig)
+                            continue
+                        from .cli import run_sector_review
+                        run_sector_review(trig.split(":", 1)[1], use_llm=use_llm)
+                    elif trig.startswith("pead:"):
+                        if not pead:
+                            log.info("event trigger %s -> %s paused", ev.label, trig)
+                            continue
+                        run_pead_monitor(trig.split(":", 1)[1], use_llm=use_llm)
+                    else:
+                        log.warning("unknown event trigger %r on %s", trig, ev.label)
                         continue
-                    from .cli import run_macro_review
-                    run_macro_review(load_pead_global()["macro_review"]["name"], use_llm=use_llm)
-                elif trig == "sector":
-                    if not macro_sector:
-                        log.info("event trigger %s -> sector paused", ev.label)
-                        continue
-                    from .cli import run_sector_review
-                    for name in load_pead_global()["sector_review"]["sectors"]:
-                        run_sector_review(name, use_llm=use_llm)
-                elif trig.startswith("sector:"):
-                    if not macro_sector:
-                        log.info("event trigger %s -> %s paused", ev.label, trig)
-                        continue
-                    from .cli import run_sector_review
-                    run_sector_review(trig.split(":", 1)[1], use_llm=use_llm)
-                elif trig.startswith("pead:"):
-                    if not pead:
-                        log.info("event trigger %s -> %s paused", ev.label, trig)
-                        continue
-                    run_pead_monitor(trig.split(":", 1)[1], use_llm=use_llm)
-                else:
-                    log.warning("unknown event trigger %r on %s", trig, ev.label)
-                    continue
-                fired.append(f"{ev.label}->{trig}")
-            except Exception as exc:  # noqa: BLE001 - one trigger must not break the job
-                log.warning("event trigger %s (%s) failed: %s", ev.label, trig, exc)
+                    fired.append(f"{ev.label}->{trig}")
+                except Exception as exc:  # noqa: BLE001 - one trigger must not break the job
+                    log.warning("event trigger %s (%s) failed: %s", ev.label, trig, exc)
     return fired
 
 
@@ -834,7 +848,13 @@ def _attach_job_logging(scheduler) -> None:
     )
 
     def _on_event(event) -> None:
+        from ..workflow.schedule_runtime import observe
+
+        if event.scheduled_run_time:
+            observe("wake_seen", event.job_id, {"planned": event.scheduled_run_time.astimezone(timezone.utc).isoformat(),
+                                              "code": event.code})
         if event.code == EVENT_JOB_MISSED:
+            observe("wake_misfire", event.job_id, {"scheduled_for": event.scheduled_run_time.isoformat()})
             log.error("job %s MISSED its %s run — machine asleep past the grace window? "
                       "(nothing ran)", event.job_id, event.scheduled_run_time)
             return
@@ -879,8 +899,19 @@ def _validate_factset_schedule(cfg, *, semantic: bool = False) -> None:
         raise ValueError("factset_refresh_at must precede weekly_review_at")
 
 
+def _add_planned_job(scheduler, function, trigger, *, id, **kwargs):
+    """Keep real callbacks on their existing worker; the executor binds planned time."""
+    scheduler.add_job(function, trigger, id=id, **kwargs)
+
+
 def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = None,
           use_llm: bool = True, phase_e: bool = False) -> None:
+    from ..execution.broker_write_guard import startup
+
+    startup(caller="ats.runtime.scheduler.start")
+    from ..workflow.schedule_runtime import reload_authority
+
+    reload_authority()
     from ..config import load_pead_global
 
     if phase_e:
@@ -903,7 +934,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
     if cfg.jobs.factset_weekly_ingest:
         _validate_factset_schedule(cfg, semantic=factset_semantic)
 
-    from apscheduler.executors.pool import ThreadPoolExecutor
+    from ..workflow.schedule_executor import PlannedThreadPoolExecutor as ThreadPoolExecutor
     from apscheduler.schedulers.blocking import BlockingScheduler
     from apscheduler.triggers.cron import CronTrigger
 
@@ -924,7 +955,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
                                   executors={"default": ThreadPoolExecutor(1)})
     _attach_job_logging(scheduler)
     if any(cfg.daily_stages.model_dump().values()):
-        scheduler.add_job(
+        _add_planned_job(scheduler,
             lambda: _daily(dry_run=dry_run, use_llm=use_llm),
             CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=cfg.timezone),
             id="daily_cycle", misfire_grace_time=grace,
@@ -954,7 +985,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             coalesce=True, max_instances=1,
         )
     if cfg.jobs.weekly_review:
-        scheduler.add_job(
+        _add_planned_job(scheduler,
             lambda: _weekly_review(),
             CronTrigger(day_of_week="sat", hour=w_hour, minute=w_minute,
                         timezone=cfg.weekly_review_tz),
@@ -977,7 +1008,7 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
         except ValueError:
             log.warning("bad score_windows[%s]=%r; skipping", name, hhmm)
             continue
-        scheduler.add_job(
+        _add_planned_job(scheduler,
             # `name=name` binds the loop variable per job — a bare closure would give
             # every job the last window's name.
             lambda name=name: pead_score_window(
@@ -1033,6 +1064,9 @@ def _start_phase_e(*, run_once: bool = False) -> None:
         context = TriggerContext(kind="schedule", workflow_id=workflow_id,
                                  schedule_id=workflow_id,
                                  scheduled_for=planned.isoformat())
+        from ..workflow.schedule_runtime import observe
+
+        observe("wake", workflow_id, {"owner": "dispatcher", "trigger": context.model_dump(mode="json")})
         try:
             result = run_owned_workflow(
                 workflow_id, scope=entry["scope"], trigger=context,
@@ -1051,11 +1085,12 @@ def _start_phase_e(*, run_once: bool = False) -> None:
         return
 
     from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
-    from apscheduler.executors.pool import ThreadPoolExecutor
+    from ..workflow.schedule_executor import PlannedThreadPoolExecutor as ThreadPoolExecutor
     from apscheduler.schedulers.blocking import BlockingScheduler
     from apscheduler.triggers.cron import CronTrigger
 
     scheduler = BlockingScheduler(timezone="UTC", executors={"default": ThreadPoolExecutor(1)})
+    _attach_job_logging(scheduler)
     job_to_workflow = {}
 
     def on_wake(event) -> None:
@@ -1066,9 +1101,12 @@ def _start_phase_e(*, run_once: bool = False) -> None:
         if planned is None:
             return
         if event.code == EVENT_JOB_MISSED:
+            from ..workflow.schedule_runtime import observe
+
+            observe("wake_misfire", workflow_id, {"owner": "dispatcher", "scheduled_for": planned.isoformat()})
             log.warning("Phase E wake %s misfired at %s; Trigger Ledger will catch up or skip",
                         workflow_id, planned)
-        dispatch_tick(workflow_id, entries[workflow_id], planned)
+            dispatch_tick(workflow_id, entries[workflow_id], planned)
 
     scheduler.add_listener(on_wake, EVENT_JOB_EXECUTED | EVENT_JOB_MISSED)
     # The in-memory cron engine forgets ticks across process restarts. Enumerate only
@@ -1101,7 +1139,7 @@ def _start_phase_e(*, run_once: bool = False) -> None:
             }
             ticks.append((context, frozen_request))
             planned = trigger.get_next_fire_time(planned, planned)
-        decisions = reconcile_schedule(workflow_store_for_owner(workflow_id),
+        decisions = reconcile_schedule(workflow_store_for_owner(workflow_id, scope=entry["scope"]),
                                        expected=ticks, now=startup_now, policy=policy)
         for decision in decisions:
             if decision["status"] == "planned":
@@ -1109,7 +1147,12 @@ def _start_phase_e(*, run_once: bool = False) -> None:
                 item = next((ctx for ctx, _ in ticks if trigger_key(ctx) == key), None)
                 if item is not None:
                     dispatch_tick(workflow_id, entry, datetime.fromisoformat(item.scheduled_for))
-        scheduler.add_job(lambda: None, trigger, id=job_id, coalesce=False,
+        def run_tick(workflow_id=workflow_id, entry=entry):
+            from ..workflow.schedule_runtime import _WAKE
+
+            dispatch_tick(workflow_id, entry, datetime.fromisoformat(_WAKE.get().scheduled_for))
+
+        scheduler.add_job(run_tick, trigger, id=job_id, coalesce=False,
                           max_instances=1, misfire_grace_time=None)
 
     from ..config import REPO_ROOT
@@ -1121,61 +1164,32 @@ def _start_phase_e(*, run_once: bool = False) -> None:
         encoding="utf-8")) or {}
     refresh_schedule = (calendar_cfg.get("refresh", {}) or {}).get("schedule", {}) or {}
     if refresh_schedule.get("enabled", False):
-        def refresh_calendar() -> None:
-            from ..data.calendar_refresh import enqueue_schedule_calendar_refresh
-            from ..data.persistent_queue import PersistentIngestionQueue
+        def consume_calendar() -> None:
+            # Source publication/queue leases retain their existing owner. This
+            # research daemon consumes published versions without refreshing them.
             from ..workflow.ownership import (dispatch_planned_calendar_events,
-                                               dispatch_released_calendar_events,
-                                               reconcile_calendar_trigger_versions,
-                                               record_due_calendar_material_waits)
+                dispatch_released_calendar_events, reconcile_calendar_trigger_versions,
+                record_due_calendar_material_waits)
 
-            now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-            queue = PersistentIngestionQueue()
-            submitted = enqueue_schedule_calendar_refresh(
-                trigger_kind="scheduled", trigger_ref=f"calendar-tick:{now.isoformat()}",
-                now=now)
-            refreshed = []
-            for task in submitted:
-                worker_result = queue.run_one(task_id=task["task_id"])
-                current = queue.get(task["task_id"]) or {}
-                payload = (worker_result or {}).get("stdout", {})
-                status = (worker_result or {}).get("status") or current.get("status", "queued")
-                refreshed.extend(payload.get("sources", []))
-                if status not in {"succeeded", "no_change", "partial"}:
-                    refreshed.append({"source_id": task["source_id"], "status": status})
-            result = {"sources": refreshed, "refresh_owner": "persistent_queue"}
-            log.info("schedule calendar refresh -> %s", result)
-            try:
-                stale = reconcile_calendar_trigger_versions()
-                log.info("calendar event-version reconciliation -> %s", stale)
-            except Exception:
-                log.exception("calendar event-version reconciliation failed")
-            try:
-                planned = dispatch_planned_calendar_events()
-                log.info("planned calendar preparation -> %s", planned)
-            except Exception:
-                log.exception("planned calendar preparation dispatch failed")
-            try:
-                waiting = record_due_calendar_material_waits()
-                log.info("calendar releases awaiting admitted materials -> %s", waiting)
-            except Exception:
-                log.exception("calendar missing-material wait recording failed")
-            try:
-                dispatched = dispatch_released_calendar_events()
-                log.info("released calendar events -> %s", dispatched)
-            except Exception:
-                log.exception("released calendar event dispatch failed")
+            for operation in (reconcile_calendar_trigger_versions,
+                              dispatch_planned_calendar_events,
+                              record_due_calendar_material_waits,
+                              dispatch_released_calendar_events):
+                try:
+                    operation()
+                except Exception:
+                    log.exception("published calendar consumption failed: %s", operation.__name__)
 
         cron = CronTrigger(day_of_week="*", hour=refresh_schedule.get("hour", 6),
                            minute=int(refresh_schedule.get("minute", 10)),
                            timezone=refresh_schedule.get("timezone", "UTC"))
-        scheduler.add_job(refresh_calendar, cron, id="calendar_refresh", coalesce=True,
+        scheduler.add_job(consume_calendar, cron, id="phase_e:calendar-consume", coalesce=True,
                           max_instances=1, misfire_grace_time=None)
 
-    log.info("Phase E scheduler started: workflows=%s; calendar_refresh=%s",
+    log.info("Phase E scheduler started: workflows=%s; calendar_consume=%s",
              ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)))
     print(f"⏰ Phase E dispatcher workflows: {', '.join(entries) or 'none'}; "
-          f"calendar refresh: {'enabled' if refresh_schedule.get('enabled', False) else 'disabled'}")
+          f"published calendar consume: {'enabled' if refresh_schedule.get('enabled', False) else 'disabled'}")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

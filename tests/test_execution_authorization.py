@@ -26,7 +26,7 @@ from ats.execution.route_registry import install_route
 from ats.graph.chief_state import ChiefDecisionState
 from ats.memory.store import TradingMemory
 from ats.runtime.cli import run_decision_graph
-from ats.schemas.decision import TradeDecision
+from ats.schemas.decision import BossApproval, TradeDecision
 from ats.schemas.memory import TradeLogEntry
 
 NOW = datetime.now(timezone.utc)
@@ -250,23 +250,28 @@ def test_order_ref_format_fits_ibkr_field():
 # --- 7.8 retry idempotency ---------------------------------------------------------- #
 
 def test_retry_with_uncertain_outcome_does_not_resubmit(broker):
+    from ats.graph import chief
     from ats.memory import get_store
     from ats.trader import execute as texec
+    from ats.execution.authorization import bind_to_active_route
 
-    store = get_store()
-    # First attempt recorded as `submitted` — its outcome is uncertain.
-    store.save_trades([TradeLogEntry(order_id="9", cycle_id="c1", symbol="NVDA",
-                                     action="buy", qty=10, status="submitted",
-                                     submitted_at=NOW, revision_no=1, order_seq=0)],
-                      cycle_id="c1", source="manual")
-    d = TradeDecision(symbol="NVDA", action="buy", qty=10, rationale="r")
-    # place_orders trusts the graph-level gate; the unit checks only the
-    # uncertain-outcome branch, so any non-empty authorization payload works.
-    auth = {"cycle_id": "c1"}
-
-    entries, fills = texec.place_orders([(d, 10.0)], "c1", revision_no=1,
-                                        authorization=auth)
-    assert broker.placed == []                       # no second logical order
-    assert fills == []
-    assert entries[0].status == "submitted"          # stays for reconciliation
-    assert "reconciliation" in entries[0].error
+    state = ChiefDecisionState(cycle_id="retry-valid", as_of=datetime.now(timezone.utc),
+                               decide=False, dry_run=False,
+                               decisions=[TradeDecision(symbol="NVDA", action="buy", qty=10)])
+    state = state.model_copy(update=chief.risk_gate(state))
+    state = state.model_copy(update=chief.persist_decision(state))
+    approval = BossApproval(status="approved", reviewer="test", reviewed_at=datetime.now(timezone.utc))
+    chief._record_approval(state, approval)
+    repo = DecisionAuditRepository(get_store())
+    auth = bind_to_active_route(build_authorization(repo, state.cycle_id)).model_dump()
+    d = state.decisions[0]
+    first, _ = texec.place_orders([(d, d.qty)], state.cycle_id,
+                                  revision_no=state.revision_no, authorization=auth)
+    assert len(broker.placed) == 1
+    # Actual simulated acceptance occurred; locally its completion has not arrived.
+    first[0].status = "submitted"
+    get_store().save_trades(first, cycle_id=state.cycle_id, source="test")
+    entries, fills = texec.place_orders([(d, d.qty)], state.cycle_id,
+                                        revision_no=state.revision_no, authorization=auth)
+    assert len(broker.placed) == 1 and fills == []
+    assert entries[0].status == "submitted" and "reconciliation" in entries[0].error

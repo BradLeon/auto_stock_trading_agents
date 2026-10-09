@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..config import REPO_ROOT
+from .route_arbitration import arbitrated
 
 DEFAULT_PATH = "var/phase_f_routes.sqlite"
 
@@ -89,6 +91,24 @@ CREATE TABLE IF NOT EXISTS trade_route_issuance (
     counter INTEGER NOT NULL DEFAULT 0,
     last_at TEXT NOT NULL DEFAULT '',
     last_authorization_id TEXT NOT NULL DEFAULT ''
+);
+-- Arbitration receipts, not a second decision/order business ledger. These
+-- survive a crash between broker acceptance and the ordinary ledger write.
+CREATE TABLE IF NOT EXISTS trade_submit_receipts (
+    intent_id TEXT PRIMARY KEY,
+    route_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    account TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    pid INTEGER NOT NULL,
+    attempted_at TEXT NOT NULL,
+    order_ref TEXT NOT NULL,
+    cycle_id TEXT NOT NULL,
+    revision_no INTEGER NOT NULL,
+    sequence INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'unknown',
+    broker_order_id TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -147,15 +167,19 @@ class RouteState:
                 and self.generation == other.generation)
 
 
-def _connect(path: str | Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(path: str | Path):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target, timeout=30.0, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.executescript(_SCHEMA)
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.executescript(_SCHEMA)
+        yield conn
+    finally:
+        conn.close()
 
 
 def read_state(path: str | Path | None = None) -> RouteState:
@@ -165,9 +189,17 @@ def read_state(path: str | Path | None = None) -> RouteState:
     "route A", and defaulting would make a fresh install silently writable.
     """
     target = path or default_registry_path()
-    with _connect(target) as conn:
-        row = conn.execute(
-            "SELECT * FROM trade_route_state WHERE singleton=1").fetchone()
+    if not Path(target).is_file():
+        raise RouteRegistryError(f"no active trade route: authority file is absent in {target}")
+    try:
+        with closing(sqlite3.connect(Path(target).resolve().as_uri() + "?mode=ro",
+                                     uri=True, timeout=5.0)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            row = conn.execute(
+                "SELECT * FROM trade_route_state WHERE singleton=1").fetchone()
+    except (OSError, sqlite3.Error) as exc:
+        raise RouteRegistryError(f"route authority is unreadable: {type(exc).__name__}") from exc
     if row is None:
         raise RouteRegistryError(
             f"no active trade route is registered in {target}; a route must be "
@@ -187,6 +219,7 @@ def try_read_state(path: str | Path | None = None) -> RouteState | None:
         return None
 
 
+@arbitrated
 def install_route(route_id: str, *, generation: int = 1, environment: str = "",
                   account: str = "", actor: str = "", reason: str = "",
                   path: str | Path | None = None) -> RouteState:
@@ -228,6 +261,7 @@ def install_route(route_id: str, *, generation: int = 1, environment: str = "",
     return read_state(target)
 
 
+@arbitrated
 def switch_route(expected_generation: int, route_id: str, *, environment: str = "",
                  account: str = "", actor: str = "", reason: str = "",
                  path: str | Path | None = None) -> RouteState:
@@ -361,6 +395,7 @@ def issuance_counter(path: str | Path | None = None) -> int:
     return int(row["counter"]) if row is not None else 0
 
 
+@arbitrated
 def record_issuance(authorization_id: str, path: str | Path | None = None) -> int:
     """Count one authorization issuance and return the new counter.
 
@@ -398,8 +433,10 @@ def record_issuance(authorization_id: str, path: str | Path | None = None) -> in
     return int(counter)
 
 
+@arbitrated
 def freeze_submissions(*, actor: str = "", reason: str = "",
-                       path: str | Path | None = None) -> FreezeState:
+                       path: str | Path | None = None,
+                       expected_generation: int | None = None) -> FreezeState:
     """Close submissions and return the freeze state (step 1 of the protocol).
 
     Records the issuance counter at the moment of freezing, which is what makes
@@ -416,6 +453,10 @@ def freeze_submissions(*, actor: str = "", reason: str = "",
                 if state is None:
                     raise RouteRegistryError(
                         "no active trade route is registered; nothing to freeze")
+                if expected_generation is not None and int(state["generation"]) != expected_generation:
+                    raise RouteGenerationConflict(
+                        f"route moved before freeze: expected {expected_generation}, "
+                        f"found {state['generation']}")
                 existing = conn.execute(
                     "SELECT * FROM trade_route_freeze WHERE singleton=1").fetchone()
                 if existing is not None and existing["frozen"]:
@@ -453,6 +494,7 @@ def freeze_submissions(*, actor: str = "", reason: str = "",
         frozen_by=actor, freeze_reason=reason)
 
 
+@arbitrated
 def open_submissions(switch_token: str, *, path: str | Path | None = None) -> FreezeState:
     """Reopen submissions for the switch identified by `switch_token` (step 4).
 
@@ -483,6 +525,7 @@ def open_submissions(switch_token: str, *, path: str | Path | None = None) -> Fr
     return FreezeState(frozen=False)
 
 
+@arbitrated
 def abort_freeze(switch_token: str, *, actor: str = "", reason: str = "",
                  path: str | Path | None = None) -> FreezeState:
     """Void the attempt and reopen under the SAME generation (steps 2/3 failure).
@@ -498,3 +541,51 @@ def abort_freeze(switch_token: str, *, actor: str = "", reason: str = "",
             "UPDATE trade_route_freeze SET frozen_by=?, freeze_reason=? "
             "WHERE singleton=1", (actor, f"aborted: {reason}" if reason else "aborted"))
     return state
+
+
+def reserve_submission(intent_id: str, payload_hash: str, state: RouteState,
+                       path: str | Path | None = None, *, order_ref: str,
+                       cycle_id: str, revision_no: int, sequence: int) -> None:
+    """Commit an unknown receipt before sending; identity survives generations."""
+    from .broker_write_guard import refuse
+
+    with _connect(path or default_registry_path()) as conn:
+        current = conn.execute("SELECT * FROM trade_route_state WHERE singleton=1").fetchone()
+        frozen = conn.execute("SELECT frozen FROM trade_route_freeze WHERE singleton=1").fetchone()
+        if current is None or tuple(current[key] for key in (
+                "route_id", "generation", "account", "environment")) != (
+                state.route_id, state.generation, state.account, state.environment) \
+                or (frozen and frozen["frozen"]):
+            raise RouteRegistryError("route authority changed before reserving the broker write")
+        try:
+            conn.execute(
+                "INSERT INTO trade_submit_receipts"
+                " (intent_id, route_id, generation, account, environment, payload_hash,"
+                " pid, attempted_at, order_ref, cycle_id, revision_no, sequence)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (intent_id, state.route_id, state.generation, state.account,
+                 state.environment, payload_hash, os.getpid(), _now(),
+                 order_ref, cycle_id, revision_no, sequence))
+        except sqlite3.IntegrityError:
+            existing = conn.execute("SELECT * FROM trade_submit_receipts WHERE intent_id=?",
+                                    (intent_id,)).fetchone()
+            refuse("duplicate_order_intent", operation="placeOrder",
+                   caller="IBKRBroker._submit", detail=(
+                       f"intent={intent_id} prior_pid={existing['pid']} "
+                       f"prior_generation={existing['generation']} "
+                       f"prior_status={existing['status']} "
+                       f"payload_matches={existing['payload_hash'] == payload_hash}"))
+
+
+def record_submission_result(intent_id: str, status: str, order_id: str,
+                             path: str | Path | None = None) -> None:
+    """Only broker-observed terminal states release a drain blocker."""
+    status = status if status in {"filled", "cancelled", "rejected", "partial", "submitted"} else "unknown"
+    with _connect(path or default_registry_path()) as conn:
+        conn.execute("UPDATE trade_submit_receipts SET status=?, broker_order_id=? WHERE intent_id=?",
+                     (status, order_id, intent_id))
+
+
+def submission_receipts(path: str | Path | None = None) -> list[dict[str, Any]]:
+    with _connect(path or default_registry_path()) as conn:
+        return [dict(row) for row in conn.execute("SELECT * FROM trade_submit_receipts")]

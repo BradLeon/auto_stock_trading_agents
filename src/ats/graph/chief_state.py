@@ -8,7 +8,7 @@ interrupt are enforced uniformly. thread_id == cycle_id (`chief-*` / `trader-*`)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,9 @@ class ChiefDecisionState(BaseModel):
     auto_approve: bool = False          # --yes; must NEVER become a default upstream
     decide: bool = True                 # False: skip the Chief, take seed_decisions as-is
     execute: bool = True                # False (--no-execute): stop after persist_decision
+    fundamental_mode: Literal["routine", "event"] = "routine"
+    decision_profile: str = "ai_hardware"
+    decision_requirements: dict = Field(default_factory=dict)
     seed_decisions: list[TradeDecision] = Field(default_factory=list)
 
     # assemble_context
@@ -48,6 +51,8 @@ class ChiefDecisionState(BaseModel):
     qty_by_symbol: dict[str, float] = Field(default_factory=dict)
     risk_notes: list[str] = Field(default_factory=list)
     approval_summary: str = ""          # banner + risk block + order lines (the card body)
+    normalization_errors: list[str] = Field(default_factory=list)
+    execution_price_audit: list[dict] = Field(default_factory=list)
 
     # decision-audit loop (Phase B, §5.4). `decisions` stays this round's FULL
     # proposal; `approved_decisions` is what the review let through and what the

@@ -1,0 +1,12 @@
+{
+  "src/ats/graph/chief.py": {
+    "before_has_place_orders_call": true,
+    "before_sha256": "e16aa4d8fcfcc9b647812e756b5dc4bccff3c181977ce800630e95b2c682c170",
+    "current_sha256": "a9372f7dcf71c1360900931349cf19445c28569284dfc657a7e69b9ab646ae70"
+  },
+  "src/ats/execution/shadow_execution.py": {
+    "before_has_place_orders_call": true,
+    "before_sha256": "681576ee466d8319465a46c7195ac45270c14d6353d691530a82ea368c0f22ee",
+    "current_sha256": "681576ee466d8319465a46c7195ac45270c14d6353d691530a82ea368c0f22ee"
+  }
+}

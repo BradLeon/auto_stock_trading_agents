@@ -32,6 +32,7 @@ def _declare(manifest_db, batch_id="b-research", batch_class=bm.RESEARCH_READ,
              **kw):
     """Declare a batch through the public API, not the CLI."""
     defaults = dict(
+        shadow_report_id="unit-report-adapter",
         owner="ats.data.products", old_route="legacy", new_route="target",
         observation_window="2 trading days", success_criteria="no divergence",
         stop_conditions="any unaccepted divergence",
@@ -186,6 +187,8 @@ def test_dry_run_exits_zero_when_everything_is_switchable(capsys, wired,
              old_route="", new_route="", direct_verification=True,
              fallback_route="", fallback_proof="", fallback_retired="",
              fallback_available="", fallback_drill_ref="")
+    # Explicit report adapter for this CLI serialization test.
+    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (True, []))
     _stub_eligible(monkeypatch)
     code, _ = _run(capsys, _batch_argv("dry-run", manifest_db, cutover_db))
     assert code == 0
@@ -271,6 +274,8 @@ def test_show_prints_the_batch_and_its_dry_run(capsys, wired):
 def test_show_exits_zero_for_a_switchable_batch(capsys, wired, monkeypatch):
     cutover_db, manifest_db = wired
     _declare(manifest_db, "b-one")
+    # Explicit report adapter for this CLI serialization test.
+    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (True, []))
     _stub_eligible(monkeypatch)
     code, _ = _run(capsys, _batch_argv("show", manifest_db, cutover_db,
                                        "--batch-id", "b-one"))

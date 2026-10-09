@@ -1,0 +1,28 @@
+{
+  "reports": [
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[routine]",
+      "report_id": "independent",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o0/iso/report.sqlite",
+      "status": "unsigned"
+    },
+    {
+      "label": "test_actual_full_capture_and_offline_process_replay[event]",
+      "report_id": "independent",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_actual_full_capture_and_o1/iso/report.sqlite",
+      "status": "unsigned"
+    },
+    {
+      "label": "test_research_only_capture_missing_environment_and_legacy_unavailable[True]",
+      "report_id": "research",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_research_only_capture_mis0/iso/report.sqlite",
+      "status": "unsigned"
+    },
+    {
+      "label": "test_research_only_capture_missing_environment_and_legacy_unavailable[False]",
+      "report_id": "research",
+      "report_db": "/Users/liuchao/Code/trading/auto_stock_trading_agents/var/isolated/phase_f_joint_trade_20261009_independent_verified/test_research_only_capture_mis1/iso/report.sqlite",
+      "status": "unsigned"
+    }
+  ]
+}

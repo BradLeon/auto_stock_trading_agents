@@ -52,6 +52,7 @@ def _report_ok(batch):
 
 def _batch(batch_id="b-research", batch_class=bm.RESEARCH_READ, **kw):
     defaults = dict(
+        shadow_report_id="unit-report-adapter",
         owner="ats.data.products", old_route="legacy", new_route="target",
         observation_window="2 trading days", success_criteria="无差异或差异已接受",
         stop_conditions="任一必需面出现未接受差异",
@@ -288,7 +289,7 @@ def test_a_citable_report_passes_the_check(manifest):
 def test_a_missing_report_is_a_failed_check_not_a_skipped_one(manifest):
     """A batch citing nothing has no evidence behind it; that is a fail, not an
     absence of one."""
-    batch = bm.declare_batch(_batch(), path=manifest)
+    batch = bm.declare_batch(_batch(shadow_report_id=""), path=manifest)
     result = bm.dry_run_batch(batch, qualification_reader=_qualified(),
                               report_checker=_report_ok, path=manifest)
     assert result.checks["shadow_report_citable"] is False
@@ -301,6 +302,7 @@ def test_a_report_error_is_reported_rather_than_raised(manifest):
 
     batch = bm.declare_batch(_batch(shadow_report_id="r-missing"), path=manifest)
     result = bm.dry_run_batch(batch, qualification_reader=_qualified(),
+                              report_checker=lambda b: shadow_reports.check_batch_report(b, path=manifest),
                               path=manifest)
     assert result.outcome == bm.BLOCKED
     assert result.reasons

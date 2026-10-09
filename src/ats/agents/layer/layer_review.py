@@ -22,7 +22,10 @@ and degrades conservatively (Phase D: `agent/layer-analyst` 失败不降级).
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
+from ...workflow.schedule_runtime import scheduled_cli
 from datetime import datetime, timezone
 
 from ...schemas.sector import (CandidateClaim, LAYER_STATUSES, LayerNameCall,
@@ -44,7 +47,7 @@ STATUS_CN = {"expanding": "扩张", "steady": "平稳", "contracting": "收缩",
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = None,
@@ -136,6 +139,8 @@ def _basket_block(layer, basket) -> str:
     return "\n".join(head)
 
 
+@scheduled_cli("layer-review", kind="layer", argument=lambda args: args["layer"].key,
+               restore=lambda result: (LayerVerdict.model_validate(result[0]) if result[0] else None, result[1]))
 def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = None,
         snapshot_block: str = "", use_llm: bool = True,
         assessments=None, store=None, workflow_run_id: str = "",

@@ -10,6 +10,8 @@
 """
 
 import re
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -23,7 +25,16 @@ COVERAGE = REPO_ROOT / "config" / "data" / "target_dataflow_coverage.yaml"
 
 @pytest.fixture(scope="module")
 def text() -> str:
-    return PROGRESS.read_text(encoding="utf-8")
+    return PROGRESS.read_text(encoding="utf-8").split("\n## 历史记录", 1)[0]
+
+
+def _readonly_rows(path: Path, query: str) -> list[sqlite3.Row]:
+    """Document checks must not initialise or append to production state."""
+    assert path.is_file(), f"只读状态文件缺失：{path}"
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=ON")
+        return list(conn.execute(query))
 
 
 def _table_rows(text: str, header_cell: str) -> list[list[str]]:
@@ -92,22 +103,23 @@ def test_every_batch_outcome_in_the_record_matches_a_live_dry_run(text):
     """
     from ats.workflow import batch_manifest as bm
 
-    declared = bm.list_batches()
+    declared = _readonly_rows(Path(bm.default_batch_db_path()),
+                              "SELECT batch_id FROM cutover_batches")
     assert declared, (
         "真实清单库为空。若确实要清空，先更新 "
         "docs/validation/PHASE_F_GROUP_PROGRESS.md 的逐批结论表")
 
     recorded = set(re.findall(r"`(batch-[a-z-]+)`", text))
     for batch in declared:
-        assert f"`{batch.batch_id}`" in text, (
-            f"{batch.batch_id} 在清单里但不在记录文档中；"
+        assert f"`{batch['batch_id']}`" in text, (
+            f"{batch['batch_id']} 在清单里但不在记录文档中；"
             "新增批次必须同步登记结论")
 
     # The reverse direction matters too: a batch retired from the manifest but
     # still described in the document is a claim about something that no longer
     # exists.
     for batch_id in recorded:
-        assert batch_id in {b.batch_id for b in declared}, (
+        assert batch_id in {b["batch_id"] for b in declared}, (
             f"记录文档提到 {batch_id}，但清单里没有它；"
             "批次撤销后必须从文档移除结论")
 
@@ -121,11 +133,16 @@ def test_the_record_lists_every_boundary_with_its_current_route(text):
     """
     from ats.workflow import cutover as plane
 
-    for boundary, state in plane.all_boundaries().items():
+    recorded = {row[0].strip("` "): row[1] for row in _table_rows(text, "当前路由")}
+    rows = _readonly_rows(Path(plane.default_cutover_db_path()),
+                          "SELECT boundary,route FROM cutover_boundary_state")
+    assert {row["boundary"] for row in rows} == set(plane.SIX_BOUNDARIES)
+    for row in rows:
+        boundary, route = row["boundary"], row["route"]
         assert f"`{boundary}`" in text, (
             f"边界 {boundary} 未出现在记录文档的路由表里；六条边界必须齐全，"
             "漏一条会让读者以为其余也没切")
-        assert state.route in {"legacy", "target", "disabled"}, state.route
+        assert recorded.get(boundary) == route, (boundary, recorded.get(boundary), route)
 
 
 def test_the_record_states_the_fingerprint_surface_count(text):
@@ -173,8 +190,8 @@ def test_the_record_distinguishes_blocking_from_deferred(text):
     document exists to prevent.
     """
     assert "### 待处理项 · 阻塞后续任务" in text
-    assert "### 待处理项 · 不阻塞，待第 9 组之后统一 fix" in text
-    assert "## 3. 统一 fix 的入口" in text
+    assert "### 待处理项 · 不阻塞，按依赖推进" in text
+    assert "## 当前修复入口" in text
 
     # The ordering constraint is the part that cannot be recovered by reasoning:
     # two of the fixes touch the fingerprint surface.

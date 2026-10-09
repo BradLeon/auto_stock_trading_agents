@@ -17,7 +17,10 @@ CHAIN = {"revision_no": 1, "decision_hash": "a" * 32,
 
 
 @pytest.fixture
-def store():
+def store(monkeypatch):
+    # Orchestration tests do not need a live performance feed. The ledger E2E
+    # test exercises that step with a synthetic portfolio and broker instead.
+    monkeypatch.setattr("ats.trader.performance.record_snapshot", lambda **kwargs: None)
     return get_store()
 
 
@@ -123,7 +126,7 @@ def test_clerk_run_leaves_domain_facts_byte_identical(store):
 def test_broker_unavailable_registers_missed_window_gaps(store, monkeypatch):
     _seed_system_order(store)
     # a fill from an earlier, never-reconciled session sits in the ledger
-    old = (NOW - timedelta(days=10)).isoformat()
+    old = "2026-09-13T00:00:00+00:00"
     store.conn.execute(
         "INSERT INTO fills (exec_id, symbol, side, shares, price, time) "
         "VALUES ('old', 'AAPL', 'BOT', 5, 100, ?)", (old,))
@@ -133,6 +136,8 @@ def test_broker_unavailable_registers_missed_window_gaps(store, monkeypatch):
         raise RuntimeError("broker unavailable: test")
 
     import ats.trader.execute as texec
+    import ats.trader.performance as performance
+    monkeypatch.setattr(performance, "IBKRBroker", _no_broker)
     monkeypatch.setattr(texec, "IBKRBroker", _no_broker)
     out = clerk.clerk_run(store=store, broker=None,
                           window_start="2026-09-23", window_end="2026-09-23")

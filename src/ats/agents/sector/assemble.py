@@ -7,6 +7,8 @@ insights/high-triage events, and the static industry notes into one prompt body.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 import time
 from dataclasses import dataclass, field
@@ -266,7 +268,7 @@ def _insights_and_events(sc: SectorContext, symbols: list[str], pead_syms: list[
     lookback = int(sc.cfg.review["events_lookback_days"])
     min_triage = float(sc.cfg.review["events_min_triage"])
     per_ticker = int(sc.cfg.review["insights_per_ticker"])
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback)).isoformat()
+    cutoff = (evaluation_now(timezone.utc) - timedelta(days=lookback)).isoformat()
 
     for sym in symbols:
         for r in store.recent_insights(sym, limit=per_ticker):

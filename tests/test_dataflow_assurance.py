@@ -206,6 +206,50 @@ def recorder(ledger, paths, policy, scope, role) -> Recorder:
 
 # --- fail-closed basics ------------------------------------------------------ #
 
+
+@pytest.mark.parametrize("consumer", ["risk", "trader"])
+def test_authorization_or_state_evidence_cannot_replace_execution_price_evidence(
+        recorder, manifest, consumer):
+    role = next(row for row in manifest["consumers"] if row["id"] == consumer)
+    runtime_types = {"runtime_query", "timestamp", "failure_semantics", "no_persistence"}
+    selected_scope = {"kind": "decision", "id": "synthetic", "entities": ["AAPL"],
+                      "purpose": "approved_execution_check"}
+    for kind in set(role["required_evidence"]) - runtime_types:
+        recorder.record(kind, who=role, selected_scope=selected_scope)
+    result = recorder.query(who=role, selected_scope=selected_scope)
+    assert result["status"] == "ineligible"
+    assert runtime_types <= set(result["missing"])
+
+
+@pytest.mark.parametrize("consumer", ["risk", "trader"])
+def test_old_execution_contract_evidence_is_retained_but_not_reused(
+        tmp_path, ledger, paths, policy, manifest, consumer):
+    import copy
+
+    old = copy.deepcopy(manifest)
+    role = next(row for row in old["consumers"] if row["id"] == consumer)
+    role["contract_version"] = "target-dataflow-v1"
+    role["required_evidence"] = [kind for kind in role["required_evidence"] if kind not in {
+        "runtime_query", "timestamp", "failure_semantics", "no_persistence"}]
+    coverage = tmp_path / "old-coverage.yaml"
+    coverage.write_text(yaml.safe_dump(old))
+    scope = {"kind": "decision", "id": "synthetic", "entities": ["AAPL"]}
+    for kind in role["required_evidence"]:
+        assurance.record_evidence(
+            domain_id=role["domain"], consumer_id=consumer, evidence_type=kind,
+            outcome="passed", scope=scope, as_of=START,
+            command_summary="synthetic old contract", result_summary="mechanism only",
+            dependency_paths=paths + policy["consumer_fingerprint_paths"][consumer],
+            db_path=ledger, coverage_path=coverage)
+    result = assurance.qualification(domain_id=role["domain"], consumer_id=consumer,
+                                     contract_version="target-dataflow-v2", scope=scope,
+                                     db_path=ledger)
+    assert result["status"] == "ineligible" and result["evidence"] == {}
+    with sqlite3.connect(ledger) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM dataflow_assurance_events").fetchone()[0] == len(
+            role["required_evidence"])
+
+
 def test_missing_ledger_is_ineligible(recorder):
     """No evidence, no qualification. A missing table must not read as a pass."""
     assert recorder.query()["status"] == "ineligible"

@@ -1,0 +1,62 @@
+{
+  "identity": {
+    "domain_id": "ai_hardware",
+    "consumer_id": "trader",
+    "contract_version": "v1",
+    "scope": {
+      "entities": [
+        "AMD",
+        "NVDA"
+      ],
+      "id": "ai_hardware",
+      "kind": "sector",
+      "time_range": {
+        "end": "2026-10-08T00:00:00+00:00",
+        "start": "2026-10-07T00:00:00+00:00"
+      }
+    }
+  },
+  "mode": "isolated",
+  "call_points": {
+    "ats.broker.ibkr.IBKRBroker._submit": {
+      "writer": "IBKRBroker",
+      "entry_exercised": "ats.broker.ibkr.IBKRBroker._submit",
+      "negative_side_effect_count": 0,
+      "positive_test": "tests.test_phase_f_broker_enforcement.test_valid_session_sets_explicit_order_account_and_preserves_reads",
+      "negative_test": "tests.test_phase_f_broker_enforcement.test_freeze_between_batch_check_and_actual_write_is_rechecked",
+      "junit_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/docs/validation/phase_f_scoped_routing_20261008/regression.junit.xml",
+      "junit_sha256": "ba81a1d165b85a1d3f1398127acdab4e2ff8218397a2e5c6cce0145bdb279d87",
+      "source_hashes": {
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/broker/ibkr.py": "6c02a1f9be97548a2eb0fdcdeafed55827195fa2eed723fda5732a864c638d6a",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/execution/broker_write_guard.py": "af84f4c726ebfb5c669ea0fcea372a33578f2c886e281c982467952ae70c9a9a",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/execution/route_registry.py": "e1dfc887bed9a3aa264865bb81c17813ff219a7ea9a621b8f5895935732f6a2b",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/execution/route_arbitration.py": "19d88527f184057c78e9f00d6b2e233711922e9c84f3e174f23b896f601b3329",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/workflow/boundary_evidence.py": "20b1da1d27036e42d884d47f75015881ac6fcafd8d67b6c741d603c26529757f",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/workflow/scoped_routes.py": "d75a1c9db3b42c55d262a8c290fc50c61264feb2bfc45b524b40f1d8bee7b906",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/tests/test_phase_f_broker_enforcement.py": "e762dd92b27a98e13ec1974ec816aecbe42ee37ee0aa1863e5db470e2032caee",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/tests/test_phase_f_scoped_routes.py": "a070c0446ff4df3675d4b9216eae15ddecf42efde2749788feab4adca18fa194",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/tests/phase_f_broker_harness.py": "6e6d47418300fd757a49592086bf7afdf2bf2337bb9ba6efa212947b61bfe9f5"
+      }
+    },
+    "ats.broker.ibkr.IBKRBroker.cancel_all": {
+      "writer": "IBKRBroker",
+      "entry_exercised": "ats.broker.ibkr.IBKRBroker.cancel_all",
+      "negative_side_effect_count": 0,
+      "positive_test": "tests.test_phase_f_scoped_routes.test_business_cancel_positive",
+      "negative_test": "tests.test_phase_f_scoped_routes.test_business_cancel_wrong_account_negative",
+      "junit_path": "/Users/liuchao/Code/trading/auto_stock_trading_agents/docs/validation/phase_f_scoped_routing_20261008/regression.junit.xml",
+      "junit_sha256": "ba81a1d165b85a1d3f1398127acdab4e2ff8218397a2e5c6cce0145bdb279d87",
+      "source_hashes": {
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/broker/ibkr.py": "6c02a1f9be97548a2eb0fdcdeafed55827195fa2eed723fda5732a864c638d6a",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/execution/broker_write_guard.py": "af84f4c726ebfb5c669ea0fcea372a33578f2c886e281c982467952ae70c9a9a",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/execution/route_registry.py": "e1dfc887bed9a3aa264865bb81c17813ff219a7ea9a621b8f5895935732f6a2b",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/execution/route_arbitration.py": "19d88527f184057c78e9f00d6b2e233711922e9c84f3e174f23b896f601b3329",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/workflow/boundary_evidence.py": "20b1da1d27036e42d884d47f75015881ac6fcafd8d67b6c741d603c26529757f",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/src/ats/workflow/scoped_routes.py": "d75a1c9db3b42c55d262a8c290fc50c61264feb2bfc45b524b40f1d8bee7b906",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/tests/test_phase_f_broker_enforcement.py": "e762dd92b27a98e13ec1974ec816aecbe42ee37ee0aa1863e5db470e2032caee",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/tests/test_phase_f_scoped_routes.py": "a070c0446ff4df3675d4b9216eae15ddecf42efde2749788feab4adca18fa194",
+        "/Users/liuchao/Code/trading/auto_stock_trading_agents/tests/phase_f_broker_harness.py": "6e6d47418300fd757a49592086bf7afdf2bf2337bb9ba6efa212947b61bfe9f5"
+      }
+    }
+  }
+}

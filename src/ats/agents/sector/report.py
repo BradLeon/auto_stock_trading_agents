@@ -7,6 +7,8 @@ dir degrades to None.
 
 from __future__ import annotations
 
+from ...workflow.schedule_runtime import publication_report
+
 import logging
 from pathlib import Path
 
@@ -394,6 +396,7 @@ def _section_candidates(verdict) -> list[str]:
     return lines
 
 
+@publication_report
 def write_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=None,
                 rows=None) -> Path | None:
     """Write one layer's report. Same-day reruns overwrite (idempotent)."""
@@ -429,6 +432,7 @@ def _budgets(cfg: SectorConfig) -> dict:
     return {ly.key: (ly.weight_cap or 0.0) for ly in cfg.layers}
 
 
+@publication_report
 def write(review: SectorReview, cfg: SectorConfig) -> Path | None:
     if not cfg.output_dir:
         log.info("sector report: output_dir unset — skipped")

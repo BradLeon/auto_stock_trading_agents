@@ -1,0 +1,14 @@
+{
+  "simulated_collection_delay_seconds": 360,
+  "production_price_validation_modified": false,
+  "results": {
+    "before": {
+      "test_passed": false,
+      "failure": "Regex pattern did not match.\n  Expected regex: 'future'\n  Actual message: 'quote_stale'"
+    },
+    "current": {
+      "test_passed": true,
+      "future_quote_rejected": true
+    }
+  }
+}

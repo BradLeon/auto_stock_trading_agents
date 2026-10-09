@@ -25,6 +25,7 @@ from ..channel import get_channel
 from ..config import get_config
 from ..graph.checkpoint import get_checkpointer
 from ..schemas.channel import ApprovalRequest, Notification
+from ..workflow.schedule_runtime import scheduled_cli
 
 
 def run_decision_graph(state, *, channel="cli") -> dict:
@@ -74,6 +75,11 @@ def run_decision_graph(state, *, channel="cli") -> dict:
     return result
 
 
+from ..workflow.runtime_reads import cli_read_request, scoped_read  # noqa: E402
+
+@scoped_read("fundamental")
+@scheduled_cli(lambda args: "fundamental-event" if args["phase"] == "score" else "fundamental-routine",
+               kind="entity", argument="symbol")
 def run_pead(
     symbol: str,
     phase: str,
@@ -113,7 +119,8 @@ def run_pead(
     if phase == "score":
         if chief:
             run_chief(
-                dry_run=dry_run, channel=channel, auto=auto, offline=offline, source="pead-chief"
+                dry_run=dry_run, channel=channel, auto=auto, offline=offline, source="pead-chief",
+                fundamental_mode="event",
             )
         else:
             print("→ 建议已入档；运行 `ats chief run` 收口交易决策")
@@ -166,6 +173,7 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
     print("=" * 70)
 
 
+@scheduled_cli("information-brief", kind="entity", argument="symbol")
 def run_pead_monitor(symbol: str, *, use_llm: bool = True) -> dict:
     """Run one continuous-monitor pass: ingest events, update the living dossier."""
     from ..agents.pead import monitor
@@ -366,6 +374,8 @@ def batch_command(args, *, parser) -> int:
     cutover = args.cutover_db or None
     action = args.action
 
+
+
     def _reader(consumer_id, scope):
         """Read live qualification for one consumer. Absent reader -> ineligible."""
         from ..workflow.intake import _consumer_scope
@@ -434,7 +444,10 @@ def batch_command(args, *, parser) -> int:
     if action == "show":
         batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
                               path=manifest)
+        from ..workflow.shadow_reports import check_batch_report
+
         result = bm.dry_run_batch(batch, qualification_reader=_reader,
+                                  report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
                                   path=manifest, cutover_path=cutover)
         print(json.dumps({"batch": batch.as_row(), "dry_run": result.as_row()},
                          ensure_ascii=False, indent=2, default=str))
@@ -442,7 +455,10 @@ def batch_command(args, *, parser) -> int:
         return 0 if result.switchable else 1
 
     if action == "dry-run":
+        from ..workflow.shadow_reports import check_batch_report
+
         results = bm.dry_run(qualification_reader=_reader, path=manifest,
+                             report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
                              cutover_path=cutover)
         if args.json:
             print(json.dumps([r.as_row() for r in results], ensure_ascii=False,
@@ -751,6 +767,50 @@ def schedule_cutover_command(args, *, parser) -> int:
     """
     from ..workflow import dispatch_claims as claims
     from ..workflow import schedule_cutover as sc
+
+    if args.action.startswith("runtime-"):
+        from ..workflow import schedule_runtime as runtime
+        from datetime import datetime
+
+        if getattr(args, "isolation_root", ""):
+            from ..workflow.isolation import isolated_run
+            import copy
+
+            child = copy.copy(args)
+            child.isolation_root = ""
+            with isolated_run("schedule-control-cli", root=args.isolation_root):
+                return schedule_cutover_command(child, parser=parser)
+        action = args.action.removeprefix("runtime-")
+        try:
+            scope = json.loads(args.business_scope) if getattr(args, "business_scope", "") else None
+            if action == "state":
+                result = runtime.snapshot()
+            elif action == "reload":
+                result = runtime.reload_authority()
+            elif action == "prepare":
+                from ..workflow.isolation import verified_isolation_root
+                if verified_isolation_root() is None:
+                    raise runtime.ScheduleAuthorityError("scope preparation requires isolated drill")
+                result = runtime.check_owner(args.workflow, scope, args.owner)
+            elif action == "freeze":
+                result = {"token": runtime.freeze(args.workflow, scope, actor=args.actor, reason=args.reason)}
+            elif action == "inventory":
+                result = runtime.frozen_inventory(args.token)
+            elif action == "handover":
+                runtime.handover(args.token, to_owner=args.owner,
+                    dispositions=json.loads(args.dispositions), actor=args.actor, reason=args.reason)
+                result = runtime.snapshot()
+            elif action == "cancel-freeze":
+                runtime.cancel_freeze(args.token, actor=args.actor, reason=args.reason)
+                result = runtime.snapshot()
+            else:
+                expected = runtime.expected_triggers(datetime.fromisoformat(args.from_time), datetime.fromisoformat(args.to_time))
+                result = expected if action == "expected" else runtime.compare_triggers(expected)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except (runtime.ScheduleAuthorityError, ValueError) as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+            return 2
 
     state_path = args.state or None
     switch_db = args.switch_db or None
@@ -1113,15 +1173,7 @@ def read_cutover_command(args, *, parser) -> int:
         """
         from ..workflow import shadow_reports as reports
 
-        if not batch.shadow_report_id:
-            return True, []
-        try:
-            usable, problems = reports.check_citable(
-                report_id=batch.shadow_report_id, scope=dict(batch.scope),
-                required_surfaces=batch.required_surfaces or None)
-        except Exception as exc:  # noqa: BLE001
-            return False, [f"the cited report could not be read: {exc}"]
-        return bool(usable), list(problems or [])
+        return reports.check_batch_report(batch, path=args.report_db or None)
 
     if action == "authorize":
         auth = rc.DeploymentAuthorization(
@@ -1276,7 +1328,10 @@ def cutover_command(args, *, parser) -> int:
         wiring.bootstrap_wired(actor=args.actor, path=db)
 
     if action == "state":
-        print(json.dumps({b: s.as_row() for b, s in
+        from ..workflow.scoped_routes import route_summary
+
+        scoped = route_summary(path=db)
+        print(json.dumps({b: {**s.as_row(), "scoped_routes": scoped[b]} for b, s in
                           plane.all_boundaries(db).items()},
                          ensure_ascii=False, indent=2, default=str))
         return 0
@@ -1301,17 +1356,34 @@ def cutover_command(args, *, parser) -> int:
                 consumer_id=args.consumer_id, report_id=args.report_id,
                 actor=args.actor)
         result = plane.preflight(boundary=args.boundary or None, request=request,
-                                 path=db)
+                                 path=db, report_checker=lambda b: reports.check_batch_report(
+                                     b, path=args.report_db or None))
         print(json.dumps(result.as_row(), ensure_ascii=False, indent=2,
                          default=str))
         return 0 if result.ok else 1
 
     if action == "set-route":
         boundary = _need(args.boundary, "--boundary")
-        plane.assert_wired(boundary, db)
-        state = plane.set_route(boundary, _need(args.route, "--route"),
+        route = _need(args.route, "--route")
+        reason = _need(args.reason, "--reason")
+        try:
+            if route == plane.ROUTE_TARGET:
+                request = plane.ActivationRequest(boundary=boundary, scope=_scope(),
+                                                  consumer_id=args.consumer_id or "",
+                                                  report_id=args.report_id, actor=args.actor)
+                from ..workflow.shadow_reports import require_batch_report, activation_batch
+
+                ok, problems = require_batch_report(activation_batch(request),
+                    lambda b: reports.check_batch_report(b, path=args.report_db or None))
+                if not ok:
+                    raise plane.CutoverError("; ".join(problems))
+                plane.assert_wired(boundary, db)
+        except plane.CutoverError as exc:
+            print(json.dumps({"changed": False, "problem": str(exc)}, ensure_ascii=False))
+            return 1
+        state = plane.set_route(boundary, route,
                                 actor=args.actor,
-                                reason=_need(args.reason, "--reason"), path=db)
+                                reason=reason, path=db)
         # Compatibility is checked AFTER the move so the refusal names both sides.
         # Reported as JSON plus a non-zero exit rather than a traceback: a runbook
         # script has to be able to read WHICH combination conflicted.
@@ -1331,26 +1403,15 @@ def cutover_command(args, *, parser) -> int:
             boundary=boundary, scope=_scope(),
             consumer_id=_need(args.consumer_id, "--consumer-id"),
             report_id=args.report_id, actor=_need(args.actor, "--actor"))
-        if args.report_id:
-            try:
-                ok, problems = reports.check_citable(
-                    report_id=args.report_id, scope=request.scope,
-                    path=args.report_db or None)
-            except reports.ShadowReportError as exc:
-                # An unknown report is a citation problem, not a crash: the operator
-                # needs to read "no such report" alongside the other findings.
-                ok, problems = False, [str(exc)]
-            if not ok:
-                print(json.dumps({"activated": False, "problems": problems},
-                                 ensure_ascii=False, indent=2))
-                return 1
-        result = plane.preflight(boundary=boundary, request=request, path=db)
+        result = plane.preflight(boundary=boundary, request=request, path=db,
+                                 report_checker=lambda b: reports.check_batch_report(b, path=args.report_db or None))
         if not result.ok:
             print(json.dumps({"activated": False, "problems": result.problems,
                               "warnings": result.warnings},
                              ensure_ascii=False, indent=2, default=str))
             return 1
-        record = plane.record_activation(request=request, path=db)
+        record = plane.record_activation(request=request, path=db,
+                                         report_checker=lambda b: reports.check_batch_report(b, path=args.report_db or None))
         print(json.dumps({**record, "warnings": result.warnings},
                          ensure_ascii=False, indent=2, default=str))
         return 0
@@ -1401,6 +1462,9 @@ def shadow_command(args, *, parser) -> int:
     both makes the read-only ones look like they can also mutate.
     """
     from ..workflow import shadow_compare as compare
+    from ..execution.broker_write_guard import startup
+
+    startup(caller="ats.runtime.cli.shadow_command", mode="shadow")
     from ..workflow import shadow_ledger as ledger
     from ..workflow import shadow_matrix as matrix
     from ..workflow import shadow_reports as reports
@@ -1408,6 +1472,87 @@ def shadow_command(args, *, parser) -> int:
     db = args.db or None
     order_db = args.order_db or None
     action = args.action
+
+    if action.startswith("acceptance-"):
+        from ..workflow import acceptance_reports as acceptance
+        import sqlite3
+        try:
+            if action == "acceptance-capture":
+                from ..workflow.acceptance_matrix import restore
+                from ..workflow.acceptance_runner import capture
+                from ..workflow.isolation import isolated_run
+                from contextlib import redirect_stdout
+                from io import StringIO
+                if not all((args.isolation_root,args.input_store,args.matrix_file,args.run_id)):
+                    raise ValueError("acceptance-capture requires isolation-root/input-store/matrix-file/run-id")
+                recipe = json.loads(Path(args.request_file).read_text()) if args.request_file else {}
+                with isolated_run(args.run_id,root=args.isolation_root), redirect_stdout(sys.stderr):
+                    payload = capture(matrix=restore(json.loads(Path(args.matrix_file).read_text())),
+                        input_store=args.input_store,root=Path(args.isolation_root)/args.run_id,
+                        capture_id=args.run_id,execution=recipe,channel="cli")
+            elif action == "acceptance-run":
+                from ..workflow.acceptance_matrix import restore
+                from ..workflow.isolation import isolated_run
+                from contextlib import redirect_stdout
+                from io import StringIO
+                if not all((args.isolation_root,args.input_store,args.matrix_file,args.run_id,args.packet_hash)):
+                    raise ValueError("acceptance-run requires isolation-root/input-store/matrix-file/run-id/packet-hash")
+                with isolated_run(args.run_id,root=args.isolation_root), redirect_stdout(StringIO()):
+                    output = acceptance.run(matrix=restore(json.loads(Path(args.matrix_file).read_text())),
+                        input_store=args.input_store,input_hash=args.packet_hash,
+                        root=Path(args.isolation_root)/args.run_id,replay_run_id=args.run_id)
+                payload = {"type":acceptance.TYPE,"run_id":args.run_id,"workflow_run_id":output["dispatch"]["run_id"],
+                           "input_hash":args.packet_hash,"store":output["store"]}
+            elif action == "acceptance-record":
+                proof = json.loads(Path(args.proof_file).read_text())
+                payload = acceptance.record(report_id=args.report_id,input_hash=args.packet_hash,
+                    proof=proof,actor=args.actor,path=db,supersedes=args.supersedes)
+            elif action == "acceptance-report":
+                payload = acceptance.read(args.report_id,path=db)
+            elif action == "acceptance-check":
+                from types import SimpleNamespace
+                classes = {"research_read":"research_read","decision":"internal_state_approval","trading":"live_trader"}
+                ok, problems = acceptance.check_batch_report(SimpleNamespace(
+                    shadow_report_id=args.report_id,scope=json.loads(args.scope_json),
+                    batch_class=classes.get(args.batch_class),required_surfaces=args.required_surface),path=db)
+                print(json.dumps({"valid":ok,"problems":problems},ensure_ascii=False))
+                return 0 if ok else 1
+            else:
+                actions = {"acceptance-signoff":"signed_off","acceptance-reject":"rejected","acceptance-revoke":"revoked"}
+                payload = acceptance.signoff(report_id=args.report_id,action=actions[action],actor=args.actor,
+                    authority=args.authority,reason=args.reason,path=db)
+            print(json.dumps(payload,ensure_ascii=False,indent=2))
+            return 0
+        except (ValueError, KeyError, OSError, sqlite3.Error) as exc:
+            print(json.dumps({"status":"refused","reason":str(exc)},ensure_ascii=False))
+            return 1
+
+    if action in {"capture-business", "run-pair"}:
+        from ..workflow.isolation import isolated_run
+        from ..workflow import paired_business
+        from contextlib import redirect_stdout
+        from io import StringIO
+        try:
+            if not args.isolation_root or not args.input_store:
+                raise ValueError("business pair requires --isolation-root and --input-store")
+            with isolated_run(args.run_id or args.pair_id or "business-pair-cli", root=args.isolation_root):
+                console = StringIO()
+                with redirect_stdout(console):
+                    if action == "capture-business":
+                        request = json.loads(Path(args.request_file).read_text())
+                        result = paired_business.capture(request=request, input_store=args.input_store,
+                            work_root=Path(args.isolation_root) / (args.run_id + "-capture"), run_id=args.run_id)
+                    else:
+                        if not args.pair_id or not args.packet_hash:
+                            raise ValueError("run-pair requires --pair-id and --packet-hash")
+                        result = paired_business.run_pair(input_store=args.input_store, input_hash=args.packet_hash,
+                            root=Path(args.isolation_root) / args.pair_id, pair_id=args.pair_id)
+                result["business_console"] = console.getvalue()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except (ValueError, PermissionError, OSError) as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+            return 1
 
     def _json_arg(name: str, default):
         try:
@@ -1638,6 +1783,7 @@ def workflow_command(args, *, parser) -> int:
     return 0 if result.get("status") in {"complete", "incomplete", "running", "planned"} else 1
 
 
+@scoped_read("chief")
 def run_chief(
     *,
     execute: bool = True,
@@ -1647,6 +1793,8 @@ def run_chief(
     auto: bool = False,
     offline: bool = False,
     source: str = "chief",
+    fundamental_mode: str = "routine",
+    decision_profile: str = "ai_hardware",
 ) -> int:
     """One Chief decision run through the decision graph: assemble all artifacts
     -> decide -> risk gate -> persist -> Boss approval -> trade -> persist."""
@@ -1657,6 +1805,8 @@ def run_chief(
         cycle_id=f"chief-{now:%Y%m%d-%H%M%S}",
         as_of=now,
         source=source,
+        fundamental_mode=fundamental_mode,
+        decision_profile=decision_profile,
         dry_run=dry_run,
         use_llm=use_llm,
         use_broker=not offline,
@@ -2036,6 +2186,7 @@ def _print_quadrant(review) -> None:
         print(f"      · ⚠️ 数据过旧/缺失: {', '.join(stale)}")
 
 
+@scoped_read("technical")
 def run_technical_review(
     name: str = "technical", *, live_data: bool = True, write_report: bool = True
 ) -> int:
@@ -2088,6 +2239,8 @@ def technical_probe(name: str = "technical", *, live_data: bool = True) -> int:
     return 0
 
 
+@scoped_read("macro")
+@scheduled_cli("macro-review", scope_id="")
 def run_macro_review(
     name: str = "macro", *, use_llm: bool = True, live_data: bool = True, write_report: bool = True
 ):
@@ -2186,6 +2339,7 @@ def run_cross_section(
     return 0
 
 
+@scoped_read("layer")
 def run_layer_review(
     name: str = "ai_hardware",
     layer_key: str = "all",
@@ -2224,7 +2378,8 @@ def run_layer_review(
                 )
             except Exception as exc:  # noqa: BLE001
                 print(f"  （{layer.key} 截面取数失败：{exc}）")
-        v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)
+        v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm,
+                                 store=get_store())
         if v is None:
             # Phase D: a failed layer is a registered gap — nothing is carried forward
             # or defaulted into a fake verdict.
@@ -2262,6 +2417,8 @@ def run_layer_review(
     return 0
 
 
+@scoped_read("sector")
+@scheduled_cli("sector-review", kind="sector", argument="name")
 def run_sector_review(
     name: str = "ai_hardware",
     *,
@@ -2287,6 +2444,7 @@ def run_sector_review(
     return review
 
 
+@scoped_read("sector")
 def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
     """Offline rebuild of the viz dashboard from what a past review already produced.
 
@@ -2303,6 +2461,16 @@ def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
 
     cfg = load_sector_config(name)
     store = get_store()
+    from ..agents.sector.read_model import allocation, governed, write_html
+
+    if governed():
+        row = allocation(store, name, date=date)
+        path = write_html(row, cfg.output_dir)
+        if path:
+            print(f"📊 {path}")
+            return 0
+        print("（output_dir 未配置或不存在）")
+        return 1
     review = None
     if date:
         for r in store.sector_review_history(name, limit=60):
@@ -2853,6 +3021,7 @@ def run_pead_research(*, use_llm: bool = True) -> list:
     return insights
 
 
+@scoped_read("information")
 def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) -> int:
     """信息分析师独立入口（Phase D）：一轮信息简报，独立终结。
 
@@ -2873,6 +3042,7 @@ def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) 
     return 0
 
 
+@scoped_read("fundamental")
 def _run_analyst_fundamental(args) -> int:
     """基本面双模式独立入口（Phase D 5.1）：ats analyst fundamental --mode routine|event."""
     from ..agents.fundamental.entry import build_run_request, run_fundamental_pass
@@ -4109,9 +4279,14 @@ def run_data(
     return 0
 
 
+@cli_read_request
 def main(argv: list[str] | None = None) -> int:
+    from ..execution.broker_write_guard import startup
+
+    startup(caller="ats.runtime.cli.main")
     _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
+    parser.add_argument("--read-scope-json", help="Exact business read scopes, keyed by consumer")
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument(
@@ -4369,10 +4544,19 @@ def main(argv: list[str] | None = None) -> int:
 
     sh = sub.add_parser("shadow", help="Phase F 影子比较报告、差异处置与影子账本运维")
     sh.add_argument("action", choices=[
+        "acceptance-capture", "acceptance-run", "acceptance-record", "acceptance-report", "acceptance-check", "acceptance-signoff", "acceptance-reject", "acceptance-revoke",
+        "capture-business", "run-pair",
         "report", "events", "acceptances", "compare", "signoff", "reject",
         "revoke", "accept", "check", "intents", "attest"])
     sh.add_argument("--report-id", default="", help="report ID")
+    sh.add_argument("--proof-file", default="", help="acceptance-record: actual new/replay execution proof JSON")
+    sh.add_argument("--matrix-file", default="", help="acceptance-run: pre-run frozen requirement matrix JSON")
+    sh.add_argument("--supersedes", default="", help="acceptance-record: prior immutable report ID")
     sh.add_argument("--run-id", default="", help="compare/attest: shadow run ID")
+    sh.add_argument("--pair-id", default="", help="run-pair: unique paired execution ID")
+    sh.add_argument("--isolation-root", default="", help="business pair: parent isolation root")
+    sh.add_argument("--input-store", default="", help="business pair: durable frozen input SQLite")
+    sh.add_argument("--request-file", default="", help="capture-business: request JSON; acceptance-capture: explicit cycle_id/account/fill_price simulation recipe")
     sh.add_argument("--consumer-id", default="", help="compare: consumer")
     sh.add_argument("--batch-class", default="",
                     choices=["", "research_read", "decision", "trading"])
@@ -4456,6 +4640,8 @@ def main(argv: list[str] | None = None) -> int:
         "dispatch",
         help="Phase F 调度所有权核验与回滚去重（**读账本，不改 owner**）")
     sp.add_argument("action", choices=[
+        "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze",
+        "runtime-inventory", "runtime-handover", "runtime-cancel-freeze", "runtime-expected", "runtime-compare",
         "ownership", "ledger", "executed", "record-execution",
         "rollback-plan", "rollback-history"])
     sp.add_argument("--trigger", default="", help="限定单一逻辑触发")
@@ -4463,6 +4649,15 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--state", default="", help="第4组的 dispatch 状态库")
     sp.add_argument("--switch-db", default="", help="执行记录与回滚记录库")
     sp.add_argument("--actor", default="", help="执行人")
+    sp.add_argument("--isolation-root", default="", help="runtime-* 隔离演练根目录；不修改生产 owner")
+    sp.add_argument("--workflow", default="", help="runtime-* workflow ID")
+    sp.add_argument("--business-scope", default="", help="runtime-* 精确 scope JSON")
+    sp.add_argument("--owner", default="legacy", choices=["legacy", "shadow", "dispatcher"])
+    sp.add_argument("--reason", default="")
+    sp.add_argument("--token", default="", help="freeze 返回的 token")
+    sp.add_argument("--dispositions", default="{}", help="逐 trigger key 处置 JSON")
+    sp.add_argument("--from-time", default="", help="预期集合窗口 ISO 起点（带时区）")
+    sp.add_argument("--to-time", default="", help="预期集合窗口 ISO 终点（带时区）")
 
     rc_parser = sub.add_parser(
         "read",
@@ -4472,6 +4667,7 @@ def main(argv: list[str] | None = None) -> int:
     rc_parser.add_argument("--batch-id", default="", help="switch: 批次 ID")
     rc_parser.add_argument("--db", default="", help="批次清单与运行记录库")
     rc_parser.add_argument("--cutover-db", default="", help="切流控制状态库")
+    rc_parser.add_argument("--report-db", default="", help="独立影子报告库路径")
     rc_parser.add_argument("--authorisation", default="",
                            help="已登记的部署授权引用；switch 必填")
     rc_parser.add_argument("--authorised-by", default="", help="authorize: 授权人")
@@ -4517,6 +4713,7 @@ def main(argv: list[str] | None = None) -> int:
     bt.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
     bt.add_argument("--db", default="", help="覆盖批次清单库路径")
     bt.add_argument("--cutover-db", default="", help="覆盖切流控制库路径")
+    bt.add_argument("--report-db", default="", help="独立影子报告库路径")
 
     # Named `drill`, not `rollback`: the actions cover the shadow-period
     # acceptance checks as well as the three boundary rollbacks, and a command
@@ -4679,6 +4876,8 @@ def main(argv: list[str] | None = None) -> int:
     ch.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     ch.add_argument("--no-llm", action="store_true")
     ch.add_argument("--offline", action="store_true", help="skip live broker read")
+    ch.add_argument("--fundamental-mode", choices=["routine", "event"], default="routine")
+    ch.add_argument("--decision-profile", default="ai_hardware")
     ch.add_argument("--no-execute", action="store_true", help="decide only, don't call trader")
     ch.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli")
     rk = sub.add_parser("risk", help="risk officer 风控 (report / memo / check)")
@@ -5110,6 +5309,8 @@ def main(argv: list[str] | None = None) -> int:
             use_llm=not args.no_llm,
             auto=args.yes,
             offline=args.offline,
+            fundamental_mode=args.fundamental_mode,
+            decision_profile=args.decision_profile,
         )
     if args.command == "risk":
         if args.action == "report":

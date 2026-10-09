@@ -534,15 +534,20 @@ def execute_batch(batch: manifest.CutoverBatch, *,
             consumer_id="<batch>", outcome=BOUNDARY_UNWIRED,
             reason="the batch names no read-path boundary to switch"))
         return _finish(boundary)
-    if not plane.wiring_of(boundary, cutover_path):
+    # Existing executor has no per-consumer identity protocol yet (9.2).
+    # A bootstrap declaration must not open that incomplete path.
+    try:
+        plane.assert_wired(boundary, cutover_path)
+    except plane.CutoverError as exc:
         result.outcome = BATCH_REFUSED
         result.scopes.append(ScopeOutcome(
             consumer_id="<batch>", outcome=BOUNDARY_UNWIRED,
-            reason=f"boundary {boundary!r} has no declared wiring; it cannot "
-                   "justify a cutover because nothing reads it"))
+            reason=str(exc)))
         return _finish(boundary)
 
     chain = _switch_chain(boundary)
+    if apply and len(chain)>1:
+        raise ReadCutoverError("explicit exact-scope joint coordinator required; sequential global apply refused")
     result.checks["switch_chain"] = list(chain)
     settled = chain_is_settled(states, boundary)
 
@@ -562,14 +567,13 @@ def execute_batch(batch: manifest.CutoverBatch, *,
             return _finish("")
 
     # --- 3. shadow report applicability, batch-wide -------------------------
-    if report_checker is not None:
-        usable, problems = report_checker(batch)
-        if not usable:
-            result.outcome = BATCH_REFUSED
-            result.scopes.append(ScopeOutcome(
-                consumer_id="<batch>", outcome=REPORT_INVALID,
-                reason="; ".join(problems) or "the cited shadow report is not usable"))
-            return _finish("")
+    usable, problems = reports.require_batch_report(batch, report_checker)
+    if not usable:
+        result.outcome = BATCH_REFUSED
+        result.scopes.append(ScopeOutcome(
+            consumer_id="<batch>", outcome=REPORT_INVALID,
+            reason="; ".join(problems) or "the cited shadow report is not usable"))
+        return _finish("")
 
     # --- 4. projection availability, batch-wide -----------------------------
     projection = _projection_available(batch, projection_checker)
@@ -663,10 +667,6 @@ def execute_batch(batch: manifest.CutoverBatch, *,
         return _finish("")
 
     if moved:
-        # The whole chain moves together, or not at all. Setting them one at a
-        # time would pass through the half-migrated state the control plane
-        # rejects — and a crash halfway would leave it there, which is exactly
-        # the combination `check_compatibility` exists to prevent.
         for member in chain:
             plane.set_route(member, plane.ROUTE_TARGET,
                             actor=actor or "read-executor",

@@ -185,7 +185,9 @@ def test_the_runbook_cites_only_evidence_ids_that_exist(capsys):
     _, index = _run(capsys, ["intake", "evidence-index"])
     known = {entry["evidence_id"]
              for entry in index["consumers"].values()}
-    cited = set(re.findall(r"intake-verification:[0-9a-f]{16}:[a-z_]+", text))
+    current, separator, historical = text.partition("\n## 历史手册")
+    assert separator, "current and historical evidence must be separated"
+    cited = set(re.findall(r"intake-verification:[0-9a-f]{16}:[a-z_]+", current))
     assert cited, (
         "the runbook cites no intake evidence id, so its index is not being "
         "checked against anything")

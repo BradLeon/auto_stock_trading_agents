@@ -16,6 +16,10 @@ What changed against the pre-Phase-D flow:
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
+from ...workflow.schedule_runtime import scheduled_cli
+
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -34,6 +38,8 @@ _MAX_QUOTE_CHARS = 400
 PROCESSOR_VERSION = assemble.PROCESSOR_VERSION
 
 
+@scheduled_cli("information-brief", scope_id="research-extraction", inherit_owner=True,
+               restore=lambda rows: [Insight.model_validate(row) for row in rows])
 def run(*, use_llm: bool = True, since: datetime | None = None) -> list[Insight]:
     """One research pass over admitted articles: extract insights, publish briefs.
 
@@ -48,7 +54,7 @@ def run(*, use_llm: bool = True, since: datetime | None = None) -> list[Insight]
     rcfg = g["research"]
     store = get_store()
 
-    since = since or (datetime.now(timezone.utc) - timedelta(days=rcfg["lookback_days"]))
+    since = since or (evaluation_now(timezone.utc) - timedelta(days=rcfg["lookback_days"]))
     candidates = assemble.admitted_articles(store, since=since)
     log.info("information: %d admitted article candidates", len(candidates))
     if not candidates:

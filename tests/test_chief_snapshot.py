@@ -16,14 +16,13 @@ import pytest
 
 from ats.agent.task_projection import ProjectionScope, build_envelope
 from ats.decision.repository import DecisionAuditRepository
-from ats.decision.snapshot import (frozen_snapshot_complete,
-                                   frozen_snapshot_stale_reasons)
+from ats.decision.snapshot import frozen_snapshot_complete, frozen_snapshot_stale_reasons
 from ats.graph.chief import assemble_context, persist_decision, route_after_assemble
 from ats.graph.chief_state import ChiefDecisionState
 from ats.memory.store import TradingMemory
 from ats.schemas.decision import TradeDecision
 
-NOW = datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc) - timedelta(seconds=2)
 
 
 def _expiry(hours: int = 48) -> str:
@@ -77,8 +76,26 @@ def _seed(store, *, layers=("L1_app", "L3_optics"), targets=("COHR",),
             {"entity": sym, "signal": "neutral", "summary": "区间震荡",
              "levels": {"support": 300.0}},
             ProjectionScope(kind="entity", id=sym))
-    for env in rows.values():
-        store.save_task_projection_envelope(env)
+    from ats.workflow import decision_requirements as dr
+    from ats.workflow.dispatcher import Dispatcher
+    from ats.workflow.phase_e import TASK_ROLE
+    plan = dr.restore(dr.standalone(_state()))
+    by_binding = {(e.agent_role, e.scope.key): e for e in rows.values()}
+    selected = {}
+    for task in plan.tasks:
+        env = by_binding.get((TASK_ROLE[task.task_id], task.scope.key))
+        if env is None:
+            continue
+        inputs, _, _ = Dispatcher._task_inputs(None, plan, task,
+            {k: selected[k] for k in task.dependencies})
+        env = build_envelope(role=env.agent_role, payload=env.payload, scope=env.scope,
+            as_of=env.as_of, valid_until=env.valid_until, input_refs=inputs,
+            data_vintage_refs=env.data_vintage_refs)
+        by_binding[(env.agent_role, env.scope.key)] = env
+        selected[task.instance_key] = env
+    for key, env in list(rows.items()):
+        rows[key] = by_binding[(env.agent_role, env.scope.key)]
+        store.save_task_projection_envelope(rows[key])
     return rows
 
 
@@ -86,7 +103,25 @@ def _seed(store, *, layers=("L1_app", "L3_optics"), targets=("COHR",),
 def chief_env(tmp_path, monkeypatch):
     store = TradingMemory(tmp_path / "chief.sqlite")
     monkeypatch.setattr("ats.memory.get_store", lambda: store)
-    # Pin the plan inputs so the config on disk cannot shift the fixture.
+    # Freeze the same real profile/configuration that the decision gate reads.
+    import shutil
+
+    import yaml
+
+    from ats.config import REPO_ROOT, reset_config_cache
+    root = tmp_path / "config"
+    shutil.copytree(REPO_ROOT / "config", root)
+    path = root / "pead.yaml"
+    cfg = yaml.safe_load(path.read_text()); cfg["targets"] = ["COHR"]
+    path.write_text(yaml.safe_dump(cfg))
+    path = root / "sectors/ai_hardware.yaml"
+    cfg = yaml.safe_load(path.read_text()); cfg["layers"] = cfg["layers"][:2]
+    for layer, key in zip(cfg["layers"], ["L1_app", "L3_optics"]):
+        layer["key"] = key
+    path.write_text(yaml.safe_dump(cfg))
+    monkeypatch.setenv("ATS_CONFIG_DIR", str(root)); reset_config_cache()
+    monkeypatch.setattr("ats.graph.chief._now", lambda: NOW)
+    # Pin the compatibility readers as well.
     monkeypatch.setattr("ats.config.load_pead_global", lambda: {
         "targets": ["COHR"], "observe": [], "monitor": {},
         "sector_review": {"sectors": ["ai_hardware"]},
@@ -99,7 +134,7 @@ def chief_env(tmp_path, monkeypatch):
 
 
 def _state(**kw):
-    base = dict(cycle_id="chief-g7", as_of=NOW, source="chief", decide=True,
+    base = dict(cycle_id="chief-g7", as_of=NOW, source="chief", decide=True, fundamental_mode="event",
                 use_llm=False, use_broker=False)
     base.update(kw)
     return ChiefDecisionState(**base)
@@ -140,7 +175,6 @@ def test_snapshot_fundamental_category_satisfied_by_either_mode(chief_env):
 # --- 7.2/7.5 incomplete snapshot blocks before any cycle write --------------------- #
 
 def test_incomplete_snapshot_blocks_and_writes_nothing(chief_env, capsys):
-    from ats.agents.chief import assemble
 
     _seed(chief_env)
     chief_env.conn.execute("DELETE FROM task_projection_envelopes WHERE agent_role='macro_review'")
@@ -169,7 +203,6 @@ def test_incomplete_snapshot_blocks_and_writes_nothing(chief_env, capsys):
 # --- 7.3 the real frozen snapshot reaches create_cycle ------------------------------ #
 
 def test_persist_writes_real_snapshot_into_the_cycle(chief_env):
-    from ats.agents.chief import assemble
 
     _seed(chief_env)
     state = _state(decisions=[TradeDecision(symbol="COHR", action="buy",
@@ -225,7 +258,7 @@ def test_dual_read_counts_disagreement(chief_env):
 
     _seed(chief_env)
     state = _state()
-    out = assemble_context(state)
+    assemble_context(state)
     ctx_blocks = {"宏观评审（倾斜修正）": "regime: risk_on …"}  # legacy present, projection missing
     detail = [{"task_id": "macro_review", "scope": "portfolio", "status": "missing"}]
     diffs = assemble.dual_read_diffs(
@@ -276,7 +309,7 @@ def test_newer_vintage_supersedes_mid_cycle(chief_env):
         payload={"regime": "risk_off", "summary": "信用利差走阔", "indicators": ["HY OAS +80"]},
         scope=ProjectionScope(kind="portfolio"), as_of=NOW.isoformat(timespec="seconds"),
         valid_until=_expiry(), data_vintage_refs=["dataset@2026-09-24"],
-        created_at=(NOW + timedelta(minutes=1)).isoformat(timespec="seconds"))
+        created_at=(datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(timespec="seconds"))
     chief_env.save_task_projection_envelope(newer)
 
     repo = DecisionAuditRepository(chief_env)

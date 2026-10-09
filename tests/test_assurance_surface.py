@@ -171,10 +171,8 @@ def test_a_cutover_action_outside_the_surface_is_allowed(surface):
     typo, not new work, and is rejected separately.
     """
     surface_mod.assert_outside_fingerprint_surface(
-        ["src/ats/workflow/assurance_surface.py",
-         "config/workflow/workflow_owners.yaml",
-         "src/ats/execution/broker_write_guard.py",
-         "src/ats/workflow/isolation.py"])
+        ["src/ats/workflow/consumer_disposition.py",
+         "src/ats/workflow/batch_manifest.py"])
 
 
 def test_a_misspelled_path_is_rejected_rather_than_silently_passing(surface):
@@ -232,3 +230,10 @@ def test_inventory_is_exported_for_review(surface):
     manifest_rows = [row for row in rows if row["path"] == surface.manifest]
     assert manifest_rows and manifest_rows[0]["invalidates"] == "every recorded evidence row"
     assert any(row["scope"] == "required" for row in rows)
+
+
+@pytest.mark.parametrize("path", ["src/ats/workflow/schedule_runtime.py", "src/ats/workflow/schedule_executor.py",
+                                   "config/workflow/workflow_owners.yaml", "src/ats/workflow/isolation.py"])
+def test_schedule_runtime_dependency_drift_requires_reverification(path, surface):
+    with pytest.raises(surface_mod.FingerprintSurfaceError,match="all 10"):
+        surface_mod.assert_outside_fingerprint_surface([path],surface)

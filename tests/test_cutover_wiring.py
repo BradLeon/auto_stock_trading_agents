@@ -236,7 +236,7 @@ def test_asserting_no_unowned_range_names_the_slice_and_its_task():
 
     message = str(excinfo.value)
     assert "sector_cli_legacy_read" in message
-    assert "F.6.3" in message
+    assert "9.6" in message
     assert excinfo.value.reason_code == "migration_range_unowned"
 
 

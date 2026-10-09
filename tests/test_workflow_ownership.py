@@ -10,6 +10,12 @@ from ats.workflow.run_contracts import TriggerContext
 from ats.agent.task_projection import ProjectionScope
 
 
+def initialize_declared_schedule(config, tmp_path, monkeypatch):
+    from ats.workflow.schedule_runtime import initialize
+    monkeypatch.setenv("ATS_DISPATCH_STATE_PATH",str(tmp_path/"declared-dispatch.sqlite"))
+    initialize(config_dir=config)
+
+
 def test_all_phase_e_workflow_owners_default_to_legacy_until_opted_in():
     owners = load_workflow_owners()
     assert {value["mode"] for value in owners["workflows"].values()} == {"legacy"}
@@ -107,6 +113,7 @@ def test_calendar_revision_supersedes_old_pending_trigger_in_shadow_store(
     }), encoding="utf-8")
     shadow_db = tmp_path / "shadow.sqlite"
     monkeypatch.setenv("ATS_SHADOW_DB_PATH", str(shadow_db))
+    initialize_declared_schedule(config,tmp_path,monkeypatch)
     calendar = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
     identity = macro_identity("CPI", "2026-08", "initial")
     first = ScheduleEventCandidate(source_id="bls", event_type="cpi",
@@ -156,6 +163,7 @@ def test_due_planned_release_waits_for_materials_then_routes_new_calendar_versio
     }), encoding="utf-8")
     shadow_db = tmp_path / "shadow.sqlite"
     monkeypatch.setenv("ATS_SHADOW_DB_PATH", str(shadow_db))
+    initialize_declared_schedule(config,tmp_path,monkeypatch)
     calendar = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
     event = ScheduleEventCandidate(
         source_id="bls", event_type="cpi",
@@ -244,7 +252,7 @@ def test_date_precision_wait_is_not_recorded_before_local_calendar_date(
     assert result == []
 
 
-def test_owner_rollback_stops_new_claims_but_preserves_and_finishes_active_lease(
+def test_yaml_reload_does_not_rollback_sql_owner(
         tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
@@ -261,8 +269,14 @@ def test_owner_rollback_stops_new_claims_but_preserves_and_finishes_active_lease
               "workflows": {"macro-review": {
                   "mode": "shadow", "task_ids": ["macro-review"]}}}
     owners_path.write_text(yaml.safe_dump(owners), encoding="utf-8")
+    (config / "pead.yaml").write_text("targets: [AAA]\n", encoding="utf-8")
     shadow_db = tmp_path / "shadow.sqlite"
     monkeypatch.setenv("ATS_SHADOW_DB_PATH", str(shadow_db))
+    initialize_declared_schedule(config,tmp_path,monkeypatch)
+
+    from ats.workflow.schedule_runtime import initialize
+    monkeypatch.setenv("ATS_DISPATCH_STATE_PATH", str(tmp_path / "owner-state.sqlite"))
+    initialize(config_dir=config)
 
     entered, allow_finish = Event(), Event()
 
@@ -302,6 +316,8 @@ def test_owner_rollback_stops_new_claims_but_preserves_and_finishes_active_lease
     with ThreadPoolExecutor(max_workers=1) as executor:
         active = executor.submit(active_run)
         assert entered.wait(5)
+        allow_finish.set()
+        active.result(timeout=5)
         owners["workflows"]["macro-review"]["mode"] = "legacy"
         owners_path.write_text(yaml.safe_dump(owners), encoding="utf-8")
 
@@ -312,9 +328,10 @@ def test_owner_rollback_stops_new_claims_but_preserves_and_finishes_active_lease
             request={"requested_tasks": ["macro-review"]}, config_dir=config)
         store = WorkflowStore(shadow_db)
         existing = store.list_triggers(workflow_id="macro-review")
-        assert rolled_back["status"] == "legacy"
-        assert len(existing) == 1 and existing[0]["status"] == "running"
-        assert store.list_runs()[0]["status"] == "running"
+        assert rolled_back["status"] == "complete"
+        assert rolled_back["owner"] == "shadow"
+        assert len(existing) == 2 and all(row["status"] == "complete" for row in existing)
+        assert store.list_runs()[0]["status"] == "complete"
 
         allow_finish.set()
         active.result(timeout=5)

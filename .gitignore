@@ -80,6 +80,10 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# 本地验证记录和文档素材保留在磁盘，不纳入版本控制。
+/docs/validation/
+/docs/assets/
+
 # PyBuilder
 .pybuilder/
 target/

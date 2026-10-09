@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="32.231" timestamp="2026-10-08T22:26:48.497914+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_opinion_execution" name="test_actual_opinion_edges_and_published_lineage" time="30.851"><failure message="PermissionError: analysis_acceptance_failed: [{'consumer': 'information', 'call': 'ats.data.stores.unstructured.platform.document_by_external_id', 'status': 'blocked', 'reason_code': 'provider_or_raw_repository_bypass'}]">tests/test_phase_f_opinion_execution.py:25: in test_actual_opinion_edges_and_published_lineage
-    with verify_analysis_access() as calls, trace_reads() as reads:
-         ^^^^^^^^^^^^^^^^^^^^^^^^
-../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/contextlib.py:144: in __exit__
-    next(self.gen)
-src/ats/workflow/analysis_verification.py:91: in verify_analysis_access
-    raise PermissionError("analysis_acceptance_failed: "+str(violations))
-E   PermissionError: analysis_acceptance_failed: [{'consumer': 'information', 'call': 'ats.data.stores.unstructured.platform.document_by_external_id', 'status': 'blocked', 'reason_code': 'provider_or_raw_repository_bypass'}]</failure></testcase></testsuite></testsuites>

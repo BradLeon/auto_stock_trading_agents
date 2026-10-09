@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="16.440" timestamp="2026-10-08T21:06:12.614293+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_phase_f_opinion_execution" name="test_complete_business_execution_and_recovery[1000]" time="15.427"><failure message="AssertionError: [{'cycle_id': 'complete-chain', 'as_of': datetime.datetime(2026, 10, 8, 13, 6, 22, 308110, tzinfo=datetime.timezone.utc), 'source': 'chief', 'dry_run': False, ...}]&#10;assert 0 == 1&#10; +  where 0 = len([])&#10; +    where [] = &lt;ats.execution.simulation.FakeBroker object at 0x10a49aa20&gt;.accepted">tests/test_phase_f_opinion_execution.py:64: in test_complete_business_execution_and_recovery
-    assert len(broker.accepted)==1, states
-E   AssertionError: [{'cycle_id': 'complete-chain', 'as_of': datetime.datetime(2026, 10, 8, 13, 6, 22, 308110, tzinfo=datetime.timezone.utc), 'source': 'chief', 'dry_run': False, ...}]
-E   assert 0 == 1
-E    +  where 0 = len([])
-E    +    where [] = &lt;ats.execution.simulation.FakeBroker object at 0x10a49aa20&gt;.accepted</failure></testcase></testsuite></testsuites>

@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="3" time="2.177" timestamp="2026-10-08T16:13:08.430416+08:00" hostname="C02F613WQ05F"><testcase classname="tests.test_intake_verification" name="test_a_complete_run_may_enter_the_decision_cycle" time="1.339"><failure message="assert False is True">tests/test_intake_verification.py:661: in test_a_complete_run_may_enter_the_decision_cycle
-    assert result["complete"] is True
-E   assert False is True</failure></testcase><testcase classname="tests.test_intake_verification" name="test_a_disagreement_between_the_two_contracts_is_reported_not_hidden" time="0.320"><failure message="assert False is True">tests/test_intake_verification.py:740: in test_a_disagreement_between_the_two_contracts_is_reported_not_hidden
-    assert outcome["complete"] is True
-E   assert False is True</failure></testcase><testcase classname="tests.test_intake_verification" name="test_a_fully_consistent_run_reports_no_disagreement" time="0.183"><failure message="assert False is True">tests/test_intake_verification.py:757: in test_a_fully_consistent_run_reports_no_disagreement
-    assert outcome["verified"] is True
-E   assert False is True</failure></testcase></testsuite></testsuites>

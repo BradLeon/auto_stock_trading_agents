@@ -17,13 +17,15 @@ from __future__ import annotations
 from ats.workflow.evaluation_clock import now as evaluation_now
 
 import logging
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from ...schemas.news import ContextUpdate
 from ..base import run_structured
-from ..pead.outputs import ContextUpdateView
 from . import assemble
 from .briefs import clocks_for, cluster_key, cluster_summary, publish_information_brief
+from .outputs import InformationContextUpdateView
+
 
 log = logging.getLogger("ats.agents.information.documents")
 
@@ -55,14 +57,17 @@ def run_document_pass(store, symbol: str, *, cfg, fresh: list, use_llm: bool = T
     # The bridge's `fresh` list is ALREADY triage-filtered and ranked — it is the
     # authoritative material for this pass. Admitted events are the fallback for
     # standalone runs (entry.py) where no bridge ran.
-    material = [_as_record(e) for e in fresh] if fresh else admitted
+    material = ([_as_record(e) for e in fresh] if fresh else admitted)[:MAX_EVENTS_IN_CONTEXT]
     # 简报保持 thesis-free：基本面叙事是基本面的观点，不由信息角色读取。
 
     if not material:
         return ContextUpdate(symbol=symbol, as_of=_now(), materiality=0.0,
                              event_summary="all triaged as noise")
 
-    update = _llm_brief(symbol, material, articles or [])
+    if articles is None:
+        articles = [(SimpleNamespace(headline=row.get("headline", "")), row["text"][:12000])
+                    for row in material if row.get("text")]
+    update = _llm_brief(symbol, material, articles)
     _publish_target_brief(store, symbol, update, material)
     return update
 
@@ -95,20 +100,25 @@ def _llm_brief(symbol: str, material: list, articles: list[tuple]) -> ContextUpd
            if articles_txt else "")
         + "Summarize what is factually NEW (no advice, no position language): "
         "list the fact changes, who they might impact, what remains unverified, "
-        "and an overall confidence. Most days are low-materiality noise — say so."
+        "and an overall confidence in the confidence field, independently of materiality. "
+        "Most days are low-materiality noise — say so."
     )
     try:
-        view: ContextUpdateView = run_structured("context_monitor", ContextUpdateView, ctx,
-                                                 skill_slug="pead-monitor")
+        view: InformationContextUpdateView = run_structured("context_monitor", InformationContextUpdateView, ctx,
+                                                 skill_slug="information-analyst")
+        if view.confidence is None:
+            raise ValueError("Information requires explicit confidence independent of materiality")
+        if view.expectation_changes:
+            raise ValueError("Information cannot emit Fundamental expectation changes")
         return ContextUpdate(
             symbol=symbol, as_of=_now(),
             materiality=max(0.0, min(1.0, float(view.materiality))),
+            confidence=view.confidence,
             event_summary=view.event_summary, narrative_delta=view.narrative_delta,
             sources=[str(e.get("source") or "") for e in material[:MAX_EVENTS_IN_CONTEXT]])
     except Exception as exc:  # noqa: BLE001
         log.warning("information monitor LLM failed for %s: %s", symbol, exc)
-        return ContextUpdate(symbol=symbol, as_of=_now(), materiality=0.0,
-                             event_summary=f"{len(material)} new events (LLM unavailable)")
+        raise RuntimeError(f"Information model failed for {symbol}; no brief published") from exc
 
 
 def _publish_target_brief(store, symbol: str, update: ContextUpdate,
@@ -121,7 +131,7 @@ def _publish_target_brief(store, symbol: str, update: ContextUpdate,
     clocks = clocks_for({"published_at": material[0].get("published_at") or ""},
                         extracted_at=update.as_of)
     stats = cluster_summary([
-        {"source": e.get("source") or "", "confidence": update.materiality}
+        {"source": e.get("source") or "", "confidence": update.confidence}
         for e in material])
     fact_changes = [
         f"[{str(e.get('published_at') or '')[:10]}] {e.get('headline') or ''}"
@@ -134,12 +144,20 @@ def _publish_target_brief(store, symbol: str, update: ContextUpdate,
                       else "medium" if update.materiality >= 0.4 else "low"),
         "sources": sorted(stats["sources"]) or ["unknown"],
         "fact_changes": fact_changes,
-        "impact_candidates": ["supply_chain"] if any(
-            e.get("symbol", symbol) != symbol for e in material) else ["direct"],
+        "source_evidence": [{"fact_index": index, "document_ref": row["input_ref"],
+            "publication_id": row.get("publication_id", ""),
+            "related_entities": row.get("related_entities", [row.get("symbol", symbol)]),
+            "locator": {"field": "title", "start": 0, "end": len(row.get("headline", ""))},
+            "event_time": row.get("published_at", ""), "published_at": row.get("published_at", ""),
+            "event_time_basis": "publication_proxy_not_independently_verified",
+            "extracted_at": clocks["extracted_at"], "confidence": update.confidence}
+            for index, row in enumerate(material) if row.get("input_ref")],
+        "impact_candidates": sorted({"direct" if symbol in (e.get("related_entities") or
+            [e.get("symbol", symbol)]) else "supply_chain" for e in material}),
         "entities": [symbol],
-        "confidence": update.materiality,
+        "confidence": update.confidence,
         "freshness": f"published {clocks['published_at'][:10]}",
-        "unverified": ["事件影响幅度与持续性待后续材料核验"],
+        "unverified": ["事件影响幅度与持续性待后续材料核验", "事件发生时点未独立核验，event_time 使用原始发布时间代理"],
         "event_time": clocks["event_time"],
         "published_at": clocks["published_at"],
         "extracted_at": clocks["extracted_at"],
@@ -148,12 +166,14 @@ def _publish_target_brief(store, symbol: str, update: ContextUpdate,
         "independent_sources": stats["independent_sources"],
     }
     try:
+        from ..base import execution_versions
+        versions = execution_versions("context_monitor", "information-analyst", template_source=__file__)
         return publish_information_brief(
             store, payload,
             scope=ProjectionScope(kind="entity", id=symbol),
             as_of=clocks["extracted_at"],
             input_refs=[ref for row in material for ref in (
-                row.get("input_ref") or row.get("id"), row.get("publication_id")) if ref])
+                row.get("input_ref") or row.get("id"), row.get("publication_id")) if ref], **versions)
     except Exception as exc:  # noqa: BLE001 - contract violations must fail loudly in logs
         log.warning("information target brief failed for %s: %s", symbol, exc)
-        return None
+        raise

@@ -69,7 +69,8 @@ def require_six_elements(payload: dict) -> None:
 
 def publish_information_brief(store, payload: dict, *, scope: ProjectionScope,
                               as_of: str, input_refs=None, valid_until: str = "",
-                              supersedes_projection_id: str = "") -> str:
+                              supersedes_projection_id: str = "", model_version: str = "",
+                              prompt_version: str = "") -> str:
     """Validate, intercept, wrap and persist one InformationBrief projection.
 
     Returns the projection id. Raises `EnvelopeValidationError` on contract
@@ -84,7 +85,8 @@ def publish_information_brief(store, payload: dict, *, scope: ProjectionScope,
     envelope = build_envelope(
         role="information_brief", payload=payload, scope=scope, as_of=as_of,
         input_refs=input_refs, valid_until=valid_until,
-        supersedes_projection_id=supersedes_projection_id)
+        supersedes_projection_id=supersedes_projection_id,
+        model_version=model_version, prompt_version=prompt_version)
     store.save_task_projection_envelope(envelope)
     return envelope.projection_id
 

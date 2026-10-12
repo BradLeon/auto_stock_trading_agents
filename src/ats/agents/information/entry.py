@@ -61,7 +61,10 @@ def run_information_target(symbol: str, *, store=None, use_llm: bool = True,
     from . import documents, extract
 
     store = get_store() if store is None else store
-    if run_extraction:
+    from ...workflow.runtime_reads import current_read_context
+    # A bound task reads only its authorized target/peer documents. The corpus
+    # extraction entry owns a different scope and must not escape this task.
+    if run_extraction and current_read_context() is None:
         work = lambda: extract.run(use_llm=use_llm)
         if run_once is not None:
             run_once("information-research-extraction", work)
@@ -69,7 +72,8 @@ def run_information_target(symbol: str, *, store=None, use_llm: bool = True,
             work()
     sym = symbol.upper()
     cfg = _pead_cfg(sym)
-    update = documents.run_document_pass(store, sym, cfg=cfg, fresh=[], use_llm=use_llm)
+    update = documents.run_document_pass(store, sym, cfg=cfg, fresh=[], use_llm=use_llm,
+        lookback_days=int(cfg["monitor"].get("lookback_days", 7)))
     return {"symbol": sym, "materiality": update.materiality,
             "event_summary": update.event_summary}
 

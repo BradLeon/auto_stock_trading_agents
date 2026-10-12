@@ -86,14 +86,14 @@ def _clean_summary(value: str, *, limit: int = 1000) -> str:
 
 def _evidence_details(details: dict[str, Any]) -> dict[str, Any]:
     """Store only bounded machine proof summaries, never source bodies or accounts."""
-    if not isinstance(details, dict) or set(details) - {"inputs", "rollback"}:
-        raise ValueError("details supports only inputs and rollback")
+    if not isinstance(details, dict) or set(details) - {"inputs", "rollback", "recovery"}:
+        raise ValueError("details supports only inputs, rollback and recovery")
     result: dict[str, Any] = {}
     for name in details:
         if not isinstance(details[name], list) or len(details[name]) > 100:
             raise ValueError(f"details.{name} must be a bounded list")
         result[name] = []
-        allowed = (
+        allowed = {"reference", "sha256"} if name == "recovery" else (
             {
                 "input_id",
                 "source_status",
@@ -239,6 +239,32 @@ def _invalid_event(
 
 
 def _rollback_failures(consumer, details, policy, *, now, scope) -> list[str]:
+    if "recovery" in details:
+        # New-contract safety uses the same registered exact-scope strategy as
+        # the real read gate. Old native comparison remains historical evidence.
+        from ats.workflow import read_recovery
+        from ats.workflow.exit_requirements import _artifact_verified
+        from ats.workflow.scoped_routes import RouteIdentity
+        try:
+            proofs = details['recovery']
+            if len(proofs) != 1:
+                raise ValueError('one exact recovery proof required')
+            identity = RouteIdentity(consumer['domain'], consumer['id'], consumer['contract_version'], scope)
+            registered = read_recovery.current_policy(identity)
+            if registered is None or registered['stopped'] or any(
+                registered[key] != proofs[0][key] for key in ('reference','sha256')
+            ):
+                raise ValueError('current recovery registration differs')
+            body = read_recovery._proof(identity, registered)
+            if (datetime.fromisoformat(body['valid_until']) <= now
+                    or not _artifact_verified(body['drill'])
+                    or body['drill'].get('identity') != identity.as_row()
+                    or body['drill'].get('history_preserved') is not True
+                    or body['drill'].get('old_worker_fenced') is not True):
+                raise ValueError('actual exact-scope recovery drill incomplete')
+            return []
+        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, RuntimeError):
+            return ['new_recovery_unverified']
     routes = policy.get("rollback_routes", {})
     if not routes:
         return ["rollback_policy_missing"]

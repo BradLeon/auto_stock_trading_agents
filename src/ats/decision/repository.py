@@ -367,6 +367,7 @@ class DecisionAuditRepository:
         from ..workflow.cutover_wiring import guard_approval_write
 
         guard_approval_write(store=self.store, what="a risk review")
+        self.validate_research_dependencies(cycle_id)
         # §5.3/§10.2: a review binds ONE revision under ONE ruleset at ONE
         # snapshot instant. Any missing binding makes the row unverifiable, so
         # it is invalid by construction, not merely sparse.
@@ -405,6 +406,7 @@ class DecisionAuditRepository:
         from ..workflow.cutover_wiring import guard_approval_write
 
         guard_approval_write(store=self.store, what="a Boss approval")
+        self.validate_research_dependencies(cycle_id)
         self.conn.execute(
             "INSERT OR IGNORE INTO boss_approvals (approval_id, cycle_id, "
             "revision_no, decision_hash, decision, reviewer, comment, channel, "
@@ -417,6 +419,20 @@ class DecisionAuditRepository:
             (idempotency_key,)).fetchone()           # type: ignore[return-value]
 
     # --- chain read (2.6) ----------------------------------------------------- #
+    def validate_research_dependencies(self, cycle_id: str) -> None:
+        """Validate the persisted new research basis, independent of a caller context.
+
+        Historical cycles without the new requirement contract remain readable;
+        a new contract cannot omit its frozen dependencies or borrow another scope.
+        """
+        cycle = self.get_cycle(cycle_id)
+        if cycle is None or not cycle["research_snapshot"]:
+            return
+        basis = json.loads(cycle["research_snapshot"])
+        if basis.get("requirements"):
+            from ..workflow.decision_requirements import validate_chief
+            validate_chief(self.store, basis, at=evaluation_now(timezone.utc))
+
     def read_chain(self, cycle_id: str) -> dict[str, Any]:
         """The complete causal chain of one cycle, from storage alone.
 

@@ -674,7 +674,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `ramp_ai_index` | `current_partial` | `persistent` | `ramp_ai_adoption, ramp_ai_spend` |
 | `openrouter_rankings` | `current_partial` | `persistent` | `openrouter_rankings_daily` |
 | `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
-| `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
+| `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks, frontier_ai_public_model_cards` |
 | `tw_mof_exports` | `current_partial` | `persistent` | `regional_tw_exports` |
 | `kr_ecos_exports` | `current_partial` | `persistent` | `regional_kr_exports` |
 | `trendforce_dram` | `current_partial` | `persistent` | `industry_dram_contract_price` |
@@ -702,6 +702,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `ramp_ai_spend` | `current_partial` |
 | `openrouter_rankings_daily` | `current_partial` |
 | `frontier_ai_capability_benchmarks` | `current_partial` |
+| `frontier_ai_public_model_cards` | `current_partial` |
 | `sp500_earnings_insight` | `current_partial` |
 | `regional_tw_exports` | `current_partial` |
 | `regional_kr_exports` | `current_partial` |
@@ -825,6 +826,10 @@ ats data factset-reprocess factset-text-v2 --report-path /absolute/path/Earnings
 ```
 
 周六 `factset_weekly_ingest` 必须先于 Macro→Sector 周评。当前 `index_core`、`sector_core`、`macro_factset` 和 `sector_factset` 都已是 `platform`：`082826` 的 231 个适用行业单元格已由人工 golden cells 与独立原图 decoder 逐格验证。日常运行不再读取 `macro.yaml` 的本地文件夹，也不得让 Macro 或 Sector 现场下载/解析 PDF。遇到 `unreachable`、`not_pdf` 或 `parse_failed` 时，产品保留上一期并标记 `stale`；没有上一期则返回 `unavailable`，不得以零值代替。完整运行顺序、版权和回滚规则见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。
+
+## Phase F 持久运行许可
+
+Phase F 持久运行许可使用显式 `until_stopped` 部署请求和稳定 `per_invocation` scope；逐次 as_of、查询窗口、实际事件和输入有效性独立检查。报价阶段用途与 `deployment_purpose` 分列，许可不替代单笔审批。实现、隔离验证和后续生产冻结/资格步骤见 [持久运行报告](PHASE_F_PERSISTENT_RUNTIME.md)。
 
 ## AI 生产化 Observer 运维
 

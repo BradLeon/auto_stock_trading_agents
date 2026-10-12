@@ -361,7 +361,9 @@ def frozen_snapshot_stale_reasons(store: Any, payload: Mapping[str, Any] | None,
 
     stamp = at or datetime.now(timezone.utc)
     reasons: list[str] = []
-    for item in frozen_snapshot_items(payload):
+    items = frozen_snapshot_items(payload)
+    frozen_refs = {item.projection_id for item in items if item.projection_id}
+    for item in items:
         if not item.reusable or not item.projection_id:
             continue
         where = f"{item.category}[{item.scope_kind}:{item.scope_id}]"
@@ -387,6 +389,16 @@ def frozen_snapshot_stale_reasons(store: Any, payload: Mapping[str, Any] | None,
             agent_role=row.get("agent_role"), scope_kind=item.scope_kind,
             scope_id=item.scope_id, limit=1)
         if newer and newer[0].get("projection_id") != item.projection_id:
+            latest = newer[0]
+            # Per-fact Routine updates share one terminal producer. Every
+            # member is already cited and individually checked in this basis;
+            # a sibling is not a later analysis replacing that basis.
+            if (latest.get("projection_id") in frozen_refs
+                    and row.get("agent_run_id")
+                    and row.get("workflow_run_id")
+                    and latest.get("agent_run_id") == row.get("agent_run_id")
+                    and latest.get("workflow_run_id") == row.get("workflow_run_id")):
+                continue
             if (normalize_refs(newer[0].get("data_vintage_refs"))
                     != normalize_refs(row.get("data_vintage_refs"))):
                 reasons.append(f"{where}: 关键数据 vintage 变化，已出现新版本分析")

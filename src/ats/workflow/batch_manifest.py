@@ -442,6 +442,7 @@ def dry_run_batch(batch: CutoverBatch, *,
                   | None = None,
                   report_checker: Callable[[CutoverBatch], tuple[bool, list[str]]]
                   | None = None,
+                  projection_checker=None,
                   path: str | Path | None = None,
                   cutover_path: str | Path | None = None,
                   record: bool = True) -> DryRunResult:
@@ -476,6 +477,25 @@ def dry_run_batch(batch: CutoverBatch, *,
         if record:
             _record_dry_run(result, path=path)
         return result
+
+    # The formal plan uses the identical executor/gates as commit. Historical
+    # product-list declarations and empty schedule consumer sets cannot be ready.
+    if batch.batch_class in {RESEARCH_READ, SCHEDULE}:
+        from . import read_cutover as executor
+        auth = executor.read_authorisation(batch.scope.get('deployment_authorisation', ''), path=path)
+        planned = executor.execute_batch(batch, qualification_reader=qualification_reader,
+            report_checker=report_checker, projection_checker=projection_checker,
+            authorisation=auth, path=path, cutover_path=cutover_path, record=False)
+        result.outcome = READY if planned.outcome in {executor.BATCH_SWITCHED, executor.BATCH_NOOP} else BLOCKED
+        result.reasons = [s.consumer_id + ': ' + s.reason for s in planned.scopes if s.reason]
+        result.checks = {'formal_executor': planned.as_row(), 'routes_changed': planned.changed}
+        result.qualification_status = 'eligible' if result.outcome == READY else 'blocked'
+        result.report_citable = result.outcome == READY
+        if record:
+            _record_dry_run(result, path=path)
+        return result
+    result.outcome = BLOCKED
+    reasons.append('dedicated approval/trade protocol required; this read/schedule plan cannot authorize it')
 
     # --- 1. can this batch be undone? ---------------------------------------
     verdict = routing.assess_fallback(
@@ -583,6 +603,7 @@ def _record_dry_run(result: DryRunResult, *, path: str | Path | None = None) -> 
 def dry_run(*, batch_ids: Sequence[str] | None = None,
             qualification_reader: Callable[[str, dict[str, Any]], dict[str, Any]]
             | None = None,
+            projection_checker=None,
             report_checker: Callable[[CutoverBatch], tuple[bool, list[str]]]
             | None = None,
             path: str | Path | None = None,
@@ -597,7 +618,7 @@ def dry_run(*, batch_ids: Sequence[str] | None = None,
     batches = ([read_batch(b, path=path) for b in batch_ids] if batch_ids
                else list_batches(path=path))
     return [dry_run_batch(batch, qualification_reader=qualification_reader,
-                          report_checker=report_checker, path=path,
+                          report_checker=report_checker, projection_checker=projection_checker, path=path,
                           cutover_path=cutover_path)
             for batch in batches]
 

@@ -149,6 +149,33 @@ def identity(workflow, scope, trigger):
     return hashlib.sha256(canonical(value).encode()).hexdigest(), value
 
 
+def assert_scope_execution_records(conn, workflow, scope):
+    """Recovery needs the real claim ledger, including completed triggers.
+
+    Durable arrival/claim history survives a lost mutable record. It must never
+    become permission to execute that logical trigger again in a new generation.
+    Older claim events identify their scope through the recorded arrival.
+    """
+    scope_json = canonical(scope)
+    arrivals = {}
+    for event in conn.execute("SELECT key,payload FROM schedule_runtime_history WHERE action='arrival'"):
+        value = json.loads(event['payload']).get('identity')
+        if value and value.get('workflow') == workflow and canonical(value.get('scope')) == scope_json:
+            arrivals[event['key']] = value
+    claimed = {row[0] for row in conn.execute("SELECT key FROM schedule_runtime_history WHERE action='claim'")}
+    for key, logical in arrivals.items():
+        if key not in claimed:
+            continue
+        row = conn.execute("SELECT * FROM schedule_runtime_claims WHERE key=?", (key,)).fetchone()
+        if (row is None or row['workflow'] != workflow or row['scope'] != scope_json
+                or row['identity'] != canonical(logical)
+                or row['status'] not in {'running','pending','failed','complete','void'}
+                or row['generation'] < 1):
+            raise ScheduleAuthorityError('scope execution records missing/corrupt; remain stopped')
+        json.loads(row['result_refs'])
+        json.loads(row['result_json'])
+
+
 @dataclass(frozen=True)
 class Lease:
     key: str
@@ -797,6 +824,7 @@ def handover(token, *, to_owner, dispositions, actor, reason):
             state = conn.execute("SELECT * FROM schedule_scope_owners WHERE frozen=1 AND token=?", (token,)).fetchone()
             if state is None:
                 raise ScheduleAuthorityError("frozen token missing")
+            assert_scope_execution_records(conn, state['workflow'], json.loads(state['scope']))
             rows = conn.execute("SELECT * FROM schedule_runtime_claims WHERE workflow=? AND scope=? AND status IN ('running','failed','pending')",
                                 (state["workflow"], state["scope"])).fetchall()
             if set(dispositions) != {row["key"] for row in rows}:

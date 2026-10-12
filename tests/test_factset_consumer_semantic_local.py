@@ -102,8 +102,11 @@ def test_new_shadow_report_keeps_previous_release_explicitly_historical(tmp_path
     assert historical_asof.report.version_id == 'prior'
     assert historical_asof.status.state == 'platform'
     assert current_asof.report.version_id == 'prior'
-    assert current_asof.status.state == 'stale'
-    assert 'latest_unpublished_report:2026-09-18' in current_asof.status.warnings
+    # Monthly release contract: keep the latest released report usable and
+    # identify an unpublished newer report separately, without age degradation.
+    assert current_asof.status.state == 'platform'
+    assert current_asof.status.freshness == 'newer_unpublished'
+    assert current_asof.status.index_release.passed
     repository.close()
 
 

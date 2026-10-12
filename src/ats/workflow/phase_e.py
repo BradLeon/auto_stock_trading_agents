@@ -289,6 +289,11 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         source_paths.add("technical.yaml")
     if "macro-review" in ordered_task_ids:
         source_paths.add("macro.yaml")
+    if "information-brief" in ordered_task_ids:
+        for target in _scopes("information-brief", scope, root):
+            rel = f"pead/{target.id.upper()}.yaml"
+            if (root / rel).exists():
+                source_paths.add(rel)
     for rel_path in sorted(source_paths):
         if rel_path in source_hashes:
             continue

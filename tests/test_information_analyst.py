@@ -230,8 +230,9 @@ def test_monitor_chain_leaves_dossier_untouched_and_publishes_brief(monkeypatch)
                         lambda sym, since, until=None, consumer="pead_monitor": fresh)
     monkeypatch.setattr("ats.agents.information.documents.run_structured", lambda *a, **k: None)
     # LLM 失败路径：不产出简报、绝不写 dossier
-    upd = monitor.run("COHR", use_llm=True, lookback_days=7)
-    assert upd.symbol == "COHR"
+    with pytest.raises(RuntimeError, match="no brief published"):
+        monitor.run("COHR", use_llm=True, lookback_days=7)
+    assert store.task_projection_envelopes(agent_role="information_brief") == []
     assert store.get_dossier("COHR", "Q FY2026") is None  # 无 dossier 创建
     # use_llm=False 路径：只登记事件
     upd2 = monitor.run("COHR", use_llm=False)
@@ -241,15 +242,19 @@ def test_monitor_chain_leaves_dossier_untouched_and_publishes_brief(monkeypatch)
 
 def test_document_pass_publishes_brief_without_dossier_write(monkeypatch):
     from ats.agent.task_projection import ProjectionScope
-    from ats.agents.information import documents
+    from ats.agents.information import assemble, documents
     from ats.agents.pead.outputs import ContextUpdateView
     from ats.schemas.news import ContextUpdate
 
     store = _store()
-    view = ContextUpdateView(materiality=0.8, event_summary="capex up",
+    view = ContextUpdateView(materiality=0.8, confidence=0.6, event_summary="capex up",
                              narrative_delta="upstream demand stronger",
                              expectation_changes=[])
     monkeypatch.setattr(documents, "run_structured", lambda *a, **k: view)
+    # The admitted event is dated NOW; evaluate its seven-day window at that
+    # same declared point rather than the day the test happens to execute.
+    monkeypatch.setattr(assemble, "evaluation_now", lambda tz: NOW)
+    monkeypatch.setattr(documents, "evaluation_now", lambda tz: NOW)
     # 预置一条已准入事件（发布时间在窗口内）
     from ats.schemas.news import NewsItem
 
@@ -341,3 +346,44 @@ def _noop_update(sym):
     from ats.schemas.news import ContextUpdate
 
     return ContextUpdate(symbol=sym, as_of=NOW, materiality=0.0, event_summary="none")
+
+
+@pytest.mark.parametrize('data', [{}, {'confidence':None}])
+def test_information_model_request_requires_explicit_nonnull_confidence(data):
+    from pydantic import ValidationError
+    from ats.agents.information.documents import InformationContextUpdateView
+    from ats.agents.pead.outputs import ContextUpdateView
+    schema = InformationContextUpdateView.model_json_schema()
+    assert 'confidence' in schema['required']
+    assert schema['properties']['confidence']['type'] == 'number'
+    with pytest.raises(ValidationError):
+        InformationContextUpdateView(materiality=0.1, **data)
+    assert ContextUpdateView(materiality=0.1).confidence is None
+
+
+def test_actual_information_model_call_uses_required_confidence_schema(monkeypatch):
+    from ats.agents.information import documents
+    captured = {}
+    def transport(role, schema, context, **kwargs):
+        captured['schema'] = schema.model_json_schema()
+        return schema(materiality=0.01, confidence=0.87, event_summary='Verified factual summary')
+    monkeypatch.setattr(documents, 'run_structured', transport)
+    update = documents._llm_brief('COHR', [], [])
+    assert 'confidence' in captured['schema']['required']
+    assert update.confidence == 0.87 and update.materiality == 0.01
+
+
+def test_information_response_roundtrips_through_frozen_contract_decoder():
+    from ats.agents.information.outputs import InformationContextUpdateView
+    from ats.workflow.business_replay_inputs import decode, encode
+
+    response = InformationContextUpdateView(
+        materiality=0.01, confidence=0.87, event_summary='Verified factual summary')
+    recorded = encode(response)
+    assert recorded['$model'] == (
+        'ats.agents.information.outputs:InformationContextUpdateView')
+    assert decode(recorded) == response
+    # Arbitrary computation modules remain outside the recorded contract surface.
+    with pytest.raises(ValueError, match='outside data/schema contracts'):
+        decode({**recorded, '$model': (
+            'ats.agents.information.documents:InformationContextUpdateView')})

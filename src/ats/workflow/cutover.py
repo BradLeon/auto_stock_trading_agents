@@ -230,6 +230,39 @@ def all_boundaries(path: str | Path | None = None) -> dict[str, BoundaryState]:
     return {b: read_boundary(b, path) for b in SIX_BOUNDARIES}
 
 
+def assert_runtime_startup(*, caller: str, path=None) -> dict[str, BoundaryState]:
+    """Read-only service admission; never bootstrap an unreadable authority.
+
+    Qualification and pending joint fences remain per business scope at the real
+    entry. A revoked scope must not turn this structural check into a global stop.
+    """
+    from contextlib import closing
+    from .scoped_routes import RouteIdentity, canonical_json
+
+    target = Path(path or default_cutover_db_path()).resolve()
+    try:
+        with closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN")
+            rows = [dict(row) for row in conn.execute("SELECT * FROM cutover_boundary_state")]
+            if len(rows) != len(SIX_BOUNDARIES) or {r["boundary"] for r in rows} != set(SIX_BOUNDARIES):
+                raise CutoverError("startup authority does not contain exactly six boundaries")
+            if any(row["route"] not in VALID_ROUTES for row in rows):
+                raise CutoverError("startup conflicting/unknown active route")
+            states = {row["boundary"]: BoundaryState(row["boundary"], row["route"]) for row in rows}
+            assert_compatible(states)
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_cutover_routes'").fetchone():
+                for row in conn.execute("SELECT * FROM scoped_cutover_routes"):
+                    who = RouteIdentity(**json.loads(row["identity_json"]))
+                    if (who.key != row["identity_key"] or row["identity_json"] != canonical_json(who.as_row())
+                            or row["boundary"] not in SIX_BOUNDARIES or row["route"] not in VALID_ROUTES
+                            or not isinstance(row["generation"], int) or row["generation"] < 1):
+                        raise CutoverError("startup scoped authority corrupt")
+            return states
+    except (sqlite3.Error, OSError, KeyError, ValueError, TypeError) as exc:
+        raise CutoverError(f"{caller}: startup control authority unreadable: {exc}") from exc
+
+
 def set_route(boundary: str, route: str, *, actor: str = "", reason: str = "",
               path: str | Path | None = None) -> BoundaryState:
     """Move ONE boundary. Others are untouched by construction.

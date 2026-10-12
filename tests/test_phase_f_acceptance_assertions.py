@@ -40,7 +40,7 @@ def measured(tmp_path, db_paths):
             "input":data.model_dump(mode="json"),"surface":"persistent_refs"}
     inputs = replay.freeze_inputs(run_id="fixed",consumer_id="macro",batch_class="research_read",
         scope=identity.scope,logical_eval_time=plan.as_of,
-        contents={"persistent_refs":[read["input"]],"projection_hash":[]},reads=[read])
+        contents={"persistent_refs":[read["input"]],"projection_hash":{}},reads=[read])
     result = Dispatcher(workflow_store=WorkflowStore(db_paths),adapters={"macro-review":_fake_adapter}).dispatch(plan)
     assert result.complete
     with task_store_scope(db_paths) as store:
@@ -98,6 +98,29 @@ def test_input_hash_and_consumption_are_independent_requirements(measured):
     matrix,evidence = measured
     evidence["inputs"].contents["persistent_refs"][0]["payload"]["rate"] = 99
     assert checks.evaluate(matrix,evidence).results[0].status == "failed"
+
+
+@pytest.mark.parametrize("malformed", [[], ["summary-only"], "unbound"])
+def test_malformed_projection_records_are_failed_not_an_unhandled_exception(measured, malformed):
+    matrix, evidence = measured
+    evidence["inputs"].contents["projection_hash"] = malformed
+    # Valid content binding isolates the shape check from the hash-mismatch guard.
+    evidence["inputs"].packet.surfaces["projection_hash"] = replay.digest(malformed)
+    result = checks.evaluate(matrix, evidence)
+    assert not result.passed and result.results[0].status == "failed"
+    assert "records malformed" in result.results[0].reason
+
+
+@pytest.mark.parametrize("malformed", [[], "summary-only", None, True])
+def test_hash_valid_malformed_model_rows_are_failed_not_an_unhandled_exception(measured, malformed):
+    matrix, evidence = measured
+    inputs = evidence["inputs"]
+    model = {"rows": {"bad-row": malformed}}
+    inputs.contents["model_config"] = model
+    inputs.packet.surfaces["model_config"] = replay.digest(model)
+    result = checks.evaluate(matrix, evidence)
+    assert not result.passed and result.results[0].status == "failed"
+    assert "records malformed" in result.results[0].reason
 
 
 @pytest.mark.parametrize("damage",["omission","duplicate_publication","old_generation"])
@@ -191,3 +214,27 @@ def test_actual_business_new_side_resolves_schedule_and_analysis_without_old_ora
     assert all(r.status == "passed" for r in result.results if r.dimension in {"schedule","analysis"}),json.dumps(result.as_dict())
     assert result.results[0].status == "untested"  # Entire report/runner remains a separate task.
     record_property("actual_new_business_assertions",json.dumps(result.as_dict()))
+
+
+def test_non_routine_output_cardinality_remains_single(measured):
+    matrix, evidence = measured
+    evidence = {**evidence, 'dispatch':copy.deepcopy(evidence['dispatch'])}
+    evidence['dispatch']['outcomes'][0]['projection_refs'] *= 2
+    result = checks.evaluate(matrix, evidence)
+    assert not result.passed
+    assert any(r.dimension=='analysis' and r.status=='failed' for r in result.results)
+
+
+def test_predeclared_quantity_units_refuse_realistic_hundredfold_error():
+    expected = checks.quantity_values('SpaceX plans 1.44 million chips; financing is $40B.')
+    assert expected == ['1440000', '40000000000']
+    correct = checks.quantity_values('144万颗芯片；融资约400亿美元。')
+    criterion = [{'path':'quantity_values','op':'subset','value':expected}]
+    checks.check_criteria({'quantity_values':correct}, criterion)
+    with pytest.raises(ValueError, match='criterion failed'):
+        checks.check_criteria({'quantity_values':checks.quantity_values('1.44 万颗芯片')}, criterion)
+    checks.check_criteria({'quantity_values':[]}, [{'path':'quantity_values','op':'subset','value':[]}])
+    with pytest.raises(ValueError):
+        checks.check_criteria({'quantity_values':'1440000'}, criterion)
+    assert checks.quantity_values('[2026-10-07] 144万 chips; source-id-244b-xx') == ['1440000']
+    assert checks.quantity_values('loss $-2B; 正增长 +20亿美元') == ['-2000000000', '2000000000']

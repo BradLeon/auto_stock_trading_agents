@@ -75,15 +75,24 @@ def price_request(consumer, orders, *, cycle_id, purpose, currency="USD", audit=
         scope = {**parent.identity.scope, "purpose": purpose, "currency": currency}
         if not set(symbols) <= set(scope["entities"]):
             raise PermissionError("execution_price_order_escapes_business_scope")
-    if business_scope is not None:
-        supplied = business_scope.scope if hasattr(business_scope, "scope") else business_scope
-        if supplied.get("purpose") != purpose or supplied.get("currency") != currency:
-            raise PermissionError("execution_price_business_purpose_mismatch")
-        scope = supplied
-    identity = business_identity(consumer, kind=scope["kind"], scope_id=scope["id"],
-                                 entities=scope["entities"], explicit=scope,
-                                 event_id=scope.get("event_id", ""),
-                                 event_version=scope.get("event_version", ""))
+    if parent is not None and parent.identity.scope.get("time_policy") == "per_invocation":
+        if parent.identity.consumer_id != consumer:
+            raise PermissionError("execution_price_requires_own_role_permission")
+        if business_scope is not None:
+            supplied = business_scope.scope if hasattr(business_scope, "scope") else business_scope
+            if supplied != parent.identity.scope:
+                raise PermissionError("execution_price_business_scope_escape")
+        identity = parent.identity
+    else:
+        if business_scope is not None:
+            supplied = business_scope.scope if hasattr(business_scope, "scope") else business_scope
+            if supplied.get("purpose") != purpose or supplied.get("currency") != currency:
+                raise PermissionError("execution_price_business_purpose_mismatch")
+            scope = supplied
+        identity = business_identity(consumer, kind=scope["kind"], scope_id=scope["id"],
+                                     entities=scope["entities"], explicit=scope,
+                                     event_id=scope.get("event_id", ""),
+                                     event_version=scope.get("event_version", ""))
     with bind_read(identity):
         token = _REQUEST.set(PriceRequest(consumer, cycle_id, purpose, symbols, currency, identity))
         quotes = {d.execution_basis["quote_ref"]: d.execution_basis["quote"] for d in orders

@@ -476,37 +476,71 @@ def scan_projection_scopes(store, *, at=None,
     straight from Phase A's `reuse_decision` so the report never forks terms.
     """
     from ...agent.task_projection import reuse_decision
+    from ...workflow.decision_requirements import routine_producer_refs, validate_routine_value_contract
+    from ...workflow.cutover_routing import RouteUnavailable
 
     manifest = None
     if projection_manifest is not None:
-        manifest = {(item["role"], item["scope_kind"], item["scope_id"]): item
-                    for item in projection_manifest}
+        manifest = {}
+        for item in projection_manifest:
+            manifest.setdefault((item["role"], item["scope_kind"], item["scope_id"]), []).append(item)
     detail: list[dict] = []
     for task_id, plan in (query_plan if query_plan is not None else projection_query_plan()).items():
         for scope in plan["scopes"]:
-            selected = (manifest.get((plan["role"], scope.kind, scope.id))
-                        if manifest is not None else None)
-            projection_id = str(selected.get("projection_id", "")) if selected else ""
-            row = (_latest_row(store, role=plan["role"], scope=scope,
-                               projection_id=projection_id,
-                               content_hash=str(selected.get("content_hash", "")
-                                                if selected else ""))
-                   if manifest is None or selected else None)
-            if row is None:
+            references = (manifest.get((plan["role"], scope.kind, scope.id), [])
+                          if manifest is not None else [None])
+            if manifest is None and plan["role"] == "fundamental_expectation_update":
+                latest = _latest_row(store, role=plan["role"], scope=scope)
+                if latest and latest.get("agent_run_id"):
+                    refs = routine_producer_refs(store, latest, scope)
+                    valid = bool(refs)
+                    if not valid:
+                        detail.append({"task_id": task_id, "role": plan["role"],
+                            "scope": scope.key, "status": "producer_unresolved",
+                            "projection_id": latest["projection_id"], "content_hash": latest["content_hash"],
+                            "as_of": latest["as_of"], "reason": "complete terminal Routine producer required"})
+                        continue
+                    references = [{"projection_id": ref, "producer_attempt": latest["agent_run_id"],
+                                   "producer_run": latest["workflow_run_id"]} for ref in refs]
+            for selected in references or [None]:
+                projection_id = str(selected.get("projection_id", "")) if selected else ""
+                row = (_latest_row(store, role=plan["role"], scope=scope,
+                                   projection_id=projection_id,
+                                   content_hash=str(selected.get("content_hash", "")
+                                                    if selected else ""))
+                       if manifest is None or selected else None)
+                if row is None:
+                    detail.append({"task_id": task_id, "role": plan["role"],
+                                   "scope": scope.key, "status": "missing",
+                                   "projection_id": "", "content_hash": "",
+                                   "as_of": "", "reason": "missing"})
+                    continue
+                envelope = _envelope_from_row(row, scope)
+                if plan["role"] == "fundamental_expectation_update":
+                    try:
+                        validate_routine_value_contract(envelope.payload)
+                    except RouteUnavailable as exc:
+                        detail.append({"task_id":task_id, "role":plan["role"], "scope":scope.key,
+                            "status":"value_unconfirmed", "projection_id":envelope.projection_id,
+                            "content_hash":envelope.content_hash, "as_of":envelope.as_of,
+                            "reason":str(exc)})
+                        continue
+                if (manifest is None and selected and selected.get("producer_attempt")
+                        and (envelope.agent_run_id != selected["producer_attempt"]
+                             or envelope.workflow_run_id != selected["producer_run"])):
+                    detail.append({"task_id": task_id, "role": plan["role"], "scope": scope.key,
+                        "status": "producer_mismatch", "projection_id": envelope.projection_id,
+                        "content_hash": envelope.content_hash, "as_of": envelope.as_of,
+                        "reason": "Routine member differs from complete terminal producer"})
+                    continue
+                reusable, reason = reuse_decision(envelope, scope=scope, at=at)
                 detail.append({"task_id": task_id, "role": plan["role"],
-                               "scope": scope.key, "status": "missing",
-                               "projection_id": "", "content_hash": "",
-                               "as_of": "", "reason": "missing"})
-                continue
-            envelope = _envelope_from_row(row, scope)
-            reusable, reason = reuse_decision(envelope, scope=scope, at=at)
-            detail.append({"task_id": task_id, "role": plan["role"],
-                           "scope": scope.key,
-                           "status": "fresh" if reusable else reason,
-                           "projection_id": envelope.projection_id,
-                           "as_of": envelope.as_of, "reason": reason,
-                           "content_hash": envelope.content_hash,
-                           "payload": envelope.payload})
+                               "scope": scope.key,
+                               "status": "fresh" if reusable else reason,
+                               "projection_id": envelope.projection_id,
+                               "as_of": envelope.as_of, "reason": reason,
+                               "content_hash": envelope.content_hash,
+                               "payload": envelope.payload})
     return detail
 
 
@@ -600,7 +634,7 @@ def build_chief_snapshot(store, *, at=None,
     for d in detail:
         if ROLE_TO_CATEGORY.get(d["role"]) == "fundamental_analysis":
             winner = fund_winners.get(d["scope"])
-            if not winner or winner[1] is not d:
+            if not winner or winner[0] != d["task_id"]:
                 continue
         kind, _, ident = d["scope"].partition(":")
         items.append(SnapshotItem(
@@ -648,8 +682,10 @@ def projection_context_block(detail: list[dict]) -> str:
             if "direction" in payload:
                 head += (f" · direction={int(payload['direction']):+d}"
                          "（研究输入：预期差方向，非交易指令）")
-            if "new_value" in payload:
+            if payload.get("new_value") is not None:
                 head += f" · {payload.get('metric')}={payload.get('new_value')}"
+            elif payload.get("metric") == "narrative":
+                head += " · 定性叙事更新（无可量化 KPI 读数）"
             head += f" · {(payload.get('narrative') or payload.get('driver') or '')[:80]}"
         elif task_id == "macro_review":
             head += f" · regime={payload.get('regime')} · {payload.get('summary', '')[:80]}"

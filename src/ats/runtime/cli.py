@@ -369,6 +369,7 @@ def batch_command(args, *, parser) -> int:
     loop before deciding.
     """
     from ..workflow import batch_manifest as bm
+    from ..workflow.read_deployment import projection_check
 
     manifest = args.db or None
     cutover = args.cutover_db or None
@@ -447,6 +448,7 @@ def batch_command(args, *, parser) -> int:
         from ..workflow.shadow_reports import check_batch_report
 
         result = bm.dry_run_batch(batch, qualification_reader=_reader,
+                                  projection_checker=projection_check,
                                   report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
                                   path=manifest, cutover_path=cutover)
         print(json.dumps({"batch": batch.as_row(), "dry_run": result.as_row()},
@@ -458,6 +460,7 @@ def batch_command(args, *, parser) -> int:
         from ..workflow.shadow_reports import check_batch_report
 
         results = bm.dry_run(qualification_reader=_reader, path=manifest,
+                             projection_checker=projection_check,
                              report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
                              cutover_path=cutover)
         if args.json:
@@ -1137,32 +1140,13 @@ def read_cutover_command(args, *, parser) -> int:
     action = args.action
 
     def _reader(consumer_id, scope):
-        """Live qualification for one consumer.
-
-        Two things are load-bearing here.
-
-        The scope is DERIVED from the manifest, never taken from the caller: a
-        caller-chosen scope is how a narrow pass gets registered as a broad one,
-        so the same helper the evidence was registered under is the one that must
-        query it.
-
-        And a gate that raises is reported as `unreadable`, not as `ineligible` —
-        those are different findings. Conflating them means "I looked it up wrong"
-        gets reported as "it does not qualify", which is a claim about the
-        consumer rather than about the query.
-        """
-        from ..data.assurance import qualification as _qualification
+        from ..data.assurance import qualification
         from ..workflow.cutover_routing import _consumer_contract
-        from ..workflow.intake import _consumer_scope
+        contract = _consumer_contract(consumer_id)
+        return qualification(domain_id=contract["domain_id"], consumer_id=consumer_id,
+                             contract_version=contract["contract_version"], scope=scope)
 
-        try:
-            contract = _consumer_contract(consumer_id)
-            return _qualification(
-                domain_id=contract["domain_id"], consumer_id=consumer_id,
-                contract_version=contract["contract_version"],
-                scope=_consumer_scope(consumer_id, contract))
-        except Exception as exc:  # noqa: BLE001 - a gate that crashes is not a pass
-            return {"status": "unreadable", "reason": f"{type(exc).__name__}: {exc}"}
+    from ..workflow.read_deployment import authorize, projection_check
 
     def _report_ok(batch):
         """Delegates to the shadow report's own applicability check (3.6).
@@ -1185,8 +1169,16 @@ def read_cutover_command(args, *, parser) -> int:
             valid_until=_require(args.valid_until, "--valid-until", parser),
             note=args.note or "")
         try:
+            previous = rc.read_authorisation(auth.reference, path=manifest)
+            if previous is not None and previous != auth:
+                raise rc.DeploymentAuthorizationError('deployment authorisation reference is immutable')
+            if args.batch_id:
+                batch = bm_read(args.batch_id, parser, manifest)
+                if cutover and Path(cutover).resolve() != Path(rc.plane.default_cutover_db_path()).resolve():
+                    raise rc.DeploymentAuthorizationError("authorize must use active runtime authority")
+                authorize(batch, auth, actor=args.actor or auth.issued_by)
             rc.write_authorisation(auth, path=manifest, actor=args.actor)
-        except rc.DeploymentAuthorizationError as exc:
+        except (rc.DeploymentAuthorizationError, rc.plane.CutoverError, KeyError, ValueError) as exc:
             print(str(exc))
             return 1
         print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
@@ -1208,17 +1200,18 @@ def read_cutover_command(args, *, parser) -> int:
                   "command line would not be readable by whoever asks who allowed it")
             return 1
         if not args.batch_id:
-            print(rc.render_report([rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok,
+            results = [rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
                 authorisation=auth, actor=args.actor, path=manifest,
-                cutover_path=cutover) for batch in _all_batches(manifest)]))
+                cutover_path=cutover) for batch in _all_batches(manifest)]
         else:
             batch = bm_read(args.batch_id, parser, manifest)
-            print(rc.render_report([rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok,
+            results = [rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
                 authorisation=auth, actor=args.actor, path=manifest,
-                cutover_path=cutover)]))
-        return 0
+                cutover_path=cutover)]
+        print(rc.render_report(results))
+        return 0 if results and all(r.outcome in {rc.BATCH_SWITCHED, rc.BATCH_NOOP} for r in results) else 1
 
     if action == "switch":
         if not args.authorisation:
@@ -1229,7 +1222,7 @@ def read_cutover_command(args, *, parser) -> int:
             batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
                             manifest)
             result = rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok,
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
                 authorisation=None, actor=args.actor or "cli", path=manifest,
                 cutover_path=cutover, apply=args.apply)
             print(rc.render_report([result]))
@@ -1244,7 +1237,7 @@ def read_cutover_command(args, *, parser) -> int:
             batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
                             manifest)
             result = rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok,
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
                 authorisation=None, actor=args.actor or "cli", path=manifest,
                 cutover_path=cutover, apply=args.apply)
             print(rc.render_report([result]))
@@ -1253,13 +1246,13 @@ def read_cutover_command(args, *, parser) -> int:
             return 1
         batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser, manifest)
         result = rc.execute_batch(
-            batch, qualification_reader=_reader, report_checker=_report_ok,
+            batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
             authorisation=auth, actor=args.actor or "cli", path=manifest,
             cutover_path=cutover, apply=args.apply)
         print(rc.render_report([result]))
         # Exit non-zero unless everything switched: a partial switch is not the
         # requested outcome and must not read as success in a script.
-        return 0 if result.outcome == rc.BATCH_SWITCHED else 2
+        return 0 if result.outcome in {rc.BATCH_SWITCHED, rc.BATCH_NOOP} else 2
 
     if action == "history":
         rows = rc.run_history(args.batch_id or "", path=manifest)
@@ -5047,6 +5040,12 @@ def main(argv: list[str] | None = None) -> int:
         help="score: run the Chief immediately after the recommendation persists",
     )
     args = parser.parse_args(argv)
+
+    # Only the explicit administrative bootstrap can initialize a missing
+    # authority. Business and ordinary inspection entries never create defaults.
+    if not (args.command == "cutover" and args.action == "state" and args.bootstrap):
+        from ..workflow.cutover import assert_runtime_startup
+        assert_runtime_startup(caller="ats.runtime.cli.main")
 
     if args.command == "data":
         persistent_write = args.action in {

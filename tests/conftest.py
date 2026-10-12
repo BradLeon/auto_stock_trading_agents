@@ -205,6 +205,12 @@ def _publish_cited_document(store, document_id: str, fetched_at: str) -> None:
 @pytest.fixture(autouse=True)
 def _isolate_db(tmp_path, monkeypatch):
     """Point Context Memory + checkpoints at throwaway DBs per test."""
+    # Redirect every audited persistence surface, without claiming isolated-run
+    # permission or manufacturing a qualification/grant. Tests can explicitly
+    # override a path later; no unspecified route/report authority may hit var/.
+    from ats.workflow.isolation import build_environment
+    for variable, destination in build_environment(tmp_path / 'unit-surfaces').surfaces.items():
+        monkeypatch.setenv(variable, destination)
     monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "mem.sqlite"))
     monkeypatch.setenv("ATS_CUTOVER_DB", str(tmp_path / "cutover.sqlite"))
     monkeypatch.setenv("ATS_DISPATCH_STATE_PATH", str(tmp_path / "dispatch.sqlite"))

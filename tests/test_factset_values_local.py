@@ -1,5 +1,6 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from pathlib import Path
 import pytest
 from ats.data.sources.factset_chart_grid import GridCell, PrintedGrid
 from ats.data.sources.factset_chart_values import parse_printed_number, read_grid_candidates
@@ -41,7 +42,9 @@ def test_alias_policy_conflicts_are_rejected(tmp_path):
     policy=load_layout_policy()
     policy['sector_aliases']['GICS_15'].append('Energy')
     p=tmp_path/'catalog.yaml'
-    p.write_text(yaml.safe_dump({'datasets':{'sp500_earnings_insight':{'extraction_policy':policy}}}))
+    catalog=yaml.safe_load(Path('config/data/structured.yaml').read_text())
+    catalog['datasets']['sp500_earnings_insight']['extraction_policy']=policy
+    p.write_text(yaml.safe_dump(catalog))
     with pytest.raises(ValueError,match='alias_conflict'):
         load_layout_policy(p)
 

@@ -206,6 +206,8 @@ class ExpectationChangeView(BaseModel):
 
 class ContextUpdateView(BaseModel):
     materiality: float = Field(description="0=noise .. 1=thesis-changing")
+    confidence: float | None = Field(default=None, ge=0, le=1,
+        description="Confidence in the factual summary; independent of materiality. Information requires this field.")
     event_summary: str = Field(default="", description="what's genuinely new since last update")
     narrative_delta: str = Field(default="", description="how the thesis changes; empty if nothing")
     expectation_changes: list[ExpectationChangeView] = Field(default_factory=list)

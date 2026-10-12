@@ -34,12 +34,13 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
         from ...data.consumer_api import read_input
 
         packet = read_input(consumer="information", product="DOC_DATA",
-                            scope={"entity": symbol, "limit": limit})
+                            scope={"entities": context.identity.scope["entities"], "limit": limit})
         if packet.status not in {"complete", "partial", "no_coverage"}:
             from ...workflow.cutover_routing import RouteUnavailable
 
             raise RouteUnavailable("Information admitted documents unavailable")
         return [{**row, "id": row["document_id"], "headline": row["title"],
+                 "symbol": row["entity"],
                  "input_ref": f"{row['document_id']}@{row['version_id']}"}
                 for row in packet.payload or []
                 if row.get("published_at") and row["published_at"] >= cutoff.isoformat()]

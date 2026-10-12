@@ -1,9 +1,9 @@
 """Adversarial audits of the durable actual 3.10 ledgers; originals stay readonly."""
 import copy
 import importlib.util
-import json
-from pathlib import Path
 import sqlite3
+from contextlib import ExitStack
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,8 +20,32 @@ INDEX = REPO_ROOT / "docs/validation/phase_f_independent_runner_20261009/evidenc
 
 
 @pytest.fixture(scope="module")
-def original():
-    source = json.loads(INDEX.read_text())
+def original(tmp_path_factory):
+    """Produce current records; historical indices cannot certify changed code."""
+    from test_phase_f_independent_runner import (
+        test_actual_full_capture_and_offline_process_replay as full,
+    )
+    from test_phase_f_independent_runner import (
+        test_research_only_capture_missing_environment_and_legacy_unavailable as research,
+    )
+    from test_phase_f_research_gate import business_inputs, research_isolation
+    source = {'reports':[]}
+    for label in ('routine','event','technical','technical-missing'):
+        directory=tmp_path_factory.mktemp('integration-'+label)
+        with ExitStack() as cleanup:
+            patcher=pytest.MonkeyPatch()
+            cleanup.callback(patcher.undo)
+            environment=research_isolation.__wrapped__(directory)
+            store=next(environment);cleanup.callback(environment.close)
+            fixture=business_inputs.__wrapped__(store,patcher,directory)
+            inputs=next(fixture);cleanup.callback(fixture.close)
+            if label in {'routine','event'}:
+                full(inputs,store,patcher,lambda *a:None,label)
+            else:
+                research(inputs,store,patcher,lambda *a:None,label=='technical')
+        source['reports'].append({'label':label,'report_id':'independent' if label in {'routine','event'} else 'research',
+            'report_db':str(directory/'iso/report.sqlite')})
+    source= audit.index(source)
     item = next(r for r in source["reports"] if r["label"] == "routine")
     body = reports.read(item["report_id"], path=item["report_db"])["body"]
     value, runs, _ = reports._executions(body["proof"], body["input_hash"])

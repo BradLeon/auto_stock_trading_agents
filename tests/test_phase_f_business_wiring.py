@@ -2,6 +2,7 @@
 import json
 import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -105,15 +106,16 @@ def test_clerk_rechecks_between_steps_and_never_swallows_boundary_refusal(monkey
 
 
 @pytest.fixture
-def synthetic_target(monkeypatch):
+def synthetic_target(monkeypatch, tmp_path):
     monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
     def move(identity):
         transition_route(co.PROJECTION_READ, identity, "target", actor="test", reason="synthetic",
-                         expected_generation=0,
+                         expected_generation=0, mode="isolated",
                          qualification=lambda i: {"identity": i.as_row(), "status": "eligible"},
                          report=lambda i: {"identity": i.as_row(), "valid": True, "reference": "fake"},
                          fallback=lambda i: {"identity": i.as_row(), "valid": True, "reference": "fake"})
-    return move
+    with isolated_run("business-wiring-target", root=tmp_path / "iso"):
+        yield move
 
 
 def entity(consumer="information", symbol="AMD", point=POINT):
@@ -227,12 +229,17 @@ def plan(tmp_path, *, namespace="dispatcher"):
 
 
 def prepare_schedule_unit(tmp_path, monkeypatch, owner="dispatcher"):
-    from ats.workflow.schedule_runtime import initialize
     import yaml
+
+    from ats.workflow.isolation import verified_isolation_root
+    from ats.workflow.schedule_runtime import initialize
+
+    isolated_root = verified_isolation_root()
     root=tmp_path/"schedule-unit-config"/"workflow"
     root.mkdir(parents=True,exist_ok=True)
     (root/"workflow_owners.yaml").write_text(yaml.safe_dump({"workflows":{"technical-review":{"mode":owner}}}))
-    monkeypatch.setenv("ATS_DISPATCH_STATE_PATH",str(tmp_path/"schedule-unit.sqlite"))
+    if isolated_root is None:
+        monkeypatch.setenv("ATS_DISPATCH_STATE_PATH",str(tmp_path/"schedule-unit.sqlite"))
     initialize(config_dir=root.parent)
 
 
@@ -249,7 +256,7 @@ def test_actual_dispatcher_rechecks_before_saved_result_reuse(tmp_path, syntheti
             payload={"entity": "AMD", "signal": "neutral", "summary": "fake", "levels": {"close": 100}}))
         return TaskAdapterResult()
     monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "eligible"})
-    dispatcher = Dispatcher(workflow_store=WorkflowStore(tmp_path / "workflow.sqlite"),
+    dispatcher = Dispatcher(workflow_store=WorkflowStore(Path(os.environ["ATS_DB_PATH"]).parent / "workflow.sqlite"),
                             adapters={"technical-review": adapter})
     assert dispatcher.dispatch(business_plan).status == "complete"
     assert calls == [identity]
@@ -353,7 +360,7 @@ def test_actual_dispatcher_mixed_entities_only_blocks_ineligible_scope(
             role="technical_review", scope=context.task.scope, as_of=POINT,
             payload={"entity": context.task.scope.id, "signal": "neutral", "summary": "fake", "levels": {"close": 100}}))
         return TaskAdapterResult()
-    result = Dispatcher(workflow_store=WorkflowStore(tmp_path / "mixed.sqlite"),
+    result = Dispatcher(workflow_store=WorkflowStore(Path(os.environ["ATS_DB_PATH"]).parent / "mixed.sqlite"),
                         adapters={"technical-review": adapter}).dispatch(business_plan)
     assert result.status == "incomplete" and calls == ["AMD"]
     assert {outcome.scope.id: outcome.status for outcome in result.outcomes} == {

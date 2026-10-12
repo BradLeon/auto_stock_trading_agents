@@ -126,7 +126,7 @@ def guard_write(boundary: str, *, what: str,
     from .runtime_reads import current_read_context
 
     context = current_read_context()
-    from .joint_cutover import assert_scope_open, assert_boundary_open, epoch
+    from .joint_cutover import assert_boundary_open, assert_scope_open, epoch
     if route_reader is None:
         if context:
             assert_scope_open(context.identity,boundary=boundary)
@@ -135,12 +135,31 @@ def guard_write(boundary: str, *, what: str,
         else:
             assert_boundary_open(boundary)
     if context:
+        if context.deployment:
+            from .runtime_reads import gate_read
+            gate_read(context.identity)  # Recheck permission/input/report before publication.
         policy = current_policy(context.identity)
         if policy and policy["stopped"]:
             raise ReadStopped("stopped read scope cannot publish or authorize dependent work")
         if (policy["event_id"] if policy else 0) != context.recovery_generation:
             raise ReadStopped("recovery strategy changed; old bound worker cannot publish")
     route = _route_of(boundary, route_reader)
+    if route_reader is None:
+        from .scoped_routes import resolve_route, route_summary
+
+        if context:
+            authority = resolve_route(boundary, context.identity)
+            expected = dict(context.publication_generations).get(boundary)
+            if expected is not None and authority["generation"] != expected:
+                raise BoundaryWriteRefused(
+                    boundary, "publication authority changed after worker binding",
+                    reason_code="publication_worker_stale")
+            route = authority["route"]
+        elif any(row["route"] == cutover_module.ROUTE_DISABLED
+                 for row in route_summary()[boundary]):
+            raise BoundaryWriteRefused(
+                boundary, "unscoped publication cannot bypass a stopped scope",
+                reason_code="publication_scope_required")
     if route == cutover_module.ROUTE_DISABLED:
         return WriteDecision(
             False, boundary, route, reason_code="boundary_disabled",

@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,7 +62,18 @@ def readonly_store(path):
     return store
 
 
-def cached_fallback_drills(data_path, internal_path):
+def probe_time(identity, as_of=None):
+    """A deployment scope is never substituted for an invocation clock."""
+    from ats.workflow.read_windows import check_time
+    window = identity.scope.get("time_range")
+    if as_of is None:
+        if not window or window["start"] != window["end"]:
+            raise ValueError("independent --as-of required for non-point business scope")
+        as_of = window["end"]
+    return check_time(identity, as_of)
+
+
+def cached_fallback_drills(data_path, internal_path, business_scopes, *, as_of=None, consumers=None):
     """Exercise stable native reads directly, preserving exact data scope/time."""
     manifest = yaml.safe_load(COVERAGE.read_text())
     routes = manifest["qualification_policy"]["rollback_routes"]
@@ -73,18 +84,32 @@ def cached_fallback_drills(data_path, internal_path):
     structured.conn.execute("BEGIN")
     unstructured.conn.execute("BEGIN")
     products = DataProducts(structured_repository=structured, unstructured_repository=unstructured)
-    now = datetime.now(timezone.utc)
+    invocation = datetime.fromisoformat(as_of) if isinstance(as_of, str) else as_of
+    if invocation is not None and invocation.tzinfo is None:
+        raise ValueError("probe as_of requires timezone")
+    now = invocation or datetime.now(UTC)
     internal = readonly_store(internal_path) if internal_path.is_file() else None
     output = []
     try:
         for consumer in manifest["consumers"]:
+            if consumers is not None and consumer["id"] not in consumers:
+                continue
             proofs = []
             scopes = {}
+            business_scope = business_scopes.get(consumer["id"])
+            if business_scope:
+                from ats.workflow.scoped_routes import RouteIdentity
+                identity = RouteIdentity(consumer["domain"], consumer["id"],
+                    consumer["contract_version"], business_scope)
+                business_scope = identity.scope
+                now = probe_time(identity, invocation)
             for product in consumer["products"]:
                 scope, native, packet, native_reader = {}, None, None, None
                 reason = ""
                 refs = []
                 try:
+                    if not business_scope:
+                        raise ValueError("explicit_business_scope_missing")
                     if product in {"HIER_DATA", "COMPANY_DATA", "MACRO_DATA"}:
                         dataset = {
                             "HIER_DATA": "industry_dram_contract_price",
@@ -96,8 +121,9 @@ def cached_fallback_drills(data_path, internal_path):
                             "FROM structured_observations o "
                             "JOIN structured_series s ON s.series_id=o.series_id "
                             "WHERE s.dataset_id=? AND o.quality_status='accepted' "
+                            "AND s.entity_id IN (" + ",".join("?" for _ in business_scope["entities"]) + ") "
                             "ORDER BY o.known_at DESC LIMIT 1",
-                            (dataset,),
+                            (dataset, *business_scope["entities"]),
                         ).fetchone()
                         if row is None:
                             raise ValueError("accepted_cache_missing")
@@ -107,23 +133,23 @@ def cached_fallback_drills(data_path, internal_path):
                             "dataset": dataset,
                         }
                         packet = read_input(
-                            consumer["id"], product, scope=scope, as_of=now, products=products
+                            consumer["id"], product, scope=scope, business_scope=business_scope, as_of=now, products=products
                         )
 
-                        def native_reader():
+                        def native_reader(scope=scope, now=now):
                             return products.metric_series(**scope, as_of=now)
 
                         native = native_reader()
                     elif product == "DOC_DATA":
-                        scope = {"entity": "NVDA", "limit": 20}
+                        scope = {"entity": business_scope["entities"][0], "limit": 20}
                         packet = read_input(
-                            consumer["id"], product, scope=scope, as_of=now, products=products
+                            consumer["id"], product, scope=scope, business_scope=business_scope, as_of=now, products=products
                         )
 
-                        def native_reader():
+                        def native_reader(scope=scope, now=now):
                             return _json(
                                 admitted_documents(
-                                    entities=["NVDA"], as_of=now, limit=20, repository=unstructured
+                                    entities=[scope["entity"]], as_of=now, limit=20, repository=unstructured
                                 )
                             )
 
@@ -131,7 +157,7 @@ def cached_fallback_drills(data_path, internal_path):
                     elif product in {"PORTFOLIO_DATA", "HISTORY_DATA"}:
                         if internal is None:
                             raise ValueError("internal_ledger_missing")
-                        packet = read_input(consumer["id"], product, scope=scope, store=internal)
+                        packet = read_input(consumer["id"], product, scope=scope, business_scope=business_scope, store=internal)
                         state = get_internal_state(internal)
                         native = (
                             state.portfolio
@@ -145,7 +171,7 @@ def cached_fallback_drills(data_path, internal_path):
                         )
                         refs = [f"internal-snapshot:{s}" for s in packet.source_as_of]
 
-                        def native_reader():
+                        def native_reader(product=product):
                             state = get_internal_state(internal)
                             return (
                                 state.portfolio
@@ -164,7 +190,7 @@ def cached_fallback_drills(data_path, internal_path):
                             return _json(get_config().app.risk)
 
                         native = native_reader()
-                        packet = read_input(consumer["id"], product, scope=scope)
+                        packet = read_input(consumer["id"], product, scope=scope, business_scope=business_scope)
                     elif product == "DECISION_APPROVAL_CONTEXT":
                         if internal is None:
                             raise ValueError("internal_ledger_missing")
@@ -175,9 +201,9 @@ def cached_fallback_drills(data_path, internal_path):
                             raise ValueError("persisted_decision_context_missing")
                         scope = {"cycle_id": row["cycle_id"]}
                         audit = DecisionAuditRepository(internal)
-                        packet = read_input(consumer["id"], product, scope=scope, audit=audit)
+                        packet = read_input(consumer["id"], product, scope=scope, business_scope=business_scope, audit=audit)
 
-                        def native_reader():
+                        def native_reader(audit=audit, row=row):
                             return audit.read_chain(row["cycle_id"])
 
                         native = native_reader()
@@ -220,7 +246,7 @@ def cached_fallback_drills(data_path, internal_path):
                             side_effect=RuntimeError("synthetic packet reader outage"),
                         ):
                             try:
-                                read_input(consumer["id"], product, scope=scope)
+                                read_input(consumer["id"], product, scope=scope, business_scope=business_scope)
                             except RuntimeError:
                                 fallback = native_reader()
                             else:
@@ -230,6 +256,7 @@ def cached_fallback_drills(data_path, internal_path):
                             consumer["id"],
                             product,
                             scope=scope,
+                            business_scope=business_scope,
                             as_of=now
                             if product in {"HIER_DATA", "COMPANY_DATA", "MACRO_DATA", "DOC_DATA"}
                             else None,
@@ -255,7 +282,7 @@ def cached_fallback_drills(data_path, internal_path):
                         }
                     )
                     scopes[product] = scope
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - retain each unavailable cached input
                     if hasattr(exc, "errors"):
                         location = ",".join(
                             ".".join(str(v) for v in error["loc"]) for error in exc.errors()
@@ -284,6 +311,7 @@ def cached_fallback_drills(data_path, internal_path):
                     "domain": consumer["domain"],
                     "contract_version": consumer["contract_version"],
                     "scope": scopes,
+                    "business_scope": business_scope,
                     "rollback_status": "passed"
                     if all(p["status"] == "passed" for p in proofs)
                     else "failed",
@@ -307,7 +335,7 @@ def mechanism_probes(root, drills):
     manifest = yaml.safe_load(COVERAGE.read_text())
     paths = fingerprint_paths("fundamental")
     db = root / "assurance.sqlite"
-    start = datetime.now(timezone.utc)
+    start = datetime.now(UTC)
     scope = {
         "products": next(row for row in drills if row["consumer"] == "fundamental")["scope"],
         "purpose": "isolated-task4-mechanism",
@@ -457,7 +485,7 @@ def mechanism_probes(root, drills):
     checks.append("incomplete_code_registry_fingerprints_rejected")
     record("read")
     assert query()["status"] == "eligible"
-    assert query(now=datetime.now(timezone.utc) + timedelta(days=31))["status"] == "ineligible"
+    assert query(now=datetime.now(UTC) + timedelta(days=31))["status"] == "ineligible"
     checks.append("evidence_ttl_not_report_age")
     assert query(selected_scope={**scope, "entity": "AMD"})["status"] == "ineligible"
     checks.append("exact_scope_isolation")
@@ -624,11 +652,14 @@ def sec_null_and_publication_probes(data_path, root):
     source = PlatformUnstructuredRepository(data_path, writable=False)
     structured = SQLiteStructuredRepository(data_path, readonly=True)
     products = DataProducts(structured_repository=structured, unstructured_repository=source)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         packet = read_input(
             "fundamental",
             "COMPANY_DATA",
+            business_scope={"kind":"entity","id":"TASK4_NO_SEC_COVERAGE",
+                "entities":["TASK4_NO_SEC_COVERAGE"],
+                "time_range":{"start":now.isoformat(),"end":now.isoformat()}},
             products=products,
             as_of=now,
             scope={
@@ -726,7 +757,7 @@ def cli_probes(root):
         "--outcome",
         "passed",
         "--as-of",
-        datetime.now(timezone.utc).isoformat(),
+        datetime.now(UTC).isoformat(),
         "--command-summary",
         "isolated CLI probe",
         "--summary",
@@ -760,27 +791,47 @@ def main():
     parser.add_argument("--data-cache", type=Path, default=REPO_ROOT / "var/data.sqlite")
     parser.add_argument("--internal-cache", type=Path, default=REPO_ROOT / "var/ats.sqlite")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--as-of", help="independent timezone-aware probe cutoff; required for persistent/window scopes")
+    parser.add_argument("--business-scopes", type=Path, required=True,
+        help="JSON consumer -> explicit business scope; product scopes are separate")
     args = parser.parse_args()
+    if args.output and args.output.exists():
+        parser.error("output already exists; preserve old evidence and choose a new run path")
     root = Path(tempfile.mkdtemp(prefix="ats-task4-"))
     if args.output:
         args.output.write_text(
             json.dumps({"passed": False, "status": "running_or_incomplete"}) + "\n"
         )
-    with patch.object(
+    from ats.workflow.isolation import isolated_run
+    business_scopes = json.loads(args.business_scopes.read_text())
+    declared = {c["id"] for c in yaml.safe_load(COVERAGE.read_text())["consumers"]}
+    if not isinstance(business_scopes, dict) or not business_scopes or set(business_scopes) - declared:
+        parser.error("business scopes must name nonempty declared consumers")
+    with isolated_run("cached-native-read-probes", root=root), patch.object(
         socket.socket, "connect", side_effect=AssertionError("Task 4 must not collect data")
     ):
         assert validate_target_contract()["valid"]
-        drills = cached_fallback_drills(args.data_cache, args.internal_cache)
-        probes = mechanism_probes(root, drills)
-        sec_probes = sec_null_and_publication_probes(args.data_cache, root)
+        drills = cached_fallback_drills(args.data_cache, args.internal_cache, business_scopes,
+            as_of=args.as_of, consumers=set(business_scopes))
+        fundamental = next((r for r in drills if r["consumer"] == "fundamental"), None)
+        probes = mechanism_probes(root, drills) if fundamental and fundamental["rollback_status"] == "passed" else {
+            "checks": [], "status":"untested", "reason":"required cached fallback unavailable",
+            "ledger":str(root / "assurance.sqlite")}
+        sec_probes = {"status": "not-applicable", "reason": "Fundamental not selected"}
+        if fundamental:
+            try:
+                sec_probes = sec_null_and_publication_probes(args.data_cache, root)
+            except (StopIteration, ValueError, sqlite3.Error) as exc:
+                sec_probes = {"status":"untested", "reason":type(exc).__name__}
         cli = cli_probes(root)
     report = {
         "schema_version": "target-dataflow-task4-v1",
         "passed": True,
-        "verified_at": datetime.now(timezone.utc).isoformat(),
+        "verified_at": datetime.now(UTC).isoformat(),
         "network_calls": 0,
         "production_cutover": False,
         "production_qualification_granted": False,
+        "selected_consumer_scopes": business_scopes,
         "consumer_drills": drills,
         "mechanism": probes,
         "sec_consumer_publication_checks": sec_probes,

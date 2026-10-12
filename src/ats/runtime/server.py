@@ -37,13 +37,15 @@ def _resume_once(thread_id: str, approval, channel, verdict: str,
 
     with _RESUME_LOCK:
         try:
+            from ..workflow.cutover import assert_runtime_startup
+            assert_runtime_startup(caller='ats.runtime.server._resume_once')
             repo = DecisionAuditRepository(get_store())
             ok, reason, deduped = repo.validate_callback(
                 thread_id, revision_no=revision_no, decision_hash=decision_hash,
                 channel=approval.channel)
         except Exception as exc:  # noqa: BLE001 - guard failure must not brick the card
             log.warning("callback guard failed for %s: %s", thread_id, exc)
-            ok, reason, deduped = True, "", False
+            return False, 'approval authority unavailable; callback refused'
         if not ok:
             if deduped:
                 return True, f"{thread_id}: 已处理 — 忽略重复请求"
@@ -103,10 +105,20 @@ def handle_approve(thread_id: str, verdict: str, sig: str) -> tuple[bool, str]:
 
 
 def build_app():
+    from contextlib import asynccontextmanager
+
     from fastapi import FastAPI, Request
     from fastapi.responses import HTMLResponse
 
-    app = FastAPI(title="ats approval webhook")
+    @asynccontextmanager
+    async def lifespan(app):
+        from ..execution.broker_write_guard import startup
+        from ..workflow.cutover import assert_runtime_startup
+        startup(caller='ats.runtime.server.lifespan')
+        assert_runtime_startup(caller='ats.runtime.server.lifespan')
+        yield
+
+    app = FastAPI(title="ats approval webhook", lifespan=lifespan)
 
     @app.get("/health")
     def health():

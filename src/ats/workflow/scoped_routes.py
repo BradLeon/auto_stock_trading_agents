@@ -55,13 +55,21 @@ class RouteIdentity:
             raise ValueError("business scope requires explicit entities")
         normalized["entities"] = sorted(set(entities))
         window = normalized.get("time_range")
-        if not isinstance(window, dict) or set(window) != {"start", "end"}:
+        independent = normalized.get("time_policy") == "per_invocation"
+        if independent and "time_range" in normalized:
+            raise ValueError("per-invocation scope cannot contain a fixed time_range")
+        if "time_policy" in normalized and not independent:
+            raise ValueError("unknown business scope time_policy")
+        if not independent and (not isinstance(window, dict) or set(window) != {"start", "end"}):
             raise ValueError("business scope requires time_range start/end")
-        window["start"], window["end"] = _stamp(window["start"]), _stamp(window["end"])
-        if datetime.fromisoformat(window["start"]) > datetime.fromisoformat(window["end"]):
-            raise ValueError("business time window is reversed")
+        if not independent:
+            window["start"], window["end"] = _stamp(window["start"]), _stamp(window["end"])
+            if datetime.fromisoformat(window["start"]) > datetime.fromisoformat(window["end"]):
+                raise ValueError("business time window is reversed")
         if bool(normalized.get("event_id")) != bool(normalized.get("event_version")):
             raise ValueError("event_id and event_version must be supplied together")
+        from .invocation_bindings import validate_policy
+        validate_policy(normalized, consumer_id)
         object.__setattr__(self, "scope_json", canonical_json(normalized))
 
     @property

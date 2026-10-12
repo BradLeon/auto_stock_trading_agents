@@ -48,13 +48,28 @@ def load_baseline(store, symbol: str) -> dict:
         es = getattr(dossier, "expectation_set", None) if dossier else None
         if not isinstance(es, ExpectationSet):
             continue
+        import hashlib
+        import json
+        label = meta.get("fiscal_label", "")
+        baseline_digest = hashlib.sha256(es.model_dump_json().encode()).hexdigest()
+        baseline_refs = [f"pead-baseline:{symbol}:{meta.get('fiscal_label', '')}@{baseline_digest}"]
+        if not label and getattr(dossier, "earnings_date", None):
+            from ...data.fiscal import parse_label
+            period = store.get_period(symbol, dossier.earnings_date)
+            if period and parse_label(period.get("fiscal_label", "")) == (period.get("year"), period.get("quarter")) and all(
+                    period.get(key) for key in ("year", "quarter", "fiscal_label", "detected_at")):
+                known = datetime.fromisoformat(period["detected_at"].replace("Z", "+00:00"))
+                if known <= evaluation_now(timezone.utc):
+                    label = period["fiscal_label"]
+                    digest = hashlib.sha256(json.dumps(period, sort_keys=True, default=str).encode()).hexdigest()
+                    baseline_refs.append(f"pead-period:{symbol}:{period['earnings_date']}@{digest}")
         metrics: dict[str, float] = {}
         for e in es.expectations:
             neutral_value = _first_number(e.neutral)
             if neutral_value is not None:
                 metrics[e.dim_key] = neutral_value
         return {
-            "symbol": symbol, "fiscal_label": meta.get("fiscal_label", ""),
+            "symbol": symbol, "fiscal_label": label, "baseline_refs": baseline_refs,
             "narrative": es.narrative, "metrics": metrics,
             "dim_keys": [e.dim_key for e in es.expectations],
             "kpi_words": _kpi_words(es),
@@ -83,7 +98,39 @@ def _first_number(text: str) -> float | None:
 
 def _change_metric_number(change: str) -> float | None:
     """事实变化文本里携带的数值读数（第一个数字）。"""
-    return _first_number(change)
+    # Information prefixes publish dates; the year isn't a business reading.
+    return _first_number(re.sub(r"^\s*\[\d{4}-\d{2}-\d{2}\]\s*", "", change))
+
+
+def _metric_number_for(change: str, metric: str) -> float | None:
+    """Accept only a local reading of a named KPI, never a headline's first number.
+
+    Without a unit contract, currency/scaled quantities cannot be compared with
+    a bare baseline float. Preserve those changes as qualitative evidence.
+    """
+    if metric == "narrative":
+        return None
+    text = re.sub(r"^\s*\[\d{4}-\d{2}-\d{2}\]\s*", "", change)
+    tokens = [metric, *(t for t in metric.split("_") if len(t) >= 3)]
+    match = next((m for token in tokens if (m := re.search(
+        r"(?<![A-Za-z0-9_])"+re.escape(token)+r"(?![A-Za-z0-9_])", text, re.I))), None)
+    if match is None:
+        return None
+    reading = _NUM_RE.search(text, match.end())
+    if reading is None or reading.start()-match.end() > 40:
+        return None
+    bridge = text[match.end():reading.start()]
+    suffix = text[reading.end():]
+    if (re.search(r"[$€£]|\b(?:USD|EUR|GBP)\b", bridge, re.I)
+            or re.match(r"\s*(?:million|billion|trillion|万亿|百万|十亿|亿|万|[BMT]\b)", suffix, re.I)):
+        return None
+    number = float(reading.group())
+    if 1900 <= abs(number) <= 2100 or re.match(r"[-/]\d", suffix):
+        return None  # dates/years are not readings
+    if re.match(r"\s*%", suffix) and not any(
+            token in metric.lower() for token in ("margin", "growth", "rate", "pct", "percent")):
+        return None
+    return number
 
 
 def _mentions_baseline(change: str, baseline: dict) -> bool:
@@ -103,8 +150,8 @@ def classify_change(change: str, baseline: dict) -> str:
     """
     if not _mentions_baseline(change, baseline):
         return NEW
-    number = _change_metric_number(change)
     metrics: dict[str, float] = baseline.get("metrics") or {}
+    number = _metric_number_for(change, _metric_key_for(change, metrics))
     if number is None or not metrics:
         return PENDING
     reference = _reference_value(change, metrics)
@@ -170,19 +217,24 @@ def build_expectation_updates(changes: list[str], classifications: list[str],
                               baseline: dict, *, period: str = "") -> list[dict]:
     """每条归类变化一份 FundamentalExpectationUpdate payload 草稿。
 
-    数值可得时 previous_value=基线中性值、new_value=新读数；纯定性变化以
-    previous_value=new_value=基线值记录（数值不变，变化在 driver 里留痕）。
+    已绑定 KPI 且单位可比较的数值读数才更新数值；纯定性/未绑定/单位不明
+    的变化保留完整分类与 driver，metric=narrative、两个数值均为 null。
     """
     metrics: dict[str, float] = baseline.get("metrics") or {}
     period = period or baseline.get("fiscal_label", "") or "current"
     drafts: list[dict] = []
     for change, label in zip(changes, classifications):
-        number = _change_metric_number(change)
-        reference = _reference_value(change, metrics)
-        previous = reference
-        new_value = number if (number is not None and label in (CONFIRM, REFUTE, NEW)) else (
-            reference if reference is not None else 0.0)
         metric_key = _metric_key_for(change, metrics)
+        number = _metric_number_for(change, metric_key)
+        reference = _reference_value(change, metrics)
+        if number is None:
+            # A classified narrative is useful evidence but no measurable update.
+            metric_key, previous, new_value = "narrative", None, None
+        else:
+            previous = reference
+            new_value = number if label in (CONFIRM, REFUTE, NEW) else reference
+            if new_value is None:
+                metric_key, previous = "narrative", None
         drafts.append({
             "entity": baseline.get("symbol", ""),
             "metric": metric_key,
@@ -204,13 +256,23 @@ def _metric_key_for(change: str, metrics: dict[str, float]) -> str:
 
 
 def publish_expectation_update(store, payload: dict, *, as_of: str = "",
-                               input_refs=None) -> str:
+                               input_refs=None, use_llm: bool = True) -> str:
     """校验并落一份 FundamentalExpectationUpdate 投影。动作词表先拦截。"""
     assert_no_advice([payload.get("driver", "")])
+    from ...workflow.decision_requirements import validate_routine_value_contract
+    from ...workflow.cutover_routing import RouteUnavailable
+    from ...agent.task_projection import EnvelopeValidationError
+    try:
+        validate_routine_value_contract(payload)
+    except RouteUnavailable as exc:
+        raise EnvelopeValidationError(str(exc)) from exc
+    from ..base import execution_versions
+    versions = execution_versions("fundamental_analyst", "fundamental-routine", use_llm=use_llm,
+                                  template_source=__file__)
     envelope = build_envelope(
         role="fundamental_expectation_update", payload=payload,
         scope=ProjectionScope(kind="entity", id=str(payload.get("entity", "")).upper()),
-        as_of=as_of or _now(), input_refs=input_refs)
+        as_of=as_of or _now(), input_refs=input_refs, **versions)
     store.save_task_projection_envelope(envelope)
     return envelope.projection_id
 
@@ -234,6 +296,8 @@ def run_routine_pass(request) -> dict:
         return {"mode": "routine", "symbol": request.symbol,
                 "classified": [], "published": [],
                 "note": "no information brief available; routine pass is a no-op"}
+    if not baseline.get("fiscal_label") or not (baseline.get("narrative") or baseline.get("dim_keys")):
+        raise RuntimeError("Routine requires a valid labelled previous expectation baseline")
     payload = briefs[0].get("payload") or {}
     changes = list(payload.get("fact_changes") or [])
     labels = classify_changes(changes, baseline, use_llm=request.use_llm)
@@ -241,7 +305,8 @@ def run_routine_pass(request) -> dict:
     published: list[str] = []
     for draft in drafts:
         published.append(publish_expectation_update(
-            store, draft, input_refs=[briefs[0].get("projection_id", "")]))
+            store, draft, input_refs=[briefs[0].get("projection_id", ""), *baseline.get("baseline_refs", [])],
+            use_llm=request.use_llm))
     summary = {label: labels.count(label) for label in CLASSIFICATIONS if labels.count(label)}
     return {"mode": "routine", "symbol": request.symbol,
             "classified": list(zip(changes, labels)), "published": published,

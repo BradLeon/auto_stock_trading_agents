@@ -140,8 +140,40 @@ def sector_prices(symbols: list[str], period: str = "1y") -> dict[str, list[floa
 def sector_price_history(symbols: list[str], period: str = "1y"):
     """Runtime market read including per-symbol status and source bar date."""
     from .. import sector_snapshot
+    from ...workflow.runtime_reads import current_read_context, gate_read
 
-    return sector_snapshot.fetch_close_history(symbols, period=period)
+    context = current_read_context()
+    persistent = context is not None and context.invocation is not None
+    if persistent:
+        from ...workflow.cutover_routing import RouteUnavailable
+
+        # Business securities stay within this invocation. The technical
+        # strategy's two fixed volatility indicators are auxiliary inputs,
+        # never additional tradable entities or a wider portfolio permission.
+        entities = set(context.invocation["actual_identity"]["scope"]["entities"])
+        auxiliary = {"^VIX", "^VIX3M"} if context.identity.consumer_id == "technical" else set()
+        if not set(symbols) <= entities | auxiliary:
+            raise RouteUnavailable("runtime history entity escapes bound invocation")
+        gate_read(context.identity)
+    rows = sector_snapshot.fetch_close_history(symbols, period=period)
+    if persistent:
+        import hashlib
+        import json
+        from dataclasses import asdict
+        from ...workflow.consumer_reads import record_read
+
+        if not set(rows) <= set(symbols):
+            raise RouteUnavailable("runtime history response escapes requested symbols")
+        gate_read(context.identity)
+        record_read(context.identity.consumer_id, "ats.data.products.sector_inputs.sector_price_history",
+            refs=[f"runtime-history:{r.source}:{r.symbol}:{r.bar_as_of}" for r in rows.values()],
+            status="complete" if rows and all(r.status == "succeeded" for r in rows.values()) else "unavailable",
+            scope={"entities": list(symbols), "period": period},
+            source_as_of=[r.bar_as_of.isoformat() for r in rows.values() if r.bar_as_of is not None],
+            queried_at=[r.queried_at.isoformat() for r in rows.values()],
+            payload_hash=hashlib.sha256(json.dumps({s: asdict(r) for s, r in rows.items()},
+                sort_keys=True, default=str, allow_nan=False).encode()).hexdigest())
+    return rows
 
 
 def price_momentum(closes: list[float], days: int) -> float | None:

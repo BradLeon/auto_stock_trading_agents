@@ -212,7 +212,8 @@ class ReplayReads:
         row = next((r for r in self.value.reads if r["request"] == request), None)
         # Runtime stages use the recorded receipt clock, not the research as-of.
         # A different time is admitted only if actually captured by this tape.
-        clocks = self.value.contents.get(si.MODEL_CONFIG, {}).get("rows", {})
+        transports = self.value.contents.get(si.MODEL_CONFIG) or self.value.contents.get(si.PROJECTION_HASH, {}).get("runtime_tape", {})
+        clocks = transports.get("rows", {})
         runtime_times = {r["result"].get("$datetime") for r in clocks.values()
                          if r["request"]["api"] == "evaluation_clock.now" and isinstance(r["result"], dict)}
         fixed_time = as_of is None or as_of == self.logical_time or (

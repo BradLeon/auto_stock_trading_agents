@@ -66,8 +66,10 @@ def assemble_context(state: ChiefDecisionState) -> dict:
     selected_plan = dr.query_plan(plan)
     # Phase D 7.1: fix the research snapshot BEFORE any decision context is
     # used — per-category projection ids, content hashes, as-of and freshness.
+    from ..workflow.runtime_reads import current_read_context
+    read = current_read_context()
     snapshot, detail = assemble.build_chief_snapshot(
-        store, at=state.as_of, query_plan=selected_plan,
+        store, at=read.cutoff if read else state.as_of, query_plan=selected_plan,
         projection_manifest=requirements.get("manifest"))
     dr.attach(snapshot, requirements, detail)
     out["research_snapshot"] = snapshot.to_payload()

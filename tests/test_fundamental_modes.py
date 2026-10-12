@@ -373,3 +373,40 @@ def test_inject_prep_switch_is_gone():
     assert '["inject_prep"]' not in graph_source
     assert 'get("inject_prep"' not in graph_source
     assert "prep_block" not in graph_source
+
+
+@pytest.mark.parametrize('change', [
+    "[2026-10-07] SpaceX's $40B Nvidia Chip Plan Would Help Fuel AI Growth",
+    '[2026-10-07] New plant announced for 2027',
+    '[2026-10-07] New narrative without a measurable reading',
+    '[2026-10-07] revenue USD 40 billion',
+    '[2026-10-07] revenue growth 5%',
+])
+def test_routine_unmapped_or_unit_unconfirmed_changes_are_qualitative(change):
+    from ats.agents.fundamental import routine
+    baseline = {'symbol':'MRVL','fiscal_label':'Q2 FY2027','metrics':{'revenue':8.2}}
+    draft = routine.build_expectation_updates([change], [routine.NEW], baseline)[0]
+    assert draft['metric'] == 'narrative'
+    assert draft['previous_value'] is None and draft['new_value'] is None
+    assert draft['driver'] == '[新增] '+change
+    store = _store()
+    ref = routine.publish_expectation_update(store, draft, as_of=NOW.isoformat(), use_llm=False)
+    assert store.get_task_projection(ref)['payload']['new_value'] is None
+
+
+def test_routine_numeric_reading_belongs_to_kpi_not_an_earlier_headline_number():
+    from ats.agents.fundamental import routine
+    baseline = {'symbol':'COHR','fiscal_label':'Q3 FY2026','metrics':{'gross_margin':25},
+                'kpi_words':{'gross_margin'}}
+    change = '[2026-10-07] SpaceX $40B plan; gross_margin actual 25.5%'
+    assert routine.classify_change(change, baseline) == routine.CONFIRM
+    draft = routine.build_expectation_updates([change], [routine.CONFIRM], baseline)[0]
+    assert draft['metric'] == 'gross_margin' and draft['new_value'] == 25.5
+    assert draft['previous_value'] == 25
+
+
+def test_routine_real_zero_reading_is_not_an_unknown_value_sentinel():
+    from ats.agents.fundamental import routine
+    baseline = {'symbol':'COHR','fiscal_label':'Q3 FY2026','metrics':{'gross_margin':25}}
+    draft = routine.build_expectation_updates(['gross_margin actual 0%'], [routine.REFUTE], baseline)[0]
+    assert draft['metric'] == 'gross_margin' and draft['new_value'] == 0.0

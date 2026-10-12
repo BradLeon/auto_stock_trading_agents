@@ -91,14 +91,17 @@ def dispatch_entry(*, read_input, logical_time, matrix, value, root):
     matrices.check_inputs(matrix, value.packet)
     if logical_time.isoformat() != matrix.body["plan"]["as_of"]:
         raise ValueError("fixed execution clock differs")
-    if value.contents.get("model_config", {}).get("dependency_hashes") != fingerprint():
+    transports = value.contents.get("model_config") or value.contents.get('projection_hash', {}).get('runtime_tape', {})
+    if transports.get("dependency_hashes") != fingerprint():
         raise ValueError("fixed implementation fingerprint drifted")
-    tape = Tape(replay=read_input.__self__, rows=value.contents["model_config"]["rows"])
+    if not matrix.body['model_execution'] and any(row.get('model_response') for row in transports['rows'].values()):
+        raise ValueError('undeclared model execution in deterministic replay')
+    tape = Tape(replay=read_input.__self__, rows=transports["rows"])
     seed = value.contents["projection_hash"]["seed"]
     if {name:hashlib.sha256(text.encode()).hexdigest() for name,text in seed["config"].items()} != _config(matrix):
         raise ValueError("seed configuration differs from pre-run matrix configuration")
     from .acceptance_runner import _execute
-    tape.record_clock = value.contents["model_config"].get("record_clock", False)
+    tape.record_clock = transports.get("record_clock", False)
     output = _execute(matrix,seed,tape,root,value.contents["projection_hash"].get("execution", {}))
     return {"type": TYPE, "matrix": matrix.as_row(), "_packet": asdict(value.packet), **output,
             "consumed_reads": sorted(read_input.__self__.used),

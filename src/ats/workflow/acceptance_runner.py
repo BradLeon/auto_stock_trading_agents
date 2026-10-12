@@ -171,9 +171,15 @@ def capture(*, matrix, input_store, root, capture_id, execution=None, channel=No
     output = _execute(matrix,seed,tape,root,execution,channel)
     if implementation_hashes() != frozen_implementation:
         raise ValueError("implementation drift during capture")
-    contents = {"persistent_refs":[],"projection_hash":{"seed":seed,"execution":execution},
-        "model_config":{"rows":tape.rows,"dependency_hashes":frozen_implementation,"record_clock":True}}
+    contents = {"persistent_refs":[],"projection_hash":{"seed":seed,"execution":execution}}
     required = matrix.body["input_fixing"]
+    transports = {"rows":tape.rows,"dependency_hashes":frozen_implementation,"record_clock":True}
+    if required['model_config'] == 'not_applicable':
+        if any(row.get('model_response') for row in tape.rows.values()):
+            raise ValueError('undeclared model execution in deterministic capture')
+        contents['projection_hash']['runtime_tape'] = transports
+    else:
+        contents['model_config'] = transports
     for name in ("market_runtime","account_state","history_state","ruleset_version"):
         if required[name] != "not_applicable": contents[name] = []
     for row in tape.reads:

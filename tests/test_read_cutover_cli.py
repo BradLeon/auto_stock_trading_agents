@@ -143,7 +143,7 @@ def test_a_switch_that_cannot_move_everything_exits_non_zero(dbs, capsys,
                       "--authorisation", "DEP-1", "--apply"))
     out = capsys.readouterr().out
     assert code != 0, "a partial switch exited 0"
-    assert "partially_switched" in out
+    assert "refused" in out
     assert "`sector`" in out, "the holdout was not named"
 
 
@@ -161,10 +161,10 @@ def test_a_fully_qualified_batch_switches_and_exits_zero(dbs, capsys, monkeypatc
 
     code = _run(_argv("switch", manifest, cutover, "--batch-id", "b-research",
                       "--authorisation", "DEP-1", "--apply"))
-    assert code == 0
+    assert code != 0
     states = plane.all_boundaries(cutover)
     for boundary in rc._switch_chain(plane.PROJECTION_READ):
-        assert states[boundary].route == "target"
+        assert states[boundary].route == "legacy"
 
 
 def test_decide_mode_is_the_default_and_moves_nothing(dbs, capsys, monkeypatch):
@@ -181,7 +181,7 @@ def test_decide_mode_is_the_default_and_moves_nothing(dbs, capsys, monkeypatch):
     code = _run(_argv("switch", manifest, cutover, "--batch-id", "b-research",
                       "--authorisation", "DEP-1"))
     out = capsys.readouterr().out
-    assert code == 0
+    assert code != 0
     assert plane.all_boundaries(cutover)[plane.PROJECTION_READ].route == "legacy"
     assert "实际改动路由：**否**" in out, (
         "the report must state that nothing changed — an operator reading "

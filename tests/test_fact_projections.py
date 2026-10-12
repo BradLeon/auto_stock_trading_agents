@@ -1,6 +1,8 @@
 """Shared facts stay neutral while task interpretations remain versioned."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from ats.data import research as research_data
 from ats.data import source_cache
@@ -48,8 +50,37 @@ def test_reprocessing_retires_old_fact_views_but_keeps_history():
 
     store.save_observation(obs)
     assert len(store.facts(entity="AMD")) == 1
-    assert len(store.facts(entity="AMD", include_superseded=True)) == 1
+    assert len(store.facts(entity="AMD", include_superseded=True)) == 2
     assert len(store.fact_projections(profile="evidence_observer")) == 1
+
+
+def test_reextraction_preserves_historical_gap_and_does_not_double_count():
+    store = get_store()
+    obs = _observation(row_id="obs-a", concept="customer_mix")
+    store.save_observation(obs)
+    original = dict(store.facts(entity="AMD")[0])
+    retired = NOW + timedelta(hours=1)
+    store.supersede_document_observations(obs.document_id, "SEMIANALYSIS", at=retired)
+    reproduced = obs.model_copy(update={"observed_at": NOW + timedelta(hours=2)})
+    store.save_observation(reproduced)
+    store.save_observation(reproduced)
+    assert len(store.facts(entity="AMD")) == 1
+    assert len(store.facts(entity="AMD", include_superseded=True)) == 2
+    assert store.data_store().facts(entity="AMD", as_of=NOW + timedelta(minutes=30))[0]["fact_id"] == original["fact_id"]
+    assert store.data_store().facts(entity="AMD", as_of=NOW + timedelta(minutes=90)) == []
+    assert store.data_store().facts(entity="AMD", as_of=NOW + timedelta(hours=3))[0]["fact_id"] != original["fact_id"]
+    historical = store.fact_projections(profile="evidence_observer", include_superseded=True)
+    assert len(historical) == 2 and any(r["fact_id"] == original["fact_id"] and r["superseded_at"] for r in historical)
+
+
+def test_backdated_reextraction_cannot_reactivate_retired_fact():
+    store = get_store()
+    obs = _observation(row_id="obs-a", concept="customer_mix")
+    store.save_observation(obs)
+    store.supersede_document_observations(obs.document_id, "SEMIANALYSIS", at=NOW + timedelta(hours=1))
+    with pytest.raises(ValueError, match="precedes_supersession"):
+        store.save_observation(obs)
+    assert store.facts(entity="AMD") == []
 
 
 def test_pead_insight_is_a_projection_of_the_exact_document_version():

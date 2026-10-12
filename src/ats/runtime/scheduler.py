@@ -909,6 +909,9 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
     from ..execution.broker_write_guard import startup
 
     startup(caller="ats.runtime.scheduler.start")
+    from ..workflow.cutover import assert_runtime_startup
+
+    assert_runtime_startup(caller="ats.runtime.scheduler.start")
     from ..workflow.schedule_runtime import reload_authority
 
     reload_authority()

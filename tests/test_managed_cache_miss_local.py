@@ -163,7 +163,9 @@ def test_runtime_batch_prices_keep_per_symbol_status_and_never_enqueue(
 def test_broker_portfolio_read_bypasses_ingestion_queue(tmp_path, monkeypatch):
     queue_path = tmp_path / "queue.sqlite"
     monkeypatch.setenv("ATS_PERSISTENT_QUEUE_PATH", str(queue_path))
-    expected = SimpleNamespace(as_of="2026-09-25T12:00:00+00:00")
+    from ats.schemas.portfolio import PortfolioSnapshot
+    expected = PortfolioSnapshot(as_of=datetime.now(timezone.utc), net_liquidation=100000,
+        cash=100000, daily_pnl=0, gross_exposure=0, positions=[])
 
     class Broker:
         def __init__(self, **_kwargs):
@@ -175,7 +177,19 @@ def test_broker_portfolio_read_bypasses_ingestion_queue(tmp_path, monkeypatch):
     monkeypatch.setattr(portfolio, "IBKRBroker", Broker)
     monkeypatch.setattr(portfolio, "_sector_map", lambda: {})
 
-    assert portfolio.snapshot() is expected
+    # The governed runtime boundary serializes and validates the broker payload.
+    assert portfolio.snapshot() == expected
+    assert PersistentIngestionQueue(queue_path).list() == []
+
+
+def test_malformed_broker_portfolio_is_unavailable_and_never_queued(tmp_path, monkeypatch):
+    queue_path = tmp_path / "queue.sqlite"
+    monkeypatch.setenv("ATS_PERSISTENT_QUEUE_PATH", str(queue_path))
+    class Broker:
+        def __init__(self, **kwargs): pass
+        def get_portfolio(self): return SimpleNamespace(as_of="2026-09-25T12:00:00+00:00")
+    monkeypatch.setattr(portfolio, "IBKRBroker", Broker)
+    assert portfolio.snapshot() is None
     assert PersistentIngestionQueue(queue_path).list() == []
 
 

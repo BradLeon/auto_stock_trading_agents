@@ -185,6 +185,7 @@ class AdmittedDocument:
     publication_id: str = ""
     known_at: str = ""
     metadata_history: str = "current_index"
+    related_entities: tuple[str, ...] = ()
 
 
 def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
@@ -260,6 +261,7 @@ def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
                 publication_id=str(version.get("publication_id") or ""),
                 known_at=str(version.get("known_at") or row.get("fetched_at") or ""),
                 metadata_history=str(row.get("metadata_history") or "current_index"),
+                related_entities=tuple(str(entity).upper() for entity in row.get("related_entities", [])),
             ))
         return sorted(result, key=lambda item: (item.published_at, item.fetched_at), reverse=True)[:limit]
     finally:

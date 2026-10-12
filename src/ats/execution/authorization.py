@@ -153,6 +153,10 @@ def validate_authorization(repo: "DecisionAuditRepository", auth: ExecutionAutho
     if empty:
         reasons.append(f"authorization_incomplete: missing {', '.join(empty)}")
         return reasons                       # cannot verify anything else meaningfully
+    try:
+        repo.validate_research_dependencies(auth.cycle_id)
+    except Exception as exc:  # noqa: BLE001 - invalid/unreadable dependencies cannot submit
+        reasons.append("research_dependencies_invalid: " + str(exc))
     rev = repo.latest_revision(auth.cycle_id)
     if rev is None or rev["decision_hash"] != auth.decision_hash:
         reasons.append("hash_mismatch: authorization does not bind the current revision")

@@ -269,10 +269,15 @@ def test_old_formal_executor_refuses_bootstrap_only(authority, tmp_path):
         fallback_route="legacy", fallback_proof="valid", fallback_drill_ref="local-drill")
     auth = rc.DeploymentAuthorization(reference="isolated-auth", authorised_by="test", issued_by="test",
         scope=("layer",), valid_until=(datetime.now(UTC) + timedelta(days=1)).isoformat())
+    before = {key: value.as_row() for key, value in co.all_boundaries(authority).items()}
     result = rc.execute_batch(batch, authorisation=auth, apply=True, path=tmp_path / "batches.sqlite",
                               cutover_path=authority, qualification_reader=lambda *_: {"status": "eligible"})
     assert result.outcome == rc.BATCH_REFUSED and not result.changed
-    assert result.scopes[0].outcome == rc.BOUNDARY_UNWIRED
+    # A product/consumer list fails the formal exact-request contract before
+    # wiring can be evaluated. A bootstrap cannot supply the missing request.
+    assert result.scopes[0].outcome == rc.REPORT_INVALID
+    assert "read_request" in result.scopes[0].reason
+    assert {key: value.as_row() for key, value in co.all_boundaries(authority).items()} == before
 
 
 def _cancel_transport(tmp_path, monkeypatch, account):

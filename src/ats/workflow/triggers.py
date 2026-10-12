@@ -136,7 +136,13 @@ def _request_fingerprint(context: TriggerContext, request: Mapping[str, Any]) ->
     trigger.pop("requested_at", None)
     if context.kind == "schedule":
         trigger["scheduled_for"] = _utc(context.scheduled_for).isoformat(timespec="microseconds")
-    return {"trigger": trigger, "request": dict(request)}
+    # Deployment permission is checked separately. Rebinding a window must not
+    # change the business identity of an already completed logical trigger.
+    body = json.loads(json.dumps(dict(request)))
+    if isinstance(body.get("task_inputs"), dict):
+        body["task_inputs"].pop("read_scopes", None)
+        body["task_inputs"].pop("read_invocations", None)
+    return {"trigger": trigger, "request": body}
 
 
 class TriggerService:

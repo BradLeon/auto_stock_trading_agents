@@ -18,19 +18,19 @@ from ats.workflow.run_contracts import TriggerContext
 from ats.agent.task_projection import ProjectionScope
 
 
-def plan_matrix(config, run_id, point, mode="routine", tasks=None, extra=None, batch="trading"):
+def plan_matrix(config, run_id, point, mode="routine", tasks=None, extra=None, batch="trading", model_execution=True):
     scope = {"kind":"sector","id":"ai_hardware","entities":["COHR"],
              "time_range":{"start":point,"end":point}}
     plan = build_plan(requested_tasks=tasks or ["sector-review","fundamental-"+mode,"macro-review","technical-review"],
         scope=ProjectionScope(kind="sector",id="ai_hardware"),trigger=TriggerContext(kind="manual",trigger_id="independent-"+mode),
         as_of=point,run_id=run_id,profile_id="ai_hardware",enter_decision_cycle=batch!="research_read",config_dir=config,
-        task_inputs={"fundamental-"+mode:{"use_llm":False,**(extra or {})}})
+        task_inputs={"fundamental-"+mode:{"use_llm":False,**(extra or {})},'technical-review':{'use_llm':False}})
     criteria = {} if batch == "research_read" else {"risk.contract":[{"path":"verdict","op":"eq","value":"approved"},{"path":"orders_by_symbol.COHR.notional_usd","op":"range","value":[0,25000]}]}
     if batch == "trading": criteria.update({"approval.contract":[{"path":"decision","op":"eq","value":"approved"}],
         "attribution.contract":[{"path":"route.account","op":"eq","value":"DU1"},
                                 {"path":"route.route_id","op":"eq","value":"simulation"}]})
     return mx.freeze(plan,workflow_id="independent-"+mode,identity=RouteIdentity("research","trader" if batch=="trading" else "chief" if batch=="decision" else "technical","v1",scope),
-                     batch_class=batch,criteria=criteria)
+                     batch_class=batch,criteria=criteria,model_execution=model_execution)
 
 
 @pytest.mark.parametrize("mode",["routine","event"])
@@ -43,7 +43,11 @@ def test_actual_full_capture_and_offline_process_replay(business_inputs,isolated
     from ats.execution import broker_write_guard as guard
     seed_performance(isolated)
     pf = PortfolioSnapshot(as_of=datetime.now(UTC),net_liquidation=1e6,cash=1e6,daily_pnl=0,gross_exposure=0,positions=[])
-    monkeypatch.setattr(IBKRBroker,"get_portfolio",lambda self:pf)
+    # The fake transport represents a new broker response at each actual query.
+    # Holding a snapshot from test setup across slow research/capture makes the
+    # positive fixture legitimately expire under the unchanged 60-second guard.
+    monkeypatch.setattr(IBKRBroker,"get_portfolio",lambda self:pf.model_copy(
+        update={"as_of":datetime.now(UTC)}))
     monkeypatch.setattr("ats.data.execution_prices.session_context",lambda now:(True,now-timedelta(days=1)))
     monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",lambda symbol,**kw:quote(symbol=symbol))
     monkeypatch.setattr("ats.agents.chief.decide.run_structured",lambda *a,**k:ChiefOutput(summary="Actual six-role governed research",
@@ -68,7 +72,7 @@ def test_actual_full_capture_and_offline_process_replay(business_inputs,isolated
     captured=runner.capture(matrix=matrix("capture"),input_store=inputs,root=root/"capture",capture_id="frozen",
         execution={"cycle_id":"independent-chain","account":"DU1","fill_price":100.1},channel=Human())
     value=replay.load_inputs(captured["input_hash"],path=inputs)
-    assert {"preapproval_normalization","approved_execution_check"} <= {r["request"]["stage"] for r in value.reads}
+    assert {"preapproval_normalization","approved_execution_check"} <= {r["request"]["stage"] for r in value.reads}, captured["observed_dispatch"].get("decision_block_reason")
     assert guard.is_prohibited() and guard.active_grant() is None
     reports.run(matrix=matrix("new"),input_store=inputs,input_hash=value.input_hash(),root=root/"new",replay_run_id="new")
     matrix_file=root/"matrix.json";matrix_file.write_text(json.dumps(matrix("replayed").as_row()))
@@ -94,7 +98,7 @@ def test_research_only_capture_missing_environment_and_legacy_unavailable(busine
         from ats.data.runtime import market_data
         import pandas as pd
         monkeypatch.setattr(market_data,"_download_close_frame",lambda *a,**k:(pd.DataFrame(),{}))
-    def matrix(run_id):return plan_matrix(business_inputs.root,run_id,point,tasks=["technical-review"],batch="research_read")
+    def matrix(run_id):return plan_matrix(business_inputs.root,run_id,point,tasks=["technical-review"],batch="research_read",model_execution=False)
     captured=runner.capture(matrix=matrix("capture"),input_store=inputs,root=root/"capture",capture_id="research-frozen")
     for name in ("new","replayed"):
         reports.run(matrix=matrix(name),input_store=inputs,input_hash=captured["input_hash"],root=root/name,replay_run_id=name)

@@ -63,7 +63,7 @@ def test_chief_actual_render_requires_every_scope_and_keeps_full_references(isol
     seed_performance(isolated)
     with bind_read(scope()), trace_reads() as rows:
         context = assemble.build(live_broker=False)
-        snapshot, detail = assemble.build_chief_snapshot(isolated)
+        snapshot, _detail = assemble.build_chief_snapshot(isolated)
     assert snapshot.complete and len(snapshot.items) == 7
     assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in envelopes)
     isolated.conn.execute("DELETE FROM task_projection_envelopes WHERE projection_id=?", (envelopes[-1].projection_id,))
@@ -219,6 +219,15 @@ def business_inputs(isolated, monkeypatch, tmp_path):
     monkeypatch.setenv("ATS_PERSISTENT_QUEUE_SOURCE_ID","ibkr_news")
     repository=get_platform_unstructured_store()
     at=datetime.now(UTC)-timedelta(seconds=3)
+    # Routine consumes a previous self-owned expectation baseline (TARGET 9.2).
+    # An admitted article alone is not a complete positive workflow fixture.
+    from ats.schemas.pead import PeadDossier, ExpectationSet, Expectation
+    baseline_at = at - timedelta(minutes=30)
+    isolated.save_dossier(PeadDossier(symbol="COHR", fiscal_label="Q3 FY2026", phase="prep",
+        updated_at=baseline_at, expectation_set=ExpectationSet(symbol="COHR", fiscal_label="Q3 FY2026",
+        as_of=baseline_at, narrative="Controlled previous revenue and capacity expectation.",
+        expectations=[Expectation(dim_key="revenue", metric="Revenue", conservative="90",
+            neutral="100", optimistic="120", source="isolated previous baseline fixture")])))
     document=document_assets.ingest(entity="COHR",key="fixture-news",doc_type="article",
         text="Revenue guidance increased to 120. New factory adds ten production lines. "*30,
         source="ibkr_news",source_url="fixture:accepted-news",title="新增产线 revenue 120",
@@ -247,6 +256,8 @@ def business_inputs(isolated, monkeypatch, tmp_path):
     monkeypatch.setattr(consensus,"_yf_consensus",lambda symbol:{})
     monkeypatch.setattr(consensus,"_yf_analyst",lambda symbol:{})
     responses=[]
+    from ats.agents.information import extract
+    from ats.agents.pead.outputs import InsightBatchView
     def model(agent,schema,context,**kwargs):
         responses.append({"agent":agent,"schema":schema.__name__,"context":context})
         if schema is LayerVerdictView:
@@ -255,14 +266,18 @@ def business_inputs(isolated, monkeypatch, tmp_path):
         if schema is LayerRotationView:
             return schema(regime="steady",summary="Layer inputs imply neutral allocation.")
         if schema is StructureView:return schema()
-        if schema is ContextUpdateView:
-            return schema(materiality=.8,event_summary="Revenue guidance and capacity changed.")
+        if issubclass(schema, ContextUpdateView):
+            return schema(materiality=.8,confidence=.6,event_summary="Revenue guidance and capacity changed.")
         if schema is MacroReviewLLMView:
             return schema(regime="neutral",summary="Controlled inputs; optional FactSet remains unavailable.")
         if schema is ClassificationView:
             return schema(items=[{"index":0,"classification":"新增","reason":"new capacity"}])
+        if schema is InsightBatchView:
+            return schema(insights=[{'ticker':'COHR','direction':'neutral','impact_path':'direct',
+                'summary':'Controlled admitted capacity information; uncertainty retained.',
+                'evidence_quote':'capacity','confidence':.2}],article_gist='Controlled admitted fixture')
         raise AssertionError("unexpected model schema: "+schema.__name__)
-    for module in (base,layer_review,rotation,structure,documents,macro_review):
+    for module in (base,layer_review,rotation,structure,documents,macro_review,extract):
         monkeypatch.setattr(module,"run_structured",model)
     # Replace external transports, never the role entry, compute, or publisher.
     monkeypatch.setattr(macro,"fetch",lambda:None)
@@ -373,6 +388,16 @@ def decision_run(business_inputs, isolated, *, mode="routine", runner=None, befo
         before_dispatch(plan)
     return Dispatcher(workflow_store=WorkflowStore(str(isolated.path)),
         max_workers=1,chief_runner=runner).dispatch(plan)
+
+
+def test_missing_previous_baseline_blocks_actual_routine_and_chief(business_inputs, isolated):
+    isolated.conn.execute("DELETE FROM pead_dossier WHERE symbol='COHR'")
+    isolated.conn.commit()
+    result = decision_run(business_inputs, isolated, mode="routine",
+        runner=lambda *a, **kw: pytest.fail("Chief reached without previous baseline"))
+    assert not result.complete and not result.decision_cycle_entered
+    failed = next(row for row in result.outcomes if row.task_id == "fundamental-routine")
+    assert failed.status == "failed" and "previous expectation baseline" in failed.detail
 
 
 @pytest.mark.parametrize("mode",["routine","event"])

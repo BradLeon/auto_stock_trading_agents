@@ -62,16 +62,14 @@ def test_a_shared_path_names_every_consumer_it_would_retire(surface):
     # exactly which consumer a change to the authorization gate retires.
     policy = manifest["qualification_policy"]["consumer_fingerprint_paths"]
     assert set(surface.consumers_touched_by("src/ats/execution/authorization.py")) == {
-        consumer for consumer, paths in policy.items()
-        if "src/ats/execution/authorization.py" in paths}
+        consumer for consumer in all_consumers
+        if "src/ats/execution/authorization.py" in {*surface.required, *policy.get(consumer, [])}}
     assert set(surface.consumers_touched_by("src/ats/execution/state_api.py")) == {
-        consumer for consumer, paths in policy.items()
-        if "src/ats/execution/state_api.py" in paths}
-    # The authorization gate binds `trader` alone; `trader` and `clerk` share
-    # the decision repository.
-    assert surface.consumers_touched_by("src/ats/execution/authorization.py") == ("trader",)
-    assert set(surface.consumers_touched_by("src/ats/decision/repository.py")) == {
-        "trader", "clerk"}
+        consumer for consumer in all_consumers
+        if "src/ats/execution/state_api.py" in {*surface.required, *policy.get(consumer, [])}}
+    # The final shared business closure conservatively protects every consumer.
+    assert set(surface.consumers_touched_by("src/ats/execution/authorization.py")) == all_consumers
+    assert set(surface.consumers_touched_by("src/ats/decision/repository.py")) == all_consumers
 
 
 def test_paths_for_unions_rather_than_replaces(surface):
@@ -79,7 +77,7 @@ def test_paths_for_unions_rather_than_replaces(surface):
     paths = surface.paths_for("trader")
     assert set(surface.required) <= set(paths)
     assert "src/ats/execution/authorization.py" in paths
-    assert "src/ats/execution/state_api.py" not in paths
+    assert "src/ats/execution/state_api.py" in paths
 
 
 def test_the_authorization_gate_is_on_the_surface_and_that_is_a_constraint(surface):
@@ -94,7 +92,7 @@ def test_the_authorization_gate_is_on_the_surface_and_that_is_a_constraint(surfa
     have made the re-verification scope look larger than it is.
     """
     assert "src/ats/execution/authorization.py" in surface.paths_for("trader")
-    assert "src/ats/execution/authorization.py" not in surface.paths_for("clerk")
+    assert "src/ats/execution/authorization.py" in surface.paths_for("clerk")
 
 
 def test_every_declared_path_exists_and_is_inside_the_repository(surface):
@@ -141,7 +139,7 @@ def test_the_manifest_change_is_reported_as_retiring_everything(surface, tmp_pat
 def test_affected_consumers_maps_each_path_to_its_consumers(surface):
     affected = surface_mod.affected_consumers(surface, [
         "config/risk.yaml", "src/ats/data/assurance.py", "docs/unrelated.md"])
-    assert affected["config/risk.yaml"] == ("risk",)
+    assert set(affected["config/risk.yaml"]) == set(surface.consumers)
     assert len(affected["src/ats/data/assurance.py"]) == 10
     assert "docs/unrelated.md" not in affected
 
@@ -171,8 +169,7 @@ def test_a_cutover_action_outside_the_surface_is_allowed(surface):
     typo, not new work, and is rejected separately.
     """
     surface_mod.assert_outside_fingerprint_surface(
-        ["src/ats/workflow/consumer_disposition.py",
-         "src/ats/workflow/batch_manifest.py"])
+        ["docs/PHASE_F_ACCEPTANCE_REQUIREMENTS.md"])
 
 
 def test_a_misspelled_path_is_rejected_rather_than_silently_passing(surface):

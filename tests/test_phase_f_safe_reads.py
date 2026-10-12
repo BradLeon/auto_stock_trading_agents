@@ -215,6 +215,13 @@ def test_actual_read_rechecks_control_change_during_probe(isolated, tmp_path, mo
 
 def test_actual_routine_consumes_published_brief_and_preserves_refs(isolated, record_property):
     now = datetime.now(UTC)
+    from ats.schemas.pead import PeadDossier, ExpectationSet, Expectation
+    baseline_at = now - timedelta(minutes=30)
+    isolated.save_dossier(PeadDossier(symbol="COHR", fiscal_label="Q3 FY2026", phase="prep",
+        updated_at=baseline_at, expectation_set=ExpectationSet(symbol="COHR", fiscal_label="Q3 FY2026",
+        as_of=baseline_at, narrative="Previous capacity expectation before the new factory information.",
+        expectations=[Expectation(dim_key="capacity", metric="Production lines", conservative="8",
+            neutral="10", optimistic="12", source="isolated previous baseline fixture")])))
     brief = build_envelope(role="information_brief", scope=ProjectionScope(kind="entity", id="COHR"),
         as_of=(now-timedelta(seconds=1)).isoformat(), input_refs=["published-document@v1"],
         payload={"entity": "COHR", "headline": "厂房", "summary": "事实更新", "relevance": "high",
@@ -226,6 +233,7 @@ def test_actual_routine_consumes_published_brief_and_preserves_refs(isolated, re
     assert result["published"] and rows[0]["refs"] == [brief.projection_id]
     output = isolated.get_task_projection(result["published"][0])
     assert brief.projection_id in output["input_refs"] and output["content_hash"]
+    assert any(ref.startswith("pead-baseline:COHR:Q3 FY2026@") for ref in output["input_refs"])
     record_property("read_trace", json.dumps(rows))
     record_property("projection", json.dumps(output))
     with pytest.raises(PermissionError, match="undeclared"):

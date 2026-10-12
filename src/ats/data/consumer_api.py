@@ -11,6 +11,7 @@ from ats.workflow.evaluation_clock import now as evaluation_now
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+import json
 from typing import Any, Literal
 
 import yaml
@@ -106,7 +107,8 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
         from ..workflow.consumer_reads import record_read
         record_read(consumer, "ats.data.consumer_api.read_input", refs=frozen.input_refs,
                     status=frozen.status, product=product, source_as_of=frozen.source_as_of,
-                    scope=_json(scope))
+                    scope=_json(scope), queried_at=frozen.queried_at.isoformat(),
+                    payload_hash=sha256(json.dumps(_json(frozen.payload), sort_keys=True).encode()).hexdigest())
         return frozen
     queried_at = evaluation_now(timezone.utc)
     point = as_of or queried_at
@@ -227,7 +229,6 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             from ..config import get_config
             cfg = risk_config if risk_config is not None else get_config().app.risk
             payload = _json(cfg)
-            import json
             refs = ["ruleset:" + sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()]
             status = "complete"
         elif product == "BROKER_STATE":
@@ -278,7 +279,8 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
     from ..workflow.consumer_reads import record_read
 
     record_read(consumer, "ats.data.consumer_api.read_input", refs=refs, status=status,
-                product=product, source_as_of=stamps, scope=_json(scope))
+                product=product, source_as_of=stamps, scope=_json(scope), queried_at=queried_at.isoformat(),
+                payload_hash=sha256(json.dumps(_json(payload), sort_keys=True).encode()).hexdigest())
     return capture_governed(ConsumerInput(consumer=consumer, product=product, owner=contract["owner"],
                          contract_version=contract["contract_version"], input_mode=mode,
                          scope=_json(scope), as_of=point, queried_at=queried_at,

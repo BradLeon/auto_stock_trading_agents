@@ -92,7 +92,7 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 
 ### Requirement: 读路径路由必须逐消费者依据读取资格判定
 
-系统 SHALL 在实际 CLI、Workflow 与 Dispatcher 读取入口按 `domain_id + consumer_id + contract_version + scope` 逐条判定。资格查询、影子报告、回退证明、持久化运行路由和记录 SHALL 使用同一业务 scope；SHALL NOT 将实体或时间范围替换为消费者产品列表。运行路由 SHALL 能独立表达不同消费者/范围的迁移状态，重启后保持一致。任一必需证据缺失、过期、被撤销或回滚证明未通过时，SHALL 进入安全回退判定而非直接切流。SHALL NOT 以单一总开关或「同一数据域其他消费者已通过」为由放行未通过的消费者。
+系统 SHALL 在实际 CLI、Workflow 与 Dispatcher 读取入口按 `domain_id + consumer_id + contract_version + scope` 逐条判定。当次资格查询、输入和报告 SHALL 使用明确一致的业务 scope；持久部署 scope、运行路由及恢复证明 SHALL 显式关联该范围，部署许可寿命 SHALL 与当次查询时间分离；SHALL NOT 将实体或时间范围替换为消费者产品列表。运行路由 SHALL 能独立表达不同消费者/范围的迁移状态，重启后保持一致。任一必需证据缺失、过期、被撤销或回滚证明未通过时，SHALL 进入安全回退判定而非直接切流。SHALL NOT 以单一总开关或「同一数据域其他消费者已通过」为由放行未通过的消费者。
 
 #### Scenario: 同一消费者另一实体未取得资格
 
@@ -254,3 +254,26 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 - **WHEN** 新增绕过切流控制直接改变路由、直接提交真实订单或绕过边界开关写入的代码路径
 - **THEN** 架构守卫 SHALL 判失败并指出该路径
 - **AND** 该路径 SHALL NOT 通过人工豁免长期保留，豁免必须声明收敛阶段
+
+### Requirement: 持久部署许可与每次运行时间必须分离
+
+系统 SHALL 支持上线明确批准一次、在批准范围内持续运行直到主动停用/撤销的持久部署许可，SHALL NOT 因数据查询窗口推进或日常运行要求人工续批。许可 SHALL 固定 workflow、domain/consumer/contract、用途、精确实体、边界及明确 Event 规则；稳定部署 scope SHALL 与当次资格/输入/报告 scope 显式关联，SHALL NOT 通过近似匹配、全局 target 或远期 end 模拟长期许可。每次调用 SHALL 独立记录 as_of、数据查询窗口、实际 Event/version、source/query 时间、hash/run/generation，并重验当前许可、资格/TTL、报告、配置、输入有效性、停止状态与 worker 代次。无绑定、歧义、范围逃逸 SHALL 拒绝；扩大许可范围 SHALL 另行明确批准。历史有限授权 SHALL NOT 自动转为持久许可。
+
+#### Scenario: 数据窗口推进而许可持续有效
+- **WHEN** 同一批准范围连续多个 tick 或跨日运行，数据查询窗口推进，且各次当前门禁通过
+- **THEN** 系统 SHALL 使用同一持久部署许可和各自运行时点/输入记录
+- **AND** SHALL NOT 要求逐 tick 或逐日人工部署续批
+
+#### Scenario: 许可仍在但输入证据失效
+- **WHEN** 持久许可未撤销，但资格/报告/实际输入过期、撤销或缺失
+- **THEN** 系统 SHALL 阻断受影响范围，SHALL NOT 以持久批准豁免当前门禁
+- **AND** SHALL NOT 因证据失效删除该部署批准或在刷新证据后自动解除持久停止
+
+#### Scenario: 主动停用后仍有旧 worker
+- **WHEN** 用户主动停用/撤销范围，而旧 worker 尝试继续读取或发布，或重新绑定
+- **THEN** 系统 SHALL 在实际入口拒绝并保留原始代次，SHALL NOT 借重新绑定恢复权限
+
+#### Scenario: 一次性动作凭据到期
+- **WHEN** 已明确批准持续运行，但用于当次部署动作的凭据随后到期
+- **THEN** 系统 SHALL 独立查询持久运行许可，SHALL NOT 仅因动作凭据到期要求再次上线批准
+- **AND** 未明确签发持久许可的历史有限授权 SHALL 继续保持原期限和范围

@@ -127,7 +127,7 @@ def _legacy(plan):
             raise ValueError('legacy dependency chain blocked')
         _, _, inputs = Dispatcher._task_inputs(None, plan, task, {})
         use_llm = bool(inputs.get('use_llm', True))
-        with bind_read(task_identity(plan, task)), wake(TriggerContext(**plan.trigger)):
+        with bind_read(task_identity(plan, task), as_of=plan.as_of), wake(TriggerContext(**plan.trigger)):
             if task.task_id == 'information-brief':
                 run_information_target(task.scope.id, use_llm=use_llm)
             elif task.task_id == 'fundamental-routine':

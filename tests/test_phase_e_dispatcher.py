@@ -12,6 +12,7 @@ from ats.workflow.dispatcher import (AdapterUnavailable, Dispatcher,
 from ats.workflow.phase_e import TASK_ROLE, build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
+from ats.workflow.isolation import isolated_run
 
 
 def _config(tmp_path, targets=("AAA", "BBB")):
@@ -31,18 +32,23 @@ def _config(tmp_path, targets=("AAA", "BBB")):
 
 @pytest.fixture
 def db_paths(tmp_path, monkeypatch):
-    monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "workflow.sqlite"))
-    monkeypatch.setenv("ATS_DATA_DB_PATH", str(tmp_path / "data.sqlite"))
+    # Fake role adapters test DAG/reuse/fencing, without a production read
+    # deployment. Physical isolation permits candidate outputs, not production
+    # admission or consumer qualification; the production missing-grant gate stays.
+    with isolated_run("phase-e-dispatcher-fixture", root=tmp_path / "dispatcher-iso") as env:
+        yield from _dispatcher_db_paths(tmp_path, monkeypatch, env)
+
+
+def _dispatcher_db_paths(tmp_path, monkeypatch, env):
     from ats.workflow.schedule_runtime import initialize
     import yaml
 
     control = tmp_path / "control-config" / "workflow"
     control.mkdir(parents=True)
     (control / "workflow_owners.yaml").write_text(yaml.safe_dump({"workflows": {task: {"mode": "dispatcher"} for task in TASK_ROLE}}))
-    monkeypatch.setenv("ATS_DISPATCH_STATE_PATH", str(tmp_path / "unit-dispatch.sqlite"))
     initialize(config_dir=control.parent)
     reset_store_cache()
-    yield tmp_path / "workflow.sqlite"
+    yield env.path_for("ATS_DB_PATH")
     try:
         get_store().close()
     except Exception:

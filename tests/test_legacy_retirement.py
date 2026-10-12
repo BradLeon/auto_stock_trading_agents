@@ -172,6 +172,9 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "risk.checks.pre_trade_adapter",
         # ── Phase F（任务 7.10：第 7 组实测缺口此前无归属者，在此取得归属）──
         "decision_roles.unwired_to_governed_read_api",
+        # Observer responsibilities are explicitly merged into Layer; retaining
+        # its retired tombstone preserves historical lineage and rejects reuse.
+        "agent.evidence_observer",
     }
     assert set(registry.identifiers()) == expected
     for stone in registry.tombstones():

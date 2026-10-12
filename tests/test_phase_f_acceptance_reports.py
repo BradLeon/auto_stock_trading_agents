@@ -181,7 +181,11 @@ def test_actual_report_is_used_by_dry_run_and_activation_write(actual,monkeypatc
     sign(actual)
     signed = bm.dry_run_batch(batch,report_checker=checker,qualification_reader=lambda *a:{"status":"eligible"},
         path=actual.root/"batches.sqlite",cutover_path=control,record=False)
-    assert signed.report_citable
+    assert reports.check_batch_report(actual.batch,path=actual.path) == (True,[])
+    # A valid signed report alone cannot make an incomplete historical batch
+    # deployable: exact request, recorded authorization and actual projections
+    # still need to be supplied to the formal executor.
+    assert not signed.switchable
     assert plane.all_boundaries(control) == before
     request = plane.ActivationRequest(boundary="projection_read",consumer_id="technical",scope=actual.batch.scope,report_id="good")
     reports.signoff(report_id="good",action="revoked",actor="fixture",authority="fixture-only",reason="withdrawn",path=actual.path)

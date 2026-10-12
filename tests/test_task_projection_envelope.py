@@ -300,3 +300,25 @@ def test_the_legacy_projection_table_keeps_its_own_columns(tmp_path) -> None:
                        "input_ref", "target_type", "target_id", "payload",
                        "created_at", "expires_at"}
     store.conn.close()
+
+
+@pytest.mark.parametrize('value', [0.0, 40.0])
+def test_qualitative_update_cannot_invent_numeric_values(value):
+    from ats.agents.fundamental import routine
+    payload = {'entity':'MRVL','metric':'narrative','period':'Q2 FY2027',
+        'previous_value':None,'new_value':value,'driver':'[新增] SpaceX $40B plan'}
+    assert validate_payload('fundamental_expectation_update', payload).new_value == value
+    with pytest.raises(EnvelopeValidationError):
+        routine.publish_expectation_update(TradingMemory(':memory:'), payload, as_of=NOW, use_llm=False)
+
+
+def test_null_narrative_values_roundtrip_but_null_numeric_kpi_is_refused():
+    payload = {'entity':'MRVL','metric':'narrative','period':'Q2 FY2027',
+        'previous_value':None,'new_value':None,'driver':'[待验证] qualitative information'}
+    env = build_envelope(role='fundamental_expectation_update', payload=payload,
+        scope=ProjectionScope(kind='entity',id='MRVL'), as_of=NOW)
+    store = TradingMemory(':memory:')
+    store.save_task_projection_envelope(env)
+    assert store.get_task_projection(env.projection_id)['payload'] == env.payload
+    with pytest.raises(EnvelopeValidationError):
+        validate_payload('fundamental_expectation_update', {**payload,'metric':'revenue'})

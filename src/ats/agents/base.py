@@ -53,6 +53,20 @@ def load_skill(slug: str) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def execution_versions(role: str, skill_slug: str, *, use_llm: bool = True,
+                       template_source: str | Path | None = None) -> dict[str, str]:
+    """Describe the configured model and actual prompt implementation, no secrets."""
+    import hashlib
+    import json
+    from ..config import get_config
+    config = get_config().app.llm.for_role(role).model_dump(mode="json")
+    prompt = load_skill(skill_slug) + Path(__file__).read_text()
+    if template_source:
+        prompt += Path(template_source).read_text()
+    return {"model_version": (json.dumps(config, sort_keys=True) if use_llm else "deterministic-rules"),
+            "prompt_version": hashlib.sha256(prompt.encode()).hexdigest()}
+
+
 def run_structured(role: str, schema: type[T], context: str, *, skill_slug: str | None = None) -> T:
     """Invoke the role's model, forcing output into `schema`.
 

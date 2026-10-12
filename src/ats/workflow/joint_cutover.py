@@ -98,10 +98,21 @@ def assert_schedule_open(workflow, scope, *, path=None):
     with closing(_read(path)) as conn:
         for row in _operations(conn):
             request = json.loads(row["request_json"])
-            if row["state"] != "committed" and any(
+            applies = any(
                 s["workflow"] == workflow and s["scope"] == scope for s in request["schedules"]
-            ):
+            )
+            if row["state"] != "committed" and applies:
                 raise plane.CutoverError("joint schedule frozen: " + row["batch_id"])
+            if applies:
+                for member in request['members']:
+                    if member['boundary'] != plane.DISPATCHER_SCHEDULE:
+                        continue
+                    current = conn.execute(
+                        'SELECT route FROM scoped_cutover_routes WHERE boundary=? AND identity_key=?',
+                        (plane.DISPATCHER_SCHEDULE, scopes.RouteIdentity(**member['identity']).key),
+                    ).fetchone()
+                    if current and current['route'] == plane.ROUTE_DISABLED:
+                        raise plane.CutoverError('joint schedule disabled: ' + row['batch_id'])
 
 
 def epoch(identity, *, path=None):
@@ -151,6 +162,17 @@ def _validate(request):
     if not request.get("batch_id") or not request.get("workflow") or not request.get("members"):
         raise plane.CutoverError("explicit joint batch/workflow/members required")
     request.setdefault("schedules", [])
+    if request.get("deployment_policy", "finite") not in {"finite", "until_stopped"}:
+        raise plane.CutoverError("unknown deployment permission policy")
+    if request.get("deployment_policy") == "until_stopped" and any(
+        m["identity"]["scope"].get("time_policy") != "per_invocation"
+        for m in request["members"]
+    ):
+        raise plane.CutoverError("persistent deployment requires explicit per-invocation scopes")
+    if request.get("deployment_policy") == "until_stopped" and any(
+        not m["identity"]["scope"].get("deployment_purpose") for m in request["members"]
+    ):
+        raise plane.CutoverError("persistent deployment requires explicit purpose")
     seen = set()
     for member in request["members"]:
         who = scopes.RouteIdentity(**member["identity"])
@@ -228,14 +250,24 @@ def record_authorization(request, *, reference, valid_until, actor, reason):
     digest = hashlib.sha256(scopes.canonical_json(request).encode()).hexdigest()
     with closing(_write(plane.default_cutover_db_path())) as conn:
         conn.executescript(SCHEMA)
+        conn.execute('BEGIN IMMEDIATE')
+        prior = conn.execute('SELECT * FROM joint_cutover_authorizations WHERE reference=?',
+                             (reference,)).fetchone()
+        if prior:
+            if tuple(prior) != (reference, digest, expiry.isoformat(), actor, reason):
+                raise plane.CutoverError('deployment authorization reference is immutable')
+            return
         conn.execute(
             "INSERT INTO joint_cutover_authorizations VALUES(?,?,?,?,?)",
             (reference, digest, expiry.isoformat(), actor, reason),
         )
+        conn.commit()
 
 
-def _authorization(auth, request, path):
+def _authorization(auth, request, path, *, runtime=False):
     with closing(_read(path)) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='joint_cutover_authorizations'").fetchone():
+            raise plane.CutoverError("recorded exact deployment authorization required")
         row = conn.execute(
             "SELECT * FROM joint_cutover_authorizations WHERE reference=?", (auth["reference"],)
         ).fetchone()
@@ -247,7 +279,8 @@ def _authorization(auth, request, path):
         revoked
         or row is None
         or row["request_hash"] != digest
-        or datetime.fromisoformat(row["valid_until"]) <= datetime.now(UTC)
+        or (not (runtime and request.get("deployment_policy") == "until_stopped")
+            and datetime.fromisoformat(row["valid_until"]) <= datetime.now(UTC))
     ):
         raise plane.CutoverError("recorded exact joint authorization missing or expired")
 
@@ -329,7 +362,7 @@ def _gates(request, gates, path, mode):
             values = {routes[b] for b in group}
             if (
                 plane.ROUTE_TARGET in values
-                and plane.ROUTE_LEGACY in values
+                and len(values) > 1
                 and not edge["mixed_compatible"]
             ):
                 raise plane.CutoverError(
@@ -343,6 +376,7 @@ def _schedule_state(s):
     from . import schedule_runtime as runtime
 
     with closing(runtime._connect()) as conn:
+        runtime.assert_scope_execution_records(conn, s['workflow'], s['scope'])
         row = conn.execute(
             "SELECT * FROM schedule_scope_owners WHERE workflow=? AND scope=?",
             (s["workflow"], runtime.canonical(s["scope"])),
@@ -352,6 +386,63 @@ def _schedule_state(s):
             "exact schedule owner missing; cannot inherit template for cutover"
         )
     return dict(row)
+
+
+def preflight(request, *, gates, mode="production", path=None):
+    """Read the same current gates and authorities used by prepare/commit.
+
+    A matching pending journal may resume its own partial commits. A completed
+    request is idempotent only while its committed generations still exist.
+    Planning never creates schema, acquires a freeze or changes an owner.
+    """
+    from .isolation import verified_isolation_root
+
+    request = _validate(request)
+    if mode not in {"production", "isolated"} or (
+        mode == "isolated" and verified_isolation_root() is None
+    ):
+        raise plane.CutoverError("isolated gates require verified physical isolation")
+    target = Path(path or plane.default_cutover_db_path()).resolve()
+    if target != Path(plane.default_cutover_db_path()).resolve():
+        raise plane.CutoverError("coordinator must use active control authority")
+    if set(gates) != {"authorization", "qualification", "report", "fallback", "compatibility"}:
+        raise plane.CutoverError("all gate adapters required")
+    digest = hashlib.sha256(scopes.canonical_json(request).encode()).hexdigest()
+    with closing(_read(target)) as conn:
+        operations = _operations(conn)
+        saved = next((r for r in operations if r['batch_id'] == request['batch_id']), None)
+        if saved and saved['request_hash'] != digest:
+            raise plane.CutoverError("joint request changed; recovery refuses")
+        if saved is None:
+            for row in operations:
+                prior = json.loads(row['request_json'])
+                if row['state'] != 'committed' and (
+                    any(a['identity'] == b['identity'] for a in request['members'] for b in prior['members'])
+                    or any(a['workflow'] == b['workflow'] and a['scope'] == b['scope']
+                           for a in request['schedules'] for b in prior['schedules'])
+                ):
+                    raise plane.CutoverError("overlapping joint operation already frozen")
+    checked = _gates(request, gates, target, mode)
+    for member in request['members']:
+        current = scopes.resolve_route(member['boundary'], scopes.RouteIdentity(**member['identity']), path=target)
+        before = current['generation'] == member['expected_generation']
+        after = (current['generation'] == member['expected_generation'] + 1
+                 and current['route'] == member['route'])
+        if not (after if saved and saved['state'] == 'committed' else
+                before or bool(saved and after)):
+            raise plane.CutoverError("scope generation changed before freeze")
+    for schedule in request['schedules']:
+        state = _schedule_state(schedule)
+        before = (state['generation'] == schedule['expected_generation']
+                  and state['owner'] == schedule['from_owner'])
+        after = (state['generation'] == schedule['expected_generation'] + 1
+                 and state['owner'] == schedule['to_owner'])
+        if not (after if saved and saved['state'] == 'committed' else
+                before or bool(saved and after)) or (state['frozen'] and not saved):
+            raise plane.CutoverError("schedule owner changed before freeze")
+        if saved and saved['state'] == 'committed' and state['frozen']:
+            raise plane.CutoverError("committed schedule is now frozen")
+    return checked
 
 
 def execute(request, *, gates, actor, reason, mode="production", path=None, checkpoint=None):
@@ -379,6 +470,7 @@ def execute(request, *, gates, actor, reason, mode="production", path=None, chec
     target = Path(path or plane.default_cutover_db_path()).resolve()
     if target != Path(plane.default_cutover_db_path()).resolve():
         raise plane.CutoverError("coordinator must use active control authority")
+    preflight(request, gates=gates, mode=mode, path=target)
     digest = hashlib.sha256(scopes.canonical_json(request).encode()).hexdigest()
     batch = request["batch_id"]
     for m in request["members"]:

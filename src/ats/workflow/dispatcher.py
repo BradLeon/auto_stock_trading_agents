@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from ats.workflow.evaluation_clock import now as evaluation_now
 
+import json
 import logging
 from contextvars import copy_context
 import time
@@ -181,6 +182,11 @@ class Dispatcher:
             scheduling.check_owner(task.task_id, task.scope.model_dump(mode="json"),
                 "shadow" if task.instance_key.startswith("shadow:") else "dispatcher")
 
+        from .isolation import verified_isolation_root
+        if (verified_isolation_root() is None and
+                any(task.instance_key.startswith("dispatcher:") for task in plan.tasks)):
+            from .read_windows import bind_plan
+            plan = bind_plan(plan)
         read_errors = check_plan_reads(plan, collect=True)
         request = {
             "run_id": plan.run_id, "trigger": plan.trigger,
@@ -553,10 +559,14 @@ class Dispatcher:
                 reusable, reason = False, "agent_attempt_missing"
             else:
                 attempt = memory.conn.execute(
-                    "SELECT status FROM agent_runs WHERE agent_run_id=?",
+                    "SELECT status,projection_refs_json FROM agent_runs WHERE agent_run_id=?",
                     (envelope.agent_run_id,)).fetchone()
                 if attempt is None or attempt["status"] != "succeeded":
                     reusable, reason = False, "agent_attempt_not_terminal"
+                elif task.task_id == "fundamental-routine" and json.loads(attempt["projection_refs_json"]) != [envelope.projection_id]:
+                    # Cross-run reuse selects one envelope. Never turn a complete
+                    # per-fact Routine producer bundle into a partial success.
+                    reusable, reason = False, "multi_projection_recompute_required"
                 else:
                     reusable, reason = self._projection_reuse_check(
                         envelope, task, input_refs, data_refs, as_of,
@@ -576,6 +586,13 @@ class Dispatcher:
                                 freshness_seconds, schema_name):
         from ..agent.task_projection import reuse_decision
 
+        if task.task_id == "fundamental-routine":
+            from .decision_requirements import validate_routine_value_contract
+            from .cutover_routing import RouteUnavailable
+            try:
+                validate_routine_value_contract(envelope.payload)
+            except RouteUnavailable:
+                return False, "routine_value_contract_invalid"
         if envelope.agent_role != TASK_ROLE[task.task_id]:
             return False, "role_mismatch"
         if envelope.scope.key != task.scope.key:
@@ -610,6 +627,31 @@ class Dispatcher:
         return reusable, reason
 
     def _invoke_adapter(self, adapter, context):
+        from .runtime_reads import bind_read, task_identity
+
+        mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
+        with bind_read(task_identity(context.plan, context.task), as_of=context.plan.as_of, mode=mode,
+                publication_path=str(self.workflow_store.path),
+                invocation=(context.plan.task_inputs.get("read_invocations") or {}).get(context.task.instance_key),
+                execution_plan_hash=context.plan.plan_hash):
+            return self._invoke_bound_adapter(adapter, context)
+
+    @staticmethod
+    def _record_reused(context, envelopes):
+        from .consumer_reads import record_read
+        from .runtime_reads import current_read_context, gate_read
+        from .shadow_replay import digest
+
+        bound = current_read_context()
+        if bound is not None and bound.invocation:
+            gate_read(bound.identity)
+            record_read(bound.identity.consumer_id, "Dispatcher.projection_reuse",
+                refs=[e.projection_id for e in envelopes],
+                source_as_of=[e.as_of for e in envelopes],
+                queried_at=evaluation_now(timezone.utc).isoformat(),
+                payload_hash=digest([e.model_dump(mode="json") for e in envelopes]))
+
+    def _invoke_bound_adapter(self, adapter, context):
         from . import schedule_runtime as scheduling
 
         owner = "shadow" if context.task.instance_key.startswith("shadow:") else "dispatcher"
@@ -629,6 +671,7 @@ class Dispatcher:
                 valid = [env for env in envelopes if self._projection_reuse_check(env, context.task, context.input_refs, context.data_vintage_refs, context.plan.as_of, phase_e_registry().spec(context.task.task_id).freshness_seconds, PAYLOAD_SCHEMA_BY_ROLE[TASK_ROLE[context.task.task_id]].role_schema_name())[0]]
                 if not valid:
                     raise ProjectionMissing("shared trigger projections fail current reuse validation")
+                self._record_reused(context, valid)
                 return tuple(valid), "shared_trigger_reused"
         return result
 
@@ -637,6 +680,7 @@ class Dispatcher:
 
         envelope = getattr(context, "reusable_projection", None)
         if envelope is not None:
+            self._record_reused(context, (envelope,))
             record_reuse([envelope.projection_id])
             return (envelope,), "projection_reused"
         return self._invoke_claimed_adapter(adapter, context)
@@ -646,14 +690,16 @@ class Dispatcher:
         from .runtime_reads import bind_read, task_identity
 
         mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
-        with bind_read(task_identity(context.plan, context.task), mode=mode,
-                       publication_path=str(self.workflow_store.path)), \
+        with bind_read(task_identity(context.plan, context.task), as_of=context.plan.as_of, mode=mode,
+                       publication_path=str(self.workflow_store.path),
+                       invocation=(context.plan.task_inputs.get("read_invocations") or {}).get(context.task.instance_key),
+                       execution_plan_hash=context.plan.plan_hash), \
                 task_store_scope(self.workflow_store.path) as store:
             context.store = store
             with projection_context(
                     workflow_run_id=context.run_id, agent_run_id=context.agent_run_id,
                     input_refs=context.input_refs,
-                    data_vintage_refs=context.data_vintage_refs):
+                    data_vintage_refs=context.data_vintage_refs, as_of=context.plan.as_of):
                 adapter_result = adapter(context) or TaskAdapterResult()
             if adapter_result.status != "succeeded":
                 if adapter_result.status == "missing":
@@ -725,7 +771,9 @@ class Dispatcher:
             as_of=plan.as_of, explicit=(plan.task_inputs.get("read_scopes", {}) or {}).get("chief:portfolio"))
         mode = "shadow" if any(t.instance_key.startswith("shadow:") for t in plan.tasks) else None
         try:
-            with bind_read(identity, mode=mode, publication_path=self.workflow_store.path):
+            with bind_read(identity, as_of=plan.as_of, mode=mode, publication_path=self.workflow_store.path,
+                           invocation=(plan.task_inputs.get("read_invocations") or {}).get("chief:portfolio"),
+                           execution_plan_hash=plan.plan_hash):
                 return self._assemble_chief_snapshot(result, plan, memory)
         except RouteUnavailable as exc:
             return DispatchResult(
@@ -766,21 +814,21 @@ class Dispatcher:
         from . import decision_requirements as dr
 
         snapshot, detail = build_chief_snapshot(
-            memory, at=evaluation_now(timezone.utc), projection_manifest=manifest,
+            memory, at=datetime.fromisoformat(plan.as_of), projection_manifest=manifest,
             query_plan=dr.query_plan(plan))
         dr.attach(snapshot, dr.freeze(plan, outcomes=[o.as_dict() for o in result.outcomes],
             manifest=manifest, workflow_store_path=self.workflow_store.path), detail)
         block_reason = "complete_snapshot" if snapshot.complete else "incomplete_research_snapshot"
         ready = snapshot.complete
         if ready:
-            dr.validate(memory, snapshot.to_payload())
+            dr.validate(memory, snapshot.to_payload(), at=datetime.fromisoformat(plan.as_of))
         entered, chief_payload = False, {}
         if ready and self.chief_runner is not None:
             try:
                 chief_payload = self.chief_runner(snapshot, manifest) or {}
                 entered = True
             except Exception as exc:  # noqa: BLE001 - the run remains auditable
-                block_reason = f"chief_runner_failed:{type(exc).__name__}"
+                block_reason = f"chief_runner_failed:{type(exc).__name__}:{exc}"
         elif ready:
             block_reason = "chief_runner_not_configured"
         snapshot_payload = {

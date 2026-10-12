@@ -27,7 +27,7 @@ import os
 import subprocess
 import sys
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -140,7 +140,7 @@ def _run_child(script: str, mode: str, registry_path: Path, generation: int = 1,
     completed = subprocess.run(
         [sys.executable, "-c", _CHILD, mode, str(registry_path),
          str(generation), route_id, extra],
-        capture_output=True, text=True, env=_child_env(), timeout=120)
+        capture_output=True, text=True, env=_child_env(), timeout=120, check=False)
     if completed.returncode != 0:
         raise AssertionError(
             f"child {mode} failed (rc={completed.returncode}):\n"
@@ -152,7 +152,7 @@ def _run_raw(code: str, **env_extra: str) -> subprocess.CompletedProcess:
     env = _child_env()
     env.update(env_extra)
     return subprocess.run([sys.executable, "-c", textwrap.dedent(code)],
-                          capture_output=True, text=True, env=env, timeout=120)
+                          capture_output=True, text=True, env=env, timeout=120, check=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -360,6 +360,11 @@ def test_an_authorization_bound_before_the_switch_is_refused_after_it(registry):
     # first. A stub returning "everything is effective" isolates the route
     # binding, which is what this test is about.
     class _AllEffective:
+        def validate_research_dependencies(self, cycle_id):
+            # This fixture models a currently valid research basis; actual
+            # dependency withdrawal is covered by Phase F business-entry tests.
+            return None
+
         def latest_revision(self, cycle_id):
             return {"revision_no": 1, "decision_hash": "dh"}
 
@@ -374,7 +379,7 @@ def test_an_authorization_bound_before_the_switch_is_refused_after_it(registry):
 
     # The snapshot must be current for the check to get as far as the route, so
     # the repo stub and the snapshot timestamp are part of isolating it.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     assert validate_authorization(
         _AllEffective(), fresh, snapshot_as_of=now,

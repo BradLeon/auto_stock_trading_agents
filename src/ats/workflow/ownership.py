@@ -144,13 +144,19 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
     policies = load_trigger_policies(config_dir)
     policy = policies.get(workflow_id, policies["default"])
     def plan_factory(context, body, run_id):
-        return build_plan(
+        plan = build_plan(
             requested_tasks=body["requested_tasks"], scope=scope,
             trigger=context, as_of=body.get("as_of", context.requested_at),
             run_id=run_id, profile_id=body.get("profile_id", ""),
             enter_decision_cycle=body["enter_decision_cycle"],
             config_dir=config_dir, namespace=mode,
             task_inputs=body.get("task_inputs", {}))
+        from .isolation import verified_isolation_root
+        if mode == "dispatcher" and verified_isolation_root() is None:
+            from .read_windows import bind_plan
+            plan = bind_plan(plan)
+        return plan
+
 
     from .runtime_reads import check_plan_reads
 

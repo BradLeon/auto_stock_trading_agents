@@ -62,6 +62,18 @@
 - **THEN** 报告 SHALL 记为 untested 并保持该范围未通过
 - **AND** SHALL NOT 用汇总 passed 或辅助旧侧比较掩盖缺项
 
+#### Scenario: Routine 定性变化不能冒充数值 KPI 更新
+- **WHEN** Routine 处理未匹配基线 KPI 的第三方标题、无可量化读数的叙事或缺少可比较单位的数量
+- **THEN** 当前发布与需求验收 SHALL 保留完整分类和原文，并以 null 表示未知数值
+- **AND** SHALL NOT 把标题首个数字、日期、未经单位绑定的金额或零哨兵当作 KPI 新值
+- **AND** 具有有效 hash 但带伪数值的定性投影 SHALL 在当前复用、Chief 决策和必需分析断言中拒绝；历史原记录保持可审计
+
+#### Scenario: Information 请求契约与发布置信度要求一致
+- **WHEN** 新 Information 路径请求事实摘要模型输出
+- **THEN** 响应 schema SHALL 要求显式、非空且在 0 至 1 范围内的事实置信度，与 materiality 独立
+- **AND** 缺失或 null 置信度 SHALL 拒绝发布，不能用 materiality 或默认值代填
+- **AND** 历史共享响应类型及原失败记录 SHALL 保持可审计，不据兼容解析放行当前输出
+
 ### Requirement: 新入口需求失败必须修复并重验
 
 必需需求 failed 或 untested SHALL 阻断对应范围通过，修复或补验后 SHALL 追加新运行与结论。系统 SHALL NOT 用差异接受、旧侧同样失败或临时放宽阈值将其转为通过。旧业务缺陷与新旧差异 SHALL 仅登记；若其仍影响新入口、共享状态或写权限，SHALL 按对应新需求失败处置。既有 optional/no_coverage/partial 政策 SHALL 保留并显式核验。
@@ -167,3 +179,11 @@ dry-run、CLI 与执行器 SHALL 引用真实新入口验收报告并强制校�
 - **WHEN** 必需断言经新运行补齐后再次签核
 - **THEN** 系统 SHALL 关联新报告与旧缺口并保留此前失败/未测结论
 - **AND** SHALL NOT 原地改写旧报告为通过
+
+### Requirement: 固定输入验收必须区分部署许可与运行时间
+
+固定输入包及报告 SHALL 同时记录稳定部署 scope/许可引用、独立 invocation as_of、查询窗口和实际 Event/version/source/query 时点。新入口及跨进程重放 SHALL 使用相同调用截止和固定输入，SHALL NOT 将部署期限或查询窗口 end 代入调用 as_of，SHALL NOT 重写来源时间。连续运行验收 SHALL 包含多 tick/跨日/窗口推进无需续批、撤销/主动停止、资格/报告/输入失效、旧 worker 与触发去重；单次通过 SHALL NOT 声称持续生产观察完成。
+
+#### Scenario: 同一许可下两次输入不同
+- **WHEN** 两次调用属于同一持久部署许可但实际 as_of、查询窗口或输入 hash 不同
+- **THEN** 系统 SHALL 保留两次独立运行记录和固定输入，不合并为同一个输入快照

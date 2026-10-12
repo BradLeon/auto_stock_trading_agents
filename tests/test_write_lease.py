@@ -11,7 +11,7 @@ turn 158 tests red with an error that reads like a product bug.
 """
 
 import importlib.util
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,13 +28,12 @@ from ats.data.persistent_queue import PersistentIngestionQueue, require_queue_wo
 from ats.memory import get_store
 from ats.schemas.chain import Observation
 
-NOW = datetime.now(timezone.utc)
-
 
 def _obs(**kw) -> Observation:
-    base = dict(document_id="lease-probe-doc", entity="MU", metric="hbm_capacity",
-                period="FY26Q3", observation_type="guidance", stance="supplier",
-                direction="up", evidence_span="2027 产能大部分已预售", observed_at=NOW)
+    base = {"document_id": "lease-probe-doc", "entity": "MU", "metric": "hbm_capacity",
+            "period": "FY26Q3", "observation_type": "guidance", "stance": "supplier",
+            "direction": "up", "evidence_span": "2027 产能大部分已预售",
+            "observed_at": datetime.now(UTC)}
     return Observation(**{**base, **kw})
 
 
@@ -115,10 +114,10 @@ def test_a_fact_cannot_cite_a_document_published_after_it(monkeypatch, publish_d
     fact was observed cannot support it."""
     monkeypatch.setenv("ATS_TEST_NO_AUTO_PUBLISH", "1")
     store = get_store()
-    later = datetime.now(timezone.utc)
+    later = datetime.now(UTC)
     publish_document(store, "lease-probe-doc", fetched_at=later.isoformat())
     past = _obs(observed_at=datetime.fromtimestamp(
-        later.timestamp() - 3600, tz=timezone.utc))
+        later.timestamp() - 3600, tz=UTC))
 
     with pytest.raises(ValueError, match="neutral_fact_cannot_cite_future_document_version"):
         store.save_observation(past)

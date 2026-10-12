@@ -1,13 +1,19 @@
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
-from ats.workflow.triggers import (TriggerPolicy, TriggerService, evaluate_misfire,
-                                   _deterministic_run_id, _request_fingerprint,
-                                   reconcile_schedule, trigger_key)
+from ats.workflow.triggers import (
+    TriggerPolicy,
+    TriggerService,
+    _deterministic_run_id,
+    _request_fingerprint,
+    evaluate_misfire,
+    reconcile_schedule,
+    trigger_key,
+)
 
 
 class _Result:
@@ -55,10 +61,11 @@ def test_equivalent_schedule_offsets_share_fingerprint_and_logical_run(tmp_path)
                              scheduled_for="2026-09-24T08:00:00-04:00")
     utc = eastern.model_copy(update={"scheduled_for": "2026-09-24T12:00:00Z"})
     service = TriggerService(store)
+    tick = datetime(2026, 9, 24, 12, tzinfo=UTC)
     first = service.dispatch(eastern, request={"scope": "portfolio"},
-                             plan_factory=lambda *_: object(), dispatcher=dispatcher)
+                             plan_factory=lambda *_: object(), dispatcher=dispatcher, now=tick)
     replay = service.dispatch(utc, request={"scope": "portfolio"},
-                              plan_factory=lambda *_: object(), dispatcher=dispatcher)
+                              plan_factory=lambda *_: object(), dispatcher=dispatcher, now=tick)
 
     assert replay["duplicate"] is True
     assert replay["run_id"] == first["run_id"]
@@ -68,7 +75,7 @@ def test_equivalent_schedule_offsets_share_fingerprint_and_logical_run(tmp_path)
 def test_misfire_grace_lookback_and_budget_are_auditable(tmp_path):
     policy = TriggerPolicy(misfire_grace_seconds=3600, max_lookback_seconds=7200,
                           compensation_budget=1)
-    now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 24, 12, tzinfo=UTC)
     planned = now - timedelta(minutes=30)
     assert evaluate_misfire(scheduled_for=planned, now=now, policy=policy)[0] == "dispatch"
     assert evaluate_misfire(scheduled_for=now - timedelta(hours=3), now=now,
@@ -89,9 +96,9 @@ def test_misfire_grace_lookback_and_budget_are_auditable(tmp_path):
 
 
 def test_trading_session_policy_skips_holiday_and_fails_closed_without_calendar(monkeypatch):
-    import ats.runtime.scheduler as scheduler
+    from ats.runtime import scheduler
 
-    now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 24, 12, tzinfo=UTC)
     policy = TriggerPolicy(require_trading_session=True)
     monkeypatch.setattr(scheduler, "is_trading_session", lambda _: False)
     assert evaluate_misfire(
@@ -109,7 +116,7 @@ def test_trading_session_policy_skips_holiday_and_fails_closed_without_calendar(
 
 def test_misfire_never_overwrites_active_lease_and_skips_expired_claim(tmp_path):
     store = WorkflowStore(tmp_path / "wf.sqlite")
-    planned = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    planned = datetime(2026, 9, 24, 12, tzinfo=UTC)
     policy = TriggerPolicy(misfire_grace_seconds=3600, max_lookback_seconds=14_400)
     dispatcher = _Dispatcher()
 
@@ -213,11 +220,11 @@ def test_same_event_replay_uses_first_created_at_and_only_dispatches_once(tmp_pa
 
     first = service.dispatch(_event_context(), request={"scope": "NVDA"},
                              plan_factory=plan_factory, dispatcher=dispatcher,
-                             now=datetime(2026, 9, 24, 10, tzinfo=timezone.utc))
+                             now=datetime(2026, 9, 24, 10, tzinfo=UTC))
     replay = TriggerService(store, owner_id="worker-b").dispatch(
         _event_context("2026-09-25T10:00:00+00:00"), request={"scope": "NVDA"},
         plan_factory=plan_factory, dispatcher=dispatcher,
-        now=datetime(2026, 9, 25, 10, tzinfo=timezone.utc))
+        now=datetime(2026, 9, 25, 10, tzinfo=UTC))
     assert first["status"] == "complete"
     assert replay["duplicate"] is True
     assert replay["run_id"] == first["run_id"]

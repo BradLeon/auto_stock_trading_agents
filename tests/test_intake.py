@@ -50,7 +50,9 @@ def _item(consumer_id: str = "macro", **overrides) -> intake.EvidenceItem:
         "command_summary": "ats data validate-source <source>",
         "result_summary": "all required inputs resolved for the declared scope",
         "as_of": datetime.now(timezone.utc) - timedelta(days=1),
-        "dependency_paths": ["src/ats/data/consumer_api.py"],
+        # Use an unchanged protected file: HEAD-based historical intake must
+        # reject the deliberately edited consumer_api, not bypass its drift.
+        "dependency_paths": ["src/ats/data/contract_validation.py"],
     }
     defaults.update(overrides)
     return intake.EvidenceItem(**defaults)
@@ -340,7 +342,7 @@ def test_evidence_whose_fingerprint_drifted_is_refused_naming_the_paths(
 
     assert outcomes[0].registered is False
     assert outcomes[0].reason_code == "fingerprint_drift"
-    assert outcomes[0].drifted_paths == ["src/ats/data/consumer_api.py"]
+    assert outcomes[0].drifted_paths == ["src/ats/data/contract_validation.py"]
 
 
 def test_a_summary_report_alone_is_not_evidence(ledger):

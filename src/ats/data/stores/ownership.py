@@ -24,6 +24,9 @@ WORKFLOW_MEMORY_TABLES = frozenset({
     # neutral evidence, so it sits here next to `task_projections` — which it will
     # eventually replace.
     "task_projection_envelopes",
+    # Publication receipts fence stale schedule workers before opinion writes;
+    # they are execution history, not neutral persistent research data.
+    "schedule_result_publications",
     # Decision audit (§12.3, Phase B). Decisions carry opinions (who proposed
     # what, why, who approved), so they are Workflow memory, never the data
     # layer's neutral facts.

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import re
+from decimal import Decimal
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -30,11 +32,13 @@ def validate_criteria(criteria, assertions):
             if not isinstance(row["path"], str) or not row["path"] or any(
                     not p or p.startswith("_") for p in row["path"].split(".")):
                 raise MatrixError("invalid criterion path")
-            if row["op"] not in {"eq", "in", "range", "contains", "nonempty"}:
+            if row["op"] not in {"eq", "in", "range", "contains", "nonempty", "subset"}:
                 raise MatrixError("unknown criterion operator")
             value = row["value"]
             if row["op"] in {"in", "contains"} and (not isinstance(value, list) or not value):
                 raise MatrixError("criterion requires nonempty list")
+            if row["op"] == "subset" and not isinstance(value, list):
+                raise MatrixError("subset criterion requires list")
             if row["op"] == "nonempty" and value is not True:
                 raise MatrixError("nonempty criterion requires true")
             if row["op"] == "range" and (not isinstance(value, list) or len(value) != 2 or
@@ -59,6 +63,8 @@ def check_criteria(actual, criteria):
             ok = value == wanted and (type(value) is type(wanted) if isinstance(value,bool) or isinstance(wanted,bool) else True)
         elif op == "in":
             ok = value in wanted
+        elif op == "subset":
+            ok = isinstance(value, list) and all(v in wanted for v in value)
         elif op == "range":
             ok = type(value) in {float,int} and math.isfinite(value) and wanted[0] <= value <= wanted[1]
         elif op == "contains":
@@ -67,6 +73,18 @@ def check_criteria(actual, criteria):
             ok = bool(value)
         if not ok:
             raise ValueError("pre-run criterion failed: " + condition["path"])
+
+
+def quantity_values(text):
+    """Canonical explicit large quantities; does not verify referents or all prose."""
+    scales = {"trillion": Decimal("1e12"), "billion": Decimal("1e9"),
+              "million": Decimal("1e6"), "万亿": Decimal("1e12"),
+              "十亿": Decimal("1e9"), "百万": Decimal("1e6"),
+              "亿": Decimal("1e8"), "万": Decimal("1e4"),
+              "b": Decimal("1e9"), "m": Decimal("1e6"), "t": Decimal("1e12")}
+    pattern = r"(?<![A-Za-z0-9_.-])([-+]?\d+(?:,\d{3})*(?:\.\d+)?)\s*(trillion|billion|million|万亿|百万|十亿|亿|万|B\b|M\b|T\b)"
+    return sorted({format(Decimal(m.group(1).replace(",", "")) * scales[m.group(2).lower()], "f")
+                   for m in re.finditer(pattern, str(text), re.I)})
 
 
 class Untested(ValueError):
@@ -134,10 +152,19 @@ def _inputs(matrix, evidence):
         raise ValueError("actual consumed reads require nonempty request identities")
     from .shadow_replay import digest
     fixed = {digest(row["request"]): row for row in value.reads}
-    model = value.contents.get(si.MODEL_CONFIG,{})
+    model = value.contents.get(si.MODEL_CONFIG)
+    if model is None:
+        projection = value.contents.get(si.PROJECTION_HASH, {})
+        if not isinstance(projection, dict):
+            raise ValueError("fixed projection input records malformed")
+        model = projection.get('runtime_tape', {})
     if not isinstance(model,dict) or not isinstance(model.get("rows",{}),dict):
         raise ValueError("fixed model configuration/response records malformed")
     model_rows = model.get("rows", {})
+    if any(not isinstance(row, dict) for row in model_rows.values()):
+        raise ValueError("fixed model configuration/response records malformed")
+    if not matrix.body['model_execution'] and any(row.get('model_response') for row in model_rows.values()):
+        raise ValueError('undeclared model execution')
     if not set(reads) <= set(fixed) | set(model_rows):
         raise ValueError("actual read not in frozen data/model inputs")
     runtime = {row["surface"] for key, row in fixed.items() if key in reads and
@@ -201,6 +228,7 @@ def _analysis(body, assertion, evidence):
     plan = _plan(body)
     task = next(t for t in plan.tasks if "analysis." + t.instance_key == assertion["id"])
     selected = {}
+    bundles = {}
     for current in plan.tasks:
         hits = [r for r in actual.get("outcomes", []) if r["instance_key"] == current.instance_key]
         if len(hits) != 1:
@@ -208,53 +236,73 @@ def _analysis(body, assertion, evidence):
                 raise ValueError("required analysis outcome missing/duplicate: " + current.instance_key)
             continue
         out = hits[0]
-        if out["status"] != "succeeded" or len(out["projection_refs"]) != 1:
+        refs = out["projection_refs"]
+        multiple = current.task_id == "fundamental-routine"
+        if (out["status"] != "succeeded" or not refs or len(set(refs)) != len(refs)
+                or (not multiple and len(refs) != 1)):
             if current == task or current.instance_key in task.dependencies:
                 raise ValueError("required analysis failed/no exact output: " + current.instance_key)
             continue
-        row = store.conn.execute("SELECT * FROM task_projection_envelopes WHERE projection_id=?", (out["projection_refs"][0],)).fetchone()
-        if row is None:
-            raise Untested("projection ref unresolved: " + out["projection_refs"][0])
-        decoded = dict(row)
-        for field in ("payload", "input_refs", "data_vintage_refs"):
-            if isinstance(decoded[field], str):
-                decoded[field] = json.loads(decoded[field])
-        env = _envelope_from_row(decoded, current.scope)
-        if (out["task_id"] != current.task_id or out["scope"] != current.scope.model_dump(mode="json")
-                or env.agent_role != TASK_ROLE[current.task_id] or row["scope_kind"] != current.scope.kind
-                or row["scope_id"] != current.scope.id):
-            raise ValueError("analysis role/scope differs")
-        payload = validate_payload(env.agent_role, env.payload)
-        scope_field = {"entity":"entity","sector":"sector","layer":"layer"}.get(current.scope.kind)
-        if scope_field and env.payload.get(scope_field) != current.scope.id:
-            raise ValueError("analysis payload entity/sector/layer differs from required scope")
-        if (payload.schema_name != current.output_schema or env.content_hash != content_hash(
-                role=env.agent_role, scope=env.scope, as_of=env.as_of, schema_name=env.schema_name,
-                schema_version=env.schema_version, payload=payload, input_refs=env.input_refs,
-                data_vintage_refs=env.data_vintage_refs)):
-            raise ValueError("analysis schema/content integrity mismatch")
-        at, source = _time(plan.as_of), _time(env.as_of)
-        ok, reason = reuse_decision(env, scope=current.scope, schema_name=current.output_schema,
-                                    schema_version="v1", at=at)
-        from .phase_e import FRESHNESS_SECONDS
-        if not ok or source > at or (at-source).total_seconds() > FRESHNESS_SECONDS[current.task_id]:
-            raise ValueError("analysis stale/invalid: " + reason)
-        attempt = store.conn.execute("SELECT * FROM agent_runs WHERE run_id=? AND task_instance_key=? ORDER BY attempt_no DESC LIMIT 1", (plan.run_id,current.instance_key)).fetchone()
-        if not attempt or attempt["status"] != "succeeded" or json.loads(attempt["projection_refs_json"]) != [env.projection_id]:
-            raise ValueError("durable actual task attempt differs")
-        original = store.conn.execute("SELECT * FROM agent_runs WHERE agent_run_id=?", (env.agent_run_id,)).fetchone()
-        if (not original or original["status"] != "succeeded" or original["run_id"] != env.workflow_run_id
-                or original["task_id"] != current.task_id or original["task_instance_key"] != current.instance_key
-                or (not out.get("reused") and env.workflow_run_id != plan.run_id)):
-            raise ValueError("projection producer attempt unresolved/failed")
-        selected[current.instance_key] = env
-    env = selected[task.instance_key]
+        resolved = []
+        for projection_id in refs:
+            row = store.conn.execute("SELECT * FROM task_projection_envelopes WHERE projection_id=?", (projection_id,)).fetchone()
+            if row is None:
+                raise Untested("projection ref unresolved: " + projection_id)
+            decoded = dict(row)
+            for field in ("payload", "input_refs", "data_vintage_refs"):
+                if isinstance(decoded[field], str):
+                    decoded[field] = json.loads(decoded[field])
+            env = _envelope_from_row(decoded, current.scope)
+            if (out["task_id"] != current.task_id or out["scope"] != current.scope.model_dump(mode="json")
+                    or env.agent_role != TASK_ROLE[current.task_id] or row["scope_kind"] != current.scope.kind
+                    or row["scope_id"] != current.scope.id):
+                raise ValueError("analysis role/scope differs")
+            payload = validate_payload(env.agent_role, env.payload)
+            if current.task_id == "fundamental-routine":
+                from .decision_requirements import validate_routine_value_contract
+                validate_routine_value_contract(env.payload)
+            scope_field = {"entity":"entity","sector":"sector","layer":"layer"}.get(current.scope.kind)
+            if scope_field and env.payload.get(scope_field) != current.scope.id:
+                raise ValueError("analysis payload entity/sector/layer differs from required scope")
+            if (payload.schema_name != current.output_schema or env.content_hash != content_hash(
+                    role=env.agent_role, scope=env.scope, as_of=env.as_of, schema_name=env.schema_name,
+                    schema_version=env.schema_version, payload=payload, input_refs=env.input_refs,
+                    data_vintage_refs=env.data_vintage_refs)):
+                raise ValueError("analysis schema/content integrity mismatch")
+            at, source = _time(plan.as_of), _time(env.as_of)
+            ok, reason = reuse_decision(env, scope=current.scope, schema_name=current.output_schema,
+                                        schema_version="v1", at=at)
+            from .phase_e import FRESHNESS_SECONDS
+            if not ok or source > at or (at-source).total_seconds() > FRESHNESS_SECONDS[current.task_id]:
+                raise ValueError("analysis stale/invalid: " + reason)
+            attempt = store.conn.execute("SELECT * FROM agent_runs WHERE run_id=? AND task_instance_key=? ORDER BY attempt_no DESC LIMIT 1", (plan.run_id,current.instance_key)).fetchone()
+            if not attempt or attempt["status"] != "succeeded" or json.loads(attempt["projection_refs_json"]) != refs:
+                raise ValueError("durable actual task attempt differs")
+            original = store.conn.execute("SELECT * FROM agent_runs WHERE agent_run_id=?", (env.agent_run_id,)).fetchone()
+            if (not original or original["status"] != "succeeded" or original["run_id"] != env.workflow_run_id
+                    or original["task_id"] != current.task_id or original["task_instance_key"] != current.instance_key
+                    or json.loads(original["projection_refs_json"]) != refs
+                    or (not out.get("reused") and env.workflow_run_id != plan.run_id)):
+                raise ValueError("projection producer attempt unresolved/failed")
+            resolved.append(env)
+        selected[current.instance_key] = resolved[0]
+        bundles[current.instance_key] = resolved
+    envs = bundles[task.instance_key]
     parents = {key: selected[key] for key in task.dependencies}
+    if any(len(bundles[key]) != 1 for key in task.dependencies):
+        raise ValueError("analysis multi-output dependency has no declared input contract")
     wanted, vintages, _ = Dispatcher._task_inputs(None, plan, task, parents)
-    if not set(wanted) <= set(env.input_refs) or not set(vintages) <= set(env.data_vintage_refs):
-        raise ValueError("analysis fixed input/dependency/vintage lineage differs")
-    return {"payload": env.payload, "as_of": env.as_of, "content_hash": env.content_hash,
-            "input_refs": env.input_refs, "data_vintage_refs": env.data_vintage_refs}, [env.projection_id, env.agent_run_id]
+    for env in envs:
+        if not set(wanted) <= set(env.input_refs) or not set(vintages) <= set(env.data_vintage_refs):
+            raise ValueError("analysis fixed input/dependency/vintage lineage differs")
+    outputs = [{"payload": env.payload, "as_of": env.as_of, "content_hash": env.content_hash,
+                "input_refs": env.input_refs, "data_vintage_refs": env.data_vintage_refs}
+               for env in envs]
+    actual = outputs[0] if len(outputs) == 1 else {"outputs": outputs}
+    text = "\n".join(str(env.payload.get(field, "")) for env in envs
+                     for field in ("headline", "summary", "fact_changes", "driver", "narrative"))
+    actual["quantity_values"] = quantity_values(text)
+    return actual, sorted({ref for env in envs for ref in (env.projection_id, env.agent_run_id)})
 
 
 def _revision(evidence):

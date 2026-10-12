@@ -244,3 +244,11 @@ Phase F SHALL 交付逐消费者与逐批的 eligible 与 ineligible 报告，�
 - **WHEN** Clerk 已完成一个子步骤但当次 scope 资格随后失效
 - **THEN** 后续子步骤与最终发布 SHALL 停止
 - **AND** SHALL 保留已完成步骤的审计，SHALL NOT 为继续运行建立替代 broker
+
+### Requirement: 持久部署批准不得替代每次资格与输入有效性
+
+资格 SHALL 查询当次明确业务 scope，并与持久部署 scope 显式关联；原始证据 SHALL 保留真实取证时点、TTL、前置引用与指纹。独立运行 as_of 和查询窗口 SHALL 用于当次输入截止/新鲜度，SHALL NOT 与部署许可寿命混用。持续批准 SHALL NOT 证明未来数据有效；后续运行 SHALL 重查当前资格/撤销与实际输入。最小资格探测和数据刷新 SHALL 可自动重复执行，无需逐 tick 人工部署批准，但 SHALL NOT 放宽证据标准或自动改写签核。共享绑定实现完成后 SHALL 最终冻结再补验全部受影响消费者，历史报告与签核 SHALL 保留原始内容。
+
+#### Scenario: 部署批准仍有效但输入已陈旧
+- **WHEN** 持久部署许可未撤销，但实际来源数据不满足当次新鲜度或缺失必需输入
+- **THEN** 门禁 SHALL 拒绝该运行，SHALL NOT 以部署批准替代输入证明

@@ -592,9 +592,23 @@ class PlatformUnstructuredRepository:
         fact_id = hashlib.sha1((self.observation_fact_id(obs) + "|" +
                                json.dumps(neutral_payload, sort_keys=True)).encode()).hexdigest()[:20]
         prior_fact = self.conn.execute(
-            "SELECT discovery_evidence FROM data_evidence_facts WHERE fact_id=?",
+            "SELECT discovery_evidence,superseded_at FROM data_evidence_facts WHERE fact_id=?",
             (fact_id,)).fetchone()
-        fact_frozen = 1 if (frozen or (prior_fact and prior_fact[0])) else 0
+        fact_frozen = frozen
+        # A new extraction may reproduce a retired fact. Append a new vintage;
+        # clearing the old supersession would rewrite historical as-of answers.
+        # Following the deterministic chain also makes repeated writes idempotent.
+        while prior_fact is not None:
+            fact_frozen = 1 if fact_frozen or prior_fact[0] else 0
+            if not prior_fact[1]:
+                break
+            retired_at = datetime.fromisoformat(prior_fact[1].replace("Z", "+00:00"))
+            if obs.observed_at < retired_at:
+                raise ValueError("neutral_fact_reextraction_precedes_supersession")
+            fact_id = hashlib.sha1((fact_id + "|reextracted|" + prior_fact[1]).encode()).hexdigest()[:20]
+            prior_fact = self.conn.execute(
+                "SELECT discovery_evidence,superseded_at FROM data_evidence_facts WHERE fact_id=?",
+                (fact_id,)).fetchone()
         stamp = obs.observed_at.isoformat()
         self._write("UPDATE data_evidence_facts SET superseded_at=? "
                     "WHERE document_id=? AND entity=? AND metric=? AND period=? AND source_entity=? "
@@ -617,6 +631,13 @@ class PlatformUnstructuredRepository:
             self._write("UPDATE data_evidence_facts SET discovery_evidence=1 WHERE fact_id=?", (fact_id,))
         projection_id = self.observation_projection_id(
             obs, projection_profile, projection_version)
+        previous_projection = self.conn.execute(
+            "SELECT fact_id FROM data_evidence_projections WHERE projection_id=?",
+            (projection_id,)).fetchone()
+        if previous_projection and previous_projection[0] != fact_id:
+            self._write("UPDATE data_evidence_projections SET superseded_at=? "
+                        "WHERE projection_id=? AND superseded_at IS NULL", (stamp, projection_id))
+            projection_id = hashlib.sha1((projection_id + "|" + fact_id).encode()).hexdigest()[:20]
         self._write(
             "INSERT OR REPLACE INTO data_evidence_projections "
             "(projection_id,fact_id,legacy_observation_id,profile,profile_version,"

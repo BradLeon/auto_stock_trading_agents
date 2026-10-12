@@ -101,9 +101,9 @@ def test_every_batch_outcome_in_the_record_matches_a_live_dry_run(text):
     being checked is coverage — every declared batch appears — not the verdict,
     which 13.6 re-reads against real evidence.
     """
-    from ats.workflow import batch_manifest as bm
-
-    declared = _readonly_rows(Path(bm.default_batch_db_path()),
+    # The suite redirects default paths into disposable unit surfaces. This
+    # document check intentionally inspects the real authority, read-only.
+    declared = _readonly_rows(REPO_ROOT / "var/phase_f_batches.sqlite",
                               "SELECT batch_id FROM cutover_batches")
     assert declared, (
         "真实清单库为空。若确实要清空，先更新 "
@@ -134,7 +134,7 @@ def test_the_record_lists_every_boundary_with_its_current_route(text):
     from ats.workflow import cutover as plane
 
     recorded = {row[0].strip("` "): row[1] for row in _table_rows(text, "当前路由")}
-    rows = _readonly_rows(Path(plane.default_cutover_db_path()),
+    rows = _readonly_rows(REPO_ROOT / "var/phase_f_cutover.sqlite",
                           "SELECT boundary,route FROM cutover_boundary_state")
     assert {row["boundary"] for row in rows} == set(plane.SIX_BOUNDARIES)
     for row in rows:

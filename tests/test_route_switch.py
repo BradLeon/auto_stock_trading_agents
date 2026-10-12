@@ -384,14 +384,19 @@ def test_the_freeze_survives_a_process_restart(registry):
     assert excinfo.value.reason_code == guard.REASON_FROZEN
 
 
-def test_the_route_registry_is_not_on_the_fingerprint_surface(registry):
-    """Recording generations must not invalidate anyone's qualification evidence.
+def test_runtime_route_switch_preserves_qualification_fingerprints(registry):
+    """Runtime authority changes do not edit the protected implementation.
 
-    Asserted because it is easy to break by accident: `execution/` holds modules
-    that ARE fingerprint paths (`authorization.py`), and a future move could put
-    this one on the surface, at which point every switch would retire evidence.
+    Registry/switch code belongs in the final dependency closure. Their SQL
+    route generations are runtime state and must leave those hashes unchanged.
     """
-    from ats.workflow.assurance_surface import load_surface
+    from ats.workflow.assurance_surface import fingerprint, load_surface
 
-    assert "src/ats/execution/route_registry.py" not in load_surface().all_paths()
-    assert "src/ats/execution/route_switch.py" not in load_surface().all_paths()
+    paths = load_surface().all_paths()
+    assert "src/ats/execution/route_registry.py" in paths
+    assert "src/ats/execution/route_switch.py" in paths
+    before = fingerprint(paths)
+    rs.perform_switch("B", actor="test", lifecycle=_settled(),
+                      environment="paper", account="DU1", path=str(registry))
+    assert rr.read_state(path=str(registry)).generation == 2
+    assert fingerprint(paths) == before

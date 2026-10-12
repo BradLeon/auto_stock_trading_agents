@@ -40,10 +40,10 @@ _PROJECTION_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
 
 @contextmanager
 def projection_context(*, workflow_run_id: str, agent_run_id: str,
-                       input_refs: Any = None, data_vintage_refs: Any = None):
+                       input_refs: Any = None, data_vintage_refs: Any = None, as_of: str = ""):
     """Attach dispatcher provenance to every projection built in this task scope."""
     token = _PROJECTION_CONTEXT.set({
-        "workflow_run_id": workflow_run_id, "agent_run_id": agent_run_id,
+        "workflow_run_id": workflow_run_id, "agent_run_id": agent_run_id, "as_of": as_of,
         "input_refs": normalize_refs(input_refs),
         "data_vintage_refs": normalize_refs(data_vintage_refs),
     })
@@ -134,6 +134,7 @@ class InformationBriefPayload(_Payload):
     sources: list[str] = Field(min_length=1)
     # --- six evidence elements (Phase D, additive) ---
     fact_changes: list[str] = Field(default_factory=list)
+    source_evidence: list[dict[str, Any]] = Field(default_factory=list)
     impact_candidates: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -146,6 +147,14 @@ class InformationBriefPayload(_Payload):
     cluster_key: str = ""
     source_count: int | None = Field(default=None, ge=0)
     independent_sources: int | None = Field(default=None, ge=0)
+
+    def payload_json(self) -> str:
+        # Additive evidence must not change hashes of historical v1 payloads
+        # which predate this field. New nonempty evidence remains hash-bound.
+        body = self.model_dump(mode="json")
+        if not body["source_evidence"]:
+            body.pop("source_evidence")
+        return json.dumps(body, ensure_ascii=False, sort_keys=True)
 
     @field_validator("sources", "fact_changes", "impact_candidates", "entities",
                      "unverified", mode="before")
@@ -176,20 +185,28 @@ class SectorAllocationPayload(_Payload):
 
 
 class FundamentalExpectationUpdatePayload(_Payload):
-    """A changed expectation for one measurable quantity."""
+    """A metric reading or qualitative narrative change; unknown is never zero."""
 
     schema_name: str = "FundamentalExpectationUpdate"
     entity: str = Field(min_length=1)
     metric: str = Field(min_length=1)
     period: str = Field(min_length=1)
     previous_value: float | None = None
-    new_value: float
+    new_value: float | None
     driver: str = Field(min_length=1)
 
     @field_validator("new_value", "previous_value", mode="before")
     @classmethod
     def _values_from_string(cls, value: object) -> object:
         return _as_float(value)
+
+    @model_validator(mode="after")
+    def _honest_values(self):
+        # Historical v1 numeric narrative records remain parseable. Publication
+        # and current decision/reuse boundaries apply the stricter value contract.
+        if self.metric != "narrative" and self.new_value is None:
+            raise ValueError("numeric KPI update requires a measurable value")
+        return self
 
 
 # The action vocabulary of `agent/action-vocabulary`. An event review expresses a
@@ -556,6 +573,9 @@ def build_envelope(*, role: AgentRole, payload: Any, scope: ProjectionScope,
                    supersedes_projection_id: str = "") -> TaskProjectionEnvelope:
     """Validate a payload and wrap it — the only sanctioned way to publish output."""
     context = _PROJECTION_CONTEXT.get() or {}
+    # New Dispatcher outputs describe the frozen evaluation request. Publication
+    # time stays in created_at; source data vintages and historical rows are untouched.
+    as_of = context.get("as_of") or as_of
     workflow_run_id = workflow_run_id or context.get("workflow_run_id", "")
     agent_run_id = agent_run_id or context.get("agent_run_id", "")
     input_refs = [*normalize_refs(context.get("input_refs")), *normalize_refs(input_refs)]

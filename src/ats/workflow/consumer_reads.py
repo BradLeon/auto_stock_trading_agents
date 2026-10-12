@@ -23,6 +23,7 @@ from .cutover_routing import FallbackUnsafe, RouteUnavailable, is_retired, read_
 from .scoped_routes import resolve_route, route_history
 
 _TRACE: ContextVar[list | None] = ContextVar("consumer_read_trace", default=None)
+_AUDITS: ContextVar[tuple] = ContextVar("consumer_entry_audits", default=())
 
 
 @contextmanager
@@ -38,12 +39,72 @@ def trace_reads():
 
 def record_read(consumer, api, *, refs=(), status="complete", **detail):
     row = {"consumer": consumer, "api": api, "refs": list(refs), "status": status, **detail}
+    from .runtime_reads import current_read_context
+
+    context = current_read_context()
+    if context is not None and context.identity.consumer_id == consumer:
+        row.update(business_identity=context.identity.as_row(), invocation_as_of=context.cutoff.isoformat(), bound_route=context.route,
+                   run_mode=context.mode, invocation=context.invocation, deployment=context.deployment,
+                   read_generation=context.read_generation, joint_epoch=context.joint_epoch)
+        row.setdefault('route', context.route)
     logger = logging.getLogger("ats.consumer_reads")
     (logger.warning if status in {"blocked", "unavailable"} else logger.info)(
         "consumer_read %s", json.dumps(row, sort_keys=True, default=str))
     rows = _TRACE.get()
     if rows is not None:
         rows.append(row)
+    for buffer in _AUDITS.get():
+        if buffer is not rows:
+            buffer.append(row)
+
+
+@contextmanager
+def audit_read_entry(context):
+    """Capture real entry reads; append production receipts after business work.
+
+    Isolated traces remain in their actual runner and cannot certify production
+    consumer zero. No receipt is created by a static inventory or qualification.
+    """
+    rows = _TRACE.get()
+    token = None
+    if rows is None:
+        rows = []
+        token = _TRACE.set(rows)
+    audit_rows = []
+    audit_token = _AUDITS.set((*_AUDITS.get(), audit_rows))
+    started = datetime.now(UTC).isoformat()
+    status = 'failed'
+    try:
+        yield
+        status = 'passed'
+    finally:
+        from .isolation import verified_isolation_root
+        selected = [row for row in audit_rows if row.get('business_identity') == context.identity.as_row()]
+        try:
+            if context.invocation:
+                from .invocation_bindings import append_receipt
+                append_receipt(context, selected, started_at=started, status=status)
+            if context.mode == 'production' and verified_isolation_root() is None:
+                target = Path(plane.default_cutover_db_path()).resolve()
+                with closing(sqlite3.connect(target.as_uri()+'?mode=rw',uri=True)) as conn:
+                    conn.executescript("""
+                        CREATE TABLE IF NOT EXISTS production_consumer_receipts(
+                          seq INTEGER PRIMARY KEY AUTOINCREMENT, identity_json TEXT NOT NULL,
+                          route TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL,
+                          ended_at TEXT NOT NULL, reads_json TEXT NOT NULL);
+                        CREATE TRIGGER IF NOT EXISTS consumer_receipt_no_update BEFORE UPDATE ON production_consumer_receipts
+                        BEGIN SELECT RAISE(ABORT,'consumer receipts are append-only'); END;
+                        CREATE TRIGGER IF NOT EXISTS consumer_receipt_no_delete BEFORE DELETE ON production_consumer_receipts
+                        BEGIN SELECT RAISE(ABORT,'consumer receipts are append-only'); END;
+                    """)
+                    conn.execute('INSERT INTO production_consumer_receipts(identity_json,route,status,started_at,ended_at,reads_json) VALUES(?,?,?,?,?,?)',
+                        (json.dumps(context.identity.as_row(),sort_keys=True),context.route,status,
+                         started,datetime.now(UTC).isoformat(),json.dumps(selected,sort_keys=True,default=str)))
+                    conn.commit()
+        finally:
+            _AUDITS.reset(audit_token)
+            if token is not None:
+                _TRACE.reset(token)
 
 
 def implementation_hash(reader):
@@ -226,6 +287,9 @@ def read_projection(store, *, consumer, role, scope, at=None, projection_id="", 
             raise RouteUnavailable("projection entity escapes business request")
         gate_read(context.identity)
         at = at or context.cutoff
+        point = datetime.fromisoformat(at) if isinstance(at, str) else at
+        if point != context.cutoff:
+            raise RouteUnavailable("projection time escapes invocation cutoff")
     row = store.get_task_projection(projection_id) if projection_id else None
     if not projection_id:
         rows = store.task_projection_envelopes(agent_role=role, scope_kind=scope.kind,

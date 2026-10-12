@@ -377,6 +377,10 @@ Snapshot 与 run contract 检查同一已选依赖闭包。Event/Routine 只选�
 
 ### D30. 安全停止、已验收版本恢复与失败归因（2026-10-09）
 
+**13.10 实施**：实际发布守卫解析当前 exact-scope 路由，不以全局 legacy 掩盖已提交的 scope disabled；未绑定 scope 的发布不能绕过停止。read context 固定三条发布边界的 generation，同 scope 嵌套入口继承原 worker 的 generation/joint epoch，不能重新绑定为新权限。联合兼容矩阵拒绝 target 与 disabled 的不兼容半恢复；恢复重验当前资格、已验收目标状态/证明和实现摘要。真实 repository review/approval 与 Clerk 启动/步骤/完成点验证停止、旧绑定拒绝、新绑定恢复、部分步骤和迟到成交保留、同一 run/成交/审批幂等。真实 uv 子进程在 routes_committed 后强制退出，重启前写点冻结，明确有效恢复不重复换代。状态 API 仍提供历史审计读取，不因停止删除历史或批准 revision/hash。
+
+本轮受保护改动限 cutover_wiring/runtime_reads/joint_cutover，完整实现闭包仍 465；共享依赖影响十角色，原报告保持历史，固定源码 Routine/Event 独立重放补验，新报告 unsigned，最终资格仍由 6.1/6.4 追加。原始失败/中断保留本地验证目录；修正模拟迁移夹具的完整隔离和真实 SQL-owner/发布库归属，不放宽生产门禁。13.10 不代表其他边界恢复或生产部署，C3 不变。
+
 **13.3 实施**：停止由实际持久 freeze token 保护签发和提交；新增仅隔离 `restore_stopped_simulation`，在跨进程仲裁锁中校验原 token/当前代次、当前目标证明/实际 FakeBroker 账户环境及实现指纹，核验全部意图回执和实际账本全周期。未知/部分订单、遗漏批准周期或不可用目标均保持停止；Clerk 迟到只读/幂等承接不开放写权。恢复换代再开放，开放失败或证明提交中失效不 abort；已换代重试只完成同代开放。旧代 grant 不复活，后续订单仍需新代绑定及全部审批/报价门禁。生产/C3 未改，其他边界和最终资格独立推进。见 [验证记录](../../../docs/validation/PHASE_F_TRADE_SAFE_STOP_2026-10-09.md)。
 
 5.7 扩展逐 scope 恢复策略；13.1–13.3/13.10 实测停止或已验收版本恢复，9.5/10.4 保存真实生产动作与观察结果。停止不是静态 disabled 标签：实际认领/读取/发布/依赖提交应拒绝，在途订单/步骤有明确处置，历史与审计不删除，不触及无关范围；目标缺失可保持停止。恢复版本重新核对当前资格、兼容、批准修订、代次和幂等；不能复活旧授权。旧目标仅在明确选用时验证可用性，不为其补完旧业务。
@@ -422,3 +426,55 @@ Snapshot 与 run contract 检查同一已选依赖闭包。Event/Routine 只选�
 ### 7.8 → 13.4 → 13.5：动态索引与原始账本验收（2026-10-09）
 
 只读脚本 scripts/verify_phase_f_integration.py 从原始报告/输入/两轮运行/数据库复算动态索引、逐笔全链与提交安全；不修改业务代码/配置或原始证据。原 464 完整实现闭包仍可验证，审计器自身摘要独立保存。提交时 receipt 状态可随实际 Clerk 成交推进，全部固定字段必须一致，推进须与当前 trade/fills 一致。生产本轮 before/after 逐行摘要及精确归因核验与拒绝审计/模拟接收独立，不能由无生产新增推断没有下单。四轮模拟全链通过、58 项有效检查通过，报告 unsigned，TWS 未测；详见 [本轮验证](../../../docs/validation/PHASE_F_INTEGRATION_2026-10-09.md)。全边界恢复/最终资格/生产激活保持未完成。
+
+### Decision 31: Formal read CLI uses the exact-scope coordinator (9.2/13.1)
+
+The batch declares scope.read_request (workflow, identities, members, generations, schedules), qualification_scope, pinned compatibility receipts and actual projection references. Product-list-only historical batches refuse. Independently authorized dependency-closed identities receive separate immutable requests; shared schedule owners cannot be split. read authorize --batch-id records exact deployment decisions, never broker grants. Report applicability, live business qualification, recovery registration, actual projection readability and compatibility are checked at every coordinator stage. Chief explicitly selects one Fundamental mode; Sector requires every configured Layer. No global route or unrequested boundary changes. Partial qualification changes only successful closed groups; interrupted groups retain their journal fence.
+
+13.1 exercised actual Sector CLI, Chief context, Trader refusal and restart against preserved approved revisions and nonempty fills. External qualification/signoff/inventory adapters and reduced Chief configuration are explicit isolated fixtures, separate from actual SQL, business entry guards and projection/state reads. No legacy business restoration or production qualification is inferred. New read_deployment.py and shared CLI/read_cutover changes expand the implementation closure to 466; ten consumers remain in the impact set. Old evidence remains unchanged; final freeze and qualification/replay occur after remaining shared changes (6.1/6.4 and final gates).
+
+### Decision 32: Frozen decision dependencies and structural service admission
+
+A newly captured decision requirement records every producer's exact read identity and the Chief portfolio identity, their route/generation, and the registered recovery policy generation. Repository risk-review/approval callbacks validate these persisted dependencies even without a caller's read context. Trader authorization validates them again, including its existing check immediately before each transport handoff. Revocation, drift, stop, or a changed route/recovery generation invalidates the snapshot without erasing approved revisions or execution history. Candidate-only isolated dependencies cannot authorize production.
+
+The actual CLI and resident scheduler admit service work through a read-only structural control-authority check. Missing/corrupt/incomplete state, unknown active routes, and incompatible global combinations refuse; ordinary startup never bootstraps defaults. Only explicit administrative bootstrap may initialize the authority. Current qualification and joint-operation fences remain per scope at the actual business entry, so a revoked research scope cannot globally stop unrelated work. Existing legacy research can start while trading is disabled; global target flags and wiring declarations do not supply exact-scope qualification or execution evidence.
+
+### Decision 33: Actual schedule stop and one formal plan/commit protocol
+
+Research-read and explicit schedule manifests share the scoped coordinator adapters. A schedule manifest names nonempty exact consumer identities and an explicit SQL owner action; its governing member is dispatcher_schedule, so independent schedule activation does not implicitly move projection_read. Batch dry-run and read plan use the same report, qualification, actual projection, enforcement, authorization, recovery, and compatibility gates as commit. Missing metadata/checkers and historical product-list batches refuse. Approval/trade classes require their own dedicated protocol and cannot be declared ready by this read/schedule planner.
+
+A committed disabled schedule route remains a real execution fence at SQL claim and publication entries, even after the joint journal releases its transaction fence. Restoring an accepted target increments owner and boundary generations. Recovery checks durable arrival/claim history against actual records, including completed triggers; a missing/corrupt record refuses handover and leaves the stop intact. Completed logical triggers never rerun after restore; unusable historical output refuses reuse without republishing, while a new logical trigger can execute. Source collection owners and their queue lifecycle remain unchanged.
+
+Repeated registration of the identical exact authorization is idempotent; a reference cannot be rebound to a different request, expiry, actor or reason. Webhook lifespan also checks structural authority, and callbacks refuse if their authority validation raises instead of resuming on a failed guard.
+
+### Decision 34: Persistent deployment permission and independent execution time
+
+The user's final clarification on 2026-10-10 is: approve once at go-live, then operate continuously until explicitly stopped. This supersedes the earlier bounded-authorization-window interpretation. Deployment permission has an explicit durable lifecycle and no routine renewal deadline. It authorizes a fixed workflow, consumer/contract, purpose, exact entity set, boundaries and declared Event rule. Each invocation independently records as_of, its bounded data/query window, actual Event/version, actual source/query times, hashes, run identity and generations. Query-window advancement and events within the approved rule do not require another human deployment approval.
+
+A stable deployment scope must be explicitly related to each invocation's exact qualification/input/report scope. The implementation must not obtain stability by using a distant end date, modifying evidence timestamps, ignoring time validity, approximate matching or falling back to a global target. Missing or ambiguous bindings and scope escape refuse. Every tick/reuse checks that the committed permission has not been revoked, that current qualification/TTL and signed-report applicability hold, and that actual inputs/configuration, stop state and worker generations remain valid. Qualification or data expiry blocks execution without erasing the deployment approval; refreshing valid evidence does not automatically clear a persistent stop. Nested rebinding cannot refresh a stale worker's authority. Logical triggers remain deduplicated independently of permission rebinding.
+
+Any deadline for a one-time deployment-action credential governs that action, not the lifetime of a separately and explicitly approved persistent operating permission. Historical finite approvals remain finite; no existing record is extended or silently reinterpreted. Expanded entities/workflows/permissions require explicit approval. Event rules must be declared at deployment and actual versions checked at execution; approvals limited to a particular event/version must not be expanded to other events. Automatic qualification probes/data refresh require no daily human deployment approval, while required evidence and report validation remain enforced. Order review/approval and broker write permissions are separate.
+
+Task 5.16 implements this corrected lifecycle and scope separation before final freeze (6.1) and continuous-runtime gates (13.6). Acceptance includes multiple ticks/cross-day query-window progression without reapproval, exact binding/ambiguity refusal, revocation and explicit stop, stale-worker rejection, expired qualification/reports/inputs, and logical-trigger deduplication. Earlier bounded-window prototype tests are partial historical diagnostics, not completion under this clarified requirement. Shared changes affect all ten consumers; final evidence follows the completed protected closure. This decision does not itself authorize production activation or broker writes. See [PHASE_F_SCOPE_WINDOW_REVIEW.md](../../../docs/PHASE_F_SCOPE_WINDOW_REVIEW.md).
+
+**2026-10-10 implementation note (5.16):** `invocation_bindings` implements exact deployment-to-invocation mappings. `deployment_purpose` is distinct from execution-price `purpose`; only the declared decision-cycle/entity-subset rule and pinned Event routing rule transform business scope. Dispatcher and role entries retain independent cutoff, actual Event/version, run/plan hash, source/query times and append-only read receipts. Current calendar versions, committed permission, qualification/report, stop and worker generation are rechecked; publication also rechecks permission. New task envelopes use the frozen request evaluation time while preserving real creation time and original source refs. Detailed implementation, isolated evidence and remaining production work are recorded in [PHASE_F_PERSISTENT_RUNTIME.md](../../../docs/PHASE_F_PERSISTENT_RUNTIME.md). This shared implementation belongs to all ten consumers' protected closure; 6.1 remains the separate final freeze.
+
+
+### 本轮 12.2 验证范围裁决（2026-10-10）
+
+用户明确选择基于已有财务快照的 MRVL、MSFT、NVDA、TSM 推进，不把其他 7 个标的财务快照齐备作为本轮验收前置。范围在核验前固定，不按运行结果事后剔除失败标的，也不改生产 profile。四个实体的财务数据用途核验不等于 Event/Routine 分析完成；所选 workflow 的完整依赖、实际读取及适用报告继续要求。Routine 依赖 Information，Event 的期间、事件材料及基线另行核验；未选择的模式不充当本轮同时成功条件。全生产范围退役、6.4 真实运行、6.6 资格及部署仍遵守原门禁。限定财务用途通过而其余必需依赖缺失时，保留缺口并拒绝对应范围资格，不据局部数据结果授予部署权。12.2 的完成标准是所选全部用途均完成实际数据审计并对缺项验证拒绝，不能仅凭财务局部通过勾选；`audit_status=completed` 与 `coverage_status=pending` 可以并存。6.4 实际运行取证、6.6 资格与 12.8 退役仍必须处理这些缺项，审计完成不豁免它们。
+
+
+### 12.2 审计完成与后续准入的边界澄清
+
+财报已结束的历史期间仍可按新契约审计，不以“采集距今超过固定小时数”判失败。本次没有改变行情 TTL、投影复用新鲜度或资格证据的有效期。12.2 负责列全用途、核验原始数据/历史/血缘、记录真实缺项并确认拒绝；全部用途有可复算判定才完成审计。旧 Information 投影无引用及 MRVL 旧基线缺标签继续作为真实缺口交给 6.4；不补假引用或假 AgentRun，不等于 6.4/6.6 的业务验收已通过。最终退役仍按当前新契约覆盖、生产清零、观察窗口及门禁验收；不能以 12.2 任务勾选代替 coverage passed。
+
+### 真实 Routine 数值语义修复（2026-10-11）
+
+真实 MRVL 标题 `$40B` 暴露首数字解析将未匹配 KPI 的叙事写为数值 40，未知定性变化写为零；工程 schema/血缘通过不足以证明有效预期更新。依据 TARGET §9.2 和既有分析语义要求，当前发布/复用/Chief/验收均区分可量化读数与定性变化：只采用 KPI 后的局部、可比较读数，未绑定或单位不明时保留分类 driver，两个数值 null；真实 KPI 的零读数仍允许。历史 v1 记录保持解析和原 hash，不改写历史 payload；当前边界拒绝其中的伪数值。角色模型、分类提示和外发上下文不变。3.10/6.1/13.7 在受保护修复前重开，原 304 项通过、v3 冻结与四份原始模型报告均保留，不跨指纹沿用为新验收。
+
+### Information 必填事实置信度请求契约（2026-10-11）
+
+MSFT Routine 的三次真实 v4 尝试因 Information 未提供独立 confidence 被拒绝。发布器遵守 TARGET §9.1；请求复用的共享响应类型却把该字段定义为可缺失/null。新 Information 路径采用专用响应子类，在请求 schema 中要求显式 0–1 置信度，不从 materiality 推断或默认补齐。共享历史 PEAD 类型及所有原失败输出保留；缺失/null 仍拒绝当前发布。模型替身须接受该响应子类并按实际传入 schema 构造输出，不能因精确旧类名阻断契约回归。外发业务内容、系统提示、模型和目的地不变，仅响应格式约束变化；只读内容核对与新冻结后取证分别留存。
+
+响应契约定义于 `agents/information/outputs.py`，documents 仅导入；跨进程录制类型通过既有 outputs 契约白名单解码，不为计算模块扩大类型白名单。v5 原始类型地址拒绝及原 tape 保留，v6 以新的当前类型地址重新取证。

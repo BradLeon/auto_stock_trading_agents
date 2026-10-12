@@ -101,7 +101,7 @@ def test_an_observation_the_new_run_reproduces_comes_back_to_life():
     store.save_observation(_obs(metric="dropped"))
 
     store.supersede_document_observations("mu-fy26q3", "MU")
-    store.save_observation(_obs(metric="kept"))                     # the re-run's output
+    store.save_observation(_obs(metric="kept", observed_at=datetime.now(timezone.utc)))
 
     live = {r["metric"] for r in store.observations(entity="MU")}
     assert live == {"kept"}

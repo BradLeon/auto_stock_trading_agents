@@ -32,15 +32,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
 
 from . import batch_manifest as manifest
 from . import cutover as plane
-from . import cutover_routing as routing
-from . import shadow_reports as reports
 
 DEFAULT_PATH = manifest.DEFAULT_PATH
 
@@ -240,15 +239,15 @@ class BatchSwitchResult:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _parse(value: str):
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _connect(path: str | Path | None) -> sqlite3.Connection:
@@ -293,28 +292,16 @@ def write_authorisation(auth: DeploymentAuthorization, *,
                    recorded_at TEXT NOT NULL,
                    recorded_by TEXT NOT NULL DEFAULT '')""")
         now = _now()
-        existing = conn.execute(
-            "SELECT recorded_at FROM read_cutover_authorizations WHERE reference = ?",
-            (auth.reference,)).fetchone()
+        existing = conn.execute("SELECT * FROM read_cutover_authorizations WHERE reference=?",
+                                (auth.reference,)).fetchone()
+        values = (auth.authorised_by, auth.issued_by, ",".join(auth.scope),
+                  auth.valid_until, auth.note)
         if existing is not None:
-            # Re-recording the same reference must not silently widen it, or a
-            # stale narrow grant could be replaced by a broad one under the same
-            # name and the history would show one event.
-            conn.execute(
-                """UPDATE read_cutover_authorizations
-                      SET authorised_by = ?, issued_by = ?, scope = ?,
-                          valid_until = ?, note = ?, recorded_by = ?
-                    WHERE reference = ?""",
-                (auth.authorised_by, auth.issued_by, ",".join(auth.scope),
-                 auth.valid_until, auth.note, actor, auth.reference))
+            if tuple(existing[k] for k in ("authorised_by", "issued_by", "scope", "valid_until", "note")) != values:
+                raise DeploymentAuthorizationError("authorization reference is immutable")
         else:
-            conn.execute(
-                """INSERT INTO read_cutover_authorizations
-                       (reference, authorised_by, issued_by, scope, valid_until,
-                        note, recorded_at, recorded_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (auth.reference, auth.authorised_by, auth.issued_by,
-                 ",".join(auth.scope), auth.valid_until, auth.note, now, actor))
+            conn.execute("INSERT INTO read_cutover_authorizations VALUES (?,?,?,?,?,?,?,?)",
+                         (auth.reference, *values, now, actor))
         return now
     finally:
         conn.close()
@@ -359,7 +346,7 @@ def assert_authorised(auth: DeploymentAuthorization | None, *,
             "is not auditable (reference, authoriser, issuer and expiry must all "
             "be present)")
     expiry = auth.expiry()
-    if expiry is not None and expiry <= datetime.now(timezone.utc):
+    if expiry is None or expiry <= datetime.now(UTC):
         raise DeploymentAuthorizationError(
             f"refusing to switch {consumer_id!r}: authorisation {auth.reference!r} "
             f"expired at {auth.valid_until}")
@@ -416,14 +403,11 @@ def _projection_available(batch: manifest.CutoverBatch,
                           | None) -> dict[str, Any]:
     """9.3: is the new read model actually able to serve this scope?
 
-    Defaults to available because the checker is an injected capability, not
-    something the executor can synthesise. What matters is that a caller who
-    *does* have the checker gets its verdict honoured — and that an absent
-    checker is visible as "not checked" rather than silently read as "fine".
+    An absent checker refuses: availability must be measured by the actual reader.
     """
     if projection_checker is None:
-        return {"available": True, "checked": False,
-                "reason": "no projection checker supplied; treated as available"}
+        return {"available": False, "checked": False,
+                "reason": "actual projection checker required"}
     try:
         verdict = projection_checker(batch.batch_id, dict(batch.scope))
     except Exception as exc:  # noqa: BLE001
@@ -446,238 +430,72 @@ def execute_batch(batch: manifest.CutoverBatch, *,
                   actor: str = "",
                   path: str | Path | None = None,
                   cutover_path: str | Path | None = None,
-                  apply: bool = False) -> BatchSwitchResult:
-    """Decide, and only move routes when `apply` and everything agrees.
+                  apply: bool = False,
+                  record: bool = True) -> BatchSwitchResult:
+    """Formal exact-scope read executor; coordinator rechecks all gates at commit.
 
-    `apply=False` is the default and the safe one: 9.1's runbook has an operator
-    re-run this in a loop before deciding, so the deciding mode must not be able
-    to move a route even by accident.
-
-    The order is the operator's order. Authorisation is checked first, before
-    any gate, because an unauthorised run should not be reported as a successful
-    dry-run — that would let a green result stand in for a permission nobody
-    gave. Then fallback safety, then evidence, then the projection, and only
-    then the switch.
+    Old product-list batches are audit history only. No global boundary or
+    implicitly derived schedule chain can be changed through this entry.
     """
-    result = BatchSwitchResult(batch_id=batch.batch_id,
-                               batch_class=batch.batch_class,
-                               outcome=BATCH_NOOP,
-                               authorisation=authorisation.reference
-                               if authorisation else "")
+    from . import joint_cutover as joint
+    from . import read_deployment as deployment
+    from .scoped_routes import resolve_route
 
-    _settled: str | None = None
-
-    def _finish(boundary_name: str = "", *, applied: bool = False) -> None:
-        """Single exit. Every decision — including every refusal — lands here, so
-        a refusal cannot be returned without being recorded.
-
-        Recording refusals is not bookkeeping. 8.2 promises the operator the
-        reading "we looked and it was blocked", and that reading is only
-        available if the blocked run left a trace. Scattered `return result`
-        statements dropped exactly that on the unauthorised path.
-        """
-        _record(result, batch=batch, boundary=boundary_name, actor=actor,
-                path=path, applied=applied and result.changed)
-        return result
-
-    def _finish(boundary_name: str = "", *, applied: bool = False) -> None:
-        """Single exit. Every decision — including every refusal — lands here, so
-        a refusal cannot be returned without being recorded.
-
-        Recording refusals is not bookkeeping. 8.2 promises the operator the
-        reading "we looked and it was blocked", and that reading is only
-        available if the blocked run left a trace. Scattered `return result`
-        statements dropped exactly that on the unauthorised path.
-        """
-        _record(result, batch=batch, boundary=boundary_name, actor=actor,
-                path=path, applied=applied and result.changed)
-        return result
-
-    # --- 1. authorisation ----------------------------------------------------
-    # Read-only mode still reports the refusal, so an operator sees the real
-    # blocker rather than a list of gate results that would read as encouraging.
-    if authorisation is None:
-        result.outcome = BATCH_REFUSED
-        for consumer_id in batch.consumers or ("<batch>",):
-            result.scopes.append(ScopeOutcome(
-                consumer_id=consumer_id, outcome=UNAUTHORIZED,
-                reason="no deployment authorisation; passing the gates is not "
-                       "permission to cut over"))
-        return _finish("")
-    if not authorisation.is_complete:
-        result.outcome = BATCH_REFUSED
-        result.scopes.append(ScopeOutcome(
-            consumer_id="<batch>", outcome=UNAUTHORIZED,
-            reason=f"authorisation {authorisation.reference!r} is not auditable"))
-        return _finish("")
-    expiry = authorisation.expiry()
-    if expiry is not None and expiry <= datetime.now(timezone.utc):
-        result.outcome = BATCH_REFUSED
-        result.scopes.append(ScopeOutcome(
-            consumer_id="<batch>", outcome=UNAUTHORIZED,
-            reason=f"authorisation {authorisation.reference!r} expired at "
-                   f"{authorisation.valid_until}"))
-        return _finish("")
-
-    # --- 2. boundary sanity, batch-wide -------------------------------------
+    result = BatchSwitchResult(batch.batch_id, batch.batch_class, BATCH_REFUSED,
+        authorisation=authorisation.reference if authorisation else "")
+    boundary = plane.DISPATCHER_SCHEDULE if batch.batch_class == manifest.SCHEDULE else plane.PROJECTION_READ
     try:
-        states = plane.all_boundaries(cutover_path)
-    except Exception as exc:  # noqa: BLE001
-        raise ReadCutoverError(
-            f"the cutover authority could not be read, so nothing can be "
-            f"decided safely: {type(exc).__name__}: {exc}") from exc
-
-    boundary = _boundary_for(batch, states)
-    if boundary is None:
-        result.outcome = BATCH_REFUSED
-        result.scopes.append(ScopeOutcome(
-            consumer_id="<batch>", outcome=BOUNDARY_UNWIRED,
-            reason="the batch names no read-path boundary to switch"))
-        return _finish(boundary)
-    # Existing executor has no per-consumer identity protocol yet (9.2).
-    # A bootstrap declaration must not open that incomplete path.
-    try:
-        plane.assert_wired(boundary, cutover_path)
-    except plane.CutoverError as exc:
-        result.outcome = BATCH_REFUSED
-        result.scopes.append(ScopeOutcome(
-            consumer_id="<batch>", outcome=BOUNDARY_UNWIRED,
-            reason=str(exc)))
-        return _finish(boundary)
-
-    chain = _switch_chain(boundary)
-    if apply and len(chain)>1:
-        raise ReadCutoverError("explicit exact-scope joint coordinator required; sequential global apply refused")
-    result.checks["switch_chain"] = list(chain)
-    settled = chain_is_settled(states, boundary)
-
-    # The compatibility check is about the state we are about to CREATE, so it
-    # only makes sense once we know this is a fresh switch. On a settled chain the
-    # combination is whatever the previous apply left behind, and judging it again
-    # would report the operator's own successful work as a conflict.
-    if not settled:
-        verdict = plane.check_compatibility(states)
-        if not verdict.compatible:
-            result.outcome = BATCH_REFUSED
-            result.scopes.append(ScopeOutcome(
-                consumer_id="<batch>", outcome=BOUNDARY_UNWIRED,
-                reason="the current boundary combination is already half-migrated "
-                       "in a way that blocks this switch: "
-                       + "; ".join(str(c.get("reason")) for c in verdict.conflicts)))
-            return _finish("")
-
-    # --- 3. shadow report applicability, batch-wide -------------------------
-    usable, problems = reports.require_batch_report(batch, report_checker)
-    if not usable:
-        result.outcome = BATCH_REFUSED
-        result.scopes.append(ScopeOutcome(
-            consumer_id="<batch>", outcome=REPORT_INVALID,
-            reason="; ".join(problems) or "the cited shadow report is not usable"))
-        return _finish("")
-
-    # --- 4. projection availability, batch-wide -----------------------------
-    projection = _projection_available(batch, projection_checker)
-    if not projection["available"]:
-        result.outcome = BATCH_REFUSED
-        result.scopes.append(ScopeOutcome(
-            consumer_id="<batch>", outcome=PROJECTION_MISSING,
-            reason=projection["reason"]))
-        return _finish("")
-
-    route_before = states[boundary].route
-
-    # --- 5. per consumer ----------------------------------------------------
-    # Each scope accumulates EVERY blocker rather than stopping at the first.
-    #
-    # 9.4 asks for the result to be recorded, and an operator acting on that
-    # record would otherwise have to fix one gap, re-run, discover the next, and
-    # repeat — while the batch's fallback drill (a batch-level property, checked
-    # per consumer below) stays invisible until every consumer's qualification
-    # happens to pass. Short-circuiting here also let the real state read as
-    # "only a qualification problem", which is what the first run of this
-    # command actually reported.
-    for consumer_id in batch.consumers:
-        scope = ScopeOutcome(consumer_id=consumer_id, outcome=ALREADY,
-                             route_before=route_before, route_after=route_before)
-        blockers: list[tuple[str, str]] = []
-
-        if not authorisation.covers(consumer_id):
-            blockers.append((UNAUTHORIZED,
-                             f"authorisation {authorisation.reference!r} covers "
-                             f"{list(authorisation.scope)}, not this consumer"))
-
-        eligibility = _scope_eligibility(consumer_id, dict(batch.scope),
-                                         qualification_reader=qualification_reader)
-        scope.checks["qualification"] = eligibility
-        status = str(eligibility.get("status") or "")
-        if status != "eligible":
-            blockers.append((NOT_QUALIFIED, _eligibility_reason(eligibility, status)))
-
-        fallback = routing.assess_fallback(
-            batch.fallback_route, consumer_id=consumer_id,
-            proof_valid=manifest._flag(batch.fallback_proof),
-            retired=True if manifest._flag(batch.fallback_retired) else None)
-        scope.checks["fallback"] = fallback
-        if not manifest._drill_recorded(batch.fallback_drill_ref):
-            blockers.append((NO_SAFE_FALLBACK,
-                             "the fallback has never been drilled; an untested way "
-                             "back is not a way back (drill reference: "
-                             f"{batch.fallback_drill_ref or 'none'})"))
-        elif fallback.get("verdict") != routing.FALLBACK_OK:
-            blockers.append((
-                FALLBACK_RETIRED if fallback.get("verdict") == routing.FALLBACK_BLOCKED
-                else FALLBACK_UNAVAILABLE,
-                fallback.get("reason") or "the fallback is not usable"))
-
-        if blockers:
-            # The most severe blocker names the scope's verdict; all of them are
-            # kept so the report can list the complete set of work.
-            scope.outcome = blockers[0][0]
-            scope.reason = " | ".join(reason for _kind, reason in blockers)
-            scope.checks["blockers"] = [kind for kind, _reason in blockers]
+        if authorisation is None or not authorisation.is_complete:
+            raise DeploymentAuthorizationError("auditable deployment authorisation required")
+        if authorisation.expiry() is None or authorisation.expiry() <= datetime.now(UTC):
+            raise DeploymentAuthorizationError("deployment authorisation expired or invalid")
+        groups = deployment.requests(batch)
+        if Path(cutover_path or plane.default_cutover_db_path()).resolve() != Path(
+                plane.default_cutover_db_path()).resolve():
+            raise ReadCutoverError("executor must use active runtime control authority")
+        for who, request in groups:
+            before = resolve_route(boundary, who, path=cutover_path)
+            scope = ScopeOutcome(who.consumer_id, REPORT_INVALID,
+                route_before=before["route"], route_after=before["route"])
+            scope.checks["identity"] = who.as_row()
+            scope.checks["request"] = request
             result.scopes.append(scope)
-            continue
-
-        if settled or route_before == plane.ROUTE_TARGET:
-            scope.outcome = ALREADY
-            scope.route_after = plane.ROUTE_TARGET
-            scope.reason = (f"already serving the target route (chain {list(chain)} "
-                            "is settled)")
-            result.scopes.append(scope)
-            continue
-
-        scope.outcome = SWITCHED
-        scope.route_after = plane.ROUTE_TARGET
-        result.scopes.append(scope)
-
-    # --- 6. reduce, then move at most once ----------------------------------
-    moved = [s for s in result.scopes if s.outcome == SWITCHED]
-    already = [s for s in result.scopes if s.outcome == ALREADY]
-    if not moved:
-        result.outcome = BATCH_NOOP if already else BATCH_REFUSED
-        if not apply:
-            return _finish("")
-    else:
-        result.outcome = BATCH_PARTIAL if result.unmoved else BATCH_SWITCHED
-
-    if not apply:
-        # Decide-only. The batch may well be refused at apply time (an
-        # authorisation can expire in between), which is exactly why the
-        # recorded dry-run says "nothing changed" rather than predicting success.
-        return _finish("")
-
-    if moved:
-        for member in chain:
-            plane.set_route(member, plane.ROUTE_TARGET,
-                            actor=actor or "read-executor",
-                            reason=(f"batch {batch.batch_id}: paired switch of "
-                                    f"{list(chain)} for "
-                                    + ", ".join(s.consumer_id for s in moved)),
-                            path=cutover_path)
-            result.checks.setdefault("switched_boundaries", []).append(member)
-        result.changed = True
-
-    return _finish(boundary, applied=True)
+            try:
+                assert_authorised(authorisation, consumer_id=who.consumer_id)
+                if qualification_reader is None:
+                    raise ReadCutoverError("current exact-scope qualification reader required")
+                gates = deployment.gate_adapters(batch, who, request, authorisation,
+                    report_checker=report_checker, qualification_reader=qualification_reader,
+                    projection_checker=projection_checker,
+                    path=cutover_path or plane.default_cutover_db_path())
+                # Same adapters as the coordinator; no route writes in plan mode.
+                joint.preflight(request, gates=gates,
+                    path=cutover_path or plane.default_cutover_db_path(), mode="production")
+                if apply:
+                    operation = joint.execute(request, gates=gates, actor=actor,
+                        reason="explicit read batch " + batch.batch_id, path=cutover_path)
+                    scope.checks["joint_operation"] = operation
+                after = resolve_route(boundary, who, path=cutover_path)
+                scope.route_after = after["route"] if apply else next(
+                    m["route"] for m in request["members"] if m["boundary"] == boundary)
+                scope.outcome = (ALREADY if before["generation"] == after["generation"] and
+                    before["route"] == scope.route_after else SWITCHED)
+                result.changed |= apply and before["generation"] != after["generation"]
+            except Exception as exc:  # noqa: BLE001 - a failed gate must be recorded and refuse
+                scope.outcome = UNAUTHORIZED if isinstance(exc, DeploymentAuthorizationError) else REPORT_INVALID
+                scope.reason = str(exc)
+        result.outcome = (BATCH_PARTIAL if result.unmoved and result.moved_scopes else
+            BATCH_REFUSED if result.unmoved else BATCH_SWITCHED if any(
+                s.outcome == SWITCHED for s in result.scopes) else BATCH_NOOP)
+    except (DeploymentAuthorizationError, plane.CutoverError, ValueError, KeyError,
+            TypeError, OSError, sqlite3.Error) as exc:
+        result.scopes.extend(ScopeOutcome(consumer,
+            UNAUTHORIZED if isinstance(exc, DeploymentAuthorizationError) else REPORT_INVALID,
+            reason=str(exc)) for consumer in batch.consumers or ("<batch>",))
+    if record:
+        _record(result, batch=batch, boundary=boundary, actor=actor,
+                path=path, applied=apply and result.changed)
+    return result
 
 
 def _boundary_for(batch: manifest.CutoverBatch,

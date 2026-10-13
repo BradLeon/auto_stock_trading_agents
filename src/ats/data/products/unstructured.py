@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -186,6 +186,7 @@ class AdmittedDocument:
     known_at: str = ""
     metadata_history: str = "current_index"
     related_entities: tuple[str, ...] = ()
+    quality: dict = field(default_factory=dict)
 
 
 def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
@@ -235,6 +236,9 @@ def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
         for row in rows.values():
             if allowed_sources is not None and str(row.get("source") or "") not in allowed_sources:
                 continue
+            if as_of is None and hasattr(repo, "latest_document_metadata"):
+                row = {**row, "quality": repo.latest_document_metadata(
+                    str(row["document_id"])).get("quality", {})}
             version = row.get("version") or repo.latest_document_version(str(row["document_id"]))
             if not version:
                 if diagnostics is not None:
@@ -262,8 +266,10 @@ def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
                 known_at=str(version.get("known_at") or row.get("fetched_at") or ""),
                 metadata_history=str(row.get("metadata_history") or "current_index"),
                 related_entities=tuple(str(entity).upper() for entity in row.get("related_entities", [])),
+                quality=dict(row.get("quality") or {}),
             ))
-        return sorted(result, key=lambda item: (item.published_at, item.fetched_at), reverse=True)[:limit]
+        return sorted(result, key=lambda item: (
+            item.published_at, item.fetched_at, item.document_id), reverse=True)[:limit]
     finally:
         if repository is None:
             repo.close()

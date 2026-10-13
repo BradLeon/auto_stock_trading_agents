@@ -235,7 +235,7 @@ def test_selected_use_audit_missing_internal_store_refuses_without_creation(tmp_
     assert not missing.exists()
 
 
-def test_information_peer_scope_is_configured_frozen_and_role_specific(tmp_path):
+def test_information_target_scope_is_configured_frozen_and_role_specific(tmp_path):
     import shutil
     from ats.workflow.phase_e import build_plan
     from ats.workflow.run_contracts import TriggerContext
@@ -249,7 +249,7 @@ def test_information_peer_scope_is_configured_frozen_and_role_specific(tmp_path)
         run_id='peer-scope', config_dir=root)
     info, funda = plan.tasks
     who = task_identity(plan, info)
-    assert {'MRVL', 'NVDA', 'TSM', 'MSFT'} <= set(who.scope['entities'])
+    assert who.scope['entities'] == ['MRVL']
     assert task_identity(plan, funda).scope['entities'] == ['MRVL']
     assert 'config/pead/MRVL.yaml' in plan.source_config_hashes
     assert consumer_entities('information', 'entity', 'MRVL', config_dir=root) == who.scope['entities']
@@ -370,7 +370,7 @@ def test_information_deployment_accepts_configured_read_universe_but_requires_ta
         return {'projection_id':'unit-projection', 'content_hash':'unit-hash', 'role':'information_brief',
                 'scope_kind':'entity', 'scope_id':entity}
     assert projection_check(who, refs=[reference('MRVL')])['available']
-    with pytest.raises(CutoverError, match='dependency scope omitted'):
+    with pytest.raises(CutoverError, match='escapes business entities'):
         projection_check(who, refs=[reference('NVDA')])
     with pytest.raises(CutoverError, match='escapes'):
         projection_check(who, refs=[reference('UNCONFIGURED')])

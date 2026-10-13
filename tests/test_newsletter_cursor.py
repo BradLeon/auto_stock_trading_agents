@@ -9,6 +9,15 @@ NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
 SENDER = "semianalysis@substack.com"
 
 
+def test_failed_imap_transport_is_distinct_from_successful_empty_rss(monkeypatch):
+    monkeypatch.setattr(research, "safe_fetch", lambda *a, **k: None)
+    monkeypatch.setattr(research, "_rss_batch", lambda *a: ([], {"status": "succeeded"}))
+    batch = research.fetch_batch(NOW, source_config={})
+    assert not batch.complete and not batch.articles
+    assert batch.transport_status['imap'] == {'status': 'failed', 'reason': 'fetch_retry_exhausted'}
+    assert batch.transport_status['rss']['status'] == 'succeeded'
+
+
 def _message(uid: int, *, marker: str = "", long: bool = True) -> bytes:
     body = (f"Deep research paragraph {uid}. " * (120 if long else 5)) + marker
     return (
@@ -133,7 +142,8 @@ def test_fetch_failure_does_not_advance_success_watermark(monkeypatch):
 def test_full_partial_and_teaser_are_explainable_and_incomplete_is_hidden_by_default():
     assert research.classify_completeness("complete analysis " * 200) == ("full", "")
     partial = research.classify_completeness(
-        "substantial analysis " * 200 + " Subscribe to unlock the rest")
+        "Microsoft increased capacity by 10%. Nvidia supplied additional GPUs. " * 20
+        + " Subscribe to unlock the rest")
     teaser = research.classify_completeness("preview only. Subscribe to unlock the rest")
     assert partial == ("partial", "subscribe to unlock")
     assert teaser == ("teaser", "subscribe to unlock")
@@ -146,7 +156,24 @@ def test_generic_paid_upgrade_footer_does_not_imply_truncation():
 
 
 def test_source_named_unlock_marker_is_a_strong_truncation_signal():
-    body = "substantial analysis " * 200
+    body = "Microsoft increased capacity by 10%. Nvidia supplied additional GPUs. " * 20
     body += " Subscribe to SemiAnalysis to unlock the rest. Upgrade to paid."
     assert research.classify_completeness(body) == (
         "partial", "subscribe to unlock the rest")
+
+
+def test_imap_failure_has_sanitized_stage_and_never_advances_cursor(monkeypatch):
+    def failed(*a,**kw):
+        raise research.ImapAcquisitionError('connect',TimeoutError('secret credentials here'))
+    monkeypatch.setattr(research,'_imap_batch',failed)
+    # Exercise one attempt without sleeping; preserve production wrapper behavior.
+    def fetch(fn,**kw):
+        try:return fn()
+        except Exception:return None
+    monkeypatch.setattr(research,'safe_fetch',fetch)
+    monkeypatch.setattr(research,'_rss_batch',lambda *a:([],{'status':'succeeded'}))
+    result=research.fetch_batch(NOW,source_config={})
+    assert result.transport_status['imap']['stage']=='connect'
+    assert result.transport_status['imap']['cause_type']=='TimeoutError'
+    assert 'secret' not in repr(result.transport_status)
+    assert not result.cursor_updates and not result.complete

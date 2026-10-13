@@ -27,7 +27,7 @@ def test_full_ibkr_outage_fallback_stays_in_registered_primary_scope(tmp_path, m
 
     captured = []
 
-    def materials(source, policy, *, now, adapter_params=None):
+    def materials(source, policy, *, now, adapter_params=None, store=None):
         captured.append((source.id, adapter_params))
         if source.id == "ibkr_news":
             return [], {"status": "unreachable", "failed_slices": []}, False

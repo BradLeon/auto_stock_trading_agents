@@ -159,6 +159,9 @@ sources:
       # 未订阅时邮件通常只含可验证的预览正文。预览可作为带 completeness=partial
       # 标签的研究输入发布；它不能被后续产品误读为全文，也不能覆盖未来取得的完整版本。
       allow_partial_bodies: true
+      minimum_partial_body_chars: 400
+      require_substantive_partial: true
+      completeness_policy: visible-content-v2
       partial_body_disclosure: subscriber_preview_or_paywall_boundary
       fallback_mode: none
     ingestion:
@@ -182,6 +185,7 @@ sources:
       lookback_days: 7
       slice_days: 3
       max_body_requests: 10
+      max_exploration_candidates: 2
     policy:
       access: tws_read_only
       permission: tws_news_entitlement
@@ -197,7 +201,8 @@ sources:
       # 不会触发双源混采。
       priority: primary
       require_entity_verified: true
-      association_gate: title_ticker_company_or_registered_alias
+      entity_evidence_fields: [title, body]
+      association_gate: registered_issuer_literal_title_or_visible_body_span
       dedup_keys: [provider_article_id, normalised_title_and_exact_time, content_hash]
       failure_states: [tws_unreachable, unauthorized, provider_unavailable, rate_limited,
                        request_rejected]

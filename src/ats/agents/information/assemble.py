@@ -39,11 +39,22 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
             from ...workflow.cutover_routing import RouteUnavailable
 
             raise RouteUnavailable("Information admitted documents unavailable")
+        from ...data.articles.material_quality import completeness_assessment
+
+        rows = []
+        for row in packet.payload or []:
+            if row.get("source") == "semianalysis":
+                visibility = completeness_assessment(row.get("text", ""),
+                    stored=row.get("completeness", "unknown"))
+                if visibility["completeness"] not in {"full", "partial"}:
+                    continue
+                row = {**row, "completeness": visibility["completeness"]}
+            rows.append(row)
         return [{**row, "id": row["document_id"], "headline": row["title"],
                  "symbol": row["entity"],
                  "input_ref": f"{row['document_id']}@{row['version_id']}"}
-                for row in packet.payload or []
-                if row.get("published_at") and row["published_at"] >= cutoff.isoformat()]
+                for row in rows
+                if row.get("published_at") and _within_window(row["published_at"], cutoff)]
     out = []
     for row in store.recent_events(symbol, limit=limit):
         record = dict(row)
@@ -54,7 +65,10 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
     return out
 
 
-def admitted_articles(store, *, since: datetime, limit: int = 500) -> list:
+def admitted_articles(store, *, since: datetime, limit: int = 500, entities: list[str] | None = None,
+                      document_types: tuple[str, ...] | None = (
+                          "article", "research", "research_article", "news", "newsletter"),
+                      diagnostics: dict | None = None) -> list:
     """Read admitted document versions through the public Data Products API.
 
     Workflow Memory remains the owner of processing leases and analyst outputs,
@@ -63,21 +77,45 @@ def admitted_articles(store, *, since: datetime, limit: int = 500) -> list:
     """
     from ...data.products.unstructured import admitted_documents
     from ...schemas.research import Article
+    from ...data.articles.material_quality import interpretation_fingerprint, completeness_assessment
 
-    documents = admitted_documents(
-        document_types=("article", "research", "research_article", "news", "newsletter"),
-        published_since=since.astimezone(timezone.utc).isoformat(),
-        limit=limit,
-    )
+    from ...workflow.runtime_reads import current_read_context
+
+    context = current_read_context()
+    types = document_types
+    if context is not None:
+        from ...data.consumer_api import read_input
+        from ...data.products.unstructured import AdmittedDocument
+        from ...workflow.cutover_routing import RouteUnavailable
+
+        packet = read_input(consumer="information", product="DOC_DATA", scope={
+            "entities": entities if entities is not None else context.identity.scope["entities"],
+            "document_types": types, "limit": limit})
+        if packet.status not in {"complete", "partial", "no_coverage"}:
+            raise RouteUnavailable("Information research documents unavailable")
+        documents = [AdmittedDocument(**row) for row in packet.payload or []]
+    else:
+        documents = admitted_documents(document_types=types, entities=entities,
+            published_since=since.astimezone(timezone.utc).isoformat(), limit=limit)
+    if diagnostics is not None:
+        diagnostics.update(raw_documents=len(documents), limit_reached=len(documents) >= limit)
     out = []
     for document in documents:
+        visibility = (completeness_assessment(document.text, stored=document.completeness)
+                      if document.source == "semianalysis" else {})
+        completeness = visibility.get("completeness", document.completeness)
+        if completeness not in {"full", "partial"} or (
+                completeness == "partial" and document.source != "semianalysis"):
+            continue
         try:
             published = datetime.fromisoformat(
-                (document.published_at or document.fetched_at).replace("Z", "+00:00"))
+                document.published_at.replace("Z", "+00:00"))
         except ValueError:
             continue
         if published.tzinfo is None:
             published = published.replace(tzinfo=timezone.utc)
+        if not since <= published <= evaluation_now(timezone.utc):
+            continue
         out.append(Article(
             id=document.document_id,
             source=document.source,
@@ -85,13 +123,31 @@ def admitted_articles(store, *, since: datetime, limit: int = 500) -> list:
             url=document.source_url,
             body=document.text,
             published_at=published,
-            completeness=document.completeness,
+            completeness=completeness,
+            source_fields={key: str(value) for key, value in
+                           (document.quality.get("provenance") or {}).items()},
+            document_version_id=document.version_id,
+            publication_id=document.publication_id,
+            related_entities=list(document.related_entities), quality=document.quality,
+            interpretation_key=interpretation_fingerprint(version_id=document.version_id,
+                title=document.title, published_at=document.published_at,
+                completeness=completeness, quality={**document.quality, "visibility": visibility}),
         ))
     return out
 
 
 def default_cutoff(lookback_days: int) -> datetime:
     return evaluation_now(timezone.utc) - timedelta(days=lookback_days)
+
+
+def _within_window(stamp: str, cutoff: datetime) -> bool:
+    try:
+        published = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    return cutoff <= published <= evaluation_now(timezone.utc)
 
 
 def signal_chain_universe(targets: list[str]) -> tuple[str, dict[str, list[str]]]:

@@ -362,6 +362,12 @@ CREATE TABLE IF NOT EXISTS task_projections (
 );
 CREATE INDEX IF NOT EXISTS idx_task_projection
     ON task_projections(profile, target_type, target_id, created_at);
+CREATE TABLE IF NOT EXISTS information_processing_runs (
+    version_id TEXT NOT NULL, target_id TEXT NOT NULL, processor_version TEXT NOT NULL,
+    document_id TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL DEFAULT '', outputs INTEGER NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '', PRIMARY KEY(version_id,target_id,processor_version)
+);
 -- Unified agent-output envelope (see ats.agent.task_projection). Independent from
 -- `task_projections` on purpose: that table models evidence fact projections keyed by
 -- profile/target, which is a different abstraction. This one is additive only —
@@ -1991,17 +1997,65 @@ class TradingMemory:
                                  entity: str | None = None) -> dict | None:
         return self.data_store().document_by_content_hash(content_hash, entity=entity)
 
+    @publication_write
+    def begin_information_processing(self, document_id: str, target_id: str,
+                                     processor_version: str, *, version_id: str,
+                                     retry_failed: bool = False) -> str | None:
+        """Own-role analysis state belongs to Memory, not the ingestion ledger."""
+        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.runtime_reads import current_read_context
+        context = current_read_context()
+        if context and (context.identity.consumer_id != 'information' or
+                        context.identity.scope.get('id') != target_id):
+            raise PermissionError('Information processing escapes bound target')
+        if not all((document_id, target_id, processor_version, version_id)):
+            raise ValueError('Information processing requires exact version and target')
+        guard_analyst_output(store=self, what='Information processing state')
+        stamp=evaluation_now(timezone.utc).isoformat()
+        cur=self.conn.execute(
+            "INSERT INTO information_processing_runs "
+            "(version_id,target_id,processor_version,document_id,status,started_at) "
+            "VALUES (?,?,?,?,'running',?) ON CONFLICT(version_id,target_id,processor_version) "
+            "DO UPDATE SET status='running',started_at=excluded.started_at,completed_at='',outputs=0,note='' "
+            "WHERE information_processing_runs.status='failed' AND ? AND "
+            "information_processing_runs.document_id=excluded.document_id",
+            (version_id,target_id,processor_version,document_id,stamp,int(retry_failed)))
+        self.conn.commit()
+        return version_id if cur.rowcount else None
+
+    @publication_write
+    def finish_information_processing(self, version_id: str, target_id: str,
+                                      processor_version: str, *, ok: bool,
+                                      outputs: int = 0, note: str = '') -> None:
+        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.runtime_reads import current_read_context
+        context=current_read_context()
+        if context and (context.identity.consumer_id != 'information' or
+                        context.identity.scope.get('id') != target_id):
+            raise PermissionError('Information processing escapes bound target')
+        guard_analyst_output(store=self,what='Information processing completion')
+        self.conn.execute(
+            "UPDATE information_processing_runs SET status=?,completed_at=?,outputs=?,note=? "
+            "WHERE version_id=? AND target_id=? AND processor_version=? AND status='running'",
+            ('succeeded' if ok else 'failed',evaluation_now(timezone.utc).isoformat(),outputs,note,
+             version_id,target_id,processor_version))
+        self.conn.commit()
+
     def begin_document_processing(self, document_id: str, consumer: str,
                                   processor_version: str = "v1", *,
-                                  at: str | None = None) -> str | None:
+                                  at: str | None = None, version_id: str | None = None,
+                                  retry_failed: bool = False) -> str | None:
         """Claim one exact document version for a consumer, once.
 
         Returns the version id when this caller owns a new run, otherwise ``None``.
         The row is written before the expensive operation, so scheduler retries cannot
         duplicate spend. A new processor version remains eligible by construction.
         """
+        options = {"version_id": version_id} if version_id else {}
+        if retry_failed:
+            options["retry_failed"] = True
         claimed = self.data_store().begin_document_processing(
-            document_id, consumer, processor_version, at=at)
+            document_id, consumer, processor_version, at=at, **options)
         return claimed
 
     def finish_document_processing(self, version_id: str, consumer: str,
@@ -2560,7 +2614,7 @@ class TradingMemory:
 
     @publication_write
     def save_insights(self, article_id: str, insights, *,
-                      profile_version: str = "v1") -> None:
+                      profile_version: str = "v1", document_version_id: str = "") -> None:
         from datetime import datetime, timezone
 
         now = evaluation_now(timezone.utc).isoformat()
@@ -2579,9 +2633,16 @@ class TradingMemory:
             version = {"version_id": selected.version_id} if selected else None
             if not selected:
                 raise ValueError("insight_input_document_not_admitted")
+            if document_version_id and selected.version_id != document_version_id:
+                raise ValueError("insight_input_version_differs_from_bound_asof")
         else:
             doc = self.document_by_external_id(article_id)
             version = self.latest_document_version(doc["document_id"]) if doc else None
+            if document_version_id:
+                version = next((row for row in self.data_store().document_versions(article_id)
+                                if row["version_id"] == document_version_id), None)
+                if not version:
+                    raise ValueError("insight_input_version_not_in_document")
         input_kind = "document_version" if version else "external_article"
         input_ref = version["version_id"] if version else article_id
         self.conn.executemany(
@@ -2606,6 +2667,19 @@ class TradingMemory:
                 "SELECT * FROM research_insights ORDER BY rowid DESC LIMIT ?",
                 (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    def information_extraction_cache(self, *, input_ref: str, processor: str,
+                                     target: str, as_of: datetime) -> dict | None:
+        """Own-role interpretation cache; callers must re-admit the input first."""
+        import json
+
+        row = self.conn.execute(
+            "SELECT * FROM task_projections WHERE profile='information_extraction' "
+            "AND profile_version=? AND input_kind='document_version' AND input_ref=? "
+            "AND target_type='entity' AND target_id=? AND julianday(created_at)<=julianday(?) "
+            "ORDER BY created_at DESC LIMIT 1",
+            (processor, input_ref, target, as_of.isoformat())).fetchone()
+        return {**dict(row), "payload": json.loads(row["payload"])} if row else None
 
     def newsletter_cursor(self, mailbox: str, folder: str, sender: str) -> dict | None:
         return self.data_store().newsletter_cursor(mailbox, folder, sender.lower())

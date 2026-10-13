@@ -4293,6 +4293,7 @@ def main(argv: list[str] | None = None) -> int:
             "source-publish",
             "source-releases",
             "article-ingest",
+            "article-metadata-reconcile",
             "document-ingest",
             "fixed-ingest",
             "chain-source-collect",
@@ -4486,6 +4487,8 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--event-id", dest="evidence_event_id", default="",
                       help="assurance revoke: evidence event to invalidate")
     data.add_argument("--apply", action="store_true", help="publish/source-publish: 显式执行写操作")
+    data.add_argument("--field-evidence", default="", help="article-metadata-reconcile: exact-version field evidence JSON")
+    data.add_argument("--document-ids", default="", help="article-metadata-reconcile: bounded document ID array JSON")
     data.add_argument(
         "--mode", choices=["platform"], default="platform", help="publish: 唯一受支持的数据路径"
     )
@@ -5053,6 +5056,7 @@ def main(argv: list[str] | None = None) -> int:
             "factset-refresh", "factset-semantic-refresh", "calendar-refresh", "calendar-finalize",
         } or (args.action == "release-check" and args.ingest_new)
         persistent_write = persistent_write or args.action == "chain-source-collect"
+        persistent_write = persistent_write or (args.action == "article-metadata-reconcile" and args.apply)
         worker_task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
         if persistent_write:
             from ..data.persistent_queue import PersistentIngestionQueue
@@ -5104,6 +5108,22 @@ def main(argv: list[str] | None = None) -> int:
                                       "ingestion_result": result.get("stdout", {})},
                                      ensure_ascii=False, indent=2, default=str))
                     return 0 if result["status"] in {"succeeded", "no_change", "quarantined", "partial"} else 1
+        if args.action == 'article-metadata-reconcile':
+            from ..data.pipelines.unstructured.article_metadata import reconcile_article_metadata
+            if not args.source or not args.as_of or not args.document_ids:
+                parser.error('metadata reconciliation requires --source, --as-of and bounded --document-ids')
+            ids = json.loads(Path(args.document_ids).read_text())
+            if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                parser.error('document-ids must be a nonempty string array')
+            fields = json.loads(Path(args.field_evidence).read_text()) if args.field_evidence else None
+            result = reconcile_article_metadata(args.source,
+                now=datetime.fromisoformat(args.as_of), dry_run=not args.apply,
+                document_ids=ids, field_evidence=fields, limit=args.limit)
+            states = {row['status'] for row in result['rows']}
+            result['status'] = ('partial' if 'body_integrity_gap' in states else
+                                'no_change' if states == {'no_change'} else 'succeeded')
+            print(json.dumps(result, ensure_ascii=False, default=str))
+            return 0
         if args.action in {"search", "company", "claim", "lineage"} and not args.value:
             parser.error(f"data {args.action} requires VALUE")
         return run_data(

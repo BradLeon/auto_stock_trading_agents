@@ -461,6 +461,20 @@ qualification_policy:
     - src/ats/workflow/ownership.py
     - src/ats/agents/information/extract.py
     - src/ats/agents/information/entry.py
+    - src/ats/agents/information/selection.py
+    - src/ats/agents/information/target_research.py
+    - src/ats/agents/information/outputs.py
+    - src/ats/data/articles/material_quality.py
+    - src/ats/data/pipelines/unstructured/article_metadata.py
+    - scripts/reconcile_article_metadata.py
+    - scripts/review_information_selection.py
+    - scripts/prepare_information_capture.py
+    - scripts/run_information_capture.py
+    - scripts/review_information_capture.py
+    - tests/test_information_capture_budget.py
+    - tests/test_information_target_selection.py
+    - tests/test_information_visibility_revisions.py
+    - tests/test_information_material_quality.py
     - src/ats/agents/technical/report.py
     - src/ats/agents/macro/report.py
     - src/ats/agents/sector/report.py
@@ -885,6 +899,7 @@ qualification_policy:
     - src/ats/skills/pead-scorer/SKILL.md
     - src/ats/skills/pead-signal-chain/SKILL.md
     - src/ats/skills/research-insight/SKILL.md
+    - src/ats/skills/information-evidence-recap/SKILL.md
     - src/ats/skills/risk-officer/SKILL.md
     - src/ats/skills/sector-analyst/SKILL.md
     - src/ats/skills/structure-analyst/SKILL.md
@@ -1028,6 +1043,10 @@ consumers:
     owner: ats.data.products
     vintage: document_published_at_and_version
     completeness: partial_preview_labeled
+    document_candidate_scope:
+      entity_match: explicit_target_title_subtitle_lede_or_visible_body
+      authorization: exact_bound_target_scope
+      extraction_cache: own_information_interpretations_after_input_readmission
     source_flag: data_source_release
     consumer_flag: none_verified
     fallback: none_verified

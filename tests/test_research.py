@@ -180,7 +180,7 @@ def test_research_uses_stable_document_id_for_pre_metadata_article(monkeypatch):
         processor_version=info_extract.PROCESSOR_VERSION)
 
 
-def test_stored_articles_recovers_pre_metadata_migration_records(monkeypatch, tmp_path):
+def test_stored_articles_does_not_invent_publish_time_for_pre_metadata_records(monkeypatch, tmp_path):
     historical = tmp_path / "historical.md"
     historical.write_text("migrated SemiAnalysis body", encoding="utf-8")
 
@@ -206,9 +206,8 @@ def test_stored_articles_recovers_pre_metadata_migration_records(monkeypatch, tm
 
     articles = research_src.stored_articles(NOW, store=object())
 
-    assert len(articles) == 1
-    assert articles[0].id == "SEMIANALYSIS:imap-123:article"
-    assert articles[0].published_at == NOW
+    # Retrieval time is knowledge lineage, not evidence of a publication event.
+    assert articles == []
 
 
 def test_cross_carrier_duplicate_prefers_imap_body_and_records_duplicate_count(monkeypatch):

@@ -229,6 +229,10 @@ def test_monitor_chain_leaves_dossier_untouched_and_publishes_brief(monkeypatch)
     monkeypatch.setattr(news_src, "fetch_news",
                         lambda sym, since, until=None, consumer="pead_monitor": fresh)
     monkeypatch.setattr("ats.agents.information.documents.run_structured", lambda *a, **k: None)
+    def triage_failure(*args, **kwargs):
+        raise RuntimeError("fixture: triage model unavailable")
+
+    monkeypatch.setattr("ats.agents.information.triage.run_structured", triage_failure)
     # LLM 失败路径：不产出简报、绝不写 dossier
     with pytest.raises(RuntimeError, match="no brief published"):
         monitor.run("COHR", use_llm=True, lookback_days=7)

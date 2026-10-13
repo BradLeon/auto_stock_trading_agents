@@ -8,7 +8,7 @@ environment: live           # paper | live  (switch here when going live)
 llm:
   # OpenRouter relay (OpenAI-compatible) — swap provider/model by editing here.
   default_provider: openai
-  default_model: anthropic/claude-opus-5
+  default_model: anthropic/claude-sonnet-5.5
   temperature: 0.2
   max_tokens: 4096
   timeout_seconds: 120

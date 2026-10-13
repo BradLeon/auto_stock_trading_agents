@@ -180,6 +180,7 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
     allow_partial_bodies = _allows_partial_bodies(policy)
     require_entity_verified = bool((policy.get("policy") or {}).get(
         "require_entity_verified", False))
+    allowed_evidence_fields = (policy.get("policy") or {}).get("entity_evidence_fields", ["title"])
     human_review_required = bool((policy.get("policy") or {}).get(
         "release_requires_human_title_url_review", False))
     since = now.date() - timedelta(days=lookback_days) if lookback_days else None
@@ -218,7 +219,7 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
             row.update(status="out_of_scope", reason="published_before_acceptance_window")
             rows.append(row)
             continue
-        if require_entity_verified and row["entity_association"] != "title_verified":
+        if require_entity_verified and "body" not in allowed_evidence_fields and row["entity_association"] != "title_verified":
             row.update(status="association_rejected", reason="title_does_not_verify_queried_entity")
             rows.append(row)
             continue
@@ -244,7 +245,37 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
                 errors.append(f"{type(exc).__name__}:{exc}")
         if errors and not body:
             row["reason"] = f"body_fetch_failed_after_{max_body_attempts}_attempts:{errors[-1]}"
-        status, reason = _body_status(body, minimum=minimum)
+        from ...articles.material_quality import visible_analysis_view, completeness_assessment, substantive_preview
+
+        visible = visible_analysis_view(body or "", title=ref.title, source=source_id)
+        if require_entity_verified and "body" in allowed_evidence_fields and (body or "").strip():
+            from ....config import load_entities
+            from ...articles.material_quality import association_evidence
+
+            evidence = association_evidence({"title": ref.title, "body": visible.text}, list(load_entities()))
+            for mention in evidence:
+                if mention["field"] == "body":
+                    mention.update(visible.locator(mention["start"], mention["end"]))
+            row["entity_evidence"] = evidence
+            if not any(mention["field"] in allowed_evidence_fields for mention in evidence):
+                row.update(status="association_rejected", reason="no_registered_issuer_in_allowed_fields")
+                rows.append(row)
+                continue
+            row["entity_association"] = "literal_allowed_field_verified"
+        declared_completeness = str(provenance.get("completeness") or "full").lower()
+        if source_id == "semianalysis":
+            row["visibility"] = completeness_assessment(body or "", stored=declared_completeness)
+            declared_completeness = row["visibility"]["completeness"]
+        applicable_minimum = minimum
+        if declared_completeness == "partial" and allow_partial_bodies:
+            applicable_minimum = int((policy.get("policy") or {}).get("minimum_partial_body_chars") or minimum)
+        status, reason = _body_status(visible.text, minimum=applicable_minimum)
+        row.update(completeness=declared_completeness, effective_chars=len(visible.text))
+        if declared_completeness in {"teaser", "unknown"}:
+            status, reason = "unreadable", f"body_{declared_completeness}_not_fact_input"
+        elif declared_completeness == "partial" and (policy.get("policy") or {}).get("require_substantive_partial"):
+            if not substantive_preview(visible.text, minimum_chars=applicable_minimum):
+                status, reason = "unreadable", "partial_not_substantive"
         if (body or "").strip():
             # Hash every retrieved body, including a partial/teaser.  A rejected
             # document still needs an auditable identity and may later be superseded
@@ -253,7 +284,6 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
         # A long subscriber email can still end at a paid-content boundary.  Size is
         # only a corruption guard; the acquisition pipeline's explicit completeness
         # classification is authoritative for newsletter/RSS assets.
-        declared_completeness = str(provenance.get("completeness") or "full").lower()
         if status == "accepted" and declared_completeness != "full":
             status, reason = "partial", f"declared_{declared_completeness}_body"
         row["status"] = status

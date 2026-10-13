@@ -298,20 +298,12 @@ def configured_entities(kind, scope_id, *, sector="", config_dir=None):
 
 
 def consumer_entities(consumer, kind, scope_id, *, sector="", config_dir=None):
-    """Information's configured read universe includes its signal-chain facts.
+    """Return the configured consumer scope without discovery expansions.
 
-    Output scope remains the target. Other consumers do not inherit peer access.
+    Information uses the explicit target only; peers and publisher-only entities
+    are not added as discovery fallbacks.
     """
     entities = configured_entities(kind, scope_id, sector=sector, config_dir=config_dir)
-    if consumer == "information" and kind == "entity":
-        from pathlib import Path
-        import yaml
-        from ..config import REPO_ROOT
-        root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
-        source = root / "pead" / (scope_id.upper() + ".yaml")
-        if source.exists():
-            cfg = yaml.safe_load(source.read_text()) or {}
-            entities += [str(row["symbol"]).upper() for row in cfg.get("signal_chain", [])]
     return sorted(set(entities))
 
 

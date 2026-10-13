@@ -124,7 +124,8 @@ def discover(*, pages: int = 3, **kwargs) -> list[ArticleRef]:
 
 def provenance(ref: ArticleRef) -> dict[str, str]:
     """Stable publisher identity for a source-only acceptance ledger."""
-    return {"native_id": ref.slug, "canonical_url": ref.url}
+    return {"native_id": ref.slug, "canonical_url": ref.url,
+            "title_source": "url_slug", "title_quality": "fallback"}
 
 
 def extract_body(html: str) -> str:
@@ -150,7 +151,15 @@ def extract_body(html: str) -> str:
 def fetch_body(url: str) -> str:
     """One article's text. "" means the body could not be located — see the package
     docstring for why that is a recorded gap and never a fallback to page text."""
-    body = extract_body(_get(url))
+    return fetch_material(url)[0]
+
+
+def fetch_material(url: str) -> tuple[str, dict[str, str]]:
+    """Parse fields from the same budgeted page request as the public body."""
+    from .material_quality import page_fields
+
+    html = _get(url)
+    body = extract_body(html)
     if not body:
         log.info("trendforce: no article container at %s (paywalled or not an article)", url)
-    return body
+    return body, page_fields(html)

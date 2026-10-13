@@ -65,7 +65,14 @@ def run_document_pass(store, symbol: str, *, cfg, fresh: list, use_llm: bool = T
                              event_summary="all triaged as noise")
 
     if articles is None:
-        articles = [(SimpleNamespace(headline=row.get("headline", "")), row["text"][:12000])
+        from ...data.articles.material_quality import visible_analysis_view
+
+        articles = [(SimpleNamespace(headline=row.get("headline", ""),
+                        completeness=row.get("completeness", "unknown"),
+                        input_ref=row.get("input_ref", ""),
+                        input_truncated=len(visible_analysis_view(row["text"], title=row.get("headline", ""), source=row.get("source", "")).text) > 12000,
+                        original_chars=len(row["text"])),
+                     visible_analysis_view(row["text"], title=row.get("headline", ""), source=row.get("source", "")).text[:12000])
                     for row in material if row.get("text")]
     update = _llm_brief(symbol, material, articles)
     _publish_target_brief(store, symbol, update, material)
@@ -92,15 +99,20 @@ def _llm_brief(symbol: str, material: list, articles: list[tuple]) -> ContextUpd
         f"  - [{e.get('published_at', '')[:10]}] {e.get('headline') or ''}"
         for e in material[:MAX_EVENTS_IN_CONTEXT])
     articles_txt = "\n\n".join(
-        f"=== {it.headline} ===\n{body}" for it, body in articles)
+        f"=== {it.headline} ===\n"
+        f"document_ref={getattr(it, 'input_ref', '')}; "
+        f"completeness={getattr(it, 'completeness', 'unknown')}; "
+        f"input_truncated={getattr(it, 'input_truncated', 'unknown')}; "
+        f"visible_input_chars={len(body)}\n{body}" for it, body in articles)
     ctx = (
         f"Target: {symbol}. Admitted events (target + signal-chain peers):\n"
         f"{events_txt}\n\n"
-        + (f"Full text of the most material articles:\n{articles_txt}\n\n"
+        + (f"Visible text of admitted articles:\n{articles_txt}\n\n"
            if articles_txt else "")
         + "Summarize what is factually NEW (no advice, no position language): "
         "list the fact changes, who they might impact, what remains unverified, "
         "and an overall confidence in the confidence field, independently of materiality. "
+        "Partial or truncated inputs cover only visible content; never infer hidden text. "
         "Most days are low-materiality noise — say so."
     )
     try:

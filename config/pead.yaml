@@ -50,8 +50,13 @@ research:
   enabled: true
   lookback_days: 2
   backfill_days: 30            # acquisition window; persistent UID cursor narrows later runs
-  max_articles_per_run: 8
+  max_articles_per_run: null      # no article-count truncation; character/time budgets still apply
   article_chars: 40000           # per-article cap fed to the extraction LLM
+  publisher_entities: []         # no publisher-only candidate channel
+  candidate_limit: 120           # bounded explicit target channel
+  exploration_articles: 0        # no peer/publisher-only reserved slots
+  total_article_chars: 320000     # visible article text across one target invocation
+  dispatch_seconds: 180          # stop starting calls; an in-flight call retains gateway timeout
   min_confidence_event: 0.6      # >= this -> insight becomes a pead_events entry
   push_threshold: 0.8            # >= this -> immediate Feishu info push
 

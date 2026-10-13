@@ -34,19 +34,33 @@ _ADVICE_EN_RE = re.compile(
     re.IGNORECASE)
 
 
-def assert_no_advice(texts) -> None:
-    """Reject any directional trading advice inside a brief's text fields (4.7)."""
+def assert_no_advice(texts, *, source_statement: bool = False) -> None:
+    """Intercept system instructions; source recaps may report transactions.
+
+    The caller establishes the source channel from bound evidence, never a
+    model-provided exemption. This rule has no issuer, job-title or transaction
+    vocabulary exceptions.
+    """
     for text in texts:
         if not text:
             continue
-        hit = _ADVICE_EN_RE.search(text)
-        if hit:
+        trades = _ADVICE_EN_RE.search(text) or any(word in text for word in _ADVICE_ZH)
+        if not trades:
+            continue
+        system_directive = re.search(r'我们|你|应当|应该|请|务必|\b(?:we|you|should|must)\b', text, re.I)
+        if source_statement:
+            if system_directive:
+                raise EnvelopeValidationError('信息来源转述不得生成系统交易指令')
+            continue
+        hit = re.search(
+            r'\b(?:target position|target weight|overweight|underweight)\b|'
+            r'(?:^|[.!?]\s*)\s*(?:buy|sell|trim)\b|'
+            r'\b(?:should|must|recommend(?:s|ed)?|advise(?:s|d)?)\s+(?:to\s+)?(?:buy|sell|trim)\b|'
+            r'建议|推荐|目标仓位|建议仓位|(?:^|[。！？；;\n])\s*(?:买入|卖出|增持|减持|加仓|减仓|清仓)',
+            text, re.I)
+        if hit or system_directive:
             raise EnvelopeValidationError(
-                f"信息简报不得包含交易建议：命中英文建议词 {hit.group(0)!r}")
-        for zh in _ADVICE_ZH:
-            if zh in text:
-                raise EnvelopeValidationError(
-                    f"信息简报不得包含交易建议：命中中文建议词 {zh!r}")
+                '信息简报不得包含交易建议')
 
 
 def require_six_elements(payload: dict) -> None:
@@ -77,11 +91,29 @@ def publish_information_brief(store, payload: dict, *, scope: ProjectionScope,
     violations — no partial or degraded row is ever written.
     """
     require_six_elements(payload)
-    assert_no_advice([
-        payload.get("headline", ""), payload.get("summary", ""),
-        *(payload.get("fact_changes") or []),
-        *(payload.get("impact_candidates") or []),
-    ])
+    facts = payload.get('fact_changes') or []
+    evidence = payload.get('source_evidence') or []
+    source_indices = set()
+    for row in evidence:
+        index = row.get('fact_index')
+        if not isinstance(index, int) or not 0 <= index < len(facts):
+            continue
+        summary, actor = row.get('source_summary'), row.get('source_actor')
+        loc = row.get('locator') or {}
+        if (summary and actor and row.get('evidence_quote') and row.get('document_ref')
+                and row.get('extraction_projection_id') and row.get('publication_id')
+                and isinstance(loc.get('start'), int) and isinstance(loc.get('end'), int)
+                and 0 <= loc['start'] < loc['end']
+                and facts[index] == f'来源信息（{actor}）：{summary}'):
+            source_indices.add(index)
+    # Summary is a program-owned projection of exactly those facts, not an
+    # independent model channel that could hide advice behind a source label.
+    source_summary = bool(facts) and source_indices == set(range(len(facts))) and (
+        payload.get('summary') == '；'.join(facts)[:400])
+    assert_no_advice([payload.get('headline', ''), *(payload.get('impact_candidates') or [])])
+    assert_no_advice([payload.get('summary', '')], source_statement=source_summary)
+    for index, fact in enumerate(facts):
+        assert_no_advice([fact], source_statement=index in source_indices)
     envelope = build_envelope(
         role="information_brief", payload=payload, scope=scope, as_of=as_of,
         input_refs=input_refs, valid_until=valid_until,

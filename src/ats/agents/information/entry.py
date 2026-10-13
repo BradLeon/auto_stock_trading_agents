@@ -30,41 +30,59 @@ def run_information_pass(*, use_llm: bool = True, symbols: list[str] | None = No
     g = load_pead_global()
     summary: dict = {"briefs": 0, "targets": [], "articles": 0}
 
-    from . import extract
-
-    insights = extract.run(use_llm=use_llm)
-    summary["articles"] = len({i.article_id for i in insights})
+    # Every target owns its bounded direct-material pass. Removing publisher
+    # exploration must never re-enable an unbounded historical corpus pre-pass.
+    article_ids = set()
     summary["briefs"] += _brief_count(store)
 
     targets = [s.upper() for s in (symbols or g.get("targets", []))]
     for sym in targets:
         try:
-            run_information_target(sym, store=store, use_llm=use_llm,
-                                   run_extraction=False)
+            result = run_information_target(sym, store=store, use_llm=use_llm,
+                                            run_extraction=False)
+            article_ids.update(item['document_id'] for item in
+                               result.get('selection', {}).get('items', []))
             summary["targets"].append(sym)
         except Exception as exc:  # noqa: BLE001 - one target must not stop the pass
             log.warning("information pass failed for %s: %s", sym, exc)
     summary["briefs"] = _brief_count(store)
+    summary["articles"] = len(article_ids)
     return summary
 
 
 @scheduled_cli("information-brief", kind="entity", argument="symbol")
 def run_information_target(symbol: str, *, store=None, use_llm: bool = True,
                            run_extraction: bool = True, run_once=None) -> dict:
-    """Run the information extraction pre-pass once, then publish one target brief.
+    """Publish one target brief, using bounded extraction on the native route.
 
     Dispatcher fan-out calls this per entity and supplies ``run_once`` so the
-    corpus-wide research extraction is shared across instances instead of being
-    repeated once per ticker. All per-target documents remain admitted-data reads.
+    The historical corpus pre-pass remains a compatibility path. Native target
+    invocations use an explicit target/peer/publisher scope and own-role cache.
     """
     from ...memory import get_store
     from . import documents, extract
 
     store = get_store() if store is None else store
     from ...workflow.runtime_reads import current_read_context
+    from ...workflow.isolation import verified_isolation_root
+    context = current_read_context()
+    if context is not None and (context.route == "target" or verified_isolation_root() is not None):
+        # Candidate acceptance uses the native business implementation inside
+        # complete isolation. Native reads still run their scope/route gates;
+        # this does not activate a production route or grant qualification.
+        from ...config import load_pead_global
+        from . import assemble, target_research
+
+        sym = symbol.upper()
+        g = load_pead_global()
+        result = target_research.run(store, sym, config=g["research"],
+            since=assemble.default_cutoff(int(g.get("monitor", {}).get("lookback_days", 7))),
+            use_llm=use_llm)
+        return {"symbol": sym, "materiality": result.get("materiality"),
+                "event_summary": result["status"], "selection": result}
     # A bound task reads only its authorized target/peer documents. The corpus
     # extraction entry owns a different scope and must not escape this task.
-    if run_extraction and current_read_context() is None:
+    if run_extraction and context is None:
         work = lambda: extract.run(use_llm=use_llm)
         if run_once is not None:
             run_once("information-research-extraction", work)

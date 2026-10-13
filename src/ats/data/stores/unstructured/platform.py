@@ -229,6 +229,12 @@ class PlatformUnstructuredRepository:
             "SELECT * FROM data_document_versions WHERE document_id=? "
             "ORDER BY fetched_at DESC,created_at DESC", [document_id])
 
+    def latest_document_metadata(self, document_id: str) -> dict:
+        row = self.conn.execute(
+            "SELECT metadata_json FROM data_document_publications WHERE document_id=? "
+            "ORDER BY julianday(known_at) DESC,rowid DESC LIMIT 1", (document_id,)).fetchone()
+        return json.loads(row["metadata_json"]) if row else {}
+
     def document_materials_at(self, *, as_of: datetime, limit: int = 1000) -> list[dict]:
         """Published bodies and metadata as known then, not today's mutable index.
 
@@ -244,22 +250,26 @@ class PlatformUnstructuredRepository:
         selected = {}
         if has_history:
             rows = self.conn.execute(
-                "SELECT p.publication_id,p.metadata_json,p.known_at,v.* FROM data_document_publications p "
+                "SELECT p.rowid AS publication_order,p.publication_id,p.metadata_json,p.known_at,v.* FROM data_document_publications p "
                 "JOIN data_document_versions v ON v.version_id=p.version_id "
                 "WHERE julianday(p.known_at)<=julianday(?) "
                 "ORDER BY julianday(p.known_at) DESC,p.publication_id DESC", (point,))
             rows = sorted(rows, key=lambda item: (
                 datetime.fromisoformat(item["known_at"].replace("Z", "+00:00")),
-                item["publication_id"]), reverse=True)
+                item["publication_order"]), reverse=True)
             for row in rows:
                 version = dict(row)
                 if datetime.fromisoformat(version["known_at"].replace("Z", "+00:00")) > as_of:
                     continue
                 metadata = json.loads(version.pop("metadata_json"))
+                legacy_version = metadata.pop("_preserved_legacy_version", None)
+                history_basis = "legacy_current_only" if legacy_version else "publication_snapshot"
+                if legacy_version:
+                    version = legacy_version
                 if version["document_id"] not in selected:
                     selected[version["document_id"]] = {
                         **metadata, "version": version,
-                        "metadata_history": "publication_snapshot"}
+                        "metadata_history": history_basis}
         for row in self.documents(ok_only=True, limit=10_000):
             if row["document_id"] in selected:
                 continue
@@ -277,7 +287,8 @@ class PlatformUnstructuredRepository:
                 continue
             selected[row["document_id"]] = {
                 **row, "version": version, "metadata_history": "legacy_current_only"}
-        return sorted(selected.values(), key=lambda row: row["version"]["fetched_at"],
+        return sorted(selected.values(), key=lambda row: (
+            row["version"]["fetched_at"], row["document_id"]),
                       reverse=True)[:max(1, min(int(limit), 10_000))]
 
     def link_document_artifact(self, document_version_id: str, artifact_id: str, *,
@@ -334,16 +345,24 @@ class PlatformUnstructuredRepository:
 
     def begin_document_processing(self, document_id: str, consumer: str,
                                   processor_version: str = "v1", *,
-                                  at: str | None = None) -> str | None:
-        latest = self.latest_document_version(document_id)
+                                  at: str | None = None, version_id: str | None = None,
+                                  retry_failed: bool = False) -> str | None:
+        latest = (self.conn.execute("SELECT * FROM data_document_versions WHERE document_id=? AND version_id=?",
+                                   (document_id, version_id)).fetchone() if version_id else
+                  self.latest_document_version(document_id))
+        if version_id and latest is None:
+            raise ValueError("processing version does not belong to document")
         if latest is None:
             return None
         stamp = at or datetime.now().astimezone().isoformat(timespec="seconds")
         cur = self._write(
-            "INSERT OR IGNORE INTO data_document_processing_runs "
+            "INSERT INTO data_document_processing_runs "
             "(version_id,consumer,processor_version,status,started_at,outputs,note) "
-            "VALUES (?,?,?,'running',?,0,'')",
-            (latest["version_id"], consumer, processor_version, stamp))
+            "VALUES (?,?,?,'running',?,0,'') "
+            "ON CONFLICT(version_id,consumer,processor_version) DO UPDATE SET "
+            "status='running',started_at=excluded.started_at,completed_at='',outputs=0,note='' "
+            "WHERE data_document_processing_runs.status='failed' AND ?",
+            (latest["version_id"], consumer, processor_version, stamp, int(retry_failed)))
         return latest["version_id"] if cur.rowcount else None
 
     def finish_document_processing(self, version_id: str, consumer: str,
@@ -878,6 +897,70 @@ class PlatformUnstructuredRepository:
 
     def document_by_external_id(self, external_id: str) -> dict | None:
         row=self.conn.execute("SELECT * FROM data_documents WHERE external_id=? AND ok=1 ORDER BY fetched_at DESC LIMIT 1",(external_id,)).fetchone(); return dict(row) if row else None
+
+    def revise_document_metadata(self, document_id: str, *, metadata: dict,
+                                 known_at: datetime) -> str:
+        """Correct interpretation atomically without changing immutable body identity."""
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
+        if known_at.tzinfo is None:
+            raise ValueError("metadata known_at must be timezone-aware")
+        version = self.latest_document_version(document_id)
+        row = self.conn.execute("SELECT * FROM data_documents WHERE document_id=?",
+                                (document_id,)).fetchone()
+        if not version or not row or not row["ok"]:
+            raise ValueError("metadata revision requires an admitted body")
+        current = dict(row)
+        if version["content_hash"] != current["sha256"]:
+            raise ValueError("metadata revision requires the current immutable body")
+        allowed = {"title", "published_at", "completeness", "truncation_reason"}
+        if set(metadata) - allowed - {"related_entities", "quality"}:
+            raise ValueError("unsupported document metadata revision")
+        previous = self.conn.execute(
+            "SELECT metadata_json,known_at FROM data_document_publications WHERE document_id=? "
+            "ORDER BY julianday(known_at) DESC,rowid DESC LIMIT 1", (document_id,)).fetchone()
+        prior = json.loads(previous["metadata_json"]) if previous else current
+        stamp = known_at.astimezone(timezone.utc).isoformat()
+        if previous and known_at < datetime.fromisoformat(previous["known_at"]):
+            raise ValueError("metadata revision cannot precede latest publication")
+        revised = {**prior, **metadata}
+        revised["related_entities"] = sorted({current["entity"], *metadata.get(
+            "related_entities", prior.get("related_entities", []))})
+        if revised == prior:
+            return ""
+        revised["fetched_at"] = stamp
+        encoded = json.dumps(revised, sort_keys=True, ensure_ascii=False)
+        publication_id = hashlib.sha256(
+            f"{version['version_id']}|{stamp}|{encoded}".encode()).hexdigest()
+        with self.conn:
+            if previous is None:
+                # A legacy index was already visible through the fallback read.
+                # Preserve that exact view before mutating it. This is not a new
+                # backdated source publication: retain its legacy knowledge basis
+                # and original version/ref shape rather than inventing old refs.
+                legacy_stamp = datetime.fromisoformat(current["fetched_at"].replace("Z", "+00:00"))
+                if legacy_stamp.tzinfo is None:
+                    legacy_stamp = legacy_stamp.replace(tzinfo=timezone.utc)
+                if legacy_stamp > known_at:
+                    raise ValueError("metadata revision cannot precede legacy knowledge")
+                legacy_metadata = {**current, "_preserved_legacy_version": version}
+                legacy_encoded = json.dumps(legacy_metadata, sort_keys=True, ensure_ascii=False)
+                legacy_id = hashlib.sha256(f"legacy-index|{document_id}|{legacy_encoded}".encode()).hexdigest()
+                self.conn.execute("INSERT OR IGNORE INTO data_document_publications VALUES (?,?,?,?,?)",
+                    (legacy_id, document_id, version["version_id"], legacy_stamp.isoformat(), legacy_encoded))
+            for field in sorted(allowed.intersection(metadata)):
+                self.conn.execute(f"UPDATE data_documents SET {field}=? WHERE document_id=?",
+                                  (metadata[field], document_id))
+            self.conn.execute("UPDATE data_documents SET fetched_at=? WHERE document_id=?",
+                              (stamp, document_id))
+            self.conn.execute("DELETE FROM data_document_entities WHERE document_id=?", (document_id,))
+            self.conn.executemany("INSERT INTO data_document_entities VALUES (?,?,?)", [
+                (document_id, entity, "primary" if entity == current["entity"] else "mentioned")
+                for entity in revised["related_entities"]])
+            self.conn.execute("INSERT OR IGNORE INTO data_document_publications VALUES (?,?,?,?,?)",
+                (publication_id, document_id, version["version_id"], stamp, encoded))
+        return publication_id
 
     def document_by_content_hash(self, content_hash: str, *, entity: str | None = None) -> dict | None:
         sql=("SELECT d.*,v.version_id,v.content_hash AS version_hash "

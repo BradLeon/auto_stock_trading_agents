@@ -249,8 +249,7 @@ def stored_articles(since: datetime, *, source_match: str = "", store=None,
         completeness = row.get("completeness") or metadata.get("completeness") or "full"
         if completeness != "full" and not allow_incomplete:
             continue
-        published_raw = (row.get("published_at") or metadata.get("published_at") or
-                         row.get("fetched_at") or metadata.get("fetched_at") or "")
+        published_raw = row.get("published_at") or metadata.get("published_at") or ""
         try:
             published = datetime.fromisoformat(str(published_raw).replace("Z", "+00:00"))
         except ValueError:
@@ -286,12 +285,23 @@ def fetch_batch(since: datetime, *, store=None,
         cfg = (load_news_sources() or {}).get("newsletters", {}) or {}
     else:
         cfg = source_config
+    failure = {}
+    def acquire_imap():
+        try:
+            return _imap_batch(since, cfg.get("imap", {}) or {}, store=store)
+        except Exception as exc:
+            failure.update(error_type=type(exc).__name__,
+                           stage=getattr(exc, 'stage', 'acquisition'),
+                           cause_type=getattr(exc, 'cause_type', type(exc).__name__))
+            # Never forward credentials, mailbox names or server response text.
+            raise RuntimeError('IMAP acquisition failed; see sanitized transport diagnostics') from None
     imap_batch = safe_fetch(
-        lambda: _imap_batch(since, cfg.get("imap", {}) or {}, store=store),
+        acquire_imap,
         source="research:imap",
     )
     if imap_batch is None:
-        imap_batch = AcquisitionBatch((), (), False)
+        imap_batch = AcquisitionBatch((), (), False, transport_status={
+            "imap": {"status": "failed", "reason": "fetch_retry_exhausted", **failure}})
     items: list[Article] = list(imap_batch.articles)
     rss_items, rss_status = _rss_batch(since, cfg.get("research_feeds", []) or [])
     items += rss_items
@@ -334,7 +344,7 @@ def _imap_connect(host: str):
 
     proxy = _proxy_url()
     if not proxy:
-        return imaplib.IMAP4_SSL(host)
+        return imaplib.IMAP4_SSL(host, timeout=30)
 
     from urllib.parse import urlparse
 
@@ -349,10 +359,16 @@ def _imap_connect(host: str):
             sock = socks.create_connection(
                 (self.host, self.port), timeout=timeout if timeout else None,
                 proxy_type=ptype, proxy_addr=u.hostname, proxy_port=u.port,
-                proxy_rdns=True)   # resolve gmail's IP on the proxy side (local DNS may be poisoned)
+                proxy_rdns=True, proxy_username=u.username, proxy_password=u.password)
             return self.ssl_context.wrap_socket(sock, server_hostname=self.host)
 
-    return _ProxyIMAP4SSL(host)
+    return _ProxyIMAP4SSL(host, timeout=30)
+
+
+class ImapAcquisitionError(RuntimeError):
+    def __init__(self, stage, cause):
+        self.stage, self.cause_type = stage, type(cause).__name__
+        super().__init__(f'IMAP {stage} failed ({self.cause_type})')
 
 
 def _imap(since: datetime, cfg: dict, *, store=None) -> list[Article]:
@@ -385,9 +401,14 @@ def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
     out: list[Article] = []
     updates: list[CursorUpdate] = []
     complete = True
-    conn = _imap_connect(secrets.gmail_imap_host)
+    try:
+        conn = _imap_connect(secrets.gmail_imap_host)
+    except Exception as exc:
+        raise ImapAcquisitionError('connect', exc) from None
+    stage = 'login'
     try:
         conn.login(secrets.gmail_address, secrets.gmail_app_password)
+        stage = 'select'
         folder = cfg.get("folder", "INBOX")
         conn.select(folder, readonly=True)
         validity_response = conn.response("UIDVALIDITY")
@@ -406,6 +427,7 @@ def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
                 criteria = f'(UID {start_uid}:* FROM "{semail}")'
             else:
                 criteria = f'(SINCE "{imap_date}" FROM "{semail}")'
+            stage = 'search'
             status, data = conn.uid("SEARCH", None, criteria)
             if status != "OK":
                 complete = False
@@ -414,6 +436,7 @@ def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
             log.info("research imap: %s (%s) -> %d messages", sname, semail, len(uids))
             last_uid, last_mid, watermark = 0, "", ""
             for uid in uids:
+                stage = 'fetch'
                 status, msg_data = conn.uid("FETCH", uid, "(RFC822)")
                 if status != "OK":
                     complete = False
@@ -434,6 +457,12 @@ def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
                 if not mid:
                     mid = hashlib.sha1(f"{subject}{pub.isoformat()}".encode()).hexdigest()
                 completeness, truncation = classify_completeness(body, html)
+                from .articles.material_quality import page_fields
+
+                fields = page_fields(html) if html else {}
+                fields.update(published_at=pub.isoformat(), published_at_source="email:Date")
+                if subject:
+                    fields.update(title=subject, title_source="email:Subject", title_quality="original")
                 uid_int = int(uid.decode() if isinstance(uid, bytes) else uid)
                 out.append(Article(
                     id=f"imap:{mid}", source=f"newsletter:{sname}", title=subject,
@@ -441,12 +470,14 @@ def _imap_batch(since: datetime, cfg: dict, *, store=None) -> AcquisitionBatch:
                     completeness=completeness, truncation_reason=truncation,
                     mime_source=mime_source, mailbox=mailbox, folder=folder,
                     sender=semail, uidvalidity=uidvalidity, uid=uid_int,
-                    message_id=mid))
+                    message_id=mid, source_fields=fields))
                 if uid_int >= last_uid:
                     last_uid, last_mid, watermark = uid_int, mid, pub.isoformat()
             if last_uid:
                 updates.append(CursorUpdate(
                     mailbox, folder, semail, uidvalidity, last_uid, last_mid, watermark))
+    except Exception as exc:
+        raise ImapAcquisitionError(stage, exc) from None
     finally:
         try:
             conn.logout()
@@ -460,7 +491,7 @@ def _msg_date(msg) -> datetime | None:
 
     try:
         dt = email.utils.parsedate_to_datetime(msg.get("Date", ""))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return dt if dt.tzinfo else None
     except (TypeError, ValueError):
         return None
 
@@ -504,31 +535,12 @@ def _extract_body(msg) -> tuple[str, str]:
     return text, html
 
 
-_STRONG_TRUNCATION_PATTERNS = (
-    (re.compile(r"subscribe to [^.\n]{0,80}?\s+to unlock the rest", re.I),
-     "subscribe to unlock the rest"),
-    (re.compile(r"subscribe to unlock(?: the rest)?", re.I), "subscribe to unlock"),
-    (re.compile(r"continue reading by subscribing", re.I),
-     "continue reading by subscribing"),
-    (re.compile(r"this post is for paid subscribers", re.I),
-     "this post is for paid subscribers"),
-    (re.compile(r"read the full post", re.I), "read the full post"),
-)
-
-
 def classify_completeness(body: str, raw_html: str = "") -> tuple[str, str]:
     """Explain whether a newsletter body is full, partial, or only a teaser."""
-    text = re.sub(r"\s+", " ", body or "").strip()
-    searchable = f"{text}\n{strip_html(raw_html) if raw_html else ''}"
-    reason = next(
-        (reason for pattern, reason in _STRONG_TRUNCATION_PATTERNS
-         if pattern.search(searchable)),
-        "",
-    )
-    if not reason:
-        return "full", ""
-    status = "teaser" if len(text) < 2000 else "partial"
-    return status, reason
+    from .articles.material_quality import completeness_assessment
+
+    result = completeness_assessment(body or strip_html(raw_html))
+    return result["completeness"], result["reason"]
 
 
 def _web_link(html: str) -> str:
@@ -568,7 +580,7 @@ def _substack_rss(since: datetime, feeds: list[dict]) -> list[Article]:
         parsed = feedparser.parse(furl)
         for e in parsed.entries:
             pub = _entry_dt(e)
-            if pub and pub < since:
+            if pub is None or pub < since:
                 continue
             body = ""
             content = e.get("content") or []
@@ -585,7 +597,9 @@ def _substack_rss(since: datetime, feeds: list[dict]) -> list[Article]:
                 id=f"substack:{e.get('id') or e.get('link', e.get('title', ''))}",
                 source=f"substack:{fname}", title=e.get("title", ""),
                 url=e.get("link", ""), body=body,
-                published_at=pub or datetime.now(timezone.utc),
+                published_at=pub,
+                source_fields={"title_source": "rss:title", "title_quality": "original",
+                               "published_at_source": "rss:publication_record"},
                 completeness=completeness, truncation_reason=truncation))
     return out
 

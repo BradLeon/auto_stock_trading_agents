@@ -123,6 +123,12 @@ entities:
     market: US
     filings: sec
 
+  ORCL:
+    name: Oracle Corporation
+    aliases: [ORACLE, "ORACLE CORP"]
+    market: US
+    filings: sec
+
   TSM:
     name: Taiwan Semiconductor Manufacturing
     aliases: ["2330.TW", TSMC]

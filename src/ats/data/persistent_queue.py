@@ -30,7 +30,7 @@ STATUSES = {
 TRIGGERS = {"scheduled", "event", "manual", "cache_miss", "fallback"}
 _SAFE_COMMANDS = {
     "ingest", "release-check", "frontier-capability-audit", "article-ingest",
-    "document-ingest",
+    "document-ingest", "article-metadata-reconcile",
     "fixed-ingest",
     "factset-import", "factset-reprocess", "factset-refresh",
     "factset-semantic-refresh",

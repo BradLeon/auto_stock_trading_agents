@@ -20,6 +20,17 @@ log = logging.getLogger("ats.agents.information.triage")
 BATCH_SIZE = 40
 
 
+def reading_bucket(insight, symbol: str) -> str:
+    """Route source information by relevance, never by an investment conclusion."""
+    if insight.ticker != symbol or insight.association_type == 'unrelated':
+        return 'unrelated'
+    if insight.information_quality == 'thin':
+        return 'thin'
+    if insight.association_type == 'background':
+        return 'background'
+    return 'adopted'
+
+
 def score_items(symbol: str, thesis: str, items: list[NewsItem]) -> dict[str, tuple[float, str]]:
     """Score every item's materiality vs the thesis. Returns {item.id: (score, category)}."""
     scores: dict[str, tuple[float, str]] = {}

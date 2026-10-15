@@ -111,7 +111,7 @@ def gate_read(identity):
         result = qualification(domain_id=identity.domain_id, consumer_id=identity.consumer_id,
                                contract_version=identity.contract_version, scope=identity.scope)
         decision.qualification = {"status": result.get("status"), "reasons": result.get("reasons", [])}
-    if decision.route == "target":
+    if decision.route == "target" and not decision.consumer_wide:
         from .isolation import verified_isolation_root
         if verified_isolation_root() is None or identity.scope.get("time_policy") == "per_invocation":
             from .read_windows import assert_current

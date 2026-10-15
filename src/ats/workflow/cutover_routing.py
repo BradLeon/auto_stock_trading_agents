@@ -72,6 +72,9 @@ class RouteDecision:
     fallback: str = ""
     fallback_reason_code: str = ""
     gap: str = ""
+    # True when the route came from the consumer-wide research-read switch
+    # (consumer_cutover), not from an exact-scope row.
+    consumer_wide: bool = False
 
     @property
     def qualified(self) -> bool:
@@ -120,8 +123,9 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
             assert_scope_open(identity,path=path)
         except cutover_module.CutoverError as exc:
             raise RouteUnavailable(str(exc)) from exc
-    route = (resolve_route(cutover_module.PROJECTION_READ, identity, path=path)["route"]
-             if identity is not None else fallback_route)
+    resolved = (resolve_route(cutover_module.PROJECTION_READ, identity, path=path)
+                if identity is not None else None)
+    route = resolved["route"] if resolved is not None else fallback_route
     from .read_recovery import ReadStopped, current_policy
 
     recovery = current_policy(identity, path=path) if identity is not None else None
@@ -143,6 +147,18 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
     if (identity.domain_id != contract["domain_id"]
             or identity.contract_version != contract["contract_version"]):
         raise RouteUnavailable("runtime route domain/contract mismatch")
+    if resolved.get("consumer_wide"):
+        # 2026-10-15 simplification (G1/G2): a consumer switched as a whole was
+        # approved after a passing data-product health check and is re-checked
+        # daily (consumer_cutover.daily_check rolls it back on failure). The
+        # per-scope entry evidence and raw qualification events are not consulted
+        # at runtime. Native reads still fail loudly; nothing is swallowed.
+        return RouteDecision(
+            consumer_id=consumer_id, domain_id=contract["domain_id"],
+            contract_version=contract["contract_version"], scope=identity.scope,
+            route=cutover_module.ROUTE_TARGET, target_route=cutover_module.ROUTE_TARGET,
+            qualification={"status": "eligible", "reasons": [], "basis": "consumer_wide"},
+            fallback=FALLBACK_OK, consumer_wide=True)
     from .boundary_evidence import assert_enforced
 
     assert_enforced(cutover_module.PROJECTION_READ, identity=identity, path=path)

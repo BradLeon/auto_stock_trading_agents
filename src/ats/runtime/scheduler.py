@@ -549,6 +549,26 @@ def _perf_snapshot() -> None:
         log.warning("risk snapshot failed: %s", exc)
 
 
+def _consumer_health_daily() -> list[dict]:
+    """Daily data-product health of every consumer switched to the new research-read route.
+
+    A failed check rolls that consumer back to the old route (TARGET §14.6) and alerts
+    through the configured Boss channel (feishu_bot). With nothing switched it does nothing.
+    """
+    from ..workflow import consumer_cutover
+
+    def notify(title: str, body: str) -> None:
+        from ..channel import get_channel
+        from ..schemas.channel import Notification
+
+        get_channel().push(Notification(kind="error", title=title, body=body))
+
+    results = consumer_cutover.daily_check(notify=notify)
+    for row in results:
+        log.info("consumer health: %s", row)
+    return results
+
+
 def _push_risk_alert(review) -> None:
     try:
         from ..channel import get_channel
@@ -995,6 +1015,12 @@ def start(*, dry_run: bool = True, run_once: bool = False, window: str | None = 
             id="weekly_review", misfire_grace_time=grace,
             coalesce=True, max_instances=1,
         )
+
+    # Consumer-wide research-read switch (Phase F): rolls a consumer back to the old route
+    # when its data-product health check fails. A no-op until a consumer is switched.
+    _add_planned_job(scheduler, lambda: _consumer_health_daily(),
+        CronTrigger(hour=9, minute=30, timezone="Asia/Shanghai"),
+        id="consumer_health_daily", misfire_grace_time=grace, coalesce=True, max_instances=1)
 
     # PEAD score windows — triggered by an observed print, so their job is to check
     # cheaply and usually do nothing. See config/pead.yaml schedule.score_windows.

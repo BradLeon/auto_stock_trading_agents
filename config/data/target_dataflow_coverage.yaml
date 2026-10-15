@@ -486,6 +486,8 @@ qualification_policy:
     - src/ats/agents/information/documents.py
     - src/ats/agents/information/outputs.py
     - src/ats/workflow/cutover_routing.py
+    - src/ats/workflow/consumer_cutover.py
+    - src/ats/workflow/consumer_health.py
     - src/ats/workflow/scoped_routes.py
     - src/ats/workflow/legacy_retirement.py
     - config/workflow/legacy_retirement.yaml

@@ -1283,6 +1283,42 @@ def bm_read(batch_id, parser, manifest):
         parser.error(str(exc))
 
 
+def consumer_cutover_command(args, *, parser) -> int:
+    """Consumer-wide research-read switch. Only `switch` and `rollback` change a route."""
+    from ..workflow import consumer_cutover as cc
+    from ..workflow import consumer_health
+
+    db = args.db or None
+    action = args.action
+    try:
+        if action == "status":
+            print(json.dumps(cc.status(path=db), ensure_ascii=False, indent=2, default=str))
+            return 0
+        if action == "log":
+            print(json.dumps(cc.log(consumer_id=args.consumer_id or None, path=db), ensure_ascii=False, indent=2, default=str))
+            return 0
+        if action == "daily-check":
+            from ..runtime.scheduler import _consumer_health_daily
+            print(json.dumps(_consumer_health_daily(), ensure_ascii=False, indent=2, default=str))
+            return 0
+        if not args.consumer_id:
+            parser.error(f"consumer-cutover {action} requires --consumer-id")
+        if action == "health":
+            result = consumer_health.check(args.consumer_id)
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return 0 if result["status"] == "ok" else 1
+        if action == "switch":
+            result = cc.switch(args.consumer_id, actor=args.actor, approval=args.approval,
+                               observe_until=args.observe_until, stop_conditions=args.stop_conditions, path=db)
+        else:
+            result = cc.rollback(args.consumer_id, actor=args.actor, reason=args.reason, path=db)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+    except (cc.ConsumerCutoverError, ValueError) as exc:
+        print(f"❌ {exc}")
+        return 1
+
+
 def cutover_command(args, *, parser) -> int:
     """Phase F cutover control plane: inspect, pre-check, register, verify.
 
@@ -4538,6 +4574,16 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--bootstrap", action="store_true",
                     help="初始化六条边界并声明本仓库接线")
 
+    cc = sub.add_parser("consumer-cutover", help="Phase F 研究读取按消费者整体切换：状态、健康检查、切换、切回")
+    cc.add_argument("action", choices=["status", "health", "switch", "rollback", "log", "daily-check"])
+    cc.add_argument("--consumer-id", default="", help="information | fundamental | ...")
+    cc.add_argument("--actor", default="", help="operator identity")
+    cc.add_argument("--approval", default="", help="switch: 用户批准原文或其引用（必填）")
+    cc.add_argument("--observe-until", default="", help="switch: 观察截止时间（带时区的 ISO 时间，必填）")
+    cc.add_argument("--stop-conditions", default="", help="switch: 停止条件（必填）")
+    cc.add_argument("--reason", default="", help="rollback: 原因（必填）")
+    cc.add_argument("--db", default="", help="覆盖切流控制库路径")
+
     sh = sub.add_parser("shadow", help="Phase F 影子比较报告、差异处置与影子账本运维")
     sh.add_argument("action", choices=[
         "acceptance-capture", "acceptance-run", "acceptance-record", "acceptance-report", "acceptance-check", "acceptance-signoff", "acceptance-reject", "acceptance-revoke",
@@ -5237,6 +5283,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "cutover":
         return cutover_command(args, parser=parser)
+    if args.command == "consumer-cutover":
+        return consumer_cutover_command(args, parser=parser)
     if args.command == "intake":
         return intake_verification_command(args, parser=parser)
     if args.command == "retirement":

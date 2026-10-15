@@ -116,12 +116,18 @@ def _validate_boundary(boundary):
         raise plane.CutoverError(f"unknown boundary {boundary!r}")
 
 
-def resolve_route(boundary: str, identity: RouteIdentity, *, path=None) -> dict[str, Any]:
+def resolve_route(boundary: str, identity: RouteIdentity, *, path=None,
+                  exact_only: bool = False) -> dict[str, Any]:
     """Read-only resolution; an absent row never inherits a global target flag.
 
     An absent database is an unreadable authority, not a fresh legacy scope.
     An existing, bootstrapped old database with no scoped table has no migrated
     scopes. Never create schema while reading it.
+
+    Order: an exact-scope row, then the consumer-wide research-read route
+    (`consumer_cutover`, 2026-10-15 simplification), then the boundary default.
+    `exact_only` is for exact-scope transitions, which must not mistake the
+    consumer-wide generation for their own.
     """
     _validate_boundary(boundary)
     target = Path(path or plane.default_cutover_db_path())
@@ -136,11 +142,18 @@ def resolve_route(boundary: str, identity: RouteIdentity, *, path=None) -> dict[
                                  ("scoped_cutover_routes",)).fetchone()
             row = (conn.execute("SELECT * FROM scoped_cutover_routes WHERE boundary=? AND identity_key=?",
                                 (boundary, identity.key)).fetchone() if table else None)
+            consumer_wide = None
+            if row is None and not exact_only:
+                from .consumer_cutover import lookup
+                consumer_wide = lookup(conn, boundary, identity)
     except sqlite3.Error as exc:
         raise plane.CutoverError(f"scope route authority unreadable: {exc}") from exc
     default = plane.ROUTE_DISABLED if boundary == plane.LIVE_TRADER else plane.ROUTE_LEGACY
     result = dict(row) if row else {"boundary": boundary, "identity_key": identity.key,
                                    "route": default, "generation": 0}
+    result["consumer_wide"] = consumer_wide is not None
+    if consumer_wide is not None:
+        result.update(route=consumer_wide["route"], generation=consumer_wide["generation"])
     if row and row["identity_json"] != canonical_json(identity.as_row()):
         raise plane.CutoverError("scope identity hash collision or corrupted authority")
     if result["route"] not in plane.VALID_ROUTES:
@@ -178,7 +191,7 @@ def transition_route(boundary: str, identity: RouteIdentity, route: str, *, acto
         if verified_isolation_root() is None:
             raise plane.CutoverError("active scope writes require verified physical isolation")
     # Verify existing authority before opening a writable connection.
-    resolve_route(boundary, identity, path=target)
+    resolve_route(boundary, identity, path=target, exact_only=True)
     from .joint_cutover import assert_scope_open
     assert_scope_open(identity,path=target)
     with closing(_connection(target)) as conn:
@@ -186,7 +199,7 @@ def transition_route(boundary: str, identity: RouteIdentity, route: str, *, acto
         conn.execute("BEGIN IMMEDIATE")
         try:
             assert_scope_open(identity,path=target)
-            current = resolve_route(boundary, identity, path=target)
+            current = resolve_route(boundary, identity, path=target, exact_only=True)
             if current["generation"] != expected_generation:
                 raise plane.CutoverError("scope route generation changed")
             if route == plane.ROUTE_TARGET and current["route"] == plane.ROUTE_DISABLED:
@@ -231,7 +244,7 @@ def transition_route(boundary: str, identity: RouteIdentity, route: str, *, acto
         except BaseException:
             conn.execute("ROLLBACK")
             raise
-    return resolve_route(boundary, identity, path=target)
+    return resolve_route(boundary, identity, path=target, exact_only=True)
 
 
 def route_history(boundary: str, identity: RouteIdentity, *, path=None) -> list[dict[str, Any]]:

@@ -161,8 +161,19 @@ def test_a_legacy_untiered_freeze_treats_every_change_as_retired():
     it needs a disposition — all evidence under it retires through the verifier."""
     previous=_previous(tool=TOOL)
     previous.pop('tiers');previous['version']='phase-f-final-freeze-v1'
+    # The freeze-surface file itself did not exist under v1: added, still no disposition.
+    previous['fingerprints'].pop('config/workflow/freeze_surface.yaml')
     snapshot=intake.freeze_snapshot(previous=previous)
-    assert snapshot['transition']['qualification_changes']==[TOOL]
+    assert snapshot['transition']['qualification_changes']==sorted(
+        [TOOL,'config/workflow/freeze_surface.yaml'])
+    assert snapshot['transition']['freeze_only_dispositions']==[]
+
+
+def test_a_freeze_only_file_added_since_a_tiered_freeze_needs_a_disposition():
+    previous=_previous();previous['fingerprints'].pop(TOOL)
+    previous['tiers']['freeze_only'].remove(TOOL)
+    with pytest.raises(ValueError,match='need a disposition.*'+TOOL):
+        intake.freeze_snapshot(previous=previous)
 
 
 def test_evidence_dependencies_are_the_qualification_tier_only():

@@ -85,10 +85,15 @@ def _transition(previous, current, dispositions):
     before, after = previous['fingerprints'], current['fingerprints']
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     qualification = set(current['tiers']['qualification'])
-    # A path that was qualification-bound under the previous freeze retired its
-    # evidence through the verifier already; it needs no disposition.
-    previous_qualification = set((previous.get('tiers') or {}).get('qualification') or before)
-    retired = [p for p in changed if p in qualification or p in previous_qualification]
+    if 'tiers' not in previous:
+        # An untiered (v1) freeze bound everything to qualification: every event
+        # under it retires through the verifier, including for files added since.
+        retired = changed
+    else:
+        # A path qualification-bound under either freeze retires its evidence
+        # through the verifier already; it needs no disposition.
+        previous_qualification = set(previous['tiers']['qualification'])
+        retired = [p for p in changed if p in qualification or p in previous_qualification]
     tooling = [p for p in changed if p not in retired]
     given = {}
     for row in dispositions:

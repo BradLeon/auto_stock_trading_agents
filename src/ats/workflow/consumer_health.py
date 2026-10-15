@@ -25,6 +25,40 @@ def _universe() -> list[str]:
     return list(configured_entities("portfolio", "portfolio"))
 
 
+def _latest_brief(entity: str) -> dict | None:
+    """Newest published Information brief envelope, over a read-only connection.
+
+    Deliberately not `get_store()`: opening the memory store applies pending additive
+    schema, which would make a "read-only" health check write to the production file.
+    """
+    import json
+    import sqlite3
+    from contextlib import closing
+    from pathlib import Path
+
+    from ..memory import _db_path
+
+    path = Path(_db_path()).resolve()
+    if not path.is_file():
+        return None
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_projection_envelopes'"
+                            ).fetchone():
+            return None
+        row = conn.execute(
+            "SELECT as_of, input_refs FROM task_projection_envelopes WHERE agent_role='information_brief' "
+            "AND scope_kind='entity' AND scope_id=? AND status='published' ORDER BY created_at DESC LIMIT 1",
+            (entity,)).fetchone()
+    if row is None:
+        return None
+    try:
+        refs = json.loads(row["input_refs"] or "[]")
+    except json.JSONDecodeError:
+        refs = []
+    return {"as_of": row["as_of"], "input_refs": refs}
+
+
 def _result(consumer: str, problems: list[str], warnings: list[str], detail: dict[str, Any]) -> dict[str, Any]:
     return {"consumer_id": consumer, "status": "ok" if not problems else "failed",
             "checked_at": datetime.now(UTC).isoformat(), "problems": problems,
@@ -65,11 +99,9 @@ def _information(now: datetime) -> dict[str, Any]:
 
 def _fundamental(now: datetime) -> dict[str, Any]:
     from ..data.products import get_platform_data_products
-    from ..memory import get_store
 
     problems, warnings, detail = [], [], {}
     products = get_platform_data_products(readonly=True)
-    store = get_store()
     try:
         financial_total, fresh_briefs = 0, 0
         for entity in _universe():
@@ -88,9 +120,7 @@ def _fundamental(now: datetime) -> dict[str, Any]:
                 warnings.append(f"{entity}: no financial rows")
             row_detail["financial_rows"] = len(rows)
             financial_total += len(rows)
-            briefs = store.task_projection_envelopes(agent_role="information_brief", scope_kind="entity",
-                                                     scope_id=entity, limit=1)
-            brief = briefs[0] if briefs else None
+            brief = _latest_brief(entity)
             fresh = bool(brief and brief.get("input_refs") and brief.get("as_of")
                          and datetime.fromisoformat(brief["as_of"]) >= now - timedelta(days=BRIEF_FRESH_DAYS))
             row_detail["fresh_information_brief_with_lineage"] = fresh

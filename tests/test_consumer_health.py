@@ -45,15 +45,6 @@ class Products:
         return {"rows": value}
 
 
-class Store:
-    def __init__(self, briefs):
-        self.briefs = briefs
-
-    def task_projection_envelopes(self, *, agent_role, scope_kind, scope_id, limit):
-        assert agent_role == "information_brief" and scope_kind == "entity"
-        return self.briefs.get(scope_id, [])
-
-
 @pytest.fixture
 def world(monkeypatch):
     state = SimpleNamespace(products=Products(), documents={e: [doc(e)] for e in UNIVERSE}, briefs={})
@@ -66,7 +57,8 @@ def world(monkeypatch):
             raise value
         return value
     monkeypatch.setattr("ats.data.products.unstructured.admitted_documents", admitted)
-    monkeypatch.setattr("ats.memory.get_store", lambda: Store(state.briefs))
+    monkeypatch.setattr(health, "_latest_brief", lambda entity: (state.briefs.get(entity) or [None])[0])
+    monkeypatch.setattr("ats.memory.get_store", lambda: pytest.fail("health check must not open the memory store"))
     # The consumer read gate is what the switch changes: the check must never touch it.
     for name in ("ats.workflow.runtime_reads.gate_read", "ats.workflow.cutover_routing.read_route",
                  "ats.data.consumer_api.read_input"):
@@ -161,3 +153,26 @@ def test_the_check_closes_its_readonly_repository_even_when_it_fails(world):
     world.documents = {e: RuntimeError("down") for e in UNIVERSE}
     assert health.check("information", now=NOW)["status"] == "failed"
     assert world.products.structured.closed
+
+
+def test_latest_brief_reads_through_a_readonly_connection_and_never_creates_schema(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+
+    path = tmp_path / "memory.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE task_projection_envelopes (agent_role TEXT, scope_kind TEXT, scope_id TEXT, "
+                     "status TEXT, created_at TEXT, as_of TEXT, input_refs TEXT)")
+        conn.execute("INSERT INTO task_projection_envelopes VALUES ('information_brief','entity','MRVL','published',"
+                     "'2026-10-15','2026-10-14T00:00:00+00:00',?)", (json.dumps(["doc@v1"]),))
+        conn.execute("INSERT INTO task_projection_envelopes VALUES ('information_brief','entity','MRVL','superseded',"
+                     "'2026-10-16','2026-10-16T00:00:00+00:00','[]')")
+    before = (path.stat().st_size, sorted(r[0] for r in sqlite3.connect(path).execute("SELECT name FROM sqlite_master")))
+    monkeypatch.setenv("ATS_DB_PATH", str(path))
+    brief = health._latest_brief("MRVL")
+    assert brief == {"as_of": "2026-10-14T00:00:00+00:00", "input_refs": ["doc@v1"]}
+    assert health._latest_brief("NVDA") is None
+    after = (path.stat().st_size, sorted(r[0] for r in sqlite3.connect(path).execute("SELECT name FROM sqlite_master")))
+    assert after == before
+    monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "absent.sqlite"))
+    assert health._latest_brief("MRVL") is None and not (tmp_path / "absent.sqlite").exists()

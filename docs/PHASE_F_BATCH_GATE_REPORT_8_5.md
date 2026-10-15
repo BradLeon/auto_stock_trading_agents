@@ -1,4 +1,4 @@
-# Phase F 8.5 逐批门禁报告（2026-10-15，签核前版本）
+# Phase F 8.5 逐批门禁报告（2026-10-15，已签核，官方预检 passed）
 
 ## 一句话结论
 
@@ -40,7 +40,7 @@
 
 ## 需要你做的事
 
-1. 看上面的对照，如果认可，回复"批准签核"（或指出要看哪一份的细节）。我会对四份新报告各记录一次签核，写明你的授权原文。
+1. **先读四份可读的审阅稿**：[docs/phase_f_report_review_20261015/README.md](phase_f_report_review_20261015/README.md)（含 [MRVL](phase_f_report_review_20261015/MRVL.md)、[MSFT](phase_f_report_review_20261015/MSFT.md)、[NVDA](phase_f_report_review_20261015/NVDA.md)、[TSM](phase_f_report_review_20261015/TSM.md)），每份都有信息简报、原文摘录、全部定性更新和自动检查结果。认可后回复"批准签核"（或指出要改的地方）。我会对四份新报告各记录一次签核，写明你的授权原文。
 2. 签核之后我重新跑官方预检，通过后勾选 8.5，起草 8.6 的观察窗口登记草案供你审阅。
 
 ## 要老实说明的限定

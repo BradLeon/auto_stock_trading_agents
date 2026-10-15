@@ -535,7 +535,8 @@ def test_real_business_proof_is_exact_scope_mode_and_code_bound(authority, real_
             be.assert_enforced(co.LIVE_TRADER, identity=other, mode=mode, path=authority)
 
 
-@pytest.mark.parametrize("fault", ["missing_junit", "bad_hash", "missing_source", "side_effect", "missing_negative"])
+@pytest.mark.parametrize("fault", ["missing_junit", "bad_hash", "missing_source", "side_effect", "missing_negative",
+                                   "missing_verifier_hash"])
 def test_incomplete_or_false_entry_proof_refuses(authority, real_execution_bundle, fault):
     bundle = json.loads(json.dumps(real_execution_bundle))
     proof = next(iter(bundle["call_points"].values()))
@@ -545,6 +546,12 @@ def test_incomplete_or_false_entry_proof_refuses(authority, real_execution_bundl
         proof["junit_sha256"] = "old"
     elif fault == "missing_source":
         proof["source_hashes"] = {}
+    elif fault == "missing_verifier_hash":
+        # boundary_evidence.py is freeze-only for data qualification because every
+        # entry bundle binds it; a bundle without its hash must not register.
+        verifier = Path(be.__file__).resolve()
+        proof["source_hashes"] = {name: digest for name, digest in proof["source_hashes"].items()
+                                  if Path(name).resolve() != verifier}
     elif fault == "side_effect":
         proof["negative_side_effect_count"] = 1
     else:

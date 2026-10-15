@@ -36,6 +36,23 @@ def implementation_hashes():
     return fingerprint(sorted(paths))
 
 
+def qualification_implementation_hashes():
+    """The same complete source tree, minus the freeze-only tier.
+
+    For proofs that back qualification evidence (the recovery drill a rollback
+    event cites). They must retire on the code production runs, not on tests,
+    evidence scripts or other families' verifiers; those are held by the freeze.
+    """
+    from ..config import REPO_ROOT
+    from .assurance_surface import fingerprint, load_surface
+
+    surface = load_surface()
+    paths = set(surface.qualification_paths())
+    paths.update(str(p.relative_to(REPO_ROOT)) for p in (REPO_ROOT / 'src/ats').rglob('*')
+                 if p.is_file() and p.suffix in {'.py', '.md'})
+    return fingerprint(sorted(paths - set(surface.freeze_only)))
+
+
 def encode(value):
     if isinstance(value, datetime):
         return {"$datetime": value.isoformat()}

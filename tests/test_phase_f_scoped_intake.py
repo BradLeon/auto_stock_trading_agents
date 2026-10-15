@@ -112,3 +112,80 @@ def test_source_disappearing_after_qualification_is_reported_without_candidate_w
     assert not any(row['registered'] for row in copied)
     assert any('original event chain unreadable' in reason for row in copied for reason in row.get('reasons',[]))
     assert not target.exists()
+
+
+# --------------------------------------------------------------------------- #
+# Freeze transitions: freeze-only changes are disposed of, not silently absorbed
+# --------------------------------------------------------------------------- #
+
+TOOL='tests/test_phase_f_scoped_intake.py'
+RUNTIME='src/ats/workflow/consumer_reads.py'
+
+
+def _previous(**changed):
+    previous=json.loads(json.dumps(intake.freeze_snapshot()))
+    previous['fingerprints'].update({path:'0'*64 for path in changed.values()})
+    return previous
+
+
+def test_freeze_only_change_without_disposition_is_refused():
+    with pytest.raises(ValueError,match='need a disposition.*'+TOOL):
+        intake.freeze_snapshot(previous=_previous(tool=TOOL))
+
+
+def test_unaffected_disposition_is_recorded_and_taints_nothing():
+    previous=_previous(tool=TOOL,runtime=RUNTIME)
+    snapshot=intake.freeze_snapshot(previous=previous,dispositions=[
+        {'path':TOOL,'decision':'unaffected','reason':'assertion wording only'}])
+    transition=snapshot['transition']
+    assert transition['previous_freeze']==intake.freeze_digest(previous)
+    assert transition['qualification_changes']==[RUNTIME]
+    assert transition['freeze_only_dispositions']==[
+        {'path':TOOL,'decision':'unaffected','reason':'assertion wording only'}]
+    assert transition['tainted_freezes']==[]
+    intake.check_freeze(snapshot)
+
+
+@pytest.mark.parametrize('row,message',[
+    ({'path':RUNTIME,'decision':'unaffected','reason':'x'},'not a changed freeze-only file'),
+    ({'path':TOOL,'decision':'ignore','reason':'x'},'decision in'),
+    ({'path':TOOL,'decision':'unaffected','reason':' '},'reason'),
+])
+def test_dispositions_cannot_cover_runtime_code_or_skip_the_reason(row,message):
+    with pytest.raises(ValueError,match=message):
+        intake.freeze_snapshot(previous=_previous(tool=TOOL,runtime=RUNTIME),dispositions=[row])
+
+
+def test_a_legacy_untiered_freeze_treats_every_change_as_retired():
+    """Migration: the v1 freeze bound everything to qualification, so nothing in
+    it needs a disposition — all evidence under it retires through the verifier."""
+    previous=_previous(tool=TOOL)
+    previous.pop('tiers');previous['version']='phase-f-final-freeze-v1'
+    snapshot=intake.freeze_snapshot(previous=previous)
+    assert snapshot['transition']['qualification_changes']==[TOOL]
+
+
+def test_evidence_dependencies_are_the_qualification_tier_only():
+    snapshot=intake.freeze_snapshot()
+    paths=intake.evidence_dependency_paths('information',snapshot)
+    assert not set(paths)&set(snapshot['tiers']['freeze_only'])
+    assert set(paths)<=set(snapshot['tiers']['qualification'])
+
+
+def test_revoke_taints_events_registered_under_the_previous_freeze(setup):
+    who,source,target,_=setup;point=datetime.now(UTC)-timedelta(minutes=3)
+    previous=_previous(tool=TOOL)
+    assurance.record_evidence(domain_id=who.domain_id,consumer_id=who.consumer_id,
+        scope=who.scope,evidence_type='runtime_query',outcome='passed',as_of=point,
+        dependency_paths=intake.evidence_dependency_paths(who.consumer_id,intake.freeze_snapshot()),
+        command_summary='fixture probe; '+intake.provenance(previous),
+        result_summary='mechanism only',db_path=source)
+    revoked=intake.freeze_snapshot(previous=previous,dispositions=[
+        {'path':TOOL,'decision':'revoke','reason':'capture bug produced these rows'}])
+    assert revoked['transition']['tainted_freezes']==[intake.freeze_digest(previous)]
+    report=intake.qualification_report([who.as_row()],db_path=source,freeze=revoked)
+    assert len(report['scopes'][0]['tainted_accepted_events'])==1
+    copied=intake.append_original_events([who.as_row()],source_db=source,target_db=target,
+        freeze=revoked,actor='test')
+    query=[row for row in copied if row['evidence_type']=='runtime_query']
+    assert query and not query[0]['registered'] and 'revoke' in query[0]['reasons'][0]

@@ -146,12 +146,15 @@ def _artifact_verified(receipt):
     protected implementation hashes bind the executed assertions. These receipts
     demonstrate engineering probes, never production observation by themselves.
     """
-    from .business_replay_inputs import implementation_hashes
+    # Qualification tier only: the rollback evidence citing this drill must not
+    # retire on a test or evidence-script edit (those are held by the freeze).
+    from .business_replay_inputs import qualification_implementation_hashes
     try:
         if receipt.get('kind') != 'junit' or receipt.get('status') != 'passed':
             return False
         raw = Path(receipt['reference']).read_bytes()
-        if hashlib.sha256(raw).hexdigest() != receipt['sha256'] or receipt['implementation'] != implementation_hashes():
+        if (hashlib.sha256(raw).hexdigest() != receipt['sha256']
+                or receipt['implementation'] != qualification_implementation_hashes()):
             return False
         required = receipt['cases']
         if not required or len(required) != len(set(required)):

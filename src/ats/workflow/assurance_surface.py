@@ -24,6 +24,15 @@ Two failure modes this exists to prevent, both of which are quiet:
   which invalidates the other nine consumers that share the file;
 - bumping the manifest to make a new evidence type legal, which invalidates
   every previously recorded row at once.
+
+The surface has two tiers. The manifest lists bind qualification: production
+runtime code/config plus the data evidence's own verifiers. The freeze-only tier
+(`config/workflow/freeze_surface.yaml`) holds tests, evidence scripts, tooling
+modules and verifiers of other evidence families. The freeze covers both tiers,
+so nothing leaves the final implementation freeze; only qualification stops
+retiring on edits to files production never executes. A freeze-only change is
+disposed of explicitly when the next freeze is taken (`scoped_intake`), instead
+of silently retiring every recorded row.
 """
 
 from __future__ import annotations
@@ -46,6 +55,15 @@ MANIFEST = REPO_ROOT / "config" / "data" / "target_dataflow_coverage.yaml"
 # that depend on the touched file).
 MANIFEST_RELATIVE = "config/data/target_dataflow_coverage.yaml"
 
+# Freeze-only tier. Deliberately a separate file: registering a new test in the
+# manifest would change the manifest digest and retire every recorded row.
+FREEZE_SURFACE_RELATIVE = "config/workflow/freeze_surface.yaml"
+FREEZE_SURFACE = REPO_ROOT / FREEZE_SURFACE_RELATIVE
+
+# Only these prefixes may be freeze-only without a stated reason; anything under
+# src/ must be declared as a tool or a self-verifying verifier, with its reason.
+_FREEZE_ONLY_PREFIXES = ("tests/", "scripts/")
+
 
 @dataclass(frozen=True)
 class FingerprintSurface:
@@ -59,6 +77,20 @@ class FingerprintSurface:
     # "trader, clerk" for `assurance.py` and silently omit the other eight.
     consumers: tuple[str, ...] = ()
     manifest: str = MANIFEST_RELATIVE
+    # Frozen but not bound by qualification evidence. Empty for a manifest that
+    # has no freeze-surface file beside it (isolated test manifests).
+    freeze_only: tuple[str, ...] = ()
+    freeze_surface: str | None = None
+
+    def qualification_paths(self) -> tuple[str, ...]:
+        """Every file some consumer's qualification evidence is bound to."""
+        out: list[str] = [self.manifest, *self.required]
+        for extra in self.by_consumer.values():
+            out.extend(extra)
+        return tuple(dict.fromkeys(out))
+
+    def is_freeze_only(self, path: str) -> bool:
+        return Path(path).as_posix() in self.freeze_only
 
     def paths_for(self, consumer_id: str) -> tuple[str, ...]:
         """Every file this consumer's evidence is bound to.
@@ -81,9 +113,11 @@ class FingerprintSurface:
             if normalized in self.paths_for(consumer_id)))
 
     def all_paths(self) -> tuple[str, ...]:
-        out: list[str] = [self.manifest, *self.required]
-        for extra in self.by_consumer.values():
-            out.extend(extra)
+        """The whole frozen surface: qualification tier plus freeze-only tier."""
+        out: list[str] = list(self.qualification_paths())
+        if self.freeze_surface:
+            out.append(self.freeze_surface)
+        out.extend(self.freeze_only)
         return tuple(dict.fromkeys(out))
 
     def as_rows(self) -> list[dict[str, Any]]:
@@ -98,20 +132,72 @@ class FingerprintSurface:
             for path in self.by_consumer.get(consumer_id, ()):
                 rows.append({"path": path, "scope": consumer_id,
                              "invalidates": consumer_id})
+        for path in ((self.freeze_surface,) if self.freeze_surface else ()) + self.freeze_only:
+            rows.append({"path": path, "scope": "freeze_only",
+                         "invalidates": "freeze only; disposition required at next freeze"})
         return sorted(rows, key=lambda row: (row["path"], row["scope"]))
 
 
-def load_surface(manifest_path: str | Path | None = None) -> FingerprintSurface:
+def load_freeze_only(path: str | Path = FREEZE_SURFACE) -> tuple[str, ...]:
+    """Freeze-only paths, validated structurally.
+
+    A src/ path is accepted only with a stated reason, and a self-verifying
+    verifier must also name the test proving its own evidence family binds it.
+    Whether a tool module is really unreachable from runtime code is asserted by
+    the surface tests, not here: that check needs the import graph.
+    """
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    out: list[str] = []
+    for key in ("tests", "scripts"):
+        for item in document.get(key) or ():
+            if not str(item).startswith(_FREEZE_ONLY_PREFIXES):
+                raise ValueError(f"freeze-only {key} entry outside tests/ or scripts/: {item}")
+            out.append(str(item))
+    for key, extra in (("src_tools", ()), ("self_verifying", ("family", "self_check"))):
+        for row in document.get(key) or ():
+            if not isinstance(row, dict) or not str(row.get("path", "")).startswith("src/"):
+                raise ValueError(f"freeze-only {key} entry must be a src/ path row: {row}")
+            missing = [field for field in ("reason", *extra) if not str(row.get(field) or "").strip()]
+            if missing:
+                raise ValueError(f"freeze-only {key} entry {row['path']} lacks: {', '.join(missing)}")
+            out.append(row["path"])
+    if len(out) != len(set(out)):
+        raise ValueError("freeze-only surface lists a path twice")
+    return tuple(out)
+
+
+def load_surface(manifest_path: str | Path | None = None,
+                 freeze_surface_path: str | Path | None = None) -> FingerprintSurface:
     path = Path(manifest_path or MANIFEST)
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     policy = document["qualification_policy"]
-    return FingerprintSurface(
+    surface = FingerprintSurface(
         required=tuple(policy.get("required_fingerprint_paths", ())),
         by_consumer={consumer: tuple(paths)
                      for consumer, paths
                      in (policy.get("consumer_fingerprint_paths") or {}).items()},
         consumers=tuple(sorted(row["id"] for row in document.get("consumers", ()))),
     )
+    # The repository manifest always pairs with the repository freeze surface;
+    # an isolated manifest pairs with one only when the caller names it.
+    if freeze_surface_path is None and path.resolve() == MANIFEST.resolve():
+        freeze_surface_path = FREEZE_SURFACE
+    if freeze_surface_path is None:
+        return surface
+    freeze_only = load_freeze_only(freeze_surface_path)
+    overlap = set(freeze_only) & set(surface.qualification_paths())
+    if overlap:
+        # One file cannot both retire evidence and merely need disposition.
+        raise ValueError("paths are both qualification-bound and freeze-only: "
+                         + ", ".join(sorted(overlap)))
+    resolved = Path(freeze_surface_path).resolve()
+    try:
+        label = resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        label = str(resolved)
+    return FingerprintSurface(
+        required=surface.required, by_consumer=surface.by_consumer,
+        consumers=surface.consumers, freeze_only=freeze_only, freeze_surface=label)
 
 
 def fingerprint(paths: Iterable[str]) -> dict[str, str]:

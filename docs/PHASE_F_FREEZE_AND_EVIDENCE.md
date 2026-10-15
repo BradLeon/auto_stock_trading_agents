@@ -287,3 +287,12 @@ NVDA capture实际4次模型阅读成功，180秒预算将余项延期；离线�
 ### 2026-10-14 独立TSM执行与MRVL单次重发实际结果
 
 MRVL Information在新冻结下通过且unsigned。TSM独立执行：15/16次成功取得两篇材料、保留8条TSM提取结果；17次收到finish_reason=error、4096输出token的回复，18次解析重试APITimeoutError，整轮失败且未发布本轮新InformationBrief，不把源中两个无workflow血缘旧简报算作新产物。用户批准MRVL原14次请求仅重发一次，19次request_hash与14次完全一致；实际收到HTTP404，明确在Filter by Parameters拒绝。官方Sonnet端点参数列表均不包含temperature，当前配置发送0.2且严格参数检查开启；nullable sampling两处补丁已准备但未应用，16个非Sonnet角色及research_extract序列化一致性预审通过。累计19次、规划预留0.4091661美元不是实际账单；MRVL单次重发额度已消费，失败原记录保留。6.4/6.6/6.7尚未完成、未签核、未部署；本地工程245项通过不证明真实提供方接口已通过。等待参数调整及TSM不确定请求单次重发裁决；不新增Information质量优化或重新采集。详见current_research_after_tsm_and_mrvl_resend_review.json。
+
+## 2026-10-15 指纹分层：生产资格与冻结分开绑定
+
+**规则**：生产资格证据只绑定生产运行时执行的代码/配置和数据证据自身判定器（manifest `required_fingerprint_paths`/`consumer_fingerprint_paths`，501路径）。测试、取证/组装脚本、仅由 CLI 调用的工具模块、以及由其他证据族自绑定的判定器（`boundary_evidence.py`，入口证据包绑定其hash，改动后入口闸门运行时即失败关闭）列入 `config/workflow/freeze_surface.yaml`，只进最终冻结，不进资格漂移判定。`assurance.py` 判定语义（逐路径漂移、删路径即漂移、manifest 整文件hash）不变。
+
+- **工具改动的处置**：新冻结必须以上一冻结为前驱采集（`scripts/refresh_phase_f_evidence.py --capture-freeze --previous-freeze <旧> --dispositions <json>`）。每个变化的冻结层文件须写明 `unaffected`（附理由）或 `revoke`；未处置即拒绝采集。`revoke` 将前驱冻结下登记的事件标记为受污染：`qualification_report(freeze=...)` 列出，`append_original_events` 拒绝复用；撤销生产行仍须单独授权执行 `revoke_evidence`。
+- **登记约定**：生产事件 `dependency_paths` 取 `scoped_intake.evidence_dependency_paths(consumer, freeze)`（不得再传 `freeze['fingerprints']` 全集），`command_summary` 附 `scoped_intake.provenance(freeze)`；恢复演练回执 `implementation` 取 `qualification_implementation_hashes()`（`_artifact_verified` 已改为按此核对）。
+- **防滥用**：`freeze_surface.yaml` 只收 `tests/`、`scripts/` 前缀，src 模块须带 reason；src 工具不得被 CLI 之外的运行时模块 import（AST 守卫测试）；自绑定判定器须指向其自检用例；两层重叠时加载即报错。把文件从 manifest 降级到冻结层本身仍改 manifest，必然触发一次全量失效。
+- **迁移**：本次改动 manifest（策略版本 `target-qualification-v3`）与受保护实现，现有56条生产事件、8条持久回退证明及冻结 v1 文件全部失效；按用户决定，与下一次生产平台最小补验合并重做一次，以 `--previous-freeze` 指向旧冻结（v1 无分层，所有变化视为资格层，无需处置）采集 `phase-f-final-freeze-v2`。此后改测试/脚本/冻结层工具只需离线重采冻结并处置，不再触发生产补验。

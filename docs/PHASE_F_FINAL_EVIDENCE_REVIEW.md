@@ -1,5 +1,34 @@
 > 2026-10-15 当前裁决：用户明确验收TSM本轮有限Routine。MRVL/MSFT/NVDA/TSM四份当前Routine均为signed_off，签核只覆盖各自实际报告body hash及本轮有限范围；完整§9.2能力Phase F后补。TSM的8192为独立取证配置，全局4096不变；不表示生产资格或部署授权。6.4原始证据接收与6.6/6.7当次核验继续。
 
+## 2026-10-15：按新冻结重做生产平台最小补验，资格恢复 8/8
+
+用户批准按新冻结重做四标的最小补验（范围同上一轮，不部署、不调模型），并选定方案A处理旧恢复策略守卫：仅允许替换上一轮自留、未停止且**已失效**的 retained 停止策略，其余情形仍拒绝；恢复历史为追加式，旧策略保留。先对7个生产库做一致性备份并 quick_check，再依次 MRVL→MSFT→NVDA→TSM。
+
+- 结果：四标的各14条原始通过事件，当前原生source资格 **8/8 eligible**（56项必需证据），同一时点复算一致；18篇文档、81条财务记录的幂等写入/历史只读划分与上一轮一致。8条持久回退引用已指向新目录。模型0、网络0、未部署。
+- 保留核对：原候选/文档/版本/发布及所选财务行与备份逐行一致；Workflow memory、调度、批次、路由库及切流控制表按完整 schema+rows 比较无变化。`retain_and_verify.py` 因按文件字节比较 ats.sqlite 备份而在写 review.json 前中止（已知备份头差异，上一轮同一诊断），此时留存与重登记已完成，未重复任何写入；改用只读收尾脚本完成逻辑内容核对。
+- 持久证据：[review.json](/Users/liuchao/Code/trading/auto_stock_trading_agents/var/phase_f_assurance/production_platform_entry_contract_20261015/review.json)；工作区与备份在 `tmp/phase_f_production_platform_requal_20261015/`（备份不可清理）。
+- 停止证明有效期约一天，临生产动作须重查；8条 production 入口 enforcement 仍为 not enforced（见下）。
+
+### 生产模式 projection_read 入口证据包：已生成并校验，未登记
+
+按用户裁决（方案1、覆盖8个scope、证据包只校验不登记）新增 `tests/test_phase_f_entry_evidence.py`（68例）、`tests/test_phase_f_entry_evidence_assembly.py`（17例）与 `scripts/assemble_phase_f_entry_evidence.py`。入口在 `ReadContext.mode=production`（`ATS_RUN_MODE` 未设）下于物理隔离沙盒真实执行，broker写保持禁止，业务叶子为替身（无模型/采集/网络/券商）。每个身份各一份证据包：Information 4个入口（`run_information_pass` 对实体 scope 契约不兼容，仅拒绝证明），Fundamental 5个入口；兼容入口正向+负向齐备，均通过真实校验器 `_validate_bundle`。
+
+- 证据：[manifest](/Users/liuchao/Code/trading/auto_stock_trading_agents/tmp/phase_f_entry_evidence_20261015/bundles_final/manifest.json)、[8份证据包](/Users/liuchao/Code/trading/auto_stock_trading_agents/tmp/phase_f_entry_evidence_20261015/bundles_final/bundles/)、[JUnit](/Users/liuchao/Code/trading/auto_stock_trading_agents/tmp/phase_f_entry_evidence_20261015/bundles_final/entry_evidence.junit.xml)；冻结 [final_implementation_freeze_entry_evidence_v2.json](/Users/liuchao/Code/trading/auto_stock_trading_agents/tmp/phase_f_entry_evidence_20261015/final_implementation_freeze_entry_evidence_v2.json)（570路径，相对上一冻结仅4个文件：覆盖配置登记、新增测试2个、装配脚本）。受影响门禁379项同ID全部通过；此前110项慢速回归在上一冻结通过，其后受保护面变化仅限新增入口证据测试与装配脚本，该批模块不导入它们，未重跑。
+- 生产状态：保护面变化使生产资格再次失效后，已按已批准范围重做最小补验（本轮第3次），**8/8 eligible、56项**，路由/调度/Workflow memory逻辑无变化、原始行与备份一致，模型0、网络0、未部署。证据包在补验后真实控制面的只读还原副本上装配。
+- **未登记**：生产控制库不存在 `boundary_enforcement_evidence` 表，`record_enforcement` 未被调用；登记需用户看过证据后单独授权。
+
+**评审时须知的发现与限定**
+1. **拒绝会锁存停止。** 还原真实控制面（每个scope已登记停止型恢复策略）后发现：被拒绝的 target 读会向 `read_recovery_events` 追加 `stopped` 事件，使该scope锁存停止（设计行为，非业务写入）。测试把 `read_recovery_events` 显式列入白名单并严格断言「只能是 stopped、只属于被测身份」，业务表零变化；两次拒绝之间在沙盒副本重新登记同一恢复证明以解除锁存。清单记录各入口锁存次数（Dispatcher 12、read_input 8、run_pead 4、_run_analyst_fundamental 4、run_owned_workflow 8）。含义：切流后一次资格失败即令该scope停读，需恢复流程解除。
+2. **「零副作用」的定义。** 业务表行数/最大rowid前后不变；拒绝本身的运行记录（`workflow_runs`、`agent_runs`、`workflow_run_status_history`、`schedule_scope_owners`、`data_migrations`）按入口显式白名单列出并写入证据属性 `side_effect_allowlist`。
+3. **沙盒不等于生产。** 验证隔离下 `verified_isolation_root()` 为真，持久 read-window 选择、非 target 路由下的原生输入放行等分支不是被演练的分支；`assert_enforced` 在沙盒中为替身（它正是本证据要填充的闸门）。
+4. 证据绑定受保护文件指纹；任何受保护改动都会令证据包与生产资格同时失效，须按「改动→冻结→重做补验→重新装配」重来。
+
+**登记（2026-10-15）**：用户接受「拒绝即锁存停止」行为并授权登记。登记前备份控制库、复核冻结v2与8份证据包仍有效；`record_enforcement` 写入生产切流控制库后，只读复核8个scope的 `projection_read` 均为 enforced，路由、切流历史与恢复记录前后完全一致；其余5条边界未登记、仍为 not enforced。回执：[registration.json](/Users/liuchao/Code/trading/auto_stock_trading_agents/tmp/phase_f_entry_evidence_20261015/registration/registration.json)。
+
+用户同时要求收窄指纹依赖范围（当前每个consumer的资格证据绑定全部570路径，含46个测试、15个脚本，任一改动即令全部生产证据作废），已由另一会话按方案B实施（3a95b6c 指纹分层、测试与取证工具只入冻结；bc36f22 无分层前驱冻结的迁移修正）。该迁移改动了受保护面，上述登记的入口证据与8/8生产资格因此需按新分层最后一次重做补验并重新装配/登记（第4轮脚本已准备、未执行）；此后测试与脚本改动不再使资格证据作废。
+
+8.5 仍未勾选（待逐批门禁报告），任务计数 **106/117**。
+
 ## 2026-10-15：8.5入口适用性验收器已实施，新冻结及离线重验通过
 
 按用户确认的入口职责裁决，`boundary_evidence.entry_scope_contract`从入口登记及当前配置独立计算kind/id/entities兼容性：兼容入口仍需成功/拒绝双向证明；不兼容入口（如单标的批次下的组合级Information CLI）须证明业务body调用0、副作用0的实际拒绝，所有登记调用点保留，调用者不能自报豁免，配置/代码/测试漂移使证据失效。入口读取权限、Information筛选和模型配置未改。

@@ -1,3 +1,9 @@
+> 2026-10-15用户接受拒绝锁存停止并授权登记：8份生产模式projection_read证据包已登记，8 scope enforced，路由/恢复记录不变，未部署。指纹分层（方案B）已在3a95b6c/bc36f22实施，登记证据与资格需按新分层最后重做一次。8.5待逐批门禁报告，106/117不变。
+
+> 2026-10-15生产模式projection_read入口证据包已生成并校验（8 scope、68例、冻结final_implementation_freeze_entry_evidence_v2.json 570路径、受影响门禁379项通过），生产补验第3次重做后恢复8/8 eligible（56项，路由/调度/Workflow memory无变化，模型/网络0，未部署）；证据包只校验、未登记，等待用户审阅后另行授权。发现：被拒绝的target读会使已登记恢复策略的scope锁存stopped（已显式声明并严格断言）。8.5仍pending，106/117不变；详见PHASE_F_FINAL_EVIDENCE_REVIEW.md。
+
+> 2026-10-15生产补验按新冻结重做完成：四标的原exact-scope恢复8/8 eligible（56项证据），原始行/路由/调度/Workflow memory无变化，模型/网络0，未部署。8.5仍pending：生产projection_read入口证据包缺Dispatcher.dispatch/read_input等适用调用点的JUnit产出且mode语义待裁决，详见PHASE_F_FINAL_EVIDENCE_REVIEW.md文首章节；106/117不变。
+
 > 2026-10-15入口适用性验收器已实施：兼容入口双向证明、不兼容入口仅拒绝证明（body调用0/副作用0），292项受影响门禁同ID全通过，新冻结final_implementation_freeze_entry_contract.json登记，四份有限Routine离线new/replay/重开通过（模型/网络0，原签核不变）。因验收器hash变化生产资格只读复查为0/8（dependency_drift），需另获授权重做生产平台最小补验；8.5仍pending，106/117不变，未部署。
 
 > 2026-10-15生产平台补验最新：四标的Information/Fundamental原exact-scope已8/8 eligible，56条原始通过事件及8条持久证明引用更新；新闻18篇、财务81条（77幂等写入/4历史只读），原始数据、路由、调度和交易账本保留，模型新增0。当前106/117，8.5仍待入口适用性/精确准入证明，TSM8192生产配置另列；未部署。详见docs/PHASE_F_FINAL_EVIDENCE_REVIEW.md文首。

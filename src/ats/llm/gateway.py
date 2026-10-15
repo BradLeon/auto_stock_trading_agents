@@ -18,6 +18,31 @@ from typing import Any
 from ..config import get_config
 
 
+class StructuredOutputModel:
+    """Delegate chat behavior, selecting the configured native schema transport."""
+    def __init__(self, model, method):
+        object.__setattr__(self, "_model", model)
+        object.__setattr__(self, "_method", method)
+
+    def __getattr__(self, name):
+        return getattr(self._model, name)
+
+    def __setattr__(self, name, value):
+        if name in {"_model", "_method"}:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._model, name, value)
+
+    def model_copy(self, **kwargs):
+        return StructuredOutputModel(self._model.model_copy(**kwargs), self._method)
+
+    def with_structured_output(self, schema, **kwargs):
+        kwargs["method"] = self._method
+        if self._method == "json_schema":
+            kwargs["strict"] = True
+        return self._model.with_structured_output(schema, **kwargs)
+
+
 @lru_cache(maxsize=None)
 def get_model(role: str) -> Any:
     """Return a configured LangChain chat model for the given agent role.
@@ -75,13 +100,15 @@ def get_model(role: str) -> Any:
         # OpenRouter (optional) attribution headers — harmless against vanilla OpenAI.
         headers = {"HTTP-Referer": "https://github.com/ats", "X-Title": "ats"} \
             if base_url and "openrouter" in base_url else None
-        return ChatOpenAI(
+        value = ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.openai_api_key or None,
             base_url=base_url,
             default_headers=headers,
             **common,
         )
+        return (StructuredOutputModel(value, rc.structured_output_method)
+                if rc.structured_output_method == "json_schema" else value)
 
     raise ValueError(f"Unknown LLM provider {rc.provider!r} for role {role!r}")
 

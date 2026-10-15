@@ -219,6 +219,54 @@ def test_actual_cli_checks_scoped_target_before_provider_and_clears_context(
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("request_kind", ["portfolio", "entity", "subset", "wrong_id", "portfolio_disabled"])
+def test_information_cli_obeys_its_configured_portfolio_contract(
+        tmp_path, monkeypatch, record_property, request_kind):
+    """Fake business leaf, real CLI/scope guard; never calls a model or collector."""
+    from ats.runtime import cli
+    from ats.workflow.scoped_routes import canonical_json
+
+    config = tmp_path / "entry-config"
+    config.mkdir()
+    (config / "pead.yaml").write_text("targets: [MRVL, MSFT]\n")
+    kind = "entity" if request_kind == "entity" else "portfolio"
+    scope_id = "MRVL" if kind == "entity" else "other" if request_kind == "wrong_id" else "portfolio"
+    entities = ["MRVL", "MSFT"] if request_kind in {"portfolio", "wrong_id", "portfolio_disabled"} else ["MRVL"]
+    who = rr.business_identity("information", kind=kind, scope_id=scope_id, entities=entities, as_of=POINT)
+    calls = []
+    def business_leaf(**kwargs):
+        assert kwargs == {"use_llm": False, "ingest_research": False}
+        calls.append(rr.current_read_context().identity)
+        return {"articles": 0, "targets": ["MRVL", "MSFT"], "briefs": 0}
+    monkeypatch.setattr("ats.agents.information.entry.run_information_pass", business_leaf)
+    monkeypatch.setattr(cli, "_run_managed_article_ingestion",
+                        lambda **kwargs: pytest.fail("contract test must not collect data"))
+    with isolated_run("information-entry-contract", root=tmp_path / "entry-isolation") as env:
+        monkeypatch.setenv("ATS_CONFIG_DIR", str(config))
+        store = TradingMemory(env.path_for("ATS_DB_PATH"))
+        before = store.conn.total_changes
+        if request_kind == "portfolio":
+            assert cli.run_information_pass(use_llm=False, ingest_research=False,
+                                           read_scope=who.scope, read_as_of=POINT) == 0
+            assert calls == [who]
+        else:
+            if request_kind == "portfolio_disabled":
+                co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
+            reason = "disabled" if request_kind == "portfolio_disabled" else "does not match business request"
+            with pytest.raises(RouteUnavailable, match=reason):
+                cli.run_information_pass(use_llm=False, ingest_research=False,
+                                         read_scope=who.scope, read_as_of=POINT)
+            assert calls == [] and store.conn.total_changes == before
+        assert rr.current_read_context() is None
+    for name, value in {
+        "entry_exercised": "ats.runtime.cli.run_information_pass", "mode": "isolated",
+        "identity_json": canonical_json(who.as_row()),
+        "path_kind": "positive" if request_kind == "portfolio" else "negative",
+        "negative_side_effect_count": "0", "business_body_call_count": str(len(calls)),
+    }.items():
+        record_property(name, value)
+
+
 def plan(tmp_path, *, namespace="dispatcher"):
     config = tmp_path / "config"
     config.mkdir(exist_ok=True)

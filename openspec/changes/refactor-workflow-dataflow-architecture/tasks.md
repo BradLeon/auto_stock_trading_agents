@@ -80,7 +80,7 @@
 - [ ] 7.2 从 PEAD research/triage/monitor 和 digest 提取纯抽取/材料性逻辑，移除直接抓 Provider 和修改 dossier 的副作用
 - [ ] 7.3 实现 Information 的文档版本/chunk 血缘、事件/发布/抽取时间、聚类、置信度、仅自述和待验证标记
 - [ ] 7.4 新增 Information schema guard，拒绝 action、仓位、订单数量/价格/类型字段，并测试 Information 可不运行 Fundamental/Chief 而独立终结
-- [ ] 7.5 实现 Fundamental routine mode，基于上一有效基线、InformationBrief、Consensus、公司数据和中性产业链事实发布 `FundamentalExpectationUpdate`
+- [ ] 7.5 实现 Fundamental routine mode，基于上一有效基线、InformationBrief、Consensus、公司数据和中性产业链事实发布 `FundamentalExpectationUpdate` 2026-10-14可能缺失记录：完整市场隐含预期、整合叙事/变化路径、逐KPI变化解释、可证伪条件及输入参与判断待闭合；用户裁决Phase F验收后补。本轮有限Routine签核不代表本项完成。
 - [ ] 7.6 实现 Fundamental event cutoff 和冻结预期基线，禁止用事件后材料回写财报前预期
 - [ ] 7.7 实现 event mode 的 actuals vs baseline/Consensus/implied expectation、Surprise Scorecard、指引、叙事变化和非执行建议
 - [ ] 7.8 实现迟到电话会/指引的版本升级，共享同一冻结基线且不覆盖初版投影
@@ -126,6 +126,10 @@
 - [ ] 10.7 执行 Dataflow 专项门禁：仅将写入、发布、读取、血缘、完整性及回滚证据齐备的数据域/消费者标记可进入 Phase F 读取切流；未通过项保持稳定旧路由并登记缺口
 
 ## 11. Phase F — 影子运行、切流与回滚
+
+> 2026-10-15生产平台补验过程回写：原四标的Information/Fundamental已8/8 eligible，生产源原始证明齐备，旧0/8/缺40项是此前状态。业务原始行、路由、调度和审批交易记录保留；未部署，8.5入口证据适用性仍有待处理项，106/117不变。有限Routine签核及完整能力后补边界不变，父7.5不因此完成。
+
+> 2026-10-15过程回写（不代表13.9最终完成）：子change当前106/117完成，6.4/6.6/6.7已按当前冻结重新完成；四家有限Routine报告经用户审阅signed_off并覆盖各自Information依赖。16条隔离真实事件、生产资格0/8缺源账本、隔离仍缺40项平台原始证明分别记录，未执行生产切换/调度/观察/退役，真实券商写继续禁用。8.5前置仍有工程取证缺口，不是只等部署审批。完整Routine业务能力按用户裁决Phase F后补，父7.5不勾选；详见docs/PHASE_F_FINAL_EVIDENCE_REVIEW.md文首。
 
 **2026-10-09 验收裁决（覆盖本节此前的新旧对比/旧业务回退前置）**：以新入口需求矩阵和独立预期断言验收；旧入口不可运行、旧业务错误及新旧差异仅作可选诊断，不阻塞新入口。旧入口仍须退出安全，防重复触发/发布、越权提交和状态污染。恢复可以是经验证的安全停止或恢复已验收的新版本，不强制修复或恢复旧业务。新入口、共享依赖、必需历史/状态和权限失败仍阻塞受影响范围。子 change 的旧工具成果保留，但报告/checker 与恢复/退役判据须按新标准改造，不自动沿用历史签核。
 

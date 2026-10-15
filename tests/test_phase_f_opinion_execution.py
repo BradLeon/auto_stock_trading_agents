@@ -132,7 +132,11 @@ def test_complete_business_execution_and_recovery(business_inputs, isolated, mon
     monkeypatch.setattr(chief, "_write_chief_report", lambda state: None)
     pf = PortfolioSnapshot(as_of=datetime.now(UTC), net_liquidation=1e6,
                            cash=1e6, daily_pnl=0, gross_exposure=0, positions=[])
-    monkeypatch.setattr(IBKRBroker, "get_portfolio", lambda self: pf)
+    # Each fake transport query represents a fresh response, as in the
+    # independent runner fixture. Never reuse a setup-time snapshot after slow
+    # research; the unchanged production 60-second guard must still reject it.
+    monkeypatch.setattr(IBKRBroker, "get_portfolio", lambda self: pf.model_copy(
+        update={"as_of": datetime.now(UTC)}))
     monkeypatch.setattr("ats.data.execution_prices.session_context",
                         lambda now: (True, now-timedelta(days=1)))
     quotes=[]

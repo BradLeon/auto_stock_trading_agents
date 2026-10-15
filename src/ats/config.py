@@ -15,6 +15,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -89,6 +90,9 @@ class Secrets(BaseSettings):
 # App config (yaml)
 # --------------------------------------------------------------------------- #
 class LLMRoleConfig(BaseModel):
+    # Preserve legacy function-calling fingerprints for unchanged roles.
+    structured_output_method: Literal["function_calling", "json_schema"] | None = Field(
+        default=None, exclude_if=lambda value: value in (None, "function_calling"))
     provider: str | None = None
     model: str | None = None
     temperature: float | None = None
@@ -96,6 +100,7 @@ class LLMRoleConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
+    default_structured_output_method: Literal["function_calling", "json_schema"] = "function_calling"
     default_provider: str = "anthropic"
     default_model: str = "claude-opus-4-8"
     temperature: float = 0.2
@@ -108,6 +113,7 @@ class LLMConfig(BaseModel):
         """Merge defaults with any per-role override."""
         override = self.routing.get(role) or LLMRoleConfig()
         return LLMRoleConfig(
+            structured_output_method=override.structured_output_method or self.default_structured_output_method,
             provider=override.provider or self.default_provider,
             model=override.model or self.default_model,
             temperature=override.temperature if override.temperature is not None else self.temperature,

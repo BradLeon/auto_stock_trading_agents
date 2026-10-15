@@ -286,7 +286,7 @@ def test_native_target_channel_reads_publisher_material_only_when_target_is_inde
     assert len(captured)==1 and captured[0]['entities']==['MSFT']
 
 
-def test_near_update_waits_for_distinct_direct_material_but_remains_eligible():
+def test_near_duplicate_reuses_cache_without_rereading_other_version():
     body=' '.join(f'word{i}' for i in range(140))
     rows=[selection.Candidate(article('wire-new',source='ibkr_news',body=body),0,'target_title'),
           selection.Candidate(article('wire-old',source='ibkr_news',body=body+' Existing commentary.'),0,'target_title'),
@@ -298,7 +298,39 @@ def test_near_update_waits_for_distinct_direct_material_but_remains_eligible():
     assert {r.article.id for r in expanded}=={'wire-new','direct'}
     later=selection.choose(rows,max_articles=2,exploration_articles=0,
         cached_versions={'wire-new@v','direct@v'})
-    assert 'wire-old' in {r.article.id for r in later}
+    assert {r.article.id for r in later} == {'wire-new', 'direct'}
+
+
+def test_equivalent_content_reuses_cached_original_despite_title_and_source_changes():
+    rows = [selection.Candidate(article('a-new', source='trendforce_news',
+                title='New headline', body='Microsoft capacity increased 10%.'), 0, 'target_title'),
+            selection.Candidate(article('z-cached', source='ibkr_news',
+                title='Original headline', body='Microsoft capacity increased 10%.'), 2, 'target_visible_body')]
+    chosen = selection.choose(rows, max_articles=None, exploration_articles=0,
+                              cached_versions={'z-cached@v'})
+    assert [r.article.document_version_id for r in chosen] == ['z-cached@v']
+    # A real update is distinct even when a cached version has the same headline.
+    rows.append(selection.Candidate(article('update', title='Original headline',
+                body='Microsoft capacity increased 20%.'), 0, 'target_title'))
+    chosen = selection.choose(rows, max_articles=None, exploration_articles=0,
+                              cached_versions={'z-cached@v'})
+    assert {r.article.id for r in chosen} == {'z-cached', 'update'}
+
+
+@pytest.mark.parametrize('entity', ['MRVL', 'MSFT', 'NVDA', 'TSM'])
+def test_independent_research_capture_trigger_ids_preserve_same_flow_identity(entity):
+    import importlib.util
+    from ats.config import REPO_ROOT
+    spec = importlib.util.spec_from_file_location('research_capture_trigger',
+                                                 REPO_ROOT / 'scripts/capture_phase_f_research.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    research_trigger_id = module.research_trigger_id
+    information = research_trigger_id(entity, with_routine=False)
+    routine = research_trigger_id(entity, with_routine=True)
+    assert information != routine
+    assert information == research_trigger_id(entity, with_routine=False)
+    assert routine == research_trigger_id(entity, with_routine=True)
 
 
 def test_identical_syndication_consumes_one_read_and_numeric_update_remains_available():

@@ -10,6 +10,18 @@
 
 系统 SHALL 为 projection read、analyst output、Dispatcher schedule、approval lifecycle、Clerk publication 和 live Trader 六条边界分别维护独立功能开关。开关状态 SHALL 可查询、可追溯到操作者与时间；单边界操作 SHALL NOT 隐式改变其他边界。每条边界 SHALL 声明作用范围、实际调用点、各模式语义与权威写入方，并提供真实业务入口的执行及否定路径证明。声明登记 SHALL 与已生效接线分列；只有字符串声明、静态扫描或 bootstrap 写入 SHALL NOT 被视为已接线。兼容矩阵 SHALL 按具体 workflow 与业务 scope 声明；确需共同迁移的范围 SHALL 使用显式联合批次，SHALL NOT 把不兼容的独立请求自动扩成联合动作。
 
+入口证明 SHALL 按独立于证据提交者的入口契约及当前配置核对 kind/id/entities。Dispatcher 的单标的任务只处理该标的；组合级 Information CLI 一次处理配置中的完整组合，SHALL NOT 接受单标的或组合子集冒充组合请求。所有登记调用点 SHALL 保留在证据包中：契约兼容入口须有成功与拒绝两类实际执行证明；契约不兼容入口须证明业务执行前拒绝且无业务副作用，SHALL NOT 要求或伪造越界成功。调用者 SHALL NOT 自行声明豁免，配置/代码/测试及证明漂移 SHALL 使相应证据失效。
+
+#### Scenario: 单标的批次核验组合级入口
+
+- **WHEN** 单标的 MRVL 请求经 Dispatcher 执行，同时验收器检查登记的组合级 Information CLI
+- **THEN** Dispatcher 仍须证明成功及拒绝路径；该 CLI 须证明拒绝单标的请求且未进入业务执行，不要求它越界成功，也不得从登记集合删除
+
+#### Scenario: 完整组合入口及越界请求
+
+- **WHEN** Information CLI 收到与当前配置完全匹配的组合请求，或收到单标的、错误组合标识或组合子集请求
+- **THEN** 完整组合须验证成功及拒绝路径；越界请求 SHALL 在采集、模型或业务发布前拒绝，验收器 SHALL 核对配置与实际测试的指纹
+
 #### Scenario: 切换读路径不影响调度路径
 
 - **WHEN** 某数据域执行兼容的独立读路径批次，从旧路由切到新路由

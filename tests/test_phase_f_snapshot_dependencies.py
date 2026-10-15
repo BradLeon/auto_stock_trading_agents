@@ -114,8 +114,8 @@ def multi_routine_basis(business_inputs, isolated):
     repository = get_platform_unstructured_store()
     point = datetime.now(UTC)
     try:
-        for key, title in [('capacity', 'Factory capacity outlook changed'),
-                           ('customer', 'Customer qualification milestone confirmed')]:
+        for key, title in [('capacity', 'Coherent factory capacity outlook changed'),
+                           ('customer', 'Coherent customer qualification milestone confirmed')]:
             assert document_assets.ingest(entity='COHR', key='multi-'+key, doc_type='article',
                 text=(title+'. Source uncertainty remains explicit. ')*30,
                 source='ibkr_news', source_url='fixture:multi-'+key, title=title,

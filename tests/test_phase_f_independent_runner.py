@@ -43,19 +43,20 @@ def test_actual_full_capture_and_offline_process_replay(business_inputs,isolated
     from ats.execution import broker_write_guard as guard
     seed_performance(isolated)
     pf = PortfolioSnapshot(as_of=datetime.now(UTC),net_liquidation=1e6,cash=1e6,daily_pnl=0,gross_exposure=0,positions=[])
-    # The fake transport represents a new broker response at each actual query.
-    # Holding a snapshot from test setup across slow research/capture makes the
-    # positive fixture legitimately expire under the unchanged 60-second guard.
+    # Positive simulated execution uses one controlled runtime instant for all
+    # fake sources. Machine load must not turn it into the separately tested
+    # expired-authorization scenario; the production 60-second guard is unchanged.
     monkeypatch.setattr(IBKRBroker,"get_portfolio",lambda self:pf.model_copy(
-        update={"as_of":datetime.now(UTC)}))
+        update={"as_of":runtime_point}))
     monkeypatch.setattr("ats.data.execution_prices.session_context",lambda now:(True,now-timedelta(days=1)))
-    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",lambda symbol,**kw:quote(symbol=symbol))
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",lambda symbol,**kw:quote(
+        symbol=symbol,source_as_of=runtime_point,queried_at=runtime_point))
     monkeypatch.setattr("ats.agents.chief.decide.run_structured",lambda *a,**k:ChiefOutput(summary="Actual six-role governed research",
         decisions=[dict(symbol="COHR",action="buy",notional_usd=1000,conviction=.5,rationale="Actual requirements")]))
     monkeypatch.setattr(extract,"run_structured",lambda agent,schema,context,**kw:schema(insights=[]))
     class Human:
         def request_approval(self,request):
-            return BossApproval(status="approved",reviewer="fixture-human",channel="fixture-only",reviewed_at=datetime.now(UTC))
+            return BossApproval(status="approved",reviewer="fixture-human",channel="fixture-only",reviewed_at=runtime_point)
     extra = {}
     if mode=="event":
         from ats.data import document_assets
@@ -67,6 +68,15 @@ def test_actual_full_capture_and_offline_process_replay(business_inputs,isolated
         repository.close();assert release
         extra={"fiscal_label":"Q3 FY2026","trigger":"earnings_release","material_state":"admitted","admitted_material_refs":[release.document_id]}
     point=datetime.now(UTC).isoformat();root=verified_isolation_root();inputs=root/"fixed.sqlite"
+    from ats.workflow import evaluation_clock
+    runtime_point = datetime.fromisoformat(point) + timedelta(seconds=1)
+    original_now = evaluation_clock._now
+    def controlled_now(tz):
+        if evaluation_clock._POINT.get() is not None:
+            return original_now(tz)
+        return (runtime_point.astimezone(tz) if tz is not None else
+                runtime_point.astimezone().replace(tzinfo=None))
+    monkeypatch.setattr(evaluation_clock, '_now', controlled_now)
     def matrix(run_id):return plan_matrix(business_inputs.root,run_id,point,mode,extra=extra)
     # Requirements and simulation protocol precede output. Capture is new only.
     captured=runner.capture(matrix=matrix("capture"),input_store=inputs,root=root/"capture",capture_id="frozen",

@@ -91,6 +91,179 @@ def test_nonempty_bootstrap_proof_string_cannot_pass(authority):
             "identity": identity().as_row(), "mode": "production", "call_points": {}}, path=authority)
 
 
+def information_identity(kind="entity", scope_id="MRVL", entities=("MRVL",)):
+    from ats.workflow import runtime_reads as rr
+    return rr.business_identity("information", kind=kind, scope_id=scope_id,
+                                entities=list(entities), as_of="2026-10-08T00:00:00+00:00")
+
+
+def information_cli_point():
+    return next(p for p in be.CALL_POINTS[co.PROJECTION_READ]
+                if p.site == "ats.runtime.cli.run_information_pass")
+
+
+@pytest.mark.parametrize("kind,scope_id,entities,compatible", [
+    ("entity", "MRVL", ("MRVL",), False),
+    ("portfolio", "portfolio", ("MRVL", "MSFT"), True),
+    ("portfolio", "portfolio", ("MRVL",), False),
+    ("portfolio", "other", ("MRVL", "MSFT"), False),
+])
+def test_entry_contract_uses_kind_id_and_current_entities(
+        tmp_path, monkeypatch, kind, scope_id, entities, compatible):
+    (tmp_path / "pead.yaml").write_text("targets: [MRVL, MSFT]\n")
+    monkeypatch.setenv("ATS_CONFIG_DIR", str(tmp_path))
+    who = information_identity(kind, scope_id, entities)
+    contract = be.entry_scope_contract(information_cli_point(), who)
+    assert contract["compatible"] is compatible
+    assert str(tmp_path / "pead.yaml") in contract["dependencies"]
+    dispatcher = next(p for p in be.CALL_POINTS[co.PROJECTION_READ] if p.site.endswith("Dispatcher.dispatch"))
+    assert be.entry_scope_contract(dispatcher, who)["compatible"]
+
+
+@pytest.fixture(scope="module")
+def actual_information_refusal(tmp_path_factory):
+    """Real CLI refusal on fake isolated stores, not production enforcement."""
+    folder = tmp_path_factory.mktemp("information-refusal-proof")
+    junit = folder / "business.junit.xml"
+    base_name = "test_information_cli_obeys_its_configured_portfolio_contract"
+    test_name = base_name + "[entity]"
+    subprocess.run([sys.executable, "-m", "pytest",
+                    f"tests/test_phase_f_business_wiring.py::{base_name}", "-q",
+                    "-o", "junit_family=xunit1", f"--junitxml={junit}"],
+                   check=True, capture_output=True, text=True)
+    (folder / "pead.yaml").write_text("targets: [MRVL, MSFT]\n")
+    return folder, junit, "tests.test_phase_f_business_wiring." + test_name
+
+
+@pytest.fixture
+def information_refusal_bundle(monkeypatch, actual_information_refusal):
+    folder, junit, test_name = actual_information_refusal
+    monkeypatch.setenv("ATS_CONFIG_DIR", str(folder))
+    who, point = information_identity(), information_cli_point()
+    contract = be.entry_scope_contract(point, who)
+    source, _ = be.resolve_site(point.site)
+    needed = {source, Path(be.__file__), be.REPO_ROOT / "src/ats/workflow/scoped_routes.py",
+              be.REPO_ROOT / "src/ats/workflow/cutover_wiring.py",
+              be.REPO_ROOT / "tests/test_phase_f_business_wiring.py",
+              *(Path(p) for p in contract["dependencies"])}
+    proof = {"writer": point.writer, "entry_exercised": point.site, "entry_contract": contract,
+             "negative_side_effect_count": 0, "negative_test": test_name,
+             "junit_path": str(junit), "junit_sha256": hashlib.sha256(junit.read_bytes()).hexdigest(),
+             "source_hashes": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in needed}}
+    return {"identity": who.as_row(), "mode": "isolated", "call_points": {point.site: proof}}
+
+
+def test_incompatible_entry_accepts_real_refusal_without_invented_success(
+        authority, monkeypatch, information_refusal_bundle):
+    point = information_cli_point()
+    # Focus this unit test on one entry; the full-registry omission test below
+    # separately proves a production bundle cannot perform this narrowing.
+    monkeypatch.setitem(be.CALL_POINTS, co.PROJECTION_READ, (point,))
+    be.record_enforcement(co.PROJECTION_READ, information_identity(), mode="isolated",
+                          bundle=information_refusal_bundle, path=authority)
+    be.assert_enforced(co.PROJECTION_READ, identity=information_identity(), mode="isolated", path=authority)
+
+
+def test_incompatible_entry_cannot_be_omitted_from_full_inventory(authority, information_refusal_bundle):
+    with pytest.raises(co.CutoverError, match="every applicable"):
+        be.record_enforcement(co.PROJECTION_READ, information_identity(), mode="isolated",
+                              bundle=information_refusal_bundle, path=authority)
+
+
+@pytest.mark.parametrize("fault", ["invent_success", "claim_compatible", "missing_config",
+                                    "wrong_mode", "wrong_entities", "side_effect", "missing_test"])
+def test_incompatible_entry_still_rejects_false_or_incomplete_proofs(
+        authority, monkeypatch, information_refusal_bundle, fault):
+    point = information_cli_point()
+    monkeypatch.setitem(be.CALL_POINTS, co.PROJECTION_READ, (point,))
+    bundle = json.loads(json.dumps(information_refusal_bundle))
+    proof = bundle["call_points"][point.site]
+    if fault == "invent_success":
+        proof["positive_test"] = "made.up"
+    elif fault == "claim_compatible":
+        proof["entry_contract"]["compatible"] = True
+    elif fault == "missing_config":
+        proof["source_hashes"].pop(str(Path(os.environ["ATS_CONFIG_DIR"]) / "pead.yaml"))
+    elif fault == "wrong_mode":
+        bundle["mode"] = "production"
+    elif fault == "wrong_entities":
+        bundle["identity"]["scope"]["entities"] = ["MSFT"]
+    elif fault == "side_effect":
+        proof["negative_side_effect_count"] = 1
+    else:
+        proof["negative_test"] = "missing.test"
+    with pytest.raises(co.CutoverError):
+        be.record_enforcement(co.PROJECTION_READ, information_identity(), mode=bundle["mode"],
+                              bundle=bundle, path=authority)
+
+
+def test_reachable_dispatcher_cannot_claim_refusal_only(authority, monkeypatch):
+    point = next(p for p in be.CALL_POINTS[co.PROJECTION_READ] if p.site.endswith("Dispatcher.dispatch"))
+    monkeypatch.setitem(be.CALL_POINTS, co.PROJECTION_READ, (point,))
+    proof = {"writer": point.writer, "negative_test": "made.up"}
+    bundle = {"identity": information_identity().as_row(), "mode": "production", "call_points": {point.site: proof}}
+    with pytest.raises(co.CutoverError, match="distinct positive/negative"):
+        be.record_enforcement(co.PROJECTION_READ, information_identity(), mode="production", bundle=bundle, path=authority)
+
+
+def test_complete_portfolio_requires_and_accepts_both_actual_paths(
+        authority, monkeypatch, information_refusal_bundle):
+    point = information_cli_point()
+    monkeypatch.setitem(be.CALL_POINTS, co.PROJECTION_READ, (point,))
+    who = information_identity("portfolio", "portfolio", ("MRVL", "MSFT"))
+    bundle = json.loads(json.dumps(information_refusal_bundle))
+    bundle["identity"] = who.as_row()
+    proof = bundle["call_points"][point.site]
+    proof["entry_contract"] = be.entry_scope_contract(point, who)
+    proof["negative_test"] = proof["negative_test"].replace("[entity]", "[portfolio_disabled]")
+    with pytest.raises(co.CutoverError, match="distinct positive/negative"):
+        be.record_enforcement(co.PROJECTION_READ, who, mode="isolated", bundle=bundle, path=authority)
+    proof["positive_test"] = proof["negative_test"].replace("[portfolio_disabled]", "[portfolio]")
+    be.record_enforcement(co.PROJECTION_READ, who, mode="isolated", bundle=bundle, path=authority)
+    be.assert_enforced(co.PROJECTION_READ, identity=who, mode="isolated", path=authority)
+
+
+@pytest.mark.parametrize("property_name,value", [("business_body_call_count", None),
+                                                ("business_body_call_count", "1"),
+                                                ("negative_side_effect_count", "1")])
+def test_refusal_must_prove_pre_business_and_zero_effects(
+        authority, monkeypatch, information_refusal_bundle, tmp_path, property_name, value):
+    import xml.etree.ElementTree as ET
+    point = information_cli_point()
+    monkeypatch.setitem(be.CALL_POINTS, co.PROJECTION_READ, (point,))
+    bundle = json.loads(json.dumps(information_refusal_bundle))
+    proof = bundle["call_points"][point.site]
+    tree = ET.parse(proof["junit_path"])
+    case = next(c for c in tree.iter("testcase") if c.get("name").endswith("[entity]"))
+    props = case.find("properties")
+    prop = next(p for p in props if p.get("name") == property_name)
+    if value is None:
+        props.remove(prop)
+    else:
+        prop.set("value", value)
+    changed = tmp_path / "altered-proof.xml"
+    tree.write(changed)
+    proof.update(junit_path=str(changed), junit_sha256=hashlib.sha256(changed.read_bytes()).hexdigest())
+    with pytest.raises(co.CutoverError, match="invalid enforcement"):
+        be.record_enforcement(co.PROJECTION_READ, information_identity(), mode="isolated", bundle=bundle, path=authority)
+
+
+def test_entry_config_drift_invalidates_previously_accepted_refusal(
+        authority, monkeypatch, information_refusal_bundle):
+    point = information_cli_point()
+    monkeypatch.setitem(be.CALL_POINTS, co.PROJECTION_READ, (point,))
+    be.record_enforcement(co.PROJECTION_READ, information_identity(), mode="isolated",
+                          bundle=information_refusal_bundle, path=authority)
+    config = Path(os.environ["ATS_CONFIG_DIR"]) / "pead.yaml"
+    original = config.read_bytes()
+    try:
+        config.write_bytes(original + b"# changed\n")
+        with pytest.raises(co.CutoverError, match="not enforced"):
+            be.assert_enforced(co.PROJECTION_READ, identity=information_identity(), mode="isolated", path=authority)
+    finally:
+        config.write_bytes(original)
+
+
 def test_fake_business_evidence_cannot_hide_missing_guard(authority):
     points = be.CALL_POINTS[co.DISPATCHER_SCHEDULE]
     bundle = {"identity": identity().as_row(), "mode": "production", "call_points": {

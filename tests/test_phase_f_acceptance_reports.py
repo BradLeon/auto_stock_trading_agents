@@ -22,6 +22,113 @@ from ats.workflow.run_contracts import TriggerContext
 from ats.agent.task_projection import ProjectionScope
 
 
+def test_information_elapsed_budget_replays_slow_capture_without_extra_read(isolated, monkeypatch):
+    """A fast replay must preserve the real run's time-budget deferral."""
+    import time
+    from datetime import UTC, datetime
+    from ats.schemas.research import Article
+    from ats.agents.information import selection, target_research
+    from ats.workflow.business_replay_inputs import bind_tape
+
+    stamp = datetime.now(UTC)
+    rows = [selection.Candidate(Article(id=name, document_version_id=name+'@v',
+        source='ibkr_news', title='Microsoft capacity',
+        body=f'Microsoft installed {number} clusters.', published_at=stamp),
+        0, 'target_title', 'MSFT') for number, name in enumerate(('first', 'second'), 1)]
+    monkeypatch.setattr(selection, 'candidates', lambda *a, **k: (rows, {
+        'universe_card':'MSFT', 'universe':['MSFT']}))
+    reads = []
+    monkeypatch.setattr(target_research.extract, '_extract',
+        lambda article, *a, **k: reads.append(article.id) or [])
+    monkeypatch.setattr(target_research, '_publish_empty', lambda *a, **k: 'bounded-empty')
+    store = SimpleNamespace(information_extraction_cache=lambda **k: None,
+        begin_information_processing=lambda *a, **k: True,
+        save_task_projection=lambda **k: 'cache-'+k['input_ref'],
+        finish_information_processing=lambda *a, **k: None)
+    config = {'max_articles_per_run':None, 'article_chars':40000,
+              'total_article_chars':80000, 'dispatch_seconds':180}
+    def run():
+        return target_research.run(store, 'MSFT', config=config,
+                                   since=datetime.now(UTC), use_llm=True)
+    samples = iter((100.0, 101.0, 281.0, 282.0))
+    monkeypatch.setattr(target_research, 'time', SimpleNamespace(monotonic=lambda: next(samples)))
+    standard_clock = time.monotonic
+    tape = Tape(); tape.record_clock = True
+    with bind_tape(tape):
+        captured = run()
+        assert time.monotonic is standard_clock
+    assert reads == ['first']
+    assert [r['status'] for r in captured['items']] == ['no_relevant_insight', 'deferred_budget']
+    reads.clear()
+    monkeypatch.setattr(target_research, 'time', SimpleNamespace(
+        monotonic=lambda: pytest.fail('replay sampled an unrecorded elapsed clock')))
+    replay_tape = Tape(replay=SimpleNamespace(used=[]), rows=tape.rows)
+    replay_tape.record_clock = True
+    with bind_tape(replay_tape):
+        repeated = run()
+        assert time.monotonic is standard_clock
+    assert reads == ['first']
+    assert repeated == captured
+
+
+def test_unrecorded_information_budget_clock_is_rejected(isolated):
+    from ats.agents.information import target_research
+    from ats.workflow.business_replay_inputs import bind_tape
+    tape = Tape(replay=SimpleNamespace(used=[]), rows={}); tape.record_clock = True
+    with pytest.raises(ValueError, match='uncaptured business input'), bind_tape(tape):
+        target_research.time.monotonic()
+
+
+def test_model_tape_distinguishes_inputs_and_refuses_uncaptured_replay(isolated, monkeypatch):
+    """Two documents using one role/schema must never share a model response."""
+    from ats.agents.information.outputs import InformationInsightBatchView as Result
+    from ats.agents import base
+    from ats.workflow.business_replay_inputs import bind_tape
+
+    calls = []
+    def external(role, schema, context, **kwargs):
+        calls.append(context)
+        return schema(insights=[], empty_reason=context)
+
+    monkeypatch.setattr(base, 'run_structured', external)
+    tape = Tape()
+    with bind_tape(tape):
+        first = base.run_structured('research_extract', Result, 'document A')
+        second = base.run_structured('research_extract', Result, 'document B')
+        repeated = base.run_structured('research_extract', Result, 'document A')
+    assert (first.empty_reason, second.empty_reason, repeated.empty_reason) == ('document A', 'document B', 'document A')
+    assert calls == ['document A', 'document B']
+    assert len(tape.rows) == 2
+    replay_tape = Tape(replay=SimpleNamespace(used=[]), rows=tape.rows)
+    monkeypatch.setattr(base, 'run_structured', lambda *a, **k: pytest.fail('replay reached model'))
+    with bind_tape(replay_tape):
+        assert base.run_structured('research_extract', Result, 'document B').empty_reason == 'document B'
+        assert base.run_structured('research_extract', Result, 'document A').empty_reason == 'document A'
+    with pytest.raises(ValueError, match='uncaptured business input'), bind_tape(replay_tape):
+        base.run_structured('research_extract', Result, 'changed document A')
+
+
+@pytest.mark.parametrize('changed', ['system', 'schema'])
+def test_model_tape_binds_system_and_schema_content(isolated, monkeypatch, changed):
+    from ats.agents.information.outputs import InformationInsightBatchView as Result
+    from ats.agents import base
+    from ats.workflow.business_replay_inputs import bind_tape
+
+    monkeypatch.setattr(base, 'load_skill', lambda slug: 'original system')
+    monkeypatch.setattr(base, 'run_structured', lambda role, schema, context, **k: schema(insights=[], empty_reason=context))
+    tape = Tape()
+    with bind_tape(tape):
+        base.run_structured('research_extract', Result, 'document')
+    if changed == 'system':
+        monkeypatch.setattr(base, 'load_skill', lambda slug: 'changed system')
+    else:
+        original = Result.model_json_schema()
+        monkeypatch.setattr(Result, 'model_json_schema', lambda: {**original, 'description': 'changed schema'})
+    replay_tape = Tape(replay=SimpleNamespace(used=[]), rows=tape.rows)
+    with pytest.raises(ValueError, match='uncaptured business input'), bind_tape(replay_tape):
+        base.run_structured('research_extract', Result, 'document')
+
+
 @pytest.fixture
 def actual(business_inputs,isolated,monkeypatch):
     root = verified_isolation_root()

@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import sqlite3
 import xml.etree.ElementTree as ET
 from contextlib import closing
@@ -111,6 +112,52 @@ MODE_SEMANTICS = {
     "isolated": "isolated state and fake transport; production authority and broker writes prohibited",
 }
 
+# These are entry contracts, not exemptions supplied by an evidence producer.
+# Dispatcher/native/owner entries receive an already bound task scope. CLI
+# entries instead construct their scope from their own arguments/configuration.
+_ENTRY_SCOPES = {
+    "ats.runtime.cli.run_information_pass": ("portfolio",),
+    "ats.runtime.cli.run_chief": ("portfolio",),
+    "ats.graph.chief.assemble_context": ("portfolio",),
+    "ats.runtime.cli.run_macro_review": ("portfolio",),
+    "ats.runtime.cli.run_technical_review": ("portfolio",),
+    "ats.runtime.cli.run_layer_review": ("layer", "sector"),
+    "ats.runtime.cli.run_sector_review": ("sector",),
+    "ats.runtime.cli.run_sector_html": ("sector",),
+    "ats.runtime.cli.run_pead": ("entity",),
+    "ats.runtime.cli._run_analyst_fundamental": ("entity",),
+}
+
+
+def entry_scope_contract(point: CallPoint, identity: RouteIdentity) -> dict:
+    """Compute obligations from the entry and current config, never the bundle.
+
+    This only decides which execution proofs are required. It grants no read
+    permission and does not replace the real entry's scope/qualification guard.
+    """
+    kinds = _ENTRY_SCOPES.get(point.site)
+    if kinds is None:
+        return {"kind": "bound_task", "compatible": True, "dependencies": []}
+    from .runtime_reads import consumer_entities
+
+    root = Path(os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config")).resolve()
+    scope = identity.scope
+    dependencies = {REPO_ROOT / "src/ats/workflow/runtime_reads.py"}
+    if "portfolio" in kinds:
+        dependencies.add(root / "pead.yaml")
+    if {"sector", "layer"}.intersection(kinds):
+        dependencies.update((root / "sectors").glob("*.yaml"))
+    compatible = scope["kind"] in kinds
+    if compatible:
+        kind, scope_id = scope["kind"], scope["id"]
+        # portfolio has one configured universe; entity has exactly its symbol.
+        compatible = ((kind != "portfolio" or scope_id == "portfolio") and
+                      (kind != "entity" or scope_id == scope_id.upper()))
+        expected = consumer_entities(identity.consumer_id, kind, scope_id)
+        compatible = compatible and scope["entities"] == expected
+    return {"kind": list(kinds), "compatible": compatible,
+            "dependencies": sorted(str(p.resolve()) for p in dependencies)}
+
 
 def resolve_site(site: str):
     """Resolve source AST without importing a module or initializing its stores."""
@@ -172,15 +219,25 @@ def _validate_bundle(boundary: str, identity: RouteIdentity, mode: str, bundle: 
         if proof.get("writer") != point.writer or not _calls_guard(point):
             raise plane.CutoverError(f"actual guard missing or writer mismatch: {site}")
         positive, negative = proof.get("positive_test"), proof.get("negative_test")
-        if not positive or not negative or positive == negative:
+        try:
+            contract = entry_scope_contract(point, identity)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise plane.CutoverError(f"entry scope contract unavailable: {site}: {exc}") from exc
+        compatible = contract["compatible"]
+        if "entry_contract" in proof and proof["entry_contract"] != contract:
+            raise plane.CutoverError("entry scope contract mismatch")
+        if compatible and (not positive or not negative or positive == negative):
             raise plane.CutoverError("distinct positive/negative business-entry tests required")
+        if not compatible and (positive or not negative):
+            raise plane.CutoverError("incompatible entry requires refusal-only business-entry proof")
+        tests = (positive, negative) if compatible else (negative,)
         junit = Path(proof.get("junit_path", ""))
         try:
             data = junit.read_bytes()
             if hashlib.sha256(data).hexdigest() != proof.get("junit_sha256"):
                 raise ValueError("JUnit hash drift")
             cases = list(ET.fromstring(data).iter("testcase"))
-            for test in (positive, negative):
+            for test in tests:
                 matches = [case for case in cases if f"{case.get('classname')}.{case.get('name')}" == test]
                 if len(matches) != 1 or any(matches[0].find(tag) is not None
                                             for tag in ("failure", "error", "skipped")):
@@ -194,15 +251,18 @@ def _validate_bundle(boundary: str, identity: RouteIdentity, mode: str, bundle: 
                     raise ValueError("executed test entry/scope/mode does not match evidence")
                 if test == negative and properties.get("negative_side_effect_count") != "0":
                     raise ValueError("negative test did not prove zero side effects")
+                if not compatible and properties.get("business_body_call_count") != "0":
+                    raise ValueError("incompatible entry did not prove refusal before business execution")
             hashes = proof.get("source_hashes", {})
             source, _ = resolve_site(site)
             guard_source = REPO_ROOT / "src/ats/workflow/cutover_wiring.py"
             if boundary == plane.LIVE_TRADER:
                 guard_source = REPO_ROOT / "src/ats/execution/broker_write_guard.py"
             test_sources = {REPO_ROOT / "tests" / (test.removeprefix("tests.").split(".")[0] + ".py")
-                            for test in (positive, negative)}
+                            for test in tests}
             needed = {source, guard_source, Path(__file__),
-                      REPO_ROOT / "src/ats/workflow/scoped_routes.py", *test_sources}
+                      REPO_ROOT / "src/ats/workflow/scoped_routes.py", *test_sources,
+                      *(Path(p) for p in contract["dependencies"])}
             if boundary == plane.LIVE_TRADER:
                 needed |= {REPO_ROOT / "src/ats/execution/route_registry.py",
                            REPO_ROOT / "src/ats/execution/route_arbitration.py",

@@ -133,6 +133,23 @@ class Tape:
         return self.call("evaluation_clock.now", {"tz": str(tz), "site":site,"ordinal": ordinal}, action)
 
 
+    def monotonic(self, action):
+        frame = sys._getframe(2)  # caller of the scoped monotonic proxy
+        site = []
+        # Distinguish validation inside the input transport from validation by
+        # the business caller; replay intentionally skips transport internals.
+        while frame is not None and len(site) < 3:
+            module = frame.f_globals.get("__name__", "")
+            if module.startswith("ats."):
+                site.append({"module":module,"function":frame.f_code.co_name,"line":frame.f_lineno})
+                if frame.f_code.co_name == "_execute": break
+            frame = frame.f_back
+        scope = digest({"api":"elapsed_budget.monotonic","business":_business_scope(),"site":site})
+        ordinal = self.clock_counts.get(scope, 0)
+        self.clock_counts[scope] = ordinal + 1
+        return self.call("elapsed_budget.monotonic", {"site":site,"ordinal": ordinal}, action)
+
+
     def call(self, api, request, action, *, model=False):
         from .isolation import verified_isolation_root
         if verified_isolation_root() is None:
@@ -239,6 +256,18 @@ def bind_tape(tape):
             if getattr(tape, "record_clock", False):
                 from .evaluation_clock import recorded
                 stack.enter_context(recorded(tape.clock))
+                # Record only explicit Information budget clocks, not SDK or
+                # threading timers. Production code and dispatch limits stay intact.
+                class BudgetTime:
+                    def __init__(self, original):
+                        self.original = original
+                    def __getattr__(self, name):
+                        return getattr(self.original, name)
+                    def monotonic(self):
+                        return tape.monotonic(self.original.monotonic)
+                for name in ("ats.agents.information.target_research", "ats.agents.information.extract"):
+                    module = importlib.import_module(name)
+                    stack.enter_context(patch.object(module, "time", BudgetTime(module.time)))
             # The broker read facade is an input, never its submit facade.
             from ..broker.ibkr import IBKRBroker
             original_portfolio = IBKRBroker.get_portfolio
@@ -266,10 +295,15 @@ def bind_tape(tape):
                 def wrap_model(original):
                     @wraps(original)
                     def model(agent, schema, context, **kwargs):
-                        # The fixed transport is a recorded response at this role/schema;
-                        # differing prompts remain in the actual call trace for review.
+                        # A response belongs to the complete input, not just its
+                        # role/schema name. Distinct documents must be recorded
+                        # separately and changed replay inputs must fail closed.
+                        system = base.load_skill(kwargs.get("skill_slug") or agent) or f"You are the {agent}. Be rigorous and concise."
                         value = tape.call("model:" + agent + ":" + schema.__name__,
-                            {"agent": agent, "schema": schema.__module__ + ":" + schema.__name__, "kwargs": encode(kwargs)},
+                            {"agent": agent, "schema": schema.__module__ + ":" + schema.__name__,
+                             "schema_hash": digest(schema.model_json_schema()),
+                             "system_hash": digest(system), "prompt_hash": digest(context),
+                             "kwargs": encode(kwargs)},
                             lambda: original(agent, schema, context, **kwargs), model=True)
                         tape.calls[-1]["prompt_hash"] = digest(context)
                         return schema.model_validate(value.model_dump(mode="json"))

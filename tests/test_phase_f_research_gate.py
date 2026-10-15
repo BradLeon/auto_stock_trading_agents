@@ -229,8 +229,8 @@ def business_inputs(isolated, monkeypatch, tmp_path):
         expectations=[Expectation(dim_key="revenue", metric="Revenue", conservative="90",
             neutral="100", optimistic="120", source="isolated previous baseline fixture")])))
     document=document_assets.ingest(entity="COHR",key="fixture-news",doc_type="article",
-        text="Revenue guidance increased to 120. New factory adds ten production lines. "*30,
-        source="ibkr_news",source_url="fixture:accepted-news",title="新增产线 revenue 120",
+        text="Coherent revenue guidance increased to 120. New factory adds ten production lines. "*30,
+        source="ibkr_news",source_url="fixture:accepted-news",title="COHR 新增产线 revenue 120",
         published_at=at.isoformat(),now=at,min_chars=1,store=repository)
     assert document is not None
     class SharedReadRepository:
@@ -257,6 +257,7 @@ def business_inputs(isolated, monkeypatch, tmp_path):
     monkeypatch.setattr(consensus,"_yf_analyst",lambda symbol:{})
     responses=[]
     from ats.agents.information import extract
+    from ats.agents.information.outputs import InformationInsightBatchView
     from ats.agents.pead.outputs import InsightBatchView
     def model(agent,schema,context,**kwargs):
         responses.append({"agent":agent,"schema":schema.__name__,"context":context})
@@ -272,6 +273,18 @@ def business_inputs(isolated, monkeypatch, tmp_path):
             return schema(regime="neutral",summary="Controlled inputs; optional FactSet remains unavailable.")
         if schema is ClassificationView:
             return schema(items=[{"index":0,"classification":"新增","reason":"new capacity"}])
+        if schema is InformationInsightBatchView:
+            import re
+            # The transport fixture honours the current response contract and
+            # supplied source span; real selection/compute/publication still run.
+            source = re.search(r'\[(ev:\d+:\d+)\] (.*?)(?=\n\[ev:|\n---)', context, re.S)
+            span = source.group(1)
+            summary = ' '.join(re.split(r'(?<=[.!?])\s+', source.group(2))[:2])
+            return schema(insights=[dict(ticker='COHR', source_fact=summary,
+                summary=summary, source_kind='reported_fact', source_actor='ibkr_news',
+                association_type='direct_update', association_reason='原文明确陈述 Coherent 的业务变化。',
+                information_topic='capacity', information_quality='substantive',
+                evidence_span_id=span, materiality=.8, confidence=.6)])
         if schema is InsightBatchView:
             return schema(insights=[{'ticker':'COHR','direction':'neutral','impact_path':'direct',
                 'summary':'Controlled admitted capacity information; uncertainty retained.',

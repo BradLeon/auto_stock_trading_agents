@@ -465,6 +465,8 @@ qualification_policy:
     - src/ats/agents/information/target_research.py
     - src/ats/agents/information/outputs.py
     - src/ats/data/articles/material_quality.py
+    - src/ats/data/document_quality.py
+    - src/ats/data/entity_association.py
     - src/ats/data/pipelines/unstructured/article_metadata.py
     - scripts/reconcile_article_metadata.py
     - scripts/review_information_selection.py

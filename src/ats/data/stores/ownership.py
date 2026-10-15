@@ -27,6 +27,9 @@ WORKFLOW_MEMORY_TABLES = frozenset({
     # Publication receipts fence stale schedule workers before opinion writes;
     # they are execution history, not neutral persistent research data.
     "schedule_result_publications",
+    # Target-scoped Information extraction leases/cache outcomes are own-role
+    # execution history, not shared document-ingestion or admission records.
+    "information_processing_runs",
     # Decision audit (§12.3, Phase B). Decisions carry opinions (who proposed
     # what, why, who approved), so they are Workflow memory, never the data
     # layer's neutral facts.

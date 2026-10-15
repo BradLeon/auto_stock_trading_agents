@@ -6,7 +6,7 @@ from bisect import bisect_left
 from datetime import timezone
 
 from ...schemas.research import Insight
-from ...data.articles.material_quality import visible_analysis_view
+from ...data.document_quality import visible_analysis_view
 from ...workflow.evaluation_clock import now as evaluation_now
 from ...agent.task_projection import ProjectionScope
 from . import extract, selection, triage

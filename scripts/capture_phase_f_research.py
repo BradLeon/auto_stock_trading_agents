@@ -27,6 +27,11 @@ from ats.workflow.runtime_reads import task_identity
 from ats.workflow.scoped_intake import check_freeze
 
 
+def research_trigger_id(entity: str, *, with_routine: bool) -> str:
+    """Independent captures have separate IDs; each capture/replay shares its ID."""
+    return 'phase-f-real-research-' + entity + ('-routine' if with_routine else '-information')
+
+
 def selected_snapshot(source, target, entities):
     """Readonly source, exact original rows. Excluded query caches aren't evidence.
 
@@ -138,7 +143,7 @@ def execute(args):
         def plan(name, inputs=None):
             return build_plan(requested_tasks=requested, scope=ProjectionScope(kind='entity', id=entity),
                 trigger=TriggerContext(kind='manual', workflow_id='fundamental-routine' if args.with_routine else 'information-brief',
-                                       trigger_id='phase-f-real-research-' + entity),
+                                       trigger_id=research_trigger_id(entity, with_routine=args.with_routine)),
                 as_of=point, run_id=name, task_inputs=inputs or {}, enter_decision_cycle=False)
         preliminary = plan('inputs')
         who = task_identity(preliminary, preliminary.tasks[0])

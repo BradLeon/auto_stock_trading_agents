@@ -159,7 +159,7 @@ def evidence_spans(text: str, *, span_chars: int = EVIDENCE_SPAN_CHARS) -> dict[
 def extraction_input(art: Article, universe_card: str, max_chars: int, *,
                      assess_materiality: bool = False, target: str = "", span_chars: int = EVIDENCE_SPAN_CHARS):
     """Prepare the exact visible payload without invoking a model."""
-    from ...data.articles.material_quality import visible_analysis_view
+    from ...data.document_quality import visible_analysis_view
 
     text_view = visible_analysis_view(art.body, title=art.title, source=art.source)
     body = text_view.text[:max_chars]
@@ -342,7 +342,7 @@ def structural_context(text: str, start: int, end: int) -> list[tuple[str, int]]
 
 
 def evidence_selection_input(art: Article, target: str, max_chars: int):
-    from ...data.articles.material_quality import visible_analysis_view
+    from ...data.document_quality import visible_analysis_view
     from .outputs import InformationEvidenceBatchView
 
     visible = visible_analysis_view(art.body, title=art.title, source=art.source)

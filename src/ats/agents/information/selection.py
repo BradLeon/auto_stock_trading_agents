@@ -7,7 +7,7 @@ import re
 from difflib import SequenceMatcher
 
 from ...schemas.research import Article
-from ...data.articles.material_quality import association_evidence, visible_analysis_view
+from ...data.document_quality import association_evidence, visible_analysis_view
 from ...workflow.cutover_routing import RouteUnavailable
 from ...workflow.runtime_reads import current_read_context
 from . import assemble
@@ -98,9 +98,12 @@ def choose(rows: list[Candidate], *, max_articles: int | None, exploration_artic
         raise ValueError("invalid Information article/exploration budget")
     key = lambda row: (row.article.document_version_id in cached_versions, row.rank,
                       -row.article.published_at.timestamp(), row.article.document_version_id)
-    # Keep all versions in the caller's pool. Exact repeated visible content needs
-    # one reading; near versions are delayed behind other content, not discarded.
-    ordered = sorted((row for row in rows if row.rank < 3), key=key)
+    # Reuse an eligible cached representative of duplicate content. Cache validity
+    # is checked by the caller; quotes remain bound to that original version.
+    # Cache preference must precede dedup, not promote a rereading of its duplicate.
+    ordered = sorted((row for row in rows if row.rank < 3), key=lambda row: (
+        row.article.document_version_id not in cached_versions, row.rank,
+        -row.article.published_at.timestamp(), row.article.document_version_id))
     seen, update_keys, signatures, diverse, updates = set(), set(), [], [], []
     for row in ordered:
         update_key = target_update_fingerprint(row.article, row.target)
@@ -130,7 +133,8 @@ def choose(rows: list[Candidate], *, max_articles: int | None, exploration_artic
         (updates if similar else diverse).append(row)
         if not similar:
             signatures.append((row.article.source, shingles, title, numbers))
-    related = diverse
+    # Preserve uncached-first scheduling for distinct material within the budget.
+    related = sorted(diverse, key=key)
     # Within each relevance tier, alternate sources before letting one publisher
     # take all slots. No peer or publisher-only candidate is eligible.
     fair_related = []
@@ -142,6 +146,5 @@ def choose(rows: list[Candidate], *, max_articles: int | None, exploration_artic
                 fair_related.append(row)
                 tier.remove(row)
     chosen = fair_related[:max_articles]
-    # Suspected duplicate versions stay in the caller's inventory for later
-    # uncached-first runs; never spend on them merely to fill a count budget.
+    # Duplicate versions remain in the inventory; do not reread them to fill slots.
     return chosen

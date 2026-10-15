@@ -39,7 +39,7 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
             from ...workflow.cutover_routing import RouteUnavailable
 
             raise RouteUnavailable("Information admitted documents unavailable")
-        from ...data.articles.material_quality import completeness_assessment
+        from ...data.document_quality import completeness_assessment
 
         rows = []
         for row in packet.payload or []:
@@ -77,7 +77,7 @@ def admitted_articles(store, *, since: datetime, limit: int = 500, entities: lis
     """
     from ...data.products.unstructured import admitted_documents
     from ...schemas.research import Article
-    from ...data.articles.material_quality import interpretation_fingerprint, completeness_assessment
+    from ...data.document_quality import interpretation_fingerprint, completeness_assessment
 
     from ...workflow.runtime_reads import current_read_context
 

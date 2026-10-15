@@ -65,7 +65,7 @@ def run_document_pass(store, symbol: str, *, cfg, fresh: list, use_llm: bool = T
                              event_summary="all triaged as noise")
 
     if articles is None:
-        from ...data.articles.material_quality import visible_analysis_view
+        from ...data.document_quality import visible_analysis_view
 
         articles = [(SimpleNamespace(headline=row.get("headline", ""),
                         completeness=row.get("completeness", "unknown"),

@@ -252,7 +252,7 @@ def test_release_overlay_is_explicit_and_reversible(monkeypatch, tmp_path):
 def test_declared_partial_newsletter_body_can_publish_only_when_source_policy_allows_it(monkeypatch, tmp_path):
     source = _source("semianalysis", adapter="semianalysis", minimum=2000)
     _wire(monkeypatch, source, _adapter(
-        body="x" * 5000,
+        body=("Microsoft increased cloud capacity by 10%. Nvidia supplies the GPUs. " * 80),
         provenance={"native_id": "imap:<partial@example.test>",
                     "canonical_url": "https://semianalysis.com/p/partial",
                     "completeness": "partial"},

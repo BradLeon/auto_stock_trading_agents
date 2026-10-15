@@ -45,7 +45,9 @@ class ChiefContext:
 def build(*, live_broker: bool = True, projection_manifest=None, query_plan=None) -> ChiefContext:
     from ...config import get_config
 
-    ctx = ChiefContext(as_of=datetime.now(timezone.utc))
+    from ...workflow.evaluation_clock import now as evaluation_now
+
+    ctx = ChiefContext(as_of=evaluation_now(timezone.utc))
     from ...workflow.isolation import verified_isolation_root
     from ...workflow.runtime_reads import current_read_context
 

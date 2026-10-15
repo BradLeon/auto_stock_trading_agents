@@ -31,6 +31,8 @@
 
 8.5 仍未勾选（待逐批门禁报告），任务计数 **106/117**。
 
+**第5轮（报告层指纹收窄后，2026-10-15）**：用户批准计划（含统一输出上限标准与注释更正）。报告层指纹由「571路径+全部src/ats」收窄为 `qualification_implementation_hashes()`；报告的配置绑定排除 `workflow/freeze_surface.yaml`；`fundamental_analyst` 输出上限 8192（角色级统一标准，未动全局默认以保护信息抽取缓存身份）；`settings.yaml` 注释与现状一致。受影响门禁508项+慢速回归114项通过；新冻结 `tmp/phase_f_report_fingerprint_20261015/final_implementation_freeze_report_narrowed.json`（3个资格层变化，1个冻结层测试文件写「不影响」处置）。第5轮生产补验：8/8 eligible（56项），入口证据仍8/8，路由/调度/Workflow memory无变化，模型0、网络0、未部署，证据归档 `var/phase_f_assurance/production_platform_report_narrowed/`。四份报告已离线重验为新的未签核报告（7条断言相同、11份投影载荷逐字相同，仅运行编号及Fundamental投影记录的输出上限不同）；临时副本干跑显示若签核则官方预检 passed。待用户对四份新报告签核。详见 [8.5门禁报告](/Users/liuchao/Code/trading/auto_stock_trading_agents/docs/PHASE_F_BATCH_GATE_REPORT_8_5.md)。
+
 ## 2026-10-15：8.5入口适用性验收器已实施，新冻结及离线重验通过
 
 按用户确认的入口职责裁决，`boundary_evidence.entry_scope_contract`从入口登记及当前配置独立计算kind/id/entities兼容性：兼容入口仍需成功/拒绝双向证明；不兼容入口（如单标的批次下的组合级Information CLI）须证明业务body调用0、副作用0的实际拒绝，所有登记调用点保留，调用者不能自报豁免，配置/代码/测试漂移使证据失效。入口读取权限、Information筛选和模型配置未改。

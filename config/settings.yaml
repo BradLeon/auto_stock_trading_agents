@@ -9,7 +9,8 @@ llm:
   # OpenRouter relay (OpenAI-compatible) — swap provider/model by editing here.
   default_provider: openai
   default_model: deepseek/deepseek-v4-pro
-  # Sonnet 5.5 supports strict JSON Schema, but rejects forced tool calls.
+  # Default structured-output transport is strict JSON Schema. Roles on models that need forced
+  # tool calls (the DeepSeek-based ones below) set function_calling explicitly.
   default_structured_output_method: json_schema
   temperature: 0.2
   max_tokens: 4096
@@ -18,7 +19,7 @@ llm:
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
     industry_analyst: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling}   # PEAD signal-chain read-throughs
-    manager: {}            # routing key reused by pead-scorer — real money, keep Opus
+    manager: {}            # routing key reused by pead-scorer — real money; no per-role model override, so it runs on default_model
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
     news_triage: {model: deepseek/deepseek-v4-flash-0731, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
     context_monitor: {model: deepseek/deepseek-v4-flash-0731, max_tokens: 8192, structured_output_method: function_calling}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
@@ -55,9 +56,15 @@ llm:
     # 跨层轮动（收窄后的 sector_analyst 第二段）：只消费八条层级结论，输入紧凑。
     layer_rotation: {model: openai/gpt-5.6-terra, max_tokens: 8192}
     invalidation_check: {model: openai/gpt-5.6-terra, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，判读需稳定（2026-08-03 换 terra）
-    # --- Opus tier: genuine judgment that drives trades, low frequency ---
-    chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
-    risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus
+    # --- high-judgment tier: drives trades, low frequency. No per-role model override: runs on default_model ---
+    chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis
+    risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read
+    # Fundamental routine fact-change classification. One output size standard for every ticker:
+    # a larger watch-list entry (e.g. TSM, 22 fact changes) overflowed the 4096 default and was
+    # truncated. The ceiling is only spent when output needs it. Do NOT raise the global default
+    # instead: the role config is part of the Information extraction identity (role: research_extract),
+    # so changing the default would retire the whole extraction cache.
+    fundamental_analyst: {max_tokens: 8192}
     critic: {max_tokens: 4096}           # 交易日志季度 critic —— 低频、人工签字前最后一道叙事关卡，成本不是约束
 
 # --- IBKR broker connection --------------------------------------------------

@@ -11,7 +11,7 @@ from pathlib import Path
 import json
 
 from . import acceptance_matrix as matrices, acceptance_assertions as assertions
-from .business_replay_inputs import Tape, bind_tape, implementation_hashes, encode
+from .business_replay_inputs import Tape, bind_tape, qualification_implementation_hashes, encode
 from .evaluation_clock import at, now
 from .shadow_replay import freeze_inputs, save_inputs, digest
 
@@ -160,16 +160,17 @@ def capture(*, matrix, input_store, root, capture_id, execution=None, channel=No
     if isinstance(channel, str):
         from ..channel import get_channel
         channel = get_channel(channel)
-    frozen_implementation = implementation_hashes()
+    frozen_implementation = qualification_implementation_hashes()  # must equal acceptance_reports.fingerprint()
     seed = _snapshot()
-    from .acceptance_reports import _config
+    from .acceptance_reports import _config, config_is_bound
     import hashlib
-    if {name:hashlib.sha256(text.encode()).hexdigest() for name,text in seed["config"].items()} != _config(matrix):
+    if {name:hashlib.sha256(text.encode()).hexdigest() for name,text in seed["config"].items()
+            if config_is_bound(name)} != _config(matrix):
         raise ValueError("capture configuration differs from pre-run matrix")
     tape = Tape()
     tape.record_clock = True
     output = _execute(matrix,seed,tape,root,execution,channel)
-    if implementation_hashes() != frozen_implementation:
+    if qualification_implementation_hashes() != frozen_implementation:
         raise ValueError("implementation drift during capture")
     contents = {"persistent_refs":[],"projection_hash":{"seed":seed,"execution":execution}}
     required = matrix.body["input_fixing"]

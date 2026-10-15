@@ -1,3 +1,5 @@
+> 2026-10-15 报告层指纹已收窄（测试/脚本改动不再使签核报告失效），第5轮生产补验完成：生产资格8/8、入口证据8/8，四份报告离线重验为新的未签核报告（业务内容与已签核版本一致），临时副本干跑官方预检passed。8.5仅待用户对4份新报告签核；docs/PHASE_F_BATCH_GATE_REPORT_8_5.md。106/117不变。
+
 > 2026-10-15用户接受拒绝锁存停止并授权登记：8份生产模式projection_read证据包已登记，8 scope enforced，路由/恢复记录不变，未部署。指纹分层（方案B）已实施（3a95b6c/bc36f22），第4轮补验已完成：生产资格8/8，8条入口证据仍enforced，无需重做。8.5待逐批门禁报告，106/117不变。
 
 > 2026-10-15生产模式projection_read入口证据包已生成并校验（8 scope、68例、冻结final_implementation_freeze_entry_evidence_v2.json 570路径、受影响门禁379项通过），生产补验第3次重做后恢复8/8 eligible（56项，路由/调度/Workflow memory无变化，模型/网络0，未部署）；证据包只校验、未登记，等待用户审阅后另行授权。发现：被拒绝的target读会使已登记恢复策略的scope锁存stopped（已显式声明并严格断言）。8.5仍pending，106/117不变；详见PHASE_F_FINAL_EVIDENCE_REVIEW.md。

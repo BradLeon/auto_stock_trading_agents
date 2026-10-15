@@ -149,7 +149,7 @@ def actual(business_inputs,isolated,monkeypatch):
             config_dir=business_inputs.root,task_inputs=req["task_inputs"])
         return mx.freeze(plan,workflow_id="technical-review",identity=identity,model_execution=True,criteria=criteria)
     contents = {"persistent_refs":[],"projection_hash":{"seed":seed},
-        "model_config":{"rows":tape.rows,"dependency_hashes":implementation_hashes()},
+        "model_config":{"rows":tape.rows,"dependency_hashes":reports.fingerprint()},
         "market_runtime":{"inputs":[r for r in tape.rows.values() if "market_data" in r["request"]["api"]]}}
     for row in tape.reads:
         contents.setdefault(row["surface"],[]).append(row["input"])
@@ -342,3 +342,78 @@ def test_hashed_signature_with_missing_reviewer_is_invalid(actual):
         conn.execute("INSERT INTO new_entry_signoffs(report_id,action,actor,authority,reason,body_hash,previous_hash,event_hash,recorded_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (*[event[k] for k in ("report_id","action","actor","authority","reason","body_hash","previous_hash")],replay.digest(event),event["recorded_at"]))
     assert not reports.check_batch_report(actual.batch,path=actual.path)[0]
+
+
+
+# --- what a report pins ------------------------------------------------------------------
+
+def recorded_fingerprint_paths(monkeypatch, touched=frozenset()):
+    """Run reports.fingerprint() against a fake hasher so file contents are not needed."""
+    from ats.workflow import assurance_surface
+
+    seen = []
+
+    def fake(paths):
+        seen.extend(paths)
+        return {p: ("changed" if p in touched else "same") for p in paths}
+    monkeypatch.setattr(assurance_surface, "fingerprint", fake)
+    return reports.fingerprint(), set(seen)
+
+
+def test_report_fingerprint_pins_runtime_code_and_the_verifier_not_the_gating_tooling(monkeypatch):
+    from ats.workflow.assurance_surface import load_surface
+
+    surface = load_surface()
+    _, pinned = recorded_fingerprint_paths(monkeypatch)
+    assert pinned.isdisjoint(surface.freeze_only)
+    assert pinned >= set(surface.qualification_paths())
+    # The code that measures and replays stays pinned, so a verifier change retires reports.
+    for verifier in ("src/ats/workflow/acceptance_reports.py", "src/ats/workflow/acceptance_runner.py",
+                     "src/ats/workflow/dispatcher.py", "src/ats/agents/base.py"):
+        assert verifier in pinned
+    full = set(implementation_hashes())
+    # Exactly the freeze-only tier and the list that names it. That list is not pinned, as in the
+    # qualification tier: registering a new test edits it, so pinning it would retire reports on
+    # every new test. Demoting a runtime module into it is stopped by the AST-reachability test in
+    # tests/test_assurance_surface.py and by the freeze disposition rule.
+    assert pinned < full
+    assert full - pinned == set(surface.freeze_only) | {surface.freeze_surface}
+
+
+def test_editing_the_freeze_only_tier_leaves_reports_valid_but_runtime_edits_do_not(monkeypatch):
+    from ats.workflow.assurance_surface import load_surface
+
+    surface = load_surface()
+    baseline, _ = recorded_fingerprint_paths(monkeypatch)
+    tooling = sorted(surface.freeze_only)
+    assert tooling and any(p.startswith("tests/") for p in tooling) and any(p.startswith("scripts/") for p in tooling)
+    for path in (tooling[0], tooling[-1], "src/ats/workflow/boundary_evidence.py"):
+        edited, _ = recorded_fingerprint_paths(monkeypatch, touched=frozenset({path}))
+        assert edited == baseline, path
+    for path in ("src/ats/workflow/dispatcher.py", "src/ats/workflow/acceptance_reports.py", "pyproject.toml"):
+        edited, _ = recorded_fingerprint_paths(monkeypatch, touched=frozenset({path}))
+        assert edited != baseline, path
+
+
+def test_a_report_recorded_under_the_full_fingerprint_is_refused(actual):
+    body = copy.deepcopy(actual.body)
+    reports._validate(body)
+    body["implementation"] = implementation_hashes()
+    with pytest.raises(ValueError, match="fingerprint drifted"):
+        reports._validate(body)
+
+
+def test_registering_a_test_does_not_change_the_bound_configuration(tmp_path):
+    root = tmp_path / "config"
+    (root / "workflow").mkdir(parents=True)
+    (root / "settings.yaml").write_text("llm: {max_tokens: 4096}\n")
+    (root / "workflow" / "freeze_surface.yaml").write_text("tests: []\n")
+    matrix = SimpleNamespace(body={"plan": {"config_root": str(root)}})
+    bound = reports._config(matrix)
+    assert set(bound) == {"settings.yaml"}
+    (root / "workflow" / "freeze_surface.yaml").write_text("tests: [tests/test_new.py]\n")
+    assert reports._config(matrix) == bound
+    (root / "settings.yaml").write_text("llm: {max_tokens: 8192}\n")
+    assert reports._config(matrix) != bound
+    assert not reports.config_is_bound("workflow/freeze_surface.yaml")
+    assert reports.config_is_bound("workflow/phase_e_schedules.yaml") and reports.config_is_bound("settings.yaml")

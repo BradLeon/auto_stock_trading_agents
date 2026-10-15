@@ -66,15 +66,32 @@ def _json(value):
 
 
 def fingerprint():
-    from .business_replay_inputs import implementation_hashes
-    return implementation_hashes()
+    """What a report pins: the code production runs, not the tooling that gates it.
+
+    The complete ``src/ats`` tree and the qualification-tier paths, minus the
+    freeze-only tier (tests, evidence scripts, CLI-only tools, the entry verifier).
+    Those are held by the final freeze and the gate suites, so editing one does not
+    retire a signed report. The verifier code in this package stays pinned.
+    """
+    from .business_replay_inputs import qualification_implementation_hashes
+    return qualification_implementation_hashes()
+
+
+# Governance manifests no business execution reads. This one names the freeze-only tier, so it
+# changes whenever a test is registered; binding it would retire every report on each new test.
+# Everything else under config/ stays bound by content hash.
+UNBOUND_CONFIG = frozenset({"workflow/freeze_surface.yaml"})
+
+
+def config_is_bound(name) -> bool:
+    return Path(str(name)).as_posix() not in UNBOUND_CONFIG
 
 
 def _config(matrix):
     from ..config import REPO_ROOT
     root = Path(matrix.body["plan"]["config_root"] or REPO_ROOT / "config").resolve()
     return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(root.rglob("*.yaml"))}
+            for p in sorted(root.rglob("*.yaml")) if config_is_bound(p.relative_to(root))}
 
 
 def dispatch_entry(*, read_input, logical_time, matrix, value, root):
@@ -98,7 +115,8 @@ def dispatch_entry(*, read_input, logical_time, matrix, value, root):
         raise ValueError('undeclared model execution in deterministic replay')
     tape = Tape(replay=read_input.__self__, rows=transports["rows"])
     seed = value.contents["projection_hash"]["seed"]
-    if {name:hashlib.sha256(text.encode()).hexdigest() for name,text in seed["config"].items()} != _config(matrix):
+    if {name:hashlib.sha256(text.encode()).hexdigest() for name,text in seed["config"].items()
+            if config_is_bound(name)} != _config(matrix):
         raise ValueError("seed configuration differs from pre-run matrix configuration")
     from .acceptance_runner import _execute
     tape.record_clock = transports.get("record_clock", False)
@@ -143,7 +161,7 @@ def _measure(run, value):
         raise ValueError("execution implementation/config fingerprint drifted")
     root = Path(output["side_root"]).resolve()
     actual_config = {str(p.relative_to(root/"config")):hashlib.sha256(p.read_bytes()).hexdigest()
-                     for p in sorted((root/"config").rglob("*.yaml"))}
+                     for p in sorted((root/"config").rglob("*.yaml")) if config_is_bound(p.relative_to(root/"config"))}
     if actual_config != output["config"]:
         raise ValueError("actual execution configuration drifted")
     from .isolation import build_environment, inspect_isolated_records

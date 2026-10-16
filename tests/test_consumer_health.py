@@ -176,3 +176,10 @@ def test_latest_brief_reads_through_a_readonly_connection_and_never_creates_sche
     assert after == before
     monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "absent.sqlite"))
     assert health._latest_brief("MRVL") is None and not (tmp_path / "absent.sqlite").exists()
+
+
+def test_a_weekend_old_information_brief_still_counts_as_fresh_upstream(world):
+    world.briefs = {"MRVL": fresh_brief(days=4)}
+    assert health.check("fundamental", now=NOW)["status"] == "ok"
+    world.briefs = {"MRVL": fresh_brief(days=8)}
+    assert health.check("fundamental", now=NOW)["status"] == "failed"

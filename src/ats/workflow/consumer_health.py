@@ -16,7 +16,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 DOCUMENT_LOOKBACK_DAYS = 7
-BRIEF_FRESH_DAYS = 3
+# Same window as the document lookback: Information is not run daily yet, and a weekend must not
+# roll Fundamental back for an upstream that is merely a few days old.
+BRIEF_FRESH_DAYS = 7
 
 
 def _universe() -> list[str]:

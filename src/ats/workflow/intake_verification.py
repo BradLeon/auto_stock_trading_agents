@@ -78,8 +78,11 @@ CONSUMER_ENTRY_POINTS: dict[str, tuple[str, ...]] = {
     "layer": ("ats.agents.layer.layer_review",),
     "information": ("ats.agents.information.entry", "ats.agents.information.assemble"),
     "sector": ("ats.agents.sector.review", "ats.agents.sector.assemble"),
+    # `inputs` is where the governed target path reads company data and `graph.pead` is the PEAD graph that calls it
+    # (and still holds the route-gated legacy fallbacks). Scanning only the three entry modules never reached either,
+    # so the Fundamental consumer looked as if it read nothing governed at all (found 2026-10-17, task 12.1).
     "fundamental": ("ats.agents.fundamental.entry", "ats.agents.fundamental.routine",
-                    "ats.agents.fundamental.event"),
+                    "ats.agents.fundamental.event", "ats.agents.fundamental.inputs", "ats.graph.pead"),
     "macro": ("ats.agents.macro.review", "ats.agents.macro.assemble"),
     "technical": ("ats.agents.technical.review",),
     "chief": ("ats.agents.chief.decide", "ats.agents.chief.assemble"),

@@ -40,6 +40,75 @@ MAX_SPANS = 6            # per cluster; a call restating one plan rarely needs m
 SPAN_CHARS = 220
 
 
+# --------------------------------------------------------------------------- #
+# Judgement cache (2026-10-17)
+# --------------------------------------------------------------------------- #
+# The same claim with the same clusters is adjudicated again and again: the Layer review, and then the Sector
+# review twice (evidence packs and layer assessments), all with byte-identical prompts — 26 requests became 78 per
+# weekly run. The judgement is a pure function of (model configuration, prompt implementation, the prompt text):
+# the model is told nothing else. So the answer is cached under exactly that key, and any change to the evidence,
+# the skill text, this module or the role's model/temperature/limits is a different key and misses.
+#
+# Only COMPLETE answers are stored. The retry in `judge` exists because an identical prompt can come back short
+# (7 of 17 once, then 17 of 17), so a short answer must never be frozen into the cache. `ATS_NO_JUDGEMENT_CACHE=1`
+# forces fresh calls.
+_CACHE_DDL = ("CREATE TABLE IF NOT EXISTS llm_judgement_cache ("
+              "cache_key TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL)")
+
+
+def _cache_enabled() -> bool:
+    import os
+
+    return os.environ.get("ATS_NO_JUDGEMENT_CACHE", "") not in {"1", "true", "yes"}
+
+
+def _cache_key(kind: str, context: str) -> str:
+    import hashlib
+
+    from ..base import execution_versions
+
+    versions = execution_versions("evidence_adjudicator", "evidence-adjudicator", template_source=__file__)
+    raw = "\x1f".join((kind, versions["model_version"], versions["prompt_version"], context))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(kind: str, context: str):
+    if not _cache_enabled():
+        return None
+    try:
+        import json
+
+        from ...memory import get_store
+
+        conn = get_store().conn
+        conn.execute(_CACHE_DDL)
+        row = conn.execute("SELECT payload FROM llm_judgement_cache WHERE cache_key=?",
+                           (_cache_key(kind, context),)).fetchone()
+        return json.loads(row[0]) if row else None
+    except Exception as exc:  # noqa: BLE001 - a cache failure must never change the answer, only its cost
+        log.warning("judgement cache read failed: %s", exc)
+        return None
+
+
+def _cache_put(kind: str, context: str, payload) -> None:
+    if not _cache_enabled():
+        return
+    try:
+        import json
+        from datetime import datetime, timezone
+
+        from ...memory import get_store
+
+        conn = get_store().conn
+        conn.execute(_CACHE_DDL)
+        conn.execute("INSERT OR REPLACE INTO llm_judgement_cache VALUES (?,?,?,?)",
+                     (_cache_key(kind, context), kind, json.dumps(payload, ensure_ascii=False),
+                      datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("judgement cache write failed: %s", exc)
+
+
 def _cluster_block(claim: ClaimDef, clusters: list[EvidenceCluster]) -> str:
     out = []
     for i, c in enumerate(clusters, 1):
@@ -126,11 +195,19 @@ def judge(claim: ClaimDef, clusters: list[EvidenceCluster]) -> list[ClusterJudge
     if not clusters:
         return []
 
+    context = build_context(claim, clusters)
+    by_key_all = {c.key: c for c in clusters}
+    cached = _cache_get("claim", context)
+    if cached and {row["cluster_key"] for row in cached} == set(by_key_all):
+        return [ClusterJudgement(
+            cluster_key=c.key, polarity=row["polarity"], reason=row["reason"], speaker=c.speaker,
+            concept=c.concept, stance=c.stance, primary=c.primary, observation_ids=c.observation_ids)
+            for c in clusters for row in cached if row["cluster_key"] == c.key]
+
     seen: dict[str, ClusterJudgement] = {}
     for attempt in (1, 2):
         try:
-            view = run_structured("evidence_adjudicator", AdjudicationView,
-                                  build_context(claim, clusters),
+            view = run_structured("evidence_adjudicator", AdjudicationView, context,
                                   skill_slug="evidence-adjudicator")
         except Exception as exc:  # noqa: BLE001 - one claim must not break the run
             log.warning("adjudicator failed for claim %s (attempt %d): %s",
@@ -160,6 +237,9 @@ def judge(claim: ClaimDef, clusters: list[EvidenceCluster]) -> list[ClusterJudge
     if unjudged:
         log.warning("adjudicator: %s left %d/%d cluster(s) unjudged after retry",
                     claim.id, unjudged, len(clusters))
+    else:
+        _cache_put("claim", context, [{"cluster_key": j.cluster_key, "polarity": j.polarity, "reason": j.reason}
+                                      for j in seen.values()])
 
     # Anything still unjudged stays neutral, and says so. Silence must not read as
     # agreement — but it must not read as a considered "neutral" either, which is why
@@ -234,9 +314,15 @@ def judge_cross_section(claim: ClaimDef, by_entity: dict) -> list:
 
     if not claim.entities:
         return []
+    context = build_cross_section_context(claim, by_entity)
+    valid_keys_all = {c.key for g in by_entity.values() for c in g}
+    cached = _cache_get("cross_section", context)
+    if cached and {row["entity"] for row in cached} == set(claim.entities):
+        return [EntityReading(entity=row["entity"], standing=row["standing"], reason=row["reason"],
+                              key_clusters=[k for k in row["key_clusters"] if k in valid_keys_all])
+                for entity in claim.entities for row in cached if row["entity"] == entity]
     try:
-        view = run_structured("evidence_adjudicator", CrossSectionView,
-                              build_cross_section_context(claim, by_entity),
+        view = run_structured("evidence_adjudicator", CrossSectionView, context,
                               skill_slug="evidence-adjudicator")
     except Exception as exc:  # noqa: BLE001
         log.warning("cross-section adjudication failed for %s: %s", claim.id, exc)
@@ -257,6 +343,10 @@ def judge_cross_section(claim: ClaimDef, by_entity: dict) -> list:
         seen[entity] = EntityReading(
             entity=entity, standing=standing, reason=(item.reason or "").strip(),
             key_clusters=[k for k in (item.key_clusters or []) if k in valid_keys])
+    if view is not None and all(entity in seen for entity in claim.entities):
+        _cache_put("cross_section", context, [
+            {"entity": r.entity, "standing": r.standing, "reason": r.reason, "key_clusters": list(r.key_clusters)}
+            for r in seen.values()])
     for entity in claim.entities:
         seen.setdefault(entity, EntityReading(entity=entity, standing="unknown",
                                               reason="未获判读"))

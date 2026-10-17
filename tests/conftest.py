@@ -336,6 +336,10 @@ def _stub_adjudicator(monkeypatch):
     from ats.agents.evidence.outputs import (AdjudicationView, ClusterJudgementView,
                                           CrossSectionView, EntityReadingView)
 
+    # The judgement cache (2026-10-17) must not carry an answer from one test into another; tests that exercise
+    # the cache itself re-enable it (tests/test_evidence_judgement_cache.py).
+    monkeypatch.setenv("ATS_NO_JUDGEMENT_CACHE", "1")
+
     def _fake(role, schema, context, **kw):
         blocks: list[tuple[str, list[str]]] = []
         for line in context.splitlines():

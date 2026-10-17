@@ -92,6 +92,7 @@ def company_financial_release_check(repository, *, entities: list[str] | None = 
             "entity": entity, "ready": all(check["passed"] for check in checks),
             "source_id": package["source_id"], "source_ids": list(package["source_ids"]),
             "period": package["period"], "currency": package["currency"],
+            "package_gaps": list(package.get("gaps") or []),
             "source_by_metric": package["source_by_metric"], "latest_known_at": latest_known,
             "checks": checks,
         })

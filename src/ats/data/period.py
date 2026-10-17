@@ -91,3 +91,25 @@ def resolve_and_cache(symbol: str, print_, *, config_label: str = "", store=None
         except Exception as exc:  # noqa: BLE001 - caching is best-effort
             log.warning("period cache write failed for %s: %s", symbol, exc)
     return label
+
+
+def label_for_reads(symbol: str, *, store=None, config_label: str = "") -> str:
+    """The fiscal label to READ a symbol's current dossier under (no network, no derivation).
+
+    Hand-written labels in `config/pead/<SYM>.yaml` go stale every quarter (ASML/TSM still said Q2 after the Q3
+    prints), and readers that took the configured label — trade sizing, the daily digest, the journal — then looked
+    up the wrong dossier. The dossier a symbol was last prepared or scored under IS its current label, because the
+    PEAD paths write under `resolve_fiscal_label`, which rolls with the earnings calendar. The configured label is
+    only the fallback for a symbol that has no dossier yet.
+    """
+    if store is None:
+        from ..memory import get_store
+
+        store = get_store()
+    try:
+        recent = store.recent_dossiers(symbol.upper(), limit=1)
+    except Exception as exc:  # noqa: BLE001 - a lookup failure must degrade to the old behaviour, not break a read
+        log.warning("label_for_reads(%s): dossier lookup failed (%s)", symbol, exc)
+        recent = []
+    return (recent[0].get("fiscal_label") if recent else "") or config_label
+

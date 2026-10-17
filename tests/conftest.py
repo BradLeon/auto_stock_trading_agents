@@ -500,3 +500,16 @@ def approve_all():
 def reject_all():
     return FakeChannel(BossApproval(status="rejected", reviewer="test",
                                     reviewed_at=datetime.now(timezone.utc)))
+
+
+@pytest.fixture(autouse=True)
+def _no_live_baseline_window(monkeypatch):
+    """Routine mode looks up the next earnings print (a provider call) to decide whether the PEAD
+    baseline is due. No test may reach that calendar by accident; tests of the baseline window patch
+    `routine.baseline_window` themselves."""
+    from ats.agents.fundamental import routine
+
+    monkeypatch.setattr(routine, "real_baseline_window", routine.baseline_window, raising=False)
+    monkeypatch.setattr(routine, "baseline_window", lambda symbol, *, now=None: {
+        "symbol": str(symbol).upper(), "label": "", "open": False, "days_to": None,
+        "date": "", "session": "", "cutoff_passed": False})

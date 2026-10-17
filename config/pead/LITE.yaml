@@ -3,7 +3,8 @@
 
 symbol: LITE
 company_name: "Lumentum"
-fiscal_label: "Q FY2026"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
+#   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 sector_etf: SMH
 benchmark: QQQ
 long_threshold: 1.0

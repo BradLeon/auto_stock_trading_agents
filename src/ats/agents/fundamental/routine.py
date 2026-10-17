@@ -175,18 +175,34 @@ def _reference_value(change: str, metrics: dict[str, float]) -> float | None:
     return None
 
 
+CLASSIFIER_ROLE = "fundamental_classifier"     # own role: temperature 0 and a small output ceiling (config/settings.yaml)
+CLASSIFIER_ATTEMPTS = 2                         # one retry on a truncated or unparsable answer, then the rules
+RULES_FALLBACK_NOTE = "｜分类器：规则回退"
+
+
 def classify_changes(changes: list[str], baseline: dict, *, use_llm: bool = True) -> list[str]:
     """整批归类。use_llm 时先走 LLM 判断，失败或不可用时回退确定性规则。"""
+    return classify_changes_with_source(changes, baseline, use_llm=use_llm)[0]
+
+
+def classify_changes_with_source(changes: list[str], baseline: dict, *,
+                                 use_llm: bool = True) -> tuple[list[str], str]:
+    """(labels, source). source: llm | rules (chosen: no model) | rules_fallback (model failed twice)."""
     if not changes:
-        return []
-    if use_llm:
+        return [], "llm" if use_llm else "rules"
+    if not use_llm:
+        return [classify_change(c, baseline) for c in changes], "rules"
+    for attempt in range(1, CLASSIFIER_ATTEMPTS + 1):
         try:
             labels = _classify_with_llm(changes, baseline)
             if labels is not None:
-                return labels
-        except Exception as exc:  # noqa: BLE001 - LLM 失败回退规则，不中断
-            log.warning("routine classify LLM failed, falling back to rules: %s", exc)
-    return [classify_change(c, baseline) for c in changes]
+                return labels, "llm"
+            log.warning("routine classify LLM returned %s items for %s facts (attempt %d)",
+                        "a wrong number of", len(changes), attempt)
+        except Exception as exc:  # noqa: BLE001 - a model failure falls back to the rules, never aborts
+            log.warning("routine classify LLM failed (attempt %d/%d): %s", attempt, CLASSIFIER_ATTEMPTS, exc)
+    log.warning("routine classification fell back to rules for %d facts", len(changes))
+    return [classify_change(c, baseline) for c in changes], "rules_fallback"
 
 
 def _classify_with_llm(changes: list[str], baseline: dict) -> list[str] | None:
@@ -202,10 +218,13 @@ def _classify_with_llm(changes: list[str], baseline: dict) -> list[str] | None:
         "Fact changes:\n" + lines +
         "\n\nFor each item output classification exactly one of: 确认 | 否定 | 新增 | 待验证. "
         "确认 = consistent with the baseline expectation; 否定 = contradicts it; "
-        "新增 = a subject the baseline does not track; 待验证 = related but not yet decidable."
+        "新增 = a subject the baseline does not track; 待验证 = related but not yet decidable.\n"
+        f"Output discipline: exactly {len(changes)} items, one per fact, `index` = the [number] above, "
+        "`classification` one of the four labels, `reason` at most 30 characters. "
+        "Give only the structured answer: no reasoning text, no summary, no extra commentary."
     )
     view: ClassificationView = run_structured(
-        "fundamental_analyst", ClassificationView, ctx, skill_slug="fundamental-routine")
+        CLASSIFIER_ROLE, ClassificationView, ctx, skill_slug="fundamental-routine")
     out: list[str] = []
     for item in view.items:
         label = (item.classification or "").strip()
@@ -214,7 +233,7 @@ def _classify_with_llm(changes: list[str], baseline: dict) -> list[str] | None:
 
 
 def build_expectation_updates(changes: list[str], classifications: list[str],
-                              baseline: dict, *, period: str = "") -> list[dict]:
+                              baseline: dict, *, period: str = "", note: str = "") -> list[dict]:
     """每条归类变化一份 FundamentalExpectationUpdate payload 草稿。
 
     已绑定 KPI 且单位可比较的数值读数才更新数值；纯定性/未绑定/单位不明
@@ -241,7 +260,7 @@ def build_expectation_updates(changes: list[str], classifications: list[str],
             "period": period,
             "previous_value": previous,
             "new_value": new_value,
-            "driver": f"[{label}] {change}",
+            "driver": f"[{label}] {change}{note}",
         })
     return drafts
 
@@ -277,6 +296,113 @@ def publish_expectation_update(store, payload: dict, *, as_of: str = "",
     return envelope.projection_id
 
 
+# --------------------------------------------------------------------------- #
+# Pre-earnings baseline (PEAD prep) inside routine mode (Phase F, 2026-10-16)
+# --------------------------------------------------------------------------- #
+# User ruling: PEAD is Fundamental's analysis framework. Routine mode builds the pre-earnings baseline once
+# when the next print is within `schedule.prep_days_before` (config/pead.yaml); a manual run may rebuild it
+# from the latest Information. There is no "material change" auto-refresh. After the print the baseline is
+# frozen for event mode (§9.3). Each build publishes its own versioned narrative projection.
+
+def baseline_window(symbol: str, *, now: datetime | None = None) -> dict:
+    """Next print, its fiscal label and whether today is inside the pre-earnings window."""
+    from zoneinfo import ZoneInfo
+
+    from ...config import load_pead_config, load_pead_global
+    from ...data.earnings_calendar import EarningsPrint
+    from ...data.runtime import earnings as calendar
+
+    symbol = symbol.upper()
+    event = calendar.next_earnings(symbol)
+    if not event or not event.get("date"):
+        return {"symbol": symbol, "label": "", "open": False, "days_to": None, "date": "", "session": ""}
+    point = (now or evaluation_now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
+    session = str(event.get("hour") or "")
+    upcoming = EarningsPrint(symbol=symbol, date=event["date"], session=session or "unknown",
+                             quarter=event.get("quarter"), year=event.get("year"))
+    label, _source = calendar.resolve_fiscal_label(symbol, upcoming,
+                                                   config_label=load_pead_config(symbol).fiscal_label)
+    days_to = (event["date"] - point.date()).days
+    before = int((load_pead_global().get("schedule") or {}).get("prep_days_before", 3))
+    # Same rule as the legacy scheduler: a bmo print has opened the market before a same-day run.
+    earliest = 1 if session == "bmo" else 0
+    return {"symbol": symbol, "label": label, "open": earliest <= days_to <= before, "days_to": days_to,
+            "date": event["date"].isoformat(), "session": session, "cutoff_passed": days_to < earliest}
+
+
+def _brief_facts(store, symbol: str) -> tuple[list[str], str]:
+    from ...workflow.consumer_reads import read_projection
+
+    brief = read_projection(store, consumer="fundamental", role="information_brief",
+                            scope=ProjectionScope(kind="entity", id=symbol))
+    if not brief:
+        return [], ""
+    return list((brief.get("payload") or {}).get("fact_changes") or []), brief.get("projection_id", "")
+
+
+def _publish_baseline(store, symbol: str, label: str, dossier, *, reason: str, input_refs: list[str],
+                      use_llm: bool) -> str:
+    """One append-only narrative projection per baseline build: the baseline's history up to the cutoff."""
+    es = dossier.expectation_set
+    previous = [row for row in store.task_projection_envelopes(
+        agent_role="fundamental_expectation_update", scope_kind="entity", scope_id=symbol, limit=500)
+        if (row.get("payload") or {}).get("period") == label
+        and str((row.get("payload") or {}).get("driver", "")).startswith("[基线")]
+    consensus = (f"EPS {es.consensus_eps} / 营收 {es.consensus_revenue}" if es.consensus_eps or es.consensus_revenue
+                 else f"不可用（{es.consensus_note}）" if es.consensus_note else "不可用")
+    driver = (f"[基线 v{len(previous) + 1}] {label} 财报前预期基线（{reason}）：{es.narrative[:600]}"
+              f"｜关注：{'；'.join(es.focus_ranking[:3])}｜预期维度：{', '.join(e.dim_key for e in es.expectations)}"
+              f"｜共识：{consensus}")
+    payload = {"entity": symbol, "metric": "narrative", "period": label,
+               "previous_value": None, "new_value": None, "driver": driver}
+    return publish_expectation_update(store, payload, input_refs=input_refs, use_llm=use_llm)
+
+
+def ensure_baseline(store, request) -> dict:
+    """Build the upcoming period's baseline when due (window) or asked for (manual refresh)."""
+    symbol = request.symbol.upper()
+    refresh = bool((request.extra or {}).get("refresh_baseline"))
+    window = baseline_window(symbol)
+    label = window.get("label")
+    if not label:
+        return {"baseline": "no_upcoming_print", **window}
+    existing = store.get_dossier(symbol, label)
+    has = bool(existing and existing.expectation_set and existing.expectation_set.expectations)
+    if refresh:
+        if window.get("cutoff_passed"):
+            return {"baseline": "frozen_after_print", **window}
+        reason = "手动刷新"
+    elif not window.get("open"):
+        return {"baseline": "outside_window", **window}
+    elif has:
+        return {"baseline": "exists", **window}
+    else:
+        reason = f"财报前 {window['days_to']} 天建立"
+    facts, brief_id = _brief_facts(store, symbol)
+    from ...graph.pead import build_pead_graph
+    from ...graph.pead_state import PeadState
+
+    now = evaluation_now(timezone.utc)
+    state = PeadState(symbol=symbol, fiscal_label=label, phase="prep", as_of=now, dry_run=True,
+                      use_llm=request.use_llm, use_broker=False, live_data=True,
+                      earnings_date=window.get("date", ""), information_facts=facts)
+    build_pead_graph(checkpointer=None).invoke(state, config={"configurable": {
+        "thread_id": f"fundamental-baseline-{symbol}-{now:%Y%m%d%H%M%S}"}})
+    dossier = store.get_dossier(symbol, label)
+    if not (dossier and dossier.expectation_set):
+        raise RuntimeError(f"baseline build for {symbol} {label} produced no expectation set")
+    import hashlib
+    digest = hashlib.sha256(dossier.expectation_set.model_dump_json().encode()).hexdigest()
+    refs = [f"pead-baseline:{symbol}:{label}@{digest}", *([brief_id] if brief_id else [])]
+    try:
+        projection = _publish_baseline(store, symbol, label, dossier, reason=reason, input_refs=refs,
+                                       use_llm=request.use_llm)
+    except Exception as exc:  # noqa: BLE001 - the baseline itself is saved; the record of it is refused
+        log.warning("baseline projection for %s %s refused: %s", symbol, label, exc)
+        projection = ""
+    return {"baseline": "built", "reason": reason, "projection_id": projection, **window}
+
+
 from ...workflow.runtime_reads import scoped_read  # noqa: E402
 
 
@@ -286,6 +412,7 @@ def run_routine_pass(request) -> dict:
     from ...memory import get_store
 
     store = get_store()
+    baseline_state = ensure_baseline(store, request)
     baseline = load_baseline(store, request.symbol)
     from ...workflow.consumer_reads import read_projection
 
@@ -294,15 +421,16 @@ def run_routine_pass(request) -> dict:
     briefs = [brief] if brief else []
     if not briefs:
         return {"mode": "routine", "symbol": request.symbol,
-                "classified": [], "published": [],
+                "classified": [], "published": [], "baseline": baseline_state,
                 "note": "no information brief available; routine pass is a no-op"}
     if not baseline.get("fiscal_label") or not (baseline.get("narrative") or baseline.get("dim_keys")):
         raise RuntimeError("Routine requires a valid labelled previous expectation baseline")
     payload = briefs[0].get("payload") or {}
     changes = list(payload.get("fact_changes") or [])
-    labels = classify_changes(changes, baseline, use_llm=request.use_llm)
-    drafts = build_expectation_updates(changes, labels, baseline)
-    published: list[str] = []
+    labels, classifier = classify_changes_with_source(changes, baseline, use_llm=request.use_llm)
+    drafts = build_expectation_updates(changes, labels, baseline,
+                                       note=RULES_FALLBACK_NOTE if classifier == "rules_fallback" else "")
+    published: list[str] = [baseline_state["projection_id"]] if baseline_state.get("projection_id") else []
     for draft in drafts:
         published.append(publish_expectation_update(
             store, draft, input_refs=[briefs[0].get("projection_id", ""), *baseline.get("baseline_refs", [])],
@@ -310,4 +438,4 @@ def run_routine_pass(request) -> dict:
     summary = {label: labels.count(label) for label in CLASSIFICATIONS if labels.count(label)}
     return {"mode": "routine", "symbol": request.symbol,
             "classified": list(zip(changes, labels)), "published": published,
-            "summary": summary}
+            "summary": summary, "baseline": baseline_state, "classifier": classifier}

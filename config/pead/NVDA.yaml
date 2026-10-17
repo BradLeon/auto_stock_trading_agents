@@ -4,8 +4,8 @@
 
 symbol: NVDA
 company_name: "Nvidia"
-fiscal_label: "Q2 FY2027"    # NVDA 财年偏移（1 月底结）：下次申报(2026-08-25)为 FY2027 Q2；
-                             #   上次已报 $81.6B（截至 2026-04-30）为 FY2027 Q1
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
+#   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 sector_etf: SMH
 benchmark: QQQ
 run_up_warn_pct: 5.0

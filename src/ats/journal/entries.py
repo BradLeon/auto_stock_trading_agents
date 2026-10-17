@@ -125,7 +125,10 @@ def record_intents(state, *, store=None) -> list[str]:
                                              i, d.symbol, d.action)
             em = (event_data.get(d.symbol) or {}).get("expected_move_pct")
             try:
-                label = load_pead_config(d.symbol).fiscal_label
+                from ..data.period import label_for_reads
+
+                label = label_for_reads(d.symbol, store=store,
+                                        config_label=load_pead_config(d.symbol).fiscal_label)
             except Exception:  # noqa: BLE001 - non-PEAD names have no config
                 label = ""
             risk_usd, unit = resolve_risk_unit(

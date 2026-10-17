@@ -100,3 +100,20 @@ def test_cache_is_per_print_date():
         "GOOG", _print(q=3, y=2026, d=date(2026, 10, 27)), store=store)
     assert label == "Q3 FY2026"
     assert not source.startswith("cache:")
+
+
+def test_reads_use_the_label_of_the_latest_dossier_not_the_stale_configured_one():
+    from ats.data.period import label_for_reads
+
+    class Store:
+        def __init__(self, rows): self.rows = rows
+        def recent_dossiers(self, symbol, limit=10): return self.rows[:limit]
+
+    assert label_for_reads("ASML", store=Store([{"fiscal_label": "Q3 FY2026"}]), config_label="Q2 FY2026") == "Q3 FY2026"
+    assert label_for_reads("ASML", store=Store([]), config_label="Q2 FY2026") == "Q2 FY2026"      # no dossier yet
+    assert label_for_reads("ASML", store=Store([]), config_label="") == ""
+
+    class Broken:
+        def recent_dossiers(self, *a, **k): raise RuntimeError("db locked")
+
+    assert label_for_reads("ASML", store=Broken(), config_label="Q2 FY2026") == "Q2 FY2026"       # degrades, never breaks a read

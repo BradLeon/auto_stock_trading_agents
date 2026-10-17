@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class ClassificationItem(BaseModel):
     index: int
     classification: str = ""
-    reason: str = ""
+    reason: str = ""          # at most 30 characters; long free text is what ran the output away (2026-10-16)
 
 
 class ClassificationView(BaseModel):

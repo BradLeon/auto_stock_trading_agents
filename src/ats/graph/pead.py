@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from ..agents.pead import prep as prep_agents
 from ..agents.pead import score as score_agents
 from ..config import load_pead_config
+from ..data.consensus import align as align_consensus
 from ..schemas.market import Ticker
 from ..schemas.pead import (
     Actuals,
@@ -68,6 +69,11 @@ def _published_event_date(package) -> str:
 def load(state: PeadState) -> dict:
     cfg = load_pead_config(state.symbol)
     fiscal = state.fiscal_label or cfg.fiscal_label
+    if fiscal != cfg.fiscal_label:
+        # The run's target period wins over the hand-written config label (which goes stale after every
+        # print). Every prompt and the Scorecard read `config.fiscal_label`; leaving the old value there
+        # told the model to analyse the quarter that had just been reported (found 2026-10-16, MSFT).
+        cfg = cfg.model_copy(update={"fiscal_label": fiscal})
     out: dict = {"config": cfg, "fiscal_label": fiscal}
 
     # Phase D: no portfolio read here. The event review never sizes positions,
@@ -92,6 +98,16 @@ def load(state: PeadState) -> dict:
     return out
 
 
+def target_event_note(state: PeadState) -> str:
+    """Tell the model which print it is preparing for, when it lands, and that it has not happened."""
+    parts = [f"目标财报：{state.fiscal_label}"]
+    if state.earnings_date:
+        parts.append(f"预计发布日 {state.earnings_date}")
+    parts.append(f"今天 {state.as_of:%Y-%m-%d}")
+    return ("；".join(parts) + "。该季财报尚未发布：下方 Fundamentals 里最新的已报季是它的上一季，"
+            "那是已知事实而不是本次要预判的对象；不要把已报季当作目标季。\n")
+
+
 def route(state: PeadState) -> str:
     return state.phase
 
@@ -111,9 +127,18 @@ def prep_fetch(state: PeadState) -> dict:
     if governed is not None:
         # Runtime price/options are not declared Fundamental inputs. Candidate
         # research consumes the persistent packet, never a hidden provider fetch.
+        consensus, note = align_consensus(
+            governed["consensus"], governed.get("consensus_meta"), as_of=state.as_of)
+        if note:
+            log.warning("%s: consensus ignored for %s — %s", state.symbol, state.fiscal_label, note)
+        context = governed["industry_context"]
+        if state.information_facts:
+            # Fundamental's only declared upstream (TARGET §7.2): the entity's own InformationBrief facts.
+            context += "\n\n### 本标的最新信息简报事实（Information Analyst）\n" + "\n".join(
+                f"- {fact}" for fact in state.information_facts[:20])
         return {"fundamentals_text": governed["fundamentals_text"],
-                "consensus": governed["consensus"], "peer_rows": [],
-                "industry_context": governed["industry_context"],
+                "consensus": consensus, "consensus_note": note, "peer_rows": [],
+                "industry_context": context,
                 "input_refs": governed["input_refs"]}
 
     from ..data import consensus as consensus_src
@@ -124,7 +149,7 @@ def prep_fetch(state: PeadState) -> dict:
 
     fd = fund_src.fetch(state.symbol)
     out["fundamentals_text"] = fd.to_context()
-    out["consensus"] = consensus_src.fetch(state.symbol)
+    raw_consensus = consensus_src.fetch(state.symbol)
     # Phase D (5.8): the sector-review / macro-review prep-block injection is GONE,
     # along with its `inject_prep` switches. Analysts' conclusions never enter the
     # fundamental context — only the static chain notes (shared facts) below.
@@ -135,6 +160,13 @@ def prep_fetch(state: PeadState) -> dict:
     # whose Expected Move / IV actually prices the event).
     target_earnings = earnings_calendar.next_earnings_date(state.symbol)
     out["earnings_date"] = target_earnings.isoformat() if target_earnings else ""
+    out["consensus"], out["consensus_note"] = align_consensus(
+        raw_consensus, {"target_event_date": (raw_consensus or {}).get("target_event_date"),
+                        "known_at": datetime.now(timezone.utc).isoformat()},
+        as_of=state.as_of, expected_event_date=out["earnings_date"])
+    if out["consensus_note"]:
+        log.warning("%s: consensus ignored for %s — %s", state.symbol, state.fiscal_label,
+                    out["consensus_note"])
     opt = opt_src.fetch(state.symbol, target_earnings)
     out["market_setup"] = MarketSetup(
         symbol=state.symbol, as_of=state.as_of,
@@ -215,7 +247,8 @@ def prep_framework(state: PeadState) -> dict:
     """Stable company framework (background / peers / catalysts / risks / valuation band)."""
     if not state.use_llm:
         return {}
-    view = prep_agents.framework(state.config, state.fundamentals_text, state.consensus)
+    view = prep_agents.framework(state.config, state.fundamentals_text, state.consensus,
+                                 event_note=target_event_note(state))
     fb = FundamentalBackground(
         background=view.background, peer_comparison=view.peer_comparison,
         watch_metrics=view.watch_metrics,
@@ -231,15 +264,16 @@ def prep_narrative(state: PeadState) -> dict:
         return {"expectation_set": ExpectationSet(
             symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
             narrative=state.prior_narrative or cfg.narrative_seed,
-            **consensus_kwargs)}
+            consensus_note=state.consensus_note, **consensus_kwargs)}
     nv = prep_agents.narrative(cfg, state.fundamentals_text, state.consensus,
+                               event_note=target_event_note(state),
                                prior_narrative=state.prior_narrative,
                                industry_context=state.industry_context,
                                market_setup=state.market_setup)
     es = ExpectationSet(
         symbol=state.symbol, fiscal_label=state.fiscal_label, as_of=state.as_of,
         narrative=nv.narrative, focus_ranking=nv.focus_ranking, valuation=nv.valuation,
-        **consensus_kwargs)
+        consensus_note=state.consensus_note, **consensus_kwargs)
     return {"expectation_set": es}
 
 
@@ -276,7 +310,7 @@ def prep_expectations(state: PeadState) -> dict:
     es = state.expectation_set
     nv = NarrativeView(narrative=es.narrative, focus_ranking=es.focus_ranking, valuation=es.valuation)
     es.expectations = prep_agents.expectations(state.config, nv, state.fundamentals_text,
-                                               state.consensus)
+                                               state.consensus, event_note=target_event_note(state))
     return {"expectation_set": es}
 
 

@@ -39,8 +39,10 @@ class PeadState(BaseModel):
     # fetched inputs
     fundamentals_text: str = ""
     consensus: dict = Field(default_factory=dict)
+    consensus_note: str = ""        # why the vendor estimate was ignored (period/freshness), "" when used
     peer_rows: list[dict] = Field(default_factory=list)
     industry_context: str = ""      # curated sector background (Obsidian) for prep thesis
+    information_facts: list[str] = Field(default_factory=list)  # latest InformationBrief facts for a routine baseline build
     earnings_date: str = ""         # ISO date of the upcoming/scored print, when known
     transcript_text: str = ""
     transcript_resolved_source: str = ""

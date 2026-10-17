@@ -11,7 +11,7 @@ Returns a dict, None/[] for anything unavailable. Never raises.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 import logging
 
 from .base import safe_fetch
@@ -88,6 +88,12 @@ def _yf_consensus(symbol: str) -> dict:
 
     if out["eps"] is None and out["revenue"] is None:
         raise ValueError(f"no consensus for {symbol}")
+    # The print the vendor's "current quarter" estimate is for; lets prep detect a quarter that has
+    # not rolled yet (data/consensus_alignment.py).
+    if isinstance(cal, dict):
+        when = cal.get("Earnings Date")
+        when = when[0] if isinstance(when, (list, tuple)) and when else when
+        out["target_event_date"] = str(when)[:10] if when else None
     return out
 
 
@@ -294,3 +300,94 @@ def fetch(symbol: str, *, consumer: str = "pead_consensus") -> dict:
     if not matched:
         log.info("consensus: accepted provider snapshot revision for %s", symbol)
     return legacy
+
+
+# --------------------------------------------------------------------------- #
+# Period / freshness alignment (Phase F, 2026-10-16)
+# --------------------------------------------------------------------------- #
+# Consensus period/freshness alignment for PEAD prep (Phase F, 2026-10-16).
+# 
+# Vendors publish one rolling "current quarter" (`0q`) estimate. Right after a print the
+# vendor's quarter has not rolled yet, so that estimate still belongs to the quarter that
+# was just reported; the platform snapshot may also simply be old. Putting such a number
+# into a baseline as "the consensus for this quarter" later makes a normal result read as
+# a large surprise (found 2026-10-16: TSM Q2 baseline carried the Q3 consensus, so Q2
+# revenue scored as a 12% miss).
+# 
+# The rule is deliberately date-based, not fiscal-calendar arithmetic: it needs only the
+# snapshot's own `target_event_date` and `known_at`, and does not trust the snapshot's
+# `target_period` (derived from the latest reported statement, which lags a print).
+# 
+# Estimates that fail a check are blanked and the reason is kept, never silently dropped.
+# Price targets and ratings are not period-specific and are left alone.
+
+MAX_AGE_DAYS = 14
+EVENT_DATE_TOLERANCE_DAYS = 10
+_ESTIMATE_KEYS = ("eps", "eps_low", "eps_high", "revenue", "revenue_low", "revenue_high")
+
+
+def _date(value) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _moment(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def alignment_settings() -> tuple[int, int]:
+    """(max_age_days, event_date_tolerance_days); optional override in config/pead.yaml `consensus:`."""
+    try:
+        from ..config import load_pead_global
+
+        block = load_pead_global().get("consensus") or {}
+    except Exception:  # noqa: BLE001 - configuration must not break prep
+        block = {}
+    return (int(block.get("max_age_days", MAX_AGE_DAYS)),
+            int(block.get("event_date_tolerance_days", EVENT_DATE_TOLERANCE_DAYS)))
+
+
+def align(consensus: dict | None, meta: dict | None, *, as_of: datetime,
+          expected_event_date: str = "") -> tuple[dict, str]:
+    """Return (consensus to use, reason). Reason is "" when the estimates are usable as given.
+
+    `meta`: {"target_event_date": ISO date of the print the estimate is for, "known_at": ISO
+    time the vendor snapshot was taken}. `expected_event_date` is the print date of the
+    quarter being prepared when the caller knows it (legacy path); the governed path does
+    not call a calendar provider, so there the "event already happened" and age checks apply.
+    """
+    consensus = dict(consensus or {})
+    if all(consensus.get(key) is None for key in _ESTIMATE_KEYS):
+        return consensus, ""
+    max_age, tolerance = alignment_settings()
+    meta = meta or {}
+    as_of = as_of if as_of.tzinfo else as_of.replace(tzinfo=UTC)
+    reason = ""
+    known_at = _moment(meta.get("known_at"))
+    event = _date(meta.get("target_event_date"))
+    expected = _date(expected_event_date)
+    if known_at is not None and as_of - known_at > timedelta(days=max_age):
+        reason = (f"stale: consensus snapshot taken {known_at.date()} is more than {max_age} days "
+                  f"before {as_of.date()}")
+    elif event is not None and event < as_of.date():
+        reason = (f"event_already_passed: consensus is for the print on {event}, before "
+                  f"{as_of.date()}; the vendor quarter has not rolled")
+    elif event is not None and expected is not None and abs((event - expected).days) > tolerance:
+        reason = (f"event_date_mismatch: consensus is for the print on {event}, the quarter being "
+                  f"prepared reports on {expected}")
+    if not reason:
+        return consensus, ""
+    for key in _ESTIMATE_KEYS:
+        consensus[key] = None
+    consensus["unavailable_reason"] = reason
+    return consensus, reason

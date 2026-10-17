@@ -181,7 +181,16 @@ def test_actual_multi_routine_preserves_all_updates_in_checker_chief_and_reuse(m
     env = Dispatcher._envelope(s.store.get_task_projection(s.outcome.projection_refs[0]))
     hit, reason = Dispatcher(workflow_store=WorkflowStore(str(s.store.path)))._select_reusable(
         s.store, task, env.input_refs, env.data_vintage_refs, s.plan.as_of)
-    assert hit is None and reason['reason'] == 'multi_projection_recompute_required'
+    # 2026-10-16 (TARGET 8.2-5): a Routine run's per-fact bundle is reused ALL-OR-NOTHING. While every member
+    # still validates the whole bundle comes back (never a partial success); the old per-projection rule
+    # ('multi_projection_recompute_required') now applies only when a member no longer validates.
+    assert hit is not None and reason['reason'] == 'reusable_bundle'
+    assert {m.projection_id for m in hit} == set(s.outcome.projection_refs)
+    s.store.conn.execute("UPDATE task_projection_envelopes SET status='withdrawn' WHERE projection_id=?",
+                         (s.outcome.projection_refs[-1],))
+    broken, why = Dispatcher(workflow_store=WorkflowStore(str(s.store.path)))._select_reusable(
+        s.store, task, env.input_refs, env.data_vintage_refs, s.plan.as_of)
+    assert broken is None and why['reason'] == 'multi_projection_recompute_required'
     record_property('actual_multi_routine_basis', json.dumps({'scope':task.scope.model_dump(mode='json'),
         'projection_refs':list(s.outcome.projection_refs), 'basis':s.basis,
         'model_transport':'controlled fixture; not production evidence'}))

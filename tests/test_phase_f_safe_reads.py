@@ -295,7 +295,10 @@ def test_actual_fundamental_fetch_uses_governed_products_without_provider(isolat
     now = company_products
     with rr.bind_read(scope("fundamental", entity=True)), trace_reads() as rows:
         result = pead.prep_fetch(PeadState(symbol="COHR", as_of=now, live_data=True))
-    assert "accepted-company-v1" in result["fundamentals_text"] and result["consensus"]["eps"] == 3
+    # The prompt now carries a compact per-metric summary (2026-10-16: the raw snapshot was ~150K tokens per call);
+    # lineage to the exact observation is kept in `input_refs` below, not in the prompt text.
+    assert "财务快照摘要" in result["fundamentals_text"] and "financial.revenue" in result["fundamentals_text"]
+    assert result["consensus"]["eps"] == 3
     assert set(result["input_refs"]) == {"accepted-company-v1", "consensus-v1", "chain-fact-v1"}
     assert len(rows) == 3 and all(row["consumer"] == "fundamental" for row in rows)
 

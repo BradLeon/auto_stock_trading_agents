@@ -447,6 +447,10 @@ _PACKAGE_QUARTER_METRICS = frozenset({
     "financial.cash_from_operations.gaap",
     "financial.capex.gaap",
 })
+_PACKAGE_CASH_FLOW_METRICS = frozenset({
+    "financial.cash_from_operations.gaap",
+    "financial.capex.gaap",
+})
 _PACKAGE_INSTANT_METRICS = frozenset({
     "financial.cash_and_equivalents.gaap",
     "financial.total_assets.gaap",
@@ -598,6 +602,23 @@ def _complete_report_package(repository, *, source_id: str | tuple[str, ...],
                              for metric in _PACKAGE_DEBT_METRICS
                              if choose(metric, "instant")), None)
         missing = sorted(metric for metric, row in selected.items() if row is None)
+        # Cash-flow-only gap (found 2026-10-17 on ASML): the vendors publish a foreign filer's quarterly cash flow
+        # late, so the newest quarter can carry the full income statement, balance sheet, EPS and debt but no
+        # CFO/CapEx. Withholding the whole package then blocks every read of an otherwise complete quarter. It is
+        # accepted ONLY when nothing but those two metrics is absent AND the same source delivered both for the
+        # previous quarter (so the gap is lateness, not a provider that never supplies them). The gap is named in
+        # `gaps` and the statement DTO leaves CapEx / FCF unknown rather than borrowing an older quarter's value.
+        # The AMZN failure mode (newer quarter with only EPS) still fails: it is missing far more than cash flow.
+        gaps: list[str] = []
+        if missing and set(missing) <= _PACKAGE_CASH_FLOW_METRICS and len(by_period) > 1:
+            prior_period = sorted(by_period)[-2]
+            prior_rows = by_period[prior_period]
+            prior_has_cash_flow = all(
+                any(row["source_id"] in source_ids and row["metric_id"] == metric
+                    and row.get("period_basis") == "quarter" for row in prior_rows)
+                for metric in _PACKAGE_CASH_FLOW_METRICS)
+            if prior_has_cash_flow:
+                gaps, missing = list(missing), []
         if eps_present is None:
             missing.append("financial.eps.diluted.(adr|market_adjusted|gaap)")
         if debt_present is None:
@@ -614,7 +635,7 @@ def _complete_report_package(repository, *, source_id: str | tuple[str, ...],
         if not missing:
             return {
                 "source_id": source_ids[0] if len(source_ids) == 1 else "official_disclosure_bundle",
-                "source_ids": source_ids, "period": period,
+                "source_ids": source_ids, "period": period, "gaps": gaps,
                 "currency": next(iter(currencies)), "eps_metric": eps_present[0],
                 "debt_metric": debt_present[0], "rows": selected_rows,
                 "source_by_metric": {metric: row["source_id"]
@@ -691,11 +712,28 @@ def _structured_statements(symbol: str, products, *, source_id: str = "",
     eps = triple(eps_metric)
     eps_rows = ordered(eps_metric, "quarter")
     eps_unit = str(eps_rows[0].get("unit") or eps_unit) if eps_rows else eps_unit
-    cash_from_operations = triple("financial.cash_from_operations.gaap")
+    quarter_periods = [row["period"] for row in revenue_rows]
+
+    def aligned(metric: str) -> tuple:
+        """Current / previous / year-ago value for the SAME periods as revenue, or None where the source has none.
+
+        `triple` counts rows by position, which is only right while every metric has the same latest quarter. When
+        a package accepted a cash-flow gap in its newest quarter, positions would shift and the previous quarter's
+        cash flow would be presented as current."""
+        by_period = {row["period"]: row for row in ordered(metric, "quarter")}
+        out = []
+        for index in (0, 1, 4):
+            row = by_period.get(quarter_periods[index]) if len(quarter_periods) > index else None
+            if row is not None:
+                used[row["observation_id"]] = row
+            out.append(row["value"] if row is not None else None)
+        return tuple(out)
+
+    cash_from_operations = aligned("financial.cash_from_operations.gaap")
     # Persistent CapEx is stored as a positive investment amount.  PEAD's
     # long-standing DTO displays cash outflows as negative values, matching the
     # legacy yfinance statement and keeping FCF = CFO + displayed CapEx.
-    capex_raw = triple("financial.capex.gaap")
+    capex_raw = aligned("financial.capex.gaap")
     capex = tuple(-abs(value) if value is not None else None for value in capex_raw)
     # Official total debt has a controlled XBRL definition.  Provider-reported
     # total debt can remain a useful coverage fallback, but it may include lease

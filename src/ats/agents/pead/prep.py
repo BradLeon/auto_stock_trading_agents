@@ -15,6 +15,10 @@ log = logging.getLogger("ats.agents.pead")
 def _consensus_text(consensus: dict) -> str:
     """Compact consensus block: estimates + price targets + ratings + recent grade actions."""
     lines = [f"Consensus: EPS {consensus.get('eps')}, Revenue {consensus.get('revenue')}"]
+    if consensus.get("unavailable_reason"):
+        lines.append("Consensus estimates are UNAVAILABLE for this quarter "
+                     f"({consensus['unavailable_reason']}). Do not infer, recall or cite consensus "
+                     "EPS/revenue numbers; state that they are missing where it matters.")
     if consensus.get("target_mean") is not None:
         pt = (f"Price target: mean {consensus.get('target_mean')} "
               f"({consensus.get('target_low')}–{consensus.get('target_high')})")
@@ -33,11 +37,12 @@ def _consensus_text(consensus: dict) -> str:
 
 
 def framework(config: PeadConfig, fundamentals_text: str,
-              consensus: dict) -> FundamentalAnalysisView:
+              consensus: dict, event_note: str = "") -> FundamentalAnalysisView:
     """Stable company framework: background bullets, peer table, catalysts, risks, valuation."""
     peers = ", ".join(sc.symbol for sc in config.signal_chain) or "(none listed)"
     ctx = (
         f"Build the company framework section for {config.symbol} ({config.fiscal_label}).\n"
+        f"{event_note}"
         f"Fundamentals:\n{fundamentals_text}\n"
         f"{_consensus_text(consensus)}\n"
         f"Its signal-chain names (candidate peers for the comparison table): {peers}. "
@@ -83,7 +88,7 @@ def _market_setup_text(ms: MarketSetup | None) -> str:
 
 def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
               prior_narrative: str = "", industry_context: str = "",
-              market_setup: MarketSetup | None = None) -> NarrativeView:
+              market_setup: MarketSetup | None = None, event_note: str = "") -> NarrativeView:
     # Prefer the living thesis accumulated by the monitor between earnings; fall
     # back to the static seed only on the first-ever prep (nothing accumulated yet).
     if prior_narrative.strip():
@@ -101,6 +106,7 @@ def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
             f"the industry, only extract what bears on THIS quarter's thesis):\n{industry_context}\n")
     ctx = (
         f"Build the pre-earnings core narrative for {config.symbol} ({config.fiscal_label}).\n"
+        f"{event_note}"
         f"{base}"
         f"Fundamentals:\n{fundamentals_text}\n"
         f"{_consensus_text(consensus)}\n"
@@ -121,11 +127,12 @@ def narrative(config: PeadConfig, fundamentals_text: str, consensus: dict,
 
 
 def expectations(config: PeadConfig, narrative_view: NarrativeView,
-                 fundamentals_text: str, consensus: dict) -> list[Expectation]:
+                 fundamentals_text: str, consensus: dict, event_note: str = "") -> list[Expectation]:
     dims = "\n".join(f"  - {d.key}: {d.label} (weight {d.weight:.0%})" for d in config.scorecard_dims)
     ctx = (
         f"Set the conservative/neutral/optimistic expectations for {config.symbol} "
         f"({config.fiscal_label}) for EACH scorecard dimension below.\n"
+        f"{event_note}"
         f"Narrative: {narrative_view.narrative}\n"
         f"{_consensus_text(consensus)}\n"
         f"Fundamentals:\n{fundamentals_text}\n\n"

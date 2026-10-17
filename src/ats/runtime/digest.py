@@ -215,7 +215,10 @@ def intel_digest(lookback_hours: int = 24, *, use_llm: bool = True) -> Path | No
                     and (i.get("summary") or "").strip() and (i.get("confidence") or 0) > 0]  # 滤掉空/失败 insight
         delta = ""
         try:
-            d = store.get_dossier(sym, load_pead_config(sym).fiscal_label)
+            from ..data.period import label_for_reads
+
+            d = store.get_dossier(sym, label_for_reads(
+                sym, store=store, config_label=load_pead_config(sym).fiscal_label))
             narr = d.expectation_set.narrative if (d and d.expectation_set) else ""
             if narr and "[update" in narr:
                 delta = "[update" + narr.split("[update", 1)[1][:500]

@@ -4,7 +4,8 @@
 
 symbol: MSFT
 company_name: "Microsoft"
-fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，MSFT 财年 Q4
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
+#   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
 
 signal_chain:

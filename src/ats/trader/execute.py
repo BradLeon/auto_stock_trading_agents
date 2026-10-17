@@ -394,12 +394,15 @@ def trade_context_json(source: str, approval: BossApproval | None,
 def pead_event_data() -> dict[str, dict]:
     """Expected Move per PEAD target from the freshest dossiers (for the L6 risk gate)."""
     from ..config import load_pead_config, load_pead_global
+    from ..data.period import label_for_reads
     from ..memory import get_store
 
     out: dict[str, dict] = {}
     for sym in load_pead_global().get("targets", []):
         try:
-            d = get_store().get_dossier(sym.upper(), load_pead_config(sym).fiscal_label)
+            store = get_store()
+            d = store.get_dossier(sym.upper(), label_for_reads(
+                sym, store=store, config_label=load_pead_config(sym).fiscal_label))
             if d and d.market_setup and d.market_setup.expected_move_pct:
                 out[sym.upper()] = {"expected_move_pct": d.market_setup.expected_move_pct}
         except Exception:  # noqa: BLE001

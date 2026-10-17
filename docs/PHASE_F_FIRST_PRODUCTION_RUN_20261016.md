@@ -114,3 +114,178 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 **已知问题（不是本次改动引起，未修改）**
 - `ibkr_news_daily` 10-15 窗口的队列任务已是终态 `partial`，控制器第二次尝试去重试它时抛 `RuntimeError`：采集控制器与持久队列对 `partial` 重试语义不一致。该窗口停在部分结果；10-16 16:30（纽约时间）会开新窗口再采。
 - Information 每日检查的预警（10-19 起文档过期）因采集恢复而解除：最新文档为 10-16，7 天窗口可覆盖到 10-22，只要采集持续。
+
+---
+
+## 追加：ibkr_news 的 partial 与 30 分钟失败原因（2026-10-16，只读排查）
+
+**运行环境**：`ibkr_news_daily` 由本机 launchd 任务 `com.ats.data-refresh` 拉取（本机 TWS 在 7496 端口监听），不是沙盒。10-16 窗口第 1 次尝试成功连上 TWS（发现 580 条、选中 351 条、0 个失败切片）。当天我用只读诊断命令 `ats data ibkr-news-diagnostics` 复测，8 个新闻源全部可用。
+
+**一、`partial` 是常态，不是 TWS 故障。**
+- 判定代码（`article_ingest.py`）：只要有“预算内读不完而延后”的文章就记 `partial`。配置的正文请求预算是每次 10 篇（`body_request_budget: 10`），而每次选中约 350 篇。
+- 10-16 这次：351 条里读了 10 篇，9 篇准入发布、1 篇正文太短被隔离、341 条延后。10-12 那次也是 326 条延后。
+- 采集控制器（`refresh.py:623`）把 `partial` 一律记为 `failed / article_source_partial`，并在 1 小时后重试第 2 次。
+- **第 2 次必败**：持久队列把 `partial` 当终态，同一窗口的任务无法再次领取，控制器随即抛 `RuntimeError("queue_task_not_claimable")`（`refresh.py:573`）。从 9 月 29 日起每一个 `partial` 窗口（9-29、10-1、10-4、10-5、10-9、10-10、10-11、10-15）都这样：第 1 次入库成功，第 2 次 0.02 秒内报错。
+- 影响：入库的 9 篇是真的；但每天固定只入库约 10 篇、延后约 340 篇，且这个窗口永远显示“失败”。
+
+**二、10-13、10-14 等“30 分钟失败”是 TWS 无响应导致的挂起，加上一个掩盖原因的错误处理缺陷。**
+- 现象：9-26、10-3、10-8、10-12（两次）、10-13（两次）、10-14（两次）的尝试都恰好跑满 1800 秒，随后记为 `controller_UnboundLocalError`；没有队列任务编号；数据平台里对应的采集运行永远停在 `running`、发现数为 0。
+- **错误名是假的**：`persistent_queue.py` 的 `run_one` 在子进程超时时没有给 `payload` 赋值，却在返回时使用它，于是抛 `UnboundLocalError`，真实的超时（应记为 `command_timeout`）被掩盖。
+- **挂起的机制（代码核实，触发原因是推断）**：`ibkr_news.py` 里 `reqNewsProviders()` 和 `qualifyContracts()` 都是同步调用，所用的 `ib_async` 库默认请求超时为 0（不超时）。如果 TWS 接受了连接却不回应，进程会一直等到被外层 1800 秒超时杀掉。只有连接本身带 20 秒超时。这与“采集运行停在 running、发现数 0、整整 30 分钟”完全吻合。
+- **没能确认的**：当时 TWS 为什么不回应。子进程的标准错误输出没有保存（只存了哈希），Mac 的睡眠日志只保留到 10-10，无法对上。我不声称知道根因。
+
+**三、修复建议（未实施，等你决定）**
+1. 队列：`partial` 视为可接受的终态，控制器不再重试（或把延后的文章下一轮继续读，而不是重试同一任务）。
+2. 队列：修复 `run_one` 超时分支的未赋值变量，让超时如实记为 `command_timeout`。
+3. 适配器：给 `reqNewsProviders`/`qualifyContracts` 加超时（或统一设置库的请求超时），并保存子进程标准错误的末尾，下次挂起时能看到卡在哪一步。
+4. 配置：评估把正文请求预算从 10 提高（每天只入库约 10 篇，对 11 只标的的覆盖偏薄）。
+
+---
+
+## 追加：Fundamental 事件模式与定时 PEAD 准备任务的生产运行（2026-10-16）
+
+可读版：`docs/phase_f_first_run_review_20261016/PEAD_EVENT_AND_PREP.md`。累计模型请求 **42 次**（费用上限估算约 1.08 美元），在批准的 100 次/2 美元内。
+
+| 项目 | 结果 |
+|---|---|
+| 事件模式 NVDA Q2 FY2027 | 成功（v7，中性观望）；但运行前该季基线是空的，所以全中性不能说明评分能力 |
+| 事件模式 TSM Q2 FY2026 | 成功（v1，+0.15）；有完整基线，三向差异分歧保留。**营收一栏被错判为重大不及预期，原因是基线里的共识属于下一季（见下）** |
+| 事件模式 ASML Q3 FY2026 | 新路径拒绝：平台里没有 ASML 财务数据 |
+| 事件模式 TSM Q3 FY2026 | 新路径拒绝：平台里没有 TSMC 官方财报/纪要 |
+| 定时 PEAD 准备 NVDA(Q3 FY2027)、MRVL、TSM(Q4 FY2026) | 成功（共 13 次请求） |
+| 定时 PEAD 准备 ASML(Q4 FY2026) | 新路径拒绝：同上，无财务数据 |
+
+**需要你决定的问题（均未处理）**
+1. **生产里现在有一条假的事件评审**：TSM Q2 FY2026 最新一版把营收判成“重大负面意外”（-2.0），根因是基线里的共识（1.454 万亿新台币）是 Q3 的，Q2 实际是 1.270 万亿。事件评审是追加式的，旧版还在，但“最新”这一版会被 Chief 读到。
+2. **共识与财报期没有核对**：准备任务取供应商“当前季”共识，财报发布后到供应商滚动前会错位。今天 TSM 的 Q4 准备里共识也是 Q3 的。
+3. **`config/pead/{ASML,TSM,NVDA}.yaml` 的 `fiscal_label` 是手填的，现已过期**（仍是已发布的上一季）。我没有改配置，只在进程内覆盖。
+4. **新路径把整个财务快照原样塞进档案和提示词**：TSM 档案的 `fundamentals_context` 从约 200 字节涨到约 568KB，MRVL 档案涨到约 778KB，Obsidian 报告也同步涨到约 590–690KB，准备任务一次要 3 分多钟。
+5. **覆盖了的东西（可由 `tmp/phase_f_first_run_20261016/pead_before_validation.json` 恢复）**：NVDA Q2 FY2027、TSM Q2 FY2026 的档案被事件模式重写；MRVL 的单一档案槽位（财报期标签为空串）被下一季准备替换，原来的 Q2 评分档案不再是当前行；Obsidian 里 `基本面分析-NVDA-2027Q2.md`、`基本面分析-TSM-2026Q2.md` 被覆盖。评分台账、事件评审投影都是追加式，旧记录都在。
+6. `run_event_pass` 的返回汇总恒为空（`PeadState` 缺 `event_summary` 字段），只影响汇报，不影响落库。
+7. ASML 在新路径下没有财务数据：事件模式和准备都跑不了，需要先补数据或明确 ASML 走什么口径。
+
+**每日健康检查**：在这些运行之后手动触发一次，Information、Fundamental 均 `health_ok`。
+
+---
+
+## 追加：共识期次错位的修复与现场清理（2026-10-16，用户批准计划）
+
+**代码（已测试，未提交）**
+- 新增共识期次/新鲜度核对 `align()`（在已登记的 `src/ats/data/consensus.py` 内，没有新增清单路径）。共识满足任一条即判不可用，估计值置空并留痕：快照距 `as_of` 超过 14 天（`stale`）；快照对应的财报日已早于 `as_of`（`event_already_passed`，TSM 那种情形）；与待准备季的发布日相差超过 10 天（旧路径已知日期时，`event_date_mismatch`）。价格目标、评级不受影响。阈值可在 `config/pead.yaml` 的 `consensus:` 下覆盖。
+- 接入准备任务的新旧两条路径：`prep_fetch` 调 `align()`；`PeadState.consensus_note`、`ExpectationSet.consensus_note` 记录原因；提示词明确写出“共识不可用，不得推断或引用具体数字”；旧路径的 yfinance 共识补带 `target_event_date`。
+- 12 项新测试（`tests/test_consensus_alignment.py`）；相邻 PEAD/共识套件 123 项通过；指纹关联的 11 个测试文件 233 通过、17 失败，17 个失败全在 `test_batch_manifest.py`，HEAD 上相同，漂移无新增失败。
+- 新增 11 条共识刷新任务配置（每个 PEAD 目标一条，**`enabled: false` 未启用**），`ats.data.refresh validate` 通过，相关 88 项测试通过。启用需另行批准。
+
+**生产数据**
+- TSM Q2 FY2026 事件评审（假的营收重大不及预期）和 NVDA Q2 FY2027 v7 评审（无基线的假中性）已标为 `failed`；事件评审现仅剩 ASML（10-14）。评分台账、认领引用、其他投影没动。原行备份在 `tmp/phase_f_first_run_20261016/invalidated_reviews_backup.json`。
+- TSM Q2、NVDA Q2、MRVL（空标签槽位）三份档案已恢复为验证前内容，Obsidian 报告 `TSM-2026Q2`（恢复后 24366 字节，与 10-14 的原文件大小一致）、`NVDA-2027Q2`、`MRVL-latest` 已据此重新生成。
+- 用修复后的代码重跑 TSM（Q4 FY2026）、NVDA（Q3 FY2027）准备：共识置空且留痕（原因：快照 9-04，已超 14 天），叙述中明确写明共识缺失；11 次模型请求。TSM 这次信号链为 0 条（上次 15 条），未排查。
+- 累计模型请求 **53 次**（费用上限估算约 1.36 美元），在批准的 100 次/2 美元内。每日健康检查两消费者均 `health_ok`。
+
+**没做 / 仍开放**
+- 没有登记新冻结：注册的 `final_implementation_freeze_report_narrowed` 因改动文件已漂移；简化切流后消费者整体路由不依赖它，是否登记留待决定。
+- 评分台账里仍有 TSM Q2 v1 和 NVDA v7 两条记录（追加式不删）；两者对应评审已作废。
+- 共识快照仍停在 9-04：NVDA、MRVL、TSM 等的共识现在会被判不可用，直到启用刷新任务。
+- 平台采集里的 `target_period` 推算（最近季报+3 个月）在财报刚发布后会错一季，核对已不依赖它，推算本身未改。
+- 新路径把整个财务快照塞进档案的膨胀问题（TSM Q4 / NVDA Q3 档案和 Obsidian 报告重新变大）、ASML 在平台无财务数据、`config/pead/*.yaml` 手填财报期过期、ibkr_news 的两个缺陷，均未处理。
+
+---
+
+## 追加：共识刷新任务启用与 9.5 回退演练（2026-10-16，用户批准）
+
+**共识刷新任务**：11 条（每个 PEAD 目标一条）已 `enabled: true`。启用时发现刷新控制器要求数据源声明 `requests_per_run`，`yfinance_consensus` 缺该字段，已补 `8`。手动跑一次 tick：11 条全部成功（各发布 39~42 条观测）。新快照里 NVDA（事件日 11-18）、MRVL（12-02）、MSFT（10-29）通过期次核对；TSM（10-15）、ASML（10-14）的事件日已过，被正确拒绝（厂商“当前季”尚未滚动）。NVDA 的 `target_period` 从旧快照的 2026-07-30 变为 2026-10-31，证实旧值是财报刚发布后报表滞后所致。用新快照重跑 NVDA Q3 准备：共识 EPS 2.47、营收 1090 亿被使用，无忽略标记。累计模型请求 57 次（上限估算约 1.46 美元）。
+
+**9.5 回退演练**：Information、Fundamental 各演练一次。每步经真实入口 `scoped_read` 解析路由：切回前 target，`rollback`（代次 2）后 legacy，`switch`（代次 3）后 target；全部追加到 `consumer_cutover_log`（seq 9–12），演练后每日健康检查两消费者均 `health_ok`。「观察期内健康检查失败自动切回」由 `daily_check` 的单测覆盖，未在生产人为制造故障。
+
+---
+
+## 追加：10.4 首批调度切换演练（Information、Fundamental、PEAD，2026-10-16）
+
+**用户裁决：** 不做应用内成本护栏（由 API key 管理方设上限），但逻辑上不得重复发起模型请求、能用缓存就用缓存；演练后终态留在 legacy，并写明何时可切新逻辑（`docs/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`）；Layer/Sector/Macro/Technical 记为 Phase F 内待办（10.5）；当前只做 Information、Fundamental、PEAD。
+
+**代码（已测试，未提交）**
+- `read_windows.select()`：没有精确窗口、且消费者整体路由为 target 时，Dispatcher 计划绑定自身业务身份；精确窗口（有效或无效）仍优先，旧路径消费者仍被拒。修复前只读探针显示 `bind_plan` 被拒（`workflow has no explicitly authorized read window`），修复后 Information、Fundamental 通过、Technical（旧路径）仍被拒。
+- `schedule_runtime.owner_switch/owner_log` 与 `ats dispatch owner-switch|owner-rollback|owner-log`：一个事务同时改模板行和所有标的行；去 dispatcher 需要批准原文、该消费者读路由为 target、健康检查 ok；有 `running` 认领拒绝，`failed/pending` 须带理由作废；追加日志只增不改。联合协调器路径（`runtime-freeze/handover`）原样保留。
+- 12 项新测试（`tests/test_schedule_owner_switch.py`）；相邻 19 个文件 433 通过、11 个失败全在 `test_chief_snapshot.py`，在 HEAD 上同样失败（既有）。
+
+**生产演练**
+1. 备份调度权威库；`phase_e_schedules.yaml` 启用 information-brief、fundamental-routine 两个条目（legacy 负责人时被忽略）。
+2. 三个工作流切到 dispatcher（代次 1→2），作废 7 条旧 failed 认领（早期预演 4 条、验证运行被新路径拒绝 3 条），全部有理由并入日志。
+3. 三个旧入口（Information、例行基本面、**PEAD 准备 `run_pead`**）均被拒：`schedule frozen or caller is not current owner`。
+4. 一次观察 `ats schedule --phase-e --now`（dry-run，不加载任何常驻进程）：
+   - Information：11 个标的 10 个成功，各一条 dispatcher 认领；LRCX 7 天内无已准入文档，按设计拒绝（fail-closed）。抽取缓存生效：新增 16 次抽取全是新文档（TSM、ASML 0 次）；NVDA、MRVL、TSM、ASML 当天已有简报但被重新发布一份（投影复用因缺数据版本引用不生效）。
+   - 例行基本面：11 个标的全部 `blocked`（依赖的 Information 简报不可复用，见 10.8）。
+5. 三个工作流切回 legacy（代次 3），作废 LRCX 那条 failed 认领；证明 Dispatcher 入口返回 `legacy`、旧入口重新可用。终态：所有研究工作流 legacy，读路由仍为 Information、Fundamental target；演练后每日健康检查两消费者 ok。
+
+**阻碍（已记为 10.6、10.8，待你决定）**
+- 例行基本面单独定时不可运行：定时条目不提供数据版本引用 → 复用恒判「缺数据版本」。方案 A 把 Information 并入同一次运行；方案 B 让条目携带数据版本引用。
+- PEAD 准备没有 Dispatcher 入口（Dispatcher 只有例行与事件两个基本面适配器）。
+- 小问题：观察时新建的标的行代次从 1 起，与已有行（2）不一致，回退后分别是 2 与 3；不影响正确性，未处理。
+
+---
+
+## 追加：10.6/10.8 实现与生产验证（2026-10-16，按 TARGET 与用户裁决）
+
+**用户裁决：** 数据版本不变则复用，上限 72 小时；不做「重大变化」自动刷新，例行 Fundamental 在财报前窗口内建一次基线，并保留手动刷新入口；基线每次建立另发版本化投影；财务快照摘要化。
+
+**对上一节判断的更正：** 观察时例行基本面全部 blocked，直接原因是 `--now` 让两个条目拿到同一计划时刻，同一逻辑触发的复用判断拿另一计划的引用比对而失败；真实定时下还会碰到「复用永远判缺数据版本」和「引用必须逐字相等」两个更根本的问题（适配器发布时会追加自己的文档引用，所以旧判断对 Information、Fundamental 永远命不中）。
+
+**实现**
+- `dispatcher.py`：`vintage_resolver` + `default_data_vintage`（Information=准入文档版本集合；例行基本面=财务观测集合、共识快照时间、基线窗口状态）；复用判断改为「计划要求的引用必须包含」；例行基本面整批投影全有或全无地复用（原来一律重算）。同一触发复用仍按本计划引用严格校验（既有测试保护的不变量保留）。
+- `phase_e.py`：Information、例行基本面新鲜期 1h→72h。
+- `routine.py`：`baseline_window`（日历推导下一次财报、目标期、窗口开闭）、`ensure_baseline`（窗口内且无基线则建；手动 `--refresh-baseline` 可重建；财报发布后冻结）、`[基线 vN]` 版本化投影；`graph/pead.py`/`pead_state.py` 在新入口准备时带入本标的最新简报事实。
+- `inputs.py`：`financial_summary`，每项最近 8 期的紧凑表（TSM 568KB→5KB，MRVL 664KB→7KB，NVDA 134KB→3KB），完整数据留在数据产品。
+- 15 项新测试；相邻 50 个测试文件 763 通过、16 失败，全部是 HEAD 上就有的（`test_chief_snapshot` 11 项 + 另 5 项）。过程中有一次回归（`Dispatcher._task_inputs` 被个别测试以未绑定方式调用、同触发复用的严格校验被我误放宽），已修复并保留测试保护的不变量。
+
+**生产验证（终态 legacy）**：三个工作流切到 dispatcher（代次 4）后连跑三遍 `schedule --phase-e --now`：
+| 遍 | Information | 例行基本面 | 新简报/新预期更新/新抽取 |
+|---|---|---|---|
+| 1 | 10 成功（旧简报无版本，重算），LRCX 无文档拒绝 | 10 成功（4 个 `agent_attempt_missing`、6 个 `no_candidate` 重算），LRCX blocked | 0 / 约 50 / 0（抽取缓存全命中） |
+| 2 | 10 全部 hit | 3 hit，7 因整批不复用而重算 | 0 / +48 / 0 |
+| 3 | 10 全部 hit | **10 全部 hit（3 单条 + 7 整批）** | **0 / 0 / 0** |
+然后切回 legacy（代次 5），作废 LRCX 的 failed 认领；每日健康检查两消费者 ok。
+
+**手动基线首次生产使用（MSFT）**：目标期 `Q1 FY2027` 由日历推导，档案 20KB，`[基线 v1]` 投影已发布，Obsidian 报告 `基本面分析-MSFT-2027Q1.md`。**发现两个质量问题（未处理）：** ① 基线叙事开头写「微软即将发布 FY2026 Q4（截至 6 月 30 日）财报」，与目标期 Q1 FY2027 不符：提示词没把目标期和发布日交给模型，模型按最近一期财务数据往前猜；② 之后的例行分类调用 `fundamental_analyst`（DeepSeek V4 Pro，上限 8192）输出被截断，退回规则分类，5 条都标「新增」，整次用时约 12 分钟。
+
+**仍未做**：PEAD 准备的自动窗口路径尚无真实窗口可验证（LRCX 约 10-18 开窗）；第二批工作流（10.5）；ibkr_news、ASML 无财务数据、手填 `fiscal_label` 等旧问题。
+
+---
+
+## 追加：基线叙事目标期写错与例行分类截断的修复（2026-10-16，用户批准方案）
+
+**根因（比上一节的猜测更具体）**
+- **目标期写错：** 图里准备的三个提示词和事件打分（Scorecard 标签）读的是 `state.config.fiscal_label`，即 `config/pead/*.yaml` 手填、财报后就过期的标签；运行的目标期只存在 `state.fiscal_label`，没传进配置。MSFT 的配置还写着 `Q4 FY2026`，模型便按它写。事件模式在 Dispatcher 路径下同样会用旧标签给 Scorecard 盖章（此前验证事件模式时是用进程内补丁盖住的）。
+- **分类截断：** 提示词只有 1035 token，输出却到 8192 被截断；调用的 skill `fundamental-routine` 并不存在（兜底系统提示只有一句话），`reason` 字段又不限长；退回规则后驱动文字与模型判断无法区分。**失控的真实原因没法确认**：用同样的输入重放一次（用户批准的那一次诊断），正常返回 5 条结果、输出 196 token、费用约 0.0019 美元，复现不了。
+
+**修复（已测试，未提交）**
+- `graph/pead.py`：`load()` 以运行目标期覆盖配置标签（准备、事件打分、Scorecard 一并对）；新增 `target_event_note`，把目标财报、预计发布日、今天的日期，以及「该季尚未发布、Fundamentals 里最新已报季是它的上一季」写进准备的三个提示词（`prep.py` 三个函数加带默认值的 `event_note`）。
+- `routine.py`：分类改用独立角色 `fundamental_classifier`（温度 0，`max_tokens` 3072，`config/settings.yaml`），上下文写明「恰好 N 条、index 必填、reason 不超过 30 字、不输出推理或额外文字」；失败（截断、解析失败、条数不符）重试一次，再失败才回退规则；回退时驱动末尾追加「｜分类器：规则回退」，摘要里带 `classifier`；用户主动不用模型（`--no-llm`）不算回退、不加标记。
+- 新增 9 项测试；相关 16 个测试文件 222 项通过（含 PEAD 图、例行/事件模式、Dispatcher、研究门、成对业务、调度运行时）。
+
+**生产验证**
+- 不花钱：渲染了 MSFT 的三个准备提示词，目标期为 `Q1 FY2027`、含发布日 2026-10-28 与「尚未发布」说明，单个提示词约 8.5K 字符（此前约 15 万 token）。
+- 手动刷新重建 MSFT：新发 `[基线 v2]` 投影（v1 保留），叙事开头为「即将发布 FY2027 Q1（截至 2026 年 9 月 30 日）财报」，目标期正确；分类由模型完成（确认 3、否定 1、新增 1），无回退；用时约 3 分钟（此前 12 分钟）；档案 45KB；共识 EPS 4.72 被使用（刷新任务已更新快照）。
+- 单独一次分类诊断 + 本次 MSFT 重建的模型请求共约 6 次。
+
+---
+
+## 追加：10.5 前置考察与 Technical 切换（2026-10-16）
+
+**前置考察**（`docs/PHASE_F_10_5_PREFLIGHT_AUDIT.md`）：只有 Technical 具备切换条件。Layer/Sector 的中性证据全部停在 2026-08（证据抽取挂在旧调度器的 PEAD 窗口里，开关 `pead_observe_window: false`），30 只截面标的仅 7 只有受治理财务；Macro 在分析中实时调用 Tavily 网页搜索，违反 §12.1；四个角色的投影都比 §7.3 薄（Sector 只有行业级立场）。数据流补齐方案见 `docs/PHASE_F_DATAFLOW_REMEDIATION_PLAN.md`，待审阅。
+
+**Technical（用户批准先按原 10.5 计划推进）**
+- 代码：`consumer_health._technical`（运行时价格网关；单只缺价是警告，整池无 4 天内 K 线且重试一次仍失败才失败）；`default_data_vintage` 增加 Technical（纽约交易日 + 收盘前/后，不发网络请求）；新鲜期 1h→24h；轻量调度切换允许作废「已以 execution_error 结束、却因写过旧表而仍标 running」的认领（真实运行中的认领仍不可作废）。新增/调整测试 9 项，相邻 7 个测试文件 102 项通过。
+- 生产：健康检查 ok（11 只 K 线 10-15）→ 读路由切到 target（代次 1）→ 首跑 `ats technical review`：12 只读数、投影已发布、旧表与 Obsidian 报告 `技术面读数-技术面-2026-10-16.md` 已写，SKHY/DRAM/LYTE 因 K 线不足 200 根未评估 → 切回演练（target→legacy→target，代次 3）→ 调度切到 dispatcher → 两遍观察：第一遍 10 只成功，第二遍 10/10 复用、0 新投影，SKHY 按设计拒绝 → 切回 legacy（代次 3）。每日健康检查三个消费者均 ok。
+- 不调模型，没有券商写入。
+- **发现：** SKHY 无读数时 Dispatcher 适配器仍会把一条空的旧表记录写入，导致认领卡在 running；本次按「已结束」作废并留痕，适配器本身未改。
+
+---
+
+## 追加：7 个研究工作流切到 Dispatcher 并上线（2026-10-17）
+
+- **先决修复。** ①ASML 最新季只缺 CFO/CapEx（供应商对外国申报人滞后发布）：包门槛在「只缺这两项且同源上一季齐全」时接受并写入 `gaps`，现金流按期次对齐，不借旧季；AMZN 型缺口（新季只有 EPS）仍被拒。②手填 `fiscal_label` 每季过期：10 个配置去掉手填，交易定规模、日报、日记改用 `label_for_reads`（取最新档案的标签）。③Dispatcher 日历事件路径原先不读 `macro_sector_event_triggers`/`pead_event_triggers`，已补上。
+- **8 条缺陷旧 Layer 投影**（首次 Layer 运行的缺陷版本）已备份到 `tmp/phase_f_first_run_20261016/projection_cleanup/` 并标为 `failed`；它们被调度发布台账（只增不改）和复用决策引用，所以不删除、不覆盖；读取方只取到新的。
+- **切换。** 7 个工作流 `owner-switch` 到 dispatcher（批准原文写入日志）；新建并加载 `com.ats.phase-e`；启动补跑由常驻进程执行：macro-review 约 3.5 分钟（1 次模型请求）、sector-review 约 9.5 分钟，均 complete。
+- **意外。** 切换过程中 `com.ats.data-refresh` 与 `com.ats.consumer-health` 两个 launchd 任务不在已加载列表里（当时系统负载很高、进程数接近上限），已重新加载；原因不明，建议留意。
+- **未解决。** SEC（sec.gov）连接被重置：本机 DNS 返回 198.18.x（Clash fake-ip），Clash 为全局模式，当前出口节点到 SEC 的 TLS 被重置，沙箱内外一致；需要用户调整 Clash。10.6 待 LRCX 的真实窗口（财报 10-21 amc，prep 窗口 3 天，周一 10-19 的例行任务首次进入窗口）。
+

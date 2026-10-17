@@ -1,0 +1,135 @@
+<unknown>:685: SyntaxWarning: invalid escape sequence '\d'
+# 消费者清零与对账核验（11.8）
+
+27 条登记 · 可退出 **3** · 保持 pending **24**
+
+| 条目 | 结论 | 可退出 |
+|---|---|---|
+| `agent.evidence_observer` | retired | 是 |
+| `agents.risk_validator.apply_guardrails` | pending | **否** |
+| `chief.legacy_table_direct_reads` | pending | **否** |
+| `decision_roles.unwired_to_governed_read_api` | pending | **否** |
+| `evidence_fact_projections.legacy_observation_id` | pending | **否** |
+| `graph.pead.internal_risk_and_sizing` | pending | **否** |
+| `journal.report.render_ledger` | pending | **否** |
+| `layer_verdict.allocation` | pending | **否** |
+| `legacy_read_models` | pending | **否** |
+| `memory.store.legacy_decision_write_path` | pending | **否** |
+| `pead_dossier` | pending | **否** |
+| `performance.legacy_snapshot` | pending | **否** |
+| `reconcile.origin_manual_fallback` | retired | 是 |
+| `reconcile.partial_fill_as_filled` | retired | 是 |
+| `risk.checks.in_place_clipping` | pending | **否** |
+| `risk.checks.pre_trade_adapter` | pending | **否** |
+| `runtime.server.in_process_resume_dedup` | pending | **否** |
+| `scheduler.adhoc_journal_jobs` | pending | **否** |
+| `scheduler.hardcoded_serial_run` | pending | **否** |
+| `sector_reviews` | pending | **否** |
+| `store.direct_trade_reads` | pending | **否** |
+| `task_projections.legacy_columns` | pending | **否** |
+| `trades.client_order_id.legacy_derivation` | pending | **否** |
+| `workflow_memory.evidence_fact_projections` | pending | **否** |
+| `workflow_memory.evidence_facts` | pending | **否** |
+| `workflow_memory.evidence_failures` | pending | **否** |
+| `workflow_memory.evidence_observations` | pending | **否** |
+
+## 保持 pending 的条目及其所缺条件
+
+### `agents.risk_validator.apply_guardrails`
+
+- consumers still on the legacy path: ['graph.pead']; consumer state unknown (not verified zero): ['graph.pead']
+
+### `chief.legacy_table_direct_reads`
+
+- consumers still on the legacy path: ['agents.chief.assemble']
+
+### `decision_roles.unwired_to_governed_read_api`
+
+- consumers still on the legacy path: ['agents.risk_officer.review', 'execution.clerk']
+
+### `evidence_fact_projections.legacy_observation_id`
+
+- consumers still on the legacy path: ['memory.store.fact_projections', 'tests/test_data_migrations']; consumer state unknown (not verified zero): ['memory.store.fact_projections', 'tests/test_data_migrations']
+
+### `graph.pead.internal_risk_and_sizing`
+
+- consumers still on the legacy path: ['graph.pead', 'agents.pead.score']; consumer state unknown (not verified zero): ['graph.pead', 'agents.pead.score']
+
+### `journal.report.render_ledger`
+
+- consumers still on the legacy path: ['runtime.cli']; consumer state unknown (not verified zero): ['runtime.cli']
+
+### `layer_verdict.allocation`
+
+- consumers still on the legacy path: ['agents.sector.report', 'agents.sector.viz', 'runtime.cli']; consumer state unknown (not verified zero): ['agents.sector.report', 'agents.sector.viz', 'runtime.cli']
+
+### `legacy_read_models`
+
+- consumers still on the legacy path: ['runtime.cli', 'channel.context']; consumer state unknown (not verified zero): ['runtime.cli', 'channel.context']
+
+### `memory.store.legacy_decision_write_path`
+
+- consumers still on the legacy path: ['decision.repository.mirror_revision_to_legacy', 'memory.store.last_chief_run', 'memory.store.recent_decisions']; consumer state unknown (not verified zero): ['decision.repository.mirror_revision_to_legacy', 'memory.store.last_chief_run', 'memory.store.recent_decisions']
+
+### `pead_dossier`
+
+- consumers still on the legacy path: ['runtime.cli', 'agents.pead.report']; consumer state unknown (not verified zero): ['runtime.cli', 'agents.pead.report']
+
+### `performance.legacy_snapshot`
+
+- consumers still on the legacy path: ['runtime.cli', 'runtime.scheduler']; consumer state unknown (not verified zero): ['runtime.cli', 'runtime.scheduler']
+
+### `risk.checks.in_place_clipping`
+
+- consumers still on the legacy path: ['graph.chief.risk_gate', 'graph.pead']; consumer state unknown (not verified zero): ['graph.chief.risk_gate', 'graph.pead']
+
+### `risk.checks.pre_trade_adapter`
+
+- consumers still on the legacy path: ['runtime.scheduler', 'runtime.cli']; consumer state unknown (not verified zero): ['runtime.scheduler', 'runtime.cli']
+
+### `runtime.server.in_process_resume_dedup`
+
+- consumers still on the legacy path: ['runtime.server.handle_callback', 'runtime.server.handle_approve']; consumer state unknown (not verified zero): ['runtime.server.handle_callback', 'runtime.server.handle_approve']
+
+### `scheduler.adhoc_journal_jobs`
+
+- consumers still on the legacy path: ['runtime.cli']; consumer state unknown (not verified zero): ['runtime.cli']
+
+### `scheduler.hardcoded_serial_run`
+
+- consumers still on the legacy path: ['runtime.scheduler', 'tests/test_scheduler_jobs']; consumer state unknown (not verified zero): ['runtime.scheduler', 'tests/test_scheduler_jobs']
+
+### `sector_reviews`
+
+- consumers still on the legacy path: ['agents.chief.assemble', 'runtime.cli']; consumer state unknown (not verified zero): ['runtime.cli']
+
+### `store.direct_trade_reads`
+
+- consumers still on the legacy path: ['agents.chief.assemble', 'risk.assess', 'channel.context']; consumer state unknown (not verified zero): ['risk.assess', 'channel.context']
+
+### `task_projections.legacy_columns`
+
+- consumers still on the legacy path: ['memory.store.projection_lineage', 'tests/test_fact_projections']; consumer state unknown (not verified zero): ['memory.store.projection_lineage', 'tests/test_fact_projections']
+
+### `trades.client_order_id.legacy_derivation`
+
+- consumers still on the legacy path: ['memory.store.save_trades', 'trader.execute.place_orders', 'trader.reconcile']; consumer state unknown (not verified zero): ['memory.store.save_trades', 'trader.execute.place_orders', 'trader.reconcile']
+
+### `workflow_memory.evidence_fact_projections`
+
+- consumers still on the legacy path: ['chain.evidence', 'memory.store.projection_lineage']; consumer state unknown (not verified zero): ['chain.evidence', 'memory.store.projection_lineage']
+
+### `workflow_memory.evidence_facts`
+
+- consumers still on the legacy path: ['chain.evidence', 'scheduler.observe']; consumer state unknown (not verified zero): ['chain.evidence', 'scheduler.observe']
+
+### `workflow_memory.evidence_failures`
+
+- consumers still on the legacy path: ['chain.sources', 'chain.articles']; consumer state unknown (not verified zero): ['chain.sources', 'chain.articles']
+
+### `workflow_memory.evidence_observations`
+
+- consumers still on the legacy path: ['scheduler.observe', 'chain.sources', 'chain.articles', 'runtime.cli']; consumer state unknown (not verified zero): ['scheduler.observe', 'chain.sources', 'chain.articles', 'runtime.cli']
+
+
+**缺项只阻断受影响范围**：未满足清零/对账条件的条目保持 pending，不得为使其可退出而降低判据标准；已满足的条目亦不得据此放行其它范围。

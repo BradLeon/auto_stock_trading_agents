@@ -212,24 +212,39 @@ def _falsifiable_conditions(expectation_set, limit: int = 3) -> list[str]:
     return out
 
 
+NO_COMPARISON_BASIS = ("【无比较依据】本期没有财报前冻结基线，也没有可用的共识：未做预期差判断，"
+                       "direction=0 表示「无依据」而不是「符合预期」；以下仅为纪要与指引的提取。")
+NO_BASIS_CONFIDENCE = 0.1
+
+
 def build_event_review_payload(*, symbol: str, period: str, event: str,
                                scorecard, event_view: dict, tri_diffs: dict,
                                actuals, narrative: str = "") -> dict:
     lines = [line.model_dump(mode="json") for line in scorecard.lines] if scorecard else []
+    notes = event_view.get("rationale", "")
+    confidence = event_view.get("confidence")
+    # Nothing to compare the actuals with (no frozen pre-print baseline and no consensus): the scorecard then reads
+    # "no information, assume neutral" on every line. That is a gap, not a considered neutral view, and the Chief must
+    # not read direction 0 as "in line with expectations" (found 2026-10-17 on TSM/ASML Q3, whose prints came before
+    # the baseline mechanism existed). The extracted guidance and call signals are still published.
+    no_basis = not (tri_diffs or {}).get("vs_baseline") and not (tri_diffs or {}).get("vs_consensus")
+    if no_basis:
+        notes = (NO_COMPARISON_BASIS + notes).strip()
+        confidence = min(float(confidence if confidence is not None else NO_BASIS_CONFIDENCE), NO_BASIS_CONFIDENCE)
     payload = {
         "entity": symbol.upper(),
         "event": event,
         "period": period,
         "direction": int(event_view.get("direction", 0)),
         "magnitude": float(event_view.get("magnitude", 0.0)),
-        "notes": event_view.get("rationale", ""),
+        "notes": notes,
         "scorecard": [
             {"section": "scorecard_lines", "lines": lines},
             {"section": "tri_diff", **(tri_diffs or {})},
         ],
         "guidance": (getattr(actuals, "guidance", "") or "") if actuals else "",
         "narrative": narrative,
-        "confidence": event_view.get("confidence"),
+        "confidence": confidence,
         "falsifiable_conditions": list(event_view.get("falsifiable_conditions") or []),
     }
     return payload
@@ -291,7 +306,12 @@ def run_event_pass(request) -> dict:
     now = evaluation_now(timezone.utc)
     state = PeadState(symbol=request.symbol, fiscal_label=request.fiscal_label, phase="score", as_of=now,
                       use_llm=request.use_llm,
-                      use_broker=False, live_data=bool(request.extra.get("live_data", False)),
+                      use_broker=False,
+                      # A model-backed event review must read the quarter's documents; with live_data False the graph
+                      # is offline, gets no transcript and no release, and every scorecard line comes back as
+                      # "data missing" (found 2026-10-17 on TSM/ASML: the Dispatcher run was `complete` but empty).
+                      # Offline stays the default only for runs without a model.
+                      live_data=bool(request.extra.get("live_data", request.use_llm)),
                       dry_run=True, transcript_source=request.extra.get("transcript_source"))
     app = build_pead_graph(checkpointer=None)
     result = app.invoke(state, config={"configurable": {

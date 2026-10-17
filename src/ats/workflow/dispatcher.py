@@ -154,7 +154,8 @@ class Dispatcher:
                  resource_limits: Mapping[str, int] | None = None,
                  timeout_overrides: Mapping[str, float] | None = None,
                  chief_runner: Callable[[Any, list[dict]], Any] | None = None,
-                 calendar_store: Any = None):
+                 calendar_store: Any = None,
+                 vintage_resolver: Callable[[Any, Any, dict], list[str]] | None = None):
         self.workflow_store = workflow_store or WorkflowStore()
         self.adapters = dict(adapters or default_adapters())
         self.max_workers = max(1, int(max_workers))
@@ -165,6 +166,9 @@ class Dispatcher:
         # execution; a deployment may inject its already-authorized Chief runner.
         self.chief_runner = chief_runner
         self.calendar_store = calendar_store
+        # Production entries inject `default_data_vintage`; without it a task that brings no data
+        # vintage of its own is always recomputed, as before.
+        self.vintage_resolver = vintage_resolver
 
     def dispatch(self, plan: WorkflowPlan, *, trigger_key: str = "",
                  policy_version: str = "phase-e-v1") -> DispatchResult:
@@ -539,6 +543,13 @@ class Dispatcher:
         input_refs.extend(f"config:{path}@{digest}"
                           for path, digest in sorted(plan.source_config_hashes.items()))
         data_refs = task_inputs.get("data_vintage_refs", root.get("data_vintage_refs", [])) or []
+        resolver = getattr(self, "vintage_resolver", None)   # some callers invoke this unbound
+        if not data_refs and resolver is not None:
+            try:
+                data_refs = list(resolver(plan, task, task_inputs) or [])
+            except Exception as exc:  # noqa: BLE001 - an unknown vintage only means "recompute"
+                log.warning("data vintage for %s unavailable: %s", task.instance_key, exc)
+                data_refs = []
         return sorted(set(map(str, input_refs))), sorted(set(map(str, data_refs))), task_inputs
 
     def _select_reusable(self, memory, task, input_refs, data_refs, as_of):
@@ -551,7 +562,8 @@ class Dispatcher:
             return None, {"decision": "recompute", "reason": "missing_data_vintage"}
         rows = memory.task_projection_envelopes(
             agent_role=role, scope_kind=task.scope.kind, scope_id=task.scope.id,
-            status="published", limit=50)
+            status="published", limit=500 if task.task_id == "fundamental-routine" else 50)
+        by_id = {row["projection_id"]: row for row in rows}
         candidates = []
         for row in rows:
             envelope = self._envelope(row)
@@ -564,8 +576,18 @@ class Dispatcher:
                 if attempt is None or attempt["status"] != "succeeded":
                     reusable, reason = False, "agent_attempt_not_terminal"
                 elif task.task_id == "fundamental-routine" and json.loads(attempt["projection_refs_json"]) != [envelope.projection_id]:
-                    # Cross-run reuse selects one envelope. Never turn a complete
-                    # per-fact Routine producer bundle into a partial success.
+                    # A Routine run publishes one projection per fact change. Reuse is all-or-nothing: every
+                    # member of the producer's bundle must still validate, and the whole bundle is returned,
+                    # so a complete per-fact bundle is never turned into a partial success.
+                    refs = json.loads(attempt["projection_refs_json"])
+                    members = [self._envelope(by_id[ref]) if ref in by_id else None for ref in refs]
+                    ok = bool(refs) and all(
+                        m is not None and m.agent_run_id == envelope.agent_run_id and self._projection_reuse_check(
+                            m, task, input_refs, data_refs, as_of, spec.freshness_seconds,
+                            schema.role_schema_name())[0] for m in members)
+                    if ok:
+                        return tuple(members), {"decision": "hit", "reason": "reusable_bundle",
+                                                "projection_ids": refs, "candidates": candidates}
                     reusable, reason = False, "multi_projection_recompute_required"
                 else:
                     reusable, reason = self._projection_reuse_check(
@@ -603,7 +625,11 @@ class Dispatcher:
             return False, "not_published"
         if not Dispatcher._valid_output(task, envelope):
             return False, "content_hash_mismatch"
-        if sorted(envelope.input_refs) != sorted(input_refs):
+        # Every ref this plan requires must be in the envelope. An adapter adds its own document refs on
+        # top of the plan-level ones when it publishes, so strict equality could never hit for Information
+        # or Fundamental (TARGET §8.2-5 reuses on unchanged scope, schema and data vintage). A projection
+        # from a different lineage still lacks the required refs and is refused.
+        if set(input_refs) - set(envelope.input_refs):
             return False, "input_refs_changed"
         if sorted(envelope.data_vintage_refs) != sorted(data_refs):
             return False, "data_vintage_changed"
@@ -678,11 +704,12 @@ class Dispatcher:
     def _claimed_or_reused(self, adapter, context):
         from .schedule_runtime import record_reuse
 
-        envelope = getattr(context, "reusable_projection", None)
-        if envelope is not None:
-            self._record_reused(context, (envelope,))
-            record_reuse([envelope.projection_id])
-            return (envelope,), "projection_reused"
+        reusable = getattr(context, "reusable_projection", None)
+        if reusable is not None:
+            envelopes = tuple(reusable) if isinstance(reusable, (tuple, list)) else (reusable,)
+            self._record_reused(context, envelopes)
+            record_reuse([envelope.projection_id for envelope in envelopes])
+            return envelopes, "projection_reused"
         return self._invoke_claimed_adapter(adapter, context)
 
     def _invoke_claimed_adapter(self, adapter, context):
@@ -957,9 +984,12 @@ def _fundamental_routine_adapter(context: TaskContext) -> TaskAdapterResult:
 
     symbol = context.task.scope.id
     trigger = str(context.task_inputs.get("fundamental_trigger", "information_brief_update"))
+    # A baseline rebuild on demand is an operator action: only a manual trigger may ask for it.
+    refresh = bool(context.task_inputs.get("refresh_baseline")) and getattr(context.trigger, "kind", "") == "manual"
     request = routine_request(symbol, trigger=trigger, use_llm=_use_llm(context),
                               extra={"input_refs": _information_dependency_refs(context),
-                                     "data_vintage_refs": list(context.data_vintage_refs)})
+                                     "data_vintage_refs": list(context.data_vintage_refs),
+                                     "refresh_baseline": refresh})
     result = run_fundamental_pass(request)
     return TaskAdapterResult(detail=str(result.get("summary", "routine completed")))
 
@@ -988,10 +1018,25 @@ def _fundamental_event_adapter(context: TaskContext) -> TaskAdapterResult:
 def _macro_adapter(context: TaskContext) -> TaskAdapterResult:
     from ..agents.macro.review import run
 
-    review = run(name="macro", use_llm=_use_llm(context), live_data=True)
+    from datetime import datetime, timezone
+
+    started = datetime.now(timezone.utc)
+    use_llm = _use_llm(context)
+    review = run(name="macro", use_llm=use_llm, live_data=True)
     if not review.regime or review.regime.startswith("("):
         raise ProjectionMissing("Macro Analyst did not publish a formal regime projection")
-    return TaskAdapterResult(detail=f"regime={review.regime}")
+    detail = f"regime={review.regime}"
+    # The readable weekly report: the CLI path always wrote it, this path did not (found 2026-10-17). A new
+    # version file, never an overwrite. `run` returns the PRIOR review when the model call fails, so a stale
+    # review must not be written out under today's name.
+    if use_llm and review.sector_tilts and review.as_of >= started:
+        from ..agents.macro import report
+        from ..config import load_macro_config
+
+        path = report.write_new_version(review, load_macro_config("macro"))
+        if path:
+            detail += f"; report={path.name}"
+    return TaskAdapterResult(detail=detail)
 
 
 def _technical_adapter(context: TaskContext) -> TaskAdapterResult:
@@ -1007,3 +1052,109 @@ def _technical_adapter(context: TaskContext) -> TaskAdapterResult:
 __all__ = ["AdapterUnavailable", "DependencyUnavailable", "DispatchResult", "Dispatcher",
            "ProjectionMissing", "RetryableTaskError", "TaskAdapterResult", "TaskContext",
            "TaskOutcome", "default_adapters"]
+
+
+def _digest(values) -> str:
+    import hashlib
+
+    return hashlib.sha256(json.dumps(sorted(values), ensure_ascii=False).encode()).hexdigest()[:16]
+
+
+def default_data_vintage(plan: WorkflowPlan, task: TaskInstance, task_inputs: dict) -> list[str]:
+    """Data-vintage references of a task, plus a unique one when the request forces a recompute.
+
+    `task_inputs["force_recompute"]` is the manual "run it again on unchanged data" switch (for example after the
+    projection contract gained fields, which does not change any data version): it makes the references unique to
+    this run, so no earlier projection is reusable, and leaves every other task alone.
+    """
+    refs = _data_vintage_refs(plan, task, task_inputs)
+    if task_inputs.get("force_recompute") and refs is not None:
+        refs = [*refs, f"forced-recompute:{plan.run_id}"]
+    return refs
+
+
+def _data_vintage_refs(plan: WorkflowPlan, task: TaskInstance, task_inputs: dict) -> list[str]:
+    """The shared-data versions a research task reads (TARGET §8.2-5), so unchanged data is reused.
+
+    Information: the admitted document versions in its lookback for the entity. Routine Fundamental:
+    the financial snapshot, the consensus snapshot time and the pre-earnings window state (a window that
+    opens must rebuild the baseline even when nothing else moved). Macro: the stored indicator series
+    (newest known_at each), the admitted theme news versions, the regional and FactSet releases. Other
+    tasks bring none and recompute.
+    """
+    if task.task_id in {"layer-review", "sector-review"}:
+        return _layer_sector_vintage(plan, task, task_inputs)
+    if task.task_id == "macro-review":
+        from ..data.products import get_platform_data_products, macro_inputs
+
+        products = get_platform_data_products(readonly=True)
+        try:
+            as_of = datetime.fromisoformat(str(plan.as_of).replace("Z", "+00:00"))
+            state = macro_inputs.stored_input_state(products, as_of=as_of)
+        finally:
+            products.structured.close()
+        # A review is reusable only if every input that decides its content was readable: a failed
+        # series or news read would otherwise look like "unchanged" and pin an incomplete review.
+        if state["series"]["error"] or state["news"]["error"]:
+            return []
+        return macro_inputs.input_vintage_refs(state)
+    if task.scope.kind != "entity" or task.task_id not in {"information-brief", "fundamental-routine",
+                                                             "technical-review"}:
+        return []
+    symbol = task.scope.id.upper()
+    as_of = datetime.fromisoformat(str(plan.as_of).replace("Z", "+00:00"))
+    if task.task_id == "technical-review":
+        # Daily bars: the reading can only change with a new session close, so it is reused within the
+        # same New York trading date and the same side of the 16:00 close (no network call needed here).
+        from zoneinfo import ZoneInfo
+
+        local = as_of.astimezone(ZoneInfo("America/New_York"))
+        side = "after-close" if (local.hour, local.minute) >= (16, 0) else "before-close"
+        return [f"market-session:{symbol}:{local.date().isoformat()}:{side}"]
+    from ..data.products import get_platform_data_products
+
+    products = get_platform_data_products(readonly=True)
+    try:
+        if task.task_id == "information-brief":
+            from ..config import load_pead_global
+            from ..data.products.unstructured import admitted_documents
+
+            days = int((load_pead_global().get("monitor") or {}).get("lookback_days", 7))
+            rows = admitted_documents(entities=[symbol], as_of=as_of, repository=products.unstructured,
+                                      published_since=(as_of - timedelta(days=days)).isoformat(), limit=500)
+            refs = [f"{row.document_id}@{row.version_id}" for row in rows]
+            return [f"documents:{symbol}:{len(refs)}@{_digest(refs)}"] if refs else []
+        snapshot = products.company_financial_snapshot(entity=symbol, as_of=as_of)
+        observations = [str(row.get("observation_id")) for row in snapshot.get("rows") or []]
+        consensus = products.consensus_snapshot(entity=symbol, as_of=as_of)
+    finally:
+        products.structured.close()
+    from ..agents.fundamental.routine import baseline_window
+
+    window = baseline_window(symbol, now=as_of)
+    refs = [f"financials:{symbol}:{len(observations)}@{_digest(observations)}",
+            f"consensus:{symbol}@{consensus.get('known_at') or 'none'}",
+            f"baseline-window:{symbol}:{window.get('label') or 'none'}:{'open' if window.get('open') else 'closed'}"]
+    if task_inputs.get("refresh_baseline"):
+        refs.append(f"baseline-refresh:{plan.run_id}")
+    return refs
+
+
+def _layer_sector_vintage(plan: WorkflowPlan, task: TaskInstance, task_inputs: dict) -> list[str]:
+    """Data-vintage references of Layer and Sector reviews (10.5, 2026-10-17); local reads, no network.
+
+    Layer: the neutral-evidence observations its claims read and the knowledge-note versions. Sector: the
+    governed financials, consensus snapshots and FactSet packet of its cross-section, the last NYSE session
+    side (runtime prices), and the layer-budget switch; the eight LayerAnalysis projections it consumes are
+    already plan-level input refs, so a rebuilt layer changes the Sector reference without being listed here.
+    Anything unreadable raises and the caller treats it as "recompute".
+    """
+    from . import layer_sector_inputs as inputs
+
+    sector = (plan.request_scope.id if plan.request_scope.kind == "sector"
+              else str(task_inputs.get("sector", "")))
+    if not sector:
+        return []
+    if task.task_id == "layer-review":
+        return inputs.layer_vintage(sector, task.scope.id)
+    return inputs.sector_vintage(sector, datetime.fromisoformat(str(plan.as_of).replace("Z", "+00:00")))

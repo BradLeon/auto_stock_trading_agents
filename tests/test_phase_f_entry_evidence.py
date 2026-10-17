@@ -437,7 +437,7 @@ def owned_case(consumer, symbol, sandbox, monkeypatch):
                 payload={"entity": symbol, "headline": "h", "summary": "s",
                          "relevance": "high", "sources": ["ref"]}))
         return TaskAdapterResult()
-    monkeypatch.setattr(ownership, "Dispatcher", lambda workflow_store: Dispatcher(
+    monkeypatch.setattr(ownership, "Dispatcher", lambda workflow_store, **_kw: Dispatcher(
         workflow_store=workflow_store, adapters={name: adapter for name in TASK.values()}))
     scope = ProjectionScope(kind="entity", id=symbol)
 

@@ -102,6 +102,30 @@ def assert_current(identity, *, workflow=None, path=None):
         raise RouteUnavailable("read window authority refused: " + str(exc)) from exc
 
 
+def _consumer_wide_binding(identity, *, purpose=None, path=None):
+    """The identity itself, when its consumer's whole research read is on the target route and no exact
+    window is registered for it (Phase F simplification, 2026-10-15/16).
+
+    Consumer-wide routes (`consumer_cutover`) carry no per-window authorization, so the Dispatcher cannot
+    pick a pre-registered window for them; the plan's own business identity is bound instead. An exact
+    registered window, valid or not, always wins and keeps failing as before. A consumer on the legacy
+    route, or without a route row, gets nothing here and is refused by the caller.
+    """
+    from .consumer_cutover import lookup
+
+    try:
+        with closing(joint._read(path)) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_cutover_routes'").fetchone():
+                for row in conn.execute("SELECT identity_json FROM scoped_cutover_routes WHERE boundary=?",
+                                        (plane.PROJECTION_READ,)):
+                    if _same_business(identity, RouteIdentity(**json.loads(row[0])), purpose=purpose):
+                        return None
+            wide = lookup(conn, plane.PROJECTION_READ, identity)
+    except sqlite3.Error:
+        return None
+    return identity if wide and wide["route"] == plane.ROUTE_TARGET else None
+
+
 def select(identity, *, workflow, as_of, explicit=None, path=None, purpose=None, config_dir=None):
     """Select one explicitly registered exact business window; ambiguity refuses.
 
@@ -110,6 +134,11 @@ def select(identity, *, workflow, as_of, explicit=None, path=None, purpose=None,
     Invalid windows are never filtered out merely to find a convenient survivor.
     """
     try:
+        wide = _consumer_wide_binding(identity, purpose=purpose, path=path)
+        if wide is not None:
+            from .runtime_reads import gate_read
+            gate_read(wide)
+            return wide
         if explicit is not None:
             supplied = explicit.as_row() if isinstance(explicit, RouteIdentity) else explicit
             who = RouteIdentity(**supplied) if "scope" in supplied else RouteIdentity(

@@ -855,3 +855,125 @@ def handover(token, *, to_owner, dispositions, actor, reason):
         except Exception:
             conn.rollback()
             raise
+
+
+# --------------------------------------------------------------------------- #
+# Light owner switch for research workflows (Phase F simplification, 2026-10-16)
+# --------------------------------------------------------------------------- #
+# `freeze`/`handover` above stay under the joint coordinator. This path is for the research workflows only
+# (never Chief, approval, Clerk or trading): one SQL transaction flips the workflow's template row and every
+# existing scope row, needs a recorded approval and a passing consumer health check to go to the Dispatcher, and
+# needs neither to come back. Unfinished claims must be voided on purpose; a running claim is never touched.
+RESEARCH_WORKFLOW_CONSUMER = {
+    "layer-review": "layer", "information-brief": "information", "sector-review": "sector",
+    "fundamental-routine": "fundamental", "fundamental-event": "fundamental",
+    "macro-review": "macro", "technical-review": "technical",
+}
+_OWNER_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS schedule_owner_log (
+ seq INTEGER PRIMARY KEY AUTOINCREMENT, workflow TEXT NOT NULL, action TEXT NOT NULL,
+ from_owner TEXT NOT NULL, to_owner TEXT NOT NULL, from_generation INTEGER NOT NULL,
+ to_generation INTEGER NOT NULL, actor TEXT NOT NULL, approval TEXT NOT NULL, reason TEXT NOT NULL,
+ scopes INTEGER NOT NULL, voided TEXT NOT NULL, health TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS schedule_owner_log_no_update BEFORE UPDATE ON schedule_owner_log
+BEGIN SELECT RAISE(ABORT,'schedule owner log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS schedule_owner_log_no_delete BEFORE DELETE ON schedule_owner_log
+BEGIN SELECT RAISE(ABORT,'schedule owner log is append-only'); END;
+"""
+
+
+def _dispatcher_preconditions(workflow, health_check):
+    """A workflow may go to the Dispatcher only when its consumer reads the target route and is healthy."""
+    from . import consumer_cutover, consumer_health
+
+    consumer = RESEARCH_WORKFLOW_CONSUMER[workflow]
+    route = next((row for row in consumer_cutover.status() if row["consumer_id"] == consumer), None)
+    if route is None or route["route"] != "target":
+        raise ScheduleAuthorityError(
+            f"{workflow}: the {consumer} research read is not on the target route; the Dispatcher cannot bind it")
+    health = (health_check or consumer_health.check)(consumer)
+    if health.get("status") != "ok":
+        raise ScheduleAuthorityError(f"{workflow}: {consumer} health check failed: {health.get('problems')}")
+    return {"consumer": consumer, "route": route["route"], "route_generation": route["generation"],
+            "health": {k: health.get(k) for k in ("status", "checked_at", "warnings")}}
+
+
+def owner_switch(workflow, *, to_owner, actor, reason, approval="", void_unfinished="", health_check=None):
+    """Move one research workflow between legacy and dispatcher. Returns the appended log row."""
+    if workflow not in RESEARCH_WORKFLOW_CONSUMER:
+        raise ScheduleAuthorityError(f"{workflow!r} is not a research workflow; it moves with its own protocol")
+    if to_owner not in {"legacy", "dispatcher"}:
+        raise ScheduleAuthorityError("owner must be legacy or dispatcher")
+    if not actor or not reason:
+        raise ScheduleAuthorityError("actor and reason are required")
+    if to_owner == "dispatcher" and not approval:
+        raise ScheduleAuthorityError("going to the Dispatcher requires the recorded approval text")
+    startup()
+    evidence = _dispatcher_preconditions(workflow, health_check) if to_owner == "dispatcher" else {}
+    with closing(_connect(write=True)) as conn:
+        conn.executescript(_OWNER_LOG_SCHEMA)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rows = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=?", (workflow,)).fetchall()
+            if not any(row["scope"] == "*" for row in rows):
+                raise ScheduleAuthorityError("workflow has no declared schedule owner")
+            if any(row["frozen"] for row in rows):
+                raise ScheduleAuthorityError("a scope of this workflow is frozen by the joint coordinator")
+            owners = {row["owner"] for row in rows}
+            if owners == {to_owner}:
+                raise ScheduleAuthorityError(f"{workflow} is already owned by {to_owner}")
+            if len(owners) != 1:
+                raise ScheduleAuthorityError("workflow has mixed SQL owners; resolve scopes individually first")
+            from_owner = next(iter(owners))
+            for row in rows:
+                if row["scope"] != "*":
+                    assert_scope_execution_records(conn, workflow, json.loads(row["scope"]))
+            unfinished = conn.execute(
+                "SELECT key,scope,status FROM schedule_runtime_claims WHERE workflow=? "
+                "AND status IN ('running','failed','pending')", (workflow,)).fetchall()
+            for row in unfinished:
+                if row["status"] != "running":
+                    continue
+                # A worker that already ended with an error after it had published something stays "running"
+                # (execute() only marks unpublished failures as failed). Its last history event proves it is
+                # not alive; only such a dead claim may be voided. A live one is never touched.
+                last = conn.execute("SELECT action FROM schedule_runtime_history WHERE key=? ORDER BY seq DESC LIMIT 1",
+                                    (row["key"],)).fetchone()
+                if last is None or last["action"] != "execution_error":
+                    raise ScheduleAuthorityError("a claim is still running; let it finish, a running claim is never voided")
+            if unfinished and not void_unfinished:
+                raise ScheduleAuthorityError(
+                    f"{len(unfinished)} unfinished claim(s) need an explicit disposition (void_unfinished=<reason>)")
+            for row in unfinished:
+                conn.execute("UPDATE schedule_runtime_claims SET status='void' WHERE key=?", (row["key"],))
+                _history(conn, "disposition", row["key"], {
+                    "kind": "void", "reason": void_unfinished, "actor": actor, "was": row["status"],
+                    "scope": row["scope"], "via": "owner_switch",
+                    **({"worker": "ended with execution_error"} if row["status"] == "running" else {})})
+            generation = max(row["generation"] for row in rows)
+            conn.execute("UPDATE schedule_scope_owners SET owner=?,generation=generation+1,frozen=0,token='' "
+                         "WHERE workflow=?", (to_owner, workflow))
+            entry = {"workflow": workflow, "action": "switch" if to_owner == "dispatcher" else "rollback",
+                     "from_owner": from_owner, "to_owner": to_owner, "from_generation": generation,
+                     "to_generation": generation + 1, "actor": actor, "approval": approval, "reason": reason,
+                     "scopes": len(rows), "voided": [row["key"] for row in unfinished],
+                     "health": evidence, "at": datetime.now(UTC).isoformat()}
+            conn.execute("INSERT INTO schedule_owner_log(workflow,action,from_owner,to_owner,from_generation,"
+                         "to_generation,actor,approval,reason,scopes,voided,health,at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (entry["workflow"], entry["action"], from_owner, to_owner, generation, generation + 1,
+                          actor, approval, reason, len(rows), canonical(entry["voided"]), canonical(evidence),
+                          entry["at"]))
+            _history(conn, "owner_switch", workflow, {**entry, "source_lifecycle": "unchanged"})
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return entry
+
+
+def owner_log(workflow=None):
+    with closing(_connect()) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='schedule_owner_log'").fetchone():
+            return []
+        sql = "SELECT * FROM schedule_owner_log" + (" WHERE workflow=?" if workflow else "") + " ORDER BY seq"
+        return [dict(row) for row in conn.execute(sql, (workflow,) if workflow else ())]

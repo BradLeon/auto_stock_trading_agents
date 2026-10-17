@@ -145,7 +145,7 @@ def test_fundamental_fails_when_a_financial_snapshot_is_unreadable(world):
 
 
 def test_a_consumer_without_a_defined_check_cannot_pass(world):
-    result = health.check("technical", now=NOW)
+    result = health.check("chief", now=NOW)      # a decision role: it never moves with the research-read switch
     assert result["status"] == "failed" and "cannot switch yet" in result["problems"][0]
 
 
@@ -183,3 +183,50 @@ def test_a_weekend_old_information_brief_still_counts_as_fresh_upstream(world):
     assert health.check("fundamental", now=NOW)["status"] == "ok"
     world.briefs = {"MRVL": fresh_brief(days=8)}
     assert health.check("fundamental", now=NOW)["status"] == "failed"
+
+
+# --- Technical: runtime price gateway (2026-10-16) -------------------------------------------------------
+def bar(symbol, *, days_old=1, status="succeeded"):
+    from datetime import timedelta as td
+
+    return SimpleNamespace(symbol=symbol, status=status, source="yfinance",
+                           bar_as_of=(NOW - td(days=days_old)).date())
+
+
+@pytest.fixture
+def prices(world, monkeypatch):
+    state = SimpleNamespace(answers=[], calls=0)
+    monkeypatch.setattr(health, "PRICE_RETRY_SECONDS", 0)
+
+    def fake(symbols):
+        state.calls += 1
+        answer = state.answers.pop(0) if state.answers else {}
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(health, "_price_history", fake)
+    return state
+
+
+def test_technical_is_healthy_when_the_universe_has_recent_bars(prices):
+    prices.answers = [{"MRVL": bar("MRVL"), "MSFT": bar("MSFT", days_old=3)}]
+    result = health.check("technical", now=NOW)
+    assert result["status"] == "ok" and result["warnings"] == [] and prices.calls == 1
+
+
+def test_technical_one_missing_or_stale_symbol_is_only_a_warning(prices):
+    prices.answers = [{"MRVL": bar("MRVL"), "MSFT": bar("MSFT", days_old=9)}]
+    result = health.check("technical", now=NOW)
+    assert result["status"] == "ok" and any("MSFT" in w for w in result["warnings"])
+
+
+def test_technical_retries_once_before_failing(prices):
+    prices.answers = [RuntimeError("yfinance down"), {"MRVL": bar("MRVL")}]
+    assert health.check("technical", now=NOW)["status"] == "ok" and prices.calls == 2
+
+
+def test_technical_fails_when_the_whole_universe_has_no_recent_bar_twice(prices):
+    prices.answers = [RuntimeError("down"), {"MRVL": bar("MRVL", status="failed"), "MSFT": bar("MSFT", days_old=30)}]
+    result = health.check("technical", now=NOW)
+    assert result["status"] == "failed" and prices.calls == 2
+    assert any("no symbol in the universe" in p for p in result["problems"])

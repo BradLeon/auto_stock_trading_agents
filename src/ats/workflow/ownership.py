@@ -12,7 +12,7 @@ import yaml
 
 from ..agent.task_projection import ProjectionScope
 from ..config import REPO_ROOT
-from .dispatcher import Dispatcher
+from .dispatcher import Dispatcher, default_data_vintage
 from .phase_e import TASK_ROLE, build_plan
 from .run_contracts import TriggerContext
 from .store import WorkflowStore
@@ -163,7 +163,7 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
     check_plan_reads(plan_factory(ctx, request_body, "read-preflight"))
     result = TriggerService(store, policy=policy).dispatch(
         ctx, request=request_body, plan_factory=plan_factory,
-        dispatcher=Dispatcher(workflow_store=store), now=now)
+        dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage), now=now)
     return {"workflow_id": workflow_id, "owner": mode, **result}
 
 
@@ -193,6 +193,22 @@ def phase_e_schedule_entries(*, config_dir: str | Path | None = None) -> dict[st
         entries[workflow_id] = {**value, "task_ids": task_ids,
                                 "scope": ProjectionScope.model_validate(value["scope"])}
     return entries
+
+
+_MACRO_SECTOR_WORKFLOWS = frozenset({"macro-review", "sector-review", "layer-review"})
+_PEAD_WORKFLOWS = frozenset({"information-brief", "fundamental-routine", "fundamental-event"})
+
+
+def event_trigger_enabled(workflow_id: str) -> bool:
+    """Is event-driven waking of this workflow allowed by the operator's `daily_stages` switches?"""
+    from ..config import get_config
+
+    stages = get_config().app.schedule.daily_stages
+    if workflow_id in _MACRO_SECTOR_WORKFLOWS:
+        return bool(stages.macro_sector_event_triggers)
+    if workflow_id in _PEAD_WORKFLOWS:
+        return bool(stages.pead_event_triggers)
+    return True
 
 
 def dispatch_calendar_event(event: Mapping[str, Any], *,
@@ -232,6 +248,12 @@ def dispatch_calendar_event(event: Mapping[str, Any], *,
         mode = owner_mode(workflow_id, config_dir=config_dir, scope=scope)
         if mode == "legacy":
             outcomes.append({"workflow_id": workflow_id, "owner": mode, "status": mode})
+            continue
+        if not event_trigger_enabled(workflow_id):
+            # The operator paused this family of event triggers (settings `schedule.daily_stages`). The legacy
+            # scheduler honoured that; the Dispatcher's calendar path did not read it at all, so handing a
+            # workflow to the Dispatcher would have silently turned the triggers back on (found 2026-10-17).
+            outcomes.append({"workflow_id": workflow_id, "owner": mode, "status": "event_trigger_paused"})
             continue
         workflow_store_for_owner(workflow_id, config_dir=config_dir, scope=scope).supersede_event(
             event_id=route.event_id, current_version=route.event_version, at=now)

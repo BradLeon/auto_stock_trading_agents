@@ -52,13 +52,22 @@ TASK_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "macro-review": (), "technical-review": (),
 }
 FRESHNESS_SECONDS: dict[str, int] = {
-    "layer-review": 7 * 86_400, "information-brief": 3_600,
-    "sector-review": 7 * 86_400, "fundamental-routine": 3_600,
+    # Information and Routine reuse while their data vintage is unchanged, up to 72 hours (user ruling
+    # 2026-10-16, TARGET §8.2-5): an unchanged document set or financial snapshot is never re-analysed.
+    # Layer and Sector are weekly (Saturday) reviews: reuse needs an unchanged data vintage (Layer: the evidence
+    # observation set and knowledge-note versions; Sector: cohort financials, consensus, FactSet, last NYSE
+    # session and the eight Layer projection ids). 7 days (one weekly cycle) only caps reuse where the vintage
+    # cannot see a change, such as the model or the prompt (10.5, 2026-10-17).
+    "layer-review": 7 * 86_400, "information-brief": 72 * 3_600,
+    "sector-review": 7 * 86_400, "fundamental-routine": 72 * 3_600,
     "fundamental-event": 4 * 86_400, "macro-review": 7 * 86_400,
-    "technical-review": 3_600,
+    "technical-review": 24 * 3_600,   # with its market-session vintage: reused within one session (2026-10-16)
 }
 TIMEOUT_SECONDS: dict[str, int] = {
-    "layer-review": 900, "information-brief": 900, "sector-review": 1_200,
+    # sector-review: the first real run took 21.4 minutes (12 structure-analyst calls alone 13 minutes on DeepSeek,
+    # 52 adjudications, one rotation). At the old 1200 s the Dispatcher would cancel the attempt and retry the whole
+    # review while the first worker kept calling the model, doubling the requests (10.5, 2026-10-17).
+    "layer-review": 900, "information-brief": 900, "sector-review": 3_600,
     "fundamental-routine": 900, "fundamental-event": 1_200,
     "macro-review": 900, "technical-review": 600,
 }

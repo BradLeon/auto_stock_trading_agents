@@ -272,7 +272,8 @@ def test_successful_review_publishes_a_layer_projection(monkeypatch):
     # 内容哈希稳定：同内容重发布得到同一投影标识
     env2 = layer_review._publish_projection(store, layer, v,
                                             input_refs=["obs-1"],
-                                            data_vintage_refs=["ds@2026-09-21"])
+                                            data_vintage_refs=["ds@2026-09-21"],
+                                            assessments=[_assessment("supportive")])
     assert env2 == env.projection_id
 
 

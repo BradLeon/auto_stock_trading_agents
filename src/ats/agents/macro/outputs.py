@@ -22,6 +22,13 @@ class SectorTiltView(BaseModel):
     rationale: str = ""
 
 
+class ScenarioView(BaseModel):
+    name: str = Field(description="情景名，如 基准 / 通胀回升 / 增长失速")
+    description: str = Field(default="", description="该情景下宏观环境如何演变，一到两句")
+    trigger: str = Field(default="", description="具体可观测的触发条件（指标+阈值或事件），不要写“如果恶化”")
+    sector_impact: str = Field(default="", description="对板块倾斜（尤其 AI 硬件链）的影响")
+
+
 class MacroReviewLLMView(BaseModel):
     regime: str = Field(description="risk-on/neutral/risk-off + 周期位置，一句话自包含（会被注入其他 agent）")
     summary: str = Field(default="", description="5-10 行总评，面向 prep/monitor/行业分析师读者")
@@ -44,7 +51,7 @@ class MacroReviewLLMView(BaseModel):
     # whole review failed validation, and run() fell back to the PRIOR week's
     # review — stale macro background feeding five downstream agents with nothing
     # on screen to say so. Coerce instead of discarding the call.
-    @field_validator("sector_tilts", "themes", mode="before")
+    @field_validator("sector_tilts", "themes", "scenarios", mode="before")
     @classmethod
     def _objlists(cls, v):
         return _as_objlist(v)
@@ -54,6 +61,11 @@ class MacroReviewLLMView(BaseModel):
     def _strlists(cls, v):
         return _as_strlist(v)
 
+    scenarios: list[ScenarioView] = Field(
+        default_factory=list,
+        description=("2-3 个情景（基准情景必须在内），每个给出可观测的触发条件和对板块倾斜的影响；"
+                     "与 falsifier 互补：falsifier 说什么推翻本判断，情景说推翻后会走向哪里。"))
+    horizon: str = Field(default="", description="本判断适用的时间范围，如 未来 4-8 周，并说明下次需要重估的时点")
     falsifier: str = Field(
         default="",
         description=("什么**具体可观测**的事件会推翻这次判断。"

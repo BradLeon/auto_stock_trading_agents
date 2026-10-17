@@ -30,7 +30,7 @@ import json
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, ClassVar, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -89,13 +89,65 @@ class _Payload(BaseModel):
 
     schema_name: str = ""
     schema_version: str = "v1"
+    # Additive fields (2026-10-17, TARGET §7.3 enrichment). An EMPTY value is left out of the dump, so a payload
+    # that does not use them hashes exactly as it did before they existed: historical projections stay valid,
+    # keep their content hash and need no re-run. A non-empty value is hash-bound like any other field.
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     def role_schema_name(cls) -> str:
         return cls.model_fields["schema_name"].default or cls.__name__
 
     def payload_json(self) -> str:
-        return json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        body = self.model_dump(mode="json")
+        for name in self._OMIT_WHEN_EMPTY:
+            if body.get(name) in (None, "", [], {}):
+                body.pop(name, None)
+        return json.dumps(body, ensure_ascii=False, sort_keys=True)
+
+
+class _Item(BaseModel):
+    """A structured entry inside an additive field: strict, so a typo cannot hide data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LayerEntity(_Item):
+    symbol: str = Field(min_length=1)
+    role: Literal["member", "witness"] = "member"
+
+
+class CrossSectionRow(_Item):
+    """One name's standing inside the layer, from the evidence readings (not from financials)."""
+
+    symbol: str = Field(min_length=1)
+    rank: int | None = Field(default=None, ge=1)
+    standing: str = ""                  # strong | neutral | weak | unknown
+    basis: str = ""                     # corroborated | self_reported | thin
+    evidence_clusters: int = Field(default=0, ge=0)
+    stance_classes: int = Field(default=0, ge=0)
+    claims: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class EvidenceItem(_Item):
+    claim_id: str = Field(min_length=1)
+    statement: str = ""
+    verdict: str = ""
+    basis: str = ""
+    coverage: str = ""
+    evidence_clusters: int = Field(default=0, ge=0)
+    observation_ids: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class DivergentEvidence(_Item):
+    claim_id: str = Field(min_length=1)
+    verdict: str = ""
+    unresolved_reason: str = ""
+    dissenters: list[str] = Field(default_factory=list)
+    silent_witnesses: list[str] = Field(default_factory=list)
+    note: str = ""
 
 
 class LayerAnalysisPayload(_Payload):
@@ -107,6 +159,21 @@ class LayerAnalysisPayload(_Payload):
     summary: str = Field(min_length=1)
     findings: list[str] = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
+    # --- TARGET §7.3 additive fields ---
+    cycle_position: str = ""
+    has_claims: bool | None = None
+    reversal_triggers: list[str] = Field(default_factory=list)
+    entities: list[LayerEntity] = Field(default_factory=list)
+    cross_section: list[CrossSectionRow] = Field(default_factory=list)
+    cross_section_basis: str = ""       # what the ranking rests on, e.g. "evidence_readings"
+    cross_section_coverage: str = ""    # e.g. "5/6 members read"
+    common_evidence: list[EvidenceItem] = Field(default_factory=list)
+    divergent_evidence: list[DivergentEvidence] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
+        "cycle_position", "has_claims", "reversal_triggers", "entities", "cross_section",
+        "cross_section_basis", "cross_section_coverage", "common_evidence", "divergent_evidence", "gaps")
 
     @field_validator("findings", mode="before")
     @classmethod
@@ -163,6 +230,27 @@ class InformationBriefPayload(_Payload):
         return _as_list(value)
 
 
+class LayerAllocation(_Item):
+    layer: str = Field(min_length=1)
+    status: str = ""                    # the layer analyst's own status
+    allocation: str = ""                # the sector analyst's call: 超配 / 标配 / 低配 / 清仓
+    budget: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    cycle_position: str = ""
+    projection_ref: str = ""            # the LayerAnalysis projection this rests on
+    gaps: list[str] = Field(default_factory=list)
+
+
+class NameAllocation(_Item):
+    symbol: str = Field(min_length=1)
+    layer: str = ""
+    subgroup: str = ""
+    view: str = ""                      # 增持 | 持有 | 减持
+    weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    rationale: str = ""
+    self_reported_only: bool | None = None
+
+
 class SectorAllocationPayload(_Payload):
     """Where capital should sit within a sector, relative to the book."""
 
@@ -172,6 +260,16 @@ class SectorAllocationPayload(_Payload):
     target_weight: float = Field(ge=0.0, le=1.0)
     rationale: str = Field(min_length=1)
     drivers: list[str] = Field(default_factory=list)
+    # --- TARGET §7.3 additive fields: sector -> layer -> name, each with its fact references ---
+    layers: list[LayerAllocation] = Field(default_factory=list)
+    names: list[NameAllocation] = Field(default_factory=list)
+    fact_refs: list[str] = Field(default_factory=list)
+    rotation_available: bool | None = None
+    rotation_advice: str = ""
+    missing_layers: list[str] = Field(default_factory=list)
+
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
+        "layers", "names", "fact_refs", "rotation_available", "rotation_advice", "missing_layers")
 
     @field_validator("drivers", mode="before")
     @classmethod
@@ -280,6 +378,27 @@ class FundamentalEventReviewPayload(_Payload):
         return self
 
 
+class MacroTransmission(_Item):
+    theme: str = Field(min_length=1)
+    label: str = ""
+    direction: str = ""
+    transmission: str = ""
+    signal: str = ""
+
+
+class MacroScenario(_Item):
+    name: str = Field(min_length=1)
+    description: str = ""
+    trigger: str = ""
+    sector_impact: str = ""
+
+
+class MacroTilt(_Item):
+    sector: str = Field(min_length=1)
+    stance: str = ""
+    rationale: str = ""
+
+
 class MacroReviewPayload(_Payload):
     """The regime read that frames every other role's assumptions."""
 
@@ -287,6 +406,24 @@ class MacroReviewPayload(_Payload):
     regime: Literal["risk_on", "risk_off", "transition", "unclear"]
     summary: str = Field(min_length=1)
     indicators: list[str] = Field(min_length=1)
+    # --- TARGET §7.3 additive fields ---
+    # `regime` above is derived by code from the quadrant (deterministic, checkable); `narrative_regime` is the
+    # review's own one-line wording. They can legitimately differ and are both shown, labelled.
+    narrative_regime: str = ""
+    quadrant: str = ""
+    quadrant_state: str = ""
+    rate_path: str = ""
+    transmission: list[MacroTransmission] = Field(default_factory=list)
+    scenarios: list[MacroScenario] = Field(default_factory=list)
+    horizon: str = ""
+    risks: list[str] = Field(default_factory=list)
+    falsifier: str = ""
+    sector_tilts: list[MacroTilt] = Field(default_factory=list)
+    asset_implications: str = ""
+
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
+        "narrative_regime", "quadrant", "quadrant_state", "rate_path", "transmission", "scenarios",
+        "horizon", "risks", "falsifier", "sector_tilts", "asset_implications")
 
     @field_validator("indicators", mode="before")
     @classmethod
@@ -302,6 +439,19 @@ class TechnicalReviewPayload(_Payload):
     signal: Literal["bullish", "bearish", "neutral"]
     summary: str = Field(min_length=1)
     levels: dict[str, float] = Field(default_factory=dict)
+    # --- TARGET §7.3 additive fields, all computed by code (no model call) ---
+    trend_state: str = ""
+    score: int | None = Field(default=None, ge=0, le=7)
+    score_detail: dict[str, bool] = Field(default_factory=dict)
+    suggested_exposure: float | None = Field(default=None, ge=0.0, le=1.0)   # a CEILING, not an order
+    previous_exposure: float | None = Field(default=None, ge=0.0, le=1.0)
+    invalidation: list[str] = Field(default_factory=list)
+    panic_fired: bool | None = None
+    bear_fired: bool | None = None
+
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
+        "trend_state", "score", "score_detail", "suggested_exposure", "previous_exposure", "invalidation",
+        "panic_fired", "bear_fired")
 
     @field_validator("levels", mode="before")
     @classmethod

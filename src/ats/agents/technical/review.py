@@ -181,6 +181,64 @@ def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float
     return closes, vix, v3, notes
 
 
+def projection_extras(r, review) -> dict:
+    """The TARGET §7.3 fields of a technical projection: trend state, invalidation, suggested exposure.
+
+    Entirely code: every statement is a threshold the strategy already uses (SMA200 bear cap, VIX/VIX3M panic
+    ratio, the score bands behind `signal`), so no model call is involved and each line can be checked against
+    the numbers beside it. `suggested_exposure` is the strategy's exposure CEILING, not an order.
+    """
+    from ...config import load_technical_config
+    from .strategy import BEAR_PRICE_CAP, PANIC_TERM_RATIO
+
+    try:       # the configured thresholds, not the code defaults, are what the strategy actually applied
+        par = _params(load_technical_config(review.name))
+        PANIC_RATIO, BEAR_CAP = par["panic_ratio"], par["bear_cap"]
+    except Exception:  # noqa: BLE001 - a config read failure must not drop the projection
+        PANIC_RATIO, BEAR_CAP = PANIC_TERM_RATIO, BEAR_PRICE_CAP
+
+    detail = {k: bool(v) for k, v in (r.score_detail or {}).items()
+              if isinstance(v, bool)}
+    above = [name for name, key in (("20日线", "above_sma20"), ("50日线", "above_sma50"),
+                                    ("200日线", "above_sma200")) if detail.get(key)]
+    below = [name for name, key in (("20日线", "above_sma20"), ("50日线", "above_sma50"),
+                                    ("200日线", "above_sma200")) if key in detail and not detail[key]]
+    trend = f"评分 {r.score}/7"
+    if above:
+        trend += " · 收盘价在" + "、".join(above) + "之上"
+    if below:
+        trend += " · 收盘价在" + "、".join(below) + "之下"
+    if r.panic_fired:
+        trend += " · 恐慌层已触发（期限结构倒挂）"
+    if r.bear_fired:
+        trend += " · 熊市层已触发（跌破200日线）"
+
+    out = []
+    if r.sma200 is not None:
+        if r.bear_fired:
+            out.append(f"收盘价站回 200 日线 {r.sma200:.2f} 之上：解除熊市层对敞口的上限（现为 {BEAR_CAP:.0%}）")
+        else:
+            out.append(f"收盘价跌破 200 日线 {r.sma200:.2f}：触发熊市层，敞口上限降至 {BEAR_CAP:.0%}")
+    ratio = (review.vix / review.vix3m) if review.vix and review.vix3m else None
+    if r.panic_fired:
+        out.append(f"VIX/VIX3M 回落到 {PANIC_RATIO:.2f} 以下：解除恐慌层（敞口上限现为 0）")
+    elif ratio is not None:
+        out.append(f"VIX/VIX3M 升至 {PANIC_RATIO:.2f} 及以上（现为 {ratio:.2f}）：触发恐慌层，敞口上限归零")
+    for label, level, key in (("50日线", r.sma50, "above_sma50"), ("20日线", r.sma20, "above_sma20")):
+        if level is not None and detail.get(key):
+            out.append(f"收盘价跌破{label} {level:.2f}：对应的趋势分项失效，评分下降")
+    if r.score >= 5:
+        out.append("评分降到 4 及以下：信号不再为看多")
+    elif r.score <= 2:
+        out.append("评分升到 3 及以上：信号不再为看空")
+    else:
+        out.append("评分升到 5 及以上转看多；降到 2 及以下转看空")
+    return {"trend_state": trend, "score": r.score, "score_detail": detail,
+            "suggested_exposure": round(float(r.target_exposure), 4),
+            "previous_exposure": (None if r.prev_exposure is None else round(float(r.prev_exposure), 4)),
+            "invalidation": out, "panic_fired": bool(r.panic_fired), "bear_fired": bool(r.bear_fired)}
+
+
 def _publish_projection(store, review: TechnicalReview) -> int:
     """Publish each usable reading as a `technical_review` projection (entity scope).
 
@@ -208,7 +266,8 @@ def _publish_projection(store, review: TechnicalReview) -> int:
             envelope = build_envelope(
                 role="technical_review",
                 payload={"entity": r.symbol, "signal": signal,
-                         "summary": r.one_line(), "levels": levels},
+                         "summary": r.one_line(), "levels": levels,
+                         **projection_extras(r, review)},
                 scope=ProjectionScope(kind="entity", id=r.symbol),
                 as_of=review.as_of.isoformat(timespec="seconds"),
                 model_version=f"deterministic:{review.strategy}@{review.fingerprint}",

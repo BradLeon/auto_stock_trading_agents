@@ -165,6 +165,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
                 as_of=datetime.fromisoformat(envelope.as_of.replace("Z", "+00:00")),
                 layer_status=payload["status"], confidence=payload["confidence"],
                 claim_attributions=list(payload["findings"]),
+                cycle_position=payload.get("cycle_position", ""),
+                reversal_triggers=list(payload.get("reversal_triggers", [])),
                 rationale=payload["summary"], has_claims=bool(layer.claims),
                 cross_section_applicable=bool(basket is not None
                                                and basket.cross_section_applicable))
@@ -248,7 +250,9 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
 
     # 3.7：配置结论以 SectorAllocation 投影发布，input_refs 记录本轮消费的全部
     # 层级投影标识，使配置可追溯到具体的层级判断。
-    _publish_allocation_projection(store, name, review, budgets, projection_refs)
+    _publish_allocation_projection(store, name, review, budgets, projection_refs,
+                                   missing_layers=[k for k, _reason in projection_missing],
+                                   rotation_available=view is not None)
 
     if write_reports:
         try:
@@ -346,7 +350,61 @@ def _evidence_conflicts(cfg, verdicts) -> list[str]:
     return out
 
 
-def _publish_allocation_projection(store, name, review, budgets, projection_refs) -> str | None:
+def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), rotation_available=None) -> dict:
+    """TARGET §7.3: the three-level allocation (sector -> layer -> name) with its fact references.
+
+    Everything here already exists in the review (layer verdicts, per-layer budgets, baskets, name calls);
+    until 2026-10-17 only the sector-level stance reached the projection, so the Chief could not see layers or
+    names. Lists are capped (5 names per layer) to keep the projection readable inside the Chief's prompt.
+    """
+    from ...schemas.sector import allocation_for_status
+
+    baskets = {b.layer_key: b for b in review.baskets}
+    layers, names = [], []
+    for v in review.layer_verdicts:
+        gaps = []
+        if not v.has_claims:
+            gaps.append("本层无命题")
+        if v.layer_key in missing_layers:
+            gaps.append("层级投影缺失或不兼容，按标配保守处理")
+        layers.append({"layer": v.layer_key, "status": v.layer_status,
+                       "allocation": allocation_for_status(v.layer_status),
+                       "budget": (None if budgets.get(v.layer_key) is None
+                                  else max(0.0, min(1.0, float(budgets[v.layer_key])))),
+                       "confidence": v.confidence, "cycle_position": v.cycle_position,
+                       "projection_ref": projection_refs.get(v.layer_key, ""), "gaps": gaps})
+        rows = {r.symbol: r for r in (baskets[v.layer_key].rows if v.layer_key in baskets else [])}
+        picked = []
+        for c in v.name_calls:
+            row = rows.get(c.symbol)
+            picked.append({"symbol": c.symbol, "layer": v.layer_key, "subgroup": c.subgroup or (row.subgroup if row else ""),
+                           "view": c.stance, "weight": (None if row is None or not row.data_ok
+                                                        else max(0.0, min(1.0, float(row.weight)))),
+                           "rationale": (c.rationale or "")[:200], "self_reported_only": c.self_reported_only,
+                           "_rank": row.rank if row else 10**6})
+        if not picked:
+            # No analyst name calls (the Dispatcher path builds layer verdicts from projections, which carry
+            # none): fall back to the cross-section basket itself — rank, weight and the structure analyst's note.
+            for sym, row in rows.items():
+                if row.data_ok:
+                    picked.append({"symbol": sym, "layer": v.layer_key, "subgroup": row.subgroup, "view": "",
+                                   "weight": max(0.0, min(1.0, float(row.weight))),
+                                   "rationale": (row.rationale or "")[:200], "self_reported_only": None,
+                                   "_rank": row.rank})
+        picked.sort(key=lambda n: n["_rank"])
+        for n in picked[:5]:
+            n.pop("_rank")
+            names.append(n)
+    out = {"layers": layers, "names": names, "fact_refs": sorted(projection_refs.values())[:20],
+           "rotation_advice": (review.rotation_advice or "").strip()[:400],
+           "missing_layers": sorted(missing_layers)}
+    if rotation_available is not None:
+        out["rotation_available"] = bool(rotation_available)
+    return out
+
+
+def _publish_allocation_projection(store, name, review, budgets, projection_refs, *,
+                                   missing_layers=(), rotation_available=None) -> str | None:
     """把本轮配置结论发布为 `sector_allocation` 投影（3.7）。Best-effort。"""
     from ...agent.task_projection import ProjectionScope, build_envelope
 
@@ -365,7 +423,9 @@ def _publish_allocation_projection(store, name, review, budgets, projection_refs
         envelope = build_envelope(
             role="sector_allocation",
             payload={"sector": name, "stance": stance, "target_weight": target_weight,
-                     "rationale": rationale, "drivers": drivers},
+                     "rationale": rationale, "drivers": drivers,
+                     **allocation_extras(review, budgets, projection_refs, missing_layers=missing_layers,
+                                         rotation_available=rotation_available)},
             scope=ProjectionScope(kind="sector", id=name),
             as_of=review.as_of.isoformat(timespec="seconds"),
             input_refs=sorted(projection_refs.values()))

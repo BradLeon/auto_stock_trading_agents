@@ -78,6 +78,13 @@ class ThemeAssess(BaseModel):
     note: str = ""
 
 
+class MacroScenario(BaseModel):
+    name: str
+    description: str = ""
+    trigger: str = ""
+    sector_impact: str = ""
+
+
 class SectorTilt(BaseModel):
     sector: str                        # 板块/行业名（自由文本，如 半导体/能源/公用事业）
     stance: str = "中性"               # 超配 | 中性 | 低配
@@ -337,6 +344,10 @@ class MacroReview(BaseModel):
     themes: list[ThemeAssess] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
     falsifier: str = ""                # 什么观察会推翻这次判断（必须具体可观测）
+    # TARGET §7.3 (2026-10-17): scenarios and the validity window. Default-empty so rows written before they
+    # existed still revalidate out of `macro_reviews.payload`.
+    scenarios: list[MacroScenario] = Field(default_factory=list)
+    horizon: str = ""
     factset_earnings_assessment: FactSetEarningsAssessment | None = None
 
     def quadrant_brief(self) -> str:

@@ -421,11 +421,11 @@ def _patch_series(monkeypatch, series):
     Same stubbing pattern the rest of tests/test_macro_strategy.py uses.
     """
     from ats.agents.macro import assemble
-    from ats.data import macro as macro_data
+    from ats.data.products import macro_inputs
 
-    monkeypatch.setattr(macro_data, "fetch_series", lambda years=11: series)
+    monkeypatch.setattr(macro_inputs, "macro_series_histories", lambda **_k: series)
     monkeypatch.setattr(
-        macro_data, "series_spec",
+        macro_inputs, "series_spec",
         lambda: {k: (k.upper(), k, "pct" if k.endswith(("_10y", "oas")) else "index",
                      "daily") for k in series})
     monkeypatch.setattr(assemble, "build",

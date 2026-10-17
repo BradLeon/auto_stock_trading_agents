@@ -285,6 +285,16 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
     # checklist item — so it gets its own section rather than a footnote.
     if review.falsifier:
         lines += ["", "## 证伪条件（什么观察会推翻这次判断）", "", review.falsifier]
+    if review.scenarios:
+        lines += ["", "## 情景", ""]
+        for x in review.scenarios:
+            lines.append(f"- **{x.name}**：{x.description}")
+            if x.trigger:
+                lines.append(f"  - 触发条件：{x.trigger}")
+            if x.sector_impact:
+                lines.append(f"  - 对板块倾斜的影响：{x.sector_impact}")
+    if review.horizon:
+        lines += ["", "## 适用时间范围", "", review.horizon]
 
     lines += [""] + _indicator_appendix(review)
     lines += ["---", f"*数据截至 {review.as_of:%Y-%m-%d %H:%M} UTC*", ""]
@@ -301,5 +311,27 @@ def write(review: MacroReview, cfg: MacroConfig) -> Path | None:
         log.warning("macro report: output_dir missing — skipped: %s", folder)
         return None
     path = folder / f"宏观分析-{cfg.label}-{review.as_of:%Y-%m-%d}.md"
+    path.write_text(render(review, cfg), encoding="utf-8")
+    return path
+
+
+def write_new_version(review: MacroReview, cfg: MacroConfig) -> Path | None:
+    """Write the weekly report without ever replacing an existing file.
+
+    The Dispatcher path (2026-10-17) may run on a day the CLI already wrote its report; the first file of
+    the day keeps the plain name and later ones get `-v2`, `-v3`, ... so each run stays readable on its own.
+    """
+    if not cfg.output_dir:
+        log.info("macro report: output_dir unset — skipped")
+        return None
+    folder = Path(cfg.output_dir)
+    if not folder.is_dir():
+        log.warning("macro report: output_dir missing — skipped: %s", folder)
+        return None
+    stem = f"宏观分析-{cfg.label}-{review.as_of:%Y-%m-%d}"
+    path, version = folder / f"{stem}.md", 1
+    while path.exists():
+        version += 1
+        path = folder / f"{stem}-v{version}.md"
     path.write_text(render(review, cfg), encoding="utf-8")
     return path

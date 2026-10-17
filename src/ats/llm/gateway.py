@@ -43,6 +43,15 @@ class StructuredOutputModel:
         return self._model.with_structured_output(schema, **kwargs)
 
 
+def reasoning_body(reasoning) -> dict | None:
+    """OpenRouter `reasoning` request field for a role's setting (None = leave the provider default)."""
+    if reasoning is None:
+        return None
+    if reasoning == "off":
+        return {"reasoning": {"enabled": False}}
+    return {"reasoning": {"max_tokens": int(reasoning)}}
+
+
 @lru_cache(maxsize=None)
 def get_model(role: str) -> Any:
     """Return a configured LangChain chat model for the given agent role.
@@ -100,11 +109,13 @@ def get_model(role: str) -> Any:
         # OpenRouter (optional) attribution headers — harmless against vanilla OpenAI.
         headers = {"HTTP-Referer": "https://github.com/ats", "X-Title": "ats"} \
             if base_url and "openrouter" in base_url else None
+        extra = reasoning_body(rc.reasoning) if base_url and "openrouter" in base_url else None
         value = ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.openai_api_key or None,
             base_url=base_url,
             default_headers=headers,
+            **({"extra_body": extra} if extra else {}),
             **common,
         )
         return (StructuredOutputModel(value, rc.structured_output_method)

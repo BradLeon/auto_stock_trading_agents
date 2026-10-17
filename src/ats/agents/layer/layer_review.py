@@ -163,6 +163,20 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
         log.info("layer %s: no-llm run — no status judgement produced", layer.key)
         return None, False
 
+    if assessments is None and has_claims:
+        # A caller that does not bring the claim verdicts (the single-layer CLI and the Dispatcher adapter)
+        # must still get them judged against the SAME ones the prompt shows. Left as None, `_to_verdict`
+        # read "no verdict at all" and forced every layer with evidence to steady / confidence 0.3 with an
+        # "evidence missing" note (found 2026-10-17, first Layer production run). Computed once, here, so
+        # the prompt and the guards share one engine output and no extra model call is made.
+        from ..sector import assemble
+
+        try:
+            assessments = assemble.layer_assessments(cfg, layer, allow_llm=True)
+        except Exception as exc:  # noqa: BLE001 - an unreadable ledger is an evidence gap, not a crash
+            log.warning("layer %s: claim assessment failed (%s): treated as an evidence gap", layer.key, exc)
+            assessments = []
+
     ctx = build_context(cfg, layer, basket=basket, prior=prior,
                         snapshot_block=snapshot_block, assessments=assessments)
     try:
@@ -178,12 +192,90 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
                           assessments=assessments)
     if store is not None:
         _publish_projection(store, layer, verdict, workflow_run_id=workflow_run_id,
-                            input_refs=input_refs, data_vintage_refs=data_vintage_refs)
+                            input_refs=input_refs, data_vintage_refs=data_vintage_refs,
+                            assessments=assessments)
     return verdict, True
 
 
+_STANDING_RANK = {"strong": 3, "neutral": 2, "weak": 1, "unknown": 0}
+_BASIS_RANK = {"corroborated": 2, "self_reported": 1, "thin": 0}
+_SUPPORTIVE = {"supportive", "resolved"}
+_DIVERGENT = {"contradicted", "mixed"}
+
+
+def projection_extras(layer, verdict: LayerVerdict, assessments=None) -> dict:
+    """TARGET §7.3 fields of a LayerAnalysis: entities, cross-section, common / divergent evidence.
+
+    The ranking rests on the evidence readings the engine already produced (`EntityReading`: standing, basis,
+    cluster count), NOT on financials — those cover few names — and says so in `cross_section_basis`.
+    Lists are capped so the projection stays readable inside the Chief's prompt.
+    """
+    assessments = [a for a in (assessments or []) if getattr(a, "layer", layer.key) in ("", layer.key)]
+    claims = {c.id: c for c in layer.claims}
+    members = [t.symbol.upper() for t in layer.tickers]
+    witnesses = []
+    for claim in layer.claims:
+        for w in claim.witnesses:
+            sym = w.entity.upper()
+            if sym not in members and sym not in witnesses:
+                witnesses.append(sym)
+    entities = ([{"symbol": m, "role": "member"} for m in members]
+                + [{"symbol": w, "role": "witness"} for w in witnesses])[:24]
+
+    readings: dict[str, dict] = {}
+    for a in assessments:
+        for r in getattr(a, "entity_readings", None) or []:
+            sym = r.entity.upper()
+            row = readings.setdefault(sym, {"claims": [], "best": None})
+            row["claims"].append(a.claim_id)
+            key = (_STANDING_RANK.get(r.standing, 0), _BASIS_RANK.get(r.basis, 0), r.evidence_clusters)
+            if row["best"] is None or key > row["best"][0]:
+                row["best"] = (key, r)
+    ranked = sorted(readings.items(), key=lambda kv: kv[1]["best"][0], reverse=True)
+    cross = []
+    for i, (sym, row) in enumerate(ranked[:12], start=1):
+        r = row["best"][1]
+        cross.append({"symbol": sym, "rank": i, "standing": r.standing, "basis": r.basis,
+                      "evidence_clusters": r.evidence_clusters, "stance_classes": r.stance_classes,
+                      "claims": sorted(set(row["claims"]))[:6], "reason": (r.reason or "")[:240]})
+    unread = [m for m in members if m not in readings]
+    for sym in unread[: max(0, 12 - len(cross))]:
+        cross.append({"symbol": sym, "rank": None, "standing": "unknown", "basis": "thin",
+                      "reason": "本层命题没有读到该标的的证据"})
+
+    def statement(claim_id):
+        c = claims.get(claim_id)
+        return (c.statement if c else "")[:200]
+
+    common, divergent = [], []
+    for a in assessments:
+        if getattr(a, "entity_readings", None):
+            continue                                   # cross-section claims are in `cross_section`
+        if a.verdict in _SUPPORTIVE:
+            common.append({"claim_id": a.claim_id, "statement": statement(a.claim_id), "verdict": a.verdict,
+                           "basis": a.basis, "coverage": a.coverage, "evidence_clusters": a.evidence_clusters,
+                           "observation_ids": list(a.observation_ids)[:5], "note": (a.note or "")[:200]})
+        elif a.verdict in _DIVERGENT or a.dissenters or a.unresolved_reason:
+            divergent.append({"claim_id": a.claim_id, "verdict": a.verdict,
+                              "unresolved_reason": a.unresolved_reason, "dissenters": list(a.dissenters)[:6],
+                              "silent_witnesses": list(a.silent_witnesses)[:8], "note": (a.note or "")[:200]})
+    gaps = []
+    if not verdict.has_claims:
+        gaps.append("本层没有声明命题（配置缺口）")
+    if not verdict.cross_section_applicable:
+        gaps.append("本层可比样本不足，没有层内排序")
+    extras = {"cycle_position": verdict.cycle_position, "has_claims": verdict.has_claims,
+              "reversal_triggers": list(verdict.reversal_triggers)[:6], "entities": entities,
+              "cross_section": cross, "common_evidence": common[:8], "divergent_evidence": divergent[:8],
+              "gaps": gaps}
+    if readings:
+        extras["cross_section_basis"] = "evidence_readings"
+        extras["cross_section_coverage"] = f"{len(readings)}/{len(members)} members read" if members else ""
+    return extras
+
+
 def _publish_projection(store, layer, verdict: LayerVerdict, *, workflow_run_id: str = "",
-                        input_refs=None, data_vintage_refs=None) -> str | None:
+                        input_refs=None, data_vintage_refs=None, assessments=None) -> str | None:
     """Publish the verdict as a `layer_analysis` projection (tasks 2.5/2.6).
 
     Idempotent by content: the envelope's projection id IS the content hash, and the
@@ -201,7 +293,8 @@ def _publish_projection(store, layer, verdict: LayerVerdict, *, workflow_run_id:
             role="layer_analysis",
             payload={"layer": layer.key, "status": verdict.layer_status,
                      "summary": summary, "findings": findings,
-                     "confidence": verdict.confidence},
+                     "confidence": verdict.confidence,
+                     **projection_extras(layer, verdict, assessments)},
             scope=ProjectionScope(kind="layer", id=layer.key),
             as_of=verdict.as_of.isoformat(timespec="seconds"),
             input_refs=input_refs, data_vintage_refs=data_vintage_refs,

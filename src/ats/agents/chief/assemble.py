@@ -676,9 +676,14 @@ def projection_context_block(detail: list[dict]) -> str:
         payload = best.get("payload") or {}
         if task_id == "layer_analysis":
             head += f" · status={payload.get('status')} · {payload.get('summary', '')[:80]}"
+            if payload.get("cross_section"):
+                head += f" · 横截面 {len(payload['cross_section'])} 个标的（依据 {payload.get('cross_section_basis', '')}）"
         elif task_id == "sector_allocation":
             head += (f" · stance={payload.get('stance')} · "
                      f"target_weight={payload.get('target_weight')}")
+            if payload.get("layers"):
+                head += (f" · {len(payload['layers'])} 层 / {len(payload.get('names', []))} 个标的"
+                         + ("" if payload.get("rotation_available") in (None, True) else " · 轮动合成不可用"))
         elif task_id in ("fundamental_expectation_update",
                          "fundamental_event_review"):
             if "direction" in payload:
@@ -691,8 +696,13 @@ def projection_context_block(detail: list[dict]) -> str:
             head += f" · {(payload.get('narrative') or payload.get('driver') or '')[:80]}"
         elif task_id == "macro_review":
             head += f" · regime={payload.get('regime')} · {payload.get('summary', '')[:80]}"
+            if payload.get("quadrant"):
+                head += (f" · 象限={payload['quadrant']}({payload.get('quadrant_state', '')})"
+                         f" · 叙事 regime={payload.get('narrative_regime', '')[:60]}")
         elif task_id == "technical_review":
             head += f" · signal={payload.get('signal')} · {payload.get('summary', '')[:80]}"
+            if payload.get("suggested_exposure") is not None:
+                head += f" · 建议敞口上限={payload['suggested_exposure']:.0%}（非交易指令）"
         elif task_id == "information_brief":
             head += f" · {payload.get('headline', '')[:80]}"
         return head

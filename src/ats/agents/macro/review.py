@@ -16,6 +16,7 @@ from ...schemas.macro_strategy import (
     FactSetObservationSummary,
     MacroConfig,
     MacroReview,
+    MacroScenario,
     SectorTilt,
     ThemeAssess,
 )
@@ -80,16 +81,15 @@ def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
     """
     if not live_data:
         return {}
-    # FRED/yfinance indicators are time-sensitive runtime inputs.  They are
-    # intentionally kept behind the runtime facade instead of being treated as
-    # governed, persisted structured observations.
-    from ...data.runtime import macro as macro_data
+    # Indicator histories are governed observations collected by the data platform
+    # (`macro_series_feeds`); the review reads them and never calls a provider.
+    from ...data.products import macro_inputs
 
-    series = macro_data.fetch_series()
+    series = macro_inputs.macro_series_histories()
     if not series:
         log.warning("macro: no indicator series available; regime layer skipped")
         return {}
-    readings = indicators.build_readings(series, macro_data.series_spec())
+    readings = indicators.build_readings(series, macro_inputs.series_spec())
     out = regime.assess(
         series, readings, overrides=cfg.regime,
         prior_quadrant=(prior.quadrant if prior else None),
@@ -255,6 +255,30 @@ _REGIME_BY_QUADRANT = {
 }
 
 
+def projection_extras(review: MacroReview) -> dict:
+    """TARGET §7.3 fields of a MacroReview projection, all taken from the persisted review.
+
+    `regime` in the payload is derived by code from the quadrant; `narrative_regime` carries the review's own
+    wording so the two are both visible (and labelled) instead of one silently replacing the other.
+    """
+    return {
+        "narrative_regime": (review.regime or "").strip()[:300],
+        "quadrant": str(review.quadrant), "quadrant_state": str(review.quadrant_state),
+        "rate_path": (review.rate_path or "").strip()[:400],
+        "transmission": [{"theme": t.key, "label": t.label, "direction": t.direction[:200],
+                          "transmission": t.transmission[:300], "signal": t.signal}
+                         for t in (review.themes or [])[:10]],
+        "scenarios": [{"name": x.name, "description": x.description[:300], "trigger": x.trigger[:300],
+                       "sector_impact": x.sector_impact[:300]} for x in (review.scenarios or [])[:3]],
+        "horizon": (review.horizon or "").strip()[:200],
+        "risks": [str(x)[:300] for x in (review.top_risks or [])[:6]],
+        "falsifier": (review.falsifier or "").strip()[:400],
+        "sector_tilts": [{"sector": x.sector, "stance": x.stance, "rationale": x.rationale[:240]}
+                         for x in (review.sector_tilts or [])[:10]],
+        "asset_implications": (review.asset_implications or "").strip()[:400],
+    }
+
+
 def _publish_projection(store, review: MacroReview) -> None:
     """Publish the formal macro review as a `macro_review` projection (portfolio scope).
 
@@ -277,6 +301,7 @@ def _publish_projection(store, review: MacroReview) -> None:
         "regime": regime,
         "summary": (review.summary or "").strip() or "（摘要缺失）",
         "indicators": indicators or ["(本期无有效指标读数)"],
+        **projection_extras(review),
     }
     try:
         envelope = build_envelope(
@@ -430,4 +455,7 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
         rate_path=view.rate_path, sector_tilts=tilts,
         asset_implications=view.asset_implications, themes=themes,
         top_risks=view.top_risks, falsifier=view.falsifier,
+        scenarios=[MacroScenario(name=x.name, description=x.description, trigger=x.trigger,
+                                 sector_impact=x.sector_impact) for x in view.scenarios[:3]],
+        horizon=view.horizon,
         factset_earnings_assessment=assessment, **(det or {}))

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger("ats.config")
@@ -97,6 +97,20 @@ class LLMRoleConfig(BaseModel):
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    # Hidden-reasoning control for reasoning models behind OpenRouter (2026-10-17). Reasoning tokens are
+    # counted inside `max_tokens`: deepseek-v4-pro spent the whole 8192 budget thinking on a 1.7K-token
+    # answer and returned no tool call (4 identical retries, all empty). "off" disables reasoning
+    # (extraction/classification roles); an integer caps it (judgment roles keep some thinking, and
+    # `max_tokens` must leave room for that cap plus the answer). Unset = provider default, and it is
+    # excluded from the dump so unchanged roles keep their execution identity.
+    reasoning: Literal["off"] | int | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("reasoning")
+    @classmethod
+    def _reasoning_budget_positive(cls, value):
+        if isinstance(value, int) and not isinstance(value, bool) and value < 256:
+            raise ValueError("reasoning budget must be 'off' or an integer >= 256")
+        return value
 
 
 class LLMConfig(BaseModel):
@@ -118,6 +132,7 @@ class LLMConfig(BaseModel):
             model=override.model or self.default_model,
             temperature=override.temperature if override.temperature is not None else self.temperature,
             max_tokens=override.max_tokens or self.max_tokens,
+            reasoning=override.reasoning,
         )
 
 

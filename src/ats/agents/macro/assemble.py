@@ -54,16 +54,17 @@ class MacroContext:
 
 
 def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
-    from ...data.runtime import macro as macro_src
+    from ...data.products import macro_inputs
 
     mc = MacroContext(cfg=cfg)
-    data = macro_src.fetch() if live_data else None
+    # Indicators are read from the series the data platform collected (2026-10-16); the review
+    # no longer calls FRED/yfinance/CNN itself.
+    data = macro_inputs.macro_snapshot() if live_data else None
     mc.quant_block = (data.to_context() if data else
                       "(offline 离线运行：不访问互联网；本地未持久化的实时宏观行情不可用。"
                       "FactSet、本地区域数据和历史正式评审仍会读取。)")
     # Regional data is a governed local product, so offline only disables its
     # acquisition, not this read.  A saved monthly snapshot remains valid input.
-    from ...data.products import macro_inputs
     try:
         mc.regional_block = macro_inputs.regional_monthly("macro_agent").render()
     except Exception as exc:  # regional evidence is additive, never blocks regime review
@@ -85,9 +86,10 @@ def build(cfg: MacroConfig, *, live_data: bool = True) -> MacroContext:
         if theme.quant:
             picked = [f"{k}={field_vals.get(k, 'n/a')}" for k in theme.quant]
             lines.append("定量: " + ", ".join(picked))
-        # Tavily news for themes with queries (qualitative + a couple quant ones).
-        if live_data and theme.queries:
-            lines.append(_search_block(theme, search_cfg))
+        # Admitted news for themes with queries (qualitative + a couple quant ones). A database
+        # read, so it is also available offline.
+        if theme.queries:
+            lines.append(_news_block(theme, search_cfg))
         mc.theme_blocks.append("\n".join(x for x in lines if x))
 
     # Bound total size: truncate each theme block's news tail (quant stays intact).
@@ -108,23 +110,18 @@ def _field_map(data) -> dict:
     return out
 
 
-def _search_block(theme, search_cfg: dict) -> str:
+def _news_block(theme, search_cfg: dict) -> str:
+    """Admitted news for the theme. Never searches: the data platform collects (2026-10-16)."""
     from ...data.products import macro_inputs
 
-    hits = []
-    for q in theme.queries:
-        hits += macro_inputs.search_news(
-            q, max_results=int(search_cfg.get("max_results_per_query", 4)),
-            days=int(search_cfg.get("recency_days", 21)),
-            max_chars=int(search_cfg.get("max_chars_per_result", 1800)))
-    if not hits:
-        return "新闻: (无结果/无 Tavily key)"
-    seen: set[str] = set()
-    lines = ["近期新闻:"]
-    for h in hits:
-        if h["url"] in seen or not h["content"]:
-            continue
-        seen.add(h["url"])
-        pub = (h.get("published") or "")[:16]
-        lines.append(f"- [{pub}] {h['title']}: {h['content']}")
+    days = int(search_cfg.get("recency_days", 21))
+    cap = int(search_cfg.get("max_chars_per_result", 1800))
+    docs = macro_inputs.admitted_news(theme.key, days=days)
+    if not docs:
+        return f"新闻: (无已准入宏观材料：近 {days} 天该主题没有通过准入的新闻文档)"
+    lines = ["近期新闻（已准入文档，正文为搜索服务摘录）:"]
+    for doc in docs:
+        pub = (doc.published_at or "")[:16]
+        body = doc.text.split("\n\n", 1)[-1][:cap]
+        lines.append(f"- [{pub}] {doc.title}: {body} ｜文档 {doc.document_id}@{doc.version_id[:12]}")
     return "\n".join(lines)

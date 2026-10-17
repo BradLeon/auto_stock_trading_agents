@@ -683,6 +683,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `defeatbeta_stock_statement` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_financials` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_consensus` | `current_partial` | `persistent` | `market_consensus` |
+| `macro_series_feeds` | `current_partial` | `persistent` | `macro_series` |
 | `factset_earnings_insight_metrics` | `current_partial` | `persistent` | `sp500_earnings_insight` |
 | `accepted_document_evidence` | `deferred` | `persistent` | `private_company_events` |
 | `ibkr_market` | `runtime_excluded` | `runtime` | — |
@@ -709,6 +710,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `industry_dram_contract_price` | `current_partial` |
 | `company_financials` | `current_partial` |
 | `market_consensus` | `current_partial` |
+| `macro_series` | `current_partial` |
 | `sp500_earnings_insight` | `current_partial` |
 | `private_company_events` | `deferred` |
 
@@ -731,6 +733,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `defeatbeta_stock_statement` | `company_financials` | `current_partial` | `shadow` | snapshot | 每实体一个 query slice；60s |
 | `yfinance_financials` | `company_financials` | `current_partial` | `shadow` | event | 仅季度/年度三表 fallback；不请求或保存股价、OHLCV、期权或 quote metadata；concurrency 1；间隔至少 1s；30s |
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |
+| `macro_series_feeds` | `macro_series` | `current_partial` | `shadow` | daily | concurrency 1；约 40 请求（FRED 21 个序列、行情一次批量、CNN 一次）；日常重读最近 120 天，首次回填 11 年；Macro 评审读取，评审中不再联网 |
 | `factset_earnings_insight_metrics` | `sp500_earnings_insight` | `current_partial` | `platform` | weekly | concurrency 1；每周 1 次受控 URL 解析；60s；仅限许可的内部研究使用 |
 | `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
 | `sacra_public_company_profiles` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | weekly | concurrency 1；公开页面探测；保留最小证据切片 |

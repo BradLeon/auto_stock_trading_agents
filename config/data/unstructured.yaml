@@ -29,7 +29,7 @@ datasets:
   shared_documents:
     document_types: [research_article, news_item]
     sources: [factset_earnings_insight_doc, trendforce_news, semianalysis,
-              ibkr_news, yfinance_live_news]
+              ibkr_news, yfinance_live_news, macro_theme_news]
   sec_filing_index:
     record_types: [sec_filing_metadata]
     sources: [defeatbeta_sec_filing_index]
@@ -362,3 +362,25 @@ sources:
       fallback: none
       usage: repository_curated
       retention: git_history_and_content_hash
+  macro_theme_news:
+    # 2026-10-16: the Macro review's theme queries (config/macro.yaml) moved out of the analysis
+    # and into the platform. Results are search-provider text extracts, stored as immutable
+    # `partial` document versions under MACRO_<THEME> entities; Macro reads only these.
+    domain: unstructured
+    source_kind: search_news
+    datasets: [shared_documents]
+    provider: Tavily news search
+    adapter: tavily_theme_news
+    status: registered
+    cadence: daily
+    request_budget:
+      max_requests_per_run: 16
+      timeout_seconds: 40
+    policy:
+      permission: public_search_results_internal_research
+      usage: internal_research
+      retention: immutable_versions_by_url
+      fallback: none
+      acquisition: tavily_news_search
+      completeness: partial_text_extract
+      entities: MACRO_<THEME> per config/macro.yaml theme

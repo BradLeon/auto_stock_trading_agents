@@ -223,6 +223,208 @@ structured:
       scope:
         release_day: monthly_upstream_latest_release_check
       semantics: public DRAM contract-price table; retain per-series identity and derive MoM only
+    # --- PEAD consensus refresh (added 2026-10-16, enabled 2026-10-16 on the user's approval) -----------------
+    # yfinance_consensus snapshots stopped on 2026-09-04: no job ever refreshed them, and the target route
+    # now ignores a snapshot older than 14 days (data/consensus.py `align`). The adapter takes exactly one
+    # entity per snapshot, so there is one job per PEAD target. Validate with `ats.data.refresh validate` after any change.
+    consensus_goog_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:00"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity GOOG
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_nvda_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:03"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity NVDA
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_skhy_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:06"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity SKHY
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_tsm_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:09"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity TSM
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_asml_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:12"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity ASML
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_cohr_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:15"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity COHR
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_lrcx_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:18"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LRCX
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_lite_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:21"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LITE
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_avgo_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:24"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity AVGO
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_mrvl_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:27"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MRVL
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_msft_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:30"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MSFT
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    company_financials_weekly:
+      # 2026-10-16 pilot (user: validate the path on a few names, widen after go-live). One job
+      # per entity via `entities`; `entity_sources` picks the provider per name once the
+      # coverage probe has shown who can supply a complete report package.
+      #   GOOG, MU  complete quarterly package from defeatbeta (probe 2026-10-16).
+      #   ASML      defeatbeta returns 11/13 metrics for the latest quarter, so the package gate
+      #             correctly refuses it; an official-disclosure source is needed (not pilot).
+      #   SKHY      both vendors quarantine on unit_unresolved/currency_unresolved; needs a
+      #             currency mapping before it can be admitted.
+      #   sec_companyfacts was unreachable from this host (TLS reset) during the probe.
+      # Widening = adding names here; names the gate rejects stay visible as failed runs.
+      enabled: true
+      source: defeatbeta_stock_statement
+      entities: [GOOG, MU]
+      datasets: [company_financials]
+      schedule: weekly
+      weekday: saturday
+      at: "06:30"
+      timezone: UTC
+      command: ats data ingest --source {source} --dataset company_financials --entity {entity}
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: provider statements as immutable vintages per fetch; the complete-report-package gate decides what a consumer can read, rejected rows are quarantined and shown as an explicit gap
+    macro_series_daily:
+      # 2026-10-16: the Macro review used to pull these indicators itself (FRED, market closes, CNN
+      # fear & greed). The scheduled run re-reads a rolling window so revisions are caught; the
+      # first load (11 years) was done once with an explicit `since`.
+      enabled: true
+      source: macro_series_feeds
+      datasets: [macro_series]
+      schedule: daily
+      at: "10:30"
+      timezone: UTC
+      command: ats data ingest --source macro_series_feeds --dataset macro_series --query-scope '{"lookback_days":120}'
+      concurrency: 1
+      freshness_slo_days: 4
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: one observation per series point under US_MACRO; revisions become new vintages, never overwrites
+
 unstructured:
   trigger: launchd_controller
   command: ats data article-ingest
@@ -326,3 +528,45 @@ unstructured:
                       rate_limited, request_rejected, failed_slices]
         human_title_url_review_required: true
       semantics: TWS headlines daily; Yahoo only for failed primary scope and held for human review
+# Derived jobs: facts the platform produces itself from admitted/official documents. They are
+# ledgered, retried and freshness-checked like source jobs but have no ingestion-run record, so
+# the command's own result packet is the evidence (status + reason).
+derived:
+  trigger: launchd_controller
+  default_timezone: UTC
+  jobs:
+    chain_evidence_daily:
+      # 2026-10-16: moved out of the legacy PEAD score window (`pead_observe_window`, left false).
+      # PILOT LIST ONLY (user decision: validate the path on a few names, widen after go-live).
+      # Widen by extending `entities`; one job (own ledger row, retry, freshness) per name.
+      enabled: true
+      source: chain_evidence_observer
+      entities: [TSM, ASML, MU, SKHY]
+      schedule: daily
+      at: "22:00"
+      timezone: UTC
+      command: ats data evidence-observe --entity {entity} --lookback-days 7
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 8}   # flash extraction calls one name may spend per run
+      retry:
+        attempts: 2
+        backoff_seconds: [600, 1800]
+      semantics: extract the latest confirmed earnings document per name into neutral chain evidence; a document already extracted is never read again; nothing is scored or traded
+    macro_theme_news_daily:
+      # 2026-10-16: the Macro review used to run these Tavily queries during analysis (TARGET
+      # §12.1). They are the theme queries of config/macro.yaml, run here and admitted as
+      # `partial` document versions under MACRO_<THEME>; Macro reads only admitted documents.
+      enabled: true
+      source: macro_theme_news
+      schedule: daily
+      at: "11:00"
+      timezone: UTC
+      command: ats data macro-news-collect
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 16}   # one search per configured theme query (13 today)
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: theme news as immutable partial document versions keyed by URL; a URL already admitted is never stored again

@@ -815,6 +815,23 @@ def schedule_cutover_command(args, *, parser) -> int:
             print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
             return 2
 
+    if args.action in {"owner-switch", "owner-rollback", "owner-log"}:
+        from ..workflow import schedule_runtime as runtime
+
+        try:
+            if args.action == "owner-log":
+                result = runtime.owner_log(args.workflow or None)
+            else:
+                result = runtime.owner_switch(
+                    args.workflow, to_owner="dispatcher" if args.action == "owner-switch" else "legacy",
+                    actor=args.actor, reason=args.reason, approval=args.approval,
+                    void_unfinished=args.void_unfinished)
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return 0
+        except runtime.ScheduleAuthorityError as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+            return 2
+
     state_path = args.state or None
     switch_db = args.switch_db or None
     action = args.action
@@ -1735,7 +1752,7 @@ def workflow_command(args, *, parser) -> int:
         if not store.compensate_trigger(args.trigger_key, actor=args.actor, reason=args.reason):
             parser.error("only a failed/incomplete trigger can be explicitly compensated")
         from ..agent.task_projection import ProjectionScope
-        from ..workflow.dispatcher import Dispatcher
+        from ..workflow.dispatcher import Dispatcher, default_data_vintage
         from ..workflow.phase_e import build_plan
         from ..workflow.run_contracts import TriggerContext
         from ..workflow.triggers import TriggerService
@@ -1759,7 +1776,7 @@ def workflow_command(args, *, parser) -> int:
 
         result = TriggerService(store).dispatch(
             frozen_context, request=body, plan_factory=plan_factory,
-            dispatcher=Dispatcher(workflow_store=store))
+            dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage))
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result.get("status") in {"complete", "incomplete"} else 1
     if not args.task:
@@ -1772,7 +1789,7 @@ def workflow_command(args, *, parser) -> int:
         parser.error("--inputs-json must be a JSON object")
 
     from ..agent.task_projection import ProjectionScope
-    from ..workflow.dispatcher import Dispatcher
+    from ..workflow.dispatcher import Dispatcher, default_data_vintage
     from ..workflow.phase_e import build_plan
     from ..workflow.run_contracts import TriggerContext
     from ..workflow.triggers import TriggerService, load_trigger_policies
@@ -1807,7 +1824,7 @@ def workflow_command(args, *, parser) -> int:
     service = TriggerService(store, policy=policy_map.get(workflow_id,
                                                            policy_map["default"]))
     result = service.dispatch(trigger, request=request, plan_factory=plan_factory,
-                              dispatcher=Dispatcher(workflow_store=store))
+                              dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage))
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0 if result.get("status") in {"complete", "incomplete", "running", "planned"} else 1
 
@@ -3080,12 +3097,13 @@ def _run_analyst_fundamental(args) -> int:
         raise SystemExit("analyst fundamental 需要 --symbol")
     default_trigger = ("information_brief_update" if args.mode == "routine"
                        else "earnings_release")
+    extra = {"refresh_baseline": True} if args.mode == "routine" and getattr(args, "refresh_baseline", False) else {}
     request = build_run_request(
         args.mode, args.symbol,
         trigger=args.trigger or default_trigger,
         use_llm=not args.no_llm,
         fiscal_label=args.fiscal_label,
-        cutoff=args.cutoff)
+        cutoff=args.cutoff, **extra)
     summary = run_fundamental_pass(request)
     if summary.get("mode") == "routine":
         print("📈 fundamental (routine) — 例行预期更新")
@@ -4333,6 +4351,8 @@ def main(argv: list[str] | None = None) -> int:
             "document-ingest",
             "fixed-ingest",
             "chain-source-collect",
+            "evidence-observe",
+            "macro-news-collect",
             "calendar-refresh",
             "calendar-finalize",
             "assurance",
@@ -4435,6 +4455,10 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
     data.add_argument("--scope", default="", help="Ramp 图表 scope（adoption_overall 等）")
     data.add_argument("--entity", default="", help="实体过滤")
+    data.add_argument("--lookback-days", type=int, default=7,
+                      help="evidence-observe: 向前查找最近一次已发布财报的天数（日常 7，补抽 60）")
+    data.add_argument("--dry-run", action="store_true",
+                      help="evidence-observe / macro-news-collect: 只列出会处理什么，不写入")
     data.add_argument("--since", default="", help="最早期间或发布日期")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
     data.add_argument("--limit", type=int, default=20, help="通用结果条数")
@@ -4680,12 +4704,14 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser(
         "dispatch",
-        help="Phase F 调度所有权核验与回滚去重（**读账本，不改 owner**）")
+        help="Phase F 调度所有权核验与回滚去重（owner-switch/owner-rollback 会改研究工作流的 owner；其余只读账本）")
     sp.add_argument("action", choices=[
         "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze",
         "runtime-inventory", "runtime-handover", "runtime-cancel-freeze", "runtime-expected", "runtime-compare",
         "ownership", "ledger", "executed", "record-execution",
-        "rollback-plan", "rollback-history"])
+        "rollback-plan", "rollback-history", "owner-switch", "owner-rollback", "owner-log"])
+    sp.add_argument("--approval", default="", help="owner-switch: 用户批准原文或其引用（去 dispatcher 必填）")
+    sp.add_argument("--void-unfinished", default="", help="owner-*: 作废未完成认领的理由（有未完成认领时必填，running 不可作废）")
     sp.add_argument("--trigger", default="", help="限定单一逻辑触发")
     sp.add_argument("--execution-ref", default="", help="record-execution: 执行引用")
     sp.add_argument("--state", default="", help="第4组的 dispatch 状态库")
@@ -5030,6 +5056,8 @@ def main(argv: list[str] | None = None) -> int:
     an.add_argument("--fiscal-label", dest="fiscal_label", default="",
                     help="event 模式的目标报告期（如 Q3 FY2026）")
     an.add_argument("--cutoff", default="", help="event 模式的基线冻结时刻（ISO）")
+    an.add_argument("--refresh-baseline", dest="refresh_baseline", action="store_true",
+                    help="routine 模式：按最新信息简报重建下一期财报前基线（财报发布后拒绝）")
     an.add_argument("--no-ingest", action="store_true",
                     help="跳过数据层研究文章采集，只处理已准入文档")
     an.add_argument("--no-llm", action="store_true", help="无 LLM：只做识别与投影，不抽取")
@@ -5102,6 +5130,8 @@ def main(argv: list[str] | None = None) -> int:
             "factset-refresh", "factset-semantic-refresh", "calendar-refresh", "calendar-finalize",
         } or (args.action == "release-check" and args.ingest_new)
         persistent_write = persistent_write or args.action == "chain-source-collect"
+        persistent_write = persistent_write or (
+            args.action in {"evidence-observe", "macro-news-collect"} and not args.dry_run)
         persistent_write = persistent_write or (args.action == "article-metadata-reconcile" and args.apply)
         worker_task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
         if persistent_write:
@@ -5121,6 +5151,10 @@ def main(argv: list[str] | None = None) -> int:
                     raw_args = list(argv) if argv is not None else sys.argv[1:]
                     trigger_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
                     source_id = args.source or args.value or args.group or args.dataset
+                    if args.action == "evidence-observe":
+                        source_id = source_id or args.entity
+                    elif args.action == "macro-news-collect":
+                        source_id = source_id or "macro_theme_news"
                     if not source_id:
                         parser.error("persistent ingestion requires --source, VALUE, --group or --dataset")
                     registry_bytes = b"".join(
@@ -5154,6 +5188,20 @@ def main(argv: list[str] | None = None) -> int:
                                       "ingestion_result": result.get("stdout", {})},
                                      ensure_ascii=False, indent=2, default=str))
                     return 0 if result["status"] in {"succeeded", "no_change", "quarantined", "partial"} else 1
+        if args.action == "macro-news-collect":
+            from ..data.collection.macro_news import collect
+
+            packet = collect(dry_run=args.dry_run)
+            print(json.dumps(packet, ensure_ascii=False, default=str))
+            return 1 if packet["status"] == "failed" else 0
+        if args.action == "evidence-observe":
+            from .evidence_observe import observe_entity
+
+            if not args.entity:
+                parser.error("data evidence-observe requires --entity")
+            packet = observe_entity(args.entity, lookback_days=args.lookback_days, dry_run=args.dry_run)
+            print(json.dumps(packet, ensure_ascii=False, default=str))
+            return 1 if packet["status"] == "failed" else 0
         if args.action == 'article-metadata-reconcile':
             from ..data.pipelines.unstructured.article_metadata import reconcile_article_metadata
             if not args.source or not args.as_of or not args.document_ids:

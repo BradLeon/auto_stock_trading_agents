@@ -299,7 +299,7 @@ class DataCatalog:
                   bool(row.get("adapter")), "adapter_missing")
             check(f"unstructured:{source_id}:source_kind",
                   kind in {"article", "fixed_index", "official_body",
-                           "fixed_transcript", "repository_corpus"},
+                           "fixed_transcript", "repository_corpus", "search_news"},
                   "source_kind_invalid")
             check(f"unstructured:{source_id}:no_symbol_template",
                   not any(marker in str(source_id) for marker in (":", "{", "}", "/")),

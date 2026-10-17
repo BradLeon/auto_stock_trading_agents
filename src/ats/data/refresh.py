@@ -35,6 +35,10 @@ _WEEKDAYS = {name: index for index, name in enumerate(
     ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"))}
 _SAFE_ACTIONS = {"ingest", "release-check", "frontier-capability-audit"}
 _SAFE_UNSTRUCTURED_ACTIONS = {"article-ingest", "document-ingest", "fixed-ingest"}
+# Derived jobs produce governed facts from already-admitted documents or from provider
+# reads that have no ingestion-run record (chain evidence extraction). They are scheduled
+# and ledgered like the others but have no structured/unstructured catalog source.
+_SAFE_DERIVED_ACTIONS = {"evidence-observe", "macro-news-collect"}
 
 
 def _utc_now() -> datetime:
@@ -67,6 +71,8 @@ class RefreshJob:
     required_env: tuple[str, ...]
     approval_env: tuple[str, ...]
     retry_discovery_only: bool = False
+    request_budget: int = 0           # derived jobs: requests one run may spend (0 = undeclared)
+    entity: str = ""                  # set when expanded from an `entities:` list
 
     def window(self, now: datetime) -> tuple[str, datetime]:
         """Latest scheduled local window and its UTC due instant."""
@@ -116,6 +122,32 @@ class RefreshPlan:
     max_run_seconds: int
 
 
+def _expand_jobs(section: dict[str, Any]):
+    """Yield (job_id, body, entity). A job with `entities:` becomes one job per entity.
+
+    One entity per job keeps the ledger, retry and freshness per company — a failure on one
+    name never blocks the others, which is what 11 hand-copied `consensus_*_daily` entries
+    were doing. `command` may use `{entity}` and `{source}`; `entity_sources` overrides
+    `source` for individual entities (financials differ in which provider covers a name).
+    """
+    for job_id, body in (section.get("jobs") or {}).items():
+        body = dict(body or {})
+        entities = body.pop("entities", None)
+        entity_sources = body.pop("entity_sources", None) or {}
+        if not entities:
+            yield job_id, body, ""
+            continue
+        for entity in entities:
+            entity = str(entity)
+            expanded = dict(body)
+            source = str(entity_sources.get(entity) or body.get("source") or "")
+            if source:
+                expanded["source"] = source
+            expanded["command"] = str(body.get("command") or "").replace(
+                "{entity}", entity).replace("{source}", source)
+            yield f"{job_id}.{entity}", expanded, entity
+
+
 def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     if raw.get("version") != 1:
@@ -133,15 +165,19 @@ def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
                             unstructured_catalog.target_unstructured_sources()
                             if source.domain == "unstructured"}
     sections = [("structured", raw.get("structured") or {}),
-                ("unstructured", raw.get("unstructured") or {})]
+                ("unstructured", raw.get("unstructured") or {}),
+                ("derived", raw.get("derived") or {})]
     for domain, section in sections:
-      for job_id, body in (section.get("jobs") or {}).items():
-        body = body or {}
+      for job_id, body, job_entity in _expand_jobs(section):
         source_ids = tuple(body.get("sources") or ([body["source"]] if body.get("source") else []))
         dataset_ids = tuple(body.get("datasets") or [])
         if not source_ids or (domain == "structured" and not dataset_ids):
             raise ValueError(f"{job_id}: sources and structured datasets are required")
-        if domain == "structured":
+        if domain == "derived":
+            budget = int((body.get("request_budget") or {}).get("requests_per_run") or 0)
+            if budget < 1:
+                raise ValueError(f"{job_id}: derived job lacks request_budget.requests_per_run")
+        elif domain == "structured":
             for source_id in source_ids:
                 if source_id not in sources:
                     raise ValueError(f"{job_id}: unknown structured source {source_id}")
@@ -154,7 +190,7 @@ def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
                     raise ValueError(f"{job_id}: unknown dataset {dataset_id}")
                 if not any(dataset_id in sources[source_id].datasets for source_id in source_ids):
                     raise ValueError(f"{job_id}: dataset {dataset_id} has no listed source")
-        else:
+        elif domain == "unstructured":
             for source_id in source_ids:
                 if source_id not in unstructured_sources:
                     raise ValueError(f"{job_id}: unknown unstructured source {source_id}")
@@ -163,7 +199,8 @@ def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
                     for source_id in source_ids for dataset_id in dataset_ids):
                 raise ValueError(f"{job_id}: unstructured source/dataset mismatch")
         command = tuple(shlex.split(str(body.get("command") or "")))
-        allowed_actions = _SAFE_ACTIONS if domain == "structured" else _SAFE_UNSTRUCTURED_ACTIONS
+        allowed_actions = {"structured": _SAFE_ACTIONS, "unstructured": _SAFE_UNSTRUCTURED_ACTIONS,
+                           "derived": _SAFE_DERIVED_ACTIONS}[domain]
         if len(command) < 3 or command[:2] != ("ats", "data") or command[2] not in allowed_actions:
             raise ValueError(f"{job_id}: command must be an allowed ats data action")
         if any(token in command for token in ("--apply", "--confirm", "--force")):
@@ -221,6 +258,8 @@ def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
                                ("public_terms_approval_env", "public_structured_page_policy_env")
                                if (body.get("scope") or {}).get(key)),
             retry_discovery_only=bool(body.get("retry_discovery_only", False)),
+            request_budget=int((body.get("request_budget") or {}).get("requests_per_run") or 0),
+            entity=job_entity,
         ))
     ledger_value = Path(str(controller.get("ledger") or "var/data_refresh.sqlite"))
     ledger = ledger_value if ledger_value.is_absolute() else REPO_ROOT / ledger_value
@@ -383,7 +422,10 @@ def _refresh_environment() -> dict[str, str]:
 
 
 def _safe_sources(job: RefreshJob, env: dict[str, str]) -> str:
-    if job.domain == "structured":
+    if job.domain == "derived":
+        if job.request_budget < 1:
+            return "source_budget_missing"
+    elif job.domain == "structured":
         catalog = {source.id: source for source in StructuredCatalog.load().sources()}
         for source_id in job.sources:
             source = catalog[source_id]
@@ -577,9 +619,12 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             packet_status = str(worker.get("reported_status") or "")
             code = worker.get("exit_code")
             output_hash = str((worker.get("result") or {}).get("stdout_sha256") or "")
-            refs = (_unstructured_references(data_db, packet, job)
-                    if job.domain == "unstructured" else
-                    _references(data_db, before_rowid, before_check_rowid, job))
+            if job.domain == "derived":
+                refs = {"runs": [], "checks": [], "raw": [], "admission": [], "published": []}
+            else:
+                refs = (_unstructured_references(data_db, packet, job)
+                        if job.domain == "unstructured" else
+                        _references(data_db, before_rowid, before_check_rowid, job))
             queue.record_lineage(task_id, refs)
             ledger.record_queue_task(key, task_id)
             statuses = []
@@ -598,7 +643,14 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             if action in {"article-ingest", "document-ingest", "fixed-ingest"}:
                 accepted_packet_statuses |= {"quarantined", "pending_human_review",
                                              "partial", "unreachable"}
-            if code != 0 or not packet_status or packet_status not in accepted_packet_statuses:
+            if job.domain == "derived":
+                # The command's own packet is the record: it names the reason a run did
+                # nothing (`no_change`) or what it wrote (`succeeded`); `failed` is retried.
+                if code == 0 and packet_status in {"succeeded", "no_change"}:
+                    status, reason = packet_status, str(packet.get("reason") or "")
+                else:
+                    status, reason = "failed", str(packet.get("reason") or "command_or_result_failed")
+            elif code != 0 or not packet_status or packet_status not in accepted_packet_statuses:
                 status, reason = "failed", "command_or_result_failed"
             elif action in {"calendar-refresh", "calendar-finalize"}:
                 status, reason = packet_status, ""

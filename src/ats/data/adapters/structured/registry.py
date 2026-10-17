@@ -55,6 +55,12 @@ def _yfinance_financials():
     return YFinanceFinancialStatementsAdapter()
 
 
+def _macro_series():
+    from ...sources.macro_series import MacroSeriesAdapter
+
+    return MacroSeriesAdapter()
+
+
 def _consensus():
     from ...sources.market_consensus import YFinanceConsensusAdapter
 
@@ -155,6 +161,7 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "yfinance_financials": RuntimeSourceSpec(
         "yfinance_financials", _yfinance_financials, requires_entities=True),
     "consensus": RuntimeSourceSpec("consensus", _consensus, requires_entities=True),
+    "macro_series": RuntimeSourceSpec("macro_series", _macro_series),
     "trendforce": RuntimeSourceSpec("trendforce", _trendforce),
     "factset_earnings_insight": RuntimeSourceSpec(
         "factset_earnings_insight", _factset_earnings_insight),

@@ -151,6 +151,7 @@ feature_flags:
     defeatbeta_stock_statement: shadow
     yfinance_financials: shadow
     yfinance_consensus: shadow
+    macro_series_feeds: shadow
     # Private-company events are intentionally deferred and therefore do not
     # enter the persistent layer until a later, separately approved scope.
     accepted_document_evidence: legacy
@@ -483,6 +484,18 @@ sources:
     cadence: monthly
     retention: full_response
     internal_request_budget: {concurrency: 1, requests_per_run: 2, timeout_seconds: 60}
+  macro_series_feeds:
+    # US macro indicator histories for the Macro review (2026-10-16): FRED + market closes + CNN
+    # fear & greed, one observation per series point under entity US_MACRO. Provider code is
+    # data/macro.py; this source only maps it to records.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: FRED, Yahoo Finance and CNN Business
+    adapter: macro_series
+    datasets: [macro_series]
+    cadence: daily
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_run: 40, timeout_seconds: 120}
   kr_ecos_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -530,7 +543,7 @@ sources:
     datasets: [company_financials]
     cadence: snapshot
     retention: query_slice
-    internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, timeout_seconds: 60}
+    internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, requests_per_run: 4, timeout_seconds: 60}
   yfinance_financials:
     # Promoted from the legacy fundamentals reader strictly for low-frequency
     # financial statement gaps.  Prices, OHLCV, options and quote metadata remain
@@ -542,7 +555,7 @@ sources:
     datasets: [company_financials]
     cadence: event
     retention: query_slice
-    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, requests_per_run: 4, timeout_seconds: 30}
   yfinance_consensus:
     catalog_status: current_partial
     persistence: persistent
@@ -551,7 +564,9 @@ sources:
     datasets: [market_consensus]
     cadence: event_snapshot
     retention: normalized_snapshot
-    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+    # requests_per_run: one snapshot reads about eight yfinance endpoints (estimates, calendar, targets,
+    # ratings, grade changes, earnings history, statements). Required by the refresh controller.
+    internal_request_budget: {concurrency: 1, requests_per_run: 8, min_interval_seconds: 1, timeout_seconds: 30}
   accepted_document_evidence:
     # The evidence workbench remains available for a future approved source, but
     # no private-company event acquisition or publication is scheduled now.
@@ -1123,6 +1138,19 @@ datasets:
       shadow_abs_tolerance: 0.000001
     acceptance_samples: [TW_IC_EXPORT]
     rollback_on: [period_gap, unit_change, shadow_mismatch, stale]
+  macro_series:
+    catalog_status: current_partial
+    entities: [US_MACRO]
+    expected_cadence: daily
+    primary_sources: [macro_series_feeds]
+    core_metrics: [macro.ust_10y.value, macro.ust_2y.value, macro.real_10y.value, macro.breakeven_10y.value, macro.policy_rate.value, macro.hy_oas.value, macro.ig_oas.value, macro.unemployment.value, macro.fed_funds.value, macro.vix.value, macro.dxy.value, macro.spx.value, macro.ndx.value, macro.fear_greed.value, macro.headline_cpi.value, macro.core_pce.value, macro.cfnai.value, macro.productivity.value, macro.unit_labor_cost.value, macro.initial_claims.value, macro.continuing_claims.value, macro.payrolls.value, macro.gasoline.value, macro.oil_wti.value, macro.gold.value]
+    quality:
+      coverage_ratio_min: 0.9
+      freshness_hours_max: 168    # a daily series older than a week is stale; monthly ones carry their own release lag
+      reconciliation_abs_tolerance: 0.000001
+      shadow_abs_tolerance: 0.000001
+    acceptance_samples: [US_MACRO]
+    rollback_on: [unit_change, stale]
   regional_kr_exports:
     catalog_status: current_partial
     entities: [KR_SEMI_EXPORT]
@@ -1366,6 +1394,31 @@ metric_definitions:
   consensus.target.upside: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
   regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
   regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
+  macro.ust_10y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.ust_2y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.real_10y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.breakeven_10y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.policy_rate.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.hy_oas.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.ig_oas.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.unemployment.value: {value_type: number, unit_family: percent, cadence: monthly}
+  macro.fed_funds.value: {value_type: number, unit_family: percent, cadence: monthly}
+  macro.vix.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.dxy.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.spx.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.ndx.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.fear_greed.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.headline_cpi.value: {value_type: number, unit_family: index, cadence: monthly}
+  macro.core_pce.value: {value_type: number, unit_family: index, cadence: monthly}
+  macro.cfnai.value: {value_type: number, unit_family: index, cadence: monthly}
+  macro.productivity.value: {value_type: number, unit_family: index, cadence: quarterly}
+  macro.unit_labor_cost.value: {value_type: number, unit_family: index, cadence: quarterly}
+  macro.initial_claims.value: {value_type: number, unit_family: count, cadence: weekly}
+  macro.continuing_claims.value: {value_type: number, unit_family: count, cadence: weekly}
+  macro.payrolls.value: {value_type: number, unit_family: count, cadence: monthly}
+  macro.gasoline.value: {value_type: number, unit_family: currency, cadence: weekly}
+  macro.oil_wti.value: {value_type: number, unit_family: currency, cadence: daily}
+  macro.gold.value: {value_type: number, unit_family: currency, cadence: daily}
   industry.dram_contract_price: {value_type: number, unit_family: currency_per_item, cadence: monthly}
   financial.revenue.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
   financial.gross_profit.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}

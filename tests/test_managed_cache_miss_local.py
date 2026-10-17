@@ -283,7 +283,8 @@ def test_governed_article_sources_come_from_authoritative_unstructured_registry(
     assert set(sources) <= target_ids
     assert target_ids - set(sources) == {
         "defeatbeta_sec_filing_index", "sec_edgar_filing_body",
-        "defeatbeta_earnings_transcript", "ai_hardware_knowledge_corpus"}
+        "defeatbeta_earnings_transcript", "ai_hardware_knowledge_corpus",
+        "macro_theme_news"}          # search-news kind: collected by the refresh controller, not an article adapter
     assert "kr_semiconductor_exports" not in target_ids
     assert sources["trendforce_news"].max_per_run == 16
     assert sources["trendforce_news"].entity == "TRENDFORCE"

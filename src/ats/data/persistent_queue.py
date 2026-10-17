@@ -35,6 +35,7 @@ _SAFE_COMMANDS = {
     "factset-import", "factset-reprocess", "factset-refresh",
     "factset-semantic-refresh",
     "chain-source-collect", "calendar-refresh", "calendar-finalize",
+    "evidence-observe", "macro-news-collect",
 }
 
 

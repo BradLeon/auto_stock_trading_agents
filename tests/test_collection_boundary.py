@@ -99,12 +99,11 @@ def test_macro_inputs_route_to_the_underlying_reads(monkeypatch):
     monkeypatch.setattr("ats.data.regional.fetch",
                         lambda *, consumer: ("snap", consumer))
     monkeypatch.setattr("ats.data.factset.fetch_macro_material", lambda *, products=None: 7)
-    monkeypatch.setattr("ats.data.websearch.search_news", lambda *a, **k: ["hit"])
 
     snap = macro_inputs.regional_monthly("macro_agent")
     assert snap == ("snap", "macro_agent")
     assert macro_inputs.factset_macro_material() == 7
-    assert macro_inputs.search_news("q") == ["hit"]
+    assert not hasattr(macro_inputs, "search_news")        # no live search behind the product
 
 
 def test_sector_inputs_route_to_the_underlying_reads(monkeypatch):

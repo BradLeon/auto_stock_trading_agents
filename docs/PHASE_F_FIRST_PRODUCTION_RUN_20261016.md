@@ -303,3 +303,48 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 - **为什么评分是中性：** 这两家的财报都发生在新的财报前基线机制上线之前，没有冻结的基线可对照，发布后又不允许补建（防止事后诸葛）。要看到真正的预期差评审，需要一个财报前建过基线的标的（LRCX 10-21 盘后）。
 - **清理：** 此前一次空评审与一次中间版本共 3 条已备份并标为 failed（`tmp/phase_f_first_run_20261016/projection_cleanup/superseded_empty_event_reviews_backup.json`），每家只保留最新一条。
 
+
+---
+
+## 追加：10.6 手动跑一遍「例行 tick」，LRCX 基线被上游简报卡住（2026-10-18，**10.6 未勾选**）
+
+**结论：10.6 的三项判据里，只有「(a) 只有一个负责人在动」成立；LRCX 的基线没有建成，所以 (a) 的另一半、(b)、(c) 都还没验证。原因不是基线逻辑出错，而是 LRCX 近 7 天没有任何已准入资讯，信息简报没发布，例行任务按「上游依赖失败则阻断」规则被拦住。这需要一个设计取舍，下面给出选项，等你裁决。**
+
+### 做了什么
+
+用与常驻进程 `com.ats.phase-e` 的 `fundamental-routine` 定时任务**同一条代码路径**手动跑一遍：触发类型 `schedule`、范围 `portfolio:pead-targets`、请求 `requested_tasks=["fundamental-routine"]`，模型请求逐条计数（脚本 `tmp/phase_f_first_run_20261016/verify/run_routine_tick.py`，输出 `routine_tick_p1.json`、`llm_routine_tick_p1.jsonl`）。这验证的是**逻辑**，不是常驻进程的定时触发本身（下一次真实定时触发是周一 08:00/09:00 纽约时间）。
+
+### 结果（第 1 遍，用时 52.5 秒，状态 `incomplete`，14 次模型请求）
+
+| 项 | 结果 |
+|---|---|
+| 负责人 | 只有 `dispatcher` 动手（调度负责人日志 35 行、7 个工作流均为 dispatcher）；旧入口被拒沿用 12.3 的演练与测试（`schedule frozen or caller is not current owner`），本次 tick 没有重新测试这一点 |
+| 11 个标的 | 10 个的「信息简报 + 例行」都成功（GOOG、NVDA、SKHY、TSM、ASML、COHR、LITE、AVGO、MRVL、MSFT）；**LRCX 的信息简报 `missing`，例行 `blocked: upstream dependency failed`** |
+| 模型请求 | `fundamental_classifier` 10 次、`research_extract` 4 次，共 14 次，0 错误 |
+| 其他标的的窗口 | 都不在财报前 3 天窗口内，没有建基线（预期如此）；它们的例行预期更新正常 |
+| LRCX 基线 `[基线 v1]`（目标期 Q1 FY2027） | **没有生成**；LRCX 也没有任何 `fundamental_event_review`，所以「基线先于事件评审」目前是空成立 |
+| `phase-e.err.log` | 无新增错误；仍是 10-17 已记录的几条警告（Macro 丢弃未知主题键、Sector 一层结构校验失败、yfinance/证据判读连接重置后重试） |
+
+### 为什么 LRCX 被卡住
+
+1. LRCX 的已准入资讯：总共 5 条，最新一条是 2026-09-26，**近 7 天（`monitor.lookback_days`）为 0 条**；对比 GOOG 1、COHR 1、LITE 1、SKHY 2。`ibkr_news` 的标的清单里本来就没有 LRCX。
+2. 信息简报在「完全没有资讯」时直接返回、**不发布**投影（`documents.run_document_pass` 的 `no new events` 分支）；而「有 1 条但无相关变化」会发布一份 `no_relevant_change` 简报。所以同样是「没新闻」，GOOG 有简报、LRCX 没有。
+3. `fundamental-routine` 声明依赖 `information-brief`（`phase_e.TASK_DEPENDENCIES`），且工作流任务规格里没有「可选依赖」的概念；上游缺失就阻断，这是有意的 fail-closed 设计。
+4. 结果：PEAD 的财报前基线是用财务与共识建的，**并不需要当天有新闻**，却被「没有新闻」拦住。
+
+### 选项（都是设计取舍，我没有擅自改）
+
+| 方案 | 做法 | 优点 | 代价 / 风险 |
+|---|---|---|---|
+| A（建议） | 让「近 7 天没有任何已准入资讯」成为信息任务的一种**成功但无投影**的结果（记为 `no_material`），例行任务据此继续，把「无资讯」写进基线的缺口说明 | 改动只限于「没有新闻」这一种情况；其他上游失败仍然阻断；基线不依赖新闻 | 要在 Dispatcher 的依赖判定里新增一种合法状态，属于依赖语义的扩展，需要你认可 |
+| B | 给 LRCX 补资讯覆盖（`ibkr_news` 的标的清单、或另一条 LRCX 新闻源） | 不改依赖语义；信息简报本来就该覆盖 LRCX | 触及你暂缓的 `ibkr_news` 缺陷；而且只解决 LRCX，下一个冷门标的还会遇到 |
+| C | 为「没新闻」发布一份空的信息简报 | 依赖不变 | 信息简报的六要素规则要求事实与来源证据，空简报要么违反该规则、要么要放宽规则；**不建议** |
+
+### 时间点
+
+LRCX 财报 10-21 盘后，prep 窗口（≤3 天）从今天起就是开的。常驻进程下一次定时触发是**周一** 08:00（信息）、09:00（例行）纽约时间；如果不改，周一和周二的例行 tick 会重复同样的 LRCX 阻断（LRCX 这一路每次只多一条 failed 认领，不发模型请求），基线最晚要在**周三 10-21 纽约时间 09:00 的例行 tick** 之前建成。方案 A 的改动不大，裁决后我可以马上实现、手动重跑三遍（建基线 → 复用 0 请求 → 确认 LRCX 事件评审前基线已冻结）并勾选 10.6。
+
+### 没有做的
+
+- **没有跑第 2 遍。** 第 2 遍会再产生一次 `incomplete`，与前一次连成「连续两次整批失败」，会把 12.3 的第 ④ 条停止条件人为凑出来；(b)「第二遍复用」留到 LRCX 能建基线之后一并验证。
+- 没有改依赖语义、没有碰 `ibkr_news`、没有改任何配置。

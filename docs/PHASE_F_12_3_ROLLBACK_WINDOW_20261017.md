@@ -1,5 +1,7 @@
 # 任务 12.3：回滚窗口登记与停止条件（2026-10-17）
 
+> 2026-10-18 修订：观察窗口按你的裁决在 10-18 结束（原建议 10-28 作废），其余内容为 10-17 当时的记录。
+>
 > 12.3 要的不是「旧业务还能用」，而是三件有证据的事：**回退演练过**、**停止真的封住入口和写点**、**窗口有登记的停止条件且没有被触发**。下面逐项给出证据，并登记观察窗口。
 
 ## 一、已演练：安全停止与恢复
@@ -28,7 +30,7 @@
 | 窗口编号 | `phase-f-dispatcher-2026-10-17` |
 | 范围 | 7 个研究工作流（information-brief、fundamental-routine、fundamental-event、layer-review、sector-review、macro-review、technical-review）；不含 Chief、审批、记账、交易 |
 | 起点 | 2026-10-17（负责人切到 Dispatcher、`com.ats.phase-e` 加载） |
-| 建议终点 | **2026-10-28**：覆盖周六 10-24 的 Macro/Sector 周度运行，以及 LRCX（10-21）、GOOG 与 SKHY（10-27）、MSFT（10-28）财报的事件路径；终点由你定，不设固定天数的裁决不变 |
+| 终点 | **2026-10-18**（你 10-18 的裁决，取代原先建议的 10-28）。原建议终点要覆盖周六 10-24 的 Macro/Sector 周度运行，以及 LRCX（10-21）、GOOG 与 SKHY（10-27）、MSFT（10-28）财报的事件路径；提前结束后，事件路径只用最近发布财报的 TSM、ASML 验证，其余标的不逐个等待财报。窗口结束后的退役核验见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md` |
 | 停止条件（任一出现即 `owner-rollback`） | ①每日健康检查失败；②同一逻辑触发出现重复认领；③必需投影缺失或认领长时间 `running`；④连续两次整批运行失败，且原因是新逻辑缺陷而非「该标的无数据」；⑤外部 API 上限被触发（花费异常）；⑥任何券商写入尝试 |
 | 窗口内的回退方式 | `ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e` |
 

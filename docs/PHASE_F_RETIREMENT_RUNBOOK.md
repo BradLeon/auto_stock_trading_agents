@@ -82,7 +82,7 @@
 
 ## 六、安全恢复与观察窗口（12.3）
 
-窗口 `phase-f-dispatcher-2026-10-17`：7 个研究工作流，起点 10-17，建议终点 10-28，六条停止条件，现状均未触发。回退：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e`。详见 `docs/PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md`。
+窗口 `phase-f-dispatcher-2026-10-17`：7 个研究工作流，起点 10-17，**终点 10-18（用户裁决，取代原建议的 10-28）**，六条停止条件；10-18 核对结果见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md`（五条未触发，第③条有一次 LRCX 信息简报缺失，属数据缺口，待用户裁决是否算触发）。回退：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e`。详见 `docs/PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md`。
 
 ## 七、退出责任（谁、什么条件下、做什么）
 
@@ -101,5 +101,5 @@
 
 ## 九、下一步
 
-1. 观察窗口结束（建议 10-28）后复跑 `ats retirement zero` 与 `decide`，任务 12.8 据此逐项核验清零、对账、回滚窗口和墓碑，条件全满足才受控退役，缺条件继续 pending。
-2. 任务 13.8、13.9 回写最终验收与门禁状态。
+1. 观察窗口已于 10-18 结束（用户裁决）。12.8 已复跑 `ats retirement zero` 与 `decide` 并逐项核验：3 个可退出（本来就是 retired）、24 个继续 pending，没有改登记；要退役任何新条目须用户明确同意。24 个 pending 条目还缺的清零与对账，见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md`。
+2. 任务 13.8、13.9 已回写最终验收与门禁状态：`docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md`。

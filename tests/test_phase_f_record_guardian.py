@@ -28,7 +28,7 @@ import pytest
 
 from ats.config import REPO_ROOT
 
-CHANGE = REPO_ROOT / "openspec" / "changes" / "implement-phase-f-shadow-run-and-cutover"
+CHANGE = REPO_ROOT / "openspec" / "changes" / "archive" / "2026-10-19-implement-phase-f-shadow-run-and-cutover"
 TASKS = CHANGE / "tasks.md"
 RECORD = REPO_ROOT / "docs" / "validation" / "PHASE_F_GROUP_PROGRESS.md"
 

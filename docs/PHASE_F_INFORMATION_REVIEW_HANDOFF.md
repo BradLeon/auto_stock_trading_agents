@@ -30,7 +30,7 @@
 
 - 实际 Git branch：`feat/rebuild_workflow_dataflow`，截至此次修订已推送的 HEAD：`5e4379e`；首次交接时为 `075ed0e`。用户讨论的 change 是 `implement-phase-f-shadow-run-and-cutover`，不要把 change 名称当成当前 Git branch。
 - 父 change：`refactor-workflow-dataflow-architecture`。
-- 当前权威 [tasks.md](../openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md) 统计为 106/117，11 项未勾选；这里只记录交接时点，不代替后续实时状态。
+- 当前权威 [tasks.md](../openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md) 统计为 106/117，11 项未勾选；这里只记录交接时点，不代替后续实时状态。
 - 首次交接时的大批实现／测试／文档已按用户要求在 `5e4379e` 提交并推送，相关回归 106 passed、OpenSpec strict 通过。本次后续来源审阅与计划修订尚未提交／推送；不要覆盖工作区或仅据此历史记录判断当前 Git 状态。
 
 ## 本次已经完成什么

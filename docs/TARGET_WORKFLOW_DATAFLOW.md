@@ -751,7 +751,7 @@ runtime 价格不写入共享事实。十字段授权、账户、grant、代次�
 用户已允许完整隔离环境显式选择无网络 FakeBroker，通过实际 Trader 产生非空订单及因果成交回报，
 用于后续 Clerk 验收。生产 C3 保持禁写；IBKR（含 Paper）写入需单独明确授权。
 本次实现与局部回归不代表六分析角色、完整研究快照、Clerk 恢复和生产资格已经验收，见
-[Phase F 当前任务](../openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md)。
+[Phase F 当前任务](../openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md)。
 
 ## 11. Clerk 与交易账本
 

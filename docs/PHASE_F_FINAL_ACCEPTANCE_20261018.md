@@ -17,7 +17,7 @@
 | 旧实现退役 | 27 条登记：**3 退出、24 pending**，没有改登记 | [12.8 记录](PHASE_F_12_8_RETIREMENT_20261018.md) |
 | PEAD 财报前基线（10.6） | **已通过**：LRCX `[基线 v1]`（Q1 FY2027）建成，仅 dispatcher 动手，第二遍复用，基线先于事件评审；定时触发与 10-21 事件评审尚未观察 | [首轮记录末尾附录](PHASE_F_FIRST_PRODUCTION_RUN_20261016.md) |
 
-任务计数以 `openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md` 首行为准（**121/121**：12.8、13.8、13.9 于 10-18 完成，10.6 于 10-19 完成）。
+任务计数以 `openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md` 首行为准（**121/121**：12.8、13.8、13.9 于 10-18 完成，10.6 于 10-19 完成）。
 
 ## 二、需求矩阵（按切流边界分列）
 

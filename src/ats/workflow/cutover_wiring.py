@@ -302,7 +302,7 @@ def valid_owner_mapping(boundary: OwnerBoundary, *, tasks_path=None) -> bool:
     task, required = expected.get(boundary.slice_name, ("", ()))
     if boundary.migration_task != task or not task:
         return False
-    path = Path(tasks_path or REPO_ROOT / "openspec/changes/implement-phase-f-shadow-run-and-cutover/tasks.md")
+    path = Path(tasks_path or REPO_ROOT / "openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md")
     try:
         matches = re.findall(r"^- \[[ x]\] " + re.escape(task) + r"\s+(.+)$",
                              path.read_text(), re.MULTILINE)

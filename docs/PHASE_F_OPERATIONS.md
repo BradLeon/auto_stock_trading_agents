@@ -1,5 +1,7 @@
 # Phase F 控制、读、调度与交易操作手册
 
+> **2026-10-19 说明：** 本手册写于 2026-10-15 精简裁决之前。其中按「标的×时点」逐 scope 取得资格、入口证据包、绑定请求哈希的精确授权等做法已被裁决取代：研究读取按消费者整体切换，前置是消费者层面的数据产品健康检查，迁移期退回旧路径。当前生产状态、切换与回退命令以 `docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 和 `docs/PHASE_F_RETIREMENT_RUNBOOK.md` 为准；以下内容保留作历史与实现参考。
+
 本手册对应 `implement-phase-f-shadow-run-and-cutover`。所有命令使用项目 uv 环境。生产部署需要当前 exact-scope 资格、当前新入口验收签核和明确部署授权；隔离 fixture 不满足这些条件。C3 仍关闭真实自动券商写入，隔离验收可明确选择无网络 FakeBroker。
 
 架构及验收依据为 [TARGET_WORKFLOW_DATAFLOW.md](TARGET_WORKFLOW_DATAFLOW.md)，逐项对应见 [验收要求映射](PHASE_F_ACCEPTANCE_REQUIREMENTS.md)。本手册不扩展其角色依赖、单次运行范围或上线条件。

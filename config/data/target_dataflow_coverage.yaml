@@ -438,6 +438,11 @@ qualification_policy:
     - src/ats/config.py
     - src/ats/schemas/market.py
     - src/ats/workflow/assurance_surface.py
+    # Runtime modules the Macro / Layer / Sector reads import; they cannot be freeze-only (2026-10-19).
+    - src/ats/data/collection/macro_news.py
+    - src/ats/data/products/macro_series.py
+    - src/ats/data/sources/macro_series.py
+    - src/ats/workflow/layer_sector_inputs.py
     - src/ats/workflow/cutover.py
     - src/ats/data/products/unstructured.py
     - src/ats/data/assurance.py

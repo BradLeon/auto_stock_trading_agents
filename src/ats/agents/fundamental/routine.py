@@ -412,7 +412,13 @@ def run_routine_pass(request) -> dict:
     from ...memory import get_store
 
     store = get_store()
-    baseline_state = ensure_baseline(store, request)
+    from ...workflow.isolation import verified_isolation_root
+
+    # The pre-earnings baseline is a production, calendar-driven step: it reads the live earnings calendar and
+    # the evaluation clock. Inside a verified isolation root (fixed-input acceptance, shadow replay) neither is
+    # an admitted input, so the step is not run there and the pass says so instead of consuming them.
+    baseline_state = ({"baseline": "skipped_in_isolation"} if verified_isolation_root() is not None
+                      else ensure_baseline(store, request))
     baseline = load_baseline(store, request.symbol)
     from ...workflow.consumer_reads import read_projection
 

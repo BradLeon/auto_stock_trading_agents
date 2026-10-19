@@ -22,6 +22,9 @@ from ats.graph.chief_state import ChiefDecisionState
 from ats.memory.store import TradingMemory
 from ats.schemas.decision import TradeDecision
 
+pytestmark = pytest.mark.usefixtures("open_decision_read_gate")
+
+
 NOW = datetime.now(timezone.utc) - timedelta(seconds=2)
 
 

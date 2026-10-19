@@ -62,7 +62,8 @@ def registered(monkeypatch):
 
 def test_registers_daily_cycle_score_windows_and_reconcile(registered):
     ids = [j["id"] for j in registered.jobs]
-    assert ids == ["daily_cycle", "factset_weekly_ingest", "weekly_review",
+    # consumer_health_daily: the Phase F consumer-level read-route health check (2026-10-15).
+    assert ids == ["daily_cycle", "factset_weekly_ingest", "weekly_review", "consumer_health_daily",
                    "pead_score_amc", "pead_score_bmo", "journal_reconcile"]
 
 
@@ -78,7 +79,7 @@ def test_checked_in_pause_policy_keeps_only_pead_and_factset(monkeypatch):
 
     jobs = holder["s"].jobs
     assert [job["id"] for job in jobs] == [
-        "daily_cycle", "factset_weekly_ingest", "pead_score_amc", "pead_score_bmo"]
+        "daily_cycle", "factset_weekly_ingest", "consumer_health_daily", "pead_score_amc", "pead_score_bmo"]
 
     called = []
     monkeypatch.setattr(scheduler, "pead_score_window",
@@ -119,8 +120,8 @@ def test_windows_fire_at_the_configured_times(registered):
     assert (fields["pead_score_amc"]["hour"], fields["pead_score_amc"]["minute"]) == ("20", "0")
     assert (fields["pead_score_bmo"]["hour"], fields["pead_score_bmo"]["minute"]) == ("11", "0")
     for i in by_id:
-        if i in {"weekly_review", "factset_weekly_ingest"}:
-            continue
+        if i in {"weekly_review", "factset_weekly_ingest", "consumer_health_daily"}:
+            continue   # the consumer health check runs every day, not only on NYSE sessions
         assert fields[i]["day_of_week"] == "mon-fri"
 
 
@@ -176,7 +177,7 @@ def test_bad_window_time_is_skipped_not_fatal(monkeypatch):
                         lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
     scheduler.start(dry_run=True)
     assert [j["id"] for j in holder["s"].jobs] == [
-        "daily_cycle", "factset_weekly_ingest", "pead_score_bmo"]
+        "daily_cycle", "factset_weekly_ingest", "consumer_health_daily", "pead_score_bmo"]
 
 
 # --------------------------------------------------------------------------- #

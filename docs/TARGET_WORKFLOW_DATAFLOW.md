@@ -1016,12 +1016,23 @@ event_id + event_version + workflow_id
 - 发布 Schedule Calendar 数据产品和 trigger ledger。
 - 迁移财报、FOMC、核心宏观事件和人工覆盖。
 
+**实施状态（change `implement-phase-e-dispatcher-and-calendar` 已归档，2026-10-19 核对）**：任务注册表与 Dispatcher、Trigger Ledger（`event_id + event_version + workflow_id` 幂等认领）、task-local SQLite 连接（WAL、busy timeout、短事务）、版本化 `schedule_events` 与只读 Calendar Data Product 均已实现并验收。生产现状：Information、Fundamental 例行与事件、Layer、Sector、Macro、Technical 这 7 个研究工作流的调度负责人是 Dispatcher，常驻进程 `com.ats.phase-e` 只跑研究、不进 Chief、不下单；**主理人决策周期、PEAD 评分窗口以及 journal/clerk 作业仍由旧调度承担**。**生产日历库目前是空的**（`schedule_events` 0 行，`config/data/schedules.yaml` 没有日历刷新任务），事件路径尚未被真实日历事件触发过，现有事件评审均为手动触发。
+
 ### 14.6 阶段 F：影子运行与切流
 
 - 新旧分析和调度路径并行运行，新路径默认禁止真实下单。
 - 比较输入快照、分析输出、调度遗漏、风控结果和交易归因。
 - 通过阶段性验收后分别切换读路径、调度路径和交易路径。
 - 迁移窗口内保留旧入口作为可控回滚路径；不同时保留两个可下真单的入口。
+
+**实施状态（change `implement-phase-f-shadow-run-and-cutover` 已归档，121/121，2026-10-19 核对）**：
+- **读取**：Information、Fundamental、Layer、Macro、Sector、Technical 六个消费者按消费者整体切到新路径（代次 3），每日健康检查，失败即退回旧路径；Chief 对旧表的直读尚未清零。
+- **调度**：7 个研究工作流切到 Dispatcher，并演练过「切回旧路径再切回」。
+- **交易 / 审批 / 记账**：未切换。实盘仍锁定，任一时刻只有一条可执行真实交易的入口。
+- **旧实现退役**：27 个登记条目 3 个退出、24 个 pending，未改登记。
+- **切流口径**：按 2026-10-15 精简裁决，切流以本文档为准，研究读取按消费者整体切换，迁移期退回旧路径；观察 = 一次切换加一次切回演练。
+- **限定**：这是有限 Routine 签核加研究侧上线，不是 §9.2 的完整达标；完整 Routine 能力（完整市场隐含预期、整合叙事、逐 KPI 变化解释、可证伪条件）后补。
+详见 `docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md`。
 
 ## 15. 可靠性测试与验收标准
 

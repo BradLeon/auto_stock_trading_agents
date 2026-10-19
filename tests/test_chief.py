@@ -1,6 +1,7 @@
 """Chief 统一决策 — context assembly, no-llm stub, store round-trip, execute wiring
 (hermetic; no network/LLM/TWS)."""
 
+import pytest
 from datetime import datetime, timedelta, timezone
 
 import ats.config as _config
@@ -12,6 +13,9 @@ from ats.schemas.macro_strategy import MacroReview, SectorTilt
 from ats.schemas.pead import ExpectationSet, PeadDossier, Scorecard
 from ats.schemas.risk import RiskDirective, RiskReview
 from ats.schemas.sector import CompanyCall, SectorReview
+
+pytestmark = pytest.mark.usefixtures("open_decision_read_gate")
+
 
 NOW = datetime.now(timezone.utc)
 
@@ -164,6 +168,9 @@ def test_run_chief_cli_executes_when_decisions(monkeypatch):
         return g
 
     monkeypatch.setattr(_config, "load_pead_global", pinned_global)
+    # The frozen decision plan reads pead.yaml itself (phase_e._targets), not load_pead_global: pin it too,
+    # otherwise the checked-in 11-name roster makes this one-name snapshot incomplete.
+    monkeypatch.setattr("ats.workflow.phase_e._targets", lambda config_dir: ["COHR"])
     now = datetime.now(timezone.utc)
     valid = (now + timedelta(hours=48)).isoformat(timespec="seconds")
 

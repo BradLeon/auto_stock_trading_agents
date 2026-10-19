@@ -70,6 +70,15 @@
 6 元组 `_PRODUCTION_WATCH_TABLES` 取值、以 `mode=ro` 连接，且列的是**新表**
 `data_evidence_facts` 而非退役表。
 
+#### 2026-10-19（父 change 12.1，本机 uv 环境）
+
+| 项 | 值 |
+|---|---|
+| 命令 | `./scripts/run_tests.sh -p no:randomly --junitxml=… --deselect tests/test_factset_index_semantic_local.py::test_semantic_core_passes_with_exact_index_and_technology_reviews` |
+| 结果 | 首轮 86 failed / 4334 passed / 21 errors；修复后最终全量 **57 failed / 4387 passed / 0 errors**（4444 个测试，81 分钟） |
+| 归因 | 57 个失败：41 个旧批次/读取切换机制（被 10-15 裁决取代，只能从运维命令到达）、4 个决策路径夹具债、12 个 13.6 之前已登记的既有失败；没有产品缺陷。逐组根因、第一次失败的提交和处置见 `docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md` |
+| 方法 | `scripts/attribute_test_failures.py` 按文件与签名归因；对没登记过的 72 个失败用 `git worktree` 在 8 个更早的提交上逐个对照，确定第一次失败的提交 |
+
 #### 历史权威测量
 
 | 项 | 值 |

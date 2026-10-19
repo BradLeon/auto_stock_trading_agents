@@ -28,6 +28,7 @@ class MacroSeriesSet:
     known_at: dict = field(default_factory=dict)   # key -> latest known_at (ISO) of the newest point
     gaps: tuple = ()                  # keys with no stored data
     stale: tuple = ()                 # (key, last_period, age_days)
+    defined: dict = field(default_factory=dict)   # key -> cadence of every defined series (collected or not)
     as_of: datetime | None = None
 
 
@@ -75,7 +76,8 @@ def load(*, as_of: datetime | None = None, repository=None, now: datetime | None
         age = (today - s.index[-1].date()).days
         if age > STALE_DAYS.get(specs[key][4], 10):
             stale.append((key, s.index[-1].date().isoformat(), age))
-    return MacroSeriesSet(series=series, known_at=known, gaps=gaps, stale=tuple(sorted(stale)), as_of=as_of or now)
+    return MacroSeriesSet(series=series, known_at=known, gaps=gaps, stale=tuple(sorted(stale)),
+                          defined={key: spec[4] for key, spec in specs.items()}, as_of=as_of or now)
 
 
 def _last(series, key):

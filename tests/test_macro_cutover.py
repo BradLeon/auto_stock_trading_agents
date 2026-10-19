@@ -29,7 +29,8 @@ def series_set(*, keys=None, stale=(), gaps=None, known="2026-10-16T22:00:00+00:
         series={k: pd.Series([1.0], index=index) for k in keys},
         known_at={k: known for k in keys},
         gaps=tuple(sorted(set(SPECS) - set(keys))) if gaps is None else gaps,
-        stale=tuple((k, "2026-09-01", 46) for k in stale), as_of=NOW)
+        stale=tuple((k, "2026-09-01", 46) for k in stale),
+        defined={k: v[4] for k, v in SPECS.items()}, as_of=NOW)
 
 
 def news_doc(theme, i=0, *, published="2026-10-15T12:00:00+00:00", **overrides):

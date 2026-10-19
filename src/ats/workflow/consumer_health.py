@@ -227,11 +227,10 @@ def _macro(now: datetime) -> dict[str, Any]:
     else:
         data = series_state["value"]
         from ..data.products.macro_series import STALE_DAYS
-        from ..data.sources.macro_series import all_series
 
-        specs = all_series()
+        specs = data.defined          # key -> cadence, supplied by the product (workflow code may not import sources)
         coverage = len(data.series) / len(specs) if specs else 0.0
-        daily = [key for key, spec in specs.items() if spec[4] == "daily"]
+        daily = [key for key, cadence in specs.items() if cadence == "daily"]
         stale_keys = {key for key, _last, _age in data.stale}
         live_daily = [key for key in daily if key in data.series and key not in stale_keys]
         newest = max(data.known_at.values(), default="")

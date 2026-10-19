@@ -86,16 +86,8 @@ src_tools:
   reason: consumer disposition report; reached only from the cli
 - path: src/ats/workflow/cutover_acceptance.py
   reason: cutover acceptance report; reached only from the cli
-- path: src/ats/data/collection/macro_news.py
-  reason: macro theme news collection run by the data refresh controller; Macro has no qualification evidence yet
-- path: src/ats/data/products/macro_series.py
-  reason: macro indicator read product; read only by the Macro review, which has no qualification evidence yet
-- path: src/ats/data/sources/macro_series.py
-  reason: macro indicator provider adapter run by the data refresh controller; Macro has no qualification evidence yet
 - path: src/ats/runtime/evidence_observe.py
   reason: chain-evidence extraction run by the data refresh controller; no consumer's qualification evidence reads it
-- path: src/ats/workflow/layer_sector_inputs.py
-  reason: read-only description of the Layer and Sector review inputs (health check, data vintage); Layer and Sector have no qualification evidence yet
 - path: src/ats/workflow/intake.py
   reason: prerequisite intake and evidence registration; reached only from the cli
 - path: src/ats/workflow/pytest_optional_deps_plugin.py

@@ -517,3 +517,17 @@ def _no_live_baseline_window(monkeypatch):
     monkeypatch.setattr(routine, "baseline_window", lambda symbol, *, now=None: {
         "symbol": str(symbol).upper(), "label": "", "open": False, "days_to": None,
         "date": "", "session": "", "cutoff_passed": False})
+
+
+@pytest.fixture
+def open_decision_read_gate(monkeypatch):
+    """Let a decision-snapshot test exercise the snapshot logic without the Phase F read-route gate.
+
+    `decision_requirements.freeze_read_dependencies` refuses to freeze a decision unless every dependency (and
+    the Chief itself) reads from a qualified target route, which is the production fail-closed rule and is
+    covered by its own test. Snapshot/cycle tests predate that rule and have no routes configured.
+    """
+    from ats.workflow import decision_requirements as dr
+
+    monkeypatch.setattr(dr, "freeze_read_dependencies", lambda plan: [])
+    monkeypatch.setattr(dr, "validate_read_dependencies", lambda plan, requirements: None)

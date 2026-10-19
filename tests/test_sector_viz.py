@@ -6,6 +6,7 @@ stay fast and independent of that config's contents changing. Mirrors the same s
 `SectorReview`, a `{layer_key: [ClaimAssessment]}` map, and an injected data reader.
 """
 
+import pytest
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +18,13 @@ from ats.schemas.sector import BasketRow, LayerBasket, LayerNameCall, LayerTicke
     LayerVerdict, SectorConfig, SectorLayer, SectorReview
 
 NOW = datetime(2026, 8, 21, 8, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _configured_scope(monkeypatch):
+    """The viz CLI is a gated Sector read (Phase F): it resolves its business scope from the checked-in sector
+    config. These tests use an invented sector name, so the scope is supplied directly."""
+    monkeypatch.setattr("ats.workflow.runtime_reads.configured_entities", lambda *a, **k: ["COHR"])
 
 
 class FakeDataStore:

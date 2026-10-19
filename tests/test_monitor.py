@@ -7,6 +7,8 @@ analyst. These tests pin the NEW contract.
 
 from datetime import datetime, timezone
 
+import pytest
+
 from ats.agents.pead import monitor, triage
 from ats.agents.pead.outputs import ContextUpdateView
 from ats.data import news as news_src
@@ -44,7 +46,8 @@ def test_monitor_llm_material_update_does_not_touch_dossier(monkeypatch):
     monkeypatch.setattr(triage, "score_items", lambda *a, **k: {})  # triage miss -> pass-through
     view = ContextUpdateView(materiality=0.8, event_summary="hyperscaler capex up",
                              narrative_delta="upstream CapEx raised → optical demand up",
-                             expectation_changes=[])
+                             expectation_changes=[],
+                             confidence=0.6)
     monkeypatch.setattr("ats.agents.information.documents.run_structured", lambda *a, **k: view)
 
     upd = monitor.run("COHR", use_llm=True)
@@ -63,7 +66,9 @@ def test_monitor_no_fresh_events_is_zero_materiality(monkeypatch):
     assert upd.materiality == 0.0
 
 
-def test_monitor_persists_expectation_changes_only_as_brief(monkeypatch):
+def test_information_may_not_emit_fundamental_expectation_changes(monkeypatch):
+    """Phase D 4.4/7.4: expectation changes are Fundamental's judgement. A model answer that carries
+    them makes the Information run fail; no brief is published and the dossier is untouched."""
     from ats.agents.pead.outputs import ContextUpdateView, ExpectationChangeView
 
     monkeypatch.setattr(news_src, "fetch_news", lambda sym, since, until=None, consumer="pead_monitor": _news(sym))
@@ -71,14 +76,14 @@ def test_monitor_persists_expectation_changes_only_as_brief(monkeypatch):
     view = ContextUpdateView(
         materiality=0.8, event_summary="capex divergence",
         narrative_delta="demand no longer uniformly up",
+        confidence=0.6,
         expectation_changes=[ExpectationChangeView(
             dim_key="hyperscaler_capex_demand", change="downgrade conviction")])
     monkeypatch.setattr("ats.agents.information.documents.run_structured",
                         lambda *a, **k: view)
 
-    monitor.run("COHR", use_llm=True)
+    with pytest.raises(RuntimeError, match="Information model failed"):
+        monitor.run("COHR", use_llm=True)
     store = get_store()
-    # No dossier write, no narrative merge — expectation changes stay in the brief.
     assert store.get_dossier("COHR", "Q FY2026") is None
-    briefs = store.task_projection_envelopes(agent_role="information_brief")
-    assert briefs and "demand no longer uniformly up" in briefs[0]["payload"]["summary"]
+    assert not store.task_projection_envelopes(agent_role="information_brief")

@@ -1,4 +1,4 @@
-> 2026-10-19 对照已归档的各 Phase change 勾选：**113/119 完成**、6 项未完成（7.5 按用户裁决保留；8.9 主理人决策周期与 PEAD 评分窗口仍由旧调度承担；12.1、12.2、12.3、12.5 为本 change 自身的最终验收与文档同步）。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
+> 2026-10-19 对照已归档的各 Phase change 勾选并完成第 12 节最终验收：**117/119 完成**、2 项未完成（7.5 按用户裁决保留；8.9 主理人决策周期与 PEAD 评分窗口仍由旧调度承担）。第 12 节验收记录见 docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
 
 ## 1. Phase A — 权威基线与数据边界
 
@@ -212,9 +212,9 @@
 
 ## 12. 最终验收与文档同步
 
-- [ ] 12.1 运行全量 `uv run pytest` 和所有 Phase/Dataflow 专项测试发现问题，对比 Phase A 权威基线，对每个剩余失败登记根因、新需求关联/可达性及处置；新需求、共享依赖与退出安全失败阻塞，已证明无新路径影响的旧专属失败可排除，不以全仓旧测试全绿作为新入口验收前置
-- [ ] 12.2 运行 OpenSpec strict validation、架构守卫、schema migration/reopen 和 SQLite 并发压力测试
-- [ ] 12.3 验证每笔新系统影子/实际订单都可追溯到 research snapshot、decision revision、risk review 和 Boss approval
+- [x] 12.1 运行全量 `uv run pytest` 和所有 Phase/Dataflow 专项测试发现问题，对比 Phase A 权威基线，对每个剩余失败登记根因、新需求关联/可达性及处置；新需求、共享依赖与退出安全失败阻塞，已证明无新路径影响的旧专属失败可排除，不以全仓旧测试全绿作为新入口验收前置 【2026-10-19 完成】首轮 86 failed/21 errors，修复后最终全量 **57 failed / 4387 passed / 0 errors**（10-07 基线 45 failed）。57 个全部登记根因与处置：41 个旧批次/读取切换机制（被 10-15 裁决取代，只能从 `ats batch|read` 和边界演练到达，生产的 `consumer_cutover` 不导入）、4 个决策路径夹具债、12 个 13.6 前已登记的既有失败；无一为产品缺陷。本轮查出并修复 3 个自己引入的问题（运行时模块被登记成仅冻结；健康检查导入来源适配器违反数据—Agent 边界；Routine 财报前基线在隔离验收里读实时日历和时钟）。见 docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。
+- [x] 12.2 运行 OpenSpec strict validation、架构守卫、schema migration/reopen 和 SQLite 并发压力测试 【2026-10-19 完成】`openspec validate --all --strict` 45 项通过；架构/切流/数据层守卫与数据迁移测试通过；新增 tests/test_sqlite_concurrency_stress.py（真实多线程：12 线程×25 次发布投影、8 线程×10 次追加修订、16 线程争抢同一触发），连续 5 次通过，无丢失、无重复、无锁超时。
+- [x] 12.3 验证每笔新系统影子/实际订单都可追溯到 research snapshot、decision revision、risk review 和 Boss approval 【2026-10-19 完成】生产库无新系统订单（`trades` 52 笔均在 2026-07-23 之前，9 笔无法恢复决策链的登记为 broken_link 异常，未伪造关联）；写路径强制关联；隔离环境完整链路 `test_phase_f_integration_evidence` 22 项在当前代码通过。
 - [x] 12.4 验证完整流程在任一必需分析缺失/失败/过期时只产生 incomplete 报告且无法下单
-- [ ] 12.5 更新 `TARGET_WORKFLOW_DATAFLOW.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar、Dataflow 专项验收范围和单 live route 规则一致
+- [x] 12.5 更新 `TARGET_WORKFLOW_DATAFLOW.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar、Dataflow 专项验收范围和单 live route 规则一致 【2026-10-19 完成】TARGET_WORKFLOW_DATAFLOW.md §14.5/§14.6 补 Phase E/F 实施状态（含生产日历库为空）；PHASE_F_OPERATIONS.md 加 10-15 裁决说明；60 秒新鲜度、最多 3 轮、单一实盘入口与配置一致。
 - [x] 12.6 审阅每个 Phase 与横向 Dataflow 专项的待退清单，为未满足项保留具体缺口，不在本 change 中执行未经确认的物理清除

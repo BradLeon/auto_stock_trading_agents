@@ -24,6 +24,9 @@ from ats.memory.store import TradingMemory
 from ats.runtime.cli import run_decision_graph
 from ats.schemas.decision import BossApproval
 
+pytestmark = pytest.mark.usefixtures("open_decision_read_gate")
+
+
 NOW = datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc)
 
 

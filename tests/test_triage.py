@@ -38,7 +38,7 @@ def test_triage_scores_persisted_and_noise_filtered(monkeypatch):
 
     def fake_llm(role, schema, ctx, **k):
         captured["ctx"] = ctx
-        return ContextUpdateView(materiality=0.7, event_summary="guidance up")
+        return ContextUpdateView(materiality=0.7, event_summary="guidance up", confidence=0.6)
 
     monkeypatch.setattr("ats.agents.information.documents.run_structured", fake_llm)
     upd = monitor.run("COHR", use_llm=True)
@@ -77,7 +77,7 @@ def test_triage_failure_degrades_to_passthrough(monkeypatch):
 
     def fake_llm(role, schema, ctx, **k):
         captured["ctx"] = ctx
-        return ContextUpdateView(materiality=0.2, event_summary="routine")
+        return ContextUpdateView(materiality=0.2, event_summary="routine", confidence=0.6)
 
     monkeypatch.setattr("ats.agents.information.documents.run_structured", fake_llm)
     upd = monitor.run("COHR", use_llm=True)
@@ -104,7 +104,7 @@ def test_fulltext_bodies_reach_llm_context(monkeypatch):
 
     def fake_llm(role, schema, ctx, **k):
         captured["ctx"] = ctx
-        return ContextUpdateView(materiality=0.8, event_summary="x")
+        return ContextUpdateView(materiality=0.8, event_summary="x", confidence=0.6)
 
     monkeypatch.setattr("ats.agents.information.documents.run_structured", fake_llm)
     monitor.run("COHR", use_llm=True)

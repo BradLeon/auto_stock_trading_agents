@@ -305,7 +305,17 @@ def test_single_real_order_submission_path():
             continue
         from pathlib import Path
         callers.add(str(Path(path)))                      # line-number robust
-    assert callers == {"src/ats/graph/chief.py"}, callers
+    # Phase F added two isolated acceptance callers. Both exist to PROVE the real facade refuses inside an
+    # isolation root (the broker write guard raises BrokerWriteProhibited; acceptance_runner fails if the
+    # facade ever accepts). They are sanctioned only while each still names its guard, so a refactor that
+    # drops the guard turns this into a second real funnel and fails here.
+    isolated = {"src/ats/execution/shadow_execution.py": "verified_isolation_root",
+                "src/ats/workflow/acceptance_runner.py": "broker_write_guard"}
+    assert callers - set(isolated) == {"src/ats/graph/chief.py"}, callers
+    for path, guard_name in isolated.items():
+        if path in callers:
+            from pathlib import Path
+            assert guard_name in (Path(ROOT) / path).read_text(encoding="utf-8"), path
 
 
 # --- chief_revise unit behaviour --------------------------------------------------- #

@@ -123,11 +123,20 @@ schedule:
   factset_month_end_tz: America/New_York
   # 例行作业可逐项暂停、验证输入/输出后再恢复。未列出的旧配置默认全部开启，
   # 以保证升级兼容；此处是当前生产运行策略。
+  # 2026-10-19 (parent 8.9): the legacy scheduler (com.ats.schedule) is retired and not loaded. What it ran now has
+  # an owner elsewhere, so the switches below are off and nothing here can run a second copy by accident
+  # (pead_event_triggers is the one exception: it is the shared switch the new calendar-event path also reads):
+  #   pead_daily                       -> Information brief, Fundamental routine and event workflows (com.ats.phase-e)
+  #   pead_score_*                     -> Fundamental event workflow, woken by the calendar (data refresh controller)
+  #   factset_weekly_ingest            -> data refresh job factset_month_end_ingest
+  #   weekly_review                    -> Macro and Sector workflows (com.ats.phase-e)
+  # chief_daily / journal_reconcile stay off: the decision cycle and the Clerk schedule belong to the trade path and
+  # are scheduled when that path is switched (live remains locked).
   daily_stages:
-    pead_event_triggers: true
+    pead_event_triggers: true       # still LIVE: com.ats.phase-e's calendar-event path reads this switch (event_trigger_enabled)
     macro_sector_event_triggers: false
     news_backfill: false
-    pead_daily: true
+    pead_daily: false
     technical_daily: false
     intel_digest: false
     performance_snapshot: false
@@ -135,11 +144,11 @@ schedule:
     journal_marks: false
     chief_daily: false
   jobs:
-    factset_weekly_ingest: true
+    factset_weekly_ingest: false
     weekly_review: false
     journal_reconcile: false
-    pead_score_bmo: true
-    pead_score_amc: true
+    pead_score_bmo: false
+    pead_score_amc: false
     # 仅影响排程内的自动抽取；手动 evidence observe 仍然可用。
     pead_observe_window: false
   # 这台机器会睡眠。触发时刻若在睡眠中，任务只有在唤醒后、且仍在本宽限窗口内才补跑。

@@ -209,3 +209,73 @@ def test_late_admitted_transcript_appends_a_followup_release_version(tmp_path):
         "filing-v1", "transcript-v1"}
     assert store.events(as_of=datetime(2026, 10, 14, 12, tzinfo=timezone.utc))[0][
         "event_version"] == first["event_version"]
+
+
+# --- 2026-10-19: a source that adds detail does not conflict with one that states less ------------------- #
+
+def _earnings(*, source, time="", tz="", utc="", precision="date", session="amc", day="2026-10-21",
+              fetched="2026-10-19T06:00:00+00:00"):
+    return ScheduleEventCandidate(
+        source_id=source, source_url=f"https://{source}.example/", source_event_ref="LRCX-FY2027Q1",
+        event_type="earnings", stable_identity=earnings_identity("LRCX", 2027, 1),
+        label="LRCX earnings", reference_period="FY2027Q1", event_date=day, local_time=time,
+        timezone=tz, utc_at=utc, time_precision=precision, market_session=session, status="planned",
+        fetched_at=fetched)
+
+
+def test_a_clock_time_for_a_date_only_print_is_corroboration_not_a_conflict(tmp_path):
+    store = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
+    date_only = store.submit_candidate(_earnings(source="finnhub"))
+    v1 = store.publish_candidate(date_only["candidate_id"], at=datetime(2026, 10, 19, 6, tzinfo=timezone.utc))
+    detailed = store.submit_candidate(_earnings(
+        source="yahoo", time="16:00", tz="America/New_York", utc="2026-10-21T20:00:00+00:00",
+        precision="minute", fetched="2026-10-19T06:01:00+00:00"))
+    assert detailed["review_status"] == "candidate"            # was "conflict" before
+    v2 = store.publish_candidate(detailed["candidate_id"], at=datetime(2026, 10, 19, 6, 1, tzinfo=timezone.utc))
+    assert (v1["event_version"], v2["event_version"]) == (1, 2)  # the more precise statement is a new version
+    assert v2["utc_at"] == "2026-10-21T20:00:00+00:00"
+    assert store.latest_events()[0]["quality_status"] == "ok"
+
+
+def test_a_coarser_statement_after_a_precise_one_does_not_flip_the_version_back(tmp_path):
+    store = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
+    precise = store.submit_candidate(_earnings(source="yahoo", time="16:00", tz="America/New_York",
+                                               utc="2026-10-21T20:00:00+00:00", precision="minute"))
+    store.publish_candidate(precise["candidate_id"], at=datetime(2026, 10, 19, 6, tzinfo=timezone.utc))
+    coarse = store.submit_candidate(_earnings(source="finnhub", fetched="2026-10-19T18:00:00+00:00"))
+    assert coarse["review_status"] == "candidate"
+    event = store.publish_candidate(coarse["candidate_id"], at=datetime(2026, 10, 19, 18, tzinfo=timezone.utc))
+    assert event["event_version"] == 1 and event["time_precision"] == "minute"
+
+
+def test_different_dates_or_sessions_still_conflict(tmp_path):
+    store = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
+    base = store.submit_candidate(_earnings(source="finnhub"))
+    store.publish_candidate(base["candidate_id"])
+    other_day = store.submit_candidate(_earnings(source="yahoo", day="2026-10-22"))
+    other_session = store.submit_candidate(_earnings(source="bloomberg", session="bmo"))
+    assert other_day["review_status"] == other_session["review_status"] == "conflict"
+
+
+def test_conflicts_recorded_before_the_rule_are_released_when_they_only_add_detail(tmp_path):
+    import sqlite3
+
+    store = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
+    base = store.submit_candidate(_earnings(source="finnhub"))
+    store.publish_candidate(base["candidate_id"], at=datetime(2026, 10, 19, 6, tzinfo=timezone.utc))
+    detailed = store.submit_candidate(_earnings(
+        source="yahoo", time="16:00", tz="America/New_York", utc="2026-10-21T20:00:00+00:00",
+        precision="minute", fetched="2026-10-19T06:01:00+00:00"))
+    genuine = store.submit_candidate(_earnings(source="bloomberg", day="2026-10-22",
+                                               fetched="2026-10-19T06:02:00+00:00"))
+    with sqlite3.connect(tmp_path / "calendar.sqlite") as conn:   # recreate the pre-rule state
+        conn.execute("UPDATE schedule_event_candidates SET review_status='conflict',"
+                     "review_reason='cross_source_trigger_fields_disagree' WHERE candidate_id=?",
+                     (detailed["candidate_id"],))
+    assert store.latest_events()[0]["quality_status"] == "conflict"
+    refs = store.rereview_compatible_conflicts(at=datetime(2026, 10, 19, 7, tzinfo=timezone.utc))
+    assert refs == ["earnings:LRCX:FY2027Q1:release@2"]
+    statuses = {c["source_id"]: c["review_status"] for c in
+                store.candidates(event_id="earnings:LRCX:FY2027Q1:release")}
+    assert statuses["bloomberg"] == "conflict"                    # the real disagreement stays parked
+    assert genuine["review_status"] == "conflict"

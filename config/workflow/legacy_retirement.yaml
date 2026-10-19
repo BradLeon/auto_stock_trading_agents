@@ -118,7 +118,11 @@ retired:
     status: pending
     exit_condition: 任务注册表与依赖解析上线并通过验收，Dispatcher 接管阶段编排。
     missing_condition: >-
-      Dispatcher 运行时属 Phase E，本阶段只定义契约与注册表结构，未接线任何调度执行路径。
+      2026-10-19 状态：旧调度器（com.ats.schedule）已下线（launchd 未加载，settings.yaml 的 daily_stages 与
+      jobs 开关除与新事件路径共用的 pead_event_triggers 外全部关闭），它承担的工作都有新的负责人：PEAD 监控/准备/评分、周报由 com.ats.phase-e 的
+      Dispatcher 工作流承担，财报日历与 FactSet 月末摄入由数据刷新控制器承担。仍未清零的只有 scheduler.py
+      代码本身及其测试，以及两项属于交易路径、待实盘切换时再排程的工作：主理人决策周期的定时触发
+      （chief_daily）与书记员对账（journal_reconcile）。
     consumers:
       - runtime.scheduler
       - tests/test_scheduler_jobs

@@ -499,6 +499,8 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
             require_queue_worker(source_id)
         if finalize_only:
             require_queue_worker("calendar_maintenance")
+    # Candidates parked earlier that only add detail (a clock time for a date-only print) are released first.
+    reconciled = [] if finalize_only else repository.rereview_compatible_conflicts(at=now)
     results = []
     for source_id in sorted(selected):
         source = source_cfg[source_id]
@@ -621,7 +623,7 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
             # is unavailable; no release event is promoted on this failed pass.
             release_reconciliation = {"status": "failed",
                                       "error": f"{type(exc).__name__}: {exc}"[:300]}
-    return {"sources": results, "manual_overlay": overlay_results,
+    return {"sources": results, "reconciled_refinements": reconciled, "manual_overlay": overlay_results,
             "release_reconciliation": release_reconciliation,
             "release_ready_events": [{"event_id": item["event"]["event_id"],
                                       "event_version": item["event"]["event_version"],

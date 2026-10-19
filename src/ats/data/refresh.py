@@ -38,7 +38,20 @@ _SAFE_UNSTRUCTURED_ACTIONS = {"article-ingest", "document-ingest", "fixed-ingest
 # Derived jobs produce governed facts from already-admitted documents or from provider
 # reads that have no ingestion-run record (chain evidence extraction). They are scheduled
 # and ledgered like the others but have no structured/unstructured catalog source.
-_SAFE_DERIVED_ACTIONS = {"evidence-observe", "macro-news-collect"}
+_SAFE_DERIVED_ACTIONS = {"evidence-observe", "macro-news-collect", "calendar-refresh", "calendar-finalize",
+                         "factset-semantic-refresh"}
+# Calendar refreshes report `partial` when one source's batch carries a quarantined or conflicting candidate;
+# the other candidates were published, so the run counts as succeeded and the reason names what was held back.
+_PARTIAL_OK_DERIVED = {"calendar-refresh", "calendar-finalize"}
+
+
+def _resolve_command(command: tuple[str, ...], window: str) -> tuple[str, ...]:
+    """`{prev_month}` -> the calendar month before the window date, as YYYY-MM (FactSet month-end finalisation)."""
+    if not any("{prev_month}" in token for token in command):
+        return command
+    day = date.fromisoformat(str(window)[:10])
+    previous = (day.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    return tuple(token.replace("{prev_month}", previous) for token in command)
 
 
 def _utc_now() -> datetime:
@@ -608,7 +621,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 scope={"job_id": job.id, "window": window, "datasets": list(job.datasets),
                        "sources": list(job.sources)},
                 trigger_kind="scheduled", trigger_ref=f"{job.id}:{window}",
-                command=job.command, policy_fingerprint=policy,
+                command=_resolve_command(job.command, window), policy_fingerprint=policy,
                 requested_as_of=_iso(now), priority=30,
                 max_attempts=job.max_attempts,
                 backoff_seconds=job.backoff_seconds, parent_run_id=key, now=now)
@@ -646,7 +659,9 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             if job.domain == "derived":
                 # The command's own packet is the record: it names the reason a run did
                 # nothing (`no_change`) or what it wrote (`succeeded`); `failed` is retried.
-                if code == 0 and packet_status in {"succeeded", "no_change"}:
+                if code == 0 and packet_status == "partial" and job.command[2] in _PARTIAL_OK_DERIVED:
+                    status, reason = "succeeded", "partial_sources_held_back"
+                elif code == 0 and packet_status in {"succeeded", "no_change"}:
                     status, reason = packet_status, str(packet.get("reason") or "")
                 else:
                     status, reason = "failed", str(packet.get("reason") or "command_or_result_failed")

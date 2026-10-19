@@ -1,4 +1,4 @@
-> 2026-10-19 对照已归档的各 Phase change 勾选并完成第 12 节最终验收：**117/119 完成**、2 项未完成（7.5 按用户裁决保留；8.9 主理人决策周期与 PEAD 评分窗口仍由旧调度承担）。第 12 节验收记录见 docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
+> 2026-10-19 对照已归档的各 Phase change 勾选并完成第 12 节最终验收：**118/119 完成**、1 项未完成（7.5 Fundamental 例行模式的完整能力，进行中）。第 12 节验收记录见 docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
 
 ## 1. Phase A — 权威基线与数据边界
 
@@ -101,7 +101,7 @@
 - [x] 8.6 将 projection selector 接入依赖解析，实现可复用原因、重跑原因和 agent-run 记录
 - [x] 8.7 实现完整性门禁和 `incomplete` 缺口报告，任一必需投影失败/缺失/过期/不兼容时禁止创建 cycle
 - [x] 8.8 新增 CLI/API 入口：单 Agent、自动补依赖子流程、全分析流程和显式 `enter_decision_cycle`
-- [ ] 8.9 将现有 Scheduler 任务逐项改为 Dispatcher 调用，对每个迁移任务建立旧 job 退役登记和单活跃所有者检查 【2026-10-19 按子 change 裁定，仍未完成】按 Phase E 7.6，数据采集、Clerk 对账与券商相关作业保留各自 owner，不迁入 Dispatcher。7 个研究工作流已由 Phase F 10.4/10.5 迁入 Dispatcher 并保持单一调度所有者；**主理人决策周期（daily_cycle）与 PEAD 评分窗口仍由旧 Scheduler 承担**（`scheduler.hardcoded_serial_run` 待退役条目 pending），它们属于交易路径，随交易路径切换另行完成。
+- [x] 8.9 将现有 Scheduler 任务逐项改为 Dispatcher 调用，对每个迁移任务建立旧 job 退役登记和单活跃所有者检查 【2026-10-19 完成，按用户裁定改写口径】旧调度器任务逐项处置：研究侧（PEAD 监控/准备/评分、周报、技术面）已由 Dispatcher 工作流承担并保持单一调度所有者；核对发现 FactSet 月末摄入与财报日历刷新在旧调度器下线后无人接手，已补进数据刷新控制器（新增 factset_month_end_ingest 与 6 个 calendar_* 任务），并修复日历把「一方多给钟点」当冲突导致所有财报事件被拦的问题；旧开关已关闭（pead_event_triggers 与新事件路径共用，保持开启）；`scheduler.hardcoded_serial_run` 登记保持 pending 并更新缺项。主理人决策周期的定时触发（chief_daily）与书记员对账（journal_reconcile）属于交易路径，随实盘切换另行排程，已在处置表明确记录。见 docs/PHASE_F_PARENT_8_9_SCHEDULER_DISPOSITION_20261019.md。遗留：LRCX 10-21 是日历事件路径的第一次真实触发；FactSet 月末摄入待 11-01 验证。
 - [x] 8.10 新增并发、依赖补齐、缓存失效、重启幂等、失败隔离和不完整阻断的端到端测试
 
 ## 9. Phase E — Schedule Calendar 与 Trigger Ledger

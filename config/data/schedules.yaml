@@ -570,3 +570,94 @@ derived:
         attempts: 2
         backoff_seconds: [300, 1800]
       semantics: theme news as immutable partial document versions keyed by URL; a URL already admitted is never stored again
+    # 2026-10-19 (parent 8.9): the schedule-calendar refresh and the FactSet month-end ingest used to hang off the
+    # legacy scheduler (com.ats.schedule), which has not been loaded since 2026-10-15; with it gone the calendar store
+    # stayed empty (the event path never fired) and the October FactSet report would not have been ingested. The
+    # controller owns both now. Each calendar source is its own job so one source failing never blocks the others.
+    calendar_finnhub_earnings_daily:
+      enabled: true
+      source: finnhub_earnings_calendar
+      schedule: daily
+      at: "06:10"
+      timezone: UTC
+      command: ats data calendar-refresh --source finnhub_earnings_calendar
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 20}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: earnings dates and sessions of the PEAD targets as versioned calendar events; metadata only, never reported values
+    calendar_yahoo_earnings_daily:
+      enabled: true
+      source: yahoo_earnings_calendar
+      schedule: daily
+      at: "06:20"
+      timezone: UTC
+      command: ats data calendar-refresh --source yahoo_earnings_calendar
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 20}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: clock time of the same prints; agrees with Finnhub on every field both state, or the event is held for an operator
+    calendar_fomc_daily:
+      enabled: true
+      source: federal_reserve_fomc
+      schedule: daily
+      at: "06:30"
+      timezone: UTC
+      command: ats data calendar-refresh --source federal_reserve_fomc
+      concurrency: 1
+      freshness_slo_days: 5
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: FOMC meeting dates from the Federal Reserve calendar page
+    calendar_bls_daily:
+      enabled: true
+      source: bls_release_calendar
+      schedule: daily
+      at: "06:40"
+      timezone: UTC
+      command: ats data calendar-refresh --source bls_release_calendar
+      concurrency: 1
+      freshness_slo_days: 5
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: CPI and employment release dates from the BLS release calendar
+    calendar_bea_daily:
+      enabled: true
+      source: bea_release_schedule
+      schedule: daily
+      at: "06:50"
+      timezone: UTC
+      command: ats data calendar-refresh --source bea_release_schedule
+      concurrency: 1
+      freshness_slo_days: 5
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: PCE and GDP release dates from the BEA schedule
+    calendar_finalize_daily:
+      enabled: true
+      source: calendar_maintenance
+      schedule: daily
+      at: "07:10"
+      timezone: UTC
+      command: ats data calendar-finalize
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: confirm which planned prints have been released with admitted material, so the event workflows can run on them
+    factset_month_end_ingest:
+      # Report of the PREVIOUS month: the guard refuses a report from any other month, so a late or early run cannot
+      # file October's data under November. Runs on the 1st at 00:30 New York, before the next Friday's report exists.
+      enabled: true
+      source: factset_earnings_insight_doc
+      schedule: monthly
+      day_of_month: 1
+      at: "00:30"
+      timezone: America/New_York
+      command: ats data factset-semantic-refresh --source factset_earnings_insight_doc --query-scope '{"auto_admit":true,"report_month":"{prev_month}"}'
+      concurrency: 1
+      freshness_slo_days: 40
+      request_budget: {requests_per_run: 3}
+      retry: {attempts: 3, backoff_seconds: [900, 3600, 21600]}
+      semantics: the final FactSet Earnings Insight of the month, ingested once and read by Macro, Sector and Layer; nothing is scored

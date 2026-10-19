@@ -12,7 +12,7 @@ import re
 import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Sequence, Any, Literal, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -211,6 +211,36 @@ def _stamp(value: datetime | None = None) -> str:
         timespec="microseconds")
 
 
+# Trigger signature field order (ScheduleEventCandidate.trigger_signature): type, date, local time, timezone,
+# UTC instant, time precision, market session, status.
+_SIGNATURE_PRECISION = 5
+
+
+def _populated(value: object) -> bool:
+    return str(value) not in {"", "unknown", "None"}
+
+
+def signatures_conflict(old: Sequence[object], new: Sequence[object]) -> bool:
+    """Two sources disagree only when a field both of them state differs.
+
+    An empty field means "not stated", not "different". Finnhub publishes the date and session of a print;
+    Yahoo adds the clock time. They agree on everything they both state, so they do not conflict (2026-10-19:
+    every earnings event was blocked as `conflict` for exactly this reason). `time_precision` is derived from
+    the time fields and is not compared on its own.
+    """
+    for index, (a, b) in enumerate(zip(old, new)):
+        if index != _SIGNATURE_PRECISION and _populated(a) and _populated(b) and str(a) != str(b):
+            return True
+    return False
+
+
+def signature_refines(old: Sequence[object], new: Sequence[object]) -> bool:
+    """`new` agrees with `old` and states at least one field `old` leaves empty."""
+    return (not signatures_conflict(old, new)) and any(
+        index != _SIGNATURE_PRECISION and not _populated(a) and _populated(b)
+        for index, (a, b) in enumerate(zip(old, new)))
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                       default=str)
@@ -317,7 +347,7 @@ class ScheduleCalendarStore:
                     old_sources = {source[0] for source in conn.execute(
                         "SELECT DISTINCT source_id FROM schedule_event_sources WHERE event_id=? "
                         "AND event_version=?", (event_id, current["event_version"])).fetchall()}
-                    if (tuple(old.get("signature", ())) != candidate.trigger_signature()
+                    if (signatures_conflict(tuple(old.get("signature", ())), candidate.trigger_signature())
                             and candidate.source_id not in old_sources):
                         review_status, reason = "conflict", "cross_source_trigger_fields_disagree"
             conn.execute("INSERT INTO schedule_event_candidates(candidate_id,event_id,source_id,"
@@ -331,6 +361,38 @@ class ScheduleCalendarStore:
                                (candidate_id,)).fetchone()
             self._record_reviews(conn, event_id, fetched, candidate_id=candidate_id)
             return self._candidate_dict(row, duplicate=False)
+
+    def rereview_compatible_conflicts(self, *, at: datetime | None = None) -> list[str]:
+        """Release candidates that were parked as conflicts but only add detail to the current version.
+
+        Returns the published `event_id@version` references. Candidates that truly disagree stay parked for an
+        operator (`ats events override`).
+        """
+        now = _stamp(at)
+        released: list[tuple[str, str]] = []
+        with self._tx() as conn:
+            rows = conn.execute("SELECT candidate_id,event_id,signature_json FROM schedule_event_candidates "
+                                "WHERE review_status='conflict' AND review_reason="
+                                "'cross_source_trigger_fields_disagree'").fetchall()
+            for row in rows:
+                current = conn.execute("SELECT payload_json FROM schedule_events WHERE event_id=? "
+                                       "AND valid_until='' ORDER BY event_version DESC LIMIT 1",
+                                       (row["event_id"],)).fetchone()
+                if current is None:
+                    continue
+                old_sig = tuple(json.loads(current["payload_json"]).get("signature", ()))
+                if signatures_conflict(old_sig, json.loads(row["signature_json"])):
+                    continue
+                conn.execute("UPDATE schedule_event_candidates SET review_status='candidate',"
+                             "review_reason='compatible_refinement' WHERE candidate_id=?",
+                             (row["candidate_id"],))
+                self._record_reviews(conn, row["event_id"], now, candidate_id=row["candidate_id"])
+                released.append((row["candidate_id"], row["event_id"]))
+        refs = []
+        for candidate_id, _event_id in released:
+            event = self.publish_candidate(candidate_id, reason="compatible_refinement", at=at)
+            refs.append(f"{event['event_id']}@{event['event_version']}")
+        return refs
 
     @staticmethod
     def _record_reviews(conn, event_id: str, at: str, *, candidate_id: str = "") -> None:
@@ -407,7 +469,11 @@ class ScheduleCalendarStore:
             new_version = False
             if current:
                 old_payload = json.loads(current["payload_json"])
-                if tuple(sig) != tuple(old_payload.get("signature", ())):
+                old_sig = tuple(old_payload.get("signature", ()))
+                # A candidate that only agrees with the current version (or states less than it) corroborates it;
+                # only a disagreement or a strictly more precise statement is a new version.
+                if tuple(sig) != old_sig and (signatures_conflict(old_sig, sig)
+                                              or signature_refines(old_sig, sig)):
                     conn.execute("UPDATE schedule_events SET valid_until=? WHERE event_id=? "
                                  "AND event_version=? AND valid_until=''",
                                  (now, event_id, current["event_version"]))

@@ -67,8 +67,10 @@ def test_registers_daily_cycle_score_windows_and_reconcile(registered):
                    "pead_score_amc", "pead_score_bmo", "journal_reconcile"]
 
 
-def test_checked_in_pause_policy_keeps_only_pead_and_factset(monkeypatch):
-    """Production policy is intentionally narrower than the compatibility default."""
+def test_checked_in_policy_leaves_only_the_shared_event_switch_and_the_health_check(monkeypatch):
+    """2026-10-19: the legacy scheduler is retired. PEAD monitoring/prep/scoring, FactSet ingestion and the weekly
+    review each have an owner elsewhere (com.ats.phase-e, the data refresh controller), so the checked-in policy
+    switches them all off and a loaded legacy daemon would only run the consumer health check."""
     import apscheduler.schedulers.blocking as blocking
 
     holder = {}
@@ -77,17 +79,20 @@ def test_checked_in_pause_policy_keeps_only_pead_and_factset(monkeypatch):
 
     scheduler.start(dry_run=True)
 
-    jobs = holder["s"].jobs
-    assert [job["id"] for job in jobs] == [
-        "daily_cycle", "factset_weekly_ingest", "consumer_health_daily", "pead_score_amc", "pead_score_bmo"]
+    # `pead_event_triggers` stays on because the new calendar-event path reads the same switch, so the daily-cycle
+    # job still registers; its only stage is the legacy event trigger, which the schedule owner (Dispatcher)
+    # refuses. Everything else the old scheduler ran is off.
+    assert [job["id"] for job in holder["s"].jobs] == ["daily_cycle", "consumer_health_daily"]
 
-    called = []
-    monkeypatch.setattr(scheduler, "pead_score_window",
-                        lambda name, **kwargs: called.append((name, kwargs["observe"])))
-    for job in jobs:
-        if job["id"].startswith("pead_score_"):
-            job["fn"]()
-    assert sorted(called) == [("amc", False), ("bmo", False)]
+
+def test_each_retired_job_has_an_owner_in_the_refresh_schedule():
+    """The switches above are off because something else now runs the work; keep that claim checkable."""
+    from ats.data.refresh import load_plan
+
+    jobs = {job.id: job for job in load_plan().jobs}
+    for needed in ("factset_month_end_ingest", "calendar_finnhub_earnings_daily", "calendar_yahoo_earnings_daily",
+                   "calendar_fomc_daily", "calendar_bls_daily", "calendar_bea_daily", "calendar_finalize_daily"):
+        assert needed in jobs and jobs[needed].enabled, needed
 
 
 def test_weekly_review_has_its_own_saturday_time_and_timezone(registered):
@@ -158,7 +163,7 @@ def test_window_flag_runs_one_window_and_exits(monkeypatch):
     assert calls == [("amc", True)]
 
 
-def test_bad_window_time_is_skipped_not_fatal(monkeypatch):
+def test_bad_window_time_is_skipped_not_fatal(registered, monkeypatch):
     """A typo in score_windows must not take the whole scheduler down."""
     from ats import config
 
@@ -177,7 +182,8 @@ def test_bad_window_time_is_skipped_not_fatal(monkeypatch):
                         lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
     scheduler.start(dry_run=True)
     assert [j["id"] for j in holder["s"].jobs] == [
-        "daily_cycle", "factset_weekly_ingest", "consumer_health_daily", "pead_score_bmo"]
+        "daily_cycle", "factset_weekly_ingest", "weekly_review", "consumer_health_daily", "pead_score_bmo",
+        "journal_reconcile"]
 
 
 # --------------------------------------------------------------------------- #

@@ -1,3 +1,41 @@
+## 2026-10-19 以子 change 实现为准的裁定
+
+本 change 先写，各 Phase 子 change 在实施时按实际情况细化。用户裁决（2026-10-19）：**子 change 的实现只要不偏离需求，就以子 change 为准来裁定或更改本 change 的要求。** 据此作出以下三项裁定，本文件此前的段落保留原文作为历史。
+
+### 1. 规格以子 change 合入主规格的版本为准
+
+各 Phase 子 change 归档时已把更细的规格合入 `openspec/specs/`。本 change 的增量规格是更早、更粗的版本，路径与写法都与之不同（例如 Phase D 已把 `sector/layer-analyst` 退役并迁为 `agent/layer-analyst`）。因此本 change 的增量规格**不再合入主规格**，归档时使用 `openspec archive refactor-workflow-dataflow-architecture --skip-specs`；增量文件保留为目标契约的历史记录。对应关系：
+
+| 本 change 的增量 | 主规格中的实际能力 | 来源子 change |
+|---|---|---|
+| `workflow/test-baseline` | `workflow/test-baseline` | establish-workflow-contracts-and-green-baseline（Phase A） |
+| `workflow/architecture-guards` | `workflow/architecture-guards` | Phase A、restructure-analyst-roles-and-chief-inputs（Phase D） |
+| `workflow/legacy-retirement` | `workflow/legacy-retirement` | Phase A、implement-phase-f-shadow-run-and-cutover |
+| `workflow/dispatcher-runtime` | `workflow/dispatcher-runtime` | implement-phase-e-dispatcher-and-calendar、Phase F |
+| `workflow/projection-store` | `agent/task-projection`、`workflow/run-contracts` | Phase A |
+| `agent/action-vocabulary` | `agent/action-vocabulary` | Phase A |
+| `execution/option-survival` | `execution/option-survival` | Phase A |
+| `data/data-layer-architecture` | `data/data-layer-architecture`（另有 `data/target-dataflow-assurance`） | unify-data-layer-architecture、Phase A、complete-target-dataflow、Phase F |
+| `decision/approval-lifecycle` | `decision/approval-lifecycle`、`decision/decision-audit-store`、`risk/deterministic-review`、`decision/research-snapshot` | establish-decision-audit-and-trade-safety（Phase B）、Phase D |
+| `trading/clerk-ledger` | `execution/clerk-ledger`、`execution/internal-state-api` | establish-clerk-and-trade-ledger（Phase C） |
+| `sector/layer-analyst` | `agent/layer-analyst`（`sector/layer-analyst` 已退役） | Phase D |
+| `sector/sector-allocation` | `agent/sector-allocation` | Phase D |
+| `analysis/information-analyst` | `agent/information-analyst` | Phase D |
+| `analysis/fundamental-pead` | `agent/fundamental-pead`（另有 `agent/risk-officer-inputs`） | Phase D |
+| `scheduling/event-calendar` | `scheduling/event-calendar`、`scheduling/trigger-ledger` | Phase E |
+| （Phase F 新增） | `workflow/cutover-control`、`workflow/shadow-reconciliation`、`execution/live-route-switch`、`execution/authorization-gate` | Phase F |
+
+### 2. 2026-10-15 精简裁决同样适用于本 change 的 Phase F 文本
+
+切流以 `docs/TARGET_WORKFLOW_DATAFLOW.md` 为准（G1）；研究读取按消费者整体切换，前置是消费者层面的数据产品健康检查（G2）；迁移期出问题退回旧路径（G3）；以追加裁决方式修订、保留历史（G4）。本 change 中与之冲突的写法以 G1–G4 为准，包括：F.0.2、F.0.6、11.5 的 exact-scope 资格与指纹前置；本文件「逐边界切换」中「每个数据域和消费者须先取得 verified 证据」；以及「安全停止或已验收版本恢复」作为回退前置（改为「已演练切回旧路径」）。被取代、修改、保留的逐条清单见 `docs/PHASE_F_OPENSPEC_REVISION_DRAFT.md` 与 `docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 第九节。
+
+### 3. 任务级裁定
+
+- **2.6**：Dispatcher、Trigger Ledger 与角色适配器按任务使用独立连接；CLI 与服务器缓存实例保留共享连接（同样 WAL + busy timeout），按 Phase E 2.2 的实现判完成。
+- **7.12**：「人工审阅影子差异」按 2026-10-09 验收裁决改为以新入口需求矩阵验收，新旧差异只作可选诊断，判完成。
+- **8.9**：按 Phase E 7.6，数据采集、Clerk 对账、券商相关作业保留各自 owner；7 个研究工作流已迁入 Dispatcher。主理人决策周期与 PEAD 评分窗口仍由旧调度承担，**本项保持未完成**，随交易路径切换另行完成。
+- **7.5**：按用户 2026-10-14 裁决保持未完成。
+
 ## Context（背景）
 
 动机和范围见 `proposal.md`。权威目标文档是 `docs/TARGET_WORKFLOW_DATAFLOW.md`；本设计将其中 Phase A–F 的架构落到适合当前代码库的实现形态，并为横跨各阶段的目标 Dataflow 设置独立专项和 Phase F 前置门禁。

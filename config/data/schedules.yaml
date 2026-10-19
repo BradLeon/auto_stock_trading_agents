@@ -385,7 +385,7 @@ structured:
       # 2026-10-16 pilot (user: validate the path on a few names, widen after go-live). One job
       # per entity via `entities`; `entity_sources` picks the provider per name once the
       # coverage probe has shown who can supply a complete report package.
-      #   GOOG, MU  complete quarterly package from defeatbeta (probe 2026-10-16).
+      #   GOOG, MU, LRCX  complete quarterly package from defeatbeta (probe 2026-10-16; LRCX 2026-10-19, FQ ending 2026-06-30).
       #   ASML      defeatbeta returns 11/13 metrics for the latest quarter, so the package gate
       #             correctly refuses it; an official-disclosure source is needed (not pilot).
       #   SKHY      both vendors quarantine on unit_unresolved/currency_unresolved; needs a
@@ -394,7 +394,7 @@ structured:
       # Widening = adding names here; names the gate rejects stay visible as failed runs.
       enabled: true
       source: defeatbeta_stock_statement
-      entities: [GOOG, MU]
+      entities: [GOOG, MU, LRCX]   # LRCX added 2026-10-19: pre-earnings baseline (10.6) needs a governed financial package
       datasets: [company_financials]
       schedule: weekly
       weekday: saturday

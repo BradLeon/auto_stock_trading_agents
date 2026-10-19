@@ -194,7 +194,7 @@ sources:
       freshness_policy: latest_verified_upstream_revision
       minimum_body_chars: 600
       lookback_days: 7
-      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
       providers: dynamic_tws_session
       # IBKR 是股票新闻的主来源。Yahoo 只在 TWS/供应商不可达或某个
       # historical-news 切片失败时按相同标的范围兜底；“没有新闻”是正常结果，
@@ -227,7 +227,7 @@ sources:
         lookback_days: 7
         provider_lookup_attempts: 3
         provider_lookup_retry_seconds: 1
-        symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+        symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
   yfinance_live_news:
     domain: unstructured
     source_kind: article

@@ -2,6 +2,8 @@ import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from ats.data.articles import ibkr_news
 
 
@@ -256,3 +258,41 @@ def test_source_owned_timeout_uses_public_method_for_test_double():
 
     assert len(rows) == 1
     assert fake.calls[0][1] == "DJ-N"
+
+
+def _match(symbol, con_id, sec_type="STK", currency="USD"):
+    return SimpleNamespace(contract=SimpleNamespace(
+        symbol=symbol, secType=sec_type, currency=currency, conId=con_id))
+
+
+class UnansweredDetailsIB(FakeIB):
+    """reqContractDetails never answers (TWS 2026-10-19) while symbol search still does."""
+
+    def __init__(self, matches):
+        super().__init__()
+        self.matches = matches
+
+    def qualifyContracts(self, contract):
+        raise TimeoutError(contract.symbol)
+
+    def reqMatchingSymbols(self, symbol):
+        return self.matches
+
+
+def test_contract_details_that_never_answer_fall_back_to_a_single_symbol_match():
+    from ib_async import Stock
+
+    contract = Stock("LRCX", "SMART", "USD")
+    ibkr_news._qualify(UnansweredDetailsIB([_match("LRCX", 77), _match("LRCX", 77),
+                                            _match("LRCXF", 5), _match("LRCX", 9, "OPT")]),
+                       contract)
+    assert contract.conId == 77
+
+
+def test_an_ambiguous_symbol_match_is_still_a_qualify_failure():
+    from ib_async import Stock
+
+    contract = Stock("LRCX", "SMART", "USD")
+    with pytest.raises(TimeoutError):
+        ibkr_news._qualify(UnansweredDetailsIB([_match("LRCX", 77), _match("LRCX", 78)]), contract)
+    assert not contract.conId

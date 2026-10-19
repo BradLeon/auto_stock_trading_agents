@@ -250,7 +250,7 @@ article_sources:
       provider_lookup_retry_seconds: 1
       # 只扫这些标的的新闻。**不是全市场**——按 conId 逐个请求，名单越长越慢，
       # 且与命题无关的公司只会把未映射池做大。先覆盖 L4 四家 + 最活跃的买方。
-      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
     # 关键词比 TrendForce 那份窄且偏"交易/结构"，因为这个源的价值不在于复述基本面
     # （那些财报里都有），而在于**财报里没有的那类事实**。
     match: [financing, finance, guarantee, backstop, prepay, prepayment, stake,

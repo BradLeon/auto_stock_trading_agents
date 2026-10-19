@@ -97,3 +97,64 @@ def test_gateway_sends_the_reasoning_field_only_through_openrouter(monkeypatch):
         gateway.get_model("layer_rotation")
         assert seen[-1].get("extra_body") == expected
     gateway.get_model.cache_clear()
+
+
+def test_an_empty_tool_call_is_retried_with_reasoning_off_without_changing_the_role_identity(monkeypatch):
+    """LRCX 2026-10-19: research_extract returned no tool call on every identical retry; the same request
+    with reasoning off answered at once. The retries now turn reasoning off; the configured identity stays."""
+    from pydantic import BaseModel
+
+    from ats.agents import base
+
+    class Answer(BaseModel):
+        value: int = 1
+
+    class Model:
+        def __init__(self, answer):
+            self.answer = answer
+            self.calls = 0
+
+        def with_structured_output(self, schema, method=None):
+            return self
+
+        def invoke(self, messages):
+            self.calls += 1
+            return self.answer
+
+    default, off = Model(None), Model(Answer(value=7))
+    asked = []
+
+    def fake_get_model(role, reasoning=None):
+        asked.append(reasoning)
+        return off if reasoning == "off" else default
+
+    monkeypatch.setattr(base, "get_model", fake_get_model)
+    before = base.execution_versions("research_extract", "research-insight")["model_version"]
+    assert base.run_structured("research_extract", Answer, "ctx", skill_slug="research-insight").value == 7
+    assert (default.calls, off.calls) == (1, 1)
+    assert asked[0] is None and asked[1] == "off"
+    assert base.execution_versions("research_extract", "research-insight")["model_version"] == before
+
+
+def test_a_role_that_already_has_reasoning_off_keeps_retrying_the_same_model(monkeypatch):
+    from pydantic import BaseModel
+
+    from ats.agents import base
+
+    class Answer(BaseModel):
+        value: int = 1
+
+    class Model:
+        calls = 0
+
+        def with_structured_output(self, schema, method=None):
+            return self
+
+        def invoke(self, messages):
+            Model.calls += 1
+            return None
+
+    monkeypatch.setattr(base, "get_model", lambda role, reasoning=None: Model())
+    with pytest.raises(RuntimeError, match="after retries"):
+        base.run_structured("layer_rotation", Answer, "ctx")
+    assert Model.calls == 4

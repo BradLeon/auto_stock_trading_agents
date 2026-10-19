@@ -53,14 +53,19 @@ def reasoning_body(reasoning) -> dict | None:
 
 
 @lru_cache(maxsize=None)
-def get_model(role: str) -> Any:
+def get_model(role: str, reasoning: Any = None) -> Any:
     """Return a configured LangChain chat model for the given agent role.
 
     Roles: macro_analyst, industry_analyst, fundamental_analyst,
     technical_analyst, risk_manager, manager.
+
+    `reasoning` overrides the role's hidden-reasoning setting for this model only
+    ("off" or a token cap); the role's configured execution identity is unchanged.
     """
     cfg = get_config()
     rc = cfg.app.llm.for_role(role)
+    if reasoning is not None:
+        rc = rc.model_copy(update={"reasoning": reasoning})
     common = dict(
         temperature=rc.temperature,
         max_tokens=rc.max_tokens,

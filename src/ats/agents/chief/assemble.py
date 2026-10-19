@@ -694,6 +694,16 @@ def projection_context_block(detail: list[dict]) -> str:
             elif payload.get("metric") == "narrative":
                 head += " · 定性叙事更新（无可量化 KPI 读数）"
             head += f" · {(payload.get('narrative') or payload.get('driver') or '')[:80]}"
+            baseline = payload.get("baseline")
+            if baseline:
+                consensus = baseline.get("consensus") or {}
+                head += (f" · 财报前基线：{len(baseline.get('expectation_table') or [])} 维预期表"
+                         + (" · 含共识" if consensus.get("eps") or consensus.get("revenue") else " · 共识缺失")
+                         + (" · 含期权隐含" if baseline.get("market_implied") else " · 期权隐含缺失"))
+            if payload.get("change_class"):
+                head += f" · 归类={payload['change_class']}"
+            if payload.get("comparison_basis"):
+                head += f" · 对照基础={payload['comparison_basis']}"
         elif task_id == "macro_review":
             head += f" · regime={payload.get('regime')} · {payload.get('summary', '')[:80]}"
             if payload.get("quadrant"):

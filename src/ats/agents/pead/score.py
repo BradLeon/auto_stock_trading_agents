@@ -64,7 +64,9 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         "Using ALL of the above (press release + presentation carry segment QoQ/YoY, guidance, "
         "and market commentary), give per scorecard dimension the actual value, a 'vs_expected' "
         "tag (远超/超/中性/低于/远低于 + 🔴/✅/⚪/⚠️) and a note. Extract forward GUIDANCE and key "
-        "qualitative call signals separately. Set reported_eps / reported_revenue if present."
+        "qualitative call signals separately. Set reported_eps / reported_revenue if present: "
+        "reported_revenue is an ABSOLUTE number (11700000000 for EUR 11.7B), both are in the currency the company "
+        "reports in, and reporting_currency names it (ISO code). Never convert currencies."
     )
     try:
         view: ActualsView = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
@@ -85,6 +87,7 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
     return Actuals(
         symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
         reported_eps=view.reported_eps, reported_revenue=view.reported_revenue,
+        reporting_currency=(view.reporting_currency or "").strip().upper()[:3],
         metrics=[ActualMetric(dim_key=m.dim_key, metric=m.metric, actual=m.actual,
                               vs_expected=m.vs_expected, note=m.note) for m in view.metrics],
         guidance=view.guidance, transcript_signals=view.transcript_signals,

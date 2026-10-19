@@ -159,8 +159,12 @@ class ActualMetricView(BaseModel):
 
 
 class ActualsView(BaseModel):
-    reported_eps: float | None = None
-    reported_revenue: float | None = None
+    reported_eps: float | None = Field(default=None, description=(
+        "reported diluted EPS per share (per ADR when the company reports per ADR), in reporting_currency"))
+    reported_revenue: float | None = Field(default=None, description=(
+        "reported revenue as an ABSOLUTE number in reporting_currency (11700000000, not 11.7 or 11.7B)"))
+    reporting_currency: str = Field(default="", description=(
+        "ISO code the two figures above are stated in, e.g. USD, EUR, TWD; empty when not stated"))
     metrics: list[ActualMetricView] = Field(default_factory=list)
     guidance: str = Field(default="", description="forward guidance extracted from the text")
     transcript_signals: list[str] = Field(default_factory=list,

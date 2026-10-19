@@ -168,11 +168,11 @@ def test_tri_diffs_keep_disagreement():
     from ats.agents.fundamental.event import compute_tri_diffs
 
     frozen = {"expectations": [
-        {"dim_key": "gross_margin", "metric": "毛利率", "neutral": "25"}], "narrative": ""}
+        {"dim_key": "gross_margin", "metric": "毛利率", "neutral": "25%"}], "narrative": ""}
     actuals = Actuals(symbol="COHR", fiscal_label="Q3 FY2026", as_of=NOW,
                       metrics=[ActualMetric(dim_key="gross_margin", metric="毛利率",
-                                            actual="30", vs_expected="超")],
-                      reported_eps=1.10)
+                                            actual="30%", vs_expected="超")],
+                      reported_eps=1.10, reporting_currency="USD")
     es = _es()
     es.consensus_eps = 1.00
     market = MarketSetup(symbol="COHR", as_of=NOW, expected_move_pct=8.0)
@@ -193,7 +193,7 @@ def test_tri_diffs_keep_disagreement():
     assert tri2["directions"]["vs_market"] == 0
     # 方向不一致时保留分歧、不取平均。
     frozen_neg = {"expectations": [
-        {"dim_key": "gross_margin", "metric": "毛利率", "neutral": "35"}]}
+        {"dim_key": "gross_margin", "metric": "毛利率", "neutral": "35%"}]}
     tri3 = compute_tri_diffs(frozen_baseline=frozen_neg, expectation_set=es,
                              actuals=actuals, market_setup=market)
     assert tri3["directions"]["vs_baseline"] == -1
@@ -410,3 +410,65 @@ def test_routine_real_zero_reading_is_not_an_unknown_value_sentinel():
     baseline = {'symbol':'COHR','fiscal_label':'Q3 FY2026','metrics':{'gross_margin':25}}
     draft = routine.build_expectation_updates(['gross_margin actual 0%'], [routine.REFUTE], baseline)[0]
     assert draft['metric'] == 'gross_margin' and draft['new_value'] == 0.0
+
+
+# --- 2026-10-19: only like-for-like quantities are compared ---------------------------------------------------- #
+
+def test_numbers_in_different_currencies_or_without_units_are_not_compared():
+    from ats.agents.fundamental.event import compute_tri_diffs, quantity
+    from ats.schemas.pead import ActualMetric, Actuals
+
+    assert quantity("EUR 11.7B (Q3)") == (11.7e9, "EUR")
+    assert quantity("营收约 NT$1.45万亿") == (1.45e12, "TWD")
+    assert quantity("毛利率约 67.0%") == (67.0, "pct")
+    assert quantity("Q3 FY2026 数据未披露") is None
+    frozen = {"expectations": [
+        {"dim_key": "revenue", "neutral": "营收 NT$1.45万亿"}, {"dim_key": "bookings", "neutral": "净新增订单€5B"},
+        {"dim_key": "call_tone", "neutral": "建设性"}]}
+    actuals = Actuals(
+        symbol="TSM", fiscal_label="Q3 FY2026", as_of=NOW, reported_eps=29.43, reported_revenue=46.7,
+        reporting_currency="TWD",
+        metrics=[ActualMetric(dim_key="revenue", actual="US$46.7B"),
+                 ActualMetric(dim_key="bookings", actual="未披露订单金额"),
+                 ActualMetric(dim_key="call_tone", actual="积极")])
+    es = _es()
+    es.consensus_eps, es.consensus_revenue = 4.45, 1.4545e12
+    tri = compute_tri_diffs(frozen_baseline=frozen, expectation_set=es, actuals=actuals, market_setup=None,
+                            symbol="TSM")
+    assert tri["vs_baseline"] == [] and tri["vs_consensus"] == {}
+    reasons = {(x["scope"], x.get("dim_key", "")): x["reason"] for x in tri["not_comparable"]}
+    assert "币种或单位不同" in reasons[("baseline", "revenue")]        # TWD vs USD
+    assert ("baseline", "call_tone") not in reasons                      # qualitative: nothing to compare
+    assert "共识 EPS 以美元计" in reasons[("consensus_eps", "")]         # TWD EPS against a USD consensus
+    assert "不是绝对金额" in reasons[("consensus_revenue", "")]          # 46.7 is not an absolute amount
+    assert tri["directions_agree"] is True
+
+
+def test_a_like_for_like_revenue_is_compared_in_local_currency():
+    from ats.agents.fundamental.event import compute_tri_diffs
+    from ats.schemas.pead import Actuals
+
+    es = _es()
+    es.consensus_revenue = 11.66e9
+    actuals = Actuals(symbol="ASML", fiscal_label="Q3 FY2026", as_of=NOW, reported_revenue=11.7e9,
+                      reporting_currency="EUR")
+    tri = compute_tri_diffs(frozen_baseline=None, expectation_set=es, actuals=actuals, market_setup=None,
+                            symbol="ASML")
+    assert tri["vs_consensus"]["revenue"]["delta_pct"] == pytest.approx(0.0034, abs=1e-4)
+
+
+def test_an_implausible_gap_is_a_unit_problem_not_a_beat_or_a_miss():
+    from ats.agents.fundamental.event import compute_tri_diffs
+    from ats.schemas.pead import ActualMetric, Actuals
+
+    es = _es()
+    es.consensus_eps = 4.45
+    actuals = Actuals(symbol="TSM", fiscal_label="Q3 FY2026", as_of=NOW, reported_eps=29.43,
+                      reporting_currency="USD",
+                      metrics=[ActualMetric(dim_key="revenue", actual="NT$46.7B")])
+    frozen = {"expectations": [{"dim_key": "revenue", "neutral": "NT$1.454万亿"}]}
+    tri = compute_tri_diffs(frozen_baseline=frozen, expectation_set=es, actuals=actuals, market_setup=None,
+                            symbol="TSM")
+    assert tri["vs_consensus"] == {} and tri["vs_baseline"] == []
+    assert {x["scope"] for x in tri["not_comparable"]} == {"baseline", "consensus_eps"}
+    assert all("过大" in x["reason"] for x in tri["not_comparable"])

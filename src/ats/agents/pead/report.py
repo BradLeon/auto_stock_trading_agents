@@ -189,7 +189,7 @@ def _actuals(dossier) -> str:
     if a.reported_eps is not None:
         headline.append(f"EPS **${a.reported_eps:.2f}**")
     if a.reported_revenue is not None:
-        headline.append(f"Revenue **{a.reported_revenue/1e9:.1f}B**")
+        headline.append(f"Revenue **{a.reported_revenue/1e9:.1f}B{(' ' + a.reporting_currency) if getattr(a, 'reporting_currency', '') else ''}**")
     if headline:
         parts.append("头条数字: " + " ｜ ".join(headline))
     if a.metrics:

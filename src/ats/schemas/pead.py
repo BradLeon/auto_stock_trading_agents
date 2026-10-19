@@ -140,6 +140,7 @@ class Actuals(BaseModel):
     as_of: datetime
     reported_eps: float | None = None
     reported_revenue: float | None = None
+    reporting_currency: str = ""      # ISO code the two figures above are stated in
     metrics: list[ActualMetric] = Field(default_factory=list)
     guidance: str = ""                # forward guidance extracted from text
     transcript_signals: list[str] = Field(default_factory=list)

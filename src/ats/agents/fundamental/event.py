@@ -120,52 +120,151 @@ def _number(text: object) -> float | None:
     return float(hit.group(0)) if hit else None
 
 
+# --- units -----------------------------------------------------------------------------------------------------------
+# A bare number is not a comparison: "5" (billion euro) against "5" (a count), or 46.7 (USD billions) against
+# 1.45 (TWD trillions), produced differences of +32000% on TSM and ASML in the first run with a baseline
+# (2026-10-19). Two quantities are compared only when both state a unit and the units are the same.
+_CURRENCIES = (("TWD", r"NT\$|TWD|新台币|台币"), ("USD", r"US\$|USD|美元|\$"), ("EUR", r"EUR|€|欧元"),
+               ("KRW", r"KRW|₩|韩元"), ("JPY", r"JPY|日元"), ("CNY", r"CNY|RMB|人民币"))
+_SCALES = ((1e12, r"万亿|trillion|tn\b|T\b"), (1e9, r"十亿|billion|bn\b|B\b"), (1e8, r"亿"),
+           (1e6, r"百万|million|mn\b|M\b"), (1e4, r"万"))
+# the local currency a company's consensus revenue is quoted in; everything else defaults to USD
+LOCAL_CURRENCY = {"ASML": "EUR", "TSM": "TWD", "SKHY": "KRW", "000660.KS": "KRW"}
+
+
+def _currency_in(text: str) -> str:
+    import re
+
+    for code, pattern in _CURRENCIES:
+        if re.search(pattern, text, re.I):
+            return code
+    return ""
+
+
+def quantity(text: object) -> tuple[float, str] | None:
+    """(value in base units, unit) for the first number that carries a currency or a percent sign; else None."""
+    import re
+
+    raw = str(text or "").replace(",", "")
+    for match in re.finditer(r"(?<![\w.])(-?\d+(?:\.\d+)?)\s*(%|万亿|十亿|百万|亿|万|trillion|billion|million|tn|bn|mn|bp|T|B|M)?",
+                             raw):
+        number = float(match.group(1))
+        if match.group(2) is None and 1900 <= abs(number) <= 2100:
+            continue                                  # a year, not a reading
+        before, after = raw[max(0, match.start() - 6):match.start()], raw[match.end():match.end() + 8]
+        if match.group(2) == "%":
+            return number, "pct"
+        currency = _currency_in(before + " " + after)
+        if not currency:
+            continue
+        scale = 1.0
+        if match.group(2):
+            for factor, pattern in _SCALES:
+                if re.fullmatch(pattern, match.group(2), re.I):
+                    scale = factor
+                    break
+        return number * scale, currency
+    return None
+
+
+# A reading more than 4x, or less than a quarter of, its expectation is, for a large company's revenue, margin or
+# EPS, far more likely a currency, per-share-basis or scale mismatch than a real surprise (TSM EPS +561% on
+# 2026-10-19: NT$ per share against a US$ per ADR consensus; revenue -97% from a NT$ against a US$ figure). It is
+# reported as not comparable, not as a beat or a miss.
+IMPLAUSIBLE_RATIO = (0.25, 4.0)
+
+
+def _implausible(actual: float, expected: float) -> bool:
+    if not expected:
+        return False
+    if actual > 0 and expected > 0:
+        return not IMPLAUSIBLE_RATIO[0] <= actual / expected <= IMPLAUSIBLE_RATIO[1]
+    return abs((actual - expected) / expected) > 1.0
+
+
+def _comparable(a: tuple[float, str] | None, b: tuple[float, str] | None) -> str:
+    """"" when the two quantities can be compared, else why not."""
+    if a is None or b is None:
+        return "一方没有写明币种或单位"
+    if a[1] != b[1]:
+        return f"币种或单位不同（{a[1]} vs {b[1]}）"
+    return ""
+
+
 def compute_tri_diffs(*, frozen_baseline: dict | None, expectation_set,
-                      actuals, market_setup) -> dict:
+                      actuals, market_setup, symbol: str = "") -> dict:
     """分别对 冻结基线 / Consensus / 市场隐含预期 计算实际值差异。
 
     三个口径分列、各自带方向符号；方向不一致时保留分歧并说明，绝不取平均。
+    只比较币种或单位一致的两个数；不一致的不算差异，列入 `not_comparable` 并写明原因。
     """
     vs_baseline: list[dict] = []
+    not_comparable: list[dict] = []
     baseline_sign = 0
     if frozen_baseline:
         actual_by_dim = {}
         if actuals is not None:
             for m in actuals.metrics:
-                actual_by_dim[m.dim_key] = _number(m.actual)
+                actual_by_dim[m.dim_key] = m.actual
         for e in frozen_baseline.get("expectations", []):
-            neutral = _number(e.get("neutral"))
-            actual = actual_by_dim.get(e.get("dim_key", ""))
-            if neutral is None or actual is None:
+            dim = e.get("dim_key", "")
+            if dim not in actual_by_dim or not str(e.get("neutral") or "").strip():
                 continue
-            delta = actual - neutral
-            rel = delta / abs(neutral) if neutral else 0.0
-            vs_baseline.append({"dim_key": e.get("dim_key"), "neutral": neutral,
-                                "actual": actual, "delta": round(delta, 4),
-                                "delta_pct": round(rel, 4)})
+            neutral_q, actual_q = quantity(e.get("neutral")), quantity(actual_by_dim[dim])
+            if neutral_q is None and actual_q is None:
+                continue                                   # a qualitative dimension: the scorecard line carries it
+            why = _comparable(neutral_q, actual_q)
+            if why:
+                not_comparable.append({"scope": "baseline", "dim_key": dim, "reason": why})
+                continue
+            delta = actual_q[0] - neutral_q[0]
+            rel = delta / abs(neutral_q[0]) if neutral_q[0] else 0.0
+            if _implausible(actual_q[0], neutral_q[0]):
+                not_comparable.append({"scope": "baseline", "dim_key": dim, "reason": (
+                    f"差异 {rel:+.0%} 过大（超出 -75%~+300%），更可能是币种、每股口径或量级不一致，不当作真实预期差")})
+                continue
+            vs_baseline.append({"dim_key": dim, "unit": neutral_q[1], "neutral": neutral_q[0],
+                                "actual": actual_q[0], "delta": round(delta, 4), "delta_pct": round(rel, 4)})
             baseline_sign += 1 if rel > 0.01 else (-1 if rel < -0.01 else 0)
         baseline_sign = _sign(baseline_sign)
 
     consensus_sign = 0
     vs_consensus: dict = {}
     if actuals is not None and expectation_set is not None:
+        reporting = str(getattr(actuals, "reporting_currency", "") or "").upper()
+        local = LOCAL_CURRENCY.get((symbol or getattr(expectation_set, "symbol", "")).upper(), "USD")
         eps = getattr(actuals, "reported_eps", None)
-        cons_eps = getattr(expectation_set, "consensus_eps", None)
-        if eps is not None and cons_eps:
-            cons_eps_num = _number(cons_eps)
-            if cons_eps_num:
-                rel = (eps - cons_eps_num) / abs(cons_eps_num)
-                vs_consensus["eps"] = {"consensus": cons_eps_num, "reported": eps,
+        cons_eps_num = _number(getattr(expectation_set, "consensus_eps", None))
+        if eps is not None and cons_eps_num:
+            # analyst EPS consensus is quoted per US-listed share, in USD
+            rel = (eps - cons_eps_num) / abs(cons_eps_num)
+            if reporting == "USD" and not _implausible(eps, cons_eps_num):
+                vs_consensus["eps"] = {"consensus": cons_eps_num, "reported": eps, "unit": "USD",
                                        "delta_pct": round(rel, 4)}
                 consensus_sign = _sign(rel)
+            elif reporting == "USD":
+                not_comparable.append({"scope": "consensus_eps", "reason": (
+                    f"实际 EPS 与共识相差 {rel:+.0%}，过大，更可能是每股口径（普通股 vs ADR）或币种不一致"),
+                    "consensus": cons_eps_num, "reported": eps})
+            else:
+                not_comparable.append({"scope": "consensus_eps", "reason": (
+                    f"共识 EPS 以美元计，实际 EPS 币种为 {reporting or '未写明'}，不换算、不比较"),
+                    "consensus": cons_eps_num, "reported": eps})
         rev = getattr(actuals, "reported_revenue", None)
-        cons_rev = getattr(expectation_set, "consensus_revenue", None)
-        if rev is not None and cons_rev:
-            cons_rev_num = _number(cons_rev)
-            if cons_rev_num:
-                rel = (rev - cons_rev_num) / abs(cons_rev_num)
-                vs_consensus["revenue"] = {"consensus": cons_rev_num, "reported": rev,
+        cons_rev_num = _number(getattr(expectation_set, "consensus_revenue", None))
+        if rev is not None and cons_rev_num:
+            rel = (rev - cons_rev_num) / abs(cons_rev_num)
+            if reporting == local and rev > 1e6 and not _implausible(rev, cons_rev_num):
+                vs_consensus["revenue"] = {"consensus": cons_rev_num, "reported": rev, "unit": local,
                                            "delta_pct": round(rel, 4)}
+            elif reporting == local and rev > 1e6:
+                not_comparable.append({"scope": "consensus_revenue", "reason": (
+                    f"实际营收与共识相差 {rel:+.0%}，过大，更可能是量级或币种不一致"),
+                    "consensus": cons_rev_num, "reported": rev})
+            else:
+                not_comparable.append({"scope": "consensus_revenue", "reason": (
+                    f"共识营收以本币 {local} 计，实际营收币种为 {reporting or '未写明'}"
+                    + ("" if rev > 1e6 else "，且数值不是绝对金额")), "consensus": cons_rev_num, "reported": rev})
 
     market_sign = 0
     vs_market: dict = {}
@@ -178,12 +277,15 @@ def compute_tri_diffs(*, frozen_baseline: dict | None, expectation_set,
                      vs_consensus["eps"]["delta_pct"] * 100,
                      "priced_in": surprise <= em}
         market_sign = _sign(vs_consensus["eps"]["delta_pct"]) if surprise > em else 0
+    elif em is not None:
+        vs_market = {"expected_move_pct": em, "note": "无可比的 EPS 惊喜，期权隐含波幅仅作参照，未判断是否已在价内"}
 
     signs = {"vs_baseline": baseline_sign, "vs_consensus": consensus_sign,
              "vs_market": market_sign}
     disagree = len({v for v in signs.values() if v != 0}) > 1
     return {
         "vs_baseline": vs_baseline, "vs_consensus": vs_consensus, "vs_market": vs_market,
+        "not_comparable": not_comparable[:12],
         "directions": signs, "directions_agree": not disagree,
         "note": ("三类方向不一致，分歧保留、未取平均" if disagree else ""),
     }
@@ -217,9 +319,40 @@ NO_COMPARISON_BASIS = ("【无比较依据】本期没有财报前冻结基线�
 NO_BASIS_CONFIDENCE = 0.1
 
 
+def actuals_view(actuals) -> dict | None:
+    """What was reported, as the legacy report's section 3 showed it (headline numbers, per-dimension readings,
+    call signals). The scenario tree and execution checklist of sections 5-6 are deliberately not carried: they name
+    trade actions, which an event review may not."""
+    if actuals is None:
+        return None
+    metrics = list(getattr(actuals, "metrics", None) or [])
+    view = {
+        "reported_eps": getattr(actuals, "reported_eps", None),
+        "reported_revenue": getattr(actuals, "reported_revenue", None),
+        "reporting_currency": str(getattr(actuals, "reporting_currency", "") or ""),
+        "metrics": [{"dim_key": getattr(m, "dim_key", ""), "metric": str(getattr(m, "metric", ""))[:200],
+                     "actual": str(getattr(m, "actual", ""))[:400],
+                     "vs_expected": str(getattr(m, "vs_expected", ""))[:60],
+                     "note": str(getattr(m, "note", ""))[:400]} for m in metrics[:16]],
+        "transcript_signals": [str(x)[:300] for x in list(getattr(actuals, "transcript_signals", None) or [])[:8]],
+        "transcript_source": str(getattr(actuals, "transcript_source", "") or "")[:200]}
+    return view if (view["reported_eps"] is not None or view["reported_revenue"] is not None or view["metrics"]
+                    or view["transcript_signals"]) else None
+
+
+def baseline_reference(store, symbol: str, period: str) -> str:
+    """The newest published `[基线 vN]` projection for the period: what the gap below was measured against."""
+    rows = [row for row in (store.task_projection_envelopes(
+        agent_role="fundamental_expectation_update", scope_kind="entity", scope_id=symbol.upper(), limit=500) or [])
+        if (row.get("payload") or {}).get("period") == period
+        and str((row.get("payload") or {}).get("driver", "")).startswith("[基线")]
+    return rows[0]["projection_id"] if rows else ""
+
+
 def build_event_review_payload(*, symbol: str, period: str, event: str,
                                scorecard, event_view: dict, tri_diffs: dict,
-                               actuals, narrative: str = "") -> dict:
+                               actuals, narrative: str = "", baseline_ref: str = "",
+                               baseline_as_of: str = "") -> dict:
     lines = [line.model_dump(mode="json") for line in scorecard.lines] if scorecard else []
     notes = event_view.get("rationale", "")
     confidence = event_view.get("confidence")
@@ -246,7 +379,16 @@ def build_event_review_payload(*, symbol: str, period: str, event: str,
         "narrative": narrative,
         "confidence": confidence,
         "falsifiable_conditions": list(event_view.get("falsifiable_conditions") or []),
+        "actuals": actuals_view(actuals),
+        # `frozen_baseline` means the review was scored against a baseline built before the print, whether or not
+        # any of its lines could be put into numbers (the unit-aware comparison leaves many as not_comparable).
+        "comparison_basis": ("frozen_baseline" if ((tri_diffs or {}).get("vs_baseline") or baseline_ref)
+                             else "consensus_only" if (tri_diffs or {}).get("vs_consensus") else "none"),
     }
+    if baseline_ref:
+        payload["baseline_ref"] = baseline_ref
+    if baseline_as_of:
+        payload["baseline_as_of"] = baseline_as_of
     return payload
 
 

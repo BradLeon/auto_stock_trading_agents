@@ -282,6 +282,95 @@ class SectorAllocationPayload(_Payload):
         return _as_float(value)
 
 
+class ExpectationRow(_Item):
+    """One scorecard dimension of the pre-earnings baseline: what a weak, a base and a strong print look like."""
+
+    dim_key: str = Field(min_length=1)
+    metric: str = ""
+    weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    conservative: str = ""
+    neutral: str = ""
+    optimistic: str = ""
+    source: str = ""
+
+
+class ConsensusView(_Item):
+    eps: float | None = None
+    eps_low: float | None = None
+    eps_high: float | None = None
+    revenue: float | None = None
+    revenue_low: float | None = None
+    revenue_high: float | None = None
+    target_price: float | None = None
+    rating_summary: str = ""
+    recent_actions: list[str] = Field(default_factory=list)
+    note: str = ""          # why the estimates are blank (stale or wrong-period snapshot), else ""
+
+
+class MarketImpliedView(_Item):
+    """What the price and the options already say before the print."""
+
+    reference_price: float | None = None
+    expected_move_pct: float | None = None     # option-implied straddle move
+    atm_iv: float | None = None
+    iv_skew: float | None = None               # 25-delta put IV minus call IV
+    run_up_vs_sector_pct: float | None = None
+    run_up_vs_bench_pct: float | None = None
+    dist_to_ath_pct: float | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class SignalLine(_Item):
+    symbol: str = Field(min_length=1)
+    role: str = ""
+    reported: bool | None = None
+    price_chg_pct: float | None = None
+    signal: str = ""
+
+
+class BaselineDetail(_Item):
+    """The pre-earnings baseline as the legacy PEAD report carried it (sections 1.1-2.4 and 7), published whole.
+
+    Added 2026-10-19 (parent 7.5): the Dispatcher path used to publish the baseline as one narrative string, which
+    dropped the expectation table, consensus, market-implied expectations, valuation band, catalysts and risks the
+    analyst had already produced. Every field is optional; an empty one is not published.
+    """
+
+    built_at: str = ""              # the cutoff the baseline was built against (before the print)
+    provenance: str = ""            # how it came to be, when not a plain routine build
+    core_narrative: str = ""
+    peer_comparison: str = ""
+    focus_ranking: list[str] = Field(default_factory=list)
+    watch_metrics: str = ""
+    valuation: str = ""
+    catalysts: list[str] = Field(default_factory=list)
+    key_risks: list[str] = Field(default_factory=list)
+    falsifiable_conditions: list[str] = Field(default_factory=list)
+    expectation_table: list[ExpectationRow] = Field(default_factory=list)
+    consensus: ConsensusView | None = None
+    market_implied: MarketImpliedView | None = None
+    synthesis: str = ""
+    signal_chain: list[SignalLine] = Field(default_factory=list)
+    signal_chain_summary: str = ""
+
+
+class ActualMetricView(_Item):
+    dim_key: str = ""
+    metric: str = ""
+    actual: str = ""
+    vs_expected: str = ""
+    note: str = ""
+
+
+class ActualsView(_Item):
+    reported_eps: float | None = None
+    reported_revenue: float | None = None
+    reporting_currency: str = ""
+    metrics: list[ActualMetricView] = Field(default_factory=list)
+    transcript_signals: list[str] = Field(default_factory=list)
+    transcript_source: str = ""
+
+
 class FundamentalExpectationUpdatePayload(_Payload):
     """A metric reading or qualitative narrative change; unknown is never zero."""
 
@@ -292,6 +381,15 @@ class FundamentalExpectationUpdatePayload(_Payload):
     previous_value: float | None = None
     new_value: float | None
     driver: str = Field(min_length=1)
+    # --- parent 7.5 additive fields (2026-10-19): classification trail and the whole baseline ---
+    change_class: Literal["确认", "否定", "新增", "待验证", ""] = ""
+    kpi: str = ""                   # the baseline dimension this change was matched to, when it was
+    explanation: str = ""           # why the classifier put it in that class
+    evidence_refs: list[str] = Field(default_factory=list)
+    baseline: BaselineDetail | None = None
+
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
+        "change_class", "kpi", "explanation", "evidence_refs", "baseline")
 
     @field_validator("new_value", "previous_value", mode="before")
     @classmethod
@@ -342,6 +440,14 @@ class FundamentalEventReviewPayload(_Payload):
     narrative: str = ""
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     falsifiable_conditions: list[str] = Field(default_factory=list)
+    # --- parent 7.5 additive fields (2026-10-19): what was reported and what it was compared with ---
+    actuals: ActualsView | None = None
+    baseline_ref: str = ""          # the frozen baseline projection the gap was measured against
+    baseline_as_of: str = ""
+    comparison_basis: Literal["frozen_baseline", "consensus_only", "none", ""] = ""
+
+    _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
+        "actuals", "baseline_ref", "baseline_as_of", "comparison_basis")
 
     @field_validator("magnitude", mode="before")
     @classmethod

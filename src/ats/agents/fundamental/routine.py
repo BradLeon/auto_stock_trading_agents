@@ -182,30 +182,38 @@ RULES_FALLBACK_NOTE = "｜分类器：规则回退"
 
 def classify_changes(changes: list[str], baseline: dict, *, use_llm: bool = True) -> list[str]:
     """整批归类。use_llm 时先走 LLM 判断，失败或不可用时回退确定性规则。"""
-    return classify_changes_with_source(changes, baseline, use_llm=use_llm)[0]
+    return classify_changes_detailed(changes, baseline, use_llm=use_llm)[0]
 
 
 def classify_changes_with_source(changes: list[str], baseline: dict, *,
                                  use_llm: bool = True) -> tuple[list[str], str]:
     """(labels, source). source: llm | rules (chosen: no model) | rules_fallback (model failed twice)."""
+    labels, source, _reasons = classify_changes_detailed(changes, baseline, use_llm=use_llm)
+    return labels, source
+
+
+def classify_changes_detailed(changes: list[str], baseline: dict, *,
+                              use_llm: bool = True) -> tuple[list[str], str, list[str]]:
+    """(labels, source, reasons): the classifier's own one-line reason per fact ("" when the rules decided)."""
+    blank = [""] * len(changes)
     if not changes:
-        return [], "llm" if use_llm else "rules"
+        return [], "llm" if use_llm else "rules", []
     if not use_llm:
-        return [classify_change(c, baseline) for c in changes], "rules"
+        return [classify_change(c, baseline) for c in changes], "rules", blank
     for attempt in range(1, CLASSIFIER_ATTEMPTS + 1):
         try:
-            labels = _classify_with_llm(changes, baseline)
-            if labels is not None:
-                return labels, "llm"
+            answer = _classify_with_llm(changes, baseline)
+            if answer is not None:
+                return answer[0], "llm", answer[1]
             log.warning("routine classify LLM returned %s items for %s facts (attempt %d)",
                         "a wrong number of", len(changes), attempt)
         except Exception as exc:  # noqa: BLE001 - a model failure falls back to the rules, never aborts
             log.warning("routine classify LLM failed (attempt %d/%d): %s", attempt, CLASSIFIER_ATTEMPTS, exc)
     log.warning("routine classification fell back to rules for %d facts", len(changes))
-    return [classify_change(c, baseline) for c in changes], "rules_fallback"
+    return [classify_change(c, baseline) for c in changes], "rules_fallback", blank
 
 
-def _classify_with_llm(changes: list[str], baseline: dict) -> list[str] | None:
+def _classify_with_llm(changes: list[str], baseline: dict) -> tuple[list[str], list[str]] | None:
     from ..base import run_structured
     from .outputs import ClassificationView
 
@@ -226,14 +234,18 @@ def _classify_with_llm(changes: list[str], baseline: dict) -> list[str] | None:
     view: ClassificationView = run_structured(
         CLASSIFIER_ROLE, ClassificationView, ctx, skill_slug="fundamental-routine")
     out: list[str] = []
+    reasons: list[str] = []
     for item in view.items:
         label = (item.classification or "").strip()
         out.append(label if label in CLASSIFICATIONS else PENDING)
-    return out if len(out) == len(changes) else None
+        reasons.append(str(getattr(item, "reason", "") or "").strip()[:120])
+    return (out, reasons) if len(out) == len(changes) else None
 
 
 def build_expectation_updates(changes: list[str], classifications: list[str],
-                              baseline: dict, *, period: str = "", note: str = "") -> list[dict]:
+                              baseline: dict, *, period: str = "", note: str = "",
+                              reasons: list[str] | None = None,
+                              evidence_refs: list[str] | None = None) -> list[dict]:
     """每条归类变化一份 FundamentalExpectationUpdate payload 草稿。
 
     已绑定 KPI 且单位可比较的数值读数才更新数值；纯定性/未绑定/单位不明
@@ -242,7 +254,7 @@ def build_expectation_updates(changes: list[str], classifications: list[str],
     metrics: dict[str, float] = baseline.get("metrics") or {}
     period = period or baseline.get("fiscal_label", "") or "current"
     drafts: list[dict] = []
-    for change, label in zip(changes, classifications):
+    for index, (change, label) in enumerate(zip(changes, classifications)):
         metric_key = _metric_key_for(change, metrics)
         number = _metric_number_for(change, metric_key)
         reference = _reference_value(change, metrics)
@@ -261,6 +273,10 @@ def build_expectation_updates(changes: list[str], classifications: list[str],
             "previous_value": previous,
             "new_value": new_value,
             "driver": f"[{label}] {change}{note}",
+            "change_class": label,
+            "kpi": "" if metric_key == "narrative" and number is None else metric_key,
+            "explanation": (reasons[index] if reasons and index < len(reasons) else ""),
+            "evidence_refs": [ref for ref in (evidence_refs or []) if ref],
         })
     return drafts
 
@@ -341,7 +357,7 @@ def _brief_facts(store, symbol: str) -> tuple[list[str], str]:
 
 
 def _publish_baseline(store, symbol: str, label: str, dossier, *, reason: str, input_refs: list[str],
-                      use_llm: bool) -> str:
+                      use_llm: bool, provenance: str = "") -> str:
     """One append-only narrative projection per baseline build: the baseline's history up to the cutoff."""
     es = dossier.expectation_set
     previous = [row for row in store.task_projection_envelopes(
@@ -353,8 +369,11 @@ def _publish_baseline(store, symbol: str, label: str, dossier, *, reason: str, i
     driver = (f"[基线 v{len(previous) + 1}] {label} 财报前预期基线（{reason}）：{es.narrative[:600]}"
               f"｜关注：{'；'.join(es.focus_ranking[:3])}｜预期维度：{', '.join(e.dim_key for e in es.expectations)}"
               f"｜共识：{consensus}")
+    from .baseline_view import baseline_detail
+
     payload = {"entity": symbol, "metric": "narrative", "period": label,
-               "previous_value": None, "new_value": None, "driver": driver}
+               "previous_value": None, "new_value": None, "driver": driver,
+               "baseline": baseline_detail(dossier, provenance=provenance)}
     return publish_expectation_update(store, payload, input_refs=input_refs, use_llm=use_llm)
 
 
@@ -433,9 +452,10 @@ def run_routine_pass(request) -> dict:
         raise RuntimeError("Routine requires a valid labelled previous expectation baseline")
     payload = briefs[0].get("payload") or {}
     changes = list(payload.get("fact_changes") or [])
-    labels, classifier = classify_changes_with_source(changes, baseline, use_llm=request.use_llm)
+    labels, classifier, reasons = classify_changes_detailed(changes, baseline, use_llm=request.use_llm)
     drafts = build_expectation_updates(changes, labels, baseline,
-                                       note=RULES_FALLBACK_NOTE if classifier == "rules_fallback" else "")
+                                       note=RULES_FALLBACK_NOTE if classifier == "rules_fallback" else "",
+                                       reasons=reasons, evidence_refs=[briefs[0].get("projection_id", "")])
     published: list[str] = [baseline_state["projection_id"]] if baseline_state.get("projection_id") else []
     for draft in drafts:
         published.append(publish_expectation_update(

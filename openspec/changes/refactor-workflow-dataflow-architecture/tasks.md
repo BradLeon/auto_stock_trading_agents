@@ -1,4 +1,4 @@
-> 2026-10-19 对照已归档的各 Phase change 勾选并完成第 12 节最终验收：**118/119 完成**、1 项未完成（7.5 Fundamental 例行模式的完整能力，进行中）。第 12 节验收记录见 docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
+> 2026-10-19 对照已归档的各 Phase change 勾选并完成第 12 节最终验收：**119/119 完成**、0 项未完成。第 12 节验收记录见 docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
 
 ## 1. Phase A — 权威基线与数据边界
 
@@ -82,7 +82,7 @@
 - [x] 7.2 从 PEAD research/triage/monitor 和 digest 提取纯抽取/材料性逻辑，移除直接抓 Provider 和修改 dossier 的副作用
 - [x] 7.3 实现 Information 的文档版本/chunk 血缘、事件/发布/抽取时间、聚类、置信度、仅自述和待验证标记
 - [x] 7.4 新增 Information schema guard，拒绝 action、仓位、订单数量/价格/类型字段，并测试 Information 可不运行 Fundamental/Chief 而独立终结
-- [ ] 7.5 实现 Fundamental routine mode，基于上一有效基线、InformationBrief、Consensus、公司数据和中性产业链事实发布 `FundamentalExpectationUpdate` 2026-10-14可能缺失记录：完整市场隐含预期、整合叙事/变化路径、逐KPI变化解释、可证伪条件及输入参与判断待闭合；用户裁决Phase F验收后补。本轮有限Routine签核不代表本项完成。 【2026-10-19】按用户 2026-10-14 裁决保持未勾选：例行模式已实现（Phase D 5.2），完整市场隐含预期、整合叙事/变化路径、逐 KPI 变化解释与可证伪条件为 Phase F 之后补的能力。
+- [x] 7.5 实现 Fundamental routine mode，基于上一有效基线、InformationBrief、Consensus、公司数据和中性产业链事实发布 `FundamentalExpectationUpdate` 2026-10-14可能缺失记录：完整市场隐含预期、整合叙事/变化路径、逐KPI变化解释、可证伪条件及输入参与判断待闭合；用户裁决Phase F验收后补。本轮有限Routine签核不代表本项完成。 【2026-10-19 完成】按用户要求补齐：旧 PEAD 报告的每一节（核心叙事、同业、关注排序、KPI 清单、估值、催化剂与风险、预期基准表、共识、期权/价格隐含、综合预判、信号链、实际披露、三类差异）现在都由 Dispatcher 发布的投影携带（FundamentalExpectationUpdate 新增可选字段 baseline/change_class/kpi/explanation/evidence_refs，FundamentalEventReview 新增 actuals/baseline_ref/comparison_basis），空值不进哈希；情景决策树、PEAD 建议与执行清单有意不带（含交易动作）。用 TSM、ASML 的 Q3 财报验证：取发布前建好的基线档案（误标成 Q2/Q4）改归 Q3 FY2026，重跑财报后评审并产出完整报告。途中修复：三类差异不看币种与单位导致荒谬数字（现在只比较同币种同单位，口径不明或差距过大的列为不可比）、营收被当成 0.0B（抽取改为绝对金额加申报币种）。见 docs/PHASE_F_PARENT_7_5_FUNDAMENTAL_DETAIL_20261019.md。遗留：新例行模式在真实窗口里产出带明细基线（下一个是 LRCX 之后的窗口）；ASML 与 TSM 的基线币种口径本身不一致，对比大半仍为不可比。
 - [x] 7.6 实现 Fundamental event cutoff 和冻结预期基线，禁止用事件后材料回写财报前预期
 - [x] 7.7 实现 event mode 的 actuals vs baseline/Consensus/implied expectation、Surprise Scorecard、指引、叙事变化和非执行建议
 - [x] 7.8 实现迟到电话会/指引的版本升级，共享同一冻结基线且不覆盖初版投影
@@ -140,7 +140,7 @@
 > - **生产读 / 调度：** 研究读取 6 个消费者（Information、Fundamental、Layer、Macro、Sector、Technical）已在生产切到新路径（target，代次 3），每日健康检查通过；7 个研究工作流调度负责人已切到 Dispatcher，常驻进程 `com.ats.phase-e` 已加载（只跑研究，不进 Chief、不下单）。观察窗口 `phase-f-dispatcher-2026-10-17` 按用户裁决于 10-18 结束；事件路径只用 TSM、ASML 验证。**未切：** Chief 读取新投影、交易、审批、记账。
 > - **实盘：** **仍为锁定。** `trades` 表自 10-16 起无新增，`com.ats.schedule`（带 `--live`）未加载，实盘路由未切换；实盘授权库里有一行来源未核实的 `LIVE-X`，不认定为授权，未改动，待用户确认来源。真实 live 切换不在本 change 执行范围。
 > - **旧实现退役：** 27 个登记条目 3 个退出、24 个 pending（其中 8 个登记为 retired 但无法证明清零），未改登记；见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md`。
-> - **仍未完成 / 后补：** 常驻进程的真实定时触发与 LRCX 10-21 盘后事件评审（10.6 已用同一代码路径手动验证，LRCX `[基线 v1]` 已建成）；完整 Routine 业务能力按用户裁决 Phase F 后补，**父 7.5 不勾选**——完整市场隐含预期、整合叙事/变化路径、逐 KPI 变化解释及可证伪条件仍未完成；有限 Routine 签核只覆盖 MRVL/MSFT/NVDA/TSM 四份报告的实际内容，**不是 TARGET §9.2 完整达标**。另有：SEC 对后台进程不可达、事件日历库为空（事件路径从未被真实日历事件触发）、TSM/ASML 事件评审无比较依据、`ibkr_news` 的 partial 重试与超时掩盖原因两个缺陷（10-19 已修请求挂起，这两个仍在）。
+> - **仍未完成 / 后补：** 常驻进程的真实定时触发与 LRCX 10-21 盘后事件评审（10.6 已用同一代码路径手动验证，LRCX `[基线 v1]` 已建成）；完整 Routine 内容（完整市场隐含预期、整合叙事/变化路径、逐 KPI 变化解释、可证伪条件）已在 2026-10-19 由 Dispatcher 投影携带，并以 TSM/ASML 的 Q3 财报做了完整财报前后报告，**父 7.5 已勾选**，真实窗口里的产出待 LRCX 之后验证；有限 Routine 签核只覆盖 MRVL/MSFT/NVDA/TSM 四份报告的实际内容，**仍不是 TARGET §9.2 完整达标**。另有：SEC 对后台进程不可达、财报日历库 10-19 已补上但事件路径尚未被真实日历事件触发过（LRCX 10-21 是第一次）、TSM/ASML 的基线币种口径不一致致对比大半不可比、`ibkr_news` 的 partial 重试与超时掩盖原因两个缺陷（10-19 已修请求挂起，这两个仍在）。
 > - **独立于本回写：** 父 change 的新需求、共享安全和整图验收各自独立，不因子 change 的这些状态判通过，也不因 HEAD 上既有的旧专属失败（如 scheduler_jobs、read_cutover 相关测试）阻塞或被掩盖。精简裁决（G1–G4）及被取代要求清单见 `docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 第九节。
 
 **2026-10-09 验收裁决（覆盖本节此前的新旧对比/旧业务回退前置）**：以新入口需求矩阵和独立预期断言验收；旧入口不可运行、旧业务错误及新旧差异仅作可选诊断，不阻塞新入口。旧入口仍须退出安全，防重复触发/发布、越权提交和状态污染。恢复可以是经验证的安全停止或恢复已验收的新版本，不强制修复或恢复旧业务。新入口、共享依赖、必需历史/状态和权限失败仍阻塞受影响范围。子 change 的旧工具成果保留，但报告/checker 与恢复/退役判据须按新标准改造，不自动沿用历史签核。

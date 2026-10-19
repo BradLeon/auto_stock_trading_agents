@@ -539,7 +539,7 @@ def score_review(state: PeadState) -> dict:
         get_store(), symbol=state.symbol, fiscal_label=state.fiscal_label)
     tri = fundamental_event.compute_tri_diffs(
         frozen_baseline=frozen, expectation_set=state.expectation_set,
-        actuals=state.actuals, market_setup=state.market_setup)
+        actuals=state.actuals, market_setup=state.market_setup, symbol=state.symbol)
     return {"event_view": view, "tri_diffs": tri,
             "decision_band": state.scorecard.band if state.scorecard else ""}
 
@@ -589,7 +589,10 @@ def score_persist(state: PeadState) -> dict:
             symbol=state.symbol, period=state.fiscal_label, event="earnings",
             scorecard=state.scorecard, event_view=view, tri_diffs=tri,
             actuals=state.actuals,
-            narrative=state.expectation_set.narrative if state.expectation_set else "")
+            narrative=state.expectation_set.narrative if state.expectation_set else "",
+            baseline_ref=fundamental_event.baseline_reference(store, state.symbol, state.fiscal_label),
+            baseline_as_of=(state.expectation_set.as_of.isoformat(timespec="seconds")
+                            if state.expectation_set else ""))
         fundamental_event.publish_event_review(store, payload, input_refs=state.input_refs)
     except Exception as exc:  # noqa: BLE001 - dossier 已落库，投影失败显式留痕
         log.warning("event review projection failed for %s: %s", state.symbol, exc)

@@ -162,3 +162,35 @@ def test_narrative_focus_ranking_coerces_stringified_array():
     # genuine lists and empties untouched
     assert NarrativeView(narrative="t", focus_ranking=["a", "b"]).focus_ranking == ["a", "b"]
     assert NarrativeView(narrative="t", focus_ranking=[]).focus_ranking == []
+
+
+# --- 2026-10-19: an extraction with headline numbers but no per-dimension readings must not become a score ----- #
+
+def test_headline_numbers_without_dimension_readings_are_retried_then_refused(monkeypatch):
+    import pytest as _pytest
+
+    from ats.agents.pead import score as score_mod
+    from ats.agents.pead.outputs import ActualsView
+    from ats.schemas.pead import Expectation, ExpectationSet, PeadConfig
+
+    calls = []
+
+    def fake(role, schema, ctx, **kw):
+        calls.append(role)
+        return ActualsView(reported_eps=12.95, reported_revenue=11.7e9, reporting_currency="EUR", metrics=[])
+
+    monkeypatch.setattr(score_mod, "run_structured", fake)
+    es = ExpectationSet(symbol="ASML", as_of=datetime(2026, 10, 13, tzinfo=timezone.utc),
+                        expectations=[Expectation(dim_key="bookings", neutral="€5B")])
+    with _pytest.raises(ValueError, match="actuals-guard"):
+        score_mod.extract_actuals(PeadConfig(symbol="ASML", fiscal_label="Q3 FY2026"), es, "transcript", "", 
+                                  datetime(2026, 10, 19, tzinfo=timezone.utc))
+    assert calls == ["actuals_extract", "actuals_extract"]          # one retry, then refusal
+
+
+def test_a_one_element_list_holding_a_json_array_is_unwrapped():
+    from ats.agents.pead.outputs import ActualsView
+
+    view = ActualsView(transcript_signals=['["一", "二", "三"]'])
+    assert view.transcript_signals == ["一", "二", "三"]
+    assert ActualsView(transcript_signals=["a", "b"]).transcript_signals == ["a", "b"]

@@ -472,3 +472,28 @@ def test_an_implausible_gap_is_a_unit_problem_not_a_beat_or_a_miss():
     assert tri["vs_consensus"] == {} and tri["vs_baseline"] == []
     assert {x["scope"] for x in tri["not_comparable"]} == {"baseline", "consensus_eps"}
     assert all("过大" in x["reason"] for x in tri["not_comparable"])
+
+
+def test_a_reading_that_names_two_currencies_is_a_conversion_and_is_not_compared():
+    from ats.agents.fundamental.event import compute_tri_diffs, mixes_currencies
+    from ats.schemas.pead import ActualMetric, Actuals
+
+    assert mixes_currencies("1.270万亿台币（约467亿美元）") is True
+    assert mixes_currencies("EUR 11.7B") is False
+    es = _es()
+    es.consensus_revenue = 1.4545e12
+    actuals = Actuals(symbol="TSM", fiscal_label="Q3 FY2026", as_of=NOW, reported_revenue=1.27e12,
+                      reporting_currency="TWD",
+                      metrics=[ActualMetric(dim_key="revenue", actual="1.270万亿台币（约467亿美元）")])
+    frozen = {"expectations": [{"dim_key": "revenue", "neutral": "NT$1.454万亿"}]}
+    tri = compute_tri_diffs(frozen_baseline=frozen, expectation_set=es, actuals=actuals, market_setup=None,
+                            symbol="TSM")
+    assert tri["vs_baseline"] == [] and tri["vs_consensus"] == {}
+    assert {x["scope"] for x in tri["not_comparable"]} == {"baseline", "consensus_revenue"}
+
+
+def test_nt_dollar_is_taiwan_dollar_only():
+    from ats.agents.fundamental.event import mixes_currencies, quantity
+
+    assert quantity("NT$1.45万亿") == (1.45e12, "TWD") and mixes_currencies("NT$1.45万亿") is False
+    assert quantity("$4.45") == (4.45, "USD") and mixes_currencies("EPS $4.45 / US$") is False

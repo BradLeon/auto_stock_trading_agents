@@ -187,7 +187,9 @@ def _actuals(dossier) -> str:
     parts = []
     headline = []
     if a.reported_eps is not None:
-        headline.append(f"EPS **${a.reported_eps:.2f}**")
+        cur = getattr(a, "reporting_currency", "") or ""
+        # the headline used to print "$" for every company (ASML reports in euro, TSM per share in NT$)
+        headline.append(f"EPS **{(cur + ' ') if cur else '$'}{a.reported_eps:.2f}**")
     if a.reported_revenue is not None:
         headline.append(f"Revenue **{a.reported_revenue/1e9:.1f}B{(' ' + a.reporting_currency) if getattr(a, 'reporting_currency', '') else ''}**")
     if headline:

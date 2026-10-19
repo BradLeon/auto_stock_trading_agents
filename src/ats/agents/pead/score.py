@@ -66,10 +66,19 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         "tag (远超/超/中性/低于/远低于 + 🔴/✅/⚪/⚠️) and a note. Extract forward GUIDANCE and key "
         "qualitative call signals separately. Set reported_eps / reported_revenue if present: "
         "reported_revenue is an ABSOLUTE number (11700000000 for EUR 11.7B), both are in the currency the company "
-        "reports in, and reporting_currency names it (ISO code). Never convert currencies."
+        "reports in, and reporting_currency names it (ISO code). Never convert currencies. If the release also gives "
+        "revenue in a convenience currency (TSMC quotes US$ next to NT$), use the REPORTING-currency figure; if you "
+        "only have the other currency's figure, leave reported_revenue empty rather than label it with the wrong code."
     )
+    expected_dims = bool(expectations and expectations.expectations)
     try:
         view: ActualsView = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
+        if expected_dims and not view.metrics:
+            # Headline numbers without a single per-dimension reading cannot score a baseline of several dimensions:
+            # every line would come back "assume neutral" and read as 符合预期 (ASML Q3, 2026-10-19). One more try,
+            # then the guard below refuses to score.
+            log.warning("actuals for %s carried no per-dimension readings; retrying once", config.symbol)
+            view = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
     except Exception as exc:  # noqa: BLE001
         # Abort loudly rather than fall back to an all-neutral (all-zero) scorecard
         # that reads as a tradeable "符合预期" — same policy as the period guard.
@@ -84,9 +93,21 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         raise ValueError(
             f"[actuals-guard] {config.symbol} score 已中止：有输入却抽取到空 actuals"
             f"（无 metrics、无 reported EPS/营收），疑似抽取降级，拒绝据此打分。")
+    if expected_dims and not view.metrics:
+        raise ValueError(
+            f"[actuals-guard] {config.symbol} score 已中止：基线有 {len(expectations.expectations)} 个维度，"
+            f"但两次抽取都没有任何逐维度读数。只有头条数字无法给维度打分，拒绝产出全 0 的伪中性打分卡。")
+    # A revenue headline taken from a reading that names two currencies is a conversion the model chose a rate for
+    # (TSM Q3: US$46.7B shown as NT$1.27T). The metric row keeps both figures as the source gave them; the
+    # headline number is left empty rather than carrying an invented one.
+    from .units import mixes_currencies
+
+    revenue_text = next((m.actual for m in view.metrics if "revenue" in str(m.dim_key).lower()), "")
+    reported_revenue = None if (view.reported_revenue is not None and mixes_currencies(revenue_text)) \
+        else view.reported_revenue
     return Actuals(
         symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
-        reported_eps=view.reported_eps, reported_revenue=view.reported_revenue,
+        reported_eps=view.reported_eps, reported_revenue=reported_revenue,
         reporting_currency=(view.reporting_currency or "").strip().upper()[:3],
         metrics=[ActualMetric(dim_key=m.dim_key, metric=m.metric, actual=m.actual,
                               vs_expected=m.vs_expected, note=m.note) for m in view.metrics],

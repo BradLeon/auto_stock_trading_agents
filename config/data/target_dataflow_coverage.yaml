@@ -444,6 +444,7 @@ qualification_policy:
     - src/ats/data/sources/macro_series.py
     - src/ats/workflow/layer_sector_inputs.py
     - src/ats/agents/fundamental/baseline_view.py     # parent 7.5 (2026-10-19): the baseline published whole
+    - src/ats/agents/pead/units.py                    # currency/unit reading shared by the extraction and the comparison
     - src/ats/workflow/cutover.py
     - src/ats/data/products/unstructured.py
     - src/ats/data/assurance.py

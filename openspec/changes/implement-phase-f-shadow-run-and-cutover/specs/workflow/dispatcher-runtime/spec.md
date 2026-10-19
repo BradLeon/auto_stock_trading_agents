@@ -15,6 +15,8 @@
 | Chief 完整性门禁、统一逻辑触发身份、先冻结新认领再清点、不重复消费已执行触发、独立预期触发集合、不误作数据源重启 | 保留 | 调度单一负责人与幂等是 TARGET §8.3、§15.4 要求 |
 | 实际 Workflow 与调度必须绑定持久许可和独立运行时点 | 修改 | 保留「独立运行时点记录」；「绑定持久许可」随 cutover-control 被取代 |
 
+> 2026-10-19 归档前整理：上表处置「被取代」的要求已从下方 `ADDED Requirements` 中移除（原文保留在本 change 的 git 历史与 `docs/PHASE_F_OPENSPEC_REVISION_DRAFT.md`），处置「修改」的要求已改写为裁决后的写法，主规格因此只承载仍然有效的要求。
+
 ## ADDED Requirements
 
 ### Requirement: Chief 完整性门禁必须同时满足必需类别与所选任务模式
@@ -153,18 +155,14 @@
 - **THEN** 系统 SHALL 拒绝该操作并指出调度切换不拥有数据采集生命周期
 - **AND** 该数据源 SHALL 保持其原所有者与运行状态
 
-### Requirement: 实际 Workflow 与调度必须绑定持久许可和独立运行时点
+### Requirement: 实际 Workflow 与调度必须持久化独立运行时点
 
-新 Workflow、cron/event 和手动调度 SHALL 为每个必需消费者/task scope 显式绑定唯一已批准的持久部署许可，持久化独立 plan.as_of、查询窗口、实际 Event/version 与运行结果。每次执行/复用/发布 SHALL 核验当次资格、输入、报告、许可撤销、停止和代次；无许可、歧义和范围逃逸 SHALL 拒绝。查询窗口推进及符合已批准 Event 规则的版本更新 SHALL NOT 要求重新人工部署批准；只批准特定 Event/version 的许可 SHALL NOT 扩大为规则授权。logical trigger 身份 SHALL 继续由 workflow/scope/计划时点或实际 Event/version 确定，SHALL NOT 因换绑许可或部署代次重新执行已完成工作。
+新 Workflow、cron/event 和手动调度 SHALL 为每次执行持久化独立 plan.as_of、查询窗口、实际 Event/version 与运行结果。每次执行/复用/发布 SHALL 核验当次输入、停止状态与 owner 代次；范围逃逸 SHALL 拒绝。查询窗口推进及符合已批准 Event 规则的版本更新 SHALL NOT 要求人工续批。logical trigger 身份 SHALL 继续由 workflow/scope/计划时点或实际 Event/version 确定，SHALL NOT 因 owner 代次变化重新执行已完成工作。
 
 #### Scenario: 常驻调度跨日继续运行
-- **WHEN** 持久许可未撤销、范围未扩大，两个独立 tick 位于不同日期且当次门禁通过
-- **THEN** 调度 SHALL 保留同一部署许可和各自 plan.as_of/输入窗口，无需日常人工续批
+- **WHEN** 调度负责人未变、两个独立 tick 位于不同日期且当次输入检查通过
+- **THEN** 调度 SHALL 保留各自 plan.as_of/输入窗口，无需日常人工续批
 
-#### Scenario: 没有许可或绑定歧义
-- **WHEN** 任一必需 task 未绑定当前持久许可，或绑定无法唯一确定
-- **THEN** Workflow SHALL 在执行前拒绝并报告具体 task/scope 缺口
-
-#### Scenario: 同一逻辑触发换绑许可
-- **WHEN** 已完成触发再次到达且绑定了另一部署许可
+#### Scenario: 同一逻辑触发重复到达
+- **WHEN** 已完成触发再次到达，即使 owner 代次已变化
 - **THEN** 系统 SHALL 依据原逻辑触发记录跳过，SHALL NOT 重复执行或发布

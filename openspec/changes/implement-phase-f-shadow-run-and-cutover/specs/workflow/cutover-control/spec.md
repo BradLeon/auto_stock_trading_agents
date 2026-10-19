@@ -23,6 +23,8 @@
 | 切流门禁不变量必须由机器校验 | 修改 | 机器校验保留于安全底线（禁券商写、单一实盘入口、成对边界、单一调度负责人）；入口证据包、兼容性证明文件、绑定请求哈希的精确授权不再是切流前置 |
 | 持久部署许可与每次运行时间必须分离 | 被取代 | 按消费者切换后路由本身持续有效；「日常运行无需逐日续批」由消费者路由满足 |
 
+> 2026-10-19 归档前整理：上表处置「被取代」的要求已从下方 `ADDED Requirements` 中移除（原文保留在本 change 的 git 历史与 `docs/PHASE_F_OPENSPEC_REVISION_DRAFT.md`），处置「修改」的要求已改写为裁决后的写法，主规格因此只承载仍然有效的要求。
+
 ## ADDED Requirements
 
 ### Requirement: 每条切流边界必须有独立功能开关
@@ -121,98 +123,71 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 - **THEN** 系统 SHALL NOT 假定该 scope 已全面验证
 - **AND** 后续提交前 SHALL 仍按本次决策的 scope 重新验证资格
 
-### Requirement: 读路径路由必须逐消费者依据读取资格判定
+### Requirement: 读路径路由必须按消费者整体切换并以消费者健康检查为前提
 
-系统 SHALL 在实际 CLI、Workflow 与 Dispatcher 读取入口按 `domain_id + consumer_id + contract_version + scope` 逐条判定。当次资格查询、输入和报告 SHALL 使用明确一致的业务 scope；持久部署 scope、运行路由及恢复证明 SHALL 显式关联该范围，部署许可寿命 SHALL 与当次查询时间分离；SHALL NOT 将实体或时间范围替换为消费者产品列表。运行路由 SHALL 能独立表达不同消费者/范围的迁移状态，重启后保持一致。任一必需证据缺失、过期、被撤销或回滚证明未通过时，SHALL 进入安全回退判定而非直接切流。SHALL NOT 以单一总开关或「同一数据域其他消费者已通过」为由放行未通过的消费者。
+系统 SHALL 在实际 CLI、Workflow 与 Dispatcher 读取入口按消费者（`domain_id + consumer_id + contract_version`）整体路由研究读取。切换前 SHALL 完成该消费者层面的数据产品健康检查并留存批准记录；观察期内 SHALL 每日复查，健康检查失败时 SHALL 按迁移窗口策略退回旧路径并告警。精确 scope 路由行 MAY 保留作可选的细粒度停止，SHALL NOT 成为日常运行前提。运行路由 SHALL 能独立表达不同消费者的迁移状态，重启后保持一致。读取入口 SHALL 使用明确一致的业务 scope，SHALL NOT 将实体或时间范围替换为消费者产品列表；读取失败 SHALL 显式报错，SHALL NOT 吞为空结果。SHALL NOT 以单一总开关或「同一数据域其他消费者已通过」为由放行健康检查未通过的消费者。
 
-#### Scenario: 同一消费者另一实体未取得资格
+#### Scenario: 消费者健康检查未通过
 
-- **WHEN** 该消费者仅在实体 A 的 scope 合格，而实际请求读取实体 B
-- **THEN** 系统 SHALL 查询 B 的 exact-scope 资格并按其结果处置
-- **AND** SHALL NOT 用 A 或消费者全产品列表的资格放行 B
+- **WHEN** 某消费者切换前的数据产品健康检查未通过
+- **THEN** 该次切换 SHALL 被拒绝并报告未通过的检查项
+- **AND** 系统 SHALL 保持其原有路由
 
-#### Scenario: 数据域通过但单个消费者无安全恢复证明
+#### Scenario: 观察期内健康检查失败
 
-- **WHEN** 某数据域的写入、准入、读取与血缘证据齐备，而其中一个消费者没有经验证的安全停止或版本恢复证明
-- **THEN** 该消费者 SHALL 不具备切换资格
-- **AND** 系统 SHALL 进入安全回退判定并报告缺少安全恢复证明
+- **WHEN** 已切换的消费者在观察期内的每日健康检查失败
+- **THEN** 系统 SHALL 退回旧路径并告警，记录原因、操作者与前后路由
+- **AND** SHALL NOT 影响其他消费者的路由
 
-#### Scenario: 资格在切换前被撤销
+#### Scenario: 同一数据域其他消费者已通过
 
-- **WHEN** 某消费者的读取资格在切换执行前被撤销或因来源版本变化而失效
-- **THEN** 该次切换 SHALL 被拒绝并报告失效原因
-- **AND** 系统 SHALL 保持其原有稳定路由；原路由无法确认安全时保持停止
+- **WHEN** 某数据域的其他消费者均已通过，而本消费者健康检查未通过
+- **THEN** 本消费者 SHALL 不具备切换条件
+- **AND** SHALL NOT 以数据域整体通过为由放行
 
 #### Scenario: 读取资格不得开启交易权限
 
-- **WHEN** 某消费者的全部读取资格均为通过状态
-- **THEN** 该资格 SHALL 仅允许其读路径切流
+- **WHEN** 某消费者的读路径已切换
+- **THEN** 该切换 SHALL 仅影响其读路径
 - **AND** SHALL NOT 被解释为任何交易、审批或下单权限
 
 #### Scenario: 原生产品查询不能替代业务 scope
 
 - **WHEN** 原生消费者 API 收到产品查询参数，却没有显式业务 scope 或绑定的当次入口上下文
-- **THEN** 系统 SHALL 拒绝读取，而不是使用产品列表构造资格 scope
-- **AND** 绑定后更换实体、消费者或历史 cutoff SHALL 被拒绝，资格门禁失败 SHALL NOT 被吞为成功的空 payload
+- **THEN** 系统 SHALL 拒绝读取，而不是使用产品列表构造 scope
+- **AND** 绑定后更换实体、消费者或历史 cutoff SHALL 被拒绝，读取失败 SHALL NOT 被吞为成功的空 payload
 
-### Requirement: 资格失效时必须执行已登记的安全停止或恢复策略
+### Requirement: 健康检查失败时迁移窗口内退回旧路径，旧入口退役后执行已登记的安全停止或恢复
 
-系统 SHALL 按 workflow/scope 在运行前登记安全停止、恢复已验收版本或可选旧目标策略。停止 SHALL 禁止该范围继续读取/发布与依赖交易，保留历史和审计；恢复 SHALL 核验目标 scope、版本、有效证明、资格、未退役及实际可读性，并重查撤销/代次。缺目标或核验失败 SHALL 保持停止。系统 SHALL NOT 要求修复旧业务或强退故障旧路；下游已组装快照 SHALL 重验失效依赖。
+迁移窗口内，消费者健康检查失败或读取资格被撤销时，系统 SHALL 默认退回旧路径并告警，记录原因与操作者。旧入口退役之后，系统 SHALL 改按 workflow/scope 登记的安全停止或恢复已验收版本策略处置：停止 SHALL 禁止该范围继续读取/发布与依赖交易，保留历史和审计；恢复 SHALL 核验目标版本、有效证明、未退役及实际可读性。缺目标或核验失败 SHALL 保持停止。系统 SHALL NOT 要求每个 scope 一份带有效期的停止证明，也 SHALL NOT 要求修复旧业务；下游已组装快照 SHALL 重验失效依赖。
 
-#### Scenario: 安全停止作为完整恢复策略
-- **WHEN** 某 scope 资格失效且已登记安全停止
+#### Scenario: 迁移窗口内退回旧路径
+- **WHEN** 迁移窗口内某消费者健康检查失败
+- **THEN** 系统 SHALL 退回旧路径并告警，保留历史与审计
+- **AND** SHALL NOT 要求先取得该 scope 的停止证明
+
+#### Scenario: 旧入口退役后的安全停止
+- **WHEN** 旧入口已退役，某 scope 资格失效且已登记安全停止
 - **THEN** 系统 SHALL 停止该范围并阻断其依赖交易、保留历史与审计
 - **AND** 已实测上述行为 SHALL 满足该范围的恢复验收，不要求旧入口可用
 
 #### Scenario: 恢复已验收的新版本
 - **WHEN** 操作者选择已验收的新版本作为恢复目标
-- **THEN** 系统 SHALL 核验该版本的资格、scope、有效证明与实际读取并重查撤销/代次
+- **THEN** 系统 SHALL 核验该版本的 scope、有效证明与实际读取
 - **AND** SHALL NOT 自动沿用当前版本的资格或恢复旧授权
-
-#### Scenario: 明确选择旧目标
-- **WHEN** 批次明确登记可选旧目标恢复
-- **THEN** 系统 SHALL 核验未退役、证明/指纹有效与当次真实读取引用
-- **AND** 任一失败 SHALL 保持停止，SHALL NOT 为通过验收修复旧业务
-
-#### Scenario: 恢复证明被撤销
-- **WHEN** 某 scope 的恢复证明被撤销
-- **THEN** 系统 SHALL 追加 scope/引用/操作者/原因并停止后续使用该证明
-- **AND** SHALL NOT 隐式撤销其他范围
 
 #### Scenario: 已组装快照继续执行
 - **WHEN** 已组装快照的必需依赖失效
 - **THEN** 下游审批/提交 SHALL 重验并停止无效范围
 - **AND** SHALL NOT 仅记日志继续，也不扩大为无关研究范围的全局阻断
 
-### Requirement: 切流不得动摇受取证约束的文件与基线
-
-运行时切流 SHALL 只使用既有发布覆盖层与本 change 独立的控制状态，SHALL NOT 修改已被取证的消费者契约基线与受指纹约束的代码或配置文件。若确需修改，系统 SHALL 在最终代码与配置上重新验证、追加证据并重算受影响消费者资格，SHALL NOT 修改旧证据或放宽指纹标准。系统 SHALL NOT 因一次切流动作而使已登记证据整体失效。
-
-#### Scenario: 切流动作改动了受指纹约束的配置
-
-- **WHEN** 某次切流改动了被资格政策纳入指纹的文件
-- **THEN** 系统 SHALL 判该动作不安全并拒绝
-- **AND** SHALL 报告该文件的指纹变化将使相关消费者资格失效
-
-#### Scenario: 共同依赖文件的改动影响多个消费者
-
-- **WHEN** 为某个消费者调整路由而需要改动被多个消费者共同纳入指纹的文件
-- **THEN** 系统 SHALL 要求重算全部受影响消费者的资格
-- **AND** SHALL NOT 只为当前消费者重新取证
-
-#### Scenario: 必须修改时在最终状态重新取证
-
-- **WHEN** 确需修改受约束文件以完成某项工作
-- **THEN** 系统 SHALL 在修改完成后的最终代码与配置上重新验证并追加证据
-- **AND** 旧证据 SHALL 保持原样且不被改写
-
 ### Requirement: 切流执行必须留下可回退的批次记录
 
-每次切流 SHALL 以批次记录标识、涉及边界、逐消费者范围、实际 owner、前后路由、明确观察窗口/成功与停止条件、所用新入口验收报告和已验证安全停止/版本恢复策略。正式 dry-run 与执行器 SHALL 强制核验报告适用性及投影实际可用性；缺报告、缺校验能力、缺接线证明或不可确认投影 SHALL 拒绝，SHALL NOT 默认通过。需求面不适用 SHALL 依据新需求矩阵显式声明，SHALL NOT 以空报告 ID 表示通过。回退演练 SHALL 在首次生产切换前于隔离环境完成，不以已经生产切换为前置；切后实际回退 SHALL 单独留证。安全停止经真实入口验证 SHALL 可作为恢复策略；既无可用恢复目标也无经过验证的停止策略时 SHALL 保持未切换。
+每次切流 SHALL 留下一条批次记录：切什么（边界与消费者范围）、谁批准（批准原文或引用）、何时、前后路由与实际 owner、观察到何时、停止条件、如何回退。回退 SHALL 以迁移期保留的旧路径为准；切回旧路径 SHALL 在隔离环境演练，并在切换后于生产上至少演练一次「切回旧路径再切回」并单独留证。新入口验收报告适用性与投影实际可用性 SHALL 按消费者/工作流核验；缺报告、缺校验能力或不可确认的投影 SHALL 拒绝，SHALL NOT 默认通过，需求面不适用 SHALL 依据需求矩阵显式声明。既无可用回退方式时 SHALL 保持未切换。
 
 #### Scenario: 无可用回退的批次
 
-- **WHEN** 某批次既未登记可用版本恢复，也未登记经实际验证的安全停止
+- **WHEN** 某批次没有可用的回退方式
 - **THEN** 该批次 SHALL 不进入切流执行
 - **AND** SHALL 被登记为缺口且相关消费者保持未切换
 
@@ -224,7 +199,7 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 
 #### Scenario: 未通过路径不得随整体批次切换
 
-- **WHEN** 一个批次包含多个消费者范围，而其中一部分未取得资格
+- **WHEN** 一个批次包含多个消费者范围，而其中一部分未通过健康检查
 - **THEN** 该批次 SHALL 仅对已通过的消费者范围执行切换
 - **AND** 未通过范围 SHALL 明确报告为未切换，SHALL NOT 静默沿用新路由
 
@@ -242,15 +217,11 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 
 ### Requirement: 联合边界切换必须显式且不可暴露半迁移状态
 
+联合边界协调 SHALL 仅适用于必须成对切换的审批与账本发布；研究读取与调度的单独切换 SHALL NOT 经联合协调器。
+
 生产联合授权 SHALL 绑定完整规范请求（包括 workflow、业务身份、边界、目标及预期代次），持久化且保留不可修改历史；授权过期或撤销 SHALL 阻止提交或恢复开放。隔离 fixture 门禁 SHALL 仅在物理隔离和进程 broker 禁写能力均经核验时使用。恢复 SHALL 核对原权威状态路径与本批次冻结来源，SHALL NOT 接管其他操作的冻结 token。
 
 确需联合的批次 SHALL 明确列出全部边界、workflow/consumer scope、资格、报告、授权范围及回退协议。单边界动作不兼容时 SHALL 拒绝，SHALL NOT 隐式扩大授权。联合动作 SHALL 以事务或冻结后可恢复协议协调全部权威状态，在提交时重验前置条件；故障后 SHALL NOT 暴露可执行的不兼容半迁移状态。控制表、发布覆盖层与 owner/schedule 生效状态的权威及恢复方式 SHALL 明确。回退 SHALL 遵守同一范围与协调协议。
-
-#### Scenario: 独立读请求需要联合调度
-
-- **WHEN** 具体 workflow/scope 的独立读请求违反兼容矩阵，且未声明联合调度动作
-- **THEN** 系统 SHALL 拒绝并报告需要的联合批次范围
-- **AND** SHALL NOT 自动改变调度边界
 
 #### Scenario: 第一边界写入后崩溃
 
@@ -266,7 +237,7 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 
 ### Requirement: 切流门禁不变量必须由机器校验
 
-系统 SHALL 提供可重复执行的校验，确认边界开关互斥、跨边界组合兼容、读路径资格绑定、受取证文件未被动摇、交易入口单活与回退方式已验证。校验 SHALL 覆盖否定路径（冲突配置、缺资格、双活交易入口、无回退批次、指纹漂移均必须判失败）。校验失败 SHALL 阻断切流操作。
+系统 SHALL 提供可重复执行的校验，确认安全底线：边界开关互斥、必须成对切换的边界组合兼容、禁止券商写、交易入口单活、调度单一负责人，以及回退方式已验证。校验 SHALL 覆盖否定路径（冲突配置、双活交易入口、无回退批次均必须判失败）。入口证据包、兼容性证明文件与绑定请求哈希的精确授权 SHALL NOT 作为切流前置。校验失败 SHALL 阻断切流操作。
 
 #### Scenario: 校验捕获双活交易入口
 
@@ -274,37 +245,8 @@ analyst output、approval lifecycle 与 Clerk publication 三条边界 SHALL 分
 - **THEN** 校验 SHALL 失败并指出两个入口标识
 - **AND** 该失败 SHALL 阻断该边界的切流操作
 
-#### Scenario: 校验捕获指纹漂移
-
-- **WHEN** 校验发现受指纹约束的文件已相对取证时点发生变更
-- **THEN** 校验 SHALL 失败并列出漂移文件
-- **AND** 该失败 SHALL 阻断据旧证据执行的切流
-
 #### Scenario: 校验纳入架构守卫
 
 - **WHEN** 新增绕过切流控制直接改变路由、直接提交真实订单或绕过边界开关写入的代码路径
 - **THEN** 架构守卫 SHALL 判失败并指出该路径
 - **AND** 该路径 SHALL NOT 通过人工豁免长期保留，豁免必须声明收敛阶段
-
-### Requirement: 持久部署许可与每次运行时间必须分离
-
-系统 SHALL 支持上线明确批准一次、在批准范围内持续运行直到主动停用/撤销的持久部署许可，SHALL NOT 因数据查询窗口推进或日常运行要求人工续批。许可 SHALL 固定 workflow、domain/consumer/contract、用途、精确实体、边界及明确 Event 规则；稳定部署 scope SHALL 与当次资格/输入/报告 scope 显式关联，SHALL NOT 通过近似匹配、全局 target 或远期 end 模拟长期许可。每次调用 SHALL 独立记录 as_of、数据查询窗口、实际 Event/version、source/query 时间、hash/run/generation，并重验当前许可、资格/TTL、报告、配置、输入有效性、停止状态与 worker 代次。无绑定、歧义、范围逃逸 SHALL 拒绝；扩大许可范围 SHALL 另行明确批准。历史有限授权 SHALL NOT 自动转为持久许可。
-
-#### Scenario: 数据窗口推进而许可持续有效
-- **WHEN** 同一批准范围连续多个 tick 或跨日运行，数据查询窗口推进，且各次当前门禁通过
-- **THEN** 系统 SHALL 使用同一持久部署许可和各自运行时点/输入记录
-- **AND** SHALL NOT 要求逐 tick 或逐日人工部署续批
-
-#### Scenario: 许可仍在但输入证据失效
-- **WHEN** 持久许可未撤销，但资格/报告/实际输入过期、撤销或缺失
-- **THEN** 系统 SHALL 阻断受影响范围，SHALL NOT 以持久批准豁免当前门禁
-- **AND** SHALL NOT 因证据失效删除该部署批准或在刷新证据后自动解除持久停止
-
-#### Scenario: 主动停用后仍有旧 worker
-- **WHEN** 用户主动停用/撤销范围，而旧 worker 尝试继续读取或发布，或重新绑定
-- **THEN** 系统 SHALL 在实际入口拒绝并保留原始代次，SHALL NOT 借重新绑定恢复权限
-
-#### Scenario: 一次性动作凭据到期
-- **WHEN** 已明确批准持续运行，但用于当次部署动作的凭据随后到期
-- **THEN** 系统 SHALL 独立查询持久运行许可，SHALL NOT 仅因动作凭据到期要求再次上线批准
-- **AND** 未明确签发持久许可的历史有限授权 SHALL 继续保持原期限和范围

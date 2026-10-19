@@ -18,6 +18,8 @@
 | 新入口需求失败必须修复并重验 | 保留 | — |
 | 切流必须校验新入口验收报告的适用性 | 修改 | 适用性按消费者/工作流判断，签核依据为可读报告与业务内容；报告不再按「标的×时点」逐一匹配切换 scope |
 
+> 2026-10-19 归档前整理：上表处置「被取代」的要求已从下方 `ADDED Requirements` 中移除（原文保留在本 change 的 git 历史与 `docs/PHASE_F_OPENSPEC_REVISION_DRAFT.md`），处置「修改」的要求已改写为裁决后的写法，主规格因此只承载仍然有效的要求。
+
 ## ADDED Requirements
 
 ### Requirement: 新入口验收必须使用可重放的固定输入
@@ -104,20 +106,20 @@
 
 ### Requirement: 切流必须校验新入口验收报告的适用性
 
-dry-run、CLI 与执行器 SHALL 引用真实新入口验收报告并强制校验：需求版本及 scope 匹配、有效签核未撤销、全部必需断言 passed、输入/实际 run/输出可解析且代码配置指纹适用。空 ID、缺 checker、不可读、failed/untested 必需项 SHALL 拒绝。旧比较报告 SHALL 保留历史类型，不自动转换为新验收报告；有效旧诊断差异 SHALL NOT 构成新验收阻塞。
+dry-run、CLI 与执行器 SHALL 引用真实新入口验收报告并按消费者/工作流校验适用性：需求版本匹配、有效签核未撤销、全部必需断言 passed、输入/实际 run/输出可解析。签核依据 SHALL 为可读报告与业务内容；报告 SHALL NOT 再按「标的×时点」逐一匹配切换 scope。空 ID、缺 checker、不可读、failed/untested 必需项 SHALL 拒绝。旧比较报告 SHALL 保留历史类型，不自动转换为新验收报告；有效旧诊断差异 SHALL NOT 构成新验收阻塞。
 
 #### Scenario: 只有旧比较工具报告
 - **WHEN** 报告只有左右 JSON、matched 数量或旧差异接受记录
 - **THEN** 切流 SHALL 拒绝以其替代新入口实际需求验收
 
 #### Scenario: 报告撤销或版本不符
-- **WHEN** 报告已撤销、需求/scope 不符或实现配置已漂移
+- **WHEN** 报告已撤销、需求版本不符或输入/输出不可解析
 - **THEN** 系统 SHALL 拒绝切流并报告原因
 
 #### Scenario: 缺旧侧但新入口证据齐备
 - **WHEN** 新入口报告各项适用性通过，仅无旧侧比较
 - **THEN** 报告校验 SHALL NOT 因缺旧侧而拒绝
-- **AND** 资格、恢复与部署授权 SHALL 仍独立核验
+- **AND** 消费者健康检查与回退方式 SHALL 仍独立核验
 
 ### Requirement: 影子期必须从进程能力层禁止新路径真实下单
 

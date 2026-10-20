@@ -4,7 +4,7 @@
 - [x] 1.2 增加缺失可选依赖的显式报告：相关模块导入失败时报告模块名与所属分组，而非表现为业务断言失败；验证：在未装入 `schedule` 分组的环境中运行调度相关测试，错误信息指明缺失模块与分组。
 - [x] 1.3 形成一份基线测量记录，包含命令、依赖范围与执行环境条件，并显式记录执行环境对文件删除与临时目录的任何限制及其影响范围；验证：记录三项齐备，且受限项被标注受影响范围。
 - [x] 1.4 在不受删除配额约束的环境中运行一次全量测试，记录 passed / failed / errors 三组计数；验证：该记录可在同环境按记录的命令复现。
-- [x] 1.5 按 1.4 的实测结果回填 `docs/TARGET_WORKFLOW_DATAFLOW.md` §15.1，并说明与原文「111 passed / 11 failed / 8 errors」相差的原因；验证：文档 §15.1 的数字与实测一致且附测量条件。
+- [x] 1.5 按 1.4 的实测结果回填 `docs/ARCHITECTURE.md` §15.1，并说明与原文「111 passed / 11 failed / 8 errors」相差的原因；验证：文档 §15.1 的数字与实测一致且附测量条件。
 - [x] 1.6 提供受限环境下的分批取证方式（按文件分批运行并聚合结果），并要求结果标注该方式的局限；验证：分批聚合结果与全量结果不出现方向性背离，且标注存在。
 - [x] 1.7 确认整库级 setup 中断被归类为单一环境性成因：以守卫中断为输入，验证摘要把它归为环境性失败、给出放大机制说明并标注受影响测试范围，而非呈现为逐项业务失败。
 
@@ -72,7 +72,7 @@
 
 ## 5. 契约定义：TaskProjection envelope（对应 `agent/task-projection`）
 
-- [x] 5.1 新增 `task_projection_envelopes` 表承载目标结构（投影标识、运行标识、角色、作用域、`as_of`、有效期、schema 版本、输入引用、数据 vintage 引用、模型与提示词版本、类型化 payload、内容哈希、状态），仅 additive，且不改 `task_projections` 的既有列；验证：既有 `task_projections` 与 `tests/test_fact_projections.py` 结果不变，且表名与 `docs/TARGET_WORKFLOW_DATAFLOW.md` §12.2 一致。
+- [x] 5.1 新增 `task_projection_envelopes` 表承载目标结构（投影标识、运行标识、角色、作用域、`as_of`、有效期、schema 版本、输入引用、数据 vintage 引用、模型与提示词版本、类型化 payload、内容哈希、状态），仅 additive，且不改 `task_projections` 的既有列；验证：既有 `task_projections` 与 `tests/test_fact_projections.py` 结果不变，且表名与 `docs/ARCHITECTURE.md` §12.2 一致。
       **实现**：`src/ats/memory/store.py` 的 `_SCHEMA` 中 `task_projections` 之后追加 `task_projection_envelopes`（additive，`CREATE TABLE IF NOT EXISTS`），含 `idx_envelope_content`（`agent_role`/`scope_kind`/`scope_id`/`content_hash` 唯一，重试不产生孪生行）、`idx_envelope_lookup`、`idx_envelope_run`。契约代码落在新域 `src/ats/agent/task_projection.py`（依 D1 能力归域）。
       **验证**：`tests/test_task_projection_envelope.py`（29 项全通过）；其中 `test_the_legacy_projection_table_keeps_its_own_columns` 断言 `task_projections` 列集合仍为原始 10 列，`test_the_legacy_projection_table_is_untouched_by_envelope_writes` 断言新写路径对旧表零写入；`tests/test_fact_projections.py` 结果不变（4 passed）。表名与 §12.2、design D2、待退项登记表三处一致。
 
@@ -192,5 +192,5 @@
 - [x] 9.5 运行 `openspec validate "establish-workflow-contracts-and-green-baseline" --strict`；验证：输出 `is valid`。
       **实测**：`Change 'establish-workflow-contracts-and-green-baseline' is valid`。8 个 delta 中 7 个为 ADDED、1 个（`data/data-layer-architecture`）为 ADDED-only，无 MODIFIED，规避了 1.13.0 场景名重命名限制。
 
-- [x] 9.6 核对规划产物间无残留未决分歧：envelope 承载表在 `docs/TARGET_WORKFLOW_DATAFLOW.md` §12.2、`design.md` D2 与待退项登记表三处称法一致（`task_projection_envelopes`），且 `design.md` 的 Open Questions 不含已被裁决关闭的条目；验证：三处逐条比对一致。
+- [x] 9.6 核对规划产物间无残留未决分歧：envelope 承载表在 `docs/ARCHITECTURE.md` §12.2、`design.md` D2 与待退项登记表三处称法一致（`task_projection_envelopes`），且 `design.md` 的 Open Questions 不含已被裁决关闭的条目；验证：三处逐条比对一致。
       **核对**：三处（§12.2 第 767/771/773 行、`design.md` D2 第 56/58/64 行与 D9、待退项登记表第 131 行、`config/workflow/legacy_retirement.yaml` 第 78/81/88/120 行）均为 `task_projection_envelopes`，一致。Open Questions 中「退役登记处物理形态」与「守卫例外清单粒度」两条已在实施中确定（分别为独立登记文件 `config/workflow/legacy_retirement.yaml`、按「模块 + 导入目标」对登记），已从 Open Questions 移入新增的「实施中已关闭的 Open Questions」并附结论与理由；剩余 2 条确属 Phase D/E 待定。

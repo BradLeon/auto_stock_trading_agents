@@ -133,7 +133,7 @@ def prep_fetch(state: PeadState) -> dict:
             log.warning("%s: consensus ignored for %s — %s", state.symbol, state.fiscal_label, note)
         context = governed["industry_context"]
         if state.information_facts:
-            # Fundamental's only declared upstream (TARGET §7.2): the entity's own InformationBrief facts.
+            # Fundamental's only declared upstream (ARCHITECTURE §7.2): the entity's own InformationBrief facts.
             context += "\n\n### 本标的最新信息简报事实（Information Analyst）\n" + "\n".join(
                 f"- {fact}" for fact in state.information_facts[:20])
         return {"fundamentals_text": governed["fundamentals_text"],

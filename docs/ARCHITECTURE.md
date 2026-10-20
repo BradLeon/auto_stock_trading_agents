@@ -1,13 +1,9 @@
-# Workflow 与 Dataflow 目标架构及实施设计
+# Workflow 与 Dataflow 架构
 
-> 文档定位：本文件是 Workflow、Dataflow、Agent 职责和交易审批链的唯一权威设计文档。需求条文以
-> `openspec/specs/` 为准；本文讲设计与现状。
->
-> 状态：目标架构经人工审阅确认（2026-09-21），A–F 六阶段迁移已于 2026-10-19 完成并归档。研究侧已按本文运行，
-> 交易路径尚未切换（见 §14.6）。迁移过程的盘点、计划与旧基线已移至
-> [迁移史](archive/TARGET_WORKFLOW_DATAFLOW_MIGRATION.md)。
+> 本文件是 Workflow、Dataflow、Agent 职责和交易审批链的唯一权威设计文档；需求条文以 `openspec/specs/`
+> 为准。研究侧已按本文运行，交易路径尚未切换（见 §6）。怎么运行和维护见 [`OPERATIONS.md`](OPERATIONS.md)。
 
-## 1. 设计状态、适用范围与核心原则
+## 1. 核心原则
 
 本文固定以下核心约束：
 
@@ -18,11 +14,12 @@
 5. LangGraph checkpoint 只用于运行恢复；Workflow Memory、审批记录和交易账本才是审计真相。
 6. 完整交易流程缺少任何被要求的分析结果时可以产出不完整报告，但必须阻断自动交易。
 
-原始设计中的 Phase 编号被原样保留，因此 Phase 2 暂为空缺。
+下文流程图中的 Phase 0–6 是一次完整流程里的执行阶段（前置研究、专业分析、组合决策、风控、执行、记录）；
+编号沿用最初设计，Phase 2 空缺。
 
 ### 1.1 不可违反的不变式
 
-以下几条来自最初的设计文档（已归档为 [`archive/DESIGN.md`](archive/DESIGN.md)），即使以后重写实现也不能丢：
+即使以后重写实现也不能丢：
 
 1. **写材料的人不能审批自己的材料。** 分析师产出研究，Chief 综合但不能被分析师绕过；Chief 产出决策，
    风控主管与 Boss 审批。角色之间是单向信息流，不互相代理。
@@ -36,7 +33,7 @@
 6. **缺失要显式。** 数据不足时带着"证据不足"的标注继续，不假装数据存在；但完整交易流程所要求的分析缺失时
    必须阻断自动交易（上文第 6 条）。
 
-## 2. 目标 Workflow
+## 2. Workflow
 
 ```mermaid
 flowchart TB
@@ -142,7 +139,7 @@ flowchart TB
     class NOOP,REJECTED terminal;
 ```
 
-## 3. 目标 Dataflow
+## 3. Dataflow
 
 ```mermaid
 flowchart TB
@@ -467,20 +464,16 @@ stateDiagram-v2
 该结构既能成为主理人下一轮的精确输入，也能让书记员和后续复盘区分：是投资判断改变，
 还是订单仅因风险预算被压缩。
 
-### 5.4 与当前实现的映射
-
-切换前 `graph/chief.py` 单次通过结构及演进建议见[迁移史](archive/TARGET_WORKFLOW_DATAFLOW_MIGRATION.md) §5.4。目标 Loop 已实现，生产切换状态见 §14.6。
-
-## 6. 当前实施状态
-
-迁移前「组件 → 处置 → 目标变化」的盘点与九条已确认冲突见[迁移史](archive/TARGET_WORKFLOW_DATAFLOW_MIGRATION.md) §6。迁移完成后的现状：
+## 6. 实施状态
 
 | 范围 | 状态 |
 |---|---|
-| 六个研究分析师（§7.2） | 已按本文契约实现，产出 §7.1 的 Task Projection，由 Dispatcher 调度 |
-| Dispatcher 与事件日历（§8、§13） | 生产运行，见 §14.5 |
-| Chief—Risk—Boss—Trader（§5、§10） | 多轮 Loop、不可变 revision 与审批绑定已实现；**生产上尚未切换**，Chief 只手动运行 |
-| Clerk（§11） | 已实现；生产排程随交易路径切换 |
+| 六个研究分析师（§7.2） | 已按本文契约实现，产出 §7.1 的 Task Projection |
+| 读取 | 六个分析师读数据产品的新路径；数据产品在发布时和每次任务执行前检查，不合格只告警并阻断该任务 |
+| 调度（§8、§13） | 7 个研究工作流由 Dispatcher 常驻进程按时间表与日历事件运行，只跑研究、不进 Chief、不下单；财报日历与 FactSet 月末摄入由数据刷新控制器负责，日历上来源冲突的事件挡住待人工裁决 |
+| Chief—Risk—Boss—Trader（§5、§10） | 多轮 Loop、不可变 revision 与审批绑定已实现；**生产上尚未切换**：Chief 只手动运行，实盘锁定，任一时刻只有一条可执行真实交易的入口 |
+| Clerk（§11） | 已实现；主理人每日决策与 Clerk 每日对账在交易路径切换时由 Dispatcher 排程 |
+| 旧实现 | 按 [`PHASE_F_RETIREMENT_RUNBOOK.md`](PHASE_F_RETIREMENT_RUNBOOK.md) 逐条清零后退出；Chief 对旧表的直读尚未清零 |
 
 ## 7. Agent 详细职责和输入输出契约
 
@@ -526,7 +519,7 @@ TaskProjection
 | Trader | 已通过 Risk 和 Boss 的 approval token | `ExecutionResult` | 不接受未审批的决策或任意文本指令 |
 | Clerk | 决策审计链、券商回报、交易历史 | 账本、绩效、归因、异常项 | LLM 不得生成或修改账本事实 |
 
-### 7.3 目标 payload
+### 7.3 Payload
 
 - `LayerAnalysis`：产业链层级、实体关系、标的横截面排名、共同证据和差异证据。
 - `InformationBrief`：来源文档、事实变化、影响候选、关联实体、置信度、时效和待核验项。
@@ -612,12 +605,8 @@ Information Analyst 处理的是多类信息资产，因此公开角色名不使
 直接调用新闻、研报或公告 Provider。输出必须保留每个结论的文档版本、片段位置、
 事件时间、抽取时间和置信度。
 
-迁移时复用：
-
-- `agents/pead/research.py` 的文章/通讯抽取能力。
-- `agents/pead/triage.py` 的材料性评估。
-- `agents/pead/monitor.py` 中与文档识别相关的逻辑，但移除直接更新 PEAD dossier 的副作用。
-- `runtime/digest.py` 和现有 `intel-brief` 的摘要能力；旧名仅作为迁移期内部标识。
+实现在 `agents/information/`（抽取、材料性评估、文档识别与简报发布契约），角色说明见
+[`agents/INFORMATION_ANALYST.md`](agents/INFORMATION_ANALYST.md)。
 
 ### 9.2 Fundamental 例行模式
 
@@ -638,7 +627,7 @@ Information Analyst 处理的是多类信息资产，因此公开角色名不使
 4. 生成 Surprise Scorecard、指引评估、叙事转变和 `FundamentalEventReview`。
 5. 电话会迟到时可生成新版本，但不覆盖早期版本。
 
-Fundamental 不再读取 Sector 或 Macro 报告，也不再调用最终组合 pre-trade check。
+Fundamental 不读取 Sector 或 Macro 报告，也不调用最终组合 pre-trade check。
 上下游信号必须以共享事实或 Data Product 形式输入，不能通过另一个分析师的观点绕过依赖约束。
 
 ## 10. Chief—Risk—Boss—Trader 审批链
@@ -689,13 +678,12 @@ ExecutionAuthorization
 
 Trader 的 client order ID 由 cycle、revision 和订单序号稳定生成。同一授权和订单序号不得重复提交。
 
-#### Phase F 方案 A：受治理执行报价（2026-10-08）
+#### 执行报价
 
 Risk/Trader 使用 `target-dataflow-v2` 契约，经 `ats.data.consumer_api.read_input` 读取
 `MARKET_DATA(kind=execution_price)`；它不开放研究历史、期权或任意标的查询。
 `ats.data.execution_prices.price_request` 绑定本次 cycle、实体、业务 scope、USD 和用途；
 用途只有 `preapproval_normalization` 与 `approved_execution_check`，执行用途须与已批准修订逐字段一致。
-生产每次读取仍验证 exact-scope 资格；隔离候选读取不授予生产资格或券商写能力。
 
 规范化先完成股数、金额、限价、类型、TIF 与报价约束，再冻结完整 revision/hash，随后 Risk
 使用同一捕获报价独立通过自身读取门禁，Boss 批准同一修订。报价证据包含来源时点与查询时点、
@@ -707,11 +695,7 @@ Close 生成待常规时段执行的限价，其精度明确为 session_date，�
 执行前及逐笔券商交接前重新检查实时报价、批准的 1% 偏离上限、限价和资金上限；
 只做校验，不修改批准订单。报价失效或超限返回新一轮 Risk/Boss；审批报价与执行报价分别入审计，
 runtime 价格不写入共享事实。十字段授权、账户、grant、代次、冻结和幂等门禁继续生效。
-
-用户已允许完整隔离环境显式选择无网络 FakeBroker，通过实际 Trader 产生非空订单及因果成交回报，
-用于后续 Clerk 验收。生产 C3 保持禁写；IBKR（含 Paper）写入需单独明确授权。
-本次实现与局部回归不代表六分析角色、完整研究快照、Clerk 恢复和生产资格已经验收，见
-[Phase F 当前任务](../openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md)。
+IBKR（含 Paper）写入需单独明确授权。
 
 ## 11. Clerk 与交易账本
 
@@ -722,21 +706,19 @@ Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent�
 
 - 记录 research snapshot、decision revision、Risk 审查、Boss 审批和每次状态转换。
 - 读取券商订单、部分成交、完全成交、撤单、拒单、持仓和资金。
-- 复用现有 reconcile、marks、performance、episodes、predictions 和 attribution。
+- 编排 reconcile、marks、performance、episodes、predictions 和 attribution。
 - 区分系统订单、人工订单和无法归因订单；无法归因不等于忽略。
 - 对迟到成交、部分成交和漏跑日期进行可重放补偿。
 - 将交易历史、绩效和归因发布为 Internal State API，供下一轮 Chief、Risk 和 Clerk 读取。
 
-> **实施载体（Phase C，2026-09-23）**：编排入口 `execution/clerk.py`；审计异常 /
-> 运行留痕 / 派生读模型分别为 `ledger_exceptions` / `clerk_runs` /
-> `ledger_read_models` 三表（Workflow memory 归属）；归属三类与决策链字段落在
-> `trades` / `fills`（`origin`、`link_confidence`、`revision_no`、`decision_hash`、
-> `approval_id` 等，可空）；重建与发布见 `execution/rebuild.py` 与
-> `execution/state_api.py`；LLM 白名单见 `execution/llm_boundary.py`。
+实现位置：编排入口 `execution/clerk.py`；审计异常、运行留痕、派生读模型分别为 `ledger_exceptions`、
+`clerk_runs`、`ledger_read_models` 三表（Workflow Memory 归属）；归属三类与决策链字段落在 `trades` / `fills`
+（`origin`、`link_confidence`、`revision_no`、`decision_hash`、`approval_id` 等，可空）；重建与发布见
+`execution/rebuild.py` 与 `execution/state_api.py`；LLM 白名单见 `execution/llm_boundary.py`。
 
 ### 11.2 LLM 边界
 
-现有 critic 可用于低频复盘叙事，但它的输出是附加分析，不是 order、fill、position、PnL
+Critic 可用于低频复盘叙事，但它的输出是附加分析，不是 order、fill、position、PnL
 或 attribution 的事实来源。LLM 无权回写或覆盖券商和确定性计算结果。
 
 ## 12. 数据边界、Workflow Memory 与持久化模型
@@ -758,15 +740,9 @@ Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent�
 | `task_projection_envelopes` | 统一 envelope、类型化 payload、输入引用和 content hash |
 | `trigger_runs` | 手动、定时和事件触发的幂等记录 |
 
-现有 `pead_dossier`、`sector_reviews`、`macro_reviews` 等表在迁移期保留为兼容读模型。
-新流程以 `task_projection_envelopes` 为通用引用层，不要求在第一阶段破坏所有旧报表和 CLI。
-
-> 已裁决（2026-09-22）：统一 envelope 由**新建的独立表** `task_projection_envelopes` 承载，
-> **不复用**既有 `task_projections` 同名表。理由是既有表的键语义（`profile` / `target_type` /
-> `target_id` / `input_kind` / `input_ref`）服务于证据事实投影，与目标 envelope 的
-> `agent_role` / `scope` / `data_vintage_refs` / `content_hash` 并非同一抽象；原地改列会让既有
-> 查询与测试同时失效。既有 `task_projections` 保留为兼容读模型，其旧列的退出登记见 Phase A
-> change 的待退项登记表，退出条件为「读取方全部切换到新表且旧表零写入」。
+`task_projection_envelopes` 是所有分析产出的通用引用层，与 `task_projections`（证据事实投影的旧表，
+键语义不同）是两张表。`pead_dossier`、`sector_reviews`、`macro_reviews`、`task_projections` 保留为兼容读模型，
+在读取方清零后按退役登记退出。
 
 ### 12.3 决策与交易审计
 
@@ -778,41 +754,36 @@ Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent�
 | `boss_approvals` | revision hash、决定、审批人、时间和备注 |
 | `cycle_events` | 追加式状态转换、actor、幂等键、错误和恢复信息 |
 
-现有 `orders` 和 `fills` 增加可空的 `cycle_id`、`revision_no`、`decision_hash` 和
-`approval_id` 关联字段。现有用于组合快照的 `risk_reviews` 保留，不与新的
-`decision_risk_reviews` 混用。
+订单由 `trades` 表承担（上文 `orders` 是设计层称谓），它与 `fills` 带可空的 `cycle_id`、`revision_no`、
+`decision_hash` 和 `approval_id` 关联字段；订单标识由 `cycle + revision + 订单序号` 派生（`client_order_id` /
+`order_ref`）。组合快照用的 `risk_reviews` 与交易审查用的 `decision_risk_reviews` 是两张表，不混用。
 
-> **实现注记（Phase B）**：本仓库以 `trades` 表承担上述「订单」职责（`orders` 仅为
-> 设计层称谓），故关联字段落在 `trades` 与 `fills` 两表上；订单标识由
-> `cycle + revision + 订单序号` 派生（`client_order_id` / `order_ref`）。
+### 12.4 存储演进与退役原则
 
-### 12.4 迁移原则
-
-- 所有 schema 变更首先使用 additive migration，不删除旧表或旧列。
+- schema 变更使用 additive migration，不删除旧表或旧列。
 - 只对能可靠映射的历史决策创建 legacy revision。
 - 无法还原原始提案、输入快照或 hash 的历史数据标记为 `legacy_unknown`，不伪造审计字段。
-- 在新写路径稳定前保留旧读入口，并使用读模型或双写适配层过渡。
+- 新写路径稳定前保留旧读入口，用读模型或双写适配层过渡。
 - **旧实现的退出必须经墓碑登记**：在登记处留下墓碑（含替代实现、目标相位与退出条件）；
   同一标识不得同时存在于「在用」与「已退役」，两处并存即配置加载失败；读取命中墓碑须
   fail-closed 返回显式退役原因码，不得静默回退到替代实现；物理清除默认只读干跑，须显式确认
   才执行，并记录动作、范围与备注。该模式已在结构化来源上验证（`retired_sources` 墓碑 +
   `purge-source` 两段式清除），Workflow 侧沿用同一模式，不另立标准。
-- **兼容迁移保护的是旧读入口**。已被边界归类判定为数据层所有的表不适用「保留旧表」原则——
-  它们的失效是边界决策的结果，正确处置是补齐另一侧的归属（见 §3 与 §7.1），而不是恢复旧表。
-  迁移若确需分阶段完成，未迁移的一侧必须被显式登记，不得以静默方式继续写入旧存储。
-- **每个阶段必须登记其待退旧实现**，逐项写明替代实现、退出条件与依赖消费方清零的判据；
-  条件未满足者标注「待退」并说明所缺条件，不得省略登记。
+- **兼容保护的是旧读入口**。已判定为数据层所有的表不适用「保留旧表」原则，正确处置是补齐另一侧的归属
+  （见 §3 与 §7.1），而不是恢复旧表；未迁移的一侧必须显式登记，不得静默继续写入旧存储。
+- **每次替换都要登记待退的旧实现**，逐项写明替代实现、退出条件与消费方清零的判据；条件未满足者标注
+  「待退」并说明所缺条件。
 
 ## 13. 自动事件日历
 
-### 13.1 首期范围
+### 13.1 范围
 
 - 公司财报日期及 BMO/AMC/盘中窗口。
 - FOMC 会议、决议和发布会。
 - CPI、PCE、NFP、GDP 等核心宏观发布。
 - 人工创建的公司、行业或系统事件。
 
-`config/events.yaml` 保留为人工覆盖和自定义事件层，不再作为可自动发现事件的主数据源。
+`config/events.yaml` 是人工覆盖和自定义事件层，不是可自动发现事件的主数据源。
 
 ### 13.2 `schedule_events`
 
@@ -846,42 +817,17 @@ event_id + event_version + workflow_id
 事件日历只决定何时调度哪个 Workflow，不向 Agent 注入研究结论。休市、进程休眠、misfire
 和重启后的补偿策略必须由 trigger ledger 可观测，不能只存在调度器内存中。
 
-## 14. 分阶段迁移方案
+## 14. 迁移记录
 
-迁移按 A–F 六个阶段实施，**均已完成并归档**（`openspec/changes/archive/`）。各阶段的原计划、
-落地载体与实施状态全文见[迁移史](archive/TARGET_WORKFLOW_DATAFLOW_MIGRATION.md) §14。下表只给结论。
-
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| 14.1 A | 稳定基线与契约 | 完成 |
-| 14.2 B | 决策审计与交易安全（revision、风控审查、Boss 审批绑定） | 完成 |
-| 14.3 C | Clerk 与交易账本 | 完成 |
-| 14.4 D | 分析师职责重构（Layer/Sector 拆分、Information 独立、Fundamental 双模式、Chief 只读投影） | 完成 |
-| 14.5 E | Dispatcher、Trigger Ledger 与事件日历 | 完成 |
-| 14.6 F | 影子运行与切流 | 研究侧完成；交易路径未切 |
-
-### 14.5 阶段 E：Dispatcher 与事件日历
-
-Dispatcher、Trigger Ledger、任务级 SQLite 连接与版本化 `schedule_events` 已在生产运行。财报日历由
-数据刷新控制器的 `calendar_*` 任务刷新；两个来源冲突的事件会被挡住等待人工裁决（`ats events override`）。
-
-### 14.6 阶段 F：影子运行与切流
-
-- **读取**：Information、Fundamental、Layer、Macro、Sector、Technical 六个消费者按消费者整体读新路径，
-  读路由固定在新路径；数据产品在发布时和每次任务执行前检查，不合格只告警并阻断该任务，不再切回旧路径。
-- **调度**：7 个研究工作流的负责人是 Dispatcher，由常驻进程 `com.ats.phase-e` 驱动，只跑研究、不进 Chief、不下单。
-  旧调度器 `com.ats.schedule` 已退役，它承担过的数据任务（FactSet 月末摄入、财报日历刷新）已移入数据刷新控制器。
-- **交易 / 审批 / 记账 / Chief**：**未切换**。Chief 对旧表的直读尚未清零，主理人决策周期与 Clerk 每日对账
-  没有排程，实盘锁定；任一时刻只有一条可执行真实交易的入口。
-- **旧实现退役**：按 [`PHASE_F_RETIREMENT_RUNBOOK.md`](PHASE_F_RETIREMENT_RUNBOOK.md) 逐条清零后退出。
+A–F 六阶段迁移（2026-09 至 2026-10）已完成并归档在 `openspec/changes/archive/`；原计划、各阶段落地载体与
+当时的差距盘点见[迁移史](archive/ARCHITECTURE_MIGRATION.md)。
 
 ## 15. 可靠性测试与验收标准
 
-### 15.1 当前基线
+### 15.1 测试基线
 
 测试的唯一入口、权威测量数字与「环境性失败 vs 业务回归」的判据记在
 [`docs/TEST_BASELINE.md`](TEST_BASELINE.md)；引用任何基线数字时必须连同那里的测量条件一起读。
-2026-09-22 迁移开始前的基线与失败归因见[迁移史](archive/TARGET_WORKFLOW_DATAFLOW_MIGRATION.md) §15.1。
 
 ### 15.2 Chief—Risk—Boss—Trader
 
@@ -909,11 +855,11 @@ Dispatcher、Trigger Ledger、任务级 SQLite 连接与版本化 `schedule_even
 - Clerk 对部分成交、迟到成交、撤单、拒单、人工订单、无法归因订单和进程重启的处理。
 - 绩效和归因可从不可变原始记录重建，重建不改变原始事实。
 
-### 15.5 上线门禁
+### 15.5 交易路径上线门禁
 
-1. 现有核心测试在固定的完整测试依赖下全绿。
-2. 新增的状态机、幂等、依赖隔离、Calendar 和 Clerk 测试全绿。
-3. 新流程完成影子运行，期间无未审批真实下单。
+1. 核心测试在固定的完整测试依赖下全绿。
+2. 状态机、幂等、依赖隔离、Calendar 和 Clerk 测试全绿。
+3. 影子运行期间无未审批真实下单。
 4. 所有影子订单都能追溯到研究快照、revision、Risk 和 Boss 批准。
 5. 回滚步骤已演练，并且任何时刻只有一条可执行真实交易的入口。
 
@@ -922,12 +868,11 @@ Dispatcher、Trigger Ledger、任务级 SQLite 连接与版本化 `schedule_even
 1. 角色公开名称为 `Information Analyst / 信息分析师`，代码标识使用 `information-analyst`。
 2. Layer Analyst 与 Sector Analyst 严格拆分；配置权属于 Sector Analyst。
 3. Clerk 是确定性服务；LLM 只能产生不影响账本的附加复盘。
-4. 迁移采用分阶段兼容方式，不一次性破坏旧表、CLI 和报表。
+4. 存储与入口的替换采用兼容方式（§12.4），不一次性破坏旧表、CLI 和报表。
 5. Boss 只能批准或拒绝；修改意见必须由 Chief 生成新 revision 并重新风控。
 6. 事件日历首期覆盖财报、FOMC、CPI、PCE、NFP、GDP 和人工自定义事件。
 7. 完整流程中任一被要求的分析失败、缺失或过期时，必须阻断自动交易。
 8. Chief—Risk 自动修订默认最多 3 轮，超过后进入 `manual_review`。
 9. 执行前市场或账户快照默认超过 60 秒即失效，需重新风控和重新人工批准。
 10. 普通分析 Workflow 由 Dispatcher 编排；LangGraph 用于 PEAD 事件流和 Chief 审批链。
-11. 原有四张 Mermaid 图是本文档的正式目标架构图，不在实施章节中用另一套图替换。
-12. 本次设计和文档实施不使用 OpenSpec。
+11. 本文四张 Mermaid 图是正式架构图，不在其他章节用另一套图替换。

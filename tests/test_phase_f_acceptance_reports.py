@@ -416,4 +416,4 @@ def test_registering_a_test_does_not_change_the_bound_configuration(tmp_path):
     (root / "settings.yaml").write_text("llm: {max_tokens: 8192}\n")
     assert reports._config(matrix) != bound
     assert not reports.config_is_bound("workflow/freeze_surface.yaml")
-    assert reports.config_is_bound("workflow/phase_e_schedules.yaml") and reports.config_is_bound("settings.yaml")
+    assert reports.config_is_bound("workflow/research_schedules.yaml") and reports.config_is_bound("settings.yaml")

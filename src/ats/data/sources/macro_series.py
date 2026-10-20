@@ -1,7 +1,7 @@
 """US macro indicator histories (FRED + market closes + CNN fear & greed) as governed observations.
 
 Until 2026-10-16 the Macro review pulled these from the providers while it ran (`data/macro.py`
-`fetch()` / `fetch_series()`), which broke TARGET §3/§12.1 (indicators are persisted structured
+`fetch()` / `fetch_series()`), which broke ARCHITECTURE §3/§12.1 (indicators are persisted structured
 data; an Agent must not call a Provider) and left nothing to say which vintage a review used.
 The refresh controller now runs this adapter on a schedule, every point lands as an immutable
 observation under entity `US_MACRO`, and the review reads `products.macro_series`.

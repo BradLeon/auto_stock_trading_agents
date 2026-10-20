@@ -6,7 +6,7 @@
 > |---|---|
 > | 职责 | **独占**行业 / 层 / 标的三级配置权（超配、标配、低配、清仓与预算）。层级状态判断与层内排名已拆给[层次分析师](LAYER_ANALYST.md)，本角色读它的 `layer_analysis` 投影 |
 > | 读什么 | 共享的行业事实与 `layer_analysis` 投影 |
-> | 不读什么 | 信息、基本面、宏观、技术面的观点（TARGET §7.2） |
+> | 不读什么 | 信息、基本面、宏观、技术面的观点（ARCHITECTURE §7.2） |
 > | 产出 | `sector_allocation` 投影（`SectorAllocation`，每层 `LayerAllocation`：状态、配置、预算、信心、引用的层级投影、缺口） |
 > | 谁读它 | 只有 Chief。下文「注回 PEAD prep/monitor」「PEAD 标的额外读活体档案」描述的是切换前的行为，基本面分析师现在不读行业结论 |
 > | 什么时候跑 | 每周六 09:30（台北时间），Dispatcher 调度，先自动补跑层次分析 |

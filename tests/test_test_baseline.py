@@ -163,7 +163,7 @@ def test_the_design_document_points_at_the_baseline_record():
     """Scenario: 文档数字与实测不一致 — the cited numbers must have a place to be
     re-measured from, and that place must be reachable from the design document."""
     baseline_doc = REPO_ROOT / "docs" / "TEST_BASELINE.md"
-    design_doc = REPO_ROOT / "docs" / "TARGET_WORKFLOW_DATAFLOW.md"
+    design_doc = REPO_ROOT / "docs" / "ARCHITECTURE.md"
     assert baseline_doc.exists()
     design = design_doc.read_text(encoding="utf-8")
     assert "docs/TEST_BASELINE.md" in design

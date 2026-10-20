@@ -1,4 +1,4 @@
-"""TARGET §7.3 projection enrichment (2026-10-17): additive fields, hash stability, and what each role now carries."""
+"""ARCHITECTURE §7.3 projection enrichment (2026-10-17): additive fields, hash stability, and what each role now carries."""
 from __future__ import annotations
 
 import json

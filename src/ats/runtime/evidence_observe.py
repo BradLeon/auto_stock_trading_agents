@@ -2,7 +2,7 @@
 
 Why this lives here (2026-10-16): extraction used to be a side effect of the PEAD score
 window in the legacy scheduler (`scheduler._observe_window`). When the user turned that
-window off, nothing else collected evidence and 9–10 月 left no facts at all. TARGET §3 has
+window off, nothing else collected evidence and 9–10 月 left no facts at all. ARCHITECTURE §3 has
 the data platform collect on its own cadence, so the controller now schedules this per
 entity (`config/data/schedules.yaml` -> `derived.jobs.chain_evidence_daily`) and the
 legacy window calls the same function.

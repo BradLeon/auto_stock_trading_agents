@@ -93,9 +93,9 @@
 
 | 文档 | 动作 |
 |---|---|
-| `docs/TARGET_WORKFLOW_DATAFLOW.md` | §14.5 补 Phase E 实施状态（含**生产日历库目前是空的**，事件路径从未被真实日历事件触发）；§14.6 补 Phase F 实施状态（读取 6 个消费者、调度 7 个工作流、交易/审批/记账未切、实盘锁定、有限 Routine 签核不是 §9.2 完整达标） |
+| `docs/ARCHITECTURE.md` | §14.5 补 Phase E 实施状态（含**生产日历库目前是空的**，事件路径从未被真实日历事件触发）；§14.6 补 Phase F 实施状态（读取 6 个消费者、调度 7 个工作流、交易/审批/记账未切、实盘锁定、有限 Routine 签核不是 §9.2 完整达标） |
 | `docs/archive/PHASE_F_OPERATIONS.md` | 文首加说明：逐 scope 资格、入口证据包、精确授权等做法已被 10-15 裁决取代，当前口径以最终验收记录和退役 runbook 为准 |
-| 一致性核对 | 执行前快照默认 60 秒失效（`config/risk.yaml`、`config.py`、TARGET §10/§15 一致）；Chief—Risk 默认最多 3 轮（TARGET 多处一致）；单一实盘入口（TARGET §14.6/§15.5 与实盘锁定状态一致） |
+| 一致性核对 | 执行前快照默认 60 秒失效（`config/risk.yaml`、`config.py`、ARCHITECTURE §10/§15 一致）；Chief—Risk 默认最多 3 轮（TARGET 多处一致）；单一实盘入口（ARCHITECTURE §14.6/§15.5 与实盘锁定状态一致） |
 
 ## 六、需要你知道的
 

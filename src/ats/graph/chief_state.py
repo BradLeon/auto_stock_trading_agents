@@ -54,7 +54,7 @@ class ChiefDecisionState(BaseModel):
     normalization_errors: list[str] = Field(default_factory=list)
     execution_price_audit: list[dict] = Field(default_factory=list)
 
-    # decision-audit loop (Phase B, §5.4). `decisions` stays this round's FULL
+    # decision-audit loop (Phase B, ARCHITECTURE §5.2–5.3). `decisions` stays this round's FULL
     # proposal; `approved_decisions` is what the review let through and what the
     # approval card / trader see.
     research_snapshot: dict = Field(default_factory=dict)   # §10.1 frozen inputs
@@ -63,7 +63,7 @@ class ChiefDecisionState(BaseModel):
     revision_hash: str = ""                                 # content hash of that revision
     parent_revision_no: int | None = None                   # revised from (chief_revise)
     risk_round: int = 0                                     # 1-based once risk_gate ran
-    max_risk_rounds: int = 3                                # bounded auto-revision (§5.4)
+    max_risk_rounds: int = 3                                # bounded auto-revision (ARCHITECTURE §5.2)
     risk_review: DecisionRiskReview | None = None           # latest deterministic review
     approved_decisions: list[TradeDecision] = Field(default_factory=list)
     portfolio_snapshot_id: str = ""                         # review binding (§10.2)

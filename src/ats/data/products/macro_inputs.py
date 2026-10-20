@@ -5,7 +5,7 @@ Provider 模块（factset / regional / websearch）不再是 agents 的合法导
 这一层才是稳定契约，底层取数可以换实现而不动评审代码。
 
 主题新闻只读数据平台已准入的文档（`data/collection/macro_news.py` 按刷新控制器的
-日程采集），评审过程中不再检索外部（2026-10-16，TARGET §12.1）。
+日程采集），评审过程中不再检索外部（2026-10-16，ARCHITECTURE §12.1）。
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def admitted_news(theme_key: str, *, days: int = 21, limit: int = 8, now=None, r
 # --------------------------------------------------------------------------- #
 # One read-only pass over the four stored inputs of the review. The consumer health check judges it
 # and the Dispatcher turns it into a data-vintage reference (so an unchanged input set is reused,
-# TARGET §8.2-5). It reads only through `products`, never calls a provider and never writes: the
+# ARCHITECTURE §8.2-5). It reads only through `products`, never calls a provider and never writes: the
 # regional derivations (`RegionalProducts.snapshot`) register a derivation row, so levels are read
 # straight from `metric_series` here instead.
 def stored_input_state(products, *, as_of=None, news_days: int | None = None, themes=None) -> dict:

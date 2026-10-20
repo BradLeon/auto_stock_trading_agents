@@ -1,6 +1,6 @@
 # 10.5 第二批：Macro 切换结果（2026-10-17）
 
-> 范围：只做 Macro（工作流 `macro-review`，消费者 `macro`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md` 与 `docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`，照搬 Technical 的路径。未提交任何代码；未启用 `phase_e_schedules` 节奏、未加载常驻 `schedule --phase-e`、未启用任何数据任务；未改投影 schema；未碰 Layer/Sector、PEAD、ibkr_news、交易/审批路径。
+> 范围：只做 Macro（工作流 `macro-review`，消费者 `macro`）。依据 `docs/ARCHITECTURE.md` 与 `docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`，照搬 Technical 的路径。未提交任何代码；未启用 `phase_e_schedules` 节奏、未加载常驻 `schedule`、未启用任何数据任务；未改投影 schema；未碰 Layer/Sector、PEAD、ibkr_news、交易/审批路径。
 
 ## 一句话结论
 
@@ -12,7 +12,7 @@ Macro 读路由已切到 target 并保持在 target；一次真实评审（DeepS
 |---|---|---|
 | 健康检查 `macro` | `src/ats/workflow/consumer_health.py`（`_macro`，登记进 `CHECKS`） | 只读：不调模型、不经 `get_store()`、不调任何 provider。读取评审实际读的四类已存数据并判定 |
 | 已存输入读取器 | `src/ats/data/products/macro_inputs.py`（`stored_input_state`、`input_vintage_refs`） | 健康检查与数据版本共用同一次只读读取；区域数据直接读 `metric_series`，因为 `RegionalProducts.snapshot` 会登记派生行（写库），只读连接下会报错 |
-| 数据版本 | `src/ats/workflow/dispatcher.py`（`default_data_vintage` 增加 `macro-review` 分支） | 由已存数据生成引用，**不联网**；输入不变则整批复用（TARGET §8.2-5） |
+| 数据版本 | `src/ats/workflow/dispatcher.py`（`default_data_vintage` 增加 `macro-review` 分支） | 由已存数据生成引用，**不联网**；输入不变则整批复用（ARCHITECTURE §8.2-5） |
 | 新鲜期 | `src/ats/workflow/phase_e.py` | **未改**，保持 `macro-review` 7 天（理由见第三节） |
 | 切回演练探针 | `tmp/phase_f_first_run_20261016/rollback_drill.py` | 增加 `_probe_macro` 与 macro 的批准原文 |
 | 测试 | `tests/test_macro_cutover.py`（新，19 项） | 健康检查的失败/警告边界、读取器、数据版本、复用判定、`macro-review` 调度切换 |
@@ -45,7 +45,7 @@ Macro 读路由已切到 target 并保持在 target；一次真实评审（DeepS
 
 `FRESHNESS_SECONDS['macro-review']` 保持 **7 天**，没有改。理由：
 
-1. Macro 是周度评审（`phase_e_schedules.yaml` 周六），7 天恰为一个周期；
+1. Macro 是周度评审（`research_schedules.yaml` 周六），7 天恰为一个周期；
 2. 这个数字同时被 Chief 侧的“投影最大年龄”校验使用（`decision_requirements`、`acceptance_matrix`），缩到 6 天会让周六产出的评审在下一个周五就被判过期；
 3. 复用本身还要过数据版本这一关：日频序列每天都有新数据，所以**实际上只有在输入完全没变（重试、同日重复触发）时才会复用**，7 天只是上限，不会让一份陈旧评审被重复使用。
 
@@ -60,7 +60,7 @@ Macro 读路由已切到 target 并保持在 target；一次真实评审（DeepS
 | 2 切读路由 | `ats consumer-cutover switch --consumer-id macro ...`（观察至 2026-10-24） | 代次 1，legacy→target |
 | 3 读路由切回演练 | `rollback_drill.py macro` | target→legacy→target，代次 2 → 3；每步用真实入口装饰器解析路由确认 |
 | 4 调度切换 | `ats dispatch owner-switch --workflow macro-review ...`，批准原文用你指定的那句 | legacy→dispatcher，代次 1→2；日志含健康检查证据 |
-| 5 第一遍（真实评审） | `observe_pass.py pass1`：对 `phase_e_schedules.yaml` 的 macro-review 条目发一次 schedule 触发（不改条目、不启节奏） | 状态 complete；`macro-review` succeeded，尝试 1 次；发布投影 `d6769ec763ed1d7bd0b1b523fff145b6`；**模型请求 1 次**（`macro_strategist` / `MacroReviewLLMView`，提示 56,840 字符，输入 21,217 tokens，输出 3,115 tokens，81 秒，OpenRouter 回传费用 0.0285 美元）；输出**解析成功**：象限 transition，8 个主题、10 条板块倾斜、5 条主要风险、利率路径、证伪条件均有 |
+| 5 第一遍（真实评审） | `observe_pass.py pass1`：对 `research_schedules.yaml` 的 macro-review 条目发一次 schedule 触发（不改条目、不启节奏） | 状态 complete；`macro-review` succeeded，尝试 1 次；发布投影 `d6769ec763ed1d7bd0b1b523fff145b6`；**模型请求 1 次**（`macro_strategist` / `MacroReviewLLMView`，提示 56,840 字符，输入 21,217 tokens，输出 3,115 tokens，81 秒，OpenRouter 回传费用 0.0285 美元）；输出**解析成功**：象限 transition，8 个主题、10 条板块倾斜、5 条主要风险、利率路径、证伪条件均有 |
 | 6 第二遍 | 先确认当时的数据版本与已发布投影的版本引用完全相同，再跑 `observe_pass.py pass2` | **整批复用**：同一投影 id，`reused=true`，**模型请求 0 次，新投影 0 条** |
 | 7 旧入口失权 | `legacy_entry_refused.py`（评审函数换成陷阱，保证失败时不会调模型/写库） | `ScheduleAuthorityError: schedule frozen or caller is not current owner` |
 | 8 调度切回 | `ats dispatch owner-rollback --workflow macro-review ...` | dispatcher→legacy，代次 2→3；无未完成认领，认领均 complete |
@@ -82,7 +82,7 @@ Macro 读路由已切到 target 并保持在 target；一次真实评审（DeepS
 ## 四、发现的问题
 
 1. **Dispatcher 入口不写 Obsidian 周报。** 报告只在 CLI `run_macro_review` 里写（`report.write`）；`_macro_adapter` 只调 `review.run`。评审本身与投影已落库，所以对 Chief 无影响，但切到 Dispatcher 后周度 markdown 报告不会再生成（Technical 的适配器同样 `write_report=False`）。需要你决定：适配器补写报告，还是接受由 CLI 另行生成。
-2. **投影的 `regime` 与叙述不一致（既有设计，非本次引入）。** 投影里的 regime 由象限映射（本次象限 transition → `transition`），而评审正文的 regime 文字是 “risk-off｜周期位置为 transition…”。Chief 读到的结构化字段与叙述方向可能不同。这属于 TARGET §7.3 投影变薄的同一类问题（待你决定是否补齐）。
+2. **投影的 `regime` 与叙述不一致（既有设计，非本次引入）。** 投影里的 regime 由象限映射（本次象限 transition → `transition`），而评审正文的 regime 文字是 “risk-off｜周期位置为 transition…”。Chief 读到的结构化字段与叙述方向可能不同。这属于 ARCHITECTURE §7.3 投影变薄的同一类问题（待你决定是否补齐）。
 3. **模型返回了配置里不存在的主题键 `monetary_policy`**（配置键为 `fed_policy`），该主题被丢弃（日志 `dropped unknown theme key`）。同时 `fed_policy` 主题近 21 天没有已准入新闻。评审里“货币政策”主题因此缺位，只剩利率路径文字。建议后续核对主题键提示或补该主题的新闻采集（上次采集时 8 条结果全部因超出 21 天窗口被丢）。
 4. **`factset_earnings_assessment` 为空**：FactSet 材料已读到（上下文含该材料），但模型这次没有返回该可选结构，存档里为 `None`。DeepSeek 对大型嵌套可选字段的遵从度没有验证过，观察后续几期。
 5. **数据覆盖缺口（警告项，非本次引入）**：台湾/韩国区域出口只到 2026-08（9 月数据已发布但未入库）；FactSet 指数报告停在 2026-09-25（周更漏了两期）。这两项都属于数据采集侧。
@@ -99,15 +99,15 @@ Macro 读路由已切到 target 并保持在 target；一次真实评审（DeepS
 |---|---|
 | Macro 读路由 | **target**（代次 3；观察至 2026-10-24，停止条件见切换日志） |
 | `macro-review` 调度负责人 | **legacy**（模板行代次 3，范围行 legacy；无未完成认领） |
-| 常驻 `schedule --phase-e` | 未加载；`com.ats.schedule` 不存在 |
-| `phase_e_schedules.yaml` 的 `macro-review` | 仍是 `enabled: false`（未动） |
+| 常驻 `schedule` | 未加载；`com.ats.schedule` 不存在 |
+| `research_schedules.yaml` 的 `macro-review` | 仍是 `enabled: false`（未动） |
 
 macro 读路由现在是 target，因此 `com.ats.consumer-health` 的每日检查会把 macro 纳入；失败时按既定机制自动切回旧读路径并告警。
 
 ## 七、待决/遗留
 
 1. 要不要让 Dispatcher 适配器补写周报（问题 1）。
-2. 若将来要让 Macro 长期由 Dispatcher 执行：除批准常驻进程外，还需把 `phase_e_schedules.yaml` 里 `macro-review` 改为 `enabled: true`（Technical 等已是这样）；这一步我按规则没做。演练时我是直接用该条目的内容手工触发，没有改配置。
+2. 若将来要让 Macro 长期由 Dispatcher 执行：除批准常驻进程外，还需把 `research_schedules.yaml` 里 `macro-review` 改为 `enabled: true`（Technical 等已是这样）；这一步我按规则没做。演练时我是直接用该条目的内容手工触发，没有改配置。
 3. 区域月度与 FactSet 周更的补采（问题 5）、`fed_policy` 主题新闻与主题键（问题 3）。
 4. 投影变薄（问题 2）属于 §7.3 待你裁决的事项，本次未改 schema。
 5. 切换条件文档第 6 节、tasks.md 与记忆目录由你合并，我没有改。

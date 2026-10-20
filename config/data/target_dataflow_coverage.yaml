@@ -1,7 +1,7 @@
 # Target §3-4, §12 coverage declaration. This is NOT verification evidence.
 # A row becomes verified only through a reproducible assurance run.
 schema_version: 1
-target: docs/TARGET_WORKFLOW_DATAFLOW.md
+target: docs/ARCHITECTURE.md
 data_input_contracts:
   HIER_DATA:
     schema_version: target-consumer-input-v1
@@ -475,7 +475,7 @@ qualification_policy:
     - config/workflow/workflow_owners.yaml
     - config/data/schedule_calendar.yaml
     - config/workflow/trigger_policies.yaml
-    - config/workflow/phase_e_schedules.yaml
+    - config/workflow/research_schedules.yaml
     - config/workflow/event_routes.yaml
     - src/ats/data/calendar_refresh.py
     - src/ats/data/stores/schedule_calendar.py

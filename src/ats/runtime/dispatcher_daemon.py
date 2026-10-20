@@ -1,6 +1,6 @@
 """Research dispatcher daemon (`ats schedule`, launchd `com.ats.dispatcher`).
 
-Wakes the research workflows on their schedules (`config/workflow/phase_e_schedules.yaml`)
+Wakes the research workflows on their schedules (`config/workflow/research_schedules.yaml`)
 and on published calendar events, and runs them through the Dispatcher. It never enters
 the Chief decision cycle and never touches the broker.
 
@@ -92,14 +92,14 @@ def start(*, run_once: bool = False) -> None:
 
 def _run_dispatcher(*, run_once: bool = False) -> None:
     """Scheduled and calendar-event wake-ups; workflow ownership is checked per workflow ID."""
-    from ..workflow.ownership import phase_e_schedule_entries, run_owned_workflow
+    from ..workflow.ownership import research_schedule_entries, run_owned_workflow
     from ..workflow.run_contracts import TriggerContext
     from ..workflow.triggers import load_trigger_policies, reconcile_schedule, trigger_key
 
     from ..workflow.ownership import install_product_health_gate
 
     install_product_health_gate()
-    entries = phase_e_schedule_entries()
+    entries = research_schedule_entries()
     policies = load_trigger_policies()
 
     def dispatch_tick(workflow_id: str, entry: dict, planned: datetime) -> None:

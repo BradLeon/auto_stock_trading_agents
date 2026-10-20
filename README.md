@@ -141,7 +141,7 @@ flowchart LR
 读的就是这份日志：样本不够时直接说"样本不足"，不硬编故事。
 
 完整的架构、数据流和每个角色的输入输出契约见
-[`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md)。
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ---
 
@@ -153,11 +153,11 @@ flowchart LR
 | 服务 | 做什么 | 节奏 |
 |---|---|---|
 | `com.ats.data-refresh` | **数据平台**：采集结构化与非结构化数据、刷新财报日历、FactSet 月末摄入、文档准入 | 每小时一次 |
-| `com.ats.phase-e` | **研究调度（Dispatcher）**：按时间表和日历事件运行 7 个研究工作流，产出各分析师的投影；**不进 Chief、不下单** | 常驻 |
+| `com.ats.dispatcher` | **研究调度（Dispatcher）**：按时间表和日历事件运行 7 个研究工作流，产出各分析师的投影；**不进 Chief、不下单** | 常驻 |
 | `com.ats.serve` | 处理飞书审批回调 | 常驻 |
 
 
-研究工作流的节奏（`config/workflow/phase_e_schedules.yaml`）：
+研究工作流的节奏（`config/workflow/research_schedules.yaml`）：
 
 ```mermaid
 flowchart TD
@@ -214,7 +214,7 @@ flowchart TD
 | **某只股票的个性化设置**（上下游、关注的 KPI） | `config/pead/<代码>.yaml` |
 | **产业链分层、要验证的命题** | `config/sectors/ai_hardware.yaml` |
 | **数据采集任务和频率** | `config/data/schedules.yaml`（数据刷新控制器读取） |
-| **研究工作流的时间表** | `config/workflow/phase_e_schedules.yaml` |
+| **研究工作流的时间表** | `config/workflow/research_schedules.yaml` |
 | **日历事件唤醒哪些工作流** | `config/workflow/event_routes.yaml` |
 | **风控限额** | `config/risk.yaml` |
 | **模型与推理配置** | `config/settings.yaml` 的 `llm` 一节 |
@@ -288,9 +288,9 @@ ats trader perf                      # 历史绩效
 - **这台机器需要保持醒着，尤其是财报当晚。** 调度依赖 Mac 在触发时刻不处于
   深度睡眠——虽然系统对"晚醒"设了几个小时的宽限窗口兜底，但最可靠的做法
   还是财报密集期让机器别睡死，或配置好定时唤醒。
-- **改了代码要重启常驻进程才会生效。** `com.ats.phase-e`（`ats schedule --phase-e`）
+- **改了代码要重启常驻进程才会生效。** `com.ats.dispatcher`（`ats schedule`）
   和 `com.ats.serve` 是长驻 Python 进程，启动时把代码加载进了内存，不重启（比如
-  `launchctl kickstart -k gui/$(id -u)/com.ats.phase-e`）它们看不到磁盘上的改动。
+  `launchctl kickstart -k gui/$(id -u)/com.ats.dispatcher`）它们看不到磁盘上的改动。
 - **数据源会降级，但不会让流程崩溃。** 某个行情/基本面/期权数据源连不上时，
   系统会自动跳过或换一个源，但打分质量可能因此打折——如果某只票长期只能拿到
   "降级版"数据（比如新上市不久、覆盖不全的标的），这类分析的可信度要打个
@@ -308,7 +308,7 @@ ats trader perf                      # 历史绩效
 
 | 位置 | 内容 |
 |---|---|
-| [`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md) | Workflow、Dataflow、Agent 契约与审批链的唯一权威设计（需求条文在 `openspec/specs/`） |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Workflow、Dataflow、Agent 契约与审批链的唯一权威设计（需求条文在 `openspec/specs/`） |
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | 常驻服务、每日检查、调度负责人切换与回退、数据刷新、事件日历、首次安装、排障 |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)、[`docs/TEST_BASELINE.md`](docs/TEST_BASELINE.md) | 代码约定、仓库结构、测试入口与基线 |
 | [`docs/agents/`](docs/agents/) | 每个角色一份：[信息](docs/agents/INFORMATION_ANALYST.md)、[基本面/PEAD](docs/agents/FUNDAMENTAL_ANALYST.md)、[层次](docs/agents/LAYER_ANALYST.md)、[行业](docs/agents/SECTOR_ANALYST.md)、[宏观](docs/agents/MACRO_ANALYST.md)、[技术面](docs/agents/TECHNICAL_ANALYST.md)、[风控](docs/agents/RISK_SYSTEM.md) |

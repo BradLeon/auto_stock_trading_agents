@@ -95,7 +95,7 @@
 
 ### Requirement: Data 与目标角色的每条对接关系必须有独立契约
 
-系统 SHALL 按 `docs/TARGET_WORKFLOW_DATAFLOW.md` §4 为 Layer、Information、Sector、Fundamental、Macro、Technical、Chief、Risk、Trader 与 Clerk 的每条数据输入维护独立 consumer contract，包含产品/API owner、schema/version、来源与 as-of/vintage、完整性/缺口语义、允许消费者、fallback、旧入口和验证证据。持久化研究输入 SHALL 只通过 Data Products；实时市场输入 SHALL 只通过 Runtime Data Gateway；组合、交易、绩效、决策与审批状态 SHALL 只通过 Internal State API 或受管决策/执行契约。外部研究文档 SHALL NOT 以 Workflow Memory 或底层表作为正式读取 API。
+系统 SHALL 按 `docs/ARCHITECTURE.md` §4 为 Layer、Information、Sector、Fundamental、Macro、Technical、Chief、Risk、Trader 与 Clerk 的每条数据输入维护独立 consumer contract，包含产品/API owner、schema/version、来源与 as-of/vintage、完整性/缺口语义、允许消费者、fallback、旧入口和验证证据。持久化研究输入 SHALL 只通过 Data Products；实时市场输入 SHALL 只通过 Runtime Data Gateway；组合、交易、绩效、决策与审批状态 SHALL 只通过 Internal State API 或受管决策/执行契约。外部研究文档 SHALL NOT 以 Workflow Memory 或底层表作为正式读取 API。
 
 #### Scenario: Layer 只登记了部分目标输入
 

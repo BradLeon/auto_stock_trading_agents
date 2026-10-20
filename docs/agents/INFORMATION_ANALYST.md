@@ -1,6 +1,6 @@
 # 信息分析师（Information Analyst）
 
-> 契约以 [`TARGET_WORKFLOW_DATAFLOW.md`](../TARGET_WORKFLOW_DATAFLOW.md) §7.2、§9.1 为准；需求条文见
+> 契约以 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §7.2、§9.1 为准；需求条文见
 > `openspec/specs/agent/`。运维命令见 [`OPERATIONS.md`](../OPERATIONS.md)。
 
 ## 它回答什么

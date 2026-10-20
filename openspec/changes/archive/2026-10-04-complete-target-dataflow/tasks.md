@@ -2,7 +2,7 @@
 
 当前验收口径（2026-09-26 用户确认，覆盖下文历史进展中的旧阻塞结论）：`sec_edgar_filing_body` / `sec_filing_documents` 获取或解析失败标记“已接受非阻塞缺口”，正文允许为空，不单独阻塞 2.2.9、2.2.11、2.2.12 的切流判断或 Phase F 消费者资格。来源失败、0 发布、错误与 task/run 引用仍如实保留，不改记采集成功。本例外不涵盖财务报表、电话会、SEC 索引或其他来源；其他验收条件保持不变。历史运行记录不删除；尚未完成的复合任务不能仅因接受 SEC 缺口整体勾选。运行时可选门禁和消费者空值处理尚需 4.6 实施验证，本轮只是规划同步。
 
-- [x] 1.1 将 `docs/TARGET_WORKFLOW_DATAFLOW.md` §3–4、§12 的节点、关键连线和直接消费者整理为版本化覆盖清单，标明 domain、owner、现有实现/配置、旧入口和验收方法。
+- [x] 1.1 将 `docs/ARCHITECTURE.md` §3–4、§12 的节点、关键连线和直接消费者整理为版本化覆盖清单，标明 domain、owner、现有实现/配置、旧入口和验收方法。
 - [x] 1.2 对 Source Catalog、结构化/非结构化采集、raw、准入/quarantine、共享观测/文档/事实、Data Products、Runtime Data Gateway、Schedule Calendar、Internal State API、Workflow Memory 边界逐项核验，记录 `verified | needs_refactor | missing | blocked` 与证据，而非继承历史 change 状态。
 - [x] 1.3 为各结构化、非结构化、runtime、内部状态直接消费者列出读 API、来源版本/as-of、完整性语义、唯一写入或查询 owner、source/consumer 开关、稳定回退路由及旧入口。
 - [x] 1.4 生成可审阅的差距矩阵与影响清单，为每个 `needs_refactor`、`missing`、`blocked` 项指定 owner、受影响消费者、最小修复或阻塞原因。

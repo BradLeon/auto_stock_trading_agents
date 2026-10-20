@@ -1,5 +1,5 @@
 """The Dispatcher's calendar path must honour the operator's paused event triggers
-(`event_triggers` in config/workflow/phase_e_schedules.yaml)."""
+(`event_triggers` in config/workflow/research_schedules.yaml)."""
 from __future__ import annotations
 
 import pytest

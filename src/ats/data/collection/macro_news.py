@@ -1,7 +1,7 @@
 """Macro theme news, collected by the data platform and read back as admitted documents.
 
 Until 2026-10-16 the Macro review ran Tavily searches *during analysis* (`macro_inputs.
-search_news`), which breaks TARGET §12.1 (an Agent must not call a Provider) and left no
+search_news`), which breaks ARCHITECTURE §12.1 (an Agent must not call a Provider) and left no
 record of what the review had actually been shown. The same theme queries (`config/macro.yaml`
 -> `themes[].queries`) now run here, on the refresh controller's schedule; every result that
 passes the gates below becomes an immutable document version under the entity

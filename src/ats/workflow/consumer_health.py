@@ -161,7 +161,7 @@ def _price_history(symbols):
 
 
 def _technical(now: datetime) -> dict[str, Any]:
-    """Runtime price gateway (TARGET §4 MARKET_DATA, not persisted).
+    """Runtime price gateway (ARCHITECTURE §4 MARKET_DATA, not persisted).
 
     Fails only when the whole universe has no usable recent bar, twice in a row within the check
     (one retry after `PRICE_RETRY_SECONDS`); a single symbol without a bar is a warning.

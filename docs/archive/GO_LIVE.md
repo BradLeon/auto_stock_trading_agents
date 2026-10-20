@@ -166,7 +166,7 @@ uv sync --python 3.12 \
 > ⚠️ **不要运行 `ats schedule --live`，也不要加载 `com.ats.schedule`。** 那是已退役的旧调度器，
 > 会让旧级联与新调度同时跑，并打开实盘开关。
 
-研究侧由常驻服务 `com.ats.phase-e`（`ats schedule --phase-e`，不进 Chief、不下单）、
+研究侧由常驻服务 `com.ats.dispatcher`（`ats schedule`，不进 Chief、不下单）、
 `com.ats.data-refresh`、`com.ats.consumer-health` 驱动，安装与操作见
 [`PHASE_F_OPERATIONS.md`](PHASE_F_OPERATIONS.md) 与 [`DEVELOPMENT.md`](../DEVELOPMENT.md) 第 9 节。
 **交易路径（Chief 定时决策 → 风控 → 飞书审批 → 执行）尚未切换到新路径，目前没有定时排程**；
@@ -176,7 +176,7 @@ uv sync --python 3.12 \
 ats chief run --channel feishu_bot   # 默认 dry-run，推飞书审批卡；绝不要加 --yes
 ```
 
-> 常驻进程：**TWS**（或 Gateway）、`com.ats.serve`（审批回调）、`com.ats.phase-e`（研究调度）、
+> 常驻进程：**TWS**（或 Gateway）、`com.ats.serve`（审批回调）、`com.ats.dispatcher`（研究调度）、
 > `com.ats.data-refresh`（数据采集），均由 launchd 守护。
 
 ---

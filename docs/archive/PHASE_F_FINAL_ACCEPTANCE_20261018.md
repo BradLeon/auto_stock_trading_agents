@@ -6,14 +6,14 @@
 
 > 这份记录回答一个问题：**`implement-phase-f-shadow-run-and-cutover` 到今天为止，什么做了、什么没做、什么还需要你决定。** 每一条结论都能追到下方列出的记录；没有执行或还在 pending 的一律不写成完成。
 >
-> 一句话：**研究侧（读取 6 个消费者、调度 7 个工作流）已经切到新路径并在生产上运行；交易、Chief、审批、记账和实盘没有切，也不在本 change 范围；旧实现 27 个登记条目里只有 3 个退出，其余 24 个继续 pending；PEAD 财报前基线（10.6）已用与定时 tick 相同的代码路径手动验证通过（LRCX `[基线 v1]`），但常驻进程的真实定时触发和 LRCX 10-21 的事件评审还没有观察到。** 这是「有限 Routine 签核 + 研究侧上线」，**不是 TARGET §9.2 的完整达标**。
+> 一句话：**研究侧（读取 6 个消费者、调度 7 个工作流）已经切到新路径并在生产上运行；交易、Chief、审批、记账和实盘没有切，也不在本 change 范围；旧实现 27 个登记条目里只有 3 个退出，其余 24 个继续 pending；PEAD 财报前基线（10.6）已用与定时 tick 相同的代码路径手动验证通过（LRCX `[基线 v1]`），但常驻进程的真实定时触发和 LRCX 10-21 的事件评审还没有观察到。** 这是「有限 Routine 签核 + 研究侧上线」，**不是 ARCHITECTURE §9.2 的完整达标**。
 
 ## 一、当前状态一览
 
 | 范围 | 状态 | 依据 |
 |---|---|---|
 | 读取（Information、Fundamental、Layer、Macro、Sector、Technical） | **新路径（target），代次 3**，每日健康检查 6/6 通过 | `ats consumer-cutover status`、`daily-check`（2026-10-18） |
-| 调度（7 个研究工作流） | 负责人 **dispatcher**，常驻进程 `com.ats.phase-e` 已加载（只跑研究、不进 Chief、不下单） | `ats dispatch owner-log`（35 行）、`launchctl` |
+| 调度（7 个研究工作流） | 负责人 **dispatcher**，常驻进程 `com.ats.dispatcher` 已加载（只跑研究、不进 Chief、不下单） | `ats dispatch owner-log`（35 行）、`launchctl` |
 | 交易 / 审批 / 记账 / Chief | **没有切换，不在本 change 范围** | `trades` 表 2026-10-16 以来 0 条；`com.ats.schedule`（带 `--live`）未加载 |
 | 实盘 | **锁定**（见第七节对 `LIVE-X` 的说明） | `ats live gate` 无引用时 `refused / no_live_authorisation` |
 | 旧实现退役 | 27 条登记：**3 退出、24 pending**，没有改登记 | [12.8 记录](PHASE_F_12_8_RETIREMENT_20261018.md) |
@@ -61,7 +61,7 @@
 |---|---|---|
 | **切前**（隔离环境） | 研究读取、调度、交易、审批与记账的安全停止与恢复演练（13.1、13.2、13.3、13.10） | 各项验证记录；生产路由、C3 在这些演练里不变 |
 | **切后**（生产） | 调度：7 个工作流「切到 dispatcher → 旧入口被拒 → 切回 legacy → 再切回」，`owner-log` 共 35 行；读取：7 个消费者 target → legacy → target，经真实读取入口解析 | [12.3 记录](PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md)；演练引用 `owner-log:35-rows;route-drills:7-consumers;window:phase-f-dispatcher-2026-10-17` |
-| 窗口内回退办法 | `ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e` | [退役 runbook](../PHASE_F_RETIREMENT_RUNBOOK.md) |
+| 窗口内回退办法 | `ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.dispatcher` | [退役 runbook](../PHASE_F_RETIREMENT_RUNBOOK.md) |
 
 **实盘与 `LIVE-X`（如实写下）：** 实盘授权库里有一行 2026-10-07 记录的 `LIVE-X`（授权人字段是单字母占位、账户 `U1`、有效期到 2099 年、note 为空）。它的来源至今**没有核实**，10-07 的审计已要求不得把它认定为实盘授权，本次也没有删除或改写。需要说明的是：带这个引用查询 `ats live gate` 会得到 `authorised`——这只说明门的机械检查通过，**实盘路由并没有切换**（`trade_route_state` 0 行），C3 保持停用，`com.ats.schedule` 未加载。这行记录来源不明且能让门放行，**建议你确认来源后决定是否作废**；我没有动它。
 
@@ -88,7 +88,7 @@
 
 此外，这轮执行中用户又给出的裁决（均已在对应记录里）：7 个研究工作流可一起切、不等观察期；证据判读按（模型配置、提示词实现、提示词文本）缓存，不重复请求；费用上限由 API key 一侧控制，应用内不设护栏；SEC 暂不处理；观察窗口 10-18 结束；事件路径只验证 TSM、ASML。
 
-## 十、有限 Routine 签核与 Phase F 之后才补的能力（**不是 TARGET §9.2 完整达标**）
+## 十、有限 Routine 签核与 Phase F 之后才补的能力（**不是 ARCHITECTURE §9.2 完整达标**）
 
 - **已达到：** 四个标的的有限 Routine 报告经你签核；研究侧 7 个工作流在新路径生产运行；读取、调度、数据平台、投影、证据判读缓存、Macro/Layer/Sector/Technical 的投影补齐已落地并有真实运行记录（见 [10.5 各项结果](PHASE_F_10_5_PROJECTION_RESULT.md)）。
 - **2026-10-19 更新：** 父 7.5 要求的完整 Routine 内容（市场隐含预期、整合叙事与变化路径、逐 KPI 变化解释、可证伪条件）已由 Dispatcher 发布的投影携带，并用 TSM、ASML 的 Q3 财报做了财报前、财报后完整报告，见 [7.5 记录](PHASE_F_PARENT_7_5_FUNDAMENTAL_DETAIL_20261019.md)。**仍未验证：** 新例行模式在真实窗口里产出带明细的基线，以及 Chief 读到这些字段后的决策质量；因此签核范围仍是有限的。

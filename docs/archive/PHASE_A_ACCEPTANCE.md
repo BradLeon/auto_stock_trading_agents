@@ -1,7 +1,7 @@
 # Phase A 验收记录（`establish-workflow-contracts-and-green-baseline`）
 
 本文件是 Phase A change 的验收产物，满足验收清单 9.1（基线）与 9.2（需求场景 → 验证方式对照）。
-测量条件的权威说明见 `docs/TEST_BASELINE.md`；目标架构见 `docs/TARGET_WORKFLOW_DATAFLOW.md`。
+测量条件的权威说明见 `docs/TEST_BASELINE.md`；目标架构见 `docs/ARCHITECTURE.md`。
 
 ---
 
@@ -79,7 +79,7 @@
 | 区分后的基线摘要 | 同上的 `render_summary` 断言 + 上文 1.2 的实际摘要 |
 | 多数失败同源 | `test_the_summary_reports_clusters_not_only_totals` |
 | 存在尚未归因的失败 | `test_unattributed_failures_are_listed_rather_than_dropped` + `test_every_cluster_carries_a_criterion` |
-| 文档数字与实测不一致 | `test_the_design_document_points_at_the_baseline_record`（`docs/TARGET_WORKFLOW_DATAFLOW.md` 引用 `docs/TEST_BASELINE.md`） |
+| 文档数字与实测不一致 | `test_the_design_document_points_at_the_baseline_record`（`docs/ARCHITECTURE.md` 引用 `docs/TEST_BASELINE.md`） |
 
 ### `execution/option-survival`
 
@@ -184,6 +184,6 @@
 
 ## 4. 规划产物一致性（9.6）
 
-- envelope 承载表三处称法一致：`docs/TARGET_WORKFLOW_DATAFLOW.md` §12.2（767/771/773/774 行）、`design.md` D2（56/58/64 行）与 D9、待退项登记表（131 行）与 `config/workflow/legacy_retirement.yaml`（78/81/88/120 行）均为 `task_projection_envelopes`。
+- envelope 承载表三处称法一致：`docs/ARCHITECTURE.md` §12.2（767/771/773/774 行）、`design.md` D2（56/58/64 行）与 D9、待退项登记表（131 行）与 `config/workflow/legacy_retirement.yaml`（78/81/88/120 行）均为 `task_projection_envelopes`。
 - `design.md` 的 Open Questions 现仅保留 2 条真正待后续阶段决定的条目；实施中已确定的 2 条（退役登记处物理形态、守卫例外粒度）已移入「实施中已关闭的 Open Questions」并附结论与理由。
 - `openspec validate "establish-workflow-contracts-and-green-baseline" --strict` → `Change ... is valid`。

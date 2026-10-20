@@ -351,7 +351,7 @@ def _evidence_conflicts(cfg, verdicts) -> list[str]:
 
 
 def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), rotation_available=None) -> dict:
-    """TARGET §7.3: the three-level allocation (sector -> layer -> name) with its fact references.
+    """ARCHITECTURE §7.3: the three-level allocation (sector -> layer -> name) with its fact references.
 
     Everything here already exists in the review (layer verdicts, per-layer budgets, baskets, name calls);
     until 2026-10-17 only the sector-level stance reached the projection, so the Chief could not see layers or

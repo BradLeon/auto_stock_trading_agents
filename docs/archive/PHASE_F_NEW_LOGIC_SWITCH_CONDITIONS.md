@@ -12,7 +12,7 @@
 | 调度 | 谁来唤醒并执行分析工作流：旧的每日 cron（legacy）还是 Dispatcher | **全部 legacy**；首批演练已做过一次“切过去再切回来” |
 | 交易 | 审批、记账、实盘 | 全部不动；实盘 disabled，须独立授权 |
 
-本文只讲**调度**这条边界（读取已有 `consumer-cutover` 的健康检查加自动切回）。“切到新代码逻辑”= 把某个研究工作流的 SQL 负责人从 legacy 改为 dispatcher，**并且**加载常驻的 `schedule --phase-e` 去唤醒它。只做前者不做后者，那个工作流会没有任何人执行。
+本文只讲**调度**这条边界（读取已有 `consumer-cutover` 的健康检查加自动切回）。“切到新代码逻辑”= 把某个研究工作流的 SQL 负责人从 legacy 改为 dispatcher，**并且**加载常驻的 `schedule` 去唤醒它。只做前者不做后者，那个工作流会没有任何人执行。
 
 ## 二、通用前置条件（每一批都要满足，逐条可核验）
 
@@ -44,8 +44,8 @@ uv run ats dispatch owner-log
 
 - 一次事务里同时改该工作流的模板行和所有已有标的行，不会出现“一半 legacy 一半 dispatcher”。
 - 有 `running` 认领一律拒绝，不会被强行作废；`failed/pending` 必须带理由作废；历史记录不删。
-- 切过去之后，旧的每日 cycle、手工 CLI（`ats analyst information`、`run_fundamental_pass`、`run_pead`）都会被拒；要让工作流自己跑起来，还需要单独批准加载 `ats schedule --phase-e` 常驻进程（现在**没有**这个 launchd 任务，也没有加载 `com.ats.schedule`）。
-- 回退后条目在 `phase_e_schedules.yaml` 里仍是 `enabled: true`，但 legacy 负责人时会被忽略，不会唤醒任何东西。
+- 切过去之后，旧的每日 cycle、手工 CLI（`ats analyst information`、`run_fundamental_pass`、`run_pead`）都会被拒；要让工作流自己跑起来，还需要单独批准加载 `ats schedule` 常驻进程（现在**没有**这个 launchd 任务，也没有加载 `com.ats.schedule`）。
+- 回退后条目在 `research_schedules.yaml` 里仍是 `enabled: true`，但 legacy 负责人时会被忽略，不会唤醒任何东西。
 
 ## 四、首批观察发现的两个阻碍（均已处理，保留记录）
 
@@ -70,7 +70,7 @@ uv run ats dispatch owner-log
 
 **现在的终态是 Dispatcher。** 用户 2026-10-17 裁决「7 个一起切换」后：
 - 7 个研究工作流（information-brief、fundamental-routine、fundamental-event、layer-review、sector-review、macro-review、technical-review）的调度负责人都是 dispatcher，日志见 `ats dispatch owner-log`。
-- 常驻进程 `com.ats.phase-e`（`deploy/launchd/com.ats.phase-e.plist`，`schedule --phase-e`，**没有** `--live`）已加载：只跑研究工作流、消费已发布的日历事件，**不进 Chief、不下单**。不要用 `com.ats.schedule.plist`——它启动的是旧调度器并带 `--live`。
-- 切回：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；要停掉全部：`launchctl bootout gui/$(id -u)/com.ats.phase-e`。
+- 常驻进程 `com.ats.dispatcher`（`deploy/launchd/com.ats.dispatcher.plist`，`schedule`，**没有** `--live`）已加载：只跑研究工作流、消费已发布的日历事件，**不进 Chief、不下单**。不要用 `com.ats.schedule.plist`——它启动的是旧调度器并带 `--live`。
+- 切回：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；要停掉全部：`launchctl bootout gui/$(id -u)/com.ats.dispatcher`。
 - 事件触发开关 `schedule.daily_stages.macro_sector_event_triggers`（现为 false）和 `pead_event_triggers`（true）现在对 Dispatcher 的日历事件路径同样生效；此前这条路径没有读它们。
 - 切换时第 8 条（数据覆盖）仍有遗留：TSM/ASML Q3 官方披露（SEC）因 Clash 节点限制进不来，它们的 Q3 事件评审会因缺少已准入的官方材料而按设计不触发；解除需要用户调整 Clash 对 sec.gov 的节点或规则。

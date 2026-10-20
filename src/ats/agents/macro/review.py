@@ -256,7 +256,7 @@ _REGIME_BY_QUADRANT = {
 
 
 def projection_extras(review: MacroReview) -> dict:
-    """TARGET §7.3 fields of a MacroReview projection, all taken from the persisted review.
+    """ARCHITECTURE §7.3 fields of a MacroReview projection, all taken from the persisted review.
 
     `regime` in the payload is derived by code from the quadrant; `narrative_regime` carries the review's own
     wording so the two are both visible (and labelled) instead of one silently replacing the other.

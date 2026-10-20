@@ -409,7 +409,7 @@ CREATE TABLE IF NOT EXISTS claim_assessments (
 """
 
 # ---------------------------------------------------------------------------
-# Decision audit (docs/TARGET_WORKFLOW_DATAFLOW.md §12.3, Phase B).
+# Decision audit (docs/ARCHITECTURE.md §12.3, Phase B).
 # Five additive tables; no legacy table or column is touched. Kept as a separate
 # module constant so `_migrate` can re-apply exactly this fragment on databases
 # created before Phase B. Notes on the shape:

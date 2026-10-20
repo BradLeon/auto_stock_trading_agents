@@ -2,7 +2,7 @@
 
 目标架构的 Phase E 要让分析任务可按依赖独立、并发、定时或由事件运行。当前 `runtime/scheduler.py` 仍以单 worker 和硬编码顺序组织分析，`config/events.yaml` 仍承担人工维护的事件日期；已有 `WorkflowRun*`、`TriggerContext`、Task Projection 和审批契约尚未接成统一的调度运行时。
 
-本专项 change 细化 `docs/TARGET_WORKFLOW_DATAFLOW.md` §8、§13、§14.5 和 `refactor-workflow-dataflow-architecture` 的 Phase E，形成可独立实施、验收的 Dispatcher、Schedule Calendar 与 Trigger Ledger 方案。它复用现有契约和 Phase D 已发布的分析角色输出，不重新定义分析观点或交易审批。
+本专项 change 细化 `docs/ARCHITECTURE.md` §8、§13、§14.5 和 `refactor-workflow-dataflow-architecture` 的 Phase E，形成可独立实施、验收的 Dispatcher、Schedule Calendar 与 Trigger Ledger 方案。它复用现有契约和 Phase D 已发布的分析角色输出，不重新定义分析观点或交易审批。
 
 ## What Changes
 

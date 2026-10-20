@@ -2,12 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Research-workflow scheduler (Phase F, 2026-10-17): runs ONLY the Dispatcher-owned research workflows
-         (information, fundamental, layer, sector, macro, technical) and consumes published calendar events.
-         It never enters the Chief decision cycle, never places orders and takes no --live flag.
-         Do NOT confuse with com.ats.schedule.plist, which starts the legacy scheduler with `--live`. -->
+    <!-- Research dispatcher daemon: runs ONLY the Dispatcher-owned research workflows (information,
+         fundamental, layer, sector, macro, technical) on their schedules and on published calendar events.
+         It never enters the Chief decision cycle and never places orders. -->
     <key>Label</key>
-    <string>com.ats.phase-e</string>
+    <string>com.ats.dispatcher</string>
     <key>ProgramArguments</key>
     <array>
         <string>/Users/liuchao/.local/bin/uv</string>
@@ -18,7 +17,6 @@
         <string>-m</string>
         <string>ats.runtime.cli</string>
         <string>schedule</string>
-        <string>--phase-e</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/liuchao/Code/trading/auto_stock_trading_agents</string>
@@ -30,9 +28,9 @@
         <string>1</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/logs/phase-e.out.log</string>
+    <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/logs/dispatcher.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/logs/phase-e.err.log</string>
+    <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/logs/dispatcher.err.log</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

@@ -1,6 +1,6 @@
 ## Why
 
-目标架构（`docs/TARGET_WORKFLOW_DATAFLOW.md` §1、§7.2、§14.4）要求分析师之间除「层次 → 行业」与「信息 → 基本面」两条依赖外互不读取彼此观点，且只有主理人可以汇总全部结论。当前实现与该约束有多处实测冲突：层级分析师直接产出超配/低配/清仓并绑定预算使用率（`agents/sector/layer_review.py:213-220`、`schemas/sector.py:277`），行业分析师在轮动里读取宏观报告（`agents/sector/review.py:229-241`）与 PEAD dossier（`agents/sector/assemble.py:257-279`），基本面在 monitor 与 graph 注入里读取 Sector 与 Macro 观点（`agents/pead/monitor.py:85-95`、`graph/pead.py:125-144`）并自行跑风险引擎产出带数量的订单（`graph/pead.py:473-519`、`agents/pead/score.py:189-231`），风控 memo 仍注入宏观 regime（`agents/risk_officer/review.py:29-39`），而主理人 `agents/chief/assemble.py` 直读旧表且任一分析师缺失时静默降级为空串（`:90-92`、`:136-137`）——既不固定研究快照，也不阻断自动交易。`decision/snapshot.py` 已实现快照与阻断，但从未被接线。
+目标架构（`docs/ARCHITECTURE.md` §1、§7.2、§14.4）要求分析师之间除「层次 → 行业」与「信息 → 基本面」两条依赖外互不读取彼此观点，且只有主理人可以汇总全部结论。当前实现与该约束有多处实测冲突：层级分析师直接产出超配/低配/清仓并绑定预算使用率（`agents/sector/layer_review.py:213-220`、`schemas/sector.py:277`），行业分析师在轮动里读取宏观报告（`agents/sector/review.py:229-241`）与 PEAD dossier（`agents/sector/assemble.py:257-279`），基本面在 monitor 与 graph 注入里读取 Sector 与 Macro 观点（`agents/pead/monitor.py:85-95`、`graph/pead.py:125-144`）并自行跑风险引擎产出带数量的订单（`graph/pead.py:473-519`、`agents/pead/score.py:189-231`），风控 memo 仍注入宏观 regime（`agents/risk_officer/review.py:29-39`），而主理人 `agents/chief/assemble.py` 直读旧表且任一分析师缺失时静默降级为空串（`:90-92`、`:136-137`）——既不固定研究快照，也不阻断自动交易。`decision/snapshot.py` 已实现快照与阻断，但从未被接线。
 
 同时，架构守卫里 27 条例外以「Phase D」为由挂起（采集侧直连 Provider、分析师直连取数），若不随本阶段清退，边界约束就是纸面上的。
 

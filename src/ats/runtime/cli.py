@@ -4516,8 +4516,6 @@ def main(argv: list[str] | None = None) -> int:
     srv.add_argument("--host", default="0.0.0.0")
     srv.add_argument("--port", type=int, default=8000)
     sch = sub.add_parser("schedule", help="research dispatcher daemon: scheduled and calendar-event workflows")
-    sch.add_argument("--phase-e", action="store_true",
-                     help="required: the dispatcher daemon (the legacy serial scheduler was removed)")
     ct = sub.add_parser("cutover", help="Phase F 切流控制平面：边界查询、预检、批次登记与报告校验")
     ct.add_argument("action", choices=[
         "state", "wiring", "preflight", "set-route", "activate", "release",
@@ -5237,8 +5235,6 @@ def main(argv: list[str] | None = None) -> int:
         serve(host=args.host, port=args.port)
         return 0
     if args.command == "schedule":
-        if not args.phase_e:
-            parser.error("the legacy serial scheduler was removed; run the dispatcher with --phase-e")
         from .dispatcher_daemon import start
 
         start()

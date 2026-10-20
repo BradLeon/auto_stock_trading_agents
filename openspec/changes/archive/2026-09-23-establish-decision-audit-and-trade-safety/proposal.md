@@ -1,6 +1,6 @@
 ## Why
 
-`docs/TARGET_WORKFLOW_DATAFLOW.md` §14.2 把阶段 B 定为「决策审计与交易安全」：新增 decision cycle / revision / risk review / Boss approval / cycle event 模型，实现 Chief—Risk 多轮 Loop 并移除 Risk 静默裁剪，把 Boss 入口限定为绑定 revision hash 的批准/拒绝，在 Trader 入口强制校验 `ExecutionAuthorization` 与新鲜度，并让手动与自动交易指令进入同一审批链。现在做这一阶段，原因有四条，全部可在当前仓库定位。
+`docs/ARCHITECTURE.md` §14.2 把阶段 B 定为「决策审计与交易安全」：新增 decision cycle / revision / risk review / Boss approval / cycle event 模型，实现 Chief—Risk 多轮 Loop 并移除 Risk 静默裁剪，把 Boss 入口限定为绑定 revision hash 的批准/拒绝，在 Trader 入口强制校验 `ExecutionAuthorization` 与新鲜度，并让手动与自动交易指令进入同一审批链。现在做这一阶段，原因有四条，全部可在当前仓库定位。
 
 **第一，批准的对象和执行的对象不是同一个东西。** 当前 `src/ats/graph/chief.py` 是单次通过图（`assemble_context → chief_decide → risk_gate → persist_decision → boss_review → trader`，`chief.py:231-250`）。`risk_gate`（`chief.py:78-115`）先做 Hold 过滤（`chief.py:82`）与 PEAD 隔夜限价改写（`chief.py:102-109`），再交给 `risk/checks.py::pre_trade()`，最终把**已被改写过的** `state.decisions` 交给 Boss 与 Trader。落库时 `persist_decision`（`chief.py:118-158`）写 `cycles` + `decisions` 两张表（`store.py:1026-1033`），而 `decisions` 表没有主键、没有 revision 序号、没有内容 hash（`store.py:28-31`），`cycles` 也没有风险审查与审批的关联列（`store.py:25-27`）。因此「Boss 批准的是哪一份提案、Trader 执行的是不是同一份」在当前 schema 下**无法回答**，§5.2 第 7 条禁止的「批准的是 A、执行的是 B」没有被结构性阻止。
 

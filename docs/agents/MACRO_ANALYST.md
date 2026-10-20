@@ -7,7 +7,7 @@
 > | 读什么 | 宏观数据包：`macro_series` 数据集（FRED 等定量指标，VIX 取前收）与数据平台已准入的政策、宏观新闻文档。分析中**不再直连** Tavily 等搜索 |
 > | 不读什么 | 其他分析师的观点 |
 > | 产出 | `macro_review` 投影（`MacroReview`）：regime（并保留正文判读的 `narrative_regime`）、影响传导、情景、时间范围、主要风险 |
-> | 谁读它 | **只有 Chief**。行业、基本面、风控主管都不再读宏观结论（TARGET §7.2），下文「唯一收口」一节所列注入 PEAD prep、行业分析、风控 memo 的路径描述的是切换前的行为 |
+> | 谁读它 | **只有 Chief**。行业、基本面、风控主管都不再读宏观结论（ARCHITECTURE §7.2），下文「唯一收口」一节所列注入 PEAD prep、行业分析、风控 memo 的路径描述的是切换前的行为 |
 > | 什么时候跑 | 每周六 09:00（台北时间），Dispatcher 调度；FOMC/CPI/PCE/NFP/GDP 发布事件可唤醒（受研究时间表配置 `event_triggers.macro_sector` 控制，现为关闭） |
 > | 手动运行 | `ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio`；负责人为 dispatcher 时 `ats macro review` 会被拒绝。旧的 `weekly_review`（周六 08:50）与 `factset_weekly_ingest` 已退役，FactSet 改为每月 1 日的月末摄入 |
 >
@@ -15,7 +15,7 @@
 
 > 面向：决策者 / 设计者。这份文档只讲宏观这一个角色：它为什么存在、看什么、
 > 怎么把数据变成判断、以及怎么保证产出不是模型编的。
-> 系统全局设计见 `docs/TARGET_WORKFLOW_DATAFLOW.md`；代码与运维规范见 `docs/DEVELOPMENT.md`。
+> 系统全局设计见 `docs/ARCHITECTURE.md`；代码与运维规范见 `docs/DEVELOPMENT.md`。
 
 ---
 
@@ -509,7 +509,7 @@ vintage，再与本次 FRED 结果比较，补齐区间内的新增观测和历�
 执行 `ats macro review macro`，再执行 `ats sector review ai_hardware`，最后按需运行
 `ats chief run --channel feishu_bot` 更新决策。
 
-- 系统全局设计、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
+- 系统全局设计、角色契约 → `docs/ARCHITECTURE.md`
 - 代码规范、数据源约定 → `docs/DEVELOPMENT.md`
 - 数据源接入状态 → `docs/data/DATA_SOURCES.md`
 - 行业分析师（宏观的下游消费方）→ `docs/agents/SECTOR_ANALYST.md`

@@ -4,7 +4,7 @@
 
 本阶段完成 13.6 的失败归因台账、12.2 的必需用途盘点，以及 6.4/6.7 的验证脚本和生产观察方案准备。**这不是四项完整验收通过，也没有生产切换、资格签发、报告签核或真实券商写操作。** Tasks 总数仍为 98/117，19 项待办。
 
-验收依据是 [TARGET_WORKFLOW_DATAFLOW.md](../TARGET_WORKFLOW_DATAFLOW.md)，逐章映射见 [验收要求映射](PHASE_F_ACCEPTANCE_REQUIREMENTS.md)。单任务、子流程、完整决策流程分别按实际请求的依赖闭包验收；Routine/Event 是所选模式的替代范围。旧业务成功或新旧一致不作为新入口前置；共享依赖、安全守卫和历史保留仍需证明。
+验收依据是 [ARCHITECTURE.md](../ARCHITECTURE.md)，逐章映射见 [验收要求映射](PHASE_F_ACCEPTANCE_REQUIREMENTS.md)。单任务、子流程、完整决策流程分别按实际请求的依赖闭包验收；Routine/Event 是所选模式的替代范围。旧业务成功或新旧一致不作为新入口前置；共享依赖、安全守卫和历史保留仍需证明。
 
 ## 13.6：全量发现与归因
 

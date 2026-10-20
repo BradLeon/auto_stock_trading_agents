@@ -2,7 +2,7 @@
 
 ## 2026-10-15 精简裁决（覆盖本 change 此前与之冲突的要求）
 
-用户裁决（2026-10-15）：切流以 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§1、§12.4、§14.6、§15.5、§16）及用户历次裁决为准；本 change 中超出 TARGET 的派生机制降为可选。G1 以 TARGET 为准；G2 研究读取按消费者整体切换，不再按「标的×时点」；G3 迁移窗口内出问题退回旧路径（TARGET §14.6「保留旧入口作可控回滚」），取代「停止即锁读」作为默认；G4 本 change 以追加裁决方式修订，已完成任务与证据保留为历史。安全底线不变：新路径与隔离运行禁止券商写入；任何时刻只有一个实盘入口；真实交易绑定同一 revision 的风控与 Boss 批准；读/调度/交易分别切换；审批与账本发布成对切换；调度单一负责人；旧实现墓碑退役；回滚已演练；测试全绿。依据：TARGET §16 第 12 条「本次设计和文档实施不使用 OpenSpec」；TARGET 中唯一的 exact-scope 资格表述为 2026-10-09 Phase F 期间补入；按此前机制推进切流出现结构性死循环（`docs/archive/PHASE_F_GUARD_REVIEW.md`、`docs/archive/PHASE_F_8_6_REGISTRATION_DRAFT.md` 第七至九节）。观察期 3 个交易日；自动切回的告警走飞书机器人。
+用户裁决（2026-10-15）：切流以 `docs/ARCHITECTURE.md`（§1、§12.4、§14.6、§15.5、§16）及用户历次裁决为准；本 change 中超出 TARGET 的派生机制降为可选。G1 以 TARGET 为准；G2 研究读取按消费者整体切换，不再按「标的×时点」；G3 迁移窗口内出问题退回旧路径（ARCHITECTURE §14.6「保留旧入口作可控回滚」），取代「停止即锁读」作为默认；G4 本 change 以追加裁决方式修订，已完成任务与证据保留为历史。安全底线不变：新路径与隔离运行禁止券商写入；任何时刻只有一个实盘入口；真实交易绑定同一 revision 的风控与 Boss 批准；读/调度/交易分别切换；审批与账本发布成对切换；调度单一负责人；旧实现墓碑退役；回滚已演练；测试全绿。依据：ARCHITECTURE §16 第 12 条「本次设计和文档实施不使用 OpenSpec」；TARGET 中唯一的 exact-scope 资格表述为 2026-10-09 Phase F 期间补入；按此前机制推进切流出现结构性死循环（`docs/archive/PHASE_F_GUARD_REVIEW.md`、`docs/archive/PHASE_F_8_6_REGISTRATION_DRAFT.md` 第七至九节）。观察期 3 个交易日；自动切回的告警走飞书机器人。
 
 各 spec 的逐条处置见各 spec 文件同名一节；评估依据见 `docs/archive/PHASE_F_GUARD_REVIEW.md`，代码改动见 `docs/archive/PHASE_F_CODE_SIMPLIFICATION_PLAN.md`。
 
@@ -152,7 +152,7 @@
 
 ### 决策 8：旧调度必须先接入统一逻辑触发身份，再谈 owner 切换
 
-`src/ats/runtime/scheduler.py` 中 `owner_mode` **完全不存在**，`trigger_key` 只出现在 `_start_phase_e`（L1027+）内部。旧常驻调度自建 APScheduler jobs 并直接调用角色入口；Phase E 是另一条显式 `--phase-e` 启动路径。因此仅改 `workflow_owners.yaml` 的 mode 与 `phase_e_schedules.yaml` 的 enabled，**既不能证明已运行的旧进程停止触发，也无法让旧路径在回滚后按新账本去重**。
+`src/ats/runtime/scheduler.py` 中 `owner_mode` **完全不存在**，`trigger_key` 只出现在 `_start_phase_e`（L1027+）内部。旧常驻调度自建 APScheduler jobs 并直接调用角色入口；Phase E 是另一条显式 `--phase-e` 启动路径。因此仅改 `workflow_owners.yaml` 的 mode 与 `research_schedules.yaml` 的 enabled，**既不能证明已运行的旧进程停止触发，也无法让旧路径在回滚后按新账本去重**。
 
 **选择**：新增旧调度适配层——把旧 job 与 event 映射到共同的逻辑触发身份（workflow + scope + 计划时点，或 event + version）；仍可执行的旧路径在执行前读取共享 owner 状态与代次并登记认领，或经可核验关停/失权退出；切换流程为「冻结新认领 → 清点未完成 → 移交」；运行任务承接时 SHALL 证明旧执行方不能继续发布同一结果。配置变更的重载或受控重启方式 SHALL 明确。新调度 SHALL 依据需求/配置/发布事件独立导出预期触发集合，不以旧运行或两侧并集定义成功；旧业务不要求成功。
 
@@ -483,11 +483,11 @@ Task 5.16 implements this corrected lifecycle and scope separation before final 
 
 ### 真实 Routine 数值语义修复（2026-10-11）
 
-真实 MRVL 标题 `$40B` 暴露首数字解析将未匹配 KPI 的叙事写为数值 40，未知定性变化写为零；工程 schema/血缘通过不足以证明有效预期更新。依据 TARGET §9.2 和既有分析语义要求，当前发布/复用/Chief/验收均区分可量化读数与定性变化：只采用 KPI 后的局部、可比较读数，未绑定或单位不明时保留分类 driver，两个数值 null；真实 KPI 的零读数仍允许。历史 v1 记录保持解析和原 hash，不改写历史 payload；当前边界拒绝其中的伪数值。角色模型、分类提示和外发上下文不变。3.10/6.1/13.7 在受保护修复前重开，原 304 项通过、v3 冻结与四份原始模型报告均保留，不跨指纹沿用为新验收。
+真实 MRVL 标题 `$40B` 暴露首数字解析将未匹配 KPI 的叙事写为数值 40，未知定性变化写为零；工程 schema/血缘通过不足以证明有效预期更新。依据 ARCHITECTURE §9.2 和既有分析语义要求，当前发布/复用/Chief/验收均区分可量化读数与定性变化：只采用 KPI 后的局部、可比较读数，未绑定或单位不明时保留分类 driver，两个数值 null；真实 KPI 的零读数仍允许。历史 v1 记录保持解析和原 hash，不改写历史 payload；当前边界拒绝其中的伪数值。角色模型、分类提示和外发上下文不变。3.10/6.1/13.7 在受保护修复前重开，原 304 项通过、v3 冻结与四份原始模型报告均保留，不跨指纹沿用为新验收。
 
 ### Information 必填事实置信度请求契约（2026-10-11）
 
-MSFT Routine 的三次真实 v4 尝试因 Information 未提供独立 confidence 被拒绝。发布器遵守 TARGET §9.1；请求复用的共享响应类型却把该字段定义为可缺失/null。新 Information 路径采用专用响应子类，在请求 schema 中要求显式 0–1 置信度，不从 materiality 推断或默认补齐。共享历史 PEAD 类型及所有原失败输出保留；缺失/null 仍拒绝当前发布。模型替身须接受该响应子类并按实际传入 schema 构造输出，不能因精确旧类名阻断契约回归。外发业务内容、系统提示、模型和目的地不变，仅响应格式约束变化；只读内容核对与新冻结后取证分别留存。
+MSFT Routine 的三次真实 v4 尝试因 Information 未提供独立 confidence 被拒绝。发布器遵守 ARCHITECTURE §9.1；请求复用的共享响应类型却把该字段定义为可缺失/null。新 Information 路径采用专用响应子类，在请求 schema 中要求显式 0–1 置信度，不从 materiality 推断或默认补齐。共享历史 PEAD 类型及所有原失败输出保留；缺失/null 仍拒绝当前发布。模型替身须接受该响应子类并按实际传入 schema 构造输出，不能因精确旧类名阻断契约回归。外发业务内容、系统提示、模型和目的地不变，仅响应格式约束变化；只读内容核对与新冻结后取证分别留存。
 
 响应契约定义于 `agents/information/outputs.py`，documents 仅导入；跨进程录制类型通过既有 outputs 契约白名单解码，不为计算模块扩大类型白名单。v5 原始类型地址拒绝及原 tape 保留，v6 以新的当前类型地址重新取证。
 

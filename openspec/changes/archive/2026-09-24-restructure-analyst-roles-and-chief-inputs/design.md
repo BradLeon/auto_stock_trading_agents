@@ -1,6 +1,6 @@
 ## Context
 
-目标架构见 `docs/TARGET_WORKFLOW_DATAFLOW.md` §7.2 / §9 / §10.1 / §14.4，动机见 proposal.md。本节只记录实现路径必须知道现状。
+目标架构见 `docs/ARCHITECTURE.md` §7.2 / §9 / §10.1 / §14.4，动机见 proposal.md。本节只记录实现路径必须知道现状。
 
 已具备的地基（Phase A–C 已落地）：
 

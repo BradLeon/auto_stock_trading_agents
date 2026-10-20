@@ -2,7 +2,7 @@
 
 > 对应你的三项裁决：投影补齐按推荐方案做；max_tokens 全面排查；Macro 周报 Dispatcher 路径写新版本。验证产出的可读笔记在 Obsidian：`量化投资/个股分析系统/Phase F 验证/`。
 
-## 1. 投影补齐（TARGET §7.3）
+## 1. 投影补齐（ARCHITECTURE §7.3）
 
 | 投影 | 新增内容（可选字段，空值不进哈希，旧投影不受影响） | 来源 |
 |---|---|---|
@@ -32,11 +32,11 @@ Chief 的一行摘要里加了关键新字段（横截面数量、层/标的数�
 | macro-review | 1 次请求（输出 12,685 token，含情景），3.1 分钟；**周报已写入** `宏观分析-宏观-2026-10-17.md` | 0 次请求，复用 |
 | technical | 命令行运行（不调模型），13 个标的，投影已带新字段 | — |
 
-三个工作流的调度负责人已全部切回 legacy；`schedule --phase-e` 常驻进程没有加载。强制重算用的是新增的 `force_recompute` 任务输入（让这次运行的数据版本引用独一无二，不影响其他任务）。
+三个工作流的调度负责人已全部切回 legacy；`schedule` 常驻进程没有加载。强制重算用的是新增的 `force_recompute` 任务输入（让这次运行的数据版本引用独一无二，不影响其他任务）。
 
 ## 4. 启用
 
-`phase_e_schedules.yaml` 里 `macro-review`、`sector-review` 改为 `enabled: true`（`layer-review` 没有独立条目，由 Sector 计划带上）。**负责人仍是 legacy，所以条目被忽略，不会唤醒任何东西**（已验证 `phase_e_schedule_entries()` 为空）。真正让它们按节奏运行还需要：把负责人切给 Dispatcher（`owner-switch`）并加载 `schedule --phase-e` 常驻进程——这两步我没有做，等你批准。
+`research_schedules.yaml` 里 `macro-review`、`sector-review` 改为 `enabled: true`（`layer-review` 没有独立条目，由 Sector 计划带上）。**负责人仍是 legacy，所以条目被忽略，不会唤醒任何东西**（已验证 `research_schedule_entries()` 为空）。真正让它们按节奏运行还需要：把负责人切给 Dispatcher（`owner-switch`）并加载 `schedule` 常驻进程——这两步我没有做，等你批准。
 
 ## 5. 发现
 

@@ -2,7 +2,7 @@
 
 ## 2026-10-15 精简裁决（覆盖本 change 此前与之冲突的要求）
 
-用户裁决（2026-10-15）：切流以 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§1、§12.4、§14.6、§15.5、§16）及用户历次裁决为准；本 change 中超出 TARGET 的派生机制降为可选。G1 以 TARGET 为准；G2 研究读取按消费者整体切换，不再按「标的×时点」；G3 迁移窗口内出问题退回旧路径（TARGET §14.6「保留旧入口作可控回滚」），取代「停止即锁读」作为默认；G4 本 change 以追加裁决方式修订，已完成任务与证据保留为历史。安全底线不变：新路径与隔离运行禁止券商写入；任何时刻只有一个实盘入口；真实交易绑定同一 revision 的风控与 Boss 批准；读/调度/交易分别切换；审批与账本发布成对切换；调度单一负责人；旧实现墓碑退役；回滚已演练；测试全绿。依据：TARGET §16 第 12 条「本次设计和文档实施不使用 OpenSpec」；TARGET 中唯一的 exact-scope 资格表述为 2026-10-09 Phase F 期间补入；按此前机制推进切流出现结构性死循环（`docs/archive/PHASE_F_GUARD_REVIEW.md`、`docs/archive/PHASE_F_8_6_REGISTRATION_DRAFT.md` 第七至九节）。观察期 3 个交易日；自动切回的告警走飞书机器人。
+用户裁决（2026-10-15）：切流以 `docs/ARCHITECTURE.md`（§1、§12.4、§14.6、§15.5、§16）及用户历次裁决为准；本 change 中超出 TARGET 的派生机制降为可选。G1 以 TARGET 为准；G2 研究读取按消费者整体切换，不再按「标的×时点」；G3 迁移窗口内出问题退回旧路径（ARCHITECTURE §14.6「保留旧入口作可控回滚」），取代「停止即锁读」作为默认；G4 本 change 以追加裁决方式修订，已完成任务与证据保留为历史。安全底线不变：新路径与隔离运行禁止券商写入；任何时刻只有一个实盘入口；真实交易绑定同一 revision 的风控与 Boss 批准；读/调度/交易分别切换；审批与账本发布成对切换；调度单一负责人；旧实现墓碑退役；回滚已演练；测试全绿。依据：ARCHITECTURE §16 第 12 条「本次设计和文档实施不使用 OpenSpec」；TARGET 中唯一的 exact-scope 资格表述为 2026-10-09 Phase F 期间补入；按此前机制推进切流出现结构性死循环（`docs/archive/PHASE_F_GUARD_REVIEW.md`、`docs/archive/PHASE_F_8_6_REGISTRATION_DRAFT.md` 第七至九节）。观察期 3 个交易日；自动切回的告警走飞书机器人。
 
 各 spec 的逐条处置见各 spec 文件同名一节；评估依据见 `docs/archive/PHASE_F_GUARD_REVIEW.md`，代码改动见 `docs/archive/PHASE_F_CODE_SIMPLIFICATION_PLAN.md`。
 
@@ -10,9 +10,9 @@
 
 **2026-10-07 审计后更新**：下文原立项动机保留为历史背景。当前已交付控制、隔离、资格、比较和代次模块，但真实业务接线、可重放双运行及端到端验收尚未完成；本 change 继续承担这些工作，不将五角色接线移出 Phase F。依据见 [实际达成情况审计](../../../docs/validation/PHASE_F_ACTUAL_COMPLETION_AUDIT_2026-10-07.md)。当前十消费者均因资格账本缺失而 ineligible，五条边界 legacy、一条交易 disabled。`wired=true`、静态扫描合规和空账本不证明目标完成。现有部署授权须按具体动作核对，`LIVE-X` 来源待核实，C3 生产自动下单继续停用。
 
-Phase A–E 与目标数据流专项（`complete-target-dataflow`，44 项任务）均已归档，十个目标角色的契约、门禁与数据面已就位，但系统仍整体运行在旧入口上：`config/workflow/workflow_owners.yaml` 的 7 个 workflow 全部 `mode: legacy`，`config/workflow/phase_e_schedules.yaml` 的 5 个 schedule 全部 `enabled: false`，`config/data/structured.yaml` 的消费者虽已签发 platform 模式，但按 `docs/data/DATA_ARCHITECTURE.md:67` 的记录十个 consumer 均未取得生产读取资格。同时存在三个结构性缺口：读/调度/交易三条边界没有统一的切流开关与互斥校验（交易路径完全缺失，`src/ats/broker/ibkr.py:282` 无 paper/live 断言，「任何时刻只有一条可下真单的入口」目前无任何实现）；影子运行只有零散的双读比对（`data/cutover.py` 的非追加式 comparison、`agents/chief/assemble.py:650` 只比 presence 计数），没有覆盖调度遗漏、风控 verdict、审批链与交易归因的差异报告；旧实现退役登记中 `chief.legacy_table_direct_reads`、`sector_reviews`、`trades.client_order_id.legacy_derivation` 三条 pending 明确写着「切流属 Phase F」。
+Phase A–E 与目标数据流专项（`complete-target-dataflow`，44 项任务）均已归档，十个目标角色的契约、门禁与数据面已就位，但系统仍整体运行在旧入口上：`config/workflow/workflow_owners.yaml` 的 7 个 workflow 全部 `mode: legacy`，`config/workflow/research_schedules.yaml` 的 5 个 schedule 全部 `enabled: false`，`config/data/structured.yaml` 的消费者虽已签发 platform 模式，但按 `docs/data/DATA_ARCHITECTURE.md:67` 的记录十个 consumer 均未取得生产读取资格。同时存在三个结构性缺口：读/调度/交易三条边界没有统一的切流开关与互斥校验（交易路径完全缺失，`src/ats/broker/ibkr.py:282` 无 paper/live 断言，「任何时刻只有一条可下真单的入口」目前无任何实现）；影子运行只有零散的双读比对（`data/cutover.py` 的非追加式 comparison、`agents/chief/assemble.py:650` 只比 presence 计数），没有覆盖调度遗漏、风控 verdict、审批链与交易归因的差异报告；旧实现退役登记中 `chief.legacy_table_direct_reads`、`sector_reviews`、`trades.client_order_id.legacy_derivation` 三条 pending 明确写着「切流属 Phase F」。
 
-现在必须执行切流，因为继续叠加兼容层会同时稀释审计真相与写入边界，且 `docs/TARGET_WORKFLOW_DATAFLOW.md` §15.5 的上线门禁中第 3、4、5 条（影子运行无未审批下单、影子订单全链可追溯、回滚已演练且单交易入口）当前 0/3 达成。
+现在必须执行切流，因为继续叠加兼容层会同时稀释审计真相与写入边界，且 `docs/ARCHITECTURE.md` §15.5 的上线门禁中第 3、4、5 条（影子运行无未审批下单、影子订单全链可追溯、回滚已演练且单交易入口）当前 0/3 达成。
 
 本提案经外部审阅后修订。审阅指出六项 P1：进程内能力签发无法定义跨进程单活、授权缺少可查询生命周期与原子切换协议、计划中的 catalog 配置切换会使资格指纹自失效、影子证据缺少完整输入固定与通过判据、调度切换缺少旧入口接入统一触发身份的任务、资格失效时缺少「无安全旧路由」分支；另两项 P2 指出三条边界接线不具体与下单证明观测对象不足。经逐条核对代码后全部采纳，并额外补入审阅未覆盖的两点：`manifest_hash` 使契约清单本身的改动也会使全部证据漂移（范围比 `structured.yaml` 更广），以及由此推出的实施顺序约束（取证后置到受影响实现依赖闭包最终冻结之后）。
 
@@ -57,7 +57,7 @@ Phase A–E 与目标数据流专项（`complete-target-dataflow`，44 项任务
 ## Impact
 
 - **新增代码**：`workflow/` 下的切流控制平面（含边界开关与接线声明、资格门控路由、安全回退判定）、影子输入持久化/runner 与比较矩阵模块、旧调度适配层，`execution/` 下的 route 代次仲裁、下单能力校验与授权生命周期。
-- **改动代码**：`config/workflow/workflow_owners.yaml` 与 `phase_e_schedules.yaml`（owner 模式与 schedule 启用状态随逐批切换变更）、`config/workflow/legacy_retirement.yaml`（三条 Phase F 相关 pending 的状态与判据）、`src/ats/runtime/scheduler.py`（旧入口接入统一触发身份与认领）、`src/ats/execution/authorization.py`（授权生命周期与代次绑定）、`src/ats/broker/ibkr.py`（提交前能力与账户校验）、`src/ats/graph/chief.py` 与 `src/ats/trader/execute.py`（交易入口接仲裁）、`src/ats/runtime/cli.py`（切流与差异报告入口）。
+- **改动代码**：`config/workflow/workflow_owners.yaml` 与 `research_schedules.yaml`（owner 模式与 schedule 启用状态随逐批切换变更）、`config/workflow/legacy_retirement.yaml`（三条 Phase F 相关 pending 的状态与判据）、`src/ats/runtime/scheduler.py`（旧入口接入统一触发身份与认领）、`src/ats/execution/authorization.py`（授权生命周期与代次绑定）、`src/ats/broker/ibkr.py`（提交前能力与账户校验）、`src/ats/graph/chief.py` 与 `src/ats/trader/execute.py`（交易入口接仲裁）、`src/ats/runtime/cli.py`（切流与差异报告入口）。
 - **新增/改动配置**：新增切流开关与 runbook 配置文件；受指纹约束的 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/target_dataflow_coverage.yaml` 与 `config/risk.yaml` **不在运行时切流的改动面内**。
 - **A 的取证前改动面**：任务 0.6/7.14–7.17 覆盖 `config/data/target_dataflow_coverage.yaml`、`src/ats/data/contract_validation.py`、`src/ats/data/consumer_api.py`、既有 runtime 行情适配、Risk/Trader/Chief、契约文档和相关测试。manifest 使用全文件摘要，共享 API 也受指纹约束，因此十消费者均纳入影响评估；保留原始证据，按新最终基线最小重验并追加登记，不承诺旧资格继续适用。
 - **数据与账本**：影子订单与真实订单账本隔离会影响 `trades` 表写入路径；资格证据继续写入 `dataflow_assurance_events`（追加式，不修改既有行）；新增持久化活跃 route 状态。

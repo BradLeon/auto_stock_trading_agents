@@ -1,6 +1,6 @@
 ## Context
 
-参见 [proposal.md](proposal.md) 的动机与两份 delta specs。目标图及 Agent 对接见 `docs/TARGET_WORKFLOW_DATAFLOW.md` §3–4、§12。当前 `src/ats/data` 已有统一 catalog、结构化/非结构化采集与数据产品、runtime 查询、独立 source/consumer rollout mode 和部分 cutover 对账；`src/ats/execution/state_api.py` 提供内部状态读取。它们是待验证的现有实现，不是需要重建的空白模块。
+参见 [proposal.md](proposal.md) 的动机与两份 delta specs。目标图及 Agent 对接见 `docs/ARCHITECTURE.md` §3–4、§12。当前 `src/ats/data` 已有统一 catalog、结构化/非结构化采集与数据产品、runtime 查询、独立 source/consumer rollout mode 和部分 cutover 对账；`src/ats/execution/state_api.py` 提供内部状态读取。它们是待验证的现有实现，不是需要重建的空白模块。
 
 配置采用“一入口、两领域文件”：`config/data/catalog.yaml` 是 Data Catalog 唯一机器加载入口，只声明 schema/version 和对 `structured.yaml`、`unstructured.yaml` 的装配关系；`structured.yaml`（结构化来源/数据集）与 `unstructured.yaml`（非结构化来源/文档类型）是持久化来源定义的唯一权威文件。当前后者仍将细节委托给 `sources.yaml`、`news_sources.yaml`，且事件流程会按 symbol 动态登记 SEC/transcript source；这些是兼容/现状，不符合目标。Layer Analyst 的逐源 A/B/C 对照见 `docs/validation/UNSTRUCTURED_REFRESH_INVENTORY.md`，其中配置、部署启用、真实采集、发布和 Agent 读回应分别留证。旧 Evidence Observer 不再作为目标角色或独立消费者；它仍有价值的来源与中性数据产品归入 Layer 的产业链数据包。
 
@@ -87,7 +87,7 @@
 
 #### 2.5 Data Products 与目标角色逐边对接
 
-以 `docs/TARGET_WORKFLOW_DATAFLOW.md` §4 为规范，覆盖清单不得只登记一个泛化 `WORKFLOW` consumer，而要将每条数据边落实为独立的产品契约：
+以 `docs/ARCHITECTURE.md` §4 为规范，覆盖清单不得只登记一个泛化 `WORKFLOW` consumer，而要将每条数据边落实为独立的产品契约：
 
 | 角色 | 数据侧输入契约 | 非 Dataflow 依赖边界 |
 |---|---|---|

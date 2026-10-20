@@ -50,8 +50,8 @@ This inventory records the scheduler behavior observed before Dispatcher migrati
 ## Phase E opt-in operations
 
 Phase E remains opt-in. `config/workflow/workflow_owners.yaml` defaults every workflow to
-`legacy`, and `config/workflow/phase_e_schedules.yaml` disables recurring jobs until a
-workflow has an explicitly approved `shadow` or `dispatcher` owner. `ats schedule --phase-e`
+`legacy`, and `config/workflow/research_schedules.yaml` disables recurring jobs until a
+workflow has an explicitly approved `shadow` or `dispatcher` owner. `ats schedule`
 starts only those enabled Phase E entries plus the configured calendar refresh; it does not
 start the legacy daily cascade or enable Chief/Trader execution.
 

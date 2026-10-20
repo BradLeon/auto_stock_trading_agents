@@ -94,7 +94,7 @@
 
 ## 1. 依据与范围
 
-依据 [TARGET_WORKFLOW_DATAFLOW.md §9.1](../TARGET_WORKFLOW_DATAFLOW.md#91-information-analyst) 及其数据与角色边界：
+依据 [ARCHITECTURE.md §9.1](../ARCHITECTURE.md#91-information-analyst) 及其数据与角色边界：
 
 - Data Platform 负责外部采集、文档准入、不可变版本及可追溯的实体关联元数据（可含带来源归属的观点）。
 - Information 只读取准入材料，负责正文抽取、相关性和材料性判断；结论保留文档版本、片段位置、时间及置信度。
@@ -339,7 +339,7 @@ T5/T6 的情景要分别对 SemiAnalysis 和 TrendForce 实现，真实存量样
 
 每个标的的来源、标题、中文摘要、拒绝原因、完整过滤漏斗及改进顺序见 [三步实验报告](INFORMATION_SOURCE_SELECTION_THREE_STEP_RESULTS.md)。旧两篇抽样结论保留为历史，不代表当前完整覆盖。完整实验涉及30个不同文档版本、64个目标/版本输入对；供应商返回费用合计$0.045992897，无生产简报发布。
 
-当前尚未通过内容整体验收：优先修复输出约束/建议词误伤及无依据的关系推断，再处理模型读取前的重复和覆盖，最后评估预算。额外8篇为分层抽样，不是生产16篇排序的严格A/B；上游IBKR正文预算10→24/32比较、生产元数据修订、正式Information及受影响链路资格仍不能由本轮替代。未改OpenSpec主任务完成状态或生产预算。依据 TARGET_WORKFLOW_DATAFLOW.md §9.1，继续复用现有Information职责和静态关系，不引入新Agent或动态叙事图。
+当前尚未通过内容整体验收：优先修复输出约束/建议词误伤及无依据的关系推断，再处理模型读取前的重复和覆盖，最后评估预算。额外8篇为分层抽样，不是生产16篇排序的严格A/B；上游IBKR正文预算10→24/32比较、生产元数据修订、正式Information及受影响链路资格仍不能由本轮替代。未改OpenSpec主任务完成状态或生产预算。依据 ARCHITECTURE.md §9.1，继续复用现有Information职责和静态关系，不引入新Agent或动态叙事图。
 
 
 ## 2026-10-13 输出、选择与元数据收尾

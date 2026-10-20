@@ -1,7 +1,7 @@
 # 开发与运维手册
 
 > 面向：开发者 / 运维。讲代码怎么写、环境怎么搭、部署怎么改——设计动机和思想
-> 见 `docs/TARGET_WORKFLOW_DATAFLOW.md`，日常使用见根目录 `README.md`，运维见 `docs/OPERATIONS.md`。
+> 见 `docs/ARCHITECTURE.md`，日常使用见根目录 `README.md`，运维见 `docs/OPERATIONS.md`。
 
 ---
 
@@ -77,7 +77,7 @@ src/ats/
   journal/             # 交易日志 —— 确定性归约，不是 agent
   memory/              # store（领域表读写）
   risk/                # 六层风控（确定性）
-  runtime/             # cli、server（飞书回调）、scheduler（schedule --phase-e 入口）
+  runtime/             # cli、server（飞书回调）、scheduler（schedule 入口）
   schemas/             # 每个业务域一个文件，见第 3 节
   skills/<slug>/SKILL.md  # 每个 LLM 角色一份，见第 4 节
 config/
@@ -260,19 +260,19 @@ worktree 开发新功能），但这个模式在实践中造成了麻烦：workt
 
 | 服务 | 作用 | 进程 |
 |---|---|---|
-| `com.ats.phase-e` | 研究调度 daemon（Dispatcher）：7 个研究工作流的定时与日历事件触发；不进 Chief、不下单 | `ats.runtime.cli schedule --phase-e` |
+| `com.ats.dispatcher` | 研究调度 daemon（Dispatcher）：7 个研究工作流的定时与日历事件触发；不进 Chief、不下单 | `ats.runtime.cli schedule` |
 | `com.ats.data-refresh` | 数据刷新控制器，每小时 tick 一次 | `ats.data.refresh tick` |
 | `com.ats.serve` | 飞书 approval webhook | `ats.runtime.cli serve --host 127.0.0.1 --port 8000` |
 
 
 ```bash
 launchctl list | grep com.ats                               # 查状态
-launchctl kickstart -k gui/$(id -u)/com.ats.phase-e          # 强制重启（-k 先杀掉旧进程）
+launchctl kickstart -k gui/$(id -u)/com.ats.dispatcher          # 强制重启（-k 先杀掉旧进程）
 launchctl kickstart -k gui/$(id -u)/com.ats.serve
 ```
 
 在 Claude Code 等沙箱里执行 `launchctl` 不会生效，需要在沙箱外执行。日志在 `var/logs/`
-（`phase-e.*.log`、`data-refresh.*.log`、`serve.*.log`）。
+（`dispatcher.*.log`、`data-refresh.*.log`、`serve.*.log`）。
 
 **核心危险：Python 的懒加载 + 长驻进程。** 常驻进程启动时只预加载了极少数 `ats.*`
 模块，大多数模块在函数体内第一次被调用时才 import。这意味着：
@@ -282,7 +282,7 @@ launchctl kickstart -k gui/$(id -u)/com.ats.serve
   两者混用的行为是未定义的，且不会报错。
 - **规则：任何改动了 `src/ats/` 的改动，只要 daemon 在跑，就必须在改动落盘后显式
   `kickstart -k` 重启对应服务。**
-- 重启时机挑在两次调度之间（研究时间表见 `config/workflow/phase_e_schedules.yaml`），
+- 重启时机挑在两次调度之间（研究时间表见 `config/workflow/research_schedules.yaml`），
   先看日志确认上一个任务刚结束。
 
 交易路径（Chief 定时决策、Clerk 每日对账）尚未切换，目前没有排程；切换时再补本节。
@@ -292,7 +292,7 @@ launchctl kickstart -k gui/$(id -u)/com.ats.serve
 领域库 `var/ats.sqlite`，数据平台库 `var/data.sqlite`，调度与切流状态在 `var/phase_f_*.sqlite`、
 `var/data_refresh.sqlite`、`var/persistent_ingestion.sqlite`。新代码每个运行或 worker 使用独立连接，
 启用 WAL 与 busy timeout，写操作用短事务，远程请求和 LLM 调用不得包在事务里；重试靠唯一约束与幂等写入，
-不靠进程内锁（TARGET §8.5）。台账类表只增不改。
+不靠进程内锁（ARCHITECTURE §8.5）。台账类表只增不改。
 
 - **幂等 upsert 用确定性 ID 做 `INSERT OR REPLACE` 的 key，不用随机 UUID。**
   例如 `pead_dossier` 用 `(symbol, fiscal_label)` 做 key——这样重复调用
@@ -359,7 +359,7 @@ ats chief run                # 收口：读存档→决策→风控→审批→(
 
 ## 13. 相关文档
 
-- 架构、数据流、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
+- 架构、数据流、角色契约 → `docs/ARCHITECTURE.md`
 - 使用者视角、日常操作 → `README.md`
 - 常驻服务与日常运维 → `docs/OPERATIONS.md`
 - 技术面策略与回测证据 → `docs/agents/TECHNICAL_ANALYST.md`

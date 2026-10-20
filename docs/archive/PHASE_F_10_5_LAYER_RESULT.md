@@ -1,6 +1,6 @@
 # 10.5 Layer 消费者切换结果（2026-10-17）
 
-> 范围：`config/sectors/ai_hardware.yaml` 的 8 层，Dispatcher 任务 `layer-review`（每层一个实例，作用域 `layer:<key>`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§4、§7.2、§8.2-5）和 `docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`。只写描述数据与分析，不含投资建议。
+> 范围：`config/sectors/ai_hardware.yaml` 的 8 层，Dispatcher 任务 `layer-review`（每层一个实例，作用域 `layer:<key>`）。依据 `docs/ARCHITECTURE.md`（§4、§7.2、§8.2-5）和 `docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`。只写描述数据与分析，不含投资建议。
 
 ## 一、结论
 
@@ -55,7 +55,7 @@ Layer 评审（Dispatcher 适配器）实际只读两样东西：**命题证人�
 | 第 2 遍观察 | 8/8 **全部复用**（`projection_reused`），0 次模型请求，0 条新投影；用时 12 秒 |
 | 调度切回 | `owner-rollback` 代次 2→3，旧入口重新可用；终态 legacy |
 
-观察用的是 `tmp/phase_f_first_run_20261016/layer/observe.py`：它只对 `layer-review` 一个工作流做与 `ats schedule --phase-e --now` 同样的一次 `run_owned_workflow`，没有走 `--phase-e` 入口，以免误跑另一位同事正在切换的其他工作流；**没有启用任何 `phase_e_schedules` 条目，没有加载常驻进程**（`layer-review` 本来就没有定时条目，Sector 条目带它）。
+观察用的是 `tmp/phase_f_first_run_20261016/layer/observe.py`：它只对 `layer-review` 一个工作流做与 `ats schedule --now` 同样的一次 `run_owned_workflow`，没有走 `--phase-e` 入口，以免误跑另一位同事正在切换的其他工作流；**没有启用任何 `phase_e_schedules` 条目，没有加载常驻进程**（`layer-review` 本来就没有定时条目，Sector 条目带它）。
 
 ## 六、模型请求数（取自 `count_llm.py` 的逐次记录，LangChain 层的真实调用，不是按请求数估的费用）
 
@@ -87,7 +87,7 @@ Layer 评审（Dispatcher 适配器）实际只读两样东西：**命题证人�
 ## 八、问题与待你决定
 
 1. **8 条有缺陷的旧投影仍是 `published`。** 已被更新的取代，不影响读取；是否把它们标成 `failed`（需要对生产库做一次 UPDATE，我的操作被权限分类器拒绝）由你定。
-2. **单层入口和 Dispatcher 适配器不带横截面篮子**，所以 Layer 投影里没有 TARGET §7.3 说的“标的横截面排名”，提示词里也没有量化因子表（整行业旧路径有）。这是既有设计（适配器 `basket=None`），投影结构不变；要补齐属于 §7.3 的投影补齐决定，我没动。
+2. **单层入口和 Dispatcher 适配器不带横截面篮子**，所以 Layer 投影里没有 ARCHITECTURE §7.3 说的“标的横截面排名”，提示词里也没有量化因子表（整行业旧路径有）。这是既有设计（适配器 `basket=None`），投影结构不变；要补齐属于 §7.3 的投影补齐决定，我没动。
 3. **L1、L3 没有命题**，只能出“平稳、低信心”。这是配置缺口，不是数据问题。
 4. **新鲜期之外的盲点**：数据版本看不见模型或提示词的变化，7 天内换了模型仍会复用旧结果；必要时手动重算。
 5. 同一周内，新证据一到（例如 ASML 每天重试抽取）就会让相关层的版本变化而重算，这是预期行为，不是缺陷。

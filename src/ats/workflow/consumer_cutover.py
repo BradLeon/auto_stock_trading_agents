@@ -7,8 +7,8 @@ backed by raw qualification events, entry evidence, compatibility proofs and a
 hash-bound authorization) could not be bootstrapped: a consumer may only switch
 once its new-entry output already exists in production, and the new entry can
 only read once switched. The user ruled (G1-G4) that cutover follows
-TARGET_WORKFLOW_DATAFLOW.md: research reads switch per consumer, and during the
-migration window a failure falls back to the old route (TARGET §14.6 "keep the
+ARCHITECTURE.md: research reads switch per consumer, and during the
+migration window a failure falls back to the old route (archive/ARCHITECTURE_MIGRATION.md §14.6 "keep the
 old entry as a controlled rollback path").
 
 What it does and does not do

@@ -1,4 +1,4 @@
-"""Decision audit domain (Phase B of docs/TARGET_WORKFLOW_DATAFLOW.md).
+"""Decision audit domain (Phase B of docs/ARCHITECTURE.md).
 
 The lifecycle state machine, content hashing and legacy-migration semantics for
 `decision_cycles` / `decision_revisions` / `decision_risk_reviews` /

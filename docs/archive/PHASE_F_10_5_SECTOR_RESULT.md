@@ -1,6 +1,6 @@
 # 10.5 Sector 消费者切换结果（2026-10-17）
 
-> 范围：工作流 `sector-review`，作用域 `sector:ai_hardware`，依赖恰好 8 份有效 `LayerAnalysis`（`docs/archive/PHASE_F_10_5_LAYER_RESULT.md`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§4、§7.2、§8.2-4/5）。只写数据与分析，不含投资建议。
+> 范围：工作流 `sector-review`，作用域 `sector:ai_hardware`，依赖恰好 8 份有效 `LayerAnalysis`（`docs/archive/PHASE_F_10_5_LAYER_RESULT.md`）。依据 `docs/ARCHITECTURE.md`（§4、§7.2、§8.2-4/5）。只写数据与分析，不含投资建议。
 
 ## 一、结论
 
@@ -48,7 +48,7 @@ Sector 评审（Dispatcher 适配器）读：8 份 `LayerAnalysis` 投影；每�
 | 真实首跑（旧入口 `ats sector review ai_hardware`，读路由 target） | 成功，用时 21 分 24 秒；8 份 Layer 投影被 `governed()` 路径读取，发布 `SectorAllocation`（8 份投影编号为输入引用）；写了 8 份层报告和 1 份 HTML 到 Obsidian |
 | 读路由切回演练 | target→legacy→target，经真实 `scoped_read("sector")` 解析，代次 1→2→3（seq 46、47） |
 | 调度切换 | 先 `layer-review`（代次 3→4），再 `sector-review`（1→2）；因为 Sector 的计划带 8 个 Layer 实例，Dispatcher 对每个任务检查负责人 |
-| 第 1 遍观察 | 9 个任务全部成功：**8 个 Layer 全部复用**（Dispatcher 补齐/复用 Layer 依赖，TARGET §8.2-4/5），Sector 重算（旧投影无数据版本）；用时 1917 秒 |
+| 第 1 遍观察 | 9 个任务全部成功：**8 个 Layer 全部复用**（Dispatcher 补齐/复用 Layer 依赖，ARCHITECTURE §8.2-4/5），Sector 重算（旧投影无数据版本）；用时 1917 秒 |
 | 第 2 遍观察 | **9/9 全部复用**，0 次模型请求，0 条新投影；用时 14 秒 |
 | 调度切回 | `sector-review` 2→3，`layer-review` 4→5；终态均为 legacy |
 
@@ -90,7 +90,7 @@ Sector 评审（Dispatcher 适配器）读：8 份 `LayerAnalysis` 投影；每�
 3. **证据判读重复三次、没有缓存**：Layer 一次、Sector 的 `packs_for_layer` 一次、`layer_assessments` 一次，提示词相同。可做进程内或持久缓存（键：命题 + 证据簇集合，随模型/提示词版本失效）。涉及缓存位置和失效策略，属于设计决定，没做。
 4. **Sector 一次运行约 20–32 分钟**（大部分是 `structure_analyst` 的触顶重试）。超时已调到 3600 秒；若上面第 2 条解决，时间会大幅下降。
 5. **旧入口 `ats sector review` 在读路由 target 时每次都会触发 8×（运行时行情 + 共识缓存缺失入队 + 结构层调用）**，且要求 8 份 Layer 投影都存在，所以周六旧级联里 Layer 必须先跑。
-6. `target_weight=1.0` 是各层预算之和截到 1 的既有公式，不是新逻辑；投影结构未改（TARGET §7.3 的三级配置仍是待你决定的事项）。
+6. `target_weight=1.0` 是各层预算之和截到 1 的既有公式，不是新逻辑；投影结构未改（ARCHITECTURE §7.3 的三级配置仍是待你决定的事项）。
 7. 无关的既有失败：`tests/test_sector_viz.py` 4 项（`run_sector_html` 的夹具用不存在的行业名 `test_sector`，`scoped_read` 在解析业务范围时抛 `RouteUnavailable`），`tests/test_sector_allocation.py` 1 项（夹具写死 `valid_until` 2026-09-30，已过期）。均与本次改动无关。
 8. 与 Layer 相同：数据版本看不见模型/提示词变化；新证据或新共识会让对应版本变化而重算。
 

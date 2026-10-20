@@ -91,7 +91,7 @@
 | 结果 | **135 failed / 1398 passed / 22 warnings（170.50s），error = 0** |
 | 日期 | 2026-09-22 |
 
-该数字已回填 `docs/TARGET_WORKFLOW_DATAFLOW.md` §15.1，并附按簇归因（116 项同源 = 86%）。
+该数字已回填 `docs/ARCHITECTURE.md` §15.1，并附按簇归因（116 项同源 = 86%）。
 
 ### 2.2 受限环境测量（仅作对照，不得用作验收判据）
 

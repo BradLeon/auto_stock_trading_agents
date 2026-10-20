@@ -40,7 +40,7 @@ def inventory(as_of, *, config_dir=None):
     root = Path(config_dir or REPO_ROOT / "config")
     load = lambda name: yaml.safe_load((root / name).read_text())
     owners = load("workflow/workflow_owners.yaml")["workflows"]
-    schedules = load("workflow/phase_e_schedules.yaml")["workflows"]
+    schedules = load("workflow/research_schedules.yaml")["workflows"]
     profiles = load("workflow/decision_profiles.yaml")["profiles"]
     coverage = load("data/target_dataflow_coverage.yaml")
     contracts = {c["id"]: c for c in coverage["consumers"]}
@@ -84,9 +84,9 @@ def inventory(as_of, *, config_dir=None):
             "actual_invocation_scope": "bind from actual selected decision/approval/broker records",
             "scope_status": "template_not_execution", "required_by": "TARGET 4/10/11/15.2/15.4"})
     return {"kind": "phase-f-stage-one-inventory-v1", "status": "prepared_not_verified",
-        "as_of": as_of, "authority": file_ref(REPO_ROOT / "docs/TARGET_WORKFLOW_DATAFLOW.md"),
+        "as_of": as_of, "authority": file_ref(REPO_ROOT / "docs/ARCHITECTURE.md"),
         "sources": [file_ref(root / n) for n in ("workflow/workflow_owners.yaml",
-            "workflow/phase_e_schedules.yaml", "workflow/decision_profiles.yaml",
+            "workflow/research_schedules.yaml", "workflow/decision_profiles.yaml",
             "workflow/event_routes.yaml", "data/target_dataflow_coverage.yaml")],
         "groups": groups, "downstream_uses": downstream,
         "event_rules": load("workflow/event_routes.yaml")["events"],
@@ -164,7 +164,7 @@ def failures(junit, previous):
         raise ValueError("original attribution cases missing from discovery JUnit: " + str(missing))
     return {"kind": "phase-f-stage-one-attribution-v1", "status": "prepared_not_final_gate",
         "discovery": file_ref(junit), "previous_attribution": file_ref(previous),
-        "authority": file_ref(REPO_ROOT / "docs/TARGET_WORKFLOW_DATAFLOW.md"),
+        "authority": file_ref(REPO_ROOT / "docs/ARCHITECTURE.md"),
         "discovery_counts": dict(counts), "failures": rows,
         "excluded_count": 0, "final_gate_requires": ["5.16", "final protected closure", "current required/shared safety rechecks"],
         "production_claim": False}
@@ -456,7 +456,7 @@ def financial_use_audit(requirements_path, data_cache, artifact_root):
         return {'kind': 'phase-f-selected-financial-use-audit-v1',
             'status': 'passed' if all(r['status'] == 'passed' for r in results) else 'failed',
             'as_of': point.isoformat(), 'requirements': file_ref(requirements_path),
-            'authority': file_ref(REPO_ROOT / 'docs/TARGET_WORKFLOW_DATAFLOW.md'),
+            'authority': file_ref(REPO_ROOT / 'docs/ARCHITECTURE.md'),
             'implementation': file_ref(Path(__file__)), 'uses': results, 'raw_blobs': list(blobs.values()),
             'historical_backups': list(backups.values()),
             'scope': 'selected financial data uses only; workflow outputs and qualification require 6.4/6.6',

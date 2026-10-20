@@ -1,6 +1,6 @@
 # 基本面分析师（Fundamental Analyst，PEAD 框架）
 
-> 契约以 [`TARGET_WORKFLOW_DATAFLOW.md`](../TARGET_WORKFLOW_DATAFLOW.md) §7.2、§9.2、§9.3 为准；需求条文见
+> 契约以 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §7.2、§9.2、§9.3 为准；需求条文见
 > `openspec/specs/agent/`。运维命令见 [`OPERATIONS.md`](../OPERATIONS.md)。
 
 ## 它回答什么

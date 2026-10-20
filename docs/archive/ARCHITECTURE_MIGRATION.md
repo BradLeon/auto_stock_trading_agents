@@ -1,6 +1,6 @@
-# Workflow / Dataflow 迁移史（从 TARGET_WORKFLOW_DATAFLOW.md 移出）
+# Workflow / Dataflow 迁移史（从 ARCHITECTURE.md 移出）
 
-> 2026-10-20 从 [`docs/TARGET_WORKFLOW_DATAFLOW.md`](../TARGET_WORKFLOW_DATAFLOW.md) 原样移出的四节：切换前的实现映射（§5.4）、
+> 2026-10-20 从 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) 原样移出的四节：切换前的实现映射（§5.4）、
 > 当前实现盘点与差距（§6）、分阶段迁移方案及各阶段实施状态（§14）、2026-09-22 的测试基线（§15.1）。
 > 这些内容记录的是迁移过程，迁移完成后不再代表现状；正文保留原章节号，只写现状并指回这里。
 > 文中 Phase A–F 的 OpenSpec change 均已归档在 `openspec/changes/archive/`。
@@ -209,7 +209,7 @@ assemble_context
 - 发布 Schedule Calendar 数据产品和 trigger ledger。
 - 迁移财报、FOMC、核心宏观事件和人工覆盖。
 
-**实施状态（change `implement-phase-e-dispatcher-and-calendar` 已归档，2026-10-19 核对）**：任务注册表与 Dispatcher、Trigger Ledger（`event_id + event_version + workflow_id` 幂等认领）、task-local SQLite 连接（WAL、busy timeout、短事务）、版本化 `schedule_events` 与只读 Calendar Data Product 均已实现并验收。生产现状：Information、Fundamental 例行与事件、Layer、Sector、Macro、Technical 这 7 个研究工作流的调度负责人是 Dispatcher，常驻进程 `com.ats.phase-e` 只跑研究、不进 Chief、不下单；**主理人决策周期、PEAD 评分窗口以及 journal/clerk 作业仍由旧调度承担**。**生产日历库目前是空的**（`schedule_events` 0 行，`config/data/schedules.yaml` 没有日历刷新任务），事件路径尚未被真实日历事件触发过，现有事件评审均为手动触发。
+**实施状态（change `implement-phase-e-dispatcher-and-calendar` 已归档，2026-10-19 核对）**：任务注册表与 Dispatcher、Trigger Ledger（`event_id + event_version + workflow_id` 幂等认领）、task-local SQLite 连接（WAL、busy timeout、短事务）、版本化 `schedule_events` 与只读 Calendar Data Product 均已实现并验收。生产现状：Information、Fundamental 例行与事件、Layer、Sector、Macro、Technical 这 7 个研究工作流的调度负责人是 Dispatcher，常驻进程 `com.ats.dispatcher` 只跑研究、不进 Chief、不下单；**主理人决策周期、PEAD 评分窗口以及 journal/clerk 作业仍由旧调度承担**。**生产日历库目前是空的**（`schedule_events` 0 行，`config/data/schedules.yaml` 没有日历刷新任务），事件路径尚未被真实日历事件触发过，现有事件评审均为手动触发。
 
 ### 14.6 阶段 F：影子运行与切流
 

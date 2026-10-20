@@ -469,7 +469,7 @@ def chief_revise(state: ChiefDecisionState) -> dict:
 
 
 def manual_review(state: ChiefDecisionState) -> dict:
-    """Bounded loop exhausted (§5.4): leave the cycle for a human."""
+    """Bounded loop exhausted (ARCHITECTURE §5.2): leave the cycle for a human."""
     from ..decision.state import CycleStatus
 
     repo = _decision_repo()

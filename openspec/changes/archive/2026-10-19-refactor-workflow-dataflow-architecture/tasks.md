@@ -137,10 +137,10 @@
 
 > 2026-10-18 子 change 最终回写（13.9；子 change 121/121；2026-10-19 更新：10.6 已完成）。**三种状态分列，互不替代：**
 > - **门禁实现：** 实盘授权门（11.1）、六条切流边界的独立开关、调度单一负责人与幂等、消费者读取健康检查与切换/切回、退役判据与墓碑/回退预检工具均已实现并有测试与真实运行记录；13.7 的 strict、接线/切流/架构守卫、记录一致性和 schema reopen 通过。这些**是实现状态，不等于对应范围已经上线或退役**。
-> - **生产读 / 调度：** 研究读取 6 个消费者（Information、Fundamental、Layer、Macro、Sector、Technical）已在生产切到新路径（target，代次 3），每日健康检查通过；7 个研究工作流调度负责人已切到 Dispatcher，常驻进程 `com.ats.phase-e` 已加载（只跑研究，不进 Chief、不下单）。观察窗口 `phase-f-dispatcher-2026-10-17` 按用户裁决于 10-18 结束；事件路径只用 TSM、ASML 验证。**未切：** Chief 读取新投影、交易、审批、记账。
+> - **生产读 / 调度：** 研究读取 6 个消费者（Information、Fundamental、Layer、Macro、Sector、Technical）已在生产切到新路径（target，代次 3），每日健康检查通过；7 个研究工作流调度负责人已切到 Dispatcher，常驻进程 `com.ats.dispatcher` 已加载（只跑研究，不进 Chief、不下单）。观察窗口 `phase-f-dispatcher-2026-10-17` 按用户裁决于 10-18 结束；事件路径只用 TSM、ASML 验证。**未切：** Chief 读取新投影、交易、审批、记账。
 > - **实盘：** **仍为锁定。** `trades` 表自 10-16 起无新增，`com.ats.schedule`（带 `--live`）未加载，实盘路由未切换；实盘授权库里有一行来源未核实的 `LIVE-X`，不认定为授权，未改动，待用户确认来源。真实 live 切换不在本 change 执行范围。
 > - **旧实现退役：** 27 个登记条目 3 个退出、24 个 pending（其中 8 个登记为 retired 但无法证明清零），未改登记；见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md`。
-> - **仍未完成 / 后补：** 常驻进程的真实定时触发与 LRCX 10-21 盘后事件评审（10.6 已用同一代码路径手动验证，LRCX `[基线 v1]` 已建成）；完整 Routine 内容（完整市场隐含预期、整合叙事/变化路径、逐 KPI 变化解释、可证伪条件）已在 2026-10-19 由 Dispatcher 投影携带，并以 TSM/ASML 的 Q3 财报做了完整财报前后报告，**父 7.5 已勾选**，真实窗口里的产出待 LRCX 之后验证；有限 Routine 签核只覆盖 MRVL/MSFT/NVDA/TSM 四份报告的实际内容，**仍不是 TARGET §9.2 完整达标**。另有：SEC 对后台进程不可达、财报日历库 10-19 已补上但事件路径尚未被真实日历事件触发过（LRCX 10-21 是第一次）、TSM/ASML 的基线币种口径不一致致对比大半不可比、`ibkr_news` 的 partial 重试与超时掩盖原因两个缺陷（10-19 已修请求挂起，这两个仍在）。
+> - **仍未完成 / 后补：** 常驻进程的真实定时触发与 LRCX 10-21 盘后事件评审（10.6 已用同一代码路径手动验证，LRCX `[基线 v1]` 已建成）；完整 Routine 内容（完整市场隐含预期、整合叙事/变化路径、逐 KPI 变化解释、可证伪条件）已在 2026-10-19 由 Dispatcher 投影携带，并以 TSM/ASML 的 Q3 财报做了完整财报前后报告，**父 7.5 已勾选**，真实窗口里的产出待 LRCX 之后验证；有限 Routine 签核只覆盖 MRVL/MSFT/NVDA/TSM 四份报告的实际内容，**仍不是 ARCHITECTURE §9.2 完整达标**。另有：SEC 对后台进程不可达、财报日历库 10-19 已补上但事件路径尚未被真实日历事件触发过（LRCX 10-21 是第一次）、TSM/ASML 的基线币种口径不一致致对比大半不可比、`ibkr_news` 的 partial 重试与超时掩盖原因两个缺陷（10-19 已修请求挂起，这两个仍在）。
 > - **独立于本回写：** 父 change 的新需求、共享安全和整图验收各自独立，不因子 change 的这些状态判通过，也不因 HEAD 上既有的旧专属失败（如 scheduler_jobs、read_cutover 相关测试）阻塞或被掩盖。精简裁决（G1–G4）及被取代要求清单见 `docs/archive/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 第九节。
 
 **2026-10-09 验收裁决（覆盖本节此前的新旧对比/旧业务回退前置）**：以新入口需求矩阵和独立预期断言验收；旧入口不可运行、旧业务错误及新旧差异仅作可选诊断，不阻塞新入口。旧入口仍须退出安全，防重复触发/发布、越权提交和状态污染。恢复可以是经验证的安全停止或恢复已验收的新版本，不强制修复或恢复旧业务。新入口、共享依赖、必需历史/状态和权限失败仍阻塞受影响范围。子 change 的旧工具成果保留，但报告/checker 与恢复/退役判据须按新标准改造，不自动沿用历史签核。
@@ -216,5 +216,5 @@
 - [x] 12.2 运行 OpenSpec strict validation、架构守卫、schema migration/reopen 和 SQLite 并发压力测试 【2026-10-19 完成】`openspec validate --all --strict` 45 项通过；架构/切流/数据层守卫与数据迁移测试通过；新增 tests/test_sqlite_concurrency_stress.py（真实多线程：12 线程×25 次发布投影、8 线程×10 次追加修订、16 线程争抢同一触发），连续 5 次通过，无丢失、无重复、无锁超时。
 - [x] 12.3 验证每笔新系统影子/实际订单都可追溯到 research snapshot、decision revision、risk review 和 Boss approval 【2026-10-19 完成】生产库无新系统订单（`trades` 52 笔均在 2026-07-23 之前，9 笔无法恢复决策链的登记为 broken_link 异常，未伪造关联）；写路径强制关联；隔离环境完整链路 `test_phase_f_integration_evidence` 22 项在当前代码通过。
 - [x] 12.4 验证完整流程在任一必需分析缺失/失败/过期时只产生 incomplete 报告且无法下单
-- [x] 12.5 更新 `TARGET_WORKFLOW_DATAFLOW.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar、Dataflow 专项验收范围和单 live route 规则一致 【2026-10-19 完成】TARGET_WORKFLOW_DATAFLOW.md §14.5/§14.6 补 Phase E/F 实施状态（含生产日历库为空）；PHASE_F_OPERATIONS.md 加 10-15 裁决说明；60 秒新鲜度、最多 3 轮、单一实盘入口与配置一致。
+- [x] 12.5 更新 `ARCHITECTURE.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar、Dataflow 专项验收范围和单 live route 规则一致 【2026-10-19 完成】ARCHITECTURE.md §14.5/§14.6 补 Phase E/F 实施状态（含生产日历库为空）；PHASE_F_OPERATIONS.md 加 10-15 裁决说明；60 秒新鲜度、最多 3 轮、单一实盘入口与配置一致。
 - [x] 12.6 审阅每个 Phase 与横向 Dataflow 专项的待退清单，为未满足项保留具体缺口，不在本 change 中执行未经确认的物理清除

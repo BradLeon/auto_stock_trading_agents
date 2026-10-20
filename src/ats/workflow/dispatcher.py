@@ -647,7 +647,7 @@ class Dispatcher:
             return False, "content_hash_mismatch"
         # Every ref this plan requires must be in the envelope. An adapter adds its own document refs on
         # top of the plan-level ones when it publishes, so strict equality could never hit for Information
-        # or Fundamental (TARGET §8.2-5 reuses on unchanged scope, schema and data vintage). A projection
+        # or Fundamental (ARCHITECTURE §8.2-5 reuses on unchanged scope, schema and data vintage). A projection
         # from a different lineage still lacks the required refs and is refused.
         if set(input_refs) - set(envelope.input_refs):
             return False, "input_refs_changed"
@@ -1094,7 +1094,7 @@ def default_data_vintage(plan: WorkflowPlan, task: TaskInstance, task_inputs: di
 
 
 def _data_vintage_refs(plan: WorkflowPlan, task: TaskInstance, task_inputs: dict) -> list[str]:
-    """The shared-data versions a research task reads (TARGET §8.2-5), so unchanged data is reused.
+    """The shared-data versions a research task reads (ARCHITECTURE §8.2-5), so unchanged data is reused.
 
     Information: the admitted document versions in its lookback for the entity. Routine Fundamental:
     the financial snapshot, the consensus snapshot time and the pre-earnings window state (a window that

@@ -10,7 +10,7 @@
 
 > 2026-10-14 最新用户裁决：完整Routine业务产物的可能缺失记录为Phase F验收后补事项，本轮仅验收现有分类/变化投影、来源引用、schema/血缘/时效及真实执行与回放。用户明确审阅通过MSFT/NVDA/MRVL三份当前Routine报告；TSM恢复执行并可读取原获批集合的新材料。该限定不代表TARGET §9.2完整能力已实现，不构成部署或券商写入授权。
 
-> 2026-10-14 Routine 业务产物复核：此前三标的“通过”仅指当前实现的执行、结构/血缘和新运行/回放门禁通过；对照 TARGET_WORKFLOW_DATAFLOW §7.3/§9.2，业务完整验收仍未通过。实际产物只有逐条分类事实的 narrative 投影（2/9/13份），没有明确产出更新后的市场隐含预期、整合叙事、逐KPI变化/不变理由及可证伪条件。不能将执行通过当作完整需求达标。 详见最终审阅报告的“Routine实际产物审阅与需求缺口”。
+> 2026-10-14 Routine 业务产物复核：此前三标的“通过”仅指当前实现的执行、结构/血缘和新运行/回放门禁通过；对照 ARCHITECTURE §7.3/§9.2，业务完整验收仍未通过。实际产物只有逐条分类事实的 narrative 投影（2/9/13份），没有明确产出更新后的市场隐含预期、整合叙事、逐KPI变化/不变理由及可证伪条件。不能将执行通过当作完整需求达标。 详见最终审阅报告的“Routine实际产物审阅与需求缺口”。
 
 > 2026-10-14 最新：按用户限定，仅用已成功读取的原始材料及缓存验证 MRVL/MSFT/NVDA Routine。三份真实新入口报告的新运行、独立离线回放、正式重开均通过，unsigned；Information 模型请求 0、重采 0、Routine 请求 3、自动重试 0。TSM 按裁决保留阻塞，6.4 整项仍未完成，6.6/6.7 不勾选；未签核、未部署。 详见 PHASE_F_FINAL_EVIDENCE_REVIEW.md 最新三标的中文核签清单，以及本轮 verified_results.json。
 
@@ -36,7 +36,7 @@
 
 # Phase F 冻结准备与最终取证
 
-验收依据为 `docs/TARGET_WORKFLOW_DATAFLOW.md` §9.1、§9.2、§15，以及本 change 的 6.1 → 6.4 → 6.6 → 6.7 → 13.7。所选研究范围为 MRVL、MSFT、NVDA、TSM 的 Routine，每个包含 Information 依赖。其他七家公司和未选 Event 不作为本轮前置；生产 profile 不改。
+验收依据为 `docs/ARCHITECTURE.md` §9.1、§9.2、§15，以及本 change 的 6.1 → 6.4 → 6.6 → 6.7 → 13.7。所选研究范围为 MRVL、MSFT、NVDA、TSM 的 Routine，每个包含 Information 依赖。其他七家公司和未选 Event 不作为本轮前置；生产 profile 不改。
 
 ## 冻结前修复
 
@@ -62,7 +62,7 @@
 
 2026-10-10T14:40:00.196345+00:00 登记最终实现冻结，包含 550 个路径及全部十消费者。冻结文件为本地 `docs/validation/phase_f_final_gate_20261010/final_implementation_freeze.json`。登记时业务代码与广域门禁开始时一致；唯一后续保护面变化为下述正向测试函数的夹具修正，已完成对应复验。任何新的受保护修改仍须重新验证并登记新冻结。
 
-广域门禁实际收集并执行预先指定的 583 项，**582 passed / 1 failed / 0 errors / 0 skipped**，用例无遗漏，执行期间保护指纹稳定。唯一失败是 `test_actual_routine_consumes_published_brief_and_preserves_refs` 只准备 Information brief、缺上一有效预期基线，按 TARGET §9.2 被真实 Routine 拒绝。补齐隔离夹具的带期间基线并检查输出的基线引用后，整个受影响模块、缺基线负向入口及架构/切流/记录/schema 守卫 **88 passed**。逐用例采用对应最后结果，583 个必需用例均有通过记录；不是把广域原结果重写为一次“583 passed”，也不把两轮重叠测试相加。测试函数 AST 和完整保护指纹对比证明修正未改变业务实现、其他测试函数或共享 fixture。原始失败 XML/log、诊断堆栈和逐项核对保留。
+广域门禁实际收集并执行预先指定的 583 项，**582 passed / 1 failed / 0 errors / 0 skipped**，用例无遗漏，执行期间保护指纹稳定。唯一失败是 `test_actual_routine_consumes_published_brief_and_preserves_refs` 只准备 Information brief、缺上一有效预期基线，按 ARCHITECTURE §9.2 被真实 Routine 拒绝。补齐隔离夹具的带期间基线并检查输出的基线引用后，整个受影响模块、缺基线负向入口及架构/切流/记录/schema 守卫 **88 passed**。逐用例采用对应最后结果，583 个必需用例均有通过记录；不是把广域原结果重写为一次“583 passed”，也不把两轮重叠测试相加。测试函数 AST 和完整保护指纹对比证明修正未改变业务实现、其他测试函数或共享 fixture。原始失败 XML/log、诊断堆栈和逐项核对保留。
 
 最终冻结后，最初五类审计反例的真实入口回归 **25 passed**：边界关闭拒绝实际发布、无初始化 capability 拒绝 broker session、缺报告/投影的 CLI 切换拒绝、部分资格不扩大路由范围、首个权威提交后重验失败保持联合冻结。使用隔离库和 FakeIB，没有连接 TWS。OpenSpec strict 与 `git diff --check` 通过。记录分别为 `final_current_engineering_gate.json`、`final_fixture_and_guards.*`、`final_five_audit_counterexamples.*`；这些证明工程行为，不赋予生产资格。
 
@@ -102,7 +102,7 @@ MRVL、MSFT、NVDA 的独立 Information 报告均已生成，new/replay 的必�
 
 ### 多投影与数量条件修复进行中
 
-MRVL、NVDA Routine 的真实 capture/new/replay 均完成，但最终必需 analysis 断言失败，原因为验收器把每个任务的输出数固定为 1。追查发现 Chief manifest 同样覆盖掉同 role/scope 的其他更新，冻结核验也硬性按任务数计算投影数；跨运行复用还可能从同一生产者的一组更新中只选择一份。为满足 TARGET §9.2、§15 的实际输出完整性，3.10、6.1、13.7 已重开。旧冻结、三份通过的 Information 报告、两个失败的 Routine 报告与被停止候选均保留，不沿用其签核或资格。
+MRVL、NVDA Routine 的真实 capture/new/replay 均完成，但最终必需 analysis 断言失败，原因为验收器把每个任务的输出数固定为 1。追查发现 Chief manifest 同样覆盖掉同 role/scope 的其他更新，冻结核验也硬性按任务数计算投影数；跨运行复用还可能从同一生产者的一组更新中只选择一份。为满足 ARCHITECTURE §9.2、§15 的实际输出完整性，3.10、6.1、13.7 已重开。旧冻结、三份通过的 Information 报告、两个失败的 Routine 报告与被停止候选均保留，不沿用其签核或资格。
 
 修复范围事先记录为本地 `multi_projection_and_numeric_impact.json`，共 8 个受保护路径，影响十消费者。Routine 的完整唯一输出集合须逐份核对 scope/schema/hash/时效/输入 vintage/生产者与当前 attempt 的完整引用；Chief 不丢成员，其他角色仍执行单投影契约。跨运行复用若只有单份选择能力，则对多份 Routine 生产者重新计算，不能宣称部分成功。同输入的新 capture 前从已批准、同 entity/as-of 的原文预览冻结明确数量/单位条件；模型输出的百万、万、亿等显式数量须落在原文集合内。此条件只证明数量单位一致，不保证所有语义、归属或投资判断正确。
 

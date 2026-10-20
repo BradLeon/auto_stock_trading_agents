@@ -6,8 +6,8 @@
 
 | 旧任务 | 现在谁承担 | 处置 |
 |---|---|---|
-| PEAD 日常：监控 | Information 简报工作流（`com.ats.phase-e`，周一至周五 08:00 纽约时间） | 已迁走；旧开关 `pead_daily` 关闭 |
-| PEAD 日常：财报前准备 | Fundamental 例行工作流（`com.ats.phase-e`，09:00），窗口内建一次 `[基线 vN]` | 已迁走 |
+| PEAD 日常：监控 | Information 简报工作流（`com.ats.dispatcher`，周一至周五 08:00 纽约时间） | 已迁走；旧开关 `pead_daily` 关闭 |
+| PEAD 日常：财报前准备 | Fundamental 例行工作流（`com.ats.dispatcher`，09:00），窗口内建一次 `[基线 vN]` | 已迁走 |
 | **PEAD 评分窗口**（amc / bmo） | 打分逻辑在 Fundamental 事件工作流；**触发**由财报日历驱动（`phase_e:calendar-consume`） | 打分已迁走，**触发此前没通**（日历库为空），本次补上；旧开关 `pead_score_amc/bmo` 关闭 |
 | 日历事件触发 | `phase_e:calendar-consume`（每天 06:10、18:10 UTC）读取已发布事件 | 保留，`pead_event_triggers` 是新旧路径共用的开关，**保持开启**；`macro_sector_event_triggers` 仍是你设的关闭 |
 | **FactSet 摄入** | 数据刷新控制器的新任务 `factset_month_end_ingest`（每月 1 日 00:30 纽约时间，摄入上月最终版） | **本次补上**；旧开关 `factset_weekly_ingest` 关闭 |

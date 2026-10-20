@@ -58,7 +58,7 @@ src/ats/data/
 
 持久化配置采用“一入口、两领域注册表”：`catalog.yaml` 只装配并校验；结构化与非结构化来源分别登记于 `structured.yaml`、`unstructured.yaml`。股价、期权和券商状态等即时查询只走 Runtime Data Gateway，不进入持久化注册表或采集队列。账户、历史账本、决策和审批通过 Internal State API / 决策执行契约读取。
 
-持久化更新统一走受管队列：手动、定时、事件发现及策略允许的 cache miss 都提交幂等任务；仅持有有效 lease 的 worker 调用 adapter，并依次记录 raw、准入或 quarantine、发布版本及血缘。队列与 `com.ats.data-refresh` launchd 是数据刷新路径；FactSet 月末摄入与财报日历刷新也是数据刷新控制器的任务；`com.ats.phase-e`（Dispatcher）只负责研究 Workflow 的定时与事件调度，不得因日历触发而绕开数据队列。旧调度器 `com.ats.schedule` 已退役。即时行情、期权和券商查询不排队、不保存为研究事实。
+持久化更新统一走受管队列：手动、定时、事件发现及策略允许的 cache miss 都提交幂等任务；仅持有有效 lease 的 worker 调用 adapter，并依次记录 raw、准入或 quarantine、发布版本及血缘。队列与 `com.ats.data-refresh` launchd 是数据刷新路径；FactSet 月末摄入与财报日历刷新也是数据刷新控制器的任务；`com.ats.dispatcher`（Dispatcher）只负责研究 Workflow 的定时与事件调度，不得因日历触发而绕开数据队列。旧调度器 `com.ats.schedule` 已退役。即时行情、期权和券商查询不排队、不保存为研究事实。
 
 Layer Analyst 的持久化输入按来源逐项验收，清单以 A/B/C 记录旧流程是否有实际入口、目标 registry 是否登记及目前运行/发布证据。Evidence Observer 已作为目标角色退役并由 Layer Analyst 承接；历史 alias 与 lineage 保留，旧提取组件可在兼容期作为工具，不构成第二个消费者。
 
@@ -923,7 +923,7 @@ Trader 在版本化 `target-dataflow-v2` 契约中同时消费批准授权与 MA
 
 新资格必须含 runtime_query/timestamp/failure_semantics/no_persistence；授权证明不能替代行情证明。
 清单及共享 API 漂移影响十角色，旧证据保留，最终冻结后按新指纹追加补验，不全量重采。
-协议、阈值与隔离 FakeBroker 范围见 [Trader 入口](../TARGET_WORKFLOW_DATAFLOW.md#104-trader-入口)。
+协议、阈值与隔离 FakeBroker 范围见 [Trader 入口](../ARCHITECTURE.md#104-trader-入口)。
 
 ## FactSet Earnings Insight（已上线）
 

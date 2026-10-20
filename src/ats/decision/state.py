@@ -1,4 +1,4 @@
-"""Decision cycle lifecycle states (docs/TARGET_WORKFLOW_DATAFLOW.md §5.1).
+"""Decision cycle lifecycle states (docs/ARCHITECTURE.md §5.1).
 
 One enum, one terminal set. Every table column, graph node and gate that talks
 about "which state is the cycle in" must reference these names — a second list

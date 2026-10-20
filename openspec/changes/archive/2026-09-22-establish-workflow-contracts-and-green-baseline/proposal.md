@@ -1,6 +1,6 @@
 ## Why
 
-`docs/TARGET_WORKFLOW_DATAFLOW.md` 把 Workflow 与 Dataflow 迁移拆成 Phase A–F 六个阶段：从「硬编码串行 scheduler + 单次通过的 Chief 决策 + 分析师互相读取观点」迁移到「Dispatcher 依赖编排 + 独立分析角色 + 不可变决策 revision + 确定性账本」。Phase A 是其余五个阶段的共同前提，原因有两条。
+`docs/ARCHITECTURE.md` 把 Workflow 与 Dataflow 迁移拆成 Phase A–F 六个阶段：从「硬编码串行 scheduler + 单次通过的 Chief 决策 + 分析师互相读取观点」迁移到「Dispatcher 依赖编排 + 独立分析角色 + 不可变决策 revision + 确定性账本」。Phase A 是其余五个阶段的共同前提，原因有两条。
 
 第一，**没有可重复的绿色基线就无法判断结构性迁移是否引入回归**。当前基线不绿，且失败集中在两类可解释的来源，都不是回归，但都会淹没真实缺陷。
 

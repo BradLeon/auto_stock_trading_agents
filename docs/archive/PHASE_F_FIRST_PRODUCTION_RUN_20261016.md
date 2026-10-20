@@ -209,10 +209,10 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 - 12 项新测试（`tests/test_schedule_owner_switch.py`）；相邻 19 个文件 433 通过、11 个失败全在 `test_chief_snapshot.py`，在 HEAD 上同样失败（既有）。
 
 **生产演练**
-1. 备份调度权威库；`phase_e_schedules.yaml` 启用 information-brief、fundamental-routine 两个条目（legacy 负责人时被忽略）。
+1. 备份调度权威库；`research_schedules.yaml` 启用 information-brief、fundamental-routine 两个条目（legacy 负责人时被忽略）。
 2. 三个工作流切到 dispatcher（代次 1→2），作废 7 条旧 failed 认领（早期预演 4 条、验证运行被新路径拒绝 3 条），全部有理由并入日志。
 3. 三个旧入口（Information、例行基本面、**PEAD 准备 `run_pead`**）均被拒：`schedule frozen or caller is not current owner`。
-4. 一次观察 `ats schedule --phase-e --now`（dry-run，不加载任何常驻进程）：
+4. 一次观察 `ats schedule --now`（dry-run，不加载任何常驻进程）：
    - Information：11 个标的 10 个成功，各一条 dispatcher 认领；LRCX 7 天内无已准入文档，按设计拒绝（fail-closed）。抽取缓存生效：新增 16 次抽取全是新文档（TSM、ASML 0 次）；NVDA、MRVL、TSM、ASML 当天已有简报但被重新发布一份（投影复用因缺数据版本引用不生效）。
    - 例行基本面：11 个标的全部 `blocked`（依赖的 Information 简报不可复用，见 10.8）。
 5. 三个工作流切回 legacy（代次 3），作废 LRCX 那条 failed 认领；证明 Dispatcher 入口返回 `legacy`、旧入口重新可用。终态：所有研究工作流 legacy，读路由仍为 Information、Fundamental target；演练后每日健康检查两消费者 ok。
@@ -237,7 +237,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 - `inputs.py`：`financial_summary`，每项最近 8 期的紧凑表（TSM 568KB→5KB，MRVL 664KB→7KB，NVDA 134KB→3KB），完整数据留在数据产品。
 - 15 项新测试；相邻 50 个测试文件 763 通过、16 失败，全部是 HEAD 上就有的（`test_chief_snapshot` 11 项 + 另 5 项）。过程中有一次回归（`Dispatcher._task_inputs` 被个别测试以未绑定方式调用、同触发复用的严格校验被我误放宽），已修复并保留测试保护的不变量。
 
-**生产验证（终态 legacy）**：三个工作流切到 dispatcher（代次 4）后连跑三遍 `schedule --phase-e --now`：
+**生产验证（终态 legacy）**：三个工作流切到 dispatcher（代次 4）后连跑三遍 `schedule --now`：
 | 遍 | Information | 例行基本面 | 新简报/新预期更新/新抽取 |
 |---|---|---|---|
 | 1 | 10 成功（旧简报无版本，重算），LRCX 无文档拒绝 | 10 成功（4 个 `agent_attempt_missing`、6 个 `no_candidate` 重算），LRCX blocked | 0 / 约 50 / 0（抽取缓存全命中） |
@@ -285,7 +285,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 
 - **先决修复。** ①ASML 最新季只缺 CFO/CapEx（供应商对外国申报人滞后发布）：包门槛在「只缺这两项且同源上一季齐全」时接受并写入 `gaps`，现金流按期次对齐，不借旧季；AMZN 型缺口（新季只有 EPS）仍被拒。②手填 `fiscal_label` 每季过期：10 个配置去掉手填，交易定规模、日报、日记改用 `label_for_reads`（取最新档案的标签）。③Dispatcher 日历事件路径原先不读 `macro_sector_event_triggers`/`pead_event_triggers`，已补上。
 - **8 条缺陷旧 Layer 投影**（首次 Layer 运行的缺陷版本）已备份到 `tmp/phase_f_first_run_20261016/projection_cleanup/` 并标为 `failed`；它们被调度发布台账（只增不改）和复用决策引用，所以不删除、不覆盖；读取方只取到新的。
-- **切换。** 7 个工作流 `owner-switch` 到 dispatcher（批准原文写入日志）；新建并加载 `com.ats.phase-e`；启动补跑由常驻进程执行：macro-review 约 3.5 分钟（1 次模型请求）、sector-review 约 9.5 分钟，均 complete。
+- **切换。** 7 个工作流 `owner-switch` 到 dispatcher（批准原文写入日志）；新建并加载 `com.ats.dispatcher`；启动补跑由常驻进程执行：macro-review 约 3.5 分钟（1 次模型请求）、sector-review 约 9.5 分钟，均 complete。
 - **意外。** 切换过程中 `com.ats.data-refresh` 与 `com.ats.consumer-health` 两个 launchd 任务不在已加载列表里（当时系统负载很高、进程数接近上限），已重新加载；原因不明，建议留意。
 - **未解决。** SEC（sec.gov）连接被重置：本机 DNS 返回 198.18.x（Clash fake-ip），Clash 为全局模式，当前出口节点到 SEC 的 TLS 被重置，沙箱内外一致；需要用户调整 Clash。10.6 待 LRCX 的真实窗口（财报 10-21 amc，prep 窗口 3 天，周一 10-19 的例行任务首次进入窗口）。
 
@@ -312,7 +312,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 
 ### 做了什么
 
-用与常驻进程 `com.ats.phase-e` 的 `fundamental-routine` 定时任务**同一条代码路径**手动跑一遍：触发类型 `schedule`、范围 `portfolio:pead-targets`、请求 `requested_tasks=["fundamental-routine"]`，模型请求逐条计数（脚本 `tmp/phase_f_first_run_20261016/verify/run_routine_tick.py`，输出 `routine_tick_p1.json`、`llm_routine_tick_p1.jsonl`）。这验证的是**逻辑**，不是常驻进程的定时触发本身（下一次真实定时触发是周一 08:00/09:00 纽约时间）。
+用与常驻进程 `com.ats.dispatcher` 的 `fundamental-routine` 定时任务**同一条代码路径**手动跑一遍：触发类型 `schedule`、范围 `portfolio:pead-targets`、请求 `requested_tasks=["fundamental-routine"]`，模型请求逐条计数（脚本 `tmp/phase_f_first_run_20261016/verify/run_routine_tick.py`，输出 `routine_tick_p1.json`、`llm_routine_tick_p1.jsonl`）。这验证的是**逻辑**，不是常驻进程的定时触发本身（下一次真实定时触发是周一 08:00/09:00 纽约时间）。
 
 ### 结果（第 1 遍，用时 52.5 秒，状态 `incomplete`，14 次模型请求）
 
@@ -323,7 +323,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 | 模型请求 | `fundamental_classifier` 10 次、`research_extract` 4 次，共 14 次，0 错误 |
 | 其他标的的窗口 | 都不在财报前 3 天窗口内，没有建基线（预期如此）；它们的例行预期更新正常 |
 | LRCX 基线 `[基线 v1]`（目标期 Q1 FY2027） | **没有生成**；LRCX 也没有任何 `fundamental_event_review`，所以「基线先于事件评审」目前是空成立 |
-| `phase-e.err.log` | 无新增错误；仍是 10-17 已记录的几条警告（Macro 丢弃未知主题键、Sector 一层结构校验失败、yfinance/证据判读连接重置后重试） |
+| `dispatcher.err.log` | 无新增错误；仍是 10-17 已记录的几条警告（Macro 丢弃未知主题键、Sector 一层结构校验失败、yfinance/证据判读连接重置后重试） |
 
 ### 为什么 LRCX 被卡住
 

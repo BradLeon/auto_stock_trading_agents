@@ -27,7 +27,7 @@
 
 ### 2. 2026-10-15 精简裁决同样适用于本 change 的 Phase F 文本
 
-切流以 `docs/TARGET_WORKFLOW_DATAFLOW.md` 为准（G1）；研究读取按消费者整体切换，前置是消费者层面的数据产品健康检查（G2）；迁移期出问题退回旧路径（G3）；以追加裁决方式修订、保留历史（G4）。本 change 中与之冲突的写法以 G1–G4 为准，包括：F.0.2、F.0.6、11.5 的 exact-scope 资格与指纹前置；本文件「逐边界切换」中「每个数据域和消费者须先取得 verified 证据」；以及「安全停止或已验收版本恢复」作为回退前置（改为「已演练切回旧路径」）。被取代、修改、保留的逐条清单见 `docs/archive/PHASE_F_OPENSPEC_REVISION_DRAFT.md` 与 `docs/archive/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 第九节。
+切流以 `docs/ARCHITECTURE.md` 为准（G1）；研究读取按消费者整体切换，前置是消费者层面的数据产品健康检查（G2）；迁移期出问题退回旧路径（G3）；以追加裁决方式修订、保留历史（G4）。本 change 中与之冲突的写法以 G1–G4 为准，包括：F.0.2、F.0.6、11.5 的 exact-scope 资格与指纹前置；本文件「逐边界切换」中「每个数据域和消费者须先取得 verified 证据」；以及「安全停止或已验收版本恢复」作为回退前置（改为「已演练切回旧路径」）。被取代、修改、保留的逐条清单见 `docs/archive/PHASE_F_OPENSPEC_REVISION_DRAFT.md` 与 `docs/archive/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 第九节。
 
 ### 3. 任务级裁定
 
@@ -38,7 +38,7 @@
 
 ## Context（背景）
 
-动机和范围见 `proposal.md`。权威目标文档是 `docs/TARGET_WORKFLOW_DATAFLOW.md`；本设计将其中 Phase A–F 的架构落到适合当前代码库的实现形态，并为横跨各阶段的目标 Dataflow 设置独立专项和 Phase F 前置门禁。
+动机和范围见 `proposal.md`。权威目标文档是 `docs/ARCHITECTURE.md`；本设计将其中 Phase A–F 的架构落到适合当前代码库的实现形态，并为横跨各阶段的目标 Dataflow 设置独立专项和 Phase F 前置门禁。
 
 当前系统已经具备以下基础：
 

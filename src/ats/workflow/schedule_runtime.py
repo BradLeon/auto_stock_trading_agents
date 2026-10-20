@@ -475,7 +475,7 @@ def adapt_wake(workflow, trigger, *, config_dir=None):
         return trigger
     from zoneinfo import ZoneInfo
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
-    schedules = yaml.safe_load((root / "workflow/phase_e_schedules.yaml").read_text())["workflows"]
+    schedules = yaml.safe_load((root / "workflow/research_schedules.yaml").read_text())["workflows"]
     alias = "sector-review" if workflow == "layer-review" else workflow
     if alias not in schedules:
         return trigger
@@ -619,7 +619,7 @@ def expected_triggers(start, end, *, config_dir=None):
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
     switches = event_trigger_switches(config_dir=root)
     market_tz = "America/New_York"
-    schedules = yaml.safe_load((root / "workflow/phase_e_schedules.yaml").read_text())["workflows"]
+    schedules = yaml.safe_load((root / "workflow/research_schedules.yaml").read_text())["workflows"]
     output = {}
     wake_expected = []
 
@@ -688,7 +688,7 @@ def expected_triggers(start, end, *, config_dir=None):
                         context = TriggerContext(kind="event", event_id=record["event_id"], event_version=str(record["event_version"]))
                         for workflow in route["workflow_ids"]:
                             add(workflow, scope, context, "dispatcher")
-    files = ["settings.yaml", "events.yaml", "pead.yaml", "workflow/phase_e_schedules.yaml", "workflow/event_routes.yaml", "workflow/workflow_owners.yaml"]
+    files = ["settings.yaml", "events.yaml", "pead.yaml", "workflow/research_schedules.yaml", "workflow/event_routes.yaml", "workflow/workflow_owners.yaml"]
     return {"window": [start.isoformat(), end.isoformat()], "config_hashes": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
             "expected": sorted(output.values(), key=lambda row: row["key"]), "wake_expected": wake_expected}
 

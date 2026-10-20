@@ -182,7 +182,7 @@ def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float
 
 
 def projection_extras(r, review) -> dict:
-    """The TARGET §7.3 fields of a technical projection: trend state, invalidation, suggested exposure.
+    """The ARCHITECTURE §7.3 fields of a technical projection: trend state, invalidation, suggested exposure.
 
     Entirely code: every statement is a threshold the strategy already uses (SMA200 bear cap, VIX/VIX3M panic
     ratio, the score bands behind `signal`), so no model call is involved and each line can be checked against

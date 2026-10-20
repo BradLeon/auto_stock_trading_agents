@@ -1,7 +1,7 @@
 from ats.workflow.ownership import (dispatch_planned_calendar_events,
                                     dispatch_calendar_event,
                                     load_workflow_owners, owner_mode,
-                                    phase_e_schedule_entries,
+                                    research_schedule_entries,
                                     record_due_calendar_material_waits,
                                     reconcile_calendar_trigger_versions,
                                     dispatch_released_calendar_events,
@@ -20,7 +20,7 @@ def test_all_phase_e_workflow_owners_default_to_legacy_until_opted_in():
     owners = load_workflow_owners()
     assert {value["mode"] for value in owners["workflows"].values()} == {"legacy"}
     assert owner_mode("macro-review") == "legacy"
-    assert phase_e_schedule_entries() == {}
+    assert research_schedule_entries() == {}
 
 
 def test_legacy_owner_does_not_invoke_dispatcher_or_open_phase_e_run():

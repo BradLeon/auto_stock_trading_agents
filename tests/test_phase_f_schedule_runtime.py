@@ -240,7 +240,7 @@ def test_phase_e_startup_consumes_without_restarting_collectors(business_inputs,
     from ats.data.persistent_queue import PersistentIngestionQueue
     context=tick()
     Dispatcher(workflow_store=WorkflowStore(str(isolated.path)),max_workers=1).dispatch(plan(business_inputs,context,"prepare-dispatcher-owner"))
-    path=business_inputs.root/"workflow/phase_e_schedules.yaml"
+    path=business_inputs.root/"workflow/research_schedules.yaml"
     config=yaml.safe_load(path.read_text()); config["workflows"]["technical-review"]["enabled"]=True
     path.write_text(yaml.safe_dump(config)); reset_config_cache()
     task_id=os.environ["ATS_PERSISTENT_QUEUE_TASK_ID"]
@@ -262,7 +262,7 @@ def test_phase_e_startup_consumes_without_restarting_collectors(business_inputs,
 
 def test_independent_oracle_detects_the_dispatcher_omitting_a_tick(business_inputs, isolated):
     from ats.config import reset_config_cache
-    schedules=business_inputs.root/"workflow/phase_e_schedules.yaml"
+    schedules=business_inputs.root/"workflow/research_schedules.yaml"
     config=yaml.safe_load(schedules.read_text());config["workflows"]["technical-review"]["enabled"]=True
     schedules.write_text(yaml.safe_dump(config)); reset_config_cache()
     expected=rt.expected_triggers(datetime(2026,10,9,9,59,tzinfo=dispatcher_daemon.ET),datetime(2026,10,9,10,31,tzinfo=dispatcher_daemon.ET))

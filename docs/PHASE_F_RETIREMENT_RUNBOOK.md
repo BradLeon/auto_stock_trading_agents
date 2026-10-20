@@ -82,7 +82,7 @@
 
 ## 六、安全恢复与观察窗口（12.3）
 
-窗口 `phase-f-dispatcher-2026-10-17`：7 个研究工作流，起点 10-17，**终点 10-18（用户裁决，取代原建议的 10-28）**，六条停止条件；10-18 核对结果见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md`（五条未触发，第③条有一次 LRCX 信息简报缺失，属数据缺口，待用户裁决是否算触发）。回退：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e`。详见 `docs/archive/PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md`。
+窗口 `phase-f-dispatcher-2026-10-17`：7 个研究工作流，起点 10-17，**终点 10-18（用户裁决，取代原建议的 10-28）**，六条停止条件；10-18 核对结果见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md`（五条未触发，第③条有一次 LRCX 信息简报缺失，属数据缺口，待用户裁决是否算触发）。回退：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.dispatcher`。详见 `docs/archive/PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md`。
 
 ## 七、退出责任（谁、什么条件下、做什么）
 

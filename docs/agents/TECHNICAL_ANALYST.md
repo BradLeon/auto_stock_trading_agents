@@ -6,7 +6,7 @@
 > PEAD 之后、Chief 之前」描述的是旧调度器的串行级联，现在它与其他分析独立运行。策略的数学定义与回测证据不变。
 
 > 面向：决策者 / 设计者。讲这个角色回答什么问题、怎么算、凭什么相信它、代价是什么。
-> 代码规范见 `docs/DEVELOPMENT.md`；系统全局设计见 `docs/TARGET_WORKFLOW_DATAFLOW.md`。
+> 代码规范见 `docs/DEVELOPMENT.md`；系统全局设计见 `docs/ARCHITECTURE.md`。
 
 ---
 
@@ -233,7 +233,7 @@ crush"，收益完全来自期权的隐含波动率盯市与随后回落，正�
 
 ## 9. 相关文档
 
-- 系统全局设计、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
+- 系统全局设计、角色契约 → `docs/ARCHITECTURE.md`
 - 代码规范、配置分层 → `docs/DEVELOPMENT.md`
 - 调度与触发 → `docs/OPERATIONS.md` 第 3 节
 - 宏观分析师（同为确定性优先的设计）→ `docs/agents/MACRO_ANALYST.md`

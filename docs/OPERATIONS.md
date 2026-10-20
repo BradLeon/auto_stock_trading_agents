@@ -1,7 +1,7 @@
 # 运维手册
 
 > 读者：运行和维护这套系统的人。讲**现在**怎么装、怎么看、怎么停、怎么修。
-> 设计与契约见 [`TARGET_WORKFLOW_DATAFLOW.md`](TARGET_WORKFLOW_DATAFLOW.md)，代码约定见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
+> 设计与契约见 [`ARCHITECTURE.md`](ARCHITECTURE.md)，代码约定见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
 > 命令默认已激活 `.venv`（或写成 `.venv/bin/ats …`）。
 
 ## 1. 有哪些服务
@@ -9,17 +9,17 @@
 | launchd 服务 | 做什么 | 进程 | 节奏 |
 |---|---|---|---|
 | `com.ats.data-refresh` | 数据刷新控制器：结构化/非结构化采集、文档准入、财报日历刷新、FactSet 月末摄入 | `python -m ats.data.refresh tick` | 每小时一次 |
-| `com.ats.phase-e` | 研究调度（Dispatcher）：按时间表与日历事件运行 7 个研究工作流；**不进 Chief、不下单** | `ats schedule --phase-e` | 常驻 |
+| `com.ats.dispatcher` | 研究调度（Dispatcher）：按时间表与日历事件运行 7 个研究工作流；**不进 Chief、不下单** | `ats schedule` | 常驻 |
 | `com.ats.serve` | 飞书审批回调（签名链接） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
 
 
-plist 在 `~/Library/LaunchAgents/`；`data-refresh`、`phase-e` 的模板在 `deploy/launchd/`。
+plist 在 `~/Library/LaunchAgents/`；`data-refresh`、`dispatcher` 的模板在 `deploy/launchd/`。
 
 ```bash
 launchctl list | grep com.ats                                     # 状态（PID 一列为 - 表示当前没在跑）
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ats.phase-e.plist   # 加载
-launchctl kickstart -k gui/$(id -u)/com.ats.phase-e               # 重启（改了 src/ 后必须做）
-launchctl bootout gui/$(id -u)/com.ats.phase-e                    # 停掉全部研究调度
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ats.dispatcher.plist   # 加载
+launchctl kickstart -k gui/$(id -u)/com.ats.dispatcher               # 重启（改了 src/ 后必须做）
+launchctl bootout gui/$(id -u)/com.ats.dispatcher                    # 停掉全部研究调度
 ```
 
 - **改了 `src/ats/` 必须重启对应常驻进程。** 常驻进程懒加载模块，不重启会出现新旧代码混跑且不报错。
@@ -40,13 +40,13 @@ ats events upcoming --days 14        # 未来两周的财报与宏观事件
 ats events candidates                # 来源冲突、被挡住等你裁决的事件
 ```
 
-日志在 `var/logs/`：`phase-e.{out,err}.log`、`data-refresh.*.log`、`serve.*.log`。
+日志在 `var/logs/`：`dispatcher.{out,err}.log`、`data-refresh.*.log`、`serve.*.log`。
 
 ## 3. 研究调度
 
 ### 3.1 时间表与事件
 
-时间表在 `config/workflow/phase_e_schedules.yaml`，只有负责人是 dispatcher 时才生效：
+时间表在 `config/workflow/research_schedules.yaml`，只有负责人是 dispatcher 时才生效：
 
 | 工作流 | 时间 | 范围 |
 |---|---|---|
@@ -194,7 +194,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | 审批链接突然 404 / 不可达 | Clash TUN 用 GVisor 栈时会重置 cloudflared 到边缘 7844 端口的长连接；把 TUN 堆栈改为 System，`pkill cloudflared` 重起，更新 `FEISHU_APPROVE_BASE` 并重启 serve。人在 Mac 前也可以直接在本机打开 `http://127.0.0.1:8000/feishu/approve?...` |
 | 抽取角色偶发「空工具调用」 | 隐藏推理吞掉了工具调用；`run_structured` 第一次空返回后会关闭推理重试 |
 | 某只票的信息简报 `incomplete` | 多半是该标的 7 天内没有已准入资讯（数据缺口），看数据刷新与资讯覆盖，不是新逻辑缺陷 |
-| 定时任务没跑 | 看 `phase-e.err.log` 是否有 `misfire_grace_exceeded`；或该工作流被停用（`ats dispatch owner-log`） |
+| 定时任务没跑 | 看 `dispatcher.err.log` 是否有 `misfire_grace_exceeded`；或该工作流被停用（`ats dispatch owner-log`） |
 
 ## 10. 数据与备份
 

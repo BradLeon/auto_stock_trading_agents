@@ -112,7 +112,7 @@ class TriggerContext(BaseModel):
 # Decision-required categories (Phase D task 1.4)
 # --------------------------------------------------------------------------- #
 
-# The six decision-required analysis categories (docs/TARGET_WORKFLOW_DATAFLOW.md
+# The six decision-required analysis categories (docs/ARCHITECTURE.md
 # §10.1). Requirement satisfaction is judged per CATEGORY, not per task_id: the
 # fundamental analyst runs in exactly one of two modes per cycle, so demanding
 # both task ids would leave every cycle permanently incomplete. A category is

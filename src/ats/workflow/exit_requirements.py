@@ -59,7 +59,7 @@ def verify_new_coverage(requirements, *, report_reader=None):
 def required_plan_uses(plan):
     """Derive the selected request's dependency closure before reading reports.
 
-    TARGET_WORKFLOW_DATAFLOW sections 8.2/15.3 govern the required set: a
+    ARCHITECTURE sections 8.2/15.3 govern the required set: a
     single research task need not pass unrelated workflows. This inventory
     covers analysis tasks only; decision-profile and downstream approval/trade
     requirements are checked by their own business gates.
@@ -90,7 +90,7 @@ def verify_plan_coverage(plan, bindings):
     if missing or extra:
         return {"status": "pending", "required_uses": required,
                 "missing_uses": missing, "unexpected_uses": extra,
-                "criterion": "TARGET_WORKFLOW_DATAFLOW 8.2 and 15.3 selected dependency closure"}
+                "criterion": "ARCHITECTURE 8.2 and 15.3 selected dependency closure"}
     requirements = [{**bindings[r["use"]], **r} for r in required]
     checked = verify_new_coverage(requirements)
     for requirement, row in zip(requirements, checked["requirements"]):
@@ -108,7 +108,7 @@ def verify_plan_coverage(plan, bindings):
             if task["output_schema"] != requirement["schema"]:
                 raise ValueError("required task schema differs from measured report")
             row.update(task_id=task["task_id"], task_scope=task["scope"],
-                       required_by="TARGET_WORKFLOW_DATAFLOW 8.2/15.3")
+                       required_by="ARCHITECTURE 8.2/15.3")
         except (OSError, sqlite3.Error, KeyError, TypeError, ValueError) as exc:
             row["status"] = "missing"
             row["problems"].append(str(exc))

@@ -344,7 +344,7 @@ class MacroReview(BaseModel):
     themes: list[ThemeAssess] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
     falsifier: str = ""                # 什么观察会推翻这次判断（必须具体可观测）
-    # TARGET §7.3 (2026-10-17): scenarios and the validity window. Default-empty so rows written before they
+    # ARCHITECTURE §7.3 (2026-10-17): scenarios and the validity window. Default-empty so rows written before they
     # existed still revalidate out of `macro_reviews.payload`.
     scenarios: list[MacroScenario] = Field(default_factory=list)
     horizon: str = ""

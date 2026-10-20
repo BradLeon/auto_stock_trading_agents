@@ -89,7 +89,7 @@ class _Payload(BaseModel):
 
     schema_name: str = ""
     schema_version: str = "v1"
-    # Additive fields (2026-10-17, TARGET §7.3 enrichment). An EMPTY value is left out of the dump, so a payload
+    # Additive fields (2026-10-17, ARCHITECTURE §7.3 enrichment). An EMPTY value is left out of the dump, so a payload
     # that does not use them hashes exactly as it did before they existed: historical projections stay valid,
     # keep their content hash and need no re-run. A non-empty value is hash-bound like any other field.
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = ()
@@ -159,7 +159,7 @@ class LayerAnalysisPayload(_Payload):
     summary: str = Field(min_length=1)
     findings: list[str] = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
-    # --- TARGET §7.3 additive fields ---
+    # --- ARCHITECTURE §7.3 additive fields ---
     cycle_position: str = ""
     has_claims: bool | None = None
     reversal_triggers: list[str] = Field(default_factory=list)
@@ -260,7 +260,7 @@ class SectorAllocationPayload(_Payload):
     target_weight: float = Field(ge=0.0, le=1.0)
     rationale: str = Field(min_length=1)
     drivers: list[str] = Field(default_factory=list)
-    # --- TARGET §7.3 additive fields: sector -> layer -> name, each with its fact references ---
+    # --- ARCHITECTURE §7.3 additive fields: sector -> layer -> name, each with its fact references ---
     layers: list[LayerAllocation] = Field(default_factory=list)
     names: list[NameAllocation] = Field(default_factory=list)
     fact_refs: list[str] = Field(default_factory=list)
@@ -512,7 +512,7 @@ class MacroReviewPayload(_Payload):
     regime: Literal["risk_on", "risk_off", "transition", "unclear"]
     summary: str = Field(min_length=1)
     indicators: list[str] = Field(min_length=1)
-    # --- TARGET §7.3 additive fields ---
+    # --- ARCHITECTURE §7.3 additive fields ---
     # `regime` above is derived by code from the quadrant (deterministic, checkable); `narrative_regime` is the
     # review's own one-line wording. They can legitimately differ and are both shown, labelled.
     narrative_regime: str = ""
@@ -545,7 +545,7 @@ class TechnicalReviewPayload(_Payload):
     signal: Literal["bullish", "bearish", "neutral"]
     summary: str = Field(min_length=1)
     levels: dict[str, float] = Field(default_factory=dict)
-    # --- TARGET §7.3 additive fields, all computed by code (no model call) ---
+    # --- ARCHITECTURE §7.3 additive fields, all computed by code (no model call) ---
     trend_state: str = ""
     score: int | None = Field(default=None, ge=0, le=7)
     score_detail: dict[str, bool] = Field(default_factory=dict)

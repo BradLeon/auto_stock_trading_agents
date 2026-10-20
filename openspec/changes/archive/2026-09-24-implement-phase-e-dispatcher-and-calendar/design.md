@@ -1,6 +1,6 @@
 ## Context
 
-动机见 `proposal.md`，行为约束见本 change 的三个 delta spec。`docs/TARGET_WORKFLOW_DATAFLOW.md` §8、§13、§14.5 是目标边界；`refactor-workflow-dataflow-architecture` 的 Phase E 是总体任务来源，本文件给出该阶段的可实施方案。
+动机见 `proposal.md`，行为约束见本 change 的三个 delta spec。`docs/ARCHITECTURE.md` §8、§13、§14.5 是目标边界；`refactor-workflow-dataflow-architecture` 的 Phase E 是总体任务来源，本文件给出该阶段的可实施方案。
 
 截至 2026-09-24，Phase A–C 的专项 change 已归档，Phase D 的角色入口正在实施。代码库已有 `workflow/run_contracts.py` 的 `WorkflowTaskSpec`、`TaskRegistry`、`TriggerContext`、`WorkflowRunRequest/Result`，已有类型化 `task_projection_envelopes` 和 Chief 研究快照校验；这些契约尚未接入运行调度。`runtime/scheduler.py` 仍采用 `BlockingScheduler` 的单 worker 和 `_daily`/`_weekly_review` 顺序调用，事件来自静态 `config/events.yaml`。PEAD 财报窗口包含“实际公布后才能评分”、未知 session 双窗口探测和补打逻辑，迁移必须保留这些业务门槛。`get_store()` 缓存 `TradingMemory`，它持有可跨线程使用的同一个 SQLite 连接，不能直接并行运行旧入口。
 

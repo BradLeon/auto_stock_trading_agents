@@ -187,9 +187,9 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
     return {"workflow_id": workflow_id, "owner": mode, **result}
 
 
-def phase_e_schedule_entries(*, config_dir: str | Path | None = None) -> dict[str, dict[str, Any]]:
+def research_schedule_entries(*, config_dir: str | Path | None = None) -> dict[str, dict[str, Any]]:
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
-    payload = yaml.safe_load((root / "workflow" / "phase_e_schedules.yaml").read_text(
+    payload = yaml.safe_load((root / "workflow" / "research_schedules.yaml").read_text(
         encoding="utf-8")) or {}
     owners = load_workflow_owners(config_dir).get("workflows", {})
     entries = {}
@@ -226,7 +226,7 @@ def event_trigger_switches(*, config_dir: str | Path | None = None) -> dict[str,
     Layer/Sector family) on FOMC/CPI/PCE/NFP/GDP releases. A missing key keeps the production default.
     """
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
-    payload = yaml.safe_load((root / "workflow" / "phase_e_schedules.yaml").read_text(
+    payload = yaml.safe_load((root / "workflow" / "research_schedules.yaml").read_text(
         encoding="utf-8")) or {}
     switches = payload.get("event_triggers", {}) or {}
     return {"earnings": bool(switches.get("earnings", True)),
@@ -491,6 +491,6 @@ def reconcile_calendar_trigger_versions(*, calendar_store=None, now: datetime | 
 __all__ = ["OwnershipError", "load_workflow_owners", "owner_mode",
            "dispatch_calendar_event", "dispatch_released_calendar_events",
            "record_due_calendar_material_waits",
-           "dispatch_planned_calendar_events", "phase_e_schedule_entries",
+           "dispatch_planned_calendar_events", "research_schedule_entries",
            "reconcile_calendar_trigger_versions", "run_owned_workflow",
            "workflow_store_for_owner"]

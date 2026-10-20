@@ -204,7 +204,7 @@ _DIVERGENT = {"contradicted", "mixed"}
 
 
 def projection_extras(layer, verdict: LayerVerdict, assessments=None) -> dict:
-    """TARGET §7.3 fields of a LayerAnalysis: entities, cross-section, common / divergent evidence.
+    """ARCHITECTURE §7.3 fields of a LayerAnalysis: entities, cross-section, common / divergent evidence.
 
     The ranking rests on the evidence readings the engine already produced (`EntityReading`: standing, basis,
     cluster count), NOT on financials — those cover few names — and says so in `cross_section_basis`.

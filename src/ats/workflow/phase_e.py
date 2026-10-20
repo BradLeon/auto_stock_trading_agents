@@ -53,7 +53,7 @@ TASK_DEPENDENCIES: dict[str, tuple[str, ...]] = {
 }
 FRESHNESS_SECONDS: dict[str, int] = {
     # Information and Routine reuse while their data vintage is unchanged, up to 72 hours (user ruling
-    # 2026-10-16, TARGET §8.2-5): an unchanged document set or financial snapshot is never re-analysed.
+    # 2026-10-16, ARCHITECTURE §8.2-5): an unchanged document set or financial snapshot is never re-analysed.
     # Layer and Sector are weekly (Saturday) reviews: reuse needs an unchanged data vintage (Layer: the evidence
     # observation set and knowledge-note versions; Sector: cohort financials, consensus, FactSet, last NYSE
     # session and the eight Layer projection ids). 7 days (one weekly cycle) only caps reuse where the vintage

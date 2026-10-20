@@ -106,5 +106,5 @@
 ## 附录：本轮修改与记录一览
 
 - 代码与测试：见提交记录（`git log feat/rebuild_workflow_dataflow`，最近 8 个提交覆盖数据流补齐、Macro 迁移、推理预算、投影补齐、7 个工作流上线、证据判读缓存、事件评审修复）。
-- 记录：[12.1 清零](PHASE_F_12_1_CLEARANCE_20261017.md)、[12.3 回滚窗口](PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md)、[12.7 退役 runbook](../PHASE_F_RETIREMENT_RUNBOOK.md)、[12.8 退役核验](PHASE_F_12_8_RETIREMENT_20261018.md)、[首轮生产记录](PHASE_F_FIRST_PRODUCTION_RUN_20261016.md)、[切换条件](../PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md)。
+- 记录：[12.1 清零](PHASE_F_12_1_CLEARANCE_20261017.md)、[12.3 回滚窗口](PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md)、[12.7 退役 runbook](../PHASE_F_RETIREMENT_RUNBOOK.md)、[12.8 退役核验](PHASE_F_12_8_RETIREMENT_20261018.md)、[首轮生产记录](PHASE_F_FIRST_PRODUCTION_RUN_20261016.md)、[切换条件](PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md)。
 - 命令输出：`docs/archive/phase_f_first_run_review_20261016/` 下的 `retirement_*_20261018.*`。

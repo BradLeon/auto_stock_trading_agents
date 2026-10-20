@@ -168,7 +168,7 @@ uv sync --python 3.12 \
 
 研究侧由常驻服务 `com.ats.phase-e`（`ats schedule --phase-e`，不进 Chief、不下单）、
 `com.ats.data-refresh`、`com.ats.consumer-health` 驱动，安装与操作见
-[`PHASE_F_OPERATIONS.md`](PHASE_F_OPERATIONS.md) 与 [`DEVELOPMENT.md`](DEVELOPMENT.md) 第 9 节。
+[`PHASE_F_OPERATIONS.md`](PHASE_F_OPERATIONS.md) 与 [`DEVELOPMENT.md`](../DEVELOPMENT.md) 第 9 节。
 **交易路径（Chief 定时决策 → 风控 → 飞书审批 → 执行）尚未切换到新路径，目前没有定时排程**；
 在它切换之前，Chief 只能手动运行：
 

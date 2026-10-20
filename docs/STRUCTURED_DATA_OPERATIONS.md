@@ -832,7 +832,7 @@ ats data factset-reprocess factset-text-v2 --report-path /absolute/path/Earnings
 
 ## Phase F 持久运行许可
 
-Phase F 持久运行许可使用显式 `until_stopped` 部署请求和稳定 `per_invocation` scope；逐次 as_of、查询窗口、实际事件和输入有效性独立检查。报价阶段用途与 `deployment_purpose` 分列，许可不替代单笔审批。实现、隔离验证和后续生产冻结/资格步骤见 [持久运行报告](PHASE_F_PERSISTENT_RUNTIME.md)。
+Phase F 持久运行许可使用显式 `until_stopped` 部署请求和稳定 `per_invocation` scope；逐次 as_of、查询窗口、实际事件和输入有效性独立检查。报价阶段用途与 `deployment_purpose` 分列，许可不替代单笔审批。实现、隔离验证和后续生产冻结/资格步骤见 [持久运行报告](archive/PHASE_F_PERSISTENT_RUNTIME.md)。
 
 ## AI 生产化 Observer 运维
 

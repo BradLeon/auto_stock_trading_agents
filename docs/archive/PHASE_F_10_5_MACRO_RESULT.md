@@ -1,6 +1,6 @@
 # 10.5 第二批：Macro 切换结果（2026-10-17）
 
-> 范围：只做 Macro（工作流 `macro-review`，消费者 `macro`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md` 与 `docs/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`，照搬 Technical 的路径。未提交任何代码；未启用 `phase_e_schedules` 节奏、未加载常驻 `schedule --phase-e`、未启用任何数据任务；未改投影 schema；未碰 Layer/Sector、PEAD、ibkr_news、交易/审批路径。
+> 范围：只做 Macro（工作流 `macro-review`，消费者 `macro`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md` 与 `docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`，照搬 Technical 的路径。未提交任何代码；未启用 `phase_e_schedules` 节奏、未加载常驻 `schedule --phase-e`、未启用任何数据任务；未改投影 schema；未碰 Layer/Sector、PEAD、ibkr_news、交易/审批路径。
 
 ## 一句话结论
 

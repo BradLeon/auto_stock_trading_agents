@@ -1,6 +1,6 @@
 # 10.5 Layer 消费者切换结果（2026-10-17）
 
-> 范围：`config/sectors/ai_hardware.yaml` 的 8 层，Dispatcher 任务 `layer-review`（每层一个实例，作用域 `layer:<key>`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§4、§7.2、§8.2-5）和 `docs/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`。只写描述数据与分析，不含投资建议。
+> 范围：`config/sectors/ai_hardware.yaml` 的 8 层，Dispatcher 任务 `layer-review`（每层一个实例，作用域 `layer:<key>`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§4、§7.2、§8.2-5）和 `docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`。只写描述数据与分析，不含投资建议。
 
 ## 一、结论
 

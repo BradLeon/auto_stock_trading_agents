@@ -201,7 +201,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 
 ## 追加：10.4 首批调度切换演练（Information、Fundamental、PEAD，2026-10-16）
 
-**用户裁决：** 不做应用内成本护栏（由 API key 管理方设上限），但逻辑上不得重复发起模型请求、能用缓存就用缓存；演练后终态留在 legacy，并写明何时可切新逻辑（`docs/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`）；Layer/Sector/Macro/Technical 记为 Phase F 内待办（10.5）；当前只做 Information、Fundamental、PEAD。
+**用户裁决：** 不做应用内成本护栏（由 API key 管理方设上限），但逻辑上不得重复发起模型请求、能用缓存就用缓存；演练后终态留在 legacy，并写明何时可切新逻辑（`docs/archive/PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`）；Layer/Sector/Macro/Technical 记为 Phase F 内待办（10.5）；当前只做 Information、Fundamental、PEAD。
 
 **代码（已测试，未提交）**
 - `read_windows.select()`：没有精确窗口、且消费者整体路由为 target 时，Dispatcher 计划绑定自身业务身份；精确窗口（有效或无效）仍优先，旧路径消费者仍被拒。修复前只读探针显示 `bind_plan` 被拒（`workflow has no explicitly authorized read window`），修复后 Information、Fundamental 通过、Technical（旧路径）仍被拒。

@@ -413,4 +413,4 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 - 静态知识分层、谁读知识库、怎么发现它该更新 → `docs/KNOWLEDGE.md`
 - 证据观察员的边界与用法 → `docs/EVIDENCE_OBSERVER.md`
 - 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
-- 从 paper 到 live 的历史 checklist → `docs/GO_LIVE.md`
+- 从 paper 到 live 的历史 checklist → `docs/archive/GO_LIVE.md`

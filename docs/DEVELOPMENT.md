@@ -365,6 +365,6 @@ ats chief run                # 收口：读存档→决策→风控→审批→(
 
 - 架构、数据流、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
 - 使用者视角、日常操作 → `README.md`
-- 常驻服务与调度运维 → `docs/PHASE_F_OPERATIONS.md`
+- 常驻服务与日常运维 → `docs/OPERATIONS.md`
 - 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
 - 数据源清单与状态 → `docs/DATA_SOURCES.md`

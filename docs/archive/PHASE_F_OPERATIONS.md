@@ -4,7 +4,7 @@
 
 本手册对应 `implement-phase-f-shadow-run-and-cutover`。所有命令使用项目 uv 环境。生产部署需要当前 exact-scope 资格、当前新入口验收签核和明确部署授权；隔离 fixture 不满足这些条件。C3 仍关闭真实自动券商写入，隔离验收可明确选择无网络 FakeBroker。
 
-架构及验收依据为 [TARGET_WORKFLOW_DATAFLOW.md](TARGET_WORKFLOW_DATAFLOW.md)，逐项对应见 [验收要求映射](PHASE_F_ACCEPTANCE_REQUIREMENTS.md)。本手册不扩展其角色依赖、单次运行范围或上线条件。
+架构及验收依据为 [TARGET_WORKFLOW_DATAFLOW.md](../TARGET_WORKFLOW_DATAFLOW.md)，逐项对应见 [验收要求映射](../PHASE_F_ACCEPTANCE_REQUIREMENTS.md)。本手册不扩展其角色依赖、单次运行范围或上线条件。
 
 2026-10-10 用户明确运行语义：上线批准一次，在批准范围内持续运行直到主动停用/撤销，无需逐 tick/逐日部署续批。部署许可寿命与 as_of、查询窗口及资格/输入 TTL 分离；每次仍自动核验当前许可、资格、报告、输入与停止/代次。历史有限授权不自动升级；现有命令的有限 valid-until 不应被解读为已经实现持久运行许可。此改造由 5.16 承接，任务仍待完成，生产操作须等其实现与验证。
 
@@ -89,4 +89,4 @@ requirements 在验收前逐项声明 use/consumer/精确 scope、report_id/repo
 
 部署负责人负责 scope、停止阈值和窗口，验收权限方负责报告签核，采集/source owner 保持既有归属，历史清理负责人处理外部保留义务。只有条件全满足的具体条目才能申请受控退役；保留原 target_phase，未满足条目逐项列出缺项和负责人。历史判据工具实现完成与当前退出结果分列。墓碑、读取拒绝和历史引用保留之后才可另行审批物理清除；本 change 不删除历史数据。
 
-阶段一的独立归因、用途盘点、预检命令与未批准的生产观察方案见 [阶段一报告](archive/PHASE_F_STAGE_ONE.md)。正式冻结和生产动作仍按 tasks 依赖推进。
+阶段一的独立归因、用途盘点、预检命令与未批准的生产观察方案见 [阶段一报告](PHASE_F_STAGE_ONE.md)。正式冻结和生产动作仍按 tasks 依赖推进。

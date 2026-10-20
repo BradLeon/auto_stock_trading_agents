@@ -148,7 +148,7 @@ flowchart LR
 ## 一天是怎么运作的
 
 整套系统由四个常驻或定时服务驱动，都交给 launchd 管理（命令和排障见
-[运维手册](docs/PHASE_F_OPERATIONS.md)）：
+[运维手册](docs/OPERATIONS.md)）：
 
 | 服务 | 做什么 | 节奏 |
 |---|---|---|
@@ -312,7 +312,7 @@ ats trader perf                      # 历史绩效
 
 - [`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md) —— Workflow、Dataflow、
   Agent 职责与审批链的唯一权威设计
-- [`docs/PHASE_F_OPERATIONS.md`](docs/PHASE_F_OPERATIONS.md) —— 常驻服务、调度负责人切换与回退、日常运维
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) —— 常驻服务、每日检查、调度负责人切换与回退、数据刷新、事件日历、首次安装、排障
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —— 环境搭建、代码规范、测试约定
 - [`docs/TECHNICAL_ANALYST.md`](docs/TECHNICAL_ANALYST.md)、[`docs/MACRO_ANALYST.md`](docs/MACRO_ANALYST.md)、
   [`docs/SECTOR_ANALYST.md`](docs/SECTOR_ANALYST.md) —— 各分析师的方法

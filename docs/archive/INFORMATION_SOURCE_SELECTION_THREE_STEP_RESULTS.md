@@ -11,7 +11,7 @@
 |NVDA|39|5|5|6|5|23|
 |TSM|38|7|7|8|6|22|
 
-完整JSON包含逐篇结果和过滤计数：[combined_review.json](../tmp/information_selection_implementation_20261012/round5/three_step_preparation/combined_review.json)。
+完整JSON包含逐篇结果和过滤计数：[combined_review.json](../../tmp/information_selection_implementation_20261012/round5/three_step_preparation/combined_review.json)。
 
 有usage的已知小计：{'prompt_tokens': 172992, 'completion_tokens': 68265, 'total_tokens': 241257}；0次没有usage记录。供应商返回费用合计 $0.045993，0次费用未知；这不是账户账单核对。
 

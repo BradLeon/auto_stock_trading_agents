@@ -94,7 +94,7 @@
 
 ## 1. 依据与范围
 
-依据 [TARGET_WORKFLOW_DATAFLOW.md §9.1](TARGET_WORKFLOW_DATAFLOW.md#91-information-analyst) 及其数据与角色边界：
+依据 [TARGET_WORKFLOW_DATAFLOW.md §9.1](../TARGET_WORKFLOW_DATAFLOW.md#91-information-analyst) 及其数据与角色边界：
 
 - Data Platform 负责外部采集、文档准入、不可变版本及可追溯的实体关联元数据（可含带来源归属的观点）。
 - Information 只读取准入材料，负责正文抽取、相关性和材料性判断；结论保留文档版本、片段位置、时间及置信度。
@@ -306,8 +306,8 @@ T5/T6 的情景要分别对 SemiAnalysis 和 TrendForce 实现，真实存量样
 
 - 可版本化的 [来源存量标题／内容审阅](INFORMATION_PUBLISHER_INVENTORY_REVIEW.md)；原始版本、正文及命中记录在 `tmp/information_publisher_review_20261012/inventory.json`。
 
-- [原四标的材料清单](validation/information_material_reproduction_20261012.md)
-- [取消窗口与实际刷新对照](validation/information_selection_refresh_comparison_20261012.md)
+- [原四标的材料清单](../validation/information_material_reproduction_20261012.md)
+- [取消窗口与实际刷新对照](../validation/information_selection_refresh_comparison_20261012.md)
 - `tmp/information_selection_probe_20261012/`：before 数据快照、before/after 正文、取消窗口清单、comparison、候选及三份刷新结果、API 核对。
 - `tmp/phase_f_final_research/{ticker}_information_v6/inputs.sqlite`：原冻结输入。
 

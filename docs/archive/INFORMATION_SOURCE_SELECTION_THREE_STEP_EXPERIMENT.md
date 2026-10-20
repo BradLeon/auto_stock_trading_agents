@@ -18,7 +18,7 @@
 
 ## 具体外发与预算
 
-完整64份精确载荷、每篇标题及hash见[外发清单](../tmp/information_selection_implementation_20261012/round5/three_step_preparation/review.md)，分批清单及预算见[plan.json](../tmp/information_selection_implementation_20261012/round5/three_step_preparation/plan.json)。这些本机临时文件按仓库规则不提交。
+完整64份精确载荷、每篇标题及hash见[外发清单](../../tmp/information_selection_implementation_20261012/round5/three_step_preparation/review.md)，分批清单及预算见[plan.json](../../tmp/information_selection_implementation_20261012/round5/three_step_preparation/plan.json)。这些本机临时文件按仓库规则不提交。
 
 计划 SHA256：`94b4a61a7fd4a00002efc68de0b82b3c250817c05aac67d9266de7eebc534a5b`。
 

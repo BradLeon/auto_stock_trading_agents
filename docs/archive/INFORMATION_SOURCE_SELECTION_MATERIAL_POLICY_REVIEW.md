@@ -671,7 +671,7 @@
 
 ## 证据与限制
 
-[重审JSON](../tmp/information_quality_closeout_20261013/material_policy_review_final/combined_review.json)，旧报告[完整32份严格契约结果](INFORMATION_SOURCE_SELECTION_FULL_SELECTED_RESULTS.md)保留为历史。此结果是新规则对旧输出的复核，不是新提示词的真实模型验证或正式Brief/Routine验收。
+[重审JSON](../../tmp/information_quality_closeout_20261013/material_policy_review_final/combined_review.json)，旧报告[完整32份严格契约结果](INFORMATION_SOURCE_SELECTION_FULL_SELECTED_RESULTS.md)保留为历史。此结果是新规则对旧输出的复核，不是新提示词的真实模型验证或正式Brief/Routine验收。
 
 任务仍在当前开发工作区，不修改OpenSpec完成状态。生产元数据71篇和389条历史一致性证据保持原结果；未再次写生产库。
 

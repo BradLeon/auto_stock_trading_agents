@@ -15,7 +15,7 @@ Chief 的一行摘要里加了关键新字段（横截面数量、层/标的数�
 
 ## 2. max_tokens 排查
 
-根因与改动见 `config/settings.yaml` 顶部注释与 `docs/PHASE_F_10_5_SECTOR_RESULT.md` 的降级说明。核心：OpenRouter 上 deepseek-v4 的隐藏推理计入 `max_tokens`，新增角色配置 `reasoning`（`"off"` 或整数上限）。**重新验证的效果：**
+根因与改动见 `config/settings.yaml` 顶部注释与 `docs/archive/PHASE_F_10_5_SECTOR_RESULT.md` 的降级说明。核心：OpenRouter 上 deepseek-v4 的隐藏推理计入 `max_tokens`，新增角色配置 `reasoning`（`"off"` 或整数上限）。**重新验证的效果：**
 
 | | 改前（agent 的实测） | 改后 |
 |---|---|---|

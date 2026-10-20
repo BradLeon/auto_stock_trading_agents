@@ -50,7 +50,7 @@
 
 还需新版真实模型复验、正式InformationBrief发布/缓存及受影响Routine链路验证；不能用本次工程与元数据收尾替代Phase F冻结、最终资格或上线许可。IBKR采集预算10与Information选择预算8均未提高。
 
-新版8份精确载荷与budget已准备：[清单](../tmp/information_quality_closeout_20261013/capture_preparation_v2/review.md)。同一冻结正文，仅提取契约变化；目的地OpenRouter，模型 `deepseek/deepseek-v4-flash-0731`，最多8请求，自动重试0，单次输出4096 token，规划费用约$0.044836、预留$0.50，供应商单价限制输入$0.10/输出$0.80每百万token。预留不是第三方账单硬封顶。先前64次额度已用完，本清单已获批准并执行8次；结果见后文及复验报告，未通过新版内容验收。
+新版8份精确载荷与budget已准备：[清单](../../tmp/information_quality_closeout_20261013/capture_preparation_v2/review.md)。同一冻结正文，仅提取契约变化；目的地OpenRouter，模型 `deepseek/deepseek-v4-flash-0731`，最多8请求，自动重试0，单次输出4096 token，规划费用约$0.044836、预留$0.50，供应商单价限制输入$0.10/输出$0.80每百万token。预留不是第三方账单硬封顶。先前64次额度已用完，本清单已获批准并执行8次；结果见后文及复验报告，未通过新版内容验收。
 
 Manifest SHA256：`f2783067012aaef3505fbf1943cb127e0d717e027694d793938a68ad2ad7d73c`。
 

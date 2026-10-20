@@ -39,7 +39,7 @@
 **怎么读这张表**
 - **可退出（3）**：没有任何消费方，且回滚已演练、墓碑一致。
 - **登记状态是 retired、但独立核验判 pending（8）**：登记处写着已退役，工具却无法证明消费方已清零——它们的消费方登记为模块路径或函数（如 `graph.pead`、`runtime.cli`），没有角色映射，工具拒绝猜测，所以判「状态未知」。这不是说它们还在被读取，而是**没有证据说它们没有**。在补齐映射、拿到 zero 之前，不能把「登记为 retired」当成「已确认可以删」。
-- **登记状态是 pending（16）**：其中真正仍绕过受治理读取面的是 Chief（3 处）、Risk Officer、Clerk，见 `docs/PHASE_F_12_1_CLEARANCE_20261017.md`。
+- **登记状态是 pending（16）**：其中真正仍绕过受治理读取面的是 Chief（3 处）、Risk Officer、Clerk，见 `docs/archive/PHASE_F_12_1_CLEARANCE_20261017.md`。
 
 ## 二、判据工具（已完成；完成不等于条目已退出）
 
@@ -71,7 +71,7 @@
 | 官方披露 | TSM/ASML Q3 的 SEC 披露进不来（本机经 Clash 访问 sec.gov 被重置），相应的事件评审按设计不触发 |
 | 历史引用 | 8 条缺陷旧 Layer 投影标为 failed、不删除；发布台账只增不改 |
 
-详见 `docs/PHASE_F_DATAFLOW_REMEDIATION_PLAN.md`、`docs/PHASE_F_10_5_*_RESULT.md`。
+详见 `docs/archive/PHASE_F_DATAFLOW_REMEDIATION_PLAN.md`、`docs/PHASE_F_10_5_*_RESULT.md`。
 
 ## 五、历史保留
 
@@ -82,7 +82,7 @@
 
 ## 六、安全恢复与观察窗口（12.3）
 
-窗口 `phase-f-dispatcher-2026-10-17`：7 个研究工作流，起点 10-17，**终点 10-18（用户裁决，取代原建议的 10-28）**，六条停止条件；10-18 核对结果见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md`（五条未触发，第③条有一次 LRCX 信息简报缺失，属数据缺口，待用户裁决是否算触发）。回退：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e`。详见 `docs/PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md`。
+窗口 `phase-f-dispatcher-2026-10-17`：7 个研究工作流，起点 10-17，**终点 10-18（用户裁决，取代原建议的 10-28）**，六条停止条件；10-18 核对结果见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md`（五条未触发，第③条有一次 LRCX 信息简报缺失，属数据缺口，待用户裁决是否算触发）。回退：`ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e`。详见 `docs/archive/PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md`。
 
 ## 七、退出责任（谁、什么条件下、做什么）
 
@@ -101,5 +101,5 @@
 
 ## 九、下一步
 
-1. 观察窗口已于 10-18 结束（用户裁决）。12.8 已复跑 `ats retirement zero` 与 `decide` 并逐项核验：3 个可退出（本来就是 retired）、24 个继续 pending，没有改登记；要退役任何新条目须用户明确同意。24 个 pending 条目还缺的清零与对账，见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md`。
-2. 任务 13.8、13.9 已回写最终验收与门禁状态：`docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md`。
+1. 观察窗口已于 10-18 结束（用户裁决）。12.8 已复跑 `ats retirement zero` 与 `decide` 并逐项核验：3 个可退出（本来就是 retired）、24 个继续 pending，没有改登记；要退役任何新条目须用户明确同意。24 个 pending 条目还缺的清零与对账，见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md`。
+2. 任务 13.8、13.9 已回写最终验收与门禁状态：`docs/archive/PHASE_F_FINAL_ACCEPTANCE_20261018.md`。

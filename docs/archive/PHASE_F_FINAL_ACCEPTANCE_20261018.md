@@ -38,14 +38,14 @@
 
 ## 四、动态接入
 
-- 10 个角色的实际接入由运行记录核验，不以静态扫描或模块勾选判通过（7.8、13.4、13.5；见 [动态索引与全链集成验证](validation/PHASE_F_INTEGRATION_2026-10-09.md)，该目录按你的规则不入 Git）。
+- 10 个角色的实际接入由运行记录核验，不以静态扫描或模块勾选判通过（7.8、13.4、13.5；见 [动态索引与全链集成验证](../validation/PHASE_F_INTEGRATION_2026-10-09.md)，该目录按你的规则不入 Git）。
 - 生产上的实际调用链：7 个研究工作流在 Dispatcher 下均有完成认领（`schedule_runtime_claims` 279 条 complete）。
 - 12.1 把清零证明连接到了这条真实调用链，并修正了一处核验偏差（Fundamental 的入口点没覆盖真正的读取模块）。
 - 本阶段发现并修好的数据流问题：ASML 现金流缺口、财报期滚动与手填标签过期、事件触发开关未被 Dispatcher 日历路径读取、Dispatcher 的事件评审在离线状态下空转（见第八节）、证据判读重复请求。
 
 ## 五、影子 / 新入口报告
 
-- 新入口验收报告按需求矩阵分级、使用可重放的固定输入（3.x、7.x；见 [新入口报告与恢复验证](validation/PHASE_F_ACCEPTANCE_REPORTS_2026-10-09.md)）。
+- 新入口验收报告按需求矩阵分级、使用可重放的固定输入（3.x、7.x；见 [新入口报告与恢复验证](../validation/PHASE_F_ACCEPTANCE_REPORTS_2026-10-09.md)）。
 - **有限 Routine 签核（2026-10-15 你的裁决）：** MRVL、MSFT、NVDA、TSM 四份当前 Routine 报告为 `signed_off`；签核**只覆盖各自实际报告的内容哈希和本轮有限范围**，不表示生产资格或部署授权；TSM 的 8192 输出上限只是独立取证配置，全局 4096 不变。
 - 其余报告（含九份未签核报告）保持 unsigned，不能沿用签核。
 
@@ -61,7 +61,7 @@
 |---|---|---|
 | **切前**（隔离环境） | 研究读取、调度、交易、审批与记账的安全停止与恢复演练（13.1、13.2、13.3、13.10） | 各项验证记录；生产路由、C3 在这些演练里不变 |
 | **切后**（生产） | 调度：7 个工作流「切到 dispatcher → 旧入口被拒 → 切回 legacy → 再切回」，`owner-log` 共 35 行；读取：7 个消费者 target → legacy → target，经真实读取入口解析 | [12.3 记录](PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md)；演练引用 `owner-log:35-rows;route-drills:7-consumers;window:phase-f-dispatcher-2026-10-17` |
-| 窗口内回退办法 | `ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e` | [退役 runbook](PHASE_F_RETIREMENT_RUNBOOK.md) |
+| 窗口内回退办法 | `ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e` | [退役 runbook](../PHASE_F_RETIREMENT_RUNBOOK.md) |
 
 **实盘与 `LIVE-X`（如实写下）：** 实盘授权库里有一行 2026-10-07 记录的 `LIVE-X`（授权人字段是单字母占位、账户 `U1`、有效期到 2099 年、note 为空）。它的来源至今**没有核实**，10-07 的审计已要求不得把它认定为实盘授权，本次也没有删除或改写。需要说明的是：带这个引用查询 `ats live gate` 会得到 `authorised`——这只说明门的机械检查通过，**实盘路由并没有切换**（`trade_route_state` 0 行），C3 保持停用，`com.ats.schedule` 未加载。这行记录来源不明且能让门放行，**建议你确认来源后决定是否作废**；我没有动它。
 
@@ -106,5 +106,5 @@
 ## 附录：本轮修改与记录一览
 
 - 代码与测试：见提交记录（`git log feat/rebuild_workflow_dataflow`，最近 8 个提交覆盖数据流补齐、Macro 迁移、推理预算、投影补齐、7 个工作流上线、证据判读缓存、事件评审修复）。
-- 记录：[12.1 清零](PHASE_F_12_1_CLEARANCE_20261017.md)、[12.3 回滚窗口](PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md)、[12.7 退役 runbook](PHASE_F_RETIREMENT_RUNBOOK.md)、[12.8 退役核验](PHASE_F_12_8_RETIREMENT_20261018.md)、[首轮生产记录](PHASE_F_FIRST_PRODUCTION_RUN_20261016.md)、[切换条件](PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md)。
-- 命令输出：`docs/phase_f_first_run_review_20261016/` 下的 `retirement_*_20261018.*`。
+- 记录：[12.1 清零](PHASE_F_12_1_CLEARANCE_20261017.md)、[12.3 回滚窗口](PHASE_F_12_3_ROLLBACK_WINDOW_20261017.md)、[12.7 退役 runbook](../PHASE_F_RETIREMENT_RUNBOOK.md)、[12.8 退役核验](PHASE_F_12_8_RETIREMENT_20261018.md)、[首轮生产记录](PHASE_F_FIRST_PRODUCTION_RUN_20261016.md)、[切换条件](../PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md)。
+- 命令输出：`docs/archive/phase_f_first_run_review_20261016/` 下的 `retirement_*_20261018.*`。

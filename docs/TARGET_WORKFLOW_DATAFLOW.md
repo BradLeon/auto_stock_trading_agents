@@ -1032,7 +1032,7 @@ event_id + event_version + workflow_id
 - **旧实现退役**：27 个登记条目 3 个退出、24 个 pending，未改登记。
 - **切流口径**：按 2026-10-15 精简裁决，切流以本文档为准，研究读取按消费者整体切换，迁移期退回旧路径；观察 = 一次切换加一次切回演练。
 - **限定**：这是有限 Routine 签核加研究侧上线。2026-10-19 起，Dispatcher 发布的 Fundamental 投影已携带旧 PEAD 报告的全部内容（基线、预期表、共识、期权隐含、实际披露、三类差异；交易动作类章节有意不带），TSM、ASML 已做完整财报前后报告；§9.2 的真实窗口验证待 LRCX 10-21 之后。
-详见 `docs/PHASE_F_FINAL_ACCEPTANCE_20261018.md`。
+详见 `docs/archive/PHASE_F_FINAL_ACCEPTANCE_20261018.md`。
 
 ## 15. 可靠性测试与验收标准
 

@@ -6,7 +6,7 @@
 
 | 动作 | 命令 / 方法 | 结果 |
 |---|---|---|
-| 逐消费方清零 | `uv run ats retirement zero` | 53 个消费方每个都有结论（全文 `docs/phase_f_first_run_review_20261016/retirement_zero_20261018.txt`） |
+| 逐消费方清零 | `uv run ats retirement zero` | 53 个消费方每个都有结论（全文 `docs/archive/phase_f_first_run_review_20261016/retirement_zero_20261018.txt`） |
 | 逐条目裁决 | `uv run ats retirement decide --drill-reference "owner-log:35-rows;route-drills:7-consumers;window:phase-f-dispatcher-2026-10-17"` | 27 条登记，**可退出 3，保持 pending 24**（全文 `retirement_decide_20261018.txt`） |
 | 四个条件逐条目核对 | 脚本 `tmp/phase_f_first_run_20261016/verify/r128/matrix.py`（只读），结果 `retirement_matrix_20261018.json` | 见第三节 |
 | 六条停止条件 | 用窗口内的真实台账与日志核对 | 见第二节 |
@@ -96,8 +96,8 @@ Chief、风险官、执行文员、交易与记账都不在本 change 的研究�
 
 ## 附录：命令输出与脚本
 
-- `docs/phase_f_first_run_review_20261016/retirement_zero_20261018.txt`
-- `docs/phase_f_first_run_review_20261016/retirement_decide_20261018.txt`
-- `docs/phase_f_first_run_review_20261016/retirement_matrix_20261018.json`
+- `docs/archive/phase_f_first_run_review_20261016/retirement_zero_20261018.txt`
+- `docs/archive/phase_f_first_run_review_20261016/retirement_decide_20261018.txt`
+- `docs/archive/phase_f_first_run_review_20261016/retirement_matrix_20261018.json`
 - 调度认领台账：`var/phase_f_dispatch.sqlite`（`schedule_runtime_claims`：complete 279 / failed 1 / void 13）
 - 触发与运行：`var/ats.sqlite`（`trigger_runs`、`workflow_runs`）

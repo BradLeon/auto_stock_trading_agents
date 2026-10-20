@@ -2,9 +2,9 @@
 
 ## 2026-10-15 精简裁决（覆盖本 change 此前与之冲突的要求）
 
-用户裁决（2026-10-15）：切流以 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§1、§12.4、§14.6、§15.5、§16）及用户历次裁决为准；本 change 中超出 TARGET 的派生机制降为可选。G1 以 TARGET 为准；G2 研究读取按消费者整体切换，不再按「标的×时点」；G3 迁移窗口内出问题退回旧路径（TARGET §14.6「保留旧入口作可控回滚」），取代「停止即锁读」作为默认；G4 本 change 以追加裁决方式修订，已完成任务与证据保留为历史。安全底线不变：新路径与隔离运行禁止券商写入；任何时刻只有一个实盘入口；真实交易绑定同一 revision 的风控与 Boss 批准；读/调度/交易分别切换；审批与账本发布成对切换；调度单一负责人；旧实现墓碑退役；回滚已演练；测试全绿。依据：TARGET §16 第 12 条「本次设计和文档实施不使用 OpenSpec」；TARGET 中唯一的 exact-scope 资格表述为 2026-10-09 Phase F 期间补入；按此前机制推进切流出现结构性死循环（`docs/PHASE_F_GUARD_REVIEW.md`、`docs/PHASE_F_8_6_REGISTRATION_DRAFT.md` 第七至九节）。观察期 3 个交易日；自动切回的告警走飞书机器人。
+用户裁决（2026-10-15）：切流以 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§1、§12.4、§14.6、§15.5、§16）及用户历次裁决为准；本 change 中超出 TARGET 的派生机制降为可选。G1 以 TARGET 为准；G2 研究读取按消费者整体切换，不再按「标的×时点」；G3 迁移窗口内出问题退回旧路径（TARGET §14.6「保留旧入口作可控回滚」），取代「停止即锁读」作为默认；G4 本 change 以追加裁决方式修订，已完成任务与证据保留为历史。安全底线不变：新路径与隔离运行禁止券商写入；任何时刻只有一个实盘入口；真实交易绑定同一 revision 的风控与 Boss 批准；读/调度/交易分别切换；审批与账本发布成对切换；调度单一负责人；旧实现墓碑退役；回滚已演练；测试全绿。依据：TARGET §16 第 12 条「本次设计和文档实施不使用 OpenSpec」；TARGET 中唯一的 exact-scope 资格表述为 2026-10-09 Phase F 期间补入；按此前机制推进切流出现结构性死循环（`docs/archive/PHASE_F_GUARD_REVIEW.md`、`docs/archive/PHASE_F_8_6_REGISTRATION_DRAFT.md` 第七至九节）。观察期 3 个交易日；自动切回的告警走飞书机器人。
 
-各 spec 的逐条处置见各 spec 文件同名一节；评估依据见 `docs/PHASE_F_GUARD_REVIEW.md`，代码改动见 `docs/PHASE_F_CODE_SIMPLIFICATION_PLAN.md`。
+各 spec 的逐条处置见各 spec 文件同名一节；评估依据见 `docs/archive/PHASE_F_GUARD_REVIEW.md`，代码改动见 `docs/archive/PHASE_F_CODE_SIMPLIFICATION_PLAN.md`。
 
 ## 2026-10-15 入口职责裁决与8.5证明适用性
 

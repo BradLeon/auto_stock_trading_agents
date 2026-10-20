@@ -30,7 +30,7 @@
 
 - 实际 Git branch：`feat/rebuild_workflow_dataflow`，截至此次修订已推送的 HEAD：`5e4379e`；首次交接时为 `075ed0e`。用户讨论的 change 是 `implement-phase-f-shadow-run-and-cutover`，不要把 change 名称当成当前 Git branch。
 - 父 change：`refactor-workflow-dataflow-architecture`。
-- 当前权威 [tasks.md](../openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md) 统计为 106/117，11 项未勾选；这里只记录交接时点，不代替后续实时状态。
+- 当前权威 [tasks.md](../../openspec/changes/archive/2026-10-19-implement-phase-f-shadow-run-and-cutover/tasks.md) 统计为 106/117，11 项未勾选；这里只记录交接时点，不代替后续实时状态。
 - 首次交接时的大批实现／测试／文档已按用户要求在 `5e4379e` 提交并推送，相关回归 106 passed、OpenSpec strict 通过。本次后续来源审阅与计划修订尚未提交／推送；不要覆盖工作区或仅据此历史记录判断当前 Git 状态。
 
 ## 本次已经完成什么
@@ -56,7 +56,7 @@
 
 ## 返回当前 OpenSpec 的执行入口
 
-重新读取权威 tasks、design、delta specs，以及 [验收要求映射](PHASE_F_ACCEPTANCE_REQUIREMENTS.md)，按真实依赖判断下一步，不能直接从历史计数推定可上线。
+重新读取权威 tasks、design、delta specs，以及 [验收要求映射](../PHASE_F_ACCEPTANCE_REQUIREMENTS.md)，按真实依赖判断下一步，不能直接从历史计数推定可上线。
 
 当前未完成项：
 
@@ -81,7 +81,7 @@
 
 ## 后续恢复优化时可直接引用的指令
 
-> 阅读 docs/INFORMATION_SOURCE_SELECTION_DEVELOPMENT_TEST_PLAN.md、docs/INFORMATION_PUBLISHER_INVENTORY_REVIEW.md 和 docs/PHASE_F_INFORMATION_REVIEW_HANDOFF.md，重新核对当前 OpenSpec／工作区状态，按 E0 → E1a → E2a → E1b → E3a → E2b → E3b → E4 推进最小修复。先修复候选字段和解析再评价筛选效果，先核定受影响契约和验证范围；覆盖配置采集标的及两个来源的共同情景矩阵，不增加 Agent／workflow，不重建平台，不把历史材料当新消息；新模型内容按实际外发授权处理。
+> 阅读 docs/archive/INFORMATION_SOURCE_SELECTION_DEVELOPMENT_TEST_PLAN.md、docs/archive/INFORMATION_PUBLISHER_INVENTORY_REVIEW.md 和 docs/archive/PHASE_F_INFORMATION_REVIEW_HANDOFF.md，重新核对当前 OpenSpec／工作区状态，按 E0 → E1a → E2a → E1b → E3a → E2b → E3b → E4 推进最小修复。先修复候选字段和解析再评价筛选效果，先核定受影响契约和验证范围；覆盖配置采集标的及两个来源的共同情景矩阵，不增加 Agent／workflow，不重建平台，不把历史材料当新消息；新模型内容按实际外发授权处理。
 
 仅返回 Phase F 时，读取当前 change 的未完成项及依赖，从可执行的证据／准备工作继续；不要自动执行本优化计划，不自动签核或切换生产。
 

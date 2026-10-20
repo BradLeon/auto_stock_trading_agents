@@ -1,8 +1,8 @@
-> **2026-10-16 更新（修复后）：** 下文第一部分 NVDA 与第三部分 TSM 的事件评审**已作废**（状态改为 failed，Chief 不再读到）；TSM Q2、NVDA Q2、MRVL 档案已恢复为验证前内容；TSM Q4、NVDA Q3 准备已用修复后的代码重跑，共识因快照超过 14 天被判不可用，叙述里已写明缺失。下文是修复前的原始输出，保留作为对照。详见 `docs/PHASE_F_FIRST_PRODUCTION_RUN_20261016.md` 最后一节。
+> **2026-10-16 更新（修复后）：** 下文第一部分 NVDA 与第三部分 TSM 的事件评审**已作废**（状态改为 failed，Chief 不再读到）；TSM Q2、NVDA Q2、MRVL 档案已恢复为验证前内容；TSM Q4、NVDA Q3 准备已用修复后的代码重跑，共识因快照超过 14 天被判不可用，叙述里已写明缺失。下文是修复前的原始输出，保留作为对照。详见 `docs/archive/PHASE_F_FIRST_PRODUCTION_RUN_20261016.md` 最后一节。
 
 # 事件模式与定时 PEAD 准备：生产运行结果（2026-10-16）
 
-> 全部内容来自生产库，只读导出。运行记录见 `tmp/phase_f_first_run_20261016/decision_log.md`，总览见 `docs/PHASE_F_FIRST_PRODUCTION_RUN_20261016.md`。
+> 全部内容来自生产库，只读导出。运行记录见 `tmp/phase_f_first_run_20261016/decision_log.md`，总览见 `docs/archive/PHASE_F_FIRST_PRODUCTION_RUN_20261016.md`。
 
 ## 一、事件模式
 

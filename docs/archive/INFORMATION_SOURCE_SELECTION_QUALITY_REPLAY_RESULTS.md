@@ -172,6 +172,6 @@
 
 ## 证据与下一步
 
-[完整逐条输出审阅](../tmp/information_quality_closeout_20261013/review_v2_final/content_review.md)，[JSON](../tmp/information_quality_closeout_20261013/review_v2_final/content_review.json)，[执行账本](../tmp/information_quality_closeout_20261013/capture_v2_remaining/capture.json)。前5次原账本也保留，续跑仅发送剩余3份，合并计数8。
+[完整逐条输出审阅](../../tmp/information_quality_closeout_20261013/review_v2_final/content_review.md)，[JSON](../../tmp/information_quality_closeout_20261013/review_v2_final/content_review.json)，[执行账本](../../tmp/information_quality_closeout_20261013/capture_v2_remaining/capture.json)。前5次原账本也保留，续跑仅发送剩余3份，合并计数8。
 
 先修上述引用支持范围、分句误伤、分类粒度及工具诊断，做离线失败样本回归，再安排有限真实模型复验。当前8次额度已耗尽；不得自动增加调用。通过新版内容验收后，才能推进正式Brief发布/缓存及Routine验证。

@@ -74,4 +74,4 @@
 
 ## 证据
 
-[逐条检查JSON](../tmp/information_quality_closeout_20261013/contract_diagnosis.json)，[原完整8篇报告](INFORMATION_SOURCE_SELECTION_FULL_SELECTED_RESULTS.md)。
+[逐条检查JSON](../../tmp/information_quality_closeout_20261013/contract_diagnosis.json)，[原完整8篇报告](INFORMATION_SOURCE_SELECTION_FULL_SELECTED_RESULTS.md)。

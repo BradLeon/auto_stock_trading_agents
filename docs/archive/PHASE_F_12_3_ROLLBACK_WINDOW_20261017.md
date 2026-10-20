@@ -10,7 +10,7 @@
 |---|---|---|
 | 7 个研究工作流的调度负责人 | 切到 Dispatcher → 旧入口被拒 → 切回 legacy → 再切回 | `ats dispatch owner-log` 共 35 条追加记录，7 个工作流各有「切换、切回」配对（代次递增） |
 | 7 个消费者的读取路由 | target → legacy → target，经真实读取入口解析 | `ats consumer-cutover log`（路由变更均带原因与代次） |
-| 调度观察 | 第 1 遍重算、第 2 遍全部复用（0 次请求） | `docs/PHASE_F_10_5_*_RESULT.md`、`docs/PHASE_F_FIRST_PRODUCTION_RUN_20261016.md` |
+| 调度观察 | 第 1 遍重算、第 2 遍全部复用（0 次请求） | `docs/PHASE_F_10_5_*_RESULT.md`、`docs/archive/PHASE_F_FIRST_PRODUCTION_RUN_20261016.md` |
 
 演练引用（登记用）：`owner-log:35-rows; route-drills:7-consumers; window:phase-f-dispatcher-2026-10-17`。
 
@@ -30,7 +30,7 @@
 | 窗口编号 | `phase-f-dispatcher-2026-10-17` |
 | 范围 | 7 个研究工作流（information-brief、fundamental-routine、fundamental-event、layer-review、sector-review、macro-review、technical-review）；不含 Chief、审批、记账、交易 |
 | 起点 | 2026-10-17（负责人切到 Dispatcher、`com.ats.phase-e` 加载） |
-| 终点 | **2026-10-18**（你 10-18 的裁决，取代原先建议的 10-28）。原建议终点要覆盖周六 10-24 的 Macro/Sector 周度运行，以及 LRCX（10-21）、GOOG 与 SKHY（10-27）、MSFT（10-28）财报的事件路径；提前结束后，事件路径只用最近发布财报的 TSM、ASML 验证，其余标的不逐个等待财报。窗口结束后的退役核验见 `docs/PHASE_F_12_8_RETIREMENT_20261018.md` |
+| 终点 | **2026-10-18**（你 10-18 的裁决，取代原先建议的 10-28）。原建议终点要覆盖周六 10-24 的 Macro/Sector 周度运行，以及 LRCX（10-21）、GOOG 与 SKHY（10-27）、MSFT（10-28）财报的事件路径；提前结束后，事件路径只用最近发布财报的 TSM、ASML 验证，其余标的不逐个等待财报。窗口结束后的退役核验见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md` |
 | 停止条件（任一出现即 `owner-rollback`） | ①每日健康检查失败；②同一逻辑触发出现重复认领；③必需投影缺失或认领长时间 `running`；④连续两次整批运行失败，且原因是新逻辑缺陷而非「该标的无数据」；⑤外部 API 上限被触发（花费异常）；⑥任何券商写入尝试 |
 | 窗口内的回退方式 | `ats dispatch owner-rollback --workflow <id> --actor <谁> --reason <为什么>`；全部停止：`launchctl bootout gui/$(id -u)/com.ats.phase-e` |
 
@@ -50,6 +50,6 @@
 ## 五、机器核验
 
 - `verify_rollback_window`：已演练且无触发 → `window_ok`；未演练 → `window_refused`；演练过但停止条件触发 → `window_refused`。
-- `ats retirement decide --drill-reference <演练引用>`：27 个条目里 **3 个可退出**（`agent.evidence_observer`、`reconcile.origin_manual_fallback`、`reconcile.partial_fill_as_filled`，登记状态本来就是 retired），**24 个保持 pending**，缺项逐条列出，没有为放行而降低判据（全文 `docs/phase_f_first_run_review_20261016/retirement_decide_with_window_20261017.txt`）。
+- `ats retirement decide --drill-reference <演练引用>`：27 个条目里 **3 个可退出**（`agent.evidence_observer`、`reconcile.origin_manual_fallback`、`reconcile.partial_fill_as_filled`，登记状态本来就是 retired），**24 个保持 pending**，缺项逐条列出，没有为放行而降低判据（全文 `docs/archive/phase_f_first_run_review_20261016/retirement_decide_with_window_20261017.txt`）。
 
 **本项不放行任何 pending 条目**；退役要等 12.7、12.8 和窗口结束。

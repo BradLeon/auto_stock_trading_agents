@@ -561,7 +561,7 @@
 
 有usage的已知token：{'prompt_tokens': 102987, 'completion_tokens': 28583, 'total_tokens': 131570}；供应商费用已知小计$0.017659180；1次费用未知。未知包含原8次的一次响应失败，本轮不能恢复丢失的usage。不是账户账单核对。
 
-[全32份审阅JSON](../tmp/information_quality_closeout_20261013/full_selected_review.json)、[剩余24份输入和预算](../tmp/information_quality_closeout_20261013/remaining_review.md)、[24次执行账本](../tmp/information_quality_closeout_20261013/remaining_execution_ledger.json)。
+[全32份审阅JSON](../../tmp/information_quality_closeout_20261013/full_selected_review.json)、[剩余24份输入和预算](../../tmp/information_quality_closeout_20261013/remaining_review.md)、[24次执行账本](../../tmp/information_quality_closeout_20261013/remaining_execution_ledger.json)。
 
 本报告是有限模型内容实验，不代替生产Brief/缓存/Routine及Phase F资格验证。
 

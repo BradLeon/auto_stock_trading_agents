@@ -144,7 +144,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 
 ## 追加：Fundamental 事件模式与定时 PEAD 准备任务的生产运行（2026-10-16）
 
-可读版：`docs/phase_f_first_run_review_20261016/PEAD_EVENT_AND_PREP.md`。累计模型请求 **42 次**（费用上限估算约 1.08 美元），在批准的 100 次/2 美元内。
+可读版：`docs/archive/phase_f_first_run_review_20261016/PEAD_EVENT_AND_PREP.md`。累计模型请求 **42 次**（费用上限估算约 1.08 美元），在批准的 100 次/2 美元内。
 
 | 项目 | 结果 |
 |---|---|
@@ -271,7 +271,7 @@ Information 的研究读取已整体切到新路径；首次生产运行为 MRVL
 
 ## 追加：10.5 前置考察与 Technical 切换（2026-10-16）
 
-**前置考察**（`docs/PHASE_F_10_5_PREFLIGHT_AUDIT.md`）：只有 Technical 具备切换条件。Layer/Sector 的中性证据全部停在 2026-08（证据抽取挂在旧调度器的 PEAD 窗口里，开关 `pead_observe_window: false`），30 只截面标的仅 7 只有受治理财务；Macro 在分析中实时调用 Tavily 网页搜索，违反 §12.1；四个角色的投影都比 §7.3 薄（Sector 只有行业级立场）。数据流补齐方案见 `docs/PHASE_F_DATAFLOW_REMEDIATION_PLAN.md`，待审阅。
+**前置考察**（`docs/archive/PHASE_F_10_5_PREFLIGHT_AUDIT.md`）：只有 Technical 具备切换条件。Layer/Sector 的中性证据全部停在 2026-08（证据抽取挂在旧调度器的 PEAD 窗口里，开关 `pead_observe_window: false`），30 只截面标的仅 7 只有受治理财务；Macro 在分析中实时调用 Tavily 网页搜索，违反 §12.1；四个角色的投影都比 §7.3 薄（Sector 只有行业级立场）。数据流补齐方案见 `docs/archive/PHASE_F_DATAFLOW_REMEDIATION_PLAN.md`，待审阅。
 
 **Technical（用户批准先按原 10.5 计划推进）**
 - 代码：`consumer_health._technical`（运行时价格网关；单只缺价是警告，整池无 4 天内 K 线且重试一次仍失败才失败）；`default_data_vintage` 增加 Technical（纽约交易日 + 收盘前/后，不发网络请求）；新鲜期 1h→24h；轻量调度切换允许作废「已以 execution_error 结束、却因写过旧表而仍标 running」的认领（真实运行中的认领仍不可作废）。新增/调整测试 9 项，相邻 7 个测试文件 102 项通过。

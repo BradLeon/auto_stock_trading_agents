@@ -76,7 +76,7 @@
 |---|---|
 | 命令 | `./scripts/run_tests.sh -p no:randomly --junitxml=… --deselect tests/test_factset_index_semantic_local.py::test_semantic_core_passes_with_exact_index_and_technology_reviews` |
 | 结果 | 首轮 86 failed / 4334 passed / 21 errors；修复后最终全量 **57 failed / 4387 passed / 0 errors**（4444 个测试，81 分钟） |
-| 归因 | 57 个失败：41 个旧批次/读取切换机制（被 10-15 裁决取代，只能从运维命令到达）、4 个决策路径夹具债、12 个 13.6 之前已登记的既有失败；没有产品缺陷。逐组根因、第一次失败的提交和处置见 `docs/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md` |
+| 归因 | 57 个失败：41 个旧批次/读取切换机制（被 10-15 裁决取代，只能从运维命令到达）、4 个决策路径夹具债、12 个 13.6 之前已登记的既有失败；没有产品缺陷。逐组根因、第一次失败的提交和处置见 `docs/archive/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md` |
 | 方法 | `scripts/attribute_test_failures.py` 按文件与签名归因；对没登记过的 72 个失败用 `git worktree` 在 8 个更早的提交上逐个对照，确定第一次失败的提交 |
 
 #### 历史权威测量
@@ -206,5 +206,5 @@ git worktree remove /tmp/ats-base --force
 ## 与 Phase A 验收的关系
 
 Phase A（`openspec/changes/establish-workflow-contracts-and-green-baseline`）的实测基线、
-失败归因与「需求场景 → 验证方式」对照表记录在 `docs/PHASE_A_ACCEPTANCE.md`。本文件定义
+失败归因与「需求场景 → 验证方式」对照表记录在 `docs/archive/PHASE_A_ACCEPTANCE.md`。本文件定义
 「怎么测、怎么归因」，那份文件记录「测出来是什么」。

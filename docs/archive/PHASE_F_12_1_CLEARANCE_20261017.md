@@ -20,7 +20,7 @@
 
 ## 二、静态清零核验（`ats retirement zero / decide`）
 
-对 27 个登记条目的 53 个登记消费方逐一给出结论（全文见 `docs/phase_f_first_run_review_20261016/retirement_zero_20261017.txt` 与 `retirement_decide_20261017.txt`）：
+对 27 个登记条目的 53 个登记消费方逐一给出结论（全文见 `docs/archive/phase_f_first_run_review_20261016/retirement_zero_20261017.txt` 与 `retirement_decide_20261017.txt`）：
 
 | 结论 | 数量 | 含义 |
 |---|---|---|

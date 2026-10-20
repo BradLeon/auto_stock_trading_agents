@@ -169,4 +169,4 @@
 
 ## 证据
 
-[完整漏斗JSON](../tmp/information_quality_closeout_20261013/review_v2_final/full_funnel.json)；[逐条原始输出与原文证据](INFORMATION_SOURCE_SELECTION_QUALITY_REPLAY_RESULTS.md)。本报告无新增模型调用、无生产Brief发布；未宣称完成每标的8篇的正式例行运行。
+[完整漏斗JSON](../../tmp/information_quality_closeout_20261013/review_v2_final/full_funnel.json)；[逐条原始输出与原文证据](INFORMATION_SOURCE_SELECTION_QUALITY_REPLAY_RESULTS.md)。本报告无新增模型调用、无生产Brief发布；未宣称完成每标的8篇的正式例行运行。

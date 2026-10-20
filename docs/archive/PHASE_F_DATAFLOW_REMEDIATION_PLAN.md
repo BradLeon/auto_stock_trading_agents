@@ -1,6 +1,6 @@
 # 数据流补齐方案：证据抽取、截面财务、Macro 新闻（2026-10-16，待审阅）
 
-> 依据：`docs/PHASE_F_10_5_PREFLIGHT_AUDIT.md` 的考察结论与 TARGET §3（数据采集由数据平台隐式完成）、§4（分析师只读 Data Products）、§12.1（Agent 不得直接调用 Provider）。本文只是方案，没有改代码、没有调模型、没有写生产数据。
+> 依据：`docs/archive/PHASE_F_10_5_PREFLIGHT_AUDIT.md` 的考察结论与 TARGET §3（数据采集由数据平台隐式完成）、§4（分析师只读 Data Products）、§12.1（Agent 不得直接调用 Provider）。本文只是方案，没有改代码、没有调模型、没有写生产数据。
 
 ## 一句话
 

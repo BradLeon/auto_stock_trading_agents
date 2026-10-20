@@ -140,6 +140,6 @@ target_title/target_visible_body表示标题/正文目标匹配；signal_chain�
 
 ## 摘要、依据与证据入口
 
-[每篇候选摘要、来源归属、引用及基础通过依据](INFORMATION_SOURCE_SELECTION_MATERIAL_POLICY_REVIEW.md)；[本次离线重审JSON](../tmp/information_quality_closeout_20261013/material_policy_review_final/combined_review.json)；[冻结原文候选计数](../tmp/information_quality_closeout_20261013/review_v2_final/full_funnel.json)。
+[每篇候选摘要、来源归属、引用及基础通过依据](INFORMATION_SOURCE_SELECTION_MATERIAL_POLICY_REVIEW.md)；[本次离线重审JSON](../../tmp/information_quality_closeout_20261013/material_policy_review_final/combined_review.json)；[冻结原文候选计数](../../tmp/information_quality_closeout_20261013/review_v2_final/full_funnel.json)。
 
 建议后续对直接目标材料的空输出标记为“待复核”，不把“模型为空”自动等同于“没有相关信息”。这不是自动重试授权；本次没有重试、新外发或生产发布。

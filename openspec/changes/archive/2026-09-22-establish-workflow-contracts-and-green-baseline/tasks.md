@@ -176,12 +176,12 @@
 ## 9. 验收与交付
 
 - [x] 9.1 在完整测试依赖与记录清楚的测量条件下运行全量测试，形成本 change 的验收基线；验证：三处缺陷对应的测试全部通过；其余失败逐项归因并区分环境性与业务性，业务性失败登记为待处理项（本 change 不要求其清零），环境性失败按 `workflow/test-baseline` 要求标注范围与成因。
-      **产出**：`docs/PHASE_A_ACCEPTANCE.md` §1。三处缺陷对应测试全部通过（① cutover 相关 8 个文件 + `test_data_layer_write_cutover.py` 5 项；② `test_action_vocabulary.py` 13 项；③ `test_risk.py` 31 项）。
+      **产出**：`docs/archive/PHASE_A_ACCEPTANCE.md` §1。三处缺陷对应测试全部通过（① cutover 相关 8 个文件 + `test_data_layer_write_cutover.py` 5 项；② `test_action_vocabulary.py` 13 项；③ `test_risk.py` 31 项）。
       **全量测量**：受限环境下以 `scripts/run_tests_batched.py --batch-size 8` 分批取证，18 批 / 683s，通过 1223｜业务性 19｜环境性 427（原始 failed=25、errors=421）。环境性判定补充了「JUnit `<error>`：fixture setup 未完成、测试体未执行」签名——413 项 setup 中断若不被识别为环境性，会被误报为 413 项各自独立的回归。
       **归因方法**：`git worktree` 检出基线提交 `e2d86d9` 同条件对照运行，19 项业务性失败**全部**在基线同样失败（非本 change 回归），逐项登记于 §1.3；其中 `test_research.py` + `test_data_products.py` 由 12 项失败降至 6 项，`test_data_store_ownership.py` 的归属登记缺失已修复（新增表 `task_projection_envelopes` 登记为 Workflow memory）。
 
 - [x] 9.2 逐条核对 `specs/` 中每个需求的场景都有对应测试或显式验证手段；验证：产出「需求场景 → 验证方式」对照表，无空缺项。
-      **产出**：`docs/PHASE_A_ACCEPTANCE.md` §2，覆盖全部 8 个 delta（`test-baseline` / `option-survival` / `data-layer-architecture` / `action-vocabulary` / `task-projection` / `run-contracts` / `legacy-retirement` / `architecture-guards`）的全部场景，逐条给出测试名或显式验证手段。核对中发现 `workflow/test-baseline` 此前**没有对应测试**，已补 `tests/test_test_baseline.py`（11 项）。
+      **产出**：`docs/archive/PHASE_A_ACCEPTANCE.md` §2，覆盖全部 8 个 delta（`test-baseline` / `option-survival` / `data-layer-architecture` / `action-vocabulary` / `task-projection` / `run-contracts` / `legacy-retirement` / `architecture-guards`）的全部场景，逐条给出测试名或显式验证手段。核对中发现 `workflow/test-baseline` 此前**没有对应测试**，已补 `tests/test_test_baseline.py`（11 项）。
 
 - [x] 9.3 确认未引入非 additive 的数据层变更、未删除旧表或旧列、未改动既有列语义；验证：审阅本次迁移清单，全部为新增。
       **核对**：`git diff` 中无 `DROP TABLE` / `DROP COLUMN`，`ALTER TABLE` 仅 `ADD COLUMN`；`task_projections` DDL 一字未改。新增：Workflow memory `task_projection_envelopes`（独立表）；数据层 `data_evidence_*` / `data_measurement_*` / `data_document_*` 写入侧孪生表（列结构与 Workflow memory 原表逐列等价，属重定向而非改设计）。遗留升级路径亦已改为跨边界写入数据层，避免「升级成功但数据被 DROP」。

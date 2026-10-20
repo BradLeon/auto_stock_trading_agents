@@ -1,6 +1,6 @@
 # 10.5 Sector 消费者切换结果（2026-10-17）
 
-> 范围：工作流 `sector-review`，作用域 `sector:ai_hardware`，依赖恰好 8 份有效 `LayerAnalysis`（`docs/PHASE_F_10_5_LAYER_RESULT.md`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§4、§7.2、§8.2-4/5）。只写数据与分析，不含投资建议。
+> 范围：工作流 `sector-review`，作用域 `sector:ai_hardware`，依赖恰好 8 份有效 `LayerAnalysis`（`docs/archive/PHASE_F_10_5_LAYER_RESULT.md`）。依据 `docs/TARGET_WORKFLOW_DATAFLOW.md`（§4、§7.2、§8.2-4/5）。只写数据与分析，不含投资建议。
 
 ## 一、结论
 

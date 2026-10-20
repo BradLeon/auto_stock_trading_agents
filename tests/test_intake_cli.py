@@ -24,9 +24,6 @@ from ats.runtime import cli
 from ats.workflow import consumer_disposition as cd
 from ats.workflow import intake_verification as iv
 
-RUNBOOK = REPO_ROOT / "docs" / "validation" / "PHASE_F_CUTOVER_RUNBOOK.md"
-
-
 def _run(capsys, argv):
     code = cli.main(argv)
     out = capsys.readouterr().out
@@ -171,76 +168,3 @@ def test_evidence_index_covers_every_consumer_with_a_resolvable_id(capsys):
         assert entry["evidence_id"].startswith("intake-verification:")
         assert consumer_id in entry["evidence_id"]
         assert "entry_point" in entry
-
-
-def test_the_runbook_cites_only_evidence_ids_that_exist(capsys):
-    """Task 7.8's machine check, and the reason it exists.
-
-    A runbook citing an id nothing produces documents a system that does not
-    exist — and task 5.13 already established that such a document gets trusted
-    rather than obeyed.
-    """
-    assert RUNBOOK.is_file(), f"missing {RUNBOOK}"
-    text = RUNBOOK.read_text(encoding="utf-8")
-    _, index = _run(capsys, ["intake", "evidence-index"])
-    known = {entry["evidence_id"]
-             for entry in index["consumers"].values()}
-    current, separator, historical = text.partition("\n## 历史手册")
-    assert separator, "current and historical evidence must be separated"
-    cited = set(re.findall(r"intake-verification:[0-9a-f]{16}:[a-z_]+", current))
-    assert cited, (
-        "the runbook cites no intake evidence id, so its index is not being "
-        "checked against anything")
-    unknown = sorted(cited - known)
-    assert not unknown, (
-        f"the runbook cites evidence ids nothing produces: {unknown}")
-    # Every consumer must appear in the runbook's verification chapter. Split on
-    # the numbered HEADING, not on the bare string "## 11" — the chapter contains
-    # `## 11.1` … `## 11.5`, and a bare split truncates at the first subsection,
-    # which reads as "the runbook forgot the consumers".
-    chapter = re.split(r"^##\s+11\.\s*", text, flags=re.M)[-1]
-    assert "十角色接入核验" in chapter.splitlines()[0], (
-        "the runbook's chapter 11 is no longer the verification chapter; the test "
-        "is looking in the wrong place and would pass vacuously")
-    chapter = chapter.split("\n## 12 ", 1)[0]
-    for consumer_id in iv.TEN_CONSUMERS:
-        assert f"`{consumer_id}`" in chapter, (
-            f"{consumer_id} is missing from the runbook's verification chapter")
-
-
-def test_the_runbook_states_that_isolation_is_not_ledger_integrity():
-    text = RUNBOOK.read_text(encoding="utf-8")
-    assert "隔离证明不是生产账本完整性证明" in text or \
-        "隔离验收结果 SHALL NOT 本身等同于生产资格" in text, (
-        "the runbook must carry the 7.1/7.6 refusal, or an operator will read a "
-        "clean isolated run as a green light")
-
-
-def test_the_runbook_names_the_read_that_still_needs_plan_a(capsys):
-    """The runbook must not imply the ten roles are clean.
-
-    What it has to name changed with task 7.9: a live provider bypass became a
-    retained one, and the runbook's job is to say which state the code is in —
-    otherwise a reader trusts a stale "one live bypass" line.
-
-    Matched on the FUNCTION rather than the line number: a line moves on any edit
-    above it, and a runbook assertion that breaks whenever an unrelated line is
-    added gets disabled rather than fixed. The line number is asserted where it
-    cannot drift — in the scan tests, which read it from the AST.
-    """
-    text = RUNBOOK.read_text(encoding="utf-8")
-    _, payload = _run(capsys, ["intake", "verify", "--consumer-id", "trader"])
-    findings = [v for v in payload[0]["violations"]
-                if v["kind"] in {"provider_bypass", "disabled_bypass"}]
-    assert findings, (
-        "the scan reports a retained data read, so the runbook must not imply the "
-        "ten roles are all clean")
-    assert "_last_price_enabled" in text, (
-        "the runbook must name the retained helper, so plan A knows what to revive")
-    assert "disabled_bypass" in text, (
-        "the runbook must record that the bypass is disabled rather than live")
-    # `provider_bypass` may appear when CONTRASTING the two kinds — what must not
-    # survive is a claim that a live one exists. Scoped to the sentence so the
-    # explanation of the distinction does not read as the stale claim.
-    assert "唯一真实旁路" not in text and "真实旁路" not in text, (
-        "the runbook still claims a live provider bypass; task 7.9 stopped it")

@@ -19,7 +19,7 @@
 
 目标持久化刷新必须经 `PersistentIngestionQueue`。生产手动、定时、事件和允许的 cache miss 最终都提交队列；只有持有有效 lease 的 worker 才能调用采集 adapter。使用 `uv run python -m ats.data.persistent_queue status` 查看队列，使用 `uv run python -m ats.data.persistent_queue worker --once` 处理已入队任务；每个写入 CLI 由外层调用自动入队，不能加 `--force` 或隔离数据库参数绕开队列。只读验收中显式隔离数据库加 `--force` 是临时测试例外。
 
-本机 `com.ats.data-refresh` launchd 唤醒 Refresh Controller，状态以其 heartbeat 和逐源运行账本判断。`com.ats.schedule` 是 Workflow / FactSet 月报 owner，不替代逐源刷新 controller。完整来源范围、当前 job 启用状态及最近真实结果见逐源库存；cadence、注册或 job 存在本身都不证明自动采集已成功。
+本机 `com.ats.data-refresh` launchd 唤醒 Refresh Controller，状态以其 heartbeat 和逐源运行账本判断。FactSet 月末摄入（`factset_month_end_ingest`）与财报日历刷新（`calendar_*`）也由 Refresh Controller 负责；`com.ats.phase-e`（Dispatcher）只调度研究 Workflow，不替代逐源刷新 controller。旧调度器 `com.ats.schedule` 已退役，不得加载。完整来源范围、当前 job 启用状态及最近真实结果见逐源库存；cadence、注册或 job 存在本身都不证明自动采集已成功。
 
 目标 registry、逐角色读契约、资格及回退状态见 [Dataflow 验收 Runbook](validation/DATAFLOW_ASSURANCE_RUNBOOK.md)；十角色当前资格判定和拒绝原因见 [Tasks 5 门禁表](validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)。
 
@@ -419,7 +419,7 @@ ats_cli data ingest \
 | `com.ats.data-refresh` | launchd 唤醒 Refresh Controller；controller 将 due work 入队 |
 | `uv run python -m ats.data.persistent_queue status` | 查看持久化采集队列状态 |
 | `uv run python -m ats.data.persistent_queue worker --once` | 由受管运行环境处理已入队任务；生产 worker 不应另设第二个 schedule owner |
-| `com.ats.schedule` | FactSet 月报和 Workflow 任务调度；不是通用数据源刷新 owner |
+| `com.ats.phase-e` | 研究 Workflow 的定时与日历事件调度（Dispatcher）；不是数据源刷新 owner。旧调度器 `com.ats.schedule` 已退役、不得加载 |
 | `ats data ingest ...` | 操作命令会先入队；worker 持有效 lease 后才执行目标持久化写入 |
 
 部署模板和当前真实逐源状态见 `deploy/launchd/`、[来源库存](validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 [Dataflow 验收/回退 Runbook](validation/DATAFLOW_ASSURANCE_RUNBOOK.md)。runtime 行情、期权和券商查询走即时读取接口，不得调度为持久化刷新任务。

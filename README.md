@@ -98,211 +98,132 @@ tesseract --version
 
 ## 系统里的"人"（agent 角色一览）
 
-| 角色 | 做什么 | 能不能下单 |
-|---|---|---|
-| **宏观策略师** | 每周六（或遇到 FOMC/CPI/非农这类大事件时）分析宏观环境——利率路径、市场情绪、板块该往哪儿倾斜 | 不能 |
-| **行业分析师** | 每周六分层评审所在产业链（目前主要是 AI 硬件产业链，从需求端到设备端分八层看），逐层给出配置结论（超配/低配/清仓）与层内选谁 | 不能 |
-| **PEAD 分析师** | 财报事件驱动的核心分析师。财报前建立"预期基准"，财报间每天追踪新闻，财报后把实际结果和预期比对、打一个结构化的意外程度分数，给出交易建议 | 只能**建议**，不能下单 |
-| **技术面分析师** | 每天算一遍每只票的"择时读数"——三均线七点评分 + VIX 波动率调节 + 两层保护（期限结构恐慌、跌破 200 日线），给出**建议持有的敞口上限**。确定性代码，不经过 LLM。它只回答"现在适不适合持有这么多"，不回答"这只票好不好" | 不能，只出建议敞口 |
-| **证据观察员** | 读**我们不持有**的公司的财报（美光、三星、AMZN、Oracle 等），只抽出可核对的事实（产能、指引、涨价、份额），每条都带原文摘录。因为利润是流动的——HBM 的供需由海力士/美光/三星三家共同决定，只读自己持有的那家等于用三分之一的证据下注 | 不能，**连"建议"都不出**，只抽事实 |
-| **风控官** | 每天算一遍六层风控画像（有没有破限、组合处于什么风险状态），确定性代码，不经过 LLM | 不能，只会削减/拦截别人的交易 |
-| **命题提议者** | 当系统攒下一批"归不到任何已有命题"的事实时（比如一堆关于光模块交期、InP 缺口、良率的零散读数），归纳出一条可证伪的新命题给你看。**不定期**——由证据积累触发，不是定时跑 | 不能，只提议；**只有你能把它写进配置** |
-| **Chief（首席）** | **全系统唯一的决策者**。读完实时持仓、全部分析师的最新产出、风控状态、以往决策的战绩反馈，综合出交易决策 | ✅ 是唯一能产生交易决策的角色 |
-| **Trader（交易员）** | 纯执行角色，没有判断，只是把审批通过的决策真正发给券商（IBKR），并把成交记录记下来 | 执行已批准的单，自己不判断 |
-| **Critic（复盘评论员）** | 季度低频跑一次，读交易日志里每一笔（含没成交、被风控拦下、被你否决的）的开仓理由和实际结果，对"哪类判断准、哪类系统性出错"给出假设性解释和可选的参数调整建议 | 不能，产出**从不自动喂回 Chief**——要不要采纳、改哪个配置，都是你自己的动作 |
-| **Boss（你）** | 收到审批卡片，点批准或驳回 | ✅ 唯一能真正放行一笔交易的人 |
+分析师只研究、不下单，**彼此不读对方的观点**，只共享数据平台上同一份事实。
+例外只有两条：层次分析师的结论供行业分析师使用，信息分析师的简报供基本面分析师使用。
+只有 Chief 能把全部分析结论汇总成交易决策。
 
-画成图更直观——所有分析师的产出最终都收窄到 Chief 一个人，风控在审批之前
-就已经把关过，Boss 是整条链路上唯一能让交易真正发生的节点：
+| 角色 | 做什么 | 什么时候跑 | 能不能下单 |
+|---|---|---|---|
+| **信息分析师**（Information） | 读数据平台已准入的新闻、研报、公告、文章，抽出事实变化和可能的影响，产出信息简报；不给买卖建议 | 工作日 08:00（纽约时间）；财报前后由日历事件唤醒 | 不能 |
+| **基本面分析师**（Fundamental，PEAD 是它的分析框架） | **例行模式**：财报前建立并按重大变化刷新"预期基线"（市场隐含预期、核心叙事、关键 KPI、可证伪条件）。**事件模式**：财报发布后冻结基线，用实际值对照基线、一致预期、市场隐含预期三方打 Surprise Scorecard | 例行：工作日 09:00；事件：日历确认财报已发布后 | 不能，只出建议 |
+| **层次分析师**（Layer） | 按产业链层级（目前是 AI 硬件八层）比较标的强弱，给出证据论证；不给配置结论 | 每周六，行业评审前自动先跑 | 不能 |
+| **行业分析师**（Sector） | 基于层次分析，给出行业 / 层 / 标的三级配置（超配、标配、低配、清仓） | 每周六 09:30（台北时间） | 不能 |
+| **宏观分析师**（Macro） | 用宏观指标和已准入的政策文档判断 regime、传导路径和风险情景 | 每周六 09:00（台北时间） | 不能 |
+| **技术面分析师**（Technical） | 三均线七点评分 + VIX 波动率调节 + 两层保护，给出**建议持有的敞口上限**。确定性代码，不经过 LLM | 工作日 10:00（纽约时间） | 不能，只出建议敞口 |
+| **Chief（主理人）** | **全系统唯一的决策者**。汇总全部分析结论、持仓和战绩，产出交易提案或"不行动" | 目前只手动运行（见下文"交易路径"） | ✅ 唯一能产生交易决策的角色 |
+| **风控主管**（Risk Officer） | 用确定性规则复算交易后的风险，批准、裁剪或驳回提案；不读分析师观点 | 随 Chief 决策 | 不能，只会削减/拦截 |
+| **交易员**（Trader） | 只执行通过风控和你批准的同一版提案，发给 IBKR | 随审批 | 执行已批准的单，自己不判断 |
+| **书记员**（Clerk） | 对账、记录订单与成交、绩效和归因；确定性代码，LLM 不能改账本 | 随交易路径 | 不能 |
+| **Critic（复盘）** | 季度低频复盘交易日志，区分"决策质量"和"结果质量"，给出可选调整建议，从不自动喂回 Chief | 手动 | 不能 |
+| **Boss（你）** | 收到审批卡片，点批准或驳回 | — | ✅ 唯一能真正放行一笔交易的人 |
 
 ```mermaid
 flowchart LR
-    subgraph AN["分析师团队（只研究，不下单）"]
-        MA[宏观策略师]
-        SE[行业分析师]
-        PE[PEAD 分析师]
-        TE["技术面分析师<br/>（确定性，无 LLM）"]
-        EV["证据观察员<br/>（读不持有公司的财报）"]
+    DATA[("数据平台<br/>采集 · 准入 · 数据产品")]
+    subgraph AN["分析师（只研究，不下单，互不读观点）"]
+        LA[层次] --> SE[行业]
+        IN[信息] --> FU["基本面<br/>（PEAD）"]
+        MA[宏观]
+        TE["技术面<br/>（确定性）"]
     end
-    AN --> CH["Chief 首席<br/>（唯一决策者）"]
-    EV -."归不到已有假设的事实".-> PR["命题提议者"]
-    PR -.待确认卡.-> YOU["你：采纳 / 拒绝"]
-    YOU -.只有你能写进配置.-> AN
-    CH --> RG{"六层风控闸<br/>（确定性代码）"}
-    RG -->|"削减/拦截后"| PD[(决策先落库存档)]
-    PD --> BR{"Boss 审批<br/>（飞书卡片）"}
-    BR -->|批准| TR[Trader 执行下单]
+    DATA --> AN
+    AN -->|各自的投影| CH["Chief<br/>唯一决策者"]
+    CH --> RK{"风控主管<br/>确定性规则"}
+    RK -->|驳回并给出边界| CH
+    RK -->|通过| BR{"Boss 审批<br/>（飞书卡片）"}
+    BR -->|批准| TR[Trader 执行]
     BR -->|驳回| NO[不下单]
-    TR --> ML[(交易记录/绩效反馈)]
-    ML -.战绩反馈.-> CH
+    TR --> CL[(书记员<br/>账本 / 绩效)]
 ```
 
-下图把外部来源、持久化数据、实时输入、独立 Agent / Workflow、运行记忆及主要读取者放在同一张血缘图中。点击图片可打开交互版并逐项查看消费者。
+每一笔意图（不只是成交，被撤单、被拒绝、被风控拦下的也算）在提出时就把计划
+（止损、止盈、持有多久、什么条件会推翻判断）先落库，结果出来之后不能再改。Critic
+读的就是这份日志：样本不够时直接说"样本不足"，不硬编故事。
 
-[![数据层全景：来源、数据产品、Workflow Memory 与消费者](docs/assets/data-lineage/data-layer-overview.png)](docs/DATA_LINEAGE_EXPLORER.html)
-
-分析师之间是"平级"关系：行业分析师可以参考宏观策略师**已经发布**的结论作为
-背景，PEAD 分析师可以参考行业和宏观的结论作为背景——但没有人能**修改**别人的
-产出，更没有人能绕过 Chief 自己下单。
-
-**交易日志**是贯穿全系统的记录层，不是一个"分析师"：每一笔意图（不只是成交，
-被撤单/被拒绝/被风控拦下的也算）在提出时就把计划（止损/止盈/持有多久/什么条件
-会推翻这个判断）先落库、结果出来之后不能再回头改——这样才能事后诚实地判断
-"当初的判断对不对"，而不是让结果反过来污染记录。Critic 读的就是这份日志：它
-每季度做一次低频复盘，明确区分"决策质量"（当时判断得对不对）和"结果质量"
-（后来赚不赚钱）两栏，从不混着排名，且样本不够的时候直接说"样本不足，不作
-结论"，不硬编一个故事出来。
+完整的架构、数据流和每个角色的输入输出契约见
+[`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md)。
 
 ---
 
 ## 一天是怎么运作的
 
-系统每个交易日（周一到周五）会自动跑一轮"级联"（收盘前一小时左右触发），
-宏观策略师和行业分析师**不跟着这条交易日级联走**，单独挪到每周六——一周的
-节奏大致是这样：
+整套系统由四个常驻或定时服务驱动，都交给 launchd 管理（命令和排障见
+[运维手册](docs/PHASE_F_OPERATIONS.md)）：
+
+| 服务 | 做什么 | 节奏 |
+|---|---|---|
+| `com.ats.data-refresh` | **数据平台**：采集结构化与非结构化数据、刷新财报日历、FactSet 月末摄入、文档准入 | 每小时一次 |
+| `com.ats.phase-e` | **研究调度（Dispatcher）**：按时间表和日历事件运行 7 个研究工作流，产出各分析师的投影；**不进 Chief、不下单** | 常驻 |
+| `com.ats.consumer-health` | 每天检查各分析师读取的数据产品是否健康，失败就把该分析师切回旧读取路径并飞书告警 | 每天 09:30（北京时间） |
+| `com.ats.serve` | 处理飞书审批回调 | 常驻 |
+
+> ⚠️ **不要加载 `com.ats.schedule`。** 它是旧调度器（带 `--live`），已经退役，
+> 它做的事都已由上面的服务接手。加载它会让旧流程与新流程同时跑，并打开实盘开关。
+
+研究工作流的节奏（`config/workflow/phase_e_schedules.yaml`）：
 
 ```mermaid
 flowchart TD
-    subgraph SAT["周六（不下单，不用等开盘）"]
-        MA[宏观策略师评审] --> SE[行业分析师评审]
+    subgraph WD["周一 ~ 周五（纽约时间）"]
+        I["08:00 信息简报"] --> F["09:00 基本面例行<br/>（财报前建 / 刷新预期基线）"]
+        T["10:00 技术面读数"]
     end
-    subgraph WD["周一 ~ 周五，每个交易日一轮"]
-        direction TB
-        EV[手工日历事件补跑] --> PD["PEAD：新闻追踪 → 财报临近建预期档 → 财报已发布则打分"]
-        PD --> TE["技术面读数（评分/建议敞口）"]
-        TE --> RP[风控快照 + 绩效快照]
-        RP --> CH["Chief 收口（读当天全部新鲜产出，做决策）"]
+    subgraph SAT["周六（台北时间）"]
+        M["09:00 宏观评审"]
+        L["层次分析"] --> S["09:30 行业配置"]
     end
-    SAT -.评审结论已就绪，周一开工就是新鲜的.-> WD
+    subgraph EV["日历事件（每天 06:10 / 18:10 UTC 检查）"]
+        E1["财报发布且材料已准入"] --> E2["信息简报 → 基本面事件评审<br/>（Surprise Scorecard）"]
+    end
 ```
 
-Chief 排在每天最后一位，确保它看到的永远是当天最新的信息。如果它的结论是
-"什么都不用做"，流程就在这里安静结束，不会给你发任何东西。如果它认为该
-调整仓位，决策会先经过风控闸门削减/拦截，然后**在你审批之前就已经写入
-数据库存档**——就算你不点卡片，这次决策的完整记录也已经留痕，不会因为你
-没看到而凭空消失。
+- **财报是单独的一条主线。** 财报前 14 天内，例行模式在出现重大基本面变化时建立
+  或刷新预期基线，可以一直刷新到财报日，不按固定日期重做。数据平台确认财报**真的
+  发布了**（而不是按预测日期猜），事件模式才冻结基线、对照实际值打分。日历上两个
+  来源说法冲突的事件会被挡住，等你用 `ats events override` 裁决。
+- **数据没变就不重算。** 依赖的数据版本未变、投影仍在有效期内时，Dispatcher 直接复用
+  上一次的结果，不重复发模型请求。
+- **缺数据时宁可不出结论。** 必需的分析失败或过期，运行记为 `incomplete`，可以出
+  缺口报告，但不会进入决策。
 
-宏观/行业评审放在周六，是因为它们既不下单也不需要盯着开盘时间——放在周末
-跑，读到的是完整一周的信息（周一到周五每天的新闻追踪都已经落库），周一早上
-交易日级联开场时看到的就是新鲜出炉的评审结论，而不是"上周五之前"的旧快照。
+### 交易路径（目前没有切换）
 
-**财报是这套系统里单独的一条主线**，因为财报发布的时间点比"每天固定跑一次"
-重要得多：
-
-- **财报前**：给这只票建一份"预期基准"——保守/中性/乐观三档预期、市场当前
-  怎么定价这次财报（期权隐含波动、有没有提前抢跑）。
-- **财报公布前后每天**：持续追踪相关新闻，把重大信息（不是噪音）折进这只票
-  的分析里，让财报当天的判断不是"临时抱佛脚"。
-- **财报发布后**：系统会**主动确认财报真的发布了**（而不是按预测日期瞎猜——
-  数据商给的日期经常被修正），然后用真实结果对照预期基准打一个结构化的
-  "意外程度"分数，给出交易建议。这条建议同样只是建议，最终还是要经过 Chief
-  和你的审批。
-
-```mermaid
-flowchart LR
-    A["财报前 N 天<br/>建预期基准（保守/中性/乐观）"] --> B["财报前后每天<br/>追踪新闻，折进分析"]
-    B --> C{财报真的<br/>发布了吗？}
-    C -->|"还没，继续等"| B
-    C -->|"确认发布"| D["打分：实际 vs 预期<br/>→ 结构化意外程度分数"]
-    D --> E["交易建议"]
-    E --> F["Chief 决策 → 风控 → 你审批"]
-```
+研究侧已在新路径上运行；**Chief、风控、审批、交易和记账还没有切到新路径**，不会
+定时运行。现在 Chief 只在你手动执行 `ats chief run` 时运行，实盘授权锁定。切换交易
+路径需要你另行授权。
 
 ---
 
 ## 你每天要做的事
 
-日常情况下，你需要做的只有一件事：**手机收到飞书审批卡片时，看一眼，点批准
-或驳回。** 卡片上会显示：
+研究侧全自动，日常你只需要：
 
-- Chief 的决策和理由
-- 风控当前状态，以及这次决策有没有被风控削减/拦截过
-- 如果是「实盘账户」，卡片会有明显的警示前缀，别把它和模拟盘的卡片搞混
-
-**偶尔会多一件事：审批一条新命题。** 系统读了一堆不持有公司的财报后，可能攒出一批
-"归不到任何已有假设"的事实，这时它会归纳出一条候选命题请你定夺，长这样：
-
-```
-待确认命题（由 6 条未映射观测积累触发）
-
-  「AI 数据中心的增量瓶颈正从存储转向光互联，InP 衬底与 EML 器件成为出货约束」
-
-  涉及层：L5（InP衬底）→L4（EML器件）→L3（光模块）
-  证人立场：供给方×3 / 需求方×0   ⚠️ 立场单一，交叉验证不足
-
-  支撑观测（均可点回原文）
-    COHR   Lead times for our 1.6T optical modules have extended to 26 weeks
-    LITE   Key InP-based components are sold out, supply gap more than 30%
-    AXT    InP substrate yield ramp is slower than planned
-  ...
-  → ats evidence review <id> --accept | --reject
-```
-
-`--accept` 只是**记录你的决定**；命题真正生效还需要你手工写进
-`config/sectors/ai_hardware.yaml`。这是有意的：**只有人能扩展系统的判断维度**，
-否则模型今天发明一个概念、明天换一个，历史就不再可比。
-
-拒绝也会被记住——同一批证据换个说法在 30 天内再提会被自动压掉。
-
-除此之外，值得偶尔做的事：
-
-- **翻一眼产业链证据周报**：每周和行业评审一起，会在你的知识库里生成一份
-  `产业链证据-AI硬件-<日期>.md`——每条假设现在被证实到什么程度、**还有谁没发声**、
-  以及每个结论背后的**财报原文**。想立刻看命令行版就跑 `ats evidence claims`。
-- **翻一眼分析报告**：每份分析（行业评审、财报分析、交易复盘）都会存成一份
-  Obsidian 笔记，落在你配置的知识库目录里，方便你不受打字长度限制地回顾
-  某只票、某次决策的完整来龙去脉。
-- **关注运行日志里的 WARNING/ERROR**：多数数据源掉线时系统会自动降级（比如
-  某个数据源连不上就换一个、或者干脆跳过这部分分析），不会让整条流程崩掉，
-  但长期缺某类数据（比如某只新上市的外国 ADR 缺财报日历覆盖）值得你知道。
-- **偶尔看一眼有没有审批卡片"堆积"没处理**：系统只负责生成决策和推卡片，
-  不会替你做决定——如果你几天没看飞书，未处理的审批会一直攒着。
+- **手机收到飞书审批卡片时，看一眼，点批准或驳回。** 卡片会显示 Chief 的决策和
+  理由、风控有没有削减或拦截过；实盘账户的卡片有明显的警示前缀，别和模拟盘搞混。
+  （交易路径切换前，只有你手动跑 Chief 时才会出现卡片。）
+- **收到飞书告警时处理一下。** 每日健康检查失败会自动切回旧读取路径并告警，告警里
+  写着哪个分析师、哪个数据产品出了问题。
+- **偶尔看一眼分析报告。** 各分析师的报告存成 Obsidian 笔记，落在你配置的知识库目录里。
+- **偶尔裁决一次日历冲突。** `ats events candidates` 能看到被挡住的事件。
 
 ---
 
 ## 我要配置的东西都在哪
 
-日常你只需要碰这四处，它们**职责不重叠**：
-
 | 我想做什么 | 改哪里 |
 |---|---|
-| **多读一家公司的财报**（不打算交易它） | `config/pead.yaml` 的 `observe:` 列表 |
-| **让系统验证一个新假设** | `config/sectors/ai_hardware.yaml` 对应层的 `claims:` |
-| **补充某个环节的产业背景知识** | `config/knowledge/*.md`，并在该层的 `structure_notes:` 里挂上 |
-| **告诉系统谁是谁的上下游** | `config/pead/<代码>.yaml` 的 `signal_chain:` |
+| **跟踪 / 交易哪些股票** | `config/pead.yaml` 的 `targets:`（可交易）与 `observe:`（只读证据） |
+| **某只股票的个性化设置**（上下游、关注的 KPI） | `config/pead/<代码>.yaml` |
+| **产业链分层、要验证的命题** | `config/sectors/ai_hardware.yaml` |
+| **数据采集任务和频率** | `config/data/schedules.yaml`（数据刷新控制器读取） |
+| **研究工作流的时间表** | `config/workflow/phase_e_schedules.yaml` |
+| **日历事件唤醒哪些工作流** | `config/workflow/event_routes.yaml` |
+| **风控限额** | `config/risk.yaml` |
+| **模型与推理配置** | `config/settings.yaml` 的 `llm` 一节 |
 
-最后一条比看起来重要：正是因为 `config/pead/NVDA.yaml` 里写着
-`{symbol: SKHY, role: upstream}  # HBM 主供`，系统才能把英伟达电话会里那句
-"我们最大的内存合作伙伴"认出来指的是海力士——否则这条**客户亲口说的**份额证据
-就会被记在英伟达自己头上，永远进不了海力士的份额判断。
-
-写一条新命题长这样（完整字段说明见
-[`docs/CHAIN_EVIDENCE.md`](docs/CHAIN_EVIDENCE.md)）：
-
-```yaml
-claims:
-  - id: hbm_share_and_pricing_power
-    kind: relative            # 只决定怎么聚合：逐家读数 | common=支持/反驳记分
-    entities: [SKHY, MU, "005930.KS"]      # 比较这几家
-    feeds_factor: moat_pricing             # 可选：还要影响哪个截面因子；省略=都不影响
-    statement: HBM 份额与定价权在这三家之间如何分布
-    concepts:                 # 要看哪些维度（按语义归类，不是关键词匹配）
-      - key: hbm_share
-        desc: HBM 份额/供货占比及其指引
-        direct: true          # 只有这类维度能进截面比较
-        expect_from: [SKHY, MU, "005930.KS", NVDA]   # 该由谁来说
-    witnesses:                # 每个证人站在什么位置（决定能不能交叉印证）
-      - {entity: NVDA, stance: customer}
-      - {entity: MU,   stance: competitor}
-```
-
-两个容易踩的点：
-
-- **配置里没有"哪个方向算支持"这种字段。** 曾经有（`supports_when`），实测被打脸：
-  SK 海力士一边说客户还在要货、一边提前量产，被断言成七条反驳。景气里管理层必然扩产，
-  那是对需求的回应。**配置声明范围与治理，含义由逐簇判读给出并留下可审计的理由。**
-- **`expect_from` 决定了"沉默"怎么被看待。** 声明了该由谁来说，某人本期没说话
-  就会被点名为缺口；不声明，沉默就被当成中性——而单份财报既片面又可能挑好的说。
+配置只声明**范围与治理**（看哪些公司、哪些维度、该由谁来说），**不写语义判断**
+（比如"哪个方向算支持"）。含义由模型逐条判读并留下可审计的理由——曾经把方向写进
+配置（`supports_when`），实测被打脸：景气里管理层必然扩产，那是对需求的回应，不是反驳。
 
 ---
 
@@ -312,72 +233,46 @@ claims:
 
 > ⚠️ **`.venv` 只有一份，固定在主仓库根目录**：
 > `/Users/liuchao/Code/trading/auto_stock_trading_agents/.venv`。
-> 如果你当前所在的目录不是那里——比如在某个 `git worktree`（另开出来做
-> 隔离开发用的目录，跟主仓库共享 git 历史但不共享 `.venv` 这类没进 git 的
-> 文件）里，或者在仓库下面的某个子目录（比如 `src/ats`）——直接
-> `source .venv/bin/activate` 会报 `no such file or directory`，因为那个
-> 相对路径下根本没有 `.venv`。两种解法都行：
+> 在 `git worktree` 或子目录里直接 `source .venv/bin/activate` 会报
+> `no such file or directory`，用绝对路径激活即可。
 
 ```bash
-# 方式一：先 cd 回主仓库根目录，再用相对路径激活
-cd /Users/liuchao/Code/trading/auto_stock_trading_agents
-source .venv/bin/activate
-
-# 方式二：不管当前在哪个目录，直接用绝对路径激活（更省心，不用先 cd）
 source /Users/liuchao/Code/trading/auto_stock_trading_agents/.venv/bin/activate
 ```
 
-激活之后才能直接用下面的 `ats <命令>`；如果不想激活（比如只是临时跑一条），
-用 `.venv/bin/ats <命令>` 代替 `ats <命令>`。旧的
-`PYTHONPATH=src .venv/bin/python -m ats.runtime.cli <命令>` 写法仍兼容，但已不再是推荐入口。
-这两种相对路径写法都要在能找到 `.venv` 的目录下运行（同样两种解法）。
+激活之后可直接用 `ats <命令>`；不激活时用 `.venv/bin/ats <命令>`。
 
 ```bash
-# 周度研究（默认真实数据 + LLM；只更新研究存档，不会下单）
-ats macro review macro         # 手动补跑宏观周报（FRED/市场/新闻 → 宏观评审）
-ats macro show macro           # 查看最近一次宏观评审与历史摘要
-ats sector review ai_hardware  # 手动补跑 AI 硬件行业周报（应在宏观评审之后运行）
-ats sector show ai_hardware    # 查看最近一次行业评审与历史摘要
+# 看系统现在的状态
+ats consumer-cutover status          # 每个分析师读的是新路径（target）还是旧路径（legacy）
+ats dispatch owner-log               # 研究工作流由谁负责（dispatcher / legacy）及切换历史
+ats workflow runs --limit 20         # 最近的研究运行及结果（complete / incomplete）
+python -m ats.data.refresh status    # 数据采集任务的最近状态
+ats events upcoming                  # 未来的财报 / 宏观事件
+ats events candidates                # 被挡住、等你裁决的日历冲突
 
-# 补跑周度研究后，如需让 Chief 基于新结论更新决策：
-ats chief run --channel feishu_bot  # 默认 dry-run，发飞书审批卡；绝不要加 --yes
+# 手动跑一次研究工作流（走 Dispatcher，数据没变时会复用、不重复请求模型）
+ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio
+ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware   # 自动先补跑层次分析
+ats workflow run --task fundamental-routine --scope-kind portfolio --scope-id pead-targets   # 自动先补跑信息简报
 
-ats chief run                 # 手动触发一次 Chief 收口（读全部存档→决策→风控→审批）
-ats chief show                # 看最近一次 Chief 决策的完整上下文
-ats pead show SYM             # 看某只票的财报事件档案（预期、打分、是否已发终版）
-ats pead prep SYM             # 手动给某只票建预期基准（一般不需要手动跑，自动化会做）
-ats pead score SYM --transcript path/to/call.txt   # 手动打分（比如自动化没触发时）
-ats evidence show              # 看已抽取的产业链证据（不持有公司的财报事实）
-ats evidence observe MU        # 手动读一次某公司的最近财报，抽成证据
-ats evidence claims            # 看各命题现在被证实/证伪到什么程度、谁还没发声
-ats evidence report            # 手动生成一份产业链证据 Obsidian 周报
-ats evidence propose           # 让系统看看未归类的事实里有没有新命题（不够门槛就不跑）
-ats evidence proposals         # 列出待你审批的候选命题
-ats evidence kbreview          # 知识库该更新了吗（六类信号，无 LLM；周报里也有这一节）
-ats sector layer ai_hardware --layer L6_memory   # 单层配置结论 + 层内选股
-ats sector kbperturb ai_hardware --layer L4_interconnect --mode control   # 知识库真的在起作用吗
-                               # control=测噪声底 / ablate=删判据 / poison=倒序判据；不动生产文件
-ats evidence review <id> --accept --note "理由"   # 采纳（或不加 --accept 即拒绝）
-ats risk report                # 看当前六层风控画像
-ats trader portfolio           # 看实时持仓
-ats trader perf                # 看历史绩效
-ats schedule --now             # 立即手动跑一轮完整级联（非交易日会自动跳过）
-ats serve                      # 常驻进程：处理飞书审批回调（和调度进程分开跑）
+# 看各分析师的产出
+ats macro show macro
+ats sector show ai_hardware
+ats technical show
+ats pead show NVDA                   # 某只票的财报档案：基线、打分
+
+# 决策与交易（交易路径尚未切换，以下均需你手动执行）
+ats chief run --channel feishu_bot   # 默认 dry-run，发飞书审批卡；绝不要加 --yes
+ats chief show                       # 最近一次决策的完整上下文
+ats risk report                      # 当前风控画像
+ats trader portfolio                 # 实时持仓
+ats trader perf                      # 历史绩效
 ```
 
-周度任务的正常触发时点由 `config/settings.yaml` 控制：`weekly_review` 在
-`Asia/Shanghai` 时区每周六 `08:50` 依次运行“宏观 → 行业 → 截面重排”。若机器在
-该时刻睡眠或调度器未运行，按上面的前三条命令补跑；`ats schedule --now` 不会补跑
-这两个周度任务，且在非交易日会跳过日级联。
-
-宏观更新有两条并存路径：FOMC/CPI/NFP 等发布日事件触发用于尽快出结论；任何后续的
-周度调度或手动 `macro review` 也会把“上次正式评审 → 本次运行”之间所有已跟踪指标的
-新增观测和历史修订补拉回来。因此发布日任务失败不会形成永久缺口。新周报顶部的
-“宏观数据与结论 Delta”会高优列出数据发布日期、数据所属期、前值/新值以及结论变化。
-
-日常运行靠两个常驻进程：`ats schedule --live`（定时触发级联）和 `ats serve`
-（处理飞书回调），二者都建议交给 launchd/systemd 之类的守护进程管理，别手动
-开着终端窗口跑。
+研究工作流的负责人是 dispatcher 时，`ats macro review`、`ats pead prep` 这类旧入口
+会报 `caller is not current owner` 并拒绝运行——这是故意的，防止新旧两条路径重复跑。
+要回到旧路径，用 `ats dispatch owner-rollback`（见运维手册）。
 
 ---
 
@@ -396,9 +291,10 @@ ats serve                      # 常驻进程：处理飞书审批回调（和�
 - **这台机器需要保持醒着，尤其是财报当晚。** 调度依赖 Mac 在触发时刻不处于
   深度睡眠——虽然系统对"晚醒"设了几个小时的宽限窗口兜底，但最可靠的做法
   还是财报密集期让机器别睡死，或配置好定时唤醒。
-- **改了代码要重启常驻进程才会生效。** `ats schedule`/`ats serve` 是长驻
-  Python 进程，启动时把代码加载进了内存，你在磁盘上改了文件，不重启（比如
-  `launchctl kickstart -k gui/$(id -u)/com.ats.schedule`）它是看不到的。
+- **改了代码要重启常驻进程才会生效。** `com.ats.phase-e`（`ats schedule --phase-e`）
+  和 `com.ats.serve` 是长驻 Python 进程，启动时把代码加载进了内存，不重启（比如
+  `launchctl kickstart -k gui/$(id -u)/com.ats.phase-e`）它们看不到磁盘上的改动。
+- **永远不要加载 `com.ats.schedule`。** 那是已退役的旧调度器，带 `--live`。
 - **数据源会降级，但不会让流程崩溃。** 某个行情/基本面/期权数据源连不上时，
   系统会自动跳过或换一个源，但打分质量可能因此打折——如果某只票长期只能拿到
   "降级版"数据（比如新上市不久、覆盖不全的标的），这类分析的可信度要打个
@@ -412,22 +308,13 @@ ats serve                      # 常驻进程：处理飞书审批回调（和�
 
 ## 想深入了解实现细节？
 
-这份 README 只讲"这是什么、怎么用、要注意什么"。更技术性的内容在
-`docs/` 目录：
+这份 README 只讲"这是什么、怎么用、要注意什么"。更技术性的内容在 `docs/`：
 
-- [`docs/DESIGN.md`](docs/DESIGN.md) —— 设计思想、角色边界、不可违反的不变式
-  （面向决策者/设计者，偏抽象）
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —— 环境搭建、代码规范、测试约定、
-  daemon 运维操作（面向开发/运维工程师，偏具体）
-- [`docs/CHAIN_EVIDENCE.md`](docs/CHAIN_EVIDENCE.md) —— 未持有公司的财报如何变成
-  证据、共同需求与相对份额为什么必须分开记账、以及它如何进入截面因子
-- [`docs/EVIDENCE_OBSERVER.md`](docs/EVIDENCE_OBSERVER.md) —— 证据观察员：
-  为什么要读不持有公司的财报、它能做什么不能做什么、怎么手动跑
-- [`docs/TECHNICAL_ANALYST.md`](docs/TECHNICAL_ANALYST.md) —— 技术面策略的数学定义、
-  7.5 年回测证据、以及为什么选了这一版
-- [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) —— 每种 workflow 的精确触发条件、
-  Chief 决策图的节点顺序、财报打分窗口的判定逻辑
-- [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) —— 每个数据源的接入状态、
-  怎么单独测试某个数据源
-- [`docs/GO_LIVE.md`](docs/GO_LIVE.md) —— 从零开始搭这套系统的分步 checklist
-  （环境变量、IBKR、飞书应用配置、公网隧道）
+- [`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md) —— Workflow、Dataflow、
+  Agent 职责与审批链的唯一权威设计
+- [`docs/PHASE_F_OPERATIONS.md`](docs/PHASE_F_OPERATIONS.md) —— 常驻服务、调度负责人切换与回退、日常运维
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —— 环境搭建、代码规范、测试约定
+- [`docs/TECHNICAL_ANALYST.md`](docs/TECHNICAL_ANALYST.md)、[`docs/MACRO_ANALYST.md`](docs/MACRO_ANALYST.md)、
+  [`docs/SECTOR_ANALYST.md`](docs/SECTOR_ANALYST.md) —— 各分析师的方法
+- [`docs/STRUCTURED_DATA_USER_GUIDE.md`](docs/STRUCTURED_DATA_USER_GUIDE.md) —— 数据平台有什么数据、怎么查
+- [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) —— 每个数据源的接入状态

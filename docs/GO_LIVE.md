@@ -161,27 +161,23 @@ uv sync --python 3.12 \
 
 ---
 
-## 8. 定时调度（每个交易日自动）
+## 8. 定时调度
 
-- [ ] `config/settings.yaml` 设：
-  ```yaml
-  schedule:
-    run_at: "16:15"           # 美东收盘后
-    timezone: America/New_York
-  channel:
-    kind: feishu
-  ```
-- [ ] 先单次验证（非交易日会自动跳过）：
-  ```bash
-  PYTHONPATH=src .venv/bin/python -m ats.runtime.cli schedule --now
-  ```
-- [ ] 起常驻调度（另一个进程，与 serve 并存）：
-  ```bash
-  PYTHONPATH=src .venv/bin/python -m ats.runtime.cli schedule --live
-  ```
-  → 每个交易日 16:15 自动分析 → 推飞书 → 你手机审批 → serve 执行
+> ⚠️ **不要运行 `ats schedule --live`，也不要加载 `com.ats.schedule`。** 那是已退役的旧调度器，
+> 会让旧级联与新调度同时跑，并打开实盘开关。
 
-> 三个常驻进程：**TWS**（或 Gateway）、`ats serve`（审批回调）、`ats schedule`（定时）。建议用 `tmux`/`launchd`/`systemd` 守护。
+研究侧由常驻服务 `com.ats.phase-e`（`ats schedule --phase-e`，不进 Chief、不下单）、
+`com.ats.data-refresh`、`com.ats.consumer-health` 驱动，安装与操作见
+[`PHASE_F_OPERATIONS.md`](PHASE_F_OPERATIONS.md) 与 [`DEVELOPMENT.md`](DEVELOPMENT.md) 第 9 节。
+**交易路径（Chief 定时决策 → 风控 → 飞书审批 → 执行）尚未切换到新路径，目前没有定时排程**；
+在它切换之前，Chief 只能手动运行：
+
+```bash
+ats chief run --channel feishu_bot   # 默认 dry-run，推飞书审批卡；绝不要加 --yes
+```
+
+> 常驻进程：**TWS**（或 Gateway）、`com.ats.serve`（审批回调）、`com.ats.phase-e`（研究调度）、
+> `com.ats.data-refresh`（数据采集），均由 launchd 守护。
 
 ---
 
@@ -189,7 +185,7 @@ uv sync --python 3.12 \
 
 - [ ] **每日**：开 TWS（24h 会登出）→ `ats ibkr` 自检
 - [ ] **数据库**：`var/ats.sqlite`（历史/绩效）、`var/checkpoints.sqlite`（暂停态），均 gitignore，定期备份
-- [ ] **监控**：关注 serve / schedule 日志里的 `WARNING`（数据源降级、IBKR 不可达等）
+- [ ] **监控**：关注 `var/logs/` 下 serve / phase-e / data-refresh 日志里的 `WARNING`（数据源降级、IBKR 不可达等）
 - [ ] **绩效**：
   ```bash
   PYTHONPATH=src .venv/bin/python -c "from ats.memory import get_store; [print(p.cycle_id, p.net_liquidation, p.daily_pnl) for p in get_store().performance_history()]"

@@ -1,5 +1,20 @@
 # 行业分析师（sector_analyst）
 
+> **现状（新 Workflow/Dataflow 下，以本节为准）**
+>
+> | 项 | 内容 |
+> |---|---|
+> | 职责 | **独占**行业 / 层 / 标的三级配置权（超配、标配、低配、清仓与预算）。层级状态判断与层内排名已拆给[层次分析师](LAYER_ANALYST.md)，本角色读它的 `layer_analysis` 投影 |
+> | 读什么 | 共享的行业事实与 `layer_analysis` 投影 |
+> | 不读什么 | 信息、基本面、宏观、技术面的观点（TARGET §7.2） |
+> | 产出 | `sector_allocation` 投影（`SectorAllocation`，每层 `LayerAllocation`：状态、配置、预算、信心、引用的层级投影、缺口） |
+> | 谁读它 | 只有 Chief。下文「注回 PEAD prep/monitor」「PEAD 标的额外读活体档案」描述的是切换前的行为，基本面分析师现在不读行业结论 |
+> | 什么时候跑 | 每周六 09:30（台北时间），Dispatcher 调度，先自动补跑层次分析 |
+> | 手动运行 | `ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware`；`ats sector show ai_hardware` 查看 |
+> | 已知问题 | 「目标权重」口径未统一：各层预算上限之和会被截到 100% |
+>
+> 下文的分层思路、截面方法与配置结论到预算使用率的映射仍可参考；涉及层级判断的部分以层次分析师文档为准。
+
 站在**行业视角**、自下而上聚合整条产业链的分析师 Agent。与 PEAD 的**企业级**基本面分析互补：PEAD 盯单个标的的财报预期差，行业分析师看整条链条的景气度、供需、定价权、资金流，产出**层间轮动**和**个股增持/持有/减持**建议。
 
 MVP 覆盖 **AI 硬件产业链**，按 L1→L8 分层（需求沿 L1 向 L8 传导）。
@@ -291,7 +306,7 @@ ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告�
 - 标 `TODO 用户确认` 的归层请校正（如 CRWV/TEL）。
 - **新增标的默认没有可归属维度**：它不在任何命题的证人声明里 → `concept_menu` 返回空菜单
   → 它的观测 100% 未映射。补声明前走**两步法**（先观测再声明），见
-  [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
+  [`docs/archive/CHAIN_EVIDENCE.md`](../archive/CHAIN_EVIDENCE.md)。
 
 ### 普通成分股 vs PEAD 标的
 

@@ -72,7 +72,7 @@ def test_event_view_negative_below_bar_and_no_quantity_ever():
 
 def test_score_module_never_imports_or_constructs_trade_decision():
     # Structural guarantee, not just a naming convention: PEAD is an analyst, not the
-    # Manager — only Chief may produce an executable TradeDecision (docs/DESIGN.md
+    # Manager — only Chief may produce an executable TradeDecision (docs/archive/DESIGN.md
     # §4/§7). Phase D: no recommendations either — event_view() returns a direction.
     # A docstring may still *mention* TradeDecision (to explain the distinction), so
     # check the two patterns that would actually reintroduce it: an import line and

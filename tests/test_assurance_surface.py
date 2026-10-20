@@ -169,7 +169,7 @@ def test_a_cutover_action_outside_the_surface_is_allowed(surface):
     typo, not new work, and is rejected separately.
     """
     surface_mod.assert_outside_fingerprint_surface(
-        ["docs/PHASE_F_ACCEPTANCE_REQUIREMENTS.md"])
+        ["docs/archive/PHASE_F_ACCEPTANCE_REQUIREMENTS.md"])
 
 
 def test_a_misspelled_path_is_rejected_rather_than_silently_passing(surface):

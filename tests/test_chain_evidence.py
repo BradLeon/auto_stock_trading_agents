@@ -1,6 +1,6 @@
 """Chain evidence — stage 1: observation extraction + persistence (hermetic).
 
-Covers the acceptance table in docs/CHAIN_EVIDENCE.md §7 阶段一.
+Covers the acceptance table in docs/archive/CHAIN_EVIDENCE.md §7 阶段一.
 """
 
 from datetime import datetime, timezone
@@ -290,7 +290,7 @@ def test_observe_document_persists_failure(monkeypatch):
 
 def test_freeze_as_discovery_marks_rows():
     """Material that MADE us notice a proposition may explain 'why look' but must
-    never also count as 'it is true' (docs/CHAIN_EVIDENCE.md §6.5)."""
+    never also count as 'it is true' (docs/archive/CHAIN_EVIDENCE.md §6.5)."""
     store = get_store()
     o = _obs()
     store.save_observation(o)

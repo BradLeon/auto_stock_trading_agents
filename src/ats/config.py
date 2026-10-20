@@ -625,7 +625,7 @@ def load_sector_config(name: str = "ai_hardware"):
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)
     r.setdefault("dossier_excerpt_chars", 350)
-    # Chain-evidence corroboration thresholds (docs/CHAIN_EVIDENCE.md §4). Config, not
+    # Chain-evidence corroboration thresholds (docs/archive/CHAIN_EVIDENCE.md §4). Config, not
     # constants: they are judgement calls about how much evidence is "enough".
     r.setdefault("corroboration", {})
     c = r["corroboration"]

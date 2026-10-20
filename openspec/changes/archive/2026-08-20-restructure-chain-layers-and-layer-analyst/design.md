@@ -192,7 +192,7 @@ group 上限同时在 `risk/assess.py` 里成为一条新的 breach 检查。
 **之后**产出，所以改吃**上一轮**的该层 LayerVerdict。周度节奏下，上一轮结论是合法的先验；
 在提示词里明确标注它是上一轮的，避免被当成本期结论。
 
-**为什么保留跨层轮动这一步**：`docs/SECTOR_ANALYST.md` 记着「层间轮动本质是跨层比较，
+**为什么保留跨层轮动这一步**：`docs/agents/SECTOR_ANALYST.md` 记着「层间轮动本质是跨层比较，
 必须在同一上下文里完成」——这条仍然成立，只是它现在比较的是 8 条紧凑结论而不是全部原始素材。
 
 ### D9 — 失败与降级
@@ -306,7 +306,7 @@ D1 要解决的毛病。
 总 token 没有等比例增加的主要原因。
 
 保持不变的是 common / relative 的**分账**：两个块仍然分开，共同需求的结论仍然不得被读成
-「谁在赢」（`docs/CHAIN_EVIDENCE.md` 不变式 1）。按层切分只改了作用域，没有改隔离规则。
+「谁在赢」（`docs/archive/CHAIN_EVIDENCE.md` 不变式 1）。按层切分只改了作用域，没有改隔离规则。
 
 ### D15 — 两类命题的定向：common 答「多少钱」，relative 答「选谁」
 
@@ -323,7 +323,7 @@ D1 要解决的毛病。
 **relative 走两条路不是重复计价**：结构分析师把它压成一个数进复合排名，层级分析师读的是
 原文用于写理由。两者一个定量、一个定性，冲突时以读数原文为准（spec 已规定证据优先级）。
 
-**common 不进结构因子，这条不能松**：`docs/CHAIN_EVIDENCE.md` 不变式 2——「竞争者变强 ≠ 我方
+**common 不进结构因子，这条不能松**：`docs/archive/CHAIN_EVIDENCE.md` 不变式 2——「竞争者变强 ≠ 我方
 变弱」，没有直接的份额/认证/ASP 证据时不得推导我方份额下降。common 结论若能改因子，就等于让
 「行业需求好」改写「谁在赢」，正是不变式要挡的东西。
 
@@ -486,7 +486,7 @@ D1 要解决的毛病。
 7. **影子运行一轮**：使用率强制为 1.0（等价旧行为）跑一次，比对 basket 与上一周是否只因分层
    变化而变
 8. **启用绑定**：打开使用率
-9. **文档**：`docs/SECTOR_ANALYST.md` / `docs/CHAIN_EVIDENCE.md` / `docs/RISK_SYSTEM.md` / `README.md`
+9. **文档**：`docs/agents/SECTOR_ANALYST.md` / `docs/archive/CHAIN_EVIDENCE.md` / `docs/agents/RISK_SYSTEM.md` / `README.md`
 
 **回滚**：步骤 8 由 `config/pead.yaml` 的开关控制，关掉即回到「使用率恒为 1.0」；
 步骤 3 的配置搬迁靠 git revert，`legacy_keys` 保证历史两个方向都能解析。

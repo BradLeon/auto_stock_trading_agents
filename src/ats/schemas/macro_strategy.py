@@ -17,7 +17,7 @@ SIGNALS = ("risk-on", "neutral", "risk-off", "bullish", "bearish")
 # growth × inflation 2x2, plus a mandatory fifth state. `transition` is not a
 # rounding error — a classifier forced to pick one of four will hand you a
 # confident wrong answer exactly at the turning points, which is where being
-# wrong costs the most. See docs/MACRO_ANALYST.md §6.3.
+# wrong costs the most. See docs/agents/MACRO_ANALYST.md §6.3.
 Quadrant = Literal[
     "goldilocks",    # 温和降温：增长稳定/改善 + 通胀下行
     "reflation",     # 经济过热：增长改善 + 通胀上行
@@ -93,7 +93,7 @@ class SectorTilt(BaseModel):
 
 # --------------------------------------------------------------------------- #
 # Deterministic layer — every field below is filled by code, never by the LLM.
-# (Same author-separation discipline as CriticFinding; docs/DESIGN.md §9.3.)
+# (Same author-separation discipline as CriticFinding; docs/archive/DESIGN.md §9.3.)
 # --------------------------------------------------------------------------- #
 class IndicatorReading(BaseModel):
     """One indicator as level + change + distributional position.
@@ -301,7 +301,7 @@ class MacroReview(BaseModel):
     """The persisted weekly review.
 
     Two layers with different authors, deliberately kept apart so a reader can tell
-    fact from narrative at a glance (docs/MACRO_ANALYST.md §4.4):
+    fact from narrative at a glance (docs/agents/MACRO_ANALYST.md §4.4):
       · deterministic — quadrant / axes / indicators / decomposition / alerts:
         computed by code, the LLM is forbidden from rewriting them.
       · narrative — regime / summary / rate_path / sector_tilts / … / falsifier.

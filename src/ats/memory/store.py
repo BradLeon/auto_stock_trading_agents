@@ -202,7 +202,7 @@ CREATE INDEX IF NOT EXISTS idx_episode_symbol ON trade_episodes(symbol);
 CREATE INDEX IF NOT EXISTS idx_insights_ticker ON research_insights(ticker);
 CREATE INDEX IF NOT EXISTS idx_events_symbol ON pead_events(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
--- Chain evidence (docs/CHAIN_EVIDENCE.md). Not keyed by tradable symbol: an
+-- Chain evidence (docs/archive/CHAIN_EVIDENCE.md). Not keyed by tradable symbol: an
 -- observation is about an economic entity and a metric, and one fact can bear on
 -- several claims across layers.
 CREATE TABLE IF NOT EXISTS evidence_observations (
@@ -2186,7 +2186,7 @@ class TradingMemory:
         """Mark observations as the material that MADE us notice a proposition.
 
         Frozen material explains "why look"; it may never also count as "it is true"
-        (see docs/CHAIN_EVIDENCE.md §6.5). Returns rows affected.
+        (see docs/archive/CHAIN_EVIDENCE.md §6.5). Returns rows affected.
         """
         return self.data_store().freeze_observations_as_discovery(observation_ids)
 

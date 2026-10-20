@@ -3,7 +3,7 @@
 > 这份文档回答三件事：系统里的"静态知识"有哪些、每个 agent 该读哪一层、以及
 > **在没有人定期通读的前提下，怎么发现某份知识已经过时**。
 >
-> 相关：`docs/DESIGN.md`（角色与决策权）· `docs/CHAIN_EVIDENCE.md`（命题证据链）
+> 相关：`docs/archive/DESIGN.md`（角色与决策权）· `docs/archive/CHAIN_EVIDENCE.md`（命题证据链）
 
 ## 1. 问题：知识库跨了两个衰减速率
 

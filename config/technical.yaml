@@ -1,7 +1,7 @@
 # 技术面分析师配置。
 # 策略甲 = 用户 LEAPS V1→V4 核心的忠实无杠杆移植，经 7.5 年回测选定
 # （2019-01→2026-07，9 个预注册回撤窗口 + 静态敞口对照 + 成本敏感性）。
-# 详见 docs/TECHNICAL_ANALYST.md。
+# 详见 docs/agents/TECHNICAL_ANALYST.md。
 #
 # ⚠️ 本 agent **不接 LLM**：产出就是策略的确定性运行结果。
 

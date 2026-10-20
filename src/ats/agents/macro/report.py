@@ -82,7 +82,7 @@ def _deterministic_section(review: MacroReview) -> list[str]:
 
     Kept visually separate from the LLM's prose on purpose: a reader has to be
     able to tell at a glance which lines are arithmetic and which are a model's
-    interpretation (docs/MACRO_ANALYST.md §4.4).
+    interpretation (docs/agents/MACRO_ANALYST.md §4.4).
     """
     # The earnings backdrop comes from a different source than the indicator
     # layer, so it can be present when FRED is down — gating the whole section on

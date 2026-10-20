@@ -170,7 +170,7 @@ flowchart LR
 （如以 ADR 形式上市的外国公司）结构性失效——这是已知且暂不打算修的数据覆盖
 缺口，见第 12 节。
 
-数据源清单见 `docs/DATA_SOURCES.md`。
+数据源清单见 `docs/data/DATA_SOURCES.md`。
 
 ## 7. Chief：统一决策的设计动机
 
@@ -198,7 +198,7 @@ risk_state 是约束而不是参考意见；持仓复查（止损/落空/降级�
 自己持有的那家，等于用三分之一的证据下注。系统原来的分析单元是"股票"，一家公司的
 财报被当成孤立事件；现在补上的是"**产业链环节的利润池**"这个单元。
 
-完整设计见 [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)，此处只列不变式与数据模型。
+完整设计见 [`docs/archive/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)，此处只列不变式与数据模型。
 
 ### 两类信号必须分开记账
 
@@ -258,7 +258,7 @@ risk_state 是约束而不是参考意见；持仓复查（止损/落空/降级�
 底线不应该有"这次模型觉得可以例外"的弹性。
 
 完整口径、交易后模拟、期权指派资金和 Chief 状态机见
-[`docs/RISK_SYSTEM.md`](RISK_SYSTEM.md)。风险单位是经济实体而不是证券代码；所有
+[`docs/agents/RISK_SYSTEM.md`](../agents/RISK_SYSTEM.md)。风险单位是经济实体而不是证券代码；所有
 外币先换到账户基础货币，杠杆 ETF 的产品倍数和期权 delta 再进入经济敞口。
 
 | 层 | 硬限额 | 动作 |
@@ -270,7 +270,7 @@ risk_state 是约束而不是参考意见；持仓复查（止损/落空/降级�
 | 5 压测 | beta 冲击 + 期权重估 + 主题簇冲击 | block 加重受冲击敞口 |
 | 6 事件 | 财报 Expected Move 下的 NAV 损失 | 削 notional |
 
-所有数值阈值只在 [`config/risk.yaml`](../config/risk.yaml) 维护，设计文档不复制参数值。
+所有数值阈值只在 [`config/risk.yaml`](../../config/risk.yaml) 维护，设计文档不复制参数值。
 
 强制点只有两处，且都是结构性强制而非调用方自觉：决策图的 `risk_gate` 节点
 （审批之前，任何下单路径必过——这里操作的是真正的 `TradeDecision`），以及
@@ -350,7 +350,7 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 
 下图聚焦 Workflow Memory：它保存工作流产出，不是外部数据源；点击图片可打开交互版，继续查看其他 Memory 类型及其读取者。
 
-[![Workflow Memory 的内容、写入者和读取者](assets/data-lineage/workflow-memory-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+[![Workflow Memory 的内容、写入者和读取者](../assets/data-lineage/workflow-memory-lineage.png)](DATA_LINEAGE_EXPLORER.html)
 
 | 表 | 写入者 | 读取者 |
 |---|---|---|
@@ -373,7 +373,7 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 
 结构化数据已经采用“原始观测版本不变、任务解释可重算”的原则，但目前只覆盖
 `chain.sources` 主链路；行情、基本面、宏观、期权等既有运行时源仍待渐进迁移。
-详细目标、边界和路线见 `docs/DATA_ARCHITECTURE.md`。
+详细目标、边界和路线见 `docs/data/DATA_ARCHITECTURE.md`。
 
 ## 11. 人在回路（HITL）：唯一审批点的实现含义
 
@@ -405,12 +405,12 @@ PEAD score 生成建议时（scoped——PEAD 内部把建议转成 `TradeDecisi
 
 - 使用者视角、日常操作、安全红线 → `README.md`
 - 代码规范、环境搭建、运维操作 → `docs/DEVELOPMENT.md`
-- workflow 细节表、触发路由表 → `docs/WORKFLOWS.md`
-- 数据源清单与状态 → `docs/DATA_SOURCES.md`
-- 共享数据平台的产品需求、架构与实施边界 → `docs/DATA_ARCHITECTURE.md`
-- 行业分析师 L1-L6 分层方法论 → `docs/SECTOR_ANALYST.md`
-- 跨公司证据如何进入截面因子（共同需求 vs 相对份额）→ `docs/CHAIN_EVIDENCE.md`
-- 静态知识分层、谁读知识库、怎么发现它该更新 → `docs/KNOWLEDGE.md`
-- 证据观察员的边界与用法 → `docs/EVIDENCE_OBSERVER.md`
-- 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
+- workflow 细节表、触发路由表 → `docs/archive/WORKFLOWS.md`
+- 数据源清单与状态 → `docs/data/DATA_SOURCES.md`
+- 共享数据平台的产品需求、架构与实施边界 → `docs/data/DATA_ARCHITECTURE.md`
+- 行业分析师 L1-L6 分层方法论 → `docs/agents/SECTOR_ANALYST.md`
+- 跨公司证据如何进入截面因子（共同需求 vs 相对份额）→ `docs/archive/CHAIN_EVIDENCE.md`
+- 静态知识分层、谁读知识库、怎么发现它该更新 → `docs/archive/KNOWLEDGE.md`
+- 证据观察员的边界与用法 → `docs/archive/EVIDENCE_OBSERVER.md`
+- 技术面策略与回测证据 → `docs/agents/TECHNICAL_ANALYST.md`
 - 从 paper 到 live 的历史 checklist → `docs/archive/GO_LIVE.md`

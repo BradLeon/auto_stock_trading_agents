@@ -12,7 +12,7 @@
 > 阶段三是第一个会改变现有输出的阶段，由 `config/pead.yaml` 的 `sector_review.cross_section`
 > 与 `feed_chief_basket` 两个开关控制，关掉即回到阶段三之前的行为。
 > 每阶段的验收标准见第七节，未通过不进入下一阶段。
-> 与 `docs/SECTOR_ANALYST.md`（周度行业评审）、`docs/RISK_SYSTEM.md`（六层限额）配套阅读。
+> 与 `docs/agents/SECTOR_ANALYST.md`（周度行业评审）、`docs/agents/RISK_SYSTEM.md`（六层限额）配套阅读。
 
 ---
 
@@ -605,7 +605,7 @@ eligible_for_confirmation: false
 | `src/ats/agents/sector/cross_section.py` | 截面因子模型（`moat_pricing` 权重 20%） |
 | `src/ats/skills/evidence-observer/SKILL.md` | 抽取提示词（只抽事实，不判方向） |
 
-观察员的完整边界与用法见 [`docs/EVIDENCE_OBSERVER.md`](EVIDENCE_OBSERVER.md)。
+观察员的完整边界与用法见 [`docs/archive/EVIDENCE_OBSERVER.md`](EVIDENCE_OBSERVER.md)。
 
 ---
 
@@ -613,7 +613,7 @@ eligible_for_confirmation: false
 
 - **PEAD** 是时间序列/事件信号（一只票的财报预期差，回答"何时动"）；**截面因子**
   回答"同层里买谁、买多少"；**本系统**给截面因子提供它一直缺的竞争位置证据。
-- **行业评审**（`docs/SECTOR_ANALYST.md`）继续产出周度分层景气；A 类 claim 的印证
+- **行业评审**（`docs/agents/SECTOR_ANALYST.md`）继续产出周度分层景气；A 类 claim 的印证
   状态是它的事件级补充，不替代它。
-- **风控**（`docs/RISK_SYSTEM.md`）不读本系统的输出。层权重上限仍由 `config/risk.yaml`
+- **风控**（`docs/agents/RISK_SYSTEM.md`）不读本系统的输出。层权重上限仍由 `config/risk.yaml`
   的 `sector_layer_caps` 决定。

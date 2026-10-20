@@ -86,8 +86,8 @@ layers:
     private: [OpenAI, Anthropic]             # 无票据，供 LLM 参考需求侧
     structure_notes:
       Token经济: config/knowledge/Token经济.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
-    # 2026-08-18 人工新增。此前 docs/KNOWLEDGE.md 写着「L1 不写」，理由是只有一只票、
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
+    # 2026-08-18 人工新增。此前 docs/archive/KNOWLEDGE.md 写着「L1 不写」，理由是只有一只票、
     # cross_section._zscores 需要 ≥2 个样本——**理由本身没错，但它答的是另一个问题**。
     # 单样本确实让本层的截面 z 分恒为 0，所以这份笔记不改变任何权重；它有两个别的用途：
     #   ① `SectorContext.kb_criteria` 是**各层 structure_notes 的汇总**，sector_analyst
@@ -295,7 +295,7 @@ layers:
     #     # 顺带的收益：L4 那条在 2026-08-18 把 ORCL 踢出去了，理由是它反复讲的是**自己卖云
     #     #   的合同经济学**（「客户预付与自带硬件以相近或更好的利润率获得」「大型项目稳态
     #     #   ROIC 20%+」）——那批读数**现在无处安放**。本条第三维正好接住它们，这是
-    #     #   「未映射聚集」应当产生新命题的标准形状（docs/KNOWLEDGE.md §4 信号②）。
+    #     #   「未映射聚集」应当产生新命题的标准形状（docs/archive/KNOWLEDGE.md §4 信号②）。
     #     # 取数缺口：**几乎没有。**证人全是已在取数的报表方，不依赖任何新适配器。
     #     #   → 因此建议它第一个激活。
     #
@@ -470,7 +470,7 @@ layers:
       - {symbol: SPCX, note: SpaceX/xAI；仅 AI 算力分部属于本层，截面财务指标含集团其他业务，解读时需降权}
     structure_notes:
       云服务: config/knowledge/云服务.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子，六层都挂（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子，六层都挂（见 docs/archive/KNOWLEDGE.md）
     # 2026-08-11 人工新增，同日按复核收窄证人范围。
     #
     # 命题问的是「这笔 capex 由谁的钱支撑」——**只有钱的主人能作证**。首版把 NVDA/AVGO/
@@ -747,7 +747,7 @@ layers:
     cohort_extra: []
     structure_notes:
       电力冷却: config/knowledge/电力冷却.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
     # ⚠️ **本层零命题，这是拆分的直接后果，不是遗漏。**
     # 原 L3_dc_infra 的四条命题（optical_component_supply_gap / rate_transition_pricing_power
     # / copper_ip_crosses_to_optical / interconnect_moat_distribution）**全部是互联的**，
@@ -814,7 +814,7 @@ layers:
       光互联: config/knowledge/光互联.md
       铜连接: config/knowledge/铜连接.md
       衬底: config/knowledge/光互联.md      # 衬底判据写在光互联笔记里（需求派生自它）
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
 
     # ── 2026-08-14 新增四条互联层命题 ──────────────────────────────────────────
     # 此前本层**一条命题都没有**，后果是 concept_menu() 对 LITE/COHR/CRDO 返回空菜单，
@@ -1011,7 +1011,7 @@ layers:
                             interconnect_moat_distribution 负责，它已在那条的 cohort 里}
     structure_notes:
       芯片设计: config/knowledge/芯片设计.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
 
     # ── 2026-08-17 新增四条 XPU 命题 ─────────────────────────────────────────
     # 此前本层**一条命题都没有**（L1 只有一只票，不算），而它挂着知识库、有四家标的。
@@ -1020,7 +1020,7 @@ layers:
     # 别人的维度，于是 761 条读数里 **588 条落在未映射池**：
     #   NVDA 227 条 / 184 未映射（81%）   AMD  223 / 187（84%）
     #   AVGO  75 条 /  62 未映射（83%）   MRVL 236 / 155（66%）
-    # 同时 L4 的 moat_pricing 只能由静态长文 + 毛利率给出 —— 正是 docs/CHAIN_EVIDENCE.md
+    # 同时 L4 的 moat_pricing 只能由静态长文 + 毛利率给出 —— 正是 docs/archive/CHAIN_EVIDENCE.md
     # 开篇批评的那个状态。
     #
     # ⚠️ 与 L6 的一处**重要差别**：L4 未映射池里有相当比例是纯财务读数（revenue / FCF /
@@ -1494,7 +1494,7 @@ layers:
     cohort_extra: []
     structure_notes:
       存储: config/knowledge/HBM存储.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
     # ── 新增三只（SNDK/STX/WDC）的命题缺口实测 · 2026-08-20 ────────────────────
     # 文档全部可达（keyed 直取 Q4 FY2026，31k~35k 字符）；读数 SNDK 102 / STX 109 /
     # WDC 95 = **306 条，100% 未映射**——它们不在任何一条 HBM 命题的证人声明里。
@@ -1555,7 +1555,7 @@ layers:
       downstream: [NVDA, AMD, MSFT]
       reference:  ["2408.TW"]
       private:    [CXMT 长鑫存储]
-    # 可证伪命题（见 docs/CHAIN_EVIDENCE.md）。人工维护：agent 只能提议，只有人能加。
+    # 可证伪命题（见 docs/archive/CHAIN_EVIDENCE.md）。人工维护：agent 只能提议，只有人能加。
     # concepts 是「维度」不是指标名——观测按 desc 的语义归属，绝不做字符串匹配。
     # expect_from 声明该维度**该由谁来说**：单份财报只代表自家、且可能选择性披露，
     # 所以交叉验证对象要在定义命题时就写清；声明后"沉默"会显示成缺口而不是中性。
@@ -1735,7 +1735,7 @@ layers:
     cohort_extra: []
     structure_notes:
       代工封装: config/knowledge/先进封装代工.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
     # ── 命题挂「被判断的主体」所在层，不挂「说话的人」所在层 ──────────────────────
     # 这条规则 2026-08-20 拆层时定死，**下次再动层结构直接引用，不要重吵**。
     # 落到本层：先进制程与先进封装的四条命题判断的是**晶圆厂的产能与技术位置**，所以在这里；
@@ -1975,7 +1975,7 @@ layers:
       - {symbol: KLAC, note: KLA Corp（正确代码 KLAC，原 KLA 错误）}
     structure_notes:
       半导体设备: config/knowledge/半导体设备.md
-      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/KNOWLEDGE.md）
+      资本开支链: config/knowledge/资本开支链.md   # 跨层共同因子（见 docs/archive/KNOWLEDGE.md）
 
     # ── 2026-08-15 新增五条设备层命题 ────────────────────────────────────────
     # 此前本层**一条命题都没有**，concept_menu() 对 KLAC/LRCX/AMAT 返回空菜单，

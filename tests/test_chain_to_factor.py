@@ -1,6 +1,6 @@
 """Chain evidence — stage 3: verdicts -> moat_pricing -> cross-section -> Chief.
 
-Covers the acceptance table in docs/CHAIN_EVIDENCE.md §7 阶段三 (hermetic: no network,
+Covers the acceptance table in docs/archive/CHAIN_EVIDENCE.md §7 阶段三 (hermetic: no network,
 no LLM, no Obsidian, no IBKR).
 """
 

@@ -57,7 +57,7 @@ pytest 参数原样透传）——它会一次装入全部可选分组，这样�
 tesseract --version
 ```
 
-`tesseract` 是系统程序，由 Brewfile 管理；其余 Python 包由 `pyproject.toml` 和 `uv.lock` 管理。当前 `memory` extra 的 `chromadb` 尚未接入，不是部署必需项；只有未来启用向量记忆时才加 `--extra memory`。更新依赖时修改 `pyproject.toml` 后执行 `uv lock`，提交更新后的 `uv.lock`，其他机器再执行相同的 `uv sync`。完整的 FactSet 数据产品和运行手册见 [docs/FACTSET_EARNINGS_INSIGHT.md](docs/FACTSET_EARNINGS_INSIGHT.md)。
+`tesseract` 是系统程序，由 Brewfile 管理；其余 Python 包由 `pyproject.toml` 和 `uv.lock` 管理。当前 `memory` extra 的 `chromadb` 尚未接入，不是部署必需项；只有未来启用向量记忆时才加 `--extra memory`。更新依赖时修改 `pyproject.toml` 后执行 `uv lock`，提交更新后的 `uv.lock`，其他机器再执行相同的 `uv sync`。完整的 FactSet 数据产品和运行手册见 [docs/data/FACTSET_EARNINGS_INSIGHT.md](docs/data/FACTSET_EARNINGS_INSIGHT.md)。
 
 ---
 
@@ -105,7 +105,7 @@ tesseract --version
 | 角色 | 做什么 | 什么时候跑 | 能不能下单 |
 |---|---|---|---|
 | **信息分析师**（Information） | 读数据平台已准入的新闻、研报、公告、文章，抽出事实变化和可能的影响，产出信息简报；不给买卖建议 | 工作日 08:00（纽约时间）；财报前后由日历事件唤醒 | 不能 |
-| **基本面分析师**（Fundamental，PEAD 是它的分析框架） | **例行模式**：财报前建立并按重大变化刷新"预期基线"（市场隐含预期、核心叙事、关键 KPI、可证伪条件）。**事件模式**：财报发布后冻结基线，用实际值对照基线、一致预期、市场隐含预期三方打 Surprise Scorecard | 例行：工作日 09:00；事件：日历确认财报已发布后 | 不能，只出建议 |
+| **基本面分析师**（Fundamental，PEAD 是它的分析框架） | **例行模式**：财报前建立"预期基线"（市场隐含预期、核心叙事、关键 KPI、可证伪条件），并按新事实发布预期更新。**事件模式**：财报发布后冻结基线，用实际值对照基线、一致预期、市场隐含预期三方打 Surprise Scorecard | 例行：工作日 09:00；事件：日历确认财报已发布后 | 不能，只出建议 |
 | **层次分析师**（Layer） | 按产业链层级（目前是 AI 硬件八层）比较标的强弱，给出证据论证；不给配置结论 | 每周六，行业评审前自动先跑 | 不能 |
 | **行业分析师**（Sector） | 基于层次分析，给出行业 / 层 / 标的三级配置（超配、标配、低配、清仓） | 每周六 09:30（台北时间） | 不能 |
 | **宏观分析师**（Macro） | 用宏观指标和已准入的政策文档判断 regime、传导路径和风险情景 | 每周六 09:00（台北时间） | 不能 |
@@ -177,9 +177,10 @@ flowchart TD
     end
 ```
 
-- **财报是单独的一条主线。** 财报前 14 天内，例行模式在出现重大基本面变化时建立
-  或刷新预期基线，可以一直刷新到财报日，不按固定日期重做。数据平台确认财报**真的
-  发布了**（而不是按预测日期猜），事件模式才冻结基线、对照实际值打分。日历上两个
+- **财报是单独的一条主线。** 财报前 3 天内，基本面例行模式为这一期建立预期基线；
+  每个工作日它还会把信息简报里的新事实归为确认、否定、新增或待验证，发布预期更新，
+  一直到财报日。数据平台确认财报**真的发布了**（而不是按预测日期猜），事件模式才冻结
+  基线、对照实际值打分。日历上两个
   来源说法冲突的事件会被挡住，等你用 `ats events override` 裁决。
 - **数据没变就不重算。** 依赖的数据版本未变、投影仍在有效期内时，Dispatcher 直接复用
   上一次的结果，不重复发模型请求。
@@ -308,13 +309,15 @@ ats trader perf                      # 历史绩效
 
 ## 想深入了解实现细节？
 
-这份 README 只讲"这是什么、怎么用、要注意什么"。更技术性的内容在 `docs/`：
+这份 README 只讲"这是什么、怎么用、要注意什么"。`docs/` 的结构：
 
-- [`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md) —— Workflow、Dataflow、
-  Agent 职责与审批链的唯一权威设计
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) —— 常驻服务、每日检查、调度负责人切换与回退、数据刷新、事件日历、首次安装、排障
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —— 环境搭建、代码规范、测试约定
-- [`docs/TECHNICAL_ANALYST.md`](docs/TECHNICAL_ANALYST.md)、[`docs/MACRO_ANALYST.md`](docs/MACRO_ANALYST.md)、
-  [`docs/SECTOR_ANALYST.md`](docs/SECTOR_ANALYST.md) —— 各分析师的方法
-- [`docs/STRUCTURED_DATA_USER_GUIDE.md`](docs/STRUCTURED_DATA_USER_GUIDE.md) —— 数据平台有什么数据、怎么查
-- [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) —— 每个数据源的接入状态
+| 位置 | 内容 |
+|---|---|
+| [`docs/TARGET_WORKFLOW_DATAFLOW.md`](docs/TARGET_WORKFLOW_DATAFLOW.md) | Workflow、Dataflow、Agent 契约与审批链的唯一权威设计（需求条文在 `openspec/specs/`） |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | 常驻服务、每日检查、调度负责人切换与回退、数据刷新、事件日历、首次安装、排障 |
+| [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)、[`docs/TEST_BASELINE.md`](docs/TEST_BASELINE.md) | 代码约定、仓库结构、测试入口与基线 |
+| [`docs/agents/`](docs/agents/) | 每个角色一份：[信息](docs/agents/INFORMATION_ANALYST.md)、[基本面/PEAD](docs/agents/FUNDAMENTAL_ANALYST.md)、[层次](docs/agents/LAYER_ANALYST.md)、[行业](docs/agents/SECTOR_ANALYST.md)、[宏观](docs/agents/MACRO_ANALYST.md)、[技术面](docs/agents/TECHNICAL_ANALYST.md)、[风控](docs/agents/RISK_SYSTEM.md) |
+| [`docs/data/`](docs/data/) | 数据平台：[使用手册](docs/data/STRUCTURED_DATA_USER_GUIDE.md)、[运维](docs/data/STRUCTURED_DATA_OPERATIONS.md)、[开发](docs/data/STRUCTURED_DATA_DEVELOPER.md)、[架构](docs/data/DATA_ARCHITECTURE.md)、[数据源状态](docs/data/DATA_SOURCES.md) 与各来源手册 |
+| [`docs/research/`](docs/research/) | 信源调研结论 |
+| [`docs/PHASE_F_RETIREMENT_RUNBOOK.md`](docs/PHASE_F_RETIREMENT_RUNBOOK.md) | 旧实现的退役判据（24 条未退役） |
+| [`docs/archive/`](docs/archive/) | 历史：各阶段验收与复盘、迁移史、旧设计文档与旧手册。只读，不代表现状 |

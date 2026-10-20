@@ -1,7 +1,7 @@
 # 开发与运维手册
 
 > 面向：开发者 / 运维。讲代码怎么写、环境怎么搭、部署怎么改——设计动机和思想
-> 见 `docs/DESIGN.md`，日常使用见根目录 `README.md`。
+> 见 `docs/TARGET_WORKFLOW_DATAFLOW.md`，日常使用见根目录 `README.md`，运维见 `docs/OPERATIONS.md`。
 
 ---
 
@@ -366,5 +366,5 @@ ats chief run                # 收口：读存档→决策→风控→审批→(
 - 架构、数据流、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
 - 使用者视角、日常操作 → `README.md`
 - 常驻服务与日常运维 → `docs/OPERATIONS.md`
-- 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
-- 数据源清单与状态 → `docs/DATA_SOURCES.md`
+- 技术面策略与回测证据 → `docs/agents/TECHNICAL_ANALYST.md`
+- 数据源清单与状态 → `docs/data/DATA_SOURCES.md`

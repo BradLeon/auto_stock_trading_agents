@@ -41,7 +41,7 @@ llm:
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
     research_extract: {model: deepseek/deepseek-v4-flash-0731, structured_output_method: function_calling}   # supply-chain insight extraction
     # 产业链证据抽取（观察名单财报）：只抽事实+原文片段，不做判断 → 便宜档足够。
-    # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/CHAIN_EVIDENCE.md
+    # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/archive/CHAIN_EVIDENCE.md
     # provider: deepseek —— 走官方 API 而不是 OpenRouter。同一份文档、同一段 prompt，
     # 经 OpenRouter 三次抽取结果是 [0, 33, 36]；换 terra 档是 [3, 3, 2]（稳定但几乎读不出
     # 东西）。两个模型两种异常，共同变量是网关，所以先把网关这个变量去掉。

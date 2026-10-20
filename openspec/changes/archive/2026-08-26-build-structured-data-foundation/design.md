@@ -150,9 +150,9 @@ Agent 继续优先使用 DataProducts：指标序列、横截面、公司快照�
 
 实施期新增三份独立文档，并由 `DATA_ARCHITECTURE.md` 作为总入口：
 
-- `docs/STRUCTURED_DATA_DEVELOPER.md` 面向开发者，覆盖设计原则、组件职责、领域对象、组件架构图、采集/准入/查询数据流图、适配器契约、扩源示例和测试分层。
-- `docs/STRUCTURED_DATA_OPERATIONS.md` 面向运维者，维护已接入、计划接入、未接入和 runtime/excluded 来源矩阵，以及认证、调度、保存政策、QPS/限流、请求预算、缓存、重试退避、故障排查、扩源步骤和验收门。
-- `docs/STRUCTURED_DATA_USER_GUIDE.md` 面向使用者，提供指标发现、CLI、Python、SQL、Pandas、`as_of`、横截面、派生计算、分类、血缘及 Agent/Workflow 接入示例，并说明何时改用 IBKR/yfinance。
+- `docs/data/STRUCTURED_DATA_DEVELOPER.md` 面向开发者，覆盖设计原则、组件职责、领域对象、组件架构图、采集/准入/查询数据流图、适配器契约、扩源示例和测试分层。
+- `docs/data/STRUCTURED_DATA_OPERATIONS.md` 面向运维者，维护已接入、计划接入、未接入和 runtime/excluded 来源矩阵，以及认证、调度、保存政策、QPS/限流、请求预算、缓存、重试退避、故障排查、扩源步骤和验收门。
+- `docs/data/STRUCTURED_DATA_USER_GUIDE.md` 面向使用者，提供指标发现、CLI、Python、SQL、Pandas、`as_of`、横截面、派生计算、分类、血缘及 Agent/Workflow 接入示例，并说明何时改用 IBKR/yfinance。
 
 QPS 只记录 Provider 官方说明或实测可证实的限制；没有权威数字时标记 `unknown`，同时给出可配置的保守请求预算，不把内部默认值描述成外部事实。代码中的来源注册、运维矩阵与文档通过测试或生成式检查对账，避免实现已经改变而手册仍停留在旧状态。
 

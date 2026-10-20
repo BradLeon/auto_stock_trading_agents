@@ -4,7 +4,7 @@
 > 信源信息最后核验：2026-09-04。
 > 目标：用公开、免费或低成本、可信且可持续更新的数据，追踪 AI 模型产业的技术能力、生产化与商业化。
 
-配套阅读：[`docs/EVIDENCE_OBSERVER.md`](EVIDENCE_OBSERVER.md)、[`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)、[`docs/DATA_SOURCES.md`](DATA_SOURCES.md)。
+配套阅读：[`docs/archive/EVIDENCE_OBSERVER.md`](../archive/EVIDENCE_OBSERVER.md)、[`docs/archive/CHAIN_EVIDENCE.md`](../archive/CHAIN_EVIDENCE.md)、[`docs/data/DATA_SOURCES.md`](../data/DATA_SOURCES.md)。
 
 ---
 

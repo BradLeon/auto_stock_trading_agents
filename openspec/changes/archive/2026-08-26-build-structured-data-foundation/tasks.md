@@ -91,14 +91,14 @@
 
 ## 10. 面向角色的数据层文档
 
-- [x] 10.1 创建 `docs/STRUCTURED_DATA_DEVELOPER.md`，说明设计哲学、系统边界、领域对象、组件职责、组件架构图、采集/准入/查询数据流图、存储选择和迁移策略
+- [x] 10.1 创建 `docs/data/STRUCTURED_DATA_DEVELOPER.md`，说明设计哲学、系统边界、领域对象、组件职责、组件架构图、采集/准入/查询数据流图、存储选择和迁移策略
 - [x] 10.2 在开发者文档中加入适配器契约、指标映射、扩展新来源的完整示例、测试分层、常见错误和禁止绕过的准入/血缘规则
-- [x] 10.3 创建 `docs/STRUCTURED_DATA_OPERATIONS.md`，维护已接入、计划接入、未接入和 runtime/excluded 来源矩阵，并列明认证、更新频率、保存限制、依赖和责任边界
+- [x] 10.3 创建 `docs/data/STRUCTURED_DATA_OPERATIONS.md`，维护已接入、计划接入、未接入和 runtime/excluded 来源矩阵，并列明认证、更新频率、保存限制、依赖和责任边界
 - [x] 10.4 为每个来源记录官方或可验证的 QPS/限流、内部请求预算、并发、缓存、重试/退避和超时；无权威 QPS 时标记 unknown 并说明保守配置，禁止编造限制
 - [x] 10.5 在运维文档中写明新增来源的注册、凭证、fixture、隔离真实源测试、质量门、上线、监控、回滚和退役步骤，以及每一步的通过标准
-- [x] 10.6 创建 `docs/STRUCTURED_DATA_USER_GUIDE.md`，提供数据发现、CLI、Python、SQL、Pandas、最新值、全部 vintage、`as_of`、横截面、派生计算、分类和血缘查询示例
+- [x] 10.6 创建 `docs/data/STRUCTURED_DATA_USER_GUIDE.md`，提供数据发现、CLI、Python、SQL、Pandas、最新值、全部 vintage、`as_of`、横截面、派生计算、分类和血缘查询示例
 - [x] 10.7 在使用者手册中说明 Agent/Workflow 如何消费 DataProducts、如何组合 persistent 与 runtime 输入，以及何时直接调用 IBKR/yfinance 获取股价或期权
-- [x] 10.8 更新 `docs/DATA_ARCHITECTURE.md` 作为三份角色文档的总入口，并增加文档链接、命令和来源矩阵一致性测试；全部通过后才视为文档交付完成
+- [x] 10.8 更新 `docs/data/DATA_ARCHITECTURE.md` 作为三份角色文档的总入口，并增加文档链接、命令和来源矩阵一致性测试；全部通过后才视为文档交付完成
 
 ## 11. 质量、运维与可观察性
 

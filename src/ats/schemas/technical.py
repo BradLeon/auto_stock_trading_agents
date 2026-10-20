@@ -2,7 +2,7 @@
 
 与其他 analyst 一样：**只产研究，不出单**。这里刻意不含 qty / notional / action —
 `target_exposure` 是"建议的风险敞口上限"，把它变成订单是 Chief 的职责，不是这里的
-（docs/DESIGN.md §4；本仓库刚修过 PEAD 分析师越界构造 TradeDecision 的缺陷）。
+（docs/archive/DESIGN.md §4；本仓库刚修过 PEAD 分析师越界构造 TradeDecision 的缺陷）。
 
 全部字段由确定性代码填写，本 agent 不接 LLM。
 """

@@ -100,7 +100,7 @@ class SectorLayer(BaseModel):
     # via config/entities.yaml, so a company's several listings never count as several
     # witnesses. Roles the engine does not consume (private) are documentation.
     witness_roster: dict[str, list[str]] = Field(default_factory=dict)
-    # Falsifiable propositions this layer is being tested on (docs/CHAIN_EVIDENCE.md).
+    # Falsifiable propositions this layer is being tested on (docs/archive/CHAIN_EVIDENCE.md).
     # Human-maintained: agents may PROPOSE one, only a person adds it here.
     claims: list[ClaimDef] = Field(default_factory=list)
     # Governed, read-only data Observers available through ``ats evidence layer``.

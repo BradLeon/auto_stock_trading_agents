@@ -198,7 +198,7 @@ Workflow 可以组合 persistent 与 runtime 输入，但 structured snapshot ma
 
 下图以公司财务与市场预期为例，展示结构化持久数据如何同时服务 `pead_prep`、`pead_score` 和 `sector_agent`，以及各消费者写入的运行记忆。点击图片可打开交互版。
 
-[![结构化数据到 Agent、Workflow Memory 与读取者的血缘](assets/data-lineage/structured-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+[![结构化数据到 Agent、Workflow Memory 与读取者的血缘](../assets/data-lineage/structured-data-lineage.png)](../archive/DATA_LINEAGE_EXPLORER.html)
 
 ## 5. 目标组件架构
 
@@ -619,7 +619,7 @@ manifest = products.snapshot_manifest(
 - [结构化数据运维指南](STRUCTURED_DATA_OPERATIONS.md)
 - [结构化数据使用手册](STRUCTURED_DATA_USER_GUIDE.md)
 - [数据源说明](DATA_SOURCES.md)
-- [开发与测试约定](DEVELOPMENT.md)
+- [开发与测试约定](../DEVELOPMENT.md)
 
 ## AI 生产化渗透派生 consumer
 

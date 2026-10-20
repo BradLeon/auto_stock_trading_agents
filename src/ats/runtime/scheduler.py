@@ -324,7 +324,7 @@ def pead_score_window(window: str, *, dry_run: bool = True, use_llm: bool = True
     # Evidence-only tier. Deliberately a SEPARATE loop over `observe`, never merged
     # into the targets loop above: these names must not enter `scored`, must not
     # trigger a Chief cycle, and must never reach the order path. They only leave
-    # chain observations behind (docs/CHAIN_EVIDENCE.md).
+    # chain observations behind (docs/archive/CHAIN_EVIDENCE.md).
     if observe and not plan_only:
         # Evidence covers EVERY name a claim can call as a witness — targets included.
         # Restricting it to `observe` left the two most important witnesses uncollected:

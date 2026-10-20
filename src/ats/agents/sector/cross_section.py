@@ -404,7 +404,7 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
     for r in rows:
         r.quant_rank = r.rank
 
-    # Competitive-position evidence from the chain ledger (docs/CHAIN_EVIDENCE.md).
+    # Competitive-position evidence from the chain ledger (docs/archive/CHAIN_EVIDENCE.md).
     # Only claims that DECLARE a structural factor reach here (`feeds_factor`), and only
     # resolved comparisons — an unresolved one yields nothing, so the factor stays NULL
     # rather than 0. "Not looked at" and "looked at, judged neutral" stay distinct.

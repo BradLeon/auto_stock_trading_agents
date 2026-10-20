@@ -61,7 +61,7 @@ search:
 review:
   max_context_chars: 60000
 
-# 四象限判定的标定阈值（docs/MACRO_ANALYST.md §6.2）。
+# 四象限判定的标定阈值（docs/agents/MACRO_ANALYST.md §6.2）。
 # ⚠️ 这些是初始标定值，不是定论：上线后按实际触发频率复盘调整——每周翻转说明太灵敏，
 #    长期不动说明太钝。改值改这里，代码里的 regime.DEFAULTS 只是缺省兜底。
 regime:

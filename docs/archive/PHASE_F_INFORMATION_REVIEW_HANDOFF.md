@@ -56,7 +56,7 @@
 
 ## 返回当前 OpenSpec 的执行入口
 
-重新读取权威 tasks、design、delta specs，以及 [验收要求映射](../PHASE_F_ACCEPTANCE_REQUIREMENTS.md)，按真实依赖判断下一步，不能直接从历史计数推定可上线。
+重新读取权威 tasks、design、delta specs，以及 [验收要求映射](PHASE_F_ACCEPTANCE_REQUIREMENTS.md)，按真实依赖判断下一步，不能直接从历史计数推定可上线。
 
 当前未完成项：
 

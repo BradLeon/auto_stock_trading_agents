@@ -409,7 +409,7 @@ def layer_claim_lines(cfg: SectorConfig, layer, assessments=None, *,
     """One layer's claim verdicts, already split by kind: (common lines, relative lines).
 
     Split by kind rather than pooled, because the two answer different questions and
-    have different consumers (see docs/CHAIN_EVIDENCE.md):
+    have different consumers (see docs/archive/CHAIN_EVIDENCE.md):
 
       common   -> 这一层该给多少钱   the layer analyst's allocation call
       relative -> 层内怎么排序/选谁  the structure factor, and the per-name rationale

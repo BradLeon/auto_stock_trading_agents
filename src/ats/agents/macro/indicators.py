@@ -7,7 +7,7 @@ Why this module exists at all — a 10y real yield of 2.0% is by itself neither
 high nor low. What carries information is where it moved from (Δ) and how
 unusual the level is (z-score / percentile). The old macro path kept only the
 latest scalar, which is why the LLM could do no better than read numbers back.
-See docs/MACRO_ANALYST.md §4.
+See docs/agents/MACRO_ANALYST.md §4.
 
 Lookbacks are by CALENDAR DATE, not by row position: the same code has to work
 for a daily yield, a weekly claims print and a monthly PCE release, and only a
@@ -153,7 +153,7 @@ def change_z(points: list[tuple[date, float]], days: int, *,
              window_days: int = _Z_WINDOW_DAYS) -> float | None:
     """z-score of the latest `days`-change against that change's own history.
 
-    Distinguishing a shock from a trend (docs/MACRO_ANALYST.md §5.3) needs the
+    Distinguishing a shock from a trend (docs/agents/MACRO_ANALYST.md §5.3) needs the
     distribution of CHANGES, not of levels: a 30bp monthly move is ordinary for
     some series and a three-sigma event for others, and the level's z-score
     cannot tell you which.

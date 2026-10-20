@@ -94,7 +94,7 @@ def score_detail(closes: list[float], i: int) -> dict:
 #
 # 甲 was selected on a 7.5-year replay (2019-01→2026-07): the only one of the
 # three whose TIMING contribution was positive on return, drawdown, Sharpe and
-# Calmar against a static same-average-exposure control. See docs/TECHNICAL_ANALYST.md.
+# Calmar against a static same-average-exposure control. See docs/agents/TECHNICAL_ANALYST.md.
 def exposure_from(score: int, vix: float | None, mode: str = DEFAULT_MODE, *,
                   ladder: dict[int, float] | None = None,
                   vix_anchor: float = VIX_ANCHOR,

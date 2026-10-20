@@ -1,5 +1,10 @@
 # 个人投顾系统风控体系
 
+> **现状**：风控主管只审查 Chief 的某一个不可变决策 revision，读交易提案、组合快照、市场快照和规则包，
+> **不读分析师观点**（包括宏观），不静默改单——需要裁剪时给出结构化的反提案，由 Chief 生成新 revision
+> 再审（TARGET §5、§7.2）。交易路径尚未切到新路径，见 [`OPERATIONS.md`](../OPERATIONS.md) 第 7 节。
+> 下文的风险单位、限额与状态机仍然有效。
+
 适用范围：股票、ETF、ADR、跨市场挂牌证券、杠杆 ETF 和已持有期权；不覆盖期货、
 涡轮或其他带路径依赖的衍生品。
 
@@ -41,7 +46,7 @@
 
 `sector_layer_caps` 给八层各自的 `weight_cap`，合计 135%。**cap 是天花板不是分配**——
 八层不会同时满仓，总杠杆、现金下限、单票上限、相关簇上限都在管着。定 cap 的判据与
-逐层理由见 [`docs/SECTOR_ANALYST.md`](SECTOR_ANALYST.md)，其中排第一的是**有没有命题**：
+逐层理由见 [`docs/agents/SECTOR_ANALYST.md`](SECTOR_ANALYST.md)，其中排第一的是**有没有命题**：
 没有证据基础的层（当前 L1、L3）压到 10%，直到命题建起来。
 
 ⚠️ **单票层的实际上限是 `cap × 40%`**（`single_name_cap_frac`）：L1(GOOG) 10% → 实际 4%，

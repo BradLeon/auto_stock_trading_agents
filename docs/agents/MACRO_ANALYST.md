@@ -1,8 +1,21 @@
 # 宏观策略师 — 指标框架设计
 
+> **现状（新 Workflow/Dataflow 下，以本节为准）**
+>
+> | 项 | 内容 |
+> |---|---|
+> | 读什么 | 宏观数据包：`macro_series` 数据集（FRED 等定量指标，VIX 取前收）与数据平台已准入的政策、宏观新闻文档。分析中**不再直连** Tavily 等搜索 |
+> | 不读什么 | 其他分析师的观点 |
+> | 产出 | `macro_review` 投影（`MacroReview`）：regime（并保留正文判读的 `narrative_regime`）、影响传导、情景、时间范围、主要风险 |
+> | 谁读它 | **只有 Chief**。行业、基本面、风控主管都不再读宏观结论（TARGET §7.2），下文「唯一收口」一节所列注入 PEAD prep、行业分析、风控 memo 的路径描述的是切换前的行为 |
+> | 什么时候跑 | 每周六 09:00（台北时间），Dispatcher 调度；FOMC/CPI/PCE/NFP/GDP 发布事件可唤醒（受 `macro_sector_event_triggers` 开关控制，现为关闭） |
+> | 手动运行 | `ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio`；负责人为 dispatcher 时 `ats macro review` 会被拒绝。旧的 `weekly_review`（周六 08:50）与 `factset_weekly_ingest` 已退役，FactSet 改为每月 1 日的月末摄入 |
+>
+> 下文的指标框架、判定方法与验收思路仍然有效。
+
 > 面向：决策者 / 设计者。这份文档只讲宏观这一个角色：它为什么存在、看什么、
 > 怎么把数据变成判断、以及怎么保证产出不是模型编的。
-> 系统全局设计见 `docs/DESIGN.md`；代码与运维规范见 `docs/DEVELOPMENT.md`。
+> 系统全局设计见 `docs/TARGET_WORKFLOW_DATAFLOW.md`；代码与运维规范见 `docs/DEVELOPMENT.md`。
 
 ---
 
@@ -32,7 +45,7 @@
 
 ## 2. 角色边界
 
-沿用 `docs/DESIGN.md` 的决策权矩阵：**宏观策略师不出单**，只产研究，产出经
+沿用 `docs/archive/DESIGN.md` 的决策权矩阵：**宏观策略师不出单**，只产研究，产出经
 `sector_tilts` 向下游传导。在此之上，这份文档追加一条更细的边界：
 
 | | 宏观策略师 | 行业分析师 | 基本面 / PEAD 分析师 |
@@ -120,7 +133,7 @@
 但 `_latest()` 只取了 `iloc[-1]`，把历史全扔掉了。
 
 **所以做 Δ 和 z-score 不需要新建任何持久化层**——只要不丢弃已经拿到的序列，在内存里
-算完再丢弃即可。这一点很关键，因为 `docs/DATA_SOURCES.md` 明确规定"原始宏观数据不落库"，
+算完再丢弃即可。这一点很关键，因为 `docs/data/DATA_SOURCES.md` 明确规定"原始宏观数据不落库"，
 而这个做法不违反该约定。
 
 （regime 判断本身的历史已经存在：`macro_reviews` 表逐周持久化 `MacroReview`。）
@@ -141,7 +154,7 @@
 
 ### 4.4 谁算、谁解释
 
-沿用仓库已确立的"三段作者分离"模式（同 `CriticFinding`，见 `docs/DESIGN.md` §9.3）：
+沿用仓库已确立的"三段作者分离"模式（同 `CriticFinding`，见 `docs/archive/DESIGN.md` §9.3）：
 
 | 内容 | 作者 |
 |---|---|
@@ -481,7 +494,7 @@ ats macro show macro
 ats macro probe macro
 ```
 
-正常调度先由 `factset_weekly_ingest` 在周六 08:10（`Asia/Shanghai`）准备 FactSet 数据，随后 `weekly_review` 在 08:50 执行宏观后行业。Macro 不下载 PDF、不读取 Obsidian 文件夹；详情见 [FactSet Earnings Insight 数据产品](FACTSET_EARNINGS_INSIGHT.md)。
+正常调度先由 `factset_weekly_ingest` 在周六 08:10（`Asia/Shanghai`）准备 FactSet 数据，随后 `weekly_review` 在 08:50 执行宏观后行业。Macro 不下载 PDF、不读取 Obsidian 文件夹；详情见 [FactSet Earnings Insight 数据产品](../data/FACTSET_EARNINGS_INSIGHT.md)。
 FOMC/CPI/NFP 等 `config/events.yaml` 事件也会在交易日的 `daily_cycle` 中触发额外宏观
 评审，以获得发布日时效性；这条即时路径予以保留，但不是数据入库的唯一入口。
 
@@ -496,7 +509,7 @@ vintage，再与本次 FRED 结果比较，补齐区间内的新增观测和历�
 执行 `ats macro review macro`，再执行 `ats sector review ai_hardware`，最后按需运行
 `ats chief run --channel feishu_bot` 更新决策。
 
-- 系统全局设计、角色矩阵 → `docs/DESIGN.md`
+- 系统全局设计、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
 - 代码规范、数据源约定 → `docs/DEVELOPMENT.md`
-- 数据源接入状态 → `docs/DATA_SOURCES.md`
-- 行业分析师（宏观的下游消费方）→ `docs/SECTOR_ANALYST.md`
+- 数据源接入状态 → `docs/data/DATA_SOURCES.md`
+- 行业分析师（宏观的下游消费方）→ `docs/agents/SECTOR_ANALYST.md`

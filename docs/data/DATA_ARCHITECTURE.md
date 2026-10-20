@@ -10,7 +10,7 @@
 
 ### 1.0 按角色阅读
 
-本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)；持久化来源的两个权威领域注册表是 [`config/data/structured.yaml`](../config/data/structured.yaml) 与 [`config/data/unstructured.yaml`](../config/data/unstructured.yaml)。旧 `sources.yaml`、`news_sources.yaml` 只作为兼容/迁移来源，不是新来源定义的唯一依据。
+本文负责说明产品边界、设计哲学和总体演进。落地细节按角色拆分。统一数据目录入口是 [`config/data/catalog.yaml`](../../config/data/catalog.yaml)；持久化来源的两个权威领域注册表是 [`config/data/structured.yaml`](../../config/data/structured.yaml) 与 [`config/data/unstructured.yaml`](../../config/data/unstructured.yaml)。旧 `sources.yaml`、`news_sources.yaml` 只作为兼容/迁移来源，不是新来源定义的唯一依据。
 
 | 读者 | 首选文档 | 主要回答 |
 |---|---|---|
@@ -22,7 +22,7 @@
 
 - 运维新增来源、评测与发布：见 [接入—评测—发布 Runbook](STRUCTURED_DATA_OPERATIONS.md#43-从新增来源到发布可执行-runbook)。
 - 当前实际可用数据：运行 `ats data catalog --format markdown`，再用 `data describe`、`data availability` 和 `data examples`；不要从静态文档推断数据库覆盖。
-- 自主 Agent：使用 [`.agents/skills/structured-data-consumer/SKILL.md`](../.agents/skills/structured-data-consumer/SKILL.md)；确定性 Workflow 继续调用 DataProducts，不依赖 Skill。
+- 自主 Agent：使用 [`.agents/skills/structured-data-consumer/SKILL.md`](../../.agents/skills/structured-data-consumer/SKILL.md)；确定性 Workflow 继续调用 DataProducts，不依赖 Skill。
 
 ### 1.0.1 统一数据层代码树（当前入口）
 
@@ -62,13 +62,13 @@ src/ats/data/
 
 Layer Analyst 的持久化输入按来源逐项验收，清单以 A/B/C 记录旧流程是否有实际入口、目标 registry 是否登记及目前运行/发布证据。Evidence Observer 已作为目标角色退役并由 Layer Analyst 承接；历史 alias 与 lineage 保留，旧提取组件可在兼容期作为工具，不构成第二个消费者。
 
-十个角色的正式输入边及允许观点依赖见 [目标覆盖合同](../config/data/target_dataflow_coverage.yaml)：仅 Layer→Sector、Information→Fundamental 可读取对方的分析投影。持久化研究只经 Data Products；运行行情只经 Runtime Data Gateway；内部状态只经 Internal State/审批接口。Agent 观点留在 Workflow Memory，不回写共享事实。
+十个角色的正式输入边及允许观点依赖见 [目标覆盖合同](../../config/data/target_dataflow_coverage.yaml)：仅 Layer→Sector、Information→Fundamental 可读取对方的分析投影。持久化研究只经 Data Products；运行行情只经 Runtime Data Gateway；内部状态只经 Internal State/审批接口。Agent 观点留在 Workflow Memory，不回写共享事实。
 
-Phase F 的读取资格按 `domain + consumer + contract_version + scope` 单独计算，写入、准入、读取、血缘、完整性、对账和回退证据缺任一项均 fail closed。当前十个 consumer 均未签发生产资格；逐角色原因和回退证据见 [Tasks 4 验收资料](validation/TARGET_DATAFLOW_TASK4_ACCEPTANCE.md)。资格查询本身不切换读取路由、不启用调度或交易。
+Phase F 的读取资格按 `domain + consumer + contract_version + scope` 单独计算，写入、准入、读取、血缘、完整性、对账和回退证据缺任一项均 fail closed。当前十个 consumer 均未签发生产资格；逐角色原因和回退证据见 [Tasks 4 验收资料](../validation/TARGET_DATAFLOW_TASK4_ACCEPTANCE.md)。资格查询本身不切换读取路由、不启用调度或交易。
 
-Phase F 的原生 `ats.data.consumer_api.read_input` 区分产品查询 `scope` 与读取资格 `business_scope`：后者包含 kind/id、显式实体与有时区的时间窗，并按实际调用的 domain/consumer/contract 绑定。可从已绑定的 CLI/Workflow/Dispatcher 上下文继承，独立调用必须显式提供；缺范围、跨实体/消费者/冻结 cutoff 都拒绝。持久化输入未传 as_of 时继承上下文的冻结时点；current_only 输入保持实际查询/来源时点且不接受历史 as_of。原生 API 不提供 legacy 实现，生产只允许已启用且合格的 exact-scope target，完整隔离候选可为后续资格形成本地证据。接口/CLI scope 格式与当前验证界限见 [业务接线报告](validation/PHASE_F_BUSINESS_WIRING_2026-10-08.md)。
+Phase F 的原生 `ats.data.consumer_api.read_input` 区分产品查询 `scope` 与读取资格 `business_scope`：后者包含 kind/id、显式实体与有时区的时间窗，并按实际调用的 domain/consumer/contract 绑定。可从已绑定的 CLI/Workflow/Dispatcher 上下文继承，独立调用必须显式提供；缺范围、跨实体/消费者/冻结 cutoff 都拒绝。持久化输入未传 as_of 时继承上下文的冻结时点；current_only 输入保持实际查询/来源时点且不接受历史 as_of。原生 API 不提供 legacy 实现，生产只允许已启用且合格的 exact-scope target，完整隔离候选可为后续资格形成本地证据。接口/CLI scope 格式与当前验证界限见 [业务接线报告](../validation/PHASE_F_BUSINESS_WIRING_2026-10-08.md)。
 
-可复现门禁汇总、逐角色 ineligible 原因、保持的稳定路由及历史差异记录见 [Tasks 5 验收报告](validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)；机器结果由 `scripts/verify_dataflow_tasks5.py` 只读生成。来源采集失败、旧路径和无证据状态按事实记录，不因代码/配置存在而推断通过。
+可复现门禁汇总、逐角色 ineligible 原因、保持的稳定路由及历史差异记录见 [Tasks 5 验收报告](../validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)；机器结果由 `scripts/verify_dataflow_tasks5.py` 只读生成。来源采集失败、旧路径和无证据状态按事实记录，不因代码/配置存在而推断通过。
 
 本次重构的目的，不是简单地把数据分成“结构化数据库”和“向量数据库”，而是把当前由各个 Agent 自行取数、加工、保存的模式，升级为一套共享的研究数据基础设施。
 
@@ -326,7 +326,7 @@ flowchart TB
 
 目标分层落实到当前系统中的具体来源、数据产品、消费者和 Workflow Memory 如下。点击图片可打开交互版，并选择任一数据产品查看完整下游关系。
 
-[![当前数据层血缘全景](assets/data-lineage/data-layer-overview.png)](DATA_LINEAGE_EXPLORER.html)
+[![当前数据层血缘全景](../assets/data-lineage/data-layer-overview.png)](../archive/DATA_LINEAGE_EXPLORER.html)
 
 这套架构从上到下回答五个问题：
 
@@ -923,7 +923,7 @@ Trader 在版本化 `target-dataflow-v2` 契约中同时消费批准授权与 MA
 
 新资格必须含 runtime_query/timestamp/failure_semantics/no_persistence；授权证明不能替代行情证明。
 清单及共享 API 漂移影响十角色，旧证据保留，最终冻结后按新指纹追加补验，不全量重采。
-协议、阈值与隔离 FakeBroker 范围见 [Trader 入口](TARGET_WORKFLOW_DATAFLOW.md#104-trader-入口)。
+协议、阈值与隔离 FakeBroker 范围见 [Trader 入口](../TARGET_WORKFLOW_DATAFLOW.md#104-trader-入口)。
 
 ## FactSet Earnings Insight（已上线）
 

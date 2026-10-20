@@ -51,7 +51,7 @@
 这些公司我们大多不持有，读它们是因为利润是流动的——HBM 的供需由海力士/美光/三星
 三家共同决定。它们只留下带原文片段的观测，**不打分、不建档案、不触发 Chief、
 绝不进下单路径**（`tests/test_scheduler_jobs.py` 直接断言这条边界）。
-设计见 [`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
+设计见 [`docs/archive/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)。
 
 图化取舍：LangGraph 的价值 = interrupt/checkpoint 跨进程恢复 + 多节点编排。只有决策图
 （有审批 interrupt）和 PEAD 图（多节点 LLM 链）图化；I1/I2/I3/I5/I6 保持函数，不过度工程。
@@ -198,7 +198,7 @@ Chief、审批卡照常，但没有单会到券商。
 | `ats sector crosssection NAME --layer K --structure` | I8：手动跑截面（周报后自动跑，带结构层） |
 | `ats evidence propose` | I9：跑一次归纳（门槛不过则不调用模型，只打印判定） |
 | `ats evidence proposals` | 列出待确认/已采纳/已拒绝的候选命题 |
-| `ats evidence kbreview [--entity NAME]` | 知识库复核的六类信号（确定性，无 LLM）；周报「知识库复核」小节的即时版，见 `docs/KNOWLEDGE.md` |
+| `ats evidence kbreview [--entity NAME]` | 知识库复核的六类信号（确定性，无 LLM）；周报「知识库复核」小节的即时版，见 `docs/archive/KNOWLEDGE.md` |
 | `ats sector kbperturb NAME --layer K [--mode poison\|ablate\|control]` | 知识库是否 load-bearing：消融/投毒/对照三臂对比。**先跑 control 拿本层噪声底**（各层差很多）。不落库、不动生产笔记 |
 | `ats evidence review ID --accept\|--note "..."` | 审批候选命题（默认拒绝；采纳后仍需你手工写进配置） |
 

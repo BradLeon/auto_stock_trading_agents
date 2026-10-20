@@ -1,4 +1,4 @@
-"""Deterministic macro indicator + regime layer (docs/MACRO_ANALYST.md).
+"""Deterministic macro indicator + regime layer (docs/agents/MACRO_ANALYST.md).
 
 Fully hermetic: every series here is synthetic, so no network and no pandas.
 That is the point of keeping indicators.py/regime.py free of I/O — the numbers
@@ -242,7 +242,7 @@ def test_hysteresis_holds_a_confirmed_call_through_the_entry_band():
     """Entering needs |axis|>0.25; staying only needs >0.15.
 
     Without this the post-forward-guidance noise in the front end would flip the
-    quadrant every other week (docs/MACRO_ANALYST.md §4.3).
+    quadrant every other week (docs/agents/MACRO_ANALYST.md §4.3).
     """
     cfg = regime._cfg(None)
     g, f = _inputs(-0.6, -0.5), _inputs(0.6, 0.5)

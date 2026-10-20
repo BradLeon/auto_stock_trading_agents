@@ -315,7 +315,7 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
             continue
         # A hallucinated dimension is worse than none: it would silently file the fact
         # under a claim it has nothing to do with. Unmapped is a legitimate outcome —
-        # those rows feed the induction pool (docs/CHAIN_EVIDENCE.md §6.5).
+        # those rows feed the induction pool (docs/archive/CHAIN_EVIDENCE.md §6.5).
         concept = (v.concept or "").strip()
         # `not in valid_concepts` alone was not enough: when the menu is EMPTY — this
         # company is a declared witness for nothing — the old guard short-circuited on

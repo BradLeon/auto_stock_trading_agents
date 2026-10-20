@@ -26,7 +26,7 @@ packet = observe_work_adoption(
 返回 packet 包含确定性事实陈述、完整 snapshot、可选 job profile、语义 guardrails 和可离线重放的
 manifest。该入口只依赖 DataProducts；不得向它注入 repository、SQL 或 Provider client。
 
-配套阅读：[`docs/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)（这些观测最终如何变成可证伪的命题结论）。
+配套阅读：[`docs/archive/CHAIN_EVIDENCE.md`](CHAIN_EVIDENCE.md)（这些观测最终如何变成可证伪的命题结论）。
 
 ---
 
@@ -262,12 +262,12 @@ amc 20:00 ET）的末尾，对 `observe` 名单跑一遍。没有独立的 cron�
 
 ## AI 应用层生产化 Observer（专属命题）
 
-`ai_core_production_workflow_penetration` 是 L1 AI 应用层的独立、只读 Observer，不改变本文件其他财报/产业链 Observer 的协议。`claim_definition_version=v2` 消费三条主轴：BTOS 企业采用广度、RPS 员工持续使用、Anthropic 任务生产化；Ramp 是独立的第四个补充商业化命题：**AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？** 四源保留各自分母与期间，禁止合成统一渗透率；Anthropic 子轴继续使用 Work ≥80%、Automation ≥80%、Directive ≥50%、Usage >0 的代理。Ramp 的五个固定 scope、独立状态和图表不改变前三轴 `overall_status`；企业规模首版未发布时标记 `not_published`。其专属方法卡、Figure 4 式职业覆盖分布、不能推断事项和重放方式见 [AI 生产化渗透 Observer](AI_PRODUCTION_PENETRATION_OBSERVER.md)。
+`ai_core_production_workflow_penetration` 是 L1 AI 应用层的独立、只读 Observer，不改变本文件其他财报/产业链 Observer 的协议。`claim_definition_version=v2` 消费三条主轴：BTOS 企业采用广度、RPS 员工持续使用、Anthropic 任务生产化；Ramp 是独立的第四个补充商业化命题：**AI 是否从自报使用和试验，转向真实的企业付费采购，并在行业、企业规模和模型供应商之间扩散？** 四源保留各自分母与期间，禁止合成统一渗透率；Anthropic 子轴继续使用 Work ≥80%、Automation ≥80%、Directive ≥50%、Usage >0 的代理。Ramp 的五个固定 scope、独立状态和图表不改变前三轴 `overall_status`；企业规模首版未发布时标记 `not_published`。其专属方法卡、Figure 4 式职业覆盖分布、不能推断事项和重放方式见 [AI 生产化渗透 Observer](../data/AI_PRODUCTION_PENETRATION_OBSERVER.md)。
 
 ## L1 商业化能力 Observer（独立命题）
 
-`ai_frontier_labs_commercialization`（`claim_definition_version=v1`）是 L1 第二条独立只读 Observer，与生产化 Observer 共享同一层注册表但分开运行、分开出报告、分开失败。它不消费 BTOS / RPS / Ramp / Anthropic Economic Index，**只**消费 `sacra_public_company_profiles` 与 `tickertrends_public_research` 两个 Source 的 `frontier_ai_labs_revenue` dataset。首版只实现 `frontier_labs_revenue_scale_and_trend` 一节；结论固定表达"收入兑现方向已观察、留存与单位经济尚未验证"，禁止仅凭收入增长宣称商业模式可持续或单位经济成立。整体判断 `revenue_monetization_expanding_but_economics_unverified` 表示 OpenAI / Anthropic 的可比收入序列方向一致地扩大，但留存、毛利、客户集中度与商业模式可持续性均未被观察。运行、回滚、P7D 探测与 `no_change` / 修订 / methodology drift 行为见 [Frontier AI Labs 收入数据运维手册](FRONTIER_AI_LABS_REVENUE_OPERATIONS.md)。
+`ai_frontier_labs_commercialization`（`claim_definition_version=v1`）是 L1 第二条独立只读 Observer，与生产化 Observer 共享同一层注册表但分开运行、分开出报告、分开失败。它不消费 BTOS / RPS / Ramp / Anthropic Economic Index，**只**消费 `sacra_public_company_profiles` 与 `tickertrends_public_research` 两个 Source 的 `frontier_ai_labs_revenue` dataset。首版只实现 `frontier_labs_revenue_scale_and_trend` 一节；结论固定表达"收入兑现方向已观察、留存与单位经济尚未验证"，禁止仅凭收入增长宣称商业模式可持续或单位经济成立。整体判断 `revenue_monetization_expanding_but_economics_unverified` 表示 OpenAI / Anthropic 的可比收入序列方向一致地扩大，但留存、毛利、客户集中度与商业模式可持续性均未被观察。运行、回滚、P7D 探测与 `no_change` / 修订 / methodology drift 行为见 [Frontier AI Labs 收入数据运维手册](../data/FRONTIER_AI_LABS_REVENUE_OPERATIONS.md)。
 
 ## L1 原始能力前沿 Observer（独立命题）
 
-`ai_frontier_raw_capability`（`claim_definition_version=v1`）是 L1 第三条独立只读 Observer。它把 benchmark 当作能力边界的量化 proxy，而不是综合排行榜：A 在同一 `comparability_group` 内比较 current/previous global frontier；B 仅对 strict success、binary reward 或可解释 accuracy benchmark 按“多数任务解锁（95% 置信下界 > 50%）→人类基准→经济可用”三级递进判断，后两级只有预先定义且可观察时才展示。无置信区间的提升或跨越只能标记为 provisional；换版、缺失和来源故障都保留明确 NA 状态，不写成零分。固定面板为九家 Labs（OpenAI、Anthropic、Google、xAI、DeepSeek、Moonshot/Kimi、Tencent、Z.ai/GLM、Alibaba/Qwen）× 十一项 benchmark（LiveBench、AutomationBench-AA、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、SciCode、CritPt、OSWorld 2.0、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam），报告始终输出完整 11×9 表格、事件账本、方法卡与覆盖/门槛图表。数据源默认使用 benchmark 维护方/独立第三方免费公开的 Git/CSV/JSON/README/结构化 HTML 结果；Terminal-Bench 4.0 以 Harbor Hub 匿名 leaderboard JSON 为主源并保留官方 GitHub submission JSON 作审计回退。Artificial Analysis 仅在显式授权或合规公开结构化页面许可门禁通过时作为可选增强源，不能作为首版必需依赖。没有公开结果时写 coverage/NA，不制造分数。运维、调度、回放和故障隔离见 [Frontier AI 原始能力 Observer 运维说明](FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md)。
+`ai_frontier_raw_capability`（`claim_definition_version=v1`）是 L1 第三条独立只读 Observer。它把 benchmark 当作能力边界的量化 proxy，而不是综合排行榜：A 在同一 `comparability_group` 内比较 current/previous global frontier；B 仅对 strict success、binary reward 或可解释 accuracy benchmark 按“多数任务解锁（95% 置信下界 > 50%）→人类基准→经济可用”三级递进判断，后两级只有预先定义且可观察时才展示。无置信区间的提升或跨越只能标记为 provisional；换版、缺失和来源故障都保留明确 NA 状态，不写成零分。固定面板为九家 Labs（OpenAI、Anthropic、Google、xAI、DeepSeek、Moonshot/Kimi、Tencent、Z.ai/GLM、Alibaba/Qwen）× 十一项 benchmark（LiveBench、AutomationBench-AA、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、SciCode、CritPt、OSWorld 2.0、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam），报告始终输出完整 11×9 表格、事件账本、方法卡与覆盖/门槛图表。数据源默认使用 benchmark 维护方/独立第三方免费公开的 Git/CSV/JSON/README/结构化 HTML 结果；Terminal-Bench 4.0 以 Harbor Hub 匿名 leaderboard JSON 为主源并保留官方 GitHub submission JSON 作审计回退。Artificial Analysis 仅在显式授权或合规公开结构化页面许可门禁通过时作为可选增强源，不能作为首版必需依赖。没有公开结果时写 coverage/NA，不制造分数。运维、调度、回放和故障隔离见 [Frontier AI 原始能力 Observer 运维说明](../data/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md)。

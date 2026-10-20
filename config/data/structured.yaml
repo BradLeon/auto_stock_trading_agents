@@ -96,7 +96,7 @@
 #   rollback_on: [reason_code]
 #
 # Operational details and field-by-field guidance:
-# docs/STRUCTURED_DATA_OPERATIONS.md
+# docs/data/STRUCTURED_DATA_OPERATIONS.md
 
 version: 1
 

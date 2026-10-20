@@ -2958,7 +2958,7 @@ def run_evidence(
                 if a.note:
                     print(f"     {a.note}")
         if not any_claim:
-            print("(该行业配置里还没有 claims —— 见 docs/CHAIN_EVIDENCE.md)")
+            print("(该行业配置里还没有 claims —— 见 docs/archive/CHAIN_EVIDENCE.md)")
         return 0
 
     if not symbol:

@@ -189,7 +189,7 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
                     )
             lines.append("")
     if not any_claim:
-        lines += ["（该行业配置里还没有 claims —— 见 docs/CHAIN_EVIDENCE.md）", ""]
+        lines += ["（该行业配置里还没有 claims —— 见 docs/archive/CHAIN_EVIDENCE.md）", ""]
     return lines
 
 
@@ -592,7 +592,7 @@ def _render(
         "> 由 `ats sector crosssection` / 周报自动生成。读**不持有**公司的财报，"
         "把它们变成可核对的观测——利润是流动的，HBM 的供需由三家共同决定，"
         "只读自己持有的那家等于用三分之一的证据下注。",
-        "> 设计见 `docs/CHAIN_EVIDENCE.md`。",
+        "> 设计见 `docs/archive/CHAIN_EVIDENCE.md`。",
         "",
     ]
     lines += _claim_section(cfg, store, assessments_by_layer, rows_by_id)

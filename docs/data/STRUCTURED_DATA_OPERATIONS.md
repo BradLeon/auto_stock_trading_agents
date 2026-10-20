@@ -2,7 +2,7 @@
 
 > 读者：数据源运维者、发布负责人、故障处理者
 > 适用范围：持久化结构化研究数据；不包含 IBKR/yfinance 股价和期权行情
-> 当前流程基线：2026-10。分源实际状态以 [`UNSTRUCTURED_REFRESH_INVENTORY.md`](validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 Dataflow 验收清单为准；本文件部分较早章节仍说明 legacy `data ingest` 直调路径，按下方迁移说明使用。
+> 当前流程基线：2026-10。分源实际状态以 [`UNSTRUCTURED_REFRESH_INVENTORY.md`](../validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 Dataflow 验收清单为准；本文件部分较早章节仍说明 legacy `data ingest` 直调路径，按下方迁移说明使用。
 
 ## 1. 先回答六个最常见的运维问题
 
@@ -21,7 +21,7 @@
 
 本机 `com.ats.data-refresh` launchd 唤醒 Refresh Controller，状态以其 heartbeat 和逐源运行账本判断。FactSet 月末摄入（`factset_month_end_ingest`）与财报日历刷新（`calendar_*`）也由 Refresh Controller 负责；`com.ats.phase-e`（Dispatcher）只调度研究 Workflow，不替代逐源刷新 controller。旧调度器 `com.ats.schedule` 已退役，不得加载。完整来源范围、当前 job 启用状态及最近真实结果见逐源库存；cadence、注册或 job 存在本身都不证明自动采集已成功。
 
-目标 registry、逐角色读契约、资格及回退状态见 [Dataflow 验收 Runbook](validation/DATAFLOW_ASSURANCE_RUNBOOK.md)；十角色当前资格判定和拒绝原因见 [Tasks 5 门禁表](validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)。
+目标 registry、逐角色读契约、资格及回退状态见 [Dataflow 验收 Runbook](../validation/DATAFLOW_ASSURANCE_RUNBOOK.md)；十角色当前资格判定和拒绝原因见 [Tasks 5 门禁表](../validation/TARGET_DATAFLOW_TASK5_ACCEPTANCE.md)。
 
 统一配置只读校验：
 
@@ -142,7 +142,7 @@ discovery 仍读取官方 metadata，文件仍计算完整 SHA-256，持久化 l
 `not_published_or_privacy_filtered`，绝不能写为零。查看 `data health` 时应同时核对最新检查、upstream
 commit、ingested release、available period 和 Claude.ai / 1P API 的独立状态。
 
-统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../config/data/catalog.yaml)。它装配结构化、非结构化两个权威持久化注册表，并引用刷新策略；详细内容位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。runtime-only 行情、期权和券商即时查询不属于持久化来源注册表。
+统一数据层的机器配置入口是 [`config/data/catalog.yaml`](../../config/data/catalog.yaml)。它装配结构化、非结构化两个权威持久化注册表，并引用刷新策略；详细内容位于 `config/data/structured.yaml`、`config/data/unstructured.yaml`、`config/data/schedules.yaml` 和 `config/data/providers/`。runtime-only 行情、期权和券商即时查询不属于持久化来源注册表。
 
 配置职责边界：
 
@@ -293,7 +293,7 @@ KR_ECOS_API_KEY=
 FINNHUB_API_KEY=
 ```
 
-实际字段以 [`.env.example`](../.env.example) 和 `ats.config.Secrets` 为准。
+实际字段以 [`.env.example`](../../.env.example) 和 `ats.config.Secrets` 为准。
 
 ## 5. 数据源生命周期
 
@@ -422,7 +422,7 @@ ats_cli data ingest \
 | `com.ats.phase-e` | 研究 Workflow 的定时与日历事件调度（Dispatcher）；不是数据源刷新 owner。旧调度器 `com.ats.schedule` 已退役、不得加载 |
 | `ats data ingest ...` | 操作命令会先入队；worker 持有效 lease 后才执行目标持久化写入 |
 
-部署模板和当前真实逐源状态见 `deploy/launchd/`、[来源库存](validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 [Dataflow 验收/回退 Runbook](validation/DATAFLOW_ASSURANCE_RUNBOOK.md)。runtime 行情、期权和券商查询走即时读取接口，不得调度为持久化刷新任务。
+部署模板和当前真实逐源状态见 `deploy/launchd/`、[来源库存](../validation/UNSTRUCTURED_REFRESH_INVENTORY.md) 和 [Dataflow 验收/回退 Runbook](../validation/DATAFLOW_ASSURANCE_RUNBOOK.md)。runtime 行情、期权和券商查询走即时读取接口，不得调度为持久化刷新任务。
 
 建议频率以 Provider 发布时间和 dataset freshness 门为准：月度官方序列在发布窗口触发；SEC 围绕 filing/earnings event 并保留低频补漏；Consensus 按研究事件建立真实 snapshot；不要用高频轮询弥补未知发布时间。
 
@@ -660,7 +660,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 
 运维人员可以先通过下图确认持久化数据、实时输入、独立消费者和 Workflow Memory 的边界，再结合后续配置矩阵检查具体 source ID。点击图片可打开交互版。
 
-[![数据层运维全景](assets/data-lineage/data-layer-overview.png)](DATA_LINEAGE_EXPLORER.html)
+[![数据层运维全景](../assets/data-lineage/data-layer-overview.png)](../archive/DATA_LINEAGE_EXPLORER.html)
 
 ### 10.1 机器配置一致性矩阵
 
@@ -832,7 +832,7 @@ ats data factset-reprocess factset-text-v2 --report-path /absolute/path/Earnings
 
 ## Phase F 持久运行许可
 
-Phase F 持久运行许可使用显式 `until_stopped` 部署请求和稳定 `per_invocation` scope；逐次 as_of、查询窗口、实际事件和输入有效性独立检查。报价阶段用途与 `deployment_purpose` 分列，许可不替代单笔审批。实现、隔离验证和后续生产冻结/资格步骤见 [持久运行报告](archive/PHASE_F_PERSISTENT_RUNTIME.md)。
+Phase F 持久运行许可使用显式 `until_stopped` 部署请求和稳定 `per_invocation` scope；逐次 as_of、查询窗口、实际事件和输入有效性独立检查。报价阶段用途与 `deployment_purpose` 分列，许可不替代单笔审批。实现、隔离验证和后续生产冻结/资格步骤见 [持久运行报告](../archive/PHASE_F_PERSISTENT_RUNTIME.md)。
 
 ## AI 生产化 Observer 运维
 

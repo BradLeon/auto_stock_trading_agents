@@ -1,7 +1,12 @@
 # 技术面分析师 — 设计文档
 
+> **现状（新 Workflow/Dataflow 下，以本节为准）**：工作日 10:00（纽约时间）由 Dispatcher 调度
+> （`technical-review`，逐标的），产出 `technical_review` 投影（量价读数、趋势状态、失效条件、建议敞口；
+> 失效条件与建议敞口由代码生成），只供 Chief 读取，不读其他分析师观点。下文「每个交易日跑一次，位置在
+> PEAD 之后、Chief 之前」描述的是旧调度器的串行级联，现在它与其他分析独立运行。策略的数学定义与回测证据不变。
+
 > 面向：决策者 / 设计者。讲这个角色回答什么问题、怎么算、凭什么相信它、代价是什么。
-> 代码规范见 `docs/DEVELOPMENT.md`；系统全局设计见 `docs/DESIGN.md`。
+> 代码规范见 `docs/DEVELOPMENT.md`；系统全局设计见 `docs/TARGET_WORKFLOW_DATAFLOW.md`。
 
 ---
 
@@ -228,7 +233,7 @@ crush"，收益完全来自期权的隐含波动率盯市与随后回落，正�
 
 ## 9. 相关文档
 
-- 系统全局设计、角色矩阵 → `docs/DESIGN.md`
+- 系统全局设计、角色契约 → `docs/TARGET_WORKFLOW_DATAFLOW.md`
 - 代码规范、配置分层 → `docs/DEVELOPMENT.md`
-- workflow 与触发路由 → `docs/WORKFLOWS.md`
-- 宏观分析师（同为确定性优先的设计）→ `docs/MACRO_ANALYST.md`
+- 调度与触发 → `docs/OPERATIONS.md` 第 3 节
+- 宏观分析师（同为确定性优先的设计）→ `docs/agents/MACRO_ANALYST.md`

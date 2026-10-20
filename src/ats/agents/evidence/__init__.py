@@ -1,7 +1,7 @@
 """Chain evidence — extract cross-company observations from filings/transcripts.
 
 Read-only by construction: this package never imports the broker and never produces
-a TradeDecision. See docs/CHAIN_EVIDENCE.md.
+a TradeDecision. See docs/archive/CHAIN_EVIDENCE.md.
 """
 
 from .commercialization import (

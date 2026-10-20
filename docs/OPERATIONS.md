@@ -61,7 +61,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 日历事件的路由在 `config/workflow/event_routes.yaml`，常驻进程每天 06:10、18:10（UTC）消费已发布的事件：
 
-- 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（建立或刷新财报前基线）。
+- 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（例行模式在财报前 `prep_days_before`＝3 天内建立基线）。
 - 财报**已发布**且已准入公告或申报材料 → 信息简报 + 基本面事件评审（冻结基线、打分）。
 - FOMC、CPI、PCE、NFP、GDP 发布 → 宏观评审。是否唤醒受 `config/settings.yaml` 的
   `schedule.daily_stages.macro_sector_event_triggers` 控制（现为 `false`）；财报事件受
@@ -130,7 +130,7 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
   才调用来源适配器。即时行情、期权与券商查询不排队、不存为研究事实。
 - `derived` 类任务：财报日历刷新（`calendar_*`）、证据抽取、FactSet 月末摄入（每月 1 日 00:30 纽约，
   摄入上月最终版）。
-- 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](STRUCTURED_DATA_OPERATIONS.md)。
+- 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](data/STRUCTURED_DATA_OPERATIONS.md)。
 
 ## 6. 事件日历
 

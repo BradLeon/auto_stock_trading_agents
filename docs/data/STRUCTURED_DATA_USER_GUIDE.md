@@ -48,7 +48,7 @@ FactSet 的专用快照入口是 `DataProducts.earnings_insight_snapshot(as_of=.
 
 下图以公司财务与 Consensus 为例，标出可复用的结构化数据、使用它们的独立 Workflow，以及后续形成的运行记忆。点击图片可打开交互版。
 
-[![结构化持久数据的消费者与血缘](assets/data-lineage/structured-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+[![结构化持久数据的消费者与血缘](../assets/data-lineage/structured-data-lineage.png)](../archive/DATA_LINEAGE_EXPLORER.html)
 
 ### 2.2 Runtime：按需查询、不能从结构化库重放
 
@@ -62,7 +62,7 @@ FactSet 的专用快照入口是 `DataProducts.earnings_insight_snapshot(as_of=.
 
 下图显示实时输入不会进入持久化数据产品；它在任务运行时直接提供给 `technical_review` 或作为 `pead_prep` 的即时估值输入。
 
-[![实时输入、消费者与 Workflow Memory](assets/data-lineage/runtime-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+[![实时输入、消费者与 Workflow Memory](../assets/data-lineage/runtime-data-lineage.png)](../archive/DATA_LINEAGE_EXPLORER.html)
 
 ## 3. 一次性设置命令环境
 

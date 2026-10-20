@@ -3,7 +3,7 @@
 Each layer analyst sees only its own evidence, so none of them can notice that L6's
 tightness is L7's packaging schedule showing up one link downstream. That comparison
 needs every layer's conclusion in one context, which is why this stage survives the
-split into per-layer reviews (docs/SECTOR_ANALYST.md: "层间轮动本质是跨层比较").
+split into per-layer reviews (docs/agents/SECTOR_ANALYST.md: "层间轮动本质是跨层比较").
 
 What changed is the INPUT: eight compact verdicts instead of the whole sector's raw
 material. Macro and FactSet are appended only after those verdicts are fixed and may

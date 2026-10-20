@@ -77,7 +77,7 @@ def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
     it means the indicator layer can grow without touching that contract.
 
     `prior` supplies the hysteresis state: a quadrant flip stays provisional
-    until a second consecutive review agrees (docs/MACRO_ANALYST.md §4.3).
+    until a second consecutive review agrees (docs/agents/MACRO_ANALYST.md §4.3).
     """
     if not live_data:
         return {}

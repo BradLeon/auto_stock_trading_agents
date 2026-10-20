@@ -1,6 +1,6 @@
 # 数据源状态（Data Sources）
 
-本文保留早期 PEAD 接入快照和专属官方披露验收说明，不再作为全系统来源注册表或当前刷新状态的唯一依据。当前持久化 source/dataset 的权威定义在 [`structured.yaml`](../config/data/structured.yaml) 与 [`unstructured.yaml`](../config/data/unstructured.yaml)，由 [`catalog.yaml`](../config/data/catalog.yaml) 唯一装配；逐源实际 owner、launchd 运行及差异对照见 [来源库存](validation/UNSTRUCTURED_REFRESH_INVENTORY.md)。本文中早期命令、`.venv` 示例和“已接入”表格属于历史用法，操作前应以当前 Runbook 和版本化验收报告为准。
+本文保留早期 PEAD 接入快照和专属官方披露验收说明，不再作为全系统来源注册表或当前刷新状态的唯一依据。当前持久化 source/dataset 的权威定义在 [`structured.yaml`](../../config/data/structured.yaml) 与 [`unstructured.yaml`](../../config/data/unstructured.yaml)，由 [`catalog.yaml`](../../config/data/catalog.yaml) 唯一装配；逐源实际 owner、launchd 运行及差异对照见 [来源库存](../validation/UNSTRUCTURED_REFRESH_INVENTORY.md)。本文中早期命令、`.venv` 示例和“已接入”表格属于历史用法，操作前应以当前 Runbook 和版本化验收报告为准。
 
 ## PEAD 官方披露验收（当前持仓范围）
 
@@ -74,7 +74,7 @@ ATS_TEST_SENDER=你的Gmail@gmail.com PYTHONPATH=src .venv/bin/python scripts/ch
 
 第三方研究文章进入共享资料库后，会分别提供给行业研究、第三方研究提炼和命题证据分析；三个消费者各自写入不同的 Workflow Memory。点击图片可打开交互版并切换到其他非结构化数据产品。
 
-[![非结构化研究资料的消费者与血缘](assets/data-lineage/unstructured-data-lineage.png)](DATA_LINEAGE_EXPLORER.html)
+[![非结构化研究资料的消费者与血缘](../assets/data-lineage/unstructured-data-lineage.png)](../archive/DATA_LINEAGE_EXPLORER.html)
 
 ---
 

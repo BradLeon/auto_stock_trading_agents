@@ -1,6 +1,6 @@
 # Phase F 验收依据与范围
 
-验收依据为 [目标需求文档](TARGET_WORKFLOW_DATAFLOW.md)。本文件只将原文要求映射到执行工作，不新增架构或上线条件。OpenSpec 与操作手册是实施材料；发生冲突时应修正实施材料，不能通过改写目标需求来迁就实现。
+验收依据为 [目标需求文档](../TARGET_WORKFLOW_DATAFLOW.md)。本文件只将原文要求映射到执行工作，不新增架构或上线条件。OpenSpec 与操作手册是实施材料；发生冲突时应修正实施材料，不能通过改写目标需求来迁就实现。
 
 | 需求依据 | 验收行为 | 对应未完成工作 |
 |---|---|---|
@@ -21,7 +21,7 @@
 
 ## 测量纪律
 
-按 §15.1 和 [测试基线条件](TEST_BASELINE.md)，最终测量使用 `./scripts/run_tests.sh`，由它执行 `uv sync --all-extras` 与 `uv run pytest`。定向测试用于验证对应改动；它们的通过数不能冒充全量基线或生产上线结论。
+按 §15.1 和 [测试基线条件](../TEST_BASELINE.md)，最终测量使用 `./scripts/run_tests.sh`，由它执行 `uv sync --all-extras` 与 `uv run pytest`。定向测试用于验证对应改动；它们的通过数不能冒充全量基线或生产上线结论。
 
 必需用途应在运行前从选定请求的依赖闭包和目标角色契约推导，不能从已成功执行的报告倒推。`verify_plan_coverage` 仅核验选定分析任务闭包；它不证明 Chief/Risk/Boss/Trader/Clerk 全链路或生产清零。配置展开清单中的重复 task-scope 数量只用于盘点，不能直接作为上线必须执行次数。
 

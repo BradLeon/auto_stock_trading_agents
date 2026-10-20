@@ -275,6 +275,6 @@ grep -c "<source_id>" config/data/unstructured.yaml        # 每个 L1 来源应
 
 > 提交本文件的任何改动前，请先重跑上面两条范围复核——本节第一段的三条结论（唯一 `evidence_observers`、十个来源在另一域命中为 0、`L1_app` 无 `claims:` 块）是本文件收窄范围的**唯一依据**。
 
-配套阅读：`docs/EVIDENCE_OBSERVER.md`、`docs/AI_PRODUCTION_PENETRATION_OBSERVER.md`、`docs/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md`、`docs/FRONTIER_AI_LABS_REVENUE_OPERATIONS.md`、`docs/RAMP_AI_INDEX.md`、`docs/AI_MODEL_EVIDENCE_SOURCES.md`、`docs/STRUCTURED_DATA_OPERATIONS.md`。
+配套阅读：`docs/archive/EVIDENCE_OBSERVER.md`、`docs/data/AI_PRODUCTION_PENETRATION_OBSERVER.md`、`docs/data/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md`、`docs/data/FRONTIER_AI_LABS_REVENUE_OPERATIONS.md`、`docs/data/RAMP_AI_INDEX.md`、`docs/research/AI_MODEL_EVIDENCE_SOURCES.md`、`docs/data/STRUCTURED_DATA_OPERATIONS.md`。
 
-范围外的注册表见 `docs/STRUCTURED_DATA_OPERATIONS.md`（Chain 侧）与 PEAD 新闻链路的运维文档。
+范围外的注册表见 `docs/data/STRUCTURED_DATA_OPERATIONS.md`（Chain 侧）与 PEAD 新闻链路的运维文档。

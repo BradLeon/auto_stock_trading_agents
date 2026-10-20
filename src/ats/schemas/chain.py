@@ -2,7 +2,7 @@
 
 An earnings print from a company we do NOT hold (Micron, Samsung, AMZN, ORCL) is an
 observation of an industry variable, not a standalone event. This module models that
-observation. See docs/CHAIN_EVIDENCE.md for the design and the invariants.
+observation. See docs/archive/CHAIN_EVIDENCE.md for the design and the invariants.
 
 The load-bearing distinction is `kind`:
   * common   — industry-wide demand/supply/pricing. Any witness can move it.
@@ -78,7 +78,7 @@ class Observation(BaseModel):
     metric: str                           # the model's own label, kept for display
     # Which declared claim dimension this fact belongs to, assigned semantically.
     # Empty = unmapped: still stored, and it is exactly what feeds the induction
-    # pool in docs/CHAIN_EVIDENCE.md §6.5.
+    # pool in docs/archive/CHAIN_EVIDENCE.md §6.5.
     concept: str = ""
     period: str = ""                      # fiscal label / quarter the fact covers
     observation_type: ObservationType
@@ -188,7 +188,7 @@ class Concept(BaseModel):
 
 class ClaimDef(BaseModel):
     """A declared, falsifiable proposition. Lives in config/sectors/<name>.yaml under
-    its layer; only a human adds one (agents may propose, see docs/CHAIN_EVIDENCE.md)."""
+    its layer; only a human adds one (agents may propose, see docs/archive/CHAIN_EVIDENCE.md)."""
 
     id: str
     kind: ClaimKind = "common"
@@ -404,7 +404,7 @@ class ClaimProposal(BaseModel):
 
     Agents may PROPOSE; only a person adds a claim to the config. That line is what
     keeps the cross-section's factor axes stable enough for history to be comparable —
-    see docs/CHAIN_EVIDENCE.md §6.5.
+    see docs/archive/CHAIN_EVIDENCE.md §6.5.
 
     `observation_ids` are frozen as discovery evidence at proposal time: the material
     that made us notice a proposition explains "why look", it may never also serve as

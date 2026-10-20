@@ -531,3 +531,12 @@ def open_decision_read_gate(monkeypatch):
 
     monkeypatch.setattr(dr, "freeze_read_dependencies", lambda plan: [])
     monkeypatch.setattr(dr, "validate_read_dependencies", lambda plan, requirements: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_installed_product_health_gate(monkeypatch):
+    """`dispatcher_daemon.start()` installs the pre-run data-product health gate process-wide; a test that
+    starts the daemon must not leave it installed for the tests after it."""
+    from ats.workflow import ownership
+
+    monkeypatch.setattr(ownership, "PRODUCT_HEALTH_GATE", None)

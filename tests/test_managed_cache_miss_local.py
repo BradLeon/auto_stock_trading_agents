@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from ats.data.persistent_queue import PersistentIngestionQueue, enqueue_cache_miss
 from ats.data import persistent_queue
 from ats.data.stores.unstructured.platform import PlatformUnstructuredRepository
-from ats.runtime import scheduler
 from ats.chain import sources as chain_sources
 from ats.data import research, yahoo_news
 from ats.data.pipelines import factset_earnings_insight
@@ -65,29 +64,6 @@ def test_unstructured_production_store_rejects_write_without_worker_lease(
             raise AssertionError("production unstructured write bypassed queue lease")
     finally:
         repo.close()
-
-
-def test_factset_schedule_submits_one_weekly_queue_task(monkeypatch):
-    calls = {}
-
-    class Queue:
-        def enqueue(self, **kwargs):
-            calls.update(kwargs)
-            return "task-1", True
-
-        def run_one(self, *, task_id):
-            calls["run_task_id"] = task_id
-            return {"status": "succeeded", "stdout": {"status": "succeeded"}}
-
-    monkeypatch.setattr("ats.data.persistent_queue.PersistentIngestionQueue", Queue)
-    scheduler._factset_weekly_ingest()
-
-    assert calls["source_id"] == "factset_earnings_insight_doc"
-    assert calls["trigger_kind"] == "scheduled"
-    assert calls["trigger_ref"].startswith("factset-weekly:")
-    assert "factset_earnings_insight_metrics" in calls["scope"]["sources"]
-    assert calls["command"][:3] == ["ats", "data", "factset-refresh"]
-    assert calls["run_task_id"] == "task-1"
 
 
 def test_direct_factset_pipeline_rejects_before_provider_access(tmp_path, monkeypatch):

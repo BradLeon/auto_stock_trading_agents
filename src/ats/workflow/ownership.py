@@ -219,15 +219,27 @@ _MACRO_SECTOR_WORKFLOWS = frozenset({"macro-review", "sector-review", "layer-rev
 _PEAD_WORKFLOWS = frozenset({"information-brief", "fundamental-routine", "fundamental-event"})
 
 
-def event_trigger_enabled(workflow_id: str) -> bool:
-    """Is event-driven waking of this workflow allowed by the operator's `daily_stages` switches?"""
-    from ..config import get_config
+def event_trigger_switches(*, config_dir: str | Path | None = None) -> dict[str, bool]:
+    """Operator switches for calendar-event waking (`event_triggers` in the research schedule config).
 
-    stages = get_config().app.schedule.daily_stages
+    `earnings` wakes Information + Fundamental on earnings events; `macro_sector` wakes Macro (and the
+    Layer/Sector family) on FOMC/CPI/PCE/NFP/GDP releases. A missing key keeps the production default.
+    """
+    root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
+    payload = yaml.safe_load((root / "workflow" / "phase_e_schedules.yaml").read_text(
+        encoding="utf-8")) or {}
+    switches = payload.get("event_triggers", {}) or {}
+    return {"earnings": bool(switches.get("earnings", True)),
+            "macro_sector": bool(switches.get("macro_sector", False))}
+
+
+def event_trigger_enabled(workflow_id: str) -> bool:
+    """Is event-driven waking of this workflow allowed by the operator's `event_triggers` switches?"""
+    switches = event_trigger_switches()
     if workflow_id in _MACRO_SECTOR_WORKFLOWS:
-        return bool(stages.macro_sector_event_triggers)
+        return switches["macro_sector"]
     if workflow_id in _PEAD_WORKFLOWS:
-        return bool(stages.pead_event_triggers)
+        return switches["earnings"]
     return True
 
 
@@ -270,7 +282,7 @@ def dispatch_calendar_event(event: Mapping[str, Any], *,
             outcomes.append({"workflow_id": workflow_id, "owner": mode, "status": mode})
             continue
         if not event_trigger_enabled(workflow_id):
-            # The operator paused this family of event triggers (settings `schedule.daily_stages`). The legacy
+            # The operator paused this family of event triggers (`event_triggers` in the research schedule config). The legacy
             # scheduler honoured that; the Dispatcher's calendar path did not read it at all, so handing a
             # workflow to the Dispatcher would have silently turned the triggers back on (found 2026-10-17).
             outcomes.append({"workflow_id": workflow_id, "owner": mode, "status": "event_trigger_paused"})

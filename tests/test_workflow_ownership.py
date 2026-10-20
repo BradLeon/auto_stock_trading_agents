@@ -141,10 +141,10 @@ def test_due_planned_release_waits_for_materials_then_routes_new_calendar_versio
     from datetime import datetime, timezone
     import yaml
 
-    from ats.config import get_config
+    from ats.workflow import ownership as _ownership
 
     # This test exercises routing, so the operator's pause on macro/sector event triggers (the shipped policy) is lifted.
-    monkeypatch.setattr(get_config().app.schedule.daily_stages, "macro_sector_event_triggers", True)
+    monkeypatch.setattr(_ownership, "event_trigger_switches", lambda **kwargs: {"earnings": True, "macro_sector": True})
 
     from ats.data.stores.schedule_calendar import (ScheduleCalendarStore,
                                                    ScheduleEventCandidate,

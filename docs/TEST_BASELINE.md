@@ -79,6 +79,7 @@
 | 归因 | 57 个失败：41 个旧批次/读取切换机制（被 10-15 裁决取代，只能从运维命令到达）、4 个决策路径夹具债、12 个 13.6 之前已登记的既有失败；没有产品缺陷。逐组根因、第一次失败的提交和处置见 `docs/archive/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md` |
 | 方法 | `scripts/attribute_test_failures.py` 按文件与签名归因；对没登记过的 72 个失败用 `git worktree` 在 8 个更早的提交上逐个对照，确定第一次失败的提交 |
 | 之后的退役（2026-10-20） | Phase F 两个 change 归档后，读 git 忽略的 `docs/validation/` 记录、守卫已归档 change 的测试随之退役：删除 `tests/test_phase_f_record_guardian.py`、`tests/test_phase_f_progress_doc.py`，以及 `test_intake_cli.py` 中 3 个、`test_cutover_cli.py` 中 6 个校验 `PHASE_F_CUTOVER_RUNBOOK.md` 内容的测试。它们在 10-19 全量里都是通过的，所以失败数不变，通过数相应减少 |
+| 旧调度器删除（2026-10-20） | 随 `src/ats/runtime/scheduler.py` 删除：`test_scheduler.py`、`test_scheduler_jobs.py`、`test_factset_semantic_schedule_local.py` 整份删除；`test_score_state`、`test_pead_async`、`test_events`、`test_chain_{articles,evidence,sources}`、`test_macro_strategy`、`test_sector`、`test_factset_earnings_insight`、`test_managed_cache_miss_local`、`test_workflow_data_cutover` 中只测旧级联/周报/打分窗口的用例删除；Phase F 调度与启动测试改为驱动 `dispatcher_daemon`。10-19 登记的 C 组里 `test_workflow_data_cutover` 那 1 个失败（检查旧调度器里一行导入）随之消失 |
 
 #### 历史权威测量
 

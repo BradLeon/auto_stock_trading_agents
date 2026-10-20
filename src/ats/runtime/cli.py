@@ -3108,49 +3108,6 @@ def _run_analyst_fundamental(args) -> int:
     return 0
 
 
-def run_pead_score_window(
-    window: str,
-    *,
-    dry_run: bool = True,
-    use_llm: bool = True,
-    as_of: str | None = None,
-    chief: bool = True,
-    plan_only: bool = False,
-) -> int:
-    """Run one PEAD score window by hand (the scheduler runs the same function).
-
-    `--as-of` rewinds only the calendar/state layer, so a past print can be replayed;
-    it does NOT rewind Tavily or SEC results.
-    """
-    from datetime import datetime
-
-    from .scheduler import ET, pead_score_window
-
-    moment = None
-    if as_of:
-        moment = datetime.fromisoformat(as_of)
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=ET)
-
-    label = "计划" if plan_only else ("试运行" if dry_run else "实盘")
-    print(
-        f"=== PEAD {window} 打分窗口（{label}"
-        f"{f'，as_of={moment:%Y-%m-%d %H:%M %Z}' if moment else ''}）==="
-    )
-    outcomes = pead_score_window(
-        window, dry_run=dry_run, use_llm=use_llm, as_of=moment, chief=chief, plan_only=plan_only
-    )
-    if not outcomes:
-        print("  （非交易日，或打分窗口被关闭）")
-        return 0
-    for sym, why in outcomes.items():
-        mark = "▶" if why.startswith("GO") else "·"
-        print(f"  {mark} {sym:6} {why}")
-    n = sum(1 for w in outcomes.values() if w.startswith("GO"))
-    print(f"\n  {n}/{len(outcomes)} 个标的{'待打分' if plan_only else '已打分'}")
-    return 0
-
-
 def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) -> int:
     """Audit transcript retrieval across recent quarters — no LLM, read-only.
 
@@ -4558,16 +4515,9 @@ def main(argv: list[str] | None = None) -> int:
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
     srv.add_argument("--host", default="0.0.0.0")
     srv.add_argument("--port", type=int, default=8000)
-    sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
-    sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
-    sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
+    sch = sub.add_parser("schedule", help="research dispatcher daemon: scheduled and calendar-event workflows")
     sch.add_argument("--phase-e", action="store_true",
-                     help="use opt-in Phase E workflow owners + Trigger Ledger; no legacy cascade")
-    sch.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="run the same schedule without external-model calls (useful for safe acceptance checks)",
-    )
+                     help="required: the dispatcher daemon (the legacy serial scheduler was removed)")
     ct = sub.add_parser("cutover", help="Phase F 切流控制平面：边界查询、预检、批次登记与报告校验")
     ct.add_argument("action", choices=[
         "state", "wiring", "preflight", "set-route", "activate", "release",
@@ -4834,9 +4784,6 @@ def main(argv: list[str] | None = None) -> int:
     wf.add_argument("--as-of", default="", help="显式冻结的 ISO 8601 as-of 时点")
     wf.add_argument("--status", default="")
     wf.add_argument("--limit", type=int, default=100)
-    sch.add_argument(
-        "--window", choices=["amc", "bmo"], help="run one PEAD score window immediately, then exit"
-    )
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
     se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
@@ -5060,7 +5007,6 @@ def main(argv: list[str] | None = None) -> int:
             "watch",
             "research",
             "transcriptprobe",
-            "scorewindow",
         ],
     )
     pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch` / `research`)")
@@ -5069,22 +5015,6 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=4,
         help="transcriptprobe: how many recent quarters per target",
-    )
-    pe.add_argument("--window", choices=["amc", "bmo"], help="scorewindow: which window to run")
-    pe.add_argument(
-        "--as-of",
-        dest="as_of",
-        help="scorewindow: ISO datetime; rewinds the calendar/state layer only",
-    )
-    pe.add_argument(
-        "--plan-only",
-        action="store_true",
-        help="scorewindow: print the routing decision without scoring",
-    )
-    pe.add_argument(
-        "--no-chief",
-        action="store_true",
-        help="scorewindow: score but don't run the Chief / push approval",
     )
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
@@ -5307,13 +5237,11 @@ def main(argv: list[str] | None = None) -> int:
         serve(host=args.host, port=args.port)
         return 0
     if args.command == "schedule":
-        from .scheduler import start
+        if not args.phase_e:
+            parser.error("the legacy serial scheduler was removed; run the dispatcher with --phase-e")
+        from .dispatcher_daemon import start
 
-        schedule_options = {"dry_run": not args.live, "run_once": args.now,
-                            "window": args.window, "use_llm": not args.no_llm}
-        if args.phase_e:
-            schedule_options["phase_e"] = True
-        start(**schedule_options)
+        start()
         return 0
     if args.command == "cutover":
         return cutover_command(args, parser=parser)
@@ -5572,17 +5500,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "transcriptprobe":
             return run_transcript_probe(
                 [args.symbol] if args.symbol else None, quarters=args.quarters
-            )
-        if args.action == "scorewindow":
-            if not args.window:
-                parser.error("pead scorewindow requires --window amc|bmo")
-            return run_pead_score_window(
-                args.window,
-                dry_run=not args.live,
-                use_llm=not args.no_llm,
-                as_of=args.as_of,
-                chief=not args.no_chief,
-                plan_only=args.plan_only,
             )
         if not args.symbol:
             parser.error("pead %s requires a symbol" % args.action)

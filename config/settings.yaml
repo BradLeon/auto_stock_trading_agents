@@ -101,63 +101,6 @@ channel:
                                 # feishu_bot: scheduler pushes an approval card with signed Approve/Reject
                                 # links to FEISHU_BOT_WEBHOOK; taps hit `ats serve` (FEISHU_APPROVE_BASE).
 
-# --- Scheduling (Phase 9) ----------------------------------------------------
-schedule:
-  # Removed `enabled: false` — nothing ever read it, so it claimed scheduling was off
-  # while the launchd job scheduled normally. Start/stop the daemon instead.
-  run_at: "10:30"               # daily cycle: 1h after US open (was 16:15 close) — lands
-                                # ~22:30 China so the Boss can approve in the evening;
-                                # chief decides on intraday prices, orders fill in RTH.
-                                # PEAD score windows are separate — they fire off an
-                                # observed earnings print: config/pead.yaml
-                                # schedule.score_windows (bmo 11:00 / amc 20:00 ET).
-  timezone: America/New_York
-  # 宏观/行业周报：独立的时间与时区，不跟 run_at/timezone 绑定。这个 job 不碰 broker、
-  # 不需要 NYSE 交易日，绑定 ET 没有意义——且一旦触发时刻的本地日期和 ET 日历日不一致
-  # 就会出问题（例如北京周六 08:50，纽约那一刻还是周五晚上），所以直接用操作者的时区。
-  weekly_review_at: "08:50"
-  weekly_review_tz: Asia/Shanghai
-  factset_refresh_at: "08:10"
-  factset_refresh_tz: Asia/Shanghai
-  factset_month_end_at: "23:30"
-  factset_month_end_tz: America/New_York
-  # 例行作业可逐项暂停、验证输入/输出后再恢复。未列出的旧配置默认全部开启，
-  # 以保证升级兼容；此处是当前生产运行策略。
-  # 2026-10-19 (parent 8.9): the legacy scheduler (com.ats.schedule) is retired and not loaded. What it ran now has
-  # an owner elsewhere, so the switches below are off and nothing here can run a second copy by accident
-  # (pead_event_triggers is the one exception: it is the shared switch the new calendar-event path also reads):
-  #   pead_daily                       -> Information brief, Fundamental routine and event workflows (com.ats.phase-e)
-  #   pead_score_*                     -> Fundamental event workflow, woken by the calendar (data refresh controller)
-  #   factset_weekly_ingest            -> data refresh job factset_month_end_ingest
-  #   weekly_review                    -> Macro and Sector workflows (com.ats.phase-e)
-  # chief_daily / journal_reconcile stay off: the decision cycle and the Clerk schedule belong to the trade path and
-  # are scheduled when that path is switched (live remains locked).
-  daily_stages:
-    pead_event_triggers: true       # still LIVE: com.ats.phase-e's calendar-event path reads this switch (event_trigger_enabled)
-    macro_sector_event_triggers: false
-    news_backfill: false
-    pead_daily: false
-    technical_daily: false
-    intel_digest: false
-    performance_snapshot: false
-    perf_risk_digest: false
-    journal_marks: false
-    chief_daily: false
-  jobs:
-    factset_weekly_ingest: false
-    weekly_review: false
-    journal_reconcile: false
-    pead_score_bmo: false
-    pead_score_amc: false
-    # 仅影响排程内的自动抽取；手动 evidence observe 仍然可用。
-    pead_observe_window: false
-  # 这台机器会睡眠。触发时刻若在睡眠中，任务只有在唤醒后、且仍在本宽限窗口内才补跑。
-  # 实测 2026-07-27：旧值 1 小时导致 daemon 存活 2.5 天、CPU 仅 0.45 秒 —— 每一次触发
-  # 都被静默丢弃。最糟的是盘后 20:00 ET 窗口，它落在本地 09:00（清晨）。
-  # 6 小时的依据：20:00 ET + 6h = 02:00 ET，距次日开盘仍有约 7 小时，迟到的打分依然
-  # 有效；再晚就交给 _score_plan 的 T+1 补打路径。
-  misfire_grace_hours: 6
-
 # --- Trade journal -----------------------------------------------------------
 # 对账必须每个交易日跑：IBKR 的 reqExecutions 只返回**当日**执行，漏掉的那天成交
 # 无法事后补回（除非人工导 Flex Query）。所以它是独立 cron，不挂在日级联后面 ——

@@ -116,7 +116,7 @@ def evaluate_misfire(*, scheduled_for: str | datetime, now: datetime,
 
         market_day = planned.astimezone(ZoneInfo("America/New_York")).date()
         try:
-            from ..runtime.scheduler import is_trading_session
+            from ..runtime.dispatcher_daemon import is_trading_session
 
             is_session = is_trading_session(market_day)
         except Exception:  # missing/unavailable calendar must never bypass a required gate

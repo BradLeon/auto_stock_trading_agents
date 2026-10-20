@@ -96,26 +96,26 @@ def test_cli_shadow_entry_arms_before_any_work(monkeypatch, tmp_path):
                      "--order-db", str(tmp_path / "orders.sqlite")]) == 0
 
 
-def test_scheduler_environment_arms_before_daily_work(monkeypatch):
-    from ats.runtime import scheduler
+def test_dispatcher_daemon_environment_arms_before_work(monkeypatch):
+    from ats.runtime import dispatcher_daemon
     monkeypatch.setenv("ATS_RUN_MODE", "shadow")
-    monkeypatch.setattr(scheduler, "_daily", lambda **kwargs: attempt())
-    scheduler.start(run_once=True)
+    monkeypatch.setattr(dispatcher_daemon, "_run_dispatcher", lambda **kwargs: attempt())
+    dispatcher_daemon.start(run_once=True)
     assert guard.refusal_rows()
 
 
-@pytest.mark.parametrize("entry", ["cli", "scheduler", "owner", "dispatcher", "isolated"])
+@pytest.mark.parametrize("entry", ["cli", "daemon", "owner", "dispatcher", "isolated"])
 def test_missing_prohibition_refuses_each_actual_startup(tmp_path, monkeypatch, entry):
-    from ats.runtime import cli, scheduler
+    from ats.runtime import cli, dispatcher_daemon
     from ats.workflow.isolation import isolated_run
     # Simulate a deployment whose installation is ineffective; the real entry
     # must independently assert the capability and stop before task execution.
     monkeypatch.setattr(guard, "install_prohibition", lambda *args, **kwargs: None)
     if entry == "cli":
         call = lambda: cli.main(["shadow", "attest", "--run-id", "probe"])
-    elif entry == "scheduler":
+    elif entry == "daemon":
         monkeypatch.setenv("ATS_RUN_MODE", "shadow")
-        call = lambda: scheduler.start(run_once=True)
+        call = lambda: dispatcher_daemon.start(run_once=True)
     elif entry == "owner":
         call = owner_setup(monkeypatch, tmp_path)
     elif entry == "dispatcher":

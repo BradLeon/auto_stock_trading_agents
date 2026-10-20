@@ -843,8 +843,8 @@ qualification_policy:
     - src/ats/runtime/__init__.py
     - src/ats/runtime/cli.py
     - src/ats/runtime/digest.py
+    - src/ats/runtime/dispatcher_daemon.py
     - src/ats/runtime/optional_deps.py
-    - src/ats/runtime/scheduler.py
     - src/ats/runtime/server.py
     - src/ats/schemas/__init__.py
     - src/ats/schemas/chain.py
@@ -932,7 +932,7 @@ qualification_policy:
   consumer_fingerprint_paths:
     risk: [src/ats/trader/portfolio.py, src/ats/data/runtime/broker.py, src/ats/risk/assess.py, src/ats/agents/risk_officer/review.py, config/risk.yaml, src/ats/execution/state_api.py, src/ats/data/execution_prices.py, src/ats/data/runtime/execution_prices.py, src/ats/data/runtime/market_data.py, src/ats/broker/ibkr.py, src/ats/schemas/decision.py, src/ats/graph/chief.py, src/ats/trader/execute.py, src/ats/risk/checks.py, src/ats/graph/chief_state.py, src/ats/workflow/runtime_reads.py, src/ats/schemas/memory.py, src/ats/execution/simulation.py, uv.lock]
     sector: [src/ats/agents/sector/read_model.py, src/ats/agents/sector/review.py, src/ats/runtime/cli.py]
-    chief: [src/ats/runtime/cli.py, src/ats/runtime/scheduler.py, src/ats/execution/state_api.py, src/ats/agents/chief/assemble.py, src/ats/agents/chief/outputs.py, src/ats/agents/chief/decide.py, src/ats/graph/chief.py, src/ats/graph/chief_state.py]
+    chief: [src/ats/runtime/cli.py, src/ats/execution/state_api.py, src/ats/agents/chief/assemble.py, src/ats/agents/chief/outputs.py, src/ats/agents/chief/decide.py, src/ats/graph/chief.py, src/ats/graph/chief_state.py]
     fundamental: [src/ats/agents/fundamental/entry.py, src/ats/agents/fundamental/routine.py, src/ats/agents/fundamental/event.py, src/ats/agents/fundamental/inputs.py, src/ats/graph/pead.py, src/ats/graph/pead_state.py, src/ats/data/products/unstructured.py]
     trader: [src/ats/execution/authorization.py, src/ats/decision/repository.py, src/ats/data/execution_prices.py, src/ats/data/runtime/execution_prices.py, src/ats/data/runtime/market_data.py, src/ats/broker/ibkr.py, src/ats/schemas/decision.py, src/ats/graph/chief.py, src/ats/trader/execute.py, src/ats/risk/checks.py, src/ats/graph/chief_state.py, src/ats/workflow/runtime_reads.py, src/ats/schemas/memory.py, src/ats/execution/simulation.py, uv.lock]
     clerk: [src/ats/execution/clerk.py, src/ats/decision/repository.py, src/ats/data/runtime/clerk_reads.py, src/ats/data/runtime/broker.py, src/ats/trader/performance.py, src/ats/trader/reconcile.py]

@@ -10,7 +10,6 @@
 active:
   - task_projections
   - evidence_fact_projections.legacy_observation_id
-  - scheduler.hardcoded_serial_run
   - pead_dossier
   - sector_reviews
   - macro_reviews
@@ -115,17 +114,15 @@ retired:
     capability_domain: workflow/run-contracts
     replaced_by: workflow.run_contracts.TaskRegistry + Dispatcher
     target_phase: E
-    status: pending
+    status: retired
     exit_condition: 任务注册表与依赖解析上线并通过验收，Dispatcher 接管阶段编排。
     missing_condition: >-
-      2026-10-19 状态：旧调度器（com.ats.schedule）已下线（launchd 未加载，settings.yaml 的 daily_stages 与
-      jobs 开关除与新事件路径共用的 pead_event_triggers 外全部关闭），它承担的工作都有新的负责人：PEAD 监控/准备/评分、周报由 com.ats.phase-e 的
-      Dispatcher 工作流承担，财报日历与 FactSet 月末摄入由数据刷新控制器承担。仍未清零的只有 scheduler.py
-      代码本身及其测试，以及两项属于交易路径、待实盘切换时再排程的工作：主理人决策周期的定时触发
-      （chief_daily）与书记员对账（journal_reconcile）。
-    consumers:
-      - runtime.scheduler
-      - tests/test_scheduler_jobs
+      2026-10-20 退役（用户批准）：src/ats/runtime/scheduler.py 与 deploy/launchd/com.ats.schedule.plist 已删除，
+      `ats schedule` 只启动 Dispatcher 常驻进程（src/ats/runtime/dispatcher_daemon.py）；settings.yaml 的旧
+      daily_stages / jobs 开关与 ScheduleConfig 一并删除，事件唤醒开关移到研究时间表配置的 event_triggers。
+      旧流程里属于交易路径的两项（主理人每日决策 chief_daily、书记员对账 journal_reconcile）没有迁移，
+      待交易路径切换时在 Dispatcher 中重建。
+    consumers: []
     consumer_zero_criterion: 调度入口不再以硬编码顺序表达阶段依赖。
     location: src/ats/runtime/scheduler.py
 
@@ -233,13 +230,12 @@ retired:
     target_phase: B
     status: pending
     exit_condition: >-
-      唯一遗留调用点（runtime/scheduler.py、runtime/cli.py 的组合级巡检语义）确认迁移
+      唯一遗留调用点（runtime/cli.py 的组合级巡检语义；runtime/scheduler.py 已于 2026-10-20 删除）确认迁移
       或声明退役后，适配层删除；该开关仅用于风控回滚，不用于生产放行。
     missing_condition: >-
       pre_trade() 已退化为 deprecated 适配层（由新审查结果生成旧式输出），
       保留作为回滚通道。
     consumers:
-      - runtime.scheduler
       - runtime.cli
     consumer_zero_criterion: src 内 pre_trade 引用清零（调用方迁至 review_revision）。
     location: src/ats/risk/checks.py
@@ -290,12 +286,11 @@ retired:
     exit_condition: 「ats trader snapshot」与 scheduler 的直调
       record_snapshot 改经 clerk run 编排（编排内同一步骤幂等）。
     missing_condition: >-
-      trader/performance.record_snapshot 仍被 runtime/cli.py:435 与
-      runtime/scheduler.py:514 绕过 Clerk 直接调用；clerk_run 内部调用同一
+      trader/performance.record_snapshot 仍被 runtime/cli.py:435 绕过 Clerk 直接调用
+      （runtime/scheduler.py 的调用点已随旧调度器于 2026-10-20 删除）；clerk_run 内部调用同一
       确定性函数，无重复事实风险，但编排留痕缺失。
     consumers:
       - runtime.cli
-      - runtime.scheduler
     consumer_zero_criterion: record_snapshot 的调用方仅剩 execution.clerk。
     location: src/ats/trader/performance.py
 

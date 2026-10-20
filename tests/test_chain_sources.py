@@ -126,34 +126,3 @@ def test_a_series_does_not_inflate_the_cluster_count():
     clusters = build_clusters(claim, rows)
     assert len(clusters) == 1
     assert len(clusters[0].rows) == 6            # members kept, one voice
-
-
-def test_series_refresh_has_moved_to_the_structured_ingest_cli():
-    """`sources.collect()` used to have no production caller at all — the only
-    invocation in the repo was this test file, so the declared series only ever
-    refreshed from a REPL. Wiring it into the weekly job fixed that; the platform
-    cutover then moved it again: third-party structured sources are now scheduled by
-    `ats data ingest` and write directly to the platform repository, and Chain has no
-    parallel legacy ledger. The weekly job must NOT call the legacy collector — a
-    second write path behind the platform's back would resurrect exactly the
-    frozen-source failure this gate was built for."""
-    import inspect
-
-    from ats.runtime import scheduler
-
-    src = inspect.getsource(scheduler._cross_section_weekly)
-    assert "sources.collect" not in src and "chain_sources" not in src
-
-
-def test_an_ingest_or_report_failure_does_not_break_the_weekly_job():
-    """Every stage left in the weekly job is independently best-effort: the ingestion
-    stage and the report each carry their own except guard, so a publisher outage or a
-    rendering failure can never cost the job its later stages — the same rule the
-    adapters follow one level down."""
-    import inspect
-
-    from ats.runtime import scheduler
-
-    src = inspect.getsource(scheduler._cross_section_weekly)
-    body = src.split('"""')[-1]
-    assert body.count("except Exception") >= 2

@@ -96,11 +96,11 @@ def test_misfire_grace_lookback_and_budget_are_auditable(tmp_path):
 
 
 def test_trading_session_policy_skips_holiday_and_fails_closed_without_calendar(monkeypatch):
-    from ats.runtime import scheduler
+    from ats.runtime import dispatcher_daemon
 
     now = datetime(2026, 9, 24, 12, tzinfo=UTC)
     policy = TriggerPolicy(require_trading_session=True)
-    monkeypatch.setattr(scheduler, "is_trading_session", lambda _: False)
+    monkeypatch.setattr(dispatcher_daemon, "is_trading_session", lambda _: False)
     assert evaluate_misfire(
         scheduled_for="2026-09-24T08:00:00-04:00", now=now,
         policy=policy)[:2] == ("skip", "non_trading_session")
@@ -108,7 +108,7 @@ def test_trading_session_policy_skips_holiday_and_fails_closed_without_calendar(
     def unavailable(_):
         raise RuntimeError("calendar unavailable")
 
-    monkeypatch.setattr(scheduler, "is_trading_session", unavailable)
+    monkeypatch.setattr(dispatcher_daemon, "is_trading_session", unavailable)
     assert evaluate_misfire(
         scheduled_for="2026-09-24T08:00:00-04:00", now=now,
         policy=policy)[:2] == ("skip", "trading_calendar_unavailable")

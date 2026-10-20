@@ -1020,22 +1020,6 @@ def test_failed_refresh_with_no_release_is_typed_unavailable(tmp_path):
     assert snapshot.status.latest_refresh_failure == "not_pdf"
 
 
-def test_factset_schedule_requires_order_and_matching_timezone():
-    from types import SimpleNamespace
-    from ats.runtime.scheduler import _validate_factset_schedule
-
-    valid = SimpleNamespace(
-        factset_refresh_at="08:10", weekly_review_at="08:50",
-        factset_refresh_tz="Asia/Shanghai", weekly_review_tz="Asia/Shanghai")
-    _validate_factset_schedule(valid)
-    with pytest.raises(ValueError, match="precede"):
-        _validate_factset_schedule(SimpleNamespace(
-            **{**valid.__dict__, "factset_refresh_at": "09:00"}))
-    with pytest.raises(ValueError, match="must match"):
-        _validate_factset_schedule(SimpleNamespace(
-            **{**valid.__dict__, "factset_refresh_tz": "UTC"}))
-
-
 def _write_synthetic_factset_pdf(path):
     from pypdf import PdfWriter
     from pypdf.generic import (

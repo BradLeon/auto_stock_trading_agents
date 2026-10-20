@@ -1,16 +1,18 @@
-"""The Dispatcher's calendar path must honour the operator's paused event triggers (settings daily_stages)."""
+"""The Dispatcher's calendar path must honour the operator's paused event triggers
+(`event_triggers` in config/workflow/phase_e_schedules.yaml)."""
 from __future__ import annotations
 
 import pytest
 
-from ats.config import get_config
 from ats.workflow import ownership
+
+_NAMES = {"pead_event_triggers": "earnings", "macro_sector_event_triggers": "macro_sector"}
 
 
 def _stages(monkeypatch, **switches):
-    stages = get_config().app.schedule.daily_stages
-    for key, value in switches.items():
-        monkeypatch.setattr(stages, key, value)
+    current = ownership.event_trigger_switches()
+    current.update({_NAMES[key]: value for key, value in switches.items()})
+    monkeypatch.setattr(ownership, "event_trigger_switches", lambda **kwargs: dict(current))
 
 
 @pytest.mark.parametrize("workflow", ["macro-review", "sector-review", "layer-review"])
@@ -35,8 +37,7 @@ def test_technical_has_no_event_route_and_is_never_blocked(monkeypatch):
 
 
 def test_the_shipped_policy_keeps_macro_sector_events_paused_and_pead_events_on():
-    stages = get_config().app.schedule.daily_stages
-    assert stages.macro_sector_event_triggers is False and stages.pead_event_triggers is True
+    assert ownership.event_trigger_switches() == {"earnings": True, "macro_sector": False}
 
 
 def test_a_paused_trigger_family_never_reaches_run_owned_workflow(monkeypatch):

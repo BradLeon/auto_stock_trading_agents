@@ -52,8 +52,6 @@ CALL_POINTS = {
     plane.DISPATCHER_SCHEDULE: (
         CallPoint("ats.workflow.ownership.run_owned_workflow", "claim", "Workflow owner",
                   ("production", "shadow", "isolated"), "workflow/scope/planned instant or event/version", "4.2"),
-        CallPoint("ats.runtime.scheduler._daily", "claim", "Legacy scheduler",
-                  ("production",), "workflow/scope/planned instant", "4.2"),
     ),
     plane.APPROVAL_LIFECYCLE: tuple(
         CallPoint(f"ats.decision.repository.DecisionAuditRepository.{method}", "guard_approval_write",
@@ -90,11 +88,7 @@ CALL_POINTS[plane.ANALYST_OUTPUT] += (
     CallPoint("ats.memory.store.TradingMemory.save_task_projection", "guard_analyst_output",
               "Legacy analyst publisher", ("production", "isolated"),
               "legacy task projection + claim owner/generation", "5.3"),)
-CALL_POINTS[plane.DISPATCHER_SCHEDULE] += tuple(
-    CallPoint(f"ats.runtime.scheduler.{site}", "claim", "Legacy scheduler",
-              ("production", "isolated"), "workflow/scope/planned instant or event/version", "4.2")
-    for site in ("_technical_daily", "_macro_weekly", "_sector_weekly", "_weekly_review",
-                 "_chief_daily", "pead_daily", "pead_score_window", "_event_triggers"))
+# The legacy serial scheduler (`ats.runtime.scheduler`) and its claim sites were removed on 2026-10-20.
 
 CALL_POINTS[plane.PROJECTION_READ] += (
     CallPoint("ats.graph.chief.assemble_context", "scoped_read", "Chief graph",

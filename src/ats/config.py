@@ -201,69 +201,6 @@ class JournalConfig(BaseModel):
     horizons: list[int] = Field(default_factory=lambda: [1, 5, 20, 60])
 
 
-class DailyStageConfig(BaseModel):
-    """Independent switches for the stages inside the trading-day cascade.
-
-    Missing keys deliberately default to ``True`` so existing deployments keep their
-    historical all-on behaviour until they opt into a staged pause.
-    """
-
-    pead_event_triggers: bool = True
-    macro_sector_event_triggers: bool = True
-    news_backfill: bool = True
-    pead_daily: bool = True
-    technical_daily: bool = True
-    intel_digest: bool = True
-    performance_snapshot: bool = True
-    perf_risk_digest: bool = True
-    journal_marks: bool = True
-    chief_daily: bool = True
-
-
-class ScheduledJobConfig(BaseModel):
-    """Independent switches for jobs outside the daily cascade.
-
-    ``pead_observe_window`` controls only scheduler-triggered observation
-    extraction. Explicit ``ats evidence observe`` runs remain available.
-    """
-
-    factset_weekly_ingest: bool = True
-    weekly_review: bool = True
-    journal_reconcile: bool = True
-    pead_score_bmo: bool = True
-    pead_score_amc: bool = True
-    pead_observe_window: bool = True
-
-
-class ScheduleConfig(BaseModel):
-    # No `enabled` flag: it existed but was never read by start(), so settings.yaml
-    # advertised `enabled: false` while the launchd job scheduled normally. Whether
-    # the scheduler runs is decided by whether `ats schedule` is running.
-    run_at: str = "16:15"          # daily cycle; PEAD score windows: config/pead.yaml
-    timezone: str = "America/New_York"
-    # Macro/sector weekly review: its OWN time/timezone, deliberately decoupled from
-    # run_at/timezone above. It never touches the broker or NYSE sessions, so there is
-    # no reason to tie it to ET — and doing so is actively wrong once the trigger's
-    # local day and the ET calendar day disagree (e.g. Beijing Saturday 08:40 is still
-    # Friday evening in New York). See scheduler._today_weekly().
-    weekly_review_at: str = "10:30"
-    weekly_review_tz: str = "America/New_York"
-    # FactSet 的独立数据准备任务；必须早于同一时区的周度评审。
-    factset_refresh_at: str = "08:10"
-    factset_refresh_tz: str = "America/New_York"
-    # Semantic release uses the final report dated within each calendar month.
-    # Run after US close on month-end; the weekly legacy schedule remains a
-    # rollback path while ATS_FACTSET_SCHEDULE_SEMANTIC is off.
-    factset_month_end_at: str = "23:30"
-    factset_month_end_tz: str = "America/New_York"
-    # This host sleeps. A job whose trigger fires while the Mac is asleep only runs on
-    # wake, and only if it is still inside this window — with the old 1 hour, every
-    # overnight trigger was silently dropped. See scheduler.start().
-    misfire_grace_hours: float = 6.0
-    daily_stages: DailyStageConfig = Field(default_factory=DailyStageConfig)
-    jobs: ScheduledJobConfig = Field(default_factory=ScheduledJobConfig)
-
-
 class SectorBrief(BaseModel):
     label: str = ""
     supply_chain: str = ""
@@ -276,7 +213,6 @@ class AppConfig(BaseModel):
     account: AccountConfig = Field(default_factory=AccountConfig)
     broker: BrokerConfig = Field(default_factory=BrokerConfig)
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
-    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)
     tickers: list[Ticker] = Field(default_factory=list)
     sectors: dict[str, SectorBrief] = Field(default_factory=dict)

@@ -264,9 +264,6 @@ worktree 开发新功能），但这个模式在实践中造成了麻烦：workt
 | `com.ats.data-refresh` | 数据刷新控制器，每小时 tick 一次 | `ats.data.refresh tick` |
 | `com.ats.serve` | 飞书 approval webhook | `ats.runtime.cli serve --host 127.0.0.1 --port 8000` |
 
-> ⚠️ **`com.ats.schedule`（`schedule --live`，旧调度器）已退役，永远不要加载。**
-> `deploy/launchd/com.ats.schedule.plist` 只为历史保留；它负责过的事已由上表的服务接手，
-> 加载它会让新旧两套流程同时跑，并打开实盘开关。
 
 ```bash
 launchctl list | grep com.ats                               # 查状态

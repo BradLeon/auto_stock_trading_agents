@@ -12,8 +12,6 @@
 | `com.ats.phase-e` | 研究调度（Dispatcher）：按时间表与日历事件运行 7 个研究工作流；**不进 Chief、不下单** | `ats schedule --phase-e` | 常驻 |
 | `com.ats.serve` | 飞书审批回调（签名链接） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
 
-> ⚠️ **永远不要加载 `com.ats.schedule`**（`schedule --live`）。它是已退役的旧调度器，
-> 会让旧级联与 Dispatcher 同时跑，并打开实盘开关。`deploy/launchd/com.ats.schedule.plist` 只为历史保留。
 
 plist 在 `~/Library/LaunchAgents/`；`data-refresh`、`phase-e` 的模板在 `deploy/launchd/`。
 
@@ -33,7 +31,7 @@ launchctl bootout gui/$(id -u)/com.ats.phase-e                    # 停掉全部
 ## 2. 每天看什么
 
 ```bash
-ats consumer-cutover status          # 6 个分析师的读路由：target（新）/ legacy（旧）及代次
+ats consumer-cutover status          # 6 个分析师的读路由（固定为 target）
 ats consumer-cutover log             # 数据产品健康状态的变化记录（只在由好转坏、由坏转好时记一行）
 ats dispatch owner-log               # 7 个研究工作流的调度负责人及切换历史
 ats workflow runs --limit 20         # 最近的研究运行：complete / incomplete / failed
@@ -62,9 +60,10 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 - 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（例行模式在财报前 `prep_days_before`＝3 天内建立基线）。
 - 财报**已发布**且已准入公告或申报材料 → 信息简报 + 基本面事件评审（冻结基线、打分）。
-- FOMC、CPI、PCE、NFP、GDP 发布 → 宏观评审。是否唤醒受 `config/settings.yaml` 的
-  `schedule.daily_stages.macro_sector_event_triggers` 控制（现为 `false`）；财报事件受
-  `pead_event_triggers` 控制（必须保持 `true`，它与新事件路径共用）。
+- FOMC、CPI、PCE、NFP、GDP 发布 → 宏观评审。
+
+两类事件唤醒的开关在研究时间表配置的 `event_triggers`：`earnings`（财报事件，现为 `true`）、
+`macro_sector`（宏观数据发布，现为 `false`，宏观只按周跑）。
 
 错过触发时刻（机器睡眠）在 `misfire_grace_hours`（6 小时）内补跑，超出则记为 `misfire_grace_exceeded` 跳过。
 
@@ -85,14 +84,17 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 - 某只票要手动刷新财报前基线：`ats analyst fundamental --mode routine --symbol <SYM> --refresh-baseline`
   只在负责人为 legacy 时可用；dispatcher 下用 `workflow run` 并带 `force_recompute`。
 
-### 3.3 切换负责人与回退
+### 3.3 停用与恢复一个工作流
 
 ```bash
-# 切回旧路径（不需要批准，随时可做）
+# 停用：负责人改为 legacy，定时与日历事件不再唤醒它（不需要批准，随时可做）
 ats dispatch owner-rollback --workflow <workflow_id> --actor <谁> --reason "<为什么>"
-# 切到 Dispatcher（需要批准原文；检查读路由为 target、健康检查 ok；有未完成认领须说明作废理由）
+# 恢复：负责人改回 dispatcher（需要批准原文；检查读路由与数据产品健康；有未完成认领须说明作废理由）
 ats dispatch owner-switch --workflow <workflow_id> --actor <谁> --approval "<批准原文>" --reason "<为什么>"
 ```
+
+旧的串行调度器已删除，负责人为 legacy 的工作流不会被任何定时任务运行，只能用它原来的手动命令
+（例如 `ats macro review`）跑。
 
 - 一次事务同时改该工作流的模板行与所有标的行，不会出现一半新一半旧。
 - 有 `running` 认领时拒绝切换；`failed/pending` 认领须带理由作废；`owner-log` 只增不改。
@@ -180,7 +182,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 3. IBKR TWS 或 Gateway：开启 Socket API，Trusted IPs 加 `127.0.0.1`。TWS 每 24 小时登出一次。自检：`ats ibkr`。
 4. 公网入口：`cloudflared tunnel --protocol http2 --url http://localhost:8000`，把得到的地址写进
    `FEISHU_APPROVE_BASE` 后重启 `com.ats.serve`。冒烟：`curl -m10 <BASE>/health` 应回 `{"ok":true}`。
-5. 加载第 1 节的四个服务（不包括 `com.ats.schedule`），按第 2 节检查。
+5. 加载第 1 节的三个服务，按第 2 节检查。
 
 ## 9. 已知问题与排障
 
@@ -192,7 +194,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | 审批链接突然 404 / 不可达 | Clash TUN 用 GVisor 栈时会重置 cloudflared 到边缘 7844 端口的长连接；把 TUN 堆栈改为 System，`pkill cloudflared` 重起，更新 `FEISHU_APPROVE_BASE` 并重启 serve。人在 Mac 前也可以直接在本机打开 `http://127.0.0.1:8000/feishu/approve?...` |
 | 抽取角色偶发「空工具调用」 | 隐藏推理吞掉了工具调用；`run_structured` 第一次空返回后会关闭推理重试 |
 | 某只票的信息简报 `incomplete` | 多半是该标的 7 天内没有已准入资讯（数据缺口），看数据刷新与资讯覆盖，不是新逻辑缺陷 |
-| 定时任务没跑 | 看 `phase-e.err.log` 是否有 `misfire_grace_exceeded`；或负责人被切回 legacy（`ats dispatch owner-log`） |
+| 定时任务没跑 | 看 `phase-e.err.log` 是否有 `misfire_grace_exceeded`；或该工作流被停用（`ats dispatch owner-log`） |
 
 ## 10. 数据与备份
 

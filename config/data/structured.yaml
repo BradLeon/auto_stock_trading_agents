@@ -238,9 +238,6 @@ feature_flags:
     # Each cited evidence item has either immutable document/version lineage or a
     # labelled historical evidence snapshot; structured observations are excluded.
     evidence_chain: platform
-    # Scheduler has migrated to unified runtime/products/pipeline entrypoints.
-    # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
-    runtime_scheduler: shadow
     chief_graph: shadow
     # Macro reads the released index partition.
     macro_factset: platform

@@ -79,7 +79,8 @@ def test_old_wired_boolean_is_not_enforcement(authority):
 def test_all_real_callpoints_exist_and_missing_guards_remain_visible():
     report = be.declaration_report()
     assert set(report) == set(co.SIX_BOUNDARIES)
-    assert sum(len(points) for points in report.values()) == 31
+    # 31 until 2026-10-20; the nine legacy-scheduler claim sites went with the scheduler.
+    assert sum(len(points) for points in report.values()) == 22
     assert all(not p["enforced"] for points in report.values() for p in points)
     assert all(p["guard_present"] for p in report[co.LIVE_TRADER])
     assert all(p["guard_present"] for p in report[co.APPROVAL_LIFECYCLE])

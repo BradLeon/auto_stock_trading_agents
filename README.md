@@ -156,8 +156,6 @@ flowchart LR
 | `com.ats.phase-e` | **研究调度（Dispatcher）**：按时间表和日历事件运行 7 个研究工作流，产出各分析师的投影；**不进 Chief、不下单** | 常驻 |
 | `com.ats.serve` | 处理飞书审批回调 | 常驻 |
 
-> ⚠️ **不要加载 `com.ats.schedule`。** 它是旧调度器（带 `--live`），已经退役，
-> 它做的事都已由上面的服务接手。加载它会让旧流程与新流程同时跑，并打开实盘开关。
 
 研究工作流的节奏（`config/workflow/phase_e_schedules.yaml`）：
 
@@ -244,8 +242,8 @@ source /Users/liuchao/Code/trading/auto_stock_trading_agents/.venv/bin/activate
 
 ```bash
 # 看系统现在的状态
-ats consumer-cutover status          # 每个分析师读的是新路径（target）还是旧路径（legacy）
-ats dispatch owner-log               # 研究工作流由谁负责（dispatcher / legacy）及切换历史
+ats consumer-cutover log             # 数据产品健康状态的变化记录
+ats dispatch owner-log               # 研究工作流的负责人与停用/恢复历史
 ats workflow runs --limit 20         # 最近的研究运行及结果（complete / incomplete）
 python -m ats.data.refresh status    # 数据采集任务的最近状态
 ats events upcoming                  # 未来的财报 / 宏观事件
@@ -270,9 +268,8 @@ ats trader portfolio                 # 实时持仓
 ats trader perf                      # 历史绩效
 ```
 
-研究工作流的负责人是 dispatcher 时，`ats macro review`、`ats pead prep` 这类旧入口
-会报 `caller is not current owner` 并拒绝运行——这是故意的，防止新旧两条路径重复跑。
-要回到旧路径，用 `ats dispatch owner-rollback`（见运维手册）。
+研究工作流的负责人是 dispatcher 时，`ats macro review`、`ats pead prep` 这类旧的手动入口
+会报 `caller is not current owner` 并拒绝运行——这是故意的，防止同一份分析被两条路径重复跑。
 
 ---
 
@@ -294,7 +291,6 @@ ats trader perf                      # 历史绩效
 - **改了代码要重启常驻进程才会生效。** `com.ats.phase-e`（`ats schedule --phase-e`）
   和 `com.ats.serve` 是长驻 Python 进程，启动时把代码加载进了内存，不重启（比如
   `launchctl kickstart -k gui/$(id -u)/com.ats.phase-e`）它们看不到磁盘上的改动。
-- **永远不要加载 `com.ats.schedule`。** 那是已退役的旧调度器，带 `--live`。
 - **数据源会降级，但不会让流程崩溃。** 某个行情/基本面/期权数据源连不上时，
   系统会自动跳过或换一个源，但打分质量可能因此打折——如果某只票长期只能拿到
   "降级版"数据（比如新上市不久、覆盖不全的标的），这类分析的可信度要打个
@@ -318,5 +314,5 @@ ats trader perf                      # 历史绩效
 | [`docs/agents/`](docs/agents/) | 每个角色一份：[信息](docs/agents/INFORMATION_ANALYST.md)、[基本面/PEAD](docs/agents/FUNDAMENTAL_ANALYST.md)、[层次](docs/agents/LAYER_ANALYST.md)、[行业](docs/agents/SECTOR_ANALYST.md)、[宏观](docs/agents/MACRO_ANALYST.md)、[技术面](docs/agents/TECHNICAL_ANALYST.md)、[风控](docs/agents/RISK_SYSTEM.md) |
 | [`docs/data/`](docs/data/) | 数据平台：[使用手册](docs/data/STRUCTURED_DATA_USER_GUIDE.md)、[运维](docs/data/STRUCTURED_DATA_OPERATIONS.md)、[开发](docs/data/STRUCTURED_DATA_DEVELOPER.md)、[架构](docs/data/DATA_ARCHITECTURE.md)、[数据源状态](docs/data/DATA_SOURCES.md) 与各来源手册 |
 | [`docs/research/`](docs/research/) | 信源调研结论 |
-| [`docs/PHASE_F_RETIREMENT_RUNBOOK.md`](docs/PHASE_F_RETIREMENT_RUNBOOK.md) | 旧实现的退役判据（24 条未退役） |
+| [`docs/PHASE_F_RETIREMENT_RUNBOOK.md`](docs/PHASE_F_RETIREMENT_RUNBOOK.md) | 旧实现的退役判据（23 条未退役） |
 | [`docs/archive/`](docs/archive/) | 历史：各阶段验收与复盘、迁移史、旧设计文档与旧手册。只读，不代表现状 |

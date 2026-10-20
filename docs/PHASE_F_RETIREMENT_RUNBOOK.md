@@ -1,6 +1,6 @@
 # 旧实现退役 Runbook（Phase F，2026-10-17）
 
-> 写给要决定「什么时候可以删旧代码」的人。先说结论：**27 个登记条目里，3 个已验证可退出，24 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+> 写给要决定「什么时候可以删旧代码」的人。先说结论：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
 
 ## 一、当前退出结果（与判据工具是否完成无关）
 
@@ -91,7 +91,7 @@
 | 登记里只有模块路径、无法静态判定的消费方（45 行） | `runtime.cli`、`graph.pead`、`memory.store.*` | 退役登记的维护者 | 补角色映射（`MODULE_TO_ROLE`）或把消费方改为角色/入口点；之后复跑 `zero`，不需要改业务代码 |
 | Chief、Risk Officer、Clerk 仍绕过受治理读取面 | `chief.legacy_table_direct_reads`、`decision_roles.unwired_to_governed_read_api`、`store.direct_trade_reads` | 决策与执行域（Phase F 之后） | 先接入受治理读取面并拿到 zero；**实盘保持锁定**，不在本 change 范围 |
 | PEAD 图里路由门控的旧供应商回退 | `graph.pead.internal_risk_and_sizing`（4 处回退在 `graph/pead.py`） | 基本面域 | 观察窗口结束且不再需要「退回旧路径」之后，由你批准删除；删除前它们是回滚目标 |
-| 旧调度器的硬编码串行运行与临时日记作业 | `scheduler.hardcoded_serial_run`、`scheduler.adhoc_journal_jobs` | 调度域 | 窗口结束、`com.ats.schedule` 确认不再需要后，由你批准删除；**在此之前不要加载它（它带 --live）** |
+| 旧调度器的临时日记作业 | `scheduler.adhoc_journal_jobs` | 调度域 | 随 Clerk 排程（交易路径切换）收口。`scheduler.hardcoded_serial_run` 已于 2026-10-20 退役：旧调度器代码与 `com.ats.schedule` 一并删除 |
 | 旧决策写路径、`client_order_id` 旧派生 | `memory.store.legacy_decision_write_path`、`trades.client_order_id.legacy_derivation` | 原 owner（决策/记账域） | 随 Chief/Clerk 迁移，历史清理由原 owner 负责 |
 | 旧读模型与旧表 | `legacy_read_models`、`task_projections.legacy_columns`、`pead_dossier`、`sector_reviews` | 各读取方 | 对应消费方切到投影后复核 `zero` |
 

@@ -50,7 +50,6 @@ ROUTE_AUTHORITY_MODULES: frozenset[str] = frozenset({
     "ats.execution.authorization",
     "ats.broker.ibkr",
     "ats.runtime.cli",           # the operator-facing entry point
-    "ats.runtime.scheduler",     # dispatches, and is the thing being migrated
 })
 
 # Calling a mode accessor is NOT a violation. Twenty-three modules legitimately

@@ -1,4 +1,4 @@
-"""1.6/5.9/5.10 real CLI and scheduler admission, no production writes."""
+"""1.6/5.9/5.10 real CLI and dispatcher daemon admission, no production writes."""
 import json
 import os
 import sqlite3
@@ -9,14 +9,14 @@ from types import SimpleNamespace
 import pytest
 from test_phase_f_business_wiring import synthetic_target as _synthetic_target
 
-from ats.runtime import cli, scheduler
+from ats.runtime import cli, dispatcher_daemon
 from ats.workflow import cutover as plane
 from ats.workflow import runtime_reads as reads
 from ats.workflow.cutover_routing import RouteUnavailable
 
 synthetic_target = _synthetic_target
 
-@pytest.mark.parametrize('entry',['cli','scheduler','webhook'])
+@pytest.mark.parametrize('entry',['cli','daemon','webhook'])
 @pytest.mark.parametrize('fault',['missing','corrupt','missing_boundary','dual_active','incompatible'])
 def test_actual_service_refuses_bad_authority_before_business(entry,fault,tmp_path,monkeypatch):
     original=Path(os.environ['ATS_CUTOVER_DB'])
@@ -31,10 +31,10 @@ def test_actual_service_refuses_bad_authority_before_business(entry,fault,tmp_pa
                     ('legacy,target' if fault=='dual_active' else 'target',plane.PROJECTION_READ))
     monkeypatch.setenv('ATS_CUTOVER_DB',str(target))
     monkeypatch.setattr(cli,'technical_show',lambda *a:pytest.fail('business entered'))
-    monkeypatch.setattr(scheduler,'_daily',lambda **k:pytest.fail('scheduler entered'))
+    monkeypatch.setattr(dispatcher_daemon,'_run_dispatcher',lambda **k:pytest.fail('dispatcher entered'))
     with pytest.raises(plane.CutoverError):
         if entry=='cli':cli.main(['technical','show'])
-        elif entry=='scheduler':scheduler.start(run_once=True)
+        elif entry=='daemon':dispatcher_daemon.start(run_once=True)
         else:
             from fastapi.testclient import TestClient
 

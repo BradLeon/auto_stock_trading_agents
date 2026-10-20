@@ -2,6 +2,13 @@ version: "1"
 
 # Opt-in schedule definitions consumed only when the corresponding owner is
 # shadow/dispatcher. Data ingestion and Clerk jobs stay with their existing owners.
+# Calendar-event waking (read by the dispatcher's calendar path and the expected-trigger oracle):
+#   earnings      Information + Fundamental on earnings plan/release events. Keep on.
+#   macro_sector  Macro on FOMC/CPI/PCE/NFP/GDP releases. Off: the macro review runs weekly.
+event_triggers:
+  earnings: true
+  macro_sector: false
+
 workflows:
   information-brief:
     enabled: true   # 2026-10-16: first batch; only consumed while the SQL owner is shadow/dispatcher

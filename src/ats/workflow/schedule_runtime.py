@@ -610,17 +610,16 @@ def expected_triggers(start, end, *, config_dir=None):
     from apscheduler.triggers.cron import CronTrigger
 
     from ..agent.task_projection import ProjectionScope
-    from ..config import AppConfig
+    from .ownership import event_trigger_switches
     from .phase_e import _scopes
     from .run_contracts import TriggerContext
 
     if start.tzinfo is None or end.tzinfo is None or start > end:
         raise ScheduleAuthorityError("valid timezone-aware comparison window required")
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
-    raw = yaml.safe_load((root / "settings.yaml").read_text())
-    settings = AppConfig.model_validate(raw.get("app", raw)).schedule
+    switches = event_trigger_switches(config_dir=root)
+    market_tz = "America/New_York"
     schedules = yaml.safe_load((root / "workflow/phase_e_schedules.yaml").read_text())["workflows"]
-    pead = yaml.safe_load((root / "pead.yaml").read_text())
     output = {}
     wake_expected = []
 
@@ -643,62 +642,16 @@ def expected_triggers(start, end, *, config_dir=None):
             for point in ticks(entry["cron"]):
                 wake_expected.append({"job_id": "phase_e:" + workflow, "planned": point.astimezone(UTC).isoformat(), "owner": "dispatcher"})
                 add(workflow, entry["scope"], TriggerContext(kind="schedule", schedule_id=workflow, scheduled_for=point.isoformat()), "dispatcher")
-    h, m = map(int, settings.run_at.split(":"))
-    stages = settings.daily_stages
-    legacy_daily = []
-    if stages.pead_daily:
-        legacy_daily += ["information-brief", "fundamental-routine"]
-    if stages.technical_daily:
-        legacy_daily.append("technical-review")
-    daily_cron = {"day_of_week": "mon-fri", "hour": h, "minute": m, "timezone": settings.timezone}
-    for point in ticks(daily_cron):
-        if any(stages.model_dump().values()):
-            wake_expected.append({"job_id": "daily_cycle", "planned": point.astimezone(UTC).isoformat(), "owner": "legacy"})
-        for workflow in legacy_daily:
-            trigger = adapt_wake(workflow, TriggerContext(kind="schedule", schedule_id="daily_cycle", scheduled_for=point.isoformat()), config_dir=root)
-            add(workflow, schedules[workflow]["scope"], trigger, "legacy")
-    if settings.jobs.weekly_review:
-        h, m = map(int, settings.weekly_review_at.split(":"))
-        for point in ticks({"day_of_week": "sat", "hour": h, "minute": m, "timezone": settings.weekly_review_tz}):
-            wake_expected.append({"job_id": "weekly_review", "planned": point.astimezone(UTC).isoformat(), "owner": "legacy"})
-            for workflow, enabled in [("macro-review", pead.get("macro_review", {}).get("enabled", False)),
-                                      ("sector-review", pead.get("sector_review", {}).get("enabled", False))]:
-                if enabled:
-                    trigger = adapt_wake(workflow, TriggerContext(kind="schedule", schedule_id="weekly_review", scheduled_for=point.isoformat()), config_dir=root)
-                    if workflow == "sector-review":
-                        for name in pead.get("sector_review", {}).get("sectors", []):
-                            add(workflow, {"kind": "sector", "id": name}, trigger, "legacy")
-                            add("layer-review", {"kind": "sector", "id": name}, trigger, "legacy")
-                    else:
-                        add(workflow, schedules[workflow]["scope"], trigger, "legacy")
-    jobs = []
-    for name, hhmm in (pead.get("schedule", {}).get("score_windows", {}) or {}).items():
-        if getattr(settings.jobs, "pead_score_" + name, True):
-            h, m = map(int, str(hhmm).split(":"))
-            jobs.append(("pead_score_" + name, {"day_of_week": "mon-fri", "hour": h, "minute": m, "timezone": settings.timezone}))
-    if settings.jobs.factset_weekly_ingest:
-        semantic = os.environ.get("ATS_FACTSET_SCHEDULE_SEMANTIC") == "1"
-        h, m = map(int, (settings.factset_month_end_at if semantic else settings.factset_refresh_at).split(":"))
-        jobs.append(("factset_monthly_ingest" if semantic else "factset_weekly_ingest", {
-            **({"day": "last"} if semantic else {"day_of_week": "sat"}), "hour": h, "minute": m,
-            "timezone": settings.factset_month_end_tz if semantic else settings.factset_refresh_tz}))
-    app = AppConfig.model_validate(raw.get("app", raw))
-    if app.journal.enabled and settings.jobs.journal_reconcile:
-        h, m = map(int, app.journal.reconcile_at.split(":"))
-        jobs.append(("journal_reconcile", {"day_of_week": "mon-fri", "hour": h, "minute": m, "timezone": settings.timezone}))
-    for job_id, cron in jobs:
-        for point in ticks(cron):
-            wake_expected.append({"job_id": job_id, "planned": point.astimezone(UTC).isoformat(), "owner": "legacy"})
     events = yaml.safe_load((root / "events.yaml").read_text()).get("events", [])
     for event in events:
         day = str(event["date"])
-        if not (start.astimezone(ZoneInfo(settings.timezone)).date().isoformat() <= day <= end.astimezone(ZoneInfo(settings.timezone)).date().isoformat()):
+        if not (start.astimezone(ZoneInfo(market_tz)).date().isoformat() <= day <= end.astimezone(ZoneInfo(market_tz)).date().isoformat()):
             continue
         for route in event.get("triggers", []):
             workflow = "macro-review" if route == "macro" else "sector-review" if route.startswith("sector") else "information-brief" if route.startswith("pead:") else None
             if workflow is None:
                 raise ScheduleAuthorityError("unknown configured event route")
-            enabled = stages.pead_event_triggers if route.startswith("pead:") else stages.macro_sector_event_triggers
+            enabled = switches["earnings"] if route.startswith("pead:") else switches["macro_sector"]
             if not enabled:
                 continue
             trigger = config_event_context(event, config_dir=root)
@@ -723,8 +676,8 @@ def expected_triggers(start, end, *, config_dir=None):
                         if record["event_type"] not in types or record["status"] != route.get("required_event_state"):
                             continue
                         day = datetime.fromisoformat(record["event_date"]).date()
-                        local_start = start.astimezone(ZoneInfo(route.get("window_timezone", settings.timezone))).date()
-                        local_end = end.astimezone(ZoneInfo(route.get("window_timezone", settings.timezone))).date()
+                        local_start = start.astimezone(ZoneInfo(route.get("window_timezone", market_tz))).date()
+                        local_end = end.astimezone(ZoneInfo(route.get("window_timezone", market_tz))).date()
                         lead = int(route.get("lead_days_before", 0))
                         if not (local_start <= day <= local_end or (lead and 0 <= (day-local_start).days <= lead)):
                             continue

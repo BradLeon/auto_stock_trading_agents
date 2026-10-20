@@ -320,28 +320,6 @@ def test_sector_assemble_does_not_ingest_macro(monkeypatch):
     assert "MACRO REGIME MARKER" not in sc.as_context()            # 也不出现在上下文里
 
 
-def test_scheduler_macro_before_sector(monkeypatch):
-    from datetime import date
-
-    from ats.runtime import scheduler
-
-    order = []
-    monkeypatch.setattr("ats.runtime.cli.run_macro_review", lambda name, **k: order.append("macro"))
-    monkeypatch.setattr("ats.runtime.cli.run_sector_review", lambda name, **k: order.append("sector"))
-    # weekday gate now tracks weekly_review_tz, not ET — see _today_weekly().
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))   # Saturday
-    # The weekly job now also ranks the cross-section (network) and writes a report.
-    monkeypatch.setattr(scheduler, "_cross_section_weekly", lambda name: None)
-    scheduler._macro_weekly()
-    scheduler._sector_weekly()
-    assert order == ["macro", "sector"]
-
-    order.clear()
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 6))   # Monday — no longer fires
-    scheduler._macro_weekly()
-    assert order == []
-
-
 def test_new_version_report_never_overwrites_an_existing_file(tmp_path):
     cfg = CFG.model_copy(update={"output_dir": str(tmp_path)})
     r = MacroReview(name="macro", as_of=NOW, regime="risk-off｜x", summary="s")

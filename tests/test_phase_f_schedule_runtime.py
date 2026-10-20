@@ -11,11 +11,10 @@ import pytest
 import yaml
 from test_phase_f_research_gate import business_inputs as _business_inputs
 from test_phase_f_research_gate import research_isolation as _research_isolation
-from test_scheduler_jobs import FakeScheduler
 
 from ats.agent.task_projection import ProjectionScope, build_envelope
 from ats.memory import task_store_scope
-from ats.runtime import cli, scheduler
+from ats.runtime import cli, dispatcher_daemon
 from ats.workflow import schedule_runtime as rt
 from ats.workflow.dispatcher import Dispatcher
 from ats.workflow.phase_e import build_plan
@@ -23,6 +22,30 @@ from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
 
 SCOPE = {"kind": "entity", "id": "COHR"}
+
+
+class FakeScheduler:
+    """Records add_job calls instead of running them."""
+
+    def __init__(self, *a, **kw):
+        self.init_kwargs = kw
+        self.jobs: list[dict] = []
+        self.listeners: list = []
+        self.started = False
+
+    def add_job(self, fn, trigger, *, id, misfire_grace_time=None, **kw):
+        self.jobs.append({"fn": fn, "trigger": trigger, "id": id,
+                          "misfire_grace_time": misfire_grace_time})
+
+    def add_listener(self, fn, mask):
+        self.listeners.append((fn, mask))
+
+    def get_jobs(self):
+        return [SimpleNamespace(id=job["id"]) for job in self.jobs]
+
+    def start(self):
+        self.started = True
+        raise SystemExit          # don't block the test
 
 
 @pytest.fixture
@@ -177,50 +200,6 @@ def test_owner_reload_restart_and_missing_authority_fail_closed(isolated, tmp_pa
     assert not missing.exists()
 
 
-def test_real_startup_planned_tick_manual_duplicate_and_collector_unchanged(business_inputs, isolated, monkeypatch, record_property):
-    from apscheduler.schedulers import blocking
-
-    from ats.agents.technical import review
-    from ats.config import reset_config_cache
-    settings_path=business_inputs.root/"settings.yaml"
-    config=yaml.safe_load(settings_path.read_text())
-    config["schedule"]["daily_stages"]={key: key=="technical_daily" for key in scheduler.get_config().app.schedule.daily_stages.model_dump()}
-    config["schedule"]["jobs"]={key: key=="factset_weekly_ingest" for key in scheduler.get_config().app.schedule.jobs.model_dump()}
-    settings_path.write_text(yaml.safe_dump(config)); reset_config_cache()
-    monkeypatch.setattr(review, "resolve_universe", lambda *a, **kw: (["COHR"], []))
-    monkeypatch.setattr(scheduler,"is_trading_session",lambda *a:True)
-    holder={}
-    monkeypatch.setattr(blocking,"BlockingScheduler",lambda *a,**kw:holder.setdefault("scheduler",FakeScheduler(*a,**kw)))
-    scheduler.start(dry_run=True)
-    resident=holder["scheduler"]
-    collectors=[job for job in resident.jobs if job["id"].startswith("factset")]
-    assert len(collectors)==1 and collectors[0]["fn"] is scheduler._factset_weekly_ingest
-    collector_before=[(job["id"],id(job["fn"]),str(job["trigger"])) for job in collectors]
-    planned=datetime(2026,10,9,10,30,tzinfo=scheduler.ET)
-    fire(resident,"daily_cycle",planned)
-    rows=isolated.task_projection_envelopes(agent_role="technical_review",scope_id="COHR")
-    assert rows
-    transfer("technical-review",SCOPE,"dispatcher")
-    # Same resident keeps its old cached callback and unchanged collector.
-    fire(resident,"daily_cycle",planned+timedelta(days=3))
-    assert len(isolated.task_projection_envelopes(agent_role="technical_review",scope_id="COHR"))==len(rows)
-    fire(resident,"daily_cycle",planned+timedelta(days=4),missed=True)
-    rt.reload_authority()
-    assert [(job["id"],id(job["fn"]),str(job["trigger"])) for job in collectors]==collector_before
-    expected=rt.expected_triggers(planned-timedelta(minutes=1),planned+timedelta(minutes=1),config_dir=business_inputs.root)
-    comparison=rt.compare_triggers(expected)
-    assert len(expected["expected"])==1 and not comparison["rows"][0]["both_missing"]
-    replay=rt.adapt_wake("technical-review",TriggerContext(kind="schedule",schedule_id="daily_cycle",scheduled_for=planned.isoformat()))
-    with rt.wake(replay.model_copy(update={"kind":"manual","trigger_id":"manual-same-tick"})):
-        cli.run_technical_review(write_report=False)
-    assert rt.compare_triggers(expected)["duplicates"]
-    omitted=rt.expected_triggers(planned+timedelta(days=5)-timedelta(minutes=1),planned+timedelta(days=5,minutes=1),config_dir=business_inputs.root)
-    assert rt.compare_triggers(omitted)["rows"][0]["both_missing"]
-    assert comparison["misfires"]
-    record_property("expected_and_actual",json.dumps(rt.compare_triggers(expected)))
-    record_property("collector_lifecycle",json.dumps({"before":collector_before,"after":collector_before}))
-
-
 def test_actual_runtime_cli_queries_existing_isolated_ledger(isolated, capsys):
     assert cli.main(["dispatch","runtime-state"]) == 0
     state=json.loads(capsys.readouterr().out)
@@ -251,13 +230,6 @@ def test_actual_config_event_identity_uses_published_calendar_version(business_i
     published=calendar.publish_candidate(saved["candidate_id"])
     context=rt.config_event_context(event)
     assert context.event_id==published["event_id"] and context.event_version==str(published["event_version"])
-    monkeypatch.setattr(scheduler,"_today",lambda:datetime(2026,10,9,tzinfo=UTC).date())
-    assert scheduler._event_triggers(pead=False,macro_sector=True)==["9月 CPI->macro"]
-    claims=[row for row in rt.snapshot()["claims"] if row["workflow"]=="macro-review"]
-    assert len(claims)==1 and claims[0]["status"]=="complete" and json.loads(claims[0]["result_refs"])
-    scheduler._event_triggers(pead=False,macro_sector=True)
-    assert len([row for row in rt.snapshot()["claims"] if row["workflow"]=="macro-review"])==1
-    assert any(row["action"]=="skip" for row in rt.snapshot()["history"])
     record_property("event_identity_and_publication",json.dumps(rt.snapshot()))
 
 
@@ -277,7 +249,7 @@ def test_phase_e_startup_consumes_without_restarting_collectors(business_inputs,
     monkeypatch.setattr("ats.data.calendar_refresh.enqueue_schedule_calendar_refresh",lambda **kwargs:pytest.fail("research daemon attempted source collection"))
     holder={}
     monkeypatch.setattr(blocking,"BlockingScheduler",lambda *a,**kw:holder.setdefault("scheduler",FakeScheduler(*a,**kw)))
-    scheduler.start(phase_e=True)
+    dispatcher_daemon.start()
     resident=holder["scheduler"]
     assert "phase_e:technical-review" in [job["id"] for job in resident.jobs]
     assert not any(job["id"]=="calendar_refresh" or job["id"].startswith("factset") for job in resident.jobs)
@@ -288,22 +260,19 @@ def test_phase_e_startup_consumes_without_restarting_collectors(business_inputs,
     record_property("new_runtime",json.dumps(rt.snapshot()))
 
 
-def test_independent_oracle_detects_both_paths_omitting_same_tick(business_inputs, isolated):
+def test_independent_oracle_detects_the_dispatcher_omitting_a_tick(business_inputs, isolated):
     from ats.config import reset_config_cache
-    settings=business_inputs.root/"settings.yaml"
-    cfg=yaml.safe_load(settings.read_text())
-    cfg["schedule"]["daily_stages"]={key:key=="technical_daily" for key in scheduler.get_config().app.schedule.daily_stages.model_dump()}
-    settings.write_text(yaml.safe_dump(cfg))
     schedules=business_inputs.root/"workflow/phase_e_schedules.yaml"
     config=yaml.safe_load(schedules.read_text());config["workflows"]["technical-review"]["enabled"]=True
     schedules.write_text(yaml.safe_dump(config)); reset_config_cache()
-    expected=rt.expected_triggers(datetime(2026,10,9,9,59,tzinfo=scheduler.ET),datetime(2026,10,9,10,31,tzinfo=scheduler.ET))
+    expected=rt.expected_triggers(datetime(2026,10,9,9,59,tzinfo=dispatcher_daemon.ET),datetime(2026,10,9,10,31,tzinfo=dispatcher_daemon.ET))
     assert len(expected["expected"])==1
-    assert set(expected["expected"][0]["paths"])=={"legacy","dispatcher"}
+    # Only the dispatcher path exists since the legacy serial scheduler was removed (2026-10-20).
+    assert set(expected["expected"][0]["paths"])=={"dispatcher"}
     comparison=rt.compare_triggers(expected)
     assert not comparison["clean"] and comparison["rows"][0]["both_missing"]
-    assert set(comparison["rows"][0]["missing_paths"])=={"legacy","dispatcher"}
-    assert {row["job_id"] for row in comparison["missing_wakes"]}=={"daily_cycle","phase_e:technical-review"}
+    assert set(comparison["rows"][0]["missing_paths"])=={"dispatcher"}
+    assert {row["job_id"] for row in comparison["missing_wakes"]}=={"phase_e:technical-review"}
 
 
 def test_new_process_reads_same_owner_generation_without_reset(isolated, record_property):

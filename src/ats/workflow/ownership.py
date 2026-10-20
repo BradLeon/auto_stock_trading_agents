@@ -104,6 +104,25 @@ def workflow_store_for_owner(workflow_id: str, *, config_dir: str | Path | None 
     return WorkflowStore(_database_path(owner_mode(workflow_id, config_dir=config_dir, scope=scope), config_dir=config_dir))
 
 
+# Pre-run data-product check for owned workflow runs (`consumer_health.gate`). Installed by the production
+# entry points that run workflows for real -- the dispatcher daemon and `ats workflow run` -- so library
+# callers and tests keep running without it unless they opt in.
+PRODUCT_HEALTH_GATE = None
+
+
+def install_product_health_gate() -> None:
+    global PRODUCT_HEALTH_GATE
+    from .consumer_health import gate
+
+    PRODUCT_HEALTH_GATE = gate
+
+
+def _product_health_gate():
+    from .isolation import verified_isolation_root
+
+    return None if verified_isolation_root() is not None else PRODUCT_HEALTH_GATE
+
+
 def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
                        trigger: TriggerContext, request: Mapping[str, Any] | None = None,
                        now: datetime | None = None,
@@ -163,7 +182,8 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
     check_plan_reads(plan_factory(ctx, request_body, "read-preflight"))
     result = TriggerService(store, policy=policy).dispatch(
         ctx, request=request_body, plan_factory=plan_factory,
-        dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage), now=now)
+        dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage,
+                              product_health=_product_health_gate()), now=now)
     return {"workflow_id": workflow_id, "owner": mode, **result}
 
 

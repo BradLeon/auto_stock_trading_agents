@@ -10,7 +10,6 @@
 |---|---|---|---|
 | `com.ats.data-refresh` | 数据刷新控制器：结构化/非结构化采集、文档准入、财报日历刷新、FactSet 月末摄入 | `python -m ats.data.refresh tick` | 每小时一次 |
 | `com.ats.phase-e` | 研究调度（Dispatcher）：按时间表与日历事件运行 7 个研究工作流；**不进 Chief、不下单** | `ats schedule --phase-e` | 常驻 |
-| `com.ats.consumer-health` | 每个分析师所读数据产品的健康检查；失败即把该分析师切回旧读路径并飞书告警 | `ats consumer-cutover daily-check` | 每天 09:30（北京时间） |
 | `com.ats.serve` | 飞书审批回调（签名链接） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
 
 > ⚠️ **永远不要加载 `com.ats.schedule`**（`schedule --live`）。它是已退役的旧调度器，
@@ -28,14 +27,14 @@ launchctl bootout gui/$(id -u)/com.ats.phase-e                    # 停掉全部
 - **改了 `src/ats/` 必须重启对应常驻进程。** 常驻进程懒加载模块，不重启会出现新旧代码混跑且不报错。
   重启挑在两次调度之间。
 - `launchctl` 在 Claude Code 等沙箱里执行不生效，要在沙箱外执行。
-- 曾出现 `data-refresh`、`consumer-health` 在切换操作后掉出 launchd 的情况，原因不明；`launchctl list`
+- 曾出现 `data-refresh` 在切换操作后掉出 launchd 的情况，原因不明；`launchctl list`
   里看不到时重新 `bootstrap`。
 
 ## 2. 每天看什么
 
 ```bash
 ats consumer-cutover status          # 6 个分析师的读路由：target（新）/ legacy（旧）及代次
-ats consumer-cutover log             # 健康检查与切换历史（每天应有一行 health）
+ats consumer-cutover log             # 数据产品健康状态的变化记录（只在由好转坏、由坏转好时记一行）
 ats dispatch owner-log               # 7 个研究工作流的调度负责人及切换历史
 ats workflow runs --limit 20         # 最近的研究运行：complete / incomplete / failed
 python -m ats.data.refresh status    # 各采集任务最近一次结果
@@ -43,7 +42,7 @@ ats events upcoming --days 14        # 未来两周的财报与宏观事件
 ats events candidates                # 来源冲突、被挡住等你裁决的事件
 ```
 
-日志在 `var/logs/`：`phase-e.{out,err}.log`、`data-refresh.*.log`、`consumer-health.*.log`、`serve.*.log`。
+日志在 `var/logs/`：`phase-e.{out,err}.log`、`data-refresh.*.log`、`serve.*.log`。
 
 ## 3. 研究调度
 
@@ -99,21 +98,28 @@ ats dispatch owner-switch --workflow <workflow_id> --actor <谁> --approval "<�
 - 有 `running` 认领时拒绝切换；`failed/pending` 认领须带理由作废；`owner-log` 只增不改。
 - 工作进程已死亡但仍是 `running` 的认领，只在下一次负责人切换时作废，不影响定时触发。
 
-**出现任一情况就回退：** 每日健康检查失败（读路由会自动切回，调度要手动回退）；同一逻辑触发重复认领；
+**出现任一情况就停用该工作流：** 同一逻辑触发重复认领；
 必需投影缺失或认领长时间 `running`；连续两次整批失败且原因是新逻辑缺陷（不是"该标的没数据"）；
 模型请求费用异常；任何券商写入尝试。
 
-## 4. 读路由（每个分析师读新路径还是旧路径）
+## 4. 数据产品健康
+
+每个研究分析师（`information`、`fundamental`、`layer`、`macro`、`sector`、`technical`）读的数据产品在两个时点检查：
+
+- **发布时**：数据刷新控制器每次跑完任务，检查 information、fundamental、layer、macro、sector 五个分析师读的产品
+  （可读、版本/哈希/来源/血缘齐全、全体标的不是空的）。technical 读的是运行时行情，不在这里检查。
+- **读取前**：Dispatcher 要真正执行某个分析师的任务时（可复用上一次投影时不查），先检查它读的产品。不合格就不执行，
+  该任务记为 `blocked`、缺口 `data_product_unhealthy`，整次运行 `incomplete`。
+
+两处都只告警、不改读路由；同一个分析师只在状态由好转坏、由坏转好时发一次飞书并记一行日志。
 
 ```bash
-ats consumer-cutover status
-ats consumer-cutover health --consumer-id <id>          # 立即跑一次某个分析师的健康检查
-ats consumer-cutover rollback --consumer-id <id> --actor <谁>
-ats consumer-cutover switch --consumer-id <id> --actor <谁> --approval "<批准原文>"
+ats consumer-cutover health --consumer-id <id>   # 立即检查一个分析师读的数据产品
+ats consumer-cutover log                         # 健康状态变化记录
+ats consumer-cutover status                      # 六个分析师的读路由（固定为 target）
 ```
 
-六个消费者：`information`、`fundamental`、`layer`、`macro`、`sector`、`technical`。按消费者整体切换；
-每次切换代次加一，日志只增不改。Chief 不在其中（交易路径未切换）。
+迁移完成后读路由固定在新路径（target），没有切回旧路径的入口。Chief 不在其中（交易路径未切换）。
 
 ## 5. 数据刷新
 

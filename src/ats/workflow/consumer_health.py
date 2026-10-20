@@ -1,4 +1,11 @@
-"""Consumer-level data-product health check for the research-read switch.
+"""Consumer-level data-product health check.
+
+2026-10-20: run when the data refresh controller has published (`after_refresh`)
+and by the Dispatcher before it runs a task (`gate`). A failure is logged and
+alerted and blocks that task; it never changes a read route (the daily
+auto-rollback to the old route was removed once the migration completed).
+
+Originally written for the research-read switch:
 
 Replaces per-scope raw qualification events as the switch precondition
 (Phase F simplification, 2026-10-15). It reads the data products directly and
@@ -99,7 +106,7 @@ def _information(now: datetime) -> dict[str, Any]:
     return _result("information", problems, warnings, detail)
 
 
-def _fundamental(now: datetime) -> dict[str, Any]:
+def _fundamental(now: datetime, *, include_upstream: bool = True) -> dict[str, Any]:
     from ..data.products import get_platform_data_products
 
     problems, warnings, detail = [], [], {}
@@ -122,19 +129,20 @@ def _fundamental(now: datetime) -> dict[str, Any]:
                 warnings.append(f"{entity}: no financial rows")
             row_detail["financial_rows"] = len(rows)
             financial_total += len(rows)
-            brief = _latest_brief(entity)
-            fresh = bool(brief and brief.get("input_refs") and brief.get("as_of")
-                         and datetime.fromisoformat(brief["as_of"]) >= now - timedelta(days=BRIEF_FRESH_DAYS))
-            row_detail["fresh_information_brief_with_lineage"] = fresh
-            fresh_briefs += int(fresh)
-            if not fresh:
-                warnings.append(f"{entity}: no Information brief with lineage in the last {BRIEF_FRESH_DAYS} days")
+            if include_upstream:
+                brief = _latest_brief(entity)
+                fresh = bool(brief and brief.get("input_refs") and brief.get("as_of")
+                             and datetime.fromisoformat(brief["as_of"]) >= now - timedelta(days=BRIEF_FRESH_DAYS))
+                row_detail["fresh_information_brief_with_lineage"] = fresh
+                fresh_briefs += int(fresh)
+                if not fresh:
+                    warnings.append(f"{entity}: no Information brief with lineage in the last {BRIEF_FRESH_DAYS} days")
             detail[entity] = row_detail
         if financial_total == 0:
             problems.append("no financial rows for the whole universe")
         # Fundamental reads Information's briefs (its only declared upstream). With none
         # at all from the new entry, the switched Fundamental would run on nothing new.
-        if fresh_briefs == 0:
+        if include_upstream and fresh_briefs == 0:
             problems.append(f"no Information brief with lineage in the last {BRIEF_FRESH_DAYS} days "
                             "(switch Information first and let it run)")
     finally:
@@ -306,10 +314,16 @@ def _macro(now: datetime) -> dict[str, Any]:
 CHECKS = {"information": _information, "fundamental": _fundamental, "technical": _technical, "macro": _macro}
 
 
-def check(consumer_id: str, *, now: datetime | None = None) -> dict[str, Any]:
-    """Read-only health of the data products one research consumer depends on."""
+def check(consumer_id: str, *, now: datetime | None = None, include_upstream: bool = True) -> dict[str, Any]:
+    """Read-only health of the data products one research consumer depends on.
+
+    `include_upstream=False` leaves out what is not a data product (Fundamental's check that Information
+    briefs exist): before a Dispatcher task that is the dependency resolver's job, not this check's.
+    """
     if consumer_id not in CHECKS:
-        return _result(consumer_id, [f"no health check defined for {consumer_id}; it cannot switch yet"], [], {})
+        return _result(consumer_id, [f"no health check defined for {consumer_id}"], [], {})
+    if consumer_id == "fundamental":
+        return _fundamental(now or datetime.now(UTC), include_upstream=include_upstream)
     return CHECKS[consumer_id](now or datetime.now(UTC))
 
 
@@ -533,3 +547,77 @@ def _sector(now: datetime) -> dict[str, Any]:
 
 CHECKS["layer"] = _layer
 CHECKS["sector"] = _sector
+
+
+# --------------------------------------------------------------------------------------------------------
+# When the checks run (2026-10-20): after the data refresh controller publishes, and before a Dispatcher
+# task. Both log and alert only when a consumer's status changes, so an hourly refresh over a broken
+# product sends one alert, not one per hour.
+# --------------------------------------------------------------------------------------------------------
+TASK_CONSUMERS = {
+    "information-brief": "information", "fundamental-routine": "fundamental",
+    "fundamental-event": "fundamental", "layer-review": "layer", "sector-review": "sector",
+    "macro-review": "macro", "technical-review": "technical",
+}
+# Technical reads runtime prices, which the refresh controller does not collect: it is checked before its
+# task only.
+REFRESH_CONSUMERS = ("information", "fundamental", "layer", "macro", "sector")
+_PUBLISHING_STATUSES = {"succeeded", "quarantined", "failed"}
+
+
+def feishu_notify(title: str, body: str) -> None:
+    from ..channel import get_channel
+    from ..schemas.channel import Notification
+
+    get_channel().push(Notification(kind="error", title=title, body=body))
+
+
+def observe(consumer_id: str, health: dict[str, Any], *, actor: str, notify=None, path=None) -> bool:
+    """Log `health` and alert when the consumer's status differs from the last logged one. Returns changed."""
+    from . import consumer_cutover
+
+    previous = consumer_cutover.latest_health(consumer_id, path=path)
+    status = health.get("status")
+    if previous is not None and previous.get("status") == status:
+        return False
+    consumer_cutover.record_health(consumer_id, health, actor=actor,
+                                   reason=f"data-product health {status} ({actor})", path=path)
+    if notify is not None and (status != "ok" or previous is not None):
+        title = (f"数据产品健康检查未通过：{consumer_id}" if status != "ok"
+                 else f"数据产品健康检查已恢复：{consumer_id}")
+        body = ("；".join(str(p) for p in health.get("problems", []))[:1500] if status != "ok"
+                else "该分析师读取的数据产品重新通过检查。")
+        try:
+            notify(title, body)
+        except Exception:  # noqa: BLE001 - alerting must not break the refresh or the task
+            pass
+    return True
+
+
+def _safe_check(consumer_id: str, **kwargs) -> dict[str, Any]:
+    try:
+        return check(consumer_id, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - an unreadable check is a failed check
+        return _result(consumer_id, [f"health check raised {type(exc).__name__}: {exc}"], [], {})
+
+
+def after_refresh(results: list[dict[str, Any]], *, notify=feishu_notify, path=None) -> list[dict[str, Any]]:
+    """Check the refreshed consumers after a controller tick that ran at least one job."""
+    if not any(row.get("status") in _PUBLISHING_STATUSES for row in results):
+        return []
+    outcomes = []
+    for consumer in REFRESH_CONSUMERS:
+        health = _safe_check(consumer)
+        changed = observe(consumer, health, actor="data-refresh", notify=notify, path=path)
+        outcomes.append({"consumer_id": consumer, "status": health["status"], "changed": changed})
+    return outcomes
+
+
+def gate(task_id: str, *, notify=feishu_notify, path=None) -> dict[str, Any] | None:
+    """Before a Dispatcher task: the failed health of its consumer's data products, or None to proceed."""
+    consumer = TASK_CONSUMERS.get(task_id)
+    if consumer is None:
+        return None
+    health = _safe_check(consumer, include_upstream=False)
+    observe(consumer, health, actor="dispatcher", notify=notify, path=path)
+    return None if health["status"] == "ok" else health

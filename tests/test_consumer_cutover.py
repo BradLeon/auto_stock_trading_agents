@@ -113,23 +113,12 @@ def test_only_research_read_consumers_can_switch(authority, consumer):
         switch(authority, consumer)
 
 
-def test_rollback_needs_no_health_or_approval_and_is_always_possible(authority):
-    switch(authority)
-    result = cc.rollback("information", actor="operator", reason="drill", path=authority)
-    assert result["to_route"] == "legacy" and result["generation"] == 2
-    assert sr.resolve_route(co.PROJECTION_READ, who(), path=authority)["route"] == "legacy"
-    # a consumer that was never switched can also be "rolled back" without error
-    assert cc.rollback("fundamental", actor="operator", reason="drill", path=authority)["to_route"] == "legacy"
-    with pytest.raises(cc.ConsumerCutoverError, match="reason"):
-        cc.rollback("information", actor="operator", reason="", path=authority)
-
-
 def test_log_is_append_only_and_records_every_action(authority):
     switch(authority)
-    cc.record_health("information", OK, actor="daily-health", path=authority)
-    cc.rollback("information", actor="operator", reason="drill", path=authority)
+    cc.record_health("information", OK, actor="data-refresh", path=authority)
     actions = [row["action"] for row in cc.log(path=authority)]
-    assert actions == ["switch", "health", "rollback"]
+    assert actions == ["switch", "health"]
+    assert cc.latest_health("information", path=authority)["status"] == "ok"
     first = cc.log(path=authority)[0]
     assert first["approval"] == "user approved in chat" and first["stop_conditions"] == "health check fails"
     with closing(sqlite3.connect(authority)) as conn:
@@ -178,60 +167,6 @@ def test_runtime_decision_for_an_exact_scope_target_still_requires_its_evidence(
     assert seen == ["enforcement"]
 
 
-def test_a_rolled_back_consumer_reads_the_old_route_again(authority):
-    switch(authority)
-    cc.rollback("information", actor="operator", reason="drill", path=authority)
-    decision = cr.read_route(consumer_id="information", identity=who(), path=authority)
-    assert decision.route == "legacy" and decision.consumer_wide is False
-
-
-# --- daily check -----------------------------------------------------------------------------
-
-def test_daily_check_keeps_a_healthy_consumer_and_logs_it(authority):
-    switch(authority)
-    alerts = []
-    results = cc.daily_check(health_check=lambda consumer: OK, notify=lambda *a: alerts.append(a), path=authority)
-    assert results == [{"consumer_id": "information", "action": "health_ok"}] and alerts == []
-    assert sr.resolve_route(co.PROJECTION_READ, who(), path=authority)["route"] == "target"
-    assert cc.log(path=authority)[-1]["action"] == "health"
-
-
-def test_daily_check_rolls_back_on_failure_and_alerts(authority):
-    switch(authority)
-    alerts = []
-    results = cc.daily_check(health_check=lambda consumer: BAD, notify=lambda *a: alerts.append(a), path=authority)
-    assert results[0]["action"] == "rolled_back" and results[0]["to_route"] == "legacy"
-    assert sr.resolve_route(co.PROJECTION_READ, who(), path=authority)["route"] == "legacy"
-    assert len(alerts) == 1 and "information" in alerts[0][0] and "no admitted documents" in alerts[0][1]
-    last = cc.log(path=authority)[-1]
-    assert last["action"] == "rollback" and last["actor"] == "daily-health" and "no admitted documents" in last["health_json"]
-
-
-def test_daily_check_treats_a_crashing_check_as_a_failure(authority):
-    switch(authority)
-
-    def explode(consumer):
-        raise RuntimeError("database locked")
-    results = cc.daily_check(health_check=explode, path=authority)
-    assert results[0]["action"] == "rolled_back"
-    assert "database locked" in cc.log(path=authority)[-1]["health_json"]
-
-
-def test_a_failing_alert_does_not_undo_the_rollback(authority):
-    switch(authority)
-
-    def broken(*args):
-        raise ConnectionError("feishu down")
-    cc.daily_check(health_check=lambda consumer: BAD, notify=broken, path=authority)
-    assert sr.resolve_route(co.PROJECTION_READ, who(), path=authority)["route"] == "legacy"
-
-
-def test_daily_check_ignores_consumers_that_are_not_switched(authority):
-    switch(authority)
-    cc.rollback("information", actor="operator", reason="drill", path=authority)
-    assert cc.daily_check(health_check=lambda consumer: BAD, path=authority) == []
-
-
 # --- the deadlock this change exists to break ----------------------------------------------------
 
 @pytest.fixture
@@ -270,7 +205,7 @@ def test_native_input_is_refused_before_the_switch_which_is_the_original_deadloc
         native_gate()
 
 
-def test_native_input_is_served_after_the_consumer_wide_switch_and_refused_after_rollback(production_semantics):
+def test_native_input_is_served_after_the_consumer_wide_switch(production_semantics):
     from ats.workflow.cutover_routing import RouteUnavailable
 
     switch(production_semantics)
@@ -278,9 +213,6 @@ def test_native_input_is_served_after_the_consumer_wide_switch_and_refused_after
         assert native_gate(symbol=symbol).consumer_wide is True
     with pytest.raises(RouteUnavailable):
         native_gate("fundamental")  # a different consumer is not switched
-    cc.rollback("information", actor="operator", reason="drill", path=production_semantics)
-    with pytest.raises(RouteUnavailable):
-        native_gate()
 
 
 def test_the_switch_does_not_open_any_other_boundary(production_semantics):
@@ -289,3 +221,8 @@ def test_the_switch_does_not_open_any_other_boundary(production_semantics):
     for boundary in (co.DISPATCHER_SCHEDULE, co.APPROVAL_LIFECYCLE, co.CLERK_PUBLICATION, co.LIVE_TRADER, co.ANALYST_OUTPUT):
         assert sr.resolve_route(boundary, who(), path=production_semantics)["route"] != "target"
     assert states is None or all(s.route != "target" for b, s in states.items() if b != co.PROJECTION_READ)
+
+
+def test_there_is_no_way_back_to_the_old_route_any_more():
+    """2026-10-20: the migration is complete; the rollback action and the daily auto-rollback are gone."""
+    assert not hasattr(cc, "rollback") and not hasattr(cc, "daily_check")

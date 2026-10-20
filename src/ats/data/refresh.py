@@ -781,6 +781,16 @@ def main(argv: list[str] | None = None) -> int:
     only_job = args.job or os.environ.get("ATS_DATA_REFRESH_ONLY_JOB", "").strip()
     results = run_tick(plan, dry_run=args.dry_run, only_job=only_job)
     print(json.dumps(results, default=str))
+    if not args.dry_run:
+        # Publication-time data-product health: alerts on a status change, never changes a read route.
+        from ats.workflow.consumer_health import after_refresh
+
+        try:
+            for row in after_refresh(results):
+                if row["changed"]:
+                    print(json.dumps({"consumer_health": row}, default=str))
+        except Exception as exc:  # noqa: BLE001 - the refresh itself already finished and is recorded
+            print(json.dumps({"consumer_health_error": f"{type(exc).__name__}: {exc}"}))
     return 1 if any(row["status"] in {"failed", "quarantined"} for row in results) else 0
 
 

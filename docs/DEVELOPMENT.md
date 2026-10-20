@@ -66,7 +66,7 @@ src/ats/
     technical/         # strategy（纯数学·唯一真源）—— 无 LLM
     chief/ risk_officer/  # 决策收口、交易审查
   agent/task_projection.py  # 所有分析师产出的统一投影 envelope
-  workflow/            # Dispatcher、调度负责人、触发账本、读路由、消费者健康检查、退役判据
+  workflow/            # Dispatcher、调度负责人、触发账本、读路由、数据产品健康检查（发布时与读取前）、退役判据
     dispatcher.py phase_e.py triggers.py ownership.py schedule_runtime.py
     consumer_cutover.py consumer_health.py legacy_retirement.py
   data/                # 数据平台：sources（适配器）/ products（数据产品）/ stores
@@ -262,7 +262,6 @@ worktree 开发新功能），但这个模式在实践中造成了麻烦：workt
 |---|---|---|
 | `com.ats.phase-e` | 研究调度 daemon（Dispatcher）：7 个研究工作流的定时与日历事件触发；不进 Chief、不下单 | `ats.runtime.cli schedule --phase-e` |
 | `com.ats.data-refresh` | 数据刷新控制器，每小时 tick 一次 | `ats.data.refresh tick` |
-| `com.ats.consumer-health` | 每日 09:30（北京时间）消费者健康检查，失败即切回旧读路径并告警 | `ats.runtime.cli consumer-cutover daily-check` |
 | `com.ats.serve` | 飞书 approval webhook | `ats.runtime.cli serve --host 127.0.0.1 --port 8000` |
 
 > ⚠️ **`com.ats.schedule`（`schedule --live`，旧调度器）已退役，永远不要加载。**
@@ -276,7 +275,7 @@ launchctl kickstart -k gui/$(id -u)/com.ats.serve
 ```
 
 在 Claude Code 等沙箱里执行 `launchctl` 不会生效，需要在沙箱外执行。日志在 `var/logs/`
-（`phase-e.*.log`、`data-refresh.*.log`、`consumer-health.*.log`、`serve.*.log`）。
+（`phase-e.*.log`、`data-refresh.*.log`、`serve.*.log`）。
 
 **核心危险：Python 的懒加载 + 长驻进程。** 常驻进程启动时只预加载了极少数 `ats.*`
 模块，大多数模块在函数体内第一次被调用时才 import。这意味着：

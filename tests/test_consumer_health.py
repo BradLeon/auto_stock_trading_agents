@@ -146,7 +146,7 @@ def test_fundamental_fails_when_a_financial_snapshot_is_unreadable(world):
 
 def test_a_consumer_without_a_defined_check_cannot_pass(world):
     result = health.check("chief", now=NOW)      # a decision role: it never moves with the research-read switch
-    assert result["status"] == "failed" and "cannot switch yet" in result["problems"][0]
+    assert result["status"] == "failed" and "no health check defined" in result["problems"][0]
 
 
 def test_the_check_closes_its_readonly_repository_even_when_it_fails(world):
@@ -230,3 +230,71 @@ def test_technical_fails_when_the_whole_universe_has_no_recent_bar_twice(prices)
     result = health.check("technical", now=NOW)
     assert result["status"] == "failed" and prices.calls == 2
     assert any("no symbol in the universe" in p for p in result["problems"])
+
+
+# --- when the checks run (2026-10-20) --------------------------------------------------------------------
+
+@pytest.fixture
+def health_log(tmp_path):
+    from ats.workflow import cutover_wiring as cw
+    from ats.workflow.isolation import isolated_run
+
+    with isolated_run("consumer-health-log", root=tmp_path / "iso") as environment:
+        path = environment.path_for("ATS_CUTOVER_DB")
+        cw.bootstrap_wired(path=path)
+        yield path
+
+
+OK_HEALTH = {"status": "ok", "problems": [], "warnings": []}
+BAD_HEALTH = {"status": "failed", "problems": ["no admitted documents for the whole universe"], "warnings": []}
+
+
+def test_observe_logs_and_alerts_only_when_the_status_changes(health_log):
+    from ats.workflow import consumer_cutover as cc
+
+    alerts = []
+    notify = lambda *a: alerts.append(a)  # noqa: E731
+    assert health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
+    assert alerts == []                      # a first healthy observation is not news
+    assert not health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
+    assert health.observe("information", BAD_HEALTH, actor="data-refresh", notify=notify, path=health_log)
+    assert not health.observe("information", BAD_HEALTH, actor="dispatcher", notify=notify, path=health_log)
+    assert health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
+    assert [a[0] for a in alerts] == ["数据产品健康检查未通过：information", "数据产品健康检查已恢复：information"]
+    assert [row["action"] for row in cc.log(path=health_log)] == ["health", "health", "health"]
+    assert cc.status(path=health_log) == []  # observing never writes a route
+
+
+def test_a_failing_alert_does_not_break_observation(health_log):
+    def broken(*a):
+        raise ConnectionError("feishu down")
+    assert health.observe("macro", BAD_HEALTH, actor="data-refresh", notify=broken, path=health_log)
+
+
+def test_after_refresh_checks_only_when_a_job_ran(health_log, monkeypatch):
+    checked = []
+    monkeypatch.setattr(health, "check", lambda consumer, **k: checked.append(consumer) or OK_HEALTH)
+    assert health.after_refresh([{"job": "a", "status": "not_due"}, {"job": "b", "status": "deferred"}],
+                                notify=None, path=health_log) == []
+    assert checked == []
+    rows = health.after_refresh([{"job": "a", "status": "succeeded"}], notify=None, path=health_log)
+    assert checked == list(health.REFRESH_CONSUMERS) and "technical" not in checked
+    assert all(row["status"] == "ok" for row in rows)
+
+
+def test_gate_maps_tasks_to_consumers_and_leaves_upstream_projections_to_the_dispatcher(health_log, monkeypatch):
+    seen = []
+
+    def fake(consumer, **kwargs):
+        seen.append((consumer, kwargs.get("include_upstream", True)))
+        return BAD_HEALTH if consumer == "macro" else OK_HEALTH
+    monkeypatch.setattr(health, "check", fake)
+    assert health.gate("fundamental-event", notify=None, path=health_log) is None
+    assert health.gate("macro-review", notify=None, path=health_log)["status"] == "failed"
+    assert health.gate("not-a-research-task", notify=None, path=health_log) is None
+    assert seen == [("fundamental", False), ("macro", False)]
+
+
+def test_fundamental_without_upstream_ignores_the_information_briefs(world):
+    world.briefs = {}
+    assert health.check("fundamental", now=NOW, include_upstream=False)["status"] == "ok"

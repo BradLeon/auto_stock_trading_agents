@@ -335,3 +335,27 @@ def test_event_route_material_contract_reaches_fundamental_adapter(db_paths):
     assert task_inputs["fundamental_trigger"] == "earnings_release"
     assert task_inputs["material_state"] == "admitted"
     assert task_inputs["admitted_material_refs"] == ["filing:AAA@v2"]
+
+
+def test_unhealthy_data_products_block_the_task_before_it_runs(tmp_path, db_paths):
+    """Pre-run data-product health (2026-10-20): a failing check blocks the task; it is checked once per task ID."""
+    config = _config(tmp_path)
+    plan = build_plan(requested_tasks=("macro-review",),
+                      scope=ProjectionScope(kind="portfolio"), trigger=_trigger(),
+                      as_of="2026-09-24T00:00:00+00:00", run_id="unhealthy-products",
+                      config_dir=config, task_inputs={"data_vintage_refs": ["macro@v9"]})
+    asked = []
+
+    def unhealthy(task_id):
+        asked.append(task_id)
+        return {"status": "failed", "problems": ["no indicator series stored"]}
+
+    def should_not_run(_):
+        raise AssertionError("a task over unhealthy data products must not run")
+
+    result = Dispatcher(workflow_store=WorkflowStore(db_paths), adapters={"macro-review": should_not_run},
+                        product_health=unhealthy).dispatch(plan)
+    assert not result.complete and asked == ["macro-review"]
+    outcome = result.outcomes[0]
+    assert outcome.status == "blocked" and "no indicator series stored" in outcome.detail
+    assert WorkflowStore(db_paths).attempts_for_run(plan.run_id)[0]["error_code"] == "data_product_unhealthy"

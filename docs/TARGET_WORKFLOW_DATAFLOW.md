@@ -868,7 +868,7 @@ Dispatcher、Trigger Ledger、任务级 SQLite 连接与版本化 `schedule_even
 ### 14.6 阶段 F：影子运行与切流
 
 - **读取**：Information、Fundamental、Layer、Macro、Sector、Technical 六个消费者按消费者整体读新路径，
-  每日健康检查，失败即退回旧路径。
+  读路由固定在新路径；数据产品在发布时和每次任务执行前检查，不合格只告警并阻断该任务，不再切回旧路径。
 - **调度**：7 个研究工作流的负责人是 Dispatcher，由常驻进程 `com.ats.phase-e` 驱动，只跑研究、不进 Chief、不下单。
   旧调度器 `com.ats.schedule` 已退役，它承担过的数据任务（FactSet 月末摄入、财报日历刷新）已移入数据刷新控制器。
 - **交易 / 审批 / 记账 / Chief**：**未切换**。Chief 对旧表的直读尚未清零，主理人决策周期与 Clerk 每日对账

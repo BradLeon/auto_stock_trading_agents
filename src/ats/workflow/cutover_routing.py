@@ -149,8 +149,8 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
         raise RouteUnavailable("runtime route domain/contract mismatch")
     if resolved.get("consumer_wide"):
         # 2026-10-15 simplification (G1/G2): a consumer switched as a whole was
-        # approved after a passing data-product health check and is re-checked
-        # daily (consumer_cutover.daily_check rolls it back on failure). The
+        # approved after a passing data-product health check; its products are
+        # re-checked at publication and before each Dispatcher task. The
         # per-scope entry evidence and raw qualification events are not consulted
         # at runtime. Native reads still fail loudly; nothing is swallowed.
         return RouteDecision(

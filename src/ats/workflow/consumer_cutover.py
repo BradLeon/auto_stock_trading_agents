@@ -20,9 +20,16 @@ What it does and does not do
   row (``scoped_routes.resolve_route``), so a single scope can still be stopped.
 - A global ``disabled`` boundary still overrides everything.
 - ``switch`` needs a passing data-product health check and a recorded human
-  approval. ``rollback`` needs neither: going back must always be possible.
+  approval.
 - Every action is appended to ``consumer_cutover_log``, which cannot be updated
   or deleted.
+
+2026-10-20: the migration is complete and the six research consumers stay on the
+new route. There is no operator path back to the old route any more: the daily
+auto-rollback and the ``rollback`` action were removed. Data-product health is
+checked when the data refresh controller publishes and before the Dispatcher runs
+a task (``consumer_health.after_refresh`` / ``consumer_health.gate``); a failure
+alerts and blocks that task, it never changes a route.
 """
 from __future__ import annotations
 
@@ -171,23 +178,8 @@ def switch(consumer_id: str, *, actor: str, approval: str, observe_until: str,
     return result
 
 
-def rollback(consumer_id: str, *, actor: str, reason: str, health: dict[str, Any] | None = None,
-             path=None) -> dict[str, Any]:
-    """Return one consumer to the old route. Always allowed; it is the way back."""
-    if not str(actor).strip() or not str(reason).strip():
-        raise ConsumerCutoverError("rollback requires actor and reason")
-    with closing(_transaction(path)) as conn:
-        try:
-            result = _write(conn, consumer_id, route=plane.ROUTE_LEGACY, action="rollback", actor=actor,
-                            approval="", reason=reason, health=health)
-            conn.execute("COMMIT")
-        except BaseException:
-            conn.execute("ROLLBACK")
-            raise
-    return result
-
-
-def record_health(consumer_id: str, health: dict[str, Any], *, actor: str, path=None) -> None:
+def record_health(consumer_id: str, health: dict[str, Any], *, actor: str,
+                  reason: str = "data-product health check", path=None) -> None:
     """Append a health observation without changing the route."""
     _contract(consumer_id)
     with closing(_transaction(path)) as conn:
@@ -200,7 +192,7 @@ def record_health(consumer_id: str, health: dict[str, Any], *, actor: str, path=
                 "generation, actor, approval, reason, observe_until, stop_conditions, health_json, recorded_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (BOUNDARY, consumer_id, "health", route, route, generation, actor, "",
-                 "daily data-product health check", "", "",
+                 reason, "", "",
                  json.dumps(health, ensure_ascii=False, default=str), _now()))
             conn.execute("COMMIT")
         except BaseException:
@@ -231,33 +223,12 @@ def log(*, consumer_id: str | None = None, path=None) -> list[dict[str, Any]]:
         return [dict(r) for r in conn.execute(sql, (consumer_id,) if consumer_id else ())]
 
 
-def daily_check(*, health_check: Callable[[str], dict[str, Any]] | None = None,
-                notify: Callable[[str, str], None] | None = None, path=None) -> list[dict[str, Any]]:
-    """For every consumer on the new route: check health; on failure roll back and alert."""
-    from .consumer_health import check
-
-    results = []
-    for row in status(path=path):
-        if row["route"] != plane.ROUTE_TARGET:
-            continue
-        consumer = row["consumer_id"]
-        try:
-            health = (health_check or check)(consumer)
-        except Exception as exc:  # noqa: BLE001 - an unreadable check is a failed check
-            health = {"status": "failed", "problems": [f"health check raised {type(exc).__name__}: {exc}"]}
-        if health.get("status") == "ok":
-            record_health(consumer, health, actor="daily-health", path=path)
-            results.append({"consumer_id": consumer, "action": "health_ok"})
-            continue
-        outcome = rollback(consumer, actor="daily-health",
-                           reason="automatic rollback: daily data-product health check failed",
-                           health=health, path=path)
-        results.append({**outcome, "consumer_id": consumer, "action": "rolled_back"})
-        if notify is not None:
-            try:
-                notify(f"Phase F 自动切回旧路径：{consumer}",
-                       "每日数据产品健康检查未通过，已把研究读取切回旧路径。\n问题：" +
-                       "；".join(str(p) for p in health.get("problems", []))[:1500])
-            except Exception:  # noqa: BLE001 - the rollback already happened; alerting must not undo it
-                pass
-    return results
+def latest_health(consumer_id: str, *, path=None) -> dict[str, Any] | None:
+    """The most recent health observation logged for one consumer, if any."""
+    rows = [row for row in log(consumer_id=consumer_id, path=path) if row["action"] == "health"]
+    if not rows:
+        return None
+    try:
+        return json.loads(rows[-1]["health_json"] or "{}")
+    except json.JSONDecodeError:
+        return None

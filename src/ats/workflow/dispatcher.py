@@ -155,8 +155,14 @@ class Dispatcher:
                  timeout_overrides: Mapping[str, float] | None = None,
                  chief_runner: Callable[[Any, list[dict]], Any] | None = None,
                  calendar_store: Any = None,
-                 vintage_resolver: Callable[[Any, Any, dict], list[str]] | None = None):
+                 vintage_resolver: Callable[[Any, Any, dict], list[str]] | None = None,
+                 product_health: Callable[[str], dict | None] | None = None):
         self.workflow_store = workflow_store or WorkflowStore()
+        # Optional pre-run data-product check (`consumer_health.gate`): given a task ID, the failed health of
+        # the data products its consumer reads, or None. Production entry points inject it; it is consulted
+        # only when a task would actually run (not when an earlier projection is reused), at most once per
+        # task ID per dispatch.
+        self.product_health = product_health
         self.adapters = dict(adapters or default_adapters())
         self.max_workers = max(1, int(max_workers))
         self.resource_limits = {"llm": 2, "information": 2, "pead": 1,
@@ -298,6 +304,7 @@ class Dispatcher:
         retry_after: dict[str, float] = {}
         attempt_counts = {key: int(latest_by_instance.get(key, {}).get("attempt_no", 0))
                           for key in pending}
+        product_health: dict[str, dict | None] = {}
         try:
             while pending or active:
                 made_progress = False
@@ -341,6 +348,19 @@ class Dispatcher:
                         continue
                     reusable, reuse_detail = self._select_reusable(
                         memory, task, input_refs, data_refs, plan.as_of)
+                    if reusable is None and self.product_health is not None:
+                        if task.task_id not in product_health:
+                            product_health[task.task_id] = self.product_health(task.task_id)
+                        unhealthy = product_health[task.task_id]
+                        if unhealthy:
+                            outcomes[key] = self._finish_without_execution(
+                                task, plan, status="blocked",
+                                detail="data products unhealthy: " + "; ".join(
+                                    str(p) for p in unhealthy.get("problems", []))[:500],
+                                code="data_product_unhealthy", attempt_no=attempt_counts.get(key, 0) + 1)
+                            pending.pop(key)
+                            made_progress = True
+                            continue
                     attempt_no = attempt_counts.get(key, 0) + 1
                     attempt = self.workflow_store.start_attempt(
                         run_id=plan.run_id, task_instance_key=key, task_id=task.task_id,

@@ -987,9 +987,11 @@ def _sector_adapter(context: TaskContext) -> TaskAdapterResult:
         raise DependencyUnavailable("sector-review received no declared LayerAnalysis inputs")
     review = run(
         context.task.scope.id, use_llm=_use_llm(context), live_data=True,
-        layers=True, write_reports=False, upstream_layer_projections=layer_inputs)
+        layers=True, write_reports=True, upstream_layer_projections=layer_inputs)
     if not review.layer_verdicts:
         raise ProjectionMissing("Sector Analyst produced no allocation projection")
+    # The sector report, the per-layer reports and the html dashboard are written by `run` itself, from the
+    # data only that run has (a report failure is logged there and never fails the task).
     return TaskAdapterResult(detail=f"sector={review.sector}")
 
 

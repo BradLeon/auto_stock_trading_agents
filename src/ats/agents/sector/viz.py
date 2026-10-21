@@ -33,6 +33,7 @@ from ..evidence.observer import source_rank
 from .cross_section import utilization_for
 from ...schemas.sector import allocation_for_status
 from .viz_assets import CSS, JS
+from ..report_files import unique_path
 
 log = logging.getLogger("ats.agents.sector.viz")
 
@@ -688,8 +689,8 @@ def render_html(bundle: dict) -> str:
 
 
 def write_html(bundle: dict, folder: str | Path) -> Path | None:
-    """Write `层分析-<sector>-<date>.html` into `folder`. Same-day reruns overwrite —
-    mirrors every other report writer in this package (`report.py`, `chain/report.py`).
+    """Write `层分析-<sector>-<date>.html` into `folder`. A same-day rerun gets a new `-vN` file —
+    like every other report writer in this package (`report.py`, `chain/report.py`).
     Returns None (does not raise) when `folder` is unset/missing, so a caller can
     treat this the same best-effort way as the markdown writers.
     """
@@ -701,6 +702,6 @@ def write_html(bundle: dict, folder: str | Path) -> Path | None:
         log.warning("sector viz html: output_dir missing — skipped: %s", folder)
         return None
     meta = bundle["meta"]
-    path = folder / f"层分析-{meta['label']}-{meta['as_of_display']}.html"
+    path = unique_path(folder / f"层分析-{meta['label']}-{meta['as_of_display']}.html")
     path.write_text(render_html(bundle), encoding="utf-8")
     return path

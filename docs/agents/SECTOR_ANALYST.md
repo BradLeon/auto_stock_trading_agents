@@ -10,6 +10,7 @@
 > | 产出 | `sector_allocation` 投影（`SectorAllocation`，每层 `LayerAllocation`：状态、配置、预算、信心、引用的层级投影、缺口） |
 > | 谁读它 | 只有 Chief。下文「注回 PEAD prep/monitor」「PEAD 标的额外读活体档案」描述的是切换前的行为，基本面分析师现在不读行业结论 |
 > | 什么时候跑 | 每周六 09:30（台北时间），Dispatcher 调度，先自动补跑层次分析 |
+> | 可读报告 | 评审任务内写行业报告、每层一份层级报告和 `层分析-….html`；评审之后再写本周产业链证据周报（见 [`OPERATIONS.md`](../OPERATIONS.md) §3.2） |
 > | 手动运行 | `ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware`；`ats sector show ai_hardware` 查看 |
 > | 已知问题 | 「目标权重」口径未统一：各层预算上限之和会被截到 100% |
 >

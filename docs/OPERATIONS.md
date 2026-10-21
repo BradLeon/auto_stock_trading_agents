@@ -67,7 +67,21 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 错过触发时刻（机器睡眠）在 `misfire_grace_hours`（6 小时）内补跑，超出则记为 `misfire_grace_exceeded` 跳过。
 
-### 3.2 手动运行
+### 3.2 可读报告
+
+分析的结果是已发布的投影；可读报告是它们的 Markdown 副本，写到各自配置的 `output_dir`（现均为 Obsidian 的「个股分析系统」目录）。报告生成失败只记录，不影响分析本身。同一天再生成一份时不会覆盖原文件，而是写成 `…-v2.md`、`…-v3.md`。
+
+| 报告 | 谁生成、什么时候 | 文件名 |
+|---|---|---|
+| 宏观周报 | 宏观任务内，每周六 | `宏观分析-<标签>-<日期>.md` |
+| 技术面读数 | 技术面工作流**整次运行结束后**汇总所有标的写一份（任务是逐标的的，所以由运行结束后统一写） | `技术面读数-<标签>-<日期>.md` |
+| 行业报告、层级报告、层分析页面 | 行业评审任务内，每周六 | `行业分析-…`、`层分析-…-<层>-<日期>.md`、`层分析-…-<日期>.html` |
+| 产业链证据周报 | 行业评审**之后**，每周六 | `产业链证据-<标签>-<日期>.md` |
+| 基本面（PEAD）报告 | 基本面例行 / 事件评审内 | `基本面分析-<标的>-<期次>.md` |
+
+本次运行只复用了已有投影、没有新发布时，不会再生成一份重复的报告。技术面报告的数据来自当次发布的投影，所以不显示 VIX 与 VIX3M 的具体数值，只显示是否触发恐慌层。
+
+### 3.3 手动运行
 
 ```bash
 ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio
@@ -84,7 +98,7 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 - 某只票要手动刷新财报前基线：`ats analyst fundamental --mode routine --symbol <SYM> --refresh-baseline`
   只在负责人为 legacy 时可用；dispatcher 下用 `workflow run` 并带 `force_recompute`。
 
-### 3.3 停用与恢复一个工作流
+### 3.4 停用与恢复一个工作流
 
 ```bash
 # 停用：负责人改为 legacy，定时与日历事件不再唤醒它（不需要批准，随时可做）
@@ -121,7 +135,15 @@ ats consumer-cutover log                         # 健康状态变化记录
 ats consumer-cutover status                      # 六个分析师的读路由（固定为 target）
 ```
 
-迁移完成后读路由固定在新路径（target），没有切回旧路径的入口。Chief 不在其中（交易路径未切换）。
+迁移完成后读路由固定在新路径（target），没有切回旧路径的入口。万一某个分析师的读路由停在了旧路径（2026-10-20 技术面就被旧的自动切回机制切过一次，表现为该工作流报 `no explicitly authorized read window`），用下面的命令恢复；它只会把路由移向新路径，要求批准原文、原因和通过的数据产品检查，并写入只增不改的日志：
+
+```bash
+ats consumer-cutover status          # 看是不是 target
+ats consumer-cutover restore --consumer-id technical --actor <谁> \
+    --approval "<用户批准原文>" --reason "<为什么>"
+```
+
+Chief 不在其中（交易路径未切换）。
 
 ## 5. 数据刷新
 

@@ -130,16 +130,17 @@ def test_report_surfaces_pool_pending_proposals_and_failures():
     assert "「读不到」和「没说」是两种状态" in md
 
 
-def test_write_is_idempotent_and_degrades_without_output_dir(tmp_path):
+def test_a_same_day_rerun_gets_a_new_version_file_and_no_output_dir_degrades(tmp_path):
     store = get_store()
     cfg = load_sector_config("ai_hardware")
 
     assert report.write(cfg.model_copy(update={"output_dir": ""}), store, as_of=NOW) is None
     p1 = report.write(cfg.model_copy(update={"output_dir": str(tmp_path)}), store, as_of=NOW)
     p2 = report.write(cfg.model_copy(update={"output_dir": str(tmp_path)}), store, as_of=NOW)
-    assert p1 == p2 and p1.exists()  # same-day rerun overwrites
-    assert len(list(tmp_path.glob("*.md"))) == 1
+    assert p1.exists() and p2.exists() and p1 != p2  # same-day rerun never replaces the earlier file
+    assert len(list(tmp_path.glob("*.md"))) == 2
     assert "产业链证据-AI硬件-2026-08-06.md" == p1.name
+    assert "产业链证据-AI硬件-2026-08-06-v2.md" == p2.name
 
 
 def test_report_writer_is_isolated_from_the_real_vault(tmp_path):

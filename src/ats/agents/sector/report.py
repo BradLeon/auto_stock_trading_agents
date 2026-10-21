@@ -15,6 +15,7 @@ from pathlib import Path
 from ...schemas.sector import (SectorConfig, SectorReview,
                                allocation_for_status)
 from ..layer.layer_review import STATUS_CN
+from ..report_files import unique_path
 
 log = logging.getLogger("ats.agents.sector.report")
 
@@ -399,7 +400,7 @@ def _section_candidates(verdict) -> list[str]:
 @publication_report
 def write_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=None,
                 rows=None) -> Path | None:
-    """Write one layer's report. Same-day reruns overwrite (idempotent)."""
+    """Write one layer's report. A same-day rerun gets a new `-vN` file, never replaces the earlier one."""
     if not cfg.output_dir:
         log.info("layer report: output_dir unset — skipped")
         return None
@@ -408,7 +409,7 @@ def write_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=N
         log.warning("layer report: output_dir missing — skipped: %s", folder)
         return None
     safe = layer.label.replace("/", "／").replace(" ", "")
-    path = folder / f"层分析-{cfg.label}-{safe}-{verdict.as_of:%Y-%m-%d}.md"
+    path = unique_path(folder / f"层分析-{cfg.label}-{safe}-{verdict.as_of:%Y-%m-%d}.md")
     path.write_text(render_layer(verdict, layer, cfg, basket=basket,
                                  assessments=assessments, rows=rows), encoding="utf-8")
     return path
@@ -441,7 +442,7 @@ def write(review: SectorReview, cfg: SectorConfig) -> Path | None:
     if not folder.is_dir():
         log.warning("sector report: output_dir missing — skipped: %s", folder)
         return None
-    path = folder / f"行业分析-{cfg.label}-{review.as_of:%Y-%m-%d}.md"
+    path = unique_path(folder / f"行业分析-{cfg.label}-{review.as_of:%Y-%m-%d}.md")
     path.write_text(render(review, cfg), encoding="utf-8")
     return path
 

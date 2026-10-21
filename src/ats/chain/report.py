@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ..agents.report_files import unique_path
+
 log = logging.getLogger("ats.chain.report")
 
 VERDICT_MARK = {
@@ -628,7 +630,7 @@ def write(
     if not folder.is_dir():
         log.warning("chain evidence report: output_dir missing — skipped: %s", folder)
         return None
-    path = folder / f"产业链证据-{cfg.label}-{as_of:%Y-%m-%d}.md"
+    path = unique_path(folder / f"产业链证据-{cfg.label}-{as_of:%Y-%m-%d}.md")
     path.write_text(
         render(
             cfg,

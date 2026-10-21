@@ -184,7 +184,10 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
         ctx, request=request_body, plan_factory=plan_factory,
         dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage,
                               product_health=_product_health_gate()), now=now)
-    return {"workflow_id": workflow_id, "owner": mode, **result}
+    from .report_publishers import publish
+
+    reports = publish(workflow_id, result, store_path=store.path)
+    return {"workflow_id": workflow_id, "owner": mode, **result, **({"reports": reports} if reports else {})}
 
 
 def research_schedule_entries(*, config_dir: str | Path | None = None) -> dict[str, dict[str, Any]]:

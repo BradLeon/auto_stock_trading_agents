@@ -212,12 +212,13 @@ def test_one_file_per_layer_named_after_the_current_layer(tmp_path):
     assert list(tmp_path.glob("*.md")) == [path]          # 同一层不出第二份
 
 
-def test_rerunning_the_same_day_overwrites(tmp_path):
+def test_rerunning_the_same_day_keeps_the_earlier_file_and_writes_a_new_version(tmp_path):
     cfg = _cfg().model_copy(update={"output_dir": str(tmp_path)})
-    report.write_layer(_verdict(layer_status="contracting"), cfg.layers[0], cfg)
-    report.write_layer(_verdict(layer_status="expanding"), cfg.layers[0], cfg)
-    assert len(list(tmp_path.glob("*.md"))) == 1
-    assert "扩张" in list(tmp_path.glob("*.md"))[0].read_text(encoding="utf-8")
+    first = report.write_layer(_verdict(layer_status="contracting"), cfg.layers[0], cfg)
+    second = report.write_layer(_verdict(layer_status="expanding"), cfg.layers[0], cfg)
+    assert first != second and second.name.endswith("-v2.md")
+    assert "扩张" not in first.read_text(encoding="utf-8")
+    assert "扩张" in second.read_text(encoding="utf-8")
 
 
 def test_aggregate_report_is_an_index_not_a_copy():

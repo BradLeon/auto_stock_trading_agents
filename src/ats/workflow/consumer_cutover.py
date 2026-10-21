@@ -178,6 +178,40 @@ def switch(consumer_id: str, *, actor: str, approval: str, observe_until: str,
     return result
 
 
+def restore(consumer_id: str, *, actor: str, approval: str, reason: str,
+            health: dict[str, Any] | None = None,
+            health_check: Callable[[str], dict[str, Any]] | None = None, path=None) -> dict[str, Any]:
+    """Put a research consumer that is on the old route back on the new one.
+
+    This is the only operator entry that moves a research route, and it only moves it TOWARD the new route:
+    a consumer can end up on the old route by accident (the 2026-10-20 automatic rollback did that to
+    Technical), and there must be a way back that leaves a record. It needs a recorded human approval, a
+    reason and a passing data-product health check, and refuses a consumer that is already on the new route.
+    """
+    for label, value in (("actor", actor), ("approval", approval), ("reason", reason)):
+        if not str(value).strip():
+            raise ConsumerCutoverError(f"restore requires {label}")
+    if health is None:
+        from .consumer_health import check
+
+        health = (health_check or check)(consumer_id)
+    if health.get("status") != "ok":
+        raise ConsumerCutoverError(f"health check did not pass for {consumer_id}: {health.get('problems')}")
+    with closing(_transaction(path)) as conn:
+        try:
+            row = conn.execute("SELECT route FROM consumer_cutover_routes WHERE boundary=? AND consumer_id=?",
+                               (BOUNDARY, consumer_id)).fetchone()
+            if row is not None and row[0] == plane.ROUTE_TARGET:
+                raise ConsumerCutoverError(f"{consumer_id} is already on the new route")
+            result = _write(conn, consumer_id, route=plane.ROUTE_TARGET, action="restore", actor=actor,
+                            approval=approval, reason=reason, health=health)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return result
+
+
 def record_health(consumer_id: str, health: dict[str, Any], *, actor: str,
                   reason: str = "data-product health check", path=None) -> None:
     """Append a health observation without changing the route."""

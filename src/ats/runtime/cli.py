@@ -1301,7 +1301,8 @@ def bm_read(batch_id, parser, manifest):
 
 
 def consumer_cutover_command(args, *, parser) -> int:
-    """Research consumers' read routes and data-product health. Read-only: nothing here changes a route."""
+    """Research consumers' read routes and data-product health. Only `restore` changes a route, and only
+    toward the new one."""
     from ..workflow import consumer_cutover as cc
     from ..workflow import consumer_health
 
@@ -1316,6 +1317,11 @@ def consumer_cutover_command(args, *, parser) -> int:
             return 0
         if not args.consumer_id:
             parser.error(f"consumer-cutover {action} requires --consumer-id")
+        if action == "restore":
+            result = cc.restore(args.consumer_id, actor=args.actor, approval=args.approval,
+                                reason=args.reason, path=db)
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return 0
         result = consumer_health.check(args.consumer_id)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["status"] == "ok" else 1
@@ -4537,9 +4543,12 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--bootstrap", action="store_true",
                     help="初始化六条边界并声明本仓库接线")
 
-    cc = sub.add_parser("consumer-cutover", help="研究分析师的读路由与数据产品健康：状态、立即检查、历史（只读）")
-    cc.add_argument("action", choices=["status", "health", "log"])
+    cc = sub.add_parser("consumer-cutover", help="研究分析师的读路由与数据产品健康：状态、立即检查、历史；restore 把被切回旧路径的分析师恢复到新路径")
+    cc.add_argument("action", choices=["status", "health", "log", "restore"])
     cc.add_argument("--consumer-id", default="", help="information | fundamental | ...")
+    cc.add_argument("--actor", default="", help="restore: 操作者")
+    cc.add_argument("--approval", default="", help="restore: 用户批准原文（必填）")
+    cc.add_argument("--reason", default="", help="restore: 原因（必填）")
     cc.add_argument("--db", default="", help="覆盖切流控制库路径")
 
     sh = sub.add_parser("shadow", help="Phase F 影子比较报告、差异处置与影子账本运维")

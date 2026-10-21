@@ -226,3 +226,46 @@ def test_the_switch_does_not_open_any_other_boundary(production_semantics):
 def test_there_is_no_way_back_to_the_old_route_any_more():
     """2026-10-20: the migration is complete; the rollback action and the daily auto-rollback are gone."""
     assert not hasattr(cc, "rollback") and not hasattr(cc, "daily_check")
+
+
+def _move_to_legacy(authority, consumer="technical"):
+    """What the removed auto-rollback did to Technical on 2026-10-20 (written directly: no operator entry exists)."""
+    from contextlib import closing as _closing
+    with _closing(cc._transaction(authority)) as conn:
+        cc._write(conn, consumer, route="legacy", action="rollback", actor="daily-health", approval="",
+                  reason="automatic rollback: daily data-product health check failed")
+        conn.execute("COMMIT")
+
+
+def test_restore_puts_a_consumer_that_was_moved_to_the_old_route_back_on_the_new_one(authority):
+    switch(authority, "technical")
+    _move_to_legacy(authority)
+    assert sr.resolve_route(co.PROJECTION_READ, who("technical"), path=authority)["route"] == "legacy"
+    result = cc.restore("technical", actor="operator", approval="user approved in chat",
+                        reason="auto-rolled back on 2026-10-20", health=OK, path=authority)
+    assert result["from_route"] == "legacy" and result["to_route"] == "target" and result["action"] == "restore"
+    assert result["generation"] == 3
+    assert sr.resolve_route(co.PROJECTION_READ, who("technical"), path=authority)["route"] == "target"
+    last = cc.log(consumer_id="technical", path=authority)[-1]
+    assert last["action"] == "restore" and last["approval"] == "user approved in chat"
+
+
+def test_restore_refuses_without_approval_or_reason_or_a_passing_check_or_when_already_new(authority):
+    switch(authority, "technical")
+    _move_to_legacy(authority)
+    for kwargs in ({"approval": ""}, {"reason": ""}, {"actor": ""}):
+        args = dict(actor="operator", approval="ok", reason="why", health=OK, path=authority)
+        args.update(kwargs)
+        with pytest.raises(cc.ConsumerCutoverError, match="requires"):
+            cc.restore("technical", **args)
+    with pytest.raises(cc.ConsumerCutoverError, match="health check did not pass"):
+        cc.restore("technical", actor="operator", approval="ok", reason="why", health=BAD, path=authority)
+    assert sr.resolve_route(co.PROJECTION_READ, who("technical"), path=authority)["route"] == "legacy"
+    cc.restore("technical", actor="operator", approval="ok", reason="why", health=OK, path=authority)
+    with pytest.raises(cc.ConsumerCutoverError, match="already on the new route"):
+        cc.restore("technical", actor="operator", approval="ok", reason="why", health=OK, path=authority)
+
+
+def test_restore_only_moves_research_consumers(authority):
+    with pytest.raises(cc.ConsumerCutoverError, match="research-read consumer"):
+        cc.restore("chief", actor="operator", approval="ok", reason="why", health=OK, path=authority)

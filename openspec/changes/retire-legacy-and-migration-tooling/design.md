@@ -82,6 +82,7 @@ G0 清单范围（R0 阶段生成完整版）：
 ```mermaid
 flowchart TD
     R0["R0 清点与登记<br/>（只读 + 登记，可在 G0 前做）"]
+    RP["RP 可读报告接续<br/>（Dispatcher 生成技术面/行业/周报）"]
     G0{"G0 新路径人工核验通过"}
     R1["R1 命名与入口残留"]
     R2["R2 研究侧切换期工具"]
@@ -90,7 +91,7 @@ flowchart TD
     R6["R6 收尾：文档、基线、记录"]
     TP{{"外部门：交易路径切换<br/>（另一个 change）"}}
     R5["R5 交易路径相关条目<br/>（本 change 只登记）"]
-    R0 --> G0
+    R0 --> RP --> G0
     G0 --> R1 & R2 & R3
     R1 --> R4
     R3 --> R4
@@ -98,7 +99,8 @@ flowchart TD
     TP --> R5
 ```
 
-- **R0** 不删任何东西，可以在你核验之前完成，核验清单本身就是 R0 的产物。如果你希望连登记改动也放到 G0 之后，R0 就整体后移，不影响其余顺序。
+- **R0** 的只读部分（清点、副作用对照、核验清单）在 G0 之前完成；登记格式扩展与条目写入在 G0 之后做，避免核验发现缺陷后返工。
+- **RP** 在 G0 之前完成：报告由新路径生成之后，你核验时才能看到真实报告；它只新增产出，不删任何东西。
 - **R1、R2、R3** 之间没有依赖，可以并行，但每批仍单独提交、单独复验。
 - **R4 依赖 R1 与 R3：** 旧入口删掉之后，才能判断哪些旧分析代码只被旧入口引用。
 - **R5 不依赖 R1–R4**，只依赖交易路径切换。
@@ -114,18 +116,18 @@ flowchart TD
 | `naming.consumer_cutover_cli` | 命名 | `ats data health [--consumer]`、`ats data health-log` | 改名；删除 `status`（路由已固定，见 R5） |
 | `legacy_entry.research_manual_commands` | 旧手动入口 | `ats workflow run --task <id>` | 删除 `ats macro review`、`ats sector review/layer/crosssection`、`ats technical review`、`ats pead prep/score/monitor/watch/research`、`ats analyst information/fundamental`；保留一段时间的提示桩，说明已退役和替代命令。只读的 `show`/`probe`/`html` 保留 |
 | `legacy_entry.research_owner_legacy_mode` | 旧手动入口 | 工作流停用 / 恢复（`ats dispatch pause/resume`） | 负责人只剩 dispatcher 与 paused 两种状态；`owner-switch/owner-rollback` 改名；`workflow_owners.yaml` 的 legacy 默认值去掉 |
-| `legacy_entry.evidence_commands`（候选） | 旧手动入口 | 数据刷新的 `chain_evidence_daily` 与 Layer 的证据判读 | `ats evidence` 的子命令逐个判定，只删属于已退役证据观察员的部分 |
+| `legacy_entry.evidence_commands` | 旧手动入口 | 数据刷新的 `chain_evidence_daily`（`ats data evidence-observe`）与 Layer 的证据判读 | 只删 `ats evidence observe/collect/articles` 与 `ats sector crosssection`（评审内部已自己算截面，独立持久化的那一遍没有消费者）；**命题治理命令 `ats evidence claims/report/propose/proposals/review/kbreview` 与 `ats sector kbperturb` 保留**（人审批新命题的入口，用户 2026-10-21 确认） |
 | `naming.migration_terms_in_docs` | 命名 | — | 文档与帮助文本中的"新路径 / 旧路径 / 切流 / phase"残留 |
 
-**R2 研究侧切换期工具**（门 G0；运行路径之外，只被命令行和测试使用）
+**R2 研究侧切换期工具**（门 G0；运行路径之外，只被命令行和测试使用；具体依赖与簇外使用方见 inventory.md 第二节）
 
 | 条目 | 涉及 | 说明 |
 |---|---|---|
 | `migration.batch_read_cutover` | `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`；命令 `ats batch`、`ats read`；测试 `test_batch_manifest`、`test_read_cutover`、`test_batch_cli` | 逐批、逐 scope 切流；10-19 登记的 41 个旧失败中的 38 个在这里，另外 3 个属于 `ats cutover`（R5） |
 | `migration.schedule_cutover` | `schedule_cutover.py`、`cutover_acceptance.py` 及其测试 | 调度批次切换与验收 |
 | `migration.intake` | `intake.py`、`intake_verification.py`、`scoped_intake.py`；命令 `ats intake`；测试 | 接入核验与逐消费者处置 |
-| `migration.dispatch_dedup` | `dispatch_claims.py`；命令 `ats dispatch runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history` | 新旧调度去重；旧调度器已删除。保留 `owner-*`（改为 pause/resume，见 R1） |
-| `migration.analysis_verification`（候选） | `analysis_verification.py` | R0 确认无生产引用后进入 |
+| `migration.dispatch_dedup` | `dispatch_claims.py`；命令 `ats dispatch runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history` | 新旧调度去重；旧调度器已删除。**前置：**`workflow/cutover_wiring.py` 的接线声明里引用了 `dispatch_claims.claim`，先去掉这条声明及 `boundary_evidence` 对应调用点。保留 `owner-*`（改为 pause/resume，见 R1） |
+| `migration.analysis_verification` | `analysis_verification.py`、`consumer_disposition.py`、`isolated_entry.py` | inventory.md 已确认无簇外使用，与 `intake_verification` 绑定一起走 |
 
 **R3 登记修正与研究侧已登记条目**（门 G0）
 
@@ -136,19 +138,15 @@ flowchart TD
 | `pead_dossier` | 从待退项中移出，改登记为基本面自有记录：财报前基线存在这里，事件评审读它 | — |
 | `macro_reviews`、`technical_reviews`（在用清册中但无条目） | 补登记；消费方是 Chief 时归入 R5 | — |
 
-**R4 只被旧入口用到的旧分析代码**（门 G0；依赖 R1、R3；全部为候选）
+**R4 只被旧入口用到的旧分析代码**（门 G0；依赖 R1、R3；inventory.md 第三节已逐个核实，范围缩小）
 
-候选来自本次粗查，只被命令行或测试引用的模块：
-- `agents/pead/monitor.py`、`triage.py`、`prep.py`、`report.py` 的旧分支；
-- `runtime/digest.py`、`runtime/evidence_observe.py`；
-- `agents/risk_validator.py`、`agents/risk_manager.py`；
-- `agents/sector/structure.py`、`rotation.py` 的旧注入路径。
+| 条目 | 模块 | 说明 |
+|---|---|---|
+| `agents.risk_manager` | `agents/risk_manager.py` | 无任何引用，只有 1 个测试 |
+| `agents.risk_validator.apply_guardrails` | `agents/risk_validator.py` | 无任何引用，只有 1 个测试；即登记里已有的条目 |
+| `agents.pead.monitor` | `agents/pead/monitor.py` | 只被 `ats pead monitor/watch` 用；R1 删命令后进入 |
 
-R0 必须用调用图逐个确认。确认无误前一律不进入执行：
-
-- `graph/pead.py` 仍被基本面例行模式建基线使用；
-- `agents/pead/score.py` 仍被事件模式使用；
-- `agents/pead/research.py` 仍被数据层引用。
+明确**保留**（有新路径或交易路径的生产使用方）：`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,research}`、`runtime/digest.py`、`agents/evidence/observer.py`、`runtime/evidence_observe.py`（被 `chain_evidence_daily` 调用）、`agents/sector/{context,structure,rotation}`、`chain/*`、`runtime/server.py`、`graph/checkpoint.py`。
 
 **R5 交易路径相关**（外部门：交易路径切换；本 change 只登记，不执行）
 
@@ -156,7 +154,7 @@ R0 必须用调用图逐个确认。确认无误前一律不进入执行：
 |---|---|
 | 已登记 | `chief.legacy_table_direct_reads`、`sector_reviews`、`store.direct_trade_reads`、`legacy_read_models`、`decision_roles.unwired_to_governed_read_api`、`memory.store.legacy_decision_write_path`、`trades.client_order_id.legacy_derivation`、`risk.checks.pre_trade_adapter`、`scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`、`journal.report.render_ledger` |
 | 读路由与资格机制 | `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 的路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`assurance_surface` 与指纹清单 |
-| 交易侧切换工具 | `joint_cutover`、`boundary_drill`、`acceptance_runner/reports/matrix`、`paired_business`、`isolated_entry`、`shadow_*`；命令 `ats cutover`、`ats drill`、`ats shadow`、`ats live drill` |
+| 交易侧切换工具 | `joint_cutover`、`boundary_drill`（含对 `batch_manifest`/`read_cutover` 的引用，需先拆开）、`acceptance_runner/reports/matrix/assertions/disposition`、`paired_business`、`shadow_*`（`shadow_ledger` 还被 Clerk 引用）、`exit_requirements`（被 `data/assurance.py` 引用）、`business_replay_inputs`（被 `consumer_api`、`route_switch` 引用）；命令 `ats cutover`、`ats drill`、`ats shadow`、`ats live drill` |
 | 在用旧表 | `macro_reviews`、`technical_reviews`（若 Chief 仍读） |
 
 交易路径切换完成并过观察窗口后，研究分析师与 Chief 读同一新路径，这套机制才能整体收窄成"按 scope 读数据产品"。
@@ -191,6 +189,30 @@ R0 必须用调用图逐个确认。确认无误前一律不进入执行：
 
 - 每批一个提交，只删代码、命令、配置与测试，不碰数据，回滚就是 `git revert` 该批提交并重启服务。
 - 删除前，把被删命令的用法与最近一次输出样例归档到 `docs/archive/`，便于事后查阅。
+
+### D9. 可读报告由 Dispatcher 路径接续生成（RP，2026-10-21 用户确认）
+
+旧入口里生成可读报告的几项，Dispatcher 路径目前没有：技术面报告（适配器传了 `write_report=False`）、行业报告 / 层级报告 / 可视化页面（`write_reports=False`）、每周产业链证据周报（随旧调度器删除）。宏观周报已补（10-17）。
+
+- **做法：** 在 `run_owned_workflow` 的一次运行结束之后，按工作流挂「报告发布步骤」，而不是塞进逐任务的适配器。理由：技术面任务是逐标的的，报告需要汇总全部标的，只有运行结束才齐；周报要在行业评审之后。
+  - 技术面：运行结束且有新读数投影时，写一份汇总报告。
+  - 行业：行业评审完成后写行业报告、层级报告、可视化页面，再写本周产业链证据周报（顺序沿用旧流程）。
+- **约束：** 报告是投影与存档的派生物，生成失败只记录、不改运行状态、不阻断下游；文件一律新版本写入、不覆盖；复用既有投影且没有新发布时不重复生成。
+- **替代方案：** 放进各任务适配器，沿用宏观周报的做法。没采用，因为逐标的任务会各写一份报告或写出残缺的汇总。
+- **验证：** 手动在隔离环境运行一次对应工作流，看到报告文件；G0 清单里加「可读报告」一项，由你看真实生成的报告。
+
+### D10. 簇外依赖必须先于删除处理
+
+inventory.md 第二节列出 6 处簇外代码依赖切换期模块。R2 开始删之前按下表逐个处理：
+
+| 依赖 | 处理 |
+|---|---|
+| `cutover_wiring` → `dispatch_claims`（接线声明字符串） | 去掉声明与 `boundary_evidence` 对应调用点，同步其测试 |
+| `dispatcher` → `shadow_replay.digest` | 把 `digest` 移到 Dispatcher 自己的模块或通用工具，再让 `shadow_replay` 留给 R5 |
+| `read_windows` → `shadow_reports`（研究读窗口的批次报告校验） | 研究消费者已固定新路径，评估去掉这条校验；`cutover.py` 对它的使用属于 R5，`shadow_reports` 整体留给 R5 |
+| `clerk` / `shadow_execution` → `shadow_ledger` | 归 R5，R2 不动 |
+| `data/assurance` → `exit_requirements` | 归 R5，R2 不动 |
+| `consumer_api` / `route_switch` → `business_replay_inputs` | 归 R5，R2 不动 |
 
 ## Risks / Trade-offs
 

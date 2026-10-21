@@ -35,10 +35,13 @@ class FakeScheduler:
 
     def add_job(self, fn, trigger, *, id, misfire_grace_time=None, **kw):
         self.jobs.append({"fn": fn, "trigger": trigger, "id": id,
-                          "misfire_grace_time": misfire_grace_time})
+                          "misfire_grace_time": misfire_grace_time, **kw})
 
     def add_listener(self, fn, mask):
         self.listeners.append((fn, mask))
+
+    def add_executor(self, executor, alias="default"):
+        self.executors = getattr(self, "executors", {}) | {alias: executor}
 
     def get_jobs(self):
         return [SimpleNamespace(id=job["id"]) for job in self.jobs]

@@ -21,6 +21,13 @@ log = logging.getLogger("ats.dispatcher")
 
 ET = ZoneInfo("America/New_York")
 
+# The scheduler sleeps on a monotonic timer, which does not advance while the Mac is asleep: a job due at
+# 20:00 that the machine slept through fired 2.6 hours late (2026-10-21), although it had been fully awake
+# long before. Due-ness itself is judged against the wall clock, so all that is needed is that the scheduler
+# wakes up often. This job does nothing; it only bounds how long a sleep can hide an overdue job.
+HEARTBEAT_JOB_ID = "heartbeat"
+HEARTBEAT_SECONDS = 30
+
 
 def _now_et() -> datetime:
     return datetime.now(ET)
@@ -54,6 +61,8 @@ def _attach_job_logging(scheduler) -> None:
     def _on_event(event) -> None:
         from ..workflow.schedule_runtime import observe
 
+        if event.job_id == HEARTBEAT_JOB_ID:     # every 30 seconds: no log line, no ledger row
+            return
         if event.scheduled_run_time:
             observe("wake_seen", event.job_id, {"planned": event.scheduled_run_time.astimezone(timezone.utc).isoformat(),
                                               "code": event.code})
@@ -74,6 +83,20 @@ def _attach_job_logging(scheduler) -> None:
 
     scheduler.add_listener(_on_event,
                            EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+
+
+def _add_heartbeat(scheduler) -> None:
+    """Wake the scheduler every HEARTBEAT_SECONDS of awake time (see HEARTBEAT_JOB_ID).
+
+    The beat runs on its own executor so a workflow that occupies the single worker for hours cannot make
+    beats queue up behind it, and it has no misfire limit so a long sleep never reports it as missed.
+    """
+    from apscheduler.executors.pool import ThreadPoolExecutor as BeatExecutor
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    scheduler.add_executor(BeatExecutor(1), alias="heartbeat")
+    scheduler.add_job(lambda: None, IntervalTrigger(seconds=HEARTBEAT_SECONDS), id=HEARTBEAT_JOB_ID,
+                      executor="heartbeat", coalesce=True, max_instances=1, misfire_grace_time=None)
 
 
 def start(*, run_once: bool = False) -> None:
@@ -133,6 +156,7 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
 
     scheduler = BlockingScheduler(timezone="UTC", executors={"default": ThreadPoolExecutor(1)})
     _attach_job_logging(scheduler)
+    _add_heartbeat(scheduler)
     job_to_workflow = {}
 
     def on_wake(event) -> None:

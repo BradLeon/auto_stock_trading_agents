@@ -560,6 +560,35 @@ def _unstructured_references(db_path: Path, packet: dict[str, Any],
     return {key: sorted(set(value)) for key, value in refs.items()}
 
 
+def _queue_trigger_ref(job_id: str, window: str, attempt: int) -> str:
+    """Queue identity of one controller attempt.
+
+    The queue de-duplicates by trigger reference, so a retry that reused the first attempt's reference
+    got the finished task back, could not claim it and crashed with `queue_task_not_claimable` without
+    running anything. Every retry is therefore its own queue task; the first attempt keeps its old reference.
+    """
+    return f"{job_id}:{window}" if attempt <= 1 else f"{job_id}:{window}:attempt{attempt}"
+
+
+def _article_partial_outcome(packet: dict[str, Any], refs: dict[str, list[str]]) -> tuple[str, str]:
+    """Ledger status of an article/document ingestion that reported `partial`.
+
+    - the only gap is the per-run body budget (items deferred to the next run, transport complete):
+      expected state, `succeeded / partial_budget_deferred`;
+    - something was published although a slice or source failed: `succeeded / partial_sources_held_back`
+      (the reason keeps the gap visible);
+    - nothing was published: `failed / article_source_partial`, which the controller retries.
+    """
+    discovery = packet.get("discovery") or {}
+    transport_gap = bool(discovery.get("failed_slices")) or \
+        str(discovery.get("status") or "succeeded") not in {"succeeded", "no_change"}
+    if int(packet.get("deferred") or 0) > 0 and not transport_gap:
+        return "succeeded", "partial_budget_deferred"
+    if refs.get("published"):
+        return "succeeded", "partial_sources_held_back"
+    return "failed", "article_source_partial"
+
+
 def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = False,
              only_job: str = "", data_db: Path | None = None) -> list[dict[str, Any]]:
     now = now or _utc_now()
@@ -620,7 +649,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 source_id="+".join(job.sources),
                 scope={"job_id": job.id, "window": window, "datasets": list(job.datasets),
                        "sources": list(job.sources)},
-                trigger_kind="scheduled", trigger_ref=f"{job.id}:{window}",
+                trigger_kind="scheduled", trigger_ref=_queue_trigger_ref(job.id, window, attempt),
                 command=_resolve_command(job.command, window), policy_fingerprint=policy,
                 requested_as_of=_iso(now), priority=30,
                 max_attempts=job.max_attempts,
@@ -687,7 +716,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             elif action == "article-ingest" and packet_status == "unreachable":
                 status, reason = "failed", "article_source_unreachable"
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "partial":
-                status, reason = "failed", "article_source_partial"
+                status, reason = _article_partial_outcome(packet, refs)
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "no_change":
                 status, reason = "no_change", ""
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "succeeded" and refs["published"]:

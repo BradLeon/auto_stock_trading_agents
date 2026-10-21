@@ -1,0 +1,75 @@
+# Tasks
+
+> 执行顺序见 design.md D3：第 1 组可以在你人工核验之前做（只读与登记，不删除任何东西）；第 3–7 组都要等第 2 组（G0）通过。第 8 组只登记，不执行。
+> 第 4、6 组按 design.md D6 执行（2026-10-21 用户确认）：旧手动入口与负责人 legacy 模式一并退役。
+
+## 1. R0 清点与登记（不删除）
+
+- [ ] 1.1 生成退役清点报告：调用图（含函数体内延迟 import 与字符串模块路径的文本搜索）、命令行子命令清单，以及每个候选模块的生产调用方。落档 `openspec/changes/retire-legacy-and-migration-tooling/inventory.md`。验证：design.md D4 列出的每个条目和候选在报告里都有结论（在用 / 只被命令行和测试使用 / 只被旧入口使用）
+- [ ] 1.2 逐个列出旧手动入口的副作用（报告落盘、飞书推送、写库），与新路径对照。写进 inventory.md 的"副作用对照"表。验证：R1 每个旧入口都有"新路径已承担 / 需要补 / 不需要"的结论
+- [ ] 1.3 扩展退役登记格式：新增 `kind`、`group`、`depends_on`、`gate` 字段，加载时校验无环、无悬空依赖、门取值合法。验证：新增单元测试覆盖成环、悬空、未知门三种失败，以及合法登记的通过
+- [ ] 1.4 `ats retirement decide` 增加依赖与门的检查，新增只读的 `ats retirement gate --show`（汇总 verification.md 的结论）。验证：测试覆盖"前序未完成 → 不可退出""门未满足 → 不可退出"
+- [ ] 1.5 把 design.md D4 的全部条目写入 `config/workflow/legacy_retirement.yaml`：R1–R4 门为 G0，R5 门为 `trade_path_cutover`；未登记条目补齐替代实现、消费方、退出判据。验证：`ats retirement decide` 能列出全部条目及其阻塞原因，`openspec validate --all --strict` 通过
+- [ ] 1.6 修正登记错误：`pead_dossier` 移出待退项、改登记为基本面自有记录；`macro_reviews`、`technical_reviews` 补登记；8 条"登记已退役但未证明"标注为待补证。验证：登记加载通过，`ats retirement zero` 对这 8 条显示"待补证"而不是"清零"
+- [ ] 1.7 生成 G0 人工核验清单 `openspec/changes/retire-legacy-and-migration-tooling/verification.md`：按 design.md D1 的类别逐项列出 44 个刷新任务、5 类数据产品、7 个工作流与事件路径、运行保障和文档，每项附核验方式、通过标准与自动证据（命令输出、最近一次运行记录）。验证：清单覆盖 `python -m ats.data.refresh validate` 列出的全部任务，以及 `config/workflow/research_schedules.yaml`、`event_routes.yaml` 的全部条目
+- [ ] 1.8 更新 `docs/PHASE_F_RETIREMENT_RUNBOOK.md`：写明新的分组、依赖与门，以及 G0 的位置。验证：runbook 中的条目数与登记处一致
+
+## 2. G0 新路径人工核验（由你执行）
+
+- [ ] 2.1 你逐项核验 verification.md 并填写结论、核验人、日期。验证：`ats retirement gate --show` 显示全部通过，或列出未通过项
+- [ ] 2.2 核验发现的新路径缺陷登记为单独的修复任务，修复后复核通过。验证：verification.md 中没有"未通过"项；依赖未通过项的条目保持 pending
+- [ ] 2.3 记录 G0 结论（日期、范围、遗留且已接受的缺口，例如 SEC 不可达、ibkr_news 的 partial），提交 verification.md。验证：提交存在，`ats retirement gate --show` 显示 G0 通过
+
+## 3. R2 研究侧切换期工具退役
+
+- [ ] 3.1 对 `migration.batch_read_cutover` 做 V1–V3（静态无引用、14 天无运行调用、门与前序满足），结果写进 inventory.md。验证：`ats retirement decide` 判该条可退出
+- [ ] 3.2 删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试（`test_batch_manifest`、`test_read_cutover`、`test_batch_cli`），同步冻结面与资格清单；归档命令用法样例到 docs/archive。验证：受影响测试与 assurance_surface、架构守卫测试通过；调用 `ats batch` 返回已退役提示
+- [ ] 3.3 对 `migration.schedule_cutover` 做 V1–V3 并删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。验证：同 3.2
+- [ ] 3.4 对 `migration.intake` 做 V1–V3 并删除 `intake.py`、`intake_verification.py`、`scoped_intake.py`、命令 `ats intake` 及其测试。验证：同 3.2
+- [ ] 3.5 对 `migration.dispatch_dedup` 做 V1–V3 并删除 `dispatch_claims.py` 与 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。验证：`ats dispatch --help` 只剩负责人与停用相关命令，受影响测试通过
+- [ ] 3.6 `migration.analysis_verification`：若 1.1 判定无生产引用，则做 V1–V3 并删除；否则改登记为在用并写明理由。验证：登记与代码一致
+- [ ] 3.7 登记处把本组条目标为 retired 并附清零证明；更新 OPERATIONS 与 TEST_BASELINE（删除了哪些测试、其中多少原本失败）。验证：`ats retirement decide` 显示本组 retired，TEST_BASELINE 有本批记录
+- [ ] 3.8 本组复验 V4–V6：全量测试与基线逐项对照；重启 `com.ats.dispatcher` 与 `com.ats.serve`，观察下一次定时触发、数据刷新与日历消费；确认旧表与台账可读。验证：复验结果写进 inventory.md 的本批记录
+
+## 4. R1 命名与入口残留退役
+
+- [ ] 4.1 新增 `ats data health [--consumer <id>]` 与 `ats data health-log`，删除 `ats consumer-cutover`（保留提示桩，指向新命令）。验证：新命令对 5 个研究消费者输出与原 `health` 一致；提示桩测试通过
+- [ ] 4.2 对 `legacy_entry.research_manual_commands` 做 V1–V3，并确认 1.2 的副作用对照里没有"需要补"的项。验证：`ats retirement decide` 判可退出
+- [ ] 4.3 删除研究分析的旧手动命令（design.md D4 R1 表所列），保留只读的 `show`/`probe`/`html`，旧命令留提示桩并给出 `ats workflow run` 的替代写法。验证：提示桩测试通过；Dispatcher 各任务的测试仍通过
+- [ ] 4.4 负责人 legacy 模式改为停用 / 恢复：负责人只剩 dispatcher 与 paused；`ats dispatch pause/resume` 替代 `owner-switch/owner-rollback`；保留"先冻结再清点"与 running 认领拒绝停用的行为；`workflow_owners.yaml` 去掉 legacy 默认值。验证：新增测试覆盖停用期间定时 / 事件 / 手动都不执行且记录跳过原因、有 running 认领时拒绝停用、恢复后不重复执行已完成触发
+- [ ] 4.5 `legacy_entry.evidence_commands`：按 1.1 的结论逐个子命令删除或保留，结论写进登记。验证：保留的子命令都有在用理由
+- [ ] 4.6 清理文档和帮助文本中的迁移期措辞（"新路径 / 旧路径 / 切流 / phase"），更新 README、OPERATIONS、DEVELOPMENT。验证：在 `docs/`（不含 archive）与 `ats --help` 中检索这些词，只剩有意保留并加注的位置
+- [ ] 4.7 登记处把本组条目标为 retired 并附证明，TEST_BASELINE 记录本批。验证：同 3.7
+- [ ] 4.8 本组复验 V4–V6（同 3.8）。验证：复验结果写进 inventory.md
+
+## 5. R3 登记修正与研究侧已登记条目
+
+- [ ] 5.1 给 8 条"登记已退役但未证明"的消费方补 `MODULE_TO_ROLE` 映射后重扫；有读取的改回 pending 并列出消费方。验证：`ats retirement zero` 对这 8 条不再出现"未知"
+- [ ] 5.2 `task_projections.legacy_columns`：迁走或删除剩余消费方（`memory.store.projection_lineage`、相关测试）后做 V1–V3 并退役。验证：命中墓碑的读取返回已退役原因（墓碑一致性测试）
+- [ ] 5.3 `evidence_fact_projections.legacy_observation_id`：同 5.2。验证：同 5.2
+- [ ] 5.4 `layer_verdict.allocation`：在 4.3 删除旧行业入口之后，迁走或删除剩余消费方（`agents.sector.report/viz/review`、命令行）并退役；字段保留、历史行可读。验证：历史行读回测试通过，新写入不再产生该字段
+- [ ] 5.5 TEST_BASELINE 与 runbook 记录本批。验证：同 3.7
+- [ ] 5.6 本组复验 V4–V6。验证：同 3.8
+
+## 6. R4 只被旧入口用到的旧分析代码
+
+- [ ] 6.1 在第 4、5 组完成后重跑 1.1 的调用图，列出只剩被已删除入口引用的模块，写进 inventory.md；明确保留 `graph/pead.py`（例行模式建基线）、`agents/pead/score.py`（事件评审）、`agents/pead/research.py`（数据层引用）。验证：每个候选都有删除或保留的结论
+- [ ] 6.2 对确认可删的模块逐个做 V1–V3，补登记后删除，测试同步删除或改写。验证：受影响测试、架构守卫、assurance_surface 通过
+- [ ] 6.3 TEST_BASELINE 与 runbook 记录本批。验证：同 3.7
+- [ ] 6.4 本组复验 V4–V6。验证：同 3.8
+
+## 7. 规格与运维文档同步
+
+- [ ] 7.1 核对本 change 的规格增量与实际行为一致：读路由固定与数据产品检查（已在 29c6b4d 实现）、工作流停用 / 恢复、研究工作流只经 Dispatcher。验证：每条增量要求都有对应测试或运行记录引用，写进 inventory.md
+- [ ] 7.2 ARCHITECTURE §6 实施状态、OPERATIONS、角色文档更新到退役后的状态。验证：文档里的命令都能照写运行
+
+## 8. R5 交易路径相关条目（只登记，不执行）
+
+- [ ] 8.1 确认 R5 全部条目已在登记处，门为 `trade_path_cutover`，依赖与退出判据完整。验证：`ats retirement decide` 对 R5 条目显示"外部门未满足"
+- [ ] 8.2 在退役 runbook 中写明 R5 的接续方式：交易路径切换的 change 必须把 R5 列为任务，包括读路由与资格机制的收窄方案。验证：runbook 有该节
+
+## 9. 收尾与整体验证
+
+- [ ] 9.1 全量测试一次，与 10-19 基线逐项对照并登记差异（删除的测试、消失的旧失败、任何新失败的归因）。验证：TEST_BASELINE 有本 change 的权威测量
+- [ ] 9.2 生产观察：退役完成后一个完整周期（覆盖工作日定时、周六宏观与行业、至少一次日历消费与数据刷新）无因退役导致的失败。验证：观察记录写进 inventory.md
+- [ ] 9.3 `openspec validate --all --strict` 通过，更新项目记忆中的运行形态说明。验证：命令输出通过

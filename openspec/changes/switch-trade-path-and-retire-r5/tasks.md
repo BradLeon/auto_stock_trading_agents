@@ -45,7 +45,7 @@
 
 - [ ] 3.1 生成 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`：按 design.md D1 列出 T0.1–T0.9，每项附核验方式、通过标准与自动证据。证据文件放在 `var/` 下，不放 `tmp/`。验证：每项都有可复核的证据引用
 - [ ] 3.2 生产只读证据：用当天真实研究快照渲染一次主理人上下文（不建周期、不调用模型或复用已有结果），并在生产库副本（`var/` 下）上运行 `ats clerk run --dry-run`，覆盖最近 30 天，列出持仓与资金差异、无法归因记录及原因。验证：两份材料写进 verification.md，生产库未被写入（对比写前写后的行数）
-- [ ] 3.3 把 `LIVE-X` 的调查结论（design.md D9-1，2026-10-21 只读调查）写进 verification.md；得到你“不是我签发的、同意作废”的确认后，在 2.9 上线后追加作废记录，引用你的确认原文，原记录保留。验证：`ats live gate --reference LIVE-X` 返回“已作废”，原记录仍可读
+- [ ] 3.3 把 `LIVE-X` 的调查结论（design.md D9-1，2026-10-21 只读调查）写进 verification.md；2.9 上线后追加作废记录，引用用户 2026-10-21 的确认原文“这不是我签发的实盘授权，同意作废。”，原记录保留。验证：`ats live gate --reference LIVE-X` 返回“已作废”，原记录仍可读
 - [ ] 3.4 你逐项执行 T0 并填写结论、核验人与日期；未通过项登记为修复任务，修复后复核。验证：verification.md 中没有“未通过”项
 - [ ] 3.5 记录 T0 结论（范围、提交号、已接受的缺口）并提交 verification.md。验证：提交存在
 

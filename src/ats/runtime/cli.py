@@ -1822,6 +1822,11 @@ def workflow_command(args, *, parser) -> int:
     result = service.dispatch(trigger, request=request, plan_factory=plan_factory,
                               dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage,
                                                     product_health=product_health_gate))
+    from ..workflow.report_publishers import publish
+
+    reports = publish(workflow_id, result, store_path=store.path)
+    if reports:
+        result = {**result, "reports": reports}
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0 if result.get("status") in {"complete", "incomplete", "running", "planned"} else 1
 

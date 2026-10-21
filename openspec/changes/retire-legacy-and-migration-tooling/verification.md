@@ -19,9 +19,9 @@
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
-| U01 | `ibkr_news_daily`（ibkr_news + yfinance_live_news） | 未通过 | 〔自动证据，非结论〕窗口 10-20 `failed / controller_RuntimeError`（10-21 06:01），近 7 天失败 7 次；来源状态 partial；文档库 ibkr_news 126 篇、失败 28，最近抓取 10-20 05:06 | 用户确认（AI 建议） | 2026-10-21 | partial 被当失败重试→RuntimeError；库内最新一篇停在 10-20 05:06，延后积压 764 条。归根因 1；原备注：已知缺陷：partial 当失败重试 → `queue_task_not_claimable`。需决定是否接受 |
-| U02 | `trendforce_news_weekly` | 未通过 | 〔自动证据，非结论〕窗口 10-19：首次 `article_source_partial`（准入 16、budget_deferred 3），重试 `controller_RuntimeError` → failed；文档库 trendforce_news 68 篇，最近 10-19 22:05 | 用户确认（AI 建议） | 2026-10-21 | 数据其实新（10-19 准入 16 篇），状态被误记为失败。归根因 1；原备注：同 U01 缺陷（准备时新发现）。待 10-26 22:00 触发 |
-| U03 | `semianalysis_newsletter_weekly` | 未通过 | 〔自动证据，非结论〕窗口 10-19 `failed / controller_RuntimeError`，来源状态 partial、发现 0；文档库 semianalysis 23 篇，最近抓取 10-13 08:35 | 用户确认（AI 建议） | 2026-10-21 | 10-12 起连续两周发现 0 篇，库内最新一篇停在 10-13；除根因 1 外还需查上游/抓取方式；原备注：同 U01 缺陷。待 10-26 22:15 触发 |
+| U01 | `ibkr_news_daily`（ibkr_news + yfinance_live_news） | 通过 | 〔自动证据，非结论〕窗口 10-20 `failed / controller_RuntimeError`（10-21 06:01），近 7 天失败 7 次；来源状态 partial；文档库 ibkr_news 126 篇、失败 28，最近抓取 10-20 05:06 | 用户确认（AI 建议） | 2026-10-21 | 10-21 21:14 现场运行（修复后）succeeded/partial_budget_deferred：发现 429、准入 6、隔离 4、延后 419；TWS 自检正常。原“未通过”因 partial 误判，已修。遗留：每次只收约 10 篇正文，累计延后 936 条，是否调大待你看 token 花费后定 |
+| U02 | `trendforce_news_weekly` | 通过 | 〔自动证据，非结论〕窗口 10-19：首次 `article_source_partial`（准入 16、budget_deferred 3），重试 `controller_RuntimeError` → failed；文档库 trendforce_news 68 篇，最近 10-19 22:05 | 用户确认（AI 建议） | 2026-10-21 | 10-21 21:10 现场运行：succeeded/partial_budget_deferred，发现 18、准入 16、延后 2。原“未通过”因 partial 误判，已修 |
+| U03 | `semianalysis_newsletter_weekly` | 通过 | 〔自动证据，非结论〕窗口 10-19 `failed / controller_RuntimeError`，来源状态 partial、发现 0；文档库 semianalysis 23 篇，最近抓取 10-13 08:35 | 用户确认（AI 建议） | 2026-10-21 | 10-21 21:09 现场运行：succeeded，发现 9、准入 2，文档 23→25。此前两周发现 0 篇，推测是网络问题，现已恢复 |
 | U04 | `defeatbeta_transcript_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change`（20:27），发现 111、准入 0；文档库 118 篇，最近抓取 10-16 17:41 | 用户确认（AI 建议） | 2026-10-21 | no_change，111 篇已在库 |
 | U05 | `defeatbeta_sec_index_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded / index_metadata_only`（16:38），发现 116、准入 116 | 用户确认（AI 建议） | 2026-10-21 | index_metadata_only 为设计行为；原备注：只收申报目录，不收正文 |
 | U06 | `sec_official_body_daily`（sec_edgar_filing_body） | 未通过 | 〔自动证据，非结论〕任务未启用，控制器"从未运行"；sec_edgar_filing_body 最近一次 10-17 22:18 `failed`（source_unavailable ×7）；ASML、TSM 官方披露 `unreachable`（ConnectError） | 用户确认（AI 建议） | 2026-10-21 | 10-21 网络已恢复（sec.gov 200）；17:54 手动跑一次：发现 20、准入 4、隔离 4、12 条因每次运行请求预算（20 次）用完而未取；仍未启用定时任务，待你决定是否在 schedules.yaml 开启 |
@@ -47,7 +47,7 @@
 | S11 | `consensus_msft_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:36） | 用户确认（AI 建议） | 2026-10-21 |  |
 | S12 | `company_financials_weekly.GOOG` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48），defeatbeta_stock_statement 发现 247–261 行未变 | 用户确认（AI 建议） | 2026-10-21 | 待 10-24 再看一次；原备注：待 10-24 14:30 触发 |
 | S13 | `company_financials_weekly.MU` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48） | 用户确认（AI 建议） | 2026-10-21 | 待 10-24 再看一次；原备注：待 10-24 14:30 触发 |
-| S14 | `company_financials_weekly.LRCX` |  | 〔自动证据，非结论〕控制器"从未运行"（10-19 才加入）；10-19 09:49 有一次非控制器入库，准入 272 行；`g0_company LRCX` 最新报告期 2026-06-30，季度 EPS 1.81、营收见输出 |  |  | 待 10-24 14:30 控制器首次运行；原备注：待 10-24 14:30 首次由控制器运行 |
+| S14 | `company_financials_weekly.LRCX` | 通过 | 〔自动证据，非结论〕控制器"从未运行"（10-19 才加入）；10-19 09:49 有一次非控制器入库，准入 272 行；`g0_company LRCX` 最新报告期 2026-06-30，季度 EPS 1.81、营收见输出 | 用户确认（AI 建议） | 2026-10-21 | 10-21 21:14 现场运行：no_change，发现 272 行全部未变，与 10-19 入库一致；控制器路径已走通 |
 | S15 | `macro_series_daily` |  | 〔自动证据，非结论〕窗口 10-20 `succeeded`（20:27），发现 850、准入 11、未变 839；宏观检查 ok |  |  | 运行层面正常；待抽查：ats macro show 的 CPI、非农等读数对照官方发布 |
 | S16 | `kr_semiconductor_exports_monthly` | 未通过 | 〔自动证据，非结论〕窗口 10-15 `no_change`（08:14），上游 18 行无新增；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | no_change，但宏观检查提示最新期 2026-08 已过 51 天，需查上游是否已发布 9 月数据（根因 3）；原备注：可用 10-15 证据，或待 11-15 |
 | S17 | `tw_ic_exports_monthly` | 未通过 | 〔自动证据，非结论〕窗口 10-15 `failed / command_or_result_failed`，入库记录 `parse_failed`；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | 入库 parse_failed（根因 3）；原备注：需决定；下次 11-15 |

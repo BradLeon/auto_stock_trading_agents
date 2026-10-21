@@ -79,6 +79,12 @@ for r in d["structured_sources"]:
         note = ""
         if "source_unavailable" in why or "unreachable" in r["status"]:
             note = "  ← 来源连不上，正文没拿到：不算准入也不算隔离"
+        try:
+            age = (datetime.now(tz) - datetime.fromisoformat(r["updated_at"].replace("Z", "+00:00")).astimezone(tz)).days
+        except ValueError:
+            age = 0
+        if age >= 2 and r["status"] not in ("succeeded", "no_change"):
+            note += f"  ⏱ 这是 {age} 天前的旧结果，之后没有重新探测（sec_official:*、defeatbeta_transcript:<票> 这类行只在某次财报评审里顺带探测一次）"
         print(f"  {r["source_id"][:42]:42} {r["entity"][:6]:6} {r["status"]:17} 更新 {local(r["updated_at"])}  发现 {r["discovered"]} 准入 {r["accepted"]} 隔离 {r["quarantined"]}  {why[:50]}{note}")
 print("② 候选条目累计去向（历次运行合计；一条候选只有一个去向）")
 agg = collections.defaultdict(lambda: collections.Counter())
@@ -297,4 +303,36 @@ for k, v in json.loads(r["payload"]).items():
     text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, indent=1)
     print(f"\n【{k}】"); print(textwrap.fill(text, 110) if isinstance(v, str) else text[:3000])
 '
+}
+
+# ⚠ 会写真实数据（不是只读）：现在就跑一个数据刷新任务，不用等它的例行窗口。不发模型请求。
+# 做法：用一份临时配置副本，把该任务改成“每天 00:00 UTC”，进入一个今天的新窗口，再用 tick --job 单独跑它。
+# 仓库里的 schedules.yaml 不改。一个窗口只能跑一次：今天已经跑过的任务会显示 already_claimed。
+# 注意：每日任务（如 ibkr_news_daily）的窗口标签就是今天的日期，跑完后它今天的例行窗口也算已跑。
+# 用法：g0_runnow ibkr_news_daily     （任务名要写全，entity 任务带后缀，如 company_financials_weekly.LRCX）
+g0_runnow() {
+  local job="$1" cfg
+  [[ -z "$job" ]] && { echo "用法: g0_runnow <任务名>（任务名见 g0_refresh）"; return 1; }
+  cfg="$(mktemp -t g0_runnow).yaml"
+  G0_JOB="$job" python -c '
+import os, sys, yaml
+job = os.environ["G0_JOB"]
+d = yaml.safe_load(open("config/data/schedules.yaml"))
+base = job.split(".")[0]
+for dom in ("structured", "unstructured", "derived"):
+    spec = (d.get(dom) or {}).get("jobs", {}).get(base)
+    if spec is None:
+        continue
+    spec["enabled"] = True
+    spec["schedule"], spec["at"], spec["timezone"] = "daily", "00:00", "UTC"
+    for k in ("weekday", "day_of_month", "interval_days", "anchor_date"):
+        spec.pop(k, None)
+    yaml.safe_dump(d, open(sys.argv[1], "w"), allow_unicode=True, sort_keys=False)
+    break
+else:
+    sys.exit(f"没有这个任务: {job}")
+' "$cfg" || return 1
+  echo "→ 真实运行 $job（今天的新窗口，会写入真实数据，不发模型请求）"
+  python -m ats.data.refresh tick --job "$job" --config "$cfg"
+  rm -f "$cfg"
 }

@@ -148,6 +148,8 @@ feature_flags:
     trendforce_dram: shadow
     sec_companyfacts: shadow
     company_disclosures: shadow
+    # Issuer IR statement files for foreign issuers the vendors/SEC XBRL cover late or not at all.
+    issuer_ir_files: shadow
     defeatbeta_stock_statement: shadow
     yfinance_financials: shadow
     yfinance_consensus: shadow
@@ -531,6 +533,20 @@ sources:
     cadence: event
     retention: source_policy
     internal_request_budget: {concurrency: 1, requests_per_second: 1, timeout_seconds: 30}
+  issuer_ir_files:
+    # TSM / ASML / SKHY: the issuer's own IR statements (TSMC FS.pdf, ASML results presentation and 6-K
+    # exhibits) or, for SKHY, the Euroland export (a third-party aggregator, flagged in every row's lineage).
+    # Files are read deterministically (pdfplumber / xlrd / HTML tables); config/data/issuer_ir.yaml declares
+    # the issuers, folders, parsers and currency.  Rows that fail the statement self-checks are quarantined.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: issuer investor-relations files
+    upstream: issuer IR site / SEC 6-K exhibits / Euroland export
+    adapter: issuer_ir_files
+    datasets: [company_financials]
+    cadence: event
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_second: 1, requests_per_run: 6, timeout_seconds: 60, max_file_bytes: 52428800}
   defeatbeta_stock_statement:
     catalog_status: current_partial
     persistence: persistent
@@ -1189,7 +1205,7 @@ datasets:
     # sources are individually incomplete; each selected field retains its source
     # artifact and any XBRL derivation must be reproducible.  This package-level
     # data gate does not read consumer shadow records or Workflow memory.
-    primary_sources: [defeatbeta_stock_statement, yfinance_financials, sec_companyfacts, company_disclosures]
+    primary_sources: [defeatbeta_stock_statement, yfinance_financials, sec_companyfacts, company_disclosures, issuer_ir_files]
     fallback_sources: []
     core_metrics:
       - financial.revenue.gaap
@@ -1423,6 +1439,8 @@ metric_definitions:
   financial.net_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
   financial.eps.diluted.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
   financial.eps.diluted.market_adjusted: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: split_adjusted}
+  # Basic EPS is its own metric: a source that only reports basic EPS (SKHY via Euroland) must not pose as diluted.
+  financial.eps.basic.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
   # ADR EPS is economically distinct from ordinary-share EPS.  The unit records
   # whether the issuer reported USD/ADR directly or the mirror provided TWD/ADR.
   financial.eps.diluted.adr: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
@@ -1581,6 +1599,27 @@ provider_mappings:
     amzn_release:diluted_eps: financial.eps.diluted.gaap
     amzn_release:cash_from_operations: financial.cash_from_operations.gaap
     amzn_release:capex: financial.capex.gaap
+  issuer_ir_files:
+    issuer_ir:revenue: financial.revenue.gaap
+    issuer_ir:gross_profit: financial.gross_profit.gaap
+    issuer_ir:operating_income: financial.operating_income.gaap
+    issuer_ir:net_income: financial.net_income.gaap
+    issuer_ir:eps_diluted: financial.eps.diluted.gaap
+    issuer_ir:eps_diluted_adr: financial.eps.diluted.adr
+    issuer_ir:eps_basic: financial.eps.basic.gaap
+    issuer_ir:cash_from_operations: financial.cash_from_operations.gaap
+    issuer_ir:capex: financial.capex.gaap
+    issuer_ir:cash_and_equivalents: financial.cash_and_equivalents.gaap
+    issuer_ir:inventory: financial.inventory.gaap
+    issuer_ir:total_debt: financial.total_debt.gaap
+    # sums read from the statement lines, with the derivation kept in the row's lineage
+    issuer_ir:total_debt_derived: financial.total_debt.gaap
+    # a third-party aggregator's own debt definition is not the issuer's total debt
+    issuer_ir:total_debt_provider_defined: financial.total_debt.provider_reported
+    issuer_ir:total_assets: financial.total_assets.gaap
+    issuer_ir:total_liabilities: financial.total_liabilities.gaap
+    issuer_ir:total_liabilities_derived: financial.total_liabilities.gaap
+    issuer_ir:stockholders_equity: financial.stockholders_equity.gaap
   sec_companyfacts:
     "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": financial.revenue.gaap
     "us-gaap:Revenues": financial.revenue.gaap

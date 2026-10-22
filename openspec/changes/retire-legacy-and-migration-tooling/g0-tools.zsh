@@ -212,7 +212,8 @@ else:
 if fin:
     last = max(x["period"] for x in fin)
     rows = [x for x in fin if x["period"] == last]
-    print(f"财务（{fin[0]["source_id"]}）：最新报告期 {last}，{len(rows)} 项指标，入库 {max(x["known_at"] for x in rows)[:16]} UTC")
+    srcs = "、".join(sorted({x["source_id"] for x in rows}))
+    print(f"财务（{srcs}）：最新报告期 {last}，{len(rows)} 项指标，入库 {max(x["known_at"] for x in rows)[:16]} UTC")
     for x in sorted(rows, key=lambda x: (x["metric_id"], x.get("period_basis") or ""))[:16]:
         print(f"   {x["metric_id"]:44} {x.get("period_basis") or "":8} {x["value"]:,} {x.get("unit") or ""}")
 else:

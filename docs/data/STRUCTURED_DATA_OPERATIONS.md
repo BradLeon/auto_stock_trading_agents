@@ -680,6 +680,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `trendforce_dram` | `current_partial` | `persistent` | `industry_dram_contract_price` |
 | `sec_companyfacts` | `current_partial` | `persistent` | `company_financials` |
 | `company_disclosures` | `current_partial` | `persistent` | `company_financials` |
+| `issuer_ir_files` | `current_partial` | `persistent` | `company_financials` |
 | `defeatbeta_stock_statement` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_financials` | `current_partial` | `persistent` | `company_financials` |
 | `yfinance_consensus` | `current_partial` | `persistent` | `market_consensus` |
@@ -730,6 +731,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `trendforce_dram` | `industry_dram_contract_price` | `current_partial` | `shadow` | monthly | concurrency 1；每次 1 请求；30s；页面半月 session 与发布日期均需验收 |
 | `sec_companyfacts` | `company_financials` | `current_partial` | `shadow` | event | concurrency 1；内部上限 5 req/s；30s |
 | `company_disclosures` | `company_financials` | `current_partial` | `shadow` | event | 当前覆盖 TSM 与 AMZN 的官方季度 earnings release；TSM 直接保存普通股 `TWD/share` 与 ADR `USD/ADR` EPS；concurrency 1；内部上限 1 req/s；30s |
+| `issuer_ir_files` | `company_financials` | `current_partial` | `shadow` | event | TSM / ASML / SKHY 发行人 IR 文件（TSMC `FS.pdf`、ASML 业绩演示稿与 6-K 附件、SKHY 的 Euroland 导出，后者是第三方聚合商，血缘里标 `third_party_aggregator`）。`config/data/issuer_ir.yaml` 声明目录/解析器/币种；确定性解析（pdfplumber / xlrd / HTML 表格），不发模型请求；入库前做报表自核对（现金流桥、资产负债表平衡、净利润跨表一致、币种与发行人身份），硬性不通过的期整期进隔离区并写原因，软性不一致记为行级警告；每个数值保留文件名、页码/行号、sha256；concurrency 1；内部上限 1 req/s；60s |
 | `defeatbeta_stock_statement` | `company_financials` | `current_partial` | `shadow` | snapshot | 每实体一个 query slice；60s |
 | `yfinance_financials` | `company_financials` | `current_partial` | `shadow` | event | 仅季度/年度三表 fallback；不请求或保存股价、OHLCV、期权或 quote metadata；concurrency 1；间隔至少 1s；30s |
 | `yfinance_consensus` | `market_consensus` | `current_partial` | `shadow` | event snapshot | concurrency 1；间隔至少 1s；30s |

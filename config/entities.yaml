@@ -201,6 +201,9 @@ entities:
     aliases: [ASML.AS, ASMLF]
     market: US
     filings: sec          # 20-F
+    # ASML reports in euros although the ADR is quoted in USD.  Without this the statement adapters fall
+    # back to USD for a US-market name and label EUR amounts as dollars (found in G0, 2026-10-22).
+    financial_statement_currency: EUR
 
   KLAC:
     name: KLA

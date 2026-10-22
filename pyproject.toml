@@ -2,7 +2,7 @@
 name = "ats"
 version = "0.1.0"
 description = "Multi-agent automated stock trading system (IBKR paper, LangGraph, HITL)"
-readme = "docs/DESIGN.md"
+readme = "docs/ARCHITECTURE.md"
 requires-python = ">=3.11"
 dependencies = [
     # orchestration
@@ -39,6 +39,8 @@ data = [
     "Pillow>=10.0",    # raster chart crops and local OCR input for FactSet Sector extraction
     "pysocks>=1.7",      # IMAP via local proxy (imaplib ignores proxy env vars)
     "duckdb>=1.0",       # remote parquet reads for the transcript dataset (data/defeatbeta.py)
+    "pdfplumber>=0.11.10",  # issuer IR financial-statement PDFs (TSMC FS.pdf, ASML presentation)
+    "xlrd>=2.0.2",          # Euroland .xls export of SK hynix quarterly statements
 ]
 broker = ["ib_async>=1.0"]
 memory = ["chromadb>=0.5"]

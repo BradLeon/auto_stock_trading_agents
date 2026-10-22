@@ -1,0 +1,42 @@
+# Issuer investor-relations financial files -> company_financials (source: issuer_ir_files).
+#
+# Declares SCOPE only: which issuers, which files in which folder, which parser reads them
+# and the reporting currency.  What the numbers mean and whether they are trusted is decided
+# by the parser and its self-checks (src/ats/data/sources/issuer_ir_files.py), and every
+# accepted/quarantined number keeps its file, page/row and sha256.
+#
+# Files arrive in `drop_dir` either by the issuer's scheduled acquirer or by hand
+# (last-resort fallback: put the file there and run the daily job).  var/ is git-ignored.
+version: 1
+
+defaults:
+  source_nature: issuer_official      # issuer_official | third_party_aggregator
+  abs_tolerance: 3                    # rounding slack, in the table's reported unit (millions)
+  rel_tolerance: 0.0001
+
+issuers:
+  TSM:
+    name: Taiwan Semiconductor Manufacturing
+    currency: TWD                     # TIFRS statements in NT$ million, not the ADR quote currency
+    identity_markers: ["TAIWAN SEMICONDUCTOR MANUFACTURING"]
+    files:
+      - {pattern: "*FS*.pdf", parser: tsmc_fs_pdf}
+  ASML:
+    name: ASML Holding
+    currency: EUR                     # US GAAP statements in EUR million
+    identity_markers: ["ASML"]
+    files:
+      - {pattern: "*presentation*.pdf", parser: asml_presentation_pdf}
+  SKHY:
+    name: SK hynix
+    currency: KRW                     # K-IFRS consolidated, KRW million
+    source_nature: third_party_aggregator    # Euroland export, not the company filing
+    identity_markers: ["SK HYNIX"]
+    abs_tolerance: 1
+    # Euroland defines "Cash" as cash + equivalents + short-term financial instruments on the balance
+    # sheet but the cash-flow statement's ending cash differs for 2025 1Q-2026 1Q, and it omits the
+    # exchange-rate effect on cash: both are reported as warnings, not as failures.
+    cash_definition_matches_balance_sheet: false
+    fx_effect_reported: false
+    files:
+      - {pattern: "*.xls", parser: euroland_xls}

@@ -430,6 +430,26 @@ structured:
         attempts: 2
         backoff_seconds: [300, 1800]
       semantics: SEC Company Facts as immutable vintages per fetch; same complete-report-package gate as the vendor job
+    company_financials_issuer_ir_daily:
+      # 2026-10-22 (G0): TSM / ASML / SKHY are foreign issuers whose latest quarter the vendors publish late and SEC
+      # XBRL does not carry quarterly. This job parses the issuer's own IR files (config/data/issuer_ir.yaml: folder,
+      # parser, currency) found in var/ir_drop/<ticker>/ -- placed there by the issuer's file acquirer or by hand --
+      # and writes them to the same dataset. A day with no new file is `no_change`; a file whose statements fail the
+      # self-checks (cash-flow bridge, balance sheet, net income, currency) is quarantined with the reason.
+      enabled: true
+      source: issuer_ir_files
+      entities: [TSM, ASML, SKHY]
+      datasets: [company_financials]
+      schedule: daily
+      at: "07:30"
+      timezone: UTC
+      command: ats data ingest --source {source} --dataset company_financials --entity {entity}
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: issuer IR statements as immutable vintages per file; the same complete-report-package gate as the vendor jobs decides what a consumer can read
     macro_series_daily:
       # 2026-10-16: the Macro review used to pull these indicators itself (FRED, market closes, CNN
       # fear & greed). The scheduled run re-reads a rolling window so revisions are caught; the

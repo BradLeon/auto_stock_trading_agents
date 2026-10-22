@@ -43,6 +43,12 @@ def _company_disclosures():
     return CompanyDisclosuresAdapter()
 
 
+def _issuer_ir_files():
+    from ...sources.issuer_ir_files import IssuerIRFilesAdapter
+
+    return IssuerIRFilesAdapter()
+
+
 def _defeatbeta():
     from ...sources.company_financials import DefeatBetaStatementAdapter
 
@@ -156,6 +162,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         "sec_companyfacts", _sec_companyfacts, requires_entities=True),
     "company_disclosures": RuntimeSourceSpec(
         "company_disclosures", _company_disclosures, requires_entities=True),
+    "issuer_ir_files": RuntimeSourceSpec(
+        "issuer_ir_files", _issuer_ir_files, requires_entities=True),
     "defeatbeta_stock_statement": RuntimeSourceSpec(
         "defeatbeta_stock_statement", _defeatbeta, requires_entities=True),
     "yfinance_financials": RuntimeSourceSpec(

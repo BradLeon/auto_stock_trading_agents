@@ -101,6 +101,11 @@ class CentralAdmission:
             reasons.append("published_after_fetch")
         if not artifact_id:
             reasons.append("artifact_missing")
+        # An adapter that verified its own input (statement cross-checks, identity) can name
+        # the reasons a value must not be admitted; they are quarantined, never dropped.
+        for reason in (record.raw or {}).get("quarantine_reasons") or []:
+            if reason not in reasons:
+                reasons.append(str(reason))
 
         candidate_id = self._candidate_id(batch, record)
         if reasons:

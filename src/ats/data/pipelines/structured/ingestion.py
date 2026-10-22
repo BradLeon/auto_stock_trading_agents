@@ -169,6 +169,30 @@ class CentralAdmission:
                                created=vintage.created)
 
 
+def _is_transport_error(exc: BaseException) -> bool:
+    """Is this the network failing (reset, TLS EOF, timeout, DNS) rather than the data being unparsable?
+
+    The stdlib `ConnectionError`/`TimeoutError` were the only ones recognised, so the errors the real clients
+    raise (`urllib.error.URLError`, `ssl.SSLError`, httpx and curl_cffi transport errors) were recorded as
+    `parse_failed` (G0, 2026-10-21: a Clash TLS reset on Yahoo/MOF looked like a parser bug).
+    """
+    import socket
+    import ssl
+    from urllib.error import URLError
+
+    if isinstance(exc, (ConnectionError, TimeoutError, URLError, ssl.SSLError, socket.timeout, socket.gaierror)):
+        return True
+    for module, name in (("httpx", "TransportError"), ("curl_cffi.requests.exceptions", "RequestException"),
+                         ("requests", "ConnectionError"), ("requests", "Timeout")):
+        try:
+            cls = getattr(__import__(module, fromlist=[name]), name)
+        except (ImportError, AttributeError):
+            continue
+        if isinstance(exc, cls):
+            return True
+    return False
+
+
 class IngestionPipeline:
     def __init__(self, repository: SQLiteStructuredRepository):
         self.repository = repository
@@ -200,12 +224,12 @@ class IngestionPipeline:
                 run_id, status=IngestionStatus.UNAUTHORIZED.value, note=str(exc))
             return {"run_id": run_id, "status": IngestionStatus.UNAUTHORIZED.value,
                     "accepted": 0, "quarantined": 0, "unchanged": 0}
-        except (ConnectionError, TimeoutError) as exc:
-            self.repository.finish_ingestion(
-                run_id, status=IngestionStatus.UNREACHABLE.value, note=str(exc))
-            return {"run_id": run_id, "status": IngestionStatus.UNREACHABLE.value,
-                    "accepted": 0, "quarantined": 0, "unchanged": 0}
-        except Exception as exc:  # adapter parser/schema failures are local to this run
+        except Exception as exc:  # transport faults are "unreachable"; parser/schema failures stay local to this run
+            if _is_transport_error(exc):
+                self.repository.finish_ingestion(
+                    run_id, status=IngestionStatus.UNREACHABLE.value, note=str(exc))
+                return {"run_id": run_id, "status": IngestionStatus.UNREACHABLE.value,
+                        "accepted": 0, "quarantined": 0, "unchanged": 0}
             self.repository.finish_ingestion(
                 run_id, status=IngestionStatus.PARSE_FAILED.value, note=str(exc))
             return {"run_id": run_id, "status": IngestionStatus.PARSE_FAILED.value,

@@ -34,31 +34,31 @@
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
-| S01 | `consensus_goog_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:30）；yfinance_consensus 最近 3 次入库各准入 42 行 | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口 running 为控制器补跑，非卡死；10-20 窗口 succeeded |
-| S02 | `consensus_nvda_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:31） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S03 | `consensus_skhy_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:31） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S04 | `consensus_tsm_daily` | 未通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口两次尝试（17:18、21:00）都因 curl 连 query2.finance.yahoo.com 的 TLS 被重置失败（账本误标为 parse_failed）；现场单独取同一标的快照成功，属间歇性网络问题。库里数据仍是 10-20 的。另：TSM 10-15 已发财报，库里只有 0q（2026-09-30 已发布季度）预期，下一季度预期未采集 |
-| S05 | `consensus_asml_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-21 | 10-21 17:18 已刷新；注意 ASML 10-14 已发财报，库里只有 0q（2026-09-30 已发布季度）预期，下一季度预期未采集（见 g0_consensus） |
-| S06 | `consensus_cohr_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S07 | `consensus_lrcx_daily` | 未通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33）；`g0_company LRCX`：2026-09-30 季 EPS 均值 2.18（2.09–2.28）、营收均值 81.4 亿美元，目标价均值 375.9 | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口两次尝试（17:18、21:00）都因 curl 连 query2.finance.yahoo.com 的 TLS 被重置失败（账本误标为 parse_failed）；现场单独取同一标的快照成功，属间歇性网络问题。库里数据仍是 10-20 的。LRCX 财报在 10-21 盘后，10-20 的共识可作基线 |
-| S08 | `consensus_lite_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:34） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S09 | `consensus_avgo_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:34） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S10 | `consensus_mrvl_daily` | 未通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:35） | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口两次尝试（17:18、21:00）都因 curl 连 query2.finance.yahoo.com 的 TLS 被重置失败（账本误标为 parse_failed）；现场单独取同一标的快照成功，属间歇性网络问题。库里数据仍是 10-20 的 |
-| S11 | `consensus_msft_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:36） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S12 | `company_financials_weekly.GOOG` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48），defeatbeta_stock_statement 发现 247–261 行未变 | 用户确认（AI 建议） | 2026-10-21 | 待 10-24 再看一次；原备注：待 10-24 14:30 触发 |
-| S13 | `company_financials_weekly.MU` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48） | 用户确认（AI 建议） | 2026-10-21 | 待 10-24 再看一次；原备注：待 10-24 14:30 触发 |
-| S14 | `company_financials_weekly.LRCX` | 通过 | 〔自动证据，非结论〕控制器"从未运行"（10-19 才加入）；10-19 09:49 有一次非控制器入库，准入 272 行；`g0_company LRCX` 最新报告期 2026-06-30，季度 EPS 1.81、营收见输出 | 用户确认（AI 建议） | 2026-10-21 | 10-21 21:14 现场运行：no_change，发现 272 行全部未变，与 10-19 入库一致；控制器路径已走通 |
-| S15 | `macro_series_daily` |  | 〔自动证据，非结论〕窗口 10-20 `succeeded`（20:27），发现 850、准入 11、未变 839；宏观检查 ok |  |  | 运行层面正常；待抽查：ats macro show 的 CPI、非农等读数对照官方发布 |
-| S16 | `kr_semiconductor_exports_monthly` | 未通过 | 〔自动证据，非结论〕窗口 10-15 `no_change`（08:14），上游 18 行无新增；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | no_change，但宏观检查提示最新期 2026-08 已过 51 天，需查上游是否已发布 9 月数据（根因 3）；原备注：可用 10-15 证据，或待 11-15 |
-| S17 | `tw_ic_exports_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `failed / command_or_result_failed`，入库记录 `parse_failed`；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | 10-21 22:23 用 g0_rerun 手动重采：succeeded，发现 309、准入 2。10-15 的失败是 TLS 被重置（误标 parse_failed），已修 |
-| S18 | `dram_contract_price_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `succeeded`（09:20），准入 3 | 用户确认（AI 建议） | 2026-10-21 | 可用 10-15 证据；原备注：可用 10-15 证据，或待 11-15 |
-| S19 | `ramp_ai_index_p10d_probe` | 通过 | 〔自动证据，非结论〕窗口 10-14 `no_change / upstream_no_change`；上游最新期 2026-08-01，已入库 | 用户确认（AI 建议） | 2026-10-21 | 上游最新期已入库；原备注：待 10-24 15:30 触发 |
-| S20 | `openrouter_rankings_p7d_ingest` | 通过 | 〔自动证据，非结论〕窗口 10-15 `succeeded`（10-16 10:26 补跑），准入 714 | 用户确认（AI 建议） | 2026-10-21 | 待 10-22 再看一次；原备注：待 10-22 16:00 触发 |
-| S21 | `frontier_ai_capability_model_discovery_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:36）；上游最新期 2026-10-16，已入库 | 用户确认（AI 建议） | 2026-10-21 | 待 10-23 再看一次；原备注：待 10-23 触发 |
-| S22 | `frontier_ai_capability_benchmark_probe_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:37），准入 163 | 用户确认（AI 建议） | 2026-10-21 | 待 10-23 再看一次；原备注：待 10-23 触发 |
-| S23 | `frontier_ai_capability_official_release_probe_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:38），frontier_ai_public_model_cards 准入 560 | 用户确认（AI 建议） | 2026-10-21 | 待 10-23 再看一次；原备注：待 10-23 触发 |
-| S24 | `frontier_ai_capability_full_audit_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:39） | 用户确认（AI 建议） | 2026-10-21 | 待 10-23 再看一次；原备注：待 10-23 触发 |
-| S25 | `frontier_ai_labs_revenue_p7d_refresh` | 未通过 | 〔自动证据，非结论〕窗口 10-16 `failed`：首次 `command_or_result_failed`，重试 `controller_RuntimeError`；Sacra 检查 `methodology_drift`（10-16 16:40）；10-09 那次 partial（validation_failed 1） | 用户确认（AI 建议） | 2026-10-21 | 首次失败、重试 RuntimeError，Sacra 方法变化；根因 1 与上游变化并存。可改“接受缺口”，由你决定；原备注：需决定；待 10-23 15:50 触发 |
+| S01 | `consensus_goog_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:30）；yfinance_consensus 最近 3 次入库各准入 42 行 | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；GOOG 估计季度 2026-09-30，EPS 均值 2.964 |
+| S02 | `consensus_nvda_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:31） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；NVDA 估计季度 2026-10-31，EPS 均值 2.473 |
+| S03 | `consensus_skhy_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:31） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；SKHY 估计季度 2026-09-30（币种为韩元量级，注意单位） |
+| S04 | `consensus_tsm_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；但 TSM 10-15 已发 Q3，库里只有 0q（2026-09-30 已发布季度）预期，下一季度预期未采集（采集器只取 yfinance 的 0q） |
+| S05 | `consensus_asml_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；同上：ASML 10-14 已发 Q3，下一季度预期未采集 |
+| S06 | `consensus_cohr_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；COHR EPS 均值 1.965 |
+| S07 | `consensus_lrcx_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33）；`g0_company LRCX`：2026-09-30 季 EPS 均值 2.18（2.09–2.28）、营收均值 81.4 亿美元，目标价均值 375.9 | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；LRCX 财报今天盘后，EPS 均值 2.18、营收均值 85.4 亿美元，请你对照 Yahoo Finance 抽查一次 |
+| S08 | `consensus_lite_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:34） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）（第二次重采成功 09:56）；LITE EPS 均值 4.217 |
+| S09 | `consensus_avgo_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:34） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；AVGO 估计季度 2026-10-31，EPS 均值 3.828 |
+| S10 | `consensus_mrvl_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:35） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）（第二次重采成功 09:57）；MRVL 估计季度 2026-10-31，EPS 均值 1.101 |
+| S11 | `consensus_msft_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:36） | 用户确认（AI 建议） | 2026-10-22 | 10-22 09:21–09:58 手动重采 succeeded（g0_rerun，此前 10-21 的失败是 TLS 被重置，已修分类并重采）；MSFT EPS 均值 4.716 |
+| S12 | `company_financials_weekly.GOOG` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48），defeatbeta_stock_statement 发现 247–261 行未变 | 用户确认（AI 建议） | 2026-10-22 | 10-22 11:41 手动重采 no_change（上游无新数据，库内已是最新）；GOOG 最新期 2026-06-30；范围已扩到 PEAD 11 只+MU |
+| S13 | `company_financials_weekly.MU` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48） | 用户确认（AI 建议） | 2026-10-22 | 10-22 重采 succeeded，且新增 SEC 官方日任务：MU 最新期 2026-09-03（SEC 10-K，13 项指标），数据商仍停在 2026-05-31；读取时由 SEC 供数 |
+| S14 | `company_financials_weekly.LRCX` | 通过 | 〔自动证据，非结论〕控制器"从未运行"（10-19 才加入）；10-19 09:49 有一次非控制器入库，准入 272 行；`g0_company LRCX` 最新报告期 2026-06-30，季度 EPS 1.81、营收见输出 | 用户确认（AI 建议） | 2026-10-22 | 10-22 11:44 重采 succeeded，SEC 日任务也成功；LRCX 最新期 2026-06-30（LRCX 今晚发 FQ1 财报）；控制器路径已走通 |
+| S15 | `macro_series_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（20:27），发现 850、准入 11、未变 839；宏观检查 ok | 用户确认（AI 建议） | 2026-10-22 | 窗口 10-21 succeeded（21:05）；10-22 窗口 18:30（台北）才到点；库内最新 2026-10-21；请你抽查 ats macro show 中 CPI、非农等读数对照官方发布 |
+| S16 | `kr_semiconductor_exports_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `no_change`（08:14），上游 18 行无新增；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-22 | 根因：ECOS 在 15 日之后才发布当月半导体出口指数（9 月数据 10-22 已有 733.03，15 日那次还没有），而任务只在每月 15 日跑，序列因此总慢一个月。10-22 13:27 手动重采已入库 2026-09；并新增每月 25 日第二次任务防止再慢一拍。注意：这是韩国央行的“半导体出口金额指数（2020=100）”，不是 MacroMicro 截图里的出口总额 |
+| S17 | `tw_ic_exports_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `failed / command_or_result_failed`，入库记录 `parse_failed`；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-22 | 10-21 22:23 手动重采 succeeded（准入 2 条），库内最新期已到 2026-09（318 行）；10-15 的失败是 TLS 被重置，原误标 parse_failed，已修 |
+| S18 | `dram_contract_price_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `succeeded`（09:20），准入 3 | 用户确认（AI 建议） | 2026-10-22 | 采集本身没错：我们取的是 TrendForce 的“合约价”表，页面该表最新一期就是 2H Aug（该表 Last Update 2026-08-31），库内 2026-08-16 与上游一致。你截图里更新到 10-22 的是另一张“现货价”表（Session High/Low、每日更新），我们没有采集。缺口：现货价没有进库，若分析需要更及时的 DRAM 价格，需要新增现货价数据集（待你决定） |
+| S19 | `ramp_ai_index_p10d_probe` | 通过 | 〔自动证据，非结论〕窗口 10-14 `no_change / upstream_no_change`；上游最新期 2026-08-01，已入库 | 用户确认（AI 建议） | 2026-10-22 | 10-14 no_change，上游最新期 2026-08-01 已入库，上游没有更新；下一次 10-24 |
+| S20 | `openrouter_rankings_p7d_ingest` | 通过 | 〔自动证据，非结论〕窗口 10-15 `succeeded`（10-16 10:26 补跑），准入 714 | 用户确认（AI 建议） | 2026-10-22 | 窗口 10-15 succeeded（10-16 10:26 补跑），库内最新 2026-10-15，准入 714；下一次 10-22 16:00 |
+| S21 | `frontier_ai_capability_model_discovery_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:36）；上游最新期 2026-10-16，已入库 | 用户确认（AI 建议） | 2026-10-22 | 10-16 succeeded，上游最新期 2026-10-16 已入库；下一次 10-23 |
+| S22 | `frontier_ai_capability_benchmark_probe_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:37），准入 163 | 用户确认（AI 建议） | 2026-10-22 | 10-16 succeeded，准入 163；下一次 10-23 |
+| S23 | `frontier_ai_capability_official_release_probe_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:38），frontier_ai_public_model_cards 准入 560 | 用户确认（AI 建议） | 2026-10-22 | 10-16 succeeded，frontier_ai_public_model_cards 最新 2026-10-16；下一次 10-23 |
+| S24 | `frontier_ai_capability_full_audit_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:39） | 用户确认（AI 建议） | 2026-10-22 | 10-16 succeeded；下一次 10-23 |
+| S25 | `frontier_ai_labs_revenue_p7d_refresh` | 未通过 | 〔自动证据，非结论〕窗口 10-16 `failed`：首次 `command_or_result_failed`，重试 `controller_RuntimeError`；Sacra 检查 `methodology_drift`（10-16 16:40）；10-09 那次 partial（validation_failed 1） | 用户确认（AI 建议） | 2026-10-22 | 10-22 16:05 Sacra 已恢复：重采 no_change（绿色）。修了三处：①方法漂移误判（页面每出新数据点就停止入库）；②“Q1 5.7B、Q2 6.7B”这类季度数被误当成 2026 全年而撞车被质量门隔离，现在干净排除；③结构化采集只要“已有数据入库、个别行被隔离”就记失败的问题，现在记成功并写 partial_rows_held_back。仍未解决：TickerTrends 来源还固定在单篇文章，它在博客里有一整个 ARR 系列文章（9-29 OpenAI 50.44B/Anthropic 76.8B、10-08、10-14、8-14 等），正文里就有带日期的数字，需要做“从系列里发现并抽取”，已交给后续任务；做完前保持“未通过” |
 
 ## 3. Dataflow：派生
 

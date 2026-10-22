@@ -189,6 +189,26 @@ structured:
       scope:
         release_day: monthly_upstream_latest_release_check
       semantics: monthly numerical series; append revised periods and preserve source vintage
+    kr_semiconductor_exports_late_monthly:
+      # 2026-10-22 (G0 S16): the Bank of Korea publishes the month's semiconductor export index after the 15th (2026-09 was
+      # there by 10-22 but absent on the 15th), so the 15th-only run kept the series one month behind. A second run on the
+      # 25th picks it up; an unchanged upstream is just `no_change`.
+      enabled: true
+      source: kr_ecos_exports
+      datasets: [regional_kr_exports]
+      schedule: monthly
+      day_of_month: 25
+      at: "08:15"
+      timezone: Asia/Seoul
+      command: ats data ingest --source kr_ecos_exports --dataset regional_kr_exports
+      concurrency: 1
+      freshness_slo_days: 45
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      scope:
+        release_day: monthly_upstream_latest_release_check
+      semantics: monthly numerical series; append revised periods and preserve source vintage
     tw_ic_exports_monthly:
       enabled: true
       source: tw_mof_exports

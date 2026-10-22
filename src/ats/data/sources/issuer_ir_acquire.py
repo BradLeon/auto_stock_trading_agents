@@ -16,6 +16,11 @@ from pathlib import Path
 import time
 from typing import Callable
 
+import re
+from urllib.parse import urljoin, urlparse
+
+from .issuer_ir_files import AcquisitionError
+
 ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
 SUBMISSIONS = "https://data.sec.gov/submissions"
 REQUEST_INTERVAL_SECONDS = 1.0       # internal budget: 1 request/second for SEC (their limit is 10)
@@ -155,6 +160,84 @@ def acquire_sec_6k_exhibits(config, drop: Path, request, fetched_at: datetime, *
     return report
 
 
+# --------------------------------------------------------------------------- #
+# TSMC investor-relations "Quarterly Results" page (FS.pdf link carries a content hash)
+# --------------------------------------------------------------------------- #
+_TSMC_FS_LINK = re.compile(
+    r'<a\b[^>]*?href="(?P<href>[^"]*/reports/[^"]*/FS\.pdf)"[^>]*>', re.I | re.S)
+_TSMC_ACTIVE_TAB = re.compile(r'class="active[^"]*"[^>]*data-currentYear="(?P<year>\d{4})-Q(?P<quarter>[1-4])"', re.I)
+_TSMC_TITLE = re.compile(r"<title>\s*TSMC (?P<year>\d{4}) Q(?P<quarter>[1-4]) Quarterly Results", re.I)
+
+
+def parse_tsmc_results_page(html: str) -> dict:
+    """Latest quarter and its Financial Statements link from the (server-rendered) results page."""
+    links = {match.group("href") for match in _TSMC_FS_LINK.finditer(html)}
+    if len(links) != 1:
+        raise AcquisitionError(
+            f"TSMC results page: expected one FS.pdf link, found {len(links)} -- the page layout changed")
+    quarter = _TSMC_ACTIVE_TAB.search(html) or _TSMC_TITLE.search(html)
+    if not quarter:
+        raise AcquisitionError("TSMC results page: cannot tell which quarter the page shows")
+    return {"href": next(iter(links)), "year": int(quarter.group("year")), "quarter": int(quarter.group("quarter"))}
+
+
+def acquire_tsmc_quarterly_results(config, drop: Path, request, fetched_at: datetime, *,
+                                   http: Callable[[str], bytes] | None = None, sleep=time.sleep) -> dict:
+    """Light check of TSMC's results page; download FS.pdf only when its link is new.
+
+    A quiet day costs one request (the page).  The link contains a content hash, so a changed link
+    means a new file; a downloaded file whose sha256 is already in the folder is not stored twice
+    (the existing copy just gets its source URL recorded).
+    """
+    settings = config.raw.get("acquisition") or {}
+    page_url = str(settings["page_url"])
+    host = str(settings.get("allowed_host") or urlparse(page_url).netloc)
+    headers = {"User-Agent": str(settings.get("user_agent") or ""), "Accept": "text/html,application/pdf"}
+    client = _Client(http, budget=REQUESTS_PER_RUN, interval=REQUEST_INTERVAL_SECONDS if http is None else 0.0,
+                     sleep=sleep, headers=headers)
+    state = _load_state(drop)
+    known: dict = state.setdefault("tsmc_results", {})
+    report = {"kind": "tsmc_quarterly_results", "downloaded": [], "page_url": page_url}
+    try:
+        page = parse_tsmc_results_page(client.get(page_url).decode("utf-8", errors="replace"))
+        url = urljoin(page_url, page["href"])
+        if urlparse(url).netloc != host or not urlparse(url).path.endswith("/FS.pdf"):
+            raise AcquisitionError(f"TSMC results page: unexpected FS.pdf location {url}")
+        label = f"{page['year']}Q{page['quarter']}"
+        report.update(quarter=label, fs_url=url)
+        previous = known.get(url)
+        if previous and (drop / previous["file"]).is_file():
+            report["status"] = "link_unchanged"
+            return report
+        payload = client.get(url)
+        if not payload.startswith(b"%PDF"):
+            raise AcquisitionError(f"TSMC FS.pdf at {url} is not a PDF")
+        sha256 = hashlib.sha256(payload).hexdigest()
+        meta = {"source_url": url, "page_url": page_url, "quarter": label, "form": "FS.pdf"}
+        twin = next((path for path in sorted(drop.glob("*.pdf"))
+                     if hashlib.sha256(path.read_bytes()).hexdigest() == sha256), None) if drop.is_dir() else None
+        if twin is not None:
+            sidecar = twin.with_name(twin.name + ".meta.json")
+            if not sidecar.exists():
+                sidecar.write_text(json.dumps({**meta, "sha256": sha256, "bytes": len(payload),
+                                               "downloaded_at": fetched_at.isoformat(),
+                                               "note": "file was already in the folder; URL recorded afterwards"},
+                                              indent=1, sort_keys=True), encoding="utf-8")
+            known[url] = {"file": twin.name, "sha256": sha256, "quarter": label}
+            report["status"] = "already_have_this_file"
+            report["file"] = twin.name
+        else:
+            path = _write_download(drop, f"FS_{label}_{sha256[:8]}.pdf", payload, meta)
+            known[url] = {"file": path.name, "sha256": sha256, "quarter": label}
+            report["status"] = "downloaded"
+            report["downloaded"].append(path.name)
+    finally:
+        _save_state(drop, state)
+        report["requests"] = client.requests
+    return report
+
+
 ACQUIRERS: dict[str, Callable] = {
     "sec_6k_exhibits": acquire_sec_6k_exhibits,
+    "tsmc_quarterly_results": acquire_tsmc_quarterly_results,
 }

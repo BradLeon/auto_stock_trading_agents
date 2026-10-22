@@ -21,6 +21,13 @@ issuers:
     identity_markers: ["TAIWAN SEMICONDUCTOR MANUFACTURING"]
     files:
       - {pattern: "*FS*.pdf", parser: tsmc_fs_pdf}
+    acquisition:
+      # investor.tsmc.com renders the latest quarter server-side; its FS.pdf link carries a content hash,
+      # so the link changing is the signal of a new file (read from the page each time, never guessed)
+      kind: tsmc_quarterly_results
+      page_url: https://investor.tsmc.com/english/quarterly-results
+      allowed_host: investor.tsmc.com
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"   # the site answers 403 to non-browser agents
   ASML:
     name: ASML Holding
     currency: EUR                     # US GAAP statements in EUR million

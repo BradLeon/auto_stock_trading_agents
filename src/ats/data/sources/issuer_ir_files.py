@@ -58,6 +58,10 @@ class ParseError(ValueError):
     """The file is not the document the parser expects; nothing may be written."""
 
 
+class AcquisitionError(RuntimeError):
+    """The issuer's site no longer looks the way the acquirer expects (not a network fault)."""
+
+
 @dataclass(frozen=True)
 class Located:
     """One reported number and where in the file it was read."""
@@ -453,6 +457,11 @@ class IssuerIRFilesAdapter:
                 acquisition = acquirer(config, drop, request, fetched_at) or {}
             except PermissionError:
                 raise
+            except AcquisitionError as exc:
+                acquisition = {"error": str(exc)}
+                failures.append(AdapterFailure(
+                    status=IngestionStatus.PARSE_FAILED, entity_id=symbol,
+                    message=f"{symbol} IR file acquisition: {exc}"))
             except Exception as exc:
                 from ..pipelines.structured.ingestion import _is_transport_error
                 if not _is_transport_error(exc):

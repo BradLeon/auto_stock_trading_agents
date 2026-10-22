@@ -604,3 +604,98 @@ def test_asml_exhibit_patterns_cover_both_real_file_names_and_skip_the_ifrs_repo
     for name in ("statutoryinterimreport20.htm", "pressreleasefinancialresul.htm", "presentationinvestorrela.htm",
                  "form6-kquarterlyfilings.htm", "financial_statementsxusx001.jpg"):
         assert not any(fnmatch.fnmatch(name, pattern) for pattern in acquire)
+
+
+# --------------------------------------------------------------------------- #
+# TSMC investor-relations page acquirer
+# --------------------------------------------------------------------------- #
+TSMC_PAGE = FIXTURES / "tsmc_quarterly_results_2026q3_page.html"
+TSMC_PAGE_URL = "https://investor.tsmc.com/english/quarterly-results"
+TSMC_FS_PATH = "/english/encrypt/files/encrypt_file/reports/2026-10/3a94d1034b9e6b22446b674f7aaf3d088a12a193/FS.pdf"
+TSMC_FS_URL = "https://investor.tsmc.com" + TSMC_FS_PATH
+PDF_BYTES = b"%PDF-1.5 pretend statements"
+
+
+class _TsmcSite:
+    def __init__(self, page=None, pdf=PDF_BYTES):
+        self.pages = {TSMC_PAGE_URL: (page or TSMC_PAGE.read_text(encoding="utf-8")).encode(), TSMC_FS_URL: pdf}
+        self.requests = []
+
+    def __call__(self, url):
+        self.requests.append(url)
+        return self.pages[url]
+
+
+def _tsm_config():
+    return load_issuer_configs()["TSM"]
+
+
+def test_tsmc_page_parser_reads_the_latest_quarter_and_its_hashed_fs_link():
+    page = issuer_ir_acquire.parse_tsmc_results_page(TSMC_PAGE.read_text(encoding="utf-8"))
+    assert page == {"href": TSMC_FS_PATH, "year": 2026, "quarter": 3}
+    with pytest.raises(issuer_ir_acquire.AcquisitionError, match="layout changed"):
+        issuer_ir_acquire.parse_tsmc_results_page("<html><title>TSMC 2026 Q3 Quarterly Results</title></html>")
+
+
+def test_tsmc_acquirer_downloads_a_new_link_once_and_a_quiet_day_is_one_request(tmp_path):
+    site = _TsmcSite()
+    drop = tmp_path / "drop"
+    first = issuer_ir_acquire.acquire_tsmc_quarterly_results(_tsm_config(), drop, None, NOW, http=site)
+    assert first["status"] == "downloaded" and first["requests"] == 2 and first["quarter"] == "2026Q3"
+    name = first["downloaded"][0]
+    assert name.startswith("FS_2026Q3_") and (drop / name).read_bytes() == PDF_BYTES
+    meta = json.loads((drop / (name + ".meta.json")).read_text())
+    assert meta["source_url"] == TSMC_FS_URL and meta["page_url"] == TSMC_PAGE_URL and meta["quarter"] == "2026Q3"
+
+    site.requests.clear()
+    second = issuer_ir_acquire.acquire_tsmc_quarterly_results(_tsm_config(), drop, None, NOW, http=site)
+    assert second["status"] == "link_unchanged" and second["requests"] == 1 and site.requests == [TSMC_PAGE_URL]
+
+    # the file was deleted by hand: the unchanged link is fetched again
+    (drop / name).unlink()
+    third = issuer_ir_acquire.acquire_tsmc_quarterly_results(_tsm_config(), drop, None, NOW, http=site)
+    assert third["status"] == "downloaded"
+
+
+def test_tsmc_acquirer_does_not_store_a_file_it_already_has_by_hash(tmp_path):
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    (drop / "TSM_FS.pdf").write_bytes(PDF_BYTES)               # the manual download of the same file
+    report = issuer_ir_acquire.acquire_tsmc_quarterly_results(_tsm_config(), drop, None, NOW, http=_TsmcSite())
+    assert report["status"] == "already_have_this_file" and report["file"] == "TSM_FS.pdf"
+    assert sorted(p.name for p in drop.glob("*.pdf")) == ["TSM_FS.pdf"]
+    meta = json.loads((drop / "TSM_FS.pdf.meta.json").read_text())
+    assert meta["source_url"] == TSMC_FS_URL and "already in the folder" in meta["note"]
+
+
+def test_tsmc_acquirer_refuses_a_foreign_host_a_non_pdf_and_a_changed_page(tmp_path):
+    page = TSMC_PAGE.read_text(encoding="utf-8").replace('href="/english/encrypt', 'href="https://evil.example/english/encrypt')
+    with pytest.raises(issuer_ir_acquire.AcquisitionError, match="unexpected FS.pdf location"):
+        issuer_ir_acquire.acquire_tsmc_quarterly_results(
+            _tsm_config(), tmp_path / "a", None, NOW, http=lambda url: page.encode())
+    with pytest.raises(issuer_ir_acquire.AcquisitionError, match="not a PDF"):
+        issuer_ir_acquire.acquire_tsmc_quarterly_results(
+            _tsm_config(), tmp_path / "b", None, NOW, http=_TsmcSite(pdf=b"<html>blocked</html>"))
+    assert not list((tmp_path / "b").glob("*.pdf"))
+
+
+def test_adapter_reports_a_changed_tsmc_page_as_parse_failed_and_still_reads_existing_files(tmp_path, monkeypatch):
+    from ats.data.sources import issuer_ir_parsers
+    monkeypatch.setitem(issuer_ir_parsers.PARSERS, "tsmc_fs_pdf",
+                        _FakeDocParser(parse_tsmc_fs_pages(_pages("tsm_fs_3q2026_pages.json"))))
+    _drop(tmp_path, "TSM", "TSM_FS.pdf", b"tsm-bytes")
+
+    def acquirer(config, drop, request, fetched_at):
+        return issuer_ir_acquire.acquire_tsmc_quarterly_results(
+            config, drop, request, fetched_at, http=lambda url: b"<html>redesigned</html>")
+
+    repo = _repo(tmp_path)
+    result = _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"TSM": acquirer}), "TSM")
+    assert result["status"] == "partial" and result["accepted"] == 42
+    run = repo.conn.execute("SELECT note FROM structured_ingestion_runs WHERE run_id=?", (result["run_id"],)).fetchone()
+    assert "layout changed" in run["note"]
+
+
+def test_tsmc_user_agent_is_a_browser_one_because_the_site_refuses_others():
+    ua = _tsm_config().raw["acquisition"]["user_agent"]
+    assert ua.startswith("Mozilla/5.0")

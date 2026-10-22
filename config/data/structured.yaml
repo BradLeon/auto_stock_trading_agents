@@ -519,7 +519,7 @@ sources:
     datasets: [company_financials]
     cadence: event
     retention: full_response
-    internal_request_budget: {concurrency: 1, requests_per_second: 5, timeout_seconds: 30}
+    internal_request_budget: {concurrency: 1, requests_per_second: 5, requests_per_run: 3, timeout_seconds: 30}
   company_disclosures:
     # Current partial: official TSM quarterly release (SEC 6-K/EX-99.1) only.
     # No annual 20-F obligation is implied by this source's acceptance scope.

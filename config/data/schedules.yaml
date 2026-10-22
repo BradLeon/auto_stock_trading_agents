@@ -390,11 +390,14 @@ structured:
       #             correctly refuses it; an official-disclosure source is needed (not pilot).
       #   SKHY      both vendors quarantine on unit_unresolved/currency_unresolved; needs a
       #             currency mapping before it can be admitted.
-      #   sec_companyfacts was unreachable from this host (TLS reset) during the probe.
+      #   sec_companyfacts was unreachable from this host (TLS reset) during the probe (reachable again 2026-10-21).
       # Widening = adding names here; names the gate rejects stay visible as failed runs.
       enabled: true
       source: defeatbeta_stock_statement
-      entities: [GOOG, MU, LRCX]   # LRCX added 2026-10-19: pre-earnings baseline (10.6) needs a governed financial package
+      # 2026-10-22 (G0): the scope is the PEAD target list (config/pead.yaml) plus MU, as the dataset's
+      # `coverage_from` declares; it was only GOOG, MU, LRCX during the pilot. Names a vendor cannot supply a complete
+      # package for (SKHY currency, ASML/TSM foreign filers) stay visible as failed/quarantined runs, not silent gaps.
+      entities: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
       datasets: [company_financials]
       schedule: weekly
       weekday: saturday
@@ -407,6 +410,26 @@ structured:
         attempts: 2
         backoff_seconds: [300, 1800]
       semantics: provider statements as immutable vintages per fetch; the complete-report-package gate decides what a consumer can read, rejected rows are quarantined and shown as an explicit gap
+    company_financials_sec_daily:
+      # 2026-10-22 (G0): official SEC XBRL (10-Q/10-K) for the US filers of the PEAD list. The vendors (defeatbeta,
+      # yfinance) lag a filing by days to weeks (MU: SEC had the FY ending 2026-09-03 filed 10-09 while the vendors
+      # still ended at 2026-05-31). Both jobs write the same dataset: the read side takes the first complete package
+      # per period, so the vendor still wins a period both have, and a period only the SEC has is served from the SEC.
+      # Foreign private issuers (TSM, ASML, SKHY) file 20-F/6-K, which carry no quarterly XBRL: not listed here.
+      enabled: true
+      source: sec_companyfacts
+      entities: [GOOG, NVDA, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      datasets: [company_financials]
+      schedule: daily
+      at: "07:00"
+      timezone: UTC
+      command: ats data ingest --source {source} --dataset company_financials --entity {entity}
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: SEC Company Facts as immutable vintages per fetch; same complete-report-package gate as the vendor job
     macro_series_daily:
       # 2026-10-16: the Macro review used to pull these indicators itself (FRED, market closes, CNN
       # fear & greed). The scheduled run re-reads a rolling window so revisions are caught; the
@@ -442,6 +465,7 @@ unstructured:
       retry: {attempts: 2, backoff_seconds: [300, 900]}
       semantics: pinned HF revision/spec/hash; index metadata only, never SEC body
     sec_official_body_daily:
+      enabled: true   # 2026-10-21: G0 verification; sec.gov reachable again, one manual run admitted 4 bodies
       source: sec_edgar_filing_body
       datasets: [sec_filing_documents]
       schedule: daily

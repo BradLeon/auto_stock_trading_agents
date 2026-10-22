@@ -525,3 +525,27 @@ def test_frozen_fixtures_produce_no_quarantined_observations():
             FetchRequest(source_id="tickertrends_public_research",
                          dataset_id="frontier_ai_labs_revenue"))
     assert seed_batch.status is IngestionStatus.SUCCEEDED
+
+
+def test_a_newer_period_or_more_content_is_not_methodology_drift():
+    """New data points must flow in; only a layout or parser change may stop ingestion (G0 S25)."""
+    from ats.data.sources.frontier_ai_labs_revenue import methodology_fingerprint
+
+    layout = semantic_fingerprint('<h2 id="revenue">Revenue</h2><table><tr><th>Time</th><th>Metric</th></tr></table>')
+    assert methodology_fingerprint(layout, "2026-05", "v1") == methodology_fingerprint(layout, "2026-09", "v1")
+    assert methodology_fingerprint(layout, "2026-05", "v1") != methodology_fingerprint(layout, "2026-05", "v2")
+    base = '<h2 id="revenue">Revenue</h2><table><tr><th>Time</th></tr></table><span aria-hidden="true">x</span>'
+    assert semantic_fingerprint(base) == semantic_fingerprint(base + '<span aria-hidden="true">more</span>')
+
+
+def test_quarterly_figures_are_excluded_not_stored_as_the_year():
+    """"from $5.7B in Q1 to $6.7B in Q2" must not become two annual 2026 cells (G0 S25)."""
+    from ats.data.sources.frontier_ai_labs_revenue import parse_sacra_page
+
+    page = {"slug": "openai", "entity_id": "OPENAI", "company": "OpenAI", "url": "https://sacra.com/c/openai/"}
+    html = ('<h2 id="revenue">Revenue</h2><p>That growth continued into 2026, with OpenAI quarterly revenue rising '
+            'from $5.7B in Q1 to $6.7B in Q2 of 2026.</p>')
+    candidates, _ = parse_sacra_page(html, page=page)
+    quarterly = [c for c in candidates if c.value in (5.7e9, 6.7e9)]
+    assert quarterly and all(not c.accepted for c in quarterly)
+    assert all("quarterly_figure_not_annual" in c.diagnostics for c in quarterly)

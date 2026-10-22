@@ -415,7 +415,7 @@ def semantic_fingerprint(page_html: str) -> str:
         "revenue_metrics_table": "Revenue Metrics" in page_html,
         "table_columns": re.findall(r"<th[^>]*>\s*([A-Za-z]+)\s*</th>", page_html, re.I)[:4],
         "citation_toggle": "citation-toggle" in page_html,
-        "paywall_markers": page_html.count('aria-hidden="true"'),
+        "paywall_markers": 'aria-hidden="true"' in page_html,    # presence only: the count moves with the content
     }
     return _sha256(_stable_json(anchors))
 
@@ -670,6 +670,10 @@ def build_candidate(*, match_literal: str, match_start: int, before: str, after:
             period, period_start, period_end, period_basis = resolved[0]
             year_source = resolved[1]
 
+    if period_basis == "annual" and re.search(r"\bQ[1-4]\b", after[:32]):
+        # "from $5.7B in Q1 to $6.7B in Q2" are quarterly figures. Read as the year they collide in one annual cell
+        # (the quality gate quarantined the second one every run) and, worse, a quarter would be stored as a year.
+        reasons.append("quarterly_figure_not_annual")
     identity = classify_identity(window, row_type=row_type)
     metric_id = classify_metric(
         window, period_basis=period_basis, row_type=row_type,
@@ -855,9 +859,15 @@ def _parse_iso(value: str) -> datetime:
 
 
 def methodology_fingerprint(semantic: str, latest_period: str, parser_version: str) -> str:
-    """Bind the semantic layout, latest period family and parser version together."""
+    """Bind the semantic layout and parser version together.
+
+    `latest_period` is accepted for the call sites but is NOT part of the hash: the newest period on the page is
+    data, not methodology. It used to be hashed, so every new data point (OpenAI 2025-12 -> 2026-09, Anthropic
+    2026-05 -> 2026-07) changed the fingerprint, the discovery step called it `methodology_drift` and stopped, and the
+    source could never ingest a newer period again (G0 S25, 2026-10-22).
+    """
     return _sha256(_stable_json({
-        "semantic_fingerprint": semantic, "latest_period": latest_period,
+        "semantic_fingerprint": semantic,
         "parser_version": parser_version,
         "methodology_regime": METHODOLOGY_REGIME_THIRD_PARTY_ESTIMATE,
     }))

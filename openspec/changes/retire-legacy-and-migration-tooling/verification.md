@@ -37,20 +37,20 @@
 | S01 | `consensus_goog_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:30）；yfinance_consensus 最近 3 次入库各准入 42 行 | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口 running 为控制器补跑，非卡死；10-20 窗口 succeeded |
 | S02 | `consensus_nvda_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:31） | 用户确认（AI 建议） | 2026-10-21 |  |
 | S03 | `consensus_skhy_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:31） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S04 | `consensus_tsm_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S05 | `consensus_asml_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-21 |  |
+| S04 | `consensus_tsm_daily` | 未通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口两次尝试（17:18、21:00）都因 curl 连 query2.finance.yahoo.com 的 TLS 被重置失败（账本误标为 parse_failed）；现场单独取同一标的快照成功，属间歇性网络问题。库里数据仍是 10-20 的。另：TSM 10-15 已发财报，库里只有 0q（2026-09-30 已发布季度）预期，下一季度预期未采集 |
+| S05 | `consensus_asml_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:32） | 用户确认（AI 建议） | 2026-10-21 | 10-21 17:18 已刷新；注意 ASML 10-14 已发财报，库里只有 0q（2026-09-30 已发布季度）预期，下一季度预期未采集（见 g0_consensus） |
 | S06 | `consensus_cohr_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S07 | `consensus_lrcx_daily` |  | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33）；`g0_company LRCX`：2026-09-30 季 EPS 均值 2.18（2.09–2.28）、营收均值 81.4 亿美元，目标价均值 375.9 |  |  | 运行层面正常；待抽查：LRCX 共识 EPS 均值 2.18、营收 81.4 亿对照 Yahoo Finance；原备注：可与 Yahoo Finance 页面对照 |
+| S07 | `consensus_lrcx_daily` | 未通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:33）；`g0_company LRCX`：2026-09-30 季 EPS 均值 2.18（2.09–2.28）、营收均值 81.4 亿美元，目标价均值 375.9 | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口两次尝试（17:18、21:00）都因 curl 连 query2.finance.yahoo.com 的 TLS 被重置失败（账本误标为 parse_failed）；现场单独取同一标的快照成功，属间歇性网络问题。库里数据仍是 10-20 的。LRCX 财报在 10-21 盘后，10-20 的共识可作基线 |
 | S08 | `consensus_lite_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:34） | 用户确认（AI 建议） | 2026-10-21 |  |
 | S09 | `consensus_avgo_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:34） | 用户确认（AI 建议） | 2026-10-21 |  |
-| S10 | `consensus_mrvl_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:35） | 用户确认（AI 建议） | 2026-10-21 |  |
+| S10 | `consensus_mrvl_daily` | 未通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:35） | 用户确认（AI 建议） | 2026-10-21 | 10-21 窗口两次尝试（17:18、21:00）都因 curl 连 query2.finance.yahoo.com 的 TLS 被重置失败（账本误标为 parse_failed）；现场单独取同一标的快照成功，属间歇性网络问题。库里数据仍是 10-20 的 |
 | S11 | `consensus_msft_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:36） | 用户确认（AI 建议） | 2026-10-21 |  |
 | S12 | `company_financials_weekly.GOOG` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48），defeatbeta_stock_statement 发现 247–261 行未变 | 用户确认（AI 建议） | 2026-10-21 | 待 10-24 再看一次；原备注：待 10-24 14:30 触发 |
 | S13 | `company_financials_weekly.MU` | 通过 | 〔自动证据，非结论〕窗口 10-17 `no_change`（14:48） | 用户确认（AI 建议） | 2026-10-21 | 待 10-24 再看一次；原备注：待 10-24 14:30 触发 |
 | S14 | `company_financials_weekly.LRCX` | 通过 | 〔自动证据，非结论〕控制器"从未运行"（10-19 才加入）；10-19 09:49 有一次非控制器入库，准入 272 行；`g0_company LRCX` 最新报告期 2026-06-30，季度 EPS 1.81、营收见输出 | 用户确认（AI 建议） | 2026-10-21 | 10-21 21:14 现场运行：no_change，发现 272 行全部未变，与 10-19 入库一致；控制器路径已走通 |
 | S15 | `macro_series_daily` |  | 〔自动证据，非结论〕窗口 10-20 `succeeded`（20:27），发现 850、准入 11、未变 839；宏观检查 ok |  |  | 运行层面正常；待抽查：ats macro show 的 CPI、非农等读数对照官方发布 |
 | S16 | `kr_semiconductor_exports_monthly` | 未通过 | 〔自动证据，非结论〕窗口 10-15 `no_change`（08:14），上游 18 行无新增；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | no_change，但宏观检查提示最新期 2026-08 已过 51 天，需查上游是否已发布 9 月数据（根因 3）；原备注：可用 10-15 证据，或待 11-15 |
-| S17 | `tw_ic_exports_monthly` | 未通过 | 〔自动证据，非结论〕窗口 10-15 `failed / command_or_result_failed`，入库记录 `parse_failed`；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | 入库 parse_failed（根因 3）；原备注：需决定；下次 11-15 |
+| S17 | `tw_ic_exports_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `failed / command_or_result_failed`，入库记录 `parse_failed`；宏观检查提醒：最新期 2026-08 已过 51 天 | 用户确认（AI 建议） | 2026-10-21 | 10-21 22:23 用 g0_rerun 手动重采：succeeded，发现 309、准入 2。10-15 的失败是 TLS 被重置（误标 parse_failed），已修 |
 | S18 | `dram_contract_price_monthly` | 通过 | 〔自动证据，非结论〕窗口 10-15 `succeeded`（09:20），准入 3 | 用户确认（AI 建议） | 2026-10-21 | 可用 10-15 证据；原备注：可用 10-15 证据，或待 11-15 |
 | S19 | `ramp_ai_index_p10d_probe` | 通过 | 〔自动证据，非结论〕窗口 10-14 `no_change / upstream_no_change`；上游最新期 2026-08-01，已入库 | 用户确认（AI 建议） | 2026-10-21 | 上游最新期已入库；原备注：待 10-24 15:30 触发 |
 | S20 | `openrouter_rankings_p7d_ingest` | 通过 | 〔自动证据，非结论〕窗口 10-15 `succeeded`（10-16 10:26 补跑），准入 714 | 用户确认（AI 建议） | 2026-10-21 | 待 10-22 再看一次；原备注：待 10-22 16:00 触发 |

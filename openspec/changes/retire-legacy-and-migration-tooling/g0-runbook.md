@@ -41,6 +41,19 @@ cd /Users/liuchao/Code/trading/auto_stock_trading_agents && source openspec/chan
 
 > 说明：`g0_sources`、`g0_product technical` 要几十秒（前者扫全部来源，后者会实时取一次行情，不是模型请求）。`g0_latest`/`g0_show` 用 `sqlite3 -readonly` 只读打开 `var/ats.sqlite`。
 
+### 0.3.1 现在就重采（会写数据）
+
+不想等例行窗口时，用 `g0_rerun` 批量重采（写真实数据，不发模型请求）：
+
+```bash
+g0_rerun network --dry      # 先看会跑哪些：10-21 圈定的受网络断连影响的任务
+g0_rerun network            # 确认后执行；也可以 g0_rerun U / S / D，或写任务名片段，如 g0_rerun consensus_ tw_ic
+g0_history consensus_tsm 3  # 看某个任务每个窗口的结果、尝试次数和错误原文
+```
+
+- 每次重采有自己的窗口标签（如 `2026-10-21~manual-20261021T143000`），同一天可以反复跑，不占用例行窗口；未启用的任务不会跑。
+- 数据是追加新版本：上游有变化就写入新的一版并成为最新，没变化记 `no_change`；旧版本保留作审计，不会被删除或改写。
+
 ### 0.4 建议顺序与时长
 
 | 轮次 | 做什么 | 预计时长 |

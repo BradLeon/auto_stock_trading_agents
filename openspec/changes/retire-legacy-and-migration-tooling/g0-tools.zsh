@@ -104,25 +104,94 @@ for r in d["document_sources"]:
 ' "$@"
 }
 
-# 结构化采集记录：某个来源最近的入库与“上游有没有新一期”检查。参数：来源 id、条数（默认 5）
+# 结构化采集记录：最近的入库批次，以及“上游有没有新一期”的检查。
+# 参数（可选）：来源名或任务名的片段（如 yfinance_consensus、consensus_tsm_daily、macro、exports）；不带参数 = 全部结构化来源。
+# 注意：入库批次只记来源和数据集，不记标的；共识预期要按标的看，用 g0_consensus。
 g0_ingest() {
-  ats data ingestion-history --source "$1" --limit "${2:-5}" | python -c '
+  local rows="${2:-2}"
+  G0_MAP="$(g0_map)" python -c '
+import json, os, sys
+jobmap = json.loads(os.environ["G0_MAP"])
+want = sys.argv[1] if len(sys.argv) > 1 else ""
+structured = sorted({s for m in jobmap.values() if m["domain"] == "structured" for s in m["sources"]})
+terms = {want} if want else set()
+for job, m in jobmap.items():
+    if want and want in job:
+        terms |= set(m["sources"])
+picked = [s for s in structured if not want or any(t in s for t in terms)]
+if not picked:
+    sys.exit(f"没有结构化来源或任务名里含“{want}”。来源示例: " + ", ".join(structured[:6]))
+print("\n".join(picked))
+' "${1:-}" > /private/tmp/g0_ingest_sources.$$ || { rm -f /private/tmp/g0_ingest_sources.$$; return 1; }
+  local src
+  while read -r src; do
+    echo "== $src"
+    ats data ingestion-history --source "$src" --limit "$rows" | python -c '
 import json, os, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
 rows = json.load(sys.stdin) or []
-if not rows: print("（没有入库记录）")
+if not rows: print("  （没有入库记录）")
 def when(r): return r.get("started_at") or r.get("checked_at") or ""
 for r in sorted(rows, key=when, reverse=True):
     at = datetime.fromisoformat(when(r)).astimezone(tz).strftime("%m-%d %H:%M")
-    if r["record_type"] == "source_check":
+    if r.get("record_type") == "source_check":
         same = "已入库" if r.get("latest_upstream_identity") == r.get("latest_ingested_identity") else "上游有未入库版本"
-        print(f"{at}  {r["dataset_id"][:34]:34} 检查 {r["status"]:10} 上游最新期 {r.get("latest_available_period") or "-"}（{same}）")
+        print(f"  {at}  {r.get("dataset_id", "")[:34]:34} 检查 {r["status"]:10} 上游最新期 {r.get("latest_available_period") or "-"}（{same}）")
     else:
         reasons = r.get("reason_codes_json") or ""
-        print(f"{at}  {r["dataset_id"][:34]:34} 入库 {r["status"]:10} 发现 {r["discovered"]:>4} 准入 {r["accepted"]:>4} 隔离 {r["quarantined"]:>3} 未变 {r["unchanged"]:>4}  {reasons if reasons not in ("{}", "[]") else ""}"[:190])
+        note = (r.get("note") or "")[:70]
+        print(f"  {at}  {r.get("dataset_id", "")[:34]:34} 入库 {r["status"]:12} 发现 {r["discovered"]:>4} 准入 {r["accepted"]:>4} 隔离 {r["quarantined"]:>3} 未变 {r["unchanged"]:>4}  {reasons if reasons not in ("{}", "[]") else ""} {note}"[:230])
 '
+  done < /private/tmp/g0_ingest_sources.$$
+  rm -f /private/tmp/g0_ingest_sources.$$
+}
+
+# 共识预期按标的看：每只最近一次入库时间、估计针对哪个季度、EPS/营收/目标价均值，并标出异常。
+# 参数（可选）：标的名片段。异常含义：
+#   过旧   最近入库超过 36 小时
+#   已发布 估计针对的季度已经发完财报（下次财报日离该季度末 > 60 天，或财报日已过），下一季度的预期没有采集（只存 0q）
+g0_consensus() {
+  python - "${1:-}" <<'PY'
+import json, os, sqlite3, sys
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+want = sys.argv[1].upper()
+c = sqlite3.connect("file:var/data.sqlite?mode=ro", uri=True)
+rows = c.execute("""SELECT s.entity_id, s.metric_id, s.dimensions_json, o.period, o.value, o.known_at
+    FROM structured_observations o JOIN structured_series s USING(series_id)
+    WHERE s.dataset_id='market_consensus' AND s.metric_id IN
+      ('consensus.eps.mean','consensus.revenue.mean','consensus.price_target.mean')""").fetchall()
+latest = {}
+for ent, metric, dims, period, value, known in rows:
+    if want and want not in ent:
+        continue
+    key = (ent, metric)
+    if key not in latest or known > latest[key][3]:
+        latest[key] = (period, value, dims, known)
+ents = sorted({k[0] for k in latest})
+now = datetime.now(timezone.utc)
+print(f"{'标的':10} {'最近入库(台北)':14} {'估计季度':11} {'下次财报日':11} {'EPS均值':>9} {'营收均值':>12} {'目标价均值':>9}  提示")
+for ent in ents:
+    eps = latest.get((ent, "consensus.eps.mean"))
+    rev = latest.get((ent, "consensus.revenue.mean"))
+    tgt = latest.get((ent, "consensus.price_target.mean"))
+    known = max(v[3] for k, v in latest.items() if k[0] == ent)
+    age_h = (now - datetime.fromisoformat(known)).total_seconds() / 3600
+    dims = json.loads(eps[2]) if eps else {}
+    event = dims.get("target_event_date", "")
+    flags = []
+    if age_h > 36: flags.append(f"过旧({age_h/24:.0f}天)")
+    if eps and event:
+        gap = (date.fromisoformat(event) - date.fromisoformat(eps[0])).days
+        if gap > 60 or date.fromisoformat(event) < now.date():
+            flags.append("已发布，下一季度预期未采集")
+    at = datetime.fromisoformat(known).astimezone(tz).strftime("%m-%d %H:%M")
+    f = lambda v, fmt: format(v[1], fmt) if v else "-"
+    print(f"{ent:10} {at:14} {(eps[0] if eps else '-'):11} {event or '-':11} {f(eps, '9.3f'):>9} {f(rev, '12,.0f'):>12} {f(tgt, '9.2f'):>9}  {'；'.join(flags)}")
+PY
 }
 
 # 公司研究包里某只票的共识预期、财务、文档与事实（只看最新）。参数：标的
@@ -305,34 +374,109 @@ for k, v in json.loads(r["payload"]).items():
 '
 }
 
-# ⚠ 会写真实数据（不是只读）：现在就跑一个数据刷新任务，不用等它的例行窗口。不发模型请求。
-# 做法：用一份临时配置副本，把该任务改成“每天 00:00 UTC”，进入一个今天的新窗口，再用 tick --job 单独跑它。
-# 仓库里的 schedules.yaml 不改。一个窗口只能跑一次：今天已经跑过的任务会显示 already_claimed。
-# 注意：每日任务（如 ibkr_news_daily）的窗口标签就是今天的日期，跑完后它今天的例行窗口也算已跑。
-# 用法：g0_runnow ibkr_news_daily     （任务名要写全，entity 任务带后缀，如 company_financials_weekly.LRCX）
-g0_runnow() {
-  local job="$1" cfg
-  [[ -z "$job" ]] && { echo "用法: g0_runnow <任务名>（任务名见 g0_refresh）"; return 1; }
-  cfg="$(mktemp -t g0_runnow).yaml"
-  G0_JOB="$job" python -c '
-import os, sys, yaml
-job = os.environ["G0_JOB"]
-d = yaml.safe_load(open("config/data/schedules.yaml"))
-base = job.split(".")[0]
-for dom in ("structured", "unstructured", "derived"):
-    spec = (d.get(dom) or {}).get("jobs", {}).get(base)
-    if spec is None:
-        continue
-    spec["enabled"] = True
-    spec["schedule"], spec["at"], spec["timezone"] = "daily", "00:00", "UTC"
-    for k in ("weekday", "day_of_month", "interval_days", "anchor_date"):
-        spec.pop(k, None)
-    yaml.safe_dump(d, open(sys.argv[1], "w"), allow_unicode=True, sort_keys=False)
-    break
-else:
-    sys.exit(f"没有这个任务: {job}")
-' "$cfg" || return 1
-  echo "→ 真实运行 $job（今天的新窗口，会写入真实数据，不发模型请求）"
-  python -m ats.data.refresh tick --job "$job" --config "$cfg"
-  rm -f "$cfg"
+# ⚠ 会写真实数据（不是只读），不发模型请求：批量“现在就重采”，不等例行窗口。
+# 每个任务用控制器的 --manual 模式跑：自己一个窗口标签（如 2026-10-21~manual-20261021T143000），
+# 同一天可反复跑，也不占用例行窗口；被停用（enabled 未开）的任务仍然不跑。
+# 数据是“追加新版本”：上游有变化就写入新的一版并成为最新，上游没变就记 no_change；旧版本保留作审计，不删除。
+# 用法：
+#   g0_rerun U | S | D          按类：非结构化 / 结构化 / 派生（以 schedules.yaml 的分组为准）
+#   g0_rerun network            10-21 圈定的“TLS 被重置”受影响任务（Yahoo、SEC、政府统计、台湾出口、SemiAnalysis、defeatbeta）
+#   g0_rerun consensus_ tw_ic   任务名或来源名片段，可写多个
+#   加 --dry 只列出将要跑的任务，不执行；加 -y 跳过确认
+g0_rerun() {
+  local dry=0 yes=0 args=() a
+  for a in "$@"; do
+    case "$a" in --dry) dry=1 ;; -y) yes=1 ;; *) args+=("$a") ;; esac
+  done
+  [[ ${#args} -eq 0 ]] && { echo "用法: g0_rerun U|S|D|network|<任务或来源片段>... [--dry] [-y]"; return 1; }
+  local jobs
+  jobs="$(G0_MAP="$(g0_map)" python -c '
+import json, os, sys
+jobmap = json.loads(os.environ["G0_MAP"])
+domains = {"U": "unstructured", "S": "structured", "D": "derived"}
+network = ("yfinance_", "sec_", "defeatbeta_", "tw_mof", "bls_", "bea_", "federal_reserve", "semianalysis")
+picked = []
+for want in sys.argv[1:]:
+    for job, m in jobmap.items():
+        hit = (want in domains and m["domain"] == domains[want]) or \
+              (want == "network" and any(s.startswith(network) for s in m["sources"])) or \
+              (want not in domains and want != "network" and (want in job or any(want in s for s in m["sources"])))
+        if hit and job not in picked:
+            picked.append(job)
+if not picked:
+    sys.exit("没有匹配的任务: " + " ".join(sys.argv[1:]))
+print("\n".join(picked))
+' "${args[@]}")" || return 1
+  echo "将要重采 $(echo "$jobs" | wc -l | tr -d ' ') 个任务（写真实数据，不发模型请求）："
+  echo "$jobs" | sed 's/^/  /'
+  [[ $dry -eq 1 ]] && return 0
+  if [[ $yes -ne 1 ]]; then
+    read -q "?继续？[y/N] " || { echo; echo "已取消"; return 1; }
+    echo
+  fi
+  local job out n=0 ok=0
+  for job in ${(f)jobs}; do
+    n=$((n+1))
+    printf '[%s] %-48s ' "$(date +%H:%M:%S)" "$job"
+    out="$(python -m ats.data.refresh tick --job "$job" --manual 2>/dev/null | head -1)"
+    G0_OUT="$out" python -c '
+import json, os
+try:
+    row = json.loads(os.environ["G0_OUT"])[0]
+except Exception:
+    print("（没有结果，看 var/logs/data-refresh.*.log）"); raise SystemExit
+extra = f"  入库批次 {row["ingestion_runs"]} 发布 {row["published"]}" if "ingestion_runs" in row else ""
+print(f"{row["status"]:10} {row.get("reason", "")[:30]:30}{extra}")
+'
+    [[ "$out" == *'"status": "succeeded"'* || "$out" == *'"status": "no_change"'* ]] && ok=$((ok+1))
+  done
+  echo "完成：$ok/$n 个成功或无变化。下一步：g0_refresh 看总表，g0_history <任务> 看单个任务的批次与错误原文。"
+}
+
+# 兼容旧名字
+g0_runnow() { g0_rerun "$@"; }
+
+# 某个任务（可多个）最近几个窗口的完整历史：每个窗口的状态、尝试次数、原因，以及对应那次入库批次的结果和错误原文。
+# 比 g0_ingest 更适合“只看一只票”：g0_ingest 的入库批次不记标的，这里靠控制器账本把任务和批次对上。
+# 参数：任务名或来源名片段（必填，如 consensus_tsm、ibkr_news）、窗口数（默认 5）
+g0_history() {
+  [[ -z "$1" ]] && { echo "用法: g0_history <任务名或来源名片段> [窗口数]"; return 1; }
+  python -m ats.data.refresh status | G0_MAP="$(g0_map)" python -c '
+import json, os, sqlite3, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+jobmap = json.loads(os.environ["G0_MAP"])
+want, keep = sys.argv[1], int(sys.argv[2])
+jobs = [j for j, m in jobmap.items() if want in j or any(want in s for s in m["sources"])]
+if not jobs:
+    sys.exit(f"没有任务或来源名里含“{want}”")
+d = json.load(sys.stdin)
+db = sqlite3.connect("file:var/data.sqlite?mode=ro", uri=True)
+def run_info(run_id):
+    for table in ("structured_ingestion_runs", "data_ingestion_runs"):
+        try:
+            cols = [c[1] for c in db.execute(f"pragma table_info({table})")]
+            note = "note" if "note" in cols else "NULL"
+            row = db.execute(f"select status, discovered, accepted, quarantined, {note} from {table} where run_id=?", (run_id,)).fetchone()
+        except sqlite3.Error:
+            row = None
+        if row:
+            return row
+    return None
+def local(s):
+    return datetime.fromisoformat(s).astimezone(tz).strftime("%m-%d %H:%M") if s else "-"
+for job in jobs:
+    rows = sorted((r for r in d["runs"] if r["job_id"] == job), key=lambda r: r["claimed_at"], reverse=True)[:keep]
+    print(f"== {job}")
+    if not rows:
+        print("  从未运行")
+    for r in rows:
+        print(f"  窗口 {r["window_date"]}  {r["status"]:10} {r["reason_code"][:28]:28} 尝试 {r["attempts"]} 次  完成 {local(r["completed_at"])}")
+        for rid in json.loads(r.get("ingestion_run_ids_json") or "[]"):
+            info = run_info(rid)
+            if info:
+                note = (info[4] or "")[:150]
+                print(f"      批次 {rid[:8]}: {info[0]}  发现 {info[1]} 准入 {info[2]} 隔离 {info[3]}  {note}")
+' "$1" "${2:-5}"
 }

@@ -1616,6 +1616,10 @@ provider_mappings:
     issuer_ir:total_debt_derived: financial.total_debt.gaap
     # a third-party aggregator's own debt definition is not the issuer's total debt
     issuer_ir:total_debt_provider_defined: financial.total_debt.provider_reported
+    # ASML's summary balance sheet only shows non-current long-term debt (no current portion): exact as
+    # long_term_debt, and offered as a provider-defined total only so the report package can be assembled
+    issuer_ir:long_term_debt: financial.long_term_debt.gaap
+    issuer_ir:total_debt_long_term_only: financial.total_debt.provider_reported
     issuer_ir:total_assets: financial.total_assets.gaap
     issuer_ir:total_liabilities: financial.total_liabilities.gaap
     issuer_ir:total_liabilities_derived: financial.total_liabilities.gaap

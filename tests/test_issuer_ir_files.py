@@ -290,7 +290,7 @@ def adapter_with_fixture_docs(tmp_path, monkeypatch):
     _drop(tmp_path, "TSM", "TSM_FS.pdf", b"tsm-bytes")
     _drop(tmp_path, "ASML", "q3_presentation.pdf", b"asml-bytes")
     _drop(tmp_path, "SKHY", "Data.xls", b"skhy-bytes")
-    return IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW)
+    return IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={})
 
 
 def _run(repo, adapter, entity, **scope):
@@ -352,7 +352,7 @@ def test_failed_self_check_lands_in_quarantine_with_reason_and_nothing_is_admitt
     monkeypatch.setattr(issuer_ir_parsers, "PARSERS", {"tsmc_fs_pdf": _FakeDocParser(parse_tsmc_fs_pages(pages))})
     _drop(tmp_path, "TSM", "TSM_FS.pdf", b"x")
     repo = _repo(tmp_path)
-    result = _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW), "TSM")
+    result = _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={}), "TSM")
     assert result["accepted"] == 28 and result["quarantined"] == 14       # 14 rows for 2026-09-30 held back
     assert not [r for r in _accepted(repo, "TSM") if r["period"] == "2026-09-30"]
     reasons = {code for r in result["results"] for code in r["reason_codes"]}
@@ -362,7 +362,7 @@ def test_failed_self_check_lands_in_quarantine_with_reason_and_nothing_is_admitt
 def test_unparseable_file_is_parse_failed_and_unknown_issuer_or_empty_folder_are_not_errors(tmp_path):
     _drop(tmp_path, "TSM", "TSM_FS.pdf", b"this is not a pdf")
     repo = _repo(tmp_path)
-    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW)
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={})
     assert _run(repo, adapter, "TSM")["status"] == "parse_failed"
     assert _run(repo, adapter, "SKHY")["status"] == "no_change"          # nothing dropped yet
     assert _run(repo, adapter, "AAPL")["status"] == "no_coverage"
@@ -399,3 +399,208 @@ def test_real_asml_and_skhy_files_parse_and_pass_their_checks():
             continue
         doc = parser(path, path.read_bytes())
         assert _failed(_records(doc, entity)[1]) == set()
+
+
+# --------------------------------------------------------------------------- #
+# ASML 6-K exhibit EX-99.3 (slide HTML) and the SEC acquirer
+# --------------------------------------------------------------------------- #
+from ats.data.sources import issuer_ir_acquire  # noqa: E402
+from ats.data.sources.issuer_ir_parsers import parse_asml_ex99_3_html  # noqa: E402
+
+EX99_3 = FIXTURES / "asml_6k_ex99_3_q3_2026_slides.htm"
+ASML_ACCESSION = "0001628280-26-065813"
+
+
+def _ex99():
+    return parse_asml_ex99_3_html(EX99_3, EX99_3.read_bytes())
+
+
+def test_ex99_3_reads_the_five_quarter_slides_with_decimals_and_the_debt_line():
+    doc = _ex99()
+    assert doc.currency == "EUR" and doc.current_period == "2026-09-30"
+    assert doc.periods == ["2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30", "2026-09-30"]
+    q3 = _by_field(doc, "2026-09-30")
+    assert q3["revenue"].value == 11_662.0              # the nine-month slide says 29,755.4
+    assert (q3["gross_profit"].value, q3["operating_income"].value, q3["net_income"].value) == (6_699.8, 5_172.8, 4_960.4)
+    assert (q3["eps_diluted"].value, q3["eps_basic"].value) == (12.93, 12.95)
+    assert q3["cash_from_operations"].value == 11_797.6
+    assert q3["capex"].value == pytest.approx(413.3 + 33.9) and "intangible" in q3["capex"].notes["capex_scope"]
+    assert q3["capex"].derived["calculation"] == "purchase_of_ppe + purchase_of_intangible_assets"
+    assert q3["cash_and_equivalents"].value == 8_030.9 and q3["inventory"].value == 11_907.3
+    assert q3["total_liabilities"].value == 36_917.3 and q3["stockholders_equity"].value == 22_063.9
+    assert q3["long_term_debt"].value == 1_963.0
+    assert q3["total_debt"].provider_field == "issuer_ir:total_debt_long_term_only"
+    assert "current portion" in q3["total_debt"].notes["debt_definition"]
+    # ASML's 4-4-5 quarter ends Sep 27; the series keeps the calendar quarter end like every other source
+    assert q3["revenue"].notes["fiscal_period_end"] == "2026-09-27"
+    assert _by_field(doc, "2026-06-30")["revenue"].value == 9_326.5
+
+
+def test_ex99_3_checks_pass_including_net_income_across_statements_and_cash_to_balance_sheet():
+    doc = _ex99()
+    records, checks = _records(doc, "ASML")
+    assert _failed(checks) == set()
+    names = {c.name for c in checks if c.passed}
+    assert {"net_income_same_in_income_and_cash_flow_statements", "cash_flow_ending_cash_matches_balance_sheet",
+            "balance_sheet_balances", "cash_flow_bridge", "liabilities_equal_current_plus_noncurrent"} <= names
+    assert {r.currency for r in records} == {"EUR"}
+    debt = next(r for r in records if r.period == "2026-09-30" and r.provider_field == "issuer_ir:total_debt_long_term_only")
+    assert (debt.adjustment, debt.value) == ("provider_reported", 1_963_000_000)
+
+
+def test_ex99_3_tampered_balance_sheet_is_quarantined():
+    html = EX99_3.read_text(encoding="utf-8").replace("Total assets | 45,097.1", "Total assets | 45,097.1")
+    html = html.replace("58,981.2  ", "59,981.2  ", 1) if "58,981.2  " in html else html
+    doc = parse_asml_ex99_3_html(EX99_3, html.encode())
+    _, checks = _records(doc, "ASML")
+    assert any(name.startswith(("balance_sheet", "assets_equal")) for name, _ in _failed(checks))
+
+
+def test_ex99_3_refuses_other_documents_and_a_changed_layout():
+    with pytest.raises(ParseError, match="not ASML's EX-99.3"):
+        parse_asml_ex99_3_html(EX99_3, b"<html><body>some other exhibit</body></html>")
+    broken = EX99_3.read_text(encoding="utf-8").replace("Long-term debt", "Borrowings")
+    with pytest.raises(ParseError, match="Long-term debt"):
+        parse_asml_ex99_3_html(EX99_3, broken.encode())
+
+
+def test_ex99_3_outranks_the_presentation_and_completes_the_asml_report_package(tmp_path, monkeypatch):
+    from ats.data.sources import issuer_ir_parsers
+    monkeypatch.setitem(issuer_ir_parsers.PARSERS, "asml_presentation_pdf",
+                        _FakeDocParser(parse_asml_presentation_pages(_pages("asml_q3_2026_presentation_pages.json"))))
+    _drop(tmp_path, "ASML", "q3_presentation.pdf", b"asml-pdf-bytes")
+    _drop(tmp_path, "ASML", f"{ASML_ACCESSION}_financial_statementsxusx.htm", copy_from=EX99_3)
+    repo = _repo(tmp_path)
+    result = _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={}), "ASML")
+    assert result["status"] == "succeeded" and result["quarantined"] == 0
+    rows = {(r["metric_id"], r["period"]): r for r in _accepted(repo, "ASML")}
+    assert rows[("financial.gross_profit.gaap", "2026-09-30")]["value"] == 6_699_800_000   # 6,700 in the presentation
+    assert rows[("financial.long_term_debt.gaap", "2026-09-30")]["value"] == 1_963_000_000
+    assert rows[("financial.total_debt.provider_reported", "2026-09-30")]["value"] == 1_963_000_000
+    from ats.data.fundamentals import _complete_report_package
+    package = _complete_report_package(repo, source_id="issuer_ir_files", symbol="ASML")
+    assert (package["period"], package["currency"], package["debt_metric"]) == (
+        "2026-09-30", "EUR", "financial.total_debt.provider_reported")
+
+
+class _SecSite:
+    """A fake EDGAR: submissions listing, filing indexes and exhibits."""
+
+    def __init__(self, tmp_path):
+        self.requests = []
+        self.exhibit = EX99_3.read_bytes()
+        cik = "0000937966"
+        self.listing = {"filings": {"recent": {
+            "form": ["6-K", "6-K", "20-F", "6-K"],
+            "accessionNumber": [ASML_ACCESSION, "0001628280-26-060001", "0001628280-26-010000", "0001628280-25-000001"],
+            "filingDate": ["2026-10-14", "2026-09-10", "2026-02-12", "2025-01-01"],
+            "primaryDocument": ["form6-kquarterlyfilings.htm", "x.htm", "y.htm", "z.htm"]}}}
+        base = "https://www.sec.gov/Archives/edgar/data/937966"
+        self.pages = {
+            f"https://data.sec.gov/submissions/CIK{cik}.json": json.dumps(self.listing).encode(),
+            f"{base}/000162828026065813/index.json": json.dumps({"directory": {"item": [
+                {"name": "form6-kquarterlyfilings.htm"}, {"name": "pressreleasefinancialresul.htm"},
+                {"name": "financial_statementsxusx.htm"}, {"name": "financial_statementsxusx001.jpg"}]}}).encode(),
+            f"{base}/000162828026065813/financial_statementsxusx.htm": self.exhibit,
+            f"{base}/000162828026060001/index.json": json.dumps({"directory": {"item": [
+                {"name": "x.htm"}]}}).encode(),
+        }
+
+    def __call__(self, url):
+        self.requests.append(url)
+        if url not in self.pages:
+            raise AssertionError(f"unexpected request {url}")
+        return self.pages[url]
+
+
+def _asml_config():
+    return load_issuer_configs()["ASML"]
+
+
+def test_sec_acquirer_downloads_the_results_exhibit_once_and_a_quiet_day_costs_one_request(tmp_path):
+    site = _SecSite(tmp_path)
+    drop = tmp_path / "drop"
+    first = issuer_ir_acquire.acquire_sec_6k_exhibits(
+        _asml_config(), drop, None, NOW, http=site)
+    assert first["downloaded"] == [f"{ASML_ACCESSION}_financial_statementsxusx.htm"]
+    assert first["requests"] == 4      # listing + 2 filing indexes + 1 exhibit (the 2025 6-K is outside the look-back)
+    saved = drop / f"{ASML_ACCESSION}_financial_statementsxusx.htm"
+    assert saved.read_bytes() == site.exhibit
+    meta = json.loads(saved.with_name(saved.name + ".meta.json").read_text())
+    assert meta["source_url"].endswith("/000162828026065813/financial_statementsxusx.htm")
+    assert meta["accession"] == ASML_ACCESSION and meta["filed"] == "2026-10-14" and len(meta["sha256"]) == 64
+    assert not any("20-F" in url or "y.htm" in url for url in site.requests)
+
+    site.requests.clear()
+    second = issuer_ir_acquire.acquire_sec_6k_exhibits(_asml_config(), drop, None, NOW, http=site)
+    assert second["downloaded"] == [] and second["requests"] == 1 and second["skipped_seen"] == 2
+    assert site.requests == ["https://data.sec.gov/submissions/CIK0000937966.json"]
+
+
+def test_sec_acquirer_rechecks_a_very_recent_6k_that_has_no_exhibit_yet(tmp_path):
+    site = _SecSite(tmp_path)
+    site.pages["https://www.sec.gov/Archives/edgar/data/937966/000162828026065813/index.json"] = json.dumps(
+        {"directory": {"item": [{"name": "form6-kquarterlyfilings.htm"}]}}).encode()
+    drop = tmp_path / "drop"
+    the_next_day = datetime(2026, 10, 15, 8, 0, tzinfo=timezone.utc)
+    issuer_ir_acquire.acquire_sec_6k_exhibits(_asml_config(), drop, None, the_next_day, http=site)
+    state = json.loads((drop / ".acquisition_state.json").read_text())["sec_6k"]
+    assert ASML_ACCESSION not in state                       # filed yesterday, exhibits may still be coming
+    assert state["0001628280-26-060001"]["status"] == "no_matching_exhibit"   # old 6-K: looked at once
+    issuer_ir_acquire.acquire_sec_6k_exhibits(_asml_config(), drop, None, NOW, http=site)
+    assert json.loads((drop / ".acquisition_state.json").read_text())["sec_6k"][ASML_ACCESSION]["status"] \
+        == "no_matching_exhibit"                              # a week later it is settled
+
+
+def test_sec_acquirer_stops_at_the_request_budget_and_requires_a_user_agent(tmp_path, monkeypatch):
+    site = _SecSite(tmp_path)
+    monkeypatch.setattr(issuer_ir_acquire, "REQUESTS_PER_RUN", 2)
+    report = issuer_ir_acquire.acquire_sec_6k_exhibits(_asml_config(), tmp_path / "drop", None, NOW, http=site)
+    assert report["requests"] == 2 and "budget" in report["budget_exhausted"] and report["downloaded"] == []
+    from ats.data import sec
+    monkeypatch.setattr(sec, "_headers", lambda: {"User-Agent": ""})
+    with pytest.raises(PermissionError, match="SEC_EDGAR_USER_AGENT"):
+        issuer_ir_acquire.acquire_sec_6k_exhibits(_asml_config(), tmp_path / "drop2", None, NOW)
+
+
+def test_adapter_runs_the_acquirer_first_and_records_the_sec_url_in_lineage(tmp_path):
+    site = _SecSite(tmp_path)
+
+    def acquirer(config, drop, request, fetched_at):
+        return issuer_ir_acquire.acquire_sec_6k_exhibits(config, drop, request, fetched_at, http=site)
+
+    repo = _repo(tmp_path)
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"ASML": acquirer})
+    result = _run(repo, adapter, "ASML")
+    assert result["status"] == "succeeded" and result["quarantined"] == 0
+    row = next(r for r in _accepted(repo, "ASML") if r["metric_id"] == "financial.revenue.gaap" and r["period"] == "2026-09-30")
+    assert repo.artifact(row["artifact_id"])["source_url"].endswith("/000162828026065813/financial_statementsxusx.htm")
+    raw = json.loads(row["raw_payload"])
+    assert raw["provenance"]["origin"]["accession"] == ASML_ACCESSION and raw["provenance"]["origin"]["filed"] == "2026-10-14"
+    # next day: same file, nothing new
+    assert _run(repo, adapter, "ASML")["status"] == "no_change"
+
+
+def test_acquisition_outage_is_unreachable_but_existing_files_are_still_parsed(tmp_path):
+    def broken(config, drop, request, fetched_at):
+        raise ConnectionError("TLS reset")
+
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"ASML": broken})
+    repo = _repo(tmp_path)
+    assert _run(repo, adapter, "ASML")["status"] == "unreachable"      # nothing on disk yet
+    _drop(tmp_path, "ASML", f"{ASML_ACCESSION}_financial_statementsxusx.htm", copy_from=EX99_3)
+    result = _run(repo, adapter, "ASML")
+    assert result["status"] == "partial" and result["accepted"] > 0     # data written, the outage stays visible
+
+
+def test_asml_exhibit_patterns_cover_both_real_file_names_and_skip_the_ifrs_report():
+    import fnmatch
+    config = _asml_config()
+    acquire = config.raw["acquisition"]["exhibit_patterns"]
+    rule = next(r for r in config.files if r.parser == "asml_ex99_3_html")
+    for name in ("financial_statementsxusx.htm", "financialstatementsusgaa.htm"):     # Oct-2026 / Jul-2026 6-K
+        assert any(fnmatch.fnmatch(name, pattern) for pattern in acquire)
+        assert Path(f"{ASML_ACCESSION}_{name}").match(rule.pattern)
+    for name in ("statutoryinterimreport20.htm", "pressreleasefinancialresul.htm", "presentationinvestorrela.htm",
+                 "form6-kquarterlyfilings.htm", "financial_statementsxusx001.jpg"):
+        assert not any(fnmatch.fnmatch(name, pattern) for pattern in acquire)

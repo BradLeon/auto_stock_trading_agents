@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Callable
@@ -47,6 +48,7 @@ FIELD_KIND = {
     "net_income": "flow", "cash_from_operations": "flow", "capex": "flow",
     "eps_diluted": "per_share", "eps_diluted_adr": "per_adr", "eps_basic": "per_share",
     "cash_and_equivalents": "instant", "inventory": "instant", "total_debt": "instant",
+    "long_term_debt": "instant",
     "total_assets": "instant", "total_liabilities": "instant",
     "stockholders_equity": "instant",
 }
@@ -75,6 +77,8 @@ class IRValue:
     basis: str = ""                  # quarter | instant
     derived: dict | None = None      # {"calculation", "left": {...}, "right": {...}} for sums/differences
     notes: dict = field(default_factory=dict)
+    provider_field: str = ""         # override of the default ``issuer_ir:<field>`` provider field
+    adjustment: str = ""             # override of the default ``gaap`` adjustment
 
 
 @dataclass
@@ -101,6 +105,7 @@ class IRDocument:
     published_on: date | None = None
     meta: dict = field(default_factory=dict)
     checks: list[CheckResult] = field(default_factory=list)
+    abs_tolerance: float | None = None   # the table's own rounding, when finer than the issuer default
 
 
 # --------------------------------------------------------------------------- #
@@ -229,6 +234,7 @@ def _months_apart(earlier: str, later: str) -> int:
 class FileRule:
     pattern: str
     parser: str
+    rank: int = 0       # when two files carry the same period, the higher rank (then the newer document) wins
 
 
 @dataclass(frozen=True)
@@ -264,7 +270,7 @@ def load_issuer_configs(path: str | Path | None = None) -> dict[str, IssuerConfi
             currency=str(merged.get("currency", "")),
             source_nature=str(merged.get("source_nature", "issuer_official")),
             drop_dir=str(merged.get("drop_dir") or f"var/ir_drop/{str(entity).upper()}"),
-            files=tuple(FileRule(str(rule["pattern"]), str(rule["parser"]))
+            files=tuple(FileRule(str(rule["pattern"]), str(rule["parser"]), int(rule.get("rank", 0)))
                         for rule in (merged.get("files") or [])),
             identity_markers=tuple(str(item) for item in (merged.get("identity_markers") or [])),
             abs_tolerance=float(merged.get("abs_tolerance", 3.0)),
@@ -285,6 +291,8 @@ def _unit_for(kind: str, currency: str) -> str:
 
 
 def _provider_field(value: IRValue, source_nature: str) -> str:
+    if value.provider_field:
+        return value.provider_field
     name = value.field
     if name == "total_debt":
         if value.derived:
@@ -297,10 +305,11 @@ def _provider_field(value: IRValue, source_nature: str) -> str:
 
 
 def build_records(doc: IRDocument, *, config: IssuerConfig, file_name: str, sha256: str,
-                  slice_key: str, published_at: datetime | None) -> tuple[list[NativeRecord], list[CheckResult]]:
+                  slice_key: str, published_at: datetime | None, origin: dict | None = None) -> tuple[list[NativeRecord], list[CheckResult]]:
     """Turn the parsed values into NativeRecords, quarantining periods whose checks failed."""
     checks = run_checks(
-        doc, configured_currency=config.currency, abs_tol=config.abs_tolerance,
+        doc, configured_currency=config.currency,
+        abs_tol=doc.abs_tolerance if doc.abs_tolerance is not None else config.abs_tolerance,
         rel_tol=config.rel_tolerance, identity_markers=list(config.identity_markers),
         cash_definition_matches_balance_sheet=bool(config.raw.get("cash_definition_matches_balance_sheet", True)),
         fx_effect_reported=bool(config.raw.get("fx_effect_reported", True)))
@@ -331,7 +340,7 @@ def build_records(doc: IRDocument, *, config: IssuerConfig, file_name: str, sha2
             "provenance": {
                 "file": file_name, "sha256": sha256, "location": value.location, "label": value.label,
                 "parser": doc.parser, "parser_version": PARSER_VERSION,
-                "column_period": value.period_end,
+                "column_period": value.period_end, **({"origin": origin} if origin else {}),
                 "period_role": "current" if value.period_end == doc.current_period else "comparative",
             },
             "reported_value": value.value, "table_unit": doc.scale_label, "stored_unit_scale": scale,
@@ -351,8 +360,9 @@ def build_records(doc: IRDocument, *, config: IssuerConfig, file_name: str, sha2
             entity_id=config.entity, provider_field=_provider_field(value, config.source_nature),
             period=value.period_end, value=stored, unit=_unit_for(kind, config.currency),
             currency=config.currency, period_basis=basis,
-            adjustment="provider_reported" if (value.field == "total_debt" and not value.derived
-                                               and config.source_nature != "issuer_official") else "gaap",
+            adjustment=value.adjustment or (
+                "provider_reported" if (value.field == "total_debt" and not value.derived
+                                        and config.source_nature != "issuer_official") else "gaap"),
             period_start=quarter_start(end).isoformat() if flow and basis == "quarter" else "",
             period_end=value.period_end, published_at=published_at,
             dimensions={"statement_scope": "consolidated", "source_nature": config.source_nature,
@@ -365,6 +375,18 @@ def build_records(doc: IRDocument, *, config: IssuerConfig, file_name: str, sha2
 # Adapter
 # --------------------------------------------------------------------------- #
 ParserFn = Callable[[Path, bytes], IRDocument]
+
+
+def sidecar_path(path: Path) -> Path:
+    return path.with_name(path.name + ".meta.json")
+
+
+def read_sidecar(path: Path) -> dict:
+    """Where an acquired file came from (URL, accession, filing date), written by its acquirer."""
+    try:
+        return json.loads(sidecar_path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def _parsers() -> dict[str, ParserFn]:
@@ -422,18 +444,35 @@ class IssuerIRFilesAdapter:
         drop = Path(config.drop_dir)
         drop = drop if drop.is_absolute() else self._root() / drop
         acquisition: dict = {}
-        acquirer = (self.acquirers or {}).get(symbol)
+        failures: list[AdapterFailure] = []
+        # ``acquirers=None`` -> the configured acquirer; an explicit mapping (even empty) replaces it
+        acquirer = (self.acquirers.get(symbol) if self.acquirers is not None
+                    else self._configured_acquirer(config))
         if acquirer is not None:
-            acquisition = acquirer(config, drop, request, fetched_at) or {}
+            try:
+                acquisition = acquirer(config, drop, request, fetched_at) or {}
+            except PermissionError:
+                raise
+            except Exception as exc:
+                from ..pipelines.structured.ingestion import _is_transport_error
+                if not _is_transport_error(exc):
+                    raise
+                # keep parsing what is already in the folder; the outage itself stays visible
+                acquisition = {"error": f"{type(exc).__name__}: {exc}"}
+                failures.append(AdapterFailure(
+                    status=IngestionStatus.UNREACHABLE, entity_id=symbol,
+                    message=f"{symbol} IR file acquisition failed: {exc}"))
         files = self._files(config, drop, request)
         if not files:
+            if failures:
+                return self._batch(request, fetched_at, IngestionStatus.UNREACHABLE, failures=failures,
+                                   metadata={"acquisition": acquisition})
             return self._batch(request, fetched_at, IngestionStatus.NO_CHANGE, metadata={
                 "note": f"no IR files in {config.drop_dir}", "acquisition": acquisition})
 
         parsers = _parsers()
-        records: list[NativeRecord] = []
+        candidates: list[tuple[tuple, NativeRecord]] = []
         artifacts: list[AdapterArtifact] = []
-        failures: list[AdapterFailure] = []
         file_reports = []
         for path, rule in files:
             payload = path.read_bytes()
@@ -453,13 +492,18 @@ class IssuerIRFilesAdapter:
                     status=IngestionStatus.PARSE_FAILED, entity_id=symbol, slice_key=key,
                     message=f"{path.name}: {exc}"))
                 continue
-            published_at = (datetime.combine(doc.published_on, datetime.min.time(), tzinfo=timezone.utc)
-                            if doc.published_on else None)
+            origin = read_sidecar(path)
+            published_on = doc.published_on
+            if published_on is None and origin.get("filed"):
+                published_on = date.fromisoformat(str(origin["filed"])[:10])
+            published_at = (datetime.combine(published_on, datetime.min.time(), tzinfo=timezone.utc)
+                            if published_on else None)
             built, checks = build_records(doc, config=config, file_name=path.name, sha256=sha256,
-                                          slice_key=key, published_at=published_at)
+                                          slice_key=key, published_at=published_at, origin=origin or None)
             if request.periods:
                 built = [item for item in built if item.period in set(request.periods)]
-            records.extend(built)
+            precedence = (rule.rank, doc.current_period)
+            candidates.extend((precedence, item) for item in built)
             quarantined = sum(1 for item in built if item.raw.get("quarantine_reasons"))
             file_reports.append({
                 "file": path.name, "sha256": sha256, "parser": rule.parser,
@@ -469,23 +513,49 @@ class IssuerIRFilesAdapter:
                                   if not c.passed and c.severity == "hard"],
                 "warnings": [f"{c.name}@{c.period or 'document'}" for c in checks
                              if not c.passed and c.severity == "soft"]})
-            media = "application/pdf" if path.suffix.lower() == ".pdf" else "application/vnd.ms-excel"
+            media = {".pdf": "application/pdf", ".xls": "application/vnd.ms-excel",
+                     ".htm": "text/html", ".html": "text/html"}.get(path.suffix.lower(), "application/octet-stream")
             artifacts.append(AdapterArtifact(
                 artifact_key=key, payload=payload, media_type=media, retention="full_response",
-                source_url=path.resolve().as_uri(), source_version=sha256,
+                source_url=str(origin.get("source_url") or path.resolve().as_uri()), source_version=sha256,
                 query_scope={"entity": symbol, "file": path.name},
                 metadata={"file": path.name, "sha256": sha256, "parser": rule.parser,
                           "source_nature": config.source_nature, "currency": config.currency,
-                          "coverage": file_reports[-1]}))
+                          "origin": origin, "coverage": file_reports[-1]}))
+
+        # Two files can carry the same period (an older and a newer statement, a PDF and its SEC
+        # exhibit): the higher-ranked, then newer, document supplies the value.  Rows held back by a
+        # failed check are always kept so the quarantine stays visible.
+        records: list[NativeRecord] = []
+        best: dict[tuple, tuple[tuple, NativeRecord]] = {}
+        for precedence, record in candidates:
+            if record.raw.get("quarantine_reasons"):
+                records.append(record)
+                continue
+            slot = (record.provider_field, record.period, record.period_basis)
+            if slot not in best or precedence > best[slot][0]:
+                best[slot] = (precedence, record)
+        records.extend(record for _, record in best.values())
+        superseded = len(candidates) - len(records)
 
         warnings = sorted({w for report in file_reports for w in report["warnings"]})
         metadata = {"files": file_reports, "acquisition": acquisition, "warnings": warnings,
+                    "superseded_rows": superseded,
                     "source_version": ",".join(r["sha256"][:12] for r in file_reports)}
         if not records:
-            status = IngestionStatus.PARSE_FAILED if failures else IngestionStatus.NO_CHANGE
+            status = IngestionStatus.PARSE_FAILED if any(
+                f.status == IngestionStatus.PARSE_FAILED for f in failures) else IngestionStatus.NO_CHANGE
             return self._batch(request, fetched_at, status, failures=failures, metadata=metadata)
         return self._batch(request, fetched_at, IngestionStatus.PARTIAL if failures else IngestionStatus.SUCCEEDED,
                            failures=failures, records=records, artifacts=artifacts, metadata=metadata)
+
+    @staticmethod
+    def _configured_acquirer(config: IssuerConfig):
+        kind = str((config.raw.get("acquisition") or {}).get("kind") or "")
+        if not kind:
+            return None
+        from . import issuer_ir_acquire
+        return issuer_ir_acquire.ACQUIRERS.get(kind)
 
     @staticmethod
     def _files(config: IssuerConfig, drop: Path, request: FetchRequest) -> list[tuple[Path, FileRule]]:

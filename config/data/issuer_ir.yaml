@@ -26,7 +26,18 @@ issuers:
     currency: EUR                     # US GAAP statements in EUR million
     identity_markers: ["ASML"]
     files:
-      - {pattern: "*presentation*.pdf", parser: asml_presentation_pdf}
+      # results presentation (manual drop): five quarters, whole millions, capex only as one combined line
+      - {pattern: "*presentation*.pdf", parser: asml_presentation_pdf, rank: 0}
+      # the 6-K's EX-99.3 (name differs per quarter) "Financial Statements US GAAP": same quarters with one decimal, PP&E and
+      # intangibles separately and the long-term debt line; it wins over the presentation
+      - {pattern: "*financial*statements*.htm", parser: asml_ex99_3_html, rank: 10}
+    acquisition:
+      kind: sec_6k_exhibits           # SEC EDGAR: results 6-Ks carry the exhibits (EX-99.1/.2/.3)
+      cik: "0000937966"
+      forms: ["6-K"]
+      exhibit_patterns: ["financial*statements*.htm"]   # file names differ per quarter (…_statementsxusx / …statementsusgaa)
+      lookback_days: 120              # how far back an unseen 6-K is still looked at
+      max_new_filings_per_run: 3      # each costs an index request plus one request per exhibit
   SKHY:
     name: SK hynix
     currency: KRW                     # K-IFRS consolidated, KRW million

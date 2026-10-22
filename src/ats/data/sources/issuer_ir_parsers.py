@@ -432,6 +432,194 @@ def parse_asml_presentation_pdf(path: Path, payload: bytes) -> IRDocument:
 
 
 # --------------------------------------------------------------------------- #
+# ASML: EX-99.3 "Financial Statements US GAAP" of the quarterly-results 6-K (slide HTML)
+# --------------------------------------------------------------------------- #
+_SLIDE = re.compile(r'<IMG[^>]*title="slide(\d+)"[^>]*>\s*<DIV>\s*<FONT[^>]*>(.*?)</FONT>\s*</DIV>', re.S | re.I)
+_HEADER_DATES = re.compile(r"((?:[A-Z][a-z]{2} \d{1,2},\s*){5})\|?\s*\(Unaudited[^)]*\)\s*((?:\d{4}\s+){4}\d{4})")
+_HEADER_PREFIX = re.compile(r"^\(Unaudited[^)]*\)\s*(?:\d{4}(?:\s+|$))+")
+_CELL_NUMBER = re.compile(r"^(?:\(?-?[\d,]+(?:\.\d+)?\)?|—|–)$")
+
+
+def _slide_rows(text: str) -> list[tuple[str, list[float | None]]]:
+    """(label, numbers) rows from one slide's hidden text layer: cells are separated by 2+ spaces."""
+    import html as _html
+    cleaned = _html.unescape(text).replace("\xa0", " ").replace("’", "'")
+    cells = [cell.strip() for cell in re.split(r"\s{2,}", cleaned) if cell.strip()]
+    rows: list[tuple[str, list[float | None]]] = []
+    label: list[str] = []
+    numbers: list[float | None] = []
+    for cell in cells:
+        cell = _HEADER_PREFIX.sub("", cell).strip()
+        cell = re.sub(r"^Three months ended (?:[A-Z][a-z]{2} \d{1,2},\s*)+", "", cell).strip()
+        if not cell:
+            continue
+        if _CELL_NUMBER.match(cell):
+            numbers.append(None if cell in {"—", "–"} else _to_number(cell))
+            continue
+        if numbers:
+            rows.append((" ".join(label), numbers))
+            label, numbers = [], []
+        label.append(cell)
+    if numbers:
+        rows.append((" ".join(label), numbers))
+    return rows
+
+
+def parse_asml_ex99_3_html(path: Path, payload: bytes) -> IRDocument:
+    """ASML 6-K exhibit 99.3: five quarters of the US GAAP statements, in EUR million with one decimal.
+
+    Each slide is an image with the statement text in a hidden text layer.  The three quarterly
+    slides are told apart by their five-date column header; the three-month/nine-month slides
+    (two dates / "Nine months ended") are never read.
+    """
+    text = payload.decode("utf-8", errors="replace")
+    if "EX-99.3" not in text[:600] and "Financial Statements US GAAP" not in text[:6000]:
+        raise ParseError("not ASML's EX-99.3 financial statements exhibit")
+    slides = {int(number): body for number, body in _SLIDE.findall(text)}
+    if not slides:
+        raise ParseError("ASML EX-99.3: no slide text layer found")
+
+    def quarterly(needle: str) -> tuple[int, list[str], list[date], list[tuple[str, list[float | None]]], str]:
+        for number in sorted(slides):
+            import html as _html
+            plain = re.sub(r"\s+", " ", _html.unescape(slides[number]).replace("\xa0", " "))
+            header = _HEADER_DATES.search(plain)
+            if header and needle in plain and "Nine months ended" not in plain[:400]:
+                days = re.findall(r"([A-Z][a-z]{2}) (\d{1,2}),", header.group(1))
+                years = header.group(2).split()
+                fiscal = [datetime.strptime(f"{m} {d} {y}", "%b %d %Y").date() for (m, d), y in zip(days, years)]
+                # ASML's 4-4-5 quarters end near, not on, the calendar quarter end (Sep 27, 2026):
+                # the series keeps calendar quarter-ends like every other source
+                ends = [quarter_end(day.year, (day.month - 1) // 3 + 1).isoformat() for day in fiscal]
+                return number, ends, fiscal, _slide_rows(slides[number]), plain
+        raise ParseError(f"ASML EX-99.3: no five-quarter slide containing {needle!r}")
+
+    income_no, periods, fiscal, income_rows, income_text = quarterly("Total net sales")
+    balance_no, balance_periods, _, balance_rows, balance_text = quarterly("Total non-current assets")
+    cash_no, cash_periods, _, cash_rows, cash_text = quarterly("Cash flows from operating activities")
+    if not (periods == balance_periods == cash_periods) or len(set(periods)) != 5 or periods != sorted(periods):
+        raise ParseError(f"ASML EX-99.3: statements disagree on the quarter columns {periods}")
+    if "€" not in income_text:
+        raise ParseError("ASML EX-99.3: statements are not in euros")
+    count = len(periods)
+
+    def pick(rows, number: int, label: str, *, exact: bool = True) -> list[Located]:
+        pattern = re.compile(rf"(?:^|\s){label}$" if exact else label)
+        hits = [(name, values) for name, values in rows if pattern.search(name)]
+        if len(hits) != 1:
+            raise ParseError(f"ASML EX-99.3 slide {number}: {label!r} matched {len(hits)} rows, expected 1")
+        name, values = hits[0]
+        if len(values) != count or any(v is None for v in values):
+            raise ParseError(f"ASML EX-99.3 slide {number}: row {name!r} has {len(values)} cells, expected {count}")
+        shown = label.replace("\\", "")
+        return [Located(float(v), f"slide {number} '{shown}'", shown) for v in values]
+
+    revenue = pick(income_rows, income_no, "Total net sales")
+    cost = pick(income_rows, income_no, r"Total cost of sales")
+    gross = pick(income_rows, income_no, "Gross profit")
+    operating = pick(income_rows, income_no, "Income from operations")
+    net_income = pick(income_rows, income_no, "Net income")
+    eps_basic = pick(income_rows, income_no, "Basic net income per ordinary share")
+    eps_diluted = pick(income_rows, income_no, "Diluted net income per ordinary share")
+
+    cash = pick(balance_rows, balance_no, "Cash and cash equivalents")
+    sti = pick(balance_rows, balance_no, "Short-term investments")
+    inventory = pick(balance_rows, balance_no, "Inventories, net")
+    current_assets = pick(balance_rows, balance_no, "Total current assets")
+    noncurrent_assets = pick(balance_rows, balance_no, "Total non-current assets")
+    assets = pick(balance_rows, balance_no, "Total assets")
+    current_liabilities = pick(balance_rows, balance_no, "Total current liabilities")
+    long_term_debt = pick(balance_rows, balance_no, "Long-term debt")
+    noncurrent_liabilities = pick(balance_rows, balance_no, "Total non-current liabilities")
+    liabilities = pick(balance_rows, balance_no, "Total liabilities")
+    equity = pick(balance_rows, balance_no, "Total shareholders' equity")
+
+    net_income_cf = pick(cash_rows, cash_no, "Net income")
+    cfo = pick(cash_rows, cash_no, r"Net cash provided by \(used in\) operating activities")
+    ppe = pick(cash_rows, cash_no, "Purchase of property, plant and equipment")
+    intangibles = pick(cash_rows, cash_no, "Purchase of intangible assets")
+    cfi = pick(cash_rows, cash_no, r"Net cash provided by \(used in\) investing activities")
+    cff = pick(cash_rows, cash_no, r"Net cash provided by \(used in\) financing activities")
+    fx = pick(cash_rows, cash_no, "Effect of changes in exchange rates on cash")
+    net_change = pick(cash_rows, cash_no, r"Net increase \(decrease\) in cash and cash equivalents")
+    cash_begin = pick(cash_rows, cash_no, "Cash and cash equivalents at beginning of the period")
+    cash_end = pick(cash_rows, cash_no, "Cash and cash equivalents at end of the period")
+
+    values: list[IRValue] = []
+    lines: dict[str, dict[str, Located]] = {}
+    _emit(values, "revenue", periods, revenue)
+    _emit(values, "gross_profit", periods, gross)
+    _emit(values, "operating_income", periods, operating)
+    _emit(values, "net_income", periods, net_income)
+    _emit(values, "eps_basic", periods, eps_basic)
+    _emit(values, "eps_diluted", periods, eps_diluted)
+    _emit(values, "cash_from_operations", periods, cfo)
+    _emit(values, "cash_and_equivalents", periods, cash, basis="instant")
+    _emit(values, "inventory", periods, inventory, basis="instant")
+    _emit(values, "total_assets", periods, assets, basis="instant")
+    _emit(values, "total_liabilities", periods, liabilities, basis="instant")
+    _emit(values, "stockholders_equity", periods, equity, basis="instant")
+    _emit(values, "long_term_debt", periods, long_term_debt, basis="instant")
+    debt_note = ("long-term debt on the summary balance sheet (non-current). The summary statements do not "
+                 "break out the current portion of long-term debt, which sits inside current liabilities, so "
+                 "this understates total borrowings in quarters where a bond is due within a year")
+    for period, cell in zip(periods, long_term_debt):
+        values.append(IRValue(
+            field="total_debt", period_end=period, value=cell.value, location=cell.location, label=cell.label,
+            basis="instant", provider_field="issuer_ir:total_debt_long_term_only", adjustment="provider_reported",
+            notes={"debt_definition": debt_note}))
+    for period, left, right in zip(periods, ppe, intangibles):
+        values.append(IRValue(
+            field="capex", period_end=period, value=abs(left.value) + abs(right.value),
+            location=f"{left.location} + {right.location}", label="Purchases of PP&E and intangible assets",
+            derived={"calculation": "purchase_of_ppe + purchase_of_intangible_assets",
+                     "left": {"label": left.label, "value": abs(left.value), "location": left.location},
+                     "right": {"label": right.label, "value": abs(right.value), "location": right.location}},
+            notes={"capex_scope": "purchases of property, plant and equipment AND intangible assets, "
+                                  "the definition ASML's own free cash flow uses"}))
+    for value in values:
+        end = value.period_end
+        value.notes["fiscal_period_end"] = fiscal[periods.index(end)].isoformat()
+
+    _put_lines(lines, "revenue", periods, revenue)
+    _put_lines(lines, "cost_of_revenue", periods, cost, sign="abs")
+    _put_lines(lines, "gross_profit", periods, gross)
+    _put_lines(lines, "net_income_is", periods, net_income)
+    _put_lines(lines, "net_income_cf", periods, net_income_cf)
+    _put_lines(lines, "cfo", periods, cfo)
+    _put_lines(lines, "cfi", periods, cfi)
+    _put_lines(lines, "cff", periods, cff)
+    _put_lines(lines, "fx", periods, fx)
+    _put_lines(lines, "net_change", periods, net_change)
+    _put_lines(lines, "cash_begin", periods, cash_begin)
+    _put_lines(lines, "cash_end", periods, cash_end)
+    _put_lines(lines, "cash_balance_sheet", periods, cash)
+    _put_lines(lines, "inventory", periods, inventory)
+    _put_lines(lines, "current_assets", periods, current_assets)
+    _put_lines(lines, "noncurrent_assets", periods, noncurrent_assets)
+    _put_lines(lines, "total_assets", periods, assets)
+    _put_lines(lines, "current_liabilities", periods, current_liabilities)
+    _put_lines(lines, "total_liabilities", periods, liabilities)
+    _put_lines(lines, "equity_total", periods, equity)
+    for period, ppe_cell, intangible_cell in zip(periods, ppe, intangibles):
+        lines[period]["capex"] = Located(abs(ppe_cell.value) + abs(intangible_cell.value), ppe_cell.location)
+
+    extra = [CheckResult("liabilities_equal_current_plus_noncurrent", period,
+                         abs(c.value + n.value - t.value) <= 0.3, "hard",
+                         "" if abs(c.value + n.value - t.value) <= 0.3 else
+                         f"{c.value:,.1f} + {n.value:,.1f} != {t.value:,.1f}")
+             for period, c, n, t in zip(periods, current_liabilities, noncurrent_liabilities, liabilities)]
+    filed = re.search(r"(?:^|\W)Q([1-4]) (\d{4})", text[:6000])
+    return IRDocument(
+        entity="ASML", parser="asml_ex99_3_html", currency="EUR", table_scale=1e6,
+        scale_label="EUR million (per-share in EUR)", values=values, lines=lines, periods=periods,
+        current_period=periods[-1], identity_text=re.sub(r"<[^>]+>", " ", text[:6000]),
+        abs_tolerance=0.3,
+        meta={"slides": sorted(slides), "extra_checks": extra,
+              "document_title": f"Financial Statements US GAAP Q{filed.group(1)} {filed.group(2)}" if filed else ""})
+
+
+# --------------------------------------------------------------------------- #
 # Euroland .xls export (SK hynix quarterly statements, third-party aggregator)
 # --------------------------------------------------------------------------- #
 _EUROLAND_PERIOD = re.compile(r"^(\d{4}) ([1-4])Q$")
@@ -579,5 +767,6 @@ def parse_euroland_xls(path: Path, payload: bytes) -> IRDocument:
 PARSERS = {
     "tsmc_fs_pdf": parse_tsmc_fs_pdf,
     "asml_presentation_pdf": parse_asml_presentation_pdf,
+    "asml_ex99_3_html": parse_asml_ex99_3_html,
     "euroland_xls": parse_euroland_xls,
 }

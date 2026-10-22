@@ -590,7 +590,8 @@ def _article_partial_outcome(packet: dict[str, Any], refs: dict[str, list[str]])
 
 
 def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = False,
-             only_job: str = "", data_db: Path | None = None) -> list[dict[str, Any]]:
+             only_job: str = "", data_db: Path | None = None,
+             manual: bool = False) -> list[dict[str, Any]]:
     now = now or _utc_now()
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -603,6 +604,10 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             continue
         window, due = job.window(now)
         age_hours = (now - due).total_seconds() / 3600
+        if manual and job.enabled:
+            # An operator re-collection: its own window label (the schedule's window stays untouched and the
+            # date prefix still resolves `{prev_month}`), not held back by due time, misfire or minimum interval.
+            window, age_hours = f"{window}~manual-{now:%Y%m%dT%H%M%S}", 0.0
         if not job.enabled or age_hours < 0:
             status = "disabled" if not job.enabled else "not_due"
             results.append({"job": job.id, "window": window, "status": status})
@@ -616,7 +621,8 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             continue
         reason = _safe_sources(job, child_env)
         latest = ledger.latest_success(job.id) if ledger else None
-        if latest and job.min_interval_hours and (now - latest).total_seconds() < job.min_interval_hours * 3600:
+        if latest and job.min_interval_hours and not manual and \
+                (now - latest).total_seconds() < job.min_interval_hours * 3600:
             reason = "minimum_interval"
         if reason:
             results.append({"job": job.id, "window": window, "status": "deferred", "reason": reason})
@@ -649,7 +655,8 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 source_id="+".join(job.sources),
                 scope={"job_id": job.id, "window": window, "datasets": list(job.datasets),
                        "sources": list(job.sources)},
-                trigger_kind="scheduled", trigger_ref=_queue_trigger_ref(job.id, window, attempt),
+                trigger_kind="manual" if manual else "scheduled",
+                trigger_ref=_queue_trigger_ref(job.id, window, attempt),
                 command=_resolve_command(job.command, window), policy_fingerprint=policy,
                 requested_as_of=_iso(now), priority=30,
                 max_attempts=job.max_attempts,
@@ -774,7 +781,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ledger", default="")
     parser.add_argument("--job", default="")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--manual", action="store_true",
+                        help="re-collect --job now in its own window, regardless of its schedule (writes data)")
     args = parser.parse_args(argv)
+    if args.manual and not args.job:
+        parser.error("--manual requires --job")
     plan = load_plan(args.config)
     if args.ledger:
         plan = RefreshPlan(plan.jobs, plan.owner, Path(args.ledger),
@@ -808,7 +819,7 @@ def main(argv: list[str] | None = None) -> int:
     # The override is intentionally one-shot via `launchctl setenv`/unsetenv;
     # normal unattended ticks remain unchanged when it is absent.
     only_job = args.job or os.environ.get("ATS_DATA_REFRESH_ONLY_JOB", "").strip()
-    results = run_tick(plan, dry_run=args.dry_run, only_job=only_job)
+    results = run_tick(plan, dry_run=args.dry_run, only_job=only_job, manual=args.manual)
     print(json.dumps(results, default=str))
     if not args.dry_run:
         # Publication-time data-product health: alerts on a status change, never changes a read route.

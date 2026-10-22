@@ -668,7 +668,7 @@ sources:
     catalog_status: current_partial
     persistence: persistent
     provider: TickerTrends
-    upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking)
+    upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking) and its public research notes
     adapter: tickertrends_frontier_labs_revenue
     datasets: [frontier_ai_labs_revenue]
     # The same research object seen from a second angle, so it shares the Sacra
@@ -684,11 +684,12 @@ sources:
       mcp_allowed: false
       public_post_api_only: true
       accepted_reference_period: 2026-01-01..2026-06-30
+      notes_start: 2026-07-01
       chart_derived_values_allowed: false
-      notes: 与 Sacra 同一研究对象的第二信息源；每 7 天复核公开 Substack post API，语义指纹未变即 no_change，不重新基准主序列。
+      notes: 与 Sacra 同一研究对象的第二信息源；每 7 天复核公开 Substack post API，语义指纹未变即 no_change，不重新基准主序列。2026-07-01 起另读公开归档中涉及 ARR/收入的研究笔记，保留 TickerTrends 自身追踪值、他人口径（Bloomberg/FT/Axios 等）、产品级 ARR 与季度收入，按身份/产品范围/期间口径分序列，不混入公司级主序列。
     internal_request_budget:
       concurrency: 1
-      requests_per_run: 1
+      requests_per_run: 30
       timeout_seconds: 45
       max_file_bytes: 5242880
       retry_attempts: 2

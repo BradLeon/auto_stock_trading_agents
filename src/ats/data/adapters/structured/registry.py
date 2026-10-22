@@ -82,7 +82,7 @@ def _sacra_frontier_labs_revenue():
 def _tickertrends_frontier_labs_revenue():
     from ...sources.frontier_ai_labs_revenue import TickerTrendsPublicResearchAdapter
 
-    return TickerTrendsPublicResearchAdapter()
+    return TickerTrendsPublicResearchAdapter(include_notes=True)
 
 
 def _trendforce():

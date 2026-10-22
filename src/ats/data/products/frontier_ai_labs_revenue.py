@@ -51,6 +51,9 @@ COMPANY_LABELS = {item["entity_id"]: item["label"] for item in COMPANIES}
 CELL_METRIC_PREFERENCE = (
     METRIC_ANNUALIZED_RUN_RATE, METRIC_REPORTED_ARR, METRIC_TRAILING_REVENUE,
     METRIC_FORWARD_PROJECTION)
+# The section's governed trend basis is the monthly disclosure; weekly "as of" readings and closed quarters are
+# kept as supplementary cells instead of competing for it by sheer point count.
+CELL_BASIS_PREFERENCE = ("calendar_month", "instant", "quarter")
 HISTORICAL_METRICS = (METRIC_ANNUALIZED_RUN_RATE, METRIC_REPORTED_ARR,
                       METRIC_TRAILING_REVENUE)
 
@@ -68,7 +71,7 @@ METRIC_LABELS = {
 }
 SOURCE_LABELS = {
     SOURCE_SACRA: "Sacra 公开公司页面",
-    SOURCE_TICKERTRENDS: "TickerTrends 公开文章（2026H1 冻结回填）",
+    SOURCE_TICKERTRENDS: "TickerTrends 公开文章与研究笔记",
 }
 TREND_LABELS = {
     "expanding": "扩大",
@@ -129,9 +132,16 @@ def _regime(row: dict[str, Any]) -> str:
     return str(_dims(row).get("methodology_regime") or "")
 
 
+def _product_scope(row: dict[str, Any]) -> str:
+    return str(_dims(row).get("product_scope") or "")
+
+
 def _cell_key(row: dict[str, Any]) -> tuple[str, ...]:
+    # period basis and product scope are part of the cell: a closed quarter, a month and a tracked day are not one
+    # series, and a product line (Claude Code, Codex) is never trended or ranked as its parent company.
     return (str(row.get("entity_id") or ""), str(row.get("metric_id") or ""),
-            _identity(row), str(row.get("currency") or ""), _regime(row))
+            _identity(row), str(row.get("currency") or ""), _regime(row),
+            str(row.get("period_basis") or ""), _product_scope(row))
 
 
 def _iso_day(value: str) -> date | None:
@@ -261,6 +271,8 @@ def to_records(rows: Sequence[dict[str, Any]], *, repository=None,
                 str(dimensions.get("observation_identity") or ""), ""),
             "raw_metric_label": str(dimensions.get("raw_metric_label") or ""),
             "methodology_regime": str(dimensions.get("methodology_regime") or ""),
+            "product_scope": str(dimensions.get("product_scope") or ""),
+            "value_qualifier": str(_raw(row).get("value_qualifier") or ""),
             "period": str(row.get("period") or ""),
             "period_start": str(row.get("period_start") or ""),
             "period_end": str(row.get("period_end") or ""),
@@ -300,11 +312,12 @@ def comparability(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]
         == str(right.get("methodology_regime", "")),
         "currency": str(left.get("currency", "")) == str(right.get("currency", "")),
         "period_basis": str(left.get("period_basis", "")) == str(right.get("period_basis", "")),
+        "product_scope": str(left.get("product_scope", "")) == str(right.get("product_scope", "")),
         "reference_period": str(left.get("period", "")) == str(right.get("period", "")),
     }
     comparable = (dimensions["metric_id"] and dimensions["observation_identity"]
                   and dimensions["methodology_regime"] and dimensions["currency"]
-                  and dimensions["period_basis"])
+                  and dimensions["period_basis"] and dimensions["product_scope"])
     same_entity = dimensions["entity_id"]
     return {
         "version": COMPARABILITY_VERSION,
@@ -332,7 +345,8 @@ def source_conflicts(records: Sequence[dict[str, Any]], *, tolerance: float
         key = (str(record.get("entity_id") or ""), str(record.get("period") or ""),
                str(record.get("metric_id") or ""),
                str(record.get("observation_identity") or ""),
-               str(record.get("methodology_regime") or ""))
+               str(record.get("methodology_regime") or ""),
+               str(record.get("period_basis") or ""), str(record.get("product_scope") or ""))
         grouped.setdefault(key, []).append(record)
     for key, members in sorted(grouped.items()):
         if len(members) < 2:
@@ -520,7 +534,8 @@ def _fetch_rows(repository, *, metric: str = "", entity_id: str = "",
                 source_id: str = "", observation_identity: str = "",
                 methodology_regime: str = "", periods: Sequence[str] | None = None,
                 as_of: datetime | None = None, include_vintages: bool = False,
-                limit: int = 50_000) -> list[dict[str, Any]]:
+                product_scope: str = "", limit: int = 50_000) -> list[dict[str, Any]]:
+    """``product_scope``: '' = company-level rows only, '*' = every row, otherwise that product."""
     rows = repository.observations(dataset_id=DATASET_ID, entity_id=entity_id or None,
                                    metric_id=metric or None, source_id=source_id or None,
                                    as_of=as_of, latest_only=not include_vintages,
@@ -534,13 +549,15 @@ def _fetch_rows(repository, *, metric: str = "", entity_id: str = "",
             continue
         if periods and str(row.get("period")) not in {str(item) for item in periods}:
             continue
+        if product_scope != "*" and str(dimensions.get("product_scope") or "") != product_scope:
+            continue
         selected.append(row)
     return selected
 
 
 def frontier_labs_revenue_series(products, *, company: str = "", metric: str = "",
                                  observation_identity: str = "", source_id: str = "",
-                                 methodology_regime: str = "",
+                                 methodology_regime: str = "", product_scope: str = "",
                                  periods: list[str] | None = None, as_of=None,
                                  include_vintages: bool = False, as_frame: bool = False
                                  ) -> dict[str, Any]:
@@ -549,7 +566,8 @@ def frontier_labs_revenue_series(products, *, company: str = "", metric: str = "
     rows = _fetch_rows(repository, entity_id=str(company or "").upper(), metric=metric,
                        source_id=source_id, observation_identity=observation_identity,
                        methodology_regime=methodology_regime, periods=periods,
-                       as_of=as_of, include_vintages=include_vintages)
+                       as_of=as_of, include_vintages=include_vintages,
+                       product_scope=product_scope)
     records = to_records(rows, repository=repository, as_of=as_of)
     result = {
         "status": "ok" if records else "no_coverage",
@@ -557,7 +575,8 @@ def frontier_labs_revenue_series(products, *, company: str = "", metric: str = "
         "dataset_id": DATASET_ID,
         "filters": {"company": str(company or "").upper(), "metric": metric,
                     "observation_identity": observation_identity, "source_id": source_id,
-                    "methodology_regime": methodology_regime, "periods": periods or [],
+                    "methodology_regime": methodology_regime,
+                    "product_scope": product_scope, "periods": periods or [],
                     "as_of": as_of.isoformat() if as_of else "",
                     "include_vintages": include_vintages},
         "row_count": len(records),
@@ -585,7 +604,8 @@ def frontier_labs_revenue_cells(products, *, company: str = "", as_of=None,
                                 ) -> list[dict[str, Any]]:
     """Every comparable trend cell of one company, ranked for headline selection."""
     repository = products.structured
-    rows = _fetch_rows(repository, entity_id=str(company or "").upper(), as_of=as_of)
+    rows = _fetch_rows(repository, entity_id=str(company or "").upper(), as_of=as_of,
+                       product_scope="*")
     grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for row in rows:
         grouped.setdefault(_cell_key(row), []).append(row)
@@ -599,12 +619,15 @@ def frontier_labs_revenue_cells(products, *, company: str = "", as_of=None,
             "observation_identity": str(key[2]),
             "observation_identity_label": IDENTITY_LABELS.get(str(key[2]), str(key[2])),
             "currency": str(key[3]), "methodology_regime": str(key[4]),
+            "period_basis": str(key[5]), "product_scope": str(key[6]),
             "point_count": len(records), "periods": sorted(
                 {str(item.get("period") or "") for item in records}),
             "rows": records,
         })
     rank = {metric: index for index, metric in enumerate(CELL_METRIC_PREFERENCE)}
+    basis_rank = {basis: index for index, basis in enumerate(CELL_BASIS_PREFERENCE)}
     cells.sort(key=lambda item: (rank.get(str(item["metric_id"]), len(rank)),
+                                 basis_rank.get(str(item["period_basis"]), len(basis_rank)),
                                  -int(item["point_count"]), str(item["metric_id"])))
     return cells
 
@@ -616,12 +639,17 @@ def frontier_labs_company_view(products, *, company: str, as_of=None) -> dict[st
     tolerance = float(quality.get("source_conflict_relative_tolerance",
                                  DEFAULT_CONFLICT_TOLERANCE))
     cells = frontier_labs_revenue_cells(products, company=company, as_of=as_of)
-    historical = [cell for cell in cells if str(cell["metric_id"]) in HISTORICAL_METRICS]
-    comparison = historical[0] if historical else (cells[0] if cells else None)
+    # Product lines (Claude Code, Codex, ChatGPT Ads) are real evidence but never headline, trend or conflict
+    # candidates of the company: they are listed beside it, never summed into it.
+    company_cells = [cell for cell in cells if not cell["product_scope"]]
+    historical = [cell for cell in company_cells if str(cell["metric_id"]) in HISTORICAL_METRICS]
+    comparison = historical[0] if historical else (company_cells[0] if company_cells else None)
     trend = revenue_trend(comparison["rows"], quality=quality) if comparison else {
         "status": "unavailable", "rule_version": TREND_RULE_VERSION,
         "comparable_point_count": 0, "steps": ["没有通过质量门的收入观察"]}
-    all_records = [record for cell in cells for record in cell["rows"]]
+    all_records = [record for cell in company_cells for record in cell["rows"]]
+    supplementary_rows = [record for cell in cells if cell is not comparison
+                          for record in cell["rows"]]
     latest_records = [record for record in all_records
                       if str(record.get("period")) == comparison["periods"][-1]] \
         if comparison and comparison["periods"] else []
@@ -638,12 +666,15 @@ def frontier_labs_company_view(products, *, company: str, as_of=None) -> dict[st
              "observation_identity": comparison["observation_identity"],
              "observation_identity_label": comparison["observation_identity_label"],
              "methodology_regime": comparison["methodology_regime"],
+             "period_basis": comparison["period_basis"],
              "point_count": comparison["point_count"],
              "periods": comparison["periods"]} if comparison else None),
         "trend": trend,
         "cells": [{key: value for key, value in cell.items() if key != "rows"}
                   for cell in cells],
         "history_rows": comparison["rows"] if comparison else [],
+        # Every other cell of the company, product lines included, labelled by identity, scope and period basis.
+        "supplementary_rows": supplementary_rows,
         "rows_hash": rows_hash(comparison["rows"]) if comparison else "",
         "period_gap": trend.get("period_gap", _period_gap([])),
         "source_conflicts": conflicts,
@@ -710,7 +741,8 @@ def frontier_labs_revenue_evidence_bundle(products, *, companies: Sequence[str] 
         comparable_across_companies = bool(
             left["metric_id"] == right["metric_id"]
             and left["observation_identity"] == right["observation_identity"]
-            and left["methodology_regime"] == right["methodology_regime"])
+            and left["methodology_regime"] == right["methodology_regime"]
+            and left.get("period_basis", "") == right.get("period_basis", ""))
         comparison_pair = [
             {"entity_id": str(views_with_cells[0].get("entity_id") or ""),
              "metric_id": str(left["metric_id"]),

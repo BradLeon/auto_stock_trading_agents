@@ -60,6 +60,12 @@
 | S24 | `frontier_ai_capability_full_audit_p7d` | 通过 | 〔自动证据，非结论〕窗口 10-16 `succeeded`（15:39） | 用户确认（AI 建议） | 2026-10-22 | 10-16 succeeded；下一次 10-23 |
 | S25 | `frontier_ai_labs_revenue_p7d_refresh` | 通过 | 〔自动证据，非结论〕窗口 10-16 `failed`：首次 `command_or_result_failed`，重试 `controller_RuntimeError`；Sacra 检查 `methodology_drift`（10-16 16:40）；10-09 那次 partial（validation_failed 1） | 用户确认（AI 建议） | 2026-10-22 | 10-22 已修好并重采入库（发现 40 / 准入 35 / 隔离 0，立即再跑 no_change，无新版本）。修了四处：①Sacra 方法漂移误判；②季度数被误当全年；③“有数据入库、个别行被隔离”不再记失败；④TickerTrends 从“固定一篇文章”改为读公开归档里 2026-07-01 起涉及 ARR/收入的研究笔记系列（9-29、10-08、10-14、8-14 等都已进来）。按你的口径，他人口径与产品级、季度数都保留，只是各自带标签分序列：Bloomberg/FT 等口径记 media_reported 并写明出处；Claude Code、Codex、ChatGPT Ads 记 product_scope，不并进公司级、不相加；季度收入记 quarter 期间口径（如 Anthropic Q3 16.8B 来自 FT）；每周追踪值记具体日期（instant）。公司级主序列与趋势仍用月度口径，其余在 supplementary_rows 里并列。明确拒收并留痕的：增量（“增加 5.2B”“差额 6.3B”）、没写日期的“同期”数字、成本/融资类。遗留（不影响本项通过）：①只收标题/摘要含 ARR/revenue/run rate 的笔记，正文里偶然提到收入的其他文章不抓；②“约/超过”类数字保留并标 approximate/lower_bound，不当精确值；③Sacra 页面里的产品级数字仍按原规则排除（未改）；④评审报告/图表尚未展示 supplementary_rows |
 
+结构化 S01–S25 小结（2026-10-22，AI 建议，待用户确认）：25 项均记“通过”，其中 S01–S25 里有 9 项是 G0 过程中发现缺陷、修复并手动重采后才通过的（TLS 重置被误标 parse_failed、重试 trigger 冲突、部分行被隔离即记失败、Sacra 方法漂移与季度数误当全年、SEC 预算缺失、韩国出口只在 15 日跑一次、TickerTrends 固定单篇文章）。
+不影响通过、但需要你决定或后续处理的缺口：
+- S18：现货价（TrendForce 每日表）没有数据集，合约价采集本身正确；
+- S01–S15：仍有 19 个标的的一致预期过期、未来季度一致预期未采（你说“以后再说”）；
+- S25：只抓标题/摘要含 ARR/revenue 的笔记；Sacra 页面里的产品级数字仍排除；报告与图表尚未展示 supplementary_rows。
+
 ## 3. Dataflow：派生
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |

@@ -86,6 +86,27 @@ def _write_download(drop: Path, name: str, payload: bytes, meta: dict) -> Path:
     return path
 
 
+def _store_unique(drop: Path, payload: bytes, filename: str, meta: dict, *, suffix: str,
+                  fetched_at: datetime) -> tuple[Path, bool]:
+    """Save ``payload`` unless a file with the same sha256 is already in ``drop``.
+
+    Returns (path, newly_saved).  When the content is already there (for example a manual download of
+    the same file) nothing is stored twice; the existing copy only gets its source recorded.
+    """
+    sha256 = hashlib.sha256(payload).hexdigest()
+    twin = next((path for path in sorted(drop.glob(f"*{suffix}")) if path.is_file()
+                 and hashlib.sha256(path.read_bytes()).hexdigest() == sha256), None) if drop.is_dir() else None
+    if twin is None:
+        return _write_download(drop, filename, payload, meta), True
+    sidecar = twin.with_name(twin.name + ".meta.json")
+    if not sidecar.exists():
+        sidecar.write_text(json.dumps({**meta, "sha256": sha256, "bytes": len(payload),
+                                       "downloaded_at": fetched_at.isoformat(),
+                                       "note": "file was already in the folder; URL recorded afterwards"},
+                                      indent=1, sort_keys=True), encoding="utf-8")
+    return twin, False
+
+
 def _sec_headers() -> dict:
     from .. import sec
     headers = sec._headers()
@@ -214,23 +235,69 @@ def acquire_tsmc_quarterly_results(config, drop: Path, request, fetched_at: date
             raise AcquisitionError(f"TSMC FS.pdf at {url} is not a PDF")
         sha256 = hashlib.sha256(payload).hexdigest()
         meta = {"source_url": url, "page_url": page_url, "quarter": label, "form": "FS.pdf"}
-        twin = next((path for path in sorted(drop.glob("*.pdf"))
-                     if hashlib.sha256(path.read_bytes()).hexdigest() == sha256), None) if drop.is_dir() else None
-        if twin is not None:
-            sidecar = twin.with_name(twin.name + ".meta.json")
-            if not sidecar.exists():
-                sidecar.write_text(json.dumps({**meta, "sha256": sha256, "bytes": len(payload),
-                                               "downloaded_at": fetched_at.isoformat(),
-                                               "note": "file was already in the folder; URL recorded afterwards"},
-                                              indent=1, sort_keys=True), encoding="utf-8")
-            known[url] = {"file": twin.name, "sha256": sha256, "quarter": label}
-            report["status"] = "already_have_this_file"
-            report["file"] = twin.name
-        else:
-            path = _write_download(drop, f"FS_{label}_{sha256[:8]}.pdf", payload, meta)
-            known[url] = {"file": path.name, "sha256": sha256, "quarter": label}
+        path, saved = _store_unique(drop, payload, f"FS_{label}_{sha256[:8]}.pdf", meta, suffix=".pdf",
+                                    fetched_at=fetched_at)
+        known[url] = {"file": path.name, "sha256": sha256, "quarter": label}
+        report["file"] = path.name
+        if saved:
             report["status"] = "downloaded"
             report["downloaded"].append(path.name)
+        else:
+            report["status"] = "already_have_this_file"
+    finally:
+        _save_state(drop, state)
+        report["requests"] = client.requests
+    return report
+
+
+# --------------------------------------------------------------------------- #
+# Euroland "Interactive Analysis" Excel export (SK hynix quarterly statements, third party)
+# --------------------------------------------------------------------------- #
+def urlencode_params(settings: dict) -> str:
+    from urllib.parse import urlencode
+    return urlencode({str(k): str(v) for k, v in (settings.get("params") or {}).items()})
+
+
+def acquire_euroland_export(config, drop: Path, request, fetched_at: datetime, *,
+                            http: Callable[[str], bytes] | None = None, sleep=time.sleep) -> dict:
+    """Request the tool's own "Export all the data into an Excel" URL and keep it when its content is new.
+
+    The tool page's export button builds ``<tool>/Excel/?<tool params>&sid=&generalNotesFirst=0&levelZero=<n>&format=xls``
+    (levelZero 1 = the Quarterly tab).  The request needs no cookie or login; one request a day is both the
+    check and the download, and an unchanged export (same sha256) is not stored again.
+    """
+    settings = config.raw.get("acquisition") or {}
+    url = f"{settings['export_url']}?{urlencode_params(settings)}"
+    host = str(settings.get("allowed_host") or urlparse(url).netloc)
+    if urlparse(url).netloc != host:
+        raise AcquisitionError(f"Euroland export host {urlparse(url).netloc} is not {host}")
+    headers = {"User-Agent": str(settings.get("user_agent") or ""), "Referer": str(settings.get("page_url") or "")}
+    client = _Client(http, budget=REQUESTS_PER_RUN, interval=0.0, sleep=sleep, headers=headers)
+    state = _load_state(drop)
+    known: dict = state.setdefault("euroland_export", {})
+    report = {"kind": "euroland_export", "export_url": url, "downloaded": []}
+    try:
+        payload = client.get(url)
+        if not payload.startswith(b"\xd0\xcf\x11\xe0"):          # OLE2 / .xls
+            raise AcquisitionError(
+                f"Euroland export did not return a workbook: {payload[:60]!r} -- the export parameters changed")
+        sha256 = hashlib.sha256(payload).hexdigest()
+        previous = known.get("sha256")
+        if previous == sha256 and (drop / known.get("file", "")).is_file():
+            report["status"] = "export_unchanged"
+            return report
+        meta = {"source_url": url, "page_url": str(settings.get("page_url") or ""),
+                "source_nature": "third_party_aggregator", "form": "Data.xls"}
+        stamp = fetched_at.astimezone(timezone.utc).strftime("%Y%m%d")
+        path, saved = _store_unique(drop, payload, f"Data_{stamp}_{sha256[:8]}.xls", meta, suffix=".xls",
+                                    fetched_at=fetched_at)
+        known.update(sha256=sha256, file=path.name, checked_at=fetched_at.isoformat())
+        report["file"] = path.name
+        if saved:
+            report["status"] = "downloaded"
+            report["downloaded"].append(path.name)
+        else:
+            report["status"] = "already_have_this_file"
     finally:
         _save_state(drop, state)
         report["requests"] = client.requests
@@ -240,4 +307,5 @@ def acquire_tsmc_quarterly_results(config, drop: Path, request, fetched_at: date
 ACQUIRERS: dict[str, Callable] = {
     "sec_6k_exhibits": acquire_sec_6k_exhibits,
     "tsmc_quarterly_results": acquire_tsmc_quarterly_results,
+    "euroland_export": acquire_euroland_export,
 }

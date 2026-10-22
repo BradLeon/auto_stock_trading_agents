@@ -699,3 +699,80 @@ def test_adapter_reports_a_changed_tsmc_page_as_parse_failed_and_still_reads_exi
 def test_tsmc_user_agent_is_a_browser_one_because_the_site_refuses_others():
     ua = _tsm_config().raw["acquisition"]["user_agent"]
     assert ua.startswith("Mozilla/5.0")
+
+
+# --------------------------------------------------------------------------- #
+# Euroland export acquirer (SKHY)
+# --------------------------------------------------------------------------- #
+XLS_BYTES = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 pretend workbook"
+EXPORT_URL = ("https://asia.tools.euroland.com/tools/IA/Excel/?companycode=kr-000660&v=redesign&sid="
+              "&generalNotesFirst=0&levelZero=1&format=xls")
+
+
+def _skhy_config():
+    return load_issuer_configs()["SKHY"]
+
+
+class _EurolandSite:
+    def __init__(self, body=XLS_BYTES):
+        self.body, self.requests = body, []
+
+    def __call__(self, url):
+        self.requests.append(url)
+        return self.body
+
+
+def test_euroland_export_request_is_the_tools_own_quarterly_excel_url():
+    settings = _skhy_config().raw["acquisition"]
+    assert settings["params"] == {"companycode": "kr-000660", "v": "redesign", "sid": "",
+                                  "generalNotesFirst": "0", "levelZero": "1", "format": "xls"}
+    assert issuer_ir_acquire.urlencode_params(settings) == EXPORT_URL.split("?", 1)[1]
+
+
+def test_euroland_acquirer_stores_a_new_export_once_and_skips_an_unchanged_one(tmp_path):
+    site = _EurolandSite()
+    drop = tmp_path / "drop"
+    first = issuer_ir_acquire.acquire_euroland_export(_skhy_config(), drop, None, NOW, http=site)
+    assert first["status"] == "downloaded" and first["requests"] == 1 and site.requests == [EXPORT_URL]
+    name = first["downloaded"][0]
+    assert name.startswith("Data_20261022_") and name.endswith(".xls") and (drop / name).read_bytes() == XLS_BYTES
+    meta = json.loads((drop / (name + ".meta.json")).read_text())
+    assert meta["source_url"] == EXPORT_URL and meta["source_nature"] == "third_party_aggregator"
+
+    again = issuer_ir_acquire.acquire_euroland_export(_skhy_config(), drop, None, NOW, http=site)
+    assert again["status"] == "export_unchanged" and again["downloaded"] == []
+    assert len(list(drop.glob("*.xls"))) == 1
+
+    site.body = XLS_BYTES + b" revised numbers"          # Euroland revised the data: a new vintage file
+    changed = issuer_ir_acquire.acquire_euroland_export(_skhy_config(), drop, None, NOW, http=site)
+    assert changed["status"] == "downloaded" and len(list(drop.glob("*.xls"))) == 2
+
+
+def test_euroland_acquirer_does_not_duplicate_the_manual_download_and_refuses_an_error_page(tmp_path):
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    (drop / "Data.xls").write_bytes(XLS_BYTES)
+    report = issuer_ir_acquire.acquire_euroland_export(_skhy_config(), drop, None, NOW, http=_EurolandSite())
+    assert report["status"] == "already_have_this_file" and report["file"] == "Data.xls"
+    assert json.loads((drop / "Data.xls.meta.json").read_text())["source_url"] == EXPORT_URL
+    with pytest.raises(issuer_ir_acquire.AcquisitionError, match="did not return a workbook"):
+        issuer_ir_acquire.acquire_euroland_export(
+            _skhy_config(), tmp_path / "other", None, NOW, http=_EurolandSite(b"ERROR 003 - "))
+
+
+def test_skhy_daily_run_downloads_parses_and_the_next_day_is_no_change(tmp_path, monkeypatch):
+    from ats.data.sources import issuer_ir_parsers
+    monkeypatch.setitem(issuer_ir_parsers.PARSERS, "euroland_xls", _FakeDocParser(parse_euroland_rows(_rows())))
+    site = _EurolandSite()
+
+    def acquirer(config, drop, request, fetched_at):
+        return issuer_ir_acquire.acquire_euroland_export(config, drop, request, fetched_at, http=site)
+
+    repo = _repo(tmp_path)
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"SKHY": acquirer})
+    first = _run(repo, adapter, "SKHY")
+    assert first["status"] == "succeeded" and first["accepted"] == 104
+    assert _run(repo, adapter, "SKHY")["status"] == "no_change"
+    row = next(r for r in _accepted(repo, "SKHY") if r["metric_id"] == "financial.revenue.gaap" and r["period"] == "2026-06-30")
+    assert repo.artifact(row["artifact_id"])["source_url"] == EXPORT_URL
+    assert json.loads(row["raw_payload"])["source_nature"] == "third_party_aggregator"

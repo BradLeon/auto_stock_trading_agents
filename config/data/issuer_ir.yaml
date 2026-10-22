@@ -58,3 +58,14 @@ issuers:
     fx_effect_reported: false
     files:
       - {pattern: "*.xls", parser: euroland_xls}
+    acquisition:
+      # The tool behind https://www.skhynix.com/ir/UI-FR-IR07/ (iframe asia.tools.euroland.com/tools/ia/) has an
+      # "Export all the data into an Excel" button; its URL is <tool>/Excel/?<tool params>&sid=&generalNotesFirst=0
+      # &levelZero=1&format=xls (levelZero 1 = Quarterly). No login or cookie; verified 2026-10-22 to return a file
+      # byte-identical (sha256) to the manual download. One request a day is the check and the download.
+      kind: euroland_export
+      export_url: https://asia.tools.euroland.com/tools/IA/Excel/
+      page_url: https://asia.tools.euroland.com/tools/ia/?companycode=kr-000660&v=redesign
+      allowed_host: asia.tools.euroland.com
+      params: {companycode: kr-000660, v: redesign, sid: "", generalNotesFirst: "0", levelZero: "1", format: xls}
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"

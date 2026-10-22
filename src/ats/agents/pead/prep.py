@@ -175,9 +175,9 @@ def _peer_line(r: dict) -> str:
     if r.get("reported"):
         base += f"\n      【已发布财报 {r.get('peer_fiscal', '')}】"
         if r.get("peer_reported_eps") is not None:
-            base += f"\n      已报 EPS: {r.get('peer_reported_eps')} (YoY {r.get('peer_reported_eps_yoy')}%)"
+            base += f"\n      已报 EPS: {r.get('peer_reported_eps')} {r.get('peer_reported_eps_unit', '')} (YoY {r.get('peer_reported_eps_yoy')}%)"
         if r.get("peer_reported_revenue") is not None:
-            base += f"\n      已报营收: {r.get('peer_reported_revenue')} (YoY {r.get('peer_reported_revenue_yoy')}%)"
+            base += f"\n      已报营收: {r.get('peer_reported_revenue')} {r.get('peer_reported_revenue_unit', '')} (YoY {r.get('peer_reported_revenue_yoy')}%)"
     for fact in (r.get("peer_brief_facts") or []):
         base += f"\n      简报事实: {fact}"
     return base

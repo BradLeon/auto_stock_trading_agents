@@ -26,8 +26,17 @@ class StatementMetric(BaseModel):
 
     def render(self) -> str:
         def fmt(v, u):
-            return "n/a" if v is None else (f"{v:,.0f}{u}" if u == "$M"
-                                            else f"{v:.2f}{u}" if u in ("%", "$") else f"{v}{u}")
+            if v is None:
+                return "n/a"
+            if u == "$M":
+                return f"{v:,.0f}{u}"
+            if u in ("%", "$"):
+                return f"{v:.2f}{u}"
+            if u.endswith(" M"):                 # "TWD M", "EUR M", "KRW M": amounts in millions of that currency
+                return f"{v:,.0f} {u}"
+            if "/" in u:                         # "USD/share", "TWD/ADR": per-share amounts keep their currency
+                return f"{v:,.2f} {u}"
+            return f"{v}{u}"
 
         def dlt(v):
             return "n/a" if v is None else f"{v:+.1f}{self.delta_unit}"

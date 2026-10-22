@@ -221,12 +221,16 @@ def _peer_report(symbol: str) -> dict:
         out["reported"] = True
         out["peer_fiscal"] = fd.statements.period
         for line in fd.statements.lines:
-            if line.label == "Diluted EPS" and line.value is not None:
+            if line.label in {"Diluted EPS", "Basic EPS"} and line.value is not None:
                 out["peer_reported_eps"] = line.value
                 out["peer_reported_eps_yoy"] = line.yoy
+                out["peer_reported_eps_unit"] = line.unit      # a bare 147.13 is not a reading: say TWD/ADR
+                if line.label == "Basic EPS":
+                    out["peer_reported_eps_unit"] += " (basic)"
             elif line.label == "Revenue" and line.value is not None:
                 out["peer_reported_revenue"] = line.value
                 out["peer_reported_revenue_yoy"] = line.yoy
+                out["peer_reported_revenue_unit"] = line.unit
 
     # 近期事实变化：该标的自己的 InformationBrief 投影（information_brief 角色，
     # 允许的跨角色读取）。只取事实列表，不取任何评审结论。

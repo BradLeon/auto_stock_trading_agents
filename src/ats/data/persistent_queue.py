@@ -352,6 +352,8 @@ class PersistentIngestionQueue:
         env["ATS_PERSISTENT_QUEUE_TASK_ID"] = task["task_id"]
         env["ATS_PERSISTENT_QUEUE_LEASE_OWNER"] = worker_id
         env["ATS_PERSISTENT_QUEUE_SOURCE_ID"] = task["source_id"]
+        # lets a command tell an operator's manual re-collection from a scheduled run
+        env["ATS_PERSISTENT_QUEUE_TRIGGER"] = str(task.get("trigger_kind", ""))
         reported = ""
         heartbeat_stop = threading.Event()
         lease_lost = threading.Event()

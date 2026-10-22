@@ -433,9 +433,13 @@ structured:
     company_financials_issuer_ir_daily:
       # 2026-10-22 (G0): TSM / ASML / SKHY are foreign issuers whose latest quarter the vendors publish late and SEC
       # XBRL does not carry quarterly. This job parses the issuer's own IR files (config/data/issuer_ir.yaml: folder,
-      # parser, currency) found in var/ir_drop/<ticker>/ -- placed there by the issuer's file acquirer or by hand --
-      # and writes them to the same dataset. A day with no new file is `no_change`; a file whose statements fail the
-      # self-checks (cash-flow bridge, balance sheet, net income, currency) is quarantined with the reason.
+      # parser, currency) found in var/ir_drop/<ticker>/ and writes them to the same dataset. A day with no new file
+      # is `no_change`; a file whose statements fail the self-checks (cash-flow bridge, balance sheet, net income,
+      # currency) is quarantined with the reason.
+      # Load: the job starts daily so it can follow the earnings calendar, but the NETWORK is only used inside the
+      # window around a calendar earnings date (1 day before .. 14 days after) and once a week as a safety net for a
+      # slipped/missing calendar date; every other day it only re-reads the files already on disk (no request).
+      # A manual re-collection (g0_rerun) always checks.
       enabled: true
       source: issuer_ir_files
       entities: [TSM, ASML, SKHY]
@@ -449,7 +453,7 @@ structured:
       retry:
         attempts: 2
         backoff_seconds: [300, 1800]
-      semantics: issuer IR statements as immutable vintages per file; the same complete-report-package gate as the vendor jobs decides what a consumer can read
+      semantics: issuer IR statements as immutable vintages per file; consumers read the newest complete report package over all sources (a newer issuer quarter wins over a vendor one quarter behind)
     macro_series_daily:
       # 2026-10-16: the Macro review used to pull these indicators itself (FRED, market closes, CNN
       # fear & greed). The scheduled run re-reads a rolling window so revisions are caught; the

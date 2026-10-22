@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 
-from .fundamentals import _FINANCIAL_SOURCE_PRIORITY, _complete_report_package
+from .fundamentals import _select_report_package
 
 
 def _derived_rows_recompute(rows: list[dict]) -> list[dict]:
@@ -57,15 +57,7 @@ def company_financial_release_check(repository, *, entities: list[str] | None = 
     freshness_limit = float((configured.quality or {}).get("freshness_hours_max", 0) or 0)
     packages = []
     for entity in target_entities:
-        package = None
-        for source_id in _FINANCIAL_SOURCE_PRIORITY:
-            package = _complete_report_package(repository, source_id=source_id, symbol=entity)
-            if package is not None:
-                break
-        if package is None:
-            package = _complete_report_package(
-                repository,
-                source_id=("sec_companyfacts", "company_disclosures"), symbol=entity)
+        package = _select_report_package(repository, symbol=entity)
         if package is None:
             packages.append({"entity": entity, "ready": False,
                              "reason": "no_current_complete_report_package"})

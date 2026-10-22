@@ -11,6 +11,10 @@ version: 1
 
 defaults:
   source_nature: issuer_official      # issuer_official | third_party_aggregator
+  # When the daily job may use the network to look for a new file: inside the window around a calendar
+  # earnings date, plus a weekly safety net in case the calendar date slipped or is missing. A manual
+  # re-collection (g0_rerun) always checks. Files already on disk are parsed every run (no network).
+  collection_window: {before_days: 1, after_days: 14, safety_net_days: 7}
   abs_tolerance: 3                    # rounding slack, in the table's reported unit (millions)
   rel_tolerance: 0.0001
 

@@ -20,7 +20,7 @@ Contract (deterministic, no model requests):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -378,6 +378,16 @@ def build_records(doc: IRDocument, *, config: IssuerConfig, file_name: str, sha2
 # --------------------------------------------------------------------------- #
 # Adapter
 # --------------------------------------------------------------------------- #
+def calendar_event_dates(symbol: str, start: date, end: date) -> list[date]:
+    """Earnings-event dates of ``symbol`` in [start, end] from the persisted schedule calendar."""
+    from ..stores.schedule_calendar import ScheduleCalendarStore
+
+    rows = ScheduleCalendarStore().events(start=start, end=end, event_types=("earnings",), limit=5000)
+    return [date.fromisoformat(str(row["event_date"])[:10]) for row in rows
+            if str(row.get("event_id", "")).split(":")[1:2] == [symbol.upper()]]
+
+
+
 ParserFn = Callable[[Path, bytes], IRDocument]
 
 
@@ -409,7 +419,8 @@ class IssuerIRFilesAdapter:
     dataset_id = "company_financials"
 
     def __init__(self, *, configs: dict[str, IssuerConfig] | None = None, clock=None,
-                 root: Path | None = None, acquirers: dict | None = None):
+                 root: Path | None = None, acquirers: dict | None = None, calendar=None):
+        self.calendar = calendar or calendar_event_dates
         self._configs = configs
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.root = root
@@ -452,9 +463,13 @@ class IssuerIRFilesAdapter:
         # ``acquirers=None`` -> the configured acquirer; an explicit mapping (even empty) replaces it
         acquirer = (self.acquirers.get(symbol) if self.acquirers is not None
                     else self._configured_acquirer(config))
-        if acquirer is not None:
+        gate = self._collection_gate(config, drop, request, fetched_at, symbol) if acquirer is not None else None
+        if gate is not None and not gate["open"]:
+            acquisition = {"skipped": gate["reason"], **{k: v for k, v in gate.items() if k not in {"open", "reason"}}}
+        elif acquirer is not None:
             try:
-                acquisition = acquirer(config, drop, request, fetched_at) or {}
+                acquisition = {**(acquirer(config, drop, request, fetched_at) or {}), "gate": gate["reason"]}
+                self._record_network_check(drop, fetched_at)
             except PermissionError:
                 raise
             except AcquisitionError as exc:
@@ -557,6 +572,46 @@ class IssuerIRFilesAdapter:
             return self._batch(request, fetched_at, status, failures=failures, metadata=metadata)
         return self._batch(request, fetched_at, IngestionStatus.PARTIAL if failures else IngestionStatus.SUCCEEDED,
                            failures=failures, records=records, artifacts=artifacts, metadata=metadata)
+
+    def _collection_gate(self, config: IssuerConfig, drop: Path, request: FetchRequest,
+                         fetched_at: datetime, symbol: str) -> dict:
+        """Decide whether today's run may go to the network at all.
+
+        Files only appear when the issuer reports, so the network is used (a) inside the window around a
+        calendar earnings date, (b) at least once every ``safety_net_days`` regardless -- a slipped or missing
+        calendar date can delay a file by at most that long -- and (c) whenever an operator asks (manual run
+        or ``query_scope.acquire = "always"``).  Parsing the files already on disk never needs the network.
+        """
+        window = {"before_days": 1, "after_days": 14, "safety_net_days": 7,
+                  **(config.raw.get("collection_window") or {})}
+        if os.environ.get("ATS_PERSISTENT_QUEUE_TRIGGER") == "manual" or \
+                (request.query_scope or {}).get("acquire") == "always":
+            return {"open": True, "reason": "manual"}
+        today = fetched_at.astimezone(timezone.utc).date()
+        calendar_error = ""
+        try:
+            dates = self.calendar(symbol, today - timedelta(days=int(window["after_days"])),
+                                  today + timedelta(days=int(window["before_days"])))
+        except Exception as exc:        # a missing calendar must not stop collection: the safety net still runs
+            dates, calendar_error = [], f"{type(exc).__name__}: {exc}"
+        if dates:
+            return {"open": True, "reason": f"earnings_window:{max(dates).isoformat()}"}
+        from . import issuer_ir_acquire
+        last = (issuer_ir_acquire._load_state(drop).get("gate") or {}).get("last_network_check", "")
+        due = True
+        if last:
+            due = (today - datetime.fromisoformat(last).date()).days >= int(window["safety_net_days"])
+        info = {"calendar_error": calendar_error} if calendar_error else {}
+        if due:
+            return {"open": True, "reason": "safety_net", **info}
+        return {"open": False, "reason": "outside_earnings_window", "last_network_check": last, **info}
+
+    @staticmethod
+    def _record_network_check(drop: Path, fetched_at: datetime) -> None:
+        from . import issuer_ir_acquire
+        state = issuer_ir_acquire._load_state(drop)
+        state["gate"] = {"last_network_check": fetched_at.astimezone(timezone.utc).isoformat()}
+        issuer_ir_acquire._save_state(drop, state)
 
     @staticmethod
     def _configured_acquirer(config: IssuerConfig):

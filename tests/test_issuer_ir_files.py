@@ -8,7 +8,7 @@ files by pdfplumber / xlrd (file name and sha256 are recorded inside each fixtur
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 from pathlib import Path
 
@@ -44,6 +44,7 @@ CORE_METRICS = {
     "financial.total_debt.gaap",
 }
 NOW = datetime(2026, 10, 22, 8, 0, tzinfo=timezone.utc)
+_NO_CALENDAR = lambda symbol, start, end: []   # noqa: E731 - tests never read the production calendar
 
 
 def _pages(name: str) -> list[str]:
@@ -570,7 +571,8 @@ def test_adapter_runs_the_acquirer_first_and_records_the_sec_url_in_lineage(tmp_
         return issuer_ir_acquire.acquire_sec_6k_exhibits(config, drop, request, fetched_at, http=site)
 
     repo = _repo(tmp_path)
-    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"ASML": acquirer})
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"ASML": acquirer},
+                                calendar=_NO_CALENDAR)
     result = _run(repo, adapter, "ASML")
     assert result["status"] == "succeeded" and result["quarantined"] == 0
     row = next(r for r in _accepted(repo, "ASML") if r["metric_id"] == "financial.revenue.gaap" and r["period"] == "2026-09-30")
@@ -585,7 +587,8 @@ def test_acquisition_outage_is_unreachable_but_existing_files_are_still_parsed(t
     def broken(config, drop, request, fetched_at):
         raise ConnectionError("TLS reset")
 
-    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"ASML": broken})
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"ASML": broken},
+                                calendar=_NO_CALENDAR)
     repo = _repo(tmp_path)
     assert _run(repo, adapter, "ASML")["status"] == "unreachable"      # nothing on disk yet
     _drop(tmp_path, "ASML", f"{ASML_ACCESSION}_financial_statementsxusx.htm", copy_from=EX99_3)
@@ -690,7 +693,8 @@ def test_adapter_reports_a_changed_tsmc_page_as_parse_failed_and_still_reads_exi
             config, drop, request, fetched_at, http=lambda url: b"<html>redesigned</html>")
 
     repo = _repo(tmp_path)
-    result = _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"TSM": acquirer}), "TSM")
+    result = _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"TSM": acquirer},
+                                calendar=_NO_CALENDAR), "TSM")
     assert result["status"] == "partial" and result["accepted"] == 42
     run = repo.conn.execute("SELECT note FROM structured_ingestion_runs WHERE run_id=?", (result["run_id"],)).fetchone()
     assert "layout changed" in run["note"]
@@ -769,10 +773,174 @@ def test_skhy_daily_run_downloads_parses_and_the_next_day_is_no_change(tmp_path,
         return issuer_ir_acquire.acquire_euroland_export(config, drop, request, fetched_at, http=site)
 
     repo = _repo(tmp_path)
-    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"SKHY": acquirer})
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={"SKHY": acquirer},
+                                calendar=_NO_CALENDAR)
     first = _run(repo, adapter, "SKHY")
     assert first["status"] == "succeeded" and first["accepted"] == 104
     assert _run(repo, adapter, "SKHY")["status"] == "no_change"
     row = next(r for r in _accepted(repo, "SKHY") if r["metric_id"] == "financial.revenue.gaap" and r["period"] == "2026-06-30")
     assert repo.artifact(row["artifact_id"])["source_url"] == EXPORT_URL
     assert json.loads(row["raw_payload"])["source_nature"] == "third_party_aggregator"
+
+
+# --------------------------------------------------------------------------- #
+# When the daily job may use the network (calendar window + weekly safety net)
+# --------------------------------------------------------------------------- #
+class _CountingAcquirer:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, config, drop, request, fetched_at):
+        self.calls += 1
+        return {"kind": "fake"}
+
+
+def _gated(tmp_path, calendar, acquirer, *, now=NOW, **scope):
+    adapter = IssuerIRFilesAdapter(root=tmp_path, clock=lambda: now, acquirers={"TSM": acquirer}, calendar=calendar)
+    return adapter.fetch(FetchRequest(source_id="issuer_ir_files", dataset_id="company_financials",
+                                      entities=["TSM"], query_scope=scope))
+
+
+def test_network_is_used_inside_the_earnings_window_not_outside_it(tmp_path):
+    acquirer = _CountingAcquirer()
+    seen = {}
+
+    def calendar(symbol, start, end):
+        seen["range"] = (start.isoformat(), end.isoformat())
+        return [date(2026, 10, 15)] if start <= date(2026, 10, 15) <= end else []
+
+    batch = _gated(tmp_path, calendar, acquirer)              # 10-22: the 10-15 release is 7 days ago
+    assert acquirer.calls == 1 and batch.provider_metadata["acquisition"]["gate"] == "earnings_window:2026-10-15"
+    assert seen["range"] == ("2026-10-08", "2026-10-23")      # 14 days after .. 1 day before today
+    later = datetime(2026, 12, 1, 8, 0, tzinfo=timezone.utc)  # long after the window, but the safety net
+    assert _gated(tmp_path, calendar, acquirer, now=later).provider_metadata["acquisition"]["gate"] == "safety_net"
+    assert acquirer.calls == 2
+
+
+def test_quiet_days_outside_the_window_do_not_touch_the_network_until_the_weekly_safety_net(tmp_path):
+    acquirer = _CountingAcquirer()
+    _gated(tmp_path, _NO_CALENDAR, acquirer)                  # first ever run -> safety net, recorded
+    assert acquirer.calls == 1
+    for days in (1, 3, 6):
+        batch = _gated(tmp_path, _NO_CALENDAR, acquirer, now=NOW + timedelta(days=days))
+        assert batch.provider_metadata["acquisition"]["skipped"] == "outside_earnings_window"
+    assert acquirer.calls == 1
+    _gated(tmp_path, _NO_CALENDAR, acquirer, now=NOW + timedelta(days=7))
+    assert acquirer.calls == 2
+
+
+def test_manual_run_and_explicit_scope_always_check_and_a_broken_calendar_falls_back_to_the_safety_net(
+        tmp_path, monkeypatch):
+    acquirer = _CountingAcquirer()
+    _gated(tmp_path, _NO_CALENDAR, acquirer)
+    _gated(tmp_path, _NO_CALENDAR, acquirer, now=NOW + timedelta(days=1), acquire="always")
+    assert acquirer.calls == 2
+    monkeypatch.setenv("ATS_PERSISTENT_QUEUE_TRIGGER", "manual")
+    _gated(tmp_path, _NO_CALENDAR, acquirer, now=NOW + timedelta(days=2))
+    assert acquirer.calls == 3
+    monkeypatch.delenv("ATS_PERSISTENT_QUEUE_TRIGGER")
+
+    def broken(symbol, start, end):
+        raise RuntimeError("calendar db locked")
+
+    batch = _gated(tmp_path, broken, acquirer, now=NOW + timedelta(days=30))
+    assert batch.provider_metadata["acquisition"]["gate"] == "safety_net" and acquirer.calls == 4
+
+
+def test_a_failed_acquisition_does_not_reset_the_safety_net_clock(tmp_path):
+    def broken(config, drop, request, fetched_at):
+        raise ConnectionError("TLS reset")
+
+    batch = _gated(tmp_path, _NO_CALENDAR, broken)
+    assert batch.status.value == "unreachable"
+    good = _CountingAcquirer()
+    _gated(tmp_path, _NO_CALENDAR, good, now=NOW + timedelta(days=1))
+    assert good.calls == 1                                     # the next day tries again
+
+
+def test_calendar_event_dates_reads_only_this_issuers_earnings_events(tmp_path):
+    from ats.data.sources.issuer_ir_files import calendar_event_dates
+    from ats.data.stores.schedule_calendar import ScheduleCalendarStore
+
+    class Store(ScheduleCalendarStore):
+        def __init__(self):
+            pass
+
+        def events(self, **kwargs):
+            assert kwargs["event_types"] == ("earnings",)
+            return [{"event_id": "earnings:TSM:FY2026Q3:release", "event_date": "2026-10-15"},
+                    {"event_id": "earnings:ASML:FY2026Q3:release", "event_date": "2026-10-14"},
+                    {"event_id": "earnings:TSMX:FY2026Q3:release", "event_date": "2026-10-16"}]
+
+    import ats.data.stores.schedule_calendar as module
+    original = module.ScheduleCalendarStore
+    module.ScheduleCalendarStore = Store
+    try:
+        assert calendar_event_dates("TSM", date(2026, 10, 1), date(2026, 10, 31)) == [date(2026, 10, 15)]
+    finally:
+        module.ScheduleCalendarStore = original
+
+
+# --------------------------------------------------------------------------- #
+# What a consumer reads: the selected package projected into the statement lines
+# --------------------------------------------------------------------------- #
+def _statements(repo, symbol):
+    from ats.data.fundamentals import _select_report_package, _structured_statements
+    from ats.data.products import DataProducts
+    package = _select_report_package(repo, symbol=symbol)
+    assert package is not None and package["source_id"] == "issuer_ir_files"
+    statement, _ = _structured_statements(
+        symbol, DataProducts(structured_repository=repo), source_id=package["source_id"],
+        report_period=package["period"], source_by_metric=package.get("source_by_metric"))
+    return package, {line.label: line for line in statement.lines}
+
+
+def test_consumer_reads_tsm_q3_in_twd_with_qoq_and_yoy_by_date(tmp_path, adapter_with_fixture_docs):
+    repo = _repo(tmp_path)
+    _run(repo, adapter_with_fixture_docs, "TSM")
+    package, lines = _statements(repo, "TSM")
+    assert package["period"] == "2026-09-30" and package["currency"] == "TWD"
+    revenue = lines["Revenue"]
+    assert (revenue.value, revenue.unit) == (1_494_243.0, "TWD M")
+    assert revenue.qoq == pytest.approx(17.6, abs=0.1) and revenue.yoy == pytest.approx(50.9, abs=0.1)
+    eps = lines["Diluted EPS"]
+    assert (eps.value, eps.unit) == (147.13, "TWD/ADR") and eps.yoy == pytest.approx(68.7, abs=0.1)
+    assert lines["Total Debt"].value == 983_513.0 and lines["Total Debt"].unit == "TWD M"
+    assert lines["CapEx"].value == -443_206.0 and lines["Free Cash Flow"].value == pytest.approx(476_570.0)
+    assert revenue.render() == "Revenue: 1,494,243 TWD M (QoQ +17.6%, YoY +50.9%)"
+
+
+def test_consumer_reads_asml_in_eur_with_the_long_term_debt_caveat_in_lineage(tmp_path, monkeypatch):
+    from ats.data.sources import issuer_ir_parsers
+    monkeypatch.setitem(issuer_ir_parsers.PARSERS, "asml_ex99_3_html", issuer_ir_parsers.parse_asml_ex99_3_html)
+    _drop(tmp_path, "ASML", f"{ASML_ACCESSION}_financial_statementsxusx.htm", copy_from=EX99_3)
+    repo = _repo(tmp_path)
+    _run(repo, IssuerIRFilesAdapter(root=tmp_path, clock=lambda: NOW, acquirers={}), "ASML")
+    package, lines = _statements(repo, "ASML")
+    assert package["currency"] == "EUR" and package["debt_metric"] == "financial.total_debt.provider_reported"
+    assert lines["Revenue"].unit == "EUR M" and lines["Revenue"].yoy == pytest.approx(55.2, abs=0.1)
+    assert (lines["Diluted EPS"].value, lines["Diluted EPS"].unit) == (12.93, "EUR/share")
+    assert lines["Total Debt"].value == 1_963.0
+    row = next(r for r in _accepted(repo, "ASML") if r["metric_id"] == "financial.total_debt.provider_reported"
+               and r["period"] == "2026-09-30")
+    assert "current portion" in json.loads(row["raw_payload"])["debt_definition"]
+
+
+def test_consumer_reads_skhy_in_krw_and_basic_eps_is_labelled_basic(tmp_path, adapter_with_fixture_docs):
+    repo = _repo(tmp_path)
+    _run(repo, adapter_with_fixture_docs, "SKHY")
+    package, lines = _statements(repo, "SKHY")
+    assert package["period"] == "2026-06-30" and package["currency"] == "KRW"
+    assert "Diluted EPS" not in lines
+    assert (lines["Basic EPS"].unit, round(lines["Basic EPS"].value)) == ("KRW/share", 132_707)
+    assert lines["Revenue"].unit == "KRW M" and lines["Revenue"].qoq == pytest.approx(50.9, abs=0.1)
+    assert lines["Total Debt"].unit == "KRW M"
+
+
+def test_a_quarter_missing_from_the_history_never_shifts_previous_or_year_ago(tmp_path, adapter_with_fixture_docs):
+    # the TSM file prints 3Q25, 2Q26 and 3Q26 only: "previous" is 2Q26 and "year ago" is 3Q25, not list neighbours
+    repo = _repo(tmp_path)
+    _run(repo, adapter_with_fixture_docs, "TSM")
+    _, lines = _statements(repo, "TSM")
+    assert lines["Net Income"].qoq == pytest.approx((763_064 / 706_562 - 1) * 100, abs=0.1)
+    assert lines["Net Income"].yoy == pytest.approx((763_064 / 452_302 - 1) * 100, abs=0.1)

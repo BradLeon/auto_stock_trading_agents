@@ -129,14 +129,9 @@ def layer_vintage(sector: str, layer_key: str) -> list[str]:
 # --------------------------------------------------------------------------- #
 def financial_package(structured, symbol: str) -> dict | None:
     """The complete report package the constituent view would use (mirrors `_platform_constituent_accounting`)."""
-    from ..data.fundamentals import _FINANCIAL_SOURCE_PRIORITY, _complete_report_package
+    from ..data.fundamentals import _select_report_package
 
-    for source_id in _FINANCIAL_SOURCE_PRIORITY:
-        package = _complete_report_package(structured, source_id=source_id, symbol=symbol.upper())
-        if package is not None:
-            return package
-    return _complete_report_package(structured, source_id=("sec_companyfacts", "company_disclosures"),
-                                    symbol=symbol.upper())
+    return _select_report_package(structured, symbol=symbol.upper())
 
 
 def financial_state(products, symbol: str, *, as_of: datetime) -> dict[str, Any]:

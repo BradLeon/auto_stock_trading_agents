@@ -102,3 +102,12 @@ def test_a_retry_never_crashes_with_queue_task_not_claimable(controller):
     second = controller({"status": "partial", "discovery": {"status": "succeeded", "failed_slices": ["feed"]}},
                         at=NOW + timedelta(hours=2))
     assert second["reason"] == "article_source_partial"
+
+
+def test_structured_partial_runs_that_hold_data_are_not_failures():
+    assert refresh._partial_runs_hold_data([("partial", 3, 6)])
+    assert refresh._partial_runs_hold_data([("succeeded", 5, 0), ("partial", 0, 9)])
+    assert not refresh._partial_runs_hold_data([("partial", 0, 0)])             # nothing in, nothing known
+    assert not refresh._partial_runs_hold_data([("partial", 2, 0), ("parse_failed", 0, 0)])
+    assert not refresh._partial_runs_hold_data([("succeeded", 5, 0)])           # nothing to excuse
+    assert not refresh._partial_runs_hold_data([])

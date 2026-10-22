@@ -589,6 +589,17 @@ def _article_partial_outcome(packet: dict[str, Any], refs: dict[str, list[str]])
     return "failed", "article_source_partial"
 
 
+def _partial_runs_hold_data(rows: list[tuple]) -> bool:
+    """Is every non-successful run a `partial` that still has admitted or already-known rows?
+
+    A structured run is `partial` when most rows are in and a few were quarantined or a slice failed. Recording it as
+    `failed` made the source look broken for days although its data was current (G0 S25, 2026-10-22); the gap stays
+    visible in the reason code and the run row. A partial run with nothing admitted and nothing known is still a failure.
+    """
+    bad = [row for row in rows if row[0] not in {"succeeded", "no_change"}]
+    return bool(bad) and all(row[0] == "partial" and int(row[1] or 0) + int(row[2] or 0) > 0 for row in bad)
+
+
 def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = False,
              only_job: str = "", data_db: Path | None = None,
              manual: bool = False) -> list[dict[str, Any]]:
@@ -677,16 +688,20 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             queue.record_lineage(task_id, refs)
             ledger.record_queue_task(key, task_id)
             statuses = []
+            run_rows: list[tuple] = []
             if refs["runs"] and job.domain == "structured":
                 with sqlite3.connect(f"file:{data_db}?mode=ro", uri=True) as conn:
-                    statuses = [r[0] for r in conn.execute(
-                        "SELECT status FROM structured_ingestion_runs WHERE run_id IN (" +
-                        ",".join("?" for _ in refs["runs"]) + ")", refs["runs"]).fetchall()]
+                    run_rows = conn.execute(
+                        "SELECT status, accepted, unchanged FROM structured_ingestion_runs WHERE run_id IN (" +
+                        ",".join("?" for _ in refs["runs"]) + ")", refs["runs"]).fetchall()
+                statuses = [row[0] for row in run_rows]
             action = job.command[2]
             publication_expected = action == "ingest" or \
                 (action == "release-check" and "--ingest-new" in job.command) or \
                 action == "frontier-capability-audit" or action in {"article-ingest", "document-ingest", "fixed-ingest"}
             accepted_packet_statuses = {"succeeded", "no_change"}
+            if job.domain == "structured" and action in {"ingest", "release-check"}:
+                accepted_packet_statuses.add("partial")       # judged below from the run rows
             if action in {"calendar-refresh", "calendar-finalize"}:
                 accepted_packet_statuses.add("partial")
             if action in {"article-ingest", "document-ingest", "fixed-ingest"}:
@@ -705,6 +720,8 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 status, reason = "failed", "command_or_result_failed"
             elif action in {"calendar-refresh", "calendar-finalize"}:
                 status, reason = packet_status, ""
+            elif _partial_runs_hold_data(run_rows):
+                status, reason = "succeeded", "partial_rows_held_back"
             elif any(s not in {"succeeded", "no_change"} for s in statuses):
                 status, reason = "failed", "ingestion_failed"
             elif action == "ingest" and not refs["runs"]:

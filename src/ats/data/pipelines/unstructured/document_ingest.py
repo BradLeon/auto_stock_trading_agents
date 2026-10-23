@@ -233,7 +233,11 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                          "THEN 1 ELSE 0 END) accepted FROM data_fixed_source_rows "
                          "WHERE source_id=? GROUP BY natural_key) "
                          "SELECT latest.raw_json FROM latest LEFT JOIN published USING(natural_key) "
-                         "WHERE latest.rn=1 ORDER BY COALESCE(published.accepted,0), "
+                         "WHERE latest.rn=1 ORDER BY "
+                         # Filings from the last 30 days first: an earnings event waits on them, and a backlog of
+                         # older never-tried accessions (TSM had dozens) must not push a fresh 6-K out of the budget.
+                         "CASE WHEN json_extract(latest.raw_json,'$.filing_date') >= date('now','-30 days') "
+                         "THEN 0 ELSE 1 END, COALESCE(published.accepted,0), "
                          "COALESCE(published.last_attempt,''), "
                          "json_extract(latest.raw_json,'$.filing_date') DESC LIMIT ?")
                 params: list[Any] = [index_id]

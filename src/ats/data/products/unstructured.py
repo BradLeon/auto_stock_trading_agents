@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +96,33 @@ def _matches_period(row: dict[str, Any], period: str) -> bool:
     return target in _period_token(haystack)
 
 
+# An 8-K / 6-K body is admitted without a fiscal-period label (the SEC index does not carry one), so a period
+# match can never find it.  For an earnings event the filing date is the link instead: the results release is
+# filed on the release day or just after.  Only SEC bodies that read like a quarterly-results release qualify,
+# because every 8-K/6-K is classified "company_release" (buyback updates, governance notices ...).
+RELEASE_WINDOW_BEFORE_DAYS = 1
+RELEASE_WINDOW_AFTER_DAYS = 3
+_RESULTS_PERIOD_RE = re.compile(
+    r"\bquarter(?:ly)?\b|\bQ[1-4]\b|\bhalf[- ]year\b|\bfiscal (?:year|20\d\d)\b", re.I)
+_RESULTS_WORD_RE = re.compile(r"\b(?:results|earnings|net income|net sales|revenue)\b", re.I)
+
+
+def _filed_near_event(row: dict[str, Any], event_date: str) -> bool:
+    if str(row.get("source") or "") != "sec_edgar_filing_body" or row.get("period"):
+        return False
+    try:
+        event_day = date.fromisoformat(str(event_date)[:10])
+        filed = date.fromisoformat(str(row.get("published_at") or "")[:10])
+    except ValueError:
+        return False
+    return -RELEASE_WINDOW_BEFORE_DAYS <= (filed - event_day).days <= RELEASE_WINDOW_AFTER_DAYS
+
+
+def _reads_like_results_release(text: str) -> bool:
+    head = text[:6000]
+    return bool(_RESULTS_PERIOD_RE.search(head) and _RESULTS_WORD_RE.search(head))
+
+
 def _read_version_text(version: dict[str, Any]) -> str:
     path = Path(str(version.get("local_path") or ""))
     if not path.is_file():
@@ -118,7 +145,8 @@ def _read_version_text(version: dict[str, Any]) -> str:
 
 
 def earnings_document_package(repository, *, entity: str,
-                              period: str, as_of: datetime | None = None) -> EarningsDocumentPackage:
+                              period: str, as_of: datetime | None = None,
+                              event_date: str = "") -> EarningsDocumentPackage:
     """Select the latest complete body for each official role in one event.
 
     The repository is intentionally supplied by the caller.  That keeps product
@@ -137,13 +165,21 @@ def earnings_document_package(repository, *, entity: str,
         rows = repository.documents(entity=entity, ok_only=True, limit=1000)
     for row in rows:
         role = _role(row.get("doc_type", ""))
-        if not role or not _matches_period(row, period) or row.get("completeness", "full") != "full":
+        if not role or row.get("completeness", "full") != "full":
             continue
+        by_filing_date = False
+        if not _matches_period(row, period):
+            # No period label: fall back to "filed within the event's release window" for SEC release bodies.
+            if not (event_date and role == "earnings_release" and _filed_near_event(row, event_date)):
+                continue
+            by_filing_date = True
         version = row.get("version") or repository.latest_document_version(row["document_id"])
         if not version:
             continue
         text = _read_version_text(version)
         if not text.strip():
+            continue
+        if by_filing_date and not _reads_like_results_release(text):
             continue
         item = EarningsDocument(
             role=role,
@@ -275,14 +311,15 @@ def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
             repo.close()
 
 
-def platform_earnings_document_package(*, entity: str,
-                                       period: str, as_of: datetime | None = None) -> EarningsDocumentPackage:
+def platform_earnings_document_package(*, entity: str, period: str, as_of: datetime | None = None,
+                                       event_date: str = "") -> EarningsDocumentPackage:
     """Read the migrated platform database and its immutable asset references."""
     from ats.data.stores.unstructured import get_platform_unstructured_repository
 
     repository = get_platform_unstructured_repository()
     try:
-        return earnings_document_package(repository, entity=entity, period=period, as_of=as_of)
+        return earnings_document_package(repository, entity=entity, period=period, as_of=as_of,
+                                         event_date=event_date)
     finally:
         repository.close()
 

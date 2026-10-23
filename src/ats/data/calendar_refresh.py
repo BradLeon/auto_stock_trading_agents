@@ -438,7 +438,8 @@ def reconcile_earnings_release_materials(*, store: ScheduleCalendarStore | None 
             period = str(metadata.get("fiscal_label") or event.get("reference_period") or "")
             if not entity or not period:
                 continue
-            package = earnings_document_package(documents, entity=entity, period=period)
+            package = earnings_document_package(documents, entity=entity, period=period,
+                                                event_date=str(event.get("event_date") or "")[:10])
             role_to_kind = {
                 "regulatory_filing": "filing",
                 "earnings_release": "company_release",

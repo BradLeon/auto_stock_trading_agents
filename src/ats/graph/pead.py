@@ -396,6 +396,7 @@ def score_fetch(state: PeadState) -> dict:
 
             package = platform_earnings_document_package(
                 entity=state.symbol, period=state.fiscal_label,
+                event_date=str(state.earnings_date or "")[:10],
                 **({"as_of": governed["as_of"]} if governed else {}))
 
     if governed and not state.transcript_source and (package is None or not package.scoreable):

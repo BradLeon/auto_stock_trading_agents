@@ -2,6 +2,7 @@
 # 全部只读：不改 var/ 下的数据、不加载/卸载服务、不发模型请求。
 cd /Users/liuchao/Code/trading/auto_stock_trading_agents && source .venv/bin/activate
 export G0_TZ=Asia/Taipei
+G0_TOOLS_DIR="${${(%):-%x}:A:h}"   # 本文件所在目录（source 时确定），供 g0_show 找到 g0_show.py
 
 # 任务名 → 来源名 的对照（读 config/data/schedules.yaml），供下面几个函数用
 g0_map() {
@@ -360,19 +361,9 @@ for r in (json.loads(raw) if raw else []):
 
 # 打开一份投影的全文（逐字段）。参数：投影 id（g0_latest 输出里的 12 位编号）
 g0_show() {
-  sqlite3 -readonly -json var/ats.sqlite "SELECT agent_role, scope_id, as_of, input_refs, data_vintage_refs, model_version, prompt_version, content_hash, payload FROM task_projection_envelopes WHERE projection_id LIKE '$1%' LIMIT 1" | python -c '
-import json, sys, textwrap
-raw = sys.stdin.read().strip()
-if not raw: sys.exit("没有找到这份投影")
-r = json.loads(raw)[0]
-print(f"角色 {r["agent_role"]} · 范围 {r["scope_id"]} · 时点 {r["as_of"]} · 模型 {r["model_version"]} · 提示词 {r["prompt_version"]}")
-for label, key in (("依赖的上游投影/材料", "input_refs"), ("依赖的数据版本", "data_vintage_refs")):
-    refs = json.loads(r[key] or "[]")
-    print(f"{label}: {len(refs)} 项", "；".join(str(x)[:60] for x in refs[:4]), "…" if len(refs) > 4 else "")
-for k, v in json.loads(r["payload"]).items():
-    text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, indent=1)
-    print(f"\n【{k}】"); print(textwrap.fill(text, 110) if isinstance(v, str) else text[:3000])
-'
+  # 用法: g0_show 编号（g0_latest 输出里的 12 位编号，可只写前几位）。显示部分在 g0_show.py，避免粘贴多行引号块出错
+  [[ -z "$1" ]] && { echo "用法: g0_show 编号（先用 g0_latest 找 12 位编号，例如 g0_show d865de3edfa8）"; return 1; }
+  sqlite3 -readonly -json var/ats.sqlite "SELECT agent_role, scope_id, as_of, input_refs, data_vintage_refs, model_version, prompt_version, content_hash, payload FROM task_projection_envelopes WHERE projection_id LIKE '$1%' LIMIT 1" | python "${G0_TOOLS_DIR}/g0_show.py"
 }
 
 # ⚠ 会写真实数据（不是只读），不发模型请求：批量“现在就重采”，不等例行窗口。

@@ -295,7 +295,7 @@ g0_runs 30                              # 最近 30 次运行：任务、范围�
 g0_runs 60 technical-review             # 只看某个工作流
 g0_runs 150 sector-review               # 周度工作流离现在远，要把条数放大才翻得到
 g0_latest information_brief             # 每个标的最近一份产出的时间与摘要
-g0_show <12位编号>                       # 打开一份产出的全文
+g0_show d865de3edfa8                    # 打开一份产出的全文（把编号换成 g0_latest 输出里的 12 位编号）
 ```
 
 **怎么读 `g0_runs`：** 状态 `complete`=全部完成；`incomplete`=有标的缺产出（下面 └ 行写了是谁、为什么）；`failed`=整次失败。"新算 N"是这次真的请求了模型的标的数，"复用 N"是直接用了上一份产出的标的数。

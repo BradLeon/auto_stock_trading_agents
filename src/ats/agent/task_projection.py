@@ -542,9 +542,12 @@ class TechnicalReviewPayload(_Payload):
 
     schema_name: str = "TechnicalReview"
     entity: str = Field(min_length=1)
-    signal: Literal["bullish", "bearish", "neutral"]
+    # "unavailable": the instrument cannot be read yet (too little price history for SMA200). It is a published,
+    # explicit gap -- no exposure, no levels -- never a neutral reading.
+    signal: Literal["bullish", "bearish", "neutral", "unavailable"]
     summary: str = Field(min_length=1)
     levels: dict[str, float] = Field(default_factory=dict)
+    data_status: str = ""                       # "insufficient_history" when signal is "unavailable"
     # --- ARCHITECTURE §7.3 additive fields, all computed by code (no model call) ---
     trend_state: str = ""
     score: int | None = Field(default=None, ge=0, le=7)
@@ -556,8 +559,8 @@ class TechnicalReviewPayload(_Payload):
     bear_fired: bool | None = None
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
-        "trend_state", "score", "score_detail", "suggested_exposure", "previous_exposure", "invalidation",
-        "panic_fired", "bear_fired")
+        "data_status", "trend_state", "score", "score_detail", "suggested_exposure", "previous_exposure",
+        "invalidation", "panic_fired", "bear_fired")
 
     @field_validator("levels", mode="before")
     @classmethod

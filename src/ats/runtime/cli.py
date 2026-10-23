@@ -2260,8 +2260,6 @@ def _technical_show_all(review, name: str) -> None:
 
     `chief_block` lists only what needs Chief's attention (below full exposure, or changed); this is the full list.
     """
-    from ..config import load_technical_config
-
     ok = [r for r in review.readings if not r.stale]
     stale = [r for r in review.readings if r.stale]
     print(f"\n全部可计算标的（{len(ok)} 只）：")
@@ -2273,13 +2271,8 @@ def _technical_show_all(review, name: str) -> None:
         close = "-" if r.close is None else f"{r.close:.2f}"
         sma = "-" if r.sma200 is None else f"{r.sma200:.2f}"
         print(f"  {r.symbol:<8}{r.target_exposure:>8.0%}{prev:>8}{r.score:>6}{close:>11}{sma:>11}  {flags}")
-    try:
-        gaps = dict(load_technical_config(name).universe.get("data_gaps") or {})
-    except Exception:  # noqa: BLE001 - the list above is still useful without the config note
-        gaps = {}
     missing = {r.symbol: r.note for r in stale}
-    for sym, reason in gaps.items():
-        missing.setdefault(sym, reason)
+    missing.update({sym: "取不到行情" for sym in review.skipped if sym not in missing})
     if missing:
         print(f"\n数据缺失、未出读数（{len(missing)} 只）：")
         for sym in sorted(missing):

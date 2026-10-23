@@ -53,6 +53,10 @@ def technical_report(outcomes: list[dict], *, store_path: str | None) -> dict[st
     for row in rows:
         payload = row["payload"]
         levels = payload.get("levels") or {}
+        if payload.get("signal") == "unavailable":
+            readings.append(TechnicalReading(symbol=str(payload.get("entity") or row["scope_id"]), stale=True,
+                                             note=str(payload.get("summary") or "数据缺失")))
+            continue
         target = float(payload.get("suggested_exposure") or 0.0)
         previous = payload.get("previous_exposure")
         readings.append(TechnicalReading(

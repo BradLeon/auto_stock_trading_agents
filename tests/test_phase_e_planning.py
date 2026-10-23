@@ -93,28 +93,3 @@ def test_config_changes_do_not_mutate_an_already_built_plan(tmp_path):
     assert first.plan_hash != second.plan_hash
     assert len([t for t in first.tasks if t.task_id == "layer-review"]) == 1
     assert len([t for t in second.tasks if t.task_id == "layer-review"]) == 2
-
-
-def test_technical_plan_skips_names_the_analyst_declares_excluded(tmp_path):
-    """config/technical.yaml `exclude` is the analyst's declared scope; planning an excluded name only makes
-    a permanent 'missing' (SKHY: 74 bars, SMA200 needs 200)."""
-    import shutil
-
-    from ats.config import REPO_ROOT
-
-    root = tmp_path / "config"
-    shutil.copytree(REPO_ROOT / "config", root)
-    technical = (root / "technical.yaml").read_text(encoding="utf-8")
-    assert "SKHY" in technical
-    kwargs = dict(requested_tasks=("technical-review",), scope=ProjectionScope(kind="portfolio", id="portfolio"),
-                  trigger=_scheduled(), as_of="2026-10-23T00:00:00+00:00", run_id="r-tech", config_dir=root)
-    plan = build_plan(**kwargs)
-    scopes = {task.scope.id for task in plan.tasks}
-    assert "SKHY" not in scopes and {"NVDA", "TSM"} <= scopes
-
-    # the same name stays planned for the other analysts, and an explicit entity request is still honoured
-    info = build_plan(**{**kwargs, "requested_tasks": ("information-brief",)})
-    assert "SKHY" in {task.scope.id for task in info.tasks}
-    single = build_plan(**{**kwargs, "scope": ProjectionScope(kind="entity", id="SKHY"),
-                           "run_id": "r-tech-skhy"})
-    assert [task.scope.id for task in single.tasks] == ["SKHY"]

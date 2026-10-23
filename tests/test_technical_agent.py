@@ -265,22 +265,81 @@ def test_previous_exposure_comes_from_each_symbols_own_projection():
     assert tech._prior_exposures(store, "technical", ["NVDA"], today) == {"NVDA": 1.0}
 
 
-def test_show_lists_every_reading_and_marks_missing_data(monkeypatch, capsys):
+def test_show_lists_every_reading_and_marks_missing_data(capsys):
     from ats.runtime import cli
 
-    cfg = _cfg(universe={"exclude": ["SKHY"], "min_bars": 200,
-                         "data_gaps": {"SKHY": "上市未满 200 个交易日"}})
-    monkeypatch.setattr("ats.config.load_technical_config", lambda name: cfg)
     review = _review(readings=[
         TechnicalReading(symbol="NVDA", score=7, target_exposure=1.0, prev_exposure=1.0, close=100.0,
                          sma200=80.0, bars=300),
         TechnicalReading(symbol="TSM", score=3, target_exposure=0.5, prev_exposure=1.0, close=90.0,
                          sma200=95.0, bars=300, bear_fired=True),
-        TechnicalReading(symbol="NEWCO", stale=True, bars=74, note="历史不足（74 < 200 根）")])
+        TechnicalReading(symbol="NEWCO", stale=True, bars=74, note="历史不足（74 < 200 根）")],
+        skipped=["GONE"])
     cli._technical_show_all(review, "technical")
     out = capsys.readouterr().out
     assert "全部可计算标的（2 只）" in out
     assert "NVDA" in out and "TSM" in out and "熊市层" in out and "较上次有变化" in out
     assert "数据缺失、未出读数（2 只）" in out
     assert "NEWCO" in out and "历史不足（74 < 200 根）" in out
-    assert "SKHY" in out and "上市未满 200 个交易日" in out
+    assert "GONE" in out and "取不到行情" in out
+
+
+def test_insufficient_history_is_published_as_an_explicit_gap_not_skipped_and_not_neutral():
+    """SKHY (74 bars, SMA200 needs 200) used to publish nothing, which the Dispatcher counted as a failed task and
+    made every run incomplete.  It now publishes a valid 'unavailable' projection: no exposure, no levels."""
+    from ats.agent.task_projection import validate_payload
+    from ats.memory import get_store
+
+    store = get_store()
+    review = _review(readings=[
+        TechnicalReading(symbol="NVDA", score=6, target_exposure=1.0, close=100.0, sma200=90.0, bars=300),
+        TechnicalReading(symbol="SKHY", stale=True, bars=74, note="历史不足（74 < 200 根）")])
+    assert tech._publish_projection(store, review) == 2
+    rows = {r["scope_id"]: r for r in store.task_projection_envelopes(
+        agent_role="technical_review", scope_kind="entity", limit=50)}
+    gap = rows["SKHY"]["payload"]
+    assert gap["signal"] == "unavailable" and gap["data_status"] == "insufficient_history"
+    assert "suggested_exposure" not in gap and "levels" not in gap or not gap.get("levels")
+    assert "历史不足（74 < 200 根）" in gap["summary"]
+    validate_payload("technical_review", gap)
+    assert rows["NVDA"]["payload"]["signal"] == "bullish"
+
+
+def test_report_publisher_shows_an_unavailable_projection_as_missing_data_not_zero_exposure():
+    from ats.workflow import report_publishers
+
+    seen = {}
+
+    def fake_write(review, cfg):
+        seen["review"] = review
+        return "/tmp/report.md"
+
+    rows = [
+        {"projection_id": "p1", "scope_id": "NVDA", "as_of": "2026-10-23T00:00:00+00:00", "model_version": "x@y",
+         "payload": {"entity": "NVDA", "signal": "bullish", "score": 6, "suggested_exposure": 1.0,
+                     "levels": {"close": 100.0}}},
+        {"projection_id": "p2", "scope_id": "SKHY", "as_of": "2026-10-23T00:00:00+00:00", "model_version": "x@y",
+         "payload": {"entity": "SKHY", "signal": "unavailable", "summary": "数据缺失，本期不出读数：历史不足",
+                     "data_status": "insufficient_history"}}]
+
+    class _Mem:
+        def task_projection_envelopes(self, **_kw):
+            return rows
+
+    import contextlib
+    import ats.agents.technical.report as tech_report
+    import ats.memory as memory
+
+    original = (tech_report.write, memory.task_store_scope)
+    tech_report.write = fake_write
+    memory.task_store_scope = lambda _path: contextlib.nullcontext(_Mem())
+    try:
+        result = report_publishers.technical_report(
+            [{"task_id": "technical-review", "status": "succeeded", "reused": False,
+              "projection_refs": ["p1", "p2"]}], store_path=None)
+    finally:
+        tech_report.write, memory.task_store_scope = original
+    assert result["status"] == "written"
+    by_symbol = {r.symbol: r for r in seen["review"].readings}
+    assert not by_symbol["NVDA"].stale and by_symbol["NVDA"].target_exposure == 1.0
+    assert by_symbol["SKHY"].stale and "历史不足" in by_symbol["SKHY"].note

@@ -278,15 +278,29 @@ def _publish_projection(store, review: TechnicalReview) -> int:
     """Publish each usable reading as a `technical_review` projection (entity scope).
 
     全部由确定性代码产出：signal 是 7 点动量评分的三档化（≥5 bullish、≤2 bearish、
-    其余 neutral），不接 LLM。stale 读数没有评分依据——宁缺勿造，直接跳过（下游
-    把缺失投影当缺口，好过把无依据的信号当输入）。A failed publish is a gap, not
-    a crash: the review row already holds the truth.
+    其余 neutral），不接 LLM。stale 读数（历史不足 SMA200）没有评分依据——宁缺勿造：不出敞口、不出价位，
+    发布一份 signal="unavailable" 的缺口投影，让"这只标的现在算不了"成为明确的结果，而不是一次失败的运行。
+    A failed publish is a gap, not a crash: the review row already holds the truth.
     """
     from ...agent.task_projection import ProjectionScope, build_envelope
 
     published = 0
     for r in review.readings:
         if r.stale:
+            try:
+                store.save_task_projection_envelope(build_envelope(
+                    role="technical_review",
+                    payload={"entity": r.symbol, "signal": "unavailable",
+                             "summary": f"数据缺失，本期不出读数：{r.note or '历史不足'}",
+                             "data_status": "insufficient_history"},
+                    scope=ProjectionScope(kind="entity", id=r.symbol),
+                    as_of=review.as_of.isoformat(timespec="seconds"),
+                    model_version=f"deterministic:{review.strategy}@{review.fingerprint}",
+                    workflow_run_id=""))
+                published += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("technical %s: gap projection publish failed for %s: %s",
+                            review.name, r.symbol, exc)
             continue
         if r.score >= 5:
             signal = "bullish"

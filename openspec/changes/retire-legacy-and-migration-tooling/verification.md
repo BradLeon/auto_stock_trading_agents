@@ -70,10 +70,10 @@
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
-| D01 | `chain_evidence_daily.TSM` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / already_extracted`（10-21 06:01）；`ats evidence show --entity TSM` 有 2026-10-15 财报后的读数（A14 节点、先进封装光罩尺寸、agentic AI CPU 需求等） | 用户确认（AI 建议） | 2026-10-21 |  |
-| D02 | `chain_evidence_daily.ASML` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / already_extracted`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-21 |  |
-| D03 | `chain_evidence_daily.MU` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / no_print_in_window`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-21 | 近 7 天无新财报，正常；原备注：近 7 天无新财报，属正常 |
-| D04 | `chain_evidence_daily.SKHY` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / no_print_in_window`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-21 | 近 7 天无新财报，正常；原备注：SKHY 10-27 财报后应有新读数 |
+| D01 | `chain_evidence_daily.TSM` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / already_extracted`（10-21 06:01）；`ats evidence show --entity TSM` 有 2026-10-15 财报后的读数（A14 节点、先进封装光罩尺寸、agentic AI CPU 需求等） | 用户确认（AI 建议） | 2026-10-23 | 10-23 抽查 10 条（见 d01-d04-sample.md）：✅3 ⚠️6 ❌1。财报会引文基本准确；问题是立场标注（TrendForce 转述的 TSM 自己的话被标成 competitor、机构估计被标成 incumbent）、一条动作被标成 up、一条引文是网页编辑导语而非管理层原话。需关注：该文档有 3 个版本、来源不同，证据行没记出自哪版 |
+| D02 | `chain_evidence_daily.ASML` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / already_extracted`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-23 | 10-23 抽查 7 条（ASML 名下只能回查到 7 条，其余 240 条来自旧编号文档）：✅5 ⚠️1 ❌1。数值/期间基本准确；一条 unit 字段塞进限定语，一条引文把 12-inch 写成 12 in（不逐字） |
+| D03 | `chain_evidence_daily.MU` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / no_print_in_window`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-23 | 10-23 抽查 10 条：✅9 ❌1。财报会数值全部准确；一条股价“收盘上涨 4.2%”方向被标成 flat。注意：MU 只有 57/178 条无法回查的旧编号证据 |
+| D04 | `chain_evidence_daily.SKHY` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / no_print_in_window`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-23 | 10-23 抽查 10 条：✅9 ⚠️1。全部来自新闻/研报（SKHY 暂无自己的财报会，10-27 财报后才会有）；一条“4 月”被补成 2025-04，年份没有依据 |
 | D05 | `calendar_finnhub_earnings_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:36），发现 24 | 用户确认（AI 建议） | 2026-10-21 |  |
 | D06 | `calendar_yahoo_earnings_daily` |  | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:37），发现 13；`ats events upcoming --days 30` 列出 LRCX 10-21 16:00、SKHY 10-27、GOOG/MSFT 10-28、FOMC 10-27/28、GDP/PCE 10-29 |  |  | 运行层面正常；待抽查：LRCX 10-21、SKHY 10-27、GOOG/MSFT 10-28 等日期对照公司 IR；原备注：日期需你对照 IR / 官网 |
 | D07 | `calendar_fomc_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `failed`（16:38），两次尝试；错误 `URLError: SSL UNEXPECTED_EOF_WHILE_READING` | 用户确认（AI 建议） | 2026-10-21 | 10-21 17:25 窗口已 succeeded（发现 38 条），网络恢复后改为通过；原：TLS 被重置（根因 2） |
@@ -262,3 +262,6 @@ g0_sources:
   trendforce                                 文档   25  存库失败   0  库内最新一篇存入 08-18 11:07
   trendforce_news                            文档   68  存库失败   0  库内最新一篇存入 10-19 22:05
 
+## 上线后待办
+
+- [ ] 产业链证据（`chain_evidence_daily`）当前是试点名单 TSM / ASML / MU / SKHY。G0 验证全部完成、正式上线后，在 `config/data/schedules.yaml` 的 `chain_evidence_daily.entities` 里扩充更多公司（每家一个任务，每次最多 8 次抽取调用）。扩之前先看 D01–D04 抽查发现的标注偏差是否已处理，并决定旧编号证据（约 60%）如何回查。

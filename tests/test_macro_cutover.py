@@ -136,7 +136,7 @@ def test_a_stopped_collection_is_a_warning_with_the_threshold_written_down(check
     old = series_set(known=(NOW - timedelta(days=health.MACRO_SERIES_COLLECTION_DAYS + 2)).isoformat())
     result = check(good_state(series={"value": old, "error": ""}))
     assert result["status"] == "ok" and any("may have stopped" in w for w in result["warnings"])
-    assert (health.MACRO_SERIES_MIN_COVERAGE, health.MACRO_REGIONAL_STALE_DAYS, health.MACRO_FACTSET_STALE_DAYS) == (0.5, 45, 14)
+    assert (health.MACRO_SERIES_MIN_COVERAGE, health.MACRO_REGIONAL_STALE_DAYS, health.MACRO_FACTSET_STALE_DAYS) == (0.5, 45, 40)
 
 
 # --- the stored-input reader --------------------------------------------------------------------------------

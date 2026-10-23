@@ -205,7 +205,7 @@ MACRO_SERIES_MIN_COVERAGE = 0.5   # share of the defined indicator series that m
 MACRO_SERIES_COLLECTION_DAYS = 5  # newest stored print older than this: the daily collection looks stopped (warning)
 MACRO_NEWS_NEWEST_DAYS = 7        # newest admitted theme news older than this (warning)
 MACRO_REGIONAL_STALE_DAYS = 45    # days after the END of the latest monthly period; one missed release (warning)
-MACRO_FACTSET_STALE_DAYS = 14     # FactSet index report is weekly; two missed reports (warning)
+MACRO_FACTSET_STALE_DAYS = 40     # the report is ingested monthly (final of the month); matches the job's 40-day freshness SLO (warning)
 
 
 def _macro(now: datetime) -> dict[str, Any]:

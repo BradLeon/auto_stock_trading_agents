@@ -223,3 +223,64 @@ def test_same_day_rerun_overwrites_and_previous_finds_yesterday():
     assert store.latest_technical_review().readings[0].target_exposure == 0.5
     prev = store.previous_technical_review(before=NOW.date().isoformat())
     assert prev.readings[0].target_exposure == 1.0       # strictly before today
+
+
+# ── per-symbol runs (the Dispatcher runs one name at a time) ─────────────────
+def test_one_symbol_runs_join_todays_summary_instead_of_replacing_it():
+    from ats.memory import get_store
+
+    store = get_store()
+    first = _review(readings=[TechnicalReading(symbol="NVDA", target_exposure=1.0)])
+    second = _review(readings=[TechnicalReading(symbol="TSM", target_exposure=0.5)])
+    store.save_technical_review(tech._merge_same_day(store, first))
+    store.save_technical_review(tech._merge_same_day(store, second))
+    assert [r.symbol for r in store.latest_technical_review().readings] == ["NVDA", "TSM"]
+
+    # the same symbol run again replaces its own reading, it does not duplicate
+    rerun = _review(readings=[TechnicalReading(symbol="NVDA", target_exposure=0.25)])
+    store.save_technical_review(tech._merge_same_day(store, rerun))
+    readings = {r.symbol: r.target_exposure for r in store.latest_technical_review().readings}
+    assert readings == {"NVDA": 0.25, "TSM": 0.5}
+
+    # a new day starts a new summary
+    tomorrow = _review(as_of=NOW + timedelta(days=1),
+                       readings=[TechnicalReading(symbol="ASML", target_exposure=1.0)])
+    assert [r.symbol for r in tech._merge_same_day(store, tomorrow).readings] == ["ASML"]
+
+
+def test_previous_exposure_comes_from_each_symbols_own_projection():
+    """A saved summary holding one name used to make every other symbol look like 'no previous reading'."""
+    from ats.memory import get_store
+
+    store = get_store()
+    yesterday = _review(as_of=NOW - timedelta(days=1), readings=[
+        TechnicalReading(symbol="NVDA", score=6, target_exposure=1.0, close=100.0, sma200=90.0, bars=300),
+        TechnicalReading(symbol="TSM", score=3, target_exposure=0.5, close=100.0, sma200=90.0, bars=300)])
+    tech._publish_projection(store, yesterday)
+    today = NOW.date().isoformat()
+    assert tech._prior_exposures(store, "technical", ["NVDA", "TSM", "ASML"], today) == {
+        "NVDA": 1.0, "TSM": 0.5}                          # ASML has none; a same-day projection never counts
+    tech._publish_projection(store, _review(readings=[
+        TechnicalReading(symbol="NVDA", score=2, target_exposure=0.25, close=100.0, sma200=90.0, bars=300)]))
+    assert tech._prior_exposures(store, "technical", ["NVDA"], today) == {"NVDA": 1.0}
+
+
+def test_show_lists_every_reading_and_marks_missing_data(monkeypatch, capsys):
+    from ats.runtime import cli
+
+    cfg = _cfg(universe={"exclude": ["SKHY"], "min_bars": 200,
+                         "data_gaps": {"SKHY": "上市未满 200 个交易日"}})
+    monkeypatch.setattr("ats.config.load_technical_config", lambda name: cfg)
+    review = _review(readings=[
+        TechnicalReading(symbol="NVDA", score=7, target_exposure=1.0, prev_exposure=1.0, close=100.0,
+                         sma200=80.0, bars=300),
+        TechnicalReading(symbol="TSM", score=3, target_exposure=0.5, prev_exposure=1.0, close=90.0,
+                         sma200=95.0, bars=300, bear_fired=True),
+        TechnicalReading(symbol="NEWCO", stale=True, bars=74, note="历史不足（74 < 200 根）")])
+    cli._technical_show_all(review, "technical")
+    out = capsys.readouterr().out
+    assert "全部可计算标的（2 只）" in out
+    assert "NVDA" in out and "TSM" in out and "熊市层" in out and "较上次有变化" in out
+    assert "数据缺失、未出读数（2 只）" in out
+    assert "NEWCO" in out and "历史不足（74 < 200 根）" in out
+    assert "SKHY" in out and "上市未满 200 个交易日" in out

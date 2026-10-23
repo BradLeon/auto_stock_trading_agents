@@ -223,6 +223,13 @@ def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) ->
                    "technical-review"}:
         symbols = ([requested_scope.id.upper()] if requested_scope.kind == "entity"
                    else _targets(config_dir))
+        if task_id == "technical-review" and requested_scope.kind != "entity":
+            # config/technical.yaml's `exclude` is the declared scope of this analyst (cash equivalents, leveraged
+            # products, names without enough price history). Planning a task for an excluded name only produces a
+            # permanent "missing" that makes every run incomplete.
+            excluded = {str(item).upper() for item in
+                        (_load_yaml(config_dir / "technical.yaml").get("universe") or {}).get("exclude", [])}
+            symbols = [symbol for symbol in symbols if symbol not in excluded]
         if not symbols:
             raise ContractError(f"{task_id} has an empty entity scope")
         return [ProjectionScope(kind="entity", id=symbol) for symbol in symbols]

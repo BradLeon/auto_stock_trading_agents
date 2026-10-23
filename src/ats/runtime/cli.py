@@ -2255,6 +2255,37 @@ def run_technical_review(
     return 0
 
 
+def _technical_show_all(review, name: str) -> None:
+    """Every symbol that has a reading, then the ones that cannot be computed, marked as missing data.
+
+    `chief_block` lists only what needs Chief's attention (below full exposure, or changed); this is the full list.
+    """
+    from ..config import load_technical_config
+
+    ok = [r for r in review.readings if not r.stale]
+    stale = [r for r in review.readings if r.stale]
+    print(f"\n全部可计算标的（{len(ok)} 只）：")
+    print(f"  {'代码':<8}{'建议敞口':>8}{'上次':>8}{'评分':>6}{'收盘':>11}{'SMA200':>11}  状态")
+    for r in sorted(ok, key=lambda x: x.symbol):
+        prev = "-" if r.prev_exposure is None else f"{r.prev_exposure:.0%}"
+        flags = "".join(["恐慌层 " if r.panic_fired else "", "熊市层 " if r.bear_fired else "",
+                         "较上次有变化" if r.changed else ""]).strip() or "-"
+        close = "-" if r.close is None else f"{r.close:.2f}"
+        sma = "-" if r.sma200 is None else f"{r.sma200:.2f}"
+        print(f"  {r.symbol:<8}{r.target_exposure:>8.0%}{prev:>8}{r.score:>6}{close:>11}{sma:>11}  {flags}")
+    try:
+        gaps = dict(load_technical_config(name).universe.get("data_gaps") or {})
+    except Exception:  # noqa: BLE001 - the list above is still useful without the config note
+        gaps = {}
+    missing = {r.symbol: r.note for r in stale}
+    for sym, reason in gaps.items():
+        missing.setdefault(sym, reason)
+    if missing:
+        print(f"\n数据缺失、未出读数（{len(missing)} 只）：")
+        for sym in sorted(missing):
+            print(f"  {sym:<8}{missing[sym]}")
+
+
 def technical_show(name: str = "technical") -> int:
     from ..memory import get_store
 
@@ -2265,6 +2296,7 @@ def technical_show(name: str = "technical") -> int:
         return 0
     print(f"=== technical {name} @ {latest.as_of:%Y-%m-%d} · 策略 {latest.strategy} ===")
     print(latest.chief_block(4000))
+    _technical_show_all(latest, name)
     print("\nHistory:")
     for row in store.recent_technical_reviews(name):
         print(f"  {row['as_of'][:10]}  {row['summary'][:80]}")

@@ -20,7 +20,12 @@ universe:
   # 现金等价物不做技术面判定（它们本来就是减仓的去处）；
   # 7709 = CSOP SK Hynix Daily 2x Leveraged（HKEX）——每日重置的杠杆产品价格路径
   # 依赖衰减，均线读数会失真；其底层 SK Hynix 已由 SKHY 覆盖，排除不丢信息。
-  exclude: [SGOV, SHV, BIL, "7709"]
+  exclude: [SGOV, SHV, BIL, "7709", SKHY]
+  # 被排除或暂时算不了的标的及原因：`ats technical show` 把它们列为"数据缺失"，而不是悄悄不出现。
+  # SKHY 2026-07 上市，2026-10-22 只有 74 根日线（SMA200 需要 200 根）：每次评审都出不了读数，
+  # 调度器会把它记成 missing 而让整次运行 incomplete，所以先排除；约 2027-04 日线满 200 根后移出 exclude 与本表。
+  data_gaps:
+    SKHY: "上市未满 200 个交易日（2026-10-22 仅 74 根，SMA200 需要 200 根），约 2027-04 起可算"
   min_bars: 200          # 少于 SMA200 所需根数则标记 stale，不出读数
 
 params:

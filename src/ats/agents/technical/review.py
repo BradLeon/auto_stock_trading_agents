@@ -239,6 +239,41 @@ def projection_extras(r, review) -> dict:
             "invalidation": out, "panic_fired": bool(r.panic_fired), "bear_fired": bool(r.bear_fired)}
 
 
+def _prior_exposures(store, name: str, symbols, today: str) -> dict[str, float]:
+    """Each symbol's last suggested exposure strictly before `today`.
+
+    Read from the symbol's own published projections: the saved daily summary used to be the source, but the
+    Dispatcher runs one symbol at a time, so the summary held a single name and every other symbol looked
+    like "no previous reading".
+    """
+    prior: dict[str, float] = {}
+    for sym in symbols:
+        try:
+            rows = store.task_projection_envelopes(agent_role="technical_review", scope_kind="entity",
+                                                   scope_id=sym, limit=30)
+        except Exception:  # noqa: BLE001 - fall back to the saved summary below
+            continue
+        for row in rows:
+            if str(row.get("as_of") or "")[:10] < today:
+                value = (row.get("payload") or {}).get("suggested_exposure")
+                if isinstance(value, (int, float)):
+                    prior[sym] = float(value)
+                break
+    return prior
+
+
+def _merge_same_day(store, review: TechnicalReview) -> TechnicalReview:
+    """Fold a one-symbol run into today's saved summary instead of replacing it."""
+    saved = store.latest_technical_review(review.name)
+    if saved is None or saved.as_of.date() != review.as_of.date():
+        return review
+    mine = {r.symbol for r in review.readings}
+    kept = [r for r in saved.readings if r.symbol not in mine]
+    return review.model_copy(update={
+        "readings": sorted([*kept, *review.readings], key=lambda r: r.symbol),
+        "skipped": sorted(set(saved.skipped) | set(review.skipped))})
+
+
 def _publish_projection(store, review: TechnicalReview) -> int:
     """Publish each usable reading as a `technical_review` projection (entity scope).
 
@@ -330,6 +365,7 @@ def _run(name: str = "technical", *, live_data: bool = True, persist: bool = Tru
     now = evaluation_now(timezone.utc)
     store = get_store()
 
+    per_symbol_run = symbols is not None
     if symbols is None:
         symbols, notes = resolve_universe(cfg, live_broker=live_data)
     else:
@@ -359,12 +395,15 @@ def _run(name: str = "technical", *, live_data: bool = True, persist: bool = Tru
 
     prev = store.previous_technical_review(cfg.name, before=now.date().isoformat())
     prior = {r.symbol: r.target_exposure for r in prev.readings} if prev else {}
+    prior.update(_prior_exposures(store, cfg.name, symbols, now.date().isoformat()))
 
     review.readings = compute_readings(closes, vix=vix, vix3m=v3, cfg=cfg, prior=prior)
     review.skipped = sorted(set(symbols) - set(closes))
 
     if persist:
-        store.save_technical_review(review)
+        # A run for given symbols (the Dispatcher's one-name tasks) joins today's summary; a full-universe run
+        # replaces it.
+        store.save_technical_review(_merge_same_day(store, review) if per_symbol_run else review)
         _publish_projection(store, review)
     if write_report:
         from . import report as tech_report

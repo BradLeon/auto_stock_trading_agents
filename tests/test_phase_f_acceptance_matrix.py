@@ -6,7 +6,7 @@ import pytest
 from ats.agent.task_projection import ProjectionScope
 from ats.workflow import acceptance_matrix as mx
 from ats.workflow import shadow_inputs as si
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.scoped_routes import RouteIdentity, canonical_json
 from ats.workflow.shadow_matrix import MatrixError

@@ -129,7 +129,7 @@ def _time(value):
 
 def _plan(body):
     from ..agent.task_projection import ProjectionScope
-    from .phase_e import build_plan
+    from .planning import build_plan
     from .run_contracts import TriggerContext
     raw = body["plan"]
     return build_plan(requested_tasks=raw["requested_tasks"], scope=ProjectionScope.model_validate(raw["request_scope"]),
@@ -223,7 +223,7 @@ def _analysis(body, assertion, evidence):
     from ..agent.task_projection import content_hash, reuse_decision, validate_payload
     from ..agents.chief.assemble import _envelope_from_row
     from .dispatcher import Dispatcher
-    from .phase_e import TASK_ROLE
+    from .planning import TASK_ROLE
     store, actual = _run(body, evidence)
     plan = _plan(body)
     task = next(t for t in plan.tasks if "analysis." + t.instance_key == assertion["id"])
@@ -272,7 +272,7 @@ def _analysis(body, assertion, evidence):
             at, source = _time(plan.as_of), _time(env.as_of)
             ok, reason = reuse_decision(env, scope=current.scope, schema_name=current.output_schema,
                                         schema_version="v1", at=at)
-            from .phase_e import FRESHNESS_SECONDS
+            from .planning import FRESHNESS_SECONDS
             if not ok or source > at or (at-source).total_seconds() > FRESHNESS_SECONDS[current.task_id]:
                 raise ValueError("analysis stale/invalid: " + reason)
             attempt = store.conn.execute("SELECT * FROM agent_runs WHERE run_id=? AND task_instance_key=? ORDER BY attempt_no DESC LIMIT 1", (plan.run_id,current.instance_key)).fetchone()

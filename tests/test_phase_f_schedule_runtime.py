@@ -17,7 +17,7 @@ from ats.memory import task_store_scope
 from ats.runtime import cli, dispatcher_daemon
 from ats.workflow import schedule_runtime as rt
 from ats.workflow.dispatcher import Dispatcher
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
 

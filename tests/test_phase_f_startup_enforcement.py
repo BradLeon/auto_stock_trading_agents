@@ -9,7 +9,7 @@ from ats.agent.task_projection import ProjectionScope, build_envelope
 from ats.execution import broker_write_guard as guard
 from ats.schemas.decision import TradeDecision
 from ats.workflow.dispatcher import Dispatcher, TaskAdapterResult
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
 

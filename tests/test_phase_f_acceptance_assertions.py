@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 import pytest
-from test_phase_e_dispatcher import db_paths, _fake_adapter, _config
+from test_workflow_dispatcher import db_paths, _fake_adapter, _config
 from test_phase_f_paired_business import input_fixture, isolated_run, request
 
 from ats.agent.task_projection import ProjectionScope
@@ -12,7 +12,7 @@ from ats.data.consumer_api import ConsumerInput
 from ats.memory import task_store_scope
 from ats.workflow import acceptance_assertions as checks, acceptance_matrix as mx, shadow_replay as replay
 from ats.workflow.dispatcher import Dispatcher
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.scoped_routes import RouteIdentity
 from ats.workflow.store import WorkflowStore

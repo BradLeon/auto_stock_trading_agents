@@ -64,7 +64,7 @@ def test_missing_required_uses_and_unfinished_failed_or_undrilled_window_refuse(
 
 def test_selected_plan_does_not_require_unrelated_workflows():
     from ats.agent.task_projection import ProjectionScope
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
 
     plan = build_plan(requested_tasks=["technical-review"], scope=ProjectionScope(kind="entity", id="COHR"),
@@ -78,7 +78,7 @@ def test_selected_plan_does_not_require_unrelated_workflows():
 
 def test_executed_subset_cannot_define_required_fundamental_dependency_closure():
     from ats.agent.task_projection import ProjectionScope
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
 
     plan = build_plan(requested_tasks=["fundamental-routine"], scope=ProjectionScope(kind="entity", id="COHR"),
@@ -93,7 +93,7 @@ def test_executed_subset_cannot_define_required_fundamental_dependency_closure()
 
 def test_actual_report_only_certifies_its_measured_task_scope(actual):
     from ats.agent.task_projection import ProjectionScope
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
 
     sign(actual)

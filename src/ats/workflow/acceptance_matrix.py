@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 
 from . import shadow_inputs as inputs
-from .phase_e import FRESHNESS_SECONDS, build_plan
+from .planning import FRESHNESS_SECONDS, build_plan
 from .run_contracts import TriggerContext
 from .scoped_routes import canonical_json
 from .shadow_matrix import BATCH_CLASSES, DECISION, RESEARCH_READ, TRADING, MatrixError

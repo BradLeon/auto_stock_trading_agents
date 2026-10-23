@@ -286,7 +286,7 @@ def test_a_published_macro_review_is_reused_while_the_inputs_are_unchanged_and_w
 
 
 def test_macro_freshness_is_the_weekly_cadence():
-    from ats.workflow.phase_e import FRESHNESS_SECONDS
+    from ats.workflow.planning import FRESHNESS_SECONDS
 
     assert FRESHNESS_SECONDS["macro-review"] == 7 * 86_400
 

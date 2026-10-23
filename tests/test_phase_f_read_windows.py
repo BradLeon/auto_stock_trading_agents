@@ -20,7 +20,7 @@ from ats.workflow import scoped_routes as scopes
 from ats.workflow.consumer_reads import record_read, trace_reads
 from ats.workflow.cutover_routing import RouteUnavailable
 from ats.workflow.isolation import isolated_run
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
 from ats.workflow.triggers import TriggerService

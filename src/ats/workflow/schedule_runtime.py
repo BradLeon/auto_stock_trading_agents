@@ -611,7 +611,7 @@ def expected_triggers(start, end, *, config_dir=None):
 
     from ..agent.task_projection import ProjectionScope
     from .ownership import event_trigger_switches
-    from .phase_e import _scopes
+    from .planning import _scopes
     from .run_contracts import TriggerContext
 
     if start.tzinfo is None or end.tzinfo is None or start > end:

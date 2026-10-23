@@ -25,7 +25,7 @@ from ..agent.task_projection import (
     content_hash,
 )
 from ..memory import task_store_scope
-from .phase_e import TASK_ROLE, TaskInstance, WorkflowPlan, phase_e_registry
+from .planning import TASK_ROLE, TaskInstance, WorkflowPlan, task_registry
 from .run_contracts import TriggerContext
 from .store import WorkflowStore
 
@@ -218,7 +218,7 @@ class Dispatcher:
         self.workflow_store.set_run_state(plan.run_id, status="running",
                                           result={}, expected=("planned",))
 
-        registry = phase_e_registry()
+        registry = task_registry()
         trigger = TriggerContext.model_validate(plan.trigger).validate_for_use()
         run_once = _RunOnce()
         attempts = self.workflow_store.attempts_for_run(plan.run_id)
@@ -573,7 +573,7 @@ class Dispatcher:
         return sorted(set(map(str, input_refs))), sorted(set(map(str, data_refs))), task_inputs
 
     def _select_reusable(self, memory, task, input_refs, data_refs, as_of):
-        spec = phase_e_registry().spec(task.task_id)
+        spec = task_registry().spec(task.task_id)
         role = TASK_ROLE[task.task_id]
         schema = PAYLOAD_SCHEMA_BY_ROLE[role]
         if spec.freshness_seconds <= 0:
@@ -714,7 +714,7 @@ class Dispatcher:
                 envelopes = [self._envelope(row) for row in rows if row["projection_id"] in result["result_refs"]]
                 if not envelopes:
                     raise ProjectionMissing("shared completed trigger has no readable projection refs")
-                valid = [env for env in envelopes if self._projection_reuse_check(env, context.task, context.input_refs, context.data_vintage_refs, context.plan.as_of, phase_e_registry().spec(context.task.task_id).freshness_seconds, PAYLOAD_SCHEMA_BY_ROLE[TASK_ROLE[context.task.task_id]].role_schema_name())[0]]
+                valid = [env for env in envelopes if self._projection_reuse_check(env, context.task, context.input_refs, context.data_vintage_refs, context.plan.as_of, task_registry().spec(context.task.task_id).freshness_seconds, PAYLOAD_SCHEMA_BY_ROLE[TASK_ROLE[context.task.task_id]].role_schema_name())[0]]
                 if not valid:
                     raise ProjectionMissing("shared trigger projections fail current reuse validation")
                 self._record_reused(context, valid)
@@ -920,7 +920,7 @@ class Dispatcher:
 def retry_or_finish(state, outcomes, pending, retry_after, attempt_counts, *, status,
                     code, detail, trigger_key, policy_version):
     task = state["task"]
-    policy = phase_e_registry().spec(task.task_id).retry
+    policy = task_registry().spec(task.task_id).retry
     may_retry = code in policy.retry_on and attempt_counts[task.instance_key] < policy.max_attempts
     if may_retry:
         retry_after[task.instance_key] = time.monotonic() + policy.backoff_seconds

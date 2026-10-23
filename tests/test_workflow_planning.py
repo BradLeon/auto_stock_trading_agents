@@ -1,8 +1,8 @@
 import pytest
 
 from ats.agent.task_projection import ProjectionScope
-from ats.workflow.phase_e import (build_plan, phase_e_registry,
-                                   validate_phase_e_registry)
+from ats.workflow.planning import (build_plan, task_registry,
+                                   validate_task_registry)
 from ats.workflow.run_contracts import (ContractError, TaskRegistry, TriggerContext,
                                         WorkflowTaskSpec)
 
@@ -12,8 +12,8 @@ def _scheduled():
                           scheduled_for="2026-09-24T00:00:00+00:00")
 
 
-def test_phase_e_registry_has_only_the_two_declared_cross_analyst_edges():
-    registry = phase_e_registry()
+def test_task_registry_has_only_the_two_declared_cross_analyst_edges():
+    registry = task_registry()
     assert registry.dependencies_for("sector-review") == ("layer-review",)
     assert registry.dependencies_for("fundamental-routine") == ("information-brief",)
     assert registry.dependencies_for("fundamental-event") == ("information-brief",)
@@ -22,7 +22,7 @@ def test_phase_e_registry_has_only_the_two_declared_cross_analyst_edges():
                if spec.task_id == "sector-review" else spec
                for spec in (registry.spec(task_id) for task_id in registry.task_ids())]
     with pytest.raises(ContractError, match="cross-analyst"):
-        validate_phase_e_registry(TaskRegistry(mutated))
+        validate_task_registry(TaskRegistry(mutated))
 
 
 def test_registry_rejects_duplicate_unknown_dependency_and_cycles():

@@ -1,4 +1,10 @@
-"""Phase E task registry, frozen scope expansion, and decision-profile validation."""
+"""Workflow planning: the task registry, expansion of a request into task instances, and the frozen plan.
+
+`task_registry()` declares every workflow task (its analyst role, dependencies, freshness, retry policy);
+`build_plan()` expands one request (tasks + scope + trigger) into stable task instances and freezes the config
+and decision-profile hashes it was resolved from.  The Dispatcher executes a plan; this module never runs one.
+(Formerly `phase_e.py`, named after the migration phase that introduced it.)
+"""
 
 from __future__ import annotations
 
@@ -153,7 +159,7 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def phase_e_registry() -> TaskRegistry:
+def task_registry() -> TaskRegistry:
     specs = []
     for task_id, role in TASK_ROLE.items():
         policy = TASK_POLICIES[task_id]
@@ -168,11 +174,11 @@ def phase_e_registry() -> TaskRegistry:
                               retry_on=("timeout", "transient")),
             required_for_decision=True))
     registry = TaskRegistry(specs)
-    validate_phase_e_registry(registry)
+    validate_task_registry(registry)
     return registry
 
 
-def validate_phase_e_registry(registry: TaskRegistry) -> None:
+def validate_task_registry(registry: TaskRegistry) -> None:
     registry.validate()
     for task_id in registry.task_ids():
         spec = registry.spec(task_id)
@@ -242,7 +248,7 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
                namespace: str = "dispatcher",
                task_inputs: dict[str, Any] | None = None) -> WorkflowPlan:
     """Expand a request to stable task instances and freeze all resolver inputs."""
-    registry = phase_e_registry()
+    registry = task_registry()
     trigger.validate_for_use()
     requested = tuple(dict.fromkeys(requested_tasks))
     if not requested:
@@ -377,4 +383,4 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
 
 
 __all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
-           "build_plan", "phase_e_registry", "validate_phase_e_registry"]
+           "build_plan", "task_registry", "validate_task_registry"]

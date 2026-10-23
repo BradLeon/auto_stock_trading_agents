@@ -224,7 +224,7 @@ def bind_plan(plan):
             from .invocation_bindings import invocation
             invocations["chief:portfolio"] = invocation(who, point, workflow=workflow,
                 as_of=plan.as_of, purpose="chief", run_id=plan.run_id, config_dir=plan.config_root or None)
-    from .phase_e import build_plan
+    from .planning import build_plan
     from .run_contracts import TriggerContext
 
     return build_plan(requested_tasks=plan.requested_tasks, scope=plan.request_scope,

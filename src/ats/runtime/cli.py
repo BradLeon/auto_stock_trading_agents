@@ -1747,7 +1747,7 @@ def workflow_command(args, *, parser) -> int:
             parser.error("only a failed/incomplete trigger can be explicitly compensated")
         from ..agent.task_projection import ProjectionScope
         from ..workflow.dispatcher import Dispatcher, default_data_vintage
-        from ..workflow.phase_e import build_plan
+        from ..workflow.planning import build_plan
         from ..workflow.run_contracts import TriggerContext
         from ..workflow.triggers import TriggerService
 
@@ -1784,7 +1784,7 @@ def workflow_command(args, *, parser) -> int:
 
     from ..agent.task_projection import ProjectionScope
     from ..workflow.dispatcher import Dispatcher, default_data_vintage
-    from ..workflow.phase_e import build_plan
+    from ..workflow.planning import build_plan
     from ..workflow.run_contracts import TriggerContext
     from ..workflow.triggers import TriggerService, load_trigger_policies
 

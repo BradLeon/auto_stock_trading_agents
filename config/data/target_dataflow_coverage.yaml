@@ -480,7 +480,7 @@ qualification_policy:
     - src/ats/data/calendar_refresh.py
     - src/ats/data/stores/schedule_calendar.py
     - src/ats/workflow/dispatcher.py
-    - src/ats/workflow/phase_e.py
+    - src/ats/workflow/planning.py
     - src/ats/workflow/run_contracts.py
     - src/ats/decision/snapshot.py
     - src/ats/agent/task_projection.py

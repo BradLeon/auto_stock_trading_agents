@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from ..config import REPO_ROOT
-from .phase_e import phase_e_registry
+from .planning import task_registry
 
 
 class RouteError(ValueError):
@@ -40,7 +40,7 @@ def _routes(config_dir: str | Path | None = None) -> list[dict[str, Any]]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if int(payload.get("schema_version", 0)) != 1:
         raise RouteError("unsupported event route schema_version")
-    registry = phase_e_registry()
+    registry = task_registry()
     allowed = set(registry.task_ids())
     for rule in payload.get("events", []) or []:
         kind = rule.get("event_type")

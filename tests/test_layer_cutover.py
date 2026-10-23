@@ -251,7 +251,7 @@ def test_an_unchanged_vintage_reuses_the_published_layer_projection_and_a_change
 
 
 def test_a_layer_projection_older_than_the_weekly_window_is_not_reused_even_when_unchanged(vintage):
-    from ats.workflow.phase_e import FRESHNESS_SECONDS
+    from ats.workflow.planning import FRESHNESS_SECONDS
 
     assert FRESHNESS_SECONDS["layer-review"] == 7 * 86_400
     refs = inp.layer_vintage("demo", "L1")

@@ -19,7 +19,7 @@ from ats.workflow.cutover_routing import RouteUnavailable
 from ats.workflow.cutover_wiring import BoundaryWriteRefused
 from ats.workflow.dispatcher import Dispatcher, TaskAdapterResult
 from ats.workflow.isolation import isolated_run
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.scoped_routes import transition_route
 from ats.workflow.store import WorkflowStore

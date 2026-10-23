@@ -13,7 +13,7 @@ import yaml
 from ..agent.task_projection import ProjectionScope
 from ..config import REPO_ROOT
 from .dispatcher import Dispatcher, default_data_vintage
-from .phase_e import TASK_ROLE, build_plan
+from .planning import TASK_ROLE, build_plan
 from .run_contracts import TriggerContext
 from .store import WorkflowStore
 from .triggers import TriggerService, load_trigger_policies, trigger_key
@@ -45,7 +45,7 @@ def owner_mode(workflow_id: str, *, config_dir: str | Path | None = None,
     if entry is None:
         raise OwnershipError(f"workflow {workflow_id!r} has no declared owner")
     from .schedule_runtime import current_owner
-    from .phase_e import _scopes
+    from .planning import _scopes
 
     if scope is None:
         return current_owner(workflow_id, {"kind": "portfolio", "id": ""}, candidate=str(entry.get("mode", "legacy")))
@@ -134,7 +134,7 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
         raise OwnershipError(f"workflow {workflow_id!r} has no declared owner")
     mode = entry.get("mode", "legacy")
     from .schedule_runtime import current_owner, startup as schedule_startup
-    from .phase_e import _scopes
+    from .planning import _scopes
 
     schedule_startup(config_dir=config_dir)
     resolved = _scopes(tuple(entry["task_ids"])[0], scope,
@@ -201,7 +201,7 @@ def research_schedule_entries(*, config_dir: str | Path | None = None) -> dict[s
         if owner is None:
             raise OwnershipError(f"scheduled workflow {workflow_id!r} has no owner entry")
         from .schedule_runtime import current_owner
-        from .phase_e import _scopes
+        from .planning import _scopes
 
         resolved = _scopes(tuple(value.get("task_ids", ()))[0], ProjectionScope.model_validate(value["scope"]), root)
         modes = {current_owner(workflow_id, item.model_dump(mode="json"), candidate=owner.get("mode")) for item in resolved}

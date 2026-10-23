@@ -9,7 +9,7 @@ from ats.config import REPO_ROOT
 from ats.memory import get_store, reset_store_cache, task_store_scope
 from ats.workflow.dispatcher import (AdapterUnavailable, Dispatcher,
                                      TaskAdapterResult)
-from ats.workflow.phase_e import TASK_ROLE, build_plan
+from ats.workflow.planning import TASK_ROLE, build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.store import WorkflowStore
 from ats.workflow.isolation import isolated_run

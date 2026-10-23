@@ -22,7 +22,7 @@ tests:
 - tests/test_information_material_quality.py
 - tests/test_information_target_selection.py
 - tests/test_information_visibility_revisions.py
-- tests/test_phase_e_planning.py
+- tests/test_workflow_planning.py
 - tests/test_phase_f_acceptance_assertions.py
 - tests/test_phase_f_acceptance_matrix.py
 - tests/test_phase_f_acceptance_reports.py

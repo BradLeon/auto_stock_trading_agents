@@ -40,7 +40,7 @@ from ats.workflow import runtime_reads as rr
 from ats.workflow.cutover_routing import RouteUnavailable
 from ats.workflow.dispatcher import Dispatcher, TaskAdapterResult
 from ats.workflow.isolation import build_environment, isolated_run, verified_isolation_root
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.scoped_routes import canonical_json, resolve_route, transition_route
 from ats.workflow.store import WorkflowStore

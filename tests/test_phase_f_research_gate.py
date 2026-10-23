@@ -6,7 +6,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_phase_e_dispatcher import _payload
+from test_workflow_dispatcher import _payload
 from test_phase_f_safe_reads import (
     isolated as safe_isolated,
 )
@@ -315,7 +315,7 @@ def test_six_roles_actual_dispatcher_publish_with_provenance(business_inputs, is
     import threading
 
     from ats.workflow.dispatcher import Dispatcher
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
     from ats.workflow.store import WorkflowStore
     calls=[]
@@ -372,7 +372,7 @@ def test_actual_workflow_cli_single_and_dependency_subflows(business_inputs, iso
 
 def decision_run(business_inputs, isolated, *, mode="routine", runner=None, before_dispatch=None):
     from ats.workflow.dispatcher import Dispatcher
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
     from ats.workflow.store import WorkflowStore
     extra={"fundamental-"+mode:{"use_llm":False},
@@ -459,7 +459,7 @@ def test_fixed_requirement_damage_blocks_actual_cycle_write(business_inputs, iso
     from copy import deepcopy
 
     from ats.decision.repository import DecisionAuditRepository
-    from ats.workflow.phase_e import _hash
+    from ats.workflow.planning import _hash
     result=decision_run(business_inputs,isolated)
     assert result.decision_cycle_ready,result.as_dict()
     payload=deepcopy(result.chief_snapshot)

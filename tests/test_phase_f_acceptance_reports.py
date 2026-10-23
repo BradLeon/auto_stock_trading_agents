@@ -17,7 +17,7 @@ from ats.workflow.acceptance_disposition import dispose
 from ats.workflow.isolation import verified_isolation_root
 from ats.workflow.business_replay_inputs import Tape, implementation_hashes
 from ats.workflow.scoped_routes import RouteIdentity
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.agent.task_projection import ProjectionScope
 

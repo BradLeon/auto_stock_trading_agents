@@ -20,7 +20,7 @@ from ats.workflow.cutover_routing import RouteUnavailable
 from ats.workflow.consumer_reads import trace_reads, record_read
 from ats.workflow.isolation import isolated_run
 from ats.workflow.run_contracts import TriggerContext
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.agent.task_projection import ProjectionScope
 
 
@@ -309,7 +309,7 @@ def test_stable_trader_permission_reads_real_governed_quote_and_rejects_other_cy
 def test_real_dispatcher_two_invocations_under_one_stable_permission(business_inputs, isolated, monkeypatch):
     from ats.workflow.isolation import verified_isolation_root
     from ats.agent.task_projection import ProjectionScope
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
     from ats.workflow.dispatcher import Dispatcher
     from ats.workflow.store import WorkflowStore

@@ -12,7 +12,7 @@ from test_phase_f_trader_a import quote
 from ats.workflow import acceptance_runner as runner, acceptance_reports as reports, acceptance_matrix as mx
 from ats.workflow import shadow_replay as replay
 from ats.workflow.isolation import verified_isolation_root
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.scoped_routes import RouteIdentity
 from ats.workflow.run_contracts import TriggerContext
 from ats.agent.task_projection import ProjectionScope

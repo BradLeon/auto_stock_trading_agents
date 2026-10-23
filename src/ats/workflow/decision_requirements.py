@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from ..agent.task_projection import ProjectionScope, reuse_decision
 from .cutover_routing import RouteUnavailable
-from .phase_e import TASK_ROLE, _hash, build_plan
+from .planning import TASK_ROLE, _hash, build_plan
 from .run_contracts import TriggerContext
 
 
@@ -245,7 +245,7 @@ def validate(store, snapshot_payload, *, at=None):
                 validate_routine_value_contract(envelope.payload)
             ok, reason = reuse_decision(envelope, scope=task.scope, at=stamp,
                 schema_name=task.output_schema, schema_version="v1")
-            from .phase_e import FRESHNESS_SECONDS
+            from .planning import FRESHNESS_SECONDS
 
             source_time = datetime.fromisoformat(envelope.as_of)
             if (source_time.tzinfo is None or source_time > min(stamp, read_cutoff) or

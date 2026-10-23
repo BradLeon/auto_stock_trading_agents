@@ -81,7 +81,7 @@ def _seed(store, *, layers=("L1_app", "L3_optics"), targets=("COHR",),
             ProjectionScope(kind="entity", id=sym))
     from ats.workflow import decision_requirements as dr
     from ats.workflow.dispatcher import Dispatcher
-    from ats.workflow.phase_e import TASK_ROLE
+    from ats.workflow.planning import TASK_ROLE
     plan = dr.restore(dr.standalone(_state()))
     by_binding = {(e.agent_role, e.scope.key): e for e in rows.values()}
     selected = {}

@@ -237,7 +237,7 @@ def test_selected_use_audit_missing_internal_store_refuses_without_creation(tmp_
 
 def test_information_target_scope_is_configured_frozen_and_role_specific(tmp_path):
     import shutil
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
     from ats.agent.task_projection import ProjectionScope
     from ats.workflow.runtime_reads import task_identity, consumer_entities, guard_input, ReadContext, _CURRENT

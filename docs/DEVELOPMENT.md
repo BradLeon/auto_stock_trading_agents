@@ -67,7 +67,7 @@ src/ats/
     chief/ risk_officer/  # 决策收口、交易审查
   agent/task_projection.py  # 所有分析师产出的统一投影 envelope
   workflow/            # Dispatcher、调度负责人、触发账本、读路由、数据产品健康检查（发布时与读取前）、退役判据
-    dispatcher.py phase_e.py triggers.py ownership.py schedule_runtime.py
+    dispatcher.py planning.py triggers.py ownership.py schedule_runtime.py
     consumer_cutover.py consumer_health.py legacy_retirement.py
   data/                # 数据平台：sources（适配器）/ products（数据产品）/ stores
     refresh.py         # 数据刷新控制器（com.ats.data-refresh 每小时 tick）

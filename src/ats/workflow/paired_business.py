@@ -101,7 +101,7 @@ def _side(snapshot, root, run_id):
 
 def _plan(request, run_id, point):
     from ..agent.task_projection import ProjectionScope
-    from .phase_e import build_plan
+    from .planning import build_plan
     from .run_contracts import TriggerContext
     return build_plan(requested_tasks=request['tasks'], scope=ProjectionScope(**request['scope']),
         trigger=TriggerContext(**request['trigger']), as_of=point.isoformat(), run_id=run_id,
@@ -217,7 +217,7 @@ def _business(*, legacy, read_input, logical_time, value, root, business_run_id,
         result = _legacy(plan) if legacy else _dispatcher(plan)
         projections = [row for row in get_store().task_projection_envelopes(limit=100000)
                        if row['projection_id'] not in before]
-        from .phase_e import TASK_ROLE
+        from .planning import TASK_ROLE
         for task in plan.tasks:
             if not any(row['agent_role'] == TASK_ROLE[task.task_id]
                        and row['scope_kind'] == task.scope.kind and row['scope_id'] == task.scope.id for row in projections):

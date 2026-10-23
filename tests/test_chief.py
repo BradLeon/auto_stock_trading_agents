@@ -168,9 +168,9 @@ def test_run_chief_cli_executes_when_decisions(monkeypatch):
         return g
 
     monkeypatch.setattr(_config, "load_pead_global", pinned_global)
-    # The frozen decision plan reads pead.yaml itself (phase_e._targets), not load_pead_global: pin it too,
+    # The frozen decision plan reads pead.yaml itself (planning._targets), not load_pead_global: pin it too,
     # otherwise the checked-in 11-name roster makes this one-name snapshot incomplete.
-    monkeypatch.setattr("ats.workflow.phase_e._targets", lambda config_dir: ["COHR"])
+    monkeypatch.setattr("ats.workflow.planning._targets", lambda config_dir: ["COHR"])
     now = datetime.now(timezone.utc)
     valid = (now + timedelta(hours=48)).isoformat(timespec="seconds")
 

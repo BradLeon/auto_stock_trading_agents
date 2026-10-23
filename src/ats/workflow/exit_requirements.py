@@ -64,7 +64,7 @@ def required_plan_uses(plan):
     covers analysis tasks only; decision-profile and downstream approval/trade
     requirements are checked by their own business gates.
     """
-    from .phase_e import TASK_ROLE
+    from .planning import TASK_ROLE
     from .runtime_reads import task_identity
 
     return [{"use": task.task_id + ":" + task.scope.key,

@@ -208,7 +208,7 @@ def test_default_data_vintage_resolves_a_sector_task_and_needs_a_named_sector(wo
 # --- the plan binds exactly the eight Layer instances ---------------------------------------------------------
 def real_plan():
     from ats.agent.task_projection import ProjectionScope
-    from ats.workflow.phase_e import build_plan
+    from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
 
     return build_plan(requested_tasks=("sector-review",), scope=ProjectionScope(kind="sector", id="ai_hardware"),

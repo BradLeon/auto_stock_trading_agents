@@ -93,7 +93,7 @@ def test_per_input_gaps_are_only_warnings(check):
         news={"value": {"days": 21, "themes": {"inflation": [news_doc("inflation")], "growth": []}}, "error": ""},
         regional={"value": [{"id": "tw_ic_exports", "label": "TW", "period": "2026-08", "known_at": "x"},
                             {"id": "kr_semi_exports", "label": "KR", "period": "", "known_at": ""}], "error": ""},
-        factset={"value": {"version_id": "SP500:2026-09-25@x", "report_date": "2026-09-25", "age_days": 22,
+        factset={"value": {"version_id": "SP500:2026-09-25@x", "report_date": "2026-09-25", "age_days": 45,
                            "state": "platform", "freshness": "latest_released"}, "error": ""})
     result = check(state)
     assert result["status"] == "ok"

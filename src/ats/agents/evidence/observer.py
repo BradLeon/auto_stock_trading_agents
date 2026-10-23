@@ -234,6 +234,25 @@ def _windows(body: str) -> list[str]:
     return out
 
 
+# What counts as "a fact worth a row". Without this the model decides per window how much to extract, and
+# the same document came back with 21 rows from one model and 44 from another (G0 D01-D04, 2026-10-23).
+SCOPE_RULES = (
+    "【抽取范围】满足下面任一条的句子，**每句都要有一条观测**，不要只挑有代表性的几条：\n"
+    "- 公司自述的数字：营收、利润率、资本开支、库存、产能、出货、价格、份额，及其同比/环比变化；\n"
+    "- 前瞻指引：带期间或数字的“预计/计划/目标/将”；\n"
+    "- 产能、良率、制程或封装节点、客户需求与供给缺口的明确陈述；\n"
+    "- 管理层对供应瓶颈、定价、竞争格局的明确判断。\n"
+    "不抽：寒暄、会议流程、免责声明、纯观点（如“将迎来超级周期”）、与该公司及其产业链无关的数字。\n"
+    "一句话里有几个对应不同期间或对象的数字（如 2026 年底 14 万片、2027 年底 22 万片），拆成几条。\n"
+    "标注示例：\n"
+    "- “Revenue rose 17.6% sequentially” → reported_actual、up、数值 17.6、单位 %；\n"
+    "- “server DRAM bit shipments grew roughly 8% quarter over quarter” → direction 是 up，数值 8，单位 %，"
+    "不是 flat；\n"
+    "- 关注公司自己的股价、份额、业务、产能，说话人立场都是 incumbent；只有句子谈的是**另一家**公司"
+    "（竞争对手、客户、供应商）时，才用 competitor / customer / supplier。"
+)
+
+
 def _context(symbol: str, chunk: str, period: str, menu: str, relations: str,
              document_id: str = "") -> str:
     """One window's prompt. The dimension menu goes AFTER the document, not before.
@@ -256,7 +275,8 @@ def _context(symbol: str, chunk: str, period: str, menu: str, relations: str,
         + (menu + "\n\n" if menu else "")
         + "现在输出观测。**逐条判断它属于上面哪个维度并填进 concept**；都不属于就留空，"
         "不要硬套。抽不出任何可核对的事实时，用 failure_reason 说明原因，不要编造观测。\n"
-        "写每一条时再核对这几点：\n"
+        + (SCOPE_RULES + "\n" if SCOPE_RULES else "")
+        + "写每一条时再核对这几点：\n"
         "1. evidence_span 必须原样复制原文：保留连字符、数字和单位的写法，不得缩写、改写或合并两处文字"
         "（原文是 12-inch 就不能写成 12 in）；复制不出来就不要输出这条。\n"
         "2. stance 看**这句话的说话人**，不是看谁发布了文档：管理层自己说的话（含媒体原样引用的董事长/CEO 的话）"

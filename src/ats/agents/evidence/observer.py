@@ -60,6 +60,20 @@ def _span_weight(s: str) -> int:
     return sum(2 if "一" <= ch <= "鿿" else 1 for ch in s)
 
 
+def _squash(text: str) -> str:
+    """Whitespace- and quote-style-insensitive form used to check a quote against its source."""
+    table = {ord("’"): "'", ord("‘"): "'", ord("“"): '"', ord("”"): '"', ord("\u00a0"): " "}
+    return " ".join(text.translate(table).split()).lower()
+
+
+def _publisher(document_id: str, symbol: str) -> tuple[str, str]:
+    """(who published the document, what kind of material it is), from the document id prefix."""
+    prefix = (document_id or "").split(":", 1)[0].strip()
+    if not prefix or prefix.upper() == symbol.upper() or prefix.startswith(("probe-", "manual")):
+        return symbol, "公司自己的材料（财报/纪要/公告）"
+    return prefix, "第三方媒体/研报/数据商的文章（里面的话不是 " + symbol + " 管理层说的，除非文中明确引用）"
+
+
 def _clip(text: str, limit: int = MAX_DOC_CHARS) -> str:
     """Keep head and tail: prepared remarks open a call, guidance lands in Q&A."""
     if len(text) <= limit:
@@ -220,7 +234,8 @@ def _windows(body: str) -> list[str]:
     return out
 
 
-def _context(symbol: str, chunk: str, period: str, menu: str, relations: str) -> str:
+def _context(symbol: str, chunk: str, period: str, menu: str, relations: str,
+             document_id: str = "") -> str:
     """One window's prompt. The dimension menu goes AFTER the document, not before.
 
     Measured on a real 60k-char filing: with the menu up front the model returned 10
@@ -229,7 +244,8 @@ def _context(symbol: str, chunk: str, period: str, menu: str, relations: str) ->
     of effective attention — so the instruction it must follow while writing sits last.
     """
     return (
-        f"说话人（本文档的发布方）：{symbol}\n"
+        f"文档发布方：{_publisher(document_id, symbol)[0]}——{_publisher(document_id, symbol)[1]}\n"
+        f"被关注的公司：{symbol}\n"
         f"期间（如已知）：{period or '未知'}\n\n"
         + (relations + "\n\n" if relations else "")
         + "以下是该公司的财报/纪要原文（可能是其中一段）。请抽取其中可核对的事实观测。\n"
@@ -239,7 +255,17 @@ def _context(symbol: str, chunk: str, period: str, menu: str, relations: str) ->
         "===== 文档正文结束 =====\n\n"
         + (menu + "\n\n" if menu else "")
         + "现在输出观测。**逐条判断它属于上面哪个维度并填进 concept**；都不属于就留空，"
-        "不要硬套。抽不出任何可核对的事实时，用 failure_reason 说明原因，不要编造观测。"
+        "不要硬套。抽不出任何可核对的事实时，用 failure_reason 说明原因，不要编造观测。\n"
+        "写每一条时再核对这几点：\n"
+        "1. evidence_span 必须原样复制原文：保留连字符、数字和单位的写法，不得缩写、改写或合并两处文字"
+        "（原文是 12-inch 就不能写成 12 in）；复制不出来就不要输出这条。\n"
+        "2. stance 看**这句话的说话人**，不是看谁发布了文档：管理层自己说的话（含媒体原样引用的董事长/CEO 的话）"
+        "= incumbent；记者或网页编辑自己写的导语/摘要不是管理层说的，observation_type 填 media。\n"
+        "3. direction 看文中该指标的实际变化：涨/增长/收涨 = up，跌/下降 = down；只有明确持平、"
+        "或这句话只是在讲一个动作而没有指标变化时才填 flat，不要凭印象给 up。\n"
+        "4. period 只写原文里能读到的期间；原文只说“4 月”而没有年份时，不要用常识补年份，留空或照抄原文写法。\n"
+        "5. unit 只写计量单位（%、USD billion、systems）；“约”“预计”“仍在评估”这类限定语写进 metric，"
+        "不要写进 unit。"
     )
 
 
@@ -263,7 +289,7 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
     windows = _windows(body)
     for i, chunk in enumerate(windows, 1):
         tag = f"{document_id}#{i}/{len(windows)}" if len(windows) > 1 else document_id
-        ctx = _context(symbol, chunk, period, menu, relations)
+        ctx = _context(symbol, chunk, period, menu, relations, document_id)
         view = None
         # Retry an EMPTY result once. A well-formed empty list with an empty
         # failure_reason slips past `run_structured`'s None-retry, and a silent zero is
@@ -295,8 +321,15 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
         return [], (" / ".join(dict.fromkeys(failures)) or "未抽出任何带原文佐证的观测")
 
     out: list[Observation] = []
+    source = _squash(body)
     for v in rows:
         span = (v.evidence_span or "").strip()
+        if span and _squash(span) not in source:
+            # The invariant is that evidence can be RE-CHECKED against the source. A quote the model
+            # reworded ("12 in" for "12-inch") cannot be, however plausible its meaning.
+            log.warning("evidence %s: dropped row whose span is not verbatim (%r, metric=%s)",
+                        symbol, span[:60], v.metric)
+            continue
         if _span_weight(span) < MIN_SPAN_WEIGHT:
             # Blank was always dropped; a bare fragment now is too. Verbatim is
             # necessary but not sufficient — the invariant is that evidence can be

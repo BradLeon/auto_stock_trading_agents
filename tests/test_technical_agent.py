@@ -226,26 +226,53 @@ def test_same_day_rerun_overwrites_and_previous_finds_yesterday():
 
 
 # ── per-symbol runs (the Dispatcher runs one name at a time) ─────────────────
-def test_one_symbol_runs_join_todays_summary_instead_of_replacing_it():
+def _one(symbol, exposure, *, as_of=NOW, stale=False):
+    reading = (TechnicalReading(symbol=symbol, stale=True, bars=74, note="历史不足（74 < 200 根）") if stale else
+               TechnicalReading(symbol=symbol, score=5, target_exposure=exposure, close=100.0, sma200=90.0, bars=300))
+    return _review(as_of=as_of, readings=[reading])
+
+
+def test_one_symbol_runs_build_todays_summary_from_all_published_projections():
     from ats.memory import get_store
 
     store = get_store()
-    first = _review(readings=[TechnicalReading(symbol="NVDA", target_exposure=1.0)])
-    second = _review(readings=[TechnicalReading(symbol="TSM", target_exposure=0.5)])
-    store.save_technical_review(tech._merge_same_day(store, first))
-    store.save_technical_review(tech._merge_same_day(store, second))
+    for symbol, exposure in (("NVDA", 1.0), ("TSM", 0.5)):
+        tech._persist_per_symbol(store, _one(symbol, exposure))
     assert [r.symbol for r in store.latest_technical_review().readings] == ["NVDA", "TSM"]
 
-    # the same symbol run again replaces its own reading, it does not duplicate
-    rerun = _review(readings=[TechnicalReading(symbol="NVDA", target_exposure=0.25)])
-    store.save_technical_review(tech._merge_same_day(store, rerun))
-    readings = {r.symbol: r.target_exposure for r in store.latest_technical_review().readings}
-    assert readings == {"NVDA": 0.25, "TSM": 0.5}
+    # the same symbol run again replaces its own reading; a data gap is kept as a missing-data entry
+    tech._persist_per_symbol(store, _one("NVDA", 0.25))
+    tech._persist_per_symbol(store, _one("SKHY", 0.0, stale=True))
+    saved = {r.symbol: r for r in store.latest_technical_review().readings}
+    assert saved["NVDA"].target_exposure == 0.25 and saved["TSM"].target_exposure == 0.5
+    assert saved["SKHY"].stale and saved["SKHY"].note == "历史不足（74 < 200 根）"
 
     # a new day starts a new summary
-    tomorrow = _review(as_of=NOW + timedelta(days=1),
-                       readings=[TechnicalReading(symbol="ASML", target_exposure=1.0)])
-    assert [r.symbol for r in tech._merge_same_day(store, tomorrow).readings] == ["ASML"]
+    tomorrow = _one("ASML", 1.0, as_of=NOW + timedelta(days=1))
+    tech._persist_per_symbol(store, tomorrow)
+    assert [r.symbol for r in store.latest_technical_review().readings] == ["ASML"]
+
+
+def test_concurrent_symbol_tasks_never_lose_a_reading_from_the_summary():
+    """The Dispatcher runs several one-symbol tasks at once; an unlocked read-merge-write lost 3 of 11."""
+    import threading
+
+    from ats.memory import get_store
+
+    store = get_store()
+    symbols = [f"S{i:02d}" for i in range(11)]
+    gate = threading.Barrier(len(symbols))
+
+    def work(symbol):
+        gate.wait()
+        tech._persist_per_symbol(store, _one(symbol, 1.0))
+
+    threads = [threading.Thread(target=work, args=(sym,)) for sym in symbols]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert [r.symbol for r in store.latest_technical_review().readings] == symbols
 
 
 def test_previous_exposure_comes_from_each_symbols_own_projection():

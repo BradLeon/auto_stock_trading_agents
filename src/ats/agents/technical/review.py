@@ -13,6 +13,7 @@ from __future__ import annotations
 from ats.workflow.evaluation_clock import now as evaluation_now
 
 import logging
+import threading
 from datetime import datetime, timezone
 
 from ...schemas.technical import TechnicalReading, TechnicalReview
@@ -262,16 +263,49 @@ def _prior_exposures(store, name: str, symbols, today: str) -> dict[str, float]:
     return prior
 
 
-def _merge_same_day(store, review: TechnicalReview) -> TechnicalReview:
-    """Fold a one-symbol run into today's saved summary instead of replacing it."""
-    saved = store.latest_technical_review(review.name)
-    if saved is None or saved.as_of.date() != review.as_of.date():
-        return review
-    mine = {r.symbol for r in review.readings}
-    kept = [r for r in saved.readings if r.symbol not in mine]
-    return review.model_copy(update={
-        "readings": sorted([*kept, *review.readings], key=lambda r: r.symbol),
-        "skipped": sorted(set(saved.skipped) | set(review.skipped))})
+_SUMMARY_LOCK = threading.Lock()
+_GAP_PREFIX = "数据缺失，本期不出读数："
+
+
+def _readings_from_projections(store, as_of_date: str) -> list[TechnicalReading]:
+    """The day's readings as published: the latest technical_review projection of every symbol."""
+    latest: dict[str, dict] = {}
+    for row in store.task_projection_envelopes(agent_role="technical_review", scope_kind="entity", limit=500):
+        if str(row.get("as_of") or "")[:10] == as_of_date:
+            latest.setdefault(str(row["scope_id"]), row)          # newest first
+    readings = []
+    for sym, row in sorted(latest.items()):
+        p = row.get("payload") or {}
+        if p.get("signal") == "unavailable":
+            note = str(p.get("summary") or "")
+            readings.append(TechnicalReading(symbol=sym, stale=True, note=note.removeprefix(_GAP_PREFIX)))
+            continue
+        levels = p.get("levels") or {}
+        exposure = float(p.get("suggested_exposure") or 0.0)
+        readings.append(TechnicalReading(
+            symbol=sym, score=int(p.get("score") or 0), score_detail=p.get("score_detail") or {},
+            raw_ladder=exposure, target_exposure=exposure, prev_exposure=p.get("previous_exposure"),
+            panic_fired=bool(p.get("panic_fired")), bear_fired=bool(p.get("bear_fired")),
+            close=levels.get("close"), sma20=levels.get("sma20"), sma50=levels.get("sma50"),
+            sma200=levels.get("sma200")))
+    return readings
+
+
+def _persist_per_symbol(store, review: TechnicalReview) -> None:
+    """Publish this run's projections, then save the day's summary rebuilt from ALL of the day's projections.
+
+    The Dispatcher runs one symbol per task and several tasks at once.  A read-merge-write on the saved summary
+    loses readings when two tasks interleave (3 of 11 symbols vanished in a manual run), so the summary is derived
+    from the projections instead, and publish + rebuild + save run under one lock: whichever task saves last has
+    seen every projection published before it.
+    """
+    with _SUMMARY_LOCK:
+        _publish_projection(store, review)
+        own = {r.symbol: r for r in review.readings}
+        merged = {r.symbol: r for r in _readings_from_projections(store, review.as_of.date().isoformat())}
+        merged.update(own)                                         # this run's own reading is the fuller one
+        store.save_technical_review(review.model_copy(update={
+            "readings": sorted(merged.values(), key=lambda r: r.symbol)}))
 
 
 def _publish_projection(store, review: TechnicalReview) -> int:
@@ -417,8 +451,11 @@ def _run(name: str = "technical", *, live_data: bool = True, persist: bool = Tru
     if persist:
         # A run for given symbols (the Dispatcher's one-name tasks) joins today's summary; a full-universe run
         # replaces it.
-        store.save_technical_review(_merge_same_day(store, review) if per_symbol_run else review)
-        _publish_projection(store, review)
+        if per_symbol_run:
+            _persist_per_symbol(store, review)
+        else:
+            store.save_technical_review(review)
+            _publish_projection(store, review)
     if write_report:
         from . import report as tech_report
 

@@ -1,14 +1,15 @@
 # G0 核验用的只读查看函数。用法：在仓库根目录的终端里 `source` 本文件，见 g0-runbook.md 0.3。
-# 全部只读：不改 var/ 下的数据、不加载/卸载服务、不发模型请求。
+# 全部只读（sqlite 连接开 PRAGMA query_only=ON；不用 -readonly，WAL 库在没有 -shm 文件时只读打开会失败）：不改 var/ 下的数据、不加载/卸载服务、不发模型请求。
 cd /Users/liuchao/Code/trading/auto_stock_trading_agents && source .venv/bin/activate
 export G0_TZ=Asia/Taipei
 G0_TOOLS_DIR="${${(%):-%x}:A:h}"   # 本文件所在目录（source 时确定），供 g0_show 找到 g0_show.py
+export G0_REPO="${G0_TOOLS_DIR:h:h:h}"   # 仓库根目录；所有函数都用它定位 var/、config/，不依赖当前所在目录
 
 # 任务名 → 来源名 的对照（读 config/data/schedules.yaml），供下面几个函数用
 g0_map() {
   python -c '
-import json, yaml
-d = yaml.safe_load(open("config/data/schedules.yaml"))
+import json, os, yaml
+d = yaml.safe_load(open(os.path.join(os.environ["G0_REPO"], "config/data/schedules.yaml")))
 out = {}
 for dom in ("structured", "unstructured", "derived"):
     for k, v in d[dom]["jobs"].items():
@@ -160,7 +161,8 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
 want = sys.argv[1].upper()
-c = sqlite3.connect("file:var/data.sqlite?mode=ro", uri=True)
+c = sqlite3.connect(os.path.join(os.environ["G0_REPO"], "var/data.sqlite"), timeout=10)
+c.execute("PRAGMA query_only=ON")
 rows = c.execute("""SELECT s.entity_id, s.metric_id, s.dimensions_json, o.period, o.value, o.known_at
     FROM structured_observations o JOIN structured_series s USING(series_id)
     WHERE s.dataset_id='market_consensus' AND s.metric_id IN
@@ -339,7 +341,7 @@ for r in json.load(sys.stdin):
 #   information_brief | fundamental_expectation_update | fundamental_event_review | layer_analysis
 #   sector_allocation | macro_review | technical_review
 g0_latest() {
-  sqlite3 -readonly -json var/ats.sqlite "SELECT projection_id, scope_kind, scope_id, as_of, valid_until, status, model_version, payload FROM task_projection_envelopes WHERE agent_role='$1' AND ('${2:-}'='' OR scope_id='${2:-}') ORDER BY created_at DESC LIMIT 400" | python -c '
+  sqlite3 -json -cmd "PRAGMA query_only=ON" "$G0_REPO/var/ats.sqlite" "SELECT projection_id, scope_kind, scope_id, as_of, valid_until, status, model_version, payload FROM task_projection_envelopes WHERE agent_role='$1' AND ('${2:-}'='' OR scope_id='${2:-}') ORDER BY created_at DESC LIMIT 400" | python -c '
 import json, os, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -363,7 +365,7 @@ for r in (json.loads(raw) if raw else []):
 g0_show() {
   # 用法: g0_show 编号（g0_latest 输出里的 12 位编号，可只写前几位）。显示部分在 g0_show.py，避免粘贴多行引号块出错
   [[ -z "$1" ]] && { echo "用法: g0_show 编号（先用 g0_latest 找 12 位编号，例如 g0_show d865de3edfa8）"; return 1; }
-  sqlite3 -readonly -json var/ats.sqlite "SELECT agent_role, scope_id, as_of, input_refs, data_vintage_refs, model_version, prompt_version, content_hash, payload FROM task_projection_envelopes WHERE projection_id LIKE '$1%' LIMIT 1" | python "${G0_TOOLS_DIR}/g0_show.py"
+  sqlite3 -json -cmd "PRAGMA query_only=ON" "$G0_REPO/var/ats.sqlite" "SELECT agent_role, scope_id, as_of, input_refs, data_vintage_refs, model_version, prompt_version, content_hash, payload FROM task_projection_envelopes WHERE projection_id LIKE '$1%' LIMIT 1" | python "${G0_TOOLS_DIR}/g0_show.py"
 }
 
 # ⚠ 会写真实数据（不是只读），不发模型请求：批量“现在就重采”，不等例行窗口。
@@ -444,7 +446,8 @@ jobs = [j for j, m in jobmap.items() if want in j or any(want in s for s in m["s
 if not jobs:
     sys.exit(f"没有任务或来源名里含“{want}”")
 d = json.load(sys.stdin)
-db = sqlite3.connect("file:var/data.sqlite?mode=ro", uri=True)
+db = sqlite3.connect(os.path.join(os.environ["G0_REPO"], "var/data.sqlite"), timeout=10)
+db.execute("PRAGMA query_only=ON")
 def run_info(run_id):
     for table in ("structured_ingestion_runs", "data_ingestion_runs"):
         try:

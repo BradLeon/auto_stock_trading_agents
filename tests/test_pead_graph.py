@@ -154,7 +154,7 @@ def test_platform_score_reads_event_bound_documents_without_legacy_fetch(monkeyp
     monkeypatch.setattr("ats.data.transcript.fetch", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy transcript fetch")))
     monkeypatch.setattr("ats.data.transcript.extract_body", lambda text, _src: (text, ""))
     monkeypatch.setattr("ats.data.transcript.looks_like_transcript", lambda _text: (True, "ok"))
-    monkeypatch.setattr("ats.data.fiscal.verify_transcript", lambda *_args: (True, "period ok"))
+    monkeypatch.setattr("ats.data.fiscal.verify_transcript", lambda *_args, **_kwargs: (True, "period ok"))
 
     out = pead.score_fetch(state)
 

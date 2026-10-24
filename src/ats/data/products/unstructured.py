@@ -30,6 +30,7 @@ class EarningsDocument:
     published_at: str
     title: str
     text: str
+    period: str = ""          # fiscal period declared by the catalog (structured sources such as defeatbeta)
 
     @property
     def lineage(self) -> dict[str, str]:
@@ -190,6 +191,7 @@ def earnings_document_package(repository, *, entity: str,
             published_at=str(row.get("published_at") or ""),
             title=str(row.get("title") or role),
             text=text,
+            period=str(row.get("period") or ""),
         )
         known_at = str(version.get("known_at") or version.get("fetched_at") or row.get("fetched_at") or "")
         if role not in selected or known_at > selected_at[role]:

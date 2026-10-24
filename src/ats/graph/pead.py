@@ -386,6 +386,7 @@ def score_fetch(state: PeadState) -> dict:
     # Legacy/shadow retain the established discovery path until PEAD's own shadow
     # reconciliation is completed in task 10.1.
     package = None
+    declared_period = ""
     package_mode = "legacy"
     if state.live_data and not state.transcript_source:
         from ..data.structured import read_mode
@@ -408,6 +409,7 @@ def score_fetch(state: PeadState) -> dict:
     if use_package:
         transcript = package.transcript
         text = transcript.text if transcript else ""
+        declared_period = transcript.period if transcript else ""
         src = (f"platform:{transcript.source}:{transcript.version_id}"
                if transcript else "platform:no_transcript")
         out["documents_text"] = package.official_text()
@@ -434,7 +436,7 @@ def score_fetch(state: PeadState) -> dict:
     if text:
         from ..data import fiscal
 
-        ok, why = fiscal.verify_transcript(state.fiscal_label, text, src)
+        ok, why = fiscal.verify_transcript(state.fiscal_label, text, src, declared_period=declared_period)
         if not ok:
             raise ValueError(
                 f"[period-guard] {state.symbol} score 已中止：{why}。transcript source={src}。"

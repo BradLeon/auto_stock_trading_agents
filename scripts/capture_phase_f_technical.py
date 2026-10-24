@@ -12,7 +12,7 @@ from ats.workflow import acceptance_matrix as matrices
 from ats.workflow import acceptance_reports as reports
 from ats.workflow import acceptance_runner as runner
 from ats.workflow.isolation import isolated_run
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.scoped_routes import RouteIdentity
 

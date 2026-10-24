@@ -21,7 +21,7 @@ from ats.agent.task_projection import ProjectionScope
 from ats.workflow import acceptance_matrix as matrices, acceptance_reports as reports, acceptance_runner as runner
 from ats.workflow.acceptance_assertions import quantity_values
 from ats.workflow.isolation import isolated_run, verified_isolation_root
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.runtime_reads import task_identity
 from ats.workflow.scoped_intake import check_freeze

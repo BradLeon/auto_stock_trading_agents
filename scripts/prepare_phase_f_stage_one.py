@@ -23,7 +23,7 @@ import yaml
 from ats.config import REPO_ROOT
 from ats.agent.task_projection import ProjectionScope
 from ats.workflow.exit_requirements import required_plan_uses
-from ats.workflow.phase_e import build_plan
+from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.runtime_reads import task_identity
 

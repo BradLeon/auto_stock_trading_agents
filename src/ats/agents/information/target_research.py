@@ -1,6 +1,7 @@
 """Existing Information extraction, own-role cache, and a target-scoped brief."""
 from __future__ import annotations
 
+import logging
 import time
 from bisect import bisect_left
 from datetime import timezone
@@ -11,6 +12,8 @@ from ...workflow.evaluation_clock import now as evaluation_now
 from ...agent.task_projection import ProjectionScope
 from . import extract, selection, triage
 from .briefs import assert_no_advice, clocks_for, publish_information_brief
+
+log = logging.getLogger(__name__)
 
 
 def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
@@ -114,12 +117,38 @@ def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
     elif inspected:
         report['materiality'] = 0.0 if not report['deferred'] else None
         report['projection_id'] = _publish_empty(store, symbol, inspected, deferred=report['deferred'])
+    elif not rows and use_llm:
+        # Nothing admitted inside the look-back window.  That is a result ("quiet"), not a failed run: publish it
+        # explicitly, otherwise the Dispatcher counts the task as missing (ASML after its 6-K left the window).
+        report['materiality'] = 0.0
+        report['projection_id'] = _publish_no_candidates(store, symbol, since=since)
     report['elapsed_seconds'] = round(time.monotonic()-started, 3)
     report['status'] = ('selected_no_model' if not use_llm else
+                        'published_no_candidates' if report['projection_id'] and not rows else
                         'published_with_deferred' if extracted and report['deferred'] else 'published' if extracted else
                         'pending' if report['deferred'] else 'no_relevant_change')
     report.pop('universe_card')
+    log.info('information target %s: candidates=%d selected=%d cached=%d deferred=%s extracted=%d inspected=%d -> %s',
+             symbol, len(rows), len(selected), len(caches), report['deferred'], len(extracted), len(inspected),
+             report['status'])
     return report
+
+
+def _publish_no_candidates(store, symbol, *, since):
+    """An explicit 'quiet window' brief: states only what the system saw, invents no issuer fact or source."""
+    now = evaluation_now(timezone.utc)
+    days = max(1, round((now - since).total_seconds() / 86400))
+    observation = f'回看的 {days} 天内没有新增可核读的准入材料，本期无简报内容。'
+    payload = {'entity': symbol, 'headline': f'{symbol} 回看窗口内无新增材料', 'summary': observation,
+        'fact_changes': [observation], 'source_evidence': [], 'relevance': 'low',
+        'sources': ['系统：回看窗口内无准入材料'], 'entities': [symbol], 'impact_candidates': [],
+        'confidence': 0.0, 'freshness': f'no admitted material in the last {days} days',
+        'unverified': ['仅表达回看窗口内没有候选材料；不断言该标的没有重要消息，窗口之外的材料不在本简报内'],
+        'extracted_at': now.isoformat(), 'source_count': 0}
+    from ..base import execution_versions
+    return publish_information_brief(store, payload, scope=ProjectionScope(kind='entity', id=symbol),
+        as_of=now.isoformat(), input_refs=[],
+        **execution_versions('research_extract', 'research-insight', template_source=__file__))
 
 
 def _publish_empty(store, symbol, inspected, *, deferred):

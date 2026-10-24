@@ -404,3 +404,25 @@ def test_cached_supporting_context_must_resolve_as_well_as_core_quote(monkeypatc
     monkeypatch.setattr(extract,'run_structured',lambda *a,**kw:pytest.fail('no model on corrupt cache'))
     with pytest.raises(ValueError,match='cache evidence'):
         target_research.run(store,'MSFT',config=CONFIG,since=NOW-timedelta(days=7),use_llm=True)
+
+
+def test_quiet_window_publishes_an_explicit_brief_instead_of_nothing(monkeypatch):
+    """ASML: its only recent filing left the look-back window, so there were no candidates.  The task used to
+    publish nothing, which the Dispatcher counted as a failed (missing) task."""
+    from ats.memory import get_store
+
+    store = get_store()
+    bound(monkeypatch)
+    monkeypatch.setattr(assemble, 'admitted_articles', lambda store, **kw: [])
+    monkeypatch.setattr(target_research, 'evaluation_now', lambda tz: NOW)
+    monkeypatch.setattr(extract, 'run_structured', lambda *a, **k: pytest.fail('no model call without material'))
+    report = target_research.run(store, 'MSFT', config=CONFIG, since=NOW - timedelta(days=7), use_llm=True)
+    assert report['status'] == 'published_no_candidates' and report['model_calls'] == 0
+    payload = store.get_task_projection(report['projection_id'])['payload']
+    assert payload['entity'] == 'MSFT' and payload['relevance'] == 'low' and payload['confidence'] == 0.0
+    assert not payload.get('source_evidence') and not payload.get('source_count')
+    assert '7 天' in payload['summary'] and payload['unverified']
+
+    # without a model the run still publishes nothing (selected_no_model path is unchanged)
+    offline = target_research.run(store, 'MSFT', config=CONFIG, since=NOW - timedelta(days=7), use_llm=False)
+    assert offline['projection_id'] == '' and offline['status'] == 'selected_no_model'

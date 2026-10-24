@@ -303,7 +303,8 @@ tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
 want = sys.argv[1] if len(sys.argv) > 1 else ""
 for r in json.load(sys.stdin):
     req = r["request"]; res = r.get("result") or {}
-    tasks = ",".join(req.get("requested_tasks", []))
+    # 被依赖带起来的任务（如 sector-review 里的 8 个 layer-review）不在 requested_tasks 里，也要能按名字搜到
+    tasks = ",".join(req.get("requested_tasks", []) + sorted({o.get("task_id", "") for o in res.get("outcomes", [])}))
     if want not in tasks:
         continue
     c = collections.Counter()

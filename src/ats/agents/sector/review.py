@@ -364,7 +364,7 @@ def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), ro
     for v in review.layer_verdicts:
         gaps = []
         if not v.has_claims:
-            gaps.append("本层无命题")
+            gaps.append("本层无命题（结论依据证据观察器）" if v.observer_claims else "本层无命题")
         if v.layer_key in missing_layers:
             gaps.append("层级投影缺失或不兼容，按标配保守处理")
         layers.append({"layer": v.layer_key, "status": v.layer_status,

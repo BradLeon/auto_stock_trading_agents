@@ -103,8 +103,9 @@ class SectorLayer(BaseModel):
     # Falsifiable propositions this layer is being tested on (docs/archive/CHAIN_EVIDENCE.md).
     # Human-maintained: agents may PROPOSE one, only a person adds it here.
     claims: list[ClaimDef] = Field(default_factory=list)
-    # Governed, read-only data Observers available through ``ats evidence layer``.
-    # These do not create Chain claims, witnesses, corroboration, or trade inputs.
+    # Governed, read-only data Observers, available through ``ats evidence layer`` and shown to the layer analyst as
+    # descriptive context (2026-10-25).  They do not create Chain claims, witnesses or corroboration; a layer with
+    # observers but no claims keeps its config-gap marker and a confidence ceiling of 0.5.
     evidence_observers: list[EvidenceObserverRef] = Field(default_factory=list)
 
     def roster(self, *roles: str) -> list[str]:
@@ -326,6 +327,10 @@ class LayerVerdict(BaseModel):
     # nothing was said this quarter": the first is a CONFIG gap that must stay visible,
     # the second is an EVIDENCE gap. Collapsing them hides the config gap forever.
     has_claims: bool = True
+    # Evidence observers (read-only, governed data) whose readings the layer analyst was given.  Distinct from
+    # claims: they are descriptive trends, not adjudicated propositions, so a layer with no claims but with
+    # observers is still a config gap -- only its confidence ceiling is higher.
+    observer_claims: list[str] = Field(default_factory=list)
     rationale: str = ""
     # Report-only (design D19): never feeds a verdict, a rank or a weight.
     candidate_claims: list[CandidateClaim] = Field(default_factory=list)

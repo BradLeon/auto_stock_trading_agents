@@ -92,7 +92,8 @@ def _layer_line(review, cfg, symbol: str) -> str:
         if v.cycle_position:
             bits.append(f"周期 {v.cycle_position}")
         if not v.has_claims:
-            bits.append("⚠️ 本层无命题，该结论没有议题证据支撑")
+            bits.append("⚠️ 本层无命题，该结论依据证据观察器的描述性趋势，没有议题证据支撑" if v.observer_claims
+                        else "⚠️ 本层无命题，该结论没有议题证据支撑")
         if v.reversal_triggers:
             bits.append("反转看: " + "；".join(v.reversal_triggers[:2]))
         return "; ".join(bits)

@@ -604,3 +604,85 @@ def test_sector_skill_limits_macro_and_factset_to_final_comparison():
     assert "不能回头修改某层的配置、信心、逐票判断或证据链" in text
     assert "GICS 行业直接当成" in text
     assert "未正式发布" in text and "shadow" in text and "过期" in text
+
+
+# --------------------------------------------------------------------------- #
+# 证据观察器：本层无命题但有受治理数据的描述性趋势（L1）
+# --------------------------------------------------------------------------- #
+def _observers(production="expanding", commercial="expanding", extra=None):
+    packets = [
+        {"status": "ok", "claim_id": "ai_core_production_workflow_penetration",
+         "axis_overview": [{"axis_id": "enterprise_breadth", "axis_label": "企业采用广度",
+                            "trend_status": production},
+                           {"axis_id": "task_production", "axis_label": "任务生产化",
+                            "trend_status": "insufficient_history"}]},
+        {"status": "ok", "claim_id": "ai_frontier_labs_commercialization", "section_status": commercial},
+        {"status": "ok", "claim_id": "ai_frontier_raw_capability", "a": {"benchmarks": []}, "b": {"benchmarks": []}},
+    ]
+    return {"status": "ok", "packets": packets + list(extra or [])}
+
+
+def test_observer_anchors_take_direction_only_from_each_observers_own_trend():
+    support, contrary, used = layer_review.observer_anchors(_observers(production="contracting"))
+    assert support == ["ai_frontier_labs_commercialization:Frontier AI Labs 收入"]
+    assert contrary == ["ai_core_production_workflow_penetration:企业采用广度"]
+    assert used == ["ai_core_production_workflow_penetration", "ai_frontier_labs_commercialization",
+                    "ai_frontier_raw_capability"]            # raw capability is shown, but anchors nothing
+    assert layer_review.observer_anchors(None) == ([], [], [])
+
+
+def test_layer_without_claims_may_follow_observer_trends_but_stays_below_claim_backed_confidence():
+    v = layer_review._to_verdict(_layer(claims=[]), _view(layer_status="expanding", confidence=0.95),
+                                 has_claims=False, cross_ok=True, observers=_observers())
+    assert v.layer_status == "expanding"
+    assert v.confidence == layer_review.OBSERVER_ONLY_CONFIDENCE_CAP == 0.5
+    assert v.has_claims is False                               # still a config gap, and still marked as one
+    assert "本层无命题" in v.rationale and "证据观察器" in v.rationale
+    assert v.observer_claims == ["ai_core_production_workflow_penetration",
+                                 "ai_frontier_labs_commercialization", "ai_frontier_raw_capability"]
+
+
+def test_a_direction_without_an_observer_trend_behind_it_becomes_unclear():
+    flat = _observers(production="stable", commercial="stable")
+    up = layer_review._to_verdict(_layer(claims=[]), _view(layer_status="expanding", confidence=0.6),
+                                  has_claims=False, cross_ok=True, observers=flat)
+    down = layer_review._to_verdict(_layer(claims=[]), _view(layer_status="contracting", confidence=0.6),
+                                    has_claims=False, cross_ok=True, observers=flat)
+    steady = layer_review._to_verdict(_layer(claims=[]), _view(layer_status="steady", confidence=0.6),
+                                      has_claims=False, cross_ok=True, observers=flat)
+    assert (up.layer_status, down.layer_status, steady.layer_status) == ("unclear", "unclear", "steady")
+
+
+def test_without_usable_observers_a_layer_with_no_claims_is_still_blind():
+    v = layer_review._to_verdict(_layer(claims=[]), _view(layer_status="expanding", confidence=0.95),
+                                 has_claims=False, cross_ok=True, observers={"status": "ok", "packets": []})
+    assert v.layer_status == "steady" and v.confidence <= layer_review.BLIND_CONFIDENCE_CAP
+    assert v.observer_claims == []
+
+
+def test_context_shows_observers_and_rewrites_the_blind_paragraph(monkeypatch):
+    from ats.agents.evidence import analyst_context
+
+    monkeypatch.setattr(analyst_context, "build_layer_analyst_context",
+                        lambda result: {"schema_version": analyst_context.SCHEMA_VERSION, "observers": []})
+    layer = _layer(claims=[])
+    with_obs = layer_review.build_context(_cfg(layer), layer, observers=_observers())
+    assert "本层证据观察器" in with_obs and "不合成为单一分数" in with_obs and "confidence ≤0.5" in with_obs
+    assert "本层无命题（配置缺口）" in with_obs and "不要写成「证据缺失」" in with_obs
+    without = layer_review.build_context(_cfg(layer), layer)
+    assert "本层证据观察器" not in without and "confidence ≤0.3" in without
+
+
+def test_an_unreadable_observer_is_absent_not_a_crash(monkeypatch):
+    from ats.agents.evidence import layer_runner
+
+    layer_review._OBSERVER_CACHE.clear()
+
+    def boom(**kwargs):
+        raise RuntimeError("dataset unreadable")
+
+    monkeypatch.setattr(layer_runner, "run_registered_layer_observers", boom)
+    layer = _layer(claims=[], evidence_observers=[{"claim_id": "ai_core_production_workflow_penetration",
+                                                   "runner": "ai_production_penetration"}])
+    assert layer_review.observer_evidence(_cfg(layer), layer) is None
+    assert layer_review.observer_evidence(_cfg(_layer()), _layer()) is None      # no observers declared

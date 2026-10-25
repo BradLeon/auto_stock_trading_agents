@@ -50,6 +50,16 @@ OBSERVER_RUNNER_EXTENSIONS: dict[str, tuple[str, LayerObserver]] = {
 }
 
 
+# The structured datasets each observer reads.  Used only to tell whether the layer's evidence changed (data vintage),
+# so that the layer analyst is rebuilt when new data arrives and reused when it did not.
+OBSERVER_DATASETS: dict[str, tuple[str, ...]] = {
+    PRODUCTION_CLAIM_ID: ("ai_enterprise_adoption_us", "ai_worker_adoption_us", "ai_work_adoption",
+                          "ramp_ai_adoption", "ramp_ai_spend"),
+    COMMERCIALIZATION_CLAIM_ID: ("frontier_ai_labs_revenue", "openrouter_rankings_daily"),
+    RAW_CAPABILITY_CLAIM_ID: ("frontier_ai_capability_benchmarks", "frontier_ai_public_model_cards"),
+}
+
+
 def _configured_observers(
     observer_refs: list[Any],
 ) -> tuple[dict[str, LayerObserver], dict[str, Any] | None]:

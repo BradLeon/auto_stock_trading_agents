@@ -641,6 +641,57 @@ derived:
         attempts: 2
         backoff_seconds: [300, 1800]
       semantics: governed observer readings as re-checkable neutral observations (speaker, concept, direction, evidence line); a reading with insufficient history produces none, an unchanged reading is not re-stored
+    chain_regional_kr_exports_weekly:
+      # 2026-10-25: the Korea / Taiwan export and DRAM contract-price series reach the chain evidence ledger only
+      # through `chain-source-collect`; no schedule ran it, so their observations stopped on 2026-08-12 while the
+      # structured ingest jobs above kept appending measurement points. Weekly is enough for a monthly print.
+      # The collect step refreshes the Bank of Korea levels itself, so the lease names both source ids.
+      enabled: true
+      sources: [kr_semiconductor_exports, kr_ecos_exports]
+      schedule: weekly
+      weekday: monday
+      at: "09:30"
+      timezone: UTC
+      command: ats data chain-source-collect --source kr_semiconductor_exports
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 3}   # no model call; the agency refresh is the only network use
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly series as re-checkable neutral observations (yoy / mom direction by formula); an unchanged print stores nothing new
+    chain_regional_tw_exports_weekly:
+      # Same shape as the Korea job: the lease names the chain source and the structured source it refreshes.
+      enabled: true
+      sources: [tw_ic_exports, tw_mof_exports]
+      schedule: weekly
+      weekday: monday
+      at: "09:30"
+      timezone: UTC
+      command: ats data chain-source-collect --source tw_ic_exports
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 3}   # no model call; the agency refresh is the only network use
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly series as re-checkable neutral observations (yoy / mom direction by formula); an unchanged print stores nothing new
+    chain_regional_dram_price_weekly:
+      # TrendForce's public contract-price table, fetched directly by the adapter.
+      enabled: true
+      sources: [dram_contract_price]
+      schedule: weekly
+      weekday: monday
+      at: "09:30"
+      timezone: UTC
+      command: ats data chain-source-collect --source dram_contract_price
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 3}   # no model call; the agency refresh is the only network use
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly series as re-checkable neutral observations (yoy / mom direction by formula); an unchanged print stores nothing new
     macro_theme_news_daily:
       # 2026-10-16: the Macro review used to run these Tavily queries during analysis (TARGET
       # §12.1). They are the theme queries of config/macro.yaml, run here and admitted as

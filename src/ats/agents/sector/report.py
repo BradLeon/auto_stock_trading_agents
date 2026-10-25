@@ -114,7 +114,7 @@ def _layer_verdict_section(review: SectorReview, cfg: SectorConfig, pead: set) -
         label = next((ly.label for ly in cfg.layers if ly.key == key), key)
         flags = []
         if not v.has_claims:
-            flags.append("**无命题**（配置缺口）" + ("；依据证据观察器" if v.observer_claims else ""))
+            flags.append("**无命题**（配置缺口）")
         if not v.cross_section_applicable:
             flags.append("截面不适用")
         budget = basket_by_key[key].layer_cap if key in basket_by_key else budgets.get(key)
@@ -164,7 +164,6 @@ def render_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=
     lines = [f"# 🤖 {layer.label}（{cfg.label}）— 层级分析（{verdict.as_of:%Y-%m-%d}）", ""]
     lines += _section_conclusion(verdict, layer, cfg, basket, pead)
     lines += _section_claim_evidence(common, by_claim, verdict)
-    lines += _section_observers(layer, cfg, verdict)
     lines += _section_cross_section(layer, basket, relative, by_claim, rows)
     lines += _section_name_rationale(verdict, pead)
     lines += _section_candidates(verdict)
@@ -190,8 +189,7 @@ def _section_conclusion(verdict, layer, cfg, basket, pead) -> list[str]:
             f"资金分配由行业分析师依据本层投影另行给出，不在此报告内"]
     flags = []
     if not verdict.has_claims:
-        flags.append("**本层无命题**（配置缺口，不是本季没人发声）"
-                     + ("；结论依据证据观察器的描述性趋势，不是命题裁决" if verdict.observer_claims else ""))
+        flags.append("**本层无命题**（配置缺口，不是本季没人发声）")
     if not verdict.cross_section_applicable:
         flags.append("**截面不适用**（可比样本 <2，名次不是发现）")
     if flags:
@@ -242,10 +240,9 @@ def _budget_derivation(verdict, cap: float, budget: float | None) -> str:
 def _section_claim_evidence(common, by_claim, verdict) -> list[str]:
     lines = ["## 二、议题证据链", ""]
     if not verdict.has_claims:
-        basis = ("上面的结论依据下一节的证据观察器（描述性趋势），没有议题证据链支撑。" if verdict.observer_claims
-                 else "上面的结论只来自快照与判据笔记，没有议题证据支撑。")
         return lines + ["⚠️ **本层没有任何命题** —— 这是**配置缺口**（该建的命题还没建），"
-                        "不是本季没人发声。" + basis, ""]
+                        "不是本季没人发声。上面的结论只来自快照与判据笔记，没有议题证据支撑。",
+                        ""]
     if not common:
         return lines + ["本层有命题，但本期**没有一条产出结论** —— 这是**证据缺口**"
                         "（本季没人发声），与「本层无命题」不同。", ""]
@@ -276,26 +273,6 @@ def _section_claim_evidence(common, by_claim, verdict) -> list[str]:
                 lines.append(f"| {POLARITY_MARK.get(j.polarity, '・')} | {j.speaker or '—'} "
                              f"| {j.concept or '—'} | {j.reason or '—'} |")
             lines.append("")
-    return lines
-
-
-def _section_observers(layer, cfg, verdict) -> list[str]:
-    """The governed evidence observers the layer analyst read, as one line each (full review: `ats evidence layer`)."""
-    if not verdict.observer_claims:
-        return []
-    from ..evidence.layer_runner import _observer_conclusion
-    from ..layer.layer_review import observer_evidence
-
-    result = observer_evidence(cfg, layer)
-    lines = ["## 证据观察器", "",
-             "> 受治理数据的只读观察；描述性趋势，不是命题裁决，不合成单一分数。层分析师把它们作为状态判断的"
-             "方向依据（本层无命题时信心上限 0.5）。", ""]
-    if result is None:
-        return lines + ["⚠️ 本次生成报告时观察器读取失败；结论所依据的读数见层分析投影。", ""]
-    for packet in result.get("packets") or []:
-        label, status, conclusion = _observer_conclusion(packet)
-        lines.append(f"- **{label}**（`{status}`）：{conclusion}")
-    lines += ["", f"完整审阅文档（方法卡、血缘、图表）：`ats evidence layer --sector {cfg.name} --layer {layer.key}`", ""]
     return lines
 
 

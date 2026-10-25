@@ -43,9 +43,7 @@ def build_context(cfg: SectorConfig, verdicts: list[LayerVerdict], *,
             f" · 周期：{v.cycle_position or '—'}",
         ]
         if not v.has_claims:
-            block.append("> ⚠️ 本层**无命题**（配置缺口），结论依据证据观察器的描述性趋势（非命题裁决）——"
-                         "把它当作「只有描述性证据」，不是「测过」。" if v.observer_claims else
-                         "> ⚠️ 本层**无命题**（配置缺口），结论仅来自快照与判据笔记——"
+            block.append("> ⚠️ 本层**无命题**（配置缺口），结论仅来自快照与判据笔记——"
                          "把它当作「还没测过」，不是「测过且中性」。")
         if not v.cross_section_applicable:
             block.append("> ⚠️ 本层截面不适用（可比样本 <2），没有层内排序信息。")

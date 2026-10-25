@@ -77,8 +77,7 @@ packet = observe_ai_production_penetration(
 `evidence_observers` 中已启用声明，绝不会为了方便顺带运行同一 sector 的其他 L1–L8 层。
 `config/sectors/ai_hardware.yaml` 的 `L1_app` 已将本命题声明为
 `ai_core_production_workflow_penetration / ai_production_penetration`；这与该层的 `claims`
-分开，后者仍只服务公司证人、归因和 Chain workflow。
-2026-10-25 起，层级分析师（Dispatcher 的 `layer-review`）会把本层已启用的 `evidence_observers` 的紧凑 Analyst 上下文作为**描述性背景**读入：它们仍不创建命题、证人或 corroboration；本层无命题时，状态方向必须有观察器自身的 expanding/contracting 趋势支撑，信心上限 0.5（有命题的层仍按命题裁决）。层级数据版本包含这些数据集的入库轮次，新数据到来时该层重算。其他已配置但尚未接入 Observer 的 layer
+分开，后者仍只服务公司证人、归因和 Chain workflow。其他已配置但尚未接入 Observer 的 layer
 返回 `no_registered_observers`，而不会被 L1 的结果替代。`ai-production` 只是此命题的兼容快捷入口，仍先经同一配置声明验证。默认 Markdown 运行会持久化审阅文档并打印路径；`--format json` 保持机器接口。
 
 输出依次展示本 Observer 专属 `methodology_card`、四序列、职业任务组合已确认生产化覆盖的分布、分布尾部完整披露、按 Usage Share 排列的高流量典型使用单位 TOP10、指标公式、facts、warnings、snapshot manifest 和图表 descriptors。覆盖率至少 50% 的职业不是典型样本：它仅表示该职业 O*NET 任务清单中，公开数据能同时确认符合代理的任务数达到一半，并不表示一半员工、工时或完整工作流已经 AI 化。没有三个连续、同 methodology、同 threshold/derivation regime 的月份，`history_status` 必为 `insufficient_history`；可以报告单月比较，不能称为持续趋势。当前受治理样本只有 2026-04、2026-05 两个月，正属于这一情形。

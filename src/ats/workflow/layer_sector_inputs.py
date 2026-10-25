@@ -121,29 +121,6 @@ def layer_vintage(sector: str, layer_key: str) -> list[str]:
     refs = [f"evidence:{layer.key}:{evidence['observations']}@{digest(evidence['ids'])}"]
     refs += [f"knowledge:{note['path']}@{str(note['content_hash'])[:16]}" for note in packet["notes"]]
     refs += [f"knowledge-missing:{item['path']}:{item['reason']}" for item in packet["missing"]]
-    if getattr(layer, "evidence_observers", None):
-        # The governed observers the layer analyst reads (L1).  Their datasets are fixed by code
-        # (`OBSERVER_DATASETS`), and the vintage is each dataset's count of ingestion runs that admitted rows and the newest one's
-        # time: a new print or a revision moves it, and nothing else does.  (Running the observers here would take ~40 s and write a
-        # snapshot manifest on every call.)  An unreadable dataset contributes nothing.
-        from ..agents.evidence.layer_runner import OBSERVER_DATASETS
-        from ..data.products import get_platform_data_products
-
-        wanted = sorted({dataset for ref in layer.evidence_observers if getattr(ref, "enabled", True)
-                         for dataset in OBSERVER_DATASETS.get(str(getattr(ref, "claim_id", "")), ())})
-        products = get_platform_data_products(readonly=True)
-        try:
-            for dataset in wanted:
-                try:
-                    # runs that admitted rows: a new print or a revision is one more such run
-                    count, newest = products.structured.conn.execute(
-                        "SELECT COUNT(*), MAX(completed_at) FROM structured_ingestion_runs "
-                        "WHERE dataset_id=? AND accepted>0", (dataset,)).fetchone()
-                except Exception:  # noqa: BLE001
-                    continue
-                refs.append(f"observer-data:{dataset}:{count}@{str(newest or '')[:19]}")
-        finally:
-            products.structured.close()
     return refs
 
 

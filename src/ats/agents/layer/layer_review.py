@@ -40,9 +40,6 @@ log = logging.getLogger("ats.agents.layer.layer_review")
 # the two "nothing to go on" cases it was (no claims vs. claims that said nothing).
 BLIND_STATUS = "steady"
 BLIND_CONFIDENCE_CAP = 0.3
-# A layer with no claims but with governed evidence observers is not blind: it has descriptive trends (adoption,
-# monetisation, capability).  It is still not adjudicated by claims, so the ceiling stays below the 0.6 default.
-OBSERVER_ONLY_CONFIDENCE_CAP = 0.5
 
 # 中文标签仅用于报告渲染；枚举本身保持英文，与 LayerAnalysisPayload 一致。
 STATUS_CN = {"expanding": "扩张", "steady": "平稳", "contracting": "收缩",
@@ -53,85 +50,8 @@ def _now() -> datetime:
     return evaluation_now(timezone.utc)
 
 
-_OBSERVER_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
-_OBSERVER_CACHE_SECONDS = 900.0          # one layer run reads them for the prompt and again for the report
-
-
-def observer_evidence(cfg: SectorConfig, layer) -> dict | None:
-    """Run the layer's registered, read-only evidence observers (governed data products only).
-
-    None when the layer declares none, or when they cannot be read: an unreadable observer is a gap, and the layer
-    then falls back to exactly the claims-only behaviour (blind when it has no claims), never a crash.
-    """
-    if not getattr(layer, "evidence_observers", None):
-        return None
-    import time
-
-    key = (cfg.name, layer.key)
-    cached = _OBSERVER_CACHE.get(key)
-    if cached and time.monotonic() - cached[0] < _OBSERVER_CACHE_SECONDS:
-        return cached[1]
-    from ..evidence.layer_runner import run_registered_layer_observers
-
-    try:
-        result = run_registered_layer_observers(
-            sector=cfg.name, sector_label=cfg.label, layer=layer.key, layer_label=layer.label,
-            observer_refs=layer.evidence_observers, as_of=_now())
-    except Exception as exc:  # noqa: BLE001 - see docstring
-        log.warning("layer %s: evidence observers unreadable (%s): treated as absent", layer.key, exc)
-        return None
-    if result.get("status") == "ok" and result.get("packets"):
-        _OBSERVER_CACHE[key] = (time.monotonic(), result)
-        return result
-    return None
-
-
-def observer_anchors(result: dict | None) -> tuple[list[str], list[str], list[str]]:
-    """(supportive, contrary, claim ids used) -- direction only from each observer's own governed trend status.
-
-    Production adoption reports a trend per axis; commercialisation reports a section status.  Raw capability
-    describes the model frontier, not demand for this layer, so it is shown to the analyst but anchors nothing.
-    """
-    supportive: list[str] = []
-    contrary: list[str] = []
-    used: list[str] = []
-    for packet in (result or {}).get("packets") or []:
-        if packet.get("status") != "ok":
-            continue
-        claim_id = str(packet.get("claim_id") or "")
-        used.append(claim_id)
-        directions = []
-        if claim_id == "ai_core_production_workflow_penetration":
-            directions = [(str(a.get("axis_label") or a.get("axis_id") or claim_id), a.get("trend_status"))
-                          for a in packet.get("axis_overview") or []]
-        elif claim_id == "ai_frontier_labs_commercialization":
-            directions = [("Frontier AI Labs 收入", packet.get("section_status"))]
-        for label, status in directions:
-            if status == "expanding":
-                supportive.append(f"{claim_id}:{label}")
-            elif status == "contracting":
-                contrary.append(f"{claim_id}:{label}")
-    return supportive, contrary, used
-
-
-def _observer_block(result: dict) -> str:
-    from ..evidence.analyst_context import build_layer_analyst_context, render_analyst_llm_input
-
-    context = build_layer_analyst_context(result)
-    return (
-        "## 本层证据观察器（受治理数据；描述性趋势，不是命题裁决）\n"
-        "规则：\n"
-        "1. 几个观察器并列阅读，**不合成为单一分数**，也不做跨来源数值计算；\n"
-        "2. 这是本层需求端的证据：其中明确的 expanding / contracting 趋势可以作为状态方向的依据，"
-        "但 rationale 里必须写明依据哪个观察器的哪个读数；\n"
-        "3. 观察器标为“尚未验证 / 历史不足 / 未披露”的维度（留存、单位经济、缺失月份）"
-        "**不得写成已验证**，缺失不是零；\n"
-        "4. 它们不是命题裁决：本层没有命题时，confidence ≤0.5。\n\n"
-        + render_analyst_llm_input(context))
-
-
 def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = None,
-                  snapshot_block: str = "", assessments=None, observers: dict | None = None) -> str:
+                  snapshot_block: str = "", assessments=None) -> str:
     """Assemble ONE layer's context. Never includes another layer's material, and never
     includes macro."""
     from ...data.products import sector_inputs as industry
@@ -145,14 +65,7 @@ def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict 
 
     common_block, relative_block = assemble.layer_evidence_blocks(
         cfg, layer, assessments)
-    if not layer.claims and observers:
-        parts.append(
-            "## ⚠️ 本层无命题（配置缺口）\n"
-            "本层的 claims 列表是空的——这是**配置缺口**，不是本季没人发声。rationale 里必须显式写明"
-            "「本层无命题」，**不要写成「证据缺失」**。\n"
-            "本层另有证据观察器（见下一节）：状态判断可以依据它们明确的方向性读数，并说明依据的是观察器的"
-            "描述性趋势；没有观察器方向依据时取 steady。confidence ≤0.5。")
-    elif not layer.claims:
+    if not layer.claims:
         # A config gap, not an evidence gap. Saying "证据不足" here would file the
         # missing claims under "the industry was quiet this quarter" — and then nobody
         # ever goes looking for them.
@@ -168,9 +81,6 @@ def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict 
             "与「本层无命题」不同。状态判断取 steady、confidence ≤0.3，并说明是证据缺失。"))
         if relative_block:
             parts.append(relative_block)
-
-    if observers:
-        parts.append(_observer_block(observers))
 
     notes = list(dict.fromkeys(layer.structure_notes.values()))
     if notes:
@@ -267,9 +177,8 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
             log.warning("layer %s: claim assessment failed (%s): treated as an evidence gap", layer.key, exc)
             assessments = []
 
-    observers = observer_evidence(cfg, layer)
     ctx = build_context(cfg, layer, basket=basket, prior=prior,
-                        snapshot_block=snapshot_block, assessments=assessments, observers=observers)
+                        snapshot_block=snapshot_block, assessments=assessments)
     try:
         view: LayerVerdictView = run_structured("layer_analyst", LayerVerdictView, ctx,
                                                 skill_slug="layer-analyst")
@@ -280,7 +189,7 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
     verdict = _to_verdict(layer, view, has_claims,
                           bool(basket is not None and basket.rows
                                and basket.cross_section_applicable),
-                          assessments=assessments, observers=observers)
+                          assessments=assessments)
     if store is not None:
         _publish_projection(store, layer, verdict, workflow_run_id=workflow_run_id,
                             input_refs=input_refs, data_vintage_refs=data_vintage_refs,
@@ -352,15 +261,13 @@ def projection_extras(layer, verdict: LayerVerdict, assessments=None) -> dict:
                               "silent_witnesses": list(a.silent_witnesses)[:8], "note": (a.note or "")[:200]})
     gaps = []
     if not verdict.has_claims:
-        gaps.append("本层没有声明命题（配置缺口）" + ("；结论另依据证据观察器的描述性趋势" if verdict.observer_claims else ""))
+        gaps.append("本层没有声明命题（配置缺口）")
     if not verdict.cross_section_applicable:
         gaps.append("本层可比样本不足，没有层内排序")
     extras = {"cycle_position": verdict.cycle_position, "has_claims": verdict.has_claims,
               "reversal_triggers": list(verdict.reversal_triggers)[:6], "entities": entities,
               "cross_section": cross, "common_evidence": common[:8], "divergent_evidence": divergent[:8],
               "gaps": gaps}
-    if verdict.observer_claims:
-        extras["evidence_observers"] = list(verdict.observer_claims)
     if readings:
         extras["cross_section_basis"] = "evidence_readings"
         extras["cross_section_coverage"] = f"{len(readings)}/{len(members)} members read" if members else ""
@@ -400,7 +307,7 @@ def _publish_projection(store, layer, verdict: LayerVerdict, *, workflow_run_id:
 
 
 def _to_verdict(layer, view: LayerVerdictView, has_claims: bool,
-                cross_ok: bool, assessments=None, observers: dict | None = None) -> LayerVerdict:
+                cross_ok: bool, assessments=None) -> LayerVerdict:
     status = view.layer_status if view.layer_status in LAYER_STATUSES else BLIND_STATUS
     if view.layer_status not in LAYER_STATUSES:
         log.warning("layer %s: unknown layer_status %r -> %s",
@@ -414,25 +321,9 @@ def _to_verdict(layer, view: LayerVerdictView, has_claims: bool,
     contrary = [a for a in common if a.verdict in ("contradicted", "falsified")]
     any_conclusion = [a for a in common if a.verdict != "unknown"]
 
-    obs_support, obs_contrary, obs_used = observer_anchors(observers)
-
     # Blind rounds are capped in CODE, not by asking nicely in the prompt: a confident
     # status with no claims behind it is exactly the shape that would move a budget.
-    if not has_claims and obs_used:
-        # No claims, but governed observers: a direction needs an observer trend pointing the same way, and the
-        # ceiling is lower than a claim-backed layer's because nothing adjudicated it.
-        conf = min(conf, OBSERVER_ONLY_CONFIDENCE_CAP)
-        if status == "expanding" and not obs_support:
-            log.warning("layer %s: expanding without an observer trend -> unclear", layer.key)
-            status = "unclear"
-        elif status == "contracting" and not obs_contrary:
-            log.warning("layer %s: contracting without an observer trend -> unclear", layer.key)
-            status = "unclear"
-        marker = "本层无命题"
-        if marker not in rationale:
-            rationale = (f"【{marker}——配置缺口；结论依据证据观察器的描述性趋势"
-                         f"（{'、'.join(obs_used)}），不是命题裁决】{rationale}")
-    elif not has_claims:
+    if not has_claims:
         status = BLIND_STATUS
         conf = min(conf, BLIND_CONFIDENCE_CAP)
         marker = "本层无命题"
@@ -493,4 +384,4 @@ def _to_verdict(layer, view: LayerVerdictView, has_claims: bool,
         claim_attributions=list(view.claim_attributions),
         reversal_triggers=list(view.reversal_triggers),
         name_calls=kept, cross_section_applicable=cross_ok, has_claims=has_claims,
-        observer_claims=obs_used, rationale=rationale)
+        rationale=rationale)

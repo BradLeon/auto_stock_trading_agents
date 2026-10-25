@@ -170,12 +170,10 @@ class LayerAnalysisPayload(_Payload):
     common_evidence: list[EvidenceItem] = Field(default_factory=list)
     divergent_evidence: list[DivergentEvidence] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
-    evidence_observers: list[str] = Field(default_factory=list)   # claim ids of the observers the layer read
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
         "cycle_position", "has_claims", "reversal_triggers", "entities", "cross_section",
-        "cross_section_basis", "cross_section_coverage", "common_evidence", "divergent_evidence", "gaps",
-        "evidence_observers")
+        "cross_section_basis", "cross_section_coverage", "common_evidence", "divergent_evidence", "gaps")
 
     @field_validator("findings", mode="before")
     @classmethod

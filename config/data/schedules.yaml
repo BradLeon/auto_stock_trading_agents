@@ -621,6 +621,26 @@ derived:
         attempts: 2
         backoff_seconds: [600, 1800]
       semantics: extract the latest confirmed earnings document per name into neutral chain evidence; a document already extracted is never read again; nothing is scored or traded
+    chain_l1_governed_evidence_daily:
+      # 2026-10-25: L1 (AI application layer) claims are fed by its three evidence observers (production adoption,
+      # frontier-lab commercialisation, raw capability), read through `data/sources/governed_observer.py`. They run
+      # after the datasets they read are refreshed (Ramp / frontier revenue / OpenRouter / benchmarks all land by
+      # 08:00 UTC) and before the daily layer review. No model call: the observers' own trend rules give direction.
+      # One job per source (own ledger row, retry, freshness); `entities` here lists chain source ids.
+      enabled: true
+      source: chain_l1_governed_observers
+      entities: [l1_ai_production_adoption, l1_frontier_labs_commercialization, l1_frontier_raw_capability]
+      schedule: daily
+      at: "09:00"
+      timezone: UTC
+      command: ats data chain-source-collect --source {entity}
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 1}   # no model or network call: the observers read admitted data products
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: governed observer readings as re-checkable neutral observations (speaker, concept, direction, evidence line); a reading with insufficient history produces none, an unchanged reading is not re-stored
     macro_theme_news_daily:
       # 2026-10-16: the Macro review used to run these Tavily queries during analysis (TARGET
       # §12.1). They are the theme queries of config/macro.yaml, run here and admitted as

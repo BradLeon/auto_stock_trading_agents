@@ -36,7 +36,7 @@ TEST_ONLY_PERSISTENT_SOURCES: frozenset[str] = frozenset({
     # catalog sources, so the lease has to name them. A new one surfaces as a
     # PermissionError in the test that uses it — add it here, do not widen the
     # check.
-    "tf", "tw_ic_exports", "kr", "ibkr", "model_price",
+    "tf", "tw_ic_exports", "kr", "ibkr", "model_price", "l1_ai_production_adoption",
 })
 
 

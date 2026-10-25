@@ -462,6 +462,9 @@ class SourceDef(BaseModel):
     observation_type: ObservationType = "regulatory"
     cadence: str = "monthly"
     concepts: list[str] = Field(default_factory=list)
+    # Further entities this source speaks for when its points carry their own `entity` (governed observers: one
+    # source, several data providers).  They bind to claims through `concepts` exactly like `entity` does.
+    entities: list[str] = Field(default_factory=list)
     # Trend and turning point are different facts: yoy filters seasonality, mom turns
     # first. Declaring both emits one observation each rather than blending them into a
     # single number, which would erase the leading signal.
@@ -561,3 +564,13 @@ class SeriesPoint(BaseModel):
     yoy: float | None = None              # fractional change, not percent
     mom: float | None = None
     published_at: date | None = None      # when the agency released it
+    # Governed-observer points (adapter `governed_observer`) arrive already interpreted: the observer owns the
+    # trend rule, so a point may carry its own direction, speaker, concept and rendered evidence line instead of
+    # the yoy/mom formula and the source-wide entity/stance.  Empty means "use the source's defaults".
+    entity: str = ""
+    stance: str = ""
+    observation_type: str = ""
+    concept: str = ""
+    direction: str = ""
+    evidence_span: str = ""
+    source_entity: str = ""

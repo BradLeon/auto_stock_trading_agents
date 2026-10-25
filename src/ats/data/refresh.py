@@ -38,8 +38,8 @@ _SAFE_UNSTRUCTURED_ACTIONS = {"article-ingest", "document-ingest", "fixed-ingest
 # Derived jobs produce governed facts from already-admitted documents or from provider
 # reads that have no ingestion-run record (chain evidence extraction). They are scheduled
 # and ledgered like the others but have no structured/unstructured catalog source.
-_SAFE_DERIVED_ACTIONS = {"evidence-observe", "macro-news-collect", "calendar-refresh", "calendar-finalize",
-                         "factset-semantic-refresh"}
+_SAFE_DERIVED_ACTIONS = {"evidence-observe", "chain-source-collect", "macro-news-collect", "calendar-refresh",
+                         "calendar-finalize", "factset-semantic-refresh"}
 # Calendar refreshes report `partial` when one source's batch carries a quarantined or conflicting candidate;
 # the other candidates were published, so the run counts as succeeded and the reason names what was held back.
 _PARTIAL_OK_DERIVED = {"calendar-refresh", "calendar-finalize"}

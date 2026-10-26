@@ -31,28 +31,255 @@
 
 ### 0.3 准备（每开一个新终端做一次）
 
-每开一个新终端，先执行下面这一行。
+把下面整段粘贴进终端。它只定义一组以 `g0_` 开头的查看函数（关掉终端就没了，不改任何文件），把机器可读的输出整理成表格。第一行让这个终端认得命令后面的 `# 注释`（你的 zsh 默认不认）。**手册里其余命令都在这个终端里运行**，在别的终端里运行时请去掉行尾的 `# …` 注释。
 
 ```bash
-cd /Users/liuchao/Code/trading/auto_stock_trading_agents && source openspec/changes/retire-legacy-and-migration-tooling/g0-tools.zsh
-```
+setopt interactivecomments
+cd /Users/liuchao/Code/trading/auto_stock_trading_agents && source .venv/bin/activate
+export G0_TZ=Asia/Taipei
 
-这一行会进入仓库目录、激活 `.venv`、设置台北时区，并定义全部 `g0_` 函数（关掉终端就没了，不改任何文件）。函数的源码在 [`g0-tools.zsh`](g0-tools.zsh)，**不要把它们整段复制粘贴进终端**：长文本粘贴进终端时可能丢字符（出现过 `lambd"failed" …` 这种缺了一截的语法错误）。手册里其余命令都在这个终端里运行；如果在别的终端里运行带 `# …` 注释的命令，需要先执行一次 `setopt interactivecomments`。
+# 刷新任务：每个任务最近一次的窗口、结果、原因、完成时间，以及近 7 天失败次数。可选参数：任务名片段
+g0_refresh() {
+  python -m ats.data.refresh status | G0_JOBS="$(python -m ats.data.refresh validate)" python -c '
+import json, os, sys
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+jobs = json.loads(os.environ["G0_JOBS"])["jobs"]
+d = json.load(sys.stdin)
+want = sys.argv[1] if len(sys.argv) > 1 else ""
+def local(s):
+    return datetime.fromisoformat(s).astimezone(tz).strftime("%m-%d %H:%M") if s else "-"
+week = datetime.now(timezone.utc) - timedelta(days=7)
+print("控制器最近一次定时运行:", local(d.get("last_tick", "")), "| launchd 已加载:", d.get("launchd_loaded"))
+print(f"{"任务":48} {"窗口":10} {"最近结果":14} {"原因":28} {"完成(台北)":11} 近7天失败")
+for job in jobs:
+    if want not in job:
+        continue
+    rows = [r for r in d["runs"] if r["job_id"] == job]
+    if not rows:
+        print(f"{job:48} {"-":10} {"从未运行":14}")
+        continue
+    last = max(rows, key=lambda r: r["claimed_at"])
+    fails = sum(1 for r in rows if r["status"] == "failed" and datetime.fromisoformat(r["claimed_at"]) >= week)
+    print(f"{job:48} {last["window_date"]:10} {last["status"]:14} {last["reason_code"][:28]:28} {local(last["completed_at"]):11} {fails}")
+' "$@"
+}
+
+# 来源采集与文档准入：每个来源最近一次的结果与入库数。可选参数：来源名片段
+g0_sources() {
+  ats data health | python -c '
+import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+def local(s):
+    try: return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(tz).strftime("%m-%d %H:%M")
+    except ValueError: return s[:16] or "-"
+d = json.load(sys.stdin)
+want = sys.argv[1] if len(sys.argv) > 1 else ""
+print("== 采集记录（最近一次，时间为台北）")
+for r in d["structured_sources"]:
+    if want in r["source_id"]:
+        print(f"{r["source_id"][:42]:42} {r["entity"][:6]:6} {r["status"]:17} 更新 {local(r["updated_at"])}  发现 {r["discovered"]} 准入 {r["accepted"]} 隔离 {r["quarantined"]}  {r["reason_codes"][:60] if r["reason_codes"] not in ("{}", "[]") else ""}")
+print("== 文档库（按来源）")
+for r in d["document_sources"]:
+    if want in r["source"] and not r["source"].startswith(("file:", "tavily:")):
+        print(f"{r["source"][:42]:42} 文档 {r["documents"]:4}  失败 {r["failures"]:3}  最近抓取 {local(r["latest_fetch"])}")
+' "$@"
+}
+
+# 结构化采集记录：某个来源最近的入库与“上游有没有新一期”检查。参数：来源 id、条数（默认 5）
+g0_ingest() {
+  ats data ingestion-history --source "$1" --limit "${2:-5}" | python -c '
+import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+rows = json.load(sys.stdin) or []
+if not rows: print("（没有入库记录）")
+def when(r): return r.get("started_at") or r.get("checked_at") or ""
+for r in sorted(rows, key=when, reverse=True):
+    at = datetime.fromisoformat(when(r)).astimezone(tz).strftime("%m-%d %H:%M")
+    if r["record_type"] == "source_check":
+        same = "已入库" if r.get("latest_upstream_identity") == r.get("latest_ingested_identity") else "上游有未入库版本"
+        print(f"{at}  {r["dataset_id"][:34]:34} 检查 {r["status"]:10} 上游最新期 {r.get("latest_available_period") or "-"}（{same}）")
+    else:
+        reasons = r.get("reason_codes_json") or ""
+        print(f"{at}  {r["dataset_id"][:34]:34} 入库 {r["status"]:10} 发现 {r["discovered"]:>4} 准入 {r["accepted"]:>4} 隔离 {r["quarantined"]:>3} 未变 {r["unchanged"]:>4}  {reasons if reasons not in ("{}", "[]") else ""}"[:190])
+'
+}
+
+# 公司研究包里某只票的共识预期、财务、文档与事实（只看最新）。参数：标的
+g0_company() {
+  ats data company "$1" | python -c '
+import json, sys
+d = json.load(sys.stdin)
+m = d.get("measurements", [])
+cons = [x for x in m if x["dataset_id"] == "market_consensus"]
+fin = [x for x in m if x["dataset_id"] == "company_financials"]
+if cons:
+    latest = max(x["known_at"] for x in cons)
+    print(f"共识预期（{cons[0]["source_id"]}，最近一次入库 {latest[:16]} UTC）:")
+    for x in sorted((x for x in cons if x["known_at"] == latest and x["metric_id"].rsplit(".", 1)[-1] in ("mean", "low", "high", "median")), key=lambda x: (x["metric_id"], x["period"])):
+        print(f"   {x["metric_id"]:44} {x["period"]:12} {x["value"]}")
+else:
+    print("共识预期: 无")
+if fin:
+    last = max(x["period"] for x in fin)
+    rows = [x for x in fin if x["period"] == last]
+    print(f"财务（{fin[0]["source_id"]}）：最新报告期 {last}，{len(rows)} 项指标，入库 {max(x["known_at"] for x in rows)[:16]} UTC")
+    for x in sorted(rows, key=lambda x: (x["metric_id"], x.get("period_basis") or ""))[:16]:
+        print(f"   {x["metric_id"]:44} {x.get("period_basis") or "":8} {x["value"]:,} {x.get("unit") or ""}")
+else:
+    print("财务: 无")
+docs = d.get("documents", [])
+print(f"文档 {len(docs)} 篇；事实 {len(d.get("facts", []))} 条")
+'
+}
+
+# 财报/宏观日历：各来源最近一次刷新、待裁决冲突数
+g0_calendar() {
+  ats events status | python -c '
+import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+q = json.load(sys.stdin)["quality"]
+print("日历总体:", q["status"], "| 待裁决冲突候选:", q["conflicting_candidates"], "| 身份隔离:", q["identity_quarantine"])
+for src, r in sorted(q.get("latest_by_source", {}).items()):
+    at = datetime.fromisoformat(r["started_at"]).astimezone(tz).strftime("%m-%d %H:%M")
+    err = (r.get("error_code") + " " + r.get("error_detail", ""))[:90] if r.get("error_code") else ""
+    print(f"{src:28} {at}  {r["status"]:9} 发现 {r["discovered"]:>3} 发布 {r["published"]:>3} 冲突 {r["conflicts"]:>2}  {err}")
+'
+}
+
+# 财报日历上某只票的事件状态（planned=计划中，released=已发布且有准入材料）。参数：标的
+g0_event() {
+  ats events status | python -c '
+import json, sys
+sym = sys.argv[1].upper()
+for e in json.load(sys.stdin)["events"]:
+    if e["event_type"] == "earnings" and f":{sym}:" in e["event_id"]:
+        conf = e.get("release_confirmations") or []
+        mats = [m.get("kind") for c in conf for m in c.get("materials", [])]
+        print(f"{e["event_id"]:36} {e["event_date"]} {e.get("local_time") or "":5} {e["status"]:9} 版本 v{e["event_version"]}  准入材料 {mats or "无"}")
+' "$1"
+}
+
+# 一个分析师读的数据产品现在是否合格（只检查，不记日志、不发飞书）。参数：information|fundamental|layer|macro|sector|technical
+g0_product() {
+  ats consumer-cutover health --consumer-id "$1" | python -c '
+import json, sys
+d = json.load(sys.stdin)
+print("分析师:", d.get("consumer_id"), "| 结论:", d.get("status"))
+for p in d.get("problems", []): print("  问题:", str(p)[:200])
+for w in d.get("warnings", [])[:15]: print("  提醒:", str(w)[:200])
+'
+}
+
+# 数据产品健康与读路由的变化记录（最近 30 行）
+g0_product_log() {
+  ats consumer-cutover log | python -c '
+import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+for r in json.load(sys.stdin)[-30:]:
+    at = datetime.fromisoformat(r["recorded_at"]).astimezone(tz).strftime("%m-%d %H:%M")
+    health = json.loads(r.get("health_json") or "{}").get("status", "")
+    print(f"{at}  {r["consumer_id"]:12} {r["action"]:9} 路由 {r["from_route"]}→{r["to_route"]:7} 检查 {health or "-":7} {r["actor"][:22]:22} {r["reason"][:60]}")
+'
+}
+
+# 工作流运行：时间、任务、范围、状态、各标的结果（新算/复用/阻断/失败）。参数：条数（默认 20）、工作流名片段
+g0_runs() {
+  ats workflow runs --limit "${1:-20}" | python -c '
+import json, os, sys, collections
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+want = sys.argv[1] if len(sys.argv) > 1 else ""
+for r in json.load(sys.stdin):
+    req = r["request"]; res = r.get("result") or {}
+    tasks = ",".join(req.get("requested_tasks", []))
+    if want not in tasks:
+        continue
+    c = collections.Counter()
+    bad = []
+    for o in res.get("outcomes", []):
+        kind = "复用" if o.get("reused") else {"succeeded": "新算"}.get(o["status"], o["status"])
+        c[kind] += 1
+        if o["status"] != "succeeded":
+            bad.append(f"{o["task_id"]}/{o["scope"]["id"]}: {o["status"]} {o.get("detail", "")[:90]}")
+    start = datetime.fromisoformat(r["started_at"]).astimezone(tz).strftime("%m-%d %H:%M") if r.get("started_at") else "-"
+    print(f"{start}  {tasks:30} {req["scope"]["kind"]}:{req["scope"]["id"]:14} {r["status"]:10} " + " ".join(f"{k}{v}" for k, v in c.items()))
+    for line in bad[:8]:
+        print("        └", line)
+    for m in res.get("missing_requirements", [])[:3]:
+        print("        缺口:", str(m)[:120])
+' "${2:-}"
+}
+
+# 触发记录：定时/事件/手动触发及其状态。参数：工作流 id（必填）、条数（默认 20）
+g0_triggers() {
+  ats workflow triggers --workflow-id "$1" --limit "${2:-20}" | python -c '
+import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+def local(s):
+    return datetime.fromisoformat(s).astimezone(tz).strftime("%m-%d %H:%M") if s else "-"
+for r in json.load(sys.stdin):
+    what = local(r["scheduled_for"]) + " 应触发" if r["scheduled_for"] else r["event_id"][:46]
+    print(f"{r["kind"]:8} {what:46} {r["status"]:17} {r["reason_code"][:32]:32} 记录于 {local(r["created_at"])}")
+'
+}
+
+# 研究产出（投影）：每个标的/层/组合最近一份的时间与摘要。参数：角色（见下）、可选标的
+#   information_brief | fundamental_expectation_update | fundamental_event_review | layer_analysis
+#   sector_allocation | macro_review | technical_review
+g0_latest() {
+  sqlite3 -readonly -json var/ats.sqlite "SELECT projection_id, scope_kind, scope_id, as_of, valid_until, status, model_version, payload FROM task_projection_envelopes WHERE agent_role='$1' AND ('${2:-}'='' OR scope_id='${2:-}') ORDER BY created_at DESC LIMIT 400" | python -c '
+import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo(os.environ.get("G0_TZ", "Asia/Taipei"))
+def local(s):
+    try: return datetime.fromisoformat(s).astimezone(tz).strftime("%m-%d %H:%M")
+    except ValueError: return s or "-"
+raw = sys.stdin.read().strip()
+seen = set()
+for r in (json.loads(raw) if raw else []):
+    key = (r["scope_kind"], r["scope_id"])
+    if key in seen: continue
+    seen.add(key)
+    p = json.loads(r["payload"] or "{}")
+    text = p.get("summary") or p.get("headline") or p.get("notes") or p.get("driver") or p.get("regime") or ""
+    print(f"{r["scope_id"][:14]:14} 产出 {local(r["as_of"])}  有效至 {local(r["valid_until"])}  {r["status"]:9} {r["projection_id"][:12]}  {str(text)[:70]}")
+'
+}
+
+# 打开一份投影的全文（逐字段）。参数：投影 id（g0_latest 输出里的 12 位编号）
+g0_show() {
+  sqlite3 -readonly -json var/ats.sqlite "SELECT agent_role, scope_id, as_of, input_refs, data_vintage_refs, model_version, prompt_version, content_hash, payload FROM task_projection_envelopes WHERE projection_id LIKE '$1%' LIMIT 1" | python -c '
+import json, sys, textwrap
+raw = sys.stdin.read().strip()
+if not raw: sys.exit("没有找到这份投影")
+r = json.loads(raw)[0]
+print(f"角色 {r["agent_role"]} · 范围 {r["scope_id"]} · 时点 {r["as_of"]} · 模型 {r["model_version"]} · 提示词 {r["prompt_version"]}")
+for label, key in (("依赖的上游投影/材料", "input_refs"), ("依赖的数据版本", "data_vintage_refs")):
+    refs = json.loads(r[key] or "[]")
+    print(f"{label}: {len(refs)} 项", "；".join(str(x)[:60] for x in refs[:4]), "…" if len(refs) > 4 else "")
+for k, v in json.loads(r["payload"]).items():
+    text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, indent=1)
+    print(f"\n【{k}】"); print(textwrap.fill(text, 110) if isinstance(v, str) else text[:3000])
+'
+}
+
+```
 
 > 说明：`g0_sources`、`g0_product technical` 要几十秒（前者扫全部来源，后者会实时取一次行情，不是模型请求）。`g0_latest`/`g0_show` 用 `sqlite3 -readonly` 只读打开 `var/ats.sqlite`。
-
-### 0.3.1 现在就重采（会写数据）
-
-不想等例行窗口时，用 `g0_rerun` 批量重采（写真实数据，不发模型请求）：
-
-```bash
-g0_rerun network --dry      # 先看会跑哪些：10-21 圈定的受网络断连影响的任务
-g0_rerun network            # 确认后执行；也可以 g0_rerun U / S / D，或写任务名片段，如 g0_rerun consensus_ tw_ic
-g0_history consensus_tsm 3  # 看某个任务每个窗口的结果、尝试次数和错误原文
-```
-
-- 每次重采有自己的窗口标签（如 `2026-10-21~manual-20261021T143000`），同一天可以反复跑，不占用例行窗口；未启用的任务不会跑。
-- 数据是追加新版本：上游有变化就写入新的一版并成为最新，没变化记 `no_change`；旧版本保留作审计，不会被删除或改写。
 
 ### 0.4 建议顺序与时长
 
@@ -114,48 +341,20 @@ g0_history consensus_tsm 3  # 看某个任务每个窗口的结果、尝试次�
 **怎么看：**
 
 ```bash
-g0_refresh                     # 全部 44 个任务一张表（§1–§3 都用它），带“来源”列
-g0_sources                     # 全部来源：①最近一次运行 ②候选累计去向 ③文档库存量（三段口径见下表）
-g0_product information          # 信息分析师读的整包文档是否合格（见 P01）。只认 6 个分析师名，不认来源名
+g0_refresh                     # 全部 44 个任务一张表（§1–§3 都用它）
+g0_sources                     # 每个来源最近一次采集结果 + 文档库每个来源的篇数与最近抓取时间
+g0_product information          # 信息文档包检查：会查文档的版本、哈希、来源是否齐全（见 P01）
 ```
 
-单看某一项：`g0_refresh` 和 `g0_sources` 都既认**任务名**也认**来源名**的片段，例如 `g0_refresh ibkr_news`、`g0_sources trendforce`、`g0_sources sec_edgar`、`g0_refresh defeatbeta_earnings_transcript`。输入的词匹配不上时会明确提示，不会静默。
-
-**任务 ↔ 来源 ↔ 谁读它**
-
-| 任务（`g0_refresh` 的“任务”列） | 来源（`g0_sources` 里的名字） | 合格检查归谁 |
-|---|---|---|
-| `ibkr_news_daily` | `ibkr_news`、`yfinance_live_news` | information |
-| `trendforce_news_weekly` | `trendforce_news` | information |
-| `semianalysis_newsletter_weekly` | `semianalysis` | information |
-| `defeatbeta_transcript_daily` | `defeatbeta_earnings_transcript` | information |
-| `defeatbeta_sec_index_daily` | `defeatbeta_sec_filing_index`（文档库里叫 `defeatbeta`） | information |
-| `sec_official_body_daily` | `sec_edgar_filing_body`（另有 `sec_official:*` 行，是各公司的官方披露探测） | information |
-| `macro_theme_news_daily` | `macro_theme_news` | macro |
-| `ai_hardware_knowledge_daily` | `ai_hardware_knowledge_corpus` | layer（检查各层知识笔记是否已发布） |
-
-来源没有各自的合格检查：`g0_product information` 查的是 11 只标的近几天**所有来源合在一起**的已准入文档（有没有、版本/哈希/来源是否齐全），不区分是哪个来源来的。所以某个来源停了，它不一定报错。U 类每一项靠 `g0_refresh` + `g0_sources` 判断，P01 只是兜底。
-
-**怎么读 `g0_sources` 的三段（口径不同，数字不会互相对应）：**
-
-| 段 | 回答的问题 | 各数字的意思 |
-|---|---|---|
-| ① 最近一次运行 | 最近这一次跑了什么 | **发现**=来源这次列出的候选条数；**准入**=其中新放行的；**隔离**=被质量门拒绝的；已经入库且没变的候选两者都不算（所以 `no_change` 时发现很多、准入 0 是正常的） |
-| ② 候选累计去向 | 历次运行的候选最后都去了哪 | accepted 放行、no_change 没变、deferred 因预算延后、quarantined 隔离（括号里是原因）、pending_human_review 等你审 |
-| ③ 文档库存量 | 库里现在有什么 | **文档**=已存进库的篇数；**存库失败**=已存入、但标记为抓取失败的行数；**库内最新一篇存入**=库里最近一份文档的存入时间，不是任务最近运行时间 |
-
-几个容易误读的地方：
-- **来源连不上时，准入 0、隔离 0、存库失败 0 同时出现是正常的。** 没拿到正文就谈不上合格不合格，也没有一行入库，所以哪个数字都不动。要看 ① 里的状态（`failed`、`source_unavailable`、`unreachable`）。
-- **`defeatbeta_sec_filing_index` 的发现、准入都是 100+，库里却只有二三十篇文档。** 它只登记申报的目录条目，不下载正文，状态 `succeeded / index_metadata_only`，不产生发布的文档。
-- **`defeatbeta_earnings_transcript` 发现 111、准入 0**：111 篇早就在库里，没变，所以不重复准入。
-- **库内最新一篇存入很旧**（例如知识库 09-25、电话会稿 10-16）：说明那之后没有新内容，不等于任务停了。任务有没有在跑看 `g0_refresh` 的“完成”时间。
+单看某一项：`g0_refresh ibkr_news`、`g0_sources trendforce` 这样加关键词。
 
 **怎么读输出：**
-- `g0_refresh` 的“最近结果”：`succeeded`（有新数据）、`no_change`（跑了但上游没新东西，也算正常）、`failed`、`从未运行`。“窗口”是这次该跑的那一期。
+- `g0_refresh` 的"最近结果"：`succeeded`（有新数据）、`no_change`（跑了但上游没新东西，也算正常）、`failed`、`从未运行`。"窗口"是这次该跑的那一期。
+- `g0_sources` 上半部分是"这次采集发现几篇、准入几篇、隔离几篇"；下半部分是"文档库里累计几篇、最近一次抓到是什么时候"。
 
 **通用通过标准：**
 1. 最近一个应跑窗口的结果是 `succeeded` 或 `no_change`；
-2. 有新内容的来源，文档库篇数随时间增长、库内最新一篇存入时间与频率相符（日更的不超过 2 天，周更的不超过 8 天）；`no_change` 的来源看 `g0_refresh` 的“完成”时间；
+2. 文档库篇数随时间增长，最近抓取时间与频率相符（日更的不超过 2 天，周更的不超过 8 天）；
 3. P01 的检查结论是 `ok`，也就是准入文档的版本、哈希、来源齐全；
 4. 抽读 1–2 篇：用 §5 的 W01 打开一份信息简报，看它引用的文档是否真实、时间是否对得上。
 
@@ -295,8 +494,21 @@ g0_runs 30                              # 最近 30 次运行：任务、范围�
 g0_runs 60 technical-review             # 只看某个工作流
 g0_runs 150 sector-review               # 周度工作流离现在远，要把条数放大才翻得到
 g0_latest information_brief             # 每个标的最近一份产出的时间与摘要
-g0_show d865de3edfa8                    # 打开一份产出的全文（把编号换成 g0_latest 输出里的 12 位编号）
+g0_show <12位编号>                       # 打开一份产出的全文
 ```
+
+
+# g0_runs()  # 工作流运行：时间、任务、范围、状态、各标的结果（新算/复用/阻断/失败）。参数：条数（默认 20）、工作流名片段
+# g0_triggers()  #触发记录：定时/事件/手动触发及其状态。参数：工作流 id（必填）、条数（默认 20）
+# g0_latest() 
+# 研究产出（投影）：每个标的/层/组合最近一份的时间与摘要。参数：角色（见下）、可选标的
+#   information_brief | fundamental_expectation_update | fundamental_event_review | layer_analysis
+#   sector_allocation | macro_review | technical_review
+# g0_show() 
+# 打开一份投影的全文（逐字段）。参数：投影 id（g0_latest 输出里的 12 位编号）
+
+
+
 
 **怎么读 `g0_runs`：** 状态 `complete`=全部完成；`incomplete`=有标的缺产出（下面 └ 行写了是谁、为什么）；`failed`=整次失败。"新算 N"是这次真的请求了模型的标的数，"复用 N"是直接用了上一份产出的标的数。
 

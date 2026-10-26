@@ -2,7 +2,7 @@
 
 > 执行顺序见 design.md D3：第 1 组（R0）的只读部分和第 2 组（RP 报告接续）在你的 G0 之前完成，它们不删任何东西；第 3 组是你亲自做的 G0；第 4–8 组等 G0 通过；第 9 组只登记，等交易路径切换。
 > 第 5、7 组按 design.md D6 执行：旧手动入口与负责人 legacy 模式一并退役（2026-10-21 用户确认）。
-> 2026-10-21 用户另已确认：可读报告要恢复（D9）、命题治理命令与知识库校验命令保留、R4 缩小为 3 个模块。清点依据见 `inventory.md`。
+> 2026-10-21 用户另已确认：可读报告要恢复（D9）、命题治理命令与知识库校验命令保留、R4 缩小为 3 个模块（10-26 增补 `pead/research`，共 4 项；`risk_validator` 只清退 `apply_guardrails`）。清点依据见 `inventory.md`。
 
 ## 1. R0 清点与登记
 
@@ -63,9 +63,9 @@
 
 ## 7. R4 只被旧入口用到的旧分析代码（门 G0，依赖第 5、6 组）
 
-- [ ] 7.1 对 `agents.risk_manager`、`agents.risk_validator.apply_guardrails`、`agents.pead.monitor` 逐个做 V1–V3（`pead.monitor` 在 5.3 之后）。验证：`ats retirement decide` 判可退出
-- [ ] 7.2 删除这三个模块及其测试，同步冻结面与资格清单。验证：受影响测试、架构守卫、assurance_surface 通过
-- [ ] 7.3 重跑调用图确认没有新增的「只被已删除入口引用」的模块，结果写进 inventory.md；`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,research}`、`runtime/digest.py`、`runtime/evidence_observe.py`、`agents/evidence/observer.py` 等明确保留。验证：inventory.md 有重跑结论
+- [ ] 7.1 对 `agents.risk_manager`、`agents.risk_validator.apply_guardrails`、`agents.pead.monitor`、`agents.pead.research` 逐个做 V1–V3（`pead.monitor`、`pead.research` 在 5.3 之后）。验证：`ats retirement decide` 判可退出
+- [ ] 7.2 删除这四项（risk_validator 只删已退役的 `apply_guardrails`，保留 `review_guardrails` 及其测试，等 R5 决定）及其测试，同步冻结面与资格清单。验证：受影响测试、架构守卫、assurance_surface 通过
+- [ ] 7.3 重跑调用图确认没有新增的「只被已删除入口引用」的模块，结果写进 inventory.md；`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,outputs}`、`runtime/digest.py`、`runtime/evidence_observe.py`、`agents/evidence/observer.py` 等明确保留。验证：inventory.md 有重跑结论
 - [ ] 7.4 TEST_BASELINE 与 runbook 记录本批，本组复验 V4–V6。验证：同 4.8
 
 ## 8. 规格与运维文档同步

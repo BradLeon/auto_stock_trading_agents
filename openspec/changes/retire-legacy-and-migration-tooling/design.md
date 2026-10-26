@@ -145,8 +145,9 @@ flowchart TD
 | `agents.risk_manager` | `agents/risk_manager.py` | 无任何引用，只有 1 个测试 |
 | `agents.risk_validator.apply_guardrails` | `agents/risk_validator.py` | 无任何引用，只有 1 个测试；即登记里已有的条目 |
 | `agents.pead.monitor` | `agents/pead/monitor.py` | 只被 `ats pead monitor/watch` 用；R1 删命令后进入 |
+| `agents.pead.research` | `agents/pead/research.py` | 2026-10-26 增补：迁移期薄代理，只被 `ats pead research` 用；R1 删命令后进入 |
 
-明确**保留**（有新路径或交易路径的生产使用方）：`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,research}`、`runtime/digest.py`、`agents/evidence/observer.py`、`runtime/evidence_observe.py`（被 `chain_evidence_daily` 调用）、`agents/sector/{context,structure,rotation}`、`chain/*`、`runtime/server.py`、`graph/checkpoint.py`。
+明确**保留**（有新路径或交易路径的生产使用方）：`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,outputs}`、`runtime/digest.py`、`agents/evidence/observer.py`、`runtime/evidence_observe.py`（被 `chain_evidence_daily` 调用）、`agents/sector/{context,structure,rotation}`、`chain/*`、`runtime/server.py`、`graph/checkpoint.py`。
 
 **R5 交易路径相关**（外部门：交易路径切换；本 change 只登记，不执行）
 

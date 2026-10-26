@@ -28,7 +28,7 @@
 
 - [x] 3.1 你逐项核验 `verification.md` 并填写结论、核验人、日期。验证：`ats retirement gate --show`（1.5 完成前以人工汇总为准）显示全部通过，或列出未通过项（78 项全部通过，10-27）
 - [x] 3.2 核验发现的新路径缺陷登记为单独的修复任务，修复后复核通过。验证：verification.md 中没有「未通过」项；依赖未通过项的条目保持 pending（核验期间发现的缺陷多数当场修复，提交号见 verification.md「G0 结论」）
-- [ ] 3.3 记录 G0 结论（日期、范围、遗留且已接受的缺口，例如 SEC 不可达、ibkr_news 的 partial），提交 verification.md。验证：提交存在
+- [x] 3.3 记录 G0 结论（日期、范围、遗留且已接受的缺口，例如 SEC 不可达、ibkr_news 的 partial），提交 verification.md。验证：提交存在（2026-10-27 用户确认并签字，G0 通过）
 
 ## 4. R2 研究侧切换期工具退役（门 G0）
 

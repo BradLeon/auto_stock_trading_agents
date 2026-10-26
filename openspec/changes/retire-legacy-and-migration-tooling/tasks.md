@@ -9,11 +9,11 @@
 - [x] 1.1 生成退役清点报告 `inventory.md`：调用图、命令行清单、每个候选模块的生产调用方。验证：design.md D4 列出的每个条目和候选在报告里都有结论（已完成，a1c89e3）
 - [x] 1.2 旧手动入口副作用对照，写入 inventory.md 第四节。验证：R1 每个旧入口都有「新路径已承担 / 需要补 / 不需要」的结论（已完成，a1c89e3）
 - [x] 1.3 生成 G0 人工核验手册 `g0-runbook.md` 与结果记录 `verification.md`（由独立会话生成），并加入「可读报告」一项（第 2 组完成后）。验证：清单覆盖 `python -m ats.data.refresh validate` 列出的全部刷新任务、`config/workflow/research_schedules.yaml` 与 `event_routes.yaml` 的全部条目（g0-runbook.md 已于 10-27 提交；核验期间新增的 6 个刷新任务记在 verification.md「G0 结论」的范围补充）
-- [ ] 1.4 扩展退役登记格式：新增 `kind`、`group`、`depends_on`、`gate` 字段，加载时校验无环、无悬空依赖、门取值合法（**G0 之后做**）。验证：新增单元测试覆盖成环、悬空、未知门三种失败，以及合法登记的通过
-- [ ] 1.5 `ats retirement decide` 增加依赖与门的检查，新增只读的 `ats retirement gate --show`（汇总 verification.md 的结论）（**G0 之后做**）。验证：测试覆盖「前序未完成 → 不可退出」「门未满足 → 不可退出」
-- [ ] 1.6 把 design.md D4 的全部条目写入 `config/workflow/legacy_retirement.yaml`：R1–R4 门为 G0，R5 门为 `trade_path_cutover`；未登记条目补齐替代实现、消费方、退出判据（**G0 之后做**）。验证：`ats retirement decide` 能列出全部条目及其阻塞原因，`openspec validate --all --strict` 通过
-- [ ] 1.7 修正登记错误：`pead_dossier` 移出待退项、改登记为基本面自有记录；`macro_reviews`、`technical_reviews` 补登记；8 条「登记已退役但未证明」标注为待补证（**G0 之后做**）。验证：登记加载通过，`ats retirement zero` 对这 8 条显示「待补证」而不是「清零」
-- [ ] 1.8 更新 `docs/PHASE_F_RETIREMENT_RUNBOOK.md`：写明新的分组、依赖与门，以及 G0 的位置（**G0 之后做**）。验证：runbook 中的条目数与登记处一致
+- [x] 1.4 扩展退役登记格式：新增 `kind`、`group`、`depends_on`、`gate` 字段，加载时校验无环、无悬空依赖、门取值合法（**G0 之后做**）。验证：新增单元测试覆盖成环、悬空、未知门三种失败，以及合法登记的通过（750fc13；成环、悬空、未知门/批次/类别三种失败与合法登记均有测试）
+- [x] 1.5 `ats retirement decide` 增加依赖与门的检查，新增只读的 `ats retirement gate --show`（汇总 verification.md 的结论）（**G0 之后做**）。验证：测试覆盖「前序未完成 → 不可退出」「门未满足 → 不可退出」（750fc13；`ats retirement decide` 带依赖与门，新增只读 `ats retirement gate [--show]`；现网读到 78 项通过、G0 已开）
+- [x] 1.6 把 design.md D4 的全部条目写入 `config/workflow/legacy_retirement.yaml`：R1–R4 门为 G0，R5 门为 `trade_path_cutover`；未登记条目补齐替代实现、消费方、退出判据（**G0 之后做**）。验证：`ats retirement decide` 能列出全部条目及其阻塞原因，`openspec validate --all --strict` 通过（8fb799a；登记 43 条，R1–R4 门 G0、R5 门 trade_path_cutover；`openspec validate --all --strict` 通过）
+- [x] 1.7 修正登记错误：`pead_dossier` 移出待退项、改登记为基本面自有记录；`macro_reviews`、`technical_reviews` 补登记；8 条「登记已退役但未证明」标注为待补证（**G0 之后做**）。验证：登记加载通过，`ats retirement zero` 对这 8 条显示「待补证」而不是「清零」（8fb799a；`pead_dossier` 移出待退项，补登记 `macro_reviews`、`technical_reviews`；8 条无法证明的在 `ats retirement zero` 显示“待补证”）
+- [x] 1.8 更新 `docs/PHASE_F_RETIREMENT_RUNBOOK.md`：写明新的分组、依赖与门，以及 G0 的位置（**G0 之后做**）。验证：runbook 中的条目数与登记处一致（8fe9733；runbook 新增第〇节，条目数取自登记处）
 
 ## 2. RP 可读报告接续（G0 之前，只新增产出）
 

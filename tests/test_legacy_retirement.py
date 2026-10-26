@@ -175,7 +175,17 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         # Observer responsibilities are explicitly merged into Layer; retaining
         # its retired tombstone preserves historical lineage and rejects reuse.
         "agent.evidence_observer",
+        # ── retire-legacy-and-migration-tooling（tasks 1.6、1.7）──
+        "macro_reviews", "technical_reviews",
+        "naming.consumer_cutover_cli", "legacy_entry.research_manual_commands",
+        "legacy_entry.research_owner_legacy_mode", "legacy_entry.evidence_commands",
+        "naming.migration_terms_in_docs",
+        "migration.batch_read_cutover", "migration.schedule_cutover", "migration.intake",
+        "migration.analysis_verification", "migration.dispatch_dedup",
+        "agents.risk_manager", "agents.pead.monitor", "agents.pead.research",
+        "migration.read_route_and_qualification", "migration.trade_cutover_tooling",
     }
+    expected.discard("pead_dossier")        # a fundamental-owned live record, not a retirement item (tasks 1.7)
     assert set(registry.identifiers()) == expected
     for stone in registry.tombstones():
         assert stone.replaced_by and stone.exit_condition
@@ -192,8 +202,7 @@ def test_phase_d_items_are_registered_with_complete_fields() -> None:
     pending = {
         "layer_verdict.allocation": "pending",
         "chief.legacy_table_direct_reads": "pending",
-        "pead_dossier": "pending",
-        "sector_reviews": "pending",
+        "sector_reviews": "pending",      # `pead_dossier` left this list on 2026-10-27: a live fundamental record (tasks 1.7)
     }
     for identifier, status in pending.items():
         stone = registry.tombstone(identifier)
@@ -289,3 +298,24 @@ def test_a_valid_dependency_graph_loads_and_reports_unmet_dependencies() -> None
     assert registry.unmet_dependencies("first") == ()
     assert registry.unmet_dependencies("second") == ()          # `first` has retired
     assert registry.unmet_dependencies("third") == ("second",)
+
+
+def test_every_entry_of_the_retirement_change_has_a_group_a_gate_and_known_dependencies() -> None:
+    """tasks 1.6: R1–R4 wait on G0, R5 on the external trade-path gate; nothing is left unplaced."""
+    from ats.workflow import legacy_retirement as mod
+
+    registry = mod.load_registry()
+    placed = [stone for stone in registry.tombstones() if stone.group]
+    assert {stone.group for stone in placed} == {"R1", "R2", "R3", "R4", "R5"}
+    for stone in placed:
+        assert stone.gate == ("trade_path_cutover" if stone.group == "R5" else "G0"), stone.identifier
+        assert stone.kind, stone.identifier
+    assert registry.tombstone("pead_dossier") is None and "pead_dossier" in registry.active()
+    assert registry.tombstone("macro_reviews") and registry.tombstone("technical_reviews")
+
+
+def test_unproven_retired_entries_read_as_awaiting_proof_not_as_cleared() -> None:
+    from ats.workflow import retirement_clearance as rc
+
+    text = rc.render_report([], [rc.ZeroVerdict(identifier="x", consumer="m", verdict=rc.PARTIAL, reason="no role id")])
+    assert "待补证" in text and "清零" not in text.split("| 条目 | 消费方 | 结论 | 说明 |")[1].split("\n")[2]

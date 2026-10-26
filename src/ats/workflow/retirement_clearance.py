@@ -512,6 +512,10 @@ def decide_entry(identifier: str, *,
                   "decided_at": _now()})
 
 
+# What the operator reads. `partial` is "registered as retired but nobody has proved the readers are gone": say so.
+_VERDICT_LABEL = {ZERO: "清零", NOT_ZERO: "未清零", PARTIAL: "待补证"}
+
+
 def render_report(decisions: Sequence[EntryDecision],
                   zero: Sequence[ZeroVerdict] = (),
                   reconcile: Sequence[ReconcileVerdict] = ()) -> str:
@@ -529,7 +533,7 @@ def render_report(decisions: Sequence[EntryDecision],
         lines += ["", "## 逐消费方清零", ""]
         lines += ["| 条目 | 消费方 | 结论 | 说明 |", "|---|---|---|---|"]
         for v in zero:
-            lines.append(f"| `{v.identifier}` | `{v.consumer}` | {v.verdict} | "
+            lines.append(f"| `{v.identifier}` | `{v.consumer}` | {_VERDICT_LABEL.get(v.verdict, v.verdict)} | "
                          f"{v.reason} |")
 
     if reconcile:

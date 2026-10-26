@@ -698,7 +698,7 @@ def retirement_command(args, *, parser) -> int:
                 by_gate.setdefault(tomb.gate, []).append(tomb.identifier)
         for gate_name, items in sorted(by_gate.items()):
             opened, why = rc.evaluate_gate(gate_name, g0=g0)
-            print(f"\n门 {gate_name}：{'已开' if opened else '未开'}，卡住 {len(items)} 条"
+            print(f"\n门 {gate_name}：{'已开' if opened else '未开'}，挂在这道门上的未退役条目 {len(items)} 条"
                   + ("" if opened else f"（{why}）"))
             if args.show:
                 for name in items:

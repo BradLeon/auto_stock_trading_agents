@@ -36,6 +36,13 @@ from ..config import REPO_ROOT
 REGISTRY_PATH = REPO_ROOT / "config" / "workflow" / "legacy_retirement.yaml"
 
 RetirementStatus = Literal["retired", "pending"]
+# What kind of thing is being retired, which batch it belongs to, and what has to be true first.  All three default to
+# "" so an entry registered before this existed still loads; `config/workflow/legacy_retirement.yaml` fills them in.
+RetirementKind = Literal["", "business", "migration_tooling", "migration_mechanism", "legacy_entry", "naming"]
+RetirementGroup = Literal["", "R1", "R2", "R3", "R4", "R5"]
+# `G0` is the manual verification of the new path (verification.md); `trade_path_cutover` is an external gate owned by
+# another change and is never satisfied from here.
+RetirementGate = Literal["", "G0", "trade_path_cutover"]
 ReadKind = Literal["ok", "retired", "not_found", "no_data"]
 
 # Distinct on purpose: a caller that cannot tell these apart will retry a retired
@@ -56,6 +63,23 @@ class RetirementConflictError(ValueError):
             "in-use entry cannot coexist — register the exit or withdraw the tombstone.")
 
 
+class RetirementDependencyError(ValueError):
+    """A dependency points at an entry that is not registered."""
+
+    def __init__(self, dangling: Mapping[str, Sequence[str]]) -> None:
+        self.dangling = {key: list(value) for key, value in dangling.items()}
+        detail = "; ".join(f"{key} -> {', '.join(value)}" for key, value in sorted(self.dangling.items()))
+        super().__init__(f"depends_on names entries that are not registered: {detail}")
+
+
+class RetirementCycleError(ValueError):
+    """The dependency graph has a cycle, so no entry on it could ever go first."""
+
+    def __init__(self, cycle: Sequence[str]) -> None:
+        self.cycle = list(cycle)
+        super().__init__("retirement dependencies form a cycle: " + " -> ".join(self.cycle))
+
+
 class RetirementTombstone(BaseModel):
     """Everything a later phase needs to know to actually remove something."""
 
@@ -72,6 +96,10 @@ class RetirementTombstone(BaseModel):
     consumers: tuple[str, ...] = ()
     consumer_zero_criterion: str = ""
     location: str = ""
+    kind: RetirementKind = ""
+    group: RetirementGroup = ""
+    depends_on: tuple[str, ...] = ()
+    gate: RetirementGate = ""
 
     @model_validator(mode="after")
     def _require_the_missing_condition(self) -> RetirementTombstone:
@@ -125,6 +153,7 @@ class RetirementRegistry:
             self.register(tombstone)
         self._active.update(active)
         self._validate_no_conflicts()
+        self._validate_dependencies()
 
     # --- registration ------------------------------------------------------ #
     def register(self, tombstone: RetirementTombstone) -> None:
@@ -146,7 +175,36 @@ class RetirementRegistry:
         if overlap:
             raise RetirementConflictError(overlap)
 
+    def _validate_dependencies(self) -> None:
+        """Dependencies must name registered entries and must not loop (checked at load, like the conflict check)."""
+        dangling = {name: [dep for dep in item.depends_on if dep not in self._tombstones]
+                    for name, item in self._tombstones.items()}
+        dangling = {name: deps for name, deps in dangling.items() if deps}
+        if dangling:
+            raise RetirementDependencyError(dangling)
+        state: dict[str, int] = {}                     # 1 = on the current path, 2 = done
+
+        def visit(name: str, path: list[str]) -> None:
+            if state.get(name) == 2:
+                return
+            if state.get(name) == 1:
+                raise RetirementCycleError([*path[path.index(name):], name])
+            state[name] = 1
+            for dep in self._tombstones[name].depends_on:
+                visit(dep, [*path, name])
+            state[name] = 2
+
+        for name in sorted(self._tombstones):
+            visit(name, [])
+
     # --- queries ----------------------------------------------------------- #
+    def unmet_dependencies(self, identifier: str) -> tuple[str, ...]:
+        """Registered dependencies of `identifier` that have not themselves retired yet."""
+        item = self._tombstones.get(identifier)
+        if item is None:
+            return ()
+        return tuple(dep for dep in item.depends_on if not self._tombstones[dep].may_exit)
+
     def tombstone(self, identifier: str) -> RetirementTombstone | None:
         return self._tombstones.get(identifier)
 
@@ -249,7 +307,9 @@ def registry_from_mapping(payload: Mapping[str, Any]) -> RetirementRegistry:
             missing_condition=row.get("missing_condition", ""),
             consumers=_as_tuple(row.get("consumers")),
             consumer_zero_criterion=row.get("consumer_zero_criterion", ""),
-            location=row.get("location", "")))
+            location=row.get("location", ""),
+            kind=row.get("kind", ""), group=row.get("group", ""),
+            depends_on=_as_tuple(row.get("depends_on")), gate=row.get("gate", "")))
     active = _as_tuple(payload.get("active"))
     registry = RetirementRegistry(tombstones, active)
     for row in payload.get("purge_scope") or []:

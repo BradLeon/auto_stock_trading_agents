@@ -36,7 +36,9 @@ deliberate, separate step.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence
 
@@ -112,6 +114,69 @@ class TombstoneVerdict:
         return {"identifier": self.identifier, "verdict": self.verdict,
                 "registered_status": self.registered_status,
                 "readable_by": list(self.readable_by), "reason": self.reason}
+
+
+# --- gates ------------------------------------------------------------------
+
+G0_VERIFICATION = Path(__file__).resolve().parents[3] / "openspec" / "changes" / \
+    "retire-legacy-and-migration-tooling" / "verification.md"
+_OPEN_VERDICTS = {"通过", "接受缺口", "不适用"}
+
+
+@dataclass
+class GateStatus:
+    """What the manual verification (G0) says today — read from verification.md, never written."""
+
+    gate: str
+    is_open: bool
+    reason: str
+    total: int = 0
+    counts: dict[str, int] = field(default_factory=dict)
+    not_open: tuple[str, ...] = ()
+    concluded: bool = False
+
+    def as_row(self) -> dict[str, Any]:
+        return {"gate": self.gate, "open": self.is_open, "reason": self.reason, "total": self.total,
+                "counts": dict(self.counts), "not_open": list(self.not_open), "concluded": self.concluded}
+
+
+def read_g0_gate(path: Path | str | None = None) -> GateStatus:
+    """G0 is open only when every item has a verdict that lets the retirement go ahead AND the conclusion is signed.
+
+    Open verdicts are 通过 / 接受缺口 / 不适用. 未通过 and an empty verdict both block: "not yet looked at" is not a pass.
+    """
+    target = Path(path) if path else G0_VERIFICATION
+    if not target.exists():
+        return GateStatus("G0", False, f"verification record not found: {target}")
+    text = target.read_text(encoding="utf-8")
+    rows = [(m.group(1), line.split("|")[3].strip()) for line in text.splitlines()
+            if (m := re.match(r"\| ([A-Z]\d{2}) \|", line)) and len(line.split("|")) > 4]
+    counts: dict[str, int] = {}
+    for _id, verdict in rows:
+        counts[verdict or "空"] = counts.get(verdict or "空", 0) + 1
+    not_open = tuple(item for item, verdict in rows if verdict not in _OPEN_VERDICTS)
+    conclusion = re.search(r"\*\*G0 结论：\*\*\s*(.*)", text)
+    concluded = bool(conclusion) and conclusion.group(1).strip().startswith("通过") \
+        and "不通过" not in conclusion.group(1)
+    if not rows:
+        return GateStatus("G0", False, "no verification rows found", 0, counts, (), concluded)
+    if not_open:
+        return GateStatus("G0", False, f"{len(not_open)} item(s) without an open verdict: {list(not_open)}",
+                          len(rows), counts, not_open, concluded)
+    if not concluded:
+        return GateStatus("G0", False, "every item has a verdict but the G0 conclusion is not signed",
+                          len(rows), counts, (), False)
+    return GateStatus("G0", True, "all items verified and the G0 conclusion is signed", len(rows), counts, (), True)
+
+
+def evaluate_gate(gate: str, *, g0: GateStatus | None = None) -> tuple[bool, str]:
+    """(open?, why-not). An entry with no gate is not gated; an external gate is never opened from here."""
+    if not gate:
+        return True, ""
+    if gate == "G0":
+        status = g0 or read_g0_gate()
+        return status.is_open, ("" if status.is_open else f"gate G0 not met: {status.reason}")
+    return False, f"external gate not met: {gate} (owned by another change, never opened from here)"
 
 
 @dataclass
@@ -390,7 +455,11 @@ def decide_entry(identifier: str, *,
                  reconcile_verdict: ReconcileVerdict | None = None,
                  window: str = WINDOW_REFUSED,
                  tombstone: TombstoneVerdict | None = None,
-                 required_uses: Sequence[str] = ()) -> EntryDecision:
+                 required_uses: Sequence[str] = (),
+                 unmet_dependencies: Sequence[str] = (),
+                 gate: str = "",
+                 gate_open: bool = True,
+                 gate_reason: str = "") -> EntryDecision:
     """12.6: what may be said about one entry today.
 
     Reports `retired` only when **all** criteria hold. Otherwise it stays
@@ -398,6 +467,11 @@ def decide_entry(identifier: str, *,
     reason an entry must not be quietly promoted on partial evidence.
     """
     missing: list[str] = []
+
+    if unmet_dependencies:
+        missing.append(f"depends on entries that have not retired: {list(unmet_dependencies)}")
+    if gate and not gate_open:
+        missing.append(gate_reason or f"gate {gate} not met")
 
     not_zero = [v.consumer for v in zero_verdicts if v.blocks_exit]
     partial = [v.consumer for v in zero_verdicts if v.verdict == PARTIAL]
@@ -428,6 +502,8 @@ def decide_entry(identifier: str, *,
         missing=tuple(missing),
         proposed_status="retired" if may_exit else "pending",
         evidence={"required_uses": list(required_uses),
+                  "unmet_dependencies": list(unmet_dependencies),
+                  "gate": gate, "gate_open": gate_open,
                   "zero": [v.as_row() for v in zero_verdicts],
                   "reconcile": reconcile_verdict.as_row()
                   if reconcile_verdict else None,

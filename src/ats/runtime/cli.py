@@ -668,17 +668,42 @@ def retirement_command(args, *, parser) -> int:
             print("no matching retirement entries")
             return 1
         decisions = []
+        g0 = rc.read_g0_gate(args.verification or None)
         for tomb in rows:
             zero = rc.verify_consumer_zero(
                 tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+            gate_open, gate_reason = rc.evaluate_gate(tomb.gate, g0=g0)
             decisions.append(rc.decide_entry(
                 tomb.identifier, zero_verdicts=zero,
                 window=rc.verify_rollback_window(
                     drilled=bool(args.drill_reference),
                     drill_reference=args.drill_reference or ""),
-                tombstone=rc.check_tombstone_behaviour(tomb.identifier, tomb.status)))
+                tombstone=rc.check_tombstone_behaviour(tomb.identifier, tomb.status),
+                unmet_dependencies=registry.unmet_dependencies(tomb.identifier),
+                gate=tomb.gate, gate_open=gate_open, gate_reason=gate_reason))
         print(rc.render_report(decisions))
         return 0 if all(d.may_exit for d in decisions) else 2
+
+    if action == "gate":
+        # Read-only summary of the manual verification (G0) plus which registry entries each gate holds back.
+        g0 = rc.read_g0_gate(args.verification or None)
+        print(f"G0：{'已开' if g0.is_open else '未开'}——{g0.reason}")
+        print(f"  核验项 {g0.total}；" + "；".join(f"{k} {v}" for k, v in sorted(g0.counts.items())))
+        if g0.not_open:
+            print(f"  未开放的项：{', '.join(g0.not_open)}")
+        print(f"  G0 结论{'已签字' if g0.concluded else '未签字'}")
+        by_gate: dict[str, list[str]] = {}
+        for tomb in registry.tombstones():
+            if tomb.gate and not tomb.may_exit:
+                by_gate.setdefault(tomb.gate, []).append(tomb.identifier)
+        for gate_name, items in sorted(by_gate.items()):
+            opened, why = rc.evaluate_gate(gate_name, g0=g0)
+            print(f"\n门 {gate_name}：{'已开' if opened else '未开'}，卡住 {len(items)} 条"
+                  + ("" if opened else f"（{why}）"))
+            if args.show:
+                for name in items:
+                    print(f"  - {name}")
+        return 0 if g0.is_open else 2
 
     parser.error(f"unknown action {action!r}")
 
@@ -4637,9 +4662,13 @@ def main(argv: list[str] | None = None) -> int:
     # mistyped flag away from firing a real cycle.
     rt = sub.add_parser(
         "retirement",
-        help="Phase F 消费者清零、数据对账与墓碑一致性（**只读，不改登记表**）")
+        help="退役：消费者清零、数据对账、墓碑一致性、依赖与门（G0）检查（**只读，不改登记表**）")
     rt.add_argument("action", choices=[
-        "zero", "reconcile", "tombstone", "fallback-precheck", "decide"])
+        "zero", "reconcile", "tombstone", "fallback-precheck", "decide", "gate"])
+    rt.add_argument("--show", action="store_true",
+                    help="gate: 列出每道门卡住的条目（只读）")
+    rt.add_argument("--verification", default="",
+                    help="decide/gate: G0 核验记录路径（默认 openspec 里的 verification.md）")
     rt.add_argument("--identifier", default="",
                     help="逗号分隔的登记条目 id（reconcile/tombstone 用单个）")
     rt.add_argument("--uses", default="",

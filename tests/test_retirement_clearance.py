@@ -284,3 +284,50 @@ def test_the_report_names_every_pending_entry_and_what_it_waits_on():
     assert "`sector_reviews`" in text
     assert "rollback not drilled" in text
     assert "只登记不退出" in text or "保持 pending" in text
+
+
+# --- retire-legacy-and-migration-tooling 1.5: dependencies and gates ----------------------------------------- #
+
+def _verification(tmp_path, rows, conclusion="通过"):
+    text = "\n".join(f"| {item} | 对象 | {verdict} | 证据 |" for item, verdict in rows)
+    path = tmp_path / "verification.md"
+    path.write_text(f"{text}\n\n- **G0 结论：** {conclusion}\n", encoding="utf-8")
+    return path
+
+
+def test_g0_is_open_only_when_every_item_has_an_open_verdict_and_the_conclusion_is_signed(tmp_path):
+    from ats.workflow import retirement_clearance as rc
+
+    ok = rc.read_g0_gate(_verification(tmp_path, [("U01", "通过"), ("U02", "接受缺口"), ("U03", "不适用")]))
+    assert ok.is_open and ok.total == 3 and ok.counts["接受缺口"] == 1
+
+    failed = rc.read_g0_gate(_verification(tmp_path, [("U01", "通过"), ("U02", "未通过")]))
+    assert not failed.is_open and failed.not_open == ("U02",)
+
+    blank = rc.read_g0_gate(_verification(tmp_path, [("U01", "通过"), ("U02", "")]))
+    assert not blank.is_open and blank.not_open == ("U02",)                  # not yet looked at is not a pass
+
+    unsigned = rc.read_g0_gate(_verification(tmp_path, [("U01", "通过")], conclusion="通过 / 不通过"))
+    assert not unsigned.is_open and "not signed" in unsigned.reason
+
+    assert not rc.read_g0_gate(tmp_path / "missing.md").is_open
+
+
+def test_an_external_gate_is_never_opened_from_here():
+    from ats.workflow import retirement_clearance as rc
+
+    opened, why = rc.evaluate_gate("trade_path_cutover", g0=rc.GateStatus("G0", True, "ok"))
+    assert not opened and "external gate" in why
+    assert rc.evaluate_gate("") == (True, "")
+
+
+def test_an_entry_with_an_unmet_dependency_or_a_closed_gate_cannot_be_decided_retired():
+    from ats.workflow import retirement_clearance as rc
+
+    clear = dict(window=rc.WINDOW_OK)
+    assert rc.decide_entry("a", **clear).may_exit
+    blocked_dep = rc.decide_entry("a", unmet_dependencies=["first"], **clear)
+    assert not blocked_dep.may_exit and "have not retired" in blocked_dep.reason
+    blocked_gate = rc.decide_entry("a", gate="G0", gate_open=False, gate_reason="gate G0 not met: 2 items", **clear)
+    assert not blocked_gate.may_exit and "gate G0 not met" in blocked_gate.reason
+    assert rc.decide_entry("a", gate="G0", gate_open=True, **clear).may_exit

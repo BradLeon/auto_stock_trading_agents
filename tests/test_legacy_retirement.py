@@ -239,3 +239,53 @@ def test_a_mapping_with_a_conflict_fails_to_build() -> None:
             "retired": [{"identifier": "x", "status": "retired",
                          "exit_condition": "done"}],
         })
+
+
+# --- retire-legacy-and-migration-tooling 1.4: kind / group / depends_on / gate -------------------------------- #
+
+from ats.workflow.legacy_retirement import RetirementCycleError, RetirementDependencyError  # noqa: E402
+
+
+def _pending(identifier: str, **kwargs) -> RetirementTombstone:
+    return _tombstone(identifier, status="pending", missing_condition="waiting", **kwargs)
+
+
+def test_the_new_fields_round_trip_and_default_to_empty() -> None:
+    plain = _tombstone("plain")
+    assert (plain.kind, plain.group, plain.gate, plain.depends_on) == ("", "", "", ())
+    registry = registry_from_mapping({"retired": [
+        {"identifier": "a", "status": "pending", "missing_condition": "x", "kind": "migration_tooling",
+         "group": "R2", "gate": "G0"},
+        {"identifier": "b", "status": "pending", "missing_condition": "x", "kind": "legacy_entry",
+         "group": "R1", "gate": "G0", "depends_on": ["a"]}]})
+    b = registry.tombstone("b")
+    assert (b.kind, b.group, b.gate, b.depends_on) == ("legacy_entry", "R1", "G0", ("a",))
+
+
+def test_a_cycle_in_the_dependencies_fails_the_registry() -> None:
+    with pytest.raises(RetirementCycleError) as caught:
+        RetirementRegistry([_pending("a", depends_on=("b",)), _pending("b", depends_on=("c",)),
+                            _pending("c", depends_on=("a",))])
+    assert set(caught.value.cycle) == {"a", "b", "c"}
+    with pytest.raises(RetirementCycleError):
+        RetirementRegistry([_pending("self", depends_on=("self",))])
+
+
+def test_a_dependency_on_an_unregistered_entry_fails_the_registry() -> None:
+    with pytest.raises(RetirementDependencyError) as caught:
+        RetirementRegistry([_pending("a", depends_on=("ghost",))])
+    assert caught.value.dangling == {"a": ["ghost"]}
+
+
+@pytest.mark.parametrize("field,value", [("gate", "G9"), ("group", "R9"), ("kind", "whatever")])
+def test_an_unknown_gate_group_or_kind_is_rejected(field, value) -> None:
+    with pytest.raises(ValueError):
+        _pending("a", **{field: value})
+
+
+def test_a_valid_dependency_graph_loads_and_reports_unmet_dependencies() -> None:
+    registry = RetirementRegistry([_tombstone("first"), _pending("second", depends_on=("first",)),
+                                   _pending("third", depends_on=("second", "first"))])
+    assert registry.unmet_dependencies("first") == ()
+    assert registry.unmet_dependencies("second") == ()          # `first` has retired
+    assert registry.unmet_dependencies("third") == ("second",)

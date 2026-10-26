@@ -48,9 +48,15 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
                     transcript_chars: int = 120_000,
                     documents_chars: int = 40_000) -> Actuals:
     exp_lines = ""
-    if expectations:
+    if expectations and expectations.expectations:
         exp_lines = "\n".join(
             f"  - {e.dim_key}: neutral={e.neutral}" for e in expectations.expectations)
+    else:
+        # No baseline to read the dimensions from: name the scorecard's own, or the model invents its own keys
+        # (`financial.revenue.gaap [USD, quarter]`) and no scorecard line ever finds its reading.
+        exp_lines = "\n".join(f"  - {d.key}: {d.label} (no baseline)" for d in config.scorecard_dims)
+    dim_keys = {d.key for d in config.scorecard_dims} | {
+        e.dim_key for e in (expectations.expectations if expectations else [])}
     # Opus/Sonnet have 200K context: a chrome-stripped transcript (~55K chars ≈ 14K
     # tokens) fits whole, so the default cap is a guardrail, not a routine clip.
     transcript_block = _clip(transcript_text, transcript_chars) if transcript_text else "(no transcript)"
@@ -73,6 +79,9 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
     expected_dims = bool(expectations and expectations.expectations)
     try:
         view: ActualsView = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
+        if dim_keys and view.metrics and not any(m.dim_key in dim_keys for m in view.metrics):
+            log.warning("actuals for %s keyed no reading to a scorecard dimension; retrying once", config.symbol)
+            view = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
         if expected_dims and not view.metrics:
             # Headline numbers without a single per-dimension reading cannot score a baseline of several dimensions:
             # every line would come back "assume neutral" and read as 符合预期 (ASML Q3, 2026-10-19). One more try,
@@ -93,6 +102,10 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         raise ValueError(
             f"[actuals-guard] {config.symbol} score 已中止：有输入却抽取到空 actuals"
             f"（无 metrics、无 reported EPS/营收），疑似抽取降级，拒绝据此打分。")
+    if dim_keys and view.metrics and not any(m.dim_key in dim_keys for m in view.metrics):
+        raise ValueError(
+            f"[actuals-guard] {config.symbol} score 已中止：抽取到的读数没有一条对应记分卡维度"
+            f"（{sorted({m.dim_key for m in view.metrics})[:4]}…），拒绝据此打出全 0 的伪中性打分卡。")
     if expected_dims and not view.metrics:
         raise ValueError(
             f"[actuals-guard] {config.symbol} score 已中止：基线有 {len(expectations.expectations)} 个维度，"

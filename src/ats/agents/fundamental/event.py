@@ -92,6 +92,16 @@ def published_baseline(store, *, symbol: str, fiscal_label: str, cutoff: str = "
     return None
 
 
+def _not_after(moment, cutoff: str) -> bool:
+    try:
+        limit = datetime.fromisoformat(str(cutoff).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment <= limit
+
+
 def freeze_baseline(store, *, symbol: str, fiscal_label: str, cutoff: str = "") -> dict:
     """在 cutoff 冻结本标的本报告期的预期基线与其引用，写入 Workflow memory。
 
@@ -115,7 +125,9 @@ def freeze_baseline(store, *, symbol: str, fiscal_label: str, cutoff: str = "") 
     else:
         dossier = store.get_dossier(symbol, fiscal_label)
         es = getattr(dossier, "expectation_set", None) if dossier else None
-        if isinstance(es, ExpectationSet) and es.expectations:
+        # An expectation set built after the cutoff is not a baseline, whatever the dossier calls it.
+        if (isinstance(es, ExpectationSet) and es.expectations
+                and _not_after(es.as_of, cutoff)):
             frozen.update({
                 "narrative": es.narrative,
                 "expectations": [

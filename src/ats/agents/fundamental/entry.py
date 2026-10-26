@@ -70,8 +70,11 @@ def event_request(symbol: str, *, trigger: str, fiscal_label: str,
                   cutoff: str = "", use_llm: bool = True,
                   extra: dict | None = None) -> FundamentalRunRequest:
     """事件模式运行请求：财报或明确公司事件触发，带报告期与 cutoff。"""
+    from ...data.period import dossier_label
+
+    # The calendar says `FY2027Q1`, the prep dossier is stored as `Q1 FY2027`: one quarter, one spelling.
     return FundamentalRunRequest(mode=MODE_EVENT, symbol=symbol, trigger=trigger,
-                                 fiscal_label=fiscal_label, cutoff=cutoff,
+                                 fiscal_label=dossier_label(symbol, fiscal_label), cutoff=cutoff,
                                  use_llm=use_llm, extra=dict(extra or {}))
 
 

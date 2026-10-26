@@ -89,3 +89,20 @@ def test_the_frozen_consensus_stands_in_when_the_dossier_has_none():
                                   market_setup=None, symbol="LRCX")
     assert tri["vs_consensus"]["eps"]["delta_pct"] == 0.2
     assert tri["vs_consensus"]["revenue"]["consensus"] == 8.0e9
+
+
+def test_a_dossier_expectation_set_built_after_the_print_is_not_a_baseline():
+    """TSM / ASML printed on 10-14/15, before the baseline mechanism existed; their only expectation set was built
+    on 10-19. Freezing it would present a post-print guess as a pre-print one."""
+    from datetime import datetime, timezone
+
+    from ats.schemas.pead import Expectation, ExpectationSet
+
+    built = datetime(2026, 10, 19, 13, 0, tzinfo=timezone.utc)
+    es = ExpectationSet(symbol="TSM", as_of=built, narrative="事后", expectations=[
+        Expectation(dim_key="revenue", metric="r", neutral="1", conservative="0", optimistic="2")])
+    store = FakeStore(dossier=SimpleNamespace(expectation_set=es))
+    late = event.freeze_baseline(store, symbol="TSM", fiscal_label="Q3 FY2026", cutoff="2026-10-15T06:00:00+00:00")
+    assert not late["expectations"] and event.load_frozen_baseline(store, symbol="TSM", fiscal_label="Q3 FY2026") is None
+    ok = event.freeze_baseline(store, symbol="TSM", fiscal_label="Q3 FY2026", cutoff="2026-10-20T00:00:00+00:00")
+    assert ok["expectations"]

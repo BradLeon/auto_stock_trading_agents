@@ -194,3 +194,27 @@ def test_a_one_element_list_holding_a_json_array_is_unwrapped():
     view = ActualsView(transcript_signals=['["一", "二", "三"]'])
     assert view.transcript_signals == ["一", "二", "三"]
     assert ActualsView(transcript_signals=["a", "b"]).transcript_signals == ["a", "b"]
+
+
+def test_actuals_without_a_baseline_are_keyed_to_the_scorecard_dimensions(monkeypatch):
+    """With no expectation set the prompt used to name no dimensions at all, and the model keyed its readings to
+    platform metric names (`financial.revenue.gaap [USD, quarter]`), so every scorecard line read "not provided"."""
+    from types import SimpleNamespace
+
+    import pytest
+
+    from ats.agents.pead import score as pead_score
+
+    seen = {}
+
+    def fake(role, schema, ctx, **_):
+        seen["ctx"] = ctx
+        return schema(metrics=[{"dim_key": "financial.revenue.gaap [USD, quarter]", "actual": "$8.2B"}],
+                      reported_revenue=8.2e9, reporting_currency="USD")
+
+    monkeypatch.setattr(pead_score, "run_structured", fake)
+    config = SimpleNamespace(symbol="LRCX", fiscal_label="Q1 FY2027", scorecard_dims=[
+        SimpleNamespace(key="revenue", label="营收超预期"), SimpleNamespace(key="eps", label="EPS超预期")])
+    with pytest.raises(ValueError, match="actuals-guard"):
+        pead_score.extract_actuals(config, None, "t", "f", datetime.now(timezone.utc), documents_text="d")
+    assert "revenue: 营收超预期" in seen["ctx"] and "eps: EPS超预期" in seen["ctx"]

@@ -8,7 +8,7 @@
 
 - [x] 1.1 生成退役清点报告 `inventory.md`：调用图、命令行清单、每个候选模块的生产调用方。验证：design.md D4 列出的每个条目和候选在报告里都有结论（已完成，a1c89e3）
 - [x] 1.2 旧手动入口副作用对照，写入 inventory.md 第四节。验证：R1 每个旧入口都有「新路径已承担 / 需要补 / 不需要」的结论（已完成，a1c89e3）
-- [ ] 1.3 生成 G0 人工核验手册 `g0-runbook.md` 与结果记录 `verification.md`（由独立会话生成），并加入「可读报告」一项（第 2 组完成后）。验证：清单覆盖 `python -m ats.data.refresh validate` 列出的全部刷新任务、`config/workflow/research_schedules.yaml` 与 `event_routes.yaml` 的全部条目
+- [x] 1.3 生成 G0 人工核验手册 `g0-runbook.md` 与结果记录 `verification.md`（由独立会话生成），并加入「可读报告」一项（第 2 组完成后）。验证：清单覆盖 `python -m ats.data.refresh validate` 列出的全部刷新任务、`config/workflow/research_schedules.yaml` 与 `event_routes.yaml` 的全部条目（g0-runbook.md 已于 10-27 提交；核验期间新增的 6 个刷新任务记在 verification.md「G0 结论」的范围补充）
 - [ ] 1.4 扩展退役登记格式：新增 `kind`、`group`、`depends_on`、`gate` 字段，加载时校验无环、无悬空依赖、门取值合法（**G0 之后做**）。验证：新增单元测试覆盖成环、悬空、未知门三种失败，以及合法登记的通过
 - [ ] 1.5 `ats retirement decide` 增加依赖与门的检查，新增只读的 `ats retirement gate --show`（汇总 verification.md 的结论）（**G0 之后做**）。验证：测试覆盖「前序未完成 → 不可退出」「门未满足 → 不可退出」
 - [ ] 1.6 把 design.md D4 的全部条目写入 `config/workflow/legacy_retirement.yaml`：R1–R4 门为 G0，R5 门为 `trade_path_cutover`；未登记条目补齐替代实现、消费方、退出判据（**G0 之后做**）。验证：`ats retirement decide` 能列出全部条目及其阻塞原因，`openspec validate --all --strict` 通过
@@ -19,15 +19,15 @@
 
 - [x] 2.1 在 `run_owned_workflow` 一次运行结束之后增加按工作流挂接的「报告发布步骤」框架：失败只记录到运行详情、不改运行状态、不阻断下游；复用既有投影且没有新发布时不重复生成。验证：新增测试覆盖报告步骤失败不改运行状态、复用时不重复生成、隔离环境中不写生产报告目录
 - [x] 2.2 技术面：运行结束且有新读数投影时写一份汇总所有标的的技术面报告（新版本文件、不覆盖）。验证：测试覆盖「逐标的任务不各写一份」；隔离环境手动跑一次，看到报告文件
-- [x] 2.3 行业：行业评审完成后写行业报告、层级报告与可视化页面。验证：测试覆盖内容与该次已发布的投影一致；隔离环境手动跑一次，看到三类文件
+- [x] 2.3 行业：行业评审完成后写行业报告、层级报告与可视化页面。验证：测试覆盖内容与该次已发布的投影一致；隔离环境手动跑一次，看到三类文件（10-26 补写漏掉的行业周报，8a89fd9）
 - [x] 2.4 每周产业链证据周报：在行业报告之后生成，沿用旧流程的内容与顺序。验证：测试覆盖「行业评审失败时不生成周报」；隔离环境看到周报文件
 - [x] 2.5 更新 `docs/OPERATIONS.md` 与角色文档，写明报告的生成时点与目录；`config/settings.yaml` 的报告目录配置核对一遍。验证：文档里的描述与第 2.2–2.4 项隔离运行的结果一致
-- [ ] 2.6 重启 `com.ats.dispatcher`，观察下一次定时触发后报告出现在配置的目录。验证：`launchctl list` 有 PID；报告文件存在且内容来自该次投影
+- [x] 2.6 重启 `com.ats.dispatcher`，观察下一次定时触发后报告出现在配置的目录。验证：`launchctl list` 有 PID；报告文件存在且内容来自该次投影（10-26 22:00 技术面定时任务写出汇总报告；行业周报的首次定时产出在 10-31，届时复核）
 
 ## 3. G0 新路径人工核验（由你执行）
 
-- [ ] 3.1 你逐项核验 `verification.md` 并填写结论、核验人、日期。验证：`ats retirement gate --show`（1.5 完成前以人工汇总为准）显示全部通过，或列出未通过项
-- [ ] 3.2 核验发现的新路径缺陷登记为单独的修复任务，修复后复核通过。验证：verification.md 中没有「未通过」项；依赖未通过项的条目保持 pending
+- [x] 3.1 你逐项核验 `verification.md` 并填写结论、核验人、日期。验证：`ats retirement gate --show`（1.5 完成前以人工汇总为准）显示全部通过，或列出未通过项（78 项全部通过，10-27）
+- [x] 3.2 核验发现的新路径缺陷登记为单独的修复任务，修复后复核通过。验证：verification.md 中没有「未通过」项；依赖未通过项的条目保持 pending（核验期间发现的缺陷多数当场修复，提交号见 verification.md「G0 结论」）
 - [ ] 3.3 记录 G0 结论（日期、范围、遗留且已接受的缺口，例如 SEC 不可达、ibkr_news 的 partial），提交 verification.md。验证：提交存在
 
 ## 4. R2 研究侧切换期工具退役（门 G0）

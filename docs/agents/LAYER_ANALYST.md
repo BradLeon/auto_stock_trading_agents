@@ -25,6 +25,7 @@
 
 - **共同命题（common claims）→ 这一层处于什么状态**（`status`、`cycle_position`、`reversal_triggers`）。
 - **相对命题（relative claims）→ 层内谁在被验证**（逐个标的的理由与 `cross_section` 排名）。
+- **第三方数据也走同一条链**：不是公司自述的数据（海关统计、DRAM 合约价、L1 的企业采用/收入/能力读数）经 `config/data/sources.yaml` 声明为证据来源，转成带说话人、维度、方向与可复核证据行的观测，进入同一套去重、立场与判读。L1 的三个证据观察器（生产化渗透、前沿商业化、原始能力）由 `data/sources/governed_observer.py` 接入，采集任务是 `chain_l1_governed_evidence_daily`（每天 09:00 UTC）；观察器历史不足的轴不产出观测（缺口不是持平）。
 - 每条证据由模型逐簇判读支持或反驳，并留下可审计的理由；配置只声明**看哪些公司、哪些维度、该由谁来说**，
   不写"哪个方向算支持"。
 - 截面排名目前按证据判读的强弱与证据簇数排（`cross_section_basis` 写明依据）；财务与估值维度还没有接入。

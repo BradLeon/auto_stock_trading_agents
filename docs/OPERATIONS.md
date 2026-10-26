@@ -161,7 +161,9 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
 - 持久化采集统一走受管队列（`var/persistent_ingestion.sqlite`），每个任务幂等；只有持有有效租约的 worker
   才调用来源适配器。即时行情、期权与券商查询不排队、不存为研究事实。
 - `derived` 类任务：财报日历刷新（`calendar_*`）、证据抽取、FactSet 月末摄入（每月 1 日 00:30 纽约，
-  摄入上月最终版）。
+  摄入上月最终版）、第三方序列的链证据采集（`chain-source-collect`）：L1 三个证据观察器每天 09:00 UTC
+  （`chain_l1_governed_evidence_daily`），韩国/台湾出口与 DRAM 合约价每周一 09:30 UTC
+  （`chain_regional_*_weekly`）。这类任务不调用模型。
 - 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](data/STRUCTURED_DATA_OPERATIONS.md)。
 
 ## 6. 事件日历
@@ -169,14 +171,15 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
 ```bash
 ats events upcoming --days 30
 ats events status
-ats events candidates                                   # 被挡住的冲突
+ats events candidates --status conflict                 # 被挡住的冲突（不加 --status 会列出全部已准入候选）
 ats events override --event-id <id> --date YYYY-MM-DD --actor <谁> --reason "<依据>"
 ats events cancel   --event-id <id> --actor <谁> --reason "<依据>"
 ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 ```
 
 两个来源只是精度不同（一方多给了具体钟点）时视为兼容并自动合并；日期或时段（盘前/盘中/盘后）
-真不一致时挡住，事件不会唤醒任何工作流，直到你裁决。
+真不一致时，被挡住的是另一来源那一条（`conflict`），日历里该事件仍按已采用的一条（通常是 Finnhub）存在；
+挂起的只是一条备选说法，距离财报日还远时可以不处理，临近时对照公司公告核一次，不一致再 `override`。
 
 ## 7. 交易路径（尚未切换）
 
@@ -213,11 +216,13 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | 现象 | 原因与处理 |
 |---|---|
 | `ibkr_news` 采集曾每天挂满 30 分钟 | TWS 对 `reqContractDetails` 不回复、`ib_async` 默认无限等待；已加 20 秒超时与符号检索回退。若再出现，先看 TWS 是否登录 |
-| `ibkr_news` 每个窗口都是 `partial` | 正文请求预算 10 篇而每次选中数百篇，属常态；控制器把 `partial` 当失败重试、队列把它当终态，第二次会抛 `queue_task_not_claimable`——已知缺陷，未修 |
+| `ibkr_news`、TrendForce、SemiAnalysis 每个窗口都是 `partial` | 正文请求预算 10 篇而每次选中数百篇，属常态；控制器把 `partial` 当失败重试、队列把它当终态，第二次会抛 `queue_task_not_claimable`——已知缺陷，未修 |
 | sec.gov 对后台进程不可达 | 本机 Clash fake-ip（198.18.x），命令行进程到 SEC 的 TLS 被重置，浏览器正常。影响外国申报人（如 TSM）的官方披露 |
 | 审批链接突然 404 / 不可达 | Clash TUN 用 GVisor 栈时会重置 cloudflared 到边缘 7844 端口的长连接；把 TUN 堆栈改为 System，`pkill cloudflared` 重起，更新 `FEISHU_APPROVE_BASE` 并重启 serve。人在 Mac 前也可以直接在本机打开 `http://127.0.0.1:8000/feishu/approve?...` |
 | 抽取角色偶发「空工具调用」 | 隐藏推理吞掉了工具调用；`run_structured` 第一次空返回后会关闭推理重试 |
 | 某只票的信息简报 `incomplete` | 多半是该标的 7 天内没有已准入资讯（数据缺口），看数据刷新与资讯覆盖，不是新逻辑缺陷 |
+| 日历消费日志里出现 `IdentityConflict` | 同一场财报的“计划事件”记录与“财报日到了仍缺材料”的等待记录共用触发键；已改为保留旧记录并跳过，不再整批中断。事件升版（材料入库）后换新键 |
+| 基本面报告第一、二节为空或“无比较依据” | 同一财季曾被存成两份档案（`FY2027Q1` 与 `Q1 FY2027`），已统一写法；基线读财报前已发布的记录。仍出现时先看 `ats pead show <代码>` 的阶段与预期维度 |
 | 定时任务没跑 | 看 `dispatcher.err.log` 是否有 `misfire_grace_exceeded`；或该工作流被停用（`ats dispatch owner-log`） |
 
 ## 10. 数据与备份

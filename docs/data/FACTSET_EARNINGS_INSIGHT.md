@@ -11,7 +11,7 @@
 | 文档/指数分区 | `factset_earnings_insight_index=platform`；`macro_factset=platform` |
 | 行业分区 | `factset_earnings_insight_sector=platform`；`sector_factset=platform` |
 | 当前上线验收 | 2026-08-28（`082826`）：8 张表、11 个 GICS 行业、231/231 单元格与独立原图 decoder 一致 |
-| 唯一导入路径 | `factset_weekly_ingest` 或受控 `factset-import`；Macro/Sector 不下载、解析 PDF，也不读取 Obsidian 文件夹 |
+| 唯一导入路径 | 月末摄入任务 `factset_month_end_ingest` 或受控 `factset-import`；Macro/Sector 不下载、解析 PDF，也不读取 Obsidian 文件夹 |
 
 一份授权 PDF 形成两个独立分区：指数正文指标是 `index_core`，GICS 图表指标是 `sector_core`。一个分区失败不会覆盖另一个已发布分区；每个观测都保留报告版本、`known_at`、证据页码/区域和质量状态。
 
@@ -52,9 +52,9 @@
 
 `--offline` 仅禁止现场网络获取：本地已经发布的 FactSet snapshot 和已持久化 Macro memory 仍必须可读。无正式 release 时，报告要写明 `unavailable`；超过 10 天时标记 `stale` 并给出原报告日期，绝不能填零。
 
-## 5. 每周运行手册
+## 5. 运行手册
 
-默认调度在周六 08:10（`Asia/Shanghai`）运行 `factset_weekly_ingest`，随后 08:50 的周度评审按 Macro → Sector 顺序读取同一份本地发布快照。
+默认调度由数据刷新控制器在**每月 1 日 00:30（`America/New_York`）**运行 `factset_month_end_ingest`，摄入**上个月**最后一期报告（守卫拒收其他月份的报告，所以迟到或提前都不会把 10 月的数据记到 11 月）。每周六 09:00（台北）的宏观评审、09:30 的行业评审读取同一份本地发布快照。宏观的新鲜度提醒按月摄入的节奏，超过 **40 天**未更新才提示。
 
 ```bash
 # 查看来源健康、报告版本/哈希、两个分区的质量与最近失败（URL 已脱敏）

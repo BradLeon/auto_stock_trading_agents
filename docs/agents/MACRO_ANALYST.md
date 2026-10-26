@@ -494,9 +494,8 @@ ats macro show macro
 ats macro probe macro
 ```
 
-正常调度先由 `factset_weekly_ingest` 在周六 08:10（`Asia/Shanghai`）准备 FactSet 数据，随后 `weekly_review` 在 08:50 执行宏观后行业。Macro 不下载 PDF、不读取 Obsidian 文件夹；详情见 [FactSet Earnings Insight 数据产品](../data/FACTSET_EARNINGS_INSIGHT.md)。
-FOMC/CPI/NFP 等 `config/events.yaml` 事件也会在交易日的 `daily_cycle` 中触发额外宏观
-评审，以获得发布日时效性；这条即时路径予以保留，但不是数据入库的唯一入口。
+FactSet 数据由数据刷新控制器的 `factset_month_end_ingest` 每月 1 日 00:30（`America/New_York`）摄入上月最后一期报告；宏观评审由 Dispatcher 每周六 09:00（台北）运行，行业评审随后 09:30。Macro 不下载 PDF、不读取 Obsidian 文件夹；FactSet 新鲜度提醒的阈值是 40 天（与月度摄入节奏匹配）。详情见 [FactSet Earnings Insight 数据产品](../data/FACTSET_EARNINGS_INSIGHT.md)。
+FOMC/CPI/NFP 等发布事件可经日历唤醒宏观评审，但开关 `event_triggers.macro_sector` 现为关闭，宏观只按周运行。
 
 每一次正式宏观评审（事件触发、周度调度或手动命令）都会读取上次正式评审保存的指标
 vintage，再与本次 FRED 结果比较，补齐区间内的新增观测和历史修订。比如上次评审为

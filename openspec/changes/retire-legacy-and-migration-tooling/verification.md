@@ -135,10 +135,10 @@
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
-| M01 | `docs/OPERATIONS.md` |  | 〔自动证据，非结论〕§2 的 7 条日常命令都能只读运行。不一致：§2/§4 说读路由"固定为 target"，technical 实为 legacy；`ats events candidates` 不加 `--status conflict` 会列出 100 条已准入候选；§9 的 partial 缺陷未提 TrendForce/SemiAnalysis |  |  |  |
-| M02 | `docs/ARCHITECTURE.md`（§2–§4、§6–§9、§13） |  | 〔自动证据，非结论〕§6 "六个分析师读新路径"与 P07 不符；§6/§13 的日历事件唤醒在发布侧尚未自动走通（E02） |  |  |  |
-| M03 | `docs/agents/*.md`（7 份） |  | 〔自动证据，非结论〕`MACRO_ANALYST.md`（约 497 行）与 `docs/data/FACTSET_EARNINGS_INSIGHT.md`（约 57 行）仍写周六 08:10 `factset_weekly_ingest` 与 08:50 `weekly_review`，二者已下线；`SECTOR_ANALYST.md` 仍以旧入口 `ats sector review` 写 Obsidian 为主要用法 |  |  |  |
-| M04 | `README.md` |  | 〔自动证据，非结论〕约 204 行"各分析师的报告存成 Obsidian 笔记"，新路径只有宏观、基本面写 |  |  |  |
+| M01 | `docs/OPERATIONS.md` |  | 〔自动证据，非结论〕§2 的 7 条日常命令都能只读运行。不一致：§2/§4 说读路由"固定为 target"，technical 实为 legacy；`ats events candidates` 不加 `--status conflict` 会列出 100 条已准入候选；§9 的 partial 缺陷未提 TrendForce/SemiAnalysis |  |  | 更新：10-26 文档已按最新事实更新：§5 补第三方序列采集任务，§6 命令改为 `--status conflict` 并说明冲突的含义，§9 的 partial 加 TrendForce/SemiAnalysis、增 `IdentityConflict` 与基本面报告为空两行；“读路由固定为 target”现在成立（technical 10-21 已恢复） |
+| M02 | `docs/ARCHITECTURE.md`（§2–§4、§6–§9、§13） |  | 〔自动证据，非结论〕§6 "六个分析师读新路径"与 P07 不符；§6/§13 的日历事件唤醒在发布侧尚未自动走通（E02） |  |  | 更新：10-26：§6 已与现实一致（六个分析师读新路径成立；日历事件唤醒 E02 已走通），只改了“来源冲突”一句的含义 |
+| M03 | `docs/agents/*.md`（7 份） |  | 〔自动证据，非结论〕`MACRO_ANALYST.md`（约 497 行）与 `docs/data/FACTSET_EARNINGS_INSIGHT.md`（约 57 行）仍写周六 08:10 `factset_weekly_ingest` 与 08:50 `weekly_review`，二者已下线；`SECTOR_ANALYST.md` 仍以旧入口 `ats sector review` 写 Obsidian 为主要用法 |  |  | 更新：10-26 已改：`MACRO_ANALYST.md`、`FACTSET_EARNINGS_INSIGHT.md` 的周六 08:10/08:50 旧写法改为每月 1 日月末摄入与 40 天提醒；`LAYER_ANALYST.md` 补第三方数据/L1 观察器；`FUNDAMENTAL_ANALYST.md` 补冻结基线来源与统一财季写法。`SECTOR_ANALYST.md` 仍以旧入口 `ats sector review` 为主要用法，未改 |
+| M04 | `README.md` |  | 〔自动证据，非结论〕约 204 行"各分析师的报告存成 Obsidian 笔记"，新路径只有宏观、基本面写 |  |  | 更新：10-26 已改：Obsidian 报告覆盖宏观、基本面、技术面、层级、行业；日历冲突命令加 `--status conflict` |
 
 ## 9. 旧入口副作用对照
 

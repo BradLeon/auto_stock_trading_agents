@@ -59,17 +59,27 @@ def render(review: SectorReview, cfg: SectorConfig) -> str:
 
 
 def _top_down_section(review: SectorReview) -> list[str]:
+    """FactSet cross-check. Macro is not part of it: the sector analyst does not read the macro review (design), so a
+    macro sub-section only appears on an older report that actually carries one."""
     comparison = review.top_down_comparison
-    lines = ["## 宏观与 FactSet 对照", ""]
+    lines = ["## FactSet 对照", ""]
     if comparison is None:
         return lines + ["（这份旧报告没有保存最终对照结果。）", ""]
-    lines += [
-        "### 宏观报告提供的背景", "",
-        comparison.macro_background or "（没有可用的最新正式宏观报告。）",
-    ]
-    if comparison.macro_review_date:
-        lines.append(f"- 使用的宏观报告日期：{comparison.macro_review_date}")
-    lines += ["", "### FactSet 行业数据提供的背景", "",
+    if comparison.macro_review_date:                         # older reports only
+        lines += ["### 宏观报告提供的背景", "", comparison.macro_background,
+                  f"- 使用的宏观报告日期：{comparison.macro_review_date}", ""]
+    factset_missing = not comparison.factset_background or any(
+        "尚未发布" in note or "不可用" in note for note in comparison.availability_notes)
+    if factset_missing and not comparison.agreements and not comparison.divergences:
+        reason = [n for n in comparison.availability_notes if "宏观" not in n and "不读取" not in n]
+        lines += ["FactSet 十一行业分区本周不可用，没有对照，八层结论不受影响。"
+                  + (f"原因：{reason[0]}" if reason else ""), ""]
+        if comparison.factset_report_date:
+            lines.append(f"- 当前最新已发布的 FactSet 报告日期：{comparison.factset_report_date}")
+        lines += ["", "> 行业分析不读取宏观评审（设计如此，宏观视角由主理人汇总）；FactSet 仅参与最终对照，"
+                  "没有回写或修改任何单层结论、逐票判断、信心或证据链。", ""]
+        return lines
+    lines += ["### FactSet 行业数据提供的背景", "",
               comparison.factset_background or "（没有可用的正式 FactSet 十一行业数据。）"]
     if comparison.factset_report_date:
         lines.append(f"- 使用的 FactSet 报告日期：{comparison.factset_report_date}")
@@ -84,11 +94,12 @@ def _top_down_section(review: SectorReview) -> list[str]:
     lines += ["", "### 是否改变本周产业链配置建议", "",
               comparison.recommendation_impact or
               "没有足够的正式背景改变跨层建议；八个单层结论保持不变。"]
-    if comparison.availability_notes:
+    notes = [n for n in comparison.availability_notes if "不读取宏观" not in n]
+    if notes:
         lines += ["", "### 未采用数据及原因", ""]
-        lines += [f"- {item}" for item in comparison.availability_notes]
-    lines += ["", "> 宏观和 FactSet 仅参与上述最终对照；没有回写或修改任何单层结论、"
-              "逐票判断、信心或证据链。", ""]
+        lines += [f"- {item}" for item in notes]
+    lines += ["", "> 行业分析不读取宏观评审（设计如此，宏观视角由主理人汇总）；FactSet 仅参与最终对照，"
+              "没有回写或修改任何单层结论、逐票判断、信心或证据链。", ""]
     return lines
 
 

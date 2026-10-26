@@ -253,7 +253,7 @@ def test_aggregate_report_renders_macro_factset_comparison_and_unavailability():
             factset_version_id="factset@082826"))
     text = report.render(review, _cfg())
 
-    assert "宏观与 FactSet 对照" in text
+    assert "FactSet 对照" in text
     assert "实际利率偏高" in text
     assert "标准行业总量强" in text
     assert "维持层间建议" in text
@@ -313,3 +313,25 @@ def test_confidence_is_stated_as_not_feeding_the_budget():
     md = report.render_layer(_verdict(confidence=0.78), _cfg().layers[0], _cfg(),
                              basket=_basket())
     assert "不在此报告内" in md and "行业分析师" in md
+
+
+def test_without_factset_the_report_says_so_once_and_does_not_claim_a_macro_gap():
+    """10-26: the report said "no macro report available" although the sector analyst simply does not read macro
+    (design), and spent four sub-sections on "nothing to compare"."""
+    from ats.schemas.sector import SectorReview, TopDownComparison
+
+    review = SectorReview(
+        sector="demo", as_of=NOW, regime="中性",
+        top_down_comparison=TopDownComparison(
+            macro_background="行业分析不读取宏观评审（设计如此：宏观视角只由主理人汇总），所以本报告没有宏观对照。",
+            factset_background="所选报告尚未发布可用的十一行业分区。",
+            availability_notes=["行业分析不读取宏观评审（设计如此：宏观视角只由主理人汇总），所以本报告没有宏观对照。",
+                                "所选报告尚未发布可用的十一行业分区。"],
+            factset_report_date="2026-09-25"))
+    text = report.render(review, _cfg())
+
+    assert "## FactSet 对照" in text and "宏观与 FactSet 对照" not in text
+    assert "没有可用的最新正式宏观报告" not in text and "### 宏观报告提供的背景" not in text
+    assert "FactSet 十一行业分区本周不可用" in text and "尚未发布可用的十一行业分区" in text
+    assert "### 与八个产业链环节一致的地方" not in text                       # no empty sub-sections
+    assert "行业分析不读取宏观评审" in text

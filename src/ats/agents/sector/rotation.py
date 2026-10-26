@@ -64,15 +64,16 @@ def build_context(cfg: SectorConfig, verdicts: list[LayerVerdict], *,
                        "并把它们的层键回填到 missing_layers。")
     factset_material = factset_material or {}
     parts += [
-        "## 最终对照所用的宏观背景",
-        macro_context or "（没有可用的最新正式宏观报告，请在 macro_background 中明确说明。）",
+        "## 宏观",
+        macro_context or "行业分析不读取宏观评审（设计如此，宏观视角由主理人汇总）。**不要引用、推测或假设任何宏观判断**"
+                         "（利率、增长、政策走向等），也不要写“若宏观……则……”；macro_background 留空。",
         "## 最终对照所用的 FactSet 十一行业背景",
         (factset_material.get("text") or
          f"（未作为正式输入：{factset_material.get('reason') or '数据缺失'}）"),
         "## 对照纪律",
-        "以上两类背景只用于现在这一次整体比较。先前八层结论和逐票判断已经固定，"
+        "以上背景只用于现在这一次整体比较。先前八层结论和逐票判断已经固定，"
         "不得修改、替换或重新计算。GICS 标准行业也不是 AI 硬件产业链环节。"
-        "请明确写出一致、分歧，以及它们是否改变跨层加减建议；数据不可用时照实说明原因。",
+        "请明确写出一致、分歧，以及 FactSet 是否改变跨层加减建议；FactSet 不可用时只说明一次原因，不要重复展开。",
     ]
     return "\n\n".join(parts)
 

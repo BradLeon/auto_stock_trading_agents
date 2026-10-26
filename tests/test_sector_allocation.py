@@ -73,7 +73,7 @@ def _run_layered(store, cfg, monkeypatch, *, verdict_status="steady", rotation_v
 
     monkeypatch.setattr("ats.agents.sector.rotation.run", rotate_fn or _rotate)
     monkeypatch.setattr(sector_review, "_load_top_down_context", lambda store_: {
-        "macro_text": "", "macro_date": "", "macro_note": "没有可用的最新正式宏观报告。",
+        "macro_text": "", "macro_date": "", "macro_note": "行业分析不读取宏观评审（设计如此）。",
         "factset": {"text": "", "reason": "", "state": "platform",
                     "report_date": "", "version_id": ""}})
     review = sector_review._run_layered("demo", cfg, _S(), use_llm=True, live_data=False,
@@ -269,3 +269,13 @@ def test_a_failing_sector_report_does_not_fail_the_run(monkeypatch, tmp_path):
     cfg = _cfg().model_copy(update={"output_dir": str(tmp_path), "label": "演示"})
     review, saved = _run_layered(store, cfg, monkeypatch, write_reports=True)
     assert saved and review.layer_verdicts                                        # the review is still saved
+
+
+def test_macro_is_stated_as_not_read_by_design_in_the_rotation_prompt_and_context():
+    from ats.agents.sector import rotation
+
+    context = rotation.build_context(_cfg(), [], macro_context="", factset_material={"reason": "尚未发布"})
+    assert "不读取宏观评审" in context and "没有可用的最新正式宏观报告" not in context
+    assert "不要引用、推测或假设任何宏观判断" in context
+    top_down = sector_review._load_top_down_context(_store())
+    assert "不读取宏观评审" in top_down["macro_note"] and "没有可用" not in top_down["macro_note"]

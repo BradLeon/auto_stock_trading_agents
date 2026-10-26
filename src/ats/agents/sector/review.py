@@ -474,7 +474,9 @@ def _load_top_down_context(store) -> dict:
     """
     from ...data.products import sector_inputs
 
-    macro_note = "没有可用的最新正式宏观报告。"
+    # Not "unavailable": a macro review exists, the sector analyst is simply not allowed to read it (ARCHITECTURE §7.2).
+    # Saying "no macro report" made the report claim a data gap that is a design rule.
+    macro_note = "行业分析不读取宏观评审（设计如此：宏观视角只由主理人汇总），所以本报告没有宏观对照。"
     try:
         factset_material = sector_inputs.factset_sector_material()
     except Exception as exc:  # noqa: BLE001 - final comparison must degrade explicitly

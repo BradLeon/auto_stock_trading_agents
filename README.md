@@ -39,7 +39,7 @@ uv sync --python 3.12 \
 
 ```bash
 source .venv/bin/activate              # 可选；之后可直接使用 ats
-ats macro review macro
+ats workflow runs --limit 5
 
 # 不激活环境也可以，适合 cron、launchd 和脚本
 ./.venv/bin/ats data factset-status

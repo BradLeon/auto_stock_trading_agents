@@ -289,13 +289,15 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli sector html ai_hardware --dat
 
 ### 自动调度
 
-`config/pead.yaml` 的 `sector_review` 段控制：`enabled`、`sectors`、`weekday`（5=周六）、`inject_prep`、`inject_monitor`。调度器的独立 `weekly_review` job 按 `config/settings.yaml` 的 `weekly_review_at` / `weekly_review_tz`（当前为周六 08:50，Asia/Shanghai）先跑宏观、再跑行业和截面重排；它不属于每日 `_daily` 级联，也不依赖 NYSE 交易日。若机器睡眠或 daemon 未运行而错过该时点，依次执行：
+由 Dispatcher 常驻进程按 `config/workflow/research_schedules.yaml` 运行：`sector-review` 每周六 09:30（台北），它先自动补跑 `layer-review`（八层），宏观评审在 09:00 先跑；不依赖 NYSE 交易日。错过的时点在 `config/workflow/trigger_policies.yaml` 的宽限内（行业、层次 48 小时）会补跑一次。机器睡眠或进程停了错过更久时，手动补跑：
 
 ```bash
-ats macro review macro
-ats sector review ai_hardware
+ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio
+ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware     # 会先补跑层次评审
 ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告；默认 dry-run，仍须人工审批
 ```
+
+依赖的数据版本没变时直接复用已有投影，不重复请求模型；要强制重算见 OPERATIONS §3.3。负责人是 dispatcher 时，旧入口 `ats sector review`、`ats macro review` 会被拒绝。
 
 行业视角变化是周级的，日级刷新没意义且费 token，所以默认周更。
 

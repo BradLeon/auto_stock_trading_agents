@@ -460,7 +460,7 @@ MOVE 就能参与 z-score 判定）。
 
 ### ⚠️ 一个运维陷阱
 
-`ats macro review --no-llm` 会把一条 `regime="(no-llm)"` 的评审写进库。下游注入有
+不带模型的宏观评审（`ats workflow run --task macro-review … --inputs-json '{"macro-review": {"use_llm": false}}'`，旧入口 `ats macro review --no-llm` 已被拒绝）会把一条 `regime="(no-llm)"` 的评审写进库。下游注入有
 stub 保护（`agents/macro/context.py` 拦截以 `(` 开头的 regime），所以不会污染决策，
 但 `latest_macro_review()` 从此返回这条 stub，**等于让 5 个下游消费方在下次正式
 评审前都读不到宏观背景**。要核对数字请直接调 `data.macro.fetch_series()` +
@@ -487,7 +487,7 @@ stub 保护（`agents/macro/context.py` 拦截以 `(` 开头的 regime），所�
 
 ```bash
 # 生产补跑：拉取 FRED / 市场 / 新闻；读取已经发布的本地 FactSet 材料，落库并写周报
-ats macro review macro
+ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio
 
 # 查看最近结果或检查输入；--no-llm 会写 stub，不应用于生产库验证
 ats macro show macro
@@ -505,7 +505,7 @@ vintage，再与本次 FRED 结果比较，补齐区间内的新增观测和历�
 报告顶部固定输出高优章节“宏观数据与结论 Delta”：逐项列出新增/修订、发布日期、
 数据所属期、上次值到本次值和期变动，并说明这些变化是否以及如何改变 regime、风险预算
 或行业倾斜。若结论未变，也必须明确写出“数据已更新、结论维持”及原因。错过任务后，先
-执行 `ats macro review macro`，再执行 `ats sector review ai_hardware`，最后按需运行
+执行 `ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio`，再执行 `ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware`，最后按需运行
 `ats chief run --channel feishu_bot` 更新决策。
 
 - 系统全局设计、角色契约 → `docs/ARCHITECTURE.md`

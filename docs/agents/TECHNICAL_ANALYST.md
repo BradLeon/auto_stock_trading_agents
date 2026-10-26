@@ -235,5 +235,6 @@ crush"，收益完全来自期权的隐含波动率盯市与随后回落，正�
 
 - 系统全局设计、角色契约 → `docs/ARCHITECTURE.md`
 - 代码规范、配置分层 → `docs/DEVELOPMENT.md`
+- 手动运行：`ats workflow run --task technical-review --scope-kind portfolio --scope-id portfolio`；`ats technical show` 查看最近结果
 - 调度与触发 → `docs/OPERATIONS.md` 第 3 节
 - 宏观分析师（同为确定性优先的设计）→ `docs/agents/MACRO_ANALYST.md`

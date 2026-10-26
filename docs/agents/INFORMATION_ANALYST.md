@@ -17,6 +17,7 @@
 | 产出 | 每个标的一份 `information_brief` 投影（`InformationBriefPayload`） |
 | 谁读它 | 基本面分析师（唯一的跨分析师依赖之一）、Chief |
 | 什么时候跑 | 工作日 08:00（纽约时间）定时；财报计划与发布的日历事件也会唤醒它（见 OPERATIONS §3.1） |
+| 手动运行 | `ats workflow run --task information-brief --scope-kind entity --scope-id <代码>`（全部目标标的用 `--scope-kind portfolio --scope-id pead-targets`）；旧入口 `ats analyst information` 会被拒绝 |
 | 代码 | `src/ats/agents/information/`（`entry.py` 入口、`selection.py` 候选选择、`triage.py` 材料性评估、`extract.py` 抽取、`briefs.py` 发布契约） |
 
 ## 一份简报里有什么

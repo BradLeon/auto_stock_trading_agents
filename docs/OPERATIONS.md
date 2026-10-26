@@ -89,6 +89,9 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio
 ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware
 ats workflow run --task fundamental-routine --scope-kind portfolio --scope-id pead-targets
+ats workflow run --task information-brief --scope-kind portfolio --scope-id pead-targets
+ats workflow run --task technical-review --scope-kind portfolio --scope-id portfolio
+ats workflow run --task layer-review --scope-kind sector --scope-id ai_hardware            # 八层；单层见 LAYER_ANALYST
 ats workflow runs --limit 5
 ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # 只重试失败的那一个任务
 ```

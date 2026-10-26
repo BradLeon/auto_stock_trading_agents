@@ -18,6 +18,7 @@
 | 产出 | 每层一份 `layer_analysis` 投影（`LayerAnalysisPayload`） |
 | 谁读它 | 行业分析师（唯一的跨分析师依赖之一）、Chief |
 | 什么时候跑 | 每周六行业评审之前，由 Dispatcher 作为 `sector-review` 的依赖自动补跑（`layer-review`） |
+| 手动运行 | `ats workflow run --task layer-review --scope-kind layer --scope-id <层键> --inputs-json '{"layer-review":{"sector":"ai_hardware"}}'`；或用 `--scope-kind sector --scope-id ai_hardware` 跑全部八层 |
 | 代码 | `src/ats/agents/layer/layer_review.py` |
 | 配置 | `config/sectors/ai_hardware.yaml`：每层的成员、`claims`（要验证的命题）、`structure_notes` |
 

@@ -75,7 +75,7 @@
 | D03 | `chain_evidence_daily.MU` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / no_print_in_window`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-23 | 10-23 抽查 10 条：✅9 ❌1。财报会数值全部准确；一条股价“收盘上涨 4.2%”方向被标成 flat。注意：MU 只有 57/178 条无法回查的旧编号证据 |
 | D04 | `chain_evidence_daily.SKHY` | 通过 | 〔自动证据，非结论〕窗口 10-20 `no_change / no_print_in_window`（10-21 06:01） | 用户确认（AI 建议） | 2026-10-23 | 10-23 抽查 10 条：✅9 ⚠️1。全部来自新闻/研报（SKHY 暂无自己的财报会，10-27 财报后才会有）；一条“4 月”被补成 2025-04，年份没有依据 |
 | D05 | `calendar_finnhub_earnings_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:36），发现 24 | 用户确认（AI 建议） | 2026-10-21 |  |
-| D06 | `calendar_yahoo_earnings_daily` |  | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:37），发现 13；`ats events upcoming --days 30` 列出 LRCX 10-21 16:00、SKHY 10-27、GOOG/MSFT 10-28、FOMC 10-27/28、GDP/PCE 10-29 |  |  | 运行层面正常；待抽查：LRCX 10-21、SKHY 10-27、GOOG/MSFT 10-28 等日期对照公司 IR；原备注：日期需你对照 IR / 官网 |
+| D06 | `calendar_yahoo_earnings_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `succeeded`（15:37），发现 13；`ats events upcoming --days 30` 列出 LRCX 10-21 16:00、SKHY 10-27、GOOG/MSFT 10-28、FOMC 10-27/28、GDP/PCE 10-29 | 用户确认（AI 建议） | 2026-10-26 | 运行层面正常；待抽查：LRCX 10-21、SKHY 10-27、GOOG/MSFT 10-28 等日期对照公司 IR；原备注：日期需你对照 IR / 官网；用户 10-26 确认通过：LRCX 10-21 实际发布日与两家日历一致；SKHY 10-27、GOOG/MSFT 10-28 两家日期时段一致 |
 | D07 | `calendar_fomc_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `failed`（16:38），两次尝试；错误 `URLError: SSL UNEXPECTED_EOF_WHILE_READING` | 用户确认（AI 建议） | 2026-10-21 | 10-21 17:25 窗口已 succeeded（发现 38 条），网络恢复后改为通过；原：TLS 被重置（根因 2） |
 | D08 | `calendar_bls_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `failed`（16:38）；错误 `SSLError: curl (35) Connection closed abruptly`（www.bls.gov） | 用户确认（AI 建议） | 2026-10-21 | 10-21 17:25 窗口已 succeeded（发现 48 条），网络恢复后改为通过；原：TLS 被重置（根因 2） |
 | D09 | `calendar_bea_daily` | 通过 | 〔自动证据，非结论〕窗口 10-20 `failed`（16:38）；错误 `URLError: SSL UNEXPECTED_EOF_WHILE_READING`（www.bea.gov） | 用户确认（AI 建议） | 2026-10-21 | 10-21 17:25 窗口已 succeeded（发现 6 条），网络恢复后改为通过；原：TLS 被重置（根因 2） |
@@ -123,12 +123,12 @@
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
-| A01 | 三个服务在跑 |  | 〔自动证据，非结论〕`launchctl list`：com.ats.dispatcher PID 8699；com.ats.serve PID 8776（上次退出码 -15）；com.ats.data-refresh PID `-`、退出码 0；`/health` 返回 `{"ok":true}` |  |  |  |
+| A01 | 三个服务在跑 | 通过 | 〔自动证据，非结论〕`launchctl list`：com.ats.dispatcher PID 8699；com.ats.serve PID 8776（上次退出码 -15）；com.ats.data-refresh PID `-`、退出码 0；`/health` 返回 `{"ok":true}` | 用户确认（AI 建议） | 2026-10-26 | 用户 10-26 确认通过：dispatcher、serve 在跑，data-refresh 状态 0，/health 正常 |
 | A02 | 发布时检查（刷新后） | 通过 | 〔自动证据，非结论〕29c6b4d 之后 `consumer-cutover log` 没有新行（没有状态变化就不记）；data-refresh.out.log 里 `consumer_health` 0 行；隔离测试 `tests/test_consumer_health.py` 27 passed | 用户确认（AI 建议） | 2026-10-26 |生产上还没有一条新机制的记录；用户 10-26 核对飞书截图通过：10-25 19:31“数据产品健康检查未通过：sector（L1_app 投影读不出）”与 19:55“已恢复”各一条，与生产日志记录一致、同状态不重复。该次失败由我撤回的 L1 旁路提交留下的不兼容投影引起，检查按设计拦住并告警 |
-| A03 | 读取前检查与阻断语义 |  | 〔自动证据，非结论〕生产运行记录里没有 `data_product_unhealthy`；隔离测试 `test_unhealthy_data_products_block_the_task_before_it_runs` passed |  |  |  |
+| A03 | 读取前检查与阻断语义 | 通过 | 〔自动证据，非结论〕生产运行记录里没有 `data_product_unhealthy`；隔离测试 `test_unhealthy_data_products_block_the_task_before_it_runs` passed | 用户确认（AI 建议） | 2026-10-26 | 用户 10-26 确认通过：隔离测试（tests/test_workflow_dispatcher.py -k unhealthy）通过，生产无 data_product_unhealthy 阻断 |
 | A04 | 飞书告警（状态变化时一次） | 通过 | 〔自动证据，非结论〕隔离测试 `test_observe_logs_and_alerts_only_when_the_status_changes`、`test_a_failing_alert_does_not_break_observation` passed；生产上新机制尚未发过告警 | 用户确认（AI 建议） | 2026-10-26 |请在飞书群历史里看 10-20 09:36 前后有没有 technical 的告警（旧机制）；用户 10-26 核对飞书通过：由好转坏、由坏转好各发一条，不刷屏；隔离测试 27 passed |
-| A05 | `com.ats.dispatcher` 重启后加载新代码、启动补跑 |  | 〔自动证据，非结论〕进程启动于 10-20 16:10:51，晚于最后一次改 `src/` 的提交（64926c4，16:09:52）；10-20 20:00 信息简报在 23:18、21:00 基本面在 23:27 补跑成功，各一次 |  |  | 工作区里另有未提交的 `src/` 改动（其他会话），未加载，不影响本项 |
-| A06 | 数据刷新控制器每小时运行与补跑 |  | 〔自动证据，非结论〕`g0_refresh` 显示最近一次定时运行 10-21 10:29，launchd 已加载；周/月任务过宽限后记 `misfire` |  |  |  |
+| A05 | `com.ats.dispatcher` 重启后加载新代码、启动补跑 | 通过 | 〔自动证据，非结论〕进程启动于 10-20 16:10:51，晚于最后一次改 `src/` 的提交（64926c4，16:09:52）；10-20 20:00 信息简报在 23:18、21:00 基本面在 23:27 补跑成功，各一次 | 用户确认（AI 建议） | 2026-10-26 | 工作区里另有未提交的 `src/` 改动（其他会话），未加载，不影响本项；用户 10-26 确认通过：进程启动于 12:07，晚于最后一次 src/ 改动；修复后重启为核验之外的必要重启 |
+| A06 | 数据刷新控制器每小时运行与补跑 | 通过 | 〔自动证据，非结论〕`g0_refresh` 显示最近一次定时运行 10-21 10:29，launchd 已加载；周/月任务过宽限后记 `misfire` | 用户确认（AI 建议） | 2026-10-26 | 用户 10-26 确认通过：控制器最近定时运行 10-26 12:27 / 13:28，间隔约 1 小时 |
 | A07 | 日志无未处理异常 | 通过 | 〔自动证据，非结论〕dispatcher.err.log：10-20 23:29 technical-review `RouteUnavailable` 一处 Traceback；data-refresh.err.log 只有一行无害的 MallocStackLogging 提示 | 用户确认（AI 建议） | 2026-10-26 |与 P07、W03 同源；用户 10-26 要求查根因：10-22 14:10、10-23 02:25/14:10 的 `IdentityConflict` 是同一场财报的“计划事件”记录与“财报日到了仍缺材料”的等待记录共用触发键（工作流+事件号+事件版本），后者内容不同被拒，一个事件出错还会让排在后面的事件丢等待记录；事件升版（材料入库）后键变化所以消失，并非已修好，本周 SKHY/GOOG/MSFT 会同样触发。已按方案 A 修复：同键已有记录就保留并跳过、不报错，不改键算法；补测试（无修复时失败）。其余 ERROR：10-20 技术面读窗口（P07/W03 同源，已恢复）、10-21 信息简报证据片段定位不到、10-24 02:10 基本面事件评审（旧进程未加载新代码，已修复） |
 
 ## 8. 运维文档

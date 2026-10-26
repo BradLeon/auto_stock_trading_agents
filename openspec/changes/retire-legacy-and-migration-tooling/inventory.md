@@ -1,4 +1,3 @@
-| `ats evidence claims/propose/proposals/review/kbreview` | 命题状态、候选命题与审批 | **没有对应的新路径入口，且有意不迁移**：它们是人在终端使用的治理工具，不是分析师任务（无投影、无定时/事件触发）；命题归纳按设计“证据驱动、不是日历驱动”，不能放进定时器；`review` 是审批动作，必须由人发起。读取侧已自动进入每周产业链证据周报（待确认命题、知识库待办两节） | 终端输出；`ats evidence claims ai_hardware` 可看各层命题与证据 | 按 10-21 裁决（Q3）**保留**；10-26 复核后**确认保留、不迁移**，R1 不删；10-26 实测可用 |
 # 退役清点报告（R0：任务 1.1、1.2）
 
 > 生成日期 2026-10-21，基线提交 99b82b4 之后的工作区。**只读清点，没有改任何代码、配置或登记处。**
@@ -65,7 +64,50 @@
 | `agents/pead/monitor` | 79 | `ats pead monitor/watch` | 3 | 只被命令行用；R1 删命令后进入 R4 |
 | `agents/risk_manager` | 52 | — | 1 | 无任何引用，只有测试；可删 |
 | `agents/risk_validator` | 164 | — | 1 | 无任何引用，只有测试；退役登记里的 `apply_guardrails` 即它；可删 |
-| `agents/sector/kb_perturb` | 305 | `ats sector kbperturb` | 知识库有效性校验（不动生产） | 无，有意不迁移：开发期验证工具，不写库，生产无任何依赖 | 终端输出 | 按 Q3 保留；10-26 复核后**确认保留、不迁移**；`ats sector --help` 中仍在 |
+| `agents/sector/kb_perturb` | 305 | `ats sector kbperturb` | 1 | 知识库扰动校验工具；10-21 裁决并于 10-26 再确认：**保留，不迁移，不进 R4**（见第五节 Q3） |
+| `runtime/evidence_observe` | 95 | `ats data evidence-observe` | 1 | **保留**：数据刷新任务 `chain_evidence_daily.*` 用命令 `ats data evidence-observe` 调用它（`config/data/schedules.yaml`），是新路径的一部分，不是旧入口 |
+| `graph/checkpoint`、`runtime/server` | — | `ats serve` | — | **保留**（审批回调与恢复在用） |
+
+被其他源码引用的旧分析代码（**不能当旧代码删**，因为新路径在用）：
+
+| 模块 | 使用方 | 结论 |
+|---|---|---|
+| `graph/pead`（658 行） | `agents/fundamental/routine`、`agents/fundamental/event`、`agents/pead/prep`、`score` | **保留**：例行模式建基线、事件模式评审的图都在这里 |
+| `agents/pead/prep`、`score`、`report`、`units` | `graph/pead`、`agents/fundamental/event`、sector/technical/risk 的报告 | **保留**：被新路径直接调用 |
+| `agents/pead/research` | `agents/information/*`、`data/articles/semianalysis`、`data/research` 等 | **保留**：信息分析师在用 |
+| `agents/pead/triage` | `agents/information/target_research`、`pead/monitor` | **保留**：信息分析师在用；`monitor` 删了之后它仍有使用方 |
+| `runtime/digest`（297 行） | `journal/calibration`、`critic`、`episode_report`、`report` | **保留**：交易日志与复盘在用，归交易路径 |
+| `agents/evidence/observer`（383 行） | `agents/sector/viz`、`chain/articles`、`runtime/evidence_observe` | **保留**：产业链证据抽取仍被引用；退役登记里的 `agent.evidence_observer` 说的是作为独立角色调度，不是这个模块 |
+| `agents/sector/context` | `channel/cli_channel`、`feishu_bot`、`feishu_channel` | **保留**：审批卡片渲染在用 |
+| `agents/sector/structure`、`rotation` | `cross_section`、`sector/review`、`business_replay_inputs` | **保留**：行业分析师在用 |
+| `chain/*`（`induction`、`corroborate`、`report`） | `agents/sector/*`、`risk_officer/report`、`technical/review` | **保留**：被多个报告引用 |
+
+**修正 design.md D4：** R4 的范围比预想小得多。确认可删的只有 `risk_manager`、`risk_validator`，以及 R1 删掉命令后的 `pead/monitor`。原先列在 R4 候选里的 `pead/prep`、`score`、`report`、`triage`、`runtime/digest`、`runtime/evidence_observe`（待确认）、`sector/structure`、`rotation` 都有生产使用方，应当移出。
+
+## 四、旧手动入口的副作用对照（任务 1.2）
+
+对象：命令行里用于研究分析师的旧手动入口，以及已被删除的旧调度流程（faeac82 之前）。表中「新路径」指 Dispatcher 的任务适配器。
+
+### 4.1 研究分析师手动入口
+
+> **2026-10-26 更新**：本节最初写于 R0（a1c89e3），当时新路径不生成技术面、行业、层级与 HTML、产业链证据周报。这些已由退役方案第 2 组 RP 恢复，下表的「新路径」「结论」两列按 10-26 的实际产出重写，并新增「新路径的产出」一列（文件名与位置）。所有报告都写到Obsidian「量化投资/个股分析系统」目录（`/Users/liuchao/Documents/Obsidian Vault/量化投资/个股分析系统/`，各配置的 `output_dir`）。
+
+| 旧入口 | 旧入口做的事 | 新路径（Dispatcher） | 新路径的产出（文件名 / 位置） | 结论 |
+|---|---|---|---|---|
+| `ats macro review` | 评审 + 打印 + 写 Obsidian 周报 | `_macro_adapter` 评审 + `write_new_version` 写周报 | `宏观分析-<标签>-<日期>.md`，如 `宏观分析-宏观-2026-10-24.md`；每周六 09:00（台北） | 已承担 |
+| `ats technical review` | 评审 + 打印 + 写 Obsidian 技术面报告 | `_technical_adapter` 只写投影；报告由 `report_publishers.technical_report` 在**整次运行结束后**用已发布的投影汇总写一份（不显示 VIX 数值，只显示是否触发恐慌层） | `技术面读数-<标签>-<日期>.md`，如 `技术面读数-技术面-2026-10-24.md`；工作日 22:00（台北） | 已恢复（W10 复核） |
+| `ats sector review`（层级报告 + HTML） | 评审 + 写行业周报 + 层级报告 + 可视化 HTML | `sector-review` 任务内 `agents/sector/review.py` 写层级报告与 HTML | 层级：`层分析-<行业>-<层名>-<日期>.md`（8 层各一份），如 `层分析-AI硬件-L1AI应用层（Token经济）-2026-10-25.md`；页面：`层分析-<行业>-<日期>.html`；每周六 09:30（台北） | 已恢复 |
+| `ats sector review`（**行业周报**） | 同上，写 `行业分析-<行业>-<日期>.md` | `sector-review` 任务内 `agents/sector/review.py` 在层级报告之后调用 `report.write`（10-26 补上；此前新路径没有调用，10-24、10-25 都没写） | `行业分析-<行业>-<日期>.md`，如 `行业分析-AI硬件-2026-10-26.md`；每周六 09:30（台北） | 已恢复（10-26 补，W10 复核） |
+| `ats sector layer` | 单层配置结论 + 层内选股 | `layer-review` 适配器写层级投影，不打印 | 无独立文件；层级结论在上面的层级报告里 | 已承担 |
+| `ats sector crosssection` | 单层截面排名，持久化到库 | 行业评审自己在评审里逐层算截面，结果存进评审的 `baskets`；Layer 投影另带截面排名 | 层级报告第三节「截面明细」 | 已核实、已承担：Chief 读的是评审里的 `baskets`，不读独立持久化表，旧调度器每周额外 `persist=True` 的那一遍没有消费者 |
+| `ats analyst information` | 一轮信息简报 | `_information_adapter` 同一入口 | 投影（不写 Obsidian 报告）；`g0_latest information_brief` 查看 | 已承担 |
+| `ats analyst fundamental` | 例行 / 事件模式 | `_fundamental_*_adapter` 同一入口 | `基本面分析-<代码>-<年份Qn>.md`，如 `基本面分析-LRCX-2027Q1.md`（财报前为 prep 阶段，财报后同一文件更新为 score） | 已承担 |
+| `ats pead prep/score` | 预期基线 / 财报后打分 | 例行模式建基线、事件模式评审（`graph/pead` 同一图） | 同上一行 | 已承担，报告落盘已验证（LRCX、TSM、ASML） |
+| `ats pead monitor/watch/research` | 新闻追踪、监控 | 信息分析师 + 数据刷新的新闻任务 | 投影 | 已承担 |
+| `ats evidence observe/collect/articles` | 产业链证据抽取、文章采集 | 数据刷新 `chain_evidence_daily.*`、`chain_l1_governed_evidence_daily`、`chain_regional_*_weekly`、`semianalysis_newsletter_weekly` | 证据入库，不写报告 | 已承担 |
+| `ats evidence report`（每周产业链证据周报） | 旧调度器每周末尾写 `产业链证据-<行业>-<日期>.md` | 行业评审**之后**由 `report_publishers.chain_evidence_report` 写 | `产业链证据-<行业>-<日期>.md`，如 `产业链证据-AI硬件-2026-10-24.md`；每周六 | 已恢复（W10 复核） |
+| `ats evidence claims/propose/proposals/review/kbreview` | 命题状态、候选命题与审批 | **没有对应的新路径入口，且有意不迁移**：它们是人在终端使用的治理工具，不是分析师任务（无投影、无定时/事件触发）；命题归纳按设计“证据驱动、不是日历驱动”，不能放进定时器；`review` 是审批动作，必须由人发起。读取侧已自动进入每周产业链证据周报（待确认命题、知识库待办两节） | 终端输出；`ats evidence claims ai_hardware` 可看各层命题与证据 | 按 10-21 裁决（Q3）**保留**；10-26 复核后**确认保留、不迁移**，R1 不删；10-26 实测可用 |
+| `ats sector kbperturb` | 知识库有效性校验（不动生产） | 无，有意不迁移：开发期验证工具，不写库，生产无任何依赖 | 终端输出 | 按 Q3 保留；10-26 复核后**确认保留、不迁移**；`ats sector --help` 中仍在 |
 
 ### 4.2 已删除的旧调度流程，被删后没人接手的工作
 

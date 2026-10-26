@@ -513,7 +513,7 @@ unstructured:
       source: sec_edgar_filing_body
       datasets: [sec_filing_documents]
       schedule: daily
-      at: "08:30"
+      at: "09:30"   # 2026-10-26: was 08:30; the index it reads is refreshed ~08:34, so 08:30 always read yesterday's
       timezone: UTC
       command: ats data document-ingest --source sec_edgar_filing_body
       freshness_slo_days: 3
@@ -774,10 +774,13 @@ derived:
       retry: {attempts: 2, backoff_seconds: [300, 1800]}
       semantics: PCE and GDP release dates from the BEA schedule
     calendar_finalize_daily:
+      # 2026-10-26: moved from 07:10 to 10:00 UTC, after the filing index (08:00) and the SEC body job (09:30), so a
+      # print whose material was admitted this morning is confirmed this morning and the 18:10 calendar consumption
+      # wakes its review the same day instead of a day later.
       enabled: true
       source: calendar_maintenance
       schedule: daily
-      at: "07:10"
+      at: "10:00"
       timezone: UTC
       command: ats data calendar-finalize
       concurrency: 1

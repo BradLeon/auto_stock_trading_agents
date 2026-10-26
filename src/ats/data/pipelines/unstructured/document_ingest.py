@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -44,7 +44,21 @@ CREATE TABLE IF NOT EXISTS data_fixed_source_rows (
     UNIQUE(source_id,snapshot_id,natural_key,content_hash));
 CREATE INDEX IF NOT EXISTS ix_fixed_source_entity
     ON data_fixed_source_rows(source_id,entity,natural_key,observed_at);
+-- One row per real attempt to fetch a body. data_fixed_source_rows is idempotent per (key, status, reason), so a
+-- repeated identical failure leaves no trace there; this ledger is what makes attempt counts and recency true.
+CREATE TABLE IF NOT EXISTS data_fixed_source_attempts (
+    source_id TEXT NOT NULL, natural_key TEXT NOT NULL, attempted_at TEXT NOT NULL,
+    outcome TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS ix_fixed_source_attempts
+    ON data_fixed_source_attempts(source_id,natural_key,attempted_at);
 """
+
+
+def _record_attempt(store: Any, *, source_id: str, natural_key: str, outcome: str, reason: str,
+                    now: datetime) -> None:
+    store.conn.execute("INSERT INTO data_fixed_source_attempts VALUES (?,?,?,?,?)",
+                       (source_id, natural_key, _stamp(now), outcome, reason))
+    store.conn.commit()
 
 
 def _rows() -> dict[str, dict[str, Any]]:
@@ -194,7 +208,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
             id=source_id, label=source["provider"], adapter=source["adapter"],
             cadence=source["cadence"], entity=""), at=now)
         run_id = store.begin_ingestion(source_id, kind="fixed_source_refresh", at=now)
-        accepted = quarantined = unchanged = failed = 0
+        accepted = quarantined = unchanged = failed = deferred = 0
         row_ids: list[str] = []
         document_ids: list[str] = []
         coverage_missing_entities: list[str] = []
@@ -221,30 +235,56 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                             "file_sha256": "", "file_updated_at": "",
                             "source_url": "https://www.sec.gov/Archives/edgar/data/"}
                 index_id = str(policy["discovery_source"])
-                # Each daily run has a bounded SEC request budget.  Prefer
-                # never-published accessions and dedupe repeat index snapshots,
-                # otherwise the same first 20 rows can starve all other filings.
+                # Each daily run has a bounded SEC request budget, so the candidate list is what the budget is spent
+                # on. A filing is a candidate only while it is not in the library and has not been given up on:
+                #   * already admitted -> not fetched again until `recheck_admitted_after_days` (default 7) have passed, and then
+                #     only after everything pending (it exists to catch a revised body, not to spend the budget);
+                #   * `sec_missing` on three different days, or any failure on five -> given up (`max_missing_attempts`,
+                #     `max_attempts_per_filing`), so a permanent 404 stops costing requests;
+                # and what is left is ordered by what an earnings event is waiting on: filings of the last 30 days,
+                # fewest attempts, least recently tried, newest filing. Attempts are counted from the attempts ledger
+                # (data_fixed_source_attempts); rows recorded before it existed count once each.
+                budget = source["request_budget"]
                 query = ("WITH latest AS (SELECT raw_json,natural_key,observed_at,"
                          "ROW_NUMBER() OVER (PARTITION BY natural_key ORDER BY observed_at DESC) rn "
                          "FROM data_fixed_source_rows WHERE source_id=? AND status='accepted'" +
                          (" AND entity=?" if entity else "") +
-                         "), published AS (SELECT natural_key,MAX(observed_at) last_attempt,"
-                         "MAX(CASE WHEN status='accepted' "
-                         "THEN 1 ELSE 0 END) accepted FROM data_fixed_source_rows "
-                         "WHERE source_id=? GROUP BY natural_key) "
-                         "SELECT latest.raw_json FROM latest LEFT JOIN published USING(natural_key) "
-                         "WHERE latest.rn=1 ORDER BY "
-                         # Filings from the last 30 days first: an earnings event waits on them, and a backlog of
-                         # older never-tried accessions (TSM had dozens) must not push a fresh 6-K out of the budget.
-                         "CASE WHEN json_extract(latest.raw_json,'$.filing_date') >= date('now','-30 days') "
-                         "THEN 0 ELSE 1 END, COALESCE(published.accepted,0), "
-                         "COALESCE(published.last_attempt,''), "
-                         "json_extract(latest.raw_json,'$.filing_date') DESC LIMIT ?")
+                         "), published AS (SELECT natural_key,MAX(observed_at) last_row,"
+                         "MAX(CASE WHEN status='accepted' THEN 1 ELSE 0 END) accepted,"
+                         "SUM(CASE WHEN status!='accepted' AND reason NOT LIKE '%RequestBudgetExceeded%' "
+                         "THEN 1 ELSE 0 END) legacy_tries,"
+                         "SUM(CASE WHEN status!='accepted' AND reason LIKE '%sec_missing%' "
+                         "AND reason NOT LIKE '%RequestBudgetExceeded%' "
+                         "THEN 1 ELSE 0 END) legacy_missing FROM data_fixed_source_rows "
+                         "WHERE source_id=? GROUP BY natural_key), "
+                         "tried AS (SELECT natural_key,COUNT(DISTINCT substr(attempted_at,1,10)) n,MAX(attempted_at) last_try,"
+                         "COUNT(DISTINCT CASE WHEN reason LIKE '%sec_missing%' "
+                         "THEN substr(attempted_at,1,10) END) missing "
+                         "FROM data_fixed_source_attempts WHERE source_id=? AND outcome!='accepted' "
+                         "GROUP BY natural_key), "
+                         "okd AS (SELECT natural_key,MAX(attempted_at) last_ok "
+                         "FROM data_fixed_source_attempts WHERE source_id=? AND outcome='accepted' "
+                         "GROUP BY natural_key), "
+                         "ranked AS (SELECT latest.raw_json raw_json,latest.raw_json filing,"
+                         "COALESCE(published.accepted,0) accepted,"
+                         "COALESCE(okd.last_ok,published.last_row,'') last_ok,"
+                         "MAX(COALESCE(tried.n,0),COALESCE(published.legacy_tries,0)) tries,"
+                         "MAX(COALESCE(tried.missing,0),COALESCE(published.legacy_missing,0)) missing,"
+                         "COALESCE(tried.last_try,published.last_row,'') last_try "
+                         "FROM latest LEFT JOIN published USING(natural_key) LEFT JOIN tried USING(natural_key) "
+                         "LEFT JOIN okd USING(natural_key) WHERE latest.rn=1) "
+                         "SELECT raw_json FROM ranked WHERE (accepted=0 AND missing<? AND tries<?) "
+                         "OR (accepted=1 AND last_ok<?) ORDER BY accepted, "
+                         "CASE WHEN json_extract(filing,'$.filing_date') >= date('now','-30 days') "
+                         "THEN 0 ELSE 1 END, tries, last_try, "
+                         "json_extract(filing,'$.filing_date') DESC LIMIT ?")
                 params: list[Any] = [index_id]
                 if entity:
                     params.append(entity.upper())
-                params.append(source_id)
-                params.append(int(source["request_budget"]["max_documents_per_run"]))
+                recheck = now - timedelta(days=int(budget.get("recheck_admitted_after_days", 7)))
+                params += [source_id, source_id, source_id, int(budget.get("max_missing_attempts", 3)),
+                           int(budget.get("max_attempts_per_filing", 5)), _stamp(recheck),
+                           int(budget["max_documents_per_run"])]
                 source_rows = [json.loads(row[0]) for row in store.conn.execute(query, params)]
             else:
                 manifest = yaml.safe_load((REPO_ROOT / policy["manifest"]).read_text(
@@ -282,7 +322,12 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                                 snapshot["file_updated_at"], _stamp(now),
                                 snapshot["source_url"], run_id))
             store.conn.commit()
-            for row in source_rows:
+            for position, row in enumerate(source_rows):
+                if kind == "official_body" and transport.exhausted:
+                    # Out of budget: the rest were not tried, so they are deferred, not failed. Nothing is recorded
+                    # for them; they stay first in line for the next run.
+                    deferred += len(source_rows) - position
+                    break
                 issues: list[admission.ValidationIssue] = []
                 publication_hash = ""
                 try:
@@ -366,6 +411,10 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                         status="accepted" if status == "no_change" else status,
                         document_id=doc_id, publication_hash=publication_hash, now=now)
                     row_ids.append(row_id)
+                    if kind == "official_body":
+                        _record_attempt(store, source_id=source_id, natural_key=natural_key,
+                                        outcome="accepted" if status in {"accepted", "no_change"} else status,
+                                        reason="", now=now)
                     if kind == "fixed_index" and not row_created and status == "accepted":
                         status = "no_change"
                     if status == "accepted":
@@ -378,10 +427,17 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                         document_ids.append(doc_id)
                 except (ValueError, TypeError, KeyError, SECSourceUnavailable) as exc:
                     unavailable = isinstance(exc, SECSourceUnavailable)
+                    if unavailable and "RequestBudgetExceeded" in str(exc):
+                        deferred += 1        # never reached the network: not an attempt, not a failure
+                        continue
                     failed += int(unavailable)
                     quarantined += int(not unavailable)
                     natural_key = str(row.get("accession_number") or
                                       row.get("transcripts_id") or row.get("path") or "invalid")
+                    if kind == "official_body":
+                        _record_attempt(store, source_id=source_id, natural_key=natural_key,
+                                        outcome="failed" if unavailable else "quarantined",
+                                        reason=type(exc).__name__ + ":" + str(exc), now=now)
                     rejected_row_id, _ = _record_row(
                         store, source_id=source_id, snapshot_id=snapshot_id,
                         entity=str(row.get("symbol") or ""), natural_key=natural_key,
@@ -394,6 +450,8 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                       "no_change")
             if failed:
                 status = "partial" if accepted or unchanged else "failed"
+            if deferred and status in {"no_change", "succeeded"}:
+                status = "partial"           # candidates were left for the next run
             if kind == "official_body" and not source_rows:
                 status = "partial"
                 coverage_missing_entities = [entity.upper() if entity else "SEC_INDEX"]
@@ -404,6 +462,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                                    reason_codes={**({"fixed_source_quarantine": quarantined}
                                                    if quarantined else {}),
                                                  **({"source_unavailable": failed} if failed else {}),
+                                                 **({"deferred_budget": deferred} if deferred else {}),
                                                  **({"snapshot_stale": 1}
                                                     if snapshot_stale else {}),
                                                  **({"coverage_missing_entities":

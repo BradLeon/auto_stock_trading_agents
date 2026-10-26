@@ -59,7 +59,12 @@ class SECTransport:
     """One run's request/size budget; never follows an unvalidated redirect."""
 
     def __init__(self, budget: dict):
+        # `max_requests_per_run` is the budget of SUCCESSFUL requests: a request that failed does not use it. Failures
+        # have their own ceiling (`max_failed_requests_per_run`, default the same number), so a run still cannot hammer
+        # an unreachable host. A 403/404 is an answer, not a failure of the host: it uses neither (the run is bounded by
+        # `max_documents_per_run` anyway).
         self.remaining = int(budget["max_requests_per_run"])
+        self.failures_remaining = int(budget.get("max_failed_requests_per_run", self.remaining))
         self.timeout = float(budget.get("timeout_seconds", 30))
         self.user_agent = (os.environ.get("SEC_EDGAR_USER_AGENT") or
                            os.environ.get("ATS_SEC_USER_AGENT") or "").strip()
@@ -69,6 +74,10 @@ class SECTransport:
             raise ValueError("sec_user_agent_missing")
         self.last_request = 0.0
 
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining <= 0 or self.failures_remaining <= 0
+
     def for_filing(self, row: dict):
         def request(url: str, *, stage: str, attempts: int = 3):
             failures = []
@@ -76,11 +85,10 @@ class SECTransport:
                 return "", (extractor.SecFetchFailure(
                     stage, url, "InvalidOfficialURL", "outside accession"),)
             for attempt in range(min(attempts, 2)):
-                if self.remaining <= 0:
+                if self.exhausted:
                     failures.append(extractor.SecFetchFailure(
                         stage, url, "RequestBudgetExceeded", "run request budget exhausted"))
                     break
-                self.remaining -= 1
                 time.sleep(max(0, 0.15 - (time.monotonic() - self.last_request)))
                 self.last_request = time.monotonic()
                 try:
@@ -95,9 +103,14 @@ class SECTransport:
                                 payload.extend(chunk)
                                 if len(payload) > 12_000_000:
                                     raise ValueError("sec_body_over_budget")
+                            self.remaining -= 1
                             return bytes(payload).decode(response.encoding or "utf-8",
                                                          errors="replace"), tuple(failures)
                 except (httpx.HTTPError, ValueError) as exc:
+                    definitive = isinstance(exc, httpx.HTTPStatusError) and \
+                        exc.response.status_code in {403, 404}
+                    if not definitive:
+                        self.failures_remaining -= 1      # a definitive "not there" costs nothing; a flaky host does
                     failures.append(extractor.SecFetchFailure(
                         stage, url, type(exc).__name__, f"attempt {attempt + 1} failed"))
                     if isinstance(exc, ValueError) or (
@@ -112,6 +125,7 @@ def fetch_filing(row: dict, transport: SECTransport):
     """Return an authoritative body with its semantic role, never a directory/cover."""
     validate_filing(row)
     cik, accession, form = str(row["cik"]), row["accession_number"], row["form_type"]
+    spent_before = getattr(transport, "remaining", None)
     with extractor.document_transport(transport.for_filing(row)):
         if form in {"8-K", "6-K"}:
             result = extractor.exhibit_result(cik, accession, form_type=form)
@@ -122,4 +136,9 @@ def fetch_filing(row: dict, transport: SECTransport):
             semantic = "regulatory_filing"
     if result.status == "succeeded" and not _official_url(result.url, accession, cik):
         raise ValueError("sec_result_outside_accession")
+    if result.status != "succeeded" and spent_before is not None:
+        # The budget pays for filings that are admitted. A filing that yields no body (an 8-K without a press-release
+        # exhibit, a missing submission) gives its requests back; the run stays bounded by `max_documents_per_run`
+        # and, for flaky hosts, by `max_failed_requests_per_run`.
+        transport.remaining = spent_before
     return result, semantic

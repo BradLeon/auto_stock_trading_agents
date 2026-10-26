@@ -167,6 +167,9 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
   摄入上月最终版）、第三方序列的链证据采集（`chain-source-collect`）：L1 三个证据观察器每天 09:00 UTC
   （`chain_l1_governed_evidence_daily`），韩国/台湾出口与 DRAM 合约价每周一 09:30 UTC
   （`chain_regional_*_weekly`）。这类任务不调用模型。
+- SEC 正文任务（`sec_official_body_daily`，每天 09:30 UTC，在文件索引 08:00 之后）每次最多取 20 份申报，**请求预算只算入库成功的申报**：
+  取不到正文的（如没有新闻稿附件的 8-K）退还请求；已入库的 7 天内不再取；同一份在 3 个不同日子都找不到（或 5 个不同日子都失败）就不再试；
+  预算用完没轮到的记为“延后”而不是失败，下次排在最前。日历“发布确认”在 10:00 UTC，紧接着这个任务。
 - 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](data/STRUCTURED_DATA_OPERATIONS.md)。
 
 ## 6. 事件日历

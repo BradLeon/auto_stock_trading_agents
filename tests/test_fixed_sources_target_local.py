@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ats.data.catalog.loader import DataCatalog
 from ats.data.pipelines.unstructured import document_ingest as fixed_sources
@@ -296,13 +296,18 @@ def test_official_body_revision_is_separate_from_index_metadata(tmp_path, monkey
             "sec_edgar_filing_body", entity="NVDA", now=NOW, store=store)
         assert first["accepted"] == 1
         current["body"] = "NVIDIA Corporation revised quarterly filing. " * 80
-        second = fixed_sources.ingest_documents(
+        # An admitted filing is looked at again only after the weekly re-check interval, to catch a revised body.
+        immediately = fixed_sources.ingest_documents(
             "sec_edgar_filing_body", entity="NVDA", now=NOW, store=store)
+        assert immediately["discovered"] == 0
+        later = NOW + timedelta(days=8)
+        second = fixed_sources.ingest_documents(
+            "sec_edgar_filing_body", entity="NVDA", now=later, store=store)
         assert second["accepted"] == 1
         assert second["document_ids"] == first["document_ids"]
         assert len(store.document_versions(first["document_ids"][0])) == 2
         third = fixed_sources.ingest_documents(
-            "sec_edgar_filing_body", entity="NVDA", now=NOW, store=store)
+            "sec_edgar_filing_body", entity="NVDA", now=later + timedelta(days=8), store=store)
         assert third["no_change"] == 1
     finally:
         store.close()

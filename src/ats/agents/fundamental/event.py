@@ -36,33 +36,97 @@ def _meta_key(symbol: str, fiscal_label: str) -> str:
 # --------------------------------------------------------------------------- #
 # 基线冻结（5.3）
 # --------------------------------------------------------------------------- #
+def _period_key(label: str) -> tuple[str, str] | None:
+    """(fiscal year, quarter) from either spelling in use: `FY2027Q1` (calendar) or `Q1 FY2027` (baseline)."""
+    import re
+
+    text = str(label or "").upper().replace(" ", "")
+    hit = re.search(r"FY(\d{4})Q([1-4])", text) or re.search(r"Q([1-4])FY(\d{4})", text)
+    if not hit:
+        return None
+    first, second = hit.groups()
+    return (first, second) if len(first) == 4 else (second, first)
+
+
+def published_baseline(store, *, symbol: str, fiscal_label: str, cutoff: str = "") -> dict | None:
+    """The pre-print baseline as it was published: newest `[基线 vN]` projection of the period not after `cutoff`.
+
+    The dossier's expectation set is overwritten by the scoring phase after the print, so it cannot be the source of
+    a baseline frozen at review time. The published projection is append-only and carries the same expectation table,
+    narrative and consensus, and its timestamp proves it predates the print.
+    """
+    from datetime import datetime
+
+    wanted = _period_key(fiscal_label)
+    limit = None
+    if cutoff:
+        try:
+            limit = datetime.fromisoformat(str(cutoff).replace("Z", "+00:00"))
+        except ValueError:
+            limit = None
+    for row in store.task_projection_envelopes(
+            agent_role="fundamental_expectation_update", scope_kind="entity", scope_id=symbol.upper(), limit=500) or []:
+        payload = row.get("payload") or {}
+        detail = payload.get("baseline") or {}
+        if (not str(payload.get("driver", "")).startswith("[基线") or not detail
+                or _period_key(payload.get("period", "")) != wanted):
+            continue
+        if limit is not None:
+            made = datetime.fromisoformat(str(row.get("created_at") or "").replace("Z", "+00:00"))
+            if made.tzinfo is None:
+                made = made.replace(tzinfo=timezone.utc)
+            if made > limit:
+                continue
+        consensus = detail.get("consensus") or {}
+        return {
+            "narrative": str(detail.get("synthesis") or ""),
+            "expectations": [
+                {"dim_key": e.get("dim_key", ""), "metric": e.get("metric", ""), "neutral": e.get("neutral", ""),
+                 "conservative": e.get("conservative", ""), "optimistic": e.get("optimistic", ""),
+                 "source": e.get("source", "")} for e in detail.get("expectation_table") or []],
+            "consensus": {f"consensus_{k}": v for k, v in consensus.items()
+                          if k in {"eps", "revenue", "target_price", "eps_low", "eps_high", "revenue_low",
+                                   "revenue_high"} and v is not None},
+            "refs": {"baseline_projection_id": row.get("projection_id", ""),
+                     "baseline_built_at": detail.get("built_at", ""), "baseline_published_at": row.get("created_at", "")}}
+    return None
+
+
 def freeze_baseline(store, *, symbol: str, fiscal_label: str, cutoff: str = "") -> dict:
     """在 cutoff 冻结本标的本报告期的预期基线与其引用，写入 Workflow memory。
 
     冻结记录是一次性快照：事件评审的差异计算永远以它为参照，后续到达的
-    简报、文档或重跑 prep 都不改写它（重跑只会重算 prep 的 dossier，冻结
-    记录独立存在）。
+    简报、文档或重跑 prep 都不改写它。基线取财报前已发布的 `[基线 vN]`
+    （评分阶段会覆盖档案里的预期集合，档案不能再当来源）；已冻结且有内容的记录
+    原样沿用，读不到基线时不写空记录覆盖。
     """
     from ...schemas.pead import ExpectationSet
 
     symbol = symbol.upper()
     cutoff = cutoff or _now()
-    dossier = store.get_dossier(symbol, fiscal_label)
-    es = getattr(dossier, "expectation_set", None) if dossier else None
-    frozen = {
-        "symbol": symbol, "fiscal_label": fiscal_label, "frozen_at": cutoff,
-        "narrative": es.narrative if isinstance(es, ExpectationSet) else "",
-        "expectations": [
-            {"dim_key": e.dim_key, "metric": e.metric, "neutral": e.neutral,
-             "conservative": e.conservative, "optimistic": e.optimistic, "source": e.source}
-            for e in (es.expectations if isinstance(es, ExpectationSet) else [])],
-        "consensus": _consensus_view(es) if isinstance(es, ExpectationSet) else {},
-        "refs": {
-            "dossier_symbol": symbol, "dossier_fiscal_label": fiscal_label,
-            "expectation_set_as_of": es.as_of.isoformat() if isinstance(es, ExpectationSet) else "",
-        },
-    }
-    store.set_meta(_meta_key(symbol, fiscal_label), json.dumps(frozen, ensure_ascii=False))
+    existing = load_frozen_baseline(store, symbol=symbol, fiscal_label=fiscal_label)
+    if existing and (existing.get("expectations") or existing.get("narrative")):
+        return existing
+    frozen = {"symbol": symbol, "fiscal_label": fiscal_label, "frozen_at": cutoff,
+              "narrative": "", "expectations": [], "consensus": {}, "refs": {}}
+    published = published_baseline(store, symbol=symbol, fiscal_label=fiscal_label, cutoff=cutoff)
+    if published:
+        frozen.update(published)
+    else:
+        dossier = store.get_dossier(symbol, fiscal_label)
+        es = getattr(dossier, "expectation_set", None) if dossier else None
+        if isinstance(es, ExpectationSet) and es.expectations:
+            frozen.update({
+                "narrative": es.narrative,
+                "expectations": [
+                    {"dim_key": e.dim_key, "metric": e.metric, "neutral": e.neutral,
+                     "conservative": e.conservative, "optimistic": e.optimistic, "source": e.source}
+                    for e in es.expectations],
+                "consensus": _consensus_view(es),
+                "refs": {"dossier_symbol": symbol, "dossier_fiscal_label": fiscal_label,
+                         "expectation_set_as_of": es.as_of.isoformat()}})
+    if frozen["expectations"] or frozen["narrative"]:
+        store.set_meta(_meta_key(symbol, fiscal_label), json.dumps(frozen, ensure_ascii=False))
     return frozen
 
 
@@ -158,6 +222,13 @@ def compute_tri_diffs(*, frozen_baseline: dict | None, expectation_set,
     vs_baseline: list[dict] = []
     not_comparable: list[dict] = []
     baseline_sign = 0
+    # After the print the dossier's expectation set is gone; the consensus frozen with the baseline is the pre-print one.
+    frozen_consensus = (frozen_baseline or {}).get("consensus") or {}
+    if frozen_consensus and not (getattr(expectation_set, "consensus_eps", None)
+                                 or getattr(expectation_set, "consensus_revenue", None)):
+        from types import SimpleNamespace
+
+        expectation_set = SimpleNamespace(symbol=symbol, **frozen_consensus)
     if frozen_baseline:
         actual_by_dim = {}
         if actuals is not None:

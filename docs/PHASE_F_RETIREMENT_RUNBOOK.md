@@ -1,6 +1,36 @@
 # 旧实现退役 Runbook（Phase F，2026-10-17）
 
-> 写给要决定「什么时候可以删旧代码」的人。先说结论：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+> 写给要决定「什么时候可以删旧代码」的人。先说结论（**2026-10-17 的快照，最新数字见下面第〇节**）：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+
+## 〇、2026-10-27 更新：分组、依赖与门（退役变更 retire-legacy-and-migration-tooling）
+
+G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/changes/retire-legacy-and-migration-tooling/verification.md`，78 项全部通过）。从这一天起，登记处不再只是一张平铺的清单，而是带批次、依赖与门的退役计划。**下面第一至第九节保留 2026-10-17 的原文与快照，数字以本节为准。**
+
+**登记处现在是 43 条**（`ats retirement decide` 会逐条列出）：
+
+| 批次 | 条数 | 内容 | 门 |
+|---|---|---|---|
+| R1 命名与入口残留 | 5 | 旧手动命令、负责人 legacy 模式、证据命令（保留命题治理命令）、`consumer-cutover` 命名、文档里的迁移措辞 | G0 |
+| R2 研究侧切换期工具 | 5 | `batch`/`read`、`schedule_cutover`、`intake`、`analysis_verification`、`dispatch_dedup` | G0 |
+| R3 登记修正与研究侧已登记条目 | 3 | `task_projections.legacy_columns`、`evidence_fact_projections.legacy_observation_id`、`layer_verdict.allocation` | G0 |
+| R4 只被旧入口用到的旧分析代码 | 4 | `risk_manager`、`risk_validator.apply_guardrails`、`pead/monitor`、`pead/research`（交易链路其余代码保留） | G0 |
+| R5 交易路径相关 | 15 | 读路由与资格机制、交易侧切换工具、旧读模型表（含新补登记的 `macro_reviews`、`technical_reviews`）等；本 change 只登记 | **trade_path_cutover**（外部门） |
+| 未分组（早期阶段已退役） | 11 | 例如 `workflow_memory.*`、`scheduler.hardcoded_serial_run` | — |
+
+**两道门：**
+- **G0**：由 `ats retirement gate --show` 只读汇总 verification.md——每一项须是「通过 / 接受缺口 / 不适用」，空和「未通过」都挡住，G0 结论须签字。现在显示已开。
+- **trade_path_cutover**：交易路径（Chief、Clerk、Risk、Trader、Boss）切换的外部门，由另一个 change 满足，**这里永远不会放行**。所以 R5 的 15 条在本 change 里只登记、不退。
+
+**依赖：** 条目的 `depends_on` 列出必须先退役的前序条目，加载时校验不指向未登记条目、不成环。例如 `naming.migration_terms_in_docs` 要等四个入口类条目都退役；`agents.pead.monitor`、`agents.pead.research` 要等 `legacy_entry.research_manual_commands`；`migration.analysis_verification` 与 `migration.intake` 一起走。`ats retirement decide` 现在会把「前序未退役」和「门未开」写进缺项，缺项任何一条存在都不得判可退出。
+
+**这次修正的登记错误：**
+- `pead_dossier` 不再是待退项：它是基本面分析师自有的在用记录（财报前基线存在这里，事件评审读它，同一财季只留一份档案），留在在用清册里，不登记墓碑。
+- `macro_reviews`、`technical_reviews` 补登记（消费方是 Chief，归 R5）。
+- 8 条「登记为 retired 却无法证明」的条目，`ats retirement zero` 现在显示「**待补证**」，不再看起来像通过；补 `MODULE_TO_ROLE` 映射后重扫属于退役变更的 6.1。
+
+**每批怎么退（V1–V6，设计见 design.md D5）：** 退役前 V1 静态无引用、V2 运行无调用、V3 `ats retirement decide` 的依赖与门检查；退役后 V4 测试与基线对照、V5 重启服务后观察下一次定时触发与数据刷新、V6 历史可读与已退役提示。**研究与数据侧验证通过即退役，无需等满一周；交易链路暂不退役**（2026-10-27 用户裁决）。
+
+**有意保留、不迁移：** `ats evidence claims/report/propose/proposals/review/kbreview` 与 `ats sector kbperturb`——人在回路的治理与开发工具，不是分析师入口（见 inventory.md 4.1）。
 
 ## 一、当前退出结果（与判据工具是否完成无关）
 

@@ -39,7 +39,7 @@ def _layer_projection(store, layer_key: str, status: str, *, when=NOW):
 
 
 def _run_layered(store, cfg, monkeypatch, *, verdict_status="steady", rotation_view=None,
-                 rotate_fn=None):
+                 rotate_fn=None, write_reports=False):
     """Drive `_run_layered` with the layer LLM stubbed; projections drive allocation."""
     saved = []
 
@@ -77,7 +77,7 @@ def _run_layered(store, cfg, monkeypatch, *, verdict_status="steady", rotation_v
         "factset": {"text": "", "reason": "", "state": "platform",
                     "report_date": "", "version_id": ""}})
     review = sector_review._run_layered("demo", cfg, _S(), use_llm=True, live_data=False,
-                                        write_reports=False)
+                                        write_reports=write_reports)
     return review, saved
 
 
@@ -242,3 +242,30 @@ def test_conflicts_are_appended_to_review_summary(monkeypatch):
     review = sector_review._run_layered("demo", _cfg(), _S(), use_llm=True,
                                         live_data=False, write_reports=False)
     assert "待人工裁决" in (review.summary or "")
+
+
+def test_the_sector_run_writes_the_sector_report_next_to_the_layer_reports(monkeypatch, tmp_path):
+    """G0 L01, 2026-10-26: the Dispatcher path wrote the layer reports and the html page but never the sector report
+    (`行业分析-<行业>-<日期>.md`); the last one in the vault was from 2026-09-04."""
+    store = _store()
+    _layer_projection(store, "L6_memory", "expanding")
+    _layer_projection(store, "L2_gpu", "contracting")
+    cfg = _cfg().model_copy(update={"output_dir": str(tmp_path), "label": "演示"})
+    review, _ = _run_layered(store, cfg, monkeypatch, write_reports=True)
+    written = sorted(path.name for path in tmp_path.iterdir())
+    assert any(name.startswith("行业分析-演示-") and name.endswith(".md") for name in written), written
+    assert any(name.startswith("层分析-演示-L6") for name in written)           # the layer reports are still written
+
+
+def test_a_failing_sector_report_does_not_fail_the_run(monkeypatch, tmp_path):
+    store = _store()
+    _layer_projection(store, "L6_memory", "expanding")
+    _layer_projection(store, "L2_gpu", "contracting")
+
+    def broken(*_a, **_k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("ats.agents.sector.report.write", broken)
+    cfg = _cfg().model_copy(update={"output_dir": str(tmp_path), "label": "演示"})
+    review, saved = _run_layered(store, cfg, monkeypatch, write_reports=True)
+    assert saved and review.layer_verdicts                                        # the review is still saved

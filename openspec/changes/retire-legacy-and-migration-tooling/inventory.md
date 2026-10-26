@@ -97,7 +97,7 @@
 | `ats macro review` | 评审 + 打印 + 写 Obsidian 周报 | `_macro_adapter` 评审 + `write_new_version` 写周报 | `宏观分析-<标签>-<日期>.md`，如 `宏观分析-宏观-2026-10-24.md`；每周六 09:00（台北） | 已承担 |
 | `ats technical review` | 评审 + 打印 + 写 Obsidian 技术面报告 | `_technical_adapter` 只写投影；报告由 `report_publishers.technical_report` 在**整次运行结束后**用已发布的投影汇总写一份（不显示 VIX 数值，只显示是否触发恐慌层） | `技术面读数-<标签>-<日期>.md`，如 `技术面读数-技术面-2026-10-24.md`；工作日 22:00（台北） | 已恢复（W10 复核） |
 | `ats sector review`（层级报告 + HTML） | 评审 + 写行业周报 + 层级报告 + 可视化 HTML | `sector-review` 任务内 `agents/sector/review.py` 写层级报告与 HTML | 层级：`层分析-<行业>-<层名>-<日期>.md`（8 层各一份），如 `层分析-AI硬件-L1AI应用层（Token经济）-2026-10-25.md`；页面：`层分析-<行业>-<日期>.html`；每周六 09:30（台北） | 已恢复 |
-| `ats sector review`（**行业周报**） | 同上，写 `行业分析-<行业>-<日期>.md` | **没有调用**：`agents/sector/report.write` 在新路径里没人调（只有旧命令 `ats sector review` 的 `cli.py` 调） | 应为 `行业分析-AI硬件-<日期>.md`；库里最新一份是 `行业分析-AI硬件-2026-09-04.md`，**10-24、10-25 的行业评审都没有写** | **差异：行业周报未恢复**（见第五节 Q1 补充） |
+| `ats sector review`（**行业周报**） | 同上，写 `行业分析-<行业>-<日期>.md` | `sector-review` 任务内 `agents/sector/review.py` 在层级报告之后调用 `report.write`（10-26 补上；此前新路径没有调用，10-24、10-25 都没写） | `行业分析-<行业>-<日期>.md`，如 `行业分析-AI硬件-2026-10-26.md`；每周六 09:30（台北） | 已恢复（10-26 补，W10 复核） |
 | `ats sector layer` | 单层配置结论 + 层内选股 | `layer-review` 适配器写层级投影，不打印 | 无独立文件；层级结论在上面的层级报告里 | 已承担 |
 | `ats sector crosssection` | 单层截面排名，持久化到库 | 行业评审自己在评审里逐层算截面，结果存进评审的 `baskets`；Layer 投影另带截面排名 | 层级报告第三节「截面明细」 | 已核实、已承担：Chief 读的是评审里的 `baskets`，不读独立持久化表，旧调度器每周额外 `persist=True` 的那一遍没有消费者 |
 | `ats analyst information` | 一轮信息简报 | `_information_adapter` 同一入口 | 投影（不写 Obsidian 报告）；`g0_latest information_brief` 查看 | 已承担 |
@@ -126,7 +126,7 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 
 ## 五、需要你决定的问题（写进 G0 清单前先定）
 
-- **Q1 可读报告要不要恢复。**（10-21 已裁决：恢复；10-26 实测：技术面报告、层级报告 + HTML、产业链证据周报已恢复，**行业周报 `行业分析-…md` 未恢复**，见 4.1。） 技术面、行业（含层级、HTML）、产业链证据周报现在不再由流水线生成（宏观周报已补上）。如果你仍要看这些报告，需要在 Dispatcher 的适配器里补写报告，并先于旧入口退役完成；如果不需要，就在 G0 清单里记为「接受缺失」。
+- **Q1 可读报告要不要恢复。**（10-21 已裁决：恢复；10-26 实测：技术面报告、层级报告 + HTML、产业链证据周报已恢复，行业周报 `行业分析-…md` 原先漏了，10-26 已补，见 4.1。） 技术面、行业（含层级、HTML）、产业链证据周报现在不再由流水线生成（宏观周报已补上）。如果你仍要看这些报告，需要在 Dispatcher 的适配器里补写报告，并先于旧入口退役完成；如果不需要，就在 G0 清单里记为「接受缺失」。
 - **Q2（已核实，无需你决定）持久化截面排名。** Chief 读的是行业评审里的 `baskets`，评审内部已自己计算截面，独立持久化的那一遍没有消费者，不必恢复。
 - **Q3 命题治理与知识库校验命令（`ats evidence claims/report/propose/proposals/review/kbreview`、`ats sector kbperturb`）。** 这是人审批新命题的入口，没有新路径对应物。建议保留，不列入 R1。
 - **Q4 R4 缩小。** 按第三节，R4 只剩 `risk_manager`、`risk_validator`、`pead/monitor`，你同意吗？

@@ -255,6 +255,16 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
                                    rotation_available=view is not None)
 
     if write_reports:
+        # The sector report itself (行业分析-<行业>-<日期>.md). The Dispatcher path used to write only the layer reports
+        # and the html page, so 10-24 and 10-25 produced no sector report at all (found in G0 L01, 2026-10-26).
+        try:
+            from . import report as report_mod
+
+            sector_path = report_mod.write(review, cfg)
+            if sector_path:
+                log.info("sector report: %s", sector_path)
+        except Exception as exc:  # noqa: BLE001 - a report must not fail the run
+            log.warning("sector report failed for %s: %s", name, exc)
         try:
             from . import viz
 

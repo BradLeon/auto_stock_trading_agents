@@ -275,4 +275,5 @@ P01–P07 结论补充（2026-10-23）：`g0_product` 的 ok 仅表示“无阻�
 
 - [ ] 产业链证据（`chain_evidence_daily`）当前是试点名单 TSM / ASML / MU / SKHY。G0 验证全部完成、正式上线后，在 `config/data/schedules.yaml` 的 `chain_evidence_daily.entities` 里扩充更多公司（每家一个任务，每次最多 8 次抽取调用）。扩之前先看 D01–D04 抽查发现的标注偏差是否已处理，并决定旧编号证据（约 60%）如何回查。
 - [ ] 上线后处理 P01–P07 提醒里“光靠上线解决不了”的四项：005930.KS 财务来源、FactSet 行业分区放行条件（11-01 实测）、L3 命题（L1 已于 10-25 补齐）、L5/L6/L7 缺失证人。名单类缺口（财务、一致预期、证据）随上面的扩名单待办一并改配置。
-
+- [ ] **下阶段任务：旧路径 / 旧入口的下线与清退**（即本变更的 R1–R5）。清退范围里**不含** `ats evidence claims/propose/proposals/review/kbreview` 与 `ats sector kbperturb`：10-26 复核确认它们是人在回路的治理与开发工具，不是分析师入口，保留且不迁移（理由见 inventory.md 4.1 与第五节 Q3）。
+- [ ] 上线后择期一次性过一遍命题治理：`claim_proposals` 里有 1 条 2026-08-06 起一直 pending 的候选命题，没归属的观测至少 500 条；用 `ats evidence proposals`、`ats evidence kbreview` 看一遍，决定采纳、拒绝或接受不用（采纳后仍须手工写进 `config/sectors/ai_hardware.yaml`）。

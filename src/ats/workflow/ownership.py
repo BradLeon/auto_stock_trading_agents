@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import logging
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -15,8 +16,10 @@ from ..config import REPO_ROOT
 from .dispatcher import Dispatcher, default_data_vintage
 from .planning import TASK_ROLE, build_plan
 from .run_contracts import TriggerContext
-from .store import WorkflowStore
+from .store import IdentityConflict, WorkflowStore
 from .triggers import TriggerService, load_trigger_policies, trigger_key
+
+log = logging.getLogger("ats.workflow.ownership")
 
 
 class OwnershipError(ValueError):
@@ -446,10 +449,19 @@ def record_due_calendar_material_waits(*, calendar_store=None, now: datetime | N
                        "event_version": route.event_version,
                        "workflow_id": workflow_id,
                        "reason_code": "release_material_not_admitted"}
-            row = store.record_trigger(
-                trigger_key=key, kind="event", workflow_id=workflow_id,
-                request=request, event_id=route.event_id,
-                event_version=route.event_version, at=instant)
+            try:
+                row = store.record_trigger(
+                    trigger_key=key, kind="event", workflow_id=workflow_id,
+                    request=request, event_id=route.event_id,
+                    event_version=route.event_version, at=instant)
+            except IdentityConflict:
+                # The earnings plan wake-up and this waiting record share one key (workflow, event id, event
+                # version). The plan record, written earlier for the same version, stays as it is: it already
+                # ran, and the release wake-up gets a new version (hence a new key) once materials are admitted.
+                # One such event must not stop the waiting records of the events after it (LRCX, 2026-10-22).
+                log.info("calendar wait for %s (%s): a wake-up already holds this key; left as is",
+                         route.event_id, workflow_id)
+                continue
             if row["status"] in {"planned", "pending"}:
                 store.resolve_planned_trigger(
                     key, status="waiting_material",

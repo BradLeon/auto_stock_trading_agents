@@ -124,12 +124,12 @@
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
 | A01 | 三个服务在跑 |  | 〔自动证据，非结论〕`launchctl list`：com.ats.dispatcher PID 8699；com.ats.serve PID 8776（上次退出码 -15）；com.ats.data-refresh PID `-`、退出码 0；`/health` 返回 `{"ok":true}` |  |  |  |
-| A02 | 发布时检查（刷新后） |  | 〔自动证据，非结论〕29c6b4d 之后 `consumer-cutover log` 没有新行（没有状态变化就不记）；data-refresh.out.log 里 `consumer_health` 0 行；隔离测试 `tests/test_consumer_health.py` 27 passed |  |  | 生产上还没有一条新机制的记录 |
+| A02 | 发布时检查（刷新后） | 通过 | 〔自动证据，非结论〕29c6b4d 之后 `consumer-cutover log` 没有新行（没有状态变化就不记）；data-refresh.out.log 里 `consumer_health` 0 行；隔离测试 `tests/test_consumer_health.py` 27 passed | 用户确认（AI 建议） | 2026-10-26 |生产上还没有一条新机制的记录；用户 10-26 核对飞书截图通过：10-25 19:31“数据产品健康检查未通过：sector（L1_app 投影读不出）”与 19:55“已恢复”各一条，与生产日志记录一致、同状态不重复。该次失败由我撤回的 L1 旁路提交留下的不兼容投影引起，检查按设计拦住并告警 |
 | A03 | 读取前检查与阻断语义 |  | 〔自动证据，非结论〕生产运行记录里没有 `data_product_unhealthy`；隔离测试 `test_unhealthy_data_products_block_the_task_before_it_runs` passed |  |  |  |
-| A04 | 飞书告警（状态变化时一次） |  | 〔自动证据，非结论〕隔离测试 `test_observe_logs_and_alerts_only_when_the_status_changes`、`test_a_failing_alert_does_not_break_observation` passed；生产上新机制尚未发过告警 |  |  | 请在飞书群历史里看 10-20 09:36 前后有没有 technical 的告警（旧机制） |
+| A04 | 飞书告警（状态变化时一次） | 通过 | 〔自动证据，非结论〕隔离测试 `test_observe_logs_and_alerts_only_when_the_status_changes`、`test_a_failing_alert_does_not_break_observation` passed；生产上新机制尚未发过告警 | 用户确认（AI 建议） | 2026-10-26 |请在飞书群历史里看 10-20 09:36 前后有没有 technical 的告警（旧机制）；用户 10-26 核对飞书通过：由好转坏、由坏转好各发一条，不刷屏；隔离测试 27 passed |
 | A05 | `com.ats.dispatcher` 重启后加载新代码、启动补跑 |  | 〔自动证据，非结论〕进程启动于 10-20 16:10:51，晚于最后一次改 `src/` 的提交（64926c4，16:09:52）；10-20 20:00 信息简报在 23:18、21:00 基本面在 23:27 补跑成功，各一次 |  |  | 工作区里另有未提交的 `src/` 改动（其他会话），未加载，不影响本项 |
 | A06 | 数据刷新控制器每小时运行与补跑 |  | 〔自动证据，非结论〕`g0_refresh` 显示最近一次定时运行 10-21 10:29，launchd 已加载；周/月任务过宽限后记 `misfire` |  |  |  |
-| A07 | 日志无未处理异常 |  | 〔自动证据，非结论〕dispatcher.err.log：10-20 23:29 technical-review `RouteUnavailable` 一处 Traceback；data-refresh.err.log 只有一行无害的 MallocStackLogging 提示 |  |  | 与 P07、W03 同源 |
+| A07 | 日志无未处理异常 | 通过 | 〔自动证据，非结论〕dispatcher.err.log：10-20 23:29 technical-review `RouteUnavailable` 一处 Traceback；data-refresh.err.log 只有一行无害的 MallocStackLogging 提示 | 用户确认（AI 建议） | 2026-10-26 |与 P07、W03 同源；用户 10-26 要求查根因：10-22 14:10、10-23 02:25/14:10 的 `IdentityConflict` 是同一场财报的“计划事件”记录与“财报日到了仍缺材料”的等待记录共用触发键（工作流+事件号+事件版本），后者内容不同被拒，一个事件出错还会让排在后面的事件丢等待记录；事件升版（材料入库）后键变化所以消失，并非已修好，本周 SKHY/GOOG/MSFT 会同样触发。已按方案 A 修复：同键已有记录就保留并跳过、不报错，不改键算法；补测试（无修复时失败）。其余 ERROR：10-20 技术面读窗口（P07/W03 同源，已恢复）、10-21 信息简报证据片段定位不到、10-24 02:10 基本面事件评审（旧进程未加载新代码，已修复） |
 
 ## 8. 运维文档
 

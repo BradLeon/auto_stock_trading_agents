@@ -348,3 +348,52 @@ def test_yaml_reload_does_not_rollback_sql_owner(
     assert [row["to_status"] for row in persisted.trigger_history(
         final_trigger["trigger_key"])] == ["planned", "running", "complete"]
     assert persisted.list_runs()[0]["status"] == "complete"
+
+
+def test_a_plan_record_under_the_same_key_does_not_stop_the_other_waiting_records(tmp_path, monkeypatch):
+    """LRCX, 2026-10-22: the earnings plan wake-up had already used the key (workflow, event id, version), so the
+    waiting record for the same version raised IdentityConflict and every event after it lost its waiting record."""
+    from datetime import datetime, timezone
+    import yaml
+
+    from ats.data.stores.schedule_calendar import (ScheduleCalendarStore, ScheduleEventCandidate,
+                                                   macro_identity)
+    from ats.workflow.run_contracts import TriggerContext
+    from ats.workflow.store import WorkflowStore
+    from ats.workflow.triggers import trigger_key
+
+    config = tmp_path / "config"
+    (config / "workflow").mkdir(parents=True)
+    (config / "workflow" / "workflow_owners.yaml").write_text(yaml.safe_dump({
+        "version": "1", "shadow_database": "shadow.sqlite",
+        "workflows": {"macro-review": {"mode": "shadow", "task_ids": ["macro-review"]}}}), encoding="utf-8")
+    (config / "workflow" / "event_routes.yaml").write_text(yaml.safe_dump({
+        "schema_version": 1,
+        "events": [{"event_type": "cpi", "event_subtype": "release", "required_event_state": "released",
+                    "workflow_ids": ["macro-review"], "scope_resolver": "portfolio",
+                    "required_admitted_material": True, "required_material_kinds": ["official_release"]}]}),
+        encoding="utf-8")
+    shadow_db = tmp_path / "shadow.sqlite"
+    monkeypatch.setenv("ATS_SHADOW_DB_PATH", str(shadow_db))
+    initialize_declared_schedule(config, tmp_path, monkeypatch)
+    calendar = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
+    planned = []
+    for period, day in (("2026-07", "2026-09-22"), ("2026-08", "2026-09-23")):
+        candidate = calendar.submit_candidate(ScheduleEventCandidate(
+            source_id="bls", event_type="cpi", stable_identity=macro_identity("CPI", period, "initial"),
+            event_date=day, time_precision="date"))
+        planned.append(calendar.publish_candidate(candidate["candidate_id"]))
+
+    store = WorkflowStore(shadow_db)
+    context = TriggerContext(kind="event", workflow_id="macro-review", event_id=planned[0]["event_id"],
+                             event_version=str(planned[0]["event_version"]))
+    store.record_trigger(trigger_key=trigger_key(context), kind="event", workflow_id="macro-review",
+                         request={"calendar_event_id": planned[0]["event_id"], "reason_code": "plan"},
+                         event_id=planned[0]["event_id"], event_version=str(planned[0]["event_version"]))
+
+    result = record_due_calendar_material_waits(
+        calendar_store=calendar, now=datetime(2026, 9, 24, 12, tzinfo=timezone.utc), config_dir=config)
+
+    assert [row["event_id"] for row in result] == [planned[1]["event_id"]]            # the other event is recorded
+    kept = store.get_trigger(trigger_key(context))
+    assert kept["status"] == "planned"                                                # the plan record is untouched

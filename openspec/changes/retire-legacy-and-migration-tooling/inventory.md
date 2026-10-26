@@ -130,7 +130,7 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 - **Q1 可读报告要不要恢复。**（10-21 已裁决：恢复；10-26 实测：技术面报告、层级报告 + HTML、产业链证据周报已恢复，行业周报 `行业分析-…md` 原先漏了，10-26 已补，见 4.1。） 技术面、行业（含层级、HTML）、产业链证据周报现在不再由流水线生成（宏观周报已补上）。如果你仍要看这些报告，需要在 Dispatcher 的适配器里补写报告，并先于旧入口退役完成；如果不需要，就在 G0 清单里记为「接受缺失」。
 - **Q2（已核实，无需你决定）持久化截面排名。** Chief 读的是行业评审里的 `baskets`，评审内部已自己计算截面，独立持久化的那一遍没有消费者，不必恢复。
 - **Q3（10-26 再次确认：保留，不迁移；下阶段只清退其余旧入口）命题治理与知识库校验命令（`ats evidence claims/report/propose/proposals/review/kbreview`、`ats sector kbperturb`）。** 这是人审批新命题的入口，没有新路径对应物。建议保留，不列入 R1。
-- **Q4 R4 缩小。**（10-26 已确认）R4 只剩：`risk_manager`、`risk_validator` 里已退役的 `apply_guardrails`（同文件的 `review_guardrails` 是声明的替代品，等 R5 决定去留，不随本批删除）、`pead/monitor`、`pead/research`（10-26 增补）。`agents/pead/{prep,score,report,units,triage,outputs}` 是新路径 Fundamental Analyst 的实现本体，保留。
+- **Q4 R4 缩小。**（10-26 已确认）R4 只剩：`risk_manager`、`risk_validator` 里已退役的 `apply_guardrails`（同文件的 `review_guardrails` 是声明的替代品，等 R5 决定去留，不随本批删除）、`pead/monitor`、`pead/research`（10-26 增补）。`agents/pead/{prep,score,report,units,triage,outputs}` 是新路径 Fundamental Analyst 的实现本体，保留。**风控部分的原则（用户 10-26）**：Risk / Chief / Clerk 的新路径还没有试用过（交易流程未上线），所以 R4 里只清退确实用不着的 Risk 代码（`risk_manager`、`apply_guardrails`），其余 Risk 代码一律保留，后续再清退旧路径剩余部分。
 
 ## 六、对 design.md / tasks.md 的修订建议
 

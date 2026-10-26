@@ -144,7 +144,7 @@
 
 | 编号 | 对象 | 结论 | 证据 | 核验人 | 日期 | 备注 |
 |---|---|---|---|---|---|---|
-| L01 | 旧手动入口副作用对照确认（[`inventory.md`](inventory.md) 第四、五节） |  | 〔自动证据，非结论〕inventory.md（a1c89e3）：技术面、行业（含层级与 HTML）、产业链证据周报的可读报告新路径不再生成（Q1）；命题治理命令无新路径对应物（Q3）；宏观周报已补上。10-21 裁决（ede7412）：Q1 恢复，走 tasks.md 第 2 组 RP（G0 之前）；Q3 保留 |  |  | 10-26 重读 inventory.md 第四节并按实际产出重写（8ae5524，加“产出文件名/位置”列）；核对时发现行业周报 `行业分析-…md` 新路径漏写，已补（见下提交）。待你确认后记通过，核验版本写 inventory.md 的提交号 |
+| L01 | 旧手动入口副作用对照确认（[`inventory.md`](inventory.md) 第四、五节） | 通过 | 〔自动证据，非结论〕inventory.md（a1c89e3）：技术面、行业（含层级与 HTML）、产业链证据周报的可读报告新路径不再生成（Q1）；命题治理命令无新路径对应物（Q3）；宏观周报已补上。10-21 裁决（ede7412）：Q1 恢复，走 tasks.md 第 2 组 RP（G0 之前）；Q3 保留 | 用户确认（AI 建议） | 2026-10-26 | 核验版本：inventory.md 提交 d6cb6d5（先于它的重写为 8ae5524、8a89fd9，修复为 4588a19）。用户 10-26 逐行阅读第四节全部 ok；核对中发现并补上行业周报 `行业分析-…md` 新路径漏写（8a89fd9）；Q3 命题治理与 kbperturb 确认保留不迁移；Q4：R4 缩小为 risk_manager、risk_validator.apply_guardrails、pead/monitor、pead/research 四项，pead 框架本体（prep/score/report/units/triage/outputs）保留；因 Risk/Chief/Clerk 新路径尚未试用，只清退用不着的 Risk，其余留待后续清退。恢复的技术面报告随 W10 复核 |
 
 ---
 

@@ -142,3 +142,20 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 2. design.md 新增「簇外依赖先于删除」一节，列出第二节的 6 处。
 3. tasks.md：R2 增加任务——先改 `cutover_wiring` 的接线声明、把 `digest` 从 `shadow_replay` 搬出、确认 `read_windows` 对 `shadow_reports` 的依赖去留；新增「可读报告接续」任务（取决于 Q1）。
 4. G0 清单（g0-runbook 会话产出）里「旧入口副作用对照确认」一项引用本文第四节。
+
+## 七、各批复验记录（V4–V6）
+
+### 第 5 组（R1：旧手动入口与命名）· 2026-10-27
+
+提交：0ae8e9f、5f6fd90、2cd1fb5、8d2b79d（5.1–5.3、5.5、5.6）、86e4c19（5.4）、0a6ae9c（5.7）。
+
+| 项 | 结果 |
+|---|---|
+| V4 测试 | 受影响文件逐个对照干净基线（`3b2a745` 的 worktree，同一批 id）：`test_phase_f_opinion_execution`、`research_gate`、`schedule_runtime`、`scoped_intake`、`stage_one` 失败集合与基线**完全相同**；`test_phase_f_acceptance_reports` 25 例全过；`test_schedule_owner_switch`、`workflow_ownership`、`macro_cutover`、`retired_research_commands`、`legacy_retirement`、`retirement_clearance`、`workflow_dispatcher`、`phase_f_schedule_stop` 全过。`test_cutover_cli` 3 例与 `test_sector_allocation` 1 例在更早提交同样失败，属既有。`test_phase_f_independent_runner`（2 失败）、`test_phase_f_integration_evidence`（21 错误）当前树结果已有，基线对照仍在后台运行，出结果前不记「既有」。本批未重跑全量（单次全量约 80 分钟）。TEST_BASELINE 已记本批 |
+| V5 运行 | 10-27 11:27（台北）`launchctl kickstart -k` 重启 `com.ats.dispatcher`（PID 31647）与 `com.ats.serve`（PID 31651），serve 在 8000 端口应答、启动日志无错误；`ats data health --consumer information` 为 ok。**尚未观察到**：重启后的下一次定时触发与日历消费（日历消费 06:10 / 18:10 UTC）、下一次数据刷新——这三项等真实触发后补记 |
+| V6 历史 | 4 条已登记 retired 的条目 `ats retirement tombstone` 均显示 `registered_status: retired`、`readable_by: []`；旧命令返回提示（`macro review`、`consumer-cutover health`、`dispatch owner-switch/owner-rollback`、`evidence collect`、`sector crosssection` 已逐个实跑）；旧表与台账可读（库里仍可查认领与历史） |
+
+遗留与注意：
+- `legacy_entry.research_owner_legacy_mode` 有意保持 pending（5.4 取「丙」，库内部值仍为 `legacy`），长期方案乙见 verification.md「上线后待办」。
+- 库里有 11 条 `running` 认领，最后更新在 10-19 至 10-23（information-brief 7 条、technical-review 4 条），无对应活进程，是早先中断留下的；`pause` 遇到 `running` 认领会拒绝，若以后要停用这两个工作流，需先单独处置它们。本任务未动。
+- `RESEARCH_MANUAL_MOVED` 里 `evidence collect/observe/articles` 与 `sector crosssection` 的提示前缀仍写「研究分析师由 Dispatcher 运行，请用」，读起来略别扭，不影响功能。

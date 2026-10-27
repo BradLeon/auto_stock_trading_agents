@@ -55,7 +55,7 @@
 - [x] 5.5 `legacy_entry.evidence_commands`：删除 `ats evidence observe/collect/articles` 与 `ats sector crosssection`；保留命题治理命令（`ats evidence claims/report/propose/proposals/review/kbreview`）与 `ats sector kbperturb`。验证：保留的命令测试通过，被删命令返回已退役提示（2cd1fb5；observe/collect/articles/crosssection 停用并删除约 140 行死代码，命题治理与 kbperturb 保留）
 - [x] 5.6 清理文档和帮助文本中的迁移期措辞（「新路径 / 旧路径 / 切流 / phase」），更新 README、OPERATIONS、DEVELOPMENT。验证：在 `docs/`（不含 archive）与 `ats --help` 中检索这些词，只剩有意保留并加注的位置（8d2b79d；帮助文本与操作类文档清理，DEVELOPMENT 新增“迁移期用语说明”列出有意保留处；docs/validation 为冻结的历史验收证据，不改）
 - [x] 5.7 登记处把本组条目标为 retired 并附证明，TEST_BASELINE 记录本批。验证：同 4.7（10-27：5 条里 4 条标 retired——`naming.consumer_cutover_cli`、`legacy_entry.research_manual_commands`、`legacy_entry.evidence_commands`、`naming.migration_terms_in_docs`，证明写在各条 missing_condition；`legacy_entry.research_owner_legacy_mode` 因 5.4 取「丙」有意保持 pending，待长期方案乙；`migration_terms_in_docs` 因此去掉对它的依赖；TEST_BASELINE 已记录本批）
-- [ ] 5.8 本组复验 V4–V6（同 4.8）。验证：复验结果写进 inventory.md
+- [x] 5.8 本组复验 V4–V6（同 4.8）。验证：复验结果写进 inventory.md（10-27：V4 对照无新增失败，两份大文件的基线对照仍在后台；V5 已重启 dispatcher 与 serve，下一次真实触发待补记；V6 通过；见 inventory.md 第七节）
 
 ## 6. R3 登记修正与研究侧已登记条目（门 G0）
 

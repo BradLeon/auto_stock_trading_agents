@@ -1325,6 +1325,29 @@ def bm_read(batch_id, parser, manifest):
         parser.error(str(exc))
 
 
+# Research analysts are run by the Dispatcher (`ats workflow run`); the commands that used to run them by hand are retired.
+# They answer with the replacement instead of silently doing nothing. The functions behind them (run_macro_review, ...)
+# stay for now: `boundary_evidence` and the Phase F acceptance tests name them as business entries (R5).
+_WORKFLOW_RUN = "ats workflow run --task {task} --scope-kind {kind} --scope-id {id}"
+RESEARCH_MANUAL_MOVED = {
+    ("macro", "review"): _WORKFLOW_RUN.format(task="macro-review", kind="portfolio", id="portfolio"),
+    ("sector", "review"): _WORKFLOW_RUN.format(task="sector-review", kind="sector", id="<行业，如 ai_hardware>")
+                          + "（会先补跑层级评审）",
+    ("sector", "layer"): _WORKFLOW_RUN.format(task="layer-review", kind="layer", id="<层键>")
+                         + " --inputs-json '{\"layer-review\": {\"sector\": \"<行业>\"}}'",
+    ("technical", "review"): _WORKFLOW_RUN.format(task="technical-review", kind="portfolio", id="portfolio"),
+    ("analyst", "information"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+    ("analyst", "fundamental"): _WORKFLOW_RUN.format(task="fundamental-routine", kind="entity", id="<代码>")
+                                + "（财报后的事件评审由日历在材料准入后唤醒，补跑用 ats workflow retry）",
+    ("pead", "prep"): _WORKFLOW_RUN.format(task="fundamental-routine", kind="entity", id="<代码>")
+                      + " --inputs-json '{\"fundamental-routine\": {\"refresh_baseline\": true}}'（财报前建基线）",
+    ("pead", "score"): "财报后的事件评审由日历在财报发布且材料准入后自动唤醒；补跑用 ats workflow retry --trigger-key <键>",
+    ("pead", "monitor"): _WORKFLOW_RUN.format(task="information-brief", kind="entity", id="<代码>"),
+    ("pead", "watch"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+    ("pead", "research"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+}
+
+
 CONSUMER_CUTOVER_MOVED = {
     "status": "研究分析师的读路由已固定为 target，不再提供状态查看；数据产品健康用 `ats data health --consumer <id>`。",
     "health": "改用 `ats data health --consumer <id>`（不带 --consumer 时是数据平台的整体健康）。",
@@ -4866,7 +4889,7 @@ def main(argv: list[str] | None = None) -> int:
     wf.add_argument("--limit", type=int, default=100)
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
-    se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
+    se = sub.add_parser("sector", help="行业分析：show / probe / html / kbperturb（review、layer、crosssection 已退役，用 ats workflow run）")
     se.add_argument(
         "action", choices=["review", "show", "probe", "crosssection", "kbperturb", "layer", "html"]
     )
@@ -5041,20 +5064,20 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="go through approval but place no orders"
     )
     te = sub.add_parser(
-        "technical", help="technical analyst 技术面 (review / show / probe) — 确定性无 LLM"
+        "technical", help="技术面：show / probe（review 已退役，用 ats workflow run）"
     )
     te.add_argument("action", choices=["review", "show", "probe"])
     te.add_argument("name", nargs="?", default="technical")
     te.add_argument("--offline", action="store_true", help="skip broker + price fetch")
     te.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
-    ma = sub.add_parser("macro", help="macro strategist 宏观分析 (review / show / probe)")
+    ma = sub.add_parser("macro", help="宏观分析：show / probe（review 已退役，用 ats workflow run）")
     ma.add_argument("action", choices=["review", "show", "probe"])
     ma.add_argument("name", nargs="?", default="macro")
     ma.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     ma.add_argument("--offline", action="store_true", help="skip FRED/yfinance/Tavily")
     ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
     an = sub.add_parser(
-        "analyst", help="分析师独立入口 (information / fundamental) — 独立终结，不触发决策链"
+        "analyst", help="已退役：information / fundamental 由 Dispatcher 运行，用 ats workflow run"
     )
     an.add_argument("action", choices=["information", "fundamental"],
                     help="information: 信息分析师一轮简报（4.9 独立入口）；"
@@ -5075,7 +5098,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="跳过数据层研究文章采集，只处理已准入文档")
     an.add_argument("--no-llm", action="store_true", help="无 LLM：只做识别与投影，不抽取")
     pe = sub.add_parser(
-        "pead", help="PEAD earnings workflow (prep / score / show / monitor / watch / research)"
+        "pead", help="PEAD：show / transcriptprobe（prep、score、monitor、watch、research 已退役，用 ats workflow run）"
     )
     pe.add_argument(
         "action",
@@ -5113,6 +5136,11 @@ def main(argv: list[str] | None = None) -> int:
         help="score: run the Chief immediately after the recommendation persists",
     )
     args = parser.parse_args(argv)
+
+    moved = RESEARCH_MANUAL_MOVED.get((args.command, getattr(args, "action", "")))
+    if moved:
+        print(f"❌ `ats {args.command} {args.action}` 已退役：研究分析师由 Dispatcher 运行，请用\n   {moved}")
+        return 2
 
     # Only the explicit administrative bootstrap can initialize a missing
     # authority. Business and ordinary inspection entries never create defaults.

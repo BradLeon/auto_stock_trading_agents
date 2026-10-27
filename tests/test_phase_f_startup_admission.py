@@ -49,7 +49,7 @@ def test_actual_cli_legacy_research_starts_with_trading_disabled(monkeypatch):
     monkeypatch.setattr('ats.agents.technical.review.run',lambda *a,**k:
         calls.append(reads.current_read_context().route) or SimpleNamespace(strategy='fixture',
             summary_line=lambda:'fixture',notes=[],readings=[]))
-    assert cli.main(['technical','review','--offline','--no-report'])==0
+    assert cli.run_technical_review(live_data=False,write_report=False)==0     # the CLI command is retired; its entry function stays
     assert calls==['legacy']
 
 
@@ -64,10 +64,10 @@ def test_actual_main_target_admission_and_revocation(synthetic_target,monkeypatc
         calls.append(reads.current_read_context().route) or SimpleNamespace(strategy='fixture',
             summary_line=lambda:'fixture',notes=[],readings=[]))
     monkeypatch.setattr('ats.data.assurance.qualification',lambda **k:{'status':'eligible'})
-    args=['--read-scope-json',json.dumps({'technical':scope}),'technical','review','--offline','--no-report']
-    assert cli.main(args)==0 and calls==['target']
+    run=lambda:cli.run_technical_review(live_data=False,write_report=False,read_scope=scope)
+    assert run()==0 and calls==['target']
     monkeypatch.setattr('ats.data.assurance.qualification',lambda **k:{'status':'ineligible'})
-    with pytest.raises(RouteUnavailable):cli.main(args)
+    with pytest.raises(RouteUnavailable):run()
     assert calls==['target']
 
 

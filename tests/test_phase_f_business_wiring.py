@@ -455,7 +455,7 @@ def test_configuration_drift_does_not_reinterpret_frozen_plan_scope(tmp_path):
     assert before.scope["entities"] == ["AMD"]
 
 
-def test_real_cli_json_scope_protocol_reaches_the_business_gate(monkeypatch):
+def test_cli_entry_function_with_an_explicit_scope_reaches_the_business_gate(monkeypatch):
     from ats.runtime import cli
 
     now = datetime.now(UTC)
@@ -466,8 +466,7 @@ def test_real_cli_json_scope_protocol_reaches_the_business_gate(monkeypatch):
         assert rr.current_read_context().identity.scope["time_range"]["end"] == scope["time_range"]["end"]
         return SimpleNamespace(strategy="fake", summary_line=lambda: "fake", notes=[], readings=[])
     monkeypatch.setattr("ats.agents.technical.review.run", run)
-    assert cli.main(["--read-scope-json", json.dumps({"technical": scope}), "technical", "review",
-                     "--offline", "--no-report"]) == 0
+    assert cli.run_technical_review(live_data=False, write_report=False, read_scope=scope) == 0
     assert rr.current_read_context() is None
 
 

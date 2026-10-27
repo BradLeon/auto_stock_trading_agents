@@ -2448,6 +2448,7 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
     return 0
 
 
+@scoped_read("layer")
 def run_layer_review(
     name: str = "ai_hardware",
     layer_key: str = "all",

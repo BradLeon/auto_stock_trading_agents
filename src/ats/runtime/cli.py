@@ -2496,7 +2496,7 @@ def run_layer_review(
             continue
         # 单层视图给的是**未经组上限约束**的数：组上限要等同组其余层都评完才算得出来。
         budget = cross_section.budget_for(
-            layer, v.allocation or allocation_for_status(v.layer_status) if ok else None)
+            layer, allocation_for_status(v.layer_status) if ok else None)
         group = next((g for g in cfg.layer_groups if layer.key in g.layers), None)
         flags = []
         if not v.has_claims:
@@ -2504,7 +2504,7 @@ def run_layer_review(
         if not v.cross_section_applicable:
             flags.append("截面不适用")
         print(f"\n=== {layer.label}  [{layer.key}] ===")
-        call = v.allocation or allocation_for_status(v.layer_status)
+        call = allocation_for_status(v.layer_status)
         print(
             f"  状态 {v.layer_status}（行业侧映射 {call}）· 信心 {v.confidence:.2f}"
             f" · 预算 {budget:.1%} NAV"
@@ -3015,7 +3015,7 @@ def sector_show(name: str = "ai_hardware") -> int:
         for v in sorted(latest.layer_verdicts, key=lambda x: order.get(x.layer_key, 99)):
             layer = cfg.layer_by_key(v.layer_key)
             label = layer.label if layer else v.layer_key
-            call = v.allocation or allocation_for_status(v.layer_status)
+            call = allocation_for_status(v.layer_status)
             budget = cross_section.budget_for(layer, call) if layer else 0.0
             flags = []
             if not v.has_claims:

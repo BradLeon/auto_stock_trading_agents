@@ -38,7 +38,7 @@ def build_context(cfg: SectorConfig, verdicts: list[LayerVerdict], *,
             continue
         block = [
             f"## {layer.label}  [layer key = {layer.key}]",
-            f"配置：**{v.allocation or allocation_for_status(v.layer_status)}**"
+            f"配置：**{allocation_for_status(v.layer_status)}**"
             f"（confidence {v.confidence:.2f}）"
             f" · 周期：{v.cycle_position or '—'}",
         ]

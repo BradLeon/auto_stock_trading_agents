@@ -299,10 +299,9 @@ class LayerVerdict(BaseModel):
     """One layer's STATUS call — what this layer IS doing, and WHY.
 
     Phase D: the layer analyst no longer owns an allocation call. `allocation` is
-    RETIRED on the write path — the field stays only so historical rows read back
-    (and so old reports render); new rows leave it at the retired default and no
-    consumer may drive a budget from it (see `agent/layer-analyst` and the
-    `layer_verdict.allocation` pending-retirement entry). The layer's own output is
+    RETIRED (registry: `layer_verdict.allocation`) — the field stays only so historical
+    rows read back; new rows leave it at the retired default and nothing reads it:
+    every report, view and budget derives the call from `layer_status`. The layer's own output is
     `layer_status`, and the SECTOR analyst translates status + evidence into the
     three-level allocation.
     """

@@ -42,7 +42,7 @@ def monitor_hint(symbol: str, sector: str = "ai_hardware", max_chars: int = 280)
         key = cfg.layer_of(symbol) if cfg else None
         v = review.verdict_for(key)
         if v is not None:
-            hint += f" | {_label(cfg, key)}: {v.allocation or allocation_for_status(v.layer_status)}"
+            hint += f" | {_label(cfg, key)}: {allocation_for_status(v.layer_status)}"
         else:
             a = review.layer_assessment(key)
             if a:
@@ -87,7 +87,7 @@ def _layer_line(review, cfg, symbol: str) -> str:
     v = review.verdict_for(key)
     if v is not None:
         bits = [f"本层 {_label(cfg, key)}: "
-                f"**{v.allocation or allocation_for_status(v.layer_status)}**"
+                f"**{allocation_for_status(v.layer_status)}**"
                 f"（信心 {v.confidence:.2f}）"]
         if v.cycle_position:
             bits.append(f"周期 {v.cycle_position}")

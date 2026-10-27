@@ -60,10 +60,10 @@
 ## 6. R3 登记修正与研究侧已登记条目（门 G0）
 
 - [x] 6.1 给 8 条「登记已退役但未证明」的消费方补 `MODULE_TO_ROLE` 映射后重扫；有读取的改回 pending 并列出消费方。验证：`ats retirement zero` 对这 8 条不再出现「未知」（10-27：`MODULE_TO_ROLE` 只能映射角色，`chain.*`、`graph.*` 这类路径硬凑会得出假「清零」，所以改用静态检索证明：8 条的退役条件在 src 里都已成立，原消费方列表已过期，改为 `consumers: []` 并把检索结果写进各条 missing_condition；`ats retirement zero` 对这 8 条不再出现「待补证」。`apply_guardrails` 的定义本身还在 `risk_validator.py`，物理删除属第 7 组）
-- [ ] 6.2 `task_projections.legacy_columns`：迁走或删除剩余消费方（`memory.store.projection_lineage`、相关测试）后做 V1–V3 并退役。验证：命中墓碑的读取返回已退役原因（墓碑一致性测试）
-- [ ] 6.3 `evidence_fact_projections.legacy_observation_id`：同 6.2。验证：同 6.2
-- [ ] 6.4 `layer_verdict.allocation`：在 5.3 删除旧行业入口之后，迁走或删除剩余消费方（`agents.sector.report/viz/review`、命令行）并退役；字段保留、历史行可读。验证：历史行读回测试通过，新写入不再产生该字段
-- [ ] 6.5 TEST_BASELINE 与 runbook 记录本批。验证：同 4.7
+- [x] 6.2 `task_projections.legacy_columns`：迁走或删除剩余消费方（`memory.store.projection_lineage`、相关测试）后做 V1–V3 并退役。验证：命中墓碑的读取返回已退役原因（墓碑一致性测试）（10-27 用户同意改登记而非退役：`task_projections` 是信息分析师的抽取缓存，`save_task_projection` 写、`information_extraction_cache` 读，与 envelope 表是独立抽象；删旧列会让缓存失效、同一文档重复调用模型。已移出待退项，留在 active 清册，不登记墓碑；对应测试改为断言这一点）
+- [x] 6.3 `evidence_fact_projections.legacy_observation_id`：同 6.2。验证：同 6.2（10-27 同 6.2：`legacy_observation_id` 是事实投影回溯到观测的连接键，产业链归纳的 `freeze_as_discovery` 在用，名字叫 legacy 只是遗留；已移出待退项）
+- [x] 6.4 `layer_verdict.allocation`：在 5.3 删除旧行业入口之后，迁走或删除剩余消费方（`agents.sector.report/viz/review`、命令行）并退役；字段保留、历史行可读。验证：历史行读回测试通过，新写入不再产生该字段（10-27：cli、行业报告、轮动、截面、上下文、viz 共 11 处 `allocation or allocation_for_status(...)` 改为只用 `allocation_for_status(layer_status)`；`layer_verdict.allocation` 标 retired；新增历史行读回测试。已知行为变化：用历史行重渲染旧报告时档位按层状态推出）
+- [x] 6.5 TEST_BASELINE 与 runbook 记录本批。验证：同 4.7（见 TEST_BASELINE 同日记录；runbook 第〇节条目数改为 41）
 - [ ] 6.6 本组复验 V4–V6。验证：同 4.8
 
 ## 7. R4 只被旧入口用到的旧分析代码（门 G0，依赖第 5、6 组）

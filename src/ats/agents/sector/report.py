@@ -131,7 +131,7 @@ def _layer_verdict_section(review: SectorReview, cfg: SectorConfig, pead: set) -
         budget = basket_by_key[key].layer_cap if key in basket_by_key else budgets.get(key)
         gist = (v.claim_attributions[0] if v.claim_attributions
                 else (v.rationale.splitlines()[0] if v.rationale else "—"))
-        call = v.allocation or allocation_for_status(v.layer_status)
+        call = allocation_for_status(v.layer_status)
         lines.append(f"| {label} | **{call}** | {v.confidence:.2f} | "
                      f"{budget:.1%} | {v.cycle_position.split('：')[0][:12] or '—'} | "
                      f"{gist[:70]} | {'；'.join(flags) or '—'} |")
@@ -236,7 +236,7 @@ def _budget_derivation(verdict, cap: float, budget: float | None) -> str:
     自 Phase D 起不再承载预算章节。）"""
     from .cross_section import utilization_for
 
-    call = verdict.allocation or allocation_for_status(verdict.layer_status)
+    call = allocation_for_status(verdict.layer_status)
     if budget is None:
         return f"—　（层上限 {cap:.0%}；本轮无截面预算）"
     util = utilization_for(call)

@@ -441,3 +441,16 @@ def test_run_sector_html_reports_when_output_dir_is_unset(monkeypatch):
     monkeypatch.setattr(viz, "write_html", lambda bundle, folder: None)
 
     assert cli.run_sector_html("test_sector") == 1
+
+
+def test_a_historical_allocation_value_is_read_back_but_never_drives_the_call():
+    """tasks 6.4：`layer_verdict.allocation` 已退役——历史行里的值仍能读回，
+    但图表、预算和报告的配置档位一律由 `layer_status` 推出。"""
+    from ats.schemas.sector import allocation_for_status
+
+    historical = _verdict(allocation="清仓", layer_status="expanding")
+    assert historical.model_dump(mode="json")["allocation"] == "清仓"                # old rows still read back
+    assert LayerVerdict.model_validate(historical.model_dump(mode="json")).allocation == "清仓"
+    bundle = viz.build_bundle(_cfg(), _review(verdict=historical), assessments_by_layer={}, store=FakeDataStore())
+    row = bundle["layers"][0]
+    assert row["die"]["allocation"] == allocation_for_status("expanding") != "清仓"

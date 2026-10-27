@@ -212,7 +212,7 @@ def _budget_line(verdict, layer, basket) -> dict:
     if verdict is None:
         return {"amount": 0.0, "cap": cap, "formula": "—（本轮未产出结论）", "squeezed": False}
     budget = basket.layer_cap if basket is not None else None
-    call = verdict.allocation or allocation_for_status(verdict.layer_status)
+    call = allocation_for_status(verdict.layer_status)
     util = utilization_for(call)
     if budget is None:
         amount = cap * util
@@ -241,10 +241,9 @@ def _die(layer, verdict, budget_line) -> dict:
         flags.append("截面不适用")
     pct = round(100 * budget_line["amount"] / cap) if cap else 0
     return {"key": layer.key, "short": layer.key.split("_")[0], "label": label,
-            "allocation": (verdict.allocation
-                           or allocation_for_status(verdict.layer_status)),
+            "allocation": allocation_for_status(verdict.layer_status),
             "alloc_class": ALLOC_CLASS.get(
-                verdict.allocation or allocation_for_status(verdict.layer_status), "flat"),
+                allocation_for_status(verdict.layer_status), "flat"),
             "confidence": round(verdict.confidence, 2), "budget": budget_line["amount"],
             "cap": cap, "budget_pct_of_cap": max(0, min(100, pct)), "flags": flags}
 

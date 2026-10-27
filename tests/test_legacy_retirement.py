@@ -146,8 +146,6 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "workflow_memory.evidence_facts",
         "workflow_memory.evidence_fact_projections",
         "workflow_memory.evidence_failures",
-        "task_projections.legacy_columns",
-        "evidence_fact_projections.legacy_observation_id",
         "scheduler.hardcoded_serial_run",
         "legacy_read_models",
         # ── Phase C（任务 6.7：旧直读点先行登记；其余五项随任务 8.1 批次追加）──
@@ -199,8 +197,9 @@ def test_phase_d_items_are_registered_with_complete_fields() -> None:
     from ats.workflow import legacy_retirement as mod
 
     registry = mod.load_registry()
+    allocation = registry.tombstone("layer_verdict.allocation")       # retired on 2026-10-27 (tasks 6.4): no reader left
+    assert allocation is not None and allocation.status == "retired" and not allocation.consumers
     pending = {
-        "layer_verdict.allocation": "pending",
         "chief.legacy_table_direct_reads": "pending",
         "sector_reviews": "pending",      # `pead_dossier` left this list on 2026-10-27: a live fundamental record (tasks 1.7)
     }
@@ -227,12 +226,15 @@ def test_every_registered_item_names_its_consumer_zero_criterion() -> None:
         assert stone.consumer_zero_criterion, stone.identifier
 
 
-def test_the_legacy_projection_columns_are_registered_but_not_deleted() -> None:
+def test_the_projection_cache_and_lineage_key_are_live_records_not_retirement_items() -> None:
+    """tasks 6.2、6.3：信息分析师的抽取缓存与事实投影的血缘键仍在用，留在活动清册，不登记墓碑。"""
     from ats.workflow import legacy_retirement as mod
 
-    stone = mod.load_registry().tombstone("task_projections.legacy_columns")
-    assert stone is not None and stone.status == "pending"
-    assert stone.replaced_by == "task_projection_envelopes"
+    registry = mod.load_registry()
+    for identifier in ("task_projections.legacy_columns", "evidence_fact_projections.legacy_observation_id"):
+        assert registry.tombstone(identifier) is None, identifier
+    assert "task_projections" in registry.active()
+    assert "evidence_fact_projections.legacy_observation_id" in registry.active()
 
 
 def test_no_physical_purge_has_been_performed() -> None:

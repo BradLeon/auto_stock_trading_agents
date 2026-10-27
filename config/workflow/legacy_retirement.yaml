@@ -80,41 +80,6 @@ retired:
     location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
 
   # ── 待退（条件未满足，本阶段只登记） ──────────────────────────────────────
-  - identifier: task_projections.legacy_columns
-    kind: business
-    group: R3
-    gate: G0
-    depends_on: [legacy_entry.research_manual_commands]
-    capability_domain: agent/task-projection
-    replaced_by: task_projection_envelopes
-    target_phase: D
-    status: pending
-    exit_condition: 读取方全部切换到 task_projection_envelopes，且旧表在新写路径中零写入。
-    missing_condition: >-
-      旧列的读取方（store.projection_lineage 同时解析两个投影族、tests/test_fact_projections.py）
-      尚未切换；本阶段只登记，不删除任何旧列。
-    consumers:
-      - memory.store.projection_lineage
-      - tests/test_fact_projections
-    consumer_zero_criterion: 上述读取方全部改为读 task_projection_envelopes，且旧表零写入。
-    location: src/ats/memory/store.py:337-343
-
-  - identifier: evidence_fact_projections.legacy_observation_id
-    kind: business
-    group: R3
-    gate: G0
-    capability_domain: data/data-layer-architecture
-    replaced_by: data_evidence_projections
-    target_phase: D
-    status: pending
-    exit_condition: 历史观测标识不再被任何读取方引用。
-    missing_condition: 迁移期兼容读仍按 legacy_observation_id 回溯旧观测，消费方未清零。
-    consumers:
-      - memory.store.fact_projections
-      - tests/test_data_migrations
-    consumer_zero_criterion: 无读取方再按该列查询。
-    location: 数据层 data_evidence_projections
-
   - identifier: scheduler.hardcoded_serial_run
     capability_domain: workflow/run-contracts
     replaced_by: workflow.run_contracts.TaskRegistry + Dispatcher
@@ -355,18 +320,13 @@ retired:
       （agent/sector-allocation），经 allocation_for_status 映射与
       risk.yaml layer_utilization 的关系不变。
     target_phase: D
-    status: pending
+    status: retired
     exit_condition: >-
       任何消费方不再从 LayerVerdict.allocation 读取预算或配置语义；
       层报告不再出现预算章节（行业报告承载）。
     missing_condition: >-
-      过渡期内 viz / cli / 行业索引仍以 `allocation or allocation_for_status(layer_status)`
-      兼容读历史行；新写路径已不写 allocation（默认空串）。
-    consumers:
-      - agents.sector.report
-      - agents.sector.viz
-      - runtime.cli
-      - agents.sector.review
+      2026-10-27 退役（tasks 6.4）：cli / 行业报告 / 轮动 / 截面 / 上下文 / viz 里的 `allocation or allocation_for_status(layer_status)` 全部改为只用 `allocation_for_status(layer_status)`；src 内除 schemas/sector.py 的字段定义外，无任何代码读 LayerVerdict.allocation。字段保留，历史行可读回（tests/test_sector_viz.py 覆盖）；用历史行重新渲染旧报告时，配置档位改按层状态推出，不再用当时存的值。
+    consumers: []
     consumer_zero_criterion: >-
       src 内除 schemas/sector.py 的字段定义与「历史行兼容读」外，无任何代码以
       verdict.allocation 为非空语义做预算决策（统一走 allocation_for_status）。
@@ -416,6 +376,12 @@ retired:
     location: src/ats/agents/chief/assemble.py
 
   # ── Phase D（任务 9.1：旧读模型逐项登记，替代 legacy_read_models 的分组条目）──
+
+  # task_projections 与 evidence_fact_projections.legacy_observation_id 不是待退项（2026-10-27，tasks 6.2、6.3）：
+  # task_projections 是信息分析师的抽取缓存（save_task_projection 写、information_extraction_cache 读，与
+  # task_projection_envelopes 是两套独立抽象，代码里明写「有意保留」），删旧列会让缓存失效、同一文档重新调用模型；
+  # legacy_observation_id 是事实投影回溯到观测的连接键，产业链归纳「冻结发现性证据」（freeze_as_discovery）正在用，
+  # 名字叫 legacy 只是历史遗留。两者都留在上面的 active 清册里，不登记墓碑。
 
   # pead_dossier 不是待退项（2026-10-27，tasks 1.7）：它是基本面分析师自有的在用记录——财报前基线存在这里，事件评审读它，
   # 同一财季只留一份档案。因此它留在上面的 active 清册里，不登记墓碑。
@@ -796,12 +762,4 @@ retired:
 
 
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）
-purge_scope:
-  - identifier: task_projections.legacy_columns
-    scope:
-      - task_projections.profile
-      - task_projections.profile_version
-      - task_projections.input_kind
-      - task_projections.input_ref
-      - task_projections.target_type
-      - task_projections.target_id
+purge_scope: []

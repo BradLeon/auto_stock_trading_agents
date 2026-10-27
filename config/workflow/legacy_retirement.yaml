@@ -27,7 +27,6 @@ retired:
     location: src/ats/data/consumer_identity.py
 
   # ── 本阶段退出 ────────────────────────────────────────────────────────────
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: workflow_memory.evidence_observations
     capability_domain: data/data-layer-architecture
     replaced_by: data_evidence_observations
@@ -36,52 +35,47 @@ retired:
     exit_condition: >-
       写侧 cutover 完成：四条调用路径（调度观察、chain/sources、chain/articles、命令行）
       全部经 TradingMemory.data_store() 改指数据层，且数据层读入口能按同一标识与血缘读回。
-    consumers:
-      - scheduler.observe
-      - chain.sources
-      - chain.articles
-      - runtime.cli
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 memory/store.py 的 _SCHEMA、_retire_data_tables、_migrate、_migrate_shared_facts（迁移读旧表）与 data/stores/ownership.py 边界登记表；原消费方 scheduler.observe、chain.sources、chain.articles、runtime.cli 已无引用。
+    consumers: []
     consumer_zero_criterion: >-
       四条路径均无旁路写入；src 内除 _SCHEMA / _retire_data_tables / _migrate /
       _migrate_shared_facts 与 ownership.py 边界登记表外不再出现该表名。
     location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
 
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: workflow_memory.evidence_facts
     capability_domain: data/data-layer-architecture
     replaced_by: data_evidence_facts
     target_phase: A
     status: retired
     exit_condition: 写侧 cutover 完成，事实写入经 save_evidence_observation 落到数据层。
-    consumers:
-      - chain.evidence
-      - scheduler.observe
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 _SCHEMA、_retire_data_tables、列迁移与 ownership.py 边界登记表；原消费方 chain.evidence、scheduler.observe 已无引用。
+    consumers: []
     consumer_zero_criterion: 无代码再引用该表名（同 evidence_observations 的扫描判据）。
     location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
 
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: workflow_memory.evidence_fact_projections
     capability_domain: data/data-layer-architecture
     replaced_by: data_evidence_projections
     target_phase: A
     status: retired
     exit_condition: 写侧 cutover 完成，投影与事实在同一事务写入数据层。
-    consumers:
-      - chain.evidence
-      - memory.store.projection_lineage
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 _SCHEMA、_retire_data_tables 与 ownership.py 边界登记表；原消费方 chain.evidence、memory.store.projection_lineage 已无对该表的读写（projection_lineage 的旧列另见 task_projections.legacy_columns，tasks 6.2）。
+    consumers: []
     consumer_zero_criterion: 血缘解析改由数据层解析两族投影。
     location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
 
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: workflow_memory.evidence_failures
     capability_domain: data/data-layer-architecture
     replaced_by: data_evidence_failures
     target_phase: A
     status: retired
     exit_condition: save_observation_failure 改指数据层。
-    consumers:
-      - chain.sources
-      - chain.articles
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 _SCHEMA、_retire_data_tables 与 ownership.py 边界登记表（chain/articles.py 里只是说明文字）；原消费方 chain.sources、chain.articles 已无引用。
+    consumers: []
     consumer_zero_criterion: 无代码再引用该表名。
     location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
 
@@ -173,7 +167,6 @@ retired:
     location: Workflow memory
 
   # ── Phase B（决策审计与交易安全）──────────────────────────────────────────
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: risk.checks.in_place_clipping
     capability_domain: risk/deterministic-review
     replaced_by: risk.checks.review_revision（整条修订只读审查 + counterproposal）
@@ -182,13 +175,12 @@ retired:
     exit_condition: >-
       图风控节点改调 review_revision；旧就地裁剪函数（_apply_order_caps /
       _clip_event_notional 及裁剪式返回值）从 src 移除，pre_trade() 适配层除外。
-    consumers:
-      - graph.chief.risk_gate
-      - graph.pead
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：`_apply_order_caps`、`_clip_event_notional` 在 src 与 tests 里已无任何出现；原消费方 graph.chief.risk_gate、graph.pead 不再取得被裁剪的订单。
+    consumers: []
     consumer_zero_criterion: src 内无任何调用方再取得「被裁剪后的订单」作为风控输出。
     location: src/ats/risk/checks.py
 
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: agents.risk_validator.apply_guardrails
     kind: business
     group: R4
@@ -198,21 +190,21 @@ retired:
     target_phase: B
     status: retired
     exit_condition: 默认流程改调 review_guardrails，apply_guardrails 无引用。
-    consumers:
-      - graph.pead
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：graph.pead 已不调用；src 里只剩定义本身（risk_validator.py:22），tests 里是历史说明与墓碑断言。定义的物理删除属 R4（tasks 7）。
+    consumers: []
     consumer_zero_criterion: src 内 grep apply_guardrails 仅剩定义与其自身测试（已改造）。
     location: src/ats/agents/risk_validator.py
 
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: runtime.server.in_process_resume_dedup
     capability_domain: decision/approval-lifecycle
     replaced_by: decision.repository.validate_callback（持久幂等键 + 终态/修订/审查判定）
     target_phase: B
     status: retired
     exit_condition: server 移除进程内 _RESUMED，去重改查 boss_approvals 与 decision_cycles。
-    consumers:
-      - runtime.server.handle_callback
-      - runtime.server.handle_approve
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：`_RESUMED` 在 src 里只剩说明注释，tests/test_server.py 断言 server 已无该属性；去重改查持久库。
+    consumers: []
     consumer_zero_criterion: src 内不再存在任何进程内回调去重集合。
     location: src/ats/runtime/server.py
 
@@ -381,7 +373,6 @@ retired:
     location: src/ats/schemas/sector.py（字段保留，历史行可读回）
 
   # ── Phase D（Group 5：PEAD 内部风控与 sizing 路径退出）──
-  # 待补证：登记为 retired，但消费方缺 MODULE_TO_ROLE 映射，`ats retirement zero` 显示“待补证”而不是“清零”（tasks 6.1 补映射后重扫）。
   - identifier: graph.pead.internal_risk_and_sizing
     capability_domain: agent/fundamental-pead
     replaced_by: >-
@@ -395,9 +386,9 @@ retired:
       graph/pead.py 的 risk_agent.assess / review_guardrails / pre_trade 调用与
       PeadRecommendation→TradeDecision 转换已删，score.py 的 sizing 树已改为
       event_view()（direction 不映射动作，9.2 契约落地载体）。
-    consumers:
-      - graph.pead
-      - agents.pead.score
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：graph/pead.py 与 agents/pead/score.py 里 risk_agent、pre_trade、TradeDecision、PeadRecommendation 的引用已为零（grep 复核）。
+    consumers: []
     consumer_zero_criterion: >-
       src 内 agents/pead 与 graph/pead 对 risk_agent.assess / pre_trade /
       TradeDecision 的引用清零（已达成；tests/test_pead_graph.py 断言）。

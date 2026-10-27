@@ -59,7 +59,7 @@
 
 ## 6. R3 登记修正与研究侧已登记条目（门 G0）
 
-- [ ] 6.1 给 8 条「登记已退役但未证明」的消费方补 `MODULE_TO_ROLE` 映射后重扫；有读取的改回 pending 并列出消费方。验证：`ats retirement zero` 对这 8 条不再出现「未知」
+- [x] 6.1 给 8 条「登记已退役但未证明」的消费方补 `MODULE_TO_ROLE` 映射后重扫；有读取的改回 pending 并列出消费方。验证：`ats retirement zero` 对这 8 条不再出现「未知」（10-27：`MODULE_TO_ROLE` 只能映射角色，`chain.*`、`graph.*` 这类路径硬凑会得出假「清零」，所以改用静态检索证明：8 条的退役条件在 src 里都已成立，原消费方列表已过期，改为 `consumers: []` 并把检索结果写进各条 missing_condition；`ats retirement zero` 对这 8 条不再出现「待补证」。`apply_guardrails` 的定义本身还在 `risk_validator.py`，物理删除属第 7 组）
 - [ ] 6.2 `task_projections.legacy_columns`：迁走或删除剩余消费方（`memory.store.projection_lineage`、相关测试）后做 V1–V3 并退役。验证：命中墓碑的读取返回已退役原因（墓碑一致性测试）
 - [ ] 6.3 `evidence_fact_projections.legacy_observation_id`：同 6.2。验证：同 6.2
 - [ ] 6.4 `layer_verdict.allocation`：在 5.3 删除旧行业入口之后，迁走或删除剩余消费方（`agents.sector.report/viz/review`、命令行）并退役；字段保留、历史行可读。验证：历史行读回测试通过，新写入不再产生该字段

@@ -242,7 +242,7 @@ source /Users/liuchao/Code/trading/auto_stock_trading_agents/.venv/bin/activate
 
 ```bash
 # 看系统现在的状态
-ats consumer-cutover log             # 数据产品健康状态的变化记录
+ats data health-log                      # 数据产品健康状态的变化记录
 ats dispatch owner-log               # 研究工作流的负责人与停用/恢复历史
 ats workflow runs --limit 20         # 最近的研究运行及结果（complete / incomplete）
 python -m ats.data.refresh status    # 数据采集任务的最近状态

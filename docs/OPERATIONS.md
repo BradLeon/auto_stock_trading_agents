@@ -31,8 +31,8 @@ launchctl bootout gui/$(id -u)/com.ats.dispatcher                    # 停掉全
 ## 2. 每天看什么
 
 ```bash
-ats consumer-cutover status          # 6 个分析师的读路由（固定为 target）
-ats consumer-cutover log             # 数据产品健康状态的变化记录（只在由好转坏、由坏转好时记一行）
+ats data health --consumer information   # 立即检查一个分析师读的数据产品（读路由已固定为 target）
+ats data health-log                      # 数据产品健康状态的变化记录（只在由好转坏、由坏转好时记一行）
 ats dispatch owner-log               # 7 个研究工作流的调度负责人及切换历史
 ats workflow runs --limit 20         # 最近的研究运行：complete / incomplete / failed
 python -m ats.data.refresh status    # 各采集任务最近一次结果
@@ -135,15 +135,15 @@ ats dispatch owner-switch --workflow <workflow_id> --actor <谁> --approval "<�
 两处都只告警、不改读路由；同一个分析师只在状态由好转坏、由坏转好时发一次飞书并记一行日志。
 
 ```bash
-ats consumer-cutover health --consumer-id <id>   # 立即检查一个分析师读的数据产品
-ats consumer-cutover log                         # 健康状态变化记录
-ats consumer-cutover status                      # 六个分析师的读路由（固定为 target）
+ats data health --consumer <id>                  # 立即检查一个分析师读的数据产品
+ats data health-log [--consumer <id>]             # 健康状态变化记录
+# 读路由已固定为 target，不再提供状态命令
 ```
 
 迁移完成后读路由固定在新路径（target），没有切回旧路径的入口。万一某个分析师的读路由停在了旧路径（2026-10-20 技术面就被旧的自动切回机制切过一次，表现为该工作流报 `no explicitly authorized read window`），用下面的命令恢复；它只会把路由移向新路径，要求批准原文、原因和通过的数据产品检查，并写入只增不改的日志：
 
 ```bash
-ats consumer-cutover status          # 看是不是 target
+# （读路由已固定为 target）
 ats consumer-cutover restore --consumer-id technical --actor <谁> \
     --approval "<用户批准原文>" --reason "<为什么>"
 ```

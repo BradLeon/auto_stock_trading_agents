@@ -1325,31 +1325,31 @@ def bm_read(batch_id, parser, manifest):
         parser.error(str(exc))
 
 
+CONSUMER_CUTOVER_MOVED = {
+    "status": "研究分析师的读路由已固定为 target，不再提供状态查看；数据产品健康用 `ats data health --consumer <id>`。",
+    "health": "改用 `ats data health --consumer <id>`（不带 --consumer 时是数据平台的整体健康）。",
+    "log": "改用 `ats data health-log [--consumer <id>]`。",
+}
+
+
 def consumer_cutover_command(args, *, parser) -> int:
     """Research consumers' read routes and data-product health. Only `restore` changes a route, and only
     toward the new one."""
     from ..workflow import consumer_cutover as cc
-    from ..workflow import consumer_health
 
     db = args.db or None
     action = args.action
+    if action in CONSUMER_CUTOVER_MOVED:
+        # A prompt stub, not a silent alias: the command named a migration step, the replacement is health.
+        print(f"❌ `ats consumer-cutover {action}` 已退役：{CONSUMER_CUTOVER_MOVED[action]}")
+        return 2
     try:
-        if action == "status":
-            print(json.dumps(cc.status(path=db), ensure_ascii=False, indent=2, default=str))
-            return 0
-        if action == "log":
-            print(json.dumps(cc.log(consumer_id=args.consumer_id or None, path=db), ensure_ascii=False, indent=2, default=str))
-            return 0
         if not args.consumer_id:
             parser.error(f"consumer-cutover {action} requires --consumer-id")
-        if action == "restore":
-            result = cc.restore(args.consumer_id, actor=args.actor, approval=args.approval,
-                                reason=args.reason, path=db)
-            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-            return 0
-        result = consumer_health.check(args.consumer_id)
+        result = cc.restore(args.consumer_id, actor=args.actor, approval=args.approval,
+                            reason=args.reason, path=db)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0 if result["status"] == "ok" else 1
+        return 0
     except (cc.ConsumerCutoverError, ValueError) as exc:
         print(f"❌ {exc}")
         return 1
@@ -3944,8 +3944,21 @@ def run_data(
         result = products.datasets()
     elif action == "metrics":
         result = products.metrics()
+    elif action == "health" and assurance_consumer:
+        # One research consumer's data-product health (what `ats consumer-cutover health` used to print).
+        from ..workflow import consumer_health
+
+        result = consumer_health.check(assurance_consumer)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["status"] == "ok" else 1
     elif action == "health":
         result = products.health()
+    elif action == "health-log":
+        # The recorded changes of that health (a line only when it turns bad or turns good again).
+        from ..workflow import consumer_cutover as cc
+
+        print(json.dumps(cc.log(consumer_id=assurance_consumer or None), ensure_ascii=False, indent=2, default=str))
+        return 0
     elif action == "quality":
         structured = products.structured_quality_report(dataset=dataset or None)
         if output_format == "markdown":
@@ -4380,6 +4393,7 @@ def main(argv: list[str] | None = None) -> int:
             "datasets",
             "metrics",
             "health",
+            "health-log",
             "coverage",
             "quality",
             "series",
@@ -4598,7 +4612,7 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--bootstrap", action="store_true",
                     help="初始化六条边界并声明本仓库接线")
 
-    cc = sub.add_parser("consumer-cutover", help="研究分析师的读路由与数据产品健康：状态、立即检查、历史；restore 把被切回旧路径的分析师恢复到新路径")
+    cc = sub.add_parser("consumer-cutover", help="仅保留 restore（把被切回旧路径的分析师恢复到新路径）；status/health/log 已迁到 `ats data health`、`ats data health-log`")
     cc.add_argument("action", choices=["status", "health", "log", "restore"])
     cc.add_argument("--consumer-id", default="", help="information | fundamental | ...")
     cc.add_argument("--actor", default="", help="restore: 操作者")

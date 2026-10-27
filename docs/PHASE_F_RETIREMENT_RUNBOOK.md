@@ -61,7 +61,7 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 
 1. **三个模块没有任务认领。** `exit_requirements`（被 `data/assurance.py` 引用）、`business_replay_inputs`（被 `consumer_api`、`route_switch` 引用）、`cutover_guards`（登记里已补进 `migration.read_route_and_qualification` 的退出条件）在那个 change 的 tasks.md 与 design.md 里都没出现。`shadow_ledger` 被 Clerk 引用，只被 8.4 的 `shadow_*` 通配涵盖，没有单独写明引用要先拆开。建议在 8.2 的调用图清单和 9.3 的删除清单里补上。
 2. **6.3、6.5 的前提没有达成。** 6.3 写「在退役 change R1 清掉 `runtime.cli` 消费方之后」，但 R1 只退役了旧手动入口，`ats macro/sector/technical show` 等只读命令仍读 `macro_reviews`、`sector_reviews`、`technical_reviews`（登记里 `runtime.cli` 仍是这四条的消费方）。6.3、6.5 需要自己决定这些只读命令改读投影还是随表一起处置。
-3. **「停用时记录跳过原因」尚未实现。** 那个 change 的 2.7 验证要求停用的 `chief-daily` / `clerk-daily` 记录跳过原因；退役 change 的 8.1 核对发现，定时与日历路径对停用工作流只写日志、不留记录，覆盖核验也不认识「因停用而跳过」（见 inventory.md §8.5）。2.7 要么把这两处补上，要么先单开修复。
+3. **「停用时记录跳过原因」已于 10-27 实现。** 那个 change 的 2.7 验证要求停用的 `chief-daily` / `clerk-daily` 记录跳过原因；退役 change 核对时发现定时与日历路径只写日志、覆盖核验也不认识「因停用而跳过」，已修复（手动、定时、日历三条路径写 `skipped_owner_legacy`；`compare_triggers` 区分 `skipped_by_pause` / `voided_by_pause`，见 inventory.md §十）。2.7 直接沿用，不必重做；`ats dispatch runtime-expected` / `runtime-compare` 属于 8.8 要删的 `runtime-*`，到时需要把覆盖核验搬到保留的命令下。
 4. **「负责人默认 `paused`」的写法对不上。** 现行实现里停用就是负责人取值 `legacy`（命令是 `ats dispatch pause` / `resume`，内部取值保留），没有 `paused` 这个取值。代码里没有 `paused` 这个取值，2.7 要新建的两个工作流不能照此注册；要么沿用 `legacy`，要么先做长期方案（取消停用开关，改由 `research_schedules.yaml` 的 `enabled` 控制，需要规格变更，另案）。
 5. **proposal.md 里「11 条已登记条目」是旧数字。** 登记处现在 R5 是 20 条（含原 R2 转入的 5 条与新补登记的 `macro_reviews`、`technical_reviews`）。
 

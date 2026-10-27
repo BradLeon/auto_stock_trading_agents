@@ -115,8 +115,9 @@ ats dispatch owner-log [--workflow <workflow_id>]
 
 停用的工作流不会被任何定时任务或日历事件运行；要补跑，先 `resume`，再用 `ats workflow run`。
 
-> 已知局限：停用期间，覆盖核验（`expected_triggers` 与实际记录的对照）还不认识「因停用而跳过」，会把这些预期触发报成遗漏；
-> 定时与日历路径对被跳过的触发也只写日志、不留记录。登记在 `openspec/changes/retire-legacy-and-migration-tooling/inventory.md` §8.5，待另案处理。
+停用期间到点的触发不会丢得无声无息：定时、手动、日历三条路径对每个被跳过的触发各写一条 `skipped_owner_legacy` 记录（同一触发只记一次，在 `ats dispatch runtime-state` 输出的 history 里可查）。
+覆盖核验（`ats dispatch runtime-expected` 与 `runtime-compare`）会把停用区间内到点的触发标为 `skipped_by_pause`，不算遗漏；因停用而作废的触发标为 `voided_by_pause`。
+只有 `pause` 开出的区间才算停用：从未迁移的工作流虽然负责人也是 `legacy`，它的触发仍按遗漏处理。
 旧名 `owner-rollback` / `owner-switch` 已改名，运行它们会提示新命令且不改任何状态。
 
 > 已知技术债：库里「已停用」仍存成内部值 `legacy`（只改了对外的命令与文档用语）。长期做法是取消这个开关，

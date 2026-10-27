@@ -200,13 +200,13 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 |---|---|---|
 | 研究工作流必须只经 Dispatcher 执行 / 手动与定时同窗口 | 有测试 | `test_dispatch_claims::test_a_manual_and_an_automatic_trigger_merge_into_one_execution`、`::test_the_legacy_daily_cascade_and_the_new_schedule_resolve_to_one_identity` |
 | 同上 / 调用已退役的旧分析入口 | 有测试 | `test_retired_research_commands::test_a_retired_command_names_its_replacement_and_runs_nothing`（15 条旧命令，断言退出码 2、含「已退役」与替代写法、`run_*` 全被替换成「调用即失败」） |
-| 同上 / 已停用的工作流 | **缺口（部分）** | 「不执行」有测试：`test_schedule_owner_switch::test_pause_stops_the_workflow_without_approval_and_resume_needs_it`、`::test_the_old_owner_commands_answer_with_pause_and_resume_and_change_nothing`、`test_workflow_ownership::test_legacy_owner_does_not_invoke_dispatcher_or_open_phase_e_run`。「记录被跳过的原因」只有手动路径做到（返回 `status: legacy`）；定时路径只写一行日志加一条 wake 观察；日历路径（`ownership.py` 两处 `continue`）没有任何记录 |
+| 同上 / 已停用的工作流 | 有测试（缺口 a 已于 10-27 修复） | 「不执行」有测试：`test_schedule_owner_switch::test_pause_stops_the_workflow_without_approval_and_resume_needs_it`、`::test_the_old_owner_commands_answer_with_pause_and_resume_and_change_nothing`、`test_workflow_ownership::test_legacy_owner_does_not_invoke_dispatcher_or_open_phase_e_run`。「记录被跳过的原因」修复前只有手动路径做到；修复后手动、定时、日历三条路径都写一条 `skipped_owner_legacy` 记录，同一触发只记一次：`test_schedule_owner_switch::test_a_paused_workflow_leaves_one_skip_record_per_trigger_for_scheduled_and_manual_runs`、`::test_a_dispatcher_owned_workflow_leaves_no_skip_record`、`test_workflow_ownership::test_calendar_events_for_a_workflow_the_dispatcher_does_not_own_leave_skip_records` |
 | 停用与恢复必须先冻结再清点 / 清点后又产生新触发 | 有测试（间接） | 先冻结后清点的顺序与冻结失败即停：`test_schedule_cutover::test_the_step_order_is_freeze_inventory_dispose_handover`、`::test_a_failed_freeze_stops_before_inventory`；`test_dispatch_claims::test_a_second_freeze_while_frozen_is_refused`、`::test_only_the_attempt_that_froze_may_open` |
 | 同上 / 存在处置方式未声明的未完成触发 | 有测试 | `test_dispatch_claims::test_an_undeclared_disposition_refuses_the_handover`、`test_schedule_cutover::test_an_undeclared_disposition_stops_the_cutover`、`test_schedule_owner_switch::test_unfinished_claims_block_the_switch_until_voided_on_purpose` |
 | 同上 / 有正在运行的认领 | 有测试 | `test_schedule_owner_switch::test_a_running_claim_is_never_voided`、`::test_pause_is_refused_while_a_claim_is_running` |
-| 同上 / 停用时作废未完成触发 | **缺口（部分）** | 「记录原因与操作者」有测试：`test_dispatch_claims::test_a_void_disposition_records_its_reason_and_does_not_execute`、`test_schedule_cutover::test_voiding_without_a_reason_stops_the_cutover`。「恢复后不被自动执行」没有断言；现有 `test_dispatch_claims::test_a_void_trigger_can_be_claimed_again_after_the_handover` 反过来证明作废的认领可以被再次认领（追赶式触发会不会把它重新跑一遍，没有测试回答） |
+| 同上 / 停用时作废未完成触发 | 有测试（缺口 c 已于 10-27 核实） | 「记录原因与操作者」有测试：`test_dispatch_claims::test_a_void_disposition_records_its_reason_and_does_not_execute`、`test_schedule_cutover::test_voiding_without_a_reason_stops_the_cutover`。「恢复后不被自动执行」新增 `test_schedule_owner_switch::test_a_trigger_voided_by_a_pause_is_not_executed_again_after_the_resume`：作废的认领保持 void，恢复后同一触发再到达被 `schedule_skipped` 跳过。原先引用的 `test_dispatch_claims::test_a_void_trigger_can_be_claimed_again…` 属于旧的迁移期认领表（R5 的 `migration.dispatch_dedup`），不是现行的 `schedule_runtime`，不能据此判断 |
 | 调度覆盖必须依据独立预期触发集合 / 调度遗漏必需触发 | 有测试 | `test_phase_f_schedule_runtime::test_independent_oracle_detects_the_dispatcher_omitting_a_tick`、`test_dispatch_claims::test_both_paths_missing_the_same_trigger_is_detected` |
-| 同上 / 停用期间的触发 | **缺口** | 未实现。`schedule_runtime.expected_triggers` 对所有启用的工作流导出预期触发，不看所有者或停用状态；`compare_triggers` 没有「因停用而跳过」这一类。停用期间的预期触发会被算作 `missing_paths` |
+| 同上 / 停用期间的触发 | 有测试（缺口 b 已于 10-27 修复） | `compare_triggers` 按追加式 owner log 还原停用区间（只认 `pause` 开出的区间），区间内到点且没有认领的触发记为 `skipped_by_pause`，因停用作废的记为 `voided_by_pause`，均不算遗漏：`test_schedule_owner_switch::test_expected_triggers_during_a_pause_are_skipped_not_missing`、`::test_a_pause_that_is_still_open_covers_every_later_trigger`、`::test_a_workflow_that_was_never_moved_to_the_dispatcher_is_not_treated_as_paused`、`::test_a_trigger_that_has_a_claim_is_never_reclassified_as_skipped`、`::test_a_trigger_voided_by_the_pause_is_reported_as_such`、`::test_an_event_trigger_dropped_during_a_pause_is_skipped_not_missing` |
 | 同上 / 预期来源不一致 | 有测试 | `test_dispatch_claims::test_an_expected_set_that_disagrees_with_registration_is_not_trusted`、`::test_no_declared_set_means_no_verdict_at_all` |
 | 可读报告必须由 Dispatcher 路径生成 / 技术面定时运行后 | 有测试 | `test_report_publishers::test_one_summary_report_covers_every_symbol_of_the_run` |
 | 同上 / 周度行业评审后 | 有测试（部分有记录） | 周报跟随新的行业评审：`test_report_publishers::test_chain_evidence_report_follows_a_new_sector_review_only`；行业与层级报告内容：`test_layer_report`、`test_sector_viz`（`test_run_sector_html_*`）。首次真实定时的行业周报在 10-31 09:30（台北），尚无运行记录 |
@@ -261,16 +261,16 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 
 四份增量里的 REMOVED 条款（前置接收矩阵、逐批 eligible / ineligible 报告，以及 `dispatcher-runtime`、`cutover-control` 里被新要求取代的旧条款）没有可测的行为，随归档从主规格里删除。核对点是每条的 Migration 所指向的新要求都已在上面有证据：前置接收 → 8.3 的人工核验前置；逐批报告 → 8.3 的依赖顺序与 R5 外部门；旧切流 / 回退条款 → 8.2。
 
-### 8.5 缺口小结与处置建议
+### 8.5 缺口小结与处置
 
-| # | 缺口 | 性质 | 建议 |
-|---|---|---|---|
-| a | 已停用工作流的定时 / 日历触发没有「被跳过的原因」记录 | 规格要求的记录没做全；功能（不执行）是对的 | 在 `ownership.py` 的定时与日历分支各补一条跳过观察（轻量，不改所有权判断）。属逻辑改动，**不在本 change 的文档任务内**，建议单开修复 |
-| b | 预期触发集合不区分停用，停用期间会被报成遗漏 | 规格场景未实现 | 在 `expected_triggers` / `compare_triggers` 加「因停用而跳过」类。同上，需要改行为与测试，建议单开修复；在此之前，停用期间做覆盖核验会看到误报的遗漏，运维文档需提示 |
-| c | 作废的未完成触发「恢复后不被自动执行」无断言，现有用例还证明它可被再次认领 | 证据缺失，行为未知 | 先写一条用例确认追赶式触发是否会重跑已作废的认领；若会，按规格改。建议与 a、b 一并单开 |
-| d | 停用 / 恢复的 5.4 原验证口径（定时、事件、手动都不执行并记录原因）只被部分覆盖 | 同 a | 同 a |
+缺口 a、b、c 已在同日修复或核实（见 §十），不再是缺口；d 随 a 一并解决。
 
-这四项都不影响当前生产：现在没有任何研究工作流处于停用状态，`pause` 只在运维手动停某个工作流时才用到。
+| # | 缺口 | 结果 |
+|---|---|---|
+| a | 已停用工作流的定时 / 日历触发没有「被跳过的原因」记录 | 已修复：手动、定时、日历三条路径各写一条 `skipped_owner_legacy`，同一触发只记一次 |
+| b | 预期触发集合不区分停用，停用期间会被报成遗漏 | 已修复：`compare_triggers` 新增 `skipped_by_pause` / `voided_by_pause` |
+| c | 作废触发「恢复后不被自动执行」无断言 | 核实：现行代码本来就不会重跑（作废认领保留为 void，同键再到达被跳过）；补了测试 |
+| d | 5.4 原验证口径只被部分覆盖 | 随 a 解决 |
 
 ## 九、文档同步与 R5 核对记录（任务 8.2、9.1、9.2）· 2026-10-27
 
@@ -281,3 +281,16 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 **9.1 R5 登记核对。** `ats retirement decide` 对 R5 的 20 条全部显示「external gate not met: trade_path_cutover」；20 条都有退出条件、缺失条件、清零判据、位置，门均为 `trade_path_cutover`（只有 `migration.analysis_verification` 另有一条前序依赖）。inventory §二 归 R5 的模块逐个对照登记位置：`shadow_*`、`acceptance_*` 以通配符登记，其余均点名；只有 `cutover_guards` 没有出现在任何退出条件里，已补进 `migration.read_route_and_qualification`（只改登记文字，登记与清零测试 58 项通过）。
 
 **9.2 runbook 接续。** `docs/PHASE_F_RETIREMENT_RUNBOOK.md` 新增「〇·二」节：20 条与 `switch-trade-path-and-retire-r5` 各任务一一对应，并列出 5 处对不上的地方（三个模块无人认领、6.3/6.5 的前提未达成、2.7 的跳过记录与 `paused` 取值、proposal 里的旧数字）。这些只记录，没有改那个 change。同节顺手纠正了「R5 的 15 条」为 20 条。
+
+
+## 十、缺口 a/b/c 的修复记录 · 2026-10-27
+
+**c（先查）。** 读 `schedule_runtime.execute`：同一触发键已有认领行且不是 pending / failed 时直接返回 `schedule_skipped`，作废的认领（`status='void'`）永久保留，所以追赶式触发和 `workflow retry` 都不会把它重跑；之前引用的「可再次认领」用例属于旧的 `dispatch_claims`，不是现行路径。结论：行为本来就对，补了一条测试固定它。
+
+**a。** `schedule_runtime.observe_skipped_not_owned(key, payload)`：把「因为 Dispatcher 不拥有这个工作流而没运行」写进运行历史（动作 `skipped_owner_legacy`），按触发键去重（日历路径是轮询，同一触发会反复到达）。`ownership.py` 三处调用：`run_owned_workflow`（手动与定时都经过这里）、日历事件分发、计划中事件的到期释放。不改任何所有权判断。
+
+**b。** `compare_triggers` 新增分类。停用区间来自追加式 `schedule_owner_log`：`rollback`（即 `ats dispatch pause`）开区间，下一个 `switch` 关区间；从未迁移过的工作流没有区间，所以它的触发仍按遗漏处理。定时触发用计划时刻比对区间；事件触发没有计划时刻，用 a 写下的跳过记录的时刻。已有认领的触发不重新分类。`expected_triggers` 保持只依据配置导出，仅给每行加了 `workflow` 字段。
+
+**验证。** 相关 13 个测试文件共 267 个用例，266 通过；唯一失败是 `test_committed_result_survives_control_record_crash_without_republication`，在 3b2a745 基线上同样失败（既有问题）。新增用例 10 个。生产库里没有被测试写入跳过记录（已查）。
+
+**还没做的。** dispatcher 常驻进程尚未重启，生产上跑的仍是旧代码，需要你同意后 `launchctl kickstart -k gui/$(id -u)/com.ats.dispatcher` 并观察下一次定时触发。`ownership.py`、`schedule_runtime.py` 在资格指纹清单内，会使已记录的资格证据显示 `manifest_drift`（性质与之前相同，重新记录需要你授权）。

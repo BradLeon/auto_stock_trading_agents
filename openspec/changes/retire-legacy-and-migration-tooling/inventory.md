@@ -185,7 +185,7 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 | 顺带发现 | `store.append_events`、`store.set_triage` 在删除 monitor 后 src 内无调用方（只剩测试使用），属于下一轮可清的存量，本批未动 |
 | 回归 | 复验时发现第 5 组的 2cd1fb5 在删 `run_cross_section` 时误删了 `run_layer_review` 上方的 `@scoped_read("layer")`，导致 `test_phase_f_business_wiring` 的 `run_layer_review` 用例失败（路由禁用时本应拒绝，却跑起了 8 层评审，测试环境的模型守卫拦住了真实调用，没有产生费用）。已补回并单独提交；其余装饰器逐个与基线比对，只有这一处不同 |
 | V4 测试 | 见 TEST_BASELINE 同日记录 |
-| V5 运行 | 见下方重启记录 |
+| V5 运行 | 10-27 12:56（台北）重启 dispatcher（PID 51975）与 serve（PID 51998）：dispatcher 正常启动（含读取前的数据产品健康检查），serve 应答、启动日志无错误；`ats data health --consumer information` 为 ok。**尚未观察到**重启后的下一次真实定时触发（日历消费 14:10 台北），待补记 |
 | V6 历史 | 四项 `ats retirement tombstone` 显示 retired、一致、无读取方；`ats pead monitor/watch/research` 仍返回已退役提示 |
 
 清单影响：从 `config/data/target_dataflow_coverage.yaml` 的 `required_fingerprint_paths` 移除 6 个路径（上述 4 项 + `pead/triage.py` + `news_inputs.py`）。清单哈希因此变化，已记录的资格证据会显示 `manifest_drift`。研究侧读路由已固定，不受影响；交易侧的资格证据在 trade_path_cutover 前本来就要补验，补验属生产操作，需另行授权。

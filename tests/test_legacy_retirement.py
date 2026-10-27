@@ -306,7 +306,7 @@ def test_every_entry_of_the_retirement_change_has_a_group_a_gate_and_known_depen
 
     registry = mod.load_registry()
     placed = [stone for stone in registry.tombstones() if stone.group]
-    assert {stone.group for stone in placed} == {"R1", "R2", "R3", "R4", "R5"}
+    assert {stone.group for stone in placed} == {"R1", "R3", "R4", "R5"}      # R2 moved wholly to R5 on 2026-10-27
     for stone in placed:
         assert stone.gate == ("trade_path_cutover" if stone.group == "R5" else "G0"), stone.identifier
         assert stone.kind, stone.identifier

@@ -25,6 +25,8 @@
 
 ### 簇内整批可删（R2）的模块与命令
 
+> **2026-10-27 复核：R2 整组转入 R5。** 清点时只按 `src/` 看使用方，补查测试和命令组后发现：这 10 个模块没有一个能单独删——`boundary_drill`（`ats drill` 的读边界回退演练）依赖 `batch_manifest`/`read_cutover`/`schedule_cutover`；`paired_business` 与 `ats retirement` 依赖 `intake_verification`；`analysis_verification`、`isolated_entry`、`scoped_intake`、`consumer_disposition` 被 Phase F 验收测试（研究、决策、执行、恢复，隔离环境跑交易侧角色等）使用；`cutover_acceptance` 验证交易订单可追溯与未经批准的订单；`dispatch_claims` 被 `schedule_cutover` 直接使用。交易链路（Chief、Clerk、Risk、Trader、Boss）暂不退役，所以它们与交易侧一起留到 R5（门 `trade_path_cutover`）。研究侧已于 4.1 解耦：Dispatcher 与研究侧读窗口不再依赖这些工具。
+
 下面各项在簇内之外没有使用方，只被命令行与测试引用（「测试」列是引用该模块的测试文件数）。
 
 | 模块 | 命令行 | 测试 | 备注 |

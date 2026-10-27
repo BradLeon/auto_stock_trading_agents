@@ -30,16 +30,21 @@
 - [x] 3.2 核验发现的新路径缺陷登记为单独的修复任务，修复后复核通过。验证：verification.md 中没有「未通过」项；依赖未通过项的条目保持 pending（核验期间发现的缺陷多数当场修复，提交号见 verification.md「G0 结论」）
 - [x] 3.3 记录 G0 结论（日期、范围、遗留且已接受的缺口，例如 SEC 不可达、ibkr_news 的 partial），提交 verification.md。验证：提交存在（2026-10-27 用户确认并签字，G0 通过）
 
-## 4. R2 研究侧切换期工具退役（门 G0）
+## 4. R2 研究侧切换期工具退役（原门 G0；2026-10-27 整组转入 R5，只做了 4.1）
+
+> **2026-10-27 复核：R2 整组转入 R5。** 清点时只按 `src/` 看使用方，补查测试和命令组后发现：这 10 个模块没有一个能单独删——`boundary_drill`（`ats drill` 的读边界回退演练）依赖 `batch_manifest`/`read_cutover`/`schedule_cutover`；`paired_business` 与 `ats retirement` 依赖 `intake_verification`；`analysis_verification`、`isolated_entry`、`scoped_intake`、`consumer_disposition` 被 Phase F 验收测试（研究、决策、执行、恢复，隔离环境跑交易侧角色等）使用；`cutover_acceptance` 验证交易订单可追溯与未经批准的订单；`dispatch_claims` 被 `schedule_cutover` 直接使用。交易链路（Chief、Clerk、Risk、Trader、Boss）暂不退役，所以它们与交易侧一起留到 R5（门 `trade_path_cutover`）。研究侧已于 4.1 解耦：Dispatcher 与研究侧读窗口不再依赖这些工具。
+
+4.2–4.8 记为“转入 R5”：条目已改登记为 R5（门 `trade_path_cutover`），由交易路径切换的 change 接续；本 change 不执行。
+
 
 - [x] 4.1 先处理簇外依赖（design.md D10）：去掉 `cutover_wiring` 里对 `dispatch_claims` 的接线声明及 `boundary_evidence` 对应调用点；把 `digest` 从 `shadow_replay` 移到 Dispatcher 自己的模块；评估并去掉 `read_windows` 对 `shadow_reports` 的研究侧批次报告校验。验证：对应测试通过，`dispatcher` 与 `read_windows` 不再导入 `shadow_replay`/`shadow_reports`（10-27：digest 搬出 6ebbf11、研究侧读窗口不再要求批次报告 e2319c5、调度边界登记改指向真实认领 8137c0e；63 个相关文件里 54 个通过、`test_cutover_cli` 的 3 条失败改动前就有；其余 5 个有失败与 4 个超时的 Phase F 重型验收文件在后台与改动前对照，结果记入 TEST_BASELINE。`dispatcher` 已无 `shadow_*` 导入；`read_windows` 只在交易侧消费者分支内保留对 `shadow_reports` 的导入，属 R5）
-- [ ] 4.2 对 `migration.batch_read_cutover` 做 V1–V3，结果写进 inventory.md。验证：`ats retirement decide` 判该条可退出
-- [ ] 4.3 删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试（`test_batch_manifest`、`test_read_cutover`、`test_batch_cli`），同步冻结面与资格清单；归档命令用法样例到 docs/archive。验证：受影响测试与 assurance_surface、架构守卫测试通过；调用 `ats batch` 返回已退役提示
-- [ ] 4.4 对 `migration.schedule_cutover` 做 V1–V3，删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。验证：同 4.3
-- [ ] 4.5 对 `migration.intake`、`migration.analysis_verification` 做 V1–V3，删除 `intake.py`、`intake_verification.py`、`scoped_intake.py`、`analysis_verification.py`、`consumer_disposition.py`、`isolated_entry.py`、命令 `ats intake` 及其测试。验证：同 4.3
-- [ ] 4.6 对 `migration.dispatch_dedup` 做 V1–V3，删除 `dispatch_claims.py` 与 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。验证：`ats dispatch --help` 只剩负责人与停用相关命令，受影响测试通过
-- [ ] 4.7 登记处把本组条目标为 retired 并附清零证明；更新 OPERATIONS 与 TEST_BASELINE（删除了哪些测试、其中多少原本失败）。验证：`ats retirement decide` 显示本组 retired，TEST_BASELINE 有本批记录
-- [ ] 4.8 本组复验 V4–V6：全量测试与基线逐项对照；重启 `com.ats.dispatcher` 与 `com.ats.serve`，观察下一次定时触发、数据刷新与日历消费；确认旧表与台账可读。验证：复验结果写进 inventory.md 的本批记录
+- [x] 4.2 对 `migration.batch_read_cutover` 做 V1–V3，结果写进 inventory.md。验证：`ats retirement decide` 判该条可退出（**转入 R5，本 change 不执行**）
+- [x] 4.3 删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试（`test_batch_manifest`、`test_read_cutover`、`test_batch_cli`），同步冻结面与资格清单；归档命令用法样例到 docs/archive。验证：受影响测试与 assurance_surface、架构守卫测试通过；调用 `ats batch` 返回已退役提示（**转入 R5，本 change 不执行**）
+- [x] 4.4 对 `migration.schedule_cutover` 做 V1–V3，删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。验证：同 4.3（**转入 R5，本 change 不执行**）
+- [x] 4.5 对 `migration.intake`、`migration.analysis_verification` 做 V1–V3，删除 `intake.py`、`intake_verification.py`、`scoped_intake.py`、`analysis_verification.py`、`consumer_disposition.py`、`isolated_entry.py`、命令 `ats intake` 及其测试。验证：同 4.3（**转入 R5，本 change 不执行**）
+- [x] 4.6 对 `migration.dispatch_dedup` 做 V1–V3，删除 `dispatch_claims.py` 与 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。验证：`ats dispatch --help` 只剩负责人与停用相关命令，受影响测试通过（**转入 R5，本 change 不执行**）
+- [x] 4.7 登记处把本组条目标为 retired 并附清零证明；更新 OPERATIONS 与 TEST_BASELINE（删除了哪些测试、其中多少原本失败）。验证：`ats retirement decide` 显示本组 retired，TEST_BASELINE 有本批记录（**转入 R5，本 change 不执行**）
+- [x] 4.8 本组复验 V4–V6：全量测试与基线逐项对照；重启 `com.ats.dispatcher` 与 `com.ats.serve`，观察下一次定时触发、数据刷新与日历消费；确认旧表与台账可读。验证：复验结果写进 inventory.md 的本批记录（**转入 R5，本 change 不执行**）
 
 ## 5. R1 命名与入口残留退役（门 G0）
 

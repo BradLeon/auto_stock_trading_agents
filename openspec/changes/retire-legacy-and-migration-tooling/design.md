@@ -119,7 +119,9 @@ flowchart TD
 | `legacy_entry.evidence_commands` | 旧手动入口 | 数据刷新的 `chain_evidence_daily`（`ats data evidence-observe`）与 Layer 的证据判读 | 只删 `ats evidence observe/collect/articles` 与 `ats sector crosssection`（评审内部已自己算截面，独立持久化的那一遍没有消费者）；**命题治理命令 `ats evidence claims/report/propose/proposals/review/kbreview` 与 `ats sector kbperturb` 保留**（人审批新命题的入口，用户 2026-10-21 确认） |
 | `naming.migration_terms_in_docs` | 命名 | — | 文档与帮助文本中的"新路径 / 旧路径 / 切流 / phase"残留 |
 
-**R2 研究侧切换期工具**（门 G0；运行路径之外，只被命令行和测试使用；具体依赖与簇外使用方见 inventory.md 第二节）
+**R2 研究侧切换期工具**（原门 G0；**已于 2026-10-27 整组转入 R5**，见下方说明；具体依赖与簇外使用方见 inventory.md 第二节）
+
+> **2026-10-27 复核：R2 整组转入 R5。** 清点时只按 `src/` 看使用方，补查测试和命令组后发现：这 10 个模块没有一个能单独删——`boundary_drill`（`ats drill` 的读边界回退演练）依赖 `batch_manifest`/`read_cutover`/`schedule_cutover`；`paired_business` 与 `ats retirement` 依赖 `intake_verification`；`analysis_verification`、`isolated_entry`、`scoped_intake`、`consumer_disposition` 被 Phase F 验收测试（研究、决策、执行、恢复，隔离环境跑交易侧角色等）使用；`cutover_acceptance` 验证交易订单可追溯与未经批准的订单；`dispatch_claims` 被 `schedule_cutover` 直接使用。交易链路（Chief、Clerk、Risk、Trader、Boss）暂不退役，所以它们与交易侧一起留到 R5（门 `trade_path_cutover`）。研究侧已于 4.1 解耦：Dispatcher 与研究侧读窗口不再依赖这些工具。
 
 | 条目 | 涉及 | 说明 |
 |---|---|---|
@@ -234,7 +236,7 @@ inventory.md 第二节列出 6 处簇外代码依赖切换期模块。R2 开始�
 
 1. R0：清点、登记、生成 G0 清单（可在你核验前做，不删除任何东西）。
 2. 你执行 G0 人工核验并在 verification.md 写结论。
-3. G0 通过后按 D3 顺序执行 R1、R2、R3（可并行），然后 R4；每批：V1–V3 → 提交删除 → 重启服务 → V4–V6。
+3. G0 通过后按 D3 顺序执行 R1、R3（可并行；R2 已转入 R5），然后 R4；每批：V1–V3 → 提交删除 → 重启服务 → V4–V6。
 4. R6 收尾：OPERATIONS、ARCHITECTURE、退役 runbook、README、TEST_BASELINE 更新；全量测试一次；`openspec validate`。
 5. 归档本 change 时，R5 条目仍为 pending，并在交易路径切换的 change 里接续。
 6. 回滚：按批 `git revert` 并重启服务；数据不受影响，无需恢复。

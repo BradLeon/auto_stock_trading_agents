@@ -11,10 +11,10 @@ G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/c
 | 批次 | 条数 | 内容 | 门 |
 |---|---|---|---|
 | R1 命名与入口残留 | 5 | 旧手动命令、负责人 legacy 模式、证据命令（保留命题治理命令）、`consumer-cutover` 命名、文档里的迁移措辞 | G0 |
-| R2 研究侧切换期工具 | 5 | `batch`/`read`、`schedule_cutover`、`intake`、`analysis_verification`、`dispatch_dedup` | G0 |
+| R2 研究侧切换期工具 | 0（原 5 条已于 10-27 **整组转入 R5**：与交易侧的演练、验收和接入核验相连，研究侧已于 4.1 解耦） | — | — |
 | R3 登记修正与研究侧已登记条目 | 3 | `task_projections.legacy_columns`、`evidence_fact_projections.legacy_observation_id`、`layer_verdict.allocation` | G0 |
 | R4 只被旧入口用到的旧分析代码 | 4 | `risk_manager`、`risk_validator.apply_guardrails`、`pead/monitor`、`pead/research`（交易链路其余代码保留） | G0 |
-| R5 交易路径相关 | 15 | 读路由与资格机制、交易侧切换工具、旧读模型表（含新补登记的 `macro_reviews`、`technical_reviews`）等；本 change 只登记 | **trade_path_cutover**（外部门） |
+| R5 交易路径相关 | 20（含从 R2 转入的 5 条） | 读路由与资格机制、交易侧切换工具、旧读模型表（含新补登记的 `macro_reviews`、`technical_reviews`）等；本 change 只登记 | **trade_path_cutover**（外部门） |
 | 未分组（早期阶段已退役） | 11 | 例如 `workflow_memory.*`、`scheduler.hardcoded_serial_run` | — |
 
 **两道门：**

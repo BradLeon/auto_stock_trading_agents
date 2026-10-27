@@ -622,8 +622,8 @@ retired:
 
   - identifier: migration.batch_read_cutover
     kind: migration_tooling
-    group: R2
-    gate: G0
+    group: R5
+    gate: trade_path_cutover
     capability_domain: workflow/cutover-control
     replaced_by: >-
       无（研究侧读路由已固定为 target）
@@ -632,7 +632,7 @@ retired:
     exit_condition: >-
       删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试。
     missing_condition: >-
-      先处理簇外依赖（design.md D10：`cutover_wiring`、`dispatcher`→`shadow_replay.digest`、`read_windows`→`shadow_reports`）；G0 通过前不执行（tasks 4.1–4.3）。
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`boundary_drill`（`ats drill` 的读边界回退演练）用 `CutoverBatch`、`READ_BOUNDARIES`、`_switch_chain`；批次类别含 internal_state_approval、live_trader 等交易批次。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
       除本批删除的集合外，`src/` 无导入或调用；14 天内无经该条目的调用。
@@ -640,8 +640,8 @@ retired:
 
   - identifier: migration.schedule_cutover
     kind: migration_tooling
-    group: R2
-    gate: G0
+    group: R5
+    gate: trade_path_cutover
     capability_domain: workflow/cutover-control
     replaced_by: >-
       无（调度批次切换已完成，旧调度器已删除）
@@ -650,7 +650,7 @@ retired:
     exit_condition: >-
       删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。
     missing_condition: >-
-      G0 通过前不执行（tasks 4.4）。
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`boundary_drill`（调度批次 dry-run）依赖；它又直接使用 `dispatch_claims` 的处置常量，所以 `dispatch_claims` 一并留下。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
       除本批外无引用。
@@ -658,8 +658,8 @@ retired:
 
   - identifier: migration.intake
     kind: migration_tooling
-    group: R2
-    gate: G0
+    group: R5
+    gate: trade_path_cutover
     capability_domain: workflow/cutover-control
     replaced_by: >-
       无（接入核验与逐消费者处置属切换期工具）
@@ -668,7 +668,7 @@ retired:
     exit_condition: >-
       删除 `intake.py`、`intake_verification.py`、`scoped_intake.py`、命令 `ats intake` 及其测试。
     missing_condition: >-
-      G0 通过前不执行（tasks 4.5）；`intake_verification.scan_consumer_access` 目前仍被 `ats retirement zero/decide` 使用，需先迁走。
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`paired_business` 用 `intake_verification.isolated_verification`；`ats retirement zero/decide` 用 `scan_consumer_access`；`consumer_disposition` 被 `ats intake` 与 Phase F 验收测试使用。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
       除本批外无引用，`ats retirement` 的清零扫描改用别处的实现。
@@ -676,8 +676,8 @@ retired:
 
   - identifier: migration.analysis_verification
     kind: migration_tooling
-    group: R2
-    gate: G0
+    group: R5
+    gate: trade_path_cutover
     depends_on: [migration.intake]
     capability_domain: workflow/cutover-control
     replaced_by: >-
@@ -687,7 +687,7 @@ retired:
     exit_condition: >-
       删除 `analysis_verification.py`、`consumer_disposition.py`、`isolated_entry.py` 及其测试，与 `intake_verification` 绑定一起走。
     missing_condition: >-
-      inventory.md 已确认无簇外使用；随 migration.intake 一并退役（tasks 4.5）。
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`analysis_verification` 被 `test_phase_f_opinion_execution`（研究、决策、执行、恢复验收）使用；`isolated_entry` 被 `test_phase_f_shadow_business`、`test_phase_f_safe_reads` 用来在隔离环境跑交易侧角色；随 `migration.intake` 一起走。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
       除本批外无引用。
@@ -695,8 +695,8 @@ retired:
 
   - identifier: migration.dispatch_dedup
     kind: migration_tooling
-    group: R2
-    gate: G0
+    group: R5
+    gate: trade_path_cutover
     capability_domain: workflow/cutover-control
     replaced_by: >-
       无（新旧调度去重；旧调度器已删除）
@@ -705,7 +705,7 @@ retired:
     exit_condition: >-
       删除 `dispatch_claims.py` 与 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。
     missing_condition: >-
-      先去掉 `workflow/cutover_wiring.py` 接线声明里对它的引用与 `boundary_evidence` 的调用点；G0 通过前不执行（tasks 4.1、4.6）。
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`schedule_cutover` 直接使用 `dispatch_claims` 的处置常量；`cutover_acceptance`（交易订单可追溯与“未经批准的订单”验收）也属交易侧影子期验收。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
       `ats dispatch --help` 只剩负责人与停用相关命令。

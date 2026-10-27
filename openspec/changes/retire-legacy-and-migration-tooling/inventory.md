@@ -172,3 +172,20 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 | V6 历史 | `ats retirement tombstone --identifier layer_verdict.allocation` 显示 retired、一致、无读取方；历史行读回由新增测试覆盖 |
 
 遗留：`task_projections` 与 `legacy_observation_id` 名字里的 legacy 是历史遗留，未改名（改名要动两个库的表结构，收益不值）。
+
+### 第 7 组（R4：只被旧入口用到的旧分析代码）· 2026-10-27
+
+提交见 git log（"refactor(agents): R4 …"）。
+
+| 项 | 结果 |
+|---|---|
+| V1–V3 | `ats retirement decide` 对四项都只剩「回退未演练」。静态：`risk_manager` 零引用；`pead/monitor`、`pead/research` 只被 cli 里已不可达的 `run_pead_*` 引用；`apply_guardrails` 只剩定义 |
+| 删除内容 | `agents/risk_manager.py`、`agents/pead/monitor.py`、`agents/pead/research.py`；`risk_validator.py` 里 `apply_guardrails` 与独有的 `_enforce_sector_cap`、`_enforce_budget`（保留只读的 `review_guardrails`）；cli 里 `run_pead_monitor`、`run_pead_watch`、`run_pead_research` 与 main 里 3 处分支 |
+| 7.3 调用图重跑 | 用 AST 扫描「没有任何 src 模块导入」的模块，对比 3b2a745 基线：删除后新增 2 个只被已删入口引用的模块，一并删除——`agents/pead/triage.py`（只是对 `agents/information/triage` 的转发壳，inventory 第三节原先写「保留」是因为当时以为 `target_research` 用它，实际用的是 information 下的那份）、`data/products/news_inputs.py`（只有 `monitor_news` 一个函数）。另外 `agents/risk_validator`（保留 `review_guardrails`）现在 src 内无调用方，是已记录的「等交易路径决定」。第三节「明确保留」的 `graph/pead.py`、`pead/{prep,score,report,units,outputs}`、`runtime/digest.py`、`runtime/evidence_observe.py`、`agents/evidence/observer.py` 仍有使用方，保留 |
+| 顺带发现 | `store.append_events`、`store.set_triage` 在删除 monitor 后 src 内无调用方（只剩测试使用），属于下一轮可清的存量，本批未动 |
+| 回归 | 复验时发现第 5 组的 2cd1fb5 在删 `run_cross_section` 时误删了 `run_layer_review` 上方的 `@scoped_read("layer")`，导致 `test_phase_f_business_wiring` 的 `run_layer_review` 用例失败（路由禁用时本应拒绝，却跑起了 8 层评审，测试环境的模型守卫拦住了真实调用，没有产生费用）。已补回并单独提交；其余装饰器逐个与基线比对，只有这一处不同 |
+| V4 测试 | 见 TEST_BASELINE 同日记录 |
+| V5 运行 | 见下方重启记录 |
+| V6 历史 | 四项 `ats retirement tombstone` 显示 retired、一致、无读取方；`ats pead monitor/watch/research` 仍返回已退役提示 |
+
+清单影响：从 `config/data/target_dataflow_coverage.yaml` 的 `required_fingerprint_paths` 移除 6 个路径（上述 4 项 + `pead/triage.py` + `news_inputs.py`）。清单哈希因此变化，已记录的资格证据会显示 `manifest_drift`。研究侧读路由已固定，不受影响；交易侧的资格证据在 trade_path_cutover 前本来就要补验，补验属生产操作，需另行授权。

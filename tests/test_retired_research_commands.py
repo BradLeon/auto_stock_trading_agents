@@ -27,8 +27,7 @@ RETIRED = [
 @pytest.mark.parametrize("argv,replacement", RETIRED)
 def test_a_retired_command_names_its_replacement_and_runs_nothing(capsys, monkeypatch, argv, replacement):
     for name in ("run_macro_review", "run_sector_review", "run_layer_review", "run_technical_review",
-                 "run_information_pass", "_run_analyst_fundamental", "run_pead", "run_pead_monitor",
-                 "run_pead_watch", "run_pead_research"):
+                 "run_information_pass", "_run_analyst_fundamental", "run_pead"):
         monkeypatch.setattr(cli, name, lambda *a, **k: pytest.fail("a retired command ran the analyst"))
     code = cli.main(argv)
     out = capsys.readouterr().out

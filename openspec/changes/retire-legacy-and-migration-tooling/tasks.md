@@ -68,10 +68,10 @@
 
 ## 7. R4 只被旧入口用到的旧分析代码（门 G0，依赖第 5、6 组）
 
-- [ ] 7.1 对 `agents.risk_manager`、`agents.risk_validator.apply_guardrails`、`agents.pead.monitor`、`agents.pead.research` 逐个做 V1–V3（`pead.monitor`、`pead.research` 在 5.3 之后）。验证：`ats retirement decide` 判可退出
-- [ ] 7.2 删除这四项（risk_validator 只删已退役的 `apply_guardrails`，保留 `review_guardrails` 及其测试，等 R5 决定）及其测试，同步冻结面与资格清单。验证：受影响测试、架构守卫、assurance_surface 通过
-- [ ] 7.3 重跑调用图确认没有新增的「只被已删除入口引用」的模块，结果写进 inventory.md；`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,outputs}`、`runtime/digest.py`、`runtime/evidence_observe.py`、`agents/evidence/observer.py` 等明确保留。验证：inventory.md 有重跑结论
-- [ ] 7.4 TEST_BASELINE 与 runbook 记录本批，本组复验 V4–V6。验证：同 4.8
+- [x] 7.1 对 `agents.risk_manager`、`agents.risk_validator.apply_guardrails`、`agents.pead.monitor`、`agents.pead.research` 逐个做 V1–V3（`pead.monitor`、`pead.research` 在 5.3 之后）。验证：`ats retirement decide` 判可退出（10-27：`ats retirement decide` 对四项都只剩「回退未演练」；V1 静态：risk_manager 零引用，monitor / research 仅被 cli 已不可达的 run_pead_* 引用，apply_guardrails 仅剩定义）
+- [x] 7.2 删除这四项（risk_validator 只删已退役的 `apply_guardrails`，保留 `review_guardrails` 及其测试，等 R5 决定）及其测试，同步冻结面与资格清单。验证：受影响测试、架构守卫、assurance_surface 通过（10-27：删除 risk_manager.py、pead/monitor.py、pead/research.py，risk_validator 删 apply_guardrails 及 2 个独有辅助函数，cli 删 run_pead_monitor / run_pead_watch / run_pead_research 与 main 里 3 处分支；测试：删 test_monitor.py，monitor 的两条保证改写为直接驱动 run_document_pass，test_triage 改指信息分析师的 triage，test_broker_risk 去掉 2 个 assess 用例；覆盖清单移除 4+2 个路径，意味着已记录的资格证据显示 manifest_drift，补验另行授权）
+- [x] 7.3 重跑调用图确认没有新增的「只被已删除入口引用」的模块，结果写进 inventory.md；`graph/pead.py`、`agents/pead/{prep,score,report,units,triage,outputs}`、`runtime/digest.py`、`runtime/evidence_observe.py`、`agents/evidence/observer.py` 等明确保留。验证：inventory.md 有重跑结论（10-27：重跑调用图，删除 monitor 后新增 2 个只被已删入口引用的模块并一并删除——`agents/pead/triage.py`（只是对 information/triage 的转发壳）和 `data/products/news_inputs.py`（只有 monitor_news 一个函数）；其余明确保留项均仍有使用方，结论见 inventory.md 第七节）
+- [x] 7.4 TEST_BASELINE 与 runbook 记录本批，本组复验 V4–V6。验证：同 4.8（10-27：TEST_BASELINE 与 runbook 已记录；V4 受影响文件通过，唯一遗留失败为基线上同样失败的既有项；复验发现并修复第 5 组遗漏的 run_layer_review 守卫装饰器（1da1918）；V5 已重启服务，下一次真实触发待补记；V6 通过；见 inventory.md 第七节）
 
 ## 8. 规格与运维文档同步
 

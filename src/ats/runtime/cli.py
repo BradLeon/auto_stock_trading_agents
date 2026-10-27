@@ -173,50 +173,6 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
     print("=" * 70)
 
 
-@scheduled_cli("information-brief", kind="entity", argument="symbol")
-def run_pead_monitor(symbol: str, *, use_llm: bool = True) -> dict:
-    """Run one continuous-monitor pass: ingest events, update the living dossier."""
-    from ..agents.pead import monitor
-    from ..config import load_pead_global
-
-    g = load_pead_global()
-    update = monitor.run(
-        symbol.upper(), use_llm=use_llm, lookback_days=g["monitor"]["lookback_days"]
-    )
-    print(
-        f"📡 monitor {symbol.upper()} — materiality {update.materiality:.2f} · "
-        f"{update.event_summary}"
-    )
-    if update.narrative_delta:
-        print(f"   Δ thesis: {update.narrative_delta}")
-    for ec in update.expectation_changes:
-        print(f"   Δ {ec.dim_key}: {ec.change}")
-
-    mon = g["monitor"]
-    if mon.get("push_context_updates") and update.materiality >= mon["materiality_threshold"]:
-        try:
-            get_channel("feishu").push(
-                Notification(
-                    kind="info",
-                    title=f"PEAD context update — {symbol.upper()} "
-                    f"(materiality {update.materiality:.2f})",
-                    body=update.event_summary
-                    + ("\nΔ " + update.narrative_delta if update.narrative_delta else ""),
-                )
-            )
-            print("   → pushed Feishu info card")
-        except Exception as exc:  # noqa: BLE001 - push is best-effort
-            print(f"   (Feishu push skipped: {exc})")
-    return {"update": update}
-
-
-def run_pead_watch(*, use_llm: bool = True) -> None:
-    from ..config import load_pead_global
-
-    for sym in load_pead_global().get("targets", []):
-        run_pead_monitor(sym, use_llm=use_llm)
-
-
 def events_list(*, days: int | None = None) -> int:
     from datetime import date, timedelta
     from zoneinfo import ZoneInfo
@@ -3046,21 +3002,6 @@ def sector_probe(name: str = "ai_hardware", *, live_data: bool = True) -> int:
     return 0
 
 
-def run_pead_research(*, use_llm: bool = True) -> list:
-    """One research pass: ingest newsletters, extract per-ticker insights."""
-    from ..agents.pead import research
-
-    _run_managed_article_ingestion(source_ids={"semianalysis"}, trigger_kind="manual")
-    insights = research.run(use_llm=use_llm)
-    if not insights:
-        print("📰 research — no new articles / no insights")
-        return []
-    print(f"📰 research — {len(insights)} insights:")
-    for i in insights:
-        print(f"   [{i.direction}/{i.impact_path}] {i.ticker} ({i.confidence:.2f}): {i.summary}")
-    return insights
-
-
 @scoped_read("information")
 def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) -> int:
     """信息分析师独立入口（Phase D）：一轮信息简报，独立终结。
@@ -5478,12 +5419,6 @@ def main(argv: list[str] | None = None) -> int:
             return _run_analyst_fundamental(args)
         return 1
     if args.command == "pead":
-        if args.action == "watch":
-            run_pead_watch(use_llm=not args.no_llm)
-            return 0
-        if args.action == "research":
-            run_pead_research(use_llm=not args.no_llm)
-            return 0
         if args.action == "transcriptprobe":
             return run_transcript_probe(
                 [args.symbol] if args.symbol else None, quarters=args.quarters
@@ -5492,9 +5427,6 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("pead %s requires a symbol" % args.action)
         if args.action == "show":
             return pead_show(args.symbol)
-        if args.action == "monitor":
-            run_pead_monitor(args.symbol, use_llm=not args.no_llm)
-            return 0
         run_pead(
             args.symbol,
             args.action,

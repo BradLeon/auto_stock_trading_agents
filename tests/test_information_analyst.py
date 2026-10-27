@@ -214,34 +214,48 @@ def test_same_event_clusters_and_confidence_not_raised_by_count():
 
 # --- 4.2/4.4 抽取与监控链路不改写 dossier ------------------------------------------- #
 
-def test_monitor_chain_leaves_dossier_untouched_and_publishes_brief(monkeypatch):
-    from ats.agents.pead import monitor
-    from ats.data import news as news_src
+def test_document_pass_failure_publishes_no_brief_and_never_writes_the_dossier(monkeypatch):
+    """LLM 失败路径：不产出简报、绝不写 dossier；use_llm=False 只登记事件、不读模型。
+    （原 pead.monitor 链路的同名保证，tasks 7.2 改为直接驱动信息分析师的文档评审。）"""
+    from ats.agents.information import assemble, documents
     from ats.schemas.news import NewsItem
 
     store = _store()
-    import ats.memory as memory_mod
-
-    monkeypatch.setattr(memory_mod, "get_store", lambda: store)
-
-    fresh = [NewsItem(id="n1", source="finnhub", headline="NVDA raises CapEx",
-                      published_at=NOW)]
-    monkeypatch.setattr(news_src, "fetch_news",
-                        lambda sym, since, until=None, consumer="pead_monitor": fresh)
-    monkeypatch.setattr("ats.agents.information.documents.run_structured", lambda *a, **k: None)
-    def triage_failure(*args, **kwargs):
-        raise RuntimeError("fixture: triage model unavailable")
-
-    monkeypatch.setattr("ats.agents.information.triage.run_structured", triage_failure)
-    # LLM 失败路径：不产出简报、绝不写 dossier
+    monkeypatch.setattr(assemble, "evaluation_now", lambda tz: NOW)
+    monkeypatch.setattr(documents, "evaluation_now", lambda tz: NOW)
+    store.append_events("COHR", [NewsItem(id="n1", source="finnhub", headline="NVDA raises CapEx",
+                                          published_at=NOW, url="", summary="")])
+    monkeypatch.setattr(documents, "run_structured", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="no brief published"):
-        monitor.run("COHR", use_llm=True, lookback_days=7)
+        documents.run_document_pass(store, "COHR", cfg={}, fresh=[], use_llm=True, lookback_days=7)
     assert store.task_projection_envelopes(agent_role="information_brief") == []
-    assert store.get_dossier("COHR", "Q FY2026") is None  # 无 dossier 创建
-    # use_llm=False 路径：只登记事件
-    upd2 = monitor.run("COHR", use_llm=False)
-    assert upd2.materiality == 0.0
-    assert store.count_events("COHR") == 1
+    assert store.get_dossier("COHR", "Q FY2026") is None
+    upd = documents.run_document_pass(store, "COHR", cfg={}, fresh=[], use_llm=False, lookback_days=7)
+    assert upd.materiality == 0.0 and store.count_events("COHR") == 1
+
+
+def test_information_may_not_emit_fundamental_expectation_changes(monkeypatch):
+    """Phase D 4.4/7.4：预期变更是基本面的判断。模型答案带上它们，信息分析师这一轮失败，
+    不发简报、不动 dossier。"""
+    from ats.agents.information import assemble, documents
+    from ats.agents.pead.outputs import ContextUpdateView, ExpectationChangeView
+    from ats.schemas.news import NewsItem
+
+    store = _store()
+    monkeypatch.setattr(assemble, "evaluation_now", lambda tz: NOW)
+    monkeypatch.setattr(documents, "evaluation_now", lambda tz: NOW)
+    store.append_events("COHR", [NewsItem(id="n1", source="finnhub", headline="NVDA raises CapEx",
+                                          published_at=NOW, url="", summary="")])
+    view = ContextUpdateView(
+        materiality=0.8, event_summary="capex divergence", narrative_delta="demand no longer uniformly up",
+        confidence=0.6,
+        expectation_changes=[ExpectationChangeView(dim_key="hyperscaler_capex_demand",
+                                                   change="downgrade conviction")])
+    monkeypatch.setattr(documents, "run_structured", lambda *a, **k: view)
+    with pytest.raises(RuntimeError, match="Information model failed"):
+        documents.run_document_pass(store, "COHR", cfg={}, fresh=[], use_llm=True, lookback_days=7)
+    assert store.get_dossier("COHR", "Q FY2026") is None
+    assert not store.task_projection_envelopes(agent_role="information_brief")
 
 
 def test_document_pass_publishes_brief_without_dossier_write(monkeypatch):

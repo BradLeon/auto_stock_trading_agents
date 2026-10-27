@@ -124,13 +124,10 @@ def test_sector_inputs_route_to_the_underlying_reads(monkeypatch):
     assert sector_inputs.constituent_financials("MU") == {"pe": 11}
 
 
-def test_news_and_market_inputs_route_to_the_underlying_reads(monkeypatch):
-    from ats.data.products import market_inputs, news_inputs
+def test_market_inputs_route_to_the_underlying_reads(monkeypatch):
+    from ats.data.products import market_inputs
 
-    monkeypatch.setattr("ats.data.news.fetch_news",
-                        lambda symbol, since, until=None, *, consumer: [symbol])
     monkeypatch.setattr("ats.data.base.yf_symbol", lambda s: s.upper())
-    assert news_inputs.monitor_news("MU", "since") == ["MU"]
     assert market_inputs.yf_symbol("mu") == "MU"
 
 

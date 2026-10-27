@@ -156,7 +156,7 @@ retired:
     status: retired
     exit_condition: 默认流程改调 review_guardrails，apply_guardrails 无引用。
     missing_condition: >-
-      2026-10-27 补证（tasks 6.1）：graph.pead 已不调用；src 里只剩定义本身（risk_validator.py:22），tests 里是历史说明与墓碑断言。定义的物理删除属 R4（tasks 7）。
+      2026-10-27 补证并物理删除（tasks 6.1、7.2）：apply_guardrails 与它独有的 _enforce_sector_cap、_enforce_budget 已从 risk_validator.py 删除；同文件的只读 review_guardrails 保留（src 内暂无调用方，等交易路径决定去留）。
     consumers: []
     consumer_zero_criterion: src 内 grep apply_guardrails 仅剩定义与其自身测试（已改造）。
     location: src/ats/agents/risk_validator.py
@@ -676,11 +676,11 @@ retired:
     replaced_by: >-
       无（风控在 Chief 里走 `risk/checks.py`）
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `agents/risk_manager.py` 及其测试（只清退用不着的 Risk，交易链路其余代码保留）。
     missing_condition: >-
-      无任何引用，只有 1 个测试；G0 通过前不执行（tasks 7.1–7.2）。
+      2026-10-27 退役并删除（tasks 7.2）：src 零引用，仅 test_broker_risk 的 2 个 assess 用例使用，已随文件删除；从覆盖清单（target_dataflow_coverage.yaml）移除。交易链路其余代码保留。
     consumers: []
     consumer_zero_criterion: >-
       `src/` 无导入。
@@ -695,11 +695,11 @@ retired:
     replaced_by: >-
       信息分析师（`agents/information/documents`）与数据刷新的新闻任务
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `agents/pead/monitor.py` 及其测试。
     missing_condition: >-
-      只被 `ats pead monitor/watch` 用；旧命令退役之后进入（tasks 7.1–7.2）。
+      2026-10-27 退役并删除（tasks 7.2）：只被 cli 里已不可达的 run_pead_monitor / run_pead_watch 使用，二者与 main 里对应分支一并删除；新路径由信息分析师的 run_document_pass 读已准入的文档。测试 test_monitor.py 删除，其中“信息分析师不得发出预期变更”与“失败不发简报、不写 dossier”两条保证改写为直接驱动 documents.run_document_pass（tests/test_information_analyst.py）。
     consumers: []
     consumer_zero_criterion: >-
       `src/` 无导入。
@@ -714,11 +714,11 @@ retired:
     replaced_by: >-
       `agents/information/extract`
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `agents/pead/research.py` 及其测试（迁移期薄代理）。
     missing_condition: >-
-      2026-10-26 增补；只被 `ats pead research` 用，旧命令退役之后进入（tasks 7.1–7.2）。
+      2026-10-27 退役并删除（tasks 7.2）：迁移期薄代理，只被 cli 里已不可达的 run_pead_research 使用，已一并删除；能力在 agents/information/extract。
     consumers: []
     consumer_zero_criterion: >-
       `src/` 无导入；`ats pead research` 返回已退役提示。

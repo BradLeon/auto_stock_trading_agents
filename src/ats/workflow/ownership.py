@@ -126,6 +126,20 @@ def _product_health_gate():
     return None if verified_isolation_root() is not None else PRODUCT_HEALTH_GATE
 
 
+def _record_skipped_not_owned(workflow_id: str, trigger: TriggerContext, *, scope: Mapping[str, Any] | None = None) -> None:
+    """Leave a record that a trigger was dropped because the Dispatcher does not own the workflow (once per trigger)."""
+    from .schedule_runtime import observe_skipped_not_owned
+
+    try:
+        key = trigger_key(trigger)
+    except Exception:  # noqa: BLE001 - a trigger shape trigger_key rejects still deserves a record
+        key = f"{workflow_id}:{trigger.kind}"
+    observe_skipped_not_owned(key, {
+        "workflow": workflow_id, "owner": "legacy", "kind": trigger.kind, "scope": scope,
+        "trigger": trigger.model_dump(mode="json"),
+        "reason": "the workflow is not owned by the Dispatcher (paused); the trigger was not run"})
+
+
 def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
                        trigger: TriggerContext, request: Mapping[str, Any] | None = None,
                        now: datetime | None = None,
@@ -148,6 +162,7 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
         raise OwnershipError("mixed SQL owners: dispatch exact scopes independently")
     mode = modes.pop()
     if mode == "legacy":
+        _record_skipped_not_owned(workflow_id, trigger, scope=scope.model_dump(mode="json"))
         return {"workflow_id": workflow_id, "owner": mode, "status": "legacy"}
     from ..execution.broker_write_guard import startup
 
@@ -285,6 +300,8 @@ def dispatch_calendar_event(event: Mapping[str, Any], *,
     for workflow_id in route.workflow_ids:
         mode = owner_mode(workflow_id, config_dir=config_dir, scope=scope)
         if mode == "legacy":
+            _record_skipped_not_owned(workflow_id, TriggerContext(
+                kind="event", workflow_id=workflow_id, event_id=route.event_id, event_version=route.event_version))
             outcomes.append({"workflow_id": workflow_id, "owner": mode, "status": mode})
             continue
         if not event_trigger_enabled(workflow_id):
@@ -436,6 +453,8 @@ def record_due_calendar_material_waits(*, calendar_store=None, now: datetime | N
             scope = _calendar_scope(event)
             mode = owner_mode(workflow_id, config_dir=config_dir, scope=scope)
             if mode == "legacy":
+                _record_skipped_not_owned(workflow_id, TriggerContext(
+                    kind="event", workflow_id=workflow_id, event_id=route.event_id, event_version=route.event_version))
                 continue
             store = workflow_store_for_owner(workflow_id, config_dir=config_dir, scope=scope)
             store.supersede_event(event_id=route.event_id,

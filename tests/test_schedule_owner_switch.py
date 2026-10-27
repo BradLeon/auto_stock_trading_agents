@@ -228,3 +228,131 @@ def test_pause_is_refused_while_a_claim_is_running(world, capsys, monkeypatch):
                 "--void-unfinished", "x") == 2
     assert "still running" in capsys.readouterr().out
     assert {o for _, o, _ in owners()} == {"dispatcher"}
+
+
+def test_a_trigger_voided_by_a_pause_is_not_executed_again_after_the_resume(world, monkeypatch):
+    """Spec 工作流停用与恢复 / 停用时作废未完成触发: the voided trigger stays void; a later arrival of the same logical
+    trigger (a catch-up after the resume) is skipped, never run."""
+    from ats.workflow.run_contracts import TriggerContext
+    monkeypatch.setattr(rt, "_dispatcher_preconditions", lambda workflow, check=None: {})
+    trigger = TriggerContext(kind="schedule", schedule_id="information-brief", scheduled_for=POINT)
+    go()
+    with pytest.raises(RuntimeError, match="boom"):
+        rt.execute("information-brief", SCOPE_A, trigger, lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+                   owner="dispatcher", actor="attempt-1")
+    entry = rt.owner_switch("information-brief", to_owner="legacy", actor="operator", reason="stop",
+                            void_unfinished="paused on purpose")
+    assert len(entry["voided"]) == 1
+    go()
+    again = rt.execute("information-brief", SCOPE_A, trigger, lambda: pytest.fail("a voided trigger was executed"),
+                       owner="dispatcher", actor="attempt-2")
+    assert again["schedule_skipped"] is True and again["status"] == "void"
+    with closing(rt._connect()) as conn:
+        assert conn.execute("SELECT status FROM schedule_runtime_claims WHERE key=?", (entry["voided"][0],)).fetchone()[0] == "void"
+
+
+def _skip_rows():
+    with closing(rt._connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM schedule_runtime_history WHERE action=?", (rt.SKIPPED_NOT_DISPATCHER_OWNED,))]
+
+
+def test_a_paused_workflow_leaves_one_skip_record_per_trigger_for_scheduled_and_manual_runs(world):
+    """Spec 已停用的工作流: not run, and the reason is recorded (scheduled and manual alike), once per trigger."""
+    from ats.agent.task_projection import ProjectionScope
+    from ats.workflow.ownership import run_owned_workflow
+    from ats.workflow.run_contracts import TriggerContext
+    scope = ProjectionScope(kind="entity", id="NVDA")
+    scheduled = TriggerContext(kind="schedule", workflow_id="information-brief", schedule_id="information-brief",
+                               scheduled_for=POINT)
+    manual = TriggerContext(kind="manual", workflow_id="information-brief")
+    for trigger in (scheduled, scheduled, manual):   # the scheduled tick arrives twice (catch-up)
+        assert run_owned_workflow("information-brief", scope=scope, trigger=trigger)["status"] == "legacy"
+    rows = _skip_rows()
+    assert len(rows) == 2
+    payloads = [json.loads(r["payload"]) for r in rows]
+    assert {p["kind"] for p in payloads} == {"schedule", "manual"}
+    assert all(p["workflow"] == "information-brief" and "paused" in p["reason"] for p in payloads)
+
+
+def test_a_dispatcher_owned_workflow_leaves_no_skip_record(world, monkeypatch):
+    from ats.workflow.ownership import owner_mode
+    monkeypatch.setattr(rt, "_dispatcher_preconditions", lambda workflow, check=None: {})
+    go()
+    from ats.agent.task_projection import ProjectionScope
+    assert owner_mode("information-brief", scope=ProjectionScope(kind="entity", id="NVDA")) == "dispatcher"
+    assert _skip_rows() == []
+
+
+def _log(workflow, action, at, voided=()):
+    with closing(rt._connect(write=True)) as conn:
+        conn.executescript(rt._OWNER_LOG_SCHEMA)
+        to_owner = "dispatcher" if action == "switch" else "legacy"
+        conn.execute("INSERT INTO schedule_owner_log(workflow,action,from_owner,to_owner,from_generation,to_generation,"
+                     "actor,approval,reason,scopes,voided,health,at) VALUES(?,?,?,?,1,2,'o','','r',1,?,'{}',?)",
+                     (workflow, action, "legacy" if action == "switch" else "dispatcher", to_owner,
+                      rt.canonical(list(voided)), at))
+
+
+def _expected(*items):
+    return {"config_hashes": {}, "window": [], "wake_expected": [], "expected": [
+        {"key": key, "workflow": "information-brief", "identity": {"scheduled_for": at}, "paths": ["dispatcher"]}
+        for key, at in items]}
+
+
+def test_expected_triggers_during_a_pause_are_skipped_not_missing(world):
+    """Spec 调度覆盖 / 停用期间的触发: a trigger due while the workflow was paused is 'skipped by pause', not an omission;
+    one due before the pause or after the resume is still a real omission."""
+    _log("information-brief", "switch", "2026-10-01T00:00:00+00:00")
+    _log("information-brief", "rollback", "2026-10-10T00:00:00+00:00")     # pause
+    _log("information-brief", "switch", "2026-10-20T00:00:00+00:00")      # resume
+    result = rt.compare_triggers(_expected(("before", "2026-10-05T14:00:00+00:00"),
+                                           ("during", "2026-10-15T14:00:00+00:00"),
+                                           ("after", "2026-10-25T14:00:00+00:00")))
+    status = {row["key"]: (row["status"], row["missing_paths"]) for row in result["rows"]}
+    assert status["during"] == (rt.SKIPPED_BY_PAUSE, [])
+    assert status["before"] == ("missing", ["dispatcher"])
+    assert status["after"] == ("missing", ["dispatcher"])
+    assert not result["clean"]
+
+
+def test_a_pause_that_is_still_open_covers_every_later_trigger(world):
+    _log("information-brief", "rollback", "2026-10-10T00:00:00+00:00")
+    result = rt.compare_triggers(_expected(("later", "2026-10-30T14:00:00+00:00")))
+    assert result["rows"][0]["status"] == rt.SKIPPED_BY_PAUSE
+
+
+def test_a_workflow_that_was_never_moved_to_the_dispatcher_is_not_treated_as_paused(world):
+    """Owner `legacy` is also the starting state; only a recorded pause opens a window."""
+    result = rt.compare_triggers(_expected(("never", "2026-10-15T14:00:00+00:00")))
+    assert result["rows"][0]["status"] == "missing" and result["rows"][0]["missing_paths"] == ["dispatcher"]
+
+
+def test_a_trigger_that_has_a_claim_is_never_reclassified_as_skipped(world):
+    _log("information-brief", "rollback", "2026-10-10T00:00:00+00:00")
+    claim("ran-anyway", "complete")
+    result = rt.compare_triggers(_expected(("ran-anyway", "2026-10-15T14:00:00+00:00")))
+    assert result["rows"][0]["status"] == "complete"
+
+
+def test_a_trigger_voided_by_the_pause_is_reported_as_such(world):
+    _log("information-brief", "switch", "2026-10-01T00:00:00+00:00")
+    claim("voided-one", "void")
+    _log("information-brief", "rollback", "2026-10-10T00:00:00+00:00", voided=["voided-one"])
+    result = rt.compare_triggers(_expected(("voided-one", "2026-10-09T14:00:00+00:00")))
+    assert result["rows"][0]["status"] == rt.VOIDED_BY_PAUSE
+    assert result["rows"][0]["missing_results"] is False
+
+
+def test_an_event_trigger_dropped_during_a_pause_is_skipped_not_missing(world):
+    """Event rows carry no planned instant: the moment the calendar path dropped the trigger (its skip record) is used."""
+    _log("information-brief", "rollback", "2026-10-10T00:00:00+00:00")
+    rt.observe_skipped_not_owned("k-ev", {"workflow": "information-brief", "trigger": {
+        "kind": "event", "event_id": "earnings:NVDA:FY2027Q3:release", "event_version": "2"}})
+    event = {"config_hashes": {}, "window": [], "wake_expected": [], "expected": [
+        {"key": "ev", "workflow": "information-brief",
+         "identity": {"event_id": "earnings:NVDA:FY2027Q3:release", "event_version": "2"}, "paths": ["dispatcher"]},
+        {"key": "ev-unseen", "workflow": "information-brief",
+         "identity": {"event_id": "earnings:TSM:FY2027Q3:release", "event_version": "1"}, "paths": ["dispatcher"]}]}
+    status = {row["key"]: row["status"] for row in rt.compare_triggers(event)["rows"]}
+    assert status == {"ev": rt.SKIPPED_BY_PAUSE, "ev-unseen": "missing"}

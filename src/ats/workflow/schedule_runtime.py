@@ -540,6 +540,32 @@ def observe(action, key, payload):
         _history(conn, action, key, payload)
 
 
+SKIPPED_NOT_DISPATCHER_OWNED = "skipped_owner_legacy"
+
+
+def observe_skipped_not_owned(key, payload):
+    """Record, once per trigger key, that a trigger was not run because the Dispatcher does not own the workflow.
+
+    A paused workflow keeps owner `legacy`; every trigger path (scheduled, manual, calendar) used to drop such a
+    trigger without a trace. The calendar passes poll, so the same key arrives again and again: only the first
+    arrival is written. Whether the skip was a pause or a never-migrated workflow is told apart by the owner log,
+    not here.
+    """
+    with closing(_connect(write=True)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if conn.execute("SELECT 1 FROM schedule_runtime_history WHERE action=? AND key=? LIMIT 1",
+                            (SKIPPED_NOT_DISPATCHER_OWNED, key)).fetchone():
+                conn.rollback()
+                return False
+            _history(conn, SKIPPED_NOT_DISPATCHER_OWNED, key, payload)
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
+
 def config_event_context(event, *, config_dir=None):
     """Use the same stable calendar identity as the managed configuration adapter."""
     from ..data.calendar_refresh import _manual_overlay_candidates
@@ -626,7 +652,7 @@ def expected_triggers(start, end, *, config_dir=None):
     def add(workflow, scope, trigger, path):
         for target in _scopes(workflow, ProjectionScope.model_validate(scope), root):
             key, logical = identity(workflow, target.model_dump(mode="json"), trigger)
-            row = output.setdefault(key, {"key": key, "identity": logical, "paths": []})
+            row = output.setdefault(key, {"key": key, "workflow": workflow, "identity": logical, "paths": []})
             if path not in row["paths"]:
                 row["paths"].append(path)
 
@@ -693,6 +719,34 @@ def expected_triggers(start, end, *, config_dir=None):
             "expected": sorted(output.values(), key=lambda row: row["key"]), "wake_expected": wake_expected}
 
 
+SKIPPED_BY_PAUSE = "skipped_by_pause"
+VOIDED_BY_PAUSE = "voided_by_pause"
+
+
+def _pause_windows():
+    """workflow -> [(start, end|None)] from the append-only owner log.
+
+    Only a `rollback` (the log's name for `ats dispatch pause`) opens a window and the next `switch` closes it. A
+    workflow that was never moved to the Dispatcher is `legacy` too, but it was not paused: no window, so its
+    triggers stay real omissions.
+    """
+    windows, voided = {}, {}
+    for row in owner_log():
+        at = datetime.fromisoformat(row["at"])
+        spans = windows.setdefault(row["workflow"], [])
+        if row["action"] == "rollback" and not (spans and spans[-1][1] is None):
+            spans.append((at, None))
+        elif row["action"] == "switch" and spans and spans[-1][1] is None:
+            spans[-1] = (spans[-1][0], at)
+        for key in json.loads(row["voided"] or "[]"):
+            voided[key] = row["workflow"]
+    return windows, voided
+
+
+def _in_window(moment, spans):
+    return any(start <= moment and (end is None or moment < end) for start, end in spans)
+
+
 def compare_triggers(expected):
     state = snapshot()
     arrivals = {}
@@ -700,13 +754,34 @@ def compare_triggers(expected):
         if record["action"] == "arrival":
             arrivals.setdefault(record["key"], []).append(json.loads(record["payload"]))
     claims = {row["key"]: row for row in state["claims"]}
+    windows, voided = _pause_windows()
+    # The moment an event trigger was seen and dropped for want of ownership; event rows carry no planned instant.
+    dropped_at = {}
+    for record in state["history"]:
+        if record["action"] == SKIPPED_NOT_DISPATCHER_OWNED:
+            body = json.loads(record["payload"])
+            trigger = body.get("trigger") or {}
+            dropped_at.setdefault((body.get("workflow"), trigger.get("event_id"), str(trigger.get("event_version"))),
+                                  datetime.fromisoformat(record["at"]))
     rows = []
     for item in expected["expected"]:
         observed = {entry["owner"] for entry in arrivals.get(item["key"], [])}
         claim = claims.get(item["key"])
-        rows.append({**item, "observed": sorted(observed), "missing_paths": sorted(set(item["paths"]) - observed),
+        row = {**item, "observed": sorted(observed), "missing_paths": sorted(set(item["paths"]) - observed),
             "both_missing": not observed, "status": claim["status"] if claim else "missing",
-            "missing_results": not claim or not json.loads(claim["result_refs"])})
+            "missing_results": not claim or not json.loads(claim["result_refs"])}
+        spans = windows.get(item.get("workflow"), [])
+        logical = item.get("identity") or {}
+        if logical.get("scheduled_for"):
+            moment = datetime.fromisoformat(logical["scheduled_for"])
+        else:
+            moment = dropped_at.get((item.get("workflow"), logical.get("event_id"), str(logical.get("event_version"))))
+        if claim is None and moment is not None and _in_window(moment, spans):
+            # Not an omission: the workflow was paused when this trigger came due.
+            row.update(status=SKIPPED_BY_PAUSE, missing_paths=[], both_missing=False, missing_results=False)
+        elif claim is not None and claim["status"] == "void" and item["key"] in voided:
+            row.update(status=VOIDED_BY_PAUSE, missing_results=False)
+        rows.append(row)
     duplicates = [key for key, entries in arrivals.items() if len(entries) > 1 and key in {row["key"] for row in rows}]
     misfires = [row for row in state["history"] if row["action"] == "wake_misfire"]
     seen = {(row["key"], json.loads(row["payload"])["planned"]) for row in state["history"] if row["action"] == "wake_seen"}
@@ -714,7 +789,7 @@ def compare_triggers(expected):
     return {"config_hashes": expected["config_hashes"], "window": expected["window"], "rows": rows,
             "duplicates": duplicates, "misfires": misfires,
             "missing_wakes": missing_wakes,
-            "clean": bool(rows or expected.get("wake_expected")) and not missing_wakes and all(not row["missing_paths"] and not row["missing_results"] and row["status"] == "complete" for row in rows)}
+            "clean": bool(rows or expected.get("wake_expected")) and not missing_wakes and all(not row["missing_paths"] and not row["missing_results"] and row["status"] in ("complete", SKIPPED_BY_PAUSE, VOIDED_BY_PAUSE) for row in rows)}
 
 
 def freeze(workflow, scope, *, actor, reason):

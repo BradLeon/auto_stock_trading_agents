@@ -397,3 +397,30 @@ def test_a_plan_record_under_the_same_key_does_not_stop_the_other_waiting_record
     assert [row["event_id"] for row in result] == [planned[1]["event_id"]]            # the other event is recorded
     kept = store.get_trigger(trigger_key(context))
     assert kept["status"] == "planned"                                                # the plan record is untouched
+
+
+def test_calendar_events_for_a_workflow_the_dispatcher_does_not_own_leave_skip_records(tmp_path, monkeypatch):
+    """Spec 已停用的工作流: the calendar path drops the trigger but records why, once per (event, version, workflow)."""
+    import json
+    from contextlib import closing
+    from datetime import datetime, timezone
+
+    from ats.data.stores.schedule_calendar import (ScheduleCalendarStore, ScheduleEventCandidate, earnings_identity)
+    from ats.workflow import schedule_runtime as rt
+
+    monkeypatch.setenv("ATS_DB_PATH", str(tmp_path / "workflow.sqlite"))
+    calendar = ScheduleCalendarStore(tmp_path / "calendar.sqlite")
+    candidate = ScheduleEventCandidate(
+        source_id="test", event_type="earnings", stable_identity=earnings_identity("AAA", 2026, 3),
+        event_date="2026-10-01", time_precision="date", market_session="unknown",
+        metadata={"entity": "AAA", "fiscal_label": "FY2026Q3"})
+    saved = calendar.submit_candidate(candidate)
+    calendar.publish_candidate(saved["candidate_id"])
+    now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    for _ in range(2):   # the pass polls: the same trigger arrives again
+        dispatch_planned_calendar_events(calendar_store=calendar, now=now)
+    with closing(rt._connect()) as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM schedule_runtime_history WHERE action=?",
+                                              (rt.SKIPPED_NOT_DISPATCHER_OWNED,))]
+    assert {json.loads(r["payload"])["workflow"] for r in rows} == {"information-brief", "fundamental-routine"}
+    assert len(rows) == 2 and len({r["key"] for r in rows}) == 2

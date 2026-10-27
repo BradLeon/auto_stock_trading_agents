@@ -32,7 +32,7 @@
 
 ## 4. R2 研究侧切换期工具退役（门 G0）
 
-- [ ] 4.1 先处理簇外依赖（design.md D10）：去掉 `cutover_wiring` 里对 `dispatch_claims` 的接线声明及 `boundary_evidence` 对应调用点；把 `digest` 从 `shadow_replay` 移到 Dispatcher 自己的模块；评估并去掉 `read_windows` 对 `shadow_reports` 的研究侧批次报告校验。验证：对应测试通过，`dispatcher` 与 `read_windows` 不再导入 `shadow_replay`/`shadow_reports`
+- [x] 4.1 先处理簇外依赖（design.md D10）：去掉 `cutover_wiring` 里对 `dispatch_claims` 的接线声明及 `boundary_evidence` 对应调用点；把 `digest` 从 `shadow_replay` 移到 Dispatcher 自己的模块；评估并去掉 `read_windows` 对 `shadow_reports` 的研究侧批次报告校验。验证：对应测试通过，`dispatcher` 与 `read_windows` 不再导入 `shadow_replay`/`shadow_reports`（10-27：digest 搬出 6ebbf11、研究侧读窗口不再要求批次报告 e2319c5、调度边界登记改指向真实认领 8137c0e；63 个相关文件里 54 个通过、`test_cutover_cli` 的 3 条失败改动前就有；其余 5 个有失败与 4 个超时的 Phase F 重型验收文件在后台与改动前对照，结果记入 TEST_BASELINE。`dispatcher` 已无 `shadow_*` 导入；`read_windows` 只在交易侧消费者分支内保留对 `shadow_reports` 的导入，属 R5）
 - [ ] 4.2 对 `migration.batch_read_cutover` 做 V1–V3，结果写进 inventory.md。验证：`ats retirement decide` 判该条可退出
 - [ ] 4.3 删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试（`test_batch_manifest`、`test_read_cutover`、`test_batch_cli`），同步冻结面与资格清单；归档命令用法样例到 docs/archive。验证：受影响测试与 assurance_surface、架构守卫测试通过；调用 `ats batch` 返回已退役提示
 - [ ] 4.4 对 `migration.schedule_cutover` 做 V1–V3，删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。验证：同 4.3

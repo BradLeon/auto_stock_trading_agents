@@ -34,7 +34,7 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
    预期更新投影，每条变化一份，带变化前后的值、驱动、证据引用。
 3. **手动刷新基线**：财报 cutoff 之前可以重建基线（产生 `[基线 v(N+1)]`），见 OPERATIONS §3.3。
 
-**手动运行**：例行 `ats workflow run --task fundamental-routine --scope-kind entity --scope-id <代码>`；事件评审由日历在财报发布且材料准入后唤醒，手动补跑需带 `fiscal_label`、`material_state`、`admitted_material_refs` 等输入，通常用 `ats workflow retry --trigger-key <键>`。旧入口 `ats analyst fundamental`、`ats pead prep` 会被拒绝。
+**手动运行**：例行 `ats workflow run --task fundamental-routine --scope-kind entity --scope-id <代码>`；事件评审由日历在财报发布且材料准入后唤醒，手动补跑需带 `fiscal_label`、`material_state`、`admitted_material_refs` 等输入，通常用 `ats workflow retry --trigger-key <键>`。旧入口 `ats analyst fundamental`、`ats pead prep` 已退役，运行只会提示上述写法。
 4. 数据版本没变、投影仍在有效期内（72 小时）时直接复用，不重复请求模型。
 
 ## 事件模式：财报后

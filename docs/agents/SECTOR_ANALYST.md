@@ -297,7 +297,7 @@ ats workflow run --task sector-review --scope-kind sector --scope-id ai_hardware
 ats chief run --channel feishu_bot  # 可选：让 Chief 读取两份新报告；默认 dry-run，仍须人工审批
 ```
 
-依赖的数据版本没变时直接复用已有投影，不重复请求模型；要强制重算见 OPERATIONS §3.3。负责人是 dispatcher 时，旧入口 `ats sector review`、`ats macro review` 会被拒绝。
+依赖的数据版本没变时直接复用已有投影，不重复请求模型；要强制重算见 OPERATIONS §3.3。旧入口 `ats sector review`、`ats macro review` 已退役，运行只会提示对应的 `ats workflow run` 写法。
 
 行业视角变化是周级的，日级刷新没意义且费 token，所以默认周更。
 
@@ -372,5 +372,5 @@ JSON、纯客户端渲染，不建服务、不进前端工具链，可离线打�
 `claim_proposals` 走人工采纳；前者是**语义的**、从分析师读到的素材提出、**只进报告**
 （代价：不去重、不被跟踪）。两者都只提议，只有人能把命题写进 yaml。
 
-> `ats sector crosssection` **只打印不写文件**：层报告已经含截面，第二份每层文档迟早
-> 会不同步——它的 `layer_cap` 在配置结论出来前还是个半成品。
+> 原先的 `ats sector crosssection` 已退役（运行只提示 `sector-review` 的写法）：层报告已经含截面，
+> 第二份每层文档迟早会不同步。

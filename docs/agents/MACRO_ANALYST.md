@@ -9,7 +9,7 @@
 > | 产出 | `macro_review` 投影（`MacroReview`）：regime（并保留正文判读的 `narrative_regime`）、影响传导、情景、时间范围、主要风险 |
 > | 谁读它 | **只有 Chief**。行业、基本面、风控主管都不再读宏观结论（ARCHITECTURE §7.2），下文「唯一收口」一节所列注入 PEAD prep、行业分析、风控 memo 的路径描述的是切换前的行为 |
 > | 什么时候跑 | 每周六 09:00（台北时间），Dispatcher 调度；FOMC/CPI/PCE/NFP/GDP 发布事件可唤醒（受研究时间表配置 `event_triggers.macro_sector` 控制，现为关闭） |
-> | 手动运行 | `ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio`；负责人为 dispatcher 时 `ats macro review` 会被拒绝。旧的 `weekly_review`（周六 08:50）与 `factset_weekly_ingest` 已退役，FactSet 改为每月 1 日的月末摄入 |
+> | 手动运行 | `ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio`；旧入口 `ats macro review` 已退役，运行只会提示上述写法。旧的 `weekly_review`（周六 08:50）与 `factset_weekly_ingest` 已退役，FactSet 改为每月 1 日的月末摄入 |
 >
 > 下文的指标框架、判定方法与验收思路仍然有效。
 
@@ -460,7 +460,7 @@ MOVE 就能参与 z-score 判定）。
 
 ### ⚠️ 一个运维陷阱
 
-不带模型的宏观评审（`ats workflow run --task macro-review … --inputs-json '{"macro-review": {"use_llm": false}}'`，旧入口 `ats macro review --no-llm` 已被拒绝）会把一条 `regime="(no-llm)"` 的评审写进库。下游注入有
+不带模型的宏观评审（`ats workflow run --task macro-review … --inputs-json '{"macro-review": {"use_llm": false}}'`，旧入口 `ats macro review --no-llm` 已退役）会把一条 `regime="(no-llm)"` 的评审写进库。下游注入有
 stub 保护（`agents/macro/context.py` 拦截以 `(` 开头的 regime），所以不会污染决策，
 但 `latest_macro_review()` 从此返回这条 stub，**等于让 5 个下游消费方在下次正式
 评审前都读不到宏观背景**。要核对数字请直接调 `data.macro.fetch_series()` +

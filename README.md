@@ -268,8 +268,8 @@ ats trader portfolio                 # 实时持仓
 ats trader perf                      # 历史绩效
 ```
 
-研究工作流的负责人是 dispatcher 时，`ats macro review`、`ats pead prep` 这类旧的手动入口
-会报 `caller is not current owner` 并拒绝运行——这是故意的，防止同一份分析被两条路径重复跑。
+`ats macro review`、`ats sector review`、`ats pead prep` 这类旧的手动入口已退役：运行它们只会提示
+`ats workflow run --task …` 的替代写法（退出码 2），不会去调用分析师——这样同一份分析不会被两条路径重复跑。
 
 ---
 

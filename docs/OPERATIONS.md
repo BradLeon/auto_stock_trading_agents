@@ -114,6 +114,9 @@ ats dispatch owner-log [--workflow <workflow_id>]
 ```
 
 停用的工作流不会被任何定时任务或日历事件运行；要补跑，先 `resume`，再用 `ats workflow run`。
+
+> 已知局限：停用期间，覆盖核验（`expected_triggers` 与实际记录的对照）还不认识「因停用而跳过」，会把这些预期触发报成遗漏；
+> 定时与日历路径对被跳过的触发也只写日志、不留记录。登记在 `openspec/changes/retire-legacy-and-migration-tooling/inventory.md` §8.5，待另案处理。
 旧名 `owner-rollback` / `owner-switch` 已改名，运行它们会提示新命令且不改任何状态。
 
 > 已知技术债：库里「已停用」仍存成内部值 `legacy`（只改了对外的命令与文档用语）。长期做法是取消这个开关，

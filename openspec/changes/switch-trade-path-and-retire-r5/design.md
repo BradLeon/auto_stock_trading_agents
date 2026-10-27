@@ -222,8 +222,49 @@
 |---|---|---|
 | R5a 读取侧 | `chief.legacy_table_direct_reads`、`store.direct_trade_reads`、`sector_reviews`（Chief 消费方）、`legacy_read_models`（`channel.context` 消费方）、`decision_roles.unwired_to_governed_read_api`；`macro_reviews` 与 `technical_reviews` 若最后的读取方是 Chief，一并处理 | S1–S3 已上线并过观察窗口；`runtime.cli` 消费方由退役 change R1 清掉 |
 | R5b 写入与入口侧 | `memory.store.legacy_decision_write_path`（移除镜像写）、`trades.client_order_id.legacy_derivation`（旧式订单号行由 Clerk 标为 `legacy_unknown` 或对账承接后）、`scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`、`journal.report.render_ledger`、`risk.checks.pre_trade_adapter` | R5a 完成。镜像写的读取方已全部清零 |
-| R5c 交易侧切换工具 | `joint_cutover`、`boundary_drill`、`acceptance_runner/reports/matrix`、`paired_business`、`shadow_*`；命令 `ats cutover`、`ats drill`、`ats shadow` | R5b 完成。`isolated_entry` 逐个判定：被隔离测试与 22 项追溯使用的部分保留 |
-| R5d 读路由与资格机制收窄 | `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`assurance_surface` 与指纹清单 | R5a–R5c 完成；退役 change 的 R1（`consumer-cutover` 改名为数据健康命令）与 R2 完成 |
+| R5c 切换期工具（交易侧，加上转入的原 R2） | 分四步，见下文“R5c 的顺序” | R5b 完成 |
+| R5d 读路由与资格机制收窄 | `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`assurance_surface` 与指纹清单 | R5a–R5c 完成；退役 change 的 R0（登记字段与门）与 R1（`consumer-cutover` 改名为数据健康命令）完成。不再依赖退役 change 的 R2：它已并入 R5c |
+
+**2026-10-27 从退役 change 转入的原 R2**（依据：退役 change tasks.md 第 4 组开头的“2026-10-27 复核”段，提交 15190e2）
+
+- **原因：** 退役 change 起初只按 `src/` 判断使用方。补查测试和命令组后发现，这些模块没有一个能单独删：
+  - `boundary_drill`（`ats drill`）依赖 `batch_manifest`、`read_cutover`、`schedule_cutover`；
+  - `paired_business` 和 `ats retirement` 依赖 `intake_verification`；
+  - `schedule_cutover` 直接使用 `dispatch_claims`；
+  - `analysis_verification`、`isolated_entry`、`scoped_intake`、`consumer_disposition` 被 Phase F 验收测试使用；
+  - `cutover_acceptance` 负责验证交易订单可追溯、未经批准的订单被拒。
+
+  这些模块和交易路径绑在一起，所以随交易路径留到 R5，门改为 `trade_path_cutover`。
+- **退役 change 已做的解耦（4.1）：**
+  - `digest` 搬出 `shadow_replay`（6ebbf11）；
+  - 研究侧读窗口不再要求批次报告（e2319c5）；
+  - 调度边界的接线登记改指向真实认领（8137c0e）。
+
+  研究侧的 Dispatcher 与读窗口已不依赖这些工具。
+- **转入的登记条目：** `migration.batch_read_cutover`、`migration.schedule_cutover`、`migration.intake`、`migration.analysis_verification`、`migration.dispatch_dedup`。
+- **转入的模块：** `workflow/batch_manifest`、`read_cutover`、`read_deployment`、`schedule_cutover`、`cutover_acceptance`、`intake`、`intake_verification`、`scoped_intake`、`analysis_verification`、`consumer_disposition`、`dispatch_claims`。
+- **转入的命令：** `ats batch`、`ats read`、`ats intake`，以及 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。
+- **转入的测试：** `test_batch_manifest`、`test_read_cutover`、`test_batch_cli`、`test_intake_cli`、`test_consumer_disposition`、`test_cutover_acceptance`、`test_phase_f_scoped_intake`，以及引用这些模块的 Phase F 验收测试（`test_phase_f_stage_one`、`test_phase_f_shadow_business`、`test_phase_f_opinion_execution`、`test_phase_f_disposition_a_regression`、`test_phase_f_safe_reads` 等）。最终清单以 R5c 第 2 步的调用图为准。10-19 登记的 41 个旧失败测试（38 个属批次与读切流，3 个属 `ats cutover`）随之处理。
+- **做法：** 照搬退役 change 4.2–4.8 的原文。每条先做 V1–V3，归档命令用法样例，同步冻结面与资格清单，最后复验 V4–V6。
+- **口径以本 change 为准：** 原 R2（退役 change 4.5）计划把 `isolated_entry` 整个删掉。本 change 的口径是逐个判定、部分保留：被隔离模拟与 22 项订单追溯使用的部分留下。原计划已被取代。
+
+**R5c 的顺序**（按依赖由外向内；每步每条都需你同意，并单独提交）：
+
+1. **先让退役工具自立。** `ats retirement zero/decide` 用 `intake_verification` 里的消费方扫描器（`scan_consumer_access` 及它依赖的入口清单 `CONSUMER_ENTRY_POINTS`、模块清单常量）判断有没有人还在用旧路径。退役工具要一直用到 R5 最后一条，以后的退役也要用，所以不能在 R5 中途随 `intake_verification` 一起删掉。处理办法：先把扫描器和这些常量搬到退役工具自己的模块（`retirement_clearance` 或一个独立的消费方扫描模块），验证全部条目的 `ats retirement zero/decide` 输出与搬移前逐条一致；`intake_verification` 剩下的隔离接入核验部分，留到第 4 步再删。
+2. **判定被验收测试使用的模块：** `analysis_verification`、`isolated_entry`、`scoped_intake`、`consumer_disposition`、`cutover_acceptance`。判据如下：
+   - 交易路径长期需要的检查（订单可追溯、未经批准的订单被拒、隔离模拟运行），如果在 22 项追溯与 T0 测试里没有等价覆盖，先把检查迁进长期测试支撑，再删除；
+   - 只服务迁移期切流资格的部分，直接删除。
+3. **删除叶子工具：**
+   - `boundary_drill`（`ats drill`）、`joint_cutover`、`paired_business`、`acceptance_runner/reports/matrix`，命令 `ats cutover`；
+   - `shadow_*`（`ats shadow`）。删之前，先去掉 `read_windows` 对交易消费者的批次报告校验：它是 `read_windows` 对 `shadow_reports` 仅剩的导入，切换后交易消费者的读取不再需要签名批次报告，做法与退役 change 4.1 对研究侧的处理相同。
+4. **删除被叶子依赖的工具：**
+   - `batch_manifest`、`read_cutover`、`read_deployment`（`ats batch`、`ats read`）；
+   - `schedule_cutover`；
+   - `intake` 与 `intake_verification` 的剩余部分（`ats intake`）；
+   - 第 2 步判定可删的 `consumer_disposition` 等；
+   - 最后删 `dispatch_claims` 和 `ats dispatch` 的迁移期子命令，必须排在 `schedule_cutover` 之后。
+
+   `read_windows` 对 `batch_manifest`、`read_cutover` 只剩文档字符串里的引用，不构成依赖。
 
 **读路由收窄成“按 scope 读数据产品”**（规格见本 change 的 target-dataflow-assurance 增量）：
 
@@ -290,4 +331,4 @@
 ## Open Questions
 
 - `clerk-daily` 的具体时点是否要避开你在 TWS 设置的自动重启时间。T0 核对后定，不影响任务拆分。
-- R5c 中 `isolated_entry` 哪些部分被隔离测试依赖，要在 R5c 执行前用调用图逐个确认。
+- R5c 中 `isolated_entry`、`cutover_acceptance` 等哪些部分被隔离测试与 22 项追溯依赖，在 R5c 第 2 步用调用图逐个确认（D10）。

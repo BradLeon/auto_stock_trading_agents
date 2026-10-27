@@ -37,11 +37,17 @@
 - **R5 接续**：观察窗口通过、你确认后，按依赖顺序退役：
   1. 读取侧旧条目；
   2. 写入与入口侧旧条目；
-  3. 交易侧切换工具；
+  3. 切换期工具：包括交易侧切换工具，以及 2026-10-27 从退役 change 转入的原研究侧 R2 工具（批次与读路径切流、调度切换、接入核验、新旧调度去重）；
   4. 最后把读路由与资格机制收窄为“按声明的数据产品与业务 scope 读取”。
 
   实盘路由仲裁、实盘授权、券商写禁令属于长期的资金安全机制，**不在退役范围**。
-- **BREAKING（R5 阶段，运维命令）**：`ats cutover`、`ats drill`、`ats shadow` 和 `ats live drill/rollback-drill` 中只服务迁移的部分将被删除；`ats journal` 的独立对账入口降为单步调试。具体清单见 design.md D10。
+- **BREAKING（R5 阶段，运维命令）**：
+  - 删除 `ats cutover`、`ats drill`、`ats shadow`；
+  - 删除原 R2 的 `ats batch`、`ats read`、`ats intake`，以及 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`；
+  - `ats journal` 的独立对账入口降为单步调试；
+  - `ats live drill/rollback-drill` 保留，实盘解锁时还要用。
+
+  具体清单见 design.md D10。
 
 ## Capabilities
 
@@ -82,7 +88,7 @@
   - `com.ats.serve` 与飞书审批卡不在新交易路径上。代码保留，不退役，等你选定 IM 工具后另立 change。
 - **数据**：不删除任何历史表、账本与审计记录。旧决策表在观察窗口内继续被镜像写入，R5 后停写、保留可读。
 - **依赖**：
-  - R5 的读路由收窄依赖退役 change 的 R0（登记字段与门）以及 R1、R2 完成；
+  - R5 的读路由收窄只依赖退役 change 的 R0（登记字段与门）与 R1。原 R2 已于 2026-10-27 整组并入本 change 的 R5c，不再是外部前提；
   - 本 change 归档必须在退役 change 归档之后，避免两份规格增量冲突。
 - **不受影响**：
   - 实盘锁定的三道锁（生产券商提交禁用 C3、实盘路由 disabled、实盘门无有效授权）全部保留；

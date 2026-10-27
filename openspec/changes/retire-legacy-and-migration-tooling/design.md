@@ -115,7 +115,7 @@ flowchart TD
 |---|---|---|---|
 | `naming.consumer_cutover_cli` | 命名 | `ats data health [--consumer]`、`ats data health-log` | 改名；删除 `status`（路由已固定，见 R5） |
 | `legacy_entry.research_manual_commands` | 旧手动入口 | `ats workflow run --task <id>` | 删除 `ats macro review`、`ats sector review/layer/crosssection`、`ats technical review`、`ats pead prep/score/monitor/watch/research`、`ats analyst information/fundamental`；保留一段时间的提示桩，说明已退役和替代命令。只读的 `show`/`probe`/`html` 保留 |
-| `legacy_entry.research_owner_legacy_mode` | 旧手动入口 | 工作流停用 / 恢复（`ats dispatch pause/resume`） | 负责人只剩 dispatcher 与 paused 两种状态；`owner-switch/owner-rollback` 改名；`workflow_owners.yaml` 的 legacy 默认值去掉 |
+| `legacy_entry.research_owner_legacy_mode` | 旧手动入口 | 工作流停用 / 恢复（`ats dispatch pause/resume`） | 负责人只剩 dispatcher 与 paused 两种状态；`owner-switch/owner-rollback` 改名；`workflow_owners.yaml` 的 legacy 种子值暂留（5.4 取「丙」，随长期方案乙一并处理） |
 | `legacy_entry.evidence_commands` | 旧手动入口 | 数据刷新的 `chain_evidence_daily`（`ats data evidence-observe`）与 Layer 的证据判读 | 只删 `ats evidence observe/collect/articles` 与 `ats sector crosssection`（评审内部已自己算截面，独立持久化的那一遍没有消费者）；**命题治理命令 `ats evidence claims/report/propose/proposals/review/kbreview` 与 `ats sector kbperturb` 保留**（人审批新命题的入口，用户 2026-10-21 确认） |
 | `naming.migration_terms_in_docs` | 命名 | — | 文档与帮助文本中的"新路径 / 旧路径 / 切流 / phase"残留 |
 

@@ -536,11 +536,11 @@ retired:
     replaced_by: >-
       `ats data health [--consumer]`、`ats data health-log`
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       命令改名完成，`ats consumer-cutover` 只留提示桩；`status` 删除（路由已固定）。
     missing_condition: >-
-      G0 通过前不执行；改名与删除尚未做（tasks 5.1）。
+      2026-10-27 退役（用户 G0 签字后批准研究侧验证通过即退役）：`ats data health [--consumer]`、`ats data health-log` 已加（0ae8e9f），`ats consumer-cutover status/health/log` 改为提示桩，文档与帮助文本已改用新命令。`restore` 仍保留，因读路由表在交易路径切换前（R5）不动。
     consumers: []
     consumer_zero_criterion: >-
       `ats consumer-cutover` 除提示桩外无调用方；文档与帮助文本改用新命令。
@@ -554,11 +554,11 @@ retired:
     replaced_by: >-
       `ats workflow run --task <id>`
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       旧手动命令删除并留提示桩，提示 `ats workflow run` 的替代写法。
     missing_condition: >-
-      G0 通过前不执行；inventory.md 第四节副作用对照已全部为“已承担”（10-26 复核，L01 通过），待 tasks 5.2、5.3。
+      2026-10-27 退役：`ats macro review`、`ats sector review/layer`、`ats technical review`、`ats pead prep/score/monitor/watch/research`、`ats analyst information/fundamental` 已删除并返回 `ats workflow run` 的替代写法（5f6fd90）；V1 静态仅 boundary_evidence 与 Phase F 验收测试以业务入口名引用，V2 运行 launchd 与配置无调用。`run_*` 函数因 R5 引用保留。
     consumers: []
     consumer_zero_criterion: >-
       `ats macro review`、`ats sector review/layer`、`ats technical review`、`ats pead prep/score/monitor/watch/research`、`ats analyst information/fundamental` 均无生产调用；返回已退役提示。
@@ -575,12 +575,12 @@ retired:
     target_phase: retire-legacy-and-migration-tooling
     status: pending
     exit_condition: >-
-      对外只剩停用 / 恢复两个动作：`ats dispatch pause/resume` 替代 `owner-switch/owner-rollback`（旧名只给提示）；`workflow_owners.yaml` 默认值改为 dispatcher。库内部值 `legacy` 暂留（技术债，长期取消开关见 verification.md）。
+      对外只剩停用 / 恢复两个动作：`ats dispatch pause/resume` 替代 `owner-switch/owner-rollback`（旧名只给提示）；`workflow_owners.yaml` 的种子值与库内部值 `legacy` 暂留（技术债：长期取消开关，见 verification.md 上线后待办）。
     missing_condition: >-
-      旧手动入口先退役（它们是 legacy 模式存在的唯一理由）；G0 通过前不执行（tasks 5.4）。
+      2026-10-27 部分完成（tasks 5.4 取「丙」）：对外已是 `ats dispatch pause/resume`，旧名只给提示；库内部值仍为 `legacy`，`workflow_owners.yaml` 种子值未改。保持 pending 是有意的技术债，待长期方案乙（取消开关，改由 `research_schedules.yaml` 的 `enabled`/`event_triggers` 决定）另开变更处理。
     consumers: []
     consumer_zero_criterion: >-
-      没有任何配置或命令把研究工作流置于 legacy 负责人；停用期间定时与日历事件不再唤醒。
+      研究工作流不再有「legacy 负责人」这个概念：库内值、种子配置与对应规格要求全部移除（方案乙）。
     location: src/ats/workflow/ownership.py, config/workflow/workflow_owners.yaml
 
   - identifier: legacy_entry.evidence_commands
@@ -591,11 +591,11 @@ retired:
     replaced_by: >-
       数据刷新的 `chain_evidence_daily`（`ats data evidence-observe`）与 Layer 的证据判读
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `ats evidence observe/collect/articles` 与 `ats sector crosssection`；保留命题治理命令（`ats evidence claims/report/propose/proposals/review/kbreview`）与 `ats sector kbperturb`（10-21 裁决、10-26 再确认）。
     missing_condition: >-
-      G0 通过前不执行（tasks 5.5）。
+      2026-10-27 退役：`ats evidence observe/collect/articles` 与 `ats sector crosssection` 已删除并返回替代写法（2cd1fb5，约 140 行死代码）；命题治理命令与 `ats sector kbperturb` 按 10-21 / 10-26 裁决保留。
     consumers: []
     consumer_zero_criterion: >-
       被删命令返回已退役提示；保留的命令测试通过。
@@ -605,16 +605,16 @@ retired:
     kind: naming
     group: R1
     gate: G0
-    depends_on: [legacy_entry.research_manual_commands, legacy_entry.research_owner_legacy_mode, legacy_entry.evidence_commands, naming.consumer_cutover_cli]
+    depends_on: [legacy_entry.research_manual_commands, legacy_entry.evidence_commands, naming.consumer_cutover_cli]
     capability_domain: workflow/legacy-retirement
     replaced_by: >-
       去掉“新路径 / 旧路径 / 切流 / phase”等迁移期措辞
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       `docs/`（不含 archive）与 `ats --help` 中检索这些词，只剩有意保留并加注的位置。
     missing_condition: >-
-      在命令与入口退役之后做（tasks 5.6）。
+      2026-10-27 退役（8d2b79d）：帮助文本与操作类文档的迁移期措辞已清理，DEVELOPMENT.md 新增「迁移期用语说明」列出有意保留处；docs/validation 为冻结的历史验收证据，不改。已去掉对 research_owner_legacy_mode 的依赖：文档措辞与库内部值无关。
     consumers: []
     consumer_zero_criterion: >-
       检索无残留，或每处残留都有加注。

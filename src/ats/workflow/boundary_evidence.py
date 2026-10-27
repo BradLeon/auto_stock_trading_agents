@@ -50,7 +50,9 @@ CALL_POINTS = {
                   "task projection + claim owner/generation", "5.3"),
     ),
     plane.DISPATCHER_SCHEDULE: (
-        CallPoint("ats.workflow.ownership.run_owned_workflow", "claim", "Workflow owner",
+        # Was `claim` (dispatch_claims, the dual-run dedup of the retired scheduler; run_owned_workflow stopped calling it).
+        # The trigger is now claimed inside TriggerService.dispatch, which run_owned_workflow calls.
+        CallPoint("ats.workflow.ownership.run_owned_workflow", "dispatch", "Workflow owner",
                   ("production", "shadow", "isolated"), "workflow/scope/planned instant or event/version", "4.2"),
     ),
     plane.APPROVAL_LIFECYCLE: tuple(

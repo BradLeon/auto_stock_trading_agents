@@ -348,9 +348,9 @@ DECLARED_BOUNDARY_WIRING: dict[str, tuple[tuple[str, str, str], ...]] = {
          "refuses an analyst output write when the boundary is disabled"),
     ),
     cutover_module.DISPATCHER_SCHEDULE: (
-        ("ats.workflow.dispatch_claims.claim",
-         "ats.workflow.dispatch_claims",
-         "claims a logical trigger before executing it, under the current owner"),
+        ("ats.workflow.store.WorkflowStore.claim_trigger",
+         "ats.workflow.store",
+         "claims a logical trigger before executing it (TriggerService.dispatch), one run per trigger key"),
     ),
     cutover_module.APPROVAL_LIFECYCLE: (
         ("ats.workflow.cutover_wiring.guard_approval_write",

@@ -265,8 +265,16 @@ def test_entry_config_drift_invalidates_previously_accepted_refusal(
         config.write_bytes(original)
 
 
-def test_fake_business_evidence_cannot_hide_missing_guard(authority):
+def test_the_declared_schedule_guard_is_really_called_by_the_owned_workflow():
+    """The registered guard is the one run_owned_workflow actually calls (TriggerService.dispatch claims the trigger).
+    It used to name `claim` from dispatch_claims, which the code had stopped calling (tasks 4.1)."""
     points = be.CALL_POINTS[co.DISPATCHER_SCHEDULE]
+    assert points and all(be._calls_guard(point) for point in points)
+
+
+def test_fake_business_evidence_cannot_hide_missing_guard(authority, monkeypatch):
+    points = be.CALL_POINTS[co.DISPATCHER_SCHEDULE]
+    monkeypatch.setattr(be, "_calls_guard", lambda point: False)           # the guard is gone from the code
     bundle = {"identity": identity().as_row(), "mode": "production", "call_points": {
         p.site: {"writer": p.writer, "positive_test": "passed", "negative_test": "passed-too"}
         for p in points}}

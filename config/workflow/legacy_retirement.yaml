@@ -734,7 +734,7 @@ retired:
     target_phase: retire-legacy-and-migration-tooling
     status: pending
     exit_condition: >-
-      `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`assurance_surface` 与指纹清单收窄。
+      `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`cutover_guards`、`assurance_surface` 与指纹清单收窄。
     missing_condition: >-
       交易链路（Chief、Clerk、Risk、Trader、Boss）尚未在新路径上充分验证；外部门 trade_path_cutover 未满足，本 change 只登记。
     consumers: []

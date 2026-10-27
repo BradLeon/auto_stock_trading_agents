@@ -189,3 +189,95 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 | V6 历史 | 四项 `ats retirement tombstone` 显示 retired、一致、无读取方；`ats pead monitor/watch/research` 仍返回已退役提示 |
 
 清单影响：从 `config/data/target_dataflow_coverage.yaml` 的 `required_fingerprint_paths` 移除 6 个路径（上述 4 项 + `pead/triage.py` + `news_inputs.py`）。清单哈希因此变化，已记录的资格证据会显示 `manifest_drift`。研究侧读路由已固定，不受影响；交易侧的资格证据在 trade_path_cutover 前本来就要补验，补验属生产操作，需另行授权。
+
+## 八、规格增量与实际行为对照（任务 8.1）· 2026-10-27
+
+对 `specs/` 下四份增量里的每条要求、每个场景，列出能证明它的测试或运行记录。判定三档：**有测试**（有直接断言）、**有记录**（只有运行或人工核验记录）、**缺口**（找不到证据，或证据只覆盖了一半）。缺口只在这里如实登记，本任务不改行为；处置见本节末尾。测试名均在 `tests/` 下，写作 `文件::用例`。
+
+### 8.1 `workflow/dispatcher-runtime`（ADDED）
+
+| 要求 / 场景 | 判定 | 证据 |
+|---|---|---|
+| 研究工作流必须只经 Dispatcher 执行 / 手动与定时同窗口 | 有测试 | `test_dispatch_claims::test_a_manual_and_an_automatic_trigger_merge_into_one_execution`、`::test_the_legacy_daily_cascade_and_the_new_schedule_resolve_to_one_identity` |
+| 同上 / 调用已退役的旧分析入口 | 有测试 | `test_retired_research_commands::test_a_retired_command_names_its_replacement_and_runs_nothing`（15 条旧命令，断言退出码 2、含「已退役」与替代写法、`run_*` 全被替换成「调用即失败」） |
+| 同上 / 已停用的工作流 | **缺口（部分）** | 「不执行」有测试：`test_schedule_owner_switch::test_pause_stops_the_workflow_without_approval_and_resume_needs_it`、`::test_the_old_owner_commands_answer_with_pause_and_resume_and_change_nothing`、`test_workflow_ownership::test_legacy_owner_does_not_invoke_dispatcher_or_open_phase_e_run`。「记录被跳过的原因」只有手动路径做到（返回 `status: legacy`）；定时路径只写一行日志加一条 wake 观察；日历路径（`ownership.py` 两处 `continue`）没有任何记录 |
+| 停用与恢复必须先冻结再清点 / 清点后又产生新触发 | 有测试（间接） | 先冻结后清点的顺序与冻结失败即停：`test_schedule_cutover::test_the_step_order_is_freeze_inventory_dispose_handover`、`::test_a_failed_freeze_stops_before_inventory`；`test_dispatch_claims::test_a_second_freeze_while_frozen_is_refused`、`::test_only_the_attempt_that_froze_may_open` |
+| 同上 / 存在处置方式未声明的未完成触发 | 有测试 | `test_dispatch_claims::test_an_undeclared_disposition_refuses_the_handover`、`test_schedule_cutover::test_an_undeclared_disposition_stops_the_cutover`、`test_schedule_owner_switch::test_unfinished_claims_block_the_switch_until_voided_on_purpose` |
+| 同上 / 有正在运行的认领 | 有测试 | `test_schedule_owner_switch::test_a_running_claim_is_never_voided`、`::test_pause_is_refused_while_a_claim_is_running` |
+| 同上 / 停用时作废未完成触发 | **缺口（部分）** | 「记录原因与操作者」有测试：`test_dispatch_claims::test_a_void_disposition_records_its_reason_and_does_not_execute`、`test_schedule_cutover::test_voiding_without_a_reason_stops_the_cutover`。「恢复后不被自动执行」没有断言；现有 `test_dispatch_claims::test_a_void_trigger_can_be_claimed_again_after_the_handover` 反过来证明作废的认领可以被再次认领（追赶式触发会不会把它重新跑一遍，没有测试回答） |
+| 调度覆盖必须依据独立预期触发集合 / 调度遗漏必需触发 | 有测试 | `test_phase_f_schedule_runtime::test_independent_oracle_detects_the_dispatcher_omitting_a_tick`、`test_dispatch_claims::test_both_paths_missing_the_same_trigger_is_detected` |
+| 同上 / 停用期间的触发 | **缺口** | 未实现。`schedule_runtime.expected_triggers` 对所有启用的工作流导出预期触发，不看所有者或停用状态；`compare_triggers` 没有「因停用而跳过」这一类。停用期间的预期触发会被算作 `missing_paths` |
+| 同上 / 预期来源不一致 | 有测试 | `test_dispatch_claims::test_an_expected_set_that_disagrees_with_registration_is_not_trusted`、`::test_no_declared_set_means_no_verdict_at_all` |
+| 可读报告必须由 Dispatcher 路径生成 / 技术面定时运行后 | 有测试 | `test_report_publishers::test_one_summary_report_covers_every_symbol_of_the_run` |
+| 同上 / 周度行业评审后 | 有测试（部分有记录） | 周报跟随新的行业评审：`test_report_publishers::test_chain_evidence_report_follows_a_new_sector_review_only`；行业与层级报告内容：`test_layer_report`、`test_sector_viz`（`test_run_sector_html_*`）。首次真实定时的行业周报在 10-31 09:30（台北），尚无运行记录 |
+| 同上 / 报告生成失败 | 有测试 | `test_report_publishers::test_an_unset_output_directory_is_a_skip_not_an_error`、`::test_a_publisher_failure_is_reported_and_never_raised`、`::test_failed_tasks_do_not_count_as_published` |
+| 同上 / 复用既有投影 | 有测试 | `test_report_publishers::test_a_run_that_only_reused_projections_writes_no_report`、`::test_a_second_report_on_the_same_day_is_a_new_version_file`（后者是同日再发时的版本化，不是重复生成） |
+
+### 8.2 `workflow/cutover-control`（ADDED）
+
+| 要求 / 场景 | 判定 | 证据 |
+|---|---|---|
+| 读路由固定为新路径并在发布时与读取前检查 / 数据刷新后产品不合格 | 有测试 | `test_consumer_health::test_observe_logs_and_alerts_only_when_the_status_changes`、`::test_after_refresh_checks_only_when_a_job_ran`；路由不变：`test_consumer_cutover::test_switch_refuses_a_failing_health_check_and_changes_nothing` |
+| 同上 / 任务执行前产品不合格 | 有测试 | `test_workflow_dispatcher::test_unhealthy_data_products_block_the_task_before_it_runs`、`test_consumer_health::test_gate_maps_tasks_to_consumers_and_leaves_upstream_projections_to_the_dispatcher` |
+| 同上 / 状态未变化时不重复告警 | 有测试 | `test_consumer_health::test_observe_logs_and_alerts_only_when_the_status_changes` |
+| 同上 / 同一数据域其他消费者已通过 | 有测试（间接） | 路由与检查按消费者逐个进行：`test_consumer_cutover::test_switch_moves_every_scope_of_the_consumer_and_no_other_consumer`、`test_consumer_health::test_a_consumer_without_a_defined_check_cannot_pass`。没有「同域其他消费者全过而本消费者不过」的单独用例 |
+| 同上 / 读取资格不得开启交易权限 | 有测试 | `test_consumer_cutover::test_only_research_read_consumers_can_switch`、`::test_the_switch_does_not_open_any_other_boundary`、`::test_consumer_wide_row_is_only_ever_written_for_projection_read` |
+| 同上 / 原生产品查询不能替代业务 scope | 有测试 | `test_phase_f_scoped_routes::test_products_list_is_not_business_scope`、`::test_incomplete_or_ambiguous_business_scopes_refuse`、`test_phase_f_safe_reads::test_isolated_entry_persists_actual_read_refs` |
+| 检查失败时安全停止而不退回旧路径 / 窗口关闭后的检查失败 | 有测试 | `test_consumer_cutover::test_there_is_no_way_back_to_the_old_route_any_more`、`test_workflow_dispatcher::test_unhealthy_data_products_block_the_task_before_it_runs` |
+| 同上 / 旧入口退役后的安全停止 | 有测试 | `test_phase_f_schedule_stop`、`test_phase_f_state_stop`、`test_phase_f_trade_stop` 三组 stop/restore 用例；`test_phase_f_safe_reads::test_actual_read_refuses_each_unsafe_fallback` |
+| 同上 / 恢复已验收的新版本 | 有测试 | `test_phase_f_scoped_routes::test_target_scope_rollback_requires_proof_and_keeps_history`、`test_phase_f_trade_stop::test_proof_expires_after_bump_keeps_stop`、`::test_recovery_cannot_use_an_isolated_label_to_touch_production` |
+| 同上 / 已组装快照继续执行 | 有测试 | `test_phase_f_safe_reads::test_actual_risk_node_blocks_before_account_or_dependent_execution`、`::test_actual_clerk_stops_next_step_after_read_revocation`、`::test_failed_scope_does_not_stop_unrelated_legacy_reader` |
+| 同上 / 尚未切换的边界 | 有测试 | `test_phase_f_safe_reads::test_actual_chief_read_falls_back_using_once_checked_state`、`test_consumer_cutover::test_unswitched_consumer_defaults_to_the_old_route` |
+| 被意外切回旧路径的消费者必须能经批准恢复 / 恢复被切回旧路径的消费者 | 有测试 | `test_consumer_cutover::test_restore_puts_a_consumer_that_was_moved_to_the_old_route_back_on_the_new_one`（代次加一，日志含操作者、批准原文、原因） |
+| 同上 / 缺少批准或检查未通过 | 有测试 | `test_consumer_cutover::test_restore_refuses_without_approval_or_reason_or_a_passing_check_or_when_already_new` |
+| 同上 / 已在新路径或非研究消费者 | 有测试 | 同一用例（已在新路径）与 `::test_restore_only_moves_research_consumers`（Chief 被拒；风控、交易员、书记员走同一判断，用例只取了 Chief） |
+
+### 8.3 `workflow/legacy-retirement`（MODIFIED + ADDED）
+
+| 要求 / 场景 | 判定 | 证据 |
+|---|---|---|
+| 每个阶段登记待退旧实现 / 替代已就绪但消费方未清零 | 有测试 | `test_legacy_retirement::test_a_pending_tombstone_must_state_what_it_is_waiting_for`、`::test_a_tombstone_carries_the_exit_criterion_not_just_the_target`、`::test_a_pending_item_may_still_be_in_use` |
+| 同上 / 阶段遗漏待退项 | 有记录 | 规划产物层面的检查，没有自动化。本 change 以 inventory.md 第二、三节清点 + G0 L01 人工核验承担；`test_the_registered_batch_covers_every_documented_item` 只覆盖已文档化的批次 |
+| 同上 / 迁移期工具未登记 | 有测试 + 记录 | `test_legacy_retirement::test_the_registered_batch_covers_every_documented_item`；inventory.md 第二节逐模块清点 |
+| 同上 / 条目未声明依赖或所属门 | 有测试 | `test_legacy_retirement::test_every_entry_of_the_retirement_change_has_a_group_a_gate_and_known_dependencies`、`::test_an_unknown_gate_group_or_kind_is_rejected` |
+| 退役必须经过已演练的切回与观察窗口 / 未演练即退役 | 有测试 | `test_retirement_clearance::test_an_undrilled_boundary_is_refused`；`ats retirement decide` 对在册条目普遍给出「回退未演练」 |
+| 同上 / 已演练且窗口结束 | 有测试 | `test_retirement_clearance::test_a_drilled_clean_window_passes`、`::test_an_entry_meeting_every_criterion_may_exit` |
+| 同上 / 窗口触发停止条件 | 有测试 | `test_retirement_clearance::test_a_triggered_stop_condition_keeps_the_window_pending` |
+| 同上 / 迁移窗口已关闭的研究边界 | 有记录 | 第 5–7 组用既有演练与窗口记录退役，未重开旧路径（inventory §七；`ats retirement decide` 的「回退未演练」按已接受先例处理，见 design.md） |
+| 同上 / 只被命令行和测试使用的工具 | 有记录 | 第 5–7 组各条目的 `missing_condition` 内写入了消费方清零证明（先例 `scheduler.hardcoded_serial_run`），未要求演练切回 |
+| 退役执行必须以新路径人工核验通过为前置 / 核验未完成就开始删除 | 有测试 | `test_retirement_clearance::test_g0_is_open_only_when_every_item_has_an_open_verdict_and_the_conclusion_is_signed`、`::test_an_entry_with_an_unmet_dependency_or_a_closed_gate_cannot_be_decided_retired` |
+| 同上 / 核验通过后进入退役 | 有记录 | G0 78/78 已于 10-27 签署（verification.md「G0 结论」），随后第 5–7 组的 `decide` 以 G0 开启为前提 |
+| 同上 / 核验发现新路径缺陷 | 有记录 | G0 过程中发现并修复的缺陷（verification.md S01–S25 小结列了 9 项）；`test_..._every_item_has_an_open_verdict` 保证有「未通过」项时门不开 |
+| 退役条目必须按依赖顺序执行 / 前序条目未完成 | 有测试 | `test_legacy_retirement::test_a_valid_dependency_graph_loads_and_reports_unmet_dependencies`、`test_retirement_clearance::test_an_entry_with_an_unmet_dependency_or_a_closed_gate_cannot_be_decided_retired` |
+| 同上 / 依赖交易路径切换的条目 | 有测试 + 记录 | `test_retirement_clearance::test_an_external_gate_is_never_opened_from_here`；9.1 的 `decide` 输出（见第九节） |
+| 同上 / 依赖存在环或悬空引用 | 有测试 | `test_legacy_retirement::test_a_cycle_in_the_dependencies_fails_the_registry`、`::test_a_dependency_on_an_unregistered_entry_fails_the_registry` |
+| 每批退役后必须复验 / 退役后定时触发失败 | 有记录 | 各组 V5 记录（inventory §七）；第 5–7 组重启后的首次真实定时触发仍在观察中（任务 10.2） |
+| 同上 / 全量测试出现未登记的新失败 | 有记录 | TEST_BASELINE 各组记录；每组新失败均已归因（第 7 组为被误删的 `@scoped_read("layer")`，当场修复） |
+| 同上 / 历史记录不可读 | 有记录 | 各组 V6 记录（`ats retirement tombstone`、历史表读取）；`test_legacy_retirement::test_no_physical_purge_has_been_performed` |
+| 登记为已退役的条目必须可证明消费方清零 / 已退役但消费方状态未知 | 有测试 | `test_legacy_retirement::test_unproven_retired_entries_read_as_awaiting_proof_not_as_cleared`、`test_retirement_clearance::test_no_reader_at_all_is_partial_not_zero`、`::test_an_unmapped_module_path_is_rejected_rather_than_guessed` |
+| 同上 / 重新核验发现仍有使用 | 有测试 | `test_retirement_clearance::test_a_retired_tombstone_that_is_still_readable_fails`、`::test_a_consumer_still_on_the_legacy_path_blocks_exit` |
+
+### 8.4 `data/target-dataflow-assurance`（REMOVED）及其他 REMOVED 条款
+
+四份增量里的 REMOVED 条款（前置接收矩阵、逐批 eligible / ineligible 报告，以及 `dispatcher-runtime`、`cutover-control` 里被新要求取代的旧条款）没有可测的行为，随归档从主规格里删除。核对点是每条的 Migration 所指向的新要求都已在上面有证据：前置接收 → 8.3 的人工核验前置；逐批报告 → 8.3 的依赖顺序与 R5 外部门；旧切流 / 回退条款 → 8.2。
+
+### 8.5 缺口小结与处置建议
+
+| # | 缺口 | 性质 | 建议 |
+|---|---|---|---|
+| a | 已停用工作流的定时 / 日历触发没有「被跳过的原因」记录 | 规格要求的记录没做全；功能（不执行）是对的 | 在 `ownership.py` 的定时与日历分支各补一条跳过观察（轻量，不改所有权判断）。属逻辑改动，**不在本 change 的文档任务内**，建议单开修复 |
+| b | 预期触发集合不区分停用，停用期间会被报成遗漏 | 规格场景未实现 | 在 `expected_triggers` / `compare_triggers` 加「因停用而跳过」类。同上，需要改行为与测试，建议单开修复；在此之前，停用期间做覆盖核验会看到误报的遗漏，运维文档需提示 |
+| c | 作废的未完成触发「恢复后不被自动执行」无断言，现有用例还证明它可被再次认领 | 证据缺失，行为未知 | 先写一条用例确认追赶式触发是否会重跑已作废的认领；若会，按规格改。建议与 a、b 一并单开 |
+| d | 停用 / 恢复的 5.4 原验证口径（定时、事件、手动都不执行并记录原因）只被部分覆盖 | 同 a | 同 a |
+
+这四项都不影响当前生产：现在没有任何研究工作流处于停用状态，`pause` 只在运维手动停某个工作流时才用到。
+
+## 九、文档同步与 R5 核对记录（任务 8.2、9.1、9.2）· 2026-10-27
+
+**8.2 文档修正。** 改了 9 处过期说法：`README.md`（旧入口不再「报 caller is not current owner」，改为已退役并提示替代写法）、`docs/agents/MACRO_ANALYST.md` 两处、`SECTOR_ANALYST.md` 两处（其中 `ats sector crosssection` 一条改为已退役）、`FUNDAMENTAL_ANALYST.md`、`INFORMATION_ANALYST.md`；`docs/ARCHITECTURE.md` §6「旧实现」一行改为当前状态（41 条在册、20 条已退役、21 条未退，其中 20 条绑交易路径）；`docs/OPERATIONS.md` 第 3.4 节补了停用期间覆盖核验的已知局限（见 §8.5 缺口 a、b）。
+
+**命令有效性核对。** 新增 `scripts/check_doc_commands.py`：从 README、OPERATIONS、DEVELOPMENT、ARCHITECTURE、`docs/agents/*` 的代码块与行内代码里取出全部 `ats …` 命令，用真实的参数解析器核对子命令路径与每个 `--flag`，不运行任何命令。结果：检查 110 条，未知命令 0 条；另有 14 处提到已退役命令（只回提示桩），逐处核对过，文字都已写明「已退役」。首版脚本没有核对 `action` 这类位置参数，漏掉了这 14 处，补上后才查出；之后每次改文档可重跑。
+
+**9.1 R5 登记核对。** `ats retirement decide` 对 R5 的 20 条全部显示「external gate not met: trade_path_cutover」；20 条都有退出条件、缺失条件、清零判据、位置，门均为 `trade_path_cutover`（只有 `migration.analysis_verification` 另有一条前序依赖）。inventory §二 归 R5 的模块逐个对照登记位置：`shadow_*`、`acceptance_*` 以通配符登记，其余均点名；只有 `cutover_guards` 没有出现在任何退出条件里，已补进 `migration.read_route_and_qualification`（只改登记文字，登记与清零测试 58 项通过）。
+
+**9.2 runbook 接续。** `docs/PHASE_F_RETIREMENT_RUNBOOK.md` 新增「〇·二」节：20 条与 `switch-trade-path-and-retire-r5` 各任务一一对应，并列出 5 处对不上的地方（三个模块无人认领、6.3/6.5 的前提未达成、2.7 的跳过记录与 `paused` 取值、proposal 里的旧数字）。这些只记录，没有改那个 change。同节顺手纠正了「R5 的 15 条」为 20 条。

@@ -75,13 +75,13 @@
 
 ## 8. 规格与运维文档同步
 
-- [ ] 8.1 核对本 change 的规格增量与实际行为一致：读路由固定与数据产品检查（已在 29c6b4d 实现）、工作流停用 / 恢复、研究工作流只经 Dispatcher、可读报告由 Dispatcher 生成。验证：每条增量要求都有对应测试或运行记录引用，写进 inventory.md
-- [ ] 8.2 ARCHITECTURE §6 实施状态、OPERATIONS、角色文档更新到退役后的状态。验证：文档里的命令都能照写运行
+- [x] 8.1 核对本 change 的规格增量与实际行为一致：读路由固定与数据产品检查（已在 29c6b4d 实现）、工作流停用 / 恢复、研究工作流只经 Dispatcher、可读报告由 Dispatcher 生成。验证：每条增量要求都有对应测试或运行记录引用，写进 inventory.md
+- [x] 8.2 ARCHITECTURE §6 实施状态、OPERATIONS、角色文档更新到退役后的状态。验证：文档里的命令都能照写运行
 
 ## 9. R5 交易路径相关条目（只登记，不执行）
 
-- [ ] 9.1 确认 R5 全部条目已在登记处，门为 `trade_path_cutover`，依赖与退出判据完整；包括 inventory.md 第二节归 R5 的模块（`boundary_drill`、`joint_cutover`、`shadow_*`、`acceptance_*`、`paired_business`、`exit_requirements`、`business_replay_inputs`）。验证：`ats retirement decide` 对 R5 条目显示「外部门未满足」
-- [ ] 9.2 在退役 runbook 中写明 R5 的接续方式：交易路径切换的 change 必须把 R5 列为任务，包括读路由与资格机制的收窄方案。验证：runbook 有该节，且与 `switch-trade-path-and-retire-r5` 的任务对得上
+- [x] 9.1 确认 R5 全部条目已在登记处，门为 `trade_path_cutover`，依赖与退出判据完整；包括 inventory.md 第二节归 R5 的模块（`boundary_drill`、`joint_cutover`、`shadow_*`、`acceptance_*`、`paired_business`、`exit_requirements`、`business_replay_inputs`）。验证：`ats retirement decide` 对 R5 条目显示「外部门未满足」
+- [x] 9.2 在退役 runbook 中写明 R5 的接续方式：交易路径切换的 change 必须把 R5 列为任务，包括读路由与资格机制的收窄方案。验证：runbook 有该节，且与 `switch-trade-path-and-retire-r5` 的任务对得上
 
 ## 10. 收尾与整体验证
 

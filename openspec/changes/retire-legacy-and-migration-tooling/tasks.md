@@ -64,7 +64,7 @@
 - [x] 6.3 `evidence_fact_projections.legacy_observation_id`：同 6.2。验证：同 6.2（10-27 同 6.2：`legacy_observation_id` 是事实投影回溯到观测的连接键，产业链归纳的 `freeze_as_discovery` 在用，名字叫 legacy 只是遗留；已移出待退项）
 - [x] 6.4 `layer_verdict.allocation`：在 5.3 删除旧行业入口之后，迁走或删除剩余消费方（`agents.sector.report/viz/review`、命令行）并退役；字段保留、历史行可读。验证：历史行读回测试通过，新写入不再产生该字段（10-27：cli、行业报告、轮动、截面、上下文、viz 共 11 处 `allocation or allocation_for_status(...)` 改为只用 `allocation_for_status(layer_status)`；`layer_verdict.allocation` 标 retired；新增历史行读回测试。已知行为变化：用历史行重渲染旧报告时档位按层状态推出）
 - [x] 6.5 TEST_BASELINE 与 runbook 记录本批。验证：同 4.7（见 TEST_BASELINE 同日记录；runbook 第〇节条目数改为 41）
-- [ ] 6.6 本组复验 V4–V6。验证：同 4.8
+- [x] 6.6 本组复验 V4–V6。验证：同 4.8（10-27：V4 受影响文件通过，V5 已重启服务、下一次真实触发待补记，V6 通过；见 inventory.md 第七节）
 
 ## 7. R4 只被旧入口用到的旧分析代码（门 G0，依赖第 5、6 组）
 

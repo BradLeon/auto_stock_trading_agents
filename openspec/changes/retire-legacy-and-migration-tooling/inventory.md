@@ -159,3 +159,16 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 - `legacy_entry.research_owner_legacy_mode` 有意保持 pending（5.4 取「丙」，库内部值仍为 `legacy`），长期方案乙见 verification.md「上线后待办」。
 - 库里有 11 条 `running` 认领，最后更新在 10-19 至 10-23（information-brief 7 条、technical-review 4 条），无对应活进程，是早先中断留下的；`pause` 遇到 `running` 认领会拒绝，若以后要停用这两个工作流，需先单独处置它们。本任务未动。
 - `RESEARCH_MANUAL_MOVED` 里 `evidence collect/observe/articles` 与 `sector crosssection` 的提示前缀仍写「研究分析师由 Dispatcher 运行，请用」，读起来略别扭，不影响功能。
+
+### 第 6 组（R3：登记修正与研究侧已登记条目）· 2026-10-27
+
+提交：1f2324b（6.1）、a336ffe（6.2–6.5）。
+
+| 项 | 结果 |
+|---|---|
+| V1–V3 | 6.1 的 8 条以 grep 复核（四张旧表只剩建表 / 退役 / 迁移与边界登记表；`_apply_order_caps`、`_clip_event_notional`、`_RESUMED` 已无引用；`apply_guardrails` 只剩定义）。6.2、6.3 核查发现是在用记录，经用户同意改登记而非退役。6.4 的 11 处回退读取已清零，src 内除字段定义外无代码读 `LayerVerdict.allocation` |
+| V4 测试 | 受影响的 10 个测试文件通过；`test_sector_allocation` 1 例失败在更早提交上同样失败（既有）。新增 `test_sector_viz` 历史行读回用例。未重跑全量 |
+| V5 运行 | 10-27 12:22（台北）再次重启 dispatcher（PID 43954）与 serve（PID 43967），serve 应答、启动日志无错误。**尚未观察到**重启后的下一次真实触发（日历消费 06:10 UTC 即 14:10 台北），待补记 |
+| V6 历史 | `ats retirement tombstone --identifier layer_verdict.allocation` 显示 retired、一致、无读取方；历史行读回由新增测试覆盖 |
+
+遗留：`task_projections` 与 `legacy_observation_id` 名字里的 legacy 是历史遗留，未改名（改名要动两个库的表结构，收益不值）。

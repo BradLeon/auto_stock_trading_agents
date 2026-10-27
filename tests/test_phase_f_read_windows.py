@@ -112,11 +112,24 @@ def test_authorization_revoked_between_ticks(deployed):
 
 
 @pytest.mark.parametrize("deployed", ["finite", "persistent"], indirect=True)
-def test_report_revoked_between_ticks(deployed, monkeypatch):
+def test_research_windows_do_not_depend_on_a_signed_batch_report(deployed, monkeypatch):
+    """The batch reports came from the research cutover tooling retired with R2 (tasks 4.1). A research window is
+    still refused when its authorization is revoked (test above), but a report check is no longer asked of it."""
     windows.bind_plan(make_plan(deployed.now))
-    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (False, ["report revoked"]))
-    with pytest.raises(RouteUnavailable, match="report revoked"):
-        windows.bind_plan(make_plan(deployed.now + timedelta(minutes=1)))
+    asked = []
+    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report",
+                        lambda *a, **k: asked.append(a) or (False, ["report revoked"]))
+    windows.bind_plan(make_plan(deployed.now + timedelta(minutes=1)))          # does not raise
+    assert asked == []
+
+
+def test_trade_consumers_still_need_the_signed_batch_report():
+    from types import SimpleNamespace
+
+    for consumer in ("risk", "trader", "clerk"):
+        assert windows._batch_report_required(SimpleNamespace(consumer_id=consumer))
+    for consumer in ("technical", "information", "fundamental", "layer", "macro", "sector"):
+        assert not windows._batch_report_required(SimpleNamespace(consumer_id=consumer))
 
 
 @pytest.mark.parametrize("deployed", ["finite", "persistent"], indirect=True)

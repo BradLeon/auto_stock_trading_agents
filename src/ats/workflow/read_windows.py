@@ -79,24 +79,39 @@ def _deployment(identity, *, workflow=None, path=None):
         "report_reference": evidence["report"]["reference"]}}
 
 
-def assert_current(identity, *, workflow=None, path=None):
-    """Recheck mutable authorization and signed report status at every entry."""
-    from .shadow_reports import check_batch_report, require_batch_report
+# The consumers whose reads feed the trade path. Their exact windows are still backed by a signed shadow batch report; that
+# check belongs to the trade-path cutover (R5) and is left as it was.
+_TRADE_CONSUMERS = frozenset({"risk", "trader", "clerk"})
 
+
+def _batch_report_required(identity) -> bool:
+    """Research windows no longer need a signed batch report.
+
+    The reports came from `ats batch` / `read_cutover` / `batch_manifest`, the research-side cutover tooling that is
+    retired with R2, and no research consumer is read through an exact window in production (they are all consumer-wide
+    routes). Window authorization, generation and identity are still rechecked at every entry.
+    """
+    return identity.consumer_id in _TRADE_CONSUMERS
+
+
+def assert_current(identity, *, workflow=None, path=None):
+    """Recheck mutable authorization and (for trade consumers) signed report status at every entry."""
     try:
         joint.assert_scope_open(identity, path=path)
         evidence = _deployment(identity, workflow=workflow, path=path)
         proof = evidence["report"]
         if proof.get("identity") != identity.as_row() or proof.get("valid") is not True:
             raise RouteUnavailable("read window report identity mismatch")
-        batch = SimpleNamespace(shadow_report_id=proof["reference"], scope=identity.scope,
-            batch_class=proof.get("batch_class", "internal_state_approval" if identity.consumer_id in {"risk", "trader", "clerk"} else "research_read"),
-            consumers=(identity.consumer_id,), required_surfaces=tuple(proof.get("required_surfaces",
-                ("input_snapshot", "analyst_output", "risk_verdict", "approval_chain", "trade_attribution")
-                if identity.consumer_id in {"risk", "trader", "clerk"} else ("input_snapshot", "analyst_output"))))
-        ok, problems = require_batch_report(batch, check_batch_report)
-        if not ok:
-            raise RouteUnavailable("; ".join(problems))
+        if _batch_report_required(identity):
+            from .shadow_reports import check_batch_report, require_batch_report
+
+            batch = SimpleNamespace(shadow_report_id=proof["reference"], scope=identity.scope,
+                batch_class=proof.get("batch_class", "internal_state_approval"),
+                consumers=(identity.consumer_id,), required_surfaces=tuple(proof.get("required_surfaces",
+                    ("input_snapshot", "analyst_output", "risk_verdict", "approval_chain", "trade_attribution"))))
+            ok, problems = require_batch_report(batch, check_batch_report)
+            if not ok:
+                raise RouteUnavailable("; ".join(problems))
         return evidence
     except (plane.CutoverError, sqlite3.Error, ValueError, KeyError, TypeError, OSError) as exc:
         raise RouteUnavailable("read window authority refused: " + str(exc)) from exc

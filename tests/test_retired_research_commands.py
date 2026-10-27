@@ -17,6 +17,10 @@ RETIRED = [
     (["pead", "monitor", "NVDA"], "information-brief"),
     (["pead", "watch"], "information-brief"),
     (["pead", "research"], "information-brief"),
+    (["evidence", "observe", "MU"], "ats data evidence-observe"),
+    (["evidence", "collect"], "chain-source-collect"),
+    (["evidence", "articles"], "ats data article-ingest"),
+    (["sector", "crosssection"], "sector-review"),
 ]
 
 
@@ -34,5 +38,6 @@ def test_a_retired_command_names_its_replacement_and_runs_nothing(capsys, monkey
 def test_the_read_only_commands_are_not_retired():
     for argv in (["macro", "show"], ["technical", "show"], ["technical", "probe"], ["sector", "show"],
                  ["sector", "html"], ["sector", "probe"], ["sector", "kbperturb"], ["pead", "show"],
-                 ["pead", "transcriptprobe"]):
+                 ["pead", "transcriptprobe"], ["evidence", "claims"], ["evidence", "report"], ["evidence", "propose"],
+                 ["evidence", "proposals"], ["evidence", "review"], ["evidence", "kbreview"], ["evidence", "show"]):
         assert cli.RESEARCH_MANUAL_MOVED.get((argv[0], argv[1])) is None, argv

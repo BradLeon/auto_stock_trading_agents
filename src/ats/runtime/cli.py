@@ -1345,6 +1345,13 @@ RESEARCH_MANUAL_MOVED = {
     ("pead", "monitor"): _WORKFLOW_RUN.format(task="information-brief", kind="entity", id="<代码>"),
     ("pead", "watch"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
     ("pead", "research"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+    # Evidence collection belongs to the data refresh controller, not to a command someone has to remember to run.
+    ("evidence", "observe"): "ats data evidence-observe --entity <代码>（数据刷新任务 chain_evidence_daily 每天跑）",
+    ("evidence", "collect"): "第三方序列由数据刷新任务采集（chain_l1_governed_evidence_daily、chain_regional_*）；"
+                             "手动补采用 ats data chain-source-collect --source <来源 id>（须在受管队列内）",
+    ("evidence", "articles"): "ats data article-ingest --source <来源 id>",
+    ("sector", "crosssection"): "截面已并入行业评审：用 " + _WORKFLOW_RUN.format(task="sector-review", kind="sector",
+                                id="<行业>") + "，结果在层级报告第三节",
 }
 
 
@@ -2428,39 +2435,6 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
     return 0
 
 
-def run_cross_section(
-    name: str = "ai_hardware",
-    layer: str = "all",
-    *,
-    structure: bool = False,
-    write_report: bool = False,
-) -> int:
-    """Cross-sectional selection + sizing within a chain layer (WHO / HOW MUCH).
-
-    **Prints only — never writes a file.** The layer report produced by the weekly review
-    already carries this table, and a second per-layer document would drift out of sync:
-    its `layer_cap` is a half-finished number until the allocation verdict exists.
-    This command is a debugging view of the current factors.
-    """
-    from ..agents.sector import cross_section
-    from ..config import load_sector_config
-
-    cfg = load_sector_config(name)
-    keys = [layer] if layer != "all" else [ly.key for ly in cfg.layers if ly.tickers]
-    for key in keys:
-        try:
-            rows, basket = cross_section.run_layer(name, key, persist=True, structure=structure)
-        except Exception as exc:  # noqa: BLE001
-            print(f"❌ {key}: {exc}")
-            continue
-        label = next((ly.label for ly in cfg.layers if ly.key == key), key)
-        print(f"\n=== {label}  [{key}]{'  +结构层' if basket.structural else ''} ===")
-        print(cross_section.format_table(rows, basket.layer_cap))
-    print("\n（本命令只打印，不写文件 —— 层报告由 `ats sector review` 产出，一层一份。）")
-    return 0
-
-
-@scoped_read("layer")
 def run_layer_review(
     name: str = "ai_hardware",
     layer_key: str = "all",
@@ -2921,38 +2895,6 @@ def run_evidence(
         print(f"📝 {path}" if path else "(report dir unset — skipped)")
         return 0
 
-    if action == "collect":
-        # Fetch every configured third-party series into the ledger. Separate from
-        # `sources`, which reports primary-document coverage and touches no network.
-        from ..chain import sources as chain_sources
-
-        saved = chain_sources.collect(store)
-        if not saved:
-            print("（config/data/sources.yaml 里没有配置第三方源）")
-            return 0
-        # -1 = the source could not be reached this round (true gap). 0 = it was
-        # reached but every point was already in the ledger (data is current, not
-        # stale). Printing both as "取不到数据" is the exact bug this distinguishes:
-        # a monthly source fetched twice in one month is 0-and-fine, not dead.
-        for sid, n in sorted(saved.items()):
-            if n < 0:
-                print(f"  ⚠️  {sid:<28}取不到数据，已记成缺口而非沉默")
-            elif n == 0:
-                print(f"  🟡 {sid:<28}0 条新观测　—— 已抓到最新数据，只是与上次相同")
-            else:
-                print(f"  ✅ {sid:<28}{n} 条新观测")
-        return 0
-
-    if action == "articles":
-        outcomes = _run_managed_article_ingestion(
-            source_ids={entity} if entity else None, trigger_kind="manual")
-        print(json.dumps({"status": "succeeded" if all(
-            row["status"] in {"succeeded", "no_change", "quarantined", "partial"}
-            for row in outcomes) else "partial", "tasks": outcomes},
-            ensure_ascii=False, indent=2, default=str))
-        return 0 if all(row["status"] in {
-            "succeeded", "no_change", "quarantined", "partial"} for row in outcomes) else 1
-
     if action == "kbreview":
         # The same six detectors the weekly report runs, on demand. Worth its own
         # command because the report costs a full re-assessment to regenerate, while
@@ -3036,45 +2978,8 @@ def run_evidence(
             print("(该行业配置里还没有 claims —— 见 docs/archive/CHAIN_EVIDENCE.md)")
         return 0
 
-    if not symbol:
-        print("❌ observe 需要标的：ats evidence observe MU")
-        return 1
-    sym = symbol.upper()
-    if file:
-        text, src, doc_id = Path(file).read_text(encoding="utf-8"), file, f"{sym}:{Path(file).name}"
-    else:
-        from ..data import earnings_calendar
-
-        pr = earnings_calendar.last_print(sym, back_days=45)
-        doc_id = f"{sym}:{pr.date:%Y%m%d}" if pr and pr.date else f"{sym}:manual"
-        text, src, note = observer.fetch_document(sym, print_=pr, store=store)
-        if note:
-            print(f"（{note}）")
-    if not text.strip():
-        print(f"❌ 取不到 {sym} 的财报稿/纪要 — 可用 --file 指定本地文档")
-        return 1
-    res = observer.observe_document(sym, doc_id, text, source_url=src)
-    if res["failure"]:
-        print(f"⚠️  {sym}: 抽取失败 — {res['failure']}（已记录，不记为零观测）")
-    else:
-        print(f"✅ {sym}: {res['new']} 条新观测 / 共 {res['saved']} 条（doc={doc_id}）")
-
-    # The earnings RELEASE is a second document, extracted separately — the call
-    # narrates, the release tabulates, and folding them together would lose which
-    # source a number came from.
-    if not file:
-        report_date = str(getattr(pr, "date", "") or "")
-        rtext, rsrc, rnote = observer.fetch_release(sym, report_date=report_date, store=store)
-        if rnote:
-            print(f"（财报稿：{rnote}）")
-        if rtext.strip():
-            rid = f"{sym}:release:{report_date or 'manual'}"
-            rres = observer.observe_document(sym, rid, rtext, source_url=rsrc)
-            if rres["failure"]:
-                print(f"⚠️  {sym} 财报稿抽取失败 — {rres['failure']}")
-            else:
-                print(f"✅ {sym} 财报稿: {rres['new']} 条新观测 / 共 {rres['saved']} 条")
-    return 0
+    print(f"❌ 未知的 evidence 操作 {action!r}")
+    return 2
 
 
 def sector_show(name: str = "ai_hardware") -> int:
@@ -4912,7 +4817,7 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
-    evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
+    evi = sub.add_parser("evidence", help="产业链证据：show / sources / probe / layer 与命题治理（claims、report、propose、proposals、review、kbreview）——只读，绝不下单；observe、collect、articles 已退役，见数据刷新任务")
     evi.add_argument(
         "action",
         choices=[
@@ -5301,42 +5206,6 @@ def main(argv: list[str] | None = None) -> int:
             evidence_reason=args.evidence_reason,
             evidence_event_id=args.evidence_event_id,
         )
-    if args.command == "evidence" and args.action == "collect":
-        from ..chain.sources import load_sources
-        from ..data.catalog.loader import DataCatalog
-        from ..data.persistent_queue import PersistentIngestionQueue
-
-        queue = PersistentIngestionQueue()
-        source_registry = DataCatalog.load().unstructured_registry().get("sources", {})
-        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-        policy = hashlib.sha256(
-            Path("config/data/sources.yaml").read_bytes()
-            + Path("config/data/structured.yaml").read_bytes()
-        ).hexdigest()
-        outcomes = []
-        for source_def in load_sources():
-            registered = source_registry.get(source_def.id) or {}
-            canonical_source = str(registered.get("canonical_source_id") or source_def.id)
-            dataset_id = str(registered.get("dataset_id") or "")
-            task_id, created = queue.enqueue(
-                source_id=source_def.id,
-                scope={"source_alias": source_def.id, "canonical_source": canonical_source,
-                       "dataset": dataset_id,
-                       "sources": [source_def.id, canonical_source]},
-                trigger_kind="manual",
-                trigger_ref=f"evidence-collect:{source_def.id}:{now.isoformat()}",
-                command=["ats", "data", "chain-source-collect", "--source", source_def.id],
-                policy_fingerprint=policy,
-                requested_as_of=now.isoformat(), priority=40,
-            )
-            result = queue.run_one(task_id=task_id)
-            status = (result or {}).get("status") or (queue.get(task_id) or {}).get("status", "queued")
-            outcomes.append({"source_id": source_def.id, "task_id": task_id,
-                             "created": created, "status": status})
-        print(json.dumps({"status": "succeeded" if all(
-            row["status"] in {"succeeded", "no_change"} for row in outcomes) else "partial",
-            "tasks": outcomes}, ensure_ascii=False, indent=2))
-        return 0 if all(row["status"] in {"succeeded", "no_change"} for row in outcomes) else 1
     if args.command == "ibkr":
         return ibkr_probe()
     if args.command == "serve":
@@ -5397,8 +5266,6 @@ def main(argv: list[str] | None = None) -> int:
             print(kb_perturb.render(base, other, mode=args.mode))
             return 0
 
-        if args.action == "crosssection":
-            return run_cross_section(args.name, args.layer, structure=args.structure)
         if args.action == "layer":
             return run_layer_review(
                 args.name, args.layer, use_llm=not args.no_llm, live_data=not args.offline

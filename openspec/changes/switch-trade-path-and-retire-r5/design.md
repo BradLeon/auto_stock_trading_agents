@@ -125,7 +125,13 @@
   | `chief-daily` | 交易日 10:30 ET | `ai_hardware` 决策 profile，Fundamental 例行模式（财报事件日改事件模式，规则沿用研究快照的固定需求判定） | 沿用旧调度器的时点：开盘后一小时，北京时间晚上，便于你当晚审批 |
 
 - **交易日日历：** 沿用 Dispatcher 现有的交易所日历（含假期与提前收盘）。
-- **负责人默认 `paused`：** S4、S5 才改为启用。
+- **默认不启用：**
+  - 两个工作流在 `trade_schedules.yaml` 里以 `enabled: false` 起步。这个字段沿用研究时间表已有的含义：不注册定时，也不进覆盖核验的预期触发集合。这样第 1–3 组上线代码后、S4 之前，生产调度里完全没有这两个工作流，也不会每天留下跳过记录。
+  - 负责人处于停用状态（内部取值仍是 legacy，见退役 change 5.4 的决定；对外一律说停用 / 恢复）。
+  - S4、S5 各自改为 `enabled: true`，重启 `com.ats.dispatcher`，再 `ats dispatch resume <工作流>`。
+  - 观察期的紧急停止用 `ats dispatch pause <工作流>`：不改配置、不用重启。停用时的跳过记录，以及覆盖核验里“因停用而跳过 / 因停用而作废”的分类，已由 90d26b2 实现，这里直接沿用。
+  - 覆盖核验的预期触发集合目前只读 `research_schedules.yaml`，要扩展为同时读 `trade_schedules.yaml`，否则交易路径工作流不在核验范围内。
+  - 长期方向是取消停用开关，只由时间表的 `enabled` 控制。这需要改规格，另立 change。
 - **与研究的衔接：** 主理人运行前经 Chief 完整性门禁。研究不齐时以不完整终结，不建周期，也不调用模型。研究任务失败不会因主理人排程而重跑；主理人不触发分析师重跑。
 - **前一日待审批的周期：** 新的 `chief-daily` 周期创建前，把仍在待审批或已驳回待修订的旧周期转为“失效”，原因写“被次日周期取代”。这样不会同时挂着两份待批方案。
 - **IBKR 连接：** 同进程内每个连接分配不同的 client_id（pid 偏移加进程内序号），不改变“跨进程不冲突”的现有规则。
@@ -190,7 +196,7 @@
   7. 主理人连续 2 个交易日因非数据缺口原因失败。数据缺口导致的不完整不算，只记录。
 - **不触发停止、但要记录：** TWS 不可用导致的阻断，以及你未审批导致的过期。
 - **回退：**
-  1. 停用工作流：`ats dispatch pause`（退役 change R1 之后的命令；之前用 `owner-rollback`）。
+  1. 停用工作流：`ats dispatch pause chief-daily`、`ats dispatch pause clerk-daily`。
   2. 必要时按 S3 → S2 → S1 倒序 revert 并重启服务。
   3. 实盘锁定期间没有在途订单需要排空。但仍执行一次路由冻结核验，确认没有未终结授权。
 
@@ -220,10 +226,10 @@
 
 | 批 | 条目 | 前提 |
 |---|---|---|
-| R5a 读取侧 | `chief.legacy_table_direct_reads`、`store.direct_trade_reads`、`sector_reviews`（Chief 消费方）、`legacy_read_models`（`channel.context` 消费方）、`decision_roles.unwired_to_governed_read_api`；`macro_reviews` 与 `technical_reviews` 若最后的读取方是 Chief，一并处理 | S1–S3 已上线并过观察窗口；`runtime.cli` 消费方由退役 change R1 清掉 |
+| R5a 读取侧 | `chief.legacy_table_direct_reads`、`store.direct_trade_reads`、`decision_roles.unwired_to_governed_read_api`；四张旧表 `sector_reviews`、`macro_reviews`、`technical_reviews`（消费方：Chief、`runtime.cli`）与 `legacy_read_models`（消费方：`channel.context`、`runtime.cli`） | S1–S3 已上线并过观察窗口。`runtime.cli` 消费方不由退役 change R1 清掉：R1 只退役了旧手动入口，`ats macro/sector/technical show` 等保留的只读命令仍读这四张表。做法（用户 2026-10-27 定）：这些命令先改读已发布的任务投影，在同一批历史数据上与原输出逐项对照；读取方全部清零后再退役旧表，旧表保留只读 |
 | R5b 写入与入口侧 | `memory.store.legacy_decision_write_path`（移除镜像写）、`trades.client_order_id.legacy_derivation`（旧式订单号行由 Clerk 标为 `legacy_unknown` 或对账承接后）、`scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`、`journal.report.render_ledger`、`risk.checks.pre_trade_adapter` | R5a 完成。镜像写的读取方已全部清零 |
 | R5c 切换期工具（交易侧，加上转入的原 R2） | 分四步，见下文“R5c 的顺序” | R5b 完成 |
-| R5d 读路由与资格机制收窄 | `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`assurance_surface` 与指纹清单 | R5a–R5c 完成；退役 change 的 R0（登记字段与门）与 R1（`consumer-cutover` 改名为数据健康命令）完成。不再依赖退役 change 的 R2：它已并入 R5c |
+| R5d 读路由与资格机制收窄 | `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`exit_requirements`、`cutover_guards`、`business_replay_inputs` 的剩余部分、`assurance_surface` 与指纹清单（见下文“核对时补出的模块”） | R5a–R5c 完成；退役 change 的 R0（登记字段与门）与 R1（`consumer-cutover` 改名为数据健康命令）完成。不再依赖退役 change 的 R2：它已并入 R5c |
 
 **2026-10-27 从退役 change 转入的原 R2**（依据：退役 change tasks.md 第 4 组开头的“2026-10-27 复核”段，提交 15190e2）
 
@@ -248,6 +254,18 @@
 - **做法：** 照搬退役 change 4.2–4.8 的原文。每条先做 V1–V3，归档命令用法样例，同步冻结面与资格清单，最后复验 V4–V6。
 - **口径以本 change 为准：** 原 R2（退役 change 4.5）计划把 `isolated_entry` 整个删掉。本 change 的口径是逐个判定、部分保留：被隔离模拟与 22 项订单追溯使用的部分留下。原计划已被取代。
 
+**核对时补出的模块（2026-10-27）**（依据：退役 runbook「〇·二」与对代码的复查）
+
+以下模块原先没有任务认领，或者只被 `shadow_*` 通配涵盖、没写明要先拆引用。其中几处在生产交易路径上，不能当叶子直接删：
+
+| 模块 | 谁在用 | 处置 |
+|---|---|---|
+| `workflow/shadow_ledger` | Clerk 捕获它的写入拒绝异常；`execution/shadow_execution` 依赖它 | R5c 第 3 步删 `shadow_*` 之前先拆引用 |
+| `execution/shadow_execution` | Trader 执行、主理人决策图发布结果、store 的交易写入（发布前断言）；`isolated_entry` 的隔离运行 | 同上。R5c 第 2 步判定“影子执行”在实盘锁定期是否还有用途：没有就删掉这些调用；隔离模拟需要的部分迁到长期模块 |
+| `workflow/business_replay_inputs` | `consumer_api.read_input` 每次读取都先经过它的回放冻结（`governed_read`）；长期保留的 `route_switch` 用它的 `implementation_hashes`（隔离环境的停止与恢复）；另被 `acceptance_*`、`paired_business`、`shadow_replay`、`read_deployment`、`exit_requirements` 使用 | `route_switch` 需要的哈希函数先迁到长期模块，`route_switch` 本身保留；回放冻结是否属于隔离模拟的长期能力，在 R5c 第 2 步判定，R5d 收窄 `read_input` 时据此迁出或去掉；剩余部分随 R5d 删除 |
+| `workflow/exit_requirements` | `data/assurance.py` 的读恢复核验 | 随 R5d 删 `read_recovery` 时一起删，先拆 `assurance.py` 的引用 |
+| `workflow/cutover_guards` | `src/` 内没有导入方；登记已补进 `migration.read_route_and_qualification` 的退出条件 | 随 R5d 删除 |
+
 **R5c 的顺序**（按依赖由外向内；每步每条都需你同意，并单独提交）：
 
 1. **先让退役工具自立。** `ats retirement zero/decide` 用 `intake_verification` 里的消费方扫描器（`scan_consumer_access` 及它依赖的入口清单 `CONSUMER_ENTRY_POINTS`、模块清单常量）判断有没有人还在用旧路径。退役工具要一直用到 R5 最后一条，以后的退役也要用，所以不能在 R5 中途随 `intake_verification` 一起删掉。处理办法：先把扫描器和这些常量搬到退役工具自己的模块（`retirement_clearance` 或一个独立的消费方扫描模块），验证全部条目的 `ats retirement zero/decide` 输出与搬移前逐条一致；`intake_verification` 剩下的隔离接入核验部分，留到第 4 步再删。
@@ -256,13 +274,13 @@
    - 只服务迁移期切流资格的部分，直接删除。
 3. **删除叶子工具：**
    - `boundary_drill`（`ats drill`）、`joint_cutover`、`paired_business`、`acceptance_runner/reports/matrix`，命令 `ats cutover`；
-   - `shadow_*`（`ats shadow`）。删之前，先去掉 `read_windows` 对交易消费者的批次报告校验：它是 `read_windows` 对 `shadow_reports` 仅剩的导入，切换后交易消费者的读取不再需要签名批次报告，做法与退役 change 4.1 对研究侧的处理相同。
+   - `shadow_*`（`ats shadow`）。删之前，先按第 2 步的结论拆掉 Clerk、Trader、主理人决策图、store 对 `shadow_ledger` 与 `execution/shadow_execution` 的引用（见上表）；再去掉 `read_windows` 对交易消费者的批次报告校验：它是 `read_windows` 对 `shadow_reports` 仅剩的导入，切换后交易消费者的读取不再需要签名批次报告，做法与退役 change 4.1 对研究侧的处理相同。
 4. **删除被叶子依赖的工具：**
    - `batch_manifest`、`read_cutover`、`read_deployment`（`ats batch`、`ats read`）；
    - `schedule_cutover`；
    - `intake` 与 `intake_verification` 的剩余部分（`ats intake`）；
    - 第 2 步判定可删的 `consumer_disposition` 等；
-   - 最后删 `dispatch_claims` 和 `ats dispatch` 的迁移期子命令，必须排在 `schedule_cutover` 之后。
+   - 最后删 `dispatch_claims` 和 `ats dispatch` 的迁移期子命令，必须排在 `schedule_cutover` 之后。其中 `runtime-expected`、`runtime-compare` 是现行的调度覆盖核验入口（含 90d26b2 的“因停用而跳过”分类），删之前先把这项核验搬到保留的命令下，并核对搬移前后输出一致。
 
    `read_windows` 对 `batch_manifest`、`read_cutover` 只剩文档字符串里的引用，不构成依赖。
 
@@ -327,6 +345,11 @@
 3. **审批提醒（D6）：** 要提醒，发单向文字提醒，不带链接。
 4. **执行方式（D7）：** 非演练 + 实盘锁定。
 5. **`LIVE-X`（D9-1）：** 用户确认原文：“这不是我签发的实盘授权，同意作废。”作废记录在 tasks 2.9 上线后按 3.3 追加，引用这句原文；原记录保留。
+
+## 用户裁决（2026-10-27）
+
+6. **四张旧分析表的只读命令（D10 R5a）：** `ats macro/sector/technical show` 等先改读已发布的任务投影，与原输出逐项对照；读取方清零后再退役旧表，旧表保留只读。
+7. **停用 / 恢复的说法（D5）：** 采用退役 change 5.4 的方案丙：内部取值仍是 legacy，对外一律说停用 / 恢复（`ats dispatch pause/resume`）。两个交易路径工作流在时间表里以 `enabled: false` 起步，S4、S5 才启用。长期改为只由 `enabled` 控制，另立 change。
 
 ## Open Questions
 

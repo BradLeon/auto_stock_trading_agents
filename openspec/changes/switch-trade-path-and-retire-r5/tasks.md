@@ -33,10 +33,11 @@
 - [ ] 2.6 审批与账本成对切换的代码（design.md D4 方案 B）：Clerk 的决策链联接与读模型发布只读审计表，去掉 Clerk 与报表对旧决策表的读取；新增只读核验脚本，列出仍读旧决策表的审批或账本代码路径。验证：核验脚本对当前代码输出为空；Clerk 的部分成交、迟到成交、撤单、拒单、人工订单、无法归因与重放测试全绿
 - [ ] 2.7 Dispatcher 交易路径工作流：
   - 新建 `config/workflow/trade_schedules.yaml`：`clerk-daily` 交易日 16:30 ET，`chief-daily` 交易日 10:30 ET；
-  - 注册两个任务，负责人默认 `paused`；
+  - 注册两个任务：在时间表里以 `enabled: false` 起步，负责人处于停用状态（内部取值仍是 legacy，见退役 change 5.4 的决定；对外一律说停用 / 恢复），见 design.md D5；
+  - 覆盖核验的预期触发集合扩展为同时读取 `trade_schedules.yaml`；
   - 新的 `chief-daily` 周期创建前，把前一日仍待审批或待修订的周期转为失效。
 
-  验证：新增测试覆盖休市不触发、研究不完整不建周期且零模型调用、主理人失败不影响对账、重启补跑不重复、停用时记录跳过原因、前一日周期被取代
+  验证：新增测试覆盖休市不触发、研究不完整不建周期且零模型调用、主理人失败不影响对账、重启补跑不重复、前一日周期被取代；`enabled: false` 时不注册定时、不进入预期触发集合；停用时记录跳过原因与“因停用而跳过”的覆盖分类沿用 90d26b2 已实现的能力，只补交易路径工作流的用例
 - [ ] 2.8 IBKR 连接标识：同一进程内每个连接分配不同的 client_id，跨进程规则不变。验证：测试在同一进程内并发开两个连接，client_id 不同；现有 broker 测试通过
 - [ ] 2.9 实盘授权来源核实：授权记录增加核实状态（未核实、已核实、已作废）及核实依据；实盘门只采信已核实记录；核实或作废必须引用用户的确认原文；既有记录（含 `LIVE-X`）一律视为未核实，不删除。验证：测试覆盖未核实拒绝、作废后拒绝且原记录可读、缺确认引用的核实被拒；`ats live gate --reference LIVE-X` 返回“授权来源未核实”
 - [ ] 2.10 更新 `docs/OPERATIONS.md` 第 7 节（草稿，随第 4 组生效）：命令行审批、两个交易路径工作流的停用与恢复、“六个边界开关不是权威状态”、回退步骤、三道实盘锁。更新 `docs/TEST_BASELINE.md` 中本组新增与改写的测试。验证：照文档能在隔离环境完成一次“查看待审批 → 批准 → 看到已批准未执行”
@@ -54,8 +55,8 @@
 - [ ] 4.1 S1 上线主理人改读（2.1、2.2）。验证：重启后用一次手动 `ats chief run` 演练（不批准），确认上下文来自快照，`ats retirement zero` 显示 Chief 两条 zero
 - [ ] 4.2 S2 上线决策记录读取方迁移（2.3）。验证：`ats chief show` 显示审计表中的最近周期；旧表镜像写仍有新行
 - [ ] 4.3 S3 上线审批与账本成对切换（2.4、2.5、2.6、2.9）。上线前后各跑一次 2.6 的核验脚本，把提交号写进 verification.md。验证：两次核验输出都为空；`ats approval pending` 可用
-- [ ] 4.4 S4 启用 `clerk-daily`。验证：第一次定时运行 complete；对账结果与 3.2 的演练差异一致或可解释；同一窗口手动重跑不产生新事实
-- [ ] 4.5 S5 启用 `chief-daily`。验证：第一次定时运行要么建周期并在待审批处暂停、进程正常结束，要么以研究不完整终结并出缺口报告；记录实际模型请求数
+- [ ] 4.4 S4 启用 `clerk-daily`：时间表改为 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume clerk-daily`。验证：第一次定时运行 complete；对账结果与 3.2 的演练差异一致或可解释；同一窗口手动重跑不产生新事实
+- [ ] 4.5 S5 启用 `chief-daily`：时间表改为 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume chief-daily`。验证：第一次定时运行要么建周期并在待审批处暂停、进程正常结束，要么以研究不完整终结并出缺口报告；记录实际模型请求数
 - [ ] 4.6 OPERATIONS 第 7 节改为“交易路径（已切换，实盘锁定）”，ARCHITECTURE §6 实施状态同步。验证：文档描述与 `launchctl list`、`ats approval pending` 的实际输出一致
 
 ## 5. 观察窗口（design.md D8）
@@ -70,9 +71,14 @@
 
 - [ ] 6.1 `chief.legacy_table_direct_reads`：做 V1–V3，删除旧直读入口，登记改为 retired 并附清零证明。验证：`ats retirement decide` 判可退出；命中墓碑的读取返回退役原因
 - [ ] 6.2 `store.direct_trade_reads`：同 6.1。验证：同 6.1
-- [ ] 6.3 `sector_reviews`、`legacy_read_models`：在退役 change R1 清掉 `runtime.cli` 消费方之后，清掉 Chief 与 `channel.context` 消费方并退役，旧表保留只读。验证：历史行可读，新写入停止
+- [ ] 6.3 `sector_reviews`、`legacy_read_models`（design.md D10 R5a；用户 2026-10-27 定）：
+  1. 保留的只读命令（`ats sector show` 等读 `sector_reviews` 与旧读模型的命令）改读已发布的任务投影，在同一批历史数据上与原输出逐项对照；
+  2. 清掉 Chief 与 `channel.context` 消费方；
+  3. `runtime.cli`、Chief、`channel.context` 都判 zero 后退役，旧表保留只读。
+
+  验证：对照记录写进 inventory.md；`ats retirement zero` 对三个消费方判 zero；历史行可读，新写入已停止
 - [ ] 6.4 `decision_roles.unwired_to_governed_read_api`：风控、Trader、Clerk、Fundamental 四个消费方经受治理读取面取数后退役。验证：`ats retirement zero` 对四个消费方判 zero
-- [ ] 6.5 `macro_reviews`、`technical_reviews`：如果最后的读取方是 Chief，就一并退役；否则保持原登记并写明理由。验证：登记与代码一致
+- [ ] 6.5 `macro_reviews`、`technical_reviews`：做法同 6.3。`ats macro show`、`ats technical show` 等改读已发布的任务投影并逐项对照；Chief 消费方已由 2.1 清掉；`runtime.cli` 与 Chief 都判 zero 后退役，旧表保留只读。验证：同 6.3
 - [ ] 6.6 本批复验 V4–V6，TEST_BASELINE 与退役 runbook 记录本批。验证：重启后下一次 `chief-daily` 与 `clerk-daily` 正常完成
 
 ## 7. R5b 写入与入口侧条目
@@ -89,21 +95,21 @@
 > 顺序与依据见 design.md D10 的“R5c 的顺序”。原 R2 的做法照搬退役 change 4.2–4.8：每条先做 V1–V3，归档命令用法样例，同步冻结面与资格清单，最后复验 V4–V6。
 
 - [ ] 8.1 让退役工具自立：把 `ats retirement` 用到的消费方扫描器（`scan_consumer_access`、`CONSUMER_ENTRY_POINTS` 及其依赖的模块清单常量）从 `intake_verification` 搬到退役工具自己的模块。验证：搬移前后对全部登记条目运行 `ats retirement zero` 与 `decide`，输出逐条一致；`ats retirement` 不再导入 `intake_verification`
-- [ ] 8.2 用调用图逐个确认 `joint_cutover`、`boundary_drill`、`acceptance_runner/reports/matrix`、`paired_business`、`shadow_*`，以及原 R2 的 `batch_manifest`、`read_cutover`、`read_deployment`、`schedule_cutover`、`cutover_acceptance`、`intake`、`intake_verification`、`scoped_intake`、`analysis_verification`、`consumer_disposition`、`isolated_entry`、`dispatch_claims` 的生产调用方、测试依赖与命令组。结论写进本 change 的 `inventory.md`。验证：每个模块都有删除、迁移或保留的结论
+- [ ] 8.2 用调用图逐个确认 `joint_cutover`、`boundary_drill`、`acceptance_runner/reports/matrix`、`paired_business`、`shadow_*`，以及原 R2 的 `batch_manifest`、`read_cutover`、`read_deployment`、`schedule_cutover`、`cutover_acceptance`、`intake`、`intake_verification`、`scoped_intake`、`analysis_verification`、`consumer_disposition`、`isolated_entry`、`dispatch_claims`，以及 10-27 核对补出的 `business_replay_inputs`、`exit_requirements`、`cutover_guards`、`shadow_ledger`（Clerk 引用）、`execution/shadow_execution`（Trader 执行、主理人决策图、store 的交易写入调用）的生产调用方、测试依赖与命令组（见 design.md D10“核对时补出的模块”）。结论写进本 change 的 `inventory.md`。验证：每个模块都有删除、迁移或保留的结论；`shadow_execution` 与 `business_replay_inputs` 的回放冻结写明长期是否需要
 - [ ] 8.3 处理被验收测试使用的模块（`analysis_verification`、`isolated_entry`、`scoped_intake`、`consumer_disposition`、`cutover_acceptance`）：交易路径长期需要、但 22 项追溯与 T0 测试没有等价覆盖的检查（订单可追溯、未经批准的订单被拒、隔离模拟运行），先迁进长期测试支撑；只服务迁移期资格的部分标为可删。验证：迁移后 22 项追溯、隔离模拟与 T0 相关测试全绿；design.md D10 的长期资金安全机制一律保留
-- [ ] 8.4 删除叶子工具：`boundary_drill`（`ats drill`）、`joint_cutover`、`paired_business`、`acceptance_runner/reports/matrix`、命令 `ats cutover`；先去掉 `read_windows` 对交易消费者的批次报告校验，再删除 `shadow_*`（`ats shadow`）。每条做 V1–V3，命令保留一个版本的提示桩，归档用法样例到 `docs/archive/`，同步冻结面与资格清单。验证：22 项追溯、架构守卫与 assurance_surface 测试通过；`ats live drill` 仍可用；`read_windows` 不再导入 `shadow_reports`
+- [ ] 8.4 删除叶子工具：`boundary_drill`（`ats drill`）、`joint_cutover`、`paired_business`、`acceptance_runner/reports/matrix`、命令 `ats cutover`；删除 `shadow_*`（`ats shadow`）之前，先按 8.2 的结论拆掉 Clerk、Trader、主理人决策图、store 对 `shadow_ledger` 与 `execution/shadow_execution` 的引用（删除或迁到长期模块），并去掉 `read_windows` 对交易消费者的批次报告校验。每条做 V1–V3，命令保留一个版本的提示桩，归档用法样例到 `docs/archive/`，同步冻结面与资格清单。验证：22 项追溯、Clerk、架构守卫与 assurance_surface 测试通过；`ats live drill` 仍可用；`read_windows` 不再导入 `shadow_reports`；`src/` 内没有对 `shadow_*` 的导入
 - [ ] 8.5 `migration.batch_read_cutover`：V1–V3 后删除 `batch_manifest`、`read_cutover`、`read_deployment`、命令 `ats batch`、`ats read` 及其测试（`test_batch_manifest`、`test_read_cutover`、`test_batch_cli`），同步冻结面与资格清单并归档用法样例。验证：受影响测试与 assurance_surface、架构守卫测试通过；调用 `ats batch` 返回已退役提示
 - [ ] 8.6 `migration.schedule_cutover`：V1–V3 后删除 `schedule_cutover`、`cutover_acceptance`（8.3 已迁走需要保留的检查）及其测试。验证：同 8.5
 - [ ] 8.7 `migration.intake`、`migration.analysis_verification`：V1–V3 后删除 `intake`、`intake_verification` 剩余部分、`scoped_intake`、`analysis_verification`、`consumer_disposition`、命令 `ats intake` 及其测试；`isolated_entry` 按 8.3 的结论只删可删部分（原 R2 整删的计划已被取代）。验证：同 8.5；`ats retirement zero/decide` 仍正常运行
-- [ ] 8.8 `migration.dispatch_dedup`（必须在 8.6 之后）：V1–V3 后删除 `dispatch_claims` 和 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。验证：`ats dispatch --help` 只剩停用、恢复与负责人日志相关命令；受影响测试通过
+- [ ] 8.8 `migration.dispatch_dedup`（必须在 8.6 之后）：先把调度覆盖核验（现在的 `runtime-expected` / `runtime-compare`，含“因停用而跳过 / 作废”的分类）搬到保留的命令下；再 V1–V3，删除 `dispatch_claims` 和 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。验证：同一时间窗口下覆盖核验搬移前后输出一致；`ats dispatch --help` 只剩停用、恢复、负责人日志与覆盖核验相关命令；受影响测试通过
 - [ ] 8.9 登记处把本组条目（含原 R2 的 5 条）标为 retired 并附清零证明；更新 OPERATIONS 与 TEST_BASELINE，写明删除了哪些测试、其中多少原本失败（含 10-19 登记的 41 个旧失败）。验证：`ats retirement decide` 显示本组 retired，TEST_BASELINE 有本批记录
 - [ ] 8.10 本批复验 V4–V6：全量测试与基线逐项对照；重启 `com.ats.dispatcher`，观察下一次定时触发、数据刷新、日历消费，以及 `chief-daily` 与 `clerk-daily`；确认旧表与台账可读。验证：复验结果写进 inventory.md 的本批记录
 
 ## 9. R5d 读路由与资格机制收窄
 
 - [ ] 9.1 前提核对：退役 change 的 R0（登记字段与门）与 R1（`consumer-cutover` 改名为数据健康命令）已完成，本 change 的 6–8 组已完成（原 R2 已并入第 8 组，不再是外部前提）。验证：`ats retirement decide` 对本组条目只剩本组内依赖
-- [ ] 9.2 `consumer_api.read_input` 收窄为“查声明 → 查数据产品 → 读”：保留消费者身份、允许的产品与 scope 声明、读取前检查与 scope 绑定；去掉路由表、资格账本、指纹绑定与边界接线证据的依赖。验证：新增测试覆盖读取未声明产品被拒、产品不合格显式失败、没有路由表与资格记录时照常读取、scope 不一致被拒；6 个研究分析师和 5 个交易路径角色的读取测试全绿
-- [ ] 9.3 删除 `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`，以及 `assurance_surface` 中只为资格存在的指纹清单；历史路由与资格记录保留只读。验证：V1–V3 通过；架构守卫测试通过
+- [ ] 9.2 `consumer_api.read_input` 收窄为“查声明 → 查数据产品 → 读”：保留消费者身份、允许的产品与 scope 声明、读取前检查与 scope 绑定；去掉路由表、资格账本、指纹绑定与边界接线证据的依赖；去掉对 `business_replay_inputs.governed_read` 的依赖（若 8.2 判定回放冻结属于隔离模拟的长期能力，就迁到长期模块）。验证：新增测试覆盖读取未声明产品被拒、产品不合格显式失败、没有路由表与资格记录时照常读取、scope 不一致被拒；6 个研究分析师和 5 个交易路径角色的读取测试全绿
+- [ ] 9.3 删除 `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`exit_requirements`（先拆 `data/assurance.py` 读恢复核验的引用）、`cutover_guards`、`business_replay_inputs` 的剩余部分（先把 `route_switch` 用的 `implementation_hashes` 迁到长期模块，`route_switch` 本身保留），以及 `assurance_surface` 中只为资格存在的指纹清单；历史路由与资格记录保留只读。验证：V1–V3 通过；架构守卫测试通过；`ats live drill/rollback-drill` 与隔离环境的停止恢复测试仍通过
 - [ ] 9.4 本批复验 V4–V6：重启后一个完整周期（工作日研究、主理人、Clerk，周六宏观与行业）无因退役导致的失败。验证：观察记录写进 observation.md
 
 ## 10. 规格与收尾

@@ -189,3 +189,42 @@ def test_a_running_claim_whose_worker_already_ended_with_an_error_can_be_voided(
         payload = json.loads(conn.execute("SELECT payload FROM schedule_runtime_history WHERE action='disposition' "
                                           "ORDER BY seq DESC LIMIT 1").fetchone()[0])
     assert payload["was"] == "running" and payload["worker"] == "ended with execution_error"
+
+
+# --- 5.4: the user-facing words are pause / resume; the stored owner value is still "legacy" (recorded shortcut) ---
+
+def _cli(*argv):
+    from ats.runtime import cli
+    return cli.main(["dispatch", *argv])
+
+
+def test_the_old_owner_commands_answer_with_pause_and_resume_and_change_nothing(world, capsys):
+    before = owners()
+    assert _cli("owner-rollback", "--workflow", "information-brief", "--actor", "o", "--reason", "r") == 2
+    assert "ats dispatch pause" in capsys.readouterr().out
+    assert _cli("owner-switch", "--workflow", "information-brief", "--actor", "o", "--reason", "r",
+                "--approval", "a") == 2
+    assert "ats dispatch resume" in capsys.readouterr().out
+    assert owners() == before and rt.owner_log() == []
+
+
+def test_pause_stops_the_workflow_without_approval_and_resume_needs_it(world, capsys, monkeypatch):
+    monkeypatch.setattr(rt, "_dispatcher_preconditions", lambda workflow, check=None: {"consumer": "information"})
+    assert _cli("resume", "--workflow", "information-brief", "--actor", "o", "--reason", "back") == 2   # no approval
+    assert "approval" in capsys.readouterr().out
+    assert _cli("resume", "--workflow", "information-brief", "--actor", "o", "--reason", "back",
+                "--approval", "user approved") == 0
+    assert {o for _, o, _ in owners()} == {"dispatcher"}
+    assert _cli("pause", "--workflow", "information-brief", "--actor", "o", "--reason", "stop") == 0
+    assert {o for _, o, _ in owners()} == {"legacy"}
+    assert [row["to_owner"] for row in rt.owner_log("information-brief")] == ["dispatcher", "legacy"]
+
+
+def test_pause_is_refused_while_a_claim_is_running(world, capsys, monkeypatch):
+    monkeypatch.setattr(rt, "_dispatcher_preconditions", lambda workflow, check=None: {})
+    go()
+    claim("k-run", "running")
+    assert _cli("pause", "--workflow", "information-brief", "--actor", "o", "--reason", "stop",
+                "--void-unfinished", "x") == 2
+    assert "still running" in capsys.readouterr().out
+    assert {o for _, o, _ in owners()} == {"dispatcher"}

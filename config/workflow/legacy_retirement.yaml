@@ -575,7 +575,7 @@ retired:
     target_phase: retire-legacy-and-migration-tooling
     status: pending
     exit_condition: >-
-      负责人只剩 dispatcher 与 paused 两种状态；`owner-switch/owner-rollback` 改名；`workflow_owners.yaml` 去掉 legacy 默认值。
+      对外只剩停用 / 恢复两个动作：`ats dispatch pause/resume` 替代 `owner-switch/owner-rollback`（旧名只给提示）；`workflow_owners.yaml` 默认值改为 dispatcher。库内部值 `legacy` 暂留（技术债，长期取消开关见 verification.md）。
     missing_condition: >-
       旧手动入口先退役（它们是 legacy 模式存在的唯一理由）；G0 通过前不执行（tasks 5.4）。
     consumers: []

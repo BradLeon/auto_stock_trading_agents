@@ -244,4 +244,5 @@ inventory.md 第二节列出 6 处簇外代码依赖切换期模块。R2 开始�
 ## Open Questions
 
 - ~~每批退役后的观察时长~~（2026-10-27 用户已答）：**所有数据平台与研究型 / 分析型角色及功能，验证通过后即可退役，无需等待满一周**；**所有交易链路（Chief、Clerk、Risk、Trader、Boss 等）暂未在新路径上充分验证，先不退役**（对应 R5，门为 `trade_path_cutover`，本 change 只登记）。
+- 研究工作流的停用开关长期是否取消（2026-10-27 用户：长期选「取消，改由 `research_schedules.yaml` 的 `enabled`/`event_triggers` 决定」，短期按 5.4 落地 pause/resume 并保留内部值 `legacy`，记为技术债；取消需同步改 dispatcher-runtime 规格，另开变更）。
 - 旧命令的提示桩保留多久（建议一个月或直到下一个 change 归档）。不影响规格。

@@ -840,15 +840,22 @@ def schedule_cutover_command(args, *, parser) -> int:
             print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
             return 2
 
-    if args.action in {"owner-switch", "owner-rollback", "owner-log"}:
+    if args.action in DISPATCH_OWNER_MOVED:
+        # A prompt stub, not a silent alias: the old names spoke of "switching owners", the workflow is now paused/resumed.
+        print(f"❌ `ats dispatch {args.action}` 已改名：{DISPATCH_OWNER_MOVED[args.action]}")
+        return 2
+
+    if args.action in {"pause", "resume", "owner-log"}:
         from ..workflow import schedule_runtime as runtime
 
         try:
             if args.action == "owner-log":
                 result = runtime.owner_log(args.workflow or None)
             else:
+                # The stored owner value for a paused workflow is still "legacy" (a deliberate, recorded shortcut:
+                # renaming it touches the stored rows and the dispatcher-runtime spec). Only the user-facing words changed.
                 result = runtime.owner_switch(
-                    args.workflow, to_owner="dispatcher" if args.action == "owner-switch" else "legacy",
+                    args.workflow, to_owner="dispatcher" if args.action == "resume" else "legacy",
                     actor=args.actor, reason=args.reason, approval=args.approval,
                     void_unfinished=args.void_unfinished)
             print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -1352,6 +1359,12 @@ RESEARCH_MANUAL_MOVED = {
     ("evidence", "articles"): "ats data article-ingest --source <来源 id>",
     ("sector", "crosssection"): "截面已并入行业评审：用 " + _WORKFLOW_RUN.format(task="sector-review", kind="sector",
                                 id="<行业>") + "，结果在层级报告第三节",
+}
+
+
+DISPATCH_OWNER_MOVED = {
+    "owner-rollback": "停用一个工作流用 `ats dispatch pause --workflow <id> --actor <谁> --reason <为什么>`（不需要批准）。",
+    "owner-switch": "恢复一个工作流用 `ats dispatch resume --workflow <id> --actor <谁> --approval <批准原文> --reason <为什么>`。",
 }
 
 
@@ -4648,14 +4661,14 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser(
         "dispatch",
-        help="调度所有权核验与回滚去重（交易路径切换前保留）（owner-switch/owner-rollback 会改研究工作流的 owner；其余只读账本）")
+        help="调度所有权核验与回滚去重（交易路径切换前保留）（pause/resume 停用或恢复一个研究工作流；其余只读账本）")
     sp.add_argument("action", choices=[
         "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze",
         "runtime-inventory", "runtime-handover", "runtime-cancel-freeze", "runtime-expected", "runtime-compare",
         "ownership", "ledger", "executed", "record-execution",
-        "rollback-plan", "rollback-history", "owner-switch", "owner-rollback", "owner-log"])
-    sp.add_argument("--approval", default="", help="owner-switch: 用户批准原文或其引用（去 dispatcher 必填）")
-    sp.add_argument("--void-unfinished", default="", help="owner-*: 作废未完成认领的理由（有未完成认领时必填，running 不可作废）")
+        "rollback-plan", "rollback-history", "pause", "resume", "owner-switch", "owner-rollback", "owner-log"])
+    sp.add_argument("--approval", default="", help="resume: 用户批准原文或其引用（恢复必填，停用不需要）")
+    sp.add_argument("--void-unfinished", default="", help="pause/resume: 作废未完成认领的理由（有未完成认领时必填，running 不可作废）")
     sp.add_argument("--trigger", default="", help="限定单一逻辑触发")
     sp.add_argument("--execution-ref", default="", help="record-execution: 执行引用")
     sp.add_argument("--state", default="", help="第4组的 dispatch 状态库")

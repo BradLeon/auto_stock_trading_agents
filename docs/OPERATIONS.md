@@ -98,22 +98,27 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 
 - 依赖的数据版本未变、投影仍在有效期内时直接复用，**不重复请求模型**。要在数据没变时强制重算，
   用 `--inputs-json '{"<task_id>": {"force_recompute": true}}'`。
-- 负责人是 dispatcher 时，旧入口（`ats macro review`、`ats pead prep`、`ats analyst information` 等）
-  会报 `caller is not current owner` 并拒绝，防止新旧两条路径重复跑。
-- 某只票要手动刷新财报前基线：`ats analyst fundamental --mode routine --symbol <SYM> --refresh-baseline`
-  只在负责人为 legacy 时可用；dispatcher 下用 `workflow run` 并带 `force_recompute`。
+- 旧手动入口（`ats macro review`、`ats pead prep`、`ats analyst information` 等）已退役，会提示对应的 `ats workflow run` 写法。
+- 某只票要手动刷新财报前基线：`ats workflow run --task fundamental-routine --scope-kind entity --scope-id <SYM>
+  --inputs-json '{"fundamental-routine": {"refresh_baseline": true}}'`。
 
 ### 3.4 停用与恢复一个工作流
 
 ```bash
-# 停用：负责人改为 legacy，定时与日历事件不再唤醒它（不需要批准，随时可做）
-ats dispatch owner-rollback --workflow <workflow_id> --actor <谁> --reason "<为什么>"
-# 恢复：负责人改回 dispatcher（需要批准原文；检查读路由与数据产品健康；有未完成认领须说明作废理由）
-ats dispatch owner-switch --workflow <workflow_id> --actor <谁> --approval "<批准原文>" --reason "<为什么>"
+# 停用：定时与日历事件不再唤醒它（不需要批准，随时可做；有正在运行的认领时拒绝）
+ats dispatch pause --workflow <workflow_id> --actor <谁> --reason "<为什么>"
+# 恢复：交回 Dispatcher（需要批准原文；检查读路由与数据产品健康；有未完成认领须说明作废理由）
+ats dispatch resume --workflow <workflow_id> --actor <谁> --approval "<批准原文>" --reason "<为什么>"
+# 查看停用 / 恢复的追加式记录
+ats dispatch owner-log [--workflow <workflow_id>]
 ```
 
-旧的串行调度器已删除，负责人为 legacy 的工作流不会被任何定时任务运行，只能用它原来的手动命令
-（例如 `ats macro review`）跑。
+停用的工作流不会被任何定时任务或日历事件运行；要补跑，先 `resume`，再用 `ats workflow run`。
+旧名 `owner-rollback` / `owner-switch` 已改名，运行它们会提示新命令且不改任何状态。
+
+> 已知技术债：库里「已停用」仍存成内部值 `legacy`（只改了对外的命令与文档用语）。长期做法是取消这个开关，
+> 由 `research_schedules.yaml` 的 `enabled: false` / `event_triggers` 决定是否运行；见
+> `openspec/changes/retire-legacy-and-migration-tooling/verification.md` 的「上线后待办」。
 
 - 一次事务同时改该工作流的模板行与所有标的行，不会出现一半新一半旧。
 - 有 `running` 认领时拒绝切换；`failed/pending` 认领须带理由作废；`owner-log` 只增不改。

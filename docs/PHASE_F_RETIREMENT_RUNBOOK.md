@@ -80,7 +80,7 @@ G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/c
 | `ats retirement tombstone` | 登记为 retired 的是否真的读不到（登记说谎比还在 pending 更糟） | 12.4 |
 | `ats retirement fallback-precheck` | 回退目标是否已退役或不可用，是则拒绝执行注定失败的回退 | 12.5 |
 | `ats retirement decide` | 把清零、对账、回滚窗口、墓碑合成一条结论；缺一项就保持 pending 并写明缺什么 | 12.6 |
-| `ats dispatch owner-switch / owner-rollback / owner-log` | 调度负责人的切换、切回与追加式日志 | 10.4、10.5 |
+| `ats dispatch pause / resume / owner-log` | 研究工作流的停用、恢复与追加式日志（原 `owner-switch / owner-rollback`，已改名，旧名只给提示） | 10.4、10.5 |
 
 这些工具都是**只读**的：它们给出结论和「若满足条件则应写成什么」，不修改登记表。把某个条目改成 retired 是单独的、由人批准的一步。
 

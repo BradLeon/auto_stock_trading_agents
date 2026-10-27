@@ -140,7 +140,7 @@ ats data health-log [--consumer <id>]             # 健康状态变化记录
 # 读路由已固定为 target，不再提供状态命令
 ```
 
-迁移完成后读路由固定在新路径（target），没有切回旧路径的入口。万一某个分析师的读路由停在了旧路径（2026-10-20 技术面就被旧的自动切回机制切过一次，表现为该工作流报 `no explicitly authorized read window`），用下面的命令恢复；它只会把路由移向新路径，要求批准原文、原因和通过的数据产品检查，并写入只增不改的日志：
+研究分析师的读路由固定为 target，没有切换入口。万一某个分析师的读路由不在 target（2026-10-20 技术面就被已移除的每日自动切回机制切过一次，表现为该工作流报 `no explicitly authorized read window`），用下面的命令恢复；它只会把路由移向 target，要求批准原文、原因和通过的数据产品检查，并写入只增不改的日志：
 
 ```bash
 # （读路由已固定为 target）
@@ -189,7 +189,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ## 7. 交易路径（尚未切换）
 
-- Chief、风控主管、Boss 审批、Trader、Clerk **没有切到新路径，也没有定时排程**。Chief 只能手动运行：
+- Chief、风控主管、Boss 审批、Trader、Clerk **尚未切换，也没有定时排程**。Chief 只能手动运行：
 
   ```bash
   ats chief run --channel feishu_bot   # 默认 dry-run，推飞书审批卡；绝不要加 --yes
@@ -252,6 +252,6 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 ## 12. 诊断工具
 
 - 新旧结果差异诊断：`ats shadow`，用法见 [`SHADOW_COMPARISON_RUNBOOK.md`](SHADOW_COMPARISON_RUNBOOK.md)（只作诊断，不是验收标准）。
-- 历史手册（切换期间的逐 scope 授权、批次切流、持久部署许可、旧上线 checklist）已归档在
+- 历史手册（切换期间的逐 scope 授权、批次切换、持久部署许可、旧上线 checklist）已归档在
   [`archive/`](archive/)：`PHASE_F_OPERATIONS.md`、`PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`、
   `PHASE_F_PERSISTENT_RUNTIME.md`、`GO_LIVE.md`。

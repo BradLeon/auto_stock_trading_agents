@@ -4519,7 +4519,7 @@ def main(argv: list[str] | None = None) -> int:
     srv.add_argument("--host", default="0.0.0.0")
     srv.add_argument("--port", type=int, default=8000)
     sch = sub.add_parser("schedule", help="research dispatcher daemon: scheduled and calendar-event workflows")
-    ct = sub.add_parser("cutover", help="Phase F 切流控制平面：边界查询、预检、批次登记与报告校验")
+    ct = sub.add_parser("cutover", help="切换控制平面（交易路径切换前保留）：边界查询、预检、批次登记与报告校验")
     ct.add_argument("action", choices=[
         "state", "wiring", "preflight", "set-route", "activate", "release",
         "active", "history", "fallback", "reverify"])
@@ -4540,7 +4540,7 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--bootstrap", action="store_true",
                     help="初始化六条边界并声明本仓库接线")
 
-    cc = sub.add_parser("consumer-cutover", help="仅保留 restore（把被切回旧路径的分析师恢复到新路径）；status/health/log 已迁到 `ats data health`、`ats data health-log`")
+    cc = sub.add_parser("consumer-cutover", help="仅保留 restore（把读路由不在 target 的分析师恢复到 target）；status/health/log 已迁到 `ats data health`、`ats data health-log`")
     cc.add_argument("action", choices=["status", "health", "log", "restore"])
     cc.add_argument("--consumer-id", default="", help="information | fundamental | ...")
     cc.add_argument("--actor", default="", help="restore: 操作者")
@@ -4548,7 +4548,7 @@ def main(argv: list[str] | None = None) -> int:
     cc.add_argument("--reason", default="", help="restore: 原因（必填）")
     cc.add_argument("--db", default="", help="覆盖切流控制库路径")
 
-    sh = sub.add_parser("shadow", help="Phase F 影子比较报告、差异处置与影子账本运维")
+    sh = sub.add_parser("shadow", help="影子比较报告、差异处置与影子账本运维（交易路径切换前保留）")
     sh.add_argument("action", choices=[
         "acceptance-capture", "acceptance-run", "acceptance-record", "acceptance-report", "acceptance-check", "acceptance-signoff", "acceptance-reject", "acceptance-revoke",
         "capture-business", "run-pair",
@@ -4585,7 +4585,7 @@ def main(argv: list[str] | None = None) -> int:
 
     iv = sub.add_parser(
         "intake",
-        help="Phase F 接入核验与逐消费者处置（只读，不改路由、不落生产证据）")
+        help="接入核验与逐消费者处置（交易路径切换前保留；只读，不改路由、不落生产证据）")
     iv.add_argument("action", choices=[
         "verify", "report", "digest", "not-tradable", "disposition",
         "evidence-index"])
@@ -4625,7 +4625,7 @@ def main(argv: list[str] | None = None) -> int:
 
     lv = sub.add_parser(
         "live",
-        help="Phase F 实盘授权门与交易路径演练（**本命令不会执行真实切换**）")
+        help="实盘授权门与交易路径演练（**本命令不会执行真实切换**）")
     lv.add_argument("action", choices=[
         "authorize", "show-auth", "gate", "drill", "rollback-drill",
         "drill-history"])
@@ -4648,7 +4648,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser(
         "dispatch",
-        help="Phase F 调度所有权核验与回滚去重（owner-switch/owner-rollback 会改研究工作流的 owner；其余只读账本）")
+        help="调度所有权核验与回滚去重（交易路径切换前保留）（owner-switch/owner-rollback 会改研究工作流的 owner；其余只读账本）")
     sp.add_argument("action", choices=[
         "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze",
         "runtime-inventory", "runtime-handover", "runtime-cancel-freeze", "runtime-expected", "runtime-compare",
@@ -4673,7 +4673,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rc_parser = sub.add_parser(
         "read",
-        help="Phase F 读路径分批切换（**会改路由**，须提供 --authorisation）")
+        help="读路径分批切换（交易路径切换前保留；**会改路由**，须提供 --authorisation）")
     rc_parser.add_argument("action", choices=[
         "plan", "switch", "authorize", "show-auth", "history"])
     rc_parser.add_argument("--batch-id", default="", help="switch: 批次 ID")
@@ -4694,7 +4694,7 @@ def main(argv: list[str] | None = None) -> int:
 
     bt = sub.add_parser(
         "batch",
-        help="Phase F 逐批切流清单与 dry-run（**不改任何路由**）")
+        help="逐批切换清单与 dry-run（交易路径切换前保留；**不改任何路由**）")
     bt.add_argument("action", choices=[
         "list", "declare", "show", "dry-run", "drift"])
     bt.add_argument("--batch-id", default="", help="declare/show/drift: 批次 ID")
@@ -4732,7 +4732,7 @@ def main(argv: list[str] | None = None) -> int:
     # named `rollback` that also verifies traceability would be misread.
     dr = sub.add_parser(
         "drill",
-        help="Phase F 三边界独立回滚演练与影子期验收（**不切实盘、不改生产路由**）")
+        help="三边界独立回滚演练与影子期验收（交易路径切换前保留；**不切实盘、不改生产路由**）")
     dr.add_argument("action", choices=[
         "read-rollback", "schedule-rollback", "trade-rollback", "all-rollbacks",
         "history", "traceability", "unapproved-orders", "acceptance"])
@@ -4769,7 +4769,7 @@ def main(argv: list[str] | None = None) -> int:
     dr.add_argument("--actor", default="", help="执行人")
     dr.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
 
-    wf = sub.add_parser("workflow", help="Phase E 工作流运行及 Trigger Ledger 运维")
+    wf = sub.add_parser("workflow", help="工作流运行及 Trigger Ledger 运维")
     wf.add_argument("action", choices=["run", "runs", "triggers", "retry", "history"])
     wf.add_argument("--task", action="append", default=[], help="run: Phase E task ID，可重复")
     wf.add_argument("--scope-kind", default="portfolio")

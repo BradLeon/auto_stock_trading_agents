@@ -289,7 +289,7 @@ launchctl kickstart -k gui/$(id -u)/com.ats.serve
 
 ## 10. 数据库与持久化约定
 
-领域库 `var/ats.sqlite`，数据平台库 `var/data.sqlite`，调度与切流状态在 `var/phase_f_*.sqlite`、
+领域库 `var/ats.sqlite`，数据平台库 `var/data.sqlite`，调度与切换状态在 `var/phase_f_*.sqlite`（文件名沿用历史前缀）、
 `var/data_refresh.sqlite`、`var/persistent_ingestion.sqlite`。新代码每个运行或 worker 使用独立连接，
 启用 WAL 与 busy timeout，写操作用短事务，远程请求和 LLM 调用不得包在事务里；重试靠唯一约束与幂等写入，
 不靠进程内锁（ARCHITECTURE §8.5）。台账类表只增不改。
@@ -364,3 +364,12 @@ ats chief run                # 收口：读存档→决策→风控→审批→(
 - 常驻服务与日常运维 → `docs/OPERATIONS.md`
 - 技术面策略与回测证据 → `docs/agents/TECHNICAL_ANALYST.md`
 - 数据源清单与状态 → `docs/data/DATA_SOURCES.md`
+
+## 迁移期用语说明
+
+退役变更清理了文档与 `ats --help` 里的“新路径 / 旧路径 / 切流 / Phase”措辞。下列位置**有意保留**，不是遗漏：
+
+- `ARCHITECTURE.md` 流程图里的 Phase 0–6：一次完整流程的**执行阶段**（前置研究、专业分析、组合决策、风控、执行、记录），与迁移无关。
+- 结构化数据文档里的 `legacy / shadow / platform / fallback`：数据源与消费者的**配置取值**（`docs/data/STRUCTURED_DATA_*.md`），是真实的运行模式。
+- `var/phase_f_*.sqlite` 等文件名与 `docs/validation/` 下的验收记录：沿用历史名称 / 冻结的历史证据，不改。
+- 交易路径切换前保留的切换期工具（`ats cutover`、`shadow`、`intake`、`read`、`batch`、`drill`、`live`、`dispatch`）：命令与帮助里写明“交易路径切换前保留”，随交易路径切换的 change 退役。

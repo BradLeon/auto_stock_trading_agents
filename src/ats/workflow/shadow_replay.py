@@ -12,11 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import shadow_inputs as si
-
-
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                    allow_nan=False).encode()).hexdigest()
+from .payload_digest import digest  # noqa: F401  (re-exported: the cutover tools import it from here)
 
 
 def _isolated(path=None):

@@ -686,7 +686,7 @@ class Dispatcher:
     def _record_reused(context, envelopes):
         from .consumer_reads import record_read
         from .runtime_reads import current_read_context, gate_read
-        from .shadow_replay import digest
+        from .payload_digest import digest
 
         bound = current_read_context()
         if bound is not None and bound.invocation:

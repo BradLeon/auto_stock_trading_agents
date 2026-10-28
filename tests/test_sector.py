@@ -127,7 +127,8 @@ def test_assemble_offline_reads_store(monkeypatch):
 
     sc = assemble.build(CFG, live_data=False)
     ctx = sc.as_context()
-    assert "FRESH TAIL MARKER" in ctx and "OLD HEAD" not in ctx   # tail excerpt
+    # Phase D（3.4）：行业分析师不再读取 PEAD dossier 的结论、叙事与 Scorecard
+    assert "FRESH TAIL MARKER" not in ctx and "OLD HEAD" not in ctx
     assert "InP supply deal" in ctx and "listicle noise" not in ctx  # triage filter
     assert "COHR [PEAD]" in ctx
     assert len(sc.static_notes) == 100                             # static cap
@@ -145,7 +146,7 @@ def test_assemble_live_renders_governed_regional_block(monkeypatch):
             return "REGIONAL GOVERNED OUTPUT"
 
     monkeypatch.setattr(assemble, "_snapshots", lambda *args: {})
-    monkeypatch.setattr(assemble, "_pead_conclusions", lambda *args: None)
+    # Phase D：_pead_conclusions 已移除（行业不得读 PEAD dossier），无需打桩
     monkeypatch.setattr(assemble, "_insights_and_events", lambda *args: None)
     monkeypatch.setattr(assemble, "_chain_evidence", lambda *args, **kwargs: None)
     monkeypatch.setattr(assemble, "_kb_criteria", lambda *args: None)
@@ -326,49 +327,6 @@ def test_injection_blocks(monkeypatch):
                                           as_of=datetime(2027, 1, 1, tzinfo=timezone.utc),
                                           regime="(no-llm)"))
     assert sector_context.prep_block("test_sector", "COHR") == ""
-
-
-def test_scheduler_sector_weekly(monkeypatch):
-    from datetime import date
-
-    from ats.runtime import scheduler
-
-    calls = []
-    monkeypatch.setattr("ats.runtime.cli.run_sector_review",
-                        lambda name, **k: calls.append(name))
-    # The weekly job now also runs the cross-section, which fetches factors for the
-    # whole universe. Stub it: without this the test makes ~25 live yfinance calls
-    # (measured: 119s) and its result depends on the network.
-    xs = []
-    monkeypatch.setattr(scheduler, "_cross_section_weekly", lambda name: xs.append(name))
-    # weekday gate now tracks weekly_review_tz, not ET — see scheduler._today_weekly().
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))   # a Saturday
-    scheduler._sector_weekly()
-    assert calls == ["ai_hardware"]
-    assert xs == ["ai_hardware"]          # ranking follows the review, same fresh data
-
-    calls.clear()
-    xs.clear()
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 6))   # Monday — no longer fires
-    scheduler._sector_weekly()
-    assert calls == [] and xs == []
-
-
-def test_cross_section_weekly_respects_the_kill_switch(monkeypatch):
-    """`sector_review.cross_section: false` must fully restore pre-stage-3 behaviour."""
-    from datetime import date
-
-    from ats import config
-    from ats.runtime import scheduler
-
-    real = config.load_pead_global
-    monkeypatch.setattr(config, "load_pead_global", lambda: {
-        **real(), "sector_review": {**real()["sector_review"], "cross_section": False}})
-    monkeypatch.setattr("ats.runtime.cli.run_sector_review", lambda name, **k: None)
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))
-    monkeypatch.setattr(scheduler, "_cross_section_weekly",
-                        lambda name: pytest.fail("kill switch must prevent the run"))
-    scheduler._sector_weekly()
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,53 @@
+schema_version: 1
+source: independent_read_of_official_pdf_text_and_charts
+production_review_approval: false
+entity_id: SP500
+metric_registry: config/data/structured.yaml#datasets.sp500_earnings_insight.core_metrics
+notes:
+  - This is a pre-extraction applicability inventory, not a parser result or approval.
+  - A missing exact printed value is unreadable, never zero or inferred from a bar/line.
+  - Quarter, calendar-year, mixed-fiscal-year and snapshot values remain separate.
+reports:
+  '2026-08-28':
+    pdf_hash: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    groups:
+      scorecard: {periods: [2026Q2], source: printed_scorecard_and_narrative}
+      surprise: {periods: [2026Q2], source: printed_sector_level_aggregate_row_and_narrative}
+      growth: {periods: [2026Q2, 2026Q3, '2026', '2027'], source: printed_aggregate_rows}
+      net_profit_margin: {periods: [2026Q2], source: printed_aggregate_row_and_narrative}
+      margin_breadth: {periods: [2026Q2], source: printed_aggregate_row}
+      eps_guidance_count:
+        periods: [2026Q3]
+        source: narrative_and_printed_count_chart
+        not_disclosed_as_index_aggregate: [2026/2027]
+      eps_guidance_share: {periods: [2026Q3, 2026/2027], source: printed_aggregate_row}
+      bottom_up_eps:
+        periods: [2026Q3, '2026', '2027']
+        source: printed_quarter_and_calendar_year_bar_labels
+      geographic_exposure: {periods: ['2026-08-28'], source: printed_pie_labels}
+      valuation: {periods: ['2026-08-28'], source: narrative_and_charts}
+      ratings_and_target: {periods: ['2026-08-28'], source: narrative_and_charts}
+      revision_breadth: {periods: [2026Q2], source: explicit_narrative}
+      reporting_coverage: {periods: [2026Q2], source: explicit_narrative}
+  '2026-09-18':
+    pdf_hash: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    groups:
+      scorecard: {periods: [2026Q2], source: printed_scorecard}
+      surprise: {periods: [2026Q2], source: printed_sector_level_aggregate_row}
+      growth: {periods: [2026Q2, 2026Q3, '2026', '2027'], source: printed_aggregate_rows_and_narrative}
+      net_profit_margin: {periods: [2026Q2, 2026Q3], source: printed_aggregate_row_and_narrative}
+      margin_breadth: {periods: [2026Q2], source: printed_aggregate_row}
+      eps_guidance_count:
+        periods: [2026Q3]
+        source: narrative_and_printed_count_chart
+        not_disclosed_as_index_aggregate: [2026/2027]
+      eps_guidance_share: {periods: [2026Q3, 2026/2027], source: printed_aggregate_row}
+      bottom_up_eps: {periods: [2026Q3, '2026', '2027'], source: printed_quarter_and_calendar_year_bar_labels}
+      geographic_exposure: {periods: ['2026-09-18'], source: printed_pie_labels}
+      valuation: {periods: ['2026-09-18'], source: narrative_and_charts}
+      ratings_and_target: {periods: ['2026-09-18'], source: narrative_and_charts}
+      revision_breadth: {periods: [2026Q3], source: explicit_narrative}
+      reporting_coverage:
+        periods: []
+        status: not_disclosed_as_percentage
+        evidence: key_metrics_discloses_three_reporting_companies_not_coverage_ratio

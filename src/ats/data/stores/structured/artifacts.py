@@ -20,9 +20,11 @@ class StoredBlob:
 
 
 class ArtifactStore:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, *, readonly: bool = False):
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.readonly = readonly
+        if not readonly:
+            self.root.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def encode(payload: bytes | str | dict | list) -> bytes:
@@ -34,6 +36,8 @@ class ArtifactStore:
                           separators=(",", ":")).encode("utf-8")
 
     def put(self, payload: bytes | str | dict | list, *, suffix: str = ".bin") -> StoredBlob:
+        if self.readonly:
+            raise PermissionError("artifact_store_is_read_only")
         body = self.encode(payload)
         digest = hashlib.sha256(body).hexdigest()
         safe_suffix = suffix if suffix.startswith(".") and suffix[1:].isalnum() else ".bin"

@@ -1,0 +1,145 @@
+schema_version: 1
+method: assistant_visual_read_of_original_embedded_png
+production_review_approval: false
+status: partial_pending_cell_anchor_validation
+# Read from original images, independently of OCR/vision candidate output.
+# Values below are printed source units; rating shares are percentages.
+charts:
+  - report_date: '2026-08-28'
+    page: 33
+    image: 2
+    group: forward_pe
+    horizon: forward_12_months
+    columns: [forward_pe]
+    rows:
+      Industrials: [24.1]
+      Consumer Disc.: [23.6]
+      Info. Technology: [21.8]
+      Consumer Staples: [21.5]
+      Health Care: [19.0]
+      Real Estate: [18.4]
+      Materials: [18.3]
+      Comm. Services: [17.7]
+      Utilities: [17.0]
+      Financials: [15.4]
+      Energy: [13.6]
+  - report_date: '2026-09-18'
+    page: 29
+    image: 2
+    group: forward_pe
+    horizon: forward_12_months
+    columns: [forward_pe]
+    rows:
+      Consumer Disc.: [22.9]
+      Industrials: [22.6]
+      Consumer Staples: [21.2]
+      Info. Technology: [21.1]
+      Comm. Services: [18.5]
+      Health Care: [18.4]
+      Real Estate: [17.5]
+      Materials: [17.3]
+      Utilities: [16.3]
+      Financials: [14.7]
+      Energy: [13.7]
+  - report_date: '2026-08-28'
+    page: 36
+    image: 2
+    group: target_ratings
+    columns: [buy_share, hold_share, sell_share]
+    rows:
+      Info. Tech.: [69, 27, 4]
+      Comm. Services: [67, 28, 5]
+      Energy: [64, 32, 4]
+      Materials: [63, 34, 4]
+      Health Care: [62, 34, 3]
+      Consumer Disc.: [57, 38, 5]
+      Industrials: [57, 37, 5]
+      Real Estate: [55, 42, 3]
+      Financials: [53, 40, 7]
+      Utilities: [51, 44, 5]
+      Consumer Staples: [44, 49, 8]
+  - report_date: '2026-09-18'
+    page: 32
+    image: 2
+    group: target_ratings
+    columns: [buy_share, hold_share, sell_share]
+    rows:
+      Info. Tech.: [69, 27, 3]
+      Comm. Services: [67, 28, 5]
+      Energy: [64, 32, 4]
+      Materials: [64, 32, 4]
+      Health Care: [61, 35, 4]
+      Industrials: [58, 37, 5]
+      Consumer Disc.: [57, 38, 5]
+      Real Estate: [55, 42, 3]
+      Financials: [53, 40, 7]
+      Utilities: [49, 46, 5]
+      Consumer Staples: [45, 48, 8]
+  - report_date: '2026-08-28'
+    page: 36
+    image: 3
+    group: target_ratings
+    columns: [target_upside]
+    rows:
+      Comm. Services: [25.0]
+      Info. Tech.: [24.3]
+      Consumer Disc.: [21.1]
+      Industrials: [18.6]
+      Utilities: [18.3]
+      Consumer Staples: [13.5]
+      Real Estate: [13.5]
+      Materials: [13.0]
+      Health Care: [10.2]
+      Financials: [10.1]
+      Energy: [9.5]
+  - report_date: '2026-09-18'
+    page: 32
+    image: 3
+    group: target_ratings
+    columns: [target_upside]
+    rows:
+      Info. Tech.: [26.0]
+      Industrials: [25.7]
+      Consumer Disc.: [25.5]
+      Utilities: [21.6]
+      Comm. Services: [19.9]
+      Materials: [19.7]
+      Real Estate: [18.6]
+      Consumer Staples: [14.6]
+      Financials: [14.4]
+      Health Care: [12.8]
+      Energy: [7.6]
+  - report_date: '2026-08-28'
+    page: 30
+    image: 3
+    group: geographic_revenue_exposure
+    columns: [international_share, us_share]
+    rows:
+      Utilities: [2, 98]
+      Real Estate: [21, 79]
+      Financials: [29, 71]
+      Health Care: [32, 68]
+      Consumer Disc.: [34, 66]
+      Industrials: [35, 65]
+      Energy: [36, 64]
+      Consumer Staples: [39, 61]
+      Comm. Services: [49, 51]
+      Materials: [51, 49]
+      Info. Technology: [53, 47]
+  - report_date: '2026-09-18'
+    page: 26
+    image: 3
+    group: geographic_revenue_exposure
+    columns: [international_share, us_share]
+    rows:
+      Utilities: [2, 98]
+      Real Estate: [21, 79]
+      Financials: [29, 71]
+      Health Care: [33, 67]
+      Consumer Disc.: [35, 65]
+      Industrials: [35, 65]
+      Energy: [36, 64]
+      Consumer Staples: [41, 59]
+      Comm. Services: [49, 51]
+      Info. Technology: [52, 48]
+      Materials: [53, 47]

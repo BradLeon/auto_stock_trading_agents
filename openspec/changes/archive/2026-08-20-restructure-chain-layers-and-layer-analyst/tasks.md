@@ -100,8 +100,8 @@
 - [x] 11.3 影子运行：`bind_layer_budget` 关闭（使用率恒 1.0）跑一次完整周度作业，与 1.3 的对照 basket 比对——差异应当**只**来自分层变化与新增标的
 - [x] 11.4 打开 `bind_layer_budget` 再跑一次，记录八层的结论与换算预算，人工过一遍是否合理
 - [x] 11.5 核对实际 token 成本与 design 里的估算；若显著超出，把跨层轮动的输入进一步压缩
-- [x] 11.6 更新 `docs/SECTOR_ANALYST.md`（八层表、新流水线顺序、层级分析师一节、预算绑定与护栏不变式）
-- [x] 11.7 更新 `docs/CHAIN_EVIDENCE.md`（命题的层归属规则 D12、证据块按层切分、电力层的命题缺口与两步法）、`docs/RISK_SYSTEM.md`（八层 + group cap + 静态 cap 与使用率的分工）、`README.md`
+- [x] 11.6 更新 `docs/agents/SECTOR_ANALYST.md`（八层表、新流水线顺序、层级分析师一节、预算绑定与护栏不变式）
+- [x] 11.7 更新 `docs/archive/CHAIN_EVIDENCE.md`（命题的层归属规则 D12、证据块按层切分、电力层的命题缺口与两步法）、`docs/agents/RISK_SYSTEM.md`（八层 + group cap + 静态 cap 与使用率的分工）、`README.md`
 - [x] 11.8 在 `ai_hardware.yaml` 头部记下本次重构的判据（层的三重职责、层 vs subgroup 的分工、命题挂主体不挂证人），供以后再调分层时不必重新推导
 
 ## 12. 报告返工：每层一份、结论先行、证据可核对

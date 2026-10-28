@@ -4,7 +4,8 @@
 
 symbol: LRCX
 company_name: "Lam Research"
-fiscal_label: "Q4 FY2026"      # 下次申报 2026-07-29 (amc)，Lam 财年 Q4
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
+#   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 
 # 产业链关系：刻蚀与沉积设备，存储敞口在四大设备商里最高——
 # 这决定了它的订单与 DRAM/NAND 周期的相关性强于逻辑制程。

@@ -57,6 +57,7 @@ class ContextUpdate(BaseModel):
     symbol: str
     as_of: datetime
     materiality: float = Field(0.0, ge=0, le=1, description="0=noise, 1=thesis-changing")
+    confidence: float | None = Field(default=None, ge=0, le=1)
     event_summary: str = ""          # what happened since last update
     narrative_delta: str = ""        # what changes in the thesis (empty if nothing)
     expectation_changes: list[ExpectationChange] = Field(default_factory=list)

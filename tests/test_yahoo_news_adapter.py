@@ -73,7 +73,8 @@ def test_structured_body_and_raw_paragraphs_share_one_catalog_asset(tmp_path):
     assert payload["uuid"] == "uuid-1" and len(payload["paragraphs"]) == 2
 
 
-def test_fetch_news_deduplicates_yahoo_and_finnhub_by_canonical_url(monkeypatch):
+def test_catalog_deduplicates_yahoo_and_finnhub_by_canonical_url():
+    """跨 provider 的同一条故事按 canonical URL 收敛为一份资产。"""
     yahoo = NewsItem(
         id="yahoo:uuid-1", source="yahoo:defeatbeta", headline="Same story",
         url="https://www.example.test/story/?utm_source=yahoo", published_at=NOW,
@@ -83,16 +84,12 @@ def test_fetch_news_deduplicates_yahoo_and_finnhub_by_canonical_url(monkeypatch)
         "id": "finnhub:9", "source": "finnhub",
         "url": "https://example.test/story", "published_at": NOW,
     })
-    monkeypatch.setattr(news, "load_news_sources", lambda: {
-        "yahoo_news": {"enabled": True}, "rss": []})
-    monkeypatch.setattr(yahoo_news, "stored", lambda *a, **k: [yahoo])
-    monkeypatch.setattr(news, "_finnhub", lambda *a: [finnhub])
-    monkeypatch.setattr(news, "_rss", lambda *a: [])
-    monkeypatch.setattr(news, "_x", lambda *a: [])
 
-    out = news.fetch_news("AMD", datetime(2026, 8, 20, tzinfo=timezone.utc))
+    news._catalog([yahoo, finnhub], store=get_store())
 
-    assert len(out) == 1 and out[0].id == "yahoo:uuid-1"
+    rows = get_store().documents(entity="AMD", doc_type="news")
+    assert len(rows) == 1
+    assert rows[0]["external_id"] == "https://example.test/story"
 
 
 def test_yahoo_backfill_aliases_an_existing_ibkr_story_instead_of_copying(tmp_path):

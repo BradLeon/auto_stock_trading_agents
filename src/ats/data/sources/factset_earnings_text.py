@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from collections import Counter
-from enum import StrEnum
 import hashlib
 import json
 import math
 import re
+from collections import Counter
+from contextvars import ContextVar
+from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -17,6 +18,11 @@ from .factset_earnings_insight import FactSetPDF, PDFPage
 
 
 EXTRACTOR_VERSION = "factset-text-v1"
+_SEMANTIC_SCAN: ContextVar[bool] = ContextVar('factset_semantic_scan', default=False)
+
+
+def _scan_pages(document: FactSetPDF, legacy_limit: int):
+    return document.pages if _SEMANTIC_SCAN.get() else document.pages[:legacy_limit]
 
 
 class ReportPhase(StrEnum):
@@ -63,7 +69,8 @@ class ReportPeriod(BaseModel):
     @field_validator("basis")
     @classmethod
     def known_basis(cls, value: str) -> str:
-        if value not in {"target_quarter", "target_year", "snapshot"}:
+        if value not in {"target_quarter", "target_year", "calendar_year",
+                         "fiscal_year", "mixed_fiscal_years", "snapshot"}:
             raise ValueError("unsupported FactSet period basis")
         return value
 
@@ -121,11 +128,22 @@ class FactSetCandidate(BaseModel):
     @model_validator(mode="after")
     def assign_identity(self):
         if not self.candidate_id:
-            payload = "|".join((
-                self.run_id, self.entity_id, self.metric_id, self.period.value,
-                self.estimate_state.value, self.unit, self.raw_value,
-                self.extractor_version,
-            ))
+            if self.extractor_version.startswith("factset-text-semantic-"):
+                # A repeat fetch of identical PDF bytes gets a new run time,
+                # but must not mint a new candidate or observation vintage.
+                source_version = self.evidence[0].version_id if self.evidence else ''
+                parts = (
+                    source_version, self.entity_id, self.metric_id,
+                    self.period.value, self.period.basis, self.estimate_state.value,
+                    self.unit, self.raw_value, self.extractor_version,
+                )
+            else:
+                parts = (
+                    self.run_id, self.entity_id, self.metric_id, self.period.value,
+                    self.estimate_state.value, self.unit, self.raw_value,
+                    self.extractor_version,
+                )
+            payload = "|".join(parts)
             self.candidate_id = hashlib.sha256(payload.encode()).hexdigest()[:24]
         if self.value is None and not self.reason_codes:
             raise ValueError("missing candidates require a reason code")
@@ -181,8 +199,16 @@ def normalize_quarter(token: str) -> str:
 
 def classify_document(document: FactSetPDF) -> tuple[ReportPhase, float | None, list[str]]:
     """Classify a known template and infer season phase from reporting coverage."""
-    first = document.pages[0].text if document.pages else ""
-    contents = document.pages[1].text if len(document.pages) > 1 else ""
+    if _SEMANTIC_SCAN.get():
+        titles = [page.text for page in document.pages
+                  if 'EARNINGS INSIGHT' in page.text.upper()
+                  and 'Key Metrics' in page.text and 'Earnings Scorecard:' in page.text]
+        first = titles[0] if len(titles) == 1 else ''
+        contents = ' '.join(page.text for page in document.pages
+                            if 'Table of Contents' in page.text)
+    else:
+        first = document.pages[0].text if document.pages else ""
+        contents = document.pages[1].text if len(document.pages) > 1 else ""
     reasons: list[str] = []
     if "EARNINGS INSIGHT" not in first.upper() or "FactSet" not in first:
         reasons.append("title_anchor_missing")
@@ -294,8 +320,14 @@ def _candidate(run: FactSetExtractionRun, page: PDFPage, flat: str,
         dimensions=dimensions or {})
 
 
-def _current_quarter(document: FactSetPDF) -> str:
-    first = document.pages[0].text if document.pages else ""
+def _current_quarter(document: FactSetPDF, *, semantic: bool = False) -> str:
+    if semantic or _SEMANTIC_SCAN.get():
+        titles = [page.text for page in document.pages
+                  if 'EARNINGS INSIGHT' in page.text.upper()
+                  and 'Key Metrics' in page.text and 'Earnings Scorecard:' in page.text]
+        first = titles[0] if len(titles) == 1 else ''
+    else:
+        first = document.pages[0].text if document.pages else ""
     match = re.search(r"Earnings Growth:\s*For\s*(Q\s*[1-4]\s*20\s*\d{2})", first, re.I)
     return normalize_quarter(match.group(1)) if match else ""
 
@@ -320,7 +352,7 @@ def _comparison_date(token: str, report_date: date) -> str:
 
 
 def _current_growth_state(document: FactSetPDF) -> EstimateState:
-    for page in document.pages[:16]:
+    for page in _scan_pages(document, 16):
         flat = re.sub(r"\s+", " ", page.text)
         match = re.search(
             r"(?P<state>estimated|blended|actual)\s*\(year\s*-?\s*over\s*-?\s*year\)\s*"
@@ -341,7 +373,7 @@ def extract_revision_breadth(document: FactSetPDF,
     )
     quarter = _current_quarter(document)
     state = _current_growth_state(document)
-    for page in document.pages[:16]:
+    for page in _scan_pages(document, 16):
         flat, offsets = _flat_page(page)
         for match in pattern.finditer(flat):
             body = match.group("body").lower()
@@ -411,7 +443,7 @@ def extract_scorecard(document: FactSetPDF, run: FactSetExtractionRun) -> TextEx
     )
     for field, metric, group, pattern in specs:
         found = False
-        for page in document.pages[:10]:
+        for page in _scan_pages(document, 10):
             flat, offsets = _flat_page(page)
             match = re.search(pattern, flat, re.I)
             if match:
@@ -443,7 +475,7 @@ def extract_growth_and_surprise(document: FactSetPDF,
     )
     for field, metric, group, pattern in specs:
         found = False
-        for page in document.pages[:16]:
+        for page in _scan_pages(document, 16):
             flat, offsets = _flat_page(page)
             match = re.search(pattern, flat, re.I)
             if not match:
@@ -469,7 +501,7 @@ def extract_margin(document: FactSetPDF, run: FactSetExtractionRun) -> TextExtra
          r"(?P<state>estimated|blended|actual)\s+net\s+profit\s+margin\s+for\s+the\s+S&P\s*500\s+for\s+Q\s*[1-4]\s*20\s*\d{2}\s+is\s+(?P<value>\d+(?:\.\d+)?)\s*%"),
     )
     for field, metric, pattern in patterns:
-        for page in document.pages[:16]:
+        for page in _scan_pages(document, 16):
             flat, offsets = _flat_page(page)
             match = re.search(pattern, flat, re.I)
             if match:
@@ -486,7 +518,7 @@ def extract_margin(document: FactSetPDF, run: FactSetExtractionRun) -> TextExtra
 
 def extract_guidance(document: FactSetPDF, run: FactSetExtractionRun) -> TextExtractorResult:
     result = TextExtractorResult(name="guidance")
-    joined = " ".join(re.sub(r"\s+", " ", page.text) for page in document.pages[:16])
+    joined = " ".join(re.sub(r"\s+", " ", page.text) for page in _scan_pages(document, 16))
     period_match = re.search(r"Earnings Guidance:\s*For\s*(Q\s*[1-4]\s*20\s*\d{2})", joined, re.I)
     period = normalize_quarter(period_match.group(1)) if period_match else ""
     specs = (
@@ -495,7 +527,7 @@ def extract_guidance(document: FactSetPDF, run: FactSetExtractionRun) -> TextExt
     )
     for field, metric, direction in specs:
         pattern = rf"(?P<value>\d+)\s+S&P\s*500\s+companies\s+have\s+issued\s+{direction}\s+EPS\s+guidance"
-        for page in document.pages[:16]:
+        for page in _scan_pages(document, 16):
             flat, offsets = _flat_page(page)
             match = re.search(pattern, flat, re.I)
             if match:
@@ -518,7 +550,7 @@ def extract_valuation(document: FactSetPDF, run: FactSetExtractionRun) -> TextEx
         ("trailing_pe", "valuation.trailing_pe", r"trailing\s+12\s*-?\s*month\s+P/E\s+ratio\s+is\s+(?P<value>\d+(?:\.\d+)?)"),
     )
     for field, metric, pattern in specs:
-        for page in document.pages[:16]:
+        for page in _scan_pages(document, 16):
             flat, offsets = _flat_page(page)
             match = re.search(pattern, flat, re.I)
             if match:
@@ -532,7 +564,7 @@ def extract_valuation(document: FactSetPDF, run: FactSetExtractionRun) -> TextEx
             result.missing_metrics[metric] = "text_pattern_not_found"
     # Reference averages are accepted only from the corresponding valuation sentence.
     for horizon, prefix in (("forward", "forward"), ("trailing", "trailing")):
-        for page in document.pages[:16]:
+        for page in _scan_pages(document, 16):
             flat, offsets = _flat_page(page)
             block = re.search(
                 rf"{horizon}\s+12\s*-?\s*month\s+P/E\s+ratio(?:\s+for\s+the\s+S&P\s*500)?\s+is\s+"
@@ -566,10 +598,17 @@ def extract_ratings_and_target(document: FactSetPDF,
         r"(?P<buy>\d+(?:\.\d+)?)\s*%\s+are\s+Buy\s+ratings,\s+"
         r"(?P<hold>\d+(?:\.\d+)?)\s*%\s+are\s+Hold\s+ratings,\s+and\s+"
         r"(?P<sell>\d+(?:\.\d+)?)\s*%\s+are\s+Sell\s+ratings", re.I)
-    for page in document.pages[:16]:
+    for page in _scan_pages(document, 16):
         flat, offsets = _flat_page(page)
-        match = rating_pattern.search(flat)
-        if match:
+        for match in rating_pattern.finditer(flat):
+            # PDF text can split a leading digit ("5 9.9%" for "59.9%").
+            # Do not repair the token: use only a complete, internally
+            # consistent printed statement elsewhere in the same report.
+            shares = [float(match[name]) for name in ('buy', 'hold', 'sell')]
+            if not all(0 <= value <= 100 for value in shares):
+                continue
+            if abs(sum(shares) - 100) > 1.0 + 1e-9:
+                continue
             for field, metric, value_group in (
                 ("rating_buy_share", "consensus.rating.buy_share", "buy"),
                 ("rating_hold_share", "consensus.rating.hold_share", "hold"),
@@ -581,10 +620,12 @@ def extract_ratings_and_target(document: FactSetPDF,
                     basis="snapshot", state=EstimateState.NOT_APPLICABLE,
                     unit="ratio", percent=True, value_group=value_group))
             break
+        if result.candidates:
+            break
     target_pattern = re.compile(
         r"bottom\s*-?\s*up\s+target\s+price\s+for\s+the\s+S&P\s*500\s+is\s+"
         r"[\d,.]+,\s+which\s+is\s+(?P<value>[+-]?\d+(?:\.\d+)?)\s*%\s+above", re.I)
-    for page in document.pages[:16]:
+    for page in _scan_pages(document, 16):
         flat, offsets = _flat_page(page)
         match = target_pattern.search(flat)
         if match:
@@ -615,6 +656,53 @@ def extract_chart_only_index_fields(document: FactSetPDF,
     return TextExtractorResult(name="chart_only_index_fields", missing_metrics=metrics)
 
 
+def bounded_narrative_evidence(document: FactSetPDF, *, max_per_theme: int = 3) -> list[dict]:
+    """Retain explicit topic mentions with source spans, without deriving metrics.
+
+    These are research leads, not a claim that all Information Technology is
+    AI hardware or that Consumer Discretionary is consumer electronics.
+    """
+    themes = {
+        'ai': re.compile(r'\bAI\b|artificial\s+intelligence', re.I),
+        'semiconductors': re.compile(r'\bsemiconductors?\b', re.I),
+        'consumer_electronics': re.compile(r'\bconsumer\s+electronics\b', re.I),
+        'hardware': re.compile(r'\bhardware\b', re.I),
+    }
+    found = {theme: 0 for theme in themes}
+    result = []
+    for page in document.pages:
+        for theme, pattern in themes.items():
+            if found[theme] >= max_per_theme:
+                continue
+            for match in pattern.finditer(page.text):
+                if found[theme] >= max_per_theme:
+                    break
+                start = max(page.text.rfind('.', 0, match.start()) + 1,
+                            page.text.rfind('\n', 0, match.start()) + 1)
+                end_candidates = [pos for pos in (
+                    page.text.find('.', match.end()),
+                    page.text.find('\n', match.end())) if pos >= 0]
+                end = min(end_candidates) + 1 if end_candidates else len(page.text)
+                if end - start > 500:
+                    start = max(start, match.start() - 180)
+                    end = min(end, match.end() + 180)
+                snippet = ' '.join(page.text[start:end].split())
+                if len(snippet) < 25:
+                    continue
+                if theme == 'ai' and not re.search(
+                        r'S&P\s*500|earnings|conference\s+calls?', snippet, re.I):
+                    continue
+                result.append({
+                    'theme': theme, 'page_number': page.page_number,
+                    'char_start': page.char_start + start,
+                    'char_end': page.char_start + end,
+                    'text': snippet,
+                    'status': 'source_mention_not_inference',
+                })
+                found[theme] += 1
+    return result
+
+
 def extract_index_text(document: FactSetPDF, *, document_id: str, version_id: str,
                        known_at: datetime,
                        extractor_version: str = EXTRACTOR_VERSION) -> FactSetExtractionRun:
@@ -642,6 +730,127 @@ def extract_index_text(document: FactSetPDF, *, document_id: str, version_id: st
     return run
 
 
+def extract_index_text_semantic(document: FactSetPDF, *, document_id: str,
+                                version_id: str, known_at: datetime,
+                                policy: dict | None = None,
+                                extractor_version: str = 'factset-text-semantic-v2') -> FactSetExtractionRun:
+    """New two-state Index projection; old text-v1 records stay untouched.
+
+    Existing deterministic text extractors remain the source of candidate
+    values and spans. The new contract normalizes only estimate-state identity;
+    it never upgrades a conditional statement or other-period prose to actual.
+    """
+    from .factset_report_layout import load_layout_policy, policy_hash
+
+    policy = policy or load_layout_policy()
+    if not extractor_version.startswith('factset-text-semantic-v2'):
+        raise ValueError('semantic_index_extractor_version_required')
+    token = _SEMANTIC_SCAN.set(True)
+    try:
+        run = extract_index_text(document, document_id=document_id, version_id=version_id,
+                                 known_at=known_at, extractor_version=extractor_version)
+    finally:
+        _SEMANTIC_SCAN.reset(token)
+    normalized = []
+    for candidate in run.candidates:
+        raw = re.sub(r'\s+', ' ', candidate.raw_token).strip()
+        actual = bool(re.search(
+            r'\b(?:reporting|reported|report) actual (?:results|EPS|revenues)\b|'
+            r'^actual\s+(?:\(year.over.year\)\s+)?(?:earnings|revenue|net profit margin)',
+            raw, re.I))
+        state = EstimateState.ACTUAL if actual else EstimateState.ESTIMATED
+        payload = candidate.model_dump(mode='python')
+        payload['candidate_id'] = ''
+        payload['estimate_state'] = state
+        payload['extractor_version'] = run.extractor_version
+        payload['dimensions'] = {
+            **candidate.dimensions,
+            'source_estimate_wording': candidate.estimate_state.value,
+            'state_policy_version': policy['estimate_state_policy']['version'],
+            'extraction_policy_hash': policy_hash(policy),
+        }
+        normalized.append(FactSetCandidate.model_validate(payload))
+    run.candidates = normalized
+    if not any(c.metric_id == 'earnings.revision.improved_sector_count'
+               for c in run.candidates):
+        revised = re.compile(
+            rf'(?P<count>{_NUMBER_TOKEN})\s+sectors\s+are\s+expected\s+to\s+report\s+'
+            r'higher\s+earnings\s+today\s*\(compared\s+to\s+'
+            r'(?P<comparison>(?:January|February|March|April|May|June|July|August|'
+            r'September|October|November|December)\s+\d{1,2})\)\s+due\s+to\s+'
+            r'upward\s+revisions', re.I)
+        for page in document.pages:
+            flat, offsets = _flat_page(page)
+            match = revised.search(flat)
+            if not match:
+                continue
+            count = _number(match['count'])
+            comparison = _comparison_date(match['comparison'], run.report_date)
+            if count < 0 or not comparison:
+                continue
+            period = _current_quarter(document, semantic=True)
+            if not period:
+                continue
+            start = page.char_start + offsets[match.start()]
+            end = page.char_start + offsets[match.end() - 1] + 1
+            run.candidates.append(FactSetCandidate(
+                run_id=run.run_id, entity_id='SP500',
+                provider_field='revision_improved_sector_count',
+                metric_id='earnings.revision.improved_sector_count',
+                metric_group=MetricGroup.REVISION_BREADTH,
+                period=ReportPeriod(value=period, basis='target_quarter'),
+                estimate_state=EstimateState.ESTIMATED, unit='count',
+                raw_token=match.group(0), raw_value=match['count'], value=count,
+                report_date=run.report_date, known_at=run.known_at,
+                extractor_version=run.extractor_version,
+                evidence=[FactSetEvidenceAnchor(
+                    document_id=run.document_id, version_id=run.version_id,
+                    page_number=page.page_number, char_start=start, char_end=end,
+                    extraction_method=run.extractor_version)],
+                dimensions={
+                    'comparison_date': comparison, 'revision_direction': 'upward',
+                    'sector_total': len(policy['sector_aliases']),
+                    'sector_total_source': 'registered_gics_sector_count',
+                    'source_estimate_wording': 'expected',
+                    'state_policy_version': policy['estimate_state_policy']['version'],
+                    'extraction_policy_hash': policy_hash(policy),
+                },
+            ))
+            break
+    # Current bottom-up EPS may be explicitly printed in narrative prose even
+    # when a trend figure has no readable endpoint label. Do not estimate from
+    # line geometry or transfer a value from another quarter.
+    bottom_up = re.compile(
+        r"the\s+(?P<quarter>Q\s*[1-4](?:\s*20\s*\d{2})?)\s+bottom\s*-?\s*up\s+EPS\s+"
+        r"estimate\b.{0,480}?\b(?:to|at)\s*\$\s*(?P<value>\d+(?:\.\d+)?)",
+        re.I,
+    )
+    for page in document.pages:
+        flat, offsets = _flat_page(page)
+        match = bottom_up.search(flat)
+        if match:
+            period = normalize_quarter(match['quarter'])
+            if not period:
+                current = _current_quarter(document, semantic=True)
+                short = re.search(r'Q\s*([1-4])', match['quarter'], re.I)
+                if not short or not current.endswith('Q' + short[1]):
+                    continue
+                period = current
+            run.candidates.append(_candidate(
+                run, page, flat, offsets, match,
+                provider_field='bottom_up_eps', metric_id='earnings.bottom_up_eps',
+                group=MetricGroup.BOTTOM_UP_EPS, period=period,
+                basis='target_quarter', state=EstimateState.ESTIMATED,
+                unit='currency_per_share', dimensions={
+                    'source_estimate_wording': 'estimate',
+                    'state_policy_version': policy['estimate_state_policy']['version'],
+                    'extraction_policy_hash': policy_hash(policy),
+                },
+            ))
+            break
+    return run
+
+
 _BOUNDED_SHARES = {
     "earnings.reporting.coverage",
     "earnings.eps.above_estimate_share",
@@ -653,6 +862,8 @@ _BOUNDED_SHARES = {
     "earnings.margin.increase_share",
     "earnings.margin.unchanged_share",
     "earnings.margin.decrease_share",
+    "earnings.guidance.positive_share",
+    "earnings.guidance.negative_share",
     "revenue.geographic.us_share",
     "revenue.geographic.international_share",
     "consensus.rating.buy_share",
@@ -688,6 +899,7 @@ _COMPOSITIONS = {
         "earnings.margin.decrease_share",
     },
     "geography": {"revenue.geographic.us_share", "revenue.geographic.international_share"},
+    "guidance_share": {"earnings.guidance.positive_share", "earnings.guidance.negative_share"},
     "ratings": {
         "consensus.rating.buy_share", "consensus.rating.hold_share",
         "consensus.rating.sell_share",
@@ -747,19 +959,24 @@ def validate_index_candidates(run: FactSetExtractionRun, *,
         if not candidate.evidence:
             _add_reason(candidate, "evidence_missing")
 
-    by_metric = {candidate.metric_id: candidate for candidate in candidates}
-    for group, expected in _COMPOSITIONS.items():
-        present = expected & set(by_metric)
-        if not present:
-            continue
-        if present != expected:
-            for metric in present:
-                _add_reason(by_metric[metric], f"{group}_composition_incomplete")
-            continue
-        total = sum(float(by_metric[metric].value) for metric in expected)
-        if not math.isclose(total, 1.0, rel_tol=0, abs_tol=composition_tolerance + 1e-12):
-            for metric in expected:
-                _add_reason(by_metric[metric], f"{group}_composition_total_mismatch")
+    by_period: dict[tuple[str, str], dict[str, FactSetCandidate]] = {}
+    for candidate in candidates:
+        by_period.setdefault((candidate.period.value, candidate.period.basis), {})[
+            candidate.metric_id] = candidate
+    for period_metrics in by_period.values():
+        for group, expected in _COMPOSITIONS.items():
+            present = expected & set(period_metrics)
+            if not present:
+                continue
+            if present != expected:
+                for metric in present:
+                    _add_reason(period_metrics[metric], f"{group}_composition_incomplete")
+                continue
+            total = sum(float(period_metrics[metric].value) for metric in expected)
+            if not math.isclose(total, 1.0, rel_tol=0,
+                                abs_tol=composition_tolerance + 1e-12):
+                for metric in expected:
+                    _add_reason(period_metrics[metric], f"{group}_composition_total_mismatch")
 
     for candidate in candidates:
         if candidate.status == CandidateStatus.PENDING:
@@ -773,11 +990,22 @@ def validate_index_candidates(run: FactSetExtractionRun, *,
         missing=missing, reason_counts=dict(counts))
 
 
-def observation_identity(candidate: FactSetCandidate) -> str:
-    semantic_dimensions = {
+def series_dimensions(candidate: FactSetCandidate) -> dict[str, Any]:
+    if candidate.extractor_version.startswith('factset-text-semantic-'):
+        # Extraction wording, image hash and policy provenance belong to the
+        # candidate/review, not to the economic series identity. This lets a
+        # chart and paragraph corroborate (or conflict on) one observation.
+        return {key: candidate.dimensions[key] for key in (
+            'comparison_date', 'revision_direction', 'sector_total'
+        ) if key in candidate.dimensions}
+    return {
         key: value for key, value in candidate.dimensions.items()
         if not key.startswith("raw_") and key != "supporting_raw_tokens"
     }
+
+
+def observation_identity(candidate: FactSetCandidate) -> str:
+    semantic_dimensions = series_dimensions(candidate)
     payload = {
         "entity_id": candidate.entity_id,
         "metric_id": candidate.metric_id,

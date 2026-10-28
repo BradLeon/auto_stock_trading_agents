@@ -89,7 +89,7 @@ def test_intents_recorded_with_the_plan(store):
     ids = je.record_intents(
         _state([d], event_data={"GOOG": {"expected_move_pct": 5.71}},
                ), store=store)
-    assert ids == ["c1:GOOG:trim"]
+    assert ids == ["c1:r0:0:GOOG:trim"]
     row = store.journal_entries()[0]
     assert row.setup == "pead_event"
     assert row.stop_price == 300.0
@@ -103,7 +103,7 @@ def test_intents_recorded_with_the_plan(store):
 def test_intent_id_matches_the_trade_key(store):
     """The ledger id IS the order idempotency key, so the two always join."""
     je.record_intents(_state([_d()]), store=store)
-    assert store.journal_entries()[0].entry_id == store.client_order_id("c1", "GOOG", "trim")
+    assert store.journal_entries()[0].entry_id == store.client_order_id("c1", 0, 0, "GOOG", "trim")
 
 
 def test_rerunning_a_cycle_restates_one_intent(store):

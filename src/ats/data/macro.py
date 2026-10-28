@@ -31,10 +31,10 @@ _FRED_SERIES = {
 
 
 # Series the indicator framework needs the FULL HISTORY of, not just the last
-# print: every axis, z-score and Δ in docs/MACRO_ANALYST.md §4 is defined on the
+# print: every axis, z-score and Δ in docs/agents/MACRO_ANALYST.md §4 is defined on the
 # series, and `fred.get_series()` already returns all of it — the old code just
 # threw it away in `_latest()`. Keeping it in memory costs nothing and avoids
-# introducing a macro persistence layer (docs/DATA_SOURCES.md keeps raw macro
+# introducing a macro persistence layer (docs/data/DATA_SOURCES.md keeps raw macro
 # out of the DB on purpose).
 #
 #   key -> (fred_code, 中文标签, unit, 观测频率)

@@ -39,12 +39,16 @@ class PeadState(BaseModel):
     # fetched inputs
     fundamentals_text: str = ""
     consensus: dict = Field(default_factory=dict)
+    consensus_note: str = ""        # why the vendor estimate was ignored (period/freshness), "" when used
     peer_rows: list[dict] = Field(default_factory=list)
     industry_context: str = ""      # curated sector background (Obsidian) for prep thesis
+    information_facts: list[str] = Field(default_factory=list)  # latest InformationBrief facts for a routine baseline build
     earnings_date: str = ""         # ISO date of the upcoming/scored print, when known
     transcript_text: str = ""
     transcript_resolved_source: str = ""
     documents_text: str = ""        # official docs (SEC 8-K release + investor decks)
+    input_refs: list[str] = Field(default_factory=list)
+    document_lineage: list[dict] = Field(default_factory=list)
 
     # dossier sections
     prior_narrative: str = ""           # accumulated monitor thesis to continue in prep
@@ -61,6 +65,9 @@ class PeadState(BaseModel):
     decisions: list[PeadRecommendation] = Field(default_factory=list)
     decision_band: str = ""
     risk_adjustments: list[str] = Field(default_factory=list)
+    # Phase D event review (non-executable view published as a projection)
+    event_view: dict = Field(default_factory=dict)
+    tri_diffs: dict = Field(default_factory=dict)
     # legacy (pre-chief score execution path) — kept for checkpoint compatibility
     approval: BossApproval | None = None
     order_results: list[TradeLogEntry] = Field(default_factory=list)

@@ -1,0 +1,459 @@
+[
+ {
+  "id": "agent.evidence_observer",
+  "registered": "retired",
+  "target_phase": "complete-target-dataflow",
+  "consumers": 0,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 0,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": true,
+  "missing": []
+ },
+ {
+  "id": "agents.risk_validator.apply_guardrails",
+  "registered": "retired",
+  "target_phase": "B",
+  "consumers": 1,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 1,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['graph.pead']",
+   "consumer state unknown (not verified zero): ['graph.pead']"
+  ]
+ },
+ {
+  "id": "chief.legacy_table_direct_reads",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 1,
+  "zero": 0,
+  "not_zero": 1,
+  "readers": [
+   "agents.chief.assemble"
+  ],
+  "unknown": 0,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['agents.chief.assemble']"
+  ]
+ },
+ {
+  "id": "decision_roles.unwired_to_governed_read_api",
+  "registered": "pending",
+  "target_phase": "F",
+  "consumers": 4,
+  "zero": 2,
+  "not_zero": 2,
+  "readers": [
+   "agents.risk_officer.review",
+   "execution.clerk"
+  ],
+  "unknown": 0,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['agents.risk_officer.review', 'execution.clerk']"
+  ]
+ },
+ {
+  "id": "evidence_fact_projections.legacy_observation_id",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['memory.store.fact_projections', 'tests/test_data_migrations']",
+   "consumer state unknown (not verified zero): ['memory.store.fact_projections', 'tests/test_data_migrations']"
+  ]
+ },
+ {
+  "id": "graph.pead.internal_risk_and_sizing",
+  "registered": "retired",
+  "target_phase": "D",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['graph.pead', 'agents.pead.score']",
+   "consumer state unknown (not verified zero): ['graph.pead', 'agents.pead.score']"
+  ]
+ },
+ {
+  "id": "journal.report.render_ledger",
+  "registered": "pending",
+  "target_phase": "C",
+  "consumers": 1,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 1,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.cli']",
+   "consumer state unknown (not verified zero): ['runtime.cli']"
+  ]
+ },
+ {
+  "id": "layer_verdict.allocation",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 4,
+  "zero": 1,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 3,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['agents.sector.report', 'agents.sector.viz', 'runtime.cli']",
+   "consumer state unknown (not verified zero): ['agents.sector.report', 'agents.sector.viz', 'runtime.cli']"
+  ]
+ },
+ {
+  "id": "legacy_read_models",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.cli', 'channel.context']",
+   "consumer state unknown (not verified zero): ['runtime.cli', 'channel.context']"
+  ]
+ },
+ {
+  "id": "memory.store.legacy_decision_write_path",
+  "registered": "pending",
+  "target_phase": "B",
+  "consumers": 3,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 3,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['decision.repository.mirror_revision_to_legacy', 'memory.store.last_chief_run', 'memory.store.recent_decisions']",
+   "consumer state unknown (not verified zero): ['decision.repository.mirror_revision_to_legacy', 'memory.store.last_chief_run', 'memory.store.recent_decisions']"
+  ]
+ },
+ {
+  "id": "pead_dossier",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.cli', 'agents.pead.report']",
+   "consumer state unknown (not verified zero): ['runtime.cli', 'agents.pead.report']"
+  ]
+ },
+ {
+  "id": "performance.legacy_snapshot",
+  "registered": "pending",
+  "target_phase": "C",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.cli', 'runtime.scheduler']",
+   "consumer state unknown (not verified zero): ['runtime.cli', 'runtime.scheduler']"
+  ]
+ },
+ {
+  "id": "reconcile.origin_manual_fallback",
+  "registered": "retired",
+  "target_phase": "C",
+  "consumers": 0,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 0,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": true,
+  "missing": []
+ },
+ {
+  "id": "reconcile.partial_fill_as_filled",
+  "registered": "retired",
+  "target_phase": "C",
+  "consumers": 0,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 0,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": true,
+  "missing": []
+ },
+ {
+  "id": "risk.checks.in_place_clipping",
+  "registered": "retired",
+  "target_phase": "B",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['graph.chief.risk_gate', 'graph.pead']",
+   "consumer state unknown (not verified zero): ['graph.chief.risk_gate', 'graph.pead']"
+  ]
+ },
+ {
+  "id": "risk.checks.pre_trade_adapter",
+  "registered": "pending",
+  "target_phase": "B",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.scheduler', 'runtime.cli']",
+   "consumer state unknown (not verified zero): ['runtime.scheduler', 'runtime.cli']"
+  ]
+ },
+ {
+  "id": "runtime.server.in_process_resume_dedup",
+  "registered": "retired",
+  "target_phase": "B",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.server.handle_callback', 'runtime.server.handle_approve']",
+   "consumer state unknown (not verified zero): ['runtime.server.handle_callback', 'runtime.server.handle_approve']"
+  ]
+ },
+ {
+  "id": "scheduler.adhoc_journal_jobs",
+  "registered": "pending",
+  "target_phase": "C",
+  "consumers": 1,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 1,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.cli']",
+   "consumer state unknown (not verified zero): ['runtime.cli']"
+  ]
+ },
+ {
+  "id": "scheduler.hardcoded_serial_run",
+  "registered": "pending",
+  "target_phase": "E",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['runtime.scheduler', 'tests/test_scheduler_jobs']",
+   "consumer state unknown (not verified zero): ['runtime.scheduler', 'tests/test_scheduler_jobs']"
+  ]
+ },
+ {
+  "id": "sector_reviews",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 1,
+  "readers": [
+   "agents.chief.assemble"
+  ],
+  "unknown": 1,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['agents.chief.assemble', 'runtime.cli']",
+   "consumer state unknown (not verified zero): ['runtime.cli']"
+  ]
+ },
+ {
+  "id": "store.direct_trade_reads",
+  "registered": "pending",
+  "target_phase": "C",
+  "consumers": 3,
+  "zero": 0,
+  "not_zero": 1,
+  "readers": [
+   "agents.chief.assemble"
+  ],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['agents.chief.assemble', 'risk.assess', 'channel.context']",
+   "consumer state unknown (not verified zero): ['risk.assess', 'channel.context']"
+  ]
+ },
+ {
+  "id": "task_projections.legacy_columns",
+  "registered": "pending",
+  "target_phase": "D",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['memory.store.projection_lineage', 'tests/test_fact_projections']",
+   "consumer state unknown (not verified zero): ['memory.store.projection_lineage', 'tests/test_fact_projections']"
+  ]
+ },
+ {
+  "id": "trades.client_order_id.legacy_derivation",
+  "registered": "pending",
+  "target_phase": "B",
+  "consumers": 3,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 3,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['memory.store.save_trades', 'trader.execute.place_orders', 'trader.reconcile']",
+   "consumer state unknown (not verified zero): ['memory.store.save_trades', 'trader.execute.place_orders', 'trader.reconcile']"
+  ]
+ },
+ {
+  "id": "workflow_memory.evidence_fact_projections",
+  "registered": "retired",
+  "target_phase": "A",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['chain.evidence', 'memory.store.projection_lineage']",
+   "consumer state unknown (not verified zero): ['chain.evidence', 'memory.store.projection_lineage']"
+  ]
+ },
+ {
+  "id": "workflow_memory.evidence_facts",
+  "registered": "retired",
+  "target_phase": "A",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['chain.evidence', 'scheduler.observe']",
+   "consumer state unknown (not verified zero): ['chain.evidence', 'scheduler.observe']"
+  ]
+ },
+ {
+  "id": "workflow_memory.evidence_failures",
+  "registered": "retired",
+  "target_phase": "A",
+  "consumers": 2,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 2,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['chain.sources', 'chain.articles']",
+   "consumer state unknown (not verified zero): ['chain.sources', 'chain.articles']"
+  ]
+ },
+ {
+  "id": "workflow_memory.evidence_observations",
+  "registered": "retired",
+  "target_phase": "A",
+  "consumers": 4,
+  "zero": 0,
+  "not_zero": 0,
+  "readers": [],
+  "unknown": 4,
+  "window": "window_ok",
+  "tombstone": "consistent",
+  "may_exit": false,
+  "missing": [
+   "consumers still on the legacy path: ['scheduler.observe', 'chain.sources', 'chain.articles', 'runtime.cli']",
+   "consumer state unknown (not verified zero): ['scheduler.observe', 'chain.sources', 'chain.articles', 'runtime.cli']"
+  ]
+ }
+]

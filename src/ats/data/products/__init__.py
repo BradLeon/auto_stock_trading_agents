@@ -27,16 +27,27 @@ from .earnings_insight import (
     to_earnings_backdrop,
 )
 from .workflows import WorkflowDataBoundary, workflow_data_boundary
+from .calendar import ScheduleCalendarProduct, schedule_calendar_snapshot
 
 
-def get_platform_data_products() -> DataProducts:
+def get_platform_data_products(*, readonly: bool = False) -> DataProducts:
     """Open products backed only by migrated persistent data repositories."""
     from ..runtime import get_platform_structured_repository
     from ..stores.unstructured import get_platform_unstructured_repository
 
-    return DataProducts(
-        structured_repository=get_platform_structured_repository(),
-        unstructured_repository=get_platform_unstructured_repository())
+    if readonly:
+        from ..runtime.repository import platform_artifact_root, platform_data_db_path
+        from ..stores.structured.repository import SQLiteStructuredRepository
+        structured = SQLiteStructuredRepository(platform_data_db_path(),
+            artifact_root=platform_artifact_root(), readonly=True)
+    else:
+        structured = get_platform_structured_repository()
+    try:
+        unstructured = get_platform_unstructured_repository()
+    except Exception:
+        structured.close()
+        raise
+    return DataProducts(structured_repository=structured, unstructured_repository=unstructured)
 
 __all__ = [
     "DataProducts",
@@ -66,4 +77,6 @@ __all__ = [
     "to_earnings_backdrop",
     "WorkflowDataBoundary",
     "workflow_data_boundary",
+    "ScheduleCalendarProduct",
+    "schedule_calendar_snapshot",
 ]

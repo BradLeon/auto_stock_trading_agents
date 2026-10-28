@@ -69,7 +69,7 @@
 - [x] 9.2 Run real-source acceptance for each public transport (Git, CSV, JSON, README), score addition/revision, no-change, source unavailable and method-change paths; document observed latency, validators/commit path and request budget.
 - [x] 9.3 Run raw-capability unit/integration tests plus existing structured ingestion/query, production Observer, commercialization Observer, Ramp, RPS, Anthropic Economic Index and OpenRouter regression suites.
 - [x] 9.4 Generate a reviewable report with working embedded images, readable Chinese glyphs, valid sidecar links, concise benchmark explanations and textual summaries for each visualization.
-- [x] 9.5 Add `docs/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md` covering source policy, model eligibility, benchmark versions, schedules, NA semantics, A/B rules, quality gates, replay, incidents and rollback; update `docs/EVIDENCE_OBSERVER.md`.
+- [x] 9.5 Add `docs/data/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md` covering source policy, model eligibility, benchmark versions, schedules, NA semantics, A/B rules, quality gates, replay, incidents and rollback; update `docs/archive/EVIDENCE_OBSERVER.md`.
 - [x] 9.6 After every acceptance gate passes, configure the dataset and Observer as `platform`, verify the formal L1 report includes raw capability by default, and prove source/revision failure does not break the two existing L1 Observers.
 
 ## 10. Eleven-Benchmark Registry and Source Contract Migration
@@ -111,5 +111,5 @@
 ## 14. Platform Configuration and Operations Documentation
 
 - [x] 14.1 Update `config/data/structured.yaml`, schedules and source registry for the eleven-benchmark panel, source-specific frequencies, event probes, hot-observation windows, policy gates, freshness and retention metadata.
-- [x] 14.2 Update `docs/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md` and `docs/EVIDENCE_OBSERVER.md` with the final benchmark panel, source routes, priority rules, event ledger, policy fallback, NA semantics and incident procedures.
+- [x] 14.2 Update `docs/data/FRONTIER_AI_RAW_CAPABILITY_OPERATIONS.md` and `docs/archive/EVIDENCE_OBSERVER.md` with the final benchmark panel, source routes, priority rules, event ledger, policy fallback, NA semantics and incident procedures.
 - [x] 14.3 After all new acceptance gates pass, publish the migrated dataset and Observer directly as `platform`, verify the formal L1 report uses the eleven-benchmark system by default, and prove a blocked or drifting source only degrades its own evidence slice.

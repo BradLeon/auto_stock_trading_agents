@@ -1,0 +1,140 @@
+{
+  "response": {
+    "request_hash": "1915d456306a2eda5c9c70eb4d993e67c95a16761d5546a016702e1c2c10fbc1",
+    "refs": [
+      {
+        "id": "sep-25-3-0-11",
+        "image_hash": "66659fb6b2da96b1e12b581e2ff981cc554fb670e56e03de46a60791b93bd215",
+        "region": [
+          0.8340659340659341,
+          0.8880484114977307,
+          0.9076923076923077,
+          0.9334341906202723
+        ],
+        "crop_hash": "91de66751fa263512dfd2213eccabf2e7394b24b869c5e5b78e9fc295ff327cb"
+      },
+      {
+        "id": "sep-25-3-1-11",
+        "image_hash": "66659fb6b2da96b1e12b581e2ff981cc554fb670e56e03de46a60791b93bd215",
+        "region": [
+          0.8340659340659341,
+          0.9349470499243571,
+          0.9076923076923077,
+          0.9606656580937972
+        ],
+        "crop_hash": "1a7fe869ab32a24cc78fed7fc82d60d1aa71b05714ce2d137061664df2bea8b2"
+      },
+      {
+        "id": "sep-25-3-0-12",
+        "image_hash": "66659fb6b2da96b1e12b581e2ff981cc554fb670e56e03de46a60791b93bd215",
+        "region": [
+          0.9087912087912088,
+          0.8880484114977307,
+          0.9835164835164835,
+          0.9334341906202723
+        ],
+        "crop_hash": "4a3f9bf928d696f513d1a38200d4dd85485ab3872c48b0152a1694ce01049ac7"
+      },
+      {
+        "id": "sep-25-3-1-12",
+        "image_hash": "66659fb6b2da96b1e12b581e2ff981cc554fb670e56e03de46a60791b93bd215",
+        "region": [
+          0.9087912087912088,
+          0.9349470499243571,
+          0.9835164835164835,
+          0.9606656580937972
+        ],
+        "crop_hash": "4f29e41d85e53a07c592c1c3c421207dc54233bc1003d15a3f885cdede029bc6"
+      }
+    ],
+    "policy": {
+      "enabled": true,
+      "authorization": "user_2026_09_27_factset_chart_crops",
+      "model": "openai/gpt-5.6-terra",
+      "prompt_version": "factset-cell-transcription-v1",
+      "max_requests": 32,
+      "max_crops_per_request": 12,
+      "max_image_bytes": 2000000,
+      "max_tokens": 4096,
+      "timeout_seconds": 60,
+      "provider_data_collection": "deny",
+      "zero_data_retention": true,
+      "automatic_publication": false
+    },
+    "prompt_hash": "c6a3791a150b332ca2da11ca47441b0c5b1d7ffc859da870b2fe81628a32ab81",
+    "requested_at": "2026-09-26T22:23:18.941397+00:00",
+    "status": "pending_review",
+    "approved": false,
+    "response_id": "gen-1790461332-vkrXSwqfXW8cS5zBfz4g",
+    "model": "openai/gpt-5.6-terra",
+    "usage": {
+      "prompt_tokens": 325,
+      "completion_tokens": 104,
+      "total_tokens": 429,
+      "cost": 0.00187902,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.001898,
+        "upstream_inference_prompt_cost": 0.00065,
+        "upstream_inference_completions_cost": 0.001248
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 18,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    },
+    "raw_content": "{\"cells\":[{\"id\":\"sep-25-3-0-11\",\"token\":\"Consumer Staples\"},{\"id\":\"sep-25-3-1-11\",\"token\":\"4.2%\"},{\"id\":\"sep-25-3-0-12\",\"token\":\"Energy\"},{\"id\":\"sep-25-3-1-12\",\"token\":\"-5.9%\"}]}",
+    "cells": [
+      {
+        "id": "sep-25-3-0-11",
+        "token": "Consumer Staples"
+      },
+      {
+        "id": "sep-25-3-1-11",
+        "token": "4.2%"
+      },
+      {
+        "id": "sep-25-3-0-12",
+        "token": "Energy"
+      },
+      {
+        "id": "sep-25-3-1-12",
+        "token": "-5.9%"
+      }
+    ]
+  },
+  "sources": {
+    "sep-25-3-0-11": {
+      "chart": "sep-25-3",
+      "kind": "label",
+      "entity": "GICS_30",
+      "ocr_token": "Consumer Staples"
+    },
+    "sep-25-3-1-11": {
+      "chart": "sep-25-3",
+      "kind": "value",
+      "entity": "GICS_30",
+      "ocr_token": "4.2%"
+    },
+    "sep-25-3-0-12": {
+      "chart": "sep-25-3",
+      "kind": "label",
+      "entity": "GICS_10",
+      "ocr_token": "Energy"
+    },
+    "sep-25-3-1-12": {
+      "chart": "sep-25-3",
+      "kind": "value",
+      "entity": "GICS_10",
+      "ocr_token": "-5.9%"
+    }
+  },
+  "policy_hash": "1aeeedd772c1685e6ab16b23de54ec5dc238e91ccc3f65f56471ab20f91eda5e"
+}

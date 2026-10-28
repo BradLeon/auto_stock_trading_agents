@@ -26,12 +26,13 @@ historical actual.
 from __future__ import annotations
 
 import calendar
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timezone
 import hashlib
 import html
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
@@ -98,6 +99,16 @@ TICKERTRENDS_ORIGIN_SEED = "frozen_seed"
 SACRA_PUBLISHER = "Sacra"
 TICKERTRENDS_DEFAULT_SEED_FILENAME = (
     "tickertrends_anthropic_vs_openai_arr_tracking.json")
+# Beyond the single essay, TickerTrends keeps publishing short research notes that restate its tracked ARR
+# and quote other outlets' figures.  They are read from the same public Substack API (archive listing, then
+# one post each); nothing behind a login or paywall is touched.
+TICKERTRENDS_NOTES_PARSER_VERSION = "tickertrends_notes/v1"
+TICKERTRENDS_NOTES_START = "2026-07-01"
+TICKERTRENDS_ARCHIVE_TEMPLATE = (
+    "https://blog.tickertrends.io/api/v1/archive?sort=new&limit={limit}&offset={offset}")
+TICKERTRENDS_ARCHIVE_PAGE_SIZE = 20
+TICKERTRENDS_ARCHIVE_MAX_PAGES = 6
+TICKERTRENDS_FETCH_ATTEMPTS = 3
 
 SACRA_PAGES: tuple[dict[str, str], ...] = (
     {"slug": "openai", "entity_id": "OPENAI", "company": "OpenAI",
@@ -221,12 +232,21 @@ class RevenueCandidate:
     published_at: datetime | None = None
     diagnostics: tuple[str, ...] = ()
     period_year_source: str = ""
+    value_qualifier: str = ""
 
     @property
     def accepted(self) -> bool:
         return not self.diagnostics
 
     def as_native_record(self) -> NativeRecord:
+        # product_scope / value_qualifier are written only when present, so rows that never
+        # had them keep byte-identical dimensions and raw payloads (no spurious new vintages).
+        extra_dimensions = {"product_scope": self.product_scope} if self.product_scope else {}
+        extra_raw: dict[str, Any] = {}
+        if self.product_scope:
+            extra_raw["product_scope"] = self.product_scope
+        if self.value_qualifier:
+            extra_raw["value_qualifier"] = self.value_qualifier
         return NativeRecord(
             entity_id=self.entity_id,
             provider_field=self.provider_field,
@@ -243,8 +263,10 @@ class RevenueCandidate:
                 "observation_identity": self.observation_identity,
                 "raw_metric_label": self.raw_metric_label,
                 "methodology_regime": self.methodology_regime,
+                **extra_dimensions,
             },
             raw={
+                **extra_raw,
                 "raw_metric_label": self.raw_metric_label,
                 "raw_quote": self.raw_quote,
                 "publisher_url": self.publisher_url,
@@ -415,7 +437,7 @@ def semantic_fingerprint(page_html: str) -> str:
         "revenue_metrics_table": "Revenue Metrics" in page_html,
         "table_columns": re.findall(r"<th[^>]*>\s*([A-Za-z]+)\s*</th>", page_html, re.I)[:4],
         "citation_toggle": "citation-toggle" in page_html,
-        "paywall_markers": page_html.count('aria-hidden="true"'),
+        "paywall_markers": 'aria-hidden="true"' in page_html,    # presence only: the count moves with the content
     }
     return _sha256(_stable_json(anchors))
 
@@ -670,6 +692,10 @@ def build_candidate(*, match_literal: str, match_start: int, before: str, after:
             period, period_start, period_end, period_basis = resolved[0]
             year_source = resolved[1]
 
+    if period_basis == "annual" and re.search(r"\bQ[1-4]\b", after[:32]):
+        # "from $5.7B in Q1 to $6.7B in Q2" are quarterly figures. Read as the year they collide in one annual cell
+        # (the quality gate quarantined the second one every run) and, worse, a quarter would be stored as a year.
+        reasons.append("quarterly_figure_not_annual")
     identity = classify_identity(window, row_type=row_type)
     metric_id = classify_metric(
         window, period_basis=period_basis, row_type=row_type,
@@ -835,12 +861,14 @@ def tickertrends_semantic_fingerprint(candidates: Iterable[RevenueCandidate]) ->
             "observation_identity": item.observation_identity,
             "metric_id": item.metric_id,
             "raw_metric_label": item.raw_metric_label,
+            **({"product_scope": item.product_scope} if item.product_scope else {}),
         }
         for item in candidates
         if item.accepted
     ]
     admitted.sort(key=lambda row: (row["entity_id"], row["period"],
-                                   row["metric_id"], row["value"]))
+                                   row["metric_id"], row["value"],
+                                   row.get("product_scope", "")))
     return _sha256(_stable_json(admitted))
 
 
@@ -855,12 +883,412 @@ def _parse_iso(value: str) -> datetime:
 
 
 def methodology_fingerprint(semantic: str, latest_period: str, parser_version: str) -> str:
-    """Bind the semantic layout, latest period family and parser version together."""
+    """Bind the semantic layout and parser version together.
+
+    `latest_period` is accepted for the call sites but is NOT part of the hash: the newest period on the page is
+    data, not methodology. It used to be hashed, so every new data point (OpenAI 2025-12 -> 2026-09, Anthropic
+    2026-05 -> 2026-07) changed the fingerprint, the discovery step called it `methodology_drift` and stopped, and the
+    source could never ingest a newer period again (G0 S25, 2026-10-22).
+    """
     return _sha256(_stable_json({
-        "semantic_fingerprint": semantic, "latest_period": latest_period,
+        "semantic_fingerprint": semantic,
         "parser_version": parser_version,
         "methodology_regime": METHODOLOGY_REGIME_THIRD_PARTY_ESTIMATE,
     }))
+
+
+# --------------------------------------------------------------------------- #
+# TickerTrends research notes
+# --------------------------------------------------------------------------- #
+#
+# The notes restate TickerTrends' own tracked ARR, quote other outlets (Bloomberg, FT, Axios ...), give
+# product-line ARR (Claude Code, Codex, ChatGPT Ads) and closed-quarter revenue.  None of that is authoritative
+# on its own, and none of it is thrown away: every figure keeps the identity of whoever stated it, the product
+# it describes and the period basis it was stated on, so the consumer can compare like with like.  What a note
+# cannot support is refused with a reason code and kept in the artifact's diagnostics:
+# no resolvable date, no resolvable subject, increments instead of levels, cost/financing items.
+
+_NOTE_PRODUCTS: tuple[tuple[str, str, str], ...] = (
+    # (phrase as written, canonical product, owning entity); phrases that contain another name come first.
+    ("OpenAI Codex", "Codex", "OPENAI"),
+    ("Claude mobile app", "Claude mobile app", "ANTHROPIC"),
+    ("ChatGPT Ads", "ChatGPT Ads", "OPENAI"),
+    ("Claude Code", "Claude Code", "ANTHROPIC"),
+    ("Codex", "Codex", "OPENAI"),
+    ("ChatGPT", "ChatGPT", "OPENAI"),
+)
+_NOTE_COMPANIES: tuple[tuple[str, str], ...] = (
+    ("OpenAI", "OPENAI"), ("Anthropic", "ANTHROPIC"), ("Claude", "ANTHROPIC"))
+_NOTE_MEDIA = (
+    "The Information", "Reuters", "Bloomberg", "TechCrunch", "Fortune", "Financial Times", "FT",
+    "Wall Street Journal", "WSJ", "Axios", "CNBC", "Business Insider", "Forbes", "Semafor",
+    "The Verge", "New York Times", "NYT")
+_NOTE_MEDIA_RE = re.compile(r"\b(" + "|".join(re.escape(item) for item in _NOTE_MEDIA) + r")\b")
+_NOTE_MEDIA_CANONICAL = {"FT": "Financial Times", "WSJ": "Wall Street Journal",
+                         "NYT": "New York Times"}
+_NOTE_COMPANY_SAID_RE = re.compile(
+    r"\b(?:OpenAI|Anthropic)(?:['’]s)?\s+(?:reported|said|says|disclosed|announced|confirmed|revealed)\b"
+    r"|\bthe company (?:said|says|reported|disclosed|announced)\b", re.I)
+_NOTE_GENERIC_REPORT_RE = re.compile(
+    r"\b(?:reported|reports|reportedly|headlines?|according to)\b", re.I)
+_NOTE_TRACKING_RE = re.compile(r"\b(?:tracked|tracking|tracker|TickerTrends|our)\b", re.I)
+_NOTE_PROJECTION_RE = re.compile(
+    r"\b(?:expects?|expected|projects?|projected|projection|targets?|targeting|forecasts?|"
+    r"anticipates?|anticipated|guidance|aims?|on pace)\b", re.I)
+_NOTE_CLAUSE_BREAK_RE = re.compile(
+    r";|:|\bwhile\b|\bversus\b|\bvs\b\.?|\bwhereas\b|\bcompared (?:with|to)\b|\bbut\b", re.I)
+_NOTE_DELTA_BEFORE_RE = re.compile(
+    r"(?:increase[ds]?|rose|grew|adding|added|adds?|gain(?:ed)?|jump(?:ed)?)"
+    r"(?:\s+(?:by|of))?\s+(?:approximately\s+|about\s+|roughly\s+|around\s+)?$", re.I)
+_NOTE_DELTA_AFTER_RE = re.compile(
+    r"^\s*(?:billion|bn|[BMT])?\s*(?:increase|gain|rise|jump|growth|decline|decrease|difference)\b", re.I)
+_NOTE_DELTA_SENTENCE_RE = re.compile(r"\b(?:difference|gap)\b", re.I)
+_NOTE_LATEST_RE = re.compile(r"\b(?:latest|current(?:ly)?|today|now)\b", re.I)
+_NOTE_BOUND_RE = (
+    ("lower_bound", re.compile(
+        r"(?:more than|over|at least|surpass(?:ed|ing)?|exceed(?:ed|ing)?|above)\s+(?:an?\s+)?$", re.I)),
+    ("upper_bound", re.compile(r"(?:less than|under|below|up to)\s+(?:an?\s+)?$", re.I)),
+    ("approximate", re.compile(
+        r"(?:approximately|about|roughly|around|nearly|almost|approaching|close to|~)\s*$", re.I)),
+)
+_MONTH_ABBREVIATIONS = {
+    "Jan": "January", "Feb": "February", "Mar": "March", "Apr": "April", "Jun": "June",
+    "Jul": "July", "Aug": "August", "Sept": "September", "Sep": "September", "Oct": "October",
+    "Nov": "November", "Dec": "December"}
+_MONTH_ABBREVIATION_RE = re.compile(
+    r"\b(" + "|".join(sorted(_MONTH_ABBREVIATIONS, key=len, reverse=True)) + r")\b(?:\.(?=\s*\d))?")
+_NOTE_MONTH = "|".join(sorted(_MONTH_NAMES, key=len, reverse=True))
+_NOTE_DATE_RE = re.compile(
+    rf"(?P<day>\b(?P<dm>{_NOTE_MONTH})\s+(?P<dd>\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s*(?P<dy>20\d\d))?\b)"
+    rf"|(?P<quarter>\bQ(?P<qn>[1-4])(?:\s+(?P<qy>20\d\d))?\b)"
+    rf"|(?P<month>\b(?P<mm>{_NOTE_MONTH})(?:,?\s+(?P<my>20\d\d))?\b)")
+_NOTE_RELEVANCE_RE = re.compile(r"\b(?:ARR|revenue|run[- ]?rate)\b", re.I)
+_NOTE_MAX_ATTRIBUTION_GAP = 40
+
+
+def note_is_relevant(entry: dict[str, Any]) -> bool:
+    """Archive listing filter: public, inside the notes window, and about revenue/ARR."""
+    if str(entry.get("post_date") or "")[:10] < TICKERTRENDS_NOTES_START:
+        return False
+    if str(entry.get("slug") or "") in {"", TICKERTRENDS_ARTICLE_SLUG}:
+        return False
+    if str(entry.get("audience") or "everyone") != "everyone":
+        return False
+    text = " ".join(str(entry.get(key) or "") for key in
+                    ("title", "subtitle", "description", "search_engine_title", "slug"))
+    return bool(_NOTE_RELEVANCE_RE.search(text.replace("-", " ")))
+
+
+def expand_month_abbreviations(text: str) -> str:
+    """``Aug. 12`` -> ``August 12`` so dates survive sentence splitting and period resolution."""
+    return _MONTH_ABBREVIATION_RE.sub(lambda m: _MONTH_ABBREVIATIONS[m.group(1)], text)
+
+
+def _note_mentions(sentence: str) -> list[tuple[int, int, str, str]]:
+    """Company and product names in order: (start, end, owning entity, product or '')."""
+    found: list[tuple[int, int, str, str]] = []
+    for phrase, product, owner in _NOTE_PRODUCTS:
+        for match in re.finditer(rf"\b{re.escape(phrase)}\b", sentence, re.I):
+            found.append((match.start(), match.end(), owner, product))
+    for phrase, owner in _NOTE_COMPANIES:
+        for match in re.finditer(rf"\b{re.escape(phrase)}\b", sentence):
+            found.append((match.start(), match.end(), owner, ""))
+    kept: list[tuple[int, int, str, str]] = []
+    for item in sorted(found, key=lambda row: (row[0], -(row[1] - row[0]))):
+        if any(other[0] <= item[0] and item[1] <= other[1] and other != item for other in kept):
+            continue
+        kept.append(item)
+    return kept
+
+
+def _note_subject(sentence: str, mentions: Sequence[tuple[int, int, str, str]],
+                  amount_start: int, amount_end: int) -> tuple[int, int, str, str] | None:
+    """The name an amount belongs to: ``... for OpenAI Codex`` after it, else the nearest name before."""
+    for mention in mentions:
+        if mention[3] and 0 <= mention[0] - amount_end <= 2:
+            return mention  # "$2.5 billion Claude Code run rate": the product named right after the figure
+    trailing = re.match(r"[^.;:]{0,30}?\bfor\s+(?:the\s+)?", sentence[amount_end: amount_end + 60])
+    if trailing:
+        position = amount_end + trailing.end()
+        for mention in mentions:
+            if mention[0] == position:
+                return mention
+    before = [mention for mention in mentions if mention[1] <= amount_start]
+    return max(before, key=lambda mention: mention[1]) if before else None
+
+
+def _note_year(month: int, published: date, explicit: str, *, allow_future: bool) -> tuple[int, str]:
+    if explicit:
+        return int(explicit), "explicit"
+    year = published.year
+    if not allow_future and month > published.month + 1:
+        year -= 1  # a month still to come cannot be a reading already published
+    return year, "publication_year"
+
+
+def _note_period_mentions(sentence: str, published: date, *, allow_future: bool) -> list[dict[str, Any]]:
+    mentions: list[dict[str, Any]] = []
+    for match in _NOTE_DATE_RE.finditer(sentence):
+        if match.group("day"):
+            month, day = _MONTH_NAMES[match.group("dm")], int(match.group("dd"))
+            year, source = _note_year(month, published, match.group("dy") or "", allow_future=allow_future)
+            try:
+                iso = date(year, month, day).isoformat()
+            except ValueError:
+                continue
+            period = (iso, iso, iso, "instant")
+        elif match.group("quarter"):
+            quarter = int(match.group("qn"))
+            first_month = _QUARTER_BOUNDS[quarter][0]
+            year, source = _note_year(first_month, published, match.group("qy") or "",
+                                      allow_future=allow_future)
+            period = (*_quarter_bounds(year, quarter), "quarter")
+        else:
+            month = _MONTH_NAMES[match.group("mm")]
+            year, source = _note_year(month, published, match.group("my") or "", allow_future=allow_future)
+            period = (*_month_bounds(year, month), "calendar_month")
+        mentions.append({"start": match.start(), "end": match.end(), "period": period,
+                         "year_source": source})
+    return mentions
+
+
+def _span_gap(first: tuple[int, int], second: tuple[int, int]) -> int:
+    if first[1] <= second[0]:
+        return second[0] - first[1]
+    if second[1] <= first[0]:
+        return first[0] - second[1]
+    return 0
+
+
+def _assign_periods(amounts: Sequence[tuple[int, int]], mentions: Sequence[dict[str, Any]]
+                    ) -> list[dict[str, Any] | None]:
+    """Pair each amount with the date the author wrote for it.
+
+    One date per amount in the same order is the usual shape (``$X on July 6, $Y on July 13``); a single
+    date governs a whole comparison (``As of August 10, A was $X versus B at $Y``); anything else falls back
+    to the nearest date within a short distance.  Amounts left without a date are the caller's to refuse.
+    """
+    if amounts and len(mentions) == len(amounts):
+        return list(mentions)
+    if amounts and len(mentions) == 1:
+        return [mentions[0]] * len(amounts)
+    assigned: list[dict[str, Any] | None] = [None] * len(amounts)
+    pairs = sorted((_span_gap(amount, (mention["start"], mention["end"])), index, position)
+                   for index, amount in enumerate(amounts)
+                   for position, mention in enumerate(mentions))
+    used_amounts: set[int] = set()
+    used_mentions: set[int] = set()
+    for gap, index, position in pairs:
+        if gap > _NOTE_MAX_ATTRIBUTION_GAP:
+            break
+        if index in used_amounts or position in used_mentions:
+            continue
+        assigned[index] = mentions[position]
+        used_amounts.add(index)
+        used_mentions.add(position)
+    for index, amount in enumerate(amounts):
+        if assigned[index] is not None:
+            continue
+        near = [(gap, position) for gap, idx, position in pairs
+                if idx == index and gap <= _NOTE_MAX_ATTRIBUTION_GAP]
+        if near:
+            assigned[index] = mentions[min(near)[1]]
+    return assigned
+
+
+def _note_clause(sentence: str, start: int, end: int) -> tuple[str, int, int]:
+    """The part of the sentence an amount is attributed within (cut at ';', ':', 'while', 'versus' ...)."""
+    left = 0
+    right = len(sentence)
+    for match in _NOTE_CLAUSE_BREAK_RE.finditer(sentence):
+        if match.end() <= start:
+            left = match.end()
+        elif match.start() >= end:
+            right = match.start()
+            break
+    return sentence[left:right], left, right
+
+
+def _note_identity(clause: str) -> tuple[str, str, str]:
+    """(observation identity, origin publisher, attributed-to) from the words around one amount."""
+    media = _NOTE_MEDIA_RE.search(clause)
+    outlet = _NOTE_MEDIA_CANONICAL.get(media.group(1), media.group(1)) if media else ""
+    if _NOTE_PROJECTION_RE.search(clause):
+        return OBSERVATION_IDENTITY_PROJECTION, outlet or "TickerTrends", outlet
+    if media:
+        return OBSERVATION_IDENTITY_MEDIA, outlet, outlet
+    if _NOTE_COMPANY_SAID_RE.search(clause):
+        return OBSERVATION_IDENTITY_COMPANY, "company statement via TickerTrends", "company"
+    if _NOTE_TRACKING_RE.search(clause):
+        return OBSERVATION_IDENTITY_ESTIMATE, "TickerTrends", "TickerTrends"
+    if _NOTE_GENERIC_REPORT_RE.search(clause):
+        return OBSERVATION_IDENTITY_MEDIA, "unnamed media reports via TickerTrends", "unnamed media"
+    return OBSERVATION_IDENTITY_ESTIMATE, "TickerTrends", "TickerTrends"
+
+
+def _note_qualifier(before: str) -> str:
+    for name, pattern in _NOTE_BOUND_RE:
+        if pattern.search(before):
+            return name
+    return ""
+
+
+def parse_tickertrends_note(article: dict[str, Any], *,
+                            parser_version: str = TICKERTRENDS_NOTES_PARSER_VERSION
+                            ) -> tuple[list[RevenueCandidate], dict[str, Any]]:
+    """Every explicit dollar amount of one note, with its identity, scope, basis and refusal reasons."""
+    slug = str(article.get("slug") or "")
+    title = str(article.get("title") or "")
+    url = str(article.get("canonical_url") or f"https://blog.tickertrends.io/p/{slug}")
+    published_at = _parse_iso(article.get("post_date", ""))
+    published_day = published_at.date()
+    body_html = str(article.get("body_html") or "")
+    text = expand_month_abbreviations(strip_html(body_html, drop_figures=True))
+    slice_key = f"tickertrends:{slug}"
+
+    title_mentions = _note_mentions(expand_month_abbreviations(title))
+    title_subjects = {(item[2], item[3]) for item in title_mentions}
+    carried: tuple[str, str] | None = next(iter(title_subjects)) if len(title_subjects) == 1 else None
+    candidates: list[RevenueCandidate] = []
+    previous = title
+    for sentence in _sentences(text):
+        mentions = _note_mentions(sentence)
+        amounts = list(_MONEY_RE.finditer(sentence))
+        if amounts:
+            projecting = bool(_NOTE_PROJECTION_RE.search(sentence))
+            periods = _assign_periods([(item.start(), item.end()) for item in amounts],
+                                      _note_period_mentions(sentence, published_day,
+                                                            allow_future=projecting))
+            sentence_is_delta = bool(_NOTE_DELTA_SENTENCE_RE.search(sentence))
+            context = f"{title} {previous} {sentence}"
+            for match, resolved in zip(amounts, periods):
+                reasons: list[str] = []
+                before = sentence[:match.start()]
+                after = sentence[match.end():]
+                value = parse_amount(match.group(0))
+                if value is None:
+                    reasons.append("amount_unresolved")
+                    value = 0.0
+                if sentence_is_delta or _NOTE_DELTA_BEFORE_RE.search(before[-40:]) \
+                        or _NOTE_DELTA_AFTER_RE.match(after):
+                    reasons.append("delta_not_level")
+                clause, left, right = _note_clause(sentence, match.start(), match.end())
+                local = sentence[max(left, match.start() - 80): min(right, match.end() + 60)].lower()
+                if any(token.lower() in local for token in _NON_REVENUE_CONTEXT):
+                    reasons.append("not_company_revenue_context")
+                if not any(label.lower() in context.lower() for label in _REVENUE_LABEL):
+                    reasons.append("revenue_label_missing")
+
+                subject = _note_subject(sentence, mentions, match.start(), match.end())
+                inherited = False
+                if subject is not None:
+                    entity_id, product_scope = subject[2], subject[3]
+                elif carried is not None:
+                    (entity_id, product_scope), inherited = carried, True
+                else:
+                    entity_id, product_scope = "", ""
+                    reasons.append("company_unresolved")
+
+                period = period_start = period_end = period_basis = year_source = ""
+                if resolved is not None:
+                    period, period_start, period_end, period_basis = resolved["period"]
+                    year_source = resolved["year_source"]
+                elif _NOTE_LATEST_RE.search(sentence):
+                    period = period_start = period_end = published_day.isoformat()
+                    period_basis, year_source = "instant", "publication_date"
+                else:
+                    reasons.append("reference_period_unresolved")
+
+                identity, origin_publisher, attributed_to = _note_identity(clause)
+                row_type = "projection" if identity == OBSERVATION_IDENTITY_PROJECTION else ""
+                metric_id = classify_metric(
+                    clause, period_basis=period_basis, row_type=row_type,
+                    cue_window=f"{previous[-160:]} {sentence[max(0, match.start() - 160): match.end()]}")
+                if metric_id == METRIC_REPORTED_ARR and identity != OBSERVATION_IDENTITY_COMPANY:
+                    # Someone else's "ARR" is their run-rate estimate, never a contract ARR.
+                    metric_id = METRIC_ANNUALIZED_RUN_RATE
+                if metric_id == METRIC_TRAILING_REVENUE and period_basis == "instant":
+                    metric_id = METRIC_ANNUALIZED_RUN_RATE  # a level "as of a day" is a run rate
+                if period_start and period_start > published_day.isoformat() \
+                        and identity != OBSERVATION_IDENTITY_PROJECTION:
+                    reasons.append("period_after_publication")
+                if value and not reasons and value < MINIMUM_COMPANY_REVENUE_USD:
+                    reasons.append("below_company_revenue_scale")
+
+                citation = {
+                    "origin_publisher": origin_publisher, "origin_title": title, "origin_url": url,
+                    "origin_quote": _collapse(sentence)[:600], "additional_citations": [],
+                    "note_slug": slug, "attributed_to": attributed_to,
+                    "subject_inherited": inherited}
+                candidates.append(RevenueCandidate(
+                    entity_id=entity_id, provider_field=provider_field_for(metric_id),
+                    metric_id=metric_id, observation_identity=identity,
+                    methodology_regime=methodology_regime_for(metric_id, identity),
+                    raw_metric_label=raw_metric_label(f"{clause} {context}"),
+                    period=period, period_start=period_start, period_end=period_end,
+                    period_basis=period_basis, value=value, currency="USD",
+                    raw_quote=_collapse(sentence)[:600], publisher_url=url,
+                    origin_citation=citation, extraction_method="tickertrends_note_body",
+                    slice_key=slice_key, product_scope=product_scope, published_at=published_at,
+                    diagnostics=tuple(reasons), period_year_source=year_source,
+                    value_qualifier=_note_qualifier(before[-30:])))
+        if mentions:
+            last = mentions[-1]
+            carried = (last[2], last[3])
+        previous = sentence
+
+    summary = {
+        "slice_key": slice_key, "slug": slug, "url": url, "title": title,
+        "published_at": published_at.isoformat(),
+        "content_sha256": _sha256(body_html),
+        "semantic_fingerprint": tickertrends_semantic_fingerprint(candidates),
+        "candidate_count": len(candidates),
+        "accepted_count": sum(1 for item in candidates if item.accepted),
+        "parser_version": parser_version,
+        "chart_reading_note": CHART_READING_PROHIBITED,
+    }
+    return candidates, {"per_page": [summary], "diagnostics": []}
+
+
+def merge_duplicate_candidates(candidates: Sequence[RevenueCandidate]
+                               ) -> tuple[list[RevenueCandidate], list[dict[str, Any]]]:
+    """One observation per cell: the same figure restated is merged, a changed figure is superseded.
+
+    A cell is entity x metric x period x identity x product.  When several notes state it, the newest note
+    stands; older notes with the same value are kept as additional citations, older notes with a different
+    value are reported as superseded instead of silently overwritten.
+    """
+    groups: dict[tuple[str, ...], list[RevenueCandidate]] = {}
+    for item in candidates:
+        if not item.accepted:
+            continue
+        key = (item.entity_id, item.provider_field, item.period, item.observation_identity,
+               item.product_scope)
+        groups.setdefault(key, []).append(item)
+    kept: list[RevenueCandidate] = []
+    superseded: list[dict[str, Any]] = []
+    for members in groups.values():
+        order = sorted(range(len(members)), key=lambda index: (
+            members[index].published_at or datetime.min.replace(tzinfo=timezone.utc), -index))
+        winner = members[order[-1]]
+        extra: list[dict[str, Any]] = []
+        for index in order[:-1]:
+            other = members[index]
+            larger = max(abs(winner.value), abs(other.value)) or 1.0
+            if abs(winner.value - other.value) / larger <= 0.005:
+                extra.append({"note_slug": other.origin_citation.get("note_slug", ""),
+                              "origin_quote": other.raw_quote[:300]})
+            else:
+                superseded.append({
+                    "entity_id": other.entity_id, "period": other.period, "value": other.value,
+                    "slice_key": other.slice_key, "reason_codes": ["superseded_by_newer_note"],
+                    "raw_quote": other.raw_quote[:200]})
+        if extra:
+            citation = dict(winner.origin_citation)
+            citation["additional_citations"] = [*citation.get("additional_citations", []), *extra]
+            winner = replace(winner, origin_citation=citation)
+        kept.append(winner)
+    return kept, superseded
 
 
 # --------------------------------------------------------------------------- #
@@ -1092,13 +1520,23 @@ class TickerTrendsPublicResearchAdapter:
     def __init__(self, *, seed_path: str | Path | None = None,
                  client: Any | None = None,
                  clock: Callable[[], datetime] | None = None,
-                 request_timeout: float = 45.0):
+                 request_timeout: float = 45.0,
+                 include_notes: bool = False,
+                 note_articles: Sequence[dict[str, Any]] | None = None,
+                 sleep: Callable[[float], None] | None = None):
         # An explicit seed_path pins the offline route; leaving it unset means
         # the adapter probes the live public post API.
         self.seed_path = Path(seed_path) if seed_path else None
         self.client = client
         self.clock = clock or _now
         self.request_timeout = request_timeout
+        # include_notes adds the notes series (archive listing + one post each) to the essay.  Explicit
+        # note_articles pin that series offline; a seed-pinned replay carries no notes unless given some.
+        self.include_notes = include_notes
+        self.note_articles = list(note_articles) if note_articles is not None else None
+        self.sleep = sleep or time.sleep
+        self.note_failures: list[str] = []
+        self._notes_cache: list[dict[str, Any]] | None = None
         self.article_url = TICKERTRENDS_POST_API_URL
         # Raw JSON text stays in memory only for the discovery -> ingest handoff;
         # the artifact store persists the constrained snapshot inside fetch().
@@ -1169,6 +1607,97 @@ class TickerTrendsPublicResearchAdapter:
             return article
         return self._live_article()
 
+    # -- notes series ------------------------------------------------------- #
+
+    def _get_text_with_retry(self, url: str, *, check: Callable[[str], None] | None = None) -> str:
+        """A few attempts per request: the proxy path here resets TLS handshakes now and then."""
+        failure: Exception | None = None
+        for attempt in range(TICKERTRENDS_FETCH_ATTEMPTS):
+            try:
+                body = self._static_get(url)
+                if check is not None:
+                    check(body)
+                return body
+            except Exception as exc:  # noqa: BLE001 - classified by the caller
+                failure = exc
+                if attempt + 1 < TICKERTRENDS_FETCH_ATTEMPTS:
+                    self.sleep(1.5 * (attempt + 1))
+        assert failure is not None
+        raise failure
+
+    @staticmethod
+    def _json_check(url: str) -> Callable[[str], None]:
+        def check(body: str) -> None:
+            try:
+                json.loads(body)
+            except ValueError as exc:
+                raise ConnectionError(f"tickertrends_api_not_json:{url}") from exc
+        return check
+
+    @staticmethod
+    def _note_payload(article: dict[str, Any]) -> dict[str, Any]:
+        keep = ("id", "slug", "title", "subtitle", "post_date", "canonical_url", "audience",
+                "type", "body_html")
+        return {key: article.get(key) for key in keep if key in article}
+
+    def _live_notes(self) -> list[dict[str, Any]]:
+        entries: dict[str, dict[str, Any]] = {}
+        for page in range(TICKERTRENDS_ARCHIVE_MAX_PAGES):
+            url = TICKERTRENDS_ARCHIVE_TEMPLATE.format(
+                limit=TICKERTRENDS_ARCHIVE_PAGE_SIZE, offset=page * TICKERTRENDS_ARCHIVE_PAGE_SIZE)
+            listing = json.loads(self._get_text_with_retry(url, check=self._json_check(url)))
+            if not isinstance(listing, list):
+                raise ConnectionError(f"tickertrends_archive_unexpected:{url}")
+            for entry in listing:
+                if isinstance(entry, dict) and entry.get("slug"):
+                    entries.setdefault(str(entry["slug"]), entry)
+            oldest = str(listing[-1].get("post_date") or "")[:10] if listing else ""
+            if len(listing) < TICKERTRENDS_ARCHIVE_PAGE_SIZE or oldest < TICKERTRENDS_NOTES_START:
+                break
+        articles: list[dict[str, Any]] = []
+        for slug, entry in entries.items():
+            if not note_is_relevant(entry):
+                continue
+            url = TICKERTRENDS_POST_API_TEMPLATE.format(slug=slug)
+            try:
+                body = self._get_text_with_retry(url, check=self._json_check(url))
+            except Exception as exc:  # noqa: BLE001 - one note must not take the others down
+                self.note_failures.append(f"tickertrends_note_unreachable:{slug}:{type(exc).__name__}")
+                continue
+            article = json.loads(body)
+            if not isinstance(article, dict) or article.get("free_unlock_required") \
+                    or str(article.get("audience") or "everyone") != "everyone":
+                self.note_failures.append(f"tickertrends_note_not_public:{slug}")
+                continue
+            self.discovered_payloads[slug] = body
+            articles.append(article)
+        return articles
+
+    def _notes(self, request: FetchRequest | None = None) -> list[dict[str, Any]]:
+        if not self.include_notes and self.note_articles is None:
+            return []
+        supplied = ((request.query_scope or {}).get("payloads") or {}) if request else {}
+        from_probe = [json.loads(str(text)) for slug, text in supplied.items()
+                      if slug != TICKERTRENDS_ARTICLE_SLUG and text] if isinstance(supplied, dict) else []
+        if from_probe:
+            return from_probe
+        if self.note_articles is not None:
+            return list(self.note_articles)
+        if self._notes_cache is not None:
+            return list(self._notes_cache)
+        if self.seed_path is not None:
+            return []
+        self._notes_cache = self._live_notes()
+        return list(self._notes_cache)
+
+    def _parsed_notes(self, request: FetchRequest | None = None
+                      ) -> list[tuple[dict[str, Any], list[RevenueCandidate], dict[str, Any]]]:
+        parsed = []
+        for article in self._notes(request):
+            candidates, report = parse_tickertrends_note(article)
+            parsed.append((article, candidates, next(iter(report.get("per_page") or []), {})))
+        return parsed
+
     # -- discovery ---------------------------------------------------------- #
 
     def discover(self, request: FetchRequest) -> DiscoveryResult:
@@ -1192,30 +1721,71 @@ class TickerTrendsPublicResearchAdapter:
                 status=IngestionStatus.PARSE_FAILED,
                 message="revenue_observations_missing:tickertrends",
                 slice_key=f"tickertrends:{TICKERTRENDS_ARTICLE_SLUG}"))
+        release_candidates = [ReleaseCandidate(
+            identity=identity, period=latest_period, urls=[url],
+            methodology_fingerprint=methodology_fingerprint(
+                fingerprint, latest_period, self.parser_version),
+            metadata={"scope": TICKERTRENDS_ARTICLE_SLUG,
+                      "payload_sha256": summary.get("content_sha256", ""),
+                      "semantic_fingerprint": fingerprint,
+                      "latest_period": latest_period,
+                      "candidate_count": summary.get("candidate_count", 0),
+                      "accepted_count": summary.get("accepted_count", 0),
+                      "payload_origin": self.payload_origin,
+                      "parser_version": self.parser_version,
+                      "methodology_regime": METHODOLOGY_REGIME_THIRD_PARTY_ESTIMATE})]
+        latest_end = max((item.period_end for item in candidates
+                          if item.accepted and item.period == latest_period), default="")
+        summaries = [summary]
+        identities = [identity]
+        for note, note_candidates, note_summary in self._parsed_notes(request):
+            summaries.append(note_summary)
+            accepted = [item for item in note_candidates if item.accepted]
+            if not accepted:
+                continue  # a note without a usable figure is diagnosed, not announced as a release
+            newest = max(accepted, key=lambda item: (item.period_end, item.period))
+            note_period = newest.period
+            # periods come in three shapes (day, month, quarter); order them by the day they end, not as text
+            if (newest.period_end, note_period) > (latest_end, latest_period):
+                latest_end, latest_period = newest.period_end, note_period
+            note_identity = (f"tickertrends:{note_summary['slug']}:{note_period}:"
+                             f"{note_summary['semantic_fingerprint']}")
+            identities.append(note_identity)
+            release_candidates.append(ReleaseCandidate(
+                identity=note_identity, period=note_period,
+                urls=[str(note_summary["url"])],
+                # The claims are data; only the parser version is methodology.  Hashing the claims here would
+                # report methodology drift every time a note is revised.
+                methodology_fingerprint=methodology_fingerprint(
+                    "", note_period, TICKERTRENDS_NOTES_PARSER_VERSION),
+                metadata={"scope": str(note_summary["slug"]),
+                          "payload_sha256": note_summary.get("content_sha256", ""),
+                          "semantic_fingerprint": note_summary["semantic_fingerprint"],
+                          "latest_period": note_period,
+                          "candidate_count": note_summary.get("candidate_count", 0),
+                          "accepted_count": note_summary.get("accepted_count", 0),
+                          "published_at": note_summary.get("published_at", ""),
+                          "payload_origin": self.payload_origin or TICKERTRENDS_ORIGIN_LIVE,
+                          "parser_version": TICKERTRENDS_NOTES_PARSER_VERSION,
+                          "methodology_regime": METHODOLOGY_REGIME_THIRD_PARTY_ESTIMATE}))
+        for message in self.note_failures:
+            failures.append(AdapterFailure(
+                status=IngestionStatus.UNREACHABLE, message=message,
+                slice_key=f"tickertrends:{message.split(':')[1] if ':' in message else ''}"))
+        upstream_identity = (f"TICKERTRENDS:{_sha256(identity)[:24]}" if len(identities) == 1
+                             else f"TICKERTRENDS:{_sha256('|'.join(sorted(identities)))[:24]}")
         return DiscoveryResult(
             source_id=request.source_id, dataset_id=request.dataset_id,
             checked_at=checked_at,
             status=(DiscoveryStatus.PARTIAL if failures
                     else DiscoveryStatus.NEW_RELEASE),
-            latest_upstream_identity=(f"TICKERTRENDS:"
-                                      f"{_sha256(identity)[:24]}"),
+            latest_upstream_identity=upstream_identity,
             latest_available_period=latest_period,
-            candidates=[ReleaseCandidate(
-                identity=identity, period=latest_period, urls=[url],
-                methodology_fingerprint=methodology_fingerprint(
-                    fingerprint, latest_period, self.parser_version),
-                metadata={"scope": TICKERTRENDS_ARTICLE_SLUG,
-                          "payload_sha256": summary.get("content_sha256", ""),
-                          "semantic_fingerprint": fingerprint,
-                          "latest_period": latest_period,
-                          "candidate_count": summary.get("candidate_count", 0),
-                          "accepted_count": summary.get("accepted_count", 0),
-                          "payload_origin": self.payload_origin,
-                          "parser_version": self.parser_version,
-                          "methodology_regime": METHODOLOGY_REGIME_THIRD_PARTY_ESTIMATE})],
-            diagnostics={"per_page": [summary],
+            candidates=release_candidates,
+            diagnostics={"per_page": summaries,
                          "payload_origin": self.payload_origin,
                          "scheduled_discovery": True,
+                         "note_failures": list(self.note_failures),
                          "chart_reading_note": CHART_READING_PROHIBITED})
 
     def fetch(self, request: FetchRequest) -> AdapterBatch:
@@ -1227,19 +1797,48 @@ class TickerTrendsPublicResearchAdapter:
         candidates, report = parse_tickertrends_article(
             body_html=body_html, url=url, published_at=published_at)
         summary = next(iter(report.get("per_page") or []), {})
-        records: list[NativeRecord] = []
         rejected: list[dict[str, Any]] = []
+        accepted_candidates: list[RevenueCandidate] = []
         for candidate in candidates:
             record_candidate = RevenueCandidate(
                 **{**candidate.__dict__, "published_at": published_at})
             if candidate.accepted:
-                records.append(record_candidate.as_native_record())
+                accepted_candidates.append(record_candidate)
             else:
                 rejected.append({"entity_id": candidate.entity_id,
                                  "period": candidate.period, "value": candidate.value,
                                  "slice_key": candidate.slice_key,
                                  "reason_codes": list(candidate.diagnostics),
                                  "raw_quote": candidate.raw_quote[:200]})
+        artifacts: list[AdapterArtifact] = []
+
+        parsed_notes = self._parsed_notes(request)
+        note_accepted: list[RevenueCandidate] = []
+        for note, note_candidates, note_summary in parsed_notes:
+            note_rejected = [
+                {"entity_id": item.entity_id, "period": item.period, "value": item.value,
+                 "slice_key": item.slice_key, "reason_codes": list(item.diagnostics),
+                 "raw_quote": item.raw_quote[:200]}
+                for item in note_candidates if not item.accepted]
+            rejected.extend(note_rejected)
+            note_accepted.extend(item for item in note_candidates if item.accepted)
+            artifacts.append(AdapterArtifact(
+                artifact_key=f"tickertrends:{note_summary['slug']}",
+                payload=self._note_payload(note),
+                query_scope={"slug": note_summary["slug"],
+                             "parser_version": TICKERTRENDS_NOTES_PARSER_VERSION},
+                source_url=str(note_summary["url"]),
+                source_version=str(note_summary.get("content_sha256", ""))[:16],
+                media_type="application/json", retention="constrained_snapshot",
+                metadata={**note_summary, "payload_origin": self.payload_origin or TICKERTRENDS_ORIGIN_LIVE,
+                          "excluded_candidates": note_rejected}))
+        if parsed_notes:
+            # Several notes restate the same reading: merge restatements, supersede changed figures.
+            merged, superseded = merge_duplicate_candidates([*accepted_candidates, *note_accepted])
+            rejected.extend(superseded)
+        else:
+            merged = accepted_candidates
+        records: list[NativeRecord] = [item.as_native_record() for item in merged]
         admitted, quarantined = partition_admissible_records(records)
         failures: list[AdapterFailure] = []
         total = len(records)
@@ -1250,23 +1849,31 @@ class TickerTrendsPublicResearchAdapter:
                 status=IngestionStatus.VALIDATION_FAILED,
                 message=f"quality_gate_quarantined:{len(quarantined)}/{total}",
                 slice_key=f"tickertrends:{TICKERTRENDS_ARTICLE_SLUG}"))
+        for message in self.note_failures:
+            failures.append(AdapterFailure(
+                status=IngestionStatus.UNREACHABLE, message=message,
+                slice_key=f"tickertrends:{message.split(':')[1] if ':' in message else ''}"))
         status = IngestionStatus.PARTIAL if failures and records else (
             IngestionStatus.SUCCEEDED if records else IngestionStatus.ZERO_MATCH)
+        essay_slice = f"tickertrends:{TICKERTRENDS_ARTICLE_SLUG}"
+        artifacts.insert(0, AdapterArtifact(
+            artifact_key=essay_slice, payload=article,
+            query_scope={"slug": TICKERTRENDS_ARTICLE_SLUG,
+                         "accepted_reference_period": list(TICKERTRENDS_ACCEPTED_WINDOW)},
+            source_url=url, source_version=str(summary.get("content_sha256", ""))[:16],
+            media_type="application/json", retention="constrained_snapshot",
+            metadata={**summary, "published_at": published_at.isoformat(),
+                      "payload_origin": self.payload_origin,
+                      "excluded_candidates": [item for item in rejected
+                                              if item.get("slice_key") == essay_slice]}))
         return AdapterBatch(
             source_id=request.source_id, dataset_id=request.dataset_id, status=status,
             fetched_at=fetched_at, records=records, failures=failures,
-            artifacts=[AdapterArtifact(
-                artifact_key=f"tickertrends:{TICKERTRENDS_ARTICLE_SLUG}",
-                payload=article,
-                query_scope={"slug": TICKERTRENDS_ARTICLE_SLUG,
-                             "accepted_reference_period": list(TICKERTRENDS_ACCEPTED_WINDOW)},
-                source_url=url, source_version=str(summary.get("content_sha256", ""))[:16],
-                media_type="application/json", retention="constrained_snapshot",
-                metadata={**summary, "published_at": published_at.isoformat(),
-                          "payload_origin": self.payload_origin,
-                          "excluded_candidates": rejected})],
+            artifacts=artifacts,
             provider_metadata={
                 "parser_version": self.parser_version,
+                "notes_parser_version": TICKERTRENDS_NOTES_PARSER_VERSION if parsed_notes else "",
+                "notes_ingested": [item[2]["slug"] for item in parsed_notes],
                 "published_at": published_at.isoformat(),
                 "accepted_reference_period": list(TICKERTRENDS_ACCEPTED_WINDOW),
                 "rejected_candidates": rejected,
@@ -1293,6 +1900,9 @@ def revenue_record_issues(record: NativeRecord, *, seen: set[tuple[str, ...]] | 
     issues: list[str] = []
     key = (record.entity_id, record.provider_field, record.period,
            str(record.dimensions.get("observation_identity", "")))
+    if record.dimensions.get("product_scope"):
+        # A product line and its parent company legitimately share entity/metric/period/identity.
+        key = key + (str(record.dimensions["product_scope"]),)
     if seen is not None:
         if key in seen:
             issues.append(f"duplicate_cell:{key}")

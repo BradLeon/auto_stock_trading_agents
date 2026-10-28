@@ -203,6 +203,18 @@ def backfill(symbols: list[str], since: datetime, until: datetime | None = None,
     """Persist one date-bounded daily backfill for a symbol universe."""
     from .stores.unstructured import get_data_ingestion_store
     from . import news as news_store
+    from pathlib import Path
+    from .runtime.repository import platform_data_db_path
+
+    store_path = getattr(store, "path", None) or getattr(getattr(store, "data", None), "path", None)
+    if store is None or (store_path and
+            Path(str(store_path)).expanduser().resolve() == platform_data_db_path().resolve()):
+        # This legacy path fabricates a source id per ticker and is not the governed
+        # IBKR-fallback source registered in unstructured.yaml. Do not query or persist
+        # it in production; the approved fallback is article-ingest(yfinance_live_news).
+        raise PermissionError(
+            "standalone yahoo_news backfill is retired for production; use the managed "
+            "IBKR-scoped yfinance_live_news fallback")
 
     store = store or get_data_ingestion_store()
     from ..config import canonical_entity

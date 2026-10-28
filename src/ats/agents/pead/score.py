@@ -1,8 +1,9 @@
-"""Post-earnings PEAD agents: actuals extraction, Surprise Scorecard, decision.
+"""Post-earnings PEAD agents: actuals extraction and Surprise Scorecard.
 
 Division of labor (same philosophy as risk_validator): the LLM judges semantics
 (actual vs expected per dimension), but the WEIGHTING, THRESHOLD BANDS, and the
-DECISION TREE are deterministic code — auditable and not left to the model.
+event-view derivation are deterministic code — auditable and not left to the
+model. Phase D: no sizing, no actions, no portfolio reads (task 5.7).
 """
 
 from __future__ import annotations
@@ -15,11 +16,9 @@ from ...schemas.pead import (
     Actuals,
     ExpectationSet,
     PeadConfig,
-    PeadRecommendation,
     Scorecard,
     ScorecardLine,
 )
-from ...schemas.portfolio import PortfolioSnapshot
 from ..base import run_structured
 from .outputs import ActualsView, ScoresView
 
@@ -49,9 +48,15 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
                     transcript_chars: int = 120_000,
                     documents_chars: int = 40_000) -> Actuals:
     exp_lines = ""
-    if expectations:
+    if expectations and expectations.expectations:
         exp_lines = "\n".join(
             f"  - {e.dim_key}: neutral={e.neutral}" for e in expectations.expectations)
+    else:
+        # No baseline to read the dimensions from: name the scorecard's own, or the model invents its own keys
+        # (`financial.revenue.gaap [USD, quarter]`) and no scorecard line ever finds its reading.
+        exp_lines = "\n".join(f"  - {d.key}: {d.label} (no baseline)" for d in config.scorecard_dims)
+    dim_keys = {d.key for d in config.scorecard_dims} | {
+        e.dim_key for e in (expectations.expectations if expectations else [])}
     # Opus/Sonnet have 200K context: a chrome-stripped transcript (~55K chars ≈ 14K
     # tokens) fits whole, so the default cap is a guardrail, not a routine clip.
     transcript_block = _clip(transcript_text, transcript_chars) if transcript_text else "(no transcript)"
@@ -65,10 +70,24 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         "Using ALL of the above (press release + presentation carry segment QoQ/YoY, guidance, "
         "and market commentary), give per scorecard dimension the actual value, a 'vs_expected' "
         "tag (远超/超/中性/低于/远低于 + 🔴/✅/⚪/⚠️) and a note. Extract forward GUIDANCE and key "
-        "qualitative call signals separately. Set reported_eps / reported_revenue if present."
+        "qualitative call signals separately. Set reported_eps / reported_revenue if present: "
+        "reported_revenue is an ABSOLUTE number (11700000000 for EUR 11.7B), both are in the currency the company "
+        "reports in, and reporting_currency names it (ISO code). Never convert currencies. If the release also gives "
+        "revenue in a convenience currency (TSMC quotes US$ next to NT$), use the REPORTING-currency figure; if you "
+        "only have the other currency's figure, leave reported_revenue empty rather than label it with the wrong code."
     )
+    expected_dims = bool(expectations and expectations.expectations)
     try:
         view: ActualsView = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
+        if dim_keys and view.metrics and not any(m.dim_key in dim_keys for m in view.metrics):
+            log.warning("actuals for %s keyed no reading to a scorecard dimension; retrying once", config.symbol)
+            view = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
+        if expected_dims and not view.metrics:
+            # Headline numbers without a single per-dimension reading cannot score a baseline of several dimensions:
+            # every line would come back "assume neutral" and read as 符合预期 (ASML Q3, 2026-10-19). One more try,
+            # then the guard below refuses to score.
+            log.warning("actuals for %s carried no per-dimension readings; retrying once", config.symbol)
+            view = run_structured("actuals_extract", ActualsView, ctx, skill_slug="pead-actuals")
     except Exception as exc:  # noqa: BLE001
         # Abort loudly rather than fall back to an all-neutral (all-zero) scorecard
         # that reads as a tradeable "符合预期" — same policy as the period guard.
@@ -83,9 +102,26 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         raise ValueError(
             f"[actuals-guard] {config.symbol} score 已中止：有输入却抽取到空 actuals"
             f"（无 metrics、无 reported EPS/营收），疑似抽取降级，拒绝据此打分。")
+    if dim_keys and view.metrics and not any(m.dim_key in dim_keys for m in view.metrics):
+        raise ValueError(
+            f"[actuals-guard] {config.symbol} score 已中止：抽取到的读数没有一条对应记分卡维度"
+            f"（{sorted({m.dim_key for m in view.metrics})[:4]}…），拒绝据此打出全 0 的伪中性打分卡。")
+    if expected_dims and not view.metrics:
+        raise ValueError(
+            f"[actuals-guard] {config.symbol} score 已中止：基线有 {len(expectations.expectations)} 个维度，"
+            f"但两次抽取都没有任何逐维度读数。只有头条数字无法给维度打分，拒绝产出全 0 的伪中性打分卡。")
+    # A revenue headline taken from a reading that names two currencies is a conversion the model chose a rate for
+    # (TSM Q3: US$46.7B shown as NT$1.27T). The metric row keeps both figures as the source gave them; the
+    # headline number is left empty rather than carrying an invented one.
+    from .units import mixes_currencies
+
+    revenue_text = next((m.actual for m in view.metrics if "revenue" in str(m.dim_key).lower()), "")
+    reported_revenue = None if (view.reported_revenue is not None and mixes_currencies(revenue_text)) \
+        else view.reported_revenue
     return Actuals(
         symbol=config.symbol, fiscal_label=config.fiscal_label, as_of=as_of,
-        reported_eps=view.reported_eps, reported_revenue=view.reported_revenue,
+        reported_eps=view.reported_eps, reported_revenue=reported_revenue,
+        reporting_currency=(view.reporting_currency or "").strip().upper()[:3],
         metrics=[ActualMetric(dim_key=m.dim_key, metric=m.metric, actual=m.actual,
                               vs_expected=m.vs_expected, note=m.note) for m in view.metrics],
         guidance=view.guidance, transcript_signals=view.transcript_signals,
@@ -184,69 +220,53 @@ def _band(total: float, threshold: float) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Decision tree (pure, deterministic) — mirrors the doc's scenario table
+# Event view (deterministic) — direction / magnitude / confidence / rationale /
+# falsifiable conditions. The old `decide()` sizing tree (portfolio positions,
+# net-liquidation notional, trim fractions) was removed in Phase D (task 5.7):
+# the fundamental analyst judges the expectation gap, it does not size trades.
 # --------------------------------------------------------------------------- #
-def decide(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | None,
-           portfolio: PortfolioSnapshot | None, net_liquidation: float,
-           small_long_pct: float = 0.03, trim_fraction: float = 0.30,
-           size_factor: float = 1.0, as_of: datetime | None = None,
-          ) -> tuple[list[PeadRecommendation], str, str]:
-    """Return (recommendations, scenario_band, rationale). Action is fully deterministic.
+def event_view(config: PeadConfig, scorecard: Scorecard, run_up_vs_sector: float | None,
+              *, confidence_floor: float = 0.3,
+             ) -> dict:
+    """Non-executable investment view derived from the surprise scorecard.
 
-    `size_factor` scales the OPENING size only (a transcript-less score passes 0.5).
-    De-risking is never scaled down: if the evidence says trim, thin evidence is not a
-    reason to trim less.
-
-    Returns `PeadRecommendation`, NOT `TradeDecision` — PEAD is an analyst, not the
-    Manager. `qty_hint`/`notional_hint` are computed from the live `portfolio` snapshot
-    passed in, but only Chief may turn a recommendation into an executable decision.
+    Returns {direction, magnitude, confidence, rationale, falsifiable_conditions}.
+    `direction` is the EXPECTATION-GAP direction (-1|0|1), never an action verb.
+    Magnitude is a fundamental-basis read (the scorecard gap itself), not a
+    position size.
     """
     total = scorecard.total
     thr = config.long_threshold
-    held_qty = _held_qty(portfolio, config.symbol)
-    holding = held_qty > 0
-    run_up = run_up_vs_sector
-    thin = size_factor != 1.0
-    thin_note = "（v1 缺纪要，仓位按 %.0f%% 计，纪要到位后重评）" % (size_factor * 100) if thin else ""
 
-    # Cleared the (ticker-specific) long bar.
     if total >= thr:
-        if run_up is not None and run_up > config.run_up_warn_pct:
-            return ([], "做多门槛达成但抢跑透支→观望",
-                    f"总分 {total:+.2f} ≥ 门槛 {thr:+.1f}，但财报前 20 日相对 {config.sector_etf} "
-                    f"抢跑 +{run_up:.1f}%（>{config.run_up_warn_pct:.0f}% 警戒），透支风险高，观望。")
-        notional = round(small_long_pct * net_liquidation * size_factor, 0)
-        d = PeadRecommendation(symbol=config.symbol, action="buy", notional_hint=notional,
-                               conviction=min(1.0, total / max(thr, 0.5)),
-                               rationale=f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，抢跑可控；"
-                                         f"小仓位试探做多。{thin_note}",
-                               portfolio_as_of=as_of)
-        return ([d], "达成门槛→小仓位做多", d.rationale)
-
-    # Below the long bar.
-    if holding and total < thr:
-        # Beat-but-not-enough / weak: de-risk per the doc's "分步减仓".
-        qty = round(held_qty * trim_fraction)
-        if qty >= 1:
-            d = PeadRecommendation(symbol=config.symbol, action="trim", qty_hint=float(qty),
-                                   conviction=0.5,
-                                   rationale=f"Scorecard {total:+.2f} 未达门槛 {thr:+.1f}，已持仓 → "
-                                             f"减仓 {trim_fraction:.0%} 锁定，保留核心仓位。",
-                                   portfolio_as_of=as_of)
-            return ([d], "未达门槛+持仓→分步减仓", d.rationale)
-
+        if run_up_vs_sector is not None and run_up_vs_sector > config.run_up_warn_pct:
+            return {
+                "direction": 0,
+                "magnitude": round(abs(total), 2),
+                "confidence": confidence_floor,
+                "rationale": f"总分 {total:+.2f} ≥ 门槛 {thr:+.1f}，但财报前 20 日相对 "
+                             f"{config.sector_etf} 抢跑 +{run_up_vs_sector:.1f}% "
+                             f"（>{config.run_up_warn_pct:.0f}% 警戒），预期差或已被定价，"
+                             f"方向判中性、待实际读数确认。",
+            }
+        return {
+            "direction": 1,
+            "magnitude": round(total, 2),
+            "confidence": min(1.0, total / max(thr, 0.5)),
+            "rationale": f"Scorecard {total:+.2f} ≥ 门槛 {thr:+.1f}，实际值系统性超出"
+                         f"中性预期，预期差为正。",
+        }
     if total <= -0.5:
-        return ([], "负面但不做空(订单簿支撑)",
-                f"总分 {total:+.2f} 偏负，但长期订单/预订支撑下行，不做空。")
-
-    return ([], scorecard.band,
-            f"总分 {total:+.2f} 未达门槛 {thr:+.1f}，无明确 edge，观望。")
-
-
-def _held_qty(portfolio: PortfolioSnapshot | None, symbol: str) -> float:
-    if not portfolio:
-        return 0.0
-    for p in portfolio.positions:
-        if p.symbol == symbol:
-            return p.qty
-    return 0.0
+        return {
+            "direction": -1,
+            "magnitude": round(abs(total), 2),
+            "confidence": min(1.0, abs(total) / max(thr, 0.5)),
+            "rationale": f"总分 {total:+.2f} 明显为负，实际值低于预期，预期差为负"
+                         f"（不做空判断属于决策链，非本评审）。",
+        }
+    return {
+        "direction": 0,
+        "magnitude": round(abs(total), 2),
+        "confidence": confidence_floor,
+        "rationale": f"总分 {total:+.2f} 未达门槛 {thr:+.1f}，预期差中性。",
+    }

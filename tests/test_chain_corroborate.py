@@ -1,6 +1,6 @@
 """Chain evidence — stage 2: the three corroboration gates (hermetic, no LLM).
 
-Covers the acceptance table in docs/CHAIN_EVIDENCE.md §7 阶段二.
+Covers the acceptance table in docs/archive/CHAIN_EVIDENCE.md §7 阶段二.
 """
 
 from datetime import datetime, timedelta, timezone

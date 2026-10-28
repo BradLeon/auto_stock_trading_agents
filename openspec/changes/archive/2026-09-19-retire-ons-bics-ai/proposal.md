@@ -44,4 +44,4 @@
 - **文档**：6 份文档需改，其中 `STRUCTURED_DATA_OPERATIONS.md` §10.1/§10.2 受机器校验约束。2 份验收记录与 1 份候选源调研保留并标注退役。
 - **不受影响**：L1 三个 Observer 的输入、命题、报告、图表与 manifest 全部不变，本次退役不产生任何 L1 输出差异；Chain、PEAD、Chief、Trader、Portfolio、Risk 路径从未读取该来源。
 - **协调注意**：当前工作区在 `codex/new_data_source` 分支上已有未提交改动（`config/data/structured.yaml`、`config/data/schedules.yaml`、4 份 docs、1 份 src、3 份 tests），与本次退役改动的文件高度重叠。实施前需先处理该批未提交改动，否则两次改动会混成一份 diff。
-- **顺带发现（不在本次范围）**：`docs/L1_OBSERVER_DATA_SOURCES.md` 的 `tickertrends_public_research` 行仍写着 `frozen_seed，不参与周期发现`，与该来源已改为 7 天周期的事实不符；退役改到该文件时可一并修正，也可另开一次文档修正。
+- **顺带发现（不在本次范围）**：`docs/data/L1_OBSERVER_DATA_SOURCES.md` 的 `tickertrends_public_research` 行仍写着 `frozen_seed，不参与周期发现`，与该来源已改为 7 天周期的事实不符；退役改到该文件时可一并修正，也可另开一次文档修正。

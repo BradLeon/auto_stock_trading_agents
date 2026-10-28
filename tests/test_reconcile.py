@@ -90,7 +90,15 @@ def test_manual_tws_fill_is_not_claimed(store):
                               _fill(exec_id="theirs", order_id="34", symbol="SPCX",
                                     pnl=-60.01)]), store=store)
     origins = dict(store.conn.execute("SELECT exec_id, origin FROM fills").fetchall())
-    assert origins == {"mine": "system", "theirs": "manual"}
+    # Phase C (task 2.4): "theirs" carries no orderRef and matches nothing —
+    # that is UNATTRIBUTED, not manual. The old behaviour collapsed the two,
+    # disguising unknown fills as deliberate human trades (§11.1).
+    assert origins == {"mine": "system", "theirs": "unattributed"}
+    # ...and it left an explicit audit exception behind (task 2.4).
+    exc = store.conn.execute(
+        "SELECT kind, subject_key FROM ledger_exceptions "
+        "WHERE subject_key = 'fill:theirs'").fetchone()
+    assert exc is not None and exc["kind"] == "unattributed_fill"
 
 
 def test_order_ref_wins_and_is_exact(store):
@@ -116,7 +124,8 @@ def test_order_id_reuse_across_sessions_is_rejected(store):
            submitted=(NOW - timedelta(days=30)).isoformat())
     rec.reconcile(FakeBroker([_fill(order_id="4", symbol="GOOG", pnl=999.0)]), store=store)
     assert _row(store)["realized_pnl"] is None                 # not claimed
-    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "manual"
+    # Phase C (task 2.4): no human orderRef and no match -> unattributed.
+    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "unattributed"
 
 
 def test_order_id_match_requires_same_symbol(store):

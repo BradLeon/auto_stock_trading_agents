@@ -18,15 +18,54 @@ from typing import Any
 from ..config import get_config
 
 
+class StructuredOutputModel:
+    """Delegate chat behavior, selecting the configured native schema transport."""
+    def __init__(self, model, method):
+        object.__setattr__(self, "_model", model)
+        object.__setattr__(self, "_method", method)
+
+    def __getattr__(self, name):
+        return getattr(self._model, name)
+
+    def __setattr__(self, name, value):
+        if name in {"_model", "_method"}:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._model, name, value)
+
+    def model_copy(self, **kwargs):
+        return StructuredOutputModel(self._model.model_copy(**kwargs), self._method)
+
+    def with_structured_output(self, schema, **kwargs):
+        kwargs["method"] = self._method
+        if self._method == "json_schema":
+            kwargs["strict"] = True
+        return self._model.with_structured_output(schema, **kwargs)
+
+
+def reasoning_body(reasoning) -> dict | None:
+    """OpenRouter `reasoning` request field for a role's setting (None = leave the provider default)."""
+    if reasoning is None:
+        return None
+    if reasoning == "off":
+        return {"reasoning": {"enabled": False}}
+    return {"reasoning": {"max_tokens": int(reasoning)}}
+
+
 @lru_cache(maxsize=None)
-def get_model(role: str) -> Any:
+def get_model(role: str, reasoning: Any = None) -> Any:
     """Return a configured LangChain chat model for the given agent role.
 
     Roles: macro_analyst, industry_analyst, fundamental_analyst,
     technical_analyst, risk_manager, manager.
+
+    `reasoning` overrides the role's hidden-reasoning setting for this model only
+    ("off" or a token cap); the role's configured execution identity is unchanged.
     """
     cfg = get_config()
     rc = cfg.app.llm.for_role(role)
+    if reasoning is not None:
+        rc = rc.model_copy(update={"reasoning": reasoning})
     common = dict(
         temperature=rc.temperature,
         max_tokens=rc.max_tokens,
@@ -75,13 +114,17 @@ def get_model(role: str) -> Any:
         # OpenRouter (optional) attribution headers — harmless against vanilla OpenAI.
         headers = {"HTTP-Referer": "https://github.com/ats", "X-Title": "ats"} \
             if base_url and "openrouter" in base_url else None
-        return ChatOpenAI(
+        extra = reasoning_body(rc.reasoning) if base_url and "openrouter" in base_url else None
+        value = ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.openai_api_key or None,
             base_url=base_url,
             default_headers=headers,
+            **({"extra_body": extra} if extra else {}),
             **common,
         )
+        return (StructuredOutputModel(value, rc.structured_output_method)
+                if rc.structured_output_method == "json_schema" else value)
 
     raise ValueError(f"Unknown LLM provider {rc.provider!r} for role {role!r}")
 

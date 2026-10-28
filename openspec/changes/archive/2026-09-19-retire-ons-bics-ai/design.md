@@ -98,7 +98,7 @@
 - [墓碑是一个新的配置键，未来所有读取 `sources` 的路径都要意识到它存在] → 墓碑只承担「拒绝注册 + 解释孤儿 + 审计」三件事，不被任何采集/发布/目录路径读取；访问器收敛到 `StructuredCatalog`，并把该边界写成 `data/structured-ingestion` 的契约与回归测试。
 - [purge 是本次唯一不可逆动作，误操作会删掉在役来源数据] → 三重护栏：默认干跑、必须显式确认、必须已登记墓碑；加上单事务删除、blob 文件在提交后删。
 - [wave 159 的深度题孤本永久丢失，L1 从此没有非美国企业采用切片] → 用户已知并接受。已在 proposal 的 Impact 与退役 spec 的 Migration 中显式写明「不得用文字回填这一空缺」，防止报告层事后用叙述掩盖来源缺失。
-- [`.workbuddy/` 记忆文件与 `docs/L1_OBSERVER_DATA_SOURCES.md` 中仍有 ONS 叙述] → 记忆文件不属交付物，随实施一并更新；该文档的 `tickertrends_public_research` 行存在既有漂移（仍写 `frozen_seed`），改到该文件时一并修正。
+- [`.workbuddy/` 记忆文件与 `docs/data/L1_OBSERVER_DATA_SOURCES.md` 中仍有 ONS 叙述] → 记忆文件不属交付物，随实施一并更新；该文档的 `tickertrends_public_research` 行存在既有漂移（仍写 `frozen_seed`），改到该文件时一并修正。
 - [purge 后 artifact 目录可能残留无引用文件] → 不构成正确性问题；`artifact_usage` / `data health` 可事后核对，必要时按 `retained_orphan` 登记。
 
 ## Migration Plan

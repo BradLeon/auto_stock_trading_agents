@@ -27,7 +27,7 @@ def _document(store):
     doc = source_cache.store(
         "AMD", "2026Q2", "transcript", text, source="company:earnings",
         source_url="https://example.test/amd-q2", external_id="call-2026-q2",
-        title="AMD 2026 Q2 earnings call", published_at=NOW.isoformat(), min_chars=1,
+        title="AMD 2026 Q2 earnings call", published_at=NOW.isoformat(), now=NOW, min_chars=1,
     )
     assert doc is not None
     store.save_document(doc)
@@ -52,18 +52,32 @@ def test_document_search_returns_exact_version_and_source_location():
     assert "inference demand" in hit["text"]
 
 
-def test_indicator_series_hides_storage_tables_and_honours_filters():
-    store = get_store()
-    source = _source()
-    store.register_data_source(source, at=NOW)
-    store.save_measurement_points(source, [
-        SeriesPoint(period="2026Q1", series="industry", value=18.0, unit="%",
-                    published_at=date(2026, 4, 15)),
-        SeriesPoint(period="2026Q2", series="industry", value=21.0, unit="%",
-                    published_at=date(2026, 7, 15)),
-    ], fetched_at=NOW)
+def test_indicator_series_hides_storage_tables_and_honours_filters(tmp_path):
+    """indicator_series 是结构化仓库上的产品面：只暴露指标行，honours 过滤器，
+    不暴露任何存储细节。"""
+    from ats.data.structured import (ArtifactDescriptor, ObservationInput,
+                                     SeriesIdentity, SQLiteStructuredRepository)
 
-    rows = DataProducts(store).indicator_series(
+    repo = SQLiteStructuredRepository(tmp_path / "data.sqlite",
+                                      artifact_root=tmp_path / "artifacts")
+    repo.bootstrap_catalog()
+
+    def _save(period, value):
+        artifact = repo.put_artifact(
+            {"period": period, "value": value},
+            ArtifactDescriptor(source_id="ai_penetration", dataset_id="ai_penetration",
+                               fetched_at=NOW, query_scope={"period": period}))
+        return repo.save_observation(ObservationInput(
+            series=SeriesIdentity(source_id="ai_penetration",
+                                  dataset_id="ai_penetration", entity_id="AMD",
+                                  metric_id="industry", unit="%", period_basis="quarter"),
+            period=period, value=value, published_at=NOW, known_at=NOW,
+            fetched_at=NOW, artifact_id=artifact.id)).id
+
+    _save("2026Q1", 18.0)
+    _save("2026Q2", 21.0)
+
+    rows = DataProducts(structured_repository=repo).indicator_series(
         source_id="ai_penetration", series="industry", entity="amd", since="2026Q2",
     )
 
@@ -112,7 +126,9 @@ def test_company_package_keeps_shared_facts_and_task_views_separate():
     assert package["entity"] == "AMD"
     assert package["documents"][0]["doc_type"] == "transcript"
     assert package["facts"] == []
-    assert package["pead_projections"][0]["profile_version"] == "prompt-v3"
+    # Workflow 投影是 memory 产出，刻意不进入数据产品包——共享事实与任务视图
+    # 的分离是硬契约：写入了 task_projection 也绝不能从这里泄漏出去。
+    assert package["pead_projections"] == []
 
 
 def test_health_summarises_source_runs_and_document_processing():

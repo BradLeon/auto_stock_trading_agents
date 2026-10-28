@@ -105,10 +105,11 @@ class CandidateClaimView(BaseModel):
 
 class LayerVerdictView(BaseModel):
     layer_key: str = Field(description="必须原样回填上下文里给出的 [layer key = ...]，禁止自造")
-    allocation: str = Field(default="标配", description=(
-        "本层配置结论：超配 | 标配 | 低配 | 清仓。"
-        "**依据必须来自 common 命题的结论**——relative 读数只用于层内选谁，"
-        "不得单独作为配置结论的依据"))
+    layer_status: str = Field(default="steady", description=(
+        "本层状态判断：expanding | steady | contracting | unclear。"
+        "**依据必须来自 common 命题的结论**——relative 读数只用于层内选谁与结构因子，"
+        "不得单独作为状态判断的依据。给不出 expanding/contracting 时如实写 steady，"
+        "并说明是证据缺失"))
     confidence: float = Field(default=0.0, description=(
         "0-1。证据缺失或本层无命题时 ≤0.3；只有多条 common 议题同向才上调"))
     cycle_position: str = Field(default="", description=(
@@ -116,7 +117,7 @@ class LayerVerdictView(BaseModel):
         "产能投放。**不得**使用利率、风险偏好或大盘走向——那是宏观分析师的工作，"
         "在这里重复判断会让同一个因素被计两次"))
     claim_attributions: list[str] = Field(default_factory=list, description=(
-        "每条 common 议题一行：该命题的当期结论 + 它对本层配置的含义。"
+        "每条 common 议题一行：该命题的当期结论 + 它对本层状态的含义。"
         "议题互相矛盾时两侧都要保留，不要压成单一分数"))
     reversal_triggers: list[str] = Field(default_factory=list, description=(
         "会让本结论反向的**具体观察项**，下一轮要能直接核对。"
@@ -125,7 +126,7 @@ class LayerVerdictView(BaseModel):
     rationale: str = Field(default="", description="3-6 行本层总评")
     candidate_claims: list[CandidateClaimView] = Field(default_factory=list, description=(
         "读完本层素材后自发提出的候选追踪议题。**只进报告，不参与本期任何计算**"
-        "——不影响配置结论、不影响截面排序、不影响权重。宁缺勿滥：说不出证人或证伪条件"
+        "——不影响状态判断、不影响截面排序、不影响权重。宁缺勿滥：说不出证人或证伪条件"
         "就不要提"))
 
     # Same failure macro/pead already hit: a model sometimes serializes a list field as
@@ -141,6 +142,17 @@ class LayerVerdictView(BaseModel):
     def _coerce_strlists(cls, v):
         return _as_strlist(v)
 
+    @field_validator("layer_status", mode="before")
+    @classmethod
+    def _normalize_status(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+            # 容忍中文回填：模型偶尔用中文回答枚举
+            table = {"扩张": "expanding", "平稳": "steady", "收缩": "contracting",
+                     "不明": "unclear", "上行": "expanding", "下行": "contracting"}
+            v = table.get(v, v)
+        return v
+
 
 class LayerRotationView(BaseModel):
     """Cross-layer pass — consumes layer verdicts, never re-litigates them."""
@@ -155,15 +167,15 @@ class LayerRotationView(BaseModel):
         "结论缺失的层键；涉及它们的加减建议必须标注证据不足"))
     top_risks: list[str] = Field(default_factory=list)
     macro_background: str = Field(
-        default="", description="最新正式宏观报告提供的背景；未提供时说明不可用")
+        default="", description="行业分析不读取宏观评审，此项留空（旧报告里才有值）")
     factset_background: str = Field(
         default="", description="FactSet 十一行业数据提供的背景；未提供时说明不可用")
     agreements: list[str] = Field(
-        default_factory=list, description="宏观/FactSet 与八层公司证据一致之处")
+        default_factory=list, description="FactSet 与八层公司证据一致之处；没有可用数据就留空")
     divergences: list[str] = Field(
-        default_factory=list, description="宏观/FactSet 与八层公司证据冲突之处，不得掩盖")
+        default_factory=list, description="FactSet 与八层公司证据冲突之处，不得掩盖；没有可用数据就留空")
     recommendation_impact: str = Field(
-        default="", description="这些背景是否改变跨层加减建议；不能修改已形成的单层结论")
+        default="", description="FactSet 是否改变跨层加减建议；不能修改已形成的单层结论，不得引用宏观判断")
 
     @field_validator("conflicts", "missing_layers", "top_risks",
                      "agreements", "divergences", mode="before")

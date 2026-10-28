@@ -13,7 +13,7 @@ Turns stored observations into a verdict per claim. The division of labour is th
 
 Given the judgements, everything here is re-derivable arithmetic over declared config.
 
-The three gates, in order (docs/CHAIN_EVIDENCE.md §4.5):
+The three gates, in order (docs/archive/CHAIN_EVIDENCE.md §4.5):
 
   1. DEDUP    — cluster by (speaker, fact, direction, primary/secondary) before
                 counting. Ten reprints of one report are one cluster; a company's press

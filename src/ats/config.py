@@ -15,9 +15,10 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger("ats.config")
@@ -43,6 +44,7 @@ class Secrets(BaseSettings):
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    openrouter_api_key: str = ""
     openai_base_url: str = ""
     # DeepSeek's own API, used directly rather than through OpenRouter. Added because
     # identical requests through the relay returned wildly different results — the same
@@ -88,13 +90,31 @@ class Secrets(BaseSettings):
 # App config (yaml)
 # --------------------------------------------------------------------------- #
 class LLMRoleConfig(BaseModel):
+    # Preserve legacy function-calling fingerprints for unchanged roles.
+    structured_output_method: Literal["function_calling", "json_schema"] | None = Field(
+        default=None, exclude_if=lambda value: value in (None, "function_calling"))
     provider: str | None = None
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    # Hidden-reasoning control for reasoning models behind OpenRouter (2026-10-17). Reasoning tokens are
+    # counted inside `max_tokens`: deepseek-v4-pro spent the whole 8192 budget thinking on a 1.7K-token
+    # answer and returned no tool call (4 identical retries, all empty). "off" disables reasoning
+    # (extraction/classification roles); an integer caps it (judgment roles keep some thinking, and
+    # `max_tokens` must leave room for that cap plus the answer). Unset = provider default, and it is
+    # excluded from the dump so unchanged roles keep their execution identity.
+    reasoning: Literal["off"] | int | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("reasoning")
+    @classmethod
+    def _reasoning_budget_positive(cls, value):
+        if isinstance(value, int) and not isinstance(value, bool) and value < 256:
+            raise ValueError("reasoning budget must be 'off' or an integer >= 256")
+        return value
 
 
 class LLMConfig(BaseModel):
+    default_structured_output_method: Literal["function_calling", "json_schema"] = "function_calling"
     default_provider: str = "anthropic"
     default_model: str = "claude-opus-4-8"
     temperature: float = 0.2
@@ -107,10 +127,12 @@ class LLMConfig(BaseModel):
         """Merge defaults with any per-role override."""
         override = self.routing.get(role) or LLMRoleConfig()
         return LLMRoleConfig(
+            structured_output_method=override.structured_output_method or self.default_structured_output_method,
             provider=override.provider or self.default_provider,
             model=override.model or self.default_model,
             temperature=override.temperature if override.temperature is not None else self.temperature,
             max_tokens=override.max_tokens or self.max_tokens,
+            reasoning=override.reasoning,
         )
 
 
@@ -150,6 +172,9 @@ class RiskConfig(BaseModel):
     # 现金等价物：symbol -> haircut（0=纯现金信用；1=完全当风险敞口）。美债 ETF/BRK-B 等
     # 按现金信用计入有效现金，不占单票/杠杆/beta/集中度限额。见 risk/assess.py。
     cash_equivalents: dict[str, float] = Field(default_factory=dict)
+    # 执行授权网关（Phase B 7.4）：组合快照超过该秒数即视为过期，真实下单被拒绝
+    # 并回到风险审查。配置缺键时回落默认 60。
+    max_snapshot_age_seconds: float = 60.0
 
 
 class AccountConfig(BaseModel):
@@ -176,64 +201,6 @@ class JournalConfig(BaseModel):
     horizons: list[int] = Field(default_factory=lambda: [1, 5, 20, 60])
 
 
-class DailyStageConfig(BaseModel):
-    """Independent switches for the stages inside the trading-day cascade.
-
-    Missing keys deliberately default to ``True`` so existing deployments keep their
-    historical all-on behaviour until they opt into a staged pause.
-    """
-
-    pead_event_triggers: bool = True
-    macro_sector_event_triggers: bool = True
-    news_backfill: bool = True
-    pead_daily: bool = True
-    technical_daily: bool = True
-    intel_digest: bool = True
-    performance_snapshot: bool = True
-    perf_risk_digest: bool = True
-    journal_marks: bool = True
-    chief_daily: bool = True
-
-
-class ScheduledJobConfig(BaseModel):
-    """Independent switches for jobs outside the daily cascade.
-
-    ``pead_observe_window`` controls only scheduler-triggered observation
-    extraction. Explicit ``ats evidence observe`` runs remain available.
-    """
-
-    factset_weekly_ingest: bool = True
-    weekly_review: bool = True
-    journal_reconcile: bool = True
-    pead_score_bmo: bool = True
-    pead_score_amc: bool = True
-    pead_observe_window: bool = True
-
-
-class ScheduleConfig(BaseModel):
-    # No `enabled` flag: it existed but was never read by start(), so settings.yaml
-    # advertised `enabled: false` while the launchd job scheduled normally. Whether
-    # the scheduler runs is decided by whether `ats schedule` is running.
-    run_at: str = "16:15"          # daily cycle; PEAD score windows: config/pead.yaml
-    timezone: str = "America/New_York"
-    # Macro/sector weekly review: its OWN time/timezone, deliberately decoupled from
-    # run_at/timezone above. It never touches the broker or NYSE sessions, so there is
-    # no reason to tie it to ET — and doing so is actively wrong once the trigger's
-    # local day and the ET calendar day disagree (e.g. Beijing Saturday 08:40 is still
-    # Friday evening in New York). See scheduler._today_weekly().
-    weekly_review_at: str = "10:30"
-    weekly_review_tz: str = "America/New_York"
-    # FactSet 的独立数据准备任务；必须早于同一时区的周度评审。
-    factset_refresh_at: str = "08:10"
-    factset_refresh_tz: str = "America/New_York"
-    # This host sleeps. A job whose trigger fires while the Mac is asleep only runs on
-    # wake, and only if it is still inside this window — with the old 1 hour, every
-    # overnight trigger was silently dropped. See scheduler.start().
-    misfire_grace_hours: float = 6.0
-    daily_stages: DailyStageConfig = Field(default_factory=DailyStageConfig)
-    jobs: ScheduledJobConfig = Field(default_factory=ScheduledJobConfig)
-
-
 class SectorBrief(BaseModel):
     label: str = ""
     supply_chain: str = ""
@@ -246,7 +213,6 @@ class AppConfig(BaseModel):
     account: AccountConfig = Field(default_factory=AccountConfig)
     broker: BrokerConfig = Field(default_factory=BrokerConfig)
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
-    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)
     tickers: list[Ticker] = Field(default_factory=list)
     sectors: dict[str, SectorBrief] = Field(default_factory=dict)
@@ -421,8 +387,8 @@ def load_pead_global() -> dict:
     sr.setdefault("sectors", ["ai_hardware"])
     sr.setdefault("weekday", 5)          # 5 = Saturday (weekly scheduled run; own cron job,
                                           # decoupled from the mon-fri trading-day cascade)
-    sr.setdefault("inject_prep", True)
-    sr.setdefault("inject_monitor", True)
+    # Phase D (5.8): inject_prep / inject_monitor switches REMOVED, not defaulted —
+    # sector conclusions never enter the PEAD prep/monitor context again.
     # Cross-section + chain evidence -> moat_pricing -> Chief. The kill switch for the
     # whole stage-3 path: off = the system behaves exactly as it did before.
     sr.setdefault("cross_section", True)
@@ -440,8 +406,6 @@ def load_pead_global() -> dict:
     mr.setdefault("enabled", True)
     mr.setdefault("name", "macro")
     mr.setdefault("weekday", 5)          # runs BEFORE sector on Saturdays (cascade)
-    mr.setdefault("inject_prep", True)
-    mr.setdefault("inject_monitor", True)
     mr.setdefault("feed_sector", True)   # prepend macro regime into sector review context
     return cfg
 
@@ -597,7 +561,7 @@ def load_sector_config(name: str = "ai_hardware"):
     r.setdefault("events_lookback_days", 14)
     r.setdefault("events_min_triage", 0.6)
     r.setdefault("dossier_excerpt_chars", 350)
-    # Chain-evidence corroboration thresholds (docs/CHAIN_EVIDENCE.md §4). Config, not
+    # Chain-evidence corroboration thresholds (docs/archive/CHAIN_EVIDENCE.md §4). Config, not
     # constants: they are judgement calls about how much evidence is "enough".
     r.setdefault("corroboration", {})
     c = r["corroboration"]

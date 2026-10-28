@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ats.data-refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/liuchao/.local/bin/uv</string>
+    <string>run</string>
+    <string>--offline</string>
+    <string>--no-sync</string>
+    <string>python</string>
+    <string>-m</string>
+    <string>ats.data.refresh</string>
+    <string>tick</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/liuchao/Code/trading/auto_stock_trading_agents</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ATS_DOCS_ROOT</key>
+    <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/data/documents</string>
+    <key>ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES</key>
+    <string>1</string>
+    <key>ATS_FRONTIER_AI_USE_AA</key>
+    <string>0</string>
+    <key>ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED</key>
+    <string>1</string>
+    <key>ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS</key>
+    <string>automationbench_aa,scicode,critpt,mmmu_pro,toolathlon_verified,humanitys_last_exam</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/logs/data-refresh.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/liuchao/Code/trading/auto_stock_trading_agents/var/logs/data-refresh.err.log</string>
+</dict>
+</plist>

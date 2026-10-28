@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
@@ -14,6 +16,7 @@ from ...schemas.macro_strategy import (
     FactSetObservationSummary,
     MacroConfig,
     MacroReview,
+    MacroScenario,
     SectorTilt,
     ThemeAssess,
 )
@@ -62,7 +65,7 @@ _FACTSET_JUDGMENT_TOPICS = {
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
@@ -74,20 +77,19 @@ def deterministic(cfg: MacroConfig, prior: MacroReview | None, *,
     it means the indicator layer can grow without touching that contract.
 
     `prior` supplies the hysteresis state: a quadrant flip stays provisional
-    until a second consecutive review agrees (docs/MACRO_ANALYST.md §4.3).
+    until a second consecutive review agrees (docs/agents/MACRO_ANALYST.md §4.3).
     """
     if not live_data:
         return {}
-    # FRED/yfinance indicators are time-sensitive runtime inputs.  They are
-    # intentionally kept behind the runtime facade instead of being treated as
-    # governed, persisted structured observations.
-    from ...data.runtime import macro as macro_data
+    # Indicator histories are governed observations collected by the data platform
+    # (`macro_series_feeds`); the review reads them and never calls a provider.
+    from ...data.products import macro_inputs
 
-    series = macro_data.fetch_series()
+    series = macro_inputs.macro_series_histories()
     if not series:
         log.warning("macro: no indicator series available; regime layer skipped")
         return {}
-    readings = indicators.build_readings(series, macro_data.series_spec())
+    readings = indicators.build_readings(series, macro_inputs.series_spec())
     out = regime.assess(
         series, readings, overrides=cfg.regime,
         prior_quadrant=(prior.quadrant if prior else None),
@@ -241,6 +243,80 @@ def _det_block(det: dict) -> str:
     return "\n".join(lines)
 
 
+# Phase D（主理人固定快照）：正式评审落库的同时发布 macro_review 投影。
+# 象限是本仓库宏观判定的原语，payload 的 regime 用四选一的风险姿态表达；
+# (no-llm) / (LLM unavailable) 这类占位评审不发布——那不是一次评审，只是留痕。
+_REGIME_BY_QUADRANT = {
+    "goldilocks": "risk_on",     # 增长稳/改善 + 通胀下行
+    "reflation": "risk_on",      # 增长改善 + 通胀上行
+    "stagflation": "risk_off",   # 增长恶化 + 通胀上行
+    "deflation": "risk_off",     # 增长恶化 + 通胀下行
+    "transition": "transition",
+}
+
+
+def projection_extras(review: MacroReview) -> dict:
+    """ARCHITECTURE §7.3 fields of a MacroReview projection, all taken from the persisted review.
+
+    `regime` in the payload is derived by code from the quadrant; `narrative_regime` carries the review's own
+    wording so the two are both visible (and labelled) instead of one silently replacing the other.
+    """
+    return {
+        "narrative_regime": (review.regime or "").strip()[:300],
+        "quadrant": str(review.quadrant), "quadrant_state": str(review.quadrant_state),
+        "rate_path": (review.rate_path or "").strip()[:400],
+        "transmission": [{"theme": t.key, "label": t.label, "direction": t.direction[:200],
+                          "transmission": t.transmission[:300], "signal": t.signal}
+                         for t in (review.themes or [])[:10]],
+        "scenarios": [{"name": x.name, "description": x.description[:300], "trigger": x.trigger[:300],
+                       "sector_impact": x.sector_impact[:300]} for x in (review.scenarios or [])[:3]],
+        "horizon": (review.horizon or "").strip()[:200],
+        "risks": [str(x)[:300] for x in (review.top_risks or [])[:6]],
+        "falsifier": (review.falsifier or "").strip()[:400],
+        "sector_tilts": [{"sector": x.sector, "stance": x.stance, "rationale": x.rationale[:240]}
+                         for x in (review.sector_tilts or [])[:10]],
+        "asset_implications": (review.asset_implications or "").strip()[:400],
+    }
+
+
+def _publish_projection(store, review: MacroReview) -> None:
+    """Publish the formal macro review as a `macro_review` projection (portfolio scope).
+
+    A failed publish is a gap, not a crash: the review row already holds the truth,
+    and downstream reuse treats a missing projection as a fresh-run requirement.
+    占位评审（"(no-llm)" / "(LLM unavailable)"，regime 以括号开头或为空）不发布——
+    那不是一次评审，只是留痕；quadrant 默认 transition，不能单独作为判据。
+    """
+    from ...agent.task_projection import ProjectionScope, build_envelope
+
+    regime_text = (review.regime or "").strip()
+    if not regime_text or regime_text.startswith("("):
+        log.info("macro %s: placeholder review (%r) — projection not published",
+                 review.name, regime_text or "(empty)")
+        return
+    regime = _REGIME_BY_QUADRANT.get(str(review.quadrant), "unclear")
+    indicators = [f"{r.label or r.key}={r.level}"
+                  for r in (review.indicators or []) if r.level is not None]
+    payload = {
+        "regime": regime,
+        "summary": (review.summary or "").strip() or "（摘要缺失）",
+        "indicators": indicators or ["(本期无有效指标读数)"],
+        **projection_extras(review),
+    }
+    try:
+        envelope = build_envelope(
+            role="macro_review",
+            payload=payload,
+            scope=ProjectionScope(kind="portfolio"),
+            as_of=review.as_of.isoformat(timespec="seconds"),
+            workflow_run_id="")
+        store.save_task_projection_envelope(envelope)
+        log.info("macro %s: macro_review projection published (quadrant=%s)",
+                 review.name, review.quadrant)
+    except Exception as exc:  # noqa: BLE001 - 发布失败留痕，不影响评审落库
+        log.warning("macro %s: projection publish failed: %s", review.name, exc)
+
+
 def _prior_block(prior: MacroReview | None) -> str:
     if prior is None:
         return ""
@@ -318,6 +394,7 @@ def run(name: str = "macro", *, use_llm: bool = True, live_data: bool = True) ->
 
     review = _to_review(name, cfg, view, det, prior=prior, as_of=started)
     store.save_macro_review(review)
+    _publish_projection(store, review)
     return review
 
 
@@ -378,4 +455,7 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
         rate_path=view.rate_path, sector_tilts=tilts,
         asset_implications=view.asset_implications, themes=themes,
         top_risks=view.top_risks, falsifier=view.falsifier,
+        scenarios=[MacroScenario(name=x.name, description=x.description, trigger=x.trigger,
+                                 sector_impact=x.sector_impact) for x in view.scenarios[:3]],
+        horizon=view.horizon,
         factset_earnings_assessment=assessment, **(det or {}))

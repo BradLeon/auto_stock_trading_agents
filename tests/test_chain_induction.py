@@ -1,6 +1,6 @@
 """Chain evidence — stage 4: emergent propositions (hermetic, no LLM/network).
 
-Covers the acceptance table in docs/CHAIN_EVIDENCE.md §7 阶段四.
+Covers the acceptance table in docs/archive/CHAIN_EVIDENCE.md §7 阶段四.
 """
 
 from datetime import datetime, timedelta, timezone

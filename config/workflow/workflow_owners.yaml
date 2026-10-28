@@ -1,0 +1,13 @@
+version: "1"
+shadow_database: var/shadow/phase-e.sqlite
+
+# All workflow owners remain on legacy until an operator explicitly opts in.
+# shadow runs use a separate Workflow Memory + Trigger Ledger SQLite file.
+workflows:
+  layer-review: {mode: legacy, task_ids: [layer-review]}
+  information-brief: {mode: legacy, task_ids: [information-brief]}
+  sector-review: {mode: legacy, task_ids: [sector-review]}
+  fundamental-routine: {mode: legacy, task_ids: [fundamental-routine]}
+  fundamental-event: {mode: legacy, task_ids: [fundamental-event]}
+  macro-review: {mode: legacy, task_ids: [macro-review]}
+  technical-review: {mode: legacy, task_ids: [technical-review]}

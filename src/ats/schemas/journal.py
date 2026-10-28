@@ -25,7 +25,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from .decision import Action, normalize_action
 
 # --------------------------------------------------------------------------- #
 # 枚举
@@ -118,7 +120,14 @@ class JournalEntry(BaseModel):
     cycle_id: str                       # 属于哪一次 Chief 决策会话（审计单位）
     as_of: datetime                     # 提议产生的时刻
     symbol: str                         # 标的代码
-    action: str                         # buy / add / trim / sell / hold
+    action: Action                      # buy / add / trim / sell / hold（词表见 decision.Action）
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _canonical_action(cls, v: object) -> object:
+        # Same single normalization point as TradeDecision: the journal must never
+        # record an action outside the shared vocabulary (it used to be a bare `str`).
+        return normalize_action(v, where="JournalEntry.action") if isinstance(v, str) else v
     source: str = ""                    # 提议来源：chief / pead-chief / manual
     setup: Setup = "unknown"            # 策略归类，按类别统计期望值要靠它
 
@@ -204,6 +213,10 @@ class TradeEpisode(BaseModel):
     # ── 未平仓专属：这两位产出的是**可行动**的结论，不只是教训 ──
     invalidation_triggered: bool | None = None   # 论点已失效但仓位还在 → 该退未退（每周判定）
     horizon_overdue_days: int | None = None      # 超过计划持有期多少天（drift 的实时形态）
+    # §11.2（任务 7.1）：LLM 产生的标注必须携带来源与判定时点——与确定性
+    # 计算结果在数据上可区分。写入口由 execution.llm_boundary 白名单强制。
+    invalidation_source: str = ""                # "llm" / ""（确定性或未判定）
+    invalidation_checked_at: datetime | None = None   # 最近一次 LLM 判定时刻
 
     @property
     def decision_gradeable(self) -> bool:

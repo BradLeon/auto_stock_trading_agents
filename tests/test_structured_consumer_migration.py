@@ -51,12 +51,15 @@ def test_source_and_consumer_rollout_flags_are_independent(monkeypatch, tmp_path
     # of the checked-in baseline.  This test exercises baseline/env precedence.
     monkeypatch.setenv("ATS_STRUCTURED_RELEASE_FILE", str(tmp_path / "releases.yaml"))
     assert source_mode("tw_mof_exports") == "platform"
-    # 10.5 reverts the historic platform baseline until this consumer has
-    # consumer-specific shadow evidence rather than source-level evidence only.
-    assert read_mode("chain_regional", source_id="tw_mof_exports") == "shadow"
+    # The regional source completed its consumer-specific acceptance (2026-06/07
+    # real legacy/platform point equivalence), so the baseline promotes the
+    # chain_regional consumer together with the source — env flags stay independent.
+    assert read_mode("chain_regional", source_id="tw_mof_exports") == "platform"
     assert source_mode("sec_companyfacts") == "shadow"
     assert source_mode("company_disclosures") == "shadow"
-    assert read_mode("pead_fundamentals", source_id="sec_companyfacts") == "shadow"
+    # MSFT's governed package completed the PEAD fundamentals acceptance, so the
+    # baseline publishes this consumer as platform too.
+    assert read_mode("pead_fundamentals", source_id="sec_companyfacts") == "platform"
 
     monkeypatch.setenv("ATS_STRUCTURED_SOURCE_SEC_COMPANYFACTS_MODE", "platform")
     monkeypatch.setenv("ATS_STRUCTURED_PEAD_FUNDAMENTALS_MODE", "fallback")

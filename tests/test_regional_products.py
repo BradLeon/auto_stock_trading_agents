@@ -74,11 +74,14 @@ def test_regional_shadow_returns_legacy_and_records_equivalent_snapshot(monkeypa
     monkeypatch.setattr(regional, "_legacy_snapshot", lambda **kwargs: _snapshot(**kwargs))
     monkeypatch.setattr(regional, "_platform_snapshot", lambda **kwargs: _snapshot(**kwargs))
     monkeypatch.setattr(regional, "_record", lambda **kwargs: records.append(kwargs))
+    # 两个区域源已发布 platform（见 structured.yaml feature_flags）；显式把 TW 钉在
+    # shadow 以测试双读机制，KR 钉在 platform 以钉死「发布后不再记比对」的契约。
     monkeypatch.setenv("ATS_STRUCTURED_SECTOR_AGENT_TW_MOF_EXPORTS_MODE", "shadow")
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_AGENT_KR_ECOS_EXPORTS_MODE", "platform")
 
     result = regional.fetch(consumer="sector_agent")
     assert result.points == legacy.points
-    assert {record["source_id"] for record in records} == {"tw_mof_exports", "kr_ecos_exports"}
+    assert {record["source_id"] for record in records} == {"tw_mof_exports"}
     assert all(record["matched"] is True for record in records)
 
 
@@ -88,8 +91,13 @@ def test_regional_shadow_falls_back_to_legacy_when_platform_fails(monkeypatch):
     monkeypatch.setattr(regional, "_platform_snapshot",
                         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("database unavailable")))
     monkeypatch.setenv("ATS_STRUCTURED_MACRO_AGENT_TW_MOF_EXPORTS_MODE", "shadow")
+    monkeypatch.setenv("ATS_STRUCTURED_MACRO_AGENT_KR_ECOS_EXPORTS_MODE", "platform")
 
-    assert regional.fetch(consumer="macro_agent").points == legacy.points
+    points = regional.fetch(consumer="macro_agent").points
+    # shadow 源：平台不可得时回落 legacy，读数不丢；platform 源：平台不可得即
+    # 明确缺口（该点缺席），绝不静默回落到 legacy 直连。
+    assert [point.id for point in points] == ["tw_ic_exports"]
+    assert points == tuple(p for p in legacy.points if p.source_id == "tw_mof_exports")
 
 
 def test_regional_source_specific_mode_does_not_switch_the_other_source(monkeypatch):

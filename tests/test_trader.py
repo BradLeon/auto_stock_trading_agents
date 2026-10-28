@@ -1,6 +1,8 @@
 """Trader agent — analytics math, approval-gated execution, store round-trips
 (hermetic; a FakeBroker replaces IBKR, no live TWS)."""
 
+import pytest
+
 from datetime import datetime, timezone
 
 from ats.memory import get_store
@@ -26,6 +28,24 @@ def _episode(pnl, status="closed", i=0):
 # --------------------------------------------------------------------------- #
 # analytics
 # --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _an_active_trade_route(monkeypatch, tmp_path):
+    """Install the trade route this test's orders execute against.
+
+    Phase F 2.5 requires an authorization to name the route and generation it was
+    issued under, so the graph refuses with `route_unbound` without one. These tests
+    exist to prove the path DOES place orders, so they need a route to place them
+    on; the refusal path is covered by the authorization unit tests.
+    """
+    from ats.execution.route_registry import install_route
+
+    path = tmp_path / "routes.sqlite"
+    install_route("A", generation=1, environment="paper", account="DU1",
+                  actor="test", reason="fixture", path=str(path))
+    monkeypatch.setenv("ATS_ROUTE_REGISTRY_PATH", str(path))
+    yield
+
+
 def test_total_return_and_drawdown():
     hist = [_perf(100000, 0, 0), _perf(110000, 10000, 1), _perf(99000, -1000, 2),
             _perf(104500, 4500, 3)]
@@ -65,11 +85,16 @@ class FakeBroker:
     def __init__(self, *a, **k):
         pass
 
-    def place_orders(self, items, cycle_id, wait=3.0):
+    def place_orders(self, items, cycle_id, wait=3.0, revision_no=0, chain=None):
+        chain = chain or {}
         FakeBroker.placed = list(items)
         return [TradeLogEntry(order_id="1", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
                               qty=q, status="filled", submitted_at=NOW, filled_at=NOW,
-                              avg_fill_price=100.0, rationale=d.rationale) for d, q in items]
+                              avg_fill_price=100.0, rationale=d.rationale,
+                              revision_no=revision_no, order_seq=i,
+                              decision_hash=chain.get("decision_hash", ""),
+                              approval_id=chain.get("approval_id", ""))
+                for i, (d, q) in enumerate(items)]
 
     def get_fills(self):
         return [{"exec_id": "e1", "symbol": "AAPL", "side": "BOT", "shares": 1, "price": 100,
@@ -80,8 +105,20 @@ def _patch(monkeypatch, approval_status="approved"):
     FakeBroker.placed = []
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
-    # execute() now runs the decision graph; keep its risk gate off live TWS.
-    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: None)
+    # execute() now runs the decision graph; give it a FRESH paper portfolio so
+    # the whole-revision review and the execution authorization gate (7.5) pass.
+    from ats.schemas.portfolio import ExposureBreakdown, PortfolioSnapshot
+    from ats.schemas.risk import RiskReview
+
+    now = datetime.now(timezone.utc)
+    pf = PortfolioSnapshot(as_of=now, net_liquidation=1_000_000.0, cash=900_000.0,
+                           gross_exposure=100_000.0, daily_pnl=0.0, positions=[],
+                           exposure=ExposureBreakdown())
+    monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: pf)
+    monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.enrich_options", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.assess",
+                        lambda p, **k: RiskReview(as_of=now, risk_state="normal"))
 
     class Ch:
         def request_approval(self, req):
@@ -90,31 +127,31 @@ def _patch(monkeypatch, approval_status="approved"):
     monkeypatch.setattr("ats.channel.get_channel", lambda kind=None: Ch())
 
 
-def test_execute_rejected_places_nothing_but_logs_context(monkeypatch):
+def test_execute_rejected_places_nothing_but_logs_context(monkeypatch, broker):
     _patch(monkeypatch, "rejected")
     d = TradeDecision(symbol="AAPL", action="buy", qty=10, rationale="test")
     entries = texec.execute([d], source="manual")
-    assert FakeBroker.placed == []                        # no order placed
+    assert broker.placed == []                        # no order placed
     assert all(e.status == "cancelled" for e in entries)
     rows = get_store().recent_trades("AAPL")
     assert rows and rows[0]["source"] == "manual" and "rejected" in (rows[0]["context"] or "")
 
 
-def test_execute_approved_places_and_persists(monkeypatch):
+def test_execute_approved_places_and_persists(monkeypatch, broker):
     _patch(monkeypatch, "approved")
     d = TradeDecision(symbol="AAPL", action="buy", qty=5, rationale="buy the dip")
     entries = texec.execute([d], source="manual")
-    assert len(FakeBroker.placed) == 1 and entries[0].status == "filled"
+    assert len(broker.placed) == 1 and entries[0].status == "filled"
     row = get_store().recent_trades("AAPL")[0]
     assert row["status"] == "filled" and "buy the dip" in (row["context"] or "")
     assert get_store().recent_fills("AAPL")                # fills persisted
 
 
-def test_execute_dry_run_no_order(monkeypatch):
+def test_execute_dry_run_no_order(monkeypatch, broker):
     _patch(monkeypatch, "approved")
     d = TradeDecision(symbol="MSFT", action="buy", qty=3)
     texec.execute([d], source="manual", dry_run=True)
-    assert FakeBroker.placed == []
+    assert broker.placed == []
 
 
 def test_hold_filtered():
@@ -153,3 +190,5 @@ def test_order_status_mapping():
 def test_trades_migration_columns():
     cols = {r["name"] for r in get_store().conn.execute("PRAGMA table_info(trades)")}
     assert {"limit_price", "filled_at", "error", "realized_pnl", "source", "context"} <= cols
+    # Phase B linkage (§12.3): nullable until Phase C makes them mandatory.
+    assert {"cycle_id", "revision_no", "decision_hash", "approval_id"} <= cols

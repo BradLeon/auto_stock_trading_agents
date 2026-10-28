@@ -167,7 +167,18 @@ def check_all(*, store=None, use_llm: bool = True, as_of: date | None = None) ->
                 store.save_episode(ep.model_copy(update=updates))
             continue
 
-        updates["invalidation_triggered"] = view.triggered
+        # §11.2 (task 7.1): the LLM-produced keys are checked against the
+        # whitelist BEFORE merging — deterministic keys already in `updates`
+        # (horizon_overdue_days) are computed by code, not by the LLM.
+        from ..execution.llm_boundary import assert_llm_update_allowed
+
+        llm_updates = {
+            "invalidation_triggered": view.triggered,
+            "invalidation_source": "llm",
+            "invalidation_checked_at": datetime.now(timezone.utc),
+        }
+        assert_llm_update_allowed(llm_updates)
+        updates.update(llm_updates)
         summary["checked"] += 1
         if view.triggered:
             summary["triggered"] += 1

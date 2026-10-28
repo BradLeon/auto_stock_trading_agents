@@ -63,11 +63,11 @@
 - [x] 8.2 将 L1 Evidence Observer 接到 DataProducts snapshot/profile 契约，加入事实陈述 guardrails，禁止直接读取 Hugging Face 或物理表。
 - [x] 8.3 添加消费者测试，确保 Usage Share 不被表述为员工采用率、SOC major group 不被表述为公司行业、Observed Exposure 不进入月度趋势。
 - [x] 8.4 验证 PEAD、Chain、Macro、Sector、Chief 和交易决策 workflow 没有新增直接依赖或默认证据权重。
-- [x] 8.5 在隔离环境完成 `validate-source → ingest --force → quality → availability → ai-job → lineage → release-check` 端到端验收并保存结果。验收记录见 `docs/ANTHROPIC_ECONOMIC_INDEX_TASK85_E2E.md`。
+- [x] 8.5 在隔离环境完成 `validate-source → ingest --force → quality → availability → ai-job → lineage → release-check` 端到端验收并保存结果。验收记录见 `docs/archive/ANTHROPIC_ECONOMIC_INDEX_TASK85_E2E.md`。
 
 ## 9. Platform 发布、运维文档与 Source Checklist
 
 > 后续运维触发项（不属于当前 change 的完成条件）：Anthropic 下一次公开 release 出现后，运行真实官方 metadata/release discovery 与首次更新验收，核对新 commit、release、period、schema drift 和网络异常状态。
 - [x] 9.2 更新 structured data 开发者文档，说明多 artifact contracts、relation schema、Anthropic adapter、测试 fixture 和扩展规则。
 - [x] 9.3 更新运维与使用者文档及 source checklist，说明公开无鉴权来源、每周外部调度、限制参数、状态机、质量门、命令、语义限制和消费者示例。
-- [x] 9.4 通过 release preflight 后显式将来源切换到 platform mode，只开放研究查询与 L1 Observer，并记录发布审计事件。发布验收见 `docs/ANTHROPIC_ECONOMIC_INDEX_PLATFORM_RELEASE.md`。
+- [x] 9.4 通过 release preflight 后显式将来源切换到 platform mode，只开放研究查询与 L1 Observer，并记录发布审计事件。发布验收见 `docs/archive/ANTHROPIC_ECONOMIC_INDEX_PLATFORM_RELEASE.md`。

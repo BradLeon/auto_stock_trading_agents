@@ -37,6 +37,12 @@
 
 sources:
   kr_semiconductor_exports:
+    # Compatibility alias for the governed numeric series. Although this legacy
+    # registry retains it next to prose sources, collection belongs to the
+    # structured catalog and must not create a second text-ingestion job.
+    domain: structured
+    canonical_source_id: kr_ecos_exports
+    dataset_id: regional_kr_exports
     label: 韩国半导体出口指数（月度）
     adapter: kr_ecos
     params: {stat: "403Y001", item: "3091AA"}      # 수출금액지수 / 반도체
@@ -52,6 +58,9 @@ sources:
     # 与台湾那条的区别正是"机制"而不是"统计口径"：台湾出口是代工与封装，不是存储。
 
   tw_ic_exports:
+    domain: structured
+    canonical_source_id: tw_mof_exports
+    dataset_id: regional_tw_exports
     label: 台湾积体电路出口（月度）
     adapter: tw_mof
     params: {hs_prefix: "8542", metric: export_value_usd}
@@ -70,6 +79,9 @@ sources:
     # 入选标准始终是"能否给出区分性读数"，不是"是不是官方数据"。
 
   dram_contract_price:
+    domain: structured
+    canonical_source_id: trendforce_dram
+    dataset_id: industry_dram_contract_price
     label: DRAM 合约价
     adapter: trendforce
     params:
@@ -92,6 +104,45 @@ sources:
     # observation_type 是 market 不是 regulatory：TrendForce 是定价机构不是官方统计。
     # 注意这让它落入 SECONDARY —— 能参与支持/反驳记分，但**不贡献立场类别**。这是对的：
     # 立场类别是"独立证人"的度量，而一家研究机构的报价不是一个新的经济位置。
+
+
+  # --- L1：受治理的证据观察器（2026-10-25）-----------------------------------------------------
+  # 数据已经被三个观察器读过、各自按版本化规则给出方向；这里不重算，只把每个读数变成一条已解释的观测
+  # （适配器 governed_observer：说话人 / 维度 / 方向 / 证据行都由观察器的字段确定性渲染，历史不足的轴不产出观测）。
+  # 一个 source 对应一个观察器，`entities` 列出它代表的各数据提供方；绑定仍然发生在 concepts 上。
+  l1_ai_production_adoption:
+    label: AI 生产化与应用扩散（BTOS / RPS / Ramp / Anthropic Economic Index）
+    adapter: governed_observer
+    params: {observer: ai_core_production_workflow_penetration}
+    entity: US_CENSUS_BTOS
+    entities: [US_RPS_GENAI, RAMP_AI_INDEX, ANTHROPIC_ECON_INDEX]
+    stance: regulator
+    observation_type: regulatory
+    cadence: monthly
+    concepts: [enterprise_ai_adoption_breadth, worker_ai_usage_persistence, paid_ai_procurement,
+               task_production_depth]
+    direction_from: [yoy]            # unused: governed points carry their own direction
+  l1_frontier_labs_commercialization:
+    label: 前沿模型公司商业化（Sacra / TickerTrends 收入运行率 + OpenRouter 路由用量）
+    adapter: governed_observer
+    params: {observer: ai_frontier_labs_commercialization}
+    entity: OPENAI
+    entities: [ANTHROPIC, OPENROUTER]
+    stance: regulator
+    observation_type: research
+    cadence: weekly
+    concepts: [frontier_revenue_scale_trend, routed_token_usage]
+    direction_from: [yoy]
+  l1_frontier_raw_capability:
+    label: 前沿原始能力（benchmark 外扩与门槛跨越）
+    adapter: governed_observer
+    params: {observer: ai_frontier_raw_capability}
+    entity: FRONTIER_BENCHMARKS
+    stance: regulator
+    observation_type: research
+    cadence: weekly
+    concepts: [capability_frontier_extension, capability_threshold_crossing]
+    direction_from: [yoy]
 
 # ==============================================================================
 # 文章类第三方源 —— 上面 sources: 的兄弟，但走另一条通路
@@ -123,12 +174,12 @@ sources:
 
 article_sources:
   factset_earnings_insight_doc:
-    label: FactSet Earnings Insight 周报
+    label: FactSet Earnings Insight 月末最终版
     adapter: factset_earnings_insight
     entity: FACTSET
     stance: regulator
     doc_type: research_article
-    cadence: weekly
+    cadence: monthly_final_report
     pages: 1
     max_per_run: 1
     min_body_chars: 1000
@@ -238,7 +289,7 @@ article_sources:
       provider_lookup_retry_seconds: 1
       # 只扫这些标的的新闻。**不是全市场**——按 conId 逐个请求，名单越长越慢，
       # 且与命题无关的公司只会把未映射池做大。先覆盖 L4 四家 + 最活跃的买方。
-      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT]
+      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
     # 关键词比 TrendForce 那份窄且偏"交易/结构"，因为这个源的价值不在于复述基本面
     # （那些财报里都有），而在于**财报里没有的那类事实**。
     match: [financing, finance, guarantee, backstop, prepay, prepayment, stake,

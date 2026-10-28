@@ -1,4 +1,4 @@
-"""Deterministic macro indicator + regime layer (docs/MACRO_ANALYST.md).
+"""Deterministic macro indicator + regime layer (docs/agents/MACRO_ANALYST.md).
 
 Fully hermetic: every series here is synthetic, so no network and no pandas.
 That is the point of keeping indicators.py/regime.py free of I/O — the numbers
@@ -242,7 +242,7 @@ def test_hysteresis_holds_a_confirmed_call_through_the_entry_band():
     """Entering needs |axis|>0.25; staying only needs >0.15.
 
     Without this the post-forward-guidance noise in the front end would flip the
-    quadrant every other week (docs/MACRO_ANALYST.md §4.3).
+    quadrant every other week (docs/agents/MACRO_ANALYST.md §4.3).
     """
     cfg = regime._cfg(None)
     g, f = _inputs(-0.6, -0.5), _inputs(0.6, 0.5)
@@ -421,11 +421,11 @@ def _patch_series(monkeypatch, series):
     Same stubbing pattern the rest of tests/test_macro_strategy.py uses.
     """
     from ats.agents.macro import assemble
-    from ats.data import macro as macro_data
+    from ats.data.products import macro_inputs
 
-    monkeypatch.setattr(macro_data, "fetch_series", lambda years=11: series)
+    monkeypatch.setattr(macro_inputs, "macro_series_histories", lambda **_k: series)
     monkeypatch.setattr(
-        macro_data, "series_spec",
+        macro_inputs, "series_spec",
         lambda: {k: (k.upper(), k, "pct" if k.endswith(("_10y", "oas")) else "index",
                      "daily") for k in series})
     monkeypatch.setattr(assemble, "build",
@@ -511,11 +511,14 @@ def _saved_review(**kw):
     return r
 
 
-def test_quadrant_reaches_all_five_downstream_injection_points():
+def test_quadrant_reaches_all_four_downstream_injection_points():
     """The deterministic call must survive into every consumer of the review.
 
-    These five are the only paths by which macro work reaches a trade decision;
-    a field that stops at the report helps nobody.
+    These four are the only paths by which macro work reaches a trade decision;
+    a field that stops at the report helps nobody. Phase D 6.1 removed the old
+    fifth path deliberately: the Risk Officer's deterministic review reads only
+    orders / portfolio snapshot / market snapshot / ruleset, never another
+    analyst's macro opinion (risk/deterministic-review boundary).
     """
     from ats.agents.chief import assemble as chief_assemble
     from ats.agents.macro import context as macro_context
@@ -529,15 +532,15 @@ def test_quadrant_reaches_all_five_downstream_injection_points():
     assert "stagflation" in macro_context.sector_block("macro")
     # 4. Chief.
     assert "stagflation" in chief_assemble._macro_block()
-    # 5. Risk officer memo — a widening spread or "worst combination" read is a
-    #    risk input, not colour, so the quadrant has to reach this prompt too.
+    # 5 (removed). The risk prompt must stay macro-free — the quadrant must NOT
+    #    reach it, and this assertion pins that boundary against regression.
     from datetime import datetime as _dt
 
     from ats.agents.risk_officer import review as ro
     from ats.schemas.risk import RiskReview
 
     prompt = ro._context(RiskReview(as_of=_dt(2026, 7, 30, tzinfo=timezone.utc)))
-    assert "stagflation" in prompt
+    assert "stagflation" not in prompt
 
 
 def test_monitor_hint_stays_within_its_character_budget():

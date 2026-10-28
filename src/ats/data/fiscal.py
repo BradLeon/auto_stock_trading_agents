@@ -91,16 +91,26 @@ def detect_period(text: str, source: str = "") -> tuple[int, int] | None:
     return None
 
 
-def verify_transcript(label: str, text: str, source: str = "") -> tuple[bool, str]:
+def verify_transcript(label: str, text: str, source: str = "", declared_period: str = "") -> tuple[bool, str]:
     """Policy gate for scoring. Returns (ok, reason).
 
     - target quarter not encoded in the label -> reject as unresolved.
     - transcript period undetectable          -> reject as unresolved.
     - CONFIRMED mismatch (period != target)   -> reject; caller must refuse to score.
+
+    `declared_period` is the fiscal period the catalog recorded for the document (a structured source states
+    fiscal year and quarter as fields).  When it is complete it is authoritative -- these transcripts open with
+    "September Quarter 2025 Earnings Conference Call", which the text detector cannot read -- and is compared
+    with the target exactly like a detected period.
     """
     ty, tq = parse_label(label)
     if ty is None or tq is None:
         return (False, f"目标季未在 fiscal_label='{label}' 中完整编码，period unresolved")
+    dy, dq = parse_label(declared_period)
+    if dy is not None and dq is not None:
+        if (dy, dq) == (ty, tq):
+            return (True, f"报告期核对通过（来源目录声明）：{dy}Q{dq}")
+        return (False, f"transcript 来源目录声明的报告期 {dy}Q{dq} ≠ 目标季 {ty}Q{tq}")
     period = detect_period(text, source)
     if period is None:
         return (False, f"transcript 报告期无法从来源/正文识别（source={source!r}），"

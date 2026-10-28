@@ -39,7 +39,11 @@ def write(result: ChiefResult, out_dir: str) -> Path | None:
     if not out_dir:
         log.info("chief report: output_dir unset — skipped")
         return None
-    folder = Path(out_dir)
+    from ...workflow.isolation import verified_isolation_root
+    root = verified_isolation_root()
+    folder = root / "docs" / "chief" if root is not None else Path(out_dir)
+    if root is not None:
+        folder.mkdir(parents=True, exist_ok=True)
     if not folder.is_dir():
         log.warning("chief report: output_dir missing — skipped: %s", folder)
         return None

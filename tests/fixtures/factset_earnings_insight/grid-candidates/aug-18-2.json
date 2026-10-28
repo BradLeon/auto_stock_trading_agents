@@ -1,0 +1,27 @@
+{
+  "candidate_only": true,
+  "policy_hash": "674ae04fbbd920be58b6adec7f7a18e4fb2194f639a8800fc29fd19cd2bd4c46",
+  "chart": {
+    "page_number": 18,
+    "image_number": 2,
+    "image_hash": "a648403122f570e7a2267b3a039f9bb5f523556373449603ffa017e7f63b7efc",
+    "title": "S&P 500 Sector-Level Earnings Surprise %: Q2 2026",
+    "title_region": [
+      0.20892791803878522,
+      0.0226928895612708,
+      0.7885107939992682,
+      0.05143721633888049
+    ],
+    "groups": [
+      "earnings_revenue_surprise"
+    ],
+    "periods": [
+      "2026Q2"
+    ],
+    "period_basis": "target_quarter",
+    "period_evidence": "Q2 2026",
+    "status": "located",
+    "reasons": []
+  },
+  "grids": []
+}

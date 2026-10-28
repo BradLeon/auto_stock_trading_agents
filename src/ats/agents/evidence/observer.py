@@ -60,6 +60,20 @@ def _span_weight(s: str) -> int:
     return sum(2 if "一" <= ch <= "鿿" else 1 for ch in s)
 
 
+def _squash(text: str) -> str:
+    """Whitespace- and quote-style-insensitive form used to check a quote against its source."""
+    table = {ord("’"): "'", ord("‘"): "'", ord("“"): '"', ord("”"): '"', ord("\u00a0"): " "}
+    return " ".join(text.translate(table).split()).lower()
+
+
+def _publisher(document_id: str, symbol: str) -> tuple[str, str]:
+    """(who published the document, what kind of material it is), from the document id prefix."""
+    prefix = (document_id or "").split(":", 1)[0].strip()
+    if not prefix or prefix.upper() == symbol.upper() or prefix.startswith(("probe-", "manual")):
+        return symbol, "公司自己的材料（财报/纪要/公告）"
+    return prefix, "第三方媒体/研报/数据商的文章（里面的话不是 " + symbol + " 管理层说的，除非文中明确引用）"
+
+
 def _clip(text: str, limit: int = MAX_DOC_CHARS) -> str:
     """Keep head and tail: prepared remarks open a call, guidance lands in Q&A."""
     if len(text) <= limit:
@@ -151,301 +165,36 @@ def relation_hint(symbol: str, sector: str = "ai_hardware") -> str:
             "指代含糊、或对应多家时，entity 仍记说话人。")
 
 
-def _mentions_company(text: str, symbol: str, company_name: str = "") -> bool:
-    """Does this document actually name the company it is supposed to be from?
+# --- acquisition (moved to the data layer, Phase D 8.1) --------------------- #
+# Fetching keyed transcripts, earnings releases and gathered documents — and the
+# raw-asset writes that record them — are collection-side concerns and now live in
+# `ats.data.collection.evidence`. The observer keeps only extraction and its own
+# Workflow-memory writes. These thin delegates keep the runtime/scheduler and test
+# call sites unchanged; the agents tree itself no longer touches any provider.
 
-    Only the head is searched: an earnings call identifies the issuer in its opening
-    lines, whereas a passing mention deep in an unrelated transcript would be a false
-    pass. Aliases are stripped to a distinctive token ("SK Hynix" -> "hynix") so that
-    "SK hynix Inc." and "SK Hynix" both match.
-    """
-    from ...data.admission import mentions_entity
-
-    return mentions_entity(text, symbol, company_name)
-
-
-# Source hierarchy. A cached document may only pre-empt a fetch when it came from a
-# tier we would not improve on; otherwise the cache silently freezes whatever was
-# fetched first, which is how web-scraped material outlived the keyed dataset.
-#
-# Public on purpose (not `_`-prefixed): this classification used to only ever decide
-# a caching question, but the viz bundle (agents/sector/viz.py) now surfaces it as a
-# tier badge on every source document — "defeatbeta 直取" and "tavily 搜索拼接" carry
-# two tiers of trust and the reader has a right to see which one backs a quote. A
-# second real consumer means it stops being an implementation detail of this module.
-RANK_MANUAL = 3        # a person put this file in 信息源/<SYM>/ — authoritative
-RANK_KEYED = 2         # defeatbeta: keyed by ticker, cannot return another company
-RANK_PUBLIC = 1        # documents.gather: SEC/IR material, but assembled by search
-RANK_SEARCH = 0        # tavily/web: the tier that returned Sherwin-Williams for SKHY
-
-
-def source_rank(source: str) -> int:
-    s = (source or "").lower()
-    if not s or s in ("manual", "cache") or s.startswith("file:") or s.startswith("doc:"):
-        return RANK_MANUAL
-    # Keyed-by-ticker sources, whatever the vendor: the property that matters is that
-    # you ask for a symbol and cannot be handed a different company.
-    if s.startswith("defeatbeta") or s.startswith("fmp"):
-        return RANK_KEYED
-    if s.startswith("documents") or s.startswith("sec"):
-        return RANK_PUBLIC
-    return RANK_SEARCH
-
-
-def _fetch_keyed(symbol: str, label: str, print_=None):
-    """Tier-1 lookup in the keyed transcript dataset. Returns (Transcript, note) or None.
-
-    When a target quarter is known we ask for THAT quarter rather than "latest": asking
-    for latest and checking afterwards is how a company that has not reported yet gets
-    served its previous call, which is exactly what happened to NVDA.
-
-    If that quarter does not exist we do fall back to the most recent one — a witness's
-    last call is real testimony and excluding it wholesale loses the only customer-side
-    voice we have until late August. But the fallback is LABELLED, and the observation's
-    period carries the transcript's actual quarter, so nothing downstream can mistake
-    last quarter's testimony for this quarter's. Stale-but-flagged is a different thing
-    from stale-and-silent, and only the second one has ever hurt us.
-    """
-    from ...data import defeatbeta, fiscal
-
-    year, quarter = fiscal.parse_label(label) if label else (None, None)
-    if quarter is not None:
-        got = defeatbeta.fetch(symbol, fiscal_year=year, fiscal_quarter=quarter)
-        if got is not None:
-            return got, ""
-        latest = defeatbeta.fetch(symbol)
-        if latest is not None:
-            log.info("evidence %s: %s not published; using %s (%s)",
-                     symbol, label, latest.label, latest.report_date)
-            return latest, f"⚠️ {label} 尚未发布，退用上一期 {latest.label}"
-        return None
-    got = defeatbeta.fetch(symbol)
-    return (got, "") if got is not None else None
+# Re-exported: the viz bundle (agents/sector/viz.py) renders the tier badge from it.
+from ...data.collection.evidence import (  # noqa: F401
+    RANK_KEYED,
+    RANK_MANUAL,
+    RANK_PUBLIC,
+    RANK_SEARCH,
+    source_rank,
+)
 
 
 def fetch_release(symbol: str, *, report_date: str = "", label: str = "",
                   store=None) -> tuple[str, str, str]:
-    """The earnings RELEASE, as a document separate from the call. (text, src, note).
+    """The earnings RELEASE, as a document separate from the call. (text, src, note)."""
+    from ...data.collection.evidence import fetch_release as _fetch_release
 
-    Separate on purpose, not appended to the transcript: they answer different
-    questions and must stay individually traceable. The call is where management
-    narrates and takes questions; the release is where the quarter is tabulated. Every
-    `reported_actual` observation in the ledger on 2026-08-07 came from a transcript,
-    which meant the most checkable facts were being read off spoken, rounded figures
-    ("ASP rose by mid 40%") when the exact ones were a filing away.
-
-    Keeping them as two documents also keeps their observation ids distinct and lets
-    one fail without taking the other down.
-    """
-    from ...data import document_assets, sec, source_cache
-
-    cached = source_cache.load(symbol, label, "release")
-    if cached and source_rank(cached.source) >= RANK_KEYED:
-        return cached.text, cached.source, f"缓存命中：{cached.path.name}"
-
-    text, url, note = sec.earnings_release(symbol, near=report_date)
-    if not text:
-        return "", "", note
-
-    company = ""
-    try:
-        from ...config import entity_meta, load_pead_config
-
-        company = entity_meta(symbol).get("name", "")
-        company = getattr(load_pead_config(symbol), "company_name", "") or company
-    except Exception:  # noqa: BLE001
-        pass
-    # The same identity guard as the transcript path. Deterministic sourcing makes a
-    # wrong company far less likely here, but "less likely" is not a reason to remove
-    # a check that costs nothing.
-    if not _mentions_company(text, symbol, company):
-        log.warning("evidence %s: release does not name the company (%s)", symbol, url)
-        if store is not None:
-            try:
-                store.save_document_failure(symbol, label, "release", source="sec",
-                                            source_url=url, note="财报稿未提及本公司")
-            except Exception:  # noqa: BLE001
-                pass
-        return "", "", "财报稿未提及本公司 → 记为缺口"
-
-    try:
-        document_assets.ingest(
-            entity=symbol, key=label, doc_type="release", text=text, source="sec",
-            source_url=url, external_id=url, title=f"{symbol} {label} earnings release",
-            related_entities=(symbol,), note=note, store=store,
-        )
-    except Exception as exc:  # noqa: BLE001
-        log.info("evidence %s: could not record release (%s)", symbol, exc)
-    return text, "sec", note
+    return _fetch_release(symbol, report_date=report_date, label=label, store=store)
 
 
 def fetch_document(symbol: str, *, print_=None, store=None) -> tuple[str, str, str]:
-    """Get this company's latest filing text. Returns (text, source, note).
+    """Get this company's latest filing text. Returns (text, source, note)."""
+    from ...data.collection.evidence import fetch_document as _fetch_document
 
-    Cache first (data.source_cache): a hit costs no network at all. This is not only a
-    cost measure — re-fetching is not idempotent (the same SKHY query returned
-    Sherwin-Williams on one run and the correct call on the next), so without a fixed
-    corpus, results measured before and after a prompt change are not comparable.
-
-    A miss fetches, then runs both guards BEFORE writing: a document that fails is never
-    cached, and is recorded as an ok=0 row carrying the URL. Retry on a later run is
-    still allowed on purpose — a transcript that did not exist yesterday may exist
-    today — so what the failure row buys is visibility, not suppression.
-
-    Mirrors the PEAD score path (graph/pead.py) on purpose, because the two failure
-    modes it guards are exactly the ones that poison an evidence ledger:
-
-      * `fiscal_label` must reach the search. Without it transcript.fetch falls back to
-        a bare "<SYM> latest earnings call transcript" query, which that module already
-        measured as returning the wrong quarter — and for thin-coverage tickers it can
-        return an entirely different COMPANY (observed: SKHY -> Sherwin-Williams,
-        005930.KS -> Teradyne).
-      * the fetched text must then be period-verified. PEAD refuses to score on a
-        confirmed mismatch; here we refuse to extract and fall back to filings, because
-        an observation carrying the wrong quarter's numbers is worse than none — it is
-        indistinguishable from a real one once it is in the table.
-    """
-    from ...config import canonical_entity, entity_meta, load_pead_config
-    from ...data import document_assets, documents, fiscal, period, source_cache, transcript
-
-    symbol = canonical_entity(symbol)
-    config_label, company = "", entity_meta(symbol).get("name", "")
-    try:
-        cfg = load_pead_config(symbol)
-        config_label = getattr(cfg, "fiscal_label", "") or ""
-        # `or company`, not a bare assignment: observe-list names have no per-ticker
-        # config, and the registry name is the only thing the identity guard can use.
-        company = getattr(cfg, "company_name", "") or company
-    except Exception:  # noqa: BLE001 - a missing per-ticker file must not block
-        pass
-    # Derive the label from the ACTUAL print rather than trusting a per-ticker file.
-    # Observe-list names have no per-ticker config at all, and even a target's can be
-    # malformed (SKHY's said "Q FY2026" — no quarter number, so it neither steers the
-    # search nor lets the period guard parse a target). Both cases silently degrade to
-    # a bare "<SYM> latest earnings call transcript" query, which is how we ended up
-    # extracting Sherwin-Williams for SKHY and last quarter's call for MU.
-    label = config_label
-    try:
-        label = period.resolve_fiscal_label(
-            symbol, print_, config_label=config_label, store=store)[0] or config_label
-    except Exception as exc:  # noqa: BLE001
-        log.info("evidence %s: fiscal label unresolved (%s)", symbol, exc)
-
-    # Cache — but the tier order applies to it too. Checking the cache first and
-    # returning on any hit inverted the whole source hierarchy: documents scraped off
-    # investing.com before the keyed dataset was wired kept winning forever, because a
-    # cached copy short-circuits before the dataset is ever asked. Nine of thirteen
-    # witnesses were still on web-scraped material for exactly that reason, including
-    # SKHY and MU, which the dataset carries.
-    #
-    # So a cached copy short-circuits only when it came from a source we would not
-    # improve on — a person's hand-dropped file, or the keyed dataset. Anything weaker
-    # is kept as a fallback and used only if the better tier has nothing.
-    # Both doc types, in preference order: a name that never yields a transcript falls
-    # back to `release` every run, and checking only "transcript" would mean it never
-    # hits cache at all.
-    stale_hit = source_cache.load(symbol, label, "release")
-
-    text, src = "", ""
-    try:
-        text, src = transcript.fetch(symbol, label, company_name=company, store=store)
-    except Exception as exc:  # noqa: BLE001
-        log.info("evidence %s: transcript unavailable (%s)", symbol, exc)
-
-    def _screen(body: str, source: str, kind: str) -> tuple[str, str]:
-        """Both guards. Returns (rejection reason, detail) — ("", why) when it passes.
-
-        Applied to EVERY path, not just the transcript. When the fallback ran unguarded,
-        NVDA — which had not yet reported Q2 FY2027 — was served a September 2025
-        investor deck and 17 observations from year-old material entered the ledger as
-        current testimony. That is worse than the wrong-company failure it sits next to:
-        an old NVIDIA deck does name NVIDIA, so the identity guard passes it, and the
-        only thing wrong is the date. **Absent a current document the right answer is a
-        gap, not the most recent thing findable.**
-        """
-        # Identity first: it is the failure that actually happened twice (SKHY ->
-        # Sherwin-Williams, 005930.KS -> Teradyne), the period guard cannot catch it (a
-        # wrong company's filing can carry the right quarter), and for names whose
-        # fiscal label will not resolve the period guard never even runs.
-        if not _mentions_company(body, symbol, company):
-            return f"取回的文档未提及本公司（来源 {source}）", ""
-        ok, why = fiscal.verify_transcript(label, body, source)
-        return ("" if ok else f"报告期核对未通过（{why}）"), why
-
-    note, rejected, attempted_url = "", "", src
-    if text:
-        rejected, why = _screen(text, src, "transcript")
-        if rejected:
-            log.warning("evidence %s: transcript rejected — %s", symbol, rejected)
-            text, src, note = "", "", rejected + " → 改用公开文档"
-        else:
-            note = ("结构化纪要通过统一准入" if src.startswith("defeatbeta") else why)
-    if rejected and store is not None:
-        # Record the rejection with its URL. It does not block a later retry (the right
-        # transcript may simply not be published yet) — it makes "we tried and got the
-        # wrong document" visible instead of indistinguishable from "nobody looked".
-        try:
-            store.save_document_failure(symbol, label, "transcript",
-                                        source=attempted_url or "search",
-                                        source_url=attempted_url, note=rejected)
-        except Exception as exc:  # noqa: BLE001 - bookkeeping must not break the fetch
-            log.info("evidence %s: could not record document failure (%s)", symbol, exc)
-
-    doc_type = "transcript"
-    if not text:
-        # Screen each gathered piece SEPARATELY. `gather` concatenates a web-searched
-        # deck with whatever the user hand-dropped, and screening the join let one bad
-        # piece condemn the good ones: for Samsung a 2020 Newmont deck sat at the head,
-        # so the two authoritative PDFs a person had just placed in 信息源/005930.KS/
-        # were thrown away with it. Hand-dropped files are the ONLY source for names the
-        # dataset does not carry — they must not be hostage to a search result.
-        kept, dropped = [], []
-        report_date = str(getattr(print_, "date", "") or "")
-        for lab, piece in documents.gather(
-                symbol, period=label, report_date=report_date, store=store):
-            if not (piece or "").strip():
-                continue
-            why, _d = _screen(piece, f"documents:{lab}", "release")
-            (dropped if why else kept).append((lab, why))
-            if not why:
-                kept[-1] = (lab, piece)
-        for lab, why in dropped:
-            log.warning("evidence %s: dropped gathered piece %s — %s", symbol, lab, why)
-        src, doc_type = "documents", "release"
-        if kept:
-            text = "\n\n".join(p for _, p in kept)
-            if dropped:
-                note = (f"{note + ' / ' if note else ''}"
-                        f"已丢弃 {len(dropped)} 份不合格来源，保留 {len(kept)} 份")
-        else:
-            why = dropped[0][1] if dropped else "无公开文档"
-            log.warning("evidence %s: no usable fallback document — %s", symbol, why)
-            note = f"{note + ' / ' if note else ''}公开文档亦不合格（{why}）→ 记为缺口"
-            if store is not None:
-                try:
-                    store.save_document_failure(symbol, label, "release",
-                                                source="documents", note=why)
-                except Exception as exc:  # noqa: BLE001
-                    log.info("evidence %s: could not record fallback failure (%s)", symbol, exc)
-
-    if not text.strip() and stale_hit is not None:
-        # Everything better came up empty, so the weaker cached copy is what we have.
-        # Kept rather than discarded: demoting it below the dataset must not turn a
-        # witness we can still read into a gap.
-        log.info("evidence %s: falling back to the cached %s copy", symbol, stale_hit.source)
-        return (stale_hit.text, stale_hit.source or "cache",
-                f"{note + ' / ' if note else ''}回落到旧缓存（来源 {stale_hit.source}）")
-
-    if text.strip() and doc_type != "transcript":
-        try:
-            document_assets.ingest(
-                entity=symbol, key=label, doc_type=doc_type, text=text, source=src,
-                source_url=src, external_id=src, title=f"{symbol} {label} {doc_type}",
-                related_entities=(symbol,), note=note, store=store,
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.info("evidence %s: could not record document (%s)", symbol, exc)
-    return text, src, note
+    return _fetch_document(symbol, print_=print_, store=store)
 
 
 WINDOW_CHARS = 20_000        # per-call budget; see _windows for why it is this small
@@ -485,7 +234,27 @@ def _windows(body: str) -> list[str]:
     return out
 
 
-def _context(symbol: str, chunk: str, period: str, menu: str, relations: str) -> str:
+# What counts as "a fact worth a row". Without this the model decides per window how much to extract, and
+# the same document came back with 21 rows from one model and 44 from another (G0 D01-D04, 2026-10-23).
+SCOPE_RULES = (
+    "【抽取范围】满足下面任一条的句子，**每句都要有一条观测**，不要只挑有代表性的几条：\n"
+    "- 公司自述的数字：营收、利润率、资本开支、库存、产能、出货、价格、份额，及其同比/环比变化；\n"
+    "- 前瞻指引：带期间或数字的“预计/计划/目标/将”；\n"
+    "- 产能、良率、制程或封装节点、客户需求与供给缺口的明确陈述；\n"
+    "- 管理层对供应瓶颈、定价、竞争格局的明确判断。\n"
+    "不抽：寒暄、会议流程、免责声明、纯观点（如“将迎来超级周期”）、与该公司及其产业链无关的数字。\n"
+    "一句话里有几个对应不同期间或对象的数字（如 2026 年底 14 万片、2027 年底 22 万片），拆成几条。\n"
+    "标注示例：\n"
+    "- “Revenue rose 17.6% sequentially” → reported_actual、up、数值 17.6、单位 %；\n"
+    "- “server DRAM bit shipments grew roughly 8% quarter over quarter” → direction 是 up，数值 8，单位 %，"
+    "不是 flat；\n"
+    "- 关注公司自己的股价、份额、业务、产能，说话人立场都是 incumbent；只有句子谈的是**另一家**公司"
+    "（竞争对手、客户、供应商）时，才用 competitor / customer / supplier。"
+)
+
+
+def _context(symbol: str, chunk: str, period: str, menu: str, relations: str,
+             document_id: str = "") -> str:
     """One window's prompt. The dimension menu goes AFTER the document, not before.
 
     Measured on a real 60k-char filing: with the menu up front the model returned 10
@@ -494,7 +263,8 @@ def _context(symbol: str, chunk: str, period: str, menu: str, relations: str) ->
     of effective attention — so the instruction it must follow while writing sits last.
     """
     return (
-        f"说话人（本文档的发布方）：{symbol}\n"
+        f"文档发布方：{_publisher(document_id, symbol)[0]}——{_publisher(document_id, symbol)[1]}\n"
+        f"被关注的公司：{symbol}\n"
         f"期间（如已知）：{period or '未知'}\n\n"
         + (relations + "\n\n" if relations else "")
         + "以下是该公司的财报/纪要原文（可能是其中一段）。请抽取其中可核对的事实观测。\n"
@@ -504,7 +274,18 @@ def _context(symbol: str, chunk: str, period: str, menu: str, relations: str) ->
         "===== 文档正文结束 =====\n\n"
         + (menu + "\n\n" if menu else "")
         + "现在输出观测。**逐条判断它属于上面哪个维度并填进 concept**；都不属于就留空，"
-        "不要硬套。抽不出任何可核对的事实时，用 failure_reason 说明原因，不要编造观测。"
+        "不要硬套。抽不出任何可核对的事实时，用 failure_reason 说明原因，不要编造观测。\n"
+        + (SCOPE_RULES + "\n" if SCOPE_RULES else "")
+        + "写每一条时再核对这几点：\n"
+        "1. evidence_span 必须原样复制原文：保留连字符、数字和单位的写法，不得缩写、改写或合并两处文字"
+        "（原文是 12-inch 就不能写成 12 in）；复制不出来就不要输出这条。\n"
+        "2. stance 看**这句话的说话人**，不是看谁发布了文档：管理层自己说的话（含媒体原样引用的董事长/CEO 的话）"
+        "= incumbent；记者或网页编辑自己写的导语/摘要不是管理层说的，observation_type 填 media。\n"
+        "3. direction 看文中该指标的实际变化：涨/增长/收涨 = up，跌/下降 = down；只有明确持平、"
+        "或这句话只是在讲一个动作而没有指标变化时才填 flat，不要凭印象给 up。\n"
+        "4. period 只写原文里能读到的期间；原文只说“4 月”而没有年份时，不要用常识补年份，留空或照抄原文写法。\n"
+        "5. unit 只写计量单位（%、USD billion、systems）；“约”“预计”“仍在评估”这类限定语写进 metric，"
+        "不要写进 unit。"
     )
 
 
@@ -528,7 +309,7 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
     windows = _windows(body)
     for i, chunk in enumerate(windows, 1):
         tag = f"{document_id}#{i}/{len(windows)}" if len(windows) > 1 else document_id
-        ctx = _context(symbol, chunk, period, menu, relations)
+        ctx = _context(symbol, chunk, period, menu, relations, document_id)
         view = None
         # Retry an EMPTY result once. A well-formed empty list with an empty
         # failure_reason slips past `run_structured`'s None-retry, and a silent zero is
@@ -560,8 +341,15 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
         return [], (" / ".join(dict.fromkeys(failures)) or "未抽出任何带原文佐证的观测")
 
     out: list[Observation] = []
+    source = _squash(body)
     for v in rows:
         span = (v.evidence_span or "").strip()
+        if span and _squash(span) not in source:
+            # The invariant is that evidence can be RE-CHECKED against the source. A quote the model
+            # reworded ("12 in" for "12-inch") cannot be, however plausible its meaning.
+            log.warning("evidence %s: dropped row whose span is not verbatim (%r, metric=%s)",
+                        symbol, span[:60], v.metric)
+            continue
         if _span_weight(span) < MIN_SPAN_WEIGHT:
             # Blank was always dropped; a bare fragment now is too. Verbatim is
             # necessary but not sufficient — the invariant is that evidence can be
@@ -580,7 +368,7 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
             continue
         # A hallucinated dimension is worse than none: it would silently file the fact
         # under a claim it has nothing to do with. Unmapped is a legitimate outcome —
-        # those rows feed the induction pool (docs/CHAIN_EVIDENCE.md §6.5).
+        # those rows feed the induction pool (docs/archive/CHAIN_EVIDENCE.md §6.5).
         concept = (v.concept or "").strip()
         # `not in valid_concepts` alone was not enough: when the menu is EMPTY — this
         # company is a declared witness for nothing — the old guard short-circuited on
@@ -619,9 +407,9 @@ def observe_document(symbol: str, document_id: str, text: str, *, source_url: st
     # Compatibility callers historically invented ids such as ``MU:20260805``.
     # Once the exact body is in the shared catalog, facts must point to that immutable
     # asset instead so lineage opens the source version rather than a synthetic key.
-    from ...data import document_assets
+    from ...data.collection.evidence import identify_asset
 
-    asset = document_assets.identify(text, entity=symbol, store=store)
+    asset = identify_asset(text, entity=symbol, store=store)
     if asset:
         document_id = asset["document_id"]
     obs, failure = extract(symbol, document_id, text, source_url=source_url,

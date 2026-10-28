@@ -154,9 +154,9 @@ def render_frontier_labs_revenue_charts(*, packet: dict[str, Any],
         chart_rows = [row for company in companies for row in _chart_rows(company)]
         descriptors.append(_sidecar(
             path, title="Frontier AI Labs 可比收入水平与趋势",
-            definition="同一可比 cell（公司 × 计量口径 × 观察身份 × methodology regime）内的离散披露点；"
+            definition="同一可比 cell（公司 × 计量口径 × 观察身份 × methodology regime × 期间口径）内的离散披露点；"
                        "连线只表示方向，不表示未披露月份的估计值。",
-            unit="USD 十亿美元", source="Sacra 公开公司页面 + TickerTrends 2026H1 冻结回填",
+            unit="USD 十亿美元", source="Sacra 公开公司页面 + TickerTrends 公开文章与研究笔记",
             rows=chart_rows, manifest=manifest,
             metadata={"font_path": font_path or "",
                       "glyph_check": glyph_report("Frontier AI Labs 可比收入水平与趋势离散披露点",

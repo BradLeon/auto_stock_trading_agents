@@ -4,16 +4,41 @@ DATA_LAYER_TABLES = frozenset({
     "source_documents", "document_candidates", "document_versions",
     "document_entities", "document_source_aliases", "document_chunks",
     "data_document_artifacts", "data_document_pages",
+    "data_document_publications",
     "document_processing_runs", "data_sources", "ingestion_runs",
     "measurement_series", "measurement_points", "evidence_observations",
     "evidence_failures", "evidence_facts", "evidence_fact_projections",
     "earnings_events",
     "newsletter_cursors", "data_migrations",
+    "schedule_calendar_source_runs", "schedule_event_candidates", "schedule_events",
+    "schedule_event_sources", "schedule_event_overrides",
+    "schedule_event_release_confirmations", "schedule_event_candidate_observations",
+    "schedule_candidate_review_history",
 })
 
 WORKFLOW_MEMORY_TABLES = frozenset({
     "cycles", "decisions", "trades", "performance", "pead_dossier", "pead_events",
     "research_articles", "research_insights", "task_projections", "claim_proposals",
+    # The unified agent-output envelope is Workflow memory, not a data product:
+    # it carries opinions (role, model and prompt versions, scope, as_of) rather than
+    # neutral evidence, so it sits here next to `task_projections` — which it will
+    # eventually replace.
+    "task_projection_envelopes",
+    # Publication receipts fence stale schedule workers before opinion writes;
+    # they are execution history, not neutral persistent research data.
+    "schedule_result_publications",
+    # Target-scoped Information extraction leases/cache outcomes are own-role
+    # execution history, not shared document-ingestion or admission records.
+    "information_processing_runs",
+    # Decision audit (§12.3, Phase B). Decisions carry opinions (who proposed
+    # what, why, who approved), so they are Workflow memory, never the data
+    # layer's neutral facts.
+    "decision_cycles", "decision_revisions", "decision_risk_reviews",
+    "boss_approvals", "cycle_events",
+    # Clerk / trade ledger (§11, Phase C). Exceptions, run trails and derived
+    # read models all carry trade consequences and opinions about them, so they
+    # are Workflow memory too.
+    "ledger_exceptions", "clerk_runs", "ledger_read_models",
     "claim_assessments", "sector_reviews", "macro_reviews",
     "technical_reviews", "fills", "risk_reviews", "score_consumption", "pead_periods",
     "pead_score_runs", "journal_entries", "journal_meta", "predictions",

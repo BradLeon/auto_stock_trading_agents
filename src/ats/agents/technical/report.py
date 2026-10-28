@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from ...workflow.schedule_runtime import publication_report
+
 import logging
 from pathlib import Path
 
 from ...schemas.technical import TechnicalConfig, TechnicalReview
+from ..report_files import unique_path
 
 log = logging.getLogger("ats.agents.technical.report")
 
@@ -72,6 +75,7 @@ def render(review: TechnicalReview, cfg: TechnicalConfig) -> str:
     return "\n".join(lines)
 
 
+@publication_report
 def write(review: TechnicalReview, cfg: TechnicalConfig) -> Path | None:
     if not cfg.output_dir:
         log.info("technical report: output_dir unset — skipped")
@@ -80,6 +84,6 @@ def write(review: TechnicalReview, cfg: TechnicalConfig) -> Path | None:
     if not folder.is_dir():
         log.warning("technical report: output_dir missing — skipped: %s", folder)
         return None
-    path = folder / f"技术面读数-{cfg.label}-{review.as_of:%Y-%m-%d}.md"
+    path = unique_path(folder / f"技术面读数-{cfg.label}-{review.as_of:%Y-%m-%d}.md")
     path.write_text(render(review, cfg), encoding="utf-8")
     return path

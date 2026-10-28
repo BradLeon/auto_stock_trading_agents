@@ -1,0 +1,163 @@
+schema_version: 1
+status: partial_not_accepted
+method: assistant_visual_read_of_unmodified_embedded_images
+production_review_approval: false
+reports:
+  '2026-08-28': {pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381, page_count: 37}
+  '2026-09-18': {pdf_sha256: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08, page_count: 33}
+notes:
+  - This is independently read source evidence, not parser output or a production release approval.
+  - Remaining charts and all-period coverage are not yet complete.
+  - The old August not_applicable declarations for revenue growth and surprise are invalid.
+tables:
+  - report_date: '2026-08-28'
+    page: 21
+    image: 2
+    period: 2026Q2
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 146.3, Communication Services: 116.9, Consumer Discretionary: 92.4, Information Technology: 75.3, Materials: 41.7, Financials: 22.0, Industrials: 16.7, Utilities: 13.7, Consumer Staples: 13.5, Real Estate: 8.6, Health Care: -6.5}
+  - report_date: '2026-09-18'
+    page: 24
+    image: 2
+    period: '2026'
+    period_basis: calendar_year
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 88.2, Communication Services: 56.7, Information Technology: 52.1, Materials: 37.2, Consumer Discretionary: 35.3, Financials: 14.5, Utilities: 12.9, Industrials: 11.7, Real Estate: 10.1, Consumer Staples: 7.4, Health Care: 2.4}
+  - report_date: '2026-09-18'
+    page: 24
+    image: 3
+    period: '2026'
+    period_basis: calendar_year
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 33.0, Energy: 21.3, Communication Services: 15.1, Real Estate: 9.3, Materials: 9.1, Financials: 9.1, Utilities: 7.8, Consumer Discretionary: 7.7, Industrials: 6.9, Consumer Staples: 6.6, Health Care: 5.8}
+  - report_date: '2026-09-18'
+    page: 25
+    image: 2
+    period: '2027'
+    period_basis: calendar_year
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 39.8, Health Care: 22.1, Industrials: 15.9, Materials: 11.5, Financials: 9.1, Utilities: 9.0, Consumer Staples: 7.2, Real Estate: 6.5, Consumer Discretionary: -2.2, Energy: -10.7, Communication Services: -11.0}
+  - report_date: '2026-09-18'
+    page: 25
+    image: 3
+    period: '2027'
+    period_basis: calendar_year
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 28.3, Communication Services: 14.2, Consumer Discretionary: 8.5, Real Estate: 8.0, Industrials: 7.8, Materials: 5.6, Financials: 5.2, Utilities: 5.1, Health Care: 4.4, Consumer Staples: 4.2, Energy: -5.9}
+  - report_date: '2026-08-28'
+    page: 29
+    image: 2
+    period: '2027'
+    period_basis: calendar_year
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 38.2, Health Care: 22.0, Industrials: 15.8, Materials: 11.6, Financials: 9.1, Utilities: 8.9, Consumer Staples: 7.2, Real Estate: 6.5, Consumer Discretionary: -1.7, Communication Services: -10.8, Energy: -12.2}
+  - report_date: '2026-08-28'
+    page: 29
+    image: 3
+    period: '2027'
+    period_basis: calendar_year
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 27.0, Communication Services: 14.1, Consumer Discretionary: 8.6, Real Estate: 7.9, Industrials: 7.7, Materials: 5.7, Financials: 5.0, Utilities: 5.0, Health Care: 4.4, Consumer Staples: 4.2, Energy: -5.9}
+  - report_date: '2026-09-18'
+    page: 22
+    image: 2
+    period: 2026Q3
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 109.6, Information Technology: 63.3, Communication Services: 51.0, Materials: 30.4, Industrials: 14.3, Real Estate: 8.7, Utilities: 6.8, Health Care: 6.0, Financials: 3.4, Consumer Discretionary: 3.0, Consumer Staples: 2.5}
+  - report_date: '2026-09-18'
+    page: 22
+    image: 3
+    period: 2026Q3
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 39.6, Energy: 18.8, Communication Services: 15.2, Utilities: 9.5, Real Estate: 9.2, Materials: 8.8, Industrials: 8.8, Financials: 7.4, Consumer Staples: 5.7, Consumer Discretionary: 5.1, Health Care: 4.0}
+  - report_date: '2026-08-28'
+    page: 26
+    image: 2
+    period: 2026Q3
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 100.7, Information Technology: 61.9, Communication Services: 49.8, Materials: 30.7, Industrials: 14.5, Real Estate: 8.7, Utilities: 7.3, Health Care: 6.1, Financials: 3.6, Consumer Discretionary: 3.3, Consumer Staples: 2.9}
+  - report_date: '2026-08-28'
+    page: 26
+    image: 3
+    period: 2026Q3
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 37.7, Energy: 18.8, Communication Services: 15.2, Utilities: 9.9, Real Estate: 9.1, Industrials: 8.8, Materials: 8.7, Financials: 7.4, Consumer Staples: 5.6, Consumer Discretionary: 5.1, Health Care: 4.0}
+  - report_date: '2026-08-28'
+    page: 28
+    image: 2
+    period: '2026'
+    period_basis: calendar_year
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 82.8, Communication Services: 55.6, Information Technology: 51.2, Materials: 37.1, Consumer Discretionary: 34.7, Financials: 14.5, Utilities: 12.9, Industrials: 11.9, Real Estate: 10.0, Consumer Staples: 7.5, Health Care: 2.3}
+  - report_date: '2026-08-28'
+    page: 28
+    image: 3
+    period: '2026'
+    period_basis: calendar_year
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Information Technology: 31.9, Energy: 20.3, Communication Services: 15.1, Real Estate: 9.3, Financials: 9.0, Materials: 9.0, Utilities: 7.9, Consumer Discretionary: 7.7, Industrials: 6.9, Consumer Staples: 6.5, Health Care: 5.8}
+  - report_date: '2026-08-28'
+    pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    page: 21
+    image: 3
+    title: 'S&P 500 Revenue Growth (Y/Y): Q2 2026'
+    period: 2026Q2
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 42.4, Information Technology: 37.1, Communication Services: 15.3, Financials: 14.2, Real Estate: 11.3, Industrials: 9.8, Consumer Discretionary: 9.5, Consumer Staples: 8.4, Materials: 7.8, Health Care: 7.5, Utilities: 5.4}
+  - report_date: '2026-08-28'
+    pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    page: 18
+    image: 3
+    title: 'S&P 500 Sector-Level Revenue Surprise %: Q2 2026'
+    period: 2026Q2
+    column: revenue_surprise
+    unit: percent
+    values: {Energy: 11.7, Financials: 4.9, Information Technology: 3.2, Industrials: 3.0, Health Care: 2.7, Real Estate: 2.1, Consumer Discretionary: 1.5, Communication Services: 1.5, Consumer Staples: 1.0, Materials: 0.8, Utilities: -1.6}
+  - report_date: '2026-09-18'
+    pdf_sha256: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    page: 17
+    image: 2
+    title: 'S&P 500 Earnings Growth (Y/Y): Q2 2026'
+    period: 2026Q2
+    column: eps_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 146.3, Communication Services: 116.9, Consumer Discretionary: 92.6, Information Technology: 76.5, Materials: 41.7, Financials: 21.9, Industrials: 16.6, Utilities: 13.7, Consumer Staples: 13.6, Real Estate: 8.6, Health Care: -6.4}
+  - report_date: '2026-09-18'
+    pdf_sha256: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    page: 17
+    image: 3
+    title: 'S&P 500 Revenue Growth (Y/Y): Q2 2026'
+    period: 2026Q2
+    column: revenue_growth
+    source_row: Today
+    unit: percent
+    values: {Energy: 42.4, Information Technology: 37.7, Communication Services: 15.3, Financials: 14.2, Real Estate: 11.3, Industrials: 9.7, Consumer Discretionary: 9.5, Consumer Staples: 8.4, Materials: 7.8, Health Care: 7.5, Utilities: 5.4}

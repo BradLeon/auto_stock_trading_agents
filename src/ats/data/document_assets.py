@@ -33,13 +33,15 @@ def ingest(*, entity: str, key: str, doc_type: str, text: str,
            completeness: str = "full", truncation_reason: str = "",
            carrier_format: str = "plain_text",
            mime_source: str = "",
+           period: str | None = None,
            now: datetime | None = None, note: str = "", store=None):
     """Persist one accepted body and return its ``CachedDoc`` compatibility object."""
     from .stores.unstructured import get_data_ingestion_store
 
     store = store or get_data_ingestion_store()
     doc = source_cache.store(
-        entity, key, doc_type, text, source=source, source_url=source_url,
+        entity, key if period is None else period, doc_type, text,
+        document_key=key, source=source, source_url=source_url,
         external_id=external_id, title=title, published_at=published_at,
         related_entities=related_entities, completeness=completeness,
         truncation_reason=truncation_reason, carrier_format=carrier_format,

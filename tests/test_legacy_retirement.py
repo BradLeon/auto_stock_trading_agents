@@ -1,0 +1,323 @@
+"""The legacy-retirement register: tombstone, fail-closed gate, two-phase purge.
+
+The point of this file is not coverage — it is that the three failure modes the
+registry exists to prevent are each pinned by a test: a tombstone silently losing to an
+in-use entry, a retired read being indistinguishable from an empty one, and an
+unconfirmed purge that deletes anyway.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from ats.workflow.legacy_retirement import (
+    REASON_NOT_FOUND,
+    REASON_NO_DATA,
+    REASON_RETIRED,
+    RetirementConflictError,
+    RetirementRegistry,
+    RetirementTombstone,
+    registry_from_mapping,
+)
+
+
+def _tombstone(identifier: str = "old.path", **kwargs) -> RetirementTombstone:
+    params = dict(identifier=identifier, capability_domain="workflow/test",
+                  replaced_by="new.path", target_phase="A",
+                  exit_condition="consumers reach zero", status="retired")
+    params.update(kwargs)
+    return RetirementTombstone(**params)
+
+
+# --- 7.1 registration ------------------------------------------------------ #
+
+def test_a_registered_tombstone_can_be_read_back() -> None:
+    registry = RetirementRegistry([_tombstone(missing_condition="")])
+    found = registry.tombstone("old.path")
+    assert found is not None
+    assert found.replaced_by == "new.path"
+    assert found.may_exit is True
+    assert registry.identifiers() == ("old.path",)
+
+
+def test_a_pending_tombstone_must_state_what_it_is_waiting_for() -> None:
+    with pytest.raises(ValueError, match="missing_condition"):
+        _tombstone(status="pending", missing_condition="")
+
+
+def test_a_tombstone_carries_the_exit_criterion_not_just_the_target() -> None:
+    stone = _tombstone(status="pending", missing_condition="consumers not migrated",
+                       consumers=("cli",), consumer_zero_criterion="cli reads envelope")
+    assert stone.may_exit is False
+    assert stone.consumer_zero_criterion == "cli reads envelope"
+
+
+# --- 7.2 mutual exclusion -------------------------------------------------- #
+
+def test_an_identifier_in_both_places_fails_the_registry() -> None:
+    with pytest.raises(RetirementConflictError) as caught:
+        RetirementRegistry([_tombstone()], active=["old.path"])
+    assert caught.value.identifiers == ["old.path"]
+
+
+def test_a_retired_identifier_is_removed_from_the_in_use_inventory() -> None:
+    """Registering an exit and keeping the in-use entry is the conflict; dropping the
+    in-use entry is the correct sequence."""
+    registry = RetirementRegistry([_tombstone()])
+    assert registry.active() == ()
+    registry.mark_active("still.here")
+    assert registry.active() == ("still.here",)
+
+
+def test_a_pending_item_may_still_be_in_use() -> None:
+    """Pending means 'registered, not yet removable' — it must not conflict."""
+    registry = RetirementRegistry(
+        [_tombstone(status="pending", missing_condition="consumers remain")],
+        active=["old.path"])
+    assert registry.read_gate("old.path") == ("ok", "")
+
+
+# --- 7.3 fail-closed read gate --------------------------------------------- #
+
+def test_the_three_outcomes_carry_distinct_reason_codes() -> None:
+    registry = RetirementRegistry([_tombstone()], active=["live.path"])
+    assert registry.read_gate("old.path") == ("retired", REASON_RETIRED)
+    assert registry.read_gate("unknown.path") == ("not_found", REASON_NOT_FOUND)
+    assert registry.read_gate("live.path", has_data=False) == ("no_data", REASON_NO_DATA)
+    codes = {registry.read_gate("old.path")[1], registry.read_gate("unknown.path")[1],
+             registry.read_gate("live.path", has_data=False)[1]}
+    assert codes == {REASON_RETIRED, REASON_NOT_FOUND, REASON_NO_DATA}
+
+
+def test_a_retired_read_is_not_silently_served_by_the_replacement() -> None:
+    """The gate says 'retired', never 'here is something similar'."""
+    registry = RetirementRegistry([_tombstone(replaced_by="new.path")])
+    kind, reason = registry.read_gate("old.path")
+    assert (kind, reason) == ("retired", REASON_RETIRED)
+
+
+def test_a_write_to_a_retired_path_fails_instead_of_being_redirected() -> None:
+    registry = RetirementRegistry([_tombstone()], active=["live.path"])
+    assert registry.write_gate("old.path") == (False, REASON_RETIRED)
+    assert registry.write_gate("live.path") == (True, "")
+
+
+# --- 7.4 two-phase purge ---------------------------------------------------- #
+
+def test_an_unconfirmed_purge_only_reports_its_scope() -> None:
+    registry = RetirementRegistry([_tombstone()])
+    registry.declare_purge_scope("old.path", ["old.path.a", "old.path.b"])
+    plan = registry.purge("old.path")
+    assert plan.executed is False
+    assert plan.scope == ("old.path.a", "old.path.b")
+    assert registry.audit_log() == ()
+
+
+def test_a_confirmed_purge_leaves_an_audit_record() -> None:
+    registry = RetirementRegistry([_tombstone()])
+    registry.declare_purge_scope("old.path", ["old.path.a"])
+    plan = registry.purge("old.path", confirm=True, note="consumers migrated")
+    assert plan.executed is True
+    record = registry.audit_log()[0]
+    assert record.identifier == "old.path"
+    assert record.action == "purge"
+    assert record.scope == ("old.path.a",)
+    assert record.note == "consumers migrated"
+    assert record.data_retained_elsewhere is False
+
+
+def test_the_retention_declaration_is_recorded_not_inferred() -> None:
+    registry = RetirementRegistry([_tombstone()])
+    registry.purge("old.path", confirm=True, exported=True, note="parquet kept")
+    assert registry.audit_log()[0].data_retained_elsewhere is True
+    assert registry.audit_log()[0].at
+
+
+# --- 7.5 first batch -------------------------------------------------------- #
+
+def test_the_registered_batch_covers_every_documented_item() -> None:
+    """design.md 的待退项登记表逐项核对，不允许多登记也不允许漏登记。
+    Phase A 8 项 + Phase B 6 项（任务 8.1）+ Phase C 6 项 + Phase D 5 项（任务 9.1）。"""
+    from ats.workflow import legacy_retirement as mod
+
+    registry = mod.load_registry()
+    expected = {
+        "workflow_memory.evidence_observations",
+        "workflow_memory.evidence_facts",
+        "workflow_memory.evidence_fact_projections",
+        "workflow_memory.evidence_failures",
+        "scheduler.hardcoded_serial_run",
+        "legacy_read_models",
+        # ── Phase C（任务 6.7：旧直读点先行登记；其余五项随任务 8.1 批次追加）──
+        "store.direct_trade_reads",
+        "reconcile.origin_manual_fallback",
+        "reconcile.partial_fill_as_filled",
+        "scheduler.adhoc_journal_jobs",
+        "performance.legacy_snapshot",
+        "journal.report.render_ledger",
+        # ── Phase D（任务 2.9 + 任务 9.1）──
+        "layer_verdict.allocation",
+        "graph.pead.internal_risk_and_sizing",
+        "chief.legacy_table_direct_reads",
+        "pead_dossier",
+        "sector_reviews",
+        # ── Phase B ──
+        "risk.checks.in_place_clipping",
+        "agents.risk_validator.apply_guardrails",
+        "runtime.server.in_process_resume_dedup",
+        "memory.store.legacy_decision_write_path",
+        "trades.client_order_id.legacy_derivation",
+        "risk.checks.pre_trade_adapter",
+        # ── Phase F（任务 7.10：第 7 组实测缺口此前无归属者，在此取得归属）──
+        "decision_roles.unwired_to_governed_read_api",
+        # Observer responsibilities are explicitly merged into Layer; retaining
+        # its retired tombstone preserves historical lineage and rejects reuse.
+        "agent.evidence_observer",
+        # ── retire-legacy-and-migration-tooling（tasks 1.6、1.7）──
+        "macro_reviews", "technical_reviews",
+        "naming.consumer_cutover_cli", "legacy_entry.research_manual_commands",
+        "legacy_entry.research_owner_legacy_mode", "legacy_entry.evidence_commands",
+        "naming.migration_terms_in_docs",
+        "migration.batch_read_cutover", "migration.schedule_cutover", "migration.intake",
+        "migration.analysis_verification", "migration.dispatch_dedup",
+        "agents.risk_manager", "agents.pead.monitor", "agents.pead.research",
+        "migration.read_route_and_qualification", "migration.trade_cutover_tooling",
+    }
+    expected.discard("pead_dossier")        # a fundamental-owned live record, not a retirement item (tasks 1.7)
+    assert set(registry.identifiers()) == expected
+    for stone in registry.tombstones():
+        assert stone.replaced_by and stone.exit_condition
+        if stone.status == "pending":
+            assert stone.missing_condition
+
+
+def test_phase_d_items_are_registered_with_complete_fields() -> None:
+    """任务 9.1：Phase D 四项新增待退（层级 allocation 已随 2.9 登记）逐项核对，
+    每项写明替代实现、退出条件与消费方清零判据。"""
+    from ats.workflow import legacy_retirement as mod
+
+    registry = mod.load_registry()
+    allocation = registry.tombstone("layer_verdict.allocation")       # retired on 2026-10-27 (tasks 6.4): no reader left
+    assert allocation is not None and allocation.status == "retired" and not allocation.consumers
+    pending = {
+        "chief.legacy_table_direct_reads": "pending",
+        "sector_reviews": "pending",      # `pead_dossier` left this list on 2026-10-27: a live fundamental record (tasks 1.7)
+    }
+    for identifier, status in pending.items():
+        stone = registry.tombstone(identifier)
+        assert stone is not None, identifier
+        assert stone.target_phase == "D", identifier
+        assert stone.status == status, identifier
+        assert stone.replaced_by, identifier
+        assert stone.exit_condition, identifier
+        assert stone.consumer_zero_criterion, identifier
+        assert stone.consumers, identifier
+    retired = registry.tombstone("graph.pead.internal_risk_and_sizing")
+    assert retired is not None
+    assert retired.target_phase == "D" and retired.status == "retired"
+    assert retired.replaced_by and retired.exit_condition
+    assert retired.consumer_zero_criterion
+
+
+def test_every_registered_item_names_its_consumer_zero_criterion() -> None:
+    from ats.workflow import legacy_retirement as mod
+
+    for stone in mod.load_registry().tombstones():
+        assert stone.consumer_zero_criterion, stone.identifier
+
+
+def test_the_projection_cache_and_lineage_key_are_live_records_not_retirement_items() -> None:
+    """tasks 6.2、6.3：信息分析师的抽取缓存与事实投影的血缘键仍在用，留在活动清册，不登记墓碑。"""
+    from ats.workflow import legacy_retirement as mod
+
+    registry = mod.load_registry()
+    for identifier in ("task_projections.legacy_columns", "evidence_fact_projections.legacy_observation_id"):
+        assert registry.tombstone(identifier) is None, identifier
+    assert "task_projections" in registry.active()
+    assert "evidence_fact_projections.legacy_observation_id" in registry.active()
+
+
+def test_no_physical_purge_has_been_performed() -> None:
+    from ats.workflow import legacy_retirement as mod
+
+    assert mod.load_registry().audit_log() == ()
+
+
+def test_a_mapping_with_a_conflict_fails_to_build() -> None:
+    with pytest.raises(RetirementConflictError):
+        registry_from_mapping({
+            "active": ["x"],
+            "retired": [{"identifier": "x", "status": "retired",
+                         "exit_condition": "done"}],
+        })
+
+
+# --- retire-legacy-and-migration-tooling 1.4: kind / group / depends_on / gate -------------------------------- #
+
+from ats.workflow.legacy_retirement import RetirementCycleError, RetirementDependencyError  # noqa: E402
+
+
+def _pending(identifier: str, **kwargs) -> RetirementTombstone:
+    return _tombstone(identifier, status="pending", missing_condition="waiting", **kwargs)
+
+
+def test_the_new_fields_round_trip_and_default_to_empty() -> None:
+    plain = _tombstone("plain")
+    assert (plain.kind, plain.group, plain.gate, plain.depends_on) == ("", "", "", ())
+    registry = registry_from_mapping({"retired": [
+        {"identifier": "a", "status": "pending", "missing_condition": "x", "kind": "migration_tooling",
+         "group": "R2", "gate": "G0"},
+        {"identifier": "b", "status": "pending", "missing_condition": "x", "kind": "legacy_entry",
+         "group": "R1", "gate": "G0", "depends_on": ["a"]}]})
+    b = registry.tombstone("b")
+    assert (b.kind, b.group, b.gate, b.depends_on) == ("legacy_entry", "R1", "G0", ("a",))
+
+
+def test_a_cycle_in_the_dependencies_fails_the_registry() -> None:
+    with pytest.raises(RetirementCycleError) as caught:
+        RetirementRegistry([_pending("a", depends_on=("b",)), _pending("b", depends_on=("c",)),
+                            _pending("c", depends_on=("a",))])
+    assert set(caught.value.cycle) == {"a", "b", "c"}
+    with pytest.raises(RetirementCycleError):
+        RetirementRegistry([_pending("self", depends_on=("self",))])
+
+
+def test_a_dependency_on_an_unregistered_entry_fails_the_registry() -> None:
+    with pytest.raises(RetirementDependencyError) as caught:
+        RetirementRegistry([_pending("a", depends_on=("ghost",))])
+    assert caught.value.dangling == {"a": ["ghost"]}
+
+
+@pytest.mark.parametrize("field,value", [("gate", "G9"), ("group", "R9"), ("kind", "whatever")])
+def test_an_unknown_gate_group_or_kind_is_rejected(field, value) -> None:
+    with pytest.raises(ValueError):
+        _pending("a", **{field: value})
+
+
+def test_a_valid_dependency_graph_loads_and_reports_unmet_dependencies() -> None:
+    registry = RetirementRegistry([_tombstone("first"), _pending("second", depends_on=("first",)),
+                                   _pending("third", depends_on=("second", "first"))])
+    assert registry.unmet_dependencies("first") == ()
+    assert registry.unmet_dependencies("second") == ()          # `first` has retired
+    assert registry.unmet_dependencies("third") == ("second",)
+
+
+def test_every_entry_of_the_retirement_change_has_a_group_a_gate_and_known_dependencies() -> None:
+    """tasks 1.6: R1–R4 wait on G0, R5 on the external trade-path gate; nothing is left unplaced."""
+    from ats.workflow import legacy_retirement as mod
+
+    registry = mod.load_registry()
+    placed = [stone for stone in registry.tombstones() if stone.group]
+    assert {stone.group for stone in placed} == {"R1", "R3", "R4", "R5"}      # R2 moved wholly to R5 on 2026-10-27
+    for stone in placed:
+        assert stone.gate == ("trade_path_cutover" if stone.group == "R5" else "G0"), stone.identifier
+        assert stone.kind, stone.identifier
+    assert registry.tombstone("pead_dossier") is None and "pead_dossier" in registry.active()
+    assert registry.tombstone("macro_reviews") and registry.tombstone("technical_reviews")
+
+
+def test_unproven_retired_entries_read_as_awaiting_proof_not_as_cleared() -> None:
+    from ats.workflow import retirement_clearance as rc
+
+    text = rc.render_report([], [rc.ZeroVerdict(identifier="x", consumer="m", verdict=rc.PARTIAL, reason="no role id")])
+    assert "待补证" in text and "清零" not in text.split("| 条目 | 消费方 | 结论 | 说明 |")[1].split("\n")[2]

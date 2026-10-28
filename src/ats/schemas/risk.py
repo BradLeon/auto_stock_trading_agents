@@ -397,3 +397,84 @@ class RiskMemo(BaseModel):
     recommended_actions: list[str] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
     review: RiskReview | None = None  # deterministic source
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic decision-level risk review (Phase B, §5.2/§5.3)
+# --------------------------------------------------------------------------- #
+class RiskViolation(BaseModel):
+    """One hard-rule failure, structured so Chief can act on it directly.
+
+    `rule_id` names the limit, `entity` the order (or "" for portfolio-level
+    rules), `limit`/`actual` the boundary and the breached value, `severity`
+    hard = always blocks. This is the counterproposal input: the boundary in
+    `limit` is what a revised proposal may use.
+    """
+    rule_id: str
+    entity: str = ""
+    limit: float | str | None = None
+    actual: float | str | None = None
+    severity: Literal["hard", "soft"] = "hard"
+    detail: str = ""
+
+
+class OrderRiskVerdict(BaseModel):
+    """Per-order outcome inside one revision review. Orders are never modified."""
+    symbol: str
+    action: str
+    verdict: Literal["approved", "rejected"]
+    reasons: list[str] = Field(default_factory=list)
+    # For a rejected increasing order: the largest notional this rule set
+    # would accept for it right now (the counterproposal's size hint).
+    max_allowed_notional: float | None = None
+
+
+class AllowedBoundary(BaseModel):
+    """What WOULD pass: the structured counterproposal envelope (§5.3)."""
+    max_additional_notional: float | None = None
+    blocked_actions: list[str] = Field(default_factory=list)
+    per_symbol_max_notional: dict[str, float] = Field(default_factory=dict)
+
+
+class ReviewBasis(BaseModel):
+    """What the review was computed ON (Phase D task 6.4, additive).
+
+    A risk review is only as valid as the inputs it binds: the portfolio
+    snapshot it projected the post-trade state on, the market as-of it priced
+    event risk at, and the ruleset version whose limits it applied. Any of the
+    three missing = the review is NOT usable to release an order
+    (`risk.checks.usable_for_release`).
+    """
+    portfolio_snapshot_id: str = ""
+    market_as_of: str = ""
+    ruleset_version: str = ""
+
+    def missing_bindings(self) -> list[str]:
+        return [name for name, value in (
+            ("portfolio_snapshot_id", self.portfolio_snapshot_id),
+            ("market_as_of", self.market_as_of),
+            ("ruleset_version", self.ruleset_version)) if not value]
+
+
+class DecisionRiskReview(BaseModel):
+    """The read-only review of ONE revision (evaluation unit: the whole revision).
+
+    Deterministic fields decide the verdict; narrative text is recorded but can
+    never flip it. `before_metrics`/`after_metrics` are risk utilizations
+    (marginal.risk_utilizations) so clerks and post-mortems can quantify how
+    much risk the revision adds — and distinguish a changed investment
+    judgement from an order compressed by risk budget.
+    """
+    verdict: Literal["approved", "rejected"] = "rejected"
+    order_verdicts: list[OrderRiskVerdict] = Field(default_factory=list)
+    violations: list[RiskViolation] = Field(default_factory=list)
+    allowed_boundary: AllowedBoundary = Field(default_factory=AllowedBoundary)
+    before_metrics: dict[str, float] = Field(default_factory=dict)
+    after_metrics: dict[str, float] = Field(default_factory=dict)
+    pre_state: str = "NORMAL"
+    post_state: str = "NORMAL"
+    notes: list[str] = Field(default_factory=list)
+    llm_comment: str = ""       # recorded, never decisive (§5.2 第 4 条)
+    # Phase D 6.4: the input binding — proposals + portfolio snapshot + market
+    # as-of + ruleset, and NOTHING else (no macro opinion enters risk review).
+    basis: ReviewBasis | None = None

@@ -11,7 +11,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from .decision import Action, normalize_action
 
 Role = Literal["upstream", "peer", "downstream"]
 
@@ -89,6 +91,7 @@ class ExpectationSet(BaseModel):
     consensus_target_price: float | None = None   # analyst PT mean
     consensus_rating_summary: str = ""            # e.g. "强买5/买12/持有2/卖0"
     consensus_recent_actions: list[str] = Field(default_factory=list)  # last 3 upgrades/downgrades
+    consensus_note: str = ""                      # why the estimates are blank (period/freshness check), else ""
     valuation: str = ""                       # PE / fwd PE / ceiling-floor note
 
 
@@ -137,6 +140,7 @@ class Actuals(BaseModel):
     as_of: datetime
     reported_eps: float | None = None
     reported_revenue: float | None = None
+    reporting_currency: str = ""      # ISO code the two figures above are stated in
     metrics: list[ActualMetric] = Field(default_factory=list)
     guidance: str = ""                # forward guidance extracted from text
     transcript_signals: list[str] = Field(default_factory=list)
@@ -200,7 +204,14 @@ class PeadRecommendation(BaseModel):
     """
 
     symbol: str
-    action: Literal["buy", "trim", "sell", "hold"]
+    # Same vocabulary as the decision layer — including `add`, which this list used to
+    # be missing. "在既有仓位上加仓" must not be forced into another action.
+    action: Action
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _canonical_action(cls, v: object) -> object:
+        return normalize_action(v, where="PeadRecommendation.action") if isinstance(v, str) else v
     qty_hint: float | None = None
     notional_hint: float | None = None
     conviction: float = 0.0

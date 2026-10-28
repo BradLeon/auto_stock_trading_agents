@@ -1,12 +1,12 @@
 ## 1. 前置：让退役 diff 干净
 
-- [x] 1.1 处理 `codex/new_data_source` 分支上的未提交改动（`config/data/structured.yaml`、`config/data/schedules.yaml`、4 份 docs、1 份 src、3 份 tests、未跟踪的 `docs/L1_OBSERVER_DATA_SOURCES.md`）：提交或另行暂存，使 `git status --short` 在开始退役前为空。验证：`git status --short` 无输出。
+- [x] 1.1 处理 `codex/new_data_source` 分支上的未提交改动（`config/data/structured.yaml`、`config/data/schedules.yaml`、4 份 docs、1 份 src、3 份 tests、未跟踪的 `docs/data/L1_OBSERVER_DATA_SOURCES.md`）：提交或另行暂存，使 `git status --short` 在开始退役前为空。验证：`git status --short` 无输出。
 
 ## 2. 墓碑登记与配置退役
 
 - [x] 2.1 在 `config/data/structured.yaml` 新增顶层 `retired_sources` 段落，登记 `ons_bics_ai` 的 `retired_at`、`reason`、`prior_catalog_status: legacy`、`disposition: purged`、`disposition_at`、`successor: ""`、`spec_removed: true`。验证：`python -c "import yaml;d=yaml.safe_load(open('config/data/structured.yaml'));print(d['retired_sources']['ons_bics_ai'])"` 输出完整墓碑。
 - [x] 2.2 同一批删除 `ons_bics_ai` 的活条目：`feature_flags.sources.ons_bics_ai`、`sources.ons_bics_ai`、`datasets.ai_enterprise_adoption_uk`、7 个 `ai.uk_enterprise_adoption.*` 指标定义、`provider_mappings.ons_bics_ai`。验证：`grep -n "ons_bics\|ai_enterprise_adoption_uk\|ai\.uk_enterprise_adoption" config/data/structured.yaml` 仅命中 `retired_sources` 与 `reason` 文本。
-- [x] 2.3 同步 `docs/STRUCTURED_DATA_OPERATIONS.md`：从 §10.1 source 表删除 `ons_bics_ai` 行与 `ai_enterprise_adoption_uk` dataset 行，从 §10.2 删除 `ons_bics_ai` 行，并更新 §3 范围边界段落中去掉 ONS 表述。验证：`pytest tests/test_structured_docs_consistency.py` 全绿。
+- [x] 2.3 同步 `docs/data/STRUCTURED_DATA_OPERATIONS.md`：从 §10.1 source 表删除 `ons_bics_ai` 行与 `ai_enterprise_adoption_uk` dataset 行，从 §10.2 删除 `ons_bics_ai` 行，并更新 §3 范围边界段落中去掉 ONS 表述。验证：`pytest tests/test_structured_docs_consistency.py` 全绿。
 
 ## 3. 注册校验 fail-closed 与墓碑访问器
 
@@ -30,11 +30,11 @@
 
 ## 6. 文档同步
 
-- [x] 6.1 `docs/L1_OBSERVER_DATA_SOURCES.md`：删除「容易误读的边界」段与来源表、规模表中的 ONS 行，修正规模合计（232,016/92.4% → 226,935/90.4%，九来源），并顺带修正 `tickertrends_public_research` 行仍写 `frozen_seed，不参与周期发现` 的既有漂移。验证：`grep -nE "ons_bics|ONS BICS" docs/L1_OBSERVER_DATA_SOURCES.md` 零命中（注意：裸 `ONS` 会被 `..._OPERATIONS.md` 里的 `OPERATI**ONS**` 误命中，不可用作探针）。
-- [x] 6.2 `docs/AI_MODEL_EVIDENCE_SOURCES.md`：删除 ONS 来源行与「双周 | Census BTOS、ONS BICS」中的 ONS。验证：`grep -n "ons_bics\|ONS BICS" docs/AI_MODEL_EVIDENCE_SOURCES.md` 零命中。
-- [x] 6.3 `docs/AI_PRODUCTION_ADOPTION_CANDIDATE_SOURCES_RESEARCH.md`：在「六、英国 ONS BICS AI」章节与来源矩阵、结论清单处标注「已于 2026-09-19 正式退役（`retire-ons-bics-ai`），不导出历史数据」，保留研究正文作为历史定级依据。验证：该章节含退役标注且正文其余部分未被删改。
+- [x] 6.1 `docs/data/L1_OBSERVER_DATA_SOURCES.md`：删除「容易误读的边界」段与来源表、规模表中的 ONS 行，修正规模合计（232,016/92.4% → 226,935/90.4%，九来源），并顺带修正 `tickertrends_public_research` 行仍写 `frozen_seed，不参与周期发现` 的既有漂移。验证：`grep -nE "ons_bics|ONS BICS" docs/data/L1_OBSERVER_DATA_SOURCES.md` 零命中（注意：裸 `ONS` 会被 `..._OPERATIONS.md` 里的 `OPERATI**ONS**` 误命中，不可用作探针）。
+- [x] 6.2 `docs/research/AI_MODEL_EVIDENCE_SOURCES.md`：删除 ONS 来源行与「双周 | Census BTOS、ONS BICS」中的 ONS。验证：`grep -n "ons_bics\|ONS BICS" docs/research/AI_MODEL_EVIDENCE_SOURCES.md` 零命中。
+- [x] 6.3 `docs/research/AI_PRODUCTION_ADOPTION_CANDIDATE_SOURCES_RESEARCH.md`：在「六、英国 ONS BICS AI」章节与来源矩阵、结论清单处标注「已于 2026-09-19 正式退役（`retire-ons-bics-ai`），不导出历史数据」，保留研究正文作为历史定级依据。验证：该章节含退役标注且正文其余部分未被删改。
 - [x] 6.4 `docs/validation/ONS_BICS_AI_TASK6_ACCEPTANCE.md` 与 `docs/validation/AI_ADOPTION_V2_END_TO_END_ACCEPTANCE.md`：顶部加退役标注并注明 5,081 obs 已 purge、验收结论仅作历史记录；保留文件不删。验证：两份文件均含退役标注。
-- [x] 6.5 复查 `docs/DATA_SOURCES.md`、`docs/AI_PRODUCTION_PENETRATION_OBSERVER.md`、`docs/STRUCTURED_DATA_OPERATIONS.md`、`docs/DATA_ARCHITECTURE.md` 无残留 ONS 来源表述。验证：`grep -rn "ons_bics\|ONS BICS\|ai_enterprise_adoption_uk" docs/` 只命中 6.3/6.4 的退役标注。附带修正 `RAMP_AI_INDEX.md`/`RAMP_AI_INDEX_ACCEPTANCE.md` 中把 ONS 列为在役节奏来源的过期枚举。
+- [x] 6.5 复查 `docs/data/DATA_SOURCES.md`、`docs/data/AI_PRODUCTION_PENETRATION_OBSERVER.md`、`docs/data/STRUCTURED_DATA_OPERATIONS.md`、`docs/data/DATA_ARCHITECTURE.md` 无残留 ONS 来源表述。验证：`grep -rn "ons_bics\|ONS BICS\|ai_enterprise_adoption_uk" docs/` 只命中 6.3/6.4 的退役标注。附带修正 `RAMP_AI_INDEX.md`/`RAMP_AI_INDEX_ACCEPTANCE.md` 中把 ONS 列为在役节奏来源的过期枚举。
 
 ## 7. 测试调整
 

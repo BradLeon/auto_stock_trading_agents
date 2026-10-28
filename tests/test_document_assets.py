@@ -1,9 +1,8 @@
 """Unified document assets: immutable bodies plus versioned consumer processing."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from ats.data import source_cache
-from ats.data import document_assets
+from ats.data import document_assets, source_cache
 from ats.memory import get_store
 
 
@@ -76,7 +75,7 @@ def test_source_cache_rejects_visible_body_with_stale_frontmatter_hash():
 
 def test_document_content_versions_are_immutable_and_latest_stays_compatible():
     store = get_store()
-    t0 = datetime(2026, 8, 19, tzinfo=timezone.utc)
+    t0 = datetime(2026, 8, 19, tzinfo=UTC)
 
     first = source_cache.store("SEMIANALYSIS", "article-1", "article", _body("v1"),
                                source="imap", source_url="https://example.test/a", now=t0)
@@ -198,8 +197,11 @@ def test_entity_association_backfill_covers_pre_platform_documents(tmp_path):
     doc = source_cache.store("AMD", "2026Q2", "release", _body("legacy"), source="sec")
     assert doc is not None
     first.save_document(doc)
-    first.conn.execute("DELETE FROM document_entities")
-    first.conn.commit()
+    # Entity association lives in the data layer now (Workflow memory retires
+    # `document_entities`), so the backfill this test exercises is a data-layer row.
+    data = first.data_store().conn
+    data.execute("DELETE FROM data_document_entities")
+    data.commit()
     first.conn.close()
 
     reopened = TradingMemory(path)
@@ -224,7 +226,7 @@ def test_evidence_compatibility_id_resolves_to_exact_shared_asset():
         entity="AMD", source_entity="AMD", metric="revenue", concept="ai_adoption",
         period="2026Q2", observation_type="reported_actual", stance="supplier",
         direction="up", value=None, unit="", evidence_span="revenue growth",
-        observed_at=datetime(2026, 8, 19, tzinfo=timezone.utc),
+        observed_at=datetime.now(UTC),
     )
     original = observer.extract
     try:

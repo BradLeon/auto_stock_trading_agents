@@ -8,55 +8,85 @@ environment: live           # paper | live  (switch here when going live)
 llm:
   # OpenRouter relay (OpenAI-compatible) — swap provider/model by editing here.
   default_provider: openai
-  default_model: anthropic/claude-opus-5
+  default_model: deepseek/deepseek-v4-pro
+  # Default structured-output transport is strict JSON Schema. Roles on models that need forced
+  # tool calls (the DeepSeek-based ones below) set function_calling explicitly.
+  default_structured_output_method: json_schema
   temperature: 0.2
   max_tokens: 4096
   timeout_seconds: 120
   max_retries: 3
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
-    industry_analyst: {model: deepseek/deepseek-v4-pro}   # PEAD signal-chain read-throughs
-    manager: {}            # routing key reused by pead-scorer — real money, keep Opus
+    # 2026-10-17 max_tokens / reasoning audit. Reasoning tokens are billed and counted INSIDE max_tokens on
+    # OpenRouter's deepseek-v4: measured on layer_rotation (answer ~1.7K tokens) the model spent 8.5-9.3K
+    # tokens thinking, hit the 8192 ceiling, returned no tool call, and run_structured retried the identical
+    # request 4 times (~$0.09 for nothing). `reasoning: off` removes the hazard for extraction/structuring/
+    # classification roles; `reasoning: <n>` caps thinking for weekly judgment roles whose max_tokens already
+    # leaves room for cap + answer. Roles left untouched on purpose (changing them retires their cached
+    # execution identity, see agents/base.execution_versions): research_extract, context_monitor,
+    # fundamental_analyst. The evidence_* roles go to the DeepSeek API directly with thinking disabled.
+    industry_analyst: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 12288}   # PEAD signal-chain read-throughs
+    manager: {max_tokens: 12288}            # routing key reused by pead-scorer — real money; no per-role model override, so it runs on default_model
     # --- cheap tier (Gemini Flash): high-volume or extraction-only, no quality loss ---
-    news_triage: {model: deepseek/deepseek-v4-flash-0731, temperature: 0.0, max_tokens: 8192}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
-    context_monitor: {model: deepseek/deepseek-v4-flash-0731, max_tokens: 8192}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
-    intel_brief: {model: openai/gpt-5.6-terra, temperature: 0.2, max_tokens: 8192}   # 每日情报 digest：逐票投资要点+方向+中文翻译（嵌套结构化，flash/deepseek 偶发翻空 → 用 sonnet 保证每天出；2026-08-03 验证后换 terra，更便宜且智能指数更高）
-    actuals_extract: {model: openai/gpt-5.6-terra, max_tokens: 8192}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor（2026-08-03 换 terra）
+    news_triage: {model: deepseek/deepseek-v4-flash-0731, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling, reasoning: "off"}  # 高频头条 triage 打分（gemini-flash 太贵，deepseek-v4-pro ~1/9 输出价、智能相近）
+    context_monitor: {model: deepseek/deepseek-v4-flash-0731, max_tokens: 8192, structured_output_method: function_calling}   # PEAD monitor _llm_update（高频；triage 已预筛；deepseek-v4-pro 省钱）
+    intel_brief: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, temperature: 0.2, max_tokens: 8192, reasoning: "off"}   # 每日情报 digest：逐票投资要点+方向+中文翻译（嵌套结构化，flash/deepseek 偶发翻空 → 用 sonnet 保证每天出；2026-08-03 验证后换 terra，更便宜且智能指数更高）
+    actuals_extract: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 8192, reasoning: "off"}   # pull reported numbers from transcript/8-K over a large context — gemini-flash flaked (empty tool call → all-zero scorecard); needs a reliable extractor（2026-08-03 换 terra）
+    # 2026-10-16 用户指示：原先走 openai/gpt-5.6-terra 的 10 个角色（intel_brief、actuals_extract、claim_proposer、
+    # sector_analyst、macro_strategist、pead_analyst、structure_analyst、layer_analyst、layer_rotation、invalidation_check）
+    # 统一改为 deepseek/deepseek-v4-pro。原因：OpenRouter 账单显示 10-16 一天 Terra 花了 $6.88（PEAD 准备把整份财务快照
+    # 塞进提示词，单次输入近 20 万 token）。以下各角色行内旧注释里的 Terra 选型理由是历史记录，不再生效。
+    # 风险（需观察）：intel_brief 此前在 deepseek/flash 上“偶发翻空”；actuals_extract 此前在 gemini-flash 上“空工具调用”。
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
-    research_extract: {model: deepseek/deepseek-v4-flash-0731}   # supply-chain insight extraction
+    research_extract: {model: deepseek/deepseek-v4-flash-0731, structured_output_method: function_calling}   # supply-chain insight extraction
     # 产业链证据抽取（观察名单财报）：只抽事实+原文片段，不做判断 → 便宜档足够。
-    # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/CHAIN_EVIDENCE.md
+    # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/archive/CHAIN_EVIDENCE.md
     # provider: deepseek —— 走官方 API 而不是 OpenRouter。同一份文档、同一段 prompt，
     # 经 OpenRouter 三次抽取结果是 [0, 33, 36]；换 terra 档是 [3, 3, 2]（稳定但几乎读不出
     # 东西）。两个模型两种异常，共同变量是网关，所以先把网关这个变量去掉。
     # 纯文本进出、无需跨供应商路由的角色才这么切；需要 Anthropic/OpenAI 的仍走 OpenRouter。
-    evidence_observer: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192}
+    # 2026-10-23 G0 D01–D04 抽查（40 条）发现方向/年份判断偏差，试换 deepseek/deepseek-v4.1-flash-1017（OpenRouter，
+    # 用户指定）。注意：这又把“OpenRouter 网关”这个变量带回来了（上面 [0,33,36] 的教训），试用期间要看抽取条数是否稳定；
+    # 不稳就退回下面这一行（官方 API 直连）：
+    #   evidence_observer: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling}
+    evidence_observer: {model: deepseek/deepseek-v4.1-flash-1017, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling, reasoning: "off"}
     # 涌现命题归纳：低频（证据驱动，不设 cron），但要从一堆散落事实里归纳出可证伪命题，
     # 是判断活不是抽取活 → 走中档。产出只是给人看的待确认卡，不进因子也不进 Chief。
-    claim_proposer: {model: openai/gpt-5.6-terra, max_tokens: 4096}
+    claim_proposer: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 4096, reasoning: "off"}
     # 证据簇判读：唯一决定"这组证据对命题意味着什么"的地方。取代了原来写在 yaml 里的
     # supports_when 标量——真实数据证明那个形状是错的（SK 海力士一边说客户还在要货、
     # 一边扩产，被判成 7 条反驳）。上下文很短（一条命题 + ~10 组、每组几句原文），
     # 但判的是机制不是方向词，判错方向直接改写结论 → 走中档。频次同 sector_review。
-    evidence_adjudicator: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192}
+    evidence_adjudicator: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling}
     # gemini-2.5-pro (reasoning model) on the full ~57k live context intermittently
     # returns an empty tool call → None; run_structured retries a few times. 24000
     # keeps output headroom for reasoning + the large structured payload.
-    sector_analyst: {model: openai/gpt-5.6-terra, max_tokens: 24000}   # weekly L1-L6 sector review — 试点(2026-08-03)验证通过：Terra AA智能指数55(max effort)>sonnet-5(53)，且 OpenRouter 限时5折后价格($1/$6)是 sonnet-5($2/$10)的一半；结构化输出稳定，不稳就退回 anthropic/claude-sonnet-5
-    macro_strategist: {model: openai/gpt-5.6-terra, max_tokens: 24000} # weekly macro regime + sector tilts — 同上，换 terra（2026-08-03）
-    pead_analyst: {model: openai/gpt-5.6-terra}  # PEAD prep framework/narrative/expectations (token-heavy)（2026-08-03 换 terra）
-    structure_analyst: {model: openai/gpt-5.6-terra, max_tokens: 8192}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权（2026-08-03 换 terra）
+    sector_analyst: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 24000, reasoning: 6000}   # weekly L1-L6 sector review — 试点(2026-08-03)验证通过：Terra AA智能指数55(max effort)>sonnet-5(53)，且 OpenRouter 限时5折后价格($1/$6)是 sonnet-5($2/$10)的一半；结构化输出稳定，不稳就退回 anthropic/claude-sonnet-5
+    macro_strategist: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 24000, reasoning: 6000} # weekly macro regime + sector tilts — 同上，换 terra（2026-08-03）
+    pead_analyst: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 16384}  # PEAD prep framework/narrative/expectations (token-heavy)（2026-08-03 换 terra）
+    structure_analyst: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 8192, reasoning: "off"}  # 截面 v2 KB 定性结构层：技术久期/护城河/定价权（2026-08-03 换 terra）
     # 层级子行业分析师（2026-08-20 新增）：每层一次，产出配置结论（超配/标配/低配/清仓）
     # 与层内选股。上下文只含本层素材，比原来的全行业合成小得多，所以同档模型跑八次的
     # 总量与原来跑一次同量级。它的产出**会改变本层预算使用率**，所以不放低档。
-    layer_analyst: {model: openai/gpt-5.6-terra, max_tokens: 12000}
+    layer_analyst: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 12000, reasoning: 4000}
     # 跨层轮动（收窄后的 sector_analyst 第二段）：只消费八条层级结论，输入紧凑。
-    layer_rotation: {model: openai/gpt-5.6-terra, max_tokens: 8192}
-    invalidation_check: {model: openai/gpt-5.6-terra, max_tokens: 2048}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，判读需稳定（2026-08-03 换 terra）
-    # --- Opus tier: genuine judgment that drives trades, low frequency ---
-    chief: {max_tokens: 8192}            # 首席收口 — daily portfolio decision synthesis, Opus
-    risk_officer: {max_tokens: 8192}     # 组合风控官 — narrative memo over the deterministic 6-layer read, Opus
-    critic: {max_tokens: 4096}           # 交易日志季度 critic —— 低频、人工签字前最后一道叙事关卡，成本不是约束
+    layer_rotation: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 8192, reasoning: "off"}
+    invalidation_check: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, max_tokens: 2048, reasoning: "off"}  # 交易日志每周失效判定——事实分类不是叙事，输入已 blind() 去除盈亏，判读需稳定（2026-08-03 换 terra）
+    # --- high-judgment tier: drives trades, low frequency. No per-role model override: runs on default_model ---
+    chief: {max_tokens: 16384}            # 首席收口 — daily portfolio decision synthesis
+    risk_officer: {max_tokens: 16384}     # 组合风控官 — narrative memo over the deterministic 6-layer read
+    # Fundamental routine fact-change classification. One output size standard for every ticker:
+    # a larger watch-list entry (e.g. TSM, 22 fact changes) overflowed the 4096 default and was
+    # truncated. The ceiling is only spent when output needs it. Do NOT raise the global default
+    # instead: the role config is part of the Information extraction identity (role: research_extract),
+    # so changing the default would retire the whole extraction cache.
+    fundamental_analyst: {max_tokens: 8192}
+    # Routine fact-change classification: tiny input, tiny structured answer. On 2026-10-16 one call with a
+    # 1K-token prompt ran to the 8192 ceiling (several minutes) and the batch fell back to rules. Its own
+    # role keeps `fundamental_analyst` (part of the published execution identity) untouched.
+    fundamental_classifier: {model: deepseek/deepseek-v4-pro, structured_output_method: function_calling, temperature: 0.0, max_tokens: 3072, reasoning: "off"}
+    critic: {max_tokens: 12288}           # 交易日志季度 critic —— 低频、人工签字前最后一道叙事关卡，成本不是约束
 
 # --- IBKR broker connection --------------------------------------------------
 # Port: TWS live=7496, TWS paper=7497, IB Gateway live=4001, IB Gateway paper=4002
@@ -74,52 +104,6 @@ channel:
   kind: feishu_bot              # cli | feishu (app) | feishu_bot (group-bot signed-link approval) | discord
                                 # feishu_bot: scheduler pushes an approval card with signed Approve/Reject
                                 # links to FEISHU_BOT_WEBHOOK; taps hit `ats serve` (FEISHU_APPROVE_BASE).
-
-# --- Scheduling (Phase 9) ----------------------------------------------------
-schedule:
-  # Removed `enabled: false` — nothing ever read it, so it claimed scheduling was off
-  # while the launchd job scheduled normally. Start/stop the daemon instead.
-  run_at: "10:30"               # daily cycle: 1h after US open (was 16:15 close) — lands
-                                # ~22:30 China so the Boss can approve in the evening;
-                                # chief decides on intraday prices, orders fill in RTH.
-                                # PEAD score windows are separate — they fire off an
-                                # observed earnings print: config/pead.yaml
-                                # schedule.score_windows (bmo 11:00 / amc 20:00 ET).
-  timezone: America/New_York
-  # 宏观/行业周报：独立的时间与时区，不跟 run_at/timezone 绑定。这个 job 不碰 broker、
-  # 不需要 NYSE 交易日，绑定 ET 没有意义——且一旦触发时刻的本地日期和 ET 日历日不一致
-  # 就会出问题（例如北京周六 08:50，纽约那一刻还是周五晚上），所以直接用操作者的时区。
-  weekly_review_at: "08:50"
-  weekly_review_tz: Asia/Shanghai
-  factset_refresh_at: "08:10"
-  factset_refresh_tz: Asia/Shanghai
-  # 例行作业可逐项暂停、验证输入/输出后再恢复。未列出的旧配置默认全部开启，
-  # 以保证升级兼容；此处是当前生产运行策略。
-  daily_stages:
-    pead_event_triggers: true
-    macro_sector_event_triggers: false
-    news_backfill: false
-    pead_daily: true
-    technical_daily: false
-    intel_digest: false
-    performance_snapshot: false
-    perf_risk_digest: false
-    journal_marks: false
-    chief_daily: false
-  jobs:
-    factset_weekly_ingest: true
-    weekly_review: false
-    journal_reconcile: false
-    pead_score_bmo: true
-    pead_score_amc: true
-    # 仅影响排程内的自动抽取；手动 evidence observe 仍然可用。
-    pead_observe_window: false
-  # 这台机器会睡眠。触发时刻若在睡眠中，任务只有在唤醒后、且仍在本宽限窗口内才补跑。
-  # 实测 2026-07-27：旧值 1 小时导致 daemon 存活 2.5 天、CPU 仅 0.45 秒 —— 每一次触发
-  # 都被静默丢弃。最糟的是盘后 20:00 ET 窗口，它落在本地 09:00（清晨）。
-  # 6 小时的依据：20:00 ET + 6h = 02:00 ET，距次日开盘仍有约 7 小时，迟到的打分依然
-  # 有效；再晚就交给 _score_plan 的 T+1 补打路径。
-  misfire_grace_hours: 6
 
 # --- Trade journal -----------------------------------------------------------
 # 对账必须每个交易日跑：IBKR 的 reqExecutions 只返回**当日**执行，漏掉的那天成交

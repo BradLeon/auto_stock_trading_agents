@@ -12,7 +12,9 @@ NOW = datetime.now(timezone.utc)
 def test_save_and_read_roundtrip():
     mem = TradingMemory(":memory:")
     mem.save_trades([TradeLogEntry(order_id="o1", cycle_id="cycle-1", symbol="NVDA",
-                                   action="buy", qty=50, status="filled", submitted_at=NOW)],
+                                   action="buy", qty=50, status="filled", submitted_at=NOW,
+                                   revision_no=1, decision_hash="hash-cycle-1",
+                                   approval_id="appr-cycle-1")],
                     cycle_id="cycle-1", source="chief", context="{}")
     mem.save_performance(PerformanceRecord(cycle_id="cycle-1", as_of=NOW,
                                            net_liquidation=100000))

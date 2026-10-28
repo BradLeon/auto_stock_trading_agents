@@ -38,6 +38,8 @@ limits:
     SGOV: 0.0
     SHV: 0.0
     BRK-B: 0.0
+  # 执行授权网关：组合快照最大可接受年龄（秒），超期拒绝下单并回到风险审查
+  max_snapshot_age_seconds: 60
 
 # 各行业产业链层限额；key 必须匹配 config/sectors/<sector>.yaml 的 layer key
 # 2026-08-21 按**八层结构本身**重设（此前的数值是从六层继承来的，L4/L5/L8 甚至只是

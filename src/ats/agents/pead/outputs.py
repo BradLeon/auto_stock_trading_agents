@@ -159,8 +159,12 @@ class ActualMetricView(BaseModel):
 
 
 class ActualsView(BaseModel):
-    reported_eps: float | None = None
-    reported_revenue: float | None = None
+    reported_eps: float | None = Field(default=None, description=(
+        "reported diluted EPS per share (per ADR when the company reports per ADR), in reporting_currency"))
+    reported_revenue: float | None = Field(default=None, description=(
+        "reported revenue as an ABSOLUTE number in reporting_currency (11700000000, not 11.7 or 11.7B)"))
+    reporting_currency: str = Field(default="", description=(
+        "ISO code the two figures above are stated in, e.g. USD, EUR, TWD; empty when not stated"))
     metrics: list[ActualMetricView] = Field(default_factory=list)
     guidance: str = Field(default="", description="forward guidance extracted from the text")
     transcript_signals: list[str] = Field(default_factory=list,
@@ -206,6 +210,8 @@ class ExpectationChangeView(BaseModel):
 
 class ContextUpdateView(BaseModel):
     materiality: float = Field(description="0=noise .. 1=thesis-changing")
+    confidence: float | None = Field(default=None, ge=0, le=1,
+        description="Confidence in the factual summary; independent of materiality. Information requires this field.")
     event_summary: str = Field(default="", description="what's genuinely new since last update")
     narrative_delta: str = Field(default="", description="how the thesis changes; empty if nothing")
     expectation_changes: list[ExpectationChangeView] = Field(default_factory=list)

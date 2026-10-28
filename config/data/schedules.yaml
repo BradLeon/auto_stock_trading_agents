@@ -1,38 +1,42 @@
-# Schedules describe intent and budgets; an external scheduler currently invokes
-# the CLI. This file does not create jobs by itself.
+# Source-specific refresh policy. The launchd agent wakes the controller; this
+# file alone does not create or prove a running launchd job.
 version: 1
+controller:
+  owner: launchd:com.ats.data-refresh
+  interval_seconds: 3600
+  ledger: var/data_refresh.sqlite
+  misfire_grace_hours: 24
+  max_run_seconds: 1800
+  # Fail closed during controller rollout. Enable each validated job explicitly.
+  default_enabled: false
 structured:
-  trigger: external_scheduler
+  trigger: launchd_controller
   command: ats data ingest
   default_timezone: UTC
   jobs:
-    ai_adoption_weekly_release_check:
-      source_group: ai_adoption
-      schedule: weekly
-      at: "07:30"
-      timezone: UTC
-      command: ats data release-check --group ai_adoption --ingest-new
-      concurrency: 1
-      retry:
-        attempts: 3
-        backoff_seconds: [60, 300, 900]
-      semantics: conditional sources may return no_change or question_not_fielded
     ramp_ai_index_p10d_probe:
+      enabled: true
       source: ramp_ai_index
+      datasets: [ramp_ai_adoption, ramp_ai_spend]
       schedule: every_10_days
       interval_days: 10
+      anchor_date: 2026-09-24
       at: "07:30"
       timezone: UTC
       command: ats data release-check --source ramp_ai_index --ingest-new --force-check
       concurrency: 1
+      freshness_slo_days: 14
       retry:
         attempts: 3
         backoff_seconds: [60, 300, 900]
       semantics: compare reference_period/methodology_fingerprint/payload_sha256; append new periods or revisions, never overwrite
     openrouter_rankings_p7d_ingest:
+      enabled: true
       source: openrouter_rankings
+      datasets: [openrouter_rankings_daily]
       schedule: every_7_days
       interval_days: 7
+      anchor_date: 2026-09-24
       at: "08:00"
       timezone: UTC
       command: ats data ingest --source openrouter_rankings --dataset openrouter_rankings_daily
@@ -52,13 +56,18 @@ structured:
       freshness_slo_days: 10
       semantics: append immutable artifacts and revision vintages; incomplete UTC weeks remain queryable daily but are excluded from trend products
     frontier_ai_capability_model_discovery_p7d:
+      enabled: true
       source: frontier_ai_capability
+      datasets: [frontier_ai_capability_benchmarks]
       schedule: every_7_days
       interval_days: 7
+      anchor_date: 2026-10-02
       at: "07:20"
       timezone: UTC
-      command: ats data release-check --source frontier_ai_capability --force-check
+      command: ats data release-check --source frontier_ai_capability --ingest-new --force-check
       concurrency: 1
+      retry_discovery_only: true
+      freshness_slo_days: 10
       retry:
         attempts: 2
         backoff_seconds: [120, 600]
@@ -67,18 +76,22 @@ structured:
         bulk_requests_per_run: 11
         conditional_requests: [etag, last_modified, git_sha, payload_sha256]
         hot_observation_days: 30
-        public_structured_page_policy_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
-        public_terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+        # HTML collection also requires exact per-benchmark authorization in
+        # ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS; other/future routes stay closed.
+        public_html_benchmarks: [automationbench_aa, scicode, critpt, mmmu_pro, toolathlon_verified, humanitys_last_exam]
         fail_closed_on_policy_or_parser_drift: true
       semantics: discover model/benchmark revisions once per cycle; no_change never duplicates a vintage; paid AA API is optional only; events are retained separately from uniform matrix
     frontier_ai_capability_benchmark_probe_p7d:
+      enabled: true
       source: frontier_ai_capability
+      datasets: [frontier_ai_capability_benchmarks]
       schedule: every_7_days
       interval_days: 7
+      anchor_date: 2026-10-02
       at: "07:25"
       timezone: UTC
-      command: ats data ingest --source frontier_ai_capability --dataset frontier_ai_capability_benchmarks
       concurrency: 1
+      freshness_slo_days: 10
       retry:
         attempts: 2
         backoff_seconds: [120, 600]
@@ -88,16 +101,25 @@ structured:
         # New benchmark scores are therefore captured with up to a 7-day delay.
         observation_ticks: weekly
         public_routes_only: true
+        required_env: [ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS]
+        public_terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+        public_structured_page_policy_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
+        public_html_benchmarks: [automationbench_aa, scicode, critpt, mmmu_pro, toolathlon_verified, humanitys_last_exam]
         event_ledger: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
+      command: ats data ingest --source frontier_ai_capability --dataset frontier_ai_capability_benchmarks --query-scope '{"benchmarks":["automationbench_aa","scicode","critpt","mmmu_pro","toolathlon_verified","humanitys_last_exam"]}'
       semantics: append score additions/revisions and preserve explicit NA states; do not mix comparability groups
     frontier_ai_capability_official_release_probe_p7d:
+      enabled: true
       source: frontier_ai_capability_official_lab
+      datasets: [frontier_ai_public_model_cards]
       schedule: every_7_days
       interval_days: 7
+      anchor_date: 2026-10-02
       at: "07:27"
       timezone: UTC
-      command: ats data ingest --source frontier_ai_capability_official_lab --dataset frontier_ai_capability_benchmarks
+      command: ats data ingest --source frontier_ai_capability_official_lab --dataset frontier_ai_public_model_cards --query-scope '{"dataset_id":"frontier_ai_public_model_cards"}'
       concurrency: 1
+      freshness_slo_days: 10
       retry:
         attempts: 2
         backoff_seconds: [120, 600]
@@ -107,28 +129,38 @@ structured:
         fallback_source_type: competitor_reported
       semantics: discover official release/model-card identities and self-reported scores; never overwrite third-party observations
     frontier_ai_capability_full_audit_p7d:
+      enabled: true
       source: frontier_ai_capability
+      datasets: [frontier_ai_capability_benchmarks]
       schedule: every_7_days
       interval_days: 7
+      anchor_date: 2026-10-02
       at: "07:35"
       timezone: UTC
       command: ats data frontier-capability-audit
       concurrency: 1
+      freshness_slo_days: 10
       retry:
         attempts: 2
         backoff_seconds: [300, 900]
+      scope:
       semantics: audit all Labs, benchmark methods and methodology fingerprints; surface stale warnings
     frontier_ai_labs_revenue_p7d_refresh:
+      enabled: true
       # Sacra profiles and the TickerTrends essay are two information sources
       # about one research object, so they share a single 7-day beat rather than
       # running on separate cadences.
       source_group: frontier_ai_labs_revenue
+      sources: [sacra_public_company_profiles, tickertrends_public_research]
+      datasets: [frontier_ai_labs_revenue]
       schedule: every_7_days
       interval_days: 7
+      anchor_date: 2026-10-02
       at: "07:50"
       timezone: UTC
       command: ats data release-check --group frontier_ai_labs_revenue --ingest-new --force-check
       concurrency: 1
+      freshness_slo_days: 10
       retry:
         attempts: 2
         backoff_seconds: [120, 600]
@@ -140,13 +172,634 @@ structured:
         tickertrends_post_api: https://blog.tickertrends.io/api/v1/posts/anthropic-vs-openai-arr-tracking
         touches_other_layers: false
       semantics: compare content_sha256/semantic_fingerprint/methodology_regime; no_change keeps the last valid platform vintage, a same-period value change appends a revision, a methodology drift only quarantines the new candidate
-    factset_weekly_ingest:
-      source: factset_earnings_insight_metrics
-      schedule: saturday
-      at: "08:10"
-      timezone: Asia/Shanghai
-      precedes: weekly_review
+    kr_semiconductor_exports_monthly:
+      enabled: true
+      source: kr_ecos_exports
+      datasets: [regional_kr_exports]
+      schedule: monthly
+      day_of_month: 15
+      at: "08:15"
+      timezone: Asia/Seoul
+      command: ats data ingest --source kr_ecos_exports --dataset regional_kr_exports
+      concurrency: 1
+      freshness_slo_days: 45
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      scope:
+        release_day: monthly_upstream_latest_release_check
+      semantics: monthly numerical series; append revised periods and preserve source vintage
+    kr_semiconductor_exports_late_monthly:
+      # 2026-10-22 (G0 S16): the Bank of Korea publishes the month's semiconductor export index after the 15th (2026-09 was
+      # there by 10-22 but absent on the 15th), so the 15th-only run kept the series one month behind. A second run on the
+      # 25th picks it up; an unchanged upstream is just `no_change`.
+      enabled: true
+      source: kr_ecos_exports
+      datasets: [regional_kr_exports]
+      schedule: monthly
+      day_of_month: 25
+      at: "08:15"
+      timezone: Asia/Seoul
+      command: ats data ingest --source kr_ecos_exports --dataset regional_kr_exports
+      concurrency: 1
+      freshness_slo_days: 45
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      scope:
+        release_day: monthly_upstream_latest_release_check
+      semantics: monthly numerical series; append revised periods and preserve source vintage
+    tw_ic_exports_monthly:
+      enabled: true
+      source: tw_mof_exports
+      datasets: [regional_tw_exports]
+      schedule: monthly
+      day_of_month: 15
+      at: "08:15"
+      timezone: Asia/Taipei
+      command: ats data ingest --source tw_mof_exports --dataset regional_tw_exports
+      concurrency: 1
+      freshness_slo_days: 45
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      scope:
+        release_day: monthly_upstream_latest_release_check
+      semantics: HS8542 export values in USD; append revised periods and preserve source vintage
+    dram_contract_price_monthly:
+      enabled: true
+      source: trendforce_dram
+      datasets: [industry_dram_contract_price]
+      schedule: monthly
+      day_of_month: 15
+      at: "08:15"
+      timezone: Asia/Taipei
+      command: ats data ingest --source trendforce_dram --dataset industry_dram_contract_price
+      concurrency: 1
+      freshness_slo_days: 45
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      scope:
+        release_day: monthly_upstream_latest_release_check
+      semantics: public DRAM contract-price table; retain per-series identity and derive MoM only
+    # --- PEAD consensus refresh (added 2026-10-16, enabled 2026-10-16 on the user's approval) -----------------
+    # yfinance_consensus snapshots stopped on 2026-09-04: no job ever refreshed them, and the target route
+    # now ignores a snapshot older than 14 days (data/consensus.py `align`). The adapter takes exactly one
+    # entity per snapshot, so there is one job per PEAD target. Validate with `ats.data.refresh validate` after any change.
+    consensus_goog_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:00"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity GOOG
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_nvda_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:03"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity NVDA
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_skhy_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:06"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity SKHY
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_tsm_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:09"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity TSM
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_asml_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:12"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity ASML
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_cohr_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:15"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity COHR
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_lrcx_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:18"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LRCX
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_lite_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:21"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LITE
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_avgo_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:24"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity AVGO
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_mrvl_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:27"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MRVL
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    consensus_msft_daily:
+      enabled: true
+      source: yfinance_consensus
+      datasets: [market_consensus]
+      schedule: daily
+      at: "06:30"
+      timezone: UTC
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MSFT
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
+    company_financials_weekly:
+      # 2026-10-16 pilot (user: validate the path on a few names, widen after go-live). One job
+      # per entity via `entities`; `entity_sources` picks the provider per name once the
+      # coverage probe has shown who can supply a complete report package.
+      #   GOOG, MU, LRCX  complete quarterly package from defeatbeta (probe 2026-10-16; LRCX 2026-10-19, FQ ending 2026-06-30).
+      #   ASML      defeatbeta returns 11/13 metrics for the latest quarter, so the package gate
+      #             correctly refuses it; an official-disclosure source is needed (not pilot).
+      #   SKHY      both vendors quarantine on unit_unresolved/currency_unresolved; needs a
+      #             currency mapping before it can be admitted.
+      #   sec_companyfacts was unreachable from this host (TLS reset) during the probe (reachable again 2026-10-21).
+      # Widening = adding names here; names the gate rejects stay visible as failed runs.
+      enabled: true
+      source: defeatbeta_stock_statement
+      # 2026-10-22 (G0): the scope is the PEAD target list (config/pead.yaml) plus MU, as the dataset's
+      # `coverage_from` declares; it was only GOOG, MU, LRCX during the pilot. Names a vendor cannot supply a complete
+      # package for (SKHY currency, ASML/TSM foreign filers) stay visible as failed/quarantined runs, not silent gaps.
+      entities: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      datasets: [company_financials]
+      schedule: weekly
+      weekday: saturday
+      at: "06:30"
+      timezone: UTC
+      command: ats data ingest --source {source} --dataset company_financials --entity {entity}
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: provider statements as immutable vintages per fetch; the complete-report-package gate decides what a consumer can read, rejected rows are quarantined and shown as an explicit gap
+    company_financials_sec_daily:
+      # 2026-10-22 (G0): official SEC XBRL (10-Q/10-K) for the US filers of the PEAD list. The vendors (defeatbeta,
+      # yfinance) lag a filing by days to weeks (MU: SEC had the FY ending 2026-09-03 filed 10-09 while the vendors
+      # still ended at 2026-05-31). Both jobs write the same dataset: the read side takes the first complete package
+      # per period, so the vendor still wins a period both have, and a period only the SEC has is served from the SEC.
+      # Foreign private issuers (TSM, ASML, SKHY) file 20-F/6-K, which carry no quarterly XBRL: not listed here.
+      enabled: true
+      source: sec_companyfacts
+      entities: [GOOG, NVDA, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      datasets: [company_financials]
+      schedule: daily
+      at: "07:00"
+      timezone: UTC
+      command: ats data ingest --source {source} --dataset company_financials --entity {entity}
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: SEC Company Facts as immutable vintages per fetch; same complete-report-package gate as the vendor job
+    company_financials_issuer_ir_daily:
+      # 2026-10-22 (G0): TSM / ASML / SKHY are foreign issuers whose latest quarter the vendors publish late and SEC
+      # XBRL does not carry quarterly. This job parses the issuer's own IR files (config/data/issuer_ir.yaml: folder,
+      # parser, currency) found in var/ir_drop/<ticker>/ and writes them to the same dataset. A day with no new file
+      # is `no_change`; a file whose statements fail the self-checks (cash-flow bridge, balance sheet, net income,
+      # currency) is quarantined with the reason.
+      # Load: the job starts daily so it can follow the earnings calendar, but the NETWORK is only used inside the
+      # window around a calendar earnings date (1 day before .. 14 days after) and once a week as a safety net for a
+      # slipped/missing calendar date; every other day it only re-reads the files already on disk (no request).
+      # A manual re-collection (g0_rerun) always checks.
+      enabled: true
+      source: issuer_ir_files
+      entities: [TSM, ASML, SKHY]
+      datasets: [company_financials]
+      schedule: daily
+      at: "07:30"
+      timezone: UTC
+      command: ats data ingest --source {source} --dataset company_financials --entity {entity}
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: issuer IR statements as immutable vintages per file; consumers read the newest complete report package over all sources (a newer issuer quarter wins over a vendor one quarter behind)
+    macro_series_daily:
+      # 2026-10-16: the Macro review used to pull these indicators itself (FRED, market closes, CNN
+      # fear & greed). The scheduled run re-reads a rolling window so revisions are caught; the
+      # first load (11 years) was done once with an explicit `since`.
+      enabled: true
+      source: macro_series_feeds
+      datasets: [macro_series]
+      schedule: daily
+      at: "10:30"
+      timezone: UTC
+      command: ats data ingest --source macro_series_feeds --dataset macro_series --query-scope '{"lookback_days":120}'
+      concurrency: 1
+      freshness_slo_days: 4
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: one observation per series point under US_MACRO; revisions become new vintages, never overwrites
+
 unstructured:
-  trigger: external_scheduler
-  command: ats data ingest
+  trigger: launchd_controller
+  command: ats data article-ingest
   default_timezone: UTC
+  jobs:
+    defeatbeta_sec_index_daily:
+      enabled: true
+      source: defeatbeta_sec_filing_index
+      datasets: [sec_filing_index]
+      schedule: daily
+      at: "08:00"
+      timezone: UTC
+      command: ats data document-ingest --source defeatbeta_sec_filing_index
+      freshness_slo_days: 3 # refresh/check cadence, not age of latest upstream release
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      semantics: pinned HF revision/spec/hash; index metadata only, never SEC body
+    sec_official_body_daily:
+      enabled: true   # 2026-10-21: G0 verification; sec.gov reachable again, one manual run admitted 4 bodies
+      source: sec_edgar_filing_body
+      datasets: [sec_filing_documents]
+      schedule: daily
+      at: "09:30"   # 2026-10-26: was 08:30; the index it reads is refreshed ~08:34, so 08:30 always read yesterday's
+      timezone: UTC
+      command: ats data document-ingest --source sec_edgar_filing_body
+      freshness_slo_days: 3
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      scope:
+        required_env: [SEC_EDGAR_USER_AGENT]
+      semantics: official HTTPS URL and accession from accepted fixed index only
+    defeatbeta_transcript_daily:
+      enabled: true
+      source: defeatbeta_earnings_transcript
+      datasets: [earnings_transcripts]
+      schedule: daily
+      at: "09:00"
+      timezone: UTC
+      command: ats data document-ingest --source defeatbeta_earnings_transcript
+      freshness_slo_days: 3 # refresh/check cadence, not age of latest upstream release
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      semantics: pinned HF revision/spec/hash and exact ticker/fiscal-quarter segments
+    ai_hardware_knowledge_daily:
+      enabled: true
+      source: ai_hardware_knowledge_corpus
+      datasets: [ai_hardware_knowledge]
+      schedule: daily
+      at: "09:15"
+      timezone: UTC
+      command: ats data document-ingest --source ai_hardware_knowledge_corpus
+      freshness_slo_days: 3
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      semantics: repository manifest and content-hash check, no external fetch
+    trendforce_news_weekly:
+      enabled: true
+      source: trendforce_news
+      datasets: [shared_documents]
+      schedule: weekly
+      weekday: monday
+      at: "10:00"
+      timezone: America/New_York
+      command: ats data article-ingest --source trendforce_news
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      semantics: public article discovery and body admission; no Agent or LLM side effects
+    semianalysis_newsletter_weekly:
+      enabled: true
+      source: semianalysis
+      datasets: [shared_documents]
+      schedule: weekly
+      weekday: monday
+      at: "10:15"
+      timezone: America/New_York
+      command: ats data article-ingest --source semianalysis
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 900]
+      scope:
+        full_body_preferred: true
+        partial_preview_explicit: true
+        required_env: [GMAIL_ADDRESS, GMAIL_APP_PASSWORD]
+      semantics: IMAP/RSS batch; advance mailbox cursor only after complete persistence
+    ibkr_news_daily:
+      enabled: true # 2026-10-02: TWS read-only probe and launchd ingestion passed.
+      sources: [ibkr_news, yfinance_live_news]
+      datasets: [shared_documents]
+      schedule: daily
+      at: "16:30"
+      timezone: America/New_York
+      command: ats data article-ingest --source ibkr_news
+      concurrency: 1
+      freshness_slo_days: 3
+      retry:
+        attempts: 2
+        backoff_seconds: [120, 600]
+      scope:
+        fallback_only: yfinance_live_news
+        fallback_on: [unreachable, tws_unreachable, unauthorized, provider_unavailable,
+                      rate_limited, request_rejected, failed_slices]
+        human_title_url_review_required: true
+      semantics: TWS headlines daily; Yahoo only for failed primary scope and held for human review
+# Derived jobs: facts the platform produces itself from admitted/official documents. They are
+# ledgered, retried and freshness-checked like source jobs but have no ingestion-run record, so
+# the command's own result packet is the evidence (status + reason).
+derived:
+  trigger: launchd_controller
+  default_timezone: UTC
+  jobs:
+    chain_evidence_daily:
+      # 2026-10-16: moved out of the legacy PEAD score window (`pead_observe_window`, left false).
+      # PILOT LIST ONLY (user decision: validate the path on a few names, widen after go-live).
+      # Widen by extending `entities`; one job (own ledger row, retry, freshness) per name.
+      enabled: true
+      source: chain_evidence_observer
+      entities: [TSM, ASML, MU, SKHY]
+      schedule: daily
+      at: "22:00"
+      timezone: UTC
+      command: ats data evidence-observe --entity {entity} --lookback-days 7
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 8}   # flash extraction calls one name may spend per run
+      retry:
+        attempts: 2
+        backoff_seconds: [600, 1800]
+      semantics: extract the latest confirmed earnings document per name into neutral chain evidence; a document already extracted is never read again; nothing is scored or traded
+    chain_l1_governed_evidence_daily:
+      # 2026-10-25: L1 (AI application layer) claims are fed by its three evidence observers (production adoption,
+      # frontier-lab commercialisation, raw capability), read through `data/sources/governed_observer.py`. They run
+      # after the datasets they read are refreshed (Ramp / frontier revenue / OpenRouter / benchmarks all land by
+      # 08:00 UTC) and before the daily layer review. No model call: the observers' own trend rules give direction.
+      # One job per source (own ledger row, retry, freshness); `entities` here lists chain source ids.
+      enabled: true
+      source: chain_l1_governed_observers
+      entities: [l1_ai_production_adoption, l1_frontier_labs_commercialization, l1_frontier_raw_capability]
+      schedule: daily
+      at: "09:00"
+      timezone: UTC
+      command: ats data chain-source-collect --source {entity}
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 1}   # no model or network call: the observers read admitted data products
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: governed observer readings as re-checkable neutral observations (speaker, concept, direction, evidence line); a reading with insufficient history produces none, an unchanged reading is not re-stored
+    chain_regional_kr_exports_weekly:
+      # 2026-10-25: the Korea / Taiwan export and DRAM contract-price series reach the chain evidence ledger only
+      # through `chain-source-collect`; no schedule ran it, so their observations stopped on 2026-08-12 while the
+      # structured ingest jobs above kept appending measurement points. Weekly is enough for a monthly print.
+      # The collect step refreshes the Bank of Korea levels itself, so the lease names both source ids.
+      enabled: true
+      sources: [kr_semiconductor_exports, kr_ecos_exports]
+      schedule: weekly
+      weekday: monday
+      at: "09:30"
+      timezone: UTC
+      command: ats data chain-source-collect --source kr_semiconductor_exports
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 3}   # no model call; the agency refresh is the only network use
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly series as re-checkable neutral observations (yoy / mom direction by formula); an unchanged print stores nothing new
+    chain_regional_tw_exports_weekly:
+      # Same shape as the Korea job: the lease names the chain source and the structured source it refreshes.
+      enabled: true
+      sources: [tw_ic_exports, tw_mof_exports]
+      schedule: weekly
+      weekday: monday
+      at: "09:30"
+      timezone: UTC
+      command: ats data chain-source-collect --source tw_ic_exports
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 3}   # no model call; the agency refresh is the only network use
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly series as re-checkable neutral observations (yoy / mom direction by formula); an unchanged print stores nothing new
+    chain_regional_dram_price_weekly:
+      # TrendForce's public contract-price table, fetched directly by the adapter.
+      enabled: true
+      sources: [dram_contract_price]
+      schedule: weekly
+      weekday: monday
+      at: "09:30"
+      timezone: UTC
+      command: ats data chain-source-collect --source dram_contract_price
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 3}   # no model call; the agency refresh is the only network use
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly series as re-checkable neutral observations (yoy / mom direction by formula); an unchanged print stores nothing new
+    macro_theme_news_daily:
+      # 2026-10-16: the Macro review used to run these Tavily queries during analysis (TARGET
+      # §12.1). They are the theme queries of config/macro.yaml, run here and admitted as
+      # `partial` document versions under MACRO_<THEME>; Macro reads only admitted documents.
+      enabled: true
+      source: macro_theme_news
+      schedule: daily
+      at: "11:00"
+      timezone: UTC
+      command: ats data macro-news-collect
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 16}   # one search per configured theme query (13 today)
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: theme news as immutable partial document versions keyed by URL; a URL already admitted is never stored again
+    # 2026-10-19 (parent 8.9): the schedule-calendar refresh and the FactSet month-end ingest used to hang off the
+    # legacy scheduler (com.ats.schedule), which has not been loaded since 2026-10-15; with it gone the calendar store
+    # stayed empty (the event path never fired) and the October FactSet report would not have been ingested. The
+    # controller owns both now. Each calendar source is its own job so one source failing never blocks the others.
+    calendar_finnhub_earnings_daily:
+      enabled: true
+      source: finnhub_earnings_calendar
+      schedule: daily
+      at: "06:10"
+      timezone: UTC
+      command: ats data calendar-refresh --source finnhub_earnings_calendar
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 20}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: earnings dates and sessions of the PEAD targets as versioned calendar events; metadata only, never reported values
+    calendar_yahoo_earnings_daily:
+      enabled: true
+      source: yahoo_earnings_calendar
+      schedule: daily
+      at: "06:20"
+      timezone: UTC
+      command: ats data calendar-refresh --source yahoo_earnings_calendar
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 20}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: clock time of the same prints; agrees with Finnhub on every field both state, or the event is held for an operator
+    calendar_fomc_daily:
+      enabled: true
+      source: federal_reserve_fomc
+      schedule: daily
+      at: "06:30"
+      timezone: UTC
+      command: ats data calendar-refresh --source federal_reserve_fomc
+      concurrency: 1
+      freshness_slo_days: 5
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: FOMC meeting dates from the Federal Reserve calendar page
+    calendar_bls_daily:
+      enabled: true
+      source: bls_release_calendar
+      schedule: daily
+      at: "06:40"
+      timezone: UTC
+      command: ats data calendar-refresh --source bls_release_calendar
+      concurrency: 1
+      freshness_slo_days: 5
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: CPI and employment release dates from the BLS release calendar
+    calendar_bea_daily:
+      enabled: true
+      source: bea_release_schedule
+      schedule: daily
+      at: "06:50"
+      timezone: UTC
+      command: ats data calendar-refresh --source bea_release_schedule
+      concurrency: 1
+      freshness_slo_days: 5
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: PCE and GDP release dates from the BEA schedule
+    calendar_finalize_daily:
+      # 2026-10-26: moved from 07:10 to 10:00 UTC, after the filing index (08:00) and the SEC body job (09:30), so a
+      # print whose material was admitted this morning is confirmed this morning and the 18:10 calendar consumption
+      # wakes its review the same day instead of a day later.
+      enabled: true
+      source: calendar_maintenance
+      schedule: daily
+      at: "10:00"
+      timezone: UTC
+      command: ats data calendar-finalize
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: confirm which planned prints have been released with admitted material, so the event workflows can run on them
+    factset_month_end_ingest:
+      # Report of the PREVIOUS month: the guard refuses a report from any other month, so a late or early run cannot
+      # file October's data under November. Runs on the 1st at 00:30 New York, before the next Friday's report exists.
+      enabled: true
+      source: factset_earnings_insight_doc
+      schedule: monthly
+      day_of_month: 1
+      at: "00:30"
+      timezone: America/New_York
+      command: ats data factset-semantic-refresh --source factset_earnings_insight_doc --query-scope '{"auto_admit":true,"report_month":"{prev_month}"}'
+      concurrency: 1
+      freshness_slo_days: 40
+      request_budget: {requests_per_run: 3}
+      retry: {attempts: 3, backoff_seconds: [900, 3600, 21600]}
+      semantics: the final FactSet Earnings Insight of the month, ingested once and read by Macro, Sector and Layer; nothing is scored

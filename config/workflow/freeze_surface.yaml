@@ -1,0 +1,102 @@
+# Freeze-only surface: files the final implementation freeze covers but production
+# qualification evidence does NOT bind (see `ats.workflow.assurance_surface`).
+#
+# Production qualification (config/data/target_dataflow_coverage.yaml
+# `required_fingerprint_paths` / `consumer_fingerprint_paths`) binds what the
+# production runtime executes plus the data evidence's own verifiers. The files
+# here only run while evidence is taken, registered or gated, so a change to one
+# does not retire recorded evidence. It does change the freeze: a new freeze
+# taken against an older one must dispose of every changed path here
+# (`scoped_intake.freeze_snapshot(previous=..., dispositions=...)`).
+#
+# This file is outside the manifest digest on purpose: registering a new test or
+# script must not rewrite the manifest, which would retire every recorded row.
+# Moving a path HERE from the manifest still edits the manifest, so demoting a
+# runtime file can never dodge drift silently.
+version: freeze-surface-v1
+tests:
+- tests/conftest.py
+- tests/test_fundamental_modes.py
+- tests/test_information_analyst.py
+- tests/test_information_capture_budget.py
+- tests/test_information_material_quality.py
+- tests/test_information_target_selection.py
+- tests/test_information_visibility_revisions.py
+- tests/test_workflow_planning.py
+- tests/test_phase_f_acceptance_assertions.py
+- tests/test_phase_f_acceptance_matrix.py
+- tests/test_phase_f_acceptance_reports.py
+- tests/test_phase_f_batch_executor.py
+- tests/test_phase_f_broker_enforcement.py
+- tests/test_phase_f_business_wiring.py
+- tests/test_phase_f_disposition_a_regression.py
+- tests/test_phase_f_entry_evidence.py
+- tests/test_phase_f_entry_evidence_assembly.py
+- tests/test_phase_f_exit_requirements.py
+- tests/test_phase_f_independent_runner.py
+- tests/test_phase_f_integration_evidence.py
+- tests/test_phase_f_isolated_authority.py
+- tests/test_phase_f_joint_cutover.py
+- tests/test_phase_f_opinion_execution.py
+- tests/test_phase_f_paired_business.py
+- tests/test_phase_f_persistent_runtime.py
+- tests/test_phase_f_read_executor.py
+- tests/test_phase_f_read_recovery.py
+- tests/test_phase_f_read_windows.py
+- tests/test_phase_f_research_gate.py
+- tests/test_phase_f_safe_reads.py
+- tests/test_phase_f_schedule_runtime.py
+- tests/test_phase_f_schedule_stop.py
+- tests/test_phase_f_scoped_intake.py
+- tests/test_phase_f_scoped_routes.py
+- tests/test_phase_f_shadow_business.py
+- tests/test_phase_f_shadow_foundation.py
+- tests/test_phase_f_snapshot_dependencies.py
+- tests/test_phase_f_stage_one.py
+- tests/test_phase_f_startup_admission.py
+- tests/test_phase_f_startup_enforcement.py
+- tests/test_phase_f_state_stop.py
+- tests/test_phase_f_trade_stop.py
+- tests/test_phase_f_trade_switch_drill.py
+- tests/test_phase_f_trader_a.py
+scripts:
+- scripts/assemble_phase_f_entry_evidence.py
+- scripts/capture_phase_f_research.py
+- scripts/capture_phase_f_technical.py
+- scripts/inspect_phase_f_exit.py
+- scripts/prepare_information_capture.py
+- scripts/prepare_phase_f_batches.py
+- scripts/prepare_phase_f_stage_one.py
+- scripts/probe_phase_f_tws_readonly.py
+- scripts/reconcile_article_metadata.py
+- scripts/refresh_phase_f_evidence.py
+- scripts/review_information_capture.py
+- scripts/review_information_selection.py
+- scripts/run_information_capture.py
+- scripts/verify_dataflow_qualification.py
+- scripts/verify_phase_f_integration.py
+src_tools:
+- path: src/ats/workflow/analysis_verification.py
+  reason: offline analysis verification harness; imported by no module
+- path: src/ats/workflow/boundary_drill.py
+  reason: isolated boundary drill; reached only from the cli drill command
+- path: src/ats/workflow/consumer_disposition.py
+  reason: consumer disposition report; reached only from the cli
+- path: src/ats/workflow/cutover_acceptance.py
+  reason: cutover acceptance report; reached only from the cli
+- path: src/ats/runtime/evidence_observe.py
+  reason: chain-evidence extraction run by the data refresh controller; no consumer's qualification evidence reads it
+- path: src/ats/workflow/intake.py
+  reason: prerequisite intake and evidence registration; reached only from the cli
+- path: src/ats/workflow/pytest_optional_deps_plugin.py
+  reason: pytest plugin; test runs only
+- path: src/ats/workflow/retirement_clearance.py
+  reason: legacy retirement clearance report; reached from the cli and boundary_drill only
+- path: src/ats/workflow/test_baseline.py
+  reason: test baseline bookkeeping; imported by no module
+self_verifying:
+- path: src/ats/workflow/boundary_evidence.py
+  family: boundary_enforcement
+  reason: entry-evidence verifier; data qualification does not run it, and every registered entry bundle binds its hash so
+    the entry gate fails closed at runtime when it changes
+  self_check: tests/test_phase_f_scoped_routes.py::test_incomplete_or_false_entry_proof_refuses[missing_verifier_hash]

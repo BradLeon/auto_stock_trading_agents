@@ -20,6 +20,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from ..schemas.decision import action_direction
 from ..schemas.journal import EvidenceBlock
 
 
@@ -279,7 +280,8 @@ def _human_gate_audit(store) -> EvidenceBlock:
         if not entry_px:
             continue
         move_pct = round((fwd_px / entry_px - 1) * 100, 2)
-        direction = 1 if entry.action in ("buy", "add") else -1
+        # 方向来自统一词表：未知取值会抛错，而不是被当成减仓方向悄悄计入统计。
+        direction = 1 if action_direction(entry.action, where="calibration") > 0 else -1
         rows_data.append((entry.entry_id, entry.symbol, round(move_pct * direction, 2)))
 
     n = len(rows_data)

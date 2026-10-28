@@ -31,7 +31,9 @@ from ...chain.factor_evidence import BASIS_CN, STANDING_CN
 from ...chain.report import VERDICT_MARK
 from ..evidence.observer import source_rank
 from .cross_section import utilization_for
+from ...schemas.sector import allocation_for_status
 from .viz_assets import CSS, JS
+from ..report_files import unique_path
 
 log = logging.getLogger("ats.agents.sector.viz")
 
@@ -210,15 +212,16 @@ def _budget_line(verdict, layer, basket) -> dict:
     if verdict is None:
         return {"amount": 0.0, "cap": cap, "formula": "—（本轮未产出结论）", "squeezed": False}
     budget = basket.layer_cap if basket is not None else None
-    util = utilization_for(verdict.allocation)
+    call = allocation_for_status(verdict.layer_status)
+    util = utilization_for(call)
     if budget is None:
         amount = cap * util
         return {"amount": amount, "cap": cap, "squeezed": False,
                 "formula": f"{amount:.1%} NAV = 层上限 {cap:.0%} × 使用率 {util:.0%}"
-                          f"（{verdict.allocation}，本轮无截面预算，按公式估算）"}
+                          f"（{call}，本轮无截面预算，按公式估算）"}
     expected = cap * util
     squeezed = budget < expected * 0.999
-    formula = f"{budget:.1%} NAV = 层上限 {cap:.0%} × 使用率 {util:.0%}（{verdict.allocation}）"
+    formula = f"{budget:.1%} NAV = 层上限 {cap:.0%} × 使用率 {util:.0%}（{call}）"
     if squeezed:
         formula += f" ⚠ 实得低于算式值（{expected:.1%}），被跨层组上限按比例压到 {budget:.1%}"
     return {"amount": budget, "cap": cap, "formula": formula, "squeezed": squeezed}
@@ -238,8 +241,9 @@ def _die(layer, verdict, budget_line) -> dict:
         flags.append("截面不适用")
     pct = round(100 * budget_line["amount"] / cap) if cap else 0
     return {"key": layer.key, "short": layer.key.split("_")[0], "label": label,
-            "allocation": verdict.allocation,
-            "alloc_class": ALLOC_CLASS.get(verdict.allocation, "flat"),
+            "allocation": allocation_for_status(verdict.layer_status),
+            "alloc_class": ALLOC_CLASS.get(
+                allocation_for_status(verdict.layer_status), "flat"),
             "confidence": round(verdict.confidence, 2), "budget": budget_line["amount"],
             "cap": cap, "budget_pct_of_cap": max(0, min(100, pct)), "flags": flags}
 
@@ -684,8 +688,8 @@ def render_html(bundle: dict) -> str:
 
 
 def write_html(bundle: dict, folder: str | Path) -> Path | None:
-    """Write `层分析-<sector>-<date>.html` into `folder`. Same-day reruns overwrite —
-    mirrors every other report writer in this package (`report.py`, `chain/report.py`).
+    """Write `层分析-<sector>-<date>.html` into `folder`. A same-day rerun gets a new `-vN` file —
+    like every other report writer in this package (`report.py`, `chain/report.py`).
     Returns None (does not raise) when `folder` is unset/missing, so a caller can
     treat this the same best-effort way as the markdown writers.
     """
@@ -697,6 +701,6 @@ def write_html(bundle: dict, folder: str | Path) -> Path | None:
         log.warning("sector viz html: output_dir missing — skipped: %s", folder)
         return None
     meta = bundle["meta"]
-    path = folder / f"层分析-{meta['label']}-{meta['as_of_display']}.html"
+    path = unique_path(folder / f"层分析-{meta['label']}-{meta['as_of_display']}.html")
     path.write_text(render_html(bundle), encoding="utf-8")
     return path

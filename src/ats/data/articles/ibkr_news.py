@@ -75,6 +75,10 @@ _PROVIDER_LOOKUP_ATTEMPTS = 3
 _PROVIDER_LOOKUP_RETRY_SECONDS = 1
 _ARTICLE_FETCH_ATTEMPTS = 2
 _ARTICLE_FETCH_RETRY_SECONDS = 0.25
+# ib_async waits forever on a blocking request unless told otherwise. TWS can leave
+# reqContractDetails unanswered while the rest of the API still works (2026-10-19), which
+# turned one symbol into a 30-minute hang that the controller then killed.
+_REQUEST_TIMEOUT_SECONDS = 20
 
 _ib = None                      # one connection per process, reused across the run
 
@@ -112,6 +116,7 @@ def _client():
     host = cfg.secrets.ibkr_host or "127.0.0.1"
     port = cfg.app.broker.port or cfg.secrets.ibkr_port or 7496
     ib = IB()
+    ib.RequestTimeout = _REQUEST_TIMEOUT_SECONDS
     # readonly=True is not decoration: this process must never be able to place an
     # order, and the news path has no business holding a writable session.
     ib.connect(host, int(port), clientId=CLIENT_ID, timeout=20, readonly=True)
@@ -211,6 +216,39 @@ def _request_failure_status(errors: list[dict[str, object]]) -> str:
         if "not subscribed" in message and "provider" in message:
             return "provider_not_subscribed"
     return "request_rejected"
+
+
+def _qualify(ib, contract) -> None:
+    """Fill ``contract.conId``, falling back to a symbol search when contract details hang.
+
+    The search only counts when it names exactly one US stock for the symbol; anything
+    ambiguous is a qualify failure like before, never a guess.
+    """
+    failure: Exception | None = None
+    try:
+        ib.qualifyContracts(contract)
+        if getattr(contract, "conId", 0):
+            return
+    except Exception as exc:  # noqa: BLE001 - TimeoutError when TWS never answers
+        failure = exc
+    search = getattr(ib, "reqMatchingSymbols", None)
+    ids: set[int] = set()
+    if search is not None:
+        try:
+            for desc in search(contract.symbol) or []:
+                found = desc.contract
+                if (found.symbol == contract.symbol and found.secType == "STK"
+                        and found.currency == contract.currency and found.conId):
+                    ids.add(int(found.conId))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ibkr_news: %s symbol search failed — %s", contract.symbol, exc)
+    if len(ids) == 1:
+        contract.conId = ids.pop()
+        log.warning("ibkr_news: %s resolved by symbol search (contract details unanswered)",
+                    contract.symbol)
+        return
+    if failure is not None:
+        raise failure
 
 
 def _news_providers(ib, *, attempts: int = _PROVIDER_LOOKUP_ATTEMPTS,
@@ -369,7 +407,7 @@ def diagnose(*, symbol: str = "NVDA", providers: list[str] | None = None,
         from ib_async import Stock
 
         contract = Stock(requested_symbol, "SMART", "USD")
-        ib.qualifyContracts(contract)
+        _qualify(ib, contract)
         con_id = int(getattr(contract, "conId", 0) or 0)
         result["con_id"] = con_id
         if not con_id:
@@ -463,7 +501,7 @@ def discover_with_status(*, pages: int = 3, symbols: list[str] | None = None,
     for sym in symbols:
         try:
             c = Stock(sym, "SMART", "USD")
-            ib.qualifyContracts(c)
+            _qualify(ib, c)
             if not c.conId:
                 log.warning("ibkr_news: %s did not qualify", sym)
                 continue

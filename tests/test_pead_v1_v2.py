@@ -99,7 +99,7 @@ def _scores(mapping: dict[str, float]):
 
 
 # --------------------------------------------------------------------------- #
-# Sizing
+# Event view — Phase D 5.7: no sizing, no actions, no portfolio reads
 # --------------------------------------------------------------------------- #
 def _card(total: float) -> Scorecard:
     return Scorecard(symbol="GOOG", fiscal_label="Q2 2026", as_of=NOW,
@@ -108,26 +108,36 @@ def _card(total: float) -> Scorecard:
                      total=total, threshold=1.0, band="达到做多门槛 (≥+1.0)")
 
 
-def test_v1_opens_at_half_size():
-    full, _, _ = score_agents.decide(_cfg(), _card(1.5), None, None, 100_000.0)
-    half, _, note = score_agents.decide(_cfg(), _card(1.5), None, None, 100_000.0,
-                                        size_factor=0.5)
-    assert full[0].notional_hint == 3000
-    assert half[0].notional_hint == 1500
-    assert "缺纪要" in half[0].rationale
+def test_the_sizing_tree_is_gone():
+    """Phase D 5.7：基本面分析师只判断预期差，不做仓位。旧 sizing 树
+    （decide / notional_hint / qty_hint / size_factor）必须保持不存在。"""
+    for gone in ("decide", "size_factor", "notional_hint", "qty_hint"):
+        assert not hasattr(score_agents, gone), gone
+    import inspect
+
+    src = inspect.getsource(score_agents)
+    for gone in ("PortfolioSnapshot", "notional_hint", "size_factor", "qty_hint"):
+        assert gone not in src, gone
 
 
-def test_thin_evidence_does_not_shrink_a_trim():
-    """De-risking is never scaled down — thin evidence is not a reason to trim less."""
-    from ats.schemas.portfolio import PortfolioSnapshot, Position
+def test_event_view_is_direction_magnitude_confidence_without_actions():
+    """event_view 产出可证伪的预期差视图；direction 不是动作词，magnitude
+    是基本面口径的差值读数，不携带任何仓位语义。"""
+    up = score_agents.event_view(_cfg(), _card(1.5), None)
+    assert up["direction"] == 1
+    assert up["magnitude"] == 1.5
+    assert 0.0 < up["confidence"] <= 1.0
+    assert "预期差为正" in up["rationale"]
 
-    pf = PortfolioSnapshot(as_of=NOW, net_liquidation=100_000.0, positions=[
-        Position(symbol="GOOG", qty=100.0, avg_cost=100.0, market_price=100.0,
-                 market_value=10_000.0, unrealized_pnl=0.0)])
-    full, _, _ = score_agents.decide(_cfg(), _card(0.0), None, pf, 100_000.0)
-    half, _, _ = score_agents.decide(_cfg(), _card(0.0), None, pf, 100_000.0, size_factor=0.5)
-    assert full[0].action == "trim" and half[0].action == "trim"
-    assert full[0].qty_hint == half[0].qty_hint == 30.0
+    neutral = score_agents.event_view(_cfg(), _card(0.3), None)
+    assert neutral["direction"] == 0
+
+    down = score_agents.event_view(_cfg(), _card(-1.2), None)
+    assert down["direction"] == -1
+    assert "不做空判断属于决策链" in down["rationale"]
+
+    for view in (up, neutral, down):
+        assert set(view) == {"direction", "magnitude", "confidence", "rationale"}
 
 
 # --------------------------------------------------------------------------- #

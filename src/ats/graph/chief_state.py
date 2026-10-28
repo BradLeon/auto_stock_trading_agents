@@ -8,12 +8,14 @@ interrupt are enforced uniformly. thread_id == cycle_id (`chief-*` / `trader-*`)
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from ..schemas.decision import BossApproval, TradeDecision
 from ..schemas.memory import TradeLogEntry
 from ..schemas.portfolio import PortfolioSnapshot
+from ..schemas.risk import DecisionRiskReview
 
 
 class ChiefDecisionState(BaseModel):
@@ -28,6 +30,9 @@ class ChiefDecisionState(BaseModel):
     auto_approve: bool = False          # --yes; must NEVER become a default upstream
     decide: bool = True                 # False: skip the Chief, take seed_decisions as-is
     execute: bool = True                # False (--no-execute): stop after persist_decision
+    fundamental_mode: Literal["routine", "event"] = "routine"
+    decision_profile: str = "ai_hardware"
+    decision_requirements: dict = Field(default_factory=dict)
     seed_decisions: list[TradeDecision] = Field(default_factory=list)
 
     # assemble_context
@@ -46,6 +51,26 @@ class ChiefDecisionState(BaseModel):
     qty_by_symbol: dict[str, float] = Field(default_factory=dict)
     risk_notes: list[str] = Field(default_factory=list)
     approval_summary: str = ""          # banner + risk block + order lines (the card body)
+    normalization_errors: list[str] = Field(default_factory=list)
+    execution_price_audit: list[dict] = Field(default_factory=list)
+
+    # decision-audit loop (Phase B, ARCHITECTURE §5.2–5.3). `decisions` stays this round's FULL
+    # proposal; `approved_decisions` is what the review let through and what the
+    # approval card / trader see.
+    research_snapshot: dict = Field(default_factory=dict)   # §10.1 frozen inputs
+    gap_report: str = ""                                    # 7.8: incomplete-snapshot report (never a decision input)
+    revision_no: int = 0                                    # current revision (per cycle)
+    revision_hash: str = ""                                 # content hash of that revision
+    parent_revision_no: int | None = None                   # revised from (chief_revise)
+    risk_round: int = 0                                     # 1-based once risk_gate ran
+    max_risk_rounds: int = 3                                # bounded auto-revision (ARCHITECTURE §5.2)
+    risk_review: DecisionRiskReview | None = None           # latest deterministic review
+    approved_decisions: list[TradeDecision] = Field(default_factory=list)
+    portfolio_snapshot_id: str = ""                         # review binding (§10.2)
+    authorization: dict[str, Any] | None = None             # execution gate (Group 7)
+    gate_outcome: str = ""                                  # placed | stale | refused
+    gate_rejections: list[str] = Field(default_factory=list)
+    cycle_status: str = ""                                  # mirrors decision_cycles.status
 
     # boss_review / trader / persist
     approval: BossApproval | None = None

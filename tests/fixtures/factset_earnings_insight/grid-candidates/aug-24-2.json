@@ -1,0 +1,27 @@
+{
+  "candidate_only": true,
+  "policy_hash": "674ae04fbbd920be58b6adec7f7a18e4fb2194f639a8800fc29fd19cd2bd4c46",
+  "chart": {
+    "page_number": 24,
+    "image_number": 2,
+    "image_hash": "d64aedbcaf890cf199ff9f0a134eb40e5fae4850492a74581b108774b4fb8c2f",
+    "title": "Number (#) of S&P 500 Cos. with Q3 Positive & Negative Guidance",
+    "title_region": [
+      0.13172338090010977,
+      0.0226928895612708,
+      0.8664471276984999,
+      0.05143721633888049
+    ],
+    "groups": [
+      "eps_guidance"
+    ],
+    "periods": [
+      "2026Q3"
+    ],
+    "period_basis": "target_quarter",
+    "period_evidence": "Q3 2026",
+    "status": "located",
+    "reasons": []
+  },
+  "grids": []
+}

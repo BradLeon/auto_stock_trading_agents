@@ -187,9 +187,11 @@ def _actuals(dossier) -> str:
     parts = []
     headline = []
     if a.reported_eps is not None:
-        headline.append(f"EPS **${a.reported_eps:.2f}**")
+        cur = getattr(a, "reporting_currency", "") or ""
+        # the headline used to print "$" for every company (ASML reports in euro, TSM per share in NT$)
+        headline.append(f"EPS **{(cur + ' ') if cur else '$'}{a.reported_eps:.2f}**")
     if a.reported_revenue is not None:
-        headline.append(f"Revenue **{a.reported_revenue/1e9:.1f}B**")
+        headline.append(f"Revenue **{a.reported_revenue/1e9:.1f}B{(' ' + a.reporting_currency) if getattr(a, 'reporting_currency', '') else ''}**")
     if headline:
         parts.append("头条数字: " + " ｜ ".join(headline))
     if a.metrics:
@@ -342,16 +344,25 @@ def _out_dir() -> str:
         return ""
 
 
+from ...workflow.schedule_runtime import publication_write
+
+
+@publication_write
 def write_report(dossier) -> Path | None:
     """Write (or re-write, at score time) the single lifecycle document."""
     out_dir = _out_dir()
     if not out_dir:
         return None
+    from ...workflow.isolation import verified_isolation_root
+    root = verified_isolation_root()
+    if root is not None:
+        out_dir = str(root / "reports")
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
     folder = Path(out_dir)
     if not folder.is_dir():
         log.warning("pead report: output_dir missing — skipped: %s", folder)
         return None
-    from ...data.fiscal import canonical_tag
+    from ...data.products.fiscal_tools import canonical_tag
 
     # Canonical tag surfaces the exact fiscal quarter ('2026Q2') so each company's
     # documents sort/browse by quarter; falls back to the sanitized label.

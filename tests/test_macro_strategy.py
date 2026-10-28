@@ -87,12 +87,31 @@ def test_macro_runtime_config_has_no_factset_download_or_folder_settings():
     assert not hasattr(factset, "parse_key_metrics")
 
 
+def _news_doc(title, body):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(title=title, text=f"{title}\n\n{body}", published_at="2026-10-10T00:00:00+00:00",
+                           document_id="doc-1", version_id="ver1")
+
+
+def test_macro_review_never_searches_the_web_and_says_so_when_no_news_is_admitted(monkeypatch):
+    from ats.data import websearch
+
+    monkeypatch.setattr("ats.data.products.macro_inputs.macro_snapshot", lambda **_k: MacroData(as_of=NOW))
+    monkeypatch.setattr("ats.data.factset.fetch_macro_material", lambda: ("", "disabled", None, None))
+    monkeypatch.setattr("ats.data.regional.fetch", lambda **_k: (_ for _ in ()).throw(RuntimeError("x")))
+    monkeypatch.setattr("ats.data.products.macro_inputs.admitted_news", lambda *_a, **_k: [])
+    monkeypatch.setattr(websearch, "search_news",
+                        lambda *a, **k: pytest.fail("the review must not call the search provider"))
+    ctx = assemble.build(CFG, live_data=True).as_context()
+    assert "无已准入宏观材料" in ctx
+
+
 def test_assemble_offline_and_live(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63, ust_10y=4.48, hy_oas=2.75, ig_oas=0.75)
-    monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
-    monkeypatch.setattr("ats.data.websearch.search_news",
-                        lambda q, **k: [{"title": "Iran headline", "url": "u",
-                                         "content": "conflict escalates", "published": "2026-07-01"}])
+    monkeypatch.setattr("ats.data.products.macro_inputs.macro_snapshot", lambda **_k: data)
+    monkeypatch.setattr("ats.data.products.macro_inputs.admitted_news",
+                        lambda theme_key, **k: [_news_doc("Iran headline", "conflict escalates")])
     monkeypatch.setattr(
         "ats.data.factset.fetch_macro_material",
         lambda: ("", "disabled", None, None))
@@ -110,7 +129,8 @@ def test_assemble_offline_and_live(monkeypatch):
     mc = assemble.build(CFG, live_data=True)
     ctx = mc.as_context()
     assert "fed_funds=3.63" in ctx and "hy_oas=2.75" in ctx        # theme quant fields
-    assert "Iran headline" in ctx and "conflict escalates" in ctx  # tavily news
+    assert "Iran headline" in ctx and "conflict escalates" in ctx  # admitted news
+    assert "文档 doc-1@ver1" in ctx                                  # cites the exact document version
     assert "REGIONAL GOVERNED OUTPUT" in ctx
     assert consumers == ["macro_agent"]
     assert mc.stats()["regional_chars"] > 0
@@ -123,8 +143,8 @@ def test_assemble_offline_and_live(monkeypatch):
 
 def test_assemble_keeps_macro_workflow_available_when_regional_product_fails(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63)
-    monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
-    monkeypatch.setattr("ats.data.websearch.search_news", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("ats.data.products.macro_inputs.macro_snapshot", lambda **_k: data)
+    monkeypatch.setattr("ats.data.products.macro_inputs.admitted_news", lambda *_a, **_k: [])
     monkeypatch.setattr("ats.data.regional.fetch",
                         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unavailable")))
     context = assemble.build(CFG, live_data=True)
@@ -135,8 +155,8 @@ def test_assemble_keeps_macro_workflow_available_when_regional_product_fails(mon
 
 def test_assemble_includes_factset(monkeypatch):
     data = MacroData(as_of=NOW, fed_funds=3.63)
-    monkeypatch.setattr("ats.data.runtime.macro.fetch", lambda: data)
-    monkeypatch.setattr("ats.data.websearch.search_news", lambda q, **k: [])
+    monkeypatch.setattr("ats.data.products.macro_inputs.macro_snapshot", lambda **_k: data)
+    monkeypatch.setattr("ats.data.products.macro_inputs.admitted_news", lambda *_a, **_k: [])
     monkeypatch.setattr(
         "ats.data.factset.fetch_macro_material",
         lambda: ("S&P500 EPS 增速 23.3%, 前瞻 P/E 20.4",
@@ -300,23 +320,14 @@ def test_sector_assemble_does_not_ingest_macro(monkeypatch):
     assert "MACRO REGIME MARKER" not in sc.as_context()            # 也不出现在上下文里
 
 
-def test_scheduler_macro_before_sector(monkeypatch):
-    from datetime import date
-
-    from ats.runtime import scheduler
-
-    order = []
-    monkeypatch.setattr("ats.runtime.cli.run_macro_review", lambda name, **k: order.append("macro"))
-    monkeypatch.setattr("ats.runtime.cli.run_sector_review", lambda name, **k: order.append("sector"))
-    # weekday gate now tracks weekly_review_tz, not ET — see _today_weekly().
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 4))   # Saturday
-    # The weekly job now also ranks the cross-section (network) and writes a report.
-    monkeypatch.setattr(scheduler, "_cross_section_weekly", lambda name: None)
-    scheduler._macro_weekly()
-    scheduler._sector_weekly()
-    assert order == ["macro", "sector"]
-
-    order.clear()
-    monkeypatch.setattr(scheduler, "_today_weekly", lambda: date(2026, 7, 6))   # Monday — no longer fires
-    scheduler._macro_weekly()
-    assert order == []
+def test_new_version_report_never_overwrites_an_existing_file(tmp_path):
+    cfg = CFG.model_copy(update={"output_dir": str(tmp_path)})
+    r = MacroReview(name="macro", as_of=NOW, regime="risk-off｜x", summary="s")
+    first = report.write_new_version(r, cfg)
+    cli_style = report.write(r, cfg)                  # the CLI path overwrites the plain name on purpose
+    second = report.write_new_version(r, cfg)
+    third = report.write_new_version(r, cfg)
+    assert first == cli_style                         # the plain name is the first file of the day
+    assert second.name.endswith("-v2.md") and third.name.endswith("-v3.md")
+    assert len({first, second, third}) == 3 and all(p.exists() for p in (first, second, third))
+    assert report.write_new_version(r, CFG) is None   # unset dir degrades quietly

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import hashlib
 import json
-from pathlib import Path
+import os
 import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 class PlatformUnstructuredRepository:
@@ -32,6 +33,11 @@ class PlatformUnstructuredRepository:
         CREATE TABLE IF NOT EXISTS data_documents (document_id TEXT PRIMARY KEY,entity TEXT NOT NULL,period TEXT NOT NULL,doc_type TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,local_path TEXT NOT NULL,sha256 TEXT NOT NULL,chars INTEGER NOT NULL,ok INTEGER NOT NULL DEFAULT 1,note TEXT NOT NULL DEFAULT '',fetched_at TEXT NOT NULL,external_id TEXT NOT NULL DEFAULT '',title TEXT NOT NULL DEFAULT '',published_at TEXT NOT NULL DEFAULT '',completeness TEXT NOT NULL DEFAULT 'full',truncation_reason TEXT NOT NULL DEFAULT '',carrier_format TEXT NOT NULL DEFAULT '',mime_source TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS data_document_versions (version_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,content_hash TEXT NOT NULL,local_path TEXT NOT NULL,chars INTEGER NOT NULL,source_url TEXT NOT NULL,fetched_at TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(document_id,content_hash));
         CREATE INDEX IF NOT EXISTS idx_data_document_version_document ON data_document_versions(document_id,fetched_at);
+        CREATE TABLE IF NOT EXISTS data_document_publications (
+            publication_id TEXT PRIMARY KEY, document_id TEXT NOT NULL,
+            version_id TEXT NOT NULL, known_at TEXT NOT NULL, metadata_json TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_data_document_publication_asof
+            ON data_document_publications(document_id,known_at);
         CREATE TABLE IF NOT EXISTS data_document_entities (document_id TEXT NOT NULL,entity TEXT NOT NULL,relation TEXT NOT NULL DEFAULT 'mentioned',PRIMARY KEY(document_id,entity,relation));
         CREATE TABLE IF NOT EXISTS data_document_aliases (alias_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,source TEXT NOT NULL,source_url TEXT NOT NULL,external_id TEXT NOT NULL,title TEXT NOT NULL,published_at TEXT NOT NULL,metadata_json TEXT NOT NULL,created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS data_document_chunks (chunk_id TEXT PRIMARY KEY,version_id TEXT NOT NULL,ordinal INTEGER NOT NULL,char_start INTEGER NOT NULL,char_end INTEGER NOT NULL,text TEXT NOT NULL,content_hash TEXT NOT NULL,UNIQUE(version_id,ordinal));
@@ -44,6 +50,26 @@ class PlatformUnstructuredRepository:
         CREATE TABLE IF NOT EXISTS data_document_pages (document_version_id TEXT NOT NULL,page_number INTEGER NOT NULL,char_start INTEGER NOT NULL,char_end INTEGER NOT NULL,section_title TEXT NOT NULL DEFAULT '',text TEXT NOT NULL,content_hash TEXT NOT NULL,PRIMARY KEY(document_version_id,page_number));
         CREATE INDEX IF NOT EXISTS idx_data_document_page_version ON data_document_pages(document_version_id,page_number);
         CREATE TABLE IF NOT EXISTS data_document_processing_runs (version_id TEXT NOT NULL,consumer TEXT NOT NULL,processor_version TEXT NOT NULL,status TEXT NOT NULL,started_at TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '',outputs INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',PRIMARY KEY(version_id,consumer,processor_version));
+        -- ── Evidence write side ────────────────────────────────────────────────
+        -- The evidence twin tables were migrated read-side only: the repository could
+        -- query them but nothing could create them, so neutral evidence facts kept
+        -- being written to Workflow memory tables that the boundary classifies as
+        -- data-layer-owned (and therefore drops). Column-for-column identical to the
+        -- Workflow memory originals — this is a redirect, not a redesign.
+        CREATE TABLE IF NOT EXISTS data_evidence_facts (fact_id TEXT PRIMARY KEY,document_id TEXT,document_version_id TEXT,source_url TEXT,entity TEXT,source_entity TEXT,metric TEXT,period TEXT,observation_type TEXT,value REAL,unit TEXT,evidence_span TEXT,observed_at TEXT,extraction_confidence REAL DEFAULT 1.0,discovery_evidence INTEGER DEFAULT 0,superseded_at TEXT);
+        CREATE INDEX IF NOT EXISTS idx_data_evidence_fact_entity ON data_evidence_facts(entity,metric);
+        CREATE INDEX IF NOT EXISTS idx_data_evidence_fact_document ON data_evidence_facts(document_id,source_entity);
+        CREATE TABLE IF NOT EXISTS data_evidence_projections (projection_id TEXT PRIMARY KEY,fact_id TEXT,legacy_observation_id TEXT,profile TEXT,profile_version TEXT,concept TEXT,stance TEXT,direction TEXT,payload TEXT,created_at TEXT,superseded_at TEXT);
+        CREATE INDEX IF NOT EXISTS idx_data_evidence_projection ON data_evidence_projections(profile,profile_version,concept,fact_id);
+        CREATE TABLE IF NOT EXISTS data_evidence_observations (id TEXT PRIMARY KEY,document_id TEXT,source_url TEXT,entity TEXT,source_entity TEXT,metric TEXT,concept TEXT,period TEXT,observation_type TEXT,stance TEXT,direction TEXT,value REAL,unit TEXT,evidence_span TEXT,observed_at TEXT,discovery_evidence INTEGER DEFAULT 0,extraction_confidence REAL DEFAULT 1.0,superseded_at TEXT);
+        CREATE INDEX IF NOT EXISTS idx_data_evidence_obs_entity ON data_evidence_observations(entity,metric);
+        CREATE INDEX IF NOT EXISTS idx_data_evidence_obs_at ON data_evidence_observations(observed_at);
+        CREATE TABLE IF NOT EXISTS data_evidence_failures (document_id TEXT,entity TEXT,reason TEXT,at TEXT,PRIMARY KEY(document_id,entity));
+        CREATE TABLE IF NOT EXISTS data_task_projections (projection_id TEXT PRIMARY KEY,profile TEXT,profile_version TEXT,input_kind TEXT,input_ref TEXT,target_type TEXT,target_id TEXT,payload TEXT,created_at TEXT,expires_at TEXT);
+        CREATE INDEX IF NOT EXISTS idx_data_task_projection ON data_task_projections(profile,target_type,target_id,created_at);
+        CREATE TABLE IF NOT EXISTS data_measurement_series (series_id TEXT PRIMARY KEY,source_id TEXT,series TEXT,label TEXT,entity TEXT,unit TEXT,cadence TEXT,updated_at TEXT,UNIQUE(source_id,series));
+        CREATE TABLE IF NOT EXISTS data_measurement_points (point_id TEXT PRIMARY KEY,series_id TEXT,period TEXT,value REAL,unit TEXT,published_at TEXT,fetched_at TEXT,content_hash TEXT,raw_payload TEXT,UNIQUE(series_id,period,content_hash));
+        CREATE INDEX IF NOT EXISTS idx_data_measurement_period ON data_measurement_points(series_id,period,fetched_at);
         """)
         self.conn.commit()
 
@@ -89,9 +115,17 @@ class PlatformUnstructuredRepository:
 
     def facts(self, *, entity: str | None = None, document_id: str | None = None,
               since: datetime | None = None, include_superseded: bool = False,
-              limit: int = 500) -> list[dict]:
+              limit: int = 500, as_of: datetime | None = None) -> list[dict]:
         sql, args = "SELECT * FROM data_evidence_facts WHERE 1=1", []
-        if not include_superseded:
+        if as_of is not None:
+            if as_of.tzinfo is None:
+                raise ValueError("evidence as_of must be timezone-aware")
+            sql += " AND julianday(observed_at)<=julianday(?)"
+            args.append(as_of.isoformat())
+            if not include_superseded:
+                sql += " AND (superseded_at IS NULL OR julianday(superseded_at)>=julianday(?))"
+                args.append(as_of.isoformat())
+        elif not include_superseded:
             sql += " AND superseded_at IS NULL"
         for column, value in (("entity", entity.upper() if entity else None),
                               ("document_id", document_id)):
@@ -99,7 +133,22 @@ class PlatformUnstructuredRepository:
                 sql += f" AND {column}=?"; args.append(value)
         if since:
             sql += " AND observed_at>=?"; args.append(since.isoformat())
-        return self._rows(sql + " ORDER BY observed_at DESC LIMIT ?", [*args, limit])
+        rows = self._rows(sql + " ORDER BY observed_at DESC LIMIT ?", [*args, limit])
+        if as_of is None:
+            return rows
+        visible = []
+        for row in rows:
+            try:
+                observed = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+                superseded = (datetime.fromisoformat(row["superseded_at"].replace("Z", "+00:00"))
+                              if row["superseded_at"] else None)
+                if observed.tzinfo is None or (superseded and superseded.tzinfo is None):
+                    continue
+                if observed <= as_of and (include_superseded or superseded is None or superseded > as_of):
+                    visible.append(row)
+            except (TypeError, ValueError):
+                continue
+        return visible
 
     def fact_projections(self, *, fact_id: str | None = None,
                          profile: str | None = None, concept: str | None = None,
@@ -125,7 +174,12 @@ class PlatformUnstructuredRepository:
 
     def documents(self, entity: str | None = None, *, ok_only: bool = True,
                   doc_type: str | None = None, source_contains: str | None = None,
-                  published_since: str | None = None, limit: int = 200) -> list[dict]:
+                  published_since: str | None = None, limit: int = 200,
+                  doc_type_in: tuple[str, ...] | None = None) -> list[dict]:
+        # `doc_type_in` lets a caller pass an already-resolved set of equivalent type
+        # values (current + legacy) instead of a single string.
+        if doc_type_in:
+            doc_type = list(doc_type_in)
         sql, args = "SELECT * FROM data_documents", []
         where: list[str] = []
         if entity:
@@ -135,7 +189,12 @@ class PlatformUnstructuredRepository:
         if ok_only:
             where.append("ok=1")
         if doc_type:
-            where.append("doc_type=?"); args.append(doc_type)
+            if isinstance(doc_type, (list, tuple, set)):
+                values = [str(v) for v in doc_type]
+                where.append("doc_type IN (%s)" % ",".join("?" * len(values)))
+                args.extend(values)
+            else:
+                where.append("doc_type=?"); args.append(doc_type)
         if source_contains:
             where.append("lower(source) LIKE ?"); args.append(f"%{source_contains.lower()}%")
         if published_since:
@@ -170,6 +229,68 @@ class PlatformUnstructuredRepository:
             "SELECT * FROM data_document_versions WHERE document_id=? "
             "ORDER BY fetched_at DESC,created_at DESC", [document_id])
 
+    def latest_document_metadata(self, document_id: str) -> dict:
+        row = self.conn.execute(
+            "SELECT metadata_json FROM data_document_publications WHERE document_id=? "
+            "ORDER BY julianday(known_at) DESC,rowid DESC LIMIT 1", (document_id,)).fetchone()
+        return json.loads(row["metadata_json"]) if row else {}
+
+    def document_materials_at(self, *, as_of: datetime, limit: int = 1000) -> list[dict]:
+        """Published bodies and metadata as known then, not today's mutable index.
+
+        Old stores have no publication metadata history. Their current index is
+        usable only when it was already known at the cutoff; never backdate it.
+        """
+        if as_of.tzinfo is None:
+            raise ValueError("document as_of must be timezone-aware")
+        point = as_of.astimezone(timezone.utc).isoformat()
+        has_history = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_document_publications'"
+        ).fetchone()
+        selected = {}
+        if has_history:
+            rows = self.conn.execute(
+                "SELECT p.rowid AS publication_order,p.publication_id,p.metadata_json,p.known_at,v.* FROM data_document_publications p "
+                "JOIN data_document_versions v ON v.version_id=p.version_id "
+                "WHERE julianday(p.known_at)<=julianday(?) "
+                "ORDER BY julianday(p.known_at) DESC,p.publication_id DESC", (point,))
+            rows = sorted(rows, key=lambda item: (
+                datetime.fromisoformat(item["known_at"].replace("Z", "+00:00")),
+                item["publication_order"]), reverse=True)
+            for row in rows:
+                version = dict(row)
+                if datetime.fromisoformat(version["known_at"].replace("Z", "+00:00")) > as_of:
+                    continue
+                metadata = json.loads(version.pop("metadata_json"))
+                legacy_version = metadata.pop("_preserved_legacy_version", None)
+                history_basis = "legacy_current_only" if legacy_version else "publication_snapshot"
+                if legacy_version:
+                    version = legacy_version
+                if version["document_id"] not in selected:
+                    selected[version["document_id"]] = {
+                        **metadata, "version": version,
+                        "metadata_history": history_basis}
+        for row in self.documents(ok_only=True, limit=10_000):
+            if row["document_id"] in selected:
+                continue
+            # A failed/newer index must not mutate an older publication's metadata.
+            stamp = str(row.get("fetched_at") or "")
+            try:
+                fetched = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                fetched = fetched.replace(tzinfo=timezone.utc) if fetched.tzinfo is None else fetched
+            except ValueError:
+                continue
+            if fetched > as_of:
+                continue
+            version = self.latest_document_version(row["document_id"])
+            if not version or version["content_hash"] != row.get("sha256"):
+                continue
+            selected[row["document_id"]] = {
+                **row, "version": version, "metadata_history": "legacy_current_only"}
+        return sorted(selected.values(), key=lambda row: (
+            row["version"]["fetched_at"], row["document_id"]),
+                      reverse=True)[:max(1, min(int(limit), 10_000))]
+
     def link_document_artifact(self, document_version_id: str, artifact_id: str, *,
                                role: str, media_type: str, content_hash: str,
                                page_number: int | None = None,
@@ -202,6 +323,9 @@ class PlatformUnstructuredRepository:
         return self._rows(sql + " ORDER BY role,page_number,artifact_id", args)
 
     def save_document_pages(self, document_version_id: str, pages) -> int:
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
         before = self.conn.total_changes
         self.conn.executemany(
             "INSERT OR REPLACE INTO data_document_pages "
@@ -221,16 +345,24 @@ class PlatformUnstructuredRepository:
 
     def begin_document_processing(self, document_id: str, consumer: str,
                                   processor_version: str = "v1", *,
-                                  at: str | None = None) -> str | None:
-        latest = self.latest_document_version(document_id)
+                                  at: str | None = None, version_id: str | None = None,
+                                  retry_failed: bool = False) -> str | None:
+        latest = (self.conn.execute("SELECT * FROM data_document_versions WHERE document_id=? AND version_id=?",
+                                   (document_id, version_id)).fetchone() if version_id else
+                  self.latest_document_version(document_id))
+        if version_id and latest is None:
+            raise ValueError("processing version does not belong to document")
         if latest is None:
             return None
         stamp = at or datetime.now().astimezone().isoformat(timespec="seconds")
         cur = self._write(
-            "INSERT OR IGNORE INTO data_document_processing_runs "
+            "INSERT INTO data_document_processing_runs "
             "(version_id,consumer,processor_version,status,started_at,outputs,note) "
-            "VALUES (?,?,?,'running',?,0,'')",
-            (latest["version_id"], consumer, processor_version, stamp))
+            "VALUES (?,?,?,'running',?,0,'') "
+            "ON CONFLICT(version_id,consumer,processor_version) DO UPDATE SET "
+            "status='running',started_at=excluded.started_at,completed_at='',outputs=0,note='' "
+            "WHERE data_document_processing_runs.status='failed' AND ?",
+            (latest["version_id"], consumer, processor_version, stamp, int(retry_failed)))
         return latest["version_id"] if cur.rowcount else None
 
     def finish_document_processing(self, version_id: str, consumer: str,
@@ -283,6 +415,102 @@ class PlatformUnstructuredRepository:
             "FROM data_sources s LEFT JOIN data_ingestion_runs r ON r.run_id=("
             " SELECT r2.run_id FROM data_ingestion_runs r2 WHERE r2.source_id=s.source_id "
             " ORDER BY r2.started_at DESC LIMIT 1) ORDER BY s.source_id", [])
+
+    def document_aliases(self, document_id: str | None = None, *,
+                         limit: int = 200) -> list[dict]:
+        sql, args = "SELECT * FROM data_document_aliases", []
+        if document_id:
+            sql += " WHERE document_id=?"
+            args.append(document_id)
+        return self._rows(sql + " ORDER BY created_at DESC LIMIT ?", [*args, limit])
+
+    def unmapped_observations(self, *, limit: int = 500) -> list[dict]:
+        """Facts we stored but could file under no declared claim dimension.
+
+        Raw material for induction; discovery-frozen rows are excluded — they already
+        triggered a proposal and must not trigger another.
+        """
+        return self._rows(
+            "SELECT * FROM data_evidence_observations "
+            "WHERE (concept IS NULL OR concept = '') AND COALESCE(discovery_evidence,0)=0 "
+            "AND superseded_at IS NULL ORDER BY observed_at DESC LIMIT ?", [limit])
+
+    def processing_runs(self, document_id: str | None = None, *,
+                        consumer: str | None = None,
+                        processor_version: str | None = None,
+                        limit: int = 200) -> list[dict]:
+        sql = ("SELECT p.*, v.document_id, v.content_hash FROM data_document_processing_runs p "
+               "JOIN data_document_versions v ON v.version_id=p.version_id WHERE 1=1")
+        args: list = []
+        if document_id:
+            sql += " AND v.document_id=?"
+            args.append(document_id)
+        if consumer:
+            sql += " AND p.consumer=?"
+            args.append(consumer)
+        if processor_version:
+            sql += " AND p.processor_version=?"
+            args.append(processor_version)
+        return self._rows(sql + " ORDER BY p.started_at DESC LIMIT ?", [*args, limit])
+
+    def save_document_failure(self, entity: str, period: str, doc_type: str, *,
+                              source: str = "", source_url: str = "", note: str = "",
+                              at: str | None = None) -> None:
+        """Record a fetch that failed a guard so it is not retried blindly (ok=0)."""
+        stamp = at or datetime.now().astimezone().isoformat(timespec="seconds")
+        self._write(
+            "INSERT OR REPLACE INTO data_documents (document_id,entity,period,doc_type,"
+            "source,source_url,local_path,sha256,chars,ok,note,fetched_at,external_id,"
+            "title,published_at,completeness,truncation_reason,carrier_format,mime_source) "
+            "VALUES (?,?,?,?,?,?,'','',0,0,?,?,'','','','full','','','')",
+            (f"{entity.upper()}:{period or 'unknown'}:{doc_type}", entity.upper(), period,
+             doc_type, source, source_url, note, stamp))
+
+    def has_document(self, document_ids: list[str]) -> bool:
+        """True when any of these logical documents exists and is accepted (ok=1)."""
+        if not document_ids:
+            return False
+        row = self.conn.execute(
+            "SELECT ok FROM data_documents WHERE document_id IN (%s)"
+            % ",".join("?" * len(document_ids)), document_ids).fetchone()
+        return bool(row and row["ok"])
+
+    def processed_document_ids(self, consumer: str, processor_version: str, *,
+                               entity: str | None = None) -> set[str]:
+        """Documents whose processing ledger says a consumer already read them."""
+        sql = ("SELECT DISTINCT v.document_id FROM data_document_processing_runs p "
+               "JOIN data_document_versions v ON v.version_id=p.version_id "
+               "LEFT JOIN data_documents d ON d.document_id=v.document_id "
+               "WHERE p.consumer=? AND p.processor_version=?")
+        args: list = [consumer, processor_version]
+        if entity:
+            sql += " AND d.entity=?"
+            args.append(entity.upper())
+        return {row["document_id"] for row in self.conn.execute(sql, args).fetchall()}
+
+    def ingestion_runs(self, source_id: str | None = None, *, limit: int = 200) -> list[dict]:
+        sql, args = "SELECT * FROM data_ingestion_runs", []
+        if source_id:
+            sql += " WHERE source_id=?"
+            args.append(source_id)
+        return self._rows(sql + " ORDER BY started_at DESC LIMIT ?", [*args, limit])
+
+    def save_document_chunks(self, version_id: str, chunks) -> int:
+        """Persist pre-computed chunks (used when chunking is done outside save_document)."""
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
+        before = self.conn.total_changes
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO data_document_chunks "
+            "(chunk_id,version_id,ordinal,char_start,char_end,text,content_hash) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [(hashlib.sha1(f"{version_id}|{int(c['ordinal'])}|{hashlib.sha256(str(c['text']).encode()).hexdigest()}".encode()).hexdigest()[:20],
+              version_id, int(c["ordinal"]), int(c["char_start"]), int(c["char_end"]),
+              str(c["text"]), hashlib.sha256(str(c["text"]).encode()).hexdigest())
+             for c in chunks])
+        self.conn.commit()
+        return self.conn.total_changes - before
 
     def document_source_health(self) -> list[dict]:
         return self._rows(
@@ -340,6 +568,283 @@ class PlatformUnstructuredRepository:
             "JOIN data_document_versions v ON v.version_id=p.version_id "
             "ORDER BY p.started_at DESC LIMIT ?", [limit])
 
+    # --- evidence write side --------------------------------------------- #
+    # Neutral evidence facts are authored here and read back through the read methods
+    # above; Workflow memory keeps only opinionated conclusions plus a lineage
+    # reference to these rows.
+    @staticmethod
+    def observation_fact_id(obs) -> str:
+        """Deterministic fact id: (document, entity, metric, period)."""
+        raw = f"{obs.document_id}|{obs.entity.upper()}|{obs.metric.lower()}|{obs.period}"
+        return hashlib.sha1(raw.encode()).hexdigest()[:20]
+
+    @staticmethod
+    def observation_projection_id(obs, profile: str, version: str) -> str:
+        raw = f"{obs.id}|{profile}|{version}"
+        return hashlib.sha1(raw.encode()).hexdigest()[:20]
+
+    def save_evidence_observation(self, obs, *, projection_profile: str = "evidence_observer",
+                                  projection_version: str = "v1") -> bool:
+        """Idempotent upsert of one neutral observation; True when it is new.
+
+        `discovery_evidence` is STICKY: it is set by a different step (when an
+        induction pass used this row to notice a proposition), so a plain
+        INSERT OR REPLACE would clear it — and the material that discovered a claim
+        would become eligible to confirm that same claim.
+        """
+        existing = self.conn.execute(
+            "SELECT discovery_evidence FROM data_evidence_observations WHERE id=?",
+            (obs.id,)).fetchone()
+        frozen = 1 if (getattr(obs, "discovery_evidence", 0) or (existing and existing[0])) else 0
+        document_version = self.latest_document_version(obs.document_id)
+        if not document_version:
+            raise ValueError("neutral_fact_requires_published_document_version")
+        if datetime.fromisoformat(document_version["fetched_at"].replace("Z", "+00:00")) > obs.observed_at:
+            raise ValueError("neutral_fact_cannot_cite_future_document_version")
+        # Append factual extraction vintages. The old compatibility observation
+        # ID/profile may remain stable; it must not overwrite historical facts.
+        neutral_payload = {"document_version_id": document_version["version_id"],
+                           "source_entity": (obs.source_entity or obs.entity).upper(),
+                           "observation_type": obs.observation_type, "value": obs.value,
+                           "unit": obs.unit, "evidence_span": obs.evidence_span,
+                           "extraction_confidence": obs.extraction_confidence}
+        fact_id = hashlib.sha1((self.observation_fact_id(obs) + "|" +
+                               json.dumps(neutral_payload, sort_keys=True)).encode()).hexdigest()[:20]
+        prior_fact = self.conn.execute(
+            "SELECT discovery_evidence,superseded_at FROM data_evidence_facts WHERE fact_id=?",
+            (fact_id,)).fetchone()
+        fact_frozen = frozen
+        # A new extraction may reproduce a retired fact. Append a new vintage;
+        # clearing the old supersession would rewrite historical as-of answers.
+        # Following the deterministic chain also makes repeated writes idempotent.
+        while prior_fact is not None:
+            fact_frozen = 1 if fact_frozen or prior_fact[0] else 0
+            if not prior_fact[1]:
+                break
+            retired_at = datetime.fromisoformat(prior_fact[1].replace("Z", "+00:00"))
+            if obs.observed_at < retired_at:
+                raise ValueError("neutral_fact_reextraction_precedes_supersession")
+            fact_id = hashlib.sha1((fact_id + "|reextracted|" + prior_fact[1]).encode()).hexdigest()[:20]
+            prior_fact = self.conn.execute(
+                "SELECT discovery_evidence,superseded_at FROM data_evidence_facts WHERE fact_id=?",
+                (fact_id,)).fetchone()
+        stamp = obs.observed_at.isoformat()
+        self._write("UPDATE data_evidence_facts SET superseded_at=? "
+                    "WHERE document_id=? AND entity=? AND metric=? AND period=? AND source_entity=? "
+                    "AND fact_id!=? AND superseded_at IS NULL AND julianday(observed_at)<=julianday(?)",
+                    (stamp, obs.document_id, obs.entity.upper(), obs.metric, obs.period,
+                     (obs.source_entity or obs.entity).upper(), fact_id, stamp))
+        self._write(
+            "INSERT OR IGNORE INTO data_evidence_facts "
+            "(fact_id,document_id,document_version_id,source_url,entity,source_entity,metric,"
+            " period,observation_type,value,unit,evidence_span,observed_at,"
+            " extraction_confidence,discovery_evidence,superseded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+            (fact_id, obs.document_id,
+             document_version["version_id"] if document_version else "",
+             obs.source_url, obs.entity.upper(),
+             (obs.source_entity or obs.entity).upper(), obs.metric, obs.period,
+             obs.observation_type, obs.value, obs.unit, obs.evidence_span,
+             obs.observed_at.isoformat(), obs.extraction_confidence, fact_frozen))
+        if fact_frozen:
+            self._write("UPDATE data_evidence_facts SET discovery_evidence=1 WHERE fact_id=?", (fact_id,))
+        projection_id = self.observation_projection_id(
+            obs, projection_profile, projection_version)
+        previous_projection = self.conn.execute(
+            "SELECT fact_id FROM data_evidence_projections WHERE projection_id=?",
+            (projection_id,)).fetchone()
+        if previous_projection and previous_projection[0] != fact_id:
+            self._write("UPDATE data_evidence_projections SET superseded_at=? "
+                        "WHERE projection_id=? AND superseded_at IS NULL", (stamp, projection_id))
+            projection_id = hashlib.sha1((projection_id + "|" + fact_id).encode()).hexdigest()[:20]
+        self._write(
+            "INSERT OR REPLACE INTO data_evidence_projections "
+            "(projection_id,fact_id,legacy_observation_id,profile,profile_version,"
+            " concept,stance,direction,payload,created_at,superseded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,NULL)",
+            (projection_id, fact_id, obs.id, projection_profile, projection_version,
+             obs.concept, obs.stance, obs.direction,
+             json.dumps({"observation_id": obs.id}, ensure_ascii=False),
+             obs.observed_at.isoformat()))
+        self._write(
+            "INSERT OR REPLACE INTO data_evidence_observations "
+            "(id,document_id,source_url,entity,source_entity,metric,concept,period,"
+            " observation_type,stance,direction,value,unit,evidence_span,observed_at,"
+            " discovery_evidence,extraction_confidence) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (obs.id, obs.document_id, obs.source_url, obs.entity.upper(),
+             (obs.source_entity or obs.entity).upper(), obs.metric,
+             obs.concept, obs.period, obs.observation_type, obs.stance, obs.direction,
+             obs.value, obs.unit, obs.evidence_span, obs.observed_at.isoformat(),
+             frozen, obs.extraction_confidence))
+        return existing is None
+
+    def save_evidence_failure(self, fail) -> None:
+        """Record a failed extraction — "could not read" ≠ "says nothing"."""
+        at = getattr(fail, "at", None)
+        self._write(
+            "INSERT OR REPLACE INTO data_evidence_failures (document_id,entity,reason,at) "
+            "VALUES (?,?,?,?)",
+            (fail.document_id, (fail.entity or "").upper(), fail.reason,
+             at.isoformat() if hasattr(at, "isoformat") else str(at or "")))
+
+    def supersede_document_observations(self, document_id: str, source_entity: str, *,
+                                        at=None) -> int:
+        """Retire the previous extraction of one document by one speaker (rows kept)."""
+        stamp = (at or datetime.now().astimezone()).isoformat(timespec="seconds")
+        source = (source_entity or "").upper()
+        cur = self._write(
+            "UPDATE data_evidence_observations SET superseded_at=? "
+            "WHERE document_id=? AND source_entity=? AND superseded_at IS NULL",
+            (stamp, document_id, source))
+        fact_ids = [r["fact_id"] for r in self.conn.execute(
+            "SELECT fact_id FROM data_evidence_facts WHERE document_id=? AND source_entity=? "
+            "AND superseded_at IS NULL", (document_id, source)).fetchall()]
+        self._write(
+            "UPDATE data_evidence_facts SET superseded_at=? WHERE document_id=? "
+            "AND source_entity=? AND superseded_at IS NULL", (stamp, document_id, source))
+        if fact_ids:
+            self._write(
+                "UPDATE data_evidence_projections SET superseded_at=? WHERE fact_id IN (%s) "
+                "AND superseded_at IS NULL" % ",".join("?" * len(fact_ids)),
+                [stamp, *fact_ids])
+        return cur.rowcount
+
+    def freeze_observations_as_discovery(self, observation_ids: list[str]) -> int:
+        """Mark observations as discovery material (sticky across later rewrites)."""
+        ids = [i for i in observation_ids if i]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        cur = self._write(
+            f"UPDATE data_evidence_observations SET discovery_evidence=1 "
+            f"WHERE id IN ({placeholders})", ids)
+        self._write(
+            f"UPDATE data_evidence_facts SET discovery_evidence=1 WHERE fact_id IN ("
+            f" SELECT fact_id FROM data_evidence_projections "
+            f" WHERE legacy_observation_id IN ({placeholders}))", ids)
+        return cur.rowcount
+
+    def has_observations_for_document(self, document_id: str) -> bool:
+        """Document-level idempotence: never re-fetch a filing already extracted."""
+        return self.conn.execute(
+            "SELECT 1 FROM data_evidence_observations WHERE document_id=? LIMIT 1",
+            (document_id,)).fetchone() is not None
+
+    # --- measurement write side ------------------------------------------ #
+    def save_measurement_points(self, source, points, *, fetched_at=None) -> int:
+        """Persist immutable raw point vintages. Returns newly accepted versions."""
+        stamp = (fetched_at or datetime.now().astimezone()).isoformat(timespec="seconds")
+        saved = 0
+        for point in points:
+            series = point.series or "value"
+            series_id = f"{source.id}:{series}"
+            self._write(
+                "INSERT INTO data_measurement_series "
+                "(series_id,source_id,series,label,entity,unit,cadence,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(series_id) DO UPDATE SET "
+                "label=excluded.label,entity=excluded.entity,unit=excluded.unit,"
+                "cadence=excluded.cadence,updated_at=excluded.updated_at",
+                (series_id, source.id, series, getattr(source, "label", source.id),
+                 getattr(source, "entity", ""), point.unit,
+                 getattr(source, "cadence", ""), stamp))
+            published = point.published_at.isoformat() if point.published_at else ""
+            # Exclude yoy/mom by construction: those are transformations, even when a
+            # provider happens to include them in the response DTO.
+            raw = point.model_dump(mode="json", exclude={"yoy", "mom"})
+            payload = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+            content_hash = hashlib.sha256(payload.encode()).hexdigest()
+            point_id = hashlib.sha1(
+                f"{series_id}|{point.period}|{content_hash}".encode()).hexdigest()[:20]
+            cur = self._write(
+                "INSERT OR IGNORE INTO data_measurement_points "
+                "(point_id,series_id,period,value,unit,published_at,fetched_at,"
+                " content_hash,raw_payload) VALUES (?,?,?,?,?,?,?,?,?)",
+                (point_id, series_id, point.period, point.value, point.unit,
+                 published, stamp, content_hash, payload))
+            saved += max(0, cur.rowcount)
+        return saved
+
+    def measurements(self, *, source_id: str | None = None, series: str | None = None,
+                     since: str | None = None, entity: str | None = None,
+                     as_of=None, latest_only: bool = True,
+                     limit: int = 5000) -> list[dict]:
+        """Query point vintages, optionally as they were knowable at `as_of`."""
+        sql = ("SELECT p.*,s.source_id,s.series,s.label,s.entity,s.cadence "
+               "FROM data_measurement_points p JOIN data_measurement_series s "
+               "ON s.series_id=p.series_id WHERE 1=1")
+        args: list = []
+        if source_id:
+            sql += " AND s.source_id=?"; args.append(source_id)
+        if series:
+            sql += " AND s.series=?"; args.append(series)
+        if entity:
+            sql += " AND s.entity=?"; args.append(entity.upper())
+        if since:
+            sql += " AND p.period>=?"; args.append(since)
+        cutoff = as_of.isoformat(timespec="seconds") if as_of else None
+        if cutoff:
+            # Both conditions matter: a backdated published_at does not mean this
+            # system possessed the point before fetched_at.
+            sql += " AND p.fetched_at<=? AND (p.published_at='' OR p.published_at<=?)"
+            args.extend([cutoff, cutoff])
+        if latest_only:
+            sql += (" AND NOT EXISTS (SELECT 1 FROM data_measurement_points newer "
+                    "WHERE newer.series_id=p.series_id AND newer.period=p.period "
+                    "AND newer.fetched_at>p.fetched_at)")
+            if cutoff:
+                # The newer-version exclusion must use the same historical knowledge
+                # boundary, otherwise a future revision hides the point known then.
+                sql = sql[:-1] + " AND newer.fetched_at<=?)"
+                args.append(cutoff)
+        return self._rows(sql + " ORDER BY p.period, p.fetched_at LIMIT ?", [*args, limit])
+
+    def projection_lineage(self, projection_id: str, *,
+                           task_projection: dict | None = None) -> dict | None:
+        """Resolve either projection family back to its fact/document/source input.
+
+        `task_projection` is the row from Workflow memory's `task_projections` (that
+        table is NOT data-layer-owned, so the caller hands it in); evidence
+        projections, facts, versions and documents all live here.
+        """
+        def version_and_document(version_id: str, document_id: str) -> tuple[dict | None, dict | None]:
+            version = self.conn.execute(
+                "SELECT * FROM data_document_versions WHERE version_id=?",
+                (version_id,)).fetchone() if version_id else None
+            doc = self.conn.execute(
+                "SELECT * FROM data_documents WHERE document_id=?",
+                (document_id,)).fetchone() if document_id else None
+            return (dict(version) if version else None, dict(doc) if doc else None)
+
+        if task_projection:
+            out = {"projection": dict(task_projection), "fact": None,
+                   "document_version": None, "document": None}
+            if task_projection.get("input_kind") == "document_version":
+                version, doc = version_and_document(
+                    task_projection.get("input_ref", ""), "")
+                if version:
+                    doc = self.conn.execute(
+                        "SELECT * FROM data_documents WHERE document_id=?",
+                        (version["document_id"],)).fetchone()
+                    doc = dict(doc) if doc else None
+                out["document_version"], out["document"] = version, doc
+            return out
+        projected = self.conn.execute(
+            "SELECT * FROM data_evidence_projections WHERE projection_id=?",
+            (projection_id,)).fetchone()
+        if not projected:
+            return None
+        fact = self.conn.execute(
+            "SELECT * FROM data_evidence_facts WHERE fact_id=?",
+            (projected["fact_id"],)).fetchone()
+        out = {"projection": dict(projected), "fact": dict(fact) if fact else None,
+               "document_version": None, "document": None}
+        if fact:
+            version, doc = version_and_document(
+                fact["document_version_id"] or "", fact["document_id"])
+            out["document_version"], out["document"] = version, doc
+        return out
+
     # Writer methods deliberately cover only reusable data assets. Workflow
     # projections, decisions and trades stay in ats.memory.
     @staticmethod
@@ -349,9 +854,19 @@ class PlatformUnstructuredRepository:
     def _write(self, sql: str, args=()) -> sqlite3.Cursor:
         if not self.writable:
             raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
         cur = self.conn.execute(sql, args)
         self.conn.commit()
         return cur
+
+    def _require_managed_writer(self) -> None:
+        """Require a valid managed task for writes to the production document store."""
+        from ...runtime.repository import platform_data_db_path
+
+        if self.path == platform_data_db_path().resolve():
+            from ...persistent_queue import require_queue_worker
+
+            require_queue_worker(os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", ""))
 
     def save_document(self, doc, *, ok: bool = True, note: str = "") -> None:
         stamp = doc.fetched_at or datetime.now().astimezone().isoformat(timespec="seconds")
@@ -359,19 +874,100 @@ class PlatformUnstructuredRepository:
         if ok and doc.sha256:
             version_id = self.document_version_id(doc.document_id, doc.sha256)
             self._write("INSERT OR IGNORE INTO data_document_versions (version_id,document_id,content_hash,local_path,chars,source_url,fetched_at,created_at) VALUES (?,?,?,?,?,?,?,?)", (version_id,doc.document_id,doc.sha256,str(getattr(doc,"version_path",None) or doc.path or ""),len(doc.text or ""),doc.source_url,stamp,stamp))
+            metadata = dict(self.conn.execute(
+                "SELECT * FROM data_documents WHERE document_id=?", (doc.document_id,)).fetchone())
+            metadata["related_entities"] = sorted({doc.symbol.upper(), *(
+                e.upper() for e in getattr(doc, "related_entities", ()) if e)})
+            encoded = json.dumps(metadata, sort_keys=True, ensure_ascii=False)
+            publication_id = hashlib.sha256(f"{version_id}|{stamp}|{encoded}".encode()).hexdigest()
+            self._write("INSERT OR IGNORE INTO data_document_publications "
+                        "(publication_id,document_id,version_id,known_at,metadata_json) VALUES (?,?,?,?,?)",
+                        (publication_id, doc.document_id, version_id, stamp, encoded))
             for ordinal, start in enumerate(range(0, len(doc.text or ""), 2400)):
                 text = (doc.text or "")[start:start + 2400]
                 digest = hashlib.sha256(text.encode()).hexdigest()
                 chunk_id = hashlib.sha1(f"{version_id}|{ordinal}|{digest}".encode()).hexdigest()[:20]
                 self._write("INSERT OR IGNORE INTO data_document_chunks (chunk_id,version_id,ordinal,char_start,char_end,text,content_hash) VALUES (?,?,?,?,?,?,?)",(chunk_id,version_id,ordinal,start,start+len(text),text,digest))
-        self.link_document_entities(doc.document_id, {doc.symbol, *getattr(doc,"related_entities",())}, relation="mentioned")
+        entities = {doc.symbol.upper()}
+        entities.update(e.upper() for e in getattr(doc, "related_entities", ()) if e)
+        self.link_document_entities(
+            doc.document_id,
+            [(entity, "primary" if entity == doc.symbol.upper() else "mentioned")
+             for entity in sorted(entities)])
 
     def document_by_external_id(self, external_id: str) -> dict | None:
         row=self.conn.execute("SELECT * FROM data_documents WHERE external_id=? AND ok=1 ORDER BY fetched_at DESC LIMIT 1",(external_id,)).fetchone(); return dict(row) if row else None
 
+    def revise_document_metadata(self, document_id: str, *, metadata: dict,
+                                 known_at: datetime) -> str:
+        """Correct interpretation atomically without changing immutable body identity."""
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
+        if known_at.tzinfo is None:
+            raise ValueError("metadata known_at must be timezone-aware")
+        version = self.latest_document_version(document_id)
+        row = self.conn.execute("SELECT * FROM data_documents WHERE document_id=?",
+                                (document_id,)).fetchone()
+        if not version or not row or not row["ok"]:
+            raise ValueError("metadata revision requires an admitted body")
+        current = dict(row)
+        if version["content_hash"] != current["sha256"]:
+            raise ValueError("metadata revision requires the current immutable body")
+        allowed = {"title", "published_at", "completeness", "truncation_reason"}
+        if set(metadata) - allowed - {"related_entities", "quality"}:
+            raise ValueError("unsupported document metadata revision")
+        previous = self.conn.execute(
+            "SELECT metadata_json,known_at FROM data_document_publications WHERE document_id=? "
+            "ORDER BY julianday(known_at) DESC,rowid DESC LIMIT 1", (document_id,)).fetchone()
+        prior = json.loads(previous["metadata_json"]) if previous else current
+        stamp = known_at.astimezone(timezone.utc).isoformat()
+        if previous and known_at < datetime.fromisoformat(previous["known_at"]):
+            raise ValueError("metadata revision cannot precede latest publication")
+        revised = {**prior, **metadata}
+        revised["related_entities"] = sorted({current["entity"], *metadata.get(
+            "related_entities", prior.get("related_entities", []))})
+        if revised == prior:
+            return ""
+        revised["fetched_at"] = stamp
+        encoded = json.dumps(revised, sort_keys=True, ensure_ascii=False)
+        publication_id = hashlib.sha256(
+            f"{version['version_id']}|{stamp}|{encoded}".encode()).hexdigest()
+        with self.conn:
+            if previous is None:
+                # A legacy index was already visible through the fallback read.
+                # Preserve that exact view before mutating it. This is not a new
+                # backdated source publication: retain its legacy knowledge basis
+                # and original version/ref shape rather than inventing old refs.
+                legacy_stamp = datetime.fromisoformat(current["fetched_at"].replace("Z", "+00:00"))
+                if legacy_stamp.tzinfo is None:
+                    legacy_stamp = legacy_stamp.replace(tzinfo=timezone.utc)
+                if legacy_stamp > known_at:
+                    raise ValueError("metadata revision cannot precede legacy knowledge")
+                legacy_metadata = {**current, "_preserved_legacy_version": version}
+                legacy_encoded = json.dumps(legacy_metadata, sort_keys=True, ensure_ascii=False)
+                legacy_id = hashlib.sha256(f"legacy-index|{document_id}|{legacy_encoded}".encode()).hexdigest()
+                self.conn.execute("INSERT OR IGNORE INTO data_document_publications VALUES (?,?,?,?,?)",
+                    (legacy_id, document_id, version["version_id"], legacy_stamp.isoformat(), legacy_encoded))
+            for field in sorted(allowed.intersection(metadata)):
+                self.conn.execute(f"UPDATE data_documents SET {field}=? WHERE document_id=?",
+                                  (metadata[field], document_id))
+            self.conn.execute("UPDATE data_documents SET fetched_at=? WHERE document_id=?",
+                              (stamp, document_id))
+            self.conn.execute("DELETE FROM data_document_entities WHERE document_id=?", (document_id,))
+            self.conn.executemany("INSERT INTO data_document_entities VALUES (?,?,?)", [
+                (document_id, entity, "primary" if entity == current["entity"] else "mentioned")
+                for entity in revised["related_entities"]])
+            self.conn.execute("INSERT OR IGNORE INTO data_document_publications VALUES (?,?,?,?,?)",
+                (publication_id, document_id, version["version_id"], stamp, encoded))
+        return publication_id
+
     def document_by_content_hash(self, content_hash: str, *, entity: str | None = None) -> dict | None:
-        sql="SELECT d.* FROM data_document_versions v JOIN data_documents d ON d.document_id=v.document_id WHERE v.content_hash=?"; args=[content_hash]
-        if entity: sql+=" AND d.entity=?"; args.append(entity.upper())
+        sql=("SELECT d.*,v.version_id,v.content_hash AS version_hash "
+             "FROM data_document_versions v JOIN data_documents d ON d.document_id=v.document_id "
+             "WHERE v.content_hash=? AND d.ok=1"); args=[content_hash]
+        if entity: sql+=(" AND (d.entity=? OR EXISTS (SELECT 1 FROM data_document_entities de "
+                         "WHERE de.document_id=d.document_id AND de.entity=?))"); args.extend([entity.upper(),entity.upper()])
         row=self.conn.execute(sql+" ORDER BY v.fetched_at DESC LIMIT 1",args).fetchone(); return dict(row) if row else None
 
     def document_by_story(self, title: str, published_at: str = "") -> dict | None:
@@ -382,7 +978,21 @@ class PlatformUnstructuredRepository:
         return None
 
     def link_document_entities(self, document_id: str, entities, *, relation: str = "mentioned") -> int:
-        before=self.conn.total_changes; self.conn.executemany("INSERT OR IGNORE INTO data_document_entities (document_id,entity,relation) VALUES (?,?,?)",[(document_id,str(x).upper(),relation) for x in entities if x]); self.conn.commit(); return self.conn.total_changes-before
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
+        # Accepts either a flat iterable of entity symbols or (entity, relation) pairs,
+        # so the document writer can mark the document's own symbol as `primary` in one
+        # call — exactly as Workflow memory did before the cutover.
+        pairs: list[tuple[str, str]] = []
+        for item in entities or ():
+            if isinstance(item, (tuple, list)) and len(item) == 2:
+                pairs.append((str(item[0]).upper(), str(item[1])))
+            elif item:
+                pairs.append((str(item).upper(), relation))
+        if not pairs:
+            return 0
+        before=self.conn.total_changes; self.conn.executemany("INSERT OR IGNORE INTO data_document_entities (document_id,entity,relation) VALUES (?,?,?)",[(document_id,entity,rel) for entity,rel in pairs]); self.conn.commit(); return self.conn.total_changes-before
 
     def save_document_alias(self, document_id: str, *, source: str, source_url: str="", external_id: str="", title: str="", published_at: str="", metadata: dict|None=None) -> str:
         identity=external_id or source_url or f"{title}|{published_at}"; alias_id=hashlib.sha1(f"{source}|{identity}".encode()).hexdigest()[:24]
@@ -400,7 +1010,11 @@ class PlatformUnstructuredRepository:
         stamp=(at or datetime.now().astimezone()).isoformat(timespec="seconds"); self._write("INSERT OR REPLACE INTO data_sources VALUES (?,?,?,?,?,?,?)",(source.id,kind,getattr(source,"label",""),getattr(source,"adapter",""),getattr(source,"cadence",""),getattr(source,"entity",""),stamp))
 
     def begin_ingestion(self, source_id: str, *, kind: str, at=None) -> str:
-        stamp=(at or datetime.now().astimezone()).isoformat(timespec="microseconds"); run_id=hashlib.sha1(f"{source_id}|{kind}|{stamp}".encode()).hexdigest()[:20]; self._write("INSERT INTO data_ingestion_runs (run_id,source_id,kind,started_at,status) VALUES (?,?,?,?,'running')",(run_id,source_id,kind,stamp)); return run_id
+        import uuid
+        stamp=(at or datetime.now().astimezone()).isoformat(timespec="microseconds")
+        # uuid4 keeps two runs started in the same microsecond from colliding.
+        run_id=hashlib.sha1(f"{source_id}|{kind}|{stamp}|{uuid.uuid4().hex}".encode()).hexdigest()[:20]
+        self._write("INSERT INTO data_ingestion_runs (run_id,source_id,kind,started_at,status) VALUES (?,?,?,?,'running')",(run_id,source_id,kind,stamp)); return run_id
 
     def finish_ingestion(self, run_id: str, *, status: str, discovered:int=0, accepted:int=0, quarantined:int=0, reason_codes=None, snapshot_updated_at:str="", snapshot_lag_hours=None, note:str="", at=None) -> None:
         stamp=(at or datetime.now().astimezone()).isoformat(timespec="seconds"); self._write("UPDATE data_ingestion_runs SET completed_at=?,status=?,discovered=?,accepted=?,quarantined=?,reason_codes=?,snapshot_updated_at=?,snapshot_lag_hours=?,note=? WHERE run_id=?",(stamp,status,discovered,accepted,quarantined,json.dumps(reason_codes or {},ensure_ascii=False,sort_keys=True),snapshot_updated_at,snapshot_lag_hours,note,run_id))
@@ -413,9 +1027,20 @@ class PlatformUnstructuredRepository:
 
 
 def get_platform_unstructured_repository() -> PlatformUnstructuredRepository:
+    """Open the released data repository read-only.
+
+    "Nothing ingested yet" is a valid state, not an error: a read path must not need
+    a writer to have run first. An absent database is therefore bootstrapped to the
+    empty schema before the read handle is opened, instead of failing with
+    "unable to open database file" — which is what the chain report hit on a fresh
+    checkout, where every read precedes the first write.
+    """
     from ...runtime import platform_data_db_path
 
-    return PlatformUnstructuredRepository(platform_data_db_path())
+    path = platform_data_db_path()
+    if not Path(path).exists():
+        PlatformUnstructuredRepository(path, writable=True).close()
+    return PlatformUnstructuredRepository(path)
 
 
 def get_platform_unstructured_store() -> PlatformUnstructuredRepository:

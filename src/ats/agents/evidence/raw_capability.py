@@ -9,7 +9,7 @@ from typing import Any
 CLAIM_ID = "ai_frontier_raw_capability"
 CLAIM_VERSION = "v1"
 CLAIM_TEXT = "前沿生成式 AI 的原始能力边界是否持续外扩，并出现过去模型无法跨越的新任务门槛？"
-CONSUMER = "evidence_observer"
+CONSUMER = "layer"
 
 
 def _fmt(value: Any, digits: int = 1) -> str:

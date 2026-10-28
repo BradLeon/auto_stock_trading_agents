@@ -22,6 +22,15 @@ def _as_list(v):
         return []
     if isinstance(v, str):
         return [v] if v.strip() else []
+    if isinstance(v, list) and len(v) == 1 and isinstance(v[0], str) and v[0].lstrip().startswith("["):
+        # a one-element list whose element is itself a JSON array (ASML Q3 call signals, 2026-10-19):
+        # unwrap it so the report prints eight signals, not one blob of brackets and quotes
+        try:
+            inner = json.loads(v[0])
+        except ValueError:
+            return v
+        if isinstance(inner, list) and all(isinstance(x, str) for x in inner):
+            return inner
     return v
 
 

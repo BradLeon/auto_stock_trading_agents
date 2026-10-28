@@ -12,9 +12,12 @@ BossChannel for a verdict, then resumes with Command(resume=...). Async channels
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
+import os
 from pathlib import Path
+import sys
 
 from langgraph.types import Command
 
@@ -22,6 +25,7 @@ from ..channel import get_channel
 from ..config import get_config
 from ..graph.checkpoint import get_checkpointer
 from ..schemas.channel import ApprovalRequest, Notification
+from ..workflow.schedule_runtime import scheduled_cli
 
 
 def run_decision_graph(state, *, channel="cli") -> dict:
@@ -71,6 +75,11 @@ def run_decision_graph(state, *, channel="cli") -> dict:
     return result
 
 
+from ..workflow.runtime_reads import cli_read_request, scoped_read  # noqa: E402
+
+@scoped_read("fundamental")
+@scheduled_cli(lambda args: "fundamental-event" if args["phase"] == "score" else "fundamental-routine",
+               kind="entity", argument="symbol")
 def run_pead(
     symbol: str,
     phase: str,
@@ -110,7 +119,8 @@ def run_pead(
     if phase == "score":
         if chief:
             run_chief(
-                dry_run=dry_run, channel=channel, auto=auto, offline=offline, source="pead-chief"
+                dry_run=dry_run, channel=channel, auto=auto, offline=offline, source="pead-chief",
+                fundamental_mode="event",
             )
         else:
             print("→ 建议已入档；运行 `ats chief run` 收口交易决策")
@@ -139,89 +149,1713 @@ def _pead_report(symbol: str, phase: str, result: dict) -> None:
         print(f"Signal chain: {len(result.get('signal_chain', []))} names")
     else:
         sc = result.get("scorecard")
-        recs = result.get("decisions", [])
+        view = result.get("event_view") or {}
         if sc:
             print(
                 f"PEAD SCORE COMPLETE — {symbol}  Scorecard {sc.total:+.2f} "
                 f"(门槛 {sc.threshold:+.1f}) — {sc.band}"
             )
-        print(f"决策情景: {result.get('decision_band', '—')} · 建议 {len(recs)} 条")
-        for d in recs:
-            # PEAD persists a recommendation, not an executable TradeDecision.
-            # Keep the CLI presentation on its public ``*_hint`` contract so a
-            # completed graph cannot be reported as a command failure.
-            notional = getattr(d, "notional_hint", None)
-            quantity = getattr(d, "qty_hint", None)
-            size = f"${notional:,.0f}" if notional else (f"{quantity:.0f}股" if quantity else "")
-            print(f"  • 建议 {d.action} {d.symbol} {size}")
+        # Phase D: the score branch publishes a non-executable event review —
+        # direction / magnitude / confidence — never recommendations.
+        from ..agents.fundamental.event import direction_word
+
+        direction = int(view.get("direction", 0))
+        line = f"事件评审（非可执行）: {direction_word(direction)}"
+        if view.get("magnitude") is not None:
+            line += f" · 幅度 {view.get('magnitude'):+.2f}"
+        if view.get("confidence") is not None:
+            line += f" · 信心 {view.get('confidence'):.2f}"
+        tri = result.get("tri_diffs") or {}
+        if tri.get("note"):
+            line += f" · {tri['note']}"
+        print(f"情景: {result.get('decision_band', '—')}")
+        print(line)
     print("=" * 70)
-
-
-def run_pead_monitor(symbol: str, *, use_llm: bool = True) -> dict:
-    """Run one continuous-monitor pass: ingest events, update the living dossier."""
-    from ..agents.pead import monitor
-    from ..config import load_pead_global
-
-    g = load_pead_global()
-    update = monitor.run(
-        symbol.upper(), use_llm=use_llm, lookback_days=g["monitor"]["lookback_days"]
-    )
-    print(
-        f"📡 monitor {symbol.upper()} — materiality {update.materiality:.2f} · "
-        f"{update.event_summary}"
-    )
-    if update.narrative_delta:
-        print(f"   Δ thesis: {update.narrative_delta}")
-    for ec in update.expectation_changes:
-        print(f"   Δ {ec.dim_key}: {ec.change}")
-
-    mon = g["monitor"]
-    if mon.get("push_context_updates") and update.materiality >= mon["materiality_threshold"]:
-        try:
-            get_channel("feishu").push(
-                Notification(
-                    kind="info",
-                    title=f"PEAD context update — {symbol.upper()} "
-                    f"(materiality {update.materiality:.2f})",
-                    body=update.event_summary
-                    + ("\nΔ " + update.narrative_delta if update.narrative_delta else ""),
-                )
-            )
-            print("   → pushed Feishu info card")
-        except Exception as exc:  # noqa: BLE001 - push is best-effort
-            print(f"   (Feishu push skipped: {exc})")
-    return {"update": update}
-
-
-def run_pead_watch(*, use_llm: bool = True) -> None:
-    from ..config import load_pead_global
-
-    for sym in load_pead_global().get("targets", []):
-        run_pead_monitor(sym, use_llm=use_llm)
 
 
 def events_list(*, days: int | None = None) -> int:
     from datetime import date, timedelta
+    from zoneinfo import ZoneInfo
 
     from ..config import load_events
 
+    from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    stored = ScheduleCalendarStore().latest_events(limit=10_000)
+    if stored:
+        end = today + timedelta(days=days) if days is not None else None
+        events = [e for e in stored if (days is None or
+                  today <= date.fromisoformat(e["event_date"]) <= end)]
+        for event in events:
+            print(f"  {event['event_date']} [{event['event_type']:13}] {event['label']} "
+                  f"v{event['event_version']} · {event['quality_status']} · "
+                  f"{event['time_precision']} {event['local_time']} {event['timezone']}")
+        if not events:
+            print("(持久化日历中没有匹配事件；可运行 `ats events refresh` 更新日历)")
+        return 0
+
+    # Compatibility fallback until the first persisted calendar refresh.
     events = load_events()
     if days is not None:
-        today = date.today()
         events = [e for e in events if today <= e.date <= today + timedelta(days=days)]
-        if not events:
-            print(f"(未来 {days} 天无日历事件 — 检查 config/events.yaml 是否需要补充下季度日期)")
-            return 0
     if not events:
-        print("(config/events.yaml 为空)")
+        print("(持久化日历为空，config/events.yaml 也没有匹配事件)")
         return 0
     for e in sorted(events, key=lambda e: e.date):
         print(f"  {e.date} [{e.kind:13}] {e.label} -> {', '.join(e.triggers)}")
-    if days is None and all(e.date < date.today() for e in events):
-        print("⚠️ 日历中全部事件已过期 — 请补充下季度 FOMC/BLS 日期")
     return 0
 
 
+def events_calendar_command(args, *, parser) -> int:
+    from ..data.products.calendar import ScheduleCalendarProduct
+    from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+    store = ScheduleCalendarStore()
+    if args.action == "refresh":
+        from ..data.calendar_refresh import enqueue_schedule_calendar_refresh
+        from ..data.persistent_queue import PersistentIngestionQueue
+
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        queue = PersistentIngestionQueue()
+        submitted = enqueue_schedule_calendar_refresh(
+            source_ids=args.source or None, trigger_kind="manual",
+            trigger_ref=f"events-refresh:{now.isoformat()}", now=now)
+        outcomes = []
+        for task in submitted:
+            result = queue.run_one(task_id=task["task_id"])
+            current = queue.get(task["task_id"]) or {}
+            outcomes.append({**task,
+                             "status": (result or {}).get("status") or
+                                       current.get("status", "queued"),
+                             "result": (result or {}).get("stdout", {})})
+        print(json.dumps({"sources": outcomes, "refresh_owner": "persistent_queue"},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0 if all(row["status"] in {"succeeded", "no_change", "partial"}
+                        for row in outcomes) else 1
+    if args.action == "status":
+        print(json.dumps(ScheduleCalendarProduct(store).snapshot(), ensure_ascii=False,
+                         indent=2, default=str))
+        return 0
+    if args.action == "candidates":
+        rows = store.candidates(event_id=args.event_id, review_status=args.status,
+                                limit=args.limit)
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "override":
+        if not args.event_id or not args.actor or not args.reason:
+            parser.error("events override requires --event-id, --actor and --reason")
+        if not args.date:
+            parser.error("events override currently requires --date")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        event = store.override_event(args.event_id,
+                                     patch={"event_date": args.date, "local_time": "",
+                                            "timezone": "", "utc_at": "",
+                                            "time_precision": "date", "market_session": "unknown"},
+                                     actor=args.actor, reason=args.reason, evidence=evidence)
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "cancel":
+        if not args.event_id or not args.actor or not args.reason:
+            parser.error("events cancel requires --event-id, --actor and --reason")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        event = store.override_event(args.event_id, patch={"status": "cancelled"},
+                                     actor=args.actor, reason=args.reason, evidence=evidence)
+        from ..workflow.ownership import reconcile_calendar_trigger_versions
+
+        event["trigger_reconciliation"] = reconcile_calendar_trigger_versions(
+            calendar_store=store)
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "withdraw":
+        if not args.event_id or not args.actor or not args.reason:
+            parser.error("events withdraw requires --event-id, --actor and --reason")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        event = store.withdraw_override(args.event_id, actor=args.actor,
+                                        reason=args.reason, evidence=evidence)
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
+    return events_list(days=args.days if args.action == "upcoming" else None)
+
+
+def _cutover_boundary_names() -> list[str]:
+    """The six boundary names, read from the module rather than duplicated here.
+
+    A CLI list that drifts from the code's list makes `--boundary` accept values the
+    plane rejects, which reads as a bug in the plane rather than in the CLI.
+    """
+    from ..workflow.cutover import SIX_BOUNDARIES
+
+    return list(SIX_BOUNDARIES)
+
+
+def _batch_class_names() -> list[str]:
+    """The five batch classes, read from the module rather than duplicated here."""
+    from ..workflow.batch_manifest import BATCH_CLASSES
+
+    return list(BATCH_CLASSES)
+
+
+def _require(value: str, flag: str, parser) -> str:
+    """Refuse a missing required flag instead of proceeding with an empty value.
+
+    Shared rather than redefined per command: four of them grew a private copy,
+    and a copy that forgets the check is a command that runs with `""`.
+    """
+    if not value:
+        parser.error(f"{flag} is required")
+    return value
+
+
+def batch_command(args, *, parser) -> int:
+    """Phase F 8.1–8.5: the per-batch manifest and its dry-run.
+
+    Separate from `cutover` because this one CANNOT change a route — that is its
+    defining property, and putting it next to the mutating commands would invite an
+    operator to assume otherwise. `dry-run` in particular is meant to be run in a
+    loop before deciding.
+    """
+    from ..workflow import batch_manifest as bm
+    from ..workflow.read_deployment import projection_check
+
+    manifest = args.db or None
+    cutover = args.cutover_db or None
+    action = args.action
+
+
+
+    def _reader(consumer_id, scope):
+        """Read live qualification for one consumer. Absent reader -> ineligible."""
+        from ..workflow.intake import _consumer_scope
+        from ..data.assurance import qualification as _qualification
+        from ..workflow.cutover_routing import _consumer_contract
+
+        try:
+            contract = _consumer_contract(consumer_id)
+        except Exception as exc:  # noqa: BLE001 - reported as ineligible
+            return {"status": "ineligible",
+                    "reasons": [f"consumer contract unreadable: {exc}"]}
+        return _qualification(
+            domain_id=contract["domain_id"], consumer_id=consumer_id,
+            contract_version=contract["contract_version"],
+            scope=scope or _consumer_scope(consumer_id, {
+                "id": consumer_id, "domain": contract["domain_id"],
+                "contract_version": contract["contract_version"],
+                "products": list(contract["scope"].get("products", ())),
+            }))
+
+    if action == "list":
+        batches = bm.list_batches(batch_class=args.batch_class or None,
+                                  path=manifest)
+        if args.json:
+            print(json.dumps([b.as_row() for b in batches], ensure_ascii=False,
+                             indent=2, default=str))
+        else:
+            print(bm.render_manifest(batches))
+        return 0
+
+    if action == "declare":
+        scope = {}
+        if args.scope_json:
+            try:
+                scope = json.loads(args.scope_json)
+            except json.JSONDecodeError as exc:
+                parser.error(f"--scope-json is not valid JSON: {exc}")
+        try:
+            record = bm.declare_batch(bm.CutoverBatch(
+                batch_id=_require(args.batch_id, "--batch-id", parser),
+                batch_class=_require(args.batch_class, "--batch-class", parser),
+                owner=args.owner, old_route=args.old_route, new_route=args.new_route,
+                scope=scope,
+                observation_window=args.observation_window,
+                success_criteria=args.success_criteria,
+                stop_conditions=args.stop_reason,
+                fallback_route=args.fallback_route,
+                fallback_proof=args.fallback_proof,
+                fallback_retired=args.fallback_retired,
+                fallback_available=args.fallback_available,
+                fallback_drill_ref=args.fallback_drill,
+                shadow_report_id=args.report_id,
+                direct_verification=args.direct_verification,
+                declared_by=args.actor), path=manifest)
+        except bm.BatchError as exc:
+            # A refusal the operator asked for, reported as one. Letting it raise
+            # would print a traceback for a plain "you left a field blank", which
+            # is how an operator learns to ignore the output.
+            print(json.dumps({"declared": False, "error": str(exc)},
+                             ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(record.as_row(), ensure_ascii=False, indent=2,
+                         default=str))
+        return 0
+
+    if action == "show":
+        batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
+                              path=manifest)
+        from ..workflow.shadow_reports import check_batch_report
+
+        result = bm.dry_run_batch(batch, qualification_reader=_reader,
+                                  projection_checker=projection_check,
+                                  report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
+                                  path=manifest, cutover_path=cutover)
+        print(json.dumps({"batch": batch.as_row(), "dry_run": result.as_row()},
+                         ensure_ascii=False, indent=2, default=str))
+        # Non-zero unless switchable, so a gate script cannot pass on a blocked batch.
+        return 0 if result.switchable else 1
+
+    if action == "dry-run":
+        from ..workflow.shadow_reports import check_batch_report
+
+        results = bm.dry_run(qualification_reader=_reader, path=manifest,
+                             projection_checker=projection_check,
+                             report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
+                             cutover_path=cutover)
+        if args.json:
+            print(json.dumps([r.as_row() for r in results], ensure_ascii=False,
+                             indent=2, default=str))
+        else:
+            print(bm.render_report(results,
+                                   batches=bm.list_batches(path=manifest)))
+        return 0 if all(r.switchable for r in results) else 1
+
+    if action == "drift":
+        batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
+                              path=manifest)
+        response = bm.respond_to_drift(
+            batch, qualification_status=args.qualification_status or "(unstated)",
+            serving_traffic=(True if args.serving == "yes"
+                             else False if args.serving == "no" else None))
+        print(json.dumps(response.as_row(), ensure_ascii=False, indent=2))
+        return 0 if response.action == bm.HOLD else 1
+
+    parser.error(f"unhandled batch action {action!r}")
+    return 2
+
+
+def intake_verification_command(args, *, parser) -> int:
+    """Phase F 7.1–7.7: isolated intake verification and per-consumer disposition.
+
+    Kept separate from `cutover` and `shadow` because this command's defining
+    property is that it does NOT change anything: it runs the ten roles' access
+    checks under the isolation environment and reports what it found. An operator
+    who sees it next to the mutating commands would reasonably assume some of its
+    actions write, so it carries its own name.
+    """
+    from ..workflow import consumer_disposition as disposition
+    from ..workflow import intake_verification as iv
+
+    action = args.action
+
+    if action in {"verify", "report"}:
+        consumers = ([args.consumer_id] if args.consumer_id
+                     else list(iv.TEN_CONSUMERS))
+        try:
+            records = []
+            for consumer_id in consumers:
+                if consumer_id not in iv.TEN_CONSUMERS:
+                    parser.error(f"unknown consumer {consumer_id!r}; expected one of "
+                                 + ", ".join(iv.TEN_CONSUMERS))
+                records.append(iv.scan_consumer_access(
+                    consumer_id,
+                    opinion_inputs=args.opinion_input or ()))
+        except iv.IntakeVerificationError as exc:
+            # A verification that could not run is not a clean result. Reported
+            # as JSON with a non-zero exit so a script cannot read "the check
+            # failed" as "nothing is wrong".
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+
+        if action == "verify":
+            payload = [record.as_row() for record in records]
+            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        else:
+            print(iv.render_report(records))
+        # Non-zero when anything is non-compliant, so a gate script fails on it.
+        return 0 if all(r.compliant for r in records) else 1
+
+    if action == "digest":
+        records = [iv.scan_consumer_access(c) for c in iv.TEN_CONSUMERS]
+        print(json.dumps({"digest": iv.verification_digest(records),
+                          "evidence_id": f"intake-verification:{iv.verification_digest(records)[:16]}",
+                          "consumers": len(records),
+                          "compliant": sum(1 for r in records if r.compliant)},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "not-tradable":
+        # The refusal, exposed as a command so the rule is checkable without
+        # writing a test: an isolated acceptance is not a trading authorisation.
+        try:
+            iv.assert_isolated_result_not_tradable(
+                iv.IsolationAttestation(run_id=args.run_id or "(none)",
+                                        isolation_root="", broker_write_prohibited=True,
+                                        surfaces_redirected=()),
+                consumer_id=args.consumer_id or "")
+        except iv.IntakeVerificationError as exc:
+            print(json.dumps({"tradable": False, "reason": str(exc)},
+                             ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps({"tradable": True}, ensure_ascii=False))
+        return 0
+
+    if action == "disposition":
+        try:
+            reports = disposition.consumer_dispositions(
+                stale_by_report_age=args.stale_input or (),
+                optional_inputs=args.optional_input or ())
+        except disposition.DispositionError as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+        print(disposition.render_dispositions(reports))
+        return 0
+
+    if action == "evidence-index":
+        # The index task 7.8's runbook chapter is checked against. Every evidence
+        # id the runbook cites must be derivable from here, or the runbook is
+        # citing something that does not exist.
+        records = [iv.scan_consumer_access(c) for c in iv.TEN_CONSUMERS]
+        digest = iv.verification_digest(records)
+        index = {record.consumer_id: {
+            "evidence_id": f"intake-verification:{digest[:16]}:{record.consumer_id}",
+            "entry_point": record.entry_point,
+            "reached_entry_point": record.reached_entry_point,
+            "compliant": record.compliant,
+            "violations": [v.as_row() for v in record.violations],
+            "gaps": list(record.gaps),
+        } for record in records}
+        print(json.dumps({"digest": digest, "consumers": index},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    parser.error(f"unhandled intake action {action!r}")
+    return 2
+
+
+def retirement_command(args, *, parser) -> int:
+    """Phase F 12.1–12.6: consumer zero, reconciliation, tombstone consistency.
+
+    Read-only by construction. It produces verdicts and, for entries whose
+    criteria now hold, the wording that would mark them retired — applying that
+    wording is a separate deliberate step, because a registry edit that quietly
+    promotes an entry on partial evidence is the failure 12.6 exists to prevent.
+    """
+    from ..workflow import intake_verification as iv
+    from ..workflow import legacy_retirement as retirement
+    from ..workflow import retirement_clearance as rc
+
+    action = args.action
+    registry = retirement.load_registry()
+    live_uses = tuple(x for x in (args.uses or "").split(",") if x.strip())
+
+    def _entries():
+        wanted = {i.strip() for i in (args.identifier or "").split(",") if i.strip()}
+        rows = []
+        for tomb in registry.tombstones():
+            if wanted and tomb.identifier not in wanted:
+                continue
+            rows.append(tomb)
+        return rows
+
+    if action == "zero":
+        rows = _entries()
+        if not rows:
+            print("no matching retirement entries")
+            return 1
+        verdicts = []
+        for tomb in rows:
+            verdicts += rc.verify_consumer_zero(
+                tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+        print(rc.render_report([], verdicts))
+        return 0 if all(not v.blocks_exit for v in verdicts) else 2
+
+    if action == "reconcile":
+        tomb = registry.tombstone(_require(args.identifier, "--identifier", parser))
+        if tomb is None:
+            print(f"no such retirement entry: {args.identifier!r}")
+            return 1
+        if not live_uses:
+            parser.error("--uses is required: reconciliation over an unnamed set of "
+                         "uses proves nothing")
+        uses = {u: {"agrees": False, "detail": "not supplied by this run"} for u in live_uses}
+        verdict = rc.reconcile(tomb.identifier, uses, required_uses=live_uses)
+        print(json.dumps(verdict.as_row(), ensure_ascii=False, indent=2))
+        return 0 if verdict.complete else 2
+
+    if action == "tombstone":
+        tomb = registry.tombstone(_require(args.identifier, "--identifier", parser))
+        if tomb is None:
+            print(f"no such retirement entry: {args.identifier!r}")
+            return 1
+        verdict = rc.check_tombstone_behaviour(
+            tomb.identifier, tomb.status,
+            readable_by=[c for c in (args.readable or "").split(",") if c.strip()])
+        print(json.dumps(verdict.as_row(), ensure_ascii=False, indent=2))
+        return 0 if verdict.verdict == rc.CONSISTENT else 2
+
+    if action == "fallback-precheck":
+        def _retired(identifier: str) -> bool:
+            # No `is_retired` helper on the registry; a tombstone's own status is
+            # the authority, read from the tombstone rather than inferred from
+            # whether an entry happens to exist.
+            tomb = registry.tombstone(identifier)
+            return tomb is not None and tomb.may_exit
+
+        ok, reason = rc.precheck_fallback_target(
+            _require(args.target, "--target", parser),
+            is_retired=_retired,
+            is_available=(None if not args.check_available
+                          else (lambda r: not _retired(r))))
+        print(json.dumps({"target": args.target, "ok": ok, "reason": reason},
+                         ensure_ascii=False, indent=2))
+        return 0 if ok else 2
+
+    if action == "decide":
+        rows = _entries()
+        if not rows:
+            print("no matching retirement entries")
+            return 1
+        decisions = []
+        g0 = rc.read_g0_gate(args.verification or None)
+        for tomb in rows:
+            zero = rc.verify_consumer_zero(
+                tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+            gate_open, gate_reason = rc.evaluate_gate(tomb.gate, g0=g0)
+            decisions.append(rc.decide_entry(
+                tomb.identifier, zero_verdicts=zero,
+                window=rc.verify_rollback_window(
+                    drilled=bool(args.drill_reference),
+                    drill_reference=args.drill_reference or ""),
+                tombstone=rc.check_tombstone_behaviour(tomb.identifier, tomb.status),
+                unmet_dependencies=registry.unmet_dependencies(tomb.identifier),
+                gate=tomb.gate, gate_open=gate_open, gate_reason=gate_reason))
+        print(rc.render_report(decisions))
+        return 0 if all(d.may_exit for d in decisions) else 2
+
+    if action == "gate":
+        # Read-only summary of the manual verification (G0) plus which registry entries each gate holds back.
+        g0 = rc.read_g0_gate(args.verification or None)
+        print(f"G0：{'已开' if g0.is_open else '未开'}——{g0.reason}")
+        print(f"  核验项 {g0.total}；" + "；".join(f"{k} {v}" for k, v in sorted(g0.counts.items())))
+        if g0.not_open:
+            print(f"  未开放的项：{', '.join(g0.not_open)}")
+        print(f"  G0 结论{'已签字' if g0.concluded else '未签字'}")
+        by_gate: dict[str, list[str]] = {}
+        for tomb in registry.tombstones():
+            if tomb.gate and not tomb.may_exit:
+                by_gate.setdefault(tomb.gate, []).append(tomb.identifier)
+        for gate_name, items in sorted(by_gate.items()):
+            opened, why = rc.evaluate_gate(gate_name, g0=g0)
+            print(f"\n门 {gate_name}：{'已开' if opened else '未开'}，挂在这道门上的未退役条目 {len(items)} 条"
+                  + ("" if opened else f"（{why}）"))
+            if args.show:
+                for name in items:
+                    print(f"  - {name}")
+        return 0 if g0.is_open else 2
+
+    parser.error(f"unknown action {action!r}")
+
+
+def live_command(args, *, parser) -> int:
+    """Phase F 11.1–11.3: the live-trading gate and route drills.
+
+    Separate from `read` and `dispatch` because those change routes and this one
+    is the only command whose subject is **real money**. The gate is consulted
+    here; the live switch itself is not performed here — keeping the two apart is
+    what means a test can exercise the gate fully without any path existing by
+    which it could move a real route.
+    """
+    from ..execution import live_authorisation as live
+    from ..execution import route_drill as drill
+
+    db = args.db or None
+    action = args.action
+
+    if action == "authorize":
+        auth = live.LiveAuthorisation(
+            reference=_require(args.reference, "--reference", parser),
+            issuer=args.issuer,
+            authorised_by=_require(args.authorised_by, "--authorised-by", parser),
+            issued_by=_require(args.issued_by, "--issued-by", parser),
+            scope=tuple(s.strip() for s in (args.scope or "").split(",") if s.strip()),
+            environment=_require(args.environment, "--environment", parser),
+            account=_require(args.account, "--account", parser),
+            valid_until=_require(args.valid_until, "--valid-until", parser),
+            note=args.note or "")
+        try:
+            live.record_authorisation(auth, actor=args.actor, path=db)
+        except live.LiveAuthorisationError as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "show-auth":
+        auth = live.read_authorisation(args.reference or "", path=db)
+        if auth is None:
+            print(f"no such live authorisation: {args.reference!r}")
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "gate":
+        decision = live.evaluate_live_switch(
+            authorisation_ref=args.reference or "",
+            consumer_id=args.consumer_id or "",
+            environment=args.environment or "",
+            account=args.account or "", path=db)
+        print(json.dumps(decision.as_row(), ensure_ascii=False, indent=2))
+        return 0 if decision.opened else 2
+
+    if action in {"drill", "rollback-drill"}:
+        if action == "drill":
+            result = drill.run_switch_drill(
+                drill_id=_require(args.drill_id, "--drill-id", parser),
+                actor=args.actor, environment=args.environment or "paper",
+                account=args.account or "", base_path=args.base,
+                live_authorisation_ref=args.reference or "")
+        else:
+            result = drill.run_rollback_drill(
+                drill_id=_require(args.drill_id, "--drill-id", parser),
+                actor=args.actor, environment=args.environment or "paper",
+                account=args.account or "", base_path=args.base,
+                fallback_available=not args.fallback_unavailable,
+                live_authorisation_ref=args.reference or "")
+        print(drill.render_drill_report(result))
+        return 0 if result.outcome == "completed" else 2
+
+    if action == "drill-history":
+        rows = drill.drill_history(args.drill_id or "",
+                                   path=drill.drill_path(args.base,
+                                                         args.drill_id or ""))
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    parser.error(f"unknown action {action!r}")
+
+
+def schedule_cutover_command(args, *, parser) -> int:
+    """Phase F 10.1–10.4: schedule ownership and rollback.
+
+    Reads group 4's real claim ledger rather than reimplementing the identity
+    mapping — `trigger_key` is the whole point of that module, and a second
+    derivation would be a second opinion about which triggers are the same one.
+    """
+    from ..workflow import dispatch_claims as claims
+    from ..workflow import schedule_cutover as sc
+
+    if args.action.startswith("runtime-"):
+        from ..workflow import schedule_runtime as runtime
+        from datetime import datetime
+
+        if getattr(args, "isolation_root", ""):
+            from ..workflow.isolation import isolated_run
+            import copy
+
+            child = copy.copy(args)
+            child.isolation_root = ""
+            with isolated_run("schedule-control-cli", root=args.isolation_root):
+                return schedule_cutover_command(child, parser=parser)
+        action = args.action.removeprefix("runtime-")
+        try:
+            scope = json.loads(args.business_scope) if getattr(args, "business_scope", "") else None
+            if action == "state":
+                result = runtime.snapshot()
+            elif action == "reload":
+                result = runtime.reload_authority()
+            elif action == "prepare":
+                from ..workflow.isolation import verified_isolation_root
+                if verified_isolation_root() is None:
+                    raise runtime.ScheduleAuthorityError("scope preparation requires isolated drill")
+                result = runtime.check_owner(args.workflow, scope, args.owner)
+            elif action == "freeze":
+                result = {"token": runtime.freeze(args.workflow, scope, actor=args.actor, reason=args.reason)}
+            elif action == "inventory":
+                result = runtime.frozen_inventory(args.token)
+            elif action == "handover":
+                runtime.handover(args.token, to_owner=args.owner,
+                    dispositions=json.loads(args.dispositions), actor=args.actor, reason=args.reason)
+                result = runtime.snapshot()
+            elif action == "cancel-freeze":
+                runtime.cancel_freeze(args.token, actor=args.actor, reason=args.reason)
+                result = runtime.snapshot()
+            else:
+                expected = runtime.expected_triggers(datetime.fromisoformat(args.from_time), datetime.fromisoformat(args.to_time))
+                result = expected if action == "expected" else runtime.compare_triggers(expected)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except (runtime.ScheduleAuthorityError, ValueError) as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+            return 2
+
+    if args.action in DISPATCH_OWNER_MOVED:
+        # A prompt stub, not a silent alias: the old names spoke of "switching owners", the workflow is now paused/resumed.
+        print(f"❌ `ats dispatch {args.action}` 已改名：{DISPATCH_OWNER_MOVED[args.action]}")
+        return 2
+
+    if args.action in {"pause", "resume", "owner-log"}:
+        from ..workflow import schedule_runtime as runtime
+
+        try:
+            if args.action == "owner-log":
+                result = runtime.owner_log(args.workflow or None)
+            else:
+                # The stored owner value for a paused workflow is still "legacy" (a deliberate, recorded shortcut:
+                # renaming it touches the stored rows and the dispatcher-runtime spec). Only the user-facing words changed.
+                result = runtime.owner_switch(
+                    args.workflow, to_owner="dispatcher" if args.action == "resume" else "legacy",
+                    actor=args.actor, reason=args.reason, approval=args.approval,
+                    void_unfinished=args.void_unfinished)
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return 0
+        except runtime.ScheduleAuthorityError as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+            return 2
+
+    state_path = args.state or None
+    switch_db = args.switch_db or None
+    action = args.action
+
+    def _ledger() -> list[dict]:
+        return list(claims.claims(path=state_path))
+
+    def _expected() -> list[str]:
+        """The triggers that *should* be in the ledger.
+
+        Group 4's 4.6 exports an expected-trigger set as the comparison baseline
+        for exactly this reason: deriving the set from the ledger alone would make
+        an empty ledger look clean. Declared here as the legacy job set, because
+        the ledger is keyed by hashed trigger and the job list is the readable
+        source of "which triggers exist at all".
+        """
+        return sorted(claims.LEGACY_JOBS)
+
+    def _triggers():
+        if args.trigger:
+            return [args.trigger]
+        return _expected()
+
+    # One snapshot for the whole sweep. Reading the ledger per trigger would let
+    # a claim taken mid-sweep make the same sweep report one trigger as sole and
+    # another as conflicted, which is not a finding about anything.
+    snapshot = {str(row["trigger_key"]): [dict(row)]
+                for row in _ledger()} if not args.trigger else {}
+
+    def _holders_reader():
+        def reader(trigger):
+            if trigger in snapshot:
+                return snapshot[trigger]
+            if not args.trigger:
+                # The ledger has never heard of this key. Raising KeyError is the
+                # module's "not verified" signal — returning [] here would read
+                # as "known and unclaimed", which is a different and wrong claim.
+                raise KeyError(trigger)
+            return [dict(row) for row in _ledger()
+                    if str(row["trigger_key"]) == trigger]
+        return reader
+
+    def _owner() -> str:
+        state = claims.read_owner(path=state_path)
+        return state.owner if state else ""
+
+    ownership = sc.assert_sole_ownership(
+        _triggers(), holders_reader=_holders_reader(), owner_reader=_owner)
+
+    if action == "ownership":
+        print(ownership.summary())
+        return 0 if ownership.clean else 2
+
+    if action == "ledger":
+        print(json.dumps(_ledger(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "executed":
+        for trigger, refs in sorted(sc.executed_triggers(switch_db).items()):
+            print(f"{trigger:44} {', '.join(refs)}")
+        return 0
+
+    if action == "record-execution":
+        if not args.trigger or not args.execution_ref:
+            parser.error("--trigger and --execution-ref are both required")
+        sc.record_execution(args.trigger, execution_ref=args.execution_ref,
+                            actor=args.actor, path=switch_db)
+        print(f"recorded {args.trigger} → {args.execution_ref}")
+        return 0
+
+    if action == "rollback-plan":
+        plan = sc.plan_rollback(_triggers(),
+                                executed=sc.executed_triggers(switch_db))
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0 if plan["dedup_sound"] else 2
+
+    if action == "rollback-history":
+        rows = sc.rollback_history(path=switch_db)
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    parser.error(f"unknown action {action!r}")
+
+
+def boundary_drill_command(args, *, parser) -> int:
+    """Phase F 13.1–13.5: independent boundary rollbacks and shadow acceptance.
+
+    Read-only with respect to production by construction: every drill derives its
+    own store from the surface it would move, and the trade drill consults the
+    live gate rather than opening it. There is no `--apply` here on purpose —
+    a rollback drill that could be pointed at production is a rollback that
+    eventually will be.
+    """
+    from ..workflow import boundary_drill as bd
+
+    action = args.action
+    actor = args.actor or ""
+
+    def _drill_id(suffix: str) -> str:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        return args.drill_id or f"{suffix}-{stamp}"
+
+    def _counters(raw: str):
+        """Record counts for 13.1's preservation check.
+
+        Read from the REAL stores rather than taken from the operator, because a
+        caller-supplied count is a claim about the evidence rather than a reading
+        of it — and the whole check is whether the evidence survived.
+        """
+        if raw:
+            def declared() -> dict[str, int]:
+                return {str(k): int(v) for k, v in json.loads(raw).items()}
+            return declared
+
+        def read_real() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            try:
+                from ..workflow import shadow_ledger as sl
+
+                counts["shadow_intents"] = len(sl.intents())
+                counts["shadow_submit_attempts"] = len(sl.submit_attempts())
+            except Exception:  # noqa: BLE001 - reported as unread, not as zero
+                counts["shadow_intents"] = -1
+            try:
+                from ..workflow import shadow_reports as sr
+
+                counts["shadow_reports"] = len(sr.events(
+                    args.report_id) if args.report_id else [])
+            except Exception:  # noqa: BLE001
+                counts["shadow_reports"] = -1
+            try:
+                from ..memory import get_store
+
+                store = get_store()
+                counts["approvals"] = int(store.conn.execute(
+                    "SELECT COUNT(*) FROM boss_approvals").fetchone()[0])
+                counts["revisions"] = int(store.conn.execute(
+                    "SELECT COUNT(*) FROM decision_revisions").fetchone()[0])
+            except Exception:  # noqa: BLE001
+                counts["approvals"] = -1
+                counts["revisions"] = -1
+            return counts
+        return read_real
+
+    def _read_rollback(drill_id: str) -> bd.BoundaryDrillResult:
+        from ..workflow import batch_manifest as bm
+
+        if not args.batch_id:
+            parser.error("--batch-id is required: a rollback drill with no batch "
+                         "has nothing to roll back")
+        # The manifest and the control plane are DIFFERENT files. Reading the
+        # batch out of the control plane reports every batch as absent and blocks
+        # the drill for a reason that lives in the wrong database.
+        batch = bm.read_batch(args.batch_id, path=args.batch_db or None)
+        return bd.run_read_boundary_drill(
+            drill_id=drill_id, batch=batch,
+            fallback_retired=bool(args.fallback_retired),
+            fallback_available=not args.fallback_unavailable,
+            evidence_counters=_counters(args.counts_json), actor=actor,
+            production_cutover_db=args.cutover_db or None)
+
+    def _schedule_rollback(drill_id: str) -> bd.BoundaryDrillResult:
+        from ..workflow import read_cutover as rc
+
+        triggers = list(args.trigger)
+        if not triggers:
+            from ..workflow import dispatch_claims as claims
+
+            triggers = sorted(claims.LEGACY_JOBS)
+        try:
+            executed = {str(k): [str(x) for x in v]
+                        for k, v in json.loads(args.executed_json or "{}").items()}
+        except ValueError as exc:
+            parser.error(f"--executed-json is not valid JSON: {exc}")
+            executed = {}
+        auth = None
+        if args.authorisation:
+            # Deployment authorisations live in the batch/authorisation file, not
+            # the switch-record file. Reading them from the switch DB reports every
+            # reference as absent, which would refuse the rollback for a reason
+            # that lives in the wrong database.
+            auth = rc.read_authorisation(
+                args.authorisation, path=args.batch_db or None)
+            if auth is None:
+                print(f"no such deployment authorisation: {args.authorisation!r}")
+                return 1
+        return bd.run_schedule_boundary_drill(
+            drill_id=drill_id, triggers=triggers, executed=executed,
+            authorisation=auth, unconfirmed=list(args.unconfirmed), actor=actor,
+            production_dispatch_db=args.dispatch_db or None,
+            production_switch_db=args.switch_db or None)
+
+    def _trade_rollback(drill_id: str) -> bd.BoundaryDrillResult:
+        return bd.run_trade_boundary_drill(
+            drill_id=drill_id, environment=args.environment or "paper",
+            account=args.account or "",
+            fallback_available=not args.fallback_unavailable,
+            live_authorisation_ref=args.live_reference or "", actor=actor,
+            production_route_db=args.route_db or None)
+
+    def _traceability():
+        from ..decision.repository import DecisionAuditRepository
+        from ..memory import get_store
+        from ..workflow import cutover_acceptance as ca
+        from ..workflow import shadow_ledger as sl
+
+        try:
+            intents = sl.intents(run_id=args.run_id or None,
+                                 cycle_id=args.cycle_id or None,
+                                 path=args.order_db or None)
+        except Exception as exc:  # noqa: BLE001
+            print(f"the shadow order ledger could not be read: {exc}")
+            return 1
+        repo = DecisionAuditRepository(get_store())
+        report = ca.verify_traceability(
+            chain_reader=repo.read_chain, intents=intents,
+            scope=args.cycle_id or args.run_id or "")
+        return report
+
+    def _unapproved():
+        from ..workflow import cutover_acceptance as ca
+        from ..workflow import shadow_ledger as sl
+        from ..execution import broker_write_guard as guard
+
+        order_db = args.order_db or None
+        try:
+            attempts = sl.submit_attempts(path=order_db)
+        except Exception as exc:  # noqa: BLE001
+            print(f"the shadow submit-attempt ledger could not be read: {exc}")
+            return None, 1
+        real_ledger = None
+        try:
+            from ..memory import get_store
+
+            real_ledger = get_store()
+        except Exception:  # noqa: BLE001 - absence is a stop condition, not a pass
+            real_ledger = None
+        return ca.verify_no_unapproved_orders(
+            run_id=args.run_id or "", attempts=attempts,
+            refusals=guard.refusal_rows(),
+            capability_checks=[], simulated_receipts=[], real_ledger=real_ledger), 0
+
+    if action == "history":
+        if not args.drill_id and not args.cutover_db:
+            parser.error("--cutover-db or --drill-id is required so the history "
+                         "store is named explicitly")
+        path = (bd.drill_db(args.cutover_db, args.drill_id)
+                if args.cutover_db else None)
+        rows = bd.drill_history(drill_id=args.drill_id or "", path=path)
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action in {"read-rollback", "schedule-rollback", "trade-rollback"}:
+        suffix = {"read-rollback": "read", "schedule-rollback": "sched",
+                  "trade-rollback": "trade"}[action]
+        result = {"read-rollback": _read_rollback,
+                  "schedule-rollback": _schedule_rollback,
+                  "trade-rollback": _trade_rollback}[action](_drill_id(suffix))
+        print(bd.render_drill_report([result]))
+        return 0 if result.outcome in {bd.COMPLETED, bd.HELD, bd.REFUSED} else 2
+
+    if action == "all-rollbacks":
+        results = [_read_rollback(_drill_id("read")),
+                   _schedule_rollback(_drill_id("sched")),
+                   _trade_rollback(_drill_id("trade"))]
+        print(bd.render_drill_report(results))
+        return 0 if all(r.outcome != bd.FAILED for r in results) else 2
+
+    if action == "traceability":
+        report = _traceability()
+        if args.json:
+            print(json.dumps(report.as_row(), ensure_ascii=False, indent=2,
+                             default=str))
+        else:
+            from ..workflow import cutover_acceptance as ca
+
+            print(ca.render_traceability_report(report))
+        return 0 if report.compliant_switch else 2
+
+    if action == "unapproved-orders":
+        report, code = _unapproved()
+        if report is None:
+            return code
+        if args.json:
+            print(json.dumps(report.as_row(), ensure_ascii=False, indent=2,
+                             default=str))
+        else:
+            from ..workflow import cutover_acceptance as ca
+
+            print(ca.render_unapproved_report(report))
+        return 0 if report.clean else 2
+
+    if action == "acceptance":
+        trace = _traceability()
+        report, code = _unapproved()
+        if report is None:
+            return code
+        from ..workflow import cutover_acceptance as ca
+
+        if args.json:
+            print(json.dumps({"traceability": trace.as_row(),
+                              "unapproved_orders": report.as_row()},
+                             ensure_ascii=False, indent=2, default=str))
+        else:
+            print(ca.render_acceptance_report(trace, report))
+        return 0 if (trace.compliant_switch and report.clean) else 2
+
+    parser.error(f"unknown action {action!r}")
+
+
+def read_cutover_command(args, *, parser) -> int:
+    """Phase F 9.1–9.5: read-path batch switching.
+
+    Separate from `batch` because this one CAN move a route. That is why every
+    action here requires an explicit `--authorisation` reference, and why the
+    deciding mode (`switch` without `--apply`) is the default: 9.1's runbook has
+    an operator re-run this in a loop before deciding.
+    """
+    from ..workflow import read_cutover as rc
+
+    manifest = args.db or None
+    cutover = args.cutover_db or None
+    action = args.action
+
+    def _reader(consumer_id, scope):
+        from ..data.assurance import qualification
+        from ..workflow.cutover_routing import _consumer_contract
+        contract = _consumer_contract(consumer_id)
+        return qualification(domain_id=contract["domain_id"], consumer_id=consumer_id,
+                             contract_version=contract["contract_version"], scope=scope)
+
+    from ..workflow.read_deployment import authorize, projection_check
+
+    def _report_ok(batch):
+        """Delegates to the shadow report's own applicability check (3.6).
+
+        Returns the `(usable, problems)` shape the executor expects rather than
+        re-deriving any of the four checks here — a second implementation would
+        eventually disagree with the one 3.6 already tests.
+        """
+        from ..workflow import shadow_reports as reports
+
+        return reports.check_batch_report(batch, path=args.report_db or None)
+
+    if action == "authorize":
+        auth = rc.DeploymentAuthorization(
+            reference=_require(args.authorisation, "--authorisation", parser),
+            authorised_by=_require(args.authorised_by, "--authorised-by", parser),
+            issued_by=_require(args.issued_by, "--issued-by", parser),
+            scope=tuple(s.strip() for s in (args.scope or "").split(",")
+                        if s.strip()),
+            valid_until=_require(args.valid_until, "--valid-until", parser),
+            note=args.note or "")
+        try:
+            previous = rc.read_authorisation(auth.reference, path=manifest)
+            if previous is not None and previous != auth:
+                raise rc.DeploymentAuthorizationError('deployment authorisation reference is immutable')
+            if args.batch_id:
+                batch = bm_read(args.batch_id, parser, manifest)
+                if cutover and Path(cutover).resolve() != Path(rc.plane.default_cutover_db_path()).resolve():
+                    raise rc.DeploymentAuthorizationError("authorize must use active runtime authority")
+                authorize(batch, auth, actor=args.actor or auth.issued_by)
+            rc.write_authorisation(auth, path=manifest, actor=args.actor)
+        except (rc.DeploymentAuthorizationError, rc.plane.CutoverError, KeyError, ValueError) as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "show-auth":
+        auth = rc.read_authorisation(args.authorisation or "", path=manifest)
+        if auth is None:
+            print(f"no such authorisation: {args.authorisation!r}")
+            return 1
+        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "plan":
+        auth = rc.read_authorisation(args.authorisation or "", path=manifest)
+        if auth is None and args.authorisation:
+            print(f"no such authorisation: {args.authorisation!r}. Record it with "
+                  "`read authorize` first — an authorisation passed only on the "
+                  "command line would not be readable by whoever asks who allowed it")
+            return 1
+        if not args.batch_id:
+            results = [rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
+                authorisation=auth, actor=args.actor, path=manifest,
+                cutover_path=cutover) for batch in _all_batches(manifest)]
+        else:
+            batch = bm_read(args.batch_id, parser, manifest)
+            results = [rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
+                authorisation=auth, actor=args.actor, path=manifest,
+                cutover_path=cutover)]
+        print(rc.render_report(results))
+        return 0 if results and all(r.outcome in {rc.BATCH_SWITCHED, rc.BATCH_NOOP} for r in results) else 1
+
+    if action == "switch":
+        if not args.authorisation:
+            # Still runs the executor, so the refusal is recorded. Shortcutting
+            # here would leave nothing in the history, and "we looked and could
+            # not" is the reading an operator needs when the authorisation later
+            # arrives (8.2 makes the same promise for the dry-run).
+            batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
+                            manifest)
+            result = rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
+                authorisation=None, actor=args.actor or "cli", path=manifest,
+                cutover_path=cutover, apply=args.apply)
+            print(rc.render_report([result]))
+            print("refusing: --authorisation is required. Passing the gates is not "
+                  "permission to cut over; the authorisation is a separate artifact "
+                  "on purpose")
+            return 1
+        auth = rc.read_authorisation(args.authorisation, path=manifest)
+        if auth is None:
+            # Same reasoning: an unrecorded reference is still an attempt worth
+            # recording, and it is the attempt most likely to be queried later.
+            batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
+                            manifest)
+            result = rc.execute_batch(
+                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
+                authorisation=None, actor=args.actor or "cli", path=manifest,
+                cutover_path=cutover, apply=args.apply)
+            print(rc.render_report([result]))
+            print(f"refusing: no recorded authorisation {args.authorisation!r}. "
+                  "An authorisation that cannot be read back cannot be audited")
+            return 1
+        batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser, manifest)
+        result = rc.execute_batch(
+            batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
+            authorisation=auth, actor=args.actor or "cli", path=manifest,
+            cutover_path=cutover, apply=args.apply)
+        print(rc.render_report([result]))
+        # Exit non-zero unless everything switched: a partial switch is not the
+        # requested outcome and must not read as success in a script.
+        return 0 if result.outcome in {rc.BATCH_SWITCHED, rc.BATCH_NOOP} else 2
+
+    if action == "history":
+        rows = rc.run_history(args.batch_id or "", path=manifest)
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        else:
+            for row in rows:
+                print(f"{row['recorded_at']}  {row['batch_id']:24} "
+                      f"{row['outcome']:22} changed={row['changed']} "
+                      f"actor={row['actor'] or '-'}")
+        return 0
+
+    parser.error(f"unknown action {action!r}")
+
+
+def _all_batches(manifest):
+    from ..workflow import batch_manifest as bm
+
+    return list(bm.list_batches(path=manifest))
+
+
+def bm_read(batch_id, parser, manifest):
+    from ..workflow import batch_manifest as bm
+
+    try:
+        return bm.read_batch(batch_id, path=manifest)
+    except bm.BatchError as exc:
+        parser.error(str(exc))
+
+
+# Research analysts are run by the Dispatcher (`ats workflow run`); the commands that used to run them by hand are retired.
+# They answer with the replacement instead of silently doing nothing. The functions behind them (run_macro_review, ...)
+# stay for now: `boundary_evidence` and the Phase F acceptance tests name them as business entries (R5).
+_WORKFLOW_RUN = "ats workflow run --task {task} --scope-kind {kind} --scope-id {id}"
+RESEARCH_MANUAL_MOVED = {
+    ("macro", "review"): _WORKFLOW_RUN.format(task="macro-review", kind="portfolio", id="portfolio"),
+    ("sector", "review"): _WORKFLOW_RUN.format(task="sector-review", kind="sector", id="<行业，如 ai_hardware>")
+                          + "（会先补跑层级评审）",
+    ("sector", "layer"): _WORKFLOW_RUN.format(task="layer-review", kind="layer", id="<层键>")
+                         + " --inputs-json '{\"layer-review\": {\"sector\": \"<行业>\"}}'",
+    ("technical", "review"): _WORKFLOW_RUN.format(task="technical-review", kind="portfolio", id="portfolio"),
+    ("analyst", "information"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+    ("analyst", "fundamental"): _WORKFLOW_RUN.format(task="fundamental-routine", kind="entity", id="<代码>")
+                                + "（财报后的事件评审由日历在材料准入后唤醒，补跑用 ats workflow retry）",
+    ("pead", "prep"): _WORKFLOW_RUN.format(task="fundamental-routine", kind="entity", id="<代码>")
+                      + " --inputs-json '{\"fundamental-routine\": {\"refresh_baseline\": true}}'（财报前建基线）",
+    ("pead", "score"): "财报后的事件评审由日历在财报发布且材料准入后自动唤醒；补跑用 ats workflow retry --trigger-key <键>",
+    ("pead", "monitor"): _WORKFLOW_RUN.format(task="information-brief", kind="entity", id="<代码>"),
+    ("pead", "watch"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+    ("pead", "research"): _WORKFLOW_RUN.format(task="information-brief", kind="portfolio", id="pead-targets"),
+    # Evidence collection belongs to the data refresh controller, not to a command someone has to remember to run.
+    ("evidence", "observe"): "ats data evidence-observe --entity <代码>（数据刷新任务 chain_evidence_daily 每天跑）",
+    ("evidence", "collect"): "第三方序列由数据刷新任务采集（chain_l1_governed_evidence_daily、chain_regional_*）；"
+                             "手动补采用 ats data chain-source-collect --source <来源 id>（须在受管队列内）",
+    ("evidence", "articles"): "ats data article-ingest --source <来源 id>",
+    ("sector", "crosssection"): "截面已并入行业评审：用 " + _WORKFLOW_RUN.format(task="sector-review", kind="sector",
+                                id="<行业>") + "，结果在层级报告第三节",
+}
+
+
+DISPATCH_OWNER_MOVED = {
+    "owner-rollback": "停用一个工作流用 `ats dispatch pause --workflow <id> --actor <谁> --reason <为什么>`（不需要批准）。",
+    "owner-switch": "恢复一个工作流用 `ats dispatch resume --workflow <id> --actor <谁> --approval <批准原文> --reason <为什么>`。",
+}
+
+
+CONSUMER_CUTOVER_MOVED = {
+    "status": "研究分析师的读路由已固定为 target，不再提供状态查看；数据产品健康用 `ats data health --consumer <id>`。",
+    "health": "改用 `ats data health --consumer <id>`（不带 --consumer 时是数据平台的整体健康）。",
+    "log": "改用 `ats data health-log [--consumer <id>]`。",
+}
+
+
+def consumer_cutover_command(args, *, parser) -> int:
+    """Research consumers' read routes and data-product health. Only `restore` changes a route, and only
+    toward the new one."""
+    from ..workflow import consumer_cutover as cc
+
+    db = args.db or None
+    action = args.action
+    if action in CONSUMER_CUTOVER_MOVED:
+        # A prompt stub, not a silent alias: the command named a migration step, the replacement is health.
+        print(f"❌ `ats consumer-cutover {action}` 已退役：{CONSUMER_CUTOVER_MOVED[action]}")
+        return 2
+    try:
+        if not args.consumer_id:
+            parser.error(f"consumer-cutover {action} requires --consumer-id")
+        result = cc.restore(args.consumer_id, actor=args.actor, approval=args.approval,
+                            reason=args.reason, path=db)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+    except (cc.ConsumerCutoverError, ValueError) as exc:
+        print(f"❌ {exc}")
+        return 1
+
+
+def cutover_command(args, *, parser) -> int:
+    """Phase F cutover control plane: inspect, pre-check, register, verify.
+
+    Every action is read-only except `set-route`, `activate` and `release`, all of
+    which require `--reason`. The pre-flight changes nothing, so it can be run
+    repeatedly before deciding.
+    """
+    from ..workflow import cutover as plane
+    from ..workflow import cutover_routing as routing
+    from ..workflow import cutover_wiring as wiring
+    from ..workflow import shadow_reports as reports
+
+    db = args.db or None
+    action = args.action
+
+    def _need(value: str, flag: str) -> str:
+        if not value:
+            parser.error(f"cutover {action} requires {flag}")
+        return value
+
+    def _scope() -> dict:
+        try:
+            parsed = json.loads(args.scope_json)
+        except json.JSONDecodeError as exc:
+            parser.error(f"--scope-json is not valid JSON: {exc}")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _flag(name: str):
+        value = getattr(args, name, "")
+        if value == "":
+            return None
+        return value == "yes"
+
+    if args.bootstrap and action == "state":
+        wiring.bootstrap_wired(actor=args.actor, path=db)
+
+    if action == "state":
+        from ..workflow.scoped_routes import route_summary
+
+        scoped = route_summary(path=db)
+        print(json.dumps({b: {**s.as_row(), "scoped_routes": scoped[b]} for b, s in
+                          plane.all_boundaries(db).items()},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "wiring":
+        print(json.dumps({b: [w.as_row() for w in plane.wiring_of(b, db)]
+                          for b in plane.SIX_BOUNDARIES},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "history":
+        print(json.dumps(plane.boundary_history(
+            _need(args.boundary, "--boundary"), db),
+            ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "preflight":
+        request = None
+        if args.boundary and args.consumer_id:
+            request = plane.ActivationRequest(
+                boundary=args.boundary, scope=_scope(),
+                consumer_id=args.consumer_id, report_id=args.report_id,
+                actor=args.actor)
+        result = plane.preflight(boundary=args.boundary or None, request=request,
+                                 path=db, report_checker=lambda b: reports.check_batch_report(
+                                     b, path=args.report_db or None))
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2,
+                         default=str))
+        return 0 if result.ok else 1
+
+    if action == "set-route":
+        boundary = _need(args.boundary, "--boundary")
+        route = _need(args.route, "--route")
+        reason = _need(args.reason, "--reason")
+        try:
+            if route == plane.ROUTE_TARGET:
+                request = plane.ActivationRequest(boundary=boundary, scope=_scope(),
+                                                  consumer_id=args.consumer_id or "",
+                                                  report_id=args.report_id, actor=args.actor)
+                from ..workflow.shadow_reports import require_batch_report, activation_batch
+
+                ok, problems = require_batch_report(activation_batch(request),
+                    lambda b: reports.check_batch_report(b, path=args.report_db or None))
+                if not ok:
+                    raise plane.CutoverError("; ".join(problems))
+                plane.assert_wired(boundary, db)
+        except plane.CutoverError as exc:
+            print(json.dumps({"changed": False, "problem": str(exc)}, ensure_ascii=False))
+            return 1
+        state = plane.set_route(boundary, route,
+                                actor=args.actor,
+                                reason=reason, path=db)
+        # Compatibility is checked AFTER the move so the refusal names both sides.
+        # Reported as JSON plus a non-zero exit rather than a traceback: a runbook
+        # script has to be able to read WHICH combination conflicted.
+        try:
+            plane.assert_compatible(path=db)
+        except plane.CutoverError as exc:
+            print(json.dumps({"changed": True, "compatible": False,
+                              "problem": str(exc)},
+                             ensure_ascii=False, indent=2, default=str))
+            return 1
+        print(json.dumps(state.as_row(), ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "activate":
+        boundary = _need(args.boundary, "--boundary")
+        request = plane.ActivationRequest(
+            boundary=boundary, scope=_scope(),
+            consumer_id=_need(args.consumer_id, "--consumer-id"),
+            report_id=args.report_id, actor=_need(args.actor, "--actor"))
+        result = plane.preflight(boundary=boundary, request=request, path=db,
+                                 report_checker=lambda b: reports.check_batch_report(b, path=args.report_db or None))
+        if not result.ok:
+            print(json.dumps({"activated": False, "problems": result.problems,
+                              "warnings": result.warnings},
+                             ensure_ascii=False, indent=2, default=str))
+            return 1
+        record = plane.record_activation(request=request, path=db,
+                                         report_checker=lambda b: reports.check_batch_report(b, path=args.report_db or None))
+        print(json.dumps({**record, "warnings": result.warnings},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "release":
+        from ..workflow.cutover import _scope_hash
+
+        released = plane.release_activation(
+            boundary=_need(args.boundary, "--boundary"),
+            scope_hash=_scope_hash(_scope()),
+            actor=_need(args.actor, "--actor"),
+            reason=_need(args.reason, "--reason"), path=db)
+        print(json.dumps({"released": released}, ensure_ascii=False, indent=2))
+        return 0 if released else 1
+
+    if action == "active":
+        print(json.dumps(plane.active_scopes(
+            _need(args.boundary, "--boundary"), db),
+            ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "fallback":
+        verdict = routing.assess_fallback(
+            _need(args.route, "--route"), consumer_id=args.consumer_id,
+            proof_valid=(True if args.fallback_proof == "valid"
+                         else False if args.fallback_proof == "missing" else None),
+            retired=_flag("fallback_retired"),
+            available=_flag("fallback_available"), path=db)
+        print(json.dumps(verdict, ensure_ascii=False, indent=2, default=str))
+        return 0 if verdict["verdict"] == routing.FALLBACK_OK else 1
+
+    if action == "reverify":
+        result = routing.reverify_downstream(
+            consumer_id=_need(args.consumer_id, "--consumer-id"),
+            scope=_scope(), snapshot_as_of=args.snapshot_as_of, path=db)
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2))
+        return 0 if result.approved else 1
+
+    parser.error(f"unhandled cutover action {action!r}")
+    return 2
+
+
+def shadow_command(args, *, parser) -> int:
+    """Phase F shadow comparison reports, dispositions and the shadow ledger.
+
+    Kept separate from `workflow` rather than added as an action there: these are
+    different artefacts with different rules, and one command whose actions span
+    both makes the read-only ones look like they can also mutate.
+    """
+    from ..workflow import shadow_compare as compare
+    from ..execution.broker_write_guard import startup
+
+    startup(caller="ats.runtime.cli.shadow_command", mode="shadow")
+    from ..workflow import shadow_ledger as ledger
+    from ..workflow import shadow_matrix as matrix
+    from ..workflow import shadow_reports as reports
+
+    db = args.db or None
+    order_db = args.order_db or None
+    action = args.action
+
+    if action.startswith("acceptance-"):
+        from ..workflow import acceptance_reports as acceptance
+        import sqlite3
+        try:
+            if action == "acceptance-capture":
+                from ..workflow.acceptance_matrix import restore
+                from ..workflow.acceptance_runner import capture
+                from ..workflow.isolation import isolated_run
+                from contextlib import redirect_stdout
+                from io import StringIO
+                if not all((args.isolation_root,args.input_store,args.matrix_file,args.run_id)):
+                    raise ValueError("acceptance-capture requires isolation-root/input-store/matrix-file/run-id")
+                recipe = json.loads(Path(args.request_file).read_text()) if args.request_file else {}
+                with isolated_run(args.run_id,root=args.isolation_root), redirect_stdout(sys.stderr):
+                    payload = capture(matrix=restore(json.loads(Path(args.matrix_file).read_text())),
+                        input_store=args.input_store,root=Path(args.isolation_root)/args.run_id,
+                        capture_id=args.run_id,execution=recipe,channel="cli")
+            elif action == "acceptance-run":
+                from ..workflow.acceptance_matrix import restore
+                from ..workflow.isolation import isolated_run
+                from contextlib import redirect_stdout
+                from io import StringIO
+                if not all((args.isolation_root,args.input_store,args.matrix_file,args.run_id,args.packet_hash)):
+                    raise ValueError("acceptance-run requires isolation-root/input-store/matrix-file/run-id/packet-hash")
+                with isolated_run(args.run_id,root=args.isolation_root), redirect_stdout(StringIO()):
+                    output = acceptance.run(matrix=restore(json.loads(Path(args.matrix_file).read_text())),
+                        input_store=args.input_store,input_hash=args.packet_hash,
+                        root=Path(args.isolation_root)/args.run_id,replay_run_id=args.run_id)
+                payload = {"type":acceptance.TYPE,"run_id":args.run_id,"workflow_run_id":output["dispatch"]["run_id"],
+                           "input_hash":args.packet_hash,"store":output["store"]}
+            elif action == "acceptance-record":
+                proof = json.loads(Path(args.proof_file).read_text())
+                payload = acceptance.record(report_id=args.report_id,input_hash=args.packet_hash,
+                    proof=proof,actor=args.actor,path=db,supersedes=args.supersedes)
+            elif action == "acceptance-report":
+                payload = acceptance.read(args.report_id,path=db)
+            elif action == "acceptance-check":
+                from types import SimpleNamespace
+                classes = {"research_read":"research_read","decision":"internal_state_approval","trading":"live_trader"}
+                ok, problems = acceptance.check_batch_report(SimpleNamespace(
+                    shadow_report_id=args.report_id,scope=json.loads(args.scope_json),
+                    batch_class=classes.get(args.batch_class),required_surfaces=args.required_surface),path=db)
+                print(json.dumps({"valid":ok,"problems":problems},ensure_ascii=False))
+                return 0 if ok else 1
+            else:
+                actions = {"acceptance-signoff":"signed_off","acceptance-reject":"rejected","acceptance-revoke":"revoked"}
+                payload = acceptance.signoff(report_id=args.report_id,action=actions[action],actor=args.actor,
+                    authority=args.authority,reason=args.reason,path=db)
+            print(json.dumps(payload,ensure_ascii=False,indent=2))
+            return 0
+        except (ValueError, KeyError, OSError, sqlite3.Error) as exc:
+            print(json.dumps({"status":"refused","reason":str(exc)},ensure_ascii=False))
+            return 1
+
+    if action in {"capture-business", "run-pair"}:
+        from ..workflow.isolation import isolated_run
+        from ..workflow import paired_business
+        from contextlib import redirect_stdout
+        from io import StringIO
+        try:
+            if not args.isolation_root or not args.input_store:
+                raise ValueError("business pair requires --isolation-root and --input-store")
+            with isolated_run(args.run_id or args.pair_id or "business-pair-cli", root=args.isolation_root):
+                console = StringIO()
+                with redirect_stdout(console):
+                    if action == "capture-business":
+                        request = json.loads(Path(args.request_file).read_text())
+                        result = paired_business.capture(request=request, input_store=args.input_store,
+                            work_root=Path(args.isolation_root) / (args.run_id + "-capture"), run_id=args.run_id)
+                    else:
+                        if not args.pair_id or not args.packet_hash:
+                            raise ValueError("run-pair requires --pair-id and --packet-hash")
+                        result = paired_business.run_pair(input_store=args.input_store, input_hash=args.packet_hash,
+                            root=Path(args.isolation_root) / args.pair_id, pair_id=args.pair_id)
+                result["business_console"] = console.getvalue()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except (ValueError, PermissionError, OSError) as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+            return 1
+
+    def _json_arg(name: str, default):
+        try:
+            return json.loads(getattr(args, name))
+        except json.JSONDecodeError as exc:
+            parser.error(f"--{name.replace('_', '-')} is not valid JSON: {exc}")
+            return default
+
+    def _need(value: str, flag: str) -> str:
+        if not value:
+            parser.error(f"shadow {action} requires {flag}")
+        return value
+
+    if action == "compare":
+        report_id = _need(args.report_id, "--report-id")
+        result = compare.compare_all(
+            run_id=args.run_id or report_id,
+            left=_json_arg("left_json", {}),
+            right=_json_arg("right_json", {}),
+            expected_triggers=_json_arg("expected_triggers_json", None) or None,
+        )
+        reports.record_comparison(
+            report_id=report_id, run_id=args.run_id or report_id,
+            consumer_id=args.consumer_id,
+            batch_class=args.batch_class or matrix.DECISION,
+            scope=_json_arg("scope_json", {}), packet_hash=args.packet_hash,
+            result=result, actor=args.actor, path=db)
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2,
+                           default=str))
+        return 0
+
+    if action in {"report", "events", "acceptances"}:
+        report_id = _need(args.report_id, "--report-id")
+        try:
+            if action == "report":
+                payload = reports.read_state(report_id, path=db).as_row()
+            elif action == "events":
+                payload = reports.events(report_id, path=db)[-args.limit:]
+            else:
+                payload = reports.acceptances(report_id, path=db)
+        except reports.ShadowReportError as exc:
+            # A mistyped ID must be an error, not an empty result: "no events"
+            # and "no such report" are different answers to the same question.
+            print(json.dumps({"error": str(exc), "report_id": report_id},
+                             ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if action in {"signoff", "reject", "revoke"}:
+        report_id = _need(args.report_id, "--report-id")
+        reason = _need(args.reason, "--reason")
+        actor = _need(args.actor, "--actor")
+        if action == "signoff":
+            reports.record_signoff(report_id=report_id, actor=actor, reason=reason,
+                                   required_surfaces=args.required_surface or None,
+                                   path=db)
+        elif action == "reject":
+            reports.record_rejection(report_id=report_id, actor=actor,
+                                     reason=reason, path=db)
+        else:
+            reports.record_revocation(report_id=report_id, actor=actor,
+                                      reason=reason, path=db)
+        print(json.dumps(reports.read_state(report_id, path=db).as_row(),
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "accept":
+        report_id = _need(args.report_id, "--report-id")
+        acceptance_id = reports.accept_divergence(
+            report_id=report_id, surface=_need(args.surface, "--surface"),
+            actor=_need(args.actor, "--actor"),
+            authority=_need(args.authority, "--authority"),
+            reason=_need(args.reason, "--reason"), path=db)
+        print(json.dumps({"acceptance_id": acceptance_id, "report_id": report_id,
+                          "surface": args.surface}, ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "check":
+        report_id = _need(args.report_id, "--report-id")
+        ok, problems = reports.check_citable(
+            report_id=report_id, scope=_json_arg("scope_json", {}),
+            required_surfaces=args.required_surface or None, path=db)
+        print(json.dumps({"report_id": report_id, "citable": ok,
+                          "problems": problems}, ensure_ascii=False, indent=2))
+        # Exit non-zero so a runbook script or gate cannot pass on a citation it
+        # just proved is invalid.
+        return 0 if ok else 1
+
+    if action == "intents":
+        cycle_id = _need(args.cycle_id, "--cycle-id")
+        print(json.dumps(ledger.rebuild_attribution(cycle_id, path=order_db),
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action == "attest":
+        run_id = _need(args.run_id, "--run-id")
+        print(json.dumps(ledger.shadow_attestation(run_id=run_id, path=order_db),
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    parser.error(f"unhandled shadow action {action!r}")
+    return 2
+
+
+def workflow_command(args, *, parser) -> int:
+    """Phase E task execution and read-only run/trigger ledger inspection."""
+    from ..workflow.store import WorkflowStore
+
+    store = WorkflowStore()
+    workflow_id = args.workflow_id
+    if args.action == "run" and not workflow_id:
+        requested = tuple(dict.fromkeys(args.task))
+        workflow_id = requested[0] if len(requested) == 1 else "analysis-bundle"
+    if workflow_id and workflow_id != "analysis-bundle":
+        from ..workflow.ownership import load_workflow_owners, workflow_store_for_owner
+
+        if workflow_id not in load_workflow_owners().get("workflows", {}):
+            parser.error(f"workflow ID {workflow_id!r} has no declared owner")
+        store = workflow_store_for_owner(workflow_id)
+    if args.action == "triggers":
+        rows = store.list_triggers(workflow_id=args.workflow_id, event_id=args.event_id,
+                                   schedule_id=args.schedule_id,
+                                   scheduled_from=args.scheduled_from,
+                                   scheduled_to=args.scheduled_to,
+                                   status=args.status, limit=args.limit)
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "runs":
+        print(json.dumps(store.list_runs(status=args.status, limit=args.limit),
+                         ensure_ascii=False, indent=2))
+        return 0
+    if args.action in {"retry", "history"}:
+        if not args.trigger_key:
+            parser.error(f"workflow {args.action} requires --trigger-key")
+        row = next((item for item in store.list_triggers(limit=10_000)
+                    if item["trigger_key"] == args.trigger_key), None)
+        if row is None:
+            parser.error(f"trigger {args.trigger_key!r} was not found")
+        if args.action == "history":
+            run = store.get_run(row.get("run_id", "")) if row.get("run_id") else None
+            print(json.dumps({"trigger": row,
+                              "trigger_history": store.trigger_history(args.trigger_key),
+                              "workflow_run": run,
+                              "workflow_run_history": store.run_history(row["run_id"])
+                              if row.get("run_id") else []},
+                             ensure_ascii=False, indent=2, default=str))
+            return 0
+        if not args.actor or not args.reason:
+            parser.error("workflow retry requires --actor and --reason")
+        if not store.compensate_trigger(args.trigger_key, actor=args.actor, reason=args.reason):
+            parser.error("only a failed/incomplete trigger can be explicitly compensated")
+        from ..agent.task_projection import ProjectionScope
+        from ..workflow.dispatcher import Dispatcher, default_data_vintage
+        from ..workflow.planning import build_plan
+        from ..workflow.run_contracts import TriggerContext
+        from ..workflow.triggers import TriggerService
+
+        stored_request = row.get("request", {})
+        frozen_context = TriggerContext.model_validate(stored_request.get("trigger", {}))
+        frozen_context.requested_at = row["created_at"]
+        body = stored_request.get("request", {})
+        run_id = row.get("run_id", "")
+        scope = ProjectionScope.model_validate(body["scope"])
+
+        def plan_factory(context, request, fixed_run_id):
+            return build_plan(
+                requested_tasks=request["requested_tasks"], scope=scope,
+                trigger=context, as_of=request.get("as_of", row["created_at"]),
+                run_id=fixed_run_id, profile_id=request.get("profile_id", ""),
+                enter_decision_cycle=bool(request.get("enter_decision_cycle", False)),
+                task_inputs=request.get("task_inputs", {}),
+                namespace=(store.get_run(run_id) or {}).get("plan", {}).get("tasks", [{}])[0]
+                .get("instance_key", "dispatcher").split(":", 1)[0])
+
+        result = TriggerService(store).dispatch(
+            frozen_context, request=body, plan_factory=plan_factory,
+            dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.get("status") in {"complete", "incomplete"} else 1
+    if not args.task:
+        parser.error("workflow run requires at least one --task")
+    try:
+        task_inputs = json.loads(args.inputs_json or "{}")
+    except json.JSONDecodeError as exc:
+        parser.error(f"--inputs-json is invalid JSON: {exc}")
+    if not isinstance(task_inputs, dict):
+        parser.error("--inputs-json must be a JSON object")
+
+    from ..agent.task_projection import ProjectionScope
+    from ..workflow.dispatcher import Dispatcher, default_data_vintage
+    from ..workflow.planning import build_plan
+    from ..workflow.run_contracts import TriggerContext
+    from ..workflow.triggers import TriggerService, load_trigger_policies
+
+    task_ids = tuple(dict.fromkeys(args.task))
+    workflow_id = workflow_id or (task_ids[0] if len(task_ids) == 1 else "analysis-bundle")
+    trigger = TriggerContext(
+        kind=args.trigger_kind, workflow_id=workflow_id, trigger_id=args.trigger_id,
+        schedule_id=args.schedule_id, scheduled_for=args.scheduled_for,
+        event_id=args.event_id, event_version=args.event_version)
+    trigger.validate_for_use()
+    request = {
+        "requested_tasks": list(task_ids),
+        "scope": {"kind": args.scope_kind, "id": args.scope_id},
+        "profile_id": args.decision_profile,
+        "enter_decision_cycle": args.decision_cycle,
+        "task_inputs": task_inputs,
+    }
+    if args.as_of:
+        request["as_of"] = args.as_of
+
+    def plan_factory(ctx, frozen_request, run_id):
+        scope = ProjectionScope.model_validate(frozen_request["scope"])
+        return build_plan(
+            requested_tasks=frozen_request["requested_tasks"], scope=scope,
+            trigger=ctx, as_of=frozen_request.get("as_of", ctx.requested_at),
+            run_id=run_id, profile_id=frozen_request.get("profile_id", ""),
+            enter_decision_cycle=bool(frozen_request.get("enter_decision_cycle", False)),
+            task_inputs=frozen_request.get("task_inputs", {}))
+
+    policy_map = load_trigger_policies()
+    service = TriggerService(store, policy=policy_map.get(workflow_id,
+                                                           policy_map["default"]))
+    from ..workflow.consumer_health import gate as product_health_gate
+
+    result = service.dispatch(trigger, request=request, plan_factory=plan_factory,
+                              dispatcher=Dispatcher(workflow_store=store, vintage_resolver=default_data_vintage,
+                                                    product_health=product_health_gate))
+    from ..workflow.report_publishers import publish
+
+    reports = publish(workflow_id, result, store_path=store.path)
+    if reports:
+        result = {**result, "reports": reports}
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0 if result.get("status") in {"complete", "incomplete", "running", "planned"} else 1
+
+
+@scoped_read("chief")
 def run_chief(
     *,
     execute: bool = True,
@@ -231,6 +1865,8 @@ def run_chief(
     auto: bool = False,
     offline: bool = False,
     source: str = "chief",
+    fundamental_mode: str = "routine",
+    decision_profile: str = "ai_hardware",
 ) -> int:
     """One Chief decision run through the decision graph: assemble all artifacts
     -> decide -> risk gate -> persist -> Boss approval -> trade -> persist."""
@@ -241,6 +1877,8 @@ def run_chief(
         cycle_id=f"chief-{now:%Y%m%d-%H%M%S}",
         as_of=now,
         source=source,
+        fundamental_mode=fundamental_mode,
+        decision_profile=decision_profile,
         dry_run=dry_run,
         use_llm=use_llm,
         use_broker=not offline,
@@ -620,6 +2258,7 @@ def _print_quadrant(review) -> None:
         print(f"      · ⚠️ 数据过旧/缺失: {', '.join(stale)}")
 
 
+@scoped_read("technical")
 def run_technical_review(
     name: str = "technical", *, live_data: bool = True, write_report: bool = True
 ) -> int:
@@ -640,6 +2279,30 @@ def run_technical_review(
     return 0
 
 
+def _technical_show_all(review, name: str) -> None:
+    """Every symbol that has a reading, then the ones that cannot be computed, marked as missing data.
+
+    `chief_block` lists only what needs Chief's attention (below full exposure, or changed); this is the full list.
+    """
+    ok = [r for r in review.readings if not r.stale]
+    stale = [r for r in review.readings if r.stale]
+    print(f"\n全部可计算标的（{len(ok)} 只）：")
+    print(f"  {'代码':<8}{'建议敞口':>8}{'上次':>8}{'评分':>6}{'收盘':>11}{'SMA200':>11}  状态")
+    for r in sorted(ok, key=lambda x: x.symbol):
+        prev = "-" if r.prev_exposure is None else f"{r.prev_exposure:.0%}"
+        flags = "".join(["恐慌层 " if r.panic_fired else "", "熊市层 " if r.bear_fired else "",
+                         "较上次有变化" if r.changed else ""]).strip() or "-"
+        close = "-" if r.close is None else f"{r.close:.2f}"
+        sma = "-" if r.sma200 is None else f"{r.sma200:.2f}"
+        print(f"  {r.symbol:<8}{r.target_exposure:>8.0%}{prev:>8}{r.score:>6}{close:>11}{sma:>11}  {flags}")
+    missing = {r.symbol: r.note for r in stale}
+    missing.update({sym: "取不到行情" for sym in review.skipped if sym not in missing})
+    if missing:
+        print(f"\n数据缺失、未出读数（{len(missing)} 只）：")
+        for sym in sorted(missing):
+            print(f"  {sym:<8}{missing[sym]}")
+
+
 def technical_show(name: str = "technical") -> int:
     from ..memory import get_store
 
@@ -650,6 +2313,7 @@ def technical_show(name: str = "technical") -> int:
         return 0
     print(f"=== technical {name} @ {latest.as_of:%Y-%m-%d} · 策略 {latest.strategy} ===")
     print(latest.chief_block(4000))
+    _technical_show_all(latest, name)
     print("\nHistory:")
     for row in store.recent_technical_reviews(name):
         print(f"  {row['as_of'][:10]}  {row['summary'][:80]}")
@@ -672,6 +2336,8 @@ def technical_probe(name: str = "technical", *, live_data: bool = True) -> int:
     return 0
 
 
+@scoped_read("macro")
+@scheduled_cli("macro-review", scope_id="")
 def run_macro_review(
     name: str = "macro", *, use_llm: bool = True, live_data: bool = True, write_report: bool = True
 ):
@@ -738,38 +2404,7 @@ def macro_probe(name: str = "macro", *, live_data: bool = True) -> int:
     return 0
 
 
-def run_cross_section(
-    name: str = "ai_hardware",
-    layer: str = "all",
-    *,
-    structure: bool = False,
-    write_report: bool = False,
-) -> int:
-    """Cross-sectional selection + sizing within a chain layer (WHO / HOW MUCH).
-
-    **Prints only — never writes a file.** The layer report produced by the weekly review
-    already carries this table, and a second per-layer document would drift out of sync:
-    its `layer_cap` is a half-finished number until the allocation verdict exists.
-    This command is a debugging view of the current factors.
-    """
-    from ..agents.sector import cross_section
-    from ..config import load_sector_config
-
-    cfg = load_sector_config(name)
-    keys = [layer] if layer != "all" else [ly.key for ly in cfg.layers if ly.tickers]
-    for key in keys:
-        try:
-            rows, basket = cross_section.run_layer(name, key, persist=True, structure=structure)
-        except Exception as exc:  # noqa: BLE001
-            print(f"❌ {key}: {exc}")
-            continue
-        label = next((ly.label for ly in cfg.layers if ly.key == key), key)
-        print(f"\n=== {label}  [{key}]{'  +结构层' if basket.structural else ''} ===")
-        print(cross_section.format_table(rows, basket.layer_cap))
-    print("\n（本命令只打印，不写文件 —— 层报告由 `ats sector review` 产出，一层一份。）")
-    return 0
-
-
+@scoped_read("layer")
 def run_layer_review(
     name: str = "ai_hardware",
     layer_key: str = "all",
@@ -778,9 +2413,11 @@ def run_layer_review(
     live_data: bool = True,
 ) -> int:
     """层级评审：一层或全部层的配置结论（超配/标配/低配/清仓）+ 层内选股。"""
-    from ..agents.sector import cross_section, layer_review
+    from ..agents.layer import layer_review
+    from ..agents.sector import cross_section
     from ..config import load_sector_config
     from ..memory import get_store
+    from ..schemas.sector import allocation_for_status
 
     cfg = load_sector_config(name)
     layers = cfg.layers if layer_key in ("", "all") else cfg.layers_by_key(layer_key)
@@ -806,20 +2443,28 @@ def run_layer_review(
                 )
             except Exception as exc:  # noqa: BLE001
                 print(f"  （{layer.key} 截面取数失败：{exc}）")
-        v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm)
+        v, ok = layer_review.run(cfg, layer, basket=basket, prior=prior_v, use_llm=use_llm,
+                                 store=get_store())
+        if v is None:
+            # Phase D: a failed layer is a registered gap — nothing is carried forward
+            # or defaulted into a fake verdict.
+            print(f"\n=== {layer.label}  [{layer.key}] ===")
+            print("  ⚠️ 本轮评审失败：该层登记为缺失，未产出状态判断与投影")
+            continue
         # 单层视图给的是**未经组上限约束**的数：组上限要等同组其余层都评完才算得出来。
-        budget = cross_section.budget_for(layer, v.allocation if ok else None)
+        budget = cross_section.budget_for(
+            layer, allocation_for_status(v.layer_status) if ok else None)
         group = next((g for g in cfg.layer_groups if layer.key in g.layers), None)
         flags = []
         if not v.has_claims:
             flags.append("无命题(配置缺口)")
         if not v.cross_section_applicable:
             flags.append("截面不适用")
-        if not ok:
-            flags.append("本轮未产出，下为沿用/占位")
         print(f"\n=== {layer.label}  [{layer.key}] ===")
+        call = allocation_for_status(v.layer_status)
         print(
-            f"  配置 {v.allocation} · 信心 {v.confidence:.2f} · 预算 {budget:.1%} NAV"
+            f"  状态 {v.layer_status}（行业侧映射 {call}）· 信心 {v.confidence:.2f}"
+            f" · 预算 {budget:.1%} NAV"
             f" · 周期 {v.cycle_position or '—'}" + (f"\n  ⚠️ {'；'.join(flags)}" if flags else "")
         )
         if group:
@@ -837,6 +2482,8 @@ def run_layer_review(
     return 0
 
 
+@scoped_read("sector")
+@scheduled_cli("sector-review", kind="sector", argument="name")
 def run_sector_review(
     name: str = "ai_hardware",
     *,
@@ -862,6 +2509,7 @@ def run_sector_review(
     return review
 
 
+@scoped_read("sector")
 def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
     """Offline rebuild of the viz dashboard from what a past review already produced.
 
@@ -878,6 +2526,16 @@ def run_sector_html(name: str = "ai_hardware", *, date: str = "") -> int:
 
     cfg = load_sector_config(name)
     store = get_store()
+    from ..agents.sector.read_model import allocation, governed, write_html
+
+    if governed():
+        row = allocation(store, name, date=date)
+        path = write_html(row, cfg.output_dir)
+        if path:
+            print(f"📊 {path}")
+            return 0
+        print("（output_dir 未配置或不存在）")
+        return 1
     review = None
     if date:
         for r in store.sector_review_history(name, limit=60):
@@ -1207,59 +2865,6 @@ def run_evidence(
         print(f"📝 {path}" if path else "(report dir unset — skipped)")
         return 0
 
-    if action == "collect":
-        # Fetch every configured third-party series into the ledger. Separate from
-        # `sources`, which reports primary-document coverage and touches no network.
-        from ..chain import sources as chain_sources
-
-        saved = chain_sources.collect(store)
-        if not saved:
-            print("（config/data/sources.yaml 里没有配置第三方源）")
-            return 0
-        # -1 = the source could not be reached this round (true gap). 0 = it was
-        # reached but every point was already in the ledger (data is current, not
-        # stale). Printing both as "取不到数据" is the exact bug this distinguishes:
-        # a monthly source fetched twice in one month is 0-and-fine, not dead.
-        for sid, n in sorted(saved.items()):
-            if n < 0:
-                print(f"  ⚠️  {sid:<28}取不到数据，已记成缺口而非沉默")
-            elif n == 0:
-                print(f"  🟡 {sid:<28}0 条新观测　—— 已抓到最新数据，只是与上次相同")
-            else:
-                print(f"  ✅ {sid:<28}{n} 条新观测")
-        return 0
-
-    if action == "articles":
-        # The prose half of `collect`. Separate command because it costs a model call
-        # per article and takes minutes, while `collect` is arithmetic over a series.
-        from ..chain import articles as chain_articles
-        from ..data import research as research_data
-
-        # Newsletter acquisition is a source-stage operation shared by every consumer.
-        # The SemiAnalysis adapter below only discovers already-stored assets.
-        if not entity or entity == "semianalysis":
-            research_data.ingest_configured(store=store)
-
-        stats = chain_articles.collect_articles(store, source_ids={entity} if entity else None)
-        if not stats:
-            print("（config/data/sources.yaml 里没有配置 article_sources）")
-            return 0
-        for sid, st in sorted(stats.items()):
-            if st.unreachable:
-                print(f"  ⚠️  {sid:<24}取不到文章列表，已记成缺口而非沉默")
-                continue
-            print(
-                f"  📰 {sid:<24}扫 {st.scanned} 篇 · 命中 {st.matched} 篇 · "
-                f"新抽取 {st.ingested} 篇 / {st.observations} 条观测"
-            )
-            if st.unreadable:
-                # Never fold this into the headline: a widening paywall must not read
-                # as the publisher having gone quiet.
-                print(f"     🚫 {st.unreadable} 篇取不到正文（付费或模板变更），已记成缺口")
-            for t in st.titles:
-                print(f"     · {t[:88]}")
-        return 0
-
     if action == "kbreview":
         # The same six detectors the weekly report runs, on demand. Worth its own
         # command because the report costs a full re-assessment to regenerate, while
@@ -1340,48 +2945,11 @@ def run_evidence(
                 if a.note:
                     print(f"     {a.note}")
         if not any_claim:
-            print("(该行业配置里还没有 claims —— 见 docs/CHAIN_EVIDENCE.md)")
+            print("(该行业配置里还没有 claims —— 见 docs/archive/CHAIN_EVIDENCE.md)")
         return 0
 
-    if not symbol:
-        print("❌ observe 需要标的：ats evidence observe MU")
-        return 1
-    sym = symbol.upper()
-    if file:
-        text, src, doc_id = Path(file).read_text(encoding="utf-8"), file, f"{sym}:{Path(file).name}"
-    else:
-        from ..data import earnings_calendar
-
-        pr = earnings_calendar.last_print(sym, back_days=45)
-        doc_id = f"{sym}:{pr.date:%Y%m%d}" if pr and pr.date else f"{sym}:manual"
-        text, src, note = observer.fetch_document(sym, print_=pr, store=store)
-        if note:
-            print(f"（{note}）")
-    if not text.strip():
-        print(f"❌ 取不到 {sym} 的财报稿/纪要 — 可用 --file 指定本地文档")
-        return 1
-    res = observer.observe_document(sym, doc_id, text, source_url=src)
-    if res["failure"]:
-        print(f"⚠️  {sym}: 抽取失败 — {res['failure']}（已记录，不记为零观测）")
-    else:
-        print(f"✅ {sym}: {res['new']} 条新观测 / 共 {res['saved']} 条（doc={doc_id}）")
-
-    # The earnings RELEASE is a second document, extracted separately — the call
-    # narrates, the release tabulates, and folding them together would lose which
-    # source a number came from.
-    if not file:
-        report_date = str(getattr(pr, "date", "") or "")
-        rtext, rsrc, rnote = observer.fetch_release(sym, report_date=report_date, store=store)
-        if rnote:
-            print(f"（财报稿：{rnote}）")
-        if rtext.strip():
-            rid = f"{sym}:release:{report_date or 'manual'}"
-            rres = observer.observe_document(sym, rid, rtext, source_url=rsrc)
-            if rres["failure"]:
-                print(f"⚠️  {sym} 财报稿抽取失败 — {rres['failure']}")
-            else:
-                print(f"✅ {sym} 财报稿: {rres['new']} 条新观测 / 共 {rres['saved']} 条")
-    return 0
+    print(f"❌ 未知的 evidence 操作 {action!r}")
+    return 2
 
 
 def sector_show(name: str = "ai_hardware") -> int:
@@ -1397,20 +2965,22 @@ def sector_show(name: str = "ai_hardware") -> int:
     if latest.layer_verdicts:
         from ..agents.sector import cross_section
         from ..config import load_sector_config
+        from ..schemas.sector import allocation_for_status
 
         cfg = load_sector_config(name)
         order = {ly.key: i for i, ly in enumerate(cfg.layers)}
         for v in sorted(latest.layer_verdicts, key=lambda x: order.get(x.layer_key, 99)):
             layer = cfg.layer_by_key(v.layer_key)
             label = layer.label if layer else v.layer_key
-            budget = cross_section.budget_for(layer, v.allocation) if layer else 0.0
+            call = allocation_for_status(v.layer_status)
+            budget = cross_section.budget_for(layer, call) if layer else 0.0
             flags = []
             if not v.has_claims:
                 flags.append("无命题")
             if not v.cross_section_applicable:
                 flags.append("截面不适用")
             print(
-                f"  {label}: {v.allocation} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
+                f"  {label}: {call} (信心 {v.confidence:.2f}) · 预算 {budget:.1%} NAV"
                 + (f"  ⚠️ {'、'.join(flags)}" if flags else "")
             )
     for a in latest.layers:
@@ -1432,67 +3002,53 @@ def sector_probe(name: str = "ai_hardware", *, live_data: bool = True) -> int:
     return 0
 
 
-def run_pead_research(*, use_llm: bool = True) -> list:
-    """One research pass: ingest newsletters, extract per-ticker insights."""
-    from ..agents.pead import research
-    from ..data import research as research_data
-    from ..data.stores.unstructured import get_data_ingestion_store
+@scoped_read("information")
+def run_information_pass(*, use_llm: bool = True, ingest_research: bool = True) -> int:
+    """信息分析师独立入口（Phase D）：一轮信息简报，独立终结。
 
-    data_store = get_data_ingestion_store()
-    try:
-        research_data.ingest_configured(store=data_store)
-    finally:
-        data_store.close()
-    insights = research.run(use_llm=use_llm)
-    if not insights:
-        print("📰 research — no new articles / no insights")
-        return []
-    print(f"📰 research — {len(insights)} insights:")
-    for i in insights:
-        print(f"   [{i.direction}/{i.impact_path}] {i.ticker} ({i.confidence:.2f}): {i.summary}")
-    return insights
-
-
-def run_pead_score_window(
-    window: str,
-    *,
-    dry_run: bool = True,
-    use_llm: bool = True,
-    as_of: str | None = None,
-    chief: bool = True,
-    plan_only: bool = False,
-) -> int:
-    """Run one PEAD score window by hand (the scheduler runs the same function).
-
-    `--as-of` rewinds only the calendar/state layer, so a past print can be replayed;
-    it does NOT rewind Tavily or SEC results.
+    只消费已准入文档与中性证据、发布 InformationBrief 投影；不读取其他
+    分析师观点，不触发基本面流程或主理人决策。
     """
-    from datetime import datetime
+    from ..agents.information import entry
 
-    from .scheduler import ET, pead_score_window
+    if ingest_research:
+        # Runtime submits an explicit data task; the Information Agent only reads
+        # the published document product after the managed writer finishes.
+        _run_managed_article_ingestion(source_ids={"semianalysis"}, trigger_kind="manual")
+    summary = entry.run_information_pass(use_llm=use_llm,
+                                         ingest_research=ingest_research)
+    print("🛰️  information — 每轮信息简报")
+    print(f"   文章 {summary['articles']} 篇 · 目标 {len(summary['targets'])} 个"
+          f" · 简报投影 {summary['briefs']} 条")
+    return 0
 
-    moment = None
-    if as_of:
-        moment = datetime.fromisoformat(as_of)
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=ET)
 
-    label = "计划" if plan_only else ("试运行" if dry_run else "实盘")
-    print(
-        f"=== PEAD {window} 打分窗口（{label}"
-        f"{f'，as_of={moment:%Y-%m-%d %H:%M %Z}' if moment else ''}）==="
-    )
-    outcomes = pead_score_window(
-        window, dry_run=dry_run, use_llm=use_llm, as_of=moment, chief=chief, plan_only=plan_only
-    )
-    if not outcomes:
-        print("  （非交易日，或打分窗口被关闭）")
-        return 0
-    for sym, why in outcomes.items():
-        mark = "▶" if why.startswith("GO") else "·"
-        print(f"  {mark} {sym:6} {why}")
-    n = sum(1 for w in outcomes.values() if w.startswith("GO"))
-    print(f"\n  {n}/{len(outcomes)} 个标的{'待打分' if plan_only else '已打分'}")
+@scoped_read("fundamental")
+def _run_analyst_fundamental(args) -> int:
+    """基本面双模式独立入口（Phase D 5.1）：ats analyst fundamental --mode routine|event."""
+    from ..agents.fundamental.entry import build_run_request, run_fundamental_pass
+
+    if not args.symbol:
+        raise SystemExit("analyst fundamental 需要 --symbol")
+    default_trigger = ("information_brief_update" if args.mode == "routine"
+                       else "earnings_release")
+    extra = {"refresh_baseline": True} if args.mode == "routine" and getattr(args, "refresh_baseline", False) else {}
+    request = build_run_request(
+        args.mode, args.symbol,
+        trigger=args.trigger or default_trigger,
+        use_llm=not args.no_llm,
+        fiscal_label=args.fiscal_label,
+        cutoff=args.cutoff, **extra)
+    summary = run_fundamental_pass(request)
+    if summary.get("mode") == "routine":
+        print("📈 fundamental (routine) — 例行预期更新")
+        print(f"   标的 {summary.get('symbol')} · 归类 {summary.get('summary', {})}"
+              f" · 投影 {len(summary.get('published', []))} 条")
+    else:
+        print(f"📈 fundamental (event) — 事件评审 {summary.get('symbol')}"
+              f" {summary.get('fiscal_label', '')}")
+        frozen = summary.get("frozen_at") or "(no frozen baseline)"
+        print(f"   冻结基线 {frozen} · 评审 {summary.get('event_review_summary', {})}")
     return 0
 
 
@@ -1688,6 +3244,46 @@ def _setup_logging() -> None:
     logging.getLogger("ats").setLevel(logging.INFO)  # our own logs at INFO, third-party quiet
 
 
+def _run_managed_article_ingestion(*, source_ids: set[str] | None = None,
+                                  trigger_kind: str = "manual",
+                                  trigger_ref: str = "") -> list[dict]:
+    """Submit article refreshes to the persistent-data worker and return outcomes."""
+    from ..data.pipelines.unstructured.article_ingest import _article_sources
+    from ..data.persistent_queue import PersistentIngestionQueue
+
+    registered = _article_sources()
+    selected = sorted(source_ids or (set(registered) - {"yfinance_live_news"}))
+    unknown = sorted(set(selected) - set(registered))
+    if unknown:
+        raise ValueError(f"unregistered article source(s): {', '.join(unknown)}")
+    queue = PersistentIngestionQueue()
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if not trigger_ref:
+        trigger_ref = f"{trigger_kind}:{now.isoformat()}"
+    registry_paths = [Path("config/data") / name for name in
+                      ("structured.yaml", "unstructured.yaml", "schedules.yaml")]
+    policy_fingerprint = hashlib.sha256(b"".join(path.read_bytes()
+                                                   for path in registry_paths)).hexdigest()
+    outcomes: list[dict] = []
+    for source_id in selected:
+        task_id, created = queue.enqueue(
+            source_id=source_id,
+            scope={"source": source_id},
+            trigger_kind=trigger_kind,
+            trigger_ref=f"{trigger_ref}:{source_id}",
+            command=["ats", "data", "article-ingest", "--source", source_id],
+            policy_fingerprint=policy_fingerprint,
+            requested_as_of=now.isoformat(), priority=30 if trigger_kind == "scheduled" else 20,
+        )
+        result = queue.run_one(task_id=task_id)
+        current = queue.get(task_id) or {}
+        outcomes.append({"source_id": source_id, "task_id": task_id,
+                         "created": created,
+                         "status": (result or {}).get("status") or current.get("status", "queued"),
+                         "result": (result or {}).get("stdout", {})})
+    return outcomes
+
+
 def run_data(
     action: str,
     value: str = "",
@@ -1731,13 +3327,150 @@ def run_data(
     provider_lookup_attempts: int = 3,
     provider_lookup_retry_seconds: float = 1.0,
     approve_title_url_review: bool = False,
+    assurance_consumer: str = "",
+    assurance_domain: str = "",
+    assurance_contract_version: str = "",
+    evidence_type: str = "",
+    evidence_outcome: str = "",
+    evidence_scope_json: str = "{}",
+    evidence_details_json: str = "{}",
+    evidence_summary: str = "",
+    evidence_command_summary: str = "",
+    evidence_environment_names: list[str] | None = None,
+    evidence_prerequisites: list[str] | None = None,
+    evidence_fingerprint_paths: list[str] | None = None,
+    evidence_reason: str = "",
+    evidence_event_id: str = "",
 ) -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
 
-    if action == "pead-official-disclosure-coverage":
-        import os
+    if action == "calendar-refresh":
+        source_id = source or value
+        if not source_id:
+            raise ValueError("calendar-refresh requires --source")
+        from ..data.calendar_refresh import refresh_schedule_calendar
+        from ..data.persistent_queue import require_queue_worker
+        from ..data.stores.schedule_calendar import ScheduleCalendarStore
 
+        worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+        require_queue_worker(worker_source)
+        result = refresh_schedule_calendar(
+            source_ids={source_id}, store=ScheduleCalendarStore())
+        task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
+        if task_id:
+            from ..data.persistent_queue import PersistentIngestionQueue
+
+            PersistentIngestionQueue().record_lineage(task_id, {
+                "runs": [row["source_run_id"] for row in result["sources"]],
+                "raw": [row.get("raw_artifact_id", "") for row in result["sources"]],
+                "admission": [ref for row in result["sources"]
+                              for ref in row.get("candidate_ids", [])],
+                "published": [ref for row in result["sources"]
+                              for ref in row.get("published_refs", [])],
+            })
+        failed = any(row["status"] == "failed" for row in result["sources"])
+        partial = any(row["status"] == "partial" for row in result["sources"])
+        result["status"] = "failed" if failed else "partial" if partial else "succeeded"
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 1 if failed else 0
+
+    if action == "calendar-finalize":
+        from ..data.calendar_refresh import refresh_schedule_calendar
+        from ..data.persistent_queue import require_queue_worker
+        from ..data.stores.schedule_calendar import ScheduleCalendarStore
+
+        worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+        require_queue_worker(worker_source)
+        result = refresh_schedule_calendar(
+            store=ScheduleCalendarStore(), finalize_only=True)
+        result["status"] = ("failed" if result["release_reconciliation"]["status"] == "failed"
+                            else "succeeded")
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["release_reconciliation"]["status"] != "failed" else 1
+
+    if action == "article-ingest":
+        source_id = source or value
+        if not source_id:
+            raise ValueError("article-ingest requires --source")
+        from ..data.pipelines.unstructured.article_ingest import ingest_article_source
+
+        result = ingest_article_source(
+            source_id, human_review_approved=approve_title_url_review)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action in {"document-ingest", "fixed-ingest"}:
+        source_id = source or value
+        if not source_id:
+            raise ValueError("document-ingest requires --source")
+        from ..data.pipelines.unstructured.document_ingest import ingest_documents
+
+        try:
+            result = ingest_documents(source_id, entity=entity)
+        except Exception as exc:
+            result = {"status": "failed", "source_id": source_id,
+                      "reason_code": type(exc).__name__}
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["status"] in {"succeeded", "no_change", "partial",
+                                         "quarantined"} else 1
+
+    if action == "chain-source-collect":
+        source_id = source or value
+        if not source_id:
+            raise ValueError("chain-source-collect requires --source")
+        from ..chain import sources as chain_sources
+        from ..data.persistent_queue import require_queue_worker
+        from ..memory import get_store
+
+        worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+        require_queue_worker(worker_source)
+        saved = chain_sources.collect(get_store(), source_ids={source_id})
+        print(json.dumps({"status": "succeeded" if saved.get(source_id, -1) >= 0 else "partial",
+                          "source_id": source_id, "saved": saved.get(source_id, -1)},
+                         ensure_ascii=False))
+        return 0 if saved.get(source_id, -1) >= 0 else 1
+
+    if action == "assurance":
+        import json
+        from ..data import assurance
+
+        scope = json.loads(evidence_scope_json or "{}")
+        if value == "query":
+            result = assurance.qualification(
+                domain_id=assurance_domain, consumer_id=assurance_consumer,
+                contract_version=assurance_contract_version, scope=scope,
+                db_path=db_path or None)
+        elif value == "history":
+            result = assurance.evidence_history(
+                domain_id=assurance_domain, consumer_id=assurance_consumer,
+                scope=scope if scope else None, db_path=db_path or None, limit=limit)
+        elif value == "record":
+            if not as_of:
+                raise ValueError("data assurance record requires --as-of")
+            result = {"event_id": assurance.record_evidence(
+                domain_id=assurance_domain, consumer_id=assurance_consumer,
+                evidence_type=evidence_type, outcome=evidence_outcome, scope=scope,
+                as_of=datetime.fromisoformat(as_of.replace("Z", "+00:00")),
+                command_summary=evidence_command_summary,
+                result_summary=evidence_summary,
+                environment_names=evidence_environment_names,
+                prerequisite_event_ids=evidence_prerequisites,
+                details=json.loads(evidence_details_json),
+                dependency_paths=evidence_fingerprint_paths,
+                db_path=db_path or None)}
+        elif value == "revoke":
+            if not evidence_reason:
+                raise ValueError("data assurance revoke requires --reason")
+            result = {"event_id": assurance.revoke_evidence(
+                reason=evidence_reason, event_id=evidence_event_id,
+                db_path=db_path or None)}
+        else:
+            raise ValueError("data assurance action must be query, record, or revoke")
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if action == "pead-official-disclosure-coverage":
         from ..data.pead_official_disclosures import (
             active_pead_targets,
             collect_active_packages,
@@ -1828,8 +3561,6 @@ def run_data(
                 # Mail/RSS acquisition is permitted only into explicitly supplied
                 # isolated storage.  The acceptance pass below then reads that same
                 # immutable asset catalog; no Chain/PEAD/Chief operation is invoked.
-                import os
-
                 from ..data import research as research_data
                 from ..memory import TradingMemory, reset_store_cache
 
@@ -1872,8 +3603,6 @@ def run_data(
             if isolated_store is not None:
                 isolated_store.conn.close()
             if previous_env:
-                import os
-
                 from ..memory import reset_store_cache
 
                 for name, previous in previous_env.items():
@@ -1941,7 +3670,8 @@ def run_data(
     # query.  The normal products surface deliberately opens unstructured data
     # read-only, so replace only that repository with the governed writer before
     # this command reaches the shared document/structured pipeline.
-    if action in {"factset-import", "factset-reprocess"}:
+    if action in {"factset-import", "factset-reprocess", "factset-refresh",
+                  "factset-semantic-refresh"} and not db_path:
         from ..data.stores.unstructured import get_platform_unstructured_store
 
         products.unstructured.close()
@@ -1953,15 +3683,26 @@ def run_data(
         "publish",
         "rollback",
         "purge-source",
+        "factset-product-pin",
+        "factset-product-unpin",
     }:
         from ..data.products import DataProducts
         from ..data.structured import SQLiteStructuredRepository
 
         isolated = SQLiteStructuredRepository(db_path, artifact_root=artifact_root or None)
         isolated.bootstrap_catalog()
-        products = DataProducts(store=products.store, structured_repository=isolated)
+        if action == "factset-semantic-refresh":
+            from ..data.stores.unstructured.platform import PlatformUnstructuredRepository
+
+            products.structured.close()
+            products.unstructured.close()
+            isolated_documents = PlatformUnstructuredRepository(db_path, writable=True)
+            products = DataProducts(store=products.store, structured_repository=isolated,
+                                    unstructured_repository=isolated_documents)
+        else:
+            products = DataProducts(store=products.store, structured_repository=isolated)
     if action in {"validate-source", "ingest", "release-check", "publish", "rollback",
-                  "purge-source"}:
+                  "purge-source", "factset-product-pin", "factset-product-unpin"}:
         from ..data.structured import (
             ReleaseManager,
             SQLiteStructuredRepository,
@@ -1990,6 +3731,11 @@ def run_data(
                 if not target_source:
                     raise ValueError("ingest requires --source or VALUE")
                 scope = json.loads(query_scope) if query_scope else {}
+                # `--dataset` is a first-class selection, not merely a display
+                # filter. Multi-dataset sources otherwise silently ingest the
+                # first catalog dataset even when the scheduler names another.
+                if dataset:
+                    scope.setdefault("dataset_id", dataset)
                 if since:
                     scope.setdefault("since", since)
                 result = ingest_source(
@@ -2024,6 +3770,14 @@ def run_data(
                     exported=exported,
                     note=purge_note,
                 )
+            elif action == "factset-product-pin":
+                if not target_source or not confirm:
+                    raise ValueError("factset-product-pin requires version VALUE and --confirm")
+                result = manager.pin_factset_product(target_source)
+            elif action == "factset-product-unpin":
+                if not confirm:
+                    raise ValueError("factset-product-unpin requires --confirm")
+                result = manager.clear_factset_product_pin()
             elif action == "rollback":
                 if not target_source:
                     raise ValueError("rollback requires --source or VALUE")
@@ -2073,8 +3827,21 @@ def run_data(
         result = products.datasets()
     elif action == "metrics":
         result = products.metrics()
+    elif action == "health" and assurance_consumer:
+        # One research consumer's data-product health (what `ats consumer-cutover health` used to print).
+        from ..workflow import consumer_health
+
+        result = consumer_health.check(assurance_consumer)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["status"] == "ok" else 1
     elif action == "health":
         result = products.health()
+    elif action == "health-log":
+        # The recorded changes of that health (a line only when it turns bad or turns good again).
+        from ..workflow import consumer_cutover as cc
+
+        print(json.dumps(cc.log(consumer_id=assurance_consumer or None), ensure_ascii=False, indent=2, default=str))
+        return 0
     elif action == "quality":
         structured = products.structured_quality_report(dataset=dataset or None)
         if output_format == "markdown":
@@ -2275,6 +4042,95 @@ def run_data(
                 limit=limit,
             ),
         }
+    elif action in {"factset-review-packages", "factset-review", "factset-review-correct",
+                    "factset-index-inventory", "factset-index-review",
+                    "factset-index-review-packages"}:
+        from ..data.stores.structured.factset_reviews import FactSetReviews
+        from ..data.sources.factset_report_layout import load_layout_policy
+
+        reviews = FactSetReviews(products.structured)
+        if action == "factset-index-review-packages":
+            result = reviews.list_index_packages(limit=limit)
+        elif action == "factset-index-inventory":
+            if not value or not confirm:
+                raise ValueError("factset-index-inventory requires release id VALUE and --confirm")
+            declaration = json.loads(query_scope or "{}")
+            if set(declaration) != {"expected_cells", "not_disclosed", "evidence_refs"}:
+                raise ValueError("index inventory requires expected_cells, not_disclosed and evidence_refs")
+            releases = products.structured.release_manifests(
+                dataset_id="sp500_earnings_insight", partition="index_core", limit=10000)
+            release = next((row for row in releases if row["release_id"] == value), None)
+            if (release is None or not release["extractor_version"].startswith(
+                    "factset-text-semantic-v2:")):
+                raise ValueError("semantic_index_release_not_found")
+            context = release["quality"].get("index_review_context")
+            if not context:
+                raise ValueError("index_review_context_missing")
+            package_hash = reviews.register_index(context, **declaration)
+            result = {"package_hash": package_hash, "release_id": value,
+                      "approved": False, "published": False}
+        elif action == "factset-index-review":
+            if not value or not confirm:
+                raise ValueError("factset-index-review requires package hash VALUE and --confirm")
+            review = json.loads(query_scope or "{}")
+            if set(review) != {"decision", "reviewer", "evidence_refs", "note"}:
+                raise ValueError("review requires decision, reviewer, evidence_refs and note")
+            review_id = reviews.decide_index(value, **review)
+            result = {"review_id": review_id, "package_hash": value,
+                      "decision": review["decision"], "published": False}
+        elif action == "factset-review-packages":
+            result = reviews.list_packages(limit=limit)
+        elif action == "factset-review-correct":
+            if not value or not confirm:
+                raise ValueError("factset-review-correct requires package hash VALUE and --confirm")
+            review = json.loads(query_scope or "{}")
+            if set(review) != {"corrections", "reviewer", "note"}:
+                raise ValueError("correction requires corrections, reviewer and note")
+            corrected = reviews.correct(value, **review)
+            result = {"package_hash": corrected, "parent_hash": value,
+                      "approved": False, "published": False}
+        else:
+            if not value or not confirm:
+                raise ValueError("factset-review requires package hash VALUE and --confirm")
+            review = json.loads(query_scope or "{}")
+            if set(review) != {"decision", "reviewer", "evidence_refs", "note"}:
+                raise ValueError("review requires decision, reviewer, evidence_refs and note")
+            review_id = reviews.decide(value, policy=load_layout_policy(), **review)
+            result = {"review_id": review_id, "package_hash": value,
+                      "decision": review["decision"], "published": False}
+    elif action == "factset-refresh":
+        from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
+        from ..data.sources.factset_earnings_insight import report_refresh_url
+
+        url = report_refresh_url(json.loads(query_scope) if query_scope else {})
+        result = FactSetWeeklyPipeline(products.structured, products.unstructured).run(url=url)
+    elif action == "factset-semantic-refresh":
+        from ..data.pipelines.factset_earnings_insight import FactSetWeeklyPipeline
+        from ..data.sources.factset_earnings_insight import report_refresh_url
+
+        scope = json.loads(query_scope) if query_scope else {}
+        if not isinstance(scope, dict) or set(scope) - {
+                'url', 'index_review_id', 'review_ids', 'auto_admit', 'report_month'}:
+            raise ValueError('semantic FactSet scope accepts only url, bound reviews, auto_admit and report_month')
+        review_ids = scope.get('review_ids') or {}
+        if not isinstance(review_ids, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in review_ids.items()):
+            raise ValueError('factset_review_ids_invalid')
+        index_review_id = scope.get('index_review_id', '')
+        if not isinstance(index_review_id, str):
+            raise ValueError('factset_index_review_id_invalid')
+        auto_admit = scope.get('auto_admit', False)
+        if not isinstance(auto_admit, bool):
+            raise ValueError('factset_auto_admit_invalid')
+        report_month = scope.get('report_month', '')
+        if not isinstance(report_month, str):
+            raise ValueError('factset_report_month_invalid')
+        result = FactSetWeeklyPipeline(products.structured, products.unstructured).run_semantic(
+            local_pdf=report_path or None,
+            url=report_refresh_url({'url': scope['url']} if 'url' in scope else {}),
+            index_review_id=index_review_id, review_ids=review_ids,
+            auto_admit=auto_admit, report_month=report_month)
     elif action in {"factset-import", "factset-reprocess"}:
         if not report_path:
             raise ValueError(f"{action} requires --report-path")
@@ -2375,9 +4231,14 @@ def run_data(
     return 0
 
 
+@cli_read_request
 def main(argv: list[str] | None = None) -> int:
+    from ..execution.broker_write_guard import startup
+
+    startup(caller="ats.runtime.cli.main")
     _setup_logging()
     parser = argparse.ArgumentParser(prog="ats", description="Multi-agent trading cycle runner")
+    parser.add_argument("--read-scope-json", help="Exact business read scopes, keyed by consumer")
     sub = parser.add_subparsers(dest="command", required=True)
     data = sub.add_parser("data", help="统一数据产品与结构化运维入口")
     data.add_argument(
@@ -2390,6 +4251,16 @@ def main(argv: list[str] | None = None) -> int:
             "source-acceptance",
             "source-publish",
             "source-releases",
+            "article-ingest",
+            "article-metadata-reconcile",
+            "document-ingest",
+            "fixed-ingest",
+            "chain-source-collect",
+            "evidence-observe",
+            "macro-news-collect",
+            "calendar-refresh",
+            "calendar-finalize",
+            "assurance",
             "ibkr-news-diagnostics",
             "describe",
             "availability",
@@ -2405,6 +4276,7 @@ def main(argv: list[str] | None = None) -> int:
             "datasets",
             "metrics",
             "health",
+            "health-log",
             "coverage",
             "quality",
             "series",
@@ -2423,8 +4295,18 @@ def main(argv: list[str] | None = None) -> int:
             "cross-section",
             "earnings-insight",
             "factset-status",
+            "factset-review-packages",
+            "factset-review",
+            "factset-review-correct",
+            "factset-index-inventory",
+            "factset-index-review",
+            "factset-index-review-packages",
             "factset-import",
             "factset-reprocess",
+            "factset-refresh",
+            "factset-semantic-refresh",
+            "factset-product-pin",
+            "factset-product-unpin",
             "search",
             "company",
             "claim",
@@ -2479,6 +4361,10 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
     data.add_argument("--scope", default="", help="Ramp 图表 scope（adoption_overall 等）")
     data.add_argument("--entity", default="", help="实体过滤")
+    data.add_argument("--lookback-days", type=int, default=7,
+                      help="evidence-observe: 向前查找最近一次已发布财报的天数（日常 7，补抽 60）")
+    data.add_argument("--dry-run", action="store_true",
+                      help="evidence-observe / macro-news-collect: 只列出会处理什么，不写入")
     data.add_argument("--since", default="", help="最早期间或发布日期")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
     data.add_argument("--limit", type=int, default=20, help="通用结果条数")
@@ -2539,7 +4425,36 @@ def main(argv: list[str] | None = None) -> int:
         help="purge-source: 声明数据已在别处留存，写入清除记录供审计",
     )
     data.add_argument("--purge-note", default="", help="purge-source: 写入清除记录的备注")
+    data.add_argument("--consumer", dest="assurance_consumer", default="",
+                      help="assurance: target coverage consumer ID")
+    data.add_argument("--domain", dest="assurance_domain", default="",
+                      help="assurance: consumer data domain")
+    data.add_argument("--contract-version", dest="assurance_contract_version", default="",
+                      help="assurance: pinned consumer contract version")
+    data.add_argument("--evidence-type", default="", help="assurance record: required evidence kind")
+    data.add_argument("--outcome", dest="evidence_outcome", choices=["passed", "failed"], default="",
+                      help="assurance record: evidence outcome")
+    data.add_argument("--scope-json", dest="evidence_scope_json", default="{}",
+                      help="assurance: exact JSON scope shared by all evidence")
+    data.add_argument("--evidence-details-json", default="{}",
+                      help="assurance record: source statuses and per-product rollback proof; no raw text")
+    data.add_argument("--summary", dest="evidence_summary", default="",
+                      help="assurance record: sanitized result summary")
+    data.add_argument("--command-summary", dest="evidence_command_summary", default="",
+                      help="assurance record: sanitized command description (no secrets)")
+    data.add_argument("--environment-name", dest="evidence_environment_names", action="append", default=[],
+                      help="assurance record: environment variable name only; never its value")
+    data.add_argument("--prerequisite-event", dest="evidence_prerequisites", action="append", default=[],
+                      help="assurance record: prerequisite evidence ID; repeatable")
+    data.add_argument("--fingerprint-path", dest="evidence_fingerprint_paths", action="append", default=[],
+                      help="assurance record: dependency file to hash; repeatable")
+    data.add_argument("--reason", dest="evidence_reason", default="",
+                      help="assurance revoke: reason")
+    data.add_argument("--event-id", dest="evidence_event_id", default="",
+                      help="assurance revoke: evidence event to invalidate")
     data.add_argument("--apply", action="store_true", help="publish/source-publish: 显式执行写操作")
+    data.add_argument("--field-evidence", default="", help="article-metadata-reconcile: exact-version field evidence JSON")
+    data.add_argument("--document-ids", default="", help="article-metadata-reconcile: bounded document ID array JSON")
     data.add_argument(
         "--mode", choices=["platform"], default="platform", help="publish: 唯一受支持的数据路径"
     )
@@ -2558,20 +4473,283 @@ def main(argv: list[str] | None = None) -> int:
     srv = sub.add_parser("serve", help="run the approval webhook (Feishu callbacks)")
     srv.add_argument("--host", default="0.0.0.0")
     srv.add_argument("--port", type=int, default=8000)
-    sch = sub.add_parser("schedule", help="run cycles on a daily NYSE-session cron")
-    sch.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
-    sch.add_argument("--now", action="store_true", help="run one cycle immediately, then exit")
-    sch.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="run the same schedule without external-model calls (useful for safe acceptance checks)",
-    )
-    sch.add_argument(
-        "--window", choices=["amc", "bmo"], help="run one PEAD score window immediately, then exit"
-    )
+    sch = sub.add_parser("schedule", help="research dispatcher daemon: scheduled and calendar-event workflows")
+    ct = sub.add_parser("cutover", help="切换控制平面（交易路径切换前保留）：边界查询、预检、批次登记与报告校验")
+    ct.add_argument("action", choices=[
+        "state", "wiring", "preflight", "set-route", "activate", "release",
+        "active", "history", "fallback", "reverify"])
+    ct.add_argument("--boundary", default="",
+                    choices=[""] + _cutover_boundary_names())
+    ct.add_argument("--route", default="", help="set-route/fallback: target | legacy | disabled")
+    ct.add_argument("--scope-json", default="{}", help="activate/release: scope")
+    ct.add_argument("--consumer-id", default="", help="activate/fallback/reverify: consumer")
+    ct.add_argument("--report-id", default="", help="activate: 引用的影子报告 ID")
+    ct.add_argument("--report-db", default="", help="影子报告库路径")
+    ct.add_argument("--snapshot-as-of", default="", help="reverify: 快照时点")
+    ct.add_argument("--actor", default="", help="operator identity")
+    ct.add_argument("--reason", default="", help="变更理由（set-route/release 必填）")
+    ct.add_argument("--fallback-proof", default="", choices=["", "valid", "missing"])
+    ct.add_argument("--fallback-retired", default="", choices=["", "yes", "no"])
+    ct.add_argument("--fallback-available", default="", choices=["", "yes", "no"])
+    ct.add_argument("--db", default="", help="覆盖切流控制库路径")
+    ct.add_argument("--bootstrap", action="store_true",
+                    help="初始化六条边界并声明本仓库接线")
+
+    cc = sub.add_parser("consumer-cutover", help="仅保留 restore（把读路由不在 target 的分析师恢复到 target）；status/health/log 已迁到 `ats data health`、`ats data health-log`")
+    cc.add_argument("action", choices=["status", "health", "log", "restore"])
+    cc.add_argument("--consumer-id", default="", help="information | fundamental | ...")
+    cc.add_argument("--actor", default="", help="restore: 操作者")
+    cc.add_argument("--approval", default="", help="restore: 用户批准原文（必填）")
+    cc.add_argument("--reason", default="", help="restore: 原因（必填）")
+    cc.add_argument("--db", default="", help="覆盖切流控制库路径")
+
+    sh = sub.add_parser("shadow", help="影子比较报告、差异处置与影子账本运维（交易路径切换前保留）")
+    sh.add_argument("action", choices=[
+        "acceptance-capture", "acceptance-run", "acceptance-record", "acceptance-report", "acceptance-check", "acceptance-signoff", "acceptance-reject", "acceptance-revoke",
+        "capture-business", "run-pair",
+        "report", "events", "acceptances", "compare", "signoff", "reject",
+        "revoke", "accept", "check", "intents", "attest"])
+    sh.add_argument("--report-id", default="", help="report ID")
+    sh.add_argument("--proof-file", default="", help="acceptance-record: actual new/replay execution proof JSON")
+    sh.add_argument("--matrix-file", default="", help="acceptance-run: pre-run frozen requirement matrix JSON")
+    sh.add_argument("--supersedes", default="", help="acceptance-record: prior immutable report ID")
+    sh.add_argument("--run-id", default="", help="compare/attest: shadow run ID")
+    sh.add_argument("--pair-id", default="", help="run-pair: unique paired execution ID")
+    sh.add_argument("--isolation-root", default="", help="business pair: parent isolation root")
+    sh.add_argument("--input-store", default="", help="business pair: durable frozen input SQLite")
+    sh.add_argument("--request-file", default="", help="capture-business: request JSON; acceptance-capture: explicit cycle_id/account/fill_price simulation recipe")
+    sh.add_argument("--consumer-id", default="", help="compare: consumer")
+    sh.add_argument("--batch-class", default="",
+                    choices=["", "research_read", "decision", "trading"])
+    sh.add_argument("--scope-json", default="{}", help="compare/check: scope")
+    sh.add_argument("--packet-hash", default="", help="compare: 输入包 hash")
+    sh.add_argument("--expected-triggers-json", default="[]",
+                    help="compare: 独立预期触发集合（不可由两轮并集推导）")
+    sh.add_argument("--left-json", default="{}", help="compare: 旧路径各面数据")
+    sh.add_argument("--right-json", default="{}", help="compare: 新路径各面数据")
+    sh.add_argument("--surface", default="", help="accept: 面名")
+    sh.add_argument("--authority", default="", help="accept: 权限方")
+    sh.add_argument("--required-surface", action="append", default=[],
+                    help="check: 必需面，可重复")
+    sh.add_argument("--actor", default="", help="operator identity")
+    sh.add_argument("--reason", default="", help="审计理由")
+    sh.add_argument("--cycle-id", default="", help="intents/attest: 决策周期")
+    sh.add_argument("--db", default="", help="覆盖影子报告库路径")
+    sh.add_argument("--order-db", default="", help="覆盖影子订单账本路径")
+    sh.add_argument("--limit", type=int, default=100)
+
+    iv = sub.add_parser(
+        "intake",
+        help="接入核验与逐消费者处置（交易路径切换前保留；只读，不改路由、不落生产证据）")
+    iv.add_argument("action", choices=[
+        "verify", "report", "digest", "not-tradable", "disposition",
+        "evidence-index"])
+    iv.add_argument("--consumer-id", default="",
+                    help="verify/not-tradable: 单一消费者；缺省为全部十个")
+    iv.add_argument("--run-id", default="", help="not-tradable: 隔离运行 ID")
+    iv.add_argument("--opinion-input", action="append", default=[],
+                    help="verify: 该角色实际读取的观点来源，可重复")
+    iv.add_argument("--optional-input", action="append", default=[],
+                    help="disposition: 缺失的可选输入，可重复")
+    iv.add_argument("--stale-input", action="append", default=[],
+                    help="disposition: 按报告年龄被判 stale 的来源，可重复")
+
+    # Named `dispatch`, not `schedule`: `schedule` is Phase E's "run the daily
+    # cycle" command, and a cutover reader sharing its name would be one
+    # mistyped flag away from firing a real cycle.
+    rt = sub.add_parser(
+        "retirement",
+        help="退役：消费者清零、数据对账、墓碑一致性、依赖与门（G0）检查（**只读，不改登记表**）")
+    rt.add_argument("action", choices=[
+        "zero", "reconcile", "tombstone", "fallback-precheck", "decide", "gate"])
+    rt.add_argument("--show", action="store_true",
+                    help="gate: 列出每道门卡住的条目（只读）")
+    rt.add_argument("--verification", default="",
+                    help="decide/gate: G0 核验记录路径（默认 openspec 里的 verification.md）")
+    rt.add_argument("--identifier", default="",
+                    help="逗号分隔的登记条目 id（reconcile/tombstone 用单个）")
+    rt.add_argument("--uses", default="",
+                    help="reconcile: 旧实现所涉的全部数据用途（逗号分隔）")
+    rt.add_argument("--readable", default="",
+                    help="tombstone: 仍可读取该条目的消费方（逗号分隔）")
+    rt.add_argument("--target", default="", help="fallback-precheck: 回退目标")
+    rt.add_argument("--check-available", action="store_true",
+                    help="fallback-precheck: 同时核验目标可用性")
+    rt.add_argument("--drill-reference", default="",
+                    help="decide: 已演练回退的引用")
+
+    lv = sub.add_parser(
+        "live",
+        help="实盘授权门与交易路径演练（**本命令不会执行真实切换**）")
+    lv.add_argument("action", choices=[
+        "authorize", "show-auth", "gate", "drill", "rollback-drill",
+        "drill-history"])
+    lv.add_argument("--reference", default="", help="实盘授权引用（须以 LIVE- 开头）")
+    lv.add_argument("--issuer", default="human", help="authorize: 签发主体（仅 human）")
+    lv.add_argument("--authorised-by", default="", help="authorize: 授权人")
+    lv.add_argument("--issued-by", default="", help="authorize: 签发人")
+    lv.add_argument("--scope", default="", help="authorize: 逗号分隔的消费者范围")
+    lv.add_argument("--environment", default="", help="environment（live/paper）")
+    lv.add_argument("--account", default="", help="account")
+    lv.add_argument("--valid-until", default="", help="authorize: 有效期")
+    lv.add_argument("--note", default="", help="authorize: 备注")
+    lv.add_argument("--consumer-id", default="", help="gate: 被切换的消费者")
+    lv.add_argument("--drill-id", default="", help="drill/rollback-drill: 演练标识")
+    lv.add_argument("--base", default="", help="演练：真实路由库路径（演练库由它派生）")
+    lv.add_argument("--fallback-unavailable", action="store_true",
+                    help="rollback-drill: 声明回退目标不可用（验证保持现状）")
+    lv.add_argument("--db", default="", help="实盘授权与门禁决定库")
+    lv.add_argument("--actor", default="", help="执行人")
+
+    sp = sub.add_parser(
+        "dispatch",
+        help="调度所有权核验与回滚去重（交易路径切换前保留）（pause/resume 停用或恢复一个研究工作流；其余只读账本）")
+    sp.add_argument("action", choices=[
+        "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze",
+        "runtime-inventory", "runtime-handover", "runtime-cancel-freeze", "runtime-expected", "runtime-compare",
+        "ownership", "ledger", "executed", "record-execution",
+        "rollback-plan", "rollback-history", "pause", "resume", "owner-switch", "owner-rollback", "owner-log"])
+    sp.add_argument("--approval", default="", help="resume: 用户批准原文或其引用（恢复必填，停用不需要）")
+    sp.add_argument("--void-unfinished", default="", help="pause/resume: 作废未完成认领的理由（有未完成认领时必填，running 不可作废）")
+    sp.add_argument("--trigger", default="", help="限定单一逻辑触发")
+    sp.add_argument("--execution-ref", default="", help="record-execution: 执行引用")
+    sp.add_argument("--state", default="", help="第4组的 dispatch 状态库")
+    sp.add_argument("--switch-db", default="", help="执行记录与回滚记录库")
+    sp.add_argument("--actor", default="", help="执行人")
+    sp.add_argument("--isolation-root", default="", help="runtime-* 隔离演练根目录；不修改生产 owner")
+    sp.add_argument("--workflow", default="", help="runtime-* workflow ID")
+    sp.add_argument("--business-scope", default="", help="runtime-* 精确 scope JSON")
+    sp.add_argument("--owner", default="legacy", choices=["legacy", "shadow", "dispatcher"])
+    sp.add_argument("--reason", default="")
+    sp.add_argument("--token", default="", help="freeze 返回的 token")
+    sp.add_argument("--dispositions", default="{}", help="逐 trigger key 处置 JSON")
+    sp.add_argument("--from-time", default="", help="预期集合窗口 ISO 起点（带时区）")
+    sp.add_argument("--to-time", default="", help="预期集合窗口 ISO 终点（带时区）")
+
+    rc_parser = sub.add_parser(
+        "read",
+        help="读路径分批切换（交易路径切换前保留；**会改路由**，须提供 --authorisation）")
+    rc_parser.add_argument("action", choices=[
+        "plan", "switch", "authorize", "show-auth", "history"])
+    rc_parser.add_argument("--batch-id", default="", help="switch: 批次 ID")
+    rc_parser.add_argument("--db", default="", help="批次清单与运行记录库")
+    rc_parser.add_argument("--cutover-db", default="", help="切流控制状态库")
+    rc_parser.add_argument("--report-db", default="", help="独立影子报告库路径")
+    rc_parser.add_argument("--authorisation", default="",
+                           help="已登记的部署授权引用；switch 必填")
+    rc_parser.add_argument("--authorised-by", default="", help="authorize: 授权人")
+    rc_parser.add_argument("--issued-by", default="", help="authorize: 签发人")
+    rc_parser.add_argument("--scope", default="", help="authorize: 逗号分隔的消费者范围")
+    rc_parser.add_argument("--valid-until", default="", help="authorize: 授权有效期")
+    rc_parser.add_argument("--note", default="", help="authorize: 备注")
+    rc_parser.add_argument("--actor", default="", help="执行人")
+    rc_parser.add_argument("--apply", action="store_true",
+                           help="switch: 真正改路由；缺省只决定不改动")
+    rc_parser.add_argument("--json", action="store_true", help="history: JSON 输出")
+
+    bt = sub.add_parser(
+        "batch",
+        help="逐批切换清单与 dry-run（交易路径切换前保留；**不改任何路由**）")
+    bt.add_argument("action", choices=[
+        "list", "declare", "show", "dry-run", "drift"])
+    bt.add_argument("--batch-id", default="", help="declare/show/drift: 批次 ID")
+    bt.add_argument("--batch-class", default="", choices=[""] + _batch_class_names())
+    bt.add_argument("--owner", default="", help="declare: 责任方")
+    bt.add_argument("--old-route", default="", help="declare: 旧路由")
+    bt.add_argument("--new-route", default="", help="declare: 新路由")
+    bt.add_argument("--scope-json", default="{}", help="declare: 批次范围")
+    bt.add_argument("--observation-window", default="", help="declare: 观察窗口")
+    bt.add_argument("--success-criteria", default="", help="declare: 成功判据")
+    bt.add_argument("--stop-reason", default="", help="declare: 停止条件")
+    bt.add_argument("--fallback-route", default="", help="declare: 回退目标")
+    bt.add_argument("--fallback-proof", default="",
+                    choices=["", "valid", "missing"])
+    bt.add_argument("--fallback-retired", default="",
+                    choices=["", "yes", "no"])
+    bt.add_argument("--fallback-available", default="",
+                    choices=["", "yes", "no"])
+    bt.add_argument("--fallback-drill", default="", help="declare: 已演练回退的引用")
+    bt.add_argument("--report-id", default="", help="declare: 引用的影子报告 ID")
+    bt.add_argument("--direct-verification", action="store_true",
+                    help="declare: 已在生产运行、直接核验接收（不重复切换）")
+    bt.add_argument("--qualification-status", default="",
+                    help="drift: 当前资格状态")
+    bt.add_argument("--serving", default="", choices=["", "yes", "no"],
+                    help="drift: 该批次是否正在承载流量")
+    bt.add_argument("--actor", default="", help="declare: operator identity")
+    bt.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
+    bt.add_argument("--db", default="", help="覆盖批次清单库路径")
+    bt.add_argument("--cutover-db", default="", help="覆盖切流控制库路径")
+    bt.add_argument("--report-db", default="", help="独立影子报告库路径")
+
+    # Named `drill`, not `rollback`: the actions cover the shadow-period
+    # acceptance checks as well as the three boundary rollbacks, and a command
+    # named `rollback` that also verifies traceability would be misread.
+    dr = sub.add_parser(
+        "drill",
+        help="三边界独立回滚演练与影子期验收（交易路径切换前保留；**不切实盘、不改生产路由**）")
+    dr.add_argument("action", choices=[
+        "read-rollback", "schedule-rollback", "trade-rollback", "all-rollbacks",
+        "history", "traceability", "unapproved-orders", "acceptance"])
+    dr.add_argument("--drill-id", default="", help="演练标识（缺省按 action 派生）")
+    dr.add_argument("--batch-id", default="", help="read-rollback: 批次 ID")
+    dr.add_argument("--trigger", action="append", default=[],
+                    help="schedule-rollback: 逻辑触发，可重复")
+    dr.add_argument("--executed-json", default="{}",
+                    help="schedule-rollback: 已执行触发映射 {trigger: [refs]}")
+    dr.add_argument("--unconfirmed", action="append", default=[],
+                    help="schedule-rollback: 无执行记录的触发，可重复")
+    dr.add_argument("--authorisation", default="", help="schedule-rollback: 部署授权引用")
+    dr.add_argument("--fallback-retired", action="store_true",
+                    help="read-rollback: 声明回退目标已退役（验证保持现状）")
+    dr.add_argument("--fallback-unavailable", action="store_true",
+                    help="read-rollback/trade-rollback: 声明回退目标不可用")
+    dr.add_argument("--environment", default="paper", help="trade-rollback: environment")
+    dr.add_argument("--account", default="", help="trade-rollback: account")
+    dr.add_argument("--live-reference", default="",
+                    help="trade-rollback: 实盘授权引用（缺省即被正确拒绝）")
+    dr.add_argument("--run-id", default="", help="traceability/unapproved-orders: 影子运行 ID")
+    dr.add_argument("--cycle-id", default="", help="traceability: 决策周期")
+    dr.add_argument("--counts-json", default="",
+                    help="read-rollback: 影子/审批/账本记录计数 {name: int}")
+    dr.add_argument("--order-db", default="", help="覆盖影子订单账本路径")
+    dr.add_argument("--report-db", default="", help="覆盖影子报告库路径")
+    dr.add_argument("--cutover-db", default="", help="覆盖切流控制库路径")
+    dr.add_argument("--batch-db", default="",
+                    help="read-rollback/schedule-rollback: 覆盖批次清单与部署授权库"
+                         "（与控制平面、切换记录是不同文件）")
+    dr.add_argument("--dispatch-db", default="", help="覆盖调度状态库路径")
+    dr.add_argument("--switch-db", default="", help="覆盖调度切换记录库路径")
+    dr.add_argument("--route-db", default="", help="覆盖交易路由库路径")
+    dr.add_argument("--actor", default="", help="执行人")
+    dr.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
+
+    wf = sub.add_parser("workflow", help="工作流运行及 Trigger Ledger 运维")
+    wf.add_argument("action", choices=["run", "runs", "triggers", "retry", "history"])
+    wf.add_argument("--task", action="append", default=[], help="run: Phase E task ID，可重复")
+    wf.add_argument("--scope-kind", default="portfolio")
+    wf.add_argument("--scope-id", default="portfolio")
+    wf.add_argument("--trigger-kind", choices=["manual", "schedule", "event"], default="manual")
+    wf.add_argument("--trigger-id", default="", help="manual: 重放时必须复用此 ID")
+    wf.add_argument("--schedule-id", default="", help="run or triggers: schedule ID")
+    wf.add_argument("--scheduled-for", default="", help="schedule: 原计划时刻，需含时区")
+    wf.add_argument("--event-id", default="", help="event: 稳定事件 ID")
+    wf.add_argument("--event-version", default="", help="event: 日历事件版本")
+    wf.add_argument("--workflow-id", default="", help="trigger policy/ledger workflow ID")
+    wf.add_argument("--trigger-key", default="", help="retry/history: stable Trigger Ledger key")
+    wf.add_argument("--scheduled-from", default="", help="triggers: 计划时刻起点（含时区）")
+    wf.add_argument("--scheduled-to", default="", help="triggers: 计划时刻终点（含时区）")
+    wf.add_argument("--actor", default="", help="retry: operator identity")
+    wf.add_argument("--reason", default="", help="retry: audited compensation reason")
+    wf.add_argument("--decision-profile", default="")
+    wf.add_argument("--decision-cycle", action="store_true")
+    wf.add_argument("--inputs-json", default="{}")
+    wf.add_argument("--as-of", default="", help="显式冻结的 ISO 8601 as-of 时点")
+    wf.add_argument("--status", default="")
+    wf.add_argument("--limit", type=int, default=100)
     td = sub.add_parser("thetadata", help="probe the local ThetaData terminal (inspect schema)")
     td.add_argument("symbol")
-    se = sub.add_parser("sector", help="sector review 行业分析 (review / show / probe)")
+    se = sub.add_parser("sector", help="行业分析：show / probe / html / kbperturb（review、layer、crosssection 已退役，用 ats workflow run）")
     se.add_argument(
         "action", choices=["review", "show", "probe", "crosssection", "kbperturb", "layer", "html"]
     )
@@ -2594,7 +4772,7 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     se.add_argument("--offline", action="store_true", help="skip yfinance (store/static only)")
     se.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
-    evi = sub.add_parser("evidence", help="产业链证据 (observe / show / sources) —— 只读，绝不下单")
+    evi = sub.add_parser("evidence", help="产业链证据：show / sources / probe / layer 与命题治理（claims、report、propose、proposals、review、kbreview）——只读，绝不下单；observe、collect、articles 已退役，见数据刷新任务")
     evi.add_argument(
         "action",
         choices=[
@@ -2644,15 +4822,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     evi.add_argument("--output", default="", help="layer/ai-production: Markdown 审阅文档路径")
     evi.add_argument("--chart-dir", default="", help="layer/ai-production: PNG/sidecar 输出目录")
-    ev = sub.add_parser("events", help="事件日历 (list / upcoming)")
-    ev.add_argument("action", choices=["list", "upcoming"])
+    ev = sub.add_parser("events", help="事件日历 (list / upcoming / refresh / status / candidates)")
+    ev.add_argument("action", choices=["list", "upcoming", "refresh", "status",
+                                       "candidates", "override", "cancel", "withdraw"])
     ev.add_argument("--days", type=int, default=30, help="upcoming window")
+    ev.add_argument("--source", action="append", default=[], help="refresh: source ID，可重复")
+    ev.add_argument("--event-id", default="")
+    ev.add_argument("--date", default="", help="override: 新日期 YYYY-MM-DD")
+    ev.add_argument("--actor", default="")
+    ev.add_argument("--reason", default="")
+    ev.add_argument("--evidence-json", default="{}")
+    ev.add_argument("--status", default="")
+    ev.add_argument("--limit", type=int, default=100)
     ch = sub.add_parser("chief", help="chief 首席统一决策 (run / show / probe)")
     ch.add_argument("action", choices=["run", "show", "probe"])
     ch.add_argument("--live", action="store_true", help="execute for real (default dry-run)")
     ch.add_argument("--yes", action="store_true", help="auto-approve (non-interactive)")
     ch.add_argument("--no-llm", action="store_true")
     ch.add_argument("--offline", action="store_true", help="skip live broker read")
+    ch.add_argument("--fundamental-mode", choices=["routine", "event"], default="routine")
+    ch.add_argument("--decision-profile", default="ai_hardware")
     ch.add_argument("--no-execute", action="store_true", help="decide only, don't call trader")
     ch.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli")
     rk = sub.add_parser("risk", help="risk officer 风控 (report / memo / check)")
@@ -2691,6 +4880,15 @@ def main(argv: list[str] | None = None) -> int:
         "reflect: 只出确定性证据+当前需要处理清单，不调 LLM 生成假设",
     )
     jr.add_argument("--quarterly", action="store_true", help="calibrate: 按季度出报告（默认按月）")
+    ck = sub.add_parser(
+        "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
+    ck.add_argument("action", choices=["run", "rebuild", "gaps"],
+                    help="run: 幂等执行一个对账窗口；rebuild: 重建绩效/归因读模型"
+                         "（只写派生读模型）；gaps: 查看未清偿审计异常")
+    ck.add_argument("--dry-run", action="store_true", help="只读演练，不写入")
+    ck.add_argument("--window-start", help="对账窗口起点 YYYY-MM-DD（默认今天）")
+    ck.add_argument("--window-end", help="对账窗口终点 YYYY-MM-DD（默认今天）")
+    ck.add_argument("--period", help="rebuild: 期间 YYYY-MM（默认当月）")
     tr = sub.add_parser(
         "trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell"
     )
@@ -2726,20 +4924,41 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="go through approval but place no orders"
     )
     te = sub.add_parser(
-        "technical", help="technical analyst 技术面 (review / show / probe) — 确定性无 LLM"
+        "technical", help="技术面：show / probe（review 已退役，用 ats workflow run）"
     )
     te.add_argument("action", choices=["review", "show", "probe"])
     te.add_argument("name", nargs="?", default="technical")
     te.add_argument("--offline", action="store_true", help="skip broker + price fetch")
     te.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
-    ma = sub.add_parser("macro", help="macro strategist 宏观分析 (review / show / probe)")
+    ma = sub.add_parser("macro", help="宏观分析：show / probe（review 已退役，用 ats workflow run）")
     ma.add_argument("action", choices=["review", "show", "probe"])
     ma.add_argument("name", nargs="?", default="macro")
     ma.add_argument("--no-llm", action="store_true", help="assemble + stub review, no LLM")
     ma.add_argument("--offline", action="store_true", help="skip FRED/yfinance/Tavily")
     ma.add_argument("--no-report", action="store_true", help="skip the Obsidian report file")
+    an = sub.add_parser(
+        "analyst", help="已退役：information / fundamental 由 Dispatcher 运行，用 ats workflow run"
+    )
+    an.add_argument("action", choices=["information", "fundamental"],
+                    help="information: 信息分析师一轮简报（4.9 独立入口）；"
+                         "fundamental: 基本面双模式运行（5.1 独立入口）")
+    an.add_argument("--mode", choices=["routine", "event"], default="routine",
+                    help="fundamental 运行模式：routine 例行（简报/预期数据触发）、"
+                         "event 事件（财报/公司事件触发）")
+    an.add_argument("--symbol", help="fundamental 目标的标的")
+    an.add_argument("--trigger", default="",
+                    help="触发类型（routine: information_brief_update|expectation_data_change；"
+                         "event: earnings_release|company_event）；缺省按模式取默认")
+    an.add_argument("--fiscal-label", dest="fiscal_label", default="",
+                    help="event 模式的目标报告期（如 Q3 FY2026）")
+    an.add_argument("--cutoff", default="", help="event 模式的基线冻结时刻（ISO）")
+    an.add_argument("--refresh-baseline", dest="refresh_baseline", action="store_true",
+                    help="routine 模式：按最新信息简报重建下一期财报前基线（财报发布后拒绝）")
+    an.add_argument("--no-ingest", action="store_true",
+                    help="跳过数据层研究文章采集，只处理已准入文档")
+    an.add_argument("--no-llm", action="store_true", help="无 LLM：只做识别与投影，不抽取")
     pe = sub.add_parser(
-        "pead", help="PEAD earnings workflow (prep / score / show / monitor / watch / research)"
+        "pead", help="PEAD：show / transcriptprobe（prep、score、monitor、watch、research 已退役，用 ats workflow run）"
     )
     pe.add_argument(
         "action",
@@ -2751,7 +4970,6 @@ def main(argv: list[str] | None = None) -> int:
             "watch",
             "research",
             "transcriptprobe",
-            "scorewindow",
         ],
     )
     pe.add_argument("symbol", nargs="?", help="ticker (omit for `watch` / `research`)")
@@ -2760,22 +4978,6 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=4,
         help="transcriptprobe: how many recent quarters per target",
-    )
-    pe.add_argument("--window", choices=["amc", "bmo"], help="scorewindow: which window to run")
-    pe.add_argument(
-        "--as-of",
-        dest="as_of",
-        help="scorewindow: ISO datetime; rewinds the calendar/state layer only",
-    )
-    pe.add_argument(
-        "--plan-only",
-        action="store_true",
-        help="scorewindow: print the routing decision without scoring",
-    )
-    pe.add_argument(
-        "--no-chief",
-        action="store_true",
-        help="scorewindow: score but don't run the Chief / push approval",
     )
     pe.add_argument("--transcript", help="path or URL to the earnings-call transcript (score)")
     pe.add_argument("--live", action="store_true", help="execute (IBKR paper); default dry-run")
@@ -2795,7 +4997,111 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    moved = RESEARCH_MANUAL_MOVED.get((args.command, getattr(args, "action", "")))
+    if moved:
+        print(f"❌ `ats {args.command} {args.action}` 已退役：研究分析师由 Dispatcher 运行，请用\n   {moved}")
+        return 2
+
+    # Only the explicit administrative bootstrap can initialize a missing
+    # authority. Business and ordinary inspection entries never create defaults.
+    if not (args.command == "cutover" and args.action == "state" and args.bootstrap):
+        from ..workflow.cutover import assert_runtime_startup
+        assert_runtime_startup(caller="ats.runtime.cli.main")
+
     if args.command == "data":
+        persistent_write = args.action in {
+            "ingest", "article-ingest", "document-ingest", "fixed-ingest", "factset-import", "factset-reprocess",
+            "factset-refresh", "factset-semantic-refresh", "calendar-refresh", "calendar-finalize",
+        } or (args.action == "release-check" and args.ingest_new)
+        persistent_write = persistent_write or args.action == "chain-source-collect"
+        persistent_write = persistent_write or (
+            args.action in {"evidence-observe", "macro-news-collect"} and not args.dry_run)
+        persistent_write = persistent_write or (args.action == "article-metadata-reconcile" and args.apply)
+        worker_task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
+        if persistent_write:
+            from ..data.persistent_queue import PersistentIngestionQueue
+
+            queue = PersistentIngestionQueue()
+            if worker_task_id:
+                worker_id = os.environ.get("ATS_PERSISTENT_QUEUE_LEASE_OWNER", "")
+                worker_source = os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", "")
+                if not queue.valid_lease(worker_task_id, worker_id, worker_source):
+                    parser.error("persistent data writes require a valid queue worker lease")
+            else:
+                # Only explicitly isolated acceptance runs may write directly to a
+                # disposable database; every operational/persistent write is queued.
+                isolated_replay = bool(args.force and args.db_path and args.artifact_root)
+                if not isolated_replay:
+                    raw_args = list(argv) if argv is not None else sys.argv[1:]
+                    trigger_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+                    source_id = args.source or args.value or args.group or args.dataset
+                    if args.action == "evidence-observe":
+                        source_id = source_id or args.entity
+                    elif args.action == "macro-news-collect":
+                        source_id = source_id or "macro_theme_news"
+                    if not source_id:
+                        parser.error("persistent ingestion requires --source, VALUE, --group or --dataset")
+                    registry_bytes = b"".join(
+                        (Path("config/data") / name).read_bytes()
+                        for name in ("structured.yaml", "unstructured.yaml", "schedules.yaml")
+                    )
+                    policy = hashlib.sha256(registry_bytes + " ".join(raw_args).encode()).hexdigest()
+                    task_scope = {"source": args.source or args.value, "group": args.group,
+                                  "dataset": args.dataset, "entity": args.entity,
+                                  "periods": args.periods, "query_scope": args.query_scope}
+                    if args.action.startswith("factset-"):
+                        task_scope["sources"] = [
+                            "factset_earnings_insight_doc",
+                            "factset_earnings_insight_metrics",
+                        ]
+                    task_id, created = queue.enqueue(
+                        source_id=source_id,
+                        scope=task_scope,
+                        trigger_kind="manual", trigger_ref=trigger_at.isoformat(),
+                        command=["ats", *raw_args], policy_fingerprint=policy,
+                        requested_as_of=trigger_at.isoformat(), priority=20,
+                    )
+                    result = queue.run_one(task_id=task_id)
+                    if result is None:
+                        existing = queue.get(task_id) or {}
+                        print(json.dumps({"task_id": task_id, "created": created,
+                                          "status": existing.get("status", "queued")},
+                                         ensure_ascii=False))
+                        return 0
+                    print(json.dumps({"task_id": task_id, "status": result["status"],
+                                      "ingestion_result": result.get("stdout", {})},
+                                     ensure_ascii=False, indent=2, default=str))
+                    return 0 if result["status"] in {"succeeded", "no_change", "quarantined", "partial"} else 1
+        if args.action == "macro-news-collect":
+            from ..data.collection.macro_news import collect
+
+            packet = collect(dry_run=args.dry_run)
+            print(json.dumps(packet, ensure_ascii=False, default=str))
+            return 1 if packet["status"] == "failed" else 0
+        if args.action == "evidence-observe":
+            from .evidence_observe import observe_entity
+
+            if not args.entity:
+                parser.error("data evidence-observe requires --entity")
+            packet = observe_entity(args.entity, lookback_days=args.lookback_days, dry_run=args.dry_run)
+            print(json.dumps(packet, ensure_ascii=False, default=str))
+            return 1 if packet["status"] == "failed" else 0
+        if args.action == 'article-metadata-reconcile':
+            from ..data.pipelines.unstructured.article_metadata import reconcile_article_metadata
+            if not args.source or not args.as_of or not args.document_ids:
+                parser.error('metadata reconciliation requires --source, --as-of and bounded --document-ids')
+            ids = json.loads(Path(args.document_ids).read_text())
+            if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                parser.error('document-ids must be a nonempty string array')
+            fields = json.loads(Path(args.field_evidence).read_text()) if args.field_evidence else None
+            result = reconcile_article_metadata(args.source,
+                now=datetime.fromisoformat(args.as_of), dry_run=not args.apply,
+                document_ids=ids, field_evidence=fields, limit=args.limit)
+            states = {row['status'] for row in result['rows']}
+            result['status'] = ('partial' if 'body_integrity_gap' in states else
+                                'no_change' if states == {'no_change'} else 'succeeded')
+            print(json.dumps(result, ensure_ascii=False, default=str))
+            return 0
         if args.action in {"search", "company", "claim", "lineage"} and not args.value:
             parser.error(f"data {args.action} requires VALUE")
         return run_data(
@@ -2840,6 +5146,20 @@ def main(argv: list[str] | None = None) -> int:
             provider_lookup_attempts=args.provider_lookup_attempts,
             provider_lookup_retry_seconds=args.provider_lookup_retry_seconds,
             approve_title_url_review=args.approve_title_url_review,
+            assurance_consumer=args.assurance_consumer,
+            assurance_domain=args.assurance_domain,
+            assurance_contract_version=args.assurance_contract_version,
+            evidence_details_json=args.evidence_details_json,
+            evidence_type=args.evidence_type,
+            evidence_outcome=args.evidence_outcome,
+            evidence_scope_json=args.evidence_scope_json,
+            evidence_summary=args.evidence_summary,
+            evidence_command_summary=args.evidence_command_summary,
+            evidence_environment_names=args.evidence_environment_names,
+            evidence_prerequisites=args.evidence_prerequisites,
+            evidence_fingerprint_paths=args.evidence_fingerprint_paths,
+            evidence_reason=args.evidence_reason,
+            evidence_event_id=args.evidence_event_id,
         )
     if args.command == "ibkr":
         return ibkr_probe()
@@ -2849,10 +5169,37 @@ def main(argv: list[str] | None = None) -> int:
         serve(host=args.host, port=args.port)
         return 0
     if args.command == "schedule":
-        from .scheduler import start
+        from .dispatcher_daemon import start
 
-        start(dry_run=not args.live, run_once=args.now, window=args.window, use_llm=not args.no_llm)
+        start()
         return 0
+    if args.command == "cutover":
+        return cutover_command(args, parser=parser)
+    if args.command == "consumer-cutover":
+        return consumer_cutover_command(args, parser=parser)
+    if args.command == "intake":
+        return intake_verification_command(args, parser=parser)
+    if args.command == "retirement":
+        return retirement_command(args, parser=parser)
+
+    if args.command == "live":
+        return live_command(args, parser=parser)
+
+    if args.command == "dispatch":
+        return schedule_cutover_command(args, parser=parser)
+
+    if args.command == "drill":
+        return boundary_drill_command(args, parser=parser)
+
+    if args.command == "read":
+        return read_cutover_command(args, parser=parser)
+
+    if args.command == "batch":
+        return batch_command(args, parser=parser)
+    if args.command == "shadow":
+        return shadow_command(args, parser=parser)
+    if args.command == "workflow":
+        return workflow_command(args, parser=parser)
     if args.command == "thetadata":
         return thetadata_probe(args.symbol)
     if args.command == "sector":
@@ -2874,8 +5221,6 @@ def main(argv: list[str] | None = None) -> int:
             print(kb_perturb.render(base, other, mode=args.mode))
             return 0
 
-        if args.action == "crosssection":
-            return run_cross_section(args.name, args.layer, structure=args.structure)
         if args.action == "layer":
             return run_layer_review(
                 args.name, args.layer, use_llm=not args.no_llm, live_data=not args.offline
@@ -2908,7 +5253,7 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output,
         )
     if args.command == "events":
-        return events_list(days=args.days if args.action == "upcoming" else None)
+        return events_calendar_command(args, parser=parser)
     if args.command == "chief":
         if args.action == "show":
             return chief_show()
@@ -2921,6 +5266,8 @@ def main(argv: list[str] | None = None) -> int:
             use_llm=not args.no_llm,
             auto=args.yes,
             offline=args.offline,
+            fundamental_mode=args.fundamental_mode,
+            decision_profile=args.decision_profile,
         )
     if args.command == "risk":
         if args.action == "report":
@@ -2928,6 +5275,48 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "memo":
             return risk_memo()
         return risk_check(args.symbol)
+    if args.command == "clerk":
+        if args.action == "run":
+            from ..execution import clerk
+
+            out = clerk.clerk_run(dry_run=args.dry_run,
+                                  window_start=args.window_start,
+                                  window_end=args.window_end)
+            print(f"Clerk run {out['run_id']} [{out['status']}]"
+                  + ("（复用已有窗口结果）" if out.get("reused") else ""))
+            for step, r in out.get("steps", {}).items():
+                print(f"  {step}: {r}")
+            for e in out.get("errors", []):
+                print(f"  ⚠️ {e}")
+            if out.get("gaps_registered"):
+                print(f"  登记对账缺口 {out['gaps_registered']} 个")
+            return 1 if out["status"] == "failed" else 0
+        if args.action == "rebuild":
+            from ..execution import rebuild
+            from ..memory import get_store
+
+            period = args.period or datetime.now(timezone.utc).strftime("%Y-%m")
+            for kind_fn in (rebuild.rebuild_performance, rebuild.rebuild_attribution):
+                out = kind_fn(get_store(), period=period)
+                print(f"  {kind_fn.__name__}: {out['status']}"
+                      f"（method={out.get('method_version', 'clerk-v1')}, "
+                      f"facts={out.get('source_facts_hash', '-')[:12]}）")
+            return 0
+        if args.action == "gaps":
+            from ..execution import rebuild
+            from ..memory import get_store
+
+            rows = rebuild.list_open_exceptions(get_store())
+            if not rows:
+                print("无未清偿审计异常 ✅")
+                return 0
+            by_kind: dict[str, int] = {}
+            for r in rows:
+                by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
+            print(f"未清偿审计异常 {len(rows)} 项：")
+            for kind, n in sorted(by_kind.items()):
+                print(f"  {kind}: {n}")
+            return 1
     if args.command == "journal":
         if args.action == "reconcile":
             from ..trader import reconcile
@@ -3022,35 +5411,22 @@ def main(argv: list[str] | None = None) -> int:
             write_report=not args.no_report,
         )
         return 0
+    if args.command == "analyst":
+        if args.action == "information":
+            return run_information_pass(use_llm=not args.no_llm,
+                                        ingest_research=not args.no_ingest)
+        if args.action == "fundamental":
+            return _run_analyst_fundamental(args)
+        return 1
     if args.command == "pead":
-        if args.action == "watch":
-            run_pead_watch(use_llm=not args.no_llm)
-            return 0
-        if args.action == "research":
-            run_pead_research(use_llm=not args.no_llm)
-            return 0
         if args.action == "transcriptprobe":
             return run_transcript_probe(
                 [args.symbol] if args.symbol else None, quarters=args.quarters
-            )
-        if args.action == "scorewindow":
-            if not args.window:
-                parser.error("pead scorewindow requires --window amc|bmo")
-            return run_pead_score_window(
-                args.window,
-                dry_run=not args.live,
-                use_llm=not args.no_llm,
-                as_of=args.as_of,
-                chief=not args.no_chief,
-                plan_only=args.plan_only,
             )
         if not args.symbol:
             parser.error("pead %s requires a symbol" % args.action)
         if args.action == "show":
             return pead_show(args.symbol)
-        if args.action == "monitor":
-            run_pead_monitor(args.symbol, use_llm=not args.no_llm)
-            return 0
         run_pead(
             args.symbol,
             args.action,

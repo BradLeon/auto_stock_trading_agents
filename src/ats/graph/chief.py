@@ -15,6 +15,8 @@ checkpoint + thread_id (`ats serve`).
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 from datetime import datetime, timezone
 
@@ -22,7 +24,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from ..schemas.channel import ApprovalRequest
-from ..schemas.decision import BossApproval
+from ..schemas.decision import BossApproval, TradeDecision
 from .chief_state import ChiefDecisionState
 
 log = logging.getLogger("ats.graph.chief")
@@ -34,12 +36,16 @@ CHIEF_SOURCES = ("chief", "scheduled", "pead-chief")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
+from ..workflow.runtime_reads import decision_read, scoped_read  # noqa: E402
+
+
+@scoped_read("chief")
 def assemble_context(state: ChiefDecisionState) -> dict:
-    from ..trader import execute as texec
     from ..data.products import workflow_data_boundary
+    from ..trader import execute as texec
 
     out: dict = {}
     boundary = workflow_data_boundary("chief_graph")
@@ -49,19 +55,66 @@ def assemble_context(state: ChiefDecisionState) -> dict:
     if not state.decide:
         return out
     from ..agents.chief import assemble
+    from ..memory import get_store
 
-    ctx = assemble.build(live_broker=state.use_broker)
+    store = get_store()
+    from ..workflow import decision_requirements as dr
+
+    requirements = (state.decision_requirements or state.research_snapshot.get("requirements")
+                    or dr.standalone(state))
+    plan = dr.restore(requirements)
+    selected_plan = dr.query_plan(plan)
+    # Phase D 7.1: fix the research snapshot BEFORE any decision context is
+    # used — per-category projection ids, content hashes, as-of and freshness.
+    from ..workflow.runtime_reads import current_read_context
+    read = current_read_context()
+    snapshot, detail = assemble.build_chief_snapshot(
+        store, at=read.cutoff if read else state.as_of, query_plan=selected_plan,
+        projection_manifest=requirements.get("manifest"))
+    dr.attach(snapshot, requirements, detail)
+    out["research_snapshot"] = snapshot.to_payload()
+    if not snapshot.complete:
+        # 7.2/7.5/7.8: an incomplete snapshot blocks the cycle BEFORE any write
+        # and before any context is assembled. The gap report is stored on the
+        # state only — it is never a decision input.
+        report = assemble.gap_report(snapshot, detail)
+        print(f"🚧 研究快照不完整 — 决策周期阻断（不创建周期、不产出决策）\n{report}")
+        out.update(gap_report=report, context_text="", context_stats={},
+                   net_liquidation=0, actionable_scores=[])
+        return out
+    dr.validate(store, snapshot.to_payload(), at=state.as_of)
+    ctx = assemble.build(live_broker=state.use_broker, query_plan=selected_plan,
+                         projection_manifest=snapshot.requirements["manifest"])
     log.info("chief context: %s", ctx.stats())
-    out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
+    # 7.4: the projection read path rides along with the legacy blocks and the
+    # per-category presence disagreement is recorded (never used to gate).
+    ctx.blocks["研究快照（六类投影）"] = assemble.projection_context_block(detail)
+    diffs = assemble.dual_read_diffs(ctx, detail)
+    if any(diffs.values()):
+        log.info("chief dual-read diffs: %s", diffs)
+    out.update(context_text=ctx.as_context(),
+               context_stats={**ctx.stats(), "dual_read_diffs": diffs},
                net_liquidation=ctx.net_liquidation,
                actionable_scores=[list(x) for x in ctx.actionable_scores])
     return out
+
+
+def route_after_assemble(state: ChiefDecisionState) -> str:
+    """7.2: an incomplete snapshot never reaches chief_decide — the refusal
+    happens before the decision cycle is written, so no empty cycle exists."""
+    if state.gap_report:
+        return "end"
+    return "decide"
 
 
 def chief_decide(state: ChiefDecisionState) -> dict:
     if not state.decide:
         return {"decisions": list(state.seed_decisions)}
     from ..agents.chief import decide
+    from ..memory import get_store
+    from ..workflow.decision_requirements import validate_chief
+
+    validate_chief(get_store(), state.research_snapshot, at=_now())
 
     result = decide.from_context(state.context_text, cycle_id=state.cycle_id,
                                  as_of=state.as_of, use_llm=state.use_llm)
@@ -75,132 +128,576 @@ def chief_decide(state: ChiefDecisionState) -> dict:
     return {"summary": result.summary, "decisions": result.decisions}
 
 
+@decision_read("risk")
 def risk_gate(state: ChiefDecisionState) -> dict:
-    """Hold-filter -> live portfolio -> 6-layer pre-trade gate -> size -> card body."""
+    """Hold-filter -> live portfolio -> whole-revision review -> size -> card body.
+
+    Phase B: the review is read-only (`review_revision`) — the proposal is
+    never rewritten; whatever passes lands in `approved_decisions` for the
+    approval card and the trader, while `decisions` keeps the full proposal
+    for the revision loop.
+    """
     from ..trader import execute as texec
 
     decisions = [d for d in state.decisions if d.action != "hold"]
     if not decisions:
         print("(no actionable decisions)")
-        return {"decisions": []}
+        return {"decisions": [], "approved_decisions": [],
+                "risk_round": state.risk_round + 1}
+
+    if state.decide and not state.revision_no:
+        from ..workflow.decision_requirements import validate_chief
+
+        validate_chief(_decision_repo().store, state.research_snapshot, at=_now())
 
     from ..risk import checks as risk_checks
     from ..trader import portfolio as tport
 
     pf = tport.snapshot() if state.use_broker else None
-    decisions, risk_notes, _ = risk_checks.pre_trade(decisions, pf,
-                                                     event_data=state.event_data or None)
+    from ..data.execution_prices import PriceUnavailable, normalize_orders, session_context
+    from ..workflow.cutover_routing import RouteUnavailable
+
+    normalization_notes, normalization_errors = [], []
+    try:
+        if pf is None:
+            raise PriceUnavailable("portfolio_snapshot_unavailable")
+        # Operational normalization precedes review: its result is the actual
+        # revision, card and order, rather than an unbound qty_by_symbol cache.
+        from ..config import load_pead_global
+        overnight = state.source == "pead-chief" and not session_context(_now())[0]
+        slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", .5)
+        decisions, normalization_notes = normalize_orders(
+            decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
+            overnight=overnight, slippage_pct=slip,
+            net_liquidation=pf.net_liquidation if pf else 0)
+    except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:
+        normalization_errors = [f"订单规范化拒绝，需重新审查：{exc}"]
+    if normalization_errors:
+        from ..schemas.risk import DecisionRiskReview, OrderRiskVerdict, RiskViolation
+
+        review = DecisionRiskReview(
+            verdict="rejected", notes=normalization_errors,
+            order_verdicts=[OrderRiskVerdict(symbol=d.symbol, action=d.action,
+                                           verdict="rejected", reasons=normalization_errors)
+                            for d in decisions],
+            violations=[RiskViolation(rule_id="execution_price_normalization",
+                                      detail=normalization_errors[0], severity="hard")])
+        return {"decisions": decisions, "approved_decisions": [], "portfolio": pf,
+                "risk_review": review, "risk_notes": normalization_errors,
+                "normalization_errors": normalization_errors, "qty_by_symbol": {},
+                "risk_round": state.risk_round + 1,
+                "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else "",
+                "approval_summary": "\n".join(normalization_errors)}
+    # Allocate the immutable revision before Risk consumes it. persist_decision
+    # later records the review against this same content hash, idempotently.
+    repo = _decision_repo()
+    if state.decide:
+        from ..decision.snapshot import frozen_snapshot_complete, frozen_snapshot_stale_reasons
+        from ..workflow.decision_requirements import validate_chief
+
+        if not frozen_snapshot_complete(state.research_snapshot):
+            raise ValueError("decision normalization requires complete research snapshot")
+        validate_chief(repo.store, state.research_snapshot, at=_now())
+        if state.revision_no and frozen_snapshot_stale_reasons(
+                repo.store, state.research_snapshot, at=state.as_of):
+            # Existing persistence path records supersession before any new revision.
+            return {"decisions": decisions, "approved_decisions": [],
+                    "risk_round": state.risk_round + 1}
+    repo.create_cycle(cycle_id=state.cycle_id, trigger_source=state.source,
+                      research_snapshot=state.research_snapshot or None,
+                      created_at=state.as_of.isoformat())
+    revision = repo.append_revision(
+        cycle_id=state.cycle_id, orders=_orders_payload(decisions),
+        rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
+        revision_source="chief", created_at=state.as_of.isoformat())
+    review = risk_checks.review_revision(decisions, pf,
+                                         event_data=state.event_data or None,
+                                         cycle_id=state.cycle_id)
+    risk_notes = list(review.notes)
+    approved = [d for d, ov in zip(decisions, review.order_verdicts)
+                if ov.verdict == "approved"]
     for n in risk_notes:
         print(f"   [risk] {n}")
-    if not decisions:
-        print("(所有决策被风控硬约束拦下 — 无单可下)")
-        return {"decisions": [], "portfolio": pf, "risk_notes": risk_notes}
-
-    # The PEAD after-close window raises orders at 20:00 ET for approval overnight;
-    # reprice them as limits BEFORE the approval card is built, so the Boss approves
-    # the same prices that get submitted.
-    if state.source == "pead-chief":
-        from ..config import load_pead_global
-
-        slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", 0.5)
-        decisions, limit_notes = texec.as_overnight_limits(decisions, slip)
-        for n in limit_notes:
-            print(f"   [overnight] {n}")
-        risk_notes = list(risk_notes) + limit_notes
-
-    sized = texec.size_decisions(decisions)
+    out: dict = {"decisions": decisions, "approved_decisions": approved,
+                 "revision_no": revision["revision_no"],
+                 "revision_hash": revision["decision_hash"], "normalization_errors": [],
+                 "portfolio": pf, "risk_notes": risk_notes, "risk_review": review,
+                 "risk_round": state.risk_round + 1,
+                 "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else ""}
+    if not approved:
+        print("(所有决策被风控硬约束拦下 — 无单可下，等待修订或人工复核)")
+        return out
+    # Normalization is already bound to the immutable revision reviewed above.
+    risk_notes = list(risk_notes) + normalization_notes
+    sized = texec.size_decisions(approved)
     summary = texec.build_approval_summary(sized, risk_notes, state.source)
-    return {"decisions": decisions, "portfolio": pf,
-            "qty_by_symbol": {d.symbol: q for d, q in sized},
-            "risk_notes": risk_notes, "approval_summary": summary}
+    out.update(risk_notes=risk_notes,
+               qty_by_symbol={d.symbol: q for d, q in sized},
+               approval_summary=summary)
+    return out
 
 
-def persist_decision(state: ChiefDecisionState) -> dict:
-    """Audit trail BEFORE the approval interrupt — a card the Boss never answers
-    still leaves the decision + full context on record."""
-    if state.source not in CHIEF_SOURCES:
-        return {}
+def _decision_repo():
+    from ..decision.repository import DecisionAuditRepository
+    from ..memory import get_store
+
+    return DecisionAuditRepository(get_store())
+
+
+def _transition_error():
+    from ..decision.repository import DecisionAuditError
+
+    return DecisionAuditError
+
+
+def _orders_payload(decisions) -> list[dict]:
+    # Type, TIF, quantity, limit and quote constraints all participate in the hash.
+    return [d.model_dump(mode="json") for d in decisions]
+
+
+def _ruleset_version() -> str:
+    # Phase D 6.4: one shared computation — a review's basis and the audit row
+    # recorded against it must never name different rulesets.
+    from ..risk import checks as risk_checks
+
+    return risk_checks.ruleset_version()
+
+
+def _consume_scores(state: ChiefDecisionState) -> None:
+    """Terminal side effect (D12): a PEAD score is a one-time event signal."""
     from ..memory import get_store
 
     store = get_store()
-    store.save_chief_run(cycle_id=state.cycle_id, as_of=state.as_of,
-                         summary=state.summary, decisions=state.decisions)
-    # Pre-register the plan BEFORE the approval interrupt. A plan written after the
-    # outcome is known can no longer be wrong, so it proves nothing.
-    try:
-        from ..journal import entries as journal_entries
-
-        journal_entries.record_intents(state, store=store)
-    except Exception as exc:  # noqa: BLE001 - the journal observes, it must not block
-        log.warning("journal pre-registration failed: %s", exc)
-    # Consume the fresh scores this cycle acted on — a PEAD score is a one-time event
-    # signal; after the chief has responded (traded or not) it becomes background so it
-    # is never re-adopted on subsequent daily runs.
     for pair in state.actionable_scores:
         try:
             store.mark_score_consumed(pair[0], pair[1], state.cycle_id)
         except Exception as exc:  # noqa: BLE001 - consumption must not break persist
             log.warning("score consume failed for %s: %s", pair, exc)
-    if state.use_llm and state.decide:   # audit report; skip for stubs
-        from ..agents.chief import report as chief_report
-        from ..agents.chief.decide import ChiefResult
-        from ..config import load_macro_config
 
-        try:
-            out_dir = load_macro_config().output_dir
-        except Exception:  # noqa: BLE001
-            out_dir = ""
-        path = chief_report.write(ChiefResult(cycle_id=state.cycle_id, as_of=state.as_of,
-                                              summary=state.summary, decisions=state.decisions,
-                                              context_text=state.context_text), out_dir)
-        if path:
-            print(f"📝 {path}")
-    return {}
+
+def _write_chief_report(state: ChiefDecisionState) -> None:
+    if not (state.use_llm and state.decide):   # audit report; skip for stubs
+        return
+    from ..agents.chief import report as chief_report
+    from ..agents.chief.decide import ChiefResult
+    from ..config import load_macro_config
+
+    try:
+        out_dir = load_macro_config().output_dir
+    except Exception:  # noqa: BLE001
+        out_dir = ""
+    path = chief_report.write(ChiefResult(cycle_id=state.cycle_id, as_of=state.as_of,
+                                          summary=state.summary, decisions=state.decisions,
+                                          context_text=state.context_text), out_dir)
+    if path:
+        print(f"📝 {path}")
+
+
+def persist_decision(state: ChiefDecisionState) -> dict:
+    """Per-round audit persistence (design D2, task 5.2) — BEFORE the interrupt.
+
+    Appends ONE immutable revision for this round's proposal and persists the
+    round's risk review, both idempotently: a crash between risk_gate and the
+    approval interrupt replays to the same revision/rows (repository-level
+    content-hash and deterministic ids). Terminal side effects are NOT here —
+    they run only when the cycle enters a terminal state (D12).
+    """
+    repo = _decision_repo()
+    # 7.7: mid-cycle invalidation — on every round after the first, re-verify
+    # the frozen snapshot against the store. A withdrawn/replaced projection,
+    # or a vintage change, supersedes the cycle instead of letting the loop
+    # continue on swapped inputs; new inputs can only open a NEW cycle.
+    if state.research_snapshot and (state.revision_no or state.risk_round > 1):
+        from ..decision.snapshot import frozen_snapshot_stale_reasons, supersede_cycle
+
+        stale = frozen_snapshot_stale_reasons(repo.store, state.research_snapshot,
+                                              at=state.as_of)
+        if stale:
+            reason = "; ".join(stale)
+            print(f"⏸️  研究快照已失效 — 周期转 superseded：{reason}")
+            supersede_cycle(repo, state.cycle_id, reason=reason, actor="chief",
+                            created_at=state.as_of.isoformat())
+            return {"cycle_status": "superseded", "decisions": [],
+                    "approved_decisions": []}
+    # 7.2 (belt and braces): a decide-path cycle is never written from an
+    # incomplete frozen snapshot — the refusal happens BEFORE create_cycle.
+    if state.decide:
+        from ..decision.snapshot import frozen_snapshot_complete
+        from ..workflow.decision_requirements import validate_chief
+
+        if not frozen_snapshot_complete(state.research_snapshot):
+            raise ValueError(
+                "decide-path persist without a complete research snapshot; "
+                "decision cycle blocked before any write")
+        validate_chief(repo.store, state.research_snapshot, at=_now())
+    repo.create_cycle(cycle_id=state.cycle_id, trigger_source=state.source,
+                      research_snapshot=state.research_snapshot or None,
+                      created_at=state.as_of.isoformat())
+    decisions = [d for d in state.decisions if d.action != "hold"]
+    if not decisions:
+        if state.parent_revision_no is not None or state.risk_round > 1:
+            # 修订被驳空（chief_revise 无合规方案可形成）：这不是主理人主动
+            # 决定不交易，而是交易意图被风控整体否决 — 静默记为 No Action 会
+            # 吞掉原交易意图，必须转人工复核（spec：无法形成合规方案 → 人工
+            # 复核终态）。终态转换交给 manual_review 节点。
+            return {}
+        # No Action is a formal terminal outcome WITH a reason (§5.1/3.4):
+        # risk review, approval and execution are never invoked.
+        from ..decision.snapshot import record_no_action
+        from ..decision.state import CycleStatus
+
+        changed = record_no_action(
+            repo, state.cycle_id, reason=state.summary or "无行动决策",
+            actor="chief", created_at=state.as_of.isoformat())
+        if changed:
+            _consume_scores(state)
+            _write_chief_report(state)
+        return {"cycle_status": CycleStatus.NO_ACTION.value}
+
+    rev = repo.append_revision(
+        cycle_id=state.cycle_id, orders=_orders_payload(decisions),
+        rationale=state.summary or "", model_version="",
+        parent_revision_no=state.parent_revision_no, revision_source="chief",
+        created_at=state.as_of.isoformat())
+    if state.risk_review is not None and not state.normalization_errors:
+        # Review ids are round-scoped: a stale-snapshot re-review (task 7.5)
+        # re-examines the SAME revision under a NEW snapshot and must land as a
+        # new review row, not be swallowed by idempotent re-insert.
+        repo.record_review(
+            review_id=f"{state.cycle_id}:r{rev['revision_no']}:review:r{state.risk_round}",
+            cycle_id=state.cycle_id, revision_no=rev["revision_no"],
+            decision_hash=rev["decision_hash"], ruleset_version=_ruleset_version(),
+            portfolio_snapshot_id=state.portfolio_snapshot_id or "unset",
+            market_as_of=(state.risk_review.basis.market_as_of
+                          if state.risk_review.basis else ""),
+            verdict=state.risk_review.verdict,
+            violations=[v.model_dump() for v in state.risk_review.violations],
+            allowed_boundary=state.risk_review.allowed_boundary.model_dump(),
+            before_metrics=state.risk_review.before_metrics,
+            after_metrics=state.risk_review.after_metrics,
+            notes="\n".join(state.risk_review.notes),
+            created_at=state.as_of.isoformat())
+    from ..decision.state import CycleStatus
+
+    to_status = (CycleStatus.PENDING_APPROVAL
+                 if state.risk_review is None      # degraded: routed to approval
+                 or state.risk_review.verdict == "approved"
+                 else CycleStatus.RISK_REJECTED)
+    repo.transition(state.cycle_id, to_status=to_status, actor="risk_gate",
+                    revision_no=rev["revision_no"],
+                    payload={"normalization_errors": state.normalization_errors},
+                    idempotency_key=_transition_key(
+                        state.cycle_id, to_status.value, rev["revision_no"],
+                        state.risk_round),
+                    created_at=state.as_of.isoformat())
+    # Legacy mirror (D2): keep `cycles`/`decisions` read entry points serving.
+    repo.mirror_revision_to_legacy(state.cycle_id, rev["revision_no"],
+                                   as_of=state.as_of.isoformat())
+    # Pre-register the plan BEFORE the approval interrupt. A plan written after the
+    # outcome is known can no longer be wrong, so it proves nothing.
+    try:
+        from ..journal import entries as journal_entries
+
+        journal_entries.record_intents(state, store=repo.store)
+    except Exception as exc:  # noqa: BLE001 - the journal observes, it must not block
+        log.warning("journal pre-registration failed: %s", exc)
+    return {"revision_no": rev["revision_no"], "revision_hash": rev["decision_hash"],
+            "cycle_status": to_status.value}
+
+
+def _transition_key(cycle_id: str, to_status: str, revision_no: int, round_no: int) -> str:
+    import hashlib
+
+    body = f"cycle|{cycle_id}|risk_gate|{to_status}|{revision_no}|round{round_no}"
+    return hashlib.sha1(body.encode()).hexdigest()[:32]
 
 
 def route_after_persist(state: ChiefDecisionState) -> str:
-    if not state.execute or not state.decisions:
+    """Conditional edge after per-round persistence (task 5.3)."""
+    if state.cycle_status == "superseded":
+        return "end"                        # 7.7: inputs invalidated mid-cycle
+    if not state.decisions:
+        if state.parent_revision_no is not None or state.risk_round > 1:
+            return "manual_review"          # revision emptied after a rejection
+        return "end"                        # No Action terminal already recorded
+    if not state.execute:
         return "end"
-    return "review"
+    review = state.risk_review
+    if state.normalization_errors:
+        return "manual_review"
+    if review is None:
+        # Degraded no-portfolio mode: legacy pass-through to approval (the
+        # execution gate remains the real-order backstop).
+        return "review"
+    if review.verdict == "approved":
+        return "review"
+    if state.risk_round >= state.max_risk_rounds:
+        return "manual_review"
+    return "revise"
+
+
+def chief_revise(state: ChiefDecisionState) -> dict:
+    """Accept the review's counterproposal and draft the next revision (5.5).
+
+    The boundary comes from the review's `allowed_boundary` — the CHIEF chooses
+    to adopt it and cites the parent revision; risk never rewrote anything.
+    """
+    from ..schemas.decision import is_increasing_action
+
+    review = state.risk_review
+    revised: list[TradeDecision] = []
+    notes = list(state.risk_notes)
+    notes.append(f"chief_revise: 采纳第 {state.risk_round} 轮风控边界，生成修订")
+    if review is not None:
+        for d, ov in zip(state.decisions, review.order_verdicts):
+            if ov.verdict == "approved":
+                revised.append(d)
+            elif (ov.max_allowed_notional and d.notional_usd
+                  and is_increasing_action(d.action)):
+                # accept the boundary explicitly, citing the violation
+                reason = ov.reasons[0] if ov.reasons else "risk boundary"
+                revised.append(d.model_copy(update={
+                    "notional_usd": ov.max_allowed_notional,
+                    "qty": None, "execution_basis": {},
+                    "rationale": f"[revise@r{state.risk_round}] 采纳边界 "
+                                 f"${ov.max_allowed_notional:,.0f}: {reason}"}))
+            else:
+                notes.append(f"chief_revise: 放弃 {d.action} {d.symbol}（{', '.join(ov.reasons) or '不可修订'}）")
+    return {"decisions": revised, "approved_decisions": [],
+            "parent_revision_no": state.revision_no or None,
+            "risk_notes": notes}
+
+
+def manual_review(state: ChiefDecisionState) -> dict:
+    """Bounded loop exhausted (ARCHITECTURE §5.2): leave the cycle for a human."""
+    from ..decision.state import CycleStatus
+
+    repo = _decision_repo()
+    event, changed = repo.transition(
+        state.cycle_id, to_status=CycleStatus.MANUAL_REVIEW, actor="risk_gate",
+        payload={"reason": f"{state.risk_round} 轮修订后仍被驳回"},
+        created_at=state.as_of.isoformat())
+    if changed:
+        repo.conn.execute(
+            "UPDATE decision_cycles SET final_outcome = ?, updated_at = ? "
+            "WHERE cycle_id = ?",
+            ("manual_review", state.as_of.isoformat(), state.cycle_id))
+        repo.conn.commit()
+        _consume_scores(state)
+        _write_chief_report(state)
+    return {"cycle_status": CycleStatus.MANUAL_REVIEW.value}
+
+
+def narrow_approval(approval: BossApproval) -> BossApproval:
+    """Approval input narrowing (task 6.1, §10.3): the verdict is approve or
+    reject of the EXACT revision shown on the card. Any modification attempt —
+    edited quantities, symbol filters, direct instructions, `modified` status —
+    is recorded as a rejection whose comment carries the modification note; the
+    executor never receives instructions derived from it."""
+    has_modifications = bool(approval.overrides or approval.direct_instructions
+                             or approval.approved_symbols
+                             or approval.rejected_symbols)
+    if approval.status == "approved" and not has_modifications:
+        return approval
+    if approval.status == "rejected":
+        return approval
+    notes = [approval.comment] if approval.comment else []
+    if approval.overrides or approval.direct_instructions:
+        notes.append("提交了修改/指令（审批只能批准或拒绝该版修订）")
+    if approval.approved_symbols or approval.rejected_symbols:
+        notes.append("提交了按标的筛选（不支持部分批准，请拒绝后由主理人修订）")
+    return approval.model_copy(update={
+        "status": "rejected", "comment": "；".join(n for n in notes if n)})
+
+
+def _record_approval(state: ChiefDecisionState, approval: BossApproval) -> None:
+    """Persist the verdict (tasks 6.5/7.6) BEFORE the trader runs, so the
+    execution gate can derive its authorization. Round-scoped: a fresh approval
+    after a stale-snapshot re-review is a new fact, never swallowed by the
+    round-1 row. Legacy `cycles.approval_status` + journal keep their writes."""
+    if not (state.revision_no and state.revision_hash):
+        return
+    try:
+        from ..decision.repository import approval_idempotency_key
+
+        repo = _decision_repo()
+        round_no = state.risk_round
+        repo.record_approval(
+            approval_id=f"{state.cycle_id}:r{state.revision_no}:approval:r{round_no}",
+            cycle_id=state.cycle_id, revision_no=state.revision_no,
+            decision_hash=state.revision_hash,
+            decision=("approved" if approval.status == "approved"
+                      else "rejected"),
+            reviewer=approval.reviewer, comment=approval.comment,
+            channel=approval.channel,
+            idempotency_key=approval_idempotency_key(
+                state.cycle_id, state.revision_no, state.revision_hash,
+                approval.channel, round_no),
+            created_at=approval.reviewed_at.isoformat()
+            if approval.reviewed_at else None)
+    except Exception as exc:  # noqa: BLE001 - preserve ordinary audit error handling
+        from ..workflow.cutover_wiring import BoundaryWriteRefused
+
+        if isinstance(exc, BoundaryWriteRefused):
+            raise
+        log.warning("boss_approvals write failed for %s: %s", state.cycle_id, exc)
 
 
 def boss_review(state: ChiefDecisionState) -> dict:
+    # The card shows EXACTLY the revision the review approved (§10.3): the
+    # boss binds to this revision via its hash, never to a free-form edit.
     if state.auto_approve:
-        return {"approval": BossApproval(status="approved", reviewer="auto",
-                                         reviewed_at=_now())}
-    request = ApprovalRequest(cycle_id=state.cycle_id, as_of=state.as_of,
-                              decisions=state.decisions,
-                              context_summary=state.approval_summary)
-    verdict = interrupt(request.model_dump(mode="json"))
-    return {"approval": BossApproval.model_validate(verdict)}
+        approval = BossApproval(status="approved", reviewer="auto",
+                                reviewed_at=_now(), channel="auto")
+    else:
+        request = ApprovalRequest(cycle_id=state.cycle_id, as_of=state.as_of,
+                                  decisions=state.approved_decisions,
+                                  context_summary=state.approval_summary,
+                                  revision_no=state.revision_no,
+                                  decision_hash=state.revision_hash)
+        verdict = interrupt(request.model_dump(mode="json"))
+        approval = BossApproval.model_validate(verdict)
+        if approval.reviewed_at is None:
+            approval.reviewed_at = _now()
+    approval = narrow_approval(approval)
+    _record_approval(state, approval)
+    return {"approval": approval}
 
 
+@decision_read("trader")
 def trader(state: ChiefDecisionState) -> dict:
     from ..trader import execute as texec
 
     approval = state.approval
-    approved = approval.effective_decisions(state.decisions)
-    sized_all = [(d, state.qty_by_symbol.get(d.symbol, 0.0)) for d in state.decisions]
+    # Execution receives ONLY what the risk review approved (task 6.1): the
+    # Boss's verdict is approve/reject of the bound revision — modifications
+    # were already narrowed to rejections in boss_review.
+    approved = list(state.approved_decisions) if (
+        approval is not None and approval.status == "approved") else []
+    sized_all = [(d, d.qty or 0.0)
+                 for d in state.approved_decisions]
 
     if state.dry_run or not approved:
         print(f"→ {approval.status}: no orders placed (dry_run={state.dry_run})")
         return {"order_results": texec.cancelled_entries(sized_all, state.cycle_id,
-                                                         approval.status)}
+                                                         approval.status),
+                "gate_outcome": "cancelled", "gate_rejections": [], "authorization": None}
 
-    # Boss overrides / direct instructions may add symbols the gate never sized.
+    # Only symbols the risk gate sized may execute — no approval-time additions.
     to_place = []
     for d in approved:
-        q = state.qty_by_symbol.get(d.symbol) or texec._size(d)
+        q = d.qty or 0.0
         if q > 0:
             to_place.append((d, q))
-    entries, fills = texec.place_orders(to_place, state.cycle_id)
+
+    # --- execution authorization gate (tasks 7.2/7.3/7.5) --------------------- #
+    from ..config import get_config
+    from ..decision.state import CycleStatus as _CS
+    from ..execution.authorization import (
+        RECOVERABLE,
+        AuthorizationError,
+        active_route_state,
+        bind_to_active_route,
+        build_authorization,
+        validate_authorization,
+    )
+
+    repo = _decision_repo()
+    now = _now()
+    pf = state.portfolio
+    max_age = get_config().app.risk.max_snapshot_age_seconds
+    rejections: list[str] = []
+    auth = None
+    try:
+        auth = build_authorization(repo, state.cycle_id)
+        # Phase F 2.5: bind the authorization to the route that is actually
+        # active, then verify that binding at submission time. Binding here (where
+        # the order is about to be placed) rather than inside build_authorization
+        # keeps the registry out of the audit-derivation path, so a missing
+        # registry degrades to "cannot authorize" instead of a construction error.
+        auth = bind_to_active_route(auth)
+        rejections = validate_authorization(
+            repo, auth, snapshot_as_of=pf.as_of if pf else None,
+            max_snapshot_age_seconds=max_age, now=now,
+            route_state=active_route_state())
+    except AuthorizationError as exc:
+        rejections = [str(exc)]
+
+    recoverable = bool(auth) and rejections and all(
+        r.split(":")[0] in RECOVERABLE for r in rejections)
+    if recoverable and state.risk_round < state.max_risk_rounds:
+        # 7.5/7.6: the snapshot the review projected on went stale. The approval
+        # is void — go back to the risk gate for a fresh review + fresh approval.
+        # The human re-approval is what bounds this loop.
+        print(f"⏫ 授权失效（{'; '.join(rejections)}）— 回到风险审查重新评估")
+        repo.transition(state.cycle_id, to_status=_CS.PENDING_RISK, actor="execution_gate",
+                        payload={"rejections": rejections},
+                        idempotency_key=_transition_key(
+                            state.cycle_id, "pending_risk", auth.revision_no,
+                            state.risk_round),
+                        created_at=now.isoformat())
+        return {"gate_outcome": "stale", "gate_rejections": rejections,
+                "authorization": None}
+    if rejections:
+        # Hard refusal: never partial-execute, never degrade to simulation.
+        from ..schemas.memory import TradeLogEntry
+
+        print(f"🚫 执行授权被拒绝：{'; '.join(rejections)}")
+        entries = [TradeLogEntry(order_id="", cycle_id=state.cycle_id, symbol=d.symbol,
+                                 action=d.action, qty=q, status="rejected",
+                                 revision_no=state.revision_no or 0,
+                                 decision_hash=state.revision_hash or "",
+                                 submitted_at=now, rationale=d.rationale,
+                                 error=f"authorization rejected: {'; '.join(rejections)}")
+                   for d, q in to_place]
+        return {"order_results": entries, "gate_outcome": "refused",
+                "gate_rejections": rejections, "authorization": None}
+
+    entries, fills = texec.place_orders(to_place, state.cycle_id,
+                                        revision_no=auth.revision_no,
+                                        authorization=auth.model_dump())
+    if entries and all(e.status == "rejected" and e.error.startswith("price conditions rejected")
+                       for e in entries):
+        from ..memory import get_store
+
+        reasons = [e.error for e in entries]
+        from ..execution.shadow_execution import publish_shadow_results
+
+        shadow_published = publish_shadow_results(entries)
+        for entry in ([] if shadow_published else entries):
+            import json
+
+            get_store().save_trades([entry], cycle_id=state.cycle_id, source=state.source,
+                                   context=json.dumps({"execution_price_audit": entry.execution_price_audit}))
+        repo.transition(state.cycle_id, to_status=_CS.PENDING_RISK, actor="execution_gate",
+                        revision_no=state.revision_no, payload={"rejections": reasons},
+                        idempotency_key=_transition_key(
+                            state.cycle_id, "price_rejected", state.revision_no, state.risk_round))
+        return {"order_results": entries, "fills": [], "authorization": None,
+                "decisions": [TradeDecision.model_validate(d.execution_basis["requested_order"])
+                              for d in state.decisions],
+                "gate_outcome": "stale" if state.risk_round < state.max_risk_rounds else "manual_review",
+                "gate_rejections": reasons}
     for e in entries:
         print(f"   {e.action} {e.symbol} x{e.qty:.0f} [{e.status}]"
               + (f" @ {e.avg_fill_price}" if e.avg_fill_price else ""))
-    return {"order_results": entries, "fills": fills}
+    outcome = "shadow_refused" if entries and all(e.status == "rejected" and e.error.startswith("shadow broker write prohibited:") for e in entries) else "placed"
+    return {"order_results": entries, "fills": fills, "gate_outcome": outcome,
+            "authorization": auth.model_dump()}
+
+
+def route_after_trader(state: ChiefDecisionState) -> str:
+    """Conditional edge after the trader node (task 7.5): a stale snapshot sends
+    the cycle back to the risk gate for a fresh review + fresh approval."""
+    if state.gate_outcome == "stale":
+        return "risk_gate"
+    if state.gate_outcome == "manual_review":
+        return "manual_review"
+    return "persist"
 
 
 def persist(state: ChiefDecisionState) -> dict:
+    from ..decision.state import CycleStatus
     from ..memory import get_store
     from ..trader import execute as texec
 
@@ -209,12 +706,23 @@ def persist(state: ChiefDecisionState) -> dict:
     # it wrote approval_status = None and nothing ever came back to fill it in.
     if state.approval is not None:
         store.set_cycle_approval(state.cycle_id, state.approval.status)
+        # The full approval record is written in boss_review (before the
+        # execution gate can derive its authorization); this legacy column and
+        # the journal approval column keep their writes (task 6.5).
 
-    by_symbol = {d.symbol: d for d in state.decisions}
-    for entry in state.order_results:
+    from ..execution.shadow_execution import publish_shadow_results
+
+    shadow_published = publish_shadow_results(state.order_results, state.fills)
+    by_symbol = {d.symbol: d for d in state.approved_decisions or state.decisions}
+    for entry in ([] if shadow_published else state.order_results):
         context = texec.trade_context_json(
-            state.source, state.approval, state.decisions,
+            state.source, state.approval, state.approved_decisions or state.decisions,
             decision=by_symbol.get(entry.symbol), risk_notes=state.risk_notes)
+        if entry.execution_price_audit:
+            import json
+
+            context = json.dumps({**json.loads(context),
+                                  "execution_price_audit": entry.execution_price_audit}, ensure_ascii=False)
         store.save_trades([entry], cycle_id=state.cycle_id,
                           source=state.source, context=context)
     if state.fills:
@@ -225,7 +733,39 @@ def persist(state: ChiefDecisionState) -> dict:
         journal_entries.record_outcome(state, store=store)
     except Exception as exc:  # noqa: BLE001
         log.warning("journal outcome write failed: %s", exc)
-    return {}
+    # Terminal transition (D12): side effects fire exactly once, on first entry.
+    repo = _decision_repo()
+    executed = any(e.status == "filled" for e in state.order_results)
+    submitted = any(e.status in {"submitted", "partial", "pending", "filled"} for e in state.order_results)
+    incomplete = any(e.status in {"rejected", "error"} for e in state.order_results)
+    status = (CycleStatus.MANUAL_REVIEW if submitted and incomplete else
+              CycleStatus.EXECUTED if submitted or (state.dry_run and state.approval
+              and state.approval.status == "approved") else
+              CycleStatus.MANUAL_REVIEW if state.approval and state.approval.status == "approved" else
+              CycleStatus.APPROVAL_REJECTED)
+    outcome = ("shadow_refused" if shadow_published and state.gate_outcome == "shadow_refused" else
+               "partial_execution_requires_reconciliation" if submitted and incomplete else
+               "dry_run" if state.dry_run else
+               "executed" if executed else str(state.approval.status if state.approval else "unknown"))
+    try:
+        event, changed = repo.transition(
+            state.cycle_id, to_status=status, actor="trader",
+            payload={"outcome": outcome},
+            idempotency_key=_transition_key(state.cycle_id, status.value,
+                                            state.revision_no, 0),
+            created_at=_now().isoformat())
+    except _transition_error() as exc:
+        # No audit row (unit-driven states, legacy paths): nothing to finalize.
+        log.warning("terminal transition skipped for %s: %s", state.cycle_id, exc)
+        return {}
+    if changed:
+        repo.conn.execute(
+            "UPDATE decision_cycles SET final_outcome = ?, updated_at = ? "
+            "WHERE cycle_id = ?", (outcome, _now().isoformat(), state.cycle_id))
+        repo.conn.commit()
+        _consume_scores(state)
+        _write_chief_report(state)
+    return {"cycle_status": status.value}
 
 
 def build_chief_graph(checkpointer=None):
@@ -233,18 +773,24 @@ def build_chief_graph(checkpointer=None):
     for name, fn in [
         ("assemble_context", assemble_context), ("chief_decide", chief_decide),
         ("risk_gate", risk_gate), ("persist_decision", persist_decision),
+        ("chief_revise", chief_revise), ("manual_review", manual_review),
         ("boss_review", boss_review), ("trader", trader), ("persist", persist),
     ]:
         g.add_node(name, fn)
 
     g.add_edge(START, "assemble_context")
-    g.add_edge("assemble_context", "chief_decide")
+    g.add_conditional_edges("assemble_context", route_after_assemble,
+                            {"decide": "chief_decide", "end": END})
     g.add_edge("chief_decide", "risk_gate")
     g.add_edge("risk_gate", "persist_decision")
     g.add_conditional_edges("persist_decision", route_after_persist,
-                            {"review": "boss_review", "end": END})
+                            {"review": "boss_review", "revise": "chief_revise",
+                             "manual_review": "manual_review", "end": END})
+    g.add_edge("chief_revise", "risk_gate")     # bounded by max_risk_rounds
+    g.add_edge("manual_review", END)
     g.add_edge("boss_review", "trader")
-    g.add_edge("trader", "persist")
+    g.add_conditional_edges("trader", route_after_trader,
+                            {"risk_gate": "risk_gate", "persist": "persist", "manual_review": "manual_review"})
     g.add_edge("persist", END)
 
     return g.compile(checkpointer=checkpointer)

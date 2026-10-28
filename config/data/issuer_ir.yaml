@@ -1,0 +1,75 @@
+# Issuer investor-relations financial files -> company_financials (source: issuer_ir_files).
+#
+# Declares SCOPE only: which issuers, which files in which folder, which parser reads them
+# and the reporting currency.  What the numbers mean and whether they are trusted is decided
+# by the parser and its self-checks (src/ats/data/sources/issuer_ir_files.py), and every
+# accepted/quarantined number keeps its file, page/row and sha256.
+#
+# Files arrive in `drop_dir` either by the issuer's scheduled acquirer or by hand
+# (last-resort fallback: put the file there and run the daily job).  var/ is git-ignored.
+version: 1
+
+defaults:
+  source_nature: issuer_official      # issuer_official | third_party_aggregator
+  # When the daily job may use the network to look for a new file: inside the window around a calendar
+  # earnings date, plus a weekly safety net in case the calendar date slipped or is missing. A manual
+  # re-collection (g0_rerun) always checks. Files already on disk are parsed every run (no network).
+  collection_window: {before_days: 1, after_days: 14, safety_net_days: 7}
+  abs_tolerance: 3                    # rounding slack, in the table's reported unit (millions)
+  rel_tolerance: 0.0001
+
+issuers:
+  TSM:
+    name: Taiwan Semiconductor Manufacturing
+    currency: TWD                     # TIFRS statements in NT$ million, not the ADR quote currency
+    identity_markers: ["TAIWAN SEMICONDUCTOR MANUFACTURING"]
+    files:
+      - {pattern: "*FS*.pdf", parser: tsmc_fs_pdf}
+    acquisition:
+      # investor.tsmc.com renders the latest quarter server-side; its FS.pdf link carries a content hash,
+      # so the link changing is the signal of a new file (read from the page each time, never guessed)
+      kind: tsmc_quarterly_results
+      page_url: https://investor.tsmc.com/english/quarterly-results
+      allowed_host: investor.tsmc.com
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"   # the site answers 403 to non-browser agents
+  ASML:
+    name: ASML Holding
+    currency: EUR                     # US GAAP statements in EUR million
+    identity_markers: ["ASML"]
+    files:
+      # results presentation (manual drop): five quarters, whole millions, capex only as one combined line
+      - {pattern: "*presentation*.pdf", parser: asml_presentation_pdf, rank: 0}
+      # the 6-K's EX-99.3 (name differs per quarter) "Financial Statements US GAAP": same quarters with one decimal, PP&E and
+      # intangibles separately and the long-term debt line; it wins over the presentation
+      - {pattern: "*financial*statements*.htm", parser: asml_ex99_3_html, rank: 10}
+    acquisition:
+      kind: sec_6k_exhibits           # SEC EDGAR: results 6-Ks carry the exhibits (EX-99.1/.2/.3)
+      cik: "0000937966"
+      forms: ["6-K"]
+      exhibit_patterns: ["financial*statements*.htm"]   # file names differ per quarter (…_statementsxusx / …statementsusgaa)
+      lookback_days: 120              # how far back an unseen 6-K is still looked at
+      max_new_filings_per_run: 3      # each costs an index request plus one request per exhibit
+  SKHY:
+    name: SK hynix
+    currency: KRW                     # K-IFRS consolidated, KRW million
+    source_nature: third_party_aggregator    # Euroland export, not the company filing
+    identity_markers: ["SK HYNIX"]
+    abs_tolerance: 1
+    # Euroland defines "Cash" as cash + equivalents + short-term financial instruments on the balance
+    # sheet but the cash-flow statement's ending cash differs for 2025 1Q-2026 1Q, and it omits the
+    # exchange-rate effect on cash: both are reported as warnings, not as failures.
+    cash_definition_matches_balance_sheet: false
+    fx_effect_reported: false
+    files:
+      - {pattern: "*.xls", parser: euroland_xls}
+    acquisition:
+      # The tool behind https://www.skhynix.com/ir/UI-FR-IR07/ (iframe asia.tools.euroland.com/tools/ia/) has an
+      # "Export all the data into an Excel" button; its URL is <tool>/Excel/?<tool params>&sid=&generalNotesFirst=0
+      # &levelZero=1&format=xls (levelZero 1 = Quarterly). No login or cookie; verified 2026-10-22 to return a file
+      # byte-identical (sha256) to the manual download. One request a day is the check and the download.
+      kind: euroland_export
+      export_url: https://asia.tools.euroland.com/tools/IA/Excel/
+      page_url: https://asia.tools.euroland.com/tools/ia/?companycode=kr-000660&v=redesign
+      allowed_host: asia.tools.euroland.com
+      params: {companycode: kr-000660, v: redesign, sid: "", generalNotesFirst: "0", levelZero: "1", format: xls}
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"

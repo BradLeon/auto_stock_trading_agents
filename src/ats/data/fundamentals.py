@@ -6,6 +6,7 @@ Both degrade to notes on failure.
 
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime, timezone
 from functools import lru_cache
 import logging
@@ -152,16 +153,7 @@ def _platform_constituent_accounting(symbol: str) -> dict:
 
     repository = get_platform_structured_repository()
     try:
-        package = None
-        for source_id in _FINANCIAL_SOURCE_PRIORITY:
-            package = _complete_report_package(repository, source_id=source_id,
-                                                symbol=symbol.upper())
-            if package is not None:
-                break
-        if package is None:
-            package = _complete_report_package(
-                repository, source_id=("sec_companyfacts", "company_disclosures"),
-                symbol=symbol.upper())
+        package = _select_report_package(repository, symbol=symbol.upper())
         if package is None:
             return {"metrics": {}, "source": "", "report_period": ""}
         statement, _ = _structured_statements(
@@ -439,11 +431,20 @@ _FINANCIAL_SOURCE_PRIORITY = (
     "sec_companyfacts",
     "company_disclosures",
 )
+# Stored sources a report package can be read from.  The first four are refreshed live by
+# ``_refresh_report_package``; ``issuer_ir_files`` (issuer IR statements for foreign filers the vendors cover late)
+# is fed by its own scheduled job and is only read here.  Among complete packages the NEWEST reporting period wins
+# (investment use needs the latest quarter); this order only breaks a tie on the same period.
+_REPORT_PACKAGE_SOURCES = (*_FINANCIAL_SOURCE_PRIORITY, "issuer_ir_files")
 _PACKAGE_QUARTER_METRICS = frozenset({
     "financial.revenue.gaap",
     "financial.gross_profit.gaap",
     "financial.operating_income.gaap",
     "financial.net_income.gaap",
+    "financial.cash_from_operations.gaap",
+    "financial.capex.gaap",
+})
+_PACKAGE_CASH_FLOW_METRICS = frozenset({
     "financial.cash_from_operations.gaap",
     "financial.capex.gaap",
 })
@@ -453,10 +454,13 @@ _PACKAGE_INSTANT_METRICS = frozenset({
     "financial.total_liabilities.gaap",
     "financial.stockholders_equity.gaap",
 })
+# Basic EPS is the last resort: a source that never reports diluted EPS (SKHY via its aggregator) can still form a
+# package, and the statement line then says "basic" in its unit.
 _PACKAGE_EPS_METRICS = (
     "financial.eps.diluted.adr",
     "financial.eps.diluted.market_adjusted",
     "financial.eps.diluted.gaap",
+    "financial.eps.basic.gaap",
 )
 _PACKAGE_DEBT_METRICS = (
     "financial.total_debt.gaap",
@@ -483,6 +487,8 @@ def _reconcile_statements(legacy: FinancialStatements | None,
         }
     legacy_lines = {line.label for line in legacy.lines if line.value is not None}
     platform_lines = {line.label for line in platform.lines if line.value is not None}
+    if "Basic EPS" in platform_lines:          # a source that never reports diluted EPS (clearly labelled basic)
+        platform_lines.add("Diluted EPS")
     missing_legacy = sorted(_PEAD_CORE_STATEMENT_LINES - legacy_lines)
     missing_platform = sorted(_PEAD_CORE_STATEMENT_LINES - platform_lines)
     if missing_platform:
@@ -598,6 +604,23 @@ def _complete_report_package(repository, *, source_id: str | tuple[str, ...],
                              for metric in _PACKAGE_DEBT_METRICS
                              if choose(metric, "instant")), None)
         missing = sorted(metric for metric, row in selected.items() if row is None)
+        # Cash-flow-only gap (found 2026-10-17 on ASML): the vendors publish a foreign filer's quarterly cash flow
+        # late, so the newest quarter can carry the full income statement, balance sheet, EPS and debt but no
+        # CFO/CapEx. Withholding the whole package then blocks every read of an otherwise complete quarter. It is
+        # accepted ONLY when nothing but those two metrics is absent AND the same source delivered both for the
+        # previous quarter (so the gap is lateness, not a provider that never supplies them). The gap is named in
+        # `gaps` and the statement DTO leaves CapEx / FCF unknown rather than borrowing an older quarter's value.
+        # The AMZN failure mode (newer quarter with only EPS) still fails: it is missing far more than cash flow.
+        gaps: list[str] = []
+        if missing and set(missing) <= _PACKAGE_CASH_FLOW_METRICS and len(by_period) > 1:
+            prior_period = sorted(by_period)[-2]
+            prior_rows = by_period[prior_period]
+            prior_has_cash_flow = all(
+                any(row["source_id"] in source_ids and row["metric_id"] == metric
+                    and row.get("period_basis") == "quarter" for row in prior_rows)
+                for metric in _PACKAGE_CASH_FLOW_METRICS)
+            if prior_has_cash_flow:
+                gaps, missing = list(missing), []
         if eps_present is None:
             missing.append("financial.eps.diluted.(adr|market_adjusted|gaap)")
         if debt_present is None:
@@ -614,7 +637,7 @@ def _complete_report_package(repository, *, source_id: str | tuple[str, ...],
         if not missing:
             return {
                 "source_id": source_ids[0] if len(source_ids) == 1 else "official_disclosure_bundle",
-                "source_ids": source_ids, "period": period,
+                "source_ids": source_ids, "period": period, "gaps": gaps,
                 "currency": next(iter(currencies)), "eps_metric": eps_present[0],
                 "debt_metric": debt_present[0], "rows": selected_rows,
                 "source_by_metric": {metric: row["source_id"]
@@ -626,6 +649,26 @@ def _complete_report_package(repository, *, source_id: str | tuple[str, ...],
     return None
 
 
+def _select_report_package(repository, *, symbol: str) -> dict | None:
+    """The complete report package with the newest reporting period across every stored source.
+
+    Ties on the period go to the earlier entry of ``_REPORT_PACKAGE_SOURCES``.  The SEC + issuer-release
+    official bundle takes part as the lowest-priority candidate.
+    """
+    candidates: list[tuple[int, dict]] = []
+    for rank, source_id in enumerate(_REPORT_PACKAGE_SOURCES):
+        package = _complete_report_package(repository, source_id=source_id, symbol=symbol.upper())
+        if package is not None:
+            candidates.append((rank, package))
+    bundle = _complete_report_package(
+        repository, source_id=("sec_companyfacts", "company_disclosures"), symbol=symbol.upper())
+    if bundle is not None:
+        candidates.append((len(_REPORT_PACKAGE_SOURCES), bundle))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (str(item[1]["period"]), -item[0]))[1]
+
+
 def _structured_statements(symbol: str, products, *, source_id: str = "",
                            report_period: str = "",
                            source_by_metric: dict[str, str] | None = None) -> tuple[FinancialStatements | None,
@@ -635,7 +678,7 @@ def _structured_statements(symbol: str, products, *, source_id: str = "",
         "financial.revenue.gaap", "financial.gross_profit.gaap",
         "financial.operating_income.gaap", "financial.net_income.gaap",
         "financial.eps.diluted.gaap", "financial.eps.diluted.adr",
-        "financial.eps.diluted.market_adjusted",
+        "financial.eps.diluted.market_adjusted", "financial.eps.basic.gaap",
         "financial.cash_from_operations.gaap",
         "financial.capex.gaap", "financial.total_debt.gaap",
         "financial.total_debt.provider_reported",
@@ -666,15 +709,37 @@ def _structured_statements(symbol: str, products, *, source_id: str = "",
 
     used: dict[str, dict] = {}
 
+    def pick(rows: list[dict], reference: str, months: int) -> dict | None:
+        """The row ``months`` before ``reference`` (±12 days), by date -- never by list position.
+
+        A source that lacks a quarter (a results file only carries the quarters printed in it) would shift a
+        positional lookup and present the wrong quarter as "previous" or "year ago".
+        """
+        target = date.fromisoformat(reference[:10])
+        year, month = divmod(target.year * 12 + target.month - 1 - months, 12)
+        month += 1
+        center = date(year, month, min(target.day, calendar.monthrange(year, month)[1]))
+        best = None
+        for row in rows:
+            try:
+                gap = abs((date.fromisoformat(str(row["period"])[:10]) - center).days)
+            except ValueError:
+                continue
+            if gap <= 12 and (best is None or gap < best[0]):
+                best = (gap, row)
+        return best[1] if best else None
+
     def triple(metric: str, basis: str = "quarter") -> tuple:
         rows = ordered(metric, basis)
-        selected = rows[:2] + (rows[4:5] if len(rows) > 4 else [])
-        for row in selected:
-            used[row["observation_id"]] = row
-        current = rows[0]["value"] if rows else None
-        previous = rows[1]["value"] if len(rows) > 1 else None
-        year_ago = rows[4]["value"] if len(rows) > 4 else None
-        return current, previous, year_ago
+        if not rows:
+            return None, None, None
+        current = rows[0]
+        previous, year_ago = pick(rows, current["period"], 3), pick(rows, current["period"], 12)
+        for row in (current, previous, year_ago):
+            if row is not None:
+                used[row["observation_id"]] = row
+        return (current["value"], previous["value"] if previous else None,
+                year_ago["value"] if year_ago else None)
 
     revenue = triple("financial.revenue.gaap")
     gross_profit = triple("financial.gross_profit.gaap")
@@ -687,25 +752,41 @@ def _structured_statements(symbol: str, products, *, source_id: str = "",
                   if ordered("financial.eps.diluted.adr", "quarter")
                   else "financial.eps.diluted.market_adjusted"
                   if ordered("financial.eps.diluted.market_adjusted", "quarter")
-                  else "financial.eps.diluted.gaap")
+                  else "financial.eps.diluted.gaap"
+                  if ordered("financial.eps.diluted.gaap", "quarter")
+                  else "financial.eps.basic.gaap")
     eps = triple(eps_metric)
     eps_rows = ordered(eps_metric, "quarter")
     eps_unit = str(eps_rows[0].get("unit") or eps_unit) if eps_rows else eps_unit
-    cash_from_operations = triple("financial.cash_from_operations.gaap")
+    quarter_periods = [row["period"] for row in revenue_rows]
+
+    def aligned(metric: str, basis: str = "quarter") -> tuple:
+        """Current / previous / year-ago value for the SAME periods as revenue, or None where the source has none.
+
+        Looked up by date relative to the report quarter, so a metric whose newest quarter is missing (a package
+        that accepted a cash-flow gap) or a source with gaps in its history never shows another quarter's value
+        as current, previous or year-ago."""
+        rows = ordered(metric, basis)
+        out = []
+        for months in (0, 3, 12):
+            row = pick(rows, quarter_periods[0], months)
+            if row is not None:
+                used[row["observation_id"]] = row
+            out.append(row["value"] if row is not None else None)
+        return tuple(out)
+
+    cash_from_operations = aligned("financial.cash_from_operations.gaap")
     # Persistent CapEx is stored as a positive investment amount.  PEAD's
     # long-standing DTO displays cash outflows as negative values, matching the
     # legacy yfinance statement and keeping FCF = CFO + displayed CapEx.
-    capex_raw = triple("financial.capex.gaap")
+    capex_raw = aligned("financial.capex.gaap")
     capex = tuple(-abs(value) if value is not None else None for value in capex_raw)
     # Official total debt has a controlled XBRL definition.  Provider-reported
     # total debt can remain a useful coverage fallback, but it may include lease
     # obligations and is only selected when the official series is absent.
-    debt_rows = (ordered("financial.total_debt.gaap", "instant") or
-                 ordered("financial.total_debt.provider_reported", "instant"))
-    debt = tuple((debt_rows[index]["value"] if len(debt_rows) > index else None)
-                 for index in (0, 1, 4))
-    for row in debt_rows[:2] + (debt_rows[4:5] if len(debt_rows) > 4 else []):
-        used[row["observation_id"]] = row
+    debt_metric = ("financial.total_debt.gaap" if ordered("financial.total_debt.gaap", "instant")
+                   else "financial.total_debt.provider_reported")
+    debt = aligned(debt_metric, "instant")
 
     free_cash_flow = tuple(
         (cash_from_operations[index] + capex[index]
@@ -719,7 +800,8 @@ def _structured_statements(symbol: str, products, *, source_id: str = "",
     ]
     if eps[0] is not None:
         lines.append(StatementMetric(
-            label="Diluted EPS", value=round(eps[0], 2),
+            label="Basic EPS" if eps_metric == "financial.eps.basic.gaap" else "Diluted EPS",
+            value=round(eps[0], 2),
             qoq=_pct(eps[0], eps[1]), yoy=_pct(eps[0], eps[2]), unit=eps_unit))
     lines.extend([
         _dollar_metric("CapEx", *capex, unit=money_unit),
@@ -742,8 +824,8 @@ def _company_disclosure_scope(symbol: str) -> dict:
     return {}
 
 
-def _refresh_report_package(repository, *, symbol: str) -> dict | None:
-    """Ingest only until the first source yields one complete financial package.
+def _refresh_live_sources(repository, *, symbol: str) -> dict | None:
+    """Ingest only until the first live source yields one complete financial package.
 
     The ordered source list is a data-policy boundary, not merely a display
     preference.  It prevents a later SEC/IR pull from overriding or silently
@@ -802,6 +884,20 @@ def _refresh_report_package(repository, *, symbol: str) -> dict | None:
         log.info("fundamentals: %s did not provide a complete report package for %s (%s)",
                  source_id, symbol, result.get("status", "unknown"))
     return None
+
+
+def _refresh_report_package(repository, *, symbol: str) -> dict | None:
+    """Refresh the live vendors/SEC, then select the newest complete package over ALL stored sources.
+
+    The live loop keeps its "stop at the first complete package" cost policy; the choice of which package a
+    consumer reads is separate and period-first, so a newer issuer-IR quarter is not hidden behind a vendor
+    that is one quarter behind.
+    """
+    live = _refresh_live_sources(repository, symbol=symbol)
+    package = _select_report_package(repository, symbol=symbol)
+    if package is not None and live is not None:
+        package["ingestion_status"] = live.get("ingestion_status", "")
+    return package
 
 
 def _platform_fetch(symbol: str, *, consumer: str) -> FundamentalData:

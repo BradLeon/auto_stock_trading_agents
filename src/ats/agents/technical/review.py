@@ -10,7 +10,10 @@ Never raises into the scheduler: every boundary degrades to a note.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
+import threading
 from datetime import datetime, timezone
 
 from ...schemas.technical import TechnicalReading, TechnicalReview
@@ -72,7 +75,7 @@ def resolve_universe(cfg, *, live_broker: bool = True) -> tuple[list[str], list[
     # Collapse tickers that are the same instrument once normalised. HY9H (the
     # Frankfurt ADR) and SKHY both resolve to SKHY; without this, fetch_prices'
     # reverse map keeps only one and the other silently reports "no price data".
-    from ...data.base import yf_symbol
+    from ...data.products.market_inputs import yf_symbol
 
     canonical: dict[str, str] = {}
     aliases: list[str] = []
@@ -142,16 +145,32 @@ def compute_readings(closes_by_symbol: dict[str, list[float]], *, vix: float | N
 def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float | None,
                                                    float | None, list[str]]:
     """One batched download for the basket, plus VIX/VIX3M. Never raises."""
-    from ...data import sector_snapshot
+    from ...data.products import sector_inputs as inputs
 
     notes: list[str] = []
     period = f"{max(2, days // 365 + 1)}y"
-    closes = sector_snapshot.fetch_prices(symbols, period=period) or {}
+    price_rows = inputs.sector_price_history(symbols, period=period) or {}
+    closes = {
+        symbol: list(row.closes)
+        for symbol, row in price_rows.items()
+        if row.status == "succeeded" and row.closes
+    }
     missing = sorted(set(symbols) - set(closes))
     if missing:
         notes.append(f"无价格数据: {', '.join(missing)}")
+    dated = sorted(
+        f"{symbol}={row.bar_as_of.isoformat()}"
+        for symbol, row in price_rows.items()
+        if row.bar_as_of is not None and row.status == "succeeded")
+    if dated:
+        notes.append("价格最后交易日: " + ", ".join(dated))
 
-    vol = sector_snapshot.fetch_prices(["^VIX", "^VIX3M"], period="1y") or {}
+    vol_rows = inputs.sector_price_history(["^VIX", "^VIX3M"], period="1y") or {}
+    vol = {
+        symbol: list(row.closes)
+        for symbol, row in vol_rows.items()
+        if row.status == "succeeded" and row.closes
+    }
     vix = vol.get("^VIX", [None])[-1] if vol.get("^VIX") else None
     v3 = vol.get("^VIX3M", [None])[-1] if vol.get("^VIX3M") else None
     if vix is None:
@@ -163,16 +182,244 @@ def _fetch(symbols: list[str], days: int) -> tuple[dict[str, list[float]], float
     return closes, vix, v3, notes
 
 
+def projection_extras(r, review) -> dict:
+    """The ARCHITECTURE §7.3 fields of a technical projection: trend state, invalidation, suggested exposure.
+
+    Entirely code: every statement is a threshold the strategy already uses (SMA200 bear cap, VIX/VIX3M panic
+    ratio, the score bands behind `signal`), so no model call is involved and each line can be checked against
+    the numbers beside it. `suggested_exposure` is the strategy's exposure CEILING, not an order.
+    """
+    from ...config import load_technical_config
+    from .strategy import BEAR_PRICE_CAP, PANIC_TERM_RATIO
+
+    try:       # the configured thresholds, not the code defaults, are what the strategy actually applied
+        par = _params(load_technical_config(review.name))
+        PANIC_RATIO, BEAR_CAP = par["panic_ratio"], par["bear_cap"]
+    except Exception:  # noqa: BLE001 - a config read failure must not drop the projection
+        PANIC_RATIO, BEAR_CAP = PANIC_TERM_RATIO, BEAR_PRICE_CAP
+
+    detail = {k: bool(v) for k, v in (r.score_detail or {}).items()
+              if isinstance(v, bool)}
+    above = [name for name, key in (("20日线", "above_sma20"), ("50日线", "above_sma50"),
+                                    ("200日线", "above_sma200")) if detail.get(key)]
+    below = [name for name, key in (("20日线", "above_sma20"), ("50日线", "above_sma50"),
+                                    ("200日线", "above_sma200")) if key in detail and not detail[key]]
+    trend = f"评分 {r.score}/7"
+    if above:
+        trend += " · 收盘价在" + "、".join(above) + "之上"
+    if below:
+        trend += " · 收盘价在" + "、".join(below) + "之下"
+    if r.panic_fired:
+        trend += " · 恐慌层已触发（期限结构倒挂）"
+    if r.bear_fired:
+        trend += " · 熊市层已触发（跌破200日线）"
+
+    out = []
+    if r.sma200 is not None:
+        if r.bear_fired:
+            out.append(f"收盘价站回 200 日线 {r.sma200:.2f} 之上：解除熊市层对敞口的上限（现为 {BEAR_CAP:.0%}）")
+        else:
+            out.append(f"收盘价跌破 200 日线 {r.sma200:.2f}：触发熊市层，敞口上限降至 {BEAR_CAP:.0%}")
+    ratio = (review.vix / review.vix3m) if review.vix and review.vix3m else None
+    if r.panic_fired:
+        out.append(f"VIX/VIX3M 回落到 {PANIC_RATIO:.2f} 以下：解除恐慌层（敞口上限现为 0）")
+    elif ratio is not None:
+        out.append(f"VIX/VIX3M 升至 {PANIC_RATIO:.2f} 及以上（现为 {ratio:.2f}）：触发恐慌层，敞口上限归零")
+    for label, level, key in (("50日线", r.sma50, "above_sma50"), ("20日线", r.sma20, "above_sma20")):
+        if level is not None and detail.get(key):
+            out.append(f"收盘价跌破{label} {level:.2f}：对应的趋势分项失效，评分下降")
+    if r.score >= 5:
+        out.append("评分降到 4 及以下：信号不再为看多")
+    elif r.score <= 2:
+        out.append("评分升到 3 及以上：信号不再为看空")
+    else:
+        out.append("评分升到 5 及以上转看多；降到 2 及以下转看空")
+    return {"trend_state": trend, "score": r.score, "score_detail": detail,
+            "suggested_exposure": round(float(r.target_exposure), 4),
+            "previous_exposure": (None if r.prev_exposure is None else round(float(r.prev_exposure), 4)),
+            "invalidation": out, "panic_fired": bool(r.panic_fired), "bear_fired": bool(r.bear_fired)}
+
+
+def _prior_exposures(store, name: str, symbols, today: str) -> dict[str, float]:
+    """Each symbol's last suggested exposure strictly before `today`.
+
+    Read from the symbol's own published projections: the saved daily summary used to be the source, but the
+    Dispatcher runs one symbol at a time, so the summary held a single name and every other symbol looked
+    like "no previous reading".
+    """
+    prior: dict[str, float] = {}
+    for sym in symbols:
+        try:
+            rows = store.task_projection_envelopes(agent_role="technical_review", scope_kind="entity",
+                                                   scope_id=sym, limit=30)
+        except Exception:  # noqa: BLE001 - fall back to the saved summary below
+            continue
+        for row in rows:
+            if str(row.get("as_of") or "")[:10] < today:
+                value = (row.get("payload") or {}).get("suggested_exposure")
+                if isinstance(value, (int, float)):
+                    prior[sym] = float(value)
+                break
+    return prior
+
+
+_SUMMARY_LOCK = threading.Lock()
+_GAP_PREFIX = "数据缺失，本期不出读数："
+
+
+def _readings_from_projections(store, as_of_date: str) -> list[TechnicalReading]:
+    """The day's readings as published: the latest technical_review projection of every symbol."""
+    latest: dict[str, dict] = {}
+    for row in store.task_projection_envelopes(agent_role="technical_review", scope_kind="entity", limit=500):
+        if str(row.get("as_of") or "")[:10] == as_of_date:
+            latest.setdefault(str(row["scope_id"]), row)          # newest first
+    readings = []
+    for sym, row in sorted(latest.items()):
+        p = row.get("payload") or {}
+        if p.get("signal") == "unavailable":
+            note = str(p.get("summary") or "")
+            readings.append(TechnicalReading(symbol=sym, stale=True, note=note.removeprefix(_GAP_PREFIX)))
+            continue
+        levels = p.get("levels") or {}
+        exposure = float(p.get("suggested_exposure") or 0.0)
+        readings.append(TechnicalReading(
+            symbol=sym, score=int(p.get("score") or 0), score_detail=p.get("score_detail") or {},
+            raw_ladder=exposure, target_exposure=exposure, prev_exposure=p.get("previous_exposure"),
+            panic_fired=bool(p.get("panic_fired")), bear_fired=bool(p.get("bear_fired")),
+            close=levels.get("close"), sma20=levels.get("sma20"), sma50=levels.get("sma50"),
+            sma200=levels.get("sma200")))
+    return readings
+
+
+def _persist_per_symbol(store, review: TechnicalReview) -> None:
+    """Publish this run's projections, then save the day's summary rebuilt from ALL of the day's projections.
+
+    The Dispatcher runs one symbol per task and several tasks at once.  A read-merge-write on the saved summary
+    loses readings when two tasks interleave (3 of 11 symbols vanished in a manual run), so the summary is derived
+    from the projections instead, and publish + rebuild + save run under one lock: whichever task saves last has
+    seen every projection published before it.
+    """
+    with _SUMMARY_LOCK:
+        _publish_projection(store, review)
+        own = {r.symbol: r for r in review.readings}
+        merged = {r.symbol: r for r in _readings_from_projections(store, review.as_of.date().isoformat())}
+        merged.update(own)                                         # this run's own reading is the fuller one
+        store.save_technical_review(review.model_copy(update={
+            "readings": sorted(merged.values(), key=lambda r: r.symbol)}))
+
+
+def _publish_projection(store, review: TechnicalReview) -> int:
+    """Publish each usable reading as a `technical_review` projection (entity scope).
+
+    全部由确定性代码产出：signal 是 7 点动量评分的三档化（≥5 bullish、≤2 bearish、
+    其余 neutral），不接 LLM。stale 读数（历史不足 SMA200）没有评分依据——宁缺勿造：不出敞口、不出价位，
+    发布一份 signal="unavailable" 的缺口投影，让"这只标的现在算不了"成为明确的结果，而不是一次失败的运行。
+    A failed publish is a gap, not a crash: the review row already holds the truth.
+    """
+    from ...agent.task_projection import ProjectionScope, build_envelope
+
+    published = 0
+    for r in review.readings:
+        if r.stale:
+            try:
+                store.save_task_projection_envelope(build_envelope(
+                    role="technical_review",
+                    payload={"entity": r.symbol, "signal": "unavailable",
+                             "summary": f"数据缺失，本期不出读数：{r.note or '历史不足'}",
+                             "data_status": "insufficient_history"},
+                    scope=ProjectionScope(kind="entity", id=r.symbol),
+                    as_of=review.as_of.isoformat(timespec="seconds"),
+                    model_version=f"deterministic:{review.strategy}@{review.fingerprint}",
+                    workflow_run_id=""))
+                published += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("technical %s: gap projection publish failed for %s: %s",
+                            review.name, r.symbol, exc)
+            continue
+        if r.score >= 5:
+            signal = "bullish"
+        elif r.score <= 2:
+            signal = "bearish"
+        else:
+            signal = "neutral"
+        levels = {key: value for key, value in (
+            ("close", r.close), ("sma20", r.sma20),
+            ("sma50", r.sma50), ("sma200", r.sma200)) if value is not None}
+        try:
+            envelope = build_envelope(
+                role="technical_review",
+                payload={"entity": r.symbol, "signal": signal,
+                         "summary": r.one_line(), "levels": levels,
+                         **projection_extras(r, review)},
+                scope=ProjectionScope(kind="entity", id=r.symbol),
+                as_of=review.as_of.isoformat(timespec="seconds"),
+                model_version=f"deterministic:{review.strategy}@{review.fingerprint}",
+                workflow_run_id="")
+            store.save_task_projection_envelope(envelope)
+            published += 1
+        except Exception as exc:  # noqa: BLE001 - 发布失败留痕，不影响读数落库
+            log.warning("technical %s: projection publish failed for %s: %s",
+                        review.name, r.symbol, exc)
+    return published
+
+
 def run(name: str = "technical", *, live_data: bool = True, persist: bool = True,
-        write_report: bool = True) -> TechnicalReview:
+        write_report: bool = True, symbols: list[str] | None = None) -> TechnicalReview:
+    from ...workflow import schedule_runtime as scheduling
+    from ...config import load_technical_config
+    from ...workflow.run_contracts import TriggerContext
+    from uuid import uuid4
+
+    active = scheduling._ACTIVE.get()
+    if (active and active.workflow == "technical-review") or not persist:
+        return _run(name, live_data=live_data, persist=persist, write_report=write_report, symbols=symbols)
+    targets = symbols
+    if targets is None:
+        targets, _ = resolve_universe(load_technical_config(name), live_broker=live_data)
+    trigger = scheduling._WAKE.get() or scheduling._LOGICAL.get() or TriggerContext(kind="manual", trigger_id="manual-" + uuid4().hex)
+    trigger = scheduling.adapt_wake("technical-review", trigger)
+    reviews = []
+    for symbol in sorted(set(str(item).upper() for item in targets)):
+        result = scheduling.execute("technical-review", {"kind": "entity", "id": symbol}, trigger,
+            lambda symbol=symbol: _run(name, live_data=live_data, persist=True,
+                write_report=write_report, symbols=[symbol]), actor="technical-" + uuid4().hex)
+        if isinstance(result, dict) and result.get("schedule_skipped"):
+            if result["status"] != "complete":
+                raise scheduling.ScheduleAuthorityError("technical trigger requires explicit disposition")
+            cached = result["result"]
+            if isinstance(cached, dict) and "readings" in cached:
+                result = TechnicalReview.model_validate(cached)
+            else:
+                from ...memory import get_store
+
+                result = get_store().latest_technical_review(name)
+                if result is None:
+                    raise scheduling.ScheduleAuthorityError("completed trigger has no readable technical review")
+        reviews.append(result)
+    if not reviews:
+        return _run(name, live_data=live_data, persist=False, write_report=False, symbols=[])
+    combined = reviews[0].model_copy(deep=True)
+    combined.readings = [reading for review in reviews for reading in review.readings]
+    combined.skipped = sorted({item for review in reviews for item in review.skipped})
+    return combined
+
+
+def _run(name: str = "technical", *, live_data: bool = True, persist: bool = True,
+        write_report: bool = True, symbols: list[str] | None = None) -> TechnicalReview:
     from ...config import load_technical_config
     from ...memory import get_store
 
     cfg = load_technical_config(name)
-    now = datetime.now(timezone.utc)
+    now = evaluation_now(timezone.utc)
     store = get_store()
 
-    symbols, notes = resolve_universe(cfg, live_broker=live_data)
+    per_symbol_run = symbols is not None
+    if symbols is None:
+        symbols, notes = resolve_universe(cfg, live_broker=live_data)
+    else:
+        excluded = {str(s).upper() for s in cfg.universe.get("exclude", [])} | _CASHLIKE
+        symbols = sorted({str(s).upper() for s in symbols} - excluded)
+        notes = ["Dispatcher：按运行计划冻结的标的范围"]
     review = TechnicalReview(
         name=cfg.name, as_of=now, strategy=cfg.strategy,
         fingerprint=st.params_fingerprint(cfg.strategy, st.LADDER,
@@ -196,12 +443,19 @@ def run(name: str = "technical", *, live_data: bool = True, persist: bool = True
 
     prev = store.previous_technical_review(cfg.name, before=now.date().isoformat())
     prior = {r.symbol: r.target_exposure for r in prev.readings} if prev else {}
+    prior.update(_prior_exposures(store, cfg.name, symbols, now.date().isoformat()))
 
     review.readings = compute_readings(closes, vix=vix, vix3m=v3, cfg=cfg, prior=prior)
     review.skipped = sorted(set(symbols) - set(closes))
 
     if persist:
-        store.save_technical_review(review)
+        # A run for given symbols (the Dispatcher's one-name tasks) joins today's summary; a full-universe run
+        # replaces it.
+        if per_symbol_run:
+            _persist_per_symbol(store, review)
+        else:
+            store.save_technical_review(review)
+            _publish_projection(store, review)
     if write_report:
         from . import report as tech_report
 

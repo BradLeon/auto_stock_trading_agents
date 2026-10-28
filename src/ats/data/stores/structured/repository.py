@@ -342,8 +342,19 @@ class StructuredRepository(Protocol):
 
 
 class SQLiteStructuredRepository:
-    def __init__(self, path: str | Path, *, artifact_root: str | Path | None = None):
+    def __init__(self, path: str | Path, *, artifact_root: str | Path | None = None,
+                 readonly: bool = False):
         self.path = str(path)
+        self._lock = RLock()
+        if readonly:
+            if self.path == ":memory:":
+                raise ValueError("readonly_repository_requires_existing_database")
+            self.conn = sqlite3.connect(Path(self.path).resolve().as_uri() + "?mode=ro",
+                                        uri=True, check_same_thread=False, timeout=30)
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA query_only=ON")
+            self.artifacts = ArtifactStore(artifact_root or default_artifact_root(), readonly=True)
+            return
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
@@ -352,7 +363,6 @@ class SQLiteStructuredRepository:
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
-        self._lock = RLock()
         self.artifacts = ArtifactStore(artifact_root or default_artifact_root())
         self._record_migration()
 
@@ -1480,6 +1490,23 @@ class SQLiteStructuredRepository:
         if cutoff:
             sql += " AND o.known_at<=? AND (o.published_at='' OR o.published_at<=?)"
             args.extend([cutoff, cutoff])
+        if accepted_only:
+            # Reviewed FactSet groups become consumer-visible only when their
+            # complete platform manifest commits. A crash between individual
+            # observation writes and that commit must not expose a partial
+            # cross-section through the generic structured read API. Legacy
+            # observations have no package_hash and retain their old behavior.
+            sql += (" AND (s.source_id!='factset_earnings_insight_metrics' "
+                    "OR json_extract(s.dimensions_json,'$.package_hash') IS NULL "
+                    "OR EXISTS (SELECT 1 FROM structured_release_manifests fm "
+                    "JOIN json_each(fm.observation_ids_json) fi ON fi.value=o.observation_id "
+                    "WHERE fm.dataset_id=s.dataset_id AND fm.passed=1 AND fm.status='platform' "
+                    "AND json_extract(fm.quality_json,'$.package_hash')="
+                    "json_extract(s.dimensions_json,'$.package_hash')")
+            if cutoff:
+                sql += " AND fm.known_at<=?"
+                args.append(cutoff)
+            sql += "))"
         if latest_only:
             sql += (" AND NOT EXISTS (SELECT 1 FROM structured_observations newer "
                     "WHERE newer.series_id=o.series_id AND newer.period=o.period "

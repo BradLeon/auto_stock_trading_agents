@@ -2,7 +2,7 @@
 
 Why this exists: the question "would a trend/vol rule have helped in the drawdowns
 I actually lived through" is answerable with data, and answering it BEFORE wiring
-anything into the live path is the whole point. See docs/MACRO_ANALYST.md's staging
+anything into the live path is the whole point. See docs/agents/MACRO_ANALYST.md's staging
 philosophy — deterministic first, verified, then connected.
 
 Three hard rules this module must obey, because a backtest is the easiest kind of
@@ -231,7 +231,7 @@ def build_series(prices: dict[str, list[float]], syms: list[str], rule_name: str
         return {s: series_triple_ma_vix(prices[s], vix) for s in syms}
     if rule_name == "F_jia_bearslope":
         # 甲 + leaps_smartrisk's Tier 2 (bear cap gated on SMA200 itself declining,
-        # not just price < SMA200). See docs/TECHNICAL_ANALYST.md §comparison.
+        # not just price < SMA200). See docs/agents/TECHNICAL_ANALYST.md §comparison.
         m = market or {}
         return {s: series_momentum_vol(prices[s], m.get("VIX", []), m.get("VIX3M", []),
                                        "jia", bear_requires_declining=True) for s in syms}

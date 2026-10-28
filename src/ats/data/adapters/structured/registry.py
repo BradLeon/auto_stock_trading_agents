@@ -43,6 +43,12 @@ def _company_disclosures():
     return CompanyDisclosuresAdapter()
 
 
+def _issuer_ir_files():
+    from ...sources.issuer_ir_files import IssuerIRFilesAdapter
+
+    return IssuerIRFilesAdapter()
+
+
 def _defeatbeta():
     from ...sources.company_financials import DefeatBetaStatementAdapter
 
@@ -53,6 +59,12 @@ def _yfinance_financials():
     from ...sources.company_financials import YFinanceFinancialStatementsAdapter
 
     return YFinanceFinancialStatementsAdapter()
+
+
+def _macro_series():
+    from ...sources.macro_series import MacroSeriesAdapter
+
+    return MacroSeriesAdapter()
 
 
 def _consensus():
@@ -70,7 +82,7 @@ def _sacra_frontier_labs_revenue():
 def _tickertrends_frontier_labs_revenue():
     from ...sources.frontier_ai_labs_revenue import TickerTrendsPublicResearchAdapter
 
-    return TickerTrendsPublicResearchAdapter()
+    return TickerTrendsPublicResearchAdapter(include_notes=True)
 
 
 def _trendforce():
@@ -150,11 +162,14 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         "sec_companyfacts", _sec_companyfacts, requires_entities=True),
     "company_disclosures": RuntimeSourceSpec(
         "company_disclosures", _company_disclosures, requires_entities=True),
+    "issuer_ir_files": RuntimeSourceSpec(
+        "issuer_ir_files", _issuer_ir_files, requires_entities=True),
     "defeatbeta_stock_statement": RuntimeSourceSpec(
         "defeatbeta_stock_statement", _defeatbeta, requires_entities=True),
     "yfinance_financials": RuntimeSourceSpec(
         "yfinance_financials", _yfinance_financials, requires_entities=True),
     "consensus": RuntimeSourceSpec("consensus", _consensus, requires_entities=True),
+    "macro_series": RuntimeSourceSpec("macro_series", _macro_series),
     "trendforce": RuntimeSourceSpec("trendforce", _trendforce),
     "factset_earnings_insight": RuntimeSourceSpec(
         "factset_earnings_insight", _factset_earnings_insight),

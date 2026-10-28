@@ -29,15 +29,6 @@ _BOUNDARIES = {
             "Chief context, decision, approval, trade and run records",
         ),
     },
-    "runtime_scheduler": {
-        "persistent_inputs": (
-            "official releases, research/news documents and Chain source products",
-        ),
-        "runtime_inputs": ("earnings calendar and market-session calendar",),
-        "memory_outputs": (
-            "workflow runs, scores, observations, reports and decision state",
-        ),
-    },
 }
 
 

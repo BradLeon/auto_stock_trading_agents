@@ -14,6 +14,7 @@ import hashlib
 from io import BytesIO
 import re
 from typing import Callable
+from urllib.parse import unquote, urlsplit
 
 from ..core.structured_models import (
     AdapterArtifact,
@@ -34,6 +35,29 @@ REPORT_DATE = re.compile(
     r"November|December)\s+(\d{1,2}),\s+(20\d{2})\b"
 )
 URL_DATE = re.compile(r"EarningsInsight_(\d{2})(\d{2})(\d{2})\.pdf", re.I)
+
+
+def report_refresh_url(scope: dict) -> str:
+    """Resolve an explicit official historical report without arbitrary URL fetches."""
+    if not isinstance(scope, dict) or set(scope) - {"url"}:
+        raise ValueError("FactSet refresh scope accepts only an official report url")
+    value = scope.get("url", STABLE_URL)
+    if not isinstance(value, str):
+        raise ValueError("FactSet report url must be a string")
+    if value == STABLE_URL:
+        return value
+    parts = urlsplit(value)
+    prefix = "/hubfs/Website/Resources Section/Research Desk/Earnings Insight/"
+    path = unquote(parts.path)
+    if (parts.scheme != "https" or parts.netloc != "advantage.factset.com"
+            or parts.query or parts.fragment or not path.startswith(prefix)):
+        raise ValueError("FactSet report url is outside the official report archive")
+    match = URL_DATE.fullmatch(path[len(prefix):])
+    if match is None:
+        raise ValueError("FactSet report url must name a dated EarningsInsight PDF")
+    month, day, year = map(int, match.groups())
+    date(2000 + year, month, day)
+    return value
 
 
 class FactSetFailure(StrEnum):

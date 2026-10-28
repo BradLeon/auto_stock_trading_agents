@@ -13,9 +13,10 @@ import json
 import logging
 import math
 from datetime import datetime, timezone
+from ats.workflow.evaluation_clock import now as evaluation_now
 
 from ..broker import IBKRBroker, IBKRUnavailable
-from ..schemas.decision import BossApproval, TradeDecision
+from ..schemas.decision import BossApproval, TradeDecision, action_direction
 from ..schemas.memory import TradeLogEntry
 
 log = logging.getLogger("ats.trader.execute")
@@ -24,7 +25,7 @@ _LIVE_PORTS = {7496, 4001}   # TWS/Gateway live; 7497/4002 are paper
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 # --------------------------------------------------------------------------- #
@@ -87,7 +88,11 @@ def as_overnight_limits(decisions: list[TradeDecision],
             out.append(d)
             notes.append(f"{d.symbol}: 取不到参考价，保持市价单（隔夜单请人工确认）")
             continue
-        mult = 1 + slippage_pct / 100 if d.action.lower() == "buy" else 1 - slippage_pct / 100
+        # Buying needs a worse price to fill; selling needs a better one. `hold` never
+        # reaches here (no order), and an unknown action raises instead of defaulting.
+        mult = (1 + slippage_pct / 100 if action_direction(
+            d.action, where="execute._to_limit_orders") > 0
+            else 1 - slippage_pct / 100)
         limit = round(ref * mult, 2)
         out.append(d.model_copy(update={"order_type": "limit", "limit_price": limit}))
         notes.append(f"{d.symbol}: 隔夜单改限价 {limit}（参考 {ref:.2f} {mult:+.2%}）")
@@ -137,20 +142,200 @@ def cancelled_entries(sized: list[tuple[TradeDecision, float]], cycle_id: str,
             for d, q in sized]
 
 
-def place_orders(to_place: list[tuple[TradeDecision, float]],
-                 cycle_id: str) -> tuple[list[TradeLogEntry], list[dict]]:
-    """Submit via IBKR; degrade to error entries (never raises) if TWS is down."""
-    try:
-        broker = IBKRBroker()
-        entries = broker.place_orders(to_place, cycle_id)
-        fills = broker.get_fills()
-        return entries, fills
-    except IBKRUnavailable as exc:
-        print(f"❌ IBKR unavailable: {exc}")
+# Production C3 remains disabled. Plan A now governs quote reads and frozen
+# orders; only explicit, fully isolated no-network simulation can submit through
+# this facade. Historical B/C3 rationale remains in the frozen validation reports.
+AUTO_EXECUTION_ENABLED = False
+AUTO_EXECUTION_DISABLED_REASON = (
+    "生产 C3 保留：真实券商提交尚未开放。隔离测试须明确选择无网络 FakeBroker，"
+    "并通过完整行情、风控、审批、账户/代次及幂等门禁。")
+
+
+def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
+                 *, revision_no: int = 0,
+                 authorization: dict | None = None
+                 ) -> tuple[list[TradeLogEntry], list[dict]]:
+    """Submit via IBKR; degrade to error entries (never raises) if TWS is down.
+
+    Execution authorization gate (tasks 7.2/7.9): a batch may only be submitted
+    against a complete ExecutionAuthorization (dict form, §10.4). Bare
+    instructions — no authorization — are rejected before the broker is touched.
+
+    Retry idempotency (task 7.8): before submitting, each order's local record
+    is checked. One that is already submitted/filled locally is NOT re-submitted
+    (the outcome is uncertain — it stays for reconciliation); only confirmed
+    unsubmitted intents proceed.
+
+    自动下单开关（任务 7.9）：停用时**在触碰券商之前**拒绝，理由入账。
+    刻意与上面的授权拒绝同形——「不成交」必须有可见且有据的原因，
+    而不是一个数字为 0 的静默丢弃。
+    """
+    from ..execution.shadow_execution import selected_shadow
+    from ..execution.simulation import selected_simulation
+
+    simulated_broker = selected_simulation()
+    shadow_broker = selected_shadow()
+    if simulated_broker is not None and shadow_broker is not None:
+        raise PermissionError("multiple_isolated_transports_selected")
+    if simulated_broker is None and shadow_broker is None:
         entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
-                                 action=d.action, qty=q, status="error", submitted_at=_now(),
-                                 rationale=d.rationale, error=str(exc)) for d, q in to_place]
+                                 action=d.action, qty=q, revision_no=revision_no,
+                                 order_seq=i, status="rejected", submitted_at=_now(),
+                                 rationale=d.rationale,
+                                 error=f"auto execution disabled: {AUTO_EXECUTION_DISABLED_REASON}")
+                   for i, (d, q) in enumerate(to_place)]
+        print(f"🚫 自动下单已停用（{len(entries)} 笔未提交）："
+              f"{AUTO_EXECUTION_DISABLED_REASON}")
         return entries, []
+
+    if not authorization:
+        entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
+                                 action=d.action, qty=q, revision_no=revision_no,
+                                 order_seq=i, status="rejected", submitted_at=_now(),
+                                 rationale=d.rationale,
+                                 error="missing execution authorization")
+                   for i, (d, q) in enumerate(to_place)]
+        print("🚫 执行被拒绝：缺少完整执行授权（审查+审批+修订绑定）")
+        return entries, []
+
+    # Task 2.1: every entry that reaches for the broker carries the full
+    # decision chain, taken from the verified authorization — never rebuilt.
+    chain = {"decision_hash": authorization.get("decision_hash", ""),
+             "approval_id": authorization.get("approval_id", "")}
+
+    from ..memory import get_store
+
+    store = get_store()
+    from ..data.execution_prices import PriceUnavailable, check_execution, price_request, read_price
+    from ..decision.repository import DecisionAuditRepository
+    from ..execution.authorization import (
+        FIELDS,
+        ExecutionAuthorization,
+        active_route_state,
+        build_authorization,
+        validate_authorization,
+    )
+
+    held: list[tuple[int, TradeLogEntry]] = []
+    fresh: list[tuple[int, TradeDecision, float]] = []
+    for i, (d, q) in enumerate(to_place):
+        coid = store.client_order_id(cycle_id, revision_no, i, d.symbol, d.action)
+        prior = store.conn.execute(
+            "SELECT * FROM trades WHERE client_order_id = ?", (coid,)).fetchone()
+        if prior is not None and prior["status"] in ("submitted", "partial", "filled", "pending"):
+            # Uncertain outcome: the first attempt may have reached the broker.
+            # Never produce a second logical order — leave it to reconciliation.
+            held.append((i, TradeLogEntry(
+                order_id=prior["order_id"] or "", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
+                qty=q, revision_no=revision_no, order_seq=i,
+                order_type=d.order_type, limit_price=d.limit_price,
+                perm_id=prior["perm_id"] or "", order_ref=prior["order_ref"] or "",
+                avg_fill_price=prior["avg_fill_price"],
+                filled_at=datetime.fromisoformat(prior["filled_at"]) if prior["filled_at"] else None,
+                status=prior["status"], submitted_at=datetime.fromisoformat(prior["submitted_at"])
+                if prior["submitted_at"] else _now(), rationale=d.rationale,
+                error="retry skipped: prior attempt outcome uncertain "
+                      "(pending reconciliation)", **chain)))
+        else:
+            fresh.append((i, d, q))
+
+    repo = DecisionAuditRepository(store)
+    execution_audit = []
+    quotes = {}
+    try:
+        auth = ExecutionAuthorization.model_validate(authorization)
+        stored = build_authorization(repo, cycle_id)
+        from ..workflow.consumer_reads import record_read
+
+        record_read("trader", "ats.execution.authorization.build_authorization",
+                    refs=[stored.decision_hash, stored.review_id, stored.approval_id],
+                    cycle_id=stored.cycle_id, revision_no=stored.revision_no)
+        if cycle_id != auth.cycle_id or revision_no != auth.revision_no or any(
+                getattr(stored, key) != getattr(auth, key) for key in FIELDS):
+            raise ValueError("authorization_does_not_match_audit")
+        # Decode the actual review binding, not a caller's invented 'now'.
+        snapshot_time = (datetime.fromisoformat(auth.portfolio_snapshot_id[3:])
+                         if auth.portfolio_snapshot_id.startswith("pf:") else None)
+        reasons = validate_authorization(repo, auth, snapshot_as_of=snapshot_time,
+                                         now=_now(), route_state=active_route_state())
+        if reasons and fresh:
+            raise ValueError(";".join(reasons))
+        revision = repo.latest_revision(cycle_id)
+        orders = json.loads(revision["orders_json"])
+        if [d.model_dump(mode="json") for d, _ in to_place] != orders:
+            raise ValueError("submitted_orders_do_not_match_approved_revision")
+        if not fresh:
+            return [entry for _, entry in held], []
+        with price_request("trader", [d for d, _ in to_place], cycle_id=cycle_id,
+                           purpose="approved_execution_check", audit=repo):
+            from ..data.consumer_api import read_input
+
+            packet = read_input("trader", "APPROVED_EXECUTION_AUTHORIZATION",
+                                scope={"cycle_id": cycle_id, "snapshot_as_of": snapshot_time}, audit=repo)
+            if packet.status != "complete" or any(packet.payload.get(key) != getattr(auth, key)
+                                                     for key in FIELDS):
+                raise ValueError("governed_authorization_rejected:" + ";".join(packet.gaps))
+            for seq, decision, qty in fresh:
+                quote = read_price("trader", decision)
+                quotes[json.dumps(decision.model_dump(mode="json"), sort_keys=True)] = quote
+                execution_audit.append({"order_seq": seq,
+                                        "quote": quote.model_dump(mode="json"),
+                                        "approval_quote_ref": decision.execution_basis.get("quote_ref")})
+                checked = check_execution(decision, qty, quote)
+                execution_audit[-1].update(checked)
+    except (ValueError, PermissionError, RuntimeError) as exc:
+        prefix = "price conditions rejected; reapprove" if isinstance(exc, PriceUnavailable) else "execution check rejected"
+        entries = [TradeLogEntry(
+            order_id="", cycle_id=cycle_id, symbol=d.symbol, action=d.action, qty=q,
+            revision_no=revision_no, order_seq=i, order_type=d.order_type,
+            limit_price=d.limit_price, status="rejected", submitted_at=_now(),
+            rationale=d.rationale, error=f"{prefix}: {exc}",
+            **chain) for i, (d, q) in enumerate(to_place)]
+        for entry in entries:
+            entry.execution_price_audit = execution_audit
+        return entries, []
+
+    def execution_check(decision, qty):
+        # Runs again immediately before each transport handoff, after contract
+        # qualification and under the route mutex. Waiting never refreshes age.
+        checked = check_execution(decision, qty, quotes[json.dumps(decision.model_dump(mode="json"), sort_keys=True)])
+        reasons = validate_authorization(repo, auth, snapshot_as_of=snapshot_time,
+                                         now=_now(), route_state=active_route_state())
+        if reasons:
+            raise ValueError(";".join(reasons))
+        return checked
+    entries: list[TradeLogEntry] = [e for _, e in held]
+    fills: list[dict] = []
+    if fresh:
+        try:
+            broker = shadow_broker or simulated_broker or IBKRBroker()
+            if shadow_broker is not None:
+                shadow_broker.authorization = auth.model_dump(mode="json")
+                shadow_broker.execution_audit = execution_audit
+            # Keep causal receipts if a later order's handoff fails. A rejection
+            # must not erase an earlier accepted intent or invent its resubmission.
+            for i, d, q in fresh:
+                submitted = broker.place_orders([(d, q)], cycle_id,
+                                                revision_no=revision_no, chain=chain,
+                                                execution_check=execution_check,
+                                                order_sequences=[i])
+                entries.extend(submitted)
+            fills = broker.get_fills()
+        except (IBKRUnavailable, ValueError, PermissionError, RuntimeError) as exc:
+            print(f"❌ execution refused: {exc}")
+            accepted_sequences = {entry.order_seq for entry in entries}
+            price_error = isinstance(exc, PriceUnavailable)
+            entries.extend([TradeLogEntry(
+                order_id="", cycle_id=cycle_id, symbol=d.symbol, action=d.action,
+                qty=q, revision_no=revision_no, order_seq=i,
+                order_type=d.order_type, limit_price=d.limit_price,
+                status="rejected" if price_error else "error",
+                submitted_at=_now(), rationale=d.rationale,
+                error=f"price conditions rejected; reapprove: {exc}" if price_error else str(exc), **chain)
+                for i, d, q in fresh if i not in accepted_sequences])
+    for entry in entries:
+        entry.execution_price_audit = execution_audit
+    return entries, fills
 
 
 def approval_divergence(approval: BossApproval | None,
@@ -209,12 +394,15 @@ def trade_context_json(source: str, approval: BossApproval | None,
 def pead_event_data() -> dict[str, dict]:
     """Expected Move per PEAD target from the freshest dossiers (for the L6 risk gate)."""
     from ..config import load_pead_config, load_pead_global
+    from ..data.period import label_for_reads
     from ..memory import get_store
 
     out: dict[str, dict] = {}
     for sym in load_pead_global().get("targets", []):
         try:
-            d = get_store().get_dossier(sym.upper(), load_pead_config(sym).fiscal_label)
+            store = get_store()
+            d = store.get_dossier(sym.upper(), label_for_reads(
+                sym, store=store, config_label=load_pead_config(sym).fiscal_label))
             if d and d.market_setup and d.market_setup.expected_move_pct:
                 out[sym.upper()] = {"expected_move_pct": d.market_setup.expected_move_pct}
         except Exception:  # noqa: BLE001
@@ -233,6 +421,29 @@ def _size(d: TradeDecision) -> float:
 
 
 def _last_price(symbol: str) -> float | None:
+    """Compatibility helper: requires an active order-bound governed price request.
+
+    Actual normalization uses direction-specific bid/ask and explicit instrument
+    precision in data.execution_prices; this helper never calls the retained provider.
+    """
+    from ..data.execution_prices import directional_price, read_price
+
+    decision = TradeDecision(symbol=symbol, action="buy")
+    quote = read_price("trader", decision)
+    return directional_price(quote, decision.action)
+
+
+def _last_price_enabled(symbol: str) -> float | None:
+    """DISABLED — retained for the plan-A restore, called by nothing.
+
+    TODO(方案 A，补授权后恢复): this becomes the governed read.
+
+    Deliberately a SEPARATE function rather than a `return None` followed by
+    unreachable code: dead code after an unconditional return reads as live to
+    the next reader, and "is this still called?" is exactly the question task
+    7.9 turns on. The intake scan treats a `TODO` + `DISABLED` docstring on an
+    uncalled function as a retained path rather than a live bypass.
+    """
     try:
         from ..data import market_data
         from ..schemas.market import Ticker

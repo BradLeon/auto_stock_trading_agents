@@ -75,7 +75,9 @@ def test_recent_actions_shows_execution_status():
         TradeDecision(symbol="ASML", action="trim", notional_usd=1500, rationale="r")])
     store.save_trades(
         [TradeLogEntry(order_id="1", cycle_id=cid, symbol="GOOG", action="trim", qty=13,
-                       status="filled", submitted_at=NOW, rationale="r")],
+                       status="filled", submitted_at=NOW, rationale="r",
+                       revision_no=1, decision_hash=f"hash-{cid}",
+                       approval_id=f"appr-{cid}")],
         cycle_id=cid, source="chief", context="")
 
     block = assemble._recent_actions_block()

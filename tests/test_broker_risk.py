@@ -1,42 +1,12 @@
-"""Phase 6: risk-manager portfolio logic + broker helpers (no network)."""
+"""Broker helpers: order placement short-circuit, status mapping, FX and sizing (no network)."""
 
 from datetime import datetime, timezone
 
 import pytest
 
-from ats.agents import risk_manager as rm
 from ats.broker.ibkr import IBKRBroker, IBKRUnavailable, _account_value_context, _fx_rate, _map_status
-from ats.config import RiskConfig
-from ats.schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
 
 NOW = datetime.now(timezone.utc)
-SECTORS = {"NVDA": "ai_hardware", "AMD": "ai_hardware", "GOOGL": "internet_software"}
-
-
-def _cfg():
-    return RiskConfig(max_position_pct=0.2, max_sector_pct=0.4, max_gross_leverage=1.0,
-                      max_single_order_usd=25000, cash_floor_pct=0.05)
-
-
-def test_assess_without_portfolio_uses_config():
-    gr = rm.assess(as_of=NOW, risk_cfg=_cfg(), portfolio=None, sector_by_symbol=SECTORS)
-    assert gr.max_position_pct == 0.2
-    assert gr.no_add_list == [] and gr.forced_trim == []
-
-
-def test_assess_flags_overweight_and_hot_sector():
-    pf = PortfolioSnapshot(
-        as_of=NOW, net_liquidation=100000, leverage=0.45,
-        positions=[Position(symbol="NVDA", sector="ai_hardware", qty=100, avg_cost=200,
-                            market_price=300, market_value=30000, weight=0.30)],
-        exposure=ExposureBreakdown(by_sector={"ai_hardware": 0.45}, by_ticker={"NVDA": 0.30}),
-    )
-    gr = rm.assess(as_of=NOW, risk_cfg=_cfg(), portfolio=pf, sector_by_symbol=SECTORS)
-    # NVDA is over the 20% position cap -> forced trim.
-    assert "NVDA" in gr.forced_trim
-    # ai_hardware sector is at 45% (>40%) -> no adds to ai_hardware names.
-    assert set(gr.no_add_list) >= {"NVDA", "AMD"}
-    assert "GOOGL" not in gr.no_add_list
 
 
 def test_place_orders_empty_does_not_connect():
@@ -86,6 +56,10 @@ def test_submit_rejects_unqualified_contract():
     """qualifyContracts returning [] (Error 200 / TWS offline) must NOT place an
     order — observed live 2026-07-15 during the IBKR maintenance window."""
     from ats.schemas.decision import TradeDecision
+    from ats.execution import broker_write_guard as guard
+
+    guard.reset_for_tests()
+    guard.grant_write("test", 1, environment="paper", account="DU1")
 
     class FakeIB:
         placed = False
@@ -105,11 +79,18 @@ def test_submit_rejects_unqualified_contract():
     assert "not qualified" in entry.error
     assert ib.placed is False
     assert broker._last_trades == [None]
+    guard.reset_for_tests()
 
 
 def test_size_survives_nan_close(monkeypatch):
     """Pre-open, yfinance appends today's bar with close=NaN — sizing must skip
-    it (use the last real close), never crash on round(NaN). Seen live 2026-07-15."""
+    it (use the last real close), never crash on round(NaN). Seen live 2026-07-15.
+
+    Retargeted by task 7.9: `_last_price` no longer reads a price at all (auto
+    execution is disabled), so this exercises `_last_price_enabled` — the retained
+    implementation the plan-A restore will use. Its NaN handling still has to be
+    correct, because plan A revives this code rather than rewriting it.
+    """
     from ats.trader import execute as texec
     from ats.schemas.decision import TradeDecision
 
@@ -121,11 +102,24 @@ def test_size_survives_nan_close(monkeypatch):
         history = [Bar(217.53), Bar(float("nan"))]
 
     monkeypatch.setattr("ats.data.market_data.fetch_snapshot", lambda t: Snap())
-    d = TradeDecision(symbol="MRVL", action="trim", notional_usd=6000)
-    assert texec._size(d) == 28.0
+    assert texec._last_price_enabled("MRVL") == 217.53
 
     class AllNan:
         history = [Bar(float("nan"))]
 
     monkeypatch.setattr("ats.data.market_data.fetch_snapshot", lambda t: AllNan())
-    assert texec._size(d) == 0.0
+    assert texec._last_price_enabled("MRVL") is None
+
+
+def test_sizing_returns_zero_while_auto_execution_is_disabled():
+    """The visible consequence of stopping the read: an amount-only decision sizes
+    to zero. It is not silent — `place_orders` refuses the batch with a recorded
+    reason (see `test_overnight_limits.py`) — but it does mean no order is sized.
+    """
+    from ats.trader import execute as texec
+    from ats.schemas.decision import TradeDecision
+
+    assert texec.AUTO_EXECUTION_ENABLED is False
+    d = TradeDecision(symbol="MRVL", action="trim", notional_usd=6000)
+    with pytest.raises(PermissionError, match="binding_required"):
+        texec._size(d)

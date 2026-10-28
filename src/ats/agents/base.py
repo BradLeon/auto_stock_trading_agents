@@ -53,6 +53,20 @@ def load_skill(slug: str) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def execution_versions(role: str, skill_slug: str, *, use_llm: bool = True,
+                       template_source: str | Path | None = None) -> dict[str, str]:
+    """Describe the configured model and actual prompt implementation, no secrets."""
+    import hashlib
+    import json
+    from ..config import get_config
+    config = get_config().app.llm.for_role(role).model_dump(mode="json")
+    prompt = load_skill(skill_slug) + Path(__file__).read_text()
+    if template_source:
+        prompt += Path(template_source).read_text()
+    return {"model_version": (json.dumps(config, sort_keys=True) if use_llm else "deterministic-rules"),
+            "prompt_version": hashlib.sha256(prompt.encode()).hexdigest()}
+
+
 def run_structured(role: str, schema: type[T], context: str, *, skill_slug: str | None = None) -> T:
     """Invoke the role's model, forcing output into `schema`.
 
@@ -61,6 +75,8 @@ def run_structured(role: str, schema: type[T], context: str, *, skill_slug: str 
     via tool-calling, so the return value is already a validated instance.
     """
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    from ..config import get_config
 
     system = load_skill(skill_slug or role) or f"You are the {role}. Be rigorous and concise."
     # Tool-calling is the most portable structured-output method across the
@@ -76,6 +92,13 @@ def run_structured(role: str, schema: type[T], context: str, *, skill_slug: str 
         out = model.invoke(messages)
         if out is not None:
             break
+        # A reasoning model can spend its turn thinking and answer with no tool call at all, and
+        # repeating the identical request repeats that (LRCX 2026-10-19: 8 of 8 attempts empty;
+        # the same request with reasoning off answered at once). The remaining attempts therefore
+        # turn reasoning off. Only the request changes: the role's configured execution identity
+        # (and so every cached answer) stays as it was.
+        if get_config().app.llm.for_role(role).reasoning != "off":
+            model = get_model(role, "off").with_structured_output(schema, method="function_calling")
     if out is None:
         raise RuntimeError(
             f"structured output empty for role={role!r} schema={schema.__name__} "

@@ -156,6 +156,62 @@ def test_official_release_rows_preserve_alias_withdrawal_and_non_comparable_stat
     assert "non_comparable" in qwen.dimensions["comparability_group"]
 
 
+def test_official_lab_live_probe_uses_exact_public_org_namespaces(monkeypatch, tmp_path):
+    from urllib.parse import parse_qs, urlparse
+
+    adapter = OfficialLabReleaseAdapter(clock=lambda: NOW)
+    requested = []
+
+    def read_url(url, **_kwargs):
+        requested.append(url)
+        org = parse_qs(urlparse(url).query).get("author", [""])[0]
+        rows = {
+            "openai": [
+                {"id": "openai/gpt-oss-20b", "sha": "abc123", "createdAt": "2026-09-01T00:00:00Z"},
+                {"id": "community/openai-copy", "sha": "bad123"},
+                {"id": "openai/gated-model", "sha": "gate123", "gated": True},
+            ],
+            "deepseek-ai": [{"id": "deepseek-ai/DeepSeek-R1", "sha": "def456"}],
+        }.get(org, [])
+        return json.dumps(rows).encode(), {"etag": '"test"'}
+
+    monkeypatch.setattr(adapter, "_read_url", read_url)
+    batch = adapter.fetch(FetchRequest(
+        source_id="frontier_ai_capability_official_lab",
+        dataset_id="frontier_ai_public_model_cards",
+    ))
+
+    assert batch.status.value == "succeeded"
+    assert len(requested) == 9
+    assert {entity.metadata["model_id"] for entity in batch.entities} == {
+        "openai/gpt-oss-20b", "deepseek-ai/DeepSeek-R1",
+    }
+    assert all(entity.metadata["flagship"] is False for entity in batch.entities)
+    assert all("release_date" not in entity.metadata for entity in batch.entities)
+    assert len(batch.records) == 2
+    assert {record.provider_field for record in batch.records} == {"public_model_card"}
+    assert {record.value for record in batch.records} == {1}
+    assert len(batch.provider_metadata["sources"]) == 9
+
+    repo = SQLiteStructuredRepository(tmp_path / "official-labs.sqlite", artifact_root=tmp_path / "artifacts")
+    repo.bootstrap_catalog(StructuredCatalog.load())
+    ingested = IngestionPipeline(repo).run(adapter, FetchRequest(
+        source_id="frontier_ai_capability_official_lab",
+        dataset_id="frontier_ai_public_model_cards",
+    ))
+    assert ingested["status"] == "succeeded"
+    assert ingested["accepted"] == 2
+
+
+def test_live_official_model_cards_cannot_write_into_benchmark_dataset():
+    batch = OfficialLabReleaseAdapter(clock=lambda: NOW).fetch(FetchRequest(
+        source_id="frontier_ai_capability_official_lab",
+        dataset_id="frontier_ai_capability_benchmarks",
+    ))
+    assert batch.status.value == "methodology_drift"
+    assert "official_model_card_dataset_mismatch" in batch.failures[0].message
+
+
 def test_no_key_fallback_is_truthful_no_coverage():
     adapter = FrontierAICapabilityAdapter(api_key="", clock=lambda: NOW)
     batch = adapter.fetch(FetchRequest(source_id="frontier_ai_capability", dataset_id="frontier_ai_capability_benchmarks"))
@@ -412,6 +468,18 @@ def test_public_structured_page_policy_gate_fails_closed(monkeypatch):
                    "toolathlon_verified", "spreadsheetbench_2", "humanitys_last_exam"})
 
 
+def test_public_structured_page_policy_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", raising=False)
+    monkeypatch.delenv("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", raising=False)
+    adapter = FrontierAICapabilityAdapter(public=True, clock=lambda: NOW)
+    adapter._public_route = lambda benchmark: {"transport": "official_html", "url": f"https://example.test/{benchmark}"}
+    payload, _source_url, _access_path, meta = adapter._load_public(NOW)
+    assert payload["scores"] == []
+    blocked = [item for item in meta["sources"] if item["benchmark_id"] == "toolathlon_verified"]
+    assert blocked and blocked[0]["status"] == "source_policy_blocked"
+    assert "source_policy_blocked" in blocked[0]["error"]
+
+
 def test_public_structured_page_terms_gate_fails_closed(monkeypatch):
     monkeypatch.setenv("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "1")
     monkeypatch.setenv("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "0")
@@ -422,6 +490,47 @@ def test_public_structured_page_terms_gate_fails_closed(monkeypatch):
     blocked = [item for item in meta["sources"] if item["benchmark_id"] == "toolathlon_verified"]
     assert blocked and blocked[0]["status"] == "source_policy_blocked"
     assert "terms_or_robots_not_approved" in blocked[0]["error"]
+
+
+def test_public_html_allowlist_authorizes_only_exact_benchmark_routes(monkeypatch):
+    import ats.data.sources.frontier_ai_capability as capability_source
+
+    monkeypatch.setattr(
+        capability_source, "BENCHMARKS", ("toolathlon_verified", "spreadsheetbench_2"))
+    monkeypatch.setenv("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "1")
+    monkeypatch.setenv("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "1")
+    monkeypatch.setenv("ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS", "toolathlon_verified")
+    adapter = FrontierAICapabilityAdapter(public=True, clock=lambda: NOW)
+    adapter._public_route = lambda benchmark: {
+        "transport": "official_html", "url": f"https://example.test/{benchmark}"}
+    requested = []
+    adapter._read_url = lambda url, **kwargs: (requested.append(url) or b"<html></html>", {})
+
+    _payload, _url, _path, meta = adapter._load_public(NOW)
+
+    by_benchmark = {row["benchmark_id"]: row for row in meta["sources"]}
+    assert requested == ["https://example.test/toolathlon_verified"]
+    assert by_benchmark["spreadsheetbench_2"]["status"] == "source_policy_blocked"
+    assert "public_html_route_not_authorized:spreadsheetbench_2" in by_benchmark[
+        "spreadsheetbench_2"]["error"]
+
+
+def test_public_html_requires_exact_route_allowlist_even_with_global_approval(monkeypatch):
+    import ats.data.sources.frontier_ai_capability as capability_source
+
+    monkeypatch.setattr(capability_source, "BENCHMARKS", ("toolathlon_verified",))
+    monkeypatch.setenv("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "1")
+    monkeypatch.setenv("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "1")
+    monkeypatch.delenv("ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS", raising=False)
+    adapter = FrontierAICapabilityAdapter(public=True, clock=lambda: NOW)
+    adapter._public_route = lambda benchmark: {
+        "transport": "official_html", "url": f"https://example.test/{benchmark}"}
+    adapter._read_url = lambda *_args, **_kwargs: pytest.fail("unauthorized route was fetched")
+
+    _payload, _url, _path, meta = adapter._load_public(NOW)
+
+    assert meta["sources"][0]["status"] == "source_policy_blocked"
+    assert "public_html_route_not_authorized:toolathlon_verified" in meta["sources"][0]["error"]
 
 
 def test_blocked_source_degrades_only_its_own_benchmark_slice(monkeypatch):

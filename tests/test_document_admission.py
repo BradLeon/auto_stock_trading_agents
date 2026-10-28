@@ -99,8 +99,8 @@ def test_quarantined_candidate_keeps_provenance_but_is_not_an_asset():
     assert rows[0]["source_url"] == candidate.source_url
     assert json.loads(rows[0]["reason_codes"]) == ["identity_mismatch"]
     assert store.documents(entity="TSM") == []
-    assert store.conn.execute("SELECT count(*) FROM document_versions").fetchone()[0] == 0
-    assert store.conn.execute("SELECT count(*) FROM document_chunks").fetchone()[0] == 0
+    assert store.data_store().conn.execute("SELECT count(*) FROM data_document_versions").fetchone()[0] == 0
+    assert store.data_store().conn.execute("SELECT count(*) FROM data_document_chunks").fetchone()[0] == 0
 
 
 def test_accepted_candidate_enters_assets_and_legacy_type_queries():
@@ -114,4 +114,4 @@ def test_accepted_candidate_enters_assets_and_legacy_type_queries():
         == outcome.document.document_id
     assert len(store.documents(entity="TSM", doc_type="earnings_transcript")) == 1
     assert len(store.documents(entity="TSM", doc_type="transcript")) == 1
-    assert store.conn.execute("SELECT count(*) FROM document_chunks").fetchone()[0] > 0
+    assert store.data_store().conn.execute("SELECT count(*) FROM data_document_chunks").fetchone()[0] > 0

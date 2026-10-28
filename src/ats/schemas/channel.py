@@ -29,6 +29,10 @@ class ApprovalRequest(BaseModel):
     as_of: datetime
     decisions: list[TradeDecision] = Field(default_factory=list)
     context_summary: str = ""   # condensed analyst/risk rationale for the Boss
+    # The card approves/rejects THIS revision (§10.3): buttons echo these back
+    # so a callback can be checked against the current revision on arrival.
+    revision_no: int = 0
+    decision_hash: str = ""
 
 
 class ReportBundle(BaseModel):

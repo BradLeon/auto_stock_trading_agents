@@ -51,7 +51,7 @@
 
 ## 7. Phase-one documentation, staged rollout, and compatibility
 
-- [x] 7.1 Update `docs/DATA_ARCHITECTURE.md` with the unified target tree, dependency diagram, ownership rules, and current migration status.
+- [x] 7.1 Update `docs/data/DATA_ARCHITECTURE.md` with the unified target tree, dependency diagram, ownership rules, and current migration status.
 - [x] 7.2 Add or update the developer guide with component contracts, extension points, import rules, data flow diagrams, and test strategy.
 - [x] 7.3 Add or update the operations guide with configuration locations, source add/remove workflow, trigger modes, validation/release/rollback commands, budgets, and acceptance criteria.
 - [x] 7.4 Add or update the user guide with dynamic discovery, structured/unstructured query examples, runtime market boundaries, and Agent/Workflow usage patterns.

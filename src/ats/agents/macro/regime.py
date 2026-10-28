@@ -5,7 +5,7 @@ I/O — the same discipline the 6-layer risk gate follows, and for the same reas
 a classification that drives portfolio tilts has to be auditable and reproducible,
 not re-derived by a model each week.
 
-Design notes that are easy to get wrong later (docs/MACRO_ANALYST.md):
+Design notes that are easy to get wrong later (docs/agents/MACRO_ANALYST.md):
   §6.3  `transition` is mandatory. A classifier forced to pick one of four will
         emit a confident wrong answer exactly at the turning points.
   §4.3  Warsh ended forward guidance, so the front end whipsaws. Entering a

@@ -96,7 +96,7 @@
 #   rollback_on: [reason_code]
 #
 # Operational details and field-by-field guidance:
-# docs/STRUCTURED_DATA_OPERATIONS.md
+# docs/data/STRUCTURED_DATA_OPERATIONS.md
 
 version: 1
 
@@ -148,9 +148,12 @@ feature_flags:
     trendforce_dram: shadow
     sec_companyfacts: shadow
     company_disclosures: shadow
+    # Issuer IR statement files for foreign issuers the vendors/SEC XBRL cover late or not at all.
+    issuer_ir_files: shadow
     defeatbeta_stock_statement: shadow
     yfinance_financials: shadow
     yfinance_consensus: shadow
+    macro_series_feeds: shadow
     # Private-company events are intentionally deferred and therefore do not
     # enter the persistent layer until a later, separately approved scope.
     accepted_document_evidence: legacy
@@ -237,9 +240,6 @@ feature_flags:
     # Each cited evidence item has either immutable document/version lineage or a
     # labelled historical evidence snapshot; structured observations are excluded.
     evidence_chain: platform
-    # Scheduler has migrated to unified runtime/products/pipeline entrypoints.
-    # Its workflow outputs remain in memory, and this shadow mode is not a platform release.
-    runtime_scheduler: shadow
     chief_graph: shadow
     # Macro reads the released index partition.
     macro_factset: platform
@@ -449,6 +449,7 @@ sources:
       conditional_requests: [etag, last_modified, git_sha, payload_sha256]
       policy_gate_env: ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES
       terms_approval_env: ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED
+      public_html_route_allowlist_env: ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS
       fail_closed_on_policy_or_parser_drift: true
       event_ledger_benchmarks: [automationbench_aa, osworld_2, toolathlon_verified, spreadsheetbench_2]
       browser_visual_scraping: forbidden
@@ -458,19 +459,21 @@ sources:
   frontier_ai_capability_official_lab:
     catalog_status: current_partial
     persistence: persistent
-    provider: Frontier Lab official releases and model cards
-    upstream: OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, Tencent, Z.ai and Alibaba public releases
+    provider: Hugging Face Hub public model-card API, restricted to exact Lab-owned namespaces
+    upstream: OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, Tencent, Z.ai and Qwen public organization model cards; closed-model releases without public cards remain uncovered
     adapter: frontier_ai_capability_official_lab
-    datasets: [frontier_ai_capability_benchmarks]
+    datasets: [frontier_ai_capability_benchmarks, frontier_ai_public_model_cards]
     cadence: daily_utc
     retention: query_slice
     discovery_group: frontier_ai_capability
     constraints:
       public_only: true
+      publisher_namespace_allowlist: [openai, Anthropic, google, xai-org, deepseek-ai, moonshotai, tencent, zai-org, Qwen]
       source_type: lab_self_reported
       direct_platform_after_acceptance: true
       license: public_page_citation
-    internal_request_budget: {concurrency: 1, requests_per_run: 1, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
+      data_limits: model_identity_only; does not infer release dates, flagship status, or self-reported scores from repository metadata
+    internal_request_budget: {concurrency: 1, requests_per_run: 9, timeout_seconds: 30, max_file_bytes: 104857600, retry_attempts: 2}
   tw_mof_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -480,6 +483,18 @@ sources:
     cadence: monthly
     retention: full_response
     internal_request_budget: {concurrency: 1, requests_per_run: 2, timeout_seconds: 60}
+  macro_series_feeds:
+    # US macro indicator histories for the Macro review (2026-10-16): FRED + market closes + CNN
+    # fear & greed, one observation per series point under entity US_MACRO. Provider code is
+    # data/macro.py; this source only maps it to records.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: FRED, Yahoo Finance and CNN Business
+    adapter: macro_series
+    datasets: [macro_series]
+    cadence: daily
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_run: 40, timeout_seconds: 120}
   kr_ecos_exports:
     catalog_status: current_partial
     persistence: persistent
@@ -488,7 +503,7 @@ sources:
     datasets: [regional_kr_exports]
     cadence: monthly
     retention: query_slice
-    internal_request_budget: {concurrency: 1, page_size: 10, timeout_seconds: 30}
+    internal_request_budget: {concurrency: 1, requests_per_run: 1, page_size: 10, timeout_seconds: 30}
   trendforce_dram:
     catalog_status: current_partial
     persistence: persistent
@@ -506,7 +521,7 @@ sources:
     datasets: [company_financials]
     cadence: event
     retention: full_response
-    internal_request_budget: {concurrency: 1, requests_per_second: 5, timeout_seconds: 30}
+    internal_request_budget: {concurrency: 1, requests_per_second: 5, requests_per_run: 3, timeout_seconds: 30}
   company_disclosures:
     # Current partial: official TSM quarterly release (SEC 6-K/EX-99.1) only.
     # No annual 20-F obligation is implied by this source's acceptance scope.
@@ -518,6 +533,20 @@ sources:
     cadence: event
     retention: source_policy
     internal_request_budget: {concurrency: 1, requests_per_second: 1, timeout_seconds: 30}
+  issuer_ir_files:
+    # TSM / ASML / SKHY: the issuer's own IR statements (TSMC FS.pdf, ASML results presentation and 6-K
+    # exhibits) or, for SKHY, the Euroland export (a third-party aggregator, flagged in every row's lineage).
+    # Files are read deterministically (pdfplumber / xlrd / HTML tables); config/data/issuer_ir.yaml declares
+    # the issuers, folders, parsers and currency.  Rows that fail the statement self-checks are quarantined.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: issuer investor-relations files
+    upstream: issuer IR site / SEC 6-K exhibits / Euroland export
+    adapter: issuer_ir_files
+    datasets: [company_financials]
+    cadence: event
+    retention: full_response
+    internal_request_budget: {concurrency: 1, requests_per_second: 1, requests_per_run: 6, timeout_seconds: 60, max_file_bytes: 52428800}
   defeatbeta_stock_statement:
     catalog_status: current_partial
     persistence: persistent
@@ -527,7 +556,7 @@ sources:
     datasets: [company_financials]
     cadence: snapshot
     retention: query_slice
-    internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, timeout_seconds: 60}
+    internal_request_budget: {concurrency: 1, slices_per_entity_run: 1, requests_per_run: 4, timeout_seconds: 60}
   yfinance_financials:
     # Promoted from the legacy fundamentals reader strictly for low-frequency
     # financial statement gaps.  Prices, OHLCV, options and quote metadata remain
@@ -539,7 +568,7 @@ sources:
     datasets: [company_financials]
     cadence: event
     retention: query_slice
-    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, requests_per_run: 4, timeout_seconds: 30}
   yfinance_consensus:
     catalog_status: current_partial
     persistence: persistent
@@ -548,7 +577,9 @@ sources:
     datasets: [market_consensus]
     cadence: event_snapshot
     retention: normalized_snapshot
-    internal_request_budget: {concurrency: 1, min_interval_seconds: 1, timeout_seconds: 30}
+    # requests_per_run: one snapshot reads about eight yfinance endpoints (estimates, calendar, targets,
+    # ratings, grade changes, earnings history, statements). Required by the refresh controller.
+    internal_request_budget: {concurrency: 1, requests_per_run: 8, min_interval_seconds: 1, timeout_seconds: 30}
   accepted_document_evidence:
     # The evidence workbench remains available for a future approved source, but
     # no private-company event acquisition or publication is scheduled now.
@@ -637,7 +668,7 @@ sources:
     catalog_status: current_partial
     persistence: persistent
     provider: TickerTrends
-    upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking)
+    upstream: TickerTrends public research essay (anthropic-vs-openai-arr-tracking) and its public research notes
     adapter: tickertrends_frontier_labs_revenue
     datasets: [frontier_ai_labs_revenue]
     # The same research object seen from a second angle, so it shares the Sacra
@@ -653,11 +684,12 @@ sources:
       mcp_allowed: false
       public_post_api_only: true
       accepted_reference_period: 2026-01-01..2026-06-30
+      notes_start: 2026-07-01
       chart_derived_values_allowed: false
-      notes: 与 Sacra 同一研究对象的第二信息源；每 7 天复核公开 Substack post API，语义指纹未变即 no_change，不重新基准主序列。
+      notes: 与 Sacra 同一研究对象的第二信息源；每 7 天复核公开 Substack post API，语义指纹未变即 no_change，不重新基准主序列。2026-07-01 起另读公开归档中涉及 ARR/收入的研究笔记，保留 TickerTrends 自身追踪值、他人口径（Bloomberg/FT/Axios 等）、产品级 ARR 与季度收入，按身份/产品范围/期间口径分序列，不混入公司级主序列。
     internal_request_budget:
       concurrency: 1
-      requests_per_run: 1
+      requests_per_run: 30
       timeout_seconds: 45
       max_file_bytes: 5242880
       retry_attempts: 2
@@ -858,11 +890,202 @@ datasets:
       a_historical_sd_multiplier: 0.2
       direct_platform_after_acceptance: true
     acceptance_samples: [OPENAI, ANTHROPIC, GOOGLE, XAI, DEEPSEEK, MOONSHOT, TENCENT, ZAI, ALIBABA]
+  frontier_ai_public_model_cards:
+    catalog_status: current_partial
+    entities: [FRONTIER_MODEL]
+    expected_cadence: weekly
+    primary_sources: [frontier_ai_capability_official_lab]
+    fallback_sources: []
+    core_metrics: [ai.frontier_capability.public_model_card]
+    quality:
+      publisher_namespace_allowlist: [openai, Anthropic, google, xai-org, deepseek-ai, moonshotai, tencent, zai-org, Qwen]
+      public_only: true
+      model_card_presence_only: true
+      inferred_release_dates: false
+      inferred_benchmark_scores: false
+      closed_model_release_coverage: unavailable
+    acceptance_samples: [OPENAI, DEEPSEEK, MOONSHOT, ALIBABA]
   sp500_earnings_insight:
     catalog_status: current_partial
+    extraction_policy:
+      version: factset-semantic-v2
+      estimate_state_policy:
+        version: explicit-actual-else-estimated-v1
+        default: estimated
+        actual_labels: [actual, actual earnings, actual revenue, actual revenues, actual results, actual performance]
+        preserve_source_wording: true
+      target_period_scope: all_disclosed
+      comparison_date_policy: latest_occurrence_on_or_before_report
+      historical_231_cells: regression_subset_only
+      scope_policy:
+        version: factset-investment-focus-v1
+        core_index: {entity: SP500, metrics: registered_applicable, narrative: bounded_macro}
+        related_topics: [ai_hardware, semiconductors, consumer_electronics, supply_chain]
+        scopes:
+          technology: {priority: P0, entities: [GICS_45], required_for_core: true}
+          all_sectors:
+            priority: P2
+            entities: [GICS_10, GICS_15, GICS_20, GICS_25, GICS_30, GICS_35, GICS_40, GICS_45, GICS_50, GICS_55, GICS_60]
+            required_for_core: false
+        effort:
+          P0: {dedicated_vision: true, stop_after_generic_failure: false}
+          P1: {dedicated_vision: false, stop_after_generic_failure: true}
+          P2: {dedicated_vision: false, stop_after_generic_failure: true}
+      auto_admission:
+        # Report coverage is not printed in every edition. Absence is an
+        # explicitly allowed source omission, not a parser-created zero.
+        optional_index_metrics: [earnings.reporting.coverage]
+        # Independently declared minimum period multiplicity for metrics that
+        # span more than one period. Other registered metrics require one cell.
+        min_index_period_counts:
+          earnings.bottom_up_eps: 3
+          earnings.eps.yoy_growth: 4
+          earnings.revenue.yoy_growth: 4
+          earnings.guidance.positive_share: 2
+          earnings.guidance.negative_share: 2
+      # Independent period/scope declarations for the two reviewed reports.
+      # Values and evidence goldens stay outside production configuration.
+      # An unseen report has no implicit inventory or publication approval.
+      report_inventories:
+        version: factset-reviewed-periods-v1
+        reports:
+          '2026-08-28':
+            technology:
+              earnings_revenue_scorecard: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_surprise: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_growth:
+                - {period: 2026Q2, basis: target_quarter}
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: '2026', basis: calendar_year}
+                - {period: '2027', basis: calendar_year}
+              net_profit_margin: [{period: 2026Q2, basis: target_quarter}]
+              eps_guidance:
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: 2026/2027, basis: mixed_fiscal_years}
+              geographic_revenue_exposure: [{period: '2026-08-28', basis: snapshot}]
+              forward_pe: [{period: '2026-08-28', basis: snapshot}]
+              target_ratings: [{period: '2026-08-28', basis: snapshot}]
+          '2026-09-18':
+            technology:
+              earnings_revenue_scorecard: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_surprise: [{period: 2026Q2, basis: target_quarter}]
+              earnings_revenue_growth:
+                - {period: 2026Q2, basis: target_quarter}
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: '2026', basis: calendar_year}
+                - {period: '2027', basis: calendar_year}
+              net_profit_margin: [{period: 2026Q2, basis: target_quarter}]
+              eps_guidance:
+                - {period: 2026Q3, basis: target_quarter}
+                - {period: 2026/2027, basis: mixed_fiscal_years}
+              geographic_revenue_exposure: [{period: '2026-09-18', basis: snapshot}]
+              forward_pe: [{period: '2026-09-18', basis: snapshot}]
+              target_ratings: [{period: '2026-09-18', basis: snapshot}]
+      vision:
+        enabled: true
+        authorization: user_2026_09_27_factset_chart_crops
+        model: openai/gpt-5.6-terra
+        prompt_version: factset-cell-transcription-v1
+        max_requests: 32
+        max_crops_per_request: 12
+        max_image_bytes: 2000000
+        max_tokens: 4096
+        timeout_seconds: 60
+        provider_data_collection: deny
+        zero_data_retention: true
+        automatic_publication: false
+      sector_aliases:
+        GICS_10: [Energy]
+        GICS_15: [Materials]
+        GICS_20: [Industrials]
+        GICS_25: [Consumer Discretionary, Consumer Disc.]
+        GICS_30: [Consumer Staples]
+        GICS_35: [Health Care, Healthcare]
+        GICS_40: [Financials]
+        GICS_45: [Information Technology, Information Tech., Info. Technology, Info. Tech.]
+        GICS_50: [Communication Services, Comm. Services]
+        GICS_55: [Utilities]
+        GICS_60: [Real Estate]
+      aggregate_aliases: [S&P 500, SP500]
+      ocr:
+        scale: 3
+        cell_scale: 4
+        timeout_seconds: 30
+        max_images: 160
+      admission:
+        required_evidence: [entity_label, numeric_token, unit, target_period, estimate_state]
+        expected_sector_count: 11
+        allow_model_confidence_only: false
+        allow_bar_geometry_as_value: false
+        unresolved_period: pending_review
+        independent_review_required: true
+        composition_tolerance: 0.01
+      groups:
+        earnings_revenue_scorecard:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:earnings|revenues?) above.*below estimates']
+          units: [ratio]
+          columns: [eps_above, eps_inline, eps_below, revenue_above, revenue_inline, revenue_below]
+          column_units: {eps_above: ratio, eps_inline: ratio, eps_below: ratio, revenue_above: ratio, revenue_inline: ratio, revenue_below: ratio}
+          sum_to_one: [[eps_above, eps_inline, eps_below], [revenue_above, revenue_inline, revenue_below]]
+        earnings_revenue_surprise:
+          estimate_states: [estimated, actual]
+          title_patterns: ['sector level (?:earnings|revenue) surprise']
+          units: [percent]
+          columns: [eps_surprise, revenue_surprise]
+          column_units: {eps_surprise: percent, revenue_surprise: percent}
+        earnings_revenue_growth:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:earnings|revenue) growth y y']
+          title_exclusions: ['\bcontributors?\b']
+          units: [percent]
+          columns: [eps_growth, revenue_growth]
+          column_units: {eps_growth: percent, revenue_growth: percent}
+        net_profit_margin:
+          estimate_states: [estimated, actual]
+          title_patterns: ['net profit margins?', 'profit margin.*(?:increase|decrease)']
+          units: [percent, ratio]
+          columns: [net_margin, increase_share, unchanged_share, decrease_share]
+          column_units: {net_margin: percent, increase_share: ratio, unchanged_share: ratio, decrease_share: ratio}
+          sum_to_one: [[increase_share, unchanged_share, decrease_share]]
+        eps_guidance:
+          estimate_states: [estimated, actual]
+          count_legend: {negative: red, positive: green}
+          title_patterns: ['positive.*negative.*(?:eps )?guidance', 'eps guidance.*(?:positive|negative)']
+          units: [count, ratio]
+          columns: [positive_count, negative_count, positive_share, negative_share]
+          column_units: {positive_count: count, negative_count: count, positive_share: ratio, negative_share: ratio}
+          sum_to_one: [[positive_share, negative_share]]
+          allow_zero_sum: true
+        geographic_revenue_exposure:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:geographic|geographical).*revenue', 'revenue.*(?:geographic|geographical)', 'revenue.*(?:u s.*international|international.*u s)']
+          units: [ratio]
+          columns: [us_share, international_share]
+          column_units: {us_share: ratio, international_share: ratio}
+          sum_to_one: [[us_share, international_share]]
+        forward_pe:
+          estimate_states: [estimated, actual]
+          title_patterns: ['forward 12 (?:month|m) p e ratio']
+          units: [multiple]
+          columns: [forward_pe]
+          column_units: {forward_pe: multiple}
+        bottom_up_eps:
+          estimate_states: [estimated, actual]
+          title_patterns: ['bottom.up eps']
+          units: [currency_per_share]
+          columns: [bottom_up_eps]
+          column_units: {bottom_up_eps: currency_per_share}
+        target_ratings:
+          estimate_states: [estimated, actual]
+          title_patterns: ['(?:analyst|analysts).*ratings', 'ratings.*(?:buy|hold|sell)', '(?:buy|hold|sell).*ratings', 'target.*(?:upside|price)', 'bottom up.*price']
+          units: [ratio, percent]
+          columns: [buy_share, hold_share, sell_share, target_upside]
+          column_units: {buy_share: ratio, hold_share: ratio, sell_share: ratio, target_upside: percent}
+          sum_to_one: [[buy_share, hold_share, sell_share]]
     entities: [SP500, GICS_10, GICS_15, GICS_20, GICS_25, GICS_30,
                GICS_35, GICS_40, GICS_45, GICS_50, GICS_55, GICS_60]
-    expected_cadence: weekly
+    expected_cadence: monthly_final_report
     primary_sources: [factset_earnings_insight_metrics]
     fallback_sources: []
     core_metrics:
@@ -883,6 +1106,8 @@ datasets:
       - earnings.margin.decrease_share
       - earnings.guidance.positive_count
       - earnings.guidance.negative_count
+      - earnings.guidance.positive_share
+      - earnings.guidance.negative_share
       - earnings.revision.improved_sector_count
       - earnings.bottom_up_eps
       - valuation.forward_pe
@@ -898,7 +1123,8 @@ datasets:
       - consensus.rating.sell_share
       - consensus.target.upside
     quality:
-      freshness_hours_max: 240
+      # A monthly report is current until its next upstream edition; elapsed
+      # wall-clock hours do not downgrade an otherwise latest release.
       composition_abs_tolerance: 0.01
       index_core_required_evidence_ratio: 1.0
       sector_core_expected_entities: 11
@@ -926,6 +1152,19 @@ datasets:
       shadow_abs_tolerance: 0.000001
     acceptance_samples: [TW_IC_EXPORT]
     rollback_on: [period_gap, unit_change, shadow_mismatch, stale]
+  macro_series:
+    catalog_status: current_partial
+    entities: [US_MACRO]
+    expected_cadence: daily
+    primary_sources: [macro_series_feeds]
+    core_metrics: [macro.ust_10y.value, macro.ust_2y.value, macro.real_10y.value, macro.breakeven_10y.value, macro.policy_rate.value, macro.hy_oas.value, macro.ig_oas.value, macro.unemployment.value, macro.fed_funds.value, macro.vix.value, macro.dxy.value, macro.spx.value, macro.ndx.value, macro.fear_greed.value, macro.headline_cpi.value, macro.core_pce.value, macro.cfnai.value, macro.productivity.value, macro.unit_labor_cost.value, macro.initial_claims.value, macro.continuing_claims.value, macro.payrolls.value, macro.gasoline.value, macro.oil_wti.value, macro.gold.value]
+    quality:
+      coverage_ratio_min: 0.9
+      freshness_hours_max: 168    # a daily series older than a week is stale; monthly ones carry their own release lag
+      reconciliation_abs_tolerance: 0.000001
+      shadow_abs_tolerance: 0.000001
+    acceptance_samples: [US_MACRO]
+    rollback_on: [unit_change, stale]
   regional_kr_exports:
     catalog_status: current_partial
     entities: [KR_SEMI_EXPORT]
@@ -967,7 +1206,7 @@ datasets:
     # sources are individually incomplete; each selected field retains its source
     # artifact and any XBRL derivation must be reproducible.  This package-level
     # data gate does not read consumer shadow records or Workflow memory.
-    primary_sources: [defeatbeta_stock_statement, yfinance_financials, sec_companyfacts, company_disclosures]
+    primary_sources: [defeatbeta_stock_statement, yfinance_financials, sec_companyfacts, company_disclosures, issuer_ir_files]
     fallback_sources: []
     core_metrics:
       - financial.revenue.gaap
@@ -998,6 +1237,14 @@ datasets:
     coverage_from: [config/pead.yaml, config/sectors/ai_hardware.yaml]
     expected_cadence: event_snapshot
     primary_sources: [yfinance_consensus]
+    # A consumer may request a managed refresh when its published snapshot is
+    # absent or older than this limit. Reads never execute the provider inline.
+    cache_miss_policy:
+      enabled: true
+      max_age_hours: 168
+      dedupe_window_hours: 24
+      priority: 80
+      max_attempts: 3
     core_metrics:
       - consensus.eps.reported_actual
       - consensus.eps.mean
@@ -1115,6 +1362,10 @@ metric_definitions:
      entity_scope: [frontier_model], required_dimensions: [lab_id, model_id, benchmark_id, method_version,
      comparability_group, harness, grader, inference_config, reasoning_effort, source_type, coverage_state],
      description: Raw capability benchmark score on a provider-declared 0-100 percent scale; not a composite intelligence ranking.}
+  ai.frontier_capability.public_model_card:
+    {value_type: integer, unit_family: count, cadence: weekly, period_basis: public_model_card_observed,
+     entity_scope: [frontier_model], required_dimensions: [lab_id, model_id, model_release_id, identity_state, source_type, source_url],
+     description: Indicator (1) that an allowlisted Lab-owned public model card was present in the official publisher namespace; not a model release date, flagship designation, or benchmark score.}
   earnings.reporting.coverage: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.above_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.inline_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
@@ -1124,14 +1375,16 @@ metric_definitions:
   earnings.revenue.below_estimate_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.eps.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.revenue.surprise_pct: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
-  earnings.eps.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
-  earnings.revenue.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.eps.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year, calendar_year, fiscal_year]}
+  earnings.revenue.yoy_growth: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, target_year, calendar_year, fiscal_year]}
   earnings.net_profit_margin: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.margin.increase_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.margin.unchanged_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
   earnings.margin.decrease_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: target_quarter}
-  earnings.guidance.positive_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
-  earnings.guidance.negative_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: target_quarter}
+  earnings.guidance.positive_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: [target_quarter, mixed_fiscal_years]}
+  earnings.guidance.negative_count: {value_type: integer, unit_family: count, cadence: weekly, period_basis: [target_quarter, mixed_fiscal_years]}
+  earnings.guidance.positive_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, fiscal_year, mixed_fiscal_years]}
+  earnings.guidance.negative_share: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: [target_quarter, fiscal_year, mixed_fiscal_years]}
   earnings.revision.improved_sector_count:
     value_type: integer
     unit_family: count
@@ -1140,7 +1393,7 @@ metric_definitions:
     entity_scope: [SP500]
     required_dimensions: [comparison_date, revision_direction, sector_total]
     description: Number of GICS sectors with improved earnings growth versus the explicit comparison date.
-  earnings.bottom_up_eps: {value_type: number, unit_family: currency_per_share, cadence: weekly, period_basis: [target_quarter, target_year]}
+  earnings.bottom_up_eps: {value_type: number, unit_family: currency_per_share, cadence: weekly, period_basis: [target_quarter, target_year, calendar_year]}
   valuation.forward_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
   valuation.trailing_pe: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
   valuation.forward_pe.average_5y: {value_type: number, unit_family: multiple, cadence: weekly, period_basis: snapshot}
@@ -1155,6 +1408,31 @@ metric_definitions:
   consensus.target.upside: {value_type: number, unit_family: ratio, cadence: weekly, period_basis: snapshot}
   regional.tw_ic_exports.value: {value_type: number, unit_family: currency, cadence: monthly}
   regional.kr_semiconductor_exports.index: {value_type: number, unit_family: index, cadence: monthly}
+  macro.ust_10y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.ust_2y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.real_10y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.breakeven_10y.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.policy_rate.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.hy_oas.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.ig_oas.value: {value_type: number, unit_family: percent, cadence: daily}
+  macro.unemployment.value: {value_type: number, unit_family: percent, cadence: monthly}
+  macro.fed_funds.value: {value_type: number, unit_family: percent, cadence: monthly}
+  macro.vix.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.dxy.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.spx.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.ndx.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.fear_greed.value: {value_type: number, unit_family: index, cadence: daily}
+  macro.headline_cpi.value: {value_type: number, unit_family: index, cadence: monthly}
+  macro.core_pce.value: {value_type: number, unit_family: index, cadence: monthly}
+  macro.cfnai.value: {value_type: number, unit_family: index, cadence: monthly}
+  macro.productivity.value: {value_type: number, unit_family: index, cadence: quarterly}
+  macro.unit_labor_cost.value: {value_type: number, unit_family: index, cadence: quarterly}
+  macro.initial_claims.value: {value_type: number, unit_family: count, cadence: weekly}
+  macro.continuing_claims.value: {value_type: number, unit_family: count, cadence: weekly}
+  macro.payrolls.value: {value_type: number, unit_family: count, cadence: monthly}
+  macro.gasoline.value: {value_type: number, unit_family: currency, cadence: weekly}
+  macro.oil_wti.value: {value_type: number, unit_family: currency, cadence: daily}
+  macro.gold.value: {value_type: number, unit_family: currency, cadence: daily}
   industry.dram_contract_price: {value_type: number, unit_family: currency_per_item, cadence: monthly}
   financial.revenue.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
   financial.gross_profit.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
@@ -1162,6 +1440,8 @@ metric_definitions:
   financial.net_income.gaap: {value_type: number, unit_family: currency, period_basis: [quarter, annual], adjustment: gaap}
   financial.eps.diluted.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
   financial.eps.diluted.market_adjusted: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: split_adjusted}
+  # Basic EPS is its own metric: a source that only reports basic EPS (SKHY via Euroland) must not pose as diluted.
+  financial.eps.basic.gaap: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
   # ADR EPS is economically distinct from ordinary-share EPS.  The unit records
   # whether the issuer reported USD/ADR directly or the mirror provided TWD/ADR.
   financial.eps.diluted.adr: {value_type: number, unit_family: currency_per_share, period_basis: [quarter, annual], adjustment: gaap}
@@ -1272,6 +1552,8 @@ provider_mappings:
     total_tokens: ai.openrouter.total_tokens
   frontier_ai_capability:
     benchmark_score: ai.frontier_capability.score
+  frontier_ai_capability_official_lab:
+    public_model_card: ai.frontier_capability.public_model_card
   factset_earnings_insight_metrics:
     reporting_coverage: earnings.reporting.coverage
     eps_above_estimate_share: earnings.eps.above_estimate_share
@@ -1318,6 +1600,31 @@ provider_mappings:
     amzn_release:diluted_eps: financial.eps.diluted.gaap
     amzn_release:cash_from_operations: financial.cash_from_operations.gaap
     amzn_release:capex: financial.capex.gaap
+  issuer_ir_files:
+    issuer_ir:revenue: financial.revenue.gaap
+    issuer_ir:gross_profit: financial.gross_profit.gaap
+    issuer_ir:operating_income: financial.operating_income.gaap
+    issuer_ir:net_income: financial.net_income.gaap
+    issuer_ir:eps_diluted: financial.eps.diluted.gaap
+    issuer_ir:eps_diluted_adr: financial.eps.diluted.adr
+    issuer_ir:eps_basic: financial.eps.basic.gaap
+    issuer_ir:cash_from_operations: financial.cash_from_operations.gaap
+    issuer_ir:capex: financial.capex.gaap
+    issuer_ir:cash_and_equivalents: financial.cash_and_equivalents.gaap
+    issuer_ir:inventory: financial.inventory.gaap
+    issuer_ir:total_debt: financial.total_debt.gaap
+    # sums read from the statement lines, with the derivation kept in the row's lineage
+    issuer_ir:total_debt_derived: financial.total_debt.gaap
+    # a third-party aggregator's own debt definition is not the issuer's total debt
+    issuer_ir:total_debt_provider_defined: financial.total_debt.provider_reported
+    # ASML's summary balance sheet only shows non-current long-term debt (no current portion): exact as
+    # long_term_debt, and offered as a provider-defined total only so the report package can be assembled
+    issuer_ir:long_term_debt: financial.long_term_debt.gaap
+    issuer_ir:total_debt_long_term_only: financial.total_debt.provider_reported
+    issuer_ir:total_assets: financial.total_assets.gaap
+    issuer_ir:total_liabilities: financial.total_liabilities.gaap
+    issuer_ir:total_liabilities_derived: financial.total_liabilities.gaap
+    issuer_ir:stockholders_equity: financial.stockholders_equity.gaap
   sec_companyfacts:
     "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": financial.revenue.gaap
     "us-gaap:Revenues": financial.revenue.gaap

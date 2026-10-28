@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-CONSUMER = "evidence_observer"
+CONSUMER = "layer"
 COMMERCIALIZATION_CLAIM_ID = "ai_frontier_labs_commercialization"
 COMMERCIALIZATION_CLAIM_DEFINITION_VERSION = "v1"
 COMMERCIALIZATION_CLAIM_TEXT = (
@@ -301,7 +301,8 @@ def _build_packet(bundle: dict[str, Any], *, openrouter_bundle: dict[str, Any] |
              "usage": "最新收入观察主信源；每 7 天探测两个公开页面，一次采集后离线复用。",
              "observation_identity": "按原文区分第三方估算、公司披露、媒体披露与预测。"},
             {"source_id": "tickertrends_public_research",
-             "usage": "冻结的一次性 2026 年 1—6 月历史回填，不参与周期发现与最新 headline 竞争。",
+             "usage": "2026 年 1—6 月历史回填（研究文章）+ 2026-07 起的研究笔记：每 7 天读取公开归档，保留其自身追踪值、"
+                      "他人口径（Bloomberg/FT/Axios 等）、产品级 ARR 与季度收入，均按身份、产品范围、期间口径标注。",
              "observation_identity": "第三方估算；raw label 写作 ARR 时规范化为年化运行率。"}],
         "metric_definitions": {
             "reported_arr": "公司自行宣布的合同/订阅 ARR。",
@@ -309,7 +310,7 @@ def _build_packet(bundle: dict[str, Any], *, openrouter_bundle: dict[str, Any] |
             "trailing_revenue": "已闭合期间实际记录的收入，不年化。",
             "forward_revenue_projection": "未来年度预测或目标，永不进入历史实际序列。"},
         "trend_rule": {
-            "cell_key": "公司 × 计量口径 × 观察身份 × 币种 × methodology regime",
+            "cell_key": "公司 × 计量口径 × 观察身份 × 币种 × methodology regime × 期间口径 × 产品范围",
             "minimum_points": 3, "minimum_days": 60,
             "direction_threshold": "净变化率绝对值 ≥ 10% 且斜率同向，且最近一个可比变化未构成 ≥10% 的反向变化",
             "slope": "按真实天数计算，不是按期数计算",
@@ -317,7 +318,7 @@ def _build_packet(bundle: dict[str, Any], *, openrouter_bundle: dict[str, Any] |
         "comparability": bundle.get("comparability"),
         "quality_gate": [
             "不含日期或计量口径的数值只保留 artifact 与诊断，不进入正式 observation。",
-            "产品级收入（如 Claude Code、广告业务）不进入公司级序列，也不与公司收入相加。",
+            "产品级收入（如 Claude Code、Codex、ChatGPT Ads）带 product_scope 单独成序列，不进入公司级序列，也不与公司收入相加。",
             "付费墙脱敏的表格行记录为覆盖缺口，不写零值。"],
         "limitations": METHODOLOGY_LIMITS,
         "lineage_pointer": "manifest.snapshot_id / companies[].lineage",
@@ -692,7 +693,7 @@ def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
     lines.extend([
         ("## 八、指标公式、统计范围与数据缺口" if openrouter is not None
          else "## 七、指标公式、统计范围与数据缺口"), "",
-        "- 趋势 cell：`公司 × 计量口径 × 观察身份 × 币种 × methodology regime`。",
+        "- 趋势 cell：`公司 × 计量口径 × 观察身份 × 币种 × methodology regime × 期间口径 × 产品范围`。",
         f"- 最小点数 {trend_rule.get('minimum_points', 3)}；最小跨度 "
         f"{trend_rule.get('minimum_days', 60)} 天；"
         f"方向阈值：{trend_rule.get('direction_threshold', '')}。",

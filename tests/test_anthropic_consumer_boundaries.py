@@ -8,6 +8,8 @@ consume it.
 from __future__ import annotations
 
 from pathlib import Path
+import copy
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,8 +57,29 @@ def test_anthropic_job_adoption_has_no_default_trading_weight_or_route():
     for path in sorted((ROOT / "config").rglob("*.yaml")):
         if path == structured_catalog:
             continue
-        text = path.read_text(encoding="utf-8")
+        body = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if path == ROOT / "config/data/target_dataflow_coverage.yaml":
+            body = _active_manifest(body)
+        text = yaml.safe_dump(body)
         for token in FORBIDDEN:
             if token in text:
                 violations.append(f"{path.relative_to(ROOT)} contains {token}")
     assert violations == []
+
+
+def _active_manifest(body):
+    body = copy.deepcopy(body)
+    # Retirement dispositions and hashed source paths do not activate a route.
+    retired = body.pop("retired_consumers", {})
+    assert all(row["status"] == "retired" and row["standalone_role"] == "forbidden"
+               for row in retired.values())
+    policy = body.get("qualification_policy", {})
+    policy.pop("required_fingerprint_paths", None)
+    policy.pop("consumer_fingerprint_paths", None)
+    return body
+
+
+def test_active_trading_weight_is_not_hidden_by_manifest_metadata():
+    body = yaml.safe_load((ROOT / "config/data/target_dataflow_coverage.yaml").read_text())
+    body["trading_weights"] = {"ai_work_adoption": 1}
+    assert "ai_work_adoption" in yaml.safe_dump(_active_manifest(body))

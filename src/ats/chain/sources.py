@@ -24,6 +24,7 @@ output — see config/data/sources.yaml.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 
@@ -90,6 +91,24 @@ def to_observations(source: SourceDef, points: list[SeriesPoint], *,
     now = now or datetime.now(timezone.utc)
     out: list[Observation] = []
     for point in points:
+        if point.direction:
+            # Already interpreted by the governed observer that produced it: one observation, its own speaker.
+            entity = (point.entity or source.entity).upper()
+            suffix = f"_{point.series}" if point.series else ""
+            try:
+                out.append(Observation(
+                    document_id=f"{source.id}:{point.period}{suffix}",
+                    source_url=source.adapter,
+                    entity=entity, source_entity=(point.source_entity or entity).upper(),
+                    metric=f"{source.id}{suffix}_{point.direction}", concept=point.concept,
+                    period=point.period,
+                    observation_type=point.observation_type or source.observation_type,
+                    stance=point.stance or source.stance, direction=point.direction,
+                    value=point.value, unit=point.unit,
+                    evidence_span=point.evidence_span, observed_at=now))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("sources: %s %s rejected by schema: %s", source.id, point.period, exc)
+            continue
         for basis in source.direction_from:
             change = getattr(point, basis, None)
             if change is None:
@@ -126,6 +145,9 @@ def fetch(source: SourceDef, *, lookback_months: int = 6) -> list[SeriesPoint]:
     A source we cannot reach is a gap, and the caller records it as one. It must not
     become "the series says nothing", which is a statement about the world.
     """
+    from ..data.persistent_queue import require_queue_worker
+
+    require_queue_worker(source.id)
     import importlib
 
     try:
@@ -235,7 +257,27 @@ def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPo
         repository.close()
 
 
+def _publish_reading(store, source: SourceDef, obs: Observation, *, now: datetime) -> None:
+    """Publish the re-checkable reading an observation cites, as an immutable document version.
+
+    A series has no filing to point at, but the evidence store only admits a neutral fact that cites a published
+    document version.  The reading line itself is the document: it carries the figure, period, agency and rule
+    status, and a changed print produces a new version under the same document id rather than rewriting history.
+    """
+    from types import SimpleNamespace
+
+    text = (f"{obs.evidence_span}\n\n来源：{source.label or source.id}（{source.adapter}）；"
+            f"口径期：{obs.period}；数值：{obs.value:g} {obs.unit}".rstrip())
+    store.save_document(SimpleNamespace(
+        document_id=obs.document_id, symbol=obs.entity, period=obs.period, doc_type="series_reading",
+        source=f"series:{source.id}", source_url=source.adapter, path=None, version_path=None, text=text,
+        sha256=hashlib.sha256(text.encode()).hexdigest(), fetched_at=now.isoformat(), external_id="",
+        title=f"{source.label or source.id} {obs.period}", published_at="", related_entities=(),
+        completeness="full", truncation_reason="", carrier_format="plain_text", mime_source=""))
+
+
 def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None,
+            source_ids: set[str] | None = None,
             now: datetime | None = None) -> dict[str, int]:
     """Fetch every declared source and persist its observations. Returns {id: saved}.
 
@@ -259,8 +301,13 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
     now = now or datetime.now(timezone.utc)
     out: dict[str, int] = {}
     for source in load_sources():
+        if source_ids and source.id not in source_ids:
+            continue
         if concepts and not (set(source.concepts) & concepts):
             continue
+        from ..data.persistent_queue import require_queue_worker
+
+        require_queue_worker(source.id)
         store.register_data_source(source, kind="structured", at=now)
         run_id = store.begin_ingestion(source.id, kind="structured", at=now)
         points = fetch(source, lookback_months=lookback_months)
@@ -278,7 +325,9 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
         raw_saved = store.save_measurement_points(source, points, fetched_at=now)
         saved = 0
         for obs in to_observations(source, points, now=now):
-            for concept in source.concepts:
+            _publish_reading(store, source, obs, now=now)
+            # A governed-observer point names its own concept; a series feeds every concept its source declares.
+            for concept in ([obs.concept] if obs.concept else source.concepts):
                 row = obs.model_copy(update={"concept": concept})
                 # Re-derive the id: it is deterministic over (doc, entity, metric,
                 # period), and two concepts off one print must not collide.
@@ -303,4 +352,5 @@ def source_entities_for(claim) -> set[str]:
     named in a claim, so iterating the claim's declared witnesses alone would silently
     drop every non-company witness.
     """
-    return {s.entity for s in sources_for_concepts({c.key for c in claim.concepts})}
+    return {entity for s in sources_for_concepts({c.key for c in claim.concepts})
+            for entity in (s.entity, *s.entities)}

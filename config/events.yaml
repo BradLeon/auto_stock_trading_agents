@@ -1,5 +1,6 @@
 # 事件日历 — 调度器每个交易日检查，命中日期则触发对应分析师额外跑一次。
 # triggers: macro | sector | sector:<name> | pead:<SYM>（pead 触发 monitor 刷新）
+# 自定义 / 行业活动若可能改期，请填写稳定 stable_id；移除条目不会自动删除已发布日历事件。
 #
 # 维护说明：每季度把下季日期补进来。
 #   FOMC / PCE / GDP → https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm

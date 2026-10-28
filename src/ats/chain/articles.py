@@ -186,6 +186,9 @@ def collect_articles(store, *, source_ids: set[str] | None = None,
     for source in load_article_sources():
         if source_ids and source.id not in source_ids:
             continue
+        from ..data.persistent_queue import require_queue_worker
+
+        require_queue_worker(source.id)
         stat = ArticleRunStat(source_id=source.id)
         out[source.id] = stat
 

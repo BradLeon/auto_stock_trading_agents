@@ -1,7 +1,7 @@
 # 开发与运维手册
 
 > 面向：开发者 / 运维。讲代码怎么写、环境怎么搭、部署怎么改——设计动机和思想
-> 见 `docs/DESIGN.md`，日常使用见根目录 `README.md`。
+> 见 `docs/ARCHITECTURE.md`，日常使用见根目录 `README.md`，运维见 `docs/OPERATIONS.md`。
 
 ---
 
@@ -18,7 +18,14 @@ uv sync --python 3.12 \
 source .venv/bin/activate                   # 可选：之后可直接使用 ats / pytest
 ```
 
-不要以 `uv pip install -e ...` 或 `pip install ...` 替代 `uv sync`；它们可能让本机环境偏离锁文件。`memory` extra 的 `chromadb` 尚未接入，不应使用 `--all-extras` 作为当前默认命令。若只部署研究任务而不运行完整开发/CI 套件，可用 `uv sync --python 3.12 --extra data --extra schedule --extra memory-persist`，并按需加 `--extra broker`、`--extra channel`。
+不要以 `uv pip install -e ...` 或 `pip install ...` 替代 `uv sync`；它们可能让本机环境偏离锁文件。
+
+**测试/CI 的依赖范围与部署的依赖范围是两件事**：运行测试与取得基线数字时，请用唯一入口
+`./scripts/run_tests.sh`（内部执行 `uv sync --all-extras` + `uv run pytest`），它会一次装入**全部**
+可选分组——包括 `memory`（chromadb）。测试基线数字只有在「命令 + 依赖范围 + 执行环境条件」三者
+固定时才可复核。部署机则继续按角色挑选分组：`uv sync --python 3.12 --extra data --extra schedule
+--extra memory-persist`，并按需加 `--extra broker`、`--extra channel`；`memory` 的 chromadb 仍未接入
+运行时，装它只是为了让测试面完整，不代表部署依赖。
 
 `.venv` 的位置就是 `<仓库根>/.venv`——不会在别的地方，`source .venv/bin/activate`
 必须在仓库根目录下执行。
@@ -49,41 +56,39 @@ PYTHONPATH=src .venv/bin/python -m ats.runtime.cli chief run   # 不 activate �
 
 ```
 src/ats/
-  agents/
-    base.py           # run_structured() —— 所有 LLM 调用的统一入口
-    macro/             # assemble review report context outputs
-    sector/            # assemble review report context outputs
-    technical/         # strategy(纯数学·唯一真源) review report context —— 无 LLM
-    pead/              # prep score monitor triage research outputs
-    evidence/          # observer outputs —— 产业链证据抽取（只写证据表，不碰 broker）
-    chief/             # assemble decide outputs —— 决策收口
-  broker/ibkr.py       # IBKR: portfolio/pnl/fills/orders/cancel
-  channel/             # cli / feishu / feishu_bot + server 回调
-  data/                # market fundamentals macro consensus options runup
-                       # earnings_calendar news research transcript documents
-                       # industry factset websearch sector_snapshot web base
-  graph/               # chief+chief_state(决策图) pead+pead_state(事件图) checkpoint
-  journal/             # 交易日志 —— 确定性归约，不是 agent（见 DESIGN.md §9）
-    doctor.py          # 数据质量只读体检，改任何 journal 代码前先跑这个
-    entries.py card.py episodes.py invalidation.py marks.py
-    calibration.py critic.py episode_report.py report.py predictions.py prices.py
-    outputs.py         # LLM 结构化视图（ProposedChangeView / FindingItemView...）
-  memory/              # store(所有表的读写) performance
-  risk/                # correlation stress assess checks report —— 六层风控
-  chain/               # 产业链证据聚合（阶段二起：corroborate / induction）
-  runtime/             # cli scheduler server
+  agents/              # 各分析师与决策角色；只读数据产品与依赖投影，不碰 Provider
+    base.py            # run_structured() —— 所有 LLM 调用的统一入口
+    information/       # 信息分析师：准入文档 → 抽取 → InformationBrief
+    fundamental/       # 基本面分析师：routine（财报前基线）/ event（财报后评审）
+    pead/              # PEAD 框架的打分、单位换算、报告（被 fundamental 调用）
+    layer/             # 层次分析师：产业链层级比较与证据判读
+    sector/ macro/     # 行业配置、宏观评审
+    technical/         # strategy（纯数学·唯一真源）—— 无 LLM
+    chief/ risk_officer/  # 决策收口、交易审查
+  agent/task_projection.py  # 所有分析师产出的统一投影 envelope
+  workflow/            # Dispatcher、调度负责人、触发账本、读路由、数据产品健康检查（发布时与读取前）、退役判据
+    dispatcher.py planning.py triggers.py ownership.py schedule_runtime.py
+    consumer_cutover.py consumer_health.py legacy_retirement.py
+  data/                # 数据平台：sources（适配器）/ products（数据产品）/ stores
+    refresh.py         # 数据刷新控制器（com.ats.data-refresh 每小时 tick）
+    persistent_queue.py calendar_refresh.py consumer_api.py admission.py
+  llm/gateway.py       # 模型路由与推理配置
+  broker/ trader/ execution/ decision/  # 券商、执行、决策审计（交易路径，尚未切换）
+  journal/             # 交易日志 —— 确定性归约，不是 agent
+  memory/              # store（领域表读写）
+  risk/                # 六层风控（确定性）
+  runtime/             # cli、server（飞书回调）、scheduler（schedule 入口）
   schemas/             # 每个业务域一个文件，见第 3 节
   skills/<slug>/SKILL.md  # 每个 LLM 角色一份，见第 4 节
 config/
-  settings.yaml        # 全局：llm.routing / broker / 通道 / 调度等
-  risk.yaml            # 风控唯一入口：限额 / 层 cap / 期权生存 / 实体映射
-  pead.yaml            # PEAD 全局：targets(可交易) / observe(只读证据) / schedule / monitor
-  pead/<SYM>.yaml       # 单票覆盖，合并在 pead/_defaults.yaml 之上
-  sectors/*.yaml macro.yaml technical.yaml events.yaml news_sources.yaml watchlist.yaml
-  knowledge/*.md        # 注入分析师上下文的静态行业笔记
-tests/                  # 见第 6 节
-docs/                   # DESIGN DEVELOPMENT WORKFLOWS DATA_SOURCES SECTOR_ANALYST
-                        # CHAIN_EVIDENCE TECHNICAL_ANALYST MACRO_ANALYST RISK_SYSTEM GO_LIVE
+  settings.yaml        # 全局：llm / broker / 通道 / 旧调度开关（已全部关闭）
+  risk.yaml            # 风控唯一入口
+  pead.yaml pead/<SYM>.yaml  # 跟踪标的与单票设置
+  data/                # 数据源、刷新任务（schedules.yaml）、覆盖与资格清单
+  workflow/            # 研究时间表、事件路由、工作流负责人、冻结面、退役登记
+  sectors/*.yaml macro.yaml technical.yaml events.yaml
+deploy/launchd/        # launchd 服务定义（见第 9 节）
+openspec/              # 需求规格（specs/）与变更记录（changes/archive/）
 ```
 
 ## 3. Schemas 约定（`src/ats/schemas/`）
@@ -218,7 +223,16 @@ claims:
 - 测试文件命名 `test_<module>.py`，与被测模块一一对应；新模块加测试时先看
   同目录有没有已存在的 fixture 可以复用（尤其 `journal/` 下几个测试文件共享
   了大量构造 `JournalEntry`/`TradeEpisode` 的 helper）。
-- 全量跑：`PYTHONPATH=src .venv/bin/python -m pytest tests/ -q`（当前 500+ 个）。
+- **全量跑的唯一入口：`./scripts/run_tests.sh`**（等价于 `uv sync --all-extras` +
+  `uv run pytest`，pytest 参数原样透传）。不要用
+  `PYTHONPATH=src .venv/bin/python -m pytest`——后者不保证可选分组已装入，缺分组时
+  失败会伪装成业务断言失败，基线数字也不可复核。基线数字与测量条件记在
+  `docs/TEST_BASELINE.md`。
+
+  脚本默认把 `--basetemp` 指到仓库内 `tmp/pytest-basetemp/`：部分执行环境（CI 沙箱、
+  受限终端）会拒绝创建 pytest 默认临时根（`/T/pytest-of-*`）或对删除临时目录设配额，
+  两者都会让整库跑在半途崩成一片 error。受限环境下改用
+  `./scripts/run_tests.sh --batched 8` 分批取证（结果只用于枚举失败，**不能**替代全量基线）。
 
 ## 7. Git 与提交约定
 
@@ -242,48 +256,43 @@ worktree 开发新功能），但这个模式在实践中造成了麻烦：workt
 需要隔离实验时可以临时用一次性 worktree（`git worktree add /tmp/xxx <branch>`，
 用完 `git worktree remove` 清掉），但不作为长期开发模式。
 
-## 9. 实盘 daemon 的操作规范（这是本仓库风险最高的一类操作）
+## 9. 常驻服务的操作规范（这是本仓库风险最高的一类操作）
 
-两个 `launchd` 服务：
-
-| 服务 | 作用 | 命令 |
+| 服务 | 作用 | 进程 |
 |---|---|---|
-| `com.ats.schedule` | 调度 daemon，跑 `ats.runtime.cli schedule --live` | 全部周期/事件触发的入口 |
-| `com.ats.serve` | 飞书 approval webhook + 执行服务，`ats.runtime.cli serve --host 127.0.0.1 --port 8000` | 异步审批回调恢复决策图 |
+| `com.ats.dispatcher` | 研究调度 daemon（Dispatcher）：7 个研究工作流的定时与日历事件触发；不进 Chief、不下单 | `ats.runtime.cli schedule` |
+| `com.ats.data-refresh` | 数据刷新控制器，每小时 tick 一次 | `ats.data.refresh tick` |
+| `com.ats.serve` | 飞书 approval webhook | `ats.runtime.cli serve --host 127.0.0.1 --port 8000` |
+
 
 ```bash
-launchctl list | grep com.ats                              # 查状态
-launchctl kickstart -k gui/$(id -u)/com.ats.schedule        # 强制重启（-k 先杀掉旧进程）
+launchctl list | grep com.ats                               # 查状态
+launchctl kickstart -k gui/$(id -u)/com.ats.dispatcher          # 强制重启（-k 先杀掉旧进程）
 launchctl kickstart -k gui/$(id -u)/com.ats.serve
 ```
 
-日志在 `var/logs/` 下。
+在 Claude Code 等沙箱里执行 `launchctl` 不会生效，需要在沙箱外执行。日志在 `var/logs/`
+（`dispatcher.*.log`、`data-refresh.*.log`、`serve.*.log`）。
 
-**核心危险：Python 的懒加载 + 长驻进程。** `BlockingScheduler` 进程启动时只
-预加载了极少数 `ats.*` 模块，绝大多数模块（`graph.chief`、`trader.execute`、
-`broker.ibkr`、`memory.store`、`agents.*`、`journal.*`）都是在函数体内第一次
-真正被调用时才 import。这意味着：
+**核心危险：Python 的懒加载 + 长驻进程。** 常驻进程启动时只预加载了极少数 `ats.*`
+模块，大多数模块在函数体内第一次被调用时才 import。这意味着：
 
-- 如果在 daemon 跑着的时候直接在这个目录下 `git checkout` 切分支或改 `src/`
-  下的文件，daemon 之后触发到的某个模块可能是**磁盘上的新代码**，而已经加载
-  过的模块仍然是**内存里的旧代码**——两者混用的行为是未定义的，且不会有任何
-  报错提示你这件事发生了。
-- **规则：任何改动了 `src/ats/` 下代码的改动，只要 daemon 在跑，就必须在
-  改动落盘后显式 `kickstart -k` 重启对应服务**，不能假设"反正是懒加载，
-  等它自己重新 import 就好"。
-- 重启时机要挑在"两次调度之间"，不要在某个 cron job 正在执行的窗口内重启——
-  可以先看日志确认上一个 job 刚结束，再重启。
+- 如果在 daemon 跑着的时候直接 `git checkout` 切分支或改 `src/` 下的文件，daemon 之后
+  触发到的某个模块可能是**磁盘上的新代码**，而已加载的模块仍是**内存里的旧代码**——
+  两者混用的行为是未定义的，且不会报错。
+- **规则：任何改动了 `src/ats/` 的改动，只要 daemon 在跑，就必须在改动落盘后显式
+  `kickstart -k` 重启对应服务。**
+- 重启时机挑在两次调度之间（研究时间表见 `config/workflow/research_schedules.yaml`），
+  先看日志确认上一个任务刚结束。
 
-`journal_reconcile` 这个每日收盘后的对账 job 是**不可补跑**的：它靠 IBKR
-`reqExecutions` 只读当天成交，一天没跑上，那天的成交记录就永久丢失（不像
-score/prep 还能手动重跑）。如果因为改代码/重启导致某天错过了这个窗口，
-没有补救手段，只能记录缺口。
+交易路径（Chief 定时决策、Clerk 每日对账）尚未切换，目前没有排程；切换时再补本节。
 
 ## 10. 数据库与持久化约定
 
-`var/ats.sqlite`，单文件、单连接（`ThreadPoolExecutor(1)`——所有调度任务共享
-同一个 sqlite 连接，这也是为什么 scheduler 的 worker 池固定是 1，不是可以随便
-调大的性能参数）。
+领域库 `var/ats.sqlite`，数据平台库 `var/data.sqlite`，调度与切换状态在 `var/phase_f_*.sqlite`（文件名沿用历史前缀）、
+`var/data_refresh.sqlite`、`var/persistent_ingestion.sqlite`。新代码每个运行或 worker 使用独立连接，
+启用 WAL 与 busy timeout，写操作用短事务，远程请求和 LLM 调用不得包在事务里；重试靠唯一约束与幂等写入，
+不靠进程内锁（ARCHITECTURE §8.5）。台账类表只增不改。
 
 - **幂等 upsert 用确定性 ID 做 `INSERT OR REPLACE` 的 key，不用随机 UUID。**
   例如 `pead_dossier` 用 `(symbol, fiscal_label)` 做 key——这样重复调用
@@ -331,23 +340,36 @@ score/prep 还能手动重跑）。如果因为改代码/重启导致某天错�
 ## 12. 验证命令
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest tests/ -q          # 全量
+./scripts/run_tests.sh                       # 全量（uv sync --all-extras + uv run pytest）
+./scripts/run_tests.sh --check                # 只装依赖并校验各可选分组均可导入
+./scripts/run_tests.sh --batched 8            # 受限环境下的分批取证（不能替代全量基线）
+./scripts/run_tests.sh tests/test_risk.py -k survival   # pytest 参数原样透传
 
 # 单角色 probe（多数支持 --offline / --no-llm 跳过外部依赖）
-ats macro review / ats sector review ai_hardware / ats pead prep|score COHR
+ats macro probe / ats sector probe ai_hardware
 ats risk report / ats trader portfolio / ats chief probe
 ats technical probe         # 技术面读数（确定性，不落库不写报告）
 ats journal doctor          # 改 journal/ 任何代码前先跑这个，read-only 数据质量体检
 
-# 端到端（真实链路，可 dry-run）
-ats schedule --now          # 事件→PEAD→技术面→快照→Chief，全流程
+# 研究工作流（走 Dispatcher；负责人为 dispatcher 时旧入口会报 caller is not current owner）
+ats workflow run --task macro-review --scope-kind portfolio --scope-id portfolio
+ats workflow runs --limit 20
 ats chief run                # 收口：读存档→决策→风控→审批→(dry-run)执行
 ```
 
 ## 13. 相关文档
 
-- 设计动机、角色边界、总体架构 → `docs/DESIGN.md`
+- 架构、数据流、角色契约 → `docs/ARCHITECTURE.md`
 - 使用者视角、日常操作 → `README.md`
-- workflow 细节表、触发路由表 → `docs/WORKFLOWS.md`
-- 技术面策略与回测证据 → `docs/TECHNICAL_ANALYST.md`
-- 数据源清单与状态 → `docs/DATA_SOURCES.md`
+- 常驻服务与日常运维 → `docs/OPERATIONS.md`
+- 技术面策略与回测证据 → `docs/agents/TECHNICAL_ANALYST.md`
+- 数据源清单与状态 → `docs/data/DATA_SOURCES.md`
+
+## 迁移期用语说明
+
+退役变更清理了文档与 `ats --help` 里的“新路径 / 旧路径 / 切流 / Phase”措辞。下列位置**有意保留**，不是遗漏：
+
+- `ARCHITECTURE.md` 流程图里的 Phase 0–6：一次完整流程的**执行阶段**（前置研究、专业分析、组合决策、风控、执行、记录），与迁移无关。
+- 结构化数据文档里的 `legacy / shadow / platform / fallback`：数据源与消费者的**配置取值**（`docs/data/STRUCTURED_DATA_*.md`），是真实的运行模式。
+- `var/phase_f_*.sqlite` 等文件名与 `docs/validation/` 下的验收记录：沿用历史名称 / 冻结的历史证据，不改。
+- 交易路径切换前保留的切换期工具（`ats cutover`、`shadow`、`intake`、`read`、`batch`、`drill`、`live`、`dispatch`）：命令与帮助里写明“交易路径切换前保留”，随交易路径切换的 change 退役。

@@ -16,6 +16,8 @@ auditable: weights and the composite are pure code; nothing here calls an LLM.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 import math
 from dataclasses import dataclass, field
@@ -115,21 +117,21 @@ def _rating_delta(rating_trend: list[dict]) -> float | None:
 
 
 def fetch_factors(symbols: list[str], subgroups: dict[str, str] | None = None) -> list[FactorRow]:
-    from ...data import consensus as consensus_src, fundamentals, sector_snapshot
+    from ...data.products import sector_inputs as inputs
 
     subgroups = subgroups or {}
-    prices = sector_snapshot.fetch_prices(symbols, period="1y")
+    prices = inputs.sector_prices(symbols, period="1y")
     rows: list[FactorRow] = []
     for s in symbols:
-        lt = fundamentals.fetch_constituent_financials(s)
+        lt = inputs.constituent_financials(s)
         closes = prices.get(s) or []
-        cons = consensus_src.fetch(s, consumer="sector_consensus")
+        cons = inputs.consensus_for(s, consumer="sector_consensus")
         rows.append(FactorRow(
             symbol=s, subgroup=subgroups.get(s, ""),
             market_cap=lt.get("market_cap"), beta=lt.get("beta"),
             rev_growth=lt.get("rev_growth"), gross_margin=lt.get("gross_margin"),
             op_margin=lt.get("op_margin"), fwd_pe=lt.get("fwd_pe"),
-            mom_60d=sector_snapshot.momentum(closes, 60) if closes else None,
+            mom_60d=inputs.price_momentum(closes, 60) if closes else None,
             rating_delta=_rating_delta(cons.get("rating_trend", []))))
     return rows
 
@@ -296,7 +298,7 @@ def to_basket(rows: list[FactorRow], layer_key: str, layer_cap: float, *,
     from ...schemas.sector import BasketRow, LayerBasket
 
     return LayerBasket(
-        layer_key=layer_key, as_of=datetime.now(timezone.utc), layer_cap=layer_cap,
+        layer_key=layer_key, as_of=evaluation_now(timezone.utc), layer_cap=layer_cap,
         structural=structural, subgroup_notes=subgroup_notes or {},
         cross_section_applicable=cross_section_applies(rows),
         rows=[BasketRow(
@@ -325,6 +327,7 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
     try:
         from ...config import load_sector_config
         from ...memory import get_store
+        from ...schemas.sector import allocation_for_status
 
         review = get_store().latest_sector_review(sector_name)
         if review is None:
@@ -338,7 +341,8 @@ def _layer_view(sector_name: str, layer_key: str) -> str:
         if verdict is not None:
             trig = "；".join(verdict.reversal_triggers[:3])
             return (f"⚠️ 以下是**上一轮**（{verdict.as_of:%Y-%m-%d}）的结论，不是本期结论\n"
-                    f"配置：{verdict.allocation}（confidence {verdict.confidence:.2f}）\n"
+                    f"配置：{allocation_for_status(verdict.layer_status)}"
+                    f"（confidence {verdict.confidence:.2f}）\n"
                     f"周期：{verdict.cycle_position or '—'}\n"
                     + (f"当时的反转触发条件：{trig}" if trig else ""))
 
@@ -400,7 +404,7 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
     for r in rows:
         r.quant_rank = r.rank
 
-    # Competitive-position evidence from the chain ledger (docs/CHAIN_EVIDENCE.md).
+    # Competitive-position evidence from the chain ledger (docs/archive/CHAIN_EVIDENCE.md).
     # Only claims that DECLARE a structural factor reach here (`feeds_factor`), and only
     # resolved comparisons — an unresolved one yields nothing, so the factor stays NULL
     # rather than 0. "Not looked at" and "looked at, judged neutral" stay distinct.
@@ -493,7 +497,7 @@ def render_report(rows: list[FactorRow], layer_key: str, layer_label: str,
                   structural: bool = False, subgroup_notes: dict | None = None) -> str:
     from datetime import datetime, timezone
 
-    now = datetime.now(timezone.utc)
+    now = evaluation_now(timezone.utc)
     weights = BLENDED_WEIGHTS if structural else QUANT_WEIGHTS
     gen = ("**量化因子 + KB 结构层(LLM)复合**" if structural else "**确定性因子模型，无 LLM**")
     flag = " --structure" if structural else ""
@@ -577,7 +581,7 @@ def write_report(rows: list[FactorRow], basket, cfg) -> "object | None":
     layer_label = layer.label if layer else basket.layer_key
     text = render_report(rows, basket.layer_key, layer_label, basket.layer_cap, cfg.label,
                          cfg.name, structural=basket.structural, subgroup_notes=basket.subgroup_notes)
-    path = folder / f"截面选股-{cfg.label}-{basket.layer_key}-{datetime.now(timezone.utc):%Y-%m-%d}.md"
+    path = folder / f"截面选股-{cfg.label}-{basket.layer_key}-{evaluation_now(timezone.utc):%Y-%m-%d}.md"
     path.write_text(text, encoding="utf-8")
     return path
 

@@ -39,18 +39,20 @@ def test_catalog_statuses_distinguish_config_from_actual_coverage():
     assert "accepted observations" in statuses["coverage_note"]
 
 
-def test_catalog_rejects_missing_legacy_file(tmp_path):
+def test_catalog_rejects_missing_target_domain_config(tmp_path):
+    """Catalog only assembles the two target domain registries."""
     path = tmp_path / "catalog.yaml"
     path.write_text(
-        "version: 1\nlegacy:\n  structured_catalog: missing.yaml\n"
-        "  sources: missing-sources.yaml\n  news_sources: missing-news.yaml\n",
+        "version: 1\ndomains:\n  structured: missing.yaml\n"
+        "  unstructured: missing-unstructured.yaml\n",
         encoding="utf-8",
     )
     catalog = DataCatalog.load(path)
 
     result = catalog.validate()
     assert result.valid is False
-    assert "legacy_config_missing:structured_catalog" in result.reason_codes
+    assert "domain_config_missing:structured" in result.reason_codes
+    assert "domain_config_missing:unstructured" in result.reason_codes
 
 
 def test_catalog_rejects_unsupported_version(tmp_path):
@@ -73,10 +75,10 @@ def test_catalog_rejects_unregistered_explicit_adapter(tmp_path):
     path = tmp_path / "catalog.yaml"
     path.write_text(
         "version: 1\n"
-        "legacy:\n"
-        f"  structured_catalog: {ROOT / 'config' / 'structured_data.yaml'}\n"
-        f"  sources: {ROOT / 'config' / 'sources.yaml'}\n"
-        f"  news_sources: {ROOT / 'config' / 'news_sources.yaml'}\n"
+        "domains:\n"
+        f"  structured: {ROOT / 'config' / 'data' / 'structured.yaml'}\n"
+        f"  sources: {ROOT / 'config' / 'data' / 'sources.yaml'}\n"
+        f"  news_sources: {ROOT / 'config' / 'data' / 'news_sources.yaml'}\n"
         "sources:\n"
         "  new_source:\n"
         "    domain: structured\n"

@@ -38,4 +38,4 @@
 - 现有 IBKR/yfinance 股价和期权运行时查询保持原状，本变更不迁移、不双写、不回填这些数据，也不承诺通过结构化 SQL/Pandas 重放其历史行情。
 - 原始快照与结构化观测会增加本地存储，但首期继续采用单机、可迁移的存储方案，并通过稳定数据产品接口隔离未来 PostgreSQL、DuckDB 或 Parquet 等实现演进。
 - 非结构化文档资产仍由阶段一系统管理；只有经过证据关联和准入的数值事实进入结构化层，两层通过 document/version/span 血缘连接，不复制文档正文。
-- 实施期 SHALL 新增 `docs/STRUCTURED_DATA_DEVELOPER.md`、`docs/STRUCTURED_DATA_OPERATIONS.md` 与 `docs/STRUCTURED_DATA_USER_GUIDE.md`，并由 `DATA_ARCHITECTURE.md` 提供入口。
+- 实施期 SHALL 新增 `docs/data/STRUCTURED_DATA_DEVELOPER.md`、`docs/data/STRUCTURED_DATA_OPERATIONS.md` 与 `docs/data/STRUCTURED_DATA_USER_GUIDE.md`，并由 `DATA_ARCHITECTURE.md` 提供入口。

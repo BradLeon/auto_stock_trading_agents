@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .base import DataProducts
-
 
 _ROLE_TYPES = {
     "earnings_release": {"company_release", "release"},
@@ -30,6 +30,7 @@ class EarningsDocument:
     published_at: str
     title: str
     text: str
+    period: str = ""          # fiscal period declared by the catalog (structured sources such as defeatbeta)
 
     @property
     def lineage(self) -> dict[str, str]:
@@ -83,6 +84,11 @@ def _role(doc_type: str) -> str:
 
 def _matches_period(row: dict[str, Any], period: str) -> bool:
     """Require an explicit event-period token; do not revive ``unknown`` assets."""
+    from ..fiscal import parse_label
+    if row.get("period"):
+        claimed, requested = parse_label(str(row["period"])), parse_label(period)
+        if claimed[0] is not None and claimed[1] is not None:
+            return claimed == requested
     target = _period_token(period)
     if not target:
         return False
@@ -91,20 +97,57 @@ def _matches_period(row: dict[str, Any], period: str) -> bool:
     return target in _period_token(haystack)
 
 
+# An 8-K / 6-K body is admitted without a fiscal-period label (the SEC index does not carry one), so a period
+# match can never find it.  For an earnings event the filing date is the link instead: the results release is
+# filed on the release day or just after.  Only SEC bodies that read like a quarterly-results release qualify,
+# because every 8-K/6-K is classified "company_release" (buyback updates, governance notices ...).
+RELEASE_WINDOW_BEFORE_DAYS = 1
+RELEASE_WINDOW_AFTER_DAYS = 3
+_RESULTS_PERIOD_RE = re.compile(
+    r"\bquarter(?:ly)?\b|\bQ[1-4]\b|\bhalf[- ]year\b|\bfiscal (?:year|20\d\d)\b", re.I)
+_RESULTS_WORD_RE = re.compile(r"\b(?:results|earnings|net income|net sales|revenue)\b", re.I)
+
+
+def _filed_near_event(row: dict[str, Any], event_date: str) -> bool:
+    if str(row.get("source") or "") != "sec_edgar_filing_body" or row.get("period"):
+        return False
+    try:
+        event_day = date.fromisoformat(str(event_date)[:10])
+        filed = date.fromisoformat(str(row.get("published_at") or "")[:10])
+    except ValueError:
+        return False
+    return -RELEASE_WINDOW_BEFORE_DAYS <= (filed - event_day).days <= RELEASE_WINDOW_AFTER_DAYS
+
+
+def _reads_like_results_release(text: str) -> bool:
+    head = text[:6000]
+    return bool(_RESULTS_PERIOD_RE.search(head) and _RESULTS_WORD_RE.search(head))
+
+
 def _read_version_text(version: dict[str, Any]) -> str:
     path = Path(str(version.get("local_path") or ""))
     if not path.is_file():
         return ""
     try:
-        return path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        return path.read_text(encoding="utf-8", errors="replace")
+        return ""
     except OSError:
         return ""
+    from .. import source_cache
+    _, body = source_cache._split_frontmatter(text)
+    body = body.strip()
+    if not source_cache.body_is_consistent(
+        body, expected_hash=version.get("content_hash", ""),
+        expected_chars=version.get("chars"),
+    ):
+        return ""
+    return body
 
 
 def earnings_document_package(repository, *, entity: str,
-                              period: str) -> EarningsDocumentPackage:
+                              period: str, as_of: datetime | None = None,
+                              event_date: str = "") -> EarningsDocumentPackage:
     """Select the latest complete body for each official role in one event.
 
     The repository is intentionally supplied by the caller.  That keeps product
@@ -112,15 +155,32 @@ def earnings_document_package(repository, *, entity: str,
     read to trigger SEC, transcript, RSS, or web collection as a hidden side effect.
     """
     selected: dict[str, EarningsDocument] = {}
-    for row in repository.documents(entity=entity, ok_only=True, limit=1000):
+    selected_at: dict[str, str] = {}
+    if as_of is not None:
+        if as_of.tzinfo is None:
+            raise ValueError("document as_of must be timezone-aware")
+        rows = [row for row in repository.document_materials_at(as_of=as_of)
+                if entity.upper() in {str(row.get("entity") or "").upper(),
+                                      *row.get("related_entities", [])}]
+    else:
+        rows = repository.documents(entity=entity, ok_only=True, limit=1000)
+    for row in rows:
         role = _role(row.get("doc_type", ""))
-        if not role or not _matches_period(row, period):
+        if not role or row.get("completeness", "full") != "full":
             continue
-        version = repository.latest_document_version(row["document_id"])
+        by_filing_date = False
+        if not _matches_period(row, period):
+            # No period label: fall back to "filed within the event's release window" for SEC release bodies.
+            if not (event_date and role == "earnings_release" and _filed_near_event(row, event_date)):
+                continue
+            by_filing_date = True
+        version = row.get("version") or repository.latest_document_version(row["document_id"])
         if not version:
             continue
         text = _read_version_text(version)
         if not text.strip():
+            continue
+        if by_filing_date and not _reads_like_results_release(text):
             continue
         item = EarningsDocument(
             role=role,
@@ -131,10 +191,12 @@ def earnings_document_package(repository, *, entity: str,
             published_at=str(row.get("published_at") or ""),
             title=str(row.get("title") or role),
             text=text,
+            period=str(row.get("period") or ""),
         )
-        existing = selected.get(role)
-        if existing is None or item.version_id > existing.version_id:
+        known_at = str(version.get("known_at") or version.get("fetched_at") or row.get("fetched_at") or "")
+        if role not in selected or known_at > selected_at[role]:
             selected[role] = item
+            selected_at[role] = known_at
     return EarningsDocumentPackage(
         entity=entity.upper(), period=period,
         documents=tuple(sorted(selected.values(), key=lambda item: _ROLE_ORDER[item.role])),
@@ -142,14 +204,124 @@ def earnings_document_package(repository, *, entity: str,
     )
 
 
-def platform_earnings_document_package(*, entity: str,
-                                       period: str) -> EarningsDocumentPackage:
+@dataclass(frozen=True)
+class AdmittedDocument:
+    """A published immutable document version exposed through Data Products."""
+
+    document_id: str
+    version_id: str
+    source: str
+    source_url: str
+    document_type: str
+    entity: str
+    title: str
+    published_at: str
+    fetched_at: str
+    completeness: str
+    content_hash: str
+    text: str
+    publication_id: str = ""
+    known_at: str = ""
+    metadata_history: str = "current_index"
+    related_entities: tuple[str, ...] = ()
+    quality: dict = field(default_factory=dict)
+
+
+def admitted_documents(*, entities: tuple[str, ...] | list[str] | None = None,
+                       document_types: tuple[str, ...] | list[str] | None = None,
+                       published_since: str | None = None,
+                       limit: int = 200, as_of: datetime | None = None,
+                       repository=None, governed_only: bool = True,
+                       diagnostics: list[dict] | None = None) -> list[AdmittedDocument]:
+    """Read only accepted, versioned document material; never triggers collection.
+
+    Missing/stale data is represented by an empty result.  Each returned row carries
+    an exact immutable version and completeness marker so consumers cannot confuse
+    a subscriber preview with a full transcript or article.
+    """
+    from ats.data.stores.unstructured import get_platform_unstructured_repository
+
+    repo = repository or get_platform_unstructured_repository()
+    allowed_sources = None
+    if governed_only:
+        from ..catalog.loader import DataCatalog
+        allowed_sources = {source.id for source in DataCatalog.load().target_unstructured_sources()}
+    try:
+        rows: dict[str, dict[str, Any]] = {}
+        entity_filter = tuple(str(item).upper() for item in (entities or ()))
+        type_filter = set(str(item).lower() for item in (document_types or ()))
+        if as_of is not None:
+            if as_of.tzinfo is None:
+                raise ValueError("document as_of must be timezone-aware")
+            for row in repo.document_materials_at(as_of=as_of, limit=10_000):
+                associated = {str(row.get("entity") or "").upper(),
+                              *row.get("related_entities", [])}
+                if entity_filter and not associated.intersection(entity_filter):
+                    continue
+                if type_filter and str(row.get("doc_type") or "").lower() not in type_filter:
+                    continue
+                if published_since and str(row.get("published_at") or "") < published_since:
+                    continue
+                rows[str(row["document_id"])] = row
+        for entity in (() if as_of is not None else entity_filter or (None,)):
+            for row in repo.documents(
+                entity=entity, ok_only=True,
+                doc_type_in=tuple(type_filter) if type_filter else None,
+                published_since=published_since, limit=max(1, min(int(limit), 1000)),
+            ):
+                rows[str(row["document_id"])] = row
+        result: list[AdmittedDocument] = []
+        for row in rows.values():
+            if allowed_sources is not None and str(row.get("source") or "") not in allowed_sources:
+                continue
+            if as_of is None and hasattr(repo, "latest_document_metadata"):
+                row = {**row, "quality": repo.latest_document_metadata(
+                    str(row["document_id"])).get("quality", {})}
+            version = row.get("version") or repo.latest_document_version(str(row["document_id"]))
+            if not version:
+                if diagnostics is not None:
+                    diagnostics.append({"document_id": row["document_id"], "reason": "immutable_version_missing"})
+                continue
+            text = _read_version_text(version)
+            if not text.strip():
+                if diagnostics is not None:
+                    diagnostics.append({"document_id": row["document_id"], "reason": "body_integrity_or_read_failure"})
+                continue
+            result.append(AdmittedDocument(
+                document_id=str(row["document_id"]),
+                version_id=str(version.get("version_id") or ""),
+                source=str(row.get("source") or ""),
+                source_url=str(version.get("source_url") or row.get("source_url") or ""),
+                document_type=str(row.get("doc_type") or ""),
+                entity=str(row.get("entity") or ""),
+                title=str(row.get("title") or ""),
+                published_at=str(row.get("published_at") or ""),
+                fetched_at=str(version.get("fetched_at") or row.get("fetched_at") or ""),
+                completeness=str(row.get("completeness") or "full"),
+                content_hash=str(version.get("content_hash") or ""),
+                text=text,
+                publication_id=str(version.get("publication_id") or ""),
+                known_at=str(version.get("known_at") or row.get("fetched_at") or ""),
+                metadata_history=str(row.get("metadata_history") or "current_index"),
+                related_entities=tuple(str(entity).upper() for entity in row.get("related_entities", [])),
+                quality=dict(row.get("quality") or {}),
+            ))
+        return sorted(result, key=lambda item: (
+            item.published_at, item.fetched_at, item.document_id), reverse=True)[:limit]
+    finally:
+        if repository is None:
+            repo.close()
+
+
+def platform_earnings_document_package(*, entity: str, period: str, as_of: datetime | None = None,
+                                       event_date: str = "") -> EarningsDocumentPackage:
     """Read the migrated platform database and its immutable asset references."""
     from ats.data.stores.unstructured import get_platform_unstructured_repository
 
     repository = get_platform_unstructured_repository()
     try:
-        return earnings_document_package(repository, entity=entity, period=period)
+        return earnings_document_package(repository, entity=entity, period=period, as_of=as_of,
+                                         event_date=event_date)
     finally:
         repository.close()
 
@@ -205,7 +377,7 @@ def get_unstructured_products() -> UnstructuredDataProducts:
 
 
 __all__ = [
-    "EarningsDocument", "EarningsDocumentPackage", "UnstructuredDataProducts",
+    "AdmittedDocument", "EarningsDocument", "EarningsDocumentPackage", "UnstructuredDataProducts",
     "earnings_document_package", "get_unstructured_products",
-    "platform_earnings_document_package", "platform_news_items",
+    "platform_earnings_document_package", "platform_news_items", "admitted_documents",
 ]

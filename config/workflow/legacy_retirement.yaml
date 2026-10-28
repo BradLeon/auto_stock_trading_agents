@@ -1,0 +1,765 @@
+# 旧实现退役登记处（workflow/legacy-retirement）
+#
+# 退出旧实现的唯一合法路径：墓碑登记 → fail-closed 读取门 → 两段式清除。
+# `active` 是当前在用清册；`retired` 是墓碑。同一标识若在 `retired` 中状态为
+# `retired` 且仍出现在 `active` 里，加载即失败（两处并存不允许静默取胜）。
+#
+# 本阶段（Phase A）只登记；除标注 `status: retired` 者外不执行任何删除，
+# 且本阶段不执行任何物理清除（审计记录为空）。
+
+active:
+  - task_projections
+  - evidence_fact_projections.legacy_observation_id
+  - pead_dossier
+  - sector_reviews
+  - macro_reviews
+  - technical_reviews
+
+retired:
+  - identifier: agent.evidence_observer
+    capability_domain: data/target-dataflow-assurance
+    replaced_by: agent.layer_analyst
+    target_phase: complete-target-dataflow
+    status: retired
+    exit_condition: 目标任务注册表不注册 Observer；所有新研究快照以 Layer 为消费者。
+    consumers: []
+    consumer_zero_criterion: Observer 不得作为独立可调度角色；历史 extractor/model key 仅为兼容组件。
+    location: src/ats/data/consumer_identity.py
+
+  # ── 本阶段退出 ────────────────────────────────────────────────────────────
+  - identifier: workflow_memory.evidence_observations
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_observations
+    target_phase: A
+    status: retired
+    exit_condition: >-
+      写侧 cutover 完成：四条调用路径（调度观察、chain/sources、chain/articles、命令行）
+      全部经 TradingMemory.data_store() 改指数据层，且数据层读入口能按同一标识与血缘读回。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 memory/store.py 的 _SCHEMA、_retire_data_tables、_migrate、_migrate_shared_facts（迁移读旧表）与 data/stores/ownership.py 边界登记表；原消费方 scheduler.observe、chain.sources、chain.articles、runtime.cli 已无引用。
+    consumers: []
+    consumer_zero_criterion: >-
+      四条路径均无旁路写入；src 内除 _SCHEMA / _retire_data_tables / _migrate /
+      _migrate_shared_facts 与 ownership.py 边界登记表外不再出现该表名。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  - identifier: workflow_memory.evidence_facts
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_facts
+    target_phase: A
+    status: retired
+    exit_condition: 写侧 cutover 完成，事实写入经 save_evidence_observation 落到数据层。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 _SCHEMA、_retire_data_tables、列迁移与 ownership.py 边界登记表；原消费方 chain.evidence、scheduler.observe 已无引用。
+    consumers: []
+    consumer_zero_criterion: 无代码再引用该表名（同 evidence_observations 的扫描判据）。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  - identifier: workflow_memory.evidence_fact_projections
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_projections
+    target_phase: A
+    status: retired
+    exit_condition: 写侧 cutover 完成，投影与事实在同一事务写入数据层。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 _SCHEMA、_retire_data_tables 与 ownership.py 边界登记表；原消费方 chain.evidence、memory.store.projection_lineage 已无对该表的读写（projection_lineage 的旧列另见 task_projections.legacy_columns，tasks 6.2）。
+    consumers: []
+    consumer_zero_criterion: 血缘解析改由数据层解析两族投影。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  - identifier: workflow_memory.evidence_failures
+    capability_domain: data/data-layer-architecture
+    replaced_by: data_evidence_failures
+    target_phase: A
+    status: retired
+    exit_condition: save_observation_failure 改指数据层。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：表仅出现在 _SCHEMA、_retire_data_tables 与 ownership.py 边界登记表（chain/articles.py 里只是说明文字）；原消费方 chain.sources、chain.articles 已无引用。
+    consumers: []
+    consumer_zero_criterion: 无代码再引用该表名。
+    location: src/ats/memory/store.py（表由 _retire_data_tables 删除）
+
+  # ── 待退（条件未满足，本阶段只登记） ──────────────────────────────────────
+  - identifier: scheduler.hardcoded_serial_run
+    capability_domain: workflow/run-contracts
+    replaced_by: workflow.run_contracts.TaskRegistry + Dispatcher
+    target_phase: E
+    status: retired
+    exit_condition: 任务注册表与依赖解析上线并通过验收，Dispatcher 接管阶段编排。
+    missing_condition: >-
+      2026-10-20 退役（用户批准）：src/ats/runtime/scheduler.py 与 deploy/launchd/com.ats.schedule.plist 已删除，
+      `ats schedule` 只启动 Dispatcher 常驻进程（src/ats/runtime/dispatcher_daemon.py）；settings.yaml 的旧
+      daily_stages / jobs 开关与 ScheduleConfig 一并删除，事件唤醒开关移到研究时间表配置的 event_triggers。
+      旧流程里属于交易路径的两项（主理人每日决策 chief_daily、书记员对账 journal_reconcile）没有迁移，
+      待交易路径切换时在 Dispatcher 中重建。
+    consumers: []
+    consumer_zero_criterion: 调度入口不再以硬编码顺序表达阶段依赖。
+    location: src/ats/runtime/scheduler.py
+
+  - identifier: legacy_read_models
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: agent/task-projection
+    replaced_by: task_projection_envelopes + 角色专用 payload
+    target_phase: D
+    status: pending
+    exit_condition: 新写路径稳定，且旧报表与 CLI 消费方迁移完成。
+    missing_condition: >-
+      pead_dossier / sector_reviews / macro_reviews / technical_reviews 仍是活动兼容读模型，
+      报表与 CLI 消费方尚未迁移到 envelope。
+    consumers:
+      - runtime.cli
+      - channel.context
+    consumer_zero_criterion: 旧报表与 CLI 全部改为读 envelope，兼容写入登记退役条件后清零。
+    location: Workflow memory
+  - identifier: store.direct_trade_reads
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: execution/internal-state-api
+    replaced_by: execution.state_api（as-of + 完整性标记的内部状态读模型）
+    target_phase: C
+    status: pending
+    exit_condition: Chief（assemble.py）、Risk（risk/assess.py）与 channel/context 的交易历史与绩效读取全部改经 Internal State API。
+    missing_condition: >-
+      上述消费方仍在直读 trades/fills/performance 原始表；双读比对确认一致后逐个切换。
+    consumers:
+      - agents.chief.assemble
+      - risk.assess
+      - channel.context
+    consumer_zero_criterion: 消费方全部切换且直读调用清零（grep 校验）。
+    location: Workflow memory
+
+  # ── Phase B（决策审计与交易安全）──────────────────────────────────────────
+  - identifier: risk.checks.in_place_clipping
+    capability_domain: risk/deterministic-review
+    replaced_by: risk.checks.review_revision（整条修订只读审查 + counterproposal）
+    target_phase: B
+    status: retired
+    exit_condition: >-
+      图风控节点改调 review_revision；旧就地裁剪函数（_apply_order_caps /
+      _clip_event_notional 及裁剪式返回值）从 src 移除，pre_trade() 适配层除外。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：`_apply_order_caps`、`_clip_event_notional` 在 src 与 tests 里已无任何出现；原消费方 graph.chief.risk_gate、graph.pead 不再取得被裁剪的订单。
+    consumers: []
+    consumer_zero_criterion: src 内无任何调用方再取得「被裁剪后的订单」作为风控输出。
+    location: src/ats/risk/checks.py
+
+  - identifier: agents.risk_validator.apply_guardrails
+    kind: business
+    group: R4
+    gate: G0
+    capability_domain: risk/deterministic-review
+    replaced_by: agents.risk_validator.review_guardrails（只读边界，不改写提案）
+    target_phase: B
+    status: retired
+    exit_condition: 默认流程改调 review_guardrails，apply_guardrails 无引用。
+    missing_condition: >-
+      2026-10-27 补证并物理删除（tasks 6.1、7.2）：apply_guardrails 与它独有的 _enforce_sector_cap、_enforce_budget 已从 risk_validator.py 删除；同文件的只读 review_guardrails 保留（src 内暂无调用方，等交易路径决定去留）。
+    consumers: []
+    consumer_zero_criterion: src 内 grep apply_guardrails 仅剩定义与其自身测试（已改造）。
+    location: src/ats/agents/risk_validator.py
+
+  - identifier: runtime.server.in_process_resume_dedup
+    capability_domain: decision/approval-lifecycle
+    replaced_by: decision.repository.validate_callback（持久幂等键 + 终态/修订/审查判定）
+    target_phase: B
+    status: retired
+    exit_condition: server 移除进程内 _RESUMED，去重改查 boss_approvals 与 decision_cycles。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：`_RESUMED` 在 src 里只剩说明注释，tests/test_server.py 断言 server 已无该属性；去重改查持久库。
+    consumers: []
+    consumer_zero_criterion: src 内不再存在任何进程内回调去重集合。
+    location: src/ats/runtime/server.py
+
+  - identifier: memory.store.legacy_decision_write_path
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: decision/decision-audit-store
+    replaced_by: decision_revisions + mirror_revision_to_legacy（D2 双写过渡）
+    target_phase: B
+    status: pending
+    exit_condition: cycles/decisions 旧决策写路径的全部读取方切换到审计表后，镜像写移除。
+    missing_condition: >-
+      D2 过渡期：决策审计表是权威，但 last_chief_run / recent_decisions 等旧读入口
+      仍由镜像双写供数，不能立即停写。
+    consumers:
+      - decision.repository.mirror_revision_to_legacy
+      - memory.store.last_chief_run
+      - memory.store.recent_decisions
+    consumer_zero_criterion: 上述读取方全部改读 decision_revisions，镜像写调用清零。
+    location: src/ats/decision/repository.py
+
+  - identifier: trades.client_order_id.legacy_derivation
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: execution/authorization-gate
+    replaced_by: client_order_id = cycle + revision_no + order_seq 派生式
+    target_phase: B
+    status: pending
+    exit_condition: 旧式（cycle:symbol:action）行全部被退役/对账清理，新派生式覆盖全部写入。
+    missing_condition: >-
+      新写入已全量切换到新派生式；历史 trades 行仍携带旧式标识，重试幂等查询需与其共存。
+    consumers:
+      - memory.store.save_trades
+      - trader.execute.place_orders
+      - trader.reconcile
+    consumer_zero_criterion: trades 表中不再有旧式 client_order_id 行，且代码中旧派生式无引用。
+    location: src/ats/memory/store.py
+
+  - identifier: risk.checks.pre_trade_adapter
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: risk/deterministic-review
+    replaced_by: risk.checks.review_revision
+    target_phase: B
+    status: pending
+    exit_condition: >-
+      唯一遗留调用点（runtime/cli.py 的组合级巡检语义；runtime/scheduler.py 已于 2026-10-20 删除）确认迁移
+      或声明退役后，适配层删除；该开关仅用于风控回滚，不用于生产放行。
+    missing_condition: >-
+      pre_trade() 已退化为 deprecated 适配层（由新审查结果生成旧式输出），
+      保留作为回滚通道。
+    consumers:
+      - runtime.cli
+    consumer_zero_criterion: src 内 pre_trade 引用清零（调用方迁至 review_revision）。
+    location: src/ats/risk/checks.py
+
+  # ── Phase C（Clerk 与账本）────────────────────────────────────────────────
+  # 本阶段已退出（retired）——旧行为已被替换，代码路径已不存在。
+  - identifier: reconcile.origin_manual_fallback
+    capability_domain: execution/clerk-ledger
+    replaced_by: reconcile 三类归属（匹配→system / 人工 orderRef→manual /
+      其余→unattributed + 审计异常）
+    target_phase: C
+    status: retired
+    exit_condition: 匹配失败的成交不再静默归为 manual，而是归为 unattributed 并登记异常。
+    consumer_zero_criterion: reconcile 内「匹配不到即 manual」分支清零（已达成）。
+    location: src/ats/trader/reconcile.py
+
+  - identifier: reconcile.partial_fill_as_filled
+    capability_domain: execution/clerk-ledger
+    replaced_by: 累计式成交核算（filled_qty 累计 + 成交量加权均价，满量才收口）
+    target_phase: C
+    status: retired
+    exit_condition: 见价即置 filled 的行为消失，部分成交以 partial 终态留痕。
+    consumer_zero_criterion: 「见价即 filled」写入路径清零（已达成）。
+    location: src/ats/trader/reconcile.py
+
+  # 待退（pending）——双轨期内旧入口仍在用，Phase E 收口。
+  - identifier: scheduler.adhoc_journal_jobs
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: execution/clerk-ledger
+    replaced_by: execution.clerk.clerk_run（窗口幂等的确定性编排入口）
+    target_phase: C
+    status: pending
+    exit_condition: 生产触发（cron/launchd/人工）全部经 ats clerk run，
+      reconcile / mark / episodes / predictions / performance 的独立直调入口
+      仅保留为单步调试。
+    missing_condition: >-
+      `ats journal reconcile` 等独立 CLI 入口仍可绕过 Clerk 编排直接写账本，
+      双轨期靠窗口幂等键防重复；Phase E 收口时切断直调触发。
+    consumers:
+      - runtime.cli
+    consumer_zero_criterion: 生产触发路径不再直调单步 journal 动作。
+    location: src/ats/runtime/cli.py（journal 子命令）
+
+  - identifier: performance.legacy_snapshot
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: execution/clerk-ledger
+    replaced_by: execution.clerk 编排内的 performance 步骤（+ rebuild 派生读模型）
+    target_phase: C
+    status: pending
+    exit_condition: 「ats trader snapshot」与 scheduler 的直调
+      record_snapshot 改经 clerk run 编排（编排内同一步骤幂等）。
+    missing_condition: >-
+      trader/performance.record_snapshot 仍被 runtime/cli.py:435 绕过 Clerk 直接调用
+      （runtime/scheduler.py 的调用点已随旧调度器于 2026-10-20 删除）；clerk_run 内部调用同一
+      确定性函数，无重复事实风险，但编排留痕缺失。
+    consumers:
+      - runtime.cli
+    consumer_zero_criterion: record_snapshot 的调用方仅剩 execution.clerk。
+    location: src/ats/trader/performance.py
+
+  - identifier: journal.report.render_ledger
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: execution/internal-state-api
+    replaced_by: Internal State / ledger_read_models（派生读模型供报告消费）
+    target_phase: C
+    status: pending
+    exit_condition: 报告（journal ledger 月度台账）改读派生读模型或经
+      Internal State API 取数；该报告只展示、从不回读系统，风险低。
+    missing_condition: >-
+      journal/report.py 仍直接读 trades 原始表渲染 Obsidian 台账；
+      SQLite 仍是权威、报告输出从不回流，故仅登记不急退。
+    consumers:
+      - runtime.cli
+    consumer_zero_criterion: report.py 不再直读 trades/fills 原始表。
+    location: src/ats/journal/report.py
+
+  # ── Phase D（任务 2.9：层级配置字段退役，写路径已停写、列保留）──
+  - identifier: layer_verdict.allocation
+    kind: business
+    group: R3
+    gate: G0
+    depends_on: [legacy_entry.research_manual_commands]
+    capability_domain: agent/layer-analyst
+    replaced_by: >-
+      层级分析师产出 layer_status（expanding|steady|contracting|unclear）经
+      LayerAnalysis 投影发布；行业分析师消费投影自行产出三级配置结论
+      （agent/sector-allocation），经 allocation_for_status 映射与
+      risk.yaml layer_utilization 的关系不变。
+    target_phase: D
+    status: retired
+    exit_condition: >-
+      任何消费方不再从 LayerVerdict.allocation 读取预算或配置语义；
+      层报告不再出现预算章节（行业报告承载）。
+    missing_condition: >-
+      2026-10-27 退役（tasks 6.4）：cli / 行业报告 / 轮动 / 截面 / 上下文 / viz 里的 `allocation or allocation_for_status(layer_status)` 全部改为只用 `allocation_for_status(layer_status)`；src 内除 schemas/sector.py 的字段定义外，无任何代码读 LayerVerdict.allocation。字段保留，历史行可读回（tests/test_sector_viz.py 覆盖）；用历史行重新渲染旧报告时，配置档位改按层状态推出，不再用当时存的值。
+    consumers: []
+    consumer_zero_criterion: >-
+      src 内除 schemas/sector.py 的字段定义与「历史行兼容读」外，无任何代码以
+      verdict.allocation 为非空语义做预算决策（统一走 allocation_for_status）。
+    location: src/ats/schemas/sector.py（字段保留，历史行可读回）
+
+  # ── Phase D（Group 5：PEAD 内部风控与 sizing 路径退出）──
+  - identifier: graph.pead.internal_risk_and_sizing
+    capability_domain: agent/fundamental-pead
+    replaced_by: >-
+      基本面事件评审只产出非可执行视图（direction / magnitude / 信心 / 理由 /
+      可证伪条件，FundamentalEventReview 投影）；可执行性与风控结论只能在
+      主理人提案 + 风控审查的审批链内产生。
+    target_phase: D
+    status: retired
+    exit_condition: >-
+      src 内不再存在从基本面输出构造 TradeDecision 或调用风控的代码路径：
+      graph/pead.py 的 risk_agent.assess / review_guardrails / pre_trade 调用与
+      PeadRecommendation→TradeDecision 转换已删，score.py 的 sizing 树已改为
+      event_view()（direction 不映射动作，9.2 契约落地载体）。
+    missing_condition: >-
+      2026-10-27 补证（tasks 6.1）：graph/pead.py 与 agents/pead/score.py 里 risk_agent、pre_trade、TradeDecision、PeadRecommendation 的引用已为零（grep 复核）。
+    consumers: []
+    consumer_zero_criterion: >-
+      src 内 agents/pead 与 graph/pead 对 risk_agent.assess / pre_trade /
+      TradeDecision 的引用清零（已达成；tests/test_pead_graph.py 断言）。
+    location: src/ats/graph/pead.py、src/ats/agents/pead/score.py
+
+  # ── Phase D（Group 7：Chief 旧表直读入口，双读期登记）──
+  - identifier: chief.legacy_table_direct_reads
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: decision/research-snapshot
+    replaced_by: >-
+      task_projection_envelopes 固定研究快照（build_chief_snapshot：六类投影齐备
+      才进决策周期，真实快照随 create_cycle 落库；修订轮次重验失效即 superseded）。
+    target_phase: D
+    status: pending
+    exit_condition: 主理人上下文渲染全部改读投影/快照，旧表直读入口移除。
+    missing_condition: >-
+      双读期：assemble.py 仍从旧读模型（sector_reviews / macro_reviews /
+      technical_reviews / pead dossier / technical context）直读渲染上下文，
+      投影路径只负责齐备性校验、快照与缺口阻断；上下文切流属 Phase F。
+    consumers:
+      - agents.chief.assemble
+    consumer_zero_criterion: assemble.py 直读旧表的渲染路径清零，dual_read_diffs 下线。
+    location: src/ats/agents/chief/assemble.py
+
+  # ── Phase D（任务 9.1：旧读模型逐项登记，替代 legacy_read_models 的分组条目）──
+
+  # task_projections 与 evidence_fact_projections.legacy_observation_id 不是待退项（2026-10-27，tasks 6.2、6.3）：
+  # task_projections 是信息分析师的抽取缓存（save_task_projection 写、information_extraction_cache 读，与
+  # task_projection_envelopes 是两套独立抽象，代码里明写「有意保留」），删旧列会让缓存失效、同一文档重新调用模型；
+  # legacy_observation_id 是事实投影回溯到观测的连接键，产业链归纳「冻结发现性证据」（freeze_as_discovery）正在用，
+  # 名字叫 legacy 只是历史遗留。两者都留在上面的 active 清册里，不登记墓碑。
+
+  # pead_dossier 不是待退项（2026-10-27，tasks 1.7）：它是基本面分析师自有的在用记录——财报前基线存在这里，事件评审读它，
+  # 同一财季只留一份档案。因此它留在上面的 active 清册里，不登记墓碑。
+
+  - identifier: sector_reviews
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: agent/sector-allocation
+    replaced_by: sector_allocation 投影（+ layer_analysis 投影，task_projection_envelopes）
+    target_phase: D
+    status: pending
+    exit_condition: >-
+      行业配置的全部消费方改读投影，sector_reviews 行只作历史报表数据源。
+    missing_condition: >-
+      Chief 双读仍从 sector_reviews 取行业结论；行业报告渲染仍走旧读模型行；
+      两处切流均属 Phase F。
+    consumers:
+      - agents.chief.assemble
+      - runtime.cli
+    consumer_zero_criterion: Chief 与 CLI 的 sector_reviews 读取清零（切流后）。
+    location: Workflow memory
+
+  # ── Phase F（任务 7.10：第 7 组实测缺口此前无归属者，在此取得归属）──
+  #
+  # 上面两条已覆盖 chief 与 sector。**risk / trader / clerk / fundamental 四个角色
+  # 实测同样「未触达受治理读取面」，而登记表无任何条目覆盖它们**——核验结论若只存在
+  # 于 change 内而登记表不知道，就成了「只有本 change 知道的缺口」。此处补登记，使
+  # 它们有主；**本条不含任何修复动作**，修复另由F.0.3–F.0.5 的核验结论驱动。
+  #
+  # `target_phase: F` 表示**本条登记于 Phase F**，与上方几条的 `D` 同义——该字段记的
+  # 是登记阶段，不是「谁必须完成」。故不改写既有条目的阶段号。
+  - identifier: decision_roles.unwired_to_governed_read_api
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: data/target-dataflow-assurance
+    replaced_by: >-
+      ats.data.consumer_api.read_input（各角色 target read_api）；读取资格须先按
+      F.0.2 逐项登记证据，缺项保持 ineligible。
+    target_phase: F
+    status: pending
+    exit_condition: >-
+      risk / trader / clerk / fundamental 四个角色经受治理读取面取数，不再由自有
+      模块直连底层或内部模块。
+    missing_condition: >-
+      实测（第 7 组 F.0.3–F.0.5）：risk 读 ats.memory + risk.assess + trader.portfolio；
+      trader 读 ats.memory，且直连行情 provider；clerk 读 ats.memory；fundamental 经
+      graph.pead 与 ats.memory——四者均未触达 consumer_api 或 data.products。
+      chief 已由 chief.legacy_table_direct_reads 覆盖、sector 由 sector_reviews 覆盖，
+      故不重复登记。**trader 的行情读取另有契约冲突（行情产品未授权给 trader），
+      由任务 7.9 裁决，明确不在本条范围内。**
+    consumers:
+      - agents.risk_officer.review
+      - trader.execute
+      - execution.clerk
+      - agents.fundamental
+    consumer_zero_criterion: >-
+      四个角色的自有模块均触达 consumer_api 或 data/products；AST 扫描
+      （ats.workflow.intake_verification.scan_consumer_access）报告
+      governed_read_surface_not_reached 为零。
+    location: src/ats/agents/risk_officer/review.py, src/ats/trader/execute.py, src/ats/execution/clerk.py, src/ats/agents/fundamental/
+
+  # ── 补登记（2026-10-27，tasks 1.7）：在用清册里有、却没有条目的两张旧读模型表 ──────────────────────
+  - identifier: macro_reviews
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: agent/macro
+    replaced_by: macro_review 投影（task_projection_envelopes）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      Chief 的宏观读取全部改读 macro_review 投影，macro_reviews 行只作历史报表数据源。
+    missing_condition: >-
+      Chief 双读仍从 macro_reviews 取宏观结论；消费方是 Chief，归 R5，随交易路径切换处理。
+    consumers:
+      - agents.chief.assemble
+      - runtime.cli
+    consumer_zero_criterion: Chief 与 CLI 的 macro_reviews 读取清零（切流后）。
+    location: Workflow memory
+
+  - identifier: technical_reviews
+    kind: business
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: agent/technical
+    replaced_by: technical_signal 等技术面投影（task_projection_envelopes，按标的作用域）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      Chief 的技术面读取全部改读技术面投影，technical_reviews 行只作历史报表数据源。
+    missing_condition: >-
+      Chief 双读仍从 technical_reviews 取技术面结论；消费方是 Chief，归 R5，随交易路径切换处理。
+    consumers:
+      - agents.chief.assemble
+      - runtime.cli
+    consumer_zero_criterion: Chief 与 CLI 的 technical_reviews 读取清零（切流后）。
+    location: Workflow memory
+
+  # ── 退役变更（retire-legacy-and-migration-tooling）：design.md D4 的全部条目 ──────────────────────────
+  # 门 G0 = verification.md 的人工核验；R5 的外部门 trade_path_cutover 在另一个 change 里满足，这里永远不会放行。
+
+  - identifier: naming.consumer_cutover_cli
+    kind: naming
+    group: R1
+    gate: G0
+    capability_domain: workflow/legacy-retirement
+    replaced_by: >-
+      `ats data health [--consumer]`、`ats data health-log`
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      命令改名完成，`ats consumer-cutover` 只留提示桩；`status` 删除（路由已固定）。
+    missing_condition: >-
+      2026-10-27 退役（用户 G0 签字后批准研究侧验证通过即退役）：`ats data health [--consumer]`、`ats data health-log` 已加（0ae8e9f），`ats consumer-cutover status/health/log` 改为提示桩，文档与帮助文本已改用新命令。`restore` 仍保留，因读路由表在交易路径切换前（R5）不动。
+    consumers: []
+    consumer_zero_criterion: >-
+      `ats consumer-cutover` 除提示桩外无调用方；文档与帮助文本改用新命令。
+    location: src/ats/runtime/cli.py
+
+  - identifier: legacy_entry.research_manual_commands
+    kind: legacy_entry
+    group: R1
+    gate: G0
+    capability_domain: workflow/dispatcher-runtime
+    replaced_by: >-
+      `ats workflow run --task <id>`
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      旧手动命令删除并留提示桩，提示 `ats workflow run` 的替代写法。
+    missing_condition: >-
+      2026-10-27 退役：`ats macro review`、`ats sector review/layer`、`ats technical review`、`ats pead prep/score/monitor/watch/research`、`ats analyst information/fundamental` 已删除并返回 `ats workflow run` 的替代写法（5f6fd90）；V1 静态仅 boundary_evidence 与 Phase F 验收测试以业务入口名引用，V2 运行 launchd 与配置无调用。`run_*` 函数因 R5 引用保留。
+    consumers: []
+    consumer_zero_criterion: >-
+      `ats macro review`、`ats sector review/layer`、`ats technical review`、`ats pead prep/score/monitor/watch/research`、`ats analyst information/fundamental` 均无生产调用；返回已退役提示。
+    location: src/ats/runtime/cli.py
+
+  - identifier: legacy_entry.research_owner_legacy_mode
+    kind: legacy_entry
+    group: R1
+    gate: G0
+    depends_on: [legacy_entry.research_manual_commands]
+    capability_domain: workflow/dispatcher-runtime
+    replaced_by: >-
+      工作流停用 / 恢复（`ats dispatch pause/resume`）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      对外只剩停用 / 恢复两个动作：`ats dispatch pause/resume` 替代 `owner-switch/owner-rollback`（旧名只给提示）；`workflow_owners.yaml` 的种子值与库内部值 `legacy` 暂留（技术债：长期取消开关，见 verification.md 上线后待办）。
+    missing_condition: >-
+      2026-10-27 部分完成（tasks 5.4 取「丙」）：对外已是 `ats dispatch pause/resume`，旧名只给提示；库内部值仍为 `legacy`，`workflow_owners.yaml` 种子值未改。保持 pending 是有意的技术债，待长期方案乙（取消开关，改由 `research_schedules.yaml` 的 `enabled`/`event_triggers` 决定）另开变更处理。
+    consumers: []
+    consumer_zero_criterion: >-
+      研究工作流不再有「legacy 负责人」这个概念：库内值、种子配置与对应规格要求全部移除（方案乙）。
+    location: src/ats/workflow/ownership.py, config/workflow/workflow_owners.yaml
+
+  - identifier: legacy_entry.evidence_commands
+    kind: legacy_entry
+    group: R1
+    gate: G0
+    capability_domain: chain/evidence
+    replaced_by: >-
+      数据刷新的 `chain_evidence_daily`（`ats data evidence-observe`）与 Layer 的证据判读
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      删除 `ats evidence observe/collect/articles` 与 `ats sector crosssection`；保留命题治理命令（`ats evidence claims/report/propose/proposals/review/kbreview`）与 `ats sector kbperturb`（10-21 裁决、10-26 再确认）。
+    missing_condition: >-
+      2026-10-27 退役：`ats evidence observe/collect/articles` 与 `ats sector crosssection` 已删除并返回替代写法（2cd1fb5，约 140 行死代码）；命题治理命令与 `ats sector kbperturb` 按 10-21 / 10-26 裁决保留。
+    consumers: []
+    consumer_zero_criterion: >-
+      被删命令返回已退役提示；保留的命令测试通过。
+    location: src/ats/runtime/cli.py
+
+  - identifier: naming.migration_terms_in_docs
+    kind: naming
+    group: R1
+    gate: G0
+    depends_on: [legacy_entry.research_manual_commands, legacy_entry.evidence_commands, naming.consumer_cutover_cli]
+    capability_domain: workflow/legacy-retirement
+    replaced_by: >-
+      去掉“新路径 / 旧路径 / 切流 / phase”等迁移期措辞
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      `docs/`（不含 archive）与 `ats --help` 中检索这些词，只剩有意保留并加注的位置。
+    missing_condition: >-
+      2026-10-27 退役（8d2b79d）：帮助文本与操作类文档的迁移期措辞已清理，DEVELOPMENT.md 新增「迁移期用语说明」列出有意保留处；docs/validation 为冻结的历史验收证据，不改。已去掉对 research_owner_legacy_mode 的依赖：文档措辞与库内部值无关。
+    consumers: []
+    consumer_zero_criterion: >-
+      检索无残留，或每处残留都有加注。
+    location: docs/, src/ats/runtime/cli.py
+
+  - identifier: migration.batch_read_cutover
+    kind: migration_tooling
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      无（研究侧读路由已固定为 target）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试。
+    missing_condition: >-
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`boundary_drill`（`ats drill` 的读边界回退演练）用 `CutoverBatch`、`READ_BOUNDARIES`、`_switch_chain`；批次类别含 internal_state_approval、live_trader 等交易批次。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
+    consumers: []
+    consumer_zero_criterion: >-
+      除本批删除的集合外，`src/` 无导入或调用；14 天内无经该条目的调用。
+    location: src/ats/workflow/batch_manifest.py, read_cutover.py, read_deployment.py
+
+  - identifier: migration.schedule_cutover
+    kind: migration_tooling
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      无（调度批次切换已完成，旧调度器已删除）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。
+    missing_condition: >-
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`boundary_drill`（调度批次 dry-run）依赖；它又直接使用 `dispatch_claims` 的处置常量，所以 `dispatch_claims` 一并留下。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
+    consumers: []
+    consumer_zero_criterion: >-
+      除本批外无引用。
+    location: src/ats/workflow/schedule_cutover.py, cutover_acceptance.py
+
+  - identifier: migration.intake
+    kind: migration_tooling
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      无（接入核验与逐消费者处置属切换期工具）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      删除 `intake.py`、`intake_verification.py`、`scoped_intake.py`、命令 `ats intake` 及其测试。
+    missing_condition: >-
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`paired_business` 用 `intake_verification.isolated_verification`；`ats retirement zero/decide` 用 `scan_consumer_access`；`consumer_disposition` 被 `ats intake` 与 Phase F 验收测试使用。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
+    consumers: []
+    consumer_zero_criterion: >-
+      除本批外无引用，`ats retirement` 的清零扫描改用别处的实现。
+    location: src/ats/workflow/intake.py, intake_verification.py, scoped_intake.py
+
+  - identifier: migration.analysis_verification
+    kind: migration_tooling
+    group: R5
+    gate: trade_path_cutover
+    depends_on: [migration.intake]
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      无
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      删除 `analysis_verification.py`、`consumer_disposition.py`、`isolated_entry.py` 及其测试，与 `intake_verification` 绑定一起走。
+    missing_condition: >-
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`analysis_verification` 被 `test_phase_f_opinion_execution`（研究、决策、执行、恢复验收）使用；`isolated_entry` 被 `test_phase_f_shadow_business`、`test_phase_f_safe_reads` 用来在隔离环境跑交易侧角色；随 `migration.intake` 一起走。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
+    consumers: []
+    consumer_zero_criterion: >-
+      除本批外无引用。
+    location: src/ats/workflow/analysis_verification.py, consumer_disposition.py, isolated_entry.py
+
+  - identifier: migration.dispatch_dedup
+    kind: migration_tooling
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      无（新旧调度去重；旧调度器已删除）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      删除 `dispatch_claims.py` 与 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。
+    missing_condition: >-
+      2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`schedule_cutover` 直接使用 `dispatch_claims` 的处置常量；`cutover_acceptance`（交易订单可追溯与“未经批准的订单”验收）也属交易侧影子期验收。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
+    consumers: []
+    consumer_zero_criterion: >-
+      `ats dispatch --help` 只剩负责人与停用相关命令。
+    location: src/ats/workflow/dispatch_claims.py
+
+  - identifier: agents.risk_manager
+    kind: business
+    group: R4
+    gate: G0
+    capability_domain: risk/deterministic-review
+    replaced_by: >-
+      无（风控在 Chief 里走 `risk/checks.py`）
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      删除 `agents/risk_manager.py` 及其测试（只清退用不着的 Risk，交易链路其余代码保留）。
+    missing_condition: >-
+      2026-10-27 退役并删除（tasks 7.2）：src 零引用，仅 test_broker_risk 的 2 个 assess 用例使用，已随文件删除；从覆盖清单（target_dataflow_coverage.yaml）移除。交易链路其余代码保留。
+    consumers: []
+    consumer_zero_criterion: >-
+      `src/` 无导入。
+    location: src/ats/agents/risk_manager.py
+
+  - identifier: agents.pead.monitor
+    kind: business
+    group: R4
+    gate: G0
+    depends_on: [legacy_entry.research_manual_commands]
+    capability_domain: agent/fundamental-pead
+    replaced_by: >-
+      信息分析师（`agents/information/documents`）与数据刷新的新闻任务
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      删除 `agents/pead/monitor.py` 及其测试。
+    missing_condition: >-
+      2026-10-27 退役并删除（tasks 7.2）：只被 cli 里已不可达的 run_pead_monitor / run_pead_watch 使用，二者与 main 里对应分支一并删除；新路径由信息分析师的 run_document_pass 读已准入的文档。测试 test_monitor.py 删除，其中“信息分析师不得发出预期变更”与“失败不发简报、不写 dossier”两条保证改写为直接驱动 documents.run_document_pass（tests/test_information_analyst.py）。
+    consumers: []
+    consumer_zero_criterion: >-
+      `src/` 无导入。
+    location: src/ats/agents/pead/monitor.py
+
+  - identifier: agents.pead.research
+    kind: business
+    group: R4
+    gate: G0
+    depends_on: [legacy_entry.research_manual_commands]
+    capability_domain: agent/fundamental-pead
+    replaced_by: >-
+      `agents/information/extract`
+    target_phase: retire-legacy-and-migration-tooling
+    status: retired
+    exit_condition: >-
+      删除 `agents/pead/research.py` 及其测试（迁移期薄代理）。
+    missing_condition: >-
+      2026-10-27 退役并删除（tasks 7.2）：迁移期薄代理，只被 cli 里已不可达的 run_pead_research 使用，已一并删除；能力在 agents/information/extract。
+    consumers: []
+    consumer_zero_criterion: >-
+      `src/` 无导入；`ats pead research` 返回已退役提示。
+    location: src/ats/agents/pead/research.py
+
+  - identifier: migration.read_route_and_qualification
+    kind: migration_mechanism
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      按 scope 读数据产品（交易路径切换后整体收窄）
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`cutover_guards`、`assurance_surface` 与指纹清单收窄。
+    missing_condition: >-
+      交易链路（Chief、Clerk、Risk、Trader、Boss）尚未在新路径上充分验证；外部门 trade_path_cutover 未满足，本 change 只登记。
+    consumers: []
+    consumer_zero_criterion: >-
+      交易路径切换并过观察窗口后，研究分析师与 Chief 读同一新路径。
+    location: src/ats/workflow/cutover*.py, scoped_routes.py, consumer_reads.py, read_windows.py
+
+  - identifier: migration.trade_cutover_tooling
+    kind: migration_tooling
+    group: R5
+    gate: trade_path_cutover
+    capability_domain: workflow/cutover-control
+    replaced_by: >-
+      无
+    target_phase: retire-legacy-and-migration-tooling
+    status: pending
+    exit_condition: >-
+      `joint_cutover`、`boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`exit_requirements`、`business_replay_inputs`；命令 `ats cutover`、`ats drill`、`ats shadow`、`ats live drill` 退役。
+    missing_condition: >-
+      交易路径切换前不动；`shadow_ledger` 被 Clerk 引用、`exit_requirements` 被 `data/assurance.py` 引用、`business_replay_inputs` 被 `consumer_api`/`route_switch` 引用，需先拆开。
+    consumers: []
+    consumer_zero_criterion: >-
+      交易路径切换后无调用方。
+    location: src/ats/workflow/joint_cutover.py, boundary_drill.py, acceptance_*.py, paired_business.py, shadow_*.py
+
+
+# 干跑用的清除影响范围声明（未确认时只报告，不执行）
+purge_scope: []

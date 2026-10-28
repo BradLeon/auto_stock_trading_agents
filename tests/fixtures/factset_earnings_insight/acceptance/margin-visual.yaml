@@ -1,0 +1,71 @@
+schema_version: 1
+method: assistant_visual_read_of_original_embedded_png
+production_review_approval: false
+status: partial_pending_cell_anchor_validation
+source_unit: percent
+target_period: 2026Q2
+charts:
+  - report_date: '2026-08-28'
+    page: 23
+    image: 2
+    columns: [net_margin]
+    rows:
+      Real Estate: [34.1]
+      Information Tech.: [32.3]
+      Comm. Services: [28.6]
+      Financials: [21.3]
+      Consumer Disc.: [16.5]
+      Utilities: [13.8]
+      Materials: [13.5]
+      Energy: [13.2]
+      Industrials: [10.9]
+      Health Care: [7.1]
+      Consumer Staples: [6.9]
+  - report_date: '2026-09-18'
+    page: 19
+    image: 2
+    columns: [net_margin]
+    rows:
+      Real Estate: [34.0]
+      Information Tech.: [32.4]
+      Comm. Services: [28.6]
+      Financials: [21.3]
+      Consumer Disc.: [16.5]
+      Utilities: [13.8]
+      Materials: [13.5]
+      Energy: [13.2]
+      Industrials: [10.9]
+      Health Care: [7.1]
+      Consumer Staples: [6.9]
+  - report_date: '2026-08-28'
+    page: 23
+    image: 3
+    columns: [decrease_share, unchanged_share, increase_share]
+    rows:
+      Information Tech.: [19, 0, 81]
+      Energy: [24, 0, 76]
+      Materials: [38, 0, 62]
+      Industrials: [37, 2, 60]
+      Consumer Staples: [41, 0, 59]
+      Financials: [43, 0, 57]
+      Comm. Services: [39, 4, 57]
+      Utilities: [45, 0, 55]
+      Health Care: [46, 0, 54]
+      Consumer Disc.: [57, 0, 43]
+      Real Estate: [61, 0, 39]
+  - report_date: '2026-09-18'
+    page: 19
+    image: 3
+    columns: [decrease_share, unchanged_share, increase_share]
+    rows:
+      Information Tech.: [19, 0, 81]
+      Energy: [24, 0, 76]
+      Consumer Staples: [35, 0, 65]
+      Materials: [38, 0, 62]
+      Industrials: [37, 2, 60]
+      Financials: [43, 0, 57]
+      Comm. Services: [39, 4, 57]
+      Health Care: [44, 0, 56]
+      Utilities: [45, 0, 55]
+      Consumer Disc.: [57, 0, 43]
+      Real Estate: [61, 0, 39]

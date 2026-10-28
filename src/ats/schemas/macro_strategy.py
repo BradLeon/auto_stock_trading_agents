@@ -17,7 +17,7 @@ SIGNALS = ("risk-on", "neutral", "risk-off", "bullish", "bearish")
 # growth × inflation 2x2, plus a mandatory fifth state. `transition` is not a
 # rounding error — a classifier forced to pick one of four will hand you a
 # confident wrong answer exactly at the turning points, which is where being
-# wrong costs the most. See docs/MACRO_ANALYST.md §6.3.
+# wrong costs the most. See docs/agents/MACRO_ANALYST.md §6.3.
 Quadrant = Literal[
     "goldilocks",    # 温和降温：增长稳定/改善 + 通胀下行
     "reflation",     # 经济过热：增长改善 + 通胀上行
@@ -78,6 +78,13 @@ class ThemeAssess(BaseModel):
     note: str = ""
 
 
+class MacroScenario(BaseModel):
+    name: str
+    description: str = ""
+    trigger: str = ""
+    sector_impact: str = ""
+
+
 class SectorTilt(BaseModel):
     sector: str                        # 板块/行业名（自由文本，如 半导体/能源/公用事业）
     stance: str = "中性"               # 超配 | 中性 | 低配
@@ -86,7 +93,7 @@ class SectorTilt(BaseModel):
 
 # --------------------------------------------------------------------------- #
 # Deterministic layer — every field below is filled by code, never by the LLM.
-# (Same author-separation discipline as CriticFinding; docs/DESIGN.md §9.3.)
+# (Same author-separation discipline as CriticFinding; docs/archive/DESIGN.md §9.3.)
 # --------------------------------------------------------------------------- #
 class IndicatorReading(BaseModel):
     """One indicator as level + change + distributional position.
@@ -294,7 +301,7 @@ class MacroReview(BaseModel):
     """The persisted weekly review.
 
     Two layers with different authors, deliberately kept apart so a reader can tell
-    fact from narrative at a glance (docs/MACRO_ANALYST.md §4.4):
+    fact from narrative at a glance (docs/agents/MACRO_ANALYST.md §4.4):
       · deterministic — quadrant / axes / indicators / decomposition / alerts:
         computed by code, the LLM is forbidden from rewriting them.
       · narrative — regime / summary / rate_path / sector_tilts / … / falsifier.
@@ -337,6 +344,10 @@ class MacroReview(BaseModel):
     themes: list[ThemeAssess] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
     falsifier: str = ""                # 什么观察会推翻这次判断（必须具体可观测）
+    # ARCHITECTURE §7.3 (2026-10-17): scenarios and the validity window. Default-empty so rows written before they
+    # existed still revalidate out of `macro_reviews.payload`.
+    scenarios: list[MacroScenario] = Field(default_factory=list)
+    horizon: str = ""
     factset_earnings_assessment: FactSetEarningsAssessment | None = None
 
     def quadrant_brief(self) -> str:

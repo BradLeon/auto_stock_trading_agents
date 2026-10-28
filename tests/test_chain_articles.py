@@ -252,31 +252,6 @@ def test_an_extraction_failure_still_counts_as_paid_for(wire):
     assert adapter.fetched == []
 
 
-def test_collect_articles_is_wired_into_the_weekly_job():
-    """A configured source nobody fetches is worse than none: it looks live in the config
-    and is frozen in the ledger. It must also run BEFORE the report renders, or the
-    report shows last week's articles beside this week's filings."""
-    import inspect
-
-    from ats.runtime import scheduler
-
-    src = inspect.getsource(scheduler._cross_section_weekly)
-    assert "collect_articles" in src
-    assert src.index("collect_articles(") < src.index("chain_report.write")
-
-
-def test_an_article_source_outage_does_not_break_the_weekly_job():
-    """A publisher being down is a recorded gap, never an exception that costs the whole
-    sector job its report — the same rule the series sources follow."""
-    import inspect
-
-    from ats.runtime import scheduler
-
-    src = inspect.getsource(scheduler._cross_section_weekly)
-    after = src[src.index("chain_articles.collect_articles("):]
-    assert "except Exception" in after.split("chain_report")[0]
-
-
 # --- the TrendForce adapter's own parsing, against fixtures ---------------------
 
 _PAGE = """<html><body>

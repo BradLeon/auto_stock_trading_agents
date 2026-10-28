@@ -96,7 +96,8 @@ def test_factset_catalog_contract_and_independent_rollout(monkeypatch, tmp_path)
                    if item.id == "sp500_earnings_insight")
     assert dataset.primary_sources == ["factset_earnings_insight_metrics"]
     assert len(dataset.entities) == 12
-    assert len(dataset.core_metrics) == 31
+    assert len(dataset.core_metrics) == 33
+    assert {'earnings.guidance.positive_share', 'earnings.guidance.negative_share'} <= set(dataset.core_metrics)
     revision = next(metric for metric in structured.metrics()
                     if metric.id == "earnings.revision.improved_sector_count")
     assert revision.unit_family == "count"
@@ -1017,22 +1018,6 @@ def test_failed_refresh_with_no_release_is_typed_unavailable(tmp_path):
         unstructured_repository=documents).earnings_insight_snapshot()
     assert snapshot.status.state == "unavailable"
     assert snapshot.status.latest_refresh_failure == "not_pdf"
-
-
-def test_factset_schedule_requires_order_and_matching_timezone():
-    from types import SimpleNamespace
-    from ats.runtime.scheduler import _validate_factset_schedule
-
-    valid = SimpleNamespace(
-        factset_refresh_at="08:10", weekly_review_at="08:50",
-        factset_refresh_tz="Asia/Shanghai", weekly_review_tz="Asia/Shanghai")
-    _validate_factset_schedule(valid)
-    with pytest.raises(ValueError, match="precede"):
-        _validate_factset_schedule(SimpleNamespace(
-            **{**valid.__dict__, "factset_refresh_at": "09:00"}))
-    with pytest.raises(ValueError, match="must match"):
-        _validate_factset_schedule(SimpleNamespace(
-            **{**valid.__dict__, "factset_refresh_tz": "UTC"}))
 
 
 def _write_synthetic_factset_pdf(path):

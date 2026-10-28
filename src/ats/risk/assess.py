@@ -9,6 +9,8 @@ computed in `enrich_options`. See risk/options_math.py for the quant core.
 
 from __future__ import annotations
 
+from ats.workflow.evaluation_clock import now as evaluation_now
+
 import logging
 import math
 import time
@@ -16,20 +18,20 @@ from datetime import datetime, timezone
 
 from ..schemas.portfolio import PortfolioSnapshot
 from ..schemas.risk import (
-    Breach,
     AssignmentRisk,
+    Breach,
     CashEquivalent,
     Cluster,
     EconomicExposure,
-    ExpiryFundingBucket,
     EventRisk,
+    ExpiryFundingBucket,
     LayerExposure,
     MarginSummary,
     OptionRisk,
     OptionSurvivalSummary,
     PortfolioGreeks,
-    RiskReview,
     RiskDirective,
+    RiskReview,
     StressResult,
     SymbolLayer,
     UnderlyingExposure,
@@ -40,7 +42,7 @@ log = logging.getLogger("ats.risk.assess")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return evaluation_now(timezone.utc)
 
 
 def _norm_sym(s: str) -> str:
@@ -180,7 +182,7 @@ def _days_to_expiry(expiry: str) -> int:
         ed = datetime.strptime(expiry.replace("-", "")[:8], "%Y%m%d").date()
     except (ValueError, TypeError):
         return 0
-    return max((ed - datetime.now(timezone.utc).date()).days, 0)
+    return max((ed - evaluation_now(timezone.utc).date()).days, 0)
 
 
 def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float) -> None:
@@ -221,11 +223,15 @@ def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float
 
     horizons = sorted(set(policy.expiry_horizons_days))
     max_days = max((a.days_to_expiry for a in assignments), default=0)
-    if max_days and (not horizons or max_days > horizons[-1]):
-        horizons.append(max_days)
+    # Buckets are half-open: `through_days` is an exclusive upper bound, so the widest
+    # configured horizon must strictly exceed the furthest expiry or that expiry would
+    # fall through every bucket. `max_days + 1` is the smallest bound that still says
+    # "up to and including the furthest expiry" without reintroducing a closed interval.
+    if max_days and (not horizons or max_days >= horizons[-1]):
+        horizons.append(max_days + 1)
     buckets: list[ExpiryFundingBucket] = []
     for horizon in horizons:
-        active = [a for a in assignments if a.days_to_expiry <= horizon]
+        active = [a for a in assignments if a.days_to_expiry < horizon]
         full = sum(a.full_assignment_notional for a in active)
         expected = sum(a.probability_weighted_notional for a in active)
         variance = sum(
@@ -235,7 +241,7 @@ def _assess_option_survival(r: RiskReview, portfolio, rc, policy, net_liq: float
         p99 = full if any(a.assignment_probability is None for a in active) else min(
             full, expected + policy.p99_z_score * math.sqrt(variance))
         buckets.append(ExpiryFundingBucket(
-            label=f"≤{horizon}天", through_days=horizon,
+            label=f"<{horizon}天", through_days=horizon,
             expiries=sorted({a.expiry for a in active}), full_notional=round(full, 2),
             expected_notional=round(expected, 2), p99_notional=round(p99, 2)))
     p99_total = max((b.p99_notional for b in buckets), default=0.0)
@@ -345,6 +351,10 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     from ..memory import get_store
 
     rc = get_config().app.risk
+    from ..workflow.consumer_reads import record_read
+    from .checks import ruleset_version
+
+    record_read("risk", "ats.config.get_config", refs=["ruleset:" + ruleset_version()])
     registry = load_instrument_risk_registry()
     risk_policy = load_risk_policy()
     net_liq = portfolio.net_liquidation
@@ -568,8 +578,23 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     _assess_option_stops(r, option_positions, rc)
 
     # L4 — drawdown / daily loss (scoped to THIS account — never mix paper vs live)
-    hist = [h for h in get_store().performance_history(limit=250)
+    # Task 6.5: the performance history now flows through the Internal State
+    # API; when the ledger is degraded (unreconciled windows / unattributed
+    # fills / broken links) the review carries an explicit degradation note
+    # instead of silently treating the numbers as complete.
+    from ..execution import state_api
+
+    _comp = state_api.completeness(get_store())
+    record_read("risk", "ats.execution.state_api.performance_history",
+                refs=[f"internal-history:{_comp.last_reconcile_at}"] if _comp.last_reconcile_at else [],
+                status=_comp.status)
+    hist = [h for h in state_api.performance_history(get_store(), limit=250)
             if h.account_id == portfolio.account_id]
+    if _comp.status == "degraded":
+        r.notes = (r.notes + "\n" if r.notes else "") + (
+            f"内部状态完整性降级（degraded）：未对账窗口 {_comp.unreconciled_windows}、"
+            f"无法归因成交 {_comp.unattributed_fills}、断链 {_comp.broken_links} —— "
+            f"绩效与回撤数值按不完整账本计算")
     if hist:
         from ..trader import analytics
         dd = analytics.max_drawdown_pct(hist + [_perf_stub(net_liq, portfolio.account_id)])

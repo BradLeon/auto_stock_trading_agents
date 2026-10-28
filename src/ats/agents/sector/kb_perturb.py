@@ -33,7 +33,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...data import industry
+from ...data.products import sector_inputs as industry  # 数据产品入口（Phase D 8.3）
 
 log = logging.getLogger("ats.agents.sector.kb_perturb")
 
@@ -55,7 +55,7 @@ def _rewrite_criteria(text: str, fn) -> str:
     labelled 投毒, whose null result reads as "the criteria are not load-bearing".
     That is the one wrong answer this whole test exists to avoid.
     """
-    spans = industry.criteria_spans(text)
+    spans = industry.industry_criteria_spans(text)
     if not spans:
         return text
     out, prev = [], 0

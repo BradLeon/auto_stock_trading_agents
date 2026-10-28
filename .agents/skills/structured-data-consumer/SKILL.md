@@ -40,4 +40,4 @@ Prefer strict quality behavior. Report the selected source, `known_at`, period, 
 
 ## Mutation boundary
 
-This is a consumption Skill. Do not ingest, publish, roll back, alter mappings, or change source configuration unless the user explicitly asks for an operator/developer action. For those tasks, follow `docs/STRUCTURED_DATA_OPERATIONS.md` and the active OpenSpec change.
+This is a consumption Skill. Do not ingest, publish, roll back, alter mappings, or change source configuration unless the user explicitly asks for an operator/developer action. For those tasks, follow `docs/data/STRUCTURED_DATA_OPERATIONS.md` and the active OpenSpec change.

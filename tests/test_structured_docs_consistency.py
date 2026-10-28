@@ -6,10 +6,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "config" / "data" / "structured.yaml"
-ARCHITECTURE_PATH = ROOT / "docs" / "DATA_ARCHITECTURE.md"
-DEVELOPER_PATH = ROOT / "docs" / "STRUCTURED_DATA_DEVELOPER.md"
-OPERATIONS_PATH = ROOT / "docs" / "STRUCTURED_DATA_OPERATIONS.md"
-USER_GUIDE_PATH = ROOT / "docs" / "STRUCTURED_DATA_USER_GUIDE.md"
+ARCHITECTURE_PATH = ROOT / "docs" / "data" / "DATA_ARCHITECTURE.md"
+DEVELOPER_PATH = ROOT / "docs" / "data" / "STRUCTURED_DATA_DEVELOPER.md"
+OPERATIONS_PATH = ROOT / "docs" / "data" / "STRUCTURED_DATA_OPERATIONS.md"
+USER_GUIDE_PATH = ROOT / "docs" / "data" / "STRUCTURED_DATA_USER_GUIDE.md"
 CONSUMER_SKILL = ROOT / ".agents" / "skills" / "structured-data-consumer" / "SKILL.md"
 CONSUMER_SKILL_UI = CONSUMER_SKILL.parent / "agents" / "openai.yaml"
 
@@ -110,6 +110,6 @@ def test_cli_help_lists_documented_structured_actions(capsys) -> None:
     output = capsys.readouterr().out
     for action in (
         "catalog", "describe", "availability", "examples", "validate-source",
-        "ingest", "financial-package-check", "release-check", "release-assessment", "publish", "rollback", "purge-source", "derive", "cross-section",
+        "ingest", "financial-package-check", "release-check", "publish", "rollback", "purge-source", "derive", "cross-section",
     ):
         assert action in output

@@ -201,5 +201,5 @@ L8 半导体设备            ASML AMAT LRCX KLAC TEL                     ← �
 - 8 次层级合成（上下文各自小得多）+ 1 次轮动合成，替代现在的单次大合成
 
 **文档**
-- `docs/SECTOR_ANALYST.md`、`docs/CHAIN_EVIDENCE.md`、`docs/RISK_SYSTEM.md`、`README.md`
+- `docs/agents/SECTOR_ANALYST.md`、`docs/archive/CHAIN_EVIDENCE.md`、`docs/agents/RISK_SYSTEM.md`、`README.md`
   中的 L1-L6 表述全部过期

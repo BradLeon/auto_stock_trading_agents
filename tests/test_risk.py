@@ -1,7 +1,7 @@
 """Risk officer — correlation clustering, stress, assess breaches, pre-trade gate
 (hermetic; no live TWS/network)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ats.memory import get_store
 from ats.risk import assess as risk_assess, checks as risk_checks, correlation, stress
@@ -93,20 +93,38 @@ def test_pre_trade_blocks_buy_in_derisk(monkeypatch):
     assert any("de-risk" in n for n in notes)
 
 
-def test_pre_trade_event_clip(monkeypatch):
+def test_pre_trade_event_cap_reports_boundary_without_rewriting(monkeypatch):
+    """Phase B (§5.2): risk no longer clips — the proposal stays untouched and
+    the acceptable ceiling is returned as a structured boundary."""
     pf = _pf([_pos("X", 0.1)], cash=900_000)
     review = RiskReview(as_of=NOW, risk_state="normal")
     # EM 20%, cap 3% NAV -> max weight 15% -> max notional 150k on 1M NAV
     buy = TradeDecision(symbol="COHR", action="buy", notional_usd=300_000)
     out, notes, _ = risk_checks.pre_trade(
         [buy], pf, event_data={"COHR": {"expected_move_pct": 20.0}}, review=review, apply_base=False)
-    assert out[0].notional_usd == 150_000 and any("CLIP" in n for n in notes)
+    assert buy.notional_usd == 300_000                       # proposal untouched
+    assert out == []                                          # over-budget: rejected, not clipped
+    assert any("150,000" in n for n in notes)                 # ceiling reported
+    result = risk_checks.review_revision(
+        [buy], pf, event_data={"COHR": {"expected_move_pct": 20.0}},
+        review=review, apply_caps=False)
+    assert result.verdict == "rejected"
+    assert result.allowed_boundary.max_additional_notional == 150_000
+    violation = next(v for v in result.violations if v.entity == "COHR")
+    assert violation.rule_id == "max_event_loss_pct"
+    assert violation.limit == 150_000 and violation.actual == 300_000
 
 
-def test_pre_trade_no_portfolio_skips():
+def test_pre_trade_no_portfolio_fails_closed():
+    """The adapter keeps the legacy skip (design D6); the NEW review entry
+    fails closed — 'cannot judge' rejects and leaves a trace."""
     buy = TradeDecision(symbol="X", action="buy", notional_usd=1000)
     out, notes, review = risk_checks.pre_trade([buy], None)
-    assert out == [buy] and review is None
+    assert out == [buy] and review is None          # legacy adapter behavior
+    assert any("skipped" in n for n in notes)
+    result = risk_checks.review_revision([buy], None)
+    assert result.verdict == "rejected"             # new path: fail closed
+    assert any(v.rule_id == "no_portfolio" for v in result.violations)
 
 
 def test_post_trade_projection_updates_margin_from_ibkr_baseline():
@@ -259,12 +277,19 @@ def test_foreign_currency_option_risk_is_converted_to_base(monkeypatch):
     assert option.margin == 600                 # long premium €5 × 100 × 1.2
 
 
+def _expiry_in(days: int) -> str:
+    """Expiry `days` from today — keeps bucket-boundary tests valid on any date."""
+    return (datetime.now(timezone.utc).date() + timedelta(days=days)).strftime("%Y%m%d")
+
+
 def test_sell_put_survival_separates_expiry_dates(monkeypatch):
     monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    # One expiry today, one exactly 30 days out: the 30-day bucket is half-open, so the
+    # boundary expiry belongs to the wider bucket, not to `through_days == 30`.
     aug = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
-               expiry="20260831", iv=0.3)
+               expiry=_expiry_in(0), iv=0.3)
     sep = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
-               expiry="20260930", iv=0.3)
+               expiry=_expiry_in(30), iv=0.3)
 
     review = risk_assess.assess(_pf([aug, sep], cash=1_000_000))
     survival = review.option_survival
@@ -278,6 +303,78 @@ def test_sell_put_survival_separates_expiry_dates(monkeypatch):
     within_90 = next(b for b in survival.expiry_buckets if b.through_days == 90)
     assert within_30.full_notional == 10_000
     assert within_90.full_notional == 20_000
+    # The label must state the same half-open semantics the filter implements.
+    assert within_30.label == "<30天"
+    assert within_30.expiries == [_expiry_in(0)]
+
+
+def test_expiry_beyond_every_horizon_still_lands_in_a_bucket(monkeypatch):
+    """4.2: a horizon list that stops at 365 days must not silently drop a 400-day put."""
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    far = _expiry_in(400)
+    put = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
+               expiry=far, iv=0.3)
+
+    survival = risk_assess.assess(_pf([put], cash=1_000_000)).option_survival
+
+    assert far in [e for b in survival.expiry_buckets for e in b.expiries]
+    widest = max(survival.expiry_buckets, key=lambda b: b.through_days)
+    assert widest.full_notional == 10_000
+
+
+def test_bucket_detail_reconciles_to_full_notional(monkeypatch):
+    """4.3: one expiry appears once per bucket and the bucket total is the sum of its
+    expiries — a reviewer must be able to re-derive the amount from the detail."""
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    same = _expiry_in(10)
+    a = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110, expiry=same, iv=0.3)
+    b = _opt("SPY", qty=-2, delta=-0.3, right="P", strike=150, spot=150, expiry=same, iv=0.3)
+
+    survival = risk_assess.assess(_pf([a, b], cash=1_000_000)).option_survival
+
+    bucket = next(x for x in survival.expiry_buckets if same in x.expiries)
+    assert bucket.expiries == [same]                       # de-duplicated
+    assert bucket.full_notional == 40_000                  # 10k + 2 × 15k × 100
+    by_expiry = {}
+    for asg in survival.assignments:
+        by_expiry[asg.expiry] = by_expiry.get(asg.expiry, 0.0) + asg.full_assignment_notional
+    assert bucket.full_notional == round(by_expiry[same], 2)
+
+
+def test_unknown_probability_keeps_notional_and_flags_the_summary(monkeypatch):
+    """4.4: missing probability is marked unknown; it is never treated as zero risk."""
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    put = _opt("SPY", qty=-1, delta=None, right="P", strike=100, spot=100, iv=None)
+
+    survival = risk_assess.assess(_pf([put], cash=1_000_000)).option_survival
+
+    asg = survival.assignments[0]
+    assert asg.assignment_probability is None
+    assert asg.probability_source == "unknown"
+    assert asg.full_assignment_notional > 0
+    assert asg.probability_weighted_notional > 0
+    assert survival.has_unknown_probability is True
+
+
+def test_half_open_boundary_leaves_l2_breach_fields_unchanged(monkeypatch):
+    """4.5: moving the boundary day between buckets must not change the totals the L2
+    breach checks read — only which bucket reports it."""
+    monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
+    near = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
+                expiry=_expiry_in(0), iv=0.3)
+    edge = _opt("SPY", qty=-1, delta=-0.3, right="P", strike=100, spot=110,
+                expiry=_expiry_in(30), iv=0.3)
+
+    review = risk_assess.assess(_pf([near, edge], cash=1_000_000))
+    survival = review.option_survival
+
+    assert survival.total_full_assignment_notional == 20_000
+    assert survival.peak_expiry_full_notional == 10_000
+    buckets = {b.through_days: b for b in survival.expiry_buckets}
+    assert buckets[30].full_notional == 10_000     # boundary day excluded here
+    assert buckets[90].full_notional == 20_000     # …and included in the wider bucket
+    # L2 layers read the totals, never a bucket, so their verdict is unaffected.
+    assert [b.layer for b in review.breaches if b.layer.startswith("L2-期权全额指派")] == []
 
 
 def test_unknown_sell_put_probability_is_data_invalid(monkeypatch):

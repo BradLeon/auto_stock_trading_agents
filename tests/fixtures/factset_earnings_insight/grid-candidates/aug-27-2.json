@@ -1,0 +1,30 @@
+{
+  "candidate_only": true,
+  "policy_hash": "674ae04fbbd920be58b6adec7f7a18e4fb2194f639a8800fc29fd19cd2bd4c46",
+  "chart": {
+    "page_number": 27,
+    "image_number": 2,
+    "image_hash": "b4baa98785cf64348cc72f7c510b211d3287682a8e6797024bc8d28821b8fb08",
+    "title": "Number (#) of S&P 500 Cos. with FY Positive & Negative Guidance",
+    "title_region": [
+      0.132821075740944,
+      0.0226928895612708,
+      0.8653494328576655,
+      0.05143721633888049
+    ],
+    "groups": [
+      "eps_guidance"
+    ],
+    "periods": [
+      "2026",
+      "2027"
+    ],
+    "period_basis": "mixed_fiscal_years",
+    "period_evidence": "FY 2026 / 2027",
+    "status": "located",
+    "reasons": [
+      "mixed_fiscal_cohort_not_separable"
+    ]
+  },
+  "grids": []
+}

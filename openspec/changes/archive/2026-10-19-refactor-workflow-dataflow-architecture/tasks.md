@@ -1,0 +1,220 @@
+> 2026-10-19 对照已归档的各 Phase change 勾选并完成第 12 节最终验收：**119/119 完成**、0 项未完成。第 12 节验收记录见 docs/archive/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。父 change 先写、子 change 按实际实施，凡不偏离需求的差异以子 change 的实现为准，裁定见 design.md「2026-10-19 以子 change 实现为准的裁定」。
+
+## 1. Phase A — 权威基线与数据边界
+
+- [x] 1.1 新增权威基线脚本/文档，固定 `uv sync --all-extras` 与 `uv run pytest` 入口，并记录 Python、依赖、执行环境、计数和用时
+- [x] 1.2 在不受临时文件删除配额干扰的环境重跑全量测试，将失败按根因簇、所属 Phase 和验收命令登记
+- [x] 1.3 盘点并验收当前 Data Platform 中性证据 observations/facts/projections/failures 的写入 schema、幂等约束和 repository API；已有实现通过契约测试则直接接收，仅补齐缺失项，并同步清除“repository 只读、writer 仍走 legacy”等过期边界声明
+- [x] 1.4 核验并完成 `TradingMemory.save_observation` 及同族证据读写对 Data Platform repository 的委托，修复旧库迁移期间 `_data` 初始化顺序等剩余缺口，并保持原文档版本与来源血缘
+- [x] 1.5 核对 observer、chain sources/articles、scheduler 和 CLI 的证据写入调用，清除旁路写入并新增四条路径及旧数据库升级路径的整合测试
+- [x] 1.6 完成数据写侧 cutover 对账和回滚检查，验证唯一 writer、实体、时间、来源、文档版本、幂等身份和失败语义，且不恢复已退役 Workflow Memory 数据表 【2026-10-19 按子 change 裁定完成】Phase A（establish-workflow-contracts-and-green-baseline 2.1–2.10）完成写侧 cutover 与对账；`workflow_memory.evidence_*` 四条登记为 retired，但 Phase F 12.8 的扫描因 `MODULE_TO_ROLE` 未登记而无法证明消费方清零，属退役核验工具的遗留，不影响本项。
+- [x] 1.7 新增单一 action 词表声明 `buy|add|hold|trim|sell`，将 Decision、PEAD、Journal、Risk 和 Chief 改为共享同一类型
+- [x] 1.8 新增显式的内部 action → 券商 side 映射，保留内部 action 与实际 broker side 的账本字段并测试 legacy 大小写转换边界
+- [x] 1.9 将期权到期资金桶改为互斥且完整的区间，新增 0/30 天边界、逐头寸合计和概率来源测试
+
+## 2. Phase A — 运行契约、存储和架构守卫
+
+- [x] 2.1 定义 `WorkflowTaskSpec`、`TriggerContext`、`WorkflowRunRequest`、`WorkflowRunResult` 及其序列化/schema 版本契约
+- [x] 2.2 定义 Task Projection envelope 和七类角色 payload schema，拒绝只有报告文本而无类型化 payload 的产出
+- [x] 2.3 新增 additive migration：`workflow_runs`、`agent_runs`、`task_projection_envelopes` 和 `trigger_runs`，包含唯一键、索引和不可变约束
+- [x] 2.4 实现 projection repository 的 publish/get/list 及规范化 content hash，对重试采用 insert-or-return-existing 语义
+- [x] 2.5 实现基于 role、scope、schema、`valid_until`、input refs 和 data vintage refs 的投影可复用评估及结构化失效原因
+- [x] 2.6 将 `TradingMemory` 改为每操作/工作单元独立 SQLite 连接，启用 WAL、busy timeout 和短事务，并新增并发写入测试 【2026-10-19 按子 change 裁定完成】按 Phase E 2.2 的实现：Dispatcher、Trigger Ledger 与角色适配器每个任务使用独立 SQLite 连接（WAL、busy timeout、短事务，任务结束关闭）；CLI 与服务器的缓存实例有意保留一条共享连接（同样启用 WAL 与 busy timeout），不偏离并发写入安全的需求。
+- [x] 2.7 实现分析师投影允许列表与运行时 input-ref 校验，只允许 Layer→Sector、Information→Fundamental 和 Analysts→Chief
+- [x] 2.8 新增静态架构测试，阻止 Agent 直接导入 Provider、未声明跨分析师投影以及 Agent 观点写回共享事实
+- [x] 2.9 实现旧实现退役登记、在用/已退役冲突检查和 fail-closed 读取原因码
+- [x] 2.10 实现退役资产的 dry-run 清除计划、显式确认和 actor/scope/note 审计，并登记 Phase A–F 首批待退项
+- [x] 2.11 执行 Phase A 门禁：复核数据写侧、action、option-survival、契约、SQLite 并发和架构守卫测试，更新权威失败簇
+
+## 3. Phase B — 决策审计存储与确定性风控
+
+- [x] 3.1 定义 decision cycle/revision/risk review/Boss approval/cycle event 的 schema、状态枚举、decision hash 规范化规则和 `ExecutionAuthorization`
+- [x] 3.2 新增 additive migration：`decision_cycles`、`decision_revisions`、`decision_risk_reviews`、`boss_approvals`、`cycle_events`，保留现有组合 `risk_reviews`
+- [x] 3.3 实现 decision repositories 的追加式写入、compare-and-set 状态转换、幂等事件和完整周期读取
+- [x] 3.4 为可验证的历史决策生成 legacy revision，对无法还原 hash/快照的记录标记 `legacy_unknown`而不伪造关联
+- [x] 3.5 新增 research snapshot builder，固定被要求角色的 projection ID、hash、as-of 和新鲜度，并在不完整时拒绝创建 cycle
+- [x] 3.6 将当前 pre-trade 路径拆成不修改提案的确定性 review API，返回前后风险向量、违规、verdict 和允许边界
+- [x] 3.7 将 order caps 和 event-notional clip 改为结构化 findings/counterproposal，测试原 revision 内容和 hash 不被改写
+- [x] 3.8 改造 Risk Agent 只解释确定性结果，移除 Macro 观点输入，并测试 LLM 文本不能覆盖硬规则 verdict
+- [x] 3.9 新增 Risk review 单元/属性测试：单票、行业层、关联簇、事件、期权、组合状态和无法推导交易后仓位
+
+## 4. Phase B — Chief—Risk—Boss—Trader 状态机
+
+- [x] 4.1 扩展 Chief graph state，加入 research snapshot、revision no/hash、risk round/review、snapshot IDs、max rounds、authorization 和 cycle status
+- [x] 4.2 将 Chief 首次决策写为不可变 revision，并将 No Action 作为带理由的正式终态落库
+- [x] 4.3 新增 `chief_revise` 和 conditional edges，实现 reject→revise→re-risk 循环与默认 3 轮上限
+- [x] 4.4 将每轮 revision/risk review/event 在转移前幂等持久化，测试各节点崩溃恢复不重复写入
+- [x] 4.5 将 Boss approval 输入收窄为 exact revision hash 的 approve/reject，将修改意见保存为 reject note 并禁止修改后直接下单
+- [x] 4.6 将 Boss webhook 去重从进程内集合迁移到持久化 idempotency key，测试重复、旧 revision、已终结 cycle 和跨进程回调
+- [x] 4.7 新增执行前 freshness check，从 risk policy 读取默认 60 秒阈值，失效时回到 Risk 并要求新 Boss approval
+- [x] 4.8 将 Trader 入口改为只接收完整 `ExecutionAuthorization`，拒绝未批准、hash 不匹配、过期或字段被修改的指令
+- [x] 4.9 将 client order ID/order reference 稳定派生为 cycle + revision + order sequence，对超时重试先查本地和券商状态
+- [x] 4.10 新增端到端状态机测试：首轮通过、一/多次驳回、轮次用尽、No Action、Boss reject、stale re-risk 和不确定券商提交
+- [x] 4.11 执行 Phase B 门禁，确认新交易路径仍处于 paper/shadow 模式且所有审批链测试通过
+
+## 5. Phase C — Clerk、对账与内部账本
+
+- [x] 5.1 为 orders/fills 增加可空 cycle ID、revision no、decision hash、approval ID 和关联索引，并对新系统订单强制非空
+- [x] 5.2 新建 Clerk 编排服务，读取 decision/audit 记录与券商回报，不通过 LLM 产生账本事实
+- [x] 5.3 整合现有 reconcile 的 order reference/perm ID 匹配，对系统、人工和 unattributed 订单生成显式分类与异常
+- [x] 5.4 增加部分成交、迟到成交、撤单、拒单、进程重启和漏跑日期的幂等重放测试
+- [x] 5.5 将 journal entries、episodes、marks、predictions、performance 和 attribution 改为 Clerk 编排的派生读模型，保留现有确定性公式
+- [x] 5.6 新增从不可变原始记录重建指定期间绩效/归因的命令与方法版本校验
+- [x] 5.7 发布带 as-of、完整性和对账缺口的 Internal State API，并迁移 Chief/Risk 的交易历史和绩效读取 【2026-10-19 核实完成】Chief 交易历史经 `state_api.recent_trades`、Risk 绩效经 `state_api.performance_history` 读取（Phase C 6.4/6.5）；退役条目 `store.direct_trade_reads` 仍为 pending，其退出条件是全部直读调用清零，属退役遗留，不影响本项。
+- [x] 5.8 将可选 critic 复盘存为链接不可变账本事实的 commentary，测试它无权更改金额或归因
+- [x] 5.9 执行 Phase C 门禁：新系统订单全部审批链完整、对账可重放、绩效可重建且异常缺口可见
+
+## 6. Phase D — Layer 与 Sector 职责拆分
+
+- [x] 6.1 新增 `LayerAnalysis` 和 `SectorAllocation` payload schemas，在 Layer schema 中禁止配置等级、budget use、stance 和 target weight
+- [x] 6.2 从现有 Sector 编排中拆出 Layer workflow，复用 hierarchy、common/relative claims、cross-section 和证据链计算
+- [x] 6.3 重写 Layer 输出为层级景气/结构、逐标的截面差异、证据强度、冲突、缺口和可证伪条件
+- [x] 6.4 调整 Layer 报告为每层一份研究报告，移除配置/权重/stance，保留截面读数和临时查询不落文件规则
+- [x] 6.5 为历史 Layer 配置读路径新增 legacy adapter 与退役登记，禁止将 legacy 配置字段注入新 Sector
+- [x] 6.6 重构 Sector 输入组装，只接受共享行业事实和有效 `LayerAnalysis`，移除 Macro、PEAD、Information 和其他研究观点
+- [x] 6.7 实现 Sector 的行业/层级/标的三级配置、证据冲突展示、研究上限和非执行性输出
+- [x] 6.8 实现 Sector 对 Layer 失败/缺失/过期/schema 不兼容的显式 incomplete 行为，不伪造配置
+- [x] 6.9 新增 Layer/Sector 契约、报告、依赖隔离和历史兼容测试
+
+## 7. Phase D — Information、Fundamental 与 Chief 汇总
+
+- [x] 7.1 新增 Information Analyst package、`InformationBrief` schema 和独立手动/定时/文档事件入口
+- [x] 7.2 从 PEAD research/triage/monitor 和 digest 提取纯抽取/材料性逻辑，移除直接抓 Provider 和修改 dossier 的副作用
+- [x] 7.3 实现 Information 的文档版本/chunk 血缘、事件/发布/抽取时间、聚类、置信度、仅自述和待验证标记
+- [x] 7.4 新增 Information schema guard，拒绝 action、仓位、订单数量/价格/类型字段，并测试 Information 可不运行 Fundamental/Chief 而独立终结
+- [x] 7.5 实现 Fundamental routine mode，基于上一有效基线、InformationBrief、Consensus、公司数据和中性产业链事实发布 `FundamentalExpectationUpdate` 2026-10-14可能缺失记录：完整市场隐含预期、整合叙事/变化路径、逐KPI变化解释、可证伪条件及输入参与判断待闭合；用户裁决Phase F验收后补。本轮有限Routine签核不代表本项完成。 【2026-10-19 完成】按用户要求补齐：旧 PEAD 报告的每一节（核心叙事、同业、关注排序、KPI 清单、估值、催化剂与风险、预期基准表、共识、期权/价格隐含、综合预判、信号链、实际披露、三类差异）现在都由 Dispatcher 发布的投影携带（FundamentalExpectationUpdate 新增可选字段 baseline/change_class/kpi/explanation/evidence_refs，FundamentalEventReview 新增 actuals/baseline_ref/comparison_basis），空值不进哈希；情景决策树、PEAD 建议与执行清单有意不带（含交易动作）。用 TSM、ASML 的 Q3 财报验证：取发布前建好的基线档案（误标成 Q2/Q4）改归 Q3 FY2026，重跑财报后评审并产出完整报告。途中修复：三类差异不看币种与单位导致荒谬数字（现在只比较同币种同单位，口径不明或差距过大的列为不可比）、营收被当成 0.0B（抽取改为绝对金额加申报币种）。见 docs/archive/PHASE_F_PARENT_7_5_FUNDAMENTAL_DETAIL_20261019.md。遗留：新例行模式在真实窗口里产出带明细基线（下一个是 LRCX 之后的窗口）；ASML 与 TSM 的基线币种口径本身不一致，对比大半仍为不可比。
+- [x] 7.6 实现 Fundamental event cutoff 和冻结预期基线，禁止用事件后材料回写财报前预期
+- [x] 7.7 实现 event mode 的 actuals vs baseline/Consensus/implied expectation、Surprise Scorecard、指引、叙事变化和非执行建议
+- [x] 7.8 实现迟到电话会/指引的版本升级，共享同一冻结基线且不覆盖初版投影
+- [x] 7.9 从 Fundamental 删除 Sector/Macro 观点、其他 Fundamental 结论和最终 pre-trade risk gate，将上下游读数改为中性 Data Product
+- [x] 7.10 扩展 Chief assembler 读取 Layer、Information、Sector、Fundamental、Macro、Technical 投影及 Internal State，并生成固定 research snapshot
+- [x] 7.11 新增 Phase D 架构守卫和角色输入契约测试，对相同 data vintages 产生新旧输出差异报告
+- [x] 7.12 执行 Phase D 门禁：所有未声明观点依赖清零，角色 schema 拒绝越界字段，人工审阅影子差异 【2026-10-19 按 2026-10-09 裁决改写后完成】「人工审阅影子差异」按 2026-10-09 验收裁决改为以新入口需求矩阵和独立预期断言验收，新旧差异只作可选诊断；Phase D 9.3–9.6（verification.md 保真性对照、正反向端到端验收）与 Phase F 新入口报告签核已满足。
+
+## 8. Phase E — Workflow Dispatcher
+
+- [x] 8.1 建立 workflow registry，登记 Layer、Information、Sector、Fundamental routine/event、Macro、Technical、Chief 的 specs、依赖、freshness、retry 和 resource group
+- [x] 8.2 实现 registry DAG 校验，拒绝循环、未知 workflow、未声明跨分析师依赖和不兼容输出 schema
+- [x] 8.3 实现手动、schedule、event 到 `TriggerContext` 的归一化与稳定幂等键
+- [x] 8.4 实现 Dispatcher 依赖展开和就绪队列，支持 Phase 0/Macro/Technical 并发与 Sector/Fundamental 各自等待唯一依赖
+- [x] 8.5 实现按 resource group 限制的 worker pool、单任务超时、重试和失败隔离，禁止重跑已成功依赖
+- [x] 8.6 将 projection selector 接入依赖解析，实现可复用原因、重跑原因和 agent-run 记录
+- [x] 8.7 实现完整性门禁和 `incomplete` 缺口报告，任一必需投影失败/缺失/过期/不兼容时禁止创建 cycle
+- [x] 8.8 新增 CLI/API 入口：单 Agent、自动补依赖子流程、全分析流程和显式 `enter_decision_cycle`
+- [x] 8.9 将现有 Scheduler 任务逐项改为 Dispatcher 调用，对每个迁移任务建立旧 job 退役登记和单活跃所有者检查 【2026-10-19 完成，按用户裁定改写口径】旧调度器任务逐项处置：研究侧（PEAD 监控/准备/评分、周报、技术面）已由 Dispatcher 工作流承担并保持单一调度所有者；核对发现 FactSet 月末摄入与财报日历刷新在旧调度器下线后无人接手，已补进数据刷新控制器（新增 factset_month_end_ingest 与 6 个 calendar_* 任务），并修复日历把「一方多给钟点」当冲突导致所有财报事件被拦的问题；旧开关已关闭（pead_event_triggers 与新事件路径共用，保持开启）；`scheduler.hardcoded_serial_run` 登记保持 pending 并更新缺项。主理人决策周期的定时触发（chief_daily）与书记员对账（journal_reconcile）属于交易路径，随实盘切换另行排程，已在处置表明确记录。见 docs/archive/PHASE_F_PARENT_8_9_SCHEDULER_DISPOSITION_20261019.md。遗留：LRCX 10-21 是日历事件路径的第一次真实触发；FactSet 月末摄入待 11-01 验证。
+- [x] 8.10 新增并发、依赖补齐、缓存失效、重启幂等、失败隔离和不完整阻断的端到端测试
+
+## 9. Phase E — Schedule Calendar 与 Trigger Ledger
+
+- [x] 9.1 新增 Data Platform `schedule_events` schema/repository，支持 stable event ID、version、source lineage、timezone、session、status 和 payload hash
+- [x] 9.2 实现财报日历刷新/修订适配器，保留 BMO/AMC/盘中/未知 session 和公司实体血缘
+- [x] 9.3 实现 FOMC 及 CPI/PCE/NFP/GDP 刷新/修订适配器，保留官方时区和发布类型
+- [x] 9.4 将 `config/events.yaml` 改为 manual override/custom event overlay，对改期、取消和补充记录 actor、reason 和被覆盖版本
+- [x] 9.5 实现 Calendar 发布的版本对比，对时间/状态/关键 payload 修订生成新 version 而不覆盖历史
+- [x] 9.6 实现 `event_id + event_version + workflow_id` 的 trigger claim，确保重启、多 worker 和补跑不产生第二个逻辑触发
+- [x] 9.7 在事件改期/取消时失效未执行旧触发并保留已执行历史，为新 version 建立新触发
+- [x] 9.8 实现 timezone/session/休市/misfire/restart 策略与 Trigger Ledger 决定记录，并确保 Calendar 不注入研究观点
+- [x] 9.9 新增 Calendar/Trigger 测试：重复源、修订、人工覆盖、取消、时区、休市、misfire 和进程重启
+- [x] 9.10 执行 Phase E 门禁，确认每个已迁移 workflow 只有一个调度所有者且 Dispatcher/Calendar 恢复测试通过
+
+## 10. 横向 Dataflow 专项 — 整图验收与缺口补齐（Phase F 读取切流前）
+
+- [x] 10.1 建立独立 OpenSpec change `complete-target-dataflow` 的 proposal、design、delta specs 和 tasks；以 Target §3–4、§12 为范围，明确不重复 Phase A 证据写侧、Phase C Clerk、Phase D Agent 职责和 Phase E Calendar 的已验收实现
+- [x] 10.2 逐项建立目标节点/关键连线到代码、配置、数据 owner、消费者、退役入口、证据和 `verified | needs_refactor | missing | blocked` 状态的 Dataflow 差距矩阵；旧 change 归档不得单独作为通过证据
+- [x] 10.3 核验 Source Catalog、Refresh Controller、结构化/非结构化适配器及采集准入、quarantine、共享事实、Data Products、Runtime Data Gateway 与 Internal State API 的现有契约；记录可复现测试和来源/消费者覆盖范围
+- [x] 10.4 在专项 change 中为矩阵中的 `needs_refactor` 与 `missing` 项安排最小修复、owner、依赖、兼容迁移和回滚任务；`verified` 项不重建，`blocked` 项保留原因及对下游的影响
+- [x] 10.5 对每个数据域验证正常、来源失败、陈旧、准入拒绝、修订/as-of、血缘读回、观点回写隔离和旧新差异归因；不得让 Agent 以直连 Provider 弥补产品缺口
+- [x] 10.6 为结构化、非结构化、runtime 和内部状态的直接消费者分别记录唯一 writer 或查询 owner、读取契约、切流开关、回滚演练和待退旧路径
+- [x] 10.7 执行 Dataflow 专项门禁：仅将写入、发布、读取、血缘、完整性及回滚证据齐备的数据域/消费者标记可进入 Phase F 读取切流；未通过项保持稳定旧路由并登记缺口
+
+## 11. Phase F — 影子运行、切流与回滚
+
+> **以下 2026-10-07～10-15 的过程回写与状态表为历史记录，当前状态以下方 2026-10-18 子 change 最终回写及文首 2026-10-19 勾选说明为准。**
+
+> 2026-10-15生产平台补验过程回写：原四标的Information/Fundamental已8/8 eligible，生产源原始证明齐备，旧0/8/缺40项是此前状态。业务原始行、路由、调度和审批交易记录保留；未部署，8.5入口证据适用性仍有待处理项，106/117不变。有限Routine签核及完整能力后补边界不变，父7.5不因此完成。
+
+> 2026-10-15过程回写（不代表13.9最终完成）：子change当前106/117完成，6.4/6.6/6.7已按当前冻结重新完成；四家有限Routine报告经用户审阅signed_off并覆盖各自Information依赖。16条隔离真实事件、生产资格0/8缺源账本、隔离仍缺40项平台原始证明分别记录，未执行生产切换/调度/观察/退役，真实券商写继续禁用。8.5前置仍有工程取证缺口，不是只等部署审批。完整Routine业务能力按用户裁决Phase F后补，父7.5不勾选；详见docs/PHASE_F_FINAL_EVIDENCE_REVIEW.md文首。
+
+> 2026-10-18 子 change 最终回写（13.9；子 change 121/121；2026-10-19 更新：10.6 已完成）。**三种状态分列，互不替代：**
+> - **门禁实现：** 实盘授权门（11.1）、六条切流边界的独立开关、调度单一负责人与幂等、消费者读取健康检查与切换/切回、退役判据与墓碑/回退预检工具均已实现并有测试与真实运行记录；13.7 的 strict、接线/切流/架构守卫、记录一致性和 schema reopen 通过。这些**是实现状态，不等于对应范围已经上线或退役**。
+> - **生产读 / 调度：** 研究读取 6 个消费者（Information、Fundamental、Layer、Macro、Sector、Technical）已在生产切到新路径（target，代次 3），每日健康检查通过；7 个研究工作流调度负责人已切到 Dispatcher，常驻进程 `com.ats.dispatcher` 已加载（只跑研究，不进 Chief、不下单）。观察窗口 `phase-f-dispatcher-2026-10-17` 按用户裁决于 10-18 结束；事件路径只用 TSM、ASML 验证。**未切：** Chief 读取新投影、交易、审批、记账。
+> - **实盘：** **仍为锁定。** `trades` 表自 10-16 起无新增，`com.ats.schedule`（带 `--live`）未加载，实盘路由未切换；实盘授权库里有一行来源未核实的 `LIVE-X`，不认定为授权，未改动，待用户确认来源。真实 live 切换不在本 change 执行范围。
+> - **旧实现退役：** 27 个登记条目 3 个退出、24 个 pending（其中 8 个登记为 retired 但无法证明清零），未改登记；见 `docs/archive/PHASE_F_12_8_RETIREMENT_20261018.md`。
+> - **仍未完成 / 后补：** 常驻进程的真实定时触发与 LRCX 10-21 盘后事件评审（10.6 已用同一代码路径手动验证，LRCX `[基线 v1]` 已建成）；完整 Routine 内容（完整市场隐含预期、整合叙事/变化路径、逐 KPI 变化解释、可证伪条件）已在 2026-10-19 由 Dispatcher 投影携带，并以 TSM/ASML 的 Q3 财报做了完整财报前后报告，**父 7.5 已勾选**，真实窗口里的产出待 LRCX 之后验证；有限 Routine 签核只覆盖 MRVL/MSFT/NVDA/TSM 四份报告的实际内容，**仍不是 ARCHITECTURE §9.2 完整达标**。另有：SEC 对后台进程不可达、财报日历库 10-19 已补上但事件路径尚未被真实日历事件触发过（LRCX 10-21 是第一次）、TSM/ASML 的基线币种口径不一致致对比大半不可比、`ibkr_news` 的 partial 重试与超时掩盖原因两个缺陷（10-19 已修请求挂起，这两个仍在）。
+> - **独立于本回写：** 父 change 的新需求、共享安全和整图验收各自独立，不因子 change 的这些状态判通过，也不因 HEAD 上既有的旧专属失败（如 scheduler_jobs、read_cutover 相关测试）阻塞或被掩盖。精简裁决（G1–G4）及被取代要求清单见 `docs/archive/PHASE_F_FINAL_ACCEPTANCE_20261018.md` 第九节。
+
+**2026-10-09 验收裁决（覆盖本节此前的新旧对比/旧业务回退前置）**：以新入口需求矩阵和独立预期断言验收；旧入口不可运行、旧业务错误及新旧差异仅作可选诊断，不阻塞新入口。旧入口仍须退出安全，防重复触发/发布、越权提交和状态污染。恢复可以是经验证的安全停止或恢复已验收的新版本，不强制修复或恢复旧业务。新入口、共享依赖、必需历史/状态和权限失败仍阻塞受影响范围。子 change 的旧工具成果保留，但报告/checker 与恢复/退役判据须按新标准改造，不自动沿用历史签核。
+
+### Phase F 前置任务：证据接收、实际接入与切流准备
+
+以下任务由 Phase F 承接实施，复用 `complete-target-dataflow` 的接口、资格机制和真实验收记录，不重建数据平台。现有专项任务完成不等于生产消费者 eligible；2026-10-04 Tasks 5 记录十角色均未取得生产资格。前置核验可以先开始，实际接入按所依赖的 A–E 能力逐项推进；不得因父 change 的未勾选状态重做已验收实现，也不得因子 change 已完成而跳过行为核验。
+
+- [x] F.0.1 建立版本化前置接收矩阵：逐项核验 A–E 专项及 Dataflow 的实现、命令和证据，记录已接收能力、缺口、owner 与依赖；检查真实部署入口和当前路由，不以静态清单中的旧入口名称推定它仍可稳定运行。复用 Tasks 2/3/4/5 的真实材料和缓存，不重复全量采集。
+- [x] F.0.2 核验并受控登记已有资格证据：逐 `domain_id + consumer_id + contract_version + scope` 校验原始记录、产品覆盖、代码/配置指纹、前置证据、时间有效性与回退证明，通过现有追加式 evidence API 落账并查询资格；记录 actor、证据引用和登记结果。汇总报告的 passed、任务勾选或隔离成功不得转换为未经验证的生产证明；缺项保留 ineligible 并列最小补验。此步骤不改变路由，不生成 Risk/Boss 交易批准。
+- [x] F.0.3 验证 Layer、Information、Sector、Fundamental、Macro、Technical 的实际 CLI/Dispatcher/Workflow 接入：保留 run ID、实际调用路径、产品/文档/vintage refs、投影 hash 和缺口；只允许 Layer→Sector、Information→Fundamental 两条观点依赖，拒绝 Provider/底层表旁路、候选材料冒充发布数据和观点回写事实。覆盖单角色、依赖子流程、完整分析流程、必要输入失败阻断及跨进程重启引用可解析；尚未实现的消费者先登记对应 A–E 依赖，不伪造接入成功。
+- [x] F.0.4 在无券商写权限的 shadow/paper 环境验证 Chief、Risk、Trader、Clerk 的实际接入及恢复：绑定研究快照、内部状态、revision、审批和订单/成交回报，覆盖多轮风控、重复恢复、部分/迟到成交与绩效重建。可复用隔离账本及券商模拟；真实 TWS 仅只读核验。不要求制造生产 cycle、真实下单或真实部分成交以完成测试，也不把隔离证明冒充当前生产账本完整性。
+- [x] F.0.5 对实际缺口形成逐消费者处置：已接受 SEC 正文 optional 与 Layer no_coverage 保持原政策；FactSet 使用最新月度最终版，不新增按报告年龄的 stale 降级；期权时间缺失、历史账本断链等继续显式 partial，并验证新路径隔离和交易阻断。旧路径问题仅登记不修复；历史不完整不得自动放行，也不得阻断与其无关的已验收研究路径。
+- [x] F.0.6 建立逐批切流清单和 dry-run：区分采集发布、研究读取、调度、内部状态/审批、live Trader；每批登记实际 owner、旧/新路由、开关、exact-scope 资格、观察窗口、成功/停止条件及已演练的稳定回退。已在生产运行的新采集路径直接核验接收，不重复切换；无安全停止或已验收版本恢复证明者保持 ineligible，不静默转回已知故障旧入口。资格漂移/撤销时验证停止或回退行为；读取资格不得开启交易权限。
+- [x] F.0.7 执行前置门禁并交付逐批 eligible/ineligible 报告：关联证据账本、实际接入运行和回退记录；仅证据及接入验收均通过的范围可进入 11.5/11.6 等实际切换。缺项只阻断受影响范围，完整自动交易仍须全部必需输入及审批链满足。生产路由变更须获得明确部署授权，live Trader 开放另须明确实盘授权；规划批准与前置通过均不构成该授权。
+
+### Phase F 实施：影子运行及逐边界切换
+
+- [x] 11.1 新增 projection read、analyst output、Dispatcher schedule、approval lifecycle、Clerk publication 和 live Trader 的独立功能开关
+- [x] 11.2 实现功能开关与配置校验，保证旧/新 live Trader 路径互斥，冲突配置启动时 fail closed
+- [x] 11.3 新增新入口独立影子运行与同输入重放模式，以冻结输入和运行前固定的需求矩阵验证分析/风控；从进程能力上禁止真实 broker write，旧侧运行为可选诊断
+- [x] 11.4 实现追加式新入口验收报告，核验输入、独立预期调度、分析、风控、审批和归因；必需项 failed/untested 不得签核，旧比较报告不自动转换为新验收证明
+- [x] 11.5 按 F.0 接收矩阵与 exact-scope 资格，为 read path 建立 runbook 并在明确部署授权后分批执行切换、观察和回退验收，记录切换前后路由、运行引用及结果；验证新 projection 需求读取、必需历史可读及旧入口退出安全，未通过的数据域/消费者不得随整体开关切换
+- [x] 11.6 为 schedule path 切换和回滚建立 runbook，在明确部署授权后分批执行，验证无尚未完成 trigger 被双重所有；沿用已接收的生产采集 owner，不把 Workflow 调度切换误作所有数据源重启
+- [x] 11.7 为 live trade path 切换和回滚建立 runbook，强制先关闭当前 live route、确认无 in-flight authorization，再开启另一 route；演练默认使用隔离/paper 模式，只有全部交易门禁通过且取得明确实盘授权后才执行真实 live route 切换
+- [x] 11.8 执行旧实现生产消费者清零、新需求数据覆盖/血缘/历史可读、安全停止或已验收版本恢复、观察窗口和墓碑登记检查；停用的离线诊断不计生产消费者，只将满足全部条件的项标记已退役
+- [x] 11.9 演练 read/schedule/trade 三个边界的独立安全停止或已验收版本恢复，保留影子、审批和账本记录；仅选择旧恢复目标时核验其可用性
+
+### Phase F 审计后状态与实施依赖（2026-10-07）
+
+2026-10-10 子 change 当前 98/116。正式 scoped 读/调度、审批/提交快照依赖重验、实际启动拒绝及切前安全恢复已推进；五类清单已实例化。真实 TWS 只读、本机 Technical 行情与独立重放通过，报告 unsigned。保护并集 538，最终冻结及全仓失败归因仍进行中。生产 scoped routes/调度 owner/C3 不变；生产资格、获授权迁移、观察及实际退役不写完成。
+
+2026-10-09 子 change 13.10 完成，当前 81/116：实际审批/Clerk/状态逐 scope 停止和联合恢复、发布代次及嵌套旧 worker 拒绝、在途审计/完整批准修订和幂等验证通过。共享实现闭包 465，新报告 unsigned；生产状态/C3 不变，其他安全恢复、最终资格及父整图验收仍独立待办。验证记录按用户规则仅保留本地 docs/validation。
+
+2026-10-09 子 change 13.3 完成，当前 80/116：实际持久交易停止、全周期/回执排空及已验收隔离模拟目标恢复通过；失败保持冻结，旧代授权不复活。固定源码独立重放通过，新报告 unsigned，生产状态与 C3 不变。见 [交易安全停止验证](../../../docs/validation/PHASE_F_TRADE_SAFE_STOP_2026-10-09.md)。父整图验收及其他边界恢复仍独立待办。
+
+2026-10-09 子 change 11.3/5.15 完成，当前 79/116：真实交易仲裁及联合持久冻结/跨库恢复机制通过，当前闭包 465 的 Routine/Event 独立重放通过。原报告保留历史指纹，新报告 unsigned；生产资格/部署、TWS 和父整图验收仍独立未完成。见 [联合与交易恢复验证](../../../docs/validation/PHASE_F_JOINT_AND_TRADE_RECOVERY_2026-10-09.md)。父目标不因子机制勾选而自动完成。
+
+依据 `docs/validation/PHASE_F_ACTUAL_COMPLETION_AUDIT_2026-10-07.md`，此前“门禁验收完成、只剩授权与证据”的回写撤销；模块和历史测试成果保留。实际接线、运行、scope 隔离和崩溃恢复未通过者重新打开。子 change `implement-phase-f-shadow-run-and-cutover/tasks.md` 保留原编号并新增 0 组，作为 Phase F 实施的依赖清单；不因父 change 任务仍未勾选重做 A–E。
+
+| 上游目标 | 当前状态 | 子 change 对应工作及阻塞 |
+|---|---|---|
+| F.0.1/F.0.2 接收与证据 | 工具已交付，最终接收/资格未完成 | 0.1/0.4、6.1/6.4/6.6/6.7；当前 0/10 原因是 ledger missing，不只是 TTL |
+| F.0.3/F.0.4 实际接入 | 部分完成 | 7.1/7.2/7.4/7.11、9.3/9.6 及 7.3/7.5 已验收；六角色与 Event/Routine Chief、完整非空交易/Clerk 恢复链通过；7.17 十角色漂移/旧契约补验完成。隔离 fixture 不代表生产全范围或资格，最终冻结/登记仍待前置闭合 |
+| F.0.5–F.0.7 处置与准备 | 实际处置完成，切前闭环未完成 | 7.7 已关联实际 scope/产物，保留 optional/partial 与旧 Clerk 缺陷登记；7.8 动态索引已由 3.10 原始账本复核完成，8.1–8.6 与签核/回退仍待完成 |
+| 11.1 六边界开关 | 声明/证明、scope 路由及研究读/三写入口已验收；兼容/联合未完成 | 子 change 5.2/5.3/5.5/5.6/5.14 已完成；9.3/9.6 完整读模型与 5.7 新读恢复已完成；5.15 联合提交待办 |
+| 11.2 fail closed/单活 | broker 默认拒绝/逐笔单活局部验收，集成未完成 | 子 change 2.2/2.3/2.8 已修实际 broker 反例；5.10/5.15 及全链仍待实施 |
+| 11.3 影子运行 | 选定隔离范围的新入口独立 capture/run/replay 已交付，全范围集成未完成 | 子 change 11.2/3.10 完成；Routine/Event 实际六角色→Chief/Risk/审批→Trader/FakeBroker→Clerk 与跨进程重放通过；不依赖旧侧，生产资格/激活仍待 |
+| 11.4 六面报告 | 六面断言及新报告/签核/checker 已交付；全范围证据仍待验收 | 3.2–3.6 已完成，native revision 重开修复，3.10 的 Routine/Event 完整交易及 Technical 独立重放通过，报告 unsigned；新报告不沿用旧签核；13.4/13.5 选定隔离范围已通过，最终资格/签核待办，其他环境未测 |
+| 11.5 读切流 | 未完成，工程与证据阻塞 | 9.2/9.3/9.6、8.6 后进入 9.4/9.5；既有部署授权按 scope 核对 |
+| 11.6 调度切流 | Tasks 4 隔离接线完成，生产切换/恢复未完成 | 10.2/10.3 后进入 10.4；验证真实 claim 去重与旧入口失权，不要求旧业务完整成功 |
+| 11.7 live trade | 实盘继续锁定，业务仲裁演练待复验 | 0.6、7.12、7.14–7.17 的 A 方案、11.2–11.4、13.3；C3 不解除，LIVE-X 来源未核实 |
+| 11.8 实际退役 | 未完成 | 判据/缺口登记完成，三项 pending；12.1/12.8 验证实际清零 |
+| 11.9 回滚 | 有历史模块演练，修复后业务回滚未验收 | 切前 13.1–13.3/13.10；切后 9.5/10.4 单列 |
+
+**关键依赖**：影响/契约/范围确认 → 保护与实际接线 → 无生产资格的隔离接入、同输入影子 → 切前安全停止/已验收版本恢复 → 最终基线冻结及受控资格登记 → 非空影子追溯/无提交/回归与守卫 → 获授权逐批读/调度切换和观察 → 实际退役。隔离运行不依赖先生产 eligible；切前回滚不依赖已经生产切换。单边界兼容操作不改其他边界；确需联合者显式登记、覆盖全部资格/授权/回退条件并协调提交。
+
+**A 替换 B（2026-10-07 用户选择）**：B 尚未实施，历史裁决保留；允许在最终取证前对 Trader 增加受限 MARKET_DATA 契约。具体依赖为子 change 0.6 → 7.14/7.15 → 7.12 → 7.16 → 7.5/7.17 → 6.1/6.4；审批前规范化完整订单，审批后新价只能校验执行条件。共享 manifest/API 改动须核对十角色资格影响，保留原始证据并最小重验，不整体重做 A–E/Dataflow、不重复全量采集、不解除 C3。
+
+**第 0 组进展**：子 change 0.1/0.3/0.4/0.6 已完成前置影响清单、范围/兼容矩阵、真实 pre-F 基线与 A 价格政策，见 `docs/validation/PHASE_F_RECOVERY_PREFLIGHT_2026-10-07.md`；2026-10-08 用户确认选定模式不可由另一模式替代、其他必需类别仍须齐全，0.2/0.5 已收尾，第 0 组 6/6 完成；完整性实际入口接线仍待 7.4。不据此前置文档勾选 F.0 接入/生产资格或 11.x 切换任务。
+
+| 收尾状态 | 是否达成 |
+|---|---|
+| 门禁实现验收完成 | 否；真实接线、默认拒绝、动态影子和恢复仍需验证 |
+| 生产读/调度切流完成 | 否；工程、资格/报告、观察均未闭合，已有授权须按动作核对 |
+| 实盘切流完成 | 否；本子 change 不执行真实 live 切换，C3 停用保留 |
+
+父 change 12.x 的新需求、端到端缺项拒绝和整图验收仍独立；子 change 的模块通过与失败分类不能代替其结果。旧专属失败只有在证明不影响新路径/共享依赖/退出安全后才能排除，不要求补完旧业务以取得全仓全绿。旧材料只作带日期的历史证据，最终状态须由修复后的实际运行回写。
+
+## 12. 最终验收与文档同步
+
+- [x] 12.1 运行全量 `uv run pytest` 和所有 Phase/Dataflow 专项测试发现问题，对比 Phase A 权威基线，对每个剩余失败登记根因、新需求关联/可达性及处置；新需求、共享依赖与退出安全失败阻塞，已证明无新路径影响的旧专属失败可排除，不以全仓旧测试全绿作为新入口验收前置 【2026-10-19 完成】首轮 86 failed/21 errors，修复后最终全量 **57 failed / 4387 passed / 0 errors**（10-07 基线 45 failed）。57 个全部登记根因与处置：41 个旧批次/读取切换机制（被 10-15 裁决取代，只能从 `ats batch|read` 和边界演练到达，生产的 `consumer_cutover` 不导入）、4 个决策路径夹具债、12 个 13.6 前已登记的既有失败；无一为产品缺陷。本轮查出并修复 3 个自己引入的问题（运行时模块被登记成仅冻结；健康检查导入来源适配器违反数据—Agent 边界；Routine 财报前基线在隔离验收里读实时日历和时钟）。见 docs/archive/PHASE_F_PARENT_12_ACCEPTANCE_20261019.md。
+- [x] 12.2 运行 OpenSpec strict validation、架构守卫、schema migration/reopen 和 SQLite 并发压力测试 【2026-10-19 完成】`openspec validate --all --strict` 45 项通过；架构/切流/数据层守卫与数据迁移测试通过；新增 tests/test_sqlite_concurrency_stress.py（真实多线程：12 线程×25 次发布投影、8 线程×10 次追加修订、16 线程争抢同一触发），连续 5 次通过，无丢失、无重复、无锁超时。
+- [x] 12.3 验证每笔新系统影子/实际订单都可追溯到 research snapshot、decision revision、risk review 和 Boss approval 【2026-10-19 完成】生产库无新系统订单（`trades` 52 笔均在 2026-07-23 之前，9 笔无法恢复决策链的登记为 broken_link 异常，未伪造关联）；写路径强制关联；隔离环境完整链路 `test_phase_f_integration_evidence` 22 项在当前代码通过。
+- [x] 12.4 验证完整流程在任一必需分析缺失/失败/过期时只产生 incomplete 报告且无法下单
+- [x] 12.5 更新 `ARCHITECTURE.md`、运维 runbooks、CLI 帮助和配置文档，确保实现状态、新鲜度、轮次、Calendar、Dataflow 专项验收范围和单 live route 规则一致 【2026-10-19 完成】ARCHITECTURE.md §14.5/§14.6 补 Phase E/F 实施状态（含生产日历库为空）；PHASE_F_OPERATIONS.md 加 10-15 裁决说明；60 秒新鲜度、最多 3 轮、单一实盘入口与配置一致。
+- [x] 12.6 审阅每个 Phase 与横向 Dataflow 专项的待退清单，为未满足项保留具体缺口，不在本 change 中执行未经确认的物理清除

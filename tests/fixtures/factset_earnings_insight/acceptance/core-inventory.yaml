@@ -1,0 +1,40 @@
+schema_version: 1
+source: independent_review_of_two_official_pdfs
+production_review_approval: false
+scope_id: technology
+entity_ids: [GICS_45]
+reports:
+  '2026-08-28':
+    pdf_hash: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    groups:
+      earnings_revenue_scorecard: [{period: 2026Q2, basis: target_quarter}]
+      earnings_revenue_surprise: [{period: 2026Q2, basis: target_quarter}]
+      earnings_revenue_growth:
+        - {period: 2026Q2, basis: target_quarter}
+        - {period: 2026Q3, basis: target_quarter}
+        - {period: '2026', basis: calendar_year}
+        - {period: '2027', basis: calendar_year}
+      net_profit_margin: [{period: 2026Q2, basis: target_quarter}]
+      eps_guidance:
+        - {period: 2026Q3, basis: target_quarter}
+        - {period: 2026/2027, basis: mixed_fiscal_years}
+      geographic_revenue_exposure: [{period: '2026-08-28', basis: snapshot}]
+      forward_pe: [{period: '2026-08-28', basis: snapshot}]
+      target_ratings: [{period: '2026-08-28', basis: snapshot}]
+  '2026-09-18':
+    pdf_hash: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    groups:
+      earnings_revenue_scorecard: [{period: 2026Q2, basis: target_quarter}]
+      earnings_revenue_surprise: [{period: 2026Q2, basis: target_quarter}]
+      earnings_revenue_growth:
+        - {period: 2026Q2, basis: target_quarter}
+        - {period: 2026Q3, basis: target_quarter}
+        - {period: '2026', basis: calendar_year}
+        - {period: '2027', basis: calendar_year}
+      net_profit_margin: [{period: 2026Q2, basis: target_quarter}]
+      eps_guidance:
+        - {period: 2026Q3, basis: target_quarter}
+        - {period: 2026/2027, basis: mixed_fiscal_years}
+      geographic_revenue_exposure: [{period: '2026-09-18', basis: snapshot}]
+      forward_pe: [{period: '2026-09-18', basis: snapshot}]
+      target_ratings: [{period: '2026-09-18', basis: snapshot}]

@@ -11,7 +11,7 @@ targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT]  # mo
 #   如需像 NVDA.yaml 那样定制 scorecard/signal_chain/narrative，再逐个补。
 
 # 观察名单：只读财报、不打分、不产出仓位建议、**绝不进入下单路径**。
-# 它们的财报被抽成产业链证据（见 docs/CHAIN_EVIDENCE.md）——利润是流动的，HBM 的
+# 它们的财报被抽成产业链证据（见 docs/archive/CHAIN_EVIDENCE.md）——利润是流动的，HBM 的
 # 供需由海力士/美光/三星三家共同决定，云 capex 由五家共同决定，只读自己持有的那家
 # 等于用几分之一的证据下注。
 # 与 targets 的区别：targets 可交易、走完整 PEAD 打分；observe 只贡献证据。
@@ -50,8 +50,13 @@ research:
   enabled: true
   lookback_days: 2
   backfill_days: 30            # acquisition window; persistent UID cursor narrows later runs
-  max_articles_per_run: 8
+  max_articles_per_run: null      # no article-count truncation; character/time budgets still apply
   article_chars: 40000           # per-article cap fed to the extraction LLM
+  publisher_entities: []         # no publisher-only candidate channel
+  candidate_limit: 120           # bounded explicit target channel
+  exploration_articles: 0        # no peer/publisher-only reserved slots
+  total_article_chars: 320000     # visible article text across one target invocation
+  dispatch_seconds: 180          # stop starting calls; an in-flight call retains gateway timeout
   min_confidence_event: 0.6      # >= this -> insight becomes a pead_events entry
   push_threshold: 0.8            # >= this -> immediate Feishu info push
 
@@ -139,8 +144,7 @@ sector_review:
   enabled: true
   sectors: [ai_hardware]
   weekday: 5            # 周六跑（独立 cron job，不跟随周一到周五的交易日级联）
-  inject_prep: true     # prep 的 industry_context 追加最新评审块
-  inject_monitor: true  # monitor 上下文加 1-3 行 regime 提示
+  # Phase D：inject_prep / inject_monitor 开关已移除——行业结论不再进入 PEAD 上下文。
   # 截面选股：周报后自动跑各层排序（带结构层，即把产业链证据带进 moat_pricing）。
   cross_section: true
   # 层级子行业分析师（2026-08-20 新增）：每层跑一次，产出配置结论（超配/标配/低配/清仓）

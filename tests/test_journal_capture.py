@@ -125,8 +125,13 @@ def test_persist_writes_divergence_and_notes_per_row():
     store = get_store()
     store.save_chief_run(cycle_id="c9", as_of=NOW, summary="s", decisions=[])
     decisions = [_d("GOOG"), _d("ASML")]
+    # Phase C (task 2.1): system-source writes now REQUIRE the decision chain;
+    # the fixture entries carry one so the test keeps targeting the context
+    # narrowing behaviour, not the (separately tested) chain enforcement.
     entries = [TradeLogEntry(order_id="1", cycle_id="c9", symbol=s, action="trim",
-                             qty=1.0, status="filled", submitted_at=NOW)
+                             qty=1.0, status="filled", submitted_at=NOW,
+                             revision_no=1, decision_hash="a" * 32,
+                             approval_id="c9:r1:approval")
                for s in ("GOOG", "ASML")]
     state = ChiefDecisionState(
         cycle_id="c9", as_of=NOW, source="chief", dry_run=True, use_llm=False,

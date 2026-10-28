@@ -47,3 +47,17 @@ def test_verify_transcript_rejects_wrong_quarter():
     # An incomplete target cannot authorize an automatic candidate either.
     ok, why = fiscal.verify_transcript("Q FY2026", "body", "tavily:...q1-2026")
     assert ok is False and "period unresolved" in why
+
+
+def test_catalog_declared_period_is_authoritative_when_the_text_cannot_be_read():
+    """defeatbeta transcripts open with 'September Quarter 2025 Earnings Conference Call'; the catalog still knows
+    fiscal year and quarter as fields.  Without this the guard aborted every event review on such a transcript."""
+    body = "## Prepared Remarks\n\n**Operator:** Good day, and welcome to the September Quarter 2026 call."
+    assert fiscal.detect_period(body, "") is None
+    ok, why = fiscal.verify_transcript("Q1 FY2027", body, "platform:defeatbeta", declared_period="Q1 FY2027")
+    assert ok and "目录声明" in why
+    ok, why = fiscal.verify_transcript("Q1 FY2027", body, "platform:defeatbeta", declared_period="Q4 FY2026")
+    assert not ok and "≠" in why
+    # an incomplete declaration falls back to reading the text, exactly as before
+    ok, why = fiscal.verify_transcript("Q1 FY2027", body, "platform:defeatbeta", declared_period="Q FY2027")
+    assert not ok and "无法" in why

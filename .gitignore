@@ -38,6 +38,12 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
+# `tests/` is deliberately NOT ignored. The upstream Python template listed it
+# here next to the coverage artifacts, which quietly excluded the entire test
+# suite (346 files) from version control — so the gate suites Phase F relies on
+# (dataflow assurance regression, isolation, architecture guards) would exist
+# only on one machine and no clone could re-run them. Only the coverage OUTPUTS
+# belong in this section.
 htmlcov/
 .tox/
 .nox/
@@ -51,6 +57,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+tests/.pytest_cache/
+tests/**/__pycache__/
 
 # Translations
 *.mo
@@ -71,6 +79,10 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+
+# 本地验证记录和文档素材保留在磁盘，不纳入版本控制。
+/docs/validation/
+/docs/assets/
 
 # PyBuilder
 .pybuilder/

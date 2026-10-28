@@ -1,0 +1,61 @@
+schema_version: 1
+source: independent_read_of_original_factset_pdf_and_printed_chart_labels
+production_review_approval: false
+review_state: independent_source_verified_not_production_approved
+entity_id: SP500
+unit_policy: published_percentages_normalized_to_ratio
+evidence_policy: page_is_printed_pdf_page; image_is_embedded_image_ordinal; never_parser_page_rule
+notes:
+  - Each values map is a metric suffix under the registered prefix described by the group.
+  - FY 2026/2027 guidance charts print sector counts but no S&P 500 aggregate count; no synthetic index count is expected.
+  - Published rounded shares can sum to 0.99 or 1.01; do not silently renormalize them.
+  - Chart labels, not curve heights or visual interpolation, supply numeric values.
+reports:
+  '2026-08-28':
+    pdf_sha256: ae262138891244678730deaaef8607466b919f058038578fbea3b5454d95f381
+    applicability: {registered_metric_ids: 33, applicable_metric_period_cells: 43, not_disclosed_index_aggregate: [earnings.guidance.negative_count@2026/2027, earnings.guidance.positive_count@2026/2027], unreadable: []}
+    groups:
+      - {name: reporting_coverage, period: 2026Q2, page: 1, anchor: 'Key Metrics', values: {earnings.reporting.coverage: 0.97}}
+      - {name: scorecard, period: 2026Q2, page: 17, image: '2/3', anchor: 'EPS and revenue surprise scorecards; S&P 500 row', values: {earnings.eps.above_estimate_share: 0.86, earnings.eps.inline_estimate_share: 0.03, earnings.eps.below_estimate_share: 0.10, earnings.revenue.above_estimate_share: 0.77, earnings.revenue.inline_estimate_share: 0.00, earnings.revenue.below_estimate_share: 0.23}}
+      - {name: surprise, period: 2026Q2, page: 18, image: '2/3', anchor: 'EPS and revenue surprise; S&P 500 row', values: {earnings.eps.surprise_pct: 0.265, earnings.revenue.surprise_pct: 0.032}}
+      - {name: growth, period: 2026Q2, page: 21, image: '2/3', anchor: 'Q2 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.520, earnings.revenue.yoy_growth: 0.155}}
+      - {name: growth, period: 2026Q3, page: 26, image: '2/3', anchor: 'Q3 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.282, earnings.revenue.yoy_growth: 0.117}}
+      - {name: growth, period: '2026', basis: calendar_year, page: 28, image: '2/3', anchor: 'CY 2026 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.312, earnings.revenue.yoy_growth: 0.119}}
+      - {name: growth, period: '2027', basis: calendar_year, page: 29, image: '2/3', anchor: 'CY 2027 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.147, earnings.revenue.yoy_growth: 0.089}}
+      - {name: margin, period: 2026Q2, page: 23, image: '2/3', anchor: 'Q2 net profit margin and year-on-year direction; S&P 500 row', values: {earnings.net_profit_margin: 0.170, earnings.margin.increase_share: 0.59, earnings.margin.unchanged_share: 0.01, earnings.margin.decrease_share: 0.40}}
+      - {name: guidance_count, period: 2026Q3, page: 1, anchor: 'Key Metrics: 35 negative, 63 positive', values: {earnings.guidance.negative_count: 35, earnings.guidance.positive_count: 63}}
+      - {name: guidance_share, period: 2026Q3, page: 24, image: 3, anchor: 'Q3 guidance percentage; S&P 500 row', values: {earnings.guidance.negative_share: 0.36, earnings.guidance.positive_share: 0.64}}
+      - {name: guidance_share, period: 2026/2027, basis: mixed_fiscal_years, page: 27, image: 3, anchor: 'FY guidance percentage; S&P 500 row', values: {earnings.guidance.negative_share: 0.37, earnings.guidance.positive_share: 0.63}}
+      - {name: bottom_up_eps, period: 2026Q3, page: 32, image: 3, anchor: 'Quarterly EPS actual and estimates; Q3 2026 label', values: {earnings.bottom_up_eps: 89.68}}
+      - {name: bottom_up_eps, period: '2026', basis: calendar_year, page: 32, image: 2, anchor: 'Calendar-year EPS actual and estimates; CY 2026 label', values: {earnings.bottom_up_eps: 361.24}}
+      - {name: bottom_up_eps, period: '2027', basis: calendar_year, page: 32, image: 2, anchor: 'Calendar-year EPS actual and estimates; CY 2027 label', values: {earnings.bottom_up_eps: 414.75}}
+      - {name: geography, period: '2026-08-28', basis: snapshot, page: 30, image: 2, anchor: 'Aggregate geographic revenue exposure printed pie labels', values: {revenue.geographic.us_share: 0.59, revenue.geographic.international_share: 0.41}}
+      - {name: valuation_forward, period: '2026-08-28', basis: snapshot, page: 33, image: 2, anchor: 'Forward 12-month P/E and printed historical averages', values: {valuation.forward_pe: 19.6, valuation.forward_pe.average_5y: 19.9, valuation.forward_pe.average_10y: 19.0}}
+      - {name: valuation_trailing, period: '2026-08-28', basis: snapshot, page: 15, anchor: 'Trailing 12-month P/E sentence', values: {valuation.trailing_pe: 26.4, valuation.trailing_pe.average_5y: 24.4, valuation.trailing_pe.average_10y: 23.5}}
+      - {name: ratings, period: '2026-08-28', basis: snapshot, page: 16, anchor: '12,883 ratings; prose gives 59.2% Buy, 35.9% Hold, 4.9% Sell more precisely than rounded chart', values: {consensus.rating.buy_share: 0.592, consensus.rating.hold_share: 0.359, consensus.rating.sell_share: 0.049}}
+      - {name: target, period: '2026-08-28', basis: snapshot, page: 36, image: 3, anchor: 'S&P 500 target upside', values: {consensus.target.upside: 0.191}}
+      - {name: revision_breadth, period: 2026Q2, page: 1, anchor: 'Ten of eleven sectors higher earnings due to upward revisions', values: {earnings.revision.improved_sector_count: 10}}
+  '2026-09-18':
+    pdf_sha256: f679661e1aaf0dc3eaa181e7fb44230a4c5c9c98ac6bea46eeea2af52edecc08
+    applicability: {registered_metric_ids: 33, applicable_metric_period_cells: 43, not_disclosed: [earnings.reporting.coverage], not_disclosed_index_aggregate: [earnings.guidance.negative_count@2026/2027, earnings.guidance.positive_count@2026/2027], unreadable: []}
+    groups:
+      - {name: scorecard, period: 2026Q2, page: 13, image: '2/3', anchor: 'EPS and revenue surprise scorecards; S&P 500 row', values: {earnings.eps.above_estimate_share: 0.87, earnings.eps.inline_estimate_share: 0.03, earnings.eps.below_estimate_share: 0.10, earnings.revenue.above_estimate_share: 0.77, earnings.revenue.inline_estimate_share: 0.00, earnings.revenue.below_estimate_share: 0.23}}
+      - {name: surprise, period: 2026Q2, page: 14, image: '2/3', anchor: 'EPS and revenue surprise; S&P 500 row', values: {earnings.eps.surprise_pct: 0.259, earnings.revenue.surprise_pct: 0.031}}
+      - {name: growth, period: 2026Q2, page: 17, image: '2/3', anchor: 'Q2 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.523, earnings.revenue.yoy_growth: 0.156}}
+      - {name: growth, period: 2026Q3, page: 22, image: '2/3', anchor: 'Q3 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.289, earnings.revenue.yoy_growth: 0.119}}
+      - {name: growth, period: '2026', basis: calendar_year, page: 24, image: '2/3', anchor: 'CY 2026 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.318, earnings.revenue.yoy_growth: 0.121}}
+      - {name: growth, period: '2027', basis: calendar_year, page: 25, image: '2/3', anchor: 'CY 2027 EPS and revenue growth; S&P 500 row', values: {earnings.eps.yoy_growth: 0.152, earnings.revenue.yoy_growth: 0.091}}
+      - {name: margin, period: 2026Q2, page: 19, image: '2/3', anchor: 'Q2 net profit margin and year-on-year direction; S&P 500 row', values: {earnings.net_profit_margin: 0.170, earnings.margin.increase_share: 0.60, earnings.margin.unchanged_share: 0.01, earnings.margin.decrease_share: 0.40}}
+      - {name: margin, period: 2026Q3, page: 11, anchor: 'Estimated Q3 2026 net profit margin sentence', values: {earnings.net_profit_margin: 0.150}}
+      - {name: guidance_count, period: 2026Q3, page: 1, anchor: 'Key Metrics: 43 negative, 72 positive', values: {earnings.guidance.negative_count: 43, earnings.guidance.positive_count: 72}}
+      - {name: guidance_share, period: 2026Q3, page: 20, image: 3, anchor: 'Q3 guidance percentage; S&P 500 row', values: {earnings.guidance.negative_share: 0.37, earnings.guidance.positive_share: 0.63}}
+      - {name: guidance_share, period: 2026/2027, basis: mixed_fiscal_years, page: 23, image: 3, anchor: 'FY guidance percentage; S&P 500 row', values: {earnings.guidance.negative_share: 0.38, earnings.guidance.positive_share: 0.62}}
+      - {name: bottom_up_eps, period: 2026Q3, page: 28, image: 3, anchor: 'Quarterly EPS actual and estimates; Q3 2026 label', values: {earnings.bottom_up_eps: 90.03}}
+      - {name: bottom_up_eps, period: '2026', basis: calendar_year, page: 28, image: 2, anchor: 'Calendar-year EPS actual and estimates; CY 2026 label', values: {earnings.bottom_up_eps: 362.41}}
+      - {name: bottom_up_eps, period: '2027', basis: calendar_year, page: 28, image: 2, anchor: 'Calendar-year EPS actual and estimates; CY 2027 label', values: {earnings.bottom_up_eps: 417.35}}
+      - {name: geography, period: '2026-09-18', basis: snapshot, page: 26, image: 2, anchor: 'Aggregate geographic revenue exposure printed pie labels', values: {revenue.geographic.us_share: 0.59, revenue.geographic.international_share: 0.41}}
+      - {name: valuation_forward, period: '2026-09-18', basis: snapshot, page: 29, image: 2, anchor: 'Forward 12-month P/E and printed historical averages', values: {valuation.forward_pe: 19.1, valuation.forward_pe.average_5y: 19.8, valuation.forward_pe.average_10y: 19.0}}
+      - {name: valuation_trailing, period: '2026-09-18', basis: snapshot, page: 12, anchor: 'Trailing 12-month P/E sentence', values: {valuation.trailing_pe: 25.5, valuation.trailing_pe.average_5y: 24.4, valuation.trailing_pe.average_10y: 23.6}}
+      - {name: ratings, period: '2026-09-18', basis: snapshot, page: 12, anchor: '13,038 ratings; prose gives 59.3% Buy, 35.9% Hold, 4.8% Sell more precisely than rounded chart', values: {consensus.rating.buy_share: 0.593, consensus.rating.hold_share: 0.359, consensus.rating.sell_share: 0.048}}
+      - {name: target, period: '2026-09-18', basis: snapshot, page: 32, image: 3, anchor: 'S&P 500 target upside', values: {consensus.target.upside: 0.212}}
+      - {name: revision_breadth, period: 2026Q3, page: 1, anchor: 'Four sectors higher earnings due to upward revisions', values: {earnings.revision.improved_sector_count: 4}}

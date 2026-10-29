@@ -16,6 +16,10 @@ workflows:
   fundamental-routine: {misfire_grace_seconds: 43200, max_lookback_seconds: 172800}
   fundamental-event: {misfire_grace_seconds: 43200, max_lookback_seconds: 345600}
   macro-review: {misfire_grace_seconds: 172800, max_lookback_seconds: 604800}
+  # Trade path (design D5): a restart replays only a tick it just missed, and never one from before the
+  # workflow was resumed. The Clerk's own window register covers older days; a stale Chief cycle is worthless.
+  clerk-daily: {misfire_grace_seconds: 43200, max_lookback_seconds: 43200}
+  chief-daily: {misfire_grace_seconds: 14400, max_lookback_seconds: 14400}
   technical-review:
     # 4 h, not 30 min: the Mac sleeps, and a run that is late because of sleep is still today's run. It is
     # deterministic and costs nothing, and the next scheduled run is a day away.

@@ -57,8 +57,9 @@ class CLIChannel:
         print("-" * 70)
 
     def _prompt(self, req: ApprovalRequest) -> BossApproval:
-        print("Commands: [a]pprove all · [r]eject all · s <SYMs> approve-subset · "
-              "x <SYMs> reject · report <SYM> · q quit")
+        left = max(0, req.max_boss_revisions - req.boss_revisions)
+        revise = f" · revise <修改意见>（还可 {left} 次）" if left else " · （驳回修改次数已用完）"
+        print(f"Commands: [a]pprove · [r]eject [备注]{revise} · report <SYM> · q quit")
         while True:
             raw = input("boss> ").strip()
             if not raw:
@@ -67,23 +68,27 @@ class CLIChannel:
             arg = " ".join(rest)
             stamp = datetime.now(timezone.utc)
             if cmd in {"a", "approve"}:
-                return BossApproval(status="approved", reviewer=self.reviewer, reviewed_at=stamp)
+                return BossApproval(status="approved", reviewer=self.reviewer, reviewed_at=stamp,
+                                    channel="cli")
             if cmd in {"r", "reject"}:
                 return BossApproval(status="rejected", reviewer=self.reviewer, reviewed_at=stamp,
-                                    comment=arg)
-            if cmd == "s":  # approve only these symbols
-                return BossApproval(status="approved", reviewer=self.reviewer, reviewed_at=stamp,
-                                    approved_symbols=rest)
-            if cmd == "x":  # reject these symbols, approve the rest
-                return BossApproval(status="approved", reviewer=self.reviewer, reviewed_at=stamp,
-                                    rejected_symbols=rest)
+                                    comment=arg, channel="cli")
+            if cmd == "revise":
+                if not left:
+                    print(f"已用完 {req.max_boss_revisions} 次驳回修改，只能 approve 或 reject")
+                    continue
+                if not arg:
+                    print("revise 需要修改意见：revise <修改意见>")
+                    continue
+                return BossApproval(status="revise", reviewer=self.reviewer, reviewed_at=stamp,
+                                    comment=arg, channel="cli")
             if cmd == "report":
                 bundle = self.fetch_report_context(arg)
                 print(bundle.summary or "(no context available yet)")
                 continue
             if cmd in {"q", "quit"}:
                 return BossApproval(status="rejected", reviewer=self.reviewer, reviewed_at=stamp,
-                                    comment="quit without approving")
+                                    comment="quit without approving", channel="cli")
             print(f"unknown command: {cmd!r}")
 
     # --- context pull ---------------------------------------------------- #

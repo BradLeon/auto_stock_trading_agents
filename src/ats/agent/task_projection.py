@@ -251,6 +251,17 @@ class NameAllocation(_Item):
     self_reported_only: bool | None = None
 
 
+class CrossSectionDivergence(_Item):
+    """A name whose blended (structure-aware) rank differs from its pure-quant rank, with the structure analyst's reason."""
+
+    layer: str = Field(min_length=1)
+    symbol: str = Field(min_length=1)
+    quant_rank: int = Field(ge=1)
+    rank: int = Field(ge=1)
+    moat_pricing: float | None = None
+    rationale: str = ""
+
+
 class SectorAllocationPayload(_Payload):
     """Where capital should sit within a sector, relative to the book."""
 
@@ -267,9 +278,12 @@ class SectorAllocationPayload(_Payload):
     rotation_available: bool | None = None
     rotation_advice: str = ""
     missing_layers: list[str] = Field(default_factory=list)
+    # 2026-10-28: composite-vs-quant rank divergences, so the Chief keeps seeing where structure moved a name.
+    cross_section_divergence: list[CrossSectionDivergence] = Field(default_factory=list)
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
-        "layers", "names", "fact_refs", "rotation_available", "rotation_advice", "missing_layers")
+        "layers", "names", "fact_refs", "rotation_available", "rotation_advice", "missing_layers",
+        "cross_section_divergence")
 
     @field_validator("drivers", mode="before")
     @classmethod

@@ -25,7 +25,7 @@ from ..agent.task_projection import (
     content_hash,
 )
 from ..memory import task_store_scope
-from .planning import TASK_ROLE, TaskInstance, WorkflowPlan, task_registry
+from .planning import TASK_ROLE, TaskInstance, WorkflowPlan, task_config_hashes, task_registry
 from .run_contracts import TriggerContext
 from .store import WorkflowStore
 
@@ -561,7 +561,7 @@ class Dispatcher:
         input_refs.extend(env.projection_id for env in dependencies.values())
         input_refs.extend(str(ref) for ref in task_inputs.get("admitted_material_refs", []) or [])
         input_refs.extend(f"config:{path}@{digest}"
-                          for path, digest in sorted(plan.source_config_hashes.items()))
+                          for path, digest in sorted(task_config_hashes(plan, task.task_id).items()))
         data_refs = task_inputs.get("data_vintage_refs", root.get("data_vintage_refs", [])) or []
         resolver = getattr(self, "vintage_resolver", None)   # some callers invoke this unbound
         if not data_refs and resolver is not None:

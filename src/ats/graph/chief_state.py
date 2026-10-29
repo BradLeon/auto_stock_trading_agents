@@ -64,11 +64,14 @@ class ChiefDecisionState(BaseModel):
     parent_revision_no: int | None = None                   # revised from (chief_revise)
     risk_round: int = 0                                     # 1-based once risk_gate ran
     max_risk_rounds: int = 3                                # bounded auto-revision (ARCHITECTURE §5.2)
+    boss_revisions: int = 0                                 # Boss "revise" verdicts used on this cycle
+    max_boss_revisions: int = 2                             # after that the Boss can only approve or reject
     risk_review: DecisionRiskReview | None = None           # latest deterministic review
     approved_decisions: list[TradeDecision] = Field(default_factory=list)
     portfolio_snapshot_id: str = ""                         # review binding (§10.2)
     authorization: dict[str, Any] | None = None             # execution gate (Group 7)
-    gate_outcome: str = ""                                  # placed | stale | refused
+    gate_outcome: str = ""                                  # placed | stale | refused | approved_not_executed
+    execution_checks: dict[str, Any] = Field(default_factory=dict)   # pre-execution checks (live lock / dry run)
     gate_rejections: list[str] = Field(default_factory=list)
     cycle_status: str = ""                                  # mirrors decision_cycles.status
 

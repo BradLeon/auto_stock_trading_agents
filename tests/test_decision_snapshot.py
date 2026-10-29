@@ -184,6 +184,37 @@ def test_no_action_is_a_formal_terminal_outcome_with_reason(tmp_path):
 
 # --- 3.5 legacy double-write ------------------------------------------------------ #
 
+def test_decision_readers_read_the_audit_and_the_mirror_stays_for_revert(tmp_path):
+    """Task 2.3: `last_chief_run` / `recent_decisions` read decision_cycles + decision_revisions.
+
+    With no mirror write the readers still see the cycle; the legacy `decisions` table is then
+    empty. Mirroring afterwards fills it with the same orders, so reverting the readers to the
+    legacy tables finds every decision written since the switch.
+    """
+    repo = _repo(tmp_path)
+    store = repo.store
+    repo.create_cycle(cycle_id="chief-20260923-000001", trigger_source="manual")
+    first = repo.append_revision(
+        cycle_id="chief-20260923-000001",
+        orders=[{"symbol": "AMD", "action": "buy", "notional_usd": 5000.0, "rationale": "first"}],
+        rationale="summary one")
+    second = repo.append_revision(
+        cycle_id="chief-20260923-000001",
+        orders=[{"symbol": "AMD", "action": "buy", "notional_usd": 3000.0, "rationale": "scaled"}],
+        rationale="summary two", parent_revision_no=first["revision_no"])
+    legacy = lambda: store.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+    assert legacy() == 0
+    run = store.last_chief_run()
+    assert run["cycle_id"] == "chief-20260923-000001" and run["manager_summary"] == "summary two"
+    assert [d["notional_usd"] for d in run["decisions"]] == [3000.0]      # the current revision only
+    assert [d["notional_usd"] for d in store.recent_decisions(symbol="AMD")] == [3000.0]
+    assert store.recent_decisions(symbol="NVDA") == []
+    for revision in (first, second):
+        repo.mirror_revision_to_legacy("chief-20260923-000001", revision["revision_no"], as_of=NOW)
+    rows = store.conn.execute("SELECT symbol, notional_usd FROM decisions ORDER BY rowid").fetchall()
+    assert [(r["symbol"], r["notional_usd"]) for r in rows] == [("AMD", 5000.0), ("AMD", 3000.0)]
+
+
 def test_mirror_keeps_legacy_read_entry_points_working(tmp_path):
     repo = _repo(tmp_path)
     store = repo.store

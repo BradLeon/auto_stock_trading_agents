@@ -248,6 +248,60 @@ def role_for(module_path: str) -> str:
         "module, not the role (e.g. 'agents.risk_officer.review' → 'risk')")
 
 
+# Consumers that are plain modules, not roles: judged by what the module's own source does.
+# Keyed by the module path the registry names; the value is the file the claim is about.
+# `store.direct_trade_reads` is the only entry measured this way, so the check is specific to
+# it: trades / fills / performance must be read through `ats.execution.state_api`.
+MODULE_TRADE_READ_SOURCES: dict[str, str] = {
+    "risk.assess": "src/ats/risk/assess.py",
+    "channel.context": "src/ats/channel/context.py",
+}
+_RAW_TRADE_CALLS = {"recent_trades", "recent_fills", "recent_performance", "save_performance"}
+_RAW_TRADE_SQL = re.compile(r"\b(from|join)\s+(trades|fills|performance|trade_episodes)\b", re.I)
+
+
+@dataclass
+class ModuleTradeReads:
+    """What one module's source does with the trade ledger tables."""
+
+    module: str
+    violations: list[tuple[str, str]] = field(default_factory=list)   # (kind, location)
+    call_path: tuple[str, ...] = ()
+
+
+def scan_module_trade_reads(module_path: str) -> ModuleTradeReads:
+    """AST scan of one module: raw store trade reads are findings, `state_api` is the way in.
+
+    Zero needs both halves. No raw read alone would also hold for a module that never
+    reads trade history, which is not evidence it moved onto the governed layer.
+    """
+    import ast
+
+    from ..config import REPO_ROOT
+
+    relative = MODULE_TRADE_READ_SOURCES[module_path]
+    path = REPO_ROOT / relative
+    record = ModuleTradeReads(module=module_path)
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    reached: list[str] = []
+    for node in ast.walk(tree):
+        location = f"{relative}:{getattr(node, 'lineno', 0)}"
+        if isinstance(node, ast.ImportFrom):
+            names = {alias.name for alias in node.names}
+            if "state_api" in names or (node.module or "").endswith("state_api"):
+                reached.append("ats.execution.state_api")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            target = node.func.value
+            on_state_api = isinstance(target, ast.Name) and target.id == "state_api"
+            if node.func.attr in _RAW_TRADE_CALLS and not on_state_api:
+                record.violations.append(("direct_store_trade_read", location))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and _RAW_TRADE_SQL.search(node.value):
+            record.violations.append(("direct_trade_table_sql", location))
+    record.call_path = tuple(dict.fromkeys(reached))
+    return record
+
+
 # --- 12.1 consumer zero ------------------------------------------------------
 
 def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
@@ -280,6 +334,17 @@ def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
             continue
 
         if scan is not None:
+            if consumer in MODULE_TRADE_READ_SOURCES and identifier == "store.direct_trade_reads":
+                found = scan_module_trade_reads(consumer)
+                clean = not found.violations and bool(found.call_path)
+                verdicts.append(ZeroVerdict(
+                    identifier=identifier, consumer=consumer, verdict=ZERO if clean else NOT_ZERO,
+                    reason=("reads trade history only through ats.execution.state_api" if clean
+                            else "reads a trade ledger table directly, or never reaches "
+                                 "ats.execution.state_api"),
+                    evidence={"violations": [f"{kind}@{where}" for kind, where in found.violations],
+                              "call_path": list(found.call_path)}))
+                continue
             try:
                 role = role_for(consumer)
             except KeyError as exc:

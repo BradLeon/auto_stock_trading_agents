@@ -531,6 +531,11 @@ def open_decision_read_gate(monkeypatch):
 
     monkeypatch.setattr(dr, "freeze_read_dependencies", lambda plan: [])
     monkeypatch.setattr(dr, "validate_read_dependencies", lambda plan, requirements: None)
+    # The Chief's context reads account state through a native input whose guard demands the same
+    # qualified route outside an isolated run (its own tests cover the refusal).
+    from ats.workflow import runtime_reads
+
+    monkeypatch.setattr(runtime_reads, "guard_input", lambda *a, **k: None)
 
 
 @pytest.fixture(autouse=True)

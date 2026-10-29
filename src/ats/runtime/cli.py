@@ -703,7 +703,27 @@ def live_command(args, *, parser) -> int:
         if auth is None:
             print(f"no such live authorisation: {args.reference!r}")
             return 1
-        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
+        print(json.dumps({**auth.as_row(),
+                          "source_verification": live.read_verification(auth.reference, path=db).as_row(),
+                          "verification_history": live.verification_history(auth.reference, path=db)},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if action in {"verify", "void"}:
+        # Both append a fact and never edit the authorisation. Each must carry the
+        # user's own confirmation (who, their words, where and when) — an agent
+        # cannot verify or void on its own say-so.
+        change = live.verify_authorisation if action == "verify" else live.void_authorisation
+        try:
+            result = change(
+                _require(args.reference, "--reference", parser),
+                confirmed_by=args.confirmed_by, confirmation=args.confirmation,
+                confirmation_source=args.confirmation_source, confirmed_at=args.confirmed_at,
+                actor=args.actor, path=db)
+        except live.LiveAuthorisationError as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(result.as_row(), ensure_ascii=False, indent=2))
         return 0
 
     if action == "gate":
@@ -1870,9 +1890,32 @@ def run_chief(
 ) -> int:
     """One Chief decision run through the decision graph: assemble all artifacts
     -> decide -> risk gate -> persist -> Boss approval -> trade -> persist."""
+    start_chief_cycle(execute=execute, dry_run=dry_run, channel=channel, use_llm=use_llm, auto=auto,
+                      offline=offline, source=source, fundamental_mode=fundamental_mode,
+                      decision_profile=decision_profile)
+    return 0
+
+
+def start_chief_cycle(
+    *,
+    execute: bool = True,
+    dry_run: bool = True,
+    channel: str = "cli",
+    use_llm: bool = True,
+    auto: bool = False,
+    offline: bool = False,
+    source: str = "chief",
+    fundamental_mode: str = "routine",
+    decision_profile: str = "ai_hardware",
+) -> tuple[str, dict]:
+    """Start one Chief cycle and return `(cycle_id, graph result)`; the scheduled `chief-daily` reads the result."""
     from ..graph.chief_state import ChiefDecisionState
 
     now = datetime.now(timezone.utc)
+    if execute:
+        from .approval_cli import supersede_pending
+
+        supersede_pending(f"chief-{now:%Y%m%d-%H%M%S}", created_at=now.isoformat())
     state = ChiefDecisionState(
         cycle_id=f"chief-{now:%Y%m%d-%H%M%S}",
         as_of=now,
@@ -1885,8 +1928,8 @@ def run_chief(
         auto_approve=auto,
         execute=execute,
     )
-    run_decision_graph(state, channel=channel)
-    return 0
+    result = run_decision_graph(state, channel=channel)
+    return state.cycle_id, result
 
 
 def chief_show() -> int:
@@ -1908,7 +1951,7 @@ def chief_show() -> int:
 def chief_probe(*, offline: bool = False) -> int:
     from ..agents.chief import assemble
 
-    ctx = assemble.build(live_broker=not offline)
+    ctx = assemble.build()
     print(f"=== chief context stats: {ctx.stats()} ===\n")
     print(ctx.as_context())
     return 0
@@ -4582,9 +4625,13 @@ def main(argv: list[str] | None = None) -> int:
         "live",
         help="实盘授权门与交易路径演练（**本命令不会执行真实切换**）")
     lv.add_argument("action", choices=[
-        "authorize", "show-auth", "gate", "drill", "rollback-drill",
+        "authorize", "show-auth", "verify", "void", "gate", "drill", "rollback-drill",
         "drill-history"])
     lv.add_argument("--reference", default="", help="实盘授权引用（须以 LIVE- 开头）")
+    lv.add_argument("--confirmed-by", default="", help="verify/void: 确认人（用户本人）")
+    lv.add_argument("--confirmation", default="", help="verify/void: 用户确认的原文")
+    lv.add_argument("--confirmation-source", default="", help="verify/void: 确认的出处（会话、日期）")
+    lv.add_argument("--confirmed-at", default="", help="verify/void: 确认时间（ISO 8601）")
     lv.add_argument("--issuer", default="human", help="authorize: 签发主体（仅 human）")
     lv.add_argument("--authorised-by", default="", help="authorize: 授权人")
     lv.add_argument("--issued-by", default="", help="authorize: 签发人")
@@ -4843,7 +4890,11 @@ def main(argv: list[str] | None = None) -> int:
     ch.add_argument("--fundamental-mode", choices=["routine", "event"], default="routine")
     ch.add_argument("--decision-profile", default="ai_hardware")
     ch.add_argument("--no-execute", action="store_true", help="decide only, don't call trader")
-    ch.add_argument("--channel", choices=["cli", "feishu", "feishu_bot"], default="cli")
+    ch.add_argument("--channel", choices=["cli", "pending", "feishu", "feishu_bot"], default="cli",
+                    help="cli: 前台批准/驳回修改/拒绝；pending: 留待 `ats approval` 回答并发一条提醒")
+    from .approval_cli import add_parser as _add_approval_parser
+
+    _add_approval_parser(sub)
     rk = sub.add_parser("risk", help="risk officer 风控 (report / memo / check)")
     rk.add_argument("action", choices=["report", "memo", "check"])
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
@@ -5254,6 +5305,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "events":
         return events_calendar_command(args, parser=parser)
+    if args.command == "approval":
+        from .approval_cli import dispatch as _approval_dispatch
+
+        return _approval_dispatch(args)
     if args.command == "chief":
         if args.action == "show":
             return chief_show()

@@ -25,7 +25,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .decision import Action, normalize_action
 
@@ -215,8 +215,27 @@ class TradeEpisode(BaseModel):
     horizon_overdue_days: int | None = None      # 超过计划持有期多少天（drift 的实时形态）
     # §11.2（任务 7.1）：LLM 产生的标注必须携带来源与判定时点——与确定性
     # 计算结果在数据上可区分。写入口由 execution.llm_boundary 白名单强制。
-    invalidation_source: str = ""                # "llm" / ""（确定性或未判定）
+    invalidation_source: str | None = None       # "llm" / None（确定性或未判定）；写库一律 NULL
     invalidation_checked_at: datetime | None = None   # 最近一次 LLM 判定时刻
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate_null_and_blank(cls, data):
+        """读库防御：NULL 与空串都可能出现在库里。
+
+        加列之前的行读出来是 NULL，旧代码写过 ""。两者对 invalidation_source 都表示
+        "未判定"，统一成 None；其他有默认值的字段读到 NULL 时取默认值。没有默认值的
+        事实字段（episode_id、opened_at 等）读到 NULL 照旧报错。
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        if data.get("invalidation_source") == "":
+            data["invalidation_source"] = None
+        for name, field in cls.model_fields.items():
+            if name in data and data[name] is None and not field.is_required():
+                data.pop(name)
+        return data
 
     @property
     def decision_gradeable(self) -> bool:

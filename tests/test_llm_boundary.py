@@ -149,3 +149,49 @@ def test_critic_run_does_not_change_ledger_numbers(store):
     run_critic(store=store, use_llm=False)
     after = _ledger_snapshot()
     assert before == after
+
+
+def test_an_unjudged_episode_is_written_as_null(store):
+    """Writes use one form for "not judged": NULL, never an empty string."""
+    from datetime import datetime, timezone
+
+    from ats.schemas.journal import TradeEpisode
+
+    store.save_episode(TradeEpisode(episode_id="t8", symbol="NVDA",
+                                    opened_at=datetime.now(timezone.utc)))
+    row = store.conn.execute(
+        "SELECT invalidation_source FROM trade_episodes WHERE episode_id='t8'").fetchone()
+    assert row["invalidation_source"] is None
+
+
+@pytest.mark.parametrize("stored", [None, ""])
+def test_an_episode_reads_null_and_blank_provenance_as_not_judged(store, stored):
+    """Rows from before the column existed read NULL; older writes stored "". Both load."""
+    from datetime import datetime, timezone
+
+    from ats.schemas.journal import TradeEpisode
+
+    store.save_episode(TradeEpisode(episode_id="t9", symbol="NVDA", setup="pead_event",
+                                    opened_at=datetime.now(timezone.utc)))
+    store.conn.execute("UPDATE trade_episodes SET invalidation_source=?, mae_source=NULL, "
+                       "primary_entry_id=NULL WHERE episode_id='t9'", (stored,))
+    episode = store.get_episode("t9")
+    assert episode.invalidation_source is None
+    # Other defaulted text fields fall back to their default instead of failing the read.
+    assert episode.mae_source == "daily_bars" and episode.primary_entry_id == ""
+    assert [e.episode_id for e in store.list_episodes()] == ["t9"]
+
+
+def test_a_null_identity_field_still_fails_the_read(store):
+    """The tolerance covers defaulted fields only; a missing fact is still an error."""
+    from datetime import datetime, timezone
+
+    from pydantic import ValidationError
+
+    from ats.schemas.journal import TradeEpisode
+
+    store.save_episode(TradeEpisode(episode_id="t10", symbol="NVDA",
+                                    opened_at=datetime.now(timezone.utc)))
+    store.conn.execute("UPDATE trade_episodes SET opened_at=NULL WHERE episode_id='t10'")
+    with pytest.raises(ValidationError):
+        store.get_episode("t10")

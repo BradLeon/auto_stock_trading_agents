@@ -7,7 +7,7 @@ from ats.data.runtime.execution_prices import ExecutionPrice
 from ats.execution import broker_write_guard as guard
 from ats.execution.route_registry import install_route
 from ats.execution.simulation import FakeBroker, simulated_execution
-from ats.memory import get_store
+from ats import memory
 from ats.workflow.isolation import isolated_run
 
 
@@ -33,5 +33,5 @@ def governed_price_run(monkeypatch, tmp_path):
             return rows
         # Only the no-network class is adapted; its real checks run first.
         monkeypatch.setattr(FakeBroker, "place_orders", filled)
-        with simulated_execution(store=get_store(), account="DU1") as broker:
+        with simulated_execution(store=memory.get_store(), account="DU1") as broker:
             yield broker

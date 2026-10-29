@@ -44,9 +44,14 @@ from . import cutover as plane
 
 ROUTES = (plane.ROUTE_LEGACY, plane.ROUTE_TARGET)
 BOUNDARY = plane.PROJECTION_READ
-# Consumers whose research read can move as a whole. Chief/Risk/Trader/Clerk read
-# for decisions and trading; they move with their own boundaries, not here.
-CONSUMERS = ("layer", "information", "sector", "fundamental", "macro", "technical")
+# Consumers whose read can move as a whole. The six research consumers moved first. Chief, Risk, Trader
+# and Clerk read for decisions and trading; they use the same projection_read route (2026-10-28), because
+# the decision graph's risk and trader nodes are refused by the read-window gate when their consumer has
+# no route at all. A read route grants no trade authority: approval, Clerk publication, schedule ownership
+# and the live trader keep their own protocols, and the three live locks are untouched.
+RESEARCH_CONSUMERS = ("layer", "information", "sector", "fundamental", "macro", "technical")
+DECISION_CONSUMERS = ("chief", "risk", "trader", "clerk")
+CONSUMERS = RESEARCH_CONSUMERS + DECISION_CONSUMERS
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS consumer_cutover_routes (
@@ -86,8 +91,8 @@ def _contract(consumer_id: str) -> dict[str, Any]:
 
     if consumer_id not in CONSUMERS:
         raise ConsumerCutoverError(
-            f"{consumer_id!r} is not a research-read consumer; decision and trading roles "
-            "move with their own boundaries")
+            f"{consumer_id!r} is not a consumer-wide read consumer (research: "
+            f"{', '.join(RESEARCH_CONSUMERS)}; decision and trading: {', '.join(DECISION_CONSUMERS)})")
     return _consumer_contract(consumer_id)
 
 

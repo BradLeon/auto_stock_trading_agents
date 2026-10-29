@@ -210,6 +210,67 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
   未核实的 `LIVE-X`，在核实前不得把它当作实盘授权。
 - **`--yes`（自动批准）在实盘环境绝对不能用。** 系统里记录的止损价只是声明，不会在券商挂真实止损单。
 
+### 7.1 切换后的操作（草稿，随 S3 上线生效；生效时用本小节替换上文）
+
+> **状态：草稿。** 在 `switch-trade-path-and-retire-r5` 的 S3 上线前，上文仍是现状。本小节随各步上线逐段生效，
+> 每一步都需要你批准（见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3）。
+
+**现状事实（切换后）**
+
+- Chief 的上下文只读研究快照与 Internal State；决策、风控、审批都只认审计表（`decision_cycles` / `decision_revisions` / `risk_reviews` / `boss_approvals`），旧决策表只剩镜像写，观察窗口结束后随 R5 移除。
+- 审批只在命令行完成（`ats approval`），没有飞书审批卡，也没有签名链接。`com.ats.serve` 不再参与审批。
+- 只有**需要下单且已通过风控**的周期才会等你。纯持有、没有订单、或风控未通过的周期不会出现在待审批列表。
+- 实盘仍然锁定（三道锁，见下）。批准后周期的终态是 **`approved_not_executed`（已批准未执行）**：Trader 已跑完授权十字段、新鲜度、实时报价、资金上限检查并记录每项结果，在券商交接点被拒绝，没有任何订单到达券商。
+
+**每天会发生什么**
+
+| 工作流 | 时间（工作日，仅 NYSE 交易日） | 内容 |
+|---|---|---|
+| `clerk-daily` | 16:30 纽约 | 对账：把成交与持仓写入账本（只认审计表） |
+| `chief-daily` | 10:30 纽约（台北晚上） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
+
+两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume --workflow <id> ...`（第 3.4 节），每一步都需要你批准。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
+
+**审批：查看 → 批准 / 修改 / 拒绝**
+
+```bash
+ats approval pending                  # 待审批周期、修订 hash、订单、风控结论、已等多久
+ats approval show <cycle_id>          # 完整审批对象：快照、订单、风控审查、锁定原因
+ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位> [--actor <谁>]
+ats approval revise  <cycle_id> --revision <hash 前缀> --note "<修改意见>"
+ats approval reject  <cycle_id> --revision <hash 前缀> [--note "<备注>"]
+```
+
+- `approve` 本身就是确认动作：命令先取新的组合快照，对**同一修订**确定性地重新风控，打印与审批时相比的变化，然后立即继续执行；
+  不会再弹第二次审批，也不会生成新的修订。快照新鲜度预算是 60 秒，所以不要把“确认”和“执行”拆成两步。
+- 重新风控若给出**不同**结论（例如价格波动后超限），命令拒绝执行并说明差异；需要你 `revise` 或 `reject`。
+- `revise` = 驳回当前修订并给出修改意见：Chief 只据此再改一次，新修订重新过风控、重新等你；一个周期最多 2 次，第三次会被拒绝。
+- `reject` = 周期终止（`approval_rejected`）。
+- 必须写明 hash 前缀：旧修订、旧周期的答复不会落到新修订上。hash 不匹配、短于 12 位、周期已终态都会被拒绝。
+- 同一周期重复 `approve` 会直接返回第一次的结果，不会再执行一次。
+- 新一轮 `chief-daily` 开始时，仍在等待的上一周期会被标为 `superseded` 并给你发一次说明；已经批准过的不受影响。
+- 没有人点审批、周期一直 `pending_approval` 本身不是故障，只会过期；不要因此用 `--yes`。
+- 手动跑一个周期：`ats chief run --channel pending --live`（`--live` = 非演练，与 `chief-daily` 一致；实盘锁定下批准后终态为 `approved_not_executed`）。不加 `--live` 是演练，批准后不走 Trader 的检查。`--no-execute` 只跑到风控，但同样会留下一个待审批周期，直到被下一轮 supersede，目前是已知行为。
+
+**三道实盘锁（本 change 一律不动）**
+
+1. `trader/execute.py` 的 `AUTO_EXECUTION_ENABLED = False`（C3）：生产里任何券商提交都被拒绝；
+2. 实盘路由 `live_trader` 为 `disabled`；
+3. `ats live gate` 没有有效的实盘授权引用。授权库里那行 `LIVE-X`（占位字段、来源未核实）按你 2026-10-21 的确认作废，作废记录追加、原记录保留，实盘门不会再把它当授权。
+
+**`ats cutover state` 里的六个边界开关不是权威状态。** 它们从未接线（`wired: false`），切换后仍显示 `legacy` / `disabled`，
+与事实不符，R5 会删除它们。真实的状态看：读路由用 `ats data health`，调度负责人用 `ats dispatch owner-log`，
+切换发生在哪个提交见 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`。
+
+**回退**
+
+1. 停用：`ats dispatch pause --workflow chief-daily --actor <谁> --reason "…"`，再停 `clerk-daily`（不需要批准）。
+2. 必要时按 S3 → S2 → S1 倒序 revert 对应提交，重启 `com.ats.dispatcher`，用 `launchctl list` 确认 PID。镜像写保留，旧读取方仍能看到观察期内的决策，回退不需要恢复数据。
+3. 实盘锁定期间没有在途订单需要排空，但要做一次路由冻结核验，确认没有未终结授权。
+
+**观察窗口的停止条件**（任一出现就停用两个工作流并记录）：出现真实券商提交；主理人上下文出现旧表读取；批准的 hash 与风控修订不一致，或旧修订被接受；
+决策链（快照 → 修订 → 风控 → 审批）断裂；Clerk 对账与 TWS 不一致且无法解释；同一触发重复执行或同一输入重复发模型请求；主理人连续 2 个交易日因非数据缺口原因失败。
+
 ## 8. 首次安装
 
 1. 依赖：`brew bundle --file=Brewfile`（FactSet 本地 OCR 用 tesseract），然后

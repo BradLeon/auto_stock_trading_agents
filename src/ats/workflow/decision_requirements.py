@@ -295,7 +295,11 @@ def validate(store, snapshot_payload, *, at=None):
                 for envelope in envelopes:
                     attempt = connection.execute("SELECT status,run_id,task_id,task_instance_key,projection_refs_json FROM agent_runs WHERE agent_run_id=?",
                                                  (envelope.agent_run_id,)).fetchone()
-                    if (not attempt or tuple(attempt[:4]) != ("succeeded", envelope.workflow_run_id, task.task_id, task.instance_key)
+                    # The key's last segment is the producing plan's config version; a single-workflow
+                    # producer and this decision plan differ there by construction. Config lineage is
+                    # already checked per task above, so compare namespace, task and scope only.
+                    if (not attempt or tuple(attempt[:3]) != ("succeeded", envelope.workflow_run_id, task.task_id)
+                            or attempt[3].rpartition(":")[0] != task.instance_key.rpartition(":")[0]
                             or json.loads(attempt[4]) != expected_refs):
                         raise RouteUnavailable("selected task attempt not terminal or mismatched")
                 if workflow_path:

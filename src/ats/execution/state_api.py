@@ -48,7 +48,27 @@ class InternalState(BaseModel):
     fills: list[dict] = Field(default_factory=list)
     performance: dict = Field(default_factory=dict)
     attribution: dict | None = None
+    # Cycles whose approval stands but sent nothing (rehearsal or live lock). Kept apart from
+    # trades, fills and performance: they are neither executions nor results.
+    approved_not_executed: list[dict] = Field(default_factory=list)
+    # The risk role's latest portfolio posture (state, directive, breaches), so the Chief proposes
+    # inside it instead of finding out at the risk gate. None when the risk role has not reviewed yet.
+    risk_posture: dict | None = None
     completeness: Completeness = Field(default_factory=Completeness)
+
+
+def _risk_posture(store) -> dict | None:
+    review = store.latest_risk_review()
+    if review is None:
+        return None
+    directive = review.directive
+    derisk_only = (not directive.can_increase_risk) if directive else review.risk_state == "derisk"
+    block = review.regime_block(1200)
+    if derisk_only and not directive:
+        block = "**⛔ de-risk 态：只允许减仓决策，禁止任何新买。**\n" + block
+    return {"as_of": review.as_of.isoformat(timespec="seconds"), "risk_state": review.risk_state,
+            "directive_state": directive.state if directive else None,
+            "can_increase_risk": not derisk_only, "block": block}
 
 
 def completeness(store) -> Completeness:
@@ -135,6 +155,10 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     if row is not None:
         attribution = json.loads(row["payload"])
 
+    held_back = _rows_to_dicts(store.conn.execute(
+        "SELECT cycle_id, updated_at, final_outcome FROM decision_cycles "
+        "WHERE status = 'approved_not_executed' ORDER BY rowid DESC LIMIT 20").fetchall())
+    risk_posture = _risk_posture(store)
     queried_at = datetime.now(timezone.utc)
     portfolio_stamp = (getattr(perf_row, "as_of", None) if perf_row else None)
     portfolio_stamp = (portfolio_stamp.isoformat() if isinstance(portfolio_stamp, datetime)
@@ -142,7 +166,8 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     performance_stamp = store.conn.execute("SELECT MAX(as_of) stamp FROM performance").fetchone()["stamp"]
     return InternalState(as_of=queried_at, portfolio=portfolio,
                          trades=trades, fills=fills, performance=performance,
-                         attribution=attribution, completeness=comp,
+                         attribution=attribution, approved_not_executed=held_back,
+                         risk_posture=risk_posture, completeness=comp,
                          section_as_of={"portfolio": portfolio_stamp,
                                         "performance": performance_stamp,
                                         "trades": comp.last_reconcile_at,

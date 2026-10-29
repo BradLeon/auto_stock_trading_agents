@@ -107,10 +107,32 @@ def test_switch_refuses_a_failing_health_check_and_changes_nothing(authority):
     assert sr.resolve_route(co.PROJECTION_READ, who(), path=authority)["route"] == "legacy"
 
 
-@pytest.mark.parametrize("consumer", ["chief", "risk", "trader", "clerk", "unknown"])
-def test_only_research_read_consumers_can_switch(authority, consumer):
-    with pytest.raises(cc.ConsumerCutoverError, match="research-read consumer"):
-        switch(authority, consumer)
+def test_only_declared_consumers_can_switch(authority):
+    with pytest.raises(cc.ConsumerCutoverError, match="not a consumer-wide read consumer"):
+        switch(authority, "unknown")
+
+
+@pytest.mark.parametrize("consumer", ["chief", "risk", "trader", "clerk"])
+def test_decision_and_trading_consumers_switch_only_their_own_read_route(authority, consumer):
+    """The decision graph's risk and trader nodes are refused by the read-window gate until their
+    consumer is on the new read route. The route is a read route: it opens no other boundary."""
+    result = switch(authority, consumer)
+    assert result["to_route"] == "target"
+    point = rr.business_identity(consumer, kind="decision", scope_id="cycle-1", entities=["COHR"], as_of=POINT)
+    route = sr.resolve_route(co.PROJECTION_READ, point, path=authority)
+    assert route["route"] == "target" and route["consumer_wide"] is True
+    assert sr.resolve_route(co.PROJECTION_READ, who("information"), path=authority)["route"] == "legacy"
+    with closing(sqlite3.connect(authority)) as conn:
+        assert {r[0] for r in conn.execute("SELECT boundary FROM consumer_cutover_routes")} == {co.PROJECTION_READ}
+    for boundary in (co.DISPATCHER_SCHEDULE, co.APPROVAL_LIFECYCLE, co.CLERK_PUBLICATION, co.LIVE_TRADER, co.ANALYST_OUTPUT):
+        assert sr.resolve_route(boundary, point, path=authority)["route"] != "target"
+
+
+@pytest.mark.parametrize("consumer", ["chief", "risk", "trader", "clerk"])
+def test_a_decision_consumer_is_not_switched_over_a_failing_check(authority, consumer):
+    with pytest.raises(cc.ConsumerCutoverError, match="health check did not pass"):
+        switch(authority, consumer, health=BAD)
+    assert cc.status(path=authority) == []
 
 
 def test_log_is_append_only_and_records_every_action(authority):
@@ -266,6 +288,40 @@ def test_restore_refuses_without_approval_or_reason_or_a_passing_check_or_when_a
         cc.restore("technical", actor="operator", approval="ok", reason="why", health=OK, path=authority)
 
 
-def test_restore_only_moves_research_consumers(authority):
-    with pytest.raises(cc.ConsumerCutoverError, match="research-read consumer"):
-        cc.restore("chief", actor="operator", approval="ok", reason="why", health=OK, path=authority)
+def test_restore_refuses_a_consumer_that_was_never_declared(authority):
+    with pytest.raises(cc.ConsumerCutoverError, match="not a consumer-wide read consumer"):
+        cc.restore("unknown", actor="operator", approval="ok", reason="why", health=OK, path=authority)
+
+
+def test_a_decision_node_is_refused_until_its_consumer_is_on_the_read_route(production_semantics, monkeypatch):
+    """The reason decision and trading consumers have a read route: in production the Chief's risk and
+    trader nodes read through `decision_read`, which refuses a consumer with no route and no registered
+    window. Switching the consumer lets the same node run; nothing else about the node changes."""
+    from ats.agent.task_projection import ProjectionScope
+    from ats.graph.chief_state import ChiefDecisionState
+    from ats.schemas.decision import TradeDecision
+    from ats.workflow import decision_requirements as dr
+    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.planning import build_plan
+    from ats.workflow.run_contracts import TriggerContext
+
+    now = datetime.now(UTC)
+    plan = build_plan(requested_tasks=("sector-review", "fundamental-routine", "macro-review", "technical-review"),
+        scope=ProjectionScope(kind="sector", id="ai_hardware"),
+        trigger=TriggerContext(kind="manual", workflow_id="chief-daily", trigger_id="probe"),
+        as_of=now.isoformat(), run_id="chief-route-probe", profile_id="ai_hardware",
+        enter_decision_cycle=True)
+    # Freezing re-qualifies every research dependency; this test is only about the decision node's own read.
+    monkeypatch.setattr(dr, "freeze_read_dependencies", lambda plan: [])
+    state = ChiefDecisionState(cycle_id="chief-route-probe", as_of=now, source="chief",
+        decisions=[TradeDecision(symbol="COHR", action="buy", notional_usd=1000)])
+    state.decision_requirements = dr.freeze(plan)
+
+    @rr.decision_read("risk")
+    def node(s):
+        return {"ran": True}
+
+    with pytest.raises(RouteUnavailable, match="no explicitly authorized read window"):
+        node(state)
+    switch(production_semantics, "risk")
+    assert node(state) == {"ran": True}

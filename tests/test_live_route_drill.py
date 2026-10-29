@@ -45,6 +45,19 @@ def _auth(**overrides) -> live.LiveAuthorisation:
     return live.LiveAuthorisation(**fields)
 
 
+def _record(auth: live.LiveAuthorisation, *, path: str) -> None:
+    """Record an authorisation and verify its source, as an operator would after the user's confirmation.
+
+    Provenance is covered in test_live_authorisation_provenance; the tests here are about
+    what the gate decides on a record it already trusts.
+    """
+    live.record_authorisation(auth, path=path)
+    live.verify_authorisation(
+        auth.reference, confirmed_by=auth.authorised_by,
+        confirmation="I issued this live authorisation", confirmation_source="test fixture",
+        confirmed_at=datetime.now(timezone.utc).isoformat(), actor="test", path=path)
+
+
 def _auth_missing(field: str) -> live.LiveAuthorisation:
     """An authorisation with one auditable field blank.
 
@@ -89,7 +102,7 @@ def test_an_unrecorded_live_reference_is_refused(live_db):
 
 
 def test_an_expired_authorisation_is_refused(live_db):
-    live.record_authorisation(_auth(valid_until=PAST), path=live_db)
+    _record(_auth(valid_until=PAST), path=live_db)
     decision = live.evaluate_live_switch(authorisation_ref="LIVE-2026-10-07",
                                          path=live_db)
     assert decision.opened is False
@@ -101,28 +114,28 @@ def test_an_expired_authorisation_is_refused(live_db):
 def test_an_incomplete_authorisation_is_not_stored(live_db, missing):
     """Incomplete means unauditable, not weaker-but-valid."""
     with pytest.raises(live.LiveAuthorisationError) as excinfo:
-        live.record_authorisation(_auth_missing(missing), path=live_db)
+        _record(_auth_missing(missing), path=live_db)
     assert missing in str(excinfo.value)
     assert live.read_authorisation("LIVE-incomplete", path=live_db) is None
 
 
 def test_an_empty_scope_is_not_stored(live_db):
     with pytest.raises(live.LiveAuthorisationError):
-        live.record_authorisation(_auth(scope=()), path=live_db)
+        _record(_auth(scope=()), path=live_db)
 
 
 def test_an_authorisation_must_be_referenced_as_live(live_db):
     """Reusing a deployment reference is the confusion this gate prevents."""
     with pytest.raises(live.LiveAuthorisationError) as excinfo:
-        live.record_authorisation(_auth(reference="DEP-something"), path=live_db)
+        _record(_auth(reference="DEP-something"), path=live_db)
     assert live.LIVE_PREFIX in str(excinfo.value)
 
 
 def test_recording_the_same_reference_again_is_refused(live_db):
     """Overwriting would silently widen the scope and hide that the grant changed."""
-    live.record_authorisation(_auth(), path=live_db)
+    _record(_auth(), path=live_db)
     with pytest.raises(live.LiveAuthorisationError) as excinfo:
-        live.record_authorisation(_auth(authorised_by="someone else",
+        _record(_auth(authorised_by="someone else",
                                         scope=("trader", "clerk")), path=live_db)
     assert "already recorded" in str(excinfo.value)
     assert live.read_authorisation("LIVE-2026-10-07", path=live_db).scope == ("trader",)
@@ -134,7 +147,7 @@ def test_recording_the_same_reference_again_is_refused(live_db):
 def test_a_shadow_or_paper_run_may_not_grant_itself_authority(live_db, issuer):
     """The subtle case: a self-issued grant collapses "simulated" into "authorised"."""
     with pytest.raises(live.LiveAuthorisationError) as excinfo:
-        live.record_authorisation(_auth(reference="LIVE-self", issuer=issuer,
+        _record(_auth(reference="LIVE-self", issuer=issuer,
                                         authorised_by=issuer, issued_by=issuer),
                                   path=live_db)
     assert live.REASON_SELF_ISSUED in str(excinfo.value)
@@ -143,7 +156,7 @@ def test_a_shadow_or_paper_run_may_not_grant_itself_authority(live_db, issuer):
 def test_a_shadow_label_cannot_open_the_gate(live_db):
     """11.2: a real authorisation, seen by a shadow run, is a mirror not a source."""
     auth = _auth()
-    live.record_authorisation(auth, path=live_db)
+    _record(auth, path=live_db)
     label = live.as_shadow_reference(auth)
     assert label.startswith("shadow:")
 
@@ -159,7 +172,7 @@ def test_a_shadow_label_for_no_authorisation_is_explicit(live_db):
 
 
 def test_an_authorisation_for_paper_does_not_cover_live(live_db):
-    live.record_authorisation(_auth(environment="paper", account="DU123"),
+    _record(_auth(environment="paper", account="DU123"),
                               path=live_db)
     decision = live.evaluate_live_switch(
         authorisation_ref="LIVE-2026-10-07", consumer_id="trader",
@@ -169,7 +182,7 @@ def test_an_authorisation_for_paper_does_not_cover_live(live_db):
 
 
 def test_an_authorisation_for_one_account_does_not_cover_another(live_db):
-    live.record_authorisation(_auth(account="U123"), path=live_db)
+    _record(_auth(account="U123"), path=live_db)
     decision = live.evaluate_live_switch(
         authorisation_ref="LIVE-2026-10-07", consumer_id="trader",
         environment="live", account="U999", path=live_db)
@@ -178,7 +191,7 @@ def test_an_authorisation_for_one_account_does_not_cover_another(live_db):
 
 
 def test_an_authorisation_omitting_a_consumer_holds_exactly_that_one(live_db):
-    live.record_authorisation(_auth(scope=("trader",)), path=live_db)
+    _record(_auth(scope=("trader",)), path=live_db)
     inside = live.evaluate_live_switch(
         authorisation_ref="LIVE-2026-10-07", consumer_id="trader",
         environment="live", account="U123", path=live_db)
@@ -192,7 +205,7 @@ def test_an_authorisation_omitting_a_consumer_holds_exactly_that_one(live_db):
 
 def test_a_valid_authorisation_opens_the_gate(live_db):
     """The positive case, so the refusals above are refusals rather than breakage."""
-    live.record_authorisation(_auth(), path=live_db)
+    _record(_auth(), path=live_db)
     decision = live.assert_live_authorised(
         authorisation_ref="LIVE-2026-10-07", consumer_id="trader",
         environment="live", account="U123", path=live_db)
@@ -208,7 +221,7 @@ def test_the_helper_raises_rather_than_returning_a_verdict(live_db):
 
 def test_each_refusal_carries_a_distinct_reason(live_db):
     """A wall of identical text tells an operator nothing about which gate to fix."""
-    live.record_authorisation(_auth(environment="paper"), path=live_db)
+    _record(_auth(environment="paper"), path=live_db)
     reasons = {
         live.evaluate_live_switch(authorisation_ref="", path=live_db).reason,
         live.evaluate_live_switch(authorisation_ref="DEP-x", path=live_db).reason,
@@ -273,7 +286,7 @@ def test_a_drill_never_opens_the_live_gate_even_with_a_valid_reference(drill_bas
     import pathlib
 
     live_db = str(pathlib.Path(drill_base).parent / "live.sqlite")
-    live.record_authorisation(_auth(), path=live_db)
+    _record(_auth(), path=live_db)
 
     result = drill.run_switch_drill(
         drill_id="d1", base_path=drill_base, environment="live", account="U123",

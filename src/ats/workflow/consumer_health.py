@@ -550,6 +550,66 @@ CHECKS["sector"] = _sector
 
 
 # --------------------------------------------------------------------------------------------------------
+# Decision and trading consumers (2026-10-28). They read internal state, not published data products, so the
+# check asks the one question that makes their route unsafe to rely on: can what they read be read at all.
+# Opened read-only, like the research checks: a health check must never write the production file.
+# --------------------------------------------------------------------------------------------------------
+_DECISION_READS = {
+    "chief": ("task_projection_envelopes", "decision_cycles", "trades", "fills", "performance"),
+    "risk": ("decision_cycles", "decision_revisions", "decision_risk_reviews"),
+    "trader": ("decision_cycles", "decision_revisions", "decision_risk_reviews", "boss_approvals", "trades"),
+    "clerk": ("trades", "fills", "performance", "decision_cycles", "boss_approvals"),
+}
+# One published projection per role must exist for the Chief to have anything to decide from. Missing
+# ones are what its snapshot gate would block on, so the route is not switched over them.
+_CHIEF_ROLES = ("layer_analysis", "information_brief", "sector_allocation", "macro_review", "technical_review")
+_CHIEF_FUNDAMENTAL_ROLES = ("fundamental_event_review", "fundamental_expectation_update")
+
+
+def _decision_consumer(consumer: str, now: datetime) -> dict[str, Any]:
+    import sqlite3
+    from contextlib import closing
+    from pathlib import Path
+
+    from ..memory import _db_path
+
+    problems, warnings, detail = [], [], {}
+    path = Path(_db_path()).resolve()
+    if not path.is_file():
+        return _result(consumer, [f"memory database not found at {path}"], warnings, detail)
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = [t for t in _DECISION_READS[consumer] if t not in present]
+        detail["tables"] = {t: t in present for t in _DECISION_READS[consumer]}
+        if missing:
+            problems.append(f"tables not readable: {', '.join(missing)}")
+        if consumer == "chief" and "task_projection_envelopes" in present:
+            roles = {row[0] for row in conn.execute(
+                "SELECT DISTINCT agent_role FROM task_projection_envelopes WHERE status='published'")}
+            detail["published_roles"] = sorted(roles)
+            absent = [r for r in _CHIEF_ROLES if r not in roles]
+            if not roles.intersection(_CHIEF_FUNDAMENTAL_ROLES):
+                absent.append("fundamental")
+            if absent:
+                problems.append("no published projection for: " + ", ".join(absent))
+    if consumer == "risk":
+        try:
+            from ..config import get_config
+
+            limit = get_config().app.risk.max_snapshot_age_seconds
+            detail["max_snapshot_age_seconds"] = limit
+            if not limit or limit <= 0:
+                problems.append("risk.max_snapshot_age_seconds is not a positive number")
+        except Exception as exc:  # noqa: BLE001 - unreadable rules are the failure we look for
+            problems.append(f"risk rules unreadable ({type(exc).__name__}: {exc})")
+    return _result(consumer, problems, warnings, detail)
+
+
+for _consumer in _DECISION_READS:
+    CHECKS[_consumer] = (lambda now, _c=_consumer: _decision_consumer(_c, now))
+
+
+# --------------------------------------------------------------------------------------------------------
 # When the checks run (2026-10-20): after the data refresh controller publishes, and before a Dispatcher
 # task. Both log and alert only when a consumer's status changes, so an hourly refresh over a broken
 # product sends one alert, not one per hour.

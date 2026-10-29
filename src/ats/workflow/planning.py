@@ -238,7 +238,44 @@ def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) ->
         return [requested_scope]
     if task_id == "macro-review":
         return [ProjectionScope(kind="portfolio")]
+    if task_id in {"clerk-daily", "chief-daily"}:
+        return [requested_scope]            # trade-path workflows run once for the whole book
     raise ContractError(f"no scope resolver is registered for {task_id!r}")
+
+
+def _config_paths(task_ids: Iterable[str], scope_id: str,
+                  brief_entities: Iterable[str]) -> set[str]:
+    """Config files (relative to config/) that these tasks read."""
+    task_ids = set(task_ids)
+    paths: set[str] = set()
+    if task_ids & {"layer-review", "sector-review"}:
+        paths |= {f"sectors/{scope_id}.yaml", "risk.yaml"}
+    if task_ids & {"information-brief", "fundamental-routine", "fundamental-event",
+                   "technical-review"}:
+        paths.add("pead.yaml")
+    if "technical-review" in task_ids:
+        paths.add("technical.yaml")
+    if "macro-review" in task_ids:
+        paths.add("macro.yaml")
+    if "information-brief" in task_ids:
+        paths |= {f"pead/{entity.upper()}.yaml" for entity in brief_entities}
+    return paths
+
+
+def task_config_hashes(plan: WorkflowPlan, task_id: str) -> dict[str, str]:
+    """The plan's frozen config hashes that one task and its declared upstream read.
+
+    A projection records the configs of the task that produced it, not of every task
+    that happened to share its plan: a Technical result is not stale because macro.yaml
+    changed. Lineage and reuse compare this per-task set, so a projection from a
+    single-workflow run stays reusable inside a multi-workflow (decision) plan.
+    """
+    if not plan.source_config_hashes:
+        return {}
+    ordered = task_registry().resolve_order((task_id,))
+    entities = [t.scope.id for t in plan.tasks if t.task_id == "information-brief"]
+    wanted = {f"config/{path}" for path in _config_paths(ordered, plan.request_scope.id, entities)}
+    return {path: digest for path, digest in plan.source_config_hashes.items() if path in wanted}
 
 
 def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
@@ -293,22 +330,9 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         raise ContractError(
             f"scope {scope.key!r} does not match profile {profile_id!r} scope")
 
-    source_paths: set[str] = set()
-    if any(task in ordered_task_ids for task in ("layer-review", "sector-review")):
-        source_paths |= {f"sectors/{scope.id}.yaml", "risk.yaml"}
-    if any(task in ordered_task_ids for task in (
-            "information-brief", "fundamental-routine", "fundamental-event",
-            "technical-review")):
-        source_paths.add("pead.yaml")
-    if "technical-review" in ordered_task_ids:
-        source_paths.add("technical.yaml")
-    if "macro-review" in ordered_task_ids:
-        source_paths.add("macro.yaml")
-    if "information-brief" in ordered_task_ids:
-        for target in _scopes("information-brief", scope, root):
-            rel = f"pead/{target.id.upper()}.yaml"
-            if (root / rel).exists():
-                source_paths.add(rel)
+    brief_entities = ([target.id for target in _scopes("information-brief", scope, root)]
+                      if "information-brief" in ordered_task_ids else [])
+    source_paths = _config_paths(ordered_task_ids, scope.id, brief_entities)
     for rel_path in sorted(source_paths):
         if rel_path in source_hashes:
             continue
@@ -383,4 +407,4 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
 
 
 __all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
-           "build_plan", "task_registry", "validate_task_registry"]
+           "build_plan", "task_config_hashes", "task_registry", "validate_task_registry"]

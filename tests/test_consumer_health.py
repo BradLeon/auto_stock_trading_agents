@@ -145,7 +145,7 @@ def test_fundamental_fails_when_a_financial_snapshot_is_unreadable(world):
 
 
 def test_a_consumer_without_a_defined_check_cannot_pass(world):
-    result = health.check("chief", now=NOW)      # a decision role: it never moves with the research-read switch
+    result = health.check("unknown-consumer", now=NOW)
     assert result["status"] == "failed" and "no health check defined" in result["problems"][0]
 
 
@@ -298,3 +298,32 @@ def test_gate_maps_tasks_to_consumers_and_leaves_upstream_projections_to_the_dis
 def test_fundamental_without_upstream_ignores_the_information_briefs(world):
     world.briefs = {}
     assert health.check("fundamental", now=NOW, include_upstream=False)["status"] == "ok"
+
+
+def test_a_decision_consumer_check_passes_on_a_complete_store_and_fails_when_it_cannot_read(world, tmp_path, monkeypatch):
+    """Chief, Risk, Trader and Clerk read internal state: the check is that it can be read at all,
+    and for the Chief that a published projection exists for every role it decides from."""
+    import sqlite3
+
+    from ats import memory
+    from ats.memory.store import TradingMemory
+
+    path = tmp_path / "decision-health.sqlite"
+    TradingMemory(path)
+    monkeypatch.setattr(memory, "_db_path", lambda: str(path))
+    for consumer in ("risk", "trader", "clerk"):
+        assert health.check(consumer, now=NOW)["status"] == "ok", consumer
+    chief = health.check("chief", now=NOW)
+    assert chief["status"] == "failed" and "no published projection for" in chief["problems"][0]
+    with sqlite3.connect(path) as conn:
+        columns = [r[1] for r in conn.execute("PRAGMA table_info(task_projection_envelopes)")]
+        base = {c: "" for c in columns}
+        for role in ("layer_analysis", "information_brief", "sector_allocation", "macro_review",
+                     "technical_review", "fundamental_event_review"):
+            row = {**base, "projection_id": role, "agent_role": role, "status": "published"}
+            conn.execute(f"INSERT INTO task_projection_envelopes ({','.join(row)}) VALUES ({','.join('?' * len(row))})",
+                         list(row.values()))
+    assert health.check("chief", now=NOW)["status"] == "ok"
+    monkeypatch.setattr(memory, "_db_path", lambda: str(tmp_path / "missing.sqlite"))
+    for consumer in ("chief", "risk", "trader", "clerk"):
+        assert health.check(consumer, now=NOW)["status"] == "failed"

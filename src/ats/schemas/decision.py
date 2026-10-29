@@ -142,10 +142,10 @@ class TradeDecision(BaseModel):
 class BossApproval(BaseModel):
     """Human-in-the-loop verdict injected via interrupt resume."""
 
-    status: Literal["approved", "rejected", "modified"]
+    status: Literal["approved", "rejected", "modified", "revise"]
     reviewer: str = ""
     reviewed_at: datetime | None = None
-    comment: str = ""
+    comment: str = ""          # for status="revise": the Boss's change request (required)
     # Which entry point delivered this verdict (feishu-card / feishu-bot / auto /
     # cli / test). Part of the persistent approval idempotency key (design D3).
     channel: str = ""

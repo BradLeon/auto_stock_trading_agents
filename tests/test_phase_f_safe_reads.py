@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from phase_f_chief_state_entry import chief_state_entry
 from test_phase_f_trader_a import execution, price_clock, ready_state  # noqa: F401,F811
 
 from ats.agent.task_projection import ProjectionScope, build_envelope
@@ -97,7 +98,7 @@ def test_actual_chief_read_falls_back_using_once_checked_state(isolated, tmp_pat
         return original(*a, **k)
     monkeypatch.setattr(state_api, "get_internal_state", counted)
     with trace_reads() as rows:
-        text = assemble._track_record_block(read_scope=identity.scope,
+        text = chief_state_entry(read_scope=identity.scope,
                                            read_fallback=InternalFallback(isolated))
     assert "1,000,000" in text and "内部状态" in text
     assert len(calls) == 1
@@ -128,7 +129,7 @@ def test_actual_read_refuses_each_unsafe_fallback(isolated, tmp_path, monkeypatc
     if failure == "unreadable":
         isolated.conn.execute("DROP TABLE performance")
     with trace_reads() as rows, pytest.raises(FallbackUnsafe) as exc:
-        assemble._track_record_block(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
+        chief_state_entry(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
     assert exc.value.reason_code == code and rows[-1]["status"] in {"blocked", "unavailable"}
     assert isolated.conn.execute("SELECT COUNT(*) FROM boss_approvals").fetchone()[0] == 0
     assert rr.current_read_context() is None
@@ -166,7 +167,7 @@ def test_emergency_disable_is_not_a_fallback_opportunity(isolated, tmp_path, mon
     activate(identity, tmp_path, monkeypatch)
     co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
     with pytest.raises(RouteUnavailable, match="disabled"):
-        assemble._track_record_block(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
+        chief_state_entry(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
 
 
 def test_actual_risk_node_blocks_before_account_or_dependent_execution(isolated, tmp_path, monkeypatch):
@@ -364,22 +365,18 @@ def test_chief_candidate_context_consumes_projection_and_state(isolated, monkeyp
     plan["information_brief"]["scopes"] = [brief.scope]
     seed_research(isolated, {k: v for k, v in plan.items() if k != "information_brief"})
     monkeypatch.setattr(assemble, "projection_query_plan", lambda: plan)
-    def forbidden(*a, **k):
-        pytest.fail("candidate Chief read legacy research/provider")
-    for name in ("_pead_block", "_sector_block", "_macro_block", "_portfolio_block"):
-        monkeypatch.setattr(assemble, name, forbidden)
     with rr.bind_read(identity), trace_reads() as rows:
         result = assemble.build()
     assert result.net_liquidation == 1_000_000 and brief.projection_id[:18] in result.as_context()
     assert any(brief.projection_id in row["refs"] and row.get("content_hash") for row in rows)
-    assert any(row["refs"] and row["api"] == "store.direct_trade_reads" for row in rows)
+    assert any(row["refs"] and row["api"] == "ats.data.consumer_api.read_input" for row in rows)
     record_property("read_trace", json.dumps(rows))
     record_property("context", result.as_context())
 
 
 def test_isolated_entry_persists_actual_read_refs(isolated, tmp_path):
     from ats.workflow.isolated_entry import run_isolated_entry
-    result = run_isolated_entry(run_id="trace-entry", entry=assemble._track_record_block,
+    result = run_isolated_entry(run_id="trace-entry", entry=chief_state_entry,
                                 root=tmp_path / "entry")
     import sqlite3
     with sqlite3.connect(result.record_path) as conn:

@@ -360,6 +360,27 @@ def _evidence_conflicts(cfg, verdicts) -> list[str]:
     return out
 
 
+def _cross_section_divergence(review) -> list[dict]:
+    """Names the structure overlay moved against the pure-quant ranking (5 per layer, structural baskets only).
+
+    Context for the Chief, never a weight: gated by `sector_review.feed_chief_basket`.
+    """
+    from ...config import load_pead_global
+
+    if not load_pead_global()["sector_review"].get("feed_chief_basket", True):
+        return []
+    out: list[dict] = []
+    for b in getattr(review, "baskets", None) or []:
+        if not b.structural:
+            continue
+        moved = [r for r in b.rows if r.quant_rank and r.rank and r.rank != r.quant_rank]
+        for r in sorted(moved, key=lambda x: x.rank)[:5]:
+            out.append({"layer": b.layer_key, "symbol": r.symbol, "quant_rank": r.quant_rank,
+                        "rank": r.rank, "moat_pricing": r.moat_pricing,
+                        "rationale": " ".join((r.rationale or "").split())[:110]})
+    return out
+
+
 def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), rotation_available=None) -> dict:
     """ARCHITECTURE §7.3: the three-level allocation (sector -> layer -> name) with its fact references.
 
@@ -406,6 +427,7 @@ def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), ro
             n.pop("_rank")
             names.append(n)
     out = {"layers": layers, "names": names, "fact_refs": sorted(projection_refs.values())[:20],
+           "cross_section_divergence": _cross_section_divergence(review),
            "rotation_advice": (review.rotation_advice or "").strip()[:400],
            "missing_layers": sorted(missing_layers)}
     if rotation_available is not None:

@@ -15,6 +15,7 @@ And one the other way: a tombstone that says `retired` while still readable must
 
 import pytest
 
+from ats.workflow import intake_verification as iv
 from ats.workflow import retirement_clearance as rc
 
 
@@ -331,3 +332,31 @@ def test_an_entry_with_an_unmet_dependency_or_a_closed_gate_cannot_be_decided_re
     blocked_gate = rc.decide_entry("a", gate="G0", gate_open=False, gate_reason="gate G0 not met: 2 items", **clear)
     assert not blocked_gate.may_exit and "gate G0 not met" in blocked_gate.reason
     assert rc.decide_entry("a", gate="G0", gate_open=True, **clear).may_exit
+
+
+# --- store.direct_trade_reads: module consumers measured by their own source ----------------
+
+def test_trade_read_consumers_that_are_modules_are_zero_only_through_state_api(tmp_path, monkeypatch):
+    """risk.assess and channel.context are modules, not roles. They are zero when their source reads
+    trades/fills/performance only through `state_api`; the registered consumers of the entry all pass."""
+    verdicts = {v.consumer: v for v in rc.verify_consumer_zero(
+        "store.direct_trade_reads", ["agents.chief.assemble", "risk.assess", "channel.context"],
+        scan=iv.scan_consumer_access)}
+    assert {v.verdict for v in verdicts.values()} == {rc.ZERO}, {k: v.reason for k, v in verdicts.items()}
+
+    raw = tmp_path / "raw.py"
+    raw.write_text("def f(store):\n    return store.recent_trades('X')\n")
+    sql = tmp_path / "sql.py"
+    sql.write_text("from ..execution import state_api\nQ = 'SELECT * FROM performance ORDER BY rowid'\n")
+    quiet = tmp_path / "quiet.py"
+    quiet.write_text("def f():\n    return 1\n")
+    monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.raw", str(raw))
+    monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.sql", str(sql))
+    monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.quiet", str(quiet))
+    found = {m: rc.verify_consumer_zero("store.direct_trade_reads", [m], scan=iv.scan_consumer_access)[0]
+             for m in ("x.raw", "x.sql", "x.quiet")}
+    assert all(v.verdict == rc.NOT_ZERO for v in found.values())
+    assert "direct_store_trade_read" in found["x.raw"].evidence["violations"][0]
+    assert "direct_trade_table_sql" in found["x.sql"].evidence["violations"][0]
+    # A module that reads nothing is not evidence of having moved onto the governed layer.
+    assert found["x.quiet"].evidence["call_path"] == []

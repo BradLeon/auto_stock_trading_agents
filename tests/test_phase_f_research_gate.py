@@ -62,14 +62,14 @@ def test_chief_actual_render_requires_every_scope_and_keeps_full_references(isol
     envelopes = seed_research(isolated, plan)
     seed_performance(isolated)
     with bind_read(scope()), trace_reads() as rows:
-        context = assemble.build(live_broker=False)
+        context = assemble.build()
         snapshot, _detail = assemble.build_chief_snapshot(isolated)
     assert snapshot.complete and len(snapshot.items) == 7
     assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in envelopes)
     isolated.conn.execute("DELETE FROM task_projection_envelopes WHERE projection_id=?", (envelopes[-1].projection_id,))
     isolated.conn.commit()
     with bind_read(scope()), pytest.raises(RouteUnavailable, match="required Chief"):
-        assemble.build(live_broker=False)
+        assemble.build()
     record_property("read_trace", json.dumps(rows))
     record_property("snapshot", json.dumps(snapshot.to_payload()))
     record_property("rendered_context", context.as_context())
@@ -96,7 +96,7 @@ def test_chief_refuses_damaged_or_unusable_required_projection(isolated, monkeyp
     isolated.conn.execute(f"UPDATE task_projection_envelopes SET {field}=? WHERE projection_id=?", (value,envelopes[0].projection_id))
     isolated.conn.commit()
     with bind_read(scope()), pytest.raises((RouteUnavailable, ValueError)):
-        assemble.build(live_broker=False)
+        assemble.build()
 
 
 def test_sector_actual_cli_html_uses_governed_projection(isolated, monkeypatch, tmp_path, record_property):

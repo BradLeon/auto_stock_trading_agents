@@ -4,9 +4,9 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from phase_f_chief_state_entry import chief_state_entry
 from test_phase_f_safe_reads import activate, isolated, scope, seed_performance  # noqa: F401
 
-from ats.agents.chief import assemble
 from ats.execution.state_api import get_internal_state
 from ats.workflow import cutover as co
 from ats.workflow import read_recovery as recovery
@@ -48,7 +48,7 @@ def test_actual_chief_safe_stop_cannot_be_bypassed_and_preserves_state(isolated,
     before = isolated.conn.execute("SELECT count(*) FROM performance").fetchone()[0]
     history = route_history(co.PROJECTION_READ, identity)
     with pytest.raises(recovery.ReadStopped):
-        assemble._track_record_block(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
+        chief_state_entry(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
     assert recovery.current_policy(identity)["stopped"]
     record_property("stopped_scope", json.dumps(recovery.current_policy(identity)))
     # Even if origin qualification later changes, no implicit resurrection.
@@ -87,7 +87,7 @@ def test_new_version_actual_state_read_is_qualified_once_returned_and_traced(iso
     record_property("actual_recovered_state", value.model_dump_json())
     assert resolve_route(co.PROJECTION_READ, identity)["route"] == "target"
     calls.clear()
-    text = assemble._track_record_block(read_scope=identity.scope,
+    text = chief_state_entry(read_scope=identity.scope,
         read_fallback=InternalFallback(isolated, recovery_readers={"accepted-v1": reader}))
     assert "1,000,000" in text and calls == ["new"]
 

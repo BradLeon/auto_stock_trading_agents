@@ -523,15 +523,20 @@ def test_quadrant_reaches_all_four_downstream_injection_points():
     from ats.agents.chief import assemble as chief_assemble
     from ats.agents.macro import context as macro_context
 
-    _saved_review()
+    review = _saved_review()
 
     # 1-2. PEAD prep and monitor.
     assert "stagflation" in macro_context.prep_block("NVDA", "macro")
     assert "stagflation" in macro_context.monitor_hint("macro")
     # 3. Sector review (the industry analyst rotates layers on this).
     assert "stagflation" in macro_context.sector_block("macro")
-    # 4. Chief.
-    assert "stagflation" in chief_assemble._macro_block()
+    # 4. Chief: rendered from the published macro projection.
+    detail = [{"task_id": "macro_review", "role": "macro_review", "scope": "portfolio:portfolio",
+               "status": "fresh", "reason": "fresh", "as_of": review.as_of.isoformat(),
+               "projection_id": "projection-" + "0" * 24, "content_hash": "0" * 64,
+               "payload": {"regime": review.regime, "summary": "", "quadrant": review.quadrant,
+                           "quadrant_state": review.quadrant_state}}]
+    assert "stagflation" in chief_assemble.projection_context_block(detail)
     # 5 (removed). The risk prompt must stay macro-free — the quadrant must NOT
     #    reach it, and this assertion pins that boundary against regression.
     from datetime import datetime as _dt

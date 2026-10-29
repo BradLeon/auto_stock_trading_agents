@@ -189,7 +189,9 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 status = state.section_status["portfolio"]
             else:
                 payload = {"trades": state.trades, "fills": state.fills,
-                           "performance": state.performance, "attribution": state.attribution}
+                           "performance": state.performance, "attribution": state.attribution,
+                           "approved_not_executed": state.approved_not_executed,
+                           "risk_posture": state.risk_posture}
                 stamp = state.completeness.last_reconcile_at
                 status = "complete" if stamp and state.completeness.status == "complete" else "partial"
             stamps = [stamp] if stamp else []

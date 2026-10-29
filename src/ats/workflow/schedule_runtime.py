@@ -668,6 +668,14 @@ def expected_triggers(start, end, *, config_dir=None):
             for point in ticks(entry["cron"]):
                 wake_expected.append({"job_id": "phase_e:" + workflow, "planned": point.astimezone(UTC).isoformat(), "owner": "dispatcher"})
                 add(workflow, entry["scope"], TriggerContext(kind="schedule", schedule_id=workflow, scheduled_for=point.isoformat()), "dispatcher")
+    from .trade_schedules import enabled_entries, planned_trading_ticks
+
+    for workflow, entry in enabled_entries(root).items():
+        for point in planned_trading_ticks(entry["cron"], start, end):
+            wake_expected.append({"job_id": "phase_e:" + workflow, "planned": point.astimezone(UTC).isoformat(),
+                                  "owner": "dispatcher"})
+            add(workflow, entry["scope"].model_dump(mode="json"),
+                TriggerContext(kind="schedule", schedule_id=workflow, scheduled_for=point.isoformat()), "dispatcher")
     events = yaml.safe_load((root / "events.yaml").read_text()).get("events", [])
     for event in events:
         day = str(event["date"])
@@ -715,6 +723,8 @@ def expected_triggers(start, end, *, config_dir=None):
                         for workflow in route["workflow_ids"]:
                             add(workflow, scope, context, "dispatcher")
     files = ["settings.yaml", "events.yaml", "pead.yaml", "workflow/research_schedules.yaml", "workflow/event_routes.yaml", "workflow/workflow_owners.yaml"]
+    if (root / "workflow/trade_schedules.yaml").is_file():
+        files.append("workflow/trade_schedules.yaml")
     return {"window": [start.isoformat(), end.isoformat()], "config_hashes": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
             "expected": sorted(output.values(), key=lambda row: row["key"]), "wake_expected": wake_expected}
 
@@ -888,8 +898,9 @@ def handover(token, *, to_owner, dispositions, actor, reason):
 # --------------------------------------------------------------------------- #
 # Light owner switch for research workflows (Phase F simplification, 2026-10-16)
 # --------------------------------------------------------------------------- #
-# `freeze`/`handover` above stay under the joint coordinator. This path is for the research workflows only
-# (never Chief, approval, Clerk or trading): one SQL transaction flips the workflow's template row and every
+# `freeze`/`handover` above stay under the joint coordinator. This path is for the research workflows and the two
+# trade-path workflows (`clerk-daily`, `chief-daily`, which resume only when their consumer reads the target route
+# and is healthy): one SQL transaction flips the workflow's template row and every
 # existing scope row, needs a recorded approval and a passing consumer health check to go to the Dispatcher, and
 # needs neither to come back. Unfinished claims must be voided on purpose; a running claim is never touched.
 RESEARCH_WORKFLOW_CONSUMER = {
@@ -910,11 +921,19 @@ BEGIN SELECT RAISE(ABORT,'schedule owner log is append-only'); END;
 """
 
 
+def _workflow_consumer(workflow):
+    if workflow in RESEARCH_WORKFLOW_CONSUMER:
+        return RESEARCH_WORKFLOW_CONSUMER[workflow]
+    from .trade_schedules import TRADE_WORKFLOW_CONSUMER
+
+    return TRADE_WORKFLOW_CONSUMER.get(workflow)
+
+
 def _dispatcher_preconditions(workflow, health_check):
     """A workflow may go to the Dispatcher only when its consumer reads the target route and is healthy."""
     from . import consumer_cutover, consumer_health
 
-    consumer = RESEARCH_WORKFLOW_CONSUMER[workflow]
+    consumer = _workflow_consumer(workflow)
     route = next((row for row in consumer_cutover.status() if row["consumer_id"] == consumer), None)
     if route is None or route["route"] != "target":
         raise ScheduleAuthorityError(
@@ -928,8 +947,8 @@ def _dispatcher_preconditions(workflow, health_check):
 
 def owner_switch(workflow, *, to_owner, actor, reason, approval="", void_unfinished="", health_check=None):
     """Move one research workflow between legacy and dispatcher. Returns the appended log row."""
-    if workflow not in RESEARCH_WORKFLOW_CONSUMER:
-        raise ScheduleAuthorityError(f"{workflow!r} is not a research workflow; it moves with its own protocol")
+    if _workflow_consumer(workflow) is None:
+        raise ScheduleAuthorityError(f"{workflow!r} is not a research workflow (nor clerk-daily / chief-daily); it moves with its own protocol")
     if to_owner not in {"legacy", "dispatcher"}:
         raise ScheduleAuthorityError("owner must be legacy or dispatcher")
     if not actor or not reason:
@@ -943,6 +962,13 @@ def owner_switch(workflow, *, to_owner, actor, reason, approval="", void_unfinis
         conn.execute("BEGIN IMMEDIATE")
         try:
             rows = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=?", (workflow,)).fetchall()
+            if not any(row["scope"] == "*" for row in rows) and to_owner == "dispatcher" \
+                    and workflow not in RESEARCH_WORKFLOW_CONSUMER:
+                # A trade-path workflow has no owner row until its first resume: record it as paused (`legacy`),
+                # then the switch below moves it, so the owner log shows the whole step.
+                conn.execute("INSERT INTO schedule_scope_owners VALUES(?,?,?,1,0,'')", (workflow, "*", "legacy"))
+                _history(conn, "register", workflow, {"owner": "legacy", "reason": "first resume of a trade-path workflow"})
+                rows = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=?", (workflow,)).fetchall()
             if not any(row["scope"] == "*" for row in rows):
                 raise ScheduleAuthorityError("workflow has no declared schedule owner")
             if any(row["frozen"] for row in rows):

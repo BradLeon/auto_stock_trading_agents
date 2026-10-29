@@ -92,16 +92,17 @@ def _capture(conn) -> Section:
             "僵尸 submitted 行", str(zombie), False,
             "已报但结果未知 —— 跑 `ats journal reconcile` 收口"))
 
-    # Only cycles that actually produced an order under the new regime can be judged;
-    # the 27 historical cycles were written before set_cycle_approval existed.
+    # Only cycles that actually produced an order under the new regime can be judged. A cycle
+    # that placed an order must carry a recorded approval in the decision audit (boss_approvals).
     ncyc = _n(conn, "SELECT COUNT(DISTINCT cycle_id) FROM trades WHERE " + _LIVE)
     napr = _n(conn, "SELECT COUNT(DISTINCT t.cycle_id) FROM trades t "
-                    "JOIN cycles c ON c.cycle_id = t.cycle_id "
+                    "JOIN decision_cycles c ON c.cycle_id = t.cycle_id "
                     f"WHERE {_LIVE.replace('client_order_id', 't.client_order_id')} "
-                    "AND c.approval_status IS NULL")
+                    "AND NOT EXISTS (SELECT 1 FROM boss_approvals a WHERE a.cycle_id = t.cycle_id "
+                    "AND a.decision = 'approved')")
     if ncyc:
-        s.findings.append(Finding("cycles.approval_status 已回填", _pct(ncyc - napr, ncyc),
-                                  napr == 0, "persist 节点在拿到裁决后回填" if napr else ""))
+        s.findings.append(Finding("下单的周期都有审批记录", _pct(ncyc - napr, ncyc),
+                                  napr == 0, "审计表 boss_approvals 里查不到批准" if napr else ""))
     return s
 
 
@@ -133,18 +134,28 @@ def _idempotency(conn) -> Section:
     return s
 
 
+def _decided_symbols(conn) -> set[tuple[str, str]]:
+    """(cycle, symbol) of every order in each cycle's current revision, from the decision audit."""
+    out: set[tuple[str, str]] = set()
+    for row in conn.execute(
+            "SELECT c.cycle_id, r.orders_json FROM decision_cycles c JOIN decision_revisions r "
+            "ON r.cycle_id = c.cycle_id AND r.revision_no = c.current_revision_no"):
+        try:
+            orders = json.loads(row["orders_json"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        out.update((row["cycle_id"], o.get("symbol")) for o in orders if o.get("symbol"))
+    return out
+
+
 def _chain(conn) -> Section:
     s = Section("3. 链路 —— 决策 → 订单 → 成交 能否串起来")
-    d_no_t = conn.execute(
-        "SELECT COUNT(*) FROM decisions d WHERE NOT EXISTS "
-        "(SELECT 1 FROM trades t WHERE t.cycle_id=d.cycle_id AND t.symbol=d.symbol)"
-    ).fetchone()[0]
-    t_no_d = conn.execute(
-        "SELECT COUNT(*) FROM trades t WHERE NOT EXISTS "
-        "(SELECT 1 FROM decisions d WHERE d.cycle_id=t.cycle_id AND d.symbol=t.symbol)"
-    ).fetchone()[0]
+    decided = _decided_symbols(conn)
+    traded = {(r[0], r[1]) for r in conn.execute("SELECT cycle_id, symbol FROM trades")}
+    d_no_t = len(decided - traded)
+    t_no_d = len(traded - decided)
     s.findings.append(Finding("有决策但无订单", str(d_no_t), None,
-                              "决策被风控拦下或未获批 —— 正常，但现在无处查证原因"))
+                              "决策被风控拦下或未获批 —— 正常，原因见 `ats approval show <周期>` 与审计表的风控审查、审批记录"))
     s.findings.append(Finding("有订单但无决策", str(t_no_d), None,
                               "manual / stored-decisions 路径绕过了 persist_decision"))
 

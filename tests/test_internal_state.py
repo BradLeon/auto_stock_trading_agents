@@ -111,8 +111,9 @@ def test_chief_assembler_reads_via_state_api(store):
     from ats.agents.chief import assemble
 
     src = open(assemble.__file__).read()
-    assert "state_api.recent_trades" in src
-    assert "read_internal" in src and "state.fills" in src
+    # Trade history, fills and performance arrive through the declared HISTORY_DATA input (Internal State).
+    assert 'read_input("chief", "HISTORY_DATA"' in src and 'payload.get("fills")' in src
+    assert "recent_trades(" not in src and "recent_fills(" not in src
 
 
 def test_context_reader_reads_via_state_api(store):

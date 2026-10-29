@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -33,6 +34,29 @@ log = logging.getLogger("ats.broker")
 
 class IBKRUnavailable(RuntimeError):
     """Raised when TWS/Gateway cannot be reached or the API is disabled."""
+
+
+# client ids held by connections open in THIS process right now. The pid offset keeps
+# processes apart; this keeps concurrent connections inside one process apart (the
+# Dispatcher runs Technical, Chief and Clerk in one process, possibly at once).
+_LEASED_IDS: set[int] = set()
+_LEASE_LOCK = threading.Lock()
+_LEASE_STEP = 100        # outside the base+1..base+80 range other processes derive from their pid
+
+
+def _lease_client_id(preferred: int) -> int:
+    """Take `preferred` if no open connection in this process holds it, else the next free step."""
+    with _LEASE_LOCK:
+        candidate = preferred
+        while candidate in _LEASED_IDS:
+            candidate += _LEASE_STEP
+        _LEASED_IDS.add(candidate)
+        return candidate
+
+
+def _release_client_id(client_id: int) -> None:
+    with _LEASE_LOCK:
+        _LEASED_IDS.discard(client_id)
 
 
 def _now() -> datetime:
@@ -52,9 +76,12 @@ class IBKRBroker:
         # second connection kick the first (IBKR error 326 "in use" + 1100
         # "connectivity lost") and drop orders mid-execution. An explicit client_id
         # (tests / pinned callers) still wins; otherwise offset the config base by
-        # the pid so concurrent connections never collide. Same id within a process
-        # (get_fills must see place_orders' fills).
+        # the pid so concurrent connections never collide. Within a process the same
+        # preferred id is reused by consecutive connections (get_fills must see
+        # place_orders' fills); a connection opened while another one still holds it
+        # leases the next free id instead (see `session`).
         base = br.client_id or s.ibkr_client_id or 1
+        self._pinned_client_id = client_id is not None
         self.client_id = client_id if client_id is not None else base + (os.getpid() % 80) + 1
         self.sector_by_symbol = sector_by_symbol or {}
         self._ib = None
@@ -70,9 +97,13 @@ class IBKRBroker:
             raise IBKRUnavailable("ib_async not installed (pip install ib_async)") from exc
 
         ib = IB()
+        leased = None if self._pinned_client_id else _lease_client_id(self.client_id)
+        client_id = self.client_id if leased is None else leased
         try:
-            ib.connect(self.host, self.port, clientId=self.client_id, timeout=timeout)
+            ib.connect(self.host, self.port, clientId=client_id, timeout=timeout)
         except Exception as exc:  # noqa: BLE001
+            if leased is not None:
+                _release_client_id(leased)
             raise IBKRUnavailable(
                 f"cannot reach IBKR at {self.host}:{self.port} (is TWS running with API enabled?): {exc}"
             ) from exc
@@ -82,6 +113,8 @@ class IBKRBroker:
         finally:
             ib.disconnect()
             self._ib = None
+            if leased is not None:
+                _release_client_id(leased)
 
     # --- reads ----------------------------------------------------------- #
     def get_stock_execution_metadata(self, symbol: str, *, currency: str) -> dict:

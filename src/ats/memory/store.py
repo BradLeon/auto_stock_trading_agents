@@ -548,6 +548,14 @@ _CLERK_LEDGER_TABLES = frozenset({
 })
 
 
+
+def _audit_order(cycle_id: str, order: dict) -> dict:
+    """One order of an audited revision, shaped like the legacy `decisions` row readers expect."""
+    return {"cycle_id": cycle_id, "symbol": order.get("symbol"), "action": order.get("action"),
+            "notional_usd": order.get("notional_usd"), "limit_price": order.get("limit_price"),
+            "conviction": order.get("conviction"), "rationale": order.get("rationale")}
+
+
 class TradingMemory:
     def __init__(self, db_path: str | Path, *, initialize: bool = True):
         self.path = str(db_path)
@@ -1513,15 +1521,23 @@ class TradingMemory:
         self.conn.commit()
 
     def last_chief_run(self) -> dict | None:
+        """The latest Chief cycle, read from the decision audit (not the legacy mirror).
+
+        `as_of` is the cycle's creation time and `manager_summary` the current revision's
+        rationale; `decisions` are that revision's orders.
+        """
         row = self.conn.execute(
-            "SELECT * FROM cycles WHERE cycle_id LIKE 'chief-%' ORDER BY as_of DESC LIMIT 1"
-        ).fetchone()
+            "SELECT c.cycle_id, c.created_at, c.status, c.final_outcome, r.rationale, r.orders_json "
+            "FROM decision_cycles c LEFT JOIN decision_revisions r "
+            "ON r.cycle_id = c.cycle_id AND r.revision_no = c.current_revision_no "
+            "WHERE c.cycle_id LIKE 'chief-%' ORDER BY c.rowid DESC LIMIT 1").fetchone()
         if row is None:
             return None
-        out = dict(row)
-        out["decisions"] = [dict(r) for r in self.conn.execute(
-            "SELECT * FROM decisions WHERE cycle_id = ?", (row["cycle_id"],)).fetchall()]
-        return out
+        return {"cycle_id": row["cycle_id"], "as_of": row["created_at"],
+                "status": row["status"], "final_outcome": row["final_outcome"],
+                "manager_summary": row["rationale"] or "",
+                "decisions": [_audit_order(row["cycle_id"], order)
+                              for order in json.loads(row["orders_json"] or "[]")]}
 
     def save_risk_review(self, review) -> None:
         self.conn.execute(
@@ -1680,14 +1696,24 @@ class TradingMemory:
             [PerformanceRecord.model_validate_json(r["payload"]) for r in rows]))
 
     def recent_decisions(self, symbol: str | None = None, limit: int = 20) -> list[dict]:
-        if symbol:
-            rows = self.conn.execute(
-                "SELECT * FROM decisions WHERE symbol = ? ORDER BY rowid DESC LIMIT ?",
-                (symbol, limit)).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT * FROM decisions ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        """Newest orders first, from each cycle's current revision in the decision audit.
+
+        A revised order is read once, as its latest revision; a revision with no recoverable
+        content (`legacy_unknown`) contributes nothing.
+        """
+        cycles = self.conn.execute(
+            "SELECT c.cycle_id, r.orders_json FROM decision_cycles c JOIN decision_revisions r "
+            "ON r.cycle_id = c.cycle_id AND r.revision_no = c.current_revision_no "
+            "WHERE r.orders_json IS NOT NULL AND r.orders_json != '' ORDER BY c.rowid DESC")
+        out: list[dict] = []
+        for cycle in cycles:
+            for order in json.loads(cycle["orders_json"]):
+                if symbol and order.get("symbol") != symbol:
+                    continue
+                out.append(_audit_order(cycle["cycle_id"], order))
+                if len(out) >= limit:
+                    return out
+        return out
 
     def recent_trades(self, symbol: str | None = None, limit: int = 10) -> list[dict]:
         if symbol:

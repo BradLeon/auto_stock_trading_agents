@@ -26,10 +26,10 @@ class ChiefResult(BaseModel):
     context_text: str = ""            # the exact context the Chief saw (for the audit report)
 
 
-def run(*, use_llm: bool = True, live_broker: bool = True) -> ChiefResult:
+def run(*, use_llm: bool = True) -> ChiefResult:
     now = datetime.now(timezone.utc)
     cycle_id = f"chief-{now:%Y%m%d-%H%M%S}"
-    ctx = assemble.build(live_broker=live_broker)
+    ctx = assemble.build()
     log.info("chief context: %s", ctx.stats())
     return from_context(ctx.as_context(), cycle_id=cycle_id, as_of=now, use_llm=use_llm)
 
@@ -52,6 +52,24 @@ def from_context(context_text: str, *, cycle_id: str, as_of: datetime,
     decisions = [_to_decision(d) for d in out.decisions if d.action != "hold"]
     return ChiefResult(cycle_id=cycle_id, as_of=as_of, summary=out.summary,
                        decisions=decisions, context_text=context_text)
+
+
+def revise_with_note(context_text: str, *, prior_summary: str, prior_decisions: list[TradeDecision],
+                     note: str, cycle_id: str, as_of: datetime, use_llm: bool = True) -> ChiefResult:
+    """The Boss sent the revision back with a change request: ONE more synthesis with the request added.
+
+    Same context, same output contract as the first run; the request is the Boss's own words and the
+    prior proposal is shown so the Chief changes what was asked rather than starting over. The revised
+    orders go through risk again like any other revision.
+    """
+    prior = "\n".join(
+        f"- {d.action} {d.symbol} "
+        + (f"${d.notional_usd:,.0f}" if d.notional_usd else f"qty={d.qty}" if d.qty else "")
+        + (f" — {d.rationale[:120]}" if d.rationale else "") for d in prior_decisions) or "（无订单）"
+    addendum = ("\n\n## Boss 驳回上一版并提出修改意见\n"
+                f"上一版摘要：{prior_summary}\n上一版订单：\n{prior}\n\n"
+                f"修改意见（Boss 原话）：{note}\n\n请据此重新给出完整的本轮决策；意见与风控硬约束冲突时，以风控为准并说明。")
+    return from_context(context_text + addendum, cycle_id=cycle_id, as_of=as_of, use_llm=use_llm)
 
 
 def _to_decision(v) -> TradeDecision:

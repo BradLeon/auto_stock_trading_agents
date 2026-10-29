@@ -1,0 +1,26 @@
+version: "1"
+
+# The trade path's two daily workflows (design D5), kept apart from `research_schedules.yaml` so pausing or
+# resuming one never touches the other. Both start `enabled: false`: with that, nothing is registered with the
+# scheduler, they are not in the expected-trigger set, and a running dispatcher is unchanged. They are turned
+# on one at a time (switch-trade-path-and-retire-r5 S4, S5), each with the user's approval:
+# `enabled: true` -> restart `com.ats.dispatcher` -> `ats dispatch resume <workflow>`.
+#
+# Both run only on NYSE trading sessions. The owner of a workflow that is switched off is `legacy`
+# (externally: paused); `ats dispatch pause/resume` moves it.
+workflows:
+  clerk-daily:
+    enabled: false      # S4
+    consumer: clerk
+    scope: {kind: portfolio, id: portfolio}
+    # After the close: the ledger window runs from the last successful reconcile to today; a missed day is
+    # picked up by the Clerk's own missed-window register, and one window is idempotent.
+    cron: {day_of_week: "mon-fri", hour: 16, minute: 30, timezone: America/New_York}
+  chief-daily:
+    enabled: false      # S5
+    consumer: chief
+    scope: {kind: portfolio, id: portfolio}
+    # An hour after the open, which is evening in Taipei: the cycle waits for the Boss' approval that night.
+    cron: {day_of_week: "mon-fri", hour: 10, minute: 30, timezone: America/New_York}
+    decision_profile: ai_hardware
+    fundamental_mode: routine

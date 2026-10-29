@@ -78,6 +78,17 @@ REASON_OUT_OF_SCOPE = "live_authorisation_out_of_scope"
 REASON_SELF_ISSUED = "live_authorisation_self_issued"
 REASON_ENVIRONMENT_MISMATCH = "live_environment_mismatch"
 REASON_ACCOUNT_MISMATCH = "live_account_mismatch"
+REASON_UNVERIFIED = "live_authorisation_source_unverified"
+REASON_VOIDED = "live_authorisation_voided"
+
+# Source verification. A recorded row proves only that somebody wrote it: the
+# 2026-10-07 `LIVE-X` row had every field filled and a 2099 expiry, and nobody
+# could say who had issued it. Verification is a second, appended fact — a human
+# confirming, in their own words, that they issued it — and a record without one
+# is not relied on, however complete it looks.
+VERIFIED = "verified"
+VOIDED = "voided"
+UNVERIFIED = "unverified"
 
 
 class LiveAuthorisationError(RuntimeError):
@@ -277,6 +288,141 @@ def read_authorisation(reference: str, *,
         valid_until=row["valid_until"], note=row["note"])
 
 
+@dataclass(frozen=True)
+class Verification:
+    """The latest appended source-verification fact about one authorisation."""
+
+    reference: str
+    status: str = UNVERIFIED
+    confirmed_by: str = ""
+    confirmation: str = ""
+    confirmation_source: str = ""
+    confirmed_at: str = ""
+    recorded_at: str = ""
+    recorded_by: str = ""
+
+    def as_row(self) -> dict[str, Any]:
+        return {"reference": self.reference, "status": self.status,
+                "confirmed_by": self.confirmed_by, "confirmation": self.confirmation,
+                "confirmation_source": self.confirmation_source,
+                "confirmed_at": self.confirmed_at, "recorded_at": self.recorded_at,
+                "recorded_by": self.recorded_by}
+
+
+_VERIFICATION_DDL = """CREATE TABLE IF NOT EXISTS live_authorization_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference TEXT NOT NULL,
+    status TEXT NOT NULL,
+    confirmed_by TEXT NOT NULL,
+    confirmation TEXT NOT NULL,
+    confirmation_source TEXT NOT NULL,
+    confirmed_at TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    recorded_by TEXT NOT NULL DEFAULT '')"""
+
+
+def read_verification(reference: str, *,
+                      path: str | Path | None = None) -> Verification:
+    """The latest verification fact, or UNVERIFIED when none was ever appended."""
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM live_authorization_verifications WHERE reference = ? "
+            "ORDER BY id DESC LIMIT 1", (reference,)).fetchone()
+    except sqlite3.Error:
+        row = None
+    finally:
+        conn.close()
+    if row is None:
+        return Verification(reference=reference)
+    return Verification(
+        reference=reference, status=row["status"], confirmed_by=row["confirmed_by"],
+        confirmation=row["confirmation"], confirmation_source=row["confirmation_source"],
+        confirmed_at=row["confirmed_at"], recorded_at=row["recorded_at"],
+        recorded_by=row["recorded_by"])
+
+
+def verification_history(reference: str, *,
+                         path: str | Path | None = None) -> list[dict[str, Any]]:
+    conn = _connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM live_authorization_verifications WHERE reference = ? "
+            "ORDER BY id", (reference,)).fetchall()
+    except sqlite3.Error:
+        rows = []
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def _append_verification(reference: str, status: str, *, confirmed_by: str,
+                         confirmation: str, confirmation_source: str,
+                         confirmed_at: str, actor: str,
+                         path: str | Path | None) -> Verification:
+    """Append one verification fact. Refused unless it cites the user's own confirmation.
+
+    The citation is the point of the operation: who confirmed, what they said, where
+    and when. Without it, "verified" would be one more field an agent could set on its
+    own, which is exactly the self-authorisation this gate exists to prevent.
+    """
+    missing = [name for name, value in (
+        ("confirmed_by", confirmed_by), ("confirmation", confirmation),
+        ("confirmation_source", confirmation_source)) if not str(value or "").strip()]
+    if _parse(confirmed_at) is None:
+        missing.append("confirmed_at")
+    if missing:
+        raise LiveAuthorisationError(
+            f"{REASON_NOT_AUDITABLE}: changing the source verification of "
+            f"{reference!r} requires the user's own confirmation (who, their words, "
+            f"where and when); missing {missing}. The record stays {UNVERIFIED if status == VERIFIED else 'as it was'}")
+    if read_authorisation(reference, path=path) is None:
+        raise LiveAuthorisationError(
+            f"{REASON_NO_LIVE_AUTHORISATION}: {reference!r} is not recorded; there is "
+            "nothing to verify or void")
+    current = read_verification(reference, path=path)
+    if current.status == VOIDED:
+        raise LiveAuthorisationError(
+            f"{REASON_VOIDED}: {reference!r} was voided at {current.recorded_at}. "
+            "A voided authorisation is not revived; record a new reference instead")
+    conn = _connect(path)
+    try:
+        conn.execute(_VERIFICATION_DDL)
+        now = _now()
+        conn.execute(
+            """INSERT INTO live_authorization_verifications
+                   (reference, status, confirmed_by, confirmation, confirmation_source,
+                    confirmed_at, recorded_at, recorded_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (reference, status, confirmed_by.strip(), confirmation.strip(),
+             confirmation_source.strip(), confirmed_at, now, actor))
+    finally:
+        conn.close()
+    return read_verification(reference, path=path)
+
+
+def verify_authorisation(reference: str, *, confirmed_by: str, confirmation: str,
+                         confirmation_source: str, confirmed_at: str,
+                         actor: str = "",
+                         path: str | Path | None = None) -> Verification:
+    """Mark a recorded authorisation's source as verified, citing the user's confirmation."""
+    return _append_verification(
+        reference, VERIFIED, confirmed_by=confirmed_by, confirmation=confirmation,
+        confirmation_source=confirmation_source, confirmed_at=confirmed_at,
+        actor=actor, path=path)
+
+
+def void_authorisation(reference: str, *, confirmed_by: str, confirmation: str,
+                       confirmation_source: str, confirmed_at: str,
+                       actor: str = "",
+                       path: str | Path | None = None) -> Verification:
+    """Void a recorded authorisation, citing the user's confirmation. The row stays readable."""
+    return _append_verification(
+        reference, VOIDED, confirmed_by=confirmed_by, confirmation=confirmation,
+        confirmation_source=confirmation_source, confirmed_at=confirmed_at,
+        actor=actor, path=path)
+
+
 def evaluate_live_switch(*, authorisation_ref: str,
                          consumer_id: str = "",
                          environment: str = "", account: str = "",
@@ -320,6 +466,24 @@ def evaluate_live_switch(*, authorisation_ref: str,
         return decision
     decision.checks["recorded"] = True
     decision.reference = auth.reference
+
+    # Source verification comes before anything the record says about itself: a
+    # complete, unexpired row nobody can vouch for is the most convincing form of
+    # an unauthorised permission.
+    verification = read_verification(auth.reference, path=path)
+    decision.checks["source_verification"] = verification.status
+    if verification.status == VOIDED:
+        decision.reason = REASON_VOIDED
+        decision.detail = (
+            f"已作废：{auth.reference} 已于 {verification.recorded_at} 作废"
+            f"（依据：{verification.confirmation_source}）。原记录保留可读，但不再采信")
+        return decision
+    if verification.status != VERIFIED:
+        decision.reason = REASON_UNVERIFIED
+        decision.detail = (
+            f"授权来源未核实：{auth.reference} 已记录，但没有引用用户本人确认的核实记录。"
+            "字段齐全或仍在有效期内都不构成放行理由")
+        return decision
 
     if not auth.is_auditable:
         decision.reason = REASON_NOT_AUDITABLE

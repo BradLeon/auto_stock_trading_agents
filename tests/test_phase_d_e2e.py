@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from phase_d_frozen_harness import freeze_config, publish_with_lineage
+
 from ats.agent.task_projection import ProjectionScope, build_envelope
 from ats.decision.repository import DecisionAuditRepository
 from ats.decision.snapshot import frozen_snapshot_complete
@@ -27,7 +29,7 @@ from ats.schemas.decision import BossApproval
 pytestmark = pytest.mark.usefixtures("open_decision_read_gate")
 
 
-NOW = datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc) - timedelta(seconds=2)
 
 
 def _expiry(hours: int = 48) -> str:
@@ -80,9 +82,7 @@ def _seed(store, *, targets=("COHR",)):
         "macro_review",
         {"regime": "risk_on", "summary": "利率见顶", "indicators": ["10Y 4.0"]},
         ProjectionScope(kind="portfolio"))
-    for env in rows.values():
-        store.save_task_projection_envelope(env)
-    return rows
+    return publish_with_lineage(store, rows, _state())
 
 
 @pytest.fixture(autouse=True)
@@ -105,8 +105,18 @@ def _an_active_trade_route(monkeypatch, tmp_path):
 
 @pytest.fixture
 def e2e_env(tmp_path, monkeypatch):
-    """Hermetic store + pinned plan inputs (same pins as the Group 7 fixture)."""
-    store = TradingMemory(tmp_path / "phase-d-e2e.sqlite")
+    """Hermetic store + the frozen planning universe the decision gate reads.
+
+    The store lives under the isolation root the `broker` fixture enters: the simulated
+    broker only publishes to a database that belongs to the isolated run.
+    """
+    from ats.workflow.isolation import build_environment
+
+    freeze_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("ats.graph.chief._now", lambda: NOW)
+    path = build_environment(tmp_path / "governed-prices").path_for("ATS_DB_PATH")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    store = TradingMemory(path)
     monkeypatch.setattr("ats.memory.get_store", lambda: store)
     monkeypatch.setattr("ats.config.load_pead_global", lambda: {
         "targets": ["COHR"], "observe": [], "monitor": {},
@@ -121,7 +131,7 @@ def e2e_env(tmp_path, monkeypatch):
 
 def _state(**kw):
     base = dict(cycle_id="phase-d-e2e", as_of=NOW, source="chief", decide=True,
-                use_llm=True, use_broker=True, dry_run=False, execute=True)
+                fundamental_mode="event", use_llm=True, use_broker=True, dry_run=False, execute=True)
     base.update(kw)
     return ChiefDecisionState(**base)
 
@@ -194,7 +204,7 @@ def test_complete_snapshot_runs_the_full_funnel_and_orders_trace_to_snapshot(
     assert chain["approvals"] and chain["approvals"][0]["decision"] == "approved"
 
 
-def test_every_snapshot_category_is_cited_in_the_decision_context(e2e_env):
+def test_every_snapshot_category_is_cited_in_the_decision_context(e2e_env, broker):
     """The context the chief decided from lists all six categories from the
     projection read path (§7.2 contract, dual-read projection block)."""
     from ats.graph.chief import assemble_context
@@ -208,6 +218,31 @@ def test_every_snapshot_category_is_cited_in_the_decision_context(e2e_env):
     for label in ("层级分析", "信息简报", "行业配置", "基本面", "宏观评审", "技术面评审"):
         assert label in block, label
     assert "direction=+1" in block and "非交易指令" in block
+
+
+def test_every_context_section_carries_its_projection_id_and_hash(e2e_env, broker):
+    """The Chief's context is rendered only from the frozen snapshot and Internal State.
+
+    Every research item the snapshot froze appears in the context with its projection id and
+    content hash, the ledger section states its completeness, and no section of the old
+    direct-read context (PEAD dossier, sector/macro/technical review tables, risk review) remains.
+    """
+    from ats.graph.chief import assemble_context
+
+    _seed(e2e_env)
+    state = _state()
+    merged = {**state.model_dump(), **assemble_context(state)}
+    text = merged["context_text"]
+    items = merged["research_snapshot"]["items"]
+    assert items
+    for item in items:
+        assert item["projection_id"] in text, item["agent_role"]
+        assert item["content_hash"] in text, item["agent_role"]
+    assert "## 组合账本状态" in text and "## 战绩反馈" in text and "## 研究快照（六类投影）" in text
+    for legacy in ("PEAD 档案", "行业评审（倾斜修正）", "宏观评审（倾斜修正）",
+                   "技术面（择时", "风控状态（硬约束）", "组合现状 (trader)"):
+        assert legacy not in text, legacy
+    assert "dual_read_diffs" not in merged["context_stats"]
 
 
 # --- 9.5 反向：缺一类分析 → 不完整、缺口报告、不进周期、不下单 ------------------- #

@@ -123,7 +123,9 @@ retired:
     status: pending
     exit_condition: Chief（assemble.py）、Risk（risk/assess.py）与 channel/context 的交易历史与绩效读取全部改经 Internal State API。
     missing_condition: >-
-      上述消费方仍在直读 trades/fills/performance 原始表；双读比对确认一致后逐个切换。
+      2026-10-28（switch-trade-path-and-retire-r5 tasks 2.2）：三个消费方都已改经 Internal State（chief 经
+      HISTORY_DATA / PORTFOLIO_DATA，risk.assess、channel.context 经 state_api），`ats retirement zero` 对三者判清零
+      （后两者为模块级源码核验）。退出仍待生产切换（S1）。
     consumers:
       - agents.chief.assemble
       - risk.assess
@@ -367,9 +369,9 @@ retired:
     status: pending
     exit_condition: 主理人上下文渲染全部改读投影/快照，旧表直读入口移除。
     missing_condition: >-
-      双读期：assemble.py 仍从旧读模型（sector_reviews / macro_reviews /
-      technical_reviews / pead dossier / technical context）直读渲染上下文，
-      投影路径只负责齐备性校验、快照与缺口阻断；上下文切流属 Phase F。
+      2026-10-28（switch-trade-path-and-retire-r5 tasks 2.1）：assemble.py 已只从研究快照与 Internal State
+      渲染上下文，旧读模型直读与 dual_read_diffs 已删除，`ats retirement zero` 判清零。仍待生产切换（S1）后
+      才算退出：Chief 读路由在生产上尚未切到 target。
     consumers:
       - agents.chief.assemble
     consumer_zero_criterion: assemble.py 直读旧表的渲染路径清零，dual_read_diffs 下线。

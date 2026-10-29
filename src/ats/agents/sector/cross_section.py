@@ -449,7 +449,7 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
             review = store.latest_sector_review(sector_name)
             if review is None:
                 # The basket has nowhere to live: `SectorReview` is its only home, and
-                # `_basket_lines` reads it from there. Silently dropping it made the
+                # the sector report reads it from there. Silently dropping it made the
                 # whole cross-section look like it had never run.
                 log.warning("basket for %s/%s discarded — no sector review to attach to; "
                             "run `ats sector review %s` first",

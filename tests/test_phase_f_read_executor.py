@@ -312,7 +312,7 @@ def test_chief_and_trader_real_stops_keep_complete_approved_revision_and_fills(e
     batch=batch_for(who,root,envs,name='chief-read');batch.scope['fundamental_mode']='routine'
     bm.declare_batch(batch);assert authorize(batch)==0;assert invoke('switch',batch,'DEP','--apply')==0
     with reads.bind_read(who),trace_reads() as rows:
-        context=assemble.build(live_broker=False)
+        context=assemble.build()
     assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in envs)
     trader=reads.business_identity('trader',kind='decision',scope_id=state.cycle_id,entities=['AAPL'],
         explicit={'kind':'decision','id':state.cycle_id,'entities':['AAPL'],'time_range':who.scope['time_range']})
@@ -341,7 +341,7 @@ def test_chief_and_trader_real_stops_keep_complete_approved_revision_and_fills(e
                 revision_no=state.revision_no,decision_hash=state.revision_hash,decision='approved',
                 reviewer='fixture',idempotency_key='stale')
     finally: reads._CURRENT.reset(token)
-    with reads.bind_read(who): assert assemble.build(live_broker=False).as_context()==context.as_context()
+    with reads.bind_read(who): assert assemble.build().as_context()==context.as_context()
     child_code='''import json,os,sys
 from ats.execution.broker_write_guard import startup
 from ats.workflow.scoped_routes import RouteIdentity

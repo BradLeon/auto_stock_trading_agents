@@ -58,13 +58,15 @@ TASK_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "macro-review": (), "technical-review": (),
 }
 FRESHNESS_SECONDS: dict[str, int] = {
-    # Information and Routine reuse while their data vintage is unchanged, up to 72 hours (user ruling
-    # 2026-10-16, ARCHITECTURE §8.2-5): an unchanged document set or financial snapshot is never re-analysed.
+    # Information and Routine reuse while their data vintage is unchanged (user ruling 2026-10-16,
+    # ARCHITECTURE §8.2-5): an unchanged document set or financial snapshot is never re-analysed. Routine is
+    # capped at 72 hours. Information at 120 hours (user ruling 2026-10-30): a brief must stay usable long
+    # enough for the event review built on it to be read through its window (switch-trade D3-3).
     # Layer and Sector are weekly (Saturday) reviews: reuse needs an unchanged data vintage (Layer: the evidence
     # observation set and knowledge-note versions; Sector: cohort financials, consensus, FactSet, last NYSE
     # session and the eight Layer projection ids). 7 days (one weekly cycle) only caps reuse where the vintage
     # cannot see a change, such as the model or the prompt (10.5, 2026-10-17).
-    "layer-review": 7 * 86_400, "information-brief": 72 * 3_600,
+    "layer-review": 7 * 86_400, "information-brief": 120 * 3_600,
     "sector-review": 7 * 86_400, "fundamental-routine": 72 * 3_600,
     "fundamental-event": 4 * 86_400, "macro-review": 7 * 86_400,
     "technical-review": 24 * 3_600,   # with its market-session vintage: reused within one session (2026-10-16)

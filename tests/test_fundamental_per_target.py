@@ -250,8 +250,18 @@ def test_the_brief_an_event_review_was_built_from_is_selected_not_the_newest(uni
 def test_an_event_review_whose_brief_has_expired_hands_back_to_routine(universe):
     tmp_path, store = universe
     _publish(tmp_path, store, [_event("COHR", age=timedelta(hours=1)), _routine("LITE")],
-             _state(fundamental_mode="event"), brief_age=timedelta(hours=80))
+             _state(fundamental_mode="event"), brief_age=timedelta(hours=130))
     store.save_task_projection_envelope(_routine("COHR"))
-    # the published event review names its brief, which is past its 72 hours
+    # the published event review names its brief, which is past its 120 hours
     plan = dr.restore(dr.standalone(_state(), store))
     assert plan.task_inputs["fundamental_modes"]["COHR"] == "fundamental-routine"
+
+
+def test_a_brief_inside_its_120_hours_keeps_the_event_review_in_use(universe):
+    """2026-10-30 ruling: briefs stay usable 120 hours, so a 4-day event review is not cut short."""
+    tmp_path, store = universe
+    _publish(tmp_path, store, [_event("COHR", age=timedelta(days=3)), _routine("LITE")],
+             _state(fundamental_mode="event"), brief_age=timedelta(hours=100))
+    store.save_task_projection_envelope(_routine("COHR"))
+    plan = dr.restore(dr.standalone(_state(), store))
+    assert plan.task_inputs["fundamental_modes"]["COHR"] == "fundamental-event"

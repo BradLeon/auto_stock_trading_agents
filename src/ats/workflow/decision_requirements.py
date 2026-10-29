@@ -116,7 +116,7 @@ def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
     """Per target, the Fundamental mode the cycle reads (D3-3).
 
     A usable event review (within its 4-day window, and while the brief it was built
-    from is still inside its own 72 hours) takes precedence: the Routine
+    from is still inside its own window) takes precedence: the Routine
     update runs several times a day on whatever fact changes arrived, so "newer" would
     hide every post-earnings review behind the next minor note. Without one, the usable
     Routine update is read.

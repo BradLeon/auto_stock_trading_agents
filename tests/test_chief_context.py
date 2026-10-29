@@ -82,3 +82,19 @@ def test_internal_state_carries_the_risk_posture_and_the_derisk_instruction():
     store.save_risk_review(RiskReview(as_of=NOW + timedelta(hours=1), risk_state="normal"))
     posture = _risk_posture(store)
     assert posture["can_increase_risk"] is True and "只允许减仓" not in posture["block"]
+
+
+# --- the rendered input does not depend on how the payload was read (T0.6, 2026-10-29) -------------------- #
+def test_ledger_and_performance_render_the_same_whatever_the_key_order():
+    """A replay tape returns payloads key-sorted, a live read in insertion order. The
+    Chief's context — and so the replay key of its model request — must not differ."""
+    live = {"net_liquidation": 1_000_000.0, "daily_pnl": 2.0, "account_id": ""}
+    replayed = dict(sorted(live.items()))
+    perf_live = {"window_days": 1, "cumulative_pnl": 100.0, "benchmarks": {}}
+    perf_replayed = dict(sorted(perf_live.items()))
+    history = _input("complete", {"trades": [], "fills": []})
+    assert assemble._ledger_block(_input("complete", live), history) == \
+        assemble._ledger_block(_input("complete", replayed), history)
+    a = assemble._track_record_block(_Store([]), _input("complete", {"performance": perf_live}))
+    b = assemble._track_record_block(_Store([]), _input("complete", {"performance": perf_replayed}))
+    assert a == b and '"cumulative_pnl": 100.0' in a

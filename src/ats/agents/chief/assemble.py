@@ -7,6 +7,7 @@ completeness stated. No analysis table is read. Pure code, no LLM.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -70,9 +71,20 @@ def build(*, projection_manifest=None, query_plan=None) -> ChiefContext:
     return ctx
 
 
+def _canonical(value) -> str:
+    """A structured value rendered independently of how it was read.
+
+    The same payload comes back key-sorted from a replay tape and in insertion order
+    from a live read; `str(dict)` would make the Chief's input — and so the replay
+    key of its model request — depend on which (T0.6, 2026-10-29)."""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return str(value)
+
+
 def _ledger_block(portfolio, history) -> str:
     """Account state with its as-of and completeness; an unreconciled ledger is called out."""
-    lines = [f"{portfolio.payload} · {portfolio.status} · as_of={portfolio.source_as_of}"]
+    lines = [f"{_canonical(portfolio.payload)} · {portfolio.status} · as_of={portfolio.source_as_of}"]
     gaps = sorted({*portfolio.gaps, *history.gaps})
     if portfolio.status != "complete" or history.status != "complete":
         lines.append("⚠ 账本未完整对账，以下持仓、成交与绩效不得当作完整事实："
@@ -103,7 +115,7 @@ def _track_record_block(store, history) -> str:
     lines = []
     performance = payload.get("performance")
     if performance:
-        lines.append(f"绩效统计: {performance}")
+        lines.append(f"绩效统计: {_canonical(performance)}")
     lines.append(f"内部状态: {history.status} · {history.source_as_of}")
     trades = payload.get("trades") or []
     sent = {(t.get("cycle_id") or "", t.get("symbol")) for t in trades}

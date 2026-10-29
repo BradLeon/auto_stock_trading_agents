@@ -257,6 +257,9 @@ def test_context_is_rendered_from_the_projection_block_alone(chief_env):
     text = out["context_text"]
     assert "研究快照（六类投影）" in text and "direction=" in text
     for item in out["research_snapshot"]["items"]:
+        if item["agent_role"] in assemble.NOT_RENDERED:   # frozen for lineage only (D3-2)
+            assert item["projection_id"] not in text
+            continue
         assert item["projection_id"] in text and item["content_hash"] in text
 
 
@@ -472,3 +475,40 @@ def test_a_routine_attempt_for_another_scope_is_still_refused(chief_env):
     _routine_attempt(chief_env, key=key, projection_id=rows["fund:COHR"].projection_id)
     with pytest.raises(RouteUnavailable, match="attempt not terminal or mismatched"):
         assemble_context(_state(fundamental_mode="routine"))
+
+
+# --- D3-2: the account is the live book; no book, no decision ------------------------ #
+
+def test_an_unreadable_account_blocks_the_cycle_before_any_write(chief_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from ats.decision.repository import DecisionAuditRepository
+
+    _seed(chief_env)
+    reviews = []
+    monkeypatch.setattr("ats.trader.portfolio.account_broker",
+                        lambda: SimpleNamespace(get_portfolio=lambda: None))
+    monkeypatch.setattr("ats.agents.risk_officer.review.record_posture", reviews.append)
+    out = assemble_context(_state(use_broker=True))
+    assert "账户实时状态不可用" in out["gap_report"] and out["context_text"] == ""
+    assert route_after_assemble(_state(gap_report=out["gap_report"])) == "end"
+    assert reviews == [] and DecisionAuditRepository(chief_env).get_cycle("chief-g7") is None
+
+
+def test_the_chief_sees_the_book_the_risk_posture_was_computed_on(chief_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from ats.schemas.portfolio import PortfolioSnapshot, Position
+
+    _seed(chief_env)
+    book = PortfolioSnapshot(as_of=NOW, net_liquidation=252_613.0, positions=[
+        Position(symbol="TSM", qty=100, avg_cost=300.0, market_price=343.0,
+                 market_value=34_300.0, weight=0.136)])
+    reviewed = []
+    monkeypatch.setattr("ats.trader.portfolio.account_broker",
+                        lambda: SimpleNamespace(get_portfolio=lambda: book))
+    monkeypatch.setattr("ats.agents.risk_officer.review.record_posture", reviewed.append)
+    out = assemble_context(_state(use_broker=True))
+    assert not out.get("gap_report")
+    assert [r.net_liquidation for r in reviewed] == [252_613.0]
+    assert "净值 $252,613" in out["context_text"] and "TSM: 100 @ 成本 300.00" in out["context_text"]

@@ -108,7 +108,8 @@ def test_an_expired_option_with_no_closing_fill_is_closed_at_expiry(store):
     s = ej.rebuild_all(store=store, portfolio=_snapshot())
     (ep,) = store.list_episodes(symbol="QQQ")
     assert (ep.status, ep.exit_reason, ep.avg_exit) == ("closed", "expired", 0.0)
-    assert ep.origin == "manual" and ep.realized_pnl is None and s["expired"] == 1
+    # the premium paid (7.42 × 100) plus its commission is lost at expiry
+    assert ep.origin == "manual" and ep.realized_pnl == -743.0 and s["expired"] == 1
     assert ep.closed_at.date().isoformat() == "2026-10-16"
 
 
@@ -160,3 +161,31 @@ def test_an_option_episode_gets_no_mae_from_the_underlyings_bars(store, monkeypa
 def test_marks_price_open_positions_by_contract():
     prices = marks.prices_by_instrument(_snapshot(_stock_pos(), _put_pos()))
     assert prices == {"AXTI": 55.0, PUT: 2.17}
+
+
+# --- realized P&L where the broker reported none (statement imports) --------- #
+
+def test_a_round_trip_without_broker_realized_is_priced_at_average_cost():
+    fills = [_fill("b1", shares=10, price=50.0, t="2026-10-01T14:00:00+00:00"),
+             _fill("b2", shares=10, price=60.0, t="2026-10-02T14:00:00+00:00"),
+             _fill("s1", side="SLD", shares=20, price=70.0, t="2026-10-03T14:00:00+00:00")]
+    (ep,) = ej.build_episodes("AXTI", fills)
+    # cost 1100 + 2 commission; proceeds 1400 − 1 commission
+    assert ep.status == "closed" and ep.realized_pnl == 297.0
+
+
+def test_the_brokers_realized_figure_wins_over_the_computed_one():
+    fills = [_fill("b1", shares=10, price=50.0),
+             {**_fill("s1", side="SLD", shares=10, price=70.0, t="2026-10-03T14:00:00+00:00"),
+              "realized_pnl": 123.0}]
+    (ep,) = ej.build_episodes("AXTI", fills)
+    assert ep.realized_pnl == 123.0
+
+
+def test_a_sold_put_bought_back_keeps_the_premium_difference():
+    contract = {"instrument_key": PUT, "sec_type": "OPT", "multiplier": 100.0}
+    fills = [_put("p1", side="SLD", shares=5, price=4.8),
+             _put("p2", side="BOT", shares=5, price=2.0, t="2026-10-05T14:00:00+00:00")]
+    (ep,) = ej.build_episodes("AXTI", fills, contract=contract)
+    # received 2400 − 1, paid back 1000 + 1
+    assert ep.direction == "short" and ep.realized_pnl == 1398.0

@@ -178,22 +178,30 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 if owned_products:
                     products.structured.close()
                     products.unstructured.close()
-        elif product in {"PORTFOLIO_DATA", "HISTORY_DATA"}:
+        elif product == "PORTFOLIO_DATA":
+            # Account state is the broker's, read at decision time: positions, cash, exposure
+            # and margin. The ledger's last performance row is history, never today's book,
+            # so there is no stale fallback — no broker, no account state.
+            from ..execution.state_api import live_account_state
+            if broker is None:
+                raise ValueError("broker_required_for_account_state")
+            packet = live_account_state(broker)
+            payload, status = packet["payload"], packet["status"]
+            stamps = [packet["source_as_of"]] if packet["source_as_of"] else []
+            refs = [f"broker-portfolio:{packet['source_as_of']}"] if stamps else []
+            if packet["reason"]:
+                gaps.append(packet["reason"])
+        elif product == "HISTORY_DATA":
             from ..execution.state_api import get_internal_state
             if store is None:
                 raise ValueError("internal_store_required")
             state = get_internal_state(store, symbol=scope.get("entity", ""))
-            if product == "PORTFOLIO_DATA":
-                payload = state.portfolio
-                stamp = state.section_as_of["portfolio"]
-                status = state.section_status["portfolio"]
-            else:
-                payload = {"trades": state.trades, "fills": state.fills,
-                           "performance": state.performance, "attribution": state.attribution,
-                           "approved_not_executed": state.approved_not_executed,
-                           "risk_posture": state.risk_posture}
-                stamp = state.completeness.last_reconcile_at
-                status = "complete" if stamp and state.completeness.status == "complete" else "partial"
+            payload = {"trades": state.trades, "fills": state.fills,
+                       "performance": state.performance, "attribution": state.attribution,
+                       "approved_not_executed": state.approved_not_executed,
+                       "risk_posture": state.risk_posture}
+            stamp = state.completeness.last_reconcile_at
+            status = "complete" if stamp and state.completeness.status == "complete" else "partial"
             stamps = [stamp] if stamp else []
             if state.completeness.status != "complete":
                 status = "partial"

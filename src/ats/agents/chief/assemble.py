@@ -39,13 +39,14 @@ class ChiefContext:
 
 
 @scoped_read("chief")
-def build(*, projection_manifest=None, query_plan=None) -> ChiefContext:
+def build(*, projection_manifest=None, query_plan=None, account=None) -> ChiefContext:
     """The Chief's decision context, rendered only from governed inputs.
 
     Research comes from the published research snapshot (task projection envelopes);
-    account, trade history and performance come from the Internal State API through
-    the declared PORTFOLIO_DATA / HISTORY_DATA inputs. No analysis table is read here,
-    and a missing or partial input is stated in the context, never filled in.
+    the account is the broker's live book (PORTFOLIO_DATA, read by the caller that also
+    reviewed it for risk — pass it as `account`); trade history and performance come
+    from the Internal State API (HISTORY_DATA). No analysis table is read here, and a
+    missing or partial input is stated in the context, never filled in.
     """
     from ...data.consumer_api import read_input
     from ...memory import get_store
@@ -56,10 +57,11 @@ def build(*, projection_manifest=None, query_plan=None) -> ChiefContext:
     ctx = ChiefContext(as_of=evaluation_now(timezone.utc))
     read = current_read_context()
     store = get_store()
-    portfolio = read_input("chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"}, store=store)
+    portfolio = account if account is not None else read_input(
+        "chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"})
     history = read_input("chief", "HISTORY_DATA", scope={"kind": "portfolio"}, store=store)
     ctx.net_liquidation = (portfolio.payload or {}).get("net_liquidation", 0)
-    ctx.blocks["组合账本状态"] = _ledger_block(portfolio, history)
+    ctx.blocks["组合账本状态"] = _ledger_block(portfolio)
     ctx.blocks["风控状态"] = _risk_posture_block((history.payload or {}).get("risk_posture"), ctx.as_of)
     snapshot, detail = build_chief_snapshot(
         store, at=read.cutoff if read else ctx.as_of, projection_manifest=projection_manifest,
@@ -82,13 +84,41 @@ def _canonical(value) -> str:
     return str(value)
 
 
-def _ledger_block(portfolio, history) -> str:
-    """Account state with its as-of and completeness; an unreconciled ledger is called out."""
-    lines = [f"{_canonical(portfolio.payload)} · {portfolio.status} · as_of={portfolio.source_as_of}"]
-    gaps = sorted({*portfolio.gaps, *history.gaps})
-    if portfolio.status != "complete" or history.status != "complete":
-        lines.append("⚠ 账本未完整对账，以下持仓、成交与绩效不得当作完整事实："
-                     + (("；".join(gaps)) if gaps else "来源缺失或部分可用"))
+def _ledger_block(portfolio) -> str:
+    """The live book: account values, then every position (options with their contract).
+
+    Values are the broker's, in account base currency, stamped with its as-of. An
+    unavailable read is stated as such — no earlier snapshot stands in for it."""
+    book = portfolio.payload or {}
+    if portfolio.status != "complete" or not book:
+        return ("⛔ 账户实时状态不可用（" + ("；".join(portfolio.gaps) or portfolio.status)
+                + "）——本轮不得基于持仓、现金或保证金做判断。")
+    positions = book.get("positions") or []
+    unrealized = sum(p.get("unrealized_pnl") or 0 for p in positions)
+    lines = [f"来源：TWS 实时 · as_of={book.get('as_of')} · 基础货币 {book.get('base_currency', 'USD')}",
+             f"净值 ${book.get('net_liquidation', 0):,.0f} · 现金 ${book.get('cash', 0):,.0f}"
+             f" · 当日盈亏 ${book.get('daily_pnl', 0):,.0f} · 未实现 ${unrealized:,.0f}"
+             f" · 当日已实现 ${book.get('realized_pnl', 0):,.0f}",
+             f"总敞口 ${book.get('gross_exposure', 0):,.0f} · 净敞口 ${book.get('net_exposure', 0):,.0f}"
+             f" · 杠杆 {book.get('leverage', 0):.2f}x"]
+    if book.get("maint_margin") is not None:
+        lines.append(f"保证金（{book.get('margin_source') or 'ibkr'}）：初始 ${book.get('init_margin') or 0:,.0f}"
+                     f" · 维持 ${book['maint_margin']:,.0f} · 剩余流动性 ${book.get('excess_liquidity') or 0:,.0f}")
+    lines.append(f"持仓 {len(positions)} 项（权重 = 市值/净值）：")
+    for p in sorted(positions, key=lambda p: (-abs(p.get("market_value") or 0), p["symbol"],
+                                              str(p.get("expiry") or ""), p.get("strike") or 0)):
+        name, cost = p["symbol"], p.get("avg_cost") or 0
+        if p.get("sec_type") == "OPT":
+            cost /= p.get("multiplier") or 100   # IBKR's option average cost is per contract
+            name += f" {p.get('expiry')} {p.get('strike'):g}{p.get('right')} ×{p.get('multiplier') or 100:g}"
+            if p.get("delta") is not None:
+                name += f" Δ={p['delta']:+.2f}"
+        elif p.get("sec_type") not in (None, "STK"):
+            name += f" [{p['sec_type']}]"
+        lines.append(f"  {name}: {p.get('qty'):g} @ 成本 {cost:,.2f} · 现价 {p.get('market_price'):,.2f}"
+                     f" · 市值 ${p.get('market_value') or 0:,.0f} ({(p.get('weight') or 0):.1%})"
+                     f" · 未实现 ${p.get('unrealized_pnl') or 0:,.0f}"
+                     + (f" · {p['currency']}" if p.get("currency") not in (None, "USD") else ""))
     return "\n".join(lines)
 
 
@@ -104,6 +134,44 @@ def _risk_posture_block(posture, now) -> str:
     return posture["block"] + stale
 
 
+def _pct(value) -> str:
+    return "无" if value is None else f"{value:+.2f}%"
+
+
+def _performance_lines(perf: dict, history) -> list[str]:
+    """Performance with the basis of every number beside it: which records, which window,
+    and what the figure does not account for."""
+    if not perf:
+        return ["绩效：无记录"]
+    lines = []
+    first, last = perf.get("nav_first_as_of"), perf.get("nav_last_as_of")
+    if perf.get("nav_points"):
+        lines.append(f"账户净值：{perf['nav_points']} 个快照点 {str(first)[:10]} → {str(last)[:10]}"
+                     f"（非逐日；首尾净值相除，未扣出入金）· 区间收益 {_pct(perf.get('total_return_pct'))}"
+                     f" · 区间最大回撤 {_pct(perf.get('max_drawdown_pct'))}")
+        try:
+            age = (getattr(history, "queried_at", None) - datetime.fromisoformat(str(last))).days
+        except (TypeError, ValueError):
+            age = None
+        if age is not None and age >= 2:
+            lines.append(f"⚠ 净值快照止于 {str(last)[:10]}（{age} 天前），此后没有记录——以上收益与回撤不代表近况。")
+    else:
+        lines.append("账户净值：无快照记录")
+    win = perf.get("win_rate")
+    factor = perf.get("profit_factor")
+    other = perf.get("realized_other_currencies") or {}
+    lines.append(
+        f"已平仓回合 {perf.get('closed_episodes', 0)}（盈 {perf.get('closed_wins', 0)} / 亏 "
+        f"{perf.get('closed_losses', 0)} / 持平 {perf.get('closed_flat', 0)}）"
+        f" · 胜率 {'无' if win is None else f'{win:.0%}'}（不计持平）"
+        f" · 美元回合已实现合计 ${perf.get('realized_total') or 0:,.0f}"
+        f" · 盈亏比 {'无' if factor is None else f'{factor:.2f}'}（仅美元回合）"
+        + ("".join(f" · {ccy} 回合已实现 {total:+,.0f}（当地货币，未换算）"
+                   for ccy, total in sorted(other.items())))
+        + "（来源：成交台账按合约重建的回合；已实现盈亏取券商回报，缺失时按平均成本含手续费计算）")
+    return lines
+
+
 def _track_record_block(store, history) -> str:
     """Latest performance, recent decisions with what became of them, and recent fills.
 
@@ -112,11 +180,11 @@ def _track_record_block(store, history) -> str:
     proposed and never reached the broker, which is context, not a commitment.
     """
     payload = history.payload or {}
-    lines = []
-    performance = payload.get("performance")
-    if performance:
-        lines.append(f"绩效统计: {_canonical(performance)}")
+    lines = _performance_lines(payload.get("performance") or {}, history)
     lines.append(f"内部状态: {history.status} · {history.source_as_of}")
+    if history.status != "complete":
+        lines.append("⚠ 账本未完整对账，以下成交与绩效不得当作完整事实："
+                     + ("；".join(sorted(history.gaps)) or "来源缺失或部分可用"))
     trades = payload.get("trades") or []
     sent = {(t.get("cycle_id") or "", t.get("symbol")) for t in trades}
     for d in store.recent_decisions(limit=8):
@@ -389,7 +457,7 @@ def build_chief_snapshot(store, *, at=None,
 
 
 def projection_context_block(detail: list[dict]) -> str:
-    """The six categories rendered FROM projections (7.4) — never from legacy tables.
+    """The analysts' categories rendered FROM projections (7.4) — never from legacy tables.
 
     A category with no usable projection is listed as 缺失, never omitted and
     never substituted with an empty string (7.5). A fundamental projection's
@@ -457,13 +525,10 @@ def projection_context_block(detail: list[dict]) -> str:
             head += f" · signal={payload.get('signal')} · {payload.get('summary', '')[:80]}"
             if payload.get("suggested_exposure") is not None:
                 head += f" · 建议敞口上限={payload['suggested_exposure']:.0%}（非交易指令）"
-        elif task_id == "information_brief":
-            head += f" · {payload.get('headline', '')[:80]}"
         return head
 
     lines = [
         line("layer_analysis", "层级分析"),
-        line("information_brief", "信息简报"),
         line("sector_allocation", "行业配置"),
         line("fundamental_expectation_update", "基本面（例行/事件）"),
         line("macro_review", "宏观评审"),
@@ -471,13 +536,24 @@ def projection_context_block(detail: list[dict]) -> str:
     ]
     import json
 
-    # Render every consumed opinion with a fully resolvable ID and hash. The
+    # Render every analyst opinion with a fully resolvable ID and hash. The
     # category summary alone loses scopes and the content that Chief must see.
+    # The information brief is the analysts' source material, not an opinion:
+    # it stays in the frozen snapshot (lineage, freshness) but is not shown.
     lines.extend(
         f"- {d['role']} [{d['scope']}] {d['status']} · {d['projection_id']} "
-        f"sha256={d['content_hash']} · " + json.dumps(d.get("payload") or {}, ensure_ascii=False)
-        for d in detail)
+        f"sha256={d['content_hash']} · " + json.dumps(
+            {k: v for k, v in (d.get("payload") or {}).items() if k not in _BOOKKEEPING},
+            ensure_ascii=False)
+        for d in detail if d["task_id"] not in NOT_RENDERED)
     return "\n".join(lines)
+
+
+# Research the Chief does not read directly (see projection_context_block).
+NOT_RENDERED = frozenset({"information_brief"})
+# Payload fields that identify the schema or point at evidence rows: the projection
+# id and hash already resolve them, and the Chief cannot follow a bare row id.
+_BOOKKEEPING = frozenset({"schema_name", "schema_version", "evidence_refs", "fact_refs"})
 
 
 TASK_TO_CATEGORY = {

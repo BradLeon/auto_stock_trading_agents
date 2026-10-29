@@ -65,7 +65,8 @@ def test_chief_actual_render_requires_every_scope_and_keeps_full_references(isol
         context = assemble.build()
         snapshot, _detail = assemble.build_chief_snapshot(isolated)
     assert snapshot.complete and len(snapshot.items) == 7
-    assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in envelopes)
+    shown = [e for e in envelopes if e.agent_role not in assemble.NOT_RENDERED]   # D3-2
+    assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in shown)
     isolated.conn.execute("DELETE FROM task_projection_envelopes WHERE projection_id=?", (envelopes[-1].projection_id,))
     isolated.conn.commit()
     with bind_read(scope()), pytest.raises(RouteUnavailable, match="required Chief"):

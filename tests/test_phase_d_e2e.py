@@ -215,8 +215,10 @@ def test_every_snapshot_category_is_cited_in_the_decision_context(e2e_env, broke
     merged = {**state.model_dump(), **out}
     assert merged["context_text"]
     block = merged["context_text"].split("研究快照（六类投影）")[-1]
-    for label in ("层级分析", "信息简报", "行业配置", "基本面", "宏观评审", "技术面评审"):
+    for label in ("层级分析", "行业配置", "基本面", "宏观评审", "技术面评审"):
         assert label in block, label
+    # the information brief is the analysts' source material, not shown to the Chief (D3-2)
+    assert "信息简报" not in block and "information_brief [" not in block
     assert "direction=+1" in block and "非交易指令" in block
 
 
@@ -236,6 +238,9 @@ def test_every_context_section_carries_its_projection_id_and_hash(e2e_env, broke
     items = merged["research_snapshot"]["items"]
     assert items
     for item in items:
+        if item["agent_role"] == "information_brief":   # frozen for lineage, not rendered (D3-2)
+            assert item["projection_id"] not in text
+            continue
         assert item["projection_id"] in text, item["agent_role"]
         assert item["content_hash"] in text, item["agent_role"]
     assert "## 组合账本状态" in text and "## 战绩反馈" in text and "## 研究快照（六类投影）" in text

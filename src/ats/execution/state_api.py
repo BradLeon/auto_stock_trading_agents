@@ -57,6 +57,17 @@ class InternalState(BaseModel):
     completeness: Completeness = Field(default_factory=Completeness)
 
 
+def live_account_state(broker) -> dict:
+    """Today's book from the broker: positions (options with greeks), cash, exposure, margin.
+
+    The ledger tables record what happened; they are not the account. A consumer that
+    needs the book reads it here, at the moment it decides, with the broker's own as-of.
+    """
+    from ..data.runtime.broker import portfolio_snapshot
+
+    return portfolio_snapshot(broker)
+
+
 def _risk_posture(store) -> dict | None:
     review = store.latest_risk_review()
     if review is None:
@@ -146,6 +157,33 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     episodes = [EpisodePerformance.model_validate(dict(r)) for r in store.conn.execute(
         "SELECT status, realized_pnl FROM trade_episodes ORDER BY opened_at DESC LIMIT 10000")]
     performance = analytics.summarize(history, episodes)
+    # What the numbers above are computed over, so a reader can judge them: the NAV
+    # snapshots are sparse and not cash-flow adjusted; round trips are the ledger's.
+    span = store.conn.execute(
+        "SELECT COUNT(*) n, MIN(as_of) first, MAX(as_of) last FROM performance").fetchone()
+    # Realized P&L is in each contract's own currency; no FX history is kept, so
+    # non-USD round trips are totalled per currency and left out of the USD figures.
+    currency = {r["k"]: r["currency"] for r in store.conn.execute(
+        "SELECT COALESCE(NULLIF(instrument_key, ''), symbol) k, MAX(currency) currency "
+        "FROM fills GROUP BY k")}
+    closed = [(r["realized_pnl"], currency.get(r["k"]) or "USD") for r in store.conn.execute(
+        "SELECT realized_pnl, COALESCE(NULLIF(instrument_key, ''), symbol) k "
+        "FROM trade_episodes WHERE status = 'closed'")]
+    usd = [p or 0 for p, ccy in closed if ccy == "USD"]
+    gross_loss = -sum(p for p in usd if p < 0)
+    other: dict[str, float] = {}
+    for p, ccy in closed:
+        if ccy != "USD":
+            other[ccy] = round(other.get(ccy, 0.0) + (p or 0), 2)
+    performance.update(
+        nav_points=span["n"], nav_first_as_of=span["first"], nav_last_as_of=span["last"],
+        closed_episodes=len(closed),
+        closed_wins=sum(1 for p, _ in closed if p and p > 0),
+        closed_losses=sum(1 for p, _ in closed if p and p < 0),
+        closed_flat=sum(1 for p, _ in closed if not p),
+        realized_total=round(sum(usd), 2),
+        profit_factor=round(sum(p for p in usd if p > 0) / gross_loss, 2) if gross_loss else None,
+        realized_other_currencies=other)
 
     attribution = None
     period = datetime.now(timezone.utc).strftime("%Y-%m")

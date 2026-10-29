@@ -83,8 +83,28 @@ def assemble_context(state: ChiefDecisionState) -> dict:
                    net_liquidation=0, actionable_scores=[])
         return out
     dr.validate(store, snapshot.to_payload(), at=state.as_of)
+    account = None
+    if state.use_broker:
+        # The book the Chief sees and the posture it proposes inside are taken from
+        # one live read; without it there is no account to decide on.
+        from ..data.consumer_api import read_input
+        from ..trader.portfolio import account_broker
+
+        account = read_input("chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"},
+                             broker=account_broker())
+        if account.status != "complete" or not account.payload:
+            report = ("账户实时状态不可用，决策周期被阻断（不创建周期、不产出决策）："
+                      + ("；".join(account.gaps) or account.status))
+            print(f"🚧 {report}")
+            out.update(gap_report=report, context_text="", context_stats={},
+                       net_liquidation=0, actionable_scores=[])
+            return out
+        from ..agents.risk_officer.review import record_posture
+        from ..schemas.portfolio import PortfolioSnapshot
+
+        record_posture(PortfolioSnapshot.model_validate(account.payload))
     ctx = assemble.build(query_plan=selected_plan,
-                         projection_manifest=snapshot.requirements["manifest"])
+                         projection_manifest=snapshot.requirements["manifest"], account=account)
     log.info("chief context: %s", ctx.stats())
     out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
                net_liquidation=ctx.net_liquidation, actionable_scores=[])

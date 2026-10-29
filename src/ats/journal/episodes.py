@@ -176,22 +176,33 @@ class _Accumulator:
         self.realized_pnl = 0.0
         self.has_realized = False
         self.commission = 0.0
+        # Average-cost basis including opening commissions, for closing legs the
+        # broker reported no realized P&L for (statement imports carry none).
+        self.multiplier = float(self.contract.get("multiplier") or 1.0)
+        self.entry_basis = 0.0
         self.origins: set[str] = set()
         self.primary_entry_id: str = ""
 
     def add_leg(self, fill: dict, role: str, qty: float, entry_id: str | None) -> None:
         price = float(fill.get("price") or 0.0)
+        commission = float(fill.get("commission") or 0.0)
+        sign = 1.0 if self.direction == "long" else -1.0
+        rp = fill.get("realized_pnl")
         if role in ("open", "add"):
             self.entry_notional += price * qty
             self.entry_qty += qty
+            # cost of the position, signed by direction: a short's basis is its proceeds
+            self.entry_basis += price * qty * self.multiplier + sign * commission
         else:  # trim | close
             self.exit_notional += price * qty
             self.exit_qty += qty
-        rp = fill.get("realized_pnl")
+            if not isinstance(rp, (int, float)):
+                unit = self.entry_basis / (self.entry_qty * self.multiplier) if self.entry_qty else 0.0
+                rp = sign * (price - unit) * qty * self.multiplier - commission
         if isinstance(rp, (int, float)):
             self.realized_pnl += float(rp)
             self.has_realized = True
-        self.commission += float(fill.get("commission") or 0.0)
+        self.commission += commission
         if fill.get("expired"):
             self.expired = True     # a synthetic close says nothing about who traded
             return

@@ -164,3 +164,22 @@ def test_direct_trade_reads_registered_as_pending():
     ts = reg.tombstone("store.direct_trade_reads")
     assert ts is not None and ts.status == "pending"
     assert "risk.assess" in ts.consumers
+
+
+def test_realized_pnl_is_never_summed_across_currencies(store):
+    from ats.journal import episodes as ej
+
+    def fill(exec_id, symbol, side, price, t, currency):
+        return {"exec_id": exec_id, "symbol": symbol, "side": side, "shares": 100.0,
+                "price": price, "time": t, "commission": 0.0, "order_id": "", "perm_id": "",
+                "order_ref": "", "sec_type": "STK", "currency": currency}
+
+    store.upsert_fills([fill("u1", "AXTI", "BOT", 10.0, "2026-10-01T14:00:00+00:00", "USD"),
+                        fill("u2", "AXTI", "SLD", 12.0, "2026-10-02T14:00:00+00:00", "USD"),
+                        fill("h1", "7709", "BOT", 30.0, "2026-10-01T02:00:00+00:00", "HKD"),
+                        fill("h2", "7709", "SLD", 40.0, "2026-10-02T02:00:00+00:00", "HKD")])
+    ej.rebuild_all(store=store)
+    perf = state_api.get_internal_state(store).performance
+    assert perf["realized_total"] == 200.0
+    assert perf["realized_other_currencies"] == {"HKD": 1000.0}
+    assert (perf["closed_episodes"], perf["closed_wins"]) == (2, 2)

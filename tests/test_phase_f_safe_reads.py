@@ -365,9 +365,17 @@ def test_chief_candidate_context_consumes_projection_and_state(isolated, monkeyp
     plan["information_brief"]["scopes"] = [brief.scope]
     seed_research(isolated, {k: v for k, v in plan.items() if k != "information_brief"})
     monkeypatch.setattr(assemble, "projection_query_plan", lambda: plan)
+    from ats.data.consumer_api import read_input
+    from ats.schemas.portfolio import PortfolioSnapshot
+
+    book = PortfolioSnapshot(as_of=datetime.now(UTC) - timedelta(seconds=1),
+                             net_liquidation=1_000_000.0, positions=[])
     with rr.bind_read(identity), trace_reads() as rows:
-        result = assemble.build()
-    assert result.net_liquidation == 1_000_000 and brief.projection_id[:18] in result.as_context()
+        account = read_input("chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"},
+                             broker=SimpleNamespace(get_portfolio=lambda: book))
+        result = assemble.build(account=account)
+    # the account is the live book; the brief is read into the snapshot but not shown (D3-2)
+    assert result.net_liquidation == 1_000_000 and brief.projection_id not in result.as_context()
     assert any(brief.projection_id in row["refs"] and row.get("content_hash") for row in rows)
     assert any(row["refs"] and row["api"] == "ats.data.consumer_api.read_input" for row in rows)
     record_property("read_trace", json.dumps(rows))

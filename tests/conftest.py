@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -200,6 +201,36 @@ def _publish_cited_document(store, document_id: str, fetched_at: str) -> None:
     store.save_document(_PublishedDocument(
         document_id=document_id, symbol="MU", period="", doc_type="test",
         source="test", text=f"published body for {document_id}", fetched_at=stamp))
+
+
+# Ports a local TWS / IB Gateway listens on (live, paper).
+_TWS_PORTS = frozenset({7496, 7497, 4001, 4002})
+
+
+@pytest.fixture(autouse=True)
+def _never_reach_tws(monkeypatch):
+    """No test may open a connection to a broker on this machine. A code path that
+    builds a real IBKRBroker fails here instead of reading the user's account."""
+    import asyncio
+    import socket
+
+    def refuse(host, port):
+        if port in _TWS_PORTS:
+            raise ConnectionRefusedError(f"test attempted a TWS connection to {host}:{port}")
+
+    connect, create = socket.socket.connect, asyncio.BaseEventLoop.create_connection
+
+    def guarded_connect(self, address):
+        if isinstance(address, tuple) and len(address) >= 2:
+            refuse(*address[:2])
+        return connect(self, address)
+
+    async def guarded_create(self, factory, host=None, port=None, *args, **kwargs):
+        refuse(host, port)
+        return await create(self, factory, host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(asyncio.BaseEventLoop, "create_connection", guarded_create)
 
 
 @pytest.fixture(autouse=True)
@@ -445,6 +476,8 @@ def broker(monkeypatch, tmp_path):
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
     monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: _fresh_portfolio())
+    monkeypatch.setattr("ats.trader.portfolio.account_broker",
+                        lambda: SimpleNamespace(get_portfolio=_fresh_portfolio))
     monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
     monkeypatch.setattr("ats.risk.assess.enrich_options", lambda p: None)
     monkeypatch.setattr("ats.risk.assess.assess",

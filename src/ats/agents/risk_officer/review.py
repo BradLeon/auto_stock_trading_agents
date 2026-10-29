@@ -38,20 +38,32 @@ def _context(review: RiskReview) -> str:
 from ...workflow.runtime_reads import scoped_read  # noqa: E402
 
 
+def record_posture(portfolio):
+    """Deterministic review of one live book, persisted as the current risk posture.
+
+    The decision cycle calls this on the same snapshot the Chief is shown, so the
+    posture the Chief proposes inside is never older than the book it sees.
+    """
+    from ...memory import get_store
+    from ...risk import assess as risk_assess
+
+    pf = portfolio.model_copy(deep=True)
+    risk_assess.enrich_beta(pf)
+    risk_assess.enrich_options(pf)
+    review = risk_assess.assess(pf)
+    get_store().save_risk_review(review)
+    return review
+
+
 @scoped_read("risk")
 def run(*, use_llm: bool = True) -> RiskMemo | None:
     """Snapshot -> assess -> persist -> LLM memo. Returns None if IBKR is unavailable."""
-    from ...memory import get_store
-    from ...risk import assess as risk_assess
     from ...trader import portfolio as tport
 
     pf = tport.snapshot()
     if pf is None:
         return None
-    risk_assess.enrich_beta(pf)
-    risk_assess.enrich_options(pf)
-    review = risk_assess.assess(pf)
-    get_store().save_risk_review(review)
+    review = record_posture(pf)
 
     if not use_llm:
         return RiskMemo(as_of=review.as_of, assessment="(no-llm) 仅确定性读数", review=review)

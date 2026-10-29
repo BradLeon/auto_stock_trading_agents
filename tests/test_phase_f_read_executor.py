@@ -313,7 +313,8 @@ def test_chief_and_trader_real_stops_keep_complete_approved_revision_and_fills(e
     bm.declare_batch(batch);assert authorize(batch)==0;assert invoke('switch',batch,'DEP','--apply')==0
     with reads.bind_read(who),trace_reads() as rows:
         context=assemble.build()
-    assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in envs)
+    assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context()
+               for e in envs if e.agent_role not in assemble.NOT_RENDERED)   # D3-2
     trader=reads.business_identity('trader',kind='decision',scope_id=state.cycle_id,entities=['AAPL'],
         explicit={'kind':'decision','id':state.cycle_id,'entities':['AAPL'],'time_range':who.scope['time_range']})
     before={t:[dict(r) for r in execution.store.conn.execute('SELECT * FROM '+t)] for t in (

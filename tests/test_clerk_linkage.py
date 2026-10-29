@@ -191,8 +191,9 @@ def test_ats_prefixed_ref_that_matches_nothing_is_unattributed(store):
 
 
 def test_repeated_discovery_refreshes_last_seen_without_duplicating(store):
+    # Dated before `journal.manual_classification_since`, so it is unattributed.
     fill = {"exec_id": "dup", "symbol": "GOOG", "side": "SLD", "shares": 3,
-            "price": 100.0, "time": NOW.isoformat(), "realized_pnl": None,
+            "price": 100.0, "time": "2026-07-20T14:00:00+00:00", "realized_pnl": None,
             "commission": 1.0, "order_id": "", "perm_id": "", "order_ref": ""}
     rec.reconcile(_FakeBroker([fill]), store=store)
     rec.reconcile(_FakeBroker([fill]), store=store)

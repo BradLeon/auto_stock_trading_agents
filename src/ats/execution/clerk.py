@@ -61,9 +61,7 @@ def _step_marks(store, *, broker, dry_run):
     from ..journal import marks
 
     portfolio = _portfolio_positions(broker)
-    prices = ({p.symbol: p.market_price for p in portfolio.positions}
-              if portfolio else {})
-    return marks.mark_all(market_prices=prices)
+    return marks.mark_all(market_prices=marks.prices_by_instrument(portfolio))
 
 
 def _step_episodes(store, *, broker, dry_run):

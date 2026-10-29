@@ -16,12 +16,20 @@ it also carries orders placed by hand in TWS. Each fill is tagged `origin`:
   matches a local order (order_ref / perm_id / order_id+date)
                                          -> system  (confidence = match method)
   non-`ats:` order_ref set in TWS        -> manual  (a deliberate human order)
+  no `ats:` tag, on/after the cutoff     -> manual  (link_confidence = untagged_after_cutoff)
   otherwise                              -> unattributed + audit exception
 
 The third class is the §11.1 ruling (task 2.4): "unattributable" is NOT the
 same as "manual", and collapsing the two — the old behaviour — disguised
 unknown fills as deliberate human trades. An unattributed fill stays in the
 ledger with an explicit exception row; it never enters system performance.
+
+The cutoff (`journal.manual_classification_since`, Boss ruling 2026-10-29) narrows
+that ruling for the era in which it no longer holds: since every system order
+carries an `ats:` orderRef, an untagged fill that matches no local order by
+order_ref/perm_id/order_id+date has positive evidence of being human — the
+absence of the tag the system always writes. A fill that DOES carry an `ats:`
+ref but matches nothing is still a lost system order, hence still unattributed.
 
 The session-date scoping on the order_id rule is not optional: IBKR's orderId
 is a per-client sequence reset by a TWS restart, so an unscoped join will
@@ -72,6 +80,34 @@ def _match(fill: dict, trades: list[dict]) -> tuple[dict | None, str]:
                 continue        # orderId reuse across sessions — not the same order
             return t, "order_id+date"
     return None, "none"
+
+
+def _manual_since() -> date | None:
+    from ..config import get_config
+
+    return get_config().app.journal.manual_classification_since
+
+
+def _untagged_after_cutoff(fill: dict, since: date | None) -> bool:
+    fdate = _as_date(fill.get("time"))
+    return bool(since and fdate and fdate >= since
+                and not (fill.get("order_ref") or "").strip().startswith("ats:"))
+
+
+def attribute(fill: dict, trades: list[dict],
+              since: date | None) -> tuple[dict | None, str, str]:
+    """Classify one fill. Returns (trade_row, origin, link_confidence)."""
+    row, how = _match(fill, trades)
+    if row is not None:
+        return row, "system", how
+    ref = (fill.get("order_ref") or "").strip()
+    if ref and not ref.startswith("ats:"):
+        # A human typed their own orderRef in TWS — a deliberate manual
+        # order with evidence, not an unknown (task 2.4).
+        return None, "manual", how
+    if _untagged_after_cutoff(fill, since):
+        return None, "manual", "untagged_after_cutoff"
+    return None, "unattributed", how
 
 
 def _is_late(fill: dict, trade: dict) -> bool:
@@ -151,17 +187,9 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
     # overwrite that made partial fills disappear from the ledger.
     pnl_by_rid: dict[int, float] = {}
     exec_by_rid: dict[int, list[dict]] = {}
+    since = _manual_since()
     for f in fills:
-        row, how = _match(f, trades)
-        if row is not None:
-            origin = "system"
-        elif (f.get("order_ref") or "").strip() and \
-                not (f.get("order_ref") or "").startswith("ats:"):
-            # A human typed their own orderRef in TWS — a deliberate manual
-            # order with evidence, not an unknown (task 2.4).
-            origin = "manual"
-        else:
-            origin = "unattributed"
+        row, origin, how = attribute(f, trades, since)
         entry_id = row.get("client_order_id") if row else None
         if row:
             summary["linked"] += 1

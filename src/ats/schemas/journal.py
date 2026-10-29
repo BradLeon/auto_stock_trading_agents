@@ -58,6 +58,7 @@ ExitReason = Literal[
     "risk_forced",          # 风控强制减仓，不是主动判断
     "boss_override",        # 人工干预
     "drift",                # ⚠️ 以上都不是 —— 没有按任何说过的理由退出
+    "expired",              # 期权到期：到期日已过、持仓里已没有它，且没有平仓成交（推断）
 ]
 # drift 是 agent 版的"没遵守计划"。人类日志里"是否遵守计划"对机器恒真，
 # 但系统确实会在计划之外平仓（风控级联、Chief 换了套说法），这一类专门抓它。
@@ -175,7 +176,10 @@ class TradeEpisode(BaseModel):
     """
 
     episode_id: str                     # 回合唯一标识
-    symbol: str                         # 标的代码
+    symbol: str                         # 标的代码（期权为其标的）
+    instrument_key: str = ""            # 合约：股票同 symbol，期权为 OCC 代码；空 = 同 symbol
+    sec_type: str = "STK"               # STK | OPT
+    multiplier: float = 1.0             # 每张合约对应股数（期权通常 100）；价格按每股记
     direction: Literal["long", "short"] = "long"   # 多头 / 空头
     origin: EpisodeOrigin = "system"    # 这个回合的单是系统下的、手工下的，还是存量持仓
     status: Literal["open", "closed"] = "open"     # 是否已平仓

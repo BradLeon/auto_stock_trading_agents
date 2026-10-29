@@ -196,6 +196,13 @@ CREATE TABLE IF NOT EXISTS trade_episodes (
 -- Single-row bookkeeping, e.g. tracking_start_date: before it we did not observe,
 -- which is NOT the same as "no trades happened".
 CREATE TABLE IF NOT EXISTS journal_meta (key TEXT PRIMARY KEY, value TEXT);
+-- A Boss-confirmed contract classification for a fill captured before fills
+-- carried contract fields. The fill row's own facts are never rewritten; this is
+-- the record of who decided its instrument, and on what evidence.
+CREATE TABLE IF NOT EXISTS fill_classifications (
+    exec_id TEXT PRIMARY KEY, sec_type TEXT, instrument_key TEXT, multiplier REAL,
+    basis TEXT, decided_by TEXT, decided_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries(symbol);
 CREATE INDEX IF NOT EXISTS idx_pred_symbol ON predictions(symbol);
 CREATE INDEX IF NOT EXISTS idx_episode_symbol ON trade_episodes(symbol);
@@ -693,7 +700,13 @@ class TradingMemory:
         for ddl in ("perm_id TEXT", "order_ref TEXT", "origin TEXT",
                     "link_confidence TEXT", "captured_at TEXT",
                     "entry_id TEXT", "episode_id TEXT",
-                    "late_backfill INTEGER"):
+                    "late_backfill INTEGER",
+                    # Contract identity (journal.episodes "Instrument identity"). NULL on rows captured
+                    # before 2026-10-29: read as a stock unless fill_classifications
+                    # says otherwise.
+                    "sec_type TEXT", "instrument_key TEXT", "multiplier REAL",
+                    "right TEXT", "strike REAL", "expiry TEXT", "currency TEXT",
+                    "con_id TEXT", "local_symbol TEXT"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
         # Phase C compensation semantics (§11, tasks 3.1/3.4): filled_qty backs
@@ -706,7 +719,8 @@ class TradingMemory:
         # episodes table so old rows simply read as "no LLM judgement yet".
         ecols = {r["name"] for r in self.conn.execute(
             "PRAGMA table_info(trade_episodes)")}
-        for ddl in ("invalidation_source TEXT", "invalidation_checked_at TEXT"):
+        for ddl in ("invalidation_source TEXT", "invalidation_checked_at TEXT",
+                    "instrument_key TEXT", "sec_type TEXT", "multiplier REAL"):
             if ecols and ddl.split()[0] not in ecols:
                 self.conn.execute(f"ALTER TABLE trade_episodes ADD COLUMN {ddl}")
         # Decision-audit linkage (§12.3, Phase B). Nullable on purpose: forcing
@@ -1227,7 +1241,13 @@ class TradingMemory:
         self.conn.commit()
 
     def upsert_fills(self, fills: list[dict]) -> int:
-        """Insert IBKR fills, deduped by exec_id (accumulates per-trade realized P&L)."""
+        """Insert IBKR fills, deduped by exec_id (accumulates per-trade realized P&L).
+
+        FX conversions are dropped here, the one write point every capture path
+        shares: they move cash between markets and are not positions."""
+        from ..journal.episodes import NOT_RECORDED
+
+        fills = [f for f in fills if f.get("sec_type") not in NOT_RECORDED]
         if not fills:
             return 0
         from ..execution.shadow_execution import assert_trade_publication
@@ -1238,12 +1258,17 @@ class TradingMemory:
         # INSERT silently breaks the moment one is added.
         self.conn.executemany(
             "INSERT OR IGNORE INTO fills (exec_id, symbol, side, shares, price, time, "
-            "realized_pnl, commission, order_id, perm_id, order_ref, captured_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "realized_pnl, commission, order_id, perm_id, order_ref, captured_at, "
+            "sec_type, instrument_key, multiplier, right, strike, expiry, currency, "
+            "con_id, local_symbol) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
               f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0),
               f.get("order_id", ""), f.get("perm_id"), f.get("order_ref"),
-              evaluation_now(timezone.utc).isoformat())
+              evaluation_now(timezone.utc).isoformat(),
+              f.get("sec_type"), f.get("instrument_key"), f.get("multiplier"),
+              f.get("right"), f.get("strike"), f.get("expiry"), f.get("currency"),
+              f.get("con_id"), f.get("local_symbol"))
              for f in fills])
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
@@ -1355,7 +1380,8 @@ class TradingMemory:
         "risk_unit_source", "mae_pct", "mfe_pct", "mae_source", "excess_vs_sector_pct",
         "setup", "primary_entry_id", "exit_reason", "exit_as_planned",
         "invalidation_triggered", "horizon_overdue_days",
-        "invalidation_source", "invalidation_checked_at")
+        "invalidation_source", "invalidation_checked_at",
+        "instrument_key", "sec_type", "multiplier")
 
     def save_episode(self, episode) -> None:
         """Upsert by episode_id — the reducer re-derives episodes from fills each run,
@@ -1406,6 +1432,43 @@ class TradingMemory:
     def symbols_with_fills(self) -> list[str]:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT symbol FROM fills ORDER BY symbol")]
+
+    # A fill's instrument: its own contract columns, else a Boss-confirmed
+    # classification, else (legacy rows) a stock named by its symbol.
+    _FILL_INSTRUMENT = (
+        "SELECT f.*, COALESCE(f.instrument_key, c.instrument_key, f.symbol) AS ikey, "
+        "COALESCE(f.sec_type, c.sec_type, 'STK') AS itype, "
+        "COALESCE(f.multiplier, c.multiplier, 1.0) AS imult "
+        "FROM fills f LEFT JOIN fill_classifications c ON c.exec_id = f.exec_id")
+
+    def instruments_with_fills(self) -> list[tuple[str, str, str, float]]:
+        """(instrument_key, symbol, sec_type, multiplier), FX excluded."""
+        from ..journal.episodes import NOT_RECORDED
+
+        rows = self.conn.execute(
+            f"SELECT ikey, symbol, itype, MAX(imult) m FROM ({self._FILL_INSTRUMENT}) "
+            "GROUP BY ikey ORDER BY ikey").fetchall()
+        return [(r[0], r[1], r[2], float(r[3] or 1.0)) for r in rows
+                if r[2] not in NOT_RECORDED]
+
+    def fills_for_instrument(self, key: str) -> list[dict]:
+        """Raw fill rows for one instrument, oldest first."""
+        return [dict(r) for r in self.conn.execute(
+            f"SELECT * FROM ({self._FILL_INSTRUMENT}) WHERE ikey = ? ORDER BY time ASC",
+            (key,))]
+
+    def classify_fill(self, exec_id: str, *, sec_type: str, instrument_key: str,
+                      multiplier: float, basis: str, decided_by: str) -> None:
+        if not self.conn.execute("SELECT 1 FROM fills WHERE exec_id = ?",
+                                 (exec_id,)).fetchone():
+            raise KeyError(exec_id)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO fill_classifications (exec_id, sec_type, "
+            "instrument_key, multiplier, basis, decided_by, decided_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (exec_id, sec_type, instrument_key, multiplier, basis, decided_by,
+             evaluation_now(timezone.utc).isoformat()))
+        self.conn.commit()
 
     def legs_for_episode(self, episode_id: str) -> list[dict]:
         """Raw fill rows belonging to one episode, oldest first. The last row is the

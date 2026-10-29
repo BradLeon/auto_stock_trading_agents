@@ -4933,9 +4933,19 @@ def main(argv: list[str] | None = None) -> int:
     jr.add_argument("--quarterly", action="store_true", help="calibrate: 按季度出报告（默认按月）")
     ck = sub.add_parser(
         "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
-    ck.add_argument("action", choices=["run", "rebuild", "gaps"],
+    ck.add_argument("action", choices=["run", "rebuild", "gaps", "import-statement",
+                                       "classify-fill"],
                     help="run: 幂等执行一个对账窗口；rebuild: 重建绩效/归因读模型"
-                         "（只写派生读模型）；gaps: 查看未清偿审计异常")
+                         "（只写派生读模型）；gaps: 查看未清偿审计异常；"
+                         "import-statement: 从 IBKR 交易确认报告 PDF 补录历史成交；"
+                         "classify-fill: 登记一笔旧成交的合约类型（须你确认）")
+    ck.add_argument("--file", help="import-statement: 交易确认报告 PDF 路径")
+    ck.add_argument("--exec-id", help="classify-fill: 成交的 exec_id")
+    ck.add_argument("--sec-type", choices=["STK", "OPT", "CASH"], help="classify-fill: 合约类型")
+    ck.add_argument("--instrument", help="classify-fill: 合约键（期权 OCC 代码；不明用 'SYM OPT?'）")
+    ck.add_argument("--multiplier", type=float, default=None, help="classify-fill: 乘数")
+    ck.add_argument("--basis", help="classify-fill: 依据（必填）")
+    ck.add_argument("--decided-by", default="boss", help="classify-fill: 决定人")
     ck.add_argument("--dry-run", action="store_true", help="只读演练，不写入")
     ck.add_argument("--window-start", help="对账窗口起点 YYYY-MM-DD（默认今天）")
     ck.add_argument("--window-end", help="对账窗口终点 YYYY-MM-DD（默认今天）")
@@ -5346,6 +5356,40 @@ def main(argv: list[str] | None = None) -> int:
             if out.get("gaps_registered"):
                 print(f"  登记对账缺口 {out['gaps_registered']} 个")
             return 1 if out["status"] == "failed" else 0
+        if args.action == "classify-fill":
+            from ..memory import get_store
+
+            if not (args.exec_id and args.sec_type and args.instrument and args.basis):
+                print("需要 --exec-id --sec-type --instrument --basis")
+                return 2
+            mult = args.multiplier or (100.0 if args.sec_type == "OPT" else 1.0)
+            try:
+                get_store().classify_fill(args.exec_id, sec_type=args.sec_type,
+                                          instrument_key=args.instrument, multiplier=mult,
+                                          basis=args.basis, decided_by=args.decided_by)
+            except KeyError:
+                print(f"没有这笔成交：{args.exec_id}")
+                return 1
+            print(f"已登记：{args.exec_id} → {args.sec_type} {args.instrument!r}（乘数 {mult:g}）")
+            return 0
+        if args.action == "import-statement":
+            from ..trader import statement_import
+
+            if not args.file:
+                print("需要 --file <交易确认报告.pdf>")
+                return 2
+            try:
+                out = statement_import.import_statement(Path(args.file), dry_run=args.dry_run)
+            except statement_import.StatementMismatch as exc:
+                print(f"对账单校验未通过，整批不写入：{exc}")
+                return 1
+            print(f"对账单补录{'（演练，未写入）' if out['dry_run'] else ''}：执行明细 "
+                  f"{out['executions']} 条，核对：{out['verified_by']}；"
+                  f"跳过 {out['skipped_sections']}；与 TWS 已抓成交重复 "
+                  f"{out['duplicates_of_tws']} 条；归因 {out['origins']}；按类型 {out['by_type']}；"
+                  f"新写入 {out['inserted']} 条，补合约字段 {out['contract_backfilled']} 条；"
+                  f"按券商记录认定旧成交合约 {len(out['legacy_classified'])} 笔")
+            return 0
         if args.action == "rebuild":
             from ..execution import rebuild
             from ..memory import get_store

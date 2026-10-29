@@ -124,8 +124,11 @@ def mark_episode(store, episode: TradeEpisode, *, market_price: float | None = N
     if episode.basis_source == "observed_fills" and episode.avg_entry:
         start = episode.opened_at.date()
         end = episode.closed_at.date() if episode.closed_at else today
-        mae, mfe = _mae_mfe(episode.symbol, episode.direction, episode.avg_entry,
-                            start, end)
+        # Daily bars are the underlying's; an option premium does not move with
+        # them one-for-one, so no MAE/MFE for options rather than a wrong one.
+        mae, mfe = ((None, None) if episode.sec_type != "STK" else
+                    _mae_mfe(episode.symbol, episode.direction, episode.avg_entry,
+                             start, end))
         if mae is not None:
             updates["mae_pct"], updates["mfe_pct"] = mae, mfe
 
@@ -146,7 +149,8 @@ def mark_episode(store, episode: TradeEpisode, *, market_price: float | None = N
             # Open position: mark-to-market R, using the SAME risk unit as entry —
             # never re-derive it from current conditions.
             sign = 1 if episode.direction == "long" else -1
-            mtm_pnl = sign * (market_price - episode.avg_entry) * _open_qty(store, episode)
+            mtm_pnl = (sign * (market_price - episode.avg_entry) * _open_qty(store, episode)
+                       * episode.multiplier)
             updates["r_multiple_mtm"] = round(mtm_pnl / opening_entry.planned_risk_usd, 3)
 
     return episode.model_copy(update=updates) if updates else episode
@@ -164,19 +168,27 @@ def _open_qty(store, episode: TradeEpisode) -> float:
 
 
 def mark_all(*, store=None, market_prices: dict[str, float] | None = None) -> dict:
-    """Mark every episode. `market_prices`, if given, is {symbol: last price} for
-    open-position MTM — this function never calls the broker itself."""
+    """Mark every episode. `market_prices`, if given, is {instrument key: last
+    price} (see `prices_by_instrument`) for open-position MTM — this function
+    never calls the broker itself."""
     from ..memory import get_store
 
     store = store or get_store()
     market_prices = market_prices or {}
     summary = {"marked": 0}
     for ep in store.list_episodes(limit=100_000):
-        updated = mark_episode(store, ep, market_price=market_prices.get(ep.symbol))
+        updated = mark_episode(store, ep, market_price=market_prices.get(
+            ep.instrument_key or ep.symbol))
         if updated is not ep:
             store.save_episode(updated)
             summary["marked"] += 1
     return summary
+
+
+def prices_by_instrument(portfolio) -> dict[str, float]:
+    from .episodes import position_key
+
+    return {position_key(p): p.market_price for p in portfolio.positions} if portfolio else {}
 
 
 def run() -> int:
@@ -188,8 +200,6 @@ def run() -> int:
     except Exception as exc:  # noqa: BLE001 - MTM marks are best-effort
         log.warning("mark_all: no live prices (%s); closed-episode marks only", exc)
 
-    prices_by_symbol = ({p.symbol: p.market_price for p in portfolio.positions}
-                        if portfolio else {})
-    s = mark_all(market_prices=prices_by_symbol)
+    s = mark_all(market_prices=prices_by_instrument(portfolio))
     print(f"标记完成：{s['marked']} 个回合已更新")
     return 0

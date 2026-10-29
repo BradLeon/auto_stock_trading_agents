@@ -311,6 +311,8 @@ class IBKRBroker:
 
     def get_fills(self) -> list[dict]:
         """Executed fills with per-trade realized P&L (IBKR's authoritative source)."""
+        from ..journal.episodes import contract_fields
+
         out: list[dict] = []
         with self.session() as ib:
             ib.reqExecutions()
@@ -319,6 +321,7 @@ class IBKRBroker:
                 ex, cr = f.execution, f.commissionReport
                 rp = getattr(cr, "realizedPNL", None)
                 out.append({
+                    **contract_fields(f.contract),
                     "exec_id": ex.execId, "symbol": f.contract.symbol,
                     "side": ex.side, "shares": float(ex.shares), "price": float(ex.price),
                     "time": ex.time.isoformat() if ex.time else "",

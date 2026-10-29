@@ -250,6 +250,30 @@ def test_position_with_zero_fills_gets_a_standalone_seed(store):
     assert eps[0].decision_gradeable is False
 
 
+def test_a_first_fill_replaces_the_standalone_seed_instead_of_adding_to_it(store):
+    """A holding first seen with no fills, then backfilled (e.g. from a broker
+    statement): the old `NVDA:pre_tracking` row must not linger as a second,
+    phantom open position."""
+    pf = PortfolioSnapshot(as_of=NOW, net_liquidation=100_000.0, positions=[
+        Position(symbol="NVDA", qty=50.0, avg_cost=150.0, market_price=170.0,
+                market_value=8500.0, unrealized_pnl=1000.0)])
+    ej.rebuild_all(store=store, portfolio=pf)
+    store.upsert_fills([_fill(exec_id="n1", symbol="NVDA", shares=50, price=150.0)])
+    s = ej.rebuild_all(store=store, portfolio=pf)
+    eps = store.list_episodes(symbol="NVDA")
+    assert [e.status for e in eps] == ["open"] and s["superseded"] == 1
+
+
+def test_a_standalone_seed_goes_once_the_name_is_no_longer_held(store):
+    pf = PortfolioSnapshot(as_of=NOW, net_liquidation=100_000.0, positions=[
+        Position(symbol="CRDO", qty=10.0, avg_cost=90.0, market_price=95.0,
+                market_value=950.0, unrealized_pnl=50.0)])
+    ej.rebuild_all(store=store, portfolio=pf)
+    ej.rebuild_all(store=store, portfolio=PortfolioSnapshot(
+        as_of=NOW, net_liquidation=100_000.0, positions=[]))
+    assert store.list_episodes(symbol="CRDO") == []
+
+
 def test_no_portfolio_means_no_seeding_at_all(store):
     """Without a live snapshot the reducer must still run (fills-only), just without
     the pre-tracking correction — never silently guess a holding."""

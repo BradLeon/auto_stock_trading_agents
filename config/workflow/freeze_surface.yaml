@@ -94,6 +94,8 @@ src_tools:
   reason: legacy retirement clearance report; reached from the cli and boundary_drill only
 - path: src/ats/workflow/test_baseline.py
   reason: test baseline bookkeeping; imported by no module
+- path: src/ats/trader/statement_import.py
+  reason: one-off backfill of broker-statement fills; reached only from the cli, never from a scheduled clerk run
 self_verifying:
 - path: src/ats/workflow/boundary_evidence.py
   family: boundary_enforcement

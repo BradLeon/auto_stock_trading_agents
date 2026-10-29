@@ -14,6 +14,7 @@ import functools
 import logging
 import os
 import re
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -199,6 +200,9 @@ class JournalConfig(BaseModel):
     enabled: bool = True
     reconcile_at: str = "16:10"                     # America/New_York
     horizons: list[int] = Field(default_factory=lambda: [1, 5, 20, 60])
+    # From this date every system order carries an `ats:` orderRef, so an untagged
+    # fill that matches no local order is a human order, not an unknown. None = off.
+    manual_classification_since: date | None = None
 
 
 class SectorBrief(BaseModel):

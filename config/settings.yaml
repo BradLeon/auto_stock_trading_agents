@@ -113,3 +113,6 @@ journal:
   enabled: true
   reconcile_at: "16:10"         # America/New_York，收盘后
   horizons: [1, 5, 20, 60]      # 预测打分窗口；四个全部保留，长短期分歧本身是信号
+  # 自此日起系统单一律带 `ats:` orderRef（提交 3cbae47，2026-07-27）：此后既无标签、又对不上
+  # 任何系统订单的成交按人工单归类，不再登记无法归因异常。此前的仍按"无证据即未知"处理。
+  manual_classification_since: "2026-07-27"

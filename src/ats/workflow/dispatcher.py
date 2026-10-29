@@ -561,7 +561,7 @@ class Dispatcher:
         input_refs.extend(env.projection_id for env in dependencies.values())
         input_refs.extend(str(ref) for ref in task_inputs.get("admitted_material_refs", []) or [])
         input_refs.extend(f"config:{path}@{digest}"
-                          for path, digest in sorted(task_config_hashes(plan, task.task_id).items()))
+                          for path, digest in sorted(task_config_hashes(plan, task.task_id, task.scope).items()))
         data_refs = task_inputs.get("data_vintage_refs", root.get("data_vintage_refs", [])) or []
         resolver = getattr(self, "vintage_resolver", None)   # some callers invoke this unbound
         if not data_refs and resolver is not None:

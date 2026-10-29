@@ -120,7 +120,7 @@ def run_pead(
         if chief:
             run_chief(
                 dry_run=dry_run, channel=channel, auto=auto, offline=offline, source="pead-chief",
-                fundamental_mode="event",
+                fundamental_mode="event", event_entities=[sym],
             )
         else:
             print("→ 建议已入档；运行 `ats chief run` 收口交易决策")
@@ -1887,12 +1887,13 @@ def run_chief(
     source: str = "chief",
     fundamental_mode: str = "routine",
     decision_profile: str = "ai_hardware",
+    event_entities: list[str] | None = None,
 ) -> int:
     """One Chief decision run through the decision graph: assemble all artifacts
     -> decide -> risk gate -> persist -> Boss approval -> trade -> persist."""
     start_chief_cycle(execute=execute, dry_run=dry_run, channel=channel, use_llm=use_llm, auto=auto,
                       offline=offline, source=source, fundamental_mode=fundamental_mode,
-                      decision_profile=decision_profile)
+                      decision_profile=decision_profile, event_entities=event_entities)
     return 0
 
 
@@ -1907,6 +1908,7 @@ def start_chief_cycle(
     source: str = "chief",
     fundamental_mode: str = "routine",
     decision_profile: str = "ai_hardware",
+    event_entities: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Start one Chief cycle and return `(cycle_id, graph result)`; the scheduled `chief-daily` reads the result."""
     from ..graph.chief_state import ChiefDecisionState
@@ -1921,6 +1923,7 @@ def start_chief_cycle(
         as_of=now,
         source=source,
         fundamental_mode=fundamental_mode,
+        event_entities=list(event_entities or []),
         decision_profile=decision_profile,
         dry_run=dry_run,
         use_llm=use_llm,
@@ -4888,6 +4891,9 @@ def main(argv: list[str] | None = None) -> int:
     ch.add_argument("--no-llm", action="store_true")
     ch.add_argument("--offline", action="store_true", help="skip live broker read")
     ch.add_argument("--fundamental-mode", choices=["routine", "event"], default="routine")
+    ch.add_argument("--event-entity", action="append", default=[], dest="event_entities",
+                    help="event cycle: an entity whose event starts it (repeatable; default: every "
+                         "target with a usable event review)")
     ch.add_argument("--decision-profile", default="ai_hardware")
     ch.add_argument("--no-execute", action="store_true", help="decide only, don't call trader")
     ch.add_argument("--channel", choices=["cli", "pending", "feishu", "feishu_bot"], default="cli",
@@ -5333,6 +5339,7 @@ def main(argv: list[str] | None = None) -> int:
             offline=args.offline,
             fundamental_mode=args.fundamental_mode,
             decision_profile=args.decision_profile,
+            event_entities=args.event_entities,
         )
     if args.command == "risk":
         if args.action == "report":

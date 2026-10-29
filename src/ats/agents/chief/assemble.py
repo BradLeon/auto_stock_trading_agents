@@ -39,7 +39,8 @@ class ChiefContext:
 
 
 @scoped_read("chief")
-def build(*, projection_manifest=None, query_plan=None, account=None) -> ChiefContext:
+def build(*, projection_manifest=None, query_plan=None, account=None,
+          fundamental_focus=None) -> ChiefContext:
     """The Chief's decision context, rendered only from governed inputs.
 
     Research comes from the published research snapshot (task projection envelopes);
@@ -68,7 +69,7 @@ def build(*, projection_manifest=None, query_plan=None, account=None) -> ChiefCo
         query_plan=query_plan)
     if not snapshot.complete:
         raise RouteUnavailable("required Chief projections unavailable: " + gap_report(snapshot, detail))
-    ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail)
+    ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail, focus=fundamental_focus)
     ctx.blocks["战绩反馈"] = _track_record_block(store, history)
     return ctx
 
@@ -353,6 +354,68 @@ def scan_projection_scopes(store, *, at=None,
     return detail
 
 
+def fundamental_parent_brief(store, row: dict, scope, *, at=None):
+    """The information brief a Fundamental projection was built from, while still usable.
+
+    Usable means published, reusable at `at`, and inside the brief's own freshness
+    window. Returns `(envelope | None, named)`; `named` is False when the projection
+    names no parent brief (nothing to align)."""
+    from datetime import datetime
+
+    from ...agent.task_projection import reuse_decision
+    from ...workflow.planning import FRESHNESS_SECONDS
+
+    own = _latest_row(store, role=row["role"], scope=scope,
+                      projection_id=row["projection_id"], content_hash=row["content_hash"])
+    parents = [ref.split(":")[1:3] for ref in (_envelope_from_row(own, scope).input_refs if own else [])
+               if ref.startswith("projection:") and ref.count(":") == 2]
+    for projection_id, content_hash in parents:
+        brief = _latest_row(store, role="information_brief", scope=scope,
+                            projection_id=projection_id, content_hash=content_hash)
+        if brief is None:
+            continue
+        envelope = _envelope_from_row(brief, scope)
+        reusable, _ = reuse_decision(envelope, scope=scope, at=at)
+        stamp = at or datetime.now(datetime.fromisoformat(envelope.as_of).tzinfo)
+        age = (stamp - datetime.fromisoformat(envelope.as_of)).total_seconds()
+        if reusable and age <= FRESHNESS_SECONDS["information-brief"]:
+            return envelope, True
+    return None, bool(parents)
+
+
+def _align_briefs_to_fundamental(store, detail: list[dict], *, at=None) -> list[dict]:
+    """Select, per target, the information brief its Fundamental projection was built from.
+
+    Briefs refresh more often than the Fundamental analysis that reads them, so the
+    newest brief is often not the one a still-valid event review (or Routine update)
+    consumed — and the frozen-lineage check then refuses the pair. The brief the
+    Fundamental projection names is used instead (coverage only picks a Fundamental
+    projection whose brief is still usable, see `fundamental_coverage`).
+    """
+    from ...agent.task_projection import ProjectionScope
+
+    fundamental: dict[str, dict] = {}
+    for d in detail:
+        if d["role"] in ("fundamental_expectation_update", "fundamental_event_review") and d["status"] == "fresh":
+            if d["scope"] not in fundamental or d["as_of"] > fundamental[d["scope"]]["as_of"]:
+                fundamental[d["scope"]] = d
+    aligned = []
+    for d in detail:
+        chosen = fundamental.get(d["scope"]) if d["role"] == "information_brief" else None
+        if chosen is None:
+            aligned.append(d)
+            continue
+        kind, _, ident = d["scope"].partition(":")
+        envelope, named = fundamental_parent_brief(store, chosen, ProjectionScope(kind=kind, id=ident), at=at)
+        if envelope is None or envelope.projection_id == d["projection_id"]:
+            aligned.append(d)    # nothing named, or already the same brief; validation judges the rest
+            continue
+        aligned.append({**d, "status": "fresh", "reason": "reusable",
+                        "projection_id": envelope.projection_id, "as_of": envelope.as_of,
+                        "content_hash": envelope.content_hash, "payload": envelope.payload})
+    return aligned
+
+
 def build_chief_snapshot(store, *, at=None,
                          projection_manifest: list[dict] | None = None,
                          query_plan=None) -> tuple[Any, list[dict]]:
@@ -375,6 +438,8 @@ def build_chief_snapshot(store, *, at=None,
     plan = query_plan if query_plan is not None else projection_query_plan()
     detail = scan_projection_scopes(store, at=at,
                                     projection_manifest=projection_manifest, query_plan=plan)
+    if projection_manifest is None:
+        detail = _align_briefs_to_fundamental(store, detail, at=at)
     envelopes: dict[str, Any] = {}
     required_scopes: dict[str, ProjectionScope] = {}
 
@@ -391,10 +456,11 @@ def build_chief_snapshot(store, *, at=None,
                           content_hash=best["content_hash"])
         return (best, scope) if row is not None else (None, None)
 
-    # Fundamental: per target, EITHER mode may cover the target; a category is
-    # satisfied only when every target is covered by exactly one winner.
-    entity_count = len(plan.get("fundamental_expectation_update", plan.get(
-        "fundamental_event_review", {"scopes": []}))["scopes"])
+    # Fundamental: per target, EITHER mode may cover the target; the category is
+    # satisfied only when every planned target is covered by a fresh winner. A
+    # per-target plan names each target under one mode only (D3-3).
+    fund_scopes = {scope.key for task_id in ("fundamental_expectation_update", "fundamental_event_review")
+                   for scope in plan.get(task_id, {"scopes": []})["scopes"]}
     fund_winners: dict[str, tuple[str, dict]] = {}
     for d in detail:
         if d["task_id"] not in ("fundamental_expectation_update",
@@ -406,10 +472,13 @@ def build_chief_snapshot(store, *, at=None,
                 or (fresh and not cur_fresh)
                 or (fresh and cur_fresh and d["as_of"] > current[1]["as_of"])):
             fund_winners[d["scope"]] = (d["task_id"], d)
+    fund_complete = bool(fund_scopes) and all(
+        scope_key in fund_winners and fund_winners[scope_key][1]["status"] == "fresh"
+        for scope_key in fund_scopes)
     for task_id in ("fundamental_expectation_update", "fundamental_event_review"):
         winners = [(scope_key, entry) for scope_key, entry in fund_winners.items()
                    if entry[0] == task_id and entry[1]["status"] == "fresh"]
-        if winners and len(winners) == entity_count:
+        if winners and fund_complete:
             best_key, best_entry = max(winners, key=lambda pair: pair[1][1]["as_of"])
             scope = scope_from_key(best_key)
             row = _latest_row(store, role=plan[task_id]["role"], scope=scope,
@@ -456,7 +525,7 @@ def build_chief_snapshot(store, *, at=None,
     return snapshot, detail
 
 
-def projection_context_block(detail: list[dict]) -> str:
+def projection_context_block(detail: list[dict], focus: dict | None = None) -> str:
     """The analysts' categories rendered FROM projections (7.4) — never from legacy tables.
 
     A category with no usable projection is listed as 缺失, never omitted and
@@ -478,7 +547,8 @@ def projection_context_block(detail: list[dict]) -> str:
             reasons = sorted({r["status"] for r in rows}) or {"missing"}
             return f"- {label}: **缺失**（{', '.join(sorted(reasons))}；{len(rows)} 个作用域均不可用）"
         best = max(fresh, key=lambda r: r["as_of"])
-        head = (f"- {label}: {len(fresh)}/{len(rows)} 个作用域可用 · 最新 "
+        scopes, usable = {r["scope"] for r in rows}, {r["scope"] for r in fresh}
+        head = (f"- {label}: {len(usable)}/{len(scopes)} 个作用域可用 · 最新 "
                 f"{best['projection_id'][:18]}… @ {best['as_of']}")
         payload = best.get("payload") or {}
         if task_id == "layer_analysis":
@@ -527,7 +597,14 @@ def projection_context_block(detail: list[dict]) -> str:
                 head += f" · 建议敞口上限={payload['suggested_exposure']:.0%}（非交易指令）"
         return head
 
-    lines = [
+    lines = []
+    focus = focus or {}
+    if focus.get("event_entities"):
+        lines.append("- 本轮事件标的（财报 / 公告后的事件评审）：" + "、".join(focus["event_entities"]))
+    if focus.get("fundamental_uncovered"):
+        lines.append("- 无新近基本面研究（例行与事件评审均已过期；本轮不阻断，不得当作“没有意见”）："
+                     + "、".join(focus["fundamental_uncovered"]))
+    lines += [
         line("layer_analysis", "层级分析"),
         line("sector_allocation", "行业配置"),
         line("fundamental_expectation_update", "基本面（例行/事件）"),

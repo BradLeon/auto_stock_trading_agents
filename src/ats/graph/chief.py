@@ -60,8 +60,15 @@ def assemble_context(state: ChiefDecisionState) -> dict:
     store = get_store()
     from ..workflow import decision_requirements as dr
 
-    requirements = (state.decision_requirements or state.research_snapshot.get("requirements")
-                    or dr.standalone(state))
+    try:
+        requirements = (state.decision_requirements or state.research_snapshot.get("requirements")
+                        or dr.standalone(state, store))
+    except dr.EventCycleWithoutEvents as exc:
+        report = f"事件周期没有可用的事件评审，决策周期被阻断（不创建周期、不产出决策）：{exc}"
+        print(f"🚧 {report}")
+        out.update(gap_report=report, context_text="", context_stats={},
+                   net_liquidation=0, actionable_scores=[])
+        return out
     plan = dr.restore(requirements)
     selected_plan = dr.query_plan(plan)
     # Phase D 7.1: fix the research snapshot BEFORE any decision context is
@@ -104,7 +111,9 @@ def assemble_context(state: ChiefDecisionState) -> dict:
 
         record_posture(PortfolioSnapshot.model_validate(account.payload))
     ctx = assemble.build(query_plan=selected_plan,
-                         projection_manifest=snapshot.requirements["manifest"], account=account)
+                         projection_manifest=snapshot.requirements["manifest"], account=account,
+                         fundamental_focus={key: plan.task_inputs.get(key) or []
+                                            for key in ("event_entities", "fundamental_uncovered")})
     log.info("chief context: %s", ctx.stats())
     out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
                net_liquidation=ctx.net_liquidation, actionable_scores=[])

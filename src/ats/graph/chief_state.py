@@ -31,6 +31,7 @@ class ChiefDecisionState(BaseModel):
     decide: bool = True                 # False: skip the Chief, take seed_decisions as-is
     execute: bool = True                # False (--no-execute): stop after persist_decision
     fundamental_mode: Literal["routine", "event"] = "routine"
+    event_entities: list[str] = Field(default_factory=list)   # event cycle: the entities whose event started it
     decision_profile: str = "ai_hardware"
     decision_requirements: dict = Field(default_factory=dict)
     seed_decisions: list[TradeDecision] = Field(default_factory=list)

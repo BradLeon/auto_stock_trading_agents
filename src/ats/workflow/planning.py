@@ -213,6 +213,32 @@ def _targets(config_dir: Path) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
+FUNDAMENTAL_TASKS = ("fundamental-routine", "fundamental-event")
+
+
+def _fundamental_modes(task_inputs: dict[str, Any] | None) -> dict[str, str] | None:
+    """Per-entity Fundamental mode frozen into a decision plan, or None (one mode for all)."""
+    raw = (task_inputs or {}).get("fundamental_modes")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw or set(raw.values()) - set(FUNDAMENTAL_TASKS):
+        raise ContractError("fundamental_modes must map entities to a Fundamental task")
+    return {str(entity).upper(): task for entity, task in raw.items()}
+
+
+def _check_fundamental_coverage(modes: dict[str, str], task_inputs: dict[str, Any],
+                                targets: list[str]) -> None:
+    """Every target is covered by exactly one mode, or (event cycle only) stated uncovered."""
+    uncovered = {str(e).upper() for e in task_inputs.get("fundamental_uncovered") or []}
+    events = {str(e).upper() for e in task_inputs.get("event_entities") or []}
+    if set(modes) & uncovered or set(modes) | uncovered != set(targets):
+        raise ContractError("every target needs exactly one Fundamental mode or an uncovered mark")
+    if uncovered and not events:
+        raise ContractError("only an event cycle may leave a target's Fundamental uncovered")
+    if any(modes.get(entity) != "fundamental-event" for entity in events):
+        raise ContractError("an event cycle's trigger entities must use their event review")
+
+
 def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) -> list[ProjectionScope]:
     if task_id == "layer-review":
         if requested_scope.kind == "layer":
@@ -262,18 +288,22 @@ def _config_paths(task_ids: Iterable[str], scope_id: str,
     return paths
 
 
-def task_config_hashes(plan: WorkflowPlan, task_id: str) -> dict[str, str]:
+def task_config_hashes(plan: WorkflowPlan, task_id: str,
+                       scope: ProjectionScope | None = None) -> dict[str, str]:
     """The plan's frozen config hashes that one task and its declared upstream read.
 
     A projection records the configs of the task that produced it, not of every task
     that happened to share its plan: a Technical result is not stale because macro.yaml
     changed. Lineage and reuse compare this per-task set, so a projection from a
-    single-workflow run stays reusable inside a multi-workflow (decision) plan.
+    single-workflow run stays reusable inside a multi-workflow (decision) plan. An
+    entity-scoped task reads only its own entity's config: a GOOG brief from a GOOG
+    event run is the same input as a GOOG brief inside a whole-sector plan.
     """
     if not plan.source_config_hashes:
         return {}
     ordered = task_registry().resolve_order((task_id,))
-    entities = [t.scope.id for t in plan.tasks if t.task_id == "information-brief"]
+    entities = ([scope.id] if scope is not None and scope.kind == "entity"
+                else [t.scope.id for t in plan.tasks if t.task_id == "information-brief"])
     wanted = {f"config/{path}" for path in _config_paths(ordered, plan.request_scope.id, entities)}
     return {path: digest for path, digest in plan.source_config_hashes.items() if path in wanted}
 
@@ -301,6 +331,11 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
             raise ContractError(f"dependency {task_id!r} does not accept {trigger.kind!r} triggers")
 
     root = _config_dir(config_dir)
+    modes = _fundamental_modes(task_inputs)
+    if modes is not None:
+        # A mode no target uses has no instance in this plan.
+        ordered_task_ids = [task_id for task_id in ordered_task_ids
+                            if task_id not in FUNDAMENTAL_TASKS or task_id in modes.values()]
     profile: dict[str, Any] = {}
     profile_version = ""
     profile_hash = ""
@@ -348,6 +383,8 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         spec = registry.spec(task_id)
         task_instances: list[TaskInstance] = []
         for item_scope in _scopes(task_id, scope, root):
+            if modes is not None and task_id in FUNDAMENTAL_TASKS and modes.get(item_scope.id) != task_id:
+                continue
             key = f"{namespace}:{task_id}:{item_scope.key}:{config_version_hash[:12]}"
             dependencies: list[str] = []
             for parent in spec.depends_on:
@@ -380,10 +417,13 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
             raise ContractError(
                 "decision-cycle request is incomplete; missing categories: "
                 + ", ".join(missing_categories))
-        fundamental_modes = planned_roles & {
-            "fundamental_expectation_update", "fundamental_event_review"}
-        if len(fundamental_modes) != 1:
-            raise ContractError("a decision profile must select exactly one Fundamental mode")
+        if modes is None:
+            fundamental_modes = planned_roles & {
+                "fundamental_expectation_update", "fundamental_event_review"}
+            if len(fundamental_modes) != 1:
+                raise ContractError("a decision profile must select exactly one Fundamental mode")
+        else:
+            _check_fundamental_coverage(modes, task_inputs or {}, _targets(root))
 
     trigger_json = trigger.model_dump(mode="json")
     # Delivery time is audit metadata, not part of a stable schedule/event plan.
@@ -406,5 +446,5 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         enter_decision_cycle=enter_decision_cycle, config_root=str(root.resolve()))
 
 
-__all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
+__all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "FUNDAMENTAL_TASKS", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
            "build_plan", "task_config_hashes", "task_registry", "validate_task_registry"]

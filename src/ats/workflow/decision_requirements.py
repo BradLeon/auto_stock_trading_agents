@@ -108,13 +108,88 @@ def restore(requirements):
     return plan
 
 
-def standalone(state):
-    mode = "fundamental-event" if state.fundamental_mode == "event" else "fundamental-routine"
-    plan = build_plan(requested_tasks=("sector-review", mode, "macro-review", "technical-review"),
+class EventCycleWithoutEvents(RouteUnavailable):
+    """An event cycle was requested but no target has a usable event review."""
+
+
+def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
+    """Per target, the Fundamental mode the cycle reads (D3-3).
+
+    A usable event review (within its 4-day window, and while the brief it was built
+    from is still inside its own 72 hours) takes precedence: the Routine
+    update runs several times a day on whatever fact changes arrived, so "newer" would
+    hide every post-earnings review behind the next minor note. Without one, the usable
+    Routine update is read.
+
+    Returns `(modes, uncovered, triggers)`. A routine cycle maps every target, so a
+    target with neither mode usable is kept on Routine and blocks as missing. An event
+    cycle is started by its trigger entities — named by the caller, else every target
+    that has a usable event review — which always use their event review; any other
+    target with nothing usable is left uncovered and stated, not blocking.
+    """
+    from ..agents.chief.assemble import fundamental_parent_brief, scan_projection_scopes
+    from .planning import FRESHNESS_SECONDS, FUNDAMENTAL_TASKS
+
+    scopes = [ProjectionScope(kind="entity", id=target) for target in targets]
+    probe = {TASK_ROLE[task]: {"role": TASK_ROLE[task], "scopes": scopes} for task in FUNDAMENTAL_TASKS}
+    task_of = {TASK_ROLE[task]: task for task in FUNDAMENTAL_TASKS}
+    usable: dict[str, set[str]] = {}
+    for row in scan_projection_scopes(store, at=at, query_plan=probe):
+        task = task_of[row["role"]]
+        if row["status"] != "fresh" or not row["as_of"]:
+            continue
+        if (at - datetime.fromisoformat(row["as_of"])).total_seconds() > FRESHNESS_SECONDS[task]:
+            continue
+        entity = row["scope"].partition(":")[2]
+        brief, named = fundamental_parent_brief(store, row, ProjectionScope(kind="entity", id=entity), at=at)
+        if named and brief is None:
+            continue    # the brief it was built from has expired: the pair no longer validates
+        usable.setdefault(entity, set()).add(task)
+    chosen = {entity: "fundamental-event" if "fundamental-event" in tasks else "fundamental-routine"
+              for entity, tasks in usable.items()}
+    triggers = sorted({str(e).upper() for e in event_entities}) if event_cycle else []
+    if event_cycle and not triggers:
+        triggers = sorted(e for e, task in chosen.items() if task == "fundamental-event")
+    modes, uncovered = {}, []
+    for target in targets:
+        if target in triggers:
+            modes[target] = "fundamental-event"
+        elif target in chosen:
+            modes[target] = chosen[target]
+        elif event_cycle:
+            uncovered.append(target)
+        else:
+            modes[target] = "fundamental-routine"
+    return modes, uncovered, triggers
+
+
+def standalone(state, store=None):
+    """The frozen decision requirements for one Chief cycle started outside the Dispatcher.
+
+    With a store, Fundamental is chosen per target (D3-3); without one (fixture
+    producers) the cycle's single mode covers every target, as before.
+    """
+    requested = ["sector-review", "macro-review", "technical-review"]
+    task_inputs = None
+    event_cycle = state.fundamental_mode == "event"
+    if store is None:
+        requested.insert(1, "fundamental-event" if event_cycle else "fundamental-routine")
+    else:
+        from .planning import FUNDAMENTAL_TASKS, _config_dir, _targets
+
+        modes, uncovered, triggers = fundamental_coverage(
+            store, targets=_targets(_config_dir(None)), at=state.as_of, event_cycle=event_cycle,
+            event_entities=getattr(state, "event_entities", ()) or ())
+        if event_cycle and not triggers:
+            raise EventCycleWithoutEvents("event cycle has no entity with a usable event review")
+        requested[1:1] = [task for task in FUNDAMENTAL_TASKS if task in modes.values()]
+        task_inputs = {"fundamental_modes": modes, "fundamental_uncovered": uncovered,
+                       "event_entities": triggers}
+    plan = build_plan(requested_tasks=tuple(requested),
         scope=ProjectionScope(kind="sector", id=state.decision_profile),
         trigger=TriggerContext(kind="manual", trigger_id=state.cycle_id),
         as_of=state.as_of.isoformat(), run_id=state.cycle_id,
-        profile_id=state.decision_profile, enter_decision_cycle=True)
+        profile_id=state.decision_profile, enter_decision_cycle=True, task_inputs=task_inputs)
     return freeze(plan)
 
 

@@ -100,11 +100,20 @@ layer. Chief uses the complete configured research snapshot, not presence counts
                      for layer in load_sector_config(identity.scope["id"]).layers]
     elif identity.consumer_id == "chief":
         from ..agents.chief.assemble import build_chief_snapshot, projection_query_plan
-        if fundamental_mode not in {"routine", "event"}:
+        if fundamental_mode not in {"routine", "event", "per_target"}:
             raise plane.CutoverError("Chief deployment requires an explicit Fundamental mode")
-        omitted = ("fundamental_event_review" if fundamental_mode == "routine"
-                   else "fundamental_expectation_update")
-        plan = {key: item for key, item in projection_query_plan().items() if key != omitted}
+        if fundamental_mode == "per_target":
+            # Each target under the mode its fixed reference actually uses (D3-3).
+            fundamental = ("fundamental_expectation_update", "fundamental_event_review")
+            used = {role: {ref["scope_id"] for ref in refs if ref["role"] == role} for role in fundamental}
+            plan = {key: ({**item, "scopes": [s for s in item["scopes"] if s.id in used[key]]}
+                          if key in fundamental else item)
+                    for key, item in projection_query_plan().items()}
+            plan = {key: item for key, item in plan.items() if item["scopes"]}
+        else:
+            omitted = ("fundamental_event_review" if fundamental_mode == "routine"
+                       else "fundamental_expectation_update")
+            plan = {key: item for key, item in projection_query_plan().items() if key != omitted}
         snapshot, detail = build_chief_snapshot(store, at=point, projection_manifest=refs, query_plan=plan)
         if not snapshot.complete or any(d["status"] != "fresh" for d in detail):
             raise plane.CutoverError("required Chief projection scopes unavailable")

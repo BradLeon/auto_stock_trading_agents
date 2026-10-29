@@ -8,10 +8,14 @@ refresh:
     http_requests: 60
     earnings_symbols: 20
     response_bytes: 10000000
+  # Dispatcher consumption of the published calendar. 2026-10-29: every 30 minutes instead of 06:10/18:10 UTC. It only
+  # reads the local store and every dispatch is keyed by event version, so a repeat is a no-op; what it buys is that a
+  # print confirmed by calendar-finalize (06:00/18:00 Taipei, on whatever minute the hourly data tick lands) wakes its
+  # review within half an hour instead of waiting for a fixed slot that the tick may have missed.
   schedule:
     enabled: true
-    hour: "6,18"
-    minute: 10
+    hour: "*"
+    minute: "5,35"
     timezone: UTC
 
 # Calendar-only sources: adapters may persist release dates/times and source lineage,

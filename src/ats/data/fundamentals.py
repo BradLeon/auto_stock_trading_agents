@@ -945,6 +945,8 @@ def _headers() -> dict:
 def _ticker_to_cik() -> dict[str, str]:
     import httpx
 
+    from . import sec_rate
+    sec_rate.wait()
     r = httpx.get("https://www.sec.gov/files/company_tickers.json", headers=_headers(), timeout=20)
     r.raise_for_status()
     return {row["ticker"].upper(): f"{int(row['cik_str']):010d}" for row in r.json().values()}
@@ -956,6 +958,8 @@ def _sec_filings(symbol: str, limit: int = 5) -> list[Filing]:
     cik = _ticker_to_cik().get(symbol.upper())
     if not cik:
         return []
+    from . import sec_rate
+    sec_rate.wait()
     r = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=_headers(), timeout=20)
     r.raise_for_status()
     recent = r.json().get("filings", {}).get("recent", {})

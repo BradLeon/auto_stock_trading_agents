@@ -270,7 +270,7 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
                     log.exception("published calendar consumption failed: %s", operation.__name__)
 
         cron = CronTrigger(day_of_week="*", hour=refresh_schedule.get("hour", 6),
-                           minute=int(refresh_schedule.get("minute", 10)),
+                           minute=str(refresh_schedule.get("minute", 10)),
                            timezone=refresh_schedule.get("timezone", "UTC"))
         scheduler.add_job(consume_calendar, cron, id="phase_e:calendar-consume", coalesce=True,
                           max_instances=1, misfire_grace_time=None)

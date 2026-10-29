@@ -258,7 +258,7 @@ def test_governed_article_sources_come_from_authoritative_unstructured_registry(
             "ibkr_news", "yfinance_live_news"} <= set(sources)
     assert set(sources) <= target_ids
     assert target_ids - set(sources) == {
-        "defeatbeta_sec_filing_index", "sec_edgar_filing_body",
+        "defeatbeta_sec_filing_index", "sec_edgar_submissions_index", "sec_edgar_filing_body",
         "defeatbeta_earnings_transcript", "ai_hardware_knowledge_corpus",
         "macro_theme_news"}          # search-news kind: collected by the refresh controller, not an article adapter
     assert "kr_semiconductor_exports" not in target_ids

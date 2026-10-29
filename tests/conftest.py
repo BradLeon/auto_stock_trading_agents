@@ -243,6 +243,15 @@ def _isolate_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_sec_rate(tmp_path, monkeypatch):
+    """The machine-wide SEC pace keeps its state per test and does not slow fake requests down."""
+    from ats.data import sec_rate
+
+    monkeypatch.setenv("ATS_SEC_RATE_STATE", str(tmp_path / "sec_rate.json"))
+    monkeypatch.setattr(sec_rate, "_interval", lambda: 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_report_dir(tmp_path, monkeypatch):
     """Reports must never land in the real Obsidian vault during tests.
 

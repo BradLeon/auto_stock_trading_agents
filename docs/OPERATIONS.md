@@ -56,7 +56,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 | `macro-review` | 周六 09:00 台北 | `portfolio:portfolio` |
 | `sector-review` | 周六 09:30 台北（Dispatcher 先补跑 `layer-review`） | `sector:ai_hardware` |
 
-日历事件的路由在 `config/workflow/event_routes.yaml`，常驻进程每天 06:10、18:10（UTC）消费已发布的事件：
+日历事件的路由在 `config/workflow/event_routes.yaml`，常驻进程每 30 分钟（每小时 :05、:35 UTC）消费已发布的事件，重复消费不会重复派发：
 
 - 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（例行模式在财报前 `prep_days_before`＝3 天内建立基线）。
 - 财报**已发布**且已准入公告或申报材料 → 信息简报 + 基本面事件评审（冻结基线、打分）。
@@ -176,9 +176,14 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
   摄入上月最终版）、第三方序列的链证据采集（`chain-source-collect`）：L1 三个证据观察器每天 09:00 UTC
   （`chain_l1_governed_evidence_daily`），韩国/台湾出口与 DRAM 合约价每周一 09:30 UTC
   （`chain_regional_*_weekly`）。这类任务不调用模型。
-- SEC 正文任务（`sec_official_body_daily`，每天 09:30 UTC，在文件索引 08:00 之后）每次最多取 20 份申报，**请求预算只算入库成功的申报**：
+- 财报申报每天分两班进入日历，06:00 和 18:00（台北）。每班在同一次数据刷新里按顺序跑：EDGAR 文件发现（`sec_edgar_discovery_*`，
+  只查财报日在前 3 天到后 1 天内的标的，每家一次请求）→ SEC 正文（`sec_official_body_*`）→ 发布确认（`calendar_finalize_*`）。
+  美股盘后 16:00 的财报，8-K 几分钟后就在 EDGAR 上，次日 06:00 那班就能确认；DefeatBeta 文件索引（每天 08:00 UTC，上游约 08:35 才更新）
+  照常运行，作为全量的兜底。所有访问 sec.gov 的请求共用一个跨进程的节流（`ats.data.sec_rate`，默认每秒 4 次，SEC 上限是 10 次），
+  一旦 SEC 回 429 或“Request Rate Threshold Exceeded”，所有进程暂停 10 分钟，状态在 `var/run/sec_rate.json`。
+- SEC 正文任务每次最多取 20 份申报，**请求预算只算入库成功的申报**：
   取不到正文的（如没有新闻稿附件的 8-K）退还请求；已入库的 7 天内不再取；同一份在 3 个不同日子都找不到（或 5 个不同日子都失败）就不再试；
-  预算用完没轮到的记为“延后”而不是失败，下次排在最前。日历“发布确认”在 10:00 UTC，紧接着这个任务。
+  预算用完没轮到的记为“延后”而不是失败，下次排在最前。
 - 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](data/STRUCTURED_DATA_OPERATIONS.md)。
 
 ## 6. 事件日历

@@ -746,7 +746,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "succeeded" and refs["published"]:
                 status, reason = "succeeded", ""
             elif action in {"document-ingest", "fixed-ingest"} and packet_status == "succeeded" and refs["runs"] and not refs["published"] and \
-                    job.sources == ("defeatbeta_sec_filing_index",):
+                    job.sources in {("defeatbeta_sec_filing_index",), ("sec_edgar_submissions_index",)}:
                 status, reason = "succeeded", "index_metadata_only"
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "succeeded":
                 status, reason = "quarantined", "article_publication_reference_missing"

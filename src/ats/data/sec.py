@@ -105,11 +105,16 @@ def _request_text(url: str, *, stage: str, attempts: int = 3) -> tuple[str, tupl
         return managed(url, stage=stage, attempts=attempts)
     import httpx
 
+    from . import sec_rate
+
     failures: list[SecFetchFailure] = []
     for attempt in range(1, max(1, attempts) + 1):
         try:
+            sec_rate.wait()
             response = httpx.get(
                 url, headers=_headers(), timeout=30, follow_redirects=True)
+            if sec_rate.observe(response.status_code, response.content):
+                raise sec_rate.SECRateLimited(f"sec throttled the request (http {response.status_code})")
             response.raise_for_status()
             return response.text, tuple(failures)
         except Exception as exc:  # noqa: BLE001 - surfaced as structured health below

@@ -368,6 +368,9 @@
 - 读路径相关 32 个文件（`switch-t01-fix-wide.log`）：903 通过、9 失败。其中 6 个与 T0.8 基线完全相同；另 3 个是直接调用 `assemble.build()` 的旧断言（期望净值来自旧 performance 表、期望信息简报出现在上下文里），已按新规则改写，复跑通过。
 - 其余会走到决策图的 14 个文件（`switch-t01-fix-graph.log`）：210 通过、3 失败。其中 2 个与基线相同。`test_phase_f_opinion_execution.py::test_actual_opinion_edges_and_published_lineage` 在基线 `fdc56a3` 是绿的，但在不含本次改动的 HEAD `d3f8c68` 干净 worktree 上同样失败：行业分析走到了 `ats.data.collection`，被判 `provider_or_raw_repository_bypass`。因此它与本次修复无关，是 `fdc56a3` 之后其他提交引入的，登记在第 5 节。
 
+- T0.6 订单追溯在干净 worktree `7920970` 复跑：**28/28 通过**（`var/test_runs/switch-t06-clean-7920970.{log,xml}`，挂连接拦截插件，命中 0 次）。
+- 提交 `7920970` 后已重启 dispatcher（PID 4871）与 serve（PID 4874），`/health` 正常。
+
 **测试事故（如实记录）：** 改动后第一次跑回归时，新的实时读账户代码路径在端到端测试里会构造真实的 IBKRBroker：原测试夹具只替换了 `tport.snapshot`。那次运行在进入端到端用例后被我停掉，期间很可能以只读方式连过一次本机 TWS（7496），读了账户和持仓。没有任何下单路径（下单走 FakeBroker），风控结果写进的是测试临时库，不是生产库。之后用连接拦截插件复现确认会尝试连接，并做了两处修复：
 - 夹具补了假账户；
 - `tests/conftest.py` 加了全局护栏 `_never_reach_tws`，任何测试连 7496/7497/4001/4002 都直接失败。

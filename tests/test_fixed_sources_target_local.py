@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from ats.data.catalog.loader import DataCatalog
 from ats.data.pipelines.unstructured import document_ingest as fixed_sources
 from ats.data.sec import SecFetchResult
@@ -159,18 +161,19 @@ def test_invalid_official_url_is_quarantined_before_fetch(tmp_path, monkeypatch)
         store.close()
 
 
-def test_transcript_period_and_speaker_segments_are_required():
+def test_transcript_period_and_content_are_required_and_missing_speakers_are_stated():
     row = {"symbol": "NVDA", "fiscal_year": 2026, "fiscal_quarter": 2,
-           "transcripts": [{"paragraph_number": 1, "speaker": "CEO", "content": "Revenue grew."}]}
+           "transcripts": [{"paragraph_number": 1, "speaker": "CEO", "content": "Revenue grew."},
+                           {"paragraph_number": 2, "speaker": "CFO", "content": "Margins held."}]}
     assert fixed_sources._transcript_row(row) == (
-        "NVDA", "Q2 FY2026", "## Prepared Remarks\n\n**CEO:** Revenue grew.")
-    row["transcripts"][0]["speaker"] = ""
-    try:
-        fixed_sources._transcript_row(row)
-    except ValueError as exc:
-        assert "segment_invalid" in str(exc)
-    else:
-        raise AssertionError("speakerless transcript accepted")
+        "NVDA", "Q2 FY2026", "## Prepared Remarks\n\n**CEO:** Revenue grew.\n\n**CFO:** Margins held.")
+    row["transcripts"][1]["speaker"] = ""                  # SK hynix Q3 2026: the source left every speaker empty
+    text = fixed_sources._transcript_row(row)[2]
+    assert text.startswith("> Speaker labels missing in the source for 1 of 2 paragraphs")
+    assert text.endswith("**CEO:** Revenue grew.\n\nMargins held.")
+    row["transcripts"][1]["content"] = " "
+    with pytest.raises(ValueError, match="segment_invalid"):
+        fixed_sources._transcript_row(row)                 # an empty paragraph is still not a transcript
 
 
 def test_pinned_transcript_and_official_filing_publish_as_distinct_documents(

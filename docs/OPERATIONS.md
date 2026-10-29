@@ -270,6 +270,7 @@ ats approval reject  <cycle_id> --revision <hash 前缀> [--note "<备注>"]
 **回退**
 
 1. 停用：`ats dispatch pause --workflow chief-daily --actor <谁> --reason "…"`，再停 `clerk-daily`（不需要批准）。
+   从未恢复过的工作流还没有调度归属记录，`pause` 会拒绝并报 `workflow has no declared schedule owner`。这表示它本来就是停用的（dispatcher 不注册它，`launchctl` 重启后日志里只列研究工作流），这一步跳过即可（2026-10-29 T0.7 演练实测）。
 2. 必要时按 S3 → S2 → S1 倒序 revert 对应提交，重启 `com.ats.dispatcher`，用 `launchctl list` 确认 PID。镜像写保留，旧读取方仍能看到观察期内的决策，回退不需要恢复数据。
 3. 实盘锁定期间没有在途订单需要排空，但要做一次路由冻结核验，确认没有未终结授权。
 

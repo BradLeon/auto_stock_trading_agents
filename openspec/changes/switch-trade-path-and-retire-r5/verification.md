@@ -409,6 +409,8 @@
   - 事件评审优先于之后的例行摘录、事件过期回到例行；
   - 选取下游依据的简报而非最新简报、简报过期则回到例行。
 - 回归（33 个文件，`var/test_runs/switch-d33-regress.log`）：628 通过、19 失败，19 个与 T0.8 基线逐项相同（`test_read_cutover` 16 个、`test_phase_f_schedule_runtime` 1 个、`test_phase_f_research_gate` 2 个）。挂连接拦截插件，命中 0 次。
+- T0.6 订单追溯在干净 worktree `cc0d197` 上复跑 **28/28 通过**（`var/test_runs/switch-t06-clean-cc0d197.{log,xml}`），拦截插件命中 0 次。
+- 提交后已于 23:14 重启 dispatcher（PID 36980）与 serve（PID 36982），`/health` 正常。
 
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
 

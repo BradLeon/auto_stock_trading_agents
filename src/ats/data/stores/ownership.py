@@ -39,6 +39,9 @@ WORKFLOW_MEMORY_TABLES = frozenset({
     # read models all carry trade consequences and opinions about them, so they
     # are Workflow memory too.
     "ledger_exceptions", "clerk_runs", "ledger_read_models",
+    # Boss/broker-record classification of a legacy fill's contract: a judgement
+    # about the fact, kept beside it, never part of the fact.
+    "fill_classifications",
     "claim_assessments", "sector_reviews", "macro_reviews",
     "technical_reviews", "fills", "risk_reviews", "score_consumption", "pead_periods",
     "pead_score_runs", "journal_entries", "journal_meta", "predictions",

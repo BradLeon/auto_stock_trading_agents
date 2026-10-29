@@ -222,7 +222,10 @@ def test_a_role_that_never_reaches_the_governed_surface_is_registered_not_passed
     # 2026-10-17: `fundamental` left this list — its declared entry points now include `fundamental.inputs`, the
     # module through which the governed target path really reads company data (the three entry modules alone never
     # reached it, so the role looked unwired although it had been cut over).
-    assert set(unwired) == {"chief", "risk", "clerk"}
+    # 2026-10-29: `chief` left this list — switch-trade-path-and-retire-r5 group 2 moved its context onto the
+    # research snapshot and Internal State, read through the governed surface (`ats retirement zero` clears
+    # `chief.legacy_table_direct_reads`). Risk and Clerk follow in that change's task 6.4.
+    assert set(unwired) == {"risk", "clerk"}
 
 
 def test_the_ten_analysis_and_decision_roles_are_the_declared_ten():
@@ -390,9 +393,9 @@ def test_a_violation_names_a_location_a_reader_can_act_on():
     assert read.location.startswith("ats.trader.execute:")
     assert read.detail
 
-    unwired = next(v for v in iv.scan_consumer_access("chief").violations
+    unwired = next(v for v in iv.scan_consumer_access("risk").violations
                    if v.kind == "governed_read_surface_not_reached")
-    assert unwired.location in iv.CONSUMER_ENTRY_POINTS["chief"]
+    assert unwired.location in iv.CONSUMER_ENTRY_POINTS["risk"]
     assert unwired.detail
 
 

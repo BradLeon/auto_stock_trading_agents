@@ -59,7 +59,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ..journal.episodes import is_unknown, occ_key
+from ..journal.episodes import _is_buy, is_unknown, occ_key
 
 _ET = ZoneInfo("America/New_York")     # statement note 7: times are US Eastern
 _SECTIONS = ("股票", "股票和指数期权", "外汇", "金融产品信息")
@@ -97,7 +97,7 @@ def _num(raw: str) -> float:
 
 
 def _side(raw: str) -> str:
-    return "BOT" if raw in ("BUY", "买入") else "SLD"
+    return "BOT" if raw == "买入" or _is_buy(raw) else "SLD"
 
 
 def _group(key: str) -> str:

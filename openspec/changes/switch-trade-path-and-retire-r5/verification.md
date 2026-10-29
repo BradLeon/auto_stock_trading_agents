@@ -371,6 +371,11 @@
 - T0.6 订单追溯在干净 worktree `7920970` 复跑：**28/28 通过**（`var/test_runs/switch-t06-clean-7920970.{log,xml}`，挂连接拦截插件，命中 0 次）。
 - 提交 `7920970` 后已重启 dispatcher（PID 4871）与 serve（PID 4874），`/health` 正常。
 
+**事件模式渲染（2026-10-29 22:00 副本 `var/switch_t0e/copy/`，账户读 TWS 实时，没建周期、没调用模型）：**
+- **严格校验：被阻断。** 11 个标的里 5 个没有可用的事件评审（AVGO、COHR、LITE、MRVL、NVDA），缺口报告见 `var/switch_t0e/chief_snapshot_strict.json`。上下文为空。因此事件触发的周期（`pead-chief`）只有在全部标的都有新近事件评审时才能运行，财报季里实际跑不起来。
+- **仅供阅读版**（`var/switch_t0e/chief_context_render.md`，103,525 字）：只在渲染进程里强制放开完整性门禁和血缘校验。事件评审 6 个标的 fresh（ASML、GOOG、LRCX、MSFT、SKHY、TSM），5 个标为 missing；这 5 个标的的例行预期更新在事件模式下完全不出现。
+- 风控现算：新增 `L1-止损 LYTE -26% vs ≥-25% → 强制 trim`，压测 -27.6%。
+
 **测试事故（如实记录）：** 改动后第一次跑回归时，新的实时读账户代码路径在端到端测试里会构造真实的 IBKRBroker：原测试夹具只替换了 `tport.snapshot`。那次运行在进入端到端用例后被我停掉，期间很可能以只读方式连过一次本机 TWS（7496），读了账户和持仓。没有任何下单路径（下单走 FakeBroker），风控结果写进的是测试临时库，不是生产库。之后用连接拦截插件复现确认会尝试连接，并做了两处修复：
 - 夹具补了假账户；
 - `tests/conftest.py` 加了全局护栏 `_never_reach_tws`，任何测试连 7496/7497/4001/4002 都直接失败。

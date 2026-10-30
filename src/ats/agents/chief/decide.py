@@ -23,6 +23,8 @@ class ChiefResult(BaseModel):
     as_of: datetime
     summary: str = ""
     decisions: list[TradeDecision] = Field(default_factory=list)
+    reasoning: dict = Field(default_factory=dict)          # ChiefReasoning, as recorded
+    option_actions: list[dict] = Field(default_factory=list)   # advice on held options; manual
     context_text: str = ""            # the exact context the Chief saw (for the audit report)
 
 
@@ -51,7 +53,9 @@ def from_context(context_text: str, *, cycle_id: str, as_of: datetime,
 
     decisions = [_to_decision(d) for d in out.decisions if d.action != "hold"]
     return ChiefResult(cycle_id=cycle_id, as_of=as_of, summary=out.summary,
-                       decisions=decisions, context_text=context_text)
+                       decisions=decisions, reasoning=out.reasoning.model_dump(),
+                       option_actions=[a.model_dump() for a in out.option_actions],
+                       context_text=context_text)
 
 
 def revise_with_note(context_text: str, *, prior_summary: str, prior_decisions: list[TradeDecision],
@@ -105,6 +109,10 @@ def _prior_lines(prior_decisions: list[TradeDecision]) -> str:
         + (f" — {d.rationale[:120]}" if d.rationale else "") for d in prior_decisions) or "（无订单）"
 
 
+def _positive(value):
+    return value if value is not None and value > 0 else None
+
+
 def _to_decision(v) -> TradeDecision:
     return TradeDecision(
         symbol=v.symbol.upper(), action=v.action,
@@ -112,7 +120,10 @@ def _to_decision(v) -> TradeDecision:
         order_type=v.order_type, limit_price=v.limit_price,
         conviction=max(0.0, min(1.0, float(v.conviction))), rationale=v.rationale,
         setup=getattr(v, "setup", "unknown") or "unknown",
-        stop_price=getattr(v, "stop_price", None),
-        target_price=getattr(v, "target_price", None),
-        planned_horizon_days=getattr(v, "planned_horizon_days", None),
-        invalidation=getattr(v, "invalidation", "") or "")
+        # Optional plan fields: a model writing 0 means "none", not a contract breach that
+        # should throw away the whole answer (2026-10-30: planned_horizon_days=0 did).
+        stop_price=_positive(getattr(v, "stop_price", None)),
+        target_price=_positive(getattr(v, "target_price", None)),
+        planned_horizon_days=_positive(getattr(v, "planned_horizon_days", None)),
+        invalidation=getattr(v, "invalidation", "") or "",
+        references=list(getattr(v, "references", None) or []))

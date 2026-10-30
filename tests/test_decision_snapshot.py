@@ -247,3 +247,34 @@ def test_mirror_skips_legacy_unknown_revisions(tmp_path):
         "VALUES ('c-old', 1, NULL, 'legacy_unknown', '[]', 't')")
     repo.mirror_revision_to_legacy("c-old", 1, as_of=NOW)
     assert store.recent_decisions() == []
+
+
+def test_only_versions_newer_than_the_frozen_snapshot_invalidate_it():
+    """2026-10-30 T0.2: the snapshot deliberately cites the brief a fundamental conclusion
+    used (D3-3), which may be older than the latest one. A version that already existed
+    when the snapshot was frozen is not a mid-cycle change; one published after it is."""
+    from ats.decision.snapshot import frozen_snapshot_stale_reasons
+
+    env = _envelope()
+    payload = build_research_snapshot(
+        registry=_registry(), projections={"layer": env, "macro": env},
+        scope=ProjectionScope(kind="portfolio")).to_payload()
+    payload["built_at"] = "2026-10-30T03:40:00+00:00"
+    row = {"projection_id": env.projection_id, "status": "published",
+           "content_hash": env.content_hash, "valid_until": _expiry(1),
+           "agent_role": "layer_analysis", "data_vintage_refs": ["dataset@2026-09-21"]}
+
+    class Store:
+        def __init__(self, created):
+            self.created = created
+
+        def get_task_projection(self, pid):
+            return row
+
+        def task_projection_envelopes(self, **kw):
+            return [{"projection_id": "f" * 32, "created_at": self.created,
+                     "data_vintage_refs": ["dataset@2026-09-21"]}]
+
+    assert frozen_snapshot_stale_reasons(Store("2026-10-30T03:20:00+00:00"), payload) == []
+    later = frozen_snapshot_stale_reasons(Store("2026-10-30T03:45:00+00:00"), payload)
+    assert later and "投影被新版本替换" in later[0]

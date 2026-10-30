@@ -202,10 +202,32 @@ def directional_price(quote, action):
         quote.ask if action_direction(action) > 0 else quote.bid)
 
 
+# Normalization refusals the Chief can fix by proposing differently; anything else
+# (prices, session, routes) is the environment, and re-asking the model cannot help.
+PROPOSAL_ERRORS = frozenset({
+    "quantity_or_budget_missing", "no_position_to_sell", "action_contradicts_target",
+    "quantity_exceeds_position", "no_action_below_minimum_quantity",
+    "quantity_precision_invalid", "budget_invalid", "quantity_exceeds_budget",
+    "limit_precision_invalid"})
+
+
+def proposal_error(message: str) -> bool:
+    """True when a `SYMBOL:code` normalization refusal is the proposal's to fix."""
+    return message.rsplit(":", 1)[-1] in PROPOSAL_ERRORS
+
+
 def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
-                     slippage_pct=.5, net_liquidation=0, business_scope=None):
-    """Freeze executable fields BEFORE risk review. An unavailable order rejects the batch."""
+                     slippage_pct=.5, net_liquidation=0, business_scope=None, positions=None):
+    """Freeze executable fields BEFORE risk review. An unavailable order rejects the batch.
+
+    `positions` (symbol -> held shares, stock only) sizes a `target_weight` order as the
+    gap from the current holding — the same reading the risk projection uses — and keeps
+    a sell or trim from exceeding what is held. Without it only explicit sizes normalize.
+    """
     from ..schemas.decision import action_direction
+    from ..schemas.instruments import normalize_symbol
+
+    held_by = {normalize_symbol(k): float(v) for k, v in (positions or {}).items()}
 
     if not math.isfinite(slippage_pct) or slippage_pct < 0 or slippage_pct > 1:
         raise PriceUnavailable("limit_slippage_policy_invalid")
@@ -252,13 +274,28 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 raise PriceUnavailable(f"{decision.symbol}:limit_precision_invalid")
             # Review and sizing use the worst permitted price, not a cheaper quote.
             cap_price = max(ref, limit or ref) if increasing else ref
+            held = held_by.get(normalize_symbol(decision.symbol), 0.0) if positions is not None else None
+            if not increasing and held is not None and held <= 0:
+                raise PriceUnavailable(f"{decision.symbol}:no_position_to_sell")
             budget = decision.notional_usd
-            if budget is None and decision.target_weight:
-                budget = decision.target_weight * net_liquidation
+            step = Decimal(str(quote.size_increment))
+            target_qty = None
+            if budget is None and decision.qty is None and decision.target_weight is not None:
+                if held is None:
+                    raise PriceUnavailable(f"{decision.symbol}:quantity_or_budget_missing")
+                if decision.target_weight == 0 and not increasing:
+                    target_qty = held              # close: exactly what is held, no rounding residue
+                else:
+                    gap = (Decimal(str(decision.target_weight * net_liquidation)) / Decimal(str(cap_price))
+                           - Decimal(str(held)))
+                    if (gap > 0) != increasing or gap == 0:
+                        raise PriceUnavailable(f"{decision.symbol}:action_contradicts_target")
+                    target_qty = float((abs(gap) / step).to_integral_value(rounding=ROUND_DOWN) * step)
             if budget is not None and (not math.isfinite(budget) or budget < 0):
                 raise PriceUnavailable(f"{decision.symbol}:budget_invalid")
-            step = Decimal(str(quote.size_increment))
-            if decision.qty is not None:
+            if target_qty is not None:
+                qty = target_qty
+            elif decision.qty is not None:
                 qty = abs(decision.qty)
                 if not math.isfinite(qty) or Decimal(str(qty)) % step != 0:
                     raise PriceUnavailable(f"{decision.symbol}:quantity_precision_invalid")
@@ -269,6 +306,8 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 raise PriceUnavailable(f"{decision.symbol}:quantity_or_budget_missing")
             if qty < quote.min_size:
                 raise PriceUnavailable(f"{decision.symbol}:no_action_below_minimum_quantity")
+            if not increasing and held is not None and qty > held + 1e-9:
+                raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_position")
             notional = qty * cap_price
             if budget is not None and notional > budget + 1e-8:
                 raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_budget")

@@ -52,6 +52,7 @@ def test_actual_full_capture_and_offline_process_replay(business_inputs,isolated
     monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",lambda symbol,**kw:quote(
         symbol=symbol,source_as_of=runtime_point,queried_at=runtime_point))
     monkeypatch.setattr("ats.agents.chief.decide.run_structured",lambda *a,**k:ChiefOutput(summary="Actual six-role governed research",
+        reasoning=dict(portfolio_stance="fixture",risks_and_invalidation="fixture"),
         decisions=[dict(symbol="COHR",action="buy",notional_usd=1000,conviction=.5,rationale="Actual requirements")]))
     monkeypatch.setattr(extract,"run_structured",lambda agent,schema,context,**kw:schema(insights=[]))
     class Human:

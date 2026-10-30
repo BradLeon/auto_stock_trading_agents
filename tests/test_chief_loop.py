@@ -402,3 +402,49 @@ def test_audit_rows_carry_each_roles_finish_time(broker, approve_all, monkeypatc
     # seeded run: no model produced these revisions, and that is on record
     assert {r["model_version"] for r in revs} == {"deterministic-rules"}
     assert all(r["prompt_version"] for r in revs)
+
+
+def test_fixable_normalization_goes_back_to_the_chief_environment_goes_to_a_person():
+    from ats.graph.chief import _manual_review_reason, route_after_persist
+    from ats.schemas.risk import DecisionRiskReview
+
+    review = DecisionRiskReview(verdict="rejected")
+    fixable = _state(risk_review=review, risk_round=1, normalization_fixable=True,
+                     normalization_errors=["订单规范化拒绝（提案需修改）：COHR:no_position_to_sell"])
+    assert route_after_persist(fixable) == "revise"
+    env = _state(risk_review=review, risk_round=1, normalization_fixable=False,
+                 normalization_errors=["订单规范化拒绝（执行环境不可用）：quote_stale"])
+    assert route_after_persist(env) == "manual_review"
+    assert _manual_review_reason(env).startswith("执行环境不可用")
+    assert "修订后" not in _manual_review_reason(env)
+    emptied = _state(decisions=[], risk_round=2, parent_revision_no=1)
+    assert "没有形成可下的单" in _manual_review_reason(emptied)
+
+
+def test_a_reasoned_revision_keeps_the_summary_for_the_card_and_audits_references():
+    from ats.decision.repository import option_advice_lines, rationale_summary
+    from ats.graph.chief import _revision_rationale
+    import json
+
+    state = _state(summary="清仓 GOOG", research_snapshot={"items": [{"projection_id": "a" * 32}]},
+                   chief_reasoning={"portfolio_stance": "修复", "holdings_review": [
+                       {"symbol": "GOOG", "verdict": "sell", "basis": "技术 0/7",
+                        "references": ["a" * 32, "b" * 32]}]},
+                   option_actions=[{"symbol": "COHR", "expiry": "20261120", "strike": 210.0,
+                                    "right": "P", "action": "close", "contracts": 2,
+                                    "rationale": "标的破位，平掉卖出看跌"}])
+    value = _revision_rationale(state)
+    assert value["reference_audit"] == {"unknown": ["b" * 32], "orders_without_references": ["NVDA"]}
+    stored = json.dumps(value, ensure_ascii=False)
+    assert rationale_summary(stored) == "清仓 GOOG"
+    assert any("close COHR 20261120 210P 2 张" in line for line in option_advice_lines(stored))
+    assert rationale_summary("plain") == "plain"
+
+
+def test_a_failed_chief_is_manual_review_not_no_action():
+    """2026-10-30: a model failure (no answer) was recorded as a No Action decision."""
+    from ats.graph.chief import _manual_review_reason, route_after_persist
+
+    failed = _state(decide=True, decisions=[], summary="[fallback] chief LLM unavailable: length limit")
+    assert route_after_persist(failed) == "manual_review"
+    assert _manual_review_reason(failed).startswith("主理人模型调用失败")

@@ -192,8 +192,12 @@ def show(cycle_id: str) -> int:
             size = (f"${o['notional_usd']:,.0f}" if o.get("notional_usd") else
                     f"{o['qty']:g} 股" if o.get("qty") else "")
             print(f"  {o.get('action')} {o.get('symbol')} {size}  {str(o.get('rationale', ''))[:100]}")
+        from ..decision.repository import option_advice_lines, rationale_summary
+
         if rev["rationale"]:
-            print(f"\n主理人摘要：{rev['rationale']}")
+            print(f"\n主理人摘要：{rationale_summary(rev['rationale'])}")
+        for line in option_advice_lines(rev["rationale"]):
+            print(line)
     if review:
         print(f"\n风控审查：{review['verdict']}（规则集 {review['ruleset_version']} · 组合快照 {review['portfolio_snapshot_id']}"
               f" · 行情 as-of {review['market_as_of']}）")

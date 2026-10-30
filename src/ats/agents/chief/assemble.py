@@ -105,22 +105,33 @@ def _ledger_block(portfolio) -> str:
     if book.get("maint_margin") is not None:
         lines.append(f"保证金（{book.get('margin_source') or 'ibkr'}）：初始 ${book.get('init_margin') or 0:,.0f}"
                      f" · 维持 ${book['maint_margin']:,.0f} · 剩余流动性 ${book.get('excess_liquidity') or 0:,.0f}")
+    order = lambda p: (-abs(p.get("market_value") or 0), p["symbol"],
+                       str(p.get("expiry") or ""), p.get("strike") or 0)
+    options = sorted((p for p in positions if p.get("sec_type") == "OPT"), key=order)
+    others = sorted((p for p in positions if p.get("sec_type") != "OPT"), key=order)
     lines.append(f"持仓 {len(positions)} 项（权重 = 市值/净值）：")
-    for p in sorted(positions, key=lambda p: (-abs(p.get("market_value") or 0), p["symbol"],
-                                              str(p.get("expiry") or ""), p.get("strike") or 0)):
-        name, cost = p["symbol"], p.get("avg_cost") or 0
-        if p.get("sec_type") == "OPT":
-            cost /= p.get("multiplier") or 100   # IBKR's option average cost is per contract
-            name += f" {p.get('expiry')} {p.get('strike'):g}{p.get('right')} ×{p.get('multiplier') or 100:g}"
-            if p.get("delta") is not None:
-                name += f" Δ={p['delta']:+.2f}"
-        elif p.get("sec_type") not in (None, "STK"):
-            name += f" [{p['sec_type']}]"
-        lines.append(f"  {name}: {p.get('qty'):g} @ 成本 {cost:,.2f} · 现价 {p.get('market_price'):,.2f}"
-                     f" · 市值 ${p.get('market_value') or 0:,.0f} ({(p.get('weight') or 0):.1%})"
-                     f" · 未实现 ${p.get('unrealized_pnl') or 0:,.0f}"
-                     + (f" · {p['currency']}" if p.get("currency") not in (None, "USD") else ""))
+    lines.append(f"正股及其他 {len(others)} 项（decisions 只能卖或减这里的正股）：")
+    for p in others:
+        name = p["symbol"] + (f" [{p['sec_type']}]" if p.get("sec_type") not in (None, "STK") else "")
+        lines.append(_position_line(name, p, p.get("avg_cost") or 0))
+    if options:
+        lines.append(f"期权 {len(options)} 项（不是正股持仓；只能在 option_actions 里给人工执行的建议）：")
+    for p in options:
+        cost = (p.get("avg_cost") or 0) / (p.get("multiplier") or 100)   # IBKR: per contract
+        side = "空头" if (p.get("qty") or 0) < 0 else "多头"
+        name = (f"{p['symbol']} {p.get('expiry')} {p.get('strike'):g}{p.get('right')}"
+                f" ×{p.get('multiplier') or 100:g} [{side}]")
+        if p.get("delta") is not None:
+            name += f" Δ={p['delta']:+.2f}"
+        lines.append(_position_line(name, p, cost))
     return "\n".join(lines)
+
+
+def _position_line(name: str, p: dict, cost: float) -> str:
+    return (f"  {name}: {p.get('qty'):g} @ 成本 {cost:,.2f} · 现价 {p.get('market_price'):,.2f}"
+            f" · 市值 ${p.get('market_value') or 0:,.0f} ({(p.get('weight') or 0):.1%})"
+            f" · 未实现 ${p.get('unrealized_pnl') or 0:,.0f}"
+            + (f" · {p['currency']}" if p.get("currency") not in (None, "USD") else ""))
 
 
 def _risk_posture_block(posture, now) -> str:

@@ -29,7 +29,9 @@ def test_the_live_book_lists_account_values_and_every_position():
     assert "TWS 实时" in text and "净值 $252,613" in text and "维持 $77,553" in text
     assert "TSM: 100 @ 成本 300.00" in text
     # an option's IBKR average cost is per contract; it is shown per share like its price
-    assert "AXTI 20261120 50P ×100 Δ=-0.28: -5 @ 成本 4.80" in text
+    assert "AXTI 20261120 50P ×100 [空头] Δ=-0.28: -5 @ 成本 4.80" in text
+    # options are listed apart from stock, so a put is never read as a share holding
+    assert text.index("正股及其他 1 项") < text.index("TSM:") < text.index("期权 1 项") < text.index("AXTI")
 
 
 def test_an_unavailable_book_is_stated_and_nothing_stands_in_for_it():

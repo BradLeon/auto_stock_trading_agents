@@ -49,6 +49,8 @@ class ChiefDecisionState(BaseModel):
     # When each role finished this round: the proposal (chief_decide / chief_revise /
     # boss_revise) and the risk review. Audit rows carry these, not `as_of`, so a
     # cycle's rows show proposal -> review -> next proposal in the order they happened.
+    chief_reasoning: dict = Field(default_factory=dict)     # full reasoning (ChiefReasoning); card shows summary
+    option_actions: list[dict] = Field(default_factory=list)  # advice on held options, executed by hand
     proposed_at: datetime | None = None
     reviewed_at: datetime | None = None
 
@@ -58,6 +60,7 @@ class ChiefDecisionState(BaseModel):
     risk_notes: list[str] = Field(default_factory=list)
     approval_summary: str = ""          # banner + risk block + order lines (the card body)
     normalization_errors: list[str] = Field(default_factory=list)
+    normalization_fixable: bool = False  # every refusal is the proposal's to fix -> back to the Chief
     execution_price_audit: list[dict] = Field(default_factory=list)
 
     # decision-audit loop (Phase B, ARCHITECTURE §5.2–5.3). `decisions` stays this round's FULL

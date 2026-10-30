@@ -481,3 +481,51 @@ def test_overnight_chief_refreshes_price_and_revision_at_regular_session(executi
 
     with pytest.raises(AuthorizationError, match="human approval"):
         build_authorization(DecisionAuditRepository(execution.store), refreshed.cycle_id)
+
+
+def _historical_quote(monkeypatch, price=100):
+    close = datetime.now(UTC) - timedelta(hours=12)
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, close))
+    historical = quote(source_as_of=close, price_kind="previous_session_close", close=price,
+                       session="previous_completed_regular", market_data_mode="historical",
+                       source_precision="session_date")
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",
+                        lambda symbol, *a, **kw: historical.model_copy(update={"symbol": symbol}))
+
+
+def _normalize(order, positions, net=100_000):
+    return prices.normalize_orders([order], cycle_id="tw", overnight=True,
+                                   net_liquidation=net, positions=positions)
+
+
+def test_target_weight_zero_sells_exactly_what_is_held(execution, monkeypatch):
+    """2026-10-30 T0.2: a target weight is the weight AFTER the trade; 0 closes the holding."""
+    _historical_quote(monkeypatch)
+    orders, _ = _normalize(TradeDecision(symbol="GOOG", action="sell", target_weight=0,
+                                         order_type="market"), {"GOOG": 60})
+    assert orders[0].qty == 60
+
+
+def test_target_weight_trims_and_adds_by_the_gap_to_the_holding(execution, monkeypatch):
+    _historical_quote(monkeypatch)
+    trim, _ = _normalize(TradeDecision(symbol="AVGO", action="trim", target_weight=.05,
+                                       order_type="market"), {"AVGO": 100})
+    assert trim[0].qty == 50                     # 100 held -> 5% of 100k at 100 = 50
+    add, _ = _normalize(TradeDecision(symbol="AVGO", action="add", target_weight=.15,
+                                      order_type="market"), {"AVGO": 100})
+    assert add[0].qty == 49                      # gap 50, priced at the 100.5 limit, rounded down
+
+
+def test_target_weight_against_the_action_and_selling_unheld_stock_are_refused(execution, monkeypatch):
+    _historical_quote(monkeypatch)
+    with pytest.raises(prices.PriceUnavailable, match="action_contradicts_target"):
+        _normalize(TradeDecision(symbol="AVGO", action="buy", target_weight=.05,
+                                 order_type="market"), {"AVGO": 100})
+    with pytest.raises(prices.PriceUnavailable, match="no_position_to_sell"):
+        _normalize(TradeDecision(symbol="COHR", action="sell", target_weight=0,
+                                 order_type="market"), {"GOOG": 60})
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_position"):
+        _normalize(TradeDecision(symbol="GOOG", action="sell", qty=80, order_type="market"),
+                   {"GOOG": 60})
+    assert prices.proposal_error("GOOG:no_position_to_sell")
+    assert not prices.proposal_error("input_unavailable:IBKRUnavailable:execution_quote_source_timestamp_missing")

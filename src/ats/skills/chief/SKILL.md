@@ -45,11 +45,26 @@
 输出空 decisions + 一句"无行动"总结。不要制造交易。
 
 ## 输出
-- `summary`：整体立场 + 你如何权衡各方产物（简明，给审批人看）。
-- `decisions[]`：每笔给 symbol/action/notional_usd（或 target_weight）/order_type/
-  limit_price/conviction/rationale。rationale 必须引用具体的分析师信号
-  （如"COHR scorecard +1.8 超门槛 1.5，行业评审增持，宏观半导体中性"）。
-- 尺寸克制：单笔不超过 guardrail（单票 20%/单笔 $25k），conviction 与信号强度一致。
+- `summary`：2–4 句，给审批人看：本轮立场和要做的单。审批卡只显示这一段。
+- `reasoning`：完整推理，存档供复盘，不上审批卡。要写全，不要压缩成一句话：
+  - `portfolio_stance`：整体立场，风控姿态、宏观、行业配置如何落到本轮取舍。
+  - `holdings_review`：**每一个现有正股持仓都要复查**，包括不动的。给出 hold/add/trim/sell/watch、
+    依据的信号和数字、与之冲突的信号以及为什么不采纳。
+  - `evidence_weighing`：每个分析师来源（风控姿态、宏观、行业配置、层级分析、各标的基本面、技术面）
+    说了什么、你采纳/部分采纳/否决/仅作背景，理由。
+  - `considered_not_taken`：考虑过但没做的交易，为什么不做（包括"为什么不加仓"）。
+  - `risks_and_invalidation`：什么情况说明本轮判断错了。
+- `decisions[]`：只放**正股**订单。每笔给 symbol/action/规模/order_type/limit_price/conviction/rationale。
+  - 规模三选一：`notional_usd`（本单金额）、`qty`（股数）或 `target_weight`（**交易后的目标组合权重**，
+    系统按与当前持仓的差额换算股数；清仓写 `action=sell, target_weight=0`）。
+  - 只能卖或减**持有的正股**；账本里的期权行不是正股持仓。
+  - rationale 必须引用具体的分析师信号（如"COHR scorecard +1.8 超门槛 1.5，行业评审增持，宏观半导体中性"）。
+  - 尺寸克制：单笔不超过 guardrail（单票 20%/单笔 $25k），conviction 与信号强度一致。
+- `references`：每笔订单、每条持仓复查和证据权衡，都列出所依据研究的投影 ID（上下文每段研究
+  开头的 32 位 ID）。系统会核对这些 ID 是否在本轮快照里，查不到的会记入审计。
+- `option_actions[]`：**只针对账本里已有的期权仓位**给建议，由人工执行，系统不下单。
+  每条写合约（标的、到期日、行权价、C/P）、动作（close 平仓 / reduce 减仓 / add 加仓 / roll 展期 / hold）、
+  张数（hold 不填），展期写目标到期日和行权价；不需要给价格。不要新开期权仓位。
 
 ## 预登记计划（每笔都填，且必须写在结果出来之前）
 这几个字段会在**审批之前**存进交易日志。事后复盘据此追问"当时的判断是否成立"，而不是

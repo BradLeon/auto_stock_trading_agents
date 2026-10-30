@@ -62,6 +62,40 @@ def approval_idempotency_key(cycle_id: str, revision_no: int, decision_hash: str
     return hashlib.sha1(body.encode()).hexdigest()[:32]
 
 
+def rationale_summary(value: str | None) -> str:
+    """The approval-card summary of a stored revision rationale (plain text or structured)."""
+    if value and value.startswith("{"):
+        import json
+
+        try:
+            return json.loads(value).get("summary") or ""
+        except ValueError:
+            return value
+    return value or ""
+
+
+def option_advice_lines(value: str | None) -> list[str]:
+    """One line per option advice in a structured rationale; these are executed by hand."""
+    if not (value and value.startswith("{")):
+        return []
+    import json
+
+    try:
+        actions = json.loads(value).get("option_actions") or []
+    except ValueError:
+        return []
+    if not actions:
+        return []
+    lines = ["\n期权建议（人工执行，系统不下单）："]
+    for a in actions:
+        roll = (f" → {a.get('roll_to_expiry') or ''} {a.get('roll_to_strike') or ''}".rstrip()
+                if a.get("action") == "roll" else "")
+        size = f" {a['contracts']:g} 张" if a.get("contracts") else ""
+        lines.append(f"  {a.get('action')} {a.get('symbol')} {a.get('expiry')} {a.get('strike'):g}"
+                     f"{a.get('right')}{size}{roll} — {str(a.get('rationale') or '')[:80]}")
+    return lines
+
+
 def review_round_of(review_id: str) -> int:
     """Parse the round suffix of a round-scoped review id (`...:review:r3`)."""
     try:

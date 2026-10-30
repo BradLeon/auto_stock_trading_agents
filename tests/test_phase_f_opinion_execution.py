@@ -149,6 +149,7 @@ def test_complete_business_execution_and_recovery(business_inputs, isolated, mon
     monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price", fetch)
     monkeypatch.setattr("ats.agents.chief.decide.run_structured", lambda *a, **k:
         ChiefOutput(summary="Fixture synthesis over actual governed research",
+            reasoning=dict(portfolio_stance="fixture", risks_and_invalidation="fixture"),
             decisions=[dict(symbol="COHR", action="buy", notional_usd=notional,
                             conviction=.5, rationale="Actual six-role research snapshot")]))
     cards=[]

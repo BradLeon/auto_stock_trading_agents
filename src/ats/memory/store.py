@@ -1589,6 +1589,8 @@ class TradingMemory:
         `as_of` is the cycle's creation time and `manager_summary` the current revision's
         rationale; `decisions` are that revision's orders.
         """
+        from ..decision.repository import rationale_summary
+
         row = self.conn.execute(
             "SELECT c.cycle_id, c.created_at, c.status, c.final_outcome, r.rationale, r.orders_json "
             "FROM decision_cycles c LEFT JOIN decision_revisions r "
@@ -1598,7 +1600,7 @@ class TradingMemory:
             return None
         return {"cycle_id": row["cycle_id"], "as_of": row["created_at"],
                 "status": row["status"], "final_outcome": row["final_outcome"],
-                "manager_summary": row["rationale"] or "",
+                "manager_summary": rationale_summary(row["rationale"]),
                 "decisions": [_audit_order(row["cycle_id"], order)
                               for order in json.loads(row["orders_json"] or "[]")]}
 

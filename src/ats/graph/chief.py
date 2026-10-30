@@ -142,11 +142,12 @@ def chief_decide(state: ChiefDecisionState) -> dict:
     print(f"👔 chief {state.cycle_id}\n{result.summary}")
     for d in result.decisions:
         size = f"${d.notional_usd:,.0f}" if d.notional_usd else (
-            f"w={d.target_weight:.0%}" if d.target_weight else "?")
+            f"w={d.target_weight:.0%}" if d.target_weight is not None else "?")
         print(f"   {d.action.upper()} {d.symbol} {size} conv={d.conviction:.2f} — {d.rationale[:70]}")
     if not result.decisions:
         print("   (无行动 — 零决策)")
-    return {"summary": result.summary, "decisions": result.decisions, "proposed_at": _now()}
+    return {"summary": result.summary, "decisions": result.decisions, "proposed_at": _now(),
+            "chief_reasoning": result.reasoning, "option_actions": result.option_actions}
 
 
 @decision_read("risk")
@@ -190,9 +191,13 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         decisions, normalization_notes = normalize_orders(
             decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
             overnight=overnight, slippage_pct=slip,
-            net_liquidation=pf.net_liquidation if pf else 0)
+            net_liquidation=pf.net_liquidation if pf else 0,
+            positions={p.symbol: p.qty for p in pf.positions if p.sec_type == "STK"})
     except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:
-        normalization_errors = [f"订单规范化拒绝，需重新审查：{exc}"]
+        from ..data.execution_prices import proposal_error
+
+        fixable = isinstance(exc, PriceUnavailable) and proposal_error(str(exc))
+        normalization_errors = [f"订单规范化拒绝（{'提案需修改' if fixable else '执行环境不可用'}）：{exc}"]
     if normalization_errors:
         from ..schemas.risk import DecisionRiskReview, OrderRiskVerdict, RiskViolation
 
@@ -205,7 +210,8 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                                       detail=normalization_errors[0], severity="hard")])
         return {"decisions": decisions, "approved_decisions": [], "portfolio": pf,
                 "risk_review": review, "risk_notes": normalization_errors,
-                "normalization_errors": normalization_errors, "qty_by_symbol": {},
+                "normalization_errors": normalization_errors, "normalization_fixable": fixable,
+                "qty_by_symbol": {},
                 "risk_round": state.risk_round + 1, "reviewed_at": _now(),
                 "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else "",
                 "approval_summary": "\n".join(normalization_errors)}
@@ -229,7 +235,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                       created_at=state.as_of.isoformat())
     revision = repo.append_revision(
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
-        rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
+        rationale=_revision_rationale(state), parent_revision_no=state.parent_revision_no,
         revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
     review = risk_checks.review_revision(decisions, pf,
                                          event_data=state.event_data or None,
@@ -242,6 +248,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     out: dict = {"decisions": decisions, "approved_decisions": approved,
                  "revision_no": revision["revision_no"],
                  "revision_hash": revision["decision_hash"], "normalization_errors": [],
+                 "normalization_fixable": False,
                  "portfolio": pf, "risk_notes": risk_notes, "risk_review": review,
                  "risk_round": state.risk_round + 1, "reviewed_at": _now(),
                  "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else ""}
@@ -252,6 +259,12 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     risk_notes = list(risk_notes) + normalization_notes
     sized = texec.size_decisions(approved)
     summary = texec.build_approval_summary(sized, risk_notes, state.source)
+    if state.option_actions:
+        import json
+
+        from ..decision.repository import option_advice_lines
+
+        summary += "\n".join(option_advice_lines(json.dumps({"option_actions": state.option_actions})))
     out.update(risk_notes=risk_notes,
                qty_by_symbol={d.symbol: q for d, q in sized},
                approval_summary=summary)
@@ -278,6 +291,27 @@ def _orders_payload(decisions) -> list[dict]:
 
 def _proposed_at(state: ChiefDecisionState) -> str:
     return (state.proposed_at or _now()).isoformat()
+
+
+def _revision_rationale(state: ChiefDecisionState):
+    """The revision's rationale: the card summary, plus — when a Chief reasoned — the full
+    reasoning, option advice and an audit of the references against this round's snapshot.
+    References are recorded, never enforced: a gap is noted for review, not a refusal."""
+    if not (state.chief_reasoning or state.option_actions):
+        return state.summary or ""
+    known = {item.get("projection_id") for item in state.research_snapshot.get("items") or []}
+    cited: list[str] = []
+    for part in ([d.references for d in state.decisions]
+                 + [h.get("references") or [] for h in state.chief_reasoning.get("holdings_review") or []]
+                 + [e.get("references") or [] for e in state.chief_reasoning.get("evidence_weighing") or []]
+                 + [a.get("references") or [] for a in state.option_actions]):
+        cited.extend(part)
+    return {"summary": state.summary or "", "reasoning": state.chief_reasoning,
+            "option_actions": state.option_actions,
+            "reference_audit": {
+                "unknown": sorted({r for r in cited if r not in known}),
+                "orders_without_references": [d.symbol for d in state.decisions
+                                              if d.action != "hold" and not d.references]}}
 
 
 def _revision_versions(state: ChiefDecisionState) -> dict[str, str]:
@@ -322,6 +356,8 @@ def _write_chief_report(state: ChiefDecisionState) -> None:
         out_dir = ""
     path = chief_report.write(ChiefResult(cycle_id=state.cycle_id, as_of=state.as_of,
                                           summary=state.summary, decisions=state.decisions,
+                                          reasoning=state.chief_reasoning,
+                                          option_actions=state.option_actions,
                                           context_text=state.context_text), out_dir)
     if path:
         print(f"📝 {path}")
@@ -369,7 +405,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
                       created_at=state.as_of.isoformat())
     decisions = [d for d in state.decisions if d.action != "hold"]
     if not decisions:
-        if state.parent_revision_no is not None or state.risk_round > 1:
+        if _chief_failed(state) or state.parent_revision_no is not None or state.risk_round > 1:
             # 修订被驳空（chief_revise 无合规方案可形成）：这不是主理人主动
             # 决定不交易，而是交易意图被风控整体否决 — 静默记为 No Action 会
             # 吞掉原交易意图，必须转人工复核（spec：无法形成合规方案 → 人工
@@ -390,7 +426,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
 
     rev = repo.append_revision(
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
-        rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
+        rationale=_revision_rationale(state), parent_revision_no=state.parent_revision_no,
         revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
     if state.risk_review is not None and not state.normalization_errors:
         # Review ids are round-scoped: a stale-snapshot re-review (task 7.5)
@@ -450,14 +486,14 @@ def route_after_persist(state: ChiefDecisionState) -> str:
     if state.cycle_status == "superseded":
         return "end"                        # 7.7: inputs invalidated mid-cycle
     if not state.decisions:
-        if state.parent_revision_no is not None or state.risk_round > 1:
-            return "manual_review"          # revision emptied after a rejection
+        if _chief_failed(state) or state.parent_revision_no is not None or state.risk_round > 1:
+            return "manual_review"          # model failed, or revision emptied after a rejection
         return "end"                        # No Action terminal already recorded
     if not state.execute:
         return "end"
     review = state.risk_review
-    if state.normalization_errors:
-        return "manual_review"
+    if state.normalization_errors and not state.normalization_fixable:
+        return "manual_review"          # prices/session/route: a new proposal cannot help
     if review is None:
         # Degraded no-portfolio mode: legacy pass-through to approval (the
         # execution gate remains the real-order backstop).
@@ -490,7 +526,8 @@ def chief_revise(state: ChiefDecisionState) -> dict:
         print(f"👔 chief {state.cycle_id} 按第 {state.risk_round} 轮风控驳回修订\n{result.summary}")
         return {"summary": result.summary, "decisions": result.decisions,
                 "approved_decisions": [], "parent_revision_no": state.revision_no or None,
-                "proposed_at": _now(),
+                "proposed_at": _now(), "chief_reasoning": result.reasoning,
+                "option_actions": result.option_actions,
                 "risk_notes": list(state.risk_notes)
                 + [f"chief_revise: 主理人按第 {state.risk_round} 轮风控驳回重新决策"]}
     revised: list[TradeDecision] = []
@@ -516,6 +553,24 @@ def chief_revise(state: ChiefDecisionState) -> dict:
             "proposed_at": _now(), "risk_notes": notes}
 
 
+def _chief_failed(state: ChiefDecisionState) -> bool:
+    """The model produced nothing (decide.from_context's fallback): not a decision to stand still."""
+    return state.decide and state.summary.startswith("[fallback]")
+
+
+def _manual_review_reason(state: ChiefDecisionState) -> str:
+    """Why the loop stopped, as it actually happened."""
+    if _chief_failed(state):
+        return f"主理人模型调用失败：{state.summary}"
+    if state.normalization_errors and not state.normalization_fixable:
+        return "执行环境不可用，订单无法规范化：" + "；".join(state.normalization_errors)
+    if not state.decisions:
+        return f"第 {state.risk_round} 轮驳回后，修订没有形成可下的单"
+    last = ("；".join(state.normalization_errors) if state.normalization_errors
+            else "；".join(v.detail for v in state.risk_review.violations) if state.risk_review else "")
+    return f"{state.risk_round} 轮后仍被驳回" + (f"：{last}" if last else "")
+
+
 def manual_review(state: ChiefDecisionState) -> dict:
     """Bounded loop exhausted (ARCHITECTURE §5.2): leave the cycle for a human."""
     from ..decision.state import CycleStatus
@@ -523,7 +578,7 @@ def manual_review(state: ChiefDecisionState) -> dict:
     repo = _decision_repo()
     event, changed = repo.transition(
         state.cycle_id, to_status=CycleStatus.MANUAL_REVIEW, actor="risk_gate",
-        payload={"reason": f"{state.risk_round} 轮修订后仍被驳回"},
+        payload={"reason": _manual_review_reason(state)},
         created_at=_now().isoformat())
     if changed:
         repo.conn.execute(
@@ -650,6 +705,7 @@ def boss_revise(state: ChiefDecisionState) -> dict:
     print(f"👔 chief {state.cycle_id} 按 Boss 意见修订（第 {state.boss_revisions + 1} 次）\n{result.summary}")
     notes = list(state.risk_notes) + [f"boss_revise: Boss 意见「{note}」，主理人重新修订"]
     return {"summary": result.summary or state.summary, "decisions": result.decisions,
+            "chief_reasoning": result.reasoning, "option_actions": result.option_actions,
             "approved_decisions": [], "approval": None,
             "parent_revision_no": state.revision_no or None,
             "boss_revisions": state.boss_revisions + 1, "proposed_at": _now(),

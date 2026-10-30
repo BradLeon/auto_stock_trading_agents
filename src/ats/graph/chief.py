@@ -130,7 +130,7 @@ def route_after_assemble(state: ChiefDecisionState) -> str:
 
 def chief_decide(state: ChiefDecisionState) -> dict:
     if not state.decide:
-        return {"decisions": list(state.seed_decisions)}
+        return {"decisions": list(state.seed_decisions), "proposed_at": _now()}
     from ..agents.chief import decide
     from ..memory import get_store
     from ..workflow.decision_requirements import validate_chief
@@ -146,7 +146,7 @@ def chief_decide(state: ChiefDecisionState) -> dict:
         print(f"   {d.action.upper()} {d.symbol} {size} conv={d.conviction:.2f} — {d.rationale[:70]}")
     if not result.decisions:
         print("   (无行动 — 零决策)")
-    return {"summary": result.summary, "decisions": result.decisions}
+    return {"summary": result.summary, "decisions": result.decisions, "proposed_at": _now()}
 
 
 @decision_read("risk")
@@ -164,7 +164,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     if not decisions:
         print("(no actionable decisions)")
         return {"decisions": [], "approved_decisions": [],
-                "risk_round": state.risk_round + 1}
+                "risk_round": state.risk_round + 1, "reviewed_at": _now()}
 
     if state.decide and not state.revision_no:
         from ..workflow.decision_requirements import validate_chief
@@ -206,7 +206,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         return {"decisions": decisions, "approved_decisions": [], "portfolio": pf,
                 "risk_review": review, "risk_notes": normalization_errors,
                 "normalization_errors": normalization_errors, "qty_by_symbol": {},
-                "risk_round": state.risk_round + 1,
+                "risk_round": state.risk_round + 1, "reviewed_at": _now(),
                 "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else "",
                 "approval_summary": "\n".join(normalization_errors)}
     # Allocate the immutable revision before Risk consumes it. persist_decision
@@ -230,7 +230,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     revision = repo.append_revision(
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
         rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
-        revision_source="chief", created_at=state.as_of.isoformat())
+        revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
     review = risk_checks.review_revision(decisions, pf,
                                          event_data=state.event_data or None,
                                          cycle_id=state.cycle_id)
@@ -243,7 +243,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                  "revision_no": revision["revision_no"],
                  "revision_hash": revision["decision_hash"], "normalization_errors": [],
                  "portfolio": pf, "risk_notes": risk_notes, "risk_review": review,
-                 "risk_round": state.risk_round + 1,
+                 "risk_round": state.risk_round + 1, "reviewed_at": _now(),
                  "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else ""}
     if not approved:
         print("(所有决策被风控硬约束拦下 — 无单可下，等待修订或人工复核)")
@@ -274,6 +274,19 @@ def _transition_error():
 def _orders_payload(decisions) -> list[dict]:
     # Type, TIF, quantity, limit and quote constraints all participate in the hash.
     return [d.model_dump(mode="json") for d in decisions]
+
+
+def _proposed_at(state: ChiefDecisionState) -> str:
+    return (state.proposed_at or _now()).isoformat()
+
+
+def _revision_versions(state: ChiefDecisionState) -> dict[str, str]:
+    """The model and prompt that produced this revision; seeded or stub runs are deterministic."""
+    from ..agents.base import execution_versions
+    from ..agents.chief import decide
+
+    return execution_versions("chief", "chief", use_llm=state.decide and state.use_llm,
+                              template_source=decide.__file__)
 
 
 def _ruleset_version() -> str:
@@ -337,7 +350,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
             reason = "; ".join(stale)
             print(f"⏸️  研究快照已失效 — 周期转 superseded：{reason}")
             supersede_cycle(repo, state.cycle_id, reason=reason, actor="chief",
-                            created_at=state.as_of.isoformat())
+                            created_at=_now().isoformat())
             return {"cycle_status": "superseded", "decisions": [],
                     "approved_decisions": []}
     # 7.2 (belt and braces): a decide-path cycle is never written from an
@@ -369,7 +382,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
 
         changed = record_no_action(
             repo, state.cycle_id, reason=state.summary or "无行动决策",
-            actor="chief", created_at=state.as_of.isoformat())
+            actor="chief", created_at=_proposed_at(state))
         if changed:
             _consume_scores(state)
             _write_chief_report(state)
@@ -377,9 +390,8 @@ def persist_decision(state: ChiefDecisionState) -> dict:
 
     rev = repo.append_revision(
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
-        rationale=state.summary or "", model_version="",
-        parent_revision_no=state.parent_revision_no, revision_source="chief",
-        created_at=state.as_of.isoformat())
+        rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
+        revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
     if state.risk_review is not None and not state.normalization_errors:
         # Review ids are round-scoped: a stale-snapshot re-review (task 7.5)
         # re-examines the SAME revision under a NEW snapshot and must land as a
@@ -397,7 +409,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
             before_metrics=state.risk_review.before_metrics,
             after_metrics=state.risk_review.after_metrics,
             notes="\n".join(state.risk_review.notes),
-            created_at=state.as_of.isoformat())
+            created_at=(state.reviewed_at or _now()).isoformat())
     from ..decision.state import CycleStatus
 
     to_status = (CycleStatus.PENDING_APPROVAL
@@ -410,7 +422,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
                     idempotency_key=_transition_key(
                         state.cycle_id, to_status.value, rev["revision_no"],
                         state.risk_round),
-                    created_at=state.as_of.isoformat())
+                    created_at=_now().isoformat())
     # Legacy mirror (D2): keep `cycles`/`decisions` read entry points serving.
     repo.mirror_revision_to_legacy(state.cycle_id, rev["revision_no"],
                                    as_of=state.as_of.isoformat())
@@ -458,14 +470,29 @@ def route_after_persist(state: ChiefDecisionState) -> str:
 
 
 def chief_revise(state: ChiefDecisionState) -> dict:
-    """Accept the review's counterproposal and draft the next revision (5.5).
+    """Risk rejected the revision: the Chief drafts the next one (5.5).
 
-    The boundary comes from the review's `allowed_boundary` — the CHIEF chooses
-    to adopt it and cites the parent revision; risk never rewrote anything.
+    With a Chief in the run, the model re-decides with the review's violations and
+    boundary in front of it (2026-10-30 ruling). Seeded and stub runs have no Chief,
+    so the boundary is adopted mechanically. Either way risk never rewrote anything:
+    the result is a new revision citing its parent.
     """
     from ..schemas.decision import is_increasing_action
 
     review = state.risk_review
+    if state.decide and state.use_llm and review is not None:
+        from ..agents.chief import decide
+
+        result = decide.revise_after_risk(
+            state.context_text, prior_summary=state.summary,
+            prior_decisions=list(state.decisions), review=review, round_no=state.risk_round,
+            cycle_id=state.cycle_id, as_of=state.as_of, use_llm=state.use_llm)
+        print(f"👔 chief {state.cycle_id} 按第 {state.risk_round} 轮风控驳回修订\n{result.summary}")
+        return {"summary": result.summary, "decisions": result.decisions,
+                "approved_decisions": [], "parent_revision_no": state.revision_no or None,
+                "proposed_at": _now(),
+                "risk_notes": list(state.risk_notes)
+                + [f"chief_revise: 主理人按第 {state.risk_round} 轮风控驳回重新决策"]}
     revised: list[TradeDecision] = []
     notes = list(state.risk_notes)
     notes.append(f"chief_revise: 采纳第 {state.risk_round} 轮风控边界，生成修订")
@@ -486,7 +513,7 @@ def chief_revise(state: ChiefDecisionState) -> dict:
                 notes.append(f"chief_revise: 放弃 {d.action} {d.symbol}（{', '.join(ov.reasons) or '不可修订'}）")
     return {"decisions": revised, "approved_decisions": [],
             "parent_revision_no": state.revision_no or None,
-            "risk_notes": notes}
+            "proposed_at": _now(), "risk_notes": notes}
 
 
 def manual_review(state: ChiefDecisionState) -> dict:
@@ -497,12 +524,12 @@ def manual_review(state: ChiefDecisionState) -> dict:
     event, changed = repo.transition(
         state.cycle_id, to_status=CycleStatus.MANUAL_REVIEW, actor="risk_gate",
         payload={"reason": f"{state.risk_round} 轮修订后仍被驳回"},
-        created_at=state.as_of.isoformat())
+        created_at=_now().isoformat())
     if changed:
         repo.conn.execute(
             "UPDATE decision_cycles SET final_outcome = ?, updated_at = ? "
             "WHERE cycle_id = ?",
-            ("manual_review", state.as_of.isoformat(), state.cycle_id))
+            ("manual_review", event["created_at"], state.cycle_id))
         repo.conn.commit()
         _consume_scores(state)
         _write_chief_report(state)
@@ -625,7 +652,7 @@ def boss_revise(state: ChiefDecisionState) -> dict:
     return {"summary": result.summary or state.summary, "decisions": result.decisions,
             "approved_decisions": [], "approval": None,
             "parent_revision_no": state.revision_no or None,
-            "boss_revisions": state.boss_revisions + 1,
+            "boss_revisions": state.boss_revisions + 1, "proposed_at": _now(),
             # a fresh allowance of automatic risk rounds for the revised proposal
             "max_risk_rounds": state.risk_round + 3,
             "risk_notes": notes}

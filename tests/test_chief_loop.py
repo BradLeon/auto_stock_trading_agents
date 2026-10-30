@@ -335,3 +335,70 @@ def test_chief_revise_adopts_boundary_and_cites_parent():
     assert out["parent_revision_no"] == 1
     assert out["decisions"][0].notional_usd == 25_000
     assert "采纳边界" in out["decisions"][0].rationale
+
+
+def test_chief_revise_with_a_chief_redecides_from_the_review(monkeypatch):
+    """2026-10-30 ruling: with a Chief in the run, a rejection goes back to the model
+    with the violations and boundary — no mechanical adoption."""
+    from ats.agents.chief import decide
+    from ats.schemas.risk import (AllowedBoundary, DecisionRiskReview,
+                                  OrderRiskVerdict, RiskViolation)
+
+    seen = {}
+
+    def _model(text, **kw):
+        seen["text"] = text
+        return decide.ChiefResult(
+            cycle_id=kw["cycle_id"], as_of=kw["as_of"], summary="缩到 20,000 并说明",
+            decisions=[TradeDecision(symbol="NVDA", action="buy", notional_usd=20_000,
+                                     rationale="按边界缩量，留余量")])
+
+    monkeypatch.setattr(decide, "from_context", _model)
+    state = _state(decide=True, use_llm=True, risk_round=1, revision_no=1,
+                   context_text="CTX", summary="原摘要")
+    state.risk_review = DecisionRiskReview(
+        verdict="rejected",
+        order_verdicts=[OrderRiskVerdict(symbol="NVDA", action="buy", verdict="rejected",
+                                         reasons=["cap"], max_allowed_notional=25_000)],
+        violations=[RiskViolation(rule_id="max_single_order_usd", entity="NVDA",
+                                  detail="超上限", severity="hard")],
+        allowed_boundary=AllowedBoundary(max_additional_notional=25_000))
+    out = chief_revise(state)
+    assert seen["text"].startswith("CTX")
+    assert "max_single_order_usd" in seen["text"] and "25,000" in seen["text"]
+    assert "原摘要" in seen["text"]
+    assert out["summary"] == "缩到 20,000 并说明"
+    assert out["decisions"][0].notional_usd == 20_000
+    assert "采纳边界" not in out["decisions"][0].rationale
+    assert out["parent_revision_no"] == 1 and out["proposed_at"] is not None
+
+
+def test_audit_rows_carry_each_roles_finish_time(broker, approve_all, monkeypatch):
+    """2026-10-30 ruling: proposal, review and approval rows show the serial order
+    and the loop — r1 proposal < r1 review < r2 proposal < r2 review < approval."""
+    _normal_review(monkeypatch)
+    from ats.config import get_config
+
+    rc = get_config().app.risk
+    original = rc.max_single_order_usd
+    rc.max_single_order_usd = 25_000
+    try:
+        run_decision_graph(_state(), channel=approve_all)
+    finally:
+        rc.max_single_order_usd = original
+    conn = get_store().conn
+    revs = _revisions()
+    reviews = conn.execute(
+        "SELECT created_at FROM decision_risk_reviews ORDER BY revision_no").fetchall()
+    approval = conn.execute("SELECT created_at FROM boss_approvals").fetchone()
+    chain = [revs[0]["created_at"], reviews[0]["created_at"], revs[1]["created_at"],
+             reviews[1]["created_at"], approval["created_at"]]
+    parsed = [datetime.fromisoformat(t) for t in chain]
+    assert parsed == sorted(parsed) and len(set(parsed)) == len(parsed), chain
+    assert _cycle()["created_at"] <= revs[0]["created_at"]
+    events = [datetime.fromisoformat(e["created_at"]) for e in conn.execute(
+        "SELECT created_at FROM cycle_events ORDER BY rowid").fetchall()]
+    assert events == sorted(events)
+    # seeded run: no model produced these revisions, and that is on record
+    assert {r["model_version"] for r in revs} == {"deterministic-rules"}
+    assert all(r["prompt_version"] for r in revs)

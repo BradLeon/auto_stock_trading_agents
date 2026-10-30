@@ -46,6 +46,11 @@ class ChiefDecisionState(BaseModel):
     # chief_decide
     summary: str = ""
     decisions: list[TradeDecision] = Field(default_factory=list)
+    # When each role finished this round: the proposal (chief_decide / chief_revise /
+    # boss_revise) and the risk review. Audit rows carry these, not `as_of`, so a
+    # cycle's rows show proposal -> review -> next proposal in the order they happened.
+    proposed_at: datetime | None = None
+    reviewed_at: datetime | None = None
 
     # risk_gate
     portfolio: PortfolioSnapshot | None = None

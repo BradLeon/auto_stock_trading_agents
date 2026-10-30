@@ -530,6 +530,9 @@ class FakeChannel:
 
     def request_approval(self, req: ApprovalRequest) -> BossApproval:
         self.requests.append(req)
+        # A real verdict is stamped when it is given, not when the channel was set up.
+        if self.verdict.reviewed_at is not None:
+            return self.verdict.model_copy(update={"reviewed_at": datetime.now(timezone.utc)})
         return self.verdict
 
     def fetch_report_context(self, query: str) -> ReportBundle:

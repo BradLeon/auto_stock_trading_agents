@@ -479,6 +479,7 @@ def broker(monkeypatch, tmp_path):
     monkeypatch.setattr("ats.trader.portfolio.account_broker",
                         lambda: SimpleNamespace(get_portfolio=_fresh_portfolio))
     monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.warm_betas", lambda p: 0)      # approving warms betas: never the network
     monkeypatch.setattr("ats.risk.assess.enrich_options", lambda p: None)
     monkeypatch.setattr("ats.risk.assess.assess",
                         lambda p, **k: RiskReview(as_of=datetime.now(timezone.utc),

@@ -230,6 +230,50 @@ def fetch_light(symbol: str, *, consumer: str = "runtime_light") -> dict:
     return {**out, **governed}
 
 
+_BETA_TTL = 86400.0        # beta moves slowly; one day is as fresh as the risk review needs it
+
+
+def _beta_cache_path():
+    """Beside the memory database, so an isolated run or a test never reads the real cache."""
+    from pathlib import Path
+
+    from ..memory import _db_path
+
+    return Path(_db_path()).with_name("risk_beta_cache.json")
+
+
+def cached_beta(symbol: str) -> tuple[float | None, bool]:
+    """Beta for the risk review: `(beta, fetched)`. A day-old value is reused across processes.
+
+    `fetch_light` only caches inside one process, and each `ats` command is a new process, so a
+    re-review at approval time paid for a network call per holding. Only beta is kept here (the
+    valuation fields of `fetch_light` stay as fresh as they were). `fetched` tells the caller
+    whether a network call happened, so pacing is only spent when it was needed.
+    """
+    import json
+    import time as _t
+
+    path = _beta_cache_path()
+    try:
+        cache = json.loads(path.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(symbol)
+    if isinstance(hit, dict) and isinstance(hit.get("beta"), (int, float)) \
+            and _t.time() - float(hit.get("at", 0)) < _BETA_TTL:
+        return float(hit["beta"]), False
+    beta = fetch_light(symbol).get("beta")
+    if isinstance(beta, (int, float)):
+        cache[symbol] = {"beta": float(beta), "at": _t.time()}
+        try:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(cache))
+            tmp.replace(path)
+        except OSError as exc:
+            log.warning("beta cache not written: %s", exc)
+    return (float(beta) if isinstance(beta, (int, float)) else None), True
+
+
 def fetch_constituent_financials(symbol: str, *,
                                  consumer: str = SECTOR_CONSTITUENT_FINANCIALS) -> dict:
     """Return one sector constituent's governed accounting plus runtime market view.

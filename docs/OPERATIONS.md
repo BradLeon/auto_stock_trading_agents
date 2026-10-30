@@ -241,17 +241,21 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 ```bash
 ats approval pending                  # 待审批周期、修订 hash、订单、风控结论、已等多久
 ats approval show <cycle_id>          # 完整审批对象：快照、订单、风控审查、锁定原因
-ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位> [--actor <谁>]
-ats approval revise  <cycle_id> --revision <hash 前缀> --note "<修改意见>"
-ats approval reject  <cycle_id> --revision <hash 前缀> [--note "<备注>"]
+ats approval approve [<cycle_id>] [--actor <谁>]     # 终端里：看审批卡，输入 approve 确认
+ats approval revise  [<cycle_id>] [--note "<修改意见>"]
+ats approval reject  [<cycle_id>] [--note "<备注>"]
+ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚本或管道：必须写明
 ```
+
+- **终端里不用敲 hash：** 不带周期时，只有一个待审批周期就直接选中，多个则让你选序号。命令打印审批卡（含修订号和 hash），你输入完整的 `approve` / `revise` / `reject` 才执行，其他任何输入都取消；`revise` 会提示输入意见。答复绑定的是这张卡上的 hash，确认前若出现更新的修订会拒绝。
+- `show` 默认把研究快照引用折叠成一行汇总，`ats approval show <cycle_id> --full` 看全部。
 
 - `approve` 本身就是确认动作：命令先取新的组合快照，对**同一修订**确定性地重新风控，打印与审批时相比的变化，然后立即继续执行；
   不会再弹第二次审批，也不会生成新的修订。快照新鲜度预算是 60 秒，所以不要把“确认”和“执行”拆成两步。
 - 重新风控若给出**不同**结论（例如价格波动后超限），命令拒绝执行并说明差异；需要你 `revise` 或 `reject`。
 - `revise` = 驳回当前修订并给出修改意见：Chief 只据此再改一次，新修订重新过风控、重新等你；一个周期最多 2 次，第三次会被拒绝。
 - `reject` = 周期终止（`approval_rejected`）。
-- 必须写明 hash 前缀：旧修订、旧周期的答复不会落到新修订上。hash 不匹配、短于 12 位、周期已终态都会被拒绝。
+- 脚本或管道必须写明周期和 hash 前缀：旧修订、旧周期的答复不会落到新修订上。hash 不匹配、短于 12 位、周期已终态都会被拒绝，报错会说出当前修订的 hash 前缀。
 - 同一周期重复 `approve` 会直接返回第一次的结果，不会再执行一次。
 - 新一轮 `chief-daily` 开始时，仍在等待的上一周期会被标为 `superseded` 并给你发一次说明；已经批准过的不受影响。
 - 没有人点审批、周期一直 `pending_approval` 本身不是故障，只会过期；不要因此用 `--yes`。

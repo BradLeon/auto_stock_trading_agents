@@ -67,8 +67,34 @@ def enrich_beta(portfolio: PortfolioSnapshot) -> None:
             continue
         if p.beta is None:
             risk_symbol = registry.resolve(p.symbol).risk_symbol
-            p.beta = fundamentals.fetch_light(risk_symbol).get("beta")
+            p.beta, fetched = fundamentals.cached_beta(risk_symbol)
+            if fetched:
+                time.sleep(0.5)
+
+
+def warm_betas(portfolio: PortfolioSnapshot) -> int:
+    """Fetch (and keep) the betas a review of this portfolio will ask for. Returns how many were fetched.
+
+    Approving re-reviews on a fresh snapshot within 60 seconds. The slow part of a review is the
+    network call per holding, so it is done BEFORE the snapshot is taken: the snapshot's clock
+    then runs only over the fast part.
+    """
+    from ..config import load_instrument_risk_registry
+    from ..data import fundamentals
+
+    registry = load_instrument_risk_registry()
+    fetched = 0
+    for p in portfolio.positions:
+        symbol = p.underlying or p.symbol if _is_opt(p) else p.symbol
+        try:
+            _, live = fundamentals.cached_beta(registry.resolve(symbol).risk_symbol)
+        except Exception as exc:  # noqa: BLE001 - warming is an optimisation, never a failure
+            log.warning("beta warm-up skipped for %s: %s", symbol, exc)
+            continue
+        if live:
+            fetched += 1
             time.sleep(0.5)
+    return fetched
 
 
 def enrich_options(portfolio: PortfolioSnapshot) -> None:
@@ -102,8 +128,9 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
         # underlying beta (for L3) — key on the underlying, cache on the option position
         if p.beta is None:
             try:
-                p.beta = fundamentals.fetch_light(registry.resolve(under).risk_symbol).get("beta")
-                time.sleep(0.5)
+                p.beta, fetched = fundamentals.cached_beta(registry.resolve(under).risk_symbol)
+                if fetched:
+                    time.sleep(0.5)
             except Exception as exc:  # noqa: BLE001
                 log.warning("option beta skipped for %s: %s", under, exc)
         # IBKR already gave greeks → only backfill spot, keep them

@@ -9,7 +9,9 @@ characters of its hash, so a stale answer can never land on a newer revision.
 from __future__ import annotations
 
 import json
+import logging
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from ..decision.repository import (DecisionAuditRepository, approval_idempotency_key,
@@ -124,7 +126,11 @@ def _first_result(repo, cycle_id: str, prefix: str, decision: str):
 def _resolve(repo, cycle_id: str, prefix: str):
     """The cycle, its current revision and effective review — or the reason this answer is refused."""
     if len(prefix) < MIN_HASH_PREFIX:
-        raise ApprovalRefused(f"修订 hash 前缀至少 {MIN_HASH_PREFIX} 位（收到 {len(prefix)} 位）")
+        current = repo.latest_revision(cycle_id)
+        raise ApprovalRefused(
+            f"修订 hash 前缀至少 {MIN_HASH_PREFIX} 位（收到 {len(prefix)} 位）"
+            + (f"；当前是修订 {current['revision_no']}，hash 前缀 {current['decision_hash'][:MIN_HASH_PREFIX]}"
+               if current else ""))
     cycle = repo.get_cycle(cycle_id)
     if cycle is None:
         raise ApprovalRefused(f"没有这个周期：{cycle_id}")
@@ -176,7 +182,15 @@ def _lock_reason(values: dict) -> str:
     return "；".join(reasons)
 
 
-def show(cycle_id: str) -> int:
+ORDER_REASON_CHARS = 120
+
+
+def _ellipsis(text: str, limit: int) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def show(cycle_id: str, *, full: bool = False) -> int:
     repo = _repo()
     cycle = repo.get_cycle(cycle_id)
     if cycle is None:
@@ -191,7 +205,9 @@ def show(cycle_id: str) -> int:
         for o in _orders(rev):
             size = (f"${o['notional_usd']:,.0f}" if o.get("notional_usd") else
                     f"{o['qty']:g} 股" if o.get("qty") else "")
-            print(f"  {o.get('action')} {o.get('symbol')} {size}  {str(o.get('rationale', ''))[:100]}")
+            reason = str(o.get("rationale", ""))
+            print(f"  {o.get('action')} {o.get('symbol')} {size}  "
+                  f"{reason if full else _ellipsis(reason, ORDER_REASON_CHARS)}")
         from ..decision.repository import option_advice_lines, rationale_summary
 
         if rev["rationale"]:
@@ -212,9 +228,18 @@ def show(cycle_id: str) -> int:
         from ..decision.snapshot import frozen_snapshot_items
 
         items = frozen_snapshot_items(json.loads(cycle["research_snapshot"]))
-        print("\n研究快照引用：")
-        for item in items:
-            print(f"  {item.category or item.task_id}: {item.projection_id} @ {item.as_of}")
+        if full:
+            print("\n研究快照引用：")
+            for item in items:
+                print(f"  {item.category or item.task_id}: {item.projection_id} @ {item.as_of}")
+        elif items:
+            kinds: dict[str, int] = {}
+            for item in items:
+                kind = item.category or item.task_id
+                kinds[kind] = kinds.get(kind, 0) + 1
+            stamps = sorted(str(item.as_of) for item in items)
+            print(f"\n研究快照引用：共 {len(items)} 条（" + "、".join(f"{k} {n}" for k, n in kinds.items())
+                  + f"），最早 {stamps[0][:19]}，最晚 {stamps[-1][:19]}。完整清单：ats approval show {cycle_id} --full")
     reason = None
     try:
         reason = _lock_reason(_checkpoint_values(_graph(), cycle_id))
@@ -348,6 +373,13 @@ def _refresh_review(repo, app, cycle_id: str, rev, previous, values: dict) -> st
         raise ApprovalRefused(f"{cycle_id} 的检查点里没有订单，无法重审")
     if not values.get("use_broker", True):
         raise ApprovalRefused(f"{cycle_id} 是离线运行，没有账户快照可刷新")
+    from ..risk import assess as risk_assess
+
+    # The slow part of a review is a network call per holding (beta). Do it before the snapshot is taken,
+    # from the holdings of the previous snapshot, so the 60 s of the new snapshot only run over the fast part.
+    earlier = values.get("portfolio")
+    if earlier is not None:
+        risk_assess.warm_betas(earlier)
     pf = tport.snapshot()
     if pf is None:
         raise ApprovalRefused("取不到新的账户快照，不能批准（批准必须基于 60 秒内的快照）")
@@ -392,6 +424,62 @@ def _diff_text(previous, review, snapshot_id: str) -> str:
     return "\n".join(lines)
 
 
+# --- keeping the answer readable ------------------------------------------------------------------ #
+class _Dedupe(logging.Filter):
+    """Let the first record of each kind through; count the rest."""
+
+    def __init__(self, kind):
+        super().__init__()
+        self.kind, self.seen, self.dropped = kind, set(), {}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        key = self.kind(record)
+        if key not in self.seen:
+            self.seen.add(key)
+            return True
+        self.dropped[key] = self.dropped.get(key, 0) + 1
+        return False
+
+
+@contextmanager
+def _quiet_noise():
+    """An answer is a few lines; around it the process printed a screen of audit and broker chatter.
+
+    Dropped: the read-trace copy of every consumer read (the audit rows themselves are kept elsewhere; a
+    blocked or unavailable read is still a warning) and TWS's code 300 (cancelling a market-data
+    subscription that is already gone). Folded to one line each, with a count at the end: TWS's
+    "completed orders" timeout, and a market-data source failing again and again. Those two are
+    real signals, so they are summarised, not hidden.
+    """
+    class _Code300(logging.Filter):
+        def filter(self, record):
+            return "Error 300" not in record.getMessage()
+
+    trace = logging.getLogger("ats.consumer_reads")
+    previous_level = trace.level
+    trace.setLevel(logging.WARNING)
+    code300 = _Code300()
+    wrapper = logging.getLogger("ib_async.wrapper")
+    wrapper.addFilter(code300)
+    timeouts = _Dedupe(lambda r: r.getMessage())
+    ib = logging.getLogger("ib_async.ib")
+    ib.addFilter(timeouts)
+    sources = _Dedupe(lambda r: r.getMessage().removeprefix("data source ").split(":", 1)[0])
+    data = logging.getLogger("ats.data")
+    data.addFilter(sources)
+    try:
+        yield
+    finally:
+        trace.setLevel(previous_level)
+        wrapper.removeFilter(code300)
+        ib.removeFilter(timeouts)
+        data.removeFilter(sources)
+        repeated = {**{f"TWS {k}": n for k, n in timeouts.dropped.items()},
+                    **{f"行情源 {k}": n for k, n in sources.dropped.items()}}
+        if repeated:
+            print("（另有重复告警已折叠：" + "；".join(f"{k} 还有 {n} 次" for k, n in repeated.items()) + "）")
+
+
 # --- argparse glue ---------------------------------------------------------------------------------- #
 def add_parser(sub) -> None:
     ap = sub.add_parser("approval", help="Boss 审批：pending / show / approve / revise / reject")
@@ -399,23 +487,110 @@ def add_parser(sub) -> None:
     verbs.add_parser("pending", help="列出待审批的周期（需要下单且已通过风控）")
     sp = verbs.add_parser("show", help="完整审批对象")
     sp.add_argument("cycle")
+    sp.add_argument("--full", action="store_true", help="列出全部研究快照引用，订单理由不截断")
     for name in ("approve", "revise", "reject"):
-        vp = verbs.add_parser(name)
-        vp.add_argument("cycle")
-        vp.add_argument("--revision", required=True, help=f"修订 hash 前缀，至少 {MIN_HASH_PREFIX} 位")
+        vp = verbs.add_parser(name, help="不带周期和 --revision：在终端里选周期、看审批卡、输入确认词")
+        vp.add_argument("cycle", nargs="?", default=None, help="周期；省略时取唯一的待审批周期（多个则让你选）")
+        vp.add_argument("--revision", default=None,
+                        help=f"修订 hash 前缀，至少 {MIN_HASH_PREFIX} 位；脚本或非交互时必填，终端里可省略")
         vp.add_argument("--actor", default=None, help="审批人，默认本机用户名")
         if name != "approve":
-            vp.add_argument("--note", default="", required=(name == "revise"),
-                            help="修改意见（revise 必填）" if name == "revise" else "拒绝备注（可选）")
+            vp.add_argument("--note", default="",
+                            help="修改意见（revise 必填；终端里可省略，会提示输入）" if name == "revise" else "拒绝备注（可选）")
 
 
 def dispatch(args) -> int:
+    with _quiet_noise():
+        return _dispatch(args)
+
+
+def _dispatch(args) -> int:
     if args.verb == "pending":
         return pending()
     if args.verb == "show":
-        return show(args.cycle)
+        return show(args.cycle, full=args.full)
+    if args.revision is None or args.cycle is None:
+        return _answer_in_terminal(args)
     if args.verb == "approve":
         return approve(args.cycle, args.revision, actor=args.actor)
     if args.verb == "revise":
         return revise(args.cycle, args.revision, note=args.note, actor=args.actor)
     return reject(args.cycle, args.revision, note=args.note, actor=args.actor)
+
+
+# --- answering in a terminal, without typing a hash ---------------------------------------------- #
+def _answer_in_terminal(args) -> int:
+    """Pick the cycle, read its card, type the verb to confirm.
+
+    The hash exists so that an answer can never land on a revision the Boss did not read. Here the
+    Boss reads the card first and the answer is bound to the hash PRINTED on that card, in the same
+    process: nothing the Boss did not see can be answered, so nothing has to be typed. A script or a
+    pipe has no card to read and keeps the explicit `--revision`.
+    """
+    import sys
+
+    verb = args.verb
+    if args.revision is not None:
+        print("✗ 给了 --revision 就要同时给周期：ats approval %s <周期> --revision <hash>" % verb)
+        return 1
+    if not sys.stdin.isatty():
+        print(f"✗ 没有终端可以确认：非交互使用必须写明周期和修订 hash："
+              f"ats approval {verb} <周期> --revision <hash 前缀，至少 {MIN_HASH_PREFIX} 位>")
+        return 1
+    repo = _repo()
+    cycle_id = args.cycle
+    if cycle_id is None:
+        waiting = pending_cycles(repo)
+        if not waiting:
+            print("（没有待审批的周期）")
+            return 1
+        if len(waiting) == 1:
+            cycle_id = waiting[0]["cycle_id"]
+        else:
+            pending()
+            choice = input(f"选哪一个？输入序号 1-{len(waiting)}，回车取消：").strip()
+            if not choice.isdigit() or not 1 <= int(choice) <= len(waiting):
+                print("已取消，没有答复任何周期。")
+                return 1
+            cycle_id = waiting[int(choice) - 1]["cycle_id"]
+    try:
+        _, rev, _ = _card_target(repo, cycle_id)
+    except ApprovalRefused as exc:
+        print(f"✗ {exc}")
+        return 1
+    shown = rev["decision_hash"][:MIN_HASH_PREFIX]
+    show(cycle_id)
+    print(f"\n你答复的是：周期 {cycle_id} · 修订 {rev['revision_no']} · hash {shown}")
+    note = args.note
+    if verb == "revise" and not note.strip():
+        note = input("修改意见（必填，回车取消）：").strip()
+        if not note:
+            print("已取消，没有答复。")
+            return 1
+    if verb == "reject" and not note.strip():
+        note = input("拒绝备注（可空）：").strip()
+    word = input(f"确认请输入 {verb}，其他任何输入都视为取消：").strip()
+    if word != verb:
+        print("已取消，没有答复。")
+        return 1
+    latest = repo.latest_revision(cycle_id)
+    if latest is None or latest["decision_hash"][:MIN_HASH_PREFIX] != shown:
+        print(f"✗ 你读过的修订已不是最新的（现在是修订 {latest['revision_no'] if latest else '-'}），"
+              "请重新运行命令阅读新的审批卡。")
+        return 1
+    if verb == "approve":
+        return approve(cycle_id, shown, actor=args.actor)
+    if verb == "revise":
+        return revise(cycle_id, shown, note=note, actor=args.actor)
+    return reject(cycle_id, shown, note=note, actor=args.actor)
+
+
+def _card_target(repo, cycle_id: str):
+    """The current revision of a cycle that is waiting, or the reason it cannot be answered."""
+    cycle = repo.get_cycle(cycle_id)
+    if cycle is None:
+        raise ApprovalRefused(f"没有这个周期：{cycle_id}")
+    rev = repo.latest_revision(cycle_id)
+    if rev is None:
+        raise ApprovalRefused(f"{cycle_id} 还没有修订")
+    return _resolve(repo, cycle_id, rev["decision_hash"][:MIN_HASH_PREFIX])

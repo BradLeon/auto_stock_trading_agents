@@ -74,7 +74,8 @@ def test_pending_never_lists_a_cycle_that_did_not_pass_risk(e2e_env, broker):
 def test_a_short_or_wrong_hash_is_refused_and_names_the_current_one(waiting, capsys):
     repo, rev = waiting
     assert approval_cli.approve(CYCLE, _hash(rev, 8)) == 1
-    assert "至少 12 位" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "至少 12 位" in out and _hash(rev) in out            # a short prefix is told what the current one is
     assert approval_cli.approve(CYCLE, "f" * 12) == 1
     assert _hash(rev) in capsys.readouterr().out
     assert repo.get_cycle(CYCLE)["status"] == "pending_approval"
@@ -241,6 +242,21 @@ def test_show_says_the_approval_will_not_place_an_order_and_why(waiting, monkeyp
     assert "批准后不会下单" in out and "实盘锁定" in out
 
 
+def test_show_folds_the_research_references_unless_asked_for_all_of_them(waiting, capsys):
+    repo, rev = waiting
+    assert approval_cli.show(CYCLE) == 0
+    folded = capsys.readouterr().out
+    assert "研究快照引用：共" in folded and "--full" in folded
+    assert approval_cli.show(CYCLE, full=True) == 0
+    full = capsys.readouterr().out
+    assert "研究快照引用：\n" in full and len(full.splitlines()) > len(folded.splitlines())
+
+
+def test_a_long_order_reason_is_cut_with_an_ellipsis_not_mid_sentence_silently():
+    assert approval_cli._ellipsis("理由" * 100, 120).endswith("…")
+    assert approval_cli._ellipsis("短理由", 120) == "短理由"
+
+
 def test_show_says_nothing_about_a_lock_when_an_approval_would_place_the_order(waiting, capsys):
     repo, rev = waiting
     assert approval_cli.show(CYCLE) == 0
@@ -283,3 +299,112 @@ def test_a_revise_that_cannot_be_honoured_is_recorded_as_a_rejection():
     assert narrow_approval(BossApproval(status="revise", comment="改小")).status == "revise"
     no_note = narrow_approval(BossApproval(status="revise", comment=" "))
     assert no_note.status == "rejected" and "缺少修改意见" in no_note.comment
+
+
+# --- answering in a terminal without typing the hash ------------------------------------------------ #
+def _args(verb, **kw):
+    from argparse import Namespace
+
+    return Namespace(verb=verb, cycle=kw.get("cycle"), revision=kw.get("revision"), note=kw.get("note", ""),
+                     actor="boss")
+
+
+@pytest.fixture
+def at_a_terminal(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+
+
+def test_a_terminal_answer_picks_the_only_waiting_cycle_and_binds_the_hash_on_the_card(
+        waiting, at_a_terminal, monkeypatch, capsys):
+    repo, rev = waiting
+    _answers(monkeypatch, "approve")
+    assert approval_cli._dispatch(_args("approve")) == 0
+    out = capsys.readouterr().out
+    assert f"hash {_hash(rev)}" in out                                  # the card says which revision is answered
+    assert repo.get_cycle(CYCLE)["status"] in {"approved_not_executed", "executed"}
+
+
+def test_anything_but_the_verb_cancels_and_leaves_the_cycle_waiting(waiting, at_a_terminal, monkeypatch, capsys):
+    repo, _ = waiting
+    for typed in ("", "y", "yes", "APPROVE", "reject"):
+        _answers(monkeypatch, typed)
+        assert approval_cli._dispatch(_args("approve")) == 1, typed
+    assert "已取消" in capsys.readouterr().out
+    assert repo.get_cycle(CYCLE)["status"] == "pending_approval"
+    assert repo.conn.execute("SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = ?", (CYCLE,)).fetchone()[0] == 0
+
+
+def test_without_a_terminal_the_hash_stays_mandatory(waiting, monkeypatch, capsys):
+    repo, _ = waiting
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    assert approval_cli._dispatch(_args("approve")) == 1
+    assert "必须写明周期和修订 hash" in capsys.readouterr().out
+    assert repo.get_cycle(CYCLE)["status"] == "pending_approval"
+
+
+def test_a_revision_without_its_cycle_is_refused(waiting, at_a_terminal, capsys):
+    assert approval_cli._dispatch(_args("approve", revision="a" * 12)) == 1
+    assert "同时给周期" in capsys.readouterr().out
+
+
+def test_a_newer_revision_that_appears_after_reading_the_card_is_not_answered(
+        waiting, at_a_terminal, monkeypatch, capsys):
+    repo, rev = waiting
+    box = {"typed": False}
+
+    def typed(prompt=""):
+        box["typed"] = True
+        return "approve"
+
+    monkeypatch.setattr("builtins.input", typed)
+    real = DecisionAuditRepository.latest_revision
+
+    def latest(self, cycle_id):
+        row = real(self, cycle_id)
+        if box["typed"] and row is not None:
+            return {**dict(row), "decision_hash": "f" * 32, "revision_no": row["revision_no"] + 1}
+        return row
+
+    monkeypatch.setattr(DecisionAuditRepository, "latest_revision", latest)
+    assert approval_cli._dispatch(_args("approve")) == 1
+    assert "已不是最新" in capsys.readouterr().out
+    assert repo.conn.execute("SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = ?", (CYCLE,)).fetchone()[0] == 0
+
+
+def test_a_terminal_revise_asks_for_the_note_and_a_blank_note_cancels(waiting, at_a_terminal, monkeypatch, capsys):
+    repo, _ = waiting
+    _answers(monkeypatch, "")
+    assert approval_cli._dispatch(_args("revise")) == 1
+    assert "已取消" in capsys.readouterr().out
+    assert repo.conn.execute("SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = ?", (CYCLE,)).fetchone()[0] == 0
+
+
+def test_nothing_waiting_is_said_plainly(e2e_env, at_a_terminal, capsys):
+    assert approval_cli._dispatch(_args("approve")) == 1
+    assert "没有待审批的周期" in capsys.readouterr().out
+
+
+# --- readable output -------------------------------------------------------------------------------- #
+def test_the_noise_around_an_answer_is_dropped_or_folded_and_real_signals_are_counted(caplog, capsys):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    with approval_cli._quiet_noise():
+        logging.getLogger("ats.consumer_reads").info("consumer_read {}")
+        logging.getLogger("ats.consumer_reads").warning("consumer_read blocked")
+        logging.getLogger("ib_async.wrapper").error("Error 300, reqId 4: Can't find EId with tickerId:4")
+        for _ in range(3):
+            logging.getLogger("ib_async.ib").error("completed orders request timed out")
+        for symbol in ("AMZN", "DRAM", "GOOG"):
+            logging.getLogger("ats.data").warning(
+                "data source yf-light:%s failed after 2 attempts: SSL", symbol)
+    shown = [r.getMessage() for r in caplog.records]
+    assert "consumer_read {}" not in shown and "consumer_read blocked" in shown
+    assert not any("Error 300" in m for m in shown)
+    assert sum("completed orders" in m for m in shown) == 1             # said once, not per connection
+    assert sum("yf-light" in m for m in shown) == 1
+    out = capsys.readouterr().out
+    assert "还有 2 次" in out and "TWS" in out and "行情源 yf-light" in out
+    # leaving the command puts the loggers back
+    logging.getLogger("ats.consumer_reads").info("consumer_read after")
+    assert "consumer_read after" in [r.getMessage() for r in caplog.records]

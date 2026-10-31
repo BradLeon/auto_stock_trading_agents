@@ -267,9 +267,16 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 2. 实盘路由 `live_trader` 为 `disabled`；
 3. `ats live gate` 没有有效的实盘授权引用。授权库里那行 `LIVE-X`（占位字段、来源未核实）按你 2026-10-21 的确认作废，作废记录追加、原记录保留，实盘门不会再把它当授权。
 
-**`ats cutover state` 里的六个边界开关不是权威状态。** 它们从未接线（`wired: false`），切换后仍显示 `legacy` / `disabled`，
-与事实不符，R5 会删除它们。真实的状态看：读路由用 `ats data health`，调度负责人用 `ats dispatch owner-log`，
-切换发生在哪个提交见 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`。
+**`ats cutover state` 里的六个边界开关不是权威状态。** 它们从未接线（`wired: false`），切换后仍显示 `legacy` / `disabled`
+（其中五个是 `legacy`，只有 `live_trader` 是 `disabled`），与事实不符，R5 会删除它们。真实的状态看：读路由用 `ats data health`，
+调度负责人用 `ats dispatch owner-log`，切换发生在哪个提交见 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`。
+
+**怎么读 `ats dispatch owner-log`。** 它是"每个工作流的定时触发由谁负责"的审计日志：负责人要么是 `legacy`（旧的 launchd 触发），要么是 `dispatcher`。
+每一条是一次切换或回退，看这几个字段就够了：`workflow`（哪个工作流）、`action`（`switch` 切过去 / `rollback` 切回）、`from_owner → to_owner`、`at`（时间）。
+一个工作流**当前**归谁，看它在日志里的**最后一条**。`approval` 字段原样记录你当时授权这次切换的回复，因为切换负责人是生产变更，
+日志要留下"谁批准的"的证据，所以读起来像聊天记录；它不参与工作流的运行。现在日志里有 7 个研究工作流（`information-brief`、`fundamental-routine`、`fundamental-event`、
+`technical-review`、`macro-review`、`layer-review`、`sector-review`），最后一条都是 `dispatcher`。**`chief-daily` 和 `clerk-daily` 不在日志里**，说明它们还没有被切换过，
+也就是停用状态；S4、S5 上线后它们才会出现新的 `switch` 记录，并带着你的批准原话。
 
 **回退**
 

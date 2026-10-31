@@ -581,6 +581,19 @@
 - 一处更正：`523ec78` 的提交说明写“阶段 F 两个文件余 2 个既有红，与本次无关”。其中 `test_actual_opinion_edges_and_published_lineage` 确为既有（行业分析读到 `ats.data.collection`，第 5 节 13）；`[50000-False]` 不是，由 `051bfb9` 引起，当时没有跑到它。
 - 修复后的定向复测（主仓库）：`test_action_vocabulary`、`test_chief_loop`、`test_chief` 与阶段 F 的 `test_complete_business_execution_and_recovery`（3 个参数）共 35 通过；`test_structured_docs_consistency`、`test_phase_f_paired_business` 16 通过。**没有重跑全量**。
 
+### 3.17 S1 上线记录：主理人、风控、Trader、书记员读路由（2026-10-31，tasks 4.1）
+
+- **你的批准：** 先批准开始 S1；看过四条切换命令与回退方式后批准“四个都批准”，再批准手动演练“批准演练”。批准原文已写进路由日志：`用户 2026-10-31 在会话中批准：四个都批准`。
+- **切换前检查：** `ats data health --consumer chief|risk|trader|clerk` 均为 `ok`，无问题无警告；四个消费者原先都没有路由记录（旧路由）。
+- **切换：** `ats consumer-cutover restore --consumer-id <id> --actor liuchao --approval ... --reason "S1 主理人改读：整消费者读路由"`，四个都是 `legacy → target`，generation 1，记录时间 2026-10-31T04:19:23—26Z。路由只作用于读取，不触及审批、Clerk 发布、调度负责人与实盘路由；三道实盘锁未动。
+- **重启：** `com.ats.dispatcher` 由 PID 68806 重启为 30857，启动日志正常（五个研究工作流加日历消费）；`com.ats.serve` 未动（68820）。
+- **演练：** `ats chief run --channel pending`（默认 dry-run，不带 `--live`），证据 `var/switch_s1/chief_run_rehearsal.log`。
+  - 上下文来自快照：日志里主理人的读取全部是 `api=task_projection、bound_route=target`；上下文四段共约 10.25 万字（研究快照六类投影 9.97 万字）。
+  - `ats retirement zero`：`agents.chief.assemble` 对 `chief.legacy_table_direct_reads`、`store.direct_trade_reads`、`macro_reviews`、`sector_reviews`、`technical_reviews` 均判**清零**（Chief 的两条目标条目为 zero）。其余消费方（`runtime.cli`、`channel.context`、`memory.store.*`、风控与书记员两个 `decision_roles`）仍是未清零或待补证，属后续 S2/S3 与第 6、7 组范围。
+  - 这是 dry-run：没有创建审批周期（`ats approval pending` 为空），也没有发提醒；写了旧 `cycles/decisions` 表一条 `chief-20261031-042253`（S2 之前读取方仍读旧表）和一份 Obsidian 报告 `首席决策-2026-10-31-0422.md`。主理人给出的是真实建议（EMERGENCY/derisk，卖出 GOOG、AVGO、NVDA，建议人工平三笔空头期权），没有执行。
+  - 没有统计模型请求数（日志里没有汇总）；S5 的验证要求记录，届时需要加上。
+- **回退：** revert S1 提交并重启服务；路由日志只增不改。
+
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
 
 **测量条件：** 提交号 `173fac0` 加工作区未提交改动；日期 2026-10-28；命令 `uv run pytest -q --tb=short -p no:randomly <文件> --junitxml=var/test_runs/switch-3.1-<组>.xml`；日志在同目录同名 `.log`。**未提交的工作区，最终提交后要复测。**

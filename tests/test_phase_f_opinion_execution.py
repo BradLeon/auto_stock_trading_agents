@@ -147,11 +147,17 @@ def test_complete_business_execution_and_recovery(business_inputs, isolated, mon
         quotes.append(value.model_dump(mode="json"))
         return value
     monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price", fetch)
-    monkeypatch.setattr("ats.agents.chief.decide.run_structured", lambda *a, **k:
-        ChiefOutput(summary="Fixture synthesis over actual governed research",
+    rounds=[]
+    def chief_model(*a, **k):
+        # A risk rejection goes back to the model, which re-proposes inside the stated bound
+        # (the $25,000 single-order cap); the first round asks for the full notional.
+        rounds.append(1)
+        amount=notional if len(rounds)==1 else min(notional, 25000)
+        return ChiefOutput(summary="Fixture synthesis over actual governed research",
             reasoning=dict(portfolio_stance="fixture", risks_and_invalidation="fixture"),
-            decisions=[dict(symbol="COHR", action="buy", notional_usd=notional,
-                            conviction=.5, rationale="Actual six-role research snapshot")]))
+            decisions=[dict(symbol="COHR", action="buy", notional_usd=amount,
+                            conviction=.5, rationale="Actual six-role research snapshot")])
+    monkeypatch.setattr("ats.agents.chief.decide.run_structured", chief_model)
     cards=[]
     class Channel:
         def request_approval(self, request):

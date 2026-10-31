@@ -55,7 +55,8 @@ class HoldingReview(BaseModel):
     """One current stock holding, reviewed whether or not it is traded."""
 
     symbol: str
-    verdict: Literal["hold", "add", "trim", "sell", "watch"]
+    # The decision layer's action vocabulary plus "watch" (no trade); never a second copy of the list.
+    verdict: Action | Literal["watch"]
     basis: str = Field(description="which signals decide it, with their numbers")
     conflicts: str = Field("", description="signals pointing the other way, and why they lose")
     references: list[str] = Field(default_factory=list, description="projection ids relied on")
@@ -94,8 +95,10 @@ class OptionAction(BaseModel):
     expiry: str = Field(description="YYYYMMDD of the held contract")
     strike: float
     right: Literal["C", "P"]
-    action: Literal["close", "reduce", "add", "roll", "hold"]
-    contracts: float | None = Field(None, description="contracts to trade; None for hold")
+    # Option advice has its own words ("increase"/"keep", not "add"/"hold"): the stock action
+    # vocabulary lives only in the decision layer, and these are advice for hand execution.
+    action: Literal["close", "reduce", "increase", "roll", "keep"]
+    contracts: float | None = Field(None, description="contracts to trade; None for keep")
     roll_to_expiry: str | None = Field(None, description="roll only: target YYYYMMDD")
     roll_to_strike: float | None = Field(None, description="roll only: target strike")
     rationale: str

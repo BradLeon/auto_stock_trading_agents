@@ -107,7 +107,7 @@
 | 方式 | 重写 4 个决策路径夹具（`phase_d_e2e` 3、`test_chief` 1），跑全量 |
 | 通过标准 | 交易路径相关测试全绿；其余与 `docs/TEST_BASELINE.md` 逐项对照，无新增未归因失败 |
 | 自动证据 | 4 个夹具已在第 2 组改写（见 TEST_BASELINE 的“交易路径切换第 2 组”一行）。全量待最终提交后，先重测证据指纹基线再跑 |
-| 状态 | 全量与逐项对照见 3.9（2026-10-29，`fdc56a3`，相关修复 `aa174ac`） |
+| 状态 | 全量与逐项对照见 3.9（2026-10-29，`fdc56a3`，相关修复 `aa174ac`）；当前提交 `a1d798f` 重跑全量并逐项对照，见 3.16（2026-10-30） |
 
 ### 2.9 T0.9 运维说明
 
@@ -116,7 +116,7 @@
 | 方式 | 按 `docs/OPERATIONS.md` §7.1 的草稿操作一遍 |
 | 通过标准 | 照文档能完成查看待审批、审批、停用与回退 |
 | 自动证据 | 审批与停用/恢复的每条命令都有测试；整套文档流程没有端到端演练 |
-| 状态 | 你操作一遍待做 |
+| 状态 | 只读走查完成（2026-10-31），文档与实际一致；见结论表。`ats dispatch pause` 没有在生产上实际运行 |
 
 ### 2.10 结论表（你填）
 
@@ -129,8 +129,8 @@
 | T0.5 | Clerk 对账 | 通过（2026-10-30，用户指示按复测结果填写）：隔离 136 通过；生产演练各步骤跑通，人工归类、补录、期权对账已做 | 3.3、3.5（30 天演练）；3.6—3.8（人工归类、补录、期权）；第 4 节 t05（当前提交 `a1d798f` 复测 `var/test_runs/switch-t05-a1d798f.{log,xml}`） | 用户 | 2026-10-30 | 遗留，用户尚未判断，不阻断：LRCX 2026-08-21 340P 按"到期作废"推断，可能实际被行权（第 5 节 5）；逐日净值与出入金（第 5 节 11）；已实现盈亏与 TWS 对平（第 5 节 12） |
 | T0.6 | 订单追溯 | 通过（2026-10-30，用户指示按复测结果填写）：当前提交干净 worktree 28/28 | 3.9（`fdc56a3`、`aa174ac` 干净 worktree 28/28，含一处回放不确定性的修复）；当前提交 `a1d798f` 干净 worktree 复测 28 通过，用时 609 秒，`var/test_runs/switch-t06-clean-a1d798f.{log,xml}` | 用户 | 2026-10-30 | 无 |
 | T0.7 | 单活与回退 | 通过（2026-10-30，用户指示按复测结果填写）：隔离 105 通过；回退演练做过 | 3.9 回退演练；第 4 节 t07（当前提交 `a1d798f` 复测 105 通过，`var/test_runs/switch-t07-a1d798f.{log,xml}`） | 用户 | 2026-10-30 | 遗留，用户尚未判断，不阻断：回退后旧界面会在"已批准"周期下列出被驳回的那一轮修订，可接受还是改成只镜像最终一轮（第 5 节 4） |
-| T0.8 | 测试基线 | | 3.9 全量与逐项对照；TEST_BASELINE 2026-10-29 一行 | | | |
-| T0.9 | 运维说明 | | OPERATIONS §7.1；待你操作一遍 | | | |
+| T0.8 | 测试基线 | 通过（2026-10-31，用户指示按复测结果填写）：当前提交干净 worktree 全量 91 failed / 4651 passed / 9 skipped / 10 errors；相对权威基线新增变红 22 个，全部归因（20 个 FactSet 本地数据环境，2 个是本变更自己的回归，已修） | 3.16（全量与逐项对照）；`var/test_runs/switch-t08-full-a1d798f.{log,xml}`；3.9 的上一次全量 | 用户 | 2026-10-31 | 全量跑在 `a1d798f`，两处回归的修复在其后，只做了定向复测，没有重跑全量；一处更正：`523ec78` 的提交说明把阶段 F 两个红都说成既有，其中 `[50000-False]` 实际由 `051bfb9` 引起，见 3.16 |
+| T0.9 | 运维说明 | 通过（2026-10-31，只读走查）：`approval pending`、`live gate`、`cutover state`、`dispatch owner-log`、`launchctl` 的实际输出与 OPERATIONS §7.1 一致；走查中发现的两处文档含糊已补写（`cutover state`、`owner-log` 的读法，`83e333d`） | OPERATIONS §7.1；你贴出的各命令输出；`83e333d` | 用户 | 2026-10-31 | 只读走查：`ats dispatch pause` 没有在生产上运行；真实批准在沙箱演练过（T0.3），回退演练做过（T0.7）；用户原话："其他三项没贴给你的是和你说的一样没有疑问。你可以记结论了。" |
 
 ## 3. 生产只读证据（tasks 3.2、3.3）
 
@@ -565,6 +565,22 @@
 - **免输 hash：** 终端里 `approve / revise / reject` 可不带周期和 `--revision`，看审批卡后输入完整动词确认，答复绑定卡上的 hash；没有终端仍须写明。
 - **测试：** `test_beta_cache.py`（6 例）、`test_approval_cli.py` 新增 9 例并改 1 例；与改动有关的 13 个用例（含重审和 show）、`test_risk.py` 的 beta 用例都通过。没有重跑 `test_approval_cli.py` 里与改动无关的其余 13 例，也没有跑阶段 F 端到端文件（改动不在其路径上）。**这些修复还没有在沙箱里让你亲手再跑一遍。**主理人的期权建议里有事实错误（AAPL 现价写成 $62.10 等），是 3.14 遗留缺陷 2，T0.3 无新增。
 
+### 3.16 T0.8 全量测试：当前提交重跑（2026-10-30，tasks 3.4）
+
+- 条件：`a1d798f` 干净 worktree，参数与 3.9 相同（`pytest -q --tb=no -rA -p no:cacheprovider -p no:randomly -v`，依赖环境同 T0.6 的说明），用时 1 小时 6 分。证据：`var/test_runs/switch-t08-full-a1d798f.{log,xml}`；对照 `var/test_runs/retire-final.xml`（权威基线）与 `switch-t08-full.xml`（3.9 的上一次）。
+- 结果：**91 failed / 4651 passed / 9 skipped / 10 errors**。权威基线为 73 failed / 4507 passed / 10 errors；3.9 的上一次为 94 / 4586 / 9 / 10。
+- 逐项对照（相对权威基线）：
+  - **新增变红 22 个：**
+    - 20 个是 FactSet 本地测试（`test_factset_index_semantic_local` 18、`test_factset_core_guidance_count_local` 1、`test_factset_core_surprise_local` 1），全部报 `var/data_artifacts/...` 文件不存在；这些数据文件不进 git，干净检出里没有。与 3.9 同一批。同 3 个文件在主仓库复跑 21/21 通过（用时 22 分钟）。属环境，与本变更无关。
+    - 2 个是本变更自己引入的，已修：
+      - `test_action_vocabulary::test_3_1_action_value_set_is_declared_once`：`523ec78` 给主理人输出加的 `HoldingReview.verdict` 与 `OptionAction.action` 两个 `Literal` 复制了动作词。修法：`verdict` 改为 `Action | Literal["watch"]`（引用决策层那一份词表）；期权建议的动作词改成独立的 `close/reduce/increase/roll/keep`（期权建议只渲染成文字、人工执行，没有下游按取值分支），`SKILL.md` 同步。
+      - `test_phase_f_opinion_execution::test_complete_business_execution_and_recovery[50000-False]`：`051bfb9` 起风控驳回后交回主理人模型重新出一轮（你认可的设计），而夹具里的模型每轮都原样提 5 万，三轮都被风控挡下，没有单可下。修法：夹具模型被驳回后在已告知的 2.5 万边界内重提；用例要验的行为（超额被驳回后修订成边界内金额并完成执行）不变。单跑复现过同样失败，修复后通过。
+  - **不再红 4 个：** `test_chief::test_run_chief_cli_executes_when_decisions` 与 `test_phase_d_e2e` 3 个（1.1 重写的 4 个决策路径夹具）。
+  - **只在基线里有的 22 个：** 3.9 的 21 个（第 2 组登记删除的测试函数），加 `test_fixed_sources_target_local::test_transcript_period_and_speaker_segments_are_required`（`ef201d8` 改名为 `..._and_content_are_required_and_missing_speakers_are_stated`，与本变更无关）。
+  - 其余失败与报错和基线逐项相同，没有新增未归因失败。
+- 一处更正：`523ec78` 的提交说明写“阶段 F 两个文件余 2 个既有红，与本次无关”。其中 `test_actual_opinion_edges_and_published_lineage` 确为既有（行业分析读到 `ats.data.collection`，第 5 节 13）；`[50000-False]` 不是，由 `051bfb9` 引起，当时没有跑到它。
+- 修复后的定向复测（主仓库）：`test_action_vocabulary`、`test_chief_loop`、`test_chief` 与阶段 F 的 `test_complete_business_execution_and_recovery`（3 个参数）共 35 通过；`test_structured_docs_consistency`、`test_phase_f_paired_business` 16 通过。**没有重跑全量**。
+
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
 
 **测量条件：** 提交号 `173fac0` 加工作区未提交改动；日期 2026-10-28；命令 `uv run pytest -q --tb=short -p no:randomly <文件> --junitxml=var/test_runs/switch-3.1-<组>.xml`；日志在同目录同名 `.log`。**未提交的工作区，最终提交后要复测。**
@@ -581,16 +597,14 @@
 
 **当前提交复测（2026-10-30，`a1d798f`；证据 `var/test_runs/switch-t0{4,5,7}-<提交>.{log,xml}`、`switch-t06-clean-a1d798f.{log,xml}`）：** t04 **131 通过**（`6ea070c`，10-29 为 128，新增目标权重换算 3 例）；t05 **136 通过**（10-29 为 132 通过 1 跳过：多出的 3 例来自 `test_instrument_ledger.py` 的新增，原来跳过的 `test_inventory_script_on_real_db_copy_if_present` 这次本机有 `var/ats.sqlite`，所以运行并通过）；t07 **105 通过**；T0.6 干净 worktree **28 通过**。T0.8 全量见 3.16。
 
-**没有覆盖的部分（不要把上表当成该项已通过）：** T0.1 的渲染材料、T0.2 的驳回—修订样例、T0.5 的生产对账演练、T0.6 的 22 项订单追溯（须干净检出）、T0.7 的回退演练、T0.8 的全量、T0.9 的文档走查。T0.3 已由你在沙箱亲手跑完（3.15），T0.9 需要你亲手跑。
+**没有覆盖的部分（不要把上表当成该项已通过）：** T0.1 的渲染材料、T0.2 的驳回—修订样例、T0.5 的生产对账演练、T0.6 的 22 项订单追溯（须干净检出）、T0.7 的回退演练、T0.8 的全量与 T0.9 的文档走查已完成（3.16 与结论表）。T0.3 已由你在沙箱亲手跑完（3.15）；T0.9 是只读走查，`dispatch pause` 没有在生产上运行。
 
 ## 5. 待你决定的事项
 
 **2026-10-29 你离开期间整理的待办（回来一并处理）：**
 
 1. **T0.1、T0.2 需要你读：** 渲染结果 `var/switch_t0/chief_context_render.md`（含真实账户号，勿外传），驳回—修订样例 `var/switch_t0/t0_2_reject_revise_sample.json`（3.9 有摘要）。
-2. **T0.9 需要你亲手跑一遍（T0.3 已在沙箱跑完，见 3.15）。** 只读的 `ats approval pending/show` 可以随时在生产上跑（现在没有待审批周期，会显示空）。要完整走 `approve/revise/reject`，需要一个处于 `pending_approval` 的周期。可选两种：
-   - 我在隔离沙箱里造几个待审批周期给你练手。注意沙箱里的 `approve` 会读真实 TWS 持仓做重新风控，三道实盘锁照旧挡住提交。
-   - 放到 S3 之后、S5 之前，用一次真实的 `ats chief run --channel pending --live` 来走。这一步会调用模型、在生产库写周期，与下面第 3 条相关。
+2. ~~**T0.9 需要你亲手跑一遍**~~ 已做（2026-10-31，只读走查，见结论表）。原文：T0.9 需要你亲手跑一遍；完整走 `approve/revise/reject` 需要待审批周期，我已在沙箱里造了周期给你（T0.3）。
 3. ~~**T0.4 的生产一半**~~ 已定（2026-10-30）：放进观察窗口的第一次真实批准，见 2.4 与结论表。原文：放进观察窗口第一次真实批准，还是 S3 后单独做一次演练周期。我倾向前者。
 4. **T0.7 回退时旧界面的显示：** 镜像把每一轮修订都写进旧 `decisions` 表，回退后旧界面会在一个“已批准”的周期下列出被驳回的那一轮。可接受，还是要改成只镜像最终一轮？
 5. **LRCX 2026-08-21 340P：** 按“到期作废”推断，但买入时价内约 29 美元，可能实际被行权。有券商的行权/指派记录可以更正（3.8）。

@@ -590,9 +590,18 @@
 - **演练：** `ats chief run --channel pending`（默认 dry-run，不带 `--live`），证据 `var/switch_s1/chief_run_rehearsal.log`。
   - 上下文来自快照：日志里主理人的读取全部是 `api=task_projection、bound_route=target`；上下文四段共约 10.25 万字（研究快照六类投影 9.97 万字）。
   - `ats retirement zero`：`agents.chief.assemble` 对 `chief.legacy_table_direct_reads`、`store.direct_trade_reads`、`macro_reviews`、`sector_reviews`、`technical_reviews` 均判**清零**（Chief 的两条目标条目为 zero）。其余消费方（`runtime.cli`、`channel.context`、`memory.store.*`、风控与书记员两个 `decision_roles`）仍是未清零或待补证，属后续 S2/S3 与第 6、7 组范围。
-  - 这是 dry-run：没有创建审批周期（`ats approval pending` 为空），也没有发提醒；写了旧 `cycles/decisions` 表一条 `chief-20261031-042253`（S2 之前读取方仍读旧表）和一份 Obsidian 报告 `首席决策-2026-10-31-0422.md`。主理人给出的是真实建议（EMERGENCY/derisk，卖出 GOOG、AVGO、NVDA，建议人工平三笔空头期权），没有执行。
+  - **更正（2026-10-31，S2 核对时发现，原文写得不对）：** 这次演练没有走完决策漏斗。它在“订单规范化”一步就以 `manual_review` 终结，原因是 `订单规范化拒绝（执行环境不可用）：business as_of is outside authorized window`（见 3.18）；没有走到风控审查和审批卡，所以 `ats approval pending` 为空不是“dry-run 不建周期”，而是周期已终结。审计表里有周期 `chief-20261031-042253`（`manual_review`、1 个修订）、旧 `cycles/decisions` 镜像各有对应行，`ats chief show` 读到的是审计表那一条（S2 的读取方改造早已随代码生效，不是 S2 之前读旧表）。另写了一份 Obsidian 报告 `首席决策-2026-10-31-0422.md`。主理人给出的是真实建议（EMERGENCY/derisk，卖出 GOOG、AVGO、NVDA，建议人工平三笔空头期权），没有执行。
   - 没有统计模型请求数（日志里没有汇总）；S5 的验证要求记录，届时需要加上。
 - **回退：** revert S1 提交并重启服务；路由日志只增不改。
+
+### 3.18 S2 核对与一处生产路径缺陷（2026-10-31，tasks 4.2）
+
+- **S2 的验证项（`ats chief show` 显示审计表的最近周期；旧表镜像写仍有新行）已满足：** 读取方改造（2.3）随代码已生效——`store.last_chief_run`、`recent_decisions` 读 `decision_cycles` 与 `decision_revisions`，`chief show` 显示的是审计表里的 `chief-20261031-042253`；`mirror_revision_to_legacy` 仍写旧 `cycles`、`decisions`，同一周期各有新行。S2 没有单独要“上线”的东西：S1–S3 的代码都在主仓库里，各进程重启（dispatcher 今天 12:19 已重启）即生效，每一步实际切换的是路由与调度。
+- **缺陷（演练暴露，隔离环境与测试看不到）：** 生产路径上，主理人周期在“订单规范化”一步必然被拒：`business as_of is outside authorized window`。
+  - **复现：** 在生产库副本上、替身模型、真实 TWS 读取，重跑同一路径，得到同样结果，并抓到调用栈：`risk_gate` 节点 → `normalize_orders` → `price_request("trader")` → `business_identity` → `check_time` 拒绝（`as_of` 04:41:31，范围 04:41:10 的单点）。
+  - **原因：** `runtime_reads.entry`（节点入口）在非隔离环境走 `select(...)`；主理人/风控/Trader 现在是整消费者路由（S1 刚切），整消费者路由回落到“计划自己的业务身份”，时间范围是入口时刻的单点（start=end）。`price_request` 在有父级读上下文时沿用父级范围，于是后面取快照、取报价用了十几到几十秒，当前时刻就落在单点之外。隔离环境走的是另一支（±5 分钟窗口），测试又冻结了评估时钟，所以都没发现。
+  - **波及：** 本次是 `trader` 的价格读取；同一机制可能影响 `ats approval approve` 的重新审查与批准后的执行前检查（它们也走节点入口与 `price_request`），**S3 之前必须查清**；`chief-daily`（S5）在修好前每次都会以 `manual_review` 终结。
+  - **没有改任何代码或生产状态。** 修法涉及“整消费者路由下读取窗口怎么界定”的设计取舍，先给方案由你审。
 
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
 

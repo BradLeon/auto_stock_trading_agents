@@ -61,7 +61,7 @@
 ## 4. 生产切换（每步需你批准；上线后重启 `com.ats.dispatcher`，用 `launchctl list` 确认 PID）
 
 - [x] 4.1 S1 上线主理人改读（2.1、2.2）：同时用 2.11 的命令切换 `chief`、`risk`、`trader`、`clerk` 的读路由（每个单独批准）。验证：重启后用一次手动 `ats chief run` 演练（不批准），确认上下文来自快照，`ats retirement zero` 显示 Chief 两条 zero
-- [ ] 4.2 S2 上线决策记录读取方迁移（2.3）。验证：`ats chief show` 显示审计表中的最近周期；旧表镜像写仍有新行
+- [x] 4.2 S2 上线决策记录读取方迁移（2.3）。验证：`ats chief show` 显示审计表中的最近周期；旧表镜像写仍有新行
 - [ ] 4.3 S3 上线审批与账本成对切换（2.4、2.5、2.6、2.9）。上线前后各跑一次 2.6 的核验脚本，把提交号写进 verification.md。验证：两次核验输出都为空；`ats approval pending` 可用
 - [ ] 4.4 S4 启用 `clerk-daily`：时间表改为 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume clerk-daily`。验证：第一次定时运行 complete；对账结果与 3.2 的演练差异一致或可解释；同一窗口手动重跑不产生新事实
 - [ ] 4.5 S5 启用 `chief-daily`：时间表改为 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume chief-daily`。验证：第一次定时运行要么建周期并在待审批处暂停、进程正常结束，要么以研究不完整终结并出缺口报告；记录实际模型请求数

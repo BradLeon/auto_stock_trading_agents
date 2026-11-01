@@ -16,6 +16,10 @@ from .runtime.execution_prices import ExecutionPrice, session_context
 
 POLICY_VERSION = "phase-f-execution-price-v1"
 PURPOSES = {"preapproval_normalization", "approved_execution_check"}
+# Half-width of the business window one price_request block reads under. The window is opened when the block
+# starts, so how long the node ran before it does not matter; it only has to cover the block's own quote reads.
+# Quote freshness is judged separately (`validate_quote`), so a wider window does not loosen prices.
+PRICE_READ_WINDOW_MINUTES = 10
 
 
 class PriceUnavailable(ValueError):
@@ -65,14 +69,16 @@ def price_request(consumer, orders, *, cycle_id, purpose, currency="USD", audit=
             raise PermissionError("execution_price_approval_required")
     parent = current_read_context()
     point = evaluation_now(UTC)
+    window = {"start": (point - timedelta(minutes=PRICE_READ_WINDOW_MINUTES)).isoformat(),
+              "end": (point + timedelta(minutes=PRICE_READ_WINDOW_MINUTES)).isoformat()}
     scope = {"kind": "decision", "id": cycle_id, "entities": list(symbols),
-             "time_range": {"start": (point - timedelta(minutes=5)).isoformat(),
-                            "end": (point + timedelta(minutes=5)).isoformat()},
-             "purpose": purpose, "currency": currency}
+             "time_range": window, "purpose": purpose, "currency": currency}
     if parent is not None:
-        # Preserve the originating request's frozen entity/time identity. Each role
-        # still gates its OWN domain/version/qualification, rather than borrowing Chief's.
-        scope = {**parent.identity.scope, "purpose": purpose, "currency": currency}
+        # Preserve the originating request's frozen entity identity. Each role still gates its OWN
+        # domain/version/qualification, rather than borrowing Chief's. The time window is this block's
+        # own: the parent's is a single instant taken when the node was entered, and a quote read after
+        # a slow portfolio snapshot would fall outside it.
+        scope = {**parent.identity.scope, "time_range": window, "purpose": purpose, "currency": currency}
         if not set(symbols) <= set(scope["entities"]):
             raise PermissionError("execution_price_order_escapes_business_scope")
     if parent is not None and parent.identity.scope.get("time_policy") == "per_invocation":

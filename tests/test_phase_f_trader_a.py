@@ -529,3 +529,25 @@ def test_target_weight_against_the_action_and_selling_unheld_stock_are_refused(e
                    {"GOOG": 60})
     assert prices.proposal_error("GOOG:no_position_to_sell")
     assert not prices.proposal_error("input_unavailable:IBKRUnavailable:execution_quote_source_timestamp_missing")
+
+
+@pytest.mark.parametrize("node_age", [timedelta(seconds=90), timedelta(minutes=30)])
+def test_price_request_window_is_its_own_not_the_nodes_entry_instant(execution, monkeypatch, node_age):
+    """A node bound on a consumer-wide route carries a single-instant window taken at entry. A quote read after a
+    slow portfolio snapshot must not fall outside it: each price_request block opens its own window."""
+    from types import SimpleNamespace
+
+    from ats.workflow import runtime_reads
+    from ats.workflow.scoped_routes import RouteIdentity
+
+    order = TradeDecision(symbol="AAPL", action="buy", qty=1)
+    entered = datetime.now(UTC) - node_age
+    contract = runtime_reads._consumer_contract("risk")
+    parent = SimpleNamespace(identity=RouteIdentity(
+        contract["domain_id"], "risk", contract["contract_version"],
+        {"kind": "decision", "id": "pending", "entities": ["AAPL"],
+         "time_range": {"start": entered.isoformat(), "end": entered.isoformat()}}))
+    monkeypatch.setattr(runtime_reads, "current_read_context", lambda: parent)
+    # Entering the block binds the identity and checks its window against now: the refusal was raised here.
+    with prices.price_request("trader", [order], cycle_id="pending", purpose="preapproval_normalization"):
+        pass

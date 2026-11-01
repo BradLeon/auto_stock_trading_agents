@@ -65,7 +65,7 @@
 - [x] 4.3 S3 上线审批与账本成对切换（2.4、2.5、2.6、2.9）。上线前后各跑一次 2.6 的核验脚本，把提交号写进 verification.md。验证：两次核验输出都为空；`ats approval pending` 可用
 - [ ] 4.4 S4 启用 `clerk-daily`：时间表改为 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume clerk-daily`。验证：第一次定时运行 complete；对账结果与 3.2 的演练差异一致或可解释；同一窗口手动重跑不产生新事实
 - [ ] 4.5 S5 启用 `chief-daily`：时间表改为 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume chief-daily`。验证：第一次定时运行要么建周期并在待审批处暂停、进程正常结束，要么以研究不完整终结并出缺口报告；记录实际模型请求数
-- [ ] 4.6 OPERATIONS 第 7 节改为“交易路径（已切换，实盘锁定）”，ARCHITECTURE §6 实施状态同步。验证：文档描述与 `launchctl list`、`ats approval pending` 的实际输出一致
+- [x] 4.6 OPERATIONS 第 7 节改为“交易路径（已切换，实盘锁定）”，ARCHITECTURE §6 实施状态同步。验证：文档描述与 `launchctl list`、`ats approval pending` 的实际输出一致
 
 ## 5. 观察窗口（design.md D8）
 

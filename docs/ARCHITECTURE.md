@@ -471,8 +471,8 @@ stateDiagram-v2
 | 六个研究分析师（§7.2） | 已按本文契约实现，产出 §7.1 的 Task Projection |
 | 读取 | 六个分析师读数据产品；数据产品在发布时和每次任务执行前检查，不合格只告警并阻断该任务 |
 | 调度（§8、§13） | 7 个研究工作流由 Dispatcher 常驻进程按时间表与日历事件运行，只跑研究、不进 Chief、不下单；财报日历与 FactSet 月末摄入由数据刷新控制器负责，日历上来源冲突的那一条备选说法被挡住待人工裁决（已采用的一条继续生效） |
-| Chief—Risk—Boss—Trader（§5、§10） | 多轮 Loop、不可变 revision 与审批绑定已实现；**读路由、审计表读取、命令行审批已切换（2026-11-01，S1–S3）**：Chief 目前只手动运行，`chief-daily` 暂缓，实盘锁定，任一时刻只有一条可执行真实交易的入口 |
-| Clerk（§11） | 已实现；Clerk 每日对账（`clerk-daily`）已由 Dispatcher 排程（2026-11-01 起）；主理人每日决策（`chief-daily`）待启用 |
+| Chief—Risk—Boss—Trader（§5、§10） | 多轮 Loop、不可变 revision 与审批绑定已实现；**读路由、审计表读取、命令行审批已切换（2026-11-01，S1–S3），`chief-daily` 已启用（2026-11-02，S5）**：实盘锁定，任一时刻只有一条可执行真实交易的入口 |
+| Clerk（§11） | 已实现；Clerk 每日对账（`clerk-daily`）已由 Dispatcher 排程（2026-11-01 起）；主理人每日决策（`chief-daily`）已由 Dispatcher 排程（2026-11-02 起） |
 | 旧实现 | 在册 41 条，已退役 20 条：研究侧的旧手动入口与命名、旧分析代码（含只被旧入口用到的 Risk 代码）、层级 allocation 字段、旧调度流程等。其余 21 条未退：1 条是研究所有者的 `legacy` 取值（已由 `pause` / `resume` 取代对外用法，内部取值保留，另案取消）；20 条跟交易路径绑定（Chief 对旧表的直读、切换期工具与读路由机制、旧订单 id 推导等），门是 `trade_path_cutover`，由交易路径切换的 change 接手。逐条状态见 [`PHASE_F_RETIREMENT_RUNBOOK.md`](PHASE_F_RETIREMENT_RUNBOOK.md) 与 `ats retirement decide` |
 
 ## 7. Agent 详细职责和输入输出契约

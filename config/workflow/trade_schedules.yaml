@@ -18,7 +18,7 @@ workflows:
     # picked up by the Clerk's own missed-window register, and one window is idempotent.
     cron: {day_of_week: "mon-fri", hour: 16, minute: 30, timezone: America/New_York}
   chief-daily:
-    enabled: false      # S5
+    enabled: true       # S5, switched on 2026-11-02 (user: "现在启用")
     consumer: chief
     scope: {kind: portfolio, id: portfolio}
     # An hour after the open, which is evening in Taipei: the cycle waits for the Boss' approval that night.

@@ -612,6 +612,14 @@
 - **没有完成的验证（阻塞点 B2）：** 第一次定时运行（11-02 周一 16:30 纽约）complete、对账差异与 3.2 一致或可解释、同窗口手动重跑不产生新事实，三项待周一收盘后核对。
 - **没有启用 `chief-daily`（阻塞点 B1）：** 批准时重审存下来的报价必然被判过期（30 秒），详见 `blockers-2026-11-01.md`。
 
+### 3.20 B1、B4 修复与 S5 上线记录（2026-11-01～02，tasks 4.5、4.6）
+
+- **B1（`5f38b8b`）：** 你的裁决：“决策重要的是方向和仓位管理，价格是否实时很难要求，一定价差也能接受。方案 1 就好；批准时的‘漂移预检’也没必要，超过 1% 的价格波动也属正常。”风控复核存下来的报价只验绑定（`quote_ref` 哈希、来源、精度、买卖价存在），不验 30 秒年龄与开盘；新取报价的规则不变；没有新增漂移预检。相关 267 例通过。周末无真实开盘报价，没能在真实开盘时做端到端批准。
+- **B4（`d0da96a`）：** `reqCompletedOrders` 一度不应答（`apiOnly` 真假都不回，`reqAllOpenOrders`、`reqExecutions` 正常），`ib_async` 的 `RequestTimeout` 默认 0＝永远等，`clerk run --dry-run` 卡死 27 分钟。你的裁决：两步各 30 秒超时、两步都完成才写、失败记 `failed`。`get_fills`、`completed_orders` 各自有界；`reconcile` 报的读失败计入 `clerk_run` 状态，同窗口可重跑；超时消息不含 “broker unavailable”，以免登记 30 天永久缺口。broker/clerk/reconcile 相关 145 例通过。重试时 TWS 已应答（生产库副本，整轮 completed），超时路径只被单测覆盖；不应答原因未明，待你提供 TWS API 日志。
+- **S5（4.5）：** 你的批准：“现在启用”（答复“要我现在启用 chief-daily（S5）吗？”，2026-11-02）。`trade_schedules.yaml` 的 `chief-daily` 改为 `enabled: true` → `ats dispatch resume --workflow chief-daily`（健康检查 `ok`，owner-log 记 `legacy → dispatcher`，批准原话在日志里）→ 重启 `com.ats.dispatcher`（PID 61048）；启动日志 `workflows=…,clerk-daily,chief-daily`。
+- **没有完成的验证：** `chief-daily` 第一次定时运行（11-02 周一 10:30 纽约，台北 23:30）：要么建周期并在待审批处暂停，要么以研究不完整终结；模型请求数仍没有统计方法，不能给出数。`clerk-daily` 的首次定时运行（11-02 16:30 纽约）也未观察。所以 4.4、4.5 没有勾。
+- **文档（4.6）：** OPERATIONS 第 7 节、ARCHITECTURE §6 已改成 S1–S5 的实际状态；与 `launchctl list`（`com.ats.dispatcher` PID 61048、`com.ats.serve`、`com.ats.data-refresh`）、`ats approval pending`（无待审批周期）一致，4.6 已勾。`data-refresh` 最近一次退出码为 1（日志是周期任务的 misfire 清单），与本变更无关，未处理。
+
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
 
 **测量条件：** 提交号 `173fac0` 加工作区未提交改动；日期 2026-10-28；命令 `uv run pytest -q --tb=short -p no:randomly <文件> --junitxml=var/test_runs/switch-3.1-<组>.xml`；日志在同目录同名 `.log`。**未提交的工作区，最终提交后要复测。**

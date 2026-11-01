@@ -201,10 +201,10 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 真不一致时，被挡住的是另一来源那一条（`conflict`），日历里该事件仍按已采用的一条（通常是 Finnhub）存在；
 挂起的只是一条备选说法，距离财报日还远时可以不处理，临近时对照公司公告核一次，不一致再 `override`。
 
-## 7. 交易路径（已切换 S1–S4；`chief-daily` 暂缓；实盘锁定）
+## 7. 交易路径（已切换 S1–S5；实盘锁定）
 
-- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 的读路由已切到新路由（S1），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 16:30 纽约）。**`chief-daily` 仍停用**：它依赖的两处缺陷待你裁决，见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
-- Chief 目前只能手动运行：
+- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 的读路由已切到新路由（S1），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 16:30 纽约）。**`chief-daily` 已启用**（S5，2026-11-02，交易日 10:30 纽约；第一次定时运行是 11-02 台北 23:30，尚未观察）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
+- Chief 每个交易日由 `chief-daily` 自动跑一次；也可手动运行：
 
   ```bash
   ats chief run --channel pending   # 默认 dry-run；不要加 --live 或 --yes
@@ -218,7 +218,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ### 7.1 切换后的操作
 
-> **状态：** S1–S4 已生效；`chief-daily`（下表第二行）尚未启用，其余描述按它启用后的样子写。
+> **状态：** S1–S5 已生效；两个定时工作流的第一次定时运行都还没观察到（`clerk-daily` 11-02 16:30 纽约，`chief-daily` 11-02 10:30 纽约）。
 > 各步见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3。
 
 **现状事实（切换后）**
@@ -276,8 +276,7 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 每一条是一次切换或回退，看这几个字段就够了：`workflow`（哪个工作流）、`action`（`switch` 切过去 / `rollback` 切回）、`from_owner → to_owner`、`at`（时间）。
 一个工作流**当前**归谁，看它在日志里的**最后一条**。`approval` 字段原样记录你当时授权这次切换的回复，因为切换负责人是生产变更，
 日志要留下"谁批准的"的证据，所以读起来像聊天记录；它不参与工作流的运行。现在日志里有 7 个研究工作流（`information-brief`、`fundamental-routine`、`fundamental-event`、
-`technical-review`、`macro-review`、`layer-review`、`sector-review`），最后一条都是 `dispatcher`。**`chief-daily` 和 `clerk-daily` 不在日志里**，说明它们还没有被切换过，
-也就是停用状态；S4、S5 上线后它们才会出现新的 `switch` 记录，并带着你的批准原话。
+`technical-review`、`macro-review`、`layer-review`、`sector-review`），最后一条都是 `dispatcher`。`clerk-daily` 与 `chief-daily` 在 S4、S5 启用时各有一条 `resume` 记录，带着你的批准原话（`ats dispatch owner-log` 看最后一条确认当前负责人）。
 
 **回退**
 

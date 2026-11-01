@@ -4,7 +4,8 @@ version: "1"
 # resuming one never touches the other. Both start `enabled: false`: with that, nothing is registered with the
 # scheduler, they are not in the expected-trigger set, and a running dispatcher is unchanged. They are turned
 # on one at a time (switch-trade-path-and-retire-r5 S4, S5), each with the user's approval:
-# `enabled: true` -> restart `com.ats.dispatcher` -> `ats dispatch resume <workflow>`.
+# `enabled: true` -> `ats dispatch resume <workflow>` -> restart `com.ats.dispatcher` (it registers trade workflows
+# at start-up by owner, so the restart must come after the resume).
 #
 # Both run only on NYSE trading sessions. The owner of a workflow that is switched off is `legacy`
 # (externally: paused); `ats dispatch pause/resume` moves it.

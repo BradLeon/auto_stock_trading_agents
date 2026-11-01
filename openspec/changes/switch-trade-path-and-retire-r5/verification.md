@@ -603,6 +603,15 @@
   - **波及：** 本次是 `trader` 的价格读取；同一机制可能影响 `ats approval approve` 的重新审查与批准后的执行前检查（它们也走节点入口与 `price_request`），**S3 之前必须查清**；`chief-daily`（S5）在修好前每次都会以 `manual_review` 终结。
   - **没有改任何代码或生产状态。** 修法涉及“整消费者路由下读取窗口怎么界定”的设计取舍，先给方案由你审。
 
+### 3.19 S3、S4 上线记录与读取窗口修复（2026-11-01，tasks 4.3、4.4）
+
+- **你的批准：** 2026-11-01 外出前：“你自行把 S4.2-S4.6 全部完成吧。如果遇到问题或者阻塞点，先记录下来，等我回来供我一齐审阅。”（`ats dispatch resume` 的批准原文引用了这句话。）
+- **读取窗口修复（`8ac7111`，你选定方案 A、±10 分钟）：** 见 3.18。修复后在生产库副本上重跑（替身模型、真实 TWS 读取、合成报价）：周期越过订单规范化，经两轮风控到 `pending_approval`；`approve` 在副本上 18.7 秒完成，终态 `approved_not_executed:dry_run`。
+- **S3（4.3）：** 审批与账本成对切换的代码早已随主仓库生效，没有单独要上线的内容。`scripts/verify_decision_table_reads.py`：上线前（`a961147`）与上线后（`8ac7111`）各跑一次，输出都为空、退出码 0；`ats approval pending` 可用（无待审批周期时显示空）。
+- **S4（4.4）：** `config/workflow/trade_schedules.yaml` 的 `clerk-daily` 改为 `enabled: true`（`28faa69`）→ `ats dispatch resume --workflow clerk-daily`（健康检查 `ok`，owner-log 记 `legacy → dispatcher`，generation 2）→ 重启 `com.ats.dispatcher`（PID 45487），`dispatcher.err.log` 的启动行含 `clerk-daily`。**顺序更正：** 必须先 `resume` 再重启；第一次重启发生在 `resume` 之前，日志里没有 `clerk-daily`，`resume` 后再重启才出现。
+- **没有完成的验证（阻塞点 B2）：** 第一次定时运行（11-02 周一 16:30 纽约）complete、对账差异与 3.2 一致或可解释、同窗口手动重跑不产生新事实，三项待周一收盘后核对。
+- **没有启用 `chief-daily`（阻塞点 B1）：** 批准时重审存下来的报价必然被判过期（30 秒），详见 `blockers-2026-11-01.md`。
+
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
 
 **测量条件：** 提交号 `173fac0` 加工作区未提交改动；日期 2026-10-28；命令 `uv run pytest -q --tb=short -p no:randomly <文件> --junitxml=var/test_runs/switch-3.1-<组>.xml`；日志在同目录同名 `.log`。**未提交的工作区，最终提交后要复测。**

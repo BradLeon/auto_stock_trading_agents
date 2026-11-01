@@ -201,24 +201,25 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 真不一致时，被挡住的是另一来源那一条（`conflict`），日历里该事件仍按已采用的一条（通常是 Finnhub）存在；
 挂起的只是一条备选说法，距离财报日还远时可以不处理，临近时对照公司公告核一次，不一致再 `override`。
 
-## 7. 交易路径（尚未切换）
+## 7. 交易路径（已切换 S1–S4；`chief-daily` 暂缓；实盘锁定）
 
-- Chief、风控主管、Boss 审批、Trader、Clerk **尚未切换，也没有定时排程**。Chief 只能手动运行：
+- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 的读路由已切到新路由（S1），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 16:30 纽约）。**`chief-daily` 仍停用**：它依赖的两处缺陷待你裁决，见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
+- Chief 目前只能手动运行：
 
   ```bash
-  ats chief run --channel feishu_bot   # 默认 dry-run，推飞书审批卡；绝不要加 --yes
+  ats chief run --channel pending   # 默认 dry-run；不要加 --live 或 --yes
   ats chief show
   ```
 
-- 审批卡上是签名链接（不是飞书原生回调），点击后由 `com.ats.serve` 校验签名并恢复执行。
+- 审批只在命令行完成（`ats approval`），没有飞书审批卡，也没有签名链接；`com.ats.serve` 不参与审批。
 - 实盘锁定：`ats live gate` 在没有授权引用时返回 `refused / no_live_authorisation`。实盘授权库里有一行来源
-  未核实的 `LIVE-X`，在核实前不得把它当作实盘授权。
+  未核实（已作废）的 `LIVE-X`，不得把它当作实盘授权。
 - **`--yes`（自动批准）在实盘环境绝对不能用。** 系统里记录的止损价只是声明，不会在券商挂真实止损单。
 
-### 7.1 切换后的操作（草稿，随 S3 上线生效；生效时用本小节替换上文）
+### 7.1 切换后的操作
 
-> **状态：草稿。** 在 `switch-trade-path-and-retire-r5` 的 S3 上线前，上文仍是现状。本小节随各步上线逐段生效，
-> 每一步都需要你批准（见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3）。
+> **状态：** S1–S4 已生效；`chief-daily`（下表第二行）尚未启用，其余描述按它启用后的样子写。
+> 各步见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3。
 
 **现状事实（切换后）**
 
@@ -234,7 +235,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | `clerk-daily` | 16:30 纽约 | 对账：把成交与持仓写入账本（只认审计表） |
 | `chief-daily` | 10:30 纽约（台北晚上） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
 
-两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → 重启 `com.ats.dispatcher` → `ats dispatch resume --workflow <id> ...`（第 3.4 节），每一步都需要你批准。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
+两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → `ats dispatch resume --workflow <id> ...`（第 3.4 节）→ **最后**重启 `com.ats.dispatcher`，并用 `launchctl list` 确认新 PID、看 `var/logs/dispatcher.err.log` 里的 `dispatcher started: workflows=…` 一行含该工作流。每一步都需要你批准。**必须先 `resume` 再重启**：Dispatcher 在启动时才按负责人决定注册哪些交易工作流，`resume` 前启动的进程不会注册它（2026-11-01 启用 `clerk-daily` 时核实）。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
 
 **审批：查看 → 批准 / 修改 / 拒绝**
 

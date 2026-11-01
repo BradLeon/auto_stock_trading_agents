@@ -10,7 +10,7 @@ version: "1"
 # (externally: paused); `ats dispatch pause/resume` moves it.
 workflows:
   clerk-daily:
-    enabled: false      # S4
+    enabled: true       # S4, switched on 2026-11-01 (user approved S4.2–S4.6 to be completed in their absence)
     consumer: clerk
     scope: {kind: portfolio, id: portfolio}
     # After the close: the ledger window runs from the last successful reconcile to today; a missed day is

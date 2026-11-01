@@ -36,6 +36,24 @@ class IBKRUnavailable(RuntimeError):
     """Raised when TWS/Gateway cannot be reached or the API is disabled."""
 
 
+# ib_async waits forever on a blocking request unless RequestTimeout is set, and TWS may simply never
+# answer one (reqCompletedOrders did not on 2026-11-01). The ledger reads below must fail, not hang.
+LEDGER_READ_TIMEOUT_SECONDS = 30.0
+
+
+def _bounded(ib, what: str, call):
+    """Run one blocking ledger read with a deadline; no answer in time is `IBKRUnavailable`.
+
+    The message deliberately avoids "broker unavailable": the Clerk reads that phrase as "TWS cannot be
+    reached" and registers permanent reconciliation gaps for it. One unanswered request is not that."""
+    ib.RequestTimeout = LEDGER_READ_TIMEOUT_SECONDS
+    try:
+        return call()
+    except TimeoutError as exc:
+        raise IBKRUnavailable(
+            f"{what} request got no answer from TWS within {LEDGER_READ_TIMEOUT_SECONDS:g}s (timed out)") from exc
+
+
 # client ids held by connections open in THIS process right now. The pid offset keeps
 # processes apart; this keeps concurrent connections inside one process apart (the
 # Dispatcher runs Technical, Chief and Clerk in one process, possibly at once).
@@ -315,7 +333,7 @@ class IBKRBroker:
 
         out: list[dict] = []
         with self.session() as ib:
-            ib.reqExecutions()
+            _bounded(ib, "executions", ib.reqExecutions)
             ib.sleep(1.5)
             for f in ib.fills():
                 ex, cr = f.execution, f.commissionReport
@@ -346,7 +364,7 @@ class IBKRBroker:
         """
         out: list[dict] = []
         with self.session() as ib:
-            ib.reqCompletedOrders(apiOnly=False)
+            _bounded(ib, "completed orders", lambda: ib.reqCompletedOrders(apiOnly=False))
             ib.sleep(1.5)
             for t in list(ib.trades()) + list(getattr(ib, "completedTrades", lambda: [])()):
                 st, o = t.orderStatus, t.order

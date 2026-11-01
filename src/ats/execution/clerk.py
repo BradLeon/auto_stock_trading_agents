@@ -195,7 +195,11 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     # This decides whether uncovered windows can still be reconciled later
     # (3.7) or must be registered as permanent gaps now.
     rec_summary = results.get("reconcile") or {}
-    rec_errors = " ".join(rec_summary.get("errors", [])) if isinstance(rec_summary, dict) else ""
+    rec_error_list = rec_summary.get("errors", []) if isinstance(rec_summary, dict) else []
+    rec_errors = " ".join(rec_error_list)
+    # `reconcile` reports a failed read in its summary instead of raising. A window whose ledger was
+    # not reconciled is not complete: recording it as such would make a rerun reuse it and skip the work.
+    errors.extend(f"reconcile: {e}" for e in rec_error_list)
     all_errors = errors + [rec_errors]
     broker_available = not any(
         ("IBKR" in e) or ("broker unavailable" in e) for e in all_errors)

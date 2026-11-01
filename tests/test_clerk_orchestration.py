@@ -190,3 +190,68 @@ def test_failed_step_is_recorded_and_run_marked_failed(store, monkeypatch):
     assert trail["status"] == "failed" and "marks" in trail["error"]
     # the other steps still ran
     assert "reconcile" in out["steps"]
+
+
+# --------------------------------------------------------------------------- #
+# A ledger read that gets no answer fails the run; it neither hangs nor counts as complete
+# --------------------------------------------------------------------------- #
+
+class _DeafCompletedOrders(_FakeBroker):
+    def completed_orders(self):
+        from ats.broker.ibkr import IBKRUnavailable
+
+        raise IBKRUnavailable("completed orders request got no answer from TWS within 30s (timed out)")
+
+
+def test_unreconciled_window_is_failed_not_completed_and_can_be_rerun(store):
+    _seed_system_order(store)
+    out = clerk.clerk_run(store=store, broker=_DeafCompletedOrders([_fill("f1")]))
+    assert out["status"] == "failed"
+    assert any(e.startswith("reconcile:") and "timed out" in e for e in out["errors"])
+    # TWS is reachable, one request went unanswered: no permanent gaps are registered for that
+    assert out["gaps_registered"] == 0
+    # all-or-nothing: the fills read before the failing read were not written either
+    assert store.conn.execute("SELECT COUNT(*) n FROM fills").fetchone()["n"] == 0
+    # a failed window is not reused: the rerun on the same window does the work
+    again = clerk.clerk_run(store=store, broker=_FakeBroker([_fill("f1")]))
+    assert again["reused"] is False and again["status"] == "completed"
+    assert store.conn.execute("SELECT COUNT(*) n FROM fills").fetchone()["n"] == 1
+
+
+def test_ledger_reads_are_bounded_and_an_unanswered_one_is_unavailable(monkeypatch):
+    import contextlib
+
+    from ats.broker import ibkr
+
+    class _IB:
+        RequestTimeout = 0
+
+        def __init__(self, hang):
+            self.hang = hang
+
+        def reqExecutions(self):
+            if self.hang == "executions":
+                raise TimeoutError
+            return []
+
+        def reqCompletedOrders(self, apiOnly):
+            if self.hang == "completed":
+                raise TimeoutError
+            return []
+
+        def sleep(self, _):
+            pass
+
+        def fills(self):
+            return []
+
+        def trades(self):
+            return []
+
+    for hang, method in (("executions", "get_fills"), ("completed", "completed_orders")):
+        ib = _IB(hang)
+        broker = ibkr.IBKRBroker.__new__(ibkr.IBKRBroker)
+        broker.session = lambda *a, ib=ib, **k: contextlib.nullcontext(ib)
+        with pytest.raises(ibkr.IBKRUnavailable, match="timed out"):
+            getattr(broker, method)()
+        assert ib.RequestTimeout == ibkr.LEDGER_READ_TIMEOUT_SECONDS

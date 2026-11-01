@@ -551,3 +551,54 @@ def test_price_request_window_is_its_own_not_the_nodes_entry_instant(execution, 
     # Entering the block binds the identity and checks its window against now: the refusal was raised here.
     with prices.price_request("trader", [order], cycle_id="pending", purpose="preapproval_normalization"):
         pass
+
+
+def test_reference_quote_drops_only_age_and_session_rules(monkeypatch):
+    """A stored quote reviewed again at approval keeps every rule about the quote itself; only its age and
+    whether the market is open now no longer count."""
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, now - timedelta(days=1)))
+    old = datetime.now(UTC) - timedelta(hours=3)
+    stored = quote(source_as_of=old, queried_at=old)
+    with pytest.raises(prices.PriceUnavailable, match="outside_regular_session"):
+        prices.validate_quote(stored, symbol="AAPL")
+    assert prices.validate_quote(stored, symbol="AAPL", as_reference=True).bid == 100.
+    for changes, reason in [({"bid": float("nan")}, "price_invalid"), ({"currency": "EUR"}, "currency_mismatch"),
+                            ({"symbol": "NVDA"}, "symbol_mismatch"), ({"market_data_mode": "delayed"}, "not_current"),
+                            ({"price_kind": "last"}, "not_current"), ({"ask": 110}, "spread_invalid"),
+                            ({"min_size": 0}, "precision_missing"), ({"session": "pre"}, "outside_regular_session")]:
+        with pytest.raises(prices.PriceUnavailable, match=reason):
+            prices.validate_quote(quote(source_as_of=old, queried_at=old, **changes), symbol="AAPL",
+                                  as_reference=True)
+
+
+def test_review_of_a_stored_quote_does_not_age_out(execution, monkeypatch):
+    """The approval-time review reads the quote stored on the revision; an hour later it must still pass, while
+    the hash binding is still enforced."""
+    from ats.risk import checks as risk_checks
+
+    state = ready_state(execution)
+    decisions = list(state.decisions)
+    assert decisions[0].execution_basis
+    from ats.workflow import evaluation_clock
+
+    monkeypatch.setattr(evaluation_clock, "_now", lambda tz: datetime.now(tz) + timedelta(hours=1))
+    review = risk_checks.review_revision(decisions, execution.pf, cycle_id=state.cycle_id)
+    assert review.verdict == "approved", review.notes
+    tampered = decisions[0].model_copy(update={"execution_basis": {
+        **decisions[0].execution_basis, "quote_ref": "execution-quote:" + "0" * 64}})
+    review = risk_checks.review_revision([tampered], execution.pf, cycle_id=state.cycle_id)
+    assert review.verdict != "approved"
+
+
+def test_fresh_reads_ignore_the_reference_flag(execution, monkeypatch):
+    """Only a risk review of stored quotes may ask for reference validation; the trader's fresh read of a stale
+    quote is refused even if its scope carries the flag."""
+    old = datetime.now(UTC) - timedelta(minutes=10)
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",
+                        lambda symbol, **kw: quote(symbol=symbol, source_as_of=old, queried_at=old))
+    order = TradeDecision(symbol="AAPL", action="buy", qty=1)
+    with prices.price_request("trader", [order], cycle_id="pending", purpose="preapproval_normalization"):
+        scope = {"kind": "execution_price", "entity": "AAPL", "currency": "USD", "cycle_id": "pending",
+                 "purpose": "preapproval_normalization", "reference_quote": True}
+        packet = read_input("trader", "MARKET_DATA", scope=scope)
+    assert packet.status != "complete" and "quote_stale" in ";".join(packet.gaps)

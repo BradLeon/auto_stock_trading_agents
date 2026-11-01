@@ -211,13 +211,16 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 gaps.append("source_timestamp_or_reconciliation_missing")
         elif product == "MARKET_DATA":
             if scope.get("kind") == "execution_price":
-                from .execution_prices import quote_ref, runtime_quote, validate_quote
+                from .execution_prices import fixed_quotes_active, quote_ref, runtime_quote, validate_quote
 
                 overnight = bool(scope.get("overnight"))
                 if overnight and scope["purpose"] != "preapproval_normalization":
                     raise ValueError("historical_close_for_execution_refused")
+                # Only a risk review of orders that carry their stored quote may validate it as a reference; a
+                # freshly read quote (normalization, execution check) is always validated in full.
                 quote = validate_quote(runtime_quote(scope),
-                    symbol=scope["entity"], currency=scope["currency"], overnight=overnight)
+                    symbol=scope["entity"], currency=scope["currency"], overnight=overnight,
+                    as_reference=bool(scope.get("reference_quote")) and fixed_quotes_active())
                 payload, status = quote, "complete"
                 refs = [quote_ref(quote)]
                 stamps = [quote.source_as_of.isoformat()]

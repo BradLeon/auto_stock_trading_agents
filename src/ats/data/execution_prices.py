@@ -136,7 +136,20 @@ def runtime_quote(scope):
                                  overnight=bool(scope.get("overnight")))
 
 
-def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
+def fixed_quotes_active() -> bool:
+    """True only inside a risk review of orders that already carry their normalized quote."""
+    return _FIXED_QUOTES.get() is not None
+
+
+def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, as_reference=False):
+    """Fail closed on a quote that cannot be priced from.
+
+    `as_reference` is for the quote stored in an approved-to-be revision when it is reviewed again later (at
+    approval): it keeps every rule about what the quote itself is (schema, symbol, currency, source, precision,
+    live bid/ask or session close, spread) and drops only the two that ask how long ago it was taken — its age and
+    whether the market is open now. Whether the price still holds is judged where an order is handed to the broker
+    (`check_execution`), on a freshly read quote that this function validates in full.
+    """
     q = ExecutionPrice.model_validate(quote)
     point = now or evaluation_now(UTC)
     if q.schema_version != "runtime-execution-price-v1":
@@ -156,13 +169,15 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
             or (q.source_as_of - point).total_seconds() > 2 \
             or (q.queried_at - point).total_seconds() > 2:
         raise PriceUnavailable("quote_timestamp_future")
-    try:
-        regular, last_close = session_context(point)
-    except Exception as exc:
-        raise PriceUnavailable("calendar_unavailable") from exc
-    age = (point - q.source_as_of).total_seconds()
+    regular, last_close, age = True, q.source_as_of, 0.0
+    if not as_reference:
+        try:
+            regular, last_close = session_context(point)
+        except Exception as exc:
+            raise PriceUnavailable("calendar_unavailable") from exc
+        age = (point - q.source_as_of).total_seconds()
     if overnight:
-        if (regular or q.price_kind != "previous_session_close"
+        if (regular and not as_reference or q.price_kind != "previous_session_close"
                 or q.session != "previous_completed_regular"
                 or q.market_data_mode != "historical"
                 or q.source_precision != "session_date"
@@ -184,7 +199,8 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
     return q
 
 
-def read_price(consumer, decision, *, overnight=False):
+def read_price(consumer, decision, *, overnight=False, as_reference=False):
+    """`as_reference` reads the quote stored on `decision` (risk review only) and validates it as a reference."""
     from .consumer_api import read_input
 
     request = _REQUEST.get()
@@ -194,11 +210,13 @@ def read_price(consumer, decision, *, overnight=False):
              "currency": request.currency, "cycle_id": request.cycle_id,
              "purpose": request.purpose, "overnight": overnight,
              "approval_quote_ref": decision.execution_basis.get("quote_ref")}
+    if as_reference:
+        scope["reference_quote"] = True
     packet = read_input(consumer, "MARKET_DATA", scope=scope)
     if packet.status != "complete":
         raise PriceUnavailable(";".join(packet.gaps))
     return validate_quote(packet.payload, symbol=decision.symbol, currency=request.currency,
-                          overnight=overnight)
+                          overnight=overnight, as_reference=as_reference)
 
 
 def directional_price(quote, action):

@@ -205,7 +205,9 @@ def review_revision(
             try:
                 with price_request("risk", orders, cycle_id=cycle_id or portfolio_snapshot_id(portfolio),
                                    purpose="preapproval_normalization", currency=portfolio.base_currency):
-                    q = read_price("risk", decision, overnight=bool(
+                    # The quote stored on the revision, reviewed again (e.g. at approval): its binding is checked
+                    # (hash below), not how long ago it was taken; the execution check reads a fresh one.
+                    q = read_price("risk", decision, as_reference=True, overnight=bool(
                         decision.execution_basis.get("defer_to_regular_session")))
                 if quote_ref(q) != decision.execution_basis.get("quote_ref"):
                     raise ValueError("review_quote_hash_mismatch")

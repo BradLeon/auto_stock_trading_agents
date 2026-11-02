@@ -36,6 +36,60 @@ from .briefs import (cluster_key, cluster_summary, clocks_for,
 
 log = logging.getLogger("ats.agents.information.extract")
 
+
+class ArticleExtractionError(ValueError, RuntimeError):
+    """One article could not be turned into valid insights: the model answered, but not with usable content.
+
+    Examples: a required field missing, an evidence span that does not resolve in the source. The article is at
+    fault (or the model's answer for it), not the service, so the Information run may skip it and publish the rest
+    with the gap disclosed. It stays a `ValueError` and a `RuntimeError` so callers that caught either still do.
+    """
+
+
+class TransientExtractionError(RuntimeError):
+    """The model service did not answer (connection, timeout, rate limit, 5xx); the article itself is not at fault.
+
+    Skipping it would silently drop news, so the whole target fails and the dispatcher retries it later.
+    """
+
+
+def _causes(exc: BaseException):
+    seen = set()
+    while exc is not None and id(exc) not in seen and len(seen) < 8:
+        seen.add(id(exc))
+        yield exc
+        exc = exc.__cause__ or exc.__context__
+
+
+def classify_extraction_failure(exc: BaseException) -> str:
+    """'transient' (service did not answer), 'content' (answer unusable) or 'unknown' (treated as a whole failure)."""
+    import ssl
+
+    import httpx
+    import openai
+    from langchain_core.exceptions import OutputParserException
+    from pydantic import ValidationError
+
+    transient = (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError,
+                 httpx.TransportError, ssl.SSLError, ConnectionError, TimeoutError)
+    chain = list(_causes(exc))
+    if any(isinstance(item, transient) for item in chain):
+        return "transient"
+    if any(isinstance(item, (ValidationError, OutputParserException, json.JSONDecodeError))
+           or (isinstance(item, RuntimeError) and "structured output empty" in str(item)) for item in chain):
+        return "content"
+    return "unknown"
+
+
+def _extraction_failure(art_id: str, exc: BaseException) -> RuntimeError:
+    message = f"Information extraction failed for {art_id}"
+    kind = classify_extraction_failure(exc)
+    if kind == "transient":
+        return TransientExtractionError(message)
+    if kind == "content":
+        return ArticleExtractionError(message)
+    return RuntimeError(message)
+
 _DIRECTIONS = {"bullish", "bearish", "neutral"}
 _IMPACT_PATHS = {"direct", "supply_chain", "competitive", "demand", "macro"}
 _MAX_QUOTE_CHARS = 400
@@ -232,8 +286,15 @@ def _extract(art: Article, universe_card: str, universe: set[str],
              diagnostics: dict | None = None, deadline: float | None = None,
              evidence_first: bool = True) -> list[Insight]:
     if assess_materiality and evidence_first:
-        return _extract_evidence_first(art, universe, max_chars, target=target,
-                                      diagnostics=diagnostics, deadline=deadline)
+        if not target or target not in universe:
+            raise ValueError('Evidence-first extraction requires one authorized target')
+        try:
+            return _extract_evidence_first(art, universe, max_chars, target=target,
+                                          diagnostics=diagnostics, deadline=deadline)
+        except ArticleExtractionError:
+            raise
+        except ValueError as exc:
+            raise ArticleExtractionError(str(exc)) from exc
     text_view, ctx, schema = extraction_input(art, universe_card, max_chars,
                                               assess_materiality=assess_materiality, target=target)
     try:
@@ -241,12 +302,17 @@ def _extract(art: Article, universe_card: str, universe: set[str],
                                                 skill_slug="research-insight")
     except Exception as exc:  # noqa: BLE001
         log.warning("information extraction failed for %s: %s", art.id, exc)
-        raise RuntimeError(f"Information extraction failed for {art.id}") from exc
+        raise _extraction_failure(art.id, exc) from exc
 
     if diagnostics is not None:
         diagnostics['empty_reason'] = getattr(view, 'empty_reason', '')
-    return validate_extraction(art, text_view, view, universe, max_chars,
-                               assess_materiality=assess_materiality, universe_card=universe_card)
+    try:
+        return validate_extraction(art, text_view, view, universe, max_chars,
+                                   assess_materiality=assess_materiality, universe_card=universe_card)
+    except ArticleExtractionError:
+        raise
+    except ValueError as exc:
+        raise ArticleExtractionError(str(exc)) from exc
 
 
 # One source-neutral contract shared by news, reports, newsletters and tables.
@@ -430,7 +496,8 @@ def _extract_evidence_first(art: Article, universe: set[str], max_chars: int, *,
         try:
             return run_structured('research_extract', contract, prompt, skill_slug=skill_slug)
         except Exception as exc:
-            raise RuntimeError(f'Information extraction failed for {art.id}') from exc
+            log.warning("information extraction failed for %s: %s", art.id, exc)
+            raise _extraction_failure(art.id, exc) from exc
 
     selection = invoke(schema, context)
     diagnostics['empty_reason'] = selection.empty_reason

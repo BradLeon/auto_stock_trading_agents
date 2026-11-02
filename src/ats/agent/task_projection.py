@@ -214,6 +214,9 @@ class InformationBriefPayload(_Payload):
     cluster_key: str = ""
     source_count: int | None = Field(default=None, ge=0)
     independent_sources: int | None = Field(default=None, ge=0)
+    # Articles whose extraction failed for this target and are therefore not covered by the brief (2026-11-02):
+    # {"document_ref", "article_id", "status": "retrying" | "quarantined", "attempts", "reason"}.
+    extraction_gaps: list[dict[str, Any]] = Field(default_factory=list)
 
     def payload_json(self) -> str:
         # Additive evidence must not change hashes of historical v1 payloads
@@ -221,6 +224,8 @@ class InformationBriefPayload(_Payload):
         body = self.model_dump(mode="json")
         if not body["source_evidence"]:
             body.pop("source_evidence")
+        if not body["extraction_gaps"]:
+            body.pop("extraction_gaps")
         return json.dumps(body, ensure_ascii=False, sort_keys=True)
 
     @field_validator("sources", "fact_changes", "impact_candidates", "entities",

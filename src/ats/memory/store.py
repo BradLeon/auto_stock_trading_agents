@@ -16,6 +16,7 @@ from ats.workflow.evaluation_clock import now as evaluation_now
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2113,6 +2114,20 @@ class TradingMemory:
             (version_id,target_id,processor_version,document_id,stamp,int(retry_failed)))
         self.conn.commit()
         return version_id if cur.rowcount else None
+
+    def information_content_failures(self, version_id: str, target_id: str, processor_version: str) -> int:
+        """How many times this article version failed with unusable model content for this target (0 if never).
+
+        The count rides in the processing row's note as `content_failure:N`; a network failure never adds to it.
+        """
+        row = self.conn.execute(
+            "SELECT status,note FROM information_processing_runs "
+            "WHERE version_id=? AND target_id=? AND processor_version=?",
+            (version_id, target_id, processor_version)).fetchone()
+        if row is None or row["status"] != "failed":
+            return 0
+        match = re.match(r"content_failure:(\d+)", row["note"] or "")
+        return int(match.group(1)) if match else 0
 
     @publication_write
     def finish_information_processing(self, version_id: str, target_id: str,

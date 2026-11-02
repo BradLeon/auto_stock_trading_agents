@@ -669,3 +669,16 @@
 - **改动：** `config/workflow/research_schedules.yaml`、`config/workflow/trade_schedules.yaml`、`docs/OPERATIONS.md`；测试 `tests/test_trade_schedules.py`（原来断言“出厂关闭”的两条在 S4/S5 启用后一直是红的，改为用关闭的配置副本）、`tests/test_phase_f_schedule_runtime.py`（oracle 测试窗口改到 08:29–08:31 并只启用 technical-review；该测试在 S5 启用 chief 后也已是红的）。
 - **已核：** dispatcher 于 11-02 08:50 重启，启动行含全部 7 个工作流；预期触发表第一次是 11-02 台北 21:00（information-brief）、22:00（chief-daily）。
 - **既有的红：** `test_committed_result_survives_control_record_crash_without_republication` 在未改动的 HEAD 上同样失败（`latest_technical_review` 为空），与本次调整无关，未处理。
+
+### 3.22 information-brief 单篇抽取失败的容错（2026-11-02，用户批准方案）
+
+- **起因：** 10-27、10-29、10-30 三个交易日的 08:00 information-brief 以 incomplete 结束。三类原因：OpenRouter 连接 `SSL: UNEXPECTED_EOF`（10-27、10-30，重试两次相隔 1 秒都失败）；模型输出缺必填字段 `ticker`（10-29）；证据片段在原文里找不到（10-21）。一篇文章出错就让整个标的简报发布不出去，当日的 fundamental-routine 也被“上游依赖失败”挡住，靠 09:00 fundamental 的依赖重跑才补上。
+- **用户裁决：** 简报里缺某篇文章可以接受；抽取结果校验失败时不让模型重答（不增加请求）。
+- **改动：**
+  - `extract.py`：失败分三类。`ArticleExtractionError`（内容不可用：字段缺失、证据不落地、摘要为空等；同时是 `ValueError` 与 `RuntimeError`，旧的捕获不受影响）、`TransientExtractionError`（连接、超时、限流、5xx）、其余原样 `RuntimeError`（整体失败，行为不变）。
+  - `target_research.py`：内容类失败只跳过这一篇，其余照常处理并发布；简报 `unverified` 里披露“N 篇抽取失败，将在下次运行重试”，payload 新增可选字段 `extraction_gaps`（空时不进哈希，历史简报哈希不变）；同一文章版本内容类失败 3 次后隔离（`content_failure:N` 记在 `information_processing_runs.note`，不改表），隔离后不再重试、简报披露“已隔离”；一篇都没读成且仍有可重试失败时照旧整体失败，全部隔离时发布一份只陈述这一点的简报；网络类失败不计入隔离次数。
+  - `dispatcher.py`：`_select_reusable` 里，带“可重试缺口”的简报视为不可复用（`extraction_incomplete`），下一次运行会重试那一篇（共享触发的重放路径不套这条，仍返回首次发布的结果）；`_information_adapter` 把 `TransientExtractionError` 转成 `RetryableTaskError(code="transient")`。
+  - `planning.py`：information-brief 重试退避由 1 秒改为 120 秒（其他任务不变）。
+- **测试：** 新增 `tests/test_information_extraction_tolerance.py`（8 条）：一篇不可用其余发布并披露；重试与第 3 次隔离、隔离后不再调用模型；只有坏文章时前两次整体失败、第 3 次发布隔离说明；网络错误整体失败且不计次；失败分类；带可重试缺口的简报重算、已隔离的简报视为最终；退避；适配器转换。同时给 2 处假 store 补了 `information_content_failures`。信息抽取、dispatcher、run_contracts、调度相关共约 330 条通过；唯一红是改动前就红的 `test_committed_result_survives_control_record_crash_without_republication`。
+- **已生效：** dispatcher 11-02 11:09 重启（PID 88465）。**没有观察到：** 真实的下一次 08:00 运行里这些路径是否触发；SSL 断连根因仍未查明（本次只是不再让它拖垮整轮，并拉长重试间隔）。
+

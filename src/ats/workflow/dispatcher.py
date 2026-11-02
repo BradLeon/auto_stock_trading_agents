@@ -613,6 +613,13 @@ class Dispatcher:
                     reusable, reason = self._projection_reuse_check(
                         envelope, task, input_refs, data_refs, as_of,
                         spec.freshness_seconds, schema.role_schema_name())
+                    if (reusable and task.task_id == "information-brief"
+                            and any(gap.get("status") == "retrying"
+                                    for gap in envelope.payload.get("extraction_gaps") or [])):
+                        # A brief that skipped an article still worth retrying is not a final answer for this data
+                        # vintage: run again, so the skipped article gets its next attempt. (Not applied to the
+                        # shared-trigger replay: that must keep returning what the first run published.)
+                        reusable, reason = False, "extraction_incomplete"
             candidates.append({"projection_id": envelope.projection_id, "reason": reason})
             if reusable:
                 return envelope, {"decision": "hit", "reason": "reusable",
@@ -970,9 +977,15 @@ def _layer_adapter(context: TaskContext) -> TaskAdapterResult:
 def _information_adapter(context: TaskContext) -> TaskAdapterResult:
     from ..agents.information.entry import run_information_target
 
-    result = run_information_target(
-        context.task.scope.id, store=context.store, use_llm=_use_llm(context),
-        run_extraction=True, run_once=context.run_once)
+    from ..agents.information.extract import TransientExtractionError
+
+    try:
+        result = run_information_target(
+            context.task.scope.id, store=context.store, use_llm=_use_llm(context),
+            run_extraction=True, run_once=context.run_once)
+    except TransientExtractionError as exc:
+        # The model service did not answer; the articles are fine. Let the retry policy try again later.
+        raise RetryableTaskError(str(exc), code="transient") from exc
     return TaskAdapterResult(detail=result.get("event_summary", ""))
 
 

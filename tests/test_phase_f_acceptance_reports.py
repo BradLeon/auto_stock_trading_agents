@@ -42,7 +42,7 @@ def test_information_elapsed_budget_replays_slow_capture_without_extra_read(isol
         lambda article, *a, **k: reads.append(article.id) or [])
     monkeypatch.setattr(target_research, '_publish_empty', lambda *a, **k: 'bounded-empty')
     store = SimpleNamespace(information_extraction_cache=lambda **k: None,
-        begin_information_processing=lambda *a, **k: True,
+        begin_information_processing=lambda *a, **k: True, information_content_failures=lambda *a: 0,
         save_task_projection=lambda **k: 'cache-'+k['input_ref'],
         finish_information_processing=lambda *a, **k: None)
     config = {'max_articles_per_run':None, 'article_chars':40000,

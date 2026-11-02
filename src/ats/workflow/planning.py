@@ -71,6 +71,9 @@ FRESHNESS_SECONDS: dict[str, int] = {
     "fundamental-event": 4 * 86_400, "macro-review": 7 * 86_400,
     "technical-review": 24 * 3_600,   # with its market-session vintage: reused within one session (2026-10-16)
 }
+# A model-service outage (connection reset, rate limit) rarely clears in one second. Information fans out one
+# task per target, so its retry waits a couple of minutes (2026-11-02: 10-27 and 10-30 failed twice within 1 s).
+RETRY_BACKOFF_SECONDS: dict[str, float] = {"information-brief": 120.0}
 TIMEOUT_SECONDS: dict[str, int] = {
     # sector-review: the first real run took 21.4 minutes (12 structure-analyst calls alone 13 minutes on DeepSeek,
     # 52 adjudications, one rotation). At the old 1200 s the Dispatcher would cancel the attempt and retry the whole
@@ -172,7 +175,7 @@ def task_registry() -> TaskRegistry:
             output_schema=schema.role_schema_name(),
             freshness_seconds=FRESHNESS_SECONDS[task_id],
             timeout_seconds=TIMEOUT_SECONDS[task_id], resource_group=policy["resource_group"],
-            retry=RetryPolicy(max_attempts=2, backoff_seconds=1.0,
+            retry=RetryPolicy(max_attempts=2, backoff_seconds=RETRY_BACKOFF_SECONDS.get(task_id, 1.0),
                               retry_on=("timeout", "transient")),
             required_for_decision=True))
     registry = TaskRegistry(specs)

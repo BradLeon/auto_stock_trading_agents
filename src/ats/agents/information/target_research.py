@@ -9,11 +9,32 @@ from datetime import timezone
 from ...schemas.research import Insight
 from ...data.document_quality import visible_analysis_view
 from ...workflow.evaluation_clock import now as evaluation_now
-from ...agent.task_projection import ProjectionScope
+from ...agent.task_projection import EnvelopeValidationError, ProjectionScope
 from . import extract, selection, triage
 from .briefs import assert_no_advice, clocks_for, publish_information_brief
 
 log = logging.getLogger(__name__)
+
+#: An article version whose model content was unusable this many times for one target is quarantined: no more
+#: retries, the brief says so. A network failure never counts.
+MAX_CONTENT_FAILURES = 3
+
+
+def _gap(art, status: str, attempts: int, reason: str) -> dict:
+    return {'document_ref': art.document_version_id, 'article_id': art.id, 'status': status,
+            'attempts': attempts, 'reason': reason[:200]}
+
+
+def _gap_notes(gaps: list[dict]) -> list[str]:
+    retrying = [g for g in gaps if g['status'] == 'retrying']
+    quarantined = [g for g in gaps if g['status'] == 'quarantined']
+    notes = []
+    if retrying:
+        notes.append(f'{len(retrying)} 篇候选抽取失败，将在下次运行重试，当前简报不声称覆盖全部候选')
+    if quarantined:
+        notes.append(f'{len(quarantined)} 篇候选连续抽取失败 {MAX_CONTENT_FAILURES} 次已隔离、不再重试，'
+                     '当前简报不覆盖其内容')
+    return notes
 
 
 def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
@@ -38,7 +59,8 @@ def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
         raise ValueError('Information character/time budget must be positive')
     report.update(model_calls=0, model_invocations=0, input_chars=0, cache_hits=0, items=[],
                   deferred=len(rows)-len(selected), projection_id='', materiality=None)
-    extracted, inspected = [], []
+    extracted, inspected, gaps, content_errors = [], [], [], []
+    max_failures = int(config.get('max_content_failures', MAX_CONTENT_FAILURES))
     for row in selected:
         art = row.article
         version = art.document_version_id
@@ -74,6 +96,11 @@ def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
                 item['status'] = 'deferred_budget'
                 report['deferred'] += 1
                 continue
+            prior_failures = store.information_content_failures(version, symbol, processor)
+            if prior_failures >= max_failures:
+                item['status'] = 'quarantined'
+                gaps.append(_gap(art, 'quarantined', prior_failures, 'repeated unusable model content'))
+                continue
             claim = store.begin_information_processing(art.id, symbol, processor,
                 version_id=version, retry_failed=True)
             if not claim:
@@ -83,13 +110,27 @@ def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
             report['model_calls'] += 1
             report['input_chars'] += max_chars
             try:
-                insights = extract._extract(art, card, universe, int(config['article_chars']),
-                    assess_materiality=True, target=symbol, diagnostics=item,
-                    deadline=started + dispatch_seconds,
-                    evidence_first=bool(config.get('evidence_first', False)))
-                report['model_invocations'] += item.get('model_invocations', 0)
-                assert_no_advice([text for insight in insights for text in (insight.summary, insight.source_fact)],
-                                 source_statement=True)
+                try:
+                    insights = extract._extract(art, card, universe, int(config['article_chars']),
+                        assess_materiality=True, target=symbol, diagnostics=item,
+                        deadline=started + dispatch_seconds,
+                        evidence_first=bool(config.get('evidence_first', False)))
+                    report['model_invocations'] += item.get('model_invocations', 0)
+                    assert_no_advice([text for insight in insights for text in (insight.summary, insight.source_fact)],
+                                     source_statement=True)
+                except (extract.ArticleExtractionError, EnvelopeValidationError) as exc:
+                    # The model answered but not usably: this article is skipped and disclosed, the rest go on.
+                    report['model_invocations'] += item.get('model_invocations', 0)
+                    attempts = prior_failures + 1
+                    store.finish_information_processing(version, symbol, processor, ok=False,
+                        note=f'content_failure:{attempts}: {exc}'[:300])
+                    log.warning('information target %s: article %s skipped (%d/%d): %s',
+                                symbol, art.id, attempts, max_failures, exc)
+                    item['status'], item['error'] = 'failed_content', str(exc)[:200]
+                    gaps.append(_gap(art, 'quarantined' if attempts >= max_failures else 'retrying',
+                                     attempts, str(exc)))
+                    content_errors.append(exc)
+                    continue
                 cache_id = store.save_task_projection(profile='information_extraction',
                     profile_version=processor, input_kind='document_version', input_ref=version,
                     target_type='entity', target_id=symbol,
@@ -97,9 +138,12 @@ def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
                              'empty_reason': item.get('empty_reason', '')},
                     created_at=evaluation_now(timezone.utc).isoformat())
                 cache = {'projection_id': cache_id}
-            except Exception:
+            except Exception as exc:
+                # A service that did not answer is not the article's fault: the earlier count stays as it was.
+                note = ('transient' if isinstance(exc, extract.TransientExtractionError)
+                        else 'target extraction/cache publication failed')
                 store.finish_information_processing(version, symbol, processor, ok=False,
-                    note='target extraction/cache publication failed')
+                    note=f'content_failure:{prior_failures}: {note}' if prior_failures else note)
                 raise
             store.finish_information_processing(version, symbol, processor, ok=True, outputs=len(insights))
             item['status'] = 'extracted' if insights else 'no_relevant_insight'
@@ -111,19 +155,28 @@ def run(store, symbol: str, *, config: dict, since, use_llm: bool) -> dict:
         adopted = [insight for insight in insights if triage.reading_bucket(insight, symbol) == 'adopted']
         item['adopted_insights'] = len(adopted)
         extracted.extend((art, insight, cache['projection_id']) for insight in adopted)
+    report['gaps'] = gaps
+    if gaps and not extracted and not inspected and any(g['status'] == 'retrying' for g in gaps):
+        # Nothing was read: a brief made only of gaps would look like an answer. The run fails, as before, and the
+        # next run retries; once every failing article is quarantined the brief below says so.
+        raise content_errors[0]
     if extracted:
         report['materiality'] = max((i.materiality or 0) for _, i, _ in extracted)
-        report['projection_id'] = _publish(store, symbol, extracted, deferred=report['deferred'])
+        report['projection_id'] = _publish(store, symbol, extracted, deferred=report['deferred'], gaps=gaps)
     elif inspected:
         report['materiality'] = 0.0 if not report['deferred'] else None
-        report['projection_id'] = _publish_empty(store, symbol, inspected, deferred=report['deferred'])
+        report['projection_id'] = _publish_empty(store, symbol, inspected, deferred=report['deferred'], gaps=gaps)
+    elif gaps:
+        report['materiality'] = None
+        report['projection_id'] = _publish_unreadable(store, symbol, gaps)
     elif not rows and use_llm:
         # Nothing admitted inside the look-back window.  That is a result ("quiet"), not a failed run: publish it
         # explicitly, otherwise the Dispatcher counts the task as missing (ASML after its 6-K left the window).
         report['materiality'] = 0.0
         report['projection_id'] = _publish_no_candidates(store, symbol, since=since)
     report['elapsed_seconds'] = round(time.monotonic()-started, 3)
-    report['status'] = ('selected_no_model' if not use_llm else
+    report['status'] = ('published_with_gaps' if gaps and report['projection_id'] else
+                        'selected_no_model' if not use_llm else
                         'published_no_candidates' if report['projection_id'] and not rows else
                         'published_with_deferred' if extracted and report['deferred'] else 'published' if extracted else
                         'pending' if report['deferred'] else 'no_relevant_change')
@@ -151,7 +204,23 @@ def _publish_no_candidates(store, symbol, *, since):
         **execution_versions('research_extract', 'research-insight', template_source=__file__))
 
 
-def _publish_empty(store, symbol, inspected, *, deferred):
+def _publish_unreadable(store, symbol, gaps):
+    """Every candidate failed for good (quarantined): say exactly that, claim nothing about the target."""
+    now = evaluation_now(timezone.utc)
+    observation = f'本次 {len(gaps)} 篇候选材料因抽取连续失败已隔离，本期无可核读的简报内容。'
+    payload = {'entity': symbol, 'headline': f'{symbol} 本次候选材料均无法抽取', 'summary': observation,
+        'fact_changes': [observation], 'source_evidence': [], 'relevance': 'low',
+        'sources': ['系统：候选材料抽取失败已隔离'], 'entities': [symbol], 'impact_candidates': [],
+        'confidence': 0.0, 'freshness': 'no readable material in this run',
+        'unverified': ['不断言该标的没有重要消息；被隔离的材料内容未进入任何简报', *_gap_notes(gaps)],
+        'extracted_at': now.isoformat(), 'source_count': 0, 'extraction_gaps': gaps}
+    from ..base import execution_versions
+    return publish_information_brief(store, payload, scope=ProjectionScope(kind='entity', id=symbol),
+        as_of=now.isoformat(), input_refs=[],
+        **execution_versions('research_extract', 'research-insight', template_source=__file__))
+
+
+def _publish_empty(store, symbol, inspected, *, deferred, gaps=()):
     """A bounded no-change observation, never invented issuer facts or coverage."""
     now = evaluation_now(timezone.utc)
     evidence = []
@@ -170,10 +239,11 @@ def _publish_empty(store, symbol, inspected, *, deferred):
         'impact_candidates': [], 'confidence': 0.0,
         'freshness': f'published {max(art.published_at for art, _, _ in inspected).date()}',
         'unverified': ['仅表达主简报筛选结果；背景/薄弱信息保留在抽取缓存，不断言市场没有重要消息；投资影响留待下游'] +
-            ([f'{deferred} 篇候选延期，未覆盖其内容'] if deferred else []) +
+            ([f'{deferred} 篇候选延期，未覆盖其内容'] if deferred else []) + _gap_notes(list(gaps)) +
             (['包含 partial 预览，未取得隐藏内容'] if any(a.completeness != 'full' for a, _, _ in inspected) else []),
         'event_time': evidence[0]['event_time'], 'published_at': evidence[0]['published_at'],
-        'extracted_at': now.isoformat(), 'source_count': len(inspected)}
+        'extracted_at': now.isoformat(), 'source_count': len(inspected),
+        **({'extraction_gaps': list(gaps)} if gaps else {})}
     from ..base import execution_versions
     return publish_information_brief(store, payload, scope=ProjectionScope(kind='entity', id=symbol),
         as_of=now.isoformat(), input_refs=sorted({ref for art, _, _ in inspected
@@ -181,7 +251,7 @@ def _publish_empty(store, symbol, inspected, *, deferred):
         **execution_versions('research_extract', 'research-insight', template_source=__file__))
 
 
-def _publish(store, symbol, extracted, *, deferred=0):
+def _publish(store, symbol, extracted, *, deferred=0, gaps=()):
     # Equal facts/quotes from syndicated materials do not become extra facts.
     unique, update_versions = {}, {}
     for art, insight, cache_id in extracted:
@@ -235,9 +305,11 @@ def _publish(store, symbol, extracted, *, deferred=0):
         'unverified': ['来源陈述及标的影响尚需独立核验；多篇材料不等于同事件独立佐证',
                        '事件发生时点未独立核验，event_time 使用原始发布时间代理'] +
                       ([f'{deferred} 篇候选因预算或处理中状态延期，当前简报不声称覆盖全部候选'] if deferred else []) +
+                      _gap_notes(list(gaps)) +
                       (['包含 partial 可见预览，未取得隐藏内容'] if any(a.completeness != 'full' for a, _, _ in rows) else []),
         'event_time': evidence[0]['event_time'], 'published_at': evidence[0]['published_at'],
-        'extracted_at': now.isoformat(), 'source_count': len({a.id for a, _, _ in rows})}
+        'extracted_at': now.isoformat(), 'source_count': len({a.id for a, _, _ in rows}),
+        **({'extraction_gaps': list(gaps)} if gaps else {})}
     from ..base import execution_versions
     return publish_information_brief(store, payload, scope=ProjectionScope(kind='entity', id=symbol),
         as_of=now.isoformat(), input_refs=sorted({ref for art, _, _ in rows

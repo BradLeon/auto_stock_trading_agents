@@ -34,7 +34,7 @@
   验证：测试覆盖错 hash 拒绝、旧周期拒绝、已终结拒绝、重复批准返回首次结果、拒绝备注保存、驳回修改生成新修订且重新风控再送审、驳回修改超过 2 次被拒、批准时快照已过期会先重审且不要求第二次批准、重审得出不同结论拒绝批准、`pending` 不列未通过风控的过程、提醒不含链接，以及即时通讯不可用时照常完成
 - [x] 2.6 审批与账本成对切换的代码（design.md D4 方案 B）：Clerk 的决策链联接与读模型发布只读审计表，去掉 Clerk 与报表对旧决策表的读取；新增只读核验脚本，列出仍读旧决策表的审批或账本代码路径。验证：核验脚本对当前代码输出为空；Clerk 的部分成交、迟到成交、撤单、拒单、人工订单、无法归因与重放测试全绿
 - [x] 2.7 Dispatcher 交易路径工作流：
-  - 新建 `config/workflow/trade_schedules.yaml`：`clerk-daily` 交易日 16:30 ET，`chief-daily` 交易日 10:30 ET；
+  - 新建 `config/workflow/trade_schedules.yaml`：`clerk-daily` 交易日 16:30 ET，`chief-daily` 交易日 10:30 ET（2026-11-02 起改为 18:00 / 09:00 ET，见 verification.md 3.21）；
   - 注册两个任务：在时间表里以 `enabled: false` 起步，负责人处于停用状态（内部取值仍是 legacy，见退役 change 5.4 的决定；对外一律说停用 / 恢复），见 design.md D5；
   - 覆盖核验的预期触发集合扩展为同时读取 `trade_schedules.yaml`；
   - 新的 `chief-daily` 周期创建前，把前一日仍待审批或待修订的周期转为失效。

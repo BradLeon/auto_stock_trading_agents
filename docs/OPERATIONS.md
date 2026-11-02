@@ -51,8 +51,8 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 | 工作流 | 时间 | 范围 |
 |---|---|---|
 | `information-brief` | 周一至周五 08:00 纽约 | `portfolio:pead-targets` |
-| `fundamental-routine` | 周一至周五 09:00 纽约（依赖当天的信息简报） | `portfolio:pead-targets` |
-| `technical-review` | 周一至周五 10:00 纽约 | `portfolio:portfolio` |
+| `fundamental-routine` | 周一至周五 08:30 纽约（依赖当天的信息简报） | `portfolio:pead-targets` |
+| `technical-review` | 周一至周五 08:30 纽约 | `portfolio:portfolio` |
 | `macro-review` | 周六 09:00 台北 | `portfolio:portfolio` |
 | `sector-review` | 周六 09:30 台北（Dispatcher 先补跑 `layer-review`） | `sector:ai_hardware` |
 
@@ -203,7 +203,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ## 7. 交易路径（已切换 S1–S5；实盘锁定）
 
-- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 的读路由已切到新路由（S1），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 16:30 纽约）。**`chief-daily` 已启用**（S5，2026-11-02，交易日 10:30 纽约；第一次定时运行是 11-02 台北 23:30，尚未观察）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
+- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 的读路由已切到新路由（S1），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 18:00 纽约；11-02 起由 16:30 改为 18:00）。**`chief-daily` 已启用**（S5，2026-11-02，交易日 09:00 纽约，台北冬令时 22:00；第一次定时运行是 11-02 台北 22:00，尚未观察）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
 - Chief 每个交易日由 `chief-daily` 自动跑一次；也可手动运行：
 
   ```bash
@@ -218,7 +218,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ### 7.1 切换后的操作
 
-> **状态：** S1–S5 已生效；两个定时工作流的第一次定时运行都还没观察到（`clerk-daily` 11-02 16:30 纽约，`chief-daily` 11-02 10:30 纽约）。
+> **状态：** S1–S5 已生效；两个定时工作流的第一次定时运行都还没观察到（`clerk-daily` 11-02 18:00 纽约，`chief-daily` 11-02 09:00 纽约）。
 > 各步见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3。
 
 **现状事实（切换后）**
@@ -232,8 +232,8 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 | 工作流 | 时间（工作日，仅 NYSE 交易日） | 内容 |
 |---|---|---|
-| `clerk-daily` | 16:30 纽约 | 对账：把成交与持仓写入账本（只认审计表） |
-| `chief-daily` | 10:30 纽约（台北晚上） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
+| `clerk-daily` | 18:00 纽约（收盘后；台北次日 07:00） | 对账：把成交与持仓写入账本（只认审计表） |
+| `chief-daily` | 09:00 纽约（盘前，台北晚上 22:00；排在 08:00/08:30 的研究之后） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
 
 两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → `ats dispatch resume --workflow <id> ...`（第 3.4 节）→ **最后**重启 `com.ats.dispatcher`，并用 `launchctl list` 确认新 PID、看 `var/logs/dispatcher.err.log` 里的 `dispatcher started: workflows=…` 一行含该工作流。每一步都需要你批准。**必须先 `resume` 再重启**：Dispatcher 在启动时才按负责人决定注册哪些交易工作流，`resume` 前启动的进程不会注册它（2026-11-01 启用 `clerk-daily` 时核实）。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
 

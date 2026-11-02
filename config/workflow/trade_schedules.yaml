@@ -14,14 +14,15 @@ workflows:
     enabled: true       # S4, switched on 2026-11-01 (user approved S4.2–S4.6 to be completed in their absence)
     consumer: clerk
     scope: {kind: portfolio, id: portfolio}
-    # After the close: the ledger window runs from the last successful reconcile to today; a missed day is
-    # picked up by the Clerk's own missed-window register, and one window is idempotent.
-    cron: {day_of_week: "mon-fri", hour: 16, minute: 30, timezone: America/New_York}
+    # After the close (2026-11-02: 16:30 -> 18:00): the ledger window runs from the last successful reconcile to
+    # today; a missed day is picked up by the Clerk's own missed-window register, and one window is idempotent.
+    cron: {day_of_week: "mon-fri", hour: 18, minute: 0, timezone: America/New_York}
   chief-daily:
     enabled: true       # S5, switched on 2026-11-02 (user: "现在启用")
     consumer: chief
     scope: {kind: portfolio, id: portfolio}
-    # An hour after the open, which is evening in Taipei: the cycle waits for the Boss' approval that night.
-    cron: {day_of_week: "mon-fri", hour: 10, minute: 30, timezone: America/New_York}
+    # 2026-11-02: 10:30 -> 09:00 NY (22:00 in Taipei in winter), after the 08:00/08:30 research runs: the cycle
+    # waits for the Boss' approval that night.
+    cron: {day_of_week: "mon-fri", hour: 9, minute: 0, timezone: America/New_York}
     decision_profile: ai_hardware
     fundamental_mode: routine

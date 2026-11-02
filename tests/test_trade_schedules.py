@@ -51,32 +51,43 @@ def _resume(workflow):
                            approval="user approved", health_check=lambda consumer: OK)
 
 
-@pytest.fixture
-def config(tmp_path):
-    """A copy of the real config with both trade workflows switched on."""
-    root = tmp_path / "config"
+def _config_with(tmp_path, enabled: bool):
+    root = tmp_path / ("config_on" if enabled else "config_off")
     shutil.copytree(REPO_ROOT / "config", root)
     path = root / "workflow" / "trade_schedules.yaml"
     body = yaml.safe_load(path.read_text())
     for entry in body["workflows"].values():
-        entry["enabled"] = True
+        entry["enabled"] = enabled
     path.write_text(yaml.safe_dump(body))
     return root
 
 
+@pytest.fixture
+def config(tmp_path):
+    """A copy of the real config with both trade workflows switched on."""
+    return _config_with(tmp_path, True)
+
+
+@pytest.fixture
+def config_off(tmp_path):
+    """A copy of the real config with both trade workflows switched off (the state before S4/S5)."""
+    return _config_with(tmp_path, False)
+
+
 # --- switched off: the production schedule does not change ------------------------------------------ #
-def test_both_workflows_ship_switched_off_with_the_agreed_times():
+def test_both_workflows_have_the_agreed_times():
     schedules = ts.load_trade_schedules()
-    assert {k: v["enabled"] for k, v in schedules.items()} == {"clerk-daily": False, "chief-daily": False}
-    assert schedules["chief-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 10, "minute": 30,
+    assert set(schedules) == {"clerk-daily", "chief-daily"}
+    assert schedules["chief-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 9, "minute": 0,
                                                "timezone": "America/New_York"}
-    assert schedules["clerk-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 16, "minute": 30,
+    assert schedules["clerk-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 18, "minute": 0,
                                                "timezone": "America/New_York"}
 
 
-def test_switched_off_means_not_registered_and_not_expected(world):
-    assert ts.enabled_entries() == {} and ts.trade_schedule_entries() == {}
-    expected = rt.expected_triggers(datetime(2026, 11, 2, 0, tzinfo=UTC), datetime(2026, 11, 6, 23, tzinfo=UTC))
+def test_switched_off_means_not_registered_and_not_expected(world, config_off):
+    assert ts.enabled_entries(config_off) == {} and ts.trade_schedule_entries(config_off) == {}
+    expected = rt.expected_triggers(datetime(2026, 11, 2, 0, tzinfo=UTC), datetime(2026, 11, 6, 23, tzinfo=UTC),
+                                    config_dir=config_off)
     assert not {row["workflow"] for row in expected["expected"]} & {"clerk-daily", "chief-daily"}
     assert not [w for w in expected["wake_expected"] if w["job_id"].endswith(("clerk-daily", "chief-daily"))]
 

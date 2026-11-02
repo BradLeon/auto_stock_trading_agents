@@ -617,7 +617,7 @@
 - **B1（`5f38b8b`）：** 你的裁决：“决策重要的是方向和仓位管理，价格是否实时很难要求，一定价差也能接受。方案 1 就好；批准时的‘漂移预检’也没必要，超过 1% 的价格波动也属正常。”风控复核存下来的报价只验绑定（`quote_ref` 哈希、来源、精度、买卖价存在），不验 30 秒年龄与开盘；新取报价的规则不变；没有新增漂移预检。相关 267 例通过。周末无真实开盘报价，没能在真实开盘时做端到端批准。
 - **B4（`d0da96a`）：** `reqCompletedOrders` 一度不应答（`apiOnly` 真假都不回，`reqAllOpenOrders`、`reqExecutions` 正常），`ib_async` 的 `RequestTimeout` 默认 0＝永远等，`clerk run --dry-run` 卡死 27 分钟。你的裁决：两步各 30 秒超时、两步都完成才写、失败记 `failed`。`get_fills`、`completed_orders` 各自有界；`reconcile` 报的读失败计入 `clerk_run` 状态，同窗口可重跑；超时消息不含 “broker unavailable”，以免登记 30 天永久缺口。broker/clerk/reconcile 相关 145 例通过。重试时 TWS 已应答（生产库副本，整轮 completed），超时路径只被单测覆盖；不应答原因未明，待你提供 TWS API 日志。
 - **S5（4.5）：** 你的批准：“现在启用”（答复“要我现在启用 chief-daily（S5）吗？”，2026-11-02）。`trade_schedules.yaml` 的 `chief-daily` 改为 `enabled: true` → `ats dispatch resume --workflow chief-daily`（健康检查 `ok`，owner-log 记 `legacy → dispatcher`，批准原话在日志里）→ 重启 `com.ats.dispatcher`（PID 61048）；启动日志 `workflows=…,clerk-daily,chief-daily`。
-- **没有完成的验证：** `chief-daily` 第一次定时运行（11-02 周一 10:30 纽约，台北 23:30）：要么建周期并在待审批处暂停，要么以研究不完整终结；模型请求数仍没有统计方法，不能给出数。`clerk-daily` 的首次定时运行（11-02 16:30 纽约）也未观察。所以 4.4、4.5 没有勾。
+- **没有完成的验证：** `chief-daily` 第一次定时运行（11-02 周一，2026-11-02 起为 09:00 纽约，台北 22:00）：要么建周期并在待审批处暂停，要么以研究不完整终结；模型请求数仍没有统计方法，不能给出数。`clerk-daily` 的首次定时运行（11-02 18:00 纽约，台北 11-03 07:00）也未观察。所以 4.4、4.5 没有勾。
 - **文档（4.6）：** OPERATIONS 第 7 节、ARCHITECTURE §6 已改成 S1–S5 的实际状态；与 `launchctl list`（`com.ats.dispatcher` PID 61048、`com.ats.serve`、`com.ats.data-refresh`）、`ats approval pending`（无待审批周期）一致，4.6 已勾。`data-refresh` 最近一次退出码为 1（日志是周期任务的 misfire 清单），与本变更无关，未处理。
 
 ## 4. 自动证据：隔离环境测试（tasks 3.1）
@@ -660,3 +660,12 @@
 - ~~**T0.4 的生产一半**~~ 已定（2026-10-30，放进观察窗口的第一次真实批准）。原文：**T0.4 的生产一半**（“锁定下批准一次演练周期”）要求真实批准一个周期。批准在实盘锁定下只会走到“已批准未执行”，不会有券商提交，但它仍会在生产库里写一条决策周期、一条批准记录。设计里 D1 说只读核验“不写决策、不下单”，两者有出入。要么把这一半挪到观察窗口的第一次真实批准里验证，要么你明确同意在 S3 之后、S5 之前做一次演练周期。我倾向前者。
 - ~~**手工单的归类**~~ 已定（2026-10-29，见 3.6）。原文：**手工单的归类（2026-10-28 复测发现）：** 你在 TWS 手工下的单如果没有自填 orderRef，现在被记为“无法归因”，非 dry-run 时每笔登记一条 `unattributed_fill` 异常，计入账本完整度，主理人上下文会一直标“账本未完整对账”。它不进系统绩效（符合你的要求），也不阻断交易，但这个警示会被手工单长期占满。可选：本系统发出的单已经全部带 `ats:` orderRef 与 permId，可以把“某日期之后、既没有 `ats:` 标记也对不上本系统订单”的成交直接记为人工、不登记异常；之前的旧单仍记无法归因。这会改动先前“无证据即未知”的规则，需要你同意。
 - ~~**拉取历史成交**~~ 已改用你上传的交易确认报告补录（2026-10-29，见 3.6）；Flex 暂不做。原文：**拉取历史成交：** TWS API 的 `reqExecutions` 只返回当前会话（TWS 里调设置后最多 7 天）的执行，补不了 9 月至今的缺口；要拉全量历史只能用 IBKR Flex Web Service（需要你在券商后台建查询、生成令牌，我不能代填）。拉回来的成交按上面的规则归类，不会默认归到系统决策。建议另开 change。
+
+### 3.21 调度时间调整（2026-11-02，用户指定）
+
+- **新时间（纽约，工作日、仅交易日）：** `information-brief` 08:00（不变）、`fundamental-routine` 08:30（原 09:00）、`technical-review` 08:30（原 10:00）、`chief-daily` 09:00（原 10:30）、`clerk-daily` 18:00（原 16:30）。冬令时对应台北 21:00 / 21:30 / 21:30 / 22:00 / 次日 07:00；仍用纽约时区，夏令时研究链与 chief 的相对顺序不变。
+- **核对过的依赖：** `technical-review` 的数据版本是“纽约交易日 + 收盘前/后”，08:30 与 09:00 的 chief 同属收盘前，可复用；`fundamental-routine` 与 `technical-review` 在不同资源组，同时启动不抢；近几日实测 fundamental 约 3 分钟、technical 约 1 分钟，提前到 08:30 后在 09:00 前有 30 分钟余量。`information-brief` 近日仍多次以 incomplete 结束（既有问题，未处理），仍可能让 chief 报研究不完整。
+- **要留意：** 09:00 纽约是盘前（09:30 开盘）。你在台北 22:00–22:30 批准时订单会在盘前提交。`clerk-daily` 18:00 纽约，台北次日 07:00。
+- **改动：** `config/workflow/research_schedules.yaml`、`config/workflow/trade_schedules.yaml`、`docs/OPERATIONS.md`；测试 `tests/test_trade_schedules.py`（原来断言“出厂关闭”的两条在 S4/S5 启用后一直是红的，改为用关闭的配置副本）、`tests/test_phase_f_schedule_runtime.py`（oracle 测试窗口改到 08:29–08:31 并只启用 technical-review；该测试在 S5 启用 chief 后也已是红的）。
+- **已核：** dispatcher 于 11-02 08:50 重启，启动行含全部 7 个工作流；预期触发表第一次是 11-02 台北 21:00（information-brief）、22:00（chief-daily）。
+- **既有的红：** `test_committed_result_survives_control_record_crash_without_republication` 在未改动的 HEAD 上同样失败（`latest_technical_review` 为空），与本次调整无关，未处理。

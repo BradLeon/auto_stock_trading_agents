@@ -266,9 +266,10 @@ def test_phase_e_startup_consumes_without_restarting_collectors(business_inputs,
 def test_independent_oracle_detects_the_dispatcher_omitting_a_tick(business_inputs, isolated):
     from ats.config import reset_config_cache
     schedules=business_inputs.root/"workflow/research_schedules.yaml"
-    config=yaml.safe_load(schedules.read_text());config["workflows"]["technical-review"]["enabled"]=True
+    config=yaml.safe_load(schedules.read_text())
+    for name,entry in config["workflows"].items(): entry["enabled"]=(name=="technical-review")
     schedules.write_text(yaml.safe_dump(config)); reset_config_cache()
-    expected=rt.expected_triggers(datetime(2026,10,9,9,59,tzinfo=dispatcher_daemon.ET),datetime(2026,10,9,10,31,tzinfo=dispatcher_daemon.ET))
+    expected=rt.expected_triggers(datetime(2026,10,9,8,29,tzinfo=dispatcher_daemon.ET),datetime(2026,10,9,8,31,tzinfo=dispatcher_daemon.ET))
     assert len(expected["expected"])==1
     # Only the dispatcher path exists since the legacy serial scheduler was removed (2026-10-20).
     assert set(expected["expected"][0]["paths"])=={"dispatcher"}

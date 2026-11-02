@@ -682,3 +682,9 @@
 - **测试：** 新增 `tests/test_information_extraction_tolerance.py`（8 条）：一篇不可用其余发布并披露；重试与第 3 次隔离、隔离后不再调用模型；只有坏文章时前两次整体失败、第 3 次发布隔离说明；网络错误整体失败且不计次；失败分类；带可重试缺口的简报重算、已隔离的简报视为最终；退避；适配器转换。同时给 2 处假 store 补了 `information_content_failures`。信息抽取、dispatcher、run_contracts、调度相关共约 330 条通过；唯一红是改动前就红的 `test_committed_result_survives_control_record_crash_without_republication`。
 - **已生效：** dispatcher 11-02 11:09 重启（PID 88465）。**没有观察到：** 真实的下一次 08:00 运行里这些路径是否触发；SSL 断连根因仍未查明（本次只是不再让它拖垮整轮，并拉长重试间隔）。
 
+### 3.23 S4、S5 第一次定时运行的观察（2026-11-02 台北 22:14 记）
+
+- **chief-daily（S5，11-02 22:00 台北 = 09:00 纽约）：未通过，4.5 不勾。** 22:01:06 以异常结束：`assemble_context` 抛 `RouteUnavailable ... layer-review:L1_app ... freshness_unconfirmed`；没有调模型、没有写周期、没有待审批。原因与影响见 blockers 文件 B5（6/8 个 Layer 分析超过 7 天，周六复用造成每周必现）。模型请求数：0（失败发生在调模型之前）。
+- **clerk-daily（S4）：第一次定时运行是 11-03 07:00 台北（11-02 18:00 纽约），尚未发生，4.4 不勾。**
+- **同日研究链（新时间表、新代码）：** information-brief 21:00–21:07 complete；fundamental-routine、technical-review 21:30–21:32 complete；没有触发单篇失败容错的路径。
+

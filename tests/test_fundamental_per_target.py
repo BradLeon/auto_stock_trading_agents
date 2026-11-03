@@ -72,10 +72,12 @@ def _event(sym, age=timedelta(minutes=10)):
                 ProjectionScope(kind="entity", id=sym), age=age)
 
 
-def _others(brief_age=timedelta(0)):
+def _others(brief_age=timedelta(0), layer_ages=None):
+    layer_ages = layer_ages or {}
     rows = [_env("layer_analysis", {"layer": key, "status": "expanding", "summary": f"{key} up",
                                     "findings": ["b2b 1.4"], "confidence": 0.8},
-                 ProjectionScope(kind="layer", id=key)) for key in ("L1_app", "L3_optics")]
+                 ProjectionScope(kind="layer", id=key), age=layer_ages.get(key, timedelta(0)))
+            for key in ("L1_app", "L3_optics")]
     for sym in TARGETS:
         rows.append(_env("information_brief",
                          {"entity": sym, "headline": "订单走强", "summary": "指引上修",
@@ -95,9 +97,9 @@ def _others(brief_age=timedelta(0)):
     return rows
 
 
-def _publish(tmp_path, store, fundamentals, state, *, brief_age=timedelta(0)):
+def _publish(tmp_path, store, fundamentals, state, *, brief_age=timedelta(0), layer_ages=None):
     """Publish research with the lineage of the plan the cycle will freeze."""
-    rows = _others(brief_age) + list(fundamentals)
+    rows = _others(brief_age, layer_ages) + list(fundamentals)
     probe = TradingMemory(tmp_path / f"probe-{len(list(tmp_path.iterdir()))}.sqlite")
     for env in rows:
         probe.save_task_projection_envelope(env)
@@ -265,3 +267,20 @@ def test_a_brief_inside_its_120_hours_keeps_the_event_review_in_use(universe):
     store.save_task_projection_envelope(_routine("COHR"))
     plan = dr.restore(dr.standalone(_state(), store))
     assert plan.task_inputs["fundamental_modes"]["COHR"] == "fundamental-event"
+
+
+def test_the_layer_review_is_fresh_when_any_layer_in_the_set_is_newer_than_the_window(universe):
+    """Layers whose evidence did not change are reused and keep their old as_of; the review is as fresh as its newest Layer."""
+    tmp_path, store = universe
+    _publish(tmp_path, store, [_routine("COHR"), _routine("LITE")], _state(),
+             layer_ages={"L1_app": timedelta(days=9)})
+    out = assemble_context(_state())
+    assert not out.get("gap_report"), out.get("gap_report")
+
+
+def test_the_layer_review_is_stale_only_when_every_layer_is_older_than_the_window(universe):
+    tmp_path, store = universe
+    _publish(tmp_path, store, [_routine("COHR"), _routine("LITE")], _state(),
+             layer_ages={"L1_app": timedelta(days=9), "L3_optics": timedelta(days=8)})
+    with pytest.raises(RouteUnavailable, match="layer-review.*freshness_unconfirmed"):
+        assemble_context(_state())

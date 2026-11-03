@@ -27,6 +27,8 @@ STATUSES = {
     "queued", "leased", "succeeded", "no_change", "quarantined", "partial",
     "retry_wait", "failed", "cancelled",
 }
+FAILURE_TAIL_CHARS = 4000
+FAILURE_LOG_DIR = REPO_ROOT / "var" / "logs" / "ingestion_failures"
 TRIGGERS = {"scheduled", "event", "manual", "cache_miss", "fallback"}
 _SAFE_COMMANDS = {
     "ingest", "release-check", "frontier-capability-audit", "article-ingest",
@@ -336,6 +338,24 @@ class PersistentIngestionQueue:
         value["lineage_refs"] = json.loads(value.pop("lineage_refs_json", "{}"))
         return value
 
+    def _keep_failure_output(self, task: dict[str, Any], stdout: bytes, stderr: bytes) -> dict[str, Any]:
+        """A failed attempt keeps what the worker printed: a hash cannot tell an operator what went wrong.
+
+        The tail goes into the task's result (readable from the queue); the whole of both streams goes to a file
+        beside the other logs, one per attempt.
+        """
+        kept = {"stderr_tail": stderr.decode(errors="replace")[-FAILURE_TAIL_CHARS:],
+                "stdout_tail": stdout.decode(errors="replace")[-FAILURE_TAIL_CHARS:]}
+        try:
+            folder = FAILURE_LOG_DIR
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{task['task_id']}-attempt{task['attempts']}.log"
+            path.write_bytes(b"--- stderr ---\n" + stderr + b"\n--- stdout ---\n" + stdout)
+            kept["output_log"] = str(path)
+        except OSError:
+            pass
+        return kept
+
     def run_one(self, *, worker_id: str | None = None, timeout_seconds: int = 1800,
                 task_id: str = "") -> dict[str, Any] | None:
         """Claim and execute one task. Test/operation hooks may target an exact ID."""
@@ -403,8 +423,11 @@ class PersistentIngestionQueue:
             result = {"exit_code": proc.returncode, "status": reported,
                       "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
                       "stderr_sha256": hashlib.sha256(stderr).hexdigest()}
+            if outcome == "failed":
+                result.update(self._keep_failure_output(task, stdout, stderr))
         except subprocess.TimeoutExpired:
             outcome, error, result = "failed", "worker_timeout", {"exit_code": None}
+            result.update(self._keep_failure_output(task, stdout, stderr))
         status = self.finish(task["task_id"], worker_id, outcome=outcome,
                              result=result, error=error)
         return {"task_id": task["task_id"], "status": status, "attempt": task["attempts"],

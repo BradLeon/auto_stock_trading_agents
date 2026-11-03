@@ -127,3 +127,11 @@
 - [ ] 10.3 文档：ARCHITECTURE §6、§10、§11，OPERATIONS 第 7 节，退役 runbook，README，同步到 R5 之后的状态。验证：文档中的命令都能照写运行
 - [ ] 10.4 全量测试一次，与基线逐项对照，并登记删除的测试与任何新失败的归因。验证：TEST_BASELINE 有本 change 的权威测量
 - [ ] 10.5 在退役 change 归档之后，`openspec validate --all --strict` 通过。验证：命令输出通过
+
+## 11. 遗留事项（2026-11-03 登记，不阻塞 4–10 组）
+
+- [ ] 11.1 FactSet 月末报告的核心图表抽取：`factset_month_end_ingest` 的 2026-10-30 SP500 报告每次都以 `partial` 结束，原因码 `factset_core_chart_ambiguous`，`index_core` 为 `not_attempted`（文档已入库，核心图表指标未确认，需人工审核）。先查清歧义发生在哪几张图、是版式变化还是抽取规则问题，再定修法。验证：同一份报告重跑得到 `succeeded`，或人工审核后的核心指标入库；下次月末运行不再是 `partial`
+- [ ] 11.2 TWS 掉线后的自动重新登录（IBC）：11-02 23:45 的每日自动重启卡在启动器（更新检查失败，停在登录），到 11-03 08:34 才登录，期间 clerk-daily 失败。参考 `scripts/start_tws.sh` 与 `ensure_tws.sh`（option_quant_trade_system 仓库）用 IBC 启动与探测重启；IBC 的下载与 live 账号凭据由用户自己安装和填写，2FA 仍需手机确认。验证：TWS 在掉线后无人值守恢复，端口 7496 可连且 API 握手成功；恢复前后有告警与日志
+- [ ] 11.3 文章类证据见证方没有观测：L5 的 `SEMIANALYSIS`、`DOWJONES` 一条观测都没有，因为 `chain.articles.collect_articles`（文章 → 观测）没有任何定时调用方，`semianalysis_newsletter_weekly` 与 ibkr_news 只把文章入库。需决定：谁来抽取、频率、每篇的模型请求预算，以及 ibkr_news 遗留缺陷是否先修。验证：这两个见证方在 L5 的观测非空，且每篇文章只抽取一次
+- [ ] 11.4 L3（数据中心电力）没有命题：`claims` 为 0，证据永远为空。需用户决定是否配置命题与数据源；先不处理
+- [ ] 11.5 ORCL 与 005930.KS 的证据抽取：财报文档被判 `period_unresolved` 隔离（`target_period` 为空：ORCL 财年 5 月结束，三星的财年口径与日历季度不同），但 `evidence-observe` 在模型已读完文档之后才在保存观测时报 `neutral_fact_requires_published_document_version`，白白花掉请求。两件事：补这两家的财期解析；文档被隔离时在调用模型之前就停止。两家先从 `chain_evidence_daily` 名单中拿掉。验证：两家的最近一次财报能抽出观测；被隔离的文档不再触发模型请求

@@ -648,11 +648,18 @@ derived:
   jobs:
     chain_evidence_daily:
       # 2026-10-16: moved out of the legacy PEAD score window (`pead_observe_window`, left false).
-      # PILOT LIST ONLY (user decision: validate the path on a few names, widen after go-live).
-      # Widen by extending `entities`; one job (own ledger row, retry, freshness) per name.
+      # Pilot list was TSM/ASML/MU/SKHY (validate the path on a few names, widen after go-live). 2026-11-03: widened
+      # to every company witness of Layers L4, L5 and L8, whose evidence had stopped (L4 on 08-30, L5 on 10-16, L8 on
+      # 10-17) because none of their witnesses was on the list. L2/L6/L7 witnesses not named here are still not
+      # collected. ORCL and 005930.KS are left out until their fiscal period resolves (tasks 11.5): their document is
+      # quarantined as `period_unresolved` after the model has already read it, so each run would spend requests for
+      # nothing. Widen further by extending `entities`; one job (own ledger row, retry, freshness) per name.
       enabled: true
       source: chain_evidence_observer
-      entities: [TSM, ASML, MU, SKHY]
+      entities: [TSM, ASML, MU, SKHY,
+                 COHR, CRDO, LITE, MRVL, NVDA,                                    # L4
+                 AMD, AMZN, AVGO, CRWV, GOOG, META, MSFT, NBIS, SPCX,             # L5
+                 AMAT, INTC, KLAC, LRCX]                                          # L8
       schedule: daily
       at: "22:00"
       timezone: UTC
@@ -671,8 +678,15 @@ derived:
       # 08:00 UTC) and before the daily layer review. No model call: the observers' own trend rules give direction.
       # One job per source (own ledger row, retry, freshness); `entities` here lists chain source ids.
       enabled: true
+      # 2026-11-03: the queue lease must name the chain source the command collects (`--source {entity}`), so
+      # each entity is its own lease source. With a shared `chain_l1_governed_observers` name every scheduled run
+      # was refused ("requires an active managed-queue lease") from 10-26 on and L1 evidence stopped at 10-25.
       source: chain_l1_governed_observers
       entities: [l1_ai_production_adoption, l1_frontier_labs_commercialization, l1_frontier_raw_capability]
+      entity_sources:
+        l1_ai_production_adoption: l1_ai_production_adoption
+        l1_frontier_labs_commercialization: l1_frontier_labs_commercialization
+        l1_frontier_raw_capability: l1_frontier_raw_capability
       schedule: daily
       at: "09:00"
       timezone: UTC

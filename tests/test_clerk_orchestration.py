@@ -255,3 +255,21 @@ def test_ledger_reads_are_bounded_and_an_unanswered_one_is_unavailable(monkeypat
         with pytest.raises(ibkr.IBKRUnavailable, match="timed out"):
             getattr(broker, method)()
         assert ib.RequestTimeout == ibkr.LEDGER_READ_TIMEOUT_SECONDS
+
+
+def test_a_tws_that_cannot_be_reached_registers_no_gaps_and_the_run_fails(store):
+    """Unreachable is not "the broker no longer returns it": the windows stay recoverable for the next run."""
+    from ats.broker.ibkr import UNREACHABLE_MARK, IBKRUnavailable
+
+    class _Down(_FakeBroker):
+        def get_fills(self):
+            raise IBKRUnavailable(f"{UNREACHABLE_MARK} at 127.0.0.1:7496 (is TWS running with API enabled?)")
+
+    _seed_system_order(store)
+    store.conn.execute("INSERT INTO fills (exec_id, symbol, side, shares, price, time) "
+                       "VALUES ('old', 'AAPL', 'BOT', 5, 100, '2026-09-13T00:00:00+00:00')")
+    store.conn.commit()
+    out = clerk.clerk_run(store=store, broker=_Down([]), window_start="2026-09-23", window_end="2026-09-23")
+    assert out["status"] == "failed" and out["gaps_registered"] == 0
+    assert store.conn.execute("SELECT COUNT(*) n FROM ledger_exceptions WHERE kind='reconciliation_gap'"
+                              ).fetchone()["n"] == 0

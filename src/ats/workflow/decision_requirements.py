@@ -287,6 +287,7 @@ def validate(store, snapshot_payload, *, at=None):
     context = current_read_context()
     read_cutoff = context.cutoff if context else stamp
     selected = {}
+    layer_times: list[tuple[str, datetime]] = []
     for task in plan.tasks:
         outcome = outcomes[task.instance_key]
         if outcome.get("task_id") != task.task_id or outcome.get("scope") != task.scope.model_dump(mode="json"):
@@ -323,13 +324,26 @@ def validate(store, snapshot_payload, *, at=None):
             from .planning import FRESHNESS_SECONDS
 
             source_time = datetime.fromisoformat(envelope.as_of)
-            if (source_time.tzinfo is None or source_time > min(stamp, read_cutoff) or
+            if task.task_id == "layer-review":
+                # The eight Layers are one review: a Layer whose evidence did not change is reused and keeps
+                # its old `as_of`, so freshness is judged on the newest Layer of the set (checked after the loop).
+                if source_time.tzinfo is None or source_time > min(stamp, read_cutoff):
+                    ok, reason = False, "freshness_unconfirmed"
+                else:
+                    layer_times.append((task.instance_key, source_time))
+            elif (source_time.tzinfo is None or source_time > min(stamp, read_cutoff) or
                     (stamp-source_time).total_seconds() > FRESHNESS_SECONDS[task.task_id]):
                 ok, reason = False, "freshness_unconfirmed"
             if not ok:
                 raise RouteUnavailable("required decision input invalid: " + task.instance_key + ":" + reason)
             envelopes.append(envelope)
         selected[task.instance_key] = envelopes
+    if layer_times:
+        from .planning import FRESHNESS_SECONDS
+
+        newest_key, newest = max(layer_times, key=lambda item: item[1])
+        if (stamp - newest).total_seconds() > FRESHNESS_SECONDS["layer-review"]:
+            raise RouteUnavailable("required decision input invalid: " + newest_key + ":freshness_unconfirmed")
     for task in plan.tasks:
         from .dispatcher import Dispatcher
 

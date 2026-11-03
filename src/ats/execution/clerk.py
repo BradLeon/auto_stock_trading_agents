@@ -207,8 +207,14 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     if context:
         gate_read(context.identity)
     guard_clerk_publication(store=store, what="Clerk completion and gap publication")
-    gaps = _register_missed_windows(store, broker_available=broker_available,
-                                    window_end=window_end)
+    # A TWS that could not be reached says nothing about what the broker can still return (2026-11-03: a TWS that
+    # had not logged in registered 30 permanent gaps, from 09-01 to 10-28, none of them verified). The run is
+    # failed, `last_reconcile_at` does not move, and the next run with TWS up sees the same windows again.
+    from ..broker.ibkr import UNREACHABLE_MARK
+
+    unreachable = any(UNREACHABLE_MARK in e for e in all_errors)
+    gaps = ([] if unreachable else
+            _register_missed_windows(store, broker_available=broker_available, window_end=window_end))
     status = "completed" if not errors else "failed"
     store.conn.execute(
         "UPDATE clerk_runs SET status = ?, counts_json = ?, error = ?, "

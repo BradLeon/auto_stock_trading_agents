@@ -32,6 +32,11 @@ from ..schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
 log = logging.getLogger("ats.broker")
 
 
+# Message prefix of a failed connection (TWS not running, not logged in, API off). The Clerk tells this apart
+# from a broker that answered but cannot return old data: nothing is known about the windows in the first case.
+UNREACHABLE_MARK = "cannot reach IBKR"
+
+
 class IBKRUnavailable(RuntimeError):
     """Raised when TWS/Gateway cannot be reached or the API is disabled."""
 
@@ -123,7 +128,7 @@ class IBKRBroker:
             if leased is not None:
                 _release_client_id(leased)
             raise IBKRUnavailable(
-                f"cannot reach IBKR at {self.host}:{self.port} (is TWS running with API enabled?): {exc}"
+                f"{UNREACHABLE_MARK} at {self.host}:{self.port} (is TWS running with API enabled?): {exc}"
             ) from exc
         self._ib = ib
         try:

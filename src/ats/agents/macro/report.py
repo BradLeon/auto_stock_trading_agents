@@ -264,11 +264,12 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
         "",
         "## 板块倾斜（核心）",
         "",
-        "| 板块/行业 | 观点 | 理由 |",
-        "|---|---|---|",
+        "| 板块/行业 | 观点 | 代表 ETF | 理由 |",
+        "|---|---|---|---|",
     ]
     for t in review.sector_tilts:
-        lines.append(f"| {t.sector} | **{t.stance}** | {t.rationale} |")
+        etf = f"{t.etf} {t.etf_name}".strip() if t.etf else "—"
+        lines.append(f"| {t.sector} | **{t.stance}** | {etf} | {t.rationale} |")
 
     lines += ["", "## 资产含义", review.asset_implications or "—", "", "## 主题评估", ""]
     if review.themes:

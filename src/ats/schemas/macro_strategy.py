@@ -53,11 +53,20 @@ class MacroTheme(BaseModel):
     queries: list[str] = Field(default_factory=list)  # Tavily search queries
 
 
+class MacroSector(BaseModel):
+    """One selectable sector of the tilt table and the ETF that implements it (config decides the ETF)."""
+    key: str
+    label: str
+    etf: str = ""
+    etf_name: str = ""
+
+
 class MacroConfig(BaseModel):
     name: str = "macro"
     label: str = "宏观"
     output_dir: str = ""
     themes: list[MacroTheme] = Field(default_factory=list)
+    sector_universe: list[MacroSector] = Field(default_factory=list)
     search: dict = Field(default_factory=dict)
     review: dict = Field(default_factory=dict)
     regime: dict = Field(default_factory=dict)   # 四象限阈值覆盖，见 agents/macro/regime.py
@@ -89,6 +98,9 @@ class SectorTilt(BaseModel):
     sector: str                        # 板块/行业名（自由文本，如 半导体/能源/公用事业）
     stance: str = "中性"               # 超配 | 中性 | 低配
     rationale: str = ""
+    sector_key: str = ""               # config/macro.yaml sector_universe 的 key；空 = 清单里没有对应板块
+    etf: str = ""                      # 代表 ETF 代码，由配置按 sector_key 解析（模型不选）
+    etf_name: str = ""
 
 
 # --------------------------------------------------------------------------- #

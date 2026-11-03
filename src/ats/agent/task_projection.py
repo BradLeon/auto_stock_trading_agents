@@ -522,6 +522,9 @@ class MacroTilt(_Item):
     sector: str = Field(min_length=1)
     stance: str = ""
     rationale: str = ""
+    sector_key: str = ""
+    etf: str = ""
+    etf_name: str = ""
 
 
 class MacroReviewPayload(_Payload):

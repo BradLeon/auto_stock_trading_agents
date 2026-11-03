@@ -18,6 +18,7 @@ class ThemeAssessView(BaseModel):
 
 class SectorTiltView(BaseModel):
     sector: str = Field(description="板块/行业名，如 半导体/能源/公用事业/成长股")
+    sector_key: str = Field(default="", description="从上下文「可选板块清单」里选一个 key；清单里没有对应板块就留空")
     stance: str = Field(default="中性", description="超配 | 中性 | 低配")
     rationale: str = ""
 

@@ -44,3 +44,15 @@ def test_it_cannot_stand_in_for_a_group_that_is_otherwise_missing():
 def test_other_failures_still_block(bad):
     with pytest.raises(ValueError, match='factset_core_chart_ambiguous'):
         discovered_core_groups(date(2026, 10, 30), full_inventory() + [bad], policy=load_layout_policy())
+
+
+def test_the_same_inventory_can_be_declared_for_the_eleven_sector_scope_too():
+    policy = load_layout_policy()
+    groups = discovered_core_groups(date(2026, 10, 30), full_inventory(), policy=policy,
+                                    scopes=('technology', 'all_sectors'))
+    by_scope = {}
+    for group in groups:
+        by_scope.setdefault(group.scope_id, set()).add((group.chart_id, group.period))
+    assert by_scope['technology'] == by_scope['all_sectors'] and len(by_scope) == 2
+    assert {len(g.entity_ids) for g in groups if g.scope_id == 'all_sectors'} == {11}
+    assert {len(g.entity_ids) for g in groups if g.scope_id == 'technology'} == {1}

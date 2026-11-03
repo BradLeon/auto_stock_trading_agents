@@ -206,26 +206,30 @@ def _partial_sector_material(products, base: dict) -> dict:
         return {}
     covered = sorted(found["sectors"])
     absent = [name for key, name in _GICS_NAMES.items() if key not in covered]
+    full = len(covered) == len(_GICS_NAMES)
+    names = "、".join(_GICS_NAMES.get(k, k) for k in covered)
     lines = [
-        "## FactSet GICS 行业数据（部分行业）",
+        "## FactSet GICS 行业数据（部分指标组）" if full else "## FactSet GICS 行业数据（部分行业）",
         "> 仅用于行业盈利/估值背景；不是 AI Hardware L1-L8、个股基本面或 Chain 独立证据。",
-        f"> 报告日期 {found['report_date']}。覆盖范围：{'、'.join(_GICS_NAMES.get(k, k) for k in covered)}"
-        f"（{len(covered)}/11 个行业）。**未发布的行业：{'、'.join(absent)}**。",
-        "> 因此这里**没有跨行业排名或相对估值**，不得据此断言所覆盖行业相对其他行业更强或更弱；"
-        "只能把它当作该行业自身的盈利、预期与估值读数。",
+        f"> 报告日期 {found['report_date']}。有数据的行业：{names}（{len(covered)}/11）。"
+        + ("" if full else f"**没有数据的行业：{'、'.join(absent)}**。"),
+        "> 每一行只含该指标已发布的行业，行末标注行业数 n/11。只有 n=11 的行可以做跨行业排名；"
+        "n 小于 11 的行不得据此断言相对强弱。",
     ]
     if found["withheld_groups"]:
-        lines.append("> 该报告本行业内未通过复核、因此未采用的指标组：" + "；".join(found["withheld_groups"]))
-    for entity, periods in sorted(found["sectors"].items()):
-        readings = []
-        for period, metrics in sorted(periods.items()):
-            for metric, observation in sorted(metrics.items()):
-                readings.append(
-                    f"{period}/{metric}={observation.value:g} {observation.unit}"
-                    f"[{observation.estimate_state}]")
-        lines.append(f"- {_GICS_NAMES.get(entity, entity)}（{entity}）: " + "; ".join(readings))
-    note = (f"FactSet 只发布了{'、'.join(_GICS_NAMES.get(k, k) for k in covered)}行业的数据"
-            f"（{len(covered)}/11），其余行业缺失，对照不含跨行业比较。")
+        lines.append("> 未通过复核、因此未采用的指标组（范围:图表/期间）：" + "；".join(found["withheld_groups"]))
+    by_metric: dict[tuple[str, str], list] = {}
+    for entity, periods in found["sectors"].items():
+        for period, metrics in periods.items():
+            for metric, observation in metrics.items():
+                by_metric.setdefault((period, metric), []).append((entity, observation))
+    for (period, metric), rows in sorted(by_metric.items()):
+        rows.sort(key=lambda item: item[1].value, reverse=True)
+        unit = rows[0][1].unit
+        cells = " > ".join(f"{_GICS_NAMES.get(entity, entity)} {obs.value:g}" for entity, obs in rows)
+        lines.append(f"- {period} {metric}（{unit}，{rows[0][1].estimate_state}，{len(rows)}/11）：{cells}")
+    note = (f"FactSet 只发布了{names}行业的数据（{len(covered)}/11），其余行业缺失，对照不含这些行业的比较。" if not full else
+            "FactSet 十一个行业都有数据，但部分指标组未通过复核未采用，见文内清单；只有 n=11 的指标可做跨行业排名。")
     return {**base, "report_date": found["report_date"], "version_id": found["version_id"],
             "freshness": "latest_released", "text": "\n".join(lines),
             "state": "partial_sectors", "reason": note}

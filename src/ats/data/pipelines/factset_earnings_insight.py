@@ -857,7 +857,8 @@ class FactSetWeeklyPipeline:
                     }
                 try:
                     expected_groups = discovered_core_groups(
-                        document.report_date, chart_inventory, policy=policy)
+                        document.report_date, chart_inventory, policy=policy,
+                        scopes=('technology', 'all_sectors'))
                 except ValueError as inventory_exc:
                     return {
                         'status': 'partial', 'core_acceptance': 'blocked',
@@ -936,7 +937,7 @@ class FactSetWeeklyPipeline:
         groups = {}
         for package in packages:
             review_id = review_ids.get(package.group.key, "")
-            if auto_admit and not review_id and package.group.scope_id == 'technology':
+            if auto_admit and not review_id and package.group.scope_id in ('technology', 'all_sectors'):
                 from ..sources.factset_contracts import validate_group
                 from ..stores.structured.factset_reviews import FactSetReviews
 

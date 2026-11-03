@@ -231,6 +231,21 @@ def validate_group(package: GroupPackage, policy: dict) -> list[str]:
                 reasons.append("numeric_evidence_conflict")
             if cell.unit in {"count", "multiple"} and unit == "percent":
                 reasons.append("numeric_evidence_unit_mismatch")
+    # A printed row has one number format. When almost every sector prints one decimal and a cell does not, the
+    # point was dropped by OCR ("7.4%" read as "74%"), which no structural rule above can see.
+    by_column: dict[str, list] = {}
+    for cell in package.candidates:
+        for source in cell.value_evidence[-1:]:
+            token = source.raw_token.strip()
+            if parse_printed_number(token)[0] is not None:
+                by_column.setdefault(cell.column, []).append(token.split('.')[1].rstrip('% ') if '.' in token else '')
+    for column, decimals in by_column.items():
+        counts = {}
+        for digits in decimals:
+            counts[len(digits)] = counts.get(len(digits), 0) + 1
+        common, seen = max(counts.items(), key=lambda item: item[1])
+        if len(decimals) >= 5 and common > 0 and seen / len(decimals) >= 0.8 and seen != len(decimals):
+            reasons.append('numeric_format_inconsistent')
     values = {(c.entity_id, c.column): c.value for c in package.candidates}
     for columns in rule.get("sum_to_one", []):
         if not set(columns) <= required:

@@ -71,8 +71,8 @@ def test_material_states_coverage_when_the_full_view_is_unavailable(monkeypatch)
     material = factset.fetch_sector_material(products=_products(manifests, rows))
     assert material["state"] == "partial_sectors" and material["report_date"] == "2026-10-30"
     text = material["text"]
-    assert "信息技术（GICS_45）" in text and "earnings.eps.yoy_growth=67.5" in text
-    assert "1/11" in text and "通信服务" in text and "没有跨行业排名" in text
+    assert "2026Q3 earnings.eps.yoy_growth" in text and "信息技术 67.5" in text
+    assert "（1/11）" in text and "通信服务" in text and "n 小于 11 的行不得据此断言相对强弱" in text
     assert "尚未发布" not in material["reason"] and "不可用" not in material["reason"]
 
 
@@ -88,3 +88,41 @@ def _observation(observation_id, row):
         observation_id=observation_id, entity_id=row["entity_id"], metric_id=row["metric_id"],
         period=row["period"], period_basis=row["period_basis"], value=row["value"], unit=row["unit"],
         known_at=T)
+
+
+def test_eleven_sectors_are_ranked_per_metric_and_unpublished_groups_are_listed_with_their_scope(monkeypatch):
+    names = ["GICS_10", "GICS_15", "GICS_20", "GICS_25", "GICS_30", "GICS_35",
+             "GICS_40", "GICS_45", "GICS_50", "GICS_55", "GICS_60"]
+    rows = {f"o{i}": _row(f"o{i}", "earnings.eps.yoy_growth", float(i), entity=e) for i, e in enumerate(names)}
+    monkeypatch.setattr(ei, "_observation", lambda products, oid: _observation(oid, rows[oid]))
+    manifests = [_manifest("a", chart="growth", period="2026Q3", observations=list(rows))]
+    manifests[0]["quality"]["group"]["scope_id"] = "all_sectors"
+    shadow = _manifest("b", chart="eps_guidance", period="2026Q4", observations=[], platform=False, at=1)
+    shadow["quality"]["group"]["scope_id"] = "all_sectors"
+    monkeypatch.setenv("ATS_STRUCTURED_SECTOR_FACTSET_MODE", "platform")
+    monkeypatch.setattr(factset, "_platform_snapshot", lambda products=None: ei.EarningsInsightSnapshot())
+    material = factset.fetch_sector_material(products=_products(manifests + [shadow], rows))
+    text = material["text"]
+    assert "（11/11）" in text and "没有数据的行业" not in text
+    assert text.index("房地产 10") < text.index("能源 0")                      # best first
+    assert "all_sectors:eps_guidance/2026Q4" in text
+    assert "只有 n=11 的指标可做跨行业排名" in material["reason"]
+
+
+def test_a_later_attempt_that_did_not_pass_withdraws_the_earlier_publication(monkeypatch):
+    # 2026-11-03: a re-read caught a dropped decimal point in a cell that had already published. The package
+    # differs (so its partition key differs) but it is the same chart, period and scope: the newer attempt decides.
+    rows = {"old": _row("old", "consensus.target.upside", 74.0, entity="GICS_30"),
+            "keep": _row("keep", "earnings.eps.yoy_growth", 5.1, entity="GICS_30")}
+    monkeypatch.setattr(ei, "_observation", lambda products, oid: _observation(oid, rows[oid]))
+    ratings = {"scope_id": "all_sectors", "chart_id": "target_ratings", "period": "2026-10-30"}
+    earlier = _manifest("first", chart="target_ratings", period="2026-10-30", observations=["old"], at=0)
+    earlier["quality"]["group"] = dict(ratings)
+    later = _manifest("second", chart="target_ratings", period="2026-10-30", observations=[], platform=False, at=5)
+    later["quality"]["group"] = dict(ratings)
+    growth = _manifest("g", chart="growth", period="2026Q3", observations=["keep"], at=1)
+    growth["quality"]["group"]["scope_id"] = "all_sectors"
+    found = ei.load_published_sector_groups(_products([later, growth, earlier], rows), as_of=T)   # newest first
+    assert found["withheld_groups"] == ["all_sectors:target_ratings/2026-10-30"]
+    assert found["published_groups"] == 1
+    assert found["observation_ids"] == ["keep"] and "consensus.target.upside" not in str(found["sectors"])

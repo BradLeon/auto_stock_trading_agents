@@ -95,6 +95,16 @@ def read_grid_candidates(data: bytes, grid: PrintedGrid, chart: ChartLocation,
             parsed = [parse_printed_number(token) for token in retries]
             if parsed[0][0] is not None and parsed[0] == parsed[1]:
                 raw = retries[0]
+        elif scope_id == 'all_sectors' and raw and parse_printed_number(raw)[0] is not None:
+            # A single OCR pass can return a clean but wrong number (2026-11-03: "7.4%" read as "74%" at one
+            # scale, "TA%" / "14%" at others). The eleven-sector scope is read without a dedicated reviewer, so a
+            # parseable cell must be confirmed by at least one of two other scales; otherwise it stays unreadable
+            # (the original token is kept in the text for the audit) instead of being published.
+            confirms = [parse_printed_number(reader(data, cell.region, scale=scale,
+                                                    timeout=int(policy['ocr']['timeout_seconds'])))
+                        for scale in (3, 6)]
+            if parse_printed_number(raw) not in confirms:
+                raw = 'unconfirmed ' + raw
         cells.append(replace(cell, text=raw))
     rows = {row: [cell for cell in cells if cell.row == row] for row in range(grid.row_count)}
     headers = [row for row in rows.values()

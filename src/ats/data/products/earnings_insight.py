@@ -415,18 +415,23 @@ def load_published_sector_groups(products, *, as_of: datetime | None = None) -> 
     if not published:
         return {}
     newest = max(published, key=lambda row: (row["report_date"], row["known_at"]))
-    latest: dict[str, dict] = {}
+    # The newest attempt per group identity decides. A package published earlier is withdrawn by a later attempt
+    # that did not pass (2026-11-03: a re-read caught a dropped decimal point in a cell that had already published).
+    latest: dict[tuple, dict] = {}
     for row in rows:                       # rows are newest first
         if row["version_id"] == newest["version_id"]:
-            latest.setdefault(row["partition_name"], row)
+            group = row.get("quality", {}).get("group", {})
+            latest.setdefault((group.get("scope_id", ""), group.get("chart_id", ""), group.get("period", ""),
+                               group.get("period_basis", "")), row)
     sectors: dict[str, dict[str, dict[str, EarningsInsightObservation]]] = {}
     ids: list[str] = []
     withheld: list[str] = []
     for row in latest.values():
         group = row.get("quality", {}).get("group", {})
         label = f"{group.get('chart_id', '?')}/{group.get('period', '?')}"
+        scope = group.get("scope_id", "")
         if not (row["passed"] and row["status"] == "platform"):
-            withheld.append(label)
+            withheld.append(f"{scope}:{label}" if scope else label)
             continue
         for observation_id in row.get("observation_ids") or []:
             item = _observation(products, observation_id)

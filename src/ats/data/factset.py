@@ -173,6 +173,64 @@ def _render_sector_snapshot(snapshot) -> str:
     return "\n".join(lines)
 
 
+_GICS_NAMES = {
+    "GICS_10": "能源", "GICS_15": "原材料", "GICS_20": "工业", "GICS_25": "可选消费",
+    "GICS_30": "必需消费", "GICS_35": "医疗保健", "GICS_40": "金融", "GICS_45": "信息技术",
+    "GICS_50": "通信服务", "GICS_55": "公用事业", "GICS_60": "房地产",
+}
+
+
+def _partial_sector_material(products, base: dict) -> dict:
+    """Readings of the sector groups that published on their own, labelled with what they do not cover.
+
+    The full eleven-sector view stays unavailable until every sector group and the index core publish; this keeps
+    the real readings of the groups that did (Information Technology) in front of the final comparison, and says
+    which sectors are absent so the comparison cannot be read as a cross-sector ranking."""
+    from .products.earnings_insight import (
+        load_published_sector_groups,
+    )
+
+    owned = products is None
+    if products is None:
+        from .products import get_platform_data_products
+        products = get_platform_data_products()
+    try:
+        found = load_published_sector_groups(products)
+    except Exception as exc:  # noqa: BLE001 - the partial view is optional; fall back to "unavailable"
+        log.warning("factset: partial sector groups unreadable: %s", exc)
+        return {}
+    finally:
+        if owned:
+            _close_owned_products(products)
+    if not found or not found["sectors"]:
+        return {}
+    covered = sorted(found["sectors"])
+    absent = [name for key, name in _GICS_NAMES.items() if key not in covered]
+    lines = [
+        "## FactSet GICS 行业数据（部分行业）",
+        "> 仅用于行业盈利/估值背景；不是 AI Hardware L1-L8、个股基本面或 Chain 独立证据。",
+        f"> 报告日期 {found['report_date']}。覆盖范围：{'、'.join(_GICS_NAMES.get(k, k) for k in covered)}"
+        f"（{len(covered)}/11 个行业）。**未发布的行业：{'、'.join(absent)}**。",
+        "> 因此这里**没有跨行业排名或相对估值**，不得据此断言所覆盖行业相对其他行业更强或更弱；"
+        "只能把它当作该行业自身的盈利、预期与估值读数。",
+    ]
+    if found["withheld_groups"]:
+        lines.append("> 该报告本行业内未通过复核、因此未采用的指标组：" + "；".join(found["withheld_groups"]))
+    for entity, periods in sorted(found["sectors"].items()):
+        readings = []
+        for period, metrics in sorted(periods.items()):
+            for metric, observation in sorted(metrics.items()):
+                readings.append(
+                    f"{period}/{metric}={observation.value:g} {observation.unit}"
+                    f"[{observation.estimate_state}]")
+        lines.append(f"- {_GICS_NAMES.get(entity, entity)}（{entity}）: " + "; ".join(readings))
+    note = (f"FactSet 只发布了{'、'.join(_GICS_NAMES.get(k, k) for k in covered)}行业的数据"
+            f"（{len(covered)}/11），其余行业缺失，对照不含跨行业比较。")
+    return {**base, "report_date": found["report_date"], "version_id": found["version_id"],
+            "freshness": "latest_released", "text": "\n".join(lines),
+            "state": "partial_sectors", "reason": note}
+
+
 def fetch_sector_context(*, products=None) -> str:
     """Return a released GICS overlay only; never acquire or parse a PDF."""
     return fetch_sector_material(products=products)["text"]
@@ -210,6 +268,9 @@ def fetch_sector_material(*, products=None) -> dict:
         return {**base, "text": "", "state": "shadow",
                 "reason": "FactSet 十一行业数据仍处于影子验证阶段，未作为正式分析输入。"}
     if not rendered:
+        partial = _partial_sector_material(products, base)
+        if partial:
+            return partial
         reason = ("所选报告尚未发布可用的十一行业分区。"
                   if not snapshot.sectors else "FactSet 十一行业材料为空。")
         return {**base, "text": "", "state": snapshot.status.sector_release.state,

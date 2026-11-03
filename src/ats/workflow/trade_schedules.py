@@ -109,8 +109,11 @@ def planned_trading_ticks(cron: dict, start: datetime, end: datetime):
 def _clerk_daily(entry: dict) -> dict:
     from ..execution import clerk
 
+    from ..execution import clerk_report
+
     out = clerk.clerk_run(dry_run=False)
-    return {"status": out.get("status"), "run_id": out.get("run_id")}
+    return {"status": out.get("status"), "run_id": out.get("run_id"),
+            "report": clerk_report.publish(out, source="定时")}
 
 
 def _chief_daily(entry: dict) -> dict:

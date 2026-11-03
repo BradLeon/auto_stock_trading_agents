@@ -4940,11 +4940,16 @@ def main(argv: list[str] | None = None) -> int:
     ck = sub.add_parser(
         "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
     ck.add_argument("action", choices=["run", "rebuild", "gaps", "import-statement",
-                                       "classify-fill"],
+                                       "classify-fill", "baseline"],
                     help="run: 幂等执行一个对账窗口；rebuild: 重建绩效/归因读模型"
                          "（只写派生读模型）；gaps: 查看未清偿审计异常；"
                          "import-statement: 从 IBKR 交易确认报告 PDF 补录历史成交；"
-                         "classify-fill: 登记一笔旧成交的合约类型（须你确认）")
+                         "classify-fill: 登记一笔旧成交的合约类型（须你确认）；"
+                         "baseline: 期初建账（默认只显示计划，加 --apply 才写入）")
+    ck.add_argument("--as-of", help="baseline: 建账日 YYYY-MM-DD")
+    ck.add_argument("--operator", default="boss", help="baseline: 批准人")
+    ck.add_argument("--reason", help="baseline: 建账原因（必填）")
+    ck.add_argument("--apply", action="store_true", help="baseline: 真正写入（默认只显示计划）")
     ck.add_argument("--file", help="import-statement: 交易确认报告 PDF 路径")
     ck.add_argument("--exec-id", help="classify-fill: 成交的 exec_id")
     ck.add_argument("--sec-type", choices=["STK", "OPT", "CASH"], help="classify-fill: 合约类型")
@@ -5362,7 +5367,36 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  ⚠️ {e}")
             if out.get("gaps_registered"):
                 print(f"  登记对账缺口 {out['gaps_registered']} 个")
+            if not args.dry_run:
+                from ..execution import clerk_report
+
+                report = clerk_report.publish(out, source="手动")
+                print(f"  日报 → {report.get('path') or report.get('error') or '（未配置 Obsidian 输出目录）'}")
             return 1 if out["status"] == "failed" else 0
+        if args.action == "baseline":
+            from ..data.runtime.clerk_reads import ClerkBrokerReads
+            from ..execution import baseline
+            from ..memory import get_store
+            from ..trader.execute import IBKRBroker
+            from ..workflow.runtime_reads import scoped_read
+
+            if not (args.as_of and args.reason):
+                print("需要 --as-of 和 --reason")
+                return 2
+            store = get_store()
+
+            @scoped_read("clerk")
+            def _baseline():
+                return baseline.establish_baseline(
+                    store=store, broker=ClerkBrokerReads(IBKRBroker(), store), as_of=args.as_of,
+                    operator=args.operator, reason=args.reason, apply=args.apply)
+
+            plan = _baseline()
+            print(f"期初建账 {plan['as_of']}：持仓 {plan['positions']} 个，净值 {plan['net_liquidation']:,.2f}")
+            print(f"  封存历史异常：{plan['sealed'] or '无'}；作废当日已完成的运行：{plan['voided_runs'] or '无'}")
+            print("  已写入" if plan["applied"] else
+                  ("  已建账，无需重复" if plan["already"] else "  （演练，未写入；加 --apply 执行）"))
+            return 0
         if args.action == "classify-fill":
             from ..memory import get_store
 

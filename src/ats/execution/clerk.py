@@ -24,7 +24,7 @@ log = logging.getLogger("ats.clerk")
 
 # The deterministic pipeline, in dependency order. `order attempt` sequences
 # are covered inside reconcile's replay (task 3.9).
-DEFAULT_STEPS = ("reconcile", "marks", "episodes", "predictions", "performance")
+DEFAULT_STEPS = ("reconcile", "marks", "episodes", "predictions", "performance", "positions")
 
 # Domain-fact columns the Clerk must never alter (task 4.3): the trader wrote
 # them at event time; Clerk may only add reconciliation/derivation fields.
@@ -83,12 +83,28 @@ def _step_performance(store, *, broker, dry_run):
     return {"recorded": rec is not None}
 
 
+def _step_positions(store, *, broker, dry_run):
+    """Keep the positions this run saw, so tomorrow's run can check them against the fills in between."""
+    from . import baseline
+
+    portfolio = _portfolio_positions(broker)
+    if portfolio is None:
+        return {"saved": False, "reason": "portfolio unavailable"}
+    try:
+        return {"saved": baseline.save_run_snapshot(store, portfolio),
+                "positions": len(portfolio.positions)}
+    except Exception as exc:  # noqa: BLE001 - a missing snapshot is reported, it does not undo the ledger work
+        log.warning("clerk: position snapshot not saved (%s)", exc)
+        return {"saved": False, "reason": str(exc)[:120]}
+
+
 _STEPS = {
     "reconcile": _step_reconcile,
     "marks": _step_marks,
     "episodes": _step_episodes,
     "predictions": _step_predictions,
     "performance": _step_performance,
+    "positions": _step_positions,
 }
 
 
@@ -104,6 +120,10 @@ def _register_missed_windows(store, *, broker_available: bool,
     last = store.conn.execute(
         "SELECT value FROM journal_meta WHERE key='last_reconcile_at'").fetchone()
     cutoff = (last["value"][:10] if last else "")
+    from .baseline import baseline_date
+
+    # History before the Day-1 baseline was sealed, not left open; it never becomes a gap again.
+    cutoff = max(cutoff, baseline_date(store))
     rows = store.conn.execute(
         "SELECT DISTINCT DATE(COALESCE(time, captured_at)) d FROM fills "
         "WHERE COALESCE(time, captured_at, '') != '' "

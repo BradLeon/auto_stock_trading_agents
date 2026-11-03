@@ -45,6 +45,10 @@ class IBKRUnavailable(RuntimeError):
 # answer one (reqCompletedOrders did not on 2026-11-01). The ledger reads below must fail, not hang.
 LEDGER_READ_TIMEOUT_SECONDS = 30.0
 
+# A BidAsk tick-by-tick subscription only pushes when the quote changes, so a thin pre-market can stay silent for
+# seconds (2026-11-03 04:07 ET: NVDA gave nothing in 2 s on 4 of 4 tries). The wait ends at the first tick.
+EXECUTION_QUOTE_WAIT_SECONDS = 10.0
+
 
 def _bounded(ib, what: str, call):
     """Run one blocking ledger read with a deadline; no answer in time is `IBKRUnavailable`.
@@ -171,7 +175,7 @@ class IBKRBroker:
             ticker = ib.reqTickByTickData(contract, "BidAsk", 0, False)
             tick = None
             try:
-                for _ in range(20):
+                for _ in range(round(EXECUTION_QUOTE_WAIT_SECONDS / 0.1)):
                     ib.sleep(0.1)
                     if ticker.tickByTicks:
                         tick = ticker.tickByTicks[-1]

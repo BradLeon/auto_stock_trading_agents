@@ -21,8 +21,10 @@ workflows:
     enabled: true       # S5, switched on 2026-11-02 (user: "现在启用")
     consumer: chief
     scope: {kind: portfolio, id: portfolio}
-    # 2026-11-02: 10:30 -> 09:00 NY (22:00 in Taipei in winter), after the 08:00/08:30 research runs: the cycle
-    # waits for the Boss' approval that night.
-    cron: {day_of_week: "mon-fri", hour: 9, minute: 0, timezone: America/New_York}
+    # 2026-11-02: 10:30 -> 09:00 NY, after the 08:00/08:30 research runs. 2026-11-03: 09:00 -> 09:45 NY (22:45 in
+    # Taipei in winter). Order normalization prices only from a live bid/ask inside the regular session (09:30-16:00
+    # NY, quote no older than 30 s), so a pre-open cycle can never normalize its orders (blockers B9). The Boss
+    # approves the same night, while the market is still open.
+    cron: {day_of_week: "mon-fri", hour: 9, minute: 45, timezone: America/New_York}
     decision_profile: ai_hardware
     fundamental_mode: routine

@@ -298,6 +298,45 @@ def test_read_only_bid_ask_adapter_preserves_server_timestamp(monkeypatch):
     assert calls == ["read", "cancel_subscription"]
 
 
+def _slow_quote_broker(monkeypatch, *, first_tick_after: float):
+    """A transport whose first bid/ask tick arrives `first_tick_after` seconds after the subscription."""
+    from ats.broker.ibkr import IBKRBroker
+    ticker = SimpleNamespace(marketDataType=1, tickByTicks=[])
+    state = {"waited": 0.0}
+    class IB:
+        def qualifyContracts(self, c):
+            return [c]
+        def reqTickByTickData(self, c, *a):
+            return ticker
+        def cancelTickByTickData(self, *a):
+            pass
+        def sleep(self, delay):
+            state["waited"] += delay
+            if state["waited"] >= first_tick_after - 1e-9 and not ticker.tickByTicks:
+                ticker.tickByTicks.append(SimpleNamespace(time=datetime.now(UTC), bidPrice=100, askPrice=100.1))
+    @contextmanager
+    def session(*a, **kw):
+        yield IB()
+    broker = IBKRBroker()
+    monkeypatch.setattr(broker, "session", session)
+    return broker, state
+
+
+def test_a_quiet_premarket_tick_arriving_within_ten_seconds_is_used(monkeypatch):
+    broker, state = _slow_quote_broker(monkeypatch, first_tick_after=7.0)
+    row = broker.get_execution_quote("AAPL", currency="USD", metadata={"symbol": "AAPL", "currency": "USD"})
+    assert row["bid"] == 100 and row["market_data_mode"] == "live"
+    assert 6.9 <= state["waited"] <= 7.2          # stops at the first tick, does not wait out the window
+
+
+def test_no_tick_in_ten_seconds_is_still_a_refusal(monkeypatch):
+    from ats.broker.ibkr import IBKRUnavailable
+    broker, state = _slow_quote_broker(monkeypatch, first_tick_after=60.0)
+    with pytest.raises(IBKRUnavailable, match="execution_quote_source_timestamp_missing"):
+        broker.get_execution_quote("AAPL", currency="USD", metadata={"symbol": "AAPL", "currency": "USD"})
+    assert 9.9 <= state["waited"] <= 10.2
+
+
 def test_execution_age_rechecked_at_actual_broker_handoff(execution, monkeypatch):
     from phase_f_broker_harness import FakeIB, broker_for
     state = ready_state(execution)

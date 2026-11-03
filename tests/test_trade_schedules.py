@@ -78,7 +78,7 @@ def config_off(tmp_path):
 def test_both_workflows_have_the_agreed_times():
     schedules = ts.load_trade_schedules()
     assert set(schedules) == {"clerk-daily", "chief-daily"}
-    assert schedules["chief-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 9, "minute": 0,
+    assert schedules["chief-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 9, "minute": 45,
                                                "timezone": "America/New_York"}
     assert schedules["clerk-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 18, "minute": 0,
                                                "timezone": "America/New_York"}

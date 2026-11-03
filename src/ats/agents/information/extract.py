@@ -61,19 +61,24 @@ def _causes(exc: BaseException):
         exc = exc.__cause__ or exc.__context__
 
 
+def _is_httpx_transport_error(exc: BaseException) -> bool:
+    return any(base.__module__.split(".")[0] == "httpx" and base.__name__ == "TransportError"
+               for base in type(exc).__mro__)
+
+
 def classify_extraction_failure(exc: BaseException) -> str:
     """'transient' (service did not answer), 'content' (answer unusable) or 'unknown' (treated as a whole failure)."""
     import ssl
 
-    import httpx
     import openai
     from langchain_core.exceptions import OutputParserException
     from pydantic import ValidationError
 
     transient = (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError,
-                 httpx.TransportError, ssl.SSLError, ConnectionError, TimeoutError)
+                 ssl.SSLError, ConnectionError, TimeoutError)
     chain = list(_causes(exc))
-    if any(isinstance(item, transient) for item in chain):
+    # httpx is a provider library the agents layer may not import; match its transport errors by class name.
+    if any(isinstance(item, transient) or _is_httpx_transport_error(item) for item in chain):
         return "transient"
     if any(isinstance(item, (ValidationError, OutputParserException, json.JSONDecodeError))
            or (isinstance(item, RuntimeError) and "structured output empty" in str(item)) for item in chain):

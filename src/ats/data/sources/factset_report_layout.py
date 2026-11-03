@@ -164,6 +164,13 @@ def discovered_core_groups(report_date: date, charts, *, policy: dict | None = N
     for chart in charts:
         if not chart.groups or chart.groups[0] not in required:
             continue
+        if (chart.status == 'pending_review' and chart.reasons == ('target_period_unresolved',)
+                and len(chart.groups) == 1 and not chart.periods):
+            # A chart whose own title names no period (2026-11-03: the 2026-10-30 report titles a Q4 chart "FY ...
+            # Guidance" with no year) stays `pending_review`, is never admitted, and is listed as a failed chart in
+            # the release manifest. It no longer blocks the charts around it: the inventory check below still
+            # requires every required group to be found in full from charts that did resolve.
+            continue
         if (chart.status != 'located' or len(chart.groups) != 1
                 or len(chart.periods) != 1 or not chart.period_basis):
             raise ValueError('factset_core_chart_ambiguous')

@@ -78,6 +78,9 @@ class TechnicalReview(BaseModel):
     fingerprint: str = ""                    # 参数指纹，供日后追溯读数由哪一版算出
     vix: float | None = None
     vix3m: float | None = None
+    # False only for a report rebuilt from projections that never stored the readings: "n/a" there means
+    # "not recorded", not "could not be fetched".
+    volatility_recorded: bool = True
     market_panic: bool = False               # 期限结构倒挂（全市场级）
     readings: list[TechnicalReading] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)   # 无价格/已过滤的标的

@@ -576,10 +576,16 @@ class TechnicalReviewPayload(_Payload):
     invalidation: list[str] = Field(default_factory=list)
     panic_fired: bool | None = None
     bear_fired: bool | None = None
+    # The volatility readings the run used (2026-11-03): without them a report built from the projection cannot say
+    # whether "no panic" was evaluated or VIX3M was simply missing. `volatility_status` is "" when both were read,
+    # else "vix_unavailable" / "vix3m_unavailable" / "vix_and_vix3m_unavailable".
+    vix: float | None = None
+    vix3m: float | None = None
+    volatility_status: str = ""
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
         "data_status", "trend_state", "score", "score_detail", "suggested_exposure", "previous_exposure",
-        "invalidation", "panic_fired", "bear_fired")
+        "invalidation", "panic_fired", "bear_fired", "vix", "vix3m", "volatility_status")
 
     @field_validator("levels", mode="before")
     @classmethod

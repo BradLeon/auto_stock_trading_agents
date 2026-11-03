@@ -241,7 +241,8 @@ def test_one_symbol_runs_build_todays_summary_from_all_published_projections():
     assert [r.symbol for r in store.latest_technical_review().readings] == ["NVDA", "TSM"]
 
     # the same symbol run again replaces its own reading; a data gap is kept as a missing-data entry
-    tech._persist_per_symbol(store, _one("NVDA", 0.25))
+    # a later run of the same day: at an identical as_of the store's newest-first order is a tie broken by content hash
+    tech._persist_per_symbol(store, _one("NVDA", 0.25, as_of=NOW + timedelta(seconds=1)))
     tech._persist_per_symbol(store, _one("SKHY", 0.0, stale=True))
     saved = {r.symbol: r for r in store.latest_technical_review().readings}
     assert saved["NVDA"].target_exposure == 0.25 and saved["TSM"].target_exposure == 0.5

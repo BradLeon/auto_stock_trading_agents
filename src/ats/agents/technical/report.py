@@ -22,6 +22,20 @@ def _flags(d: dict) -> str:
     return " ".join(f"{'✓' if d.get(k) else '✗'}{lbl}" for k, lbl in order)
 
 
+def _vol(review: TechnicalReview, value: float | None, name: str) -> str:
+    if value is not None:
+        return f"{value:.2f}"
+    return "未记录" if not review.volatility_recorded else "不可用"
+
+
+def _panic(review: TechnicalReview) -> str:
+    if review.market_panic:
+        return "**是 → 建议清仓**"
+    if review.volatility_recorded and (review.vix is None or review.vix3m is None):
+        return "未评估（VIX 或 VIX3M 不可用，不做前向填充）"
+    return "否"
+
+
 def render(review: TechnicalReview, cfg: TechnicalConfig) -> str:
     lines = [
         f"# 📐 技术面读数 — {cfg.label}（{review.as_of:%Y-%m-%d}）",
@@ -34,11 +48,10 @@ def render(review: TechnicalReview, cfg: TechnicalConfig) -> str:
         "",
         "## 市场状态",
         "",
-        f"- VIX {review.vix if review.vix is not None else 'n/a'} · "
-        f"VIX3M {review.vix3m if review.vix3m is not None else 'n/a'}"
+        f"- VIX {_vol(review, review.vix, 'VIX')} · VIX3M {_vol(review, review.vix3m, 'VIX3M')}"
         + (f" · 期限结构 {review.vix / review.vix3m:.3f}"
            if review.vix and review.vix3m else ""),
-        f"- Tier1 恐慌（期限结构倒挂）: {'**是 → 建议清仓**' if review.market_panic else '否'}",
+        f"- Tier1 恐慌（期限结构倒挂）: {_panic(review)}",
         "",
         "## 逐标的读数",
         "",

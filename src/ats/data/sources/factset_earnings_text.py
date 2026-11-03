@@ -570,7 +570,7 @@ def extract_valuation(document: FactSetPDF, run: FactSetExtractionRun) -> TextEx
                 rf"{horizon}\s+12\s*-?\s*month\s+P/E\s+ratio(?:\s+for\s+the\s+S&P\s*500)?\s+is\s+"
                 r"\d+(?:\.\d+)?[.,]?\s+(?:(?:This\s+P/E\s+ratio|which)\s+)?is\s+"
                 r"(?:below|above)\s+(?:the\s+)?5\s*-\s*year\s+average(?:\s+of)?\s*\(?(?P<five>\d+(?:\.\d+)?)\)?\s+"
-                r"(?:but|and)\s+above\s+(?:the\s+)?10\s*-\s*year\s+average(?:\s+of)?\s*\(?(?P<ten>\d+(?:\.\d+)?)\)?",
+                r"(?:but|and)\s+(?:above|below)\s+(?:the\s+)?10\s*-\s*year\s+average(?:\s+of)?\s*\(?(?P<ten>\d+(?:\.\d+)?)\)?",
                 flat, re.I)
             if block:
                 for field, metric, value_group in (
@@ -774,7 +774,7 @@ def extract_index_text_semantic(document: FactSetPDF, *, document_id: str,
     if not any(c.metric_id == 'earnings.revision.improved_sector_count'
                for c in run.candidates):
         revised = re.compile(
-            rf'(?P<count>{_NUMBER_TOKEN})\s+sectors\s+are\s+expected\s+to\s+report\s+'
+            rf'(?P<count>{_NUMBER_TOKEN})\s+sectors\s+are\s+(?:expected\s+to\s+report|reporting)\s+'
             r'higher\s+earnings\s+today\s*\(compared\s+to\s+'
             r'(?P<comparison>(?:January|February|March|April|May|June|July|August|'
             r'September|October|November|December)\s+\d{1,2})\)\s+due\s+to\s+'

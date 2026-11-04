@@ -218,7 +218,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ### 7.1 切换后的操作
 
-> **状态：** S1–S5 已生效；两个定时工作流的第一次定时运行都还没观察到（`clerk-daily` 11-02 18:00 纽约，`chief-daily` 09:45 纽约）。
+> **状态：** S1–S5 已生效；`clerk-daily` 第一次定时运行已观察到（11-03 18:00 纽约 = 台北 11-04 07:00，completed，日报已生成）；`chief-daily` 第一次定时运行（11-03 09:45 纽约）因模型输出被截断以 `manual_review` 结束（B10，已修），修复后由手动运行验证了完整链路（建周期、风控驳回一次后修订、停在 `pending_approval`），定时路径的第二次运行见 11-04 09:45 纽约。
 > 各步见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3。
 
 **现状事实（切换后）**

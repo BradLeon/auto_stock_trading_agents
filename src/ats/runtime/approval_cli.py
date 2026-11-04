@@ -255,6 +255,61 @@ def show(cycle_id: str, *, full: bool = False) -> int:
     return 0
 
 
+# --- export (read-only) --------------------------------------------------------------------------- #
+def export(cycle_id: str, *, out: str | None = None) -> int:
+    """Render a cycle's current proposal as a readable Chief report without touching the cycle.
+
+    The official 首席决策 report is written only when a cycle reaches a terminal state; this one reads the
+    audit tables and the checkpoint (as `show` does), never resumes the graph, and uses its own file name
+    so the terminal report is not shadowed or overwritten.
+    """
+    from pathlib import Path
+
+    from ..agents.chief import report as chief_report
+    from ..agents.chief.decide import ChiefResult
+    from ..config import load_macro_config
+
+    repo = _repo()
+    cycle = repo.get_cycle(cycle_id)
+    if cycle is None:
+        print(f"没有这个周期：{cycle_id}")
+        return 1
+    rev = repo.latest_revision(cycle_id)
+    review = repo.effective_review(cycle_id, rev["revision_no"], rev["decision_hash"]) if rev else None
+    try:
+        values = _checkpoint_values(_graph(), cycle_id)
+    except ApprovalRefused as exc:
+        print(f"无法导出：{exc}")
+        return 1
+    result = ChiefResult(cycle_id=cycle_id, as_of=values["as_of"], summary=values.get("summary", ""),
+                         decisions=values.get("decisions") or [], reasoning=values.get("chief_reasoning") or {},
+                         option_actions=values.get("option_actions") or [],
+                         context_text=values.get("context_text") or "")
+    head = [f"> **只读导出，周期尚未定案**：状态 `{cycle['status']}`，修订 {rev['revision_no'] if rev else '-'}，"
+            f"hash `{rev['decision_hash'][:12] if rev else '-'}`。批准或驳回后，系统才会写正式的首席决策报告。", ""]
+    if review:
+        head += [f"> **风控审查：** {review['verdict']}（规则集 {review['ruleset_version']}，行情 as-of {review['market_as_of']}）", ""]
+        for v in json.loads(review["violations_json"] or "[]"):
+            head.append(f"> - 违规 {v.get('rule_id')}：{v.get('detail')}")
+        if review["notes"]:
+            head.append(f"> - 备注：{review['notes']}")
+        head.append("")
+    body = chief_report.render(result)
+    first, _, rest = body.partition("\n")
+    text = first + "\n\n" + "\n".join(head) + rest
+    if out:
+        path = Path(out)
+    else:
+        folder = load_macro_config().output_dir
+        if not folder or not Path(folder).is_dir():
+            print("没有可写的报告目录（output_dir 未设置或不存在），请用 --out 指定文件")
+            return 1
+        path = Path(folder) / f"首席决策-待审批-{result.as_of:%Y-%m-%d-%H%M}-{cycle_id}.md"
+    path.write_text(text, encoding="utf-8")
+    print(f"📝 {path}")
+    return 0
+
+
 # --- the three answers ---------------------------------------------------------------------------- #
 def _resume(cycle_id: str, approval, *, app=None) -> dict:
     from ..runtime.cli import resume_cycle
@@ -488,6 +543,9 @@ def add_parser(sub) -> None:
     sp = verbs.add_parser("show", help="完整审批对象")
     sp.add_argument("cycle")
     sp.add_argument("--full", action="store_true", help="列出全部研究快照引用，订单理由不截断")
+    ep = verbs.add_parser("export", help="只读导出该周期当前提案的首席决策报告（不改变周期状态）")
+    ep.add_argument("cycle")
+    ep.add_argument("--out", default=None, help="输出文件；默认写到报告目录，文件名带“待审批”")
     for name in ("approve", "revise", "reject"):
         vp = verbs.add_parser(name, help="不带周期和 --revision：在终端里选周期、看审批卡、输入确认词")
         vp.add_argument("cycle", nargs="?", default=None, help="周期；省略时取唯一的待审批周期（多个则让你选）")
@@ -509,6 +567,8 @@ def _dispatch(args) -> int:
         return pending()
     if args.verb == "show":
         return show(args.cycle, full=args.full)
+    if args.verb == "export":
+        return export(args.cycle, out=args.out)
     if args.revision is None or args.cycle is None:
         return _answer_in_terminal(args)
     if args.verb == "approve":

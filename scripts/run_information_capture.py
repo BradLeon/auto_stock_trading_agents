@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from ats.agents.information.outputs import InformationInsightBatchView
 
-MODEL = 'deepseek/deepseek-v4-flash-0731'
+MODEL = 'deepseek/deepseek-v4.1-flash-1017'
 LIMITS = {'requests': 8, 'output_tokens_per_request': 4096, 'seconds_per_request': 60,
           'total_seconds': 480, 'cost_reservation_usd': .50,
           'input_usd_per_million': .10, 'output_usd_per_million': .80,

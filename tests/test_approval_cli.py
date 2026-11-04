@@ -242,6 +242,18 @@ def test_show_says_the_approval_will_not_place_an_order_and_why(waiting, monkeyp
     assert "批准后不会下单" in out and "实盘锁定" in out
 
 
+def test_export_renders_the_waiting_proposal_without_changing_the_cycle(waiting, tmp_path, capsys):
+    repo, rev = waiting
+    out = tmp_path / "proposal.md"
+    assert approval_cli.export(CYCLE, out=str(out)) == 0
+    text = out.read_text(encoding="utf-8")
+    assert CYCLE in text and "只读导出" in text and "pending_approval" in text and _hash(rev) in text
+    assert "风控审查" in text and "## 决策" in text
+    after = repo.get_cycle(CYCLE)
+    assert after["status"] == "pending_approval" and repo.latest_revision(CYCLE)["decision_hash"] == rev["decision_hash"]
+    assert approval_cli.export("no-such-cycle", out=str(out)) == 1
+
+
 def test_show_folds_the_research_references_unless_asked_for_all_of_them(waiting, capsys):
     repo, rev = waiting
     assert approval_cli.show(CYCLE) == 0

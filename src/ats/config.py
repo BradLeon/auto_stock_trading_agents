@@ -459,6 +459,28 @@ def is_pead_target(symbol: str) -> bool:
     return symbol.upper() in {s.upper() for s in load_pead_global().get("targets", [])}
 
 
+PEAD_LISTS = ("targets", "observe")
+
+
+def pead_selection(spec, *, where: str = "") -> list[str]:
+    """A company list written in a data config: a literal list, or a selection from config/pead.yaml.
+
+    2026-11-04: collection configs carried hand copies of the PEAD names and drifted (names added to `targets`
+    got no consensus, financials, chain evidence or IBKR news). `{from_pead: [targets, observe], exclude: [...]}`
+    keeps a source inside the PEAD scope, so one company is collected once and read by every analyst. `exclude`
+    names what a source cannot or should not cover; an excluded name that has left the lists is simply ignored.
+    """
+    if not isinstance(spec, dict):
+        return [str(entity) for entity in spec or []]
+    lists = spec.get("from_pead") or []
+    if not lists or any(name not in PEAD_LISTS for name in lists):
+        raise ValueError(f"{where or 'entities'}: from_pead must name {'/'.join(PEAD_LISTS)}")
+    pead = load_pead_global()
+    exclude = {str(s).upper() for s in spec.get("exclude") or []}
+    selected = dict.fromkeys(str(s).upper() for name in lists for s in pead.get(name) or [])
+    return [entity for entity in selected if entity not in exclude]
+
+
 def pead_observe_list() -> list[str]:
     """Evidence-only coverage: earnings are read for chain evidence, never scored/traded."""
     return [str(s).upper() for s in load_pead_global().get("observe", [])]

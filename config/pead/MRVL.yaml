@@ -1,18 +1,37 @@
-# Marvell (MRVL) — PEAD stub, uses the _defaults scorecard.
-# L4 定制 ASIC/光互联 DSP：AWS Trainium/Inferentia 等定制硅，以及 800G/1.6T
-# 光模块 DSP;数据中心营收占比与定制硅进度是关键。
-# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+# Marvell (MRVL) — PEAD config.
+# L4 定制 ASIC/光互联 DSP：AWS Trainium 等定制硅，以及 800G/1.6T 光模块 DSP；数据中心营收占比与定制硅进度是关键。
+# 财年 1 月底结：8 月底报 FQ2，12 月初报 FQ3。fiscal_label 由财报日历派生，无需手填。
+# 2026-11-04 由 stub 补全打分卡与叙事。依据（网络检索，二手来源为主）：FQ2 FY2027 营收 $2.739B（+37%），
+# 数据中心 $2.17B（+46%）；FQ3 指引 $3.15B；FY2027 约 $12B、FY2028 约 $18B；定制业务 FY2028 预计翻倍以上；
+# 据报与 Google 有多年期定制芯片合作，但营收要到 FY2029 才实质贡献。
+# 2026-11-04 信号链去掉 CRDO：已退出 PEAD 名单，不再采集，留着只会是没有数据的空位。
 
 symbol: MRVL
 company_name: "Marvell Technology"
 sector_etf: SMH
 benchmark: QQQ
 
+# 权重之和 = 1.00
+scorecard_dims:
+  - {key: datacenter_rev,  weight: 0.25, label: 数据中心营收增速}
+  - {key: forward_guide,   weight: 0.25, label: 次季营收/EPS 指引与年度展望}
+  - {key: custom_silicon,  weight: 0.20, label: 定制 XPU/XPU-attach 进展与新客户}
+  - {key: optics_dsp,      weight: 0.15, label: 光互联 DSP（800G/1.6T）与电光互连}
+  - {key: gross_margin,    weight: 0.10, label: 毛利率（定制业务结构稀释）}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：定制营收时点的可信度}
+
 # 产业链关系：定制 ASIC 设计服务 + 光 DSP，横跨 L4 设计与 L3 光互联两侧。
 signal_chain:
   - {symbol: TSM,   role: upstream}     # 先进制程代工
   - {symbol: AVGO,  role: peer}         # 定制 ASIC 设计服务的直接竞对
-  - {symbol: CRDO,  role: peer}         # 光 DSP/retimer 侧的重叠竞争
   - {symbol: NVDA,  role: peer}         # 通用 GPU 的替代关系
+  - {symbol: COHR,  role: downstream}   # 光模块厂采购 DSP
+  - {symbol: LITE,  role: downstream}
   - {symbol: AMZN,  role: downstream}   # 定制芯片客户
   - {symbol: MSFT,  role: downstream}
+  - {symbol: GOOG, role: downstream}   # 新增定制芯片客户（营收在 FY2029 后）
+
+narrative_seed: >
+  数据中心营收占比持续上升，光互联 DSP 随 800G→1.6T 放量，定制 XPU 是估值弹性来源；
+  管理层多次上调年度展望，但定制大单的营收确认时点偏远，市场对"何时兑现"高度敏感；
+  与 AVGO 争夺定制客户，单一客户世代切换（如 Trainium 代际）带来的营收断档是历史上的主要回撤原因。

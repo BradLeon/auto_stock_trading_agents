@@ -1,5 +1,7 @@
 # SK Hynix ADR (SKHY) — PEAD config
 # L5 HBM 龙头：HBM3E/HBM4 主导 AI 内存市场；NVIDIA 独家/优先供应商
+# 2026-11-04 更新叙事。依据（网络检索，二手来源为主）：Q3 2026 营收 104.6 万亿韩元、营业利润 83.3 万亿韩元（利润率约 80%）；
+# 预计 HBM4 在 4Q26 出货与营收双双超过 HBM3E、成为主力；M15X 年底满产；新股东回报计划（FCF 回馈比例提至 50% 以上）。
 
 symbol: SKHY
 company_name: "SK Hynix"
@@ -17,7 +19,7 @@ scorecard_dims:
   - {key: hbm_share,      weight: 0.15, label: HBM3E/HBM4 市场份额维持}
   - {key: dram_pricing,   weight: 0.10, label: 传统 DRAM 价格走势}
   - {key: nvda_relation,  weight: 0.10, label: NVIDIA 独家/优先供应关系变化}
-  - {key: call_tone,      weight: 0.05, label: 管理层对 HBM4 量产时程表态}
+  - {key: call_tone,      weight: 0.05, label: 管理层对 HBM4 主力化、2027 长约与股东回报的表态}
 
 signal_chain:
   - {symbol: NVDA,  role: downstream}   # 最大 HBM 客户
@@ -27,7 +29,7 @@ signal_chain:
   - {symbol: ASML,  role: upstream}
 
 narrative_seed: >
-  全球 HBM（高带宽内存）市占率第一（约 50%+）；HBM3E 已批量向 NVIDIA 供货；
-  HBM4 量产节奏与三星追赶是核心变量；DRAM 价格周期+HBM 溢价双轨驱动毛利率；
-  作为韩国股票的 ADR，汇率（韩元/美元）与政治风险是额外折价因子；
-  NVIDIA CoWoS 封装中 HBM 是最稀缺组件之一。
+  全球 HBM（高带宽内存）市占率第一；HBM4 在 2026 年底接替 HBM3E 成为主力产品，Rubin 世代供货地位是核心；
+  存储超级周期使营业利润率达到约 80% 的历史极值，传统 DRAM/NAND 涨价与企业级 SSD 也在贡献；
+  当季 beat 是共识，股价更看 2027 年长约锁定、三星 HBM4 追赶与行业扩产是否导致周期见顶；
+  股东回报力度提升是新变量；作为韩国股票的 ADR，汇率（韩元/美元）与政治风险是额外折价因子。

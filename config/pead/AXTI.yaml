@@ -1,16 +1,37 @@
-# AXT Inc (AXTI) — PEAD stub · L3 光互联上游材料（InP/GaAs 化合物半导体衬底）。
+# AXT Inc (AXTI) — PEAD config · L3 光互联上游材料（InP/GaAs 化合物半导体衬底）。
 # 光模块/激光器的上游衬底供应商，需求随光互联出货放量；小盘、中国产能敞口/出口管制为风险因子。
-# TODO: 定制打分卡（InP 衬底出货/中国出口管制敞口/毛利率）；财报前补 fiscal_label。
+# 季报约在 2/4/7/10 月下旬。
+# 2026-11-04 更新：去掉 fiscal_label: "TODO"（改由财报日历派生）；定制打分卡与叙事。依据（网络检索，二手来源为主）：
+# Q3 2026 营收约 $73M（+160%），高于"已获许可"口径的约 $66M 指引；InP 积压订单超 $500M、需求超过供给；
+# 中国 2025-02 起把 InP 衬底列入出口管制，北京通美的出货需商务部许可；通美引入私募融资扩产，AXT 保持约 73% 控股。
+# 信号链去掉 AAOI（不在 PEAD 名单）、改正方向：光器件厂与云厂都是下游。
+
 symbol: AXTI
 company_name: "AXT Inc"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
 sector_etf: SMH
 benchmark: QQQ
-fiscal_label: "TODO"          # ⚠ 财报前填目标季，否则 period-guard 跳过核对
+run_up_warn_pct: 5.0
 long_threshold: 1.3           # 小盘高波但估值低，门槛暂定（待截面框架校准）
 
+# 权重之和 = 1.00。营收上限由出口许可决定，许可进度比需求更关键。
+scorecard_dims:
+  - {key: export_permits,  weight: 0.25, label: 出口许可进度（已获许可营收占比）}
+  - {key: forward_guide,   weight: 0.20, label: 次季营收指引（许可口径）}
+  - {key: inp_revenue,     weight: 0.20, label: InP 衬底营收与积压订单}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率}
+  - {key: capacity,        weight: 0.10, label: 通美扩产融资与产能}
+  - {key: revenue,         weight: 0.05, label: 营收超预期}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：许可与地缘措辞}
+
 signal_chain:
-  - {symbol: COHR, role: downstream}    # 衬底买家（光器件厂）
-  - {symbol: LITE, role: downstream}
-  - {symbol: AAOI, role: downstream}
-  - {symbol: GOOG, role: upstream}     # 终端需求：hyperscaler capex
-  - {symbol: MSFT,  role: upstream}
+  - {symbol: COHR,  role: downstream}   # 衬底买家（光器件厂）
+  - {symbol: LITE,  role: downstream}
+  - {symbol: GOOG, role: downstream}    # 终端需求：hyperscaler capex
+  - {symbol: MSFT,  role: downstream}
+
+narrative_seed: >
+  InP 衬底关键供应商，AI 光互联把需求推到远超供给，积压订单超过 $500M；
+  但产能在中国（北京通美），InP 衬底受中国出口管制，营收上限实际由商务部许可的发放节奏决定——
+  指引按"已获许可"口径给出，许可落地即超预期，许可受阻即断崖；
+  中美关系是主导性风险，扩产融资会稀释对通美的持股。

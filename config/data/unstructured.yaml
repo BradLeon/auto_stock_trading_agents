@@ -181,10 +181,13 @@ sources:
     adapter: ibkr_news
     status: registered
     cadence: daily
+    # 2026-11-04 (user): 36 bodies per run (was 10). The symbol list grew from 9 names to the PEAD targets + observe
+    # (27); one body per name is guaranteed first, the rest go to the newest headlines. At 10, 498 of 508 candidates
+    # were deferred on 11-03 and new targets got no company news at all.
     request_budget:
       lookback_days: 7
       slice_days: 3
-      max_body_requests: 10
+      max_body_requests: 36
       max_exploration_candidates: 2
     policy:
       access: tws_read_only
@@ -194,7 +197,9 @@ sources:
       freshness_policy: latest_verified_upstream_revision
       minimum_body_chars: 600
       lookback_days: 7
-      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
+      # 2026-11-04 (user): the PEAD lists, not a hand copy of 9 names (the 7 new targets had no news). The Yahoo
+      # fallback takes this same scope, so it widens with it.
+      symbols: {from_pead: [targets, observe]}
       providers: dynamic_tws_session
       # IBKR 是股票新闻的主来源。Yahoo 只在 TWS/供应商不可达或某个
       # historical-news 切片失败时按相同标的范围兜底；“没有新闻”是正常结果，
@@ -227,7 +232,7 @@ sources:
         lookback_days: 7
         provider_lookup_attempts: 3
         provider_lookup_retry_seconds: 1
-        symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
+        symbols: {from_pead: [targets, observe]}
   yfinance_live_news:
     domain: unstructured
     source_kind: article

@@ -1,0 +1,35 @@
+# Tesla (TSLA) — PEAD config. 用户关注、但与 AI 硬件链相关性低的 target（2026-11-04 新入）。
+# 不注入 AI 半导体行业背景：不进链证据（schedules.yaml chain_evidence_daily 排除），基准用非半导体 ETF，
+# 信号链只放同业与直接业务关系。季报约在 1/4/7/10 月下旬。
+# 叙事依据（2026-11 网络检索，二手来源为主，数字有冲突，以 Tesla 季报为准）：Q3 2026 营收约 $28B、同比持平，
+# GAAP 营业利润同比约 -56%；9 月起 Austin 用 Cybercab 跑 Robotaxi，下一站 Dallas；Optimus 在 Fremont 开始量产但爬坡慢；
+# 2026 年资本开支约 $20B 且将继续上升。
+
+symbol: TSLA
+company_name: "Tesla"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+sector_etf: XLY               # 可选消费；不用 SMH，避免拿半导体做 run-up 基准
+benchmark: QQQ
+run_up_warn_pct: 8.0          # 极高波动、叙事驱动，财报前常有大幅预期交易
+long_threshold: 1.5           # 估值几乎全部来自自动驾驶/机器人期权，财报数字对股价解释力低，门槛抬高
+
+# 权重之和 = 1.00。估值锚在自动驾驶与机器人，汽车业务看毛利与现金流能否撑住投入。
+scorecard_dims:
+  - {key: auto_margin,     weight: 0.20, label: 汽车毛利率（剔除监管积分）与单车成本}
+  - {key: autonomy,        weight: 0.20, label: Robotaxi/FSD 进展：无监督里程、新城市、付费订阅}
+  - {key: deliveries,      weight: 0.15, label: 交付量与需求（价格动作、库存）}
+  - {key: energy,          weight: 0.15, label: 储能装机与毛利率（剔除一次性项目）}
+  - {key: fcf_capex,       weight: 0.15, label: 自由现金流 vs 资本开支指引}
+  - {key: optimus,         weight: 0.10, label: Optimus 量产爬坡节奏}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：时间表承诺的可信度}
+
+signal_chain:
+  - {symbol: GOOG,  role: peer}         # Waymo：Robotaxi 规模与城市覆盖的直接对照
+  - {symbol: AMZN,  role: peer}         # Zoox
+  - {symbol: NVDA,  role: upstream}     # 训练算力采购（自研 AI5/Dojo 之外）
+
+narrative_seed: >
+  估值主要由自动驾驶（Robotaxi/FSD）、Optimus 机器人与储能的远期期权支撑，汽车业务本身营收持平、利润承压；
+  财报日股价更多受管理层时间表与里程碑（新城市、无监督里程、Optimus 产量）驱动，而非当季数字；
+  资本开支逐年上升，汽车毛利率与自由现金流决定这些投入是否需要外部融资；
+  一次性项目（关税退税、质保调整、监管积分）常被计入毛利，需剔除后读趋势。

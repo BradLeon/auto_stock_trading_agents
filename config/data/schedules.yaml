@@ -246,155 +246,19 @@ structured:
     # --- PEAD consensus refresh (added 2026-10-16, enabled 2026-10-16 on the user's approval) -----------------
     # yfinance_consensus snapshots stopped on 2026-09-04: no job ever refreshed them, and the target route
     # now ignores a snapshot older than 14 days (data/consensus.py `align`). The adapter takes exactly one
-    # entity per snapshot, so there is one job per PEAD target. Validate with `ats.data.refresh validate` after any change.
-    consensus_goog_daily:
+    # entity per snapshot, so the job expands to one job per PEAD target. Validate with `ats.data.refresh validate` after any change.
+    # 2026-11-04: the 11 hand-copied consensus_<sym>_daily jobs (06:00..06:30, 3 minutes apart) became this one
+    # job over config/pead.yaml targets, so a name added there is collected without editing this file. The
+    # expanded jobs are due together and run one after another in the same tick.
+    consensus_daily:
       enabled: true
       source: yfinance_consensus
+      entities: {from_pead: [targets]}
       datasets: [market_consensus]
       schedule: daily
       at: "06:00"
       timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity GOOG
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_nvda_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:03"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity NVDA
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_skhy_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:06"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity SKHY
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_tsm_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:09"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity TSM
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_asml_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:12"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity ASML
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_cohr_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:15"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity COHR
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_lrcx_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:18"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LRCX
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_lite_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:21"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LITE
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_avgo_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:24"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity AVGO
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_mrvl_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:27"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MRVL
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_msft_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:30"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MSFT
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity {entity}
       concurrency: 1
       freshness_slo_days: 3
       retry:
@@ -417,7 +281,8 @@ structured:
       # 2026-10-22 (G0): the scope is the PEAD target list (config/pead.yaml) plus MU, as the dataset's
       # `coverage_from` declares; it was only GOOG, MU, LRCX during the pilot. Names a vendor cannot supply a complete
       # package for (SKHY currency, ASML/TSM foreign filers) stay visible as failed/quarantined runs, not silent gaps.
-      entities: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      # 2026-11-04: read from config/pead.yaml targets instead of a copy (MU is a target now).
+      entities: {from_pead: [targets]}
       datasets: [company_financials]
       schedule: weekly
       weekday: saturday
@@ -435,10 +300,11 @@ structured:
       # yfinance) lag a filing by days to weeks (MU: SEC had the FY ending 2026-09-03 filed 10-09 while the vendors
       # still ended at 2026-05-31). Both jobs write the same dataset: the read side takes the first complete package
       # per period, so the vendor still wins a period both have, and a period only the SEC has is served from the SEC.
-      # Foreign private issuers (TSM, ASML, SKHY) file 20-F/6-K, which carry no quarterly XBRL: not listed here.
+      # Foreign private issuers (TSM, ASML, SKHY) file 20-F/6-K, which carry no quarterly XBRL: excluded.
+      # 2026-11-04: the PEAD targets minus those, read from config/pead.yaml instead of a copy.
       enabled: true
       source: sec_companyfacts
-      entities: [GOOG, NVDA, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      entities: {from_pead: [targets], exclude: [TSM, ASML, SKHY]}
       datasets: [company_financials]
       schedule: daily
       at: "07:00"
@@ -650,16 +516,17 @@ derived:
       # 2026-10-16: moved out of the legacy PEAD score window (`pead_observe_window`, left false).
       # Pilot list was TSM/ASML/MU/SKHY (validate the path on a few names, widen after go-live). 2026-11-03: widened
       # to every company witness of Layers L4, L5 and L8, whose evidence had stopped (L4 on 08-30, L5 on 10-16, L8 on
-      # 10-17) because none of their witnesses was on the list. L2/L6/L7 witnesses not named here are still not
-      # collected. ORCL and 005930.KS are left out until their fiscal period resolves (tasks 11.5): their document is
-      # quarantined as `period_unresolved` after the model has already read it, so each run would spend requests for
-      # nothing. Widen further by extending `entities`; one job (own ledger row, retry, freshness) per name.
+      # 10-17) because none of their witnesses was on the list. ORCL and 005930.KS are left out until their fiscal
+      # period resolves (tasks 11.5): their document is quarantined as `period_unresolved` after the model has already
+      # read it, so each run would spend requests for nothing.
+      # 2026-11-04 (user): the chain scope stays inside config/pead.yaml (targets + observe), so one company is
+      # collected and processed once and every analysis reads the same evidence. CRDO and KLAC left with that (they had
+      # already left PEAD; their history stays). TSLA and AAPL are targets the user follows outside the AI-hardware
+      # chain: their earnings carry no chain evidence, so extracting them would spend requests and put AI-chain
+      # framing into their own review. Widen by adding names to config/pead.yaml; one job per name.
       enabled: true
       source: chain_evidence_observer
-      entities: [TSM, ASML, MU, SKHY,
-                 COHR, CRDO, LITE, MRVL, NVDA,                                    # L4
-                 AMD, AMZN, AVGO, CRWV, GOOG, META, MSFT, NBIS, SPCX,             # L5
-                 AMAT, INTC, KLAC, LRCX]                                          # L8
+      entities: {from_pead: [targets, observe], exclude: [ORCL, "005930.KS", TSLA, AAPL]}
       schedule: daily
       at: "22:00"
       timezone: UTC

@@ -1,18 +1,36 @@
-# Lam Research (LRCX) — PEAD stub. 半导体刻蚀/沉积设备（L6），HBM/存储扩产核心受益。
-# 财年 6 月底结：2026-07-29 申报的是 FY2026 Q4。当前以期权持有。
-# TODO: 定制打分卡（存储/HBM 敞口、WFE 指引、中国占比、系统 vs 服务收入）参照 NVDA.yaml 补全。
+# Lam Research (LRCX) — PEAD config. 半导体刻蚀/沉积设备（L6），HBM/存储扩产核心受益。当前以期权持有。
+# 财年 6 月底结：10 月下旬报 FQ1，1 月下旬报 FQ2。
+# 2026-11-04 由 stub 补全打分卡与叙事。依据（网络检索，二手来源为主）：9 月季营收约 $8.22B、非 GAAP 营业利润率首破 40%；
+# 12 月季指引 $8.6B ± 0.4B；CY26 WFE 上调至约 $150B 中段，CY27 初步看 $200B 以上，DRAM 领涨，其次先进逻辑与 NAND。
+# 2026-11-04 信号链去掉 KLAC：已退出 PEAD 名单，不再采集。
 
 symbol: LRCX
 company_name: "Lam Research"
 # fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
 #   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 
+# 权重之和 = 1.00
+scorecard_dims:
+  - {key: forward_guide,   weight: 0.25, label: 次季营收/EPS 指引}
+  - {key: wfe_outlook,     weight: 0.20, label: 当年与下一年 WFE 展望（存储/逻辑拆分）}
+  - {key: memory_mix,      weight: 0.15, label: 存储（DRAM/HBM/NAND）营收占比与增速}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率与营业利润率}
+  - {key: china_mix,       weight: 0.10, label: 中国区营收占比与出口管制}
+  - {key: revenue,         weight: 0.10, label: 营收超预期}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：下一年 WFE 措辞}
+
 # 产业链关系：刻蚀与沉积设备，存储敞口在四大设备商里最高——
 # 这决定了它的订单与 DRAM/NAND 周期的相关性强于逻辑制程。
 signal_chain:
   - {symbol: MU,    role: downstream}   # DRAM/NAND 产能——Lam 存储敞口的主体
   - {symbol: SKHY,  role: downstream}   # HBM 的 TSV 刻蚀是 Lam 的专属工序
+  - {symbol: SNDK,  role: downstream}   # NAND 扩产
+  - {symbol: "005930.KS", role: downstream}
   - {symbol: TSM,   role: downstream}   # 逻辑制程侧客户
   - {symbol: ASML,  role: peer}         # 同为设备商，光刻不重叠但同吃 WFE 预算
-  - {symbol: KLAC,  role: peer}
   - {symbol: AMAT,  role: peer}         # 沉积环节直接竞争
+
+narrative_seed: >
+  存储敞口最高的设备商，DRAM/HBM 扩产与 NAND 技术升级让它成为本轮存储超级周期的直接受益者；
+  营业利润率已过 40%，股价主锚是次季指引与下一年 WFE 展望（CY27 初步看 $200B 以上）；
+  中国区占比与出口管制是政策变量；存储厂资本开支一旦放缓，订单会比逻辑侧设备更早回落。

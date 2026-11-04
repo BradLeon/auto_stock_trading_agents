@@ -1,6 +1,8 @@
-# Microsoft (MSFT) — PEAD stub. 需求端云厂（Azure + Copilot），AI CapEx 指引风向标。
-# 财年 6 月底结：2026-07-29 申报的是 FY2026 Q4（Apr–Jun 2026）。
-# TODO: 定制打分卡（Azure 增速、CapEx 指引、Copilot 变现）参照 NVDA.yaml 补全。
+# Microsoft (MSFT) — PEAD config. 需求端云厂（Azure + Copilot），AI CapEx 指引风向标。
+# 财年 6 月底结：10 月底报 FQ1，1 月底报 FQ2。
+# 2026-11-04 由 stub 补全打分卡与叙事。依据（网络检索，二手来源为主，资本开支口径各家不一，以 10-Q 为准）：
+# FQ1 FY2027 营收约 $92.3B（+19%），Azure +48%，次季指引 Azure 恒定汇率 +49–50%（加速）；
+# 当季资本开支约 $39B，低于市场预期；OpenAI 投资收益计入 GAAP 净利，剔除后 EPS 增速约 18%。
 
 symbol: MSFT
 company_name: "Microsoft"
@@ -8,9 +10,26 @@ company_name: "Microsoft"
 #   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
 
+# 权重之和 = 1.00。Azure 增速与次季 Azure 指引是股价主锚。
+scorecard_dims:
+  - {key: azure,           weight: 0.25, label: Azure 增速（恒定汇率）与 AI 贡献}
+  - {key: forward_guide,   weight: 0.20, label: 次季 Azure 与总营收指引}
+  - {key: capex,           weight: 0.15, label: 资本开支（含融资租赁口径）与供给约束表态}
+  - {key: gross_margin,    weight: 0.10, label: 微软云毛利率（AI 基础设施折旧压力）}
+  - {key: copilot,         weight: 0.10, label: Copilot/M365 商业化与 ARPU}
+  - {key: eps,             weight: 0.15, label: EPS 超预期（剔除 OpenAI 投资损益）}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：产能约束与 OpenAI 关系}
+
 signal_chain:
   - {symbol: AMZN,  role: peer}        # 同层云厂商，CapEx 指引互相印证
   - {symbol: META,  role: peer}
   - {symbol: GOOG, role: peer}
   - {symbol: NVDA,  role: upstream}    # 算力采购的核心上游约束
   - {symbol: AVGO,  role: upstream}    # 定制 ASIC 供给
+  - {symbol: MRVL,  role: upstream}    # Maia 定制芯片合作方
+
+narrative_seed: >
+  Azure 增速在 2026 年维持在 40% 以上并指引继续加速，产能而非需求是增长上限；
+  资本开支翻倍、折旧上升压制云毛利率，市场关心投入节奏与自由现金流能否保持为正；
+  OpenAI 投资损益会扭曲 GAAP EPS，需剔除后比较；Copilot 商业化是第二增长曲线但仍难单独量化；
+  财报后股价主要看次季 Azure 指引与资本开支措辞。

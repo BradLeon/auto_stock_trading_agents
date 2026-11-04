@@ -1,5 +1,7 @@
 # Taiwan Semiconductor Manufacturing (TSM) — PEAD config
 # L5 先进制程龙头：N3/N2 节点 + CoWoS 先进封装 + AI 芯片代工核心
+# 2026-11-04 更新：毛利率目标从过期的 53-55% 改为现实区间。依据（网络检索 + 6-K）：Q3 2026 毛利率 66.4%（环比 -1.3pt，N2 爬坡稀释），
+# Q4 指引 65–67%、营收 $52.3–54.3B；N2 占晶圆营收 8%，2027 年 N2 产能翻倍以上；海外厂稀释约 2pt；2026 资本开支 $60–64B。
 
 symbol: TSM
 company_name: "Taiwan Semiconductor"
@@ -12,7 +14,7 @@ long_threshold: 1.2          # 龙头溢价，稍高于默认 1.0
 
 scorecard_dims:
   - {key: revenue,        weight: 0.20, label: 营收超预期（美元/台币双口径）}
-  - {key: gross_margin,   weight: 0.20, label: 毛利率（目标 53-55%）}
+  - {key: gross_margin,   weight: 0.20, label: 毛利率（vs 指引区间；N2 爬坡与海外厂稀释）}
   - {key: forward_guide,  weight: 0.20, label: 次季营收指引（美元中枢）}
   - {key: cowos,          weight: 0.15, label: CoWoS 先进封装产能与价格}
   - {key: advanced_node,  weight: 0.10, label: N3/N2 产能爬坡节奏}
@@ -30,7 +32,7 @@ signal_chain:
   - {symbol: MU,    role: peer}
 
 narrative_seed: >
-  全球最先进晶圆代工厂；N3/N2 良率与爬坡节奏是 AI 芯片供应链核心约束；
-  CoWoS 先进封装产能决定 NVDA H100/H200/B200 供货能力；
-  台币/美元汇率与电力成本是毛利率波动主因；
-  地缘政治（台海风险溢价）压制 P/E 倍数，但 AI 需求能见度超强。
+  全球最先进晶圆代工厂；毛利率已在 65% 以上的历史高位，N2 爬坡与海外厂是主要稀释项；
+  CoWoS 先进封装产能决定 NVDA Rubin 与各家定制 ASIC 的供货能力，2027 年产能预计再翻倍；
+  资本开支指引（2027 预计大幅上调）是全链供给扩张的领先信号；
+  台币/美元汇率与电力成本是毛利率波动主因；地缘政治（台海风险溢价）压制 P/E 倍数，但 AI 需求能见度超强。

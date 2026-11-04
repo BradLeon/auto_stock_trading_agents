@@ -1,11 +1,23 @@
-# Amazon (AMZN) — PEAD stub. 需求端云厂（AWS），AI CapEx 指引风向标。
-# TODO: 定制打分卡（AWS 增速与加速度、CapEx 指引、零售利润率）参照 NVDA.yaml 补全。
+# Amazon (AMZN) — PEAD config. 需求端云厂（AWS），AI CapEx 指引风向标。2026-11-04 由 observe 升入 targets。
+# 2026-11-04 由 stub 补全打分卡与叙事。依据（网络检索，二手来源为主，自由现金流各家数字冲突，以 10-Q 为准）：
+# Q3 2026 AWS +39%（约 $46B，近五年最快），管理层预计 2027、2028 增速均超 40%；AWS 积压订单约 $578B（同比翻倍以上）；
+# 2026 资本开支约 $220B、2027 "明显更多"，滚动自由现金流转负；Trainium 计划 2027 年底起在 AWS 之外销售。
 
 symbol: AMZN
 company_name: "Amazon"
 # fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
 #   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
+
+# 权重之和 = 1.00。AWS 增速与资本开支的现金流代价是主线；零售利润率是底座。
+scorecard_dims:
+  - {key: aws,             weight: 0.25, label: AWS 营收增速、加速度与经营利润率}
+  - {key: backlog,         weight: 0.15, label: AWS 积压订单与大额长约}
+  - {key: capex_fcf,       weight: 0.20, label: 资本开支指引 vs 自由现金流}
+  - {key: retail_margin,   weight: 0.15, label: 北美/国际零售经营利润率}
+  - {key: forward_guide,   weight: 0.10, label: 次季营收与经营利润指引}
+  - {key: trainium,        weight: 0.10, label: Trainium 自研芯片部署与外售进展}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：产能（电力/芯片）约束}
 
 # 产业链关系：AWS 既是加速器的最大买方之一，也自研 Trainium/Inferentia。
 # 注释是给 evidence_observer 用的——它靠这些描述把电话会里的指代解析到具体公司。
@@ -17,3 +29,8 @@ signal_chain:
   - {symbol: MSFT,  role: peer}         # 同为超大规模云，capex 与算力租金可比
   - {symbol: GOOG, role: peer}
   - {symbol: META,  role: peer}         # 自用为主，但同样争夺加速器供给
+
+narrative_seed: >
+  AWS 在 2026 年重新加速到近 40% 并给出 2027–2028 年均超 40% 的展望，积压订单翻倍，市场重新给 AWS 定价；
+  代价是资本开支约 $220B 且 2027 继续上升，滚动自由现金流转负，财报日股价常在"AWS 加速"与"资本开支吓人"之间反转；
+  Trainium 自研与外售是降低对 NVDA 依赖、提高 AWS 利润率的关键；零售利润率是现金流底座。

@@ -89,16 +89,35 @@ def _session_from_clock(ts: datetime | None) -> str:
     return "unknown"
 
 
-def _finnhub_window(symbol: str, start: date, end: date) -> list[dict]:
+FINNHUB_RETRY_SECONDS = (2.0, 5.0)
+
+
+def _finnhub_window(symbol: str, start: date, end: date, *, sleep=None) -> list[dict]:
     """Raw Finnhub calendar rows in [start, end] — includes PAST prints, which carry
-    epsActual/revenueActual (that is how we know a print has happened)."""
+    epsActual/revenueActual (that is how we know a print has happened).
+
+    2026-11-04: a connection-level failure (ConnectError/timeout) is retried twice. Bursts of them dropped 14 of 18
+    symbols on 11-04, 8 on 10-26 and every symbol on 10-27, while the next request minutes later succeeded; an HTTP
+    error answer (4xx/5xx) is not retried.
+    """
+    import time
+
     import httpx
 
     key = get_config().secrets.finnhub_api_key
     if not key:
         raise ValueError("no FINNHUB_API_KEY")
-    r = httpx.get("https://finnhub.io/api/v1/calendar/earnings", timeout=20, params={
-        "symbol": symbol, "from": start.isoformat(), "to": end.isoformat(), "token": key})
+    sleep = sleep or time.sleep
+    for attempt, pause in enumerate((*FINNHUB_RETRY_SECONDS, None)):
+        try:
+            r = httpx.get("https://finnhub.io/api/v1/calendar/earnings", timeout=20, params={
+                "symbol": symbol, "from": start.isoformat(), "to": end.isoformat(), "token": key})
+            break
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            if pause is None:
+                raise
+            log.info("finnhub %s: %s, retry %d in %.0fs", symbol, type(exc).__name__, attempt + 1, pause)
+            sleep(pause)
     r.raise_for_status()
     rows = []
     for c in r.json().get("earningsCalendar", []) or []:

@@ -1,6 +1,8 @@
-# Alphabet (GOOG) — PEAD stub. 用户实际持有 GOOG（C 类）。
-# 需求端云厂（Google Cloud + Gemini），AI CapEx 指引是全链景气风向标。
-# TODO: 如需定制打分卡/信号链（Cloud 增速、CapEx 指引、TPU 自研），参照 NVDA.yaml 补全。
+# Alphabet (GOOG) — PEAD config. 用户实际持有 GOOG（C 类）。
+# 需求端云厂（Google Cloud + Gemini）+ TPU 自研并对外销售，AI CapEx 指引是全链景气风向标。
+# 2026-11-04 由 stub 补全打分卡与叙事。依据（网络检索，二手来源为主，数字以 Alphabet 公告为准）：
+# Q3 2026 营收 $127.6B（+25%），Google Cloud $30.7B（+103%）、经营利润率 36%，TPU 系统销售"实质性贡献"营收增长；
+# 云积压订单约 $561B；2026 资本开支 $195–205B 不变，2027 "显著增加"、Q4 电话会给细节；财报后股价约 -10%。
 
 symbol: GOOG
 company_name: "Alphabet"
@@ -8,12 +10,29 @@ company_name: "Alphabet"
 #   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 long_threshold: 1.2            # megacap 高关注度，门槛抬高
 
+# 权重之和 = 1.00。Cloud 增速与资本开支的回报（积压订单、利润率）是市场主线；搜索是现金流底座。
+scorecard_dims:
+  - {key: cloud,           weight: 0.25, label: Google Cloud 营收增速与经营利润率}
+  - {key: backlog,         weight: 0.15, label: 云积压订单（规模、增速与 24 个月内确认比例）}
+  - {key: capex_return,    weight: 0.20, label: 资本开支指引 vs 自由现金流（投入是否被回报证明）}
+  - {key: search_ads,      weight: 0.15, label: 搜索与 YouTube 广告增速（AI 搜索是否侵蚀变现）}
+  - {key: tpu,             weight: 0.10, label: TPU 对外销售与 Gemini 使用量}
+  - {key: eps,             weight: 0.10, label: EPS 超预期（剔除投资收益）}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：2027 资本开支措辞}
+
 # 产业链关系：GCP 既买加速器也自研 TPU，是链条上少数同时是买方与设计方的角色。
 signal_chain:
   - {symbol: NVDA,  role: upstream}     # GPU 采购（与自研 TPU 并行）
   - {symbol: AVGO,  role: upstream}     # TPU 联合设计方
+  - {symbol: MRVL,  role: upstream}     # 新增定制芯片合作方（营收贡献在 FY2029 后）
   - {symbol: TSM,   role: upstream}     # TPU 代工（二级上游）
   - {symbol: SKHY,  role: upstream}     # TPU 用 HBM（三级上游）
   - {symbol: MSFT,  role: peer}         # 同为超大规模云
   - {symbol: AMZN,  role: peer}
   - {symbol: META,  role: peer}
+
+narrative_seed: >
+  Google Cloud 在 2026 年加速到三位数增长、利润率大幅抬升，TPU 从自用转为对外销售，成为第二条 AI 变现路径；
+  资本开支已到年化约 $200B 且 2027 将显著增加，市场在"积压订单能否兑现回报"与"自由现金流被吞噬"之间摇摆，
+  财报后的股价方向往往由资本开支措辞而非营收 beat 决定；
+  搜索广告是现金流底座，AI 搜索对点击与变现的影响是长期变量。

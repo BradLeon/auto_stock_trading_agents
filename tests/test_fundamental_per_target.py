@@ -269,6 +269,34 @@ def test_a_brief_inside_its_120_hours_keeps_the_event_review_in_use(universe):
     assert plan.task_inputs["fundamental_modes"]["COHR"] == "fundamental-event"
 
 
+def test_an_event_review_built_under_changed_config_hands_back_to_routine(universe):
+    """2026-11-04: rewriting a ticker's card left its 72-hour event review on rules that no longer exist.
+
+    The cycle must read that name through Routine, not abort at the lineage check."""
+    tmp_path, store = universe
+    _publish(tmp_path, store, [_event("COHR", age=timedelta(hours=3)), _routine("COHR"), _routine("LITE")], _state())
+    assert dr.restore(dr.standalone(_state(), store)).task_inputs["fundamental_modes"]["COHR"] == "fundamental-event"
+    card = tmp_path / "config" / "pead" / "COHR.yaml"
+    card.write_text(card.read_text() + "\n# narrative rewritten\n")
+    plan = dr.restore(dr.standalone(_state(), store))
+    assert plan.task_inputs["fundamental_modes"]["COHR"] == "fundamental-routine"
+    assert plan.task_inputs["fundamental_modes"]["LITE"] == "fundamental-routine"
+
+
+def test_a_roster_edit_does_not_retire_an_event_review(universe):
+    """Adding a company to pead.yaml changes what is planned, not how COHR is analysed."""
+    import yaml
+
+    tmp_path, store = universe
+    _publish(tmp_path, store, [_event("COHR", age=timedelta(hours=3)), _routine("COHR"), _routine("LITE")], _state())
+    path = tmp_path / "config" / "pead.yaml"
+    cfg = yaml.safe_load(path.read_text())
+    cfg["observe"] = list(cfg.get("observe") or []) + ["ZZZZ"]
+    path.write_text(yaml.safe_dump(cfg))
+    plan = dr.restore(dr.standalone(_state(), store))
+    assert plan.task_inputs["fundamental_modes"]["COHR"] == "fundamental-event"
+
+
 def test_the_layer_review_is_fresh_when_any_layer_in_the_set_is_newer_than_the_window(universe):
     """Layers whose evidence did not change are reused and keep their old as_of; the review is as fresh as its newest Layer."""
     tmp_path, store = universe

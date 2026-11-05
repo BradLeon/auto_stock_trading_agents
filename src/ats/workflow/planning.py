@@ -160,8 +160,29 @@ def _hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+# `pead.yaml` also lists which companies are covered. Adding or removing a name changes what is planned (which tasks
+# exist), not how any existing company is analysed, so the roster is left out of the file's lineage hash: a roster edit
+# must not make every research output look like it was built from different rules.
+ROSTER_KEYS = ("targets", "observe")
+
+
 def _file_hash(path: Path) -> str:
+    if path.name == "pead.yaml" and path.parent.name != "pead":
+        try:
+            doc = _load_yaml(path)
+        except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
+            doc = None
+        if isinstance(doc, dict):
+            return _hash({k: v for k, v in doc.items() if k not in ROSTER_KEYS})
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def current_config_refs(task_id: str, entity: str, config_dir: str | Path | None = None) -> set[str]:
+    """The `config:` lineage references a projection of `task_id` for one entity would record if it were built now."""
+    root = _config_dir(config_dir)
+    ordered = task_registry().resolve_order((task_id,))
+    return {f"config:config/{path}@{_file_hash(root / path)}"
+            for path in _config_paths(ordered, "", [entity]) if (root / path).exists()}
 
 
 def task_registry() -> TaskRegistry:
@@ -452,4 +473,4 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
 
 
 __all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "FUNDAMENTAL_TASKS", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
-           "build_plan", "task_config_hashes", "task_registry", "validate_task_registry"]
+           "build_plan", "task_config_hashes", "current_config_refs", "task_registry", "validate_task_registry"]

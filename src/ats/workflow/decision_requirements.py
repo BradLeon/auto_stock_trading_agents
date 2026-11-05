@@ -1,10 +1,13 @@
 """One frozen, versioned requirement set for analysis and actual Chief entry."""
+import logging
 from datetime import UTC, datetime
 
 from ..agent.task_projection import ProjectionScope, reuse_decision
 from .cutover_routing import RouteUnavailable
 from .planning import TASK_ROLE, _hash, build_plan
 from .run_contracts import TriggerContext
+
+log = logging.getLogger(__name__)
 
 
 def freeze(plan, *, outcomes=None, manifest=None, workflow_store_path=""):
@@ -112,6 +115,13 @@ class EventCycleWithoutEvents(RouteUnavailable):
     """An event cycle was requested but no target has a usable event review."""
 
 
+def _built_under_current_config(brief, entity: str) -> bool:
+    """True when the brief was planned from the configuration files as they are now."""
+    from .planning import current_config_refs
+
+    return current_config_refs("information-brief", entity) <= set(brief.input_refs)
+
+
 def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
     """Per target, the Fundamental mode the cycle reads (D3-3).
 
@@ -144,6 +154,12 @@ def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
         brief, named = fundamental_parent_brief(store, row, ProjectionScope(kind="entity", id=entity), at=at)
         if named and brief is None:
             continue    # the brief it was built from has expired: the pair no longer validates
+        if task == "fundamental-event" and brief is not None and not _built_under_current_config(brief, entity):
+            # An event review outlives the daily runs, so a config edit can leave it standing on a brief built
+            # under rules that have since changed. Reading it would abort the whole cycle at the lineage check;
+            # the name is read through its Routine update instead, which is rebuilt every day.
+            log.warning("event review for %s built under superseded config: read through Routine instead", entity)
+            continue
         usable.setdefault(entity, set()).add(task)
     chosen = {entity: "fundamental-event" if "fundamental-event" in tasks else "fundamental-routine"
               for entity, tasks in usable.items()}

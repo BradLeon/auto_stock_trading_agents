@@ -311,11 +311,12 @@ def task_identity(plan, task):
     from pathlib import Path
 
     from ..config import REPO_ROOT
+    from .planning import _file_hash
 
     root = Path(plan.config_root or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
     for relative, expected in plan.source_config_hashes.items():
         source = root / relative.removeprefix("config/")
-        if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+        if not source.is_file() or _file_hash(source) != expected:
             raise RouteUnavailable(f"business plan configuration drifted: {relative}")
     consumer = {"layer-review": "layer", "sector-review": "sector",
                 "information-brief": "information", "fundamental-routine": "fundamental",

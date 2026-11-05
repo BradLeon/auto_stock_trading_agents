@@ -162,16 +162,24 @@ class IBKRBroker:
                     "size_increment": float(detail.sizeIncrement),
                     "min_tick": float(detail.minTick)}
 
-    def get_execution_quote(self, symbol: str, *, currency: str, metadata: dict) -> dict:
-        """BidAsk ticks carry SERVER time; ticker.time is only local receipt time."""
+    def get_execution_quote(self, symbol: str, *, currency: str, metadata: dict, venue: str = "regular") -> dict:
+        """BidAsk ticks carry SERVER time; ticker.time is only local receipt time.
+
+        `venue="overnight"` reads the OVERNIGHT contract and refuses unless the contract's own trading hours say the
+        session is open now: IBKR, not a rule in this code, knows about holidays and early closes."""
         from ib_async import Stock
 
+        exchange = {"regular": "SMART", "overnight": "OVERNIGHT"}[venue]
         with self.session() as ib:
-            contracts = ib.qualifyContracts(Stock(symbol, "SMART", currency))
+            contracts = ib.qualifyContracts(Stock(symbol, exchange, currency))
             if len(contracts) != 1 or contracts[0].symbol != symbol \
                     or contracts[0].currency != currency:
                 raise IBKRUnavailable("execution_instrument_mismatch")
             contract = contracts[0]
+            if venue == "overnight":
+                details = ib.reqContractDetails(contract)
+                if len(details) != 1 or not trading_hours_open(details[0].tradingHours, details[0].timeZoneId, _now()):
+                    raise IBKRUnavailable("overnight_session_closed")
             ticker = ib.reqTickByTickData(contract, "BidAsk", 0, False)
             tick = None
             try:
@@ -185,7 +193,7 @@ class IBKRBroker:
                 return {**metadata, "source": "ibkr:tick_by_tick_bid_ask",
                         "source_as_of": tick.time, "queried_at": _now(),
                         "price_kind": "bid_ask", "bid": tick.bidPrice, "ask": tick.askPrice,
-                        "session": "regular", "market_data_mode": (
+                        "session": "overnight" if venue == "overnight" else "regular", "market_data_mode": (
                             "live" if ticker.marketDataType == 1 else "delayed_or_unknown"),
                         "adjusted": False, "source_precision": "tick"}
             finally:
@@ -561,7 +569,10 @@ class IBKRBroker:
                 entry.error = f"action {decision.action!r} places no order"
                 self._last_trades.append(None)
                 return entry
-            contract = Stock(decision.symbol, "SMART", "USD")
+            venue = (decision.execution_basis or {}).get("venue", "regular")
+            if venue == "overnight" and not (decision.order_type == "limit" and decision.limit_price):
+                raise ValueError("overnight_order_requires_limit")
+            contract = Stock(decision.symbol, "OVERNIGHT" if venue == "overnight" else "SMART", "USD")
             if not ib.qualifyContracts(contract):
                 # Never send an order on an unverified contract. Error 200 on a
                 # normal ticker usually means TWS lost its IB-server link
@@ -626,6 +637,24 @@ class IBKRBroker:
                          caller="IBKRBroker._submit", detail="cycle_id is required")
         return hashlib.sha256(json.dumps(
             [cycle_id, revision_no, seq]).encode()).hexdigest()
+
+
+def trading_hours_open(hours: str, timezone_id: str, point) -> bool:
+    """Is `point` inside one of IBKR's `tradingHours` segments ("20261105:2000-20261106:0350;20261107:CLOSED;...")?"""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo({"US/Eastern": "America/New_York"}.get(timezone_id, timezone_id or "America/New_York"))
+    local = point.astimezone(zone).replace(tzinfo=None)
+    for segment in (hours or "").split(";"):
+        if "CLOSED" in segment or "-" not in segment:
+            continue
+        try:
+            start, end = (datetime.strptime(part, "%Y%m%d:%H%M") for part in segment.split("-"))
+        except ValueError:
+            continue
+        if start <= local < end:
+            return True
+    return False
 
 
 def order_ref(cycle_id: str, revision_no: int, seq: int, symbol: str) -> str:

@@ -276,7 +276,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
                                                      for key in FIELDS):
                 raise ValueError("governed_authorization_rejected:" + ";".join(packet.gaps))
             for seq, decision, qty in fresh:
-                quote = read_price("trader", decision)
+                quote = read_price("trader", decision, venue=decision.execution_basis.get("venue", "regular"))
                 quotes[json.dumps(decision.model_dump(mode="json"), sort_keys=True)] = quote
                 execution_audit.append({"order_seq": seq,
                                         "quote": quote.model_dump(mode="json"),

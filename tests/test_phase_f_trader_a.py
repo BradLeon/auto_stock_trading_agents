@@ -495,6 +495,8 @@ def test_runtime_quotes_do_not_write_shared_facts_or_memory(execution):
 def test_overnight_chief_refreshes_price_and_revision_at_regular_session(execution, monkeypatch):
     close = datetime.now(UTC) - timedelta(hours=12)
     monkeypatch.setattr(prices, "session_context", lambda now: (False, close))
+    # a closed market that is NOT IBKR's overnight session (premarket, weekend): deferred, priced from the close
+    monkeypatch.setattr("ats.data.runtime.execution_prices.overnight_session_candidate", lambda point: False)
     historical = quote(source_as_of=close, price_kind="previous_session_close", close=100,
                        session="previous_completed_regular", market_data_mode="historical",
                        source_precision="session_date")

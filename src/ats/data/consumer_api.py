@@ -220,6 +220,7 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 # freshly read quote (normalization, execution check) is always validated in full.
                 quote = validate_quote(runtime_quote(scope),
                     symbol=scope["entity"], currency=scope["currency"], overnight=overnight,
+                    venue=scope.get("venue", "regular"),
                     as_reference=bool(scope.get("reference_quote")) and fixed_quotes_active())
                 payload, status = quote, "complete"
                 refs = [quote_ref(quote)]

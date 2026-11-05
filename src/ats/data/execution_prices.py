@@ -132,8 +132,9 @@ def runtime_quote(scope):
         if scope.get("approval_quote_ref") not in fixed:
             raise PriceUnavailable("review_quote_missing")
         return fixed[scope["approval_quote_ref"]]
+    venue = scope.get("venue", "regular")
     return fetch_execution_price(scope["entity"], currency=scope["currency"],
-                                 overnight=bool(scope.get("overnight")))
+                                 overnight=bool(scope.get("overnight")), **({"venue": venue} if venue != "regular" else {}))
 
 
 def fixed_quotes_active() -> bool:
@@ -141,7 +142,7 @@ def fixed_quotes_active() -> bool:
     return _FIXED_QUOTES.get() is not None
 
 
-def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, as_reference=False):
+def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, as_reference=False, venue="regular"):
     """Fail closed on a quote that cannot be priced from.
 
     `as_reference` is for the quote stored in an approved-to-be revision when it is reviewed again later (at
@@ -185,7 +186,12 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, 
             raise PriceUnavailable("previous_session_close_invalid")
         values = [q.close]
     else:
-        if not regular or q.session != "regular":
+        if venue == "overnight":
+            # IBKR's overnight venue: the same live two-sided quote rules, read while the regular session is closed
+            # (the broker read already refused outside the contract's own overnight hours).
+            if (regular and not as_reference) or q.session != "overnight":
+                raise PriceUnavailable("quote_outside_overnight_session")
+        elif not regular or q.session != "regular":
             raise PriceUnavailable("quote_outside_regular_session")
         if q.price_kind != "bid_ask" or q.market_data_mode != "live" or q.source_precision != "tick":
             raise PriceUnavailable("quote_not_current_bid_ask")
@@ -199,7 +205,7 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, 
     return q
 
 
-def read_price(consumer, decision, *, overnight=False, as_reference=False):
+def read_price(consumer, decision, *, overnight=False, as_reference=False, venue="regular"):
     """`as_reference` reads the quote stored on `decision` (risk review only) and validates it as a reference."""
     from .consumer_api import read_input
 
@@ -208,7 +214,7 @@ def read_price(consumer, decision, *, overnight=False, as_reference=False):
         raise PermissionError("execution_price_order_binding_required")
     scope = {"kind": "execution_price", "entity": decision.symbol,
              "currency": request.currency, "cycle_id": request.cycle_id,
-             "purpose": request.purpose, "overnight": overnight,
+             "purpose": request.purpose, "overnight": overnight, "venue": venue,
              "approval_quote_ref": decision.execution_basis.get("quote_ref")}
     if as_reference:
         scope["reference_quote"] = True
@@ -216,7 +222,7 @@ def read_price(consumer, decision, *, overnight=False, as_reference=False):
     if packet.status != "complete":
         raise PriceUnavailable(";".join(packet.gaps))
     return validate_quote(packet.payload, symbol=decision.symbol, currency=request.currency,
-                          overnight=overnight, as_reference=as_reference)
+                          overnight=overnight, as_reference=as_reference, venue=venue)
 
 
 def directional_price(quote, action):
@@ -241,12 +247,17 @@ def proposal_error(message: str) -> bool:
 
 
 def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
-                     slippage_pct=.5, net_liquidation=0, business_scope=None, positions=None):
+                     slippage_pct=.5, net_liquidation=0, business_scope=None, positions=None, venue="regular"):
     """Freeze executable fields BEFORE risk review. An unavailable order rejects the batch.
 
     `positions` (symbol -> held shares, stock only) sizes a `target_weight` order as the
     gap from the current holding — the same reading the risk projection uses — and keeps
     a sell or trim from exceeding what is held. Without it only explicit sizes normalize.
+
+    `venue="overnight"` prices from a LIVE two-sided quote on IBKR's overnight venue and sends the order there as a
+    limit (the same slippage rule as a deferred order); the approval-time check reads the same venue and refuses once
+    the session has closed. `overnight=True` is the other, older case: a closed market, priced from the previous close
+    and deferred to the next regular session.
     """
     from ..schemas.decision import action_direction
     from ..schemas.instruments import normalize_symbol
@@ -268,8 +279,8 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 if quote_ref(captured) != basis.get("quote_ref") or basis.get("policy_version") != POLICY_VERSION:
                     raise PriceUnavailable("normalized_quote_binding_invalid")
                 try:
-                    validate_quote(captured, symbol=decision.symbol,
-                                   currency=currency, overnight=overnight)
+                    validate_quote(captured, symbol=decision.symbol, currency=currency, overnight=overnight,
+                                   venue=basis.get("venue", "regular"))
                 except PriceUnavailable:
                     # Expired/session-changed input is refreshed BEFORE the next
                     # immutable revision and review, never inside execution.
@@ -282,11 +293,12 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                     normalized.append(decision.model_copy(deep=True))
                     notes.append(f"{decision.symbol}: 复核同一规范订单；{basis['quote_ref']}")
                     continue
-            quote = read_price("trader", decision, overnight=overnight)
+            quote = read_price("trader", decision, overnight=overnight, venue=venue)
             ref = directional_price(quote, decision.action)
             increasing = action_direction(decision.action) > 0
             limit = decision.limit_price
-            if ((decision.order_type == "limit" and limit is None or overnight)
+            deferred_limit = overnight or venue == "overnight"
+            if ((decision.order_type == "limit" and limit is None or deferred_limit)
                     and (limit is None or decision.order_type == "market")):
                 raw = Decimal(str(ref)) * (1 + Decimal(str(slippage_pct)) / 100
                                            * (1 if increasing else -1))
@@ -339,10 +351,10 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                      "requested_order": decision.model_dump(mode="json"),
                      "quote_ref": quote_ref(quote), "reference_price": ref,
                      "max_deviation": .01, "max_notional": notional,
-                     "currency": currency, "defer_to_regular_session": overnight}
+                     "currency": currency, "defer_to_regular_session": overnight, "venue": venue}
             normalized.append(decision.model_copy(update={
                 "qty": qty, "notional_usd": notional, "limit_price": limit,
-                "order_type": "limit" if overnight else decision.order_type,
+                "order_type": "limit" if deferred_limit else decision.order_type,
                 "execution_basis": basis}))
             notes.append(f"{decision.symbol}: {qty:g} 股；{quote.price_kind} 参考 {ref:g} "
                          f"{currency}，来源 {quote.source_as_of.isoformat()}；{basis['quote_ref']}")
@@ -357,7 +369,8 @@ def check_execution(decision, qty, quote, *, now=None):
     reference = ExecutionPrice.model_validate(basis["quote"])
     if basis.get("quote_ref") != quote_ref(reference):
         raise PriceUnavailable("approval_quote_hash_mismatch")
-    quote = validate_quote(quote, symbol=decision.symbol, currency=basis["currency"], now=now)
+    quote = validate_quote(quote, symbol=decision.symbol, currency=basis["currency"], now=now,
+                           venue=basis.get("venue", "regular"))
     ref = directional_price(reference, decision.action)
     if ref is None or not math.isfinite(ref) or ref <= 0 or ref != basis.get("reference_price"):
         raise PriceUnavailable("approval_reference_mismatch")

@@ -237,6 +237,8 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 **成交读取的两层保障（B11，tasks 11.12）：** TWS 的 `reqExecutions` 只返回账户“自午夜起”（TWS 本地时间 = 台北）的成交，所以台北 07:00 的 Clerk 看不到前一晚午夜前的成交。补救有两层：(1) dispatcher 里的 `phase_e:fills-capture` 每天台北 23:58 读一次当日成交（`ats clerk capture-fills` 可手动跑一次；只记成交，不动 Clerk 窗口），迟到超过 10 分钟就跳过；(2) 每次 Clerk 对账后用 IBKR Flex 对账单（`.env` 的 `IBKR_FLEX_TOKEN`、`IBKR_FLEX_QUERY_ID`，查询 `ats-trades`，美东时间，落后一个营业日）补入库里没有的成交，建账日之前的不补，已有同一笔成交（含手工补录行）的不重复（`ats clerk flex-backfill --dry-run` 只看）。Flex 拉不到只记在对账摘要的 `flex` 里，不让 Clerk 失败。令牌一年到期，到期前要在 IBKR 网页重新生成并改 `.env`。
 
+**隔夜时段下单（tasks 11.13）：** 订单的 `execution_basis.venue` 为 `regular`（默认，SMART，常规时段实时买卖价）或 `overnight`（合约交易所 `OVERNIGHT`，IBEOS）。定时的首席运行若落在隔夜时段（美东周日 18:00 起、周一至周四 20:00 起，至次日 03:50；周五夜间不开）就用 overnight：价格读 OVERNIGHT 合约的实时买卖价（≤30 秒、点差 ≤1%，合约交易时段已关则 fail-closed），只下限价单，审批与执行前检查沿用订单绑定的 venue。审批必须在隔夜时段关闭前完成，否则执行前检查会要求重新审批。当前调度未前移，因此该路径只有在首席于隔夜时段运行时才会触发。
+
 两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → `ats dispatch resume --workflow <id> ...`（第 3.4 节）→ **最后**重启 `com.ats.dispatcher`，并用 `launchctl list` 确认新 PID、看 `var/logs/dispatcher.err.log` 里的 `dispatcher started: workflows=…` 一行含该工作流。每一步都需要你批准。**必须先 `resume` 再重启**：Dispatcher 在启动时才按负责人决定注册哪些交易工作流，`resume` 前启动的进程不会注册它（2026-11-01 启用 `clerk-daily` 时核实）。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
 
 **审批：查看 → 批准 / 修改 / 拒绝**

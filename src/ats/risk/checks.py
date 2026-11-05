@@ -208,7 +208,8 @@ def review_revision(
                     # The quote stored on the revision, reviewed again (e.g. at approval): its binding is checked
                     # (hash below), not how long ago it was taken; the execution check reads a fresh one.
                     q = read_price("risk", decision, as_reference=True, overnight=bool(
-                        decision.execution_basis.get("defer_to_regular_session")))
+                        decision.execution_basis.get("defer_to_regular_session")),
+                        venue=decision.execution_basis.get("venue", "regular"))
                 if quote_ref(q) != decision.execution_basis.get("quote_ref"):
                     raise ValueError("review_quote_hash_mismatch")
                 quote_stamps.append(q.source_as_of)

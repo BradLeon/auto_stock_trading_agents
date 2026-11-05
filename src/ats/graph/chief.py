@@ -177,6 +177,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
 
     pf = tport.snapshot() if state.use_broker else None
     from ..data.execution_prices import PriceUnavailable, normalize_orders, session_context
+    from ..data.runtime.execution_prices import overnight_session_candidate
     from ..workflow.cutover_routing import RouteUnavailable
 
     normalization_notes, normalization_errors = [], []
@@ -186,11 +187,15 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         # Operational normalization precedes review: its result is the actual
         # revision, card and order, rather than an unbound qty_by_symbol cache.
         from ..config import load_pead_global
-        overnight = state.source == "pead-chief" and not session_context(_now())[0]
+        scheduled = state.source == "pead-chief" and not session_context(_now())[0]
+        # Outside the regular session a candidate overnight session is traded on IBKR's overnight venue from a live quote;
+        # a closed market (premarket, weekend, Friday night) is still priced from the previous close and deferred.
+        venue = "overnight" if scheduled and overnight_session_candidate(_now()) else "regular"
+        overnight = scheduled and venue != "overnight"
         slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", .5)
         decisions, normalization_notes = normalize_orders(
             decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
-            overnight=overnight, slippage_pct=slip,
+            overnight=overnight, slippage_pct=slip, venue=venue,
             net_liquidation=pf.net_liquidation if pf else 0,
             positions={p.symbol: p.qty for p in pf.positions if p.sec_type == "STK"})
     except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:

@@ -58,7 +58,12 @@ def _step_reconcile(store, *, broker, dry_run):
     # The API only returns the account's executions since midnight (TWS local time), so a fill made before it
     # is gone by the 07:00 read. The Flex statement is the broker's own record, a business day behind: it fills
     # what the live reads missed. Its failure is recorded, never raised: it must not fail the Clerk run.
-    summary["flex"] = flex_statement.backfill(store=store, dry_run=dry_run)
+    # Only on the live broker read: a Clerk run handed another fill source (a replay, a shadow run, a test) must not
+    # reach the Boss's real account statement and put real executions into a ledger that is not the live one.
+    if type(getattr(broker, "broker", broker)).__module__.startswith("ats.broker."):
+        summary["flex"] = flex_statement.backfill(store=store, dry_run=dry_run)
+    else:
+        summary["flex"] = {"status": "skipped", "reason": "fills came from a source other than the live IBKR read"}
     return summary
 
 

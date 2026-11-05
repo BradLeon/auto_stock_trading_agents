@@ -143,8 +143,11 @@ def _apply_cumulative_fills(store, trades: list[dict], rid: int,
         (avg_px, filled_at, total_shares, status, rid))
 
 
-def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
+def reconcile(broker=None, *, store=None, dry_run: bool = False, advance_window: bool = True) -> dict:
     """Backfill execution outcomes onto `trades`. Idempotent. Never raises upward.
+
+    `advance_window=False` is for captures that run outside a Clerk window (the 23:58 read, the Flex backfill):
+    they record fills but must not move `last_reconcile_at`, which is where the next Clerk window starts.
 
     Returns a summary dict (also what the CLI prints).
     """
@@ -293,7 +296,8 @@ def reconcile(broker=None, *, store=None, dry_run: bool = False) -> dict:
         # attributed broker history — retries must stay explainable.
         verify_attempt_counts(store)
         store.conn.commit()
-        store.set_meta("last_reconcile_at", datetime.now(timezone.utc).isoformat())
+        if advance_window:
+            store.set_meta("last_reconcile_at", datetime.now(timezone.utc).isoformat())
     return summary
 
 

@@ -275,8 +275,17 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
         scheduler.add_job(consume_calendar, cron, id="phase_e:calendar-consume", coalesce=True,
                           max_instances=1, misfire_grace_time=None)
 
-    log.info("dispatcher started: workflows=%s; calendar_consume=%s",
-             ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)))
+    # TWS returns only the account's executions since its local midnight, so the day's fills are read once more
+    # before it (trader/fills_capture.py). A read that would run more than 10 minutes late is skipped: after
+    # midnight it can no longer see what it is for.
+    from ..trader.fills_capture import CRON as CAPTURE_CRON, capture_job
+
+    scheduler.add_job(capture_job, CronTrigger(day_of_week="*", **CAPTURE_CRON), id="phase_e:fills-capture",
+                      coalesce=True, max_instances=1, misfire_grace_time=600)
+
+    log.info("dispatcher started: workflows=%s; calendar_consume=%s; fills_capture=%02d:%02d %s",
+             ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)),
+             CAPTURE_CRON["hour"], CAPTURE_CRON["minute"], CAPTURE_CRON["timezone"])
     print(f"⏰ dispatcher workflows: {', '.join(entries) or 'none'}; "
           f"published calendar consume: {'enabled' if refresh_schedule.get('enabled', False) else 'disabled'}")
     try:

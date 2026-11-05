@@ -235,6 +235,8 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | `clerk-daily` | 18:00 纽约（收盘后；台北次日 07:00） | 对账：把成交与持仓写入账本（只认审计表） |
 | `chief-daily` | 09:45 纽约（开盘后，台北晚上 22:45；排在 08:00/08:30 的研究之后；订单只在常规时段内取价，所以要在开盘后、并当晚批准） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
 
+**成交读取的两层保障（B11，tasks 11.12）：** TWS 的 `reqExecutions` 只返回账户“自午夜起”（TWS 本地时间 = 台北）的成交，所以台北 07:00 的 Clerk 看不到前一晚午夜前的成交。补救有两层：(1) dispatcher 里的 `phase_e:fills-capture` 每天台北 23:58 读一次当日成交（`ats clerk capture-fills` 可手动跑一次；只记成交，不动 Clerk 窗口），迟到超过 10 分钟就跳过；(2) 每次 Clerk 对账后用 IBKR Flex 对账单（`.env` 的 `IBKR_FLEX_TOKEN`、`IBKR_FLEX_QUERY_ID`，查询 `ats-trades`，美东时间，落后一个营业日）补入库里没有的成交，建账日之前的不补，已有同一笔成交（含手工补录行）的不重复（`ats clerk flex-backfill --dry-run` 只看）。Flex 拉不到只记在对账摘要的 `flex` 里，不让 Clerk 失败。令牌一年到期，到期前要在 IBKR 网页重新生成并改 `.env`。
+
 两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → `ats dispatch resume --workflow <id> ...`（第 3.4 节）→ **最后**重启 `com.ats.dispatcher`，并用 `launchctl list` 确认新 PID、看 `var/logs/dispatcher.err.log` 里的 `dispatcher started: workflows=…` 一行含该工作流。每一步都需要你批准。**必须先 `resume` 再重启**：Dispatcher 在启动时才按负责人决定注册哪些交易工作流，`resume` 前启动的进程不会注册它（2026-11-01 启用 `clerk-daily` 时核实）。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
 
 **审批：查看 → 批准 / 修改 / 拒绝**

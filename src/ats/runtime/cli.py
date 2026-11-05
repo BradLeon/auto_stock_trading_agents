@@ -4940,12 +4940,14 @@ def main(argv: list[str] | None = None) -> int:
     ck = sub.add_parser(
         "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
     ck.add_argument("action", choices=["run", "rebuild", "gaps", "import-statement",
-                                       "classify-fill", "baseline"],
+                                       "classify-fill", "baseline", "flex-backfill", "capture-fills"],
                     help="run: 幂等执行一个对账窗口；rebuild: 重建绩效/归因读模型"
                          "（只写派生读模型）；gaps: 查看未清偿审计异常；"
                          "import-statement: 从 IBKR 交易确认报告 PDF 补录历史成交；"
                          "classify-fill: 登记一笔旧成交的合约类型（须你确认）；"
-                         "baseline: 期初建账（默认只显示计划，加 --apply 才写入）")
+                         "baseline: 期初建账（默认只显示计划，加 --apply 才写入）；"
+                         "flex-backfill: 用 IBKR Flex 对账单补入库里缺的成交（加 --dry-run 只看）；"
+                         "capture-fills: 现在读一次 TWS 当日成交（不动 Clerk 窗口）")
     ck.add_argument("--as-of", help="baseline: 建账日 YYYY-MM-DD")
     ck.add_argument("--operator", default="boss", help="baseline: 批准人")
     ck.add_argument("--reason", help="baseline: 建账原因（必填）")
@@ -5413,6 +5415,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"已登记：{args.exec_id} → {args.sec_type} {args.instrument!r}（乘数 {mult:g}）")
             return 0
+        if args.action == "flex-backfill":
+            from ..trader import flex_statement
+
+            out = flex_statement.backfill(dry_run=args.dry_run)
+            print(flex_statement.render(out))
+            return 0 if out["status"] in ("ok", "skipped") else 1
+        if args.action == "capture-fills":
+            from ..trader import fills_capture, reconcile
+
+            out = fills_capture.capture()
+            print(reconcile.render(out))
+            return 1 if out["errors"] else 0
         if args.action == "import-statement":
             from ..trader import statement_import
 

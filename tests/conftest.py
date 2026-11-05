@@ -208,6 +208,12 @@ _TWS_PORTS = frozenset({7496, 7497, 4001, 4002})
 
 
 @pytest.fixture(autouse=True)
+def _never_reach_flex(monkeypatch):
+    """No test may call the IBKR Flex service with the Boss's token from `.env`: the Clerk's reconcile step would."""
+    monkeypatch.setattr("ats.trader.flex_statement.credentials", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _never_reach_tws(monkeypatch):
     """No test may open a connection to a broker on this machine. A code path that
     builds a real IBKRBroker fails here instead of reading the user's account."""

@@ -73,6 +73,9 @@ class Secrets(BaseSettings):
     ibkr_port: int = 7497
     ibkr_client_id: int = 11
     ibkr_account: str = ""
+    # Flex Web Service (the broker's own execution record, a business day behind; trader/flex_statement.py).
+    ibkr_flex_token: str = ""
+    ibkr_flex_query_id: str = ""
 
     feishu_app_id: str = ""
     feishu_app_secret: str = ""

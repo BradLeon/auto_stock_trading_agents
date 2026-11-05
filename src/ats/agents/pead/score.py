@@ -25,6 +25,22 @@ from .outputs import ActualsView, ScoresView
 log = logging.getLogger("ats.agents.pead")
 
 
+def _route_unavailable():
+    from ...workflow.cutover_routing import RouteUnavailable
+
+    return RouteUnavailable
+
+
+class DocumentIdentityMismatch(_route_unavailable()):
+    """The actuals model judged a supplied document to be another company's or period's.
+
+    A RouteUnavailable, so the workflow records the event review as blocked (nothing is
+    published) rather than failed-and-retried against the same bad document.
+    """
+
+    reason_code = "document_identity_mismatch"
+
+
 # --------------------------------------------------------------------------- #
 # Actuals extraction (LLM from transcript + reported financials)
 # --------------------------------------------------------------------------- #
@@ -74,7 +90,11 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         "reported_revenue is an ABSOLUTE number (11700000000 for EUR 11.7B), both are in the currency the company "
         "reports in, and reporting_currency names it (ISO code). Never convert currencies. If the release also gives "
         "revenue in a convenience currency (TSMC quotes US$ next to NT$), use the REPORTING-currency figure; if you "
-        "only have the other currency's figure, leave reported_revenue empty rather than label it with the wrong code."
+        "only have the other currency's figure, leave reported_revenue empty rather than label it with the wrong code.\n"
+        f"FIRST check identity: every supplied document must be {config.symbol}'s own material for "
+        f"{config.fiscal_label}. If the transcript or an official document is another company's call/filing, or "
+        "another period's, list it in document_identity_issues (document, problem, detail) and extract nothing "
+        "from it. Mentioning the company (as a customer, partner or peer) does not make it the company's document."
     )
     expected_dims = bool(expectations and expectations.expectations)
     try:
@@ -95,6 +115,17 @@ def extract_actuals(config: PeadConfig, expectations: ExpectationSet | None,
         raise ValueError(
             f"[actuals-guard] {config.symbol} score 已中止：actuals 抽取失败（{exc}）。"
             f"宁可不打分也不产出全 0 的伪中性打分卡。") from exc
+    issues = [i for i in (view.document_identity_issues or []) if (i.problem or i.detail)]
+    if issues:
+        # The model saw that a document is not this company's / this period's. Reporting it
+        # inside an otherwise published review (MSFT Q1 FY2027, 2026-11-04: "所附纪要实为
+        # Estée Lauder") let a mis-sourced scorecard reach the chief. Stop the run instead.
+        detail = "；".join(f"{i.document or '文档'}:{i.problem or '?'}（{i.detail}）" for i in issues)
+        log.error("pead actuals for %s: document identity mismatch — %s (source %s)",
+                  config.symbol, detail, transcript_source)
+        raise DocumentIdentityMismatch(
+            f"[identity-guard] {config.symbol} {config.fiscal_label} 已中止：模型判定输入文档不属于本公司/本期"
+            f"——{detail}；纪要来源 {transcript_source or '无'}。文档需人工作废后重跑。")
     # Extraction "succeeded" but returned nothing usable despite having input →
     # a silent degradation; treat it the same as a failure.
     had_input = bool((transcript_text or "").strip()) or bool((documents_text or "").strip())

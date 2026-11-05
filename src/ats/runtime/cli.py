@@ -3105,12 +3105,13 @@ def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) ->
     for offset fiscal years like NVDA's FY2027 as well as calendar-quarter filers)
     and check that the fetched transcript REPORTS the quarter we asked for.
 
-    Acceptance: zero wrong-quarter picks. A miss is tolerable — scoring then falls
+    Acceptance: zero wrong-quarter and zero wrong-company picks (2026-11-05: a
+    quarter-targeted search returned Seagate and Estee Lauder for MSFT). A miss is tolerable — scoring then falls
     back to the earnings release — but a wrong quarter silently produces a fictional
     surprise, so it must never happen.
     """
     from ..config import load_pead_config, load_pead_global
-    from ..data import fiscal, transcript
+    from ..data import admission, fiscal, transcript
 
     targets = [s.upper() for s in (symbols or load_pead_global().get("targets", []))]
     rows, wrong, missing, skipped = [], 0, 0, []
@@ -3130,8 +3131,11 @@ def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) ->
             text, src = transcript._from_search(sym, label, cfg.company_name)
             got = fiscal.detect_period(text, src) if text else None
             body = transcript.extract_body(text, src)[0] if text else ""
+            locator = src.split(":", 1)[1] if ":" in src else src
             if not text:
                 status, missing = "—— 未找到", missing + 1
+            elif not admission.locator_names_entity(locator, sym, cfg.company_name):
+                status, wrong = "❌ 错公司", wrong + 1
             elif got == (y, q):
                 status = "✅ 正确"
             else:
@@ -3142,10 +3146,10 @@ def run_transcript_probe(symbols: list[str] | None = None, quarters: int = 4) ->
             )
 
     print(f"\n=== transcript 检索审计：{len(rows)} 次查询 ===")
-    print(f"  ✅ 正确 {len(rows) - wrong - missing}   ❌ 错季 {wrong}   —— 未找到 {missing}")
+    print(f"  ✅ 正确 {len(rows) - wrong - missing}   ❌ 错季/错公司 {wrong}   —— 未找到 {missing}")
     if skipped:
         print(f"  ⏭  跳过（label 无季度，待 Stage B 派生）：{', '.join(skipped)}")
-    print("  验收标准：错季 = 0" + ("  → 通过 ✅" if wrong == 0 else "  → 未通过 ❌"))
+    print("  验收标准：错季 = 0 且 错公司 = 0" + ("  → 通过 ✅" if wrong == 0 else "  → 未通过 ❌"))
     return 1 if wrong else 0
 
 

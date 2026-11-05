@@ -158,6 +158,12 @@ class ActualMetricView(BaseModel):
     note: str = ""
 
 
+class DocumentIdentityIssueView(BaseModel):
+    document: str = Field(default="", description="transcript | official_documents")
+    problem: str = Field(default="", description="other_company | other_period")
+    detail: str = Field(default="", description="whose / which period the document actually is, with the evidence")
+
+
 class ActualsView(BaseModel):
     reported_eps: float | None = Field(default=None, description=(
         "reported diluted EPS per share (per ADR when the company reports per ADR), in reporting_currency"))
@@ -169,8 +175,12 @@ class ActualsView(BaseModel):
     guidance: str = Field(default="", description="forward guidance extracted from the text")
     transcript_signals: list[str] = Field(default_factory=list,
                                            description="key qualitative call signals")
+    document_identity_issues: list[DocumentIdentityIssueView] = Field(
+        default_factory=list, description=(
+            "one item per supplied document that is NOT this company's material for this fiscal "
+            "period (another company's call, another quarter's release); empty when all match"))
 
-    @field_validator("metrics", mode="before")
+    @field_validator("metrics", "document_identity_issues", mode="before")
     @classmethod
     def _cm(cls, v):
         return _as_objlist(v)

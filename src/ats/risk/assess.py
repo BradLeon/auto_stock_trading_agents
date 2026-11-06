@@ -433,6 +433,7 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     option_w: dict[str, float] = {}
     risk_symbols: dict[str, str] = {}
     layer_symbols: dict[str, str] = {}
+    layer_keys: dict[str, str] = {}      # explicit instrument->layer override
     members: dict[str, set[str]] = {}
     disp: dict[str, str] = {}
     for p in equities:
@@ -442,6 +443,8 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         equity_w[s] = equity_w.get(s, 0.0) + risk_wt[p.symbol] * meta.exposure_multiplier
         risk_symbols[s] = meta.risk_symbol
         layer_symbols[s] = meta.layer_symbol
+        if meta.layer_key:
+            layer_keys[s] = meta.layer_key
         members.setdefault(s, set()).add(p.symbol)
         disp[s] = meta.label
         if p.beta is not None:
@@ -454,6 +457,8 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
         meta = registry.resolve(o.underlying)
         risk_symbols[s] = meta.risk_symbol
         layer_symbols[s] = meta.layer_symbol
+        if meta.layer_key:
+            layer_keys[s] = meta.layer_key
         members.setdefault(s, set()).add(o.symbol)
         disp[s] = meta.label
     for p in option_positions:            # underlying betas for option-only names
@@ -516,18 +521,20 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     try:
         scfg = load_sector_config(sector)
         labels = {ly.key: ly.label for ly in scfg.layers}
-        caps = {ly.key: ly.weight_cap for ly in scfg.layers}
+        from .layer_budget import effective_caps
+        layer_caps = effective_caps(scfg, get_store())
+        caps = {k: v.effective for k, v in layer_caps.items()}
         layer_w: dict[str, float] = {}
         for p in equities:
             meta = registry.resolve(p.symbol)
-            lk = scfg.layer_of(meta.layer_symbol)
+            lk = meta.layer_key or scfg.layer_of(meta.layer_symbol)
             r.symbol_layers.append(SymbolLayer(
                 symbol=p.symbol, layer=lk or "", label=labels.get(lk, "未分层") if lk else "未分层",
                 weight=round(risk_wt[p.symbol] * meta.exposure_multiplier, 4),
                 sec_type=p.sec_type or "STK"))
         for o in r.option_risks:
             meta = registry.resolve(o.underlying)
-            lk = scfg.layer_of(meta.layer_symbol)
+            lk = meta.layer_key or scfg.layer_of(meta.layer_symbol)
             dw = ((o.delta_notional / net_liq) * meta.exposure_multiplier) if net_liq else 0.0
             r.symbol_layers.append(SymbolLayer(
                 symbol=f"{o.underlying}[{o.strategy or o.right}]", layer=lk or "",
@@ -535,22 +542,27 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
                 weight=round(dw, 4), sec_type="OPT"))
         # per-underlying NET delta weight drives the layer cap (hedges net off within a layer)
         for s, w in net_w.items():
-            lk = scfg.layer_of(layer_symbols[s])
+            lk = layer_keys.get(s) or scfg.layer_of(layer_symbols[s])
             if lk:
                 layer_w[lk] = layer_w.get(lk, 0.0) + w
             underlying_by_entity[s].layer = lk or ""
             economic_by_entity[s].layer = lk or ""
-        # ⚠️ 这里读的必须是**静态** `weight_cap`，绝不能是层级分析师的预算使用率调整过的值。
-        # 两者回答不同的问题：使用率是「新增资金愿意投多少」，breach 是「已有持仓是否越界」。
-        # 共用一个数会让一条「低配」结论把满仓但合规的层瞬间判成超限、触发不必要的减仓
-        # —— 那是用建议信号冒充风险事件。使用率只作用在 cross_section 的 basket 预算上。
+        # 有效上限 = 静态 `weight_cap` × 行业分析师最新配置结论的使用率（只下调，见 risk/layer_budget.py）。
+        # 2026-11-06 起 breach 读它；此前只读静态值，理由是「低配会把满仓但合规的层判成超限、
+        # 触发不必要的减仓」。层级破限的处置只是**禁止往该层加新买单**、从不强制卖出（强制减仓只来自
+        # 止损线），所以那条担忧在现有处置下不成立。配置缺失/过期时回到静态上限并留痕。
         for lk, w in layer_w.items():
             cap = caps.get(lk)
             breached = cap is not None and w > cap
-            r.chain_layers.append(LayerExposure(key=lk, label=labels.get(lk, lk),
-                                                weight=round(w, 4), cap=cap, breached=breached))
+            lc = layer_caps.get(lk)
+            r.chain_layers.append(LayerExposure(
+                key=lk, label=labels.get(lk, lk), weight=round(w, 4), cap=cap, breached=breached,
+                static_cap=lc.static if lc else None, allocation=lc.allocation if lc else "",
+                cap_source=lc.source if lc else "static"))
             if breached:
-                r.breaches.append(Breach(layer=f"L1-{lk}", limit=f"≤{cap:.0%}",
+                basis = (f"（静态 {lc.static:.0%} × 配置「{lc.allocation}」）"
+                         if lc and lc.allocation else "")
+                r.breaches.append(Breach(layer=f"L1-{lk}", limit=f"≤{cap:.0%}{basis}",
                                          actual=f"{w:.0%}", action="缩/block 入该层的新买单"))
 
         # 跨层上限。拆层把一个 cap 变成两个独立的 cap，两半同时满仓就能超过拆分前允许的

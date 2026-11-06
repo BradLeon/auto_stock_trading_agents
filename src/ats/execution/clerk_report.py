@@ -86,7 +86,8 @@ def collect(store, out: dict, *, source: str) -> dict:
     exceptions = [dict(r) for r in conn.execute(
         "SELECT kind, symbol, window_start, window_end, basis, first_seen_at FROM ledger_exceptions "
         "WHERE status = 'open' ORDER BY first_seen_at")]
-    return {"run_id": run["run_id"], "status": run["status"], "reused": bool(out.get("reused")),
+    return {"exposure": _exposure_by_position(store, snapshot),
+            "run_id": run["run_id"], "status": run["status"], "reused": bool(out.get("reused")),
             "source": source, "window": (run["window_start"], run["window_end"]),
             "started_at": run["started_at"] or "", "finished_at": run["finished_at"], "error": error,
             "tws": tws, "counts": counts, "snapshot": snapshot, "stale_snapshot": stale,
@@ -176,20 +177,61 @@ def _conclusion(d: dict) -> str:
     return "；".join(parts) + "。"
 
 
-def _holdings(snap: dict) -> list[str]:
-    lines = ["| 标的 | 类型 | 数量 | 成本价 | 现价 | 市值 | 占净值 | 浮动盈亏 | 浮盈亏% |",
-             "|---|---|---|---|---|---|---|---|---|"]
-    total_value = total_pnl = 0.0
+def _exposure_by_position(store, snap: dict | None) -> dict:
+    """True exposure per holding, from the same risk engine the 风控日报 uses (live; {} when unreachable)."""
+    if snap is None:
+        return {}
+    try:
+        from ..agents.risk_officer import daily
+        from ..risk import exposure
+
+        d = daily.collect(store)
+        if d["source"] != "live" or d["review"] is None:
+            return {}
+        return exposure.by_key(d["exposure"])
+    except Exception:  # noqa: BLE001 - the extra columns must never fail the clerk's report
+        return {}
+
+
+def _exposure_cells(p: dict, exposure: dict, nav: float) -> tuple[str, float | None, str]:
+    """(Delta/倍数, 真实敞口 USD, 敞口占净值) for one holding; None / "—" where the book cannot say."""
+    from ..config import load_instrument_risk_registry
+    from ..risk.exposure import option_key_of_position
+
+    if p["sec_type"] == "OPT":
+        row = exposure.get(("OPT",) + option_key_of_position(p))
+    else:
+        row = exposure.get(("STK", p["symbol"]))
+        if row is None:               # no live risk read: a stock's exposure is still market value × multiplier
+            mult = load_instrument_risk_registry().resolve(p["symbol"]).exposure_multiplier
+            value = p["market_value"] * mult
+            return (f"{mult:g}× 每日目标" if mult != 1 else "1"), value, (f"{value / nav:.1%}" if nav else "—")
+    if row is None:
+        return "—", None, "—"
+    return row["factor"], row["exposure"], f"{row['nav_pct']:.1%}"
+
+
+def _holdings(snap: dict, exposure: dict | None = None) -> list[str]:
+    exposure = exposure or {}
+    nav = snap.get("net_liquidation") or 0.0
+    lines = ["| 标的 | 类型 | 数量 | 成本价 | 现价 | 市值 | 占净值 | Delta/倍数 | 真实敞口 | 敞口/净值 | 浮动盈亏 | 浮盈亏% |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    total_value = total_pnl = total_exposure = 0.0
     for p in sorted(snap["positions"], key=lambda p: -abs(p["market_value"])):
         mult = (p.get("multiplier") or 1) if p["sec_type"] == "OPT" else 1
         cost = p["avg_cost"] / mult
         basis = abs(cost * p["qty"] * mult) or 1
+        factor, value, share = _exposure_cells(p, exposure, nav)
         lines.append(f"| {_name(p)} | {'期权' if p['sec_type'] == 'OPT' else '股票'} | {p['qty']:g} | {cost:,.2f} | "
                      f"{p['market_price']:,.2f} | {_money(p['market_value'])} | {p['weight']:.1%} | "
+                     f"{factor} | {'—' if value is None else _money(value)} | {share} | "
                      f"{_signed(p['unrealized_pnl'])} | {p['unrealized_pnl'] / basis * 100:+.1f}% |")
         total_value += p["market_value"]
         total_pnl += p["unrealized_pnl"]
-    lines.append(f"| **合计** | | | | | **{_money(total_value)}** | | **{_signed(total_pnl)}** | |")
+        total_exposure += value or 0.0
+    lines.append(f"| **合计** | | | | | **{_money(total_value)}** | | | **{_money(total_exposure)}** | "
+                 f"**{total_exposure / nav:.1%}** | **{_signed(total_pnl)}** | |" if nav else
+                 f"| **合计** | | | | | **{_money(total_value)}** | | | | | **{_signed(total_pnl)}** | |")
     return lines
 
 
@@ -230,7 +272,10 @@ def render(d: dict) -> str:
                       f"（含出入金{'' if gap <= 1 else f'，间隔 {gap} 天，不是单日变动'}）。", ""]
         else:
             lines += ["这是第一份快照，作为后续核对的起点。", ""]
-        lines += ["## 二、持仓清单（按市值从大到小）", ""] + _holdings(snap) + ["", "数量为负表示空头（例如卖出开仓的期权）。", ""]
+        lines += ["## 二、持仓清单（按市值从大到小）", ""] + _holdings(snap, d.get("exposure")) + [
+            "", "数量为负表示空头（例如卖出开仓的期权）。**真实敞口**才是账户实际承担的方向风险："
+            "杠杆 ETF 按倍数放大，期权按 Δ × 张数 × 乘数 × 标的价（卖出看跌是正敞口，市值只是权利金）；"
+            "敞口取自生成报告时的实时读数，与快照时点可能略有出入；「—」表示这次没读到实时 Delta。", ""]
 
         lines += ["## 三、持仓变化核对", ""]
         changes = d["changes"]

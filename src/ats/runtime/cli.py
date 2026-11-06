@@ -2006,6 +2006,19 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
     return 0
 
 
+def risk_daily() -> int:
+    """风控日报: the book against the rules and the gate's recent verdicts, written as 风控日报-<日期>.md. Read-only."""
+    from ..agents.risk_officer import daily
+
+    out = daily.publish(push=False)
+    if out.get("error"):
+        print(f"❌ 风控日报失败：{out['error']}")
+        return 1
+    print(f"📝 {out['path']}" if out.get("path") else "(report dir unset — skipped)")
+    print(f"需要你处理的事项：{out['alerts']} 条")
+    return 0
+
+
 def risk_memo() -> int:
     """Risk-officer narrative memo: deterministic 6-layer assess -> LLM memo -> Obsidian doc.
     Read-only: snapshots the portfolio, never submits orders."""
@@ -4905,8 +4918,8 @@ def main(argv: list[str] | None = None) -> int:
     from .approval_cli import add_parser as _add_approval_parser
 
     _add_approval_parser(sub)
-    rk = sub.add_parser("risk", help="risk officer 风控 (report / memo / check)")
-    rk.add_argument("action", choices=["report", "memo", "check"])
+    rk = sub.add_parser("risk", help="risk officer 风控 (report / memo / daily / check)")
+    rk.add_argument("action", choices=["report", "memo", "daily", "check"])
     rk.add_argument("symbol", nargs="?", help="check: filter stored decisions by ticker")
     rk.add_argument("--report", action="store_true", help="report: also write an Obsidian file")
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
@@ -5357,6 +5370,8 @@ def main(argv: list[str] | None = None) -> int:
             return risk_report(write_report=args.report, offline=getattr(args, "offline", False))
         if args.action == "memo":
             return risk_memo()
+        if args.action == "daily":
+            return risk_daily()
         return risk_check(args.symbol)
     if args.command == "clerk":
         if args.action == "run":

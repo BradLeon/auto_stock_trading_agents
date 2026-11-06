@@ -100,17 +100,15 @@ def test_exit_zeroes_every_suggested_weight():
 # 单票层：预算照落，但名次不是发现
 # --------------------------------------------------------------------------- #
 def test_a_one_name_cohort_is_marked_not_applicable_but_still_gets_a_budget():
-    """单票层：名次不是发现，但预算照落 —— **受单票限额约束**。
+    """单票层：名次不是发现，但预算照落 —— 唯一的票拿满层预算。
 
-    ⚠️ 落下来的不是层上限的全额，是 `single_name_cap_frac`（40%）那一档：
-    单票拿不到超过层上限 40% 的仓位，而它是唯一的票，溢出无处可去，**剩下 60% 就不分配**。
-    这是既有行为（不是本次引入），但它是静默的，所以在这里钉住：
-    单票层的实际敞口只有层上限的四成，别把 weight_cap 当成它会用满的数。
+    2026-11-06 废弃了「单票 ≤ 层 cap × 40%」：单票上限只由风控 `max_position_pct` 管，
+    所以单票层的建议敞口 = 本层预算（不再是四成）。
     """
     rows = cs.rank_cohort(_rows(1), layer_cap=0.10)
     basket = cs.to_basket(rows, "L3_dc_power", 0.10)
     assert basket.cross_section_applicable is False        # 名次只是配置顺序的副产品
-    assert sum(r.weight for r in basket.rows) == pytest.approx(0.10 * 0.40)
+    assert sum(r.weight for r in basket.rows) == pytest.approx(0.10)
 
 
 def test_two_comparable_names_make_the_cross_section_meaningful():

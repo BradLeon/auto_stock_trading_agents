@@ -69,6 +69,12 @@ def _report(store, out, **kw):
     return d, clerk_report.render(d)
 
 
+@pytest.fixture(autouse=True)
+def _no_live_exposure(monkeypatch):
+    """The report asks the live risk engine for true exposure; a test must never reach TWS."""
+    monkeypatch.setattr(clerk_report, "_exposure_by_position", lambda store, snap: {})
+
+
 def _silence(monkeypatch):
     pushed = []
     monkeypatch.setattr("ats.runtime.digest._push", lambda *args: pushed.append(args))
@@ -78,7 +84,7 @@ def _silence(monkeypatch):
 
 def test_the_report_lists_holdings_with_cost_price_and_profit(store):
     _, text = _report(store, _run(store))
-    assert "| NVDA | 股票 | 15 | 100.00 | 110.00 | $1,650 | 1.7% | +150 | +10.0% |" in text
+    assert "| NVDA | 股票 | 15 | 100.00 | 110.00 | $1,650 | 1.7% | 1 | $1,650 | 1.7% | +150 | +10.0% |" in text
     assert "| COHR 2026-11-20 认沽 210 | 期权 | -2 | 12.47 | 22.85 | -$4,570 |" in text
     assert "| **合计** |" in text and "$100,000" in text
 

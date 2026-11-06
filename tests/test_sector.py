@@ -345,7 +345,7 @@ def test_cross_section_rank_and_sizing():
                   gross_margin=0.30, op_margin=-0.05, fwd_pe=38, mom_60d=-30, rating_delta=-0.2),
         FactorRow(symbol="DDD"),   # data desert -> excluded
     ]
-    rank_cohort(rows, layer_cap=0.10, single_name_cap_frac=0.40)
+    rank_cohort(rows, layer_cap=0.10)
     by = {r.symbol: r for r in rows}
 
     # data desert flagged, ranked last, zero weight
@@ -359,9 +359,8 @@ def test_cross_section_rank_and_sizing():
     comps = [r.composite for r in ranked]
     assert comps == sorted(comps, reverse=True)
 
-    # weights sum to the layer cap and respect the single-name cap
+    # weights sum to the layer cap (no per-name fraction of it any more; risk.yaml max_position_pct owns that)
     assert abs(sum(r.weight for r in rows) - 0.10) < 1e-9
-    assert all(r.weight <= 0.10 * 0.40 + 1e-9 for r in rows)
 
 
 def test_cross_section_structural_blend_reranks():
@@ -393,7 +392,6 @@ def test_cross_section_structural_blend_reranks():
     assert midq.quant_rank > strongq.quant_rank                 # and it was behind on quant
     # sizing invariants still hold
     assert abs(sum(r.weight for r in rows) - 0.14) < 1e-9
-    assert all(r.weight <= 0.14 * 0.40 + 1e-9 for r in rows)
 
 
 # --- cross-section orchestration resilience -------------------------------- #

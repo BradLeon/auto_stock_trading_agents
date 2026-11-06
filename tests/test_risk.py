@@ -84,7 +84,7 @@ def test_assess_beta_and_stop_and_event(monkeypatch):
 # pre-trade gate (hard enforcement)
 # --------------------------------------------------------------------------- #
 def test_pre_trade_blocks_buy_in_derisk(monkeypatch):
-    pf = _pf([_pos("X", 0.3)])
+    pf = _pf([_pos("X", 0.4)])        # past the 35% single-name limit, so a trim improves a breached metric
     review = RiskReview(as_of=NOW, risk_state="derisk")
     buy = TradeDecision(symbol="NEW", action="buy", notional_usd=10000)
     sell = TradeDecision(symbol="X", action="trim", notional_usd=5000)
@@ -254,13 +254,13 @@ def test_option_buy_call_lifts_single_name(monkeypatch):
     # A big long call pushes the underlying's NET delta over the single-name cap.
     monkeypatch.setattr(risk_assess, "_prices", lambda syms: {})
     stk = _pos("NVDA", 0.10, beta=1.5)
-    call = _opt("NVDA", qty=10, delta=0.8, strike=200, spot=200)   # dn=0.8*10*100*200=160k → 0.16
+    call = _opt("NVDA", qty=20, delta=0.8, strike=200, spot=200)   # dn=0.8*20*100*200=320k → 0.32
     pf = _pf([stk, call], cash=740_000)
     review = risk_assess.assess(pf)
-    # net delta weight ≈ 0.10 (stock) + 0.16 (call) = 0.26 > 0.20
+    # net delta weight ≈ 0.10 (stock) + 0.32 (call) = 0.42 > 0.35
     assert any(b.layer == "L1-单票" and "NVDA" in b.actual for b in review.breaches)
     o = review.option_risks[0]
-    assert o.strategy == "buy_call" and abs(o.delta_notional - 160_000) < 1
+    assert o.strategy == "buy_call" and abs(o.delta_notional - 320_000) < 1
 
 
 def test_foreign_currency_option_risk_is_converted_to_base(monkeypatch):

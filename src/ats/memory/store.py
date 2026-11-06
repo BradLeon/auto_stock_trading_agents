@@ -1619,6 +1619,16 @@ class TradingMemory:
             "SELECT payload FROM risk_reviews ORDER BY as_of DESC LIMIT 1").fetchone()
         return RiskReview.model_validate_json(row["payload"]) if row else None
 
+    def recent_decision_risk_reviews(self, since_iso: str, limit: int = 4) -> list[dict]:
+        """The risk gate's reviews of Chief revisions since `since_iso`, newest first, each joined to the
+        revision's orders (`orders_json` is None when the revision row is gone)."""
+        rows = self.conn.execute(
+            "SELECT r.cycle_id, r.revision_no, r.verdict, r.violations_json, r.notes, r.created_at, v.orders_json "
+            "FROM decision_risk_reviews r LEFT JOIN decision_revisions v "
+            "ON v.cycle_id = r.cycle_id AND v.revision_no = r.revision_no "
+            "WHERE r.created_at >= ? ORDER BY r.created_at DESC LIMIT ?", (since_iso, limit)).fetchall()
+        return [dict(r) for r in rows]
+
     def recent_risk_reviews(self, limit: int = 10) -> list[dict]:
         rows = self.conn.execute(
             "SELECT as_of, risk_state, summary FROM risk_reviews ORDER BY as_of DESC LIMIT ?",

@@ -113,7 +113,14 @@ def _clerk_daily(entry: dict) -> dict:
 
     out = clerk.clerk_run(dry_run=False)
     return {"status": out.get("status"), "run_id": out.get("run_id"),
-            "report": clerk_report.publish(out, source="定时")}
+            "report": clerk_report.publish(out, source="定时"), "risk_report": _risk_daily()}
+
+
+def _risk_daily() -> dict:
+    """The Risk Officer's 风控日报, refreshed after each trade workflow. It never raises and never fails the workflow."""
+    from ..agents.risk_officer import daily
+
+    return daily.publish()
 
 
 def _chief_daily(entry: dict) -> dict:
@@ -129,7 +136,7 @@ def _chief_daily(entry: dict) -> dict:
         outcome = "research_incomplete"
     else:
         outcome = str(result.get("cycle_status") or "ended")
-    return {"cycle_id": cycle_id, "outcome": outcome}
+    return {"cycle_id": cycle_id, "outcome": outcome, "risk_report": _risk_daily()}
 
 
 _RUNNERS = {"clerk-daily": _clerk_daily, "chief-daily": _chief_daily}

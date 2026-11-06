@@ -107,6 +107,13 @@ def _et_to_utc(raw: str) -> str:
     return local.astimezone(timezone.utc).isoformat()
 
 
+def statement_through(body: str) -> str:
+    """The last day the statement covers (`toDate`, US Eastern, as YYYY-MM-DD); '' when it states none."""
+    dates = [d for d in (st.attrib.get("toDate", "") for st in _root(body, "").iter("FlexStatement"))
+             if re.fullmatch(r"\d{8}", d or "")]
+    return f"{max(dates)[:4]}-{max(dates)[4:6]}-{max(dates)[6:]}" if dates else ""
+
+
 def parse_trades(body: str) -> list[dict]:
     """Executions as the ledger's fill dicts (the shape `IBKRBroker.get_fills` returns)."""
     from ..journal.episodes import NOT_RECORDED, occ_key
@@ -161,6 +168,29 @@ def _known(fill: dict, existing: list[dict]) -> bool:
     return False
 
 
+def _covered_by_a_whole(fills: list[dict], existing: list[dict]) -> set[int]:
+    """Statement rows that are the parts of one recorded fill.
+
+    The broker reports a partly-filled order as several executions (NVDA 2026-11-04: 6 + 14), while a hand-entered
+    row from the trade log shows the one total (20). Same instrument, side and price, within two seconds, and the
+    parts add up to the recorded quantity: the same execution, already in the ledger.
+    """
+    covered: set[int] = set()
+    for e in existing:
+        try:
+            when = datetime.fromisoformat((e["time"] or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+        parts = [f for f in fills
+                 if (e["instrument_key"] or e["symbol"]) == f["instrument_key"] and e["side"] == f["side"]
+                 and abs(float(e["price"] or 0) - f["price"]) < 1e-6
+                 and abs((datetime.fromisoformat(f["time"]) - when).total_seconds()) <= _DUP_SECONDS]
+        if len(parts) > 1 and abs(sum(f["shares"] for f in parts) - float(e["shares"] or 0)) < 1e-9:
+            covered.update(id(f) for f in parts)
+    return covered
+
+
 class _Static:
     """A broker that returns the given fills: lets `reconcile` attribute and link them exactly as a live read."""
 
@@ -187,6 +217,7 @@ def backfill(*, store=None, dry_run: bool = False, fetch=None) -> dict:
     try:
         body = (fetch or fetch_statement)(*creds)
         fills = parse_trades(body)
+        through = statement_through(body)
     except Exception as exc:  # noqa: BLE001 - a failed back-fill must not fail the Clerk run
         message = _scrub(str(exc), creds[0])[:200]
         log.warning("flex back-fill unavailable: %s", message)
@@ -195,8 +226,9 @@ def backfill(*, store=None, dry_run: bool = False, fetch=None) -> dict:
     in_scope = [f for f in fills if f["time"][:10] >= cutoff]
     existing = [dict(r) for r in store.conn.execute(
         "SELECT exec_id, symbol, instrument_key, side, shares, price, time FROM fills")]
-    missing = [f for f in in_scope if not _known(f, existing)]
-    summary = {"status": "ok", "statement_rows": len(fills), "before_baseline": len(fills) - len(in_scope),
+    covered = _covered_by_a_whole(in_scope, existing)
+    missing = [f for f in in_scope if id(f) not in covered and not _known(f, existing)]
+    summary = {"status": "ok", "through": through, "statement_rows": len(fills), "before_baseline": len(fills) - len(in_scope),
                "already_recorded": len(in_scope) - len(missing), "missing": len(missing), "inserted": 0,
                "backfilled": [f"{f['time'][:16]} {f['symbol']} {f['side']} {f['shares']:g} @ {f['price']:g}"
                               for f in missing], "dry_run": dry_run}

@@ -96,6 +96,21 @@ def collect(store, out: dict, *, source: str) -> dict:
             "waived": conn.execute("SELECT COUNT(*) FROM ledger_exceptions WHERE status = 'waived'").fetchone()[0]}
 
 
+def _flex_still_behind(d: dict) -> str:
+    """The last day the Flex statement covers, when it has not yet reached the day of this run (US Eastern).
+
+    A statement is a business day behind, so a trade made since the last one is not in it yet; the Clerk fills it
+    in on a later run by itself. '' when the statement is current, was not had, or states no date."""
+    flex = (d["counts"].get("reconcile") or {}).get("flex") or {}
+    through = flex.get("through") or ""
+    if flex.get("status") != "ok" or not through:
+        return ""
+    from zoneinfo import ZoneInfo
+
+    run_day = _ts(d["finished_at"] or d["started_at"]).astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    return through if through < run_day else ""
+
+
 def attention(d: dict, *, only_new: bool = False) -> list[str]:
     """What needs a person; written so it can be read without the rest of the report.
 
@@ -110,9 +125,20 @@ def attention(d: dict, *, only_new: bool = False) -> list[str]:
     if changes and changes["mismatched"]:
         names = "、".join(f"{r['symbol']}（应有 {r['expected']:g}，券商实际 {r['actual']:g}）"
                          for r in changes["mismatched"][:6])
-        items.append(f"{len(changes['mismatched'])} 个标的的持仓数量与成交记录对不上：{names}。"
-                     "常见原因：当天有成交没被记录（TWS 当时没连上）、期权到期或被行权、公司行为。"
-                     "请先在 IBKR 里核对这些标的的成交，缺的成交用交易确认报告补录。")
+        waiting = _flex_still_behind(d)
+        if waiting:
+            items.append(f"{len(changes['mismatched'])} 个标的的持仓数量与成交记录对不上：{names}。"
+                         f"不需要你现在做什么：券商的 Flex 对账单目前只到 {waiting}（美东），这几天的成交还没进去；"
+                         "Clerk 每次对账后都会用它补漏，等它覆盖到这几天，成交会自动补入，这条差异随之消失。"
+                         "如果 Flex 已经覆盖到那几天还是对不上，下一份日报才会请你核对。")
+        else:
+            flex = (d["counts"].get("reconcile") or {}).get("flex") or {}
+            why = ("Flex 对账单已覆盖到这几天，仍然对不上" if flex.get("status") == "ok"
+                   else "Flex 对账单这次没能取到（" + str(flex.get("reason") or flex.get("error") or flex.get("status")
+                                                  or "未运行") + "）")
+            items.append(f"{len(changes['mismatched'])} 个标的的持仓数量与成交记录对不上：{names}。{why}。"
+                         "常见原因：期权到期或被行权、公司行为、非本账户的成交。"
+                         "请先在 IBKR 里核对这些标的的成交，缺的成交用交易确认报告补录。")
     unattributed = (d["counts"].get("reconcile") or {}).get("unattributed", 0)
     if unattributed:
         items.append(f"有 {unattributed} 笔成交不知道是谁下的单（既不是系统单，也无法判断为手工单），已登记待查。")

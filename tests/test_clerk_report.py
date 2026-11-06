@@ -111,6 +111,33 @@ def test_a_missing_fill_is_called_out_in_plain_words(store):
     assert any("NVDA（应有 10，券商实际 15）" in item for item in clerk_report.attention(d))
 
 
+def _mismatch_with_flex(store, flex):
+    baseline.put_snapshot(store, baseline.snapshot_payload(_portfolio(NOW - timedelta(days=1), nvda=10.0)),
+                          period="baseline")
+    counts = {**OK_COUNTS, "reconcile": {**OK_COUNTS["reconcile"], "flex": flex}}
+    d, text = _report(store, _run(store, counts=counts))
+    return " ".join(clerk_report.attention(d)), text
+
+
+def test_a_difference_the_flex_statement_has_not_reached_yet_does_not_ask_the_boss_to_fix_it(store):
+    """2026-11-06: NVDX/SHV were reported as 'please enter these' while the statement was a day behind."""
+    from zoneinfo import ZoneInfo
+
+    behind = (NOW.astimezone(ZoneInfo("America/New_York")) - timedelta(days=2)).date().isoformat()
+    note, _ = _mismatch_with_flex(store, {"status": "ok", "through": behind, "missing": 0})
+    assert "不需要你现在做什么" in note and f"只到 {behind}" in note and "补录" not in note
+
+
+def test_a_difference_flex_has_covered_or_could_not_check_still_asks_for_a_look(store):
+    from zoneinfo import ZoneInfo
+
+    today = NOW.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    covered, _ = _mismatch_with_flex(store, {"status": "ok", "through": today, "missing": 0})
+    assert "Flex 对账单已覆盖到这几天，仍然对不上" in covered and "补录" in covered
+    down, _ = _mismatch_with_flex(store, {"status": "unavailable", "error": "refused"})
+    assert "Flex 对账单这次没能取到" in down and "补录" in down
+
+
 def test_the_first_snapshot_is_the_starting_point(store):
     _, text = _report(store, _run(store))
     assert "这是第一份快照" in text and "今天是期初建账的起点" in text

@@ -45,6 +45,11 @@ def test_parse_reads_eastern_time_options_and_skips_fx():
     assert opt["shares"] == 1.0 and opt["side"] == "SLD" and opt["right"] == "P"
 
 
+def test_the_statement_says_which_day_it_reaches():
+    assert flex_statement.statement_through(_statement(GOOG)) == "2026-11-03"
+    assert flex_statement.statement_through("<FlexQueryResponse/>") == ""
+
+
 def test_parse_follows_daylight_saving():
     [fill] = flex_statement.parse_trades(_statement(_trade(dateTime="20260915;093000")))
     assert fill["time"] == "2026-09-15T13:30:00+00:00"    # EDT, not EST
@@ -107,6 +112,26 @@ def test_backfill_inserts_only_what_the_ledger_lacks(store, creds):
     assert store.get_meta("last_reconcile_at") == "2026-11-04T23:00:00+00:00"   # a back-fill opens no window
     again = flex_statement.backfill(store=store, fetch=lambda t, q: _statement(GOOG, OPTION, OLD))
     assert (again["missing"], again["inserted"]) == (0, 0)                       # idempotent
+
+
+def test_a_hand_entered_total_covers_the_brokers_partial_fills(store, creds):
+    # NVDA 2026-11-04: the trade log showed one 20-share fill, the broker reports 6 + 14 (counted twice on 11-06 07:00)
+    store.upsert_fills([{"exec_id": "stmt:twslog:nvda", "symbol": "NVDA", "side": "BOT", "shares": 20.0,
+                         "price": 208.04, "time": "2026-11-04T08:10:47+00:00", "commission": 1.0,
+                         "instrument_key": "NVDA", "sec_type": "STK", "multiplier": 1.0, "currency": "USD"}])
+    parts = [_trade(symbol="NVDA", dateTime="20261104;031046", quantity="6", tradePrice="208.04",
+                    ibExecID="p.1", ibOrderID="1"),
+             _trade(symbol="NVDA", dateTime="20261104;031046", quantity="14", tradePrice="208.04",
+                    ibExecID="p.2", ibOrderID="1")]
+    out = flex_statement.backfill(store=store, fetch=lambda t, q: _statement(*parts))
+    assert (out["already_recorded"], out["missing"], out["inserted"]) == (2, 0, 0) and len(_row(store, "NVDA")) == 1
+    # parts that do NOT add up to the recorded total are a different execution and are still inserted
+    other = [_trade(symbol="NVDA", dateTime="20261104;031046", quantity="5", tradePrice="208.04",
+                    ibExecID="q.1", ibOrderID="2"),
+             _trade(symbol="NVDA", dateTime="20261104;031046", quantity="14", tradePrice="208.04",
+                    ibExecID="q.2", ibOrderID="2")]
+    out = flex_statement.backfill(store=store, fetch=lambda t, q: _statement(*other))
+    assert out["missing"] == 2
 
 
 def test_backfill_dry_run_writes_nothing(store, creds):

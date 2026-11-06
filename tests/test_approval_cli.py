@@ -401,6 +401,13 @@ def test_a_terminal_revise_asks_for_the_note_and_a_blank_note_cancels(waiting, a
     assert repo.conn.execute("SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = ?", (CYCLE,)).fetchone()[0] == 0
 
 
+def test_the_note_is_said_back_exactly_as_it_will_be_recorded(waiting, at_a_terminal, monkeypatch, capsys):
+    _answers(monkeypatch, "只处理 1-3, 4-7 保留原样.", "n")          # a note, then anything but the verb
+    assert approval_cli._dispatch(_args("revise")) == 1
+    out = capsys.readouterr().out
+    assert "记录的修改意见：「只处理 1-3, 4-7 保留原样.」" in out and "已取消" in out
+
+
 def test_nothing_waiting_is_said_plainly(e2e_env, at_a_terminal, capsys):
     assert approval_cli._dispatch(_args("approve")) == 1
     assert "没有待审批的周期" in capsys.readouterr().out

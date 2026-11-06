@@ -71,7 +71,11 @@ def revise_with_note(context_text: str, *, prior_summary: str, prior_decisions: 
     prior = _prior_lines(prior_decisions)
     addendum = ("\n\n## Boss 驳回上一版并提出修改意见\n"
                 f"上一版摘要：{prior_summary}\n上一版订单：\n{prior}\n\n"
-                f"修改意见（Boss 原话）：{note}\n\n请据此重新给出完整的本轮决策；意见与风控硬约束冲突时，以风控为准并说明。")
+                f"修改意见（Boss 原话）：{note}\n\n请据此重新给出完整的本轮决策。Boss 的意见优先，必须照做。"
+                "唯一的例外：照做会让订单使风险变坏（例如在 derisk 下加仓、扩大已超限的敞口、抬高杠杆，"
+                "风控闸门会因此拒绝）。订单之外的组合仍然超限，不算冲突：照意见改，"
+                "在摘要里指出“仍未修复的超限项”即可，不要为了修复它们而保留或新增意见之外的订单。"
+                "意见有歧义时，按交易更少的方向理解，并在摘要里说明你的理解。")
     return from_context(context_text + addendum, cycle_id=cycle_id, as_of=as_of, use_llm=use_llm)
 
 

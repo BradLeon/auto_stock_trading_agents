@@ -675,6 +675,10 @@ def _answer_in_terminal(args) -> int:
             return 1
     if verb == "reject" and not note.strip():
         note = input("拒绝备注（可空）：").strip()
+    # Say back exactly what will be recorded: a terminal can drop characters from CJK input (two revise notes
+    # reached the Chief as "4-原样" and "AVG\\NVDX"), and the person only sees the redrawn line, not the buffer.
+    if verb in ("revise", "reject") and note:
+        print(f"记录的{'修改意见' if verb == 'revise' else '拒绝备注'}：「{note}」")
     word = input(f"确认请输入 {verb}，其他任何输入都视为取消：").strip()
     if word != verb:
         print("已取消，没有答复。")

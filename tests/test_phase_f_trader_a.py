@@ -677,3 +677,14 @@ def test_a_sale_is_not_refused_for_a_bid_that_moved_up_since_approval(execution)
     better = quote(bid=100.4, ask=100.5)                     # +0.4% on the bid: inside the 1% band
     assert 10 * better.bid > decision.execution_basis["max_notional"]
     prices.check_execution(decision, 10, better)             # must not raise
+
+
+def test_a_sale_with_a_share_count_is_not_refused_for_a_rounding_sized_budget_but_a_buy_still_is(execution):
+    """Chief wrote qty and an approximate amount: the share count rules a sale; a buy stays inside its budget."""
+    sale = TradeDecision(symbol="AAPL", action="sell", qty=100, notional_usd=9990, order_type="market")
+    normalized, _ = prices.normalize_orders([sale], cycle_id="s", net_liquidation=1_000_000,
+                                            positions={"AAPL": 100})      # 100 x bid 100.0 = 10,000 > 9,990
+    assert normalized[0].qty == 100 and normalized[0].notional_usd == pytest.approx(10_000)
+    buy = TradeDecision(symbol="AAPL", action="buy", qty=100, notional_usd=9990, order_type="market")
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_budget"):
+        prices.normalize_orders([buy], cycle_id="b", net_liquidation=1_000_000, positions={})

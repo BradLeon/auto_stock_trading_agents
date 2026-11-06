@@ -383,7 +383,10 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 else:
                     raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_position")
             notional = qty * cap_price
-            if budget is not None and notional > budget + 1e-8:
+            # A budget caps what a BUY may spend. On a sale with an explicit share count the amount the Chief
+            # also wrote is an estimate of the same sale, and a one-tick move in the bid made 100 shares
+            # "exceed" $3,987 by a dollar — refusing a forced stop-loss sale and costing a model round.
+            if increasing and budget is not None and notional > budget + 1e-8:
                 raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_budget")
             basis = {"policy_version": POLICY_VERSION, "quote": quote.model_dump(mode="json"),
                      "requested_order": decision.model_dump(mode="json"),

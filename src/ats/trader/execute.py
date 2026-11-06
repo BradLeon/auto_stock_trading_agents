@@ -538,7 +538,9 @@ def preflight_checks(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
         with price_request("trader", [d for d, _ in to_place], cycle_id=cycle_id,
                            purpose="approved_execution_check", audit=repo):
             for seq, (decision, qty) in enumerate(to_place):
-                quote = read_price("trader", decision)
+                # The venue the order was priced on: an overnight order checked against the regular venue
+                # reads a market that is closed and is refused for having no quote.
+                quote = read_price("trader", decision, venue=decision.execution_basis.get("venue", "regular"))
                 row = {"order_seq": seq, "quote": quote.model_dump(mode="json"),
                        "approval_quote_ref": decision.execution_basis.get("quote_ref")}
                 audit.append(row)

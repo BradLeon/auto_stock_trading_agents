@@ -265,9 +265,8 @@ def bind_read(identity, *, as_of=None, mode=None, publication_path="", fallback_
 def configured_entities(kind, scope_id, *, sector="", config_dir=None):
     from pathlib import Path
 
-    import yaml
-
     from ..config import REPO_ROOT
+    from .yaml_cache import load_yaml
 
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
     if kind == "entity":
@@ -279,7 +278,7 @@ def configured_entities(kind, scope_id, *, sector="", config_dir=None):
                           if path.stem.lower() == (sector or scope_id).lower()]
         matches = []
         for path in candidates:
-            cfg = yaml.safe_load(path.read_text()) or {}
+            cfg = load_yaml(path) or {}
             layers = cfg.get("layers", [])
             if kind == "layer":
                 layers = [layer for layer in layers if layer.get("key") == scope_id]
@@ -293,7 +292,7 @@ def configured_entities(kind, scope_id, *, sector="", config_dir=None):
         if len(matches) != 1 or not matches[0]:
             raise RouteUnavailable(f"business {kind} scope is empty or ambiguous: {scope_id}")
         return matches[0]
-    cfg = yaml.safe_load((root / "pead.yaml").read_text()) or {}
+    cfg = load_yaml(root / "pead.yaml") or {}
     return [str(s).upper() for s in cfg.get("targets", [])]
 
 

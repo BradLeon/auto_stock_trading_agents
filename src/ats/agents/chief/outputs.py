@@ -30,6 +30,10 @@ class DecisionView(BaseModel):
         return normalize_action(v, where="DecisionView.action") if isinstance(v, str) else v
     target_weight: float | None = Field(None, description="desired portfolio weight 0..1; optional")
     notional_usd: float | None = Field(None, description="order size in USD; optional")
+    qty: float | None = Field(
+        None, description="order size in SHARES (positive; the action gives the direction); optional. "
+                          "Give exactly one of qty / notional_usd / target_weight. For a sell or trim "
+                          "never more than the shares held; to close a position write target_weight=0")
     order_type: Literal["market", "limit"] = "limit"
     limit_price: float | None = None
     conviction: float = Field(description="0..1")

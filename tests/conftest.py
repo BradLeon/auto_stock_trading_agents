@@ -597,3 +597,13 @@ def _no_installed_product_health_gate(monkeypatch):
     from ats.workflow import ownership
 
     monkeypatch.setattr(ownership, "PRODUCT_HEALTH_GATE", None)
+
+
+@pytest.fixture(autouse=True)
+def _clear_risk_market_data_memo():
+    """The review's two-minute market-data memo must not carry one test's fetch into the next."""
+    from ats.risk import assess
+
+    assess._MEMO.clear()
+    yield
+    assess._MEMO.clear()

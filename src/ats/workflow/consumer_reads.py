@@ -260,18 +260,17 @@ def consume_read(identity, *, target_reader, legacy_reader, legacy_identifier,
 def read_projection(store, *, consumer, role, scope, at=None, projection_id="", content_hash="",
                     require_usable=True):
     """Read only allowed, published, reusable opinions; preserve concrete refs."""
-    import yaml
-
     from ..agent.task_projection import PAYLOAD_SCHEMA_BY_ROLE, reuse_decision
     from ..agent.task_projection import content_hash as hash_projection
     from ..agents.chief.assemble import _envelope_from_row
     from ..config import REPO_ROOT
+    from .yaml_cache import load_yaml
 
     owners = {"information_brief": "information", "layer_analysis": "layer",
               "sector_allocation": "sector", "fundamental_expectation_update": "fundamental",
               "fundamental_event_review": "fundamental", "macro_review": "macro",
               "technical_review": "technical"}
-    manifest = yaml.safe_load((REPO_ROOT / "config/data/target_dataflow_coverage.yaml").read_text())
+    manifest = load_yaml(REPO_ROOT / "config/data/target_dataflow_coverage.yaml")
     contract = next(row for row in manifest["consumers"] if row["id"] == consumer)
     if owners.get(role) != consumer and owners.get(role) not in contract["allowed_projection_inputs"]:
         record_read(consumer, "task_projection", status="blocked", producer=owners.get(role),

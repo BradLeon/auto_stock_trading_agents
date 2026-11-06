@@ -20,11 +20,13 @@ def render(result: ChiefResult) -> str:
         "",
     ]
     if result.decisions:
-        lines += ["| 动作 | 标的 | 规模 | 信心 | 理由 | 引用 |", "|---|---|---|---|---|---|"]
+        if result.outcome_note:
+            lines += [f"> ⚠️ **以下建议没有形成订单，不在待审批里**：{result.outcome_note}", ""]
+        if result.skipped_note:
+            lines += [f"> 另有建议本轮没有下单：{result.skipped_note}", ""]
+        lines += ["| 动作 | 标的 | 规模 | 限价 | 信心 | 理由 | 引用 |", "|---|---|---|---|---|---|---|"]
         for d in result.decisions:
-            size = (f"${d.notional_usd:,.0f}" if d.notional_usd else f"{d.qty:g} 股" if d.qty
-                    else f"目标权重 {d.target_weight:.0%}" if d.target_weight is not None else "—")
-            lines.append(f"| {d.action} | {d.symbol} | {size} | {d.conviction:.2f} "
+            lines.append(f"| {d.action} | {d.symbol} | {_size(d)} | {_price(d)} | {d.conviction:.2f} "
                          f"| {d.rationale} | {', '.join(r[:8] for r in d.references) or '—'} |")
     else:
         lines.append("**（无行动 — 零决策）**")
@@ -41,6 +43,24 @@ def render(result: ChiefResult) -> str:
                   "```", result.context_text, "```"]
     lines.append("")
     return "\n".join(lines)
+
+
+def _size(d) -> str:
+    """Shares and money both, whichever the order has; a proposal with neither says so instead of a bare dash."""
+    parts = []
+    if d.qty:
+        parts.append(f"{d.qty:g} 股")
+    if d.notional_usd:
+        parts.append(f"≈ ${d.notional_usd:,.0f}" if d.qty else f"${d.notional_usd:,.0f}")
+    if parts:
+        return " ".join(parts)
+    return f"目标权重 {d.target_weight:.0%}" if d.target_weight is not None else "未给规模"
+
+
+def _price(d) -> str:
+    if d.limit_price:
+        return f"{d.limit_price:,.2f}"
+    return "市价" if d.order_type == "market" else "系统按盘口定"
 
 
 def _reasoning_lines(r: dict) -> list[str]:

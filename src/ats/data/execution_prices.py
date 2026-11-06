@@ -241,13 +241,31 @@ PROPOSAL_ERRORS = frozenset({
     "limit_precision_invalid"})
 
 
+MONEY_ROUNDING_TOLERANCE = 0.05
+
+# What the Chief must change, said where it will read it (the rejection goes back into its next round).
+PROPOSAL_HINTS = {
+    "quantity_or_budget_missing": "这一单没有给规模：请在该单里填 qty（股数）、notional_usd（金额）或 target_weight 之一；"
+                                  "清仓写 action=sell, target_weight=0。理由里写的数字不算规模",
+    "quantity_exceeds_position": "卖出数量超过持仓：qty 不得大于持仓股数；要清仓请写 target_weight=0",
+    "no_position_to_sell": "没有这只股票的持仓可卖：请去掉这一单",
+}
+
+
+def proposal_hint(message: str) -> str:
+    """`SYMBOL:code` -> the refusal plus what to change, or the refusal itself when there is no hint."""
+    hint = PROPOSAL_HINTS.get(message.rsplit(":", 1)[-1])
+    return f"{message}（{hint}）" if hint else message
+
+
 def proposal_error(message: str) -> bool:
     """True when a `SYMBOL:code` normalization refusal is the proposal's to fix."""
     return message.rsplit(":", 1)[-1] in PROPOSAL_ERRORS
 
 
 def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
-                     slippage_pct=.5, net_liquidation=0, business_scope=None, positions=None, venue="regular"):
+                     slippage_pct=.5, net_liquidation=0, business_scope=None, positions=None, venue="regular",
+                     skip_unquotable=False):
     """Freeze executable fields BEFORE risk review. An unavailable order rejects the batch.
 
     `positions` (symbol -> held shares, stock only) sizes a `target_weight` order as the
@@ -266,7 +284,7 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
 
     if not math.isfinite(slippage_pct) or slippage_pct < 0 or slippage_pct > 1:
         raise PriceUnavailable("limit_slippage_policy_invalid")
-    normalized, notes = [], []
+    normalized, notes, skipped = [], [], []
     with price_request("trader", orders, cycle_id=cycle_id,
                        purpose="preapproval_normalization", currency=currency,
                        business_scope=business_scope):
@@ -293,7 +311,18 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                     normalized.append(decision.model_copy(deep=True))
                     notes.append(f"{decision.symbol}: 复核同一规范订单；{basis['quote_ref']}")
                     continue
-            quote = read_price("trader", decision, overnight=overnight, venue=venue)
+            try:
+                quote = read_price("trader", decision, overnight=overnight, venue=venue)
+            except PriceUnavailable as exc:
+                # One thin name must not take the whole batch down. On the overnight venue a name whose book is
+                # unusable tonight (spread past the limit, no two-sided quote) is left out and said so; the rest are
+                # sized, reviewed and sent. Every name unusable = an outage, not a thin name: refuse as before.
+                if skip_unquotable and venue == "overnight" and str(exc).startswith("input_unavailable:"):
+                    skipped.append((decision.symbol, exc))
+                    notes.append(f"未下单：{decision.symbol} 隔夜盘口今晚不可用（{str(exc).rsplit(':', 1)[-1]}），"
+                                 "本轮不下，常规时段再处理")
+                    continue
+                raise
             ref = directional_price(quote, decision.action)
             increasing = action_direction(decision.action) > 0
             limit = decision.limit_price
@@ -343,7 +372,16 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
             if qty < quote.min_size:
                 raise PriceUnavailable(f"{decision.symbol}:no_action_below_minimum_quantity")
             if not increasing and held is not None and qty > held + 1e-9:
-                raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_position")
+                # A SIZE given as money rounds to a share count with the bid, which can land a share or two above
+                # what is held (sell "$3,746" of 100 shares quoted 37.46 -> 101 at a lower bid). That is the
+                # intent to close, not a mistake: sell what is held. An explicit share count, or an overshoot
+                # beyond rounding, is still refused.
+                if (decision.qty is None and target_qty is None and budget is not None
+                        and qty <= held * (1 + MONEY_ROUNDING_TOLERANCE) + 1e-9):
+                    notes.append(f"{decision.symbol}: 金额折算 {qty:g} 股略超持仓 {held:g}，按持仓全部卖出")
+                    qty = held
+                else:
+                    raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_position")
             notional = qty * cap_price
             if budget is not None and notional > budget + 1e-8:
                 raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_budget")
@@ -358,6 +396,8 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 "execution_basis": basis}))
             notes.append(f"{decision.symbol}: {qty:g} 股；{quote.price_kind} 参考 {ref:g} "
                          f"{currency}，来源 {quote.source_as_of.isoformat()}；{basis['quote_ref']}")
+    if skipped and not normalized:
+        raise skipped[0][1]
     return normalized, notes
 
 
@@ -386,8 +426,12 @@ def check_execution(decision, qty, quote, *, now=None):
         if (action_direction(decision.action) > 0 and price > decision.limit_price
                 or action_direction(decision.action) < 0 and price < decision.limit_price):
             raise PriceUnavailable("execution_limit_not_marketable")
-    if not math.isfinite(basis["max_notional"]) or basis["max_notional"] <= 0 \
-            or qty * price > basis["max_notional"] + 1e-8:
+    # The funds cap bounds what a BUY may spend. A sale spends nothing: a bid that ticked UP since approval
+    # means more proceeds, and the 1% deviation band and the limit price above already bound it. Applying the
+    # cap to a sale refused every de-risk order for a one-tick move in its favour.
+    if action_direction(decision.action) > 0 and (
+            not math.isfinite(basis["max_notional"]) or basis["max_notional"] <= 0
+            or qty * price > basis["max_notional"] + 1e-8):
         raise PriceUnavailable("execution_funds_exceeded_reapprove")
     if Decimal(str(qty)) % Decimal(str(quote.size_increment)) != 0 or qty < quote.min_size:
         raise PriceUnavailable("execution_instrument_precision_changed")

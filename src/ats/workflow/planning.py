@@ -166,7 +166,33 @@ def _hash(value: Any) -> str:
 ROSTER_KEYS = ("targets", "observe")
 
 
+# `risk.yaml` mixes two kinds of content. Layer and sector review read only the layer ceilings and the allocation ->
+# utilization table; the account limits, instrument registry, option-survival and directive settings drive the risk
+# gate, never a layer or sector analysis. Hashing the whole file made every limit edit look like new input to all eight
+# layer reviews and the sector review, so the next Chief cycle refused until nine LLM runs were repeated
+# (2026-11-06: raising the single-name limit did exactly that). The lineage hash covers just the sections they read.
+RISK_LINEAGE_KEYS = ("sector_layer_caps", "layer_groups", "layer_utilization")
+
+# Before this tiering the recorded lineage was the digest of the whole file. A section set that was verified identical
+# to the one behind a recorded whole-file digest keeps answering with that digest, so projections built then stay valid
+# without being rebuilt. Key = hash of the sections now; value = the whole-file digest recorded earlier. Verified
+# 2026-11-06 against the committed file at a1c1d80 (sections byte-for-byte equal as data). Add nothing here without
+# that check; it is a statement that the analysis inputs did not change, not a way to silence a mismatch.
+RISK_LEGACY_DIGESTS = {
+    "abf2fc6d67ba1c8c3c678cbb707132030fc002a7767edbc83478fe2a7ccecca8":
+        "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+}
+
+
 def _file_hash(path: Path) -> str:
+    if path.name == "risk.yaml":
+        try:
+            doc = _load_yaml(path)
+        except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
+            doc = None
+        if isinstance(doc, dict):
+            sections = _hash({k: doc[k] for k in RISK_LINEAGE_KEYS if k in doc})
+            return RISK_LEGACY_DIGESTS.get(sections, sections)
     if path.name == "pead.yaml" and path.parent.name != "pead":
         try:
             doc = _load_yaml(path)

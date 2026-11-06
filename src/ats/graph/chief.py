@@ -189,7 +189,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         from ..config import load_pead_global
         # The event-trade chief (`pead-chief`) and the scheduled daily chief (`scheduled`, chief-daily) are the system's own
         # runs; a manual run (`chief`) keeps the regular-session rule.
-        off_session = state.source in ("pead-chief", "scheduled") and not session_context(_now())[0]
+        off_session = state.source in ("pead-chief", "scheduled", "rehearsal") and not session_context(_now())[0]
         # Outside the regular session a candidate overnight session is traded on IBKR's overnight venue from a live quote;
         # a closed market (premarket, weekend, Friday night) is, for an event trade, still priced from the previous close
         # and deferred, and, for the daily chief, refused (blockers B9).
@@ -199,13 +199,14 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         decisions, normalization_notes = normalize_orders(
             decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
             overnight=overnight, slippage_pct=slip, venue=venue,
-            net_liquidation=pf.net_liquidation if pf else 0,
+            net_liquidation=pf.net_liquidation if pf else 0, skip_unquotable=venue == "overnight",
             positions={p.symbol: p.qty for p in pf.positions if p.sec_type == "STK"})
     except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:
-        from ..data.execution_prices import proposal_error
+        from ..data.execution_prices import proposal_error, proposal_hint
 
         fixable = isinstance(exc, PriceUnavailable) and proposal_error(str(exc))
-        normalization_errors = [f"订单规范化拒绝（{'提案需修改' if fixable else '执行环境不可用'}）：{exc}"]
+        normalization_errors = [f"订单规范化拒绝（{'提案需修改' if fixable else '执行环境不可用'}）："
+                                f"{proposal_hint(str(exc)) if fixable else exc}"]
     if normalization_errors:
         from ..schemas.risk import DecisionRiskReview, OrderRiskVerdict, RiskViolation
 
@@ -355,7 +356,7 @@ def _consume_scores(state: ChiefDecisionState) -> None:
             log.warning("score consume failed for %s: %s", pair, exc)
 
 
-def _write_chief_report(state: ChiefDecisionState) -> None:
+def _write_chief_report(state: ChiefDecisionState, outcome_note: str = "") -> None:
     if not (state.use_llm and state.decide):   # audit report; skip for stubs
         return
     from ..agents.chief import report as chief_report
@@ -370,7 +371,10 @@ def _write_chief_report(state: ChiefDecisionState) -> None:
                                           summary=state.summary, decisions=state.decisions,
                                           reasoning=state.chief_reasoning,
                                           option_actions=state.option_actions,
-                                          context_text=state.context_text), out_dir)
+                                          context_text=state.context_text, outcome_note=outcome_note,
+                                          skipped_note="；".join(
+                                              n.removeprefix("未下单：") for n in (state.risk_notes or [])
+                                              if str(n).startswith("未下单："))), out_dir)
     if path:
         print(f"📝 {path}")
 
@@ -599,7 +603,7 @@ def manual_review(state: ChiefDecisionState) -> dict:
             ("manual_review", event["created_at"], state.cycle_id))
         repo.conn.commit()
         _consume_scores(state)
-        _write_chief_report(state)
+        _write_chief_report(state, outcome_note=_manual_review_reason(state))
     return {"cycle_status": CycleStatus.MANUAL_REVIEW.value}
 
 

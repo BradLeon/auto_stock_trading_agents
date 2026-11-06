@@ -55,11 +55,13 @@
   - `considered_not_taken`：考虑过但没做的交易，为什么不做（包括"为什么不加仓"）。
   - `risks_and_invalidation`：什么情况说明本轮判断错了。
 - `decisions[]`：只放**正股**订单。每笔给 symbol/action/规模/order_type/limit_price/conviction/rationale。
-  - 规模三选一：`notional_usd`（本单金额）、`qty`（股数）或 `target_weight`（**交易后的目标组合权重**，
-    系统按与当前持仓的差额换算股数；清仓写 `action=sell, target_weight=0`）。
+  - 规模三选一（**必填**）：`notional_usd`（本单金额）、`qty`（股数）或 `target_weight`（**交易后的目标组合权重**，
+    系统按与当前持仓的差额换算股数；清仓写 `action=sell, target_weight=0`）。**只在 rationale 里写“减 300 股”
+    不算规模**：缺规模的订单整批会被订单规范化拒绝、本轮作废。卖出/减仓的 `qty` 不得超过上下文里的持仓股数。
+  - 价格：`order_type=limit` 时可填 `limit_price`；不填则系统按实时盘口 ± 滑点自动定价，不需要你估价。
   - 只能卖或减**持有的正股**；账本里的期权行不是正股持仓。
   - rationale 必须引用具体的分析师信号（如"COHR scorecard +1.8 超门槛 1.5，行业评审增持，宏观半导体中性"）。
-  - 尺寸克制：单笔不超过 guardrail（单票 20%/单笔 $25k），conviction 与信号强度一致。
+  - 尺寸克制：单笔不超过 guardrail（单票 35%/单笔 $25k），conviction 与信号强度一致。
 - `references`：每笔订单、每条持仓复查和证据权衡，都列出所依据研究的投影 ID（上下文每段研究
   开头的 32 位 ID）。系统会核对这些 ID 是否在本轮快照里，查不到的会记入审计。
 - `option_actions[]`：**只针对账本里已有的期权仓位**给建议，由人工执行，系统不下单。

@@ -119,6 +119,26 @@ def _broker(monkeypatch, ib, now):
     return broker
 
 
+def test_a_name_with_no_usable_overnight_book_is_left_out_not_the_whole_batch(execution, monkeypatch):
+    """2026-11-06: FORM's overnight spread was past the limit and the whole 11-order de-risk batch was refused."""
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, datetime.now(UTC) - timedelta(hours=6)))
+
+    def provider(symbol, **kwargs):
+        if symbol == "FORM":
+            raise prices.PriceUnavailable("input_unavailable:PriceUnavailable:quote_spread_invalid")
+        return _overnight_quote(symbol=symbol)
+
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price", provider)
+    orders = [TradeDecision(symbol=s, action="buy", notional_usd=1000, order_type="market") for s in ("AAPL", "FORM")]
+    kept, notes = prices.normalize_orders(orders, cycle_id="night", venue="overnight", skip_unquotable=True)
+    assert [o.symbol for o in kept] == ["AAPL"]
+    assert any(n.startswith("未下单：FORM") and "quote_spread_invalid" in n for n in notes)
+    with pytest.raises(prices.PriceUnavailable, match="quote_spread_invalid"):          # the default is unchanged
+        prices.normalize_orders(orders, cycle_id="night", venue="overnight")
+    with pytest.raises(prices.PriceUnavailable, match="quote_spread_invalid"):          # nothing usable = an outage
+        prices.normalize_orders(orders[1:], cycle_id="night", venue="overnight", skip_unquotable=True)
+
+
 def test_overnight_quote_read_uses_the_overnight_contract_and_the_contracts_own_hours(monkeypatch):
     ib = _IB(HOURS)
     row = _broker(monkeypatch, ib, at(5, 22).astimezone(UTC)).get_execution_quote(
@@ -170,7 +190,7 @@ def test_a_regular_order_still_goes_to_smart(execution, monkeypatch):
     assert exchanges == ["SMART"]
 
 
-@pytest.mark.parametrize("source", ["pead-chief", "scheduled"])        # the event chief and chief-daily
+@pytest.mark.parametrize("source", ["pead-chief", "scheduled", "rehearsal"])   # event chief, chief-daily, its no-LLM rehearsal
 def test_the_scheduled_chief_trades_the_overnight_session_on_the_overnight_venue(execution, monkeypatch, source):
     from ats.graph import chief
     from ats.graph.chief_state import ChiefDecisionState
@@ -200,3 +220,39 @@ def test_a_manual_chief_run_keeps_the_regular_session_rule(execution, monkeypatc
                                                                        order_type="market")])
     reviewed = state.model_copy(update=chief.risk_gate(state))
     assert reviewed.risk_review.verdict == "rejected" and reviewed.normalization_errors
+
+
+def test_the_approval_time_check_of_an_overnight_order_reads_the_overnight_venue(execution, monkeypatch):
+    """The locked approval re-checks each order's quote; it must ask the venue the order was priced on."""
+    from test_approved_not_executed import _production_lock
+
+    from ats.graph import chief
+    from ats.graph.chief_state import ChiefDecisionState
+
+    venues = []
+
+    def fetch(symbol, **kw):
+        venues.append(kw.get("venue"))
+        return _overnight_quote(symbol=symbol)
+
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, datetime.now(UTC) - timedelta(hours=6)))
+    monkeypatch.setattr("ats.data.runtime.execution_prices.overnight_session_candidate", lambda point: True)
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price", fetch)
+    state = ChiefDecisionState(cycle_id="night-approve", as_of=datetime.now(UTC), source="scheduled", decide=False,
+                               use_llm=False, dry_run=False,
+                               decisions=[TradeDecision(symbol="AAPL", action="buy", notional_usd=1000,
+                                                        order_type="market")])
+    state = state.model_copy(update=chief.risk_gate(state))
+    assert state.risk_review.verdict == "approved", state.risk_notes
+    state = state.model_copy(update=chief.persist_decision(state))
+    approval = chief.BossApproval(status="approved", reviewer="test-human", channel="test",
+                                  reviewed_at=datetime.now(UTC))
+    chief._record_approval(state, approval)
+    state = state.model_copy(update={"approval": approval})
+    _production_lock(monkeypatch)
+    venues.clear()
+
+    out = chief.trader(state)
+
+    assert venues and set(venues) == {"overnight"}
+    assert out["gate_outcome"] == "approved_not_executed", out.get("gate_rejections")

@@ -230,12 +230,11 @@ def _consumer_contract(consumer_id: str) -> dict[str, Any]:
     Read from the same manifest `qualification()` reads, so the gate cannot be
     called with a domain that disagrees with the one it validates against.
     """
-    import yaml
-
     from ..config import REPO_ROOT
+    from .yaml_cache import load_yaml
 
     coverage = REPO_ROOT / "config" / "data" / "target_dataflow_coverage.yaml"
-    manifest = yaml.safe_load(coverage.read_text(encoding="utf-8"))
+    manifest = load_yaml(coverage)
     for consumer in manifest.get("consumers", []):
         if consumer.get("id") == consumer_id:
             products = sorted(consumer.get("products", ()))

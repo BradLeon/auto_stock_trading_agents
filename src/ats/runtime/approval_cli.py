@@ -190,6 +190,57 @@ def _ellipsis(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
+def _lock_note(cycle_id: str) -> str | None:
+    reason = None
+    try:
+        reason = _lock_reason(_checkpoint_values(_graph(), cycle_id))
+    except ApprovalRefused:
+        from ..trader import execute as texec
+        reason = "实盘锁定" if texec.execution_locked() else None
+    return f"⚠ 批准后不会下单：{reason}。批准只会记录并做执行前检查。" if reason else None
+
+
+def brief_card(cycle_id: str) -> int:
+    """What a person needs to answer: each order (size, limit, amount) with the Chief's reason, and nothing else.
+
+    Everything `show` also prints (summary, risk-gate notes, snapshot references, option advice) is one command
+    away; it was crowding out the orders. The things that change what an answer MEANS stay: a risk verdict that is
+    not a clean approval, and the live-lock notice.
+    """
+    repo = _repo()
+    cycle = repo.get_cycle(cycle_id)
+    rev = repo.latest_revision(cycle_id) if cycle else None
+    if cycle is None or rev is None:
+        print(f"没有这个周期或还没有修订：{cycle_id}")
+        return 1
+    review = repo.effective_review(cycle_id, rev["revision_no"], rev["decision_hash"])
+    print(f"周期 {cycle_id} · 修订 {rev['revision_no']} · hash {rev['decision_hash'][:MIN_HASH_PREFIX]}\n")
+    total = 0.0
+    orders = _orders(rev)
+    for i, o in enumerate(orders, 1):
+        qty = f"{o['qty']:g} 股" if o.get("qty") else "数量未定"
+        limit = f"限价 {o['limit_price']:,.2f}" if o.get("limit_price") else "市价/盘口定价"
+        amount = f"≈ ${o['notional_usd']:,.0f}" if o.get("notional_usd") else ""
+        total += o.get("notional_usd") or 0.0
+        print(f"{i}. {str(o.get('action', '')).upper():<5} {o.get('symbol'):<6} {qty:<9} {limit:<16} {amount}")
+        print(f"   理由：{str(o.get('rationale', '')).strip()}\n")
+    print(f"共 {len(orders)} 笔，合计 ${total:,.0f}")
+    verdict = review["verdict"] if review else "未审查"
+    violations = json.loads(review["violations_json"] or "[]") if review else []
+    if verdict != "approved" or violations:
+        print(f"⚠ 风控审查：{verdict}")
+        for v in violations:
+            print(f"  违规 {v.get('rule_id')}：{v.get('detail')}")
+    lock = _lock_note(cycle_id)
+    if lock:
+        print(lock)
+    from ..decision.repository import option_advice_lines
+
+    extra = len(option_advice_lines(rev["rationale"])) if rev["rationale"] else 0
+    print(f"（风控细节、主理人摘要{f'、{extra} 条期权建议' if extra else ''}、研究引用：ats approval show {cycle_id}）")
+    return 0
+
+
 def show(cycle_id: str, *, full: bool = False) -> int:
     repo = _repo()
     cycle = repo.get_cycle(cycle_id)
@@ -240,14 +291,9 @@ def show(cycle_id: str, *, full: bool = False) -> int:
             stamps = sorted(str(item.as_of) for item in items)
             print(f"\n研究快照引用：共 {len(items)} 条（" + "、".join(f"{k} {n}" for k, n in kinds.items())
                   + f"），最早 {stamps[0][:19]}，最晚 {stamps[-1][:19]}。完整清单：ats approval show {cycle_id} --full")
-    reason = None
-    try:
-        reason = _lock_reason(_checkpoint_values(_graph(), cycle_id))
-    except ApprovalRefused:
-        from ..trader import execute as texec
-        reason = "实盘锁定" if texec.execution_locked() else None
-    if reason:
-        print(f"\n⚠ 批准后不会下单：{reason}。批准只会记录并做执行前检查。")
+    lock = _lock_note(cycle_id)
+    if lock:
+        print(f"\n{lock}")
     rounds = repo.conn.execute(
         "SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = ? AND decision = 'revise'",
         (cycle_id,)).fetchone()[0]
@@ -619,9 +665,9 @@ def _answer_in_terminal(args) -> int:
         print(f"✗ {exc}")
         return 1
     shown = rev["decision_hash"][:MIN_HASH_PREFIX]
-    show(cycle_id)
+    brief_card(cycle_id)
     print(f"\n你答复的是：周期 {cycle_id} · 修订 {rev['revision_no']} · hash {shown}")
-    note = args.note
+    note = getattr(args, "note", "")      # `approve` has no --note flag
     if verb == "revise" and not note.strip():
         note = input("修改意见（必填，回车取消）：").strip()
         if not note:

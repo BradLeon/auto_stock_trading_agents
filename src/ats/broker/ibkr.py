@@ -37,6 +37,20 @@ log = logging.getLogger("ats.broker")
 UNREACHABLE_MARK = "cannot reach IBKR"
 
 
+
+GREEKS_WAIT_SECONDS = 10.0
+
+
+def _with_exchange(contract, exchange: str = "SMART"):
+    """A copy of `contract` with an exchange, so a market-data request for it is accepted."""
+    import copy
+
+    if getattr(contract, "exchange", ""):
+        return contract
+    routed = copy.copy(contract)
+    routed.exchange = exchange
+    return routed
+
 class IBKRUnavailable(RuntimeError):
     """Raised when TWS/Gateway cannot be reached or the API is disabled."""
 
@@ -294,15 +308,28 @@ class IBKRBroker:
             return
         try:
             tickers = []
+            requested = []
             for pos, c in opt_contracts:
                 try:
+                    # A contract read from the account's holdings carries no `exchange`, and IBKR refuses a
+                    # market-data request without one ("Please enter exchange", error 321) — which used to
+                    # leave every option on the Black-Scholes fallback. SMART routes the request.
+                    c = _with_exchange(c)
                     t = ib.reqMktData(c, "106", False, False)
                     tickers.append((pos, t))
+                    requested.append(c)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("reqMktData greeks failed for %s: %s", pos.symbol, exc)
             if not tickers:
                 return
-            ib.sleep(4.0)   # let streaming modelGreeks ticks land
+            # Wait for the streaming modelGreeks ticks, up to a deadline, and stop as soon as every option has
+            # them. A fixed short wait sometimes left one option without greeks, which silently fell back to
+            # Black-Scholes (delta -1.0 for a deep in-the-money put) and moved the risk numbers between runs.
+            for _ in range(round(GREEKS_WAIT_SECONDS / 0.25)):
+                ib.sleep(0.25)
+                if all(getattr(getattr(t, "modelGreeks", None), "delta", None) is not None
+                       for _, t in tickers):
+                    break
             for pos, t in tickers:
                 mg = getattr(t, "modelGreeks", None)
                 if mg is None:
@@ -317,7 +344,7 @@ class IBKRBroker:
                 pos.iv = _fnum(getattr(mg, "impliedVol", None))
                 pos.underlying_price = _fnum(getattr(mg, "undPrice", None))
                 pos.greeks_source = "ibkr"
-            for _, c in opt_contracts:
+            for c in requested:
                 try:
                     ib.cancelMktData(c)
                 except Exception:  # noqa: BLE001

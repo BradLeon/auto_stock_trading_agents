@@ -26,6 +26,8 @@ class ChiefResult(BaseModel):
     reasoning: dict = Field(default_factory=dict)          # ChiefReasoning, as recorded
     option_actions: list[dict] = Field(default_factory=list)   # advice on held options; manual
     context_text: str = ""            # the exact context the Chief saw (for the audit report)
+    outcome_note: str = ""            # why these proposals did NOT become orders, when they did not
+    skipped_note: str = ""            # proposals left out of an otherwise sent batch (e.g. no usable overnight book)
 
 
 def run(*, use_llm: bool = True) -> ChiefResult:
@@ -117,6 +119,7 @@ def _to_decision(v) -> TradeDecision:
     return TradeDecision(
         symbol=v.symbol.upper(), action=v.action,
         target_weight=v.target_weight, notional_usd=v.notional_usd,
+        qty=_positive(getattr(v, "qty", None)),
         order_type=v.order_type, limit_price=v.limit_price,
         conviction=max(0.0, min(1.0, float(v.conviction))), rationale=v.rationale,
         setup=getattr(v, "setup", "unknown") or "unknown",

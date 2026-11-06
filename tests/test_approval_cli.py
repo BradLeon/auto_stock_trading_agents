@@ -315,10 +315,20 @@ def test_a_revise_that_cannot_be_honoured_is_recorded_as_a_rejection():
 
 # --- answering in a terminal without typing the hash ------------------------------------------------ #
 def _args(verb, **kw):
-    from argparse import Namespace
+    """Arguments exactly as the real parser builds them: `approve` has no --note, so it has no `note` attribute
+    (2026-11-06: a hand-built Namespace that always carried `note` hid an AttributeError on every terminal approve)."""
+    import argparse
 
-    return Namespace(verb=verb, cycle=kw.get("cycle"), revision=kw.get("revision"), note=kw.get("note", ""),
-                     actor="boss")
+    root = argparse.ArgumentParser()
+    approval_cli.add_parser(root.add_subparsers(dest="command"))
+    argv = ["approval", verb] + ([kw["cycle"]] if kw.get("cycle") else [])
+    if kw.get("revision"):
+        argv += ["--revision", kw["revision"]]
+    if kw.get("note") and verb != "approve":
+        argv += ["--note", kw["note"]]
+    args = root.parse_args(argv)
+    args.actor = "boss"
+    return args
 
 
 @pytest.fixture

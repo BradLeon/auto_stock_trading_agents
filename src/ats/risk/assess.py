@@ -40,6 +40,23 @@ from . import correlation, options_math, stress
 
 log = logging.getLogger("ats.risk.assess")
 
+# A review runs `assess` once for the baseline and once more for every order it projects, and each run
+# asks the network for the same prices and option-chain IV. Market data for one review does not change
+# between those runs, so a short memo turns N identical fetches into one. A failed fetch is memoised
+# too (value None): a source that is down stays down for the next two minutes, it is not retried per order.
+_MEMO_TTL_SECONDS = 120.0
+_MEMO: dict[tuple, tuple[float, object]] = {}
+
+
+def _memo(key: tuple, fetch):
+    now = time.monotonic()
+    hit = _MEMO.get(key)
+    if hit is not None and now - hit[0] < _MEMO_TTL_SECONDS:
+        return hit[1]
+    value = fetch()
+    _MEMO[key] = (now, value)
+    return value
+
 
 def _now() -> datetime:
     return evaluation_now(timezone.utc)
@@ -117,7 +134,7 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
     if need_spot:
         try:
             from ..data import sector_snapshot
-            prices = sector_snapshot.fetch_prices(need_spot)
+            prices = _memo(("spot", tuple(need_spot)), lambda: sector_snapshot.fetch_prices(need_spot))
             spot_map = {s: (v[-1] if v else None) for s, v in prices.items()}
         except Exception as exc:  # noqa: BLE001
             log.warning("option spot fetch skipped: %s", exc)
@@ -149,7 +166,7 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
         if not sigma:                      # fall back to ATM IV from the chain
             try:
                 from ..data import options as opt_data
-                atm = opt_data.fetch(under).get("atm_iv")
+                atm = _memo(("atm_iv", under), lambda: opt_data.fetch(under).get("atm_iv"))
                 sigma = (atm / 100.0) if atm else None
             except Exception as exc:  # noqa: BLE001
                 log.warning("ATM IV fallback skipped for %s: %s", under, exc)
@@ -814,7 +831,7 @@ def _assess_portfolio_greeks(r: RiskReview, net_w: dict, net_liq: float, rc) -> 
 def _prices(symbols: list[str]) -> dict[str, list[float]]:
     from ..data import sector_snapshot
 
-    return sector_snapshot.fetch_prices(symbols)
+    return _memo(("prices", tuple(symbols)), lambda: sector_snapshot.fetch_prices(symbols))
 
 
 def _perf_stub(net_liq: float, account_id: str = ""):

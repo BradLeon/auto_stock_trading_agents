@@ -572,6 +572,29 @@ def test_target_weight_against_the_action_and_selling_unheld_stock_are_refused(e
     assert not prices.proposal_error("input_unavailable:IBKRUnavailable:execution_quote_source_timestamp_missing")
 
 
+def test_a_sell_sized_in_money_that_rounds_a_share_over_the_holding_sells_what_is_held(execution, monkeypatch):
+    """2026-11-06: "sell $10,100" of 100 shares at 100 and a lower bid rounds to 101 shares; the intent is to close."""
+    _historical_quote(monkeypatch)
+    orders, notes = _normalize(TradeDecision(symbol="AXTI", action="sell", notional_usd=10_100,
+                                             order_type="market"), {"AXTI": 100})
+    assert orders[0].qty == 100 and any("按持仓全部卖出" in n for n in notes)
+
+
+def test_a_money_overshoot_beyond_rounding_and_an_explicit_share_count_are_still_refused(execution, monkeypatch):
+    _historical_quote(monkeypatch)
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_position"):
+        _normalize(TradeDecision(symbol="AXTI", action="sell", notional_usd=20_000, order_type="market"),
+                   {"AXTI": 100})                      # twice the position is a mistake, not rounding
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_position"):
+        _normalize(TradeDecision(symbol="AXTI", action="sell", qty=101, order_type="market"), {"AXTI": 100})
+
+
+def test_a_missing_size_is_refused_with_what_to_change():
+    assert "target_weight=0" in prices.proposal_hint("AXTI:quantity_or_budget_missing")
+    assert "qty" in prices.proposal_hint("AXTI:quantity_exceeds_position")
+    assert prices.proposal_hint("AXTI:something_else") == "AXTI:something_else"
+
+
 @pytest.mark.parametrize("node_age", [timedelta(seconds=90), timedelta(minutes=30)])
 def test_price_request_window_is_its_own_not_the_nodes_entry_instant(execution, monkeypatch, node_age):
     """A node bound on a consumer-wide route carries a single-instant window taken at entry. A quote read after a
@@ -643,3 +666,14 @@ def test_fresh_reads_ignore_the_reference_flag(execution, monkeypatch):
                  "purpose": "preapproval_normalization", "reference_quote": True}
         packet = read_input("trader", "MARKET_DATA", scope=scope)
     assert packet.status != "complete" and "quote_stale" in ";".join(packet.gaps)
+
+
+def test_a_sale_is_not_refused_for_a_bid_that_moved_up_since_approval(execution):
+    """The funds cap is a buy-side spending bound; a better bid on a sale is not 'funds exceeded'."""
+    order = TradeDecision(symbol="AAPL", action="sell", qty=10, order_type="market")
+    normalized, _ = prices.normalize_orders([order], cycle_id="s", net_liquidation=100_000,
+                                            positions={"AAPL": 50})
+    decision = normalized[0]
+    better = quote(bid=100.4, ask=100.5)                     # +0.4% on the bid: inside the 1% band
+    assert 10 * better.bid > decision.execution_basis["max_notional"]
+    prices.check_execution(decision, 10, better)             # must not raise

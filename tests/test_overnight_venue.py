@@ -170,7 +170,8 @@ def test_a_regular_order_still_goes_to_smart(execution, monkeypatch):
     assert exchanges == ["SMART"]
 
 
-def test_the_scheduled_chief_trades_the_overnight_session_on_the_overnight_venue(execution, monkeypatch):
+@pytest.mark.parametrize("source", ["pead-chief", "scheduled"])        # the event chief and chief-daily
+def test_the_scheduled_chief_trades_the_overnight_session_on_the_overnight_venue(execution, monkeypatch, source):
     from ats.graph import chief
     from ats.graph.chief_state import ChiefDecisionState
 
@@ -178,7 +179,7 @@ def test_the_scheduled_chief_trades_the_overnight_session_on_the_overnight_venue
     monkeypatch.setattr("ats.data.runtime.execution_prices.overnight_session_candidate", lambda point: True)
     monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",
                         lambda symbol, **kw: _overnight_quote(symbol=symbol))
-    state = ChiefDecisionState(cycle_id="overnight-venue", as_of=datetime.now(UTC), source="pead-chief", decide=False,
+    state = ChiefDecisionState(cycle_id="overnight-venue", as_of=datetime.now(UTC), source=source, decide=False,
                                dry_run=False, decisions=[TradeDecision(symbol="AAPL", action="buy", notional_usd=1000,
                                                                        order_type="market")])
     reviewed = state.model_copy(update=chief.risk_gate(state))
@@ -186,3 +187,16 @@ def test_the_scheduled_chief_trades_the_overnight_session_on_the_overnight_venue
     order = reviewed.decisions[0]
     assert order.order_type == "limit" and order.execution_basis["venue"] == "overnight"
     assert order.execution_basis["quote"]["session"] == "overnight"
+
+
+def test_a_manual_chief_run_keeps_the_regular_session_rule(execution, monkeypatch):
+    from ats.graph import chief
+    from ats.graph.chief_state import ChiefDecisionState
+
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, datetime.now(UTC) - timedelta(hours=6)))
+    monkeypatch.setattr("ats.data.runtime.execution_prices.overnight_session_candidate", lambda point: True)
+    state = ChiefDecisionState(cycle_id="manual-night", as_of=datetime.now(UTC), source="chief", decide=False,
+                               dry_run=False, decisions=[TradeDecision(symbol="AAPL", action="buy", notional_usd=1000,
+                                                                       order_type="market")])
+    reviewed = state.model_copy(update=chief.risk_gate(state))
+    assert reviewed.risk_review.verdict == "rejected" and reviewed.normalization_errors

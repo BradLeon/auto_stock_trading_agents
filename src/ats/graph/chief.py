@@ -187,11 +187,14 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         # Operational normalization precedes review: its result is the actual
         # revision, card and order, rather than an unbound qty_by_symbol cache.
         from ..config import load_pead_global
-        scheduled = state.source == "pead-chief" and not session_context(_now())[0]
+        # The event-trade chief (`pead-chief`) and the scheduled daily chief (`scheduled`, chief-daily) are the system's own
+        # runs; a manual run (`chief`) keeps the regular-session rule.
+        off_session = state.source in ("pead-chief", "scheduled") and not session_context(_now())[0]
         # Outside the regular session a candidate overnight session is traded on IBKR's overnight venue from a live quote;
-        # a closed market (premarket, weekend, Friday night) is still priced from the previous close and deferred.
-        venue = "overnight" if scheduled and overnight_session_candidate(_now()) else "regular"
-        overnight = scheduled and venue != "overnight"
+        # a closed market (premarket, weekend, Friday night) is, for an event trade, still priced from the previous close
+        # and deferred, and, for the daily chief, refused (blockers B9).
+        venue = "overnight" if off_session and overnight_session_candidate(_now()) else "regular"
+        overnight = off_session and state.source == "pead-chief" and venue != "overnight"
         slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", .5)
         decisions, normalization_notes = normalize_orders(
             decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",

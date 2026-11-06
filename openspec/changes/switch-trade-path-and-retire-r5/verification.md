@@ -770,3 +770,42 @@ cd /Users/liuchao/Code/trading/auto_stock_trading_agents
 
 - 今晚（11-04）是窗口第 1 天，22:45 前请确认 TWS 已登录。TWS 自动重启已改到台北 07:30，在 Clerk（07:00）之后。
 - 模型请求数目前没有日志计数，口径是 OpenRouter 活动页里当天 `deepseek-v4.1-flash-1017` 的首席请求次数；你看到异常多（比如超过 4 次）就告诉我。
+
+
+### 3.25 approve / reject 真实命令测试与途中修复的缺陷（2026-11-06，tasks 5.2、11.11 相关；提交 `3fb7ce5`）
+
+用户在终端亲手跑 `ats approval approve / reject`，三个周期、五次答复，生产环境，**实盘锁定未解除，零券商提交**。模型请求：演练周期与审批测试 0 次（演练里首席那一步用上一轮存下的结论顶替，组装、血缘、归一化、风控、审批卡都是真实路径）。
+
+**结果**
+
+| 周期 | 来源 | 动作 | 结果 |
+|---|---|---|---|
+| `chief-20261106-040738`（7 笔卖单，手动重跑） | 手动 chief-daily | approve（12:45） | 快照 111 秒 > 60 秒 → 授权失效 → 回到风控 → 修订 2；批准到结束 339 秒 |
+| 同上，修订 2 | | approve（15:42） | **终态 `manual_review`**：7 笔都被批准后的价格检查拒绝（`execution_quote_source_timestamp_missing`），批准到结束 69 秒 |
+| `chief-20261106-075637`，修订 1 | rehearsal（不调模型） | approve | 7 笔被拒（`execution_funds_exceeded_reapprove`）→ 回风控 → 修订 2，130 秒 |
+| 同上，修订 2 | | approve | **`approved_not_executed:live_lock`**，73.4 秒，未过期；检查表见下 |
+| `chief-20261106-084521` | rehearsal | reject（备注“没必要 因为恐慌情绪割肉”） | `approval_rejected`，无订单；备注已记录 |
+
+最终通过的那次，执行前检查：`authorization_fields` ✓；`orders_match_approved_revision` ✓；`live_quote_and_funds` 7/7 ✓（AXTI、MRVL、LITE、AVGO、NVDX、DRAM、ASML）；`route_binding` ✗ 但标为仅提示（实盘锁定期间没有路由，设计如此）；7 笔订单记为 `rejected: auto execution disabled`（锁在起作用），零券商提交。
+
+**这次测试暴露并已修复的缺陷**（一个提交，目标测试通过；未跑全量回归）
+
+1. **批准耗时过长、快照过期。** 重审对基线和每一笔订单各评估一次，每次重取同样的价格和期权链（8 次，约 40 秒）；授权闸门里依赖校验把 52 KB 的数据流清单解析了 524 次（约 27 秒）。修：assess 加 2 分钟行情备忘（失败结果也备忘）；新增 `workflow/yaml_cache.load_yaml`（按文件 mtime 缓存，调用方各拿拷贝），换掉热路径 4 处解析。实测重审 50 秒 → 11 秒，依赖校验 27 秒 → 2 秒。
+2. **thetadata 在这一步不需要。** 它只是期权希腊字母的最后兜底（先反推隐含波动率，不行再取平值 IV）；用户没启用客户端，每次先吃一次 `Connection refused`。
+3. **IBKR 期权希腊字母一直取不到。** 合约缺 `exchange`，IBKR 拒绝请求（error 321），期权一直落到 Black-Scholes。深度实值的卖出看跌被高估：COHR delta −1.000（隐含波动率反推出 0.004）对 IBKR 的 −0.826，AXTI −0.950 对 −0.846。修：补 `SMART`（用副本，不改持仓合约）；等待由固定 4 秒改为最多 10 秒、到齐即走（固定等待曾让 COHR 偶发缺失，重审差异里出现大幅波动）。
+4. **隔夜订单批准后的价格检查读常规盘。** `preflight_checks` 取报价没带订单的 `execution_basis.venue`，凌晨读常规盘无报价，7 笔全拒、周期进 `manual_review`。修：按订单自带的场所取报价；新增测试在还原修复后确认会失败。
+5. **资金上限误拒卖单。** `execution_funds_exceeded_reapprove` 把“数量 × 批准时参考价”当花钱上限，卖单买价上涨（对卖方有利）反被判超限。修：只约束买单；价格偏离 1% 与限价检查保留。
+6. **批准后终端输出太长。** 终端答复改用精简订单卡（编号、动作、标的、数量、限价、金额、首席理由，细节指向 `show`）。
+7. 另：`approve` 因 `note` 属性缺失崩溃（已修，测试用真实解析器构造参数）；风险配置血缘按分层哈希（只看 `sector_layer_caps/layer_groups/layer_utilization`，保留旧摘要别名），改限额不再让定时任务因血缘失败；隔夜盘口不可用的名字单独跳过并留痕；首席订单必须带规模。
+
+**没有测到的**
+
+- **`revise` 没有实测。** 它会向首席发一次真实模型请求；演练周期要在常规盘才能建：隔夜盘 03:50（美东）收盘、周五夜间不开，IBKR 的 SMART 盘前盘此时虽开，系统按设计只认常规盘与隔夜盘（`quote_outside_regular_session`，blockers B9），两次非常规时段试建（`chief-20261106-085107`、`-090847`）都落到 `manual_review`，无订单、无待审批。待 22:30（台北）常规盘开盘后补测，或在今晚 22:45 的定时周期上测。
+- **没有定时周期的批准样本。** 本节全部是手动与演练周期；是否计入 5.2 的“3 次审批、批准拒绝各一次”由你裁决，5.2 不勾。
+
+**仍待处理**
+
+- 快照到执行前检查约 40 秒，余量偏紧（7 个报价各自开一个 IBKR 会话）；再偶发过期时让它们共用一个会话。
+- 盘前盘、盘后（SMART 04:00–20:00 美东）未支持，属新功能，不在本主线内。
+- 拒绝时订单卡仍显示“批准后不会下单”（只对批准有意义）。
+- 既有失败 `tests/test_evidence_work_adoption.py::test_observer_uses_snapshot_and_profile_contracts_and_keeps_manifest` 与本次无关（绕开 YAML 缓存仍失败）。

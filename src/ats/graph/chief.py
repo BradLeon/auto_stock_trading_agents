@@ -242,9 +242,13 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
         rationale=_revision_rationale(state), parent_revision_no=state.parent_revision_no,
         revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
+    from ..workflow.decision_requirements import uncovered_fundamental
+
     review = risk_checks.review_revision(decisions, pf,
                                          event_data=state.event_data or None,
-                                         cycle_id=state.cycle_id)
+                                         cycle_id=state.cycle_id,
+                                         uncovered_fundamental=uncovered_fundamental(
+                                             (state.research_snapshot or {}).get("requirements")))
     risk_notes = list(review.notes)
     approved = [d for d, ov in zip(decisions, review.order_verdicts)
                 if ov.verdict == "approved"]

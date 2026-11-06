@@ -142,13 +142,21 @@ def test_a_plan_assigns_each_target_exactly_one_fundamental_mode(tmp_path, monke
 
 @pytest.mark.parametrize("inputs", [
     {"fundamental_modes": {"COHR": "fundamental-event"}},                      # LITE unaccounted for
-    {"fundamental_modes": {"COHR": "fundamental-event"}, "fundamental_uncovered": ["LITE"]},  # not an event cycle
     {"fundamental_modes": {"COHR": "fundamental-routine"}, "fundamental_uncovered": ["LITE"],
      "event_entities": ["COHR"]},                                               # trigger not on its event review
 ])
 def test_a_plan_refuses_an_incomplete_or_inconsistent_fundamental_cover(tmp_path, monkeypatch, inputs):
     with pytest.raises(ContractError):
         _plan(tmp_path, monkeypatch, **inputs)
+
+
+def test_a_routine_cycle_may_state_a_bounded_number_of_names_uncovered(tmp_path, monkeypatch):
+    inputs = {"fundamental_modes": {"COHR": "fundamental-routine"}, "fundamental_uncovered": ["LITE"]}
+    plan = _plan(tmp_path, monkeypatch, **inputs)
+    assert plan.task_inputs["fundamental_uncovered"] == ["LITE"]
+    monkeypatch.setattr("ats.workflow.planning.MAX_UNCOVERED_FUNDAMENTAL", 0)           # past the bound: an outage
+    with pytest.raises(ContractError, match="at most"):
+        _plan(tmp_path / "second", monkeypatch, **inputs)
 
 
 def test_an_entity_task_records_only_its_own_entity_config(tmp_path, monkeypatch):
@@ -205,12 +213,29 @@ def test_an_event_cycle_with_no_event_anywhere_is_blocked(universe):
     assert "事件周期没有可用的事件评审" in out["gap_report"] and out["context_text"] == ""
 
 
-def test_a_routine_cycle_still_blocks_on_a_target_with_no_usable_fundamental(universe):
+def test_a_routine_cycle_states_a_name_without_usable_fundamental_and_does_not_block(universe):
+    """2026-11-05: one name's failed Routine run stopped the whole book. Now it is stated and barred from new exposure."""
     tmp_path, store = universe
+    plan = _publish(tmp_path, store, [_routine("COHR"), _routine("LITE", age=timedelta(days=4))], _state())
+    assert plan.task_inputs["fundamental_modes"] == {"COHR": "fundamental-routine"}
+    assert plan.task_inputs["fundamental_uncovered"] == ["LITE"]
+    out = assemble_context(_state())
+    assert not out.get("gap_report"), out.get("gap_report")
+    assert "无新近基本面研究" in out["context_text"] and "LITE" in out["context_text"]
+    assert dr.uncovered_fundamental(
+        __import__("json").loads(__import__("json").dumps(out["research_snapshot"]["requirements"]))) == {"LITE"}
+
+
+def test_a_routine_cycle_still_blocks_when_no_name_has_usable_fundamental_or_past_the_bound(universe, monkeypatch):
+    tmp_path, store = universe
+    _publish(tmp_path, store, [_routine("COHR", age=timedelta(days=4)), _routine("LITE", age=timedelta(days=4))],
+             _state())
+    with pytest.raises(RouteUnavailable, match="fundamental-routine:entity:.*freshness_unconfirmed"):
+        assemble_context(_state())                                  # nothing usable at all is an outage
+    monkeypatch.setattr(dr, "MAX_UNCOVERED_FUNDAMENTAL", 0)
     _publish(tmp_path, store, [_routine("COHR"), _routine("LITE", age=timedelta(days=4))], _state())
-    # past its 72-hour window the Routine update is refused by the frozen-input check, as before
     with pytest.raises(RouteUnavailable, match="fundamental-routine:entity:LITE.*freshness_unconfirmed"):
-        assemble_context(_state())
+        assemble_context(_state())                                  # more uncovered than the bound allows
 
 
 def test_a_usable_event_review_wins_over_a_later_routine_note(universe):

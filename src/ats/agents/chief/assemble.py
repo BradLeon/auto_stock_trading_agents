@@ -613,7 +613,7 @@ def projection_context_block(detail: list[dict], focus: dict | None = None) -> s
     if focus.get("event_entities"):
         lines.append("- 本轮事件标的（财报 / 公告后的事件评审）：" + "、".join(focus["event_entities"]))
     if focus.get("fundamental_uncovered"):
-        lines.append("- 无新近基本面研究（例行与事件评审均已过期；本轮不阻断，不得当作“没有意见”）："
+        lines.append("- 无新近基本面研究（例行与事件评审均已过期或本轮未产出；本轮不阻断，不得当作“没有意见”；这些标的只允许持有或减仓，买入/加仓会被风控驳回）："
                      + "、".join(focus["fundamental_uncovered"]))
     lines += [
         line("layer_analysis", "层级分析"),

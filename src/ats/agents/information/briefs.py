@@ -81,6 +81,31 @@ def require_six_elements(payload: dict) -> None:
             "信息简报六要素不完整，产出判为失败：" + "、".join(missing))
 
 
+def verified_source_fact_indices(payload: dict) -> set[int]:
+    """Indices of the facts that are a program-built, evidence-bound recap of what a source said.
+
+    A source's own recommendation ("作者建议卖出看跌期权") is a fact about the source, not advice from this
+    system, and may be reported as such. The proof is the bound evidence (quote, document, locator, publication)
+    and the exact program-built wording `来源信息（<actor>）：<summary>`; a model-provided exemption is never read.
+    Everything downstream that restates one of these facts (the Fundamental routine's `driver`) uses the same test.
+    """
+    facts = payload.get('fact_changes') or []
+    indices = set()
+    for row in payload.get('source_evidence') or []:
+        index = row.get('fact_index')
+        if not isinstance(index, int) or not 0 <= index < len(facts):
+            continue
+        summary, actor = row.get('source_summary'), row.get('source_actor')
+        loc = row.get('locator') or {}
+        if (summary and actor and row.get('evidence_quote') and row.get('document_ref')
+                and row.get('extraction_projection_id') and row.get('publication_id')
+                and isinstance(loc.get('start'), int) and isinstance(loc.get('end'), int)
+                and 0 <= loc['start'] < loc['end']
+                and facts[index] == f'来源信息（{actor}）：{summary}'):
+            indices.add(index)
+    return indices
+
+
 def publish_information_brief(store, payload: dict, *, scope: ProjectionScope,
                               as_of: str, input_refs=None, valid_until: str = "",
                               supersedes_projection_id: str = "", model_version: str = "",
@@ -92,20 +117,7 @@ def publish_information_brief(store, payload: dict, *, scope: ProjectionScope,
     """
     require_six_elements(payload)
     facts = payload.get('fact_changes') or []
-    evidence = payload.get('source_evidence') or []
-    source_indices = set()
-    for row in evidence:
-        index = row.get('fact_index')
-        if not isinstance(index, int) or not 0 <= index < len(facts):
-            continue
-        summary, actor = row.get('source_summary'), row.get('source_actor')
-        loc = row.get('locator') or {}
-        if (summary and actor and row.get('evidence_quote') and row.get('document_ref')
-                and row.get('extraction_projection_id') and row.get('publication_id')
-                and isinstance(loc.get('start'), int) and isinstance(loc.get('end'), int)
-                and 0 <= loc['start'] < loc['end']
-                and facts[index] == f'来源信息（{actor}）：{summary}'):
-            source_indices.add(index)
+    source_indices = verified_source_fact_indices(payload)
     # Summary is a program-owned projection of exactly those facts, not an
     # independent model channel that could hide advice behind a source label.
     source_summary = bool(facts) and source_indices == set(range(len(facts))) and (

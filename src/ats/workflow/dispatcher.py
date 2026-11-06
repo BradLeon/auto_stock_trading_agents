@@ -1026,7 +1026,11 @@ def _fundamental_routine_adapter(context: TaskContext) -> TaskAdapterResult:
                                      "data_vintage_refs": list(context.data_vintage_refs),
                                      "refresh_baseline": refresh})
     result = run_fundamental_pass(request)
-    return TaskAdapterResult(detail=str(result.get("summary", "routine completed")))
+    detail = str(result.get("summary", "routine completed"))
+    if result.get("skipped"):
+        detail += f"; skipped {len(result['skipped'])} refused fact(s): " + " | ".join(
+            f"#{row['index']} {row['reason']}" for row in result["skipped"])[:300]
+    return TaskAdapterResult(detail=detail)
 
 
 def _fundamental_event_adapter(context: TaskContext) -> TaskAdapterResult:

@@ -140,6 +140,7 @@ def review_revision(
     review: RiskReview | None = None, apply_caps: bool = True,
     llm_comment: str | None = None,
     cycle_id: str = "",
+    uncovered_fundamental: frozenset[str] | set[str] = frozenset(),
 ) -> DecisionRiskReview:
     """Review one revision without modifying it. Deterministic fields decide.
 
@@ -227,6 +228,15 @@ def review_revision(
                 rule_id="action_vocabulary", entity=sym, actual=str(decision.action),
                 detail=str(exc)))
             _reject(sym, action, [str(exc)])
+            continue
+
+        # A name the cycle states as having no current Fundamental research may be held or reduced, never opened or
+        # added to: the research that would justify new exposure is not there (it is not read as "no opinion").
+        if sym.upper() in uncovered_fundamental and is_increasing_action(decision.action):
+            violations.append(RiskViolation(
+                rule_id="fundamental_uncovered", entity=sym, severity="hard",
+                detail="本轮该标的没有新近基本面研究，只允许持有或减仓，不得新开或加仓"))
+            _reject(sym, action, ["fundamental_uncovered: 无新近基本面研究，只允许持有或减仓"])
             continue
 
         # Cap boundaries: report, never rewrite. The binding rule is whichever

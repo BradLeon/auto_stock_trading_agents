@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from ..agent.task_projection import ProjectionScope, reuse_decision
 from .cutover_routing import RouteUnavailable
-from .planning import TASK_ROLE, _hash, build_plan
+from .planning import MAX_UNCOVERED_FUNDAMENTAL, TASK_ROLE, _hash, build_plan
 from .run_contracts import TriggerContext
 
 log = logging.getLogger(__name__)
@@ -131,8 +131,9 @@ def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
     hide every post-earnings review behind the next minor note. Without one, the usable
     Routine update is read.
 
-    Returns `(modes, uncovered, triggers)`. A routine cycle maps every target, so a
-    target with neither mode usable is kept on Routine and blocks as missing. An event
+    Returns `(modes, uncovered, triggers)`. A routine cycle maps every target; up to
+    `MAX_UNCOVERED_FUNDAMENTAL` targets with neither mode usable are stated uncovered (the risk
+    review bars new exposure to them), and more than that are kept on Routine and block as missing. An event
     cycle is started by its trigger entities — named by the caller, else every target
     that has a usable event review — which always use their event review; any other
     target with nothing usable is left uncovered and stated, not blocking.
@@ -176,7 +177,21 @@ def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
             uncovered.append(target)
         else:
             modes[target] = "fundamental-routine"
+    if not event_cycle:
+        # A few names without a usable Routine update (a failed or late run) are stated and barred from new exposure
+        # (`risk.checks`), not a reason to refuse the whole book. Past the bound it is an outage and blocks as missing.
+        missing = [t for t in targets if t not in chosen]
+        if 0 < len(missing) <= MAX_UNCOVERED_FUNDAMENTAL and len(missing) < len(targets):
+            for target in missing:
+                modes.pop(target, None)
+            uncovered = missing
     return modes, uncovered, triggers
+
+
+def uncovered_fundamental(requirements) -> frozenset[str]:
+    """The targets a frozen cycle states as having no usable Fundamental research (no new exposure allowed)."""
+    inputs = ((requirements or {}).get("plan") or {}).get("task_inputs") or {}
+    return frozenset(str(e).upper() for e in inputs.get("fundamental_uncovered") or [])
 
 
 def standalone(state, store=None):

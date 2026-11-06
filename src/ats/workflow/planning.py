@@ -241,6 +241,10 @@ def _targets(config_dir: Path) -> list[str]:
 
 FUNDAMENTAL_TASKS = ("fundamental-routine", "fundamental-event")
 
+# A routine cycle may leave this many targets without a usable Fundamental (stated, and barred from new exposure by the
+# risk review) rather than refuse to run. More than this is a research outage, not a gap, and still blocks the cycle.
+MAX_UNCOVERED_FUNDAMENTAL = 4
+
 
 def _fundamental_modes(task_inputs: dict[str, Any] | None) -> dict[str, str] | None:
     """Per-entity Fundamental mode frozen into a decision plan, or None (one mode for all)."""
@@ -254,13 +258,14 @@ def _fundamental_modes(task_inputs: dict[str, Any] | None) -> dict[str, str] | N
 
 def _check_fundamental_coverage(modes: dict[str, str], task_inputs: dict[str, Any],
                                 targets: list[str]) -> None:
-    """Every target is covered by exactly one mode, or (event cycle only) stated uncovered."""
+    """Every target is covered by exactly one mode, or stated uncovered (an event cycle; a routine cycle up to a bound)."""
     uncovered = {str(e).upper() for e in task_inputs.get("fundamental_uncovered") or []}
     events = {str(e).upper() for e in task_inputs.get("event_entities") or []}
     if set(modes) & uncovered or set(modes) | uncovered != set(targets):
         raise ContractError("every target needs exactly one Fundamental mode or an uncovered mark")
-    if uncovered and not events:
-        raise ContractError("only an event cycle may leave a target's Fundamental uncovered")
+    if uncovered and not events and len(uncovered) > MAX_UNCOVERED_FUNDAMENTAL:
+        raise ContractError(f"a routine cycle may leave at most {MAX_UNCOVERED_FUNDAMENTAL} targets' Fundamental "
+                            "uncovered")
     if any(modes.get(entity) != "fundamental-event" for entity in events):
         raise ContractError("an event cycle's trigger entities must use their event review")
 

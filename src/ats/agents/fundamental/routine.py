@@ -18,7 +18,7 @@ import re
 from datetime import datetime, timezone
 
 from ...agent.task_projection import ProjectionScope, build_envelope
-from ..information.briefs import assert_no_advice
+from ..information.briefs import assert_no_advice, verified_source_fact_indices
 
 log = __import__("logging").getLogger("ats.agents.fundamental.routine")
 
@@ -291,9 +291,13 @@ def _metric_key_for(change: str, metrics: dict[str, float]) -> str:
 
 
 def publish_expectation_update(store, payload: dict, *, as_of: str = "",
-                               input_refs=None, use_llm: bool = True) -> str:
-    """校验并落一份 FundamentalExpectationUpdate 投影。动作词表先拦截。"""
-    assert_no_advice([payload.get("driver", "")])
+                               input_refs=None, use_llm: bool = True, source_statement: bool = False) -> str:
+    """校验并落一份 FundamentalExpectationUpdate 投影。动作词表先拦截。
+
+    `source_statement` 只由调用方依据简报里绑定的来源证据判定（`verified_source_fact_indices`），不读模型给的任何标记：
+    来源自己的建议（例如文章作者建议卖出看跌期权）可以作为“来源说了什么”被转述，系统自己的指令仍然拦截。
+    """
+    assert_no_advice([payload.get("driver", "")], source_statement=source_statement)
     from ...workflow.decision_requirements import validate_routine_value_contract
     from ...workflow.cutover_routing import RouteUnavailable
     from ...agent.task_projection import EnvelopeValidationError
@@ -457,11 +461,26 @@ def run_routine_pass(request) -> dict:
                                        note=RULES_FALLBACK_NOTE if classifier == "rules_fallback" else "",
                                        reasons=reasons, evidence_refs=[briefs[0].get("projection_id", "")])
     published: list[str] = [baseline_state["projection_id"]] if baseline_state.get("projection_id") else []
-    for draft in drafts:
-        published.append(publish_expectation_update(
-            store, draft, input_refs=[briefs[0].get("projection_id", ""), *baseline.get("baseline_refs", [])],
-            use_llm=request.use_llm))
+    source_facts = verified_source_fact_indices(payload)
+    # One fact the contract refuses is skipped and disclosed; it does not take the company's other facts down with
+    # it. Only a pass that publishes nothing at all fails (the first refusal is raised, as before).
+    from ...agent.task_projection import EnvelopeValidationError
+
+    skipped: list[dict] = []
+    first_refusal: Exception | None = None
+    for index, draft in enumerate(drafts):
+        try:
+            published.append(publish_expectation_update(
+                store, draft, input_refs=[briefs[0].get("projection_id", ""), *baseline.get("baseline_refs", [])],
+                use_llm=request.use_llm, source_statement=index in source_facts))
+        except EnvelopeValidationError as exc:
+            first_refusal = first_refusal or exc
+            skipped.append({"index": index, "fact": changes[index][:160], "reason": str(exc)[:160]})
+            log.warning("fundamental routine %s: fact %d refused and skipped (%s): %.120s",
+                        request.symbol, index, exc, changes[index])
+    if skipped and len(skipped) == len(drafts):
+        raise first_refusal
     summary = {label: labels.count(label) for label in CLASSIFICATIONS if labels.count(label)}
     return {"mode": "routine", "symbol": request.symbol,
-            "classified": list(zip(changes, labels)), "published": published,
+            "classified": list(zip(changes, labels)), "published": published, "skipped": skipped,
             "summary": summary, "baseline": baseline_state, "classifier": classifier}

@@ -384,3 +384,20 @@ def test_authorization_refuses_review_missing_basis_bindings(tmp_path):
         raise AssertionError("expected AuthorizationError")
     except AuthorizationError as exc:
         assert "basis bindings" in str(exc)
+
+
+def test_a_name_without_current_fundamental_research_may_be_held_or_reduced_never_added(demo):
+    """2026-11-06: a few uncovered names no longer block the cycle; the review bars new exposure to them."""
+    pf = _pf([_pos("MU", 0.10), _pos("TSM", 0.05)])
+    sell = TradeDecision(symbol="MU", action="trim", notional_usd=30_000)
+    orders = [_buy("MU", 20_000), sell, _buy("TSM", 20_000)]
+    result = risk_checks.review_revision(orders, pf, sector="demo", uncovered_fundamental={"MU"})
+    verdicts = {(v.symbol, v.action): v for v in result.order_verdicts}
+    assert verdicts[("MU", "buy")].verdict == "rejected"
+    assert "fundamental_uncovered" in " ".join(verdicts[("MU", "buy")].reasons)
+    for held in (("MU", "trim"), ("TSM", "buy")):                       # reducing, and a covered name, are untouched
+        assert "fundamental_uncovered" not in " ".join(verdicts[held].reasons)
+    assert any(v.rule_id == "fundamental_uncovered" and v.entity == "MU" for v in result.violations)
+    # nothing is uncovered by default: the review is what it was
+    plain = risk_checks.review_revision([_buy("MU", 20_000)], pf, sector="demo")
+    assert not any(v.rule_id == "fundamental_uncovered" for v in plain.violations)

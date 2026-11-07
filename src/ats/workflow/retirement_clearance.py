@@ -169,14 +169,41 @@ def read_g0_gate(path: Path | str | None = None) -> GateStatus:
     return GateStatus("G0", True, "all items verified and the G0 conclusion is signed", len(rows), counts, (), True)
 
 
-def evaluate_gate(gate: str, *, g0: GateStatus | None = None) -> tuple[bool, str]:
-    """(open?, why-not). An entry with no gate is not gated; an external gate is never opened from here."""
+TRADE_PATH_OBSERVATION = Path(__file__).resolve().parents[3] / "openspec" / "changes" / \
+    "switch-trade-path-and-retire-r5" / "observation.md"
+
+
+def read_trade_path_gate(path: Path | str | None = None) -> GateStatus:
+    """`trade_path_cutover` is open only when the user has signed the observation-window conclusion.
+
+    Same shape as G0: a marker line `**窗口结论签字：** 通过 …` in observation.md. Read-only; nothing here signs it. A
+    missing file, a missing marker, or a value that is not 通过 (blank, 未签, 通过 / 不通过, 不通过) keeps it shut.
+    """
+    target = Path(path) if path else TRADE_PATH_OBSERVATION
+    if not target.exists():
+        return GateStatus("trade_path_cutover", False, f"observation record not found: {target}")
+    marker = re.search(r"\*\*窗口结论签字：\*\*\s*(.*)", target.read_text(encoding="utf-8"))
+    if not marker:
+        return GateStatus("trade_path_cutover", False, "the observation-window conclusion has no signature line")
+    value = marker.group(1).strip()
+    signed = value.startswith("通过") and "不通过" not in value
+    if not signed:
+        return GateStatus("trade_path_cutover", False, f"the observation-window conclusion is not signed: {value or '空'}")
+    return GateStatus("trade_path_cutover", True, "the observation-window conclusion is signed", concluded=True)
+
+
+def evaluate_gate(gate: str, *, g0: GateStatus | None = None,
+                  trade_path: GateStatus | None = None) -> tuple[bool, str]:
+    """(open?, why-not). An entry with no gate is not gated. A gate this module does not know stays shut."""
     if not gate:
         return True, ""
     if gate == "G0":
         status = g0 or read_g0_gate()
         return status.is_open, ("" if status.is_open else f"gate G0 not met: {status.reason}")
-    return False, f"external gate not met: {gate} (owned by another change, never opened from here)"
+    if gate == "trade_path_cutover":
+        status = trade_path or read_trade_path_gate()
+        return status.is_open, ("" if status.is_open else f"gate trade_path_cutover not met: {status.reason}")
+    return False, f"external gate not met: {gate} (unknown to this module, never opened from here)"
 
 
 @dataclass

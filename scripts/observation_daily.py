@@ -65,7 +65,9 @@ for day in days:
         reviews = one("SELECT COUNT(*) FROM decision_risk_reviews WHERE cycle_id = ?", cid)
         answers = [r["decision"] for r in q("SELECT decision FROM boss_approvals WHERE cycle_id = ? ORDER BY created_at", cid)]
         snap = one("SELECT research_snapshot IS NOT NULL AND research_snapshot != '' FROM decision_cycles WHERE cycle_id = ?", cid)
-        if revs and not (snap and reviews):
+        refused = one("SELECT COUNT(*) FROM cycle_events WHERE cycle_id = ? AND payload LIKE '%订单规范化拒绝%'", cid)
+        # A revision refused at order normalization never reaches the risk review, by design: the refusal is on the record.
+        if revs and not (snap and reviews) and not (snap and not reviews and refused):
             chain_bad.append(f"{cid}: 有修订但缺{'研究快照' if not snap else '风控审查'}")
         if c["status"] in ("approved_not_executed", "approval_rejected") and not answers:
             chain_bad.append(f"{cid}: 终态 {c['status']} 但没有审批记录")
@@ -75,7 +77,10 @@ for day in days:
 
 print("\n## 七条停止条件\n")
 since = f"{START}"
-trades = one("SELECT COUNT(*) FROM trades WHERE submitted_at >= ?", since)
+# Under the live lock an approval writes its orders as "rejected / auto execution disabled" with no broker order id:
+# those are records of NOT submitting. A real submission carries a broker order id.
+trades = one("SELECT COUNT(*) FROM trades WHERE submitted_at >= ? AND COALESCE(order_id, '') != ''", since)
+lock_records = one("SELECT COUNT(*) FROM trades WHERE submitted_at >= ? AND COALESCE(order_id, '') = ''", since)
 system_fills = one("SELECT COUNT(*) FROM fills WHERE time >= ? AND origin IS NOT NULL "
                    "AND origin NOT IN ('manual', 'unattributed')", since)
 c1 = trades == 0 and system_fills == 0
@@ -97,7 +102,7 @@ c6 = not dup_days
 consecutive = any(failures[i][1] and failures[i + 1][1] for i in range(len(failures) - 1))
 
 rows = [
-    (1, "出现真实券商提交", mark(c1), f"本系统订单记录 {trades} 条，系统来源成交 {system_fills} 笔（都应为 0）"),
+    (1, "出现真实券商提交", mark(c1), f"带券商订单号的订单记录 {trades} 条，系统来源成交 {system_fills} 笔（都应为 0）；另有 {lock_records} 条无订单号的“未提交”记录（实盘锁定下的批准，不算提交）"),
     (2, "主理人上下文读旧表", mark(c2), "ats retirement zero chief.legacy_table_direct_reads → " + ("清零" if c2 else "未清零，需看输出")),
     (3, "审批绑定错误", mark(c3), f"批准的 hash 对不上风控审查 {len(bad_bind)} 条；批准了已被取代的周期 {len(stale)} 条"),
     (4, "决策链断裂", mark(c4), "；".join(chain_bad) or "每个周期都能从快照连到修订、风控、审批"),

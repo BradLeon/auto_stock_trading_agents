@@ -625,10 +625,11 @@ def retirement_command(args, *, parser) -> int:
             return 1
         decisions = []
         g0 = rc.read_g0_gate(args.verification or None)
+        trade_path = rc.read_trade_path_gate()
         for tomb in rows:
             zero = rc.verify_consumer_zero(
                 tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
-            gate_open, gate_reason = rc.evaluate_gate(tomb.gate, g0=g0)
+            gate_open, gate_reason = rc.evaluate_gate(tomb.gate, g0=g0, trade_path=trade_path)
             decisions.append(rc.decide_entry(
                 tomb.identifier, zero_verdicts=zero,
                 window=rc.verify_rollback_window(
@@ -643,6 +644,7 @@ def retirement_command(args, *, parser) -> int:
     if action == "gate":
         # Read-only summary of the manual verification (G0) plus which registry entries each gate holds back.
         g0 = rc.read_g0_gate(args.verification or None)
+        trade_path = rc.read_trade_path_gate()
         print(f"G0：{'已开' if g0.is_open else '未开'}——{g0.reason}")
         print(f"  核验项 {g0.total}；" + "；".join(f"{k} {v}" for k, v in sorted(g0.counts.items())))
         if g0.not_open:
@@ -653,7 +655,7 @@ def retirement_command(args, *, parser) -> int:
             if tomb.gate and not tomb.may_exit:
                 by_gate.setdefault(tomb.gate, []).append(tomb.identifier)
         for gate_name, items in sorted(by_gate.items()):
-            opened, why = rc.evaluate_gate(gate_name, g0=g0)
+            opened, why = rc.evaluate_gate(gate_name, g0=g0, trade_path=trade_path)
             print(f"\n门 {gate_name}：{'已开' if opened else '未开'}，挂在这道门上的未退役条目 {len(items)} 条"
                   + ("" if opened else f"（{why}）"))
             if args.show:

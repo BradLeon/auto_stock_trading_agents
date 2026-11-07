@@ -314,11 +314,28 @@ def test_g0_is_open_only_when_every_item_has_an_open_verdict_and_the_conclusion_
     assert not rc.read_g0_gate(tmp_path / "missing.md").is_open
 
 
-def test_an_external_gate_is_never_opened_from_here():
+def test_trade_path_cutover_opens_only_on_a_signed_observation_conclusion(tmp_path):
     from ats.workflow import retirement_clearance as rc
 
-    opened, why = rc.evaluate_gate("trade_path_cutover", g0=rc.GateStatus("G0", True, "ok"))
-    assert not opened and "external gate" in why
+    def record(text):
+        path = tmp_path / "observation.md"
+        path.write_text(text, encoding="utf-8")
+        return rc.read_trade_path_gate(path)
+
+    assert record("- [x] 确认\n\n**窗口结论签字：** 通过（用户，2026-11-07）\n").is_open
+    assert not record("### 签字\n\n- [ ] 我确认以上结论属实\n").is_open                 # no signature line at all
+    assert not record("**窗口结论签字：**\n").is_open                                         # blank is not a pass
+    assert not record("**窗口结论签字：** 未签\n").is_open
+    assert not record("**窗口结论签字：** 通过 / 不通过\n").is_open
+    assert not record("**窗口结论签字：** 不通过（停止条件 1 触发）\n").is_open
+    assert not rc.read_trade_path_gate(tmp_path / "missing.md").is_open
+
+    closed = rc.GateStatus("trade_path_cutover", False, "not signed")
+    opened = rc.GateStatus("trade_path_cutover", True, "signed")
+    shut, why = rc.evaluate_gate("trade_path_cutover", trade_path=closed)
+    assert not shut and "trade_path_cutover not met" in why
+    assert rc.evaluate_gate("trade_path_cutover", trade_path=opened) == (True, "")
+    assert rc.evaluate_gate("some_other_external_gate", trade_path=opened)[0] is False   # unknown gates stay shut
     assert rc.evaluate_gate("") == (True, "")
 
 

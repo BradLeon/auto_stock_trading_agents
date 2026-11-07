@@ -41,7 +41,8 @@ RetirementStatus = Literal["retired", "pending"]
 RetirementKind = Literal["", "business", "migration_tooling", "migration_mechanism", "legacy_entry", "naming"]
 RetirementGroup = Literal["", "R1", "R2", "R3", "R4", "R5"]
 # `G0` is the manual verification of the new path (verification.md); `trade_path_cutover` is an external gate owned by
-# another change and is never satisfied from here.
+# another change; it opens only when the user has signed the observation-window conclusion in that change's
+# observation.md (see retirement_clearance.read_trade_path_gate) — nothing here signs it.
 RetirementGate = Literal["", "G0", "trade_path_cutover"]
 ReadKind = Literal["ok", "retired", "not_found", "no_data"]
 

@@ -366,14 +366,16 @@ retired:
       task_projection_envelopes 固定研究快照（build_chief_snapshot：六类投影齐备
       才进决策周期，真实快照随 create_cycle 落库；修订轮次重验失效即 superseded）。
     target_phase: D
-    status: pending
+    status: retired
     exit_condition: 主理人上下文渲染全部改读投影/快照，旧表直读入口移除。
     missing_condition: >-
-      2026-10-28（switch-trade-path-and-retire-r5 tasks 2.1）：assemble.py 已只从研究快照与 Internal State
-      渲染上下文，旧读模型直读与 dual_read_diffs 已删除，`ats retirement zero` 判清零。仍待生产切换（S1）后
-      才算退出：Chief 读路由在生产上尚未切到 target。
-    consumers:
-      - agents.chief.assemble
+      2026-11-07 退役（用户批准，switch-trade-path-and-retire-r5 tasks 6.1）。清零证明：V1 旧直读与 dual_read_diffs
+      已于 2026-10-28（tasks 2.1）从 assemble.py 删除，src 内无旧表直读（sector/macro/technical_reviews、
+      legacy_read_models 的剩余读取方是 runtime.cli 等，归 6.3、6.5）；`ats retirement zero` 对 agents.chief.assemble
+      判清零（reaches the governed read surface）。V2 旧入口代码已不存在，无可调用路径（读取回执只记录经路由的读取，
+      无直读记录手段，用户 11-07 批准按此口径以 V1 为准）。V3 门 trade_path_cutover 已开（观察窗口 11-07 签字），
+      `ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。Chief 读路由 10-31 已切 target（S1）。
+    consumers: []
     consumer_zero_criterion: assemble.py 直读旧表的渲染路径清零，dual_read_diffs 下线。
     location: src/ats/agents/chief/assemble.py
 

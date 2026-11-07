@@ -199,8 +199,10 @@ def test_phase_d_items_are_registered_with_complete_fields() -> None:
     registry = mod.load_registry()
     allocation = registry.tombstone("layer_verdict.allocation")       # retired on 2026-10-27 (tasks 6.4): no reader left
     assert allocation is not None and allocation.status == "retired" and not allocation.consumers
+    chief = registry.tombstone("chief.legacy_table_direct_reads")   # retired on 2026-11-07 (r5 tasks 6.1)
+    assert chief is not None and chief.status == "retired" and not chief.consumers
+    assert registry.read_gate("chief.legacy_table_direct_reads") == ("retired", mod.REASON_RETIRED)
     pending = {
-        "chief.legacy_table_direct_reads": "pending",
         "sector_reviews": "pending",      # `pead_dossier` left this list on 2026-10-27: a live fundamental record (tasks 1.7)
     }
     for identifier, status in pending.items():

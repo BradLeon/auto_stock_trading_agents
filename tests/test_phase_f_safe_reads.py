@@ -58,7 +58,7 @@ def scope(consumer="chief", entity=False):
                                                          "end": (now+timedelta(minutes=5)).isoformat()}})
 
 
-def activate(identity, tmp_path, monkeypatch, *, reader=read_internal, changes=None):
+def activate(identity, tmp_path, monkeypatch, *, reader=read_internal, changes=None, real_registry=False):
     surface = load_surface()
     proof = {"identity": identity.as_row(), "legacy_identifier": "store.direct_trade_reads",
              "implementation_sha256": implementation_hash(reader),
@@ -76,6 +76,12 @@ def activate(identity, tmp_path, monkeypatch, *, reader=read_internal, changes=N
         fallback=lambda i: evidence,mode="isolated")
     monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "ineligible",
                                                                              "reasons": ["revoked"]})
+    # `store.direct_trade_reads` was retired on 2026-11-07 (r5 tasks 6.2), so the real registry now refuses every
+    # fallback to it. These cases exercise the proof checks that come before the retirement check; they model the
+    # entry as still pending. The real-registry refusal is its own test below.
+    if not real_registry:
+        monkeypatch.setattr("ats.workflow.legacy_retirement.load_registry", lambda: SimpleNamespace(
+            tombstone=lambda identifier: SimpleNamespace(status="pending")))
     return reference
 
 
@@ -133,6 +139,18 @@ def test_actual_read_refuses_each_unsafe_fallback(isolated, tmp_path, monkeypatc
     assert exc.value.reason_code == code and rows[-1]["status"] in {"blocked", "unavailable"}
     assert isolated.conn.execute("SELECT COUNT(*) FROM boss_approvals").fetchone()[0] == 0
     assert rr.current_read_context() is None
+
+
+def test_a_fallback_to_the_retired_direct_trade_reads_is_refused_by_the_real_registry(isolated, tmp_path,
+                                                                                     monkeypatch):
+    """r5 tasks 6.2: a read that would fall back to the retired implementation names the retirement."""
+    identity = scope()
+    seed_performance(isolated)
+    activate(identity, tmp_path, monkeypatch, real_registry=True)
+    with trace_reads() as rows, pytest.raises(FallbackUnsafe) as exc:
+        chief_state_entry(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
+    assert exc.value.reason_code == "fallback_target_retired"
+    assert rows[-1]["status"] == "blocked" and rows[-1]["reason_code"] == "fallback_target_retired"
 
 
 def test_failed_scope_does_not_stop_unrelated_legacy_reader(isolated, tmp_path, monkeypatch):

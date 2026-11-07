@@ -157,13 +157,17 @@ def test_performance_history_matches_direct_read(store):
 # 6.7 — the retired direct reads are registered in the tombstone registry
 # --------------------------------------------------------------------------- #
 
-def test_direct_trade_reads_registered_as_pending():
+def test_direct_trade_reads_are_retired_and_a_read_of_them_names_the_retirement():
+    """Retired 2026-11-07 (switch-trade-path-and-retire-r5 tasks 6.2): every consumer reads through state_api."""
     from ats.workflow import legacy_retirement as mod
 
     reg = mod.load_registry()
     ts = reg.tombstone("store.direct_trade_reads")
-    assert ts is not None and ts.status == "pending"
-    assert "risk.assess" in ts.consumers
+    assert ts is not None and ts.status == "retired" and not ts.consumers
+    assert reg.read_gate("store.direct_trade_reads") == ("retired", mod.REASON_RETIRED)
+    from ats.workflow.cutover_routing import is_retired
+
+    assert is_retired("store.direct_trade_reads")
 
 
 def test_realized_pnl_is_never_summed_across_currencies(store):

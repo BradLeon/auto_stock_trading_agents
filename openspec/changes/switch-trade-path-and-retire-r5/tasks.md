@@ -78,7 +78,7 @@
 ## 6. R5a 读取侧条目（每条需你同意；沿用退役 change 的 V1–V6）
 
 - [x] 6.1 `chief.legacy_table_direct_reads`：做 V1–V3，删除旧直读入口，登记改为 retired 并附清零证明。验证：`ats retirement decide` 判可退出；命中墓碑的读取返回退役原因（11-07 用户批准并退役：旧直读代码已于 2.1 删除，本条只改登记为 retired 并附清零证明；V1 src 无引用、`zero` 判清零；V2 旧入口已不存在、按 V1 为准（用户批准）；V3 门已开，`decide` 带 3.9 回退演练引用判可退出；`read_gate` 返回 legacy_retired，墓碑检查 consistent。V4–V6 随 6.6）
-- [ ] 6.2 `store.direct_trade_reads`：同 6.1。验证：同 6.1
+- [x] 6.2 `store.direct_trade_reads`：同 6.1。验证：同 6.1（11-07 用户批准并退役：三个消费方已于 2.2 改经 state_api，本条只改登记并附清零证明；V1 `zero` 三者判清零；V2 按 V1 为准（用户批准）；V3 `decide` 带 3.9 回退演练引用判可退出；运行时效果：`read_internal` 回退到旧实现按墓碑拒绝（`fallback_target_retired`），新测试以真实登记处验证；目标路由不受影响。V4–V6 随 6.6）
 - [ ] 6.3 `sector_reviews`、`legacy_read_models`（design.md D10 R5a；用户 2026-10-27 定）：
   1. 保留的只读命令（`ats sector show` 等读 `sector_reviews` 与旧读模型的命令）改读已发布的任务投影，在同一批历史数据上与原输出逐项对照；
   2. 清掉 Chief 与 `channel.context` 消费方；

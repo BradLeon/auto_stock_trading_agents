@@ -120,16 +120,16 @@ retired:
     capability_domain: execution/internal-state-api
     replaced_by: execution.state_api（as-of + 完整性标记的内部状态读模型）
     target_phase: C
-    status: pending
+    status: retired
     exit_condition: Chief（assemble.py）、Risk（risk/assess.py）与 channel/context 的交易历史与绩效读取全部改经 Internal State API。
     missing_condition: >-
-      2026-10-28（switch-trade-path-and-retire-r5 tasks 2.2）：三个消费方都已改经 Internal State（chief 经
-      HISTORY_DATA / PORTFOLIO_DATA，risk.assess、channel.context 经 state_api），`ats retirement zero` 对三者判清零
-      （后两者为模块级源码核验）。退出仍待生产切换（S1）。
-    consumers:
-      - agents.chief.assemble
-      - risk.assess
-      - channel.context
+      2026-11-07 退役（用户批准，switch-trade-path-and-retire-r5 tasks 6.2）。清零证明：V1 三个消费方已于 2026-10-28
+      （tasks 2.2）改经 Internal State（chief 经 HISTORY_DATA / PORTFOLIO_DATA，risk.assess、channel.context 经
+      state_api），`ats retirement zero` 对三者判清零（后两者为模块级源码核验）。V2 旧直读代码已不存在；读取回执只记录
+      经路由的读取，用户 11-07 批准以 V1 为准。V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用
+      （verification.md 3.9，2026-10-29）判可退出。退役后的运行时效果：consumer_reads.read_internal 的旧实现回退
+      （legacy_identifier=store.direct_trade_reads）按墓碑拒绝（fallback_target_retired），目标路由不受影响。
+    consumers: []
     consumer_zero_criterion: 消费方全部切换且直读调用清零（grep 校验）。
     location: Workflow memory
 

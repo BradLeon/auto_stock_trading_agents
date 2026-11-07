@@ -39,7 +39,7 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | R5 条目 | 接手任务（switch-trade-path-and-retire-r5） |
 |---|---|
 | `chief.legacy_table_direct_reads` | 2.1 改读快照 → 6.1 退役（**2026-11-07 已退役**，用户批准） |
-| `store.direct_trade_reads` | 2.2 改读 Internal State → 6.2 退役 |
+| `store.direct_trade_reads` | 2.2 改读 Internal State → 6.2 退役（**2026-11-07 已退役**，用户批准） |
 | `sector_reviews`、`legacy_read_models` | 6.3 |
 | `macro_reviews`、`technical_reviews` | 6.5 |
 | `decision_roles.unwired_to_governed_read_api` | 6.4 |

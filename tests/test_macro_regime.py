@@ -511,34 +511,30 @@ def _saved_review(**kw):
     return r
 
 
-def test_quadrant_reaches_all_four_downstream_injection_points():
-    """The deterministic call must survive into every consumer of the review.
+def test_quadrant_reaches_the_chief_and_stays_out_of_the_risk_prompt():
+    """The deterministic call must reach the Chief, and must not reach the Risk Officer.
 
-    These four are the only paths by which macro work reaches a trade decision;
-    a field that stops at the report helps nobody. Phase D 6.1 removed the old
-    fifth path deliberately: the Risk Officer's deterministic review reads only
+    The Chief reads the published macro projection. The old in-process injections
+    (PEAD prep / monitor hints / sector review via agents/macro/context.py) lost
+    their last caller and were deleted on 2026-11-07 (switch-trade r5, after tasks
+    6.5); the sector analyst does not read macro by design. Phase D 6.1 removed the
+    risk path deliberately: the Risk Officer's deterministic review reads only
     orders / portfolio snapshot / market snapshot / ruleset, never another
     analyst's macro opinion (risk/deterministic-review boundary).
     """
     from ats.agents.chief import assemble as chief_assemble
-    from ats.agents.macro import context as macro_context
 
     review = _saved_review()
 
-    # 1-2. PEAD prep and monitor.
-    assert "stagflation" in macro_context.prep_block("NVDA", "macro")
-    assert "stagflation" in macro_context.monitor_hint("macro")
-    # 3. Sector review (the industry analyst rotates layers on this).
-    assert "stagflation" in macro_context.sector_block("macro")
-    # 4. Chief: rendered from the published macro projection.
+    # Chief: rendered from the published macro projection.
     detail = [{"task_id": "macro_review", "role": "macro_review", "scope": "portfolio:portfolio",
                "status": "fresh", "reason": "fresh", "as_of": review.as_of.isoformat(),
                "projection_id": "projection-" + "0" * 24, "content_hash": "0" * 64,
                "payload": {"regime": review.regime, "summary": "", "quadrant": review.quadrant,
                            "quadrant_state": review.quadrant_state}}]
     assert "stagflation" in chief_assemble.projection_context_block(detail)
-    # 5 (removed). The risk prompt must stay macro-free — the quadrant must NOT
-    #    reach it, and this assertion pins that boundary against regression.
+    # Risk: the prompt must stay macro-free — the quadrant must NOT reach it,
+    # and this assertion pins that boundary against regression.
     from datetime import datetime as _dt
 
     from ats.agents.risk_officer import review as ro
@@ -548,44 +544,22 @@ def test_quadrant_reaches_all_four_downstream_injection_points():
     assert "stagflation" not in prompt
 
 
-def test_monitor_hint_stays_within_its_character_budget():
-    # 280 chars is the materiality-calibration budget; the brief form drops the
-    # alerts precisely so a long one cannot crowd out the regime itself.
-    from ats.agents.macro import context as macro_context
+def test_stub_reviews_are_never_published_downstream():
+    """The stub guard lives on the publish path now (it was in agents/macro/context.py until 2026-11-07).
 
-    _saved_review()
-    hint = macro_context.monitor_hint("macro", max_chars=280)
-    assert len(hint) <= 280 and "象限" in hint
-
-
-def test_stub_reviews_are_still_never_injected_downstream():
-    """The pre-existing guard must survive the new fields.
-
-    A `(no-llm)` run now carries a real quadrant, which makes it *more* tempting
-    to inject — but its narrative is empty, so downstream would read a regime
-    line that says nothing.
+    A `(no-llm)` run carries a real quadrant, which makes it tempting to pass on,
+    but its narrative is empty: the Chief would read a regime line that says nothing.
     """
-    from ats.agents.macro import context as macro_context
-    from ats.memory import get_store
+    from unittest.mock import MagicMock
 
-    get_store().save_macro_review(MacroReview(
-        name="macro", as_of=datetime(2026, 7, 31, tzinfo=timezone.utc),
-        regime="(no-llm)", quadrant="stagflation", quadrant_state="confirmed"))
-    assert macro_context.prep_block("NVDA", "macro") == ""
-    assert macro_context.monitor_hint("macro") == ""
-    assert macro_context.sector_block("macro") == ""
+    from ats.agents.macro import review as macro_review
 
-
-def test_a_review_without_the_deterministic_layer_injects_no_quadrant_noise():
-    """Offline/legacy reviews must not emit an empty "象限 transition" line."""
-    from ats.agents.macro import context as macro_context
-    from ats.memory import get_store
-
-    get_store().save_macro_review(MacroReview(
-        name="macro", as_of=datetime(2026, 7, 31, tzinfo=timezone.utc),
-        regime="risk-on", rate_path="持"))
-    assert "象限" not in macro_context.monitor_hint("macro")
-    assert "象限" not in macro_context.sector_block("macro")
+    for regime in ("(no-llm)", "(LLM unavailable)", ""):
+        store = MagicMock()
+        macro_review._publish_projection(store, MacroReview(
+            name="macro", as_of=datetime(2026, 7, 31, tzinfo=timezone.utc),
+            regime=regime, quadrant="stagflation", quadrant_state="confirmed"))
+        assert store.method_calls == [], regime
 
 
 def test_report_separates_computed_facts_from_model_narrative():

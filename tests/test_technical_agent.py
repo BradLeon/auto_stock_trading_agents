@@ -197,16 +197,6 @@ def test_chief_block_is_empty_when_there_are_no_readings():
     assert _review(readings=[]).chief_block() == ""
 
 
-def test_chief_context_helper_never_raises(monkeypatch):
-    from ats.agents.technical import context as tech_ctx
-
-    def boom():
-        raise RuntimeError("store down")
-
-    monkeypatch.setattr("ats.memory.get_store", boom)
-    assert tech_ctx.chief_block() == ""
-
-
 # ── persistence ──────────────────────────────────────────────────────────────
 def test_same_day_rerun_overwrites_and_previous_finds_yesterday():
     from ats.memory import get_store

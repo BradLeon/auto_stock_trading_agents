@@ -161,7 +161,6 @@ SectorReview → ① sqlite sector_reviews 表（payload 内含 layer_verdicts�
 | `src/ats/agents/sector/report.py` | Obsidian markdown 渲染/写入 |
 | `src/ats/agents/sector/viz.py` | 可交互 HTML 看板：`build_bundle()` 数据装配 + `render_html()`/`write_html()` |
 | `src/ats/agents/sector/viz_assets.py` | 看板的 CSS/JS 常量 |
-| `src/ats/agents/sector/context.py` | 注回 PEAD 的 prep_block/monitor_hint |
 | `src/ats/agents/sector/cross_section.py` | 截面选股：层内排序 + 权重分配（确定性，无 LLM） |
 | `src/ats/agents/sector/structure.py` | 结构层：KB 定性评审 → tech_tenor / moat_pricing |
 | `src/ats/skills/sector-analyst/SKILL.md` | 合成提示词（方法论+校准纪律） |

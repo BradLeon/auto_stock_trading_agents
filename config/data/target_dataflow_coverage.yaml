@@ -573,7 +573,6 @@ qualification_policy:
     - src/ats/agents/layer/__init__.py
     - src/ats/agents/macro/__init__.py
     - src/ats/agents/macro/assemble.py
-    - src/ats/agents/macro/context.py
     - src/ats/agents/macro/indicators.py
     - src/ats/agents/macro/outputs.py
     - src/ats/agents/macro/regime.py
@@ -587,7 +586,6 @@ qualification_policy:
     - src/ats/agents/risk_officer/review.py
     - src/ats/agents/risk_validator.py
     - src/ats/agents/sector/__init__.py
-    - src/ats/agents/sector/context.py
     - src/ats/agents/sector/kb_perturb.py
     - src/ats/agents/sector/outputs.py
     - src/ats/agents/sector/read_model.py
@@ -597,7 +595,6 @@ qualification_policy:
     - src/ats/agents/sector/viz.py
     - src/ats/agents/sector/viz_assets.py
     - src/ats/agents/technical/__init__.py
-    - src/ats/agents/technical/context.py
     - src/ats/agents/technical/strategy.py
     - src/ats/broker/__init__.py
     - src/ats/broker/ibkr.py

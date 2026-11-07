@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ats.agents.sector import assemble, context as sector_context, report, review as sector_review
+from ats.agents.sector import assemble, report, review as sector_review
 from ats.agents.sector.outputs import (
     CompanyCallView,
     LayerAssessView,
@@ -303,30 +303,6 @@ def test_report_render_and_write(tmp_path, monkeypatch):
     path = report.write(r, cfg2)
     assert path is not None and path.exists() and "行业分析-测试行业" in path.name
     assert report.write(r, CFG) is None                           # unset dir degrades
-
-
-def test_injection_blocks(monkeypatch):
-    store = get_store()
-    assert sector_context.prep_block("test_sector", "COHR") == ""   # no review yet
-    assert sector_context.monitor_hint("COHR", "test_sector") == ""
-
-    monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
-    store.save_sector_review(SectorReview(
-        sector="test_sector", as_of=NOW, regime="L3 是瓶颈", summary="SUM",
-        layers=[LayerAssessment(key="L3", label="L3 光互联", boom_score=80, signal="bullish")],
-        company_calls=[CompanyCall(symbol="COHR", layer="L3", stance="增持",
-                                   conviction=0.6, rationale="RA")],
-        rotation_advice="ROT"))
-    block = sector_context.prep_block("test_sector", "COHR")
-    assert "L3 是瓶颈" in block and "增持" in block and "ROT" in block
-    hint = sector_context.monitor_hint("COHR", "test_sector")
-    assert "L3 是瓶颈" in hint and "景气 80" in hint and len(hint) <= 280
-
-    # Stub reviews (no-llm) are not injected.
-    store.save_sector_review(SectorReview(sector="test_sector",
-                                          as_of=datetime(2027, 1, 1, tzinfo=timezone.utc),
-                                          regime="(no-llm)"))
-    assert sector_context.prep_block("test_sector", "COHR") == ""
 
 
 # --------------------------------------------------------------------------- #

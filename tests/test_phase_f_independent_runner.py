@@ -17,6 +17,10 @@ from ats.workflow.scoped_routes import RouteIdentity
 from ats.workflow.run_contracts import TriggerContext
 from ats.agent.task_projection import ProjectionScope
 
+# The offline replay runs in a subprocess without conftest's direct-read double, so the capture must record
+# risk's and Clerk's governed reads for real (switch-trade r5 task 6.4).
+pytestmark = pytest.mark.governed_decision_reads
+
 
 def plan_matrix(config, run_id, point, mode="routine", tasks=None, extra=None, batch="trading", model_execution=True):
     scope = {"kind":"sector","id":"ai_hardware","entities":["COHR"],

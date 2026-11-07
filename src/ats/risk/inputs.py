@@ -32,6 +32,20 @@ def _bound_entities(context) -> set[str]:
     return set(scope.get("entities") or [])
 
 
+def _outer_as_of(context):
+    """The business time of the run that called risk, if any.
+
+    Risk reviews the run's own moment: a review nested in the Chief's run takes the Chief's point in time,
+    so a replay of that run reproduces it; reading the clock here would be an input the run never froze.
+    Only a risk call outside any run (the CLI) takes the current time.
+    """
+    if context is None:
+        return None
+    scope = (context.invocation["actual_identity"]["scope"] if context.invocation
+             else context.identity.scope)
+    return ((scope or {}).get("time_range") or {}).get("end") or None
+
+
 @contextmanager
 def _bound(entities: Iterable[str] = ()):
     """Run inside a risk business scope covering `entities`.
@@ -45,12 +59,14 @@ def _bound(entities: Iterable[str] = ()):
     if context is not None and set(wanted) <= _bound_entities(context):
         yield context
         return
-    from ..workflow.runtime_reads import bind_read, business_identity, consumer_entities
+    from ..workflow.runtime_reads import (bind_read, business_identity, consumer_entities,
+                                          current_read_context)
 
     # A read that names no entity (rules, the account, the NAV history) binds the role's own portfolio
     # scope, the same one its CLI entry binds; a read for symbols binds exactly those symbols.
     identity = business_identity(RISK, kind="portfolio", scope_id="portfolio",
-                                 entities=wanted or consumer_entities(RISK, "portfolio", "portfolio"))
+                                 entities=wanted or consumer_entities(RISK, "portfolio", "portfolio"),
+                                 as_of=_outer_as_of(current_read_context()))
     with bind_read(identity) as bound:
         yield bound
 

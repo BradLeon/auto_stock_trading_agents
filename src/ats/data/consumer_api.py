@@ -102,6 +102,15 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
 
     guard_input(consumer, scope, as_of=as_of, business_scope=business_scope)
     from ..workflow.business_replay_inputs import governed_read, capture_governed
+    # Clerk's broker steps (positions, fills, completed orders) are what an isolated run's own simulated
+    # broker produces, stamped with that run's isolation root; a replay re-reads them from its own broker
+    # instead of serving the captured ones, which would publish a capture's fills into the replay's root.
+    # Contract, scope and audit still apply; only the freeze is skipped (as for the execution
+    # authorization, which a replay rebuilds rather than replays).
+    live_in_run = product == "BROKER_STATE" and bool(scope.get("step"))
+    if live_in_run:
+        governed_read = lambda *a, **k: None  # noqa: E731
+        capture_governed = lambda packet: packet  # noqa: E731
     frozen = governed_read(consumer, product, scope, as_of=as_of)
     if frozen is not None:
         from ..workflow.consumer_reads import record_read

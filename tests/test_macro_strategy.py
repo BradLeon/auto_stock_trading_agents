@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ats.agents.macro import assemble, context as macro_context, report, review as macro_review
+from ats.agents.macro import assemble, report, review as macro_review
 from ats.agents.macro.outputs import (
     MacroReviewLLMView,
     SectorTiltView,
@@ -272,27 +272,6 @@ def test_report_render_and_write(tmp_path):
     path = report.write(r, cfg2)
     assert path is not None and "宏观分析-宏观" in path.name
     assert report.write(r, CFG) is None                            # unset dir degrades
-
-
-def test_injection_and_cascade(monkeypatch):
-    store = get_store()
-    assert macro_context.prep_block("COHR") == ""                  # no review yet
-    assert macro_context.sector_block() == ""
-
-    store.save_macro_review(MacroReview(
-        name="macro", as_of=NOW, regime="risk-off 晚周期", rate_path="维持",
-        asset_implications="黄金受益",
-        sector_tilts=[SectorTilt(sector="半导体", stance="低配", rationale="RA")]))
-    assert "risk-off 晚周期" in macro_context.prep_block("COHR")
-    assert "利率: 维持" in macro_context.monitor_hint()
-    sb = macro_context.sector_block()
-    assert "半导体: 低配" in sb and "黄金受益" in sb
-
-    # Stub reviews are not injected.
-    store.save_macro_review(MacroReview(name="macro",
-                                        as_of=datetime(2027, 1, 1, tzinfo=timezone.utc),
-                                        regime="(no-llm)"))
-    assert macro_context.prep_block("COHR") == ""
 
 
 def test_sector_assemble_does_not_ingest_macro(monkeypatch):

@@ -40,8 +40,8 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 |---|---|
 | `chief.legacy_table_direct_reads` | 2.1 改读快照 → 6.1 退役（**2026-11-07 已退役**，用户批准） |
 | `store.direct_trade_reads` | 2.2 改读 Internal State → 6.2 退役（**2026-11-07 已退役**，用户批准） |
-| `sector_reviews`、`legacy_read_models` | 6.3 |
-| `macro_reviews`、`technical_reviews` | 6.5 |
+| `sector_reviews`、`legacy_read_models` | 6.3（**2026-11-07 用户批准方案 A**：`sector_reviews` 改登记为行业分析师自有工作记录，移出待退，不登记墓碑；`legacy_read_models` 消费方 `zero` 判清零、`decide` 判可退出，**2026-11-07 已退役**，用户批准） |
+| `macro_reviews`、`technical_reviews` | 6.5（同 6.3 方案 A：改登记为宏观、技术面分析师自有工作记录，移出待退） |
 | `decision_roles.unwired_to_governed_read_api` | 6.4 |
 | `memory.store.legacy_decision_write_path` | 2.3 改读 → 7.1 移除镜像写 |
 | `trades.client_order_id.legacy_derivation` | 7.2 |
@@ -156,7 +156,7 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | PEAD 图里路由门控的旧供应商回退 | `graph.pead.internal_risk_and_sizing`（4 处回退在 `graph/pead.py`） | 基本面域 | 观察窗口结束且不再需要「退回旧路径」之后，由你批准删除；删除前它们是回滚目标 |
 | 旧调度器的临时日记作业 | `scheduler.adhoc_journal_jobs` | 调度域 | 随 Clerk 排程（交易路径切换）收口。`scheduler.hardcoded_serial_run` 已于 2026-10-20 退役：旧调度器代码与 `com.ats.schedule` 一并删除 |
 | 旧决策写路径、`client_order_id` 旧派生 | `memory.store.legacy_decision_write_path`、`trades.client_order_id.legacy_derivation` | 原 owner（决策/记账域） | 随 Chief/Clerk 迁移，历史清理由原 owner 负责 |
-| 旧读模型与旧表 | `legacy_read_models`、`task_projections.legacy_columns`、`pead_dossier`、`sector_reviews` | 各读取方 | 对应消费方切到投影后复核 `zero` |
+| 旧读模型与旧表 | `legacy_read_models`、`task_projections.legacy_columns`、`pead_dossier`、`sector_reviews` | 各读取方 | 对应消费方切到投影后复核 `zero`（2026-11-07：`pead_dossier`、`sector_reviews` 及 `macro_reviews`、`technical_reviews` 已改登记为分析师自有记录，只由所有者读，`tests/test_analyst_records.py` 守住） |
 
 ## 八、不再要求「旧全用途业务一致」
 

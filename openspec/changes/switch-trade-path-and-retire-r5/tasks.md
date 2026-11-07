@@ -79,14 +79,15 @@
 
 - [x] 6.1 `chief.legacy_table_direct_reads`：做 V1–V3，删除旧直读入口，登记改为 retired 并附清零证明。验证：`ats retirement decide` 判可退出；命中墓碑的读取返回退役原因（11-07 用户批准并退役：旧直读代码已于 2.1 删除，本条只改登记为 retired 并附清零证明；V1 src 无引用、`zero` 判清零；V2 旧入口已不存在、按 V1 为准（用户批准）；V3 门已开，`decide` 带 3.9 回退演练引用判可退出；`read_gate` 返回 legacy_retired，墓碑检查 consistent。V4–V6 随 6.6）
 - [x] 6.2 `store.direct_trade_reads`：同 6.1。验证：同 6.1（11-07 用户批准并退役：三个消费方已于 2.2 改经 state_api，本条只改登记并附清零证明；V1 `zero` 三者判清零；V2 按 V1 为准（用户批准）；V3 `decide` 带 3.9 回退演练引用判可退出；运行时效果：`read_internal` 回退到旧实现按墓碑拒绝（`fallback_target_retired`），新测试以真实登记处验证；目标路由不受影响。V4–V6 随 6.6）
-- [ ] 6.3 `sector_reviews`、`legacy_read_models`（design.md D10 R5a；用户 2026-10-27 定）：
+- [x] 6.3 `sector_reviews`、`legacy_read_models`（design.md D10 R5a；用户 2026-10-27 定）：
   1. 保留的只读命令（`ats sector show` 等读 `sector_reviews` 与旧读模型的命令）改读已发布的任务投影，在同一批历史数据上与原输出逐项对照；
   2. 清掉 Chief 与 `channel.context` 消费方；
   3. `runtime.cli`、Chief、`channel.context` 都判 zero 后退役，旧表保留只读。
 
-  验证：对照记录写进 inventory.md；`ats retirement zero` 对三个消费方判 zero；历史行可读，新写入已停止
+  验证：对照记录写进 inventory.md；`ats retirement zero` 对三个消费方判 zero；历史行可读，新写入已停止（11-07 用户批准方案 A 并退役：核实后 `sector_reviews` 是行业分析师的完整工作记录——一次运行全文写表、同一次运行删减成投影发布给主理人，下一次运行读回上期篮子与层结论——改登记为分析师自有记录，移出待退，不登记墓碑，与 `pead_dossier`（10-27）同例；因此第 1 步“改读投影并逐项对照”与“新写入已停止”不再适用，inventory.md 不建。第 2 步：Chief 已由 6.1 退役，`channel.context` 判清零；`runtime.cli` 只在所属分析师自己的命令里读，判清零。`legacy_read_models` V1 `zero` 两个消费方判清零、全仓非所有者读取 0 处；V2 退役对象是读取关系、无运行时回执，按 V1 为准（用户批准）；V3 `decide` 带 3.9 回退演练引用判可退出；墓碑检查 consistent。防回退：`tests/test_analyst_records.py`。Chief 旧直读入口 `agents/{sector,macro,technical}/context.py` 已无调用方，用户批准删除。V4–V6 随 6.6）
+
 - [ ] 6.4 `decision_roles.unwired_to_governed_read_api`：风控、Trader、Clerk、Fundamental 四个消费方经受治理读取面取数后退役。验证：`ats retirement zero` 对四个消费方判 zero
-- [ ] 6.5 `macro_reviews`、`technical_reviews`：做法同 6.3。`ats macro show`、`ats technical show` 等改读已发布的任务投影并逐项对照；Chief 消费方已由 2.1 清掉；`runtime.cli` 与 Chief 都判 zero 后退役，旧表保留只读。验证：同 6.3
+- [x] 6.5 `macro_reviews`、`technical_reviews`：做法同 6.3。`ats macro show`、`ats technical show` 等改读已发布的任务投影并逐项对照；Chief 消费方已由 2.1 清掉；`runtime.cli` 与 Chief 都判 zero 后退役，旧表保留只读。验证：同 6.3（11-07 同 6.3 方案 A：`macro_reviews`、`technical_reviews` 是宏观、技术面分析师的完整工作记录——宏观读上一期结论算结论变化，技术面读最新一份做缓存与上期对比——改登记为分析师自有记录，移出待退；`show` 命令属所有者读取，保留读原表；Chief 已由 2.1、6.1 清零。V4–V6 随 6.6）
 - [ ] 6.6 本批复验 V4–V6，TEST_BASELINE 与退役 runbook 记录本批。验证：重启后下一次 `chief-daily` 与 `clerk-daily` 正常完成
 
 ## 7. R5b 写入与入口侧条目

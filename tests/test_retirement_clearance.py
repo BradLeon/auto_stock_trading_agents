@@ -109,7 +109,9 @@ def test_every_role_shaped_registered_path_maps_to_a_known_role():
             if consumer in rc.MODULE_TO_ROLE:
                 rc.role_for(consumer)  # raises when mapped but broken
                 checked += 1
-    assert checked >= 6, (
+    # 6 → 4 on 2026-11-07: the three analyst-record tombstones (each naming agents.chief.assemble) left the
+    # registry when the tables were reclassified as analyst-owned (switch-trade r5 tasks 6.3 / 6.5).
+    assert checked >= 4, (
         "expected the registry's role-shaped consumers to be mapped; a drop here "
         "means the mapping stopped covering them")
 

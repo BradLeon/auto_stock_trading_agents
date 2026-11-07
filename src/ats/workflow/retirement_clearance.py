@@ -287,6 +287,138 @@ _RAW_TRADE_CALLS = {"recent_trades", "recent_fills", "recent_performance", "save
 _RAW_TRADE_SQL = re.compile(r"\b(from|join)\s+(trades|fills|performance|trade_episodes)\b", re.I)
 
 
+# --- analyst working records (switch-trade r5 tasks 6.3 / 6.5, 2026-11-07) ----------------------
+#
+# `sector_reviews`, `macro_reviews` and `technical_reviews` are not legacy tables. Each is one
+# analyst's full working record: the analyst writes its whole conclusion there and, in the same
+# run, publishes a slimmer projection for the Chief. The next run reads the record back (prior
+# baskets, the conclusion delta, the readings cache). What retired is the *other* use: someone
+# besides the owner reading the record as a compatibility read model (`legacy_read_models`).
+#
+# So the check is per table: who may read it, and nobody else. A sector module reading
+# `macro_reviews` is a cross-analyst read and is a finding like any other.
+ANALYST_RECORD_CALLS: dict[str, str] = {
+    "save_sector_review": "sector_reviews", "latest_sector_review": "sector_reviews",
+    "sector_review_history": "sector_reviews", "recent_sector_reviews": "sector_reviews",
+    "save_macro_review": "macro_reviews", "latest_macro_review": "macro_reviews",
+    "latest_macro_review_before": "macro_reviews", "recent_macro_reviews": "macro_reviews",
+    "save_technical_review": "technical_reviews", "latest_technical_review": "technical_reviews",
+    "previous_technical_review": "technical_reviews", "recent_technical_reviews": "technical_reviews",
+}
+_ANALYST_RECORD_SQL = re.compile(r"\b(from|join|into|update)\s+(sector_reviews|macro_reviews|technical_reviews)\b", re.I)
+# The analysts' own `context` modules wrap reads of the record (they were the Chief's old way in).
+_ANALYST_CONTEXT_MODULE = re.compile(r"agents\.(sector|macro|technical)\.context$")
+_TABLE_OF_CONTEXT = {"sector": "sector_reviews", "macro": "macro_reviews", "technical": "technical_reviews"}
+
+# Who may read each record, as a path prefix under the repo, with the reason. Anything else is a finding.
+ANALYST_RECORD_OWNERS: dict[str, dict[str, str]] = {
+    "sector_reviews": {
+        "src/ats/agents/sector/": "行业分析师自己（上期篮子、层结论、截面原地回写）",
+        "src/ats/chain/kb_review.py": "产业链知识库复核：查行业分析师篮子理由里的盲区（给人看的报告，不进决策）",
+        "src/ats/chain/kb_audit.py": "产业链知识库审计：查篮子打分是否引用了判据（给人看的报告，不进决策）",
+    },
+    "macro_reviews": {"src/ats/agents/macro/": "宏观分析师自己（上一期结论，算结论变化）"},
+    "technical_reviews": {"src/ats/agents/technical/": "技术面分析师自己（读数缓存、上一期对比）"},
+}
+# runtime/cli.py reads the records only inside the owning analyst's own commands: show its record,
+# re-run one layer of its review, render its report. Each command may read its own analyst's table only.
+ANALYST_RECORD_CLI_COMMANDS: dict[str, str] = {
+    "technical_show": "technical_reviews",
+    "macro_show": "macro_reviews",
+    "sector_show": "sector_reviews",
+    "run_layer_review": "sector_reviews",
+    "run_sector_html": "sector_reviews",
+}
+ANALYST_RECORD_STORE = "src/ats/memory/store.py"     # the implementation of the reads themselves
+CLI_SOURCE = "src/ats/runtime/cli.py"
+
+# Consumers of `legacy_read_models` as the registry names them, and the file each claim is about.
+MODULE_ANALYST_RECORD_SOURCES: dict[str, str] = {
+    "channel.context": "src/ats/channel/context.py",
+    "runtime.cli": CLI_SOURCE,
+}
+
+
+@dataclass
+class AnalystRecordRead:
+    """One read (or write) of an analyst's working record found in source."""
+
+    table: str
+    kind: str          # store_call | sql | context_import
+    location: str      # path:line
+    function: str = ""  # enclosing top-level function, when there is one
+
+
+def scan_analyst_record_reads(relative: str, base: Path | None = None) -> list[AnalystRecordRead]:
+    """Every touch of the three analyst records in one source file (AST; read-only)."""
+    import ast
+    import warnings
+
+    from ..config import REPO_ROOT
+
+    path = (Path(base) if base else REPO_ROOT) / relative
+    with warnings.catch_warnings():          # a stray escape in some file's string is not our finding
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found: list[AnalystRecordRead] = []
+
+    def visit(node, function: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = function
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and not function:
+                name = child.name
+            where = f"{relative}:{getattr(child, 'lineno', 0)}"
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) \
+                    and child.func.attr in ANALYST_RECORD_CALLS:
+                found.append(AnalystRecordRead(ANALYST_RECORD_CALLS[child.func.attr], "store_call", where, name))
+            elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+                for m in _ANALYST_RECORD_SQL.finditer(child.value):
+                    found.append(AnalystRecordRead(m.group(2).lower(), "sql", where, name))
+            elif isinstance(child, ast.ImportFrom):
+                module = (child.module or "").lstrip(".")
+                targets = [module] + [f"{module}.{a.name}" for a in child.names]
+                for target in targets:
+                    m = _ANALYST_CONTEXT_MODULE.search(target)
+                    if m:
+                        found.append(AnalystRecordRead(_TABLE_OF_CONTEXT[m.group(1)], "context_import", where, name))
+            visit(child, name)
+
+    visit(tree, "")
+    return found
+
+
+def analyst_record_finding(read: AnalystRecordRead) -> str:
+    """Why this read is not allowed, or "" when the reader may read that record."""
+    relative = read.location.rsplit(":", 1)[0]
+    if relative == ANALYST_RECORD_STORE:
+        return ""
+    if relative == CLI_SOURCE:
+        allowed = ANALYST_RECORD_CLI_COMMANDS.get(read.function)
+        if allowed == read.table:
+            return ""
+        return (f"命令行函数 {read.function or '(模块级)'} 读 {read.table}，"
+                f"它不是该分析师自己的命令（允许的：{sorted(ANALYST_RECORD_CLI_COMMANDS)}）")
+    owners = ANALYST_RECORD_OWNERS.get(read.table, {})
+    if any(relative.startswith(prefix) if prefix.endswith("/") else relative == prefix for prefix in owners):
+        return ""
+    return f"{relative} 不是 {read.table} 的所有者，不得读它（所有者：{sorted(owners)}）"
+
+
+def analyst_record_violations(root: Path | None = None) -> list[tuple[AnalystRecordRead, str]]:
+    """Every read of the three records anywhere under src/ats by someone who does not own it."""
+    from ..config import REPO_ROOT
+
+    base = Path(root) if root else REPO_ROOT
+    bad: list[tuple[AnalystRecordRead, str]] = []
+    for path in sorted((base / "src" / "ats").rglob("*.py")):
+        relative = path.relative_to(base).as_posix()
+        for read in scan_analyst_record_reads(relative, base):
+            why = analyst_record_finding(read)
+            if why:
+                bad.append((read, why))
+    return bad
+
+
 @dataclass
 class ModuleTradeReads:
     """What one module's source does with the trade ledger tables."""
@@ -361,6 +493,18 @@ def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
             continue
 
         if scan is not None:
+            if consumer in MODULE_ANALYST_RECORD_SOURCES and identifier == "legacy_read_models":
+                reads = scan_analyst_record_reads(MODULE_ANALYST_RECORD_SOURCES[consumer])
+                bad = [(r, why) for r in reads if (why := analyst_record_finding(r))]
+                owner_reads = [r for r in reads if not analyst_record_finding(r)]
+                verdicts.append(ZeroVerdict(
+                    identifier=identifier, consumer=consumer, verdict=NOT_ZERO if bad else ZERO,
+                    reason=("still reads an analyst's working record as a read model" if bad else
+                            ("reads the analyst records only inside the owning analyst's own commands"
+                             if owner_reads else "reads none of the analyst records")),
+                    evidence={"violations": [f"{r.table}@{r.location}" for r, _ in bad],
+                              "owner_reads": sorted({f"{r.function}:{r.table}" for r in owner_reads})}))
+                continue
             if consumer in MODULE_TRADE_READ_SOURCES and identifier == "store.direct_trade_reads":
                 found = scan_module_trade_reads(consumer)
                 clean = not found.violations and bool(found.call_path)

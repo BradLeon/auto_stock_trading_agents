@@ -160,7 +160,6 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         "graph.pead.internal_risk_and_sizing",
         "chief.legacy_table_direct_reads",
         "pead_dossier",
-        "sector_reviews",
         # ── Phase B ──
         "risk.checks.in_place_clipping",
         "agents.risk_validator.apply_guardrails",
@@ -174,7 +173,6 @@ def test_the_registered_batch_covers_every_documented_item() -> None:
         # its retired tombstone preserves historical lineage and rejects reuse.
         "agent.evidence_observer",
         # ── retire-legacy-and-migration-tooling（tasks 1.6、1.7）──
-        "macro_reviews", "technical_reviews",
         "naming.consumer_cutover_cli", "legacy_entry.research_manual_commands",
         "legacy_entry.research_owner_legacy_mode", "legacy_entry.evidence_commands",
         "naming.migration_terms_in_docs",
@@ -202,18 +200,10 @@ def test_phase_d_items_are_registered_with_complete_fields() -> None:
     chief = registry.tombstone("chief.legacy_table_direct_reads")   # retired on 2026-11-07 (r5 tasks 6.1)
     assert chief is not None and chief.status == "retired" and not chief.consumers
     assert registry.read_gate("chief.legacy_table_direct_reads") == ("retired", mod.REASON_RETIRED)
-    pending = {
-        "sector_reviews": "pending",      # `pead_dossier` left this list on 2026-10-27: a live fundamental record (tasks 1.7)
-    }
-    for identifier, status in pending.items():
-        stone = registry.tombstone(identifier)
-        assert stone is not None, identifier
-        assert stone.target_phase == "D", identifier
-        assert stone.status == status, identifier
-        assert stone.replaced_by, identifier
-        assert stone.exit_condition, identifier
-        assert stone.consumer_zero_criterion, identifier
-        assert stone.consumers, identifier
+    # `pead_dossier` (10-27, tasks 1.7) and `sector_reviews` (11-07, r5 tasks 6.3) left this list: both are
+    # live analyst-owned records, not retirement items. They stay in the active inventory with no tombstone.
+    for identifier in ("pead_dossier", "sector_reviews"):
+        assert registry.tombstone(identifier) is None and identifier in registry.active(), identifier
     retired = registry.tombstone("graph.pead.internal_risk_and_sizing")
     assert retired is not None
     assert retired.target_phase == "D" and retired.status == "retired"
@@ -315,7 +305,8 @@ def test_every_entry_of_the_retirement_change_has_a_group_a_gate_and_known_depen
         assert stone.gate == ("trade_path_cutover" if stone.group == "R5" else "G0"), stone.identifier
         assert stone.kind, stone.identifier
     assert registry.tombstone("pead_dossier") is None and "pead_dossier" in registry.active()
-    assert registry.tombstone("macro_reviews") and registry.tombstone("technical_reviews")
+    for record in ("macro_reviews", "technical_reviews"):   # analyst-owned working records since 2026-11-07 (r5 6.5)
+        assert registry.tombstone(record) is None and record in registry.active()
 
 
 def test_unproven_retired_entries_read_as_awaiting_proof_not_as_cleared() -> None:

@@ -103,15 +103,24 @@ retired:
     capability_domain: agent/task-projection
     replaced_by: task_projection_envelopes + 角色专用 payload
     target_phase: D
-    status: pending
-    exit_condition: 新写路径稳定，且旧报表与 CLI 消费方迁移完成。
+    status: retired
+    exit_condition: >-
+      分析师工作记录（sector_reviews / macro_reviews / technical_reviews）不再被所有者以外的模块当兼容读模型读取；
+      决策路径只读已发布的投影。（2026-11-07 按方案 A 改写：原条件“报表与 CLI 迁移到 envelope”以这几张表是
+      待退旧表为前提，核实后它们是分析师在用的工作记录，见 active 清册处的说明；pead_dossier 已于 10-27 移出。）
     missing_condition: >-
-      pead_dossier / sector_reviews / macro_reviews / technical_reviews 仍是活动兼容读模型，
-      报表与 CLI 消费方尚未迁移到 envelope。
-    consumers:
-      - runtime.cli
-      - channel.context
-    consumer_zero_criterion: 旧报表与 CLI 全部改为读 envelope，兼容写入登记退役条件后清零。
+      2026-11-07 退役（用户批准，switch-trade-path-and-retire-r5 tasks 6.3、6.5，方案 A）。清零证明：V1 `ats retirement zero`
+      对 channel.context 判清零（不读三张分析师工作记录），对 runtime.cli 判清零（只在所属分析师自己的命令 technical_show /
+      macro_show / sector_show / run_layer_review / run_sector_html 里读各自的表）；Chief 已由 chief.legacy_table_direct_reads
+      于 11-07 退役；全仓非所有者读取 0 处（retirement_clearance.analyst_record_violations）；Chief 旧直读入口
+      agents/{sector,macro,technical}/context.py 已无调用方，随后删除。V2 本条退役的是一条读取关系而非一段代码，无运行时回执
+      可数，按 V1 为准（用户 11-07 批准）。V3 门 trade_path_cutover 已开（观察窗口 11-07 签字），`ats retirement decide`
+      带回退演练引用（verification.md 3.9，2026-10-29）判可退出。三张表本身不退役，见 active 清册处的说明；
+      tests/test_analyst_records.py 守住非所有者不得读取。V4–V6 随 tasks 6.6。
+    consumers: []
+    consumer_zero_criterion: >-
+      每个消费方源码里对三张分析师工作记录的读取，要么没有，要么只在所属分析师自己的命令里读它自己的表
+      （retirement_clearance.ANALYST_RECORD_CLI_COMMANDS）；全仓按表逐一核对所有者，非所有者读取为 0。
     location: Workflow memory
   - identifier: store.direct_trade_reads
     kind: business
@@ -390,24 +399,15 @@ retired:
   # pead_dossier 不是待退项（2026-10-27，tasks 1.7）：它是基本面分析师自有的在用记录——财报前基线存在这里，事件评审读它，
   # 同一财季只留一份档案。因此它留在上面的 active 清册里，不登记墓碑。
 
-  - identifier: sector_reviews
-    kind: business
-    group: R5
-    gate: trade_path_cutover
-    capability_domain: agent/sector-allocation
-    replaced_by: sector_allocation 投影（+ layer_analysis 投影，task_projection_envelopes）
-    target_phase: D
-    status: pending
-    exit_condition: >-
-      行业配置的全部消费方改读投影，sector_reviews 行只作历史报表数据源。
-    missing_condition: >-
-      Chief 双读仍从 sector_reviews 取行业结论；行业报告渲染仍走旧读模型行；
-      两处切流均属 Phase F。
-    consumers:
-      - agents.chief.assemble
-      - runtime.cli
-    consumer_zero_criterion: Chief 与 CLI 的 sector_reviews 读取清零（切流后）。
-    location: Workflow memory
+  # sector_reviews、macro_reviews、technical_reviews 不是待退项（2026-11-07，switch-trade r5 tasks 6.3、6.5，用户批准方案 A）：
+  # 它们是三位分析师各自的完整工作记录。分析师一次运行得出完整结论，全文写进自己的表，同一次运行里删减成精简版发布为
+  # 投影给主理人读（投影不从表里回读）。下一次运行要读回上期状态：宏观读上一期结论算结论变化，行业读上期篮子与层结论并
+  # 截面原地回写，技术面读最新一份做缓存与上期对比。停写或删表会让分析师下一次运行出错、产不出新投影。
+  # 退役的是「非所有者把这些表当兼容读模型来读」这条读取关系（legacy_read_models，见该条）；表本身留在 active 清册，
+  # 不登记墓碑。谁可以读由 retirement_clearance.ANALYST_RECORD_OWNERS / ANALYST_RECORD_CLI_COMMANDS 规定，
+  # tests/test_analyst_records.py 守住：所属分析师、它自己的命令行命令、产业链知识库复核与审计（只读 sector_reviews）之外，
+  # 任何模块读这三张表都报错。历史从 2026-07 起只在这三张表里，投影从 2026-10-16 起才有。
+
 
   # ── Phase F（任务 7.10：第 7 组实测缺口此前无归属者，在此取得归属）──
   #
@@ -450,41 +450,7 @@ retired:
     location: src/ats/agents/risk_officer/review.py, src/ats/trader/execute.py, src/ats/execution/clerk.py, src/ats/agents/fundamental/
 
   # ── 补登记（2026-10-27，tasks 1.7）：在用清册里有、却没有条目的两张旧读模型表 ──────────────────────
-  - identifier: macro_reviews
-    kind: business
-    group: R5
-    gate: trade_path_cutover
-    capability_domain: agent/macro
-    replaced_by: macro_review 投影（task_projection_envelopes）
-    target_phase: retire-legacy-and-migration-tooling
-    status: pending
-    exit_condition: >-
-      Chief 的宏观读取全部改读 macro_review 投影，macro_reviews 行只作历史报表数据源。
-    missing_condition: >-
-      Chief 双读仍从 macro_reviews 取宏观结论；消费方是 Chief，归 R5，随交易路径切换处理。
-    consumers:
-      - agents.chief.assemble
-      - runtime.cli
-    consumer_zero_criterion: Chief 与 CLI 的 macro_reviews 读取清零（切流后）。
-    location: Workflow memory
 
-  - identifier: technical_reviews
-    kind: business
-    group: R5
-    gate: trade_path_cutover
-    capability_domain: agent/technical
-    replaced_by: technical_signal 等技术面投影（task_projection_envelopes，按标的作用域）
-    target_phase: retire-legacy-and-migration-tooling
-    status: pending
-    exit_condition: >-
-      Chief 的技术面读取全部改读技术面投影，technical_reviews 行只作历史报表数据源。
-    missing_condition: >-
-      Chief 双读仍从 technical_reviews 取技术面结论；消费方是 Chief，归 R5，随交易路径切换处理。
-    consumers:
-      - agents.chief.assemble
-      - runtime.cli
-    consumer_zero_criterion: Chief 与 CLI 的 technical_reviews 读取清零（切流后）。
-    location: Workflow memory
 
   # ── 退役变更（retire-legacy-and-migration-tooling）：design.md D4 的全部条目 ──────────────────────────
   # 门 G0 = verification.md 的人工核验；R5 的外部门 trade_path_cutover 在另一个 change 里满足，这里永远不会放行。

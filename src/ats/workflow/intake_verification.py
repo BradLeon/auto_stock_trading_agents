@@ -86,9 +86,15 @@ CONSUMER_ENTRY_POINTS: dict[str, tuple[str, ...]] = {
     "macro": ("ats.agents.macro.review", "ats.agents.macro.assemble"),
     "technical": ("ats.agents.technical.review",),
     "chief": ("ats.agents.chief.decide", "ats.agents.chief.assemble"),
-    "risk": ("ats.agents.risk_officer.review",),
+    # Risk's reads are made where the review is computed, not only in the memo module: the order review
+    # (`risk.checks`), the six-layer engine (`risk.assess`), the daily report and its renderers, and the
+    # role's own read module (`risk.inputs`). Scanning only the memo module let a review that read the
+    # broker and the providers directly pass as unscanned (switch-trade r5 task 6.4, 2026-11-07).
+    "risk": ("ats.agents.risk_officer.review", "ats.agents.risk_officer.daily", "ats.risk.assess",
+             "ats.risk.checks", "ats.risk.exposure", "ats.risk.report", "ats.risk.inputs"),
     "trader": ("ats.trader.execute",),
-    "clerk": ("ats.execution.clerk",),
+    # The broker reads Clerk makes are in its read adapter, so the adapter is scanned with the run.
+    "clerk": ("ats.execution.clerk", "ats.data.runtime.clerk_reads"),
 }
 
 # The six analysis roles, and the four decision/execution roles. Separate because
@@ -127,6 +133,23 @@ PROVIDER_MODULES: tuple[str, ...] = (
     "ats.data.defeatbeta",
     "ats.data.indicators",
     "ats.data.articles",
+)
+
+# Runtime and internal sources a DECISION role must read through the governed API, not directly: the
+# broker gateway, the runtime market/option readers, the beta cache, the account snapshot helper and the
+# ledger's internal-state module. Each sits underneath a governed product (BROKER_STATE, PORTFOLIO_DATA,
+# MARKET_DATA, HISTORY_DATA); importing it directly skips the contract, the scope check, replay freezing
+# and the audited read. Analysis roles are not checked against this list — their direct-read rule is the
+# provider list above.
+DECISION_RUNTIME_MODULES: tuple[str, ...] = (
+    "ats.data.fundamentals",
+    "ats.data.sector_snapshot",
+    "ats.data.options",
+    "ats.data.runtime.broker",
+    "ats.data.runtime.market_data",
+    "ats.data.runtime.options",
+    "ats.trader.portfolio",
+    "ats.execution.state_api",
 )
 
 # Base-table modules: the raw repositories UNDERNEATH the product layer. Reading
@@ -745,6 +768,17 @@ def scan_consumer_access(consumer_id: str, *, extra_entry_points: Sequence[str] 
                     "code is present for a future restore but is not currently "
                     "reachable from live code. It still blocks until the retained "
                     "implementation is removed or the read is authorised.")
+                continue
+            runtime = (_matches(module, DECISION_RUNTIME_MODULES)
+                       if consumer_id in DECISION_CONSUMERS else None)
+            if runtime:
+                seen_findings.add(key)
+                reported_lines.add(location)
+                record.record_violation(
+                    "runtime_bypass", location,
+                    f"reads {runtime!r} directly; a decision role reads runtime and internal "
+                    "state through the governed read API, which checks the contract and the "
+                    "business scope, freezes the input for replay and audits the read")
                 continue
             provider = _matches(module, PROVIDER_MODULES)
             if provider:

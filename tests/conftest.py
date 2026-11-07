@@ -239,6 +239,79 @@ def _never_reach_tws(monkeypatch):
     monkeypatch.setattr(asyncio.BaseEventLoop, "create_connection", guarded_create)
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "governed_decision_reads: run Risk/Clerk reads through the real governed read API "
+                   "(the default test double reads the sources directly)")
+
+
+@pytest.fixture(autouse=True)
+def _decision_reads_direct(request, monkeypatch):
+    """Risk and Clerk read through the governed read API (switch-trade r5 task 6.4). In production their routes
+    are `target`; the test environment's are not, and the API refuses a native read on a non-target route. So a
+    test about what Risk computes or what Clerk books reads the same sources directly, through the seams these
+    tests already stub (`trader.portfolio.snapshot`, `fundamentals.cached_beta`, ...). The read path itself is
+    tested where it is the subject: mark the test `governed_decision_reads`."""
+    if request.node.get_closest_marker("governed_decision_reads"):
+        return
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from ats.data.runtime import clerk_reads
+    from ats.risk import inputs
+
+    def rules():
+        from ats.config import get_config, load_instrument_risk_registry, load_risk_policy
+
+        return inputs.Rules(get_config().app.risk, load_risk_policy(), load_instrument_risk_registry())
+
+    def account():
+        from ats.trader import portfolio
+
+        return portfolio.snapshot()
+
+    def performance_history(*, limit=250):
+        from ats.execution import state_api
+        from ats.memory import get_store
+
+        store = get_store()
+        return state_api.performance_history(store, limit=limit), state_api.completeness(store)
+
+    def beta(symbol):
+        from ats.data import fundamentals
+
+        return fundamentals.cached_beta(symbol)
+
+    def close_history(symbols):
+        from ats.data import sector_snapshot
+
+        return sector_snapshot.fetch_prices(symbols) if symbols else {}
+
+    def atm_iv(symbol):
+        from ats.data import options
+
+        return options.fetch(symbol).get("atm_iv")
+
+    for name, value in (("rules", rules), ("account", account), ("performance_history", performance_history),
+                        ("beta", beta), ("close_history", close_history), ("atm_iv", atm_iv),
+                        ("book", lambda portfolio, registry=None: nullcontext())):
+        monkeypatch.setattr(inputs, name, value)
+
+    def clerk_read(consumer, product, *, scope, broker=None, audit=None, **_kw):
+        from ats.data.runtime.broker import broker_step
+
+        try:
+            if product == "DECISION_APPROVAL_CONTEXT":
+                return SimpleNamespace(status="complete", payload=audit.read_chain(scope["cycle_id"]), gaps=[])
+            packet = broker_step(broker, scope["step"])
+            return SimpleNamespace(status=packet["status"], payload=packet["payload"], gaps=[])
+        except Exception as exc:  # noqa: BLE001 - the API records a failed read the same way
+            return SimpleNamespace(status="unavailable", payload=None,
+                                   gaps=[f"input_unavailable:{type(exc).__name__}:{exc}"])
+
+    monkeypatch.setattr(clerk_reads, "_read_input", clerk_read)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_db(tmp_path, monkeypatch):
     """Point Context Memory + checkpoints at throwaway DBs per test."""
@@ -482,7 +555,7 @@ def broker(monkeypatch, tmp_path):
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
     monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: _fresh_portfolio())
-    monkeypatch.setattr("ats.trader.portfolio.account_broker",
+    monkeypatch.setattr("ats.broker.account.account_broker",
                         lambda: SimpleNamespace(get_portfolio=_fresh_portfolio))
     monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
     monkeypatch.setattr("ats.risk.assess.warm_betas", lambda p: 0)      # approving warms betas: never the network

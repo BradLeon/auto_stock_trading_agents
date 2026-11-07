@@ -42,7 +42,7 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | `store.direct_trade_reads` | 2.2 改读 Internal State → 6.2 退役（**2026-11-07 已退役**，用户批准） |
 | `sector_reviews`、`legacy_read_models` | 6.3（**2026-11-07 用户批准方案 A**：`sector_reviews` 改登记为行业分析师自有工作记录，移出待退，不登记墓碑；`legacy_read_models` 消费方 `zero` 判清零、`decide` 判可退出，**2026-11-07 已退役**，用户批准） |
 | `macro_reviews`、`technical_reviews` | 6.5（同 6.3 方案 A：改登记为宏观、技术面分析师自有工作记录，移出待退） |
-| `decision_roles.unwired_to_governed_read_api` | 6.4 |
+| `decision_roles.unwired_to_governed_read_api` | 6.4（**2026-11-07 已退役**，用户批准方案 1：风控、Clerk 改经 `read_input`；风控业务范围取实时持仓；风控新授权 `HISTORY_DATA`；扫描器补全风控入口并把决策角色直连运行时源记为 `runtime_bypass`） |
 | `memory.store.legacy_decision_write_path` | 2.3 改读 → 7.1 移除镜像写 |
 | `trades.client_order_id.legacy_derivation` | 7.2 |
 | `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot` | 7.3 |
@@ -152,7 +152,7 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | 待退出的旧东西 | 条目举例 | 责任 | 触发条件与下一步 |
 |---|---|---|---|
 | 登记里只有模块路径、无法静态判定的消费方（45 行） | `runtime.cli`、`graph.pead`、`memory.store.*` | 退役登记的维护者 | 补角色映射（`MODULE_TO_ROLE`）或把消费方改为角色/入口点；之后复跑 `zero`，不需要改业务代码 |
-| Chief、Risk Officer、Clerk 仍绕过受治理读取面 | `chief.legacy_table_direct_reads`、`decision_roles.unwired_to_governed_read_api`、`store.direct_trade_reads` | 决策与执行域（Phase F 之后） | 先接入受治理读取面并拿到 zero；**实盘保持锁定**，不在本 change 范围 |
+| Chief、Risk Officer、Clerk 仍绕过受治理读取面 | `chief.legacy_table_direct_reads`、`decision_roles.unwired_to_governed_read_api`、`store.direct_trade_reads` | 决策与执行域 | **2026-11-07 三条均已退役**（switch-trade r5 tasks 6.1、6.2、6.4）；实盘仍锁定 |
 | PEAD 图里路由门控的旧供应商回退 | `graph.pead.internal_risk_and_sizing`（4 处回退在 `graph/pead.py`） | 基本面域 | 观察窗口结束且不再需要「退回旧路径」之后，由你批准删除；删除前它们是回滚目标 |
 | 旧调度器的临时日记作业 | `scheduler.adhoc_journal_jobs` | 调度域 | 随 Clerk 排程（交易路径切换）收口。`scheduler.hardcoded_serial_run` 已于 2026-10-20 退役：旧调度器代码与 `com.ats.schedule` 一并删除 |
 | 旧决策写路径、`client_order_id` 旧派生 | `memory.store.legacy_decision_write_path`、`trades.client_order_id.legacy_derivation` | 原 owner（决策/记账域） | 随 Chief/Clerk 迁移，历史清理由原 owner 负责 |

@@ -1964,8 +1964,7 @@ def chief_probe(*, offline: bool = False) -> int:
 
 def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
     from ..memory import get_store
-    from ..risk import assess as risk_assess, report as risk_report_mod
-    from ..trader import portfolio as tport
+    from ..risk import assess as risk_assess, inputs as risk_inputs, report as risk_report_mod
 
     if offline:
         stored = get_store().latest_risk_review()
@@ -1982,7 +1981,7 @@ def risk_report(*, write_report: bool = False, offline: bool = False) -> int:
         print(risk_report_mod.render(stored))
         return 0
 
-    pf = tport.snapshot()
+    pf = risk_inputs.account()
     if pf is None:
         from ..config import get_config
 
@@ -2049,8 +2048,8 @@ def risk_check(symbol: str | None = None) -> int:
     """Dry-run the risk gate over stored decisions (shows block/clip without ordering)."""
     from ..memory import get_store
     from ..risk import checks as risk_checks
+    from ..risk import inputs as risk_inputs
     from ..schemas.decision import TradeDecision
-    from ..trader import portfolio as tport
 
     rows = get_store().recent_decisions(symbol, limit=20)
     if not rows:
@@ -2070,7 +2069,7 @@ def risk_check(symbol: str | None = None) -> int:
                 rationale=r.get("rationale") or "",
             )
         )
-    pf = tport.snapshot()
+    pf = risk_inputs.account()
     approved, notes, _ = risk_checks.pre_trade(decisions, pf)
     print(f"=== Risk check: {len(decisions)} decisions → {len(approved)} pass ===")
     for n in notes:

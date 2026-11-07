@@ -49,7 +49,7 @@ data_input_contracts:
     schema_version: target-consumer-input-v1
     owner: ats.execution.state_api
     input_mode: internal
-    allowed_consumers: [chief]
+    allowed_consumers: [chief, risk]
     read_api: ats.data.consumer_api.read_input
     native_api: ats.execution.state_api.get_internal_state
   RISK_RULES:
@@ -1082,7 +1082,7 @@ consumers:
     contract_version: target-dataflow-v2
     evidence_ttl_days: 7
     required_evidence: [internal_read, as_of, completeness, opinion_isolation, fallback, runtime_query, timestamp, failure_semantics, no_persistence]
-    products: [PORTFOLIO_DATA, MARKET_DATA, RISK_RULES]
+    products: [PORTFOLIO_DATA, HISTORY_DATA, MARKET_DATA, RISK_RULES]
     read_api: ats.data.consumer_api.read_input
     legacy_read_api: ats.execution.state_api.get_internal_state
     owner: ats.execution.state_api

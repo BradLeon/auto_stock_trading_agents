@@ -486,7 +486,7 @@ def test_an_unreadable_account_blocks_the_cycle_before_any_write(chief_env, monk
 
     _seed(chief_env)
     reviews = []
-    monkeypatch.setattr("ats.trader.portfolio.account_broker",
+    monkeypatch.setattr("ats.broker.account.account_broker",
                         lambda: SimpleNamespace(get_portfolio=lambda: None))
     monkeypatch.setattr("ats.agents.risk_officer.review.record_posture", reviews.append)
     out = assemble_context(_state(use_broker=True))
@@ -505,7 +505,7 @@ def test_the_chief_sees_the_book_the_risk_posture_was_computed_on(chief_env, mon
         Position(symbol="TSM", qty=100, avg_cost=300.0, market_price=343.0,
                  market_value=34_300.0, weight=0.136)])
     reviewed = []
-    monkeypatch.setattr("ats.trader.portfolio.account_broker",
+    monkeypatch.setattr("ats.broker.account.account_broker",
                         lambda: SimpleNamespace(get_portfolio=lambda: book))
     monkeypatch.setattr("ats.agents.risk_officer.review.record_posture", reviewed.append)
     out = assemble_context(_state(use_broker=True))

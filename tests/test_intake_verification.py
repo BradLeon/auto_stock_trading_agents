@@ -225,7 +225,9 @@ def test_a_role_that_never_reaches_the_governed_surface_is_registered_not_passed
     # 2026-10-29: `chief` left this list — switch-trade-path-and-retire-r5 group 2 moved its context onto the
     # research snapshot and Internal State, read through the governed surface (`ats retirement zero` clears
     # `chief.legacy_table_direct_reads`). Risk and Clerk follow in that change's task 6.4.
-    assert set(unwired) == {"risk", "clerk"}
+    # 2026-11-07: `risk` and `clerk` left this list (task 6.4) — Risk reads through `risk.inputs`, Clerk's
+    # broker reads are `BROKER_STATE` steps in its read adapter; every decision role now reaches the surface.
+    assert set(unwired) == set()
 
 
 def test_the_ten_analysis_and_decision_roles_are_the_declared_ten():
@@ -393,9 +395,14 @@ def test_a_violation_names_a_location_a_reader_can_act_on():
     assert read.location.startswith("ats.trader.execute:")
     assert read.detail
 
-    unwired = next(v for v in iv.scan_consumer_access("risk").violations
-                   if v.kind == "governed_read_surface_not_reached")
-    assert unwired.location in iv.CONSUMER_ENTRY_POINTS["risk"]
+    # Every real role reaches the surface since 2026-11-07 (task 6.4), so the wiring gap is shown on a role
+    # entered through a module that reads nothing.
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setitem(iv.CONSUMER_ENTRY_POINTS, "risk", ("ats.agents.risk_officer.outputs",))
+        unwired = next(v for v in iv.scan_consumer_access("risk").violations
+                       if v.kind == "governed_read_surface_not_reached")
+    assert unwired.location == "ats.agents.risk_officer.outputs"
     assert unwired.detail
 
 

@@ -449,6 +449,11 @@ def scan_module_trade_reads(module_path: str) -> ModuleTradeReads:
             names = {alias.name for alias in node.names}
             if "state_api" in names or (node.module or "").endswith("state_api"):
                 reached.append("ats.execution.state_api")
+            # Since task 6.4 the risk engine reads its NAV history as HISTORY_DATA through its own read module,
+            # `risk.inputs`, which goes through the governed read API (and from there to state_api).
+            if relative.startswith("src/ats/risk/") and (node.module or "") == "" and node.level == 1 \
+                    and "inputs" in names:
+                reached.append("ats.risk.inputs -> ats.data.consumer_api (HISTORY_DATA)")
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             target = node.func.value
             on_state_api = isinstance(target, ast.Name) and target.id == "state_api"
@@ -510,7 +515,8 @@ def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
                 clean = not found.violations and bool(found.call_path)
                 verdicts.append(ZeroVerdict(
                     identifier=identifier, consumer=consumer, verdict=ZERO if clean else NOT_ZERO,
-                    reason=("reads trade history only through ats.execution.state_api" if clean
+                    reason=("reads trade history only through ats.execution.state_api or the governed read API"
+                            if clean
                             else "reads a trade ledger table directly, or never reaches "
                                  "ats.execution.state_api"),
                     evidence={"violations": [f"{kind}@{where}" for kind, where in found.violations],
@@ -533,12 +539,16 @@ def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
                            for m in getattr(record, "call_path", ())) or any(
                            m.startswith("ats.data.products")
                            for m in getattr(record, "call_path", ()))
-            verdict = ZERO if governed and "governed_read_surface_not_reached" not in kinds \
+            # A decision role that still reads runtime or internal state directly (`runtime_bypass`)
+            # has not moved to the governed API, whatever else it reaches (task 6.4).
+            verdict = ZERO if governed and not {"governed_read_surface_not_reached",
+                                                "runtime_bypass"} & set(kinds) \
                 else NOT_ZERO
             verdicts.append(ZeroVerdict(
                 identifier=identifier, consumer=consumer, verdict=verdict,
-                reason=("reaches the governed read surface" if governed and
-                        verdict == ZERO else
+                reason=("reaches the governed read surface" if verdict == ZERO else
+                        "the role still reads runtime or internal state directly"
+                        if "runtime_bypass" in kinds else
                         "the role's own modules reach neither the governed read API "
                         "nor the product layer"),
                 evidence={"violations": kinds,

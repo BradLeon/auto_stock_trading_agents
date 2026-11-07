@@ -16,9 +16,9 @@ log = logging.getLogger("ats.agents.risk_officer.review")
 
 
 def _context(review: RiskReview) -> str:
-    from ...config import get_config
+    from ...risk import inputs
 
-    rc = get_config().app.risk
+    rc = inputs.rules().limits
     limits = (
         f"硬限额: 单票≤{rc.max_position_pct:.0%} · 杠杆≤{rc.max_gross_leverage} · "
         f"现金地板≥{rc.cash_floor_pct:.0%} · beta≤{rc.beta_cap} · "
@@ -58,9 +58,9 @@ def record_posture(portfolio):
 @scoped_read("risk")
 def run(*, use_llm: bool = True) -> RiskMemo | None:
     """Snapshot -> assess -> persist -> LLM memo. Returns None if IBKR is unavailable."""
-    from ...trader import portfolio as tport
+    from ...risk import inputs
 
-    pf = tport.snapshot()
+    pf = inputs.account()
     if pf is None:
         return None
     review = record_posture(pf)

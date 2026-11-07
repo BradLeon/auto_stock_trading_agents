@@ -48,11 +48,10 @@ def ruleset_version() -> str:
     """
     import hashlib
 
-    from ..config import get_config, load_risk_policy
+    from . import inputs
 
-    rc = get_config().app.risk
-    policy = load_risk_policy()
-    body = rc.model_dump_json() + "\n" + policy.model_dump_json()
+    ruleset = inputs.rules()
+    body = ruleset.limits.model_dump_json() + "\n" + ruleset.policy.model_dump_json()
     return "risk-" + hashlib.sha1(body.encode()).hexdigest()[:12]
 
 
@@ -116,9 +115,9 @@ def _event_notional_boundary(decision: TradeDecision, portfolio: PortfolioSnapsh
     """Max notional the event-loss budget accepts for an increasing order."""
     if decision.notional_usd is None:
         return None
-    from ..config import load_instrument_risk_registry
+    from . import inputs
 
-    meta = load_instrument_risk_registry().resolve(decision.symbol)
+    meta = inputs.rules().instruments.resolve(decision.symbol)
     em = (event_data.get(decision.symbol, {}).get("expected_move_pct")
           or event_data.get(meta.risk_symbol, {}).get("expected_move_pct"))
     # An action outside the vocabulary must fail the check, not fall through as
@@ -149,7 +148,7 @@ def review_revision(
     before/after the merged consequence. Narrative text (`llm_comment`) is
     recorded verbatim and can never flip the verdict (§5.2 第 4 条).
     """
-    from ..config import get_config, load_risk_policy
+    from . import inputs
 
     notes: list[str] = []
     violations: list[RiskViolation] = []
@@ -180,8 +179,8 @@ def review_revision(
             basis=ReviewBasis(portfolio_snapshot_id="", market_as_of="",
                               ruleset_version=ruleset_version()))
 
-    rc = get_config().app.risk
-    policy = load_risk_policy()
+    ruleset = inputs.rules()
+    rc, policy = ruleset.limits, ruleset.policy
     event_data = event_data or {}
     working_pf, working_review, effective_state = _baseline(
         portfolio, sector=sector, event_data=event_data, review=review)

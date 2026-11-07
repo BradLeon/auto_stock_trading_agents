@@ -110,10 +110,13 @@ def test_every_role_shaped_registered_path_maps_to_a_known_role():
                 rc.role_for(consumer)  # raises when mapped but broken
                 checked += 1
     # 6 → 4 on 2026-11-07: the three analyst-record tombstones (each naming agents.chief.assemble) left the
-    # registry when the tables were reclassified as analyst-owned (switch-trade r5 tasks 6.3 / 6.5).
-    assert checked >= 4, (
-        "expected the registry's role-shaped consumers to be mapped; a drop here "
-        "means the mapping stopped covering them")
+    # registry when the tables were reclassified as analyst-owned (switch-trade r5 tasks 6.3 / 6.5); 4 → 0 the
+    # same day when decision_roles.unwired_to_governed_read_api retired and its four role consumers cleared
+    # (task 6.4). With no role-shaped consumer left in the registry, the mapping itself is checked instead.
+    for consumer in rc.MODULE_TO_ROLE:
+        rc.role_for(consumer)
+    assert {"agents.risk_officer.review", "trader.execute", "execution.clerk",
+            "agents.fundamental"} <= set(rc.MODULE_TO_ROLE)
 
 
 # --- 12.2 reconciliation -----------------------------------------------------

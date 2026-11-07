@@ -146,17 +146,17 @@ def recent_reviews(store, *, now: datetime, hours: int = 36, limit: int = 4) -> 
 
 def collect(store, *, portfolio=None, now: datetime | None = None) -> dict:
     """Read the book (live unless handed one), assess it, and gather the gate's recent reviews."""
-    from ...config import get_config
     from ...risk import assess as risk_assess
+    from ...risk import inputs as risk_inputs
 
     now = now or datetime.now(timezone.utc)
-    rc = get_config().app.risk
+    rc = risk_inputs.rules().limits
     source, note, review = "live", "", None
     try:
         if portfolio is None:
-            from ...trader import portfolio as tport
-
-            portfolio = tport.snapshot()
+            portfolio = risk_inputs.account()
+            if portfolio is None:
+                raise RuntimeError("broker account unavailable")
         pf = portfolio.model_copy(deep=True)
         risk_assess.enrich_beta(pf)
         risk_assess.enrich_options(pf)

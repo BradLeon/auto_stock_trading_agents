@@ -191,6 +191,22 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
             refs = [f"broker-portfolio:{packet['source_as_of']}"] if stamps else []
             if packet["reason"]:
                 gaps.append(packet["reason"])
+        elif product == "HISTORY_DATA" and scope.get("kind") == "performance_history":
+            # The NAV series a drawdown is computed over (risk L4), with the ledger's completeness beside it:
+            # a degraded ledger is said, never read as complete.
+            from ..execution import state_api
+            if store is None:
+                raise ValueError("internal_store_required")
+            comp = state_api.completeness(store)
+            payload = {"completeness": comp.model_dump(mode="json"),
+                       "records": [r.model_dump(mode="json") for r in
+                                   state_api.performance_history(store, limit=int(scope.get("limit", 250)))]}
+            stamp = comp.last_reconcile_at
+            status = "complete" if comp.status == "complete" else "partial"
+            stamps = [stamp] if stamp else []
+            refs = [f"internal-history:{stamp}"] if stamp else []
+            if comp.status != "complete":
+                gaps.append("ledger_degraded:" + comp.model_dump_json())
         elif product == "HISTORY_DATA":
             from ..execution.state_api import get_internal_state
             if store is None:
@@ -232,6 +248,14 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 stamps = [result["source_as_of"]] if result["source_as_of"] else []
                 if result["reason"]:
                     gaps.append(result["reason"])
+            elif scope.get("kind") == "beta":
+                # The risk review's beta: the provider's figure, reused for a day across processes. `fetched`
+                # says whether this read went to the network, so the caller paces only real calls.
+                from .fundamentals import cached_beta
+                beta, fetched = cached_beta(scope["entity"])
+                payload = {"beta": beta, "fetched": fetched}
+                status = "complete" if beta is not None else "no_coverage"
+                refs = [f"beta:{scope['entity']}:{beta}"] if beta is not None else []
             else:
                 from .runtime.market_data import fetch_close_history_many
                 payload = _json(fetch_close_history_many(scope.get("entities") or [scope["entity"]]))
@@ -240,11 +264,24 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
                 stamps = [row["bar_as_of"] for row in good if row["bar_as_of"]]
                 status = "complete" if good and len(good) == len(payload) else "partial" if good else "unavailable"
         elif product == "RISK_RULES":
-            from ..config import get_config
-            cfg = risk_config if risk_config is not None else get_config().app.risk
-            payload = _json(cfg)
+            if risk_config is not None:
+                payload = _json(risk_config)
+            else:
+                # The whole ruleset the review enforces: the limits, the survival/state policy, and the
+                # instrument -> economic-risk mapping. All three are configuration a verdict depends on.
+                from ..config import get_config, load_instrument_risk_registry, load_risk_policy
+                payload = {"limits": _json(get_config().app.risk), "policy": _json(load_risk_policy()),
+                           "instruments": _json(load_instrument_risk_registry())}
             refs = ["ruleset:" + sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()]
             status = "complete"
+        elif product == "BROKER_STATE" and scope.get("step"):
+            # Clerk reads the broker one step at a time, each step with its own timeout and failure
+            # (B4): a step that fails is that step's failure, not a partial whole.
+            from .runtime.broker import broker_step
+            packet = broker_step(broker, scope["step"])
+            payload, status = packet["payload"], packet["status"]
+            stamps = [packet["source_as_of"]] if packet["source_as_of"] else []
+            refs = packet["refs"]
         elif product == "BROKER_STATE":
             from .runtime.broker import broker_state
             payload = broker_state(broker)

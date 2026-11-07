@@ -26,6 +26,9 @@ from ats.schemas.risk import RiskReview
 from ats.trader import execute as trader
 from ats.workflow.isolation import isolated_run
 
+# The risk role's reads in these end-to-end runs go through the real governed read API (task 6.4).
+pytestmark = pytest.mark.governed_decision_reads
+
 
 def quote(**changes):
     now = datetime.now(UTC)
@@ -58,6 +61,9 @@ def execution(tmp_path, monkeypatch, price_clock):
         pf = PortfolioSnapshot(as_of=datetime.now(UTC), net_liquidation=1_000_000,
                                cash=1_000_000, daily_pnl=0, gross_exposure=0, positions=[])
         monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: pf)
+        # The risk role reads the book through the governed API (task 6.4) from this handle.
+        monkeypatch.setattr("ats.broker.account.account_broker",
+                            lambda: __import__("types").SimpleNamespace(get_portfolio=lambda: pf))
         monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda pf: None)
         monkeypatch.setattr("ats.risk.assess.enrich_options", lambda pf: None)
         monkeypatch.setattr("ats.risk.assess._prices", lambda symbols: {})

@@ -140,11 +140,15 @@ def test_context_report_shows_degraded_ledger(store):
 # --------------------------------------------------------------------------- #
 
 def test_risk_assess_performance_history_via_state_api(store):
-    from ats.risk import assess
+    """Since switch-trade r5 task 6.4 Risk reads the history as HISTORY_DATA through the governed read API,
+    whose performance-history scope is served by the Internal State API."""
+    from ats.data import consumer_api
+    from ats.risk import assess, inputs
 
-    src = open(assess.__file__).read()
-    assert "state_api.performance_history" in src
-    assert "state_api.completeness" in src
+    assert "inputs.performance_history" in open(assess.__file__).read()
+    assert '"HISTORY_DATA"' in open(inputs.__file__).read()
+    api = open(consumer_api.__file__).read()
+    assert "state_api.performance_history" in api and "state_api.completeness" in api
 
 
 def test_performance_history_matches_direct_read(store):

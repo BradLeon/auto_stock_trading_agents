@@ -466,7 +466,6 @@ def _approved_set(review, decisions) -> set[tuple[str, str]]:
 def _refresh_review(repo, app, cycle_id: str, rev, previous, values: dict) -> str:
     """Fresh snapshot → deterministic review of the same revision → checkpoint updated. Returns the diff text."""
     from ..risk import checks as risk_checks
-    from ..trader import portfolio as tport
     from ..graph.chief import _ruleset_version
 
     decisions = list(values.get("decisions") or [])
@@ -481,7 +480,9 @@ def _refresh_review(repo, app, cycle_id: str, rev, previous, values: dict) -> st
     earlier = values.get("portfolio")
     if earlier is not None:
         risk_assess.warm_betas(earlier)
-    pf = tport.snapshot()
+    from ..risk import inputs as risk_inputs
+
+    pf = risk_inputs.account()
     if pf is None:
         raise ApprovalRefused("取不到新的账户快照，不能批准（批准必须基于 60 秒内的快照）")
     review = risk_checks.review_revision(decisions, pf, event_data=values.get("event_data") or None,

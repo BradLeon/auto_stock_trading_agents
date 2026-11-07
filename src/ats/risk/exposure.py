@@ -34,9 +34,9 @@ def exposure_rows(review, portfolio=None) -> list[dict]:
     are None and only the exposure columns are filled — a report built from a saved review still
     shows true exposure.
     """
-    from ..config import load_instrument_risk_registry
+    from . import inputs
 
-    registry = load_instrument_risk_registry()
+    registry = inputs.rules().instruments
     nav = review.net_liquidation or 0.0
     cash_eq = {k.upper().replace(" ", "-") for k in (review.cash_equivalents and
                                                    [c.symbol for c in review.cash_equivalents] or [])}

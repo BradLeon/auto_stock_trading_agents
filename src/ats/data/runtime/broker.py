@@ -23,6 +23,29 @@ def broker_state(broker) -> dict:
     return envelope
 
 
+_REPORT_STEPS = {"fills": ("get_fills", "exec_id"), "completed_orders": ("completed_orders", "perm_id")}
+
+
+def broker_step(broker, step: str) -> dict:
+    """One broker read on its own: `portfolio`, `fills` or `completed_orders`.
+
+    A report read that fails raises, so the caller's step fails with the broker's own error — the governed
+    API records it and hands the error back; it is never turned into an empty collection.
+    """
+    if step == "portfolio":
+        packet = portfolio_snapshot(broker)
+        stamp = packet["source_as_of"]
+        return {**packet, "refs": [f"broker-portfolio:{stamp}"] if stamp else []}
+    if step not in _REPORT_STEPS:
+        raise ValueError(f"unknown_broker_step:{step}")
+    method, id_field = _REPORT_STEPS[step]
+    rows = getattr(broker, method)()
+    if not isinstance(rows, list):
+        raise ValueError("broker_read_not_collection")
+    return {"payload": rows, "status": "complete", "source_as_of": None,
+            "refs": [str(row.get(id_field) or row.get("order_ref") or "") for row in rows]}
+
+
 def portfolio_snapshot(broker) -> dict:
     queried_at = evaluation_now(timezone.utc)
     envelope = {"schema_version": "runtime-broker-v1", "owner": "ats.data.runtime",

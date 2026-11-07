@@ -75,18 +75,18 @@ def _is_opt(p) -> bool:
 def enrich_beta(portfolio: PortfolioSnapshot) -> None:
     """Fill Position.beta for held equities (once, paced) — not done in get_portfolio.
     Option underlyings get their beta in enrich_options (keyed on the underlying symbol)."""
-    from ..config import load_instrument_risk_registry
-    from ..data import fundamentals
+    from . import inputs
 
-    registry = load_instrument_risk_registry()
-    for p in portfolio.positions:
-        if _is_opt(p):
-            continue
-        if p.beta is None:
-            risk_symbol = registry.resolve(p.symbol).risk_symbol
-            p.beta, fetched = fundamentals.cached_beta(risk_symbol)
-            if fetched:
-                time.sleep(0.5)
+    registry = inputs.rules().instruments
+    with inputs.book(portfolio, registry):
+        for p in portfolio.positions:
+            if _is_opt(p):
+                continue
+            if p.beta is None:
+                risk_symbol = registry.resolve(p.symbol).risk_symbol
+                p.beta, fetched = inputs.beta(risk_symbol)
+                if fetched:
+                    time.sleep(0.5)
 
 
 def warm_betas(portfolio: PortfolioSnapshot) -> int:
@@ -96,21 +96,21 @@ def warm_betas(portfolio: PortfolioSnapshot) -> int:
     network call per holding, so it is done BEFORE the snapshot is taken: the snapshot's clock
     then runs only over the fast part.
     """
-    from ..config import load_instrument_risk_registry
-    from ..data import fundamentals
+    from . import inputs
 
-    registry = load_instrument_risk_registry()
+    registry = inputs.rules().instruments
     fetched = 0
-    for p in portfolio.positions:
-        symbol = p.underlying or p.symbol if _is_opt(p) else p.symbol
-        try:
-            _, live = fundamentals.cached_beta(registry.resolve(symbol).risk_symbol)
-        except Exception as exc:  # noqa: BLE001 - warming is an optimisation, never a failure
-            log.warning("beta warm-up skipped for %s: %s", symbol, exc)
-            continue
-        if live:
-            fetched += 1
-            time.sleep(0.5)
+    with inputs.book(portfolio, registry):
+        for p in portfolio.positions:
+            symbol = p.underlying or p.symbol if _is_opt(p) else p.symbol
+            try:
+                _, live = inputs.beta(registry.resolve(symbol).risk_symbol)
+            except Exception as exc:  # noqa: BLE001 - warming is an optimisation, never a failure
+                log.warning("beta warm-up skipped for %s: %s", symbol, exc)
+                continue
+            if live:
+                fetched += 1
+                time.sleep(0.5)
     return fetched
 
 
@@ -118,14 +118,19 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
     """Fill option greeks (BSM fallback when IBKR didn't supply them) + underlying beta on each
     OPT Position. Mirrors enrich_beta: fetches/derives data, mutates positions in place, never
     raises. Positions already carrying IBKR greeks (greeks_source=='ibkr') are left as-is."""
-    from ..config import get_config, load_instrument_risk_registry
-    from ..data import fundamentals
+    from . import inputs
 
     opts = [p for p in portfolio.positions if _is_opt(p)]
     if not opts:
         return
-    rc = get_config().app.risk
-    registry = load_instrument_risk_registry()
+    ruleset = inputs.rules()
+    with inputs.book(portfolio, ruleset.instruments):
+        _enrich_options(opts, ruleset.limits, ruleset.instruments)
+
+
+def _enrich_options(opts, rc, registry) -> None:
+    from . import inputs
+
     r = rc.option_risk_free_rate
 
     # Batch spot for underlyings IBKR didn't already price (undPrice).
@@ -133,8 +138,7 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
     spot_map: dict[str, float] = {}
     if need_spot:
         try:
-            from ..data import sector_snapshot
-            prices = _memo(("spot", tuple(need_spot)), lambda: sector_snapshot.fetch_prices(need_spot))
+            prices = _memo(("spot", tuple(need_spot)), lambda: inputs.close_history(need_spot))
             spot_map = {s: (v[-1] if v else None) for s, v in prices.items()}
         except Exception as exc:  # noqa: BLE001
             log.warning("option spot fetch skipped: %s", exc)
@@ -145,7 +149,7 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
         # underlying beta (for L3) — key on the underlying, cache on the option position
         if p.beta is None:
             try:
-                p.beta, fetched = fundamentals.cached_beta(registry.resolve(under).risk_symbol)
+                p.beta, fetched = inputs.beta(registry.resolve(under).risk_symbol)
                 if fetched:
                     time.sleep(0.5)
             except Exception as exc:  # noqa: BLE001
@@ -165,8 +169,7 @@ def enrich_options(portfolio: PortfolioSnapshot) -> None:
         sigma = options_math._implied_vol(premium, S, K, T, r, is_call)
         if not sigma:                      # fall back to ATM IV from the chain
             try:
-                from ..data import options as opt_data
-                atm = _memo(("atm_iv", under), lambda: opt_data.fetch(under).get("atm_iv"))
+                atm = _memo(("atm_iv", under), lambda: inputs.atm_iv(under))
                 sigma = (atm / 100.0) if atm else None
             except Exception as exc:  # noqa: BLE001
                 log.warning("ATM IV fallback skipped for %s: %s", under, exc)
@@ -386,21 +389,20 @@ def _build_directive(r: RiskReview, rc, policy, net_liq: float) -> RiskDirective
 def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
            event_data: dict[str, dict] | None = None) -> RiskReview:
     """event_data: {symbol: {expected_move_pct, ...}} for held names near earnings."""
-    from ..config import (
-        get_config,
-        load_instrument_risk_registry,
-        load_risk_policy,
-        load_sector_config,
-    )
+    from . import inputs
+
+    ruleset = inputs.rules()
+    with inputs.book(portfolio, ruleset.instruments):
+        return _assess(portfolio, ruleset, sector=sector, event_data=event_data)
+
+
+def _assess(portfolio: PortfolioSnapshot, ruleset, *, sector: str,
+            event_data: dict[str, dict] | None) -> RiskReview:
+    from ..config import load_sector_config
     from ..memory import get_store
+    from . import inputs
 
-    rc = get_config().app.risk
-    from ..workflow.consumer_reads import record_read
-    from .checks import ruleset_version
-
-    record_read("risk", "ats.config.get_config", refs=["ruleset:" + ruleset_version()])
-    registry = load_instrument_risk_registry()
-    risk_policy = load_risk_policy()
+    rc, registry, risk_policy = ruleset.limits, ruleset.instruments, ruleset.policy
     net_liq = portfolio.net_liquidation
 
     # Options are now FOLDED INTO the 6 layers via delta-notional + BSM reval (no longer exempt).
@@ -638,14 +640,8 @@ def assess(portfolio: PortfolioSnapshot, *, sector: str = "ai_hardware",
     # API; when the ledger is degraded (unreconciled windows / unattributed
     # fills / broken links) the review carries an explicit degradation note
     # instead of silently treating the numbers as complete.
-    from ..execution import state_api
-
-    _comp = state_api.completeness(get_store())
-    record_read("risk", "ats.execution.state_api.performance_history",
-                refs=[f"internal-history:{_comp.last_reconcile_at}"] if _comp.last_reconcile_at else [],
-                status=_comp.status)
-    hist = [h for h in state_api.performance_history(get_store(), limit=250)
-            if h.account_id == portfolio.account_id]
+    records, _comp = inputs.performance_history(limit=250)
+    hist = [h for h in records if h.account_id == portfolio.account_id]
     if _comp.status == "degraded":
         r.notes = (r.notes + "\n" if r.notes else "") + (
             f"内部状态完整性降级（degraded）：未对账窗口 {_comp.unreconciled_windows}、"
@@ -829,9 +825,9 @@ def _assess_portfolio_greeks(r: RiskReview, net_w: dict, net_liq: float, rc) -> 
 
 
 def _prices(symbols: list[str]) -> dict[str, list[float]]:
-    from ..data import sector_snapshot
+    from . import inputs
 
-    return _memo(("prices", tuple(symbols)), lambda: sector_snapshot.fetch_prices(symbols))
+    return _memo(("prices", tuple(symbols)), lambda: inputs.close_history(symbols))
 
 
 def _perf_stub(net_liq: float, account_id: str = ""):

@@ -95,7 +95,7 @@ def assemble_context(state: ChiefDecisionState) -> dict:
         # The book the Chief sees and the posture it proposes inside are taken from
         # one live read; without it there is no account to decide on.
         from ..data.consumer_api import read_input
-        from ..trader.portfolio import account_broker
+        from ..broker.account import account_broker
 
         account = read_input("chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"},
                              broker=account_broker())
@@ -173,9 +173,10 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         validate_chief(_decision_repo().store, state.research_snapshot, at=_now())
 
     from ..risk import checks as risk_checks
-    from ..trader import portfolio as tport
+    from ..risk import inputs as risk_inputs
 
-    pf = tport.snapshot() if state.use_broker else None
+    # The book this revision is reviewed against, read by the risk role itself (task 6.4).
+    pf = risk_inputs.account() if state.use_broker else None
     from ..data.execution_prices import PriceUnavailable, normalize_orders, session_context
     from ..data.runtime.execution_prices import overnight_session_candidate
     from ..workflow.cutover_routing import RouteUnavailable

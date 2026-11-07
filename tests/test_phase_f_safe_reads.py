@@ -260,6 +260,7 @@ def test_actual_routine_consumes_published_brief_and_preserves_refs(isolated, re
                         scope=ProjectionScope(kind="portfolio"))
 
 
+@pytest.mark.governed_decision_reads
 def test_actual_trader_and_clerk_consume_auth_quotes_reports_and_audit(execution, record_property):  # noqa: F811
     state = ready_state(execution, cycle="consumption-chain")
     # No fixture inserts submitted/filled orders: actual Trader/FakeBroker do so.
@@ -275,10 +276,12 @@ def test_actual_trader_and_clerk_consume_auth_quotes_reports_and_audit(execution
                                        shares=state.order_results[0].qty, price=100.1)
         result = clerk_run(store=execution.store, broker=Readback())
     assert result["status"] == "completed", result["errors"]
-    for consumer, api in [("trader", "ats.data.consumer_api.read_input"),
-                          ("clerk", "ats.data.runtime.clerk_reads.get_fills"),
-                          ("clerk", "ats.decision.repository.DecisionAuditRepository.read_chain")]:
-        assert any(row["consumer"] == consumer and row["api"] == api and row["refs"] for row in rows)
+    # Since task 6.4 Clerk's broker and decision-chain reads are governed reads too (BROKER_STATE steps,
+    # DECISION_APPROVAL_CONTEXT).
+    for consumer, product in [("trader", "APPROVED_EXECUTION_AUTHORIZATION"), ("clerk", "BROKER_STATE"),
+                              ("clerk", "DECISION_APPROVAL_CONTEXT")]:
+        assert any(row["consumer"] == consumer and row["api"] == "ats.data.consumer_api.read_input"
+                   and row.get("product") == product and row["refs"] for row in rows), (consumer, product)
     assert {row.get("product") for row in rows if row["consumer"] == "trader"} >= {
         "MARKET_DATA", "APPROVED_EXECUTION_AUTHORIZATION"}
     assert execution.store.conn.execute("SELECT COUNT(*) FROM performance").fetchone()[0] > 0
@@ -349,6 +352,7 @@ def test_actual_event_graph_keeps_data_document_refs(isolated, company_products,
     record_property("projection", json.dumps(published))
 
 
+@pytest.mark.governed_decision_reads
 def test_actual_risk_entry_reads_runtime_and_internal_state(isolated, monkeypatch, record_property):
     from ats.agents.risk_officer.review import run
     from ats.schemas.portfolio import PortfolioSnapshot
@@ -356,14 +360,14 @@ def test_actual_risk_entry_reads_runtime_and_internal_state(isolated, monkeypatc
     seed_performance(isolated)
     pf = PortfolioSnapshot(as_of=datetime.now(UTC), net_liquidation=1_000_000, cash=1_000_000,
         daily_pnl=0, gross_exposure=0, positions=[])
-    monkeypatch.setattr("ats.trader.portfolio.IBKRBroker", lambda **k: SimpleNamespace(get_portfolio=lambda: pf))
+    monkeypatch.setattr("ats.broker.account.IBKRBroker", lambda **k: SimpleNamespace(get_portfolio=lambda: pf))
     monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda pf: None)
     monkeypatch.setattr("ats.risk.assess.enrich_options", lambda pf: None)
     with trace_reads() as rows:
         result = run(use_llm=False)
-    assert result.review and {row["api"] for row in rows} >= {
-        "ats.data.runtime.broker.portfolio_snapshot", "ats.config.get_config",
-        "ats.execution.state_api.performance_history"}
+    # Since task 6.4 every one of these is a governed read: the book, the ruleset and the NAV history.
+    assert result.review and {row["api"] for row in rows} == {"ats.data.consumer_api.read_input"}
+    assert {row.get("product") for row in rows} >= {"PORTFOLIO_DATA", "RISK_RULES", "HISTORY_DATA"}
     assert all(row["refs"] for row in rows)
     record_property("read_trace", json.dumps(rows))
     record_property("risk_review", result.review.model_dump_json())

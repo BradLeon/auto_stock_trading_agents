@@ -352,6 +352,12 @@ class IBKRBroker:
         except Exception as exc:  # noqa: BLE001
             log.warning("option greeks fetch skipped: %s", exc)
 
+    def exchange_rates(self) -> tuple[str, dict[str, float]]:
+        """(base currency, ExchangeRate by currency): base-currency units per one unit, read from the account."""
+        with self.session() as ib:
+            base, rates, _ = _account_value_context(list(ib.accountSummary()))
+        return base, rates
+
     def get_pnl(self, account: str = "") -> dict:
         """Account-level P&L: {daily_pnl, unrealized_pnl, realized_pnl}. 0-filled on miss."""
         out = {"daily_pnl": 0.0, "unrealized_pnl": 0.0, "realized_pnl": 0.0}
@@ -374,16 +380,27 @@ class IBKRBroker:
     def get_fills(self) -> list[dict]:
         """Executed fills with per-trade realized P&L (IBKR's authoritative source)."""
         from ..journal.episodes import contract_fields
+        from ..trader import fx
 
         out: list[dict] = []
         with self.session() as ib:
             _bounded(ib, "executions", ib.reqExecutions)
             ib.sleep(1.5)
+            # The account's current ExchangeRate, read in the same session, is the capture-time rate for a fill whose
+            # statement rate is not known yet (an estimate; the Flex back-fill later replaces it with the trade's own).
+            try:
+                base, rates, _ = _account_value_context(list(ib.accountSummary()))
+            except Exception as exc:  # noqa: BLE001 - fills must still be recorded without a rate
+                log.warning("fill currency rates unavailable: %s", exc)
+                base, rates = "USD", {}
             for f in ib.fills():
                 ex, cr = f.execution, f.commissionReport
                 rp = getattr(cr, "realizedPNL", None)
+                fields = contract_fields(f.contract)
+                rate = fx.usd_rate(fields.get("currency") or "", base, rates)
                 out.append({
-                    **contract_fields(f.contract),
+                    **fields,
+                    **({"fx_to_usd": rate, "fx_source": "usd" if rate == 1.0 else "ibkr_live"} if rate else {}),
                     "exec_id": ex.execId, "symbol": f.contract.symbol,
                     "side": ex.side, "shares": float(ex.shares), "price": float(ex.price),
                     "time": ex.time.isoformat() if ex.time else "",

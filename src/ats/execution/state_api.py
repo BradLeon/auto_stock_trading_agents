@@ -161,26 +161,34 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     # snapshots are sparse and not cash-flow adjusted; round trips are the ledger's.
     span = store.conn.execute(
         "SELECT COUNT(*) n, MIN(as_of) first, MAX(as_of) last FROM performance").fetchone()
-    # Realized P&L is in each contract's own currency; no FX history is kept, so
-    # non-USD round trips are totalled per currency and left out of the USD figures.
-    currency = {r["k"]: r["currency"] for r in store.conn.execute(
-        "SELECT COALESCE(NULLIF(instrument_key, ''), symbol) k, MAX(currency) currency "
-        "FROM fills GROUP BY k")}
-    closed = [(r["realized_pnl"], currency.get(r["k"]) or "USD") for r in store.conn.execute(
-        "SELECT realized_pnl, COALESCE(NULLIF(instrument_key, ''), symbol) k "
-        "FROM trade_episodes WHERE status = 'closed'")]
-    usd = [p or 0 for p, ccy in closed if ccy == "USD"]
+    # An episode's realized P&L is in its contract's own currency. A round trip in another currency is converted
+    # with its instrument's latest recorded rate (fills.fx_to_usd, trader/fx.py) so it counts in the USD figures; one
+    # with no known rate stays out of them and is totalled per currency instead, never read as USD.
+    info = {r["k"]: (r["currency"], r["rate"]) for r in store.conn.execute(
+        "SELECT COALESCE(NULLIF(instrument_key, ''), symbol) k, MAX(currency) currency, "
+        "(SELECT f2.fx_to_usd FROM fills f2 WHERE COALESCE(NULLIF(f2.instrument_key, ''), f2.symbol) = "
+        "COALESCE(NULLIF(f.instrument_key, ''), f.symbol) AND f2.fx_to_usd > 0 "
+        "ORDER BY COALESCE(f2.time, f2.captured_at) DESC LIMIT 1) rate "
+        "FROM fills f GROUP BY k")}
+    closed: list[tuple[float | None, str, float | None]] = []   # (native P&L, currency, USD rate or None)
+    for r in store.conn.execute(
+            "SELECT realized_pnl, COALESCE(NULLIF(instrument_key, ''), symbol) k "
+            "FROM trade_episodes WHERE status = 'closed'"):
+        ccy, rate = info.get(r["k"], ("", None))
+        ccy = (ccy or "USD").upper()
+        closed.append((r["realized_pnl"], ccy, 1.0 if ccy == "USD" else rate))
+    usd = [(p or 0) * rate for p, _, rate in closed if rate]
     gross_loss = -sum(p for p in usd if p < 0)
     other: dict[str, float] = {}
-    for p, ccy in closed:
-        if ccy != "USD":
+    for p, ccy, rate in closed:
+        if not rate:
             other[ccy] = round(other.get(ccy, 0.0) + (p or 0), 2)
     performance.update(
         nav_points=span["n"], nav_first_as_of=span["first"], nav_last_as_of=span["last"],
         closed_episodes=len(closed),
-        closed_wins=sum(1 for p, _ in closed if p and p > 0),
-        closed_losses=sum(1 for p, _ in closed if p and p < 0),
-        closed_flat=sum(1 for p, _ in closed if not p),
+        closed_wins=sum(1 for p, _, _ in closed if p and p > 0),
+        closed_losses=sum(1 for p, _, _ in closed if p and p < 0),
+        closed_flat=sum(1 for p, _, _ in closed if not p),
         realized_total=round(sum(usd), 2),
         profit_factor=round(sum(p for p in usd if p > 0) / gross_loss, 2) if gross_loss else None,
         realized_other_currencies=other)

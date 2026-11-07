@@ -4959,14 +4959,17 @@ def main(argv: list[str] | None = None) -> int:
     ck = sub.add_parser(
         "clerk", help="Clerk 确定性账本编排：run（串联对账/标记/回合/预测/绩效）")
     ck.add_argument("action", choices=["run", "rebuild", "gaps", "import-statement",
-                                       "classify-fill", "baseline", "flex-backfill", "capture-fills"],
+                                       "classify-fill", "baseline", "flex-backfill", "capture-fills",
+                                       "fx-backfill"],
                     help="run: 幂等执行一个对账窗口；rebuild: 重建绩效/归因读模型"
                          "（只写派生读模型）；gaps: 查看未清偿审计异常；"
                          "import-statement: 从 IBKR 交易确认报告 PDF 补录历史成交；"
                          "classify-fill: 登记一笔旧成交的合约类型（须你确认）；"
                          "baseline: 期初建账（默认只显示计划，加 --apply 才写入）；"
                          "flex-backfill: 用 IBKR Flex 对账单补入库里缺的成交（加 --dry-run 只看）；"
-                         "capture-fills: 现在读一次 TWS 当日成交（不动 Clerk 窗口）")
+                         "capture-fills: 现在读一次 TWS 当日成交（不动 Clerk 窗口）；"
+                         "fx-backfill: 给没有汇率的旧成交补汇率（Flex 对账单优先，其次当前汇率估算；"
+                         "只写汇率与空币种，加 --dry-run 只看）")
     ck.add_argument("--as-of", help="baseline: 建账日 YYYY-MM-DD")
     ck.add_argument("--operator", default="boss", help="baseline: 批准人")
     ck.add_argument("--reason", help="baseline: 建账原因（必填）")
@@ -5442,6 +5445,21 @@ def main(argv: list[str] | None = None) -> int:
             out = flex_statement.backfill(dry_run=args.dry_run)
             print(flex_statement.render(out))
             return 0 if out["status"] in ("ok", "skipped") else 1
+        if args.action == "fx-backfill":
+            from ..trader import flex_statement, fx_backfill
+            from ..trader.execute import IBKRBroker
+
+            flex_rows: list[dict] = []
+            creds = flex_statement.credentials()
+            if creds is not None:
+                try:
+                    flex_rows = flex_statement.parse_trades(flex_statement.fetch_statement(*creds))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"Flex 对账单读不到（{flex_statement._scrub(str(exc), creds[0])[:120]}），只用当前汇率估算")
+            out = fx_backfill.backfill(dry_run=args.dry_run, flex_fills=flex_rows,
+                                       live_rates=lambda: IBKRBroker().exchange_rates())
+            print(fx_backfill.render(out))
+            return 0
         if args.action == "capture-fills":
             from ..trader import fills_capture, reconcile
 

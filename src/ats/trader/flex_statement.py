@@ -145,8 +145,18 @@ def parse_trades(body: str) -> list[dict]:
                       "perm_id": a.get("ibOrderID", ""), "order_ref": a.get("orderReference", ""),
                       "sec_type": sec_type, "instrument_key": key, "multiplier": multiplier, "right": right,
                       "strike": strike, "expiry": expiry, "currency": a.get("currency", ""),
-                      "con_id": a.get("conid", ""), "local_symbol": ""})
+                      "con_id": a.get("conid", ""), "local_symbol": "",
+                      **_statement_rate(a)})
     return fills
+
+
+def _statement_rate(attrib: dict) -> dict:
+    """The trade's own rate to the account base (USD), exact for that trade; absent or non-positive ⇒ no claim."""
+    try:
+        rate = float(attrib.get("fxRateToBase") or 0)
+    except ValueError:
+        return {}
+    return {"fx_to_usd": rate, "fx_source": "flex"} if rate > 0 else {}
 
 
 def _known(fill: dict, existing: list[dict]) -> bool:

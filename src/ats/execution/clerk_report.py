@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from ..trader import fx
+
 log = logging.getLogger("ats.clerk")
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -72,7 +74,8 @@ def collect(store, out: dict, *, source: str) -> dict:
     fills = []
     for r in conn.execute(
             "SELECT time, captured_at, symbol, side, shares, price, commission, realized_pnl, origin, "
-            "instrument_key, multiplier, sec_type, currency FROM fills ORDER BY COALESCE(time, captured_at)"):
+            "instrument_key, multiplier, sec_type, currency, fx_to_usd, fx_source "
+            "FROM fills ORDER BY COALESCE(time, captured_at)"):
         moment = r["time"] or r["captured_at"]
         if moment and _ts(since) < _ts(moment) <= _ts(until):
             fills.append(dict(r) | {"at": moment})
@@ -81,7 +84,8 @@ def collect(store, out: dict, *, source: str) -> dict:
         "ORDER BY submitted_at", (since, until))]
 
     recent = [dict(r) | {"at": r["time"] or r["captured_at"]} for r in conn.execute(
-        "SELECT time, captured_at, symbol, side, shares, price, commission, realized_pnl, origin, multiplier "
+        "SELECT time, captured_at, symbol, side, shares, price, commission, realized_pnl, origin, multiplier, "
+        "currency, fx_to_usd, fx_source "
         "FROM fills WHERE COALESCE(time, captured_at, '') != '' ORDER BY COALESCE(time, captured_at) DESC LIMIT 10")]
     exceptions = [dict(r) for r in conn.execute(
         "SELECT kind, symbol, window_start, window_end, basis, first_seen_at FROM ledger_exceptions "
@@ -236,14 +240,18 @@ def _holdings(snap: dict, exposure: dict | None = None) -> list[str]:
 
 
 def _fill_table(fills: list[dict]) -> list[str]:
+    """Amounts are in each contract's own currency; a known rate adds the USD equivalent, a missing one says so."""
     lines = ["| 时间（台北） | 标的 | 方向 | 数量 | 价格 | 成交额 | 手续费 | 已实现盈亏 | 来源 |",
              "|---|---|---|---|---|---|---|---|---|"]
     for f in fills[:_MAX_ROWS]:
+        ccy = (f.get("currency") or "").upper()
         amount = f["shares"] * f["price"] * (f["multiplier"] or 1)
-        pnl = "—" if f["realized_pnl"] is None else _signed(f["realized_pnl"])
-        fee = "—" if f["commission"] is None else format(f["commission"], ",.2f")
+        pnl = ("—" if f["realized_pnl"] is None else "+0" if not f["realized_pnl"]       # an opening fill realizes nothing
+               else fx.money(f["realized_pnl"], f, signed=True))
+        fee = "—" if f["commission"] is None else fx.money(f["commission"], f, digits=2)
+        price = format(f["price"], ",.2f") + ("" if ccy in ("", "USD") else f" {ccy}")
         lines.append(f"| {_taipei(f['at'])} | {f['symbol']} | {'买入' if f['side'] == 'BOT' else '卖出'} | "
-                     f"{f['shares']:g} | {f['price']:,.2f} | {_money(amount)} | {fee} | {pnl} | "
+                     f"{f['shares']:g} | {price} | {fx.money(amount, f)} | {fee} | {pnl} | "
                      f"{_ORIGIN.get(f['origin'], '来源未判定')} |")
     return lines
 

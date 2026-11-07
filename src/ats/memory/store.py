@@ -707,7 +707,10 @@ class TradingMemory:
                     # says otherwise.
                     "sec_type TEXT", "instrument_key TEXT", "multiplier REAL",
                     "right TEXT", "strike REAL", "expiry TEXT", "currency TEXT",
-                    "con_id TEXT", "local_symbol TEXT"):
+                    "con_id TEXT", "local_symbol TEXT",
+                    # USD per one unit of `currency`, and where the rate came from (trader/fx.py). The price,
+                    # realized P&L and commission columns stay in the contract currency.
+                    "fx_to_usd REAL", "fx_source TEXT"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
         # Phase C compensation semantics (§11, tasks 3.1/3.4): filled_qty backs
@@ -1247,6 +1250,7 @@ class TradingMemory:
         FX conversions are dropped here, the one write point every capture path
         shares: they move cash between markets and are not positions."""
         from ..journal.episodes import NOT_RECORDED
+        from ..trader import fx
 
         fills = [f for f in fills if f.get("sec_type") not in NOT_RECORDED]
         if not fills:
@@ -1261,15 +1265,15 @@ class TradingMemory:
             "INSERT OR IGNORE INTO fills (exec_id, symbol, side, shares, price, time, "
             "realized_pnl, commission, order_id, perm_id, order_ref, captured_at, "
             "sec_type, instrument_key, multiplier, right, strike, expiry, currency, "
-            "con_id, local_symbol) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "con_id, local_symbol, fx_to_usd, fx_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
               f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0),
               f.get("order_id", ""), f.get("perm_id"), f.get("order_ref"),
               evaluation_now(timezone.utc).isoformat(),
               f.get("sec_type"), f.get("instrument_key"), f.get("multiplier"),
               f.get("right"), f.get("strike"), f.get("expiry"), f.get("currency"),
-              f.get("con_id"), f.get("local_symbol"))
+              f.get("con_id"), f.get("local_symbol"), *fx.resolve(f))
              for f in fills])
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before

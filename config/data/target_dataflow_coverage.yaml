@@ -905,6 +905,7 @@ qualification_policy:
     - src/ats/workflow/cutover_wiring.py
     - src/ats/workflow/dispatch_claims.py
     - src/ats/workflow/exit_requirements.py
+    - src/ats/workflow/consumer_scan.py
     - src/ats/workflow/intake_verification.py
     - src/ats/workflow/isolated_entry.py
     - src/ats/workflow/joint_cutover.py

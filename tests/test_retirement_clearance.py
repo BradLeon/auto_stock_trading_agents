@@ -15,7 +15,7 @@ And one the other way: a tombstone that says `retired` while still readable must
 
 import pytest
 
-from ats.workflow import intake_verification as iv
+from ats.workflow import consumer_scan as cs
 from ats.workflow import retirement_clearance as rc
 
 
@@ -74,14 +74,14 @@ def test_the_access_reader_path_does_not_need_the_module_mapping():
 
 
 def test_an_unmapped_module_path_is_rejected_rather_than_guessed():
-    from ats.workflow import intake_verification as iv
+    from ats.workflow import consumer_scan as cs
 
     with pytest.raises(KeyError) as excinfo:
         rc.role_for("agents.unknown.thing")
     assert "agents.unknown.thing" in str(excinfo.value)
 
     verdicts = rc.verify_consumer_zero("x", ["agents.unknown.thing"],
-                                      scan=iv.scan_consumer_access)
+                                      scan=cs.scan_consumer_access)
     assert verdicts[0].verdict == rc.PARTIAL
 
 
@@ -363,7 +363,7 @@ def test_trade_read_consumers_that_are_modules_are_zero_only_through_state_api(t
     trades/fills/performance only through `state_api`; the registered consumers of the entry all pass."""
     verdicts = {v.consumer: v for v in rc.verify_consumer_zero(
         "store.direct_trade_reads", ["agents.chief.assemble", "risk.assess", "channel.context"],
-        scan=iv.scan_consumer_access)}
+        scan=cs.scan_consumer_access)}
     assert {v.verdict for v in verdicts.values()} == {rc.ZERO}, {k: v.reason for k, v in verdicts.items()}
 
     raw = tmp_path / "raw.py"
@@ -375,7 +375,7 @@ def test_trade_read_consumers_that_are_modules_are_zero_only_through_state_api(t
     monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.raw", str(raw))
     monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.sql", str(sql))
     monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.quiet", str(quiet))
-    found = {m: rc.verify_consumer_zero("store.direct_trade_reads", [m], scan=iv.scan_consumer_access)[0]
+    found = {m: rc.verify_consumer_zero("store.direct_trade_reads", [m], scan=cs.scan_consumer_access)[0]
              for m in ("x.raw", "x.sql", "x.quiet")}
     assert all(v.verdict == rc.NOT_ZERO for v in found.values())
     assert "direct_store_trade_read" in found["x.raw"].evidence["violations"][0]

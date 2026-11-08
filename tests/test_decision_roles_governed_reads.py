@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ats.workflow import intake_verification as iv
+from ats.workflow import consumer_scan as cs
 
 pytestmark = pytest.mark.governed_decision_reads
 
@@ -122,14 +122,14 @@ def test_clerk_reads_each_step_and_each_decision_chain_through_the_api(monkeypat
 # The scanner
 # --------------------------------------------------------------------------- #
 def test_risk_is_scanned_where_its_review_is_computed():
-    entry = set(iv.CONSUMER_ENTRY_POINTS["risk"])
+    entry = set(cs.CONSUMER_ENTRY_POINTS["risk"])
     assert {"ats.risk.assess", "ats.risk.checks", "ats.agents.risk_officer.daily", "ats.risk.inputs"} <= entry
-    assert "ats.data.runtime.clerk_reads" in iv.CONSUMER_ENTRY_POINTS["clerk"]
+    assert "ats.data.runtime.clerk_reads" in cs.CONSUMER_ENTRY_POINTS["clerk"]
 
 
 @pytest.mark.parametrize("role", ["risk", "clerk"])
 def test_the_decision_roles_have_no_direct_runtime_read(role):
-    record = iv.scan_consumer_access(role)
+    record = cs.scan_consumer_access(role)
     kinds = {v.kind for v in record.violations}
     assert "runtime_bypass" not in kinds and "governed_read_surface_not_reached" not in kinds, \
         [(v.kind, v.location) for v in record.violations]
@@ -137,9 +137,9 @@ def test_the_decision_roles_have_no_direct_runtime_read(role):
 
 
 def test_a_direct_runtime_read_by_a_decision_role_is_reported(monkeypatch):
-    monkeypatch.setitem(iv.CONSUMER_ENTRY_POINTS, "risk",
-                        (*iv.CONSUMER_ENTRY_POINTS["risk"], "ats.trader.portfolio"))
-    record = iv.scan_consumer_access("risk")
+    monkeypatch.setitem(cs.CONSUMER_ENTRY_POINTS, "risk",
+                        (*cs.CONSUMER_ENTRY_POINTS["risk"], "ats.trader.portfolio"))
+    record = cs.scan_consumer_access("risk")
     assert any(v.kind == "runtime_bypass" and v.location.startswith("ats.trader.portfolio:")
                for v in record.violations)
 

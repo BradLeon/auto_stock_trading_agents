@@ -55,10 +55,11 @@ SANCTIONED = {
     ("ats/memory/store.py", "_migrate"),
     ("ats/memory/store.py", "_migrate_shared_facts"),
     ("ats/data/stores/ownership.py", "<module>"),  # the boundary registry
-    # Phase F intake verification: NEUTRAL_FACT_TABLES / PROJECTION_TABLES name
-    # tables so 7.3 can flag an analysis role writing an opinion as a shared
-    # fact. Nothing there executes SQL against them.
-    ("ats/workflow/intake_verification.py", "<module>"),
+    # The consumer access scan (moved from intake_verification, r5 task 8.1):
+    # NEUTRAL_FACT_TABLES / PROJECTION_TABLES name tables so an analysis role
+    # writing an opinion as a shared fact can be flagged. Nothing there executes
+    # SQL against them.
+    ("ats/workflow/consumer_scan.py", "<module>"),
 }
 
 

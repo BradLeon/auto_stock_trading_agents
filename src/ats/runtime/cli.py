@@ -548,7 +548,7 @@ def retirement_command(args, *, parser) -> int:
     wording is a separate deliberate step, because a registry edit that quietly
     promotes an entry on partial evidence is the failure 12.6 exists to prevent.
     """
-    from ..workflow import intake_verification as iv
+    from ..workflow import consumer_scan
     from ..workflow import legacy_retirement as retirement
     from ..workflow import retirement_clearance as rc
 
@@ -573,7 +573,7 @@ def retirement_command(args, *, parser) -> int:
         verdicts = []
         for tomb in rows:
             verdicts += rc.verify_consumer_zero(
-                tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+                tomb.identifier, tomb.consumers, scan=consumer_scan.scan_consumer_access)
         print(rc.render_report([], verdicts))
         return 0 if all(not v.blocks_exit for v in verdicts) else 2
 
@@ -628,7 +628,7 @@ def retirement_command(args, *, parser) -> int:
         trade_path = rc.read_trade_path_gate()
         for tomb in rows:
             zero = rc.verify_consumer_zero(
-                tomb.identifier, tomb.consumers, scan=iv.scan_consumer_access)
+                tomb.identifier, tomb.consumers, scan=consumer_scan.scan_consumer_access)
             gate_open, gate_reason = rc.evaluate_gate(tomb.gate, g0=g0, trade_path=trade_path)
             decisions.append(rc.decide_entry(
                 tomb.identifier, zero_verdicts=zero,

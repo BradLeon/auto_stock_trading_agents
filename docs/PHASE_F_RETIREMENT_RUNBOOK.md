@@ -43,11 +43,11 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | `sector_reviews`、`legacy_read_models` | 6.3（**2026-11-07 用户批准方案 A**：`sector_reviews` 改登记为行业分析师自有工作记录，移出待退，不登记墓碑；`legacy_read_models` 消费方 `zero` 判清零、`decide` 判可退出，**2026-11-07 已退役**，用户批准） |
 | `macro_reviews`、`technical_reviews` | 6.5（同 6.3 方案 A：改登记为宏观、技术面分析师自有工作记录，移出待退） |
 | `decision_roles.unwired_to_governed_read_api` | 6.4（**2026-11-07 已退役**，用户批准方案 1：风控、Clerk 改经 `read_input`；风控业务范围取实时持仓；风控新授权 `HISTORY_DATA`；扫描器补全风控入口并把决策角色直连运行时源记为 `runtime_bypass`） |
-| `memory.store.legacy_decision_write_path` | 2.3 改读 → 7.1 移除镜像写 |
-| `trades.client_order_id.legacy_derivation` | 7.2 |
-| `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot` | 7.3 |
-| `journal.report.render_ledger` | 7.4 |
-| `risk.checks.pre_trade_adapter` | 7.5 |
+| `memory.store.legacy_decision_write_path` | 2.3 改读 → 7.1 移除镜像写（**2026-11-08 已退役**，用户批准：删 `mirror_revision_to_legacy`、`set_cycle_approval`、`save_chief_run`；旧 `cycles`/`decisions` 表只读保留） |
+| `trades.client_order_id.legacy_derivation` | 7.2（**2026-11-08 已退役**，用户批准：旧派生式库内 0 行、代码无引用；52 行 7 月空订单号历史行不迁移、不加标记，按全新账本看待） |
+| `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot` | 7.3（**2026-11-08 已退役**，用户批准整个删除：`ats journal reconcile/mark/episodes/score` 与 `ats trader snapshot` 不保留单步调试，账本只经 `ats clerk run`） |
+| `journal.report.render_ledger` | 7.4（**2026-11-08 已退役**，用户批准，代码不变：台账只读 `journal_entries`，不读 trades/fills 原始表） |
+| `risk.checks.pre_trade_adapter` | 7.5（**2026-11-08 已退役**，用户批准方案 A：`ats risk check` 改调 `review_revision`，拿不到账户时驳回而非放行；`paired_business` 旧风控一侧返回 retired；`pre_trade` 删除） |
 | `migration.batch_read_cutover` | 8.5 |
 | `migration.schedule_cutover` | 8.6 |
 | `migration.intake`、`migration.analysis_verification` | 8.7（`isolated_entry` 只删可删部分，见其 8.3） |

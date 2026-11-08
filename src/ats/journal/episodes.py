@@ -504,18 +504,3 @@ def _assign_fill_episode_ids(store, all_fills: list[dict],
             net = 0.0
             cur_id = None
     store.conn.commit()
-
-
-def run() -> int:
-    from ..trader.execute import IBKRBroker
-
-    portfolio = None
-    try:
-        portfolio = IBKRBroker().get_portfolio()
-    except Exception as exc:  # noqa: BLE001 - degrade to fills-only rebuild
-        log.warning("episode rebuild: no live portfolio (%s); skipping pre_tracking seed", exc)
-
-    s = rebuild_all(portfolio=portfolio)
-    print(f"回合重建：{s['symbols']} 个标的 → {s['episodes']} 个回合"
-          + (f"（含 {s['seeded']} 个存量持仓种子）" if s["seeded"] else ""))
-    return 0

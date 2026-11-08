@@ -476,9 +476,6 @@ def persist_decision(state: ChiefDecisionState) -> dict:
                         state.cycle_id, to_status.value, rev["revision_no"],
                         state.risk_round),
                     created_at=_now().isoformat())
-    # Legacy mirror (D2): keep `cycles`/`decisions` read entry points serving.
-    repo.mirror_revision_to_legacy(state.cycle_id, rev["revision_no"],
-                                   as_of=state.as_of.isoformat())
     # Pre-register the plan BEFORE the approval interrupt. A plan written after the
     # outcome is known can no longer be wrong, so it proves nothing.
     try:
@@ -898,13 +895,8 @@ def persist(state: ChiefDecisionState) -> dict:
     from ..trader import execute as texec
 
     store = get_store()
-    # The verdict is only known here — persist_decision runs BEFORE the interrupt, so
-    # it wrote approval_status = None and nothing ever came back to fill it in.
-    if state.approval is not None:
-        store.set_cycle_approval(state.cycle_id, state.approval.status)
-        # The full approval record is written in boss_review (before the
-        # execution gate can derive its authorization); this legacy column and
-        # the journal approval column keep their writes (task 6.5).
+    # The approval record is written in boss_review, before the execution gate derives its
+    # authorization; the legacy `cycles.approval_status` column is no longer written (switch-trade r5 7.1).
 
     from ..execution.shadow_execution import publish_shadow_results
 

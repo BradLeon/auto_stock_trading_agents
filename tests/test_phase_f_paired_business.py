@@ -92,7 +92,7 @@ def test_actual_risk_old_adapter_and_revision_review_share_frozen_portfolio(busi
     captured=paired.capture(request=req,input_store=store,work_root=root/'risk-capture',run_id='capture-risk')
     monkeypatch.setattr('ats.trader.portfolio.snapshot',lambda:pytest.fail('replay queried broker'))
     result=paired.run_pair(input_store=store,input_hash=captured['input_hash'],root=root/'risk-pair',pair_id='risk-pair')
-    assert result['left']['risk']['entry']=='ats.risk.checks.pre_trade'
+    assert result['left']['risk']['entry']=='ats.risk.checks.pre_trade' and result['left']['risk']['status']=='retired'
     assert result['right']['risk']['entry']=='ats.risk.checks.review_revision'
     assert result['right']['risk']['review']['basis']['portfolio_snapshot_id']=='pf:'+req['logical_time']
     record_property('actual_risk_pair',json.dumps(result))

@@ -498,47 +498,6 @@ class DecisionAuditRepository:
             "has_execution_approval": bool(executed),
         }
 
-    # --- legacy mirror (design D2, task 3.5) ---------------------------------- #
-    def mirror_revision_to_legacy(self, cycle_id: str, revision_no: int, *,
-                                  as_of: str) -> None:
-        """Double-write a revision into the legacy `cycles`/`decisions` tables.
-
-        Design D2: the revision record is authoritative, but the legacy read
-        entry points (`last_chief_run`, `recent_decisions`, reports) keep
-        working during the transition. The legacy write is a MIRROR, not a
-        second truth — authorization decisions never read it, and the
-        transition-period `decisions` rows carry no approval semantics.
-
-        Replay-safe: an identical (cycle, symbol, action, notional) row is not
-        duplicated. `legacy_unknown` revisions are skipped — they have no
-        recoverable content to mirror.
-        """
-        rev = self.get_revision(cycle_id, revision_no)
-        if rev is None:
-            raise DecisionAuditError(f"unknown revision {cycle_id}/{revision_no}")
-        if rev["revision_source"] == "legacy_unknown" or not rev["orders_json"]:
-            return
-        import json as _json
-        orders = _json.loads(rev["orders_json"])
-        self.conn.execute(
-            "INSERT OR IGNORE INTO cycles (cycle_id, as_of, approval_status, "
-            "manager_summary) VALUES (?,?,NULL,'')", (cycle_id, as_of))
-        for order in orders:
-            exists = self.conn.execute(
-                "SELECT 1 FROM decisions WHERE cycle_id = ? AND symbol = ? AND "
-                "action = ? AND notional_usd IS ?",
-                (cycle_id, order.get("symbol"), order.get("action"),
-                 order.get("notional_usd"))).fetchone()
-            if exists:
-                continue
-            self.conn.execute(
-                "INSERT INTO decisions (cycle_id, symbol, action, notional_usd, "
-                "limit_price, conviction, rationale) VALUES (?,?,?,?,?,?,?)",
-                (cycle_id, order.get("symbol"), order.get("action"),
-                 order.get("notional_usd"), order.get("limit_price"),
-                 order.get("conviction"), order.get("rationale")))
-        self.conn.commit()
-
     # --- recovery facts (2.7) ------------------------------------------------- #
     def has_transition(self, cycle_id: str, idempotency_key: str) -> bool:
         return self.conn.execute(

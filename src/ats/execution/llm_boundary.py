@@ -32,8 +32,7 @@ LLM_ALLOWED_WRITES = frozenset({"save_episode"})
 # Store methods that are ledger write paths — never callable from an LLM
 # module (checked textually by the architecture guard).
 LEDGER_WRITE_METHODS = frozenset({
-    "save_trades", "upsert_fills", "record_snapshot", "save_chief_run",
-    "set_cycle_approval", "record_ledger_exception",
+    "save_trades", "upsert_fills", "record_snapshot", "record_ledger_exception",
 })
 
 # Raw SQL targets that would be a ledger write from an LLM module.

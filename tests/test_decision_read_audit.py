@@ -61,9 +61,9 @@ def ok(conn):
 def test_a_function_exemption_does_not_cover_the_rest_of_its_file(tmp_path):
     (tmp_path / "decision").mkdir()
     (tmp_path / "decision" / "repository.py").write_text(
-        'def mirror_revision_to_legacy(c):\n    c.execute("SELECT 1 FROM decisions")\n'
+        'def exempt(c):\n    c.execute("SELECT 1 FROM decisions")\n'
         'def other(c):\n    c.execute("SELECT 1 FROM cycles")\n')
-    found = audit.scan_tree(tmp_path)
+    found = audit.scan_tree(tmp_path, allowed={"decision/repository.py::exempt": "fixture"})
     assert [(r.function, r.table) for r in found] == [("other", "cycles")]
 
 

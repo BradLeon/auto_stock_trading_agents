@@ -312,9 +312,3 @@ def render(summary: dict) -> str:
     for e in summary["errors"]:
         lines.append(f"  ⚠️ {e}")
     return "\n".join(lines)
-
-
-def run(dry_run: bool = False) -> int:
-    s = reconcile(dry_run=dry_run)
-    print(render(s))
-    return 1 if s["errors"] else 0

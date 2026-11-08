@@ -90,7 +90,7 @@ def _capture(conn) -> Section:
     if zombie:
         s.findings.append(Finding(
             "僵尸 submitted 行", str(zombie), False,
-            "已报但结果未知 —— 跑 `ats journal reconcile` 收口"))
+            "已报但结果未知 —— 跑 `ats clerk run` 收口"))
 
     # Only cycles that actually produced an order under the new regime can be judged. A cycle
     # that placed an order must carry a recorded approval in the decision audit (boss_approvals).
@@ -174,7 +174,7 @@ def _chain(conn) -> Section:
     if nfills:
         s.findings.append(Finding(
             "成交已判定归属", _pct(nfills - unlinked, nfills), unlinked == 0,
-            "跑 `ats journal reconcile` 判定" if unlinked else ""))
+            "跑 `ats clerk run` 判定" if unlinked else ""))
     return s
 
 

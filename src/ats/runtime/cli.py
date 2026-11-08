@@ -2070,9 +2070,16 @@ def risk_check(symbol: str | None = None) -> int:
             )
         )
     pf = risk_inputs.account()
-    approved, notes, _ = risk_checks.pre_trade(decisions, pf)
-    print(f"=== Risk check: {len(decisions)} decisions → {len(approved)} pass ===")
-    for n in notes:
+    # The same review the Chief's risk gate runs. Without a readable account it fails closed and says so;
+    # the retired adapter skipped every check instead (switch-trade r5 task 7.5).
+    result = risk_checks.review_revision(decisions, pf)
+    passed = sum(1 for ov in result.order_verdicts if ov.verdict == "approved")
+    print(f"=== Risk check: {len(decisions)} decisions → {passed} pass · verdict {result.verdict} ===")
+    for ov in result.order_verdicts:
+        mark = "✅" if ov.verdict == "approved" else "⛔"
+        reasons = "; ".join(ov.reasons)
+        print(f"  {mark} {ov.symbol:6} {ov.action:6} {reasons}".rstrip())
+    for n in result.notes:
         print(f"  {n}")
     return 0
 
@@ -2100,7 +2107,7 @@ def trader_portfolio(*, offline: bool = False) -> int:
                     f"· cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}"
                 )
                 return 0
-            print("❌ No stored snapshot found — connect TWS and run `ats trader snapshot`.")
+            print("❌ No stored snapshot found — connect TWS and run `ats clerk run`.")
             return 1
         from ..config import get_config
 
@@ -2121,20 +2128,6 @@ def trader_portfolio(*, offline: bool = False) -> int:
             f"  {p.symbol:6} {p.qty:+.0f} @ {p.avg_cost:.2f}  mv=${p.market_value:,.0f} "
             f"w={p.weight * 100:.1f}% uPnL=${p.unrealized_pnl:,.0f}"
         )
-    return 0
-
-
-def trader_snapshot() -> int:
-    from ..trader import performance as tperf
-
-    r = tperf.record_snapshot()
-    if r is None:
-        print("❌ IBKR unavailable — snapshot skipped.")
-        return 1
-    print(
-        f"📸 snapshot {r.as_of:%Y-%m-%d} · NetLiq ${r.net_liquidation:,.0f} · "
-        f"dayP&L ${r.daily_pnl:,.0f} · cumP&L ${r.cumulative_pnl:,.0f} · positions {r.num_positions}"
-    )
     return 0
 
 
@@ -4926,28 +4919,21 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("--offline", action="store_true", help="show stored review without IBKR")
     jr = sub.add_parser(
         "journal",
-        help="交易日志 (doctor / reconcile / episodes / mark / invalidate / review / "
-        "calibrate / reflect / ledger / score)",
+        help="交易日志 (doctor / invalidate / review / calibrate / reflect / ledger)；"
+        "对账、标记、回合、预测打分由 `ats clerk run` 编排",
     )
     jr.add_argument(
         "action",
         choices=[
             "doctor",
-            "reconcile",
-            "episodes",
-            "mark",
             "invalidate",
             "review",
             "calibrate",
             "reflect",
             "ledger",
-            "score",
         ],
     )
-    jr.add_argument("--dry-run", action="store_true", help="reconcile: 只读，打印将要写入什么")
     jr.add_argument("--month", help="ledger: YYYY-MM（默认本月）")
-    jr.add_argument("--backfill", action="store_true", help="score: 先用已打分的 dossier 回填预测")
-    jr.add_argument("--symbol", help="episodes: 只看这个标的")
     jr.add_argument(
         "--no-llm",
         action="store_true",
@@ -4985,14 +4971,13 @@ def main(argv: list[str] | None = None) -> int:
     ck.add_argument("--window-end", help="对账窗口终点 YYYY-MM-DD（默认今天）")
     ck.add_argument("--period", help="rebuild: 期间 YYYY-MM（默认当月）")
     tr = sub.add_parser(
-        "trader", help="IBKR trader: portfolio / perf / snapshot / fills / execute / buy / sell"
+        "trader", help="IBKR trader: portfolio / perf / fills / execute / buy / sell"
     )
     tr.add_argument(
         "action",
         choices=[
             "portfolio",
             "perf",
-            "snapshot",
             "fills",
             "orders",
             "cancel",
@@ -5510,26 +5495,6 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {kind}: {n}")
             return 1
     if args.command == "journal":
-        if args.action == "reconcile":
-            from ..trader import reconcile
-
-            return reconcile.run(dry_run=args.dry_run)
-        if args.action == "episodes":
-            from ..journal import episodes as episodes_mod
-            from ..memory import get_store
-
-            rc = episodes_mod.run()
-            for ep in get_store().list_episodes(symbol=args.symbol or "", limit=50):
-                print(
-                    f"  {ep.symbol:6} {ep.direction:5} {ep.status:6} "
-                    f"origin={ep.origin:12} realized={ep.realized_pnl} "
-                    f"entry={ep.avg_entry} exit={ep.avg_exit}"
-                )
-            return rc
-        if args.action == "mark":
-            from ..journal import marks
-
-            return marks.run()
         if args.action == "invalidate":
             from ..journal import invalidation
 
@@ -5550,18 +5515,12 @@ def main(argv: list[str] | None = None) -> int:
             from ..journal import report as journal_report
 
             return journal_report.run(args.month or "")
-        if args.action == "score":
-            from ..journal import predictions
-
-            return predictions.run(backfill=args.backfill)
         from ..journal import doctor
 
         return doctor.run()
     if args.command == "trader":
         if args.action == "portfolio":
             return trader_portfolio(offline=getattr(args, "offline", False))
-        if args.action == "snapshot":
-            return trader_snapshot()
         if args.action == "perf":
             return trader_perf(args.days, write_report=args.report)
         if args.action == "fills":

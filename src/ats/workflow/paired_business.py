@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import shadow_inputs as si
-from .business_replay_inputs import Tape, bind_tape, encode, implementation_hashes
+from .business_replay_inputs import Tape, bind_tape, implementation_hashes
 from .evaluation_clock import at
 from .isolation import verified_isolation_root
 from .shadow_replay import ReplayReads, digest, freeze_inputs, load_inputs, save_inputs
@@ -190,9 +190,9 @@ def _risk(request, *, legacy):
         kwargs = {'sector': request['risk'].get('sector', 'ai_hardware'),
                   'event_data': request['risk'].get('event_data')}
         if legacy:
-            approved, notes, baseline = checks.pre_trade(orders, pf, **kwargs)
-            return {'entry': 'ats.risk.checks.pre_trade', 'approved': encode(approved),
-                    'notes': notes, 'baseline': encode(baseline)}
+            # The old adapter is retired (switch-trade r5 task 7.5); this side only records that.
+            return {'entry': 'ats.risk.checks.pre_trade', 'status': 'retired',
+                    'reason': 'retired by switch-trade-path-and-retire-r5 task 7.5; use review_revision'}
         review = checks.review_revision(orders, pf, **kwargs)
         return {'entry': 'ats.risk.checks.review_revision', 'review': review.model_dump(mode='json')}
 

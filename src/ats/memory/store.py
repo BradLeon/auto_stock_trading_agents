@@ -1278,18 +1278,6 @@ class TradingMemory:
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
 
-    def set_cycle_approval(self, cycle_id: str, status: str) -> None:
-        """Record the Boss's verdict once it is known.
-
-        `save_chief_run` writes the cycle row BEFORE the approval interrupt (so a card
-        the Boss never answers still leaves an audit trail), which is why
-        approval_status was NULL on every cycle ever recorded — nothing came back to
-        fill it in.
-        """
-        self.conn.execute("UPDATE cycles SET approval_status = ? WHERE cycle_id = ?",
-                          (status, cycle_id))
-        self.conn.commit()
-
     # --- journal entries (one row per INTENT) ------------------------------ #
     # The typed columns; `risk_notes` and `approval` are objects in Python and JSON
     # on disk, so they are mapped explicitly rather than dumped.
@@ -1578,16 +1566,7 @@ class TradingMemory:
                 "SELECT * FROM fills ORDER BY time DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
-    # --- chief runs (reuse cycles + decisions tables) ---------------------- #
-    def save_chief_run(self, *, cycle_id: str, as_of, summary: str, decisions) -> None:
-        self.conn.execute("INSERT OR REPLACE INTO cycles VALUES (?,?,?,?)",
-                          (cycle_id, as_of.isoformat(), None, summary))
-        self.conn.executemany(
-            "INSERT INTO decisions VALUES (?,?,?,?,?,?,?)",
-            [(cycle_id, d.symbol, d.action, d.notional_usd, d.limit_price, d.conviction,
-              d.rationale) for d in decisions])
-        self.conn.commit()
-
+    # --- chief runs (read from the decision audit; legacy cycles/decisions are read-only history) --- #
     def last_chief_run(self) -> dict | None:
         """The latest Chief cycle, read from the decision audit (not the legacy mirror).
 

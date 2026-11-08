@@ -83,45 +83,40 @@ def test_assess_beta_and_stop_and_event(monkeypatch):
 # --------------------------------------------------------------------------- #
 # pre-trade gate (hard enforcement)
 # --------------------------------------------------------------------------- #
-def test_pre_trade_blocks_buy_in_derisk(monkeypatch):
+def test_review_blocks_buy_in_derisk(monkeypatch):
     pf = _pf([_pos("X", 0.4)])        # past the 35% single-name limit, so a trim improves a breached metric
     review = RiskReview(as_of=NOW, risk_state="derisk")
     buy = TradeDecision(symbol="NEW", action="buy", notional_usd=10000)
     sell = TradeDecision(symbol="X", action="trim", notional_usd=5000)
-    out, notes, _ = risk_checks.pre_trade([buy, sell], pf, review=review, apply_base=False)
-    assert [d.symbol for d in out] == ["X"]                       # buy blocked, sell passes
-    assert any("de-risk" in n for n in notes)
+    result = risk_checks.review_revision([buy, sell], pf, review=review, apply_caps=False)
+    assert {ov.symbol: ov.verdict for ov in result.order_verdicts} == {"NEW": "rejected", "X": "approved"}
+    assert any("de-risk" in n for n in result.notes)
 
 
-def test_pre_trade_event_cap_reports_boundary_without_rewriting(monkeypatch):
+def test_review_event_cap_reports_boundary_without_rewriting(monkeypatch):
     """Phase B (§5.2): risk no longer clips — the proposal stays untouched and
     the acceptable ceiling is returned as a structured boundary."""
     pf = _pf([_pos("X", 0.1)], cash=900_000)
     review = RiskReview(as_of=NOW, risk_state="normal")
     # EM 20%, cap 3% NAV -> max weight 15% -> max notional 150k on 1M NAV
     buy = TradeDecision(symbol="COHR", action="buy", notional_usd=300_000)
-    out, notes, _ = risk_checks.pre_trade(
-        [buy], pf, event_data={"COHR": {"expected_move_pct": 20.0}}, review=review, apply_base=False)
-    assert buy.notional_usd == 300_000                       # proposal untouched
-    assert out == []                                          # over-budget: rejected, not clipped
-    assert any("150,000" in n for n in notes)                 # ceiling reported
     result = risk_checks.review_revision(
         [buy], pf, event_data={"COHR": {"expected_move_pct": 20.0}},
         review=review, apply_caps=False)
-    assert result.verdict == "rejected"
+    assert buy.notional_usd == 300_000                       # proposal untouched
+    assert any("150,000" in n for n in result.notes)          # ceiling reported
+    assert result.verdict == "rejected"                       # over-budget: rejected, not clipped
     assert result.allowed_boundary.max_additional_notional == 150_000
     violation = next(v for v in result.violations if v.entity == "COHR")
     assert violation.rule_id == "max_event_loss_pct"
     assert violation.limit == 150_000 and violation.actual == 300_000
 
 
-def test_pre_trade_no_portfolio_fails_closed():
-    """The adapter keeps the legacy skip (design D6); the NEW review entry
-    fails closed — 'cannot judge' rejects and leaves a trace."""
+def test_review_no_portfolio_fails_closed():
+    """Without a portfolio the review fails closed — 'cannot judge' rejects and leaves a trace
+    (the retired adapter skipped every check instead)."""
     buy = TradeDecision(symbol="X", action="buy", notional_usd=1000)
-    out, notes, review = risk_checks.pre_trade([buy], None)
-    assert out == [buy] and review is None          # legacy adapter behavior
-    assert any("skipped" in n for n in notes)
+    assert not hasattr(risk_checks, "pre_trade")
     result = risk_checks.review_revision([buy], None)
     assert result.verdict == "rejected"             # new path: fail closed
     assert any(v.rule_id == "no_portfolio" for v in result.violations)

@@ -189,17 +189,3 @@ def prices_by_instrument(portfolio) -> dict[str, float]:
     from .episodes import position_key
 
     return {position_key(p): p.market_price for p in portfolio.positions} if portfolio else {}
-
-
-def run() -> int:
-    portfolio = None
-    try:
-        from ..trader.execute import IBKRBroker
-
-        portfolio = IBKRBroker().get_portfolio()
-    except Exception as exc:  # noqa: BLE001 - MTM marks are best-effort
-        log.warning("mark_all: no live prices (%s); closed-episode marks only", exc)
-
-    s = mark_all(market_prices=prices_by_instrument(portfolio))
-    print(f"标记完成：{s['marked']} 个回合已更新")
-    return 0

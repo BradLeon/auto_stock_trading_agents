@@ -2,7 +2,7 @@
 
   1. risk_notes      — why sizing was clipped or an order blocked (printed, then lost)
   2. approval divergence — where the Boss dropped / overrode / added to the proposal
-  3. cycles.approval_status — written as NULL before the interrupt, never filled in
+  3. cycles.approval_status — retired with the legacy mirror (switch-trade r5 7.1)
 
 (2) matters most. "Did I follow my plan?" — the staple of a human trading journal —
 is trivially yes for an agent; it cannot deviate. The meaningful inverse is where the
@@ -101,20 +101,6 @@ def test_context_without_narrowing_keeps_all_decisions():
 
 
 # --------------------------------------------------------------------------- #
-# cycles.approval_status
-# --------------------------------------------------------------------------- #
-def test_cycle_approval_status_is_backfilled():
-    store = get_store()
-    store.save_chief_run(cycle_id="c1", as_of=NOW, summary="s", decisions=[])
-    assert store.conn.execute(
-        "SELECT approval_status FROM cycles WHERE cycle_id='c1'").fetchone()[0] is None
-
-    store.set_cycle_approval("c1", "approved")
-    assert store.conn.execute(
-        "SELECT approval_status FROM cycles WHERE cycle_id='c1'").fetchone()[0] == "approved"
-
-
-# --------------------------------------------------------------------------- #
 # end-to-end through the persist node
 # --------------------------------------------------------------------------- #
 def test_persist_writes_divergence_and_notes_per_row():
@@ -123,7 +109,6 @@ def test_persist_writes_divergence_and_notes_per_row():
     from ats.schemas.memory import TradeLogEntry
 
     store = get_store()
-    store.save_chief_run(cycle_id="c9", as_of=NOW, summary="s", decisions=[])
     decisions = [_d("GOOG"), _d("ASML")]
     # Phase C (task 2.1): system-source writes now REQUIRE the decision chain;
     # the fixture entries carry one so the test keeps targeting the context
@@ -148,8 +133,8 @@ def test_persist_writes_divergence_and_notes_per_row():
     assert rows["GOOG"]["approval"]["dropped_symbols"] == ["ASML"]
     assert rows["GOOG"]["approval"]["comment"] == "ASML 先不动"
     assert rows["GOOG"]["risk_notes"] == ["GOOG: 仓位削减 L4 集中度"]
-    assert store.conn.execute(
-        "SELECT approval_status FROM cycles WHERE cycle_id='c9'").fetchone()[0] == "approved"
+    # The legacy cycles table is no longer written (switch-trade r5 7.1).
+    assert store.conn.execute("SELECT COUNT(*) FROM cycles").fetchone()[0] == 0
 
 
 def test_persist_without_approval_does_not_crash():

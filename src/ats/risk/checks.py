@@ -3,8 +3,8 @@
 Phase B (design D6/D7/D15): risk reviews a WHOLE revision and returns a
 structured verdict — it never rewrites a proposal. Any cap the proposal
 exceeds becomes a violation plus an `allowed_boundary` the Chief can use to
-draft the next revision. `pre_trade()` remains only as a deprecated adapter
-for call sites not yet migrated to the authorization-gate path.
+draft the next revision. The old clipping-shaped adapter `pre_trade()` is retired
+(switch-trade r5 task 7.5); `review_revision()` is the only entry.
 
 The evaluation unit is the entire revision: orders are projected sequentially
 onto a working copy, so cross-order rules (industry-layer totals, correlation
@@ -380,44 +380,6 @@ def review_revision(
             market_as_of=(min(quote_stamps).isoformat() if quote_stamps else
                           working_review.as_of.isoformat()),
             ruleset_version=ruleset_version()))
-
-
-# --------------------------------------------------------------------------- #
-# Deprecated transitional adapter (design D6)
-# --------------------------------------------------------------------------- #
-def pre_trade(decisions: list[TradeDecision], portfolio: PortfolioSnapshot | None, *,
-              sector: str = "ai_hardware", event_data: dict[str, dict] | None = None,
-              review: RiskReview | None = None, apply_base: bool = True
-              ) -> tuple[list[TradeDecision], list[str], RiskReview | None]:
-    """DEPRECATED: old clipping-shaped contract over the new read-only review.
-
-    Kept ONLY so call sites not yet migrated (graph/chief, graph/pead,
-    runtime/cli) keep running during the transition — it is registered for
-    retirement in `config/workflow/legacy_retirement.yaml` and its exit
-    condition is "all call sites consume `review_revision` results". The
-    returned decisions are the ORIGINAL, unmodified objects: risk no longer
-    clips anything. Orders that fail are absent from the approved list, with
-    the boundary they exceeded recorded in the notes.
-    """
-    import logging
-
-    logging.getLogger("ats.risk.checks").warning(
-        "pre_trade() is deprecated; migrate call sites to review_revision()")
-    # Legacy contract point: without a portfolio the old path skipped checks.
-    # The adapter preserves that for un-migrated call sites; the NEW entry
-    # (`review_revision`) fails closed instead. The skip dies with the adapter.
-    if portfolio is None:
-        return decisions, ["(no live portfolio — risk checks skipped)"], None
-    result = review_revision(
-        decisions, portfolio, sector=sector, event_data=event_data,
-        review=review, apply_caps=apply_base)
-    approved = [d for d, ov in zip(decisions, result.order_verdicts)
-                if ov.verdict == "approved"]
-    initial_review: RiskReview | None = None
-    if portfolio is not None:
-        _, initial_review, _ = _baseline(portfolio, sector=sector,
-                                         event_data=event_data, review=review)
-    return approved, result.notes, initial_review
 
 
 def _supplied_state(review: RiskReview | None) -> str:

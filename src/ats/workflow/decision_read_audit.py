@@ -24,9 +24,6 @@ _READ = re.compile(r"\b(?:FROM|JOIN)\s+(cycles|decisions)\b", re.IGNORECASE)
 ALLOWED_READERS: dict[str, str] = {
     "decision/legacy.py": "one-time migration classifier: reads legacy rows to build audit revisions, "
                           "and is the only place that does",
-    "decision/repository.py::mirror_revision_to_legacy":
-        "the mirror's own duplicate check before it writes a legacy row; its result feeds no decision, "
-        "approval or ledger figure",
 }
 
 

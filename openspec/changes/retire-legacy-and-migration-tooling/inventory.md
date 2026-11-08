@@ -315,3 +315,26 @@ faeac82 删除了旧调度器。它的工作多数有新负责人（参见 `docs
 | 缺口 a/b/c 的代码 | 已提交但 dispatcher 未重启，生产仍是旧代码 | **待用户同意重启** |
 
 **结论**：目前没有发现因退役导致的失败，但 10.2 要求的完整周期要到 10-31 周六之后才能收齐，所以 10.2 **不勾选**。
+
+### 10.2 生产观察（补验收齐，2026-11-08）
+
+观察期：10-29 dispatcher 重启（缺口 a/b/c 的代码上线）到 11-08，覆盖两个完整周（含 10-31、11-07 两个周六）。
+数据来自生产库 `var/ats.sqlite` 的 `trigger_runs`、`workflow_runs`、`clerk_runs`（只读），以及 `var/logs/dispatcher.err.log`、`var/logs/data-refresh.out.log`。时间均为台北时间。
+
+| 项 | 观察 | 状态 |
+|---|---|---|
+| 工作日研究定时（information-brief、fundamental-routine、technical-review） | 10-29 至 11-06 共 7 个工作日、21 次定时触发：18 次 complete，3 次 incomplete（见下） | 通过 |
+| 周六宏观 + 行业 | 10-31 09:00 / 09:30、11-07 09:00 / 09:30 四次均 complete | 通过 |
+| 日历消费 | 10-29 起 474 次 `calendar-consume finished`，`calendar consumption failed` 0 次；事件触发的 information-brief / fundamental-event 正常发起 | 通过 |
+| 数据刷新 | launchd `com.ats.data-refresh` last exit 0，最近一次 11-08 18:09；每轮汇总里的 misfire 是数据侧任务的调度窗口，与 10-27 记录的性质相同，没有任务引用已退役路径 | 未发现与退役相关；misfire 的根因仍未追 |
+| 交易定时（11-01 起启用，不属本 change 的退役范围，一并核对） | clerk-daily 11-04 至 11-07 每天 completed；11-03 因 TWS 未登录失败（r5 blockers B6，任务 11.2）。chief-daily 11-02、11-04 两次异常分别是 Layer 新鲜度（B5）、输入血缘不一致（B12）；11-06 正常到 pending_approval → complete | 失败均已在 r5 `blockers-2026-11-01.md` 登记，成因不是退役 |
+
+**非 complete 运行逐条归因（都与退役无关）：**
+
+- 10-29、10-30 information-brief incomplete：DOWJONES 文章抽取校验失败（`Information extraction failed` / 证据片段未定位），属抽取质量问题。
+- 11-05 fundamental-routine incomplete：GOOG 信息简报被判“不得包含交易建议”（内容校验，r5 blockers B13）。
+- 手动触发的两次 fundamental-routine incomplete（MU、TSLA）：缺带标签的上期预期基线。
+- 11-05 09:35 LITE 财报事件 fundamental-event：被治理的财报文档不可用，按设计不回退到数据源；10 秒后日历消费为同一事件再登记一次，报 `IdentityConflict`（同一触发键请求不同）。第一次触发已 complete。同类 `IdentityConflict` 在 10-22（退役前）就出现过。
+- `waiting_material`（`release_material_not_admitted`）是等待发布材料入库的正常状态。
+
+**结论：** 退役完成后的完整周期里，工作日定时、周六宏观与行业、日历消费、数据刷新都在运行，没有一次失败的成因是退役。10.2 勾选。遗留：数据刷新 misfire 的根因、事件重复登记的 `IdentityConflict`，两者都不是退役问题，不在本 change 处理。

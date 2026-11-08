@@ -2,6 +2,8 @@
 
 ## 结论先行：与 design.md D10 不符、需要你定的四处
 
+> **2026-11-08 用户决定：** 四处都按下面的建议办；`isolated_entry` 没有长期调用方，8.7 整个删除。
+
 1. **`joint_cutover` 不是叶子。** 生产读取链有六处导入它的运行时门禁：
    - `runtime_reads`、`read_windows`、`scoped_routes`、`cutover_routing`、`cutover_wiring` 用 `assert_scope_open` / `epoch`；
    - Dispatcher 的 `schedule_runtime` 用 `assert_schedule_open` / `authorize_schedule`。
@@ -55,7 +57,7 @@
 | `scoped_intake` | 无（**在生产资格指纹清单里**） | 无 | 2 个；4 个 phase_f 脚本 | 8.7 删，同时从 `required_fingerprint_paths` 去掉（R5d 收窄资格时一起核） |
 | `analysis_verification` | 无 | 无 | test_phase_f_opinion_execution | 8.7 删 |
 | `consumer_disposition` | 无 | `ats intake disposition` | 3 个 | 8.7 删 |
-| `isolated_entry` | 无 | 无 | test_phase_f_safe_reads、test_phase_f_shadow_business | 隔离模拟长期能力由 `simulation` 承担，`isolated_entry` 自身无长期调用方；建议 8.7 整删（推翻 D10“部分保留”，需你确认） |
+| `isolated_entry` | 无 | 无 | test_phase_f_safe_reads、test_phase_f_shadow_business | 隔离模拟长期能力由 `simulation` 承担，`isolated_entry` 自身无长期调用方；8.7 整删（用户 11-08 确认，取代 D10“部分保留”） |
 | `dispatch_claims` | schedule_cutover | `ats dispatch` 迁移期子命令 | test_dispatch_claims | 8.8（先迁覆盖核验） |
 | `business_replay_inputs` | consumer_api（磁带读取）、route_switch（`implementation_hashes`）、acceptance_*、paired_business、read_deployment、shadow_replay、exit_requirements | 无 | 8 个 | 见第 4 处 |
 | `exit_requirements` | data/assurance（`_artifact_verified`） | 无 | 1 个；2 个脚本 | R5d（原定） |

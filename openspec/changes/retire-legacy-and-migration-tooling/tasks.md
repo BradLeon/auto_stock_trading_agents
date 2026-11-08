@@ -88,4 +88,5 @@
 - [x] 10.1 全量测试一次，与 10-19 基线逐项对照并登记差异（删除的测试、消失的旧失败、任何新失败的归因）。验证：TEST_BASELINE 有本 change 的权威测量
 - [x] 10.2 生产观察：退役完成后一个完整周期（覆盖工作日定时、周六宏观与行业、至少一次日历消费与数据刷新）无因退役导致的失败。验证：观察记录写进 inventory.md
   - 记录（2026-11-08 补验）：10-29 重启至 11-08 两个完整周，研究定时 21 次中 18 次 complete、3 次 incomplete 均为抽取或内容校验原因；10-31、11-07 周六宏观与行业均 complete；日历消费 474 次无失败；数据刷新 last exit 0。无因退役导致的失败，详见 inventory.md「10.2 生产观察（补验收齐）」。
-- [ ] 10.3 `openspec validate --all --strict` 通过，更新项目记忆中的运行形态说明。验证：命令输出通过
+- [x] 10.3 `openspec validate --all --strict` 通过，更新项目记忆中的运行形态说明。验证：命令输出通过
+  - 记录（2026-11-08）：`openspec validate --all --strict` 46 passed / 0 failed；项目记忆（phase-f-cutover-open-items）的运行形态段按当前 launchd 服务、研究与交易时间表、健康与停用命令重写。

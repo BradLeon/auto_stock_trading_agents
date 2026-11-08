@@ -92,12 +92,12 @@
 
 ## 7. R5b 写入与入口侧条目
 
-- [x] 7.1 `memory.store.legacy_decision_write_path`：确认镜像写的读取方全部清零后，移除镜像写；旧 `cycles/decisions` 表保留只读。验证：V1–V3 通过；新周期不再写旧表；旧表历史可读
+- [ ] 7.1 `memory.store.legacy_decision_write_path`：确认镜像写的读取方全部清零后，移除镜像写；旧 `cycles/decisions` 表保留只读。验证：V1–V3 通过；新周期不再写旧表；旧表历史可读
 - [x] 7.2 `trades.client_order_id.legacy_derivation`：旧式订单号行由 Clerk 标记为 `legacy_unknown`（不伪造审计字段）或对账承接后，移除旧派生式。验证：新写入全部使用 `cycle + revision + 序号` 派生；旧行可读并带标记
-- [x] 7.3 `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`：生产触发只经 `clerk-daily`，`ats journal` 的独立对账入口与 `ats trader snapshot` 降为单步调试或删除（逐个判定）。验证：V1–V3 通过；`clerk-daily` 继续正常完成
+- [ ] 7.3 `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`：生产触发只经 `clerk-daily`，`ats journal` 的独立对账入口与 `ats trader snapshot` 降为单步调试或删除（逐个判定）。验证：V1–V3 通过；`clerk-daily` 继续正常完成
 - [x] 7.4 `journal.report.render_ledger`：月度台账改读派生读模型。验证：同一月份新旧台账输出一致或差异可解释
 - [x] 7.5 `risk.checks.pre_trade_adapter`：确认 `runtime.cli` 的组合级巡检已迁到 `review_revision` 或声明退役后，删除适配层。验证：V1–V3 通过；风控测试全绿
-  - 2026-11-08 记录（用户批准）：7.1 删镜像写与 `set_cycle_approval`、`save_chief_run`，旧表只读保留；7.2 旧派生式库内 0 行、代码无引用，52 行 7 月空订单号历史行用户决定不迁移、不加标记（原「旧行带 `legacy_unknown` 标记」验证项按用户决定取消）；7.3 五个命令整个删除，不保留单步调试；7.4 台账只读 `journal_entries`，代码不变；7.5 方案 A。六条登记 `decide` 判可退出、`tombstone` 判一致。实现在分支 `feat/switch-trade-g7`，6.6 观察完成后合入。
+  - 2026-11-08 记录（用户批准）：7.1 删镜像写与 `set_cycle_approval`、`save_chief_run`，旧表只读保留；7.2 旧派生式库内 0 行、代码无引用，52 行 7 月空订单号历史行用户决定不迁移、不加标记（原「旧行带 `legacy_unknown` 标记」验证项按用户决定取消）；7.3 五个命令整个删除，不保留单步调试；7.4 台账只读 `journal_entries`，代码不变；7.5 方案 A。六条登记 `decide` 判可退出、`tombstone` 判一致。实现在分支 `feat/switch-trade-g7`，6.6 观察完成后合入。7.1（新周期不再写旧表）、7.3（clerk-daily 继续正常完成）待合入后的生产运行确认再勾。
 - [ ] 7.6 本批复验 V4–V6，记录本批。验证：同 6.6
 
 ## 8. R5c 切换期工具（交易侧，加上 2026-10-27 从退役 change 转入的原 R2）
